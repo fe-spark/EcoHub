@@ -1,0 +1,56 @@
+.page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: var(--public-page-bg);
+}
+
+.card {
+  width: 100%;
+  max-width: 520px;
+  text-align: center;
+  padding: 40px 28px;
+  border-radius: 16px;
+  background: var(--public-surface-2);
+  border: 1px solid var(--public-border-2);
+  box-shadow: var(--public-shadow-md);
+}
+
+.code {
+  margin: 0;
+  font-size: 56px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--public-text-1);
+}
+
+.title {
+  margin: 14px 0 0;
+  font-size: 24px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--public-text-1);
+}
+
+.desc {
+  margin: 12px 0 0;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--public-text-3);
+}
+
+.backLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 24px;
+  min-width: 136px;
+  height: 40px;
+  padding: 0 18px;
+  border-radius: 10px;
+  background: var(--primary-color);
+  color: var(--public-on-accent);
+  font-weight: 600;
+}

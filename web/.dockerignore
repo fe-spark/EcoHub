@@ -1,0 +1,25 @@
+# Dependencies
+node_modules
+
+# Build output
+.next
+out
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+
+# OS
+.DS_Store
+
+# Docs
+*.md
+
+# Env
+.env
+.env.local
+.env.*.local

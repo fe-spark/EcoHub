@@ -1,0 +1,379 @@
+/* Theme tokens for FilmList */
+:global(html) {
+  --film-placeholder-bg: var(--public-surface-3);
+  --film-tag-bg: rgba(var(--primary-color-rgb), 0.15);
+  --film-tag-text: #fff;
+  --film-tag-border: rgba(255, 255, 255, 0.3);
+  --film-overlay-meta-text: rgba(255, 255, 255, 0.78);
+  --film-overlay-blurb-text: rgba(255, 255, 255, 0.68);
+}
+
+:global(html[data-theme="light"]) {
+  --film-placeholder-bg: var(--public-surface-2);
+  --film-tag-bg: rgba(var(--primary-color-rgb), 0.12);
+  --film-tag-text: var(--public-on-accent);
+  --film-tag-border: rgba(255, 255, 255, 0.18);
+  --film-overlay-meta-text: rgba(255, 255, 255, 0.88);
+  --film-overlay-blurb-text: rgba(255, 255, 255, 0.8);
+}
+
+// Flex override classes for non-24-divisor column counts (5, 7) or specific overrides
+.grid-col-5 {
+  @media (min-width: 1200px) {
+    flex: 0 0 20% !important;
+    max-width: 20% !important;
+  }
+}
+
+.grid-col-6 {
+  @media (min-width: 1200px) {
+    flex: 0 0 20% !important;
+    max-width: 20% !important;
+  }
+
+  @media (min-width: 1440px) {
+    flex: 0 0 16.6666% !important;
+    max-width: 16.6666% !important;
+  }
+}
+
+.grid-col-7 {
+  @media (min-width: 1440px) {
+    flex: 0 0 14.2857% !important;
+    max-width: 14.2857% !important;
+  }
+}
+
+.grid-col-8 {
+  @media (min-width: 1440px) {
+    flex: 0 0 12.5% !important;
+    max-width: 12.5% !important;
+  }
+}
+
+.item {
+  position: relative;
+  cursor: pointer;
+  transition: transform 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+  will-change: transform;
+  transform: translateZ(0); /* Force GPU acceleration */
+  contain: layout style; /* Contain layout/style recalculations */
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  &:hover {
+    transform: translateY(-8px) scale(1.02);
+
+    .posterWrapper {
+      box-shadow:
+        0 20px 40px rgba(0, 0, 0, 0.8),
+        0 0 0 1px rgba(var(--primary-color-rgb), 0.3);
+
+      .poster {
+        transform: scale(1.1);
+      }
+
+      .overlay {
+        opacity: 1;
+        visibility: visible;
+
+        .overlayContent {
+          transform: translateY(0);
+        }
+      }
+
+      .remark,
+      .tagGroup {
+        opacity: 0;
+      }
+    }
+
+    .name {
+      color: var(--primary-color);
+      text-shadow: 0 0 10px rgba(var(--primary-color-rgb), 0.3);
+    }
+  }
+}
+
+.posterWrapper {
+  position: relative;
+  aspect-ratio: 3 / 4.2;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--film-placeholder-bg);
+  box-shadow: var(--public-shadow-sm);
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+  margin-bottom: 12px;
+  border: 1px solid var(--public-border-1);
+
+  .poster {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transition: transform 0.8s cubic-bezier(0.165, 0.84, 0.44, 1);
+    z-index: 1;
+  }
+}
+
+.posterLoaded {
+  opacity: 1 !important;
+}
+
+.loadingBg {
+  // 关键修复：移除 posterPulse 呼吸动画，保留扫光 shimer
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    background: linear-gradient(100deg,
+        transparent 10%,
+        rgba(255, 255, 255, 0.08) 45%,
+        transparent 80%);
+    transform: translateX(-120%);
+    animation: posterShimmer 1.7s ease-in-out infinite;
+    pointer-events: none;
+  }
+}
+
+.remark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(var(--primary-color-rgb), 0.95); /* Increased opacity to compensate for lack of blur */
+  color: var(--public-on-accent);
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  z-index: 2;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: opacity 0.25s ease;
+}
+
+.tagGroup {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  padding: 8px;
+  /* Slightly tighter base padding */
+  display: flex;
+  flex-wrap: nowrap;
+  /* FORCE NO WRAP */
+  overflow: hidden;
+  gap: 4px;
+  /* Reduced gap for more space */
+  z-index: 2;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+  transition: opacity 0.3s ease;
+
+  .tag {
+    background: var(--film-tag-bg);
+    color: var(--film-tag-text);
+    padding: 2px 6px;
+    border-radius: 4px;
+    /* Slightly smaller radius for more content space */
+    font-size: 10px;
+    font-weight: 700;
+    border: 1px solid var(--film-tag-border);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 1;
+    /* Allow to shrink if container is too small */
+    min-width: 0;
+    /* Enable shrinking below content size */
+
+    &:first-child {
+      flex-shrink: 0;
+      /* Year shouldn't shrink usually */
+    }
+  }
+}
+
+/* Specific mobile overrides for absolute stability */
+@media (max-width: 576px) {
+  .tagGroup {
+    padding: 6px;
+    gap: 3px;
+
+    .tag {
+      font-size: 9px;
+      padding: 1px 4px;
+    }
+  }
+
+  .remark {
+    top: 6px;
+    right: 6px;
+    padding: 1px 6px;
+    font-size: 10px;
+  }
+}
+
+.overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--public-overlay-card);
+  opacity: 0;
+  visibility: hidden;
+  display: flex;
+  align-items: flex-end;
+  padding: 14px;
+  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
+  z-index: 5;
+
+  .overlayContent {
+    width: 100%;
+    max-height: 100%;
+    display: flex;
+    flex-direction: column;
+    transform: translateY(20px);
+    transition: transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1) 0.1s;
+  }
+
+  .overlayTitle {
+    color: var(--public-on-accent);
+    font-size: 18px;
+    font-weight: 800;
+    margin-bottom: 6px;
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .overlayMeta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    color: var(--film-overlay-meta-text);
+    margin-bottom: 8px;
+
+    .dot {
+      color: var(--primary-color);
+      font-weight: 900;
+    }
+  }
+
+  .overlayBlurb {
+    font-size: 12px;
+    color: var(--film-overlay-blurb-text);
+    line-height: 1.45;
+    margin-bottom: 10px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .playBtn {
+    margin-top: auto;
+    height: 40px;
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 14px;
+    background: var(--primary-color) !important;
+    color: var(--public-on-accent) !important;
+    border: none !important;
+    box-shadow: 0 4px 15px rgba(var(--primary-color-rgb), 0.4) !important;
+
+    &:hover {
+      filter: brightness(1.08);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(var(--primary-color-rgb), 0.5) !important;
+    }
+  }
+}
+
+.infoLine {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 0 4px;
+  overflow: hidden;
+  /* 防止文字溢出 */
+
+  .name {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--public-text-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: color 0.3s ease;
+  }
+
+  .subText {
+    font-size: 12px;
+    color: var(--public-text-5);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+
+// UI specific responsive adjustments
+@media (max-width: 768px) {
+  .overlay {
+    display: none;
+  }
+
+  .item {
+    &:hover {
+      transform: none;
+    }
+  }
+
+  .posterWrapper {
+    border-radius: 10px;
+    margin-bottom: 8px;
+  }
+
+  .infoLine {
+    .name {
+      font-size: 13px;
+    }
+
+    .subText {
+      font-size: 11px;
+    }
+  }
+}
+
+
+@keyframes posterShimmer {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loadingBg {
+    animation: none;
+
+    &::before {
+      animation: none;
+    }
+  }
+}

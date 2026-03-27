@@ -1,0 +1,140 @@
+.floatingDock {
+  position: fixed;
+  z-index: 2147483000;
+  display: flex;
+  align-items: center;
+  height: 44px;
+  border-radius: 22px;
+  background: rgba(18, 22, 32, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+  padding: 0 4px;
+  gap: 0;
+  overflow: hidden;
+  max-width: 48px;
+  transition: max-width 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              box-shadow 0.3s ease,
+              top 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              left 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+
+  &:hover {
+    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.32);
+  }
+
+  &.expanded {
+    max-width: 320px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+    cursor: default;
+
+    .indicator {
+      color: var(--primary-color);
+    }
+  }
+
+  &.dragging {
+    transition: none !important;
+    cursor: grabbing !important;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+    max-width: 48px !important;
+    opacity: 0.9;
+  }
+
+  // 吸附到左侧时选项在右侧展开（默认行为）
+  &.snapLeft {
+    flex-direction: row;
+  }
+
+  // 吸附到右侧时选项在左侧展开
+  &.snapRight {
+    flex-direction: row-reverse;
+  }
+}
+
+:global(html[data-theme="light"]) {
+  .floatingDock {
+    background: rgba(255, 255, 255, 0.6);
+    border-color: rgba(16, 18, 24, 0.1);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+
+    &:hover {
+      box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
+    }
+
+    &.expanded {
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    }
+  }
+}
+
+.indicator {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--public-text-3);
+  transition: color 0.3s ease;
+
+  svg {
+    display: block;
+  }
+}
+
+.option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--public-text-4);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+
+  svg {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background: var(--public-surface-hover);
+    color: var(--public-text-1);
+  }
+
+  &.active {
+    color: var(--primary-color);
+    background: rgba(var(--primary-color-rgb), 0.1);
+  }
+}
+
+@media (max-width: 768px) {
+  .floatingDock {
+    height: 40px;
+    border-radius: 20px;
+    max-width: 44px;
+  }
+
+  .indicator {
+    width: 32px;
+    height: 32px;
+  }
+
+  .option {
+    padding: 5px 8px;
+    font-size: 12px;
+
+    span {
+      display: none;
+    }
+  }
+}

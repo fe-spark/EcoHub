@@ -1,0 +1,110 @@
+.container {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(
+      circle at 20% 30%,
+      rgba(118, 75, 162, 0.15) 0%,
+      transparent 40%
+    ),
+    radial-gradient(
+      circle at 80% 70%,
+      rgba(250, 140, 22, 0.1) 0%,
+      transparent 40%
+    ),
+    #0a0b10;
+  overflow: hidden;
+  position: relative;
+
+  &::before {
+    content: "";
+    position: absolute;
+    width: 150%;
+    height: 150%;
+    background: url("https://www.transparenttextures.com/patterns/stardust.png");
+    opacity: 0.05;
+    pointer-events: none;
+  }
+}
+
+.card {
+  width: 440px;
+  padding: 56px 48px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 40px 100px rgba(0, 0, 0, 0.4);
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.brand {
+  margin-bottom: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.siteName {
+  font-size: 32px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.subTitle {
+  font-size: 14px;
+  color: rgba(255, 255, 255, 0.45);
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.btn {
+  height: 54px !important;
+  margin-top: 12px;
+
+  &:hover {
+    transform: translateY(-2px);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.footer {
+  margin-top: 32px;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+@media (max-width: 480px) {
+  .card {
+    width: calc(100% - 40px);
+    padding: 40px 24px;
+  }
+}

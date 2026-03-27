@@ -1,0 +1,29 @@
+.layoutWrapper {
+  background: var(--public-page-bg);
+  color: var(--public-text-1);
+  min-height: 100vh; // Ensure it takes at least the full viewport height
+  display: flex;
+  flex-direction: column;
+}
+
+.publicMain {
+  flex: 1;
+  width: 100%;
+  max-width: 1440px; // Aligned with Header's max-width
+  margin: 0 auto;
+  padding: 100px 40px 40px; // Matches desktop padding
+  position: relative;
+}
+
+@media (max-width: 768px) {
+  .publicMain {
+    padding-top: 76px; // Adjust top padding for smaller header height
+  }
+}
+
+@media (max-width: 576px) {
+  .publicMain {
+    padding-left: 16px; // Aligned with Header's mobile padding
+    padding-right: 16px;
+  }
+}

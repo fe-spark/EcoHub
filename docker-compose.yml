@@ -1,0 +1,41 @@
+services:
+  web:
+    container_name: Eco-web
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        - API_URL=http://server:3601
+    restart: always
+    ports:
+      - 3000:3000
+    networks:
+      - Eco-network
+    depends_on:
+      server:
+        condition: service_healthy
+
+  server:
+    container_name: Eco-server
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: always
+    env_file:
+      - .env
+    ports:
+      - 3601:3601
+    networks:
+      - Eco-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:$${PORT}/api/index"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+networks:
+  Eco-network:
+    driver: bridge

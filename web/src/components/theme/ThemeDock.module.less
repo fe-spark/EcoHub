@@ -1,0 +1,233 @@
+// ── 整体容器（仅定位/拖拽，无视觉） ───────────────────────────
+.dock {
+  position: fixed;
+  z-index: 2147483000;
+  width: 44px;
+  height: 44px;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  -webkit-user-select: none;
+
+  transition:
+    top 0.26s cubic-bezier(0.2, 0.85, 0.2, 1),
+    left 0.26s cubic-bezier(0.2, 0.85, 0.2, 1),
+    transform 0.2s ease;
+}
+
+.dragging {
+  cursor: grabbing;
+  transition: none;
+
+  .trigger {
+    border-radius: 50% !important;
+    border-left: 1px solid var(--ant-color-border-secondary) !important;
+    border-right: 1px solid var(--ant-color-border-secondary) !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+}
+
+.snapping.left {
+  animation: dockSnapLeft 0.28s cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+
+.snapping.right {
+  animation: dockSnapRight 0.28s cubic-bezier(0.2, 0.85, 0.2, 1);
+}
+
+@keyframes dockSnapLeft {
+  0% {
+    transform: translateX(8px);
+  }
+  65% {
+    transform: translateX(-1px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes dockSnapRight {
+  0% {
+    transform: translateX(-8px);
+  }
+  65% {
+    transform: translateX(1px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes snapLeft {
+  0% {
+    transform: translateX(7px) scale(0.98);
+  }
+  55% {
+    transform: translateX(-1px) scale(1.01);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes snapRight {
+  0% {
+    transform: translateX(-7px) scale(0.98);
+  }
+  55% {
+    transform: translateX(1px) scale(1.01);
+  }
+  100% {
+    transform: translateX(0) scale(1);
+  }
+}
+
+// ── 圆形触发按钮 ────────────────────────────────────────────────
+.trigger {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--ant-color-bg-elevated) 86%, transparent);
+  border: 1px solid var(--ant-color-border-secondary);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+  color: var(--ant-color-text-secondary);
+  transition: box-shadow 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+
+  svg {
+    display: block;
+    pointer-events: none;
+  }
+
+  .dock:hover & {
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+    color: var(--ant-color-text);
+    transform: translateY(-1px);
+  }
+
+  .dock.expanded & {
+    color: var(--ant-color-primary);
+    background: color-mix(in srgb, var(--ant-color-primary-bg) 42%, var(--ant-color-bg-elevated));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+  }
+}
+
+// 贴边态：改为边缘标签形态（非圆形）
+.dock.left .trigger {
+  border-radius: 0 22px 22px 0;
+  border-left: none;
+  padding-left: 4px;
+}
+
+.dock.right .trigger {
+  border-radius: 22px 0 0 22px;
+  border-right: none;
+  padding-right: 4px;
+}
+
+// ── 弹出选项面板 ─────────────────────────────────────────────────
+.panel {
+  position: absolute;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px 6px;
+  height: 44px;
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--ant-color-bg-elevated) 88%, transparent);
+  border: 1px solid var(--ant-color-border-secondary);
+  backdrop-filter: blur(14px) saturate(140%);
+  -webkit-backdrop-filter: blur(14px) saturate(140%);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  white-space: nowrap;
+
+  // 收起态
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(0.88);
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1);
+
+  // 展开态
+  .dock.expanded & {
+    opacity: 1;
+    pointer-events: auto;
+    transform: scale(1);
+  }
+
+  // 吸附右侧时，面板向左展开
+  .dock.right & {
+    right: calc(100% + 8px);
+    left: auto;
+    transform-origin: right center;
+  }
+
+  // 吸附左侧时，面板向右展开
+  .dock.left & {
+    left: calc(100% + 8px);
+    right: auto;
+    transform-origin: left center;
+  }
+}
+
+// ── 单个选项按钮 ─────────────────────────────────────────────────
+.option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px;
+  height: 34px;
+  border: none;
+  border-radius: 17px;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+  transition: background 0.15s ease, color 0.15s ease;
+  outline: none;
+  flex-shrink: 0;
+
+  svg {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  &:hover {
+    background: var(--ant-color-fill-tertiary);
+    color: var(--ant-color-text);
+  }
+
+  &.active {
+    background: var(--ant-color-primary-bg);
+    color: var(--ant-color-primary-text);
+  }
+}
+
+// ── 响应式 ───────────────────────────────────────────────────────
+@media (max-width: 768px) {
+  .option span {
+    display: none;
+  }
+
+  .option {
+    padding: 0 10px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dock,
+  .trigger,
+  .panel,
+  .option {
+    transition: none !important;
+  }
+}
