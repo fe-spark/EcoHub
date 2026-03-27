@@ -19,7 +19,7 @@ EcoHub 是一个前后端分离的影视聚合系统：
 - 演示地址：[https://eco.fe-spark.cn/](https://eco.fe-spark.cn/)
 - TVBox / 影视仓接入地址：`https://eco.fe-spark.cn/api/provide/config`
 - EcoHub App 接入地址：`https://eco.fe-spark.cn/api`
-- 演示站后台体验需要使用访客账号登录：账号 `guest`，密码 `guest`
+- 演示站`/manage`后台体验需要使用访客账号登录：账号 `guest`，密码 `guest`
 
 ## 系统总览
 
