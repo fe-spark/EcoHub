@@ -157,7 +157,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
 	params.Year = yStr
-	params.Sort = c.DefaultQuery("Sort", "update_stamp")
+	params.Sort = c.DefaultQuery("Sort", "latest_source_stamp")
 
 	page := dto.GetPageParams(c)
 	page.PageSize = 49

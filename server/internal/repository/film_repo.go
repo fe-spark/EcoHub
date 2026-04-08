@@ -231,11 +231,19 @@ func SaveSitePlayList(id string, list []model.MovieDetail) error {
 		return nil
 	}
 	var playlists []model.MoviePlaylist
+	latestByContentKey := make(map[string]int64)
 	for _, d := range list {
 		if len(d.PlayList) == 0 || strings.Contains(d.CName, "解说") {
 			continue
 		}
 		data, _ := json.Marshal(d.PlayList)
+		stamp, err := time.ParseInLocation(time.DateTime, d.UpdateTime, time.Local)
+		if err == nil {
+			contentKey := buildContentKey(d)
+			if contentKey != "" && stamp.Unix() > latestByContentKey[contentKey] {
+				latestByContentKey[contentKey] = stamp.Unix()
+			}
+		}
 
 		if d.DbId != 0 {
 			playlists = append(playlists, model.MoviePlaylist{
@@ -258,9 +266,34 @@ func SaveSitePlayList(id string, list []model.MovieDetail) error {
 			log.Printf("SaveSitePlayList Error: %v", err)
 			return err
 		}
+		if err := refreshLatestSourceStampByContentKeys(latestByContentKey); err != nil {
+			log.Printf("refreshLatestSourceStampByContentKeys Error: %v", err)
+			return err
+		}
 		log.Printf("[Playlist] 为站点 %s 保存了 %d 条记录\n", id, len(playlists))
 	}
 	return nil
+}
+
+func refreshLatestSourceStampByContentKeys(latestByContentKey map[string]int64) error {
+	if len(latestByContentKey) == 0 {
+		return nil
+	}
+
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for contentKey, stamp := range latestByContentKey {
+			if stamp <= 0 {
+				continue
+			}
+			if err := tx.Model(&model.SearchInfo{}).
+				Where("content_key = ?", contentKey).
+				Where("latest_source_stamp < ? OR latest_source_stamp IS NULL", stamp).
+				Update("latest_source_stamp", stamp).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // DeletePlaylistBySourceId 根据来源站点 ID 删除所有关联的播放列表资源
@@ -272,7 +305,15 @@ func DeletePlaylistBySourceId(sourceId string) error {
 
 var initializedPids sync.Map
 
-var defaultSortTagStrings = []string{"时间:update_stamp", "人气:hits", "评分:score", "最新:release_stamp"}
+var defaultSortTagStrings = []string{"最新更新:latest_source_stamp", "人气:hits", "评分:score", "最新:release_stamp"}
+
+var allowedSearchSortColumns = map[string]string{
+	"latest_source_stamp": "latest_source_stamp",
+	"update_stamp":        "update_stamp",
+	"hits":                "hits",
+	"score":               "score",
+	"release_stamp":       "release_stamp",
+}
 
 func BatchHandleSearchTag(infos ...model.SearchInfo) {
 	if len(infos) == 0 {
@@ -508,30 +549,31 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 
 func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta) model.SearchInfo {
 	return model.SearchInfo{
-		Mid:          detail.Id,
-		ContentKey:   buildContentKey(detail),
-		SourceId:     sourceId,
-		Cid:          category.Cid,
-		Pid:          category.Pid,
-		Name:         detail.Name,
-		SubTitle:     detail.SubTitle,
-		CName:        category.CName,
-		ClassTag:     meta.ClassTag,
-		Area:         meta.Area,
-		Language:     meta.Language,
-		Year:         meta.Year,
-		Initial:      detail.Initial,
-		Score:        meta.Score,
-		Hits:         detail.Hits,
-		UpdateStamp:  meta.UpdateStamp,
-		DbId:         detail.DbId,
-		State:        detail.State,
-		Remarks:      detail.Remarks,
-		ReleaseStamp: detail.AddTime,
-		Picture:      detail.Picture,
-		Actor:        detail.Actor,
-		Director:     detail.Director,
-		Blurb:        detail.Blurb,
+		Mid:               detail.Id,
+		ContentKey:        buildContentKey(detail),
+		SourceId:          sourceId,
+		Cid:               category.Cid,
+		Pid:               category.Pid,
+		Name:              detail.Name,
+		SubTitle:          detail.SubTitle,
+		CName:             category.CName,
+		ClassTag:          meta.ClassTag,
+		Area:              meta.Area,
+		Language:          meta.Language,
+		Year:              meta.Year,
+		Initial:           detail.Initial,
+		Score:             meta.Score,
+		Hits:              detail.Hits,
+		UpdateStamp:       meta.UpdateStamp,
+		LatestSourceStamp: meta.UpdateStamp,
+		DbId:              detail.DbId,
+		State:             detail.State,
+		Remarks:           detail.Remarks,
+		ReleaseStamp:      detail.AddTime,
+		Picture:           detail.Picture,
+		Actor:             detail.Actor,
+		Director:          detail.Director,
+		Blurb:             detail.Blurb,
 	}
 }
 
@@ -1240,10 +1282,18 @@ func GetSearchInfosByTags(st model.SearchTagsVO, page *dto.Page) []model.SearchI
 				// 普通剧情标签使用 LIKE 查询
 				qw = qw.Where("class_tag LIKE ?", fmt.Sprintf("%%%v%%", value))
 			case "sort":
-				if sVal, ok := value.(string); ok && strings.EqualFold(sVal, "release_stamp") {
+				sVal, ok := value.(string)
+				if !ok {
+					break
+				}
+				column, allowed := allowedSearchSortColumns[sVal]
+				if !allowed {
+					column = allowedSearchSortColumns["latest_source_stamp"]
+				}
+				if strings.EqualFold(column, "release_stamp") {
 					qw.Order("year DESC, release_stamp DESC")
 				} else {
-					qw.Order(fmt.Sprintf("%v DESC", value))
+					qw.Order(fmt.Sprintf("%s DESC", column))
 				}
 			default:
 				break
