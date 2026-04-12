@@ -225,9 +225,10 @@ func GetActiveCategoryTree() model.CategoryTree {
 	// 1. 尝试从 Redis 获取
 	if data, err := db.Rdb.Get(db.Cxt, config.ActiveCategoryTreeKey).Result(); err == nil && data != "" {
 		var tree model.CategoryTree
-		if json.Unmarshal([]byte(data), &tree) == nil {
+		if json.Unmarshal([]byte(data), &tree) == nil && isValidActiveCategoryTree(tree) {
 			return tree
 		}
+		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 
 	// 2. 获取活跃的 Pid (MainCategory) 和 Cid (Category)
@@ -302,6 +303,15 @@ func GetActiveCategoryTree() model.CategoryTree {
 	}
 
 	return root
+}
+
+func isValidActiveCategoryTree(tree model.CategoryTree) bool {
+	for _, child := range tree.Children {
+		if child == nil || child.Pid != 0 || !IsRootCategory(child.Id) {
+			return false
+		}
+	}
+	return true
 }
 
 func sortRootCategories(children []*model.CategoryTree) {
