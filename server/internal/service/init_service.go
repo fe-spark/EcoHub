@@ -19,6 +19,8 @@ type InitService struct{}
 var InitSvc = new(InitService)
 
 func (s *InitService) DefaultDataInit() {
+	clearStartupCaches()
+
 	if !repository.ExistUserTable() {
 		// 只有在用户表不存在时（视为首次运行或库重建），才执行完整的表迁移与初始数据灌入
 		s.TableInit()
@@ -41,6 +43,32 @@ func (s *InitService) DefaultDataInit() {
 	s.BasicConfigInit()
 	s.BannersInit()
 	s.SpiderInit()
+}
+
+func clearStartupCaches() {
+	ctx := db.Cxt
+	db.Rdb.Del(ctx,
+		config.ActiveCategoryTreeKey,
+		config.IndexPageCacheKey,
+		config.TVBoxConfigCacheKey,
+		config.VirtualPictureKey,
+	)
+
+	patterns := []string{
+		config.SearchTags + ":*",
+		config.TVBoxList + ":*",
+	}
+	for _, pattern := range patterns {
+		iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
+		for iter.Next(ctx) {
+			db.Rdb.Del(ctx, iter.Val())
+		}
+		if err := iter.Err(); err != nil {
+			log.Printf("Redis startup cache cleanup failed for %s: %v", pattern, err)
+		}
+	}
+
+	log.Println("[Init] Redis 可重建缓存已清理")
 }
 
 func (s *InitService) TableInit() {
