@@ -482,7 +482,7 @@ export default function CollectManagePage() {
   const commonFormItems = (
     <>
       <Form.Item label="资源名称" name="name" rules={[{ required: true }]}>
-        <Input placeholder="自定义资源名称(禁用汉字)" />
+        <Input placeholder="自定义资源名称" />
       </Form.Item>
       <Form.Item label="接口地址" name="uri" rules={[{ required: true }]}>
         <Input placeholder="资源采集链接" />
