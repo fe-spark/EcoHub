@@ -171,11 +171,14 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 		tx.Where("source_id = ? AND mapping_version <> ?", sourceId, version).Delete(&model.CategoryMapping{})
 		return nil
 	})
+	if err != nil {
+		return err
+	}
 
 	// 同步完成后刷新内存缓存，确保采集立即可用
+	ClearCategoryCache()
 	InitMappingEngine()
-	RefreshCategoryCache()
-	return err
+	return nil
 }
 
 // buildTreeHelper 内部辅助函数：直接从列表构建树形结构内存模型
@@ -428,12 +431,9 @@ func InitMainCategories() {
 	// 2. 刷新映射引擎（加载顶级大类到内存缓存）
 	InitMappingEngine()
 
-	// 3. 重建分类内存映射
-	RefreshCategoryCache()
-
-	// 4. 清理 Redis 过期缓存
-	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey, config.IndexPageCacheKey)
-	ClearAllSearchTagsCache()
+	// 3. 统一清理分类相关缓存并重建内存映射
+	ClearCategoryCache()
+	db.Rdb.Del(db.Cxt, config.IndexPageCacheKey)
 
 	fmt.Println("[Init] 缓存刷新与标准大类对齐完成。")
 }
