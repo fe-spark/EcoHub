@@ -69,9 +69,12 @@ func GetCategoryByStableKey(stableKey string) *model.Category {
 }
 
 func ResolveCategoryID(id int64) int64 {
+	if id <= 0 {
+		return id
+	}
 	category := GetCategoryByID(id)
 	if category == nil {
-		return 0
+		return id
 	}
 	if category.StableKey != "" {
 		if current := GetCategoryByStableKey(category.StableKey); current != nil {
