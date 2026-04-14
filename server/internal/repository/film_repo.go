@@ -307,6 +307,8 @@ var initializedPids sync.Map
 
 var defaultSortTagStrings = []string{"最新更新:latest_source_stamp", "人气:hits", "评分:score", "最新:release_stamp"}
 
+const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC"
+
 var allowedSearchSortColumns = map[string]string{
 	"latest_source_stamp": "latest_source_stamp",
 	"update_stamp":        "update_stamp",
@@ -647,7 +649,7 @@ func GetMovieListByPid(pid int64, page *dto.Page) []model.MovieBasicInfo {
 func GetMovieListByPidLimit(pid int64, limit, offset int) []model.MovieBasicInfo {
 	pid = ResolveCategoryID(pid)
 	var s []model.SearchInfo
-	if err := db.Mdb.Limit(limit).Offset(offset).Where("pid = ?", pid).Order("update_stamp DESC").Find(&s).Error; err != nil {
+	if err := db.Mdb.Limit(limit).Offset(offset).Where("pid = ?", pid).Order(latestUpdateOrderSQL).Find(&s).Error; err != nil {
 		log.Printf("GetMovieListByPidLimit Error: %v", err)
 		return nil
 	}
@@ -670,7 +672,7 @@ func GetMovieListByCid(cid int64, page *dto.Page) []model.MovieBasicInfo {
 func GetMovieListByCidLimit(cid int64, limit, offset int) []model.MovieBasicInfo {
 	cid = ResolveCategoryID(cid)
 	var s []model.SearchInfo
-	if err := db.Mdb.Limit(limit).Offset(offset).Where("cid = ?", cid).Order("update_stamp DESC").Find(&s).Error; err != nil {
+	if err := db.Mdb.Limit(limit).Offset(offset).Where("cid = ?", cid).Order(latestUpdateOrderSQL).Find(&s).Error; err != nil {
 		log.Printf("GetMovieListByCidLimit Error: %v", err)
 		return nil
 	}
@@ -686,7 +688,7 @@ func SearchFilmKeyword(keyword string, page *dto.Page) []model.SearchInfo {
 	page.PageCount = int((page.Total + page.PageSize - 1) / page.PageSize)
 
 	db.Mdb.Limit(page.PageSize).Offset((page.Current-1)*page.PageSize).
-		Where("name LIKE ?", fmt.Sprintf(`%%%s%%`, keyword)).Or("sub_title LIKE ?", fmt.Sprintf(`%%%s%%`, keyword)).Order("year DESC, update_stamp DESC").Find(&searchList)
+		Where("name LIKE ?", fmt.Sprintf(`%%%s%%`, keyword)).Or("sub_title LIKE ?", fmt.Sprintf(`%%%s%%`, keyword)).Order("year DESC, " + latestUpdateOrderSQL).Find(&searchList)
 
 	return searchList
 }
@@ -799,7 +801,7 @@ func GetRelateMovieBasicInfo(search model.SearchInfo, page *dto.Page) []model.Mo
 	if len(list) == 0 && search.Cid > 0 {
 		db.Mdb.Model(&model.SearchInfo{}).
 			Where("cid = ? AND mid != ?", search.Cid, search.Mid).
-			Order("update_stamp DESC").
+			Order(latestUpdateOrderSQL).
 			Offset(offset).Limit(page.PageSize).
 			Find(&list)
 	}
@@ -1725,7 +1727,7 @@ func GetMovieListBySort(t int, pid int64, page *dto.Page) []model.MovieBasicInfo
 	case 1:
 		qw.Order("hits DESC")
 	case 2:
-		qw.Order("update_stamp DESC")
+		qw.Order(latestUpdateOrderSQL)
 	}
 	if err := qw.Find(&sl).Error; err != nil {
 		log.Printf("GetMovieListBySort Error: %v", err)
