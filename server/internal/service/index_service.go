@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -20,7 +19,7 @@ var IndexSvc = new(IndexService)
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
 	// 1. 尝试从 Redis 获取缓存
-	cacheKey := config.IndexPageCacheKey
+	cacheKey := repository.GetVersionedIndexPageCacheKey()
 	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 		res := make(map[string]any)
 		if json.Unmarshal([]byte(data), &res) == nil {
@@ -154,6 +153,7 @@ func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) 
 
 // GetPidCategory 获取pid对应的分类信息
 func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
+	pid = repository.ResolveCategoryID(pid)
 	tree := repository.GetCategoryTree()
 	for _, t := range tree.Children {
 		if t.Id == pid {

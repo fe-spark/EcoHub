@@ -35,7 +35,7 @@ func ExistSearchInMid(mid int64) bool {
 // ========= Upsert Logic =========
 
 var upsertColumns = []string{
-	"mid", "cid", "pid", "name", "sub_title", "c_name", "class_tag",
+	"mid", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 	"area", "language", "year", "initial", "score",
 	"update_stamp", "hits", "state", "remarks", "release_stamp",
 	"picture", "actor", "director", "blurb", "updated_at", "deleted_at",
@@ -58,7 +58,7 @@ func BatchSaveOrUpdate(list []model.SearchInfo) map[string]int64 {
 	if err := db.Mdb.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "content_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"source_id", "cid", "pid", "name", "sub_title", "c_name", "class_tag",
+			"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 			"area", "language", "year", "initial", "score",
 			"update_stamp", "hits", "state", "remarks", "release_stamp",
 			"picture", "actor", "director", "blurb", "updated_at",
@@ -120,7 +120,7 @@ func SaveSearchInfo(s model.SearchInfo) error {
 	err := db.Mdb.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "content_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"source_id", "cid", "pid", "name", "sub_title", "c_name", "class_tag",
+			"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 			"area", "language", "year", "initial", "score",
 			"update_stamp", "hits", "state", "remarks", "release_stamp",
 			"picture", "actor", "director", "blurb", "updated_at",
@@ -187,7 +187,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	if err := db.Mdb.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "content_key"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"source_id", "cid", "pid", "name", "sub_title", "c_name", "class_tag",
+			"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 			"area", "language", "year", "initial", "score",
 			"update_stamp", "hits", "state", "remarks", "release_stamp",
 			"picture", "actor", "director", "blurb", "updated_at",
@@ -470,9 +470,12 @@ func resolveFallbackCid(pid int64, cName string) int64 {
 		return sub.Id
 	}
 
-	sub = model.Category{Pid: pid, Name: cName, Show: true}
+	sub = model.Category{Pid: pid, Name: cName, StableKey: buildCategoryStableKey(pid, cName), Show: true}
 	if err := db.Mdb.Where("pid = ? AND name = ?", pid, cName).FirstOrCreate(&sub).Error; err == nil && sub.Id > 0 {
-		RefreshCategoryCache()
+		if sub.StableKey == "" {
+			db.Mdb.Model(&model.Category{}).Where("id = ?", sub.Id).Update("stable_key", buildCategoryStableKey(pid, sub.Name))
+		}
+		MarkCategoryChanged()
 		return sub.Id
 	}
 	return 0
@@ -482,6 +485,8 @@ type resolvedSearchCategory struct {
 	Pid   int64
 	Cid   int64
 	CName string
+	PKey  string
+	CKey  string
 }
 
 type normalizedSearchMeta struct {
@@ -521,6 +526,12 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if result.Cid == 0 {
 		result.Cid = resolveFallbackCid(result.Pid, detail.CName)
 	}
+	if result.Pid > 0 {
+		result.PKey = GetCategoryStableKeyByID(result.Pid)
+	}
+	if result.Cid > 0 {
+		result.CKey = GetCategoryStableKeyByID(result.Cid)
+	}
 
 	return result
 }
@@ -554,6 +565,8 @@ func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolve
 		SourceId:          sourceId,
 		Cid:               category.Cid,
 		Pid:               category.Pid,
+		RootCategoryKey:   category.PKey,
+		CategoryKey:       category.CKey,
 		Name:              detail.Name,
 		SubTitle:          detail.SubTitle,
 		CName:             category.CName,
@@ -600,8 +613,13 @@ func applyResolvedCategory(detail *model.MovieDetail, info model.SearchInfo) {
 }
 
 func ApplyCategoryFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
+	isUncategorized := cid == model.TagUncategorizedValue
+	pid = ResolveCategoryID(pid)
+	if cid > 0 {
+		cid = ResolveCategoryID(cid)
+	}
 	switch {
-	case cid == model.TagUncategorizedValue && pid > 0:
+	case isUncategorized && pid > 0:
 		return query.Where("pid = ? AND cid = 0", pid)
 	case cid > 0 && IsRootCategory(cid):
 		return query.Where("pid = ?", cid)
@@ -616,6 +634,7 @@ func ApplyCategoryFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
 
 // GetMovieListByPid 获取指定父类 ID 的影片基本信息
 func GetMovieListByPid(pid int64, page *dto.Page) []model.MovieBasicInfo {
+	pid = ResolveCategoryID(pid)
 	var count int64
 	db.Mdb.Model(&model.SearchInfo{}).Where("pid = ?", pid).Count(&count)
 	page.Total = int(count)
@@ -626,6 +645,7 @@ func GetMovieListByPid(pid int64, page *dto.Page) []model.MovieBasicInfo {
 
 // GetMovieListByPidLimit 轻量级获取指定父类 ID 列表 (无 Count)
 func GetMovieListByPidLimit(pid int64, limit, offset int) []model.MovieBasicInfo {
+	pid = ResolveCategoryID(pid)
 	var s []model.SearchInfo
 	if err := db.Mdb.Limit(limit).Offset(offset).Where("pid = ?", pid).Order("update_stamp DESC").Find(&s).Error; err != nil {
 		log.Printf("GetMovieListByPidLimit Error: %v", err)
@@ -637,6 +657,7 @@ func GetMovieListByPidLimit(pid int64, limit, offset int) []model.MovieBasicInfo
 
 // GetMovieListByCid 获取指定子类 ID 的影片基本信息
 func GetMovieListByCid(cid int64, page *dto.Page) []model.MovieBasicInfo {
+	cid = ResolveCategoryID(cid)
 	var count int64
 	db.Mdb.Model(&model.SearchInfo{}).Where("cid = ?", cid).Count(&count)
 	page.Total = int(count)
@@ -647,6 +668,7 @@ func GetMovieListByCid(cid int64, page *dto.Page) []model.MovieBasicInfo {
 
 // GetMovieListByCidLimit 轻量级获取指定子类 ID 列表 (无 Count)
 func GetMovieListByCidLimit(cid int64, limit, offset int) []model.MovieBasicInfo {
+	cid = ResolveCategoryID(cid)
 	var s []model.SearchInfo
 	if err := db.Mdb.Limit(limit).Offset(offset).Where("cid = ?", cid).Order("update_stamp DESC").Find(&s).Error; err != nil {
 		log.Printf("GetMovieListByCidLimit Error: %v", err)
@@ -872,6 +894,7 @@ func GetMovieDetailByDBID(mid int64, name string) []model.MoviePlaySource {
 }
 
 func GetTagsByTitle(pid int64, tagType string, stickyValue string) []map[string]string {
+	pid = ResolveCategoryID(pid)
 	var tags []string
 	var items []model.SearchTagItem
 
@@ -889,6 +912,7 @@ func GetTagsByTitle(pid int64, tagType string, stickyValue string) []map[string]
 }
 
 func GetTopTagValues(pid int64, tagType string) []string {
+	pid = ResolveCategoryID(pid)
 	var vals []string
 	db.Mdb.Model(&model.SearchTagItem{}).
 		Select("value").
@@ -930,6 +954,7 @@ func appendSearchOption(options []map[string]string, option map[string]string) [
 }
 
 func buildSearchTagCacheKey(st model.SearchTagsVO) string {
+	st = normalizeSearchTagsVO(st)
 	return fmt.Sprintf("%s:%d:%d:%s:%s:%s:%s",
 		config.SearchTags,
 		st.Pid, st.Cid,
@@ -937,7 +962,16 @@ func buildSearchTagCacheKey(st model.SearchTagsVO) string {
 	)
 }
 
+func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
+	st.Pid = ResolveCategoryID(st.Pid)
+	if st.Cid > 0 {
+		st.Cid = ResolveCategoryID(st.Cid)
+	}
+	return st
+}
+
 func loadSearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
+	pid = ResolveCategoryID(pid)
 	var allItems []model.SearchTagItem
 	db.Mdb.Where("pid = ? AND score > 0", pid).Order("score DESC").Find(&allItems)
 
@@ -1008,6 +1042,7 @@ func formatSearchTagItems(tagType string, items []model.SearchTagItem, sticky st
 }
 
 func hasUncategorizedSearchInfo(pid int64) bool {
+	pid = ResolveCategoryID(pid)
 	if pid <= 0 {
 		return false
 	}
@@ -1017,6 +1052,7 @@ func hasUncategorizedSearchInfo(pid int64) bool {
 }
 
 func hasUnknownYearSearchInfo(pid int64) bool {
+	pid = ResolveCategoryID(pid)
 	if pid <= 0 {
 		return false
 	}
@@ -1026,6 +1062,7 @@ func hasUnknownYearSearchInfo(pid int64) bool {
 }
 
 func hasUnknownTextSearchInfo(pid int64, column string) bool {
+	pid = ResolveCategoryID(pid)
 	if pid <= 0 || column == "" {
 		return false
 	}
@@ -1077,6 +1114,7 @@ func appendSpecialSearchOptions(tagType string, formatted []map[string]string, s
 
 // GetSearchTag 获取搜索标签 (带联动感知与复合 Redis 缓存)
 func GetSearchTag(st model.SearchTagsVO) map[string]any {
+	st = normalizeSearchTagsVO(st)
 	pid := st.Pid
 	cacheKey := buildSearchTagCacheKey(st)
 
@@ -1135,6 +1173,7 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 }
 
 func GetSearchOptions(st model.SearchTagsVO) map[string]any {
+	st = normalizeSearchTagsVO(st)
 	// 复用 GetSearchTag 的逻辑
 	full := GetSearchTag(st)
 	if tags, ok := full["tags"].(map[string]any); ok {
@@ -1200,6 +1239,7 @@ func GetSearchPage(s model.SearchVo) []model.SearchInfo {
 }
 
 func GetSearchInfosByTags(st model.SearchTagsVO, page *dto.Page) []model.SearchInfo {
+	st = normalizeSearchTagsVO(st)
 	qw := db.Mdb.Model(&model.SearchInfo{})
 	t := reflect.TypeFor[model.SearchTagsVO]()
 	v := reflect.ValueOf(st)
@@ -1455,7 +1495,8 @@ func FilmZero() {
 
 	// 4. 清除所有 Redis 缓存
 	ClearCategoryCache()
-	db.Rdb.Del(db.Cxt, config.IndexPageCacheKey, config.VirtualPictureKey)
+	ClearIndexPageCache()
+	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 	ClearTVBoxListCache()
 	InitMappingEngine()
 }
@@ -1479,7 +1520,8 @@ func MasterFilmZero() {
 
 	// 清除所有 Redis 缓存
 	ClearCategoryCache()
-	db.Rdb.Del(db.Cxt, config.IndexPageCacheKey, config.VirtualPictureKey)
+	ClearIndexPageCache()
+	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 	ClearTVBoxListCache()
 	InitMappingEngine()
 }
@@ -1565,6 +1607,7 @@ func GetHotMovieByPid(pid int64, page *dto.Page) []model.SearchInfo {
 
 // GetHotMovieByPidLimit 轻量级获取热门影片
 func GetHotMovieByPidLimit(pid int64, limit, offset int) []model.SearchInfo {
+	pid = ResolveCategoryID(pid)
 	var s []model.SearchInfo
 	t := time.Now().AddDate(0, -1, 0).Unix()
 	if err := db.Mdb.Limit(limit).Offset(offset).Where("pid = ? AND update_stamp > ?", pid, t).Order(" year DESC, hits DESC").Find(&s).Error; err != nil {
@@ -1581,6 +1624,7 @@ func GetHotMovieByCid(cid int64, page *dto.Page) []model.SearchInfo {
 
 // GetHotMovieByCidLimit 轻量级获取热门影片
 func GetHotMovieByCidLimit(cid int64, limit, offset int) []model.SearchInfo {
+	cid = ResolveCategoryID(cid)
 	var s []model.SearchInfo
 	t := time.Now().AddDate(0, -1, 0).Unix()
 	if err := db.Mdb.Limit(limit).Offset(offset).Where("cid = ? AND update_stamp > ?", cid, t).Order(" year DESC, hits DESC").Find(&s).Error; err != nil {
@@ -1672,6 +1716,7 @@ func GetBasicInfoBySearchInfos(infos ...model.SearchInfo) []model.MovieBasicInfo
 
 // GetMovieListBySort 通过排序类型返回对应的影片基本信息
 func GetMovieListBySort(t int, pid int64, page *dto.Page) []model.MovieBasicInfo {
+	pid = ResolveCategoryID(pid)
 	var sl []model.SearchInfo
 	qw := db.Mdb.Model(&model.SearchInfo{}).Where("pid = ?", pid).Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize)
 	switch t {

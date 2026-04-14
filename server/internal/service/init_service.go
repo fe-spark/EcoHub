@@ -49,10 +49,10 @@ func clearStartupCaches() {
 	ctx := db.Cxt
 	db.Rdb.Del(ctx,
 		config.ActiveCategoryTreeKey,
-		config.IndexPageCacheKey,
 		config.TVBoxConfigCacheKey,
 		config.VirtualPictureKey,
 	)
+	repository.ClearIndexPageCache()
 
 	patterns := []string{
 		config.SearchTags + ":*",

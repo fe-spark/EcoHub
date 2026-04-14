@@ -287,6 +287,10 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	query := db.Mdb.Model(&model.SearchInfo{})
 
 	pid := int64(t)
+	pid = repository.ResolveCategoryID(pid)
+	if cid > 0 {
+		cid = repository.ResolveCategoryID(cid)
+	}
 	if cid == model.TagUncategorizedValue && pid <= 0 {
 		return 1, 1, 0, []model.FilmList{}
 	}
