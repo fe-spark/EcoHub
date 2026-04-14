@@ -124,26 +124,28 @@ type SearchInfo struct {
 	SourceId          string  `json:"sourceId" gorm:"index"`                                                                                                                                                                             // 来源站点ID
 	Cid               int64   `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
 	Pid               int64   `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
-	Name              string  `json:"name"`                                                                                                                                                                                              // 片名
-	SubTitle          string  `json:"subTitle"`                                                                                                                                                                                          // 影片子标题
-	CName             string  `json:"cName"`                                                                                                                                                                                             // 分类名称
-	ClassTag          string  `json:"classTag"`                                                                                                                                                                                          // 类型标签
-	Area              string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                            // 地区
-	Language          string  `json:"language" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                        // 语言
-	Year              int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                            // 年份
-	Initial           string  `json:"initial"`                                                                                                                                                                                           // 首字母
-	Score             float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                                                                                                                         // 评分
-	UpdateStamp       int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"`                                                                                                        // 更新时间
-	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                                                                                                                          // 聚合更新时间(主站/附属站取最新)
-	Hits              int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`                                                                                                                     // 热度排行
-	State             string  `json:"state"`                                                                                                                                                                                             // 状态 正片|预告
-	Remarks           string  `json:"remarks"`                                                                                                                                                                                           // 完结 | 更新至x集
-	DbId              int64   `json:"dbId" gorm:"index"`                                                                                                                                                                                 // 豆瓣ID (用于精准去重)
-	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                                                                                                                         // 上映时间 时间戳
-	Picture           string  `json:"picture"`                                                                                                                                                                                           // 简介图片
-	Actor             string  `json:"actor"`                                                                                                                                                                                             // 主演
-	Director          string  `json:"director"`                                                                                                                                                                                          // 导演
-	Blurb             string  `json:"blurb"`                                                                                                                                                                                             // 简介, 不完整
+	RootCategoryKey   string  `json:"rootCategoryKey" gorm:"size:128;index;index:idx_root_key_update;index:idx_root_key_hits;index:idx_root_key_latest;index:idx_filter_root_score;index:idx_filter_root_update;index:idx_filter_root_hits"`
+	CategoryKey       string  `json:"categoryKey" gorm:"size:128;index;index:idx_category_key_update;index:idx_category_key_hits;index:idx_category_key_latest"`
+	Name              string  `json:"name"`                                                                                       // 片名
+	SubTitle          string  `json:"subTitle"`                                                                                   // 影片子标题
+	CName             string  `json:"cName"`                                                                                      // 分类名称
+	ClassTag          string  `json:"classTag"`                                                                                   // 类型标签
+	Area              string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 地区
+	Language          string  `json:"language" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"` // 语言
+	Year              int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 年份
+	Initial           string  `json:"initial"`                                                                                    // 首字母
+	Score             float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                  // 评分
+	UpdateStamp       int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
+	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                   // 聚合更新时间(主站/附属站取最新)
+	Hits              int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
+	State             string  `json:"state"`                                                                                      // 状态 正片|预告
+	Remarks           string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
+	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
+	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
+	Picture           string  `json:"picture"`                                                                                    // 简介图片
+	Actor             string  `json:"actor"`                                                                                      // 主演
+	Director          string  `json:"director"`                                                                                   // 导演
+	Blurb             string  `json:"blurb"`                                                                                      // 简介, 不完整
 }
 
 // AfterSave GORM 钩子：在数据保存/更新后自动清理缓存，确保首页数据实时性
@@ -151,12 +153,15 @@ func (s *SearchInfo) AfterSave(tx *gorm.DB) (err error) {
 	ctx := context.Background()
 
 	// 1. 清理首页全量缓存
-	db.Rdb.Del(ctx, config.IndexPageCacheKey)
+	iter := db.Rdb.Scan(ctx, 0, config.IndexPageCacheKey+"*", 100).Iterator()
+	for iter.Next(ctx) {
+		db.Rdb.Del(ctx, iter.Val())
+	}
 
 	// 2. 清理 TVBox 列表第一页缓存 (由于涉及多种 Sort/Pid/Limit 组合，使用模糊匹配清理)
 	// 注意：此处使用 Keys 操作在数据量极大时可能有性能影响，但考虑到采集频率可控且主要是首页缓存，是合理的
 	pattern := config.TVBoxList + ":*"
-	iter := db.Rdb.Scan(ctx, 0, pattern, 100).Iterator()
+	iter = db.Rdb.Scan(ctx, 0, pattern, 100).Iterator()
 	for iter.Next(ctx) {
 		db.Rdb.Del(ctx, iter.Val())
 	}

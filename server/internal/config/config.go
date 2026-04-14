@@ -59,6 +59,8 @@ const (
 	TVBoxConfigCacheKey = "TVBox:Config"
 	// IndexPageCacheKey 首页数据缓存 key
 	IndexPageCacheKey = "Index:Page"
+	// CategoryVersionKey 分类版本号缓存 key
+	CategoryVersionKey = "Category:Version"
 	// TVBoxList TVBox 列表页缓存前缀
 	TVBoxList = "TVBox:List"
 
