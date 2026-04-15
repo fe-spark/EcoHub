@@ -1,4 +1,4 @@
-import HomePageClient from "./HomePageClient";
+import HomePageView from "./home-view";
 import { serverGet } from "@/lib/server-api";
 
 async function getHomeData() {
@@ -24,5 +24,5 @@ async function getHomeData() {
 export default async function HomePage() {
   const data = await getHomeData();
 
-  return <HomePageClient data={data} />;
+  return <HomePageView data={data} />;
 }

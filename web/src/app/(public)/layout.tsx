@@ -1,4 +1,4 @@
-import PublicLayoutClient from "./PublicLayoutClient";
+import PublicLayoutView from "./layout-view";
 import { serverGet } from "@/lib/server-api";
 
 interface NavItem {
@@ -26,5 +26,5 @@ export default async function PublicLayout({
 }) {
   const navList = await getNavList();
 
-  return <PublicLayoutClient navList={navList}>{children}</PublicLayoutClient>;
+  return <PublicLayoutView navList={navList}>{children}</PublicLayoutView>;
 }

@@ -1,23 +1,26 @@
 import type { NextConfig } from "next";
 import os from "os";
-import path from "path";
-import dotenv from "dotenv";
 
 const cpuCount = Math.max(1, os.cpus().length - 1);
-dotenv.config({ path: path.resolve(process.cwd(), "..", ".env") });
 
 const apiUrl = process.env.API_URL?.trim();
-const serverPort = process.env.SERVER_PORT?.trim();
 
-if (!apiUrl && !serverPort) {
-  throw new Error("缺少环境变量 API_URL 或 SERVER_PORT，无法为前端推导后端地址");
+if (!apiUrl) {
+  throw new Error("缺少环境变量 API_URL，无法为前端配置后端地址");
 }
 
 const nextConfig: NextConfig = {
   output: "standalone",
   env: {
-    ...(apiUrl ? { API_URL: apiUrl } : {}),
-    ...(serverPort ? { SERVER_PORT: serverPort } : {}),
+    API_URL: apiUrl,
+  },
+  async rewrites() {
+    return [
+      {
+        source: "/api/:path*",
+        destination: `${apiUrl.replace(/\/+$/, "")}/api/:path*`,
+      },
+    ];
   },
   turbopack: {
     rules: {

@@ -1,4 +1,4 @@
-import FilmClassifyClient from "../FilmClassifyClient";
+import FilmClassifyPageView from "./view";
 import { serverGet } from "@/lib/server-api";
 
 async function getFilmClassifyData(pid: string) {
@@ -32,5 +32,5 @@ export default async function FilmClassifyPage({
     return null;
   }
 
-  return <FilmClassifyClient data={data} pid={pid} />;
+  return <FilmClassifyPageView data={data} pid={pid} />;
 }

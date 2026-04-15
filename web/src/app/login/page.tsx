@@ -1,5 +1,5 @@
-import LoginPageClient from "./LoginPageClient";
+import LoginPageView from "./view";
 
 export default function LoginPage() {
-  return <LoginPageClient />;
+  return <LoginPageView />;
 }

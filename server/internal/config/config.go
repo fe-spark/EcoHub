@@ -124,13 +124,11 @@ func init() {
 
 func InitConfig() {
 	// 加载监听端口
-	if port := os.Getenv("SERVER_PORT"); port != "" {
+	if port := os.Getenv("PORT"); port != "" {
 		ListenerPort = port
-	} else if lPort := os.Getenv("LISTENER_PORT"); lPort != "" {
-		ListenerPort = lPort
 	}
 	if ListenerPort == "" {
-		panic("环境变量缺失: SERVER_PORT 或 LISTENER_PORT")
+		panic("环境变量缺失: PORT")
 	}
 
 	// 检测开发模式 (ENV=dev 或 IS_DEV_MODE=true)

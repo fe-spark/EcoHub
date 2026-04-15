@@ -94,9 +94,22 @@ flowchart TD
 
 ### 1. 启动后端
 
-在根目录 `.env` 中配置这些变量：
+确保本机已安装：
 
-- `SERVER_PORT` 或 `LISTENER_PORT`
+- Go 1.24+
+- 可访问的 MySQL 8+
+- 可访问的 Redis 7+
+
+在 `server/` 目录中准备环境变量：
+
+```bash
+cd server
+cp .env.example .env
+```
+
+然后在 `server/.env` 中配置这些变量：
+
+- `PORT`
 - `JWT_SECRET`
 - `MYSQL_HOST`
 - `MYSQL_PORT`
@@ -111,34 +124,54 @@ flowchart TD
 启动：
 
 ```bash
-./run-server.sh
+cd server
+set -a
+source ./.env
+set +a
+go run ./cmd/server
 ```
 
-`./run-server.sh` 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
-Windows 原生 `cmd` / PowerShell 不适用这个脚本；这类环境请改用 Docker，或先自行注入 `.env` 中的环境变量后再执行 `go run ./cmd/server`。
+适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
+Windows 原生 `cmd` / PowerShell 可改用 Docker，或先自行注入 `server/.env` 中的环境变量后再执行 `go run ./cmd/server`。
 
-服务监听地址由 `SERVER_PORT` 或 `LISTENER_PORT` 决定。
-如果同时配置了 `SERVER_PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `SERVER_PORT`。
+服务监听地址由 `PORT` 决定。
 
 > `ENV=dev` 或 `IS_DEV_MODE=true` 会开启开发模式。该模式下服务启动时会清空 Redis，并重置 MySQL：有权限时删库重建，没有删库权限时退化为清空现有表。
 
 ### 2. 启动前端
 
-本地开发通常不需要额外配置 `API_URL`。
+确保本机已安装：
 
-前端开发服务端口与后端端口是分开的：
+- Node.js 20+
+- npm
 
-- 后端监听根目录 `.env` 中的 `SERVER_PORT`，默认示例是 `3601`
-- 前端 `./run-web.sh` 默认监听 `3000`
-- 如需修改前端开发端口，可在根目录 `.env` 中额外设置 `WEB_PORT`
+首次运行前先安装依赖：
 
-默认会使用根目录 `.env` 中的 `SERVER_PORT` 推导后端地址，也就是：
-
-```env
-http://127.0.0.1:$SERVER_PORT
+```bash
+cd web
+npm install
 ```
 
-只有在前后端不在同一台机器、或使用 Docker / 容器网络时，才需要显式配置：
+在 `web/` 目录中准备环境变量：
+
+```bash
+cd web
+cp .env.example .env.local
+```
+
+前端开发服务端口与后端 API 地址分别由 `web/.env.local` 中的变量控制：
+
+- `PORT`：前端开发端口，默认示例是 `3000`
+- `API_URL`：前端访问后端的完整地址
+
+本地开发通常配置为：
+
+```env
+PORT=3000
+API_URL=http://127.0.0.1:8080
+```
+
+如果前后端不在同一台机器、或使用 Docker / 容器网络，请显式修改 `API_URL`：
 
 ```env
 API_URL=http://your-api-origin
@@ -146,28 +179,27 @@ API_URL=http://your-api-origin
 
 当前实现下：
 
-- 若配置了 `API_URL`，前端会优先使用它
-- 若未配置，浏览器端会复用当前主机名并切换到根目录 `.env` 中的 `SERVER_PORT`
-- 若未配置，服务端取数会回退到 `http://127.0.0.1:$SERVER_PORT`
-- Docker 场景仍建议显式配置容器内可访问地址
+- 前端必须显式配置 `API_URL`
+- 浏览器端和 SSR 共用同一份 `API_URL`
 - 当前前端直接请求后端绝对地址，不再依赖 Next rewrites
 - 当前公共内容页优先使用 Server Component 取数，后台与播放器仍保留客户端交互模式
 
 启动：
 
 ```bash
-./run-web.sh
+cd web
+npm run dev
 ```
 
-前台入口跟随 Next 开发服务地址，后台固定在 `/manage`，登录页固定在 `/login`。
+Next 会自动加载 `web/.env.local`。前台入口跟随 Next 开发服务地址，后台固定在 `/manage`，登录页固定在 `/login`。
 
 ### 3. 启动顺序
 
 ```mermaid
 flowchart LR
-    A["启动 MySQL / Redis"] --> B["启动 server"]
+    A["准备 MySQL / Redis"] --> B["启动 server"]
     B --> C["确认 API 可用"]
-    C --> D["配置根目录 .env"]
+    C --> D["配置 web/.env.local 中的 API_URL"]
     D --> E["启动 web"]
 ```
 
@@ -184,29 +216,53 @@ flowchart LR
 
 部署后应立即修改默认口令，或直接替换为你自己的账号体系。
 
-## Docker 部署
+## 服务器部署
 
 项目自带 `docker-compose.yml`，会启动：
 
 - `web`：Next.js 前端
 - `server`：Go API 服务
 
-当前 Compose 不包含 MySQL 和 Redis 容器，需要你自行准备外部实例。
+当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `server/.env` 配置。
 
 快速开始：
 
 ```bash
-cp .env.example .env
-docker compose up --build -d
+cp server/.env.example server/.env
+cp web/.env.example web/.env.production
+docker compose --env-file server/.env up --build -d
 ```
 
 对外访问入口以你的 Compose 端口映射或反向代理配置为准，后台路径仍然是 `/manage`。
 
+部署前请确认 `web/.env.production` 中的 `API_URL`：它是 Next 容器访问后端的地址，Docker 默认可直接写 `http://server:8080`。
+
 当前 Compose 的关键行为：
 
-- `server` 服务读取根目录 `.env`
-- `web` 在镜像构建阶段写入 `API_URL`，供浏览器端和 SSR 共用
-- 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml` 和 `web/Dockerfile`
+- `server` 服务读取 `server/.env`
+- `web` 服务在构建期与运行期都使用 `web/.env.production`
+- 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `web/.env.production` 中的 `API_URL`
+- `web/.env.production` 中的 `API_URL` 推荐直接写 Compose 内部服务地址 `http://server:8080`
+- 如果 `server/.env` 指向 Compose 内的 `mysql` / `redis`，你需要显式把它们加入启动命令
+- 如果你已有外部 MySQL / Redis，可直接把 `server/.env` 改成对应地址，并只启动 `server` / `web`
+- 启动 Compose 时建议追加 `--env-file server/.env`，让端口映射跟随后端 `PORT`
+- 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml`、`server/Dockerfile` 和 `web/Dockerfile`
+
+如果你准备复用现有数据库与缓存，而不是启动 Compose 内的 `mysql` / `redis`，推荐做法是：
+
+1. 修改 `server/.env` 中的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
+2. 如果数据库和缓存跑在宿主机，可优先使用 `host.docker.internal`
+3. 启动时只拉起应用服务：
+
+```bash
+docker compose --env-file server/.env up --build -d server web
+```
+
+如果你要同时启用 Compose 内置的 MySQL 和 Redis，请显式执行：
+
+```bash
+docker compose --env-file server/.env up --build -d mysql redis server web
+```
 
 更多内容见 [README-Docker.md](./README-Docker.md)。
 

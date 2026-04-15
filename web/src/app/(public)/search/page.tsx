@@ -1,4 +1,4 @@
-import SearchPageClient from "../SearchPageClient";
+import SearchPageView from "./view";
 import { serverGet } from "@/lib/server-api";
 
 async function getSearchData(keyword: string, current: string) {
@@ -34,5 +34,5 @@ export default async function SearchPage({
   const currentPage = Array.isArray(current) ? current[0] : (current ?? "1");
   const data = await getSearchData(keyword, currentPage);
 
-  return <SearchPageClient data={data} keyword={keyword} current={currentPage} />;
+  return <SearchPageView data={data} keyword={keyword} current={currentPage} />;
 }

@@ -1,11 +1,53 @@
 services:
+  mysql:
+    container_name: Eco-mysql
+    image: mysql:8.4
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root_local_password
+      MYSQL_DATABASE: eco
+      MYSQL_USER: eco
+      MYSQL_PASSWORD: eco_local_password
+    ports:
+      - 3306:3306
+    volumes:
+      - eco-mysql-data:/var/lib/mysql
+    networks:
+      - Eco-network
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    container_name: Eco-redis
+    image: redis:7.4-alpine
+    restart: always
+    command: ["redis-server", "--requirepass", "redis_local_password"]
+    ports:
+      - 6379:6379
+    volumes:
+      - eco-redis-data:/data
+    networks:
+      - Eco-network
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a redis_local_password ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
   web:
     container_name: Eco-web
+    env_file:
+      - ./web/.env.production
     build:
       context: ./web
       dockerfile: Dockerfile
       args:
-        - API_URL=http://server:3601
+        API_URL: http://server:8080
     restart: always
     ports:
       - 3000:3000
@@ -18,19 +60,19 @@ services:
   server:
     container_name: Eco-server
     build:
-      context: .
+      context: ./server
       dockerfile: Dockerfile
     restart: always
     env_file:
-      - .env
+      - ./server/.env
     ports:
-      - 3601:3601
+      - ${PORT:-8080}:${PORT:-8080}
     networks:
       - Eco-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:$${SERVER_PORT}/api/index"]
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:$${PORT}/api/index"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -39,3 +81,7 @@ services:
 networks:
   Eco-network:
     driver: bridge
+
+volumes:
+  eco-mysql-data:
+  eco-redis-data:
