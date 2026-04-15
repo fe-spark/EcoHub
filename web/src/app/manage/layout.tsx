@@ -24,7 +24,7 @@ import {
   UserOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import styles from "./layout.module.less";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 

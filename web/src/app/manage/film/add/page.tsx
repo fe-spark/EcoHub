@@ -28,7 +28,7 @@ import {
   PlayCircleOutlined,
   ContainerOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./page.module.less";
 

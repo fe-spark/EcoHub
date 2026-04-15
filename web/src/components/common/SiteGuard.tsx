@@ -1,11 +1,12 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Result } from "antd";
-import { ApiGet } from "@/lib/api";
+import { ApiGet } from "@/lib/client-api";
 import AppLoading from "@/components/public/Loading";
 
-interface SiteConfig {
+export interface SiteConfig {
   siteName: string;
   domain: string;
   logo: string;
@@ -30,9 +31,16 @@ const SiteConfigContext = createContext<SiteConfigContextType>({
 
 export const useSiteConfig = () => useContext(SiteConfigContext);
 
-export default function SiteGuard({ children }: { children: React.ReactNode }) {
-  const [config, setConfig] = useState<SiteConfig | null>(null);
-  const [loading, setLoading] = useState(true);
+export default function SiteGuard({
+  children,
+  initialConfig,
+}: {
+  children: React.ReactNode;
+  initialConfig: SiteConfig | null;
+}) {
+  const pathname = usePathname();
+  const [config, setConfig] = useState<SiteConfig | null>(initialConfig);
+  const [loading, setLoading] = useState(!initialConfig);
 
   const fetchConfig = async () => {
     try {
@@ -46,8 +54,10 @@ export default function SiteGuard({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
-    fetchConfig();
-  }, []);
+    if (!initialConfig) {
+      void fetchConfig();
+    }
+  }, [initialConfig]);
 
   if (loading) {
     return (
@@ -63,8 +73,8 @@ export default function SiteGuard({ children }: { children: React.ReactNode }) {
   }
 
   // 维护模式拦截 (非管理后台页面)
-  const isManagePage = typeof window !== "undefined" && window.location.pathname.startsWith("/manage");
-  const isLoginPage = typeof window !== "undefined" && window.location.pathname === "/login";
+  const isManagePage = pathname.startsWith("/manage");
+  const isLoginPage = pathname === "/login";
 
   if (config && !config.state && !isManagePage && !isLoginPage) {
     return (

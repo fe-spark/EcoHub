@@ -21,7 +21,7 @@ import {
   CloudUploadOutlined,
   FileImageOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./page.module.less";
 
@@ -187,9 +187,11 @@ export default function FileUploadPage() {
                 {list.map((item) => (
                   <div key={item.ID} className={styles.imageCard}>
                     <div className={styles.thumbnailWrapper}>
+                      {/* 管理端图库使用 AntD PreviewGroup，缩略图维持原生 img 更直接 */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={item.link}
-                        alt=""
+                        alt="图库缩略图"
                         className={styles.thumbnail}
                       />
                     </div>
@@ -219,7 +221,7 @@ export default function FileUploadPage() {
                     </div>
                     {/* AntD Image for PreviewGroup functionality */}
                     <div style={{ display: "none" }}>
-                      <Image src={item.link} />
+                      <Image src={item.link} alt="图库预览图" />
                     </div>
                   </div>
                 ))}

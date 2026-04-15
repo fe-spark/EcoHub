@@ -19,6 +19,8 @@ export default function Footer() {
   return (
     <footer className={styles.footer}>
       <div className={styles.footerInfo}>
+        {/* 站点 logo 来自后台配置的动态地址，这里不强依赖 next/image 的远程配置 */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         {config?.logo && <img src={config.logo} alt="logo" className={styles.footerLogo} />}
         <span className={styles.footerSiteName}>{config?.siteName}</span>
       </div>

@@ -24,7 +24,7 @@ cp .env.example .env
 
 至少需要确认这些字段：
 
-- `PORT` 或 `LISTENER_PORT`
+- `SERVER_PORT` 或 `LISTENER_PORT`
 - `JWT_SECRET`
 - `MYSQL_HOST`
 - `MYSQL_PORT`
@@ -51,7 +51,7 @@ docker compose up --build -d
 ### Web 服务
 
 - 构建时通过 `build.args.API_URL` 写入后端对内地址
-- 该值会在镜像构建阶段注入，并供 rewrites 和 SSR 共用
+- 该值会覆盖本地默认的 `http://127.0.0.1:$SERVER_PORT` 推导结果，并供浏览器端和 SSR 共用
 - 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml` 和 `web/Dockerfile`
 
 ### API 服务

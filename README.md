@@ -94,9 +94,9 @@ flowchart TD
 
 ### 1. 启动后端
 
-在 `server/.env` 中配置这些变量：
+在根目录 `.env` 中配置这些变量：
 
-- `PORT` 或 `LISTENER_PORT`
+- `SERVER_PORT` 或 `LISTENER_PORT`
 - `JWT_SECRET`
 - `MYSQL_HOST`
 - `MYSQL_PORT`
@@ -111,38 +111,52 @@ flowchart TD
 启动：
 
 ```bash
-cd server
-./run-local.sh
+./run-server.sh
 ```
 
-`./run-local.sh` 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
+`./run-server.sh` 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
 Windows 原生 `cmd` / PowerShell 不适用这个脚本；这类环境请改用 Docker，或先自行注入 `.env` 中的环境变量后再执行 `go run ./cmd/server`。
 
-服务监听地址由 `PORT` 或 `LISTENER_PORT` 决定。
-如果同时配置了 `PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `PORT`。
+服务监听地址由 `SERVER_PORT` 或 `LISTENER_PORT` 决定。
+如果同时配置了 `SERVER_PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `SERVER_PORT`。
 
 > `ENV=dev` 或 `IS_DEV_MODE=true` 会开启开发模式。该模式下服务启动时会清空 Redis，并重置 MySQL：有权限时删库重建，没有删库权限时退化为清空现有表。
 
 ### 2. 启动前端
 
-在 `web/.env.local` 中配置：
+本地开发通常不需要额外配置 `API_URL`。
+
+前端开发服务端口与后端端口是分开的：
+
+- 后端监听根目录 `.env` 中的 `SERVER_PORT`，默认示例是 `3601`
+- 前端 `./run-web.sh` 默认监听 `3000`
+- 如需修改前端开发端口，可在根目录 `.env` 中额外设置 `WEB_PORT`
+
+默认会使用根目录 `.env` 中的 `SERVER_PORT` 推导后端地址，也就是：
+
+```env
+http://127.0.0.1:$SERVER_PORT
+```
+
+只有在前后端不在同一台机器、或使用 Docker / 容器网络时，才需要显式配置：
 
 ```env
 API_URL=http://your-api-origin
 ```
 
-`API_URL` 必填，且必须指向后端服务入口。当前实现下：
+当前实现下：
 
-- 运行 `next dev` 时如果缺失会直接报错
-- 运行 `next build` 时如果缺失也会直接报错
-- SSR 请求同样依赖它
+- 若配置了 `API_URL`，前端会优先使用它
+- 若未配置，浏览器端会复用当前主机名并切换到根目录 `.env` 中的 `SERVER_PORT`
+- 若未配置，服务端取数会回退到 `http://127.0.0.1:$SERVER_PORT`
+- Docker 场景仍建议显式配置容器内可访问地址
+- 当前前端直接请求后端绝对地址，不再依赖 Next rewrites
+- 当前公共内容页优先使用 Server Component 取数，后台与播放器仍保留客户端交互模式
 
 启动：
 
 ```bash
-cd web
-npm install
-npm run dev
+./run-web.sh
 ```
 
 前台入口跟随 Next 开发服务地址，后台固定在 `/manage`，登录页固定在 `/login`。
@@ -153,7 +167,7 @@ npm run dev
 flowchart LR
     A["启动 MySQL / Redis"] --> B["启动 server"]
     B --> C["确认 API 可用"]
-    C --> D["配置 web/.env.local"]
+    C --> D["配置根目录 .env"]
     D --> E["启动 web"]
 ```
 
@@ -191,7 +205,7 @@ docker compose up --build -d
 当前 Compose 的关键行为：
 
 - `server` 服务读取根目录 `.env`
-- `web` 在镜像构建阶段写入 `API_URL`，供 rewrites 和 SSR 共用
+- `web` 在镜像构建阶段写入 `API_URL`，供浏览器端和 SSR 共用
 - 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml` 和 `web/Dockerfile`
 
 更多内容见 [README-Docker.md](./README-Docker.md)。
