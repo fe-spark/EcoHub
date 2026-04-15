@@ -5,44 +5,28 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmrepo "server/internal/repository/film"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-// 简易内存映射：仅用于爬虫入库等批量场景的高频查找，避免过多的数据库 IO
-var (
-	idToPid = make(map[int64]int64)
-	catMu   sync.RWMutex
-)
-
 func buildCategoryStableKey(pid int64, name string) string {
-	name = strings.TrimSpace(name)
-	if pid == 0 {
-		return fmt.Sprintf("root:%s", name)
-	}
-	parentKey := GetCategoryStableKeyByID(pid)
-	if parentKey == "" {
-		return fmt.Sprintf("sub:%d:%s", pid, name)
-	}
-	return fmt.Sprintf("%s/%s", parentKey, name)
+	return support.BuildCategoryStableKey(pid, name)
+}
+
+func BuildCategoryStableKey(pid int64, name string) string {
+	return support.BuildCategoryStableKey(pid, name)
 }
 
 func GetCategoryStableKeyByID(id int64) string {
-	if id <= 0 {
-		return ""
-	}
-	var category model.Category
-	if err := db.Mdb.Select("stable_key").Where("id = ?", id).First(&category).Error; err != nil {
-		return ""
-	}
-	return category.StableKey
+	return support.GetCategoryStableKeyByID(id)
 }
 
 func GetCategoryByID(id int64) *model.Category {
@@ -69,19 +53,7 @@ func GetCategoryByStableKey(stableKey string) *model.Category {
 }
 
 func ResolveCategoryID(id int64) int64 {
-	if id <= 0 {
-		return id
-	}
-	category := GetCategoryByID(id)
-	if category == nil {
-		return id
-	}
-	if category.StableKey != "" {
-		if current := GetCategoryByStableKey(category.StableKey); current != nil {
-			return current.Id
-		}
-	}
-	return category.Id
+	return support.ResolveCategoryID(id)
 }
 
 func normalizeCategoryStableKeys(tx *gorm.DB) error {
@@ -110,107 +82,39 @@ func normalizeCategoryStableKeys(tx *gorm.DB) error {
 }
 
 func touchCategoryVersion() {
-	db.Rdb.Set(db.Cxt, config.CategoryVersionKey, time.Now().UnixNano(), 0)
+	support.TouchCategoryVersion()
 }
 
 func GetCategoryVersion() string {
-	version, err := db.Rdb.Get(db.Cxt, config.CategoryVersionKey).Result()
-	if err == nil && version != "" {
-		return version
-	}
-	version = fmt.Sprintf("%d", time.Now().UnixNano())
-	db.Rdb.Set(db.Cxt, config.CategoryVersionKey, version, 0)
-	return version
+	return support.GetCategoryVersion()
 }
 
 func GetVersionedIndexPageCacheKey() string {
-	return fmt.Sprintf("%s:v%s", config.IndexPageCacheKey, GetCategoryVersion())
+	return support.GetVersionedIndexPageCacheKey()
 }
 
 func ClearIndexPageCache() {
-	iter := db.Rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
+	support.ClearIndexPageCache()
 }
 
 // RefreshCategoryCache 用于重新加载基础映射映射到内存
 func RefreshCategoryCache() {
-	var all []model.Category
-	db.Mdb.Find(&all)
-
-	newPidMap := make(map[int64]int64)
-
-	for _, c := range all {
-		item := c
-		newPidMap[item.Id] = item.Pid
-		SetCategoryNameCache(item.Id, item.Name)
-	}
-
-	catMu.Lock()
-	idToPid = newPidMap
-	catMu.Unlock()
+	support.RefreshCategoryCache()
 }
 
 // GetRootId 获取分类的顶级根 ID (通过内存递归映射)
 func GetRootId(id int64) int64 {
-	if id == 0 {
-		return 0
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	curr := id
-	// 为防止循环引用死循环，最多查找 5 层 (目前本项目只有 2 层)
-	for range [5]int{} {
-		p, ok := idToPid[curr]
-		if !ok || p == 0 {
-			return curr
-		}
-		curr = p
-	}
-	return curr
+	return support.GetRootId(id)
 }
 
 // IsRootCategory 判断是否为根分类 (Pid 为 0 的大类)
 func IsRootCategory(id int64) bool {
-	if id == 0 {
-		return false
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	p, ok := idToPid[id]
-	return ok && p == 0
+	return support.IsRootCategory(id)
 }
 
 // GetParentId 获取父类 ID
 func GetParentId(id int64) int64 {
-	if id == 0 {
-		return 0
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	return idToPid[id]
+	return support.GetParentId(id)
 }
 
 // GetRootIdBySourcePid 通过采集站大类原始 ID 在本地大类列表中按顺序匹配
@@ -471,7 +375,7 @@ func sortRootCategories(children []*model.CategoryTree) {
 // ClearCategoryCache 清除分类相关的所有缓存 (Redis + 内存映射)
 func ClearCategoryCache() {
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
-	ClearAllSearchTagsCache()
+	filmrepo.ClearAllSearchTagsCache()
 	RefreshCategoryCache()
 }
 

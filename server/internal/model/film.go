@@ -217,7 +217,6 @@ type SearchVo struct {
 	Area      string    `json:"area"`      // 地区
 	Language  string    `json:"language"`  // 语言
 	Year      int64     `json:"year"`      // 年份
-	Remarks   string    `json:"remarks"`   // 完结 | 未完结
 	BeginTime int64     `json:"beginTime"` // 更新时间戳起始值
 	EndTime   int64     `json:"endTime"`   // 更新时间戳结束值
 	Paging    *dto.Page `json:"paging"`    // 分页参数

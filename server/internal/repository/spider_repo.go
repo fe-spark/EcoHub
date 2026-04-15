@@ -117,7 +117,6 @@ func DelFilmTask(id string) {
 	})
 }
 
-
 // ExistTask 是否存在定时任务相关信息
 func ExistTask() bool {
 	var count int64
@@ -224,7 +223,6 @@ func ClearAllCollectSource() {
 		log.Println("TRUNCATE table film_sources Error:", err)
 	}
 }
-
 
 // ExistCollectSourceList 查询是否已经存在站点 list 相关数据
 func ExistCollectSourceList() bool {
