@@ -14,6 +14,7 @@ import (
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider/conver"
 	"server/internal/utils"
 
@@ -272,7 +273,7 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 			}
 		}
 	case model.SlaveCollect:
-		if err = repository.SaveSitePlayList(s.Id, list); err != nil {
+		if err = filmrepo.SaveSitePlayList(s.Id, list); err != nil {
 			log.Println("SaveSitePlayList Error: ", err)
 		}
 	}
@@ -313,7 +314,7 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 		log.Println("GetMovieDetail Error: ", err)
 		return
 	}
-	saveCollectedFilm(s, list, repository.SaveDetails)
+	saveCollectedFilm(s, list, filmrepo.SaveDetails)
 }
 
 // collectFilmById 采集指定ID的影片信息
@@ -327,7 +328,7 @@ func collectFilmById(ids string, s *model.FilmSource) {
 		return
 	}
 	saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
-		return repository.SaveDetail(id, l[0])
+		return filmrepo.SaveDetail(id, l[0])
 	})
 }
 
@@ -422,7 +423,7 @@ func AutoCollect(h int) {
 
 // ClearSpider 删除所有已采集的影片信息
 func ClearSpider() {
-	repository.FilmZero()
+	filmrepo.FilmZero()
 }
 
 // CollectSingleFilm 通过影片唯一ID获取影片信息 (多源并行同步)
@@ -476,7 +477,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	}
 
-	saveCollectedFilm(s, list, repository.SaveDetails)
+	saveCollectedFilm(s, list, filmrepo.SaveDetails)
 	repository.ChangeRecord(fr, 0)
 }
 

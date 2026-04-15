@@ -33,13 +33,12 @@ flowchart LR
 推荐直接使用项目内脚本：
 
 ```bash
-cd server
-./run-local.sh
+./run-server.sh
 ```
 
 脚本会：
 
-- 加载 `server/.env`
+- 加载根目录 `.env`
 - 执行 `go run ./cmd/server`
 
 适用范围：
@@ -53,22 +52,22 @@ cd server
 ```bash
 cd server
 set -a
-source .env
+source ../.env
 set +a
 go run ./cmd/server
 ```
 
-服务监听地址由 `PORT` 或 `LISTENER_PORT` 决定。
-如果同时配置了 `PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `PORT`。
+服务监听地址由 `SERVER_PORT` 或 `LISTENER_PORT` 决定。
+如果同时配置了 `SERVER_PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `SERVER_PORT`。
 
 ## 环境变量
 
-本地运行使用 `server/.env`，Docker 运行使用根目录 `.env`。字段保持一致。
+本地运行和 Docker 运行都统一使用根目录 `.env`。字段保持一致。
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `PORT` | 条件必填 | 服务监听端口，优先级高于 `LISTENER_PORT` |
-| `LISTENER_PORT` | 条件必填 | 当未设置 `PORT` 时使用的监听端口 |
+| `SERVER_PORT` | 条件必填 | 服务监听端口，优先级高于 `LISTENER_PORT` |
+| `LISTENER_PORT` | 条件必填 | 当未设置 `SERVER_PORT` 时使用的监听端口 |
 | `JWT_SECRET` | 是 | JWT 签名密钥，未配置会直接启动失败 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
