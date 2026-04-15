@@ -1,4 +1,4 @@
-import FilmClassifySearchClient from "../FilmClassifySearchClient";
+import FilmClassifySearchPageView from "./view";
 import { serverGet } from "@/lib/server-api";
 
 async function getFilmClassifySearchData(params: Record<string, string>) {
@@ -34,5 +34,5 @@ export default async function FilmClassifySearchPage({
     return null;
   }
 
-  return <FilmClassifySearchClient data={data} currentParams={currentParams} />;
+  return <FilmClassifySearchPageView data={data} currentParams={currentParams} />;
 }

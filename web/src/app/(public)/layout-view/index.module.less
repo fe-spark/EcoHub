@@ -1,0 +1,29 @@
+.layoutWrapper {
+  background: var(--public-page-bg);
+  color: var(--public-text-1);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.publicMain {
+  flex: 1;
+  width: 100%;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 100px 40px 40px;
+  position: relative;
+}
+
+@media (max-width: 768px) {
+  .publicMain {
+    padding-top: 76px;
+  }
+}
+
+@media (max-width: 576px) {
+  .publicMain {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+}

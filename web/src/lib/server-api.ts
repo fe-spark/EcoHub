@@ -8,19 +8,14 @@ export interface ApiResponse<T = any> {
 
 function getServerApiOrigin(): string {
   const apiUrl = process.env.API_URL?.trim();
-  if (apiUrl) {
-    return apiUrl.replace(/\/+$/, "");
+  if (!apiUrl) {
+    throw new Error("缺少环境变量 API_URL，无法推导服务端请求地址");
   }
 
-  const serverPort = process.env.SERVER_PORT?.trim();
-  if (!serverPort) {
-    throw new Error("缺少环境变量 SERVER_PORT 或 API_URL，无法推导服务端请求地址");
-  }
-
-  return `http://127.0.0.1:${serverPort}`;
+  return apiUrl.replace(/\/+$/, "");
 }
 
-function buildApiUrl(path: string, params?: Record<string, string | number | undefined>) {
+function buildApiUrl(path: string, params?: Record<string, string | number | undefined>): string {
   const url = new URL(`/api${path}`, getServerApiOrigin());
 
   if (params) {

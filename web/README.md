@@ -38,49 +38,63 @@ cd web
 npm install
 ```
 
-### 2. 配置 `API_URL`
+### 2. 配置 API 地址
 
-`API_URL` 现在是可选项。
+前端现在只要求显式配置 `API_URL`。
 
 前端开发服务端口与后端 API 端口不是同一个概念：
 
-- 根目录 `.env` 中的 `SERVER_PORT` 用于后端 API
-- `./run-web.sh` 默认把 Next 开发服务启动在 `3000`
-- 如需自定义前端开发端口，可在根目录 `.env` 中设置 `WEB_PORT`
+- `web/.env.local` 中的 `PORT` 用于 Next 开发服务
+- `web/.env.local` 中的 `API_URL` 用于 Next 转发浏览器端 `/api` 请求
 
-本地开发默认会根据根目录 `.env` 中的 `SERVER_PORT` 注入前端运行时，并据此推导后端地址：
+推荐先复制示例文件：
 
-```env
-http://127.0.0.1:$SERVER_PORT
+```bash
+cd web
+cp .env.example .env.local
 ```
 
-只有在 Docker、反向代理或跨机器访问时，才需要显式配置：
+本地开发常见配置：
 
 ```env
-API_URL=http://your-api-origin
+PORT=3000
+API_URL=http://127.0.0.1:8080
 ```
 
-- 配置后会优先使用 `API_URL`
-- 未配置时，浏览器端会复用当前页面的协议和主机名，只切换到根目录 `.env` 中的 `SERVER_PORT`
-- 未配置时，服务端取数会回退到 `http://127.0.0.1:$SERVER_PORT`
+如果是 Docker、反向代理或跨机器访问，请改成实际可访问地址：
+
+```env
+API_URL=http://server:8080
+```
+
 - 当前实现已拆分 `server-api` 与 `client-api`，分别服务于服务端取数和客户端交互
+- 浏览器端默认请求当前站点下的 `/api/*`，再由 Next rewrite 转发到 `API_URL`
+- 大多数情况下只需要配置 `API_URL`
+- Docker 场景下，`API_URL` 推荐直接写容器内可访问地址，例如 `http://server:8080`
 
 ### 3. 启动开发环境
 
 ```bash
-./run-web.sh
+cd web
+npm run dev
 ```
 
-前台入口跟随 Next 开发服务地址，后台路径固定为 `/manage`，登录页为 `/login`。
+Next 会自动加载 `web/.env.local`。
 
-## `API_URL` 在当前实现里的作用
+### 4. 启动成功后
+
+- 默认访问地址是 `http://127.0.0.1:3000`
+- 后台地址固定为 `/manage`
+- 登录页固定为 `/login`
+- 如果后端地址改了，记得同步修改 `web/.env.local` 中的 `API_URL`
+
+## API 地址在当前实现里的作用
 
 前端代码中的请求会按职责分层后走后端绝对地址：
 
 - 公共内容页优先在 Server Component 中通过 `src/lib/server-api.ts` 取数
 - 客户端交互与后台请求通过 `src/lib/client-api.ts` 发起
-- 若配置了 `API_URL`，服务端与浏览器端都会优先使用它
-- 若未配置，浏览器端复用当前主机名，服务端回退到 `http://127.0.0.1:$SERVER_PORT`
+- `API_URL` 同时用于 Next 转发浏览器端请求和服务端取数
 
 ```mermaid
 sequenceDiagram
@@ -88,7 +102,8 @@ sequenceDiagram
     participant Next as Next.js
     participant API as Go API
 
-    Browser->>API: 请求当前主机名或 API_URL 对应地址 + /api/index
+    Browser->>Next: 请求当前站点 /api/index
+    Next->>API: 转发到 API_URL 对应地址
     API-->>Browser: 返回 JSON
 ```
 
@@ -115,9 +130,7 @@ web/
 - `manage`、`login`、`play` 等强交互页面继续使用 Client Component
 - `src/lib/server-api.ts` 负责服务端读接口
 - `src/lib/client-api.ts` 负责浏览器端交互请求与错误处理
-- 若配置了 `API_URL`，则优先使用它
-- 若未配置，浏览器端默认复用当前主机名并切换到根目录 `.env` 中的 `SERVER_PORT`
-- 若未配置，服务端默认使用 `http://127.0.0.1:$SERVER_PORT`
+- `API_URL` 为必填项
 
 ### 后台访问控制
 
@@ -136,13 +149,38 @@ web/
 ## 常用命令
 
 ```bash
-./run-web.sh
+cd web
+npm run dev
 
 cd web
 npm run build
 npm run start
 npm run lint
 ```
+
+## Docker 运行
+
+如果你通过仓库根目录的 Compose 启动前端，请在根目录执行：
+
+```bash
+docker compose --env-file server/.env up --build -d web
+```
+
+如果还要同时启动后端：
+
+```bash
+docker compose --env-file server/.env up --build -d server web
+```
+
+如果要连同 Compose 内置的 MySQL / Redis 一起启动：
+
+```bash
+docker compose --env-file server/.env up --build -d mysql redis server web
+```
+
+Docker 场景下请重点确认 `web/.env.production`：
+
+- `API_URL`：Next 容器可访问的后端地址，默认可直接写 `http://server:8080`
 
 ## 当前约束
 

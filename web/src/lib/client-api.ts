@@ -6,23 +6,8 @@ export interface ApiResponse<T = any> {
   data: T;
 }
 
-function getClientApiOrigin(): string {
-  const apiUrl = process.env.API_URL?.trim();
-  if (apiUrl) {
-    return apiUrl.replace(/\/+$/, "");
-  }
-
-  const serverPort = process.env.SERVER_PORT?.trim();
-  if (!serverPort) {
-    throw new Error("缺少环境变量 SERVER_PORT 或 API_URL，无法推导前端请求地址");
-  }
-
-  const { protocol, hostname } = window.location;
-  return `${protocol}//${hostname}:${serverPort}`;
-}
-
 const instance: AxiosInstance = axios.create({
-  baseURL: `${getClientApiOrigin()}/api`,
+  baseURL: "/api",
   timeout: 80000,
   withCredentials: true,
 });

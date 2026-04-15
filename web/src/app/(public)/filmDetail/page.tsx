@@ -1,4 +1,4 @@
-import FilmDetailClient from "../FilmDetailClient";
+import FilmDetailPageView from "./view";
 import { serverGet } from "@/lib/server-api";
 
 function normalizeDetailContent(content: string) {
@@ -49,5 +49,5 @@ export default async function FilmDetailPage({
     return null;
   }
 
-  return <FilmDetailClient data={data} link={filmLink} />;
+  return <FilmDetailPageView data={data} link={filmLink} />;
 }

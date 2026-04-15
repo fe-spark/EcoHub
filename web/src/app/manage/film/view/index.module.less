@@ -1,0 +1,69 @@
+.container {
+  padding: 0;
+  background: transparent;
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  background: var(--ant-color-bg-container);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.filterItem {
+  width: 160px;
+}
+
+.searchInput {
+  width: 250px;
+}
+
+.tableContainer {
+  background: var(--ant-color-bg-container);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tableTitleWarp {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.paginationContainer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 16px;
+  background: var(--ant-color-bg-container);
+}
+
+.filmName {
+  font-weight: 500;
+  cursor: pointer;
+  color: var(--ant-color-primary);
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.syncIcon {
+  &.syncing {
+    animation: rotate 1s linear infinite;
+  }
+}
+
+@keyframes rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}

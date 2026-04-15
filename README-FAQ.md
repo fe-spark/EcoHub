@@ -50,19 +50,19 @@
 - 浏览器端现在直接请求后端绝对地址
 - 服务端渲染请求也需要同一套绝对地址
 
-本地开发时，前端现在会优先使用根目录 `.env` 中的 `SERVER_PORT` 推导请求地址，因此通常不需要额外配置 `API_URL`。
+现在前端改为始终显式使用 `web/.env.local` 或 `web/.env.production` 中的 `API_URL`。
 
-但 Docker 场景不同：容器里的 `127.0.0.1` 指向的是 `web` 容器自身，不是 `server` 容器，所以仍然需要显式写成类似 `http://server:3601` 的容器内地址。
+但 Docker 场景不同：容器里的 `127.0.0.1` 指向的是 `web` 容器自身，不是 `server` 容器，所以仍然需要显式写成类似 `http://server:8080` 的容器内地址。
 
 ## 为什么 `web` 和 `server` 会端口冲突
 
-如果直接把根目录 `.env` 全量导出给前端，而其中又只有 `SERVER_PORT=3601`，同时前端启动脚本没有显式指定自己的开发端口，那么 Next 开发服务也可能尝试监听 `3601`，从而和后端冲突。
+如果前端和后端都被错误地配置成相同端口，例如 `server/.env` 里写了 `PORT=8080`，同时 `web/.env.local` 里也写了 `PORT=8080`，就会产生冲突。
 
 当前仓库的约定是：
 
-- `SERVER_PORT` 只给后端 API 使用
-- `./run-web.sh` 默认使用 `3000`
-- 如需修改前端开发端口，请额外设置 `WEB_PORT`
+- `server/.env` 中的 `PORT` 只给后端 API 使用
+- `PORT` 只给前端开发服务使用
+- 推荐前端默认使用 `3000`
 
 ## 为什么登录态用 cookie，而不是 localStorage
 
@@ -107,7 +107,7 @@
 
 - `/api/config/basic` 目前仍是公开接口
 - 前端 `eslint` 仍有图片相关 warning
-- 当前 Compose 只编排 Web 和 API，不包含 MySQL / Redis
+- 当前 Compose 已包含可选的 MySQL / Redis 服务；是否启动取决于你的启动命令与 `server/.env` 配置
 
 ## 文档入口
 

@@ -30,44 +30,67 @@ flowchart LR
 
 ## 本地启动
 
-推荐直接使用项目内脚本：
+### 1. 准备环境变量
 
 ```bash
-./run-server.sh
+cd server
+cp .env.example .env
 ```
 
-脚本会：
+按你的实际环境修改 `server/.env`，至少需要确认：
 
-- 加载根目录 `.env`
-- 执行 `go run ./cmd/server`
+- `PORT`
+- `JWT_SECRET`
+- `MYSQL_HOST`
+- `MYSQL_PORT`
+- `MYSQL_USER`
+- `MYSQL_PASSWORD`
+- `MYSQL_DBNAME`
+- `REDIS_HOST`
+- `REDIS_PORT`
+- `REDIS_PASSWORD`
+- `REDIS_DB`
 
-适用范围：
-
-- 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境
-- 不适用于 Windows 原生 `cmd` / PowerShell
-- Windows 原生环境建议改用 Docker，或先自行注入 `.env` 中的环境变量后再执行 `go run ./cmd/server`
-
-如果你想手动启动：
+### 2. 启动服务
 
 ```bash
 cd server
 set -a
-source ../.env
+source ./.env
 set +a
 go run ./cmd/server
 ```
 
-服务监听地址由 `SERVER_PORT` 或 `LISTENER_PORT` 决定。
-如果同时配置了 `SERVER_PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `SERVER_PORT`。
+这会加载 `server/.env` 并启动 Go 服务。
+
+### 3. 启动成功后
+
+- 服务监听端口由 `PORT` 决定，默认是 `8080`
+- 首次启动会初始化数据库表、默认站点配置和内置账号
+- 如果数据库或 Redis 不可达，服务会在启动阶段直接报错退出
+
+适用范围：
+
+- 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境
+- Windows 原生环境建议改用 Docker，或先自行注入 `server/.env` 中的环境变量后再执行 `go run ./cmd/server`
+
+服务监听地址由 `PORT` 决定。
 
 ## 环境变量
 
-本地运行和 Docker 运行都统一使用根目录 `.env`。字段保持一致。
+本地运行和 Docker 运行都使用 `server/.env`。字段保持一致。
+
+如果你在 Docker 中只启动 `server` / `web`，而复用外部 MySQL / Redis，请把 `MYSQL_HOST` / `REDIS_HOST` 配成你的真实地址；若数据库和缓存运行在 Docker 宿主机上，可优先使用 `host.docker.internal`。
+
+`JWT_SECRET` 推荐使用随机高强度值，可通过下面的命令生成：
+
+```bash
+openssl rand -hex 32
+```
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SERVER_PORT` | 条件必填 | 服务监听端口，优先级高于 `LISTENER_PORT` |
-| `LISTENER_PORT` | 条件必填 | 当未设置 `SERVER_PORT` 时使用的监听端口 |
+| `PORT` | 是 | 服务监听端口 |
 | `JWT_SECRET` | 是 | JWT 签名密钥，未配置会直接启动失败 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
@@ -210,6 +233,26 @@ server/
 ```bash
 cd server
 go test ./...
+```
+
+## Docker 运行
+
+如果你通过仓库根目录的 Compose 启动服务端，请在根目录执行：
+
+```bash
+docker compose --env-file server/.env up --build -d server
+```
+
+如果还要同时启动前端：
+
+```bash
+docker compose --env-file server/.env up --build -d server web
+```
+
+如果要连同 Compose 内置的 MySQL / Redis 一起启动：
+
+```bash
+docker compose --env-file server/.env up --build -d mysql redis server web
 ```
 
 如果本地 Go 缓存目录受限，可显式指定：

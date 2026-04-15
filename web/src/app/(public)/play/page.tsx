@@ -1,4 +1,4 @@
-import PlayPageClient from "./PlayPageClient";
+import PlayPageView from "./view";
 import { serverGet } from "@/lib/server-api";
 
 async function getPlayData(
@@ -53,7 +53,7 @@ export default async function PlayPage({
   }
 
   return (
-    <PlayPageClient
+    <PlayPageView
       data={data}
       filmId={filmId}
       initialTime={initialTime}
