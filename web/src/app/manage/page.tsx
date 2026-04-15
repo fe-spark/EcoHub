@@ -2,7 +2,7 @@
 
 import React, { useEffect } from "react";
 import { Card, Typography } from "antd";
-import { ApiGet } from "@/lib/api";
+import { ApiGet } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 

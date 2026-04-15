@@ -24,7 +24,7 @@ import {
   LockOutlined,
   MailOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 
 const { Option } = Select;
 

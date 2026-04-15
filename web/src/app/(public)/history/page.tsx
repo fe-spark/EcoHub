@@ -55,6 +55,8 @@ export default function HistoryPage() {
         <div className={styles.historyList}>
           {historyList.map((item) => (
             <div key={item.id} className={styles.historyItem}>
+              {/* 观看记录封面来自历史缓存中的动态地址，这里保持原生 img */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={item.picture || FALLBACK_IMG}
                 className={styles.poster}

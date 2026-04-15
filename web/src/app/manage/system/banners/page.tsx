@@ -24,7 +24,7 @@ import {
   PlusCircleOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 
 const { Title, Text } = Typography;

@@ -27,7 +27,7 @@ import {
   FilterOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import styles from "./page.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -63,7 +63,6 @@ export default function FilmListPage() {
     area: "",
     language: "",
     year: "",
-    remarks: "",
     beginTime: "",
     endTime: "",
   });
@@ -74,7 +73,6 @@ export default function FilmListPage() {
     Area: [],
     Language: [],
     year: [],
-    remarks: [],
     tags: {},
   });
 

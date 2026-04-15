@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { Form, Input, Switch, Button, Typography, Spin, Space, Card, Row, Col } from "antd";
 import { SettingOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import styles from "./page.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 

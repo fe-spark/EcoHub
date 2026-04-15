@@ -19,7 +19,7 @@ import {
   ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
-import { ApiGet, ApiPost } from "@/lib/api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import styles from "./page.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 
