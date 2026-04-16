@@ -47,22 +47,22 @@
 
 因为：
 
-- 浏览器端现在直接请求后端绝对地址
-- 服务端渲染请求也需要同一套绝对地址
+- 浏览器端会先请求当前站点下的 `/api/*`
+- 服务端渲染请求也需要一套明确的后端地址
 
-现在前端改为始终显式使用 `web/.env.local` 或 `web/.env.production` 中的 `API_URL`。
+现在前端会显式使用 `API_URL`：目录内单独运行 `web` 时来自 `web/.env.local`，Compose 运行时来自 `docker-compose.yml` 注入。
 
 但 Docker 场景不同：容器里的 `127.0.0.1` 指向的是 `web` 容器自身，不是 `server` 容器，所以仍然需要显式写成类似 `http://server:8080` 的容器内地址。
 
 ## 为什么 `web` 和 `server` 会端口冲突
 
-如果前端和后端都被错误地配置成相同端口，例如 `server/.env` 里写了 `PORT=8080`，同时 `web/.env.local` 里也写了 `PORT=8080`，就会产生冲突。
+如果你本地单独运行 `web` 时又手动把 Next 开发端口改成了 `8080`，同时 `server/.env` 里后端也监听 `8080`，就会产生冲突。
 
 当前仓库的约定是：
 
 - `server/.env` 中的 `PORT` 只给后端 API 使用
-- `PORT` 只给前端开发服务使用
-- 推荐前端默认使用 `3000`
+- `web` 本地开发默认使用 Next 的 `3000`
+- Compose 部署时固定暴露 `web:3000` 和 `server:8080`
 
 ## 为什么登录态用 cookie，而不是 localStorage
 
@@ -71,20 +71,6 @@
 - 更适合服务端控制登录态
 - 能减少前端自己维护 token 的复杂度
 - 更符合当前 Next + Go 分离项目的实际使用方式
-
-## 为什么服务启动时会清库或清 Redis
-
-检查后端环境变量：
-
-- `ENV=dev`
-- `IS_DEV_MODE=true`
-
-只要命中其中之一，开发模式就会启用。当前实现里，开发模式会：
-
-- 清空 Redis
-- 尝试重建数据库
-
-如果数据库用户权限不足，服务会直接报错退出，而不是静默降级。
 
 ## 为什么 Docker 环境连不上宿主机数据库
 
@@ -107,7 +93,7 @@
 
 - `/api/config/basic` 目前仍是公开接口
 - 前端 `eslint` 仍有图片相关 warning
-- 当前 Compose 已包含可选的 MySQL / Redis 服务；是否启动取决于你的启动命令与 `server/.env` 配置
+- 当前 Compose 已包含可选的 MySQL / Redis 服务；是否启动取决于你的启动命令与 `docker-compose.yml` 中的配置
 
 ## 文档入口
 

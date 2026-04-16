@@ -55,13 +55,10 @@ cp .env.example .env
 
 ```bash
 cd server
-set -a
-source ./.env
-set +a
 go run ./cmd/server
 ```
 
-这会加载 `server/.env` 并启动 Go 服务。
+服务启动时会自动加载当前目录下的 `server/.env`。
 
 ### 3. 启动成功后
 
@@ -78,9 +75,11 @@ go run ./cmd/server
 
 ## 环境变量
 
-本地运行和 Docker 运行都使用 `server/.env`。字段保持一致。
+本地直接运行 `server` 时，服务会自动读取 `server/.env`。
 
-如果你在 Docker 中只启动 `server` / `web`，而复用外部 MySQL / Redis，请把 `MYSQL_HOST` / `REDIS_HOST` 配成你的真实地址；若数据库和缓存运行在 Docker 宿主机上，可优先使用 `host.docker.internal`。
+通过仓库根目录的 `docker-compose.yml` 运行时，服务端环境变量由 Compose 直接注入，不依赖 `server/.env`。
+
+如果你在本地直跑 `server`，而 MySQL / Redis 运行在 Docker 宿主机或其他机器上，请把 `MYSQL_HOST` / `REDIS_HOST` 配成真实可达地址；在支持的 Docker Desktop 环境下，也可以使用 `host.docker.internal`。
 
 `JWT_SECRET` 推荐使用随机高强度值，可通过下面的命令生成：
 
@@ -101,19 +100,6 @@ openssl rand -hex 32
 | `REDIS_PORT` | 是 | Redis 端口 |
 | `REDIS_PASSWORD` | 否 | Redis 密码 |
 | `REDIS_DB` | 否 | Redis DB，默认 `0` |
-| `ENV` | 否 | 设置为 `dev` 时启用开发模式 |
-| `IS_DEV_MODE` | 否 | 设置为 `true` 时同样启用开发模式 |
-
-### 开发模式说明
-
-`ENV=dev` 或 `IS_DEV_MODE=true` 时：
-
-- 启动时会清空 Redis
-- 启动时会重置 MySQL
-- 有删库建库权限时执行物理重建
-- 没有删库权限时退化为清空现有表
-
-这适合本地调试，不适合保留数据的环境。
 
 ## 启动后初始化
 
@@ -240,19 +226,19 @@ go test ./...
 如果你通过仓库根目录的 Compose 启动服务端，请在根目录执行：
 
 ```bash
-docker compose --env-file server/.env up --build -d server
+docker compose up --build -d server
 ```
 
 如果还要同时启动前端：
 
 ```bash
-docker compose --env-file server/.env up --build -d server web
+docker compose up --build -d server web
 ```
 
 如果要连同 Compose 内置的 MySQL / Redis 一起启动：
 
 ```bash
-docker compose --env-file server/.env up --build -d mysql redis server web
+docker compose up --build -d mysql redis server web
 ```
 
 如果本地 Go 缓存目录受限，可显式指定：

@@ -2,13 +2,9 @@ package db
 
 import (
 	"database/sql"
-	"errors"
-	"fmt"
 	"server/internal/config"
-	"strings"
 	"time"
 
-	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -31,32 +27,7 @@ func InitMysql() (err error) {
 		defer manageConn.Close()
 	}
 
-	if config.IsDevMode {
-		switch {
-		case userErr == nil:
-			if manageErr == nil {
-				if err = PhysicalRebuild(manageConn, config.MysqlDBName); err == nil {
-					break
-				}
-				if isMySQLPermissionError(err) {
-					return fmt.Errorf("开发模式数据库重置失败: 当前账号缺少删库/建库权限，请关闭 ENV=dev 或改用有权限账号: %w", err)
-				}
-			}
-			if err = LogicalWipe(userConn); err != nil {
-				if isMySQLPermissionError(err) {
-					return fmt.Errorf("开发模式数据库重置失败: 当前账号缺少清空表权限，请关闭 ENV=dev 或改用有权限账号: %w", err)
-				}
-				return err
-			}
-		default:
-			if manageErr != nil {
-				return manageErr
-			}
-			if err = EnsureDatabase(manageConn, config.MysqlDBName); err != nil {
-				return err
-			}
-		}
-	} else if userErr != nil {
+	if userErr != nil {
 		if manageErr != nil {
 			return userErr
 		}
@@ -108,21 +79,4 @@ func openSQLConn(dsn string) (*sql.DB, error) {
 		return nil, err
 	}
 	return conn, nil
-}
-
-func isMySQLPermissionError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	var mysqlErr *mysqlDriver.MySQLError
-	if errors.As(err, &mysqlErr) {
-		switch mysqlErr.Number {
-		case 1044, 1045, 1142, 1227:
-			return true
-		}
-	}
-
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "access denied") || strings.Contains(msg, "command denied")
 }
