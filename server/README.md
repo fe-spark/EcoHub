@@ -28,7 +28,7 @@ flowchart LR
 - MySQL 8+
 - Redis 7+
 
-## 本地启动
+## 启动
 
 ### 1. 准备环境变量
 
@@ -51,6 +51,26 @@ cp .env.example .env
 - `REDIS_PASSWORD`
 - `REDIS_DB`
 
+常见示例：
+
+```env
+PORT=8080
+JWT_SECRET=change_me_to_a_long_random_string
+
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=eco
+MYSQL_PASSWORD=your_mysql_password
+MYSQL_DBNAME=eco
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DB=0
+```
+
+如果 MySQL / Redis 不在当前机器上，请把 `MYSQL_HOST` / `REDIS_HOST` 改成真实可访问地址。
+
 ### 2. 启动服务
 
 ```bash
@@ -64,22 +84,30 @@ go run ./cmd/server
 
 - 服务监听端口由 `PORT` 决定，默认是 `8080`
 - 首次启动会初始化数据库表、默认站点配置和内置账号
-- 如果数据库或 Redis 不可达，服务会在启动阶段直接报错退出
+- 如果数据库或 Redis 不可达，服务会在启动阶段报错退出
 
-适用范围：
+运行环境：
 
 - 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境
-- Windows 原生环境建议改用 Docker，或先自行注入 `server/.env` 中的环境变量后再执行 `go run ./cmd/server`
+- Windows 原生环境可先手动配置好环境变量，再执行 `go run ./cmd/server`
 
 服务监听地址由 `PORT` 决定。
 
 ## 环境变量
 
-本地直接运行 `server` 时，服务会自动读取 `server/.env`。
+运行 `server` 时，服务会自动读取 `server/.env`。
 
-通过仓库根目录的 `docker-compose.yml` 运行时，服务端环境变量由 Compose 直接注入，不依赖 `server/.env`。
+如果你运行 `server` 时，MySQL / Redis 在其他机器或其他环境中，请把 `MYSQL_HOST` / `REDIS_HOST` 配成真实可达地址。
 
-如果你在本地直跑 `server`，而 MySQL / Redis 运行在 Docker 宿主机或其他机器上，请把 `MYSQL_HOST` / `REDIS_HOST` 配成真实可达地址；在支持的 Docker Desktop 环境下，也可以使用 `host.docker.internal`。
+推荐按下面的思路填写：
+
+- `PORT`：服务监听端口，默认 `8080`
+- `JWT_SECRET`：JWT 签名密钥，必须填写随机高强度值
+- `MYSQL_HOST` / `REDIS_HOST`：填运行 `server` 时实际能访问到的地址
+- `MYSQL_PORT` / `REDIS_PORT`：填数据库和 Redis 的真实端口
+- `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DBNAME`：填数据库真实账号、密码和库名
+- `REDIS_PASSWORD`：如果 Redis 未设置密码，可留空
+- `REDIS_DB`：一般保持 `0`
 
 `JWT_SECRET` 推荐使用随机高强度值，可通过下面的命令生成：
 
@@ -90,7 +118,7 @@ openssl rand -hex 32
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
 | `PORT` | 是 | 服务监听端口 |
-| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会直接启动失败 |
+| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
 | `MYSQL_USER` | 是 | MySQL 用户 |
@@ -100,6 +128,27 @@ openssl rand -hex 32
 | `REDIS_PORT` | 是 | Redis 端口 |
 | `REDIS_PASSWORD` | 否 | Redis 密码 |
 | `REDIS_DB` | 否 | Redis DB，默认 `0` |
+
+常见配置场景：
+
+1. MySQL / Redis 都在当前机器上
+
+```env
+MYSQL_HOST=127.0.0.1
+REDIS_HOST=127.0.0.1
+```
+
+2. MySQL / Redis 在另一台服务器
+
+```env
+MYSQL_HOST=192.168.1.10
+REDIS_HOST=192.168.1.11
+```
+
+3. 数据库和 Redis 在其他开发环境或云服务
+
+- 把 `MYSQL_HOST` / `REDIS_HOST` 改成对应域名、内网地址或公网地址
+- 同时确认防火墙、白名单和数据库账号授权已经放通
 
 ## 启动后初始化
 
@@ -219,26 +268,6 @@ server/
 ```bash
 cd server
 go test ./...
-```
-
-## Docker 运行
-
-如果你通过仓库根目录的 Compose 启动服务端，请在根目录执行：
-
-```bash
-docker compose up --build -d server
-```
-
-如果还要同时启动前端：
-
-```bash
-docker compose up --build -d server web
-```
-
-如果要连同 Compose 内置的 MySQL / Redis 一起启动：
-
-```bash
-docker compose up --build -d mysql redis server web
 ```
 
 如果本地 Go 缓存目录受限，可显式指定：
