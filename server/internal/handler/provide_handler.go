@@ -7,6 +7,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,29 @@ import (
 type ProvideHandler struct{}
 
 var ProvideHd = new(ProvideHandler)
+
+func resolveProvideBaseURL(c *gin.Context) string {
+	basicConfig := repository.GetSiteBasic()
+	domain := strings.TrimSpace(basicConfig.Domain)
+	if domain != "" {
+		return strings.TrimRight(domain, "/")
+	}
+
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+
+	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(c.Request.Host)
+	}
+
+	return scheme + "://" + host
+}
 
 // HandleProvide 提供给外界采集的 MacCMS 兼容接口
 func (h *ProvideHandler) HandleProvide(c *gin.Context) {
@@ -148,12 +172,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 
 // HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)
 func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
-	}
-	host := c.Request.Host
-	apiPath := scheme + "://" + host + "/api/provide/vod"
+	apiPath := resolveProvideBaseURL(c) + "/api/provide/vod"
 
 	sites := []gin.H{
 		{
