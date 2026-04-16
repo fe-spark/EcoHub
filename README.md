@@ -213,6 +213,11 @@ flowchart LR
 - `web`：Next.js 前端
 - `server`：Go API 服务
 
+按部署资源情况分成两种方式：
+
+1. 宿主机或外部环境已经有 MySQL / Redis：修改 `docker-compose.yml` 中 `server.environment` 的连接信息，然后执行 `docker compose up --build -d server web`
+2. 宿主机没有 MySQL / Redis：保持 `server.environment.MYSQL_HOST=mysql`、`REDIS_HOST=redis`，再执行 `docker compose up --build -d mysql redis server web`
+
 当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `docker-compose.yml` 中的服务配置。
 
 快速开始：
@@ -229,11 +234,10 @@ docker compose up --build -d
 当前 Compose 的关键行为：
 
 - `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
-- `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
 - Compose 默认还会直接注入占位用 `JWT_SECRET`，部署前应替换为你自己的高强度随机值
 - `web` 服务构建期和运行期都会由 Compose 直接注入 `API_URL=http://server:8080`
 - 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `API_URL`
-- Compose 固定把后端暴露在 `8080:8080`
+- Compose 默认不把 `server` 直接暴露到宿主机，而是仅供 `web` 通过容器网络访问
 - 如果你要启用 Compose 内的 `mysql` / `redis`，需要显式把它们加入启动命令
 - 如果你已有外部 MySQL / Redis，需要按你的实际环境自行调整 `docker-compose.yml` 中 `server.environment`
 - 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml`、`server/Dockerfile` 和 `web/Dockerfile`
@@ -242,7 +246,8 @@ docker compose up --build -d
 
 1. 修改 `docker-compose.yml` 中 `server.environment` 里的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
 2. 如果数据库和缓存跑在宿主机，可优先使用 `host.docker.internal`
-3. 启动时只拉起应用服务：
+3. 把 `JWT_SECRET` 改成你自己的高强度随机值
+4. 启动时只拉起应用服务：
 
 ```bash
 docker compose up --build -d server web
@@ -253,6 +258,8 @@ docker compose up --build -d server web
 ```bash
 docker compose up --build -d mysql redis server web
 ```
+
+如果你使用内置 MySQL / Redis，也要先把 `JWT_SECRET` 改成你自己的高强度随机值；如需修改数据库或 Redis 密码，要同步更新 `mysql`、`redis`、`server.environment` 三处对应配置。
 
 更多内容见 [README-Docker.md](./README-Docker.md)。
 
