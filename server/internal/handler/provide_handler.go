@@ -27,6 +27,9 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 	}
 
 	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if host != "" {
+		host = strings.TrimSpace(strings.Split(host, ",")[0])
+	}
 	if host == "" {
 		host = strings.TrimSpace(c.Request.Host)
 	}
