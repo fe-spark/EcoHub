@@ -29,7 +29,7 @@ flowchart LR
 - Less / CSS Modules
 - Artplayer / Hls.js
 
-## 本地运行
+## 启动
 
 ### 1. 安装依赖
 
@@ -38,9 +38,9 @@ cd web
 npm install
 ```
 
-### 2. 配置 API 地址
+### 2. 配置环境变量
 
-前端现在只要求显式配置 `API_URL`。
+运行 `web` 时，需要配置 `.env.local` 中的环境变量。
 
 推荐先复制示例文件：
 
@@ -49,22 +49,66 @@ cd web
 cp .env.example .env.local
 ```
 
-本地开发常见配置：
+示例内容：
 
 ```env
+PORT=3000
+API_URL=http://127.0.0.1:8080
+```
+
+其中最关键的是 `API_URL`，它的作用是：
+
+- 供 Next 在服务端取数时访问后端
+- 供 Next rewrite 把浏览器端 `/api/*` 请求转发到真实后端
+
+常见配置：
+
+```env
+PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
 如果是跨机器访问或反向代理，请改成后端真实可访问地址：
 
 ```env
+PORT=3000
 API_URL=http://your-api-origin
 ```
 
 - 当前实现已拆分 `server-api` 与 `client-api`，分别服务于服务端取数和客户端交互
 - 浏览器端默认请求当前站点下的 `/api/*`，再由 Next rewrite 转发到 `API_URL`
-- 大多数情况下只需要配置 `API_URL`
-- 目录内单独运行 `web` 时，Next 会自动加载 `web/.env.local`
+- 大多数情况下只需要确认 `API_URL`
+- 运行 `web` 时，Next 会自动加载 `web/.env.local`
+
+环境变量填写建议：
+
+- `PORT`：前端开发端口，默认 `3000`
+- `API_URL`：后端真实可访问地址，必须带协议头，例如 `http://127.0.0.1:8080`
+
+常见配置场景：
+
+1. 前后端都在当前机器上运行
+
+```env
+PORT=3000
+API_URL=http://127.0.0.1:8080
+```
+
+2. 前端在本机，后端在另一台机器
+
+```env
+PORT=3000
+API_URL=http://192.168.1.20:8080
+```
+
+3. 需要修改前端开发端口
+
+```env
+PORT=3100
+API_URL=http://127.0.0.1:8080
+```
+
+如果你修改了 `PORT`，前端访问地址也会跟着变化，例如 `http://127.0.0.1:3100`。
 
 ### 3. 启动开发环境
 
@@ -77,10 +121,10 @@ Next 会自动加载 `web/.env.local`。
 
 ### 4. 启动成功后
 
-- 默认访问地址是 `http://127.0.0.1:3000`
+- 访问地址默认是 `http://127.0.0.1:3000`
 - 后台地址固定为 `/manage`
 - 登录页固定为 `/login`
-- 如果后端地址改了，记得同步修改 `web/.env.local` 中的 `API_URL`
+- 如果后端地址改了，需要同步修改 `web/.env.local` 中的 `API_URL`
 
 ## API 地址在当前实现里的作用
 
@@ -124,7 +168,7 @@ web/
 - `manage`、`login`、`play` 等强交互页面继续使用 Client Component
 - `src/lib/server-api.ts` 负责服务端读接口
 - `src/lib/client-api.ts` 负责浏览器端交互请求与错误处理
-- `API_URL` 为必填项
+- `API_URL` 为必填项，未配置时前端无法正常启动或取数
 
 ### 后台访问控制
 
@@ -151,33 +195,6 @@ npm run build
 npm run start
 npm run lint
 ```
-
-## Docker 运行
-
-如果你通过仓库根目录的 Compose 启动前端，请在根目录执行：
-
-```bash
-docker compose up --build -d web
-```
-
-如果还要同时启动后端：
-
-```bash
-docker compose up --build -d server web
-```
-
-如果要连同 Compose 内置的 MySQL / Redis 一起启动：
-
-```bash
-docker compose up --build -d mysql redis server web
-```
-
-当前 Compose 运行规则：
-
-- `web` 容器不会读取 `web/.env.production`
-- Compose 会在构建期和运行期把 `API_URL=http://server:8080` 直接注入到 `web` 容器
-- 浏览器端仍然只访问当前站点下的 `/api/*`，再由 Next rewrite 转发到后端
-- 如果你改了 Compose 内部服务名或后端端口，需要同步更新 `docker-compose.yml`
 
 ## 当前约束
 
