@@ -101,11 +101,6 @@ export default function SiteConfigPageView() {
                 </Form.Item>
               </Col>
               <Col xs={24} lg={12} xl={8}>
-                <Form.Item name="domain" label="网站域名">
-                  <Input placeholder="请输入网站域名" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
                 <Form.Item name="keyword" label="搜索关键字">
                   <Input placeholder="请输入搜索关键字" />
                 </Form.Item>
