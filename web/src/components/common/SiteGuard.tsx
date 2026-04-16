@@ -8,7 +8,6 @@ import AppLoading from "@/components/public/Loading";
 
 export interface SiteConfig {
   siteName: string;
-  domain: string;
   logo: string;
   keyword: string;
   describe: string;

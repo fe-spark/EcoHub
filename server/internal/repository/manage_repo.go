@@ -29,7 +29,7 @@ func ExistBannersConfig() bool {
 // SaveSiteBasic 保存网站基本配置信息 (MySQL + Redis 短期缓存)
 func SaveSiteBasic(c model.BasicConfig) error {
 	rec := model.SiteConfigRecord{
-		SiteName: c.SiteName, Domain: c.Domain, Logo: c.Logo,
+		SiteName: c.SiteName, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 		IsVideoProxy: c.IsVideoProxy,
 	}
@@ -63,7 +63,7 @@ func GetSiteBasic() model.BasicConfig {
 		return c
 	}
 	c = model.BasicConfig{
-		SiteName: rec.SiteName, Domain: rec.Domain, Logo: rec.Logo,
+		SiteName: rec.SiteName, Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
 		IsVideoProxy: rec.IsVideoProxy,
 	}
