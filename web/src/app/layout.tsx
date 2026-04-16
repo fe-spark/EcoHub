@@ -1,16 +1,20 @@
 import type { Metadata, Viewport } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
-import { Outfit } from "next/font/google";
 import GlobalThemeProvider from "@/components/theme/GlobalThemeProvider";
 import SiteGuard, { SiteConfig } from "@/components/common/SiteGuard";
 import { serverGet } from "@/lib/server-api";
 import "./globals.css";
 
-const outfit = Outfit({
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-});
+const APP_FONT_FAMILY = [
+  "Inter",
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  "Roboto",
+  '"Helvetica Neue"',
+  "Arial",
+  "sans-serif",
+].join(", ");
 
 async function getSiteConfig(): Promise<SiteConfig | null> {
   try {
@@ -52,9 +56,9 @@ export default async function RootLayout({
 
   return (
     <html lang="zh-CN">
-      <body className={outfit.className}>
+      <body>
         <AntdRegistry>
-          <GlobalThemeProvider fontFamily={outfit.style.fontFamily}>
+          <GlobalThemeProvider fontFamily={APP_FONT_FAMILY}>
             <SiteGuard initialConfig={siteConfig}>
               {children}
             </SiteGuard>
