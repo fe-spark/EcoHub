@@ -125,18 +125,12 @@ cp .env.example .env
 
 ```bash
 cd server
-set -a
-source ./.env
-set +a
 go run ./cmd/server
 ```
 
-适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
-Windows 原生 `cmd` / PowerShell 可改用 Docker，或先自行注入 `server/.env` 中的环境变量后再执行 `go run ./cmd/server`。
+服务启动时会自动加载当前目录下的 `server/.env`。Windows 原生 `cmd` / PowerShell 同样适用，不需要再手动 `source` 环境变量文件。
 
 服务监听地址由 `PORT` 决定。
-
-> `ENV=dev` 或 `IS_DEV_MODE=true` 会开启开发模式。该模式下服务启动时会清空 Redis，并重置 MySQL：有权限时删库重建，没有删库权限时退化为清空现有表。
 
 ### 2. 启动前端
 
@@ -159,15 +153,11 @@ cd web
 cp .env.example .env.local
 ```
 
-前端开发服务端口与后端 API 地址分别由 `web/.env.local` 中的变量控制：
-
-- `PORT`：前端开发端口，默认示例是 `3000`
-- `API_URL`：前端访问后端的完整地址
+前端开发时只需要在 `web/.env.local` 中配置 `API_URL`：
 
 本地开发通常配置为：
 
 ```env
-PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
@@ -181,7 +171,7 @@ API_URL=http://your-api-origin
 
 - 前端必须显式配置 `API_URL`
 - 浏览器端和 SSR 共用同一份 `API_URL`
-- 当前前端直接请求后端绝对地址，不再依赖 Next rewrites
+- 浏览器端默认访问当前站点下的 `/api/*`，再由 Next rewrites 转发到 `API_URL`
 - 当前公共内容页优先使用 Server Component 取数，后台与播放器仍保留客户端交互模式
 
 启动：
@@ -223,45 +213,45 @@ flowchart LR
 - `web`：Next.js 前端
 - `server`：Go API 服务
 
-当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `server/.env` 配置。
+当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `docker-compose.yml` 中的服务配置。
 
 快速开始：
 
 ```bash
 cp server/.env.example server/.env
-cp web/.env.example web/.env.production
-docker compose --env-file server/.env up --build -d
+docker compose up --build -d
 ```
 
 对外访问入口以你的 Compose 端口映射或反向代理配置为准，后台路径仍然是 `/manage`。
 
-部署前请确认 `web/.env.production` 中的 `API_URL`：它是 Next 容器访问后端的地址，Docker 默认可直接写 `http://server:8080`。
+当前 Compose 中，前端会在构建期和运行期直接收到 `API_URL=http://server:8080`，不依赖 `web/.env.production`。
 
 当前 Compose 的关键行为：
 
-- `server` 服务读取 `server/.env`
-- `web` 服务在构建期与运行期都使用 `web/.env.production`
-- 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `web/.env.production` 中的 `API_URL`
-- `web/.env.production` 中的 `API_URL` 推荐直接写 Compose 内部服务地址 `http://server:8080`
-- 如果 `server/.env` 指向 Compose 内的 `mysql` / `redis`，你需要显式把它们加入启动命令
-- 如果你已有外部 MySQL / Redis，可直接把 `server/.env` 改成对应地址，并只启动 `server` / `web`
-- 启动 Compose 时建议追加 `--env-file server/.env`，让端口映射跟随后端 `PORT`
+- `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
+- `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
+- Compose 默认还会直接注入占位用 `JWT_SECRET`，部署前应替换为你自己的高强度随机值
+- `web` 服务构建期和运行期都会由 Compose 直接注入 `API_URL=http://server:8080`
+- 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `API_URL`
+- Compose 固定把后端暴露在 `8080:8080`
+- 如果你要启用 Compose 内的 `mysql` / `redis`，需要显式把它们加入启动命令
+- 如果你已有外部 MySQL / Redis，需要按你的实际环境自行调整 `docker-compose.yml` 中 `server.environment`
 - 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml`、`server/Dockerfile` 和 `web/Dockerfile`
 
 如果你准备复用现有数据库与缓存，而不是启动 Compose 内的 `mysql` / `redis`，推荐做法是：
 
-1. 修改 `server/.env` 中的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
+1. 修改 `docker-compose.yml` 中 `server.environment` 里的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
 2. 如果数据库和缓存跑在宿主机，可优先使用 `host.docker.internal`
 3. 启动时只拉起应用服务：
 
 ```bash
-docker compose --env-file server/.env up --build -d server web
+docker compose up --build -d server web
 ```
 
 如果你要同时启用 Compose 内置的 MySQL 和 Redis，请显式执行：
 
 ```bash
-docker compose --env-file server/.env up --build -d mysql redis server web
+docker compose up --build -d mysql redis server web
 ```
 
 更多内容见 [README-Docker.md](./README-Docker.md)。

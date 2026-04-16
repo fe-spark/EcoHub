@@ -42,11 +42,6 @@ npm install
 
 前端现在只要求显式配置 `API_URL`。
 
-前端开发服务端口与后端 API 端口不是同一个概念：
-
-- `web/.env.local` 中的 `PORT` 用于 Next 开发服务
-- `web/.env.local` 中的 `API_URL` 用于 Next 转发浏览器端 `/api` 请求
-
 推荐先复制示例文件：
 
 ```bash
@@ -57,20 +52,19 @@ cp .env.example .env.local
 本地开发常见配置：
 
 ```env
-PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
-如果是 Docker、反向代理或跨机器访问，请改成实际可访问地址：
+如果是跨机器访问或反向代理，请改成后端真实可访问地址：
 
 ```env
-API_URL=http://server:8080
+API_URL=http://your-api-origin
 ```
 
 - 当前实现已拆分 `server-api` 与 `client-api`，分别服务于服务端取数和客户端交互
 - 浏览器端默认请求当前站点下的 `/api/*`，再由 Next rewrite 转发到 `API_URL`
 - 大多数情况下只需要配置 `API_URL`
-- Docker 场景下，`API_URL` 推荐直接写容器内可访问地址，例如 `http://server:8080`
+- 目录内单独运行 `web` 时，Next 会自动加载 `web/.env.local`
 
 ### 3. 启动开发环境
 
@@ -90,7 +84,7 @@ Next 会自动加载 `web/.env.local`。
 
 ## API 地址在当前实现里的作用
 
-前端代码中的请求会按职责分层后走后端绝对地址：
+前端代码中的请求会按职责分层使用 `API_URL`：
 
 - 公共内容页优先在 Server Component 中通过 `src/lib/server-api.ts` 取数
 - 客户端交互与后台请求通过 `src/lib/client-api.ts` 发起
@@ -163,24 +157,27 @@ npm run lint
 如果你通过仓库根目录的 Compose 启动前端，请在根目录执行：
 
 ```bash
-docker compose --env-file server/.env up --build -d web
+docker compose up --build -d web
 ```
 
 如果还要同时启动后端：
 
 ```bash
-docker compose --env-file server/.env up --build -d server web
+docker compose up --build -d server web
 ```
 
 如果要连同 Compose 内置的 MySQL / Redis 一起启动：
 
 ```bash
-docker compose --env-file server/.env up --build -d mysql redis server web
+docker compose up --build -d mysql redis server web
 ```
 
-Docker 场景下请重点确认 `web/.env.production`：
+当前 Compose 运行规则：
 
-- `API_URL`：Next 容器可访问的后端地址，默认可直接写 `http://server:8080`
+- `web` 容器不会读取 `web/.env.production`
+- Compose 会在构建期和运行期把 `API_URL=http://server:8080` 直接注入到 `web` 容器
+- 浏览器端仍然只访问当前站点下的 `/api/*`，再由 Next rewrite 转发到后端
+- 如果你改了 Compose 内部服务名或后端端口，需要同步更新 `docker-compose.yml`
 
 ## 当前约束
 
