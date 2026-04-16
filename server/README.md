@@ -37,19 +37,7 @@ cd server
 cp .env.example .env
 ```
 
-按你的实际环境修改 `server/.env`，至少需要确认：
-
-- `PORT`
-- `JWT_SECRET`
-- `MYSQL_HOST`
-- `MYSQL_PORT`
-- `MYSQL_USER`
-- `MYSQL_PASSWORD`
-- `MYSQL_DBNAME`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `REDIS_DB`
+按你的实际环境修改 `server/.env`。
 
 常见示例：
 
@@ -86,30 +74,19 @@ go run ./cmd/server
 - 首次启动会初始化数据库表、默认站点配置和内置账号
 - 如果数据库或 Redis 不可达，服务会在启动阶段报错退出
 
-运行环境：
-
-- 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境
-- Windows 原生环境可先手动配置好环境变量，再执行 `go run ./cmd/server`
-
-服务监听地址由 `PORT` 决定。
-
 ## 环境变量
 
 运行 `server` 时，服务会自动读取 `server/.env`。
 
-如果你运行 `server` 时，MySQL / Redis 在其他机器或其他环境中，请把 `MYSQL_HOST` / `REDIS_HOST` 配成真实可达地址。
-
-推荐按下面的思路填写：
-
 - `PORT`：服务监听端口，默认 `8080`
-- `JWT_SECRET`：JWT 签名密钥，必须填写随机高强度值
+- `JWT_SECRET`：JWT 签名密钥，必须填写随机高强度值，可用 `openssl rand -hex 32` 生成
 - `MYSQL_HOST` / `REDIS_HOST`：填运行 `server` 时实际能访问到的地址
 - `MYSQL_PORT` / `REDIS_PORT`：填数据库和 Redis 的真实端口
 - `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DBNAME`：填数据库真实账号、密码和库名
 - `REDIS_PASSWORD`：如果 Redis 未设置密码，可留空
 - `REDIS_DB`：一般保持 `0`
 
-`JWT_SECRET` 推荐使用随机高强度值，可通过下面的命令生成：
+生成 `JWT_SECRET`：
 
 ```bash
 openssl rand -hex 32
@@ -118,7 +95,7 @@ openssl rand -hex 32
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
 | `PORT` | 是 | 服务监听端口 |
-| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败 |
+| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败，可用 `openssl rand -hex 32` 生成 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
 | `MYSQL_USER` | 是 | MySQL 用户 |
@@ -129,7 +106,7 @@ openssl rand -hex 32
 | `REDIS_PASSWORD` | 否 | Redis 密码 |
 | `REDIS_DB` | 否 | Redis DB，默认 `0` |
 
-常见配置场景：
+常见配置：
 
 1. MySQL / Redis 都在当前机器上
 
@@ -167,6 +144,8 @@ REDIS_HOST=192.168.1.11
 | --- | --- | --- | --- |
 | 管理员 | `admin` | `admin` | 可读可写 |
 | 访客 | `guest` | `guest` | 只读 |
+
+这些默认账号仅用于初始化或演示环境。对外使用前应立即修改密码，或直接替换为你自己的账号体系。
 
 ## 采集与聚合逻辑
 

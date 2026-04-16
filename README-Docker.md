@@ -25,7 +25,7 @@
 - `web` 构建期和运行期都会收到 `API_URL=http://server:8080`
 - 浏览器端访问当前站点下的 `/api/*`，再由 Next rewrite 转发到 `server`
 - Compose 运行时不读取 `server/.env`、`web/.env.production`，也不需要 `--env-file`
-- `docker-compose.yml` 里的 `JWT_SECRET` 只是占位值，正式部署前必须替换
+- `docker-compose.yml` 里的 `JWT_SECRET` 只是占位值，正式部署前必须替换，可用 `openssl rand -hex 32` 生成
 
 这意味着：
 
@@ -49,7 +49,7 @@
 server:
   environment:
     PORT: 8080
-    JWT_SECRET: your_generated_secret
+    JWT_SECRET: your_generated_secret # 可用 openssl rand -hex 32 生成
     MYSQL_HOST: host.docker.internal
     MYSQL_PORT: 3306
     MYSQL_USER: your_mysql_user
@@ -66,7 +66,7 @@ server:
 - 如果 MySQL / Redis 就运行在 Docker 宿主机上，可优先写 `host.docker.internal`
 - 如果它们运行在其他机器上，请直接写真实 IP、域名或内网地址
 - 如果 Redis 没有密码，可把 `REDIS_PASSWORD` 留空字符串
-- `JWT_SECRET` 必须替换成你自己的高强度随机值，例如 `openssl rand -hex 32`
+- `JWT_SECRET` 必须替换为你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
 
 ### 2. 启动应用服务
 
@@ -96,7 +96,7 @@ docker compose up --build -d server web
 server:
   environment:
     PORT: 8080
-    JWT_SECRET: your_generated_secret
+    JWT_SECRET: your_generated_secret # 可用 openssl rand -hex 32 生成
     MYSQL_HOST: mysql
     MYSQL_PORT: 3306
     MYSQL_USER: eco
@@ -110,7 +110,7 @@ server:
 
 你至少要做两件事：
 
-- 把 `JWT_SECRET` 改成你自己的随机值
+- 把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
 - 如果你不想用默认数据库密码，也同步修改 `mysql.environment`、`redis.command` 和 `server.environment` 中对应的密码
 
 ### 2. 启动全部服务
@@ -188,8 +188,8 @@ extra_hosts:
 
 ## 生产建议
 
-- 修改或禁用默认账号：管理员 `admin` / `admin`，访客 `guest` / `guest`
-- 为 `JWT_SECRET` 使用单独的高强度值，可通过 `openssl rand -hex 32` 生成
+- 默认账号 `admin / admin`、`guest / guest` 仅用于初始化或演示，部署后应立即修改密码或直接禁用
+- `JWT_SECRET` 必须使用单独的高强度随机值，可用 `openssl rand -hex 32` 生成
 - 优先通过反向代理暴露统一入口，而不是直接暴露 API 服务
 - 为前端站点启用 HTTPS
 - 不要把真实生产密码直接提交到仓库；如果需要长期维护，建议把 `docker-compose.yml` 中的敏感值迁移到安全的部署系统或密钥管理方案
@@ -198,6 +198,7 @@ extra_hosts:
 
 - `server` 容器启动失败并提示缺少环境变量
   - 检查 `docker-compose.yml` 中 `server.environment` 是否把 `JWT_SECRET` 等必填项写全
+  - 如果还没生成 `JWT_SECRET`，可先执行 `openssl rand -hex 32`
 - 使用宿主机 MySQL / Redis 时连接失败
   - 先确认宿主机或外部数据库地址填写正确
   - 再确认数据库用户允许来自容器网络的连接
