@@ -94,32 +94,14 @@ flowchart TD
 
 ### 1. 启动后端
 
-确保本机已安装：
-
-- Go 1.24+
-- 可访问的 MySQL 8+
-- 可访问的 Redis 7+
-
-在 `server/` 目录中准备环境变量：
+先准备 `server/.env`：
 
 ```bash
 cd server
 cp .env.example .env
 ```
 
-然后在 `server/.env` 中配置这些变量：
-
-- `PORT`
-- `JWT_SECRET`
-- `MYSQL_HOST`
-- `MYSQL_PORT`
-- `MYSQL_USER`
-- `MYSQL_PASSWORD`
-- `MYSQL_DBNAME`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `REDIS_DB`
+按你的环境填写 `PORT`、`JWT_SECRET`、MySQL 和 Redis 连接信息。`JWT_SECRET` 必须使用高强度随机值，可用 `openssl rand -hex 32` 生成。
 
 启动：
 
@@ -128,16 +110,9 @@ cd server
 go run ./cmd/server
 ```
 
-服务启动时会自动加载当前目录下的 `server/.env`。Windows 原生 `cmd` / PowerShell 同样适用，不需要再手动 `source` 环境变量文件。
-
-服务监听地址由 `PORT` 决定。
+服务启动时会自动加载当前目录下的 `server/.env`。
 
 ### 2. 启动前端
-
-确保本机已安装：
-
-- Node.js 20+
-- npm
 
 首次运行前先安装依赖：
 
@@ -153,26 +128,17 @@ cd web
 cp .env.example .env.local
 ```
 
-前端开发时只需要在 `web/.env.local` 中配置 `API_URL`：
-
-本地开发通常配置为：
+前端开发时重点确认 `web/.env.local` 中的 `API_URL`：
 
 ```env
 API_URL=http://127.0.0.1:8080
 ```
 
-如果前后端不在同一台机器、或使用 Docker / 容器网络，请显式修改 `API_URL`：
+如果前后端不在同一台机器，请改成真实可访问地址：
 
 ```env
 API_URL=http://your-api-origin
 ```
-
-当前实现下：
-
-- 前端必须显式配置 `API_URL`
-- 浏览器端和 SSR 共用同一份 `API_URL`
-- 浏览器端默认访问当前站点下的 `/api/*`，再由 Next rewrites 转发到 `API_URL`
-- 当前公共内容页优先使用 Server Component 取数，后台与播放器仍保留客户端交互模式
 
 启动：
 
@@ -206,6 +172,11 @@ flowchart LR
 
 部署后应立即修改默认口令，或直接替换为你自己的账号体系。
 
+更详细的运行与环境变量说明：
+
+- [服务端说明](./server/README.md)
+- [前端说明](./web/README.md)
+
 ## 服务器部署
 
 项目自带 `docker-compose.yml`，会启动：
@@ -220,13 +191,6 @@ flowchart LR
 
 当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `docker-compose.yml` 中的服务配置。
 
-快速开始：
-
-```bash
-cp server/.env.example server/.env
-docker compose up --build -d
-```
-
 对外访问入口以你的 Compose 端口映射或反向代理配置为准，后台路径仍然是 `/manage`。
 
 当前 Compose 中，前端会在构建期和运行期直接收到 `API_URL=http://server:8080`，不依赖 `web/.env.production`。
@@ -234,7 +198,7 @@ docker compose up --build -d
 当前 Compose 的关键行为：
 
 - `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
-- Compose 默认还会直接注入占位用 `JWT_SECRET`，部署前应替换为你自己的高强度随机值
+- Compose 默认还会直接注入占位用 `JWT_SECRET`，部署前必须替换为你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
 - `web` 服务构建期和运行期都会由 Compose 直接注入 `API_URL=http://server:8080`
 - 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `API_URL`
 - Compose 默认不把 `server` 直接暴露到宿主机，而是仅供 `web` 通过容器网络访问
@@ -246,7 +210,7 @@ docker compose up --build -d
 
 1. 修改 `docker-compose.yml` 中 `server.environment` 里的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
 2. 如果数据库和缓存跑在宿主机，可优先使用 `host.docker.internal`
-3. 把 `JWT_SECRET` 改成你自己的高强度随机值
+3. 把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
 4. 启动时只拉起应用服务：
 
 ```bash
@@ -259,7 +223,7 @@ docker compose up --build -d server web
 docker compose up --build -d mysql redis server web
 ```
 
-如果你使用内置 MySQL / Redis，也要先把 `JWT_SECRET` 改成你自己的高强度随机值；如需修改数据库或 Redis 密码，要同步更新 `mysql`、`redis`、`server.environment` 三处对应配置。
+如果你使用内置 MySQL / Redis，也要先把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成；如需修改数据库或 Redis 密码，要同步更新 `mysql`、`redis`、`server.environment` 三处对应配置。
 
 更多内容见 [README-Docker.md](./README-Docker.md)。
 
