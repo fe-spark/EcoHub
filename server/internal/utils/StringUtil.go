@@ -110,20 +110,6 @@ func PasswordEncrypt(password, salt string) string {
 	return hex.EncodeToString(r[:])
 }
 
-// ValidDomain 域名校验(http://example.xxx)
-func ValidDomain(s string) bool {
-	u, err := url.ParseRequestURI(s)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https" || u.Host == "") {
-		return false
-	}
-	return true
-}
-
-// ValidIPHost 校验是否符合http|https//ip 格式
-func ValidIPHost(s string) bool {
-	return regexp.MustCompile(`^(http|https)://(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(:[0-9]{1,5})?$`).MatchString(s)
-}
-
 // ValidURL 校验http链接是否是符合规范的URL
 func ValidURL(s string) bool {
 	_, err := url.ParseRequestURI(s)

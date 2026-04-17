@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/url"
 	"strconv"
 	"strings"
@@ -15,6 +16,29 @@ import (
 type ProvideHandler struct{}
 
 var ProvideHd = new(ProvideHandler)
+
+func resolveProvideBaseURL(c *gin.Context) (string, error) {
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+
+	host := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if host != "" {
+		host = strings.TrimSpace(strings.Split(host, ",")[0])
+	}
+	if host == "" {
+		host = strings.TrimSpace(c.Request.Host)
+	}
+	if host != "" {
+		return scheme + "://" + host, nil
+	}
+
+	return "", errors.New("无法解析当前请求域名，请检查反向代理 Host/X-Forwarded-Host 配置")
+}
 
 // HandleProvide 提供给外界采集的 MacCMS 兼容接口
 func (h *ProvideHandler) HandleProvide(c *gin.Context) {
@@ -148,12 +172,13 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 
 // HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)
 func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
-	scheme := "http"
-	if c.Request.TLS != nil {
-		scheme = "https"
+	baseURL, err := resolveProvideBaseURL(c)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
-	host := c.Request.Host
-	apiPath := scheme + "://" + host + "/api/provide/vod"
+
+	apiPath := baseURL + "/api/provide/vod"
 
 	sites := []gin.H{
 		{

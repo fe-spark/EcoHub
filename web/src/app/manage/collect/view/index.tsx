@@ -72,6 +72,7 @@ export default function CollectManagePageView() {
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [form] = Form.useForm();
+  const currentGrade = Form.useWatch("grade", form);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const [clearOpen, setClearOpen] = useState(false);
@@ -137,6 +138,12 @@ export default function CollectManagePageView() {
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [getCollectList, getCollectingState]);
+
+  useEffect(() => {
+    if (currentGrade === 1 && form.getFieldValue("syncPictures")) {
+      form.setFieldValue("syncPictures", false);
+    }
+  }, [currentGrade, form]);
 
   const changeSourceState = async (record: FilmSource) => {
     const resp = await ApiPost("/manage/collect/change", {
@@ -493,7 +500,7 @@ export default function CollectManagePageView() {
           </Radio>
         </Radio.Group>
       </Form.Item>
-      <Form.Item label="站点权重" name="grade">
+      <Form.Item label="站点类型" name="grade">
         <Radio.Group
           onChange={(e) => {
             if (e.target.value === 1) form.setFieldValue("syncPictures", false);
@@ -504,7 +511,7 @@ export default function CollectManagePageView() {
         </Radio.Group>
       </Form.Item>
       <Form.Item label="图片同步" name="syncPictures" valuePropName="checked">
-        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+        <Switch checkedChildren="开启" unCheckedChildren="关闭" disabled={currentGrade === 1} />
       </Form.Item>
       <Form.Item label="是否启用" name="state" valuePropName="checked">
         <Switch checkedChildren="启用" unCheckedChildren="禁用" />
