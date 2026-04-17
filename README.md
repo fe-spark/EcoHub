@@ -94,56 +94,25 @@ flowchart TD
 
 ### 1. 启动后端
 
-确保本机已安装：
-
-- Go 1.24+
-- 可访问的 MySQL 8+
-- 可访问的 Redis 7+
-
-在 `server/` 目录中准备环境变量：
+先准备 `server/.env`：
 
 ```bash
 cd server
 cp .env.example .env
 ```
 
-然后在 `server/.env` 中配置这些变量：
-
-- `PORT`
-- `JWT_SECRET`
-- `MYSQL_HOST`
-- `MYSQL_PORT`
-- `MYSQL_USER`
-- `MYSQL_PASSWORD`
-- `MYSQL_DBNAME`
-- `REDIS_HOST`
-- `REDIS_PORT`
-- `REDIS_PASSWORD`
-- `REDIS_DB`
+按你的环境填写 `PORT`、`JWT_SECRET`、MySQL 和 Redis 连接信息。`JWT_SECRET` 必须使用高强度随机值，可用 `openssl rand -hex 32` 生成。
 
 启动：
 
 ```bash
 cd server
-set -a
-source ./.env
-set +a
 go run ./cmd/server
 ```
 
-适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境。
-Windows 原生 `cmd` / PowerShell 可改用 Docker，或先自行注入 `server/.env` 中的环境变量后再执行 `go run ./cmd/server`。
-
-服务监听地址由 `PORT` 决定。
-
-> `ENV=dev` 或 `IS_DEV_MODE=true` 会开启开发模式。该模式下服务启动时会清空 Redis，并重置 MySQL：有权限时删库重建，没有删库权限时退化为清空现有表。
+服务启动时会自动加载当前目录下的 `server/.env`。
 
 ### 2. 启动前端
-
-确保本机已安装：
-
-- Node.js 20+
-- npm
 
 首次运行前先安装依赖：
 
@@ -159,30 +128,17 @@ cd web
 cp .env.example .env.local
 ```
 
-前端开发服务端口与后端 API 地址分别由 `web/.env.local` 中的变量控制：
-
-- `PORT`：前端开发端口，默认示例是 `3000`
-- `API_URL`：前端访问后端的完整地址
-
-本地开发通常配置为：
+前端开发时重点确认 `web/.env.local` 中的 `API_URL`：
 
 ```env
-PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
-如果前后端不在同一台机器、或使用 Docker / 容器网络，请显式修改 `API_URL`：
+如果前后端不在同一台机器，请改成真实可访问地址：
 
 ```env
 API_URL=http://your-api-origin
 ```
-
-当前实现下：
-
-- 前端必须显式配置 `API_URL`
-- 浏览器端和 SSR 共用同一份 `API_URL`
-- 当前前端直接请求后端绝对地址，不再依赖 Next rewrites
-- 当前公共内容页优先使用 Server Component 取数，后台与播放器仍保留客户端交互模式
 
 启动：
 
@@ -216,6 +172,11 @@ flowchart LR
 
 部署后应立即修改默认口令，或直接替换为你自己的账号体系。
 
+更详细的运行与环境变量说明：
+
+- [服务端说明](./server/README.md)
+- [前端说明](./web/README.md)
+
 ## 服务器部署
 
 项目自带 `docker-compose.yml`，会启动：
@@ -223,46 +184,46 @@ flowchart LR
 - `web`：Next.js 前端
 - `server`：Go API 服务
 
-当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `server/.env` 配置。
+按部署资源情况分成两种方式：
 
-快速开始：
+1. 宿主机或外部环境已经有 MySQL / Redis：修改 `docker-compose.yml` 中 `server.environment` 的连接信息，然后执行 `docker compose up --build -d server web`
+2. 宿主机没有 MySQL / Redis：保持 `server.environment.MYSQL_HOST=mysql`、`REDIS_HOST=redis`，再执行 `docker compose up --build -d mysql redis server web`
 
-```bash
-cp server/.env.example server/.env
-cp web/.env.example web/.env.production
-docker compose --env-file server/.env up --build -d
-```
+当前 Compose 可用于服务器部署。是否启用其中的 MySQL 和 Redis，取决于你的部署方式与 `docker-compose.yml` 中的服务配置。
 
 对外访问入口以你的 Compose 端口映射或反向代理配置为准，后台路径仍然是 `/manage`。
 
-部署前请确认 `web/.env.production` 中的 `API_URL`：它是 Next 容器访问后端的地址，Docker 默认可直接写 `http://server:8080`。
+当前 Compose 中，前端会在构建期和运行期直接收到 `API_URL=http://server:8080`，不依赖 `web/.env.production`。
 
 当前 Compose 的关键行为：
 
-- `server` 服务读取 `server/.env`
-- `web` 服务在构建期与运行期都使用 `web/.env.production`
-- 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `web/.env.production` 中的 `API_URL`
-- `web/.env.production` 中的 `API_URL` 推荐直接写 Compose 内部服务地址 `http://server:8080`
-- 如果 `server/.env` 指向 Compose 内的 `mysql` / `redis`，你需要显式把它们加入启动命令
-- 如果你已有外部 MySQL / Redis，可直接把 `server/.env` 改成对应地址，并只启动 `server` / `web`
-- 启动 Compose 时建议追加 `--env-file server/.env`，让端口映射跟随后端 `PORT`
+- `server` 服务运行时环境由 `docker-compose.yml` 直接注入，不读取 `server/.env`
+- Compose 默认还会直接注入占位用 `JWT_SECRET`，部署前必须替换为你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
+- `web` 服务构建期和运行期都会由 Compose 直接注入 `API_URL=http://server:8080`
+- 浏览器端默认通过当前站点下的 `/api/*` 请求，再由 Next rewrite 转发到 `API_URL`
+- Compose 默认不把 `server` 直接暴露到宿主机，而是仅供 `web` 通过容器网络访问
+- 如果你要启用 Compose 内的 `mysql` / `redis`，需要显式把它们加入启动命令
+- 如果你已有外部 MySQL / Redis，需要按你的实际环境自行调整 `docker-compose.yml` 中 `server.environment`
 - 如果你修改了服务名、网络结构或 API 对内地址，需要同步调整 `docker-compose.yml`、`server/Dockerfile` 和 `web/Dockerfile`
 
 如果你准备复用现有数据库与缓存，而不是启动 Compose 内的 `mysql` / `redis`，推荐做法是：
 
-1. 修改 `server/.env` 中的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
+1. 修改 `docker-compose.yml` 中 `server.environment` 里的 `MYSQL_HOST` / `REDIS_HOST` 为你的实际地址
 2. 如果数据库和缓存跑在宿主机，可优先使用 `host.docker.internal`
-3. 启动时只拉起应用服务：
+3. 把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
+4. 启动时只拉起应用服务：
 
 ```bash
-docker compose --env-file server/.env up --build -d server web
+docker compose up --build -d server web
 ```
 
 如果你要同时启用 Compose 内置的 MySQL 和 Redis，请显式执行：
 
 ```bash
-docker compose --env-file server/.env up --build -d mysql redis server web
+docker compose up --build -d mysql redis server web
 ```
+
+如果你使用内置 MySQL / Redis，也要先把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成；如需修改数据库或 Redis 密码，要同步更新 `mysql`、`redis`、`server.environment` 三处对应配置。
 
 更多内容见 [README-Docker.md](./README-Docker.md)。
 

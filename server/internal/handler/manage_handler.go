@@ -32,10 +32,6 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 	bc := model.BasicConfig{}
 	if err := c.ShouldBindJSON(&bc); err == nil {
-		if !utils.ValidDomain(bc.Domain) && !utils.ValidIPHost(bc.Domain) {
-			dto.Failed("域名格式校验失败", c)
-			return
-		}
 		if len(bc.SiteName) <= 0 {
 			dto.Failed("网站名称不能为空", c)
 			return
