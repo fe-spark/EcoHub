@@ -204,7 +204,7 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 	}
 	playList := []model.PlayLinkVo{{Id: master[0].Id, Name: master[0].Name, LinkList: firstList}}
 
-	names := make([]string, 0, 8)
+	names := make([]string, 0, 2)
 	seenKeys := make(map[string]struct{}, 8)
 	appendKey := func(k string) {
 		if k == "" {
@@ -216,27 +216,27 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 		seenKeys[k] = struct{}{}
 		names = append(names, k)
 	}
-	if detail.DbId > 0 {
-		appendKey(utils.GenerateHashKey(detail.DbId))
+	appendNormalizedTitle := func(title string) {
+		if normalizedTitle := utils.NormalizeCollectionTitle(title); normalizedTitle != "" {
+			appendKey(utils.GenerateHashKey(normalizedTitle))
+		}
 	}
-	for _, v := range utils.NormalizeTitleCandidates(detail.Name) {
-		appendKey(utils.GenerateHashKey(v))
-	}
-
-	if len(detail.SubTitle) > 0 && strings.Contains(detail.SubTitle, ",") {
-		for v := range strings.SplitSeq(detail.SubTitle, ",") {
-			for _, c := range utils.NormalizeTitleCandidates(v) {
-				appendKey(utils.GenerateHashKey(c))
+	appendAliasTitles := func(raw string) {
+		appendNormalizedTitle(raw)
+		for _, sep := range []string{",", "，", "/", "|", "、"} {
+			if !strings.Contains(raw, sep) {
+				continue
+			}
+			for alias := range strings.SplitSeq(raw, sep) {
+				appendNormalizedTitle(alias)
 			}
 		}
 	}
-	if len(detail.SubTitle) > 0 && strings.Contains(detail.SubTitle, "/") {
-		for v := range strings.SplitSeq(detail.SubTitle, "/") {
-			for _, c := range utils.NormalizeTitleCandidates(v) {
-				appendKey(utils.GenerateHashKey(c))
-			}
-		}
+	if dbIdentity := utils.BuildCollectionDbIdentity(detail.DbId, detail.Name); dbIdentity != "" {
+		appendKey(utils.GenerateHashKey(dbIdentity))
 	}
+	appendNormalizedTitle(detail.Name)
+	appendAliasTitles(detail.SubTitle)
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
 	for _, s := range sc {
 		pl := filmrepo.GetMultiplePlayByKeys(s.Id, names)

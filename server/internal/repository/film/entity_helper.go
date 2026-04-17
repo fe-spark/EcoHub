@@ -8,11 +8,11 @@ import (
 )
 
 func BuildContentKey(detail model.MovieDetail) string {
-	// 生成内容指纹：优先使用豆瓣 ID，无豆瓣 ID 则使用名称哈希
-	if detail.DbId != 0 {
-		return fmt.Sprintf("dbid_%d", detail.DbId)
+	// 生成内容指纹：豆瓣 ID 也要服从标题尾部分段规则，避免不同季/话被错误并片
+	if dbIdentity := utils.BuildCollectionDbIdentity(detail.DbId, detail.Name); dbIdentity != "" {
+		return dbIdentity
 	}
-	return fmt.Sprintf("name_%s", utils.GenerateHashKey(detail.Name))
+	return fmt.Sprintf("name_%s", utils.GenerateHashKey(utils.NormalizeCollectionTitle(detail.Name)))
 }
 
 func ApplyResolvedCategory(detail *model.MovieDetail, info model.SearchInfo) {
