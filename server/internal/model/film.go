@@ -126,6 +126,7 @@ type SearchInfo struct {
 	Pid               int64   `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
 	RootCategoryKey   string  `json:"rootCategoryKey" gorm:"size:128;index;index:idx_root_key_update;index:idx_root_key_hits;index:idx_root_key_latest;index:idx_filter_root_score;index:idx_filter_root_update;index:idx_filter_root_hits"`
 	CategoryKey       string  `json:"categoryKey" gorm:"size:128;index;index:idx_category_key_update;index:idx_category_key_hits;index:idx_category_key_latest"`
+	SeriesKey         string  `json:"seriesKey" gorm:"size:128;index"`                                                            // 系列标识，用于相关推荐召回与排序
 	Name              string  `json:"name"`                                                                                       // 片名
 	SubTitle          string  `json:"subTitle"`                                                                                   // 影片子标题
 	CName             string  `json:"cName"`                                                                                      // 分类名称

@@ -11,7 +11,7 @@ import (
 
 var searchInfoUpsertUpdateColumns = []string{
 	"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
-	"area", "language", "year", "initial", "score",
+	"series_key", "area", "language", "year", "initial", "score",
 	"update_stamp", "latest_source_stamp", "hits", "state", "remarks", "db_id", "release_stamp",
 	"picture", "actor", "director", "blurb", "updated_at", "deleted_at",
 }

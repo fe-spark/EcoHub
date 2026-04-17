@@ -13,6 +13,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -443,6 +444,7 @@ func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolve
 		Pid:               category.Pid,
 		RootCategoryKey:   category.PKey,
 		CategoryKey:       category.CKey,
+		SeriesKey:         utils.BuildSeriesKey(detail.Name, detail.SubTitle),
 		Name:              detail.Name,
 		SubTitle:          detail.SubTitle,
 		CName:             category.CName,
