@@ -1,5 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&display=swap");
-
 :root {
   --primary-color: #fa8c16;
   --primary-color-rgb: 250, 140, 22;
@@ -172,7 +170,7 @@ body {
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
   font-family:
-    "Outfit",
+    "Inter",
     -apple-system,
     BlinkMacSystemFont,
     "Segoe UI",

@@ -1,44 +1,45 @@
 import type { Metadata, Viewport } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
-import { Outfit } from "next/font/google";
 import GlobalThemeProvider from "@/components/theme/GlobalThemeProvider";
+import SiteGuard, { SiteConfig } from "@/components/common/SiteGuard";
+import { serverGet } from "@/lib/server-api";
 import "./globals.css";
-const outfit = Outfit({
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700", "800", "900"],
-});
 
-import { ApiGet } from "@/lib/api";
+const APP_FONT_FAMILY = [
+  "Inter",
+  "-apple-system",
+  "BlinkMacSystemFont",
+  '"Segoe UI"',
+  "Roboto",
+  '"Helvetica Neue"',
+  "Arial",
+  "sans-serif",
+].join(", ");
 
-export async function generateMetadata(): Promise<Metadata> {
-  let siteName = "";
-  let describe = "";
-  let keyword = "";
-  let icon = "";
-
+async function getSiteConfig(): Promise<SiteConfig | null> {
   try {
-    const res = await ApiGet("/config/basic");
-    if (res && res.code === 0 && res.data) {
-      siteName = res.data.siteName || "";
-      describe = res.data.describe || "";
-      keyword = res.data.keyword || "";
-      icon = res.data.logo || "";
+    const response = await serverGet<SiteConfig>("/config/basic");
+    if (response.code === 0 && response.data) {
+      return response.data;
     }
-  } catch (err) {
-    console.error("fetch metadata error:", err);
+  } catch (error) {
+    console.error("fetch site config error:", error);
   }
 
+  return null;
+}
+
+export async function generateMetadata(): Promise<Metadata> {
+  const siteConfig = await getSiteConfig();
+
   const generated: Metadata = {};
-  if (siteName) generated.title = siteName;
-  if (describe) generated.description = describe;
-  if (keyword) generated.keywords = keyword;
-  if (icon) generated.icons = { icon };
+  if (siteConfig?.siteName) generated.title = siteConfig.siteName;
+  if (siteConfig?.describe) generated.description = siteConfig.describe;
+  if (siteConfig?.keyword) generated.keywords = siteConfig.keyword;
+  if (siteConfig?.logo) generated.icons = { icon: siteConfig.logo };
 
   return generated;
 }
-
-import SiteGuard from "@/components/common/SiteGuard";
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -46,17 +47,19 @@ export const viewport: Viewport = {
   viewportFit: "cover",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const siteConfig = await getSiteConfig();
+
   return (
     <html lang="zh-CN">
-      <body className={outfit.className}>
+      <body>
         <AntdRegistry>
-          <GlobalThemeProvider fontFamily={outfit.style.fontFamily}>
-            <SiteGuard>
+          <GlobalThemeProvider fontFamily={APP_FONT_FAMILY}>
+            <SiteGuard initialConfig={siteConfig}>
               {children}
             </SiteGuard>
           </GlobalThemeProvider>

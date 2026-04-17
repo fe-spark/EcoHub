@@ -6,6 +6,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 )
 
@@ -39,7 +40,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		log.Printf("[Collect] 站点 %s 提升为主采集站，后台异步清理其旧有播放列表数据并降级现有主站...", source.Name)
 		// 异步清理该站点在作为附属站时期采集的所有播放列表，防止阻塞 API 几十秒（MySQL DELETE 数据量大时极慢）
 		go func(sid string) {
-			_ = repository.DeletePlaylistBySourceId(sid)
+			_ = filmrepo.DeletePlaylistBySourceId(sid)
 			log.Printf("[Collect] 站点 %s 的旧有播放列表数据清理完成", sid)
 		}(source.Id)
 
@@ -59,7 +60,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v)，进行数据重置...", masterLookup, masterUriChanged)
 		// 强制中断所有任务（双重保险）
 		spider.StopAllTasks()
-		repository.MasterFilmZero()
+		filmrepo.MasterFilmZero()
 	}
 
 	return repository.UpdateCollectSource(source)

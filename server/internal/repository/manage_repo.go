@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"context"
 	"encoding/json"
 	"log"
 	"sort"
@@ -12,7 +11,6 @@ import (
 
 	"gorm.io/gorm"
 )
-
 
 // ExistSiteConfig 判断 MySQL 中是否已有网站配置
 func ExistSiteConfig() bool {
@@ -31,7 +29,7 @@ func ExistBannersConfig() bool {
 // SaveSiteBasic 保存网站基本配置信息 (MySQL + Redis 短期缓存)
 func SaveSiteBasic(c model.BasicConfig) error {
 	rec := model.SiteConfigRecord{
-		SiteName: c.SiteName, Domain: c.Domain, Logo: c.Logo,
+		SiteName: c.SiteName, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 		IsVideoProxy: c.IsVideoProxy,
 	}
@@ -45,7 +43,7 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err()
 	if err == nil {
 		// 主动同步清理首页缓存
-		db.Rdb.Del(context.Background(), config.IndexPageCacheKey)
+		ClearIndexPageCache()
 	}
 	return err
 }
@@ -65,7 +63,7 @@ func GetSiteBasic() model.BasicConfig {
 		return c
 	}
 	c = model.BasicConfig{
-		SiteName: rec.SiteName, Domain: rec.Domain, Logo: rec.Logo,
+		SiteName: rec.SiteName, Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
 		IsVideoProxy: rec.IsVideoProxy,
 	}
@@ -119,7 +117,7 @@ func SaveBanners(bl model.Banners) error {
 		err := db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err()
 		if err == nil {
 			// Banner 变动也刷新首页
-			db.Rdb.Del(context.Background(), config.IndexPageCacheKey)
+			ClearIndexPageCache()
 		}
 		return err
 	})

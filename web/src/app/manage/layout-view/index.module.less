@@ -1,0 +1,65 @@
+.layout {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.sider {
+  height: 100%;
+  overflow: hidden;
+}
+
+.logoWrap {
+  padding: 20px 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.siteName {
+  font-size: 20px;
+  font-weight: bold;
+  font-style: italic;
+  background: linear-gradient(118deg, #e91a90, #c965b3, #988cd7, #00acfd);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.header {
+  padding: 0 24px 0 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--ant-color-bg-container) !important;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.headerTitle {
+  color: var(--ant-color-text-heading);
+  font-weight: 500;
+  font-size: 16px;
+}
+
+.headerIconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50% !important;
+  color: var(--ant-color-text-secondary);
+  transition: all 0.3s ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--ant-color-primary);
+  }
+}
+
+.content {
+  margin: 0;
+  padding: 24px;
+  background: var(--ant-color-bg-layout);
+}

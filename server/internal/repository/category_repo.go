@@ -4,100 +4,117 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"sync"
+	"strings"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmrepo "server/internal/repository/film"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-// 简易内存映射：仅用于爬虫入库等批量场景的高频查找，避免过多的数据库 IO
-var (
-	idToPid = make(map[int64]int64)
-	catMu   sync.RWMutex
-)
+func buildCategoryStableKey(pid int64, name string) string {
+	return support.BuildCategoryStableKey(pid, name)
+}
+
+func BuildCategoryStableKey(pid int64, name string) string {
+	return support.BuildCategoryStableKey(pid, name)
+}
+
+func GetCategoryStableKeyByID(id int64) string {
+	return support.GetCategoryStableKeyByID(id)
+}
+
+func GetCategoryByID(id int64) *model.Category {
+	if id <= 0 {
+		return nil
+	}
+	var category model.Category
+	if err := db.Mdb.Where("id = ?", id).First(&category).Error; err != nil {
+		return nil
+	}
+	return &category
+}
+
+func GetCategoryByStableKey(stableKey string) *model.Category {
+	stableKey = strings.TrimSpace(stableKey)
+	if stableKey == "" {
+		return nil
+	}
+	var category model.Category
+	if err := db.Mdb.Where("stable_key = ?", stableKey).First(&category).Error; err != nil {
+		return nil
+	}
+	return &category
+}
+
+func ResolveCategoryID(id int64) int64 {
+	return support.ResolveCategoryID(id)
+}
+
+func normalizeCategoryStableKeys(tx *gorm.DB) error {
+	var roots []model.Category
+	if err := tx.Where("pid = 0").Order("id ASC").Find(&roots).Error; err != nil {
+		return err
+	}
+	for _, root := range roots {
+		rootKey := buildCategoryStableKey(0, root.Name)
+		if err := tx.Model(&model.Category{}).Where("id = ?", root.Id).Update("stable_key", rootKey).Error; err != nil {
+			return err
+		}
+
+		var children []model.Category
+		if err := tx.Where("pid = ?", root.Id).Order("id ASC").Find(&children).Error; err != nil {
+			return err
+		}
+		for _, child := range children {
+			childKey := fmt.Sprintf("%s/%s", rootKey, strings.TrimSpace(child.Name))
+			if err := tx.Model(&model.Category{}).Where("id = ?", child.Id).Update("stable_key", childKey).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func touchCategoryVersion() {
+	support.TouchCategoryVersion()
+}
+
+func GetCategoryVersion() string {
+	return support.GetCategoryVersion()
+}
+
+func GetVersionedIndexPageCacheKey() string {
+	return support.GetVersionedIndexPageCacheKey()
+}
+
+func ClearIndexPageCache() {
+	support.ClearIndexPageCache()
+}
 
 // RefreshCategoryCache 用于重新加载基础映射映射到内存
 func RefreshCategoryCache() {
-	var all []model.Category
-	db.Mdb.Find(&all)
-
-	newPidMap := make(map[int64]int64)
-
-	for _, c := range all {
-		item := c
-		newPidMap[item.Id] = item.Pid
-		SetCategoryNameCache(item.Id, item.Name)
-	}
-
-	catMu.Lock()
-	idToPid = newPidMap
-	catMu.Unlock()
+	support.RefreshCategoryCache()
 }
 
 // GetRootId 获取分类的顶级根 ID (通过内存递归映射)
 func GetRootId(id int64) int64 {
-	if id == 0 {
-		return 0
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	curr := id
-	// 为防止循环引用死循环，最多查找 5 层 (目前本项目只有 2 层)
-	for range [5]int{} {
-		p, ok := idToPid[curr]
-		if !ok || p == 0 {
-			return curr
-		}
-		curr = p
-	}
-	return curr
+	return support.GetRootId(id)
 }
 
 // IsRootCategory 判断是否为根分类 (Pid 为 0 的大类)
 func IsRootCategory(id int64) bool {
-	if id == 0 {
-		return false
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	p, ok := idToPid[id]
-	return ok && p == 0
+	return support.IsRootCategory(id)
 }
 
 // GetParentId 获取父类 ID
 func GetParentId(id int64) int64 {
-	if id == 0 {
-		return 0
-	}
-
-	catMu.RLock()
-	if len(idToPid) == 0 {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
-	return idToPid[id]
+	return support.GetParentId(id)
 }
 
 // GetRootIdBySourcePid 通过采集站大类原始 ID 在本地大类列表中按顺序匹配
@@ -126,13 +143,19 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 
 			// 获取或创建本地大类
 			var localMain model.Category
-			tx.Where("pid = 0 AND name = ?", standardName).FirstOrCreate(&localMain, model.Category{Pid: 0, Name: standardName, Show: true})
+			tx.Where("pid = 0 AND name = ?", standardName).FirstOrCreate(&localMain, model.Category{Pid: 0, Name: standardName, StableKey: buildCategoryStableKey(0, standardName), Show: true})
+			if localMain.StableKey == "" {
+				tx.Model(&model.Category{}).Where("id = ?", localMain.Id).Update("stable_key", buildCategoryStableKey(0, localMain.Name))
+			}
 
 			// 3. 记录映射：如果来源大类名称与标准大类不一致，将其作为子分类处理，实现“日本动漫” -> “动漫”下的具体标签
 			targetId := localMain.Id
 			if node.Name != standardName {
 				var localSub model.Category
-				tx.Where("pid = ? AND name = ?", localMain.Id, node.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: node.Name, Show: true})
+				tx.Where("pid = ? AND name = ?", localMain.Id, node.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: node.Name, StableKey: buildCategoryStableKey(localMain.Id, node.Name), Show: true})
+				if localSub.StableKey == "" {
+					tx.Model(&model.Category{}).Where("id = ?", localSub.Id).Update("stable_key", buildCategoryStableKey(localMain.Id, localSub.Name))
+				}
 				targetId = localSub.Id
 			}
 			tx.Clauses(clause.OnConflict{
@@ -151,7 +174,10 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 			// 4. 处理来源子类 (继续挂载到本地标准大类下，平铺结构)
 			for _, sub := range node.Children {
 				var localSub model.Category
-				tx.Where("pid = ? AND name = ?", localMain.Id, sub.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: sub.Name, Show: true})
+				tx.Where("pid = ? AND name = ?", localMain.Id, sub.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: sub.Name, StableKey: buildCategoryStableKey(localMain.Id, sub.Name), Show: true})
+				if localSub.StableKey == "" {
+					tx.Model(&model.Category{}).Where("id = ?", localSub.Id).Update("stable_key", buildCategoryStableKey(localMain.Id, localSub.Name))
+				}
 
 				// 记录子类映射 (100% 绑定)
 				tx.Clauses(clause.OnConflict{
@@ -169,6 +195,9 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 			}
 		}
 		tx.Where("source_id = ? AND mapping_version <> ?", sourceId, version).Delete(&model.CategoryMapping{})
+		if err := normalizeCategoryStableKeys(tx); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
@@ -178,6 +207,8 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 	// 同步完成后刷新内存缓存，确保采集立即可用
 	ClearCategoryCache()
 	InitMappingEngine()
+	touchCategoryVersion()
+	ClearIndexPageCache()
 	return nil
 }
 
@@ -198,6 +229,7 @@ func buildTreeHelper() model.CategoryTree {
 			Id:        item.Id,
 			Pid:       item.Pid,
 			Name:      item.Name,
+			StableKey: item.StableKey,
 			Alias:     item.Alias,
 			Show:      item.Show,
 			Sort:      item.Sort,
@@ -265,6 +297,7 @@ func GetActiveCategoryTree() model.CategoryTree {
 			Id:        c.Id,
 			Pid:       c.Pid,
 			Name:      c.Name,
+			StableKey: c.StableKey,
 			Alias:     c.Alias,
 			Show:      c.Show,
 			Sort:      c.Sort,
@@ -342,8 +375,15 @@ func sortRootCategories(children []*model.CategoryTree) {
 // ClearCategoryCache 清除分类相关的所有缓存 (Redis + 内存映射)
 func ClearCategoryCache() {
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
-	ClearAllSearchTagsCache()
+	filmrepo.ClearAllSearchTagsCache()
 	RefreshCategoryCache()
+}
+
+func MarkCategoryChanged() {
+	ClearCategoryCache()
+	InitMappingEngine()
+	touchCategoryVersion()
+	ClearIndexPageCache()
 }
 
 // UpdateCategoryStatus 仅更新分类的显示状态或名称，并清除缓存
@@ -351,7 +391,12 @@ func UpdateCategoryStatus(id int64, updates map[string]any) error {
 	if err := db.Mdb.Model(&model.Category{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return err
 	}
-	ClearCategoryCache()
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return normalizeCategoryStableKeys(tx)
+	}); err != nil {
+		return err
+	}
+	MarkCategoryChanged()
 	return nil
 }
 
@@ -408,6 +453,7 @@ func InitMainCategories() {
 
 		if err == nil {
 			// 2. 存在则更新展示状态与别名
+			cat.StableKey = buildCategoryStableKey(0, name)
 			cat.Alias = aliases[name]
 			cat.Show = true
 			if saveErr := db.Mdb.Save(&cat).Error; saveErr != nil {
@@ -418,10 +464,11 @@ func InitMainCategories() {
 		} else {
 			// 3. 不存在则创建
 			db.Mdb.Create(&model.Category{
-				Pid:   0,
-				Name:  name,
-				Alias: aliases[name],
-				Show:  true,
+				Pid:       0,
+				Name:      name,
+				StableKey: buildCategoryStableKey(0, name),
+				Alias:     aliases[name],
+				Show:      true,
 			})
 			fmt.Printf("[Init] 已创建标准大类: %s\n", name)
 		}
@@ -432,8 +479,10 @@ func InitMainCategories() {
 	InitMappingEngine()
 
 	// 3. 统一清理分类相关缓存并重建内存映射
-	ClearCategoryCache()
-	db.Rdb.Del(db.Cxt, config.IndexPageCacheKey)
+	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return normalizeCategoryStableKeys(tx)
+	})
+	MarkCategoryChanged()
 
 	fmt.Println("[Init] 缓存刷新与标准大类对齐完成。")
 }
@@ -458,7 +507,7 @@ func mergeShortFilmIntoOther() {
 		for _, child := range shortChildren {
 			var target model.Category
 			if err := tx.Where("pid = ? AND name = ?", other.Id, child.Name).
-				FirstOrCreate(&target, model.Category{Pid: other.Id, Name: child.Name, Show: true}).Error; err == nil {
+				FirstOrCreate(&target, model.Category{Pid: other.Id, Name: child.Name, StableKey: buildCategoryStableKey(other.Id, child.Name), Show: true}).Error; err == nil {
 				idMap[child.Id] = target.Id
 			}
 		}
@@ -483,8 +532,12 @@ func mergeShortFilmIntoOther() {
 				"WHERE s.pid = ? AND s.cid > 0 AND s.cid <> s.pid "+
 				"GROUP BY s.pid,s.cid,c.name", other.Id,
 		)
+		if err := normalizeCategoryStableKeys(tx); err != nil {
+			return err
+		}
 		return nil
 	})
+	MarkCategoryChanged()
 }
 
 func ensureCategoryIndexes() {

@@ -1,0 +1,145 @@
+.container {
+  width: 100%;
+}
+
+.title {
+  font-size: 28px;
+  font-weight: bold;
+  color: var(--public-text-1);
+  margin-bottom: 30px;
+  border-bottom: 2px solid var(--public-border-3);
+  padding-bottom: 12px;
+}
+
+.historyList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.historyItem {
+  display: flex;
+  background: var(--public-surface-3);
+  border: 1px solid var(--public-border-3);
+  border-radius: 12px;
+  padding: 12px;
+  gap: 20px;
+  position: relative;
+  transition: all 0.2s;
+
+  &:hover {
+    background: var(--public-surface-hover);
+    border-color: var(--public-border-2);
+  }
+
+  .poster {
+    width: 100px;
+    height: 140px;
+    flex: none;
+    border-radius: 8px;
+    object-fit: cover;
+    cursor: pointer;
+  }
+
+  .info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+
+    h3 {
+      font-size: 18px;
+      margin: 0;
+      color: var(--public-text-1);
+      cursor: pointer;
+
+      &:hover {
+        color: #fa8c16;
+      }
+    }
+
+    .meta {
+      font-size: 13px;
+      color: var(--public-text-4);
+      display: flex;
+      gap: 16px;
+      align-items: center;
+
+      .deviceIcon {
+        font-size: 16px;
+        color: var(--public-text-6);
+      }
+    }
+
+    .progress {
+      font-size: 13px;
+      color: #fa8c16;
+    }
+
+    .episode {
+      font-size: 13px;
+      color: var(--public-text-5);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+
+      .sourceTag {
+        background: var(--primary-1);
+        color: #fa8c16;
+        border: 1px solid #ffd591;
+        padding: 0 6px;
+        border-radius: 4px;
+        font-size: 11px;
+        line-height: 18px;
+        font-weight: 500;
+      }
+    }
+  }
+
+  .deleteBtn {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    color: var(--public-text-6);
+    font-size: 18px;
+    cursor: pointer;
+    transition: color 0.2s;
+
+    &:hover {
+      color: #ff4d4f;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .title {
+    font-size: 20px;
+  }
+
+  .historyItem {
+    gap: 12px;
+    padding: 8px;
+
+    .poster {
+      width: 80px;
+      height: 110px;
+    }
+
+    .info {
+      h3 {
+        font-size: 15px;
+      }
+
+      .meta {
+        font-size: 11px;
+        gap: 8px;
+      }
+
+      .progress,
+      .episode {
+        font-size: 11px;
+      }
+    }
+  }
+}

@@ -16,6 +16,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/utils"
 )
 
@@ -135,7 +136,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := repository.GetSearchTag(model.SearchTagsVO{Pid: category.Id})
+			searchTags := filmrepo.GetSearchTag(model.SearchTagsVO{Pid: category.Id})
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -287,10 +288,14 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	query := db.Mdb.Model(&model.SearchInfo{})
 
 	pid := int64(t)
+	pid = repository.ResolveCategoryID(pid)
+	if cid > 0 {
+		cid = repository.ResolveCategoryID(cid)
+	}
 	if cid == model.TagUncategorizedValue && pid <= 0 {
 		return 1, 1, 0, []model.FilmList{}
 	}
-	query = repository.ApplyCategoryFilter(query, pid, cid)
+	query = filmrepo.ApplyCategoryFilter(query, pid, cid)
 
 	if wd != "" {
 		query = query.Where("name LIKE ? OR sub_title LIKE ?", "%"+wd+"%", "%"+wd+"%")
@@ -305,7 +310,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		switch year {
 		case model.TagOthersValue, "其他", "其它":
 			if pid > 0 {
-				topVals := repository.GetTopTagValues(pid, "Year")
+				topVals := filmrepo.GetTopTagValues(pid, "Year")
 				query = query.Where("year <> 0")
 				if len(topVals) > 0 {
 					query = query.Where("year NOT IN ?", topVals)
@@ -334,7 +339,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		}
 		switch {
 		case (val == model.TagOthersValue || val == "其他" || val == "其它") && pid > 0:
-			topVals := repository.GetTopTagValues(pid, dimType)
+			topVals := filmrepo.GetTopTagValues(pid, dimType)
 			if dimType == "Plot" {
 				query = query.Where("class_tag <> ''")
 				maxPlotExcludes := 5

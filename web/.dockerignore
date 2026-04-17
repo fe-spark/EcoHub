@@ -20,6 +20,5 @@ out
 *.md
 
 # Env
-.env
-.env.local
-.env.*.local
+.env*
+!.env.production

@@ -12,7 +12,6 @@ import {
   FireOutlined,
   DownOutlined,
 } from "@ant-design/icons";
-import { ApiGet } from "@/lib/api";
 import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
@@ -31,9 +30,8 @@ interface HistoryItem {
   timeStamp: number;
 }
 
-export default function Header() {
+export default function Header({ navList }: { navList: NavItem[] }) {
   const [keyword, setKeyword] = useState("");
-  const [navList, setNavList] = useState<NavItem[]>([]);
   const { config: siteInfo } = useSiteConfig();
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [scrolled, setScrolled] = useState(false);
@@ -54,12 +52,6 @@ export default function Header() {
     };
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
-  }, []);
-
-  useEffect(() => {
-    ApiGet("/navCategory").then((resp) => {
-      if (resp.code === 0) setNavList(resp.data || []);
-    });
   }, []);
 
   const loadHistory = useCallback(() => {
@@ -213,6 +205,8 @@ export default function Header() {
           
           {siteInfo?.siteName && (
             <div className={styles.siteName} onClick={() => router.push("/")}>
+              {/* 站点 logo 由后台配置提供，当前保持原生 img 避免额外远程域名配置 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               {siteInfo.logo && <img src={siteInfo.logo} alt="logo" className={styles.logoImg} />}
               <span className={styles.logoText}>{siteInfo.siteName}</span>
             </div>

@@ -47,7 +47,6 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 		}
 	}
 
-	s.Remarks = c.DefaultQuery("remarks", "")
 	begin := c.DefaultQuery("beginTime", "")
 	if begin == "" {
 		s.BeginTime = 0

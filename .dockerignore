@@ -12,10 +12,6 @@
 .DS_Store
 Thumbs.db
 
-# Client (Vue legacy)
-client/node_modules
-client/dist
-
 # Web (Next.js)
 web/node_modules
 web/.next
