@@ -49,10 +49,10 @@ func clearStartupCaches() {
 	ctx := db.Cxt
 	db.Rdb.Del(ctx,
 		config.ActiveCategoryTreeKey,
-		config.IndexPageCacheKey,
 		config.TVBoxConfigCacheKey,
 		config.VirtualPictureKey,
 	)
+	repository.ClearIndexPageCache()
 
 	patterns := []string{
 		config.SearchTags + ":*",
@@ -113,7 +113,6 @@ func (s *InitService) BasicConfigInit() {
 func defaultBasicConfig() model.BasicConfig {
 	return model.BasicConfig{
 		SiteName: "EcoHub",
-		Domain:   "http://127.0.0.1:3600",
 		Logo:     "https://raw.githubusercontent.com/fe-spark/EcoHub/main/logo.png",
 		Keyword:  "在线视频, 免费观影",
 		Describe: "自动采集, 多播放源集成,在线观影网站",

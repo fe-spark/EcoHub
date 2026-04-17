@@ -2,25 +2,26 @@ import type { NextConfig } from "next";
 import os from "os";
 
 const cpuCount = Math.max(1, os.cpus().length - 1);
+
 const apiUrl = process.env.API_URL?.trim();
 
 if (!apiUrl) {
-  throw new Error(
-    "缺少环境变量 API_URL，请在 web/.env.local 中配置，例如 API_URL=http://127.0.0.1:3601",
-  );
+  throw new Error("缺少环境变量 API_URL，无法为前端配置后端地址");
 }
 
 const nextConfig: NextConfig = {
   output: "standalone",
+  env: {
+    API_URL: apiUrl,
+  },
   async rewrites() {
     return [
       {
         source: "/api/:path*",
-        destination: `${apiUrl}/api/:path*`,
+        destination: `${apiUrl.replace(/\/+$/, "")}/api/:path*`,
       },
     ];
   },
-
   turbopack: {
     rules: {
       "*.module.less": {

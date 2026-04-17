@@ -5,11 +5,11 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/utils"
 )
 
@@ -20,7 +20,7 @@ var IndexSvc = new(IndexService)
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
 	// 1. 尝试从 Redis 获取缓存
-	cacheKey := config.IndexPageCacheKey
+	cacheKey := repository.GetVersionedIndexPageCacheKey()
 	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 		res := make(map[string]any)
 		if json.Unmarshal([]byte(data), &res) == nil {
@@ -42,11 +42,11 @@ func (i *IndexService) IndexPage() map[string]any {
 		var movies []model.MovieBasicInfo
 		var hotMovies []model.SearchInfo
 		if c.Children != nil {
-			movies = repository.GetMovieListByPidLimit(c.Id, 14, 0)
-			hotMovies = repository.GetHotMovieByPidLimit(c.Id, 14, 0)
+			movies = filmrepo.GetMovieListByPidLimit(c.Id, 14, 0)
+			hotMovies = filmrepo.GetHotMovieByPidLimit(c.Id, 14, 0)
 		} else {
-			movies = repository.GetMovieListByCidLimit(c.Id, 14, 0)
-			hotMovies = repository.GetHotMovieByCidLimit(c.Id, 14, 0)
+			movies = filmrepo.GetMovieListByCidLimit(c.Id, 14, 0)
+			hotMovies = filmrepo.GetHotMovieByCidLimit(c.Id, 14, 0)
 		}
 		if movies == nil {
 			movies = make([]model.MovieBasicInfo, 0)
@@ -74,11 +74,11 @@ func (i *IndexService) IndexPage() map[string]any {
 
 // GetFilmDetail 影片详情信息页面处理
 func (i *IndexService) GetFilmDetail(id int) model.MovieDetailVo {
-	search := repository.GetSearchInfoById(int64(id))
+	search := filmrepo.GetSearchInfoById(int64(id))
 	if search == nil {
 		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
 	}
-	movieDetail := repository.GetMovieDetail(search.Cid, search.Mid)
+	movieDetail := filmrepo.GetMovieDetail(search.Cid, search.Mid)
 	if movieDetail == nil {
 		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
 	}
@@ -132,12 +132,8 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 
 // SearchFilmInfo 获取关键字匹配的影片信息
 func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
-	sl := repository.SearchFilmKeyword(key, page)
-	var bl []model.MovieBasicInfo
-	for _, s := range sl {
-		bl = append(bl, repository.GetBasicInfoByKey(s.Cid, s.Mid))
-	}
-	return bl
+	sl := filmrepo.SearchFilmKeyword(key, page)
+	return filmrepo.GetBasicInfoBySearchInfos(sl...)
 }
 
 // GetFilmCategory 根据Pid或Cid获取指定的分页数据
@@ -145,15 +141,16 @@ func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) 
 	var basicList []model.MovieBasicInfo
 	switch idType {
 	case "pid":
-		basicList = repository.GetMovieListByPid(id, page)
+		basicList = filmrepo.GetMovieListByPid(id, page)
 	case "cid":
-		basicList = repository.GetMovieListByCid(id, page)
+		basicList = filmrepo.GetMovieListByCid(id, page)
 	}
 	return basicList
 }
 
 // GetPidCategory 获取pid对应的分类信息
 func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
+	pid = repository.ResolveCategoryID(pid)
 	tree := repository.GetCategoryTree()
 	for _, t := range tree.Children {
 		if t.Id == pid {
@@ -176,7 +173,7 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
 	// 关键修复：从数据库获取规范化后的 SearchInfo，而不是直接使用 detail 中不可信的 Cid/Pid
-	search := repository.GetSearchInfoById(detail.Id)
+	search := filmrepo.GetSearchInfoById(detail.Id)
 	if search == nil {
 		// 备选方案：如果 SearchInfo 暂无，则构造一个简易的
 		search = &model.SearchInfo{
@@ -188,12 +185,12 @@ func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []m
 			Language: detail.Language,
 		}
 	}
-	return repository.GetRelateMovieBasicInfo(*search, page)
+	return filmrepo.GetRelateMovieBasicInfo(*search, page)
 }
 
 // SearchTags 整合对应分类的搜索tag
 func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
-	return repository.GetSearchTag(st)
+	return filmrepo.GetSearchTag(st)
 }
 
 func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
@@ -242,7 +239,7 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 	}
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
 	for _, s := range sc {
-		pl := repository.GetMultiplePlayByKeys(s.Id, names)
+		pl := filmrepo.GetMultiplePlayByKeys(s.Id, names)
 		if len(pl) > 0 {
 			playList = append(playList, model.PlayLinkVo{Id: s.Id, Name: s.Name, LinkList: pl})
 		}
@@ -253,15 +250,15 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
 func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) []model.MovieBasicInfo {
-	sl := repository.GetSearchInfosByTags(st, page)
-	return repository.GetBasicInfoBySearchInfos(sl...)
+	sl := filmrepo.GetSearchInfosByTags(st, page)
+	return filmrepo.GetBasicInfoBySearchInfos(sl...)
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
 	res := make(map[string]any)
-	res["news"] = repository.GetMovieListBySort(0, pid, page)
-	res["top"] = repository.GetMovieListBySort(1, pid, page)
-	res["recent"] = repository.GetMovieListBySort(2, pid, page)
+	res["news"] = filmrepo.GetMovieListBySort(0, pid, page)
+	res["top"] = filmrepo.GetMovieListBySort(1, pid, page)
+	res["recent"] = filmrepo.GetMovieListBySort(2, pid, page)
 	return res
 }

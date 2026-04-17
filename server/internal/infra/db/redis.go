@@ -2,7 +2,6 @@ package db
 
 import (
 	"context"
-	"fmt"
 	"server/internal/config"
 	"time"
 
@@ -29,12 +28,6 @@ func InitRedisConn() error {
 	_, err := Rdb.Ping(Cxt).Result()
 	if err != nil {
 		panic(err)
-	}
-
-	// 开发模式下清空 Redis
-	if config.IsDevMode {
-		Rdb.FlushAll(Cxt)
-		fmt.Println("[Init] 开发模式：Redis 缓存已清空")
 	}
 
 	return nil

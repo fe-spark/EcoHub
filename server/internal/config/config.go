@@ -5,6 +5,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/joho/godotenv"
 )
 
 /*
@@ -21,9 +23,6 @@ var (
 	RedisAddr     = ""
 	RedisPassword = ""
 	RedisDBNo     = 0
-
-	// IsDevMode 是否处于开发模式 (开发模式下每次启动会清空数据库和 Redis)
-	IsDevMode = false
 
 	// MySQL 原始分项配置 (用于建库与重建等底层操作)
 	MysqlHost   = ""
@@ -59,6 +58,8 @@ const (
 	TVBoxConfigCacheKey = "TVBox:Config"
 	// IndexPageCacheKey 首页数据缓存 key
 	IndexPageCacheKey = "Index:Page"
+	// CategoryVersionKey 分类版本号缓存 key
+	CategoryVersionKey = "Category:Version"
 	// TVBoxList TVBox 列表页缓存前缀
 	TVBoxList = "TVBox:List"
 
@@ -117,6 +118,10 @@ const (
 
 // init func for loading from env
 func init() {
+	// 本地直接运行服务端时，优先从当前目录 .env 加载环境变量。
+	// Docker Compose 会显式注入 environment，这里不会覆盖已存在的值。
+	_ = godotenv.Load()
+
 	InitConfig()
 }
 
@@ -124,19 +129,9 @@ func InitConfig() {
 	// 加载监听端口
 	if port := os.Getenv("PORT"); port != "" {
 		ListenerPort = port
-	} else if lPort := os.Getenv("LISTENER_PORT"); lPort != "" {
-		ListenerPort = lPort
 	}
 	if ListenerPort == "" {
-		panic("环境变量缺失: PORT 或 LISTENER_PORT")
-	}
-
-	// 检测开发模式 (ENV=dev 或 IS_DEV_MODE=true)
-	env := os.Getenv("ENV")
-	devFlag := os.Getenv("IS_DEV_MODE")
-	if env == "dev" || devFlag == "true" {
-		IsDevMode = true
-		fmt.Println("[Config] 检测到开发模式：已开启数据库与 Redis 自动清空机制")
+		panic("环境变量缺失: PORT")
 	}
 
 	fmt.Printf("[Config] 加载端口: %s\n", ListenerPort)

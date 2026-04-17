@@ -28,48 +28,74 @@ flowchart LR
 - MySQL 8+
 - Redis 7+
 
-## 本地启动
+## 启动
 
-推荐直接使用项目内脚本：
+### 1. 准备环境变量
 
 ```bash
 cd server
-./run-local.sh
+cp .env.example .env
 ```
 
-脚本会：
+按你的实际环境修改 `server/.env`。
 
-- 加载 `server/.env`
-- 执行 `go run ./cmd/server`
+常见示例：
 
-适用范围：
+```env
+PORT=8080
+JWT_SECRET=change_me_to_a_long_random_string
 
-- 适用于已安装 Bash 和 Go 的 macOS、Linux、WSL、Git Bash 等环境
-- 不适用于 Windows 原生 `cmd` / PowerShell
-- Windows 原生环境建议改用 Docker，或先自行注入 `.env` 中的环境变量后再执行 `go run ./cmd/server`
+MYSQL_HOST=127.0.0.1
+MYSQL_PORT=3306
+MYSQL_USER=eco
+MYSQL_PASSWORD=your_mysql_password
+MYSQL_DBNAME=eco
 
-如果你想手动启动：
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DB=0
+```
+
+如果 MySQL / Redis 不在当前机器上，请把 `MYSQL_HOST` / `REDIS_HOST` 改成真实可访问地址。
+
+### 2. 启动服务
 
 ```bash
 cd server
-set -a
-source .env
-set +a
 go run ./cmd/server
 ```
 
-服务监听地址由 `PORT` 或 `LISTENER_PORT` 决定。
-如果同时配置了 `PORT` 和 `LISTENER_PORT`，当前实现会优先使用 `PORT`。
+服务启动时会自动加载当前目录下的 `server/.env`。
+
+### 3. 启动成功后
+
+- 服务监听端口由 `PORT` 决定，默认是 `8080`
+- 首次启动会初始化数据库表、默认站点配置和内置账号
+- 如果数据库或 Redis 不可达，服务会在启动阶段报错退出
 
 ## 环境变量
 
-本地运行使用 `server/.env`，Docker 运行使用根目录 `.env`。字段保持一致。
+运行 `server` 时，服务会自动读取 `server/.env`。
+
+- `PORT`：服务监听端口，默认 `8080`
+- `JWT_SECRET`：JWT 签名密钥，必须填写随机高强度值，可用 `openssl rand -hex 32` 生成
+- `MYSQL_HOST` / `REDIS_HOST`：填运行 `server` 时实际能访问到的地址
+- `MYSQL_PORT` / `REDIS_PORT`：填数据库和 Redis 的真实端口
+- `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DBNAME`：填数据库真实账号、密码和库名
+- `REDIS_PASSWORD`：如果 Redis 未设置密码，可留空
+- `REDIS_DB`：一般保持 `0`
+
+生成 `JWT_SECRET`：
+
+```bash
+openssl rand -hex 32
+```
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `PORT` | 条件必填 | 服务监听端口，优先级高于 `LISTENER_PORT` |
-| `LISTENER_PORT` | 条件必填 | 当未设置 `PORT` 时使用的监听端口 |
-| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会直接启动失败 |
+| `PORT` | 是 | 服务监听端口 |
+| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败，可用 `openssl rand -hex 32` 生成 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
 | `MYSQL_USER` | 是 | MySQL 用户 |
@@ -79,19 +105,27 @@ go run ./cmd/server
 | `REDIS_PORT` | 是 | Redis 端口 |
 | `REDIS_PASSWORD` | 否 | Redis 密码 |
 | `REDIS_DB` | 否 | Redis DB，默认 `0` |
-| `ENV` | 否 | 设置为 `dev` 时启用开发模式 |
-| `IS_DEV_MODE` | 否 | 设置为 `true` 时同样启用开发模式 |
 
-### 开发模式说明
+常见配置：
 
-`ENV=dev` 或 `IS_DEV_MODE=true` 时：
+1. MySQL / Redis 都在当前机器上
 
-- 启动时会清空 Redis
-- 启动时会重置 MySQL
-- 有删库建库权限时执行物理重建
-- 没有删库权限时退化为清空现有表
+```env
+MYSQL_HOST=127.0.0.1
+REDIS_HOST=127.0.0.1
+```
 
-这适合本地调试，不适合保留数据的环境。
+2. MySQL / Redis 在另一台服务器
+
+```env
+MYSQL_HOST=192.168.1.10
+REDIS_HOST=192.168.1.11
+```
+
+3. 数据库和 Redis 在其他开发环境或云服务
+
+- 把 `MYSQL_HOST` / `REDIS_HOST` 改成对应域名、内网地址或公网地址
+- 同时确认防火墙、白名单和数据库账号授权已经放通
 
 ## 启动后初始化
 
@@ -110,6 +144,8 @@ go run ./cmd/server
 | --- | --- | --- | --- |
 | 管理员 | `admin` | `admin` | 可读可写 |
 | 访客 | `guest` | `guest` | 只读 |
+
+这些默认账号仅用于初始化或演示环境。对外使用前应立即修改密码，或直接替换为你自己的账号体系。
 
 ## 采集与聚合逻辑
 

@@ -7,6 +7,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider/conver"
 )
 
@@ -16,7 +17,7 @@ var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
 func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.SearchInfo {
-	return repository.GetSearchPage(vo)
+	return filmrepo.GetSearchPage(vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
@@ -25,14 +26,13 @@ func (s *FilmService) GetSearchOptions() map[string]any {
 	tree := repository.GetActiveCategoryTree()
 	tree.Name = "全部分类"
 	options["class"] = conver.ConvertCategoryList(&tree)
-	options["remarks"] = []map[string]string{{"Name": `全部`, "Value": ``}, {"Name": `完结`, "Value": `完结`}, {"Name": `未完结`, "Value": `未完结`}}
 	options["year"] = make([]map[string]string, 0)
 	tagGroup := make(map[int64]map[string]any)
 	if tree.Children != nil {
 		for _, t := range tree.Children {
-			option := repository.GetSearchOptions(model.SearchTagsVO{Pid: t.Id})
+			option := filmrepo.GetSearchOptions(model.SearchTagsVO{Pid: t.Id})
 			if len(option) > 0 {
-				tagGroup[t.Id] = repository.GetSearchOptions(model.SearchTagsVO{Pid: t.Id})
+				tagGroup[t.Id] = option
 				if v, ok := options["year"].([]map[string]string); !ok || len(v) == 0 {
 					options["year"] = tagGroup[t.Id]["Year"]
 				}
@@ -63,16 +63,16 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		sourceId = master[0].Id
 	}
 
-	return repository.SaveDetail(sourceId, detail)
+	return filmrepo.SaveDetail(sourceId, detail)
 }
 
 // DelFilm 删除分类影片
 func (s *FilmService) DelFilm(id int64) error {
-	sInfo := repository.GetSearchInfoById(id)
+	sInfo := filmrepo.GetSearchInfoById(id)
 	if sInfo == nil || sInfo.ID == 0 {
 		return errors.New("影片信息不存在")
 	}
-	return repository.DelFilmSearch(id)
+	return filmrepo.DelFilmSearch(id)
 }
 
 // GetFilmClassTree 获取影片分类信息
@@ -117,9 +117,9 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 		for _, subC := range oldClass.Children {
 			var err error
 			if class.Show {
-				err = repository.RecoverFilmSearch(subC.Id)
+				err = filmrepo.RecoverFilmSearch(subC.Id)
 			} else {
-				err = repository.ShieldFilmSearch(subC.Id)
+				err = filmrepo.ShieldFilmSearch(subC.Id)
 			}
 			if err != nil {
 				return fmt.Errorf("分类 [%d] 搜索可见性更新失败: %s", subC.Id, err.Error())
@@ -129,9 +129,9 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 		// 如果是子类且 Show 状态变更
 		var err error
 		if class.Show {
-			err = repository.RecoverFilmSearch(class.Id)
+			err = filmrepo.RecoverFilmSearch(class.Id)
 		} else {
-			err = repository.ShieldFilmSearch(class.Id)
+			err = filmrepo.ShieldFilmSearch(class.Id)
 		}
 		if err != nil {
 			return err

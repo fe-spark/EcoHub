@@ -53,6 +53,8 @@ function FilmCard({
       <div className={styles.item} onClick={() => handleToDetail(id)}>
         <div className={`${styles.posterWrapper} ${!imgLoaded && !imgError ? styles.loadingBg : ""}`}>
           {!imgError && item.picture && (
+            /* 影片卡片图片全部来自后端动态地址，这里维持原生 img 与懒加载策略 */
+            /* eslint-disable-next-line @next/next/no-img-element */
             <img
               src={item.picture}
               className={`${styles.poster} ${imgLoaded ? styles.posterLoaded : ""}`}

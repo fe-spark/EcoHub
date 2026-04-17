@@ -7,6 +7,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 
 	"github.com/robfig/cron/v3"
 )
@@ -201,8 +202,8 @@ func executeTask(ft model.FilmCollectTask) {
 				}
 			}
 		}
-		n := repository.CleanOrphanPlaylists()
-		m := repository.CleanEmptyFilms()
+		n := filmrepo.CleanOrphanPlaylists()
+		m := filmrepo.CleanEmptyFilms()
 		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录和 %d 条空记录\n", n, m)
 	}
 
