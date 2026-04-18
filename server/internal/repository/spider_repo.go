@@ -303,7 +303,7 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	dto.GetPage(qw, vo.Paging)
 	// 获取分页查询的数据
 	var list []model.FailureRecord
-	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("updated_at DESC").Find(&list).Error; err != nil {
+	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("updated_at DESC, id DESC").Find(&list).Error; err != nil {
 		log.Println(err)
 		return nil
 	}

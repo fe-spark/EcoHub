@@ -376,14 +376,14 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 
 	dto.GetPage(query, &page)
 
-	orderBy := "update_stamp DESC"
+	orderBy := "update_stamp DESC, mid DESC"
 	switch sort {
 	case "hits":
-		orderBy = "hits DESC"
+		orderBy = "hits DESC, mid DESC"
 	case "score":
-		orderBy = "score DESC"
+		orderBy = "score DESC, mid DESC"
 	case "release_stamp":
-		orderBy = "release_stamp DESC"
+		orderBy = "release_stamp DESC, mid DESC"
 	}
 
 	var sl []model.SearchInfo
