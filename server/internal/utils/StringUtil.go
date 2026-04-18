@@ -35,7 +35,8 @@ var (
 		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:19|20)\d{2}(?:\)|）|\]|】)?\s*$`),
 		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:4k|8k|2160p|1080p|720p|480p|bd|bdrip|blu\s*ray|bluray|web\s*-?dl|webrip|hdtv|hd|uhd)(?:\)|）|\]|】)?\s*$`),
 		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:国语|国粤双语|粤语|英语|日语|韩语|中字|中英字幕|双字|双语|english|japanese|korean|mandarin|cantonese|dubbed|subbed)(?:\)|）|\]|】)?\s*$`),
-		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:完整版|未删减版|未删减|加长版|特别篇|特别版|剧场版|tv版|tv动画|ova|oad|sp|总集篇|合集|修复版|重制版|纪念版)(?:\)|）|\]|】)?\s*$`),
+		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:年番|特别篇|篇章)(?:\)|）|\]|】)?\s*$`),
+		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:完整版|未删减版|未删减|加长版|特别篇|特别版|剧场版|tv版|tv\s*动画|ova|oad|sp|总集篇|合集|修复版|重制版|纪念版)(?:\)|）|\]|】)?\s*$`),
 		regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:更新至?.*|全\d+集|完结|已完结|连载中|上映版|抢先版|超清版)(?:\)|）|\]|】)?\s*$`),
 	}
 	seriesAliasSplitPattern = regexp.MustCompile(`\s*(?:/|\||,|，|、|:|：)\s*`)
