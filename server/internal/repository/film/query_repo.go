@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -195,6 +196,13 @@ func extractCoreSearchToken(name string) string {
 	if minIdx < len(coreToken) {
 		coreToken = strings.TrimSpace(coreToken[:minIdx])
 	}
+	coreToken = strings.TrimSpace(strings.TrimSuffix(coreToken, "年番"))
+	for _, suffix := range []string{"特别篇", "篇章"} {
+		coreToken = strings.TrimSpace(strings.TrimSuffix(coreToken, suffix))
+	}
+	for _, pattern := range []string{`(?i)tv\s*动画$`} {
+		coreToken = strings.TrimSpace(regexp.MustCompile(pattern).ReplaceAllString(coreToken, ""))
+	}
 
 	runes := []rune(coreToken)
 	nameRunes := []rune(strings.TrimSpace(name))
@@ -281,32 +289,67 @@ func buildTagSet(tags []string) map[string]struct{} {
 	return set
 }
 
-func loadRelatedCandidates(search model.SearchInfo, limit int) []model.SearchInfo {
-	coreToken := extractCoreSearchToken(search.Name)
-	tags := splitClassTags(search.ClassTag)
+func appendUniqueRelatedCandidates(dst []model.SearchInfo, src []model.SearchInfo, seen map[int64]struct{}, limit int) []model.SearchInfo {
+	for _, item := range src {
+		if _, ok := seen[item.Mid]; ok {
+			continue
+		}
+		seen[item.Mid] = struct{}{}
+		dst = append(dst, item)
+		if len(dst) >= limit {
+			break
+		}
+	}
+	return dst
+}
+
+func queryRelatedCandidates(search model.SearchInfo, limit int, apply func(query *gorm.DB) *gorm.DB) []model.SearchInfo {
+	if limit <= 0 {
+		return nil
+	}
 	query := db.Mdb.Model(&model.SearchInfo{}).
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL")
-
-	condition := db.Mdb.Where("1 = 0")
-	if search.SeriesKey != "" {
-		condition = condition.Or("series_key = ?", search.SeriesKey)
+	if apply != nil {
+		query = apply(query)
 	}
-	if search.Cid > 0 {
-		condition = condition.Or("cid = ?", search.Cid)
+	var list []model.SearchInfo
+	if err := query.Order(latestUpdateOrderSQL).Limit(limit).Find(&list).Error; err != nil {
+		log.Printf("queryRelatedCandidates Error: %v", err)
+		return nil
+	}
+	return list
+}
+
+func loadRelatedCandidates(search model.SearchInfo, limit int) []model.SearchInfo {
+	coreToken := extractCoreSearchToken(search.Name)
+	tags := splitClassTags(search.ClassTag)
+	list := make([]model.SearchInfo, 0, limit)
+	seen := make(map[int64]struct{}, limit)
+	strongLimit := max(limit, 20)
+	cidLimit := max(limit/2, 10)
+	tagLimit := max(limit/3, 6)
+
+	if search.SeriesKey != "" {
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, strongLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("series_key = ?", search.SeriesKey)
+		}), seen, limit)
 	}
 	if coreToken != "" {
 		like := fmt.Sprintf("%%%s%%", coreToken)
-		condition = condition.Or("name LIKE ? OR sub_title LIKE ?", like, like)
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, strongLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("name LIKE ? OR sub_title LIKE ?", like, like)
+		}), seen, limit)
+	}
+	if search.Cid > 0 {
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, cidLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("cid = ?", search.Cid)
+		}), seen, limit)
 	}
 	for _, tag := range tags {
-		condition = condition.Or("class_tag LIKE ?", fmt.Sprintf("%%%s%%", tag))
-	}
-
-	var list []model.SearchInfo
-	if err := query.Where(condition).Order(latestUpdateOrderSQL).Limit(limit).Find(&list).Error; err != nil {
-		log.Printf("loadRelatedCandidates Error: %v", err)
-		return nil
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, tagLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("class_tag LIKE ?", fmt.Sprintf("%%%s%%", tag))
+		}), seen, limit)
 	}
 	return list
 }
