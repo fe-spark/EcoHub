@@ -89,7 +89,7 @@ func GetUserPage(page *dto.Page, userName string) []model.User {
 		query = query.Where("user_name LIKE ?", "%"+userName+"%")
 	}
 	dto.GetPage(query, page)
-	query.Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list)
+	query.Order("id DESC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list)
 	return list
 }
 

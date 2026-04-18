@@ -84,7 +84,7 @@ func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []m
 	hotSince := time.Now().AddDate(0, -1, 0).Unix()
 	if err := buildCategoryQuery(field, id).
 		Where("update_stamp > ?", hotSince).
-		Order("year DESC, hits DESC").
+		Order("year DESC, hits DESC, mid DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&searchInfos).Error; err != nil {
@@ -97,9 +97,9 @@ func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []m
 func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
 	switch sortType {
 	case 0:
-		return query.Order("release_stamp DESC")
+		return query.Order("release_stamp DESC, mid DESC")
 	case 1:
-		return query.Order("hits DESC")
+		return query.Order("hits DESC, mid DESC")
 	case 2:
 		return query.Order(latestUpdateOrderSQL)
 	default:
@@ -560,7 +560,7 @@ func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int6
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL").
 		Where("update_stamp > ?", hotSince).
-		Order("year DESC, hits DESC").
+		Order("year DESC, hits DESC, mid DESC").
 		Limit(limit * 2).
 		Find(&pidHotList).Error; err != nil {
 		log.Printf("loadFallbackCandidates Pid Hot Fallback Error: %v", err)
@@ -809,12 +809,12 @@ func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 		column = allowedSearchSortColumns["latest_source_stamp"]
 	}
 	if strings.EqualFold(column, "release_stamp") {
-		return query.Order("year DESC, release_stamp DESC")
+		return query.Order("year DESC, release_stamp DESC, mid DESC")
 	}
 	if strings.EqualFold(column, "latest_source_stamp") {
 		return query.Order(latestUpdateOrderSQL)
 	}
-	return query.Order(fmt.Sprintf("%s DESC", column))
+	return query.Order(fmt.Sprintf("%s DESC, mid DESC", column))
 }
 
 func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
