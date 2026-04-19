@@ -20,8 +20,16 @@ export default function FilmDetailPageView({
   const { message } = useAppMessage();
 
   const { detail, relate } = data;
+  const playableSource =
+    detail?.list?.find((item: any) => item?.id && item?.linkList?.length > 0) ??
+    detail?.list?.find((item: any) => item?.id);
 
   const handlePlayClick = () => {
+    if (!detail?.id) {
+      message.error("影片信息不完整，暂时无法播放");
+      return;
+    }
+
     const historyMap = readHistoryMap();
     const savedState = historyMap[detail.id];
 
@@ -30,7 +38,12 @@ export default function FilmDetailPageView({
       return;
     }
 
-    router.push(`/play?id=${link}&source=${detail.list[0].id}&episode=${0}`);
+    if (!playableSource?.id) {
+      message.error("当前影片暂无可用播放源");
+      return;
+    }
+
+    router.push(`/play?id=${link}&source=${playableSource.id}&episode=0`);
   };
 
   return (

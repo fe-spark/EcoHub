@@ -8,6 +8,8 @@ import (
 	"server/internal/utils"
 )
 
+const macCMSGroupSeparator = "$$$"
+
 /*
 	处理 不同结构体数据之间的转化
 	统一转化为内部结构体
@@ -124,13 +126,48 @@ func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 			Content:     detail.VodContent,
 		},
 	}
-	// 通过分割符切分播放源信息  PlaySeparator $$$
-	md.PlayFrom = strings.Split(detail.VodPlayFrom, detail.VodPlayNote)
+	playSeparator := resolvePlayGroupSeparator(detail.VodPlayNote, detail.VodPlayFrom, detail.VodPlayURL)
+	downSeparator := resolvePlayGroupSeparator(detail.VodDownNote, detail.VodDownFrom, detail.VodDownURL)
+	md.PlayFrom = splitPlaySources(detail.VodPlayFrom, playSeparator)
 	// v2 只保留m3u8播放源
-	md.PlayList = GenFilmPlayList(detail.VodPlayURL, detail.VodPlayNote)
-	md.DownloadList = GenFilmPlayList(detail.VodDownURL, detail.VodPlayNote)
+	md.PlayList = GenFilmPlayList(detail.VodPlayURL, playSeparator)
+	md.DownloadList = GenFilmPlayList(detail.VodDownURL, downSeparator)
 
 	return md
+}
+
+func resolvePlayGroupSeparator(note, playFrom, playURL string) string {
+	note = strings.TrimSpace(note)
+	if note != "" {
+		return note
+	}
+	if strings.Contains(playFrom, macCMSGroupSeparator) || strings.Contains(playURL, macCMSGroupSeparator) {
+		return macCMSGroupSeparator
+	}
+	return ""
+}
+
+func splitPlaySources(playFrom, separator string) []string {
+	playFrom = strings.TrimSpace(playFrom)
+	if playFrom == "" {
+		return []string{}
+	}
+	if separator == "" {
+		return []string{playFrom}
+	}
+
+	parts := make([]string, 0)
+	for item := range strings.SplitSeq(playFrom, separator) {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		parts = append(parts, item)
+	}
+	if len(parts) == 0 {
+		return []string{playFrom}
+	}
+	return parts
 }
 
 // GenFilmPlayList 处理影片播放地址数据, 保留播放链接,生成playList
