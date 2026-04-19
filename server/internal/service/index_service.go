@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -194,15 +195,7 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 }
 
 func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
-	master := repository.GetCollectSourceListByGrade(model.MasterCollect)
-	if len(master) == 0 || len(detail.PlayList) == 0 {
-		return make([]model.PlayLinkVo, 0)
-	}
-	firstList := detail.PlayList[0]
-	if firstList == nil {
-		firstList = []model.MovieUrlInfo{}
-	}
-	playList := []model.PlayLinkVo{{Id: master[0].Id, Name: master[0].Name, LinkList: firstList}}
+	playList := buildPrimaryPlaySources(detail)
 
 	names := make([]string, 0, 2)
 	seenKeys := make(map[string]struct{}, 8)
@@ -238,7 +231,17 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 	appendNormalizedTitle(detail.Name)
 	appendAliasTitles(detail.SubTitle)
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
+	seenSourceIDs := make(map[string]struct{}, len(playList))
+	for _, item := range playList {
+		if item.Id == "" {
+			continue
+		}
+		seenSourceIDs[item.Id] = struct{}{}
+	}
 	for _, s := range sc {
+		if _, ok := seenSourceIDs[s.Id]; ok {
+			continue
+		}
 		pl := filmrepo.GetMultiplePlayByKeys(s.Id, names)
 		if len(pl) > 0 {
 			playList = append(playList, model.PlayLinkVo{Id: s.Id, Name: s.Name, LinkList: pl})
@@ -246,6 +249,42 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 	}
 
 	return playList
+}
+
+func buildPrimaryPlaySources(detail *model.MovieDetail) []model.PlayLinkVo {
+	if detail == nil || len(detail.PlayList) == 0 {
+		return make([]model.PlayLinkVo, 0)
+	}
+
+	playList := make([]model.PlayLinkVo, 0, len(detail.PlayList))
+	for index, links := range detail.PlayList {
+		if len(links) == 0 {
+			continue
+		}
+
+		sourceName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
+		if sourceName == "" {
+			sourceName = "默认源"
+			if len(detail.PlayList) > 1 {
+				sourceName = "播放源" + fmt.Sprint(index+1)
+			}
+		}
+
+		playList = append(playList, model.PlayLinkVo{
+			Id:       sourceName,
+			Name:     sourceName,
+			LinkList: links,
+		})
+	}
+
+	return playList
+}
+
+func resolvePrimarySourceName(playFrom []string, index int) string {
+	if index < 0 || index >= len(playFrom) {
+		return ""
+	}
+	return playFrom[index]
 }
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
