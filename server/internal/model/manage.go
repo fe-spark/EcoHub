@@ -15,15 +15,16 @@ type BasicConfig struct {
 
 // Banner 首页横幅信息
 type Banner struct {
-	Id      string `gorm:"primaryKey;size:64" json:"id"` // 唯一标识
-	Mid     int64  `gorm:"index" json:"mid"`             // 绑定所属影片Id
-	Name    string `gorm:"size:128" json:"name"`         // 影片名称
-	Year    int64  `json:"year"`                         // 上映年份
-	CName   string `gorm:"size:64" json:"cName"`         // 分类名称
-	Poster  string `gorm:"size:512" json:"poster"`       // 海报图片链接
-	Picture string `gorm:"size:512" json:"picture"`      // 横幅大图链接
-	Remark  string `gorm:"size:128" json:"remark"`       // 更新状态描述信息
-	Sort    int64  `json:"sort"`                         // 排序分値
+	Id           string `gorm:"primaryKey;size:64" json:"id"`                 // 唯一标识
+	Mid          int64  `gorm:"index" json:"mid"`                             // 绑定所属影片Id
+	Name         string `gorm:"size:128" json:"name"`                         // 影片名称
+	Year         int64  `json:"year"`                                         // 上映年份
+	CName        string `gorm:"size:64" json:"cName"`                         // 分类名称
+	Poster       string `gorm:"size:512" json:"poster"`                       // 竖版海报图
+	Picture      string `gorm:"size:512" json:"picture"`                      // 竖版封面图
+	PictureSlide string `gorm:"size:512" json:"pictureSlide"`                 // 横版幻灯图
+	Remark       string `gorm:"size:128" json:"remark"`                       // 更新状态描述信息
+	Sort         int64  `json:"sort"`                                         // 排序分値
 }
 
 func (Banner) TableName() string {

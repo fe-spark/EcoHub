@@ -101,6 +101,7 @@ func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 		Pid:      detail.TypeID1,
 		Name:     detail.VodName,
 		Picture:  detail.VodPic,
+		PictureSlide: detail.VodPicSlide,
 		DownFrom: detail.VodDownFrom,
 		MovieDescriptor: model.MovieDescriptor{
 			SubTitle:    detail.VodSub,

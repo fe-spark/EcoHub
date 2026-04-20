@@ -5,6 +5,7 @@ import { App, ConfigProvider, theme } from "antd";
 import ThemeDock, { type ThemeMode } from "./ThemeDock";
 
 const STORAGE_KEY = "app-theme";
+const DEFAULT_PRIMARY_COLOR = "#fa8c16";
 
 function resolveEffective(mode: ThemeMode): "dark" | "light" {
   if (mode !== "system") return mode;
@@ -65,12 +66,12 @@ export default function GlobalThemeProvider({
   const providerTheme = useMemo(() => {
     const primaryColor =
       typeof window !== "undefined"
-        ? getComputedStyle(document.documentElement).getPropertyValue("--primary-color").trim()
-        : "";
+        ? getComputedStyle(document.documentElement).getPropertyValue("--primary-color").trim() || DEFAULT_PRIMARY_COLOR
+        : DEFAULT_PRIMARY_COLOR;
     return {
       algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
       token: {
-        ...(primaryColor ? { colorPrimary: primaryColor } : {}),
+        colorPrimary: primaryColor,
         fontFamily,
       },
     };

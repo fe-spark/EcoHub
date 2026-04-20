@@ -35,6 +35,7 @@ func GetBasicInfoBySearchInfos(infos ...model.SearchInfo) []model.MovieBasicInfo
 			CName:    s.CName,
 			State:    s.State,
 			Picture:  s.Picture,
+			PictureSlide: s.PictureSlide,
 			Actor:    s.Actor,
 			Director: s.Director,
 			Blurb:    s.Blurb,
