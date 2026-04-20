@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sort"
+	"strings"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -11,6 +12,31 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func normalizeBannerImageFields(bl model.Banners) model.Banners {
+	for index := range bl {
+		picture := strings.TrimSpace(bl[index].Picture)
+		if picture == "" {
+			picture = strings.TrimSpace(bl[index].Poster)
+		}
+		if picture == "" {
+			picture = strings.TrimSpace(bl[index].PictureSlide)
+		}
+		if picture == "" {
+			continue
+		}
+
+		bl[index].Picture = picture
+		if strings.TrimSpace(bl[index].Poster) == "" {
+			bl[index].Poster = picture
+		}
+		if strings.TrimSpace(bl[index].PictureSlide) == "" {
+			bl[index].PictureSlide = picture
+		}
+	}
+
+	return bl
+}
 
 // ExistSiteConfig 判断 MySQL 中是否已有网站配置
 func ExistSiteConfig() bool {
@@ -80,6 +106,7 @@ func GetBanners() model.Banners {
 	data := db.Rdb.Get(db.Cxt, config.BannersKey).Val()
 	if data != "" && data != "null" {
 		if err := json.Unmarshal([]byte(data), &bl); err == nil && len(bl) > 0 {
+			bl = normalizeBannerImageFields(bl)
 			sort.Sort(bl)
 			return bl
 		}
@@ -91,6 +118,7 @@ func GetBanners() model.Banners {
 	}
 
 	if len(bl) > 0 {
+		bl = normalizeBannerImageFields(bl)
 		sort.Sort(bl)
 		// 回填缓存
 		data, _ := json.Marshal(bl)
@@ -101,6 +129,7 @@ func GetBanners() model.Banners {
 
 // SaveBanners 保存轮播配置信息 (MySQL + Redis 短期缓存)
 func SaveBanners(bl model.Banners) error {
+	bl = normalizeBannerImageFields(bl)
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		// 清空旧轮播数据
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Banner{}).Error; err != nil {

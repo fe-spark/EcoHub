@@ -6,17 +6,17 @@ async function getPlayData(
   sourceId?: string,
   episodeIdx?: string,
 ) {
-  const response = await serverGet<any>("/filmPlayInfo", {
+  const playPageResponse = await serverGet<any>("/filmPlayInfo", {
     id: filmId,
     playFrom: sourceId,
     episode: episodeIdx || 0,
   });
 
-  if (response.code !== 0 || !response.data?.detail) {
+  if (playPageResponse.code !== 0 || !playPageResponse.data?.detail) {
     return null;
   }
 
-  return response.data;
+  return playPageResponse.data;
 }
 
 export default async function PlayPage({
@@ -41,20 +41,20 @@ export default async function PlayPage({
     return null;
   }
 
-  let data: any = null;
+  let playPageData: any = null;
   try {
-    data = await getPlayData(filmId, sourceId, episodeIdx);
+    playPageData = await getPlayData(filmId, sourceId, episodeIdx);
   } catch (error) {
     console.error("fetch play data error:", error);
   }
 
-  if (!data) {
+  if (!playPageData) {
     return null;
   }
 
   return (
     <PlayPageView
-      data={data}
+      data={playPageData}
       filmId={filmId}
       initialTime={initialTime}
     />

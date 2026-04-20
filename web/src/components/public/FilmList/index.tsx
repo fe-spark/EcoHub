@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Button, Empty, Row, Col } from "antd";
 import { PlaySquareOutlined } from "@ant-design/icons";
 import AppLoading from "@/components/public/Loading";
+import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 interface FilmItem {
@@ -30,12 +31,12 @@ function FilmCard({
   item,
   colProps,
   colClassName,
-  handleToDetail,
+  handleOpenPlayPage,
 }: {
   item: FilmItem;
   colProps: any;
   colClassName: string;
-  handleToDetail: (id: string) => void;
+  handleOpenPlayPage: (id: string) => void;
 }) {
   const [imgLoaded, setImgLoaded] = React.useState(false);
   const [imgError, setImgError] = React.useState(false);
@@ -50,7 +51,7 @@ function FilmCard({
 
   return (
     <Col key={id} {...colProps} className={colClassName}>
-      <div className={styles.item} onClick={() => handleToDetail(id)}>
+      <div className={styles.item} onClick={() => handleOpenPlayPage(id)}>
         <div className={`${styles.posterWrapper} ${!imgLoaded && !imgError ? styles.loadingBg : ""}`}>
           {!imgError && item.picture && (
             /* 影片卡片图片全部来自后端动态地址，这里维持原生 img 与懒加载策略 */
@@ -167,8 +168,8 @@ export default function FilmList({
     );
   }
 
-  const handleToDetail = (id: string) => {
-    router.push(`/filmDetail?link=${id}`);
+  const handleOpenPlayPage = (id: string) => {
+    router.push(resolvePlayEntryPath(id));
   };
 
   return (
@@ -180,7 +181,7 @@ export default function FilmList({
             item={item}
             colProps={colProps}
             colClassName={colClassName}
-            handleToDetail={handleToDetail}
+            handleOpenPlayPage={handleOpenPlayPage}
           />
         ))}
       </Row>

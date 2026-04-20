@@ -28,6 +28,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -220,11 +221,11 @@ export default function FilmListPageView() {
         key: "info",
         render: (_, record) => (
           <Space size={6} wrap={false}>
-            <Text
-              className={styles.filmName}
-              style={{ whiteSpace: "nowrap" }}
-              onClick={() => window.open(`/filmDetail?link=${record.mid}`, "_blank")}
-            >
+              <Text
+                className={styles.filmName}
+                style={{ whiteSpace: "nowrap" }}
+                onClick={() => window.open(resolvePlayEntryPath(record.mid), "_blank")}
+              >
               {record.name}
             </Text>
             <Tag color="orange" style={{ borderRadius: 4, flexShrink: 0 }}>
@@ -296,13 +297,13 @@ export default function FilmListPageView() {
         fixed: "right",
         render: (_, record) => (
           <Space size={8}>
-            <Tooltip title="详情预览">
+            <Tooltip title="打开播放页">
               <Button
                 type="primary"
                 shape="circle"
                 size="small"
                 icon={<AimOutlined />}
-                onClick={() => window.open(`/filmDetail?link=${record.mid}`, "_blank")}
+                onClick={() => window.open(resolvePlayEntryPath(record.mid), "_blank")}
               />
             </Tooltip>
             <Tooltip title="同步更新">

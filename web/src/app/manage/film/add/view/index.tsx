@@ -59,43 +59,43 @@ function FilmAddForm() {
 
     if (id) {
       setFetching(true);
-      ApiGet(`/filmDetail`, { id })
+      ApiGet(`/filmPlayInfo`, { id })
         .then((resp: any) => {
           if (resp.code === 0 && resp.data?.detail) {
-            const detail = resp.data.detail;
-            const desc = detail.descriptor || {};
+            const filmData = resp.data.detail;
+            const filmDescriptor = filmData.descriptor || {};
 
             let playLinkStr = "";
-            if (detail.playList && detail.playList.length > 0) {
-              const mainList = detail.playList[0];
+            if (filmData.playList && filmData.playList.length > 0) {
+              const mainList = filmData.playList[0];
               playLinkStr = mainList
                 .map((item: any) => `${item.episode}$${item.link}`)
                 .join("#");
             }
 
             form.setFieldsValue({
-              id: detail.id,
-              cid: detail.cid,
-              pid: detail.pid,
-              name: detail.name,
-              picture: detail.picture,
-              subTitle: desc.subTitle,
-              initial: desc.initial,
-              classTag: desc.classTag,
-              director: desc.director,
-              actor: desc.actor,
-              writer: desc.writer,
-              remarks: desc.remarks,
-              releaseDate: desc.releaseDate,
-              area: desc.area,
-              lang: desc.language,
-              year: desc.year,
-              state: desc.state,
-              dbId: desc.dbId,
-              dbScore: desc.dbScore,
-              hits: desc.hits,
-              playForm: detail.playFrom?.join(",") || "",
-              content: desc.content,
+              id: filmData.id,
+              cid: filmData.cid,
+              pid: filmData.pid,
+              name: filmData.name,
+              picture: filmData.picture,
+              subTitle: filmDescriptor.subTitle,
+              initial: filmDescriptor.initial,
+              classTag: filmDescriptor.classTag,
+              director: filmDescriptor.director,
+              actor: filmDescriptor.actor,
+              writer: filmDescriptor.writer,
+              remarks: filmDescriptor.remarks,
+              releaseDate: filmDescriptor.releaseDate,
+              area: filmDescriptor.area,
+              lang: filmDescriptor.language,
+              year: filmDescriptor.year,
+              state: filmDescriptor.state,
+              dbId: filmDescriptor.dbId,
+              dbScore: filmDescriptor.dbScore,
+              hits: filmDescriptor.hits,
+              playForm: filmData.playFrom?.join(",") || "",
+              content: filmDescriptor.content,
               playLink: playLinkStr,
             });
           } else {

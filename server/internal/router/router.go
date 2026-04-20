@@ -20,7 +20,6 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/proxy/video`, handler.ProxyHd.ProxyVideo)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
-	api.GET(`/filmDetail`, handler.IndexHd.FilmDetail)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
 	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
 	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
