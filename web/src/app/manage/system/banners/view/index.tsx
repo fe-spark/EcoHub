@@ -81,6 +81,27 @@ function resolveEditablePicture(record?: Partial<BannerRecord> | null): string {
   return record.picture || record.poster || record.pictureSlide || "";
 }
 
+function resolvePreviewPicture(record?: BannerRecord | FilmOption | null): string {
+  if (!record) {
+    return "";
+  }
+
+  const primaryPicture = record.picture || "";
+  if (primaryPicture) {
+    return primaryPicture;
+  }
+
+  if ("poster" in record && record.poster) {
+    return record.poster;
+  }
+
+  if ("pictureSlide" in record && record.pictureSlide) {
+    return record.pictureSlide;
+  }
+
+  return "";
+}
+
 export default function BannersPageView() {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
   const [loading, setLoading] = useState(false);
@@ -237,7 +258,7 @@ export default function BannersPageView() {
   const previewArea = selectedFilm?.area || "未知地区";
   const previewDirector = selectedFilm?.director || "暂无";
   const previewActor = selectedFilm?.actor || "暂无";
-  const previewPicture = watchedPicture || previewFilm?.picture || previewFilm?.poster || previewFilm?.pictureSlide || "";
+  const previewPicture = watchedPicture || resolvePreviewPicture(previewFilm);
 
   const handleCustomUpload = async (options: any, fieldName: UploadFieldName) => {
     const { file, onSuccess, onError } = options;
