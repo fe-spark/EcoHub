@@ -11,13 +11,14 @@ import {
   FireOutlined,
 } from "@ant-design/icons";
 import FilmList from "@/components/public/FilmList";
+import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 interface BannerItem {
   id: string;
   mid: string;
   name: string;
-  poster: string;
+  poster?: string;
   picture: string;
   pictureSlide?: string;
   year: string;
@@ -37,11 +38,11 @@ function buildHeroMetaItems(item: BannerItem): string[] {
   return metaItems;
 }
 
-function getBannerLandscapeImage(item: BannerItem): string {
-  return item.pictureSlide || item.poster || item.picture;
+function getBannerBackdropImage(item: BannerItem): string {
+  return item.pictureSlide || item.picture || item.poster || "";
 }
 
-function getBannerPortraitImage(item: BannerItem): string {
+function getBannerCardImage(item: BannerItem): string {
   return item.picture || item.poster || item.pictureSlide || "";
 }
 
@@ -73,25 +74,25 @@ export default function HomePageView({
   };
 }) {
   const router = useRouter();
-  const banners = data.banners;
+  const featuredCovers = data.banners;
   const [activeIndex, setActiveIndex] = useState(0);
   const safeActiveIndex =
-    banners.length === 0 ? 0 : Math.min(activeIndex, banners.length - 1);
+    featuredCovers.length === 0 ? 0 : Math.min(activeIndex, featuredCovers.length - 1);
 
-  const activeBanner = banners[safeActiveIndex] || banners[0];
-  const activeMetaItems = activeBanner ? buildHeroMetaItems(activeBanner) : [];
+  const activeCover = featuredCovers[safeActiveIndex] || featuredCovers[0];
+  const activeMetaItems = activeCover ? buildHeroMetaItems(activeCover) : [];
 
   useEffect(() => {
-    if (banners.length <= 1) {
+    if (featuredCovers.length <= 1) {
       return;
     }
 
     const timer = window.setTimeout(() => {
-      setActiveIndex((currentIndex) => (currentIndex + 1) % banners.length);
+      setActiveIndex((currentIndex) => (currentIndex + 1) % featuredCovers.length);
     }, 3600);
 
     return () => window.clearTimeout(timer);
-  }, [activeIndex, banners.length]);
+  }, [activeIndex, featuredCovers.length]);
 
   const handleHeroCardClick = (index: number) => {
     if (index === safeActiveIndex) {
@@ -106,7 +107,7 @@ export default function HomePageView({
       return styles.heroAccordionItemActive;
     }
 
-    if (banners.length <= 1) {
+    if (featuredCovers.length <= 1) {
       return styles.heroAccordionItemFar;
     }
 
@@ -130,13 +131,13 @@ export default function HomePageView({
 
   return (
     <div className={styles.container}>
-      {banners.length > 0 && activeBanner && (
+      {featuredCovers.length > 0 && activeCover && (
         <section className={styles.heroSection}>
           <div className={styles.heroBackground}>
-            <div
-              className={styles.heroBackdropImage}
-              style={{ backgroundImage: `url(${getBannerLandscapeImage(activeBanner)})` }}
-            />
+              <div
+                className={styles.heroBackdropImage}
+                 style={{ backgroundImage: `url(${getBannerBackdropImage(activeCover)})` }}
+              />
             <div className={styles.heroBackdropMask} />
           </div>
 
@@ -146,17 +147,17 @@ export default function HomePageView({
                 <div className={styles.heroEyebrow}>Editor&apos;s Pick</div>
 
                 <div className={styles.heroBadgeRow}>
-                  <div className={styles.heroBadge}>{activeBanner.cName || "精彩推荐"}</div>
-                  {banners.length > 1 && (
+                  <div className={styles.heroBadge}>{activeCover.cName || "精彩推荐"}</div>
+                  {featuredCovers.length > 1 && (
                     <div className={styles.heroCounter}>
                       <span>{String(safeActiveIndex + 1).padStart(2, "0")}</span>
                       <span className={styles.heroCounterDivider}>/</span>
-                      <span>{String(banners.length).padStart(2, "0")}</span>
+                      <span>{String(featuredCovers.length).padStart(2, "0")}</span>
                     </div>
                   )}
                 </div>
                 
-                <h1 className={styles.heroTitle}>{activeBanner.name}</h1>
+                <h1 className={styles.heroTitle}>{activeCover.name}</h1>
 
                 <div className={styles.heroMeta}>
                   {activeMetaItems.map((meta) => (
@@ -172,7 +173,14 @@ export default function HomePageView({
                     size="large"
                     icon={<PlaySquareOutlined />}
                     className={styles.playBtn}
-                    onClick={() => router.push(`/play?id=${activeBanner.mid}&source=0&episode=0`)}
+                    onClick={() =>
+                      router.push(
+                        resolvePlayEntryPath(activeCover.mid, {
+                          sourceId: "0",
+                          episodeIndex: 0,
+                        }),
+                      )
+                    }
                   >
                     立即播放
                   </Button>
@@ -180,9 +188,9 @@ export default function HomePageView({
                     ghost
                     size="large"
                     className={styles.detailBtn}
-                    onClick={() => router.push(`/filmDetail?link=${activeBanner.mid}`)}
+                    onClick={() => router.push(resolvePlayEntryPath(activeCover.mid))}
                   >
-                    查看详情
+                    继续观看
                   </Button>
                 </div>
               </div>
@@ -190,7 +198,7 @@ export default function HomePageView({
 
             <div className={styles.heroCarouselColumn}>
               <div className={styles.heroAccordion}>
-                {banners.map((item, index) => {
+                {featuredCovers.map((item, index) => {
                   const isActive = index === safeActiveIndex;
 
                   return (
@@ -201,10 +209,10 @@ export default function HomePageView({
                       onClick={() => handleHeroCardClick(index)}
                       aria-label={`切换到 ${item.name}`}
                       >
-                        <span
-                          className={styles.heroCardImage}
-                          style={{ backgroundImage: `url(${getBannerPortraitImage(item)})` }}
-                        />
+                         <span
+                           className={styles.heroCardImage}
+                            style={{ backgroundImage: `url(${getBannerCardImage(item)})` }}
+                         />
                       <span className={styles.heroCardMask} />
                       <span className={styles.heroAccordionSpine} />
                       <span className={styles.heroCardInfo}>
@@ -279,7 +287,7 @@ export default function HomePageView({
                   <div
                     key={movieIndex}
                     className={styles.hotItem}
-                    onClick={() => router.push(`/filmDetail?link=${movie.mid}`)}
+                    onClick={() => router.push(resolvePlayEntryPath(movie.mid))}
                   >
                     <span className={styles.rank}>{movieIndex + 1}.</span>
                     <span className={styles.name}>{movie.name}</span>

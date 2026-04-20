@@ -6,6 +6,7 @@ import { Button, Pagination, Empty } from "antd";
 import { SearchOutlined, CaretRightOutlined } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
+import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 export default function SearchPageView({
@@ -35,7 +36,7 @@ export default function SearchPageView({
   };
 
   const handlePlay = (id: string) => {
-    router.push(`/play?id=${id}&source=0&episode=0`);
+    router.push(resolvePlayEntryPath(id, { sourceId: "0", episodeIndex: 0 }));
   };
 
   return (
@@ -68,12 +69,12 @@ export default function SearchPageView({
                   src={movie.picture || FALLBACK_IMG}
                   className={styles.poster}
                   alt={movie.name}
-                  onClick={() => router.push(`/filmDetail?link=${movie.id}`)}
+                  onClick={() => router.push(resolvePlayEntryPath(movie.id))}
                   style={{ cursor: "pointer" }}
                 />
                 <div className={styles.intro}>
                   <h3
-                    onClick={() => router.push(`/filmDetail?link=${movie.id}`)}
+                    onClick={() => router.push(resolvePlayEntryPath(movie.id))}
                     style={{ cursor: "pointer" }}
                   >
                     {movie.name}

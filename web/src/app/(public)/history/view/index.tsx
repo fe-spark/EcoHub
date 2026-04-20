@@ -40,7 +40,7 @@ export default function HistoryPageView() {
   };
 
   const formatProgress = (curr: number, total: number) => {
-    if (!curr || !total) return "查看详情";
+    if (!curr || !total) return "进入播放页";
     const percent = Math.floor((curr / total) * 100);
     return `已观看 ${percent}%`;
   };

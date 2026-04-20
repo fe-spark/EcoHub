@@ -52,9 +52,7 @@ type BannerFormValues = {
   cName: string;
   year?: number;
   remark?: string;
-  poster: string;
   picture: string;
-  pictureSlide: string;
   sort?: number;
 };
 
@@ -64,9 +62,7 @@ type FilmOption = {
   cName?: string;
   year?: string | number;
   remarks?: string;
-  poster?: string;
   picture?: string;
-  pictureSlide?: string;
   area?: string;
   director?: string;
   actor?: string;
@@ -75,7 +71,15 @@ type FilmOption = {
 };
 
 type EditorMode = "create" | "edit";
-type UploadFieldName = "poster" | "picture" | "pictureSlide";
+type UploadFieldName = "picture";
+
+function resolveEditablePicture(record?: Partial<BannerRecord> | null): string {
+  if (!record) {
+    return "";
+  }
+
+  return record.picture || record.poster || record.pictureSlide || "";
+}
 
 export default function BannersPageView() {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
@@ -96,9 +100,7 @@ export default function BannersPageView() {
   const watchedCName = Form.useWatch("cName", form);
   const watchedYear = Form.useWatch("year", form);
   const watchedRemark = Form.useWatch("remark", form);
-  const watchedPoster = Form.useWatch("poster", form);
   const watchedPicture = Form.useWatch("picture", form);
-  const watchedPictureSlide = Form.useWatch("pictureSlide", form);
 
   const fetchBanners = useCallback(async () => {
     setLoading(true);
@@ -155,9 +157,7 @@ export default function BannersPageView() {
     cName: film.cName || "",
     year: parseInt(String(film.year || "0"), 10) || undefined,
     remark: film.remarks || "",
-    poster: film.poster || film.picture || film.pictureSlide || "",
-    picture: film.picture || film.poster || film.pictureSlide || "",
-    pictureSlide: film.pictureSlide || film.poster || film.picture || "",
+    picture: film.picture || "",
   });
 
   const onFilmSelect = (val: number | string) => {
@@ -197,9 +197,7 @@ export default function BannersPageView() {
       cName: record.cName,
       year: record.year,
       remark: record.remark,
-      poster: record.poster,
-      picture: record.picture,
-      pictureSlide: record.pictureSlide,
+      picture: resolveEditablePicture(record),
       sort: record.sort,
     });
     setEditorVisible(true);
@@ -209,17 +207,26 @@ export default function BannersPageView() {
     setEditorVisible(false);
   };
 
-const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
-    mid: values.mid,
-    name: values.name.trim(),
-    cName: values.cName.trim(),
-    year: values.year,
-    remark: values.remark?.trim() || "",
-    poster: values.poster.trim(),
-    picture: values.picture.trim(),
-    pictureSlide: values.pictureSlide.trim(),
-    sort: values.sort ?? 0,
-  });
+  const buildBannerPayload = (values: BannerFormValues): BannerRecord => {
+    const nextPicture = values.picture.trim();
+    const originalPicture = resolveEditablePicture(currentRow).trim();
+    const shouldSyncAllImages = editorMode === "create" || nextPicture !== originalPicture;
+
+    return {
+      id: currentRow?.id || "",
+      mid: values.mid,
+      name: values.name.trim(),
+      cName: values.cName.trim(),
+      year: values.year,
+      remark: values.remark?.trim() || "",
+      poster: shouldSyncAllImages ? nextPicture : currentRow?.poster || nextPicture,
+      picture: nextPicture,
+      pictureSlide: shouldSyncAllImages
+        ? nextPicture
+        : currentRow?.pictureSlide || nextPicture,
+      sort: values.sort ?? 0,
+    };
+  };
 
   const previewFilm = selectedFilm || currentRow;
   const previewName = watchedName || previewFilm?.name || "未选择影片";
@@ -230,10 +237,7 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
   const previewArea = selectedFilm?.area || "未知地区";
   const previewDirector = selectedFilm?.director || "暂无";
   const previewActor = selectedFilm?.actor || "暂无";
-  const previewPoster = watchedPoster || previewFilm?.poster || previewFilm?.picture || "";
-  const previewPicture = watchedPicture || previewFilm?.picture || previewFilm?.poster || "";
-  const previewPictureSlide =
-    watchedPictureSlide || previewFilm?.pictureSlide || previewFilm?.poster || previewFilm?.picture || "";
+  const previewPicture = watchedPicture || previewFilm?.picture || previewFilm?.poster || previewFilm?.pictureSlide || "";
 
   const handleCustomUpload = async (options: any, fieldName: UploadFieldName) => {
     const { file, onSuccess, onError } = options;
@@ -292,27 +296,12 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
       render: (t: number) => <Tag color="warning">{t}</Tag>,
     },
     {
-      title: "影片海报",
-      dataIndex: "poster",
-      key: "poster",
-      render: (src: string) => (
-        <AntImage src={src} height={50} style={{ objectFit: "contain" }} />
-      ),
-    },
-    {
       title: "影片封面",
       dataIndex: "picture",
       key: "picture",
       render: (src: string) => (
         <AntImage src={src} height={50} style={{ objectFit: "cover" }} />
       ),
-    },
-    {
-      title: "横版幻灯图",
-      dataIndex: "pictureSlide",
-      key: "pictureSlide",
-      render: (src: string) =>
-        src ? <AntImage src={src} width={120} height={50} style={{ objectFit: "cover" }} /> : "-",
     },
     {
       title: "排序",
@@ -380,7 +369,7 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
           <Flex gap={16} align="flex-start">
               <div style={{ flexShrink: 0 }}>
                 <AntImage
-                  src={previewPicture || previewPoster}
+                  src={previewPicture}
                   width={96}
                   height={132}
                   style={{ objectFit: "cover", borderRadius: 8 }}
@@ -413,12 +402,12 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
       <Row gutter={12}>
         <Col span={12}>
           <Form.Item name="name" label="影片名称" rules={[{ required: true, message: "请输入影片名称" }]}> 
-            <Input placeholder="首页横幅展示名称" />
+            <Input placeholder="封面卡片展示名称" />
           </Form.Item>
         </Col>
         <Col span={12}>
           <Form.Item name="cName" label="影片分类" rules={[{ required: true, message: "请输入影片分类" }]}> 
-            <Input placeholder="首页横幅展示分类" />
+            <Input placeholder="封面卡片展示分类" />
           </Form.Item>
         </Col>
         <Col span={12}>
@@ -451,50 +440,7 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
           },
         ]}
       />
-      <Form.Item label="横幅背景图" extra="默认会使用影片图片自动填充，可继续替换为更适合首页横幅的图片。">
-        <Space.Compact style={{ width: "100%" }}>
-          <Form.Item name="poster" noStyle rules={[{ required: true, message: "请上传或填写横幅背景图" }]}> 
-            <Input placeholder="输入横幅背景图访问 URL" />
-          </Form.Item>
-          <Upload showUploadList={false} customRequest={(o) => handleCustomUpload(o, "poster")}>
-            <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
-              上传
-            </Button>
-          </Upload>
-        </Space.Compact>
-      </Form.Item>
-      {previewPoster && (
-        <Card size="small" title="横幅背景图预览" style={{ borderRadius: 12 }}>
-          <AntImage src={previewPoster} width="100%" height={180} style={{ objectFit: "cover", borderRadius: 8 }} />
-        </Card>
-      )}
-      <Form.Item label="横版幻灯图" extra="首页 banner 背景优先使用该字段；若采集站未提供，可手动上传或填写。">
-        <Space.Compact style={{ width: "100%" }}>
-          <Form.Item
-            name="pictureSlide"
-            noStyle
-            rules={[{ required: true, message: "请上传或填写横版幻灯图" }]}
-          >
-            <Input placeholder="输入横版幻灯图访问 URL" />
-          </Form.Item>
-          <Upload showUploadList={false} customRequest={(o) => handleCustomUpload(o, "pictureSlide")}>
-            <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
-              上传
-            </Button>
-          </Upload>
-        </Space.Compact>
-      </Form.Item>
-      {previewPictureSlide && (
-        <Card size="small" title="横版幻灯图预览" style={{ borderRadius: 12 }}>
-          <AntImage
-            src={previewPictureSlide}
-            width="100%"
-            height={180}
-            style={{ objectFit: "cover", borderRadius: 8 }}
-          />
-        </Card>
-      )}
-      <Form.Item label="封面图" extra="用于补充展示的封面图，默认自动填充，可按需要替换。">
+      <Form.Item label="影片封面" extra="统一使用采集接口的 vod_pic 字段，可手动替换，但只维护这一张图。">
         <Space.Compact style={{ width: "100%" }}>
           <Form.Item name="picture" noStyle rules={[{ required: true, message: "请上传或填写封面图" }]}> 
             <Input placeholder="输入封面访问 URL" />
@@ -507,7 +453,7 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
         </Space.Compact>
       </Form.Item>
       {previewPicture && (
-        <Card size="small" title="封面图预览" style={{ borderRadius: 12 }}>
+        <Card size="small" title="影片封面预览" style={{ borderRadius: 12 }}>
           <AntImage src={previewPicture} width={160} height={220} style={{ objectFit: "cover", borderRadius: 8 }} />
         </Card>
       )}
@@ -523,14 +469,14 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
           marginBottom: 16,
         }}
       >
-        <Title level={4}>首页横幅管理</Title>
+          <Title level={4}>影片封面管理</Title>
         <Space>
           <Button
             type="primary"
             icon={<PlusCircleOutlined />}
             onClick={openCreateEditor}
           >
-            添加海报
+            添加封面
           </Button>
         </Space>
       </div>
@@ -545,7 +491,7 @@ const buildBannerPayload = (values: BannerFormValues): BannerFormValues => ({
       />
 
       <Modal
-        title={editorMode === "create" ? "添加海报" : "修改海报信息"}
+        title={editorMode === "create" ? "添加封面" : "修改封面信息"}
         open={editorVisible}
         onOk={handleSubmit}
         onCancel={closeEditor}

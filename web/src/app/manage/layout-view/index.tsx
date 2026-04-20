@@ -38,7 +38,7 @@ const menuItems: MenuItem[] = [
     label: "网站管理",
     children: [
       { key: "/manage/system/website", label: "站点管理" },
-      { key: "/manage/system/banners", label: "海报管理" },
+      { key: "/manage/system/banners", label: "封面管理" },
       { key: "/manage/system/users", label: "用户管理" },
     ],
   },

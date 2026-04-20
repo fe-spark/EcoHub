@@ -17,6 +17,28 @@ type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
 
+func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) string {
+	if preferred != "" {
+		for _, source := range playSources {
+			if source.Id == preferred && len(source.LinkList) > 0 {
+				return source.Id
+			}
+		}
+	}
+
+	for _, source := range playSources {
+		if len(source.LinkList) > 0 {
+			return source.Id
+		}
+	}
+
+	if len(playSources) > 0 {
+		return playSources[0].Id
+	}
+
+	return ""
+}
+
 func wrapProxyLink(link string) string {
 	if link == "" {
 		return link
@@ -44,22 +66,6 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 		return
 	}
 	dto.Success(data, "分类信息获取成功", c)
-}
-
-// FilmDetail 影片详情信息查询
-func (h *IndexHandler) FilmDetail(c *gin.Context) {
-	id, err := strconv.Atoi(c.Query("id"))
-	if err != nil {
-		dto.Failed("请求异常,影片请求参数异常!!!", c)
-		return
-	}
-	detail := service.IndexSvc.GetFilmDetail(id)
-	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(detail.MovieDetail, &page)
-	dto.Success(gin.H{
-		"detail": detail,
-		"relate": relateMovie,
-	}, "影片详情信息获取成功", c)
 }
 
 // FilmPlayInfo 影视播放页数据
@@ -90,16 +96,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		detail.List[i].LinkList = valid
 	}
 	if len(detail.List) > 0 {
-		found := false
-		for _, v := range detail.List {
-			if v.Id == playFrom {
-				found = true
-				break
-			}
-		}
-		if !found {
-			playFrom = detail.List[0].Id
-		}
+		playFrom = resolvePlayableSourceID(detail.List, playFrom)
 	}
 	var currentPlay model.MovieUrlInfo
 	for _, v := range detail.List {
