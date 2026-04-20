@@ -111,9 +111,11 @@ type MovieSourceMapping struct {
 // MoviePlaylist 多源播放列表持久化模型 (MySQL)
 type MoviePlaylist struct {
 	gorm.Model
-	SourceId string `gorm:"uniqueIndex:uidx_source_key"`
-	MovieKey string `gorm:"uniqueIndex:uidx_source_key"` // hash(name) or hash(dbid)
-	Content  string `gorm:"type:longtext"`
+	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
+	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"` // hash(name) or hash(dbid)
+	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"` // 播放组顺序
+	GroupName  string `gorm:"type:varchar(255)"`                 // 原始播放组名称
+	Content    string `gorm:"type:longtext"`                     // 单个播放组的播放列表 JSON
 }
 
 // SearchInfo 存储用于检索的信息
@@ -141,6 +143,7 @@ type SearchInfo struct {
 	Hits              int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State             string  `json:"state"`                                                                                      // 状态 正片|预告
 	Remarks           string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
+	PlayFromSummary   string  `json:"playFromSummary"`                                                                            // 播放源摘要，供列表接口直出
 	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
 	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
 	Picture           string  `json:"picture"`                                                                                    // 简介图片

@@ -21,13 +21,13 @@ func SaveSitePlayList(id string, list []model.MovieDetail) error {
 
 	var playlists []model.MoviePlaylist
 	latestByContentKey := make(map[string]int64)
+	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 forLoop:
 	for _, d := range list {
 		if len(d.PlayList) == 0 || strings.Contains(d.CName, "解说") {
 			continue forLoop
 		}
 
-		data, _ := json.Marshal(d.PlayList)
 		stamp, err := time.ParseInLocation(time.DateTime, d.UpdateTime, time.Local)
 		if err == nil {
 			contentKey := BuildContentKey(d)
@@ -37,11 +37,26 @@ forLoop:
 		}
 
 		for _, movieKey := range BuildPlaylistMovieKeys(d) {
-			playlists = append(playlists, model.MoviePlaylist{
-				SourceId: id,
-				MovieKey: movieKey,
-				Content:  string(data),
-			})
+			keysByMovieKey[movieKey] = struct{}{}
+			for index, links := range d.PlayList {
+				if len(links) == 0 {
+					continue
+				}
+
+				data, _ := json.Marshal(links)
+				rawName := ""
+				if index < len(d.PlayFrom) {
+					rawName = strings.TrimSpace(d.PlayFrom[index])
+				}
+
+				playlists = append(playlists, model.MoviePlaylist{
+					SourceId:   id,
+					MovieKey:   movieKey,
+					GroupIndex: index,
+					GroupName:  rawName,
+					Content:    string(data),
+				})
+			}
 		}
 	}
 
@@ -49,10 +64,7 @@ forLoop:
 		return nil
 	}
 
-	if err := db.Mdb.Clauses(clause.OnConflict{
-		Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}},
-		DoUpdates: clause.AssignmentColumns([]string{"content", "updated_at"}),
-	}).Create(&playlists).Error; err != nil {
+	if err := saveGroupedPlaylists(id, playlists, keysByMovieKey); err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
 		return err
 	}
@@ -62,8 +74,40 @@ forLoop:
 		return err
 	}
 
+	if err := RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys(mapKeys(latestByContentKey))); err != nil {
+		log.Printf("RefreshPlayFromSummaryBySearchInfos Error: %v", err)
+		return err
+	}
+
 	log.Printf("[Playlist] 为站点 %s 保存了 %d 条记录\n", id, len(playlists))
 	return nil
+}
+
+func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) error {
+	movieKeys := make([]string, 0, len(keysByMovieKey))
+	for movieKey := range keysByMovieKey {
+		if strings.TrimSpace(movieKey) == "" {
+			continue
+		}
+		movieKeys = append(movieKeys, movieKey)
+	}
+
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if len(movieKeys) > 0 {
+			if err := tx.Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).Delete(&model.MoviePlaylist{}).Error; err != nil {
+				return err
+			}
+		}
+
+		if err := tx.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
+			DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
+		}).Create(&playlists).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
 
 func refreshLatestSourceStampByContentKeys(latestByContentKey map[string]int64) error {
@@ -87,6 +131,14 @@ func refreshLatestSourceStampByContentKeys(latestByContentKey map[string]int64) 
 	})
 }
 
+func mapKeys(m map[string]int64) []string {
+	keys := make([]string, 0, len(m))
+	for key := range m {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
 // DeletePlaylistBySourceId 根据来源站点 ID 删除所有关联的播放列表资源
 func DeletePlaylistBySourceId(sourceId string) error {
 	return db.Mdb.Where("source_id = ?", sourceId).Delete(&model.MoviePlaylist{}).Error
@@ -105,21 +157,14 @@ func GetMovieDetailByDBID(mid int64, name string) []model.MoviePlaySource {
 			continue
 		}
 
-		var playlist model.MoviePlaylist
-		if err := db.Mdb.Where("source_id = ? AND movie_key = ?", s.Id, lookupKeys[0]).First(&playlist).Error; err != nil && len(lookupKeys) > 1 {
-			db.Mdb.Where("source_id = ? AND movie_key = ?", s.Id, lookupKeys[1]).First(&playlist)
-		}
-		if playlist.ID == 0 {
+		groups := GetMultiplePlayGroupsByKeys(s.Id, s.Name, lookupKeys)
+		if len(groups) == 0 {
 			continue
 		}
 
-		var playLists [][]model.MovieUrlInfo
-		if jsonErr := json.Unmarshal([]byte(playlist.Content), &playLists); jsonErr != nil {
-			continue
-		}
-		for _, pl := range playLists {
-			if len(pl) > 0 {
-				mps = append(mps, model.MoviePlaySource{SiteName: s.Name, PlayList: pl})
+		for _, item := range groups {
+			if len(item.LinkList) > 0 {
+				mps = append(mps, model.MoviePlaySource{SiteName: item.Name, PlayList: item.LinkList})
 			}
 		}
 	}
@@ -178,23 +223,54 @@ func GetMultiplePlay(siteId, key string) []model.MovieUrlInfo {
 
 // GetMultiplePlayByKeys 按优先级批量匹配播放源，返回首个命中的播放列表
 func GetMultiplePlayByKeys(siteId string, keys []string) []model.MovieUrlInfo {
+	groups := GetMultiplePlayGroupsByKeys(siteId, "", keys)
+	if len(groups) == 0 {
+		return nil
+	}
+	return groups[0].LinkList
+}
+
+// GetMultiplePlayGroupsByKeys 按优先级批量匹配播放源，返回首个命中的完整播放组列表。
+func GetMultiplePlayGroupsByKeys(siteId, siteName string, keys []string) []model.PlayLinkVo {
 	orderedKeys := UniqueKeys(keys)
 	if siteId == "" || len(orderedKeys) == 0 {
 		return nil
 	}
 
 	var playlists []model.MoviePlaylist
-	if err := db.Mdb.Where("source_id = ? AND movie_key IN ?", siteId, orderedKeys).Find(&playlists).Error; err != nil {
+	if err := db.Mdb.Where("source_id = ? AND movie_key IN ?", siteId, orderedKeys).
+		Order("movie_key ASC").
+		Order("group_index ASC").
+		Find(&playlists).Error; err != nil {
 		return nil
 	}
 	if len(playlists) == 0 {
 		return nil
 	}
 
-	contentByKey := make(map[string]string, len(playlists))
+	playlistByKey := make(map[string][]model.MoviePlaylist, len(playlists))
 	for _, p := range playlists {
-		contentByKey[p.MovieKey] = p.Content
+		playlistByKey[p.MovieKey] = append(playlistByKey[p.MovieKey], p)
 	}
+	for _, key := range orderedKeys {
+		matched, ok := playlistByKey[key]
+		if !ok {
+			continue
+		}
 
-	return ExtractFirstPlayableList(contentByKey, orderedKeys)
+		groups := make([]model.PlayLinkVo, 0, len(matched))
+		for _, playlist := range matched {
+			var links []model.MovieUrlInfo
+			if err := json.Unmarshal([]byte(playlist.Content), &links); err != nil || len(links) == 0 {
+				continue
+			}
+
+			displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
+			groups = append(groups, model.PlayLinkVo{Id: displayName, Name: displayName, LinkList: links})
+		}
+		if len(groups) > 0 {
+			return groups
+		}
+	}
+	return nil
 }
