@@ -201,7 +201,10 @@ func SaveSearchInfo(s model.SearchInfo) error {
 func SaveDetails(id string, list []model.MovieDetail) error {
 	infoList, infoByKey := buildSearchInfosFromDetails(id, list)
 	keyToMid := BatchSaveOrUpdate(infoList)
-	return saveMovieDetailInfos(buildMovieDetailInfos(id, list, infoByKey, keyToMid))
+	if err := saveMovieDetailInfos(buildMovieDetailInfos(id, list, infoByKey, keyToMid)); err != nil {
+		return err
+	}
+	return RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys(buildContentKeys(infoList)))
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
@@ -214,9 +217,23 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	err = saveMovieDetailInfos(buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid))
 
 	if err == nil {
+		if refreshErr := RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys([]string{searchInfo.ContentKey})); refreshErr != nil {
+			return refreshErr
+		}
 		clearDetailCaches(searchInfo.Pid)
 	}
 	return err
+}
+
+func reloadSearchInfosByContentKeys(contentKeys []string) []model.SearchInfo {
+	if len(contentKeys) == 0 {
+		return nil
+	}
+	var infos []model.SearchInfo
+	if err := db.Mdb.Where("content_key IN ?", contentKeys).Find(&infos).Error; err != nil {
+		return nil
+	}
+	return infos
 }
 
 func BatchHandleSearchTag(infos ...model.SearchInfo) {

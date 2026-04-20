@@ -400,7 +400,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 			VodEn:       s.Initial,
 			VodTime:     time.Unix(s.UpdateStamp, 0).Format("2006-01-02 15:04:05"),
 			VodRemarks:  s.Remarks,
-			VodPlayFrom: config.PlayFormCloud,
+			VodPlayFrom: resolveProvidePlayFromSummary(s),
 			VodPic:      s.Picture,
 		})
 	}
@@ -419,6 +419,13 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	}
 
 	return page.Current, page.PageCount, page.Total, vodList
+}
+
+func resolveProvidePlayFromSummary(search model.SearchInfo) string {
+	if strings.TrimSpace(search.PlayFromSummary) == "" {
+		return config.PlayFormCloud
+	}
+	return search.PlayFromSummary
 }
 
 // GetVodDetail 获取视频详情（带播放列表）

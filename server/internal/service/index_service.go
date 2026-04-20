@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"strings"
 	"time"
 
@@ -84,7 +83,7 @@ func (i *IndexService) GetFilmDetail(id int) model.MovieDetailVo {
 		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
 	}
 	res := model.MovieDetailVo{MovieDetail: *movieDetail}
-	res.List = multipleSource(movieDetail)
+	res.List = multipleSource(search, movieDetail)
 	return res
 }
 
@@ -194,8 +193,8 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 	return filmrepo.GetSearchTag(st)
 }
 
-func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
-	playList := buildPrimaryPlaySources(detail)
+func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
+	playList := buildPrimaryPlaySources(search, detail)
 
 	names := make([]string, 0, 2)
 	seenKeys := make(map[string]struct{}, 8)
@@ -242,36 +241,42 @@ func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
 		if _, ok := seenSourceIDs[s.Id]; ok {
 			continue
 		}
-		pl := filmrepo.GetMultiplePlayByKeys(s.Id, names)
-		if len(pl) > 0 {
-			playList = append(playList, model.PlayLinkVo{Id: s.Id, Name: s.Name, LinkList: pl})
+		groups := filmrepo.GetMultiplePlayGroupsByKeys(s.Id, s.Name, names)
+		if len(groups) > 0 {
+			playList = append(playList, groups...)
 		}
 	}
 
 	return playList
 }
 
-func buildPrimaryPlaySources(detail *model.MovieDetail) []model.PlayLinkVo {
+func buildPrimaryPlaySources(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
 	if detail == nil || len(detail.PlayList) == 0 {
 		return make([]model.PlayLinkVo, 0)
 	}
 
+	siteName := ""
+	if search != nil && search.SourceId != "" {
+		if source := repository.FindCollectSourceById(search.SourceId); source != nil {
+			siteName = source.Name
+		}
+	}
+
 	playList := make([]model.PlayLinkVo, 0, len(detail.PlayList))
+	sourceID := ""
+	if search != nil {
+		sourceID = search.SourceId
+	}
 	for index, links := range detail.PlayList {
 		if len(links) == 0 {
 			continue
 		}
 
-		sourceName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
-		if sourceName == "" {
-			sourceName = "默认源"
-			if len(detail.PlayList) > 1 {
-				sourceName = "播放源" + fmt.Sprint(index+1)
-			}
-		}
+		rawName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
+		sourceName := filmrepo.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
 
 		playList = append(playList, model.PlayLinkVo{
-			Id:       sourceName,
+			Id:       sourceID,
 			Name:     sourceName,
 			LinkList: links,
 		})
