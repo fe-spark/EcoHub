@@ -9,42 +9,20 @@ import (
 )
 
 func BuildPlaylistMovieKeys(detail model.MovieDetail) []string {
+	return BuildMovieMatchKeys(detail.DbId, detail.Name)
+}
+
+func BuildMovieMatchKeys(dbID int64, name string) []string {
 	keys := make([]string, 0, 2)
-	if dbIdentity := utils.BuildCollectionDbIdentity(detail.DbId, detail.Name); dbIdentity != "" {
+	if dbIdentity := utils.BuildCollectionDbIdentity(dbID, name); dbIdentity != "" {
 		keys = append(keys, utils.GenerateHashKey(dbIdentity))
 	}
-	normalizedTitle := utils.NormalizeCollectionTitle(detail.Name)
+
+	normalizedTitle := utils.NormalizeCollectionTitle(name)
 	if normalizedTitle != "" {
 		keys = append(keys, utils.GenerateHashKey(normalizedTitle))
 	}
-	return keys
-}
-
-func BuildMovieLookupKeys(mid int64, name string) []string {
-	keys := make([]string, 0, 2)
-	if dbIdentity := utils.BuildCollectionDbIdentity(mid, name); dbIdentity != "" {
-		keys = append(keys, utils.GenerateHashKey(dbIdentity))
-	}
-	if normalizedTitle := utils.NormalizeCollectionTitle(name); normalizedTitle != "" {
-		keys = append(keys, utils.GenerateHashKey(normalizedTitle))
-	}
 	return UniqueKeys(keys)
-}
-
-func BuildValidPlaylistKeys(films []struct {
-	Name string
-	DbId int64
-}) map[string]struct{} {
-	validKeys := make(map[string]struct{}, len(films)*4)
-	for _, f := range films {
-		if normalizedTitle := utils.NormalizeCollectionTitle(f.Name); normalizedTitle != "" {
-			validKeys[utils.GenerateHashKey(normalizedTitle)] = struct{}{}
-		}
-		if dbIdentity := utils.BuildCollectionDbIdentity(f.DbId, f.Name); dbIdentity != "" {
-			validKeys[utils.GenerateHashKey(dbIdentity)] = struct{}{}
-		}
-	}
-	return validKeys
 }
 
 func UniqueKeys(keys []string) []string {

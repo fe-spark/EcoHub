@@ -20,20 +20,11 @@ func SaveSitePlayList(id string, list []model.MovieDetail) error {
 	}
 
 	var playlists []model.MoviePlaylist
-	latestByContentKey := make(map[string]int64)
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 forLoop:
 	for _, d := range list {
 		if len(d.PlayList) == 0 || strings.Contains(d.CName, "解说") {
 			continue forLoop
-		}
-
-		stamp, err := time.ParseInLocation(time.DateTime, d.UpdateTime, time.Local)
-		if err == nil {
-			contentKey := BuildContentKey(d)
-			if contentKey != "" && stamp.Unix() > latestByContentKey[contentKey] {
-				latestByContentKey[contentKey] = stamp.Unix()
-			}
 		}
 
 		for _, movieKey := range BuildPlaylistMovieKeys(d) {
@@ -69,18 +60,108 @@ forLoop:
 		return err
 	}
 
-	if err := refreshLatestSourceStampByContentKeys(latestByContentKey); err != nil {
-		log.Printf("refreshLatestSourceStampByContentKeys Error: %v", err)
-		return err
-	}
-
-	if err := RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys(mapKeys(latestByContentKey))); err != nil {
-		log.Printf("RefreshPlayFromSummaryBySearchInfos Error: %v", err)
+	if err := refreshSearchInfosByPlaylists(list); err != nil {
+		log.Printf("refreshSearchInfosByPlaylists Error: %v", err)
 		return err
 	}
 
 	log.Printf("[Playlist] 为站点 %s 保存了 %d 条记录\n", id, len(playlists))
 	return nil
+}
+
+func refreshSearchInfosByPlaylists(details []model.MovieDetail) error {
+	infos, latestByMid, err := loadMatchedSearchInfosByDetails(details)
+	if err != nil {
+		return err
+	}
+	if err := refreshLatestSourceStampByMids(latestByMid); err != nil {
+		return err
+	}
+	return RefreshPlayFromSummaryBySearchInfos(infos)
+}
+
+func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.SearchInfo, map[int64]int64, error) {
+	type detailLookup struct {
+		detail model.MovieDetail
+		keys   []string
+	}
+	lookups := make([]detailLookup, 0, len(details))
+	allKeys := make([]string, 0, len(details)*4)
+	latestByMid := make(map[int64]int64)
+
+	for _, detail := range details {
+		lookupKeys := BuildPlaylistMovieKeys(detail)
+		if len(lookupKeys) == 0 {
+			continue
+		}
+		lookups = append(lookups, detailLookup{detail: detail, keys: lookupKeys})
+		allKeys = append(allKeys, lookupKeys...)
+	}
+
+	if len(lookups) == 0 {
+		return nil, latestByMid, nil
+	}
+
+	midsByLookupKey := loadMidCandidatesByMatchKeys(allKeys)
+	matchedMidSet := make(map[int64]struct{}, len(allKeys))
+	for _, mids := range midsByLookupKey {
+		for _, mid := range mids {
+			matchedMidSet[mid] = struct{}{}
+		}
+	}
+	if len(matchedMidSet) == 0 {
+		return nil, latestByMid, nil
+	}
+
+	matchedMids := make([]int64, 0, len(matchedMidSet))
+	for mid := range matchedMidSet {
+		matchedMids = append(matchedMids, mid)
+	}
+
+	var candidates []model.SearchInfo
+	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
+		return nil, nil, err
+	}
+	if len(candidates) == 0 {
+		return nil, latestByMid, nil
+	}
+
+	infoByMid := make(map[int64]model.SearchInfo, len(candidates))
+	for _, info := range candidates {
+		infoByMid[info.Mid] = info
+	}
+
+	ordered := make([]model.SearchInfo, 0, len(candidates))
+	seenMid := make(map[int64]struct{}, len(candidates))
+	for _, item := range lookups {
+		stamp, err := time.ParseInLocation(time.DateTime, item.detail.UpdateTime, time.Local)
+		if err != nil {
+			stamp = time.Time{}
+		}
+		matched := make(map[int64]struct{}, 2)
+		for _, key := range item.keys {
+			candidateMids := midsByLookupKey[key]
+			if len(candidateMids) == 0 {
+				continue
+			}
+			for _, mid := range candidateMids {
+				matched[mid] = struct{}{}
+			}
+			break
+		}
+		for mid := range matched {
+			if stampUnix := stamp.Unix(); stampUnix > latestByMid[mid] {
+				latestByMid[mid] = stampUnix
+			}
+			if _, ok := seenMid[mid]; ok {
+				continue
+			}
+			seenMid[mid] = struct{}{}
+			ordered = append(ordered, infoByMid[mid])
+		}
+	}
+
+	return ordered, latestByMid, nil
 }
 
 func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) error {
@@ -131,6 +212,27 @@ func refreshLatestSourceStampByContentKeys(latestByContentKey map[string]int64) 
 	})
 }
 
+func refreshLatestSourceStampByMids(latestByMid map[int64]int64) error {
+	if len(latestByMid) == 0 {
+		return nil
+	}
+
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for mid, stamp := range latestByMid {
+			if mid <= 0 || stamp <= 0 {
+				continue
+			}
+			if err := tx.Model(&model.SearchInfo{}).
+				Where("mid = ?", mid).
+				Where("latest_source_stamp < ? OR latest_source_stamp IS NULL", stamp).
+				Update("latest_source_stamp", stamp).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func mapKeys(m map[string]int64) []string {
 	keys := make([]string, 0, len(m))
 	for key := range m {
@@ -146,14 +248,13 @@ func DeletePlaylistBySourceId(sourceId string) error {
 
 func GetMovieDetailByDBID(mid int64, name string) []model.MoviePlaySource {
 	var mps []model.MoviePlaySource
+	lookupKeys := loadMovieMatchKeysByMids([]int64{mid})[mid]
+	if len(lookupKeys) == 0 {
+		return nil
+	}
 	sources := support.GetCollectSourceList()
 	for _, s := range sources {
 		if s.Grade != model.SlaveCollect || !s.State {
-			continue
-		}
-
-		lookupKeys := BuildMovieLookupKeys(mid, name)
-		if len(lookupKeys) == 0 {
 			continue
 		}
 
@@ -174,24 +275,23 @@ func GetMovieDetailByDBID(mid int64, name string) []model.MoviePlaySource {
 // CleanOrphanPlaylists 清理 movie_playlists 中与 search_infos 不匹配的孤儿记录
 // 仅当 search_infos 存在数据时执行，避免主站清空后误删全部播放列表
 func CleanOrphanPlaylists() int64 {
-	var films []struct {
-		Name string
-		DbId int64
-	}
-	db.Mdb.Model(&model.SearchInfo{}).Select("name", "db_id").Scan(&films)
-	if len(films) == 0 {
-		log.Println("[CleanOrphan] search_infos 为空，跳过孤儿清理")
+	var validKeys []string
+	db.Mdb.Model(&model.MovieMatchKey{}).Distinct().Pluck("match_key", &validKeys)
+	if len(validKeys) == 0 {
+		log.Println("[CleanOrphan] movie_match_key 为空，跳过孤儿清理")
 		return 0
 	}
-
-	validKeys := BuildValidPlaylistKeys(films)
+	validKeySet := make(map[string]struct{}, len(validKeys))
+	for _, key := range validKeys {
+		validKeySet[key] = struct{}{}
+	}
 
 	var allKeys []string
 	db.Mdb.Model(&model.MoviePlaylist{}).Distinct().Pluck("movie_key", &allKeys)
 
 	var orphanKeys []string
 	for _, key := range allKeys {
-		if _, ok := validKeys[key]; !ok {
+		if _, ok := validKeySet[key]; !ok {
 			orphanKeys = append(orphanKeys, key)
 		}
 	}

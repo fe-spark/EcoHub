@@ -114,7 +114,7 @@ func ValidSpec(spec string) error {
 }
 
 // AddOrphanCleanCron 添加孤儿数据清理定时任务
-// 定期删除 movie_playlists 中 movie_key 不再匹配 any search_infos 记录的孤儿行
+// 定期删除 movie_playlists 中 movie_key 不再匹配 movie_match_key 索引的孤儿行
 func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))

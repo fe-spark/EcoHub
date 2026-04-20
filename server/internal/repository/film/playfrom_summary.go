@@ -126,9 +126,16 @@ func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
 
 func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
 	result := make(map[int64]map[string][]model.PlayLinkVo, len(infos))
+	mids := make([]int64, 0, len(infos))
+	for _, info := range infos {
+		if info.Mid > 0 {
+			mids = append(mids, info.Mid)
+		}
+	}
+	keysByMid := loadMovieMatchKeysByMids(mids)
 	for _, info := range infos {
 		groupsBySource := make(map[string][]model.PlayLinkVo)
-		lookupKeys := BuildMovieLookupKeys(info.DbId, info.Name)
+		lookupKeys := keysByMid[info.Mid]
 		if len(lookupKeys) == 0 {
 			result[info.Mid] = groupsBySource
 			continue

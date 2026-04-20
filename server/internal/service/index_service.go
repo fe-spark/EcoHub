@@ -10,7 +10,6 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/utils"
 )
 
 type IndexService struct{}
@@ -195,40 +194,10 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 
 func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
 	playList := buildPrimaryPlaySources(search, detail)
-
-	names := make([]string, 0, 2)
-	seenKeys := make(map[string]struct{}, 8)
-	appendKey := func(k string) {
-		if k == "" {
-			return
-		}
-		if _, ok := seenKeys[k]; ok {
-			return
-		}
-		seenKeys[k] = struct{}{}
-		names = append(names, k)
+	names := filmrepo.LoadMovieMatchKeys(search, detail)
+	if len(names) == 0 {
+		return playList
 	}
-	appendNormalizedTitle := func(title string) {
-		if normalizedTitle := utils.NormalizeCollectionTitle(title); normalizedTitle != "" {
-			appendKey(utils.GenerateHashKey(normalizedTitle))
-		}
-	}
-	appendAliasTitles := func(raw string) {
-		appendNormalizedTitle(raw)
-		for _, sep := range []string{",", "，", "/", "|", "、"} {
-			if !strings.Contains(raw, sep) {
-				continue
-			}
-			for alias := range strings.SplitSeq(raw, sep) {
-				appendNormalizedTitle(alias)
-			}
-		}
-	}
-	if dbIdentity := utils.BuildCollectionDbIdentity(detail.DbId, detail.Name); dbIdentity != "" {
-		appendKey(utils.GenerateHashKey(dbIdentity))
-	}
-	appendNormalizedTitle(detail.Name)
-	appendAliasTitles(detail.SubTitle)
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
 	seenSourceIDs := make(map[string]struct{}, len(playList))
 	for _, item := range playList {
