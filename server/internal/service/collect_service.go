@@ -27,6 +27,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	if old == nil {
 		return errors.New("采集站信息不存在")
 	}
+	masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
 
 	// 1. 安全校验：如果有任何采集任务正在运行，禁止修改等级或 URI，防止引发元数据清空冲突
 	isGradeChanged := old.Grade != source.Grade
@@ -37,12 +38,11 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	// 2. 强制单主站机制：如果新等级设为主站，则自动将旧主站降级
 	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
-		log.Printf("[Collect] 站点 %s 提升为主采集站，后台异步清理其旧有播放列表数据并降级现有主站...", source.Name)
-		// 异步清理该站点在作为附属站时期采集的所有播放列表，防止阻塞 API 几十秒（MySQL DELETE 数据量大时极慢）
-		go func(sid string) {
-			_ = filmrepo.DeletePlaylistBySourceId(sid)
-			log.Printf("[Collect] 站点 %s 的旧有播放列表数据清理完成", sid)
-		}(source.Id)
+		log.Printf("[Collect] 站点 %s 提升为主采集站，清理其旧有附属站播放列表并降级现有主站...", source.Name)
+		if err := filmrepo.DeletePlaylistBySourceId(source.Id); err != nil {
+			log.Printf("[Collect] 清理站点 %s 的旧有播放列表失败: %v", source.Name, err)
+			return errors.New("清理新主站旧附属站数据失败，请重试")
+		}
 
 		if err := repository.DemoteExistingMaster(); err != nil {
 			log.Printf("[Collect] 自动降级旧主站失败: %v", err)
@@ -60,7 +60,15 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v)，进行数据重置...", masterLookup, masterUriChanged)
 		// 强制中断所有任务（双重保险）
 		spider.StopAllTasks()
-		filmrepo.MasterFilmZero()
+		affectedSourceIDs := make([]string, 0, len(masters)+1)
+		for _, master := range masters {
+			affectedSourceIDs = append(affectedSourceIDs, master.Id)
+		}
+		affectedSourceIDs = append(affectedSourceIDs, source.Id)
+		if err := filmrepo.ClearMasterDataBySourceIDs(affectedSourceIDs...); err != nil {
+			log.Printf("[Collect] 主站切换数据清理失败: %v", err)
+			return errors.New("主站切换数据清理失败，请重试")
+		}
 	}
 
 	return repository.UpdateCollectSource(source)

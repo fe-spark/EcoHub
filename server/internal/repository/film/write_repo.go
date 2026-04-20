@@ -150,6 +150,22 @@ func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByK
 	return detailInfos
 }
 
+func buildMovieMatchKeyMappings(details []model.MovieDetail, infoByKey map[string]model.SearchInfo, keyToMid map[string]int64) map[int64][]string {
+	midToKeys := make(map[int64][]string, len(details))
+	for _, detail := range details {
+		info, ok := infoByKey[BuildContentKey(detail)]
+		if !ok {
+			continue
+		}
+		globalMid, ok := keyToMid[info.ContentKey]
+		if !ok || globalMid <= 0 {
+			continue
+		}
+		midToKeys[globalMid] = BuildMovieMatchKeys(detail.DbId, detail.Name)
+	}
+	return midToKeys
+}
+
 func saveMovieDetailInfos(detailInfos []model.MovieDetailInfo) error {
 	if len(detailInfos) == 0 {
 		return nil
@@ -204,6 +220,9 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 	if err := saveMovieDetailInfos(buildMovieDetailInfos(id, list, infoByKey, keyToMid)); err != nil {
 		return err
 	}
+	if err := saveMovieMatchKeysByMid(buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
+		return err
+	}
 	return RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys(buildContentKeys(infoList)))
 }
 
@@ -215,6 +234,9 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	}
 
 	err = saveMovieDetailInfos(buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid))
+	if err == nil {
+		err = saveMovieMatchKeysByMid(buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid))
+	}
 
 	if err == nil {
 		if refreshErr := RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys([]string{searchInfo.ContentKey})); refreshErr != nil {

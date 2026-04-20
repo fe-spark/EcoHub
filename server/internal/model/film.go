@@ -114,17 +114,29 @@ type MovieSourceMapping struct {
 type MoviePlaylist struct {
 	gorm.Model
 	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
-	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"` // hash(name) or hash(dbid)
+	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"` // 播放列表匹配键：优先豆瓣ID，其次规范化片名
 	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"` // 播放组顺序
 	GroupName  string `gorm:"type:varchar(255)"`                 // 原始播放组名称
 	Content    string `gorm:"type:longtext"`                     // 单个播放组的播放列表 JSON
+}
+
+// MovieMatchKey 主站影片匹配键索引。
+// 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，附属站播放数据只通过该索引关联。
+type MovieMatchKey struct {
+	gorm.Model
+	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match;index:idx_match_key"`
+	MatchKey string `gorm:"size:64;uniqueIndex:uidx_mid_match;index:idx_match_key"`
+}
+
+func (MovieMatchKey) TableName() string {
+	return TableMovieMatchKey
 }
 
 // SearchInfo 存储用于检索的信息
 type SearchInfo struct {
 	gorm.Model
 	Mid               int64   `json:"mid" gorm:"uniqueIndex:idx_mid"`                                                                                                                                                                    // 影片ID (全局唯一)
-	ContentKey        string  `json:"contentKey" gorm:"uniqueIndex:idx_content"`                                                                                                                                                         // 内容指纹 (hash(name) or dbid)
+	ContentKey        string  `json:"contentKey" gorm:"uniqueIndex:idx_content"`                                                                                                                                                         // 主站内容指纹：优先豆瓣ID，其次规范化片名
 	SourceId          string  `json:"sourceId" gorm:"index"`                                                                                                                                                                             // 来源站点ID
 	Cid               int64   `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
 	Pid               int64   `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
