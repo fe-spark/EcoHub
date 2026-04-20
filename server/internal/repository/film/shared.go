@@ -13,7 +13,7 @@ var searchInfoUpsertUpdateColumns = []string{
 	"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 	"series_key", "area", "language", "year", "initial", "score",
 	"update_stamp", "latest_source_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "release_stamp",
-	"picture", "actor", "director", "blurb", "updated_at", "deleted_at",
+	"picture", "picture_slide", "actor", "director", "blurb", "updated_at", "deleted_at",
 }
 
 var initializedPids sync.Map

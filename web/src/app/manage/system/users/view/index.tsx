@@ -237,7 +237,7 @@ export default function UsersPageView() {
         }}
       />
 
-      <Modal title={editingUser ? "编辑用户" : "新增用户"} open={isModalOpen} onOk={handleModalOk} onCancel={() => setIsModalOpen(false)} confirmLoading={loading} destroyOnClose>
+      <Modal title={editingUser ? "编辑用户" : "新增用户"} open={isModalOpen} onOk={handleModalOk} onCancel={() => setIsModalOpen(false)} confirmLoading={loading} destroyOnHidden>
         <Form form={form} layout="vertical" preserve={false}>
           <Form.Item name="userName" label="用户名" rules={[{ required: true, message: "请输入用户名" }]}>
             <Input prefix={<UserOutlined />} placeholder="用于登录的账号" disabled={!!editingUser} />

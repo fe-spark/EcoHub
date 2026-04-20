@@ -479,6 +479,7 @@ func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolve
 		Remarks:           detail.Remarks,
 		ReleaseStamp:      detail.AddTime,
 		Picture:           detail.Picture,
+		PictureSlide:      detail.PictureSlide,
 		Actor:             detail.Actor,
 		Director:          detail.Director,
 		Blurb:             detail.Blurb,

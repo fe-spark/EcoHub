@@ -1,15 +1,14 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Carousel, Button } from "antd";
+import { Button } from "antd";
 import {
   VideoCameraOutlined,
   PlaySquareOutlined,
   SmileOutlined,
   RocketOutlined,
   FireOutlined,
-  LeftOutlined,
-  RightOutlined,
 } from "@ant-design/icons";
 import FilmList from "@/components/public/FilmList";
 import styles from "./index.module.less";
@@ -20,8 +19,30 @@ interface BannerItem {
   name: string;
   poster: string;
   picture: string;
+  pictureSlide?: string;
   year: string;
   cName: string;
+}
+
+function buildHeroMetaItems(item: BannerItem): string[] {
+  const metaItems: string[] = [];
+
+  if (item.year && item.year !== "0") {
+    metaItems.push(item.year);
+  }
+  if (item.cName) {
+    metaItems.push(item.cName);
+  }
+
+  return metaItems;
+}
+
+function getBannerLandscapeImage(item: BannerItem): string {
+  return item.pictureSlide || item.poster || item.picture;
+}
+
+function getBannerPortraitImage(item: BannerItem): string {
+  return item.picture || item.poster || item.pictureSlide || "";
 }
 
 interface NavChildItem {
@@ -43,22 +64,6 @@ interface ContentSection {
   hot: any[];
 }
 
-function NextArrow({ currentSlide: _cs, slideCount: _sc, ...props }: any) {
-  return (
-    <div {...props}>
-      <RightOutlined />
-    </div>
-  );
-}
-
-function PrevArrow({ currentSlide: _cs, slideCount: _sc, ...props }: any) {
-  return (
-    <div {...props}>
-      <LeftOutlined />
-    </div>
-  );
-}
-
 export default function HomePageView({
   data,
 }: {
@@ -68,6 +73,47 @@ export default function HomePageView({
   };
 }) {
   const router = useRouter();
+  const banners = data.banners;
+  const [activeIndex, setActiveIndex] = useState(0);
+  const safeActiveIndex =
+    banners.length === 0 ? 0 : Math.min(activeIndex, banners.length - 1);
+
+  const activeBanner = banners[safeActiveIndex] || banners[0];
+  const activeMetaItems = activeBanner ? buildHeroMetaItems(activeBanner) : [];
+
+  useEffect(() => {
+    if (banners.length <= 1) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setActiveIndex((currentIndex) => (currentIndex + 1) % banners.length);
+    }, 3600);
+
+    return () => window.clearTimeout(timer);
+  }, [activeIndex, banners.length]);
+
+  const handleHeroCardClick = (index: number) => {
+    if (index === safeActiveIndex) {
+      return;
+    }
+
+    setActiveIndex(index);
+  };
+
+  const getHeroAccordionItemClassName = (index: number) => {
+    if (index === safeActiveIndex) {
+      return styles.heroAccordionItemActive;
+    }
+
+    if (banners.length <= 1) {
+      return styles.heroAccordionItemFar;
+    }
+
+    const distance = Math.abs(index - safeActiveIndex);
+
+    return distance === 1 ? styles.heroAccordionItemNear : styles.heroAccordionItemFar;
+  };
 
   const getSectionIcon = (name: string) => {
     if (name.includes("电影")) {
@@ -84,63 +130,93 @@ export default function HomePageView({
 
   return (
     <div className={styles.container}>
-      {data.banners.length > 0 && (
+      {banners.length > 0 && activeBanner && (
         <section className={styles.heroSection}>
-          <Carousel
-            autoplay
-            autoplaySpeed={5000}
-            effect="fade"
-            dots={{ className: styles.customDots }}
-            arrows
-            nextArrow={<NextArrow className={styles.customArrow} />}
-            prevArrow={<PrevArrow className={styles.customArrow} />}
-          >
-            {data.banners.map((item, idx) => (
-              <div
-                key={idx}
-                className={styles.heroSlide}
-                onClick={() => router.push(`/filmDetail?link=${item.mid}`)}
-              >
-                <div
-                  className={styles.heroBg}
-                  style={{
-                    backgroundImage: `url(${item.poster || item.picture})`,
-                  }}
-                />
+          <div className={styles.heroBackground}>
+            <div
+              className={styles.heroBackdropImage}
+              style={{ backgroundImage: `url(${getBannerLandscapeImage(activeBanner)})` }}
+            />
+            <div className={styles.heroBackdropMask} />
+          </div>
 
-                <div className={styles.heroOverlay}>
-                  <div className={styles.heroInfo}>
-                    <div className={styles.heroBadge}>{item.cName || "精彩推荐"}</div>
-                    <h1 className={styles.heroTitle}>{item.name}</h1>
-                    <div className={styles.heroMeta}>
-                      <span>{item.year}</span>
-                      <span className={styles.divider}>|</span>
-                      <span>HD 高清</span>
+          <div className={styles.heroLayout}>
+            <div className={styles.heroContent}>
+              <div className={styles.heroPanel}>
+                <div className={styles.heroEyebrow}>Editor&apos;s Pick</div>
+
+                <div className={styles.heroBadgeRow}>
+                  <div className={styles.heroBadge}>{activeBanner.cName || "精彩推荐"}</div>
+                  {banners.length > 1 && (
+                    <div className={styles.heroCounter}>
+                      <span>{String(safeActiveIndex + 1).padStart(2, "0")}</span>
+                      <span className={styles.heroCounterDivider}>/</span>
+                      <span>{String(banners.length).padStart(2, "0")}</span>
                     </div>
-                    <div className={styles.heroActions}>
-                      <Button
-                        type="primary"
-                        size="large"
-                        icon={<PlaySquareOutlined />}
-                        className={styles.playBtn}
-                        onClick={() => router.push(`/filmDetail?link=${item.mid}`)}
-                      >
-                        立即播放
-                      </Button>
-                      <Button
-                        ghost
-                        size="large"
-                        className={styles.detailBtn}
-                        onClick={() => router.push(`/filmDetail?link=${item.mid}`)}
-                      >
-                        查看详情
-                      </Button>
-                    </div>
-                  </div>
+                  )}
+                </div>
+                
+                <h1 className={styles.heroTitle}>{activeBanner.name}</h1>
+
+                <div className={styles.heroMeta}>
+                  {activeMetaItems.map((meta) => (
+                    <span key={meta} className={styles.heroMetaItem}>
+                      {meta}
+                    </span>
+                  ))}
+                </div>
+
+                <div className={styles.heroActions}>
+                  <Button
+                    type="primary"
+                    size="large"
+                    icon={<PlaySquareOutlined />}
+                    className={styles.playBtn}
+                    onClick={() => router.push(`/play?id=${activeBanner.mid}&source=0&episode=0`)}
+                  >
+                    立即播放
+                  </Button>
+                  <Button
+                    ghost
+                    size="large"
+                    className={styles.detailBtn}
+                    onClick={() => router.push(`/filmDetail?link=${activeBanner.mid}`)}
+                  >
+                    查看详情
+                  </Button>
                 </div>
               </div>
-            ))}
-          </Carousel>
+            </div>
+
+            <div className={styles.heroCarouselColumn}>
+              <div className={styles.heroAccordion}>
+                {banners.map((item, index) => {
+                  const isActive = index === safeActiveIndex;
+
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`${styles.heroAccordionItem} ${getHeroAccordionItemClassName(index)}`}
+                      onClick={() => handleHeroCardClick(index)}
+                      aria-label={`切换到 ${item.name}`}
+                      >
+                        <span
+                          className={styles.heroCardImage}
+                          style={{ backgroundImage: `url(${getBannerPortraitImage(item)})` }}
+                        />
+                      <span className={styles.heroCardMask} />
+                      <span className={styles.heroAccordionSpine} />
+                      <span className={styles.heroCardInfo}>
+                        <span className={styles.heroCardTag}>{item.cName || "推荐"}</span>
+                        <span className={styles.heroCardTitle}>{item.name}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
         </section>
       )}
 
