@@ -181,26 +181,6 @@
   }
 }
 
-.detailBtn {
-  height: 40px;
-  padding: 0 18px;
-  border-radius: 999px;
-  border: 1px solid var(--public-border-2) !important;
-  background: color-mix(in srgb, var(--public-surface-2) 90%, transparent) !important;
-  color: var(--public-text-1) !important;
-  font-size: 13px;
-  font-weight: 600;
-  box-shadow:
-    inset 0 0 0 1px var(--public-border-1),
-    0 10px 24px rgba(0, 0, 0, 0.08);
-
-  &:hover {
-    background: color-mix(in srgb, var(--public-surface-hover) 96%, transparent) !important;
-    border-color: rgba(var(--primary-color-rgb), 0.4) !important;
-    color: var(--public-text-1) !important;
-  }
-}
-
 .heroCarouselColumn {
   position: relative;
   display: flex;
@@ -640,13 +620,12 @@
   .heroActions {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
     gap: 8px;
     margin-top: 14px;
   }
 
-  .playBtn,
-  .detailBtn {
+  .playBtn {
     width: 100%;
     height: 36px;
     padding: 0 12px;
@@ -763,8 +742,7 @@
     grid-template-columns: 1fr;
   }
 
-  .playBtn,
-  .detailBtn {
+  .playBtn {
     height: 34px;
     font-size: 12px;
   }

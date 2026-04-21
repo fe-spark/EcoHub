@@ -76,6 +76,7 @@ export default function HomePageView({
   const router = useRouter();
   const featuredCovers = data.banners;
   const [activeIndex, setActiveIndex] = useState(0);
+  const [isHeroAccordionPaused, setIsHeroAccordionPaused] = useState(false);
   const safeActiveIndex =
     featuredCovers.length === 0 ? 0 : Math.min(activeIndex, featuredCovers.length - 1);
 
@@ -83,7 +84,7 @@ export default function HomePageView({
   const activeMetaItems = activeCover ? buildHeroMetaItems(activeCover) : [];
 
   useEffect(() => {
-    if (featuredCovers.length <= 1) {
+    if (featuredCovers.length <= 1 || isHeroAccordionPaused) {
       return;
     }
 
@@ -92,14 +93,33 @@ export default function HomePageView({
     }, 3600);
 
     return () => window.clearTimeout(timer);
-  }, [activeIndex, featuredCovers.length]);
+  }, [activeIndex, featuredCovers.length, isHeroAccordionPaused]);
+  const handleHeroCardHover = (index: number) => {
+    setIsHeroAccordionPaused(true);
 
-  const handleHeroCardClick = (index: number) => {
     if (index === safeActiveIndex) {
       return;
     }
 
     setActiveIndex(index);
+  };
+
+  const handleHeroAccordionLeave = () => {
+    setIsHeroAccordionPaused(false);
+  };
+
+  const handleHeroCardPlay = (index: number, filmId: string) => {
+    if (index !== safeActiveIndex) {
+      setActiveIndex(index);
+      return;
+    }
+
+    router.push(
+      resolvePlayEntryPath(filmId, {
+        sourceId: "0",
+        episodeIndex: 0,
+      }),
+    );
   };
 
   const getHeroAccordionItemClassName = (index: number) => {
@@ -184,35 +204,35 @@ export default function HomePageView({
                   >
                     立即播放
                   </Button>
-                  <Button
-                    ghost
-                    size="large"
-                    className={styles.detailBtn}
-                    onClick={() => router.push(resolvePlayEntryPath(activeCover.mid))}
-                  >
-                    继续观看
-                  </Button>
                 </div>
               </div>
             </div>
 
             <div className={styles.heroCarouselColumn}>
-              <div className={styles.heroAccordion}>
+              <div
+                className={styles.heroAccordion}
+                onMouseLeave={handleHeroAccordionLeave}
+                onBlur={(event) => {
+                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                    handleHeroAccordionLeave();
+                  }
+                }}
+              >
                 {featuredCovers.map((item, index) => {
-                  const isActive = index === safeActiveIndex;
-
                   return (
                     <button
                       key={item.id}
                       type="button"
                       className={`${styles.heroAccordionItem} ${getHeroAccordionItemClassName(index)}`}
-                      onClick={() => handleHeroCardClick(index)}
-                      aria-label={`切换到 ${item.name}`}
-                      >
-                         <span
-                           className={styles.heroCardImage}
-                            style={{ backgroundImage: `url(${getBannerCardImage(item)})` }}
-                         />
+                      onMouseEnter={() => handleHeroCardHover(index)}
+                      onFocus={() => handleHeroCardHover(index)}
+                      onClick={() => handleHeroCardPlay(index, item.mid)}
+                      aria-label={index === safeActiveIndex ? `播放 ${item.name}` : `展开 ${item.name}`}
+                    >
+                      <span
+                        className={styles.heroCardImage}
+                        style={{ backgroundImage: `url(${getBannerCardImage(item)})` }}
+                      />
                       <span className={styles.heroCardMask} />
                       <span className={styles.heroAccordionSpine} />
                       <span className={styles.heroCardInfo}>
