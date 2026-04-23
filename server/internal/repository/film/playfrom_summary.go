@@ -124,37 +124,6 @@ func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
 	})
 }
 
-func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
-	result := make(map[int64]map[string][]model.PlayLinkVo, len(infos))
-	mids := make([]int64, 0, len(infos))
-	for _, info := range infos {
-		if info.Mid > 0 {
-			mids = append(mids, info.Mid)
-		}
-	}
-	keysByMid := loadMovieMatchKeysByMids(mids)
-	for _, info := range infos {
-		groupsBySource := make(map[string][]model.PlayLinkVo)
-		lookupKeys := keysByMid[info.Mid]
-		if len(lookupKeys) == 0 {
-			result[info.Mid] = groupsBySource
-			continue
-		}
-		for _, source := range support.GetCollectSourceList() {
-			if source.Grade != model.SlaveCollect || !source.State {
-				continue
-			}
-			groups := GetMultiplePlayGroupsByKeys(source.Id, source.Name, lookupKeys)
-			if len(groups) == 0 {
-				continue
-			}
-			groupsBySource[source.Id] = groups
-		}
-		result[info.Mid] = groupsBySource
-	}
-	return result, nil
-}
-
 func ClearProvideListCache() {
 	pattern := config.TVBoxList + ":*"
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()

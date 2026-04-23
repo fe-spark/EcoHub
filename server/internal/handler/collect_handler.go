@@ -121,10 +121,8 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 			Id:           fs.Id,
 			Name:         fs.Name,
 			Uri:          fs.Uri,
-			ResultModel:  fs.ResultModel,
 			Grade:        fs.Grade,
 			SyncPictures: s.SyncPictures,
-			CollectType:  fs.CollectType,
 			State:        s.State,
 			Interval:     fs.Interval,
 		}

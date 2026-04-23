@@ -88,12 +88,6 @@ type MovieDetail struct {
 	MovieDescriptor `json:"descriptor"` // 影片描述信息
 }
 
-// MoviePlaySource 多站播放源信息
-type MoviePlaySource struct {
-	SiteName string         `json:"siteName"` // 站点名称
-	PlayList []MovieUrlInfo `json:"playList"` // 播放列表
-}
-
 // MovieDetailInfo 影片详情持久化模型 (MySQL)
 type MovieDetailInfo struct {
 	gorm.Model
@@ -102,26 +96,29 @@ type MovieDetailInfo struct {
 	Content  string `gorm:"type:longtext"` // 存储序列化后的完整 MovieDetail JSON
 }
 
-// MovieSourceMapping 影片来源映射表 (核心：解决不同站 ID 不一致问题)
+// MovieSourceMapping 影片源站 ID 与全局影片 ID 的最小映射。
+// 主站详情写入和附属站播放列表采集匹配后都会维护该表。
+// 当前仅用于后台“单片更新全部站点”时，把全局 mid 翻译回各站 source_mid。
 type MovieSourceMapping struct {
 	gorm.Model
-	SourceId  string `gorm:"uniqueIndex:uidx_source_mid"` // 来源站点ID
-	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid"` // 来源站点原始ID
-	GlobalMid int64  `gorm:"index"`                       // 映射到的全局统一ID
+	SourceId  string `gorm:"uniqueIndex:uidx_source_mid"`
+	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid"`
+	GlobalMid int64  `gorm:"index"`
 }
 
-// MoviePlaylist 多源播放列表持久化模型 (MySQL)
+// MoviePlaylist 附属站播放列表持久化模型。
+// 主站不写该表，附属站采集后按匹配键写入，供详情页和播放页直接聚合读取。
 type MoviePlaylist struct {
 	gorm.Model
 	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
-	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"` // 播放列表匹配键：优先豆瓣ID，其次规范化片名
-	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"` // 播放组顺序
-	GroupName  string `gorm:"type:varchar(255)"`                 // 原始播放组名称
-	Content    string `gorm:"type:longtext"`                     // 单个播放组的播放列表 JSON
+	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"`
+	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"`
+	GroupName  string `gorm:"type:varchar(255)"`
+	Content    string `gorm:"type:longtext"`
 }
 
 // MovieMatchKey 主站影片匹配键索引。
-// 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，附属站播放数据只通过该索引关联。
+// 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，供详情页实时补附属站播放源。
 type MovieMatchKey struct {
 	gorm.Model
 	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match;index:idx_match_key"`
@@ -153,11 +150,11 @@ type SearchInfo struct {
 	Initial           string  `json:"initial"`                                                                                    // 首字母
 	Score             float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                  // 评分
 	UpdateStamp       int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
-	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                   // 聚合更新时间(主站/附属站取最新)
+	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                   // 主站更新时间
 	Hits              int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State             string  `json:"state"`                                                                                      // 状态 正片|预告
 	Remarks           string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
-	PlayFromSummary   string  `json:"playFromSummary"`                                                                            // 播放源摘要，供列表接口直出
+	PlayFromSummary   string  `json:"playFromSummary"`                                                                            // 主站播放源摘要，供列表接口直出
 	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
 	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
 	Picture           string  `json:"picture"`                                                                                    // 竖版封面图

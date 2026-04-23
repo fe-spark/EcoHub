@@ -1,9 +1,5 @@
 package model
 
-import (
-	"encoding/xml"
-)
-
 /*
  视频详情接口序列化 struct
 */
@@ -106,67 +102,4 @@ type FilmDetail struct {
 	VodPlotName      string `json:"vod_plot_name"`      // 分类剧情名称
 	VodPlotDetail    string `json:"vod_plot_detail"`    // 分集剧情详情
 	TypeName         string `json:"type_name"`          // 分类名称
-}
-
-//-------------------------------------------------Xml 格式-------------------------------------------------
-
-type RssD struct {
-	XMLName xml.Name        `xml:"rss"`
-	Version string          `xml:"version,attr"`
-	List    FilmDetailPageX `xml:"list"`
-}
-
-type CDATA struct {
-	Text string `xml:",cdata"`
-}
-
-type FilmDetailPageX struct {
-	XMLName     xml.Name      `xml:"list"`
-	Page        string        `xml:"page,attr"`
-	PageCount   int           `xml:"pagecount,attr"`
-	PageSize    string        `xml:"pagesize,attr"`
-	RecordCount int           `xml:"recordcount,attr"`
-	Videos      []VideoDetail `xml:"video"`
-}
-type VideoDetail struct {
-	XMLName  xml.Name `xml:"video"`
-	Last     string   `xml:"last"`
-	ID       int64    `xml:"id"`
-	Tid      int64    `xml:"tid"`
-	Name     CDATA    `xml:"name"`
-	Type     string   `xml:"type"`
-	Pic      string   `xml:"pic"`
-	Lang     string   `xml:"lang"`
-	Area     string   `xml:"area"`
-	Year     string   `xml:"year"`
-	State    string   `xml:"state"`
-	Note     CDATA    `xml:"note"`
-	Actor    CDATA    `xml:"actor"`
-	Director CDATA    `xml:"director"`
-	DL       DL       `xml:"dl"`
-	Des      CDATA    `xml:"des"`
-}
-
-type DL struct {
-	XMLName xml.Name `xml:"dl"`
-	DD      []DD     `xml:"dd"`
-}
-
-type DD struct {
-	XMLName xml.Name `xml:"dd"`
-	Flag    string   `xml:"flag,attr"`
-	Value   string   `xml:",cdata"`
-}
-
-//-------------------------------------------------Json 格式-------------------------------------------------
-
-// BatchSaveOriginalDetail 批量保存原始影片详情数据 (已废弃，调用方已注释)
-func BatchSaveOriginalDetail(_ []FilmDetail) {}
-
-// SaveOriginalDetail 保存未处理的完整影片详情信息 (已废弃，调用方已注释)
-func SaveOriginalDetail(_ FilmDetail) {}
-
-// GetOriginalDetailById 获取原始的影片详情数据 (已废弃)
-func GetOriginalDetailById(_ int64) (FilmDetail, error) {
-	return FilmDetail{}, nil
 }

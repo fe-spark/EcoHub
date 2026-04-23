@@ -153,10 +153,10 @@ REDIS_HOST=192.168.1.11
 flowchart TD
     A["定时任务 / 手动触发"] --> B["Spider 启动"]
     B --> C{"采集站等级"}
-    C -->|主站| D["写入 SearchInfo / MovieDetail / MovieSourceMapping"]
-    C -->|附属站| E["写入 MoviePlaylist"]
+    C -->|主站| D["写入 SearchInfo / MovieDetail / MovieMatchKey"]
+    C -->|附属站| E["写入 MoviePlaylist / MovieSourceMapping"]
     D --> F["生成分类映射与筛选标签"]
-    E --> G["详情页聚合多播放源"]
+    E --> G["详情页聚合多播放源 / 单片更新全部站点"]
     F --> H["前台 / 后台 / Provide 接口可见"]
     G --> H
 ```
@@ -167,7 +167,8 @@ flowchart TD
 - 站点升级为主站时，会自动降级旧主站
 - 主站变更或主站 URI 变更时，会停止采集任务并清空主数据，再由新主站重建
 - 内容归并优先使用豆瓣 ID，没有豆瓣 ID 时使用片名哈希
-- 附属站播放源聚合时，也按豆瓣 ID 和标题候选哈希去匹配
+- 附属站会采集并持久化播放列表
+- `MovieSourceMapping` 只承担最小职责：把全局 `mid` 翻译回各站 `source_mid`，供后台单片更新全部站点使用
 
 ## 接口分组
 

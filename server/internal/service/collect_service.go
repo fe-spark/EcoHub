@@ -100,7 +100,6 @@ func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.Fai
 
 func (s *CollectService) GetRecordOptions() model.OptionGroup {
 	options := make(model.OptionGroup)
-	options["collectType"] = []model.Option{{Name: "全部", Value: -1}, {Name: "影片详情", Value: 0}, {Name: "文章", Value: 1}, {Name: "演员", Value: 2}, {Name: "角色", Value: 3}, {Name: "网站", Value: 4}}
 	options["status"] = []model.Option{{Name: "全部", Value: -1}, {Name: "待重试", Value: 1}, {Name: "已处理", Value: 0}}
 
 	originOptions := []model.Option{{Name: "全部", Value: ""}}

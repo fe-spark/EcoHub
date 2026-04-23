@@ -47,7 +47,7 @@ func (s *SpiderService) ClearFilms() {
 	go spider.ClearSpider()
 }
 
-// SyncCollect 同步采集
+// SyncCollect 同步主站单片采集
 func (s *SpiderService) SyncCollect(ids string) {
 	go spider.CollectSingleFilm(ids)
 }

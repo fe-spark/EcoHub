@@ -159,13 +159,5 @@ func validFilmSource(fs model.FilmSource) error {
 	if !utils.ValidURL(fs.Uri) {
 		return errors.New("资源链接格式异常, 请输入规范的URL链接")
 	}
-	if fs.ResultModel != model.JsonResult && fs.ResultModel != model.XmlResult {
-		return errors.New("接口类型异常, 请提交正确的接口类型")
-	}
-	switch fs.CollectType {
-	case model.CollectVideo, model.CollectArticle, model.CollectActor, model.CollectRole, model.CollectWebSite:
-		return nil
-	default:
-		return errors.New("资源类型异常, 未知的资源类型")
-	}
+	return nil
 }

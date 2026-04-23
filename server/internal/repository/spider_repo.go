@@ -162,7 +162,7 @@ func DelCollectResource(id string) error {
 		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
 			return err
 		}
-		// 2. 删除附属站采集产生的播放列表数据
+		// 2. 删除附属站播放列表
 		if err := tx.Where("source_id = ?", id).Delete(&model.MoviePlaylist{}).Error; err != nil {
 			return err
 		}
@@ -234,8 +234,8 @@ func ExistCollectSourceList() bool {
 // --------- Failure Record -----------
 
 func pendingFailureScope(tx *gorm.DB, fl model.FailureRecord) *gorm.DB {
-	return tx.Where("origin_id = ? AND collect_type = ? AND page_number = ? AND hour = ? AND status = 1",
-		fl.OriginId, fl.CollectType, fl.PageNumber, fl.Hour,
+	return tx.Where("origin_id = ? AND page_number = ? AND hour = ? AND status = 1",
+		fl.OriginId, fl.PageNumber, fl.Hour,
 	)
 }
 

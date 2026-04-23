@@ -90,6 +90,8 @@ func buildMovieSourceMappings(list []model.SearchInfo, keyToMid map[string]int64
 	return mappings
 }
 
+// saveMovieSourceMappings 仅维护“站点原始影片 ID -> 全局影片 ID”的最小映射，
+// 供后台单片更新时把统一 mid 翻译回各站自己的 source_mid。
 func saveMovieSourceMappings(mappings []model.MovieSourceMapping) {
 	if len(mappings) == 0 {
 		return
