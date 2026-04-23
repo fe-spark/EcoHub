@@ -209,10 +209,15 @@ func refreshLatestSourceStampByMids(latestByMid map[int64]int64) error {
 		return nil
 	}
 
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	updatedPids := make(map[int64]struct{}, len(latestByMid))
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		for mid, stamp := range latestByMid {
 			if mid <= 0 || stamp <= 0 {
 				continue
+			}
+			var info model.SearchInfo
+			if err := tx.Select("pid").Where("mid = ?", mid).First(&info).Error; err != nil {
+				return err
 			}
 			if err := tx.Model(&model.SearchInfo{}).
 				Where("mid = ?", mid).
@@ -220,9 +225,17 @@ func refreshLatestSourceStampByMids(latestByMid map[int64]int64) error {
 				Update("latest_source_stamp", stamp).Error; err != nil {
 				return err
 			}
+			if info.Pid > 0 {
+				updatedPids[info.Pid] = struct{}{}
+			}
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	clearSearchInfoCachesByPidSet(updatedPids)
+	return nil
 }
 
 func DeletePlaylistBySourceId(sourceID string) error {

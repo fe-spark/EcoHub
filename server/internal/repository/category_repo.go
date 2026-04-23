@@ -204,11 +204,8 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 		return err
 	}
 
-	// 同步完成后刷新内存缓存，确保采集立即可用
-	ClearCategoryCache()
-	InitMappingEngine()
-	touchCategoryVersion()
-	ClearIndexPageCache()
+	// 同步完成后统一刷新分类缓存与内存映射，确保采集立即可用
+	MarkCategoryChanged()
 	return nil
 }
 
@@ -562,10 +559,7 @@ func InitMainCategories() {
 	}
 	mergeShortFilmIntoOther()
 
-	// 2. 刷新映射引擎（加载顶级大类到内存缓存）
-	InitMappingEngine()
-
-	// 3. 统一清理分类相关缓存并重建内存映射
+	// 2. 统一清理分类相关缓存并重建内存映射
 	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
 		return normalizeCategoryStableKeys(tx)
 	})
