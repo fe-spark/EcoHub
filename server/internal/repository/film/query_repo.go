@@ -619,6 +619,7 @@ func getFallbackRelatedSearchInfos(search model.SearchInfo, page *dto.Page) []mo
 	var list []model.SearchInfo
 	if err := db.Mdb.Model(&model.SearchInfo{}).
 		Where("cid = ? AND mid != ?", search.Cid, search.Mid).
+		Where("deleted_at IS NULL").
 		Order(latestUpdateOrderSQL).
 		Offset(getPageOffset(page)).
 		Limit(page.PageSize).

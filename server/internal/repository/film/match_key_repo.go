@@ -18,6 +18,10 @@ func buildMovieMatchKeyRecords(mid int64, keys []string) []model.MovieMatchKey {
 }
 
 func saveMovieMatchKeysByMid(midToKeys map[int64][]string) error {
+	return saveMovieMatchKeysByMidTx(db.Mdb, midToKeys)
+}
+
+func saveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error {
 	if len(midToKeys) == 0 {
 		return nil
 	}
@@ -35,15 +39,13 @@ func saveMovieMatchKeysByMid(midToKeys map[int64][]string) error {
 		return nil
 	}
 
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
-			return err
-		}
-		if len(records) == 0 {
-			return nil
-		}
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error
-	})
+	if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
+		return err
+	}
+	if len(records) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error
 }
 
 func deleteMovieMatchKeysByMids(tx *gorm.DB, mids []int64) error {
@@ -54,12 +56,16 @@ func deleteMovieMatchKeysByMids(tx *gorm.DB, mids []int64) error {
 }
 
 func loadMovieMatchKeysByMids(mids []int64) map[int64][]string {
+	return loadMovieMatchKeysByMidsTx(db.Mdb, mids)
+}
+
+func loadMovieMatchKeysByMidsTx(tx *gorm.DB, mids []int64) map[int64][]string {
 	if len(mids) == 0 {
 		return nil
 	}
 
 	var records []model.MovieMatchKey
-	if err := db.Mdb.Where("mid IN ?", mids).Order("id ASC").Find(&records).Error; err != nil {
+	if err := tx.Where("mid IN ?", mids).Order("id ASC").Find(&records).Error; err != nil {
 		return nil
 	}
 

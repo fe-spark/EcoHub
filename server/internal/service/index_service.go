@@ -167,18 +167,9 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
-	// 关键修复：从数据库获取规范化后的 SearchInfo，而不是直接使用 detail 中不可信的 Cid/Pid
 	search := filmrepo.GetSearchInfoById(detail.Id)
 	if search == nil {
-		// 备选方案：如果 SearchInfo 暂无，则构造一个简易的
-		search = &model.SearchInfo{
-			Cid:      detail.Cid,
-			Pid:      detail.Pid,
-			Name:     detail.Name,
-			ClassTag: detail.ClassTag,
-			Area:     detail.Area,
-			Language: detail.Language,
-		}
+		return []model.MovieBasicInfo{}
 	}
 	return filmrepo.GetRelateMovieBasicInfo(*search, page)
 }
@@ -209,6 +200,9 @@ func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model
 	}
 
 	for _, source := range sc {
+		if !source.State {
+			continue
+		}
 		if _, ok := seenSourceIDs[source.Id]; ok {
 			continue
 		}

@@ -48,6 +48,14 @@ var taskMu sync.Mutex
 // limiters 存储各站点的限流器
 var limiters sync.Map
 
+func ClearLimiter(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	limiters.Delete(sourceID)
+}
+
 type collectTask struct {
 	cancel context.CancelFunc
 	reqId  string

@@ -20,7 +20,6 @@ var initializedPids sync.Map
 
 var defaultSortTagStrings = []string{"最新更新:latest_source_stamp", "人气:hits", "评分:score", "最新采集:collect_stamp"}
 
-// 为搜索分页提供稳定排序，避免相同时间戳记录在翻页时重复漂移。
 const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC, mid DESC"
 
 var allowedSearchSortColumns = map[string]string{

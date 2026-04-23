@@ -45,19 +45,29 @@ func filterValidSearchInfos(list []model.SearchInfo) []model.SearchInfo {
 }
 
 func upsertSearchInfos(list []model.SearchInfo) error {
+	return upsertSearchInfosTx(db.Mdb, list)
+}
+
+func upsertSearchInfosTx(tx *gorm.DB, list []model.SearchInfo) error {
 	if len(list) == 0 {
 		return nil
 	}
-	return db.Mdb.Clauses(searchInfoContentKeyUpsert()).CreateInBatches(&list, 200).Error
+	return tx.Clauses(searchInfoContentKeyUpsert()).CreateInBatches(&list, 200).Error
 }
 
 func loadSearchInfoMidMapByContentKeys(contentKeys []string) map[string]int64 {
+	return loadSearchInfoMidMapByContentKeysTx(db.Mdb, contentKeys)
+}
+
+func loadSearchInfoMidMapByContentKeysTx(tx *gorm.DB, contentKeys []string) map[string]int64 {
 	if len(contentKeys) == 0 {
 		return nil
 	}
 
 	var latestInfos []model.SearchInfo
-	db.Mdb.Where("content_key IN ?", contentKeys).Find(&latestInfos)
+	if err := tx.Where("content_key IN ?", contentKeys).Find(&latestInfos).Error; err != nil {
+		return nil
+	}
 
 	keyToMid := make(map[string]int64, len(latestInfos))
 	for _, info := range latestInfos {
@@ -93,24 +103,46 @@ func buildMovieSourceMappings(list []model.SearchInfo, keyToMid map[string]int64
 // saveMovieSourceMappings 仅维护“站点原始影片 ID -> 全局影片 ID”的最小映射，
 // 供后台单片更新时把统一 mid 翻译回各站自己的 source_mid。
 func saveMovieSourceMappings(mappings []model.MovieSourceMapping) {
+	saveMovieSourceMappingsTx(db.Mdb, mappings)
+}
+
+func saveMovieSourceMappingsTx(tx *gorm.DB, mappings []model.MovieSourceMapping) {
 	if len(mappings) == 0 {
 		return
 	}
-	db.Mdb.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200)
+	if err := tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200).Error; err != nil {
+		log.Printf("saveMovieSourceMappings 失败: %v\n", err)
+	}
 }
 
 func saveSearchInfosAndMappings(list []model.SearchInfo) (map[string]int64, error) {
+	return saveSearchInfosAndMappingsTx(db.Mdb, list)
+}
+
+func saveSearchInfosAndMappingsTx(tx *gorm.DB, list []model.SearchInfo) (map[string]int64, error) {
 	if len(list) == 0 {
 		return nil, nil
 	}
 
-	if err := upsertSearchInfos(list); err != nil {
+	if err := upsertSearchInfosTx(tx, list); err != nil {
 		return nil, err
 	}
 
-	keyToMid := loadSearchInfoMidMapByContentKeys(buildContentKeys(list))
-	saveMovieSourceMappings(buildMovieSourceMappings(list, keyToMid))
+	keyToMid := loadSearchInfoMidMapByContentKeysTx(tx, buildContentKeys(list))
+	if keyToMid == nil {
+		return nil, fmt.Errorf("load search info mids failed")
+	}
+	if err := saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(list, keyToMid)); err != nil {
+		return nil, err
+	}
 	return keyToMid, nil
+}
+
+func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping) error {
+	if len(mappings) == 0 {
+		return nil
+	}
+	return tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200).Error
 }
 
 func buildSearchInfosFromDetails(sourceID string, details []model.MovieDetail) ([]model.SearchInfo, map[string]model.SearchInfo) {
@@ -169,10 +201,14 @@ func buildMovieMatchKeyMappings(details []model.MovieDetail, infoByKey map[strin
 }
 
 func saveMovieDetailInfos(detailInfos []model.MovieDetailInfo) error {
+	return saveMovieDetailInfosTx(db.Mdb, detailInfos)
+}
+
+func saveMovieDetailInfosTx(tx *gorm.DB, detailInfos []model.MovieDetailInfo) error {
 	if len(detailInfos) == 0 {
 		return nil
 	}
-	return db.Mdb.Clauses(movieDetailInfoUpsert()).Create(&detailInfos).Error
+	return tx.Clauses(movieDetailInfoUpsert()).Create(&detailInfos).Error
 }
 
 func clearDetailCaches(pid int64) {
@@ -218,43 +254,80 @@ func SaveSearchInfo(s model.SearchInfo) error {
 
 func SaveDetails(id string, list []model.MovieDetail) error {
 	infoList, infoByKey := buildSearchInfosFromDetails(id, list)
-	keyToMid := BatchSaveOrUpdate(infoList)
-	if err := saveMovieDetailInfos(buildMovieDetailInfos(id, list, infoByKey, keyToMid)); err != nil {
+	infoList = filterValidSearchInfos(infoList)
+	if len(infoList) == 0 {
+		return nil
+	}
+
+	var refreshInfos []model.SearchInfo
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		keyToMid, err := saveSearchInfosAndMappingsTx(tx, infoList)
+		if err != nil {
+			return err
+		}
+		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, list, infoByKey, keyToMid)); err != nil {
+			return err
+		}
+		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
+			return err
+		}
+		refreshInfos = reloadSearchInfosByContentKeysTx(tx, buildContentKeys(infoList))
+		if len(refreshInfos) == 0 {
+			return nil
+		}
+		return RefreshPlayFromSummaryBySearchInfosTx(tx, refreshInfos)
+	}); err != nil {
 		return err
 	}
-	if err := saveMovieMatchKeysByMid(buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
-		return err
-	}
-	return RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys(buildContentKeys(infoList)))
+
+	clearSearchInfoCachesByPids(infoList)
+	BatchHandleSearchTag(infoList...)
+	ClearProvideListCache()
+	return nil
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
 	searchInfo := ConvertSearchInfo(id, detail)
-	keyToMid, err := saveSearchInfosAndMappings([]model.SearchInfo{searchInfo})
-	if err != nil {
+	if strings.TrimSpace(searchInfo.Name) == "" {
+		return nil
+	}
+
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		keyToMid, err := saveSearchInfosAndMappingsTx(tx, []model.SearchInfo{searchInfo})
+		if err != nil {
+			return err
+		}
+		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid)); err != nil {
+			return err
+		}
+		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid)); err != nil {
+			return err
+		}
+		refreshInfos := reloadSearchInfosByContentKeysTx(tx, []string{searchInfo.ContentKey})
+		if len(refreshInfos) == 0 {
+			return nil
+		}
+		return RefreshPlayFromSummaryBySearchInfosTx(tx, refreshInfos)
+	}); err != nil {
 		return err
 	}
 
-	err = saveMovieDetailInfos(buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid))
-	if err == nil {
-		err = saveMovieMatchKeysByMid(buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid))
-	}
-
-	if err == nil {
-		if refreshErr := RefreshPlayFromSummaryBySearchInfos(reloadSearchInfosByContentKeys([]string{searchInfo.ContentKey})); refreshErr != nil {
-			return refreshErr
-		}
-		clearDetailCaches(searchInfo.Pid)
-	}
-	return err
+	BatchHandleSearchTag(searchInfo)
+	clearDetailCaches(searchInfo.Pid)
+	ClearProvideListCache()
+	return nil
 }
 
 func reloadSearchInfosByContentKeys(contentKeys []string) []model.SearchInfo {
+	return reloadSearchInfosByContentKeysTx(db.Mdb, contentKeys)
+}
+
+func reloadSearchInfosByContentKeysTx(tx *gorm.DB, contentKeys []string) []model.SearchInfo {
 	if len(contentKeys) == 0 {
 		return nil
 	}
 	var infos []model.SearchInfo
-	if err := db.Mdb.Where("content_key IN ?", contentKeys).Find(&infos).Error; err != nil {
+	if err := tx.Where("content_key IN ?", contentKeys).Find(&infos).Error; err != nil {
 		return nil
 	}
 	return infos
@@ -265,15 +338,59 @@ func BatchHandleSearchTag(infos ...model.SearchInfo) {
 		return
 	}
 
+	pids := make([]int64, 0, len(infos))
 	for pid := range collectSearchTagPids(infos) {
-		ensureStaticTagsForPid(pid)
+		pids = append(pids, pid)
 	}
-
-	for _, info := range infos {
-		handleDynamicSearchTags(info)
+	if err := RebuildSearchTagsByPids(pids...); err != nil {
+		log.Printf("RebuildSearchTagsByPids Error: %v", err)
+		return
 	}
 
 	ClearAllSearchTagsCache()
+}
+
+func RebuildSearchTagsByPids(pids ...int64) error {
+	pidSet := make(map[int64]struct{}, len(pids))
+	orderedPids := make([]int64, 0, len(pids))
+	for _, pid := range pids {
+		if pid <= 0 {
+			continue
+		}
+		if _, ok := pidSet[pid]; ok {
+			continue
+		}
+		pidSet[pid] = struct{}{}
+		orderedPids = append(orderedPids, pid)
+	}
+	if len(orderedPids) == 0 {
+		return nil
+	}
+
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("pid IN ?", orderedPids).Delete(&model.SearchTagItem{}).Error; err != nil {
+			return err
+		}
+
+		for _, pid := range orderedPids {
+			initializedPids.Delete(pid)
+			if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
+				return err
+			}
+		}
+
+		var infos []model.SearchInfo
+		if err := tx.Where("pid IN ?", orderedPids).Find(&infos).Error; err != nil {
+			return err
+		}
+
+		for _, info := range infos {
+			if err := handleDynamicSearchTagsTx(tx, info); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func SaveSearchTag(search model.SearchInfo) {
@@ -291,40 +408,67 @@ func collectSearchTagPids(infos []model.SearchInfo) map[int64]bool {
 }
 
 func handleDynamicSearchTags(info model.SearchInfo) {
+	_ = handleDynamicSearchTagsTx(db.Mdb, info)
+}
+
+func handleDynamicSearchTagsTx(tx *gorm.DB, info model.SearchInfo) error {
 	if info.Pid <= 0 {
-		return
+		return nil
 	}
 
-	handleCategorySearchTag(info)
-	handlePlotSearchTag(info)
-	HandleSearchTags(info.Area, "Area", info.Pid)
-	HandleSearchTags(info.Language, "Language", info.Pid)
-	if info.Year > 0 {
-		HandleSearchTags(fmt.Sprint(info.Year), "Year", info.Pid)
+	if err := handleCategorySearchTagTx(tx, info); err != nil {
+		return err
 	}
+	if err := handlePlotSearchTagTx(tx, info); err != nil {
+		return err
+	}
+	if err := HandleSearchTagsTx(tx, info.Area, "Area", info.Pid); err != nil {
+		return err
+	}
+	if err := HandleSearchTagsTx(tx, info.Language, "Language", info.Pid); err != nil {
+		return err
+	}
+	if info.Year > 0 {
+		if err := HandleSearchTagsTx(tx, fmt.Sprint(info.Year), "Year", info.Pid); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func handleCategorySearchTag(info model.SearchInfo) {
+	_ = handleCategorySearchTagTx(db.Mdb, info)
+}
+
+func handleCategorySearchTagTx(tx *gorm.DB, info model.SearchInfo) error {
 	if info.Cid <= 0 {
-		return
+		return nil
 	}
 
 	catName := support.GetCategoryNameById(info.Cid)
 	if catName == "" {
 		catName = info.CName
 	}
-	HandleSearchTags(catName, "Category", info.Pid, fmt.Sprint(info.Cid))
+	return HandleSearchTagsTx(tx, catName, "Category", info.Pid, fmt.Sprint(info.Cid))
 }
 
 func handlePlotSearchTag(info model.SearchInfo) {
+	_ = handlePlotSearchTagTx(db.Mdb, info)
+}
+
+func handlePlotSearchTagTx(tx *gorm.DB, info model.SearchInfo) error {
 	mainCategoryName := support.GetMainCategoryName(info.Pid)
 	cleanPlot := support.CleanPlotTags(info.ClassTag, info.Area, mainCategoryName, info.CName)
-	HandleSearchTags(cleanPlot, "Plot", info.Pid)
+	return HandleSearchTagsTx(tx, cleanPlot, "Plot", info.Pid)
 }
 
 func ensureStaticTagsForPid(pid int64) {
+	_ = ensureStaticTagsForPidTx(db.Mdb, pid)
+}
+
+func ensureStaticTagsForPidTx(tx *gorm.DB, pid int64) error {
 	if _, ok := initializedPids.Load(pid); ok {
-		return
+		return nil
 	}
 
 	var initialItems []model.SearchTagItem
@@ -332,8 +476,11 @@ func ensureStaticTagsForPid(pid int64) {
 		v := string(rune(i))
 		initialItems = append(initialItems, model.SearchTagItem{Pid: pid, TagType: "Initial", Name: v, Value: v, Score: int64(90 - i)})
 	}
-	db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).Create(&initialItems)
+	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&initialItems).Error; err != nil {
+		return err
+	}
 	initializedPids.Store(pid, true)
+	return nil
 }
 
 var (
@@ -342,8 +489,13 @@ var (
 )
 
 func HandleSearchTags(allTags string, tagType string, pid int64, customValues ...string) {
+	_ = HandleSearchTagsTx(db.Mdb, allTags, tagType, pid, customValues...)
+}
+
+func HandleSearchTagsTx(tx *gorm.DB, allTags string, tagType string, pid int64, customValues ...string) error {
 	allTags = reTagCleanup.ReplaceAllString(allTags, "")
 	parts := reTagSplit.Split(allTags, -1)
+	var saveErr error
 
 	upsert := func(v string, customVal ...string) {
 		v = strings.TrimSpace(v)
@@ -366,22 +518,28 @@ func HandleSearchTags(allTags string, tagType string, pid int64, customValues ..
 			}
 		}
 
-		db.Mdb.Clauses(clause.OnConflict{
+		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "pid"}, {Name: "tag_type"}, {Name: "value"}},
 			DoUpdates: clause.Assignments(map[string]any{
 				"score": gorm.Expr("score + 1"),
 				"name":  v,
 			}),
-		}).Create(&model.SearchTagItem{Pid: pid, TagType: tagType, Name: v, Value: val, Score: 1})
+		}).Create(&model.SearchTagItem{Pid: pid, TagType: tagType, Name: v, Value: val, Score: 1}).Error; err != nil {
+			saveErr = err
+		}
 	}
 
 	for _, t := range parts {
+		if saveErr != nil {
+			return saveErr
+		}
 		if tagType == "Category" && len(customValues) > 0 {
 			upsert(t, customValues[0])
 		} else {
 			upsert(t)
 		}
 	}
+	return saveErr
 }
 
 func resolveFallbackCid(pid int64, cName string) int64 {

@@ -200,6 +200,13 @@ func SetCategoryNameCache(id int64, name string) {
 	cacheCategoryMap.Store(id, name)
 }
 
+func ResetCategoryNameCache() {
+	cacheCategoryMap.Range(func(key, value interface{}) bool {
+		cacheCategoryMap.Delete(key)
+		return true
+	})
+}
+
 func GetCategoryBucketRole(typeName string) string {
 	typeName = strings.TrimSpace(typeName)
 	if typeName == "" {
@@ -223,7 +230,7 @@ func GetCategoryBucketRole(typeName string) string {
 
 	for _, targetName := range matchPriority {
 		m, ok := mainsMap[targetName]
-		if !ok || m.Alias == "" {
+		if !ok {
 			continue
 		}
 		for _, kw := range strings.Split(m.Alias, ",") {
@@ -233,33 +240,21 @@ func GetCategoryBucketRole(typeName string) string {
 		}
 	}
 
-	fallback := []struct {
-		Key   string
-		Value string
-	}{
-		{"动漫", model.BigCategoryAnimation},
-		{"动画", model.BigCategoryAnimation},
-		{"番剧", model.BigCategoryAnimation},
-		{"综艺", model.BigCategoryVariety},
-		{"娱乐", model.BigCategoryVariety},
-		{"纪录", model.BigCategoryDocumentary},
-		{"记录", model.BigCategoryDocumentary},
-		{"专题", model.BigCategoryDocumentary},
-		{"短剧", model.BigCategoryOther},
-		{"爽剧", model.BigCategoryOther},
-		{"微电影", model.BigCategoryOther},
-		{"电影", model.BigCategoryMovie},
-		{"片", model.BigCategoryMovie},
-		{"院线", model.BigCategoryMovie},
-		{"电视剧", model.BigCategoryTV},
-		{"剧", model.BigCategoryTV},
-		{"国产", model.BigCategoryTV},
+	fallbackKeywords := map[string][]string{
+		model.BigCategoryAnimation:   {"动漫", "动画", "番剧", "番", "卡通", "漫"},
+		model.BigCategoryVariety:     {"综艺", "真人秀", "脱口秀", "晚会"},
+		model.BigCategoryDocumentary: {"纪录", "记录", "纪实"},
+		model.BigCategoryMovie:       {"电影", "影片", "院线", "影视"},
+		model.BigCategoryTV:          {"电视剧", "剧集", "连续剧", "国产剧", "韩剧", "美剧", "日剧", "泰剧", "港剧", "台剧", "短剧"},
 	}
-	for _, f := range fallback {
-		if strings.Contains(typeName, f.Key) {
-			return f.Value
+	for _, targetName := range matchPriority {
+		for _, kw := range fallbackKeywords[targetName] {
+			if strings.Contains(typeName, kw) {
+				return targetName
+			}
 		}
 	}
+
 	return model.BigCategoryOther
 }
 
