@@ -24,6 +24,12 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) s
 				return source.Id
 			}
 		}
+
+		for _, source := range playSources {
+			if source.SourceId == preferred && len(source.LinkList) > 0 {
+				return source.Id
+			}
+		}
 	}
 
 	for _, source := range playSources {

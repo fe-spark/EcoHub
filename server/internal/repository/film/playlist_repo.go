@@ -175,7 +175,7 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if len(movieKeys) > 0 {
-			if err := tx.Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).Delete(&model.MoviePlaylist{}).Error; err != nil {
+			if err := tx.Unscoped().Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).Delete(&model.MoviePlaylist{}).Error; err != nil {
 				return err
 			}
 		}
@@ -366,7 +366,8 @@ func GetMultiplePlayGroupsByKeys(siteId, siteName string, keys []string) []model
 			}
 
 			displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
-			groups = append(groups, model.PlayLinkVo{Id: displayName, Name: displayName, LinkList: links})
+			groupID := BuildPlayGroupID(siteId, playlist.GroupName, playlist.GroupIndex, len(matched))
+			groups = append(groups, model.PlayLinkVo{Id: groupID, SourceId: siteId, Name: displayName, LinkList: links})
 		}
 		if len(groups) > 0 {
 			return groups
