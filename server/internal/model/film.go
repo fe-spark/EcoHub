@@ -156,7 +156,7 @@ type SearchInfo struct {
 	Remarks           string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
 	PlayFromSummary   string  `json:"playFromSummary"`                                                                            // 主站播放源摘要，供列表接口直出
 	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
-	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
+	CollectStamp      int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`                                             // 采集/入库时间 时间戳
 	Picture           string  `json:"picture"`                                                                                    // 竖版封面图
 	PictureSlide      string  `json:"pictureSlide" gorm:"size:512"`                                                               // 横版幻灯图
 	Actor             string  `json:"actor"`                                                                                      // 主演
@@ -190,8 +190,6 @@ func (s *SearchInfo) AfterSave(tx *gorm.DB) (err error) {
 		for iter.Next(ctx) {
 			db.Rdb.Del(ctx, iter.Val())
 		}
-		// 兼容基础版 key: Search:Tags:{pid}
-		db.Rdb.Del(ctx, fmt.Sprintf("%s:%d", config.SearchTags, s.Pid))
 	}
 
 	return

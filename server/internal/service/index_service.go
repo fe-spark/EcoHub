@@ -91,17 +91,13 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 	nav := make(map[string]any)
 	tree := repository.GetActiveCategoryTree()
 
-	// 定义标准简称映射 (仅用于保持 API 兼容性，如 film, tv 等字段名)
-	// 如果需要完全动态，可以考虑在 Category 表增加 Key 字段
-	keyMap := map[string]string{
-		"电影": "film", "电视剧": "tv", "综艺": "variety", "动漫": "cartoon", "纪录片": "document",
-	}
-
 	for _, t := range tree.Children {
-		key, ok := keyMap[t.Name]
-		if !ok {
-			// 后备方案：使用 ID 或 Alias 首项
-			key = strings.ToLower(t.Name)
+		key := strings.ToLower(strings.TrimSpace(t.Alias))
+		if key == "" {
+			key = strings.ToLower(strings.TrimSpace(t.Name))
+		}
+		if key == "" {
+			continue
 		}
 		nav[key] = t
 	}

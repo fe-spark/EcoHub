@@ -1,7 +1,5 @@
 package model
 
-import "encoding/json"
-
 /*
  视频列表接口序列化 struct
 */
@@ -47,42 +45,4 @@ type FilmClass struct {
 	ID   int64  `json:"id"`   // 分类ID
 	Pid  int64  `json:"pid"`  // 父级ID
 	Name string `json:"name"` // 类型名称
-}
-
-// UnmarshalJSON 核心兼容：支持采集站原始的 type_id/type_name 字段，同时保持结构体字段干净
-func (fc *FilmClass) UnmarshalJSON(data []byte) error {
-	type Alias FilmClass
-	aux := struct {
-		TypeID   int64  `json:"type_id"`
-		TypeName string `json:"type_name"`
-		*Alias
-	}{
-		Alias: (*Alias)(fc),
-	}
-	if err := json.Unmarshal(data, &aux); err != nil {
-		return err
-	}
-	// 如果原始 id 为空，尝试用 type_id 填充
-	if fc.ID == 0 {
-		fc.ID = aux.TypeID
-	}
-	// 如果名称为空，尝试用 type_name 填充
-	if fc.Name == "" {
-		fc.Name = aux.TypeName
-	}
-	return nil
-}
-
-// MarshalJSON 核心兼容：在输出 JSON 时，同时输出 id/name (内部使用) 和 type_id/type_name (TVBox兼容)
-func (fc FilmClass) MarshalJSON() ([]byte, error) {
-	type Alias FilmClass
-	return json.Marshal(&struct {
-		TypeID   int64  `json:"type_id"`
-		TypeName string `json:"type_name"`
-		Alias
-	}{
-		TypeID:   fc.ID,
-		TypeName: fc.Name,
-		Alias:    (Alias)(fc),
-	})
 }

@@ -97,7 +97,7 @@ func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []m
 func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
 	switch sortType {
 	case 0:
-		return query.Order("release_stamp DESC, mid DESC")
+		return query.Order("collect_stamp DESC, mid DESC")
 	case 1:
 		return query.Order("hits DESC, mid DESC")
 	case 2:
@@ -808,8 +808,8 @@ func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 	if !allowed {
 		column = allowedSearchSortColumns["latest_source_stamp"]
 	}
-	if strings.EqualFold(column, "release_stamp") {
-		return query.Order("year DESC, release_stamp DESC, mid DESC")
+	if strings.EqualFold(column, "collect_stamp") {
+		return query.Order("collect_stamp DESC, mid DESC")
 	}
 	if strings.EqualFold(column, "latest_source_stamp") {
 		return query.Order(latestUpdateOrderSQL)

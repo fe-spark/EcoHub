@@ -117,17 +117,17 @@ func (h *UserHandler) UserAdd(c *gin.Context) {
 
 // UserUpdate 更新用户
 func (h *UserHandler) UserUpdate(c *gin.Context) {
-	var u model.User
-	if err := c.ShouldBindJSON(&u); err != nil {
+	var req model.UserUpdatePayload
+	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("参数校验失败!!!", c)
 		return
 	}
-	if u.ID == 0 {
+	if req.ID == 0 {
 		dto.Failed("用户ID缺失!!!", c)
 		return
 	}
 	// 非超级管理员不可修改超级管理员信息
-	if u.ID == config.UserIdInitialVal {
+	if req.ID == config.UserIdInitialVal {
 		v, ok := c.Get(config.AuthUserClaims)
 		if !ok {
 			dto.Failed("鉴权失败，请重新登录", c)
@@ -139,7 +139,7 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 			return
 		}
 	}
-	if err := service.UserSvc.UpdateUser(u); err != nil {
+	if err := service.UserSvc.UpdateUser(req); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

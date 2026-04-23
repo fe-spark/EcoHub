@@ -27,8 +27,12 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 			continue
 		}
 
-		for _, movieKey := range BuildPlaylistMovieKeys(detail) {
+		keys := BuildPlaylistMovieKeys(detail)
+		for _, movieKey := range keys {
 			keysByMovieKey[movieKey] = struct{}{}
+		}
+
+		for _, movieKey := range keys {
 			for index, links := range detail.PlayList {
 				if len(links) == 0 {
 					continue
@@ -51,7 +55,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		}
 	}
 
-	if len(playlists) == 0 {
+	if len(keysByMovieKey) == 0 {
 		return nil
 	}
 
@@ -188,11 +192,13 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 			}
 		}
 
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
-			DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
-		}).Create(&playlists).Error; err != nil {
-			return err
+		if len(playlists) > 0 {
+			if err := tx.Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
+				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
+			}).Create(&playlists).Error; err != nil {
+				return err
+			}
 		}
 		return nil
 	})

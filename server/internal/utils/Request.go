@@ -99,9 +99,6 @@ func CreateClient() *colly.Collector {
 	c.WithTransport(&http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 	})
-	c.OnError(func(response *colly.Response, err error) {
-		log.Printf("请求异常: URL: %s Error: %s\n", response.Request.URL, err)
-	})
 	return c
 }
 
@@ -117,26 +114,62 @@ func ApiGet(r *RequestInfo) {
 
 	// 记录本次请求的 referer（局部变量，无竞态）
 	var lastURL string
+	var targetURL string
+	loggedError := false
 
 	c.OnRequest(func(req *colly.Request) {
 		setBrowserHeaders(req, lastURL)
 	})
 
+	c.OnError(func(response *colly.Response, err error) {
+		if err != nil {
+			r.Err = err.Error()
+		}
+		if response != nil && response.Request != nil && response.Request.URL != nil {
+			if r.Err == "" {
+				r.Err = "request failed"
+			}
+			r.Err = r.Err + ", status=" + strconv.Itoa(response.StatusCode) + ", url=" + response.Request.URL.String()
+			log.Printf("请求异常: URL: %s Error: %s\n", response.Request.URL, err)
+			loggedError = true
+			return
+		}
+		if r.Err == "" && targetURL != "" {
+			r.Err = "request failed, url=" + targetURL
+		}
+		log.Printf("请求异常: URL: %s Error: %v\n", targetURL, err)
+		loggedError = true
+	})
+
 	c.OnResponse(func(response *colly.Response) {
 		if (response.StatusCode == 200 || (response.StatusCode >= 300 && response.StatusCode <= 399)) && len(response.Body) > 0 {
 			r.Resp = response.Body
+			r.Err = ""
 		} else {
 			r.Resp = []byte{}
+			r.Err = "unexpected response status=" + strconv.Itoa(response.StatusCode) + ", url=" + response.Request.URL.String()
 		}
 		lastURL = response.Request.URL.String()
 	})
 
 	targetUrl := buildUrl(r.Uri, r.Params)
+	targetURL = targetUrl
 	err := c.Visit(targetUrl)
 	if err != nil {
-		r.Err = err.Error()
-		log.Println("获取数据失败: ", err)
+		if r.Err == "" {
+			r.Err = err.Error()
+		}
+		if !loggedError {
+			log.Println("获取数据失败: ", err)
+		}
 	}
+}
+
+func IsRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	return containsStr(err.Error(), "Too Many Requests")
 }
 
 // ApiTest 处理API请求后的数据, 主测试

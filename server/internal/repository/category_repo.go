@@ -255,6 +255,56 @@ func GetCategoryTree() model.CategoryTree {
 	return buildTreeHelper()
 }
 
+func GetCategoryTreeByID(id int64) *model.CategoryTree {
+	if id <= 0 {
+		return nil
+	}
+
+	var current model.Category
+	if err := db.Mdb.Where("id = ?", id).First(&current).Error; err != nil {
+		return nil
+	}
+
+	node := &model.CategoryTree{
+		Id:        current.Id,
+		Pid:       current.Pid,
+		Name:      current.Name,
+		StableKey: current.StableKey,
+		Alias:     current.Alias,
+		Show:      current.Show,
+		Sort:      current.Sort,
+		CreatedAt: current.CreatedAt,
+		UpdatedAt: current.UpdatedAt,
+		Children:  make([]*model.CategoryTree, 0),
+	}
+
+	if current.Pid != 0 {
+		return node
+	}
+
+	var children []model.Category
+	if err := db.Mdb.Where("pid = ?", current.Id).Order("id ASC").Find(&children).Error; err != nil {
+		return nil
+	}
+	for _, child := range children {
+		item := child
+		node.Children = append(node.Children, &model.CategoryTree{
+			Id:        item.Id,
+			Pid:       item.Pid,
+			Name:      item.Name,
+			StableKey: item.StableKey,
+			Alias:     item.Alias,
+			Show:      item.Show,
+			Sort:      item.Sort,
+			CreatedAt: item.CreatedAt,
+			UpdatedAt: item.UpdatedAt,
+			Children:  make([]*model.CategoryTree, 0),
+		})
+	}
+
+	return node
+}
+
 // GetActiveCategoryTree 获取仅包含有影视内容的分类树副本 (实时查库 + Redis 缓存)
 func GetActiveCategoryTree() model.CategoryTree {
 	// 1. 尝试从 Redis 获取
@@ -396,6 +446,43 @@ func UpdateCategoryStatus(id int64, updates map[string]any) error {
 	}); err != nil {
 		return err
 	}
+	MarkCategoryChanged()
+	return nil
+}
+
+func DeleteCategory(id int64) error {
+	if id <= 0 {
+		return fmt.Errorf("invalid category id: %d", id)
+	}
+
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var categories []model.Category
+		if err := tx.Where("id = ? OR pid = ?", id, id).Find(&categories).Error; err != nil {
+			return err
+		}
+		if len(categories) == 0 {
+			return fmt.Errorf("category %d not found", id)
+		}
+
+		ids := make([]int64, 0, len(categories))
+		for _, category := range categories {
+			ids = append(ids, category.Id)
+		}
+
+		if err := tx.Where("category_id IN ?", ids).Delete(&model.CategoryMapping{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("id IN ?", ids).Delete(&model.Category{}).Error; err != nil {
+			return err
+		}
+		if err := normalizeCategoryStableKeys(tx); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+
 	MarkCategoryChanged()
 	return nil
 }

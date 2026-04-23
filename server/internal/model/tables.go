@@ -12,7 +12,7 @@ const (
 	TableVirtualPicture = "virtual_picture_queue"
 	TableSearchTag      = "search_tag_item"
 	TableFilmSource     = "film_sources"
-	TableFailureRecord  = "failure_record"
+	TableFailureRecord  = "failure_records"
 	TableCrontabRecord  = "crontab_record"
 	TableSiteConfig     = "site_config_record"
 	TableBanners        = "banners_record"

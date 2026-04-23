@@ -40,7 +40,7 @@ export default function FilmClassifyPageView({
       </div>
 
       <div className={styles.content}>
-        {renderSection("最新上映", content.news, "release_stamp")}
+        {renderSection("最新采集", content.news, "collect_stamp")}
         {renderSection("排行榜", content.top, "hits")}
         {renderSection("最近更新", content.recent, "update_stamp")}
       </div>
