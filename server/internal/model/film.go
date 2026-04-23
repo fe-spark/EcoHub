@@ -50,21 +50,21 @@ type MovieDescriptor struct {
 
 // MovieBasicInfo 影片基本信息
 type MovieBasicInfo struct {
-	Id       int64  `json:"id"`       // 影片Id
-	Cid      int64  `json:"cid"`      // 分类ID
-	Pid      int64  `json:"pid"`      // 一级分类ID
-	Name     string `json:"name"`     // 片名
-	SubTitle string `json:"subTitle"` // 子标题
-	CName    string `json:"cName"`    // 分类名称
-	State    string `json:"state"`    // 影片状态 正片|预告...
-	Picture  string `json:"picture"`  // 竖版封面图
+	Id           int64  `json:"id"`           // 影片Id
+	Cid          int64  `json:"cid"`          // 分类ID
+	Pid          int64  `json:"pid"`          // 一级分类ID
+	Name         string `json:"name"`         // 片名
+	SubTitle     string `json:"subTitle"`     // 子标题
+	CName        string `json:"cName"`        // 分类名称
+	State        string `json:"state"`        // 影片状态 正片|预告...
+	Picture      string `json:"picture"`      // 竖版封面图
 	PictureSlide string `json:"pictureSlide"` // 横版幻灯图
-	Actor    string `json:"actor"`    // 主演
-	Director string `json:"director"` // 导演
-	Blurb    string `json:"blurb"`    // 简介, 不完整
-	Remarks  string `json:"remarks"`  // 更新情况
-	Area     string `json:"area"`     // 地区
-	Year     string `json:"year"`     // 年份
+	Actor        string `json:"actor"`        // 主演
+	Director     string `json:"director"`     // 导演
+	Blurb        string `json:"blurb"`        // 简介, 不完整
+	Remarks      string `json:"remarks"`      // 更新情况
+	Area         string `json:"area"`         // 地区
+	Year         string `json:"year"`         // 年份
 }
 
 // MovieUrlInfo 影视资源url信息
@@ -161,7 +161,7 @@ type SearchInfo struct {
 	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
 	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
 	Picture           string  `json:"picture"`                                                                                    // 竖版封面图
-	PictureSlide      string  `json:"pictureSlide" gorm:"size:512"`                                                             // 横版幻灯图
+	PictureSlide      string  `json:"pictureSlide" gorm:"size:512"`                                                               // 横版幻灯图
 	Actor             string  `json:"actor"`                                                                                      // 主演
 	Director          string  `json:"director"`                                                                                   // 导演
 	Blurb             string  `json:"blurb"`                                                                                      // 简介, 不完整
@@ -278,6 +278,7 @@ type FilmDetailVo struct {
 // PlayLinkVo 多站点播放链接数据列表
 type PlayLinkVo struct {
 	Id       string         `json:"id"`
+	SourceId string         `json:"sourceId"`
 	Name     string         `json:"name"`
 	LinkList []MovieUrlInfo `json:"linkList"`
 }

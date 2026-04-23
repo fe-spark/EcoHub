@@ -66,3 +66,23 @@ func BuildDisplaySourceName(siteName, rawName string, index, total int) string {
 	}
 	return fmt.Sprintf("%s-线路%d", siteName, index+1)
 }
+
+// BuildPlayGroupID 为单个可播放分组构建稳定 ID。
+// 单线路时直接复用站点 ID，多线路时追加线路标识，确保同站不同线路可区分。
+func BuildPlayGroupID(sourceID, rawName string, index, total int) string {
+	sourceID = strings.TrimSpace(sourceID)
+	rawName = strings.TrimSpace(rawName)
+	if sourceID == "" {
+		if rawName != "" {
+			return rawName
+		}
+		return fmt.Sprintf("group_%d", index)
+	}
+	if total <= 1 {
+		return sourceID
+	}
+	if rawName != "" {
+		return fmt.Sprintf("%s::%s", sourceID, rawName)
+	}
+	return fmt.Sprintf("%s::group_%d", sourceID, index)
+}

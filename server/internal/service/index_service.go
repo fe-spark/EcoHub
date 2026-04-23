@@ -201,10 +201,14 @@ func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
 	seenSourceIDs := make(map[string]struct{}, len(playList))
 	for _, item := range playList {
-		if item.Id == "" {
+		sourceID := strings.TrimSpace(item.SourceId)
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(item.Id)
+		}
+		if sourceID == "" {
 			continue
 		}
-		seenSourceIDs[item.Id] = struct{}{}
+		seenSourceIDs[sourceID] = struct{}{}
 	}
 	for _, s := range sc {
 		if _, ok := seenSourceIDs[s.Id]; ok {
@@ -243,9 +247,11 @@ func buildPrimaryPlaySources(search *model.SearchInfo, detail *model.MovieDetail
 
 		rawName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
 		sourceName := filmrepo.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
+		groupID := filmrepo.BuildPlayGroupID(sourceID, rawName, index, len(detail.PlayList))
 
 		playList = append(playList, model.PlayLinkVo{
-			Id:       sourceID,
+			Id:       groupID,
+			SourceId: sourceID,
 			Name:     sourceName,
 			LinkList: links,
 		})
