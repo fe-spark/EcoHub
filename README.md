@@ -7,8 +7,9 @@ EcoHub 是一个前后端分离的影视聚合系统：
 
 当前代码的核心逻辑不是“多个资源站平铺入库”，而是“单主站 + 多附属站”：
 
-- 主站负责影片主数据，写入 `SearchInfo`、`MovieDetail` 和来源映射
-- 附属站只补充播放列表，写入 `MoviePlaylist`
+- 主站负责影片主数据，写入 `SearchInfo`、`MovieDetail`、`MovieMatchKey`
+- 附属站负责播放列表补充，写入 `MoviePlaylist`
+- `MovieSourceMapping` 只保留最小职责：服务后台“单片更新全部站点”
 - 内容归并优先使用豆瓣 ID，没有豆瓣 ID 时回退到片名哈希
 - 分类优先走源站分类映射，失败时再回退到名称推断
 
@@ -41,10 +42,10 @@ flowchart LR
 flowchart TD
     A["采集源配置"] --> B["Spider 采集"]
     B --> C{"采集站等级"}
-    C -->|主站| D["写入 SearchInfo / MovieDetail / MovieSourceMapping"]
-    C -->|附属站| E["写入 MoviePlaylist"]
+    C -->|主站| D["写入 SearchInfo / MovieDetail / MovieMatchKey"]
+    C -->|附属站| E["写入 MoviePlaylist / MovieSourceMapping"]
     D --> F["分类映射与筛选标签生成"]
-    E --> G["详情页多播放源聚合"]
+    E --> G["详情页多播放源聚合 / 单片更新全部站点"]
     F --> H["前台 / 后台 / Provide 接口"]
     G --> H
 ```
@@ -85,7 +86,8 @@ flowchart TD
 ## 当前实现重点
 
 - 单主站机制：任意时刻仅允许一个主站，主站切换会触发主数据清理与重新归档
-- 播放源聚合：详情页会按豆瓣 ID 和标题候选哈希，从附属站回捞可用播放列表
+- 播放源聚合：列表、搜索、分类只看主站；详情页和播放页从附属站已入库播放列表聚合补源
+- 单片更新：后台按全局 `mid` 触发时，会借助 `MovieSourceMapping` 还原每个站自己的 `source_mid`
 - 分类归一：先用 `CategoryMapping` 做源站分类映射，再按名称语义兜底
 - 缓存策略：首页、筛选配置、TVBox 列表都走 Redis，并在影片写入后主动失效
 - 开放接口：`/api/provide/vod` 兼容 MacCMS 查询模式，`/api/provide/config` 输出 TVBox/影视仓配置

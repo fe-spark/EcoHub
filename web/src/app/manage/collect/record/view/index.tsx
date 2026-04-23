@@ -29,7 +29,6 @@ interface FailRecord {
   ID: number;
   originName: string;
   originId: string;
-  collectType: number;
   pageNumber: number;
   hour: number;
   cause: string;
@@ -131,12 +130,6 @@ export default function FailureRecordPageView() {
       dataIndex: "originId",
       align: "center",
       render: (v) => <Tag color="green">{v}</Tag>,
-    },
-    {
-      title: "采集类型",
-      dataIndex: "collectType",
-      align: "center",
-      render: (v) => <Tag>{v === 0 ? "影片详情" : "未知"}</Tag>,
     },
     {
       title: "分页页码",

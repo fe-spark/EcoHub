@@ -36,9 +36,6 @@ interface FilmSource {
   id: string;
   name: string;
   uri: string;
-  resultModel: number;
-  collectType: number;
-  collectTypeText: string;
   syncPictures: boolean;
   state: boolean;
   grade: number;
@@ -92,28 +89,10 @@ export default function CollectManagePageView() {
     try {
       const resp = await ApiGet("/manage/collect/list");
       if (resp.code === 0) {
-        const list = resp.data?.map((item: any) => {
-          let typeText = "视频";
-          switch (item.collectType) {
-            case 1:
-              typeText = "文章";
-              break;
-            case 2:
-              typeText = "演员";
-              break;
-            case 3:
-              typeText = "角色";
-              break;
-            case 4:
-              typeText = "网站";
-              break;
-          }
-          return {
-            ...item,
-            collectTypeText: typeText,
-            cd: item.cd || 24,
-          };
-        });
+        const list = resp.data?.map((item: any) => ({
+          ...item,
+          cd: item.cd || 24,
+        }));
         setSiteList(list);
       }
     } finally {
@@ -189,9 +168,7 @@ export default function CollectManagePageView() {
   const openAddDialog = () => {
     form.resetFields();
     form.setFieldsValue({
-      resultModel: 0,
       grade: 1,
-      collectType: 0,
       syncPictures: false,
       state: false,
       interval: 0,
@@ -304,18 +281,6 @@ export default function CollectManagePageView() {
           )}
         </Space>
       ),
-    },
-    {
-      title: "数据类型",
-      dataIndex: "resultModel",
-      align: "center",
-      render: (v: number) => <Tag>{v === 0 ? "JSON" : "XML"}</Tag>,
-    },
-    {
-      title: "资源类型",
-      dataIndex: "collectTypeText",
-      align: "center",
-      render: (v: string) => <Tag color="purple">{v}</Tag>,
     },
     {
       title: "资源站",
@@ -480,25 +445,6 @@ export default function CollectManagePageView() {
       </Form.Item>
       <Form.Item label="间隔时长" name="interval" tooltip="单次请求的时间间隔, 单位/ms">
         <InputNumber min={0} step={100} style={{ width: "100%" }} />
-      </Form.Item>
-      <Form.Item label="接口类型" name="resultModel">
-        <Radio.Group>
-          <Radio value={0}>JSON</Radio>
-          <Radio value={1} disabled>
-            XML
-          </Radio>
-        </Radio.Group>
-      </Form.Item>
-      <Form.Item label="资源类型" name="collectType">
-        <Radio.Group>
-          <Radio value={0}>视频</Radio>
-          <Radio value={1} disabled>
-            文章
-          </Radio>
-          <Radio value={2} disabled>
-            演员
-          </Radio>
-        </Radio.Group>
       </Form.Item>
       <Form.Item label="站点类型" name="grade">
         <Radio.Group
