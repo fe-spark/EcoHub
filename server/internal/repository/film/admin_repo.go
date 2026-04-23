@@ -116,19 +116,19 @@ func ClearAllSearchTagsCache() {
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() {
-		tables := []string{
-			model.TableMovieDetail,
-			model.TableSearchInfo,
-			model.TableMoviePlaylist,
-			model.TableMovieMatchKey,
-			model.TableCategory,
-			model.TableVirtualPicture,
-			model.TableSearchTag,
+	tables := []string{
+		model.TableMovieDetail,
+		model.TableSearchInfo,
+		model.TableMoviePlaylist,
+		model.TableMovieMatchKey,
+		model.TableCategory,
+		model.TableVirtualPicture,
+		model.TableSearchTag,
 	}
 	for _, t := range tables {
 		db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t))
 	}
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.MovieSourceMapping{})
+	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{})
 	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{})
 	time.Sleep(100 * time.Millisecond)
 
@@ -140,33 +140,9 @@ func FilmZero() {
 	support.InitMappingEngine()
 }
 
-// MasterFilmZero 仅清理主站相关数据 (search_infos / movie_detail_infos / category)
-// 保留附属站 movie_playlists 数据，用于主站切换时防止附属站数据丢失
-func MasterFilmZero() {
-	tables := []string{
-		model.TableSearchInfo,
-		model.TableMovieDetail,
-		model.TableMovieMatchKey,
-		model.TableCategory,
-		model.TableVirtualPicture,
-		model.TableSearchTag,
-	}
-	for _, t := range tables {
-		db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t))
-	}
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.MovieSourceMapping{})
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{})
-	time.Sleep(100 * time.Millisecond)
-
-	refreshCategoryCaches()
-	support.ClearIndexPageCache()
-	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
-	ClearTVBoxListCache()
-	support.InitMappingEngine()
-}
-
-// ClearMasterDataBySourceIDs 仅清理指定来源产生的主站数据。
-// 其他附属站播放列表保留；如果新主站之前是附属站，其旧播放列表应由外层单独删除。
+// ClearMasterDataBySourceIDs 清理指定站点在主站切换时必须重置的数据。
+// 旧主站会清空主数据和自身相关映射，新主站会清空其旧附属站播放列表与映射。
+// 其它附属站的数据保持不动，由新主站重建骨架后继续挂接。
 func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 	ids := make([]string, 0, len(sourceIDs))
 	seen := make(map[string]struct{}, len(sourceIDs))
@@ -195,6 +171,9 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 			return err
 		}
 		if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("source_id IN ?", ids).Delete(&model.MoviePlaylist{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieSourceMapping{}).Error; err != nil {

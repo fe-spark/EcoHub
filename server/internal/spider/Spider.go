@@ -3,11 +3,12 @@ package spider
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -203,41 +204,23 @@ func HandleCollect(id string, h int) error {
 	}
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	// 通过采集类型分别执行不同的采集方法
-	switch s.CollectType {
-	case model.CollectVideo:
-		// 采集视频资源
-		// 如果页数较少, 使用简单的循环串行采集; 否则进入并发模式
-		if pageCount <= config.MAXGoroutine*2 {
-			for i := 1; i <= pageCount; i++ {
-				select {
-				case <-ctx.Done():
-					log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
-					return nil
-				default:
-					// 使用限流器等待
-					_ = getLimiter(s).Wait(ctx)
-					collectFilm(ctx, s, h, i)
-				}
+	if pageCount <= config.MAXGoroutine*2 {
+		for i := 1; i <= pageCount; i++ {
+			select {
+			case <-ctx.Done():
+				log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
+				return nil
+			default:
+				_ = getLimiter(s).Wait(ctx)
+				collectFilm(ctx, s, h, i)
 			}
-		} else {
-			// 并发模式 (内部也已迁移至限流器)
-			ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
 		}
+	} else {
+		ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
+	}
 
-		switch s.Grade {
-		case model.MasterCollect:
-			// 开启图片同步
-			if s.SyncPictures {
-				repository.SyncFilmPicture()
-			}
-
-		case model.SlaveCollect:
-		}
-
-	case model.CollectArticle, model.CollectActor, model.CollectRole, model.CollectWebSite:
-		log.Println("暂未开放此采集功能!!!")
-		return errors.New("暂未开放此采集功能")
+	if s.Grade == model.MasterCollect && s.SyncPictures {
+		repository.SyncFilmPicture()
 	}
 	return nil
 }
@@ -281,14 +264,13 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 
 func saveFilmPageFailure(s *model.FilmSource, h, pg int, err error) {
 	repository.SaveFailureRecord(model.FailureRecord{
-		OriginId:    s.Id,
-		OriginName:  s.Name,
-		Uri:         s.Uri,
-		CollectType: model.CollectVideo,
-		PageNumber:  pg,
-		Hour:        h,
-		Cause:       fmt.Sprintln(err),
-		Status:      1,
+		OriginId:   s.Id,
+		OriginName: s.Name,
+		Uri:        s.Uri,
+		PageNumber: pg,
+		Hour:       h,
+		Cause:      fmt.Sprintln(err),
+		Status:     1,
 	})
 }
 
@@ -377,7 +359,6 @@ func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource
 func BatchCollect(h int, ids ...string) {
 	sources := make([]model.FilmSource, 0)
 	for _, id := range ids {
-		// 如果查询到对应Id的资源站信息, 且资源站处于启用状态
 		if fs := repository.FindCollectSourceById(id); fs != nil && fs.State {
 			sources = append(sources, *fs)
 		}
@@ -403,21 +384,18 @@ func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
 
 // AutoCollect 自动进行对所有已启用站点的采集任务
 func AutoCollect(h int) {
-	// 获取所有已启用的站点（不分主从，统一并行执行）
 	sources := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0)
-	for _, s := range sources {
-		if s.State {
-			enabled = append(enabled, s)
+	enabled := make([]model.FilmSource, 0, len(sources))
+	for _, source := range sources {
+		if source.State {
+			enabled = append(enabled, source)
 		}
 	}
-
 	if len(enabled) == 0 {
 		log.Println("[Spider] 自动采集：未找到任何启用的站点")
 		return
 	}
 
-	// 统一在并发限制下运行所有站点
 	runSourcesWithLimit(enabled, h, "Auto-Collect")
 }
 
@@ -426,32 +404,55 @@ func ClearSpider() {
 	filmrepo.FilmZero()
 }
 
-// CollectSingleFilm 通过影片唯一ID获取影片信息 (多源并行同步)
+// CollectSingleFilm 通过全局影片 ID 更新所有启用站点的对应影片。
+// 主站会优先使用自身映射，附属站则通过 MovieSourceMapping 取回各自的 source_mid。
 func CollectSingleFilm(ids string) {
-	// 获取所有已启用的采集站列表信息
-	all := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0)
-	for _, f := range all {
-		if f.State {
-			enabled = append(enabled, f)
-		}
+	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
+	if err != nil || globalMid <= 0 {
+		log.Printf("[Spider] CollectSingleFilm: 非法影片 ID %q\n", ids)
+		return
 	}
 
+	all := repository.GetCollectSourceList()
+	enabled := make([]model.FilmSource, 0, len(all))
+	for _, source := range all {
+		if source.State {
+			enabled = append(enabled, source)
+		}
+	}
 	if len(enabled) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
 		return
 	}
 
-	// 并行同步所有启用站点
 	var wg sync.WaitGroup
-	for _, s := range enabled {
+	for _, source := range enabled {
+		requestID := resolveSingleCollectSourceMid(globalMid, source)
+		if requestID == "" {
+			continue
+		}
+
 		wg.Add(1)
-		go func(src model.FilmSource) {
+		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			collectFilmById(ids, &src)
-		}(s)
+			collectFilmById(sourceMid, &src)
+		}(source, requestID)
 	}
 	wg.Wait()
+}
+
+func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
+	if globalMid <= 0 {
+		return ""
+	}
+	sourceMid := filmrepo.LoadSourceMidByGlobalMid(globalMid, source.Id)
+	if sourceMid > 0 {
+		return strconv.FormatInt(sourceMid, 10)
+	}
+	if source.Grade == model.MasterCollect {
+		return strconv.FormatInt(globalMid, 10)
+	}
+	return ""
 }
 
 // recoverFilmPage 重试单条失败页：成功后标记原记录已处理，失败则更新待处理记录
@@ -526,22 +527,11 @@ func CollectApiTest(s model.FilmSource) error {
 	err := utils.ApiTest(&r)
 	// 首先核对接口返回值类型
 	if err == nil {
-		// 如果返回值类型为Json则执行Json序列化
-		if s.ResultModel == model.JsonResult {
-			lp := model.FilmListPage{}
-			if err = json.Unmarshal(r.Resp, &lp); err != nil {
-				return errors.New(fmt.Sprint("测试失败, 返回数据异常, JSON序列化失败: ", err))
-			}
-			return nil
-		} else if s.ResultModel == model.XmlResult {
-			// 如果返回值类型为XML则执行XML序列化
-			rd := model.RssD{}
-			if err = xml.Unmarshal(r.Resp, &rd); err != nil {
-				return errors.New(fmt.Sprint("测试失败, 返回数据异常, XML序列化失败", err))
-			}
-			return nil
+		lp := model.FilmListPage{}
+		if err = json.Unmarshal(r.Resp, &lp); err != nil {
+			return errors.New(fmt.Sprint("测试失败, 返回数据异常, JSON序列化失败: ", err))
 		}
-		return errors.New("测试失败, 接口返回值类型不符合规范")
+		return nil
 	}
 	return errors.New(fmt.Sprint("测试失败, 请求响应异常 : ", err.Error()))
 }

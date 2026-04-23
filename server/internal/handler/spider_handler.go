@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"strconv"
 
 	"server/internal/config"
 	"server/internal/model"
@@ -16,26 +15,6 @@ import (
 type SpiderHandler struct{}
 
 var SpiderHd = new(SpiderHandler)
-
-// CollectFilm 开启ID对应的资源站的采集任务
-func (h *SpiderHandler) CollectFilm(c *gin.Context) {
-	id := c.DefaultQuery("id", "")
-	hourStr := c.DefaultQuery("h", "0")
-	if id == "" || hourStr == "0" {
-		dto.Failed("采集任务开启失败, 缺乏必要参数", c)
-		return
-	}
-	hr, err := strconv.Atoi(hourStr)
-	if err != nil {
-		dto.Failed("采集任务开启失败, 采集(时长)不符合规范", c)
-		return
-	}
-	if err = service.SpiderSvc.StartCollect(id, hr); err != nil {
-		dto.Failed(fmt.Sprint("采集任务开启失败: ", err.Error()), c)
-		return
-	}
-	dto.SuccessOnlyMsg("采集任务已成功开启!!!", c)
-}
 
 // StarSpider 开启并执行采集任务
 func (h *SpiderHandler) StarSpider(c *gin.Context) {
@@ -98,7 +77,7 @@ func (h *SpiderHandler) CoverFilmClass(c *gin.Context) {
 	dto.SuccessOnlyMsg("影视分类信息重置成功, 请稍等片刻后刷新页面", c)
 }
 
-// SingleUpdateSpider 单一影片更新采集
+// SingleUpdateSpider 单一影片主站更新采集
 func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
 	var req struct {
 		Ids string `json:"ids"`
@@ -113,7 +92,7 @@ func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
 		return
 	}
 	service.SpiderSvc.SyncCollect(ids)
-	dto.SuccessOnlyMsg("影片更新任务已成功开启!!!", c)
+	dto.SuccessOnlyMsg("主站影片更新任务已成功开启!!!", c)
 }
 
 // StopAllTasks 一键终止所有采集中任务

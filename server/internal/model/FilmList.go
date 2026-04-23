@@ -1,9 +1,6 @@
 package model
 
-import (
-	"encoding/json"
-	"encoding/xml"
-)
+import "encoding/json"
 
 /*
  视频列表接口序列化 struct
@@ -88,42 +85,4 @@ func (fc FilmClass) MarshalJSON() ([]byte, error) {
 		TypeName: fc.Name,
 		Alias:    (Alias)(fc),
 	})
-}
-
-//-------------------------------------------------Xml 格式-------------------------------------------------
-
-type RssL struct {
-	XMLName xml.Name      `xml:"rss"`
-	Version string        `xml:"version,attr"`
-	List    FilmListPageX `xml:"list"`
-	ClassXL ClassXL       `xml:"class"`
-}
-type FilmListPageX struct {
-	XMLName     xml.Name    `xml:"list"`
-	Page        any         `xml:"page,attr"`
-	PageCount   int         `xml:"pagecount,attr"`
-	PageSize    any         `xml:"pagesize,attr"`
-	RecordCount int         `xml:"recordcount,attr"`
-	Videos      []VideoList `xml:"video"`
-}
-
-type VideoList struct {
-	Last string `xml:"last"`
-	ID   int64  `xml:"id"`
-	Tid  int64  `xml:"tid"`
-	Name CDATA  `xml:"name"`
-	Type string `xml:"type"`
-	Dt   string `xml:"dt"`
-	Note CDATA  `xml:"note"`
-}
-
-type ClassXL struct {
-	XMLName xml.Name `xml:"class"`
-	ClassX  []ClassX `xml:"ty"`
-}
-
-type ClassX struct {
-	XMLName xml.Name `xml:"ty"`
-	ID      int64    `xml:"id,attr"`
-	Value   string   `xml:",chardata"`
 }

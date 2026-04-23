@@ -48,7 +48,7 @@ func InitMysql() (err error) {
 		NamingStrategy: schema.NamingStrategy{
 			SingularTable: true, //是否使用 结构体名称作为表名 (关闭自动变复数)
 		},
-		Logger: logger.Default.LogMode(logger.Error), //设置日志级别为Error, 避免采集时打印繁杂的 SQL 语句
+		Logger: logger.Default.LogMode(logger.Silent), //完全关闭 GORM SQL 日志输出
 	})
 
 	if err != nil {

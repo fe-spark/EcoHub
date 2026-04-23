@@ -16,7 +16,7 @@ type FilmCollectTask struct {
 	Cid    cron.EntryID `json:"cid"`    // 定时任务Id (运行时字段，不持久化)
 	Time   int          `json:"time"`   // 采集时长, 最新x小时更新的内容
 	Spec   string       `json:"spec"`   // 执行周期 cron表达式
-	Model  int          `json:"model"`  // 任务类型, 0 - 自动更新已启用站点 || 1 - 更新Ids中的资源站数据 || 2 - 定期清理失败采集记录
+	Model  int          `json:"model"`  // 任务类型, 0 - 自动更新已启用主站 || 1 - 更新Ids中的主站数据 || 2 - 定期清理失败采集记录
 	State  bool         `json:"state"`  // 状态 开启 | 禁用
 	Remark string       `json:"remark"` // 任务备注信息
 }
@@ -49,53 +49,15 @@ const (
 	SlaveCollect
 )
 
-type CollectResultModel int
-
-const (
-	JsonResult CollectResultModel = iota
-	XmlResult
-)
-
-type ResourceType int
-
-func (rt ResourceType) GetActionType() string {
-	var ac string
-	switch rt {
-	case CollectVideo:
-		ac = "detail"
-	case CollectArticle:
-		ac = "article"
-	case CollectActor:
-		ac = "actor"
-	case CollectRole:
-		ac = "role"
-	case CollectWebSite:
-		ac = "web"
-	default:
-		ac = "detail"
-	}
-	return ac
-}
-
-const (
-	CollectVideo = iota
-	CollectArticle
-	CollectActor
-	CollectRole
-	CollectWebSite
-)
-
 // FilmSource 影视站点信息保存结构体
 type FilmSource struct {
-	Id           string             `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
-	Name         string             `json:"name" gorm:"size:64"`             // 采集站点备注名
-	Uri          string             `json:"uri" gorm:"uniqueIndex;size:255"` // 采集链接
-	ResultModel  CollectResultModel `json:"resultModel"`                     // 接口返回类型, json || xml
-	Grade        SourceGrade        `json:"grade"`                           // 采集站等级 主站点 || 附属站
-	SyncPictures bool               `json:"syncPictures"`                    // 是否同步图片到服务器
-	CollectType  ResourceType       `json:"collectType"`                     // 采集资源类型
-	State        bool               `json:"state"`                           // 是否启用
-	Interval     int                `json:"interval"`                        // 采集时间间隔 单位/ms
+	Id           string      `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
+	Name         string      `json:"name" gorm:"size:64"`             // 采集站点备注名
+	Uri          string      `json:"uri" gorm:"uniqueIndex;size:255"` // 采集链接
+	Grade        SourceGrade `json:"grade"`                           // 采集站等级 主站点 || 附属站
+	SyncPictures bool        `json:"syncPictures"`                    // 是否同步图片到服务器
+	State        bool        `json:"state"`                           // 是否启用
+	Interval     int         `json:"interval"`                        // 采集时间间隔 单位/ms
 }
 
 func (f *FilmSource) TableName() string {
@@ -105,15 +67,14 @@ func (f *FilmSource) TableName() string {
 // FailureRecord 失败采集记录信息机构体
 type FailureRecord struct {
 	gorm.Model
-	OriginId    string       `json:"originId"`    // 采集站唯一ID
-	OriginName  string       `json:"originName"`  // 采集站唯一ID
-	Uri         string       `json:"uri"`         // 采集源链接
-	CollectType ResourceType `json:"collectType"` // 采集类型
-	PageNumber  int          `json:"pageNumber"`  // 页码
-	Hour        int          `json:"hour"`        // 采集参数 h 时长
-	Cause       string       `json:"cause"`       // 失败原因
-	Status      int          `json:"status"`      // 重试状态
-	RetryCount  int          `json:"retryCount"`  // 重试累计次数
+	OriginId   string `json:"originId"`   // 采集站唯一ID
+	OriginName string `json:"originName"` // 采集站唯一ID
+	Uri        string `json:"uri"`        // 采集源链接
+	PageNumber int    `json:"pageNumber"` // 页码
+	Hour       int    `json:"hour"`       // 采集参数 h 时长
+	Cause      string `json:"cause"`      // 失败原因
+	Status     int    `json:"status"`     // 重试状态
+	RetryCount int    `json:"retryCount"` // 重试累计次数
 }
 
 func (fr FailureRecord) TableName() string {
@@ -121,13 +82,12 @@ func (fr FailureRecord) TableName() string {
 }
 
 type RecordRequestVo struct {
-	OriginId    string    `json:"originId"`    // 源站点ID
-	CollectType int       `json:"collectType"` // 采集类型
-	Hour        int       `json:"hour"`        // 采集时长
-	Status      int       `json:"status"`      // 状态
-	BeginTime   time.Time `json:"beginTime"`   // 起始时间
-	EndTime     time.Time `json:"endTime"`     // 结束时间
-	Paging      *dto.Page `json:"paging"`      // 分页参数
+	OriginId  string    `json:"originId"`  // 源站点ID
+	Hour      int       `json:"hour"`      // 采集时长
+	Status    int       `json:"status"`    // 状态
+	BeginTime time.Time `json:"beginTime"` // 起始时间
+	EndTime   time.Time `json:"endTime"`   // 结束时间
+	Paging    *dto.Page `json:"paging"`    // 分页参数
 }
 
 // CronTaskVo 定时任务数据response

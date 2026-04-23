@@ -49,9 +49,6 @@ func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int
 	if s == nil || !s.State {
 		return nil, errors.New("collect source not found or disabled")
 	}
-	if s.ResultModel != model.JsonResult {
-		return nil, errors.New("collect source is not json result")
-	}
 
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	if ac == "" {

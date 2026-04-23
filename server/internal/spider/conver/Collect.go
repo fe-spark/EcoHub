@@ -96,13 +96,13 @@ func ConvertFilmDetails(details []model.FilmDetail) []model.MovieDetail {
 // ConvertFilmDetail 将影片详情数据处理转化为 model.MovieDetail
 func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 	md := model.MovieDetail{
-		Id:       detail.VodID,
-		Cid:      detail.TypeID,
-		Pid:      detail.TypeID1,
-		Name:     detail.VodName,
-		Picture:  detail.VodPic,
+		Id:           detail.VodID,
+		Cid:          detail.TypeID,
+		Pid:          detail.TypeID1,
+		Name:         detail.VodName,
+		Picture:      detail.VodPic,
 		PictureSlide: detail.VodPicSlide,
-		DownFrom: detail.VodDownFrom,
+		DownFrom:     detail.VodDownFrom,
 		MovieDescriptor: model.MovieDescriptor{
 			SubTitle:    detail.VodSub,
 			CName:       detail.TypeName,
@@ -187,24 +187,6 @@ func GenFilmPlayList(playUrl, separator string) [][]model.MovieUrlInfo {
 		if pl := ConvertPlayUrl(playUrl); len(pl) > 0 {
 			res = append(res, pl)
 		}
-	}
-	return res
-}
-
-// GenAllFilmPlayList 处理影片播放地址数据, 保留全部播放链接,生成playList
-func GenAllFilmPlayList(playUrl, separator string) [][]model.MovieUrlInfo {
-	var res [][]model.MovieUrlInfo
-	if separator != "" {
-		// 1. 通过分隔符切分播放源地址
-		for l := range strings.SplitSeq(playUrl, separator) {
-			if pl := ConvertPlayUrl(l); len(pl) > 0 {
-				res = append(res, pl)
-			}
-		}
-		return res
-	}
-	if pl := ConvertPlayUrl(playUrl); len(pl) > 0 {
-		res = append(res, pl)
 	}
 	return res
 }

@@ -198,6 +198,7 @@ func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model
 	if len(names) == 0 {
 		return playList
 	}
+
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
 	seenSourceIDs := make(map[string]struct{}, len(playList))
 	for _, item := range playList {
@@ -210,11 +211,12 @@ func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model
 		}
 		seenSourceIDs[sourceID] = struct{}{}
 	}
-	for _, s := range sc {
-		if _, ok := seenSourceIDs[s.Id]; ok {
+
+	for _, source := range sc {
+		if _, ok := seenSourceIDs[source.Id]; ok {
 			continue
 		}
-		groups := filmrepo.GetMultiplePlayGroupsByKeys(s.Id, s.Name, names)
+		groups := filmrepo.GetMultiplePlayGroupsByKeys(source.Id, source.Name, names)
 		if len(groups) > 0 {
 			playList = append(playList, groups...)
 		}

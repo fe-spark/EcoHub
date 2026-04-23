@@ -113,14 +113,12 @@ func ValidSpec(spec string) error {
 	return err
 }
 
-// AddOrphanCleanCron 添加孤儿数据清理定时任务
-// 定期删除 movie_playlists 中 movie_key 不再匹配 movie_match_key 索引的孤儿行
+// AddOrphanCleanCron 添加附属站播放列表孤儿清理定时任务。
 func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))
 	}
 	return CronCollect.AddFunc(spec, func() {
-		// 通过 Id 获取任务相关数据
 		ft, err := repository.GetFilmTaskById(id)
 		if err != nil {
 			log.Println("OrphanCleanCron Exec Failed: ", err)
@@ -155,6 +153,8 @@ func ReloadCronTask(id string) error {
 		cid, err = AddFilmRecoverCron(ft.Id, ft.Spec)
 	case 3:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
+	default:
+		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
 
 	if err != nil {
@@ -186,17 +186,16 @@ func executeTask(ft model.FilmCollectTask) {
 	case 2: // 失败采集恢复
 		FullRecoverSpider()
 		log.Println("执行一次失败采集恢复任务")
-	case 3: // 孤儿数据清理
-		// 检查是否有主站正在采集中，若有则跳过本次清理，避免误删附属站刚写入的有效数据
-		activeIds := GetActiveTasks()
-		if len(activeIds) > 0 {
+	case 3: // 附属站播放列表孤儿清理
+		activeIDs := GetActiveTasks()
+		if len(activeIDs) > 0 {
 			masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
-			masterIdSet := make(map[string]struct{}, len(masters))
-			for _, m := range masters {
-				masterIdSet[m.Id] = struct{}{}
+			masterIDSet := make(map[string]struct{}, len(masters))
+			for _, master := range masters {
+				masterIDSet[master.Id] = struct{}{}
 			}
-			for _, activeId := range activeIds {
-				if _, isMaster := masterIdSet[activeId]; isMaster {
+			for _, activeID := range activeIDs {
+				if _, isMaster := masterIDSet[activeID]; isMaster {
 					log.Println("[CleanOrphan] 主站正在采集中，跳过本次孤儿清理，等待下次执行")
 					return
 				}
@@ -205,6 +204,8 @@ func executeTask(ft model.FilmCollectTask) {
 		n := filmrepo.CleanOrphanPlaylists()
 		m := filmrepo.CleanEmptyFilms()
 		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录和 %d 条空记录\n", n, m)
+	default:
+		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
 	}
 
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)

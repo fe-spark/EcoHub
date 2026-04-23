@@ -22,10 +22,8 @@ func (s *InitService) DefaultDataInit() {
 	clearStartupCaches()
 
 	if !repository.ExistUserTable() {
-		// 只有在用户表不存在时（视为首次运行或库重建），才执行完整的表迁移与初始数据灌入
 		s.TableInit()
 	} else {
-		// 常规重启：仅执行 AutoMigrate 确保结构对齐，并加载内存缓存
 		db.Mdb.AutoMigrate(
 			&model.User{}, &model.SearchInfo{}, &model.FileInfo{}, &model.FailureRecord{},
 			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
@@ -36,7 +34,6 @@ func (s *InitService) DefaultDataInit() {
 		)
 	}
 
-	// 映射引擎初始化 & 数据库标准数据对齐 (标准大类与排序标签)
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
 	repository.InitBuiltinAccounts()
@@ -98,9 +95,6 @@ func (s *InitService) TableInit() {
 		return
 	}
 
-	// 初始化映射清洗引擎与标准大类 (由 DefaultDataInit 统一调用)
-
-	// 专门处理表的默认或初始状态定义
 	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 }
 
@@ -147,20 +141,20 @@ func (s *InitService) FilmSourceInit() {
 	}
 	// 直接初始化采集源 - 使用 URI 哈希作为 ID 确保服务重启后顺序一致且支持主从切换
 	l := []model.FilmSource{
-		{Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(OK)", Uri: `https://okzyapi.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(HM)", Uri: `https://json.heimuer.xyz/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "魔都(MD)", Uri: `https://www.mdzyapi.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(DB)", Uri: `https://caiji.dbzy.tv/api.php/provide/vod/from/dbm3u8/at/json/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.MasterCollect, SyncPictures: false, CollectType: model.CollectVideo, State: true, Interval: 500},
-		{Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(LZ)", Uri: `https://cj.lziapi.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
-		{Name: "卧龙(WL)", Uri: `https://collect.wolongzy.cc/api.php/provide/vod/`, ResultModel: model.JsonResult, Grade: model.SlaveCollect, SyncPictures: false, CollectType: model.CollectVideo, State: false, Interval: 500},
+		{Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(OK)", Uri: `https://okzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(HM)", Uri: `https://json.heimuer.xyz/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "魔都(MD)", Uri: `https://www.mdzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(DB)", Uri: `https://caiji.dbzy.tv/api.php/provide/vod/from/dbm3u8/at/json/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Grade: model.MasterCollect, SyncPictures: false, State: true, Interval: 500},
+		{Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(LZ)", Uri: `https://cj.lziapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "卧龙(WL)", Uri: `https://collect.wolongzy.cc/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
 	}
 	if err := repository.BatchAddCollectSource(l); err != nil {
 		log.Println("BatchAddCollectSource Error: ", err)
