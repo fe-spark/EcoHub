@@ -62,6 +62,19 @@ func ShieldFilmSearch(cid int64) error {
 	return nil
 }
 
+func ShieldRootFilmSearch(pid int64) error {
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return tx.Where("cid = ? OR (pid = ? AND cid = 0)", pid, pid).Delete(&model.SearchInfo{}).Error
+	})
+	if err != nil {
+		log.Printf("ShieldRootFilmSearch Error: %v", err)
+		return err
+	}
+
+	ClearSearchTagsCache(pid)
+	return nil
+}
+
 func RecoverFilmSearch(cid int64) error {
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Model(&model.SearchInfo{}).Unscoped().Where("cid = ?", cid).Update("deleted_at", nil).Error; err != nil {
@@ -88,7 +101,6 @@ func ClearSearchTagsCache(pid int64) {
 	for iter.Next(ctx) {
 		db.Rdb.Del(ctx, iter.Val())
 	}
-	db.Rdb.Del(ctx, fmt.Sprintf("%s:%d", config.SearchTags, pid))
 }
 
 // ClearTVBoxConfigCache 清除 TVBox 配置缓存

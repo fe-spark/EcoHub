@@ -34,6 +34,11 @@ const (
 	filmDetailRetryTimes = 2
 )
 
+var retryBackoffs = []time.Duration{
+	2 * time.Second,
+	5 * time.Second,
+}
+
 // activeTasks 存储当前活跃采集任务的信息
 var activeTasks sync.Map
 
@@ -72,7 +77,7 @@ func getLimiter(s *model.FilmSource) *rate.Limiter {
 	return l
 }
 
-func getPageCountWithRetry(ctx context.Context, r utils.RequestInfo) (int, error) {
+func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
 	var lastErr error
 	for attempt := 1; attempt <= pageCountRetryTimes; attempt++ {
 		select {
@@ -81,16 +86,24 @@ func getPageCountWithRetry(ctx context.Context, r utils.RequestInfo) (int, error
 		default:
 		}
 
+		if err := getLimiter(s).Wait(ctx); err != nil {
+			return 0, err
+		}
 		pageCount, err := spiderCore.GetPageCount(r)
 		if err == nil {
 			return pageCount, nil
 		}
 		lastErr = err
+		if attempt < pageCountRetryTimes && utils.IsRateLimitedErr(err) {
+			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
+				return 0, waitErr
+			}
+		}
 	}
 	return 0, lastErr
 }
 
-func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.MovieDetail, error) {
+func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 	var lastErr error
 	for attempt := 1; attempt <= filmDetailRetryTimes; attempt++ {
 		select {
@@ -99,6 +112,9 @@ func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.M
 		default:
 		}
 
+		if err := getLimiter(s).Wait(ctx); err != nil {
+			return nil, err
+		}
 		list, err := spiderCore.GetFilmDetail(r)
 		if err == nil && len(list) > 0 {
 			return list, nil
@@ -108,8 +124,32 @@ func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.M
 		} else {
 			lastErr = errors.New("response list is empty")
 		}
+		if attempt < filmDetailRetryTimes && utils.IsRateLimitedErr(lastErr) {
+			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
+				return nil, waitErr
+			}
+		}
 	}
 	return nil, lastErr
+}
+
+func waitRetryBackoff(ctx context.Context, attempt int) error {
+	if attempt <= 0 {
+		attempt = 1
+	}
+	delayIndex := attempt - 1
+	if delayIndex >= len(retryBackoffs) {
+		delayIndex = len(retryBackoffs) - 1
+	}
+	timer := time.NewTimer(retryBackoffs[delayIndex])
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
@@ -193,7 +233,7 @@ func HandleCollect(id string, h int) error {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
 	// 2. 首先获取分页采集的页数
-	pageCount, err := getPageCountWithRetry(ctx, r)
+	pageCount, err := getPageCountWithRetry(ctx, s, r)
 	if err != nil {
 		return err
 	}
@@ -211,7 +251,6 @@ func HandleCollect(id string, h int) error {
 				log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
 				return nil
 			default:
-				_ = getLimiter(s).Wait(ctx)
 				collectFilm(ctx, s, h, i)
 			}
 		}
@@ -243,23 +282,24 @@ func CollectCategory(s *model.FilmSource) {
 
 // saveCollectedFilm 将已采集的 list 按站点类型写入存储，消除 collectFilm/collectFilmById 中的重复 switch 块。
 // saveMaster 由调用方注入，区分批量(SaveDetails)与单条(SaveDetail)两种写入策略。
-func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) {
+func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) error {
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
 		if err = saveMaster(s.Id, list); err != nil {
-			log.Println("SaveDetails Error: ", err)
+			return fmt.Errorf("save master details failed: %w", err)
 		}
 		if s.SyncPictures {
 			if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
-				log.Println("SaveVirtualPic Error: ", err)
+				return fmt.Errorf("save virtual pictures failed: %w", err)
 			}
 		}
 	case model.SlaveCollect:
 		if err = filmrepo.SaveSitePlayList(s.Id, list); err != nil {
-			log.Println("SaveSitePlayList Error: ", err)
+			return fmt.Errorf("save slave playlists failed: %w", err)
 		}
 	}
+	return nil
 }
 
 func saveFilmPageFailure(s *model.FilmSource, h, pg int, err error) {
@@ -290,26 +330,34 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 	// collectFilm 本身作为并发 Worker 或同步循环的一部分
 	// 具体的 Wait 逻辑已由调用方（如 ConcurrentPageSpider 或 HandleCollect 循环）控制，
 	// 此处仅执行请求，保证原子请求的纯粹性
-	list, err := getFilmDetailWithRetry(ctx, r)
+	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		saveFilmPageFailure(s, h, pg, err)
 		log.Println("GetMovieDetail Error: ", err)
 		return
 	}
-	saveCollectedFilm(s, list, filmrepo.SaveDetails)
+	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+		saveFilmPageFailure(s, h, pg, err)
+		log.Println("saveCollectedFilm Error: ", err)
+	}
 }
 
 // collectFilmById 采集指定ID的影片信息
-func collectFilmById(ids string, s *model.FilmSource) {
+func collectFilmById(ids string, s *model.FilmSource) error {
+	if err := getLimiter(s).Wait(context.Background()); err != nil {
+		return err
+	}
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := spiderCore.GetFilmDetail(r)
-	if err != nil || len(list) <= 0 {
-		log.Println("GetMovieDetail Error: ", err)
-		return
+	if err != nil {
+		return fmt.Errorf("get movie detail failed: %w", err)
 	}
-	saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
+	if len(list) <= 0 {
+		return errors.New("get movie detail failed: response list is empty")
+	}
+	return saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
 		return filmrepo.SaveDetail(id, l[0])
 	})
 }
@@ -337,8 +385,6 @@ func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource
 					if !ok {
 						return
 					}
-					// 使用限流器等待授权，确保全局（跨 Worker）频率一致
-					_ = getLimiter(s).Wait(ctx)
 					// 执行对应的采集方法
 					collectFunc(ctx, s, h, pg)
 				}
@@ -435,7 +481,9 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			collectFilmById(sourceMid, &src)
+			if err := collectFilmById(sourceMid, &src); err != nil {
+				log.Printf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
+			}
 		}(source, requestID)
 	}
 	wg.Wait()
@@ -471,14 +519,18 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
 	}
 
-	list, err := getFilmDetailWithRetry(ctx, r)
+	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
 	}
 
-	saveCollectedFilm(s, list, filmrepo.SaveDetails)
+	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+		log.Println("Recover saveCollectedFilm Error: ", err)
+		return
+	}
 	repository.ChangeRecord(fr, 0)
 }
 
@@ -498,6 +550,11 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 // FullRecoverSpider 扫描记录表中的失败记录, 并发重试各失败页
 func FullRecoverSpider() {
 	list := repository.PendingRecord()
+	limit := config.MAXGoroutine
+	if limit <= 0 {
+		limit = 1
+	}
+	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	for i := range list {
 		fr := list[i]
@@ -507,8 +564,10 @@ func FullRecoverSpider() {
 			continue
 		}
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(src *model.FilmSource, record model.FailureRecord) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			recoverFilmPage(context.Background(), src, &record)
 		}(s, fr)
 	}

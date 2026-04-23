@@ -290,13 +290,13 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	// 通过 RecordRequestVo，生成查询条件
 	qw := db.Mdb.Model(&model.FailureRecord{})
 	if vo.OriginId != "" {
-		qw.Where("origin_id = ?", vo.OriginId)
+		qw = qw.Where("origin_id = ?", vo.OriginId)
 	}
 	if !vo.BeginTime.IsZero() && !vo.EndTime.IsZero() {
-		qw.Where("created_at BETWEEN ? AND ? ", vo.BeginTime, vo.EndTime)
+		qw = qw.Where("created_at BETWEEN ? AND ? ", vo.BeginTime, vo.EndTime)
 	}
 	if vo.Status >= 0 {
-		qw.Where("status = ?", vo.Status)
+		qw = qw.Where("status = ?", vo.Status)
 	}
 
 	// 获取分页数据
@@ -323,14 +323,25 @@ func FindRecordById(id uint) *model.FailureRecord {
 // PendingRecord 查询所有待处理的记录信息
 func PendingRecord() []model.FailureRecord {
 	var list []model.FailureRecord
-	// 1. 获取 hour > 4320 || hour < 0  && status = 1 的影片信息
-	db.Mdb.Where("(hour > 4320 OR hour < 0) AND status = 1").Find(&list)
-	// 2. 获取 hour > 0 && hour < 4320 && status = 1 的影片信息 (只获取最早的一条记录)
-	var fr model.FailureRecord
-	if err := db.Mdb.Where("hour > 0 AND hour < 4320 AND status = 1").Order("hour DESC, created_at ASC").First(&fr).Error; err == nil {
-		// 3. 将 fr 添加到 list 中
-		list = append(list, fr)
+	if err := db.Mdb.
+		Where("(hour > 4320 OR hour < 0) AND status = 1").
+		Order("created_at ASC, id ASC").
+		Find(&list).Error; err != nil {
+		log.Println("Query pending failure records failed:", err)
+		return nil
 	}
+
+	var fr model.FailureRecord
+	if err := db.Mdb.
+		Where("hour > 0 AND hour < 4320 AND status = 1").
+		Order("hour DESC, created_at ASC, id ASC").
+		First(&fr).Error; err == nil {
+		list = append(list, fr)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Println("Query incremental failure record failed:", err)
+		return nil
+	}
+
 	return list
 }
 

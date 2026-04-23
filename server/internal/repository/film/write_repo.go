@@ -501,7 +501,7 @@ func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolve
 		DbId:              detail.DbId,
 		State:             detail.State,
 		Remarks:           detail.Remarks,
-		ReleaseStamp:      detail.AddTime,
+		CollectStamp:      detail.AddTime,
 		Picture:           detail.Picture,
 		PictureSlide:      detail.PictureSlide,
 		Actor:             detail.Actor,

@@ -77,8 +77,18 @@ func GetUserById(id uint) model.User {
 
 // UpdateUserInfo 更新用户信息
 func UpdateUserInfo(u model.User) {
-	// 值更新允许修改的部分字段, 零值会在更新时被自动忽略
-	db.Mdb.Model(&u).Updates(model.User{Password: u.Password, Email: u.Email, NickName: u.NickName, Status: u.Status, Gender: u.Gender, Avatar: u.Avatar, Role: u.Role})
+	updates := map[string]any{
+		"email":     u.Email,
+		"nick_name": u.NickName,
+		"status":    u.Status,
+		"gender":    u.Gender,
+		"avatar":    u.Avatar,
+		"role":      u.Role,
+	}
+	if u.Password != "" {
+		updates["password"] = u.Password
+	}
+	db.Mdb.Model(&model.User{}).Where("id = ?", u.ID).Updates(updates)
 }
 
 // GetUserPage 分页获取用户信息

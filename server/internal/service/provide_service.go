@@ -379,8 +379,8 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		orderBy = "hits DESC, mid DESC"
 	case "score":
 		orderBy = "score DESC, mid DESC"
-	case "release_stamp":
-		orderBy = "release_stamp DESC, mid DESC"
+	case "collect_stamp":
+		orderBy = "collect_stamp DESC, mid DESC"
 	}
 
 	var sl []model.SearchInfo
@@ -395,7 +395,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 			TypeID:      typeID,
 			TypeName:    typeName,
 			VodEn:       s.Initial,
-			VodTime:     time.Unix(s.UpdateStamp, 0).Format("2006-01-02 15:04:05"),
+			VodTime:     resolveProvideVodTime(s),
 			VodRemarks:  s.Remarks,
 			VodPlayFrom: resolveProvidePlayFromSummary(s),
 			VodPic:      s.Picture,
@@ -423,6 +423,17 @@ func resolveProvidePlayFromSummary(search model.SearchInfo) string {
 		return config.PlayFormCloud
 	}
 	return search.PlayFromSummary
+}
+
+func resolveProvideVodTime(search model.SearchInfo) string {
+	stamp := search.CollectStamp
+	if stamp <= 0 {
+		stamp = search.UpdateStamp
+	}
+	if stamp <= 0 {
+		return ""
+	}
+	return time.Unix(stamp, 0).Format("2006-01-02 15:04:05")
 }
 
 // GetVodDetail 获取视频详情（带播放列表）
@@ -467,7 +478,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			TypeName:    typeName,
 			VodName:     s.Name,
 			VodEn:       s.Initial,
-			VodTime:     time.Unix(s.UpdateStamp, 0).Format("2006-01-02 15:04:05"),
+			VodTime:     resolveProvideVodTime(s),
 			VodRemarks:  s.Remarks,
 			VodPlayFrom: strings.Join(playFromList, "$$$"),
 			VodPlayURL:  strings.Join(playUrlList, "$$$"),
