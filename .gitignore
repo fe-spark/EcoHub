@@ -8,6 +8,7 @@
 server/.env
 web/.env.local
 
+
 # Test binary, built with `go test -c`
 *.test
 
@@ -29,4 +30,5 @@ package-lock.json
 .vscode/
 # 文件保留路径
 static/
+AGENTS.md
 
