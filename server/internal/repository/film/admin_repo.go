@@ -36,14 +36,19 @@ func DelFilmSearch(id int64) error {
 	})
 
 	if err == nil && info != nil {
+		if rebuildErr := RebuildSearchTagsByPids(info.Pid); rebuildErr != nil {
+			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
+			return rebuildErr
+		}
 		ClearSearchTagsCache(info.Pid)
+		ClearTVBoxListCache()
+		support.ClearIndexPageCache()
 	}
 	return err
 }
 
 func ShieldFilmSearch(cid int64) error {
-	var mids []int64
-	db.Mdb.Model(&model.SearchInfo{}).Where("cid = ?", cid).Pluck("mid", &mids)
+	pID := support.GetParentId(cid)
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("cid = ?", cid).Delete(&model.SearchInfo{}).Error; err != nil {
@@ -56,9 +61,15 @@ func ShieldFilmSearch(cid int64) error {
 		return err
 	}
 
-	if pID := support.GetParentId(cid); pID > 0 {
+	if pID > 0 {
+		if rebuildErr := RebuildSearchTagsByPids(pID); rebuildErr != nil {
+			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
+			return rebuildErr
+		}
 		ClearSearchTagsCache(pID)
 	}
+	ClearTVBoxListCache()
+	support.ClearIndexPageCache()
 	return nil
 }
 
@@ -71,7 +82,13 @@ func ShieldRootFilmSearch(pid int64) error {
 		return err
 	}
 
+	if rebuildErr := RebuildSearchTagsByPids(pid); rebuildErr != nil {
+		log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
+		return rebuildErr
+	}
 	ClearSearchTagsCache(pid)
+	ClearTVBoxListCache()
+	support.ClearIndexPageCache()
 	return nil
 }
 
@@ -87,8 +104,73 @@ func RecoverFilmSearch(cid int64) error {
 		return err
 	}
 
-	if pID := support.GetParentId(cid); pID > 0 {
+	pID := support.GetParentId(cid)
+	if pID > 0 {
+		if rebuildErr := RebuildSearchTagsByPids(pID); rebuildErr != nil {
+			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
+			return rebuildErr
+		}
 		ClearSearchTagsCache(pID)
+	}
+	ClearTVBoxListCache()
+	support.ClearIndexPageCache()
+	return nil
+}
+
+func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
+	ids := make([]string, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" {
+			continue
+		}
+		if _, ok := seen[sourceID]; ok {
+			continue
+		}
+		seen[sourceID] = struct{}{}
+		ids = append(ids, sourceID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+
+	var mids []int64
+	if err := tx.Model(&model.SearchInfo{}).Where("source_id IN ?", ids).Pluck("mid", &mids).Error; err != nil {
+		return err
+	}
+
+	if err := tx.Where("source_id IN ?", ids).Delete(&model.SearchInfo{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("source_id IN ?", ids).Delete(&model.MoviePlaylist{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		return err
+	}
+	if err := deleteMovieMatchKeysByMids(tx, mids); err != nil {
+		return err
+	}
+	if len(mids) > 0 {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
+			return err
+		}
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.VirtualPictureQueue{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Category{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
+		return err
 	}
 	return nil
 }
@@ -119,9 +201,9 @@ func ClearTVBoxListCache() {
 // ClearAllSearchTagsCache 清除所有分类的搜索标签缓存 (扫描清理)
 func ClearAllSearchTagsCache() {
 	pattern := config.SearchTags + ":*"
-	keys, err := db.Rdb.Keys(db.Cxt, pattern).Result()
-	if err == nil && len(keys) > 0 {
-		db.Rdb.Del(db.Cxt, keys...)
+	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
+	for iter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, iter.Val())
 	}
 	ClearTVBoxConfigCache()
 }
@@ -156,73 +238,22 @@ func FilmZero() {
 // 旧主站会清空主数据和自身相关映射，新主站会清空其旧附属站播放列表与映射。
 // 其它附属站的数据保持不动，由新主站重建骨架后继续挂接。
 func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
-	ids := make([]string, 0, len(sourceIDs))
-	seen := make(map[string]struct{}, len(sourceIDs))
-	for _, sourceID := range sourceIDs {
-		sourceID = strings.TrimSpace(sourceID)
-		if sourceID == "" {
-			continue
-		}
-		if _, ok := seen[sourceID]; ok {
-			continue
-		}
-		seen[sourceID] = struct{}{}
-		ids = append(ids, sourceID)
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-
-	var mids []int64
-	if err := db.Mdb.Model(&model.SearchInfo{}).Where("source_id IN ?", ids).Pluck("mid", &mids).Error; err != nil {
-		return err
-	}
-
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("source_id IN ?", ids).Delete(&model.SearchInfo{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("source_id IN ?", ids).Delete(&model.MoviePlaylist{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-			return err
-		}
-		if err := deleteMovieMatchKeysByMids(tx, mids); err != nil {
-			return err
-		}
-		if len(mids) > 0 {
-			if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
-				return err
-			}
-		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.VirtualPictureQueue{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Category{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
-			return err
-		}
-		return nil
+		return ClearMasterDataBySourceIDsTx(tx, sourceIDs...)
 	}); err != nil {
 		return err
 	}
+	RefreshMasterDataCaches()
+	return nil
+}
 
+func RefreshMasterDataCaches() {
 	time.Sleep(100 * time.Millisecond)
 	refreshCategoryCaches()
 	support.ClearIndexPageCache()
 	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 	ClearTVBoxListCache()
 	support.InitMappingEngine()
-	return nil
 }
 
 // CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录

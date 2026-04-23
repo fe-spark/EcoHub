@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"sync"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -17,22 +18,30 @@ var CronCollect *cron.Cron = CreateCron()
 // taskCidMap 运行时内存注册表：task.Id → cron.EntryID
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
 var taskCidMap = make(map[string]cron.EntryID)
+var taskCidLock sync.RWMutex
 
 // RegisterTaskCid 将 taskId 与运行时 cron.EntryID 关联
 func RegisterTaskCid(taskId string, cid cron.EntryID) {
+	taskCidLock.Lock()
+	defer taskCidLock.Unlock()
 	taskCidMap[taskId] = cid
 }
 
 // GetEntryByTaskId 通过 taskId 查找运行时 cron.Entry（含上次/下次执行时间）
 func GetEntryByTaskId(taskId string) cron.Entry {
+	taskCidLock.RLock()
 	if cid, ok := taskCidMap[taskId]; ok {
+		taskCidLock.RUnlock()
 		return CronCollect.Entry(cid)
 	}
+	taskCidLock.RUnlock()
 	return cron.Entry{}
 }
 
 // RemoveCronByTaskId 通过 taskId 删除定时任务并注销注册
 func RemoveCronByTaskId(taskId string) {
+	taskCidLock.Lock()
+	defer taskCidLock.Unlock()
 	if cid, ok := taskCidMap[taskId]; ok {
 		CronCollect.Remove(cid)
 		delete(taskCidMap, taskId)

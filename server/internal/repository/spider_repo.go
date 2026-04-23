@@ -177,8 +177,14 @@ func DelCollectResource(id string) error {
 
 // AddCollectSource 添加采集站信息
 func AddCollectSource(s model.FilmSource) error {
+	return AddCollectSourceTx(db.Mdb, s)
+}
+
+func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	var count int64
-	db.Mdb.Model(&model.FilmSource{}).Where("uri = ?", s.Uri).Count(&count)
+	if err := tx.Model(&model.FilmSource{}).Where("uri = ?", s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
 	if count > 0 {
 		return errors.New("当前采集站点信息已存在，请勿重复添加")
 	}
@@ -186,7 +192,7 @@ func AddCollectSource(s model.FilmSource) error {
 	if s.Id == "" {
 		s.Id = utils.GenerateHashKey(s.Uri)
 	}
-	return db.Mdb.Create(&s).Error
+	return tx.Create(&s).Error
 }
 
 // BatchAddCollectSource 批量添加采集站信息
@@ -202,17 +208,27 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 
 // UpdateCollectSource 更新采集站信息
 func UpdateCollectSource(s model.FilmSource) error {
+	return UpdateCollectSourceTx(db.Mdb, s)
+}
+
+func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	var count int64
-	db.Mdb.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count)
+	if err := tx.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
 	if count > 0 {
 		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
 	}
-	return db.Mdb.Save(&s).Error
+	return tx.Save(&s).Error
 }
 
 // DemoteExistingMaster 将现有的主站降级为附属站，确保全局仅一个主站
 func DemoteExistingMaster() error {
-	return db.Mdb.Model(&model.FilmSource{}).
+	return DemoteExistingMasterTx(db.Mdb)
+}
+
+func DemoteExistingMasterTx(tx *gorm.DB) error {
+	return tx.Model(&model.FilmSource{}).
 		Where("grade = ?", model.MasterCollect).
 		Update("grade", model.SlaveCollect).Error
 }
@@ -360,8 +376,7 @@ func RetryRecord(id uint, status int) error {
 	if fr == nil {
 		return errors.New("failure record not found")
 	}
-	// 将本次更新成功的记录数据状态修改为成功 0
-	return db.Mdb.Model(&model.FailureRecord{}).Where("updated_at > ?", fr.UpdatedAt).Update("status", status).Error
+	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
 }
 
 // DelDoneRecord 删除已处理的记录信息 -- 逻辑删除

@@ -419,10 +419,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 }
 
 func resolveProvidePlayFromSummary(search model.SearchInfo) string {
-	if strings.TrimSpace(search.PlayFromSummary) == "" {
-		return config.PlayFormCloud
-	}
-	return search.PlayFromSummary
+	return strings.TrimSpace(search.PlayFromSummary)
 }
 
 func resolveProvideVodTime(search model.SearchInfo) string {

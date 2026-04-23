@@ -57,12 +57,20 @@ func BuildPlayFromSummary(search model.SearchInfo, detail *model.MovieDetail, gr
 	}
 
 	if len(playNames) == 0 {
-		return config.PlayFormCloud
+		return ""
 	}
 	return strings.Join(playNames, "$$$")
 }
 
 func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
+	if err := RefreshPlayFromSummaryBySearchInfosTx(db.Mdb, infos); err != nil {
+		return err
+	}
+	ClearProvideListCache()
+	return nil
+}
+
+func RefreshPlayFromSummaryBySearchInfosTx(tx *gorm.DB, infos []model.SearchInfo) error {
 	if len(infos) == 0 {
 		return nil
 	}
@@ -89,7 +97,7 @@ func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
 	}
 
 	var detailInfos []model.MovieDetailInfo
-	if err := db.Mdb.Where("mid IN ?", mids).Find(&detailInfos).Error; err != nil {
+	if err := tx.Where("mid IN ?", mids).Find(&detailInfos).Error; err != nil {
 		return err
 	}
 	detailByMid := make(map[int64]model.MovieDetail, len(detailInfos))
@@ -101,27 +109,24 @@ func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
 		detailByMid[item.Mid] = detail
 	}
 
-	playlistGroups, err := loadPlaylistGroupsByInfos(orderedInfos)
+	playlistGroups, err := loadPlaylistGroupsByInfosTx(tx, orderedInfos)
 	if err != nil {
 		return err
 	}
 
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		for _, info := range orderedInfos {
-			var detailPtr *model.MovieDetail
-			if detail, ok := detailByMid[info.Mid]; ok {
-				detailPtr = &detail
-			}
-			summary := BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
-			if err := tx.Model(&model.SearchInfo{}).
-				Where("mid = ?", info.Mid).
-				Update("play_from_summary", summary).Error; err != nil {
-				return err
-			}
+	for _, info := range orderedInfos {
+		var detailPtr *model.MovieDetail
+		if detail, ok := detailByMid[info.Mid]; ok {
+			detailPtr = &detail
 		}
-		ClearProvideListCache()
-		return nil
-	})
+		summary := BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
+		if err := tx.Model(&model.SearchInfo{}).
+			Where("mid = ?", info.Mid).
+			Update("play_from_summary", summary).Error; err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ClearProvideListCache() {

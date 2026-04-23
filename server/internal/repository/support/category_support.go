@@ -80,6 +80,7 @@ func RefreshCategoryCache() {
 	db.Mdb.Find(&all)
 
 	newPidMap := make(map[int64]int64)
+	ResetCategoryNameCache()
 	for _, c := range all {
 		item := c
 		newPidMap[item.Id] = item.Pid

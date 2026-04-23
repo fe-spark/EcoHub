@@ -226,7 +226,11 @@ func refreshLatestSourceStampByMids(latestByMid map[int64]int64) error {
 }
 
 func DeletePlaylistBySourceId(sourceID string) error {
-	return db.Mdb.Where("source_id = ?", sourceID).Delete(&model.MoviePlaylist{}).Error
+	return DeletePlaylistBySourceIdTx(db.Mdb, sourceID)
+}
+
+func DeletePlaylistBySourceIdTx(tx *gorm.DB, sourceID string) error {
+	return tx.Where("source_id = ?", sourceID).Delete(&model.MoviePlaylist{}).Error
 }
 
 // saveSlaveSourceMappings 为附属站播放列表补充 source_mid -> global_mid 映射，
@@ -295,13 +299,17 @@ func resolveSlaveGlobalMid(detail model.MovieDetail, globalMidByKey map[string]i
 }
 
 func GetMultiplePlayGroupsByKeys(siteID, siteName string, keys []string) []model.PlayLinkVo {
+	return getMultiplePlayGroupsByKeysTx(db.Mdb, siteID, siteName, keys)
+}
+
+func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []string) []model.PlayLinkVo {
 	orderedKeys := UniqueKeys(keys)
 	if siteID == "" || len(orderedKeys) == 0 {
 		return nil
 	}
 
 	var playlists []model.MoviePlaylist
-	if err := db.Mdb.Where("source_id = ? AND movie_key IN ?", siteID, orderedKeys).
+	if err := tx.Where("source_id = ? AND movie_key IN ?", siteID, orderedKeys).
 		Order("movie_key ASC").
 		Order("group_index ASC").
 		Find(&playlists).Error; err != nil {
@@ -347,6 +355,10 @@ func GetMultiplePlayGroupsByKeys(siteID, siteName string, keys []string) []model
 }
 
 func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
+	return loadPlaylistGroupsByInfosTx(db.Mdb, infos)
+}
+
+func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
 	result := make(map[int64]map[string][]model.PlayLinkVo, len(infos))
 	mids := make([]int64, 0, len(infos))
 	for _, info := range infos {
@@ -355,7 +367,7 @@ func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][
 		}
 	}
 
-	keysByMid := loadMovieMatchKeysByMids(mids)
+	keysByMid := loadMovieMatchKeysByMidsTx(tx, mids)
 	for _, info := range infos {
 		groupsBySource := make(map[string][]model.PlayLinkVo)
 		lookupKeys := keysByMid[info.Mid]
@@ -368,7 +380,7 @@ func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][
 			if source.Grade != model.SlaveCollect || !source.State {
 				continue
 			}
-			groups := GetMultiplePlayGroupsByKeys(source.Id, source.Name, lookupKeys)
+			groups := getMultiplePlayGroupsByKeysTx(tx, source.Id, source.Name, lookupKeys)
 			if len(groups) == 0 {
 				continue
 			}
