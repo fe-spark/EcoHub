@@ -1,11 +1,6 @@
 package model
 
 import (
-	"context"
-	"fmt"
-
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/model/dto"
 
 	"gorm.io/gorm"
@@ -162,37 +157,6 @@ type SearchInfo struct {
 	Actor             string  `json:"actor"`                                                                                      // 主演
 	Director          string  `json:"director"`                                                                                   // 导演
 	Blurb             string  `json:"blurb"`                                                                                      // 简介, 不完整
-}
-
-// AfterSave GORM 钩子：在数据保存/更新后自动清理缓存，确保首页数据实时性
-func (s *SearchInfo) AfterSave(tx *gorm.DB) (err error) {
-	ctx := context.Background()
-
-	// 1. 清理首页全量缓存
-	iter := db.Rdb.Scan(ctx, 0, config.IndexPageCacheKey+"*", 100).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-
-	// 2. 清理 TVBox 列表第一页缓存 (由于涉及多种 Sort/Pid/Limit 组合，使用模糊匹配清理)
-	// 注意：此处使用 Keys 操作在数据量极大时可能有性能影响，但考虑到采集频率可控且主要是首页缓存，是合理的
-	pattern := config.TVBoxList + ":*"
-	iter = db.Rdb.Scan(ctx, 0, pattern, 100).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-
-	// 3. 清理搜索标签缓存 (SearchTags:*), 确保新入库/更新的影片能实时在筛选菜单中体现
-	// 清理当前分类的复合标签缓存 (格式：Search:Tags:{pid}:*)
-	if s.Pid > 0 {
-		tagPattern := fmt.Sprintf("%s:%d:*", config.SearchTags, s.Pid)
-		iter := db.Rdb.Scan(ctx, 0, tagPattern, 100).Iterator()
-		for iter.Next(ctx) {
-			db.Rdb.Del(ctx, iter.Val())
-		}
-	}
-
-	return
 }
 
 // SearchTagItem 影片检索标签持久化模型 (MySQL)

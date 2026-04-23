@@ -227,11 +227,7 @@ func FilmZero() {
 	time.Sleep(100 * time.Millisecond)
 
 	support.TruncateRecordTable()
-	refreshCategoryCaches()
-	support.ClearIndexPageCache()
-	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
-	ClearTVBoxListCache()
-	support.InitMappingEngine()
+	RefreshMasterDataCaches()
 }
 
 // ClearMasterDataBySourceIDs 清理指定站点在主站切换时必须重置的数据。

@@ -221,10 +221,19 @@ func clearSearchInfoCachesByPids(list []model.SearchInfo) {
 	for _, item := range list {
 		pidSet[item.Pid] = struct{}{}
 	}
+	clearSearchInfoCachesByPidSet(pidSet)
+}
+
+func clearSearchInfoCachesByPidSet(pidSet map[int64]struct{}) {
 	for pid := range pidSet {
+		if pid <= 0 {
+			continue
+		}
 		ClearSearchTagsCache(pid)
 	}
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	support.ClearIndexPageCache()
+	ClearProvideListCache()
 }
 
 func BatchSaveOrUpdate(list []model.SearchInfo) map[string]int64 {
@@ -245,11 +254,12 @@ func BatchSaveOrUpdate(list []model.SearchInfo) map[string]int64 {
 }
 
 func SaveSearchInfo(s model.SearchInfo) error {
-	_, err := saveSearchInfosAndMappings([]model.SearchInfo{s})
-
+	if _, err := saveSearchInfosAndMappings([]model.SearchInfo{s}); err != nil {
+		return err
+	}
+	clearSearchInfoCachesByPids([]model.SearchInfo{s})
 	BatchHandleSearchTag(s)
-	ClearSearchTagsCache(s.Pid)
-	return err
+	return nil
 }
 
 func SaveDetails(id string, list []model.MovieDetail) error {
