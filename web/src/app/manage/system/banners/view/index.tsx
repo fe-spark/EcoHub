@@ -30,6 +30,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 
 const { Title, Text } = Typography;
 
@@ -482,15 +483,11 @@ export default function BannersPageView() {
   );
 
   return (
-    <div style={{ background: "transparent" }}>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          marginBottom: 16,
-        }}
-      >
-          <Title level={4}>影片封面管理</Title>
+    <ManagePageShell
+      eyebrow="系统设置"
+      title="首页封面"
+      description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
+      actions={
         <Space>
           <Button
             type="primary"
@@ -500,7 +497,8 @@ export default function BannersPageView() {
             添加封面
           </Button>
         </Space>
-      </div>
+      }
+    >
 
       <Table
         dataSource={banners}
@@ -524,6 +522,6 @@ export default function BannersPageView() {
           {formItems}
         </Form>
       </Modal>
-    </div>
+    </ManagePageShell>
   );
 }

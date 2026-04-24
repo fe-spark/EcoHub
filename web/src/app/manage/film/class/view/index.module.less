@@ -1,23 +1,321 @@
 .container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
   padding: 0;
   background: transparent;
 }
 
-.toolbar {
+.heroSection {
   display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 0;
-  margin-top: 16px;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 20px;
+  background: var(--ant-color-bg-container);
+  border-radius: 8px;
 }
 
-.classSub {
+.heroTitle {
+  margin: 0;
+  color: var(--ant-color-text);
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.heroActions {
   display: flex;
+  gap: 8px;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 8px;
+  justify-content: flex-end;
 }
 
-.subTag {
-  margin: 4px 0;
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.statCard {
+  background: var(--ant-color-bg-container);
+  border-radius: 8px;
+}
+
+.statLabel {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+}
+
+.statValue {
+  color: var(--ant-color-text);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.notice {
+  margin: 0;
+}
+
+.treePanel {
+  padding: 16px;
+  background: var(--ant-color-bg-container);
+  border-radius: 8px;
+}
+
+.listWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.groupCard {
+  background: var(--ant-color-bg-layout);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  overflow: hidden;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.groupCard.nodeActive {
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-bg-layout);
+  box-shadow: inset 0 0 0 1px var(--ant-color-primary-border);
+}
+
+.groupHeaderCard {
+  background: var(--ant-color-bg-container);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.groupBody {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 12px;
+}
+
+.childList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.groupEmpty,
+.groupCollapsedHint {
+  padding: 12px 14px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+}
+
+.groupCollapsedHint {
+  border-top: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.nodeCard {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  background: var(--ant-color-bg-layout);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.nodeCardGrouped {
+  margin: 0;
+  border-radius: 8px;
+}
+
+.nodeCardRoot {
+  background: var(--ant-color-bg-layout);
+  border-left: 4px solid var(--ant-color-primary);
+}
+
+.rootCardSurface {
+  cursor: grab;
+}
+
+.nodeCardChild {
+  background: var(--ant-color-bg-container);
+  border-color: var(--ant-color-border-secondary);
+}
+
+.nodeActive {
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.nodeDragging {
+  opacity: 1;
+}
+
+.nodePlaceholder {
+  opacity: 0.35;
+  border-style: dashed;
+  border-color: var(--ant-color-primary);
+}
+
+.nodePlaceholderContent {
+  opacity: 1;
+}
+
+.dragPreview {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--ant-color-primary);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 18%);
+  pointer-events: none;
+  cursor: grabbing;
+}
+
+.dragPreviewGroupCard {
+  border: 1px solid var(--ant-color-primary);
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--ant-color-bg-layout);
+  box-shadow: 0 16px 36px rgb(0 0 0 / 18%);
+  pointer-events: none;
+  cursor: grabbing;
+}
+
+.dragPreviewRoot {
+  border-left: 4px solid var(--ant-color-primary);
+}
+
+.dragPreviewChild {
+  border-color: var(--ant-color-border-secondary);
+}
+
+.nodeMain {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  min-width: 0;
+  flex: 1;
+}
+
+.rootDragArea {
+  display: inline-flex;
+  flex: none;
+  cursor: grab;
+}
+
+.levelBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.levelBadgeRoot {
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.levelBadgeChild {
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-tertiary);
+}
+
+.nodeTitleBlock {
+  min-width: 0;
+  flex: 1;
+}
+
+.nodeTitleRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+
+.nodeTitle {
+  color: var(--ant-color-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.nodeMeta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+
+.nodeActions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+@media (max-width: 960px) {
+  .heroSection {
+    flex-direction: column;
+  }
+
+  .heroActions {
+    justify-content: flex-start;
+  }
+
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nodeCard {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .nodeActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .heroSection,
+  .treePanel {
+    padding: 14px;
+  }
+
+  .groupCard,
+  .childList,
+  .groupBody {
+    padding: 10px;
+  }
 }

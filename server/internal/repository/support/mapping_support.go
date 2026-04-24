@@ -30,10 +30,6 @@ func ReloadMappingRules() {
 		newSourceMap[fmt.Sprintf("%s_%d", m.SourceId, m.SourceTypeId)] = m.CategoryId
 	}
 
-	var mains []model.Category
-	db.Mdb.Where("pid = 0").Order("id ASC").Find(&mains)
-	cacheMainCats = mains
-
 	newArea := make(map[string]string)
 	newLang := make(map[string]string)
 	newFilter := make(map[string]bool)
@@ -104,9 +100,6 @@ func syncInitialRulesToDB() {
 		db.Mdb.FirstOrCreate(&model.MappingRule{Group: "Attribute", Raw: k, Target: v})
 	}
 
-	var mains []model.Category
-	db.Mdb.Where("pid = 0").Find(&mains)
-	cacheMainCats = mains
 }
 
 func replaceSyncMap(sm *sync.Map, data map[string]string) {
@@ -184,10 +177,6 @@ func GetPlotMapping() map[string]string {
 	return res
 }
 
-func GetMainCategoriesFromCache() []model.Category {
-	return cacheMainCats
-}
-
 func GetCategoryNameFromCache(id int64) (string, bool) {
 	val, ok := cacheCategoryMap.Load(id)
 	if !ok {
@@ -207,71 +196,10 @@ func ResetCategoryNameCache() {
 	})
 }
 
-func GetCategoryBucketRole(typeName string) string {
-	typeName = strings.TrimSpace(typeName)
-	if typeName == "" {
-		return model.BigCategoryOther
-	}
-
-	matchPriority := []string{
-		model.BigCategoryAnimation,
-		model.BigCategoryVariety,
-		model.BigCategoryDocumentary,
-		model.BigCategoryMovie,
-		model.BigCategoryTV,
-		model.BigCategoryOther,
-	}
-
-	mains := GetMainCategoriesFromCache()
-	mainsMap := make(map[string]model.Category)
-	for _, m := range mains {
-		mainsMap[m.Name] = m
-	}
-
-	for _, targetName := range matchPriority {
-		m, ok := mainsMap[targetName]
-		if !ok {
-			continue
-		}
-		for _, kw := range strings.Split(m.Alias, ",") {
-			if kw = strings.TrimSpace(kw); kw != "" && strings.Contains(typeName, kw) {
-				return m.Name
-			}
-		}
-	}
-
-	fallbackKeywords := map[string][]string{
-		model.BigCategoryAnimation:   {"动漫", "动画", "番剧", "番", "卡通", "漫"},
-		model.BigCategoryVariety:     {"综艺", "真人秀", "脱口秀", "晚会"},
-		model.BigCategoryDocumentary: {"纪录", "记录", "纪实"},
-		model.BigCategoryMovie:       {"电影", "影片", "院线", "影视"},
-		model.BigCategoryTV:          {"电视剧", "剧集", "连续剧", "国产剧", "韩剧", "美剧", "日剧", "泰剧", "港剧", "台剧", "短剧"},
-	}
-	for _, targetName := range matchPriority {
-		for _, kw := range fallbackKeywords[targetName] {
-			if strings.Contains(typeName, kw) {
-				return targetName
-			}
-		}
-	}
-
-	return model.BigCategoryOther
-}
-
 func GetLocalCategoryId(sourceId string, sourceTypeId int64) int64 {
 	key := fmt.Sprintf("%s_%d", sourceId, sourceTypeId)
 	if id, ok := cacheSourceMap.Load(key); ok {
 		return id.(int64)
-	}
-	return 0
-}
-
-func GetStandardIdByRole(role string) int64 {
-	mains := GetMainCategoriesFromCache()
-	for _, m := range mains {
-		if m.Name == role {
-			return m.Id
-		}
 	}
 	return 0
 }
@@ -288,13 +216,6 @@ func GetMainCategoryName(pid int64) string {
 	if err := db.Mdb.Where("pid = 0 AND id = ?", pid).First(&m).Error; err == nil {
 		SetCategoryNameCache(pid, m.Name)
 		return m.Name
-	}
-
-	mains := GetMainCategoriesFromCache()
-	for _, m := range mains {
-		if m.Id == pid {
-			return m.Name
-		}
 	}
 
 	return ""

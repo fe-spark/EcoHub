@@ -447,7 +447,10 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			continue
 		}
 
-		movieDetailVo := IndexSvc.GetFilmDetail(idInt)
+		movieDetailVo, err := IndexSvc.GetFilmDetail(idInt)
+		if err != nil {
+			continue
+		}
 
 		if movieDetailVo.Id == 0 && movieDetailVo.Name == "" {
 			continue

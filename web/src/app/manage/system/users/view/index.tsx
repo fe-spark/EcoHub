@@ -25,6 +25,7 @@ import {
   MailOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
+import ManagePageShell from "../../../components/page-shell";
 
 const { Option } = Select;
 
@@ -205,18 +206,19 @@ export default function UsersPageView() {
   ];
 
   return (
-    <Card
-      title={
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>用户管理</span>
-          <Space>
-            <Input.Search placeholder="搜索用户名" onSearch={handleSearch} style={{ width: 250 }} allowClear />
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} disabled={!currentUser?.canWrite}>
-              新增用户
-            </Button>
-          </Space>
-        </div>
+    <ManagePageShell
+      eyebrow="系统设置"
+      title="账号管理"
+      description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
+      actions={
+        <Space>
+          <Input.Search placeholder="搜索用户名" onSearch={handleSearch} style={{ width: 250 }} allowClear />
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} disabled={!currentUser?.canWrite}>
+            新增用户
+          </Button>
+        </Space>
       }
+      panelClassName=""
     >
       <Table
         columns={columns}
@@ -275,6 +277,6 @@ export default function UsersPageView() {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+    </ManagePageShell>
   );
 }

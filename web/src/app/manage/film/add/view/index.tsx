@@ -8,7 +8,6 @@ import {
   Select,
   Button,
   Upload,
-  Typography,
   InputNumber,
   Space,
   Spin,
@@ -30,6 +29,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
@@ -171,9 +171,12 @@ function FilmAddForm() {
   }
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
+    <ManagePageShell
+      eyebrow="内容管理"
+      title={id ? "修改影片详情" : "录入新影片"}
+      description="维护主库存影片的基础信息、演职人员、播放资源和外部数据。"
+      actions={
+        <Space size="middle" wrap>
           <Button
             type="text"
             icon={<ArrowLeftOutlined />}
@@ -181,17 +184,8 @@ function FilmAddForm() {
           >
             返回列表
           </Button>
-          <Typography.Title level={4} className={styles.title}>
-            {id ? "修改影片详情" : "录入新影片"}
-          </Typography.Title>
-        </div>
-        <Space size="middle">
           {!id && (
-            <Button
-              icon={<ClearOutlined />}
-              onClick={() => form.resetFields()}
-              style={{ fontWeight: 500 }}
-            >
+            <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
               清空重填
             </Button>
           )}
@@ -200,13 +194,13 @@ function FilmAddForm() {
             icon={<SaveOutlined />}
             onClick={() => form.submit()}
             loading={loading}
-            style={{ paddingLeft: 24, paddingRight: 24, fontWeight: 600 }}
           >
             {id ? "确认保存更新" : "立即提交"}
           </Button>
         </Space>
-      </div>
-
+      }
+      panelClassName={styles.formPanel}
+    >
       <Form
         form={form}
         layout="vertical"
@@ -470,7 +464,7 @@ function FilmAddForm() {
           </Card>
         </Space>
       </Form>
-    </div>
+    </ManagePageShell>
   );
 }
 

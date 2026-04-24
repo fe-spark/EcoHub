@@ -87,7 +87,15 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("请求异常,暂无影片信息!!!", c)
 		return
 	}
-	detail := service.IndexSvc.GetFilmDetail(id)
+	detail, err := service.IndexSvc.GetFilmDetail(id)
+	if err != nil {
+		dto.Failed("影片详情数据异常", c)
+		return
+	}
+	if detail.Id == 0 {
+		dto.Failed("暂无影片信息", c)
+		return
+	}
 	useProxy := repository.GetSiteBasic().IsVideoProxy
 	for i := range detail.List {
 		var valid []model.MovieUrlInfo

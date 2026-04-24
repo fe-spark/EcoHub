@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "antd";
 import {
@@ -10,8 +10,13 @@ import {
   RocketOutlined,
   FireOutlined,
 } from "@ant-design/icons";
+import { Autoplay, Pagination, A11y } from "swiper/modules";
+import { Swiper, SwiperSlide } from "swiper/react";
+import type { Swiper as SwiperInstance } from "swiper/types";
 import FilmList from "@/components/public/FilmList";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import "swiper/css";
+import "swiper/css/pagination";
 import styles from "./index.module.less";
 
 interface BannerItem {
@@ -42,8 +47,27 @@ function getBannerBackdropImage(item: BannerItem): string {
   return item.pictureSlide || item.picture || item.poster || "";
 }
 
-function getBannerCardImage(item: BannerItem): string {
-  return item.picture || item.poster || item.pictureSlide || "";
+function getBannerPosterImage(item: BannerItem): string {
+  return item.poster || item.picture || item.pictureSlide || "";
+}
+
+function getCircularOffset(total: number, activeIndex: number, targetIndex: number): number {
+  let offset = targetIndex - activeIndex;
+  if (total <= 1) {
+    return offset;
+  }
+
+  const wrappedForward = offset + total;
+  const wrappedBackward = offset - total;
+
+  if (Math.abs(wrappedForward) < Math.abs(offset)) {
+    offset = wrappedForward;
+  }
+  if (Math.abs(wrappedBackward) < Math.abs(offset)) {
+    offset = wrappedBackward;
+  }
+
+  return offset;
 }
 
 interface NavChildItem {
@@ -76,65 +100,12 @@ export default function HomePageView({
   const router = useRouter();
   const featuredCovers = data.banners;
   const [activeIndex, setActiveIndex] = useState(0);
-  const [isHeroAccordionPaused, setIsHeroAccordionPaused] = useState(false);
+  const [heroSwiper, setHeroSwiper] = useState<SwiperInstance | null>(null);
   const safeActiveIndex =
     featuredCovers.length === 0 ? 0 : Math.min(activeIndex, featuredCovers.length - 1);
 
   const activeCover = featuredCovers[safeActiveIndex] || featuredCovers[0];
   const activeMetaItems = activeCover ? buildHeroMetaItems(activeCover) : [];
-
-  useEffect(() => {
-    if (featuredCovers.length <= 1 || isHeroAccordionPaused) {
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      setActiveIndex((currentIndex) => (currentIndex + 1) % featuredCovers.length);
-    }, 3600);
-
-    return () => window.clearTimeout(timer);
-  }, [activeIndex, featuredCovers.length, isHeroAccordionPaused]);
-  const handleHeroCardHover = (index: number) => {
-    setIsHeroAccordionPaused(true);
-
-    if (index === safeActiveIndex) {
-      return;
-    }
-
-    setActiveIndex(index);
-  };
-
-  const handleHeroAccordionLeave = () => {
-    setIsHeroAccordionPaused(false);
-  };
-
-  const handleHeroCardPlay = (index: number, filmId: string) => {
-    if (index !== safeActiveIndex) {
-      setActiveIndex(index);
-      return;
-    }
-
-    router.push(
-      resolvePlayEntryPath(filmId, {
-        sourceId: "0",
-        episodeIndex: 0,
-      }),
-    );
-  };
-
-  const getHeroAccordionItemClassName = (index: number) => {
-    if (index === safeActiveIndex) {
-      return styles.heroAccordionItemActive;
-    }
-
-    if (featuredCovers.length <= 1) {
-      return styles.heroAccordionItemFar;
-    }
-
-    const distance = Math.abs(index - safeActiveIndex);
-
-    return distance === 1 ? styles.heroAccordionItemNear : styles.heroAccordionItemFar;
-  };
 
   const getSectionIcon = (name: string) => {
     if (name.includes("电影")) {
@@ -154,17 +125,17 @@ export default function HomePageView({
       {featuredCovers.length > 0 && activeCover && (
         <section className={styles.heroSection}>
           <div className={styles.heroBackground}>
-              <div
-                className={styles.heroBackdropImage}
-                 style={{ backgroundImage: `url(${getBannerBackdropImage(activeCover)})` }}
-              />
+            <div
+              className={styles.heroBackdropImage}
+              style={{ backgroundImage: `url(${getBannerBackdropImage(activeCover)})` }}
+            />
             <div className={styles.heroBackdropMask} />
           </div>
 
           <div className={styles.heroLayout}>
             <div className={styles.heroContent}>
-              <div className={styles.heroPanel}>
-                <div className={styles.heroEyebrow}>Editor&apos;s Pick</div>
+              <div className={styles.heroCopyBlock}>
+                <div className={styles.heroEyebrow}>Featured Spotlight</div>
 
                 <div className={styles.heroBadgeRow}>
                   <div className={styles.heroBadge}>{activeCover.cName || "精彩推荐"}</div>
@@ -176,7 +147,7 @@ export default function HomePageView({
                     </div>
                   )}
                 </div>
-                
+
                 <h1 className={styles.heroTitle}>{activeCover.name}</h1>
 
                 <div className={styles.heroMeta}>
@@ -186,6 +157,10 @@ export default function HomePageView({
                     </span>
                   ))}
                 </div>
+
+                <p className={styles.heroDescription}>
+                  当前主推影片与同组推荐内容集中展示。
+                </p>
 
                 <div className={styles.heroActions}>
                   <Button
@@ -209,39 +184,81 @@ export default function HomePageView({
             </div>
 
             <div className={styles.heroCarouselColumn}>
-              <div
-                className={styles.heroAccordion}
-                onMouseLeave={handleHeroAccordionLeave}
-                onBlur={(event) => {
-                  if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-                    handleHeroAccordionLeave();
+              <div className={styles.heroStage}>
+                <Swiper
+                  modules={[Autoplay, Pagination, A11y]}
+                  className={styles.heroSwiper}
+                  slidesPerView={1}
+                  loop={featuredCovers.length > 1}
+                  speed={650}
+                  onSwiper={setHeroSwiper}
+                  autoplay={
+                    featuredCovers.length > 1
+                      ? {
+                          delay: 3600,
+                          disableOnInteraction: false,
+                          pauseOnMouseEnter: true,
+                      }
+                    : false
                   }
-                }}
-              >
-                {featuredCovers.map((item, index) => {
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={`${styles.heroAccordionItem} ${getHeroAccordionItemClassName(index)}`}
-                      onMouseEnter={() => handleHeroCardHover(index)}
-                      onFocus={() => handleHeroCardHover(index)}
-                      onClick={() => handleHeroCardPlay(index, item.mid)}
-                      aria-label={index === safeActiveIndex ? `播放 ${item.name}` : `展开 ${item.name}`}
-                    >
-                      <span
-                        className={styles.heroCardImage}
-                        style={{ backgroundImage: `url(${getBannerCardImage(item)})` }}
-                      />
-                      <span className={styles.heroCardMask} />
-                      <span className={styles.heroAccordionSpine} />
-                      <span className={styles.heroCardInfo}>
-                        <span className={styles.heroCardTag}>{item.cName || "推荐"}</span>
-                        <span className={styles.heroCardTitle}>{item.name}</span>
-                      </span>
-                    </button>
-                  );
-                })}
+                  pagination={{
+                    clickable: true,
+                    bulletClass: styles.heroPaginationBullet,
+                    bulletActiveClass: styles.heroPaginationBulletActive,
+                  }}
+                  onSlideChange={(swiper) => {
+                    setActiveIndex(swiper.realIndex);
+                  }}
+                >
+                  {featuredCovers.map((_, stageIndex) => {
+                    return (
+                      <SwiperSlide key={`${featuredCovers[stageIndex].id}-${stageIndex}`} className={styles.heroSwiperSlide}>
+                        <div className={styles.heroRingScene}>
+                          <div
+                            className={styles.heroRingTrack}
+                            style={{
+                              ["--hero-active-angle" as string]: `${stageIndex * (360 / featuredCovers.length)}deg`,
+                            }}
+                          >
+                            {featuredCovers.map((item, ringIndex) => {
+                              const offset = getCircularOffset(featuredCovers.length, stageIndex, ringIndex);
+                              const distance = Math.abs(offset);
+                              const angle = (360 / featuredCovers.length) * ringIndex;
+                              const scale = distance === 0 ? 1 : distance === 1 ? 0.92 : distance === 2 ? 0.82 : 0.72;
+                              const opacity = distance === 0 ? 1 : distance === 1 ? 0.76 : distance === 2 ? 0.46 : 0.22;
+                              const zIndex = 10 - distance;
+                              const posterImage = getBannerPosterImage(item);
+                              const isCurrent = distance === 0;
+
+                              return (
+                                <button
+                                  key={`${item.id}-${ringIndex}`}
+                                  type="button"
+                                  className={`${styles.heroRingPoster} ${isCurrent ? styles.heroRingPosterActive : ""}`}
+                                  style={{
+                                    ["--hero-wall-angle" as string]: `${angle}deg`,
+                                    ["--hero-wall-scale" as string]: String(scale),
+                                    opacity,
+                                    zIndex,
+                                  }}
+                                  onClick={() => heroSwiper?.slideToLoop(ringIndex)}
+                                  aria-label={isCurrent ? `${item.name}，当前展示` : `切换到${item.name}`}
+                                >
+                                  <span className={styles.heroRingPosterFrame}>
+                                    <span
+                                      className={styles.heroPosterImage}
+                                      style={{ backgroundImage: `url(${posterImage})` }}
+                                    />
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </SwiperSlide>
+                    );
+                  })}
+                </Swiper>
               </div>
             </div>
           </div>

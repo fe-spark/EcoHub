@@ -96,7 +96,6 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
-			spiderRoute.POST(`/class/cover`, handler.SpiderHd.CoverFilmClass)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)
 		}
 
@@ -109,6 +108,8 @@ func SetupRouter() *gin.Engine {
 
 			filmRoute.GET(`/class/tree`, handler.FilmHd.FilmClassTree)
 			filmRoute.GET(`/class/find`, handler.FilmHd.FindFilmClass)
+			filmRoute.POST(`/class/collect`, handler.FilmHd.CollectFilmClass)
+			filmRoute.POST(`/class/tree/save`, handler.FilmHd.SaveFilmClassTree)
 			filmRoute.POST(`/class/update`, handler.FilmHd.UpdateFilmClass)
 			filmRoute.POST(`/class/del`, handler.FilmHd.DelFilmClass)
 		}

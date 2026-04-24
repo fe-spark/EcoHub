@@ -1,23 +1,18 @@
 .container {
   padding: 0;
-  margin: 0 auto;
   position: relative;
-  min-height: calc(100vh - 120px);
+  min-height: 520px;
+}
+
+.galleryPanel {
+  padding: 16px;
 }
 
 .headerSection {
-  margin-bottom: 32px;
   display: flex;
   justify-content: space-between;
-  align-items: flex-end;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-  padding-bottom: 16px;
-}
-
-.titleArea h4 {
-  margin: 0 0 4px 0 !important;
-  font-weight: 700;
-  letter-spacing: -0.5px;
+  align-items: center;
+  gap: 12px;
 }
 
 .uploadSection {
@@ -201,7 +196,7 @@
 }
 
 @media (max-width: 768px) {
-  .container {
+  .galleryPanel {
     padding: 16px;
   }
 

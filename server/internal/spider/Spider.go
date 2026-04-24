@@ -42,6 +42,9 @@ var retryBackoffs = []time.Duration{
 // activeTasks 存储当前活跃采集任务的信息
 var activeTasks sync.Map
 
+// masterWriteLocks 串行化主站写库，避免分页并发采集时多个事务互相死锁。
+var masterWriteLocks sync.Map
+
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
@@ -54,6 +57,15 @@ func ClearLimiter(sourceID string) {
 		return
 	}
 	limiters.Delete(sourceID)
+}
+
+func getMasterWriteLock(sourceID string) *sync.Mutex {
+	if lock, ok := masterWriteLocks.Load(sourceID); ok {
+		return lock.(*sync.Mutex)
+	}
+	lock := &sync.Mutex{}
+	actual, _ := masterWriteLocks.LoadOrStore(sourceID, lock)
+	return actual.(*sync.Mutex)
 }
 
 type collectTask struct {
@@ -222,14 +234,6 @@ func HandleCollect(id string, h int) error {
 		return errors.New("采集站点已停用")
 	}
 
-	// 如果是主站点且状态为启用则先获取分类tree信息
-	if s.Grade == model.MasterCollect && s.State {
-		// 是否存在分类树信息, 不存在则获取
-		if !repository.ExistsCategoryTree() {
-			CollectCategory(s)
-		}
-	}
-
 	// 生成 RequestInfo
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	// 如果 h == 0 则直接返回错误信息
@@ -273,19 +277,33 @@ func HandleCollect(id string, h int) error {
 }
 
 // CollectCategory 影视分类采集
-func CollectCategory(s *model.FilmSource) {
+func CollectCategory(s *model.FilmSource) error {
+	return collectCategoryWithMode(s, true)
+}
+
+func ResetCategory(s *model.FilmSource) error {
+	return collectCategoryWithMode(s, false)
+}
+
+func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) error {
+	if s == nil {
+		return errors.New("采集站信息不存在")
+	}
 	// 获取分类树形数据
 	categoryTree, err := spiderCore.GetCategoryTree(utils.RequestInfo{Uri: s.Uri, Params: url.Values{}})
 	if err != nil {
-		log.Println("GetCategoryTree Error: ", err)
-		return
+		return fmt.Errorf("获取主站分类树失败: %w", err)
 	}
 	// 保存 tree 到 MySQL (方案B: 传入 sourceId 建立映射)
-	err = repository.SaveCategoryTree(s.Id, categoryTree)
-	if err != nil {
-		log.Println("SaveCategoryTree Error: ", err)
-		return
+	if preserveBusinessFields {
+		err = repository.SaveCategoryTree(s.Id, categoryTree)
+	} else {
+		err = repository.ResetCategoryTree(s.Id, categoryTree)
 	}
+	if err != nil {
+		return fmt.Errorf("保存主站分类树失败: %w", err)
+	}
+	return nil
 }
 
 // saveCollectedFilm 将已采集的 list 按站点类型写入存储，消除 collectFilm/collectFilmById 中的重复 switch 块。
@@ -294,9 +312,13 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
+		lock := getMasterWriteLock(s.Id)
+		lock.Lock()
 		if err = saveMaster(s.Id, list); err != nil {
+			lock.Unlock()
 			return fmt.Errorf("save master details failed: %w", err)
 		}
+		lock.Unlock()
 		if s.SyncPictures {
 			if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
 				return fmt.Errorf("save virtual pictures failed: %w", err)
@@ -341,13 +363,15 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		saveFilmPageFailure(s, h, pg, err)
-		log.Println("GetMovieDetail Error: ", err)
+		log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, pg, err)
 		return
 	}
 	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
 		saveFilmPageFailure(s, h, pg, err)
-		log.Println("saveCollectedFilm Error: ", err)
+		log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, pg, err)
+		return
 	}
+	log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, pg, len(list))
 }
 
 // collectFilmById 采集指定ID的影片信息

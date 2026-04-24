@@ -2,6 +2,7 @@ package film
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"regexp"
@@ -672,7 +673,9 @@ func GetBasicInfoByKey(cid int64, mid int64) model.MovieBasicInfo {
 func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
 	var movieDetailInfo model.MovieDetailInfo
 	if err := db.Mdb.Where("mid = ?", mid).First(&movieDetailInfo).Error; err != nil {
-		log.Printf("GetMovieDetail Error: %v", err)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("GetMovieDetail Error: %v", err)
+		}
 		return nil
 	}
 	var detail model.MovieDetail
@@ -753,9 +756,9 @@ func applyYearTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where("year <> 0")
+		query = query.Where("year = 0")
 		if len(topVals) > 0 {
-			query = query.Where("year NOT IN ?", topVals)
+			query = query.Or("year <> 0 AND year NOT IN ?", topVals)
 		}
 		return query
 	case model.TagUnknownValue:
@@ -772,6 +775,9 @@ func applyTextTagFilter(query *gorm.DB, pid int64, fieldName string, column stri
 		query = query.Where(hasTextValue(column))
 		if len(topVals) > 0 {
 			query = query.Where(fmt.Sprintf("%s NOT IN ?", column), topVals)
+		}
+		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
+			query = query.Or(fmt.Sprintf("%s = ?", column), abnormal)
 		}
 		return query
 	case model.TagUnknownValue:
@@ -792,6 +798,9 @@ func applyPlotTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 		}
 		for i := 0; i < excludeCount; i++ {
 			query = query.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%v%%", topVals[i]))
+		}
+		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
+			query = query.Or("class_tag LIKE ?", fmt.Sprintf("%%%v%%", abnormal))
 		}
 		return query
 	case model.TagUnknownValue:

@@ -9,6 +9,7 @@ import (
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
 )
@@ -95,6 +96,14 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	if masterLookup || masterUriChanged {
 		filmrepo.RefreshMasterDataCaches()
+		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
+			return syncErr
+		}
+	}
+	if source.Grade == model.MasterCollect && source.State && old.State != source.State {
+		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
+			return syncErr
+		}
 	}
 	return nil
 }
@@ -102,8 +111,22 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	// 强制单主站机制：如果新增站点为主站，自动降级现有主站
 	if source.Grade == model.MasterCollect {
+		if source.Id == "" {
+			source.Id = utils.GenerateHashKey(source.Uri)
+		}
+		masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
+		affectedSourceIDs := make([]string, 0, len(masters)+1)
+		for _, master := range masters {
+			affectedSourceIDs = append(affectedSourceIDs, master.Id)
+		}
+		affectedSourceIDs = append(affectedSourceIDs, source.Id)
+
 		log.Printf("[Collect] 新增站点 %s 为主采集站，自动降级现有主站...", source.Name)
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+			if err := filmrepo.ClearMasterDataBySourceIDsTx(tx, affectedSourceIDs...); err != nil {
+				log.Printf("[Collect] 新主站接管前数据清理失败: %v", err)
+				return errors.New("主站切换数据清理失败，请重试")
+			}
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
 				return err
 			}
@@ -112,6 +135,12 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			return err
 		}
 		spider.ClearLimiter(source.Id)
+		filmrepo.RefreshMasterDataCaches()
+		if source.State {
+			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
+				return syncErr
+			}
+		}
 		return nil
 	}
 	if err := repository.AddCollectSource(source); err != nil {

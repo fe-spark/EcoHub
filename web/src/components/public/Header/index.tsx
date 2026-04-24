@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback, useLayoutEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Input, Button, Empty, Drawer, Flex, Dropdown } from "antd";
 import {
@@ -137,51 +137,75 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     </div>
   );
 
-  const [visibleCount, setVisibleCount] = useState(navList.length);
+  const [visibleCount, setVisibleCount] = useState(0);
+  const [navReady, setNavReady] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const navMeasureRef = useRef<HTMLDivElement>(null);
   const itemsRef = useRef<(HTMLAnchorElement | null)[]>([]);
   const homeRef = useRef<HTMLAnchorElement>(null);
+  const moreMeasureRef = useRef<HTMLAnchorElement>(null);
 
-  // Calculate visible items based on container width
-  useEffect(() => {
-    if (!containerRef.current || navList.length === 0) return;
+  const updateVisibleCount = useCallback(() => {
+    if (!containerRef.current) {
+      return;
+    }
 
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const containerWidth = entry.contentRect.width;
-      
-      if (containerWidth <= 0) return;
+    const containerWidth = containerRef.current.getBoundingClientRect().width;
+    if (containerWidth <= 0) {
+      return;
+    }
 
-      const homeWidth = homeRef.current?.getBoundingClientRect().width || 64;
-      // Get the actual gap from computed style if possible, or use a reasonable estimate
-      const computedGap = window.getComputedStyle(containerRef.current).gap;
-      const gap = parseInt(computedGap) || 24; 
-      const moreBtnBuffer = 100; // More button + icon + padding
-      
-      let currentWidth = homeWidth;
-      let count = 0;
+    const measureElement = navMeasureRef.current;
+    const navGap = measureElement
+      ? parseFloat(window.getComputedStyle(measureElement).gap || "0") || 0
+      : 0;
+    const homeWidth = homeRef.current?.getBoundingClientRect().width || 0;
+    const itemWidths = navList.map((_, index) => itemsRef.current[index]?.getBoundingClientRect().width || 0);
+    const measuredMoreWidth = moreMeasureRef.current?.getBoundingClientRect().width || 72;
 
-      for (let i = 0; i < navList.length; i++) {
-        const itemWidth = itemsRef.current[i]?.getBoundingClientRect().width || 0;
-        if (itemWidth === 0) continue;
+    const totalItemsWidth = itemWidths.reduce((sum, width) => sum + width, 0);
+    const totalWidth = homeWidth + (navList.length > 0 ? navGap : 0) + totalItemsWidth + navGap * navList.length;
 
-        const isLast = i === navList.length - 1;
-        const spaceNeeded = gap + itemWidth + (isLast ? 0 : moreBtnBuffer);
+    if (totalWidth <= containerWidth) {
+      setVisibleCount(navList.length);
+      setNavReady(true);
+      return;
+    }
 
-        if (currentWidth + spaceNeeded > containerWidth) {
-          break;
-        }
-        
-        currentWidth += itemWidth + gap;
-        count++;
+    let usedWidth = homeWidth;
+    let count = 0;
+    for (let i = 0; i < itemWidths.length; i++) {
+      const nextWidth = itemWidths[i];
+      const reserveMoreWidth = measuredMoreWidth + navGap;
+      const projectedWidth = usedWidth + navGap + nextWidth + reserveMoreWidth;
+      if (projectedWidth > containerWidth) {
+        break;
       }
-      
-      setVisibleCount(count);
+
+      usedWidth += navGap + nextWidth;
+      count++;
+    }
+
+    setVisibleCount(count);
+    setNavReady(true);
+  }, [navList]);
+
+  useLayoutEffect(() => {
+    setNavReady(false);
+    itemsRef.current = [];
+    updateVisibleCount();
+
+    if (!containerRef.current) {
+      return;
+    }
+
+    const observer = new ResizeObserver(() => {
+      updateVisibleCount();
     });
 
     observer.observe(containerRef.current);
     return () => observer.disconnect();
-  }, [navList.length]);
+  }, [updateVisibleCount]);
 
   const visibleNavs = navList.slice(0, visibleCount);
   const overflowNavs = navList.slice(visibleCount);
@@ -215,13 +239,12 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
         {/* Navigation Area - Dynamic & Flexible */}
         <div className={styles.navArea} ref={containerRef}>
-          <nav className={styles.navLinks}>
+          <nav className={`${styles.navLinks} ${navReady ? styles.navReady : styles.navPending}`}>
             <a onClick={() => router.push("/")} className={styles.navItem} ref={homeRef}>
               首页
             </a>
             
-            {/* Hidden items for width measurement */}
-            <div style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', display: 'flex', gap: '24px', opacity: 0 }}>
+            <div ref={navMeasureRef} className={styles.navMeasure} aria-hidden>
               {navList.map((nav, i) => (
                 <a 
                   key={`measure-${nav.id}`} 
@@ -231,6 +254,9 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                   {nav.name}
                 </a>
               ))}
+              <a ref={moreMeasureRef} className={styles.navItem}>
+                更多 <DownOutlined style={{ fontSize: 12, marginLeft: 4 }} />
+              </a>
             </div>
 
             {visibleNavs.map((nav) => (

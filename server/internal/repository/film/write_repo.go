@@ -29,7 +29,7 @@ func searchInfoContentKeyUpsert() clause.OnConflict {
 func movieSourceMappingUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "source_id"}, {Name: "source_mid"}},
-		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at", "deleted_at"}),
 	}
 }
 
@@ -159,7 +159,7 @@ func buildSearchInfosFromDetails(sourceID string, details []model.MovieDetail) (
 func movieDetailInfoUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "mid"}},
-		DoUpdates: clause.AssignmentColumns([]string{"source_id", "content", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"source_id", "content", "updated_at", "deleted_at"}),
 	}
 }
 
@@ -552,32 +552,27 @@ func HandleSearchTagsTx(tx *gorm.DB, allTags string, tagType string, pid int64, 
 	return saveErr
 }
 
-func resolveFallbackCid(pid int64, cName string) int64 {
-	if pid <= 0 {
-		return 0
+func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCategory {
+	result := resolvedSearchCategory{CName: strings.TrimSpace(cName)}
+	if cid > 0 {
+		result.Cid = cid
 	}
-	cName = strings.TrimSpace(cName)
-	if cName == "" {
-		return 0
+	if result.Cid > 0 {
+		result.Pid = support.GetRootId(result.Cid)
 	}
-	if cName == support.GetMainCategoryName(pid) {
-		return 0
+	if result.Pid == 0 && pid > 0 {
+		result.Pid = pid
 	}
-
-	var sub model.Category
-	if err := db.Mdb.Where("pid = ? AND name = ?", pid, cName).First(&sub).Error; err == nil && sub.Id > 0 {
-		return sub.Id
+	if result.Pid > 0 && result.Cid > 0 && result.CName == "" {
+		result.CName = support.GetCategoryNameById(result.Cid)
 	}
-
-	sub = model.Category{Pid: pid, Name: cName, StableKey: support.BuildCategoryStableKey(pid, cName), Show: true}
-	if err := db.Mdb.Where("pid = ? AND name = ?", pid, cName).FirstOrCreate(&sub).Error; err == nil && sub.Id > 0 {
-		if sub.StableKey == "" {
-			db.Mdb.Model(&model.Category{}).Where("id = ?", sub.Id).Update("stable_key", support.BuildCategoryStableKey(pid, sub.Name))
-		}
-		markCategoryChanged()
-		return sub.Id
+	if result.Pid > 0 && result.PKey == "" {
+		result.PKey = support.GetCategoryStableKeyByID(result.Pid)
 	}
-	return 0
+	if result.Cid > 0 {
+		result.CKey = support.GetCategoryStableKeyByID(result.Cid)
+	}
+	return result
 }
 
 type resolvedSearchCategory struct {
@@ -598,7 +593,11 @@ type normalizedSearchMeta struct {
 }
 
 func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSearchCategory {
-	result := resolvedSearchCategory{CName: detail.CName}
+	if strings.TrimSpace(sourceId) == "manual" {
+		return resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
+	}
+
+	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
 	result.Cid = support.GetLocalCategoryId(sourceId, detail.Cid)
 	if result.Cid > 0 {
 		result.Pid = support.GetRootId(result.Cid)
@@ -606,12 +605,14 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if result.Pid == 0 {
 		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, detail.Pid))
 	}
-	if result.Pid == 0 {
-		standardName := support.GetCategoryBucketRole(detail.CName)
-		result.Pid = support.GetStandardIdByRole(standardName)
+	if result.Pid > 0 && result.Cid == 0 && result.CName != "" {
+		var category model.Category
+		if err := db.Mdb.Where("pid = ? AND name = ?", result.Pid, result.CName).First(&category).Error; err == nil {
+			result.Cid = category.Id
+		}
 	}
-	if result.Cid == 0 {
-		result.Cid = resolveFallbackCid(result.Pid, detail.CName)
+	if result.Pid > 0 && result.CName == "" {
+		result.CName = support.GetCategoryNameById(result.Pid)
 	}
 	if result.Pid > 0 {
 		result.PKey = support.GetCategoryStableKeyByID(result.Pid)

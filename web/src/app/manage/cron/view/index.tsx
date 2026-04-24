@@ -15,6 +15,7 @@ import { EditOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../components/page-shell";
 
 interface CronTask {
   id: string;
@@ -157,7 +158,11 @@ export default function CronManagePageView() {
   ];
 
   return (
-    <div>
+    <ManagePageShell
+      eyebrow="采集中心"
+      title="计划任务"
+      description="统一维护后台自动更新、采集重试和清理类计划任务。"
+    >
       <Table
         columns={columns}
         dataSource={taskList}
@@ -174,9 +179,6 @@ export default function CronManagePageView() {
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={() => form.validateFields().then(onEditFinish)}
-        okButtonProps={{
-          style: { background: "#9b49e7", borderColor: "#9b49e7" },
-        }}
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" hidden>
@@ -185,11 +187,11 @@ export default function CronManagePageView() {
           <Form.Item label="任务标识" name="id">
             <Input disabled />
           </Form.Item>
-          <Form.Item label="执行时间" name="spec" rules={[{ required: true, message: "请输入Cron表达式" }]}>
+          <Form.Item label="执行时间" name="spec" rules={[{ required: true, message: "请输入Cron表达式" }]}> 
             <Input placeholder="例如: 0 */20 * * * ? (每20分钟执行一次)" />
           </Form.Item>
         </Form>
       </Modal>
-    </div>
+    </ManagePageShell>
   );
 }

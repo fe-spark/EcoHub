@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+  useMemo,
+} from "react";
 import {
   Table,
   Tag,
@@ -17,6 +23,7 @@ import {
   Radio,
   Tooltip,
   Alert,
+  Divider,
 } from "antd";
 import {
   PlusOutlined,
@@ -30,6 +37,7 @@ import {
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../components/page-shell";
 import styles from "./index.module.less";
 
 interface FilmSource {
@@ -80,9 +88,48 @@ export default function CollectManagePageView() {
       batchOptions.map((o) => ({
         ...o,
         grade: siteList.find((s) => s.id === o.id)?.grade ?? 1,
+        state: siteList.find((s) => s.id === o.id)?.state ?? false,
       })),
     [batchOptions, siteList],
   );
+
+  const enabledBatchIds = useMemo(
+    () =>
+      enrichedBatchOptions.filter((item) => item.state).map((item) => item.id),
+    [enrichedBatchOptions],
+  );
+
+  const batchSelectionMap = useMemo(() => new Set(batchIds), [batchIds]);
+
+  const stats = useMemo(
+    () => ({
+      total: siteList.length,
+      enabled: siteList.filter((item) => item.state).length,
+      running: activeCollectIds.length,
+      masters: siteList.filter((item) => item.grade === 0).length,
+    }),
+    [siteList, activeCollectIds],
+  );
+
+  const selectedBatchSites = useMemo(
+    () => enrichedBatchOptions.filter((item) => batchSelectionMap.has(item.id)),
+    [enrichedBatchOptions, batchSelectionMap],
+  );
+
+  const selectedRunningNames = useMemo(
+    () =>
+      selectedBatchSites
+        .filter((item) => activeCollectIds.includes(item.id))
+        .map((item) => item.name),
+    [selectedBatchSites, activeCollectIds],
+  );
+
+  const batchCheckAll =
+    enrichedBatchOptions.length > 0 &&
+    batchIds.length === enrichedBatchOptions.length;
+
+  const batchIndeterminate =
+    batchIds.length > 0 && batchIds.length < enrichedBatchOptions.length;
 
   const getCollectList = useCallback(async () => {
     setLoading(true);
@@ -227,6 +274,26 @@ export default function CollectManagePageView() {
     if (resp.code === 0) setBatchOptions(resp.data || []);
   };
 
+  const selectAllBatchSites = () => {
+    setBatchIds(enrichedBatchOptions.map((item) => item.id));
+  };
+
+  const clearBatchSelection = () => {
+    setBatchIds([]);
+  };
+
+  const selectEnabledBatchSites = () => {
+    setBatchIds(enabledBatchIds);
+  };
+
+  const invertBatchSelection = () => {
+    setBatchIds(
+      enrichedBatchOptions
+        .filter((item) => !batchSelectionMap.has(item.id))
+        .map((item) => item.id),
+    );
+  };
+
   const startBatchCollect = async () => {
     if (batchIds.length === 0) {
       message.warning("请至少选择一个站点");
@@ -341,7 +408,9 @@ export default function CollectManagePageView() {
       title: "采集间隔",
       dataIndex: "interval",
       align: "center",
-      render: (v: number) => <Tag color="cyan">{v > 0 ? `${v} ms` : "无限制"}</Tag>,
+      render: (v: number) => (
+        <Tag color="cyan">{v > 0 ? `${v} ms` : "无限制"}</Tag>
+      ),
     },
     {
       title: "采集方式",
@@ -372,32 +441,17 @@ export default function CollectManagePageView() {
         const isRunning = activeCollectIds.includes(record.id);
 
         const renderStartBtn = () => {
-          return isRunning ? (
-            <Tooltip title="截断并重新开始">
-              <Popconfirm
-                title="该站点正在采集中"
-                description="是否截断当前任务并重新开始？"
-                okText="截断重采"
-                cancelText="取消"
-                onConfirm={() => startTask(record)}
-              >
-                <Button
-                  type="primary"
-                  icon={<PoweroffOutlined />}
-                  shape="circle"
-                  size="small"
-                  style={{ background: "var(--ant-color-warning)", borderColor: "var(--ant-color-warning)" }}
-                />
-              </Popconfirm>
-            </Tooltip>
-          ) : (
+          return isRunning ? null : (
             <Tooltip title="开始采集">
               <Button
                 type="primary"
                 icon={<PoweroffOutlined />}
                 shape="circle"
                 size="small"
-                style={{ background: "var(--ant-color-success)", borderColor: "var(--ant-color-success)" }}
+                style={{
+                  background: "var(--ant-color-success)",
+                  borderColor: "var(--ant-color-success)",
+                }}
                 onClick={() => startTask(record)}
               />
             </Tooltip>
@@ -426,8 +480,16 @@ export default function CollectManagePageView() {
               size="small"
               onClick={() => openEditDialog(record.id)}
             />
-            <Popconfirm title="确认删除此采集站？" onConfirm={() => delSource(record.id)}>
-              <Button danger icon={<DeleteOutlined />} shape="circle" size="small" />
+            <Popconfirm
+              title="确认删除此采集站？"
+              onConfirm={() => delSource(record.id)}
+            >
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                shape="circle"
+                size="small"
+              />
             </Popconfirm>
           </Space>
         );
@@ -443,7 +505,11 @@ export default function CollectManagePageView() {
       <Form.Item label="接口地址" name="uri" rules={[{ required: true }]}>
         <Input placeholder="资源采集链接" />
       </Form.Item>
-      <Form.Item label="间隔时长" name="interval" tooltip="单次请求的时间间隔, 单位/ms">
+      <Form.Item
+        label="间隔时长"
+        name="interval"
+        tooltip="单次请求的时间间隔, 单位/ms"
+      >
         <InputNumber min={0} step={100} style={{ width: "100%" }} />
       </Form.Item>
       <Form.Item label="站点类型" name="grade">
@@ -457,7 +523,11 @@ export default function CollectManagePageView() {
         </Radio.Group>
       </Form.Item>
       <Form.Item label="图片同步" name="syncPictures" valuePropName="checked">
-        <Switch checkedChildren="开启" unCheckedChildren="关闭" disabled={currentGrade === 1} />
+        <Switch
+          checkedChildren="开启"
+          unCheckedChildren="关闭"
+          disabled={currentGrade === 1}
+        />
       </Form.Item>
       <Form.Item label="是否启用" name="state" valuePropName="checked">
         <Switch checkedChildren="启用" unCheckedChildren="禁用" />
@@ -466,54 +536,92 @@ export default function CollectManagePageView() {
   );
 
   return (
-    <div className={styles.container}>
-      <Table
-        columns={columns}
-        dataSource={siteList}
-        rowKey="id"
-        loading={loading}
-        bordered
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-      />
-
-      <div className={styles.toolbar}>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
-          添加采集站
-        </Button>
-        <Tooltip title="支持全站点选择；执行时所有站点将并行采集">
+    <ManagePageShell
+      eyebrow="采集中心"
+      title="采集站点"
+      description="统一管理主站、附属站和批量采集流程，随时查看站点状态与任务运行情况。"
+      actions={
+        <div className={styles.heroActions}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
+            添加采集站
+          </Button>
           <Button
             type="primary"
             icon={<SendOutlined />}
-            style={{ background: "var(--ant-color-success)", borderColor: "var(--ant-color-success)" }}
+            className={styles.successButton}
             onClick={openBatchCollect}
           >
             一键采集
           </Button>
-        </Tooltip>
-        <Popconfirm
-          title="一键终止所有采集"
-          description="确定要强制终止当前所有正在运行的采集任务吗？这可能导致部分数据不完整。"
-          onConfirm={submitStopAllTasks}
-          okText="确认终止"
-          cancelText="取消"
-          okButtonProps={{ danger: true }}
-          disabled={activeCollectIds.length === 0}
-        >
-          <Button
-            type="primary"
-            danger
-            icon={<PauseOutlined />}
+          <Popconfirm
+            title="一键终止所有采集"
+            description="确定要强制终止当前所有正在运行的采集任务吗？这可能导致部分数据不完整。"
+            onConfirm={submitStopAllTasks}
+            okText="确认终止"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
             disabled={activeCollectIds.length === 0}
           >
-            一键终止
+            <Button
+              type="primary"
+              danger
+              icon={<PauseOutlined />}
+              disabled={activeCollectIds.length === 0}
+            >
+              一键终止
+            </Button>
+          </Popconfirm>
+          <Button danger icon={<DeleteOutlined />} onClick={() => setClearOpen(true)}>
+            清空数据
           </Button>
-        </Popconfirm>
-        <Button danger icon={<DeleteOutlined />} onClick={() => setClearOpen(true)}>
-          清空数据
-        </Button>
-      </div>
+        </div>
+      }
+      extra={
+        <div className={styles.statsGrid}>
+          <div className={styles.statCard}>
+            <span className={styles.statLabel}>站点总数</span>
+            <strong className={styles.statValue}>{stats.total}</strong>
+            <span className={styles.statHint}>当前已登记的全部采集源</span>
+          </div>
+          <div className={styles.statCard}>
+            <span className={styles.statLabel}>启用站点</span>
+            <strong className={styles.statValue}>{stats.enabled}</strong>
+            <span className={styles.statHint}>可参与日常采集的站点</span>
+          </div>
+          <div className={styles.statCard}>
+            <span className={styles.statLabel}>运行中任务</span>
+            <strong className={styles.statValue}>{stats.running}</strong>
+            <span className={styles.statHint}>重复发起会被后端直接跳过</span>
+          </div>
+          <div className={styles.statCard}>
+            <span className={styles.statLabel}>主站数量</span>
+            <strong className={styles.statValue}>{stats.masters}</strong>
+            <span className={styles.statHint}>主站会优先承担分类映射同步</span>
+          </div>
+        </div>
+      }
+      panelClassName={styles.tablePanel}
+    >
+      <section className={styles.tableSection}>
+        <div className={styles.sectionHeader}>
+          <div>
+            <h3 className={styles.sectionTitle}>采集站列表</h3>
+            <p className={styles.sectionDesc}>
+              可逐站控制采集方式、启用状态与运行操作。
+            </p>
+          </div>
+        </div>
+        <Table
+          columns={columns}
+          dataSource={siteList}
+          rowKey="id"
+          loading={loading}
+          bordered
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+        />
+      </section>
 
       <Modal
         title="添加采集站点"
@@ -565,54 +673,121 @@ export default function CollectManagePageView() {
         onCancel={() => setBatchOpen(false)}
         onOk={startBatchCollect}
         okText="确认执行"
+        width={840}
       >
-        {(() => {
-          const activeNames = enrichedBatchOptions
-            .filter((o) => batchIds.includes(o.id) && activeCollectIds.includes(o.id))
-            .map((o) => o.name);
-          return activeNames.length > 0 ? (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginBottom: 12 }}
-              message="以下站点正在采集中，执行后将截断并重新开始"
-              description={activeNames.join("、")}
-            />
-          ) : null;
-        })()}
-        <Form layout="vertical">
-          <Form.Item label="执行站点">
-            <Checkbox.Group value={batchIds} onChange={(v) => setBatchIds(v as string[])}>
-              <Space direction="vertical">
-                {enrichedBatchOptions.map((o) => (
-                  <Checkbox key={o.id} value={o.id}>
-                    <Space size={4}>
-                      <Tag color={o.grade === 0 ? "green" : "default"} style={{ marginRight: 0 }}>
-                        {o.grade === 0 ? "主站" : "附属站"}
-                      </Tag>
-                      {o.name}
-                      {activeCollectIds.includes(o.id) && (
-                        <Tag color="processing" icon={<LoadingOutlined />} style={{ marginLeft: 4 }}>
-                          采集中
+        {selectedRunningNames.length > 0 && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="以下站点正在采集中"
+            description={`${selectedRunningNames.join("、")}；重复启动会被跳过，不会中断当前任务。`}
+          />
+        )}
+
+        <div className={styles.batchPanel}>
+          <div className={styles.batchPanelHeader}>
+            <div>
+              <div className={styles.sectionTitle}>选择执行站点</div>
+              <p className={styles.sectionDesc}>
+                支持全选、仅选启用站点和反选，适合快速发起大批量采集。
+              </p>
+            </div>
+            <div className={styles.batchMeta}>
+              <span>已选 {batchIds.length} 个</span>
+              <span>启用 {enabledBatchIds.length} 个</span>
+              <span>运行中 {activeCollectIds.length} 个</span>
+            </div>
+          </div>
+
+          <div className={styles.batchToolbar}>
+            <Checkbox
+              checked={batchCheckAll}
+              indeterminate={batchIndeterminate}
+              onChange={(e) => {
+                if (e.target.checked) {
+                  selectAllBatchSites();
+                  return;
+                }
+                clearBatchSelection();
+              }}
+            >
+              全选站点
+            </Checkbox>
+            <Space wrap>
+              <Button size="small" onClick={selectEnabledBatchSites}>
+                仅选启用站点
+              </Button>
+              <Button size="small" onClick={invertBatchSelection}>
+                反选
+              </Button>
+              <Button size="small" onClick={clearBatchSelection}>
+                清空选择
+              </Button>
+            </Space>
+          </div>
+
+          <Checkbox.Group
+            value={batchIds}
+            onChange={(v) => setBatchIds(v as string[])}
+          >
+            <div className={styles.batchSiteGrid}>
+              {enrichedBatchOptions.map((o) => {
+                const isRunning = activeCollectIds.includes(o.id);
+                const isChecked = batchSelectionMap.has(o.id);
+                return (
+                  <label
+                    key={o.id}
+                    className={`${styles.batchSiteCard} ${isChecked ? styles.batchSiteCardSelected : ""}`}
+                  >
+                    <div className={styles.batchSiteMain}>
+                      <Checkbox value={o.id}>{o.name}</Checkbox>
+                      <div className={styles.batchSiteTags}>
+                        <Tag
+                          color={o.grade === 0 ? "green" : "default"}
+                          style={{ marginRight: 0 }}
+                        >
+                          {o.grade === 0 ? "主站" : "附属站"}
                         </Tag>
-                      )}
-                    </Space>
-                  </Checkbox>
-                ))}
-              </Space>
-            </Checkbox.Group>
-          </Form.Item>
-          <Form.Item label="采集时长">
-            <Select
-              value={batchTime}
-              onChange={setBatchTime}
-              options={collectDuration.map((d) => ({
-                label: d.label,
-                value: d.time,
-              }))}
-            />
-          </Form.Item>
-        </Form>
+                        <Tag
+                          color={o.state ? "success" : "error"}
+                          style={{ marginRight: 0 }}
+                        >
+                          {o.state ? "已启用" : "已停用"}
+                        </Tag>
+                        {isRunning && (
+                          <Tag
+                            color="processing"
+                            icon={<LoadingOutlined />}
+                            style={{ marginRight: 0 }}
+                          >
+                            采集中
+                          </Tag>
+                        )}
+                      </div>
+                    </div>
+                    <div className={styles.batchSiteSub}>{o.id}</div>
+                  </label>
+                );
+              })}
+            </div>
+          </Checkbox.Group>
+
+          <Divider style={{ margin: "20px 0 16px" }} />
+
+          <Form layout="vertical">
+            <Form.Item label="采集时长" style={{ marginBottom: 0 }}>
+              <Select
+                value={batchTime}
+                onChange={setBatchTime}
+                options={collectDuration.map((d) => ({
+                  label: d.label,
+                  value: d.time,
+                }))}
+              />
+            </Form.Item>
+          </Form>
+        </div>
       </Modal>
 
       <Modal
@@ -632,6 +807,6 @@ export default function CollectManagePageView() {
           onChange={(e) => setPassword(e.target.value)}
         />
       </Modal>
-    </div>
+    </ManagePageShell>
   );
 }
