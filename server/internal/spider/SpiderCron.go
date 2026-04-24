@@ -212,7 +212,8 @@ func executeTask(ft model.FilmCollectTask) {
 		}
 		n := filmrepo.CleanOrphanPlaylists()
 		m := filmrepo.CleanEmptyFilms()
-		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录和 %d 条空记录\n", n, m)
+		x := filmrepo.CleanSearchWithoutDetail()
+		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
 	default:
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
 	}

@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"server/internal/model"
 )
@@ -100,7 +101,67 @@ func ParseSearchTagYear(value string) (int, bool) {
 	return year, true
 }
 
+func isAbnormalSearchTagItem(tagType string, item model.SearchTagItem) bool {
+	value := strings.TrimSpace(item.Value)
+	name := strings.TrimSpace(item.Name)
+	if value == "" || name == "" {
+		return true
+	}
+
+	switch {
+	case strings.EqualFold(tagType, "Year"):
+		_, ok := ParseSearchTagYear(value)
+		return !ok
+	case strings.EqualFold(tagType, "Area"):
+		return isAbnormalTextTagValue(value, 2, 8)
+	case strings.EqualFold(tagType, "Language"):
+		return isAbnormalTextTagValue(value, 1, 10)
+	case strings.EqualFold(tagType, "Plot"):
+		return isAbnormalTextTagValue(value, 2, 8)
+	default:
+		return false
+	}
+}
+
+func isAbnormalTextTagValue(value string, minLen int, maxLen int) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true
+	}
+
+	runes := []rune(value)
+	if len(runes) < minLen || len(runes) > maxLen {
+		return true
+	}
+
+	for _, r := range runes {
+		if unicode.IsDigit(r) || unicode.IsLetter(r) {
+			return true
+		}
+		if strings.ContainsRune(",|/\\_+&.=()[]{}<>-", r) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func SplitSearchTagItems(tagType string, items []model.SearchTagItem) ([]model.SearchTagItem, []model.SearchTagItem) {
+	normalItems := make([]model.SearchTagItem, 0, len(items))
+	abnormalItems := make([]model.SearchTagItem, 0)
+	for _, item := range items {
+		if isAbnormalSearchTagItem(tagType, item) {
+			abnormalItems = append(abnormalItems, item)
+			continue
+		}
+		normalItems = append(normalItems, item)
+	}
+	return normalItems, abnormalItems
+}
+
 func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string) []map[string]string {
+	normalItems, abnormalItems := SplitSearchTagItems(tagType, items)
+	items = normalItems
 	if strings.EqualFold(tagType, "Year") {
 		items = SortYearSearchTagItems(items)
 	}
@@ -111,6 +172,7 @@ func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky st
 	}
 	displayItems := AppendStickySearchTag(items, sticky, topCount)
 	hasMore := len(items) > SearchTagDisplayLimit
+	hasOthers := hasMore || len(abnormalItems) > 0
 
 	tagStrs := make([]string, 0, len(displayItems))
 	for _, item := range displayItems {
@@ -118,7 +180,7 @@ func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky st
 	}
 
 	formatted := HandleTagStr(tagType, true, tagStrs...)
-	if hasMore {
+	if hasOthers {
 		formatted = append(formatted, map[string]string{"Name": model.TagOthersName, "Value": model.TagOthersValue})
 	}
 	return formatted

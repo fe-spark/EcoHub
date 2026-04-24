@@ -167,6 +167,34 @@ func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
 	dto.SuccessOnlyMsg("影片分类信息更新成功", c)
 }
 
+func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
+	var req struct {
+		Children []*model.CategoryTree `json:"children"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("保存失败, 请求参数异常", c)
+		return
+	}
+	if len(req.Children) == 0 {
+		dto.Failed("保存失败, 分类结构不能为空", c)
+		return
+	}
+	if err := service.FilmSvc.SaveClassTree(req.Children); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("分类排序与层级已更新", c)
+}
+
+// CollectFilmClass 重置当前分类并重新获取主站原始分类
+func (h *FilmHandler) CollectFilmClass(c *gin.Context) {
+	if err := service.SpiderSvc.FilmClassCollect(); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("分类已重置为主站原始分类", c)
+}
+
 // DelFilmClass 删除指定ID对应的影片分类
 func (h *FilmHandler) DelFilmClass(c *gin.Context) {
 	var req struct {

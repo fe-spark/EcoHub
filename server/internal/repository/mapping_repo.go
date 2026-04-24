@@ -1,9 +1,6 @@
 package repository
 
-import (
-	"server/internal/model"
-	"server/internal/repository/support"
-)
+import "server/internal/repository/support"
 
 // InitMappingEngine 从数据库加载映射规则并初始化内存缓存
 func InitMappingEngine() {
@@ -33,10 +30,6 @@ func GetAttributeMapping() map[string]string {
 
 func GetPlotMapping() map[string]string {
 	return support.GetPlotMapping()
-}
-
-func GetMainCategoriesFromCache() []model.Category {
-	return support.GetMainCategoriesFromCache()
 }
 
 func GetCategoryNameFromCache(id int64) (string, bool) {

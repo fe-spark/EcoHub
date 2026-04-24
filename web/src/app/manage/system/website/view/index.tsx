@@ -1,13 +1,12 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Form, Input, Switch, Button, Typography, Spin, Space, Card, Row, Col } from "antd";
+import { Form, Input, Switch, Button, Spin, Space, Card, Row, Col } from "antd";
 import { SettingOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 import styles from "./index.module.less";
-
-const { Title } = Typography;
 
 export default function SiteConfigPageView() {
   const [form] = Form.useForm();
@@ -60,13 +59,11 @@ export default function SiteConfigPageView() {
   }, [getBasicInfo]);
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <Title level={4} className={styles.title}>
-            网站基础参数配置
-          </Title>
-        </div>
+    <ManagePageShell
+      eyebrow="系统设置"
+      title="网站配置"
+      description="集中维护站点名称、描述、Logo 与站点可用状态等基础信息。"
+      actions={
         <Space size="middle">
           <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
             重置
@@ -75,7 +72,9 @@ export default function SiteConfigPageView() {
             更新配置
           </Button>
         </Space>
-      </div>
+      }
+      panelClassName={styles.formPanel}
+    >
 
       <Spin spinning={fetching} description="正在加载网站配置...">
         <Form form={form} layout="vertical" className={`${styles.form} ${styles.formCompact}`}>
@@ -134,6 +133,6 @@ export default function SiteConfigPageView() {
           </Card>
         </Form>
       </Spin>
-    </div>
+    </ManagePageShell>
   );
 }

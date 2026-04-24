@@ -1,0 +1,99 @@
+.dashboard {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.welcomeCard,
+.guideCard {
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.welcomeCard {
+  background: linear-gradient(135deg, rgb(22 119 255 / 8%), transparent 55%),
+    var(--ant-color-bg-container);
+}
+
+.tag {
+  width: fit-content;
+  margin: 0;
+}
+
+.sectionTitle,
+.cardTitle {
+  margin: 0 !important;
+}
+
+.mutedText {
+  color: var(--ant-color-text-secondary);
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.cardHeader {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.cardIcon,
+.entryIcon {
+  color: var(--ant-color-primary);
+  font-size: 18px;
+  margin-top: 2px;
+}
+
+.stepList,
+.entryList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.stepItem,
+.entryItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 14px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-fill-quaternary);
+}
+
+.stepIndex {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--ant-color-primary-bg);
+  color: var(--ant-color-primary);
+  font-size: 13px;
+  font-weight: 700;
+  flex: none;
+}
+
+.stepTitle,
+.entryTitle {
+  color: var(--ant-color-text);
+  font-size: 15px;
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.stepDesc {
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 640px) {
+  .stepItem,
+  .entryItem {
+    padding: 12px;
+  }
+}

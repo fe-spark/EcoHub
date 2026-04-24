@@ -23,9 +23,10 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../components/page-shell";
 import styles from "./index.module.less";
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface PhotoItem {
   ID: number;
@@ -120,8 +121,27 @@ export default function FileUploadPageView() {
   };
 
   return (
-    <div
-      className={styles.container}
+    <ManagePageShell
+      eyebrow="图片素材"
+      title="图片素材"
+      description="集中管理全站影视海报、封面素材与图库资源，支持拖拽到页面区域直接上传。"
+      extra={
+        <div className={styles.headerSection}>
+          <div className={styles.titleArea}>
+            <Text type="secondary">
+              <FileImageOutlined style={{ marginRight: 6 }} />
+              管理全站影视海报、封面素材与图库资源 (支持拖拽至内容区上传)
+            </Text>
+          </div>
+          <div className={styles.stats}>
+            <Tag color="processing">共计 {page.total} 张图片</Tag>
+          </div>
+        </div>
+      }
+      panelClassName={styles.galleryPanel}
+    >
+      <div
+        className={styles.container}
       onDragEnter={handleDragEnter}
       onDragOver={(e) => {
         e.preventDefault();
@@ -130,20 +150,7 @@ export default function FileUploadPageView() {
       }}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-    >
-      <div className={styles.headerSection}>
-        <div className={styles.titleArea}>
-          <Title level={4}>内容库管理</Title>
-          <Text type="secondary">
-            <FileImageOutlined style={{ marginRight: 6 }} />
-            管理全站影视海报、封面素材与图库资源 (支持拖拽至内容区上传)
-          </Text>
-        </div>
-        <div className={styles.stats}>
-          <Tag color="processing">共计 {page.total} 张图片</Tag>
-        </div>
-      </div>
-
+      >
       <div className={`${styles.dropOverlay} ${dragging ? styles.dropOverlayActive : ""}`}>
         <Upload customRequest={customUpload} multiple showUploadList={false} style={{ width: "100%", height: "100%" }}>
           <div style={{ pointerEvents: "none" }}>
@@ -228,6 +235,7 @@ export default function FileUploadPageView() {
           </div>
         )}
       </div>
-    </div>
+      </div>
+    </ManagePageShell>
   );
 }

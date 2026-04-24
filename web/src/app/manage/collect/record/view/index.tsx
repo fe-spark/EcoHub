@@ -21,6 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -196,11 +197,15 @@ export default function FailureRecordPageView() {
   ];
 
   return (
-    <div className={styles.container}>
-      <div className={styles.filterBar}>
-        <Select
-          placeholder="采集来源"
-          value={params.originId || undefined}
+    <ManagePageShell
+      eyebrow="采集中心"
+      title="失败记录"
+      description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
+      extra={
+        <div className={styles.filterBar}>
+          <Select
+            placeholder="采集来源"
+            value={params.originId || undefined}
           onChange={(v) => setParams({ ...params, originId: v })}
           options={options.origin?.map((o: any) => ({
             label: o.name,
@@ -236,7 +241,10 @@ export default function FailureRecordPageView() {
         <Button type="primary" onClick={() => getRecords()}>
           查询
         </Button>
-      </div>
+        </div>
+      }
+      panelClassName={styles.tablePanel}
+    >
 
       <Table
         columns={columns}
@@ -287,6 +295,6 @@ export default function FailureRecordPageView() {
           }}
         />
       </div>
-    </div>
+    </ManagePageShell>
   );
 }

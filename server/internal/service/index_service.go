@@ -28,8 +28,8 @@ func (i *IndexService) IndexPage() map[string]any {
 	}
 
 	Info := make(map[string]any)
-	tree := model.CategoryTree{Id: 0, Name: "分类信息"}
-	sysTree := repository.GetActiveCategoryTree()
+	tree := model.CategoryTree{Id: 0, Name: "分类信息", Children: make([]*model.CategoryTree, 0)}
+	sysTree := repository.GetCategoryTree()
 	for _, c := range sysTree.Children {
 		if c.Show {
 			tree.Children = append(tree.Children, c)
@@ -72,26 +72,32 @@ func (i *IndexService) IndexPage() map[string]any {
 }
 
 // GetFilmDetail 影片详情信息页面处理
-func (i *IndexService) GetFilmDetail(id int) model.MovieDetailVo {
+func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	search := filmrepo.GetSearchInfoById(int64(id))
 	if search == nil {
-		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
+		return model.MovieDetailVo{}, nil
 	}
 	movieDetail := filmrepo.GetMovieDetail(search.Cid, search.Mid)
 	if movieDetail == nil {
-		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
+		if err := filmrepo.DelFilmSearch(search.Mid); err != nil {
+			return model.MovieDetailVo{}, err
+		}
+		return model.MovieDetailVo{}, nil
 	}
 	res := model.MovieDetailVo{MovieDetail: *movieDetail}
 	res.List = multipleSource(search, movieDetail)
-	return res
+	return res, nil
 }
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
 func (i *IndexService) GetCategoryInfo() map[string]any {
 	nav := make(map[string]any)
-	tree := repository.GetActiveCategoryTree()
+	tree := repository.GetCategoryTree()
 
 	for _, t := range tree.Children {
+		if !t.Show {
+			continue
+		}
 		key := strings.ToLower(strings.TrimSpace(t.Alias))
 		if key == "" {
 			key = strings.ToLower(strings.TrimSpace(t.Name))
@@ -106,7 +112,7 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 
 // GetNavCategory 获取导航分类信息
 func (i *IndexService) GetNavCategory() []*model.Category {
-	tree := repository.GetActiveCategoryTree()
+	tree := repository.GetCategoryTree()
 	cl := make([]*model.Category, 0)
 	for _, c := range tree.Children {
 		if c.Show {

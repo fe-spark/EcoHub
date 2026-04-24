@@ -195,7 +195,7 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		if len(playlists) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "deleted_at"}),
 			}).Create(&playlists).Error; err != nil {
 				return err
 			}

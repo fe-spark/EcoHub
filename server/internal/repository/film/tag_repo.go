@@ -12,6 +12,54 @@ import (
 	"server/internal/repository/support"
 )
 
+func hasEffectiveSearchOptions(options []map[string]string) bool {
+	for _, option := range options {
+		if strings.TrimSpace(option["Value"]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func buildCategorySearchOptions(pid int64, sticky string) []map[string]string {
+	pid = support.ResolveCategoryID(pid)
+	formatted := HandleTagStr("Category", true)
+	if pid <= 0 {
+		return formatted
+	}
+
+	var categories []model.Category
+	db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&categories)
+	for _, category := range categories {
+		formatted = append(formatted, map[string]string{
+			"Name":  category.Name,
+			"Value": fmt.Sprint(category.Id),
+		})
+	}
+
+	if sticky != "" {
+		stickyValue := strings.TrimSpace(sticky)
+		exists := false
+		for _, item := range formatted {
+			if item["Value"] == stickyValue {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			var category model.Category
+			if err := db.Mdb.Where("id = ? AND pid = ? AND `show` = ?", stickyValue, pid, true).First(&category).Error; err == nil {
+				formatted = append(formatted, map[string]string{
+					"Name":  category.Name,
+					"Value": fmt.Sprint(category.Id),
+				})
+			}
+		}
+	}
+
+	return formatted
+}
+
 func GetTagsByTitle(pid int64, tagType string) []map[string]string {
 	pid = support.ResolveCategoryID(pid)
 	var tags []string
@@ -83,6 +131,25 @@ func loadSearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
 	return itemsByType
 }
 
+func getAbnormalSearchTagValues(pid int64, tagType string) []string {
+	items := loadSearchTagItemsByType(pid)[tagType]
+	_, abnormalItems := SplitSearchTagItems(tagType, items)
+	values := make([]string, 0, len(abnormalItems))
+	seen := make(map[string]struct{}, len(abnormalItems))
+	for _, item := range abnormalItems {
+		value := strings.TrimSpace(item.Value)
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		values = append(values, value)
+	}
+	return values
+}
+
 func getStickySearchTagValue(st model.SearchTagsVO, tagType string) string {
 	switch tagType {
 	case "Category":
@@ -100,77 +167,6 @@ func getStickySearchTagValue(st model.SearchTagsVO, tagType string) string {
 	}
 }
 
-func hasUncategorizedSearchInfo(pid int64) bool {
-	pid = support.ResolveCategoryID(pid)
-	if pid <= 0 {
-		return false
-	}
-	var count int64
-	db.Mdb.Model(&model.SearchInfo{}).Where("pid = ? AND cid = 0", pid).Count(&count)
-	return count > 0
-}
-
-func hasUnknownYearSearchInfo(pid int64) bool {
-	pid = support.ResolveCategoryID(pid)
-	if pid <= 0 {
-		return false
-	}
-	var count int64
-	db.Mdb.Model(&model.SearchInfo{}).Where("pid = ? AND year = 0", pid).Count(&count)
-	return count > 0
-}
-
-func hasUnknownTextSearchInfo(pid int64, column string) bool {
-	pid = support.ResolveCategoryID(pid)
-	if pid <= 0 || column == "" {
-		return false
-	}
-	var count int64
-	db.Mdb.Model(&model.SearchInfo{}).Where(fmt.Sprintf("pid = ? AND (%s = '' OR %s IS NULL)", column, column), pid).Count(&count)
-	return count > 0
-}
-
-func appendSpecialSearchOptions(tagType string, formatted []map[string]string, st model.SearchTagsVO) []map[string]string {
-	switch tagType {
-	case "Category":
-		if hasUncategorizedSearchInfo(st.Pid) || st.Cid == model.TagUncategorizedValue {
-			return AppendSearchOption(formatted, map[string]string{
-				"Name":  model.TagUncategorizedName,
-				"Value": fmt.Sprint(model.TagUncategorizedValue),
-			})
-		}
-	case "Year":
-		if hasUnknownYearSearchInfo(st.Pid) || st.Year == model.TagUnknownValue {
-			return AppendSearchOption(formatted, map[string]string{
-				"Name":  model.TagUnknownName,
-				"Value": model.TagUnknownValue,
-			})
-		}
-	case "Area":
-		if hasUnknownTextSearchInfo(st.Pid, "area") || st.Area == model.TagUnknownValue {
-			return AppendSearchOption(formatted, map[string]string{
-				"Name":  model.TagUnknownName,
-				"Value": model.TagUnknownValue,
-			})
-		}
-	case "Language":
-		if hasUnknownTextSearchInfo(st.Pid, "language") || st.Language == model.TagUnknownValue {
-			return AppendSearchOption(formatted, map[string]string{
-				"Name":  model.TagUnknownName,
-				"Value": model.TagUnknownValue,
-			})
-		}
-	case "Plot":
-		if hasUnknownTextSearchInfo(st.Pid, "class_tag") || st.Plot == model.TagUnknownValue {
-			return AppendSearchOption(formatted, map[string]string{
-				"Name":  model.TagUnknownName,
-				"Value": model.TagUnknownValue,
-			})
-		}
-	}
-	return formatted
-}
-
 // GetSearchTag 获取搜索标签 (带联动感知与复合 Redis 缓存)
 func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	st = normalizeSearchTagsVO(st)
@@ -186,7 +182,7 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 
 	res := make(map[string]any)
 	tagTypes := []string{"Category", "Plot", "Area", "Language", "Year", "Sort"}
-	res["titles"] = map[string]string{
+	allTitles := map[string]string{
 		"Category": "类型",
 		"Plot":     "剧情",
 		"Area":     "地区",
@@ -196,31 +192,45 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	}
 
 	tagMap := make(map[string]any)
+	activeTitles := make(map[string]string)
 	activeSortList := make([]string, 0)
 	itemsByType := loadSearchTagItemsByType(pid)
 
 	for _, t := range tagTypes {
-		items := itemsByType[t]
-
-		if t == "Sort" {
-			tagMap[t] = HandleTagStr(t, false, defaultSortTagStrings...)
-			activeSortList = append(activeSortList, t)
-			continue
-		}
-
-		if len(items) == 0 {
-			if t == "Category" || t == "Year" || t == "Area" || t == "Language" || t == "Plot" {
-				tagMap[t] = appendSpecialSearchOptions(t, HandleTagStr(t, true), st)
+		if t == "Category" {
+			sticky := getStickySearchTagValue(st, t)
+			options := buildCategorySearchOptions(pid, sticky)
+			if hasEffectiveSearchOptions(options) {
+				tagMap[t] = options
+				activeTitles[t] = allTitles[t]
 				activeSortList = append(activeSortList, t)
 			}
 			continue
 		}
 
+		items := itemsByType[t]
+
+		if t == "Sort" {
+			tagMap[t] = HandleTagStr(t, false, defaultSortTagStrings...)
+			activeTitles[t] = allTitles[t]
+			activeSortList = append(activeSortList, t)
+			continue
+		}
+
+		if len(items) == 0 {
+			continue
+		}
+
 		sticky := getStickySearchTagValue(st, t)
-		tagMap[t] = appendSpecialSearchOptions(t, FormatSearchTagItems(t, items, sticky), st)
-		activeSortList = append(activeSortList, t)
+		options := FormatSearchTagItems(t, items, sticky)
+		if hasEffectiveSearchOptions(options) {
+			tagMap[t] = options
+			activeTitles[t] = allTitles[t]
+			activeSortList = append(activeSortList, t)
+		}
 	}
 
+	res["titles"] = activeTitles
 	res["sortList"] = activeSortList
 	res["tags"] = tagMap
 

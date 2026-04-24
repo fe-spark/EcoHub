@@ -14,8 +14,29 @@ import (
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
-	"gorm.io/gorm/clause"
 )
+
+type categoryPlacement struct {
+	Id    int64
+	Pid   int64
+	Sort  int
+	Depth int
+}
+
+type sourceCategoryPlacement struct {
+	SourceTypeId       int64
+	ParentSourceTypeId int64
+	Name               string
+	Sort               int
+	Depth              int
+}
+
+type categoryTreeWalkNode struct {
+	Node     *model.CategoryTree
+	ParentId int64
+	Depth    int
+	Sort     int
+}
 
 func buildCategoryStableKey(pid int64, name string) string {
 	return support.BuildCategoryStableKey(pid, name)
@@ -58,7 +79,7 @@ func ResolveCategoryID(id int64) int64 {
 
 func normalizeCategoryStableKeys(tx *gorm.DB) error {
 	var roots []model.Category
-	if err := tx.Where("pid = 0").Order("id ASC").Find(&roots).Error; err != nil {
+	if err := tx.Where("pid = 0").Order("sort ASC, id ASC").Find(&roots).Error; err != nil {
 		return err
 	}
 	for _, root := range roots {
@@ -68,7 +89,7 @@ func normalizeCategoryStableKeys(tx *gorm.DB) error {
 		}
 
 		var children []model.Category
-		if err := tx.Where("pid = ?", root.Id).Order("id ASC").Find(&children).Error; err != nil {
+		if err := tx.Where("pid = ?", root.Id).Order("sort ASC, id ASC").Find(&children).Error; err != nil {
 			return err
 		}
 		for _, child := range children {
@@ -117,102 +138,352 @@ func GetParentId(id int64) int64 {
 	return support.GetParentId(id)
 }
 
-// GetRootIdBySourcePid 通过采集站大类原始 ID 在本地大类列表中按顺序匹配
-// 仅用于子分类尚未落库时的兜底，优先级低于 GetRootId(cid)
-// SaveCategoryTree 批量保存并同步分类树（方案B: 100% 结构化映射精简版）
 func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
+	return saveCategoryTree(sourceId, tree, true)
+}
+
+func ResetCategoryTree(sourceId string, tree *model.CategoryTree) error {
+	return saveCategoryTree(sourceId, tree, false)
+}
+
+func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusinessFields bool) error {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" {
+		return fmt.Errorf("source id 不能为空")
+	}
 	if tree == nil {
 		return nil
 	}
 
+	plans := make([]sourceCategoryPlacement, 0)
+	if err := flattenSourceCategoryPlacements(tree.Children, 0, 0, &plans); err != nil {
+		return err
+	}
+
+	rootIDs := make([]int64, 0)
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		version := time.Now().UnixNano()
+		var oldCategories []model.Category
+		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&oldCategories).Error; err != nil {
+			return err
+		}
+		oldMap := make(map[int64]model.Category, len(oldCategories))
+		for _, item := range oldCategories {
+			oldMap[item.Id] = item
+		}
 
-		// 2. 遍历采集站大类，建立本地映射
-		for _, node := range tree.Children {
-			// 推断标准大类名（探测模式）
-			standardName := GetCategoryBucketRole(node.Name)
-			if standardName == model.BigCategoryOther && len(node.Children) > 0 {
-				for _, sub := range node.Children {
-					if role := GetCategoryBucketRole(sub.Name); role != model.BigCategoryOther {
-						standardName = role
-						break
-					}
-				}
+		var oldMappings []model.CategoryMapping
+		if err := tx.Where("source_id = ?", sourceId).Find(&oldMappings).Error; err != nil {
+			return err
+		}
+		existingCategoryIDs := make(map[int64]struct{}, len(oldMappings))
+		existingBySourceType := make(map[int64]int64, len(oldMappings))
+		for _, item := range oldMappings {
+			existingBySourceType[item.SourceTypeId] = item.CategoryId
+			existingCategoryIDs[item.CategoryId] = struct{}{}
+		}
+
+		if !preserveBusinessFields {
+			existingCategoryIDs = make(map[int64]struct{})
+			existingBySourceType = make(map[int64]int64)
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
+				return err
 			}
-
-			// 获取或创建本地大类
-			var localMain model.Category
-			tx.Where("pid = 0 AND name = ?", standardName).FirstOrCreate(&localMain, model.Category{Pid: 0, Name: standardName, StableKey: buildCategoryStableKey(0, standardName), Show: true})
-			if localMain.StableKey == "" {
-				tx.Model(&model.Category{}).Where("id = ?", localMain.Id).Update("stable_key", buildCategoryStableKey(0, localMain.Name))
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Category{}).Error; err != nil {
+				return err
 			}
-
-			// 3. 记录映射：如果来源大类名称与标准大类不一致，将其作为子分类处理，实现“日本动漫” -> “动漫”下的具体标签
-			targetId := localMain.Id
-			if node.Name != standardName {
-				var localSub model.Category
-				tx.Where("pid = ? AND name = ?", localMain.Id, node.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: node.Name, StableKey: buildCategoryStableKey(localMain.Id, node.Name), Show: true})
-				if localSub.StableKey == "" {
-					tx.Model(&model.Category{}).Where("id = ?", localSub.Id).Update("stable_key", buildCategoryStableKey(localMain.Id, localSub.Name))
-				}
-				targetId = localSub.Id
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
+				return err
 			}
-			tx.Clauses(clause.OnConflict{
-				Columns: []clause.Column{{Name: "source_id"}, {Name: "source_type_id"}},
-				DoUpdates: clause.Assignments(map[string]any{
-					"category_id":     targetId,
-					"mapping_version": version,
-				}),
-			}).Create(&model.CategoryMapping{
-				SourceId:       sourceId,
-				SourceTypeId:   node.Id,
-				CategoryId:     targetId,
-				MappingVersion: version,
-			})
-
-			// 4. 处理来源子类 (继续挂载到本地标准大类下，平铺结构)
-			for _, sub := range node.Children {
-				var localSub model.Category
-				tx.Where("pid = ? AND name = ?", localMain.Id, sub.Name).FirstOrCreate(&localSub, model.Category{Pid: localMain.Id, Name: sub.Name, StableKey: buildCategoryStableKey(localMain.Id, sub.Name), Show: true})
-				if localSub.StableKey == "" {
-					tx.Model(&model.Category{}).Where("id = ?", localSub.Id).Update("stable_key", buildCategoryStableKey(localMain.Id, localSub.Name))
-				}
-
-				// 记录子类映射 (100% 绑定)
-				tx.Clauses(clause.OnConflict{
-					Columns: []clause.Column{{Name: "source_id"}, {Name: "source_type_id"}},
-					DoUpdates: clause.Assignments(map[string]any{
-						"category_id":     localSub.Id,
-						"mapping_version": version,
-					}),
-				}).Create(&model.CategoryMapping{
-					SourceId:       sourceId,
-					SourceTypeId:   sub.Id,
-					CategoryId:     localSub.Id,
-					MappingVersion: version,
-				})
+			if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
+				return err
 			}
 		}
-		tx.Where("source_id = ? AND mapping_version <> ?", sourceId, version).Delete(&model.CategoryMapping{})
+
+		if preserveBusinessFields {
+			if err := tx.Where("source_id = ?", sourceId).Delete(&model.SourceCategory{}).Error; err != nil {
+				return err
+			}
+		}
+		rawRows := make([]model.SourceCategory, 0, len(plans))
+		for _, plan := range plans {
+			rawRows = append(rawRows, model.SourceCategory{
+				SourceId:           sourceId,
+				SourceTypeId:       plan.SourceTypeId,
+				ParentSourceTypeId: plan.ParentSourceTypeId,
+				Name:               plan.Name,
+				Sort:               plan.Sort,
+				Depth:              plan.Depth,
+			})
+		}
+		if len(rawRows) > 0 {
+			if err := tx.Create(&rawRows).Error; err != nil {
+				return err
+			}
+		}
+
+		sourceTypeToCategory := make(map[int64]int64, len(plans))
+		sourceTypeToStableKey := make(map[int64]string, len(plans))
+		seenSourceType := make(map[int64]struct{}, len(plans))
+		for _, plan := range plans {
+			if _, ok := seenSourceType[plan.SourceTypeId]; ok {
+				return fmt.Errorf("来源分类重复: %d", plan.SourceTypeId)
+			}
+			seenSourceType[plan.SourceTypeId] = struct{}{}
+
+			pid := int64(0)
+			if plan.ParentSourceTypeId > 0 {
+				parentId, ok := sourceTypeToCategory[plan.ParentSourceTypeId]
+				if !ok {
+					return fmt.Errorf("来源父分类不存在: %d", plan.ParentSourceTypeId)
+				}
+				pid = parentId
+			}
+
+			stableKey := buildCategoryStableKey(pid, plan.Name)
+			if plan.ParentSourceTypeId > 0 {
+				parentStableKey, ok := sourceTypeToStableKey[plan.ParentSourceTypeId]
+				if !ok {
+					return fmt.Errorf("来源父分类稳定标识不存在: %d", plan.ParentSourceTypeId)
+				}
+				stableKey = fmt.Sprintf("%s/%s", parentStableKey, strings.TrimSpace(plan.Name))
+			}
+
+			categoryId := existingBySourceType[plan.SourceTypeId]
+			if categoryId > 0 {
+				existingCategory, ok := oldMap[categoryId]
+				if !ok {
+					return fmt.Errorf("已有业务分类不存在: %d", categoryId)
+				}
+				updates := map[string]any{
+					"pid":        pid,
+					"name":       plan.Name,
+					"stable_key": stableKey,
+				}
+				if preserveBusinessFields {
+					updates["sort"] = existingCategory.Sort
+				} else {
+					updates["sort"] = plan.Sort
+					updates["show"] = true
+					updates["alias"] = ""
+				}
+				if err := tx.Model(&model.Category{}).Where("id = ?", categoryId).Updates(updates).Error; err != nil {
+					return err
+				}
+			} else {
+				category := model.Category{Pid: pid, Name: plan.Name, StableKey: stableKey, Show: true, Sort: plan.Sort}
+				if err := tx.Create(&category).Error; err != nil {
+					return err
+				}
+				categoryId = category.Id
+			}
+			sourceTypeToCategory[plan.SourceTypeId] = categoryId
+			sourceTypeToStableKey[plan.SourceTypeId] = stableKey
+		}
+
+		if preserveBusinessFields {
+			if err := tx.Where("source_id = ?", sourceId).Delete(&model.CategoryMapping{}).Error; err != nil {
+				return err
+			}
+		}
+		mappings := make([]model.CategoryMapping, 0, len(plans))
+		activeCategoryIDs := make(map[int64]struct{}, len(plans))
+		for _, plan := range plans {
+			categoryId := sourceTypeToCategory[plan.SourceTypeId]
+			activeCategoryIDs[categoryId] = struct{}{}
+			mappings = append(mappings, model.CategoryMapping{
+				SourceId:     sourceId,
+				SourceTypeId: plan.SourceTypeId,
+				CategoryId:   categoryId,
+			})
+		}
+		if len(mappings) > 0 {
+			if err := tx.Create(&mappings).Error; err != nil {
+				return err
+			}
+		}
+
+		if preserveBusinessFields {
+			staleCategoryIDs := make([]int64, 0)
+			for categoryId := range existingCategoryIDs {
+				if _, ok := activeCategoryIDs[categoryId]; ok {
+					continue
+				}
+				staleCategoryIDs = append(staleCategoryIDs, categoryId)
+			}
+			if len(staleCategoryIDs) > 0 {
+				if err := tx.Where("id IN ?", staleCategoryIDs).Delete(&model.Category{}).Error; err != nil {
+					return err
+				}
+			}
+		}
+
 		if err := normalizeCategoryStableKeys(tx); err != nil {
 			return err
 		}
-		return nil
+
+		var newCategories []model.Category
+		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&newCategories).Error; err != nil {
+			return err
+		}
+		newMap := make(map[int64]model.Category, len(newCategories))
+		for _, item := range newCategories {
+			newMap[item.Id] = item
+			if item.Pid == 0 {
+				rootIDs = append(rootIDs, item.Id)
+			}
+		}
+		if preserveBusinessFields {
+			if err := refreshSearchInfoCategoryBindingsTx(tx, oldMap, newMap); err != nil {
+				return err
+			}
+		}
+		return refreshSearchInfoCategoryBindingsByStableKeysTx(tx, newMap)
 	})
 	if err != nil {
 		return err
 	}
 
-	// 同步完成后统一刷新分类缓存与内存映射，确保采集立即可用
 	MarkCategoryChanged()
+	if err := filmrepo.RebuildSearchTagsByPids(rootIDs...); err != nil {
+		return err
+	}
+	filmrepo.ClearAllSearchTagsCache()
+	filmrepo.ClearTVBoxListCache()
+	ClearIndexPageCache()
 	return nil
+}
+
+func refreshSearchInfoCategoryBindingsByStableKeysTx(tx *gorm.DB, newMap map[int64]model.Category) error {
+	if len(newMap) == 0 {
+		return nil
+	}
+
+	rootByStableKey := make(map[string]model.Category)
+	categoryByStableKey := make(map[string]model.Category)
+	for _, item := range newMap {
+		stableKey := strings.TrimSpace(item.StableKey)
+		if stableKey == "" {
+			continue
+		}
+		categoryByStableKey[stableKey] = item
+		if item.Pid == 0 {
+			rootByStableKey[stableKey] = item
+		}
+	}
+
+	var infos []model.SearchInfo
+	if err := tx.Find(&infos).Error; err != nil {
+		return err
+	}
+
+	for _, info := range infos {
+		nextPid := info.Pid
+		nextCid := info.Cid
+		nextRootKey := strings.TrimSpace(info.RootCategoryKey)
+		nextCategoryKey := strings.TrimSpace(info.CategoryKey)
+		nextCName := info.CName
+
+		if nextCategoryKey != "" {
+			if category, ok := categoryByStableKey[nextCategoryKey]; ok {
+				nextCid = category.Id
+				nextCName = category.Name
+				if category.Pid == 0 {
+					nextPid = category.Id
+					nextRootKey = category.StableKey
+					nextCategoryKey = category.StableKey
+				} else {
+					parent, ok := newMap[category.Pid]
+					if !ok {
+						return fmt.Errorf("分类父级不存在: %d", category.Pid)
+					}
+					nextPid = parent.Id
+					nextRootKey = parent.StableKey
+					nextCategoryKey = category.StableKey
+				}
+			} else {
+				nextCid = 0
+				nextCategoryKey = ""
+			}
+		}
+
+		if nextCid == 0 && nextRootKey != "" {
+			if root, ok := rootByStableKey[nextRootKey]; ok {
+				nextPid = root.Id
+				nextRootKey = root.StableKey
+				if strings.TrimSpace(nextCName) == "" {
+					nextCName = root.Name
+				}
+			}
+		}
+
+		if nextPid == info.Pid && nextCid == info.Cid && nextRootKey == info.RootCategoryKey && nextCategoryKey == info.CategoryKey && nextCName == info.CName {
+			continue
+		}
+
+		if err := tx.Model(&model.SearchInfo{}).Where("id = ?", info.ID).Updates(map[string]any{
+			"pid":               nextPid,
+			"cid":               nextCid,
+			"root_category_key": nextRootKey,
+			"category_key":      nextCategoryKey,
+			"c_name":            nextCName,
+		}).Error; err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func walkTwoLevelCategoryTree(nodes []*model.CategoryTree, parentId int64, depth int, visit func(item categoryTreeWalkNode) error) error {
+	if len(nodes) == 0 {
+		return nil
+	}
+	if depth > 1 {
+		return fmt.Errorf("分类层级最多支持两层")
+	}
+
+	for index, node := range nodes {
+		if err := visit(categoryTreeWalkNode{
+			Node:     node,
+			ParentId: parentId,
+			Depth:    depth,
+			Sort:     index + 1,
+		}); err != nil {
+			return err
+		}
+		if err := walkTwoLevelCategoryTree(node.Children, node.Id, depth+1, visit); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func flattenSourceCategoryPlacements(nodes []*model.CategoryTree, parentId int64, depth int, out *[]sourceCategoryPlacement) error {
+	return walkTwoLevelCategoryTree(nodes, parentId, depth, func(item categoryTreeWalkNode) error {
+		node := item.Node
+		if node == nil || node.Id <= 0 {
+			return fmt.Errorf("来源分类数据异常")
+		}
+		name := strings.TrimSpace(node.Name)
+		if name == "" {
+			return fmt.Errorf("来源分类名称不能为空")
+		}
+		*out = append(*out, sourceCategoryPlacement{
+			SourceTypeId:       node.Id,
+			ParentSourceTypeId: item.ParentId,
+			Name:               name,
+			Sort:               item.Sort,
+			Depth:              item.Depth,
+		})
+		return nil
+	})
 }
 
 // buildTreeHelper 内部辅助函数：直接从列表构建树形结构内存模型
 func buildTreeHelper() model.CategoryTree {
 	var allList []model.Category
-	db.Mdb.Where("`show` = ?", true).Order("pid ASC, id ASC").Find(&allList)
+	db.Mdb.Order("pid ASC, sort ASC, id ASC").Find(&allList)
 
 	nodes := make(map[int64]*model.CategoryTree)
 	root := model.CategoryTree{
@@ -280,7 +551,7 @@ func GetCategoryTreeByID(id int64) *model.CategoryTree {
 	}
 
 	var children []model.Category
-	if err := db.Mdb.Where("pid = ?", current.Id).Order("id ASC").Find(&children).Error; err != nil {
+	if err := db.Mdb.Where("pid = ?", current.Id).Order("sort ASC, id ASC").Find(&children).Error; err != nil {
 		return nil
 	}
 	for _, child := range children {
@@ -330,7 +601,7 @@ func GetActiveCategoryTree() model.CategoryTree {
 
 	// 3. 构建树
 	var allList []model.Category
-	db.Mdb.Where("`show` = ?", true).Order("pid ASC, id ASC").Find(&allList)
+	db.Mdb.Where("`show` = ?", true).Order("pid ASC, sort ASC, id ASC").Find(&allList)
 
 	nodes := make(map[int64]*model.CategoryTree)
 	root := model.CategoryTree{
@@ -398,22 +669,9 @@ func isValidActiveCategoryTree(tree model.CategoryTree) bool {
 }
 
 func sortRootCategories(children []*model.CategoryTree) {
-	rootOrder := map[string]int{
-		model.BigCategoryMovie:       1,
-		model.BigCategoryTV:          2,
-		model.BigCategoryAnimation:   3,
-		model.BigCategoryVariety:     4,
-		model.BigCategoryDocumentary: 5,
-		model.BigCategoryOther:       6,
-	}
 	sort.SliceStable(children, func(i, j int) bool {
-		oi, oki := rootOrder[children[i].Name]
-		oj, okj := rootOrder[children[j].Name]
-		if oki && okj && oi != oj {
-			return oi < oj
-		}
-		if oki != okj {
-			return oki
+		if children[i].Sort != children[j].Sort {
+			return children[i].Sort < children[j].Sort
 		}
 		return children[i].Id < children[j].Id
 	})
@@ -444,6 +702,199 @@ func UpdateCategoryStatus(id int64, updates map[string]any) error {
 		return err
 	}
 	MarkCategoryChanged()
+	return nil
+}
+
+func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, depth int, out *[]categoryPlacement) error {
+	return walkTwoLevelCategoryTree(nodes, parentId, depth, func(item categoryTreeWalkNode) error {
+		node := item.Node
+		if node == nil || node.Id <= 0 {
+			return fmt.Errorf("分类节点数据异常")
+		}
+		*out = append(*out, categoryPlacement{
+			Id:    node.Id,
+			Pid:   item.ParentId,
+			Sort:  item.Sort,
+			Depth: item.Depth,
+		})
+		return nil
+	})
+}
+
+func rootCategoryIDByMap(categories map[int64]model.Category, id int64) int64 {
+	current := id
+	for current > 0 {
+		item, ok := categories[current]
+		if !ok {
+			return 0
+		}
+		if item.Pid == 0 {
+			return item.Id
+		}
+		current = item.Pid
+	}
+	return 0
+}
+
+func refreshSearchInfoCategoryBindingsTx(tx *gorm.DB, oldMap map[int64]model.Category, newMap map[int64]model.Category) error {
+	for id, next := range newMap {
+		prev, ok := oldMap[id]
+		if !ok {
+			continue
+		}
+		if prev.Pid == next.Pid && prev.StableKey == next.StableKey && prev.Name == next.Name {
+			continue
+		}
+
+		if next.Pid == 0 {
+			if err := tx.Model(&model.SearchInfo{}).
+				Where("cid = ?", next.Id).
+				Updates(map[string]any{
+					"pid":               next.Id,
+					"c_name":            next.Name,
+					"root_category_key": next.StableKey,
+					"category_key":      next.StableKey,
+				}).Error; err != nil {
+				return err
+			}
+			if err := tx.Model(&model.SearchInfo{}).
+				Where("pid = ? AND cid = 0", prev.Id).
+				Updates(map[string]any{
+					"pid":               next.Id,
+					"c_name":            next.Name,
+					"root_category_key": next.StableKey,
+				}).Error; err != nil {
+				return err
+			}
+			continue
+		}
+
+		parent, ok := newMap[next.Pid]
+		if !ok {
+			return fmt.Errorf("分类父级不存在: %d", next.Pid)
+		}
+		if err := tx.Model(&model.SearchInfo{}).
+			Where("cid = ?", next.Id).
+			Updates(map[string]any{
+				"pid":               parent.Id,
+				"c_name":            next.Name,
+				"root_category_key": parent.StableKey,
+				"category_key":      next.StableKey,
+			}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.SearchInfo{}).
+			Where("pid = ? AND cid = 0", prev.Id).
+			Updates(map[string]any{
+				"pid":               parent.Id,
+				"c_name":            next.Name,
+				"root_category_key": parent.StableKey,
+				"category_key":      "",
+			}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
+	placements := make([]categoryPlacement, 0)
+	if err := flattenCategoryPlacements(nodes, 0, 0, &placements); err != nil {
+		return err
+	}
+
+	var categories []model.Category
+	if err := db.Mdb.Order("pid ASC, id ASC").Find(&categories).Error; err != nil {
+		return err
+	}
+	if len(categories) != len(placements) {
+		return fmt.Errorf("分类结构保存失败，提交节点数量与数据库不一致")
+	}
+
+	oldMap := make(map[int64]model.Category, len(categories))
+	nameKeys := make(map[string]int64, len(categories))
+	for _, item := range categories {
+		oldMap[item.Id] = item
+	}
+	seen := make(map[int64]struct{}, len(placements))
+	for _, placement := range placements {
+		item, ok := oldMap[placement.Id]
+		if !ok {
+			return fmt.Errorf("分类 %d 不存在", placement.Id)
+		}
+		if _, ok := seen[placement.Id]; ok {
+			return fmt.Errorf("分类结构中存在重复节点: %d", placement.Id)
+		}
+		seen[placement.Id] = struct{}{}
+		key := fmt.Sprintf("%d:%s", placement.Pid, strings.TrimSpace(item.Name))
+		if exists, ok := nameKeys[key]; ok && exists != placement.Id {
+			return fmt.Errorf("同级分类名称重复: %s", item.Name)
+		}
+		nameKeys[key] = placement.Id
+	}
+
+	affectedPids := make(map[int64]struct{})
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for _, placement := range placements {
+			item := oldMap[placement.Id]
+			if placement.Pid == item.Id {
+				return fmt.Errorf("分类不能移动到自身下级")
+			}
+			if err := tx.Model(&model.Category{}).
+				Where("id = ?", placement.Id).
+				Updates(map[string]any{"pid": placement.Pid, "sort": placement.Sort}).Error; err != nil {
+				return err
+			}
+		}
+		if err := normalizeCategoryStableKeys(tx); err != nil {
+			return err
+		}
+
+		var updated []model.Category
+		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&updated).Error; err != nil {
+			return err
+		}
+		newMap := make(map[int64]model.Category, len(updated))
+		for _, item := range updated {
+			newMap[item.Id] = item
+		}
+
+		if err := refreshSearchInfoCategoryBindingsTx(tx, oldMap, newMap); err != nil {
+			return err
+		}
+
+		for id, prev := range oldMap {
+			next := newMap[id]
+			if prev.Pid == next.Pid && prev.StableKey == next.StableKey && prev.Name == next.Name {
+				continue
+			}
+			if oldRoot := rootCategoryIDByMap(oldMap, prev.Id); oldRoot > 0 {
+				affectedPids[oldRoot] = struct{}{}
+			}
+			if newRoot := rootCategoryIDByMap(newMap, next.Id); newRoot > 0 {
+				affectedPids[newRoot] = struct{}{}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
+	MarkCategoryChanged()
+	if len(affectedPids) == 0 {
+		return nil
+	}
+	pidList := make([]int64, 0, len(affectedPids))
+	for pid := range affectedPids {
+		pidList = append(pidList, pid)
+	}
+	if err := filmrepo.RebuildSearchTagsByPids(pidList...); err != nil {
+		return err
+	}
+	filmrepo.ClearAllSearchTagsCache()
+	filmrepo.ClearTVBoxListCache()
+	ClearIndexPageCache()
 	return nil
 }
 
@@ -508,122 +959,22 @@ func GetChildrenTree(pid int64) []*model.CategoryTree {
 
 // InitMainCategories 启动时刷新映射引擎与分类缓存
 func InitMainCategories() {
-	fmt.Println("[Init] 正在确保标准大类并刷新分类缓存...")
+	fmt.Println("[Init] 正在初始化分类表与缓存...")
 	ensureCategoryIndexes()
-
-	// 1. 确保标准大类存在 (电影, 电视剧, 动漫, 综艺, 纪录片, 其他)
-	standards := []string{
-		model.BigCategoryMovie,
-		model.BigCategoryTV,
-		model.BigCategoryAnimation,
-		model.BigCategoryVariety,
-		model.BigCategoryDocumentary,
-		model.BigCategoryOther,
+	if ExistsCategoryTree() {
+		_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
+			return normalizeCategoryStableKeys(tx)
+		})
 	}
-	// 设置每个大类的默认匹配正则 (Alias)
-	aliases := map[string]string{
-		model.BigCategoryAnimation:   "动漫,动画,番剧,日漫,国漫,美漫",
-		model.BigCategoryVariety:     "综艺,脱口秀,真人秀,选秀",
-		model.BigCategoryDocumentary: "纪录片,历史,文化,自然",
-		model.BigCategoryMovie:       "电影,动作,喜剧,爱情,科幻,恐怖,剧情,战争,惊悚",
-		model.BigCategoryTV:          "电视剧,国产,美剧,韩剧,日剧,港剧,台剧,泰剧,海外",
-		model.BigCategoryOther:       "其他,其它,解说,福利,短剧,爽剧,微电影",
-	}
-
-	for _, name := range standards {
-		// 1. 先查找是否存在该记录
-		var cat model.Category
-		err := db.Mdb.Model(&model.Category{}).Where("pid = 0 AND name = ?", name).First(&cat).Error
-
-		if err == nil {
-			// 2. 存在则更新展示状态与别名
-			cat.StableKey = buildCategoryStableKey(0, name)
-			cat.Alias = aliases[name]
-			cat.Show = true
-			if saveErr := db.Mdb.Save(&cat).Error; saveErr != nil {
-				fmt.Printf("[Error] 更新大类 %s 失败: %v\n", name, saveErr)
-			} else {
-				fmt.Printf("[Init] 已对齐标准大类: %s (ID: %d)\n", name, cat.Id)
-			}
-		} else {
-			// 3. 不存在则创建
-			db.Mdb.Create(&model.Category{
-				Pid:       0,
-				Name:      name,
-				StableKey: buildCategoryStableKey(0, name),
-				Alias:     aliases[name],
-				Show:      true,
-			})
-			fmt.Printf("[Init] 已创建标准大类: %s\n", name)
-		}
-	}
-	mergeShortFilmIntoOther()
-
-	// 2. 统一清理分类相关缓存并重建内存映射
-	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return normalizeCategoryStableKeys(tx)
-	})
 	MarkCategoryChanged()
-
-	fmt.Println("[Init] 缓存刷新与标准大类对齐完成。")
-}
-
-func mergeShortFilmIntoOther() {
-	var other model.Category
-	if err := db.Mdb.Where("pid = 0 AND name = ?", model.BigCategoryOther).First(&other).Error; err != nil {
-		return
-	}
-	var short model.Category
-	if err := db.Mdb.Where("pid = 0 AND name = ?", model.BigCategoryShortFilm).First(&short).Error; err != nil {
-		return
-	}
-
-	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		tx.Model(&model.Category{}).Where("id = ?", short.Id).Update("show", false)
-
-		var shortChildren []model.Category
-		tx.Where("pid = ?", short.Id).Find(&shortChildren)
-
-		idMap := make(map[int64]int64)
-		for _, child := range shortChildren {
-			var target model.Category
-			if err := tx.Where("pid = ? AND name = ?", other.Id, child.Name).
-				FirstOrCreate(&target, model.Category{Pid: other.Id, Name: child.Name, StableKey: buildCategoryStableKey(other.Id, child.Name), Show: true}).Error; err == nil {
-				idMap[child.Id] = target.Id
-			}
-		}
-
-		tx.Table(model.TableSearchInfo).Where("pid = ?", short.Id).Update("pid", other.Id)
-		tx.Table(model.TableSearchInfo).Where("cid = ?", short.Id).Update("cid", other.Id)
-		tx.Model(&model.CategoryMapping{}).Where("category_id = ?", short.Id).Update("category_id", other.Id)
-
-		for oldID, newID := range idMap {
-			tx.Table(model.TableSearchInfo).Where("cid = ?", oldID).Update("cid", newID)
-			tx.Model(&model.CategoryMapping{}).Where("category_id = ?", oldID).Update("category_id", newID)
-			tx.Model(&model.Category{}).Where("id = ?", oldID).Update("show", false)
-		}
-
-		tx.Where("pid = ? AND tag_type = ?", short.Id, "Category").Delete(&model.SearchTagItem{})
-		tx.Where("pid = ? AND tag_type = ?", other.Id, "Category").Delete(&model.SearchTagItem{})
-		tx.Exec(
-			"INSERT INTO "+model.TableSearchTag+" (created_at,updated_at,pid,tag_type,name,value,score) "+
-				"SELECT NOW(),NOW(),s.pid,'Category',c.name,CAST(s.cid AS CHAR),COUNT(*) "+
-				"FROM "+model.TableSearchInfo+" s "+
-				"JOIN "+model.TableCategory+" c ON c.id = s.cid "+
-				"WHERE s.pid = ? AND s.cid > 0 AND s.cid <> s.pid "+
-				"GROUP BY s.pid,s.cid,c.name", other.Id,
-		)
-		if err := normalizeCategoryStableKeys(tx); err != nil {
-			return err
-		}
-		return nil
-	})
-	MarkCategoryChanged()
+	fmt.Println("[Init] 分类缓存初始化完成。")
 }
 
 func ensureCategoryIndexes() {
-	db.Mdb.AutoMigrate(&model.Category{}, &model.CategoryMapping{})
+	db.Mdb.AutoMigrate(&model.Category{}, &model.CategoryMapping{}, &model.SourceCategory{})
 	db.Mdb.Migrator().CreateIndex(&model.Category{}, "uidx_pid_name")
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_type")
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_version")
+	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_parent_sort")
+	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_type_id")
 }

@@ -9,6 +9,7 @@ const (
 	TableMoviePlaylist  = "movie_playlist"
 	TableMovieMatchKey  = "movie_match_key"
 	TableCategory       = "film_category"
+	TableSourceCategory = "source_categories"
 	TableVirtualPicture = "virtual_picture_queue"
 	TableSearchTag      = "search_tag_item"
 	TableFilmSource     = "film_sources"

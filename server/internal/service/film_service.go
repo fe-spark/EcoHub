@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"server/internal/model"
@@ -127,6 +128,32 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 
 	// 3. 执行原子更新并清除缓存
 	return repository.UpdateCategoryStatus(class.Id, updates)
+}
+
+func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTree {
+	if len(nodes) == 0 {
+		return []*model.CategoryTree{}
+	}
+	res := make([]*model.CategoryTree, 0, len(nodes))
+	for _, node := range nodes {
+		if node == nil || node.Id <= 0 {
+			continue
+		}
+		res = append(res, &model.CategoryTree{
+			Id:       node.Id,
+			Name:     strings.TrimSpace(node.Name),
+			Children: sanitizeCategoryTreeNodes(node.Children),
+		})
+	}
+	return res
+}
+
+func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
+	cleanNodes := sanitizeCategoryTreeNodes(nodes)
+	if len(cleanNodes) == 0 {
+		return errors.New("分类结构不能为空")
+	}
+	return repository.SaveCategoryTreeStructure(cleanNodes)
 }
 
 // DelClass 删除分类信息

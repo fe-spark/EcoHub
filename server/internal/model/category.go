@@ -32,6 +32,23 @@ func (CategoryMapping) TableName() string {
 	return "category_mappings"
 }
 
+// SourceCategory 当前主站原始分类树
+type SourceCategory struct {
+	Id                 int64     `gorm:"primaryKey;autoIncrement:true" json:"id"`
+	SourceId           string    `gorm:"index:idx_source_parent_sort,priority:1;size:32" json:"source_id"`
+	SourceTypeId       int64     `gorm:"uniqueIndex:idx_source_type_id" json:"source_type_id"`
+	ParentSourceTypeId int64     `gorm:"index:idx_source_parent_sort,priority:2" json:"parent_source_type_id"`
+	Name               string    `gorm:"size:64" json:"name"`
+	Sort               int       `gorm:"index:idx_source_parent_sort,priority:3" json:"sort"`
+	Depth              int       `json:"depth"`
+	CreatedAt          time.Time `json:"created_at"`
+	UpdatedAt          time.Time `json:"updated_at"`
+}
+
+func (SourceCategory) TableName() string {
+	return TableSourceCategory
+}
+
 // CategoryTree 分類信息樹形結構 (扁平化 JSON)
 type CategoryTree struct {
 	Id        int64           `json:"id"`

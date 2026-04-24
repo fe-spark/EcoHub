@@ -39,7 +39,7 @@ func saveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error 
 		return nil
 	}
 
-	if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
+	if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
 		return err
 	}
 	if len(records) == 0 {

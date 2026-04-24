@@ -68,15 +68,6 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 	dto.SuccessOnlyMsg("影视数据已删除!!!", c)
 }
 
-// CoverFilmClass 重置覆盖影片分类信息
-func (h *SpiderHandler) CoverFilmClass(c *gin.Context) {
-	if err := service.SpiderSvc.FilmClassCollect(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("影视分类信息重置成功, 请稍等片刻后刷新页面", c)
-}
-
 // SingleUpdateSpider 单一影片主站更新采集
 func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
 	var req struct {

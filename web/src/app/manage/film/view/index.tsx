@@ -29,6 +29,7 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import ManagePageShell from "../../components/page-shell";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -349,66 +350,75 @@ export default function FilmListPageView() {
   );
 
   return (
-    <div className={styles.container}>
-      <div className={styles.filterBar}>
-        <Input.Search
-          placeholder="搜索片名..."
-          value={params.name}
-          onChange={(e) => setParams({ ...params, name: e.target.value })}
-          className={styles.searchInput}
-          allowClear
-          onSearch={onSearch}
-          enterButton
-        />
-        <Select
-          placeholder="选择分类"
-          className={styles.filterItem}
-          value={classId || undefined}
-          onChange={handleClassChange}
-          options={options.class?.map((c: any) => ({
-            label: c.name,
-            value: c.id,
-          }))}
-          allowClear
-        />
-        <Select
-          placeholder="剧情标签"
-          className={styles.filterItem}
-          value={params.plot || undefined}
-          onChange={(v) => setParams({ ...params, plot: v })}
-          options={options.Plot?.map((i: any) => ({
-            label: i.Name,
-            value: i.Value,
-          }))}
-          allowClear
-        />
-        <Select
-          placeholder="地区"
-          className={styles.filterItem}
-          value={params.area || undefined}
-          onChange={(v) => setParams({ ...params, area: v })}
-          options={options.Area?.map((i: any) => ({
-            label: i.Name,
-            value: i.Value,
-          }))}
-          allowClear
-        />
-        <RangePicker showTime value={dateRange} onChange={(v) => setDateRange(v)} />
-        <Button type="primary" icon={<SearchOutlined />} onClick={onSearch}>
-          搜索
+    <ManagePageShell
+      eyebrow="内容管理"
+      title="影片列表"
+      description="管理当前主库存影片，支持分类、剧情、地区和时间范围筛选。"
+      actions={
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push("/manage/film/add")}>
+          新增影视
         </Button>
-      </div>
-
-      <div className={styles.tableContainer}>
+      }
+      extra={
+        <div className={styles.filterBar}>
+          <Input.Search
+            placeholder="搜索片名..."
+            value={params.name}
+            onChange={(e) => setParams({ ...params, name: e.target.value })}
+            className={styles.searchInput}
+            allowClear
+            onSearch={onSearch}
+            enterButton
+          />
+          <Select
+            placeholder="选择分类"
+            className={styles.filterItem}
+            value={classId || undefined}
+            onChange={handleClassChange}
+            options={options.class?.map((c: any) => ({
+              label: c.name,
+              value: c.id,
+            }))}
+            allowClear
+          />
+          <Select
+            placeholder="剧情标签"
+            className={styles.filterItem}
+            value={params.plot || undefined}
+            onChange={(v) => setParams({ ...params, plot: v })}
+            options={options.Plot?.map((i: any) => ({
+              label: i.Name,
+              value: i.Value,
+            }))}
+            allowClear
+          />
+          <Select
+            placeholder="地区"
+            className={styles.filterItem}
+            value={params.area || undefined}
+            onChange={(v) => setParams({ ...params, area: v })}
+            options={options.Area?.map((i: any) => ({
+              label: i.Name,
+              value: i.Value,
+            }))}
+            allowClear
+          />
+          <RangePicker showTime value={dateRange} onChange={(v) => setDateRange(v)} />
+          <Button type="primary" icon={<SearchOutlined />} onClick={onSearch}>
+            搜索
+          </Button>
+        </div>
+      }
+      panelClassName={styles.tableContainer}
+    >
+      <div className={styles.tableContainerInner}>
         <Table
           title={() => (
             <div className={styles.tableTitleWarp}>
               <Title level={5} style={{ margin: 0 }}>
                 影视资源库
               </Title>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push("/manage/film/add")}>
-                发布新影片
-              </Button>
+              <Text type="secondary">当前展示统一主库存结果</Text>
             </div>
           )}
           columns={columns}
@@ -435,6 +445,6 @@ export default function FilmListPageView() {
           />
         </div>
       </div>
-    </div>
+    </ManagePageShell>
   );
 }

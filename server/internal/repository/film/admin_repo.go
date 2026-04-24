@@ -172,6 +172,9 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -224,6 +227,7 @@ func FilmZero() {
 	}
 	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{})
 	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{})
+	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{})
 	time.Sleep(100 * time.Millisecond)
 
 	support.TruncateRecordTable()
@@ -264,4 +268,77 @@ func CleanEmptyFilms() int64 {
 		ClearSearchTagsCache(info.Pid)
 	}
 	return int64(len(infos))
+}
+
+// CleanSearchWithoutDetail 清理 search_info 存在但 movie_detail_info 缺失的脏记录。
+func CleanSearchWithoutDetail() int64 {
+	type orphanRecord struct {
+		Mid int64
+		Pid int64
+	}
+
+	var records []orphanRecord
+	err := db.Mdb.Model(&model.SearchInfo{}).
+		Select("search_info.mid, search_info.pid").
+		Joins("LEFT JOIN movie_detail_info ON movie_detail_info.mid = search_info.mid AND movie_detail_info.deleted_at IS NULL").
+		Where("movie_detail_info.id IS NULL").
+		Scan(&records).Error
+	if err != nil {
+		log.Printf("CleanSearchWithoutDetail Error: %v", err)
+		return 0
+	}
+	if len(records) == 0 {
+		return 0
+	}
+
+	mids := make([]int64, 0, len(records))
+	pidSet := make(map[int64]struct{}, len(records))
+	for _, record := range records {
+		if record.Mid <= 0 {
+			continue
+		}
+		mids = append(mids, record.Mid)
+		if record.Pid > 0 {
+			pidSet[record.Pid] = struct{}{}
+		}
+	}
+	if len(mids) == 0 {
+		return 0
+	}
+
+	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.SearchInfo{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("global_mid IN ?", mids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Printf("CleanSearchWithoutDetail Delete Error: %v", err)
+		return 0
+	}
+
+	if len(pidSet) > 0 {
+		pids := make([]int64, 0, len(pidSet))
+		for pid := range pidSet {
+			pids = append(pids, pid)
+		}
+		if rebuildErr := RebuildSearchTagsByPids(pids...); rebuildErr != nil {
+			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
+		}
+	}
+	clearSearchInfoCachesByPidSet(pidSet)
+	ClearTVBoxListCache()
+	return int64(len(mids))
 }

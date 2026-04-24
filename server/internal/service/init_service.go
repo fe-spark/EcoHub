@@ -30,7 +30,7 @@ func (s *InitService) DefaultDataInit() {
 			&model.MovieMatchKey{},
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.SearchTagItem{},
 			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
-			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{},
+			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
 		)
 	}
 
@@ -89,6 +89,7 @@ func (s *InitService) TableInit() {
 		&model.CronSourceRel{},
 		&model.MappingRule{},
 		&model.CategoryMapping{},
+		&model.SourceCategory{},
 	)
 	if err != nil {
 		log.Println("Database AutoMigrate Failed:", err)
@@ -132,6 +133,9 @@ func (s *InitService) BannersInit() {
 
 func (s *InitService) SpiderInit() {
 	s.FilmSourceInit()
+	if err := SpiderSvc.SyncMasterCategoryTree(); err != nil {
+		log.Printf("[Init] 主站分类同步跳过: %v", err)
+	}
 	s.CollectCrontabInit()
 }
 
@@ -204,19 +208,19 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 func (s *InitService) createDefaultTasks() {
 	task := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
-		Model: 0, State: true, Remark: fmt.Sprintf("每20分钟自动采集已启用站点最近 %d 小时内更新的影片", config.DefaultUpdateTime),
+		Model: 0, State: false, Remark: fmt.Sprintf("每20分钟自动采集已启用站点最近 %d 小时内更新的影片", config.DefaultUpdateTime),
 	}
 	s.registerTask(task)
 
 	recoverTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryWeekSpec,
-		Model: 2, State: true, Remark: "每周日凌晨4点清理采集失败的记录",
+		Model: 2, State: false, Remark: "每周日凌晨4点清理采集失败的记录",
 	}
 	s.registerTask(recoverTask)
 
 	orphanTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryDaySpec,
-		Model: 3, State: true, Remark: "每天凌晨0点清理无主影片的孤儿播放列表",
+		Model: 3, State: false, Remark: "每天凌晨0点清理无主影片的孤儿播放列表",
 	}
 	s.registerTask(orphanTask)
 }
