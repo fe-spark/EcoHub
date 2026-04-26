@@ -39,6 +39,10 @@ var retryBackoffs = []time.Duration{
 	5 * time.Second,
 }
 
+const (
+	slaveSourceConcurrencyWhileMasterOn = 1
+)
+
 // activeTasks 存储当前活跃采集任务的信息
 var activeTasks sync.Map
 
@@ -174,11 +178,78 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 	}
 }
 
+func getSourcePageConcurrency(s *model.FilmSource) int {
+	limit := config.MAXGoroutine
+	if limit <= 0 {
+		limit = 1
+	}
+	return limit
+}
+
+func splitSourcesByGrade(sources []model.FilmSource) ([]model.FilmSource, []model.FilmSource) {
+	masters := make([]model.FilmSource, 0, len(sources))
+	slaves := make([]model.FilmSource, 0, len(sources))
+	for _, src := range sources {
+		if src.Grade == model.MasterCollect {
+			masters = append(masters, src)
+			continue
+		}
+		slaves = append(slaves, src)
+	}
+	return masters, slaves
+}
+
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	if len(sources) == 0 {
 		return
 	}
-	limit := config.MAXGoroutine
+	masters, slaves := splitSourcesByGrade(sources)
+	if len(masters) > 0 {
+		masterLimit := min(len(masters), config.MAXGoroutine)
+		if masterLimit <= 0 {
+			masterLimit = 1
+		}
+		slaveLimit := 0
+		globalLimit := config.MAXGoroutine
+		if globalLimit <= 0 {
+			globalLimit = 1
+		}
+		availableForSlaves := globalLimit - masterLimit
+		if availableForSlaves > 0 {
+			slaveLimit = min(availableForSlaves, slaveSourceConcurrencyWhileMasterOn)
+		}
+
+		log.Printf("[%s] 主站优先：主站并发=%d，附属站并发=%d", tag, masterLimit, slaveLimit)
+
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runSourcesGroupWithLimit(masters, h, tag, masterLimit)
+		}()
+		if len(slaves) > 0 && slaveLimit > 0 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				runSourcesGroupWithLimit(slaves, h, tag, slaveLimit)
+			}()
+		}
+		wg.Wait()
+		if len(slaves) > 0 && slaveLimit == 0 {
+			log.Printf("[%s] 主站优先：当前并发位已被主站占满，主站完成后顺序补跑 %d 个附属站任务", tag, len(slaves))
+			runSourcesGroupWithLimit(slaves, h, tag, 1)
+		}
+		return
+	}
+	if len(slaves) > 0 {
+		runSourcesGroupWithLimit(slaves, h, tag, config.MAXGoroutine)
+	}
+}
+
+func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int) {
+	if len(sources) == 0 {
+		return
+	}
 	if limit <= 0 {
 		limit = 1
 	}
@@ -258,8 +329,9 @@ func HandleCollect(id string, h int) error {
 	}
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
+	pageWorkerLimit := getSourcePageConcurrency(s)
 	interrupted := false
-	if pageCount <= config.MAXGoroutine*2 {
+	if pageCount <= pageWorkerLimit*2 {
 		for i := 1; i <= pageCount; i++ {
 			select {
 			case <-ctx.Done():
@@ -274,7 +346,7 @@ func HandleCollect(id string, h int) error {
 			}
 		}
 	} else {
-		ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
+		ConcurrentPageSpider(ctx, pageCount, pageWorkerLimit, s, h, collectFilm)
 	}
 	if interrupted {
 		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
@@ -428,14 +500,17 @@ func collectFilmById(ids string, s *model.FilmSource) error {
 }
 
 // ConcurrentPageSpider 并发分页采集, 不限类型
-func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource, h int, collectFunc func(ctx context.Context, s *model.FilmSource, hour, pageNumber int)) {
+func ConcurrentPageSpider(ctx context.Context, capacity int, workerLimit int, s *model.FilmSource, h int, collectFunc func(ctx context.Context, s *model.FilmSource, hour, pageNumber int)) {
 	// 开启协程并发执行
 	ch := make(chan int, capacity)
 	for i := 1; i <= capacity; i++ {
 		ch <- i
 	}
 	close(ch)
-	GoroutineNum := min(capacity, config.MAXGoroutine)
+	if workerLimit <= 0 {
+		workerLimit = 1
+	}
+	GoroutineNum := min(capacity, workerLimit)
 	// waitCh 必须带缓冲(容量=GoroutineNum)：ctx 取消时等待循环提前退出，
 	// worker 仍会执行 waitCh<-0，无缓冲则永久阻塞导致 goroutine 泄漏
 	waitCh := make(chan int, GoroutineNum)

@@ -96,8 +96,10 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	if masterLookup || masterUriChanged {
 		filmrepo.RefreshMasterDataCaches()
-		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
-			return syncErr
+		if source.Grade == model.MasterCollect && source.State {
+			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
+				return syncErr
+			}
 		}
 	}
 	if source.Grade == model.MasterCollect && source.State && old.State != source.State {

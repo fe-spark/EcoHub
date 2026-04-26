@@ -270,7 +270,6 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		return nil
 	}
 
-	var refreshInfos []model.SearchInfo
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		keyToMid, err := saveSearchInfosAndMappingsTx(tx, infoList)
 		if err != nil {
@@ -282,11 +281,7 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
 			return err
 		}
-		refreshInfos = reloadSearchInfosByContentKeysTx(tx, buildContentKeys(infoList))
-		if len(refreshInfos) == 0 {
-			return nil
-		}
-		return RefreshPlayFromSummaryBySearchInfosTx(tx, refreshInfos)
+		return nil
 	}); err != nil {
 		return err
 	}
