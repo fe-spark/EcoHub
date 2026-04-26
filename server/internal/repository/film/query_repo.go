@@ -582,10 +582,7 @@ func calcMetaScore(current, candidate model.SearchInfo) int {
 }
 
 func freshnessBoost(candidate model.SearchInfo) int {
-	stamp := candidate.LatestSourceStamp
-	if stamp <= 0 {
-		stamp = candidate.UpdateStamp
-	}
+	stamp := candidate.UpdateStamp
 	if stamp <= 0 {
 		return 0
 	}
@@ -634,12 +631,6 @@ func rankRelatedCandidates(current model.SearchInfo, candidates []model.SearchIn
 	slices.SortFunc(scored, func(a, b relatedCandidateScore) int {
 		if a.Score != b.Score {
 			return b.Score - a.Score
-		}
-		if a.Movie.LatestSourceStamp != b.Movie.LatestSourceStamp {
-			if a.Movie.LatestSourceStamp < b.Movie.LatestSourceStamp {
-				return 1
-			}
-			return -1
 		}
 		if a.Movie.UpdateStamp != b.Movie.UpdateStamp {
 			if a.Movie.UpdateStamp < b.Movie.UpdateStamp {
@@ -946,16 +937,13 @@ func applyPlotTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 
 func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 	if value == "" {
-		value = "latest_source_stamp"
+		value = "update_stamp"
 	}
 	column, allowed := allowedSearchSortColumns[value]
 	if !allowed {
-		column = allowedSearchSortColumns["latest_source_stamp"]
+		column = allowedSearchSortColumns["update_stamp"]
 	}
-	if strings.EqualFold(column, "collect_stamp") {
-		return query.Order("collect_stamp DESC, mid DESC")
-	}
-	if strings.EqualFold(column, "latest_source_stamp") {
+	if strings.EqualFold(column, "update_stamp") {
 		return query.Order(latestUpdateOrderSQL)
 	}
 	if strings.EqualFold(column, "year") {

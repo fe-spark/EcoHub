@@ -12,22 +12,21 @@ import (
 var searchInfoUpsertUpdateColumns = []string{
 	"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
 	"series_key", "area", "language", "year", "initial", "score",
-	"update_stamp", "latest_source_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp",
+	"update_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp",
 	"picture", "picture_slide", "actor", "director", "blurb", "updated_at", "deleted_at",
 }
 
 var initializedPids sync.Map
 
-var defaultSortTagStrings = []string{"最近更新:latest_source_stamp", "人气:hits", "评分:score", "时间:year"}
+var defaultSortTagStrings = []string{"最近更新:update_stamp", "人气:hits", "评分:score", "时间:year"}
 
-const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC, mid DESC"
+const latestUpdateOrderSQL = "update_stamp DESC, mid DESC"
 
 var allowedSearchSortColumns = map[string]string{
-	"latest_source_stamp": "latest_source_stamp",
-	"update_stamp":        "update_stamp",
-	"hits":                "hits",
-	"score":               "score",
-	"year":                "year",
+	"update_stamp": "update_stamp",
+	"hits":         "hits",
+	"score":        "score",
+	"year":         "year",
 }
 
 // ExistSearchTable 检查搜索表是否存在

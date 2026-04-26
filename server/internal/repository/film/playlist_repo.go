@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -74,11 +73,8 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 }
 
 func refreshSearchInfosByPlaylists(sourceID string, details []model.MovieDetail) error {
-	infos, latestByMid, err := loadMatchedSearchInfosByDetails(details)
+	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
-		return err
-	}
-	if err := refreshLatestSourceStampByMids(latestByMid); err != nil {
 		return err
 	}
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
@@ -87,7 +83,7 @@ func refreshSearchInfosByPlaylists(sourceID string, details []model.MovieDetail)
 	return RefreshPlayFromSummaryBySearchInfos(infos)
 }
 
-func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.SearchInfo, map[int64]int64, error) {
+func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.SearchInfo, error) {
 	type detailLookup struct {
 		detail model.MovieDetail
 		keys   []string
@@ -95,7 +91,6 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 
 	lookups := make([]detailLookup, 0, len(details))
 	allKeys := make([]string, 0, len(details)*4)
-	latestByMid := make(map[int64]int64)
 
 	for _, detail := range details {
 		lookupKeys := BuildPlaylistMovieKeys(detail)
@@ -107,7 +102,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 	}
 
 	if len(lookups) == 0 {
-		return nil, latestByMid, nil
+		return nil, nil
 	}
 
 	midsByLookupKey := loadMidCandidatesByMatchKeys(allKeys)
@@ -118,7 +113,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 		}
 	}
 	if len(matchedMidSet) == 0 {
-		return nil, latestByMid, nil
+		return nil, nil
 	}
 
 	matchedMids := make([]int64, 0, len(matchedMidSet))
@@ -128,10 +123,10 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 
 	var candidates []model.SearchInfo
 	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(candidates) == 0 {
-		return nil, latestByMid, nil
+		return nil, nil
 	}
 
 	infoByMid := make(map[int64]model.SearchInfo, len(candidates))
@@ -142,11 +137,6 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 	ordered := make([]model.SearchInfo, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
-		stamp, err := time.ParseInLocation(time.DateTime, item.detail.UpdateTime, time.Local)
-		if err != nil {
-			stamp = time.Time{}
-		}
-
 		matched := make(map[int64]struct{}, 2)
 		for _, key := range item.keys {
 			candidateMids := midsByLookupKey[key]
@@ -160,9 +150,6 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 		}
 
 		for mid := range matched {
-			if stampUnix := stamp.Unix(); stampUnix > latestByMid[mid] {
-				latestByMid[mid] = stampUnix
-			}
 			if _, ok := seenMid[mid]; ok {
 				continue
 			}
@@ -171,7 +158,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 		}
 	}
 
-	return ordered, latestByMid, nil
+	return ordered, nil
 }
 
 func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) error {
@@ -202,40 +189,6 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		}
 		return nil
 	})
-}
-
-func refreshLatestSourceStampByMids(latestByMid map[int64]int64) error {
-	if len(latestByMid) == 0 {
-		return nil
-	}
-
-	updatedPids := make(map[int64]struct{}, len(latestByMid))
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		for mid, stamp := range latestByMid {
-			if mid <= 0 || stamp <= 0 {
-				continue
-			}
-			var info model.SearchInfo
-			if err := tx.Select("pid").Where("mid = ?", mid).First(&info).Error; err != nil {
-				return err
-			}
-			if err := tx.Model(&model.SearchInfo{}).
-				Where("mid = ?", mid).
-				Where("latest_source_stamp < ? OR latest_source_stamp IS NULL", stamp).
-				Update("latest_source_stamp", stamp).Error; err != nil {
-				return err
-			}
-			if info.Pid > 0 {
-				updatedPids[info.Pid] = struct{}{}
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	clearSearchInfoCachesByPidSet(updatedPids)
-	return nil
 }
 
 func DeletePlaylistBySourceId(sourceID string) error {
