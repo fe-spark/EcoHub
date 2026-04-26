@@ -79,6 +79,8 @@ export default function CollectManagePageView() {
   const [form] = Form.useForm();
   const currentGrade = Form.useWatch("grade", form);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [submittingAdd, setSubmittingAdd] = useState(false);
+  const [submittingEdit, setSubmittingEdit] = useState(false);
 
   const [clearOpen, setClearOpen] = useState(false);
   const [password, setPassword] = useState("");
@@ -235,27 +237,37 @@ export default function CollectManagePageView() {
   };
 
   const onAddFinish = async (values: any) => {
-    const resp = await ApiPost("/manage/collect/add", values);
-    if (resp.code === 0) {
-      message.success(resp.msg);
-      setAddOpen(false);
-      getCollectList();
-    } else {
-      message.error(resp.msg);
+    setSubmittingAdd(true);
+    try {
+      const resp = await ApiPost("/manage/collect/add", values);
+      if (resp.code === 0) {
+        message.success(resp.msg);
+        setAddOpen(false);
+        getCollectList();
+      } else {
+        message.error(resp.msg);
+      }
+    } finally {
+      setSubmittingAdd(false);
     }
   };
 
   const onEditFinish = async (values: any) => {
-    const resp = await ApiPost("/manage/collect/update", {
-      ...values,
-      id: editingId,
-    });
-    if (resp.code === 0) {
-      message.success(resp.msg);
-      setEditOpen(false);
-      getCollectList();
-    } else {
-      message.error(resp.msg);
+    setSubmittingEdit(true);
+    try {
+      const resp = await ApiPost("/manage/collect/update", {
+        ...values,
+        id: editingId,
+      });
+      if (resp.code === 0) {
+        message.success(resp.msg);
+        setEditOpen(false);
+        getCollectList();
+      } else {
+        message.error(resp.msg);
+      }
+    } finally {
+      setSubmittingEdit(false);
     }
   };
 
@@ -542,7 +554,11 @@ export default function CollectManagePageView() {
       description="统一管理主站、附属站和批量采集流程，随时查看站点状态与任务运行情况。"
       actions={
         <div className={styles.heroActions}>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openAddDialog}
+          >
             添加采集站
           </Button>
           <Button
@@ -571,7 +587,11 @@ export default function CollectManagePageView() {
               一键终止
             </Button>
           </Popconfirm>
-          <Button danger icon={<DeleteOutlined />} onClick={() => setClearOpen(true)}>
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => setClearOpen(true)}
+          >
             清空数据
           </Button>
         </div>
@@ -601,6 +621,7 @@ export default function CollectManagePageView() {
         </div>
       }
       panelClassName={styles.tablePanel}
+      panelless
     >
       <section className={styles.tableSection}>
         <div className={styles.sectionHeader}>
@@ -626,16 +647,30 @@ export default function CollectManagePageView() {
       <Modal
         title="添加采集站点"
         open={addOpen}
-        onCancel={() => setAddOpen(false)}
+        onCancel={() => {
+          if (!submittingAdd) setAddOpen(false);
+        }}
         onOk={() => form.submit()}
+        confirmLoading={submittingAdd}
+        closable={!submittingAdd}
+        maskClosable={!submittingAdd}
         footer={[
           <Button key="test" type="dashed" onClick={testApi}>
             测试接口
           </Button>,
-          <Button key="cancel" onClick={() => setAddOpen(false)}>
+          <Button
+            key="cancel"
+            onClick={() => setAddOpen(false)}
+            disabled={submittingAdd}
+          >
             取消
           </Button>,
-          <Button key="ok" type="primary" onClick={() => form.submit()}>
+          <Button
+            key="ok"
+            type="primary"
+            onClick={() => form.submit()}
+            loading={submittingAdd}
+          >
             添加
           </Button>,
         ]}
@@ -648,16 +683,30 @@ export default function CollectManagePageView() {
       <Modal
         title="修改分类信息"
         open={editOpen}
-        onCancel={() => setEditOpen(false)}
+        onCancel={() => {
+          if (!submittingEdit) setEditOpen(false);
+        }}
         onOk={() => form.submit()}
+        confirmLoading={submittingEdit}
+        closable={!submittingEdit}
+        maskClosable={!submittingEdit}
         footer={[
           <Button key="test" type="dashed" onClick={testApi}>
             测试接口
           </Button>,
-          <Button key="cancel" onClick={() => setEditOpen(false)}>
+          <Button
+            key="cancel"
+            onClick={() => setEditOpen(false)}
+            disabled={submittingEdit}
+          >
             取消
           </Button>,
-          <Button key="ok" type="primary" onClick={() => form.submit()}>
+          <Button
+            key="ok"
+            type="primary"
+            onClick={() => form.submit()}
+            loading={submittingEdit}
+          >
             更新
           </Button>,
         ]}

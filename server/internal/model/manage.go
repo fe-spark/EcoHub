@@ -15,16 +15,16 @@ type BasicConfig struct {
 
 // Banner 首页横幅信息
 type Banner struct {
-	Id           string `gorm:"primaryKey;size:64" json:"id"`                 // 唯一标识
-	Mid          int64  `gorm:"index" json:"mid"`                             // 绑定所属影片Id
-	Name         string `gorm:"size:128" json:"name"`                         // 影片名称
-	Year         int64  `json:"year"`                                         // 上映年份
-	CName        string `gorm:"size:64" json:"cName"`                         // 分类名称
-	Poster       string `gorm:"size:512" json:"poster"`                       // 竖版海报图
-	Picture      string `gorm:"size:512" json:"picture"`                      // 竖版封面图
-	PictureSlide string `gorm:"size:512" json:"pictureSlide"`                 // 横版幻灯图
-	Remark       string `gorm:"size:128" json:"remark"`                       // 更新状态描述信息
-	Sort         int64  `json:"sort"`                                         // 排序分値
+	Id           string `gorm:"primaryKey;size:64" json:"id"` // 唯一标识
+	Mid          int64  `gorm:"index" json:"mid"`             // 绑定所属影片Id
+	Name         string `gorm:"size:128" json:"name"`         // 影片名称
+	Year         int64  `json:"year"`                         // 上映年份
+	CName        string `gorm:"size:64" json:"cName"`         // 分类名称
+	Poster       string `gorm:"size:512" json:"poster"`       // 竖版海报图
+	Picture      string `gorm:"size:512" json:"picture"`      // 竖版封面图
+	PictureSlide string `gorm:"size:512" json:"pictureSlide"` // 横版幻灯图
+	Remark       string `gorm:"size:128" json:"remark"`       // 更新状态描述信息
+	Sort         int64  `json:"sort"`                         // 排序分値
 }
 
 func (Banner) TableName() string {
@@ -54,10 +54,11 @@ type SiteConfigRecord struct {
 // MappingRule 定义从采集源到标准系统的转换规则 (地区/语言/标签黑名单)
 type MappingRule struct {
 	gorm.Model
-	Group   string `gorm:"uniqueIndex:uidx_group_raw;size:32"`  // Area, Language, Blacklist
-	Raw     string `gorm:"uniqueIndex:uidx_group_raw;size:128"` // 原始值 (采集源)
-	Target  string `gorm:"size:128"`                            // 标准值 (如果为空则视为黑名单项)
-	Remarks string `gorm:"size:256"`                            // 备注
+	Group     string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:32" json:"group"`                   // Area, Language, Blacklist
+	Raw       string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:128" json:"raw"`                    // 原始值 (采集源)
+	Target    string `gorm:"size:128" json:"target"`                                                       // 标准值 (如果为空则视为黑名单项)
+	MatchType string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:16;default:exact" json:"matchType"` // exact | regex
+	Remarks   string `gorm:"size:256" json:"remarks"`                                                      // 备注
 }
 
 func (MappingRule) TableName() string {

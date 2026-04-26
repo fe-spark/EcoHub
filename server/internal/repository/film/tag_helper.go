@@ -21,6 +21,9 @@ func HandleTagStr(title string, withAll bool, tags ...string) []map[string]strin
 
 	for _, t := range tags {
 		if sl := strings.Split(t, ":"); len(sl) > 1 {
+			if strings.TrimSpace(sl[0]) == "" || strings.TrimSpace(sl[1]) == "" {
+				continue
+			}
 			list = append(list, map[string]string{"Name": sl[0], "Value": sl[1]})
 		}
 	}
@@ -30,6 +33,9 @@ func HandleTagStr(title string, withAll bool, tags ...string) []map[string]strin
 
 func AppendSearchOption(options []map[string]string, option map[string]string) []map[string]string {
 	if option == nil {
+		return options
+	}
+	if strings.TrimSpace(option["Value"]) == "" && strings.TrimSpace(option["Name"]) != "全部" {
 		return options
 	}
 	for _, item := range options {
@@ -135,7 +141,10 @@ func isAbnormalTextTagValue(value string, minLen int, maxLen int) bool {
 	}
 
 	for _, r := range runes {
-		if unicode.IsDigit(r) || unicode.IsLetter(r) {
+		if unicode.IsDigit(r) {
+			return true
+		}
+		if r <= unicode.MaxASCII && unicode.IsLetter(r) {
 			return true
 		}
 		if strings.ContainsRune(",|/\\_+&.=()[]{}<>-", r) {
@@ -159,7 +168,7 @@ func SplitSearchTagItems(tagType string, items []model.SearchTagItem) ([]model.S
 	return normalItems, abnormalItems
 }
 
-func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string) []map[string]string {
+func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string, includeOthers bool) []map[string]string {
 	normalItems, abnormalItems := SplitSearchTagItems(tagType, items)
 	items = normalItems
 	if strings.EqualFold(tagType, "Year") {
@@ -172,10 +181,13 @@ func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky st
 	}
 	displayItems := AppendStickySearchTag(items, sticky, topCount)
 	hasMore := len(items) > SearchTagDisplayLimit
-	hasOthers := hasMore || len(abnormalItems) > 0
+	hasOthers := hasMore || len(abnormalItems) > 0 || includeOthers
 
 	tagStrs := make([]string, 0, len(displayItems))
 	for _, item := range displayItems {
+		if strings.TrimSpace(item.Value) == "" && strings.TrimSpace(item.Name) != "全部" {
+			continue
+		}
 		tagStrs = append(tagStrs, fmt.Sprintf("%s:%s", item.Name, item.Value))
 	}
 

@@ -50,6 +50,18 @@ func SetupRouter() *gin.Engine {
 			banner.POST(`/del`, handler.ManageHd.BannerDel)
 		}
 
+		// 映射规则管理
+		mapping := manageRoute.Group(`/mapping`)
+		{
+			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
+			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
+			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
+			mapping.POST(`/rule/add`, handler.ManageHd.MappingRuleAdd)
+			mapping.POST(`/rule/update`, handler.ManageHd.MappingRuleUpdate)
+			mapping.POST(`/rule/del`, handler.ManageHd.MappingRuleDel)
+			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)
+		}
+
 		// 用户相关
 		userRoute := manageRoute.Group(`/user`)
 		{

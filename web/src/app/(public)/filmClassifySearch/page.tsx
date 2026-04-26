@@ -12,7 +12,10 @@ async function getFilmClassifySearchData(params: Record<string, string>) {
     return { data: null, error: response.msg || "分类筛选数据获取失败" };
   } catch (error) {
     console.error("fetch film classify search data error:", error);
-    return { data: null, error: error instanceof Error ? error.message : "分类筛选数据获取失败" };
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "分类筛选数据获取失败",
+    };
   }
 }
 
@@ -33,8 +36,22 @@ export default async function FilmClassifySearchPage({
 
   const { data, error } = await getFilmClassifySearchData(currentParams);
   if (!data) {
-    return <Alert type="error" showIcon message={error || "分类筛选数据获取失败"} />;
+    return (
+      <Alert type="error" showIcon message={error || "分类筛选数据获取失败"} />
+    );
   }
 
-  return <FilmClassifySearchPageView data={data} currentParams={currentParams} />;
+  if (!data?.title) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="当前分类已失效，请从最新分类导航重新进入"
+      />
+    );
+  }
+
+  return (
+    <FilmClassifySearchPageView data={data} currentParams={currentParams} />
+  );
 }

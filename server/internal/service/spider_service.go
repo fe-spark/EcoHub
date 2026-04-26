@@ -6,12 +6,28 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 )
 
 type SpiderService struct{}
 
 var SpiderSvc = new(SpiderService)
+
+func clearCategorySyncRedisCaches() {
+	repository.ClearCategoryCache()
+	filmrepo.ClearAllSearchTagsCache()
+	filmrepo.ClearTVBoxListCache()
+	repository.ClearIndexPageCache()
+}
+
+func finalizeCategorySync() {
+	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
+		log.Printf("[SpiderService] 强制重建派生数据失败: %v", err)
+	}
+	repository.RefreshCategoryCache()
+	clearCategorySyncRedisCaches()
+}
 
 // StartCollect 执行对指定站点的采集任务
 func (s *SpiderService) StartCollect(id string, h int) error {
@@ -63,6 +79,7 @@ func (s *SpiderService) FilmClassCollect() error {
 			if err := spider.ResetCategory(&fs); err != nil {
 				return err
 			}
+			finalizeCategorySync()
 			return nil
 		}
 	}
@@ -83,6 +100,7 @@ func (s *SpiderService) SyncMasterCategoryTree() error {
 			log.Printf("[SpiderService] 主站分类同步失败: name=%s id=%s err=%v", fs.Name, fs.Id, err)
 			return err
 		}
+		finalizeCategorySync()
 		log.Printf("[SpiderService] 主站分类同步完成: name=%s id=%s", fs.Name, fs.Id)
 		return nil
 	}

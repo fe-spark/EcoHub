@@ -71,6 +71,8 @@ type MovieUrlInfo struct {
 // MovieDetail 影片详情信息
 type MovieDetail struct {
 	Id              int64               `json:"id"`           // 影片Id
+	RawCid          int64               `json:"rawCid"`       // 原始来源分类ID
+	RawPid          int64               `json:"rawPid"`       // 原始来源一级分类ID
 	Cid             int64               `json:"cid"`          // 分类ID
 	Pid             int64               `json:"pid"`          // 一级分类ID
 	Name            string              `json:"name"`         // 片名
@@ -177,13 +179,14 @@ type Tag struct {
 
 // SearchTagsVO 搜索标签请求参数
 type SearchTagsVO struct {
-	Pid      int64  `json:"pid"`
-	Cid      int64  `json:"cid"`
-	Plot     string `json:"plot"`
-	Area     string `json:"area"`
-	Language string `json:"language"`
-	Year     string `json:"year"`
-	Sort     string `json:"sort"`
+	Pid              int64  `json:"pid"`
+	Cid              int64  `json:"cid"`
+	OriginalCategory string `json:"originalCategory"`
+	Plot             string `json:"plot"`
+	Area             string `json:"area"`
+	Language         string `json:"language"`
+	Year             string `json:"year"`
+	Sort             string `json:"sort"`
 }
 
 // SearchVo 影片信息搜索参数

@@ -48,6 +48,140 @@ func ApplyCategoryFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
 	}
 }
 
+func applyOriginalCategoryFilter(query *gorm.DB, pid int64, value string) *gorm.DB {
+	pid = support.ResolveCategoryID(pid)
+	value = strings.TrimSpace(value)
+	if pid <= 0 || value == "" {
+		return query
+	}
+
+	scopes, err := loadOriginalCategoryScopes(pid)
+	if err != nil {
+		log.Printf("applyOriginalCategoryFilter Error: %v", err)
+		return query
+	}
+	targetScopes := scopes[value]
+	if len(targetScopes) == 0 {
+		return query.Where("1 = 0")
+	}
+
+	condition := db.Mdb
+	for _, scope := range targetScopes {
+		if len(scope.Names) == 0 {
+			continue
+		}
+		condition = condition.Or("(source_id = ? AND c_name IN ?)", scope.SourceID, scope.Names)
+	}
+	return query.Where(condition)
+}
+
+type originalCategoryScope struct {
+	SourceID string
+	RootName string
+	Names    []string
+}
+
+type originalCategoryRootRow struct {
+	SourceID     string
+	SourceTypeID int64
+	RootName     string
+}
+
+func loadOriginalCategoryScopes(pid int64) (map[string][]originalCategoryScope, error) {
+	pid = support.ResolveCategoryID(pid)
+	if pid <= 0 {
+		return map[string][]originalCategoryScope{}, nil
+	}
+
+	var rootRows []originalCategoryRootRow
+	if err := db.Mdb.Model(&model.SourceCategory{}).
+		Select("source_categories.source_id, source_categories.source_type_id, source_categories.raw_name AS root_name").
+		Joins("JOIN category_mappings ON category_mappings.source_id = source_categories.source_id AND category_mappings.source_type_id = source_categories.source_type_id").
+		Where("source_categories.parent_source_type_id = 0 AND category_mappings.category_id = ?", pid).
+		Order("source_categories.source_id ASC, source_categories.sort ASC, source_categories.id ASC").
+		Scan(&rootRows).Error; err != nil {
+		return nil, err
+	}
+	if len(rootRows) == 0 {
+		return map[string][]originalCategoryScope{}, nil
+	}
+
+	sourceIDs := make([]string, 0, len(rootRows))
+	seenSourceIDs := make(map[string]struct{}, len(rootRows))
+	for _, row := range rootRows {
+		if _, ok := seenSourceIDs[row.SourceID]; ok {
+			continue
+		}
+		seenSourceIDs[row.SourceID] = struct{}{}
+		sourceIDs = append(sourceIDs, row.SourceID)
+	}
+
+	var sourceRows []model.SourceCategory
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).
+		Order("source_id ASC, depth ASC, parent_source_type_id ASC, sort ASC, id ASC").
+		Find(&sourceRows).Error; err != nil {
+		return nil, err
+	}
+
+	childrenBySourceRoot := make(map[string]map[int64][]string)
+	for _, row := range sourceRows {
+		if row.ParentSourceTypeId <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(row.RawName)
+		if name == "" {
+			continue
+		}
+		rootMap, ok := childrenBySourceRoot[row.SourceId]
+		if !ok {
+			rootMap = make(map[int64][]string)
+			childrenBySourceRoot[row.SourceId] = rootMap
+		}
+		rootMap[row.ParentSourceTypeId] = append(rootMap[row.ParentSourceTypeId], name)
+	}
+
+	scopes := make(map[string][]originalCategoryScope)
+	for _, row := range rootRows {
+		rootName := strings.TrimSpace(row.RootName)
+		if rootName == "" {
+			continue
+		}
+		names := []string{rootName}
+		if rootMap, ok := childrenBySourceRoot[row.SourceID]; ok {
+			names = append(names, rootMap[row.SourceTypeID]...)
+		}
+		names = slices.Compact(names)
+		scopes[rootName] = append(scopes[rootName], originalCategoryScope{
+			SourceID: row.SourceID,
+			RootName: rootName,
+			Names:    names,
+		})
+	}
+
+	return scopes, nil
+}
+
+func GetOriginalCategoryOptions(pid int64) []string {
+	scopes, err := loadOriginalCategoryScopes(pid)
+	if err != nil {
+		log.Printf("GetOriginalCategoryOptions Error: %v", err)
+		return nil
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(scopes))
+	for name := range scopes {
+		result = append(result, name)
+	}
+	if len(result) <= 1 {
+		return nil
+	}
+	slices.Sort(result)
+	return result
+}
+
 func resolveCategoryFieldValue(field string, id int64) (string, int64) {
 	resolvedID := support.ResolveCategoryID(id)
 	if field == "cid" {
@@ -756,13 +890,13 @@ func applyYearTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where("year = 0")
+		query = query.Where("year <= 0 OR year IS NULL")
 		if len(topVals) > 0 {
-			query = query.Or("year <> 0 AND year NOT IN ?", topVals)
+			query = query.Or("year > 0 AND year NOT IN ?", topVals)
 		}
 		return query
 	case model.TagUnknownValue:
-		return query.Where("year = 0")
+		return query.Where("year <= 0 OR year IS NULL")
 	default:
 		return query.Where("year = ?", value)
 	}
@@ -829,6 +963,7 @@ func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 
 func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	query = ApplyCategoryFilter(query, st.Pid, st.Cid)
+	query = applyOriginalCategoryFilter(query, st.Pid, st.OriginalCategory)
 
 	if st.Year != "" {
 		query = applyYearTagFilter(query, st.Pid, "Year", st.Year)

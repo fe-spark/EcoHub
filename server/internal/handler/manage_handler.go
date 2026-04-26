@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"server/internal/model"
@@ -149,6 +150,101 @@ func (h *ManageHandler) BannerDel(c *gin.Context) {
 		}
 	}
 	dto.Failed("海报信息删除失败", c)
+}
+
+// ------------------------------------------------------ 映射规则管理 ------------------------------------------------------
+
+// MappingRuleGroups 获取映射规则分组列表
+func (h *ManageHandler) MappingRuleGroups(c *gin.Context) {
+	dto.Success(service.ManageSvc.ListMappingRuleGroups(), "映射规则分组获取成功", c)
+}
+
+// MappingRuleList 获取映射规则分页列表
+func (h *ManageHandler) MappingRuleList(c *gin.Context) {
+	result, err := service.ManageSvc.ListMappingRules(
+		c.DefaultQuery("group", ""),
+		c.DefaultQuery("keyword", ""),
+		dto.GetPageParams(c),
+	)
+	if err != nil {
+		dto.Failed(fmt.Sprintf("映射规则获取失败: %v", err), c)
+		return
+	}
+	dto.Success(result, "映射规则获取成功", c)
+}
+
+// MappingRuleReload 重载映射规则缓存
+func (h *ManageHandler) MappingRuleReload(c *gin.Context) {
+	service.ManageSvc.ReloadMappingRules()
+	dto.SuccessOnlyMsg("映射规则已重载", c)
+}
+
+// MappingRuleCheck 检查映射规则冲突
+func (h *ManageHandler) MappingRuleCheck(c *gin.Context) {
+	var rule model.MappingRule
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	result, err := service.ManageSvc.CheckMappingRuleConflict(rule)
+	if err != nil {
+		dto.Failed(fmt.Sprintf("映射规则冲突检查失败: %v", err), c)
+		return
+	}
+	dto.Success(result, "映射规则冲突检查成功", c)
+}
+
+// MappingRuleAdd 新增映射规则
+func (h *ManageHandler) MappingRuleAdd(c *gin.Context) {
+	var rule model.MappingRule
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	if err := service.ManageSvc.CreateMappingRule(rule); err != nil {
+		dto.Failed(fmt.Sprintf("映射规则新增失败: %v", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("映射规则新增成功", c)
+}
+
+// MappingRuleUpdate 更新映射规则
+func (h *ManageHandler) MappingRuleUpdate(c *gin.Context) {
+	var rule model.MappingRule
+	if err := c.ShouldBindJSON(&rule); err != nil {
+		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	if err := service.ManageSvc.UpdateMappingRule(rule); err != nil {
+		dto.Failed(fmt.Sprintf("映射规则更新失败: %v", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("映射规则更新成功", c)
+}
+
+// MappingRuleDel 删除映射规则
+func (h *ManageHandler) MappingRuleDel(c *gin.Context) {
+	var req struct {
+		ID uint `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("映射规则删除参数异常", c)
+		return
+	}
+	if req.ID == 0 {
+		idStr := strings.TrimSpace(c.DefaultQuery("id", ""))
+		if idStr != "" {
+			id, _ := strconv.Atoi(idStr)
+			if id > 0 {
+				req.ID = uint(id)
+			}
+		}
+	}
+	if err := service.ManageSvc.DeleteMappingRule(req.ID); err != nil {
+		dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("映射规则删除成功", c)
 }
 
 // ------------------------------------------------------ 参数校验 ------------------------------------------------------

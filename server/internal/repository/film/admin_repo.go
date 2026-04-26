@@ -14,6 +14,20 @@ import (
 	"gorm.io/gorm"
 )
 
+func bumpSearchTagsCacheVersion() {
+	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, time.Now().UnixNano(), 0)
+}
+
+func getSearchTagsCacheVersion() string {
+	version, err := db.Rdb.Get(db.Cxt, config.SearchTagsVersionKey).Result()
+	if err == nil && version != "" {
+		return version
+	}
+	version = fmt.Sprintf("%d", time.Now().UnixNano())
+	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, version, 0)
+	return version
+}
+
 func DelFilmSearch(id int64) error {
 	info := GetSearchInfoById(id)
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -180,12 +194,13 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 
 // ClearSearchTagsCache 清除特定分类的所有复合搜索标签缓存
 func ClearSearchTagsCache(pid int64) {
-	pattern := fmt.Sprintf("%s:%d:*", config.SearchTags, pid)
+	pattern := fmt.Sprintf("%s:v*:%d:*", config.SearchTags, pid)
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(ctx) {
 		db.Rdb.Del(ctx, iter.Val())
 	}
+	bumpSearchTagsCacheVersion()
 }
 
 // ClearTVBoxConfigCache 清除 TVBox 配置缓存
@@ -208,6 +223,7 @@ func ClearAllSearchTagsCache() {
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
+	bumpSearchTagsCacheVersion()
 	ClearTVBoxConfigCache()
 }
 
@@ -249,11 +265,15 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 
 func RefreshMasterDataCaches() {
 	time.Sleep(100 * time.Millisecond)
-	refreshCategoryCaches()
+	if err := ForceRebuildDerivedData(); err != nil {
+		log.Printf("ForceRebuildDerivedData Error: %v", err)
+	}
+	support.InitMappingEngine()
+	support.TouchCategoryVersion()
 	support.ClearIndexPageCache()
 	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 	ClearTVBoxListCache()
-	support.InitMappingEngine()
+	ClearTVBoxConfigCache()
 }
 
 // CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录

@@ -1,16 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import {
-  Table,
-  Tag,
-  Switch,
-  Button,
-  Modal,
-  Input,
-  Form,
-  Tooltip,
-} from "antd";
+import { Table, Tag, Switch, Button, Modal, Input, Form, Tooltip } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -109,7 +100,13 @@ export default function CronManagePageView() {
       align: "center",
       render: (v) => (
         <Tag color="cyan">
-          {v === 0 ? "自动更新" : v === 1 ? "自定义更新" : v === 2 ? "采集重试" : "孤儿清理"}
+          {v === 0
+            ? "自动更新"
+            : v === 1
+              ? "自定义更新"
+              : v === 2
+                ? "采集重试"
+                : "孤儿清理"}
         </Tag>
       ),
     },
@@ -162,6 +159,7 @@ export default function CronManagePageView() {
       eyebrow="采集中心"
       title="计划任务"
       description="统一维护后台自动更新、采集重试和清理类计划任务。"
+      panelless
     >
       <Table
         columns={columns}
@@ -187,7 +185,11 @@ export default function CronManagePageView() {
           <Form.Item label="任务标识" name="id">
             <Input disabled />
           </Form.Item>
-          <Form.Item label="执行时间" name="spec" rules={[{ required: true, message: "请输入Cron表达式" }]}> 
+          <Form.Item
+            label="执行时间"
+            name="spec"
+            rules={[{ required: true, message: "请输入Cron表达式" }]}
+          >
             <Input placeholder="例如: 0 */20 * * * ? (每20分钟执行一次)" />
           </Form.Item>
         </Form>

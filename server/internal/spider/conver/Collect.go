@@ -15,10 +15,15 @@ const macCMSGroupSeparator = "$$$"
 	统一转化为内部结构体
 */
 
-// GenCategoryTree 将采集站分类列表直接构建为两层树形结构
+// GenCategoryTree 将采集站分类列表直接构建为两层树形结构。
+func GenCategoryTree(list []model.FilmClass) *model.CategoryTree {
+	return GenCategoryTreeWithParentHints(list, nil)
+}
+
+// GenCategoryTreeWithParentHints 在原始 type_pid 缺失时，允许调用方补充父级推断结果。
 // 第一层（pid=0）直接作为顶级大类，第二层作为对应大类的子类。
 // 忽略资讯/明星等噪音分类。
-func GenCategoryTree(list []model.FilmClass) *model.CategoryTree {
+func GenCategoryTreeWithParentHints(list []model.FilmClass, parentHints map[int64]int64) *model.CategoryTree {
 	root := &model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
 		Children: make([]*model.CategoryTree, 0),
@@ -31,10 +36,16 @@ func GenCategoryTree(list []model.FilmClass) *model.CategoryTree {
 
 	// 第一遍：初始化所有节点
 	for _, c := range list {
+		pid := c.Pid
+		if pid == 0 && parentHints != nil {
+			if hintedPid, ok := parentHints[c.ID]; ok && hintedPid != c.ID {
+				pid = hintedPid
+			}
+		}
 		lowName := strings.ToLower(c.Name)
 		show := !utils.ContainsAny(lowName, noiseWords)
 		nodes[c.ID] = &model.CategoryTree{
-			Id: c.ID, Pid: c.Pid, Name: c.Name, Show: show,
+			Id: c.ID, Pid: pid, Name: c.Name, Show: show,
 			Children: make([]*model.CategoryTree, 0),
 		}
 	}
@@ -45,7 +56,7 @@ func GenCategoryTree(list []model.FilmClass) *model.CategoryTree {
 		if !node.Show {
 			continue
 		}
-		parent, ok := nodes[c.Pid]
+		parent, ok := nodes[node.Pid]
 		if !ok {
 			parent = root
 		}
@@ -97,6 +108,8 @@ func ConvertFilmDetails(details []model.FilmDetail) []model.MovieDetail {
 func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 	md := model.MovieDetail{
 		Id:           detail.VodID,
+		RawCid:       detail.TypeID,
+		RawPid:       detail.TypeID1,
 		Cid:          detail.TypeID,
 		Pid:          detail.TypeID1,
 		Name:         detail.VodName,

@@ -5,7 +5,7 @@
 }
 
 .galleryPanel {
-  padding: 16px;
+  padding: 0;
 }
 
 .headerSection {
@@ -57,7 +57,12 @@
   align-items: center;
   justify-content: center;
   border: 3px dashed var(--ant-color-primary-border, var(--ant-color-primary));
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--ant-color-primary-border, var(--ant-color-primary)) 60%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(
+      in srgb,
+      var(--ant-color-primary-border, var(--ant-color-primary)) 60%,
+      transparent
+    );
   border-radius: 24px;
   pointer-events: none;
   opacity: 0;
@@ -84,7 +89,10 @@
 }
 
 .dragger:hover {
-  border-color: var(--ant-color-primary-border, var(--ant-color-primary)) !important;
+  border-color: var(
+    --ant-color-primary-border,
+    var(--ant-color-primary)
+  ) !important;
   background: var(--ant-color-primary-bg, rgba(79, 127, 223, 0.06)) !important;
 }
 
@@ -142,7 +150,11 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 50%);
+  background: linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.85) 0%,
+    rgba(0, 0, 0, 0) 50%
+  );
   display: flex;
   align-items: flex-end;
   justify-content: center;
@@ -184,7 +196,11 @@
 
 .emptyState {
   padding: 80px 0;
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary, #f5f7fb) 55%, transparent);
+  background: color-mix(
+    in srgb,
+    var(--ant-color-fill-quaternary, #f5f7fb) 55%,
+    transparent
+  );
   border-radius: 16px;
   border: 1px dashed var(--ant-color-border, rgba(0, 0, 0, 0.25));
 }
@@ -197,7 +213,7 @@
 
 @media (max-width: 768px) {
   .galleryPanel {
-    padding: 16px;
+    padding: 0;
   }
 
   .headerSection {
