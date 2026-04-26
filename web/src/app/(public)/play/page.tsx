@@ -38,7 +38,7 @@ export default async function PlayPage({
     : currentTimeValue;
 
   if (!filmId) {
-    return null;
+    return <PlayPageView data={null} filmId="" emptyMessage="未找到影片参数，请返回列表重新进入播放页。" />;
   }
 
   let playPageData: any = null;
@@ -49,7 +49,13 @@ export default async function PlayPage({
   }
 
   if (!playPageData) {
-    return null;
+    return (
+      <PlayPageView
+        data={null}
+        filmId={filmId}
+        emptyMessage="当前影片播放数据不存在或已失效，请切换片源或返回详情页重试。"
+      />
+    );
   }
 
   return (

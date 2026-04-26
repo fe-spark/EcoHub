@@ -118,7 +118,9 @@ export default function FailureRecordPageView() {
       title: "ID",
       dataIndex: "ID",
       width: 60,
-      render: (v) => <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>,
+      render: (v) => (
+        <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>
+      ),
     },
     {
       title: "采集站",
@@ -206,46 +208,46 @@ export default function FailureRecordPageView() {
           <Select
             placeholder="采集来源"
             value={params.originId || undefined}
-          onChange={(v) => setParams({ ...params, originId: v })}
-          options={options.origin?.map((o: any) => ({
-            label: o.name,
-            value: o.value,
-          }))}
-          style={{ width: 160 }}
-          allowClear
-        />
-        <Select
-          placeholder="记录状态"
-          value={params.status}
-          onChange={(v) => setParams({ ...params, status: v })}
-          options={options.status?.map((o: any) => ({
-            label: o.name,
-            value: o.value,
-          }))}
-          style={{ width: 120 }}
-        />
-        <RangePicker
-          showTime
-          onChange={(dates) => {
-            if (dates && dates[0] && dates[1]) {
-              setParams({
-                ...params,
-                beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
-                endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
-              });
-            } else {
-              setParams({ ...params, beginTime: "", endTime: "" });
-            }
-          }}
-        />
-        <Button type="primary" onClick={() => getRecords()}>
-          查询
-        </Button>
+            onChange={(v) => setParams({ ...params, originId: v })}
+            options={options.origin?.map((o: any) => ({
+              label: o.name,
+              value: o.value,
+            }))}
+            style={{ width: 160 }}
+            allowClear
+          />
+          <Select
+            placeholder="记录状态"
+            value={params.status}
+            onChange={(v) => setParams({ ...params, status: v })}
+            options={options.status?.map((o: any) => ({
+              label: o.name,
+              value: o.value,
+            }))}
+            style={{ width: 120 }}
+          />
+          <RangePicker
+            showTime
+            onChange={(dates) => {
+              if (dates && dates[0] && dates[1]) {
+                setParams({
+                  ...params,
+                  beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
+                  endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
+                });
+              } else {
+                setParams({ ...params, beginTime: "", endTime: "" });
+              }
+            }}
+          />
+          <Button type="primary" onClick={() => getRecords()}>
+            查询
+          </Button>
         </div>
       }
       panelClassName={styles.tablePanel}
+      panelless
     >
-
       <Table
         columns={columns}
         dataSource={records}
@@ -267,7 +269,10 @@ export default function FailureRecordPageView() {
           <Popconfirm title="确认清除已处理记录？" onConfirm={handleCleanDone}>
             <Button
               icon={<WarningOutlined />}
-              style={{ color: "var(--ant-color-warning)", borderColor: "var(--ant-color-warning)" }}
+              style={{
+                color: "var(--ant-color-warning)",
+                borderColor: "var(--ant-color-warning)",
+              }}
             >
               清除已处理
             </Button>

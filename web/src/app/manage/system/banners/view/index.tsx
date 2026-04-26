@@ -82,7 +82,9 @@ function resolveEditablePicture(record?: Partial<BannerRecord> | null): string {
   return record.picture || record.poster || record.pictureSlide || "";
 }
 
-function resolvePreviewPicture(record?: BannerRecord | FilmOption | null): string {
+function resolvePreviewPicture(
+  record?: BannerRecord | FilmOption | null,
+): string {
   if (!record) {
     return "";
   }
@@ -232,7 +234,8 @@ export default function BannersPageView() {
   const buildBannerPayload = (values: BannerFormValues): BannerRecord => {
     const nextPicture = values.picture.trim();
     const originalPicture = resolveEditablePicture(currentRow).trim();
-    const shouldSyncAllImages = editorMode === "create" || nextPicture !== originalPicture;
+    const shouldSyncAllImages =
+      editorMode === "create" || nextPicture !== originalPicture;
 
     return {
       id: currentRow?.id || "",
@@ -241,7 +244,9 @@ export default function BannersPageView() {
       cName: values.cName.trim(),
       year: values.year,
       remark: values.remark?.trim() || "",
-      poster: shouldSyncAllImages ? nextPicture : currentRow?.poster || nextPicture,
+      poster: shouldSyncAllImages
+        ? nextPicture
+        : currentRow?.poster || nextPicture,
       picture: nextPicture,
       pictureSlide: shouldSyncAllImages
         ? nextPicture
@@ -261,7 +266,10 @@ export default function BannersPageView() {
   const previewActor = selectedFilm?.actor || "暂无";
   const previewPicture = watchedPicture || resolvePreviewPicture(previewFilm);
 
-  const handleCustomUpload = async (options: any, fieldName: UploadFieldName) => {
+  const handleCustomUpload = async (
+    options: any,
+    fieldName: UploadFieldName,
+  ) => {
     const { file, onSuccess, onError } = options;
     const formData = new FormData();
     formData.append("file", file);
@@ -290,8 +298,12 @@ export default function BannersPageView() {
         message.error("请先搜索并选择要绑定的影片");
         return;
       }
-      const requestPath = editorMode === "create" ? "/manage/banner/add" : "/manage/banner/update";
-      const requestPayload = editorMode === "create" ? payload : { ...currentRow, ...payload };
+      const requestPath =
+        editorMode === "create"
+          ? "/manage/banner/add"
+          : "/manage/banner/update";
+      const requestPayload =
+        editorMode === "create" ? payload : { ...currentRow, ...payload };
       const resp = await ApiPost(requestPath, requestPayload);
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -357,7 +369,10 @@ export default function BannersPageView() {
               onClick={() => openEditEditor(record)}
             />
           </Tooltip>
-          <Popconfirm title="确认删除该轮播图？" onConfirm={() => handleDelete(record.id)}>
+          <Popconfirm
+            title="确认删除该轮播图？"
+            onConfirm={() => handleDelete(record.id)}
+          >
             <Tooltip title="删除">
               <Button
                 type="primary"
@@ -389,15 +404,19 @@ export default function BannersPageView() {
       {previewFilm && (
         <Card size="small" bordered style={{ borderRadius: 12 }}>
           <Flex gap={16} align="flex-start">
-              <div style={{ flexShrink: 0 }}>
-                <AntImage
-                  src={previewPicture}
-                  width={96}
-                  height={132}
-                  style={{ objectFit: "cover", borderRadius: 8 }}
-                />
-              </div>
-            <Space direction="vertical" size={4} style={{ width: "100%", minWidth: 0 }}>
+            <div style={{ flexShrink: 0 }}>
+              <AntImage
+                src={previewPicture}
+                width={96}
+                height={132}
+                style={{ objectFit: "cover", borderRadius: 8 }}
+              />
+            </div>
+            <Space
+              direction="vertical"
+              size={4}
+              style={{ width: "100%", minWidth: 0 }}
+            >
               <Title level={5} style={{ margin: 0 }}>
                 {previewName}
               </Title>
@@ -423,17 +442,29 @@ export default function BannersPageView() {
       </Form.Item>
       <Row gutter={12}>
         <Col span={12}>
-          <Form.Item name="name" label="影片名称" rules={[{ required: true, message: "请输入影片名称" }]}> 
+          <Form.Item
+            name="name"
+            label="影片名称"
+            rules={[{ required: true, message: "请输入影片名称" }]}
+          >
             <Input placeholder="封面卡片展示名称" />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="cName" label="影片分类" rules={[{ required: true, message: "请输入影片分类" }]}> 
+          <Form.Item
+            name="cName"
+            label="影片分类"
+            rules={[{ required: true, message: "请输入影片分类" }]}
+          >
             <Input placeholder="封面卡片展示分类" />
           </Form.Item>
         </Col>
         <Col span={12}>
-          <Form.Item name="year" label="上映年份" rules={[{ required: true, message: "请输入上映年份" }]}> 
+          <Form.Item
+            name="year"
+            label="上映年份"
+            rules={[{ required: true, message: "请输入上映年份" }]}
+          >
             <InputNumber min={0} max={2100} style={{ width: "100%" }} />
           </Form.Item>
         </Col>
@@ -462,12 +493,22 @@ export default function BannersPageView() {
           },
         ]}
       />
-      <Form.Item label="影片封面" extra="统一使用采集接口的 vod_pic 字段，可手动替换，但只维护这一张图。">
+      <Form.Item
+        label="影片封面"
+        extra="统一使用采集接口的 vod_pic 字段，可手动替换，但只维护这一张图。"
+      >
         <Space.Compact style={{ width: "100%" }}>
-          <Form.Item name="picture" noStyle rules={[{ required: true, message: "请上传或填写封面图" }]}> 
+          <Form.Item
+            name="picture"
+            noStyle
+            rules={[{ required: true, message: "请上传或填写封面图" }]}
+          >
             <Input placeholder="输入封面访问 URL" />
           </Form.Item>
-          <Upload showUploadList={false} customRequest={(o) => handleCustomUpload(o, "picture")}>
+          <Upload
+            showUploadList={false}
+            customRequest={(o) => handleCustomUpload(o, "picture")}
+          >
             <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
               上传
             </Button>
@@ -476,7 +517,12 @@ export default function BannersPageView() {
       </Form.Item>
       {previewPicture && (
         <Card size="small" title="影片封面预览" style={{ borderRadius: 12 }}>
-          <AntImage src={previewPicture} width={160} height={220} style={{ objectFit: "cover", borderRadius: 8 }} />
+          <AntImage
+            src={previewPicture}
+            width={160}
+            height={220}
+            style={{ objectFit: "cover", borderRadius: 8 }}
+          />
         </Card>
       )}
     </Space>
@@ -498,8 +544,8 @@ export default function BannersPageView() {
           </Button>
         </Space>
       }
+      panelless
     >
-
       <Table
         dataSource={banners}
         columns={columns}

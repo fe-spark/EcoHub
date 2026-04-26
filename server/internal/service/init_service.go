@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -33,10 +34,14 @@ func (s *InitService) DefaultDataInit() {
 			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
 		)
 	}
+	ensureMappingRuleIndexes()
 
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
 	repository.InitBuiltinAccounts()
+	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
+		log.Printf("[Init] 强制重建派生数据失败: %v", err)
+	}
 
 	s.BasicConfigInit()
 	s.BannersInit()
@@ -95,8 +100,15 @@ func (s *InitService) TableInit() {
 		log.Println("Database AutoMigrate Failed:", err)
 		return
 	}
+	ensureMappingRuleIndexes()
 
 	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
+}
+
+func ensureMappingRuleIndexes() {
+	if err := repository.EnsureMappingRuleIndexes(); err != nil {
+		log.Println("Ensure mapping rule indexes failed:", err)
+	}
 }
 
 func (s *InitService) BasicConfigInit() {

@@ -222,11 +222,13 @@ export default function FilmListPageView() {
         key: "info",
         render: (_, record) => (
           <Space size={6} wrap={false}>
-              <Text
-                className={styles.filmName}
-                style={{ whiteSpace: "nowrap" }}
-                onClick={() => window.open(resolvePlayEntryPath(record.mid), "_blank")}
-              >
+            <Text
+              className={styles.filmName}
+              style={{ whiteSpace: "nowrap" }}
+              onClick={() =>
+                window.open(resolvePlayEntryPath(record.mid), "_blank")
+              }
+            >
               {record.name}
             </Text>
             <Tag color="orange" style={{ borderRadius: 4, flexShrink: 0 }}>
@@ -304,7 +306,9 @@ export default function FilmListPageView() {
                 shape="circle"
                 size="small"
                 icon={<AimOutlined />}
-                onClick={() => window.open(resolvePlayEntryPath(record.mid), "_blank")}
+                onClick={() =>
+                  window.open(resolvePlayEntryPath(record.mid), "_blank")
+                }
               />
             </Tooltip>
             <Tooltip title="同步更新">
@@ -331,7 +335,10 @@ export default function FilmListPageView() {
                 onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
               />
             </Tooltip>
-            <Popconfirm title="确认删除此影片？" onConfirm={() => handleDelFilm(record.ID)}>
+            <Popconfirm
+              title="确认删除此影片？"
+              onConfirm={() => handleDelFilm(record.ID)}
+            >
               <Tooltip title="删除">
                 <Button
                   type="primary"
@@ -355,7 +362,11 @@ export default function FilmListPageView() {
       title="影片列表"
       description="管理当前主库存影片，支持分类、剧情、地区和时间范围筛选。"
       actions={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => router.push("/manage/film/add")}>
+        <Button
+          type="primary"
+          icon={<PlusOutlined />}
+          onClick={() => router.push("/manage/film/add")}
+        >
           新增影视
         </Button>
       }
@@ -403,13 +414,18 @@ export default function FilmListPageView() {
             }))}
             allowClear
           />
-          <RangePicker showTime value={dateRange} onChange={(v) => setDateRange(v)} />
+          <RangePicker
+            showTime
+            value={dateRange}
+            onChange={(v) => setDateRange(v)}
+          />
           <Button type="primary" icon={<SearchOutlined />} onClick={onSearch}>
             搜索
           </Button>
         </div>
       }
       panelClassName={styles.tableContainer}
+      panelless
     >
       <div className={styles.tableContainerInner}>
         <Table

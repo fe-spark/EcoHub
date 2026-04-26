@@ -62,6 +62,14 @@ func CleanPlotTags(tags string, area string, mainCategory string, category strin
 	return support.CleanPlotTags(tags, area, mainCategory, category)
 }
 
+func NormalizeRootCategoryName(name string) string {
+	return support.NormalizeRootCategoryName(name)
+}
+
+func NormalizeSubCategoryName(name string) string {
+	return support.NormalizeSubCategoryName(name)
+}
+
 // IsInSlice 检查字符串是否在切片中
 func IsInSlice(slice []string, val string) bool {
 	for _, s := range slice {

@@ -38,7 +38,7 @@ type SourceCategory struct {
 	SourceId           string    `gorm:"index:idx_source_parent_sort,priority:1;size:32" json:"source_id"`
 	SourceTypeId       int64     `gorm:"uniqueIndex:idx_source_type_id" json:"source_type_id"`
 	ParentSourceTypeId int64     `gorm:"index:idx_source_parent_sort,priority:2" json:"parent_source_type_id"`
-	Name               string    `gorm:"size:64" json:"name"`
+	RawName            string    `gorm:"column:raw_name;size:64" json:"raw_name"`
 	Sort               int       `gorm:"index:idx_source_parent_sort,priority:3" json:"sort"`
 	Depth              int       `json:"depth"`
 	CreatedAt          time.Time `json:"created_at"`

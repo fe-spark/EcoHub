@@ -45,9 +45,15 @@ interface PlayPageViewProps {
   data: any;
   filmId: string;
   initialTime?: string;
+  emptyMessage?: string;
 }
 
-export default function PlayPageView({ data, filmId, initialTime }: PlayPageViewProps) {
+export default function PlayPageView({
+  data,
+  filmId,
+  initialTime,
+  emptyMessage,
+}: PlayPageViewProps) {
   const router = useRouter();
   const { message } = useAppMessage();
   const initialPlaybackState = buildInitialPlaybackState(data, initialTime);
@@ -210,7 +216,35 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
     [persistHistory],
   );
 
-  if (!data || !currentFilm) return null;
+  if (!data || !currentFilm) {
+    return (
+      <div className={styles.emptyPage}>
+        <div className={styles.emptyCard}>
+          <div className={styles.emptyEyebrow}>Play Unavailable</div>
+          <h1 className={styles.emptyTitle}>当前内容无法播放</h1>
+          <p className={styles.emptyDescription}>
+            {emptyMessage || "未获取到影片播放数据，请返回上一页后重新尝试。"}
+          </p>
+          <div className={styles.emptyActions}>
+            <button
+              type="button"
+              className={styles.emptyPrimaryAction}
+              onClick={() => router.back()}
+            >
+              返回上一页
+            </button>
+            <button
+              type="button"
+              className={styles.emptySecondaryAction}
+              onClick={() => router.push("/")}
+            >
+              回到首页
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>

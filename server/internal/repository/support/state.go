@@ -1,8 +1,14 @@
 package support
 
 import (
+	"regexp"
 	"sync"
 )
+
+type categoryRuleMatcher struct {
+	Pattern *regexp.Regexp
+	Target  string
+}
 
 var (
 	cacheAreaMap         sync.Map
@@ -10,6 +16,12 @@ var (
 	cacheFilterMap       sync.Map
 	cacheAttribute       sync.Map
 	cachePlotMap         sync.Map
+	cacheCategoryRootMap sync.Map
+	cacheCategorySubMap  sync.Map
+	categoryRootRegexMu  sync.RWMutex
+	categorySubRegexMu   sync.RWMutex
+	categoryRootRegex    []categoryRuleMatcher
+	categorySubRegex     []categoryRuleMatcher
 	cacheCategoryMap     sync.Map
 	cacheSourceMap       sync.Map
 

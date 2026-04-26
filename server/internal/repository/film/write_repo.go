@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/config"
@@ -377,8 +378,23 @@ func RebuildSearchTagsByPids(pids ...int64) error {
 		return nil
 	}
 
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("pid IN ?", orderedPids).Delete(&model.SearchTagItem{}).Error; err != nil {
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		rebuiltInfos, err := rebuildSearchInfosFromMovieDetailsTx(tx, orderedPids)
+		if err != nil {
+			return err
+		}
+		if len(rebuiltInfos) == 0 {
+			log.Printf("[RebuildSearchTagsByPids] 未找到可重建的事实详情数据: pids=%v", orderedPids)
+			return nil
+		}
+		if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
+			return err
+		}
+		if err := RefreshPlayFromSummaryBySearchInfosTx(tx, rebuiltInfos); err != nil {
+			return err
+		}
+
+		if err := tx.Unscoped().Where("pid IN ?", orderedPids).Delete(&model.SearchTagItem{}).Error; err != nil {
 			return err
 		}
 
@@ -389,18 +405,164 @@ func RebuildSearchTagsByPids(pids ...int64) error {
 			}
 		}
 
-		var infos []model.SearchInfo
-		if err := tx.Where("pid IN ?", orderedPids).Find(&infos).Error; err != nil {
-			return err
-		}
-
-		for _, info := range infos {
+		for _, info := range rebuiltInfos {
 			if err := handleDynamicSearchTagsTx(tx, info); err != nil {
 				return err
 			}
 		}
 		return nil
+	}); err != nil {
+		return err
+	}
+
+	for _, pid := range orderedPids {
+		ClearSearchTagsCache(pid)
+	}
+	return nil
+}
+
+func ForceRebuildDerivedData() error {
+	refreshCategoryCaches()
+
+	var rootPids []int64
+	if err := db.Mdb.Model(&model.Category{}).Where("pid = ?", 0).Order("sort ASC, id ASC").Pluck("id", &rootPids).Error; err != nil {
+		return err
+	}
+
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
+			return err
+		}
+
+		rebuiltInfos, err := rebuildAllSearchInfosFromMovieDetailsTx(tx)
+		if err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchInfo{}).Error; err != nil {
+			return err
+		}
+		if len(rebuiltInfos) > 0 {
+			if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
+				return err
+			}
+			if err := RefreshPlayFromSummaryBySearchInfosTx(tx, rebuiltInfos); err != nil {
+				return err
+			}
+			for _, info := range rebuiltInfos {
+				if err := handleDynamicSearchTagsTx(tx, info); err != nil {
+					return err
+				}
+			}
+		}
+
+		initializedPids = sync.Map{}
+		for _, pid := range rootPids {
+			if pid <= 0 {
+				continue
+			}
+			if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
+}
+
+type rebuildSearchInfoRow struct {
+	Mid             int64
+	ContentKey      string
+	SourceId        string
+	PlayFromSummary string
+	Pid             int64
+	Cid             int64
+	CName           string
+	RootCategoryKey string
+	CategoryKey     string
+	DetailContent   string
+}
+
+func rebuildSearchInfosFromMovieDetailsTx(tx *gorm.DB, pids []int64) ([]model.SearchInfo, error) {
+	if len(pids) == 0 {
+		return nil, nil
+	}
+	pidSet := make(map[int64]struct{}, len(pids))
+	for _, pid := range pids {
+		if pid > 0 {
+			pidSet[pid] = struct{}{}
+		}
+	}
+	return rebuildSearchInfosFromMovieDetailsByPidSetTx(tx, pidSet)
+}
+
+func rebuildAllSearchInfosFromMovieDetailsTx(tx *gorm.DB) ([]model.SearchInfo, error) {
+	return rebuildSearchInfosFromMovieDetailsByPidSetTx(tx, nil)
+}
+
+func rebuildSearchInfosFromMovieDetailsByPidSetTx(tx *gorm.DB, pidSet map[int64]struct{}) ([]model.SearchInfo, error) {
+	var rows []rebuildSearchInfoRow
+	if err := tx.Model(&model.SearchInfo{}).
+		Select("search_info.mid, search_info.content_key, search_info.source_id, search_info.play_from_summary, search_info.pid, search_info.cid, search_info.c_name, search_info.root_category_key, search_info.category_key, movie_detail_info.content AS detail_content").
+		Joins("JOIN movie_detail_info ON movie_detail_info.mid = search_info.mid").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 未命中 search_info 与 movie_detail_info 关联数据")
+		return nil, nil
+	}
+
+	rebuiltInfos := make([]model.SearchInfo, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row.DetailContent) == "" {
+			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情内容为空: mid=%d source=%s", row.Mid, row.SourceId)
+			continue
+		}
+
+		var detail model.MovieDetail
+		if err := json.Unmarshal([]byte(row.DetailContent), &detail); err != nil {
+			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情反序列化失败: mid=%d source=%s err=%v", row.Mid, row.SourceId, err)
+			continue
+		}
+
+		category := resolveSearchCategory(row.SourceId, detail)
+		if category.Pid <= 0 && row.Pid > 0 {
+			category = resolveLocalCategory(row.Pid, row.Cid, row.CName)
+		}
+		if len(pidSet) > 0 {
+			if _, ok := pidSet[category.Pid]; !ok {
+				continue
+			}
+		}
+		meta := normalizeSearchMetadata(detail, category)
+		rebuilt := buildSearchInfo(row.SourceId, detail, category, meta)
+		rebuilt.Mid = row.Mid
+		rebuilt.ContentKey = row.ContentKey
+		rebuilt.SourceId = row.SourceId
+		rebuilt.PlayFromSummary = row.PlayFromSummary
+		rebuilt.CName = category.CName
+		if rebuilt.RootCategoryKey == "" {
+			rebuilt.RootCategoryKey = row.RootCategoryKey
+		}
+		if rebuilt.RootCategoryKey == "" {
+			rebuilt.RootCategoryKey = category.PKey
+		}
+		if rebuilt.CategoryKey == "" {
+			rebuilt.CategoryKey = row.CategoryKey
+		}
+		if rebuilt.CategoryKey == "" {
+			rebuilt.CategoryKey = category.CKey
+		}
+
+		if rebuilt.Pid <= 0 {
+			continue
+		}
+		rebuiltInfos = append(rebuiltInfos, rebuilt)
+	}
+	if len(rebuiltInfos) == 0 {
+		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 事实详情存在，但未生成任何有效 SearchInfo")
+	}
+
+	return rebuiltInfos, nil
 }
 
 func SaveSearchTag(search model.SearchInfo) {
@@ -498,6 +660,26 @@ var (
 	reTagSplit   = regexp.MustCompile(`[/,，、\s\.\+\|]`)
 )
 
+func normalizeSearchTagValue(tagType string, value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimRight(value, ":：")
+
+	switch tagType {
+	case "Area":
+		switch value {
+		case "地区", "制片国家", "制片国家地区":
+			return ""
+		}
+	case "Language":
+		switch value {
+		case "语言", "对白语言":
+			return ""
+		}
+	}
+
+	return value
+}
+
 func HandleSearchTags(allTags string, tagType string, pid int64, customValues ...string) {
 	_ = HandleSearchTagsTx(db.Mdb, allTags, tagType, pid, customValues...)
 }
@@ -508,14 +690,17 @@ func HandleSearchTagsTx(tx *gorm.DB, allTags string, tagType string, pid int64, 
 	var saveErr error
 
 	upsert := func(v string, customVal ...string) {
-		v = strings.TrimSpace(v)
+		v = normalizeSearchTagValue(tagType, v)
 		if v == "" || v == model.TagOthersValue || v == "其他" || v == "其它" || v == "全部" || v == "完结" || v == "HD" || v == "解说" || v == "剧情" || v == "暂无" {
 			return
 		}
 
 		val := v
 		if len(customVal) > 0 {
-			val = customVal[0]
+			val = normalizeSearchTagValue(tagType, customVal[0])
+			if val == "" {
+				return
+			}
 		}
 
 		if tagType == "Category" && val == fmt.Sprint(pid) {
@@ -531,8 +716,9 @@ func HandleSearchTagsTx(tx *gorm.DB, allTags string, tagType string, pid int64, 
 		if err := tx.Clauses(clause.OnConflict{
 			Columns: []clause.Column{{Name: "pid"}, {Name: "tag_type"}, {Name: "value"}},
 			DoUpdates: clause.Assignments(map[string]any{
-				"score": gorm.Expr("score + 1"),
-				"name":  v,
+				"score":      gorm.Expr("score + 1"),
+				"name":       v,
+				"deleted_at": nil,
 			}),
 		}).Create(&model.SearchTagItem{Pid: pid, TagType: tagType, Name: v, Value: val, Score: 1}).Error; err != nil {
 			saveErr = err
@@ -597,13 +783,22 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 		return resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
 	}
 
+	sourceCid := detail.Cid
+	sourcePid := detail.Pid
+	if detail.RawCid > 0 {
+		sourceCid = detail.RawCid
+	}
+	if detail.RawPid > 0 {
+		sourcePid = detail.RawPid
+	}
+
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
-	result.Cid = support.GetLocalCategoryId(sourceId, detail.Cid)
+	result.Cid = support.GetLocalCategoryId(sourceId, sourceCid)
 	if result.Cid > 0 {
 		result.Pid = support.GetRootId(result.Cid)
 	}
 	if result.Pid == 0 {
-		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, detail.Pid))
+		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, sourcePid))
 	}
 	if result.Pid > 0 && result.Cid == 0 && result.CName != "" {
 		var category model.Category

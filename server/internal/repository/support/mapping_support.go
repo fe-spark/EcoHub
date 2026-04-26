@@ -18,11 +18,6 @@ func ReloadMappingRules() {
 	var rules []model.MappingRule
 	db.Mdb.Find(&rules)
 
-	if len(rules) == 0 {
-		syncInitialRulesToDB()
-		db.Mdb.Find(&rules)
-	}
-
 	var catMappings []model.CategoryMapping
 	db.Mdb.Find(&catMappings)
 	newSourceMap := make(map[string]int64)
@@ -35,8 +30,13 @@ func ReloadMappingRules() {
 	newFilter := make(map[string]bool)
 	newAttr := make(map[string]string)
 	newPlot := make(map[string]string)
+	newCategoryRoots := make(map[string]string)
+	newCategorySubs := make(map[string]string)
+	newCategoryRootRegex := make([]categoryRuleMatcher, 0)
+	newCategorySubRegex := make([]categoryRuleMatcher, 0)
 
 	for _, r := range rules {
+		matchType := normalizeRuleMatchType(r.MatchType)
 		switch r.Group {
 		case "Area":
 			newArea[r.Raw] = r.Target
@@ -48,6 +48,26 @@ func ReloadMappingRules() {
 			newAttr[r.Raw] = r.Target
 		case "Plot":
 			newPlot[r.Raw] = r.Target
+		case "CategoryRoot":
+			if matchType == "regex" {
+				pattern, err := regexp.Compile(strings.TrimSpace(r.Raw))
+				if err != nil {
+					continue
+				}
+				newCategoryRootRegex = append(newCategoryRootRegex, categoryRuleMatcher{Pattern: pattern, Target: r.Target})
+				continue
+			}
+			newCategoryRoots[r.Raw] = r.Target
+		case "CategorySub":
+			if matchType == "regex" {
+				pattern, err := regexp.Compile(strings.TrimSpace(r.Raw))
+				if err != nil {
+					continue
+				}
+				newCategorySubRegex = append(newCategorySubRegex, categoryRuleMatcher{Pattern: pattern, Target: r.Target})
+				continue
+			}
+			newCategorySubs[r.Raw] = r.Target
 		}
 	}
 
@@ -56,50 +76,46 @@ func ReloadMappingRules() {
 	replaceSyncMapBool(&cacheFilterMap, newFilter)
 	replaceSyncMap(&cacheAttribute, newAttr)
 	replaceSyncMap(&cachePlotMap, newPlot)
+	replaceSyncMap(&cacheCategoryRootMap, newCategoryRoots)
+	replaceSyncMap(&cacheCategorySubMap, newCategorySubs)
+	replaceCategoryRegexMatchers(&categoryRootRegexMu, &categoryRootRegex, newCategoryRootRegex)
+	replaceCategoryRegexMatchers(&categorySubRegexMu, &categorySubRegex, newCategorySubRegex)
 	replaceSyncMapInt64(&cacheSourceMap, newSourceMap)
 
 	RefreshCategoryCache()
 }
 
-func syncInitialRulesToDB() {
-	areas := map[string]string{
-		"内地": "大陆", "中国": "大陆", "中国大陆": "大陆", "中国内地": "大陆",
-		"韩国": "韩国", "南韩": "韩国",
-		"日本": "日本",
-		"台湾": "台湾", "中国台湾": "台湾",
-		"香港": "香港", "中国香港": "香港",
-		"美国": "美国", "欧美": "美国",
-		"英国": "英国", "泰国": "泰国", "海外": "其他",
-	}
-	for k, v := range areas {
-		db.Mdb.FirstOrCreate(&model.MappingRule{Group: "Area", Raw: k, Target: v})
-	}
+func replaceCategoryRegexMatchers(mu *sync.RWMutex, target *[]categoryRuleMatcher, data []categoryRuleMatcher) {
+	mu.Lock()
+	defer mu.Unlock()
+	cloned := make([]categoryRuleMatcher, len(data))
+	copy(cloned, data)
+	*target = cloned
+}
 
-	langs := map[string]string{
-		"普通话": "国语", "汉语普通话": "国语", "华语": "国语", "中文字幕": "国语",
-		"粤语": "粤语", "韩语": "韩语", "日语": "日语", "英语": "英语",
+func normalizeRuleMatchType(matchType string) string {
+	switch strings.TrimSpace(strings.ToLower(matchType)) {
+	case "regex":
+		return "regex"
+	default:
+		return "exact"
 	}
-	for k, v := range langs {
-		db.Mdb.FirstOrCreate(&model.MappingRule{Group: "Language", Raw: k, Target: v})
-	}
+}
 
-	filters := []string{
-		"高清", "蓝光", "1080P", "4K", "HD", "BD", "TS", "TC", "DVD", "VCD",
-		"其它", "其他", "全部", "剧情", "暂无", "简介", "正片", "完结", "更新中", "全集", "中字", "字幕",
-		"资源", "播放", "线路", "免费", "高速", "极速", "云播", "网盘", "在线",
+func matchCategoryRegexRule(name string, mu *sync.RWMutex, matchers []categoryRuleMatcher) string {
+	mu.RLock()
+	defer mu.RUnlock()
+	for _, matcher := range matchers {
+		if matcher.Pattern == nil || !matcher.Pattern.MatchString(name) {
+			continue
+		}
+		mapped := strings.TrimSpace(matcher.Target)
+		if mapped != "" {
+			return mapped
+		}
+		return name
 	}
-	for _, f := range filters {
-		db.Mdb.FirstOrCreate(&model.MappingRule{Group: "Filter", Raw: f, Target: ""})
-	}
-
-	attrs := map[string]string{
-		"国产": "大陆", "内地": "大陆", "大陆": "大陆", "香港": "香港", "台湾": "台湾",
-		"美国": "美国", "欧美": "美国", "韩国": "韩国", "韩剧": "韩国", "日剧": "日本", "日本": "日本",
-	}
-	for k, v := range attrs {
-		db.Mdb.FirstOrCreate(&model.MappingRule{Group: "Attribute", Raw: k, Target: v})
-	}
-
+	return ""
 }
 
 func replaceSyncMap(sm *sync.Map, data map[string]string) {
@@ -177,6 +193,52 @@ func GetPlotMapping() map[string]string {
 	return res
 }
 
+func GetCategoryRootMapping() map[string]string {
+	res := make(map[string]string)
+	cacheCategoryRootMap.Range(func(k, v interface{}) bool {
+		res[k.(string)] = v.(string)
+		return true
+	})
+	return res
+}
+
+func GetCategorySubMapping() map[string]string {
+	res := make(map[string]string)
+	cacheCategorySubMap.Range(func(k, v interface{}) bool {
+		res[k.(string)] = v.(string)
+		return true
+	})
+	return res
+}
+
+func NormalizeRootCategoryName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if mapped, ok := GetCategoryRootMapping()[name]; ok && strings.TrimSpace(mapped) != "" {
+		return strings.TrimSpace(mapped)
+	}
+	if mapped := matchCategoryRegexRule(name, &categoryRootRegexMu, categoryRootRegex); mapped != "" {
+		return mapped
+	}
+	return name
+}
+
+func NormalizeSubCategoryName(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if mapped, ok := GetCategorySubMapping()[name]; ok && strings.TrimSpace(mapped) != "" {
+		return strings.TrimSpace(mapped)
+	}
+	if mapped := matchCategoryRegexRule(name, &categorySubRegexMu, categorySubRegex); mapped != "" {
+		return mapped
+	}
+	return name
+}
+
 func GetCategoryNameFromCache(id int64) (string, bool) {
 	val, ok := cacheCategoryMap.Load(id)
 	if !ok {
@@ -241,6 +303,16 @@ func NormalizeArea(rawArea string) string {
 	if rawArea == "" {
 		return ""
 	}
+	rawArea = strings.NewReplacer(
+		"制片国家/地区", ",",
+		"制片国家地区", ",",
+		"制片国家：", ",",
+		"制片国家:", ",",
+		"制片国家", ",",
+		"地区：", ",",
+		"地区:", ",",
+		"地区", ",",
+	).Replace(rawArea)
 	rawArea = regexp.MustCompile(`[/,，、\s\.\+\|]`).ReplaceAllString(rawArea, ",")
 	areas := strings.Split(rawArea, ",")
 	var result []string

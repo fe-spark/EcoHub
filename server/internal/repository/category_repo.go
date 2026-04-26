@@ -167,8 +167,13 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 			return err
 		}
 		oldMap := make(map[int64]model.Category, len(oldCategories))
+		stableKeyToCategory := make(map[string]model.Category, len(oldCategories))
 		for _, item := range oldCategories {
 			oldMap[item.Id] = item
+			stableKey := strings.TrimSpace(item.StableKey)
+			if stableKey != "" {
+				stableKeyToCategory[stableKey] = item
+			}
 		}
 
 		var oldMappings []model.CategoryMapping
@@ -210,7 +215,7 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 				SourceId:           sourceId,
 				SourceTypeId:       plan.SourceTypeId,
 				ParentSourceTypeId: plan.ParentSourceTypeId,
-				Name:               plan.Name,
+				RawName:            strings.TrimSpace(plan.Name),
 				Sort:               plan.Sort,
 				Depth:              plan.Depth,
 			})
@@ -223,12 +228,14 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 
 		sourceTypeToCategory := make(map[int64]int64, len(plans))
 		sourceTypeToStableKey := make(map[int64]string, len(plans))
+		claimedCategoryIDs := make(map[int64]struct{}, len(plans))
 		seenSourceType := make(map[int64]struct{}, len(plans))
 		for _, plan := range plans {
 			if _, ok := seenSourceType[plan.SourceTypeId]; ok {
 				return fmt.Errorf("来源分类重复: %d", plan.SourceTypeId)
 			}
 			seenSourceType[plan.SourceTypeId] = struct{}{}
+			normalizedName := normalizeCategoryPlanName(plan)
 
 			pid := int64(0)
 			if plan.ParentSourceTypeId > 0 {
@@ -239,16 +246,28 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 				pid = parentId
 			}
 
-			stableKey := buildCategoryStableKey(pid, plan.Name)
+			stableKey := buildCategoryStableKey(pid, normalizedName)
 			if plan.ParentSourceTypeId > 0 {
 				parentStableKey, ok := sourceTypeToStableKey[plan.ParentSourceTypeId]
 				if !ok {
 					return fmt.Errorf("来源父分类稳定标识不存在: %d", plan.ParentSourceTypeId)
 				}
-				stableKey = fmt.Sprintf("%s/%s", parentStableKey, strings.TrimSpace(plan.Name))
+				stableKey = fmt.Sprintf("%s/%s", parentStableKey, normalizedName)
+			}
+
+			if existingCategory, ok := stableKeyToCategory[stableKey]; ok {
+				sourceTypeToCategory[plan.SourceTypeId] = existingCategory.Id
+				sourceTypeToStableKey[plan.SourceTypeId] = stableKey
+				claimedCategoryIDs[existingCategory.Id] = struct{}{}
+				continue
 			}
 
 			categoryId := existingBySourceType[plan.SourceTypeId]
+			if categoryId > 0 {
+				if _, claimed := claimedCategoryIDs[categoryId]; claimed {
+					categoryId = 0
+				}
+			}
 			if categoryId > 0 {
 				existingCategory, ok := oldMap[categoryId]
 				if !ok {
@@ -256,7 +275,7 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 				}
 				updates := map[string]any{
 					"pid":        pid,
-					"name":       plan.Name,
+					"name":       normalizedName,
 					"stable_key": stableKey,
 				}
 				if preserveBusinessFields {
@@ -269,13 +288,21 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 				if err := tx.Model(&model.Category{}).Where("id = ?", categoryId).Updates(updates).Error; err != nil {
 					return err
 				}
+				existingCategory.Pid = pid
+				existingCategory.Name = normalizedName
+				existingCategory.StableKey = stableKey
+				oldMap[categoryId] = existingCategory
+				stableKeyToCategory[stableKey] = existingCategory
 			} else {
-				category := model.Category{Pid: pid, Name: plan.Name, StableKey: stableKey, Show: true, Sort: plan.Sort}
+				category := model.Category{Pid: pid, Name: normalizedName, StableKey: stableKey, Show: true, Sort: plan.Sort}
 				if err := tx.Create(&category).Error; err != nil {
 					return err
 				}
 				categoryId = category.Id
+				oldMap[categoryId] = category
+				stableKeyToCategory[stableKey] = category
 			}
+			claimedCategoryIDs[categoryId] = struct{}{}
 			sourceTypeToCategory[plan.SourceTypeId] = categoryId
 			sourceTypeToStableKey[plan.SourceTypeId] = stableKey
 		}
@@ -344,13 +371,95 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 	}
 
 	MarkCategoryChanged()
-	if err := filmrepo.RebuildSearchTagsByPids(rootIDs...); err != nil {
+	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
 		return err
 	}
-	filmrepo.ClearAllSearchTagsCache()
-	filmrepo.ClearTVBoxListCache()
-	ClearIndexPageCache()
 	return nil
+}
+
+func RebuildCategoriesFromSourceCategories() error {
+	var sourceIDs []string
+	if err := db.Mdb.Model(&model.SourceCategory{}).Distinct("source_id").Order("source_id ASC").Pluck("source_id", &sourceIDs).Error; err != nil {
+		return err
+	}
+	for _, sourceID := range sourceIDs {
+		tree, err := GetSourceCategoryTree(sourceID)
+		if err != nil {
+			return err
+		}
+		if tree == nil {
+			continue
+		}
+		if err := saveCategoryTree(sourceID, tree, true); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func GetSourceCategoryTree(sourceId string) (*model.CategoryTree, error) {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" {
+		return nil, fmt.Errorf("source id 不能为空")
+	}
+	var rows []model.SourceCategory
+	if err := db.Mdb.Where("source_id = ?", sourceId).Order("depth ASC, parent_source_type_id ASC, sort ASC, id ASC").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return buildCategoryTreeFromSourceRows(rows)
+}
+
+func buildCategoryTreeFromSourceRows(rows []model.SourceCategory) (*model.CategoryTree, error) {
+	root := &model.CategoryTree{Id: 0, Pid: -1, Name: "分类信息", Show: true, Children: make([]*model.CategoryTree, 0)}
+	nodes := make(map[int64]*model.CategoryTree, len(rows))
+	for _, row := range rows {
+		name := strings.TrimSpace(row.RawName)
+		if name == "" {
+			return nil, fmt.Errorf("来源分类名称不能为空: %d", row.SourceTypeId)
+		}
+		nodes[row.SourceTypeId] = &model.CategoryTree{
+			Id:       row.SourceTypeId,
+			Pid:      row.ParentSourceTypeId,
+			Name:     name,
+			Sort:     row.Sort,
+			Show:     true,
+			Children: make([]*model.CategoryTree, 0),
+		}
+	}
+	for _, row := range rows {
+		node, ok := nodes[row.SourceTypeId]
+		if !ok {
+			return nil, fmt.Errorf("来源分类节点不存在: %d", row.SourceTypeId)
+		}
+		if row.ParentSourceTypeId == 0 {
+			root.Children = append(root.Children, node)
+			continue
+		}
+		parent, ok := nodes[row.ParentSourceTypeId]
+		if !ok {
+			return nil, fmt.Errorf("来源父分类不存在: %d", row.ParentSourceTypeId)
+		}
+		parent.Children = append(parent.Children, node)
+	}
+	sortCategoryTreeNodes(root.Children)
+	return root, nil
+}
+
+func sortCategoryTreeNodes(nodes []*model.CategoryTree) {
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].Sort == nodes[j].Sort {
+			return nodes[i].Id < nodes[j].Id
+		}
+		return nodes[i].Sort < nodes[j].Sort
+	})
+	for _, node := range nodes {
+		if len(node.Children) > 0 {
+			sortCategoryTreeNodes(node.Children)
+		}
+	}
 }
 
 func refreshSearchInfoCategoryBindingsByStableKeysTx(tx *gorm.DB, newMap map[int64]model.Category) error {
@@ -432,6 +541,17 @@ func refreshSearchInfoCategoryBindingsByStableKeysTx(tx *gorm.DB, newMap map[int
 	}
 
 	return nil
+}
+
+func normalizeCategoryPlanName(plan sourceCategoryPlacement) string {
+	name := strings.TrimSpace(plan.Name)
+	if name == "" {
+		return ""
+	}
+	if plan.ParentSourceTypeId == 0 {
+		return support.NormalizeRootCategoryName(name)
+	}
+	return support.NormalizeSubCategoryName(name)
 }
 
 func walkTwoLevelCategoryTree(nodes []*model.CategoryTree, parentId int64, depth int, visit func(item categoryTreeWalkNode) error) error {
@@ -885,16 +1005,9 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 	if len(affectedPids) == 0 {
 		return nil
 	}
-	pidList := make([]int64, 0, len(affectedPids))
-	for pid := range affectedPids {
-		pidList = append(pidList, pid)
-	}
-	if err := filmrepo.RebuildSearchTagsByPids(pidList...); err != nil {
+	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
 		return err
 	}
-	filmrepo.ClearAllSearchTagsCache()
-	filmrepo.ClearTVBoxListCache()
-	ClearIndexPageCache()
 	return nil
 }
 

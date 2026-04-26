@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { Form, Input, Switch, Button, Spin, Space, Card, Row, Col } from "antd";
-import { SettingOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  SettingOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+} from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageShell from "../../../components/page-shell";
@@ -65,23 +69,38 @@ export default function SiteConfigPageView() {
       description="集中维护站点名称、描述、Logo 与站点可用状态等基础信息。"
       actions={
         <Space size="middle">
-          <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
+          <Button
+            icon={<ReloadOutlined />}
+            loading={fetching}
+            onClick={handleReset}
+          >
             重置
           </Button>
-          <Button type="primary" icon={<SaveOutlined />} loading={submitting} onClick={handleUpdate}>
+          <Button
+            type="primary"
+            icon={<SaveOutlined />}
+            loading={submitting}
+            onClick={handleUpdate}
+          >
             更新配置
           </Button>
         </Space>
       }
       panelClassName={styles.formPanel}
+      panelless
     >
-
       <Spin spinning={fetching} description="正在加载网站配置...">
-        <Form form={form} layout="vertical" className={`${styles.form} ${styles.formCompact}`}>
+        <Form
+          form={form}
+          layout="vertical"
+          className={`${styles.form} ${styles.formCompact}`}
+        >
           <Card
             title={
               <Space>
-                <SettingOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <SettingOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 基础配置
               </Space>
             }
@@ -105,12 +124,20 @@ export default function SiteConfigPageView() {
                 </Form.Item>
               </Col>
               <Col xs={24} lg={12} xl={8}>
-                <Form.Item name="state" label="网站状态" valuePropName="checked">
+                <Form.Item
+                  name="state"
+                  label="网站状态"
+                  valuePropName="checked"
+                >
                   <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                 </Form.Item>
               </Col>
               <Col xs={24} lg={12} xl={8}>
-                <Form.Item name="isVideoProxy" label="视频播放代理" valuePropName="checked">
+                <Form.Item
+                  name="isVideoProxy"
+                  label="视频播放代理"
+                  valuePropName="checked"
+                >
                   <Switch checkedChildren="开启" unCheckedChildren="关闭" />
                 </Form.Item>
               </Col>
@@ -121,12 +148,18 @@ export default function SiteConfigPageView() {
               </Col>
               <Col xs={24}>
                 <Form.Item name="describe" label="网站描述">
-                  <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder="多维度描述本站特色..." />
+                  <Input.TextArea
+                    autoSize={{ minRows: 4, maxRows: 8 }}
+                    placeholder="多维度描述本站特色..."
+                  />
                 </Form.Item>
               </Col>
               <Col xs={24}>
                 <Form.Item name="hint" label="维护提示">
-                  <Input.TextArea autoSize={{ minRows: 4, maxRows: 8 }} placeholder="当网站处于维护状态时，展示给用户的提示语..." />
+                  <Input.TextArea
+                    autoSize={{ minRows: 4, maxRows: 8 }}
+                    placeholder="当网站处于维护状态时，展示给用户的提示语..."
+                  />
                 </Form.Item>
               </Col>
             </Row>

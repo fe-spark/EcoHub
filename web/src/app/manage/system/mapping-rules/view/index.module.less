@@ -1,0 +1,234 @@
+.panel {
+  padding: 0;
+}
+
+.toolbar {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.inlineGuide {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.inlineGuideTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.statCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+}
+
+.statLabel {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.statValue {
+  margin-top: 8px;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.hintList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filterTag {
+  border-radius: 999px;
+}
+
+.targetMuted {
+  color: var(--ant-color-text-secondary);
+}
+
+.targetCell {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tableTitleWrap {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.tableTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.tableDesc {
+  margin-top: 4px;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.customTable {
+  :global(.ant-table-title) {
+    padding-bottom: 12px;
+  }
+}
+
+.editorForm {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.editorSection {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.hintSection {
+  gap: 12px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text-secondary);
+}
+
+.compactItem {
+  margin-bottom: 0;
+}
+
+.fieldHint {
+  margin-top: -8px;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.conflictAlert {
+  margin-bottom: 0;
+}
+
+.conflictChecking {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.conflictList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conflictItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.conflictCode {
+  color: var(--ant-color-text);
+  font-family: var(
+    --font-family-monospace,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    Monaco,
+    Consolas,
+    "Liberation Mono",
+    "Courier New",
+    monospace
+  );
+}
+
+.regexHint {
+  margin-bottom: 0;
+}
+
+.mappingGuideCard {
+  border-radius: 12px;
+}
+
+.mappingGuideTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.mappingGuideText {
+  margin-top: 8px;
+  color: var(--ant-color-text-secondary);
+  line-height: 1.7;
+}
+
+.mappingGuideList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+
+  div {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  strong {
+    color: var(--ant-color-text);
+    font-size: 13px;
+  }
+
+  span {
+    color: var(--ant-color-text-secondary);
+    line-height: 1.6;
+    font-size: 13px;
+  }
+}
+
+.regexPreviewCard {
+  margin-bottom: 0;
+  border-radius: 12px;
+}
+
+.previewExamples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.previewSummary {
+  margin-top: 12px;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.previewError {
+  color: var(--ant-color-error);
+}
+
+@media (max-width: 900px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+}

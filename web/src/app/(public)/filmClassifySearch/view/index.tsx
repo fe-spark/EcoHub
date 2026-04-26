@@ -16,9 +16,30 @@ export default function FilmClassifySearchPageView({
   const { title, list, search, params, page } = data;
   const safeList = Array.isArray(list) ? list : [];
 
+  const normalizeTagValue = (value: unknown) =>
+    typeof value === "string" ? value.trim() : "";
+
+  const getSafeTags = (tags: any[] | undefined) => {
+    if (!Array.isArray(tags)) {
+      return [];
+    }
+    return tags.filter((tag, index) => {
+      const value = normalizeTagValue(tag?.Value);
+      if (value !== "") {
+        return true;
+      }
+      return index === 0 && tag?.Name === "全部";
+    });
+  };
+
   const handleTagClick = (key: string, value: string) => {
     const nextParams = new URLSearchParams(currentParams);
-    nextParams.set(key, value);
+    const normalizedValue = normalizeTagValue(value);
+    if (normalizedValue === "") {
+      nextParams.delete(key);
+    } else {
+      nextParams.set(key, normalizedValue);
+    }
     nextParams.set("current", "1");
     router.push(`/filmClassifySearch?${nextParams.toString()}`);
   };
@@ -42,10 +63,10 @@ export default function FilmClassifySearchPageView({
           <div key={key} className={styles.filterRow}>
             <div className={styles.label}>{search.titles[key]}</div>
             <div className={styles.options}>
-              {search.tags[key].map((tag: any) => (
+              {getSafeTags(search.tags[key]).map((tag: any, index: number) => (
                 <span
-                  key={tag.Value}
-                  className={`${styles.option} ${params[key] === tag.Value ? styles.active : ""}`}
+                  key={`${key}-${tag.Value}-${tag.Name}-${index}`}
+                  className={`${styles.option} ${normalizeTagValue(params[key]) === normalizeTagValue(tag.Value) ? styles.active : ""}`}
                   onClick={() => handleTagClick(key, tag.Value)}
                 >
                   {tag.Name}

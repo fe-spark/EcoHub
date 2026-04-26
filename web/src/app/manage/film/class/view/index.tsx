@@ -945,7 +945,10 @@ export default function FilmClassPageView() {
           >
             刷新分类
           </Button>
-          <Button icon={<ReloadOutlined />} onClick={() => setResetConfirmOpen(true)}>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => setResetConfirmOpen(true)}
+          >
             重置分类
           </Button>
           <Button
@@ -980,84 +983,85 @@ export default function FilmClassPageView() {
         </div>
       }
       panelClassName={styles.treePanel}
+      panelless
     >
-        <Modal
-          open={resetConfirmOpen}
-          title="确认重置分类？"
-          okText="确认重置"
-          cancelText="取消"
-          confirmLoading={resetting}
-          okButtonProps={{ danger: true }}
-          cancelButtonProps={{ disabled: resetting }}
-          closable={!resetting}
-          maskClosable={!resetting}
-          keyboard={!resetting}
-          onOk={handleResetConfirm}
-          onCancel={() => {
-            if (!resetting) {
-              setResetConfirmOpen(false);
+      <Modal
+        open={resetConfirmOpen}
+        title="确认重置分类？"
+        okText="确认重置"
+        cancelText="取消"
+        confirmLoading={resetting}
+        okButtonProps={{ danger: true }}
+        cancelButtonProps={{ disabled: resetting }}
+        closable={!resetting}
+        maskClosable={!resetting}
+        keyboard={!resetting}
+        onOk={handleResetConfirm}
+        onCancel={() => {
+          if (!resetting) {
+            setResetConfirmOpen(false);
+          }
+        }}
+      >
+        <p>
+          该操作会清空当前分类的业务名称、显示状态、排序等设置，并重新获取主站原始分类。
+        </p>
+      </Modal>
+
+      {classTree.length === 0 ? (
+        <Empty description="暂无分类数据" />
+      ) : (
+        <DndContext
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={(event) => {
+            if (String(event.active.id).startsWith("root-")) {
+              handleRootDragEnd(event);
             }
           }}
+          onDragCancel={handleDragCancel}
         >
-          <p>
-            该操作会清空当前分类的业务名称、显示状态、排序等设置，并重新获取主站原始分类。
-          </p>
-        </Modal>
-
-        {classTree.length === 0 ? (
-          <Empty description="暂无分类数据" />
-        ) : (
-          <DndContext
-            sensors={sensors}
-            collisionDetection={closestCenter}
-            onDragStart={handleDragStart}
-            onDragOver={handleDragOver}
-            onDragEnd={(event) => {
-              if (String(event.active.id).startsWith("root-")) {
-                handleRootDragEnd(event);
-              }
-            }}
-            onDragCancel={handleDragCancel}
+          <SortableContext
+            items={classTree.map((item) => `root-${item.id}`)}
+            strategy={verticalListSortingStrategy}
           >
-            <SortableContext
-              items={classTree.map((item) => `root-${item.id}`)}
-              strategy={verticalListSortingStrategy}
-            >
-              <div className={styles.listWrap}>
-                {classTree.map((root) => (
-                  <RootGroup
-                    key={root.id}
-                    root={root}
-                    activeId={activeId}
-                    activeSortableId={activeSortableId}
-                    collapsed={collapsedRootIds.includes(root.id)}
-                    sensors={sensors}
-                    onDragStart={handleDragStart}
-                    onDragOver={handleDragOver}
-                    onChildDragEnd={handleChildDragEnd}
-                    onDragCancel={handleDragCancel}
-                    onToggleCollapse={toggleRootCollapse}
-                    onToggle={(item, checked) =>
-                      changeClassState(item.id, checked)
-                    }
-                    onEdit={(item) => openEditDialog(item.id)}
-                    onDelete={(item) => delClass(item.id)}
-                    onMeasure={handleRootMeasure}
-                    activePreview={activePreview}
-                  />
-                ))}
-              </div>
-            </SortableContext>
-            <DragOverlay>
-              {activePreview?.entity.type === "root" ? (
-                <DragPreview
-                  entity={activePreview.entity}
-                  width={activePreview.width}
+            <div className={styles.listWrap}>
+              {classTree.map((root) => (
+                <RootGroup
+                  key={root.id}
+                  root={root}
+                  activeId={activeId}
+                  activeSortableId={activeSortableId}
+                  collapsed={collapsedRootIds.includes(root.id)}
+                  sensors={sensors}
+                  onDragStart={handleDragStart}
+                  onDragOver={handleDragOver}
+                  onChildDragEnd={handleChildDragEnd}
+                  onDragCancel={handleDragCancel}
+                  onToggleCollapse={toggleRootCollapse}
+                  onToggle={(item, checked) =>
+                    changeClassState(item.id, checked)
+                  }
+                  onEdit={(item) => openEditDialog(item.id)}
+                  onDelete={(item) => delClass(item.id)}
+                  onMeasure={handleRootMeasure}
+                  activePreview={activePreview}
                 />
-              ) : null}
-            </DragOverlay>
-          </DndContext>
-        )}
+              ))}
+            </div>
+          </SortableContext>
+          <DragOverlay>
+            {activePreview?.entity.type === "root" ? (
+              <DragPreview
+                entity={activePreview.entity}
+                width={activePreview.width}
+              />
+            ) : null}
+          </DragOverlay>
+        </DndContext>
+      )}
       <Modal
         title="更新分类信息"
         open={editOpen}

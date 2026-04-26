@@ -172,18 +172,19 @@ function FilmAddForm() {
 
   return (
     <ManagePageShell
-      eyebrow="内容管理"
+      leading={
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={() => router.back()}
+          className={styles.backButton}
+        >
+          返回影片列表
+        </Button>
+      }
       title={id ? "修改影片详情" : "录入新影片"}
-      description="维护主库存影片的基础信息、演职人员、播放资源和外部数据。"
       actions={
         <Space size="middle" wrap>
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => router.back()}
-          >
-            返回列表
-          </Button>
           {!id && (
             <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
               清空重填
@@ -200,6 +201,7 @@ function FilmAddForm() {
         </Space>
       }
       panelClassName={styles.formPanel}
+      panelless
     >
       <Form
         form={form}
@@ -216,7 +218,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <InfoCircleOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <InfoCircleOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 基础信息
               </Space>
             }
@@ -272,8 +276,15 @@ function FilmAddForm() {
                   <Input
                     placeholder="输入图片URL或上传"
                     addonAfter={
-                      <Upload customRequest={customUpload} showUploadList={false}>
-                        <Button icon={<UploadOutlined />} type="text" size="small">
+                      <Upload
+                        customRequest={customUpload}
+                        showUploadList={false}
+                      >
+                        <Button
+                          icon={<UploadOutlined />}
+                          type="text"
+                          size="small"
+                        >
                           上传封面
                         </Button>
                       </Upload>
@@ -370,7 +381,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <DatabaseOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <DatabaseOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 状态与外部数据
               </Space>
             }
@@ -419,7 +432,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <ContainerOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <ContainerOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 剧情详情
               </Space>
             }
@@ -439,7 +454,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <PlayCircleOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <PlayCircleOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 播放资源
               </Space>
             }

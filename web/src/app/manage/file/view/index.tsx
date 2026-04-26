@@ -139,102 +139,124 @@ export default function FileUploadPageView() {
         </div>
       }
       panelClassName={styles.galleryPanel}
+      panelless
     >
       <div
         className={styles.container}
-      onDragEnter={handleDragEnter}
-      onDragOver={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        setDragging(true);
-      }}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+        onDragEnter={handleDragEnter}
+        onDragOver={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          setDragging(true);
+        }}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
       >
-      <div className={`${styles.dropOverlay} ${dragging ? styles.dropOverlayActive : ""}`}>
-        <Upload customRequest={customUpload} multiple showUploadList={false} style={{ width: "100%", height: "100%" }}>
-          <div style={{ pointerEvents: "none" }}>
-            <CloudUploadOutlined className={styles.draggerIcon} />
-            <div className={styles.dropText}>松开以开始上传</div>
-            <Text style={{ color: "var(--ant-color-primary)", opacity: 0.8 }}>
-              支持批量上传多张海报图片到当前内容库
-            </Text>
-          </div>
-        </Upload>
-      </div>
-
-      <Upload customRequest={customUpload} multiple showUploadList={false}>
-        <Tooltip title="添加图片资源" placement="left">
-          <FloatButton icon={<PlusOutlined />} type="primary" style={{ right: 40, bottom: 40 }} />
-        </Tooltip>
-      </Upload>
-
-      <div className={styles.gallerySection}>
-        <Spin spinning={loading}>
-          {list.length > 0 ? (
-            <div className={styles.imageGrid}>
-              <Image.PreviewGroup>
-                {list.map((item) => (
-                  <div key={item.ID} className={styles.imageCard}>
-                    <div className={styles.thumbnailWrapper}>
-                      {/* 管理端图库使用 AntD PreviewGroup，缩略图维持原生 img 更直接 */}
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={item.link} alt="图库缩略图" className={styles.thumbnail} />
-                    </div>
-                    <div className={styles.overlay}>
-                      <Space size="large">
-                        <Tooltip title="查看大图">
-                          <div className={styles.actionBtn}>
-                            <EyeOutlined />
-                          </div>
-                        </Tooltip>
-                        <Tooltip title="彻底删除">
-                          <Popconfirm
-                            title="确定要从服务器删除这张图片吗？"
-                            onConfirm={() => delImage(item.ID)}
-                            okText="确定"
-                            cancelText="取消"
-                            placement="topRight"
-                          >
-                            <div className={`${styles.actionBtn} ${styles.deleteBtn}`}>
-                              <DeleteOutlined />
-                            </div>
-                          </Popconfirm>
-                        </Tooltip>
-                      </Space>
-                    </div>
-                    <div style={{ display: "none" }}>
-                      <Image src={item.link} alt="图库预览图" />
-                    </div>
-                  </div>
-                ))}
-              </Image.PreviewGroup>
+        <div
+          className={`${styles.dropOverlay} ${dragging ? styles.dropOverlayActive : ""}`}
+        >
+          <Upload
+            customRequest={customUpload}
+            multiple
+            showUploadList={false}
+            style={{ width: "100%", height: "100%" }}
+          >
+            <div style={{ pointerEvents: "none" }}>
+              <CloudUploadOutlined className={styles.draggerIcon} />
+              <div className={styles.dropText}>松开以开始上传</div>
+              <Text style={{ color: "var(--ant-color-primary)", opacity: 0.8 }}>
+                支持批量上传多张海报图片到当前内容库
+              </Text>
             </div>
-          ) : (
-            !loading && (
-              <div className={styles.emptyState}>
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={<Text type="secondary">内容库暂无图片，直接拖拽或点击右下角按钮上传</Text>}
-                />
-              </div>
-            )
-          )}
-        </Spin>
+          </Upload>
+        </div>
 
-        {page.total > page.pageSize && (
-          <div className={styles.pagination}>
-            <Pagination
-              current={page.current}
-              pageSize={page.pageSize}
-              total={page.total}
-              onChange={(p) => getPhotoList(p)}
-              showSizeChanger={false}
-              hideOnSinglePage
+        <Upload customRequest={customUpload} multiple showUploadList={false}>
+          <Tooltip title="添加图片资源" placement="left">
+            <FloatButton
+              icon={<PlusOutlined />}
+              type="primary"
+              style={{ right: 40, bottom: 40 }}
             />
-          </div>
-        )}
-      </div>
+          </Tooltip>
+        </Upload>
+
+        <div className={styles.gallerySection}>
+          <Spin spinning={loading}>
+            {list.length > 0 ? (
+              <div className={styles.imageGrid}>
+                <Image.PreviewGroup>
+                  {list.map((item) => (
+                    <div key={item.ID} className={styles.imageCard}>
+                      <div className={styles.thumbnailWrapper}>
+                        {/* 管理端图库使用 AntD PreviewGroup，缩略图维持原生 img 更直接 */}
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.link}
+                          alt="图库缩略图"
+                          className={styles.thumbnail}
+                        />
+                      </div>
+                      <div className={styles.overlay}>
+                        <Space size="large">
+                          <Tooltip title="查看大图">
+                            <div className={styles.actionBtn}>
+                              <EyeOutlined />
+                            </div>
+                          </Tooltip>
+                          <Tooltip title="彻底删除">
+                            <Popconfirm
+                              title="确定要从服务器删除这张图片吗？"
+                              onConfirm={() => delImage(item.ID)}
+                              okText="确定"
+                              cancelText="取消"
+                              placement="topRight"
+                            >
+                              <div
+                                className={`${styles.actionBtn} ${styles.deleteBtn}`}
+                              >
+                                <DeleteOutlined />
+                              </div>
+                            </Popconfirm>
+                          </Tooltip>
+                        </Space>
+                      </div>
+                      <div style={{ display: "none" }}>
+                        <Image src={item.link} alt="图库预览图" />
+                      </div>
+                    </div>
+                  ))}
+                </Image.PreviewGroup>
+              </div>
+            ) : (
+              !loading && (
+                <div className={styles.emptyState}>
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={
+                      <Text type="secondary">
+                        内容库暂无图片，直接拖拽或点击右下角按钮上传
+                      </Text>
+                    }
+                  />
+                </div>
+              )
+            )}
+          </Spin>
+
+          {page.total > page.pageSize && (
+            <div className={styles.pagination}>
+              <Pagination
+                current={page.current}
+                pageSize={page.pageSize}
+                total={page.total}
+                onChange={(p) => getPhotoList(p)}
+                showSizeChanger={false}
+                hideOnSinglePage
+              />
+            </div>
+          )}
+        </div>
       </div>
     </ManagePageShell>
   );

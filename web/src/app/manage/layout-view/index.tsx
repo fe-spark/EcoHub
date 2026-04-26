@@ -2,15 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import {
-  Layout,
-  Menu,
-  Avatar,
-  Button,
-  Space,
-  Dropdown,
-  Tag,
-} from "antd";
+import { Layout, Menu, Avatar, Button, Space, Dropdown, Tag } from "antd";
 import {
   HomeOutlined,
   ThunderboltOutlined,
@@ -43,7 +35,6 @@ const menuItems: MenuItem[] = [
     label: "内容管理",
     children: [
       { key: "/manage/film", label: "影片列表" },
-      { key: "/manage/film/add", label: "手动录入" },
       { key: "/manage/film/class", label: "分类管理" },
     ],
   },
@@ -69,6 +60,7 @@ const menuItems: MenuItem[] = [
     children: [
       { key: "/manage/system/website", label: "网站配置" },
       { key: "/manage/system/banners", label: "首页封面" },
+      { key: "/manage/system/mapping-rules", label: "映射规则" },
       { key: "/manage/system/users", label: "账号管理" },
     ],
   },
@@ -76,7 +68,7 @@ const menuItems: MenuItem[] = [
 
 function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/film/add")) {
-    return "/manage/film/add";
+    return "/manage/film";
   }
   if (pathname.startsWith("/manage/film/class")) {
     return "/manage/film/class";
@@ -99,6 +91,9 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/system/banners")) {
     return "/manage/system/banners";
   }
+  if (pathname.startsWith("/manage/system/mapping-rules")) {
+    return "/manage/system/mapping-rules";
+  }
   if (pathname.startsWith("/manage/system/users")) {
     return "/manage/system/users";
   }
@@ -111,11 +106,20 @@ function resolveMenuKey(pathname: string) {
 function collectOpenKeys(items: MenuItem[], selectedKey: string) {
   const openKeys: string[] = [];
   for (const item of items) {
-    if (!item || typeof item !== "object" || !("children" in item) || !item.children) {
+    if (
+      !item ||
+      typeof item !== "object" ||
+      !("children" in item) ||
+      !item.children
+    ) {
       continue;
     }
     const hasMatch = item.children.some(
-      (child) => child && typeof child === "object" && "key" in child && child.key === selectedKey,
+      (child) =>
+        child &&
+        typeof child === "object" &&
+        "key" in child &&
+        child.key === selectedKey,
     );
     if (hasMatch && "key" in item && typeof item.key === "string") {
       openKeys.push(item.key);
@@ -169,8 +173,13 @@ export default function ManageLayoutView({
         className={styles.sider}
         theme="light"
       >
-        <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-          <div className={styles.logoWrap} onClick={() => window.open("/", "_blank")}>
+        <div
+          style={{ display: "flex", flexDirection: "column", height: "100vh" }}
+        >
+          <div
+            className={styles.logoWrap}
+            onClick={() => window.open("/", "_blank")}
+          >
             {siteInfo?.logo && <Avatar src={siteInfo.logo} size={30} />}
             {!collapsed && siteInfo?.siteName && (
               <span className={styles.siteName}>{siteInfo.siteName}</span>
@@ -186,7 +195,9 @@ export default function ManageLayoutView({
           />
         </div>
       </Sider>
-      <Layout style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
+      <Layout
+        style={{ display: "flex", flexDirection: "column", height: "100vh" }}
+      >
         <Header className={styles.header}>
           <Space size="middle">
             <Button
@@ -221,15 +232,22 @@ export default function ManageLayoutView({
                       icon={<UserOutlined />}
                       style={{ backgroundColor: "#1890ff" }}
                     />
-                    <span style={{ fontWeight: 500 }}>{userInfo.nickName || userInfo.userName}</span>
-                    {userInfo.canWrite === false && <Tag color="blue">访客只读</Tag>}
+                    <span style={{ fontWeight: 500 }}>
+                      {userInfo.nickName || userInfo.userName}
+                    </span>
+                    {userInfo.canWrite === false && (
+                      <Tag color="blue">访客只读</Tag>
+                    )}
                   </Space>
                 </div>
               </Dropdown>
             )}
           </Space>
         </Header>
-        <Content className={styles.content} style={{ flex: 1, overflow: "auto" }}>
+        <Content
+          className={styles.content}
+          style={{ flex: 1, overflow: "auto" }}
+        >
           {children}
         </Content>
       </Layout>
