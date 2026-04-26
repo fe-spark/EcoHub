@@ -63,8 +63,8 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		return err
 	}
 
-	if err := refreshSearchInfosByPlaylists(sourceID, list); err != nil {
-		log.Printf("refreshSearchInfosByPlaylists Error: %v", err)
+	if err := scheduleSearchInfoRefreshByPlaylists(sourceID, list); err != nil {
+		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
 		return err
 	}
 
@@ -72,7 +72,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 	return nil
 }
 
-func refreshSearchInfosByPlaylists(sourceID string, details []model.MovieDetail) error {
+func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail) error {
 	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
 		return err
@@ -80,7 +80,8 @@ func refreshSearchInfosByPlaylists(sourceID string, details []model.MovieDetail)
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
 		return err
 	}
-	return RefreshPlayFromSummaryBySearchInfos(infos)
+	ScheduleSlaveSummaryRefresh(sourceID, infos...)
+	return nil
 }
 
 func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.SearchInfo, error) {

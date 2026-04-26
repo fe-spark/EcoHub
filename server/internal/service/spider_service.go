@@ -22,9 +22,6 @@ func clearCategorySyncRedisCaches() {
 }
 
 func finalizeCategorySync() {
-	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
-		log.Printf("[SpiderService] 强制重建派生数据失败: %v", err)
-	}
 	repository.RefreshCategoryCache()
 	clearCategorySyncRedisCaches()
 }

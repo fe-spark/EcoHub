@@ -291,9 +291,7 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		return err
 	}
 
-	clearSearchInfoCachesByPids(infoList)
-	BatchHandleSearchTag(infoList...)
-	ClearProvideListCache()
+	ScheduleDerivedRefresh(id, infoList...)
 	return nil
 }
 

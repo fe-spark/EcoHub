@@ -42,8 +42,10 @@ var retryBackoffs = []time.Duration{
 // activeTasks 存储当前活跃采集任务的信息
 var activeTasks sync.Map
 
-// masterWriteLocks 串行化主站写库，避免分页并发采集时多个事务互相死锁。
-var masterWriteLocks sync.Map
+// sourceWriteLocks 按站点串行化写库：
+// 1. 主站避免分页并发写主数据时互相打架；
+// 2. 附属站避免多页并发刷新播放列表与摘要，把 MySQL 连接池瞬时打满。
+var sourceWriteLocks sync.Map
 
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
@@ -59,12 +61,12 @@ func ClearLimiter(sourceID string) {
 	limiters.Delete(sourceID)
 }
 
-func getMasterWriteLock(sourceID string) *sync.Mutex {
-	if lock, ok := masterWriteLocks.Load(sourceID); ok {
+func getSourceWriteLock(sourceID string) *sync.Mutex {
+	if lock, ok := sourceWriteLocks.Load(sourceID); ok {
 		return lock.(*sync.Mutex)
 	}
 	lock := &sync.Mutex{}
-	actual, _ := masterWriteLocks.LoadOrStore(sourceID, lock)
+	actual, _ := sourceWriteLocks.LoadOrStore(sourceID, lock)
 	return actual.(*sync.Mutex)
 }
 
@@ -256,18 +258,37 @@ func HandleCollect(id string, h int) error {
 	}
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
+	interrupted := false
 	if pageCount <= config.MAXGoroutine*2 {
 		for i := 1; i <= pageCount; i++ {
 			select {
 			case <-ctx.Done():
 				log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
-				return nil
+				interrupted = true
+				break
 			default:
 				collectFilm(ctx, s, h, i)
+			}
+			if interrupted {
+				break
 			}
 		}
 	} else {
 		ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
+	}
+	if interrupted {
+		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
+	}
+
+	if s.Grade == model.MasterCollect {
+		if err := filmrepo.FlushPendingDerivedRefresh(s.Id); err != nil {
+			return fmt.Errorf("flush derived refresh failed: %w", err)
+		}
+	}
+	if s.Grade == model.SlaveCollect {
+		if err := filmrepo.FlushPendingSlaveSummaryRefresh(s.Id); err != nil {
+			return fmt.Errorf("flush slave summary refresh failed: %w", err)
+		}
 	}
 
 	if s.Grade == model.MasterCollect && s.SyncPictures {
@@ -312,7 +333,7 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
-		lock := getMasterWriteLock(s.Id)
+		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
 		if err = saveMaster(s.Id, list); err != nil {
 			lock.Unlock()
@@ -325,9 +346,13 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 			}
 		}
 	case model.SlaveCollect:
+		lock := getSourceWriteLock(s.Id)
+		lock.Lock()
 		if err = filmrepo.SaveSitePlayList(s.Id, list); err != nil {
+			lock.Unlock()
 			return fmt.Errorf("save slave playlists failed: %w", err)
 		}
+		lock.Unlock()
 	}
 	return nil
 }
@@ -389,9 +414,17 @@ func collectFilmById(ids string, s *model.FilmSource) error {
 	if len(list) <= 0 {
 		return errors.New("get movie detail failed: response list is empty")
 	}
-	return saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
+	if err := saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
 		return filmrepo.SaveDetail(id, l[0])
-	})
+	}); err != nil {
+		return err
+	}
+	if s.Grade == model.SlaveCollect {
+		if err := filmrepo.FlushPendingSlaveSummaryRefresh(s.Id); err != nil {
+			return fmt.Errorf("flush slave summary refresh failed: %w", err)
+		}
+	}
+	return nil
 }
 
 // ConcurrentPageSpider 并发分页采集, 不限类型
@@ -424,12 +457,10 @@ func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource
 		}()
 	}
 	for i := 0; i < GoroutineNum; i++ {
-		select {
-		case <-waitCh:
-		case <-ctx.Done():
-			log.Printf("[Spider] 站点 %s 并发采集任务被中断\n", s.Name)
-			return
-		}
+		<-waitCh
+	}
+	if ctx.Err() != nil {
+		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
 }
 
@@ -562,6 +593,20 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
+	}
+	if s.Grade == model.MasterCollect {
+		if err = filmrepo.FlushPendingDerivedRefresh(s.Id); err != nil {
+			saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+			log.Println("Recover flush derived refresh Error: ", err)
+			return
+		}
+	}
+	if s.Grade == model.SlaveCollect {
+		if err = filmrepo.FlushPendingSlaveSummaryRefresh(s.Id); err != nil {
+			saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+			log.Println("Recover flush slave summary refresh Error: ", err)
+			return
+		}
 	}
 	repository.ChangeRecord(fr, 0)
 }
