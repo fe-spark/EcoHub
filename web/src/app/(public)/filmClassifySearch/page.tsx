@@ -1,17 +1,22 @@
 import FilmClassifySearchPageView from "./view";
 import { serverGet } from "@/lib/server-api";
+import { Alert } from "antd";
 
 async function getFilmClassifySearchData(params: Record<string, string>) {
   try {
     const response = await serverGet<any>("/filmClassifySearch", params);
     if (response.code === 0) {
-      return response.data;
+      return { data: response.data, error: "" };
     }
+
+    return { data: null, error: response.msg || "分类筛选数据获取失败" };
   } catch (error) {
     console.error("fetch film classify search data error:", error);
+    return {
+      data: null,
+      error: error instanceof Error ? error.message : "分类筛选数据获取失败",
+    };
   }
-
-  return null;
 }
 
 export default async function FilmClassifySearchPage({
@@ -29,10 +34,24 @@ export default async function FilmClassifySearchPage({
     }),
   );
 
-  const data = await getFilmClassifySearchData(currentParams);
+  const { data, error } = await getFilmClassifySearchData(currentParams);
   if (!data) {
-    return null;
+    return (
+      <Alert type="error" showIcon message={error || "分类筛选数据获取失败"} />
+    );
   }
 
-  return <FilmClassifySearchPageView data={data} currentParams={currentParams} />;
+  if (!data?.title) {
+    return (
+      <Alert
+        type="warning"
+        showIcon
+        message="当前分类已失效，请从最新分类导航重新进入"
+      />
+    );
+  }
+
+  return (
+    <FilmClassifySearchPageView data={data} currentParams={currentParams} />
+  );
 }

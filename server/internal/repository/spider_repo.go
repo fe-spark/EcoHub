@@ -162,7 +162,7 @@ func DelCollectResource(id string) error {
 		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
 			return err
 		}
-		// 2. 删除附属站采集产生的播放列表数据
+		// 2. 删除附属站播放列表
 		if err := tx.Where("source_id = ?", id).Delete(&model.MoviePlaylist{}).Error; err != nil {
 			return err
 		}
@@ -177,8 +177,14 @@ func DelCollectResource(id string) error {
 
 // AddCollectSource 添加采集站信息
 func AddCollectSource(s model.FilmSource) error {
+	return AddCollectSourceTx(db.Mdb, s)
+}
+
+func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	var count int64
-	db.Mdb.Model(&model.FilmSource{}).Where("uri = ?", s.Uri).Count(&count)
+	if err := tx.Model(&model.FilmSource{}).Where("uri = ?", s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
 	if count > 0 {
 		return errors.New("当前采集站点信息已存在，请勿重复添加")
 	}
@@ -186,7 +192,7 @@ func AddCollectSource(s model.FilmSource) error {
 	if s.Id == "" {
 		s.Id = utils.GenerateHashKey(s.Uri)
 	}
-	return db.Mdb.Create(&s).Error
+	return tx.Create(&s).Error
 }
 
 // BatchAddCollectSource 批量添加采集站信息
@@ -202,17 +208,27 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 
 // UpdateCollectSource 更新采集站信息
 func UpdateCollectSource(s model.FilmSource) error {
+	return UpdateCollectSourceTx(db.Mdb, s)
+}
+
+func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	var count int64
-	db.Mdb.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count)
+	if err := tx.Model(&model.FilmSource{}).Where("id != ? AND uri = ?", s.Id, s.Uri).Count(&count).Error; err != nil {
+		return err
+	}
 	if count > 0 {
 		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
 	}
-	return db.Mdb.Save(&s).Error
+	return tx.Save(&s).Error
 }
 
 // DemoteExistingMaster 将现有的主站降级为附属站，确保全局仅一个主站
 func DemoteExistingMaster() error {
-	return db.Mdb.Model(&model.FilmSource{}).
+	return DemoteExistingMasterTx(db.Mdb)
+}
+
+func DemoteExistingMasterTx(tx *gorm.DB) error {
+	return tx.Model(&model.FilmSource{}).
 		Where("grade = ?", model.MasterCollect).
 		Update("grade", model.SlaveCollect).Error
 }
@@ -234,8 +250,8 @@ func ExistCollectSourceList() bool {
 // --------- Failure Record -----------
 
 func pendingFailureScope(tx *gorm.DB, fl model.FailureRecord) *gorm.DB {
-	return tx.Where("origin_id = ? AND collect_type = ? AND page_number = ? AND hour = ? AND status = 1",
-		fl.OriginId, fl.CollectType, fl.PageNumber, fl.Hour,
+	return tx.Where("origin_id = ? AND page_number = ? AND hour = ? AND status = 1",
+		fl.OriginId, fl.PageNumber, fl.Hour,
 	)
 }
 
@@ -290,20 +306,20 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	// 通过 RecordRequestVo，生成查询条件
 	qw := db.Mdb.Model(&model.FailureRecord{})
 	if vo.OriginId != "" {
-		qw.Where("origin_id = ?", vo.OriginId)
+		qw = qw.Where("origin_id = ?", vo.OriginId)
 	}
 	if !vo.BeginTime.IsZero() && !vo.EndTime.IsZero() {
-		qw.Where("created_at BETWEEN ? AND ? ", vo.BeginTime, vo.EndTime)
+		qw = qw.Where("created_at BETWEEN ? AND ? ", vo.BeginTime, vo.EndTime)
 	}
 	if vo.Status >= 0 {
-		qw.Where("status = ?", vo.Status)
+		qw = qw.Where("status = ?", vo.Status)
 	}
 
 	// 获取分页数据
 	dto.GetPage(qw, vo.Paging)
 	// 获取分页查询的数据
 	var list []model.FailureRecord
-	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("updated_at DESC").Find(&list).Error; err != nil {
+	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("updated_at DESC, id DESC").Find(&list).Error; err != nil {
 		log.Println(err)
 		return nil
 	}
@@ -323,14 +339,25 @@ func FindRecordById(id uint) *model.FailureRecord {
 // PendingRecord 查询所有待处理的记录信息
 func PendingRecord() []model.FailureRecord {
 	var list []model.FailureRecord
-	// 1. 获取 hour > 4320 || hour < 0  && status = 1 的影片信息
-	db.Mdb.Where("(hour > 4320 OR hour < 0) AND status = 1").Find(&list)
-	// 2. 获取 hour > 0 && hour < 4320 && status = 1 的影片信息 (只获取最早的一条记录)
-	var fr model.FailureRecord
-	if err := db.Mdb.Where("hour > 0 AND hour < 4320 AND status = 1").Order("hour DESC, created_at ASC").First(&fr).Error; err == nil {
-		// 3. 将 fr 添加到 list 中
-		list = append(list, fr)
+	if err := db.Mdb.
+		Where("(hour > 4320 OR hour < 0) AND status = 1").
+		Order("created_at ASC, id ASC").
+		Find(&list).Error; err != nil {
+		log.Println("Query pending failure records failed:", err)
+		return nil
 	}
+
+	var fr model.FailureRecord
+	if err := db.Mdb.
+		Where("hour > 0 AND hour < 4320 AND status = 1").
+		Order("hour DESC, created_at ASC, id ASC").
+		First(&fr).Error; err == nil {
+		list = append(list, fr)
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		log.Println("Query incremental failure record failed:", err)
+		return nil
+	}
+
 	return list
 }
 
@@ -349,8 +376,7 @@ func RetryRecord(id uint, status int) error {
 	if fr == nil {
 		return errors.New("failure record not found")
 	}
-	// 将本次更新成功的记录数据状态修改为成功 0
-	return db.Mdb.Model(&model.FailureRecord{}).Where("updated_at > ?", fr.UpdatedAt).Update("status", status).Error
+	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
 }
 
 // DelDoneRecord 删除已处理的记录信息 -- 逻辑删除

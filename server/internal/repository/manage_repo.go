@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"sort"
+	"strings"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -11,6 +12,31 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func normalizeBannerImageFields(bl model.Banners) model.Banners {
+	for index := range bl {
+		picture := strings.TrimSpace(bl[index].Picture)
+		if picture == "" {
+			picture = strings.TrimSpace(bl[index].Poster)
+		}
+		if picture == "" {
+			picture = strings.TrimSpace(bl[index].PictureSlide)
+		}
+		if picture == "" {
+			continue
+		}
+
+		bl[index].Picture = picture
+		if strings.TrimSpace(bl[index].Poster) == "" {
+			bl[index].Poster = picture
+		}
+		if strings.TrimSpace(bl[index].PictureSlide) == "" {
+			bl[index].PictureSlide = picture
+		}
+	}
+
+	return bl
+}
 
 // ExistSiteConfig 判断 MySQL 中是否已有网站配置
 func ExistSiteConfig() bool {
@@ -33,19 +59,21 @@ func SaveSiteBasic(c model.BasicConfig) error {
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 		IsVideoProxy: c.IsVideoProxy,
 	}
-	// 采用覆盖式更新 (因为只维护单行配置)
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{})
-	if err := db.Mdb.Create(&rec).Error; err != nil {
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{}).Error; err != nil {
+			return err
+		}
+		return tx.Create(&rec).Error
+	}); err != nil {
 		return err
 	}
-	// write-through
+
 	data, _ := json.Marshal(c)
-	err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err()
-	if err == nil {
-		// 主动同步清理首页缓存
-		ClearIndexPageCache()
+	if err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err(); err != nil {
+		log.Println("SaveSiteBasic Redis Error:", err)
 	}
-	return err
+	ClearIndexPageCache()
+	return nil
 }
 
 // GetSiteBasic 获取网站基本配置信息 (Redis 缓存优先，MySQL 兜底)
@@ -53,8 +81,11 @@ func GetSiteBasic() model.BasicConfig {
 	c := model.BasicConfig{}
 	// 1. Redis 缓存
 	if data := db.Rdb.Get(db.Cxt, config.SiteConfigBasic).Val(); data != "" {
-		_ = json.Unmarshal([]byte(data), &c)
-		return c
+		if err := json.Unmarshal([]byte(data), &c); err == nil {
+			return c
+		}
+		log.Println("GetSiteBasic Redis Unmarshal Error")
+		db.Rdb.Del(db.Cxt, config.SiteConfigBasic)
 	}
 	// 2. MySQL 兜底
 	var rec model.SiteConfigRecord
@@ -80,6 +111,7 @@ func GetBanners() model.Banners {
 	data := db.Rdb.Get(db.Cxt, config.BannersKey).Val()
 	if data != "" && data != "null" {
 		if err := json.Unmarshal([]byte(data), &bl); err == nil && len(bl) > 0 {
+			bl = normalizeBannerImageFields(bl)
 			sort.Sort(bl)
 			return bl
 		}
@@ -91,6 +123,7 @@ func GetBanners() model.Banners {
 	}
 
 	if len(bl) > 0 {
+		bl = normalizeBannerImageFields(bl)
 		sort.Sort(bl)
 		// 回填缓存
 		data, _ := json.Marshal(bl)
@@ -101,7 +134,8 @@ func GetBanners() model.Banners {
 
 // SaveBanners 保存轮播配置信息 (MySQL + Redis 短期缓存)
 func SaveBanners(bl model.Banners) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	bl = normalizeBannerImageFields(bl)
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		// 清空旧轮播数据
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Banner{}).Error; err != nil {
 			return err
@@ -112,13 +146,15 @@ func SaveBanners(bl model.Banners) error {
 				return err
 			}
 		}
-		// write-through cache
-		data, _ := json.Marshal(bl)
-		err := db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err()
-		if err == nil {
-			// Banner 变动也刷新首页
-			ClearIndexPageCache()
-		}
+		return nil
+	}); err != nil {
 		return err
-	})
+	}
+
+	data, _ := json.Marshal(bl)
+	if err := db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err(); err != nil {
+		log.Println("SaveBanners Redis Error:", err)
+	}
+	ClearIndexPageCache()
+	return nil
 }

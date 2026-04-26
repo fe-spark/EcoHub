@@ -1,5 +1,6 @@
 import FilmClassifyPageView from "./view";
 import { serverGet } from "@/lib/server-api";
+import { Alert } from "antd";
 
 async function getFilmClassifyData(pid: string) {
   try {
@@ -24,12 +25,16 @@ export default async function FilmClassifyPage({
   const pid = Array.isArray(pidValue) ? pidValue[0] : pidValue;
 
   if (!pid) {
-    return null;
+    return <Alert type="warning" showIcon message="缺少分类参数" />;
   }
 
   const data = await getFilmClassifyData(pid);
   if (!data) {
-    return null;
+    return <Alert type="error" showIcon message="分类页面数据获取失败" />;
+  }
+
+  if (!data?.title) {
+    return <Alert type="warning" showIcon message="当前分类已失效，请从最新分类导航重新进入" />;
   }
 
   return <FilmClassifyPageView data={data} pid={pid} />;

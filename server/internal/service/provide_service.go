@@ -49,9 +49,6 @@ func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int
 	if s == nil || !s.State {
 		return nil, errors.New("collect source not found or disabled")
 	}
-	if s.ResultModel != model.JsonResult {
-		return nil, errors.New("collect source is not json result")
-	}
 
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	if ac == "" {
@@ -285,8 +282,6 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		page.Current = 1
 	}
 
-	query := db.Mdb.Model(&model.SearchInfo{})
-
 	pid := int64(t)
 	pid = repository.ResolveCategoryID(pid)
 	if cid > 0 {
@@ -295,7 +290,17 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if cid == model.TagUncategorizedValue && pid <= 0 {
 		return 1, 1, 0, []model.FilmList{}
 	}
-	query = filmrepo.ApplyCategoryFilter(query, pid, cid)
+
+	searchTags := model.SearchTagsVO{
+		Pid:      pid,
+		Cid:      cid,
+		Area:     strings.TrimSpace(area),
+		Language: strings.TrimSpace(lang),
+		Plot:     strings.TrimSpace(plot),
+		Year:     strings.TrimSpace(year),
+		Sort:     strings.TrimSpace(sort),
+	}
+	query := filmrepo.BuildSearchInfoQueryByTags(db.Mdb.Model(&model.SearchInfo{}), searchTags)
 
 	if wd != "" {
 		query = query.Where("name LIKE ? OR sub_title LIKE ?", "%"+wd+"%", "%"+wd+"%")
@@ -306,88 +311,10 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		query = query.Where("update_stamp >= ?", timeLimit)
 	}
 
-	if year != "" && year != "全部" {
-		switch year {
-		case model.TagOthersValue, "其他", "其它":
-			if pid > 0 {
-				topVals := filmrepo.GetTopTagValues(pid, "Year")
-				query = query.Where("year <> 0")
-				if len(topVals) > 0 {
-					query = query.Where("year NOT IN ?", topVals)
-				}
-			}
-		case model.TagUnknownValue:
-			query = query.Where("year = 0")
-		default:
-			if y, err := strconv.Atoi(year); err == nil && y > 0 {
-				query = query.Where("year = ?", y)
-			}
-		}
-	}
-
-	// 统一处理“其它”逻辑
-	// 2. 处理规范化维度 (Area, Language, Plot) - 全部切换到 MovieTagRel 索引查询
-	dims := map[string]string{
-		"Area":     area,
-		"Language": lang,
-		"Plot":     plot,
-	}
-
-	for dimType, val := range dims {
-		if val == "" || val == "全部" {
-			continue
-		}
-		switch {
-		case (val == model.TagOthersValue || val == "其他" || val == "其它") && pid > 0:
-			topVals := filmrepo.GetTopTagValues(pid, dimType)
-			if dimType == "Plot" {
-				query = query.Where("class_tag <> ''")
-				maxPlotExcludes := 5
-				if len(topVals) < maxPlotExcludes {
-					maxPlotExcludes = len(topVals)
-				}
-				for i := 0; i < maxPlotExcludes; i++ {
-					v := topVals[i]
-					query = query.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%s%%", v))
-				}
-			} else {
-				k := strings.ToLower(dimType)
-				query = query.Where(fmt.Sprintf("%s <> ''", k))
-				if len(topVals) > 0 {
-					query = query.Where(fmt.Sprintf("%s NOT IN ?", k), topVals)
-				}
-			}
-		case val == model.TagUnknownValue:
-			if dimType == "Plot" {
-				query = query.Where("(class_tag = '' OR class_tag IS NULL)")
-			} else {
-				k := strings.ToLower(dimType)
-				query = query.Where(fmt.Sprintf("(%s = '' OR %s IS NULL)", k, k))
-			}
-		default:
-			if dimType == "Plot" {
-				query = query.Where("class_tag LIKE ?", fmt.Sprintf("%%%s%%", val))
-			} else {
-				k := strings.ToLower(dimType)
-				query = query.Where(fmt.Sprintf("%s = ?", k), val)
-			}
-		}
-	}
-
 	dto.GetPage(query, &page)
 
-	orderBy := "update_stamp DESC"
-	switch sort {
-	case "hits":
-		orderBy = "hits DESC"
-	case "score":
-		orderBy = "score DESC"
-	case "release_stamp":
-		orderBy = "release_stamp DESC"
-	}
-
 	var sl []model.SearchInfo
-	query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Order(orderBy).Find(&sl)
+	query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl)
 
 	var vodList []model.FilmList
 	for _, s := range sl {
@@ -398,9 +325,9 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 			TypeID:      typeID,
 			TypeName:    typeName,
 			VodEn:       s.Initial,
-			VodTime:     time.Unix(s.UpdateStamp, 0).Format("2006-01-02 15:04:05"),
+			VodTime:     resolveProvideVodTime(s),
 			VodRemarks:  s.Remarks,
-			VodPlayFrom: config.PlayFormCloud,
+			VodPlayFrom: resolveProvidePlayFromSummary(s),
 			VodPic:      s.Picture,
 		})
 	}
@@ -421,6 +348,21 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	return page.Current, page.PageCount, page.Total, vodList
 }
 
+func resolveProvidePlayFromSummary(search model.SearchInfo) string {
+	return strings.TrimSpace(search.PlayFromSummary)
+}
+
+func resolveProvideVodTime(search model.SearchInfo) string {
+	stamp := search.CollectStamp
+	if stamp <= 0 {
+		stamp = search.UpdateStamp
+	}
+	if stamp <= 0 {
+		return ""
+	}
+	return time.Unix(stamp, 0).Format("2006-01-02 15:04:05")
+}
+
 // GetVodDetail 获取视频详情（带播放列表）
 func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 	var detailList []model.FilmDetail
@@ -435,7 +377,10 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			continue
 		}
 
-		movieDetailVo := IndexSvc.GetFilmDetail(idInt)
+		movieDetailVo, err := IndexSvc.GetFilmDetail(idInt)
+		if err != nil {
+			continue
+		}
 
 		if movieDetailVo.Id == 0 && movieDetailVo.Name == "" {
 			continue
@@ -463,7 +408,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			TypeName:    typeName,
 			VodName:     s.Name,
 			VodEn:       s.Initial,
-			VodTime:     time.Unix(s.UpdateStamp, 0).Format("2006-01-02 15:04:05"),
+			VodTime:     resolveProvideVodTime(s),
 			VodRemarks:  s.Remarks,
 			VodPlayFrom: strings.Join(playFromList, "$$$"),
 			VodPlayURL:  strings.Join(playUrlList, "$$$"),

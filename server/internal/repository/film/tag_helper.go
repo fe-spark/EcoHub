@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"server/internal/model"
 )
@@ -20,6 +21,9 @@ func HandleTagStr(title string, withAll bool, tags ...string) []map[string]strin
 
 	for _, t := range tags {
 		if sl := strings.Split(t, ":"); len(sl) > 1 {
+			if strings.TrimSpace(sl[0]) == "" || strings.TrimSpace(sl[1]) == "" {
+				continue
+			}
 			list = append(list, map[string]string{"Name": sl[0], "Value": sl[1]})
 		}
 	}
@@ -29,6 +33,9 @@ func HandleTagStr(title string, withAll bool, tags ...string) []map[string]strin
 
 func AppendSearchOption(options []map[string]string, option map[string]string) []map[string]string {
 	if option == nil {
+		return options
+	}
+	if strings.TrimSpace(option["Value"]) == "" && strings.TrimSpace(option["Name"]) != "全部" {
 		return options
 	}
 	for _, item := range options {
@@ -100,7 +107,70 @@ func ParseSearchTagYear(value string) (int, bool) {
 	return year, true
 }
 
-func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string) []map[string]string {
+func isAbnormalSearchTagItem(tagType string, item model.SearchTagItem) bool {
+	value := strings.TrimSpace(item.Value)
+	name := strings.TrimSpace(item.Name)
+	if value == "" || name == "" {
+		return true
+	}
+
+	switch {
+	case strings.EqualFold(tagType, "Year"):
+		_, ok := ParseSearchTagYear(value)
+		return !ok
+	case strings.EqualFold(tagType, "Area"):
+		return isAbnormalTextTagValue(value, 2, 8)
+	case strings.EqualFold(tagType, "Language"):
+		return isAbnormalTextTagValue(value, 1, 10)
+	case strings.EqualFold(tagType, "Plot"):
+		return isAbnormalTextTagValue(value, 2, 8)
+	default:
+		return false
+	}
+}
+
+func isAbnormalTextTagValue(value string, minLen int, maxLen int) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return true
+	}
+
+	runes := []rune(value)
+	if len(runes) < minLen || len(runes) > maxLen {
+		return true
+	}
+
+	for _, r := range runes {
+		if unicode.IsDigit(r) {
+			return true
+		}
+		if r <= unicode.MaxASCII && unicode.IsLetter(r) {
+			return true
+		}
+		if strings.ContainsRune(",|/\\_+&.=()[]{}<>-", r) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func SplitSearchTagItems(tagType string, items []model.SearchTagItem) ([]model.SearchTagItem, []model.SearchTagItem) {
+	normalItems := make([]model.SearchTagItem, 0, len(items))
+	abnormalItems := make([]model.SearchTagItem, 0)
+	for _, item := range items {
+		if isAbnormalSearchTagItem(tagType, item) {
+			abnormalItems = append(abnormalItems, item)
+			continue
+		}
+		normalItems = append(normalItems, item)
+	}
+	return normalItems, abnormalItems
+}
+
+func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string, includeOthers bool) []map[string]string {
+	normalItems, abnormalItems := SplitSearchTagItems(tagType, items)
+	items = normalItems
 	if strings.EqualFold(tagType, "Year") {
 		items = SortYearSearchTagItems(items)
 	}
@@ -111,14 +181,18 @@ func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky st
 	}
 	displayItems := AppendStickySearchTag(items, sticky, topCount)
 	hasMore := len(items) > SearchTagDisplayLimit
+	hasOthers := hasMore || len(abnormalItems) > 0 || includeOthers
 
 	tagStrs := make([]string, 0, len(displayItems))
 	for _, item := range displayItems {
+		if strings.TrimSpace(item.Value) == "" && strings.TrimSpace(item.Name) != "全部" {
+			continue
+		}
 		tagStrs = append(tagStrs, fmt.Sprintf("%s:%s", item.Name, item.Value))
 	}
 
 	formatted := HandleTagStr(tagType, true, tagStrs...)
-	if hasMore {
+	if hasOthers {
 		formatted = append(formatted, map[string]string{"Name": model.TagOthersName, "Value": model.TagOthersValue})
 	}
 	return formatted

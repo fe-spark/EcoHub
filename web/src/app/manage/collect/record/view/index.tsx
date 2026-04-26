@@ -21,6 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -29,7 +30,6 @@ interface FailRecord {
   ID: number;
   originName: string;
   originId: string;
-  collectType: number;
   pageNumber: number;
   hour: number;
   cause: string;
@@ -118,7 +118,9 @@ export default function FailureRecordPageView() {
       title: "ID",
       dataIndex: "ID",
       width: 60,
-      render: (v) => <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>,
+      render: (v) => (
+        <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>
+      ),
     },
     {
       title: "采集站",
@@ -131,12 +133,6 @@ export default function FailureRecordPageView() {
       dataIndex: "originId",
       align: "center",
       render: (v) => <Tag color="green">{v}</Tag>,
-    },
-    {
-      title: "采集类型",
-      dataIndex: "collectType",
-      align: "center",
-      render: (v) => <Tag>{v === 0 ? "影片详情" : "未知"}</Tag>,
     },
     {
       title: "分页页码",
@@ -203,48 +199,55 @@ export default function FailureRecordPageView() {
   ];
 
   return (
-    <div className={styles.container}>
-      <div className={styles.filterBar}>
-        <Select
-          placeholder="采集来源"
-          value={params.originId || undefined}
-          onChange={(v) => setParams({ ...params, originId: v })}
-          options={options.origin?.map((o: any) => ({
-            label: o.name,
-            value: o.value,
-          }))}
-          style={{ width: 160 }}
-          allowClear
-        />
-        <Select
-          placeholder="记录状态"
-          value={params.status}
-          onChange={(v) => setParams({ ...params, status: v })}
-          options={options.status?.map((o: any) => ({
-            label: o.name,
-            value: o.value,
-          }))}
-          style={{ width: 120 }}
-        />
-        <RangePicker
-          showTime
-          onChange={(dates) => {
-            if (dates && dates[0] && dates[1]) {
-              setParams({
-                ...params,
-                beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
-                endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
-              });
-            } else {
-              setParams({ ...params, beginTime: "", endTime: "" });
-            }
-          }}
-        />
-        <Button type="primary" onClick={() => getRecords()}>
-          查询
-        </Button>
-      </div>
-
+    <ManagePageShell
+      eyebrow="采集中心"
+      title="失败记录"
+      description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
+      extra={
+        <div className={styles.filterBar}>
+          <Select
+            placeholder="采集来源"
+            value={params.originId || undefined}
+            onChange={(v) => setParams({ ...params, originId: v })}
+            options={options.origin?.map((o: any) => ({
+              label: o.name,
+              value: o.value,
+            }))}
+            style={{ width: 160 }}
+            allowClear
+          />
+          <Select
+            placeholder="记录状态"
+            value={params.status}
+            onChange={(v) => setParams({ ...params, status: v })}
+            options={options.status?.map((o: any) => ({
+              label: o.name,
+              value: o.value,
+            }))}
+            style={{ width: 120 }}
+          />
+          <RangePicker
+            showTime
+            onChange={(dates) => {
+              if (dates && dates[0] && dates[1]) {
+                setParams({
+                  ...params,
+                  beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
+                  endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
+                });
+              } else {
+                setParams({ ...params, beginTime: "", endTime: "" });
+              }
+            }}
+          />
+          <Button type="primary" onClick={() => getRecords()}>
+            查询
+          </Button>
+        </div>
+      }
+      panelClassName={styles.tablePanel}
+      panelless
+    >
       <Table
         columns={columns}
         dataSource={records}
@@ -266,7 +269,10 @@ export default function FailureRecordPageView() {
           <Popconfirm title="确认清除已处理记录？" onConfirm={handleCleanDone}>
             <Button
               icon={<WarningOutlined />}
-              style={{ color: "var(--ant-color-warning)", borderColor: "var(--ant-color-warning)" }}
+              style={{
+                color: "var(--ant-color-warning)",
+                borderColor: "var(--ant-color-warning)",
+              }}
             >
               清除已处理
             </Button>
@@ -294,6 +300,6 @@ export default function FailureRecordPageView() {
           }}
         />
       </div>
-    </div>
+    </ManagePageShell>
   );
 }

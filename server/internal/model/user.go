@@ -49,6 +49,17 @@ type User struct {
 	Reserve3 string `json:"reserve3"` // 预留字段 1
 }
 
+type UserUpdatePayload struct {
+	ID       uint    `json:"id"`
+	Password *string `json:"password"`
+	Email    *string `json:"email"`
+	Gender   *int    `json:"gender"`
+	NickName *string `json:"nickName"`
+	Avatar   *string `json:"avatar"`
+	Status   *int    `json:"status"`
+	Role     *int    `json:"role"`
+}
+
 // UserInfoVo 用户信息返回对象
 type UserInfoVo struct {
 	Id        uint   `json:"id"`

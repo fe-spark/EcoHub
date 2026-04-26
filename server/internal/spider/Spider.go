@@ -3,11 +3,12 @@ package spider
 import (
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"log"
 	"net/url"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,14 +34,39 @@ const (
 	filmDetailRetryTimes = 2
 )
 
+var retryBackoffs = []time.Duration{
+	2 * time.Second,
+	5 * time.Second,
+}
+
 // activeTasks 存储当前活跃采集任务的信息
 var activeTasks sync.Map
+
+// masterWriteLocks 串行化主站写库，避免分页并发采集时多个事务互相死锁。
+var masterWriteLocks sync.Map
 
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
 // limiters 存储各站点的限流器
 var limiters sync.Map
+
+func ClearLimiter(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	limiters.Delete(sourceID)
+}
+
+func getMasterWriteLock(sourceID string) *sync.Mutex {
+	if lock, ok := masterWriteLocks.Load(sourceID); ok {
+		return lock.(*sync.Mutex)
+	}
+	lock := &sync.Mutex{}
+	actual, _ := masterWriteLocks.LoadOrStore(sourceID, lock)
+	return actual.(*sync.Mutex)
+}
 
 type collectTask struct {
 	cancel context.CancelFunc
@@ -71,7 +97,7 @@ func getLimiter(s *model.FilmSource) *rate.Limiter {
 	return l
 }
 
-func getPageCountWithRetry(ctx context.Context, r utils.RequestInfo) (int, error) {
+func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
 	var lastErr error
 	for attempt := 1; attempt <= pageCountRetryTimes; attempt++ {
 		select {
@@ -80,16 +106,24 @@ func getPageCountWithRetry(ctx context.Context, r utils.RequestInfo) (int, error
 		default:
 		}
 
+		if err := getLimiter(s).Wait(ctx); err != nil {
+			return 0, err
+		}
 		pageCount, err := spiderCore.GetPageCount(r)
 		if err == nil {
 			return pageCount, nil
 		}
 		lastErr = err
+		if attempt < pageCountRetryTimes && utils.IsRateLimitedErr(err) {
+			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
+				return 0, waitErr
+			}
+		}
 	}
 	return 0, lastErr
 }
 
-func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.MovieDetail, error) {
+func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 	var lastErr error
 	for attempt := 1; attempt <= filmDetailRetryTimes; attempt++ {
 		select {
@@ -98,6 +132,9 @@ func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.M
 		default:
 		}
 
+		if err := getLimiter(s).Wait(ctx); err != nil {
+			return nil, err
+		}
 		list, err := spiderCore.GetFilmDetail(r)
 		if err == nil && len(list) > 0 {
 			return list, nil
@@ -107,8 +144,32 @@ func getFilmDetailWithRetry(ctx context.Context, r utils.RequestInfo) ([]model.M
 		} else {
 			lastErr = errors.New("response list is empty")
 		}
+		if attempt < filmDetailRetryTimes && utils.IsRateLimitedErr(lastErr) {
+			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
+				return nil, waitErr
+			}
+		}
 	}
 	return nil, lastErr
+}
+
+func waitRetryBackoff(ctx context.Context, attempt int) error {
+	if attempt <= 0 {
+		attempt = 1
+	}
+	delayIndex := attempt - 1
+	if delayIndex >= len(retryBackoffs) {
+		delayIndex = len(retryBackoffs) - 1
+	}
+	timer := time.NewTimer(retryBackoffs[delayIndex])
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
@@ -173,14 +234,6 @@ func HandleCollect(id string, h int) error {
 		return errors.New("采集站点已停用")
 	}
 
-	// 如果是主站点且状态为启用则先获取分类tree信息
-	if s.Grade == model.MasterCollect && s.State {
-		// 是否存在分类树信息, 不存在则获取
-		if !repository.ExistsCategoryTree() {
-			CollectCategory(s)
-		}
-	}
-
 	// 生成 RequestInfo
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	// 如果 h == 0 则直接返回错误信息
@@ -192,7 +245,7 @@ func HandleCollect(id string, h int) error {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
 	// 2. 首先获取分页采集的页数
-	pageCount, err := getPageCountWithRetry(ctx, r)
+	pageCount, err := getPageCountWithRetry(ctx, s, r)
 	if err != nil {
 		return err
 	}
@@ -203,92 +256,91 @@ func HandleCollect(id string, h int) error {
 	}
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	// 通过采集类型分别执行不同的采集方法
-	switch s.CollectType {
-	case model.CollectVideo:
-		// 采集视频资源
-		// 如果页数较少, 使用简单的循环串行采集; 否则进入并发模式
-		if pageCount <= config.MAXGoroutine*2 {
-			for i := 1; i <= pageCount; i++ {
-				select {
-				case <-ctx.Done():
-					log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
-					return nil
-				default:
-					// 使用限流器等待
-					_ = getLimiter(s).Wait(ctx)
-					collectFilm(ctx, s, h, i)
-				}
+	if pageCount <= config.MAXGoroutine*2 {
+		for i := 1; i <= pageCount; i++ {
+			select {
+			case <-ctx.Done():
+				log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
+				return nil
+			default:
+				collectFilm(ctx, s, h, i)
 			}
-		} else {
-			// 并发模式 (内部也已迁移至限流器)
-			ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
 		}
+	} else {
+		ConcurrentPageSpider(ctx, pageCount, s, h, collectFilm)
+	}
 
-		switch s.Grade {
-		case model.MasterCollect:
-			// 开启图片同步
-			if s.SyncPictures {
-				repository.SyncFilmPicture()
-			}
-
-		case model.SlaveCollect:
-		}
-
-	case model.CollectArticle, model.CollectActor, model.CollectRole, model.CollectWebSite:
-		log.Println("暂未开放此采集功能!!!")
-		return errors.New("暂未开放此采集功能")
+	if s.Grade == model.MasterCollect && s.SyncPictures {
+		repository.SyncFilmPicture()
 	}
 	return nil
 }
 
 // CollectCategory 影视分类采集
-func CollectCategory(s *model.FilmSource) {
+func CollectCategory(s *model.FilmSource) error {
+	return collectCategoryWithMode(s, true)
+}
+
+func ResetCategory(s *model.FilmSource) error {
+	return collectCategoryWithMode(s, false)
+}
+
+func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) error {
+	if s == nil {
+		return errors.New("采集站信息不存在")
+	}
 	// 获取分类树形数据
 	categoryTree, err := spiderCore.GetCategoryTree(utils.RequestInfo{Uri: s.Uri, Params: url.Values{}})
 	if err != nil {
-		log.Println("GetCategoryTree Error: ", err)
-		return
+		return fmt.Errorf("获取主站分类树失败: %w", err)
 	}
 	// 保存 tree 到 MySQL (方案B: 传入 sourceId 建立映射)
-	err = repository.SaveCategoryTree(s.Id, categoryTree)
-	if err != nil {
-		log.Println("SaveCategoryTree Error: ", err)
-		return
+	if preserveBusinessFields {
+		err = repository.SaveCategoryTree(s.Id, categoryTree)
+	} else {
+		err = repository.ResetCategoryTree(s.Id, categoryTree)
 	}
+	if err != nil {
+		return fmt.Errorf("保存主站分类树失败: %w", err)
+	}
+	return nil
 }
 
 // saveCollectedFilm 将已采集的 list 按站点类型写入存储，消除 collectFilm/collectFilmById 中的重复 switch 块。
 // saveMaster 由调用方注入，区分批量(SaveDetails)与单条(SaveDetail)两种写入策略。
-func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) {
+func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) error {
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
+		lock := getMasterWriteLock(s.Id)
+		lock.Lock()
 		if err = saveMaster(s.Id, list); err != nil {
-			log.Println("SaveDetails Error: ", err)
+			lock.Unlock()
+			return fmt.Errorf("save master details failed: %w", err)
 		}
+		lock.Unlock()
 		if s.SyncPictures {
 			if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
-				log.Println("SaveVirtualPic Error: ", err)
+				return fmt.Errorf("save virtual pictures failed: %w", err)
 			}
 		}
 	case model.SlaveCollect:
 		if err = filmrepo.SaveSitePlayList(s.Id, list); err != nil {
-			log.Println("SaveSitePlayList Error: ", err)
+			return fmt.Errorf("save slave playlists failed: %w", err)
 		}
 	}
+	return nil
 }
 
 func saveFilmPageFailure(s *model.FilmSource, h, pg int, err error) {
 	repository.SaveFailureRecord(model.FailureRecord{
-		OriginId:    s.Id,
-		OriginName:  s.Name,
-		Uri:         s.Uri,
-		CollectType: model.CollectVideo,
-		PageNumber:  pg,
-		Hour:        h,
-		Cause:       fmt.Sprintln(err),
-		Status:      1,
+		OriginId:   s.Id,
+		OriginName: s.Name,
+		Uri:        s.Uri,
+		PageNumber: pg,
+		Hour:       h,
+		Cause:      fmt.Sprintln(err),
+		Status:     1,
 	})
 }
 
@@ -308,26 +360,36 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 	// collectFilm 本身作为并发 Worker 或同步循环的一部分
 	// 具体的 Wait 逻辑已由调用方（如 ConcurrentPageSpider 或 HandleCollect 循环）控制，
 	// 此处仅执行请求，保证原子请求的纯粹性
-	list, err := getFilmDetailWithRetry(ctx, r)
+	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		saveFilmPageFailure(s, h, pg, err)
-		log.Println("GetMovieDetail Error: ", err)
+		log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, pg, err)
 		return
 	}
-	saveCollectedFilm(s, list, filmrepo.SaveDetails)
+	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+		saveFilmPageFailure(s, h, pg, err)
+		log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, pg, err)
+		return
+	}
+	log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, pg, len(list))
 }
 
 // collectFilmById 采集指定ID的影片信息
-func collectFilmById(ids string, s *model.FilmSource) {
+func collectFilmById(ids string, s *model.FilmSource) error {
+	if err := getLimiter(s).Wait(context.Background()); err != nil {
+		return err
+	}
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := spiderCore.GetFilmDetail(r)
-	if err != nil || len(list) <= 0 {
-		log.Println("GetMovieDetail Error: ", err)
-		return
+	if err != nil {
+		return fmt.Errorf("get movie detail failed: %w", err)
 	}
-	saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
+	if len(list) <= 0 {
+		return errors.New("get movie detail failed: response list is empty")
+	}
+	return saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
 		return filmrepo.SaveDetail(id, l[0])
 	})
 }
@@ -355,8 +417,6 @@ func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource
 					if !ok {
 						return
 					}
-					// 使用限流器等待授权，确保全局（跨 Worker）频率一致
-					_ = getLimiter(s).Wait(ctx)
 					// 执行对应的采集方法
 					collectFunc(ctx, s, h, pg)
 				}
@@ -377,7 +437,6 @@ func ConcurrentPageSpider(ctx context.Context, capacity int, s *model.FilmSource
 func BatchCollect(h int, ids ...string) {
 	sources := make([]model.FilmSource, 0)
 	for _, id := range ids {
-		// 如果查询到对应Id的资源站信息, 且资源站处于启用状态
 		if fs := repository.FindCollectSourceById(id); fs != nil && fs.State {
 			sources = append(sources, *fs)
 		}
@@ -403,21 +462,18 @@ func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
 
 // AutoCollect 自动进行对所有已启用站点的采集任务
 func AutoCollect(h int) {
-	// 获取所有已启用的站点（不分主从，统一并行执行）
 	sources := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0)
-	for _, s := range sources {
-		if s.State {
-			enabled = append(enabled, s)
+	enabled := make([]model.FilmSource, 0, len(sources))
+	for _, source := range sources {
+		if source.State {
+			enabled = append(enabled, source)
 		}
 	}
-
 	if len(enabled) == 0 {
 		log.Println("[Spider] 自动采集：未找到任何启用的站点")
 		return
 	}
 
-	// 统一在并发限制下运行所有站点
 	runSourcesWithLimit(enabled, h, "Auto-Collect")
 }
 
@@ -426,32 +482,57 @@ func ClearSpider() {
 	filmrepo.FilmZero()
 }
 
-// CollectSingleFilm 通过影片唯一ID获取影片信息 (多源并行同步)
+// CollectSingleFilm 通过全局影片 ID 更新所有启用站点的对应影片。
+// 主站会优先使用自身映射，附属站则通过 MovieSourceMapping 取回各自的 source_mid。
 func CollectSingleFilm(ids string) {
-	// 获取所有已启用的采集站列表信息
-	all := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0)
-	for _, f := range all {
-		if f.State {
-			enabled = append(enabled, f)
-		}
+	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
+	if err != nil || globalMid <= 0 {
+		log.Printf("[Spider] CollectSingleFilm: 非法影片 ID %q\n", ids)
+		return
 	}
 
+	all := repository.GetCollectSourceList()
+	enabled := make([]model.FilmSource, 0, len(all))
+	for _, source := range all {
+		if source.State {
+			enabled = append(enabled, source)
+		}
+	}
 	if len(enabled) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
 		return
 	}
 
-	// 并行同步所有启用站点
 	var wg sync.WaitGroup
-	for _, s := range enabled {
+	for _, source := range enabled {
+		requestID := resolveSingleCollectSourceMid(globalMid, source)
+		if requestID == "" {
+			continue
+		}
+
 		wg.Add(1)
-		go func(src model.FilmSource) {
+		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			collectFilmById(ids, &src)
-		}(s)
+			if err := collectFilmById(sourceMid, &src); err != nil {
+				log.Printf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
+			}
+		}(source, requestID)
 	}
 	wg.Wait()
+}
+
+func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
+	if globalMid <= 0 {
+		return ""
+	}
+	sourceMid := filmrepo.LoadSourceMidByGlobalMid(globalMid, source.Id)
+	if sourceMid > 0 {
+		return strconv.FormatInt(sourceMid, 10)
+	}
+	if source.Grade == model.MasterCollect {
+		return strconv.FormatInt(globalMid, 10)
+	}
+	return ""
 }
 
 // recoverFilmPage 重试单条失败页：成功后标记原记录已处理，失败则更新待处理记录
@@ -470,14 +551,18 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
 	}
 
-	list, err := getFilmDetailWithRetry(ctx, r)
+	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
 	}
 
-	saveCollectedFilm(s, list, filmrepo.SaveDetails)
+	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+		log.Println("Recover saveCollectedFilm Error: ", err)
+		return
+	}
 	repository.ChangeRecord(fr, 0)
 }
 
@@ -497,6 +582,11 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 // FullRecoverSpider 扫描记录表中的失败记录, 并发重试各失败页
 func FullRecoverSpider() {
 	list := repository.PendingRecord()
+	limit := config.MAXGoroutine
+	if limit <= 0 {
+		limit = 1
+	}
+	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	for i := range list {
 		fr := list[i]
@@ -506,8 +596,10 @@ func FullRecoverSpider() {
 			continue
 		}
 		wg.Add(1)
+		sem <- struct{}{}
 		go func(src *model.FilmSource, record model.FailureRecord) {
 			defer wg.Done()
+			defer func() { <-sem }()
 			recoverFilmPage(context.Background(), src, &record)
 		}(s, fr)
 	}
@@ -526,22 +618,11 @@ func CollectApiTest(s model.FilmSource) error {
 	err := utils.ApiTest(&r)
 	// 首先核对接口返回值类型
 	if err == nil {
-		// 如果返回值类型为Json则执行Json序列化
-		if s.ResultModel == model.JsonResult {
-			lp := model.FilmListPage{}
-			if err = json.Unmarshal(r.Resp, &lp); err != nil {
-				return errors.New(fmt.Sprint("测试失败, 返回数据异常, JSON序列化失败: ", err))
-			}
-			return nil
-		} else if s.ResultModel == model.XmlResult {
-			// 如果返回值类型为XML则执行XML序列化
-			rd := model.RssD{}
-			if err = xml.Unmarshal(r.Resp, &rd); err != nil {
-				return errors.New(fmt.Sprint("测试失败, 返回数据异常, XML序列化失败", err))
-			}
-			return nil
+		lp := model.FilmListPage{}
+		if err = json.Unmarshal(r.Resp, &lp); err != nil {
+			return errors.New(fmt.Sprint("测试失败, 返回数据异常, JSON序列化失败: ", err))
 		}
-		return errors.New("测试失败, 接口返回值类型不符合规范")
+		return nil
 	}
 	return errors.New(fmt.Sprint("测试失败, 请求响应异常 : ", err.Error()))
 }

@@ -2,8 +2,11 @@ package film
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,6 +48,140 @@ func ApplyCategoryFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
 	}
 }
 
+func applyOriginalCategoryFilter(query *gorm.DB, pid int64, value string) *gorm.DB {
+	pid = support.ResolveCategoryID(pid)
+	value = strings.TrimSpace(value)
+	if pid <= 0 || value == "" {
+		return query
+	}
+
+	scopes, err := loadOriginalCategoryScopes(pid)
+	if err != nil {
+		log.Printf("applyOriginalCategoryFilter Error: %v", err)
+		return query
+	}
+	targetScopes := scopes[value]
+	if len(targetScopes) == 0 {
+		return query.Where("1 = 0")
+	}
+
+	condition := db.Mdb
+	for _, scope := range targetScopes {
+		if len(scope.Names) == 0 {
+			continue
+		}
+		condition = condition.Or("(source_id = ? AND c_name IN ?)", scope.SourceID, scope.Names)
+	}
+	return query.Where(condition)
+}
+
+type originalCategoryScope struct {
+	SourceID string
+	RootName string
+	Names    []string
+}
+
+type originalCategoryRootRow struct {
+	SourceID     string
+	SourceTypeID int64
+	RootName     string
+}
+
+func loadOriginalCategoryScopes(pid int64) (map[string][]originalCategoryScope, error) {
+	pid = support.ResolveCategoryID(pid)
+	if pid <= 0 {
+		return map[string][]originalCategoryScope{}, nil
+	}
+
+	var rootRows []originalCategoryRootRow
+	if err := db.Mdb.Model(&model.SourceCategory{}).
+		Select("source_categories.source_id, source_categories.source_type_id, source_categories.raw_name AS root_name").
+		Joins("JOIN category_mappings ON category_mappings.source_id = source_categories.source_id AND category_mappings.source_type_id = source_categories.source_type_id").
+		Where("source_categories.parent_source_type_id = 0 AND category_mappings.category_id = ?", pid).
+		Order("source_categories.source_id ASC, source_categories.sort ASC, source_categories.id ASC").
+		Scan(&rootRows).Error; err != nil {
+		return nil, err
+	}
+	if len(rootRows) == 0 {
+		return map[string][]originalCategoryScope{}, nil
+	}
+
+	sourceIDs := make([]string, 0, len(rootRows))
+	seenSourceIDs := make(map[string]struct{}, len(rootRows))
+	for _, row := range rootRows {
+		if _, ok := seenSourceIDs[row.SourceID]; ok {
+			continue
+		}
+		seenSourceIDs[row.SourceID] = struct{}{}
+		sourceIDs = append(sourceIDs, row.SourceID)
+	}
+
+	var sourceRows []model.SourceCategory
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).
+		Order("source_id ASC, depth ASC, parent_source_type_id ASC, sort ASC, id ASC").
+		Find(&sourceRows).Error; err != nil {
+		return nil, err
+	}
+
+	childrenBySourceRoot := make(map[string]map[int64][]string)
+	for _, row := range sourceRows {
+		if row.ParentSourceTypeId <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(row.RawName)
+		if name == "" {
+			continue
+		}
+		rootMap, ok := childrenBySourceRoot[row.SourceId]
+		if !ok {
+			rootMap = make(map[int64][]string)
+			childrenBySourceRoot[row.SourceId] = rootMap
+		}
+		rootMap[row.ParentSourceTypeId] = append(rootMap[row.ParentSourceTypeId], name)
+	}
+
+	scopes := make(map[string][]originalCategoryScope)
+	for _, row := range rootRows {
+		rootName := strings.TrimSpace(row.RootName)
+		if rootName == "" {
+			continue
+		}
+		names := []string{rootName}
+		if rootMap, ok := childrenBySourceRoot[row.SourceID]; ok {
+			names = append(names, rootMap[row.SourceTypeID]...)
+		}
+		names = slices.Compact(names)
+		scopes[rootName] = append(scopes[rootName], originalCategoryScope{
+			SourceID: row.SourceID,
+			RootName: rootName,
+			Names:    names,
+		})
+	}
+
+	return scopes, nil
+}
+
+func GetOriginalCategoryOptions(pid int64) []string {
+	scopes, err := loadOriginalCategoryScopes(pid)
+	if err != nil {
+		log.Printf("GetOriginalCategoryOptions Error: %v", err)
+		return nil
+	}
+	if len(scopes) == 0 {
+		return nil
+	}
+
+	result := make([]string, 0, len(scopes))
+	for name := range scopes {
+		result = append(result, name)
+	}
+	if len(result) <= 1 {
+		return nil
+	}
+	slices.Sort(result)
+	return result
+}
+
 func resolveCategoryFieldValue(field string, id int64) (string, int64) {
 	resolvedID := support.ResolveCategoryID(id)
 	if field == "cid" {
@@ -82,7 +219,7 @@ func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []m
 	hotSince := time.Now().AddDate(0, -1, 0).Unix()
 	if err := buildCategoryQuery(field, id).
 		Where("update_stamp > ?", hotSince).
-		Order("year DESC, hits DESC").
+		Order("year DESC, hits DESC, mid DESC").
 		Limit(limit).
 		Offset(offset).
 		Find(&searchInfos).Error; err != nil {
@@ -95,9 +232,9 @@ func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []m
 func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
 	switch sortType {
 	case 0:
-		return query.Order("release_stamp DESC")
+		return query.Order("year DESC, " + latestUpdateOrderSQL)
 	case 1:
-		return query.Order("hits DESC")
+		return query.Order("hits DESC, mid DESC")
 	case 2:
 		return query.Order(latestUpdateOrderSQL)
 	default:
@@ -194,6 +331,13 @@ func extractCoreSearchToken(name string) string {
 	if minIdx < len(coreToken) {
 		coreToken = strings.TrimSpace(coreToken[:minIdx])
 	}
+	coreToken = strings.TrimSpace(strings.TrimSuffix(coreToken, "年番"))
+	for _, suffix := range []string{"特别篇", "篇章"} {
+		coreToken = strings.TrimSpace(strings.TrimSuffix(coreToken, suffix))
+	}
+	for _, pattern := range []string{`(?i)tv\s*动画$`} {
+		coreToken = strings.TrimSpace(regexp.MustCompile(pattern).ReplaceAllString(coreToken, ""))
+	}
 
 	runes := []rune(coreToken)
 	nameRunes := []rune(strings.TrimSpace(name))
@@ -226,6 +370,352 @@ func splitClassTags(classTag string) []string {
 		tags = append(tags, tag)
 	}
 	return tags
+}
+
+type relatedCandidateScore struct {
+	Movie model.SearchInfo
+	Score int
+}
+
+func splitAliasTitles(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := []string{raw}
+	for _, sep := range []string{",", "，", "/", "|", "、"} {
+		next := make([]string, 0, len(parts)*2)
+		for _, part := range parts {
+			if !strings.Contains(part, sep) {
+				next = append(next, part)
+				continue
+			}
+			for alias := range strings.SplitSeq(part, sep) {
+				next = append(next, alias)
+			}
+		}
+		parts = next
+	}
+	aliases := make([]string, 0, len(parts))
+	seen := make(map[string]struct{}, len(parts))
+	for _, part := range parts {
+		alias := strings.TrimSpace(part)
+		if alias == "" {
+			continue
+		}
+		if _, ok := seen[alias]; ok {
+			continue
+		}
+		seen[alias] = struct{}{}
+		aliases = append(aliases, alias)
+	}
+	return aliases
+}
+
+func buildTagSet(tags []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		set[tag] = struct{}{}
+	}
+	return set
+}
+
+func appendUniqueRelatedCandidates(dst []model.SearchInfo, src []model.SearchInfo, seen map[int64]struct{}, limit int) []model.SearchInfo {
+	for _, item := range src {
+		if _, ok := seen[item.Mid]; ok {
+			continue
+		}
+		seen[item.Mid] = struct{}{}
+		dst = append(dst, item)
+		if len(dst) >= limit {
+			break
+		}
+	}
+	return dst
+}
+
+func queryRelatedCandidates(search model.SearchInfo, limit int, apply func(query *gorm.DB) *gorm.DB) []model.SearchInfo {
+	if limit <= 0 {
+		return nil
+	}
+	query := db.Mdb.Model(&model.SearchInfo{}).
+		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
+		Where("deleted_at IS NULL")
+	if apply != nil {
+		query = apply(query)
+	}
+	var list []model.SearchInfo
+	if err := query.Order(latestUpdateOrderSQL).Limit(limit).Find(&list).Error; err != nil {
+		log.Printf("queryRelatedCandidates Error: %v", err)
+		return nil
+	}
+	return list
+}
+
+func loadRelatedCandidates(search model.SearchInfo, limit int) []model.SearchInfo {
+	coreToken := extractCoreSearchToken(search.Name)
+	tags := splitClassTags(search.ClassTag)
+	list := make([]model.SearchInfo, 0, limit)
+	seen := make(map[int64]struct{}, limit)
+	strongLimit := max(limit, 20)
+	cidLimit := max(limit/2, 10)
+	tagLimit := max(limit/3, 6)
+
+	if search.SeriesKey != "" {
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, strongLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("series_key = ?", search.SeriesKey)
+		}), seen, limit)
+	}
+	if coreToken != "" {
+		like := fmt.Sprintf("%%%s%%", coreToken)
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, strongLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("name LIKE ? OR sub_title LIKE ?", like, like)
+		}), seen, limit)
+	}
+	if search.Cid > 0 {
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, cidLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("cid = ?", search.Cid)
+		}), seen, limit)
+	}
+	for _, tag := range tags {
+		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, tagLimit, func(query *gorm.DB) *gorm.DB {
+			return query.Where("class_tag LIKE ?", fmt.Sprintf("%%%s%%", tag))
+		}), seen, limit)
+	}
+	return list
+}
+
+func calcTitleScore(coreToken string, candidate model.SearchInfo) int {
+	coreToken = strings.TrimSpace(coreToken)
+	if coreToken == "" {
+		return 0
+	}
+
+	name := strings.TrimSpace(candidate.Name)
+	subTitle := strings.TrimSpace(candidate.SubTitle)
+	nameLike := strings.Contains(name, coreToken)
+	prefixLike := strings.HasPrefix(name, coreToken)
+	if name == coreToken {
+		return 35
+	}
+	if prefixLike {
+		return 25
+	}
+	if nameLike {
+		return 15
+	}
+	if subTitle != "" && strings.Contains(subTitle, coreToken) {
+		return 8
+	}
+	return 0
+}
+
+func calcAliasScore(current model.SearchInfo, candidate model.SearchInfo) int {
+	aliases := splitAliasTitles(current.SubTitle)
+	if len(aliases) == 0 {
+		return 0
+	}
+	name := strings.TrimSpace(candidate.Name)
+	subTitle := strings.TrimSpace(candidate.SubTitle)
+	best := 0
+	for _, alias := range aliases {
+		score := 0
+		switch {
+		case alias == name:
+			score = 20
+		case strings.HasPrefix(name, alias):
+			score = 14
+		case strings.Contains(name, alias):
+			score = 10
+		case subTitle != "" && strings.Contains(subTitle, alias):
+			score = 6
+		}
+		if score > best {
+			best = score
+		}
+	}
+	return best
+}
+
+func calcTagOverlapScore(currentTags, candidateTags []string) int {
+	if len(currentTags) == 0 || len(candidateTags) == 0 {
+		return 0
+	}
+	currentSet := buildTagSet(currentTags)
+	score := 0
+	for _, tag := range candidateTags {
+		if _, ok := currentSet[tag]; ok {
+			score += 8
+			if score >= 24 {
+				return 24
+			}
+		}
+	}
+	return score
+}
+
+func calcMetaScore(current, candidate model.SearchInfo) int {
+	score := 0
+	if current.Year > 0 && candidate.Year > 0 {
+		diff := current.Year - candidate.Year
+		if diff < 0 {
+			diff = -diff
+		}
+		switch diff {
+		case 0:
+			score += 8
+		case 1:
+			score += 4
+		}
+	}
+	if current.Area != "" && current.Area == candidate.Area {
+		score += 5
+	}
+	if current.Language != "" && current.Language == candidate.Language {
+		score += 3
+	}
+	return score
+}
+
+func freshnessBoost(candidate model.SearchInfo) int {
+	stamp := candidate.LatestSourceStamp
+	if stamp <= 0 {
+		stamp = candidate.UpdateStamp
+	}
+	if stamp <= 0 {
+		return 0
+	}
+	age := time.Now().Unix() - stamp
+	switch {
+	case age <= 7*24*3600:
+		return 10
+	case age <= 30*24*3600:
+		return 6
+	case age <= 90*24*3600:
+		return 3
+	default:
+		return 0
+	}
+}
+
+func scoreRelatedCandidate(current model.SearchInfo, candidate model.SearchInfo) relatedCandidateScore {
+	score := 0
+	if current.SeriesKey != "" && current.SeriesKey == candidate.SeriesKey {
+		score += 80
+	}
+	if current.Cid > 0 && current.Cid == candidate.Cid {
+		score += 40
+	}
+	score += calcTitleScore(extractCoreSearchToken(current.Name), candidate)
+	score += calcAliasScore(current, candidate)
+	score += calcTagOverlapScore(splitClassTags(current.ClassTag), splitClassTags(candidate.ClassTag))
+	score += calcMetaScore(current, candidate)
+	score += freshnessBoost(candidate)
+	return relatedCandidateScore{Movie: candidate, Score: score}
+}
+
+func rankRelatedCandidates(current model.SearchInfo, candidates []model.SearchInfo, pageSize int) []model.SearchInfo {
+	if len(candidates) == 0 || pageSize <= 0 {
+		return nil
+	}
+	scored := make([]relatedCandidateScore, 0, len(candidates))
+	seen := make(map[int64]struct{}, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := seen[candidate.Mid]; ok {
+			continue
+		}
+		seen[candidate.Mid] = struct{}{}
+		scored = append(scored, scoreRelatedCandidate(current, candidate))
+	}
+	slices.SortFunc(scored, func(a, b relatedCandidateScore) int {
+		if a.Score != b.Score {
+			return b.Score - a.Score
+		}
+		if a.Movie.LatestSourceStamp != b.Movie.LatestSourceStamp {
+			if a.Movie.LatestSourceStamp < b.Movie.LatestSourceStamp {
+				return 1
+			}
+			return -1
+		}
+		if a.Movie.UpdateStamp != b.Movie.UpdateStamp {
+			if a.Movie.UpdateStamp < b.Movie.UpdateStamp {
+				return 1
+			}
+			return -1
+		}
+		if a.Movie.Mid < b.Movie.Mid {
+			return 1
+		}
+		if a.Movie.Mid > b.Movie.Mid {
+			return -1
+		}
+		return 0
+	})
+	if len(scored) > pageSize {
+		scored = scored[:pageSize]
+	}
+	list := make([]model.SearchInfo, 0, len(scored))
+	for _, item := range scored {
+		list = append(list, item.Movie)
+	}
+	return list
+}
+
+func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int64]struct{}) []model.SearchInfo {
+	if limit <= 0 {
+		return nil
+	}
+	appendUnique := func(dst []model.SearchInfo, source []model.SearchInfo, max int) []model.SearchInfo {
+		for _, item := range source {
+			if _, ok := exclude[item.Mid]; ok {
+				continue
+			}
+			exclude[item.Mid] = struct{}{}
+			dst = append(dst, item)
+			if len(dst) >= max {
+				break
+			}
+		}
+		return dst
+	}
+	var result []model.SearchInfo
+	if search.Cid > 0 {
+		result = appendUnique(result, getFallbackRelatedSearchInfos(search, &dto.Page{Current: 1, PageSize: limit}), limit)
+	}
+	if len(result) >= limit || search.Pid <= 0 {
+		return result
+	}
+	var pidHotList []model.SearchInfo
+	hotSince := time.Now().AddDate(0, -1, 0).Unix()
+	if err := db.Mdb.Model(&model.SearchInfo{}).
+		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
+		Where("deleted_at IS NULL").
+		Where("update_stamp > ?", hotSince).
+		Order("year DESC, hits DESC, mid DESC").
+		Limit(limit * 2).
+		Find(&pidHotList).Error; err != nil {
+		log.Printf("loadFallbackCandidates Pid Hot Fallback Error: %v", err)
+	} else {
+		result = appendUnique(result, pidHotList, limit)
+	}
+	if len(result) >= limit {
+		return result
+	}
+	var pidList []model.SearchInfo
+	if err := db.Mdb.Model(&model.SearchInfo{}).
+		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
+		Where("deleted_at IS NULL").
+		Order(latestUpdateOrderSQL).
+		Limit(limit * 2).
+		Find(&pidList).Error; err != nil {
+		log.Printf("loadFallbackCandidates Pid Fallback Error: %v", err)
+		return result
+	}
+	return appendUnique(result, pidList, limit)
 }
 
 func buildRelatedMovieQuery(search model.SearchInfo, coreToken string, tags []string) *gorm.DB {
@@ -264,6 +754,7 @@ func getFallbackRelatedSearchInfos(search model.SearchInfo, page *dto.Page) []mo
 	var list []model.SearchInfo
 	if err := db.Mdb.Model(&model.SearchInfo{}).
 		Where("cid = ? AND mid != ?", search.Cid, search.Mid).
+		Where("deleted_at IS NULL").
 		Order(latestUpdateOrderSQL).
 		Offset(getPageOffset(page)).
 		Limit(page.PageSize).
@@ -276,18 +767,24 @@ func getFallbackRelatedSearchInfos(search model.SearchInfo, page *dto.Page) []mo
 
 func GetRelateMovieBasicInfo(search model.SearchInfo, page *dto.Page) []model.MovieBasicInfo {
 	page = ensurePage(page)
-	var list []model.SearchInfo
-	coreToken := extractCoreSearchToken(search.Name)
-	query := buildRelatedMovieQuery(search, coreToken, splitClassTags(search.ClassTag))
-	if err := query.Offset(getPageOffset(page)).Limit(page.PageSize).Find(&list).Error; err != nil {
-		log.Printf("GetRelateMovieBasicInfo Error: %v", err)
-		return make([]model.MovieBasicInfo, 0)
+	targetSize := page.Current * page.PageSize
+	candidates := loadRelatedCandidates(search, max(targetSize*5, 80))
+	ranked := rankRelatedCandidates(search, candidates, targetSize)
+	if len(ranked) < targetSize {
+		exclude := make(map[int64]struct{}, len(ranked)+1)
+		exclude[search.Mid] = struct{}{}
+		for _, item := range ranked {
+			exclude[item.Mid] = struct{}{}
+		}
+		fallback := loadFallbackCandidates(search, targetSize-len(ranked), exclude)
+		ranked = append(ranked, fallback...)
 	}
-
-	if len(list) == 0 && search.Cid > 0 {
-		list = getFallbackRelatedSearchInfos(search, page)
+	offset := getPageOffset(page)
+	if offset >= len(ranked) {
+		return []model.MovieBasicInfo{}
 	}
-	return GetBasicInfoBySearchInfos(list...)
+	end := min(offset+page.PageSize, len(ranked))
+	return GetBasicInfoBySearchInfos(ranked[offset:end]...)
 }
 
 // GetBasicInfoByKey 获取影片的基本信息
@@ -310,7 +807,9 @@ func GetBasicInfoByKey(cid int64, mid int64) model.MovieBasicInfo {
 func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
 	var movieDetailInfo model.MovieDetailInfo
 	if err := db.Mdb.Where("mid = ?", mid).First(&movieDetailInfo).Error; err != nil {
-		log.Printf("GetMovieDetail Error: %v", err)
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			log.Printf("GetMovieDetail Error: %v", err)
+		}
 		return nil
 	}
 	var detail model.MovieDetail
@@ -391,13 +890,13 @@ func applyYearTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where("year <> 0")
+		query = query.Where("year <= 0 OR year IS NULL")
 		if len(topVals) > 0 {
-			query = query.Where("year NOT IN ?", topVals)
+			query = query.Or("year > 0 AND year NOT IN ?", topVals)
 		}
 		return query
 	case model.TagUnknownValue:
-		return query.Where("year = 0")
+		return query.Where("year <= 0 OR year IS NULL")
 	default:
 		return query.Where("year = ?", value)
 	}
@@ -410,6 +909,9 @@ func applyTextTagFilter(query *gorm.DB, pid int64, fieldName string, column stri
 		query = query.Where(hasTextValue(column))
 		if len(topVals) > 0 {
 			query = query.Where(fmt.Sprintf("%s NOT IN ?", column), topVals)
+		}
+		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
+			query = query.Or(fmt.Sprintf("%s = ?", column), abnormal)
 		}
 		return query
 	case model.TagUnknownValue:
@@ -431,6 +933,9 @@ func applyPlotTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 		for i := 0; i < excludeCount; i++ {
 			query = query.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%v%%", topVals[i]))
 		}
+		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
+			query = query.Or("class_tag LIKE ?", fmt.Sprintf("%%%v%%", abnormal))
+		}
 		return query
 	case model.TagUnknownValue:
 		return query.Where(isUnknownTextValue("class_tag"))
@@ -447,17 +952,21 @@ func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 	if !allowed {
 		column = allowedSearchSortColumns["latest_source_stamp"]
 	}
-	if strings.EqualFold(column, "release_stamp") {
-		return query.Order("year DESC, release_stamp DESC")
+	if strings.EqualFold(column, "collect_stamp") {
+		return query.Order("collect_stamp DESC, mid DESC")
 	}
 	if strings.EqualFold(column, "latest_source_stamp") {
 		return query.Order(latestUpdateOrderSQL)
 	}
-	return query.Order(fmt.Sprintf("%s DESC", column))
+	if strings.EqualFold(column, "year") {
+		return query.Order("year DESC, " + latestUpdateOrderSQL)
+	}
+	return query.Order(fmt.Sprintf("%s DESC, mid DESC", column))
 }
 
 func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	query = ApplyCategoryFilter(query, st.Pid, st.Cid)
+	query = applyOriginalCategoryFilter(query, st.Pid, st.OriginalCategory)
 
 	if st.Year != "" {
 		query = applyYearTagFilter(query, st.Pid, "Year", st.Year)
@@ -475,10 +984,14 @@ func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	return applySearchTagSort(query, st.Sort)
 }
 
+func BuildSearchInfoQueryByTags(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
+	st = normalizeSearchTagsVO(st)
+	return applySearchTagFilters(query, st)
+}
+
 func GetSearchInfosByTags(st model.SearchTagsVO, page *dto.Page) []model.SearchInfo {
 	page = ensurePage(page)
-	st = normalizeSearchTagsVO(st)
-	qw := applySearchTagFilters(db.Mdb.Model(&model.SearchInfo{}), st)
+	qw := BuildSearchInfoQueryByTags(db.Mdb.Model(&model.SearchInfo{}), st)
 
 	dto.GetPage(qw, page)
 	var sl []model.SearchInfo

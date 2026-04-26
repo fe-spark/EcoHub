@@ -6,17 +6,17 @@ async function getPlayData(
   sourceId?: string,
   episodeIdx?: string,
 ) {
-  const response = await serverGet<any>("/filmPlayInfo", {
+  const playPageResponse = await serverGet<any>("/filmPlayInfo", {
     id: filmId,
     playFrom: sourceId,
     episode: episodeIdx || 0,
   });
 
-  if (response.code !== 0 || !response.data?.detail) {
+  if (playPageResponse.code !== 0 || !playPageResponse.data?.detail) {
     return null;
   }
 
-  return response.data;
+  return playPageResponse.data;
 }
 
 export default async function PlayPage({
@@ -38,23 +38,29 @@ export default async function PlayPage({
     : currentTimeValue;
 
   if (!filmId) {
-    return null;
+    return <PlayPageView data={null} filmId="" emptyMessage="未找到影片参数，请返回列表重新进入播放页。" />;
   }
 
-  let data: any = null;
+  let playPageData: any = null;
   try {
-    data = await getPlayData(filmId, sourceId, episodeIdx);
+    playPageData = await getPlayData(filmId, sourceId, episodeIdx);
   } catch (error) {
     console.error("fetch play data error:", error);
   }
 
-  if (!data) {
-    return null;
+  if (!playPageData) {
+    return (
+      <PlayPageView
+        data={null}
+        filmId={filmId}
+        emptyMessage="当前影片播放数据不存在或已失效，请切换片源或返回详情页重试。"
+      />
+    );
   }
 
   return (
     <PlayPageView
-      data={data}
+      data={playPageData}
       filmId={filmId}
       initialTime={initialTime}
     />

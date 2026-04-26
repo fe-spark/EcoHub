@@ -54,6 +54,8 @@ const (
 
 	// SearchTags 搜索分类标签缓存 key (前缀)
 	SearchTags = "Search:Tags"
+	// SearchTagsVersionKey 搜索分类标签缓存版本号 key
+	SearchTagsVersionKey = "Search:Tags:Version"
 	// TVBoxConfigCacheKey TVBox 分类及筛选配置缓存 key
 	TVBoxConfigCacheKey = "TVBox:Config"
 	// IndexPageCacheKey 首页数据缓存 key

@@ -25,6 +25,7 @@ import {
   MailOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
+import ManagePageShell from "../../../components/page-shell";
 
 const { Option } = Select;
 
@@ -144,7 +145,10 @@ export default function UsersPageView() {
       key: "userName",
       render: (text: string, record: any) => (
         <Space>
-          <Avatar src={record.avatar === "empty" ? null : record.avatar} icon={<UserOutlined />} />
+          <Avatar
+            src={record.avatar === "empty" ? null : record.avatar}
+            icon={<UserOutlined />}
+          />
           <span style={{ fontWeight: 500 }}>{text}</span>
           {record.isAdmin && <Tag color="gold">超级管理员</Tag>}
           {record.isVisitor && <Tag color="blue">访客只读</Tag>}
@@ -166,7 +170,9 @@ export default function UsersPageView() {
       dataIndex: "status",
       key: "status",
       render: (status: number) => (
-        <Tag color={status === 0 ? "success" : "error"}>{status === 0 ? "正常" : "禁用"}</Tag>
+        <Tag color={status === 0 ? "success" : "error"}>
+          {status === 0 ? "正常" : "禁用"}
+        </Tag>
       ),
     },
     {
@@ -188,14 +194,28 @@ export default function UsersPageView() {
               shape="circle"
               size="small"
               icon={<EditOutlined />}
-              disabled={!currentUser?.canWrite || (record.isAdmin && !currentUser?.isAdmin)}
+              disabled={
+                !currentUser?.canWrite ||
+                (record.isAdmin && !currentUser?.isAdmin)
+              }
               onClick={() => handleEdit(record)}
             />
           </Tooltip>
           {currentUser?.isAdmin && !record.isAdmin && !record.isVisitor && (
-            <Popconfirm title="确定要删除这个用户吗？" onConfirm={() => handleDelete(record.id)} okText="确定" cancelText="取消">
+            <Popconfirm
+              title="确定要删除这个用户吗？"
+              onConfirm={() => handleDelete(record.id)}
+              okText="确定"
+              cancelText="取消"
+            >
               <Tooltip title="删除用户">
-                <Button type="primary" danger shape="circle" size="small" icon={<DeleteOutlined />} />
+                <Button
+                  type="primary"
+                  danger
+                  shape="circle"
+                  size="small"
+                  icon={<DeleteOutlined />}
+                />
               </Tooltip>
             </Popconfirm>
           )}
@@ -205,18 +225,30 @@ export default function UsersPageView() {
   ];
 
   return (
-    <Card
-      title={
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>用户管理</span>
-          <Space>
-            <Input.Search placeholder="搜索用户名" onSearch={handleSearch} style={{ width: 250 }} allowClear />
-            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd} disabled={!currentUser?.canWrite}>
-              新增用户
-            </Button>
-          </Space>
-        </div>
+    <ManagePageShell
+      eyebrow="系统设置"
+      title="账号管理"
+      description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
+      actions={
+        <Space>
+          <Input.Search
+            placeholder="搜索用户名"
+            onSearch={handleSearch}
+            style={{ width: 250 }}
+            allowClear
+          />
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={handleAdd}
+            disabled={!currentUser?.canWrite}
+          >
+            新增用户
+          </Button>
+        </Space>
       }
+      panelClassName=""
+      panelless
     >
       <Table
         columns={columns}
@@ -237,10 +269,25 @@ export default function UsersPageView() {
         }}
       />
 
-      <Modal title={editingUser ? "编辑用户" : "新增用户"} open={isModalOpen} onOk={handleModalOk} onCancel={() => setIsModalOpen(false)} confirmLoading={loading} destroyOnClose>
+      <Modal
+        title={editingUser ? "编辑用户" : "新增用户"}
+        open={isModalOpen}
+        onOk={handleModalOk}
+        onCancel={() => setIsModalOpen(false)}
+        confirmLoading={loading}
+        destroyOnHidden
+      >
         <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item name="userName" label="用户名" rules={[{ required: true, message: "请输入用户名" }]}>
-            <Input prefix={<UserOutlined />} placeholder="用于登录的账号" disabled={!!editingUser} />
+          <Form.Item
+            name="userName"
+            label="用户名"
+            rules={[{ required: true, message: "请输入用户名" }]}
+          >
+            <Input
+              prefix={<UserOutlined />}
+              placeholder="用于登录的账号"
+              disabled={!!editingUser}
+            />
           </Form.Item>
 
           <Form.Item
@@ -248,14 +295,21 @@ export default function UsersPageView() {
             label={editingUser ? "新密码 (留空则不修改)" : "密码"}
             rules={[{ required: !editingUser, message: "请输入密码" }]}
           >
-            <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" />
+            <Input.Password
+              prefix={<LockOutlined />}
+              placeholder="请输入密码"
+            />
           </Form.Item>
 
           <Form.Item name="nickName" label="昵称">
             <Input placeholder="用户显示的名称" />
           </Form.Item>
 
-          <Form.Item name="email" label="邮箱" rules={[{ type: "email", message: "请输入有效的邮箱地址" }]}>
+          <Form.Item
+            name="email"
+            label="邮箱"
+            rules={[{ type: "email", message: "请输入有效的邮箱地址" }]}
+          >
             <Input prefix={<MailOutlined />} placeholder="用户邮箱" />
           </Form.Item>
 
@@ -275,6 +329,6 @@ export default function UsersPageView() {
           </Form.Item>
         </Form>
       </Modal>
-    </Card>
+    </ManagePageShell>
   );
 }

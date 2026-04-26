@@ -6,12 +6,28 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 )
 
 type SpiderService struct{}
 
 var SpiderSvc = new(SpiderService)
+
+func clearCategorySyncRedisCaches() {
+	repository.ClearCategoryCache()
+	filmrepo.ClearAllSearchTagsCache()
+	filmrepo.ClearTVBoxListCache()
+	repository.ClearIndexPageCache()
+}
+
+func finalizeCategorySync() {
+	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
+		log.Printf("[SpiderService] 强制重建派生数据失败: %v", err)
+	}
+	repository.RefreshCategoryCache()
+	clearCategorySyncRedisCaches()
+}
 
 // StartCollect 执行对指定站点的采集任务
 func (s *SpiderService) StartCollect(id string, h int) error {
@@ -47,12 +63,12 @@ func (s *SpiderService) ClearFilms() {
 	go spider.ClearSpider()
 }
 
-// SyncCollect 同步采集
+// SyncCollect 同步主站单片采集
 func (s *SpiderService) SyncCollect(ids string) {
 	go spider.CollectSingleFilm(ids)
 }
 
-// FilmClassCollect 影视分类采集, 直接覆盖当前分类数据
+// FilmClassCollect 重置为主站原始分类并清空业务属性
 func (s *SpiderService) FilmClassCollect() error {
 	l := repository.GetCollectSourceListByGrade(model.MasterCollect)
 	if l == nil {
@@ -60,9 +76,33 @@ func (s *SpiderService) FilmClassCollect() error {
 	}
 	for _, fs := range l {
 		if fs.State {
-			go spider.CollectCategory(&fs)
+			if err := spider.ResetCategory(&fs); err != nil {
+				return err
+			}
+			finalizeCategorySync()
 			return nil
 		}
+	}
+	return errors.New("未获取到已启用的主采集站信息")
+}
+
+func (s *SpiderService) SyncMasterCategoryTree() error {
+	l := repository.GetCollectSourceListByGrade(model.MasterCollect)
+	if len(l) == 0 {
+		return errors.New("未获取到主采集站信息")
+	}
+	for _, fs := range l {
+		if !fs.State {
+			continue
+		}
+		log.Printf("[SpiderService] 启动同步主站分类: name=%s id=%s uri=%s", fs.Name, fs.Id, fs.Uri)
+		if err := spider.CollectCategory(&fs); err != nil {
+			log.Printf("[SpiderService] 主站分类同步失败: name=%s id=%s err=%v", fs.Name, fs.Id, err)
+			return err
+		}
+		finalizeCategorySync()
+		log.Printf("[SpiderService] 主站分类同步完成: name=%s id=%s", fs.Name, fs.Id)
+		return nil
 	}
 	return errors.New("未获取到已启用的主采集站信息")
 }

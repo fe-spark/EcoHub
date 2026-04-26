@@ -1,11 +1,6 @@
 package model
 
 import (
-	"context"
-	"fmt"
-
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/model/dto"
 
 	"gorm.io/gorm"
@@ -50,20 +45,21 @@ type MovieDescriptor struct {
 
 // MovieBasicInfo 影片基本信息
 type MovieBasicInfo struct {
-	Id       int64  `json:"id"`       // 影片Id
-	Cid      int64  `json:"cid"`      // 分类ID
-	Pid      int64  `json:"pid"`      // 一级分类ID
-	Name     string `json:"name"`     // 片名
-	SubTitle string `json:"subTitle"` // 子标题
-	CName    string `json:"cName"`    // 分类名称
-	State    string `json:"state"`    // 影片状态 正片|预告...
-	Picture  string `json:"picture"`  // 简介图片
-	Actor    string `json:"actor"`    // 主演
-	Director string `json:"director"` // 导演
-	Blurb    string `json:"blurb"`    // 简介, 不完整
-	Remarks  string `json:"remarks"`  // 更新情况
-	Area     string `json:"area"`     // 地区
-	Year     string `json:"year"`     // 年份
+	Id           int64  `json:"id"`           // 影片Id
+	Cid          int64  `json:"cid"`          // 分类ID
+	Pid          int64  `json:"pid"`          // 一级分类ID
+	Name         string `json:"name"`         // 片名
+	SubTitle     string `json:"subTitle"`     // 子标题
+	CName        string `json:"cName"`        // 分类名称
+	State        string `json:"state"`        // 影片状态 正片|预告...
+	Picture      string `json:"picture"`      // 竖版封面图
+	PictureSlide string `json:"pictureSlide"` // 横版幻灯图
+	Actor        string `json:"actor"`        // 主演
+	Director     string `json:"director"`     // 导演
+	Blurb        string `json:"blurb"`        // 简介, 不完整
+	Remarks      string `json:"remarks"`      // 更新情况
+	Area         string `json:"area"`         // 地区
+	Year         string `json:"year"`         // 年份
 }
 
 // MovieUrlInfo 影视资源url信息
@@ -75,21 +71,18 @@ type MovieUrlInfo struct {
 // MovieDetail 影片详情信息
 type MovieDetail struct {
 	Id              int64               `json:"id"`           // 影片Id
+	RawCid          int64               `json:"rawCid"`       // 原始来源分类ID
+	RawPid          int64               `json:"rawPid"`       // 原始来源一级分类ID
 	Cid             int64               `json:"cid"`          // 分类ID
 	Pid             int64               `json:"pid"`          // 一级分类ID
 	Name            string              `json:"name"`         // 片名
-	Picture         string              `json:"picture"`      // 简介图片
+	Picture         string              `json:"picture"`      // 竖版封面图
+	PictureSlide    string              `json:"pictureSlide"` // 横版幻灯图
 	PlayFrom        []string            `json:"playFrom"`     // 播放来源
 	DownFrom        string              `json:"DownFrom"`     // 下载来源 例: http
 	PlayList        [][]MovieUrlInfo    `json:"playList"`     // 播放地址url
 	DownloadList    [][]MovieUrlInfo    `json:"downloadList"` // 下载url地址
 	MovieDescriptor `json:"descriptor"` // 影片描述信息
-}
-
-// MoviePlaySource 多站播放源信息
-type MoviePlaySource struct {
-	SiteName string         `json:"siteName"` // 站点名称
-	PlayList []MovieUrlInfo `json:"playList"` // 播放列表
 }
 
 // MovieDetailInfo 影片详情持久化模型 (MySQL)
@@ -100,32 +93,50 @@ type MovieDetailInfo struct {
 	Content  string `gorm:"type:longtext"` // 存储序列化后的完整 MovieDetail JSON
 }
 
-// MovieSourceMapping 影片来源映射表 (核心：解决不同站 ID 不一致问题)
+// MovieSourceMapping 影片源站 ID 与全局影片 ID 的最小映射。
+// 主站详情写入和附属站播放列表采集匹配后都会维护该表。
+// 当前仅用于后台“单片更新全部站点”时，把全局 mid 翻译回各站 source_mid。
 type MovieSourceMapping struct {
 	gorm.Model
-	SourceId  string `gorm:"uniqueIndex:uidx_source_mid"` // 来源站点ID
-	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid"` // 来源站点原始ID
-	GlobalMid int64  `gorm:"index"`                       // 映射到的全局统一ID
+	SourceId  string `gorm:"uniqueIndex:uidx_source_mid"`
+	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid"`
+	GlobalMid int64  `gorm:"index"`
 }
 
-// MoviePlaylist 多源播放列表持久化模型 (MySQL)
+// MoviePlaylist 附属站播放列表持久化模型。
+// 主站不写该表，附属站采集后按匹配键写入，供详情页和播放页直接聚合读取。
 type MoviePlaylist struct {
 	gorm.Model
-	SourceId string `gorm:"uniqueIndex:uidx_source_key"`
-	MovieKey string `gorm:"uniqueIndex:uidx_source_key"` // hash(name) or hash(dbid)
-	Content  string `gorm:"type:longtext"`
+	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
+	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"`
+	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"`
+	GroupName  string `gorm:"type:varchar(255)"`
+	Content    string `gorm:"type:longtext"`
+}
+
+// MovieMatchKey 主站影片匹配键索引。
+// 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，供详情页实时补附属站播放源。
+type MovieMatchKey struct {
+	gorm.Model
+	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match;index:idx_match_key"`
+	MatchKey string `gorm:"size:64;uniqueIndex:uidx_mid_match;index:idx_match_key"`
+}
+
+func (MovieMatchKey) TableName() string {
+	return TableMovieMatchKey
 }
 
 // SearchInfo 存储用于检索的信息
 type SearchInfo struct {
 	gorm.Model
 	Mid               int64   `json:"mid" gorm:"uniqueIndex:idx_mid"`                                                                                                                                                                    // 影片ID (全局唯一)
-	ContentKey        string  `json:"contentKey" gorm:"uniqueIndex:idx_content"`                                                                                                                                                         // 内容指纹 (hash(name) or dbid)
+	ContentKey        string  `json:"contentKey" gorm:"uniqueIndex:idx_content"`                                                                                                                                                         // 主站内容指纹：优先豆瓣ID，其次规范化片名
 	SourceId          string  `json:"sourceId" gorm:"index"`                                                                                                                                                                             // 来源站点ID
 	Cid               int64   `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
 	Pid               int64   `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
 	RootCategoryKey   string  `json:"rootCategoryKey" gorm:"size:128;index;index:idx_root_key_update;index:idx_root_key_hits;index:idx_root_key_latest;index:idx_filter_root_score;index:idx_filter_root_update;index:idx_filter_root_hits"`
 	CategoryKey       string  `json:"categoryKey" gorm:"size:128;index;index:idx_category_key_update;index:idx_category_key_hits;index:idx_category_key_latest"`
+	SeriesKey         string  `json:"seriesKey" gorm:"size:128;index"`                                                            // 系列标识，用于相关推荐召回与排序
 	Name              string  `json:"name"`                                                                                       // 片名
 	SubTitle          string  `json:"subTitle"`                                                                                   // 影片子标题
 	CName             string  `json:"cName"`                                                                                      // 分类名称
@@ -136,49 +147,18 @@ type SearchInfo struct {
 	Initial           string  `json:"initial"`                                                                                    // 首字母
 	Score             float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                  // 评分
 	UpdateStamp       int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
-	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                   // 聚合更新时间(主站/附属站取最新)
+	LatestSourceStamp int64   `json:"latestSourceStamp" gorm:"index;index:idx_pid_latest;index:idx_cid_latest"`                   // 主站更新时间
 	Hits              int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State             string  `json:"state"`                                                                                      // 状态 正片|预告
 	Remarks           string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
+	PlayFromSummary   string  `json:"playFromSummary"`                                                                            // 主站播放源摘要，供列表接口直出
 	DbId              int64   `json:"dbId" gorm:"index"`                                                                          // 豆瓣ID (用于精准去重)
-	ReleaseStamp      int64   `json:"releaseStamp" gorm:"index"`                                                                  // 上映时间 时间戳
-	Picture           string  `json:"picture"`                                                                                    // 简介图片
+	CollectStamp      int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`                                             // 采集/入库时间 时间戳
+	Picture           string  `json:"picture"`                                                                                    // 竖版封面图
+	PictureSlide      string  `json:"pictureSlide" gorm:"size:512"`                                                               // 横版幻灯图
 	Actor             string  `json:"actor"`                                                                                      // 主演
 	Director          string  `json:"director"`                                                                                   // 导演
 	Blurb             string  `json:"blurb"`                                                                                      // 简介, 不完整
-}
-
-// AfterSave GORM 钩子：在数据保存/更新后自动清理缓存，确保首页数据实时性
-func (s *SearchInfo) AfterSave(tx *gorm.DB) (err error) {
-	ctx := context.Background()
-
-	// 1. 清理首页全量缓存
-	iter := db.Rdb.Scan(ctx, 0, config.IndexPageCacheKey+"*", 100).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-
-	// 2. 清理 TVBox 列表第一页缓存 (由于涉及多种 Sort/Pid/Limit 组合，使用模糊匹配清理)
-	// 注意：此处使用 Keys 操作在数据量极大时可能有性能影响，但考虑到采集频率可控且主要是首页缓存，是合理的
-	pattern := config.TVBoxList + ":*"
-	iter = db.Rdb.Scan(ctx, 0, pattern, 100).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-
-	// 3. 清理搜索标签缓存 (SearchTags:*), 确保新入库/更新的影片能实时在筛选菜单中体现
-	// 清理当前分类的复合标签缓存 (格式：Search:Tags:{pid}:*)
-	if s.Pid > 0 {
-		tagPattern := fmt.Sprintf("%s:%d:*", config.SearchTags, s.Pid)
-		iter := db.Rdb.Scan(ctx, 0, tagPattern, 100).Iterator()
-		for iter.Next(ctx) {
-			db.Rdb.Del(ctx, iter.Val())
-		}
-		// 兼容基础版 key: Search:Tags:{pid}
-		db.Rdb.Del(ctx, fmt.Sprintf("%s:%d", config.SearchTags, s.Pid))
-	}
-
-	return
 }
 
 // SearchTagItem 影片检索标签持久化模型 (MySQL)
@@ -199,13 +179,14 @@ type Tag struct {
 
 // SearchTagsVO 搜索标签请求参数
 type SearchTagsVO struct {
-	Pid      int64  `json:"pid"`
-	Cid      int64  `json:"cid"`
-	Plot     string `json:"plot"`
-	Area     string `json:"area"`
-	Language string `json:"language"`
-	Year     string `json:"year"`
-	Sort     string `json:"sort"`
+	Pid              int64  `json:"pid"`
+	Cid              int64  `json:"cid"`
+	OriginalCategory string `json:"originalCategory"`
+	Plot             string `json:"plot"`
+	Area             string `json:"area"`
+	Language         string `json:"language"`
+	Year             string `json:"year"`
+	Sort             string `json:"sort"`
 }
 
 // SearchVo 影片信息搜索参数
@@ -228,7 +209,8 @@ type FilmDetailVo struct {
 	Cid          int64    `json:"cid"`          // 分类ID
 	Pid          int64    `json:"pid"`          // 一级分类ID
 	Name         string   `json:"name"`         // 片名
-	Picture      string   `json:"picture"`      // 简介图片
+	Picture      string   `json:"picture"`      // 竖版封面图
+	PictureSlide string   `json:"pictureSlide"` // 横版幻灯图
 	PlayFrom     []string `json:"playFrom"`     // 播放来源
 	DownFrom     string   `json:"DownFrom"`     // 下载来源 例: http
 	PlayLink     string   `json:"playLink"`     // 播放地址url
@@ -258,6 +240,7 @@ type FilmDetailVo struct {
 // PlayLinkVo 多站点播放链接数据列表
 type PlayLinkVo struct {
 	Id       string         `json:"id"`
+	SourceId string         `json:"sourceId"`
 	Name     string         `json:"name"`
 	LinkList []MovieUrlInfo `json:"linkList"`
 }

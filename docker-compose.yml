@@ -76,7 +76,12 @@ services:
       REDIS_PASSWORD: redis_local_password
       REDIS_DB: 0
     ports:
-      - 8080:8080
+      - 0.0.0.0:8080:8080
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - Eco-network
     extra_hosts:
@@ -95,3 +100,6 @@ networks:
 volumes:
   eco-mysql-data:
   eco-redis-data:
+
+
+

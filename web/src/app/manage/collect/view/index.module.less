@@ -3,11 +3,208 @@
   background: transparent;
 }
 
-.toolbar {
+.tablePanel {
+  padding: 0;
+}
+
+.heroActions {
   display: flex;
-  justify-content: flex-end;
   gap: 8px;
-  padding: 16px 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.successButton {
+  background: var(--ant-color-primary) !important;
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: none;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.statCard {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px;
+  background: var(--ant-color-bg-layout);
+  border-radius: 8px;
+}
+
+.statLabel {
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+}
+
+.statValue {
+  color: var(--ant-color-text);
+  font-size: 28px;
+  line-height: 1;
+}
+
+.statHint {
+  color: var(--ant-color-text-description);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+// .tableSection {
+//   padding: 16px;
+// }
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.sectionTitle {
+  margin: 0;
+  color: var(--ant-color-text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.sectionDesc {
+  margin: 6px 0 0;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.batchPanel {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
   background: var(--ant-color-bg-container);
-  border-radius: 0 0 8px 8px;
+  padding: 16px;
+}
+
+.batchPanelHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.batchMeta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.batchMeta span {
+  padding: 6px 10px;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 999px;
+}
+
+.batchToolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 8px;
+}
+
+.batchSiteGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.batchSiteCard {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.batchSiteCard:hover {
+  border-color: var(--ant-color-primary-border);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.batchSiteCardSelected {
+  border-color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.batchSiteMain {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.batchSiteTags {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.batchSiteSub {
+  color: var(--ant-color-text-description);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+@media (max-width: 960px) {
+  .batchPanelHeader,
+  .sectionHeader {
+    flex-direction: column;
+  }
+
+  .heroActions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .statsGrid,
+  .batchSiteGrid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .tableSection,
+  .batchPanel {
+    padding: 14px;
+  }
+
+  .statsGrid,
+  .batchSiteGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .batchToolbar,
+  .batchSiteMain {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .batchSiteTags {
+    justify-content: flex-start;
+  }
 }

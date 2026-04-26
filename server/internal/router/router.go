@@ -20,7 +20,6 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/proxy/video`, handler.ProxyHd.ProxyVideo)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
-	api.GET(`/filmDetail`, handler.IndexHd.FilmDetail)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
 	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
 	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
@@ -49,6 +48,18 @@ func SetupRouter() *gin.Engine {
 			banner.POST(`/add`, handler.ManageHd.BannerAdd)
 			banner.POST(`/update`, handler.ManageHd.BannerUpdate)
 			banner.POST(`/del`, handler.ManageHd.BannerDel)
+		}
+
+		// 映射规则管理
+		mapping := manageRoute.Group(`/mapping`)
+		{
+			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
+			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
+			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
+			mapping.POST(`/rule/add`, handler.ManageHd.MappingRuleAdd)
+			mapping.POST(`/rule/update`, handler.ManageHd.MappingRuleUpdate)
+			mapping.POST(`/rule/del`, handler.ManageHd.MappingRuleDel)
+			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)
 		}
 
 		// 用户相关
@@ -97,7 +108,6 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
-			spiderRoute.POST(`/class/cover`, handler.SpiderHd.CoverFilmClass)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)
 		}
 
@@ -110,6 +120,8 @@ func SetupRouter() *gin.Engine {
 
 			filmRoute.GET(`/class/tree`, handler.FilmHd.FilmClassTree)
 			filmRoute.GET(`/class/find`, handler.FilmHd.FindFilmClass)
+			filmRoute.POST(`/class/collect`, handler.FilmHd.CollectFilmClass)
+			filmRoute.POST(`/class/tree/save`, handler.FilmHd.SaveFilmClassTree)
 			filmRoute.POST(`/class/update`, handler.FilmHd.UpdateFilmClass)
 			filmRoute.POST(`/class/del`, handler.FilmHd.DelFilmClass)
 		}

@@ -1,8 +1,8 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Input, Button, Empty, Drawer, Flex, Dropdown } from "antd";
+import { Button, Drawer, Empty, Input } from "antd";
 import {
   SearchOutlined,
   HistoryOutlined,
@@ -22,6 +22,8 @@ interface NavItem {
   name: string;
 }
 
+const QUICK_NAV_LIMIT = 8;
+
 interface HistoryItem {
   id: string;
   name: string;
@@ -36,9 +38,11 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
+  const [desktopCatalogOpen, setDesktopCatalogOpen] = useState(false);
   const router = useRouter();
   const searchParams = useSearchParams();
   const { message } = useAppMessage();
+  const desktopCatalogRef = useRef<HTMLDivElement>(null);
 
   const urlSearch = searchParams.get("search") || "";
   useEffect(() => {
@@ -78,15 +82,32 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
+  const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (historyRef.current && !historyRef.current.contains(event.target as Node)) {
         setShowHistory(false);
       }
+      if (desktopCatalogRef.current && !desktopCatalogRef.current.contains(event.target as Node)) {
+        setDesktopCatalogOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setDesktopCatalogOpen(false);
+        setMobileMenuVisible(false);
+        setShowHistory(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleEscape);
+    return () => document.removeEventListener("keydown", handleEscape);
   }, []);
 
   const toggleHistory = () => {
@@ -137,61 +158,10 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     </div>
   );
 
-  const [visibleCount, setVisibleCount] = useState(navList.length);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const itemsRef = useRef<(HTMLAnchorElement | null)[]>([]);
-  const homeRef = useRef<HTMLAnchorElement>(null);
-
-  // Calculate visible items based on container width
-  useEffect(() => {
-    if (!containerRef.current || navList.length === 0) return;
-
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0];
-      const containerWidth = entry.contentRect.width;
-      
-      if (containerWidth <= 0) return;
-
-      const homeWidth = homeRef.current?.getBoundingClientRect().width || 64;
-      // Get the actual gap from computed style if possible, or use a reasonable estimate
-      const computedGap = window.getComputedStyle(containerRef.current).gap;
-      const gap = parseInt(computedGap) || 24; 
-      const moreBtnBuffer = 100; // More button + icon + padding
-      
-      let currentWidth = homeWidth;
-      let count = 0;
-
-      for (let i = 0; i < navList.length; i++) {
-        const itemWidth = itemsRef.current[i]?.getBoundingClientRect().width || 0;
-        if (itemWidth === 0) continue;
-
-        const isLast = i === navList.length - 1;
-        const spaceNeeded = gap + itemWidth + (isLast ? 0 : moreBtnBuffer);
-
-        if (currentWidth + spaceNeeded > containerWidth) {
-          break;
-        }
-        
-        currentWidth += itemWidth + gap;
-        count++;
-      }
-      
-      setVisibleCount(count);
-    });
-
-    observer.observe(containerRef.current);
-    return () => observer.disconnect();
-  }, [navList.length]);
-
-  const visibleNavs = navList.slice(0, visibleCount);
-  const overflowNavs = navList.slice(visibleCount);
-
-  const moreMenu = {
-    items: overflowNavs.map((nav) => ({
-      key: nav.id,
-      label: nav.name,
-      onClick: () => router.push(`/filmClassify?Pid=${nav.id}`),
-    })),
+  const navigateToCategory = (id: string) => {
+    setDesktopCatalogOpen(false);
+    setMobileMenuVisible(false);
+    router.push(`/filmClassify?Pid=${id}`);
   };
 
   return (
@@ -214,18 +184,17 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         </div>
 
         {/* Navigation Area - Dynamic & Flexible */}
-        <div className={styles.navArea} ref={containerRef}>
+        <div className={styles.navArea} ref={desktopCatalogRef}>
           <nav className={styles.navLinks}>
-            <a onClick={() => router.push("/")} className={styles.navItem} ref={homeRef}>
+            <a onClick={() => router.push("/")} className={styles.navHomeItem}>
               首页
             </a>
-            
-            {/* Hidden items for width measurement */}
-            <div style={{ position: 'absolute', visibility: 'hidden', pointerEvents: 'none', display: 'flex', gap: '24px', opacity: 0 }}>
-              {navList.map((nav, i) => (
-                <a 
-                  key={`measure-${nav.id}`} 
-                  ref={el => { itemsRef.current[i] = el; }} 
+
+            <div className={styles.navScroller}>
+              {quickNavs.map((nav) => (
+                <a
+                  key={nav.id}
+                  onClick={() => navigateToCategory(nav.id)}
                   className={styles.navItem}
                 >
                   {nav.name}
@@ -233,24 +202,36 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               ))}
             </div>
 
-            {visibleNavs.map((nav) => (
-              <a
-                key={nav.id}
-                onClick={() => router.push(`/filmClassify?Pid=${nav.id}`)}
-                className={styles.navItem}
-              >
-                {nav.name}
-              </a>
-            ))}
-
-            {overflowNavs.length > 0 && (
-              <Dropdown menu={moreMenu} placement="bottomRight" trigger={['hover']} overlayClassName={styles.navMoreOverlay}>
-                <a className={styles.navItem}>
-                  更多 <DownOutlined style={{ fontSize: 12, marginLeft: 4 }} />
-                </a>
-              </Dropdown>
-            )}
+            <button
+              type="button"
+              className={`${styles.navCatalogBtn} ${desktopCatalogOpen ? styles.navCatalogBtnActive : ""}`}
+              onClick={() => setDesktopCatalogOpen((open) => !open)}
+            >
+              分类全览 <DownOutlined className={styles.navCatalogIcon} />
+            </button>
           </nav>
+
+          <div className={`${styles.navCatalogPanel} ${desktopCatalogOpen ? styles.navCatalogPanelOpen : ""}`}>
+            <div className={styles.navCatalogHeader}>
+              <div>
+                <span className={styles.navCatalogEyebrow}>Category Atlas</span>
+                <strong className={styles.navCatalogTitle}>全部分类</strong>
+              </div>
+              <span className={styles.navCatalogCount}>{navList.length} 个分类</span>
+            </div>
+            <div className={styles.navCatalogGrid}>
+              {navList.map((nav) => (
+                <button
+                  key={nav.id}
+                  type="button"
+                  className={styles.navCatalogItem}
+                  onClick={() => navigateToCategory(nav.id)}
+                >
+                  <span className={styles.navCatalogName}>{nav.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {/* Action Area - Search & Actions */}
@@ -305,7 +286,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
             <div 
               key={nav.id} 
               className={styles.mobileNavItem} 
-              onClick={() => { router.push(`/filmClassify?Pid=${nav.id}`); setMobileMenuVisible(false); }}
+              onClick={() => navigateToCategory(nav.id)}
             >
               <FireOutlined /> <span>{nav.name}</span>
             </div>

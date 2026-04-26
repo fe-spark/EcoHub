@@ -10,6 +10,85 @@
   gap: 32px;
 }
 
+.emptyPage {
+  min-height: calc(100vh - 76px);
+  display: grid;
+  place-items: center;
+  padding: 40px 24px;
+}
+
+.emptyCard {
+  width: min(100%, 560px);
+  padding: 36px 32px;
+  border: 1px solid var(--public-border-1);
+  border-radius: 28px;
+  background:
+    radial-gradient(circle at top, rgba(var(--primary-color-rgb), 0.16), transparent 42%),
+    color-mix(in srgb, var(--public-surface-1) 92%, rgba(8, 12, 20, 0.84));
+  box-shadow: var(--public-shadow-lg);
+  text-align: center;
+}
+
+.emptyEyebrow {
+  margin-bottom: 14px;
+  color: rgba(var(--primary-color-rgb), 0.9);
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+}
+
+.emptyTitle {
+  margin: 0;
+  color: var(--public-text-1);
+  font-size: clamp(28px, 4vw, 40px);
+  line-height: 1.1;
+  font-weight: 900;
+}
+
+.emptyDescription {
+  margin: 16px auto 0;
+  max-width: 420px;
+  color: var(--public-text-3);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.emptyActions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.emptyPrimaryAction,
+.emptySecondaryAction {
+  min-width: 132px;
+  height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.emptyPrimaryAction {
+  border: none;
+  background: linear-gradient(135deg, rgba(var(--primary-color-rgb), 0.96), rgba(var(--primary-color-rgb), 0.72));
+  color: var(--public-on-accent);
+}
+
+.emptySecondaryAction {
+  border: 1px solid var(--public-border-2);
+  background: var(--public-surface-2);
+  color: var(--public-text-1);
+}
+
 .bgWrapper {
   --play-bg-brightness: 0.25;
 

@@ -86,10 +86,30 @@ func (s *UserService) AddUser(u model.User) error {
 }
 
 // UpdateUser 更新用户
-func (s *UserService) UpdateUser(u model.User) error {
-	oldUser := repository.GetUserById(u.ID)
+func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
+	oldUser := repository.GetUserById(req.ID)
 	if oldUser.ID == 0 {
 		return errors.New("用户不存在")
+	}
+	u := oldUser
+
+	if req.Email != nil {
+		u.Email = *req.Email
+	}
+	if req.NickName != nil {
+		u.NickName = *req.NickName
+	}
+	if req.Avatar != nil {
+		u.Avatar = *req.Avatar
+	}
+	if req.Gender != nil {
+		u.Gender = *req.Gender
+	}
+	if req.Status != nil {
+		u.Status = *req.Status
+	}
+	if req.Role != nil {
+		u.Role = *req.Role
 	}
 	// 内置账号保护：禁止禁用默认超管和访客用户
 	if oldUser.ID == config.UserIdInitialVal {
@@ -101,9 +121,9 @@ func (s *UserService) UpdateUser(u model.User) error {
 		u.Role = model.UserRoleVisitor
 	}
 	// 如果修改了密码，需要重新加密
-	if u.Password != "" {
+	if req.Password != nil && *req.Password != "" {
 		u.Salt = oldUser.Salt
-		u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
+		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
 	}
 	repository.UpdateUserInfo(u)
 	// 如果用户被禁用（Status == 1），强制清除其登录状态

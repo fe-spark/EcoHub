@@ -10,7 +10,6 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/utils"
 )
 
 type IndexService struct{}
@@ -29,8 +28,8 @@ func (i *IndexService) IndexPage() map[string]any {
 	}
 
 	Info := make(map[string]any)
-	tree := model.CategoryTree{Id: 0, Name: "分类信息"}
-	sysTree := repository.GetActiveCategoryTree()
+	tree := model.CategoryTree{Id: 0, Name: "分类信息", Children: make([]*model.CategoryTree, 0)}
+	sysTree := repository.GetCategoryTree()
 	for _, c := range sysTree.Children {
 		if c.Show {
 			tree.Children = append(tree.Children, c)
@@ -73,36 +72,38 @@ func (i *IndexService) IndexPage() map[string]any {
 }
 
 // GetFilmDetail 影片详情信息页面处理
-func (i *IndexService) GetFilmDetail(id int) model.MovieDetailVo {
+func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	search := filmrepo.GetSearchInfoById(int64(id))
 	if search == nil {
-		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
+		return model.MovieDetailVo{}, nil
 	}
 	movieDetail := filmrepo.GetMovieDetail(search.Cid, search.Mid)
 	if movieDetail == nil {
-		return model.MovieDetailVo{List: make([]model.PlayLinkVo, 0)}
+		if err := filmrepo.DelFilmSearch(search.Mid); err != nil {
+			return model.MovieDetailVo{}, err
+		}
+		return model.MovieDetailVo{}, nil
 	}
 	res := model.MovieDetailVo{MovieDetail: *movieDetail}
-	res.List = multipleSource(movieDetail)
-	return res
+	res.List = multipleSource(search, movieDetail)
+	return res, nil
 }
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
 func (i *IndexService) GetCategoryInfo() map[string]any {
 	nav := make(map[string]any)
-	tree := repository.GetActiveCategoryTree()
-
-	// 定义标准简称映射 (仅用于保持 API 兼容性，如 film, tv 等字段名)
-	// 如果需要完全动态，可以考虑在 Category 表增加 Key 字段
-	keyMap := map[string]string{
-		"电影": "film", "电视剧": "tv", "综艺": "variety", "动漫": "cartoon", "纪录片": "document",
-	}
+	tree := repository.GetCategoryTree()
 
 	for _, t := range tree.Children {
-		key, ok := keyMap[t.Name]
-		if !ok {
-			// 后备方案：使用 ID 或 Alias 首项
-			key = strings.ToLower(t.Name)
+		if !t.Show {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(t.Alias))
+		if key == "" {
+			key = strings.ToLower(strings.TrimSpace(t.Name))
+		}
+		if key == "" {
+			continue
 		}
 		nav[key] = t
 	}
@@ -111,7 +112,7 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 
 // GetNavCategory 获取导航分类信息
 func (i *IndexService) GetNavCategory() []*model.Category {
-	tree := repository.GetActiveCategoryTree()
+	tree := repository.GetCategoryTree()
 	cl := make([]*model.Category, 0)
 	for _, c := range tree.Children {
 		if c.Show {
@@ -172,18 +173,9 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
-	// 关键修复：从数据库获取规范化后的 SearchInfo，而不是直接使用 detail 中不可信的 Cid/Pid
 	search := filmrepo.GetSearchInfoById(detail.Id)
 	if search == nil {
-		// 备选方案：如果 SearchInfo 暂无，则构造一个简易的
-		search = &model.SearchInfo{
-			Cid:      detail.Cid,
-			Pid:      detail.Pid,
-			Name:     detail.Name,
-			ClassTag: detail.ClassTag,
-			Area:     detail.Area,
-			Language: detail.Language,
-		}
+		return []model.MovieBasicInfo{}
 	}
 	return filmrepo.GetRelateMovieBasicInfo(*search, page)
 }
@@ -193,59 +185,84 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 	return filmrepo.GetSearchTag(st)
 }
 
-func multipleSource(detail *model.MovieDetail) []model.PlayLinkVo {
-	master := repository.GetCollectSourceListByGrade(model.MasterCollect)
-	if len(master) == 0 || len(detail.PlayList) == 0 {
-		return make([]model.PlayLinkVo, 0)
-	}
-	firstList := detail.PlayList[0]
-	if firstList == nil {
-		firstList = []model.MovieUrlInfo{}
-	}
-	playList := []model.PlayLinkVo{{Id: master[0].Id, Name: master[0].Name, LinkList: firstList}}
-
-	names := make([]string, 0, 8)
-	seenKeys := make(map[string]struct{}, 8)
-	appendKey := func(k string) {
-		if k == "" {
-			return
-		}
-		if _, ok := seenKeys[k]; ok {
-			return
-		}
-		seenKeys[k] = struct{}{}
-		names = append(names, k)
-	}
-	if detail.DbId > 0 {
-		appendKey(utils.GenerateHashKey(detail.DbId))
-	}
-	for _, v := range utils.NormalizeTitleCandidates(detail.Name) {
-		appendKey(utils.GenerateHashKey(v))
+func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
+	playList := buildPrimaryPlaySources(search, detail)
+	names := filmrepo.LoadMovieMatchKeys(search, detail)
+	if len(names) == 0 {
+		return playList
 	}
 
-	if len(detail.SubTitle) > 0 && strings.Contains(detail.SubTitle, ",") {
-		for v := range strings.SplitSeq(detail.SubTitle, ",") {
-			for _, c := range utils.NormalizeTitleCandidates(v) {
-				appendKey(utils.GenerateHashKey(c))
-			}
-		}
-	}
-	if len(detail.SubTitle) > 0 && strings.Contains(detail.SubTitle, "/") {
-		for v := range strings.SplitSeq(detail.SubTitle, "/") {
-			for _, c := range utils.NormalizeTitleCandidates(v) {
-				appendKey(utils.GenerateHashKey(c))
-			}
-		}
-	}
 	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
-	for _, s := range sc {
-		pl := filmrepo.GetMultiplePlayByKeys(s.Id, names)
-		if len(pl) > 0 {
-			playList = append(playList, model.PlayLinkVo{Id: s.Id, Name: s.Name, LinkList: pl})
+	seenSourceIDs := make(map[string]struct{}, len(playList))
+	for _, item := range playList {
+		sourceID := strings.TrimSpace(item.SourceId)
+		if sourceID == "" {
+			sourceID = strings.TrimSpace(item.Id)
+		}
+		if sourceID == "" {
+			continue
+		}
+		seenSourceIDs[sourceID] = struct{}{}
+	}
+
+	for _, source := range sc {
+		if !source.State {
+			continue
+		}
+		if _, ok := seenSourceIDs[source.Id]; ok {
+			continue
+		}
+		groups := filmrepo.GetMultiplePlayGroupsByKeys(source.Id, source.Name, names)
+		if len(groups) > 0 {
+			playList = append(playList, groups...)
 		}
 	}
 
 	return playList
+}
+
+func buildPrimaryPlaySources(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
+	if detail == nil || len(detail.PlayList) == 0 {
+		return make([]model.PlayLinkVo, 0)
+	}
+
+	siteName := ""
+	if search != nil && search.SourceId != "" {
+		if source := repository.FindCollectSourceById(search.SourceId); source != nil {
+			siteName = source.Name
+		}
+	}
+
+	playList := make([]model.PlayLinkVo, 0, len(detail.PlayList))
+	sourceID := ""
+	if search != nil {
+		sourceID = search.SourceId
+	}
+	for index, links := range detail.PlayList {
+		if len(links) == 0 {
+			continue
+		}
+
+		rawName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
+		sourceName := filmrepo.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
+		groupID := filmrepo.BuildPlayGroupID(sourceID, rawName, index, len(detail.PlayList))
+
+		playList = append(playList, model.PlayLinkVo{
+			Id:       groupID,
+			SourceId: sourceID,
+			Name:     sourceName,
+			LinkList: links,
+		})
+	}
+
+	return playList
+}
+
+func resolvePrimarySourceName(playFrom []string, index int) string {
+	if index < 0 || index >= len(playFrom) {
+		return ""
+	}
+	return playFrom[index]
 }
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息

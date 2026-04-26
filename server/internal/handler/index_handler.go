@@ -17,6 +17,34 @@ type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
 
+func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) string {
+	if preferred != "" {
+		for _, source := range playSources {
+			if source.Id == preferred && len(source.LinkList) > 0 {
+				return source.Id
+			}
+		}
+
+		for _, source := range playSources {
+			if source.SourceId == preferred && len(source.LinkList) > 0 {
+				return source.Id
+			}
+		}
+	}
+
+	for _, source := range playSources {
+		if len(source.LinkList) > 0 {
+			return source.Id
+		}
+	}
+
+	if len(playSources) > 0 {
+		return playSources[0].Id
+	}
+
+	return ""
+}
+
 func wrapProxyLink(link string) string {
 	if link == "" {
 		return link
@@ -46,22 +74,6 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 	dto.Success(data, "分类信息获取成功", c)
 }
 
-// FilmDetail 影片详情信息查询
-func (h *IndexHandler) FilmDetail(c *gin.Context) {
-	id, err := strconv.Atoi(c.Query("id"))
-	if err != nil {
-		dto.Failed("请求异常,影片请求参数异常!!!", c)
-		return
-	}
-	detail := service.IndexSvc.GetFilmDetail(id)
-	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(detail.MovieDetail, &page)
-	dto.Success(gin.H{
-		"detail": detail,
-		"relate": relateMovie,
-	}, "影片详情信息获取成功", c)
-}
-
 // FilmPlayInfo 影视播放页数据
 func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
@@ -75,7 +87,15 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("请求异常,暂无影片信息!!!", c)
 		return
 	}
-	detail := service.IndexSvc.GetFilmDetail(id)
+	detail, err := service.IndexSvc.GetFilmDetail(id)
+	if err != nil {
+		dto.Failed("影片详情数据异常", c)
+		return
+	}
+	if detail.Id == 0 {
+		dto.Failed("暂无影片信息", c)
+		return
+	}
 	useProxy := repository.GetSiteBasic().IsVideoProxy
 	for i := range detail.List {
 		var valid []model.MovieUrlInfo
@@ -90,16 +110,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		detail.List[i].LinkList = valid
 	}
 	if len(detail.List) > 0 {
-		found := false
-		for _, v := range detail.List {
-			if v.Id == playFrom {
-				found = true
-				break
-			}
-		}
-		if !found {
-			playFrom = detail.List[0].Id
-		}
+		playFrom = resolvePlayableSourceID(detail.List, playFrom)
 	}
 	var currentPlay model.MovieUrlInfo
 	for _, v := range detail.List {
@@ -153,6 +164,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	}
 	params.Pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	params.Cid, _ = strconv.ParseInt(cidStr, 10, 64)
+	params.OriginalCategory = strings.TrimSpace(c.DefaultQuery("OriginalCategory", ""))
 	params.Plot = c.DefaultQuery("Plot", "")
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
@@ -189,13 +201,14 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 		"list":   list,
 		"search": searchTags,
 		"params": map[string]string{
-			"Pid":      pidStr,
-			"Category": cidStr,
-			"Plot":     params.Plot,
-			"Area":     params.Area,
-			"Language": params.Language,
-			"Year":     yStr,
-			"Sort":     params.Sort,
+			"Pid":              pidStr,
+			"Category":         cidStr,
+			"OriginalCategory": params.OriginalCategory,
+			"Plot":             params.Plot,
+			"Area":             params.Area,
+			"Language":         params.Language,
+			"Year":             yStr,
+			"Sort":             params.Sort,
 		},
 		"page": page,
 	}, "分类影片数据获取成功", c)

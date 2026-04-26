@@ -7,6 +7,7 @@ import FilmList from "@/components/public/FilmList";
 import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
+import { buildPlayPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 function parseInitialTimeParam(value?: string): number {
@@ -25,17 +26,7 @@ function buildPlayLink(
   episodeIndex: number,
   currentTime = 0,
 ) {
-  const params = new URLSearchParams({
-    id: String(filmId),
-    source: sourceId,
-    episode: String(episodeIndex),
-  });
-
-  if (currentTime > 0) {
-    params.set("currentTime", String(Math.floor(currentTime)));
-  }
-
-  return `/play?${params.toString()}`;
+  return buildPlayPath(String(filmId), sourceId, episodeIndex, currentTime);
 }
 
 function buildInitialPlaybackState(data: any, initialTime?: string) {
@@ -54,9 +45,15 @@ interface PlayPageViewProps {
   data: any;
   filmId: string;
   initialTime?: string;
+  emptyMessage?: string;
 }
 
-export default function PlayPageView({ data, filmId, initialTime }: PlayPageViewProps) {
+export default function PlayPageView({
+  data,
+  filmId,
+  initialTime,
+  emptyMessage,
+}: PlayPageViewProps) {
   const router = useRouter();
   const { message } = useAppMessage();
   const initialPlaybackState = buildInitialPlaybackState(data, initialTime);
@@ -81,8 +78,8 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
   const episodeListRef = useRef<HTMLDivElement>(null);
   const sourceMenuRef = useRef<HTMLDivElement>(null);
 
-  const detail = data?.detail;
-  const relate = data?.relate;
+  const currentFilm = data?.detail;
+  const relatedFilms = data?.relate;
 
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
@@ -95,8 +92,8 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
     [],
   );
 
-  const viewingSource = detail?.list?.find((item: any) => item.id === viewingSourceId);
-  const playingSource = detail?.list?.find((item: any) => item.id === playingSourceId);
+  const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
+  const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
   const currentEpisodeKey =
     current && playingSourceId ? makeEpisodeKey(playingSourceId, current.index) : "";
   const visibleActiveEpisodeKey =
@@ -166,17 +163,17 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
       applyPlaybackSelection(playingSourceId, nextEpisodeIndex, nextEpisode);
     }
 
-    router.replace(`/play?id=${filmId}&source=${playingSourceId}&episode=${nextEpisodeIndex}`, {
+    router.replace(buildPlayPath(String(filmId), playingSourceId, nextEpisodeIndex), {
       scroll: false,
     });
   };
 
   const persistHistory = useCallback(
     (currentTime?: number, duration?: number) => {
-      if (!detail || !current || !playingSourceId) return;
+      if (!currentFilm || !current || !playingSourceId) return;
 
       const historyMap = readHistoryMap();
-      const historyKey = String(detail.id);
+      const historyKey = String(currentFilm.id);
       const previousRecord = historyMap[historyKey];
       const nextCurrentTime =
         typeof currentTime === "number" && Number.isFinite(currentTime)
@@ -189,15 +186,15 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
 
       historyMap[historyKey] = {
         ...(previousRecord ?? {}),
-        id: detail.id,
-        name: detail.name,
-        picture: detail.picture,
+        id: currentFilm.id,
+        name: currentFilm.name,
+        picture: currentFilm.picture,
         sourceId: playingSourceId,
         episodeIndex: current.index,
         sourceName: playingSource?.name || "默认源",
         episode: current.episode || "正在观看",
         timeStamp: Date.now(),
-        link: buildPlayLink(detail.id, playingSourceId, current.index, nextCurrentTime),
+        link: buildPlayLink(currentFilm.id, playingSourceId, current.index, nextCurrentTime),
         currentTime: nextCurrentTime,
         duration: nextDuration,
         devices: window.innerWidth <= 768,
@@ -205,7 +202,7 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
 
       writeHistoryMap(historyMap);
     },
-    [detail, current, playingSourceId, playingSource],
+    [currentFilm, current, playingSourceId, playingSource],
   );
 
   useEffect(() => {
@@ -219,41 +216,65 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
     [persistHistory],
   );
 
-  if (!data || !detail) return null;
+  if (!data || !currentFilm) {
+    return (
+      <div className={styles.emptyPage}>
+        <div className={styles.emptyCard}>
+          <div className={styles.emptyEyebrow}>Play Unavailable</div>
+          <h1 className={styles.emptyTitle}>当前内容无法播放</h1>
+          <p className={styles.emptyDescription}>
+            {emptyMessage || "未获取到影片播放数据，请返回上一页后重新尝试。"}
+          </p>
+          <div className={styles.emptyActions}>
+            <button
+              type="button"
+              className={styles.emptyPrimaryAction}
+              onClick={() => router.back()}
+            >
+              返回上一页
+            </button>
+            <button
+              type="button"
+              className={styles.emptySecondaryAction}
+              onClick={() => router.push("/")}
+            >
+              回到首页
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>
       <div className={styles.bgWrapper}>
         {/* 播放页背景图来自动态视频资源，当前不走 next/image 优化链路 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={detail.picture} className={styles.bgPoster} alt="background" />
+        <img src={currentFilm.picture} className={styles.bgPoster} alt="background" />
         <div className={styles.mask} />
       </div>
 
       <div className={styles.mainContent}>
         <div className={styles.leftColumn}>
-          <div className={styles.topInfoCard}>
-            <div className={styles.leftSection}>
-              <h1 className={styles.filmTitle}>
-                <a onClick={() => router.push(`/filmDetail?link=${detail.id}`)} style={{ cursor: "pointer" }}>
-                  {detail.name}
-                </a>
-              </h1>
+            <div className={styles.topInfoCard}>
+              <div className={styles.leftSection}>
+                <h1 className={styles.filmTitle}>{currentFilm.name}</h1>
               <div className={styles.meta}>
-                <span className={styles.active}>{detail.descriptor.remarks}</span>
+                <span className={styles.active}>{currentFilm.descriptor.remarks}</span>
                 <span>|</span>
-                <span>{detail.descriptor.cName}</span>
+                <span>{currentFilm.descriptor.cName}</span>
                 <span>|</span>
-                <span>{detail.descriptor.year}</span>
+                <span>{currentFilm.descriptor.year}</span>
                 <span>|</span>
-                <span>{detail.descriptor.area}</span>
+                <span>{currentFilm.descriptor.area}</span>
               </div>
             </div>
             <div className={styles.rightSection}>
               <div className={styles.extraInfo}>
                 <div className={styles.scoreLabel}>综合评分</div>
                 <div className={styles.scoreValue}>
-                  {detail.descriptor.score || "9.0"}
+                  {currentFilm.descriptor.score || "9.0"}
                   <span>分</span>
                 </div>
               </div>
@@ -283,7 +304,7 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
             <div className={styles.sideHeader}>
               <div className={styles.title}>正在播放</div>
               <div className={styles.subtitle}>
-                {detail.name} - {current?.episode}
+                {currentFilm.name} - {current?.episode}
               </div>
             </div>
 
@@ -305,7 +326,7 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
 
               {isSourceMenuOpen && (
                 <div className={styles.sourcePickerMenu}>
-                  {detail?.list?.map((item: any) => {
+                  {currentFilm?.list?.map((item: any) => {
                     const isViewing = viewingSourceId === item.id;
                     const isPlaying = playingSourceId === item.id;
                     const episodeCount = item.linkList?.length ?? 0;
@@ -337,7 +358,7 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
             </div>
 
             <div className={styles.sourceTabs} ref={sourceTabsRef}>
-              {detail?.list?.map((item: any) => {
+              {currentFilm?.list?.map((item: any) => {
                 const isActive = viewingSourceId === item.id;
                 return (
                   <div
@@ -370,7 +391,7 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
                       if (currentEpisodeKey === episodeKey) return;
 
                       applyPlaybackSelection(viewingSourceId, index, item);
-                      router.replace(`/play?id=${filmId}&source=${viewingSourceId}&episode=${index}`, {
+                      router.replace(buildPlayPath(String(filmId), viewingSourceId, index), {
                         scroll: false,
                       });
                     }}
@@ -425,15 +446,15 @@ export default function PlayPageView({ data, filmId, initialTime }: PlayPageView
       <div className={styles.infoArea}>
         <div className={styles.introHeading}>剧情简介</div>
         <div className={styles.intro}>
-          {detail.descriptor.content
-            ? detail.descriptor.content.replace(/<[^>]+>/g, "").trim()
+          {currentFilm.descriptor.content
+            ? currentFilm.descriptor.content.replace(/<[^>]+>/g, "").trim()
             : "暂无简介"}
         </div>
       </div>
 
       <div className={styles.recommendation}>
         <h2 className={styles.sectionTitle}>相关推荐</h2>
-        <FilmList list={relate} className={styles.classifyGrid} />
+        <FilmList list={relatedFilms} className={styles.classifyGrid} />
       </div>
     </div>
   );

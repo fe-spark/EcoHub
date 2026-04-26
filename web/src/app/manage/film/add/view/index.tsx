@@ -8,7 +8,6 @@ import {
   Select,
   Button,
   Upload,
-  Typography,
   InputNumber,
   Space,
   Spin,
@@ -30,6 +29,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageShell from "../../../components/page-shell";
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
@@ -59,43 +59,43 @@ function FilmAddForm() {
 
     if (id) {
       setFetching(true);
-      ApiGet(`/filmDetail`, { id })
+      ApiGet(`/filmPlayInfo`, { id })
         .then((resp: any) => {
           if (resp.code === 0 && resp.data?.detail) {
-            const detail = resp.data.detail;
-            const desc = detail.descriptor || {};
+            const filmData = resp.data.detail;
+            const filmDescriptor = filmData.descriptor || {};
 
             let playLinkStr = "";
-            if (detail.playList && detail.playList.length > 0) {
-              const mainList = detail.playList[0];
+            if (filmData.playList && filmData.playList.length > 0) {
+              const mainList = filmData.playList[0];
               playLinkStr = mainList
                 .map((item: any) => `${item.episode}$${item.link}`)
                 .join("#");
             }
 
             form.setFieldsValue({
-              id: detail.id,
-              cid: detail.cid,
-              pid: detail.pid,
-              name: detail.name,
-              picture: detail.picture,
-              subTitle: desc.subTitle,
-              initial: desc.initial,
-              classTag: desc.classTag,
-              director: desc.director,
-              actor: desc.actor,
-              writer: desc.writer,
-              remarks: desc.remarks,
-              releaseDate: desc.releaseDate,
-              area: desc.area,
-              lang: desc.language,
-              year: desc.year,
-              state: desc.state,
-              dbId: desc.dbId,
-              dbScore: desc.dbScore,
-              hits: desc.hits,
-              playForm: detail.playFrom?.join(",") || "",
-              content: desc.content,
+              id: filmData.id,
+              cid: filmData.cid,
+              pid: filmData.pid,
+              name: filmData.name,
+              picture: filmData.picture,
+              subTitle: filmDescriptor.subTitle,
+              initial: filmDescriptor.initial,
+              classTag: filmDescriptor.classTag,
+              director: filmDescriptor.director,
+              actor: filmDescriptor.actor,
+              writer: filmDescriptor.writer,
+              remarks: filmDescriptor.remarks,
+              releaseDate: filmDescriptor.releaseDate,
+              area: filmDescriptor.area,
+              lang: filmDescriptor.language,
+              year: filmDescriptor.year,
+              state: filmDescriptor.state,
+              dbId: filmDescriptor.dbId,
+              dbScore: filmDescriptor.dbScore,
+              hits: filmDescriptor.hits,
+              playForm: filmData.playFrom?.join(",") || "",
+              content: filmDescriptor.content,
               playLink: playLinkStr,
             });
           } else {
@@ -171,27 +171,22 @@ function FilmAddForm() {
   }
 
   return (
-    <div className={styles.container}>
-      <div className={styles.header}>
-        <div className={styles.headerLeft}>
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => router.back()}
-          >
-            返回列表
-          </Button>
-          <Typography.Title level={4} className={styles.title}>
-            {id ? "修改影片详情" : "录入新影片"}
-          </Typography.Title>
-        </div>
-        <Space size="middle">
+    <ManagePageShell
+      leading={
+        <Button
+          type="text"
+          icon={<ArrowLeftOutlined />}
+          onClick={() => router.back()}
+          className={styles.backButton}
+        >
+          返回影片列表
+        </Button>
+      }
+      title={id ? "修改影片详情" : "录入新影片"}
+      actions={
+        <Space size="middle" wrap>
           {!id && (
-            <Button
-              icon={<ClearOutlined />}
-              onClick={() => form.resetFields()}
-              style={{ fontWeight: 500 }}
-            >
+            <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
               清空重填
             </Button>
           )}
@@ -200,13 +195,14 @@ function FilmAddForm() {
             icon={<SaveOutlined />}
             onClick={() => form.submit()}
             loading={loading}
-            style={{ paddingLeft: 24, paddingRight: 24, fontWeight: 600 }}
           >
             {id ? "确认保存更新" : "立即提交"}
           </Button>
         </Space>
-      </div>
-
+      }
+      panelClassName={styles.formPanel}
+      panelless
+    >
       <Form
         form={form}
         layout="vertical"
@@ -222,7 +218,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <InfoCircleOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <InfoCircleOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 基础信息
               </Space>
             }
@@ -278,8 +276,15 @@ function FilmAddForm() {
                   <Input
                     placeholder="输入图片URL或上传"
                     addonAfter={
-                      <Upload customRequest={customUpload} showUploadList={false}>
-                        <Button icon={<UploadOutlined />} type="text" size="small">
+                      <Upload
+                        customRequest={customUpload}
+                        showUploadList={false}
+                      >
+                        <Button
+                          icon={<UploadOutlined />}
+                          type="text"
+                          size="small"
+                        >
                           上传封面
                         </Button>
                       </Upload>
@@ -376,7 +381,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <DatabaseOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <DatabaseOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 状态与外部数据
               </Space>
             }
@@ -425,7 +432,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <ContainerOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <ContainerOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 剧情详情
               </Space>
             }
@@ -445,7 +454,9 @@ function FilmAddForm() {
           <Card
             title={
               <Space>
-                <PlayCircleOutlined style={{ color: "var(--ant-color-primary)" }} />
+                <PlayCircleOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
                 播放资源
               </Space>
             }
@@ -470,7 +481,7 @@ function FilmAddForm() {
           </Card>
         </Space>
       </Form>
-    </div>
+    </ManagePageShell>
   );
 }
 

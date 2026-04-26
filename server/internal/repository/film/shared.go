@@ -11,23 +11,23 @@ import (
 
 var searchInfoUpsertUpdateColumns = []string{
 	"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
-	"area", "language", "year", "initial", "score",
-	"update_stamp", "latest_source_stamp", "hits", "state", "remarks", "db_id", "release_stamp",
-	"picture", "actor", "director", "blurb", "updated_at", "deleted_at",
+	"series_key", "area", "language", "year", "initial", "score",
+	"update_stamp", "latest_source_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp",
+	"picture", "picture_slide", "actor", "director", "blurb", "updated_at", "deleted_at",
 }
 
 var initializedPids sync.Map
 
-var defaultSortTagStrings = []string{"最新更新:latest_source_stamp", "人气:hits", "评分:score", "最新:release_stamp"}
+var defaultSortTagStrings = []string{"最近更新:latest_source_stamp", "人气:hits", "评分:score", "时间:year"}
 
-const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC"
+const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC, mid DESC"
 
 var allowedSearchSortColumns = map[string]string{
 	"latest_source_stamp": "latest_source_stamp",
 	"update_stamp":        "update_stamp",
 	"hits":                "hits",
 	"score":               "score",
-	"release_stamp":       "release_stamp",
+	"year":                "year",
 }
 
 // ExistSearchTable 检查搜索表是否存在

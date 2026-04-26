@@ -4,10 +4,19 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"net/url"
+	"strconv"
 
 	"server/internal/model"
 	"server/internal/spider/conver"
 	"server/internal/utils"
+)
+
+const (
+	categoryHintMinPages        = 1
+	categoryHintMaxPages        = 10
+	categoryHintStablePageLimit = 3
+	categoryHintTargetCoverage  = 0.7
 )
 
 /*
@@ -44,10 +53,128 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 	err := json.Unmarshal(r.Resp, &filmListPage)
 	// 获取分类列表信息
 	cl := filmListPage.Class
+	parentHints := jc.inferCategoryParents(r, cl)
 	// 组装分类数据信息树形结构
-	tree := conver.GenCategoryTree(cl)
+	tree := conver.GenCategoryTreeWithParentHints(cl, parentHints)
 
 	return tree, err
+}
+
+func (jc *JsonCollect) inferCategoryParents(r utils.RequestInfo, classes []model.FilmClass) map[int64]int64 {
+	if !needsCategoryParentInference(classes) {
+		return nil
+	}
+
+	known := make(map[int64]struct{}, len(classes))
+	for _, item := range classes {
+		known[item.ID] = struct{}{}
+	}
+
+	hints := make(map[int64]int64)
+	stablePages := 0
+	totalPages := 0
+	targetHintCount := resolveCategoryHintTarget(len(classes))
+	for page := 1; page <= categoryHintMaxPages; page++ {
+		details, pageCount, err := jc.fetchFilmDetailsPage(r, page)
+		if err != nil {
+			log.Printf("[Spider] 分类父级推断失败: page=%d err=%v", page, err)
+			continue
+		}
+		if pageCount > 0 {
+			totalPages = pageCount
+		}
+		beforeCount := len(hints)
+		for _, item := range details {
+			if item.TypeID <= 0 || item.TypeID1 <= 0 || item.TypeID == item.TypeID1 {
+				continue
+			}
+			if _, ok := known[item.TypeID]; !ok {
+				continue
+			}
+			if _, ok := known[item.TypeID1]; !ok {
+				continue
+			}
+			if existedPid, ok := hints[item.TypeID]; ok && existedPid != item.TypeID1 {
+				continue
+			}
+			hints[item.TypeID] = item.TypeID1
+		}
+
+		if len(hints) == beforeCount {
+			stablePages++
+		} else {
+			stablePages = 0
+		}
+
+		if page >= categoryHintMinPages && len(hints) >= targetHintCount && stablePages >= categoryHintStablePageLimit {
+			break
+		}
+		if totalPages > 0 && page >= totalPages {
+			break
+		}
+	}
+
+	if len(hints) == 0 {
+		return nil
+	}
+	return hints
+}
+
+func resolveCategoryHintTarget(classCount int) int {
+	if classCount <= 1 {
+		return classCount
+	}
+	target := int(float64(classCount) * categoryHintTargetCoverage)
+	if target < categoryHintMinPages {
+		return categoryHintMinPages
+	}
+	if target >= classCount {
+		return classCount - 1
+	}
+	return target
+}
+
+func needsCategoryParentInference(classes []model.FilmClass) bool {
+	if len(classes) == 0 {
+		return false
+	}
+	for _, item := range classes {
+		if item.Pid > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (jc *JsonCollect) fetchFilmDetailsPage(r utils.RequestInfo, page int) ([]model.FilmDetail, int, error) {
+	params := cloneURLValues(r.Params)
+	params.Set("ac", "detail")
+	params.Set("pg", strconv.Itoa(page))
+
+	request := utils.RequestInfo{Uri: r.Uri, Params: params, Header: r.Header}
+	utils.ApiGet(&request)
+	if len(request.Resp) == 0 {
+		if request.Err == "" {
+			request.Err = "response is empty"
+		}
+		return nil, 0, errors.New(request.Err)
+	}
+
+	pageData := model.FilmDetailLPage{}
+	if err := json.Unmarshal(request.Resp, &pageData); err != nil {
+		return nil, 0, err
+	}
+	return pageData.List, pageData.PageCount, nil
+}
+
+func cloneURLValues(src url.Values) url.Values {
+	cloned := url.Values{}
+	for key, values := range src {
+		copied := make([]string, len(values))
+		copy(copied, values)
+		cloned[key] = copied
+	}
+	return cloned
 }
 
 // GetPageCount 获取分页总页数
