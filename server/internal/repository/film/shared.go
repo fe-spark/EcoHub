@@ -18,7 +18,7 @@ var searchInfoUpsertUpdateColumns = []string{
 
 var initializedPids sync.Map
 
-var defaultSortTagStrings = []string{"最新更新:latest_source_stamp", "人气:hits", "评分:score", "最新采集:collect_stamp"}
+var defaultSortTagStrings = []string{"最近更新:latest_source_stamp", "人气:hits", "评分:score", "时间:year"}
 
 const latestUpdateOrderSQL = "COALESCE(NULLIF(latest_source_stamp, 0), update_stamp) DESC, update_stamp DESC, mid DESC"
 
@@ -27,7 +27,7 @@ var allowedSearchSortColumns = map[string]string{
 	"update_stamp":        "update_stamp",
 	"hits":                "hits",
 	"score":               "score",
-	"collect_stamp":       "collect_stamp",
+	"year":                "year",
 }
 
 // ExistSearchTable 检查搜索表是否存在

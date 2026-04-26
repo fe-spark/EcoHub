@@ -50,28 +50,43 @@ func (s *InitService) DefaultDataInit() {
 
 func clearStartupCaches() {
 	ctx := db.Cxt
-	db.Rdb.Del(ctx,
+	directKeys := []string{
+		config.CategoryTreeKey,
 		config.ActiveCategoryTreeKey,
+		config.SearchTagsVersionKey,
 		config.TVBoxConfigCacheKey,
 		config.VirtualPictureKey,
-	)
-	repository.ClearIndexPageCache()
+		config.SiteConfigBasic,
+		config.BannersKey,
+		config.CategoryVersionKey,
+	}
+	if err := db.Rdb.Del(ctx, directKeys...).Err(); err != nil {
+		log.Printf("[Init] Redis 固定键清理失败: %v", err)
+	}
 
 	patterns := []string{
 		config.SearchTags + ":*",
 		config.TVBoxList + ":*",
+		config.IndexPageCacheKey + "*",
+		"User:Token:*",
+		"TVBox:*",
+		"Category:*",
+		"Config:*",
+		"Gallery:*",
 	}
 	for _, pattern := range patterns {
 		iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
 		for iter.Next(ctx) {
-			db.Rdb.Del(ctx, iter.Val())
+			if err := db.Rdb.Del(ctx, iter.Val()).Err(); err != nil {
+				log.Printf("[Init] Redis 键删除失败 %s: %v", iter.Val(), err)
+			}
 		}
 		if err := iter.Err(); err != nil {
-			log.Printf("Redis startup cache cleanup failed for %s: %v", pattern, err)
+			log.Printf("[Init] Redis 模式清理失败 %s: %v", pattern, err)
 		}
 	}
 
-	log.Println("[Init] Redis 可重建缓存已清理")
+	log.Println("[Init] Redis 服务相关键已清空")
 }
 
 func (s *InitService) TableInit() {
