@@ -981,10 +981,14 @@ func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	return applySearchTagSort(query, st.Sort)
 }
 
+func BuildSearchInfoQueryByTags(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
+	st = normalizeSearchTagsVO(st)
+	return applySearchTagFilters(query, st)
+}
+
 func GetSearchInfosByTags(st model.SearchTagsVO, page *dto.Page) []model.SearchInfo {
 	page = ensurePage(page)
-	st = normalizeSearchTagsVO(st)
-	qw := applySearchTagFilters(db.Mdb.Model(&model.SearchInfo{}), st)
+	qw := BuildSearchInfoQueryByTags(db.Mdb.Model(&model.SearchInfo{}), st)
 
 	dto.GetPage(qw, page)
 	var sl []model.SearchInfo
