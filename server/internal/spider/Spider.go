@@ -18,8 +18,6 @@ import (
 	filmrepo "server/internal/repository/film"
 	"server/internal/spider/conver"
 	"server/internal/utils"
-
-	"golang.org/x/time/rate"
 )
 
 /*
@@ -54,15 +52,26 @@ var sourceWriteLocks sync.Map
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
-// limiters 存储各站点的限流器
-var limiters sync.Map
+// requestGates 按站点串行化外部请求，并在成功后执行冷却间隔
+var requestGates sync.Map
+
+type sourceRequestGate struct {
+	mu            sync.Mutex
+	token         chan struct{}
+	nextAllowedAt time.Time
+}
 
 func ClearLimiter(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return
 	}
-	limiters.Delete(sourceID)
+	if val, ok := requestGates.Load(sourceID); ok {
+		gate := val.(*sourceRequestGate)
+		gate.mu.Lock()
+		gate.nextAllowedAt = time.Time{}
+		gate.mu.Unlock()
+	}
 }
 
 func getSourceWriteLock(sourceID string) *sync.Mutex {
@@ -79,28 +88,88 @@ type collectTask struct {
 	reqId  string
 }
 
-// getLimiter 获取指定站点的限流器，如果不存在则基于站点的 Interval 配置创建一个
-// Interval 单位为毫秒，表示两次请求间的最小间隔
-func getLimiter(s *model.FilmSource) *rate.Limiter {
+func getSourceInterval(sourceID string, fallback *model.FilmSource) time.Duration {
+	if sourceID = strings.TrimSpace(sourceID); sourceID != "" {
+		if latest := repository.FindCollectSourceById(sourceID); latest != nil && latest.Interval > 0 {
+			return time.Duration(latest.Interval) * time.Millisecond
+		}
+	}
+	if fallback != nil && fallback.Interval > 0 {
+		return time.Duration(fallback.Interval) * time.Millisecond
+	}
+	return config.DefaultSpiderInterval * time.Millisecond
+}
+
+func getSourceRequestGate(sourceID string) *sourceRequestGate {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return &sourceRequestGate{token: make(chan struct{}, 1)}
+	}
+	if val, ok := requestGates.Load(sourceID); ok {
+		return val.(*sourceRequestGate)
+	}
+	gate := &sourceRequestGate{token: make(chan struct{}, 1)}
+	gate.token <- struct{}{}
+	actual, _ := requestGates.LoadOrStore(sourceID, gate)
+	return actual.(*sourceRequestGate)
+}
+
+func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string) (func(error), error) {
 	if s == nil {
-		return rate.NewLimiter(rate.Every(config.DefaultSpiderInterval*time.Millisecond), 1)
-	}
-	if val, ok := limiters.Load(s.Id); ok {
-		return val.(*rate.Limiter)
+		return func(error) {}, errors.New("采集站信息不存在")
 	}
 
-	// 优先使用站点配置的 Interval，否则使用全局默认配置
-	interval := int64(config.DefaultSpiderInterval)
-	if s.Interval > 0 {
-		interval = int64(s.Interval)
+	gate := getSourceRequestGate(s.Id)
+	requestedAt := time.Now()
+	log.Printf("[Spider][RateLimit] 站点 %s %s等待请求槽位 at=%d", s.Name, tag, requestedAt.UnixMilli())
+
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-gate.token:
 	}
 
-	r := rate.Every(time.Duration(interval) * time.Millisecond)
+	for {
+		gate.mu.Lock()
+		waitUntil := gate.nextAllowedAt
+		gate.mu.Unlock()
 
-	// 允许最多 1 个令牌的突发流量（Burst = 1，即严格控制间隔）
-	l := rate.NewLimiter(r, 1)
-	limiters.Store(s.Id, l)
-	return l
+		now := time.Now()
+		if waitUntil.IsZero() || !waitUntil.After(now) {
+			grantedAt := time.Now()
+			log.Printf("[Spider][RateLimit] 站点 %s %s开始请求 at=%d queue_wait_ms=%d", s.Name, tag, grantedAt.UnixMilli(), grantedAt.Sub(requestedAt).Milliseconds())
+			return func(requestErr error) {
+				gate.mu.Lock()
+				if requestErr == nil {
+					interval := getSourceInterval(s.Id, s)
+					gate.nextAllowedAt = time.Now().Add(interval)
+					log.Printf("[Spider][RateLimit] 站点 %s %s成功，进入冷却 cooldown_ms=%d next_at=%d", s.Name, tag, interval.Milliseconds(), gate.nextAllowedAt.UnixMilli())
+				} else if utils.IsRateLimitedErr(requestErr) {
+					interval := getSourceInterval(s.Id, s)
+					gate.nextAllowedAt = time.Now().Add(interval)
+					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，进入保护冷却 cooldown_ms=%d next_at=%d err=%v", s.Name, tag, interval.Milliseconds(), gate.nextAllowedAt.UnixMilli(), requestErr)
+				} else {
+					gate.nextAllowedAt = time.Time{}
+					log.Printf("[Spider][RateLimit] 站点 %s %s失败，不追加冷却 err=%v", s.Name, tag, requestErr)
+				}
+				gate.mu.Unlock()
+				gate.token <- struct{}{}
+			}, nil
+		}
+
+		cooldown := waitUntil.Sub(now)
+		log.Printf("[Spider][RateLimit] 站点 %s %s冷却中 wait_ms=%d next_at=%d", s.Name, tag, cooldown.Milliseconds(), waitUntil.UnixMilli())
+		timer := time.NewTimer(cooldown)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			gate.token <- struct{}{}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) (int, error) {
@@ -112,13 +181,18 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		default:
 		}
 
-		if err := getLimiter(s).Wait(ctx); err != nil {
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt))
+		if err != nil {
 			return 0, err
 		}
 		pageCount, err := spiderCore.GetPageCount(r)
 		if err == nil {
+			release(nil)
+			log.Printf("[Spider][RateLimit] 站点 %s 页数请求完成 attempt=%d at=%d page_count=%d", s.Name, attempt, time.Now().UnixMilli(), pageCount)
 			return pageCount, nil
 		}
+		release(err)
+		log.Printf("[Spider][RateLimit] 站点 %s 页数请求失败 attempt=%d at=%d err=%v", s.Name, attempt, time.Now().UnixMilli(), err)
 		lastErr = err
 		if attempt < pageCountRetryTimes && utils.IsRateLimitedErr(err) {
 			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
@@ -131,6 +205,10 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 
 func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 	var lastErr error
+	page := r.Params.Get("pg")
+	if page == "" {
+		page = "-"
+	}
 	for attempt := 1; attempt <= filmDetailRetryTimes; attempt++ {
 		select {
 		case <-ctx.Done():
@@ -138,16 +216,22 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		if err := getLimiter(s).Wait(ctx); err != nil {
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
+		if err != nil {
 			return nil, err
 		}
 		list, err := spiderCore.GetFilmDetail(r)
 		if err == nil && len(list) > 0 {
+			release(nil)
+			log.Printf("[Spider][RateLimit] 站点 %s 分页请求完成 pg=%s attempt=%d at=%d item_count=%d", s.Name, page, attempt, time.Now().UnixMilli(), len(list))
 			return list, nil
 		}
+		release(err)
 		if err != nil {
+			log.Printf("[Spider][RateLimit] 站点 %s 分页请求失败 pg=%s attempt=%d at=%d err=%v", s.Name, page, attempt, time.Now().UnixMilli(), err)
 			lastErr = err
 		} else {
+			log.Printf("[Spider][RateLimit] 站点 %s 分页请求空结果 pg=%s attempt=%d at=%d", s.Name, page, attempt, time.Now().UnixMilli())
 			lastErr = errors.New("response list is empty")
 		}
 		if attempt < filmDetailRetryTimes && utils.IsRateLimitedErr(lastErr) {
@@ -473,7 +557,8 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 
 // collectFilmById 采集指定ID的影片信息
 func collectFilmById(ids string, s *model.FilmSource) error {
-	if err := getLimiter(s).Wait(context.Background()); err != nil {
+	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
+	if err != nil {
 		return err
 	}
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
@@ -481,11 +566,14 @@ func collectFilmById(ids string, s *model.FilmSource) error {
 	r.Params.Set("ids", ids)
 	list, err := spiderCore.GetFilmDetail(r)
 	if err != nil {
+		release(err)
 		return fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
+		release(errors.New("response list is empty"))
 		return errors.New("get movie detail failed: response list is empty")
 	}
+	release(nil)
 	if err := saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
 		return filmrepo.SaveDetail(id, l[0])
 	}); err != nil {
