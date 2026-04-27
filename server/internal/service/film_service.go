@@ -90,13 +90,9 @@ func (s *FilmService) GetFilmClassById(id int64) *model.CategoryTree {
 	return repository.GetCategoryTreeByID(id)
 }
 
-// UpdateClass 更新分类信息
+// UpdateClass 更新分类状态
 func (s *FilmService) UpdateClass(class model.CategoryTree) error {
-	updates := make(map[string]any)
-	if class.Name != "" {
-		updates["name"] = class.Name
-	}
-	updates["show"] = class.Show
+	updates := map[string]any{"show": class.Show}
 
 	// 1. 查找旧状态以判断是否需要同步处理搜索可见性
 	oldClass := s.GetFilmClassById(class.Id)

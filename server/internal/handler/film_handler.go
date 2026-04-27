@@ -149,7 +149,7 @@ func (h *FilmHandler) FindFilmClass(c *gin.Context) {
 	dto.Success(class, "分类信息查找成功", c)
 }
 
-// UpdateFilmClass 更新指定分类的影片数据
+// UpdateFilmClass 更新指定分类的显示状态
 func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
 	var class = model.CategoryTree{}
 	if err := c.ShouldBindJSON(&class); err != nil {
@@ -164,7 +164,7 @@ func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("影片分类信息更新成功", c)
+	dto.SuccessOnlyMsg("影片分类状态更新成功", c)
 }
 
 func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
