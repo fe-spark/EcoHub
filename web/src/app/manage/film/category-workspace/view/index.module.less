@@ -1,0 +1,254 @@
+.workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.statsGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.statCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 16px;
+  background: var(--ant-color-bg-container);
+  padding: 14px 16px;
+}
+
+.statLabel {
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+  line-height: 20px;
+}
+
+.statValue {
+  color: var(--ant-color-text);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 32px;
+}
+
+.panelGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.panel {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 20px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 8%);
+  overflow: hidden;
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.panelTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.panelTitle {
+  margin: 0;
+  color: var(--ant-color-text);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.panelDescription {
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.panelActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.panelBody {
+  padding: 18px 20px 20px;
+}
+
+.treeWrap {
+  min-height: 320px;
+}
+
+.tree {
+  background: transparent;
+}
+
+.treeNode {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 14px;
+  background: var(--ant-color-bg-container);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.treeNode:hover {
+  border-color: var(--ant-color-primary-border);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.treeNodeRoot {
+  background: var(--ant-color-bg-layout);
+  border-left: 4px solid var(--ant-color-primary);
+}
+
+.treeNodeChild {
+  background: var(--ant-color-bg-container);
+}
+
+.treeNodeMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dragHandle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-quaternary);
+  cursor: grab;
+  flex-shrink: 0;
+}
+
+.treeNodeTitleBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.treeNodeTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.levelBadge {
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 12px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.levelRoot {
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.levelChild {
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-tertiary);
+}
+
+.treeNodeTitle {
+  color: var(--ant-color-text);
+  font-size: 15px;
+  font-weight: 700;
+  min-width: 0;
+}
+
+.treeNodeMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--ant-color-text-secondary);
+  font-size: 12px;
+}
+
+.treeNodeActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+
+.rulesToolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rulesGuide {
+  margin-bottom: 16px;
+}
+
+.targetMuted {
+  color: var(--ant-color-text-tertiary);
+}
+
+.previewTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 1280px) {
+  .panelGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 960px) {
+  .statsGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .panelHeader,
+  .treeNode {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .panelActions,
+  .treeNodeActions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 640px) {
+  .statsGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .panelHeader,
+  .panelBody {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+}

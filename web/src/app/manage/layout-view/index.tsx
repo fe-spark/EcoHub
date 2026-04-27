@@ -36,6 +36,7 @@ const menuItems: MenuItem[] = [
     children: [
       { key: "/manage/film", label: "影片列表" },
       { key: "/manage/film/class", label: "分类管理" },
+      { key: "/manage/film/category-workspace", label: "分类工作台" },
     ],
   },
   {
@@ -69,6 +70,9 @@ const menuItems: MenuItem[] = [
 function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";
+  }
+  if (pathname.startsWith("/manage/film/category-workspace")) {
+    return "/manage/film/category-workspace";
   }
   if (pathname.startsWith("/manage/film/class")) {
     return "/manage/film/class";
