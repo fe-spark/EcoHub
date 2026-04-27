@@ -18,9 +18,9 @@ type slaveSummaryRefreshScheduler struct {
 }
 
 type slaveSummaryRefreshState struct {
-	pending      map[int64]struct{}
-	running      bool
-	flushWaiters []chan error
+	pending  map[int64]struct{}
+	flushing bool
+	waiters  []chan error
 }
 
 func newSlaveSummaryRefreshScheduler() *slaveSummaryRefreshScheduler {
@@ -56,18 +56,10 @@ func (s *slaveSummaryRefreshScheduler) schedule(sourceID string, midSet map[int6
 	for mid := range midSet {
 		state.pending[mid] = struct{}{}
 	}
-	shouldStartWorker := !state.running
-	if shouldStartWorker {
-		state.running = true
-	}
 	pendingCount := len(state.pending)
 	s.mu.Unlock()
 
-	log.Printf("[SlaveSummaryRefresh] 入队 source=%s, added_mid=%d, pending_mid=%d, start_worker=%t", sourceID, len(midSet), pendingCount, shouldStartWorker)
-
-	if shouldStartWorker {
-		go s.runSourceWorker(sourceID)
-	}
+	log.Printf("[SlaveSummaryRefresh] 入队 source=%s, added_mid=%d, pending_mid=%d, start_worker=%t", sourceID, len(midSet), pendingCount, false)
 }
 
 func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
@@ -76,104 +68,56 @@ func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
 		return nil
 	}
 
-	ack := make(chan error, 1)
-	s.mu.Lock()
-	state := s.states[sourceID]
-	if state == nil {
-		s.mu.Unlock()
-		log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
-		return nil
-	}
-	if !state.running && len(state.pending) == 0 {
-		s.mu.Unlock()
-		log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
-		return nil
-	}
-	pendingCount := len(state.pending)
-	wasRunning := state.running
-	state.flushWaiters = append(state.flushWaiters, ack)
-	shouldStartWorker := !state.running && len(state.pending) > 0
-	if shouldStartWorker {
-		state.running = true
-	}
-	s.mu.Unlock()
-
-	log.Printf("[SlaveSummaryRefresh] Flush请求 source=%s, pending_mid=%d, running=%t, start_worker=%t", sourceID, pendingCount, wasRunning, shouldStartWorker)
-
-	if shouldStartWorker {
-		go s.runSourceWorker(sourceID)
-	}
-	return <-ack
-}
-
-func (s *slaveSummaryRefreshScheduler) runSourceWorker(sourceID string) {
-	log.Printf("[SlaveSummaryRefresh] Worker启动 source=%s", sourceID)
 	for {
-		midSet, waiters := s.takePendingBatch(sourceID)
-		if len(midSet) == 0 {
-			log.Printf("[SlaveSummaryRefresh] Worker空转退出 source=%s, waiter_count=%d", sourceID, len(waiters))
-			s.finishSourceWorker(sourceID, waiters, nil)
-			return
+		s.mu.Lock()
+		state := s.states[sourceID]
+		if state == nil {
+			s.mu.Unlock()
+			log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
+			return nil
 		}
+		if state.flushing {
+			ack := make(chan error, 1)
+			state.waiters = append(state.waiters, ack)
+			s.mu.Unlock()
+			if err := <-ack; err != nil {
+				return err
+			}
+			continue
+		}
+		if len(state.pending) == 0 {
+			s.mu.Unlock()
+			log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
+			return nil
+		}
+		pending := state.pending
+		pendingCount := len(pending)
+		state.pending = make(map[int64]struct{})
+		state.flushing = true
+		s.mu.Unlock()
 
-		if err := flushSlaveSummaryRefreshSource(sourceID, midSet); err != nil {
-			s.finishSourceWorker(sourceID, waiters, err)
-			return
-		}
-		if len(waiters) > 0 {
-			s.resolveWaiters(waiters, nil)
-		}
+		log.Printf("[SlaveSummaryRefresh] Flush请求 source=%s, pending_mid=%d, running=%t, start_worker=%t", sourceID, pendingCount, false, true)
+		err := flushSlaveSummaryRefreshSource(sourceID, pending)
+		s.finishFlush(sourceID, err)
+		return err
 	}
 }
 
-func (s *slaveSummaryRefreshScheduler) takePendingBatch(sourceID string) (map[int64]struct{}, []chan error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	state := s.states[sourceID]
-	if state == nil {
-		return nil, nil
-	}
-	if len(state.pending) == 0 {
-		waiters := state.flushWaiters
-		state.flushWaiters = nil
-		return nil, waiters
-	}
-
-	pending := state.pending
-	state.pending = make(map[int64]struct{})
-	return pending, nil
-}
-
-func (s *slaveSummaryRefreshScheduler) finishSourceWorker(sourceID string, waiters []chan error, err error) {
+func (s *slaveSummaryRefreshScheduler) finishFlush(sourceID string, err error) {
 	s.mu.Lock()
 	state := s.states[sourceID]
 	if state == nil {
 		s.mu.Unlock()
-		s.resolveWaiters(waiters, err)
 		return
 	}
-	state.running = false
-	if err != nil {
-		waiters = append(waiters, state.flushWaiters...)
-		state.flushWaiters = nil
-	}
-	shouldRestart := err == nil && len(state.pending) > 0
-	if shouldRestart {
-		state.running = true
-	}
-	if !state.running && len(state.pending) == 0 && len(state.flushWaiters) == 0 {
+	state.flushing = false
+	waiters := state.waiters
+	state.waiters = nil
+	if len(state.pending) == 0 {
 		delete(s.states, sourceID)
 	}
 	s.mu.Unlock()
 
-	s.resolveWaiters(waiters, err)
-	if shouldRestart {
-		go s.runSourceWorker(sourceID)
-	}
-}
-
-func (s *slaveSummaryRefreshScheduler) resolveWaiters(waiters []chan error, err error) {
 	for _, waiter := range waiters {
 		waiter <- err
 	}

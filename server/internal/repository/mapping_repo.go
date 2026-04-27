@@ -145,9 +145,7 @@ func CreateMappingRule(rule *model.MappingRule) error {
 	}
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) {
-		if err := RebuildCategoriesFromSourceCategories(); err != nil {
-			return err
-		}
+		TriggerRebuildCategoriesFromSourceCategoriesAsync()
 	}
 	return nil
 }
@@ -175,9 +173,7 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	}
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) || (oldRule != nil && IsCategoryMappingGroup(oldRule.Group)) {
-		if err := RebuildCategoriesFromSourceCategories(); err != nil {
-			return err
-		}
+		TriggerRebuildCategoriesFromSourceCategoriesAsync()
 	}
 	return nil
 }
@@ -192,9 +188,7 @@ func DeleteMappingRule(id uint) error {
 	}
 	ReloadMappingRules()
 	if rule != nil && IsCategoryMappingGroup(rule.Group) {
-		if err := RebuildCategoriesFromSourceCategories(); err != nil {
-			return err
-		}
+		TriggerRebuildCategoriesFromSourceCategoriesAsync()
 	}
 	return nil
 }

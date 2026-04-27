@@ -264,13 +264,7 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 }
 
 func RefreshMasterDataCaches() {
-	time.Sleep(100 * time.Millisecond)
-	if err := ForceRebuildDerivedData(); err != nil {
-		log.Printf("ForceRebuildDerivedData Error: %v", err)
-	}
-	support.InitMappingEngine()
-	support.TouchCategoryVersion()
-	support.ClearIndexPageCache()
+	markCategoryChanged()
 	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 	ClearTVBoxListCache()
 	ClearTVBoxConfigCache()
