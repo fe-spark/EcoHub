@@ -1,6 +1,9 @@
 .page {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 100%;
+  overflow: hidden;
   gap: 16px;
   padding: 0;
   background: transparent;
@@ -58,7 +61,13 @@
 .extra {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   gap: 16px;
+}
+
+.page > :last-child {
+  flex: 1;
+  min-height: 0;
 }
 
 .panel {

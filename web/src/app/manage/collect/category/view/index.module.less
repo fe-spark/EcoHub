@@ -1,10 +1,15 @@
 .workspace {
   display: flex;
   flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
   gap: 20px;
+  overflow: hidden;
 }
 
 .statsGrid {
+  flex-shrink: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
@@ -31,21 +36,27 @@
 }
 
 .panelGrid {
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
   gap: 20px;
-  align-items: start;
+  align-items: stretch;
 }
 
 .panel {
+  min-height: 0;
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 20px;
   background: var(--ant-color-bg-container);
   box-shadow: 0 12px 32px rgb(0 0 0 / 8%);
+  display: flex;
+  flex-direction: column;
   overflow: hidden;
 }
 
 .panelHeader {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -82,11 +93,14 @@
 }
 
 .panelBody {
+  flex: 1;
+  min-height: 0;
   padding: 18px 20px 20px;
+  overflow-y: auto;
 }
 
 .treeWrap {
-  min-height: 320px;
+  min-height: 100%;
 }
 
 .tree {
@@ -95,88 +109,32 @@
 
 .treeNode {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   gap: 14px;
   width: 100%;
-  padding: 10px 12px;
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 14px;
-  background: var(--ant-color-bg-container);
-  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+  min-width: 0;
 }
 
-.treeNode:hover {
-  border-color: var(--ant-color-primary-border);
-  background: var(--ant-color-fill-quaternary);
-}
-
-.treeNodeRoot {
-  background: var(--ant-color-bg-layout);
-  border-left: 4px solid var(--ant-color-primary);
-}
-
-.treeNodeChild {
-  background: var(--ant-color-bg-container);
-}
-
-.treeNodeMain {
+.treeNodeContent {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
+  flex-direction: column;
+  gap: 4px;
   min-width: 0;
   flex: 1;
 }
 
-.dragHandle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
-  color: var(--ant-color-text-secondary);
-  background: var(--ant-color-fill-quaternary);
-  cursor: grab;
-  flex-shrink: 0;
-}
-
-.treeNodeTitleBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-}
-
 .treeNodeTitleRow {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   flex-wrap: wrap;
-}
-
-.levelBadge {
-  border-radius: 999px;
-  padding: 0 10px;
-  font-size: 12px;
-  line-height: 22px;
-  font-weight: 600;
-}
-
-.levelRoot {
-  color: var(--ant-color-primary);
-  background: var(--ant-color-primary-bg);
-}
-
-.levelChild {
-  color: var(--ant-color-text-secondary);
-  background: var(--ant-color-fill-tertiary);
 }
 
 .treeNodeTitle {
   color: var(--ant-color-text);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   min-width: 0;
 }
 
@@ -220,7 +178,12 @@
 
 @media (max-width: 1280px) {
   .panelGrid {
+    min-height: auto;
     grid-template-columns: 1fr;
+  }
+
+  .panelBody {
+    overflow: visible;
   }
 }
 

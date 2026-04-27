@@ -18,13 +18,11 @@ import {
   Tree,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { TreeDataNode, TreeProps } from "antd/es/tree";
+import type { DataNode, TreeProps } from "antd/es/tree";
 import {
   DeleteOutlined,
-  EditOutlined,
   EyeInvisibleOutlined,
   EyeOutlined,
-  HolderOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
@@ -75,11 +73,15 @@ interface RuleFormValues {
   remarks?: string;
 }
 
-interface ClassTreeDataNode extends TreeDataNode {
+interface ClassTreeDataNode extends DataNode {
   key: string;
   title: string;
   rawNode: FilmClassNode;
   children?: ClassTreeDataNode[];
+}
+
+interface TreeDropNode extends ClassTreeDataNode {
+  pos: string;
 }
 
 const ROOT_GROUP = "CategoryRoot";
@@ -103,23 +105,8 @@ const groupLabelMap: Record<string, string> = {
   [SUB_GROUP]: "二级分类规则",
 };
 
-const groupHelpMap: Record<string, string[]> = {
-  [ROOT_GROUP]: [
-    "CategoryRoot = 前台一级大类，决定电影、剧集、动漫等主导航落点。",
-    "一级分类规则应该收敛成少量稳定的大类，避免把来源站的细碎分类直接暴露到前台。",
-  ],
-  [SUB_GROUP]: [
-    "CategorySub = filmClassifySearch > 类型，决定大类页内的类型筛选，如国产剧、日剧、动作片。",
-    "这里处理的是二级类型，不是前台 filmClassifySearch > 类别。",
-  ],
-};
-
 function resolveGroupLabel(group: string) {
   return groupLabelMap[group] || group;
-}
-
-function resolveGroupHelp(group: string) {
-  return groupHelpMap[group] || [];
 }
 
 function normalizeRuleRecord(record: Record<string, unknown>): MappingRuleRecord {
@@ -205,6 +192,29 @@ function reorderList<T>(items: T[], fromIndex: number, toIndex: number) {
   return next;
 }
 
+function resolveDropOffset(dropPosition: number, nodePos: string) {
+  const currentIndex = Number(nodePos.split("-").pop() || 0);
+  return dropPosition - currentIndex;
+}
+
+function moveNodeWithinList<T extends { id: number }>(items: T[], dragId: number, dropId: number, placeAfter: boolean) {
+  const fromIndex = items.findIndex((item) => item.id === dragId);
+  const targetIndex = items.findIndex((item) => item.id === dropId);
+  if (fromIndex < 0 || targetIndex < 0) {
+    return null;
+  }
+
+  let nextIndex = targetIndex + (placeAfter ? 1 : 0);
+  if (fromIndex < nextIndex) {
+    nextIndex -= 1;
+  }
+  if (fromIndex === nextIndex) {
+    return null;
+  }
+
+  return reorderList(items, fromIndex, nextIndex);
+}
+
 function buildTreeData(nodes: FilmClassNode[]): ClassTreeDataNode[] {
   return nodes.map((node) => ({
     key: buildNodeKey(node.id),
@@ -223,9 +233,9 @@ export default function CategoryWorkspacePageView() {
   const [savingTree, setSavingTree] = useState(false);
   const [resettingTree, setResettingTree] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editingItem, setEditingItem] = useState<FilmClassNode | null>(null);
-  const [editForm] = Form.useForm<{ name: string; show: boolean }>();
+  const [statusOpen, setStatusOpen] = useState(false);
+  const [statusItem, setStatusItem] = useState<FilmClassNode | null>(null);
+  const [statusForm] = Form.useForm<{ show: boolean }>();
 
   const [ruleGroup, setRuleGroup] = useState<string>(ROOT_GROUP);
   const [keyword, setKeyword] = useState("");
@@ -248,7 +258,6 @@ export default function CategoryWorkspacePageView() {
     () => JSON.stringify(serializeTree(classTree)) !== JSON.stringify(serializeTree(originalTree)),
     [classTree, originalTree],
   );
-  const selectedGroupForHelp = watchedGroup || ruleGroup || ROOT_GROUP;
   const treeData = useMemo(() => buildTreeData(classTree), [classTree]);
   const regexPreview = useMemo(() => {
     if (watchedMatchType !== "regex") {
@@ -405,35 +414,34 @@ export default function CategoryWorkspacePageView() {
     await fetchFilmClassTree();
   };
 
-  const openEditDialog = async (id: number) => {
+  const openStatusDialog = async (id: number) => {
     const resp = await ApiGet("/manage/film/class/find", { id });
     if (resp.code !== 0) {
       message.error(resp.msg || "获取分类信息失败");
       return;
     }
     const node = resp.data as FilmClassNode;
-    setEditingItem(node);
-    editForm.setFieldsValue({ name: node.name, show: node.show });
-    setEditOpen(true);
+    setStatusItem(node);
+    statusForm.setFieldsValue({ show: node.show });
+    setStatusOpen(true);
   };
 
-  const handleEditSubmit = async () => {
-    if (!editingItem) {
+  const handleStatusSubmit = async () => {
+    if (!statusItem) {
       return;
     }
-    const values = await editForm.validateFields();
+    const values = await statusForm.validateFields();
     const resp = await ApiPost("/manage/film/class/update", {
-      id: editingItem.id,
-      name: values.name,
+      id: statusItem.id,
       show: values.show,
     });
     if (resp.code !== 0) {
-      message.error(resp.msg || "更新分类失败");
+      message.error(resp.msg || "更新分类状态失败");
       return;
     }
-    message.success(resp.msg || "分类信息已更新");
-    setEditOpen(false);
-    setEditingItem(null);
+    message.success(resp.msg || "分类状态已更新");
+    setStatusOpen(false);
+    setStatusItem(null);
     await fetchFilmClassTree();
   };
 
@@ -469,30 +477,18 @@ export default function CategoryWorkspacePageView() {
   };
 
   const handleTreeDrop: TreeProps<ClassTreeDataNode>["onDrop"] = (info) => {
-    if (!info.dropToGap) {
-      return;
-    }
-
-    const dragNode = info.dragNode as ClassTreeDataNode;
-    const dropNode = info.node as ClassTreeDataNode;
+    const dragNode = info.dragNode as TreeDropNode;
+    const dropNode = info.node as TreeDropNode;
     const dragId = dragNode.rawNode.id;
     const dropId = dropNode.rawNode.id;
-    const placeAfter = info.dropPosition - Number(String(info.node.pos).split("-").pop()) > 0;
+    const dropOffset = resolveDropOffset(info.dropPosition, String(info.node.pos));
+    const placeAfter = info.dropToGap ? dropOffset > 0 : true;
 
     if (dragNode.rawNode.pid === 0 && dropNode.rawNode.pid === 0) {
-      const fromIndex = classTree.findIndex((item) => item.id === dragId);
-      const targetIndex = classTree.findIndex((item) => item.id === dropId);
-      if (fromIndex < 0 || targetIndex < 0) {
-        return;
-      }
-      let nextIndex = targetIndex + (placeAfter ? 1 : 0);
-      if (fromIndex < nextIndex) {
-        nextIndex -= 1;
-      }
-      if (fromIndex === nextIndex) {
-        return;
-      }
-      setClassTree((prev) => normalizeTree(reorderList(prev, fromIndex, nextIndex)));
+      setClassTree((prev) => {
+        const moved = moveNodeWithinList(prev, dragId, dropId, placeAfter);
+        return moved ? normalizeTree(moved) : prev;
+      });
       return;
     }
 
@@ -504,33 +500,24 @@ export default function CategoryWorkspacePageView() {
           return prev;
         }
         const siblings = root.children || [];
-        const fromIndex = siblings.findIndex((item) => item.id === dragId);
-        const targetIndex = siblings.findIndex((item) => item.id === dropId);
-        if (fromIndex < 0 || targetIndex < 0) {
+        const moved = moveNodeWithinList(siblings, dragId, dropId, placeAfter);
+        if (!moved) {
           return prev;
         }
-        let nextIndex = targetIndex + (placeAfter ? 1 : 0);
-        if (fromIndex < nextIndex) {
-          nextIndex -= 1;
-        }
-        if (fromIndex === nextIndex) {
-          return prev;
-        }
-        root.children = reorderList(siblings, fromIndex, nextIndex);
+        root.children = moved;
         return normalizeTree(next);
       });
     }
   };
 
-  const allowTreeDrop: TreeProps<ClassTreeDataNode>["allowDrop"] = ({ dragNode, dropNode, dropToGap }) => {
-    if (!dropToGap) {
-      return false;
-    }
-    const dragRaw = (dragNode as ClassTreeDataNode).rawNode;
-    const dropRaw = (dropNode as ClassTreeDataNode).rawNode;
+  const allowTreeDrop: TreeProps<ClassTreeDataNode>["allowDrop"] = ({ dragNode, dropNode }) => {
+    const dragRaw = (dragNode as TreeDropNode).rawNode;
+    const dropRaw = (dropNode as TreeDropNode).rawNode;
+
     if (dragRaw.pid === 0) {
       return dropRaw.pid === 0;
     }
+
     return dragRaw.pid > 0 && dragRaw.pid === dropRaw.pid;
   };
 
@@ -541,25 +528,18 @@ export default function CategoryWorkspacePageView() {
     const expanded = expandedKeys.includes(treeNode.key);
 
     return (
-      <div className={`${styles.treeNode} ${isRoot ? styles.treeNodeRoot : styles.treeNodeChild}`}>
-        <div className={styles.treeNodeMain}>
-          <span className={styles.dragHandle}>
-            <HolderOutlined />
-          </span>
-          <div className={styles.treeNodeTitleBlock}>
-            <div className={styles.treeNodeTitleRow}>
-              <span className={`${styles.levelBadge} ${isRoot ? styles.levelRoot : styles.levelChild}`}>
-                {isRoot ? "一级分类" : "二级分类"}
-              </span>
-              <span className={styles.treeNodeTitle}>{node.name}</span>
-              {!node.show && <Tag color="default">已隐藏</Tag>}
-              {isRoot && childCount > 0 && <Tag color="processing">{expanded ? `已展开 ${childCount}` : `已折叠 ${childCount}`}</Tag>}
-            </div>
-            <div className={styles.treeNodeMeta}>
-              <span>ID {node.id}</span>
-              <span>排序 {node.sort || 0}</span>
-              {isRoot ? <span>子分类 {childCount}</span> : <span>父级 {node.pid}</span>}
-            </div>
+      <div className={styles.treeNode}>
+        <div className={styles.treeNodeContent}>
+          <div className={styles.treeNodeTitleRow}>
+            <span className={styles.treeNodeTitle}>{node.name}</span>
+            <Tag color={isRoot ? "gold" : "blue"}>{isRoot ? "一级分类" : "二级分类"}</Tag>
+            {!node.show && <Tag>已隐藏</Tag>}
+            {isRoot && childCount > 0 && <Tag color="processing">{expanded ? `已展开 ${childCount}` : `已折叠 ${childCount}`}</Tag>}
+          </div>
+          <div className={styles.treeNodeMeta}>
+            <span>ID {node.id}</span>
+            <span>排序 {node.sort || 0}</span>
+            {isRoot ? <span>子分类 {childCount}</span> : <span>父级 {node.pid}</span>}
           </div>
         </div>
         <div className={styles.treeNodeActions} onClick={(event) => event.stopPropagation()}>
@@ -570,8 +550,8 @@ export default function CategoryWorkspacePageView() {
             checkedChildren={<EyeOutlined />}
             unCheckedChildren={<EyeInvisibleOutlined />}
           />
-          <Button size="small" icon={<EditOutlined />} onClick={() => void openEditDialog(node.id)}>
-            编辑
+          <Button size="small" onClick={() => void openStatusDialog(node.id)}>
+            状态
           </Button>
           <Popconfirm title="确认删除该分类？" okText="删除" cancelText="取消" onConfirm={() => void deleteClass(node.id)}>
             <Button size="small" danger icon={<DeleteOutlined />}>
@@ -706,9 +686,9 @@ export default function CategoryWorkspacePageView() {
 
   return (
     <ManagePageShell
-      eyebrow="内容管理"
-      title="分类工作台"
-      description="左侧维护业务分类树，右侧集中维护一级/二级分类映射规则，适合边看分类结果边调整规则。"
+      eyebrow="采集中心"
+      title="分类管理"
+      description="左侧调整分类结构和显示状态，右侧设置分类名称与归类规则。"
       extra={
         <div className={styles.statsGrid}>
           <div className={styles.statCard}>
@@ -741,9 +721,7 @@ export default function CategoryWorkspacePageView() {
             <div className={styles.panelHeader}>
               <div className={styles.panelTitleBlock}>
                 <h3 className={styles.panelTitle}>业务分类树</h3>
-                <div className={styles.panelDescription}>
-                  用 Ant Design Tree 承载拖拽排序、展开折叠、显示隐藏、编辑删除、重置与保存结构闭环。
-                </div>
+                <div className={styles.panelDescription}>左侧只负责分类层级、排序和显示状态。</div>
               </div>
               <div className={styles.panelActions}>
                 <Button icon={<ReloadOutlined />} onClick={() => void fetchFilmClassTree()} loading={loadingTree}>
@@ -770,7 +748,7 @@ export default function CategoryWorkspacePageView() {
                 <div className={styles.treeWrap}>
                   <Tree<ClassTreeDataNode>
                     blockNode
-                    draggable={{ icon: false }}
+                    draggable
                     showLine={{ showLeafIcon: false }}
                     selectable={false}
                     expandedKeys={expandedKeys}
@@ -790,7 +768,7 @@ export default function CategoryWorkspacePageView() {
             <div className={styles.panelHeader}>
               <div className={styles.panelTitleBlock}>
                 <h3 className={styles.panelTitle}>分类规则面板</h3>
-                <div className={styles.panelDescription}>仅管理 `CategoryRoot` 与 `CategorySub`，避免和其它映射规则混在一起。</div>
+                <div className={styles.panelDescription}>右侧用来设置一级分类、二级分类的名称和归类规则。</div>
               </div>
               <div className={styles.panelActions}>
                 <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
@@ -799,21 +777,6 @@ export default function CategoryWorkspacePageView() {
               </div>
             </div>
             <div className={styles.panelBody}>
-              <div className={styles.rulesGuide}>
-                <Alert
-                  type="info"
-                  showIcon
-                  message="规则提示与前端对应"
-                  description={
-                    <div>
-                      {resolveGroupHelp(selectedGroupForHelp).map((item) => (
-                        <div key={item}>{item}</div>
-                      ))}
-                      <div>类别 = `filmClassifySearch &gt; 类别`，不是分类规则的分组。</div>
-                    </div>
-                  }
-                />
-              </div>
               <div className={styles.rulesToolbar}>
                 <Select
                   value={ruleGroup}
@@ -866,30 +829,30 @@ export default function CategoryWorkspacePageView() {
       </Modal>
 
       <Modal
-        title="更新分类信息"
-        open={editOpen}
+        title="更新分类状态"
+        open={statusOpen}
         okText="保存"
         cancelText="取消"
-        onOk={() => void handleEditSubmit()}
+        onOk={() => void handleStatusSubmit()}
         onCancel={() => {
-          setEditOpen(false);
-          setEditingItem(null);
+          setStatusOpen(false);
+          setStatusItem(null);
         }}
       >
-        <Form form={editForm} layout="vertical">
-          <Form.Item name="name" label="分类名称" rules={[{ required: true, message: "请输入分类名称" }]}>
-            <Input placeholder="请输入分类名称" />
-          </Form.Item>
+        <Form form={statusForm} layout="vertical">
           <Form.Item label="分类层级">
-            {editingItem?.pid ? <Tag color="blue">二级分类</Tag> : <Tag color="gold">一级分类</Tag>}
+            {statusItem?.pid ? <Tag color="blue">二级分类</Tag> : <Tag color="gold">一级分类</Tag>}
+          </Form.Item>
+          <Form.Item label="当前分类名">
+            <Tag>{statusItem?.name || "-"}</Tag>
           </Form.Item>
           <Form.Item name="show" label="展示状态" valuePropName="checked">
             <Switch checkedChildren="展示" unCheckedChildren="隐藏" />
           </Form.Item>
-          {!!editingItem?.children?.length && (
+          {!!statusItem?.children?.length && (
             <Form.Item label="当前子分类">
               <Space wrap>
-                {editingItem.children.map((child) => (
+                {statusItem.children.map((child) => (
                   <Tag key={child.id}>{child.name}</Tag>
                 ))}
               </Space>
@@ -932,15 +895,6 @@ export default function CategoryWorkspacePageView() {
             <Form.Item name="target" label="目标值" rules={[{ required: true, message: "请输入目标值" }]}>
               <Input placeholder="如：剧集、动漫、国产剧、日剧、动作片" />
             </Form.Item>
-          </Card>
-
-          <Card size="small" title="规则提示与前端对应" style={{ marginBottom: 16 }}>
-            <Space direction="vertical" size={8}>
-              {resolveGroupHelp(selectedGroupForHelp).map((item) => (
-                <div key={item}>{item}</div>
-              ))}
-              <div>类别 = `filmClassifySearch &gt; 类别`，不是分类规则分组。</div>
-            </Space>
           </Card>
 
           {conflictRules.length > 0 && (

@@ -35,8 +35,6 @@ const menuItems: MenuItem[] = [
     label: "内容管理",
     children: [
       { key: "/manage/film", label: "影片列表" },
-      { key: "/manage/film/class", label: "分类管理" },
-      { key: "/manage/film/category-workspace", label: "分类工作台" },
     ],
   },
   {
@@ -45,6 +43,7 @@ const menuItems: MenuItem[] = [
     label: "采集中心",
     children: [
       { key: "/manage/collect", label: "采集站点" },
+      { key: "/manage/collect/category", label: "分类管理" },
       { key: "/manage/collect/record", label: "失败记录" },
       { key: "/manage/cron", label: "计划任务" },
     ],
@@ -61,7 +60,6 @@ const menuItems: MenuItem[] = [
     children: [
       { key: "/manage/system/website", label: "网站配置" },
       { key: "/manage/system/banners", label: "首页封面" },
-      { key: "/manage/system/mapping-rules", label: "映射规则" },
       { key: "/manage/system/users", label: "账号管理" },
     ],
   },
@@ -71,11 +69,8 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";
   }
-  if (pathname.startsWith("/manage/film/category-workspace")) {
-    return "/manage/film/category-workspace";
-  }
-  if (pathname.startsWith("/manage/film/class")) {
-    return "/manage/film/class";
+  if (pathname.startsWith("/manage/collect/category")) {
+    return "/manage/collect/category";
   }
   if (pathname.startsWith("/manage/film")) {
     return "/manage/film";
@@ -94,9 +89,6 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/system/banners")) {
     return "/manage/system/banners";
-  }
-  if (pathname.startsWith("/manage/system/mapping-rules")) {
-    return "/manage/system/mapping-rules";
   }
   if (pathname.startsWith("/manage/system/users")) {
     return "/manage/system/users";
