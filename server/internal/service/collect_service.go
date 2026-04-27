@@ -50,21 +50,26 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	masterLookup := old.Grade == model.SlaveCollect && source.Grade == model.MasterCollect
 	// 情况B: 依然是主站，但 URI 发生变更
 	masterUriChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && old.Uri != source.Uri
+	// 情况C: 原来是主站，现在降级为附属站
+	masterDowngrade := old.Grade == model.MasterCollect && source.Grade != model.MasterCollect
 
-	if masterLookup || masterUriChanged {
-		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v)，进行数据重置...", masterLookup, masterUriChanged)
+	if masterLookup || masterUriChanged || masterDowngrade {
+		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v, downgrade=%v)，进行数据重置...", masterLookup, masterUriChanged, masterDowngrade)
 		// 强制中断所有任务（双重保险）
 		spider.StopAllTasks()
 	}
 
-	affectedSourceIDs := make([]string, 0, len(masters)+1)
+	affectedSourceIDs := make([]string, 0, len(masters)+2)
 	for _, master := range masters {
 		affectedSourceIDs = append(affectedSourceIDs, master.Id)
 	}
 	affectedSourceIDs = append(affectedSourceIDs, source.Id)
+	if masterDowngrade {
+		affectedSourceIDs = append(affectedSourceIDs, old.Id)
+	}
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
+		if masterLookup {
 			if err := filmrepo.DeletePlaylistBySourceIdTx(tx, source.Id); err != nil {
 				log.Printf("[Collect] 清理站点 %s 的旧有播放列表失败: %v", source.Name, err)
 				return errors.New("清理新主站旧附属站数据失败，请重试")
@@ -76,7 +81,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			}
 		}
 
-		if masterLookup || masterUriChanged {
+		if masterLookup || masterUriChanged || masterDowngrade {
 			if err := filmrepo.ClearMasterDataBySourceIDsTx(tx, affectedSourceIDs...); err != nil {
 				log.Printf("[Collect] 主站切换数据清理失败: %v", err)
 				return errors.New("主站切换数据清理失败，请重试")
@@ -94,7 +99,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		spider.StopTask(source.Id)
 	}
 
-	if masterLookup || masterUriChanged {
+	if masterLookup || masterUriChanged || masterDowngrade {
 		filmrepo.RefreshMasterDataCaches()
 		if source.Grade == model.MasterCollect && source.State {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {

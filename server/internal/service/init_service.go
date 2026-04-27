@@ -8,7 +8,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -39,9 +38,6 @@ func (s *InitService) DefaultDataInit() {
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
 	repository.InitBuiltinAccounts()
-	if err := filmrepo.ForceRebuildDerivedData(); err != nil {
-		log.Printf("[Init] 强制重建派生数据失败: %v", err)
-	}
 
 	s.BasicConfigInit()
 	s.BannersInit()
@@ -160,9 +156,11 @@ func (s *InitService) BannersInit() {
 
 func (s *InitService) SpiderInit() {
 	s.FilmSourceInit()
-	if err := SpiderSvc.SyncMasterCategoryTree(); err != nil {
-		log.Printf("[Init] 主站分类同步跳过: %v", err)
-	}
+	go func() {
+		if err := SpiderSvc.SyncMasterCategoryTree(); err != nil {
+			log.Printf("[Init] 主站分类同步跳过: %v", err)
+		}
+	}()
 	s.CollectCrontabInit()
 }
 

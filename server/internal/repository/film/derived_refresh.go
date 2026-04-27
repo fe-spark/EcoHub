@@ -24,9 +24,9 @@ type derivedRefreshScheduler struct {
 
 type derivedRefreshState struct {
 	pending       map[int64]struct{}
-	running       bool
+	flushing      bool
 	lastVisibleAt time.Time
-	flushWaiters  []chan error
+	waiters       []chan error
 }
 
 func newDerivedRefreshScheduler() *derivedRefreshScheduler {
@@ -59,20 +59,13 @@ func (s *derivedRefreshScheduler) schedule(sourceID string, pidSet map[int64]boo
 	if shouldInvalidateVisibleCaches {
 		state.lastVisibleAt = now
 	}
-	shouldStartWorker := !state.running
-	if shouldStartWorker {
-		state.running = true
-	}
 	pendingCount := len(state.pending)
 	s.mu.Unlock()
 
-	log.Printf("[DerivedRefresh] 入队 source=%s, added_pid=%d, pending_pid=%d, start_worker=%t", sourceID, len(pidSet), pendingCount, shouldStartWorker)
+	log.Printf("[DerivedRefresh] 入队 source=%s, added_pid=%d, pending_pid=%d, start_worker=%t", sourceID, len(pidSet), pendingCount, false)
 
 	if shouldInvalidateVisibleCaches {
 		invalidateDerivedVisibleCaches()
-	}
-	if shouldStartWorker {
-		go s.runSourceWorker(sourceID)
 	}
 }
 
@@ -82,104 +75,56 @@ func (s *derivedRefreshScheduler) flush(sourceID string) error {
 		return nil
 	}
 
-	ack := make(chan error, 1)
-	s.mu.Lock()
-	state := s.states[sourceID]
-	if state == nil {
-		s.mu.Unlock()
-		log.Printf("[DerivedRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
-		return nil
-	}
-	if !state.running && len(state.pending) == 0 {
-		s.mu.Unlock()
-		log.Printf("[DerivedRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
-		return nil
-	}
-	pendingCount := len(state.pending)
-	wasRunning := state.running
-	state.flushWaiters = append(state.flushWaiters, ack)
-	shouldStartWorker := !state.running && len(state.pending) > 0
-	if shouldStartWorker {
-		state.running = true
-	}
-	s.mu.Unlock()
-
-	log.Printf("[DerivedRefresh] Flush请求 source=%s, pending_pid=%d, running=%t, start_worker=%t", sourceID, pendingCount, wasRunning, shouldStartWorker)
-
-	if shouldStartWorker {
-		go s.runSourceWorker(sourceID)
-	}
-	return <-ack
-}
-
-func (s *derivedRefreshScheduler) runSourceWorker(sourceID string) {
-	log.Printf("[DerivedRefresh] Worker启动 source=%s", sourceID)
 	for {
-		pidSet, waiters := s.takePendingBatch(sourceID)
-		if len(pidSet) == 0 {
-			log.Printf("[DerivedRefresh] Worker空转退出 source=%s, waiter_count=%d", sourceID, len(waiters))
-			s.finishSourceWorker(sourceID, waiters, nil)
-			return
+		s.mu.Lock()
+		state := s.states[sourceID]
+		if state == nil {
+			s.mu.Unlock()
+			log.Printf("[DerivedRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
+			return nil
 		}
+		if state.flushing {
+			ack := make(chan error, 1)
+			state.waiters = append(state.waiters, ack)
+			s.mu.Unlock()
+			if err := <-ack; err != nil {
+				return err
+			}
+			continue
+		}
+		if len(state.pending) == 0 {
+			s.mu.Unlock()
+			log.Printf("[DerivedRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
+			return nil
+		}
+		pending := state.pending
+		pendingCount := len(pending)
+		state.pending = make(map[int64]struct{})
+		state.flushing = true
+		s.mu.Unlock()
 
-		if err := flushDerivedRefreshSource(sourceID, pidSet); err != nil {
-			s.finishSourceWorker(sourceID, waiters, err)
-			return
-		}
-		if len(waiters) > 0 {
-			s.resolveWaiters(waiters, nil)
-		}
+		log.Printf("[DerivedRefresh] Flush请求 source=%s, pending_pid=%d, running=%t, start_worker=%t", sourceID, pendingCount, false, true)
+		err := flushDerivedRefreshSource(sourceID, pending)
+		s.finishFlush(sourceID, err)
+		return err
 	}
 }
 
-func (s *derivedRefreshScheduler) takePendingBatch(sourceID string) (map[int64]struct{}, []chan error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	state := s.states[sourceID]
-	if state == nil {
-		return nil, nil
-	}
-	if len(state.pending) == 0 {
-		waiters := state.flushWaiters
-		state.flushWaiters = nil
-		return nil, waiters
-	}
-
-	pending := state.pending
-	state.pending = make(map[int64]struct{})
-	return pending, nil
-}
-
-func (s *derivedRefreshScheduler) finishSourceWorker(sourceID string, waiters []chan error, err error) {
+func (s *derivedRefreshScheduler) finishFlush(sourceID string, err error) {
 	s.mu.Lock()
 	state := s.states[sourceID]
 	if state == nil {
 		s.mu.Unlock()
-		s.resolveWaiters(waiters, err)
 		return
 	}
-	state.running = false
-	if err != nil {
-		waiters = append(waiters, state.flushWaiters...)
-		state.flushWaiters = nil
-	}
-	shouldRestart := err == nil && len(state.pending) > 0
-	if shouldRestart {
-		state.running = true
-	}
-	if !state.running && len(state.pending) == 0 && len(state.flushWaiters) == 0 {
+	state.flushing = false
+	waiters := state.waiters
+	state.waiters = nil
+	if len(state.pending) == 0 {
 		delete(s.states, sourceID)
 	}
 	s.mu.Unlock()
 
-	s.resolveWaiters(waiters, err)
-	if shouldRestart {
-		go s.runSourceWorker(sourceID)
-	}
-}
-
-func (s *derivedRefreshScheduler) resolveWaiters(waiters []chan error, err error) {
 	for _, waiter := range waiters {
 		waiter <- err
 	}
@@ -222,7 +167,7 @@ func flushDerivedRefreshSource(sourceID string, pidSet map[int64]struct{}) error
 
 	log.Printf("[DerivedRefresh] 开始刷新 source=%s, pid_count=%d", sourceID, len(pids))
 	clearSearchInfoCachesByPidSet(pidSet)
-	if err := RebuildSearchTagsByPids(pids...); err != nil {
+	if err := RefreshSearchTagsByPids(pids...); err != nil {
 		return err
 	}
 	log.Printf("[DerivedRefresh] 刷新完成 source=%s, pid_count=%d", sourceID, len(pids))

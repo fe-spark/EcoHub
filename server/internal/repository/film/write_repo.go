@@ -346,15 +346,15 @@ func BatchHandleSearchTag(infos ...model.SearchInfo) {
 	for pid := range collectSearchTagPids(infos) {
 		pids = append(pids, pid)
 	}
-	if err := RebuildSearchTagsByPids(pids...); err != nil {
-		log.Printf("RebuildSearchTagsByPids Error: %v", err)
+	if err := RefreshSearchTagsByPids(pids...); err != nil {
+		log.Printf("RefreshSearchTagsByPids Error: %v", err)
 		return
 	}
 
 	ClearAllSearchTagsCache()
 }
 
-func RebuildSearchTagsByPids(pids ...int64) error {
+func normalizeOrderedPids(pids []int64) []int64 {
 	pidSet := make(map[int64]struct{}, len(pids))
 	orderedPids := make([]int64, 0, len(pids))
 	for _, pid := range pids {
@@ -367,43 +367,46 @@ func RebuildSearchTagsByPids(pids ...int64) error {
 		pidSet[pid] = struct{}{}
 		orderedPids = append(orderedPids, pid)
 	}
+	return orderedPids
+}
+
+func rebuildSearchTagsOnlyByPidsTx(tx *gorm.DB, orderedPids []int64) error {
+	if len(orderedPids) == 0 {
+		return nil
+	}
+
+	var infos []model.SearchInfo
+	if err := tx.Where("pid IN ?", orderedPids).Find(&infos).Error; err != nil {
+		return err
+	}
+
+	if err := tx.Unscoped().Where("pid IN ?", orderedPids).Delete(&model.SearchTagItem{}).Error; err != nil {
+		return err
+	}
+
+	for _, pid := range orderedPids {
+		initializedPids.Delete(pid)
+		if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
+			return err
+		}
+	}
+
+	for _, info := range infos {
+		if err := handleDynamicSearchTagsTx(tx, info); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func RefreshSearchTagsByPids(pids ...int64) error {
+	orderedPids := normalizeOrderedPids(pids)
 	if len(orderedPids) == 0 {
 		return nil
 	}
 
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		rebuiltInfos, err := rebuildSearchInfosFromMovieDetailsTx(tx, orderedPids)
-		if err != nil {
-			return err
-		}
-		if len(rebuiltInfos) == 0 {
-			log.Printf("[RebuildSearchTagsByPids] 未找到可重建的事实详情数据: pids=%v", orderedPids)
-			return nil
-		}
-		if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
-			return err
-		}
-		if err := RefreshPlayFromSummaryBySearchInfosTx(tx, rebuiltInfos); err != nil {
-			return err
-		}
-
-		if err := tx.Unscoped().Where("pid IN ?", orderedPids).Delete(&model.SearchTagItem{}).Error; err != nil {
-			return err
-		}
-
-		for _, pid := range orderedPids {
-			initializedPids.Delete(pid)
-			if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
-				return err
-			}
-		}
-
-		for _, info := range rebuiltInfos {
-			if err := handleDynamicSearchTagsTx(tx, info); err != nil {
-				return err
-			}
-		}
-		return nil
+		return rebuildSearchTagsOnlyByPidsTx(tx, orderedPids)
 	}); err != nil {
 		return err
 	}
@@ -414,7 +417,138 @@ func RebuildSearchTagsByPids(pids ...int64) error {
 	return nil
 }
 
+func rebuildSearchInfosByPidsTx(tx *gorm.DB, orderedPids []int64) ([]model.SearchInfo, error) {
+	if len(orderedPids) == 0 {
+		return nil, nil
+	}
+	rebuiltInfos, err := rebuildSearchInfosFromMovieDetailsTx(tx, orderedPids)
+	if err != nil {
+		return nil, err
+	}
+	if len(rebuiltInfos) == 0 {
+		log.Printf("[RebuildSearchTagsByPids] 未找到可重建的事实详情数据: pids=%v", orderedPids)
+		return nil, nil
+	}
+	if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
+		return nil, err
+	}
+	return rebuiltInfos, nil
+}
+
+func RebuildSearchTagsByPids(pids ...int64) error {
+	orderedPids := normalizeOrderedPids(pids)
+	if len(orderedPids) == 0 {
+		return nil
+	}
+
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if _, err := rebuildSearchInfosByPidsTx(tx, orderedPids); err != nil {
+			return err
+		}
+		return rebuildSearchTagsOnlyByPidsTx(tx, orderedPids)
+	}); err != nil {
+		return err
+	}
+
+	for _, pid := range orderedPids {
+		ClearSearchTagsCache(pid)
+	}
+	return nil
+}
+
+var (
+	rebuildMu      sync.Mutex
+	rebuilding     bool
+	rebuildDirty   bool
+)
+
 func ForceRebuildDerivedData() error {
+	rebuildMu.Lock()
+	rebuildDirty = true
+	if rebuilding {
+		rebuildMu.Unlock()
+		log.Println("[DerivedRebuild] 重建进行中，已标记补跑")
+		return nil
+	}
+	rebuilding = true
+	rebuildMu.Unlock()
+	log.Println("[DerivedRebuild] 已触发异步重建派生数据")
+	go runDerivedRebuildWorker()
+	return nil
+}
+
+func rebuildAllDerivedSearchInfosTx(tx *gorm.DB) ([]model.SearchInfo, error) {
+	rebuiltInfos, err := rebuildAllSearchInfosFromMovieDetailsTx(tx)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchInfo{}).Error; err != nil {
+		return nil, err
+	}
+	if len(rebuiltInfos) == 0 {
+		return nil, nil
+	}
+	if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
+		return nil, err
+	}
+	return rebuiltInfos, nil
+}
+
+func rebuildAllPlayFromSummariesTx(tx *gorm.DB, infos []model.SearchInfo) error {
+	if len(infos) == 0 {
+		return nil
+	}
+	return RefreshPlayFromSummaryBySearchInfosTx(tx, infos)
+}
+
+func rebuildAllSearchTagsTx(tx *gorm.DB, rootPids []int64, infos []model.SearchInfo) error {
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
+		return err
+	}
+
+	for _, info := range infos {
+		if err := handleDynamicSearchTagsTx(tx, info); err != nil {
+			return err
+		}
+	}
+
+	initializedPids = sync.Map{}
+	for _, pid := range rootPids {
+		if pid <= 0 {
+			continue
+		}
+		if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func runDerivedRebuildWorker() {
+	for {
+		rebuildMu.Lock()
+		if !rebuildDirty {
+			rebuilding = false
+			rebuildMu.Unlock()
+			return
+		}
+		rebuildDirty = false
+		rebuildMu.Unlock()
+
+		log.Println("[DerivedRebuild] 开始异步重建派生数据")
+		if err := forceRebuildDerivedDataSync(); err != nil {
+			log.Printf("[DerivedRebuild] 异步重建派生数据失败: %v", err)
+			rebuildMu.Lock()
+			rebuildDirty = true
+			rebuildMu.Unlock()
+			time.Sleep(time.Second)
+			continue
+		}
+		log.Println("[DerivedRebuild] 异步重建派生数据完成")
+	}
+}
+
+func forceRebuildDerivedDataSync() error {
 	refreshCategoryCaches()
 
 	var rootPids []int64
@@ -423,55 +557,15 @@ func ForceRebuildDerivedData() error {
 	}
 
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
-			return err
-		}
-
-		rebuiltInfos, err := rebuildAllSearchInfosFromMovieDetailsTx(tx)
+		rebuiltInfos, err := rebuildAllDerivedSearchInfosTx(tx)
 		if err != nil {
 			return err
 		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchInfo{}).Error; err != nil {
+		if err := rebuildAllPlayFromSummariesTx(tx, rebuiltInfos); err != nil {
 			return err
 		}
-		if len(rebuiltInfos) > 0 {
-			if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
-				return err
-			}
-			if err := RefreshPlayFromSummaryBySearchInfosTx(tx, rebuiltInfos); err != nil {
-				return err
-			}
-			for _, info := range rebuiltInfos {
-				if err := handleDynamicSearchTagsTx(tx, info); err != nil {
-					return err
-				}
-			}
-		}
-
-		initializedPids = sync.Map{}
-		for _, pid := range rootPids {
-			if pid <= 0 {
-				continue
-			}
-			if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
-				return err
-			}
-		}
-		return nil
+		return rebuildAllSearchTagsTx(tx, rootPids, rebuiltInfos)
 	})
-}
-
-type rebuildSearchInfoRow struct {
-	Mid             int64
-	ContentKey      string
-	SourceId        string
-	PlayFromSummary string
-	Pid             int64
-	Cid             int64
-	CName           string
-	RootCategoryKey string
-	CategoryKey     string
-	DetailContent   string
 }
 
 func rebuildSearchInfosFromMovieDetailsTx(tx *gorm.DB, pids []int64) ([]model.SearchInfo, error) {
@@ -492,34 +586,35 @@ func rebuildAllSearchInfosFromMovieDetailsTx(tx *gorm.DB) ([]model.SearchInfo, e
 }
 
 func rebuildSearchInfosFromMovieDetailsByPidSetTx(tx *gorm.DB, pidSet map[int64]struct{}) ([]model.SearchInfo, error) {
-	var rows []rebuildSearchInfoRow
-	if err := tx.Model(&model.SearchInfo{}).
-		Select("search_info.mid, search_info.content_key, search_info.source_id, search_info.play_from_summary, search_info.pid, search_info.cid, search_info.c_name, search_info.root_category_key, search_info.category_key, movie_detail_info.content AS detail_content").
-		Joins("JOIN movie_detail_info ON movie_detail_info.mid = search_info.mid").
-		Scan(&rows).Error; err != nil {
+	var detailInfos []model.MovieDetailInfo
+	if err := tx.Find(&detailInfos).Error; err != nil {
 		return nil, err
 	}
-	if len(rows) == 0 {
-		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 未命中 search_info 与 movie_detail_info 关联数据")
+	if len(detailInfos) == 0 {
+		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 未命中 movie_detail_info 事实数据")
 		return nil, nil
 	}
 
-	rebuiltInfos := make([]model.SearchInfo, 0, len(rows))
-	for _, row := range rows {
-		if strings.TrimSpace(row.DetailContent) == "" {
-			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情内容为空: mid=%d source=%s", row.Mid, row.SourceId)
+	rebuiltInfos := make([]model.SearchInfo, 0, len(detailInfos))
+	for _, item := range detailInfos {
+		if strings.TrimSpace(item.Content) == "" {
+			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情内容为空: mid=%d source=%s", item.Mid, item.SourceId)
 			continue
 		}
 
 		var detail model.MovieDetail
-		if err := json.Unmarshal([]byte(row.DetailContent), &detail); err != nil {
-			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情反序列化失败: mid=%d source=%s err=%v", row.Mid, row.SourceId, err)
+		if err := json.Unmarshal([]byte(item.Content), &detail); err != nil {
+			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情反序列化失败: mid=%d source=%s err=%v", item.Mid, item.SourceId, err)
 			continue
 		}
 
-		category := resolveSearchCategory(row.SourceId, detail)
-		if category.Pid <= 0 && row.Pid > 0 {
-			category = resolveLocalCategory(row.Pid, row.Cid, row.CName)
+		if detail.Id <= 0 {
+			detail.Id = item.Mid
+		}
+
+		category := resolveSearchCategory(item.SourceId, detail)
+		if category.Pid <= 0 {
+			category = resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
 		}
 		if len(pidSet) > 0 {
 			if _, ok := pidSet[category.Pid]; !ok {
@@ -527,26 +622,14 @@ func rebuildSearchInfosFromMovieDetailsByPidSetTx(tx *gorm.DB, pidSet map[int64]
 			}
 		}
 		meta := normalizeSearchMetadata(detail, category)
-		rebuilt := buildSearchInfo(row.SourceId, detail, category, meta)
-		rebuilt.Mid = row.Mid
-		rebuilt.ContentKey = row.ContentKey
-		rebuilt.SourceId = row.SourceId
-		rebuilt.PlayFromSummary = row.PlayFromSummary
-		rebuilt.CName = category.CName
-		if rebuilt.RootCategoryKey == "" {
-			rebuilt.RootCategoryKey = row.RootCategoryKey
-		}
-		if rebuilt.RootCategoryKey == "" {
-			rebuilt.RootCategoryKey = category.PKey
-		}
-		if rebuilt.CategoryKey == "" {
-			rebuilt.CategoryKey = row.CategoryKey
-		}
-		if rebuilt.CategoryKey == "" {
-			rebuilt.CategoryKey = category.CKey
-		}
+		rebuilt := buildSearchInfo(item.SourceId, detail, category, meta)
+		rebuilt.Mid = item.Mid
 
 		if rebuilt.Pid <= 0 {
+			continue
+		}
+		if strings.TrimSpace(rebuilt.ContentKey) == "" {
+			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 内容指纹为空: mid=%d source=%s", item.Mid, item.SourceId)
 			continue
 		}
 		rebuiltInfos = append(rebuiltInfos, rebuilt)
