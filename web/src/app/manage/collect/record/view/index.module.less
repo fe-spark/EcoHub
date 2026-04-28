@@ -1,31 +1,50 @@
-.container {
-  padding: 0;
-  background: transparent;
-}
-
-.tablePanel {
-  padding: 0;
-}
-
-.filterBar {
+.pageBody {
   display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tableHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-  padding: 16px;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 12px;
 }
 
-.toolbar {
+.tableTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 32px;
+}
+
+.tableActions {
   display: flex;
-  justify-content: flex-start;
-  gap: 8px;
-  padding: 16px 0 0;
+  flex-wrap: wrap;
+}
+
+.filterSelect {
+  width: 160px;
+}
+
+.statusSelect {
+  width: 120px;
 }
 
 .pagination {
   display: flex;
   justify-content: flex-end;
-  padding: 16px 0;
+}
+
+@media (max-width: 1200px) {
+  .tableActions {
+    width: 100%;
+  }
+}
+
+@media (max-width: 768px) {
+  .filterSelect,
+  .statusSelect {
+    width: 100%;
+  }
 }

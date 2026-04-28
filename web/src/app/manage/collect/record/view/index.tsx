@@ -21,7 +21,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -199,55 +199,53 @@ export default function FailureRecordPageView() {
   ];
 
   return (
-    <ManagePageShell
-      eyebrow="采集中心"
-      title="失败记录"
-      description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
-      extra={
-        <div className={styles.filterBar}>
-          <Select
-            placeholder="采集来源"
-            value={params.originId || undefined}
-            onChange={(v) => setParams({ ...params, originId: v })}
-            options={options.origin?.map((o: any) => ({
-              label: o.name,
-              value: o.value,
-            }))}
-            style={{ width: 160 }}
-            allowClear
-          />
-          <Select
-            placeholder="记录状态"
-            value={params.status}
-            onChange={(v) => setParams({ ...params, status: v })}
-            options={options.status?.map((o: any) => ({
-              label: o.name,
-              value: o.value,
-            }))}
-            style={{ width: 120 }}
-          />
-          <RangePicker
-            showTime
-            onChange={(dates) => {
-              if (dates && dates[0] && dates[1]) {
-                setParams({
-                  ...params,
-                  beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
-                  endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
-                });
-              } else {
-                setParams({ ...params, beginTime: "", endTime: "" });
-              }
-            }}
-          />
-          <Button type="primary" onClick={() => getRecords()}>
-            查询
-          </Button>
-        </div>
-      }
-      panelClassName={styles.tablePanel}
-      panelless
-    >
+    <div className={styles.pageBody}>
+      <ManagePageHeader
+        title="失败记录"
+        description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
+      />
+
+      <Space size={[8, 8]} wrap>
+        <Select
+          placeholder="采集来源"
+          value={params.originId || undefined}
+          onChange={(v) => setParams({ ...params, originId: v })}
+          options={options.origin?.map((o: any) => ({
+            label: o.name,
+            value: o.value,
+          }))}
+          className={styles.filterSelect}
+          allowClear
+        />
+        <Select
+          placeholder="记录状态"
+          value={params.status}
+          onChange={(v) => setParams({ ...params, status: v })}
+          options={options.status?.map((o: any) => ({
+            label: o.name,
+            value: o.value,
+          }))}
+          className={styles.statusSelect}
+        />
+        <RangePicker
+          showTime
+          onChange={(dates) => {
+            if (dates && dates[0] && dates[1]) {
+              setParams({
+                ...params,
+                beginTime: dates[0].format("YYYY-MM-DD HH:mm:ss"),
+                endTime: dates[1].format("YYYY-MM-DD HH:mm:ss"),
+              });
+            } else {
+              setParams({ ...params, beginTime: "", endTime: "" });
+            }
+          }}
+        />
+        <Button type="primary" onClick={() => getRecords()}>
+          查询
+        </Button>
+      </Space>
+
       <Table
         columns={columns}
         dataSource={records}
@@ -257,49 +255,52 @@ export default function FailureRecordPageView() {
         size="middle"
         pagination={false}
         scroll={{ x: "max-content" }}
-      />
-
-      <div className={styles.toolbar}>
-        <Space>
-          <Popconfirm title="确认重试所有失效记录？" onConfirm={handleRetryAll}>
-            <Button type="primary" icon={<ReloadOutlined />}>
-              全部重试
-            </Button>
-          </Popconfirm>
-          <Popconfirm title="确认清除已处理记录？" onConfirm={handleCleanDone}>
-            <Button
-              icon={<WarningOutlined />}
-              style={{
-                color: "var(--ant-color-warning)",
-                borderColor: "var(--ant-color-warning)",
+        title={() => (
+          <div className={styles.tableHeader}>
+            <div className={styles.tableTitle}>失败记录列表</div>
+            <Space size={[8, 8]} wrap className={styles.tableActions}>
+              <Popconfirm title="确认重试所有失效记录？" onConfirm={handleRetryAll}>
+                <Button type="primary" icon={<ReloadOutlined />}>
+                  全部重试
+                </Button>
+              </Popconfirm>
+              <Popconfirm title="确认清除已处理记录？" onConfirm={handleCleanDone}>
+                <Button
+                  icon={<WarningOutlined />}
+                  style={{
+                    color: "var(--ant-color-warning)",
+                    borderColor: "var(--ant-color-warning)",
+                  }}
+                >
+                  清除已处理
+                </Button>
+              </Popconfirm>
+              <Popconfirm title="确认清除所有记录？" onConfirm={handleCleanAll}>
+                <Button danger icon={<DeleteOutlined />}>
+                  清除所有
+                </Button>
+              </Popconfirm>
+            </Space>
+          </div>
+        )}
+        footer={() => (
+          <div className={styles.pagination}>
+            <Pagination
+              current={page.current}
+              pageSize={page.pageSize}
+              total={page.total}
+              showSizeChanger
+              showTotal={(total) => `共 ${total} 条`}
+              pageSizeOptions={[10, 20, 50, 100, 500]}
+              onChange={(current, pageSize) => {
+                const newPage = { ...page, current, pageSize };
+                setPage(newPage);
+                getRecords(newPage);
               }}
-            >
-              清除已处理
-            </Button>
-          </Popconfirm>
-          <Popconfirm title="确认清除所有记录？" onConfirm={handleCleanAll}>
-            <Button danger icon={<DeleteOutlined />}>
-              清除所有
-            </Button>
-          </Popconfirm>
-        </Space>
-      </div>
-
-      <div className={styles.pagination}>
-        <Pagination
-          current={page.current}
-          pageSize={page.pageSize}
-          total={page.total}
-          showSizeChanger
-          showTotal={(total) => `共 ${total} 条`}
-          pageSizeOptions={[10, 20, 50, 100, 500]}
-          onChange={(current, pageSize) => {
-            const newPage = { ...page, current, pageSize };
-            setPage(newPage);
-            getRecords(newPage);
-          }}
-        />
-      </div>
-    </ManagePageShell>
+            />
+          </div>
+        )}
+      />
+    </div>
   );
 }

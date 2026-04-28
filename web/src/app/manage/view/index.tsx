@@ -12,7 +12,7 @@ import {
 import { ApiGet } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
-import ManagePageShell from "../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { Title, Text } = Typography;
@@ -31,35 +31,34 @@ export default function ManagePageView() {
   }, []);
 
   return (
-    <ManagePageShell
-      eyebrow="工作台"
-      title="管理后台"
-      description="先完成站点与采集配置，再整理分类和影片内容，最后补充图片素材与首页展示资源。"
-      panelless
-    >
-      <div className={styles.dashboard}>
-        <Card className={styles.welcomeCard}>
-          <Space direction="vertical" size={8}>
-            <Tag color="processing" className={styles.tag}>
-              快速开始
-            </Tag>
-            <Title level={4} className={styles.sectionTitle}>
-              {welcomeText}
-            </Title>
-            <Text className={styles.mutedText}>
-              如果你是第一次进入后台，建议按下面的顺序完成初始化，这样后面的分类、采集和影片管理都会更顺。
-            </Text>
-          </Space>
-        </Card>
+    <div className={styles.dashboard}>
+      <ManagePageHeader
+        title="管理后台"
+        description="先完成站点与采集配置，再整理分类和影片内容，最后补充图片素材与首页展示资源。"
+      />
 
-        <Row gutter={[16, 16]}>
-          <Col xs={24} lg={12}>
-            <Card className={styles.guideCard}>
-              <Space
-                direction="vertical"
-                size={16}
-                className={styles.fullWidth}
-              >
+      <Card className={styles.welcomeCard}>
+        <Space direction="vertical" size={8}>
+          <Tag color="processing" className={styles.tag}>
+            快速开始
+          </Tag>
+          <Title level={4} className={styles.sectionTitle}>
+            {welcomeText}
+          </Title>
+          <Text className={styles.mutedText}>
+            如果你是第一次进入后台，建议按下面的顺序完成初始化，这样后面的分类、采集和影片管理都会更顺。
+          </Text>
+        </Space>
+      </Card>
+
+      <Row gutter={[16, 16]}>
+        <Col xs={24} lg={12}>
+          <Card className={styles.guideCard}>
+            <Space
+              direction="vertical"
+              size={16}
+              className={styles.fullWidth}
+            >
                 <div className={styles.cardHeader}>
                   <SettingOutlined className={styles.cardIcon} />
                   <div>
@@ -123,9 +122,9 @@ export default function ManagePageView() {
                     </div>
                   </div>
                 </div>
-              </Space>
-            </Card>
-          </Col>
+            </Space>
+          </Card>
+        </Col>
 
           <Col xs={24} lg={12}>
             <Card className={styles.guideCard}>
@@ -188,7 +187,6 @@ export default function ManagePageView() {
             </Card>
           </Col>
         </Row>
-      </div>
-    </ManagePageShell>
+    </div>
   );
 }

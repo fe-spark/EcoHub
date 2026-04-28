@@ -1,0 +1,37 @@
+.header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+}
+
+.content {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.title {
+  margin: 0 !important;
+}
+
+.actions {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: end;
+  align-content: start;
+  gap: 8px;
+}
+
+@media (max-width: 768px) {
+  .header {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    justify-content: start;
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+  }
+}

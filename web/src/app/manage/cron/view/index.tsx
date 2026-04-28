@@ -6,7 +6,8 @@ import { EditOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
+import styles from "./index.module.less";
 
 interface CronTask {
   id: string;
@@ -140,6 +141,7 @@ export default function CronManagePageView() {
       key: "action",
       align: "center",
       width: 70,
+      fixed: "right",
       render: (_, record) => (
         <Tooltip title="修改时间">
           <Button
@@ -155,12 +157,12 @@ export default function CronManagePageView() {
   ];
 
   return (
-    <ManagePageShell
-      eyebrow="采集中心"
-      title="计划任务"
-      description="统一维护后台自动更新、采集重试和清理类计划任务。"
-      panelless
-    >
+    <div className={styles.pageStack}>
+      <ManagePageHeader
+        title="计划任务"
+        description="统一维护后台自动更新、采集重试和清理类计划任务。"
+      />
+
       <Table
         columns={columns}
         dataSource={taskList}
@@ -170,6 +172,7 @@ export default function CronManagePageView() {
         size="middle"
         pagination={false}
         scroll={{ x: 900 }}
+        title={() => <div className={styles.tableTitle}>任务列表</div>}
       />
 
       <Modal
@@ -194,6 +197,6 @@ export default function CronManagePageView() {
           </Form.Item>
         </Form>
       </Modal>
-    </ManagePageShell>
+    </div>
   );
 }

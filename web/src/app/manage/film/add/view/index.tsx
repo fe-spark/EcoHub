@@ -14,6 +14,8 @@ import {
   Card,
   Row,
   Col,
+  Divider,
+  Flex,
 } from "antd";
 import {
   UploadOutlined,
@@ -29,7 +31,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
@@ -171,38 +173,16 @@ function FilmAddForm() {
   }
 
   return (
-    <ManagePageShell
-      leading={
-        <Button
-          type="text"
-          icon={<ArrowLeftOutlined />}
-          onClick={() => router.back()}
-          className={styles.backButton}
-        >
-          返回影片列表
-        </Button>
-      }
-      title={id ? "修改影片详情" : "录入新影片"}
-      actions={
-        <Space size="middle" wrap>
-          {!id && (
-            <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
-              清空重填
-            </Button>
-          )}
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            onClick={() => form.submit()}
-            loading={loading}
-          >
-            {id ? "确认保存更新" : "立即提交"}
-          </Button>
-        </Space>
-      }
-      panelClassName={styles.formPanel}
-      panelless
-    >
+    <div className={styles.pageStack}>
+      <ManagePageHeader
+        title={id ? "修改影片详情" : "录入新影片"}
+        description={
+          id
+            ? "修改主库存影片详情与播放资源。"
+            : "手动录入主库存影片信息、剧情详情与播放资源。"
+        }
+      />
+
       <Form
         form={form}
         layout="vertical"
@@ -214,90 +194,90 @@ function FilmAddForm() {
         }}
         requiredMark="optional"
       >
-        <Space direction="vertical" size={32} style={{ width: "100%" }}>
-          <Card
-            title={
-              <Space>
-                <InfoCircleOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                基础信息
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Row gutter={[40, 0]} className={styles.formRow}>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item
-                  label="影片名称"
-                  name="name"
-                  rules={[{ required: true, message: "请输入名称" }]}
-                >
-                  <Input placeholder="请输入影片名称" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="影片别名" name="subTitle">
-                  <Input placeholder="如: 英文名、又名" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item
-                  label="所属分类"
-                  name="cid"
-                  rules={[{ required: true, message: "请选择分类" }]}
-                >
-                  <Select
-                    placeholder="请选择"
-                    onChange={handleClassChange}
-                    options={categories.map((c: any) => ({
-                      label: c.name,
-                      value: c.id,
-                    }))}
+        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+            <Card
+              title={
+                <Space>
+                  <InfoCircleOutlined
+                    style={{ color: "var(--ant-color-primary)" }}
                   />
+                  基础信息
+                </Space>
+              }
+              className={styles.sectionCard}
+              styles={{
+                header: {
+                  background: "rgba(255, 255, 255, 0.02)",
+                  borderBottom: "1px solid var(--ant-color-border-secondary)",
+                },
+              }}
+            >
+              <Row gutter={[40, 0]} className={styles.formRow}>
+                <Col xs={24} lg={12} xl={8}>
+                  <Form.Item
+                    label="影片名称"
+                    name="name"
+                    rules={[{ required: true, message: "请输入名称" }]}
+                  >
+                    <Input placeholder="请输入影片名称" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} lg={12} xl={8}>
+                  <Form.Item label="影片别名" name="subTitle">
+                    <Input placeholder="如: 英文名、又名" />
+                  </Form.Item>
+                </Col>
+                <Col xs={24} lg={12} xl={8}>
+                  <Form.Item
+                    label="所属分类"
+                    name="cid"
+                    rules={[{ required: true, message: "请选择分类" }]}
+                  >
+                    <Select
+                      placeholder="请选择"
+                      onChange={handleClassChange}
+                      options={categories.map((c: any) => ({
+                        label: c.name,
+                        value: c.id,
+                      }))}
+                    />
+                  </Form.Item>
+                </Col>
+
+                <Form.Item name="pid" hidden>
+                  <Input />
                 </Form.Item>
-              </Col>
+                <Form.Item name="cName" hidden>
+                  <Input />
+                </Form.Item>
 
-              <Form.Item name="pid" hidden>
-                <Input />
-              </Form.Item>
-              <Form.Item name="cName" hidden>
-                <Input />
-              </Form.Item>
-
-              <Col xs={24} lg={12} xl={16}>
-                <Form.Item label="影片海报" name="picture">
-                  <Input
-                    placeholder="输入图片URL或上传"
-                    addonAfter={
-                      <Upload
-                        customRequest={customUpload}
-                        showUploadList={false}
-                      >
-                        <Button
-                          icon={<UploadOutlined />}
-                          type="text"
-                          size="small"
+                <Col xs={24} lg={12} xl={16}>
+                  <Form.Item label="影片海报" name="picture">
+                    <Input
+                      placeholder="输入图片URL或上传"
+                      addonAfter={
+                        <Upload
+                          customRequest={customUpload}
+                          showUploadList={false}
                         >
-                          上传封面
-                        </Button>
-                      </Upload>
-                    }
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
+                          <Button
+                            icon={<UploadOutlined />}
+                            type="text"
+                            size="small"
+                          >
+                            上传封面
+                          </Button>
+                        </Upload>
+                      }
+                    />
+                  </Form.Item>
+                </Col>
+              </Row>
+            </Card>
 
-          <Card
-            title={
-              <Space>
+            <Card
+              title={
+                <Space>
                 <UserOutlined style={{ color: "var(--ant-color-primary)" }} />
                 演职人员
               </Space>
@@ -468,20 +448,47 @@ function FilmAddForm() {
               },
             }}
           >
-            <Form.Item
-              name="playLink"
-              noStyle
-              extra="格式: 章节$链接 (多个以 # 分隔)"
-            >
+              <Form.Item
+                name="playLink"
+                noStyle
+                extra="格式: 章节$链接 (多个以 # 分隔)"
+              >
               <TextArea
                 rows={8}
                 placeholder="示例: &#10;第01集$https://url/1.m3u8#第02集$https://url/2.m3u8"
               />
             </Form.Item>
           </Card>
+
+          <Divider className={styles.formDivider} />
+          <Flex justify="space-between" align="center" wrap="wrap" gap={12}>
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => router.back()}
+              className={styles.backButton}
+            >
+              返回影片列表
+            </Button>
+            <Space wrap>
+              {!id ? (
+                <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
+                  清空重填
+                </Button>
+              ) : null}
+              <Button
+                type="primary"
+                icon={<SaveOutlined />}
+                onClick={() => form.submit()}
+                loading={loading}
+              >
+                {id ? "确认保存更新" : "立即提交"}
+              </Button>
+            </Space>
+          </Flex>
         </Space>
       </Form>
-    </ManagePageShell>
+    </div>
   );
 }
 

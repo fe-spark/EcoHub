@@ -5,20 +5,46 @@
 }
 
 .formPanel {
-  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .form {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
-.sectionCard {
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  width: 100%;
+.formBody {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px 0 0;
 }
 
-.formRow {
-  padding: 8px 0;
+.formGrid3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.formGrid2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+@media (max-width: 1200px) {
+  .formGrid3 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 768px) {
+  .formGrid3,
+  .formGrid2 {
+    grid-template-columns: 1fr;
+  }
 }

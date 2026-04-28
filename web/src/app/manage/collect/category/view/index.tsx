@@ -1,228 +1,39 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  Alert,
-  Button,
-  Card,
-  Empty,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
-  Select,
-  Space,
-  Switch,
-  Table,
-  Tag,
-  Tree,
-} from "antd";
+import { Button, Card, Descriptions, Form, Input, Modal, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { DataNode, TreeProps } from "antd/es/tree";
-import {
-  DeleteOutlined,
-  EyeInvisibleOutlined,
-  EyeOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  SaveOutlined,
-} from "@ant-design/icons";
-import ManagePageShell from "@/app/manage/components/page-shell";
+import type { TreeProps } from "antd/es/tree";
+import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageHeader from "@/app/manage/components/page-header";
+import CategoryTreeCard from "./category-tree-card";
+import RuleEditorModal from "./rule-editor-modal";
 import styles from "./index.module.less";
-
-interface FilmClassNode {
-  id: number;
-  pid: number;
-  name: string;
-  alias?: string;
-  show: boolean;
-  sort?: number;
-  children?: FilmClassNode[];
-}
-
-interface MappingRuleRecord {
-  id: number;
-  group: string;
-  raw: string;
-  target: string;
-  matchType: string;
-  remarks: string;
-}
-
-interface PagingState {
-  current: number;
-  pageSize: number;
-  total: number;
-}
-
-interface ConflictCheckResult {
-  id: number;
-  group: string;
-  raw: string;
-  target: string;
-  matchType: string;
-}
-
-interface RuleFormValues {
-  group: string;
-  raw: string;
-  target: string;
-  matchType: "exact" | "regex";
-  remarks?: string;
-}
-
-interface ClassTreeDataNode extends DataNode {
-  key: string;
-  title: string;
-  rawNode: FilmClassNode;
-  children?: ClassTreeDataNode[];
-}
-
-interface TreeDropNode extends ClassTreeDataNode {
-  pos: string;
-}
-
-const ROOT_GROUP = "CategoryRoot";
-const SUB_GROUP = "CategorySub";
-const CATEGORY_GROUPS = [ROOT_GROUP, SUB_GROUP];
-const regexPreviewSamples = [
-  "电视剧",
-  "连续剧",
-  "国产剧",
-  "日本剧",
-  "日剧",
-  "国漫",
-  "国产动漫",
-  "日韩综艺",
-  "体育赛事",
-  "篮球",
-];
-
-const groupLabelMap: Record<string, string> = {
-  [ROOT_GROUP]: "一级分类规则",
-  [SUB_GROUP]: "二级分类规则",
-};
-
-function resolveGroupLabel(group: string) {
-  return groupLabelMap[group] || group;
-}
-
-function normalizeRuleRecord(record: Record<string, unknown>): MappingRuleRecord {
-  return {
-    id: Number(record.id ?? record.ID ?? 0),
-    group: String(record.group ?? record.Group ?? ""),
-    raw: String(record.raw ?? record.Raw ?? ""),
-    target: String(record.target ?? record.Target ?? ""),
-    matchType: String(record.matchType ?? record.MatchType ?? "exact"),
-    remarks: String(record.remarks ?? record.Remarks ?? ""),
-  };
-}
-
-function normalizeTree(nodes: FilmClassNode[], parentId = 0): FilmClassNode[] {
-  return nodes.map((node, index) => ({
-    ...node,
-    pid: parentId,
-    sort: index + 1,
-    children: normalizeTree(node.children || [], node.id),
-  }));
-}
-
-function cloneTree(nodes: FilmClassNode[]): FilmClassNode[] {
-  return nodes.map((node) => ({
-    ...node,
-    children: cloneTree(node.children || []),
-  }));
-}
-
-function flattenTree(nodes: FilmClassNode[]): FilmClassNode[] {
-  return nodes.flatMap((node) => [node, ...flattenTree(node.children || [])]);
-}
-
-function collectStats(nodes: FilmClassNode[]) {
-  const flat = flattenTree(nodes);
-  return {
-    total: flat.length,
-    roots: nodes.length,
-    children: flat.filter((node) => node.pid > 0).length,
-    hidden: flat.filter((node) => !node.show).length,
-  };
-}
-
-function serializeTree(nodes: FilmClassNode[]) {
-  return nodes.map((node) => ({
-    id: node.id,
-    name: node.name,
-    children: serializeTree(node.children || []),
-  }));
-}
-
-function buildNodeKey(id: number) {
-  return `node-${id}`;
-}
-
-function parseNodeKey(key: React.Key) {
-  return Number(String(key).replace("node-", "") || 0);
-}
-
-function parseRuleList(resp: Record<string, any>, current: number, pageSize: number) {
-  const data = resp?.data || {};
-  const list = Array.isArray(data.list)
-    ? data.list
-    : Array.isArray(data.records)
-      ? data.records
-      : Array.isArray(data.items)
-        ? data.items
-        : [];
-  return {
-    rules: list.map((item: Record<string, unknown>) => normalizeRuleRecord(item)),
-    paging: {
-      current: Number(data.current ?? data.page ?? current),
-      pageSize: Number(data.pageSize ?? data.size ?? pageSize),
-      total: Number(data.total ?? list.length),
-    } satisfies PagingState,
-  };
-}
-
-function reorderList<T>(items: T[], fromIndex: number, toIndex: number) {
-  const next = items.slice();
-  const [moved] = next.splice(fromIndex, 1);
-  next.splice(toIndex, 0, moved);
-  return next;
-}
-
-function resolveDropOffset(dropPosition: number, nodePos: string) {
-  const currentIndex = Number(nodePos.split("-").pop() || 0);
-  return dropPosition - currentIndex;
-}
-
-function moveNodeWithinList<T extends { id: number }>(items: T[], dragId: number, dropId: number, placeAfter: boolean) {
-  const fromIndex = items.findIndex((item) => item.id === dragId);
-  const targetIndex = items.findIndex((item) => item.id === dropId);
-  if (fromIndex < 0 || targetIndex < 0) {
-    return null;
-  }
-
-  let nextIndex = targetIndex + (placeAfter ? 1 : 0);
-  if (fromIndex < nextIndex) {
-    nextIndex -= 1;
-  }
-  if (fromIndex === nextIndex) {
-    return null;
-  }
-
-  return reorderList(items, fromIndex, nextIndex);
-}
-
-function buildTreeData(nodes: FilmClassNode[]): ClassTreeDataNode[] {
-  return nodes.map((node) => ({
-    key: buildNodeKey(node.id),
-    title: node.name,
-    rawNode: node,
-    children: buildTreeData(node.children || []),
-  }));
-}
+import {
+  CATEGORY_GROUPS,
+  ROOT_GROUP,
+  SUB_GROUP,
+  buildTreeData,
+  cloneTree,
+  collectStats,
+  removeTreeNode,
+  normalizeRuleRecord,
+  normalizeTree,
+  parseRuleList,
+  resolveDropOffset,
+  resolveGroupLabel,
+  serializeTree,
+  moveNodeWithinList,
+  type ClassTreeDataNode,
+  type ConflictCheckResult,
+  type FilmClassNode,
+  type MappingRuleRecord,
+  type PagingState,
+  type RuleFormValues,
+  type TreeDropNode,
+} from "./types";
 
 export default function CategoryWorkspacePageView() {
   const { message } = useAppMessage();
@@ -233,9 +44,6 @@ export default function CategoryWorkspacePageView() {
   const [savingTree, setSavingTree] = useState(false);
   const [resettingTree, setResettingTree] = useState(false);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
-  const [statusOpen, setStatusOpen] = useState(false);
-  const [statusItem, setStatusItem] = useState<FilmClassNode | null>(null);
-  const [statusForm] = Form.useForm<{ show: boolean }>();
 
   const [ruleGroup, setRuleGroup] = useState<string>(ROOT_GROUP);
   const [keyword, setKeyword] = useState("");
@@ -259,6 +67,8 @@ export default function CategoryWorkspacePageView() {
     [classTree, originalTree],
   );
   const treeData = useMemo(() => buildTreeData(classTree), [classTree]);
+  const hiddenStatus = stats.hidden === 0 ? "正常" : `待检查 ${stats.hidden}`;
+  const ruleSummary = `${ruleTotals[ROOT_GROUP] || 0} / ${ruleTotals[SUB_GROUP] || 0}`;
   const regexPreview = useMemo(() => {
     if (watchedMatchType !== "regex") {
       return { valid: true, matches: [] as string[], error: "" };
@@ -269,9 +79,10 @@ export default function CategoryWorkspacePageView() {
     }
     try {
       const tester = new RegExp(source);
+      const samples = ["电视剧", "连续剧", "国产剧", "日本剧", "日剧", "国漫", "国产动漫", "日韩综艺", "体育赛事", "篮球"];
       return {
         valid: true,
-        matches: regexPreviewSamples.filter((item) => tester.test(item)),
+        matches: samples.filter((item) => tester.test(item)),
         error: "",
       };
     } catch (error) {
@@ -380,11 +191,7 @@ export default function CategoryWorkspacePageView() {
           matchType,
         });
         if (resp.code === 0) {
-          const list = Array.isArray(resp.data?.rules)
-            ? resp.data.rules
-            : Array.isArray(resp.data)
-              ? resp.data
-              : [];
+          const list = Array.isArray(resp.data?.rules) ? resp.data.rules : Array.isArray(resp.data) ? resp.data : [];
           setConflictRules(list.map((item: Record<string, unknown>) => normalizeRuleRecord(item)));
         }
       } finally {
@@ -393,57 +200,6 @@ export default function CategoryWorkspacePageView() {
     }, 250);
     return () => window.clearTimeout(timer);
   }, [editorVisible, editingRule?.id, watchedGroup, watchedRaw, watchedMatchType]);
-
-  const changeClassState = async (id: number, show: boolean) => {
-    const resp = await ApiPost("/manage/film/class/update", { id, show });
-    if (resp.code !== 0) {
-      message.error(resp.msg || "更新分类状态失败");
-      return;
-    }
-    message.success(resp.msg || "分类状态已更新");
-    await fetchFilmClassTree();
-  };
-
-  const deleteClass = async (id: number) => {
-    const resp = await ApiPost("/manage/film/class/del", { id: String(id) });
-    if (resp.code !== 0) {
-      message.error(resp.msg || "删除分类失败");
-      return;
-    }
-    message.success(resp.msg || "分类已删除");
-    await fetchFilmClassTree();
-  };
-
-  const openStatusDialog = async (id: number) => {
-    const resp = await ApiGet("/manage/film/class/find", { id });
-    if (resp.code !== 0) {
-      message.error(resp.msg || "获取分类信息失败");
-      return;
-    }
-    const node = resp.data as FilmClassNode;
-    setStatusItem(node);
-    statusForm.setFieldsValue({ show: node.show });
-    setStatusOpen(true);
-  };
-
-  const handleStatusSubmit = async () => {
-    if (!statusItem) {
-      return;
-    }
-    const values = await statusForm.validateFields();
-    const resp = await ApiPost("/manage/film/class/update", {
-      id: statusItem.id,
-      show: values.show,
-    });
-    if (resp.code !== 0) {
-      message.error(resp.msg || "更新分类状态失败");
-      return;
-    }
-    message.success(resp.msg || "分类状态已更新");
-    setStatusOpen(false);
-    setStatusItem(null);
-    await fetchFilmClassTree();
-  };
 
   const handleResetConfirm = async () => {
     setResettingTree(true);
@@ -466,14 +222,19 @@ export default function CategoryWorkspacePageView() {
     try {
       const resp = await ApiPost("/manage/film/class/tree/save", { children: classTree });
       if (resp.code !== 0) {
-        message.error(resp.msg || "保存分类排序失败");
+        message.error(resp.msg || "保存分类变更失败");
         return;
       }
-      message.success(resp.msg || "分类排序已保存");
+      message.success(resp.msg || "分类变更已保存");
       await fetchFilmClassTree();
     } finally {
       setSavingTree(false);
     }
+  };
+
+  const queueDeleteClass = (id: number) => {
+    setClassTree((prev) => normalizeTree(removeTreeNode(prev, id)));
+    message.success("删除操作已加入待保存变更");
   };
 
   const handleTreeDrop: TreeProps<ClassTreeDataNode>["onDrop"] = (info) => {
@@ -513,54 +274,10 @@ export default function CategoryWorkspacePageView() {
   const allowTreeDrop: TreeProps<ClassTreeDataNode>["allowDrop"] = ({ dragNode, dropNode }) => {
     const dragRaw = (dragNode as TreeDropNode).rawNode;
     const dropRaw = (dropNode as TreeDropNode).rawNode;
-
     if (dragRaw.pid === 0) {
       return dropRaw.pid === 0;
     }
-
     return dragRaw.pid > 0 && dragRaw.pid === dropRaw.pid;
-  };
-
-  const renderTreeNode = (treeNode: ClassTreeDataNode) => {
-    const node = treeNode.rawNode;
-    const isRoot = node.pid === 0;
-    const childCount = node.children?.length || 0;
-    const expanded = expandedKeys.includes(treeNode.key);
-
-    return (
-      <div className={styles.treeNode}>
-        <div className={styles.treeNodeContent}>
-          <div className={styles.treeNodeTitleRow}>
-            <span className={styles.treeNodeTitle}>{node.name}</span>
-            <Tag color={isRoot ? "gold" : "blue"}>{isRoot ? "一级分类" : "二级分类"}</Tag>
-            {!node.show && <Tag>已隐藏</Tag>}
-            {isRoot && childCount > 0 && <Tag color="processing">{expanded ? `已展开 ${childCount}` : `已折叠 ${childCount}`}</Tag>}
-          </div>
-          <div className={styles.treeNodeMeta}>
-            <span>ID {node.id}</span>
-            <span>排序 {node.sort || 0}</span>
-            {isRoot ? <span>子分类 {childCount}</span> : <span>父级 {node.pid}</span>}
-          </div>
-        </div>
-        <div className={styles.treeNodeActions} onClick={(event) => event.stopPropagation()}>
-          <Switch
-            size="small"
-            checked={node.show}
-            onChange={(checked) => void changeClassState(node.id, checked)}
-            checkedChildren={<EyeOutlined />}
-            unCheckedChildren={<EyeInvisibleOutlined />}
-          />
-          <Button size="small" onClick={() => void openStatusDialog(node.id)}>
-            状态
-          </Button>
-          <Popconfirm title="确认删除该分类？" okText="删除" cancelText="取消" onConfirm={() => void deleteClass(node.id)}>
-            <Button size="small" danger icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
-        </div>
-      </div>
-    );
   };
 
   const openCreateModal = () => {
@@ -580,7 +297,10 @@ export default function CategoryWorkspacePageView() {
     ruleForm.resetFields();
   };
 
-  const applyEditorValues = () => {
+  const applyEditorValues = (open: boolean) => {
+    if (!open) {
+      return;
+    }
     if (editingRule) {
       ruleForm.setFieldsValue({
         group: editingRule.group,
@@ -619,7 +339,7 @@ export default function CategoryWorkspacePageView() {
       }
       message.success(resp.msg || "分类规则已保存");
       closeRuleEditor();
-      await Promise.all([fetchRules(paging.current, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()]);
+      await Promise.all([fetchRules(paging.current, paging.pageSize, keyword, ruleGroup), fetchRuleTotals(), fetchFilmClassTree()]);
     } finally {
       setRulesSubmitting(false);
     }
@@ -633,7 +353,7 @@ export default function CategoryWorkspacePageView() {
     }
     message.success(resp.msg || "分类规则已删除");
     const nextPage = paging.current > 1 && rules.length === 1 ? paging.current - 1 : paging.current;
-    await Promise.all([fetchRules(nextPage, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()]);
+    await Promise.all([fetchRules(nextPage, paging.pageSize, keyword, ruleGroup), fetchRuleTotals(), fetchFilmClassTree()]);
   };
 
   const ruleColumns: ColumnsType<MappingRuleRecord> = [
@@ -646,7 +366,7 @@ export default function CategoryWorkspacePageView() {
     {
       title: "原始值",
       dataIndex: "raw",
-      render: (value: string) => <strong>{value}</strong>,
+      render: (value: string) => <Typography.Text strong>{value}</Typography.Text>,
     },
     {
       title: "匹配方式",
@@ -658,17 +378,18 @@ export default function CategoryWorkspacePageView() {
       title: "目标值",
       dataIndex: "target",
       render: (value: string) =>
-        value ? <Tag color="processing">{value}</Tag> : <span className={styles.targetMuted}>未设置</span>,
+        value ? <Tag color="processing">{value}</Tag> : <Typography.Text type="secondary">未设置</Typography.Text>,
     },
     {
       title: "说明",
       dataIndex: "remarks",
-      render: (value: string) => value || <span className={styles.targetMuted}>暂无说明</span>,
+      render: (value: string) => value || <Typography.Text type="secondary">暂无说明</Typography.Text>,
     },
     {
       title: "操作",
       key: "action",
       width: 140,
+      fixed: "right",
       render: (_, record) => (
         <Space size={8}>
           <Button type="link" size="small" onClick={() => openEditRuleModal(record)}>
@@ -685,135 +406,92 @@ export default function CategoryWorkspacePageView() {
   ];
 
   return (
-    <ManagePageShell
-      eyebrow="采集中心"
-      title="分类管理"
-      description="左侧调整分类结构和显示状态，右侧设置分类名称与归类规则。"
-      extra={
-        <div className={styles.statsGrid}>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>分类总数</div>
-            <div className={styles.statValue}>{stats.total}</div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>一级分类 / 二级分类</div>
-            <div className={styles.statValue}>
-              {stats.roots} / {stats.children}
-            </div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>隐藏分类</div>
-            <div className={styles.statValue}>{stats.hidden}</div>
-          </div>
-          <div className={styles.statCard}>
-            <div className={styles.statLabel}>一级规则 / 二级规则</div>
-            <div className={styles.statValue}>
-              {ruleTotals[ROOT_GROUP] || 0} / {ruleTotals[SUB_GROUP] || 0}
-            </div>
-          </div>
-        </div>
-      }
-      panelless
-    >
-      <div className={styles.workspace}>
-        <div className={styles.panelGrid}>
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div className={styles.panelTitleBlock}>
-                <h3 className={styles.panelTitle}>业务分类树</h3>
-                <div className={styles.panelDescription}>左侧只负责分类层级、排序和显示状态。</div>
-              </div>
-              <div className={styles.panelActions}>
-                <Button icon={<ReloadOutlined />} onClick={() => void fetchFilmClassTree()} loading={loadingTree}>
-                  刷新分类
-                </Button>
-                <Button onClick={() => setResetConfirmOpen(true)} loading={resettingTree}>
-                  重置分类
-                </Button>
-                <Button
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  onClick={() => void saveTree()}
-                  loading={savingTree}
-                  disabled={!hasPendingChanges}
-                >
-                  保存排序
-                </Button>
-              </div>
-            </div>
-            <div className={styles.panelBody}>
-              {classTree.length === 0 ? (
-                <Empty description="暂无分类数据" />
-              ) : (
-                <div className={styles.treeWrap}>
-                  <Tree<ClassTreeDataNode>
-                    blockNode
-                    draggable
-                    showLine={{ showLeafIcon: false }}
-                    selectable={false}
-                    expandedKeys={expandedKeys}
-                    treeData={treeData}
-                    allowDrop={allowTreeDrop}
-                    onExpand={(keys) => setExpandedKeys(keys)}
-                    onDrop={handleTreeDrop}
-                    titleRender={renderTreeNode}
-                    className={styles.tree}
-                  />
-                </div>
-              )}
-            </div>
-          </section>
+    <div className={styles.pageBody}>
+      <ManagePageHeader
+        title="分类管理"
+        description="维护分类规则与业务分类树。"
+      />
 
-          <section className={styles.panel}>
-            <div className={styles.panelHeader}>
-              <div className={styles.panelTitleBlock}>
-                <h3 className={styles.panelTitle}>分类规则面板</h3>
-                <div className={styles.panelDescription}>右侧用来设置一级分类、二级分类的名称和归类规则。</div>
-              </div>
-              <div className={styles.panelActions}>
-                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-                  新增规则
-                </Button>
-              </div>
-            </div>
-            <div className={styles.panelBody}>
-              <div className={styles.rulesToolbar}>
-                <Select
-                  value={ruleGroup}
-                  options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
-                  onChange={(value) => setRuleGroup(value)}
-                  style={{ minWidth: 160 }}
-                />
-                <Input.Search
-                  allowClear
-                  placeholder="搜索原始值、目标值或说明"
-                  value={keyword}
-                  onChange={(event) => setKeyword(event.target.value)}
-                  onSearch={(value) => void fetchRules(1, paging.pageSize, value, ruleGroup)}
-                  style={{ flex: 1, minWidth: 220 }}
-                />
+      <Card size="small">
+        <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }}>
+          <Descriptions.Item label="分类节点">{stats.total}</Descriptions.Item>
+          <Descriptions.Item label="一级 / 二级">{stats.roots} / {stats.children}</Descriptions.Item>
+          <Descriptions.Item label="隐藏分类">
+            <Tag color={stats.hidden === 0 ? "success" : "warning"}>{hiddenStatus}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="一级规则 / 二级规则">
+            <Tag color="processing">{ruleSummary}</Tag>
+          </Descriptions.Item>
+        </Descriptions>
+      </Card>
+
+      <Space size={[8, 8]} wrap>
+        <Select
+          value={ruleGroup}
+          options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
+          onChange={(value) => setRuleGroup(value)}
+          className={styles.groupSelect}
+        />
+        <Input
+          allowClear
+          placeholder="搜索原始值、目标值或说明"
+          value={keyword}
+          onChange={(event) => setKeyword(event.target.value)}
+          onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}
+          className={styles.searchInput}
+        />
+        <Button type="primary" onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}>
+          搜索
+        </Button>
+      </Space>
+
+      <div className={styles.workspace}>
+        <div className={styles.ruleWorkspace}>
+        <Table<MappingRuleRecord>
+          rowKey="id"
+          columns={ruleColumns}
+          dataSource={rules}
+          loading={rulesLoading}
+          title={() => (
+            <div className={styles.tableToolbar}>
+              <div className={styles.tableTitle}>分类规则</div>
+              <Space wrap className={styles.tableActions}>
                 <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()])}>
                   刷新规则
                 </Button>
-              </div>
-              <Table<MappingRuleRecord>
-                rowKey="id"
-                columns={ruleColumns}
-                dataSource={rules}
-                loading={rulesLoading}
-                style={{ marginTop: 16 }}
-                pagination={{
-                  current: paging.current,
-                  pageSize: paging.pageSize,
-                  total: paging.total,
-                  showSizeChanger: true,
-                  showTotal: (total) => `共 ${total} 条分类规则`,
-                  onChange: (page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup),
-                }}
-              />
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+                  新增规则
+                </Button>
+              </Space>
             </div>
-          </section>
+          )}
+          pagination={{
+            current: paging.current,
+            pageSize: paging.pageSize,
+            total: paging.total,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条分类规则`,
+            onChange: (page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup),
+          }}
+        />
         </div>
+
+        <CategoryTreeCard
+          classTree={classTree}
+          treeData={treeData}
+          expandedKeys={expandedKeys}
+          loadingTree={loadingTree}
+          savingTree={savingTree}
+          resettingTree={resettingTree}
+          hasPendingChanges={hasPendingChanges}
+          onRefresh={() => void fetchFilmClassTree()}
+          onReset={() => setResetConfirmOpen(true)}
+          onSave={() => void saveTree()}
+          onExpand={(keys) => setExpandedKeys(keys)}
+          onDrop={handleTreeDrop}
+          allowDrop={allowTreeDrop}
+          onDelete={queueDeleteClass}
+        />
       </div>
 
       <Modal
@@ -828,143 +506,19 @@ export default function CategoryWorkspacePageView() {
         该操作会清空当前分类的业务名称、显示状态、排序等设置，并重新获取主站原始分类。
       </Modal>
 
-      <Modal
-        title="更新分类状态"
-        open={statusOpen}
-        okText="保存"
-        cancelText="取消"
-        onOk={() => void handleStatusSubmit()}
-        onCancel={() => {
-          setStatusOpen(false);
-          setStatusItem(null);
-        }}
-      >
-        <Form form={statusForm} layout="vertical">
-          <Form.Item label="分类层级">
-            {statusItem?.pid ? <Tag color="blue">二级分类</Tag> : <Tag color="gold">一级分类</Tag>}
-          </Form.Item>
-          <Form.Item label="当前分类名">
-            <Tag>{statusItem?.name || "-"}</Tag>
-          </Form.Item>
-          <Form.Item name="show" label="展示状态" valuePropName="checked">
-            <Switch checkedChildren="展示" unCheckedChildren="隐藏" />
-          </Form.Item>
-          {!!statusItem?.children?.length && (
-            <Form.Item label="当前子分类">
-              <Space wrap>
-                {statusItem.children.map((child) => (
-                  <Tag key={child.id}>{child.name}</Tag>
-                ))}
-              </Space>
-            </Form.Item>
-          )}
-        </Form>
-      </Modal>
-
-      <Modal
-        title={editingRule ? "编辑分类规则" : "新增分类规则"}
+      <RuleEditorModal
         open={editorVisible}
-        width={720}
-        okText="保存规则"
-        cancelText="取消"
-        confirmLoading={rulesSubmitting}
-        afterOpenChange={(open) => {
-          if (open) {
-            applyEditorValues();
-          }
-        }}
-        onOk={() => void handleRuleSubmit()}
+        loading={rulesSubmitting}
+        editingRule={editingRule}
+        form={ruleForm}
+        conflictRules={conflictRules}
+        checkingConflict={checkingConflict}
+        watchedMatchType={watchedMatchType}
+        regexPreview={regexPreview}
+        onSubmit={() => void handleRuleSubmit()}
         onCancel={closeRuleEditor}
-      >
-        <Form form={ruleForm} layout="vertical" initialValues={{ group: ROOT_GROUP, matchType: "exact" }}>
-          <Card size="small" title="基础配置" style={{ marginBottom: 16 }}>
-            <Form.Item name="group" label="规则分组" rules={[{ required: true, message: "请选择规则分组" }]}>
-              <Select options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))} />
-            </Form.Item>
-            <Form.Item name="matchType" label="匹配方式" rules={[{ required: true, message: "请选择匹配方式" }]}>
-              <Select
-                options={[
-                  { value: "exact", label: "精确匹配" },
-                  { value: "regex", label: "正则匹配" },
-                ]}
-              />
-            </Form.Item>
-            <Form.Item name="raw" label="原始值" rules={[{ required: true, message: "请输入原始值" }]}>
-              <Input placeholder="精确示例：电视剧；正则示例：^(国|国产).*(漫|动漫)$" />
-            </Form.Item>
-            <Form.Item name="target" label="目标值" rules={[{ required: true, message: "请输入目标值" }]}>
-              <Input placeholder="如：剧集、动漫、国产剧、日剧、动作片" />
-            </Form.Item>
-          </Card>
-
-          {conflictRules.length > 0 && (
-            <Alert
-              type="warning"
-              showIcon
-              style={{ marginBottom: 16 }}
-              message="发现冲突规则"
-              description={
-                <Space direction="vertical" size={4}>
-                  {conflictRules.map((item) => (
-                    <div key={item.id}>
-                      #{item.id} {item.group}/{item.raw} · 目标值：{item.target || "未设置"} · 匹配方式：
-                      {item.matchType === "regex" ? "正则" : "精确"}
-                    </div>
-                  ))}
-                </Space>
-              }
-            />
-          )}
-          {checkingConflict && conflictRules.length === 0 && (
-            <Alert style={{ marginBottom: 16 }} type="info" showIcon message="正在检查冲突..." />
-          )}
-
-          <Alert
-            style={{ marginBottom: 16 }}
-            type={watchedMatchType === "regex" ? "warning" : "info"}
-            showIcon
-            message={
-              watchedMatchType === "regex"
-                ? "建议从 ^ 开头、$ 结尾收紧范围，避免一条规则误吞过多分类。分类规则会联动原始分类与业务分类重建。"
-                : "精确匹配只会命中完全相同的原始分类名，优先级高于正则规则。"
-            }
-          />
-
-          {watchedMatchType === "regex" && (
-            <Card size="small" title="正则命中预览" style={{ marginBottom: 16 }}>
-              {!regexPreview.valid ? (
-                <Alert type="error" showIcon message={`正则无效：${regexPreview.error}`} />
-              ) : (
-                <Space direction="vertical" size={12} style={{ width: "100%" }}>
-                  <div className={styles.previewTags}>
-                    {regexPreviewSamples.map((sample) => {
-                      const matched = regexPreview.matches.includes(sample);
-                      return (
-                        <Tag key={sample} color={matched ? "purple" : "default"}>
-                          {sample}
-                        </Tag>
-                      );
-                    })}
-                  </div>
-                  <Alert
-                    type={regexPreview.matches.length > 0 ? "success" : "warning"}
-                    showIcon
-                    message={
-                      regexPreview.matches.length > 0
-                        ? `当前正则命中 ${regexPreview.matches.length} 个示例分类。`
-                        : "当前正则未命中任何示例，请检查范围是否过窄。"
-                    }
-                  />
-                </Space>
-              )}
-            </Card>
-          )}
-
-          <Form.Item name="remarks" label="补充说明">
-            <Input.TextArea rows={4} placeholder="说明这条规则的用途或归一依据" />
-          </Form.Item>
-        </Form>
-      </Modal>
-    </ManagePageShell>
+        onAfterOpenChange={applyEditorValues}
+      />
+    </div>
   );
 }

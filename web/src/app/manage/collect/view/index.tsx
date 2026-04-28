@@ -1,107 +1,95 @@
 "use client";
 
 import React, {
-  useState,
-  useEffect,
   useCallback,
-  useRef,
+  useEffect,
   useMemo,
+  useRef,
+  useState,
 } from "react";
 import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Flex,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Row,
+  Select,
+  Statistic,
+  Space,
+  Switch,
   Table,
   Tag,
-  Switch,
-  Select,
-  Button,
-  Space,
-  Modal,
-  Input,
-  Form,
-  Popconfirm,
-  Checkbox,
-  InputNumber,
-  Radio,
   Tooltip,
-  Alert,
-  Divider,
+  Typography,
 } from "antd";
 import {
-  PlusOutlined,
-  SendOutlined,
   DeleteOutlined,
   EditOutlined,
-  PoweroffOutlined,
-  PauseOutlined,
   LoadingOutlined,
+  PauseOutlined,
+  PlusOutlined,
+  PoweroffOutlined,
+  SendOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
+import BatchCollectModal from "./batch-collect-modal";
+import SourceFormModal from "./source-form-modal";
+import {
+  collectDuration,
+  type BatchOption,
+  type FilmSource,
+  type SourceFormValues,
+} from "./types";
 import styles from "./index.module.less";
 
-interface FilmSource {
+interface CollectListItemResponse extends Partial<FilmSource> {
   id: string;
   name: string;
   uri: string;
-  syncPictures: boolean;
-  state: boolean;
-  grade: number;
-  interval: number;
-  cd?: number;
 }
 
-const collectDuration = [
-  { label: "采集今日", time: 24 },
-  { label: "采集三天", time: 72 },
-  { label: "采集一周", time: 168 },
-  { label: "采集半月", time: 360 },
-  { label: "采集一月", time: 720 },
-  { label: "采集三月", time: 2160 },
-  { label: "采集半年", time: 4320 },
-  { label: "全量采集", time: -1 },
-];
+function normalizeSource(item: CollectListItemResponse): FilmSource {
+  return {
+    id: item.id,
+    name: item.name,
+    uri: item.uri,
+    syncPictures: Boolean(item.syncPictures),
+    state: Boolean(item.state),
+    grade: Number(item.grade ?? 1),
+    interval: Number(item.interval ?? 0),
+    cd: Number(item.cd ?? 24),
+  };
+}
 
 export default function CollectManagePageView() {
+  const { message } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [activeCollectIds, setActiveCollectIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const { message } = useAppMessage();
+
+  const [sourceForm] = Form.useForm<SourceFormValues>();
+  const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
+  const [sourceModalOpen, setSourceModalOpen] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const [batchTime, setBatchTime] = useState(24);
-  const [batchOptions, setBatchOptions] = useState<any[]>([]);
-
-  const [addOpen, setAddOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
-  const [form] = Form.useForm();
-  const currentGrade = Form.useWatch("grade", form);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [submittingAdd, setSubmittingAdd] = useState(false);
-  const [submittingEdit, setSubmittingEdit] = useState(false);
+  const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
 
   const [clearOpen, setClearOpen] = useState(false);
   const [password, setPassword] = useState("");
-
-  const enrichedBatchOptions = useMemo(
-    () =>
-      batchOptions.map((o) => ({
-        ...o,
-        grade: siteList.find((s) => s.id === o.id)?.grade ?? 1,
-        state: siteList.find((s) => s.id === o.id)?.state ?? false,
-      })),
-    [batchOptions, siteList],
-  );
-
-  const enabledBatchIds = useMemo(
-    () =>
-      enrichedBatchOptions.filter((item) => item.state).map((item) => item.id),
-    [enrichedBatchOptions],
-  );
-
-  const batchSelectionMap = useMemo(() => new Set(batchIds), [batchIds]);
 
   const stats = useMemo(
     () => ({
@@ -110,68 +98,71 @@ export default function CollectManagePageView() {
       running: activeCollectIds.length,
       masters: siteList.filter((item) => item.grade === 0).length,
     }),
-    [siteList, activeCollectIds],
+    [activeCollectIds.length, siteList],
   );
 
-  const selectedBatchSites = useMemo(
-    () => enrichedBatchOptions.filter((item) => batchSelectionMap.has(item.id)),
-    [enrichedBatchOptions, batchSelectionMap],
+  const masterSite = useMemo(
+    () => siteList.find((item) => item.grade === 0) ?? null,
+    [siteList],
   );
 
-  const selectedRunningNames = useMemo(
-    () =>
-      selectedBatchSites
-        .filter((item) => activeCollectIds.includes(item.id))
-        .map((item) => item.name),
-    [selectedBatchSites, activeCollectIds],
-  );
-
-  const batchCheckAll =
-    enrichedBatchOptions.length > 0 &&
-    batchIds.length === enrichedBatchOptions.length;
-
-  const batchIndeterminate =
-    batchIds.length > 0 && batchIds.length < enrichedBatchOptions.length;
+  const masterStatus = useMemo(() => {
+    if (stats.masters === 1) {
+      return { text: "正常", color: "success" as const };
+    }
+    if (stats.masters === 0) {
+      return { text: "缺少主站", color: "warning" as const };
+    }
+    return { text: `${stats.masters} 个主站`, color: "error" as const };
+  }, [stats.masters]);
 
   const getCollectList = useCallback(async () => {
     setLoading(true);
     try {
       const resp = await ApiGet("/manage/collect/list");
       if (resp.code === 0) {
-        const list = resp.data?.map((item: any) => ({
-          ...item,
-          cd: item.cd || 24,
-        }));
+        const list = Array.isArray(resp.data)
+          ? resp.data.map((item: CollectListItemResponse) =>
+              normalizeSource(item),
+            )
+          : [];
         setSiteList(list);
+      } else {
+        message.error(resp.msg || "采集站列表加载失败");
       }
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [message]);
 
   const getCollectingState = useCallback(async () => {
     const resp = await ApiGet("/manage/collect/collecting/state", undefined);
-    if (resp.code === 0 && resp.data) {
-      setActiveCollectIds(resp.data);
+    if (resp.code === 0 && Array.isArray(resp.data)) {
+      setActiveCollectIds(resp.data as string[]);
     }
   }, []);
 
   useEffect(() => {
-    getCollectList();
-    getCollectingState();
+    void getCollectList();
+    void getCollectingState();
     timerRef.current = setInterval(() => {
-      getCollectingState();
+      void getCollectingState();
     }, 4000);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
     };
   }, [getCollectList, getCollectingState]);
 
-  useEffect(() => {
-    if (currentGrade === 1 && form.getFieldValue("syncPictures")) {
-      form.setFieldValue("syncPictures", false);
-    }
-  }, [currentGrade, form]);
+  const updateSiteListItem = useCallback(
+    (id: string, updater: (record: FilmSource) => FilmSource) => {
+      setSiteList((current) =>
+        current.map((item) => (item.id === id ? updater(item) : item)),
+      );
+    },
+    [],
+  );
 
   const changeSourceState = async (record: FilmSource) => {
     const resp = await ApiPost("/manage/collect/change", {
@@ -179,7 +170,10 @@ export default function CollectManagePageView() {
       state: record.state,
       syncPictures: record.syncPictures,
     });
-    if (resp.code !== 0) message.error(resp.msg);
+    if (resp.code !== 0) {
+      message.error(resp.msg || "状态更新失败");
+      await getCollectList();
+    }
   };
 
   const startTask = async (record: FilmSource) => {
@@ -190,120 +184,116 @@ export default function CollectManagePageView() {
     });
     if (resp.code === 0) {
       message.success(resp.msg);
-      getCollectingState();
-    } else {
-      message.error(resp.msg);
+      await getCollectingState();
+      return;
     }
+    message.error(resp.msg || "启动采集失败");
   };
 
   const stopTask = async (id: string) => {
     const resp = await ApiPost("/manage/collect/stop", { id });
     if (resp.code === 0) {
       message.success("已请求停止任务");
-      getCollectingState();
+      await getCollectingState();
+      return;
     }
+    message.error(resp.msg || "停止任务失败");
   };
 
   const delSource = async (id: string) => {
     const resp = await ApiPost("/manage/collect/del", { id });
     if (resp.code === 0) {
       message.success(resp.msg);
-      getCollectList();
-    } else {
-      message.error(resp.msg);
+      await getCollectList();
+      return;
     }
+    message.error(resp.msg || "删除采集站失败");
   };
 
   const openAddDialog = () => {
-    form.resetFields();
-    form.setFieldsValue({
+    setSourceModalMode("add");
+    setEditingId(null);
+    sourceForm.resetFields();
+    sourceForm.setFieldsValue({
       grade: 1,
       syncPictures: false,
       state: false,
       interval: 0,
+      name: "",
+      uri: "",
     });
-    setAddOpen(true);
+    setSourceModalOpen(true);
   };
 
   const openEditDialog = async (id: string) => {
+    setSourceModalMode("edit");
     setEditingId(id);
     const resp = await ApiGet("/manage/collect/find", { id });
-    if (resp.code === 0) {
-      form.setFieldsValue(resp.data);
-      setEditOpen(true);
-    } else {
-      message.error(resp.msg);
-    }
-  };
-
-  const onAddFinish = async (values: any) => {
-    setSubmittingAdd(true);
-    try {
-      const resp = await ApiPost("/manage/collect/add", values);
-      if (resp.code === 0) {
-        message.success(resp.msg);
-        setAddOpen(false);
-        getCollectList();
-      } else {
-        message.error(resp.msg);
-      }
-    } finally {
-      setSubmittingAdd(false);
-    }
-  };
-
-  const onEditFinish = async (values: any) => {
-    setSubmittingEdit(true);
-    try {
-      const resp = await ApiPost("/manage/collect/update", {
-        ...values,
-        id: editingId,
+    if (resp.code === 0 && resp.data) {
+      sourceForm.setFieldsValue({
+        name: String(resp.data.name ?? ""),
+        uri: String(resp.data.uri ?? ""),
+        syncPictures: Boolean(resp.data.syncPictures),
+        state: Boolean(resp.data.state),
+        grade: Number(resp.data.grade ?? 1),
+        interval: Number(resp.data.interval ?? 0),
       });
+      setSourceModalOpen(true);
+      return;
+    }
+    message.error(resp.msg || "获取站点信息失败");
+  };
+
+  const handleSubmitSource = async (values: SourceFormValues) => {
+    setSubmitting(true);
+    try {
+      const resp = await ApiPost(
+        sourceModalMode === "add"
+          ? "/manage/collect/add"
+          : "/manage/collect/update",
+        sourceModalMode === "add" ? values : { ...values, id: editingId },
+      );
       if (resp.code === 0) {
         message.success(resp.msg);
-        setEditOpen(false);
-        getCollectList();
-      } else {
-        message.error(resp.msg);
+        setSourceModalOpen(false);
+        await getCollectList();
+        return;
       }
+      message.error(resp.msg || "保存站点失败");
     } finally {
-      setSubmittingEdit(false);
+      setSubmitting(false);
     }
   };
 
   const testApi = async () => {
     try {
-      const values = await form.validateFields();
+      const values = await sourceForm.validateFields();
       const resp = await ApiPost("/manage/collect/test", values);
-      if (resp.code === 0) message.success(resp.msg);
-      else message.error(resp.msg);
-    } catch {}
+      if (resp.code === 0) {
+        message.success(resp.msg);
+        return;
+      }
+      message.error(resp.msg || "接口测试失败");
+    } catch {
+      // 表单校验失败时不额外提示。
+    }
   };
 
   const openBatchCollect = async () => {
     setBatchOpen(true);
     const resp = await ApiGet("/manage/collect/options");
-    if (resp.code === 0) setBatchOptions(resp.data || []);
-  };
-
-  const selectAllBatchSites = () => {
-    setBatchIds(enrichedBatchOptions.map((item) => item.id));
-  };
-
-  const clearBatchSelection = () => {
-    setBatchIds([]);
-  };
-
-  const selectEnabledBatchSites = () => {
-    setBatchIds(enabledBatchIds);
-  };
-
-  const invertBatchSelection = () => {
-    setBatchIds(
-      enrichedBatchOptions
-        .filter((item) => !batchSelectionMap.has(item.id))
-        .map((item) => item.id),
-    );
+    if (resp.code === 0) {
+      const options = Array.isArray(resp.data)
+        ? resp.data.map((item: BatchOption) => ({
+            ...item,
+            grade: siteList.find((site) => site.id === item.id)?.grade ?? 1,
+            state: siteList.find((site) => site.id === item.id)?.state ?? false,
+          }))
+        : [];
+      setBatchOptions(options);
+      return;
+    }
+    message.error(resp.msg || "加载批量采集站点失败");
   };
 
   const startBatchCollect = async () => {
@@ -319,10 +309,10 @@ export default function CollectManagePageView() {
     if (resp.code === 0) {
       message.success(resp.msg);
       setBatchOpen(false);
-      getCollectingState();
-    } else {
-      message.error(resp.msg);
+      await getCollectingState();
+      return;
     }
+    message.error(resp.msg || "批量采集启动失败");
   };
 
   const clearFilms = async () => {
@@ -331,8 +321,11 @@ export default function CollectManagePageView() {
       return;
     }
     const resp = await ApiPost("/manage/spider/clear", { password });
-    if (resp.code === 0) message.success(resp.msg);
-    else message.error(resp.msg);
+    if (resp.code === 0) {
+      message.success(resp.msg);
+    } else {
+      message.error(resp.msg || "清空数据失败");
+    }
     setClearOpen(false);
     setPassword("");
   };
@@ -341,167 +334,162 @@ export default function CollectManagePageView() {
     const resp = await ApiPost("/manage/spider/stopAll", {});
     if (resp.code === 0) {
       message.success(resp.msg);
-      getCollectingState();
-    } else {
-      message.error(resp.msg);
+      await getCollectingState();
+      return;
     }
+    message.error(resp.msg || "终止任务失败");
   };
 
   const columns: ColumnsType<FilmSource> = [
     {
-      title: "资源名称",
+      title: "站点",
       dataIndex: "name",
-      key: "name",
-      render: (name: string, record) => (
-        <Space>
-          <span>{name}</span>
-          {activeCollectIds.includes(record.id) && (
-            <LoadingOutlined style={{ color: "var(--ant-color-primary)" }} />
-          )}
-        </Space>
-      ),
+      width: 260,
+      render: (name: string, record) => {
+        const isRunning = activeCollectIds.includes(record.id);
+        return (
+          <Flex vertical gap={6}>
+            <Space size={[8, 4]} wrap>
+              <Typography.Text strong>{name}</Typography.Text>
+              <Tag
+                color={record.grade === 0 ? "gold" : "default"}
+                bordered={false}
+              >
+                {record.grade === 0 ? "主站" : "附属站"}
+              </Tag>
+              <Tag
+                color={record.state ? "success" : "default"}
+                bordered={false}
+              >
+                {record.state ? "已启用" : "已禁用"}
+              </Tag>
+              {isRunning ? (
+                <Tag
+                  icon={<LoadingOutlined />}
+                  color="processing"
+                  bordered={false}
+                >
+                  采集中
+                </Tag>
+              ) : null}
+            </Space>
+            <Typography.Link
+              href={record.uri}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {record.uri}
+            </Typography.Link>
+          </Flex>
+        );
+      },
     },
     {
-      title: "资源站",
-      dataIndex: "uri",
-      ellipsis: true,
-      render: (uri: string) => (
-        <a href={uri} target="_blank" rel="noopener noreferrer">
-          {uri}
-        </a>
-      ),
-    },
-    {
-      title: "同步图片",
+      title: "图片同步",
       dataIndex: "syncPictures",
       align: "center",
-      render: (v: boolean, record) => (
+      width: 120,
+      render: (value: boolean, record) => (
         <Switch
-          checked={v}
+          checked={value}
           disabled={record.grade === 1}
-          onChange={(checked) => {
-            record.syncPictures = checked;
-            setSiteList([...siteList]);
-            changeSourceState(record);
-          }}
           checkedChildren="开启"
           unCheckedChildren="关闭"
+          onChange={(checked) => {
+            updateSiteListItem(record.id, (item) => ({
+              ...item,
+              syncPictures: checked,
+            }));
+            void changeSourceState({ ...record, syncPictures: checked });
+          }}
         />
       ),
     },
     {
-      title: "是否启用",
+      title: "启用状态",
       dataIndex: "state",
       align: "center",
-      render: (v: boolean, record) => (
+      width: 120,
+      render: (value: boolean, record) => (
         <Switch
-          checked={v}
-          onChange={(checked) => {
-            record.state = checked;
-            setSiteList([...siteList]);
-            changeSourceState(record);
-          }}
+          checked={value}
           checkedChildren="启用"
           unCheckedChildren="禁用"
+          onChange={(checked) => {
+            updateSiteListItem(record.id, (item) => ({
+              ...item,
+              state: checked,
+            }));
+            void changeSourceState({ ...record, state: checked });
+          }}
         />
       ),
     },
     {
-      title: "站点权重",
-      dataIndex: "grade",
-      align: "center",
-      render: (v: number) => (
-        <Tag color={v === 0 ? "green" : "default"}>
-          {v === 0 ? "采集主站" : "附属站点"}
-        </Tag>
-      ),
-    },
-    {
-      title: "采集间隔",
+      title: "请求间隔",
       dataIndex: "interval",
       align: "center",
-      render: (v: number) => (
-        <Tag color="cyan">{v > 0 ? `${v} ms` : "无限制"}</Tag>
+      width: 120,
+      render: (value: number) => (
+        <Tag bordered={false}>{value > 0 ? `${value} ms` : "无限制"}</Tag>
       ),
     },
     {
-      title: "采集方式",
-      width: 120,
+      title: "采集时长",
+      width: 160,
       render: (_, record) => (
         <Select
           size="small"
           value={record.cd}
-          onChange={(v) => {
-            record.cd = v;
-            setSiteList([...siteList]);
-          }}
           style={{ width: "100%" }}
-          options={collectDuration.map((d) => ({
-            value: d.time,
-            label: d.label,
+          options={collectDuration.map((item) => ({
+            value: item.time,
+            label: item.label,
           }))}
+          onChange={(value) => {
+            updateSiteListItem(record.id, (item) => ({ ...item, cd: value }));
+          }}
         />
       ),
     },
     {
       title: "操作",
       key: "action",
-      align: "center",
-      width: 160,
       fixed: "right",
+      align: "center",
+      width: 180,
       render: (_, record) => {
         const isRunning = activeCollectIds.includes(record.id);
-
-        const renderStartBtn = () => {
-          return isRunning ? null : (
-            <Tooltip title="开始采集">
-              <Button
-                type="primary"
-                icon={<PoweroffOutlined />}
-                shape="circle"
-                size="small"
-                style={{
-                  background: "var(--ant-color-success)",
-                  borderColor: "var(--ant-color-success)",
-                }}
-                onClick={() => startTask(record)}
-              />
-            </Tooltip>
-          );
-        };
-
         return (
-          <Space>
-            {renderStartBtn()}
-            {isRunning && (
-              <Tooltip title="停止采集">
+          <Space size={4}>
+            {!isRunning ? (
+              <Tooltip title="开始采集">
                 <Button
                   type="primary"
+                  icon={<PoweroffOutlined />}
+                  onClick={() => void startTask(record)}
+                />
+              </Tooltip>
+            ) : (
+              <Tooltip title="停止采集">
+                <Button
                   danger
                   icon={<PauseOutlined />}
-                  shape="circle"
-                  size="small"
-                  onClick={() => stopTask(record.id)}
+                  onClick={() => void stopTask(record.id)}
                 />
               </Tooltip>
             )}
-            <Button
-              type="primary"
-              icon={<EditOutlined />}
-              shape="circle"
-              size="small"
-              onClick={() => openEditDialog(record.id)}
-            />
+            <Tooltip title="编辑站点">
+              <Button
+                icon={<EditOutlined />}
+                onClick={() => void openEditDialog(record.id)}
+              />
+            </Tooltip>
             <Popconfirm
               title="确认删除此采集站？"
-              onConfirm={() => delSource(record.id)}
+              onConfirm={() => void delSource(record.id)}
             >
-              <Button
-                danger
-                icon={<DeleteOutlined />}
-                shape="circle"
-                size="small"
-              />
+              <Button danger icon={<DeleteOutlined />} />
             </Popconfirm>
           </Space>
         );
@@ -509,353 +497,209 @@ export default function CollectManagePageView() {
     },
   ];
 
-  const commonFormItems = (
-    <>
-      <Form.Item label="资源名称" name="name" rules={[{ required: true }]}>
-        <Input placeholder="自定义资源名称" />
-      </Form.Item>
-      <Form.Item label="接口地址" name="uri" rules={[{ required: true }]}>
-        <Input placeholder="资源采集链接" />
-      </Form.Item>
-      <Form.Item
-        label="间隔时长"
-        name="interval"
-        tooltip="单次请求的时间间隔, 单位/ms"
-      >
-        <InputNumber min={0} step={100} style={{ width: "100%" }} />
-      </Form.Item>
-      <Form.Item label="站点类型" name="grade">
-        <Radio.Group
-          onChange={(e) => {
-            if (e.target.value === 1) form.setFieldValue("syncPictures", false);
-          }}
-        >
-          <Radio value={0}>主站点</Radio>
-          <Radio value={1}>附属站点</Radio>
-        </Radio.Group>
-      </Form.Item>
-      <Form.Item label="图片同步" name="syncPictures" valuePropName="checked">
-        <Switch
-          checkedChildren="开启"
-          unCheckedChildren="关闭"
-          disabled={currentGrade === 1}
-        />
-      </Form.Item>
-      <Form.Item label="是否启用" name="state" valuePropName="checked">
-        <Switch checkedChildren="启用" unCheckedChildren="禁用" />
-      </Form.Item>
-    </>
-  );
-
   return (
-    <ManagePageShell
-      eyebrow="采集中心"
-      title="采集站点"
-      description="统一管理主站、附属站和批量采集流程，随时查看站点状态与任务运行情况。"
-      actions={
-        <div className={styles.heroActions}>
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={openAddDialog}
-          >
-            添加采集站
-          </Button>
-          <Button
-            type="primary"
-            icon={<SendOutlined />}
-            className={styles.successButton}
-            onClick={openBatchCollect}
-          >
-            一键采集
-          </Button>
-          <Popconfirm
-            title="一键终止所有采集"
-            description="确定要强制终止当前所有正在运行的采集任务吗？这可能导致部分数据不完整。"
-            onConfirm={submitStopAllTasks}
-            okText="确认终止"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            disabled={activeCollectIds.length === 0}
-          >
-            <Button
-              type="primary"
-              danger
-              icon={<PauseOutlined />}
-              disabled={activeCollectIds.length === 0}
+    <div className={styles.pageBody}>
+      <ManagePageHeader
+        title="采集站点"
+        description="统一管理主站、附属站与采集任务。"
+      />
+
+      <div className={styles.layout}>
+        <Card
+          size="small"
+          title="运行概览"
+          className={styles.summaryCard}
+          styles={{ body: { height: "100%" } }}
+        >
+          <Row gutter={[16, 16]} className={styles.overviewRow}>
+            <Col xs={12} lg={6} className={styles.overviewCol}>
+              <div className={styles.overviewStat}>
+                <Statistic title="站点总数" value={stats.total} />
+              </div>
+            </Col>
+            <Col xs={12} lg={6} className={styles.overviewCol}>
+              <div className={styles.overviewStat}>
+                <Statistic title="启用站点" value={stats.enabled} />
+              </div>
+            </Col>
+            <Col xs={12} lg={6} className={styles.overviewCol}>
+              <div className={styles.overviewStat}>
+                <Statistic title="运行任务" value={stats.running} />
+              </div>
+            </Col>
+            <Col xs={12} lg={6} className={styles.overviewCol}>
+              <div className={styles.overviewStat}>
+                <Statistic
+                  title="主站状态"
+                  value={stats.masters}
+                  suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
+                />
+              </div>
+            </Col>
+          </Row>
+        </Card>
+
+        <Card
+          size="small"
+          title="当前主站"
+          className={styles.summaryCard}
+          styles={{ body: { height: "100%" } }}
+          extra={
+            masterSite ? (
+              <Tag color="gold">已生效</Tag>
+            ) : (
+              <Tag color="error">未配置</Tag>
+            )
+          }
+        >
+          {masterSite ? (
+            <Descriptions
+              column={1}
+              size="small"
+              className={styles.masterDescriptions}
             >
-              一键终止
-            </Button>
-          </Popconfirm>
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            onClick={() => setClearOpen(true)}
-          >
-            清空数据
-          </Button>
-        </div>
-      }
-      extra={
-        <div className={styles.statsGrid}>
-          <div className={styles.statCard}>
-            <span className={styles.statLabel}>站点总数</span>
-            <strong className={styles.statValue}>{stats.total}</strong>
-            <span className={styles.statHint}>当前已登记的全部采集源</span>
-          </div>
-          <div className={styles.statCard}>
-            <span className={styles.statLabel}>启用站点</span>
-            <strong className={styles.statValue}>{stats.enabled}</strong>
-            <span className={styles.statHint}>可参与日常采集的站点</span>
-          </div>
-          <div className={styles.statCard}>
-            <span className={styles.statLabel}>运行中任务</span>
-            <strong className={styles.statValue}>{stats.running}</strong>
-            <span className={styles.statHint}>重复发起会被后端直接跳过</span>
-          </div>
-          <div className={styles.statCard}>
-            <span className={styles.statLabel}>主站数量</span>
-            <strong className={styles.statValue}>{stats.masters}</strong>
-            <span className={styles.statHint}>主站会优先承担分类映射同步</span>
-          </div>
-        </div>
-      }
-      panelClassName={styles.tablePanel}
-      panelless
-    >
-      <section className={styles.tableSection}>
-        <div className={styles.sectionHeader}>
-          <div>
-            <h3 className={styles.sectionTitle}>采集站列表</h3>
-            <p className={styles.sectionDesc}>
-              可逐站控制采集方式、启用状态与运行操作。
-            </p>
-          </div>
-        </div>
+              <Descriptions.Item label="站点名称">
+                {masterSite.name}
+              </Descriptions.Item>
+              <Descriptions.Item label="接口地址">
+                <Typography.Link
+                  href={masterSite.uri}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {masterSite.uri}
+                </Typography.Link>
+              </Descriptions.Item>
+              <Descriptions.Item label="启用状态">
+                <Tag
+                  color={masterSite.state ? "success" : "default"}
+                  bordered={false}
+                >
+                  {masterSite.state ? "启用中" : "已停用"}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="图片同步">
+                <Tag
+                  color={masterSite.syncPictures ? "processing" : "default"}
+                  bordered={false}
+                >
+                  {masterSite.syncPictures ? "开启" : "关闭"}
+                </Tag>
+              </Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <Descriptions column={1} size="small">
+              <Descriptions.Item label="状态">
+                <Tag color="warning">未配置</Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="说明">
+                需要先指定一个主站
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+        </Card>
+
         <Table
+          rowKey="id"
+          size="middle"
           columns={columns}
           dataSource={siteList}
-          rowKey="id"
           loading={loading}
-          bordered
-          size="middle"
           pagination={false}
-          scroll={{ x: "max-content" }}
-        />
-      </section>
-
-      <Modal
-        title="添加采集站点"
-        open={addOpen}
-        onCancel={() => {
-          if (!submittingAdd) setAddOpen(false);
-        }}
-        onOk={() => form.submit()}
-        confirmLoading={submittingAdd}
-        closable={!submittingAdd}
-        maskClosable={!submittingAdd}
-        footer={[
-          <Button key="test" type="dashed" onClick={testApi}>
-            测试接口
-          </Button>,
-          <Button
-            key="cancel"
-            onClick={() => setAddOpen(false)}
-            disabled={submittingAdd}
-          >
-            取消
-          </Button>,
-          <Button
-            key="ok"
-            type="primary"
-            onClick={() => form.submit()}
-            loading={submittingAdd}
-          >
-            添加
-          </Button>,
-        ]}
-      >
-        <Form form={form} labelCol={{ span: 6 }} onFinish={onAddFinish}>
-          {commonFormItems}
-        </Form>
-      </Modal>
-
-      <Modal
-        title="修改分类信息"
-        open={editOpen}
-        onCancel={() => {
-          if (!submittingEdit) setEditOpen(false);
-        }}
-        onOk={() => form.submit()}
-        confirmLoading={submittingEdit}
-        closable={!submittingEdit}
-        maskClosable={!submittingEdit}
-        footer={[
-          <Button key="test" type="dashed" onClick={testApi}>
-            测试接口
-          </Button>,
-          <Button
-            key="cancel"
-            onClick={() => setEditOpen(false)}
-            disabled={submittingEdit}
-          >
-            取消
-          </Button>,
-          <Button
-            key="ok"
-            type="primary"
-            onClick={() => form.submit()}
-            loading={submittingEdit}
-          >
-            更新
-          </Button>,
-        ]}
-      >
-        <Form form={form} labelCol={{ span: 6 }} onFinish={onEditFinish}>
-          {commonFormItems}
-        </Form>
-      </Modal>
-
-      <Modal
-        title="多资源站一键采集"
-        open={batchOpen}
-        onCancel={() => setBatchOpen(false)}
-        onOk={startBatchCollect}
-        okText="确认执行"
-        width={840}
-      >
-        {selectedRunningNames.length > 0 && (
-          <Alert
-            type="warning"
-            showIcon
-            style={{ marginBottom: 16 }}
-            message="以下站点正在采集中"
-            description={`${selectedRunningNames.join("、")}；重复启动会被跳过，不会中断当前任务。`}
-          />
-        )}
-
-        <div className={styles.batchPanel}>
-          <div className={styles.batchPanelHeader}>
-            <div>
-              <div className={styles.sectionTitle}>选择执行站点</div>
-              <p className={styles.sectionDesc}>
-                支持全选、仅选启用站点和反选，适合快速发起大批量采集。
-              </p>
-            </div>
-            <div className={styles.batchMeta}>
-              <span>已选 {batchIds.length} 个</span>
-              <span>启用 {enabledBatchIds.length} 个</span>
-              <span>运行中 {activeCollectIds.length} 个</span>
-            </div>
-          </div>
-
-          <div className={styles.batchToolbar}>
-            <Checkbox
-              checked={batchCheckAll}
-              indeterminate={batchIndeterminate}
-              onChange={(e) => {
-                if (e.target.checked) {
-                  selectAllBatchSites();
-                  return;
-                }
-                clearBatchSelection();
-              }}
-            >
-              全选站点
-            </Checkbox>
-            <Space wrap>
-              <Button size="small" onClick={selectEnabledBatchSites}>
-                仅选启用站点
-              </Button>
-              <Button size="small" onClick={invertBatchSelection}>
-                反选
-              </Button>
-              <Button size="small" onClick={clearBatchSelection}>
-                清空选择
-              </Button>
-            </Space>
-          </div>
-
-          <Checkbox.Group
-            value={batchIds}
-            onChange={(v) => setBatchIds(v as string[])}
-          >
-            <div className={styles.batchSiteGrid}>
-              {enrichedBatchOptions.map((o) => {
-                const isRunning = activeCollectIds.includes(o.id);
-                const isChecked = batchSelectionMap.has(o.id);
-                return (
-                  <label
-                    key={o.id}
-                    className={`${styles.batchSiteCard} ${isChecked ? styles.batchSiteCardSelected : ""}`}
+          scroll={{ x: 980 }}
+          className={styles.tableBlock}
+          title={() => (
+            <div className={styles.tableToolbar}>
+              <div className={styles.tableTitle}>采集站列表</div>
+              <Space size={[8, 8]} wrap>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={openAddDialog}
+                >
+                  新增站点
+                </Button>
+                <Button
+                  icon={<SendOutlined />}
+                  onClick={() => void openBatchCollect()}
+                >
+                  批量采集
+                </Button>
+                <Popconfirm
+                  title="一键终止所有采集"
+                  description="确定要强制终止当前所有正在运行的采集任务吗？"
+                  onConfirm={() => void submitStopAllTasks()}
+                  okText="确认终止"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  disabled={activeCollectIds.length === 0}
+                >
+                  <Button
+                    danger
+                    icon={<PauseOutlined />}
+                    disabled={activeCollectIds.length === 0}
                   >
-                    <div className={styles.batchSiteMain}>
-                      <Checkbox value={o.id}>{o.name}</Checkbox>
-                      <div className={styles.batchSiteTags}>
-                        <Tag
-                          color={o.grade === 0 ? "green" : "default"}
-                          style={{ marginRight: 0 }}
-                        >
-                          {o.grade === 0 ? "主站" : "附属站"}
-                        </Tag>
-                        <Tag
-                          color={o.state ? "success" : "error"}
-                          style={{ marginRight: 0 }}
-                        >
-                          {o.state ? "已启用" : "已停用"}
-                        </Tag>
-                        {isRunning && (
-                          <Tag
-                            color="processing"
-                            icon={<LoadingOutlined />}
-                            style={{ marginRight: 0 }}
-                          >
-                            采集中
-                          </Tag>
-                        )}
-                      </div>
-                    </div>
-                    <div className={styles.batchSiteSub}>{o.id}</div>
-                  </label>
-                );
-              })}
+                    终止全部任务
+                  </Button>
+                </Popconfirm>
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  onClick={() => setClearOpen(true)}
+                >
+                  清空影片数据
+                </Button>
+              </Space>
             </div>
-          </Checkbox.Group>
+          )}
+        />
+      </div>
 
-          <Divider style={{ margin: "20px 0 16px" }} />
+      <SourceFormModal
+        open={sourceModalOpen}
+        mode={sourceModalMode}
+        loading={submitting}
+        form={sourceForm}
+        onCancel={() => setSourceModalOpen(false)}
+        onSubmit={handleSubmitSource}
+        onTest={testApi}
+      />
 
-          <Form layout="vertical">
-            <Form.Item label="采集时长" style={{ marginBottom: 0 }}>
-              <Select
-                value={batchTime}
-                onChange={setBatchTime}
-                options={collectDuration.map((d) => ({
-                  label: d.label,
-                  value: d.time,
-                }))}
-              />
-            </Form.Item>
-          </Form>
-        </div>
-      </Modal>
+      <BatchCollectModal
+        open={batchOpen}
+        options={batchOptions}
+        selectedIds={batchIds}
+        activeCollectIds={activeCollectIds}
+        batchTime={batchTime}
+        onCancel={() => setBatchOpen(false)}
+        onSubmit={() => void startBatchCollect()}
+        onSelectionChange={setBatchIds}
+        onBatchTimeChange={setBatchTime}
+      />
 
       <Modal
-        title="清空影视数据"
+        title="清空影片数据"
         open={clearOpen}
         onCancel={() => setClearOpen(false)}
-        onOk={clearFilms}
-        okText="确认执行"
+        onOk={() => void clearFilms()}
+        okText="确认清空"
         okButtonProps={{ danger: true }}
+        destroyOnHidden
       >
-        <p style={{ color: "var(--ant-color-error)", marginBottom: 16 }}>
-          此操作不可逆，将清空数据库中所有影片信息！
-        </p>
-        <Input.Password
-          placeholder="请输入管理密码"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-        />
+        <Flex vertical gap={12}>
+          <Alert
+            showIcon
+            type="error"
+            message="该操作不可逆"
+            description="会清空数据库中的全部影片数据，请确认当前没有误操作风险。"
+          />
+          <Input.Password
+            placeholder="请输入管理密码"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </Flex>
       </Modal>
-    </ManagePageShell>
+    </div>
   );
 }

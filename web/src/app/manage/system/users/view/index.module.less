@@ -1,0 +1,34 @@
+.pageStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tableToolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.searchInput {
+  width: 250px;
+  max-width: 100%;
+}
+
+.tableTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+@media (max-width: 768px) {
+  .tableToolbar {
+    flex-direction: column;
+  }
+
+  .searchInput {
+    width: 100%;
+  }
+}

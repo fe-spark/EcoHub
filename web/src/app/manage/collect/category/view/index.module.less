@@ -1,173 +1,60 @@
-.workspace {
+.pageBody {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  height: 100%;
-  min-height: 0;
-  gap: 20px;
-  overflow: hidden;
-}
-
-.statsGrid {
-  flex-shrink: 0;
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.statCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 16px;
-  background: var(--ant-color-bg-container);
-  padding: 14px 16px;
-}
-
-.statLabel {
-  color: var(--ant-color-text-secondary);
-  font-size: 12px;
-  line-height: 20px;
-}
-
-.statValue {
-  color: var(--ant-color-text);
-  font-size: 24px;
-  font-weight: 700;
-  line-height: 32px;
-}
-
-.panelGrid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.95fr);
-  gap: 20px;
-  align-items: stretch;
-}
-
-.panel {
-  min-height: 0;
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 20px;
-  background: var(--ant-color-bg-container);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 8%);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.panelHeader {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   gap: 16px;
-  padding: 18px 20px;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
 }
 
-.panelTitleBlock {
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  gap: 16px;
+  align-items: start;
+}
+
+.ruleWorkspace {
+  min-width: 0;
+}
+
+.tableToolbar {
   display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.panelTitle {
-  margin: 0;
-  color: var(--ant-color-text);
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.panelDescription {
-  color: var(--ant-color-text-secondary);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.panelActions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
   flex-wrap: wrap;
 }
 
-.panelBody {
-  flex: 1;
-  min-height: 0;
-  padding: 18px 20px 20px;
-  overflow-y: auto;
+.tableTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 32px;
 }
 
-.treeWrap {
-  min-height: 100%;
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
 }
 
-.tree {
-  background: transparent;
+.groupSelect {
+  min-width: 160px;
+}
+
+.searchInput {
+  min-width: 220px;
+  max-width: 100%;
+}
+
+.treePanel {
+  min-height: 320px;
 }
 
 .treeNode {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
   width: 100%;
   min-width: 0;
 }
 
-.treeNodeContent {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.treeNodeMain {
   min-width: 0;
   flex: 1;
-}
-
-.treeNodeTitleRow {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.treeNodeTitle {
-  color: var(--ant-color-text);
-  font-size: 15px;
-  font-weight: 600;
-  min-width: 0;
-}
-
-.treeNodeMeta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  color: var(--ant-color-text-secondary);
-  font-size: 12px;
-}
-
-.treeNodeActions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  flex-shrink: 0;
-}
-
-.rulesToolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.rulesGuide {
-  margin-bottom: 16px;
-}
-
-.targetMuted {
-  color: var(--ant-color-text-tertiary);
 }
 
 .previewTags {
@@ -176,42 +63,17 @@
   gap: 8px;
 }
 
-@media (max-width: 1280px) {
-  .panelGrid {
-    min-height: auto;
+@media (max-width: 768px) {
+  .workspace {
     grid-template-columns: 1fr;
   }
 
-  .panelBody {
-    overflow: visible;
-  }
-}
-
-@media (max-width: 960px) {
-  .statsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .groupSelect,
+  .searchInput {
+    width: 100%;
   }
 
-  .panelHeader,
   .treeNode {
-    flex-direction: column;
     align-items: stretch;
-  }
-
-  .panelActions,
-  .treeNodeActions {
-    justify-content: flex-start;
-  }
-}
-
-@media (max-width: 640px) {
-  .statsGrid {
-    grid-template-columns: 1fr;
-  }
-
-  .panelHeader,
-  .panelBody {
-    padding-left: 14px;
-    padding-right: 14px;
   }
 }

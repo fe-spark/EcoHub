@@ -30,7 +30,8 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
+import styles from "./index.module.less";
 
 const { Title, Text } = Typography;
 
@@ -529,23 +530,12 @@ export default function BannersPageView() {
   );
 
   return (
-    <ManagePageShell
-      eyebrow="系统设置"
-      title="首页封面"
-      description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
-      actions={
-        <Space>
-          <Button
-            type="primary"
-            icon={<PlusCircleOutlined />}
-            onClick={openCreateEditor}
-          >
-            添加封面
-          </Button>
-        </Space>
-      }
-      panelless
-    >
+    <div className={styles.pageStack}>
+      <ManagePageHeader
+        title="首页封面"
+        description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
+      />
+
       <Table
         dataSource={banners}
         columns={columns}
@@ -553,6 +543,14 @@ export default function BannersPageView() {
         loading={loading}
         bordered
         scroll={{ x: "max-content" }}
+        title={() => (
+          <div className={styles.tableToolbar}>
+            <div className={styles.tableTitle}>封面列表</div>
+            <Button type="primary" icon={<PlusCircleOutlined />} onClick={openCreateEditor}>
+              添加封面
+            </Button>
+          </div>
+        )}
       />
 
       <Modal
@@ -568,6 +566,6 @@ export default function BannersPageView() {
           {formItems}
         </Form>
       </Modal>
-    </ManagePageShell>
+    </div>
   );
 }

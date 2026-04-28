@@ -11,7 +11,6 @@ import {
   Input,
   Select,
   message,
-  Card,
   Tag,
   Popconfirm,
   Avatar,
@@ -24,11 +23,12 @@ import {
   LockOutlined,
   MailOutlined,
 } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
-import ManagePageShell from "../../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
+import styles from "./index.module.less";
 
 const { Option } = Select;
-
 export default function UsersPageView() {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
@@ -138,7 +138,7 @@ export default function UsersPageView() {
     }
   };
 
-  const columns = [
+  const columns: ColumnsType<any> = [
     {
       title: "用户名",
       dataIndex: "userName",
@@ -178,6 +178,7 @@ export default function UsersPageView() {
     {
       title: "操作",
       key: "action",
+      fixed: "right",
       render: (_: any, record: any) => (
         <Space size={8}>
           <Tooltip
@@ -225,36 +226,45 @@ export default function UsersPageView() {
   ];
 
   return (
-    <ManagePageShell
-      eyebrow="系统设置"
-      title="账号管理"
-      description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
-      actions={
-        <Space>
-          <Input.Search
-            placeholder="搜索用户名"
-            onSearch={handleSearch}
-            style={{ width: 250 }}
-            allowClear
-          />
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={handleAdd}
-            disabled={!currentUser?.canWrite}
-          >
-            新增用户
-          </Button>
-        </Space>
-      }
-      panelClassName=""
-      panelless
-    >
+    <div className={styles.pageStack}>
+      <ManagePageHeader
+        title="账号管理"
+        description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
+      />
+
+      <Space size={[8, 8]} wrap>
+        <Input
+          placeholder="搜索用户名"
+          value={searchText}
+          onChange={(event) => setSearchText(event.target.value)}
+          onPressEnter={() => handleSearch(searchText)}
+          className={styles.searchInput}
+          allowClear
+        />
+        <Button type="primary" onClick={() => handleSearch(searchText)}>
+          搜索
+        </Button>
+      </Space>
+
       <Table
         columns={columns}
         dataSource={data}
         rowKey="id"
         loading={loading}
+        bordered
+        title={() => (
+          <div className={styles.tableToolbar}>
+            <div className={styles.tableTitle}>账号列表</div>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={handleAdd}
+              disabled={!currentUser?.canWrite}
+            >
+              新增用户
+            </Button>
+          </div>
+        )}
         pagination={{
           current,
           pageSize,
@@ -329,6 +339,6 @@ export default function UsersPageView() {
           </Form.Item>
         </Form>
       </Modal>
-    </ManagePageShell>
+    </div>
   );
 }

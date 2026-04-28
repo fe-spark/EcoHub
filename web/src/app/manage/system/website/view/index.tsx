@@ -1,15 +1,14 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Form, Input, Switch, Button, Spin, Space, Card, Row, Col } from "antd";
+import { Form, Input, Switch, Button, Spin } from "antd";
 import {
-  SettingOutlined,
   ReloadOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import ManagePageShell from "../../../components/page-shell";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 export default function SiteConfigPageView() {
@@ -63,109 +62,80 @@ export default function SiteConfigPageView() {
   }, [getBasicInfo]);
 
   return (
-    <ManagePageShell
-      eyebrow="系统设置"
-      title="网站配置"
-      description="集中维护站点名称、描述、Logo 与站点可用状态等基础信息。"
-      actions={
-        <Space size="middle">
-          <Button
-            icon={<ReloadOutlined />}
-            loading={fetching}
-            onClick={handleReset}
-          >
-            重置
-          </Button>
-          <Button
-            type="primary"
-            icon={<SaveOutlined />}
-            loading={submitting}
-            onClick={handleUpdate}
-          >
-            更新配置
-          </Button>
-        </Space>
-      }
-      panelClassName={styles.formPanel}
-      panelless
-    >
+    <div className={styles.formPanel}>
+      <ManagePageHeader
+        title="网站配置"
+        description="集中维护站点名称、描述、Logo 与站点可用状态等基础信息。"
+        actions={
+          <>
+            <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
+              重置
+            </Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              loading={submitting}
+              onClick={handleUpdate}
+            >
+              更新配置
+            </Button>
+          </>
+        }
+      />
+
       <Spin spinning={fetching} description="正在加载网站配置...">
         <Form
           form={form}
           layout="vertical"
           className={`${styles.form} ${styles.formCompact}`}
+          requiredMark="optional"
         >
-          <Card
-            title={
-              <Space>
-                <SettingOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                基础配置
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Row gutter={[40, 0]} className={styles.formRow}>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item name="siteName" label="网站名称">
-                  <Input placeholder="请输入网站名称" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item name="keyword" label="搜索关键字">
-                  <Input placeholder="请输入搜索关键字" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item
-                  name="state"
-                  label="网站状态"
-                  valuePropName="checked"
-                >
-                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item
-                  name="isVideoProxy"
-                  label="视频播放代理"
-                  valuePropName="checked"
-                >
-                  <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={16}>
-                <Form.Item name="logo" label="网站Logo">
-                  <Input placeholder="请输入完整的 Logo 图片 URL 地址" />
-                </Form.Item>
-              </Col>
-              <Col xs={24}>
-                <Form.Item name="describe" label="网站描述">
-                  <Input.TextArea
-                    autoSize={{ minRows: 4, maxRows: 8 }}
-                    placeholder="多维度描述本站特色..."
-                  />
-                </Form.Item>
-              </Col>
-              <Col xs={24}>
-                <Form.Item name="hint" label="维护提示">
-                  <Input.TextArea
-                    autoSize={{ minRows: 4, maxRows: 8 }}
-                    placeholder="当网站处于维护状态时，展示给用户的提示语..."
-                  />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
+          <div className={styles.formBody}>
+            <div className={styles.formGrid3}>
+              <Form.Item name="siteName" label="网站名称">
+                <Input placeholder="请输入网站名称" />
+              </Form.Item>
+              <Form.Item name="keyword" label="搜索关键字">
+                <Input placeholder="请输入搜索关键字" />
+              </Form.Item>
+              <Form.Item name="logo" label="网站 Logo">
+                <Input placeholder="请输入完整的 Logo 图片 URL 地址" />
+              </Form.Item>
+            </div>
+
+            <div className={styles.formGrid2}>
+              <Form.Item
+                name="state"
+                label="网站状态"
+                valuePropName="checked"
+              >
+                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              </Form.Item>
+              <Form.Item
+                name="isVideoProxy"
+                label="视频播放代理"
+                valuePropName="checked"
+              >
+                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              </Form.Item>
+            </div>
+
+            <Form.Item name="describe" label="网站描述">
+              <Input.TextArea
+                autoSize={{ minRows: 4, maxRows: 6 }}
+                placeholder="多维度描述本站特色..."
+              />
+            </Form.Item>
+
+            <Form.Item name="hint" label="维护提示">
+              <Input.TextArea
+                autoSize={{ minRows: 4, maxRows: 6 }}
+                placeholder="当网站处于维护状态时，展示给用户的提示语..."
+              />
+            </Form.Item>
+          </div>
         </Form>
       </Spin>
-    </ManagePageShell>
+    </div>
   );
 }

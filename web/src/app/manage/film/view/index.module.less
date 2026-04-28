@@ -1,17 +1,21 @@
-.container {
-  padding: 0;
-  background: transparent;
+.pageStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
 }
 
 .filterBar {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  align-items: center;
-  padding: 16px;
-  background: var(--ant-color-bg-container);
-   border: 1px solid var(--ant-color-border-secondary);
-   border-radius: 8px;
+}
+
+.tableToolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .filterItem {
@@ -22,25 +26,16 @@
   width: 250px;
 }
 
-.tableContainer {
-  padding: 0;
-}
-
-.tableContainerInner {
-  overflow: hidden;
-}
-
-.tableTitleWarp {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.tableTitle {
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .paginationContainer {
   display: flex;
   justify-content: flex-end;
   align-items: center;
-  padding: 16px 0 0;
 }
 
 .filmName {
@@ -66,5 +61,20 @@
 
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 768px) {
+  .searchInput,
+  .filterItem {
+    width: 100%;
+  }
+
+  .tableToolbar {
+    flex-direction: column;
+  }
+
+  .tableActions {
+    width: 100%;
   }
 }
