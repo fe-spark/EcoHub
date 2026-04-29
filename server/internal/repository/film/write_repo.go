@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/config"
@@ -18,6 +19,13 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const searchTagsVisibleCacheInvalidateInterval = 2 * time.Second
+
+var searchTagsVisibleCacheState struct {
+	mu     sync.Mutex
+	lastAt time.Time
+}
 
 func filmIndexContentKeyUpsert() clause.OnConflict {
 	return clause.OnConflict{
@@ -292,6 +300,7 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		return err
 	}
 
+	UpdateSearchTagsForVisibleCollect(infoList...)
 	ScheduleDerivedRefresh(id, infoList...)
 	return nil
 }
@@ -356,6 +365,31 @@ func BatchHandleSearchTag(infos ...model.FilmIndex) {
 		log.Printf("RefreshSearchTagsByPids Error: %v", err)
 		return
 	}
+
+	ClearAllSearchTagsCache()
+}
+
+func UpdateSearchTagsForVisibleCollect(infos ...model.FilmIndex) {
+	if len(infos) == 0 {
+		return
+	}
+	for _, info := range infos {
+		if err := handleDynamicSearchTagsTx(db.Mdb, info); err != nil {
+			log.Printf("UpdateSearchTagsForVisibleCollect Error: %v", err)
+		}
+	}
+	invalidateSearchTagsVisibleCacheThrottled()
+}
+
+func invalidateSearchTagsVisibleCacheThrottled() {
+	now := time.Now()
+	searchTagsVisibleCacheState.mu.Lock()
+	if !searchTagsVisibleCacheState.lastAt.IsZero() && now.Sub(searchTagsVisibleCacheState.lastAt) < searchTagsVisibleCacheInvalidateInterval {
+		searchTagsVisibleCacheState.mu.Unlock()
+		return
+	}
+	searchTagsVisibleCacheState.lastAt = now
+	searchTagsVisibleCacheState.mu.Unlock()
 
 	ClearAllSearchTagsCache()
 }
@@ -672,6 +706,31 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 	return fallback
 }
 
+func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) int64 {
+	if strings.TrimSpace(sourceId) == "" {
+		return 0
+	}
+	if sourcePid > 0 {
+		return sourcePid
+	}
+	if sourceCid <= 0 {
+		return 0
+	}
+
+	current := sourceCid
+	for range [5]int{} {
+		var row model.SourceCategory
+		if err := db.Mdb.Select("parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, current).First(&row).Error; err != nil {
+			return current
+		}
+		if row.ParentSourceTypeId <= 0 {
+			return current
+		}
+		current = row.ParentSourceTypeId
+	}
+	return current
+}
+
 type normalizedSearchMeta struct {
 	Score       float64
 	UpdateStamp int64
@@ -699,6 +758,9 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
 	result.OriginalCategory = resolveOriginalCategoryName(sourceId, sourcePid, sourceCid, detail.CName)
+	rootSourceTypeID := resolveSourceRootTypeID(sourceId, sourcePid, sourceCid)
+	result.PKey = support.BuildSourceCategoryKey(sourceId, rootSourceTypeID)
+	result.CKey = support.BuildSourceCategoryKey(sourceId, sourceCid)
 	result.Cid = support.GetLocalCategoryId(sourceId, sourceCid)
 	if result.Cid > 0 {
 		result.Pid = support.GetRootId(result.Cid)
@@ -715,10 +777,10 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if result.Pid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Pid)
 	}
-	if result.Pid > 0 {
+	if result.PKey == "" && result.Pid > 0 {
 		result.PKey = support.GetCategoryStableKeyByID(result.Pid)
 	}
-	if result.Cid > 0 {
+	if result.CKey == "" && result.Cid > 0 {
 		result.CKey = support.GetCategoryStableKeyByID(result.Cid)
 	}
 	return result

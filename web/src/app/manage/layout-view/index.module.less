@@ -25,12 +25,20 @@
 }
 
 .logoWrap {
-  padding: 20px 0 12px;
+  height: 64px;
+  padding: 0 16px;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 10px;
+  box-sizing: border-box;
   cursor: pointer;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.logoIcon {
+  flex: 0 0 auto;
+  border-radius: 10px !important;
 }
 
 .siteName {
@@ -47,6 +55,7 @@
   flex: 1;
   overflow: auto;
   min-width: 0;
+  border-inline-end: 0 !important;
 }
 
 .header {
@@ -92,6 +101,12 @@
   }
 }
 
+.themeButton {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 20px !important;
+}
+
 .content {
   margin: 0;
   padding: 24px;
@@ -121,7 +136,7 @@
 @media (max-width: 768px) {
   .logoWrap {
     justify-content: flex-start;
-    padding: 16px 20px 12px;
+    padding: 0 20px;
   }
 
   .header {

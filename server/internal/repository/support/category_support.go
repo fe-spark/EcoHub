@@ -22,6 +22,14 @@ func BuildCategoryStableKey(pid int64, name string) string {
 	return fmt.Sprintf("%s/%s", parentKey, name)
 }
 
+func BuildSourceCategoryKey(sourceId string, sourceTypeId int64) string {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" || sourceTypeId <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("source:%s:%d", sourceId, sourceTypeId)
+}
+
 func GetCategoryStableKeyByID(id int64) string {
 	if id <= 0 {
 		return ""
@@ -52,6 +60,10 @@ func ResolveCategoryID(id int64) int64 {
 
 func TouchCategoryVersion() {
 	db.Rdb.Set(db.Cxt, config.CategoryVersionKey, time.Now().UnixNano(), 0)
+}
+
+func TouchSearchTagsVersion() {
+	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, time.Now().UnixNano(), 0)
 }
 
 func GetCategoryVersion() string {

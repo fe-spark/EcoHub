@@ -182,6 +182,20 @@
 
 如果后续发现 `categories`、`category_mappings`、`search_info` 的字段定义不再适合新模型，也可以直接改字段名、删字段或重建表结构，不保留旧语义。
 
+### 分类身份
+
+分类身份必须绑定主站来源分类，而不是绑定本地自增 ID 或分类名称路径。
+
+固定语义如下：
+
+1. `categories.id` 只作为后台 UI 与关系行 ID 使用，可随分类重建变化
+2. `categories.stable_key` 使用 `source:<source_id>:<source_type_id>`
+3. `search_info.root_category_key` 写入来源根分类 Key
+4. `search_info.category_key` 写入来源子分类 Key
+5. 前台继续接收当前分类 ID，但查询时必须先解析到 `stable_key` 再查 `root_category_key` / `category_key`
+
+因此，分类显示、隐藏、排序和展示名称修改不需要重新采集；影片入库时已经锁定来源分类身份。规则变更仍只影响未来采集，如需历史影片改变归类，必须显式执行新的主站采集或重归类任务，不允许通过后台分类保存隐式回写历史结果。
+
 ## 新写入流程
 
 ### 主站采集写入流程

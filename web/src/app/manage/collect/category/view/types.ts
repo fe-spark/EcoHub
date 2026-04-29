@@ -130,30 +130,13 @@ export function findTreeNode(nodes: FilmClassNode[], id: number): FilmClassNode 
   return null;
 }
 
-export function updateTreeNodeShow(nodes: FilmClassNode[], id: number, show: boolean): FilmClassNode[] {
+export function updateTreeNodeVisibility(nodes: FilmClassNode[], id: number, show: boolean): FilmClassNode[] {
   return nodes.map((node) => {
-    if (node.id === id) {
-      return {
-        ...node,
-        show,
-        children: updateTreeNodeShow(node.children || [], id, show),
-      };
-    }
-    return {
-      ...node,
-      children: updateTreeNodeShow(node.children || [], id, show),
-    };
+    const children = updateTreeNodeVisibility(node.children || [], id, show);
+    const { children: _children, ...nodeInfo } = node;
+    const next = children.length > 0 ? { ...nodeInfo, children } : nodeInfo;
+    return node.id === id ? { ...next, show } : next;
   });
-}
-
-export function removeTreeNode(nodes: FilmClassNode[], id: number): FilmClassNode[] {
-  return nodes
-    .filter((node) => node.id !== id)
-    .map((node) => {
-      const children = removeTreeNode(node.children || [], id);
-      const { children: _children, ...nodeInfo } = node;
-      return children.length > 0 ? { ...nodeInfo, children } : nodeInfo;
-    });
 }
 
 function reorderList<T>(items: T[], fromIndex: number, toIndex: number) {

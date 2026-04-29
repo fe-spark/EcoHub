@@ -21,10 +21,10 @@
 
   .trigger {
     border-radius: 50% !important;
-    border-left: 1px solid var(--ant-color-border-secondary) !important;
-    border-right: 1px solid var(--ant-color-border-secondary) !important;
+    border: 1px solid color-mix(in srgb, var(--ant-color-primary) 34%, var(--ant-color-border-secondary)) !important;
     padding-left: 0 !important;
     padding-right: 0 !important;
+    transform: scale(1.06);
   }
 }
 
@@ -86,35 +86,67 @@
 
 // ── 圆形触发按钮 ────────────────────────────────────────────────
 .trigger {
+  position: relative;
   width: 44px;
   height: 44px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: color-mix(in srgb, var(--ant-color-bg-elevated) 86%, transparent);
-  border: 1px solid var(--ant-color-border-secondary);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
-  color: var(--ant-color-text-secondary);
-  transition: box-shadow 0.2s ease, color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 32% 24%, color-mix(in srgb, var(--ant-color-primary) 26%, transparent), transparent 36%),
+    linear-gradient(145deg, color-mix(in srgb, var(--ant-color-bg-elevated) 94%, transparent), color-mix(in srgb, var(--ant-color-bg-container) 78%, transparent));
+  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 16%, var(--ant-color-border-secondary));
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow:
+    0 12px 34px rgba(0, 0, 0, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  color: var(--ant-color-primary);
+  transition:
+    box-shadow 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease,
+    border-color 0.2s ease,
+    transform 0.15s ease;
 
-  svg {
-    display: block;
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: inherit;
+    border: 1px solid color-mix(in srgb, var(--ant-color-primary) 20%, transparent);
     pointer-events: none;
   }
 
+  svg {
+    display: block;
+    position: relative;
+    z-index: 1;
+    pointer-events: none;
+    transform: translateX(0);
+  }
+
   .dock:hover & {
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-    color: var(--ant-color-text);
-    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--ant-color-primary) 36%, var(--ant-color-border-secondary));
+    box-shadow:
+      0 14px 38px rgba(0, 0, 0, 0.26),
+      0 0 0 4px color-mix(in srgb, var(--ant-color-primary) 10%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+    transform: translateY(-1px) scale(1.02);
   }
 
   .dock.expanded & {
     color: var(--ant-color-primary);
-    background: color-mix(in srgb, var(--ant-color-primary-bg) 42%, var(--ant-color-bg-elevated));
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.24);
+    background:
+      radial-gradient(circle at 32% 24%, color-mix(in srgb, var(--ant-color-primary) 34%, transparent), transparent 38%),
+      linear-gradient(145deg, color-mix(in srgb, var(--ant-color-primary-bg) 46%, var(--ant-color-bg-elevated)), var(--ant-color-bg-elevated));
+    border-color: color-mix(in srgb, var(--ant-color-primary) 44%, var(--ant-color-border-secondary));
+    box-shadow:
+      0 16px 44px rgba(0, 0, 0, 0.28),
+      0 0 0 5px color-mix(in srgb, var(--ant-color-primary) 12%, transparent),
+      inset 0 1px 0 rgba(255, 255, 255, 0.22);
   }
 }
 
@@ -122,30 +154,41 @@
 .dock.left .trigger {
   border-radius: 0 22px 22px 0;
   border-left: none;
-  padding-left: 4px;
+  padding-left: 0;
+
+  svg {
+    transform: translateX(-1px);
+  }
 }
 
 .dock.right .trigger {
   border-radius: 22px 0 0 22px;
   border-right: none;
-  padding-right: 4px;
+  padding-right: 0;
+
+  svg {
+    transform: translateX(1px);
+  }
 }
 
 // ── 弹出选项面板 ─────────────────────────────────────────────────
 .panel {
   position: absolute;
-  top: 0;
+  top: -2px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 4px 6px;
-  height: 44px;
-  border-radius: 22px;
-  background: color-mix(in srgb, var(--ant-color-bg-elevated) 88%, transparent);
-  border: 1px solid var(--ant-color-border-secondary);
-  backdrop-filter: blur(14px) saturate(140%);
-  -webkit-backdrop-filter: blur(14px) saturate(140%);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.2);
+  gap: 4px;
+  padding: 5px;
+  height: 48px;
+  border-radius: 24px;
+  background:
+    linear-gradient(145deg, color-mix(in srgb, var(--ant-color-bg-elevated) 94%, transparent), color-mix(in srgb, var(--ant-color-bg-container) 82%, transparent));
+  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 14%, var(--ant-color-border-secondary));
+  backdrop-filter: blur(20px) saturate(165%);
+  -webkit-backdrop-filter: blur(20px) saturate(165%);
+  box-shadow:
+    0 18px 48px rgba(0, 0, 0, 0.26),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
   white-space: nowrap;
 
   // 收起态
@@ -165,14 +208,14 @@
 
   // 吸附右侧时，面板向左展开
   .dock.right & {
-    right: calc(100% + 8px);
+    right: calc(100% + 10px);
     left: auto;
     transform-origin: right center;
   }
 
   // 吸附左侧时，面板向右展开
   .dock.left & {
-    left: calc(100% + 8px);
+    left: calc(100% + 10px);
     right: auto;
     transform-origin: left center;
   }
@@ -180,19 +223,24 @@
 
 // ── 单个选项按钮 ─────────────────────────────────────────────────
 .option {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 12px;
-  height: 34px;
+  gap: 6px;
+  padding: 0 13px;
+  height: 36px;
   border: none;
-  border-radius: 17px;
+  border-radius: 18px;
   background: transparent;
   cursor: pointer;
   font-size: 12px;
   font-weight: 600;
   color: var(--ant-color-text-secondary);
-  transition: background 0.15s ease, color 0.15s ease;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.15s ease,
+    box-shadow 0.15s ease;
   outline: none;
   flex-shrink: 0;
 
@@ -202,13 +250,28 @@
   }
 
   &:hover {
-    background: var(--ant-color-fill-tertiary);
+    background: color-mix(in srgb, var(--ant-color-primary-bg) 34%, var(--ant-color-fill-tertiary));
     color: var(--ant-color-text);
+    transform: translateY(-1px);
   }
 
   &.active {
-    background: var(--ant-color-primary-bg);
-    color: var(--ant-color-primary-text);
+    background: color-mix(in srgb, var(--ant-color-primary) 16%, var(--ant-color-primary-bg));
+    color: var(--ant-color-primary);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 22%, transparent),
+      0 6px 16px color-mix(in srgb, var(--ant-color-primary) 14%, transparent);
+
+    &::after {
+      content: "";
+      position: absolute;
+      right: 8px;
+      bottom: 6px;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: currentColor;
+    }
   }
 }
 

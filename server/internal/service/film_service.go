@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -94,39 +93,11 @@ func (s *FilmService) GetFilmClassById(id int64) *model.CategoryTree {
 func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 	updates := map[string]any{"show": class.Show}
 
-	// 1. 查找旧状态以判断是否需要同步处理搜索可见性
 	oldClass := s.GetFilmClassById(class.Id)
 	if oldClass == nil {
 		return errors.New("需要更新的分类信息不存在")
 	}
 
-	// 2. 如果是父类且 Show 状态变更，处理子类可见性
-	if oldClass.Pid == 0 && oldClass.Show != class.Show && oldClass.Children != nil {
-		for _, subC := range oldClass.Children {
-			var err error
-			if class.Show {
-				err = filmrepo.RecoverFilmSearch(subC.Id)
-			} else {
-				err = filmrepo.ShieldFilmSearch(subC.Id)
-			}
-			if err != nil {
-				return fmt.Errorf("分类 [%d] 搜索可见性更新失败: %s", subC.Id, err.Error())
-			}
-		}
-	} else if oldClass.Pid != 0 && oldClass.Show != class.Show {
-		// 如果是子类且 Show 状态变更
-		var err error
-		if class.Show {
-			err = filmrepo.RecoverFilmSearch(class.Id)
-		} else {
-			err = filmrepo.ShieldFilmSearch(class.Id)
-		}
-		if err != nil {
-			return err
-		}
-	}
-
-	// 3. 执行原子更新并清除缓存
 	return repository.UpdateCategoryStatus(class.Id, updates)
 }
 
@@ -154,30 +125,4 @@ func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
 		return errors.New("分类结构不能为空")
 	}
 	return repository.SaveCategoryTreeStructure(cleanNodes)
-}
-
-// DelClass 删除分类信息
-func (s *FilmService) DelClass(id int64) error {
-	class := s.GetFilmClassById(id)
-	if class == nil {
-		return errors.New("分类信息不存在")
-	}
-
-	// 删除分类前先屏蔽关联影片，避免库存继续挂在已删除分类上。
-	if class.Pid == 0 {
-		if err := filmrepo.ShieldRootFilmSearch(class.Id); err != nil {
-			return err
-		}
-		for _, child := range class.Children {
-			if err := filmrepo.ShieldFilmSearch(child.Id); err != nil {
-				return fmt.Errorf("分类 [%d] 搜索可见性更新失败: %s", child.Id, err.Error())
-			}
-		}
-	} else {
-		if err := filmrepo.ShieldFilmSearch(class.Id); err != nil {
-			return err
-		}
-	}
-
-	return repository.DeleteCategory(id)
 }

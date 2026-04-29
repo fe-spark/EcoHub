@@ -3,6 +3,8 @@ package film
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -10,6 +12,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+
+	"gorm.io/gorm"
 )
 
 func hasEffectiveSearchOptions(options []map[string]string) bool {
@@ -81,7 +85,7 @@ func GetTagsByTitle(pid int64, tagType string) []map[string]string {
 func GetTopTagValues(pid int64, tagType string) []string {
 	pid = support.ResolveCategoryID(pid)
 	if strings.EqualFold(tagType, "Year") {
-		items := loadSearchTagItemsByType(pid)[tagType]
+		items := loadSearchTagItemsByType(model.SearchTagsVO{Pid: pid})[tagType]
 		items = SortYearSearchTagItems(items)
 		items = LimitSearchTagItems(items, SearchTagDisplayLimit)
 
@@ -93,12 +97,9 @@ func GetTopTagValues(pid int64, tagType string) []string {
 	}
 
 	var vals []string
-	db.Mdb.Model(&model.SearchTagItem{}).
-		Select("value").
-		Where("pid = ? AND tag_type = ? AND score >= 5", pid, tagType).
-		Order("score DESC, value ASC, id ASC").
-		Limit(SearchTagDisplayLimit).
-		Find(&vals)
+	for _, item := range LimitSearchTagItems(loadSearchTagItemsByType(model.SearchTagsVO{Pid: pid})[tagType], SearchTagDisplayLimit) {
+		vals = append(vals, item.Value)
+	}
 	return vals
 }
 
@@ -129,7 +130,110 @@ func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
 	return st
 }
 
-func loadSearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
+func baseSearchTagFactQuery(st model.SearchTagsVO) *gorm.DB {
+	st = normalizeSearchTagsVO(st)
+	query := db.Mdb.Model(&model.FilmIndex{})
+	return ApplyCategoryFilter(query, st.Pid, st.Cid)
+}
+
+func searchTagItemsByColumn(st model.SearchTagsVO, tagType string, column string) []model.SearchTagItem {
+	type tagCount struct {
+		Value string
+		Score int64
+	}
+
+	var rows []tagCount
+	if err := baseSearchTagFactQuery(st).
+		Select(fmt.Sprintf("%s AS value, COUNT(*) AS score", column)).
+		Where(hasTextValue(column)).
+		Group(column).
+		Order("score DESC, value ASC").
+		Scan(&rows).Error; err != nil {
+		return nil
+	}
+
+	items := make([]model.SearchTagItem, 0, len(rows))
+	for _, row := range rows {
+		value := normalizeSearchTagValue(tagType, row.Value)
+		if value == "" {
+			continue
+		}
+		items = append(items, model.SearchTagItem{TagType: tagType, Name: value, Value: value, Score: row.Score})
+	}
+	return items
+}
+
+func searchYearTagItems(st model.SearchTagsVO) []model.SearchTagItem {
+	type yearCount struct {
+		Value int64
+		Score int64
+	}
+
+	var rows []yearCount
+	if err := baseSearchTagFactQuery(st).
+		Select("year AS value, COUNT(*) AS score").
+		Where("year > 0").
+		Group("year").
+		Order("year DESC").
+		Scan(&rows).Error; err != nil {
+		return nil
+	}
+
+	items := make([]model.SearchTagItem, 0, len(rows))
+	for _, row := range rows {
+		value := strconv.FormatInt(row.Value, 10)
+		items = append(items, model.SearchTagItem{TagType: "Year", Name: value, Value: value, Score: row.Score})
+	}
+	return items
+}
+
+func searchPlotTagItems(st model.SearchTagsVO) []model.SearchTagItem {
+	var classTags []string
+	if err := baseSearchTagFactQuery(st).
+		Where(hasTextValue("class_tag")).
+		Pluck("class_tag", &classTags).Error; err != nil {
+		return nil
+	}
+
+	counts := make(map[string]int64)
+	for _, classTag := range classTags {
+		for _, part := range reTagSplit.Split(classTag, -1) {
+			value := normalizeSearchTagValue("Plot", part)
+			if value == "" || value == model.TagOthersValue || value == "其他" || value == "其它" || value == "全部" || value == "剧情" || value == "暂无" {
+				continue
+			}
+			counts[value]++
+		}
+	}
+
+	items := make([]model.SearchTagItem, 0, len(counts))
+	for value, score := range counts {
+		items = append(items, model.SearchTagItem{TagType: "Plot", Name: value, Value: value, Score: score})
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Score == items[j].Score {
+			return items[i].Value < items[j].Value
+		}
+		return items[i].Score > items[j].Score
+	})
+	return items
+}
+
+func loadSearchTagItemsByType(st model.SearchTagsVO) map[string][]model.SearchTagItem {
+	st = normalizeSearchTagsVO(st)
+	itemsByType := make(map[string][]model.SearchTagItem)
+	if st.Pid <= 0 {
+		return itemsByType
+	}
+
+	itemsByType["Area"] = searchTagItemsByColumn(st, "Area", "area")
+	itemsByType["Language"] = searchTagItemsByColumn(st, "Language", "language")
+	itemsByType["Year"] = searchYearTagItems(st)
+	itemsByType["Plot"] = searchPlotTagItems(st)
+	return itemsByType
+}
+
+func loadLegacySearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
 	pid = support.ResolveCategoryID(pid)
 	var allItems []model.SearchTagItem
 	db.Mdb.Where("pid = ? AND score > 0", pid).Order("tag_type ASC, score DESC, value ASC, id ASC").Find(&allItems)
@@ -142,7 +246,10 @@ func loadSearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
 }
 
 func getAbnormalSearchTagValues(pid int64, tagType string) []string {
-	items := loadSearchTagItemsByType(pid)[tagType]
+	items := loadSearchTagItemsByType(model.SearchTagsVO{Pid: pid})[tagType]
+	if len(items) == 0 {
+		items = loadLegacySearchTagItemsByType(pid)[tagType]
+	}
 	_, abnormalItems := SplitSearchTagItems(tagType, items)
 	values := make([]string, 0, len(abnormalItems))
 	seen := make(map[string]struct{}, len(abnormalItems))
@@ -166,7 +273,7 @@ func hasOthersSearchFacts(pid int64, tagType string) bool {
 		return false
 	}
 
-	query := db.Mdb.Model(&model.FilmIndex{}).Where("pid = ?", pid)
+	query := buildCategoryQuery("pid", pid)
 	switch tagType {
 	case "Year":
 		query = query.Where("year <= 0 OR year IS NULL")
@@ -259,7 +366,7 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	tagMap := make(map[string]any)
 	activeTitles := make(map[string]string)
 	activeSortList := make([]string, 0)
-	itemsByType := loadSearchTagItemsByType(pid)
+	itemsByType := loadSearchTagItemsByType(st)
 
 	for _, t := range tagTypes {
 		if t == "OriginalCategory" {

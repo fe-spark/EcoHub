@@ -23,16 +23,28 @@ import {
   MenuUnfoldOutlined,
   LogoutOutlined,
   UserOutlined,
+  BgColorsOutlined,
+  SunOutlined,
+  MoonOutlined,
+  DesktopOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
+import type { ThemeMode } from "@/components/theme/ThemeDock";
 import styles from "./index.module.less";
 
 const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
 
 type MenuItem = Required<MenuProps>["items"][number];
+
+const themeModeLabels: Record<ThemeMode, string> = {
+  light: "浅色",
+  dark: "深色",
+  system: "跟随系统",
+};
 
 const menuItems: MenuItem[] = [
   {
@@ -147,6 +159,7 @@ export default function ManageLayoutView({
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const { config: siteInfo } = useSiteConfig();
+  const { mode, setMode } = useThemeMode();
   const [userInfo, setUserInfo] = useState<any>(null);
   const screens = useBreakpoint();
   const isMobile = !screens.lg;
@@ -180,10 +193,35 @@ export default function ManageLayoutView({
   };
 
   const openKeys = collectOpenKeys(menuItems, selectedKey);
+  const themeMenuItems: MenuProps["items"] = [
+    {
+      key: "light",
+      icon: <SunOutlined />,
+      label: themeModeLabels.light,
+    },
+    {
+      key: "dark",
+      icon: <MoonOutlined />,
+      label: themeModeLabels.dark,
+    },
+    {
+      key: "system",
+      icon: <DesktopOutlined />,
+      label: themeModeLabels.system,
+    },
+  ];
+
   const menuNode = (
     <>
       <div className={styles.logoWrap} onClick={() => window.open("/", "_blank")}>
-        {siteInfo?.logo && <Avatar src={siteInfo.logo} size={30} />}
+        {siteInfo?.logo && (
+          <Avatar
+            src={siteInfo.logo}
+            size={34}
+            shape="square"
+            className={styles.logoIcon}
+          />
+        )}
         {(!collapsed || isMobile) && siteInfo?.siteName && (
           <span className={styles.siteName}>{siteInfo.siteName}</span>
         )}
@@ -191,6 +229,7 @@ export default function ManageLayoutView({
       <Menu
         mode="inline"
         className={styles.menu}
+        style={{ borderInlineEnd: 0 }}
         selectedKeys={[selectedKey]}
         defaultOpenKeys={openKeys}
         items={menuItems}
@@ -241,6 +280,23 @@ export default function ManageLayoutView({
            </Space>
 
           <Space size="small" className={styles.userArea}>
+            <Dropdown
+              menu={{
+                selectedKeys: [mode],
+                items: themeMenuItems,
+                onClick: ({ key }) => setMode(key as ThemeMode),
+              }}
+              placement="bottomRight"
+              arrow
+            >
+              <Button
+                type="text"
+                icon={<BgColorsOutlined />}
+                className={`${styles.headerIconBtn} ${styles.themeButton}`}
+              >
+                {!isMobile ? themeModeLabels[mode] : null}
+              </Button>
+            </Dropdown>
             {userInfo && (
               <Dropdown
                 menu={{

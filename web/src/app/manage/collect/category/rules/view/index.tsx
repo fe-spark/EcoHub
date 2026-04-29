@@ -15,7 +15,7 @@ export default function CategoryRulePageView() {
 
   return (
     <div className={styles.pageBody}>
-      <ManagePageHeader title="分类规则" description="配置下一轮主站采集生效的分类匹配规则。" />
+      <ManagePageHeader title="分类规则" description="将主站来源分类合并到前台展示分类。" />
 
       <Card size="small">
         <Descriptions size="small" column={{ xs: 1, md: 2 }}>
@@ -31,8 +31,8 @@ export default function CategoryRulePageView() {
       <Alert
         type="info"
         showIcon
-        message="规则只影响未来采集"
-        description="修改分类规则不会回写历史展示数据。需要新规则生效时，请重新执行主站全量采集。"
+        message="规则立即刷新分类映射"
+        description="一级/二级规则用于把来源分类合并到目标展示分类；保存后会刷新分类树和来源映射，历史影片不重写、不重采集，查询时会按最新映射归入新分组。"
       />
 
       <RuleWorkspace ruleTotals={ruleTotals} onRuleTotalsChange={handleRuleTotalsChange} />

@@ -98,7 +98,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
           showIcon
           message={
             watchedMatchType === "regex"
-              ? "建议从 ^ 开头、$ 结尾收紧范围，避免一条规则误吞过多分类。分类规则只影响后续主站采集，不回写历史展示结果。"
+              ? "建议从 ^ 开头、$ 结尾收紧范围，避免一条规则误吞过多分类。分类规则会刷新展示分类与来源映射，不回写历史影片。"
               : "精确匹配只会命中完全相同的原始分类名，优先级高于正则规则。"
           }
         />

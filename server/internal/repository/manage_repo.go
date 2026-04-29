@@ -57,7 +57,6 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	rec := model.SiteConfigRecord{
 		SiteName: c.SiteName, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
-		IsVideoProxy: c.IsVideoProxy,
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{}).Error; err != nil {
@@ -96,7 +95,6 @@ func GetSiteBasic() model.BasicConfig {
 	c = model.BasicConfig{
 		SiteName: rec.SiteName, Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
-		IsVideoProxy: rec.IsVideoProxy,
 	}
 	// 回填缓存
 	data, _ := json.Marshal(c)

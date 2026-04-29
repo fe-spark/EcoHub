@@ -41,6 +41,8 @@ var retryBackoffs = []time.Duration{
 const (
 	// 主站运行期间，附属站仍保留有限并发，避免总采集时长被单站串行拖得过长。
 	slaveSourceConcurrencyWhileMasterOn = 5
+	// 全部站点同时采集时，请求可以并发，但写库必须收敛，避免 MySQL 连接池和热点 upsert 被打满。
+	collectDBWriteConcurrency = 3
 )
 
 // activeTasks 存储当前活跃采集任务的信息
@@ -54,6 +56,8 @@ var stopAllVersion atomic.Uint64
 // 1. 主站避免分页并发写主数据时互相打架；
 // 2. 附属站避免多页并发刷新播放列表与摘要，把 MySQL 连接池瞬时打满。
 var sourceWriteLocks sync.Map
+
+var collectDBWriteSem = make(chan struct{}, collectDBWriteConcurrency)
 
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
@@ -89,6 +93,12 @@ func getSourceWriteLock(sourceID string) *sync.Mutex {
 	lock := &sync.Mutex{}
 	actual, _ := sourceWriteLocks.LoadOrStore(sourceID, lock)
 	return actual.(*sync.Mutex)
+}
+
+func runCollectDBWrite(write func() error) error {
+	collectDBWriteSem <- struct{}{}
+	defer func() { <-collectDBWriteSem }()
+	return write()
 }
 
 type collectTask struct {
@@ -168,6 +178,26 @@ func (s *collectLifecycleState) runFlush(flush func() error) error {
 	s.mu.Unlock()
 
 	err := flush()
+
+	s.mu.Lock()
+	s.flushing = false
+	s.mu.Unlock()
+	s.cond.Broadcast()
+	return err
+}
+
+func (s *collectLifecycleState) runExclusive(action func() error) error {
+	s.mu.Lock()
+	for s.flushing {
+		s.cond.Wait()
+	}
+	s.flushing = true
+	for s.activeCount > 0 {
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+
+	err := action()
 
 	s.mu.Lock()
 	s.flushing = false
@@ -692,7 +722,10 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	case model.MasterCollect:
 		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
-		if err = saveMaster(s.Id, list); err != nil {
+		err = runCollectDBWrite(func() error {
+			return saveMaster(s.Id, list)
+		})
+		if err != nil {
 			lock.Unlock()
 			return fmt.Errorf("save master details failed: %w", err)
 		}
@@ -705,7 +738,10 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	case model.SlaveCollect:
 		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
-		if err = filmrepo.SaveSitePlayList(s.Id, list); err != nil {
+		err = runCollectDBWrite(func() error {
+			return filmrepo.SaveSitePlayList(s.Id, list)
+		})
+		if err != nil {
 			lock.Unlock()
 			return fmt.Errorf("save slave playlists failed: %w", err)
 		}
@@ -889,9 +925,12 @@ func AutoCollect(h int) {
 	flushSourcesPending("Auto-Collect", enabled)
 }
 
-// ClearSpider 删除所有已采集的影片信息
-func ClearSpider() {
-	filmrepo.FilmZero()
+// ClearSpider 删除所有已采集的影片信息，并与采集写库互斥。
+func ClearSpider() error {
+	StopAllTasks()
+	return collectLifecycle.runExclusive(func() error {
+		return filmrepo.FilmZero()
+	})
 }
 
 // CollectSingleFilm 通过全局影片 ID 更新所有启用站点的对应影片。

@@ -38,7 +38,7 @@ const quickEntries = [
     key: "category-rules",
     icon: DatabaseOutlined,
     title: "分类规则",
-    description: "配置下一轮主站采集生效的分类匹配规则。",
+    description: "配置来源分类到展示分类的合并映射。",
     href: "/manage/collect/category/rules",
   },
   {

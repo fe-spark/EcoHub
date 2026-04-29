@@ -35,8 +35,8 @@ func (CategoryMapping) TableName() string {
 // SourceCategory 当前主站原始分类树
 type SourceCategory struct {
 	Id                 int64     `gorm:"primaryKey;autoIncrement:true" json:"id"`
-	SourceId           string    `gorm:"index:idx_source_parent_sort,priority:1;size:32" json:"source_id"`
-	SourceTypeId       int64     `gorm:"uniqueIndex:idx_source_type_id" json:"source_type_id"`
+	SourceId           string    `gorm:"uniqueIndex:idx_source_type_id,priority:1;index:idx_source_parent_sort,priority:1;size:32" json:"source_id"`
+	SourceTypeId       int64     `gorm:"uniqueIndex:idx_source_type_id,priority:2" json:"source_type_id"`
 	ParentSourceTypeId int64     `gorm:"index:idx_source_parent_sort,priority:2" json:"parent_source_type_id"`
 	RawName            string    `gorm:"column:raw_name;size:64" json:"raw_name"`
 	Sort               int       `gorm:"index:idx_source_parent_sort,priority:3" json:"sort"`

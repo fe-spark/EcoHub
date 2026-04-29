@@ -1,9 +1,18 @@
-import React, { useMemo } from "react";
-import { Button, Card, Empty, Popconfirm, Space, Table, Tag, Typography } from "antd";
+import React, { useCallback, useMemo, useRef } from "react";
+import { Button, Empty, Space, Switch, Table, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { DeleteOutlined, HolderOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
-import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { HolderOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  DndContext,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type CollisionDetection,
+  type DragEndEvent,
+  type Modifier,
+} from "@dnd-kit/core";
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FilmClassNode } from "./types";
@@ -15,13 +24,14 @@ interface CategoryTreeCardProps {
   loadingTree: boolean;
   savingTree: boolean;
   resettingTree: boolean;
+  updatingShowIds: number[];
   hasPendingChanges: boolean;
   onRefresh: () => void;
   onReset: () => void;
   onSave: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
-  onDelete: (id: number) => void;
+  onShowChange: (id: number, show: boolean) => void;
 }
 
 function flattenVisibleNodes(nodes: FilmClassNode[], expandedKeys: React.Key[]) {
@@ -64,16 +74,53 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     loadingTree,
     savingTree,
     resettingTree,
+    updatingShowIds,
     hasPendingChanges,
     onRefresh,
     onReset,
     onSave,
     onExpand,
     onMove,
-    onDelete,
+    onShowChange,
   } = props;
+  const treePanelRef = useRef<HTMLDivElement>(null);
+  const tableBodyRectRef = useRef<DOMRect | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   const sortableItems = useMemo(() => flattenVisibleNodes(classTree, expandedKeys).map(String), [classTree, expandedKeys]);
+
+  const collisionDetection = useCallback<CollisionDetection>((args) => {
+    const pointer = args.pointerCoordinates;
+    const bodyRect = tableBodyRectRef.current;
+    if (pointer && bodyRect) {
+      const isInsideBody =
+        pointer.x >= bodyRect.left &&
+        pointer.x <= bodyRect.right &&
+        pointer.y >= bodyRect.top &&
+        pointer.y <= bodyRect.bottom;
+      if (!isInsideBody) {
+        return [];
+      }
+    }
+    return closestCenter(args);
+  }, []);
+
+  const restrictDragToTableBody = useCallback<Modifier>(({ activeNodeRect, transform }) => {
+    const bodyRect = tableBodyRectRef.current;
+    if (!bodyRect || !activeNodeRect) {
+      return transform;
+    }
+
+    const minY = bodyRect.top - activeNodeRect.top;
+    const maxY = bodyRect.bottom - activeNodeRect.bottom;
+    return {
+      ...transform,
+      y: Math.min(Math.max(transform.y, minY), maxY),
+    };
+  }, []);
+
+  const handleDragStart = () => {
+    tableBodyRectRef.current = treePanelRef.current?.querySelector(".ant-table-tbody")?.getBoundingClientRect() ?? null;
+  };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
@@ -135,14 +182,18 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       render: (children?: FilmClassNode[]) => children?.length || 0,
     },
     {
-      title: "操作",
-      key: "action",
+      title: "显示",
+      dataIndex: "show",
       width: 90,
+      fixed: "right",
       align: "center",
-      render: (_, record) => (
-        <Popconfirm title="确认删除该分类？" okText="删除" cancelText="取消" onConfirm={() => void onDelete(record.id)}>
-          <Button size="small" type="text" danger icon={<DeleteOutlined />} />
-        </Popconfirm>
+      render: (value: boolean, record) => (
+        <Switch
+          size="small"
+          checked={value}
+          loading={updatingShowIds.includes(record.id)}
+          onChange={(checked) => onShowChange(record.id, checked)}
+        />
       ),
     },
   ];
@@ -153,50 +204,49 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   };
 
   return (
-    <Card
-      title="分类管理"
-      extra={
-        <Space wrap>
-          <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
-            刷新分类
-          </Button>
-          <Button onClick={onReset} loading={resettingTree}>
-            重置分类
-          </Button>
-          <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!hasPendingChanges}>
-            保存变更
-          </Button>
-        </Space>
-      }
-    >
-      <Space direction="vertical" size={16} className={styles.fullWidth}>
-        <Typography.Text type="secondary">这里只负责当前主站分类框架草稿。删除操作会先进入本地草稿，点击保存后统一提交。</Typography.Text>
-        {classTree.length === 0 ? (
-          <Empty description="暂无分类数据" />
-        ) : (
-          <div className={styles.treePanel}>
-            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-              <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
-                <Table<FilmClassNode>
-                  rowKey="id"
-                  columns={columns}
-                  dataSource={classTree}
-                  components={tableComponents}
-                  loading={loadingTree}
-                  pagination={false}
-                  size="middle"
-                  scroll={{ x: "max-content" }}
-                  expandable={{
-                    expandedRowKeys: expandedKeys,
-                    rowExpandable: (record) => (record.children?.length || 0) > 0,
-                    onExpandedRowsChange: onExpand,
-                  }}
-                />
-              </SortableContext>
-            </DndContext>
-          </div>
-        )}
-      </Space>
-    </Card>
+    <div className={styles.treePanel} ref={treePanelRef}>
+      <DndContext
+        sensors={sensors}
+        modifiers={[restrictDragToTableBody]}
+        collisionDetection={collisionDetection}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
+          <Table<FilmClassNode>
+            rowKey="id"
+            columns={columns}
+            dataSource={classTree}
+            components={tableComponents}
+            loading={loadingTree}
+            pagination={false}
+            size="middle"
+            scroll={{ x: "max-content" }}
+            locale={{ emptyText: <Empty description="暂无分类数据" /> }}
+            title={() => (
+              <div className={styles.tableHeader}>
+                <div className={styles.tableTitle}>分类管理</div>
+                <Space wrap className={styles.tableActions}>
+                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
+                    刷新分类
+                  </Button>
+                  <Button onClick={onReset} loading={resettingTree}>
+                    重置分类
+                  </Button>
+                  <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!hasPendingChanges}>
+                    保存变更
+                  </Button>
+                </Space>
+              </div>
+            )}
+            expandable={{
+              expandedRowKeys: expandedKeys,
+              rowExpandable: (record) => (record.children?.length || 0) > 0,
+              onExpandedRowsChange: onExpand,
+            }}
+          />
+        </SortableContext>
+      </DndContext>
+    </div>
   );
 }

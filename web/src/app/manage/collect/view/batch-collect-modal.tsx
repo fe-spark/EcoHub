@@ -1,4 +1,4 @@
-import { Alert, Button, Checkbox, Flex, Form, Modal, Select, Space, Table, Tag, Typography } from "antd";
+import { Alert, Flex, Form, Modal, Select, Space, Table, Tag, Typography } from "antd";
 import { useMemo } from "react";
 import { LoadingOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -13,7 +13,6 @@ interface BatchCollectModalProps {
   batchTime: number;
   onCancel: () => void;
   onSubmit: () => void;
-  onSelectionChange: (ids: string[]) => void;
   onBatchTimeChange: (value: number) => void;
 }
 
@@ -26,15 +25,10 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
     batchTime,
     onCancel,
     onSubmit,
-    onSelectionChange,
     onBatchTimeChange,
   } = props;
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const enabledIds = useMemo(
-    () => options.filter((item) => item.state).map((item) => item.id),
-    [options],
-  );
   const selectedRunningNames = useMemo(
     () => options.filter((item) => selectedSet.has(item.id) && activeCollectIds.includes(item.id)).map((item) => item.name),
     [activeCollectIds, options, selectedSet],
@@ -50,9 +44,6 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
             <Typography.Text strong>{value}</Typography.Text>
             <Tag color={record.grade === 0 ? "gold" : "default"} bordered={false}>
               {record.grade === 0 ? "主站" : "附属站"}
-            </Tag>
-            <Tag color={record.state ? "success" : "default"} bordered={false}>
-              {record.state ? "已启用" : "已停用"}
             </Tag>
             {activeCollectIds.includes(record.id) ? (
               <Tag icon={<LoadingOutlined />} color="processing" bordered={false}>
@@ -86,27 +77,10 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
           />
         ) : null}
 
-        <Flex justify="space-between" align="center" wrap="wrap" gap={12}>
-          <Space size={[8, 8]} wrap>
-            <Button onClick={() => onSelectionChange(options.map((item) => item.id))}>全选</Button>
-            <Button onClick={() => onSelectionChange(enabledIds)}>仅选启用站点</Button>
-            <Button
-              onClick={() =>
-                onSelectionChange(
-                  options.filter((item) => !selectedSet.has(item.id)).map((item) => item.id),
-                )
-              }
-            >
-              反选
-            </Button>
-            <Button onClick={() => onSelectionChange([])}>清空</Button>
-          </Space>
-          <Space size={[8, 8]} wrap>
-            <Tag bordered={false}>已选 {selectedIds.length}</Tag>
-            <Tag bordered={false}>启用 {enabledIds.length}</Tag>
-            <Tag bordered={false}>运行中 {activeCollectIds.length}</Tag>
-          </Space>
-        </Flex>
+        <Space size={[8, 8]} wrap>
+          <Tag bordered={false}>将采集 {selectedIds.length} 个站点</Tag>
+          <Tag bordered={false}>运行中 {activeCollectIds.length}</Tag>
+        </Space>
 
         <Table<BatchOption>
           rowKey="id"
@@ -115,10 +89,6 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
           dataSource={options}
           pagination={false}
           scroll={{ y: 360 }}
-          rowSelection={{
-            selectedRowKeys: selectedIds,
-            onChange: (keys) => onSelectionChange(keys as string[]),
-          }}
         />
 
         <Form layout="vertical">

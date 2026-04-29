@@ -56,8 +56,14 @@ func (s *SpiderService) AutoCollect(time int) {
 }
 
 // ClearFilms 删除采集的数据信息
-func (s *SpiderService) ClearFilms() {
-	go spider.ClearSpider()
+func (s *SpiderService) ClearFilms() error {
+	if err := spider.ClearSpider(); err != nil {
+		return err
+	}
+	if err := s.SyncMasterCategoryTree(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // SyncCollect 同步主站单片采集
