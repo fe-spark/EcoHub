@@ -64,8 +64,11 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		dto.Failed("重置失败, 密钥校验失败!!!", c)
 		return
 	}
-	service.SpiderSvc.ClearFilms()
-	dto.SuccessOnlyMsg("影视数据已删除!!!", c)
+	if err := service.SpiderSvc.ClearFilms(); err != nil {
+		dto.Failed(fmt.Sprint("影视数据清空失败: ", err.Error()), c)
+		return
+	}
+	dto.SuccessOnlyMsg("全站影视数据已清空，主站分类已重建!!!", c)
 }
 
 // SingleUpdateSpider 单一影片主站更新采集

@@ -1,13 +1,11 @@
 package handler
 
 import (
-	"net/url"
 	"strconv"
 	"strings"
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -43,19 +41,6 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) s
 	}
 
 	return ""
-}
-
-func wrapProxyLink(link string) string {
-	if link == "" {
-		return link
-	}
-	if strings.HasPrefix(link, "/api/proxy/video?url=") {
-		return link
-	}
-	if strings.HasPrefix(link, "http://") || strings.HasPrefix(link, "https://") {
-		return "/api/proxy/video?url=" + url.QueryEscape(link)
-	}
-	return link
 }
 
 // Index 首页数据
@@ -96,14 +81,10 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("暂无影片信息", c)
 		return
 	}
-	useProxy := repository.GetSiteBasic().IsVideoProxy
 	for i := range detail.List {
 		var valid []model.MovieUrlInfo
 		for _, ep := range detail.List[i].LinkList {
 			if ep.Link != "" {
-				if useProxy {
-					ep.Link = wrapProxyLink(ep.Link)
-				}
 				valid = append(valid, ep)
 			}
 		}

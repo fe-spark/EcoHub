@@ -1,13 +1,13 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { getFilmClassTree, resetFilmClassTree, saveFilmClassTree } from "./api";
+import { getFilmClassTree, resetFilmClassTree, saveFilmClassTree, updateFilmClassShow } from "./api";
 import {
   cloneTree,
   collectStats,
   moveCategoryWithinSameParent,
   normalizeTree,
-  removeTreeNode,
   serializeTree,
+  updateTreeNodeVisibility,
   type FilmClassNode,
 } from "./types";
 
@@ -19,6 +19,7 @@ export function useCategoryTreeState() {
   const [loadingTree, setLoadingTree] = useState(false);
   const [savingTree, setSavingTree] = useState(false);
   const [resettingTree, setResettingTree] = useState(false);
+  const [updatingShowIds, setUpdatingShowIds] = useState<number[]>([]);
 
   const stats = useMemo(() => collectStats(classTree), [classTree]);
   const hasPendingChanges = useMemo(
@@ -73,17 +74,28 @@ export function useCategoryTreeState() {
     }
   }, [classTree, fetchFilmClassTree, message]);
 
-  const queueDeleteClass = useCallback(
-    (id: number) => {
-      setClassTree((prev) => normalizeTree(removeTreeNode(prev, id)));
-      message.success("删除操作已加入待保存变更");
-    },
-    [message],
-  );
-
   const moveClassWithinSameParent = useCallback((dragId: number, dropId: number) => {
     setClassTree((prev) => moveCategoryWithinSameParent(prev, dragId, dropId));
   }, []);
+
+  const updateClassVisibility = useCallback(
+    async (id: number, show: boolean) => {
+      setUpdatingShowIds((prev) => [...prev, id]);
+      try {
+        const resp = await updateFilmClassShow(id, show);
+        if (resp.code !== 0) {
+          message.error(resp.msg || "更新分类显示状态失败");
+          return;
+        }
+        setClassTree((prev) => updateTreeNodeVisibility(prev, id, show));
+        setOriginalTree((prev) => updateTreeNodeVisibility(prev, id, show));
+        message.success(show ? "分类已显示" : "分类已隐藏");
+      } finally {
+        setUpdatingShowIds((prev) => prev.filter((item) => item !== id));
+      }
+    },
+    [message],
+  );
 
   return {
     classTree,
@@ -91,6 +103,7 @@ export function useCategoryTreeState() {
     loadingTree,
     savingTree,
     resettingTree,
+    updatingShowIds,
     stats,
     hasPendingChanges,
     fetchFilmClassTree,
@@ -98,6 +111,6 @@ export function useCategoryTreeState() {
     saveTree,
     setExpandedKeys,
     moveClassWithinSameParent,
-    queueDeleteClass,
+    updateClassVisibility,
   };
 }

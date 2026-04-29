@@ -17,7 +17,6 @@ func SetupRouter() *gin.Engine {
 	api := r.Group("/api")
 
 	api.GET(`/index`, handler.IndexHd.Index)
-	api.GET(`/proxy/video`, handler.ProxyHd.ProxyVideo)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
@@ -123,7 +122,6 @@ func SetupRouter() *gin.Engine {
 			filmRoute.POST(`/class/collect`, handler.FilmHd.CollectFilmClass)
 			filmRoute.POST(`/class/tree/save`, handler.FilmHd.SaveFilmClassTree)
 			filmRoute.POST(`/class/update`, handler.FilmHd.UpdateFilmClass)
-			filmRoute.POST(`/class/del`, handler.FilmHd.DelFilmClass)
 		}
 
 		// 文件管理

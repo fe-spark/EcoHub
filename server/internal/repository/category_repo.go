@@ -3,111 +3,23 @@ package repository
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmrepo "server/internal/repository/film"
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 )
-
-var (
-	categoryRebuildOnce  sync.Once
-	categoryRebuildMu    sync.Mutex
-	categoryRebuilding   bool
-	categoryRebuildDirty bool
-)
-
-const searchInfoCategoryBindingBatchSize = 200
-
-type searchInfoCategoryKeyBinding struct {
-	CategoryKey string
-	Pid         int64
-	Cid         int64
-	RootKey     string
-	CName       string
-}
-
-type searchInfoRootBinding struct {
-	RootKey string
-	Pid     int64
-	CName   string
-}
-
-type searchInfoCategoryIDBinding struct {
-	CategoryID  int64
-	Pid         int64
-	RootKey     string
-	CategoryKey string
-	CName       string
-}
-
-type searchInfoZeroCidPidBinding struct {
-	FromPid       int64
-	ToPid         int64
-	RootKey       string
-	CName         string
-	CategoryKey   string
-	ResetCategory bool
-}
-
-func initCategoryRebuildWorker() {
-	categoryRebuildOnce.Do(func() {
-	})
-}
-
-func TriggerRebuildCategoriesFromSourceCategoriesAsync() {
-	initCategoryRebuildWorker()
-	categoryRebuildMu.Lock()
-	categoryRebuildDirty = true
-	if categoryRebuilding {
-		categoryRebuildMu.Unlock()
-		log.Println("[CategoryRebuild] 重建进行中，已标记补跑")
-		return
-	}
-	categoryRebuilding = true
-	categoryRebuildMu.Unlock()
-	log.Println("[CategoryRebuild] 已触发异步重建来源分类映射")
-	go runCategoryRebuildWorker()
-}
-
-func runCategoryRebuildWorker() {
-	for {
-		categoryRebuildMu.Lock()
-		if !categoryRebuildDirty {
-			categoryRebuilding = false
-			categoryRebuildMu.Unlock()
-			return
-		}
-		categoryRebuildDirty = false
-		categoryRebuildMu.Unlock()
-
-		log.Println("[CategoryRebuild] 开始异步重建来源分类映射")
-		if err := RebuildCategoriesFromSourceCategories(); err != nil {
-			log.Printf("[CategoryRebuild] 异步重建来源分类映射失败: %v", err)
-			categoryRebuildMu.Lock()
-			categoryRebuildDirty = true
-			categoryRebuildMu.Unlock()
-			time.Sleep(time.Second)
-			continue
-		}
-		log.Println("[CategoryRebuild] 异步重建来源分类映射完成")
-	}
-}
 
 type categoryPlacement struct {
 	Id    int64
 	Pid   int64
 	Sort  int
 	Depth int
-	Show  bool
 }
 
 type sourceCategoryPlacement struct {
@@ -123,10 +35,6 @@ type categoryTreeWalkNode struct {
 	ParentId int64
 	Depth    int
 	Sort     int
-}
-
-func buildCategoryStableKey(pid int64, name string) string {
-	return support.BuildCategoryStableKey(pid, name)
 }
 
 func BuildCategoryStableKey(pid int64, name string) string {
@@ -162,31 +70,6 @@ func GetCategoryByStableKey(stableKey string) *model.Category {
 
 func ResolveCategoryID(id int64) int64 {
 	return support.ResolveCategoryID(id)
-}
-
-func normalizeCategoryStableKeys(tx *gorm.DB) error {
-	var roots []model.Category
-	if err := tx.Where("pid = 0").Order("sort ASC, id ASC").Find(&roots).Error; err != nil {
-		return err
-	}
-	for _, root := range roots {
-		rootKey := buildCategoryStableKey(0, root.Name)
-		if err := tx.Model(&model.Category{}).Where("id = ?", root.Id).Update("stable_key", rootKey).Error; err != nil {
-			return err
-		}
-
-		var children []model.Category
-		if err := tx.Where("pid = ?", root.Id).Order("sort ASC, id ASC").Find(&children).Error; err != nil {
-			return err
-		}
-		for _, child := range children {
-			childKey := fmt.Sprintf("%s/%s", rootKey, strings.TrimSpace(child.Name))
-			if err := tx.Model(&model.Category{}).Where("id = ?", child.Id).Update("stable_key", childKey).Error; err != nil {
-				return err
-			}
-		}
-	}
-	return nil
 }
 
 func touchCategoryVersion() {
@@ -233,17 +116,6 @@ func ResetCategoryTree(sourceId string, tree *model.CategoryTree) error {
 	return saveCategoryTree(sourceId, tree, false, false)
 }
 
-func cloneCategoryMap(src map[int64]model.Category) map[int64]model.Category {
-	if len(src) == 0 {
-		return map[int64]model.Category{}
-	}
-	dst := make(map[int64]model.Category, len(src))
-	for id, item := range src {
-		dst[id] = item
-	}
-	return dst
-}
-
 func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusinessFields bool, skipRebuild bool) error {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" {
@@ -257,10 +129,10 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 	if err := flattenSourceCategoryPlacements(tree.Children, 0, 0, &plans); err != nil {
 		return err
 	}
-	return saveCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild, true)
+	return saveCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild)
 }
 
-func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserveBusinessFields bool, skipRebuild bool, refreshSearchInfos bool) error {
+func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserveBusinessFields bool, skipRebuild bool) error {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" {
 		return fmt.Errorf("source id 不能为空")
@@ -271,16 +143,17 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&oldCategories).Error; err != nil {
 			return err
 		}
-		oldMap := make(map[int64]model.Category, len(oldCategories))
+		currentMap := make(map[int64]model.Category, len(oldCategories))
 		stableKeyToCategory := make(map[string]model.Category, len(oldCategories))
+		categoryByParentName := make(map[string]model.Category, len(oldCategories))
 		for _, item := range oldCategories {
-			oldMap[item.Id] = item
+			currentMap[item.Id] = item
+			categoryByParentName[categoryParentNameKey(item.Pid, item.Name)] = item
 			stableKey := strings.TrimSpace(item.StableKey)
 			if stableKey != "" {
 				stableKeyToCategory[stableKey] = item
 			}
 		}
-		currentMap := cloneCategoryMap(oldMap)
 
 		var oldMappings []model.CategoryMapping
 		if err := tx.Where("source_id = ?", sourceId).Find(&oldMappings).Error; err != nil {
@@ -310,6 +183,7 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 			}
 			currentMap = make(map[int64]model.Category)
 			stableKeyToCategory = make(map[string]model.Category)
+			categoryByParentName = make(map[string]model.Category)
 		}
 
 		if preserveBusinessFields {
@@ -335,7 +209,7 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 		}
 
 		sourceTypeToCategory := make(map[int64]int64, len(plans))
-		sourceTypeToStableKey := make(map[int64]string, len(plans))
+		sourceTypeToDisplayKey := make(map[int64]string, len(plans))
 		claimedCategoryIDs := make(map[int64]struct{}, len(plans))
 		seenSourceType := make(map[int64]struct{}, len(plans))
 		for _, plan := range plans {
@@ -354,18 +228,40 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				pid = parentId
 			}
 
-			stableKey := buildCategoryStableKey(pid, normalizedName)
-			if plan.ParentSourceTypeId > 0 {
-				parentStableKey, ok := sourceTypeToStableKey[plan.ParentSourceTypeId]
-				if !ok {
-					return fmt.Errorf("来源父分类稳定标识不存在: %d", plan.ParentSourceTypeId)
+			stableKey := buildDisplayCategoryStableKey(pid, normalizedName, sourceTypeToDisplayKey[plan.ParentSourceTypeId])
+			if stableKey == "" {
+				return fmt.Errorf("来源分类稳定标识生成失败: %d", plan.SourceTypeId)
+			}
+
+			if existingCategory, ok := categoryByParentName[categoryParentNameKey(pid, normalizedName)]; ok {
+				updates := map[string]any{
+					"pid":        pid,
+					"name":       normalizedName,
+					"stable_key": stableKey,
 				}
-				stableKey = fmt.Sprintf("%s/%s", parentStableKey, normalizedName)
+				if !preserveBusinessFields {
+					updates["sort"] = plan.Sort
+					updates["show"] = true
+					updates["alias"] = ""
+				}
+				if err := tx.Model(&model.Category{}).Where("id = ?", existingCategory.Id).Updates(updates).Error; err != nil {
+					return err
+				}
+				existingCategory.Pid = pid
+				existingCategory.Name = normalizedName
+				existingCategory.StableKey = stableKey
+				currentMap[existingCategory.Id] = existingCategory
+				stableKeyToCategory[stableKey] = existingCategory
+				categoryByParentName[categoryParentNameKey(pid, normalizedName)] = existingCategory
+				sourceTypeToCategory[plan.SourceTypeId] = existingCategory.Id
+				sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
+				claimedCategoryIDs[existingCategory.Id] = struct{}{}
+				continue
 			}
 
 			if existingCategory, ok := stableKeyToCategory[stableKey]; ok {
 				sourceTypeToCategory[plan.SourceTypeId] = existingCategory.Id
-				sourceTypeToStableKey[plan.SourceTypeId] = stableKey
+				sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
 				claimedCategoryIDs[existingCategory.Id] = struct{}{}
 				continue
 			}
@@ -401,6 +297,7 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				existingCategory.StableKey = stableKey
 				currentMap[categoryId] = existingCategory
 				stableKeyToCategory[stableKey] = existingCategory
+				categoryByParentName[categoryParentNameKey(pid, normalizedName)] = existingCategory
 			} else {
 				category := model.Category{Pid: pid, Name: normalizedName, StableKey: stableKey, Show: true, Sort: plan.Sort}
 				if err := tx.Create(&category).Error; err != nil {
@@ -409,10 +306,11 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				categoryId = category.Id
 				currentMap[categoryId] = category
 				stableKeyToCategory[stableKey] = category
+				categoryByParentName[categoryParentNameKey(pid, normalizedName)] = category
 			}
 			claimedCategoryIDs[categoryId] = struct{}{}
 			sourceTypeToCategory[plan.SourceTypeId] = categoryId
-			sourceTypeToStableKey[plan.SourceTypeId] = stableKey
+			sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
 		}
 
 		if preserveBusinessFields {
@@ -454,16 +352,6 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				}
 			}
 		}
-		// refreshSearchInfos=false 代表只刷新未来采集要使用的分类框架与映射，
-		// 明确禁止借规则变更去回写历史 film_index。
-		if preserveBusinessFields && refreshSearchInfos {
-			if err := refreshSearchInfoCategoryBindingsTx(tx, sourceId, oldMap, currentMap); err != nil {
-				return err
-			}
-		}
-		if refreshSearchInfos {
-			return refreshSearchInfoCategoryBindingsByStableKeysTx(tx, sourceId, currentMap)
-		}
 		return nil
 	})
 	if err != nil {
@@ -472,9 +360,6 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 
 	if !skipRebuild {
 		MarkCategoryChanged()
-		if err := rebuildCategorySearchTagsByAllRoots(); err != nil {
-			return err
-		}
 	}
 	return nil
 }
@@ -512,41 +397,9 @@ func loadSourceCategoryPlacementsBySourceIDs(sourceIDs []string) (map[string][]s
 	return plansBySource, nil
 }
 
-func RebuildCategoriesFromSourceCategories() error {
-	var sourceIDs []string
-	if err := db.Mdb.Model(&model.FilmSource{}).Where("state = ? AND grade = ?", true, model.MasterCollect).Pluck("id", &sourceIDs).Error; err != nil {
-		return err
-	}
-	plansBySource, err := loadSourceCategoryPlacementsBySourceIDs(sourceIDs)
-	if err != nil {
-		return err
-	}
-	for _, sourceID := range sourceIDs {
-		plans := plansBySource[sourceID]
-		if len(plans) == 0 {
-			continue
-		}
-		if err := saveCategoryPlans(sourceID, plans, true, true, true); err != nil {
-			return err
-		}
-	}
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return normalizeCategoryStableKeys(tx)
-	}); err != nil {
-		return err
-	}
-
-	MarkCategoryChanged()
-	if err := rebuildCategorySearchTagsByAllRoots(); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func RefreshFutureCategoryMappingsFromSourceCategories() error {
-	// 这里只刷新 categories/category_mappings/cacheSourceMap，
-	// 让新规则作用于“之后的主站采集”，不回刷已经固化的历史 film_index。
+	// 这里只刷新 categories/category_mappings/cacheSourceMap，不回刷已经固化的历史 film_index。
+	// 历史影片在查询时通过最新来源映射自然归入新展示分组。
 	var sourceIDs []string
 	if err := db.Mdb.Model(&model.FilmSource{}).Where("state = ? AND grade = ?", true, model.MasterCollect).Pluck("id", &sourceIDs).Error; err != nil {
 		return err
@@ -560,27 +413,14 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 		if len(plans) == 0 {
 			continue
 		}
-		if err := saveCategoryPlans(sourceID, plans, true, true, false); err != nil {
+		if err := saveCategoryPlans(sourceID, plans, true, true); err != nil {
 			return err
 		}
-	}
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return normalizeCategoryStableKeys(tx)
-	}); err != nil {
-		return err
 	}
 	RefreshCategoryCache()
 	ReloadMappingRules()
 	touchCategoryVersion()
 	return nil
-}
-
-func rebuildCategorySearchTagsByAllRoots() error {
-	var rootPids []int64
-	if err := db.Mdb.Model(&model.Category{}).Where("pid = ?", 0).Order("sort ASC, id ASC").Pluck("id", &rootPids).Error; err != nil {
-		return err
-	}
-	return filmrepo.RefreshSearchTagsByPids(rootPids...)
 }
 
 func GetSourceCategoryTree(sourceId string) (*model.CategoryTree, error) {
@@ -648,424 +488,6 @@ func sortCategoryTreeNodes(nodes []*model.CategoryTree) {
 	}
 }
 
-func chunkStrings(items []string, size int) [][]string {
-	if len(items) == 0 {
-		return nil
-	}
-	if size <= 0 {
-		size = len(items)
-	}
-	chunks := make([][]string, 0, (len(items)+size-1)/size)
-	for start := 0; start < len(items); start += size {
-		end := start + size
-		if end > len(items) {
-			end = len(items)
-		}
-		chunks = append(chunks, items[start:end])
-	}
-	return chunks
-}
-
-func chunkCategoryKeyBindings(items []searchInfoCategoryKeyBinding, size int) [][]searchInfoCategoryKeyBinding {
-	if len(items) == 0 {
-		return nil
-	}
-	if size <= 0 {
-		size = len(items)
-	}
-	chunks := make([][]searchInfoCategoryKeyBinding, 0, (len(items)+size-1)/size)
-	for start := 0; start < len(items); start += size {
-		end := start + size
-		if end > len(items) {
-			end = len(items)
-		}
-		chunks = append(chunks, items[start:end])
-	}
-	return chunks
-}
-
-func chunkRootBindings(items []searchInfoRootBinding, size int) [][]searchInfoRootBinding {
-	if len(items) == 0 {
-		return nil
-	}
-	if size <= 0 {
-		size = len(items)
-	}
-	chunks := make([][]searchInfoRootBinding, 0, (len(items)+size-1)/size)
-	for start := 0; start < len(items); start += size {
-		end := start + size
-		if end > len(items) {
-			end = len(items)
-		}
-		chunks = append(chunks, items[start:end])
-	}
-	return chunks
-}
-
-func chunkCategoryIDBindings(items []searchInfoCategoryIDBinding, size int) [][]searchInfoCategoryIDBinding {
-	if len(items) == 0 {
-		return nil
-	}
-	if size <= 0 {
-		size = len(items)
-	}
-	chunks := make([][]searchInfoCategoryIDBinding, 0, (len(items)+size-1)/size)
-	for start := 0; start < len(items); start += size {
-		end := start + size
-		if end > len(items) {
-			end = len(items)
-		}
-		chunks = append(chunks, items[start:end])
-	}
-	return chunks
-}
-
-func chunkZeroCidPidBindings(items []searchInfoZeroCidPidBinding, size int) [][]searchInfoZeroCidPidBinding {
-	if len(items) == 0 {
-		return nil
-	}
-	if size <= 0 {
-		size = len(items)
-	}
-	chunks := make([][]searchInfoZeroCidPidBinding, 0, (len(items)+size-1)/size)
-	for start := 0; start < len(items); start += size {
-		end := start + size
-		if end > len(items) {
-			end = len(items)
-		}
-		chunks = append(chunks, items[start:end])
-	}
-	return chunks
-}
-
-func sqlPlaceholders(count int) string {
-	if count <= 0 {
-		return ""
-	}
-	parts := make([]string, count)
-	for i := 0; i < count; i++ {
-		parts[i] = "?"
-	}
-	return strings.Join(parts, ",")
-}
-
-func appendSourceFilter(where string, args []any, sourceId string) (string, []any) {
-	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" {
-		return where, args
-	}
-	return where + " AND source_id = ?", append(args, sourceId)
-}
-
-func batchUpdateSearchInfoByCategoryKeys(tx *gorm.DB, sourceId string, bindings []searchInfoCategoryKeyBinding) error {
-	for _, chunk := range chunkCategoryKeyBindings(bindings, searchInfoCategoryBindingBatchSize) {
-		keys := make([]string, 0, len(chunk))
-		pidArgs := make([]any, 0, len(chunk)*2)
-		cidArgs := make([]any, 0, len(chunk)*2)
-		rootKeyArgs := make([]any, 0, len(chunk)*2)
-		nameArgs := make([]any, 0, len(chunk)*2)
-
-		pidCase := strings.Builder{}
-		cidCase := strings.Builder{}
-		rootKeyCase := strings.Builder{}
-		nameCase := strings.Builder{}
-		pidCase.WriteString("CASE category_key")
-		cidCase.WriteString("CASE category_key")
-		rootKeyCase.WriteString("CASE category_key")
-		nameCase.WriteString("CASE category_key")
-
-		for _, binding := range chunk {
-			keys = append(keys, binding.CategoryKey)
-			pidCase.WriteString(" WHEN ? THEN ?")
-			pidArgs = append(pidArgs, binding.CategoryKey, binding.Pid)
-			cidCase.WriteString(" WHEN ? THEN ?")
-			cidArgs = append(cidArgs, binding.CategoryKey, binding.Cid)
-			rootKeyCase.WriteString(" WHEN ? THEN ?")
-			rootKeyArgs = append(rootKeyArgs, binding.CategoryKey, binding.RootKey)
-			nameCase.WriteString(" WHEN ? THEN ?")
-			nameArgs = append(nameArgs, binding.CategoryKey, binding.CName)
-		}
-
-		pidCase.WriteString(" ELSE pid END")
-		cidCase.WriteString(" ELSE cid END")
-		rootKeyCase.WriteString(" ELSE root_category_key END")
-		nameCase.WriteString(" ELSE c_name END")
-
-		whereArgs := make([]any, 0, len(keys)+1)
-		for _, key := range keys {
-			whereArgs = append(whereArgs, key)
-		}
-		whereClause, whereArgs := appendSourceFilter("category_key IN ("+sqlPlaceholders(len(keys))+")", whereArgs, sourceId)
-		args := make([]any, 0, len(pidArgs)+len(cidArgs)+len(rootKeyArgs)+len(nameArgs)+len(whereArgs))
-		args = append(args, pidArgs...)
-		args = append(args, cidArgs...)
-		args = append(args, rootKeyArgs...)
-		args = append(args, nameArgs...)
-		args = append(args, whereArgs...)
-
-		sql := fmt.Sprintf("UPDATE %s SET pid = %s, cid = %s, root_category_key = %s, c_name = %s WHERE %s", model.TableFilmIndex, pidCase.String(), cidCase.String(), rootKeyCase.String(), nameCase.String(), whereClause)
-		if err := tx.Exec(sql, args...).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func batchUpdateSearchInfoZeroCidRoots(tx *gorm.DB, sourceId string, bindings []searchInfoRootBinding) error {
-	for _, chunk := range chunkRootBindings(bindings, searchInfoCategoryBindingBatchSize) {
-		rootKeys := make([]string, 0, len(chunk))
-		pidArgs := make([]any, 0, len(chunk)*2)
-		rootKeyArgs := make([]any, 0, len(chunk)*2)
-		nameArgs := make([]any, 0, len(chunk)*2)
-
-		pidCase := strings.Builder{}
-		rootKeyCase := strings.Builder{}
-		nameCase := strings.Builder{}
-		pidCase.WriteString("CASE root_category_key")
-		rootKeyCase.WriteString("CASE root_category_key")
-		nameCase.WriteString("CASE root_category_key")
-
-		for _, binding := range chunk {
-			rootKeys = append(rootKeys, binding.RootKey)
-			pidCase.WriteString(" WHEN ? THEN ?")
-			pidArgs = append(pidArgs, binding.RootKey, binding.Pid)
-			rootKeyCase.WriteString(" WHEN ? THEN ?")
-			rootKeyArgs = append(rootKeyArgs, binding.RootKey, binding.RootKey)
-			nameCase.WriteString(" WHEN ? THEN ?")
-			nameArgs = append(nameArgs, binding.RootKey, binding.CName)
-		}
-
-		pidCase.WriteString(" ELSE pid END")
-		rootKeyCase.WriteString(" ELSE root_category_key END")
-		nameCase.WriteString(" ELSE c_name END")
-
-		whereArgs := make([]any, 0, len(rootKeys)+1)
-		for _, key := range rootKeys {
-			whereArgs = append(whereArgs, key)
-		}
-		whereClause, whereArgs := appendSourceFilter("cid = 0 AND root_category_key IN ("+sqlPlaceholders(len(rootKeys))+")", whereArgs, sourceId)
-		args := make([]any, 0, len(pidArgs)+len(rootKeyArgs)+len(nameArgs)+len(whereArgs))
-		args = append(args, pidArgs...)
-		args = append(args, rootKeyArgs...)
-		args = append(args, nameArgs...)
-		args = append(args, whereArgs...)
-
-		sql := fmt.Sprintf("UPDATE %s SET pid = %s, root_category_key = %s, c_name = CASE WHEN c_name = '' OR c_name IS NULL THEN %s ELSE c_name END WHERE %s", model.TableFilmIndex, pidCase.String(), rootKeyCase.String(), nameCase.String(), whereClause)
-		if err := tx.Exec(sql, args...).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func batchUpdateSearchInfoByCategoryIDs(tx *gorm.DB, sourceId string, bindings []searchInfoCategoryIDBinding) error {
-	for _, chunk := range chunkCategoryIDBindings(bindings, searchInfoCategoryBindingBatchSize) {
-		categoryIDs := make([]int64, 0, len(chunk))
-		pidArgs := make([]any, 0, len(chunk)*2)
-		rootKeyArgs := make([]any, 0, len(chunk)*2)
-		categoryKeyArgs := make([]any, 0, len(chunk)*2)
-		nameArgs := make([]any, 0, len(chunk)*2)
-
-		pidCase := strings.Builder{}
-		rootKeyCase := strings.Builder{}
-		categoryKeyCase := strings.Builder{}
-		nameCase := strings.Builder{}
-		pidCase.WriteString("CASE cid")
-		rootKeyCase.WriteString("CASE cid")
-		categoryKeyCase.WriteString("CASE cid")
-		nameCase.WriteString("CASE cid")
-
-		for _, binding := range chunk {
-			categoryIDs = append(categoryIDs, binding.CategoryID)
-			pidCase.WriteString(" WHEN ? THEN ?")
-			pidArgs = append(pidArgs, binding.CategoryID, binding.Pid)
-			rootKeyCase.WriteString(" WHEN ? THEN ?")
-			rootKeyArgs = append(rootKeyArgs, binding.CategoryID, binding.RootKey)
-			categoryKeyCase.WriteString(" WHEN ? THEN ?")
-			categoryKeyArgs = append(categoryKeyArgs, binding.CategoryID, binding.CategoryKey)
-			nameCase.WriteString(" WHEN ? THEN ?")
-			nameArgs = append(nameArgs, binding.CategoryID, binding.CName)
-		}
-
-		pidCase.WriteString(" ELSE pid END")
-		rootKeyCase.WriteString(" ELSE root_category_key END")
-		categoryKeyCase.WriteString(" ELSE category_key END")
-		nameCase.WriteString(" ELSE c_name END")
-
-		whereArgs := make([]any, 0, len(categoryIDs)+1)
-		for _, categoryID := range categoryIDs {
-			whereArgs = append(whereArgs, categoryID)
-		}
-		whereClause, whereArgs := appendSourceFilter("cid IN ("+sqlPlaceholders(len(categoryIDs))+")", whereArgs, sourceId)
-		args := make([]any, 0, len(pidArgs)+len(rootKeyArgs)+len(categoryKeyArgs)+len(nameArgs)+len(whereArgs))
-		args = append(args, pidArgs...)
-		args = append(args, rootKeyArgs...)
-		args = append(args, categoryKeyArgs...)
-		args = append(args, nameArgs...)
-		args = append(args, whereArgs...)
-
-		sql := fmt.Sprintf("UPDATE %s SET pid = %s, root_category_key = %s, category_key = %s, c_name = %s WHERE %s", model.TableFilmIndex, pidCase.String(), rootKeyCase.String(), categoryKeyCase.String(), nameCase.String(), whereClause)
-		if err := tx.Exec(sql, args...).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func batchUpdateSearchInfoZeroCidPids(tx *gorm.DB, sourceId string, bindings []searchInfoZeroCidPidBinding) error {
-	for _, chunk := range chunkZeroCidPidBindings(bindings, searchInfoCategoryBindingBatchSize) {
-		fromPids := make([]int64, 0, len(chunk))
-		pidArgs := make([]any, 0, len(chunk)*2)
-		rootKeyArgs := make([]any, 0, len(chunk)*2)
-		nameArgs := make([]any, 0, len(chunk)*2)
-		categoryKeyArgs := make([]any, 0, len(chunk)*2)
-
-		pidCase := strings.Builder{}
-		rootKeyCase := strings.Builder{}
-		nameCase := strings.Builder{}
-		categoryKeyCase := strings.Builder{}
-		pidCase.WriteString("CASE pid")
-		rootKeyCase.WriteString("CASE pid")
-		nameCase.WriteString("CASE pid")
-		categoryKeyCase.WriteString("CASE pid")
-
-		resetCategory := false
-		for _, binding := range chunk {
-			fromPids = append(fromPids, binding.FromPid)
-			pidCase.WriteString(" WHEN ? THEN ?")
-			pidArgs = append(pidArgs, binding.FromPid, binding.ToPid)
-			rootKeyCase.WriteString(" WHEN ? THEN ?")
-			rootKeyArgs = append(rootKeyArgs, binding.FromPid, binding.RootKey)
-			nameCase.WriteString(" WHEN ? THEN ?")
-			nameArgs = append(nameArgs, binding.FromPid, binding.CName)
-			if binding.ResetCategory {
-				resetCategory = true
-				categoryKeyCase.WriteString(" WHEN ? THEN ?")
-				categoryKeyArgs = append(categoryKeyArgs, binding.FromPid, binding.CategoryKey)
-			}
-		}
-
-		pidCase.WriteString(" ELSE pid END")
-		rootKeyCase.WriteString(" ELSE root_category_key END")
-		nameCase.WriteString(" ELSE c_name END")
-		categoryKeyCase.WriteString(" ELSE category_key END")
-
-		whereArgs := make([]any, 0, len(fromPids)+1)
-		for _, fromPid := range fromPids {
-			whereArgs = append(whereArgs, fromPid)
-		}
-		whereClause, whereArgs := appendSourceFilter("cid = 0 AND pid IN ("+sqlPlaceholders(len(fromPids))+")", whereArgs, sourceId)
-		args := make([]any, 0, len(pidArgs)+len(rootKeyArgs)+len(nameArgs)+len(categoryKeyArgs)+len(whereArgs))
-		args = append(args, pidArgs...)
-		args = append(args, rootKeyArgs...)
-		args = append(args, nameArgs...)
-		if resetCategory {
-			args = append(args, categoryKeyArgs...)
-		}
-		args = append(args, whereArgs...)
-
-		sql := fmt.Sprintf("UPDATE %s SET pid = %s, root_category_key = %s, c_name = %s", model.TableFilmIndex, pidCase.String(), rootKeyCase.String(), nameCase.String())
-		if resetCategory {
-			sql += ", category_key = " + categoryKeyCase.String()
-		}
-		sql += " WHERE " + whereClause
-
-		if err := tx.Exec(sql, args...).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func refreshSearchInfoCategoryBindingsByStableKeysTx(tx *gorm.DB, sourceId string, newMap map[int64]model.Category) error {
-	if len(newMap) == 0 {
-		return nil
-	}
-	sourceId = strings.TrimSpace(sourceId)
-	searchInfoQuery := tx.Model(&model.FilmIndex{})
-	if sourceId != "" {
-		searchInfoQuery = searchInfoQuery.Where("source_id = ?", sourceId)
-	}
-
-	rootByStableKey := make(map[string]model.Category)
-	categoryByStableKey := make(map[string]model.Category)
-	var validCategoryKeys []string
-
-	for _, item := range newMap {
-		stableKey := strings.TrimSpace(item.StableKey)
-		if stableKey == "" {
-			continue
-		}
-		categoryByStableKey[stableKey] = item
-		validCategoryKeys = append(validCategoryKeys, stableKey)
-		if item.Pid == 0 {
-			rootByStableKey[stableKey] = item
-		}
-	}
-
-	// 1. Clear category_key and cid for invalid category_keys
-	if len(validCategoryKeys) > 0 {
-		if err := searchInfoQuery.
-			Where("category_key != '' AND category_key NOT IN ?", validCategoryKeys).
-			Updates(map[string]any{
-				"cid":          0,
-				"category_key": "",
-			}).Error; err != nil {
-			return err
-		}
-	} else {
-		if err := searchInfoQuery.
-			Where("category_key != ''").
-			Updates(map[string]any{
-				"cid":          0,
-				"category_key": "",
-			}).Error; err != nil {
-			return err
-		}
-	}
-
-	bindings := make([]searchInfoCategoryKeyBinding, 0, len(categoryByStableKey))
-	for key, category := range categoryByStableKey {
-		var nextPid int64
-		var nextRootKey string
-		if category.Pid == 0 {
-			nextPid = category.Id
-			nextRootKey = category.StableKey
-		} else {
-			parent, ok := newMap[category.Pid]
-			if !ok {
-				return fmt.Errorf("分类父级不存在: %d", category.Pid)
-			}
-			nextPid = parent.Id
-			nextRootKey = parent.StableKey
-		}
-		bindings = append(bindings, searchInfoCategoryKeyBinding{
-			CategoryKey: key,
-			Pid:         nextPid,
-			Cid:         category.Id,
-			RootKey:     nextRootKey,
-			CName:       category.Name,
-		})
-	}
-	if err := batchUpdateSearchInfoByCategoryKeys(tx, sourceId, bindings); err != nil {
-		return err
-	}
-
-	rootBindings := make([]searchInfoRootBinding, 0, len(rootByStableKey))
-	for rootKey, root := range rootByStableKey {
-		rootBindings = append(rootBindings, searchInfoRootBinding{
-			RootKey: rootKey,
-			Pid:     root.Id,
-			CName:   root.Name,
-		})
-	}
-	if err := batchUpdateSearchInfoZeroCidRoots(tx, sourceId, rootBindings); err != nil {
-		return err
-	}
-
-	return nil
-}
-
 func normalizeCategoryPlanName(plan sourceCategoryPlacement) string {
 	name := strings.TrimSpace(plan.Name)
 	if name == "" {
@@ -1075,6 +497,28 @@ func normalizeCategoryPlanName(plan sourceCategoryPlacement) string {
 		return support.NormalizeRootCategoryName(name)
 	}
 	return support.NormalizeSubCategoryName(name)
+}
+
+func categoryParentNameKey(pid int64, name string) string {
+	return fmt.Sprintf("%d:%s", pid, strings.TrimSpace(name))
+}
+
+func buildDisplayCategoryStableKey(pid int64, name string, parentKey string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if pid == 0 {
+		return fmt.Sprintf("display:root:%s", name)
+	}
+	parentKey = strings.TrimSpace(parentKey)
+	if parentKey == "" {
+		parentKey = support.GetCategoryStableKeyByID(pid)
+	}
+	if parentKey == "" {
+		return fmt.Sprintf("display:sub:%d:%s", pid, name)
+	}
+	return fmt.Sprintf("%s/%s", parentKey, name)
 }
 
 func walkTwoLevelCategoryTree(nodes []*model.CategoryTree, parentId int64, depth int, visit func(item categoryTreeWalkNode) error) error {
@@ -1320,10 +764,9 @@ func sortRootCategories(children []*model.CategoryTree) {
 	})
 }
 
-// ClearCategoryCache 清除分类相关的所有缓存 (Redis + 内存映射)
+// ClearCategoryCache 清除分类相关缓存，不触碰已固化的搜索标签。
 func ClearCategoryCache() {
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
-	filmrepo.ClearAllSearchTagsCache()
 	RefreshCategoryCache()
 }
 
@@ -1331,17 +774,13 @@ func MarkCategoryChanged() {
 	ClearCategoryCache()
 	InitMappingEngine()
 	touchCategoryVersion()
+	support.TouchSearchTagsVersion()
 	ClearIndexPageCache()
 }
 
 // UpdateCategoryStatus 仅更新分类的显示状态或名称，并清除缓存
 func UpdateCategoryStatus(id int64, updates map[string]any) error {
 	if err := db.Mdb.Model(&model.Category{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return normalizeCategoryStableKeys(tx)
-	}); err != nil {
 		return err
 	}
 	MarkCategoryChanged()
@@ -1359,164 +798,9 @@ func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, dept
 			Pid:   item.ParentId,
 			Sort:  item.Sort,
 			Depth: item.Depth,
-			Show:  node.Show,
 		})
 		return nil
 	})
-}
-
-func childCategoryIDsByParent(categories map[int64]model.Category, parentId int64) []int64 {
-	ids := make([]int64, 0)
-	for _, item := range categories {
-		if item.Pid == parentId {
-			ids = append(ids, item.Id)
-		}
-	}
-	return ids
-}
-
-func markFilmIndexDeletedByCategoryIDsTx(tx *gorm.DB, categoryIDs []int64) error {
-	if len(categoryIDs) == 0 {
-		return nil
-	}
-	return tx.Where("cid IN ?", categoryIDs).Delete(&model.FilmIndex{}).Error
-}
-
-func recoverFilmIndexByCategoryIDsTx(tx *gorm.DB, categoryIDs []int64) error {
-	if len(categoryIDs) == 0 {
-		return nil
-	}
-	return tx.Model(&model.FilmIndex{}).Unscoped().Where("cid IN ?", categoryIDs).Update("deleted_at", nil).Error
-}
-
-func deleteRootFilmIndexTx(tx *gorm.DB, rootID int64) error {
-	if rootID <= 0 {
-		return nil
-	}
-	return tx.Where("cid = ? OR (pid = ? AND cid = 0)", rootID, rootID).Delete(&model.FilmIndex{}).Error
-}
-
-func applyCategoryVisibilityAndDeletionTx(tx *gorm.DB, oldMap map[int64]model.Category, newMap map[int64]model.Category, deletedIDs map[int64]struct{}) error {
-	for id, prev := range oldMap {
-		if _, deleted := deletedIDs[id]; deleted {
-			if prev.Pid == 0 {
-				if err := deleteRootFilmIndexTx(tx, prev.Id); err != nil {
-					return err
-				}
-				if err := markFilmIndexDeletedByCategoryIDsTx(tx, childCategoryIDsByParent(oldMap, prev.Id)); err != nil {
-					return err
-				}
-				continue
-			}
-			if err := markFilmIndexDeletedByCategoryIDsTx(tx, []int64{prev.Id}); err != nil {
-				return err
-			}
-			continue
-		}
-
-		next := newMap[id]
-		if prev.Show == next.Show {
-			continue
-		}
-
-		if next.Pid == 0 {
-			childIDs := childCategoryIDsByParent(newMap, next.Id)
-			if next.Show {
-				if err := recoverFilmIndexByCategoryIDsTx(tx, childIDs); err != nil {
-					return err
-				}
-			} else {
-				if err := markFilmIndexDeletedByCategoryIDsTx(tx, childIDs); err != nil {
-					return err
-				}
-			}
-			continue
-		}
-
-		if next.Show {
-			if err := recoverFilmIndexByCategoryIDsTx(tx, []int64{next.Id}); err != nil {
-				return err
-			}
-			continue
-		}
-		if err := markFilmIndexDeletedByCategoryIDsTx(tx, []int64{next.Id}); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func rootCategoryIDByMap(categories map[int64]model.Category, id int64) int64 {
-	current := id
-	for current > 0 {
-		item, ok := categories[current]
-		if !ok {
-			return 0
-		}
-		if item.Pid == 0 {
-			return item.Id
-		}
-		current = item.Pid
-	}
-	return 0
-}
-
-func refreshSearchInfoCategoryBindingsTx(tx *gorm.DB, sourceId string, oldMap map[int64]model.Category, newMap map[int64]model.Category) error {
-	categoryBindings := make([]searchInfoCategoryIDBinding, 0, len(newMap))
-	zeroCidBindings := make([]searchInfoZeroCidPidBinding, 0, len(newMap))
-	for id, next := range newMap {
-		prev, ok := oldMap[id]
-		if !ok {
-			continue
-		}
-		if prev.Pid == next.Pid && prev.StableKey == next.StableKey && prev.Name == next.Name {
-			continue
-		}
-
-		if next.Pid == 0 {
-			categoryBindings = append(categoryBindings, searchInfoCategoryIDBinding{
-				CategoryID:  next.Id,
-				Pid:         next.Id,
-				RootKey:     next.StableKey,
-				CategoryKey: next.StableKey,
-				CName:       next.Name,
-			})
-			zeroCidBindings = append(zeroCidBindings, searchInfoZeroCidPidBinding{
-				FromPid: prev.Id,
-				ToPid:   next.Id,
-				RootKey: next.StableKey,
-				CName:   next.Name,
-			})
-			continue
-		}
-
-		parent, ok := newMap[next.Pid]
-		if !ok {
-			return fmt.Errorf("分类父级不存在: %d", next.Pid)
-		}
-		categoryBindings = append(categoryBindings, searchInfoCategoryIDBinding{
-			CategoryID:  next.Id,
-			Pid:         parent.Id,
-			RootKey:     parent.StableKey,
-			CategoryKey: next.StableKey,
-			CName:       next.Name,
-		})
-		zeroCidBindings = append(zeroCidBindings, searchInfoZeroCidPidBinding{
-			FromPid:       prev.Id,
-			ToPid:         parent.Id,
-			RootKey:       parent.StableKey,
-			CName:         next.Name,
-			CategoryKey:   "",
-			ResetCategory: true,
-		})
-	}
-	if err := batchUpdateSearchInfoByCategoryIDs(tx, sourceId, categoryBindings); err != nil {
-		return err
-	}
-	if err := batchUpdateSearchInfoZeroCidPids(tx, sourceId, zeroCidBindings); err != nil {
-		return err
-	}
-	return nil
 }
 
 func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
@@ -1545,21 +829,22 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 			return fmt.Errorf("分类结构中存在重复节点: %d", placement.Id)
 		}
 		seen[placement.Id] = struct{}{}
+		if placement.Pid != item.Pid {
+			return fmt.Errorf("分类 %s 只允许同级排序，不能移动到其他父级", item.Name)
+		}
 		key := fmt.Sprintf("%d:%s", placement.Pid, strings.TrimSpace(item.Name))
 		if exists, ok := nameKeys[key]; ok && exists != placement.Id {
 			return fmt.Errorf("同级分类名称重复: %s", item.Name)
 		}
 		nameKeys[key] = placement.Id
 	}
-	deletedIDs := make(map[int64]struct{})
-	for id := range oldMap {
+	for id, item := range oldMap {
 		if _, ok := seen[id]; ok {
 			continue
 		}
-		deletedIDs[id] = struct{}{}
+		return fmt.Errorf("分类 %s 不允许删除，请使用显示/隐藏开关", item.Name)
 	}
 
-	affectedPids := make(map[int64]struct{})
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		for _, placement := range placements {
 			item := oldMap[placement.Id]
@@ -1568,112 +853,13 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 			}
 			if err := tx.Model(&model.Category{}).
 				Where("id = ?", placement.Id).
-				Updates(map[string]any{"pid": placement.Pid, "sort": placement.Sort, "show": placement.Show}).Error; err != nil {
+				Updates(map[string]any{"pid": placement.Pid, "sort": placement.Sort}).Error; err != nil {
 				return err
-			}
-		}
-		if len(deletedIDs) > 0 {
-			deleteList := make([]int64, 0, len(deletedIDs))
-			for id := range deletedIDs {
-				deleteList = append(deleteList, id)
-			}
-			if err := tx.Where("category_id IN ?", deleteList).Delete(&model.CategoryMapping{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Where("id IN ?", deleteList).Delete(&model.Category{}).Error; err != nil {
-				return err
-			}
-		}
-		if err := normalizeCategoryStableKeys(tx); err != nil {
-			return err
-		}
-
-		var updated []model.Category
-		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&updated).Error; err != nil {
-			return err
-		}
-		newMap := make(map[int64]model.Category, len(updated))
-		for _, item := range updated {
-			newMap[item.Id] = item
-		}
-
-		if err := refreshSearchInfoCategoryBindingsTx(tx, "", oldMap, newMap); err != nil {
-			return err
-		}
-		if err := applyCategoryVisibilityAndDeletionTx(tx, oldMap, newMap, deletedIDs); err != nil {
-			return err
-		}
-
-		for id, prev := range oldMap {
-			if _, deleted := deletedIDs[id]; deleted {
-				if oldRoot := rootCategoryIDByMap(oldMap, prev.Id); oldRoot > 0 {
-					affectedPids[oldRoot] = struct{}{}
-				}
-				continue
-			}
-			next := newMap[id]
-			if prev.Pid == next.Pid && prev.StableKey == next.StableKey && prev.Name == next.Name && prev.Show == next.Show {
-				continue
-			}
-			if oldRoot := rootCategoryIDByMap(oldMap, prev.Id); oldRoot > 0 {
-				affectedPids[oldRoot] = struct{}{}
-			}
-			if newRoot := rootCategoryIDByMap(newMap, next.Id); newRoot > 0 {
-				affectedPids[newRoot] = struct{}{}
 			}
 		}
 		return nil
 	})
 	if err != nil {
-		return err
-	}
-
-	MarkCategoryChanged()
-	if len(affectedPids) == 0 {
-		return nil
-	}
-	rootPids := make([]int64, 0, len(affectedPids))
-	for pid := range affectedPids {
-		if pid > 0 {
-			rootPids = append(rootPids, pid)
-		}
-	}
-	if err := filmrepo.RefreshSearchTagsByPids(rootPids...); err != nil {
-		return err
-	}
-	return nil
-}
-
-func DeleteCategory(id int64) error {
-	if id <= 0 {
-		return fmt.Errorf("invalid category id: %d", id)
-	}
-
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var categories []model.Category
-		if err := tx.Where("id = ? OR pid = ?", id, id).Find(&categories).Error; err != nil {
-			return err
-		}
-		if len(categories) == 0 {
-			return fmt.Errorf("category %d not found", id)
-		}
-
-		ids := make([]int64, 0, len(categories))
-		for _, category := range categories {
-			ids = append(ids, category.Id)
-		}
-
-		if err := tx.Where("category_id IN ?", ids).Delete(&model.CategoryMapping{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("id IN ?", ids).Delete(&model.Category{}).Error; err != nil {
-			return err
-		}
-		if err := normalizeCategoryStableKeys(tx); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
 		return err
 	}
 
@@ -1707,11 +893,6 @@ func GetChildrenTree(pid int64) []*model.CategoryTree {
 func InitMainCategories() {
 	fmt.Println("[Init] 正在初始化分类表与缓存...")
 	ensureCategoryIndexes()
-	if ExistsCategoryTree() {
-		_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
-			return normalizeCategoryStableKeys(tx)
-		})
-	}
 	MarkCategoryChanged()
 	fmt.Println("[Init] 分类缓存初始化完成。")
 }
@@ -1722,5 +903,9 @@ func ensureCategoryIndexes() {
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_type")
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_version")
 	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_parent_sort")
+	// 旧库曾把 source_type_id 做成单列唯一索引，多主站常见 type_id 会冲突；启动时重建为复合唯一。
+	if db.Mdb.Migrator().HasIndex(&model.SourceCategory{}, "idx_source_type_id") {
+		db.Mdb.Migrator().DropIndex(&model.SourceCategory{}, "idx_source_type_id")
+	}
 	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_type_id")
 }

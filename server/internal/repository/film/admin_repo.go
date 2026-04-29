@@ -228,7 +228,7 @@ func ClearAllSearchTagsCache() {
 }
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
-func FilmZero() {
+func FilmZero() error {
 	tables := []string{
 		model.TableMovieDetail,
 		model.TableFilmIndex,
@@ -237,17 +237,27 @@ func FilmZero() {
 		model.TableCategory,
 		model.TableVirtualPicture,
 		model.TableSearchTag,
+		model.TableBanners,
+		model.TableFailureRecord,
 	}
 	for _, t := range tables {
-		db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t))
+		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
+			return fmt.Errorf("truncate %s failed: %w", t, err)
+		}
 	}
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{})
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{})
-	db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{})
+	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		return fmt.Errorf("clear movie source mappings failed: %w", err)
+	}
+	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
+		return fmt.Errorf("clear category mappings failed: %w", err)
+	}
+	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
+		return fmt.Errorf("clear source categories failed: %w", err)
+	}
 	time.Sleep(100 * time.Millisecond)
 
-	support.TruncateRecordTable()
 	RefreshMasterDataCaches()
+	return nil
 }
 
 // ClearMasterDataBySourceIDs 清理指定站点在主站切换时必须重置的数据。
@@ -266,6 +276,7 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
 	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
+	db.Rdb.Del(db.Cxt, config.BannersKey)
 	ClearTVBoxListCache()
 	ClearTVBoxConfigCache()
 }

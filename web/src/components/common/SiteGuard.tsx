@@ -13,7 +13,6 @@ export interface SiteConfig {
   describe: string;
   state: boolean;
   hint: string;
-  isVideoProxy: boolean;
 }
 
 interface SiteConfigContextType {

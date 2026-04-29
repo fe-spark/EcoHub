@@ -1,50 +1,22 @@
-.container {
-  padding: 0;
-  background: transparent;
-  border: none;
-}
-
 .formPanel {
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.form {
-  width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.logoPreview {
+  border-radius: 10px;
 }
 
-.formBody {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 20px 0 0;
+.switchEditor {
+  min-height: 48px;
 }
 
-.formGrid3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+.dangerCard {
+  border-color: var(--ant-color-error-border);
+  background: var(--ant-color-error-bg);
 }
 
-.formGrid2 {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-@media (max-width: 1200px) {
-  .formGrid3 {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  .formGrid3,
-  .formGrid2 {
-    grid-template-columns: 1fr;
-  }
+.dangerText {
+  max-width: 720px;
 }

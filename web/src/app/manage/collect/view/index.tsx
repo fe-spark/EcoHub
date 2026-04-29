@@ -8,15 +8,12 @@ import React, {
   useState,
 } from "react";
 import {
-  Alert,
   Button,
   Card,
   Col,
   Descriptions,
   Flex,
   Form,
-  Input,
-  Modal,
   Popconfirm,
   Row,
   Select,
@@ -35,7 +32,6 @@ import {
   PauseOutlined,
   PlusOutlined,
   PoweroffOutlined,
-  SendOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -74,6 +70,8 @@ export default function CollectManagePageView() {
   const { message } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [activeCollectIds, setActiveCollectIds] = useState<string[]>([]);
+  const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
+  const [batchStateUpdating, setBatchStateUpdating] = useState(false);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -87,9 +85,6 @@ export default function CollectManagePageView() {
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const [batchTime, setBatchTime] = useState(24);
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
-
-  const [clearOpen, setClearOpen] = useState(false);
-  const [password, setPassword] = useState("");
 
   const stats = useMemo(
     () => ({
@@ -127,6 +122,9 @@ export default function CollectManagePageView() {
             )
           : [];
         setSiteList(list);
+        setSelectedSourceIds((current) =>
+          current.filter((id) => list.some((item) => item.id === id)),
+        );
       } else {
         message.error(resp.msg || "采集站列表加载失败");
       }
@@ -173,6 +171,44 @@ export default function CollectManagePageView() {
     if (resp.code !== 0) {
       message.error(resp.msg || "状态更新失败");
       await getCollectList();
+    }
+  };
+
+  const batchChangeSourceState = async (state: boolean) => {
+    const selectedSources = siteList.filter((item) => selectedSourceIds.includes(item.id));
+    if (selectedSources.length === 0) {
+      message.warning("请先选择采集站");
+      return;
+    }
+
+    const sourcesToUpdate = selectedSources.filter((item) => item.state !== state);
+    if (sourcesToUpdate.length === 0) {
+      message.info(state ? "选中站点已全部启用" : "选中站点已全部禁用");
+      return;
+    }
+
+    setBatchStateUpdating(true);
+    try {
+      const results = await Promise.all(
+        sourcesToUpdate.map(async (source) => {
+          const resp = await ApiPost("/manage/collect/change", {
+            id: source.id,
+            state,
+            syncPictures: source.syncPictures,
+          });
+          return { source, resp };
+        }),
+      );
+      const failed = results.filter(({ resp }) => resp.code !== 0);
+      if (failed.length > 0) {
+        message.error(`批量${state ? "启用" : "禁用"}失败 ${failed.length} 个站点`);
+      } else {
+        message.success(`已${state ? "启用" : "禁用"} ${sourcesToUpdate.length} 个站点`);
+      }
+      await getCollectList();
+      await getCollectingState();
+    } finally {
+      setBatchStateUpdating(false);
     }
   };
 
@@ -280,17 +316,31 @@ export default function CollectManagePageView() {
   };
 
   const openBatchCollect = async () => {
-    setBatchOpen(true);
     const resp = await ApiGet("/manage/collect/options");
     if (resp.code === 0) {
-      const options = Array.isArray(resp.data)
+      const allOptions = Array.isArray(resp.data)
         ? resp.data.map((item: BatchOption) => ({
             ...item,
             grade: siteList.find((site) => site.id === item.id)?.grade ?? 1,
             state: siteList.find((site) => site.id === item.id)?.state ?? false,
           }))
         : [];
+      const enabledIds = new Set(allOptions.map((item) => item.id));
+      const selectedEnabledIds = selectedSourceIds
+        .map(String)
+        .filter((id) => enabledIds.has(id));
+      if (selectedSourceIds.length === 0) {
+        message.warning("请先选择要采集的站点");
+        return;
+      }
+      if (selectedEnabledIds.length === 0) {
+        message.warning("选中的站点均未启用，无法批量采集");
+        return;
+      }
+      const options = allOptions.filter((item) => selectedEnabledIds.includes(item.id));
       setBatchOptions(options);
+      setBatchIds(selectedEnabledIds);
+      setBatchOpen(true);
       return;
     }
     message.error(resp.msg || "加载批量采集站点失败");
@@ -313,21 +363,6 @@ export default function CollectManagePageView() {
       return;
     }
     message.error(resp.msg || "批量采集启动失败");
-  };
-
-  const clearFilms = async () => {
-    if (!password) {
-      message.error("请输入密钥");
-      return;
-    }
-    const resp = await ApiPost("/manage/spider/clear", { password });
-    if (resp.code === 0) {
-      message.success(resp.msg);
-    } else {
-      message.error(resp.msg || "清空数据失败");
-    }
-    setClearOpen(false);
-    setPassword("");
   };
 
   const submitStopAllTasks = async () => {
@@ -501,6 +536,8 @@ export default function CollectManagePageView() {
     },
   ];
 
+  const selectedCount = selectedSourceIds.length;
+
   return (
     <div className={styles.pageBody}>
       <ManagePageHeader
@@ -607,6 +644,10 @@ export default function CollectManagePageView() {
         <Table
           rowKey="id"
           size="middle"
+          rowSelection={{
+            selectedRowKeys: selectedSourceIds,
+            onChange: setSelectedSourceIds,
+          }}
           columns={columns}
           dataSource={siteList}
           loading={loading}
@@ -615,7 +656,40 @@ export default function CollectManagePageView() {
           className={styles.tableBlock}
           title={() => (
             <div className={styles.tableHeader}>
-              <div className={styles.tableTitle}>采集站列表</div>
+              <Space size={[12, 8]} wrap>
+                <Space size={[8, 8]} wrap>
+                  <Button
+                    loading={batchStateUpdating}
+                    disabled={selectedCount === 0}
+                    onClick={() => void batchChangeSourceState(true)}
+                  >
+                    批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                  </Button>
+                  <Popconfirm
+                    title="批量禁用采集站？"
+                    description="禁用后，正在运行的对应站点采集任务会被请求停止。"
+                    okText="确认禁用"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    disabled={selectedCount === 0}
+                    onConfirm={() => void batchChangeSourceState(false)}
+                  >
+                    <Button
+                      danger
+                      loading={batchStateUpdating}
+                      disabled={selectedCount === 0}
+                    >
+                      批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                    </Button>
+                  </Popconfirm>
+                  <Button
+                    disabled={selectedCount === 0}
+                    onClick={() => void openBatchCollect()}
+                  >
+                    批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                  </Button>
+                </Space>
+              </Space>
               <Space size={[8, 8]} wrap className={styles.tableActions}>
                 <Button
                   type="primary"
@@ -624,38 +698,29 @@ export default function CollectManagePageView() {
                 >
                   新增站点
                 </Button>
-                <Button
-                  icon={<SendOutlined />}
-                  onClick={() => void openBatchCollect()}
-                >
-                  批量采集
-                </Button>
-                <Popconfirm
-                  title="一键终止所有采集"
-                  description="确定要强制终止当前所有正在运行的采集任务吗？"
-                  onConfirm={() => void submitStopAllTasks()}
-                  okText="确认终止"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  disabled={activeCollectIds.length === 0}
-                >
-                  <Button
-                    danger
-                    icon={<PauseOutlined />}
-                    disabled={activeCollectIds.length === 0}
-                  >
-                    终止全部任务
-                  </Button>
-                </Popconfirm>
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  onClick={() => setClearOpen(true)}
-                >
-                  清空影片数据
-                </Button>
               </Space>
             </div>
+          )}
+          footer={() => (
+            <Flex justify="flex-end">
+              <Popconfirm
+                title="一键终止所有采集"
+                description="确定要强制终止当前所有正在运行的采集任务吗？"
+                onConfirm={() => void submitStopAllTasks()}
+                okText="确认终止"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
+                disabled={activeCollectIds.length === 0}
+              >
+                <Button
+                  danger
+                  icon={<PauseOutlined />}
+                  disabled={activeCollectIds.length === 0}
+                >
+                  终止全部任务
+                </Button>
+              </Popconfirm>
+            </Flex>
           )}
         />
       </div>
@@ -678,33 +743,9 @@ export default function CollectManagePageView() {
         batchTime={batchTime}
         onCancel={() => setBatchOpen(false)}
         onSubmit={() => void startBatchCollect()}
-        onSelectionChange={setBatchIds}
         onBatchTimeChange={setBatchTime}
       />
 
-      <Modal
-        title="清空影片数据"
-        open={clearOpen}
-        onCancel={() => setClearOpen(false)}
-        onOk={() => void clearFilms()}
-        okText="确认清空"
-        okButtonProps={{ danger: true }}
-        destroyOnHidden
-      >
-        <Flex vertical gap={12}>
-          <Alert
-            showIcon
-            type="error"
-            message="该操作不可逆"
-            description="会清空数据库中的全部影片数据，请确认当前没有误操作风险。"
-          />
-          <Input.Password
-            placeholder="请输入管理密码"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-        </Flex>
-      </Modal>
     </div>
   );
 }

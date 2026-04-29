@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useEffect, useMemo, useState, useCallback } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { App, ConfigProvider, theme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import dayjs from "dayjs";
@@ -9,6 +10,22 @@ import ThemeDock, { type ThemeMode } from "./ThemeDock";
 
 const STORAGE_KEY = "app-theme";
 const DEFAULT_PRIMARY_COLOR = "#fa8c16";
+
+type ThemeContextValue = {
+  mode: ThemeMode;
+  effective: "dark" | "light";
+  setMode: (mode: ThemeMode) => void;
+};
+
+const ThemeModeContext = createContext<ThemeContextValue | null>(null);
+
+export function useThemeMode() {
+  const context = useContext(ThemeModeContext);
+  if (!context) {
+    throw new Error("useThemeMode must be used within GlobalThemeProvider");
+  }
+  return context;
+}
 
 function resolveEffective(mode: ThemeMode): "dark" | "light" {
   if (mode !== "system") return mode;
@@ -30,6 +47,7 @@ export default function GlobalThemeProvider({
   children: React.ReactNode;
   fontFamily: string;
 }) {
+  const pathname = usePathname();
   const [mode, setMode] = useState<ThemeMode>("system");
   const [effective, setEffective] = useState<"dark" | "light">("dark");
   const [mounted, setMounted] = useState(false);
@@ -66,6 +84,12 @@ export default function GlobalThemeProvider({
   const handleSelect = useCallback((m: ThemeMode) => setMode(m), []);
 
   const isDark = effective === "dark";
+  const showDock = mounted && !pathname.startsWith("/manage") && pathname !== "/login";
+
+  const contextValue = useMemo(
+    () => ({ mode, effective, setMode }),
+    [mode, effective],
+  );
 
   const providerTheme = useMemo(() => {
     const primaryColor =
@@ -87,10 +111,12 @@ export default function GlobalThemeProvider({
       locale={zhCN}
       theme={{ ...providerTheme, cssVar: { key: "app-theme" } }}
     >
-      <App>
-        {children}
-        {mounted && <ThemeDock mode={mode} onSelect={handleSelect} />}
-      </App>
+      <ThemeModeContext.Provider value={contextValue}>
+        <App>
+          {children}
+          {showDock && <ThemeDock mode={mode} onSelect={handleSelect} />}
+        </App>
+      </ThemeModeContext.Provider>
     </ConfigProvider>
   );
 }

@@ -155,8 +155,7 @@ func CreateMappingRule(rule *model.MappingRule) error {
 	TouchRuleVersion()
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) {
-		// 分类规则改动后只刷新未来采集使用的分类映射，
-		// 不回写历史 film_index，这是本次重构的硬约束。
+		// 分类规则改动后只刷新展示分类与来源映射；历史影片通过映射查询立即归入新分组。
 		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 			log.Printf("[MappingRule] 规则已创建，但未来分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
 		}
@@ -188,7 +187,7 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	TouchRuleVersion()
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) || (oldRule != nil && IsCategoryMappingGroup(oldRule.Group)) {
-		// 这里只修正未来映射，不追溯修改历史影片索引结果。
+		// 这里只修正展示分类与来源映射，不追溯修改历史影片索引结果。
 		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 			log.Printf("[MappingRule] 规则已更新，但未来分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
 		}
@@ -207,7 +206,7 @@ func DeleteMappingRule(id uint) error {
 	TouchRuleVersion()
 	ReloadMappingRules()
 	if rule != nil && IsCategoryMappingGroup(rule.Group) {
-		// 删除分类规则同样只影响后续采集，不回刷历史 film_index。
+		// 删除分类规则同样只刷新展示分类与来源映射，不回刷历史 film_index。
 		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 			log.Printf("[MappingRule] 规则已删除，但未来分类映射刷新失败: id=%d group=%s err=%v", id, rule.Group, err)
 		}

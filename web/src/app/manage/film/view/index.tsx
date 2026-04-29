@@ -454,6 +454,7 @@ export default function FilmListPageView() {
           </div>
         )}
       />
+
     </div>
   );
 }

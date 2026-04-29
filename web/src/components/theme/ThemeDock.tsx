@@ -87,7 +87,7 @@ export default function ThemeDock({ mode, onSelect }: Props) {
   // ── 位置 ─────────────────────────────────────────────────────
   // 组件由父级在 mounted 后才渲染，window 一定存在，可安全用懒初始化
   const [snap, setSnap] = useState<SnapState>(
-    () => normalizeSnap(loadSnap() ?? { snappedLeft: true, y: window.innerHeight / 2 - DOCK_H / 2 })
+    () => normalizeSnap(loadSnap() ?? { snappedLeft: false, y: window.innerHeight / 2 - DOCK_H / 2 })
   );
 
   // ── 展开/收起 ─────────────────────────────────────────────────

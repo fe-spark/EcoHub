@@ -194,29 +194,3 @@ func (h *FilmHandler) CollectFilmClass(c *gin.Context) {
 	}
 	dto.SuccessOnlyMsg("分类已重置为主站原始分类", c)
 }
-
-// DelFilmClass 删除指定ID对应的影片分类
-func (h *FilmHandler) DelFilmClass(c *gin.Context) {
-	var req struct {
-		Id string `json:"id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
-		return
-	}
-	idStr := strings.TrimSpace(req.Id)
-	if idStr == "" {
-		dto.Failed("影片分类信息获取失败, 分类Id不能为空", c)
-		return
-	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		dto.Failed("影片分类信息获取失败, 参数分类Id格式异常", c)
-		return
-	}
-	if err = service.FilmSvc.DelClass(id); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("当前分类已删除成功", c)
-}
