@@ -210,6 +210,7 @@ export default function FilmListPageView() {
         dataIndex: "mid",
         key: "mid",
         width: 80,
+        fixed: "left",
         align: "center",
         render: (v) => (
           <Tag color="#8b40ff" style={{ borderRadius: 4 }}>
@@ -220,6 +221,7 @@ export default function FilmListPageView() {
       {
         title: "影片信息",
         key: "info",
+        align: "left",
         render: (_, record) => (
           <Space size={6} wrap={false}>
             <Text
@@ -241,7 +243,6 @@ export default function FilmListPageView() {
         title: "评分",
         dataIndex: "score",
         key: "score",
-        width: 70,
         align: "center",
         render: (v) => (
           <Text strong style={{ color: "var(--ant-color-primary)" }}>
@@ -253,7 +254,6 @@ export default function FilmListPageView() {
         title: "年份",
         dataIndex: "year",
         key: "year",
-        width: 70,
         align: "center",
         render: (v) => <Text>{v}</Text>,
       },
@@ -261,7 +261,6 @@ export default function FilmListPageView() {
         title: "热度",
         dataIndex: "hits",
         key: "hits",
-        width: 80,
         align: "center",
         render: (v) => (
           <Text type="danger">
@@ -296,7 +295,6 @@ export default function FilmListPageView() {
         title: "操作",
         key: "action",
         align: "center",
-        width: 200,
         fixed: "right",
         render: (_, record) => (
           <Space size={8}>
@@ -405,8 +403,13 @@ export default function FilmListPageView() {
           }))}
           allowClear
         />
-        <RangePicker showTime value={dateRange} onChange={(v) => setDateRange(v)} />
-        <Button type="primary" onClick={onSearch}>
+        <RangePicker
+          showTime
+          value={dateRange}
+          onChange={(v) => setDateRange(v)}
+          className={styles.dateRange}
+        />
+        <Button type="primary" onClick={onSearch} className={styles.searchButton}>
           搜索
         </Button>
       </Space>
@@ -419,26 +422,28 @@ export default function FilmListPageView() {
         pagination={false}
         scroll={{ x: "max-content" }}
         size="middle"
-        bordered
         title={() => (
-          <div className={styles.tableToolbar}>
+          <div className={styles.tableHeader}>
             <div className={styles.tableTitle}>影片资源库</div>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={() => router.push("/manage/film/add")}
-            >
-              新增影视
-            </Button>
+            <Space size={[8, 8]} wrap className={styles.tableActions}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={() => router.push("/manage/film/add")}
+              >
+                新增影视
+              </Button>
+            </Space>
           </div>
         )}
         footer={() => (
-          <div className={styles.paginationContainer}>
+          <div className={styles.pagination}>
             <Pagination
               current={page.current}
               pageSize={page.pageSize}
               total={page.total}
               showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100, 500]}
               showTotal={(total) => `共 ${total} 条`}
               onChange={(current, pageSize) => {
                 const newPage = { ...page, current, pageSize };

@@ -194,7 +194,7 @@ function FilmAddForm() {
         }}
         requiredMark="optional"
       >
-        <Space direction="vertical" size={16} style={{ width: "100%" }}>
+        <Space direction="vertical" size={16} className={styles.formSections}>
             <Card
               title={
                 <Space>
@@ -254,6 +254,7 @@ function FilmAddForm() {
                 <Col xs={24} lg={12} xl={16}>
                   <Form.Item label="影片海报" name="picture">
                     <Input
+                      className={styles.posterInput}
                       placeholder="输入图片URL或上传"
                       addonAfter={
                         <Upload
@@ -461,7 +462,13 @@ function FilmAddForm() {
           </Card>
 
           <Divider className={styles.formDivider} />
-          <Flex justify="space-between" align="center" wrap="wrap" gap={12}>
+          <Flex
+            justify="space-between"
+            align="center"
+            wrap="wrap"
+            gap={12}
+            className={styles.footerActions}
+          >
             <Button
               type="text"
               icon={<ArrowLeftOutlined />}
@@ -470,7 +477,7 @@ function FilmAddForm() {
             >
               返回影片列表
             </Button>
-            <Space wrap>
+            <Space wrap className={styles.submitActions}>
               {!id ? (
                 <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
                   清空重填

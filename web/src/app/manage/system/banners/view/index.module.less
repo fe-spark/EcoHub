@@ -4,22 +4,27 @@
   gap: 16px;
 }
 
-.tableToolbar {
+.tableHeader {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 12px;
-  padding: 4px 0;
 }
 
 .tableTitle {
   font-size: 16px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 32px;
+}
+
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
 }
 
 @media (max-width: 768px) {
-  .tableToolbar {
-    flex-direction: column;
+  .tableActions {
+    width: 100%;
   }
 }

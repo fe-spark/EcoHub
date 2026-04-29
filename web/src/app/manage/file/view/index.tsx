@@ -19,10 +19,10 @@ import {
   DeleteOutlined,
   EyeOutlined,
   CloudUploadOutlined,
-  FileImageOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -121,20 +121,11 @@ export default function FileUploadPageView() {
 
   return (
     <div className={styles.galleryPanel}>
-      <div className={styles.headerSection}>
-        <div className={styles.titleArea}>
-          <Space direction="vertical" size={4}>
-            <span className={styles.pageTitle}>图片素材</span>
-            <Text type="secondary">
-              <FileImageOutlined style={{ marginRight: 6 }} />
-              管理全站影视海报、封面素材与图库资源，支持拖拽至内容区上传。
-            </Text>
-          </Space>
-        </div>
-        <div className={styles.stats}>
-          <Tag color="processing">共计 {page.total} 张图片</Tag>
-        </div>
-      </div>
+      <ManagePageHeader
+        title="图片素材"
+        description="管理全站影视海报、封面素材与图库资源，支持拖拽至内容区上传。"
+        actions={<Tag color="processing">共计 {page.total} 张图片</Tag>}
+      />
 
       <div
         className={styles.container}
@@ -171,7 +162,7 @@ export default function FileUploadPageView() {
             <FloatButton
               icon={<PlusOutlined />}
               type="primary"
-              style={{ right: 40, bottom: 40 }}
+              style={{ right: 24, bottom: 24 }}
             />
           </Tooltip>
         </Upload>
@@ -247,6 +238,7 @@ export default function FileUploadPageView() {
                 total={page.total}
                 onChange={(p) => getPhotoList(p)}
                 showSizeChanger={false}
+                showTotal={(total) => `共 ${total} 条`}
                 hideOnSinglePage
               />
             </div>

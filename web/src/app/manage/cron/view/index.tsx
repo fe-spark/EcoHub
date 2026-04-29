@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Table, Tag, Switch, Button, Modal, Input, Form, Tooltip } from "antd";
+import { Table, Tag, Switch, Button, Modal, Input, Form, Tooltip, Space } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -88,11 +88,14 @@ export default function CronManagePageView() {
       title: "任务ID",
       dataIndex: "id",
       width: 200,
+      fixed: "left",
+      align: "center",
       render: (v) => <Tag color="purple">{v}</Tag>,
     },
     {
       title: "任务描述",
       dataIndex: "remark",
+      align: "left",
       ellipsis: true,
     },
     {
@@ -140,7 +143,6 @@ export default function CronManagePageView() {
       title: "操作",
       key: "action",
       align: "center",
-      width: 70,
       fixed: "right",
       render: (_, record) => (
         <Tooltip title="修改时间">
@@ -168,11 +170,15 @@ export default function CronManagePageView() {
         dataSource={taskList}
         rowKey="id"
         loading={loading}
-        bordered
         size="middle"
         pagination={false}
-        scroll={{ x: 900 }}
-        title={() => <div className={styles.tableTitle}>任务列表</div>}
+        scroll={{ x: "max-content" }}
+        title={() => (
+          <div className={styles.tableHeader}>
+            <div className={styles.tableTitle}>任务列表</div>
+            <Space size={[8, 8]} wrap className={styles.tableActions} />
+          </div>
+        )}
       />
 
       <Modal
@@ -180,6 +186,7 @@ export default function CronManagePageView() {
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={() => form.validateFields().then(onEditFinish)}
+        width={560}
       >
         <Form form={form} layout="vertical">
           <Form.Item name="id" hidden>

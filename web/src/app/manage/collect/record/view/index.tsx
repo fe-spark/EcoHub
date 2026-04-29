@@ -118,8 +118,10 @@ export default function FailureRecordPageView() {
       title: "ID",
       dataIndex: "ID",
       width: 60,
+      fixed: "left",
+      align: "center",
       render: (v) => (
-        <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>
+          <span style={{ color: "var(--ant-color-purple)" }}>{v}</span>
       ),
     },
     {
@@ -149,6 +151,7 @@ export default function FailureRecordPageView() {
     {
       title: "失败原因",
       dataIndex: "cause",
+      align: "left",
       ellipsis: true,
       render: (v) => <Tag color="red">{v}</Tag>,
     },
@@ -167,21 +170,18 @@ export default function FailureRecordPageView() {
       title: "重试次数",
       dataIndex: "retryCount",
       align: "center",
-      width: 100,
       render: (v) => <Tag color={v > 1 ? "volcano" : "default"}>{v || 1}</Tag>,
     },
     {
       title: "执行时间",
       dataIndex: "UpdatedAt",
       align: "center",
-      width: 170,
       render: (v) => dayjs(v).format("YYYY-MM-DD HH:mm:ss"),
     },
     {
       title: "操作",
       key: "action",
       align: "center",
-      width: 80,
       fixed: "right",
       render: (_, record) => (
         <Tooltip title="采集重试">
@@ -205,7 +205,7 @@ export default function FailureRecordPageView() {
         description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
       />
 
-      <Space size={[8, 8]} wrap>
+      <Space size={[8, 8]} wrap className={styles.filterBar}>
         <Select
           placeholder="采集来源"
           value={params.originId || undefined}
@@ -229,6 +229,7 @@ export default function FailureRecordPageView() {
         />
         <RangePicker
           showTime
+          className={styles.dateRange}
           onChange={(dates) => {
             if (dates && dates[0] && dates[1]) {
               setParams({
@@ -241,7 +242,11 @@ export default function FailureRecordPageView() {
             }
           }}
         />
-        <Button type="primary" onClick={() => getRecords()}>
+        <Button
+          type="primary"
+          onClick={() => getRecords()}
+          className={styles.searchButton}
+        >
           查询
         </Button>
       </Space>
@@ -251,7 +256,6 @@ export default function FailureRecordPageView() {
         dataSource={records}
         rowKey="ID"
         loading={loading}
-        bordered
         size="middle"
         pagination={false}
         scroll={{ x: "max-content" }}

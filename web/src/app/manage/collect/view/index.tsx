@@ -342,9 +342,17 @@ export default function CollectManagePageView() {
 
   const columns: ColumnsType<FilmSource> = [
     {
+      title: "ID",
+      dataIndex: "id",
+      width: 80,
+      fixed: "left",
+      align: "center",
+      render: (value: number) => <Tag bordered={false}>{value}</Tag>,
+    },
+    {
       title: "站点",
       dataIndex: "name",
-      width: 260,
+      align: "left",
       render: (name: string, record) => {
         const isRunning = activeCollectIds.includes(record.id);
         return (
@@ -388,7 +396,6 @@ export default function CollectManagePageView() {
       title: "图片同步",
       dataIndex: "syncPictures",
       align: "center",
-      width: 120,
       render: (value: boolean, record) => (
         <Switch
           checked={value}
@@ -409,7 +416,6 @@ export default function CollectManagePageView() {
       title: "启用状态",
       dataIndex: "state",
       align: "center",
-      width: 120,
       render: (value: boolean, record) => (
         <Switch
           checked={value}
@@ -429,14 +435,13 @@ export default function CollectManagePageView() {
       title: "请求间隔",
       dataIndex: "interval",
       align: "center",
-      width: 120,
       render: (value: number) => (
         <Tag bordered={false}>{value > 0 ? `${value} ms` : "无限制"}</Tag>
       ),
     },
     {
       title: "采集时长",
-      width: 160,
+      align: "center",
       render: (_, record) => (
         <Select
           size="small"
@@ -457,7 +462,6 @@ export default function CollectManagePageView() {
       key: "action",
       fixed: "right",
       align: "center",
-      width: 180,
       render: (_, record) => {
         const isRunning = activeCollectIds.includes(record.id);
         return (
@@ -566,6 +570,7 @@ export default function CollectManagePageView() {
                   href={masterSite.uri}
                   target="_blank"
                   rel="noopener noreferrer"
+                  className={styles.masterLink}
                 >
                   {masterSite.uri}
                 </Typography.Link>
@@ -606,12 +611,12 @@ export default function CollectManagePageView() {
           dataSource={siteList}
           loading={loading}
           pagination={false}
-          scroll={{ x: 980 }}
+          scroll={{ x: "max-content" }}
           className={styles.tableBlock}
           title={() => (
-            <div className={styles.tableToolbar}>
+            <div className={styles.tableHeader}>
               <div className={styles.tableTitle}>采集站列表</div>
-              <Space size={[8, 8]} wrap>
+              <Space size={[8, 8]} wrap className={styles.tableActions}>
                 <Button
                   type="primary"
                   icon={<PlusOutlined />}

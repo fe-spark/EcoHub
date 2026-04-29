@@ -5,17 +5,25 @@
 }
 
 .workspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(360px, 440px);
+  display: flex;
+  flex-direction: column;
   gap: 16px;
-  align-items: start;
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .ruleWorkspace {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
   min-width: 0;
 }
 
-.tableToolbar {
+.tableHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -34,6 +42,13 @@
   flex-wrap: wrap;
 }
 
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .groupSelect {
   min-width: 160px;
 }
@@ -43,8 +58,25 @@
   max-width: 100%;
 }
 
+.searchButton {
+  flex: none;
+}
+
 .treePanel {
   min-height: 320px;
+}
+
+.fullWidth {
+  width: 100%;
+}
+
+.dragHandle {
+  color: #8c8c8c;
+  cursor: grab;
+}
+
+.draggingRow {
+  opacity: 0.65;
 }
 
 .treeNode {
@@ -69,8 +101,17 @@
   }
 
   .groupSelect,
-  .searchInput {
+  .searchInput,
+  .searchButton {
     width: 100%;
+  }
+
+  .tableActions {
+    width: 100%;
+  }
+
+  .pagination {
+    justify-content: flex-start;
   }
 
   .treeNode {

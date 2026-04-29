@@ -2,6 +2,7 @@
 
 import React, { Suspense, useMemo } from "react";
 import { ConfigProvider, theme } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import Header from "@/components/public/Header";
 import Footer from "@/components/public/Footer";
 import styles from "./index.module.less";
@@ -39,7 +40,7 @@ export default function PublicLayoutView({
   }, [globalToken]);
 
   return (
-    <ConfigProvider theme={providerTheme}>
+    <ConfigProvider locale={zhCN} theme={providerTheme}>
       <div className={styles.layoutWrapper}>
         <Suspense fallback={null}>
           <Header navList={navList} />

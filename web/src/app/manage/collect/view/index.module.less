@@ -8,10 +8,12 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(320px, 0.8fr);
   gap: 16px;
+  min-width: 0;
 }
 
 .summaryCard {
   height: 100%;
+  min-width: 0;
 }
 
 .overviewRow {
@@ -20,6 +22,7 @@
 
 .overviewCol {
   display: flex;
+  min-width: 0;
 }
 
 .overviewStat {
@@ -33,9 +36,11 @@
 
 .tableBlock {
   grid-column: 1 / -1;
+  min-width: 0;
+  width: 100%;
 }
 
-.tableToolbar {
+.tableHeader {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -49,8 +54,41 @@
   line-height: 32px;
 }
 
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.masterDescriptions {
+  min-width: 0;
+}
+
+.masterLink {
+  display: inline-block;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+@media (max-width: 1200px) {
+  .tableActions {
+    width: 100%;
+  }
+}
+
 @media (max-width: 1200px) {
   .layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .overviewStat {
+    min-height: 96px;
+  }
+
+  .tableActions {
+    width: 100%;
   }
 }

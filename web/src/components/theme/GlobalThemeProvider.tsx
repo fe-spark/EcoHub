@@ -2,6 +2,9 @@
 
 import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { App, ConfigProvider, theme } from "antd";
+import zhCN from "antd/locale/zh_CN";
+import dayjs from "dayjs";
+import "dayjs/locale/zh-cn";
 import ThemeDock, { type ThemeMode } from "./ThemeDock";
 
 const STORAGE_KEY = "app-theme";
@@ -33,6 +36,7 @@ export default function GlobalThemeProvider({
 
   // 避免 SSR/CSR Hydration 不一致，先用默认值，挂载后同步 localStorage
   useEffect(() => {
+    dayjs.locale("zh-cn");
     setMounted(true);
     const saved = getSavedMode();
     setMode(saved);
@@ -79,7 +83,10 @@ export default function GlobalThemeProvider({
   }, [isDark, fontFamily, effective]);
 
   return (
-    <ConfigProvider theme={{ ...providerTheme, cssVar: { key: "app-theme" } }}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{ ...providerTheme, cssVar: { key: "app-theme" } }}
+    >
       <App>
         {children}
         {mounted && <ThemeDock mode={mode} onSelect={handleSelect} />}

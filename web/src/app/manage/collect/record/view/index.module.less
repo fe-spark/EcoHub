@@ -4,6 +4,12 @@
   gap: 16px;
 }
 
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .tableHeader {
   display: flex;
   align-items: flex-start;
@@ -31,9 +37,20 @@
   width: 120px;
 }
 
+.dateRange {
+  width: 320px;
+  max-width: 100%;
+}
+
+.searchButton {
+  flex: none;
+}
+
 .pagination {
   display: flex;
   justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 @media (max-width: 1200px) {
@@ -44,7 +61,13 @@
 
 @media (max-width: 768px) {
   .filterSelect,
-  .statusSelect {
+  .statusSelect,
+  .dateRange,
+  .searchButton {
     width: 100%;
+  }
+
+  .pagination {
+    justify-content: flex-start;
   }
 }

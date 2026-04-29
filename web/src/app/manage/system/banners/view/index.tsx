@@ -317,23 +317,35 @@ export default function BannersPageView() {
   };
 
   const columns = [
-    { title: "影片名称", dataIndex: "name", key: "name" },
+    {
+      title: "ID",
+      dataIndex: "id",
+      key: "id",
+      width: 80,
+      fixed: "left" as const,
+      align: "center" as const,
+      render: (value: string) => <Tag color="purple">{value}</Tag>,
+    },
+    { title: "影片名称", dataIndex: "name", key: "name", align: "left" as const },
     {
       title: "影片类型",
       dataIndex: "cName",
       key: "cName",
+      align: "center" as const,
       render: (t: string) => <Tag color="warning">{t}</Tag>,
     },
     {
       title: "上映年份",
       dataIndex: "year",
       key: "year",
+      align: "center" as const,
       render: (t: number) => <Tag color="warning">{t}</Tag>,
     },
     {
       title: "影片封面",
       dataIndex: "picture",
       key: "picture",
+      align: "left" as const,
       render: (src: string) => (
         <AntImage src={src} height={50} style={{ objectFit: "cover" }} />
       ),
@@ -342,12 +354,14 @@ export default function BannersPageView() {
       title: "排序",
       dataIndex: "sort",
       key: "sort",
+      align: "center" as const,
       render: (s: number) => <Tag>{s}</Tag>,
     },
     {
       title: "连载状态",
       dataIndex: "remark",
       key: "remark",
+      align: "center" as const,
       render: (t: string) => (
         <Tag color={t.includes("更新") ? "processing" : "success"}>{t}</Tag>
       ),
@@ -356,7 +370,6 @@ export default function BannersPageView() {
       title: "操作",
       key: "action",
       align: "center" as const,
-      width: 100,
       fixed: "right" as const,
       render: (_: unknown, record: BannerRecord) => (
         <Space size={8}>
@@ -541,14 +554,21 @@ export default function BannersPageView() {
         columns={columns}
         rowKey="id"
         loading={loading}
-        bordered
+        size="middle"
+        pagination={false}
         scroll={{ x: "max-content" }}
         title={() => (
-          <div className={styles.tableToolbar}>
+          <div className={styles.tableHeader}>
             <div className={styles.tableTitle}>封面列表</div>
-            <Button type="primary" icon={<PlusCircleOutlined />} onClick={openCreateEditor}>
-              添加封面
-            </Button>
+            <Space size={[8, 8]} wrap className={styles.tableActions}>
+              <Button
+                type="primary"
+                icon={<PlusCircleOutlined />}
+                onClick={openCreateEditor}
+              >
+                添加封面
+              </Button>
+            </Space>
           </div>
         )}
       />
@@ -559,6 +579,7 @@ export default function BannersPageView() {
         onOk={handleSubmit}
         onCancel={closeEditor}
         width={720}
+        styles={{ body: { paddingBottom: 12 } }}
         destroyOnHidden
         afterClose={resetEditorState}
       >

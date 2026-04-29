@@ -7,13 +7,13 @@
 .filterBar {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 8px;
 }
 
-.tableToolbar {
+.tableHeader {
   display: flex;
-  justify-content: space-between;
   align-items: flex-start;
+  justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
 }
@@ -26,16 +26,32 @@
   width: 250px;
 }
 
+.dateRange {
+  width: 320px;
+  max-width: 100%;
+}
+
+.searchButton {
+  flex: none;
+}
+
 .tableTitle {
   font-size: 16px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 32px;
 }
 
-.paginationContainer {
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.pagination {
   display: flex;
   justify-content: flex-end;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .filmName {
@@ -66,15 +82,17 @@
 
 @media (max-width: 768px) {
   .searchInput,
-  .filterItem {
+  .filterItem,
+  .dateRange,
+  .searchButton {
     width: 100%;
-  }
-
-  .tableToolbar {
-    flex-direction: column;
   }
 
   .tableActions {
     width: 100%;
+  }
+
+  .pagination {
+    justify-content: flex-start;
   }
 }

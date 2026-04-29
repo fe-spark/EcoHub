@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, Input, ConfigProvider, theme } from "antd";
+import zhCN from "antd/locale/zh_CN";
 import {
   UserOutlined,
   LockOutlined,
@@ -44,6 +45,7 @@ export default function LoginPageView() {
 
   return (
     <ConfigProvider
+      locale={zhCN}
       theme={{
         algorithm: theme.darkAlgorithm,
         token: {

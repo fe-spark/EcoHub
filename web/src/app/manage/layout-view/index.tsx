@@ -2,7 +2,17 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
-import { Layout, Menu, Avatar, Button, Space, Dropdown, Tag } from "antd";
+import {
+  Layout,
+  Menu,
+  Avatar,
+  Button,
+  Space,
+  Dropdown,
+  Tag,
+  Drawer,
+  Grid,
+} from "antd";
 import {
   HomeOutlined,
   ThunderboltOutlined,
@@ -20,6 +30,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import styles from "./index.module.less";
 
 const { Sider, Header, Content } = Layout;
+const { useBreakpoint } = Grid;
 
 type MenuItem = Required<MenuProps>["items"][number];
 
@@ -44,6 +55,7 @@ const menuItems: MenuItem[] = [
     children: [
       { key: "/manage/collect", label: "采集站点" },
       { key: "/manage/collect/category", label: "分类管理" },
+      { key: "/manage/collect/category/rules", label: "分类规则" },
       { key: "/manage/collect/record", label: "失败记录" },
       { key: "/manage/cron", label: "计划任务" },
     ],
@@ -68,6 +80,9 @@ const menuItems: MenuItem[] = [
 function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";
+  }
+  if (pathname.startsWith("/manage/collect/category/rules")) {
+    return "/manage/collect/category/rules";
   }
   if (pathname.startsWith("/manage/collect/category")) {
     return "/manage/collect/category";
@@ -130,8 +145,11 @@ export default function ManageLayoutView({
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const { config: siteInfo } = useSiteConfig();
   const [userInfo, setUserInfo] = useState<any>(null);
+  const screens = useBreakpoint();
+  const isMobile = !screens.lg;
 
   const router = useRouter();
   const pathname = usePathname();
@@ -146,6 +164,9 @@ export default function ManageLayoutView({
   }, []);
 
   const onMenuClick: MenuProps["onClick"] = ({ key }) => {
+    if (isMobile) {
+      setDrawerOpen(false);
+    }
     router.push(key);
   };
 
@@ -159,53 +180,67 @@ export default function ManageLayoutView({
   };
 
   const openKeys = collectOpenKeys(menuItems, selectedKey);
+  const menuNode = (
+    <>
+      <div className={styles.logoWrap} onClick={() => window.open("/", "_blank")}>
+        {siteInfo?.logo && <Avatar src={siteInfo.logo} size={30} />}
+        {(!collapsed || isMobile) && siteInfo?.siteName && (
+          <span className={styles.siteName}>{siteInfo.siteName}</span>
+        )}
+      </div>
+      <Menu
+        mode="inline"
+        className={styles.menu}
+        selectedKeys={[selectedKey]}
+        defaultOpenKeys={openKeys}
+        items={menuItems}
+        onClick={onMenuClick}
+      />
+    </>
+  );
 
   return (
-    <Layout className={styles.layout} hasSider>
-      <Sider
-        trigger={null}
-        collapsible
-        collapsed={collapsed}
-        className={styles.sider}
-        theme="light"
-      >
-        <div
-          style={{ display: "flex", flexDirection: "column", height: "100vh" }}
+    <Layout className={styles.layout} hasSider={!isMobile}>
+      {!isMobile ? (
+        <Sider
+          trigger={null}
+          collapsible
+          collapsed={collapsed}
+          className={styles.sider}
+          theme="light"
+          width={240}
+          collapsedWidth={80}
         >
-          <div
-            className={styles.logoWrap}
-            onClick={() => window.open("/", "_blank")}
-          >
-            {siteInfo?.logo && <Avatar src={siteInfo.logo} size={30} />}
-            {!collapsed && siteInfo?.siteName && (
-              <span className={styles.siteName}>{siteInfo.siteName}</span>
-            )}
-          </div>
-          <Menu
-            mode="inline"
-            style={{ flex: 1, overflow: "auto" }}
-            selectedKeys={[selectedKey]}
-            defaultOpenKeys={openKeys}
-            items={menuItems}
-            onClick={onMenuClick}
-          />
-        </div>
-      </Sider>
-      <Layout
-        style={{ display: "flex", flexDirection: "column", height: "100vh" }}
-      >
+          <div className={styles.siderInner}>{menuNode}</div>
+        </Sider>
+      ) : null}
+      <Layout className={styles.mainLayout}>
         <Header className={styles.header}>
           <Space size="middle">
             <Button
               type="text"
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
-              onClick={() => setCollapsed(!collapsed)}
+              icon={
+                isMobile ? (
+                  <MenuUnfoldOutlined />
+                ) : collapsed ? (
+                  <MenuUnfoldOutlined />
+                ) : (
+                  <MenuFoldOutlined />
+                )
+              }
+              onClick={() => {
+                if (isMobile) {
+                  setDrawerOpen(true);
+                  return;
+                }
+                setCollapsed(!collapsed);
+              }}
               className={styles.headerIconBtn}
-            />
-            <span className={styles.headerTitle}>管理后台</span>
-          </Space>
+             />
+             <span className={styles.headerTitle}>管理后台</span>
+           </Space>
 
-          <Space size="middle">
+          <Space size="small" className={styles.userArea}>
             {userInfo && (
               <Dropdown
                 menu={{
@@ -221,17 +256,17 @@ export default function ManageLayoutView({
                 placement="bottomRight"
                 arrow
               >
-                <div style={{ cursor: "pointer" }}>
+                <div className={styles.userTrigger}>
                   <Space size="small">
                     <Avatar
                       src={userInfo.avatar === "empty" ? null : userInfo.avatar}
                       icon={<UserOutlined />}
                       style={{ backgroundColor: "#1890ff" }}
                     />
-                    <span style={{ fontWeight: 500 }}>
+                    <span className={styles.userName}>
                       {userInfo.nickName || userInfo.userName}
                     </span>
-                    {userInfo.canWrite === false && (
+                    {!isMobile && userInfo.canWrite === false && (
                       <Tag color="blue">访客只读</Tag>
                     )}
                   </Space>
@@ -247,6 +282,17 @@ export default function ManageLayoutView({
           {children}
         </Content>
       </Layout>
+      <Drawer
+        title="后台菜单"
+        placement="left"
+        width={280}
+        open={isMobile && drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        className={styles.menuDrawer}
+        bodyStyle={{ padding: 0 }}
+      >
+        <div className={styles.drawerInner}>{menuNode}</div>
+      </Drawer>
     </Layout>
   );
 }

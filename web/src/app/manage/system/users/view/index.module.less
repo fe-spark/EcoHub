@@ -4,12 +4,18 @@
   gap: 16px;
 }
 
-.tableToolbar {
+.filterBar {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
   flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tableHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 .searchInput {
@@ -17,18 +23,43 @@
   max-width: 100%;
 }
 
+.searchButton {
+  flex: none;
+}
+
 .tableTitle {
   font-size: 16px;
   font-weight: 600;
-  line-height: 1.5;
+  line-height: 32px;
+}
+
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.pagination {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
 }
 
 @media (max-width: 768px) {
-  .tableToolbar {
-    flex-direction: column;
+  .filterBar {
+    width: 100%;
   }
 
-  .searchInput {
+  .tableActions {
     width: 100%;
+  }
+
+  .searchInput,
+  .searchButton {
+    width: 100%;
+  }
+
+  .pagination {
+    justify-content: flex-start;
   }
 }

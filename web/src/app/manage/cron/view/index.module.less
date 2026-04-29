@@ -4,8 +4,27 @@
   gap: 16px;
 }
 
+.tableHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
 .tableTitle {
   font-size: 16px;
   font-weight: 600;
   line-height: 32px;
+}
+
+.tableActions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 1200px) {
+  .tableActions {
+    width: 100%;
+  }
 }

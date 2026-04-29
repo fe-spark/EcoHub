@@ -8,6 +8,10 @@
   width: 100%;
 }
 
+.formSections {
+  width: 100%;
+}
+
 .backButton {
   padding-left: 0;
 }
@@ -34,4 +38,36 @@
   align-items: center;
   min-height: 400px;
   gap: 16px;
+}
+
+.posterInput {
+  width: 100%;
+}
+
+.footerActions {
+  width: 100%;
+}
+
+.submitActions {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 768px) {
+  .formRow {
+    padding: 0;
+  }
+
+  .backButton {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .submitActions {
+    width: 100%;
+  }
+
+  .submitActions :global(.ant-btn) {
+    width: 100%;
+  }
 }

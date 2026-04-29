@@ -6,6 +6,7 @@ import {
   Button,
   Space,
   Tooltip,
+  Pagination,
   Modal,
   Form,
   Input,
@@ -140,9 +141,19 @@ export default function UsersPageView() {
 
   const columns: ColumnsType<any> = [
     {
+      title: "ID",
+      dataIndex: "id",
+      key: "id",
+      width: 80,
+      fixed: "left",
+      align: "center",
+      render: (value: number) => <Tag color="purple">{value}</Tag>,
+    },
+    {
       title: "用户名",
       dataIndex: "userName",
       key: "userName",
+      align: "left",
       render: (text: string, record: any) => (
         <Space>
           <Avatar
@@ -159,16 +170,19 @@ export default function UsersPageView() {
       title: "昵称",
       dataIndex: "nickName",
       key: "nickName",
+      align: "left",
     },
     {
       title: "邮箱",
       dataIndex: "email",
       key: "email",
+      align: "left",
     },
     {
       title: "状态",
       dataIndex: "status",
       key: "status",
+      align: "center",
       render: (status: number) => (
         <Tag color={status === 0 ? "success" : "error"}>
           {status === 0 ? "正常" : "禁用"}
@@ -179,6 +193,7 @@ export default function UsersPageView() {
       title: "操作",
       key: "action",
       fixed: "right",
+      align: "center",
       render: (_: any, record: any) => (
         <Space size={8}>
           <Tooltip
@@ -232,7 +247,7 @@ export default function UsersPageView() {
         description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
       />
 
-      <Space size={[8, 8]} wrap>
+      <Space size={[8, 8]} wrap className={styles.filterBar}>
         <Input
           placeholder="搜索用户名"
           value={searchText}
@@ -241,7 +256,11 @@ export default function UsersPageView() {
           className={styles.searchInput}
           allowClear
         />
-        <Button type="primary" onClick={() => handleSearch(searchText)}>
+        <Button
+          type="primary"
+          onClick={() => handleSearch(searchText)}
+          className={styles.searchButton}
+        >
           搜索
         </Button>
       </Space>
@@ -251,32 +270,41 @@ export default function UsersPageView() {
         dataSource={data}
         rowKey="id"
         loading={loading}
-        bordered
+        size="middle"
+        pagination={false}
+        scroll={{ x: "max-content" }}
         title={() => (
-          <div className={styles.tableToolbar}>
+          <div className={styles.tableHeader}>
             <div className={styles.tableTitle}>账号列表</div>
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleAdd}
-              disabled={!currentUser?.canWrite}
-            >
-              新增用户
-            </Button>
+            <Space size={[8, 8]} wrap className={styles.tableActions}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleAdd}
+                disabled={!currentUser?.canWrite}
+              >
+                新增用户
+              </Button>
+            </Space>
           </div>
         )}
-        pagination={{
-          current,
-          pageSize,
-          total,
-          onChange: (page, size) => {
-            setCurrent(page);
-            setPageSize(size);
-            fetchData(page, size);
-          },
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条记录`,
-        }}
+        footer={() => (
+          <div className={styles.pagination}>
+            <Pagination
+              current={current}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100, 500]}
+              showTotal={(total) => `共 ${total} 条`}
+              onChange={(page, size) => {
+                setCurrent(page);
+                setPageSize(size);
+                fetchData(page, size);
+              }}
+            />
+          </div>
+        )}
       />
 
       <Modal
