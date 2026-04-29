@@ -7,6 +7,17 @@ export interface FilmSource {
   grade: number;
   interval: number;
   cd?: number;
+  progress?: CollectProgress | null;
+}
+
+export interface CollectProgress {
+  id: string;
+  name: string;
+  total: number;
+  current: number;
+  success: number;
+  failed: number;
+  status: string;
 }
 
 export interface BatchOption {

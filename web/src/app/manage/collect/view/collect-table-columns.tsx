@@ -1,0 +1,173 @@
+import { Button, Flex, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from "antd";
+import { DeleteOutlined, EditOutlined, PauseOutlined, PoweroffOutlined } from "@ant-design/icons";
+import type { ColumnsType } from "antd/es/table";
+import { collectDuration, type FilmSource } from "./types";
+
+interface CollectTableColumnsOptions {
+  activeCollectIds: string[];
+  onUpdateItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
+  onChangeSourceState: (record: FilmSource) => void;
+  onStartTask: (record: FilmSource) => void;
+  onStopTask: (id: string) => void;
+  onEditSource: (id: string) => void;
+  onDeleteSource: (id: string) => void;
+}
+
+export function createCollectTableColumns({
+  activeCollectIds,
+  onUpdateItem,
+  onChangeSourceState,
+  onStartTask,
+  onStopTask,
+  onEditSource,
+  onDeleteSource,
+}: CollectTableColumnsOptions): ColumnsType<FilmSource> {
+  return [
+    {
+      title: "ID",
+      dataIndex: "id",
+      width: 80,
+      fixed: "left",
+      align: "center",
+      render: (value: number) => <Tag bordered={false}>{value}</Tag>,
+    },
+    {
+      title: "站点",
+      dataIndex: "name",
+      align: "left",
+      render: (name: string, record) => (
+        <Flex vertical gap={6}>
+          <Space size={[8, 4]} wrap>
+            <Typography.Text strong>{name}</Typography.Text>
+            <Tag color={record.grade === 0 ? "gold" : "default"} bordered={false}>
+              {record.grade === 0 ? "主站" : "附属站"}
+            </Tag>
+            <Tag color={record.state ? "success" : "default"} bordered={false}>
+              {record.state ? "已启用" : "已禁用"}
+            </Tag>
+          </Space>
+          <Typography.Link href={record.uri} target="_blank" rel="noopener noreferrer">
+            {record.uri}
+          </Typography.Link>
+        </Flex>
+      ),
+    },
+    {
+      title: "采集进度",
+      dataIndex: "progress",
+      width: 220,
+      render: (_, record) => {
+        const progress = record.progress;
+        if (!progress) {
+          return <Typography.Text type="secondary">未采集</Typography.Text>;
+        }
+        const total = Math.max(progress.total, 0);
+        const done = Math.min(
+          progress.success + progress.failed,
+          total || progress.success + progress.failed,
+        );
+        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+        const progressText = total > 0
+          ? `${done}/${total}`
+          : done > 0
+            ? `${done}`
+            : "即将开始采集";
+        return (
+          <Flex vertical gap={4}>
+            <Progress
+              percent={percent}
+              size="small"
+              status={progress.failed > 0 ? "exception" : "active"}
+            />
+            <Typography.Text type="secondary">
+              {progressText}
+              {progress.failed > 0 ? `，失败 ${progress.failed}` : ""}
+            </Typography.Text>
+          </Flex>
+        );
+      },
+    },
+    {
+      title: "图片同步",
+      dataIndex: "syncPictures",
+      align: "center",
+      render: (value: boolean, record) => (
+        <Switch
+          checked={value}
+          disabled={record.grade === 1}
+          checkedChildren="开启"
+          unCheckedChildren="关闭"
+          onChange={(checked) => {
+            onUpdateItem(record.id, (item) => ({ ...item, syncPictures: checked }));
+            onChangeSourceState({ ...record, syncPictures: checked });
+          }}
+        />
+      ),
+    },
+    {
+      title: "启用状态",
+      dataIndex: "state",
+      align: "center",
+      render: (value: boolean, record) => (
+        <Switch
+          checked={value}
+          checkedChildren="启用"
+          unCheckedChildren="禁用"
+          onChange={(checked) => {
+            onUpdateItem(record.id, (item) => ({ ...item, state: checked }));
+            onChangeSourceState({ ...record, state: checked });
+          }}
+        />
+      ),
+    },
+    {
+      title: "请求间隔",
+      dataIndex: "interval",
+      align: "center",
+      render: (value: number) => <Tag bordered={false}>{value > 0 ? `${value} ms` : "无限制"}</Tag>,
+    },
+    {
+      title: "采集时长",
+      align: "center",
+      render: (_, record) => (
+        <Select
+          size="small"
+          value={record.cd}
+          style={{ width: "100%" }}
+          options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
+          onChange={(value) => {
+            onUpdateItem(record.id, (item) => ({ ...item, cd: value }));
+          }}
+        />
+      ),
+    },
+    {
+      title: "操作",
+      key: "action",
+      fixed: "right",
+      align: "center",
+      render: (_, record) => {
+        const isRunning = activeCollectIds.includes(record.id);
+        return (
+          <Space size={4}>
+            {!isRunning ? (
+              <Tooltip title="开始采集">
+                <Button type="primary" icon={<PoweroffOutlined />} onClick={() => onStartTask(record)} />
+              </Tooltip>
+            ) : (
+              <Tooltip title="停止采集">
+                <Button danger icon={<PauseOutlined />} onClick={() => onStopTask(record.id)} />
+              </Tooltip>
+            )}
+            <Tooltip title="编辑站点">
+              <Button icon={<EditOutlined />} onClick={() => onEditSource(record.id)} />
+            </Tooltip>
+            <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
+              <Button danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </Space>
+        );
+      },
+    },
+  ];
+}

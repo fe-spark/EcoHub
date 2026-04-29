@@ -9,38 +9,22 @@ import React, {
 } from "react";
 import {
   Button,
-  Card,
-  Col,
-  Descriptions,
   Flex,
   Form,
   Popconfirm,
-  Row,
-  Select,
-  Statistic,
   Space,
-  Switch,
   Table,
   Tag,
-  Tooltip,
-  Typography,
 } from "antd";
-import {
-  DeleteOutlined,
-  EditOutlined,
-  LoadingOutlined,
-  PauseOutlined,
-  PlusOutlined,
-  PoweroffOutlined,
-} from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
+import { PauseOutlined, PlusOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectModal from "./batch-collect-modal";
+import { createCollectTableColumns } from "./collect-table-columns";
+import CollectOverview from "./collect-overview";
 import SourceFormModal from "./source-form-modal";
 import {
-  collectDuration,
   type BatchOption,
   type FilmSource,
   type SourceFormValues,
@@ -53,6 +37,9 @@ interface CollectListItemResponse extends Partial<FilmSource> {
   uri: string;
 }
 
+const POLL_INTERVAL = 4000;
+const MAX_POLL_FAILURES = 10;
+
 function normalizeSource(item: CollectListItemResponse): FilmSource {
   return {
     id: item.id,
@@ -63,17 +50,20 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd ?? 24),
+    progress: item.progress ?? null,
   };
 }
 
 export default function CollectManagePageView() {
   const { message } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
-  const [activeCollectIds, setActiveCollectIds] = useState<string[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
   const [batchStateUpdating, setBatchStateUpdating] = useState(false);
   const [loading, setLoading] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const mountedRef = useRef(false);
+  const pollFailuresRef = useRef(0);
+  const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
 
   const [sourceForm] = Form.useForm<SourceFormValues>();
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
@@ -85,6 +75,11 @@ export default function CollectManagePageView() {
   const [batchIds, setBatchIds] = useState<string[]>([]);
   const [batchTime, setBatchTime] = useState(24);
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
+
+  const activeCollectIds = useMemo(
+    () => siteList.filter((item) => item.progress).map((item) => item.id),
+    [siteList],
+  );
 
   const stats = useMemo(
     () => ({
@@ -101,7 +96,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const masterStatus = useMemo(() => {
+const masterStatus = useMemo(() => {
     if (stats.masters === 1) {
       return { text: "正常", color: "success" as const };
     }
@@ -111,11 +106,37 @@ export default function CollectManagePageView() {
     return { text: `${stats.masters} 个主站`, color: "error" as const };
   }, [stats.masters]);
 
-  const getCollectList = useCallback(async () => {
-    setLoading(true);
+  const clearPollTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const schedulePoll = useCallback(() => {
+    if (!mountedRef.current) {
+      return;
+    }
+    clearPollTimer();
+    timerRef.current = setTimeout(() => {
+      if (pollFailuresRef.current >= MAX_POLL_FAILURES) {
+        return;
+      }
+      void requestRef.current?.(true);
+    }, POLL_INTERVAL);
+  }, [clearPollTimer]);
+
+  const getCollectList = useCallback(async (silent = false) => {
+    if (!silent) {
+      setLoading(true);
+    }
     try {
       const resp = await ApiGet("/manage/collect/list");
+      if (!mountedRef.current) {
+        return;
+      }
       if (resp.code === 0) {
+        pollFailuresRef.current = 0;
         const list = Array.isArray(resp.data)
           ? resp.data.map((item: CollectListItemResponse) =>
               normalizeSource(item),
@@ -126,32 +147,37 @@ export default function CollectManagePageView() {
           current.filter((id) => list.some((item) => item.id === id)),
         );
       } else {
+        pollFailuresRef.current += 1;
         message.error(resp.msg || "采集站列表加载失败");
       }
+    } catch {
+      pollFailuresRef.current += 1;
+      message.error("采集站列表加载失败");
     } finally {
-      setLoading(false);
+      if (!mountedRef.current) {
+        return;
+      }
+      if (!silent) {
+        setLoading(false);
+      }
+      if (pollFailuresRef.current < MAX_POLL_FAILURES) {
+        schedulePoll();
+      }
     }
-  }, [message]);
-
-  const getCollectingState = useCallback(async () => {
-    const resp = await ApiGet("/manage/collect/collecting/state", undefined);
-    if (resp.code === 0 && Array.isArray(resp.data)) {
-      setActiveCollectIds(resp.data as string[]);
-    }
-  }, []);
+  }, [message, schedulePoll]);
 
   useEffect(() => {
+    requestRef.current = getCollectList;
+  }, [getCollectList]);
+
+  useEffect(() => {
+    mountedRef.current = true;
     void getCollectList();
-    void getCollectingState();
-    timerRef.current = setInterval(() => {
-      void getCollectingState();
-    }, 4000);
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      mountedRef.current = false;
+      clearPollTimer();
     };
-  }, [getCollectList, getCollectingState]);
+  }, [clearPollTimer, getCollectList]);
 
   const updateSiteListItem = useCallback(
     (id: string, updater: (record: FilmSource) => FilmSource) => {
@@ -181,32 +207,24 @@ export default function CollectManagePageView() {
       return;
     }
 
-    const sourcesToUpdate = selectedSources.filter((item) => item.state !== state);
-    if (sourcesToUpdate.length === 0) {
+    const sourceIdsToUpdate = selectedSources.filter((item) => item.state !== state).map((item) => item.id);
+    if (sourceIdsToUpdate.length === 0) {
       message.info(state ? "选中站点已全部启用" : "选中站点已全部禁用");
       return;
     }
 
     setBatchStateUpdating(true);
     try {
-      const results = await Promise.all(
-        sourcesToUpdate.map(async (source) => {
-          const resp = await ApiPost("/manage/collect/change", {
-            id: source.id,
-            state,
-            syncPictures: source.syncPictures,
-          });
-          return { source, resp };
-        }),
-      );
-      const failed = results.filter(({ resp }) => resp.code !== 0);
-      if (failed.length > 0) {
-        message.error(`批量${state ? "启用" : "禁用"}失败 ${failed.length} 个站点`);
+      const resp = await ApiPost("/manage/collect/change/batch", {
+        ids: sourceIdsToUpdate,
+        state,
+      });
+      if (resp.code !== 0) {
+        message.error(resp.msg || `批量${state ? "启用" : "禁用"}失败`);
       } else {
-        message.success(`已${state ? "启用" : "禁用"} ${sourcesToUpdate.length} 个站点`);
+        message.success(`已${state ? "启用" : "禁用"} ${sourceIdsToUpdate.length} 个站点`);
       }
       await getCollectList();
-      await getCollectingState();
     } finally {
       setBatchStateUpdating(false);
     }
@@ -220,7 +238,7 @@ export default function CollectManagePageView() {
     });
     if (resp.code === 0) {
       message.success(resp.msg);
-      await getCollectingState();
+      await getCollectList();
       return;
     }
     message.error(resp.msg || "启动采集失败");
@@ -230,7 +248,7 @@ export default function CollectManagePageView() {
     const resp = await ApiPost("/manage/collect/stop", { id });
     if (resp.code === 0) {
       message.success("已请求停止任务");
-      await getCollectingState();
+      await getCollectList();
       return;
     }
     message.error(resp.msg || "停止任务失败");
@@ -359,7 +377,7 @@ export default function CollectManagePageView() {
     if (resp.code === 0) {
       message.success(resp.msg);
       setBatchOpen(false);
-      await getCollectingState();
+      await getCollectList();
       return;
     }
     message.error(resp.msg || "批量采集启动失败");
@@ -369,172 +387,21 @@ export default function CollectManagePageView() {
     const resp = await ApiPost("/manage/spider/stopAll", {});
     if (resp.code === 0) {
       message.success(resp.msg);
-      await getCollectingState();
+      await getCollectList();
       return;
     }
     message.error(resp.msg || "终止任务失败");
   };
 
-  const columns: ColumnsType<FilmSource> = [
-    {
-      title: "ID",
-      dataIndex: "id",
-      width: 80,
-      fixed: "left",
-      align: "center",
-      render: (value: number) => <Tag bordered={false}>{value}</Tag>,
-    },
-    {
-      title: "站点",
-      dataIndex: "name",
-      align: "left",
-      render: (name: string, record) => {
-        const isRunning = activeCollectIds.includes(record.id);
-        return (
-          <Flex vertical gap={6}>
-            <Space size={[8, 4]} wrap>
-              <Typography.Text strong>{name}</Typography.Text>
-              <Tag
-                color={record.grade === 0 ? "gold" : "default"}
-                bordered={false}
-              >
-                {record.grade === 0 ? "主站" : "附属站"}
-              </Tag>
-              <Tag
-                color={record.state ? "success" : "default"}
-                bordered={false}
-              >
-                {record.state ? "已启用" : "已禁用"}
-              </Tag>
-              {isRunning ? (
-                <Tag
-                  icon={<LoadingOutlined />}
-                  color="processing"
-                  bordered={false}
-                >
-                  采集中
-                </Tag>
-              ) : null}
-            </Space>
-            <Typography.Link
-              href={record.uri}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {record.uri}
-            </Typography.Link>
-          </Flex>
-        );
-      },
-    },
-    {
-      title: "图片同步",
-      dataIndex: "syncPictures",
-      align: "center",
-      render: (value: boolean, record) => (
-        <Switch
-          checked={value}
-          disabled={record.grade === 1}
-          checkedChildren="开启"
-          unCheckedChildren="关闭"
-          onChange={(checked) => {
-            updateSiteListItem(record.id, (item) => ({
-              ...item,
-              syncPictures: checked,
-            }));
-            void changeSourceState({ ...record, syncPictures: checked });
-          }}
-        />
-      ),
-    },
-    {
-      title: "启用状态",
-      dataIndex: "state",
-      align: "center",
-      render: (value: boolean, record) => (
-        <Switch
-          checked={value}
-          checkedChildren="启用"
-          unCheckedChildren="禁用"
-          onChange={(checked) => {
-            updateSiteListItem(record.id, (item) => ({
-              ...item,
-              state: checked,
-            }));
-            void changeSourceState({ ...record, state: checked });
-          }}
-        />
-      ),
-    },
-    {
-      title: "请求间隔",
-      dataIndex: "interval",
-      align: "center",
-      render: (value: number) => (
-        <Tag bordered={false}>{value > 0 ? `${value} ms` : "无限制"}</Tag>
-      ),
-    },
-    {
-      title: "采集时长",
-      align: "center",
-      render: (_, record) => (
-        <Select
-          size="small"
-          value={record.cd}
-          style={{ width: "100%" }}
-          options={collectDuration.map((item) => ({
-            value: item.time,
-            label: item.label,
-          }))}
-          onChange={(value) => {
-            updateSiteListItem(record.id, (item) => ({ ...item, cd: value }));
-          }}
-        />
-      ),
-    },
-    {
-      title: "操作",
-      key: "action",
-      fixed: "right",
-      align: "center",
-      render: (_, record) => {
-        const isRunning = activeCollectIds.includes(record.id);
-        return (
-          <Space size={4}>
-            {!isRunning ? (
-              <Tooltip title="开始采集">
-                <Button
-                  type="primary"
-                  icon={<PoweroffOutlined />}
-                  onClick={() => void startTask(record)}
-                />
-              </Tooltip>
-            ) : (
-              <Tooltip title="停止采集">
-                <Button
-                  danger
-                  icon={<PauseOutlined />}
-                  onClick={() => void stopTask(record.id)}
-                />
-              </Tooltip>
-            )}
-            <Tooltip title="编辑站点">
-              <Button
-                icon={<EditOutlined />}
-                onClick={() => void openEditDialog(record.id)}
-              />
-            </Tooltip>
-            <Popconfirm
-              title="确认删除此采集站？"
-              onConfirm={() => void delSource(record.id)}
-            >
-              <Button danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          </Space>
-        );
-      },
-    },
-  ];
+  const columns = createCollectTableColumns({
+    activeCollectIds,
+    onUpdateItem: updateSiteListItem,
+    onChangeSourceState: (record) => void changeSourceState(record),
+    onStartTask: (record) => void startTask(record),
+    onStopTask: (id) => void stopTask(id),
+    onEditSource: (id) => void openEditDialog(id),
+    onDeleteSource: (id) => void delSource(id),
+  });
 
   const selectedCount = selectedSourceIds.length;
 
@@ -546,100 +413,11 @@ export default function CollectManagePageView() {
       />
 
       <div className={styles.layout}>
-        <Card
-          size="small"
-          title="运行概览"
-          className={styles.summaryCard}
-          styles={{ body: { height: "100%" } }}
-        >
-          <Row gutter={[16, 16]} className={styles.overviewRow}>
-            <Col xs={12} lg={6} className={styles.overviewCol}>
-              <div className={styles.overviewStat}>
-                <Statistic title="站点总数" value={stats.total} />
-              </div>
-            </Col>
-            <Col xs={12} lg={6} className={styles.overviewCol}>
-              <div className={styles.overviewStat}>
-                <Statistic title="启用站点" value={stats.enabled} />
-              </div>
-            </Col>
-            <Col xs={12} lg={6} className={styles.overviewCol}>
-              <div className={styles.overviewStat}>
-                <Statistic title="运行任务" value={stats.running} />
-              </div>
-            </Col>
-            <Col xs={12} lg={6} className={styles.overviewCol}>
-              <div className={styles.overviewStat}>
-                <Statistic
-                  title="主站状态"
-                  value={stats.masters}
-                  suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
-                />
-              </div>
-            </Col>
-          </Row>
-        </Card>
-
-        <Card
-          size="small"
-          title="当前主站"
-          className={styles.summaryCard}
-          styles={{ body: { height: "100%" } }}
-          extra={
-            masterSite ? (
-              <Tag color="gold">已生效</Tag>
-            ) : (
-              <Tag color="error">未配置</Tag>
-            )
-          }
-        >
-          {masterSite ? (
-            <Descriptions
-              column={1}
-              size="small"
-              className={styles.masterDescriptions}
-            >
-              <Descriptions.Item label="站点名称">
-                {masterSite.name}
-              </Descriptions.Item>
-              <Descriptions.Item label="接口地址">
-                <Typography.Link
-                  href={masterSite.uri}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className={styles.masterLink}
-                >
-                  {masterSite.uri}
-                </Typography.Link>
-              </Descriptions.Item>
-              <Descriptions.Item label="启用状态">
-                <Tag
-                  color={masterSite.state ? "success" : "default"}
-                  bordered={false}
-                >
-                  {masterSite.state ? "启用中" : "已停用"}
-                </Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="图片同步">
-                <Tag
-                  color={masterSite.syncPictures ? "processing" : "default"}
-                  bordered={false}
-                >
-                  {masterSite.syncPictures ? "开启" : "关闭"}
-                </Tag>
-              </Descriptions.Item>
-            </Descriptions>
-          ) : (
-            <Descriptions column={1} size="small">
-              <Descriptions.Item label="状态">
-                <Tag color="warning">未配置</Tag>
-              </Descriptions.Item>
-              <Descriptions.Item label="说明">
-                需要先指定一个主站
-              </Descriptions.Item>
-            </Descriptions>
-          )}
-        </Card>
+        <CollectOverview
+          stats={stats}
+          masterSite={masterSite}
+          masterStatus={masterStatus}
+        />
 
         <Table
           rowKey="id"
@@ -653,6 +431,9 @@ export default function CollectManagePageView() {
           loading={loading}
           pagination={false}
           scroll={{ x: "max-content" }}
+          rowClassName={(record) =>
+            selectedSourceIds.includes(record.id) ? styles.selectedRow : ""
+          }
           className={styles.tableBlock}
           title={() => (
             <div className={styles.tableHeader}>

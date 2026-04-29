@@ -80,9 +80,9 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/add`, handler.CollectHd.FilmSourceAdd)
 			collect.POST(`/update`, handler.CollectHd.FilmSourceUpdate)
 			collect.POST(`/change`, handler.CollectHd.FilmSourceChange)
+			collect.POST(`/change/batch`, handler.CollectHd.FilmSourceBatchChange)
 			collect.POST(`/del`, handler.CollectHd.FilmSourceDel)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
-			collect.GET(`/collecting/state`, handler.CollectHd.CollectingState)
 			collect.POST(`/stop`, handler.CollectHd.StopCollect)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)

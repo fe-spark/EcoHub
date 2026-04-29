@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -59,6 +60,8 @@ var sourceWriteLocks sync.Map
 
 var collectDBWriteSem = make(chan struct{}, collectDBWriteConcurrency)
 
+var collectProgress sync.Map
+
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
@@ -106,16 +109,117 @@ type collectTask struct {
 	reqId  string
 }
 
+type collectProgressState struct {
+	mu      sync.RWMutex
+	data    model.CollectProgress
+	updated time.Time
+}
+
+func ensureCollectProgress(sourceID string, name string) *collectProgressState {
+	if val, ok := collectProgress.Load(sourceID); ok {
+		state := val.(*collectProgressState)
+		state.mu.Lock()
+		state.data.Id = sourceID
+		if name != "" {
+			state.data.Name = name
+		}
+		state.updated = time.Now()
+		state.mu.Unlock()
+		return state
+	}
+	state := &collectProgressState{data: model.CollectProgress{Id: sourceID, Name: name, Status: "starting"}, updated: time.Now()}
+	actual, _ := collectProgress.LoadOrStore(sourceID, state)
+	return actual.(*collectProgressState)
+}
+
+func updateCollectProgress(sourceID string, update func(*model.CollectProgress)) {
+	if val, ok := collectProgress.Load(sourceID); ok {
+		state := val.(*collectProgressState)
+		state.mu.Lock()
+		update(&state.data)
+		state.updated = time.Now()
+		state.mu.Unlock()
+	}
+}
+
+func collectProgressSnapshot(sourceID string) (model.CollectProgress, bool) {
+	if val, ok := collectProgress.Load(sourceID); ok {
+		state := val.(*collectProgressState)
+		state.mu.RLock()
+		data := state.data
+		state.mu.RUnlock()
+		return data, true
+	}
+	return model.CollectProgress{}, false
+}
+
+func isCollectProgressStopped(sourceID string) bool {
+	if progress, ok := collectProgressSnapshot(sourceID); ok {
+		return progress.Status == "stopped"
+	}
+	return false
+}
+
+func isCollectProgressStarting(sourceID string) bool {
+	if progress, ok := collectProgressSnapshot(sourceID); ok {
+		return progress.Status == "starting"
+	}
+	return false
+}
+
+func isCollectAlreadyQueuedOrRunning(sourceID string) bool {
+	if _, ok := activeTasks.Load(sourceID); ok {
+		return true
+	}
+	return isCollectProgressStarting(sourceID)
+}
+
+func filterCollectableSources(sources []model.FilmSource, tag string) []model.FilmSource {
+	filtered := make([]model.FilmSource, 0, len(sources))
+	seen := make(map[string]struct{}, len(sources))
+	for _, source := range sources {
+		if _, ok := seen[source.Id]; ok {
+			log.Printf("[%s] 站点 %s 在本轮采集列表中重复，跳过", tag, source.Name)
+			continue
+		}
+		seen[source.Id] = struct{}{}
+		if isCollectAlreadyQueuedOrRunning(source.Id) {
+			log.Printf("[%s] 站点 %s 已在采集队列或正在运行，跳过", tag, source.Name)
+			continue
+		}
+		filtered = append(filtered, source)
+	}
+	return filtered
+}
+
+func markSourcesCollectStarting(sources []model.FilmSource) {
+	for _, source := range sources {
+		state := ensureCollectProgress(source.Id, source.Name)
+		state.mu.Lock()
+		state.data.Total = 0
+		state.data.Current = 0
+		state.data.Success = 0
+		state.data.Failed = 0
+		state.data.Status = "starting"
+		state.updated = time.Now()
+		state.mu.Unlock()
+	}
+}
+
 type collectLifecycleState struct {
-	mu            sync.Mutex
-	cond          *sync.Cond
-	activeSources map[string]struct{}
-	activeCount   int
-	flushing      bool
+	mu                  sync.Mutex
+	cond                *sync.Cond
+	activeSources       map[string]struct{}
+	activeCount         int
+	pendingFlushSources map[string]model.FilmSource
+	flushing            bool
 }
 
 func newCollectLifecycle() *collectLifecycleState {
-	state := &collectLifecycleState{activeSources: make(map[string]struct{})}
+	state := &collectLifecycleState{
+		activeSources:       make(map[string]struct{}),
+		pendingFlushSources: make(map[string]model.FilmSource),
+	}
 	state.cond = sync.NewCond(&state.mu)
 	return state
 }
@@ -145,19 +249,32 @@ func (s *collectLifecycleState) endSource(sourceID string) {
 	s.finishSourceLocked(sourceID)
 }
 
-func (s *collectLifecycleState) finishSourceAndFlush(sourceID string, flush func() error) error {
+func (s *collectLifecycleState) endSourceAndFlush(source model.FilmSource) error {
+	return s.finishSourceAndFlush(source)
+}
+
+func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) error {
+	source.Id = strings.TrimSpace(source.Id)
+	if source.Id == "" {
+		return nil
+	}
+
 	s.mu.Lock()
-	s.finishSourceLocked(sourceID)
-	for s.flushing {
+	s.finishSourceLocked(source.Id)
+	s.pendingFlushSources[source.Id] = source
+	for s.flushing || s.activeCount > 0 {
 		s.cond.Wait()
 	}
+	if len(s.pendingFlushSources) == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	pending := s.pendingFlushSources
+	s.pendingFlushSources = make(map[string]model.FilmSource)
 	s.flushing = true
-	for s.activeCount > 0 {
-		s.cond.Wait()
-	}
 	s.mu.Unlock()
 
-	err := flush()
+	err := flushPendingSources(pending)
 
 	s.mu.Lock()
 	s.flushing = false
@@ -168,16 +285,24 @@ func (s *collectLifecycleState) finishSourceAndFlush(sourceID string, flush func
 
 func (s *collectLifecycleState) runFlush(flush func() error) error {
 	s.mu.Lock()
-	for s.flushing {
+	for s.flushing || s.activeCount > 0 {
 		s.cond.Wait()
+	}
+	var pending map[string]model.FilmSource
+	if len(s.pendingFlushSources) > 0 {
+		pending = s.pendingFlushSources
+		s.pendingFlushSources = make(map[string]model.FilmSource)
 	}
 	s.flushing = true
-	for s.activeCount > 0 {
-		s.cond.Wait()
-	}
 	s.mu.Unlock()
 
-	err := flush()
+	var err error
+	if len(pending) > 0 {
+		err = flushPendingSources(pending)
+	}
+	if err == nil {
+		err = flush()
+	}
 
 	s.mu.Lock()
 	s.flushing = false
@@ -191,10 +316,24 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	for s.flushing {
 		s.cond.Wait()
 	}
-	s.flushing = true
 	for s.activeCount > 0 {
 		s.cond.Wait()
 	}
+	if len(s.pendingFlushSources) > 0 {
+		pending := s.pendingFlushSources
+		s.pendingFlushSources = make(map[string]model.FilmSource)
+		s.flushing = true
+		s.mu.Unlock()
+		flushErr := flushPendingSources(pending)
+		s.mu.Lock()
+		s.flushing = false
+		if flushErr != nil {
+			s.mu.Unlock()
+			s.cond.Broadcast()
+			return flushErr
+		}
+	}
+	s.flushing = true
 	s.mu.Unlock()
 
 	err := action()
@@ -236,50 +375,52 @@ func flushSourcePending(source model.FilmSource) error {
 	return nil
 }
 
+func flushPendingSources(sourceMap map[string]model.FilmSource) error {
+	if len(sourceMap) == 0 {
+		return nil
+	}
+	sources := make([]model.FilmSource, 0, len(sourceMap))
+	for _, source := range sourceMap {
+		sources = append(sources, source)
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		if sources[i].Grade == sources[j].Grade {
+			return sources[i].Id < sources[j].Id
+		}
+		return sources[i].Grade == model.MasterCollect
+	})
+
+	flushErrors := make([]string, 0)
+	for _, source := range sources {
+		if err := flushSourcePending(source); err != nil {
+			flushErrors = append(flushErrors, fmt.Sprintf("source=%s: %v", source.Name, err))
+		}
+	}
+	if len(flushErrors) > 0 {
+		return errors.New(strings.Join(flushErrors, "; "))
+	}
+	return nil
+}
+
 func flushSourcesPending(tag string, sources []model.FilmSource) {
 	if len(sources) == 0 {
 		return
 	}
 
-	masters := make([]model.FilmSource, 0, len(sources))
-	slaves := make([]model.FilmSource, 0, len(sources))
-	seen := make(map[string]struct{}, len(sources))
+	flushMap := make(map[string]model.FilmSource, len(sources))
 	for _, source := range sources {
 		source.Id = strings.TrimSpace(source.Id)
 		if source.Id == "" {
 			continue
 		}
-		if _, ok := seen[source.Id]; ok {
-			continue
-		}
-		seen[source.Id] = struct{}{}
-		if source.Grade == model.MasterCollect {
-			masters = append(masters, source)
-			continue
-		}
-		slaves = append(slaves, source)
+		flushMap[source.Id] = source
 	}
-
-	if len(masters) == 0 && len(slaves) == 0 {
+	if len(flushMap) == 0 {
 		return
 	}
 
 	if err := collectLifecycle.runFlush(func() error {
-		flushErrors := make([]string, 0)
-		for _, source := range masters {
-			if err := flushSourcePending(source); err != nil {
-				flushErrors = append(flushErrors, fmt.Sprintf("source=%s: %v", source.Name, err))
-			}
-		}
-		for _, source := range slaves {
-			if err := flushSourcePending(source); err != nil {
-				flushErrors = append(flushErrors, fmt.Sprintf("source=%s: %v", source.Name, err))
-			}
-		}
-		if len(flushErrors) > 0 {
-			return errors.New(strings.Join(flushErrors, "; "))
-		}
-		return nil
+		return flushPendingSources(flushMap)
 	}); err != nil {
 		log.Printf("[%s] 收尾刷新失败: %v", tag, err)
 	}
@@ -484,6 +625,11 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	if len(sources) == 0 {
 		return
 	}
+	sources = filterCollectableSources(sources, tag)
+	if len(sources) == 0 {
+		return
+	}
+	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
 	masters, slaves := splitSourcesByGrade(sources)
 	if len(masters) > 0 {
@@ -503,24 +649,28 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 
 		log.Printf("[%s] 主站优先：主站并发=%d，附属站并发=%d", tag, masterLimit, slaveLimit)
 
-		var wg sync.WaitGroup
-		wg.Add(1)
+		var masterWG sync.WaitGroup
+		masterWG.Add(1)
 		go func() {
-			defer wg.Done()
+			defer masterWG.Done()
 			runSourcesGroupWithLimit(masters, h, tag, masterLimit, runVersion)
 		}()
+
+		var slaveWG sync.WaitGroup
 		if len(slaves) > 0 && slaveLimit > 0 {
-			wg.Add(1)
+			slaveWG.Add(1)
 			go func() {
-				defer wg.Done()
+				defer slaveWG.Done()
 				runSourcesGroupWithLimit(slaves, h, tag, slaveLimit, runVersion)
 			}()
 		}
-		wg.Wait()
+
+		masterWG.Wait()
 		if len(slaves) > 0 && slaveLimit == 0 && !isDispatchStopped(runVersion) {
 			log.Printf("[%s] 主站优先：当前并发位已被主站占满，主站完成后顺序补跑 %d 个附属站任务", tag, len(slaves))
 			runSourcesGroupWithLimit(slaves, h, tag, 1, runVersion)
 		}
+		slaveWG.Wait()
 		return
 	}
 	if len(slaves) > 0 {
@@ -547,6 +697,10 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			log.Printf("[%s] 检测到一键终止，停止派发剩余站点任务", tag)
 			break
 		}
+		if isCollectProgressStopped(src.Id) {
+			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
+			continue
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(fs model.FilmSource) {
@@ -554,6 +708,10 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			defer func() { <-sem }()
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
+				return
+			}
+			if isCollectProgressStopped(fs.Id) {
+				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				return
 			}
 			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false); err != nil {
@@ -575,25 +733,34 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
+	if runVersion != nil && isCollectProgressStopped(id) {
+		return errors.New("任务已被停止，跳过启动")
+	}
+	if runVersion == nil && isCollectProgressStarting(id) {
+		return errors.New("该采集站已在批量队列中，已跳过本次采集")
+	}
+	// 1. 首先通过ID获取对应采集站信息
+	s := repository.FindCollectSourceById(id)
+	if s == nil {
+		return errors.New("采集站点不存在")
+	} else if !s.State {
+		return errors.New("采集站点已停用")
+	}
 	if err := collectLifecycle.beginSource(id); err != nil {
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
 	defer func() {
 		if flushAtEnd {
-			flushErr := collectLifecycle.finishSourceAndFlush(id, func() error {
-				s := repository.FindCollectSourceById(id)
-				if s == nil {
-					return nil
-				}
-				return flushSourcePending(*s)
-			})
+			flushErr := collectLifecycle.finishSourceAndFlush(*s)
 			if retErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
 			return
 		}
-		collectLifecycle.endSource(id)
+		if flushErr := collectLifecycle.endSourceAndFlush(*s); retErr == nil && flushErr != nil {
+			retErr = flushErr
+		}
 	}()
 
 	// 同站跳过：如果该站点已有采集任务在运行，则跳过此次采集任务
@@ -618,20 +785,22 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		if val, ok := activeTasks.Load(id); ok {
 			if val.(collectTask).reqId == reqId {
 				activeTasks.Delete(id)
+				updateCollectProgress(id, func(progress *model.CollectProgress) {
+					if retErr != nil {
+						progress.Status = "failed"
+						return
+					}
+					if progress.Status != "stopped" {
+						progress.Status = "done"
+					}
+				})
 				log.Printf("[Spider] 站点 %s 任务结束\n", id)
 			}
 		}
 	}()
 
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
-
-	// 1. 首先通过ID获取对应采集站信息
-	s := repository.FindCollectSourceById(id)
-	if s == nil {
-		return errors.New("采集站点不存在")
-	} else if !s.State {
-		return errors.New("采集站点已停用")
-	}
+	ensureCollectProgress(id, s.Name)
 
 	// 生成 RequestInfo
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
@@ -650,9 +819,23 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	}
 	// pageCount = 0 说明该站点在当前时间段内无新数据，任务无需执行
 	if pageCount <= 0 {
+		updateCollectProgress(id, func(progress *model.CollectProgress) {
+			progress.Total = 0
+			progress.Current = 0
+			progress.Success = 0
+			progress.Failed = 0
+			progress.Status = "done"
+		})
 		log.Printf("[Spider] 站点 %s 无需采集 (pageCount=%d，可能该时间段内无新内容)\n", s.Name, pageCount)
 		return nil
 	}
+	updateCollectProgress(id, func(progress *model.CollectProgress) {
+		progress.Total = pageCount
+		progress.Current = 0
+		progress.Success = 0
+		progress.Failed = 0
+		progress.Status = "running"
+	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
@@ -766,9 +949,18 @@ func saveFilmPageFailure(s *model.FilmSource, h, pg int, err error) {
 func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 	select {
 	case <-ctx.Done():
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Status = "stopped"
+		})
 		return
 	default:
 	}
+	updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+		if pg > progress.Current {
+			progress.Current = pg
+		}
+		progress.Status = "running"
+	})
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
@@ -780,15 +972,33 @@ func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
 	// 此处仅执行请求，保证原子请求的纯粹性
 	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Failed++
+			if pg > progress.Current {
+				progress.Current = pg
+			}
+		})
 		saveFilmPageFailure(s, h, pg, err)
 		log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, pg, err)
 		return
 	}
 	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Failed++
+			if pg > progress.Current {
+				progress.Current = pg
+			}
+		})
 		saveFilmPageFailure(s, h, pg, err)
 		log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, pg, err)
 		return
 	}
+	updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+		progress.Success++
+		if pg > progress.Current {
+			progress.Current = pg
+		}
+	})
 	log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, pg, len(list))
 }
 
@@ -803,9 +1013,7 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 	}
 	defer func() {
 		if flushAtEnd {
-			flushErr := collectLifecycle.finishSourceAndFlush(s.Id, func() error {
-				return flushSourcePending(*s)
-			})
+			flushErr := collectLifecycle.finishSourceAndFlush(*s)
 			if retErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
@@ -893,7 +1101,6 @@ func BatchCollect(h int, ids ...string) {
 	}
 
 	runSourcesWithLimit(sources, h, "Batch-Collect")
-	flushSourcesPending("Batch-Collect", sources)
 }
 
 func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
@@ -922,7 +1129,6 @@ func AutoCollect(h int) {
 	}
 
 	runSourcesWithLimit(enabled, h, "Auto-Collect")
-	flushSourcesPending("Auto-Collect", enabled)
 }
 
 // ClearSpider 删除所有已采集的影片信息，并与采集写库互斥。
@@ -1033,9 +1239,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		return
 	}
 	defer func() {
-		if err := collectLifecycle.finishSourceAndFlush(s.Id, func() error {
-			return flushSourcePending(*s)
-		}); err != nil {
+		if err := collectLifecycle.finishSourceAndFlush(*s); err != nil {
 			log.Printf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v\n", s.Id, err)
 		}
 	}()
@@ -1126,14 +1330,59 @@ func GetActiveTasks() []string {
 	return ids
 }
 
+func GetActiveTaskProgress() []model.CollectProgress {
+	list := make([]model.CollectProgress, 0)
+	seen := make(map[string]struct{})
+	activeTasks.Range(func(key, value any) bool {
+		id := key.(string)
+		seen[id] = struct{}{}
+		if progress, ok := collectProgressSnapshot(id); ok {
+			list = append(list, progress)
+			return true
+		}
+		list = append(list, model.CollectProgress{Id: id, Status: "running"})
+		return true
+	})
+	collectProgress.Range(func(key, value any) bool {
+		id := key.(string)
+		if _, ok := seen[id]; ok {
+			return true
+		}
+		state := value.(*collectProgressState)
+		state.mu.RLock()
+		progress := state.data
+		state.mu.RUnlock()
+		if progress.Status == "starting" {
+			list = append(list, progress)
+		}
+		return true
+	})
+	return list
+}
+
 // StopAllTasks 强制停止当前系统中所有正在进行的采集任务
 func StopAllTasks() {
 	stopAllVersion.Add(1)
 	count := 0
+	collectProgress.Range(func(key, value any) bool {
+		state := value.(*collectProgressState)
+		state.mu.Lock()
+		if state.data.Status == "starting" || state.data.Status == "running" {
+			state.data.Status = "stopped"
+			state.updated = time.Now()
+		}
+		state.mu.Unlock()
+		return true
+	})
 	activeTasks.Range(func(key, value any) bool {
 		if ct, ok := value.(collectTask); ok {
 			ct.cancel()
 			count++
+		}
+		if id, ok := key.(string); ok {
+			updateCollectProgress(id, func(progress *model.CollectProgress) {
+				progress.Status = "stopped"
+			})
 		}
 		activeTasks.Delete(key)
 		return true
@@ -1145,6 +1394,11 @@ func StopAllTasks() {
 
 // StopTask 强行停止指定站点的采集任务
 func StopTask(id string) {
+	updateCollectProgress(id, func(progress *model.CollectProgress) {
+		if progress.Status == "starting" || progress.Status == "running" {
+			progress.Status = "stopped"
+		}
+	})
 	if val, ok := activeTasks.Load(id); ok {
 		val.(collectTask).cancel()
 		activeTasks.Delete(id)

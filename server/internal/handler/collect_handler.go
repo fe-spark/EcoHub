@@ -134,6 +134,36 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
+func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
+	req := model.FilmSourceStateBatchRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	ids := make([]string, 0, len(req.Ids))
+	seen := make(map[string]struct{}, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		dto.Failed("请选择需要更新的采集站", c)
+		return
+	}
+	if err := service.CollectSvc.BatchUpdateFilmSourceState(ids, req.State); err != nil {
+		dto.Failed(fmt.Sprint("资源站批量更新失败: ", err.Error()), c)
+		return
+	}
+	dto.SuccessOnlyMsg("批量更新成功", c)
+}
+
 func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
 	var req struct {
 		Id string `json:"id"`
@@ -173,11 +203,6 @@ func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 		return
 	}
 	dto.SuccessOnlyMsg("测试成功!!!", c)
-}
-
-func (h *CollectHandler) CollectingState(c *gin.Context) {
-	ids := spider.GetActiveTasks()
-	dto.Success(ids, "正在采集的任务 ID 列表获取成功", c)
 }
 
 func (h *CollectHandler) StopCollect(c *gin.Context) {

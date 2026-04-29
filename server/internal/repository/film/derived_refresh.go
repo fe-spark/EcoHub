@@ -17,6 +17,8 @@ import (
 
 const derivedVisibleCacheInvalidateInterval = 2 * time.Second
 
+const derivedRefreshPIDChunkSize = 10
+
 var derivedRefresh = newDerivedRefreshScheduler()
 
 type derivedRefreshScheduler struct {
@@ -169,17 +171,24 @@ func flushDerivedRefreshSource(sourceID string, pidSet map[int64]struct{}) error
 
 	log.Printf("[DerivedRefresh] 开始刷新 source=%s, pid_count=%d", sourceID, len(pids))
 	clearFilmIndexCachesByPidSet(pidSet)
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var filmIndexes []model.FilmIndex
-		if err := tx.Where("pid IN ?", pids).Find(&filmIndexes).Error; err != nil {
+	for start := 0; start < len(pids); start += derivedRefreshPIDChunkSize {
+		end := start + derivedRefreshPIDChunkSize
+		if end > len(pids) {
+			end = len(pids)
+		}
+		chunk := pids[start:end]
+		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+			var filmIndexes []model.FilmIndex
+			if err := tx.Where("pid IN ?", chunk).Find(&filmIndexes).Error; err != nil {
+				return err
+			}
+			return RefreshPlayFromSummaryByIndexesTx(tx, filmIndexes)
+		}); err != nil {
 			return err
 		}
-		return RefreshPlayFromSummaryByIndexesTx(tx, filmIndexes)
-	}); err != nil {
-		return err
-	}
-	if err := RefreshSearchTagsByPids(pids...); err != nil {
-		return err
+		if err := RefreshSearchTagsByPids(chunk...); err != nil {
+			return err
+		}
 	}
 	log.Printf("[DerivedRefresh] 刷新完成 source=%s, pid_count=%d", sourceID, len(pids))
 	return nil

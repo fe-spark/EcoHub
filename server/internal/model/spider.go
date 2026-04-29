@@ -103,6 +103,26 @@ type FilmTaskOptions struct {
 	Name string `json:"name"`
 }
 
+type FilmSourceStateBatchRequest struct {
+	Ids   []string `json:"ids"`
+	State bool     `json:"state"`
+}
+
+type CollectProgress struct {
+	Id      string `json:"id"`
+	Name    string `json:"name"`
+	Total   int    `json:"total"`
+	Current int    `json:"current"`
+	Success int    `json:"success"`
+	Failed  int    `json:"failed"`
+	Status  string `json:"status"`
+}
+
+type FilmSourceListItem struct {
+	FilmSource
+	Progress *CollectProgress `json:"progress,omitempty"`
+}
+
 type Option struct {
 	Name  string `json:"name"`
 	Value any    `json:"value"`

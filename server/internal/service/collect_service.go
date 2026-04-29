@@ -18,8 +18,21 @@ type CollectService struct{}
 
 var CollectSvc = new(CollectService)
 
-func (s *CollectService) GetFilmSourceList() []model.FilmSource {
-	return repository.GetCollectSourceList()
+func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
+	sources := repository.GetCollectSourceList()
+	list := make([]model.FilmSourceListItem, 0, len(sources))
+	progressByID := make(map[string]model.CollectProgress)
+	for _, progress := range spider.GetActiveTaskProgress() {
+		progressByID[progress.Id] = progress
+	}
+	for _, source := range sources {
+		item := model.FilmSourceListItem{FilmSource: source}
+		if progress, ok := progressByID[source.Id]; ok {
+			item.Progress = &progress
+		}
+		list = append(list, item)
+	}
+	return list
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
@@ -110,6 +123,24 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	if source.Grade == model.MasterCollect && source.State && old.State != source.State {
 		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 			return syncErr
+		}
+	}
+	return nil
+}
+
+func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
+	for _, id := range ids {
+		source := repository.FindCollectSourceById(id)
+		if source == nil {
+			return errors.New("采集站信息不存在")
+		}
+		if source.State == state {
+			continue
+		}
+		next := *source
+		next.State = state
+		if err := s.UpdateFilmSource(next); err != nil {
+			return err
 		}
 	}
 	return nil

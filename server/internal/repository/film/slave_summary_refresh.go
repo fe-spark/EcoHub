@@ -12,6 +12,8 @@ import (
 
 var slaveSummaryRefresh = newSlaveSummaryRefreshScheduler()
 
+const slaveSummaryRefreshMIDChunkSize = 500
+
 type slaveSummaryRefreshScheduler struct {
 	mu     sync.Mutex
 	states map[string]*slaveSummaryRefreshState
@@ -146,14 +148,19 @@ func flushSlaveSummaryRefreshSource(sourceID string, midSet map[int64]struct{}) 
 		return mids[i] < mids[j]
 	})
 
-	var infos []model.FilmIndex
-	if err := db.Mdb.Where("mid IN ?", mids).Find(&infos).Error; err != nil {
-		return err
-	}
-
 	log.Printf("[SlaveSummaryRefresh] 开始刷新 source=%s, mid_count=%d", sourceID, len(mids))
-	if err := RefreshPlayFromSummaryByIndexes(infos); err != nil {
-		return err
+	for start := 0; start < len(mids); start += slaveSummaryRefreshMIDChunkSize {
+		end := start + slaveSummaryRefreshMIDChunkSize
+		if end > len(mids) {
+			end = len(mids)
+		}
+		var infos []model.FilmIndex
+		if err := db.Mdb.Where("mid IN ?", mids[start:end]).Find(&infos).Error; err != nil {
+			return err
+		}
+		if err := RefreshPlayFromSummaryByIndexes(infos); err != nil {
+			return err
+		}
 	}
 	log.Printf("[SlaveSummaryRefresh] 刷新完成 source=%s, mid_count=%d", sourceID, len(mids))
 	return nil
