@@ -29,9 +29,9 @@ func getSearchTagsCacheVersion() string {
 }
 
 func DelFilmSearch(id int64) error {
-	info := GetSearchInfoById(id)
+	info := GetFilmIndexById(id)
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid = ?", id).Delete(&model.SearchInfo{}).Error; err != nil {
+		if err := tx.Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid = ?", id).Delete(&model.MovieDetailInfo{}).Error; err != nil {
@@ -50,7 +50,7 @@ func DelFilmSearch(id int64) error {
 	})
 
 	if err == nil && info != nil {
-		if rebuildErr := RebuildSearchTagsByPids(info.Pid); rebuildErr != nil {
+		if rebuildErr := RefreshSearchTagsByPids(info.Pid); rebuildErr != nil {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
@@ -65,7 +65,7 @@ func ShieldFilmSearch(cid int64) error {
 	pID := support.GetParentId(cid)
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("cid = ?", cid).Delete(&model.SearchInfo{}).Error; err != nil {
+		if err := tx.Where("cid = ?", cid).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		return nil
@@ -76,7 +76,7 @@ func ShieldFilmSearch(cid int64) error {
 	}
 
 	if pID > 0 {
-		if rebuildErr := RebuildSearchTagsByPids(pID); rebuildErr != nil {
+		if rebuildErr := RefreshSearchTagsByPids(pID); rebuildErr != nil {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
@@ -89,14 +89,14 @@ func ShieldFilmSearch(cid int64) error {
 
 func ShieldRootFilmSearch(pid int64) error {
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return tx.Where("cid = ? OR (pid = ? AND cid = 0)", pid, pid).Delete(&model.SearchInfo{}).Error
+		return tx.Where("cid = ? OR (pid = ? AND cid = 0)", pid, pid).Delete(&model.FilmIndex{}).Error
 	})
 	if err != nil {
 		log.Printf("ShieldRootFilmSearch Error: %v", err)
 		return err
 	}
 
-	if rebuildErr := RebuildSearchTagsByPids(pid); rebuildErr != nil {
+	if rebuildErr := RefreshSearchTagsByPids(pid); rebuildErr != nil {
 		log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 		return rebuildErr
 	}
@@ -108,7 +108,7 @@ func ShieldRootFilmSearch(pid int64) error {
 
 func RecoverFilmSearch(cid int64) error {
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.SearchInfo{}).Unscoped().Where("cid = ?", cid).Update("deleted_at", nil).Error; err != nil {
+		if err := tx.Model(&model.FilmIndex{}).Unscoped().Where("cid = ?", cid).Update("deleted_at", nil).Error; err != nil {
 			return err
 		}
 		return nil
@@ -120,7 +120,7 @@ func RecoverFilmSearch(cid int64) error {
 
 	pID := support.GetParentId(cid)
 	if pID > 0 {
-		if rebuildErr := RebuildSearchTagsByPids(pID); rebuildErr != nil {
+		if rebuildErr := RefreshSearchTagsByPids(pID); rebuildErr != nil {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
@@ -150,11 +150,11 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 	}
 
 	var mids []int64
-	if err := tx.Model(&model.SearchInfo{}).Where("source_id IN ?", ids).Pluck("mid", &mids).Error; err != nil {
+	if err := tx.Model(&model.FilmIndex{}).Where("source_id IN ?", ids).Pluck("mid", &mids).Error; err != nil {
 		return err
 	}
 
-	if err := tx.Where("source_id IN ?", ids).Delete(&model.SearchInfo{}).Error; err != nil {
+	if err := tx.Where("source_id IN ?", ids).Delete(&model.FilmIndex{}).Error; err != nil {
 		return err
 	}
 	if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
@@ -231,7 +231,7 @@ func ClearAllSearchTagsCache() {
 func FilmZero() {
 	tables := []string{
 		model.TableMovieDetail,
-		model.TableSearchInfo,
+		model.TableFilmIndex,
 		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableCategory,
@@ -272,7 +272,7 @@ func RefreshMasterDataCaches() {
 
 // CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录
 func CleanEmptyFilms() int64 {
-	var infos []model.SearchInfo
+	var infos []model.FilmIndex
 	db.Mdb.Where("name = ? OR name IS NULL OR pid = 0", "").Find(&infos)
 	if len(infos) == 0 {
 		return 0
@@ -284,7 +284,7 @@ func CleanEmptyFilms() int64 {
 	return int64(len(infos))
 }
 
-// CleanSearchWithoutDetail 清理 search_info 存在但 movie_detail_info 缺失的脏记录。
+// CleanSearchWithoutDetail 清理影片索引存在但 movie_detail_info 缺失的脏记录。
 func CleanSearchWithoutDetail() int64 {
 	type orphanRecord struct {
 		Mid int64
@@ -292,9 +292,9 @@ func CleanSearchWithoutDetail() int64 {
 	}
 
 	var records []orphanRecord
-	err := db.Mdb.Model(&model.SearchInfo{}).
-		Select("search_info.mid, search_info.pid").
-		Joins("LEFT JOIN movie_detail_info ON movie_detail_info.mid = search_info.mid AND movie_detail_info.deleted_at IS NULL").
+	err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("film_index.mid, film_index.pid").
+		Joins("LEFT JOIN movie_detail_info ON movie_detail_info.mid = film_index.mid AND movie_detail_info.deleted_at IS NULL").
 		Where("movie_detail_info.id IS NULL").
 		Scan(&records).Error
 	if err != nil {
@@ -321,7 +321,7 @@ func CleanSearchWithoutDetail() int64 {
 	}
 
 	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid IN ?", mids).Delete(&model.SearchInfo{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
@@ -348,11 +348,11 @@ func CleanSearchWithoutDetail() int64 {
 		for pid := range pidSet {
 			pids = append(pids, pid)
 		}
-		if rebuildErr := RebuildSearchTagsByPids(pids...); rebuildErr != nil {
+		if rebuildErr := RefreshSearchTagsByPids(pids...); rebuildErr != nil {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 		}
 	}
-	clearSearchInfoCachesByPidSet(pidSet)
+	clearFilmIndexCachesByPidSet(pidSet)
 	ClearTVBoxListCache()
 	return int64(len(mids))
 }

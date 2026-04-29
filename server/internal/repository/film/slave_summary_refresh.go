@@ -27,7 +27,7 @@ func newSlaveSummaryRefreshScheduler() *slaveSummaryRefreshScheduler {
 	return &slaveSummaryRefreshScheduler{states: make(map[string]*slaveSummaryRefreshState)}
 }
 
-func ScheduleSlaveSummaryRefresh(sourceID string, infos ...model.SearchInfo) {
+func ScheduleSlaveSummaryRefresh(sourceID string, infos ...model.FilmIndex) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || len(infos) == 0 {
 		return
@@ -146,13 +146,13 @@ func flushSlaveSummaryRefreshSource(sourceID string, midSet map[int64]struct{}) 
 		return mids[i] < mids[j]
 	})
 
-	var infos []model.SearchInfo
+	var infos []model.FilmIndex
 	if err := db.Mdb.Where("mid IN ?", mids).Find(&infos).Error; err != nil {
 		return err
 	}
 
 	log.Printf("[SlaveSummaryRefresh] 开始刷新 source=%s, mid_count=%d", sourceID, len(mids))
-	if err := RefreshPlayFromSummaryBySearchInfos(infos); err != nil {
+	if err := RefreshPlayFromSummaryByIndexes(infos); err != nil {
 		return err
 	}
 	log.Printf("[SlaveSummaryRefresh] 刷新完成 source=%s, mid_count=%d", sourceID, len(mids))

@@ -24,20 +24,20 @@ type ProvideService struct{}
 
 var ProvideSvc = new(ProvideService)
 
-func resolveProvideType(search model.SearchInfo) (int64, string) {
-	if search.Cid > 0 {
-		if name := repository.GetCategoryNameById(search.Cid); name != "" {
-			return search.Cid, name
+func resolveProvideType(filmIndex model.FilmIndex) (int64, string) {
+	if filmIndex.Cid > 0 {
+		if name := repository.GetCategoryNameById(filmIndex.Cid); name != "" {
+			return filmIndex.Cid, name
 		}
-		return search.Cid, search.CName
+		return filmIndex.Cid, filmIndex.CName
 	}
-	if search.Pid > 0 {
-		if name := repository.GetMainCategoryName(search.Pid); name != "" {
-			return search.Pid, name
+	if filmIndex.Pid > 0 {
+		if name := repository.GetMainCategoryName(filmIndex.Pid); name != "" {
+			return filmIndex.Pid, name
 		}
-		return search.Pid, search.CName
+		return filmIndex.Pid, filmIndex.CName
 	}
-	return 0, search.CName
+	return 0, filmIndex.CName
 }
 
 // GetVodDirectBySource 获取指定采集站直连原始数据(MacCMS 兼容)
@@ -300,7 +300,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		Year:     strings.TrimSpace(year),
 		Sort:     strings.TrimSpace(sort),
 	}
-	query := filmrepo.BuildSearchInfoQueryByTags(db.Mdb.Model(&model.SearchInfo{}), searchTags)
+	query := filmrepo.BuildFilmIndexQueryByTags(db.Mdb.Model(&model.FilmIndex{}), searchTags)
 
 	if wd != "" {
 		query = query.Where("name LIKE ? OR sub_title LIKE ?", "%"+wd+"%", "%"+wd+"%")
@@ -313,7 +313,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 
 	dto.GetPage(query, &page)
 
-	var sl []model.SearchInfo
+	var sl []model.FilmIndex
 	query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl)
 
 	var vodList []model.FilmList
@@ -348,14 +348,14 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	return page.Current, page.PageCount, page.Total, vodList
 }
 
-func resolveProvidePlayFromSummary(search model.SearchInfo) string {
-	return strings.TrimSpace(search.PlayFromSummary)
+func resolveProvidePlayFromSummary(filmIndex model.FilmIndex) string {
+	return strings.TrimSpace(filmIndex.PlayFromSummary)
 }
 
-func resolveProvideVodTime(search model.SearchInfo) string {
-	stamp := search.CollectStamp
+func resolveProvideVodTime(filmIndex model.FilmIndex) string {
+	stamp := filmIndex.CollectStamp
 	if stamp <= 0 {
-		stamp = search.UpdateStamp
+		stamp = filmIndex.UpdateStamp
 	}
 	if stamp <= 0 {
 		return ""
@@ -372,7 +372,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		if err != nil {
 			continue
 		}
-		var s model.SearchInfo
+		var s model.FilmIndex
 		if err := db.Mdb.Where("mid = ?", idStr).First(&s).Error; err != nil {
 			continue
 		}

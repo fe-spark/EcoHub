@@ -9,10 +9,10 @@ import (
 	"server/internal/repository/support"
 )
 
-var searchInfoUpsertUpdateColumns = []string{
-	"source_id", "cid", "pid", "root_category_key", "category_key", "name", "sub_title", "c_name", "class_tag",
+var filmIndexUpsertUpdateColumns = []string{
+	"source_id", "cid", "pid", "root_category_key", "category_key", "original_category", "name", "sub_title", "c_name", "class_tag",
 	"series_key", "area", "language", "year", "initial", "score",
-	"update_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp",
+	"update_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp", "category_version", "rule_version",
 	"picture", "picture_slide", "actor", "director", "blurb", "updated_at", "deleted_at",
 }
 
@@ -29,20 +29,20 @@ var allowedSearchSortColumns = map[string]string{
 	"year":         "year",
 }
 
-// ExistSearchTable 检查搜索表是否存在
-func ExistSearchTable() bool {
-	return db.Mdb.Migrator().HasTable(&model.SearchInfo{})
+// ExistFilmIndexTable 检查影片索引表是否存在
+func ExistFilmIndexTable() bool {
+	return db.Mdb.Migrator().HasTable(&model.FilmIndex{})
 }
 
-func ExistSearchInMid(mid int64) bool {
+func ExistFilmIndexByMid(mid int64) bool {
 	var count int64
-	db.Mdb.Model(&model.SearchInfo{}).Where("mid = ?", mid).Count(&count)
+	db.Mdb.Model(&model.FilmIndex{}).Where("mid = ?", mid).Count(&count)
 	return count > 0
 }
 
-func ExistSearchInfo(mid int64) bool {
+func ExistFilmIndex(mid int64) bool {
 	var count int64
-	db.Mdb.Model(&model.SearchInfo{}).Where("mid", mid).Count(&count)
+	db.Mdb.Model(&model.FilmIndex{}).Where("mid", mid).Count(&count)
 	return count > 0
 }
 

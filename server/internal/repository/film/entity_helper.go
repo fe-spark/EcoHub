@@ -14,15 +14,32 @@ func BuildContentKey(detail model.MovieDetail) string {
 	return fmt.Sprintf("name_%s", keys[0])
 }
 
-func ApplyResolvedCategory(detail *model.MovieDetail, info model.SearchInfo) {
+func ApplyFilmIndex(detail *model.MovieDetail, info model.FilmIndex) {
 	if detail == nil {
 		return
 	}
+	detail.Id = info.Mid
 	detail.Pid = info.Pid
 	detail.Cid = info.Cid
+	detail.Name = info.Name
+	detail.SubTitle = info.SubTitle
+	detail.CName = info.CName
+	detail.ClassTag = info.ClassTag
+	detail.Area = info.Area
+	detail.Language = info.Language
+	detail.State = info.State
+	detail.Remarks = info.Remarks
+	detail.Picture = info.Picture
+	detail.PictureSlide = info.PictureSlide
+	detail.Actor = info.Actor
+	detail.Director = info.Director
+	detail.Blurb = info.Blurb
+	if info.Year > 0 {
+		detail.Year = fmt.Sprint(info.Year)
+	}
 }
 
-func GetBasicInfoBySearchInfos(infos ...model.SearchInfo) []model.MovieBasicInfo {
+func BuildMovieBasicInfos(infos ...model.FilmIndex) []model.MovieBasicInfo {
 	list := make([]model.MovieBasicInfo, 0, len(infos))
 	for _, s := range infos {
 		list = append(list, model.MovieBasicInfo{

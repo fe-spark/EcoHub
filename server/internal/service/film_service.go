@@ -17,7 +17,7 @@ type FilmService struct{}
 var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
-func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.SearchInfo {
+func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
 	return filmrepo.GetSearchPage(vo)
 }
 
@@ -73,8 +73,8 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 
 // DelFilm 删除分类影片
 func (s *FilmService) DelFilm(id int64) error {
-	sInfo := filmrepo.GetSearchInfoById(id)
-	if sInfo == nil || sInfo.ID == 0 {
+	filmIndex := filmrepo.GetFilmIndexById(id)
+	if filmIndex == nil || filmIndex.ID == 0 {
 		return errors.New("影片信息不存在")
 	}
 	return filmrepo.DelFilmSearch(id)

@@ -87,8 +87,8 @@ func GetPage(query *gorm.DB, page *Page) {
 		page.PageSize = 20
 	}
 
-	// 1. 尝试从缓存获取 Total (仅对 search_info 表开启缓存)
-	// 通过反射或语句分析判断表名 (简化处理：目前主要瓶颈在 search_info)
+	// 1. 尝试从缓存获取 Total (仅对影片索引表开启缓存)
+	// 通过反射或语句分析判断表名 (简化处理：目前主要瓶颈在 film_index)
 	var count int64
 	// 暂时维持现状，但在 repository 调用处进行优化。
 	query.Count(&count)

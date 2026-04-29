@@ -25,7 +25,7 @@ func (s *InitService) DefaultDataInit() {
 		s.TableInit()
 	} else {
 		db.Mdb.AutoMigrate(
-			&model.User{}, &model.SearchInfo{}, &model.FileInfo{}, &model.FailureRecord{},
+			&model.User{}, &model.FilmIndex{}, &model.FileInfo{}, &model.FailureRecord{},
 			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
 			&model.MovieMatchKey{},
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.SearchTagItem{},
@@ -46,49 +46,23 @@ func (s *InitService) DefaultDataInit() {
 
 func clearStartupCaches() {
 	ctx := db.Cxt
-	directKeys := []string{
-		config.CategoryTreeKey,
-		config.ActiveCategoryTreeKey,
-		config.SearchTagsVersionKey,
-		config.TVBoxConfigCacheKey,
-		config.VirtualPictureKey,
-		config.SiteConfigBasic,
-		config.BannersKey,
-		config.CategoryVersionKey,
-	}
-	if err := db.Rdb.Del(ctx, directKeys...).Err(); err != nil {
-		log.Printf("[Init] Redis 固定键清理失败: %v", err)
-	}
-
-	patterns := []string{
-		config.SearchTags + ":*",
-		config.TVBoxList + ":*",
-		config.IndexPageCacheKey + "*",
-		"User:Token:*",
-		"TVBox:*",
-		"Category:*",
-		"Config:*",
-		"Gallery:*",
-	}
-	for _, pattern := range patterns {
-		iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
-		for iter.Next(ctx) {
-			if err := db.Rdb.Del(ctx, iter.Val()).Err(); err != nil {
-				log.Printf("[Init] Redis 键删除失败 %s: %v", iter.Val(), err)
-			}
-		}
-		if err := iter.Err(); err != nil {
-			log.Printf("[Init] Redis 模式清理失败 %s: %v", pattern, err)
+	iter := db.Rdb.Scan(ctx, 0, config.RedisProjectKeyPattern, config.MaxScanCount).Iterator()
+	for iter.Next(ctx) {
+		if err := db.Rdb.Del(ctx, iter.Val()).Err(); err != nil {
+			log.Printf("[Init] Redis 键删除失败 %s: %v", iter.Val(), err)
 		}
 	}
+	if err := iter.Err(); err != nil {
+		log.Printf("[Init] Redis 模式清理失败 %s: %v", config.RedisProjectKeyPattern, err)
+	}
 
-	log.Println("[Init] Redis 服务相关键已清空")
+	log.Printf("[Init] Redis 前缀 %s 相关键已清空", config.RedisKeyPrefix)
 }
 
 func (s *InitService) TableInit() {
 	err := db.Mdb.AutoMigrate(
 		&model.User{},
-		&model.SearchInfo{},
+		&model.FilmIndex{},
 		&model.FileInfo{},
 		&model.FailureRecord{},
 		&model.MovieDetailInfo{},

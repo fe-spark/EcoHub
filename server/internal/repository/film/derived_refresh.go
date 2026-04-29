@@ -11,6 +11,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+
+	"gorm.io/gorm"
 )
 
 const derivedVisibleCacheInvalidateInterval = 2 * time.Second
@@ -33,7 +35,7 @@ func newDerivedRefreshScheduler() *derivedRefreshScheduler {
 	return &derivedRefreshScheduler{states: make(map[string]*derivedRefreshState)}
 }
 
-func ScheduleDerivedRefresh(sourceID string, infos ...model.SearchInfo) {
+func ScheduleDerivedRefresh(sourceID string, infos ...model.FilmIndex) {
 	derivedRefresh.schedule(sourceID, collectSearchTagPids(infos))
 }
 
@@ -166,7 +168,16 @@ func flushDerivedRefreshSource(sourceID string, pidSet map[int64]struct{}) error
 	})
 
 	log.Printf("[DerivedRefresh] 开始刷新 source=%s, pid_count=%d", sourceID, len(pids))
-	clearSearchInfoCachesByPidSet(pidSet)
+	clearFilmIndexCachesByPidSet(pidSet)
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var filmIndexes []model.FilmIndex
+		if err := tx.Where("pid IN ?", pids).Find(&filmIndexes).Error; err != nil {
+			return err
+		}
+		return RefreshPlayFromSummaryByIndexesTx(tx, filmIndexes)
+	}); err != nil {
+		return err
+	}
 	if err := RefreshSearchTagsByPids(pids...); err != nil {
 		return err
 	}

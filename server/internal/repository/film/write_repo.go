@@ -7,7 +7,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/config"
@@ -20,10 +19,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func searchInfoContentKeyUpsert() clause.OnConflict {
+func filmIndexContentKeyUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "content_key"}},
-		DoUpdates: clause.AssignmentColumns(searchInfoUpsertUpdateColumns),
+		DoUpdates: clause.AssignmentColumns(filmIndexUpsertUpdateColumns),
 	}
 }
 
@@ -34,8 +33,8 @@ func movieSourceMappingUpsert() clause.OnConflict {
 	}
 }
 
-func filterValidSearchInfos(list []model.SearchInfo) []model.SearchInfo {
-	validList := make([]model.SearchInfo, 0, len(list))
+func filterValidFilmIndexes(list []model.FilmIndex) []model.FilmIndex {
+	validList := make([]model.FilmIndex, 0, len(list))
 	for _, item := range list {
 		if strings.TrimSpace(item.Name) == "" {
 			continue
@@ -45,27 +44,27 @@ func filterValidSearchInfos(list []model.SearchInfo) []model.SearchInfo {
 	return validList
 }
 
-func upsertSearchInfos(list []model.SearchInfo) error {
-	return upsertSearchInfosTx(db.Mdb, list)
+func upsertFilmIndexes(list []model.FilmIndex) error {
+	return upsertFilmIndexesTx(db.Mdb, list)
 }
 
-func upsertSearchInfosTx(tx *gorm.DB, list []model.SearchInfo) error {
+func upsertFilmIndexesTx(tx *gorm.DB, list []model.FilmIndex) error {
 	if len(list) == 0 {
 		return nil
 	}
-	return tx.Clauses(searchInfoContentKeyUpsert()).CreateInBatches(&list, 200).Error
+	return tx.Clauses(filmIndexContentKeyUpsert()).CreateInBatches(&list, 200).Error
 }
 
-func loadSearchInfoMidMapByContentKeys(contentKeys []string) map[string]int64 {
-	return loadSearchInfoMidMapByContentKeysTx(db.Mdb, contentKeys)
+func loadFilmIndexMidMapByContentKeys(contentKeys []string) map[string]int64 {
+	return loadFilmIndexMidMapByContentKeysTx(db.Mdb, contentKeys)
 }
 
-func loadSearchInfoMidMapByContentKeysTx(tx *gorm.DB, contentKeys []string) map[string]int64 {
+func loadFilmIndexMidMapByContentKeysTx(tx *gorm.DB, contentKeys []string) map[string]int64 {
 	if len(contentKeys) == 0 {
 		return nil
 	}
 
-	var latestInfos []model.SearchInfo
+	var latestInfos []model.FilmIndex
 	if err := tx.Where("content_key IN ?", contentKeys).Find(&latestInfos).Error; err != nil {
 		return nil
 	}
@@ -77,7 +76,7 @@ func loadSearchInfoMidMapByContentKeysTx(tx *gorm.DB, contentKeys []string) map[
 	return keyToMid
 }
 
-func buildContentKeys(list []model.SearchInfo) []string {
+func buildContentKeys(list []model.FilmIndex) []string {
 	contentKeys := make([]string, 0, len(list))
 	for _, item := range list {
 		contentKeys = append(contentKeys, item.ContentKey)
@@ -85,7 +84,7 @@ func buildContentKeys(list []model.SearchInfo) []string {
 	return contentKeys
 }
 
-func buildMovieSourceMappings(list []model.SearchInfo, keyToMid map[string]int64) []model.MovieSourceMapping {
+func buildMovieSourceMappings(list []model.FilmIndex, keyToMid map[string]int64) []model.MovieSourceMapping {
 	mappings := make([]model.MovieSourceMapping, 0, len(list))
 	for _, item := range list {
 		globalMid, ok := keyToMid[item.ContentKey]
@@ -116,22 +115,22 @@ func saveMovieSourceMappingsTx(tx *gorm.DB, mappings []model.MovieSourceMapping)
 	}
 }
 
-func saveSearchInfosAndMappings(list []model.SearchInfo) (map[string]int64, error) {
-	return saveSearchInfosAndMappingsTx(db.Mdb, list)
+func saveFilmIndexesAndMappings(list []model.FilmIndex) (map[string]int64, error) {
+	return saveFilmIndexesAndMappingsTx(db.Mdb, list)
 }
 
-func saveSearchInfosAndMappingsTx(tx *gorm.DB, list []model.SearchInfo) (map[string]int64, error) {
+func saveFilmIndexesAndMappingsTx(tx *gorm.DB, list []model.FilmIndex) (map[string]int64, error) {
 	if len(list) == 0 {
 		return nil, nil
 	}
 
-	if err := upsertSearchInfosTx(tx, list); err != nil {
+	if err := upsertFilmIndexesTx(tx, list); err != nil {
 		return nil, err
 	}
 
-	keyToMid := loadSearchInfoMidMapByContentKeysTx(tx, buildContentKeys(list))
+	keyToMid := loadFilmIndexMidMapByContentKeysTx(tx, buildContentKeys(list))
 	if keyToMid == nil {
-		return nil, fmt.Errorf("load search info mids failed")
+		return nil, fmt.Errorf("load film index mids failed")
 	}
 	if err := saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(list, keyToMid)); err != nil {
 		return nil, err
@@ -146,11 +145,13 @@ func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping
 	return tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200).Error
 }
 
-func buildSearchInfosFromDetails(sourceID string, details []model.MovieDetail) ([]model.SearchInfo, map[string]model.SearchInfo) {
-	infoList := make([]model.SearchInfo, 0, len(details))
-	infoByKey := make(map[string]model.SearchInfo, len(details))
+func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) ([]model.FilmIndex, map[string]model.FilmIndex) {
+	infoList := make([]model.FilmIndex, 0, len(details))
+	infoByKey := make(map[string]model.FilmIndex, len(details))
+	categoryVersion := support.GetCategoryVersion()
+	ruleVersion := support.GetRuleVersion()
 	for _, detail := range details {
-		info := ConvertSearchInfo(sourceID, detail)
+		info := ConvertFilmIndex(sourceID, detail, categoryVersion, ruleVersion)
 		infoList = append(infoList, info)
 		infoByKey[info.ContentKey] = info
 	}
@@ -160,11 +161,11 @@ func buildSearchInfosFromDetails(sourceID string, details []model.MovieDetail) (
 func movieDetailInfoUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "mid"}},
-		DoUpdates: clause.AssignmentColumns([]string{"source_id", "content", "updated_at", "deleted_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"source_id", "category_version", "rule_version", "content", "updated_at", "deleted_at"}),
 	}
 }
 
-func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByKey map[string]model.SearchInfo, keyToMid map[string]int64) []model.MovieDetailInfo {
+func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByKey map[string]model.FilmIndex, keyToMid map[string]int64) []model.MovieDetailInfo {
 	detailInfos := make([]model.MovieDetailInfo, 0, len(details))
 	for _, detail := range details {
 		info, ok := infoByKey[BuildContentKey(detail)]
@@ -177,15 +178,20 @@ func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByK
 			globalMid = detail.Id
 		}
 
-		ApplyResolvedCategory(&detail, info)
 		detail.Id = globalMid
 		data, _ := json.Marshal(detail)
-		detailInfos = append(detailInfos, model.MovieDetailInfo{Mid: globalMid, SourceId: sourceID, Content: string(data)})
+		detailInfos = append(detailInfos, model.MovieDetailInfo{
+			Mid:             globalMid,
+			SourceId:        sourceID,
+			CategoryVersion: info.CategoryVersion,
+			RuleVersion:     info.RuleVersion,
+			Content:         string(data),
+		})
 	}
 	return detailInfos
 }
 
-func buildMovieMatchKeyMappings(details []model.MovieDetail, infoByKey map[string]model.SearchInfo, keyToMid map[string]int64) map[int64][]string {
+func buildMovieMatchKeyMappings(details []model.MovieDetail, infoByKey map[string]model.FilmIndex, keyToMid map[string]int64) map[int64][]string {
 	midToKeys := make(map[int64][]string, len(details))
 	for _, detail := range details {
 		info, ok := infoByKey[BuildContentKey(detail)]
@@ -217,15 +223,15 @@ func clearDetailCaches(pid int64) {
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 }
 
-func clearSearchInfoCachesByPids(list []model.SearchInfo) {
+func clearFilmIndexCachesByPids(list []model.FilmIndex) {
 	pidSet := make(map[int64]struct{})
 	for _, item := range list {
 		pidSet[item.Pid] = struct{}{}
 	}
-	clearSearchInfoCachesByPidSet(pidSet)
+	clearFilmIndexCachesByPidSet(pidSet)
 }
 
-func clearSearchInfoCachesByPidSet(pidSet map[int64]struct{}) {
+func clearFilmIndexCachesByPidSet(pidSet map[int64]struct{}) {
 	for pid := range pidSet {
 		if pid <= 0 {
 			continue
@@ -237,41 +243,41 @@ func clearSearchInfoCachesByPidSet(pidSet map[int64]struct{}) {
 	ClearProvideListCache()
 }
 
-func BatchSaveOrUpdate(list []model.SearchInfo) map[string]int64 {
-	list = filterValidSearchInfos(list)
+func BatchSaveOrUpdate(list []model.FilmIndex) map[string]int64 {
+	list = filterValidFilmIndexes(list)
 	if len(list) == 0 {
 		return nil
 	}
 
-	keyToMid, err := saveSearchInfosAndMappings(list)
+	keyToMid, err := saveFilmIndexesAndMappings(list)
 	if err != nil {
 		log.Printf("BatchSaveOrUpdate upsert 失败: %v\n", err)
 		return nil
 	}
 
-	clearSearchInfoCachesByPids(list)
+	clearFilmIndexCachesByPids(list)
 	BatchHandleSearchTag(list...)
 	return keyToMid
 }
 
-func SaveSearchInfo(s model.SearchInfo) error {
-	if _, err := saveSearchInfosAndMappings([]model.SearchInfo{s}); err != nil {
+func SaveFilmIndex(s model.FilmIndex) error {
+	if _, err := saveFilmIndexesAndMappings([]model.FilmIndex{s}); err != nil {
 		return err
 	}
-	clearSearchInfoCachesByPids([]model.SearchInfo{s})
+	clearFilmIndexCachesByPids([]model.FilmIndex{s})
 	BatchHandleSearchTag(s)
 	return nil
 }
 
 func SaveDetails(id string, list []model.MovieDetail) error {
-	infoList, infoByKey := buildSearchInfosFromDetails(id, list)
-	infoList = filterValidSearchInfos(infoList)
+	infoList, infoByKey := buildFilmIndexesFromDetails(id, list)
+	infoList = filterValidFilmIndexes(infoList)
 	if len(infoList) == 0 {
 		return nil
 	}
 
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		keyToMid, err := saveSearchInfosAndMappingsTx(tx, infoList)
+		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, infoList)
 		if err != nil {
 			return err
 		}
@@ -291,53 +297,53 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
-	searchInfo := ConvertSearchInfo(id, detail)
-	if strings.TrimSpace(searchInfo.Name) == "" {
+	snapshot := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
+	if strings.TrimSpace(snapshot.Name) == "" {
 		return nil
 	}
 
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		keyToMid, err := saveSearchInfosAndMappingsTx(tx, []model.SearchInfo{searchInfo})
+		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, []model.FilmIndex{snapshot})
 		if err != nil {
 			return err
 		}
-		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid)); err != nil {
+		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.FilmIndex{snapshot.ContentKey: snapshot}, keyToMid)); err != nil {
 			return err
 		}
-		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.SearchInfo{searchInfo.ContentKey: searchInfo}, keyToMid)); err != nil {
+		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.FilmIndex{snapshot.ContentKey: snapshot}, keyToMid)); err != nil {
 			return err
 		}
-		refreshInfos := reloadSearchInfosByContentKeysTx(tx, []string{searchInfo.ContentKey})
-		if len(refreshInfos) == 0 {
+		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, []string{snapshot.ContentKey})
+		if len(reloadedIndexes) == 0 {
 			return nil
 		}
-		return RefreshPlayFromSummaryBySearchInfosTx(tx, refreshInfos)
+		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
 		return err
 	}
 
-	BatchHandleSearchTag(searchInfo)
-	clearDetailCaches(searchInfo.Pid)
+	BatchHandleSearchTag(snapshot)
+	clearDetailCaches(snapshot.Pid)
 	ClearProvideListCache()
 	return nil
 }
 
-func reloadSearchInfosByContentKeys(contentKeys []string) []model.SearchInfo {
-	return reloadSearchInfosByContentKeysTx(db.Mdb, contentKeys)
+func reloadFilmIndexesByContentKeys(contentKeys []string) []model.FilmIndex {
+	return reloadFilmIndexesByContentKeysTx(db.Mdb, contentKeys)
 }
 
-func reloadSearchInfosByContentKeysTx(tx *gorm.DB, contentKeys []string) []model.SearchInfo {
+func reloadFilmIndexesByContentKeysTx(tx *gorm.DB, contentKeys []string) []model.FilmIndex {
 	if len(contentKeys) == 0 {
 		return nil
 	}
-	var infos []model.SearchInfo
+	var infos []model.FilmIndex
 	if err := tx.Where("content_key IN ?", contentKeys).Find(&infos).Error; err != nil {
 		return nil
 	}
 	return infos
 }
 
-func BatchHandleSearchTag(infos ...model.SearchInfo) {
+func BatchHandleSearchTag(infos ...model.FilmIndex) {
 	if len(infos) == 0 {
 		return
 	}
@@ -375,7 +381,7 @@ func rebuildSearchTagsOnlyByPidsTx(tx *gorm.DB, orderedPids []int64) error {
 		return nil
 	}
 
-	var infos []model.SearchInfo
+	var infos []model.FilmIndex
 	if err := tx.Where("pid IN ?", orderedPids).Find(&infos).Error; err != nil {
 		return err
 	}
@@ -417,235 +423,15 @@ func RefreshSearchTagsByPids(pids ...int64) error {
 	return nil
 }
 
-func rebuildSearchInfosByPidsTx(tx *gorm.DB, orderedPids []int64) ([]model.SearchInfo, error) {
-	if len(orderedPids) == 0 {
-		return nil, nil
-	}
-	rebuiltInfos, err := rebuildSearchInfosFromMovieDetailsTx(tx, orderedPids)
-	if err != nil {
-		return nil, err
-	}
-	if len(rebuiltInfos) == 0 {
-		log.Printf("[RebuildSearchTagsByPids] 未找到可重建的事实详情数据: pids=%v", orderedPids)
-		return nil, nil
-	}
-	if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
-		return nil, err
-	}
-	return rebuiltInfos, nil
-}
-
 func RebuildSearchTagsByPids(pids ...int64) error {
-	orderedPids := normalizeOrderedPids(pids)
-	if len(orderedPids) == 0 {
-		return nil
-	}
-
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if _, err := rebuildSearchInfosByPidsTx(tx, orderedPids); err != nil {
-			return err
-		}
-		return rebuildSearchTagsOnlyByPidsTx(tx, orderedPids)
-	}); err != nil {
-		return err
-	}
-
-	for _, pid := range orderedPids {
-		ClearSearchTagsCache(pid)
-	}
-	return nil
+	return RefreshSearchTagsByPids(pids...)
 }
 
-var (
-	rebuildMu      sync.Mutex
-	rebuilding     bool
-	rebuildDirty   bool
-)
-
-func ForceRebuildDerivedData() error {
-	rebuildMu.Lock()
-	rebuildDirty = true
-	if rebuilding {
-		rebuildMu.Unlock()
-		log.Println("[DerivedRebuild] 重建进行中，已标记补跑")
-		return nil
-	}
-	rebuilding = true
-	rebuildMu.Unlock()
-	log.Println("[DerivedRebuild] 已触发异步重建派生数据")
-	go runDerivedRebuildWorker()
-	return nil
+func SaveSearchTag(filmIndex model.FilmIndex) {
+	BatchHandleSearchTag(filmIndex)
 }
 
-func rebuildAllDerivedSearchInfosTx(tx *gorm.DB) ([]model.SearchInfo, error) {
-	rebuiltInfos, err := rebuildAllSearchInfosFromMovieDetailsTx(tx)
-	if err != nil {
-		return nil, err
-	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchInfo{}).Error; err != nil {
-		return nil, err
-	}
-	if len(rebuiltInfos) == 0 {
-		return nil, nil
-	}
-	if err := upsertSearchInfosTx(tx, rebuiltInfos); err != nil {
-		return nil, err
-	}
-	return rebuiltInfos, nil
-}
-
-func rebuildAllPlayFromSummariesTx(tx *gorm.DB, infos []model.SearchInfo) error {
-	if len(infos) == 0 {
-		return nil
-	}
-	return RefreshPlayFromSummaryBySearchInfosTx(tx, infos)
-}
-
-func rebuildAllSearchTagsTx(tx *gorm.DB, rootPids []int64, infos []model.SearchInfo) error {
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
-		return err
-	}
-
-	for _, info := range infos {
-		if err := handleDynamicSearchTagsTx(tx, info); err != nil {
-			return err
-		}
-	}
-
-	initializedPids = sync.Map{}
-	for _, pid := range rootPids {
-		if pid <= 0 {
-			continue
-		}
-		if err := ensureStaticTagsForPidTx(tx, pid); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func runDerivedRebuildWorker() {
-	for {
-		rebuildMu.Lock()
-		if !rebuildDirty {
-			rebuilding = false
-			rebuildMu.Unlock()
-			return
-		}
-		rebuildDirty = false
-		rebuildMu.Unlock()
-
-		log.Println("[DerivedRebuild] 开始异步重建派生数据")
-		if err := forceRebuildDerivedDataSync(); err != nil {
-			log.Printf("[DerivedRebuild] 异步重建派生数据失败: %v", err)
-			rebuildMu.Lock()
-			rebuildDirty = true
-			rebuildMu.Unlock()
-			time.Sleep(time.Second)
-			continue
-		}
-		log.Println("[DerivedRebuild] 异步重建派生数据完成")
-	}
-}
-
-func forceRebuildDerivedDataSync() error {
-	refreshCategoryCaches()
-
-	var rootPids []int64
-	if err := db.Mdb.Model(&model.Category{}).Where("pid = ?", 0).Order("sort ASC, id ASC").Pluck("id", &rootPids).Error; err != nil {
-		return err
-	}
-
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		rebuiltInfos, err := rebuildAllDerivedSearchInfosTx(tx)
-		if err != nil {
-			return err
-		}
-		if err := rebuildAllPlayFromSummariesTx(tx, rebuiltInfos); err != nil {
-			return err
-		}
-		return rebuildAllSearchTagsTx(tx, rootPids, rebuiltInfos)
-	})
-}
-
-func rebuildSearchInfosFromMovieDetailsTx(tx *gorm.DB, pids []int64) ([]model.SearchInfo, error) {
-	if len(pids) == 0 {
-		return nil, nil
-	}
-	pidSet := make(map[int64]struct{}, len(pids))
-	for _, pid := range pids {
-		if pid > 0 {
-			pidSet[pid] = struct{}{}
-		}
-	}
-	return rebuildSearchInfosFromMovieDetailsByPidSetTx(tx, pidSet)
-}
-
-func rebuildAllSearchInfosFromMovieDetailsTx(tx *gorm.DB) ([]model.SearchInfo, error) {
-	return rebuildSearchInfosFromMovieDetailsByPidSetTx(tx, nil)
-}
-
-func rebuildSearchInfosFromMovieDetailsByPidSetTx(tx *gorm.DB, pidSet map[int64]struct{}) ([]model.SearchInfo, error) {
-	var detailInfos []model.MovieDetailInfo
-	if err := tx.Find(&detailInfos).Error; err != nil {
-		return nil, err
-	}
-	if len(detailInfos) == 0 {
-		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 未命中 movie_detail_info 事实数据")
-		return nil, nil
-	}
-
-	rebuiltInfos := make([]model.SearchInfo, 0, len(detailInfos))
-	for _, item := range detailInfos {
-		if strings.TrimSpace(item.Content) == "" {
-			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情内容为空: mid=%d source=%s", item.Mid, item.SourceId)
-			continue
-		}
-
-		var detail model.MovieDetail
-		if err := json.Unmarshal([]byte(item.Content), &detail); err != nil {
-			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 详情反序列化失败: mid=%d source=%s err=%v", item.Mid, item.SourceId, err)
-			continue
-		}
-
-		if detail.Id <= 0 {
-			detail.Id = item.Mid
-		}
-
-		category := resolveSearchCategory(item.SourceId, detail)
-		if category.Pid <= 0 {
-			category = resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
-		}
-		if len(pidSet) > 0 {
-			if _, ok := pidSet[category.Pid]; !ok {
-				continue
-			}
-		}
-		meta := normalizeSearchMetadata(detail, category)
-		rebuilt := buildSearchInfo(item.SourceId, detail, category, meta)
-		rebuilt.Mid = item.Mid
-
-		if rebuilt.Pid <= 0 {
-			continue
-		}
-		if strings.TrimSpace(rebuilt.ContentKey) == "" {
-			log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 内容指纹为空: mid=%d source=%s", item.Mid, item.SourceId)
-			continue
-		}
-		rebuiltInfos = append(rebuiltInfos, rebuilt)
-	}
-	if len(rebuiltInfos) == 0 {
-		log.Printf("[rebuildSearchInfosFromMovieDetailsTx] 事实详情存在，但未生成任何有效 SearchInfo")
-	}
-
-	return rebuiltInfos, nil
-}
-
-func SaveSearchTag(search model.SearchInfo) {
-	BatchHandleSearchTag(search)
-}
-
-func collectSearchTagPids(infos []model.SearchInfo) map[int64]bool {
+func collectSearchTagPids(infos []model.FilmIndex) map[int64]bool {
 	pids := make(map[int64]bool)
 	for _, info := range infos {
 		if info.Pid > 0 {
@@ -655,11 +441,11 @@ func collectSearchTagPids(infos []model.SearchInfo) map[int64]bool {
 	return pids
 }
 
-func handleDynamicSearchTags(info model.SearchInfo) {
+func handleDynamicSearchTags(info model.FilmIndex) {
 	_ = handleDynamicSearchTagsTx(db.Mdb, info)
 }
 
-func handleDynamicSearchTagsTx(tx *gorm.DB, info model.SearchInfo) error {
+func handleDynamicSearchTagsTx(tx *gorm.DB, info model.FilmIndex) error {
 	if info.Pid <= 0 {
 		return nil
 	}
@@ -684,11 +470,11 @@ func handleDynamicSearchTagsTx(tx *gorm.DB, info model.SearchInfo) error {
 	return nil
 }
 
-func handleCategorySearchTag(info model.SearchInfo) {
+func handleCategorySearchTag(info model.FilmIndex) {
 	_ = handleCategorySearchTagTx(db.Mdb, info)
 }
 
-func handleCategorySearchTagTx(tx *gorm.DB, info model.SearchInfo) error {
+func handleCategorySearchTagTx(tx *gorm.DB, info model.FilmIndex) error {
 	if info.Cid <= 0 {
 		return nil
 	}
@@ -700,11 +486,11 @@ func handleCategorySearchTagTx(tx *gorm.DB, info model.SearchInfo) error {
 	return HandleSearchTagsTx(tx, catName, "Category", info.Pid, fmt.Sprint(info.Cid))
 }
 
-func handlePlotSearchTag(info model.SearchInfo) {
+func handlePlotSearchTag(info model.FilmIndex) {
 	_ = handlePlotSearchTagTx(db.Mdb, info)
 }
 
-func handlePlotSearchTagTx(tx *gorm.DB, info model.SearchInfo) error {
+func handlePlotSearchTagTx(tx *gorm.DB, info model.FilmIndex) error {
 	mainCategoryName := support.GetMainCategoryName(info.Pid)
 	cleanPlot := support.CleanPlotTags(info.ClassTag, info.Area, mainCategoryName, info.CName)
 	return HandleSearchTagsTx(tx, cleanPlot, "Plot", info.Pid)
@@ -838,11 +624,52 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 }
 
 type resolvedSearchCategory struct {
-	Pid   int64
-	Cid   int64
-	CName string
-	PKey  string
-	CKey  string
+	Pid              int64
+	Cid              int64
+	CName            string
+	OriginalCategory string
+	PKey             string
+	CKey             string
+}
+
+func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int64, fallback string) string {
+	fallback = strings.TrimSpace(fallback)
+	if strings.TrimSpace(sourceId) == "manual" {
+		return fallback
+	}
+
+	if sourcePid > 0 {
+		var root model.SourceCategory
+		if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, sourcePid).First(&root).Error; err == nil {
+			name := strings.TrimSpace(root.RawName)
+			if name != "" {
+				return name
+			}
+		}
+	}
+
+	if sourceCid > 0 {
+		var row model.SourceCategory
+		if err := db.Mdb.Select("raw_name", "parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, sourceCid).First(&row).Error; err == nil {
+			if row.ParentSourceTypeId == 0 {
+				name := strings.TrimSpace(row.RawName)
+				if name != "" {
+					return name
+				}
+			}
+			if row.ParentSourceTypeId > 0 {
+				var parent model.SourceCategory
+				if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, row.ParentSourceTypeId).First(&parent).Error; err == nil {
+					name := strings.TrimSpace(parent.RawName)
+					if name != "" {
+						return name
+					}
+				}
+			}
+		}
+	}
+
+	return fallback
 }
 
 type normalizedSearchMeta struct {
@@ -856,7 +683,9 @@ type normalizedSearchMeta struct {
 
 func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSearchCategory {
 	if strings.TrimSpace(sourceId) == "manual" {
-		return resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
+		category := resolveLocalCategory(detail.Pid, detail.Cid, detail.CName)
+		category.OriginalCategory = strings.TrimSpace(detail.CName)
+		return category
 	}
 
 	sourceCid := detail.Cid
@@ -869,6 +698,7 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	}
 
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}
+	result.OriginalCategory = resolveOriginalCategoryName(sourceId, sourcePid, sourceCid, detail.CName)
 	result.Cid = support.GetLocalCategoryId(sourceId, sourceCid)
 	if result.Cid > 0 {
 		result.Pid = support.GetRootId(result.Cid)
@@ -916,41 +746,52 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 	}
 }
 
-func buildSearchInfo(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta) model.SearchInfo {
-	return model.SearchInfo{
-		Mid:             detail.Id,
-		ContentKey:      BuildContentKey(detail),
-		SourceId:        sourceId,
-		Cid:             category.Cid,
-		Pid:             category.Pid,
-		RootCategoryKey: category.PKey,
-		CategoryKey:     category.CKey,
-		SeriesKey:       utils.BuildSeriesKey(detail.Name, detail.SubTitle),
-		Name:            detail.Name,
-		SubTitle:        detail.SubTitle,
-		CName:           category.CName,
-		ClassTag:        meta.ClassTag,
-		Area:            meta.Area,
-		Language:        meta.Language,
-		Year:            meta.Year,
-		Initial:         detail.Initial,
-		Score:           meta.Score,
-		Hits:            detail.Hits,
-		UpdateStamp:     meta.UpdateStamp,
-		DbId:            detail.DbId,
-		State:           detail.State,
-		Remarks:         detail.Remarks,
-		CollectStamp:    detail.AddTime,
-		Picture:         detail.Picture,
-		PictureSlide:    detail.PictureSlide,
-		Actor:           detail.Actor,
-		Director:        detail.Director,
-		Blurb:           detail.Blurb,
+func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta, categoryVersion string, ruleVersion string) model.FilmIndex {
+	return model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:        detail.Id,
+			ContentKey: BuildContentKey(detail),
+			SourceId:   sourceId,
+			DbId:       detail.DbId,
+		},
+		FilmIndexCategory: model.FilmIndexCategory{
+			Cid:              category.Cid,
+			Pid:              category.Pid,
+			RootCategoryKey:  category.PKey,
+			CategoryKey:      category.CKey,
+			OriginalCategory: category.OriginalCategory,
+			CName:            category.CName,
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			SeriesKey:    utils.BuildSeriesKey(detail.Name, detail.SubTitle),
+			Name:         detail.Name,
+			SubTitle:     detail.SubTitle,
+			ClassTag:     meta.ClassTag,
+			Area:         meta.Area,
+			Language:     meta.Language,
+			Year:         meta.Year,
+			Initial:      detail.Initial,
+			Score:        meta.Score,
+			UpdateStamp:  meta.UpdateStamp,
+			Hits:         detail.Hits,
+			State:        detail.State,
+			Remarks:      detail.Remarks,
+			Picture:      detail.Picture,
+			PictureSlide: detail.PictureSlide,
+			Actor:        detail.Actor,
+			Director:     detail.Director,
+			Blurb:        detail.Blurb,
+		},
+		FilmIndexVersion: model.FilmIndexVersion{
+			CollectStamp:    detail.AddTime,
+			CategoryVersion: categoryVersion,
+			RuleVersion:     ruleVersion,
+		},
 	}
 }
 
-func ConvertSearchInfo(sourceId string, detail model.MovieDetail) model.SearchInfo {
+func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) model.FilmIndex {
 	category := resolveSearchCategory(sourceId, detail)
 	meta := normalizeSearchMetadata(detail, category)
-	return buildSearchInfo(sourceId, detail, category, meta)
+	return buildFilmIndex(sourceId, detail, category, meta, categoryVersion, ruleVersion)
 }

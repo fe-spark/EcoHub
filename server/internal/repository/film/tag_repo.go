@@ -166,7 +166,7 @@ func hasOthersSearchFacts(pid int64, tagType string) bool {
 		return false
 	}
 
-	query := db.Mdb.Model(&model.SearchInfo{}).Where("pid = ?", pid)
+	query := db.Mdb.Model(&model.FilmIndex{}).Where("pid = ?", pid)
 	switch tagType {
 	case "Year":
 		query = query.Where("year <= 0 OR year IS NULL")

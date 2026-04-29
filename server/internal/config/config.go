@@ -45,28 +45,35 @@ const (
 
 // -------------------------redis key-----------------------------------
 const (
+	// RedisKeyPrefix 项目 Redis 统一前缀，便于启动时整批清理。
+	RedisKeyPrefix = "EcoHub"
+	// RedisProjectKeyPattern 项目 Redis 键全量扫描模式。
+	RedisProjectKeyPattern = RedisKeyPrefix + ":*"
+
 	// CategoryTreeKey 分类树 key
-	CategoryTreeKey = "Category:Tree"
+	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
 	// ActiveCategoryTreeKey 活跃分类树缓存 key
-	ActiveCategoryTreeKey = "Category:ActiveTree"
+	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
 
 	// SearchTags 搜索分类标签缓存 key (前缀)
-	SearchTags = "Search:Tags"
+	SearchTags = RedisKeyPrefix + ":Search:Tags"
 	// SearchTagsVersionKey 搜索分类标签缓存版本号 key
-	SearchTagsVersionKey = "Search:Tags:Version"
+	SearchTagsVersionKey = RedisKeyPrefix + ":Search:Tags:Version"
 	// TVBoxConfigCacheKey TVBox 分类及筛选配置缓存 key
-	TVBoxConfigCacheKey = "TVBox:Config"
+	TVBoxConfigCacheKey = RedisKeyPrefix + ":TVBox:Config"
 	// IndexPageCacheKey 首页数据缓存 key
-	IndexPageCacheKey = "Index:Page"
+	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
 	// CategoryVersionKey 分类版本号缓存 key
-	CategoryVersionKey = "Category:Version"
+	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
+	// RuleVersionKey 分类规则版本号缓存 key
+	RuleVersionKey = RedisKeyPrefix + ":Rule:Version"
 	// TVBoxList TVBox 列表页缓存前缀
-	TVBoxList = "TVBox:List"
+	TVBoxList = RedisKeyPrefix + ":TVBox:List"
 
 	// VirtualPictureKey 待同步图片临时存储 key
-	VirtualPictureKey = "Gallery:VirtualPicture"
+	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"
 	// MaxScanCount redis Scan 操作每次扫描的数据量, 每次最多扫描300条数据
 	MaxScanCount = 300
 )
@@ -83,9 +90,9 @@ const (
 // -------------------------manage 管理后台相关key----------------------------------
 const (
 	// SiteConfigBasic 网站参数配置
-	SiteConfigBasic = "Config:Site:Basic"
+	SiteConfigBasic = RedisKeyPrefix + ":Config:Site:Basic"
 	// BannersKey 轮播组件key
-	BannersKey = "Config:Banners"
+	BannersKey = RedisKeyPrefix + ":Config:Banners"
 
 	// DefaultUpdateSpec 每20分钟执行一次
 	DefaultUpdateSpec = "0 */20 * * * ?"
@@ -115,7 +122,7 @@ const (
 const (
 	Issuer           = "EcoHub"
 	AuthTokenExpires = 10 * 24 // 单位 h
-	UserTokenKey     = "User:Token:%d"
+	UserTokenKey     = RedisKeyPrefix + ":User:Token:%d"
 )
 
 // init func for loading from env

@@ -84,7 +84,7 @@ func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.Movie
 	return nil
 }
 
-func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.SearchInfo, error) {
+func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmIndex, error) {
 	type detailLookup struct {
 		detail model.MovieDetail
 		keys   []string
@@ -122,7 +122,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 		matchedMids = append(matchedMids, mid)
 	}
 
-	var candidates []model.SearchInfo
+	var candidates []model.FilmIndex
 	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
 		return nil, err
 	}
@@ -130,12 +130,12 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.Searc
 		return nil, nil
 	}
 
-	infoByMid := make(map[int64]model.SearchInfo, len(candidates))
+	infoByMid := make(map[int64]model.FilmIndex, len(candidates))
 	for _, info := range candidates {
 		infoByMid[info.Mid] = info
 	}
 
-	ordered := make([]model.SearchInfo, 0, len(candidates))
+	ordered := make([]model.FilmIndex, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
 		matched := make(map[int64]struct{}, 2)
@@ -202,7 +202,7 @@ func DeletePlaylistBySourceIdTx(tx *gorm.DB, sourceID string) error {
 
 // saveSlaveSourceMappings 为附属站播放列表补充 source_mid -> global_mid 映射，
 // 让后台单片更新时能够按全局 mid 精确找到每个附属站自己的原始影片 ID。
-func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos []model.SearchInfo) error {
+func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos []model.FilmIndex) error {
 	if len(details) == 0 || len(infos) == 0 {
 		return nil
 	}
@@ -321,11 +321,11 @@ func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []
 	return nil
 }
 
-func loadPlaylistGroupsByInfos(infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
+func loadPlaylistGroupsByInfos(infos []model.FilmIndex) (map[int64]map[string][]model.PlayLinkVo, error) {
 	return loadPlaylistGroupsByInfosTx(db.Mdb, infos)
 }
 
-func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.SearchInfo) (map[int64]map[string][]model.PlayLinkVo, error) {
+func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int64]map[string][]model.PlayLinkVo, error) {
 	result := make(map[int64]map[string][]model.PlayLinkVo, len(infos))
 	mids := make([]int64, 0, len(infos))
 	for _, info := range infos {

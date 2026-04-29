@@ -39,7 +39,7 @@ func (i *IndexService) IndexPage() map[string]any {
 	list := make([]map[string]any, 0)
 	for _, c := range tree.Children {
 		var movies []model.MovieBasicInfo
-		var hotMovies []model.SearchInfo
+		var hotMovies []model.FilmIndex
 		if c.Children != nil {
 			movies = filmrepo.GetMovieListByPidLimit(c.Id, 14, 0)
 			hotMovies = filmrepo.GetHotMovieByPidLimit(c.Id, 14, 0)
@@ -51,7 +51,7 @@ func (i *IndexService) IndexPage() map[string]any {
 			movies = make([]model.MovieBasicInfo, 0)
 		}
 		if hotMovies == nil {
-			hotMovies = make([]model.SearchInfo, 0)
+			hotMovies = make([]model.FilmIndex, 0)
 		}
 		item := map[string]any{"nav": c, "movies": movies, "hot": hotMovies}
 		list = append(list, item)
@@ -73,19 +73,19 @@ func (i *IndexService) IndexPage() map[string]any {
 
 // GetFilmDetail 影片详情信息页面处理
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
-	search := filmrepo.GetSearchInfoById(int64(id))
-	if search == nil {
+	filmIndex := filmrepo.GetFilmIndexById(int64(id))
+	if filmIndex == nil {
 		return model.MovieDetailVo{}, nil
 	}
-	movieDetail := filmrepo.GetMovieDetail(search.Cid, search.Mid)
+	movieDetail := filmrepo.GetMovieDetail(filmIndex.Cid, filmIndex.Mid)
 	if movieDetail == nil {
-		if err := filmrepo.DelFilmSearch(search.Mid); err != nil {
+		if err := filmrepo.DelFilmSearch(filmIndex.Mid); err != nil {
 			return model.MovieDetailVo{}, err
 		}
 		return model.MovieDetailVo{}, nil
 	}
 	res := model.MovieDetailVo{MovieDetail: *movieDetail}
-	res.List = multipleSource(search, movieDetail)
+	res.List = multipleSource(filmIndex, movieDetail)
 	return res, nil
 }
 
@@ -134,7 +134,7 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 // SearchFilmInfo 获取关键字匹配的影片信息
 func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
 	sl := filmrepo.SearchFilmKeyword(key, page)
-	return filmrepo.GetBasicInfoBySearchInfos(sl...)
+	return filmrepo.BuildMovieBasicInfos(sl...)
 }
 
 // GetFilmCategory 根据Pid或Cid获取指定的分页数据
@@ -173,11 +173,11 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
-	search := filmrepo.GetSearchInfoById(detail.Id)
-	if search == nil {
+	filmIndex := filmrepo.GetFilmIndexById(detail.Id)
+	if filmIndex == nil {
 		return []model.MovieBasicInfo{}
 	}
-	return filmrepo.GetRelateMovieBasicInfo(*search, page)
+	return filmrepo.GetRelateMovieBasicInfo(*filmIndex, page)
 }
 
 // SearchTags 整合对应分类的搜索tag
@@ -185,9 +185,9 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 	return filmrepo.GetSearchTag(st)
 }
 
-func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
-	playList := buildPrimaryPlaySources(search, detail)
-	names := filmrepo.LoadMovieMatchKeys(search, detail)
+func multipleSource(filmIndex *model.FilmIndex, detail *model.MovieDetail) []model.PlayLinkVo {
+	playList := buildPrimaryPlaySources(filmIndex, detail)
+	names := filmrepo.LoadMovieMatchKeys(filmIndex, detail)
 	if len(names) == 0 {
 		return playList
 	}
@@ -221,22 +221,22 @@ func multipleSource(search *model.SearchInfo, detail *model.MovieDetail) []model
 	return playList
 }
 
-func buildPrimaryPlaySources(search *model.SearchInfo, detail *model.MovieDetail) []model.PlayLinkVo {
+func buildPrimaryPlaySources(filmIndex *model.FilmIndex, detail *model.MovieDetail) []model.PlayLinkVo {
 	if detail == nil || len(detail.PlayList) == 0 {
 		return make([]model.PlayLinkVo, 0)
 	}
 
 	siteName := ""
-	if search != nil && search.SourceId != "" {
-		if source := repository.FindCollectSourceById(search.SourceId); source != nil {
+	if filmIndex != nil && filmIndex.SourceId != "" {
+		if source := repository.FindCollectSourceById(filmIndex.SourceId); source != nil {
 			siteName = source.Name
 		}
 	}
 
 	playList := make([]model.PlayLinkVo, 0, len(detail.PlayList))
 	sourceID := ""
-	if search != nil {
-		sourceID = search.SourceId
+	if filmIndex != nil {
+		sourceID = filmIndex.SourceId
 	}
 	for index, links := range detail.PlayList {
 		if len(links) == 0 {
@@ -267,8 +267,8 @@ func resolvePrimarySourceName(playFrom []string, index int) string {
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
 func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) []model.MovieBasicInfo {
-	sl := filmrepo.GetSearchInfosByTags(st, page)
-	return filmrepo.GetBasicInfoBySearchInfos(sl...)
+	sl := filmrepo.ListFilmIndexesByTags(st, page)
+	return filmrepo.BuildMovieBasicInfos(sl...)
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据

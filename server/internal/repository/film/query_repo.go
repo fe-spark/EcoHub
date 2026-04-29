@@ -54,132 +54,29 @@ func applyOriginalCategoryFilter(query *gorm.DB, pid int64, value string) *gorm.
 	if pid <= 0 || value == "" {
 		return query
 	}
-
-	scopes, err := loadOriginalCategoryScopes(pid)
-	if err != nil {
-		log.Printf("applyOriginalCategoryFilter Error: %v", err)
-		return query
-	}
-	targetScopes := scopes[value]
-	if len(targetScopes) == 0 {
-		return query.Where("1 = 0")
-	}
-
-	condition := db.Mdb
-	for _, scope := range targetScopes {
-		if len(scope.Names) == 0 {
-			continue
-		}
-		condition = condition.Or("(source_id = ? AND c_name IN ?)", scope.SourceID, scope.Names)
-	}
-	return query.Where(condition)
-}
-
-type originalCategoryScope struct {
-	SourceID string
-	RootName string
-	Names    []string
-}
-
-type originalCategoryRootRow struct {
-	SourceID     string
-	SourceTypeID int64
-	RootName     string
-}
-
-func loadOriginalCategoryScopes(pid int64) (map[string][]originalCategoryScope, error) {
-	pid = support.ResolveCategoryID(pid)
-	if pid <= 0 {
-		return map[string][]originalCategoryScope{}, nil
-	}
-
-	var rootRows []originalCategoryRootRow
-	if err := db.Mdb.Model(&model.SourceCategory{}).
-		Select("source_categories.source_id, source_categories.source_type_id, source_categories.raw_name AS root_name").
-		Joins("JOIN category_mappings ON category_mappings.source_id = source_categories.source_id AND category_mappings.source_type_id = source_categories.source_type_id").
-		Where("source_categories.parent_source_type_id = 0 AND category_mappings.category_id = ?", pid).
-		Order("source_categories.source_id ASC, source_categories.sort ASC, source_categories.id ASC").
-		Scan(&rootRows).Error; err != nil {
-		return nil, err
-	}
-	if len(rootRows) == 0 {
-		return map[string][]originalCategoryScope{}, nil
-	}
-
-	sourceIDs := make([]string, 0, len(rootRows))
-	seenSourceIDs := make(map[string]struct{}, len(rootRows))
-	for _, row := range rootRows {
-		if _, ok := seenSourceIDs[row.SourceID]; ok {
-			continue
-		}
-		seenSourceIDs[row.SourceID] = struct{}{}
-		sourceIDs = append(sourceIDs, row.SourceID)
-	}
-
-	var sourceRows []model.SourceCategory
-	if err := db.Mdb.Where("source_id IN ?", sourceIDs).
-		Order("source_id ASC, depth ASC, parent_source_type_id ASC, sort ASC, id ASC").
-		Find(&sourceRows).Error; err != nil {
-		return nil, err
-	}
-
-	childrenBySourceRoot := make(map[string]map[int64][]string)
-	for _, row := range sourceRows {
-		if row.ParentSourceTypeId <= 0 {
-			continue
-		}
-		name := strings.TrimSpace(row.RawName)
-		if name == "" {
-			continue
-		}
-		rootMap, ok := childrenBySourceRoot[row.SourceId]
-		if !ok {
-			rootMap = make(map[int64][]string)
-			childrenBySourceRoot[row.SourceId] = rootMap
-		}
-		rootMap[row.ParentSourceTypeId] = append(rootMap[row.ParentSourceTypeId], name)
-	}
-
-	scopes := make(map[string][]originalCategoryScope)
-	for _, row := range rootRows {
-		rootName := strings.TrimSpace(row.RootName)
-		if rootName == "" {
-			continue
-		}
-		names := []string{rootName}
-		if rootMap, ok := childrenBySourceRoot[row.SourceID]; ok {
-			names = append(names, rootMap[row.SourceTypeID]...)
-		}
-		names = slices.Compact(names)
-		scopes[rootName] = append(scopes[rootName], originalCategoryScope{
-			SourceID: row.SourceID,
-			RootName: rootName,
-			Names:    names,
-		})
-	}
-
-	return scopes, nil
+	return query.Where("pid = ? AND original_category = ?", pid, value)
 }
 
 func GetOriginalCategoryOptions(pid int64) []string {
-	scopes, err := loadOriginalCategoryScopes(pid)
-	if err != nil {
-		log.Printf("GetOriginalCategoryOptions Error: %v", err)
-		return nil
-	}
-	if len(scopes) == 0 {
+	pid = support.ResolveCategoryID(pid)
+	if pid <= 0 {
 		return nil
 	}
 
-	result := make([]string, 0, len(scopes))
-	for name := range scopes {
-		result = append(result, name)
-	}
-	if len(result) <= 1 {
+	var values []string
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Distinct("original_category").
+		Where("pid = ? AND original_category <> '' AND original_category IS NOT NULL", pid).
+		Order("original_category ASC").
+		Pluck("original_category", &values).Error; err != nil {
+		log.Printf("GetOriginalCategoryOptions Error: %v", err)
 		return nil
 	}
-	slices.Sort(result)
-	return result
+	values = slices.Compact(values)
+	if len(values) <= 1 {
+		return nil
+	}
+	return values
 }
 
 func resolveCategoryFieldValue(field string, id int64) (string, int64) {
@@ -192,7 +89,7 @@ func resolveCategoryFieldValue(field string, id int64) (string, int64) {
 
 func buildCategoryQuery(field string, id int64) *gorm.DB {
 	resolvedField, resolvedID := resolveCategoryFieldValue(field, id)
-	return db.Mdb.Model(&model.SearchInfo{}).Where(fmt.Sprintf("%s = ?", resolvedField), resolvedID)
+	return db.Mdb.Model(&model.FilmIndex{}).Where(fmt.Sprintf("%s = ?", resolvedField), resolvedID)
 }
 
 func applyPageStats(query *gorm.DB, page *dto.Page) *dto.Page {
@@ -202,31 +99,31 @@ func applyPageStats(query *gorm.DB, page *dto.Page) *dto.Page {
 }
 
 func queryMovieListByCategory(field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	var searchInfos []model.SearchInfo
+	var filmIndexes []model.FilmIndex
 	if err := buildCategoryQuery(field, id).
 		Order(latestUpdateOrderSQL).
 		Limit(limit).
 		Offset(offset).
-		Find(&searchInfos).Error; err != nil {
+		Find(&filmIndexes).Error; err != nil {
 		log.Printf("queryMovieListByCategory Error: %v", err)
 		return nil
 	}
-	return GetBasicInfoBySearchInfos(searchInfos...)
+	return BuildMovieBasicInfos(filmIndexes...)
 }
 
-func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []model.SearchInfo {
-	var searchInfos []model.SearchInfo
+func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []model.FilmIndex {
+	var filmIndexes []model.FilmIndex
 	hotSince := time.Now().AddDate(0, -1, 0).Unix()
 	if err := buildCategoryQuery(field, id).
 		Where("update_stamp > ?", hotSince).
 		Order("year DESC, hits DESC, mid DESC").
 		Limit(limit).
 		Offset(offset).
-		Find(&searchInfos).Error; err != nil {
+		Find(&filmIndexes).Error; err != nil {
 		log.Printf("queryHotMoviesByCategory Error: %v", err)
 		return nil
 	}
-	return searchInfos
+	return filmIndexes
 }
 
 func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
@@ -243,13 +140,13 @@ func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
 }
 
 func queryMovieListBySort(pid int64, sortType int, limit int, offset int) []model.MovieBasicInfo {
-	var searchInfos []model.SearchInfo
+	var filmIndexes []model.FilmIndex
 	query := applyMovieSortQuery(buildCategoryQuery("pid", pid), sortType)
-	if err := query.Limit(limit).Offset(offset).Find(&searchInfos).Error; err != nil {
+	if err := query.Limit(limit).Offset(offset).Find(&filmIndexes).Error; err != nil {
 		log.Printf("queryMovieListBySort Error: %v", err)
 		return nil
 	}
-	return GetBasicInfoBySearchInfos(searchInfos...)
+	return BuildMovieBasicInfos(filmIndexes...)
 }
 
 // GetMovieListByPid 获取指定父类 ID 的影片基本信息
@@ -274,18 +171,18 @@ func GetMovieListByCidLimit(cid int64, limit, offset int) []model.MovieBasicInfo
 	return queryMovieListByCategory("cid", cid, limit, offset)
 }
 
-func SearchFilmKeyword(keyword string, page *dto.Page) []model.SearchInfo {
+func SearchFilmKeyword(keyword string, page *dto.Page) []model.FilmIndex {
 	page = ensurePage(page)
 	keywordQuery := buildNameKeywordQuery(keyword)
-	var searchList []model.SearchInfo
-	query := db.Mdb.Model(&model.SearchInfo{}).
+	var filmIndexes []model.FilmIndex
+	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where(keywordQuery).
 		Order("year DESC, " + latestUpdateOrderSQL)
 
 	dto.GetPage(query, page)
-	query.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&searchList)
+	query.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&filmIndexes)
 
-	return searchList
+	return filmIndexes
 }
 
 func ensurePage(page *dto.Page) *dto.Page {
@@ -373,7 +270,7 @@ func splitClassTags(classTag string) []string {
 }
 
 type relatedCandidateScore struct {
-	Movie model.SearchInfo
+	Movie model.FilmIndex
 	Score int
 }
 
@@ -424,7 +321,7 @@ func buildTagSet(tags []string) map[string]struct{} {
 	return set
 }
 
-func appendUniqueRelatedCandidates(dst []model.SearchInfo, src []model.SearchInfo, seen map[int64]struct{}, limit int) []model.SearchInfo {
+func appendUniqueRelatedCandidates(dst []model.FilmIndex, src []model.FilmIndex, seen map[int64]struct{}, limit int) []model.FilmIndex {
 	for _, item := range src {
 		if _, ok := seen[item.Mid]; ok {
 			continue
@@ -438,17 +335,17 @@ func appendUniqueRelatedCandidates(dst []model.SearchInfo, src []model.SearchInf
 	return dst
 }
 
-func queryRelatedCandidates(search model.SearchInfo, limit int, apply func(query *gorm.DB) *gorm.DB) []model.SearchInfo {
+func queryRelatedCandidates(search model.FilmIndex, limit int, apply func(query *gorm.DB) *gorm.DB) []model.FilmIndex {
 	if limit <= 0 {
 		return nil
 	}
-	query := db.Mdb.Model(&model.SearchInfo{}).
+	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL")
 	if apply != nil {
 		query = apply(query)
 	}
-	var list []model.SearchInfo
+	var list []model.FilmIndex
 	if err := query.Order(latestUpdateOrderSQL).Limit(limit).Find(&list).Error; err != nil {
 		log.Printf("queryRelatedCandidates Error: %v", err)
 		return nil
@@ -456,10 +353,10 @@ func queryRelatedCandidates(search model.SearchInfo, limit int, apply func(query
 	return list
 }
 
-func loadRelatedCandidates(search model.SearchInfo, limit int) []model.SearchInfo {
+func loadRelatedCandidates(search model.FilmIndex, limit int) []model.FilmIndex {
 	coreToken := extractCoreSearchToken(search.Name)
 	tags := splitClassTags(search.ClassTag)
-	list := make([]model.SearchInfo, 0, limit)
+	list := make([]model.FilmIndex, 0, limit)
 	seen := make(map[int64]struct{}, limit)
 	strongLimit := max(limit, 20)
 	cidLimit := max(limit/2, 10)
@@ -489,7 +386,7 @@ func loadRelatedCandidates(search model.SearchInfo, limit int) []model.SearchInf
 	return list
 }
 
-func calcTitleScore(coreToken string, candidate model.SearchInfo) int {
+func calcTitleScore(coreToken string, candidate model.FilmIndex) int {
 	coreToken = strings.TrimSpace(coreToken)
 	if coreToken == "" {
 		return 0
@@ -514,7 +411,7 @@ func calcTitleScore(coreToken string, candidate model.SearchInfo) int {
 	return 0
 }
 
-func calcAliasScore(current model.SearchInfo, candidate model.SearchInfo) int {
+func calcAliasScore(current model.FilmIndex, candidate model.FilmIndex) int {
 	aliases := splitAliasTitles(current.SubTitle)
 	if len(aliases) == 0 {
 		return 0
@@ -558,7 +455,7 @@ func calcTagOverlapScore(currentTags, candidateTags []string) int {
 	return score
 }
 
-func calcMetaScore(current, candidate model.SearchInfo) int {
+func calcMetaScore(current, candidate model.FilmIndex) int {
 	score := 0
 	if current.Year > 0 && candidate.Year > 0 {
 		diff := current.Year - candidate.Year
@@ -581,7 +478,7 @@ func calcMetaScore(current, candidate model.SearchInfo) int {
 	return score
 }
 
-func freshnessBoost(candidate model.SearchInfo) int {
+func freshnessBoost(candidate model.FilmIndex) int {
 	stamp := candidate.UpdateStamp
 	if stamp <= 0 {
 		return 0
@@ -599,7 +496,7 @@ func freshnessBoost(candidate model.SearchInfo) int {
 	}
 }
 
-func scoreRelatedCandidate(current model.SearchInfo, candidate model.SearchInfo) relatedCandidateScore {
+func scoreRelatedCandidate(current model.FilmIndex, candidate model.FilmIndex) relatedCandidateScore {
 	score := 0
 	if current.SeriesKey != "" && current.SeriesKey == candidate.SeriesKey {
 		score += 80
@@ -615,7 +512,7 @@ func scoreRelatedCandidate(current model.SearchInfo, candidate model.SearchInfo)
 	return relatedCandidateScore{Movie: candidate, Score: score}
 }
 
-func rankRelatedCandidates(current model.SearchInfo, candidates []model.SearchInfo, pageSize int) []model.SearchInfo {
+func rankRelatedCandidates(current model.FilmIndex, candidates []model.FilmIndex, pageSize int) []model.FilmIndex {
 	if len(candidates) == 0 || pageSize <= 0 {
 		return nil
 	}
@@ -649,18 +546,18 @@ func rankRelatedCandidates(current model.SearchInfo, candidates []model.SearchIn
 	if len(scored) > pageSize {
 		scored = scored[:pageSize]
 	}
-	list := make([]model.SearchInfo, 0, len(scored))
+	list := make([]model.FilmIndex, 0, len(scored))
 	for _, item := range scored {
 		list = append(list, item.Movie)
 	}
 	return list
 }
 
-func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int64]struct{}) []model.SearchInfo {
+func loadFallbackCandidates(search model.FilmIndex, limit int, exclude map[int64]struct{}) []model.FilmIndex {
 	if limit <= 0 {
 		return nil
 	}
-	appendUnique := func(dst []model.SearchInfo, source []model.SearchInfo, max int) []model.SearchInfo {
+	appendUnique := func(dst []model.FilmIndex, source []model.FilmIndex, max int) []model.FilmIndex {
 		for _, item := range source {
 			if _, ok := exclude[item.Mid]; ok {
 				continue
@@ -673,16 +570,16 @@ func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int6
 		}
 		return dst
 	}
-	var result []model.SearchInfo
+	var result []model.FilmIndex
 	if search.Cid > 0 {
 		result = appendUnique(result, getFallbackRelatedSearchInfos(search, &dto.Page{Current: 1, PageSize: limit}), limit)
 	}
 	if len(result) >= limit || search.Pid <= 0 {
 		return result
 	}
-	var pidHotList []model.SearchInfo
+	var pidHotList []model.FilmIndex
 	hotSince := time.Now().AddDate(0, -1, 0).Unix()
-	if err := db.Mdb.Model(&model.SearchInfo{}).
+	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL").
 		Where("update_stamp > ?", hotSince).
@@ -696,8 +593,8 @@ func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int6
 	if len(result) >= limit {
 		return result
 	}
-	var pidList []model.SearchInfo
-	if err := db.Mdb.Model(&model.SearchInfo{}).
+	var pidList []model.FilmIndex
+	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL").
 		Order(latestUpdateOrderSQL).
@@ -709,14 +606,14 @@ func loadFallbackCandidates(search model.SearchInfo, limit int, exclude map[int6
 	return appendUnique(result, pidList, limit)
 }
 
-func buildRelatedMovieQuery(search model.SearchInfo, coreToken string, tags []string) *gorm.DB {
+func buildRelatedMovieQuery(search model.FilmIndex, coreToken string, tags []string) *gorm.DB {
 	nameLike := fmt.Sprintf("%%%s%%", coreToken)
 	prefixLike := fmt.Sprintf("%s%%", coreToken)
 	escapedCoreToken := strings.ReplaceAll(coreToken, "'", "''")
 	escapedPrefixLike := strings.ReplaceAll(prefixLike, "'", "''")
 	escapedNameLike := strings.ReplaceAll(nameLike, "'", "''")
 
-	query := db.Mdb.Model(&model.SearchInfo{}).
+	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where("pid = ? AND mid != ?", search.Pid, search.Mid).
 		Where("deleted_at IS NULL")
 
@@ -737,13 +634,13 @@ func buildRelatedMovieQuery(search model.SearchInfo, coreToken string, tags []st
 	return query
 }
 
-func getFallbackRelatedSearchInfos(search model.SearchInfo, page *dto.Page) []model.SearchInfo {
+func getFallbackRelatedSearchInfos(search model.FilmIndex, page *dto.Page) []model.FilmIndex {
 	if search.Cid <= 0 {
 		return nil
 	}
 
-	var list []model.SearchInfo
-	if err := db.Mdb.Model(&model.SearchInfo{}).
+	var list []model.FilmIndex
+	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Where("cid = ? AND mid != ?", search.Cid, search.Mid).
 		Where("deleted_at IS NULL").
 		Order(latestUpdateOrderSQL).
@@ -756,7 +653,7 @@ func getFallbackRelatedSearchInfos(search model.SearchInfo, page *dto.Page) []mo
 	return list
 }
 
-func GetRelateMovieBasicInfo(search model.SearchInfo, page *dto.Page) []model.MovieBasicInfo {
+func GetRelateMovieBasicInfo(search model.FilmIndex, page *dto.Page) []model.MovieBasicInfo {
 	page = ensurePage(page)
 	targetSize := page.Current * page.PageSize
 	candidates := loadRelatedCandidates(search, max(targetSize*5, 80))
@@ -775,27 +672,25 @@ func GetRelateMovieBasicInfo(search model.SearchInfo, page *dto.Page) []model.Mo
 		return []model.MovieBasicInfo{}
 	}
 	end := min(offset+page.PageSize, len(ranked))
-	return GetBasicInfoBySearchInfos(ranked[offset:end]...)
+	return BuildMovieBasicInfos(ranked[offset:end]...)
 }
 
 // GetBasicInfoByKey 获取影片的基本信息
 func GetBasicInfoByKey(cid int64, mid int64) model.MovieBasicInfo {
-	var info model.MovieDetailInfo
-	if err := db.Mdb.Where("mid = ?", mid).First(&info).Error; err == nil {
-		var detail model.MovieDetail
-		_ = json.Unmarshal([]byte(info.Content), &detail)
-		return model.MovieBasicInfo{
-			Id: detail.Id, Cid: detail.Cid, Pid: detail.Pid, Name: detail.Name,
-			SubTitle: detail.SubTitle, CName: detail.CName, State: detail.State,
-			Picture: detail.Picture, Actor: detail.Actor, Director: detail.Director,
-			Blurb: detail.Blurb, Remarks: detail.Remarks, Area: detail.Area, Year: detail.Year,
-		}
+	index := GetFilmIndexById(mid)
+	if index != nil {
+		return BuildMovieBasicInfos(*index)[0]
 	}
 	return model.MovieBasicInfo{}
 }
 
 // GetMovieDetail 获取影片详情信息
 func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
+	index := GetFilmIndexById(mid)
+	if index == nil {
+		return nil
+	}
+
 	var movieDetailInfo model.MovieDetailInfo
 	if err := db.Mdb.Where("mid = ?", mid).First(&movieDetailInfo).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
@@ -808,6 +703,7 @@ func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
 		log.Printf("Unmarshal MovieDetail Error: %v", err)
 		return nil
 	}
+	ApplyFilmIndex(&detail, *index)
 
 	if detail.PlayFrom == nil {
 		detail.PlayFrom = []string{}
@@ -833,13 +729,13 @@ func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
 	return &detail
 }
 
-func GetSearchPage(s model.SearchVo) []model.SearchInfo {
+func GetSearchPage(s model.SearchVo) []model.FilmIndex {
 	page := ensurePage(s.Paging)
 
-	query := applySearchPageFilters(db.Mdb.Model(&model.SearchInfo{}), s).Order(latestUpdateOrderSQL)
+	query := applySearchPageFilters(db.Mdb.Model(&model.FilmIndex{}), s).Order(latestUpdateOrderSQL)
 
 	dto.GetPage(query, page)
-	var sl []model.SearchInfo
+	var sl []model.FilmIndex
 	if err := query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl).Error; err != nil {
 		log.Printf("GetSearchPage Error: %v", err)
 		return nil
@@ -972,26 +868,26 @@ func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	return applySearchTagSort(query, st.Sort)
 }
 
-func BuildSearchInfoQueryByTags(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
+func BuildFilmIndexQueryByTags(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	st = normalizeSearchTagsVO(st)
 	return applySearchTagFilters(query, st)
 }
 
-func GetSearchInfosByTags(st model.SearchTagsVO, page *dto.Page) []model.SearchInfo {
+func ListFilmIndexesByTags(st model.SearchTagsVO, page *dto.Page) []model.FilmIndex {
 	page = ensurePage(page)
-	qw := BuildSearchInfoQueryByTags(db.Mdb.Model(&model.SearchInfo{}), st)
+	qw := BuildFilmIndexQueryByTags(db.Mdb.Model(&model.FilmIndex{}), st)
 
 	dto.GetPage(qw, page)
-	var sl []model.SearchInfo
-	if err := qw.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl).Error; err != nil {
-		log.Printf("GetSearchInfosByTags Error: %v", err)
+	var filmIndexes []model.FilmIndex
+	if err := qw.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&filmIndexes).Error; err != nil {
+		log.Printf("ListFilmIndexesByTags Error: %v", err)
 		return nil
 	}
-	return sl
+	return filmIndexes
 }
 
-func GetSearchInfoById(id int64) *model.SearchInfo {
-	s := model.SearchInfo{}
+func GetFilmIndexById(id int64) *model.FilmIndex {
+	s := model.FilmIndex{}
 	if err := db.Mdb.Where("mid = ?", id).First(&s).Error; err != nil {
 		return nil
 	}
@@ -999,24 +895,24 @@ func GetSearchInfoById(id int64) *model.SearchInfo {
 }
 
 // GetHotMovieByPid 获取当前级分类下的热门影片
-func GetHotMovieByPid(pid int64, page *dto.Page) []model.SearchInfo {
+func GetHotMovieByPid(pid int64, page *dto.Page) []model.FilmIndex {
 	page = ensurePage(page)
 	return GetHotMovieByPidLimit(pid, page.PageSize, getPageOffset(page))
 }
 
 // GetHotMovieByPidLimit 轻量级获取热门影片
-func GetHotMovieByPidLimit(pid int64, limit, offset int) []model.SearchInfo {
+func GetHotMovieByPidLimit(pid int64, limit, offset int) []model.FilmIndex {
 	return queryHotMoviesByCategory("pid", pid, limit, offset)
 }
 
 // GetHotMovieByCid 获取当前分类下的热门影片
-func GetHotMovieByCid(cid int64, page *dto.Page) []model.SearchInfo {
+func GetHotMovieByCid(cid int64, page *dto.Page) []model.FilmIndex {
 	page = ensurePage(page)
 	return GetHotMovieByCidLimit(cid, page.PageSize, getPageOffset(page))
 }
 
 // GetHotMovieByCidLimit 轻量级获取热门影片
-func GetHotMovieByCidLimit(cid int64, limit, offset int) []model.SearchInfo {
+func GetHotMovieByCidLimit(cid int64, limit, offset int) []model.FilmIndex {
 	return queryHotMoviesByCategory("cid", cid, limit, offset)
 }
 

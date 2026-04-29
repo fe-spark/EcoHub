@@ -2,6 +2,7 @@ package repository
 
 import (
 	"fmt"
+	"log"
 	"strings"
 
 	"server/internal/infra/db"
@@ -25,6 +26,14 @@ func InitMappingEngine() {
 // ReloadMappingRules 强制重新从数据库加载所有映射规则
 func ReloadMappingRules() {
 	support.ReloadMappingRules()
+}
+
+func TouchRuleVersion() {
+	support.TouchRuleVersion()
+}
+
+func GetRuleVersion() string {
+	return support.GetRuleVersion()
 }
 
 func EnsureMappingRuleIndexes() error {
@@ -143,9 +152,14 @@ func CreateMappingRule(rule *model.MappingRule) error {
 	if err := db.Mdb.Create(rule).Error; err != nil {
 		return err
 	}
+	TouchRuleVersion()
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) {
-		TriggerRebuildCategoriesFromSourceCategoriesAsync()
+		// 分类规则改动后只刷新未来采集使用的分类映射，
+		// 不回写历史 film_index，这是本次重构的硬约束。
+		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+			log.Printf("[MappingRule] 规则已创建，但未来分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
+		}
 	}
 	return nil
 }
@@ -171,9 +185,13 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	}).Error; err != nil {
 		return err
 	}
+	TouchRuleVersion()
 	ReloadMappingRules()
 	if IsCategoryMappingGroup(rule.Group) || (oldRule != nil && IsCategoryMappingGroup(oldRule.Group)) {
-		TriggerRebuildCategoriesFromSourceCategoriesAsync()
+		// 这里只修正未来映射，不追溯修改历史影片索引结果。
+		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+			log.Printf("[MappingRule] 规则已更新，但未来分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
+		}
 	}
 	return nil
 }
@@ -186,9 +204,13 @@ func DeleteMappingRule(id uint) error {
 	if err := db.Mdb.Unscoped().Delete(&model.MappingRule{}, id).Error; err != nil {
 		return err
 	}
+	TouchRuleVersion()
 	ReloadMappingRules()
 	if rule != nil && IsCategoryMappingGroup(rule.Group) {
-		TriggerRebuildCategoriesFromSourceCategoriesAsync()
+		// 删除分类规则同样只影响后续采集，不回刷历史 film_index。
+		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+			log.Printf("[MappingRule] 规则已删除，但未来分类映射刷新失败: id=%d group=%s err=%v", id, rule.Group, err)
+		}
 	}
 	return nil
 }

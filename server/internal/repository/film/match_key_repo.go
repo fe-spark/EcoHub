@@ -94,9 +94,9 @@ func loadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 	return result
 }
 
-func LoadMovieMatchKeys(search *model.SearchInfo, detail *model.MovieDetail) []string {
-	if search != nil && search.Mid > 0 {
-		if keys := loadMovieMatchKeysByMids([]int64{search.Mid})[search.Mid]; len(keys) > 0 {
+func LoadMovieMatchKeys(filmIndex *model.FilmIndex, detail *model.MovieDetail) []string {
+	if filmIndex != nil && filmIndex.Mid > 0 {
+		if keys := loadMovieMatchKeysByMids([]int64{filmIndex.Mid})[filmIndex.Mid]; len(keys) > 0 {
 			return keys
 		}
 	}

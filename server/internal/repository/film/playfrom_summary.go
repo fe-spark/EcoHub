@@ -12,7 +12,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func BuildPlayFromSummary(search model.SearchInfo, detail *model.MovieDetail, groupsBySource map[string][]model.PlayLinkVo) string {
+func BuildPlayFromSummary(filmIndex model.FilmIndex, detail *model.MovieDetail, groupsBySource map[string][]model.PlayLinkVo) string {
 	playNames := make([]string, 0)
 	seen := make(map[string]struct{})
 	appendName := func(name string) {
@@ -29,8 +29,8 @@ func BuildPlayFromSummary(search model.SearchInfo, detail *model.MovieDetail, gr
 
 	if detail != nil {
 		siteName := ""
-		if search.SourceId != "" {
-			siteName = findCollectSourceName(search.SourceId)
+		if filmIndex.SourceId != "" {
+			siteName = findCollectSourceName(filmIndex.SourceId)
 		}
 		for index, links := range detail.PlayList {
 			if len(links) == 0 {
@@ -62,20 +62,20 @@ func BuildPlayFromSummary(search model.SearchInfo, detail *model.MovieDetail, gr
 	return strings.Join(playNames, "$$$")
 }
 
-func RefreshPlayFromSummaryBySearchInfos(infos []model.SearchInfo) error {
-	if err := RefreshPlayFromSummaryBySearchInfosTx(db.Mdb, infos); err != nil {
+func RefreshPlayFromSummaryByIndexes(infos []model.FilmIndex) error {
+	if err := RefreshPlayFromSummaryByIndexesTx(db.Mdb, infos); err != nil {
 		return err
 	}
 	ClearProvideListCache()
 	return nil
 }
 
-func RefreshPlayFromSummaryBySearchInfosTx(tx *gorm.DB, infos []model.SearchInfo) error {
+func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) error {
 	if len(infos) == 0 {
 		return nil
 	}
 
-	orderedInfos := make([]model.SearchInfo, 0, len(infos))
+	orderedInfos := make([]model.FilmIndex, 0, len(infos))
 	seenMid := make(map[int64]struct{}, len(infos))
 	for _, info := range infos {
 		if info.Mid <= 0 {
@@ -120,7 +120,7 @@ func RefreshPlayFromSummaryBySearchInfosTx(tx *gorm.DB, infos []model.SearchInfo
 			detailPtr = &detail
 		}
 		summary := BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
-		if err := tx.Model(&model.SearchInfo{}).
+		if err := tx.Model(&model.FilmIndex{}).
 			Where("mid = ?", info.Mid).
 			Update("play_from_summary", summary).Error; err != nil {
 			return err

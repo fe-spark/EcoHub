@@ -5,7 +5,9 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 )
@@ -83,6 +85,20 @@ func ReloadMappingRules() {
 	replaceSyncMapInt64(&cacheSourceMap, newSourceMap)
 
 	RefreshCategoryCache()
+}
+
+func TouchRuleVersion() {
+	db.Rdb.Set(db.Cxt, config.RuleVersionKey, time.Now().UnixNano(), 0)
+}
+
+func GetRuleVersion() string {
+	version, err := db.Rdb.Get(db.Cxt, config.RuleVersionKey).Result()
+	if err == nil && version != "" {
+		return version
+	}
+	version = fmt.Sprintf("%d", time.Now().UnixNano())
+	db.Rdb.Set(db.Cxt, config.RuleVersionKey, version, 0)
+	return version
 }
 
 func replaceCategoryRegexMatchers(mu *sync.RWMutex, target *[]categoryRuleMatcher, data []categoryRuleMatcher) {
