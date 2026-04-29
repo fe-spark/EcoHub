@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
+
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/repository"
@@ -30,8 +32,9 @@ import (
 var spiderCore = &JsonCollect{}
 
 const (
-	pageCountRetryTimes  = 2
-	filmDetailRetryTimes = 2
+	pageCountRetryTimes   = 2
+	filmDetailRetryTimes  = 2
+	collectDBWriteRetries = 3
 )
 
 var retryBackoffs = []time.Duration{
@@ -40,9 +43,9 @@ var retryBackoffs = []time.Duration{
 }
 
 const (
-	// 主站运行期间，附属站仍保留有限并发，避免总采集时长被单站串行拖得过长。
-	slaveSourceConcurrencyWhileMasterOn = 5
-	// 全部站点同时采集时，请求可以并发，但写库必须收敛，避免 MySQL 连接池和热点 upsert 被打满。
+	// 站点 Interval 表示每采集 10 页后的冷却间隔，而不是每个请求都等待。
+	sourcePageRequestBurstSize = 10
+	// 请求可以并发，但写库必须收敛；本地 MySQL 在高并发 upsert+标签刷新下容易出现 i/o timeout。
 	collectDBWriteConcurrency = 3
 )
 
@@ -53,27 +56,28 @@ var activeTasks sync.Map
 // 每次执行一键终止都会递增版本号，旧版本调度器检测到版本变化后不再继续启动新站点任务。
 var stopAllVersion atomic.Uint64
 
-// sourceWriteLocks 按站点串行化写库：
-// 1. 主站避免分页并发写主数据时互相打架；
-// 2. 附属站避免多页并发刷新播放列表与摘要，把 MySQL 连接池瞬时打满。
+// sourceWriteLocks 按站点串行化附属站写库，避免多页并发刷新播放列表与摘要时互相覆盖。
 var sourceWriteLocks sync.Map
 
 var collectDBWriteSem = make(chan struct{}, collectDBWriteConcurrency)
 
 var collectProgress sync.Map
 
+var pictureSyncRunning atomic.Bool
+
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
 var collectLifecycle = newCollectLifecycle()
 
-// requestGates 按站点串行化外部请求，并在成功后执行冷却间隔
+// requestGates 按站点控制分页请求批次冷却：每 10 个分页请求后等待站点 Interval。
+// 它只串行化调度计数，不串行化真实 HTTP 请求；同批次分页允许并发在途。
 var requestGates sync.Map
 
 type sourceRequestGate struct {
-	mu            sync.Mutex
-	token         chan struct{}
-	nextAllowedAt time.Time
+	mu                        sync.Mutex
+	nextAllowedAt             time.Time
+	pageRequestsSinceCooldown int
 }
 
 func ClearLimiter(sourceID string) {
@@ -85,6 +89,7 @@ func ClearLimiter(sourceID string) {
 		gate := val.(*sourceRequestGate)
 		gate.mu.Lock()
 		gate.nextAllowedAt = time.Time{}
+		gate.pageRequestsSinceCooldown = 0
 		gate.mu.Unlock()
 	}
 }
@@ -102,6 +107,33 @@ func runCollectDBWrite(write func() error) error {
 	collectDBWriteSem <- struct{}{}
 	defer func() { <-collectDBWriteSem }()
 	return write()
+}
+
+func runCollectDBWriteWithRetry(ctx context.Context, sourceName string, page int, write func() error) error {
+	var err error
+	for attempt := 1; attempt <= collectDBWriteRetries; attempt++ {
+		err = runCollectDBWrite(write)
+		if err == nil || !isRetryableDBWriteErr(err) || attempt == collectDBWriteRetries {
+			return err
+		}
+		backoff := time.Duration(attempt*300) * time.Millisecond
+		log.Printf("[Spider][DBRetry] 站点 %s 第 %d 页写库遇到可重试错误 attempt=%d/%d backoff_ms=%d err=%v", sourceName, page, attempt, collectDBWriteRetries, backoff.Milliseconds(), err)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+	}
+	return err
+}
+
+func isRetryableDBWriteErr(err error) bool {
+	var mysqlErr *mysql.MySQLError
+	if errors.As(err, &mysqlErr) {
+		return mysqlErr.Number == 1213 || mysqlErr.Number == 1205
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "deadlock found") || strings.Contains(message, "lock wait timeout")
 }
 
 type collectTask struct {
@@ -439,61 +471,66 @@ func getSourceInterval(sourceID string, fallback *model.FilmSource) time.Duratio
 func getSourceRequestGate(sourceID string) *sourceRequestGate {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
-		return &sourceRequestGate{token: make(chan struct{}, 1)}
+		return &sourceRequestGate{}
 	}
 	if val, ok := requestGates.Load(sourceID); ok {
 		return val.(*sourceRequestGate)
 	}
-	gate := &sourceRequestGate{token: make(chan struct{}, 1)}
-	gate.token <- struct{}{}
+	gate := &sourceRequestGate{}
 	actual, _ := requestGates.LoadOrStore(sourceID, gate)
 	return actual.(*sourceRequestGate)
 }
 
-func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string) (func(error), error) {
+func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string, countPageInterval bool) (func(error), error) {
 	if s == nil {
 		return func(error) {}, errors.New("采集站信息不存在")
 	}
 
 	gate := getSourceRequestGate(s.Id)
 	requestedAt := time.Now()
-	log.Printf("[Spider][RateLimit] 站点 %s %s等待请求槽位 at=%d", s.Name, tag, requestedAt.UnixMilli())
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case <-gate.token:
-	}
+	log.Printf("[Spider][RateLimit] 站点 %s %s等待批次冷却 at=%d", s.Name, tag, requestedAt.UnixMilli())
 
 	for {
 		gate.mu.Lock()
 		waitUntil := gate.nextAllowedAt
-		gate.mu.Unlock()
-
 		now := time.Now()
 		if waitUntil.IsZero() || !waitUntil.After(now) {
-			grantedAt := time.Now()
-			log.Printf("[Spider][RateLimit] 站点 %s %s开始请求 at=%d queue_wait_ms=%d", s.Name, tag, grantedAt.UnixMilli(), grantedAt.Sub(requestedAt).Milliseconds())
-			return func(requestErr error) {
-				gate.mu.Lock()
-				if requestErr == nil {
-					interval := getSourceInterval(s.Id, s)
-					gate.nextAllowedAt = time.Now().Add(interval)
-					log.Printf("[Spider][RateLimit] 站点 %s %s成功，进入冷却 cooldown_ms=%d next_at=%d", s.Name, tag, interval.Milliseconds(), gate.nextAllowedAt.UnixMilli())
-				} else if utils.IsRateLimitedErr(requestErr) {
-					interval := getSourceInterval(s.Id, s)
-					gate.nextAllowedAt = time.Now().Add(interval)
-					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，进入保护冷却 cooldown_ms=%d next_at=%d err=%v", s.Name, tag, interval.Milliseconds(), gate.nextAllowedAt.UnixMilli(), requestErr)
-				} else {
-					gate.nextAllowedAt = time.Time{}
-					log.Printf("[Spider][RateLimit] 站点 %s %s失败，不追加冷却 err=%v", s.Name, tag, requestErr)
+			grantedAt := now
+			interval := getSourceInterval(s.Id, s)
+			gate.nextAllowedAt = time.Time{}
+			if countPageInterval {
+				gate.pageRequestsSinceCooldown++
+				if gate.pageRequestsSinceCooldown >= sourcePageRequestBurstSize {
+					gate.pageRequestsSinceCooldown = 0
+					gate.nextAllowedAt = grantedAt.Add(interval)
 				}
-				gate.mu.Unlock()
-				gate.token <- struct{}{}
+			}
+			nextAllowedAt := gate.nextAllowedAt
+			burstCount := gate.pageRequestsSinceCooldown
+			gate.mu.Unlock()
+			log.Printf("[Spider][RateLimit] 站点 %s %s开始请求 at=%d queue_wait_ms=%d burst_count=%d next_at=%d", s.Name, tag, grantedAt.UnixMilli(), grantedAt.Sub(requestedAt).Milliseconds(), burstCount, nextAllowedAt.UnixMilli())
+			return func(requestErr error) {
+				if requestErr == nil {
+					log.Printf("[Spider][RateLimit] 站点 %s %s成功", s.Name, tag)
+					return
+				}
+				if utils.IsRateLimitedErr(requestErr) {
+					protectUntil := time.Now().Add(interval)
+					gate.mu.Lock()
+					if gate.nextAllowedAt.Before(protectUntil) {
+						gate.nextAllowedAt = protectUntil
+					}
+					nextAllowedAt := gate.nextAllowedAt
+					gate.mu.Unlock()
+					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，延长保护冷却 cooldown_ms=%d next_at=%d err=%v", s.Name, tag, interval.Milliseconds(), nextAllowedAt.UnixMilli(), requestErr)
+					return
+				}
+				log.Printf("[Spider][RateLimit] 站点 %s %s失败，保留启动间隔 err=%v", s.Name, tag, requestErr)
 			}, nil
 		}
 
 		cooldown := waitUntil.Sub(now)
+		gate.mu.Unlock()
 		log.Printf("[Spider][RateLimit] 站点 %s %s冷却中 wait_ms=%d next_at=%d", s.Name, tag, cooldown.Milliseconds(), waitUntil.UnixMilli())
 		timer := time.NewTimer(cooldown)
 		select {
@@ -501,7 +538,6 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 			if !timer.Stop() {
 				<-timer.C
 			}
-			gate.token <- struct{}{}
 			return nil, ctx.Err()
 		case <-timer.C:
 		}
@@ -517,7 +553,7 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		default:
 		}
 
-		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt))
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt), false)
 		if err != nil {
 			return 0, err
 		}
@@ -552,7 +588,7 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt), true)
 		if err != nil {
 			return nil, err
 		}
@@ -606,19 +642,6 @@ func getSourcePageConcurrency(s *model.FilmSource) int {
 	return limit
 }
 
-func splitSourcesByGrade(sources []model.FilmSource) ([]model.FilmSource, []model.FilmSource) {
-	masters := make([]model.FilmSource, 0, len(sources))
-	slaves := make([]model.FilmSource, 0, len(sources))
-	for _, src := range sources {
-		if src.Grade == model.MasterCollect {
-			masters = append(masters, src)
-			continue
-		}
-		slaves = append(slaves, src)
-	}
-	return masters, slaves
-}
-
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	if len(sources) == 0 {
 		return
@@ -629,51 +652,8 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	}
 	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
-	masters, slaves := splitSourcesByGrade(sources)
-	if len(masters) > 0 {
-		masterLimit := min(len(masters), config.MAXGoroutine)
-		if masterLimit <= 0 {
-			masterLimit = 1
-		}
-		slaveLimit := 0
-		globalLimit := config.MAXGoroutine
-		if globalLimit <= 0 {
-			globalLimit = 1
-		}
-		availableForSlaves := globalLimit - masterLimit
-		if availableForSlaves > 0 {
-			slaveLimit = min(availableForSlaves, slaveSourceConcurrencyWhileMasterOn)
-		}
-
-		log.Printf("[%s] 主站优先：主站并发=%d，附属站并发=%d", tag, masterLimit, slaveLimit)
-
-		var masterWG sync.WaitGroup
-		masterWG.Add(1)
-		go func() {
-			defer masterWG.Done()
-			runSourcesGroupWithLimit(masters, h, tag, masterLimit, runVersion)
-		}()
-
-		var slaveWG sync.WaitGroup
-		if len(slaves) > 0 && slaveLimit > 0 {
-			slaveWG.Add(1)
-			go func() {
-				defer slaveWG.Done()
-				runSourcesGroupWithLimit(slaves, h, tag, slaveLimit, runVersion)
-			}()
-		}
-
-		masterWG.Wait()
-		if len(slaves) > 0 && slaveLimit == 0 && !isDispatchStopped(runVersion) {
-			log.Printf("[%s] 主站优先：当前并发位已被主站占满，主站完成后顺序补跑 %d 个附属站任务", tag, len(slaves))
-			runSourcesGroupWithLimit(slaves, h, tag, 1, runVersion)
-		}
-		slaveWG.Wait()
-		return
-	}
-	if len(slaves) > 0 {
-		runSourcesGroupWithLimit(slaves, h, tag, config.MAXGoroutine, runVersion)
-	}
+	log.Printf("[%s] 主站/附属站同时协程并发采集，站点数=%d", tag, len(sources))
+	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion)
 }
 
 func isDispatchStopped(runVersion uint64) bool {
@@ -684,10 +664,10 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 	if len(sources) == 0 {
 		return
 	}
-	if limit <= 0 {
-		limit = 1
+	var sem chan struct{}
+	if limit > 0 {
+		sem = make(chan struct{}, limit)
 	}
-	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 
 	for _, src := range sources {
@@ -700,10 +680,16 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			continue
 		}
 		wg.Add(1)
-		sem <- struct{}{}
+		if sem != nil {
+			sem <- struct{}{}
+		}
 		go func(fs model.FilmSource) {
 			defer wg.Done()
-			defer func() { <-sem }()
+			defer func() {
+				if sem != nil {
+					<-sem
+				}
+			}()
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
 				return
@@ -837,32 +823,25 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
-	interrupted := false
-	if pageCount <= pageWorkerLimit*2 {
-		for i := 1; i <= pageCount; i++ {
-			select {
-			case <-ctx.Done():
-				log.Printf("[Spider] 站点 %s 采集任务被中断(同步模式)\n", s.Name)
-				interrupted = true
-				break
-			default:
-				collectFilm(ctx, s, h, i)
-			}
-			if interrupted {
-				break
-			}
-		}
-	} else {
-		ConcurrentPageSpider(ctx, pageCount, pageWorkerLimit, s, h, collectFilm)
-	}
-	if interrupted {
+	collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h)
+	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
 	}
-
 	if s.Grade == model.MasterCollect && s.SyncPictures {
-		repository.SyncFilmPicture()
+		triggerPictureSync()
 	}
+
 	return nil
+}
+
+func triggerPictureSync() {
+	if !pictureSyncRunning.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer pictureSyncRunning.Store(false)
+		repository.SyncFilmPicture()
+	}()
 }
 
 // CollectCategory 影视分类采集
@@ -901,16 +880,12 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
-		lock := getSourceWriteLock(s.Id)
-		lock.Lock()
 		err = runCollectDBWrite(func() error {
 			return saveMaster(s.Id, list)
 		})
 		if err != nil {
-			lock.Unlock()
 			return fmt.Errorf("save master details failed: %w", err)
 		}
-		lock.Unlock()
 		if s.SyncPictures {
 			if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
 				return fmt.Errorf("save virtual pictures failed: %w", err)
@@ -931,73 +906,208 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	return nil
 }
 
-func saveFilmPageFailure(s *model.FilmSource, h, pg int, err error) {
-	repository.SaveFailureRecord(model.FailureRecord{
+func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
+	if s.Grade != model.MasterCollect {
+		return nil, saveCollectedFilm(s, list, filmrepo.SaveDetails)
+	}
+
+	var affectedPids []int64
+	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
+		pids, err := filmrepo.SaveDetailsForCollect(s.Id, list)
+		if err != nil {
+			return err
+		}
+		affectedPids = pids
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("save master details failed: %w", err)
+	}
+	if s.SyncPictures {
+		if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
+			return nil, fmt.Errorf("save virtual pictures failed: %w", err)
+		}
+	}
+	return affectedPids, nil
+}
+
+func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error) {
+	if err == nil {
+		err = errors.New("unknown error")
+	}
+	recordErr := repository.SaveFailureRecord(model.FailureRecord{
 		OriginId:   s.Id,
 		OriginName: s.Name,
 		Uri:        s.Uri,
 		PageNumber: pg,
 		Hour:       h,
-		Cause:      fmt.Sprintln(err),
+		Cause:      fmt.Sprintf("%s: %v", phase, err),
 		Status:     1,
 	})
+	if recordErr != nil {
+		log.Printf("[Spider][Failure] 失败页记录保存失败 source_id=%s source=%s page=%d hour=%d phase=%s err=%v record_err=%v", s.Id, s.Name, pg, h, phase, err, recordErr)
+		return
+	}
+	log.Printf("[Spider][Failure] 已记录失败页 source_id=%s source=%s page=%d hour=%d phase=%s err=%v", s.Id, s.Name, pg, h, phase, err)
 }
 
-// collectFilm 影视详情采集 (单一源分页全采集)
-func collectFilm(ctx context.Context, s *model.FilmSource, h, pg int) {
-	select {
-	case <-ctx.Done():
-		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-			progress.Status = "stopped"
-		})
-		return
-	default:
-	}
-	updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-		if pg > progress.Current {
-			progress.Current = pg
-		}
-		progress.Status = "running"
-	})
+type collectPageResult struct {
+	page int
+	list []model.MovieDetail
+	err  error
+}
+
+func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
+	return r
+}
 
-	// collectFilm 本身作为并发 Worker 或同步循环的一部分
-	// 具体的 Wait 逻辑已由调用方（如 ConcurrentPageSpider 或 HandleCollect 循环）控制，
-	// 此处仅执行请求，保证原子请求的纯粹性
-	list, err := getFilmDetailWithRetry(ctx, s, r)
-	if err != nil || len(list) <= 0 {
-		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-			progress.Failed++
-			if pg > progress.Current {
-				progress.Current = pg
-			}
-		})
-		saveFilmPageFailure(s, h, pg, err)
-		log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, pg, err)
+// collectFilmPages 将请求与写库拆成流水线：请求 worker 不等待写库完成即可继续抓后续页。
+func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) {
+	if pageCount <= 0 {
 		return
 	}
-	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
-		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-			progress.Failed++
-			if pg > progress.Current {
-				progress.Current = pg
+	if requestWorkerLimit <= 0 {
+		requestWorkerLimit = 1
+	}
+	requestWorkers := min(pageCount, requestWorkerLimit)
+	writeWorkers := min(pageCount, collectDBWriteConcurrency)
+	if writeWorkers <= 0 {
+		writeWorkers = 1
+	}
+
+	pages := make(chan int, pageCount)
+	results := make(chan collectPageResult, writeWorkers)
+	for pg := 1; pg <= pageCount; pg++ {
+		pages <- pg
+	}
+	close(pages)
+
+	var requestWG sync.WaitGroup
+	requestWG.Add(requestWorkers)
+	for i := 0; i < requestWorkers; i++ {
+		go func() {
+			defer requestWG.Done()
+			for {
+				select {
+				case <-ctx.Done():
+					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+						progress.Status = "stopped"
+					})
+					return
+				case pg, ok := <-pages:
+					if !ok {
+						return
+					}
+					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+						if pg > progress.Current {
+							progress.Current = pg
+						}
+						progress.Status = "running"
+					})
+					list, err := getFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
+					if err == nil && len(list) == 0 {
+						err = errors.New("response list is empty")
+					}
+					select {
+					case <-ctx.Done():
+						updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+							progress.Status = "stopped"
+						})
+						return
+					case results <- collectPageResult{page: pg, list: list, err: err}:
+					}
+				}
 			}
-		})
-		saveFilmPageFailure(s, h, pg, err)
-		log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, pg, err)
+		}()
+	}
+
+	go func() {
+		requestWG.Wait()
+		close(results)
+	}()
+
+	var writeWG sync.WaitGroup
+	affectedPids := make(map[int64]struct{})
+	var affectedPidsMu sync.Mutex
+	writeWG.Add(writeWorkers)
+	for i := 0; i < writeWorkers; i++ {
+		go func() {
+			defer writeWG.Done()
+			for result := range results {
+				if result.err != nil {
+					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+						progress.Failed++
+						if result.page > progress.Current {
+							progress.Current = result.page
+						}
+					})
+					saveFilmPageFailure(s, h, result.page, "fetch", result.err)
+					log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, result.page, result.err)
+					continue
+				}
+				pids, err := saveCollectedFilmForCollect(ctx, s, result.page, result.list)
+				if err != nil {
+					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+						progress.Failed++
+						if result.page > progress.Current {
+							progress.Current = result.page
+						}
+					})
+					saveFilmPageFailure(s, h, result.page, "save", err)
+					log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, result.page, err)
+					continue
+				}
+				if len(pids) > 0 {
+					affectedPidsMu.Lock()
+					for _, pid := range pids {
+						if pid > 0 {
+							affectedPids[pid] = struct{}{}
+						}
+					}
+					affectedPidsMu.Unlock()
+				}
+				updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+					progress.Success++
+					if result.page > progress.Current {
+						progress.Current = result.page
+					}
+				})
+				log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, result.page, len(result.list))
+			}
+		}()
+	}
+	writeWG.Wait()
+	flushCollectSearchTags(s, affectedPids)
+	if ctx.Err() != nil {
+		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
+	}
+}
+
+func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}) {
+	if s.Grade != model.MasterCollect || len(affectedPids) == 0 {
 		return
 	}
-	updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-		progress.Success++
-		if pg > progress.Current {
-			progress.Current = pg
+	pids := make([]int64, 0, len(affectedPids))
+	for pid := range affectedPids {
+		if pid > 0 {
+			pids = append(pids, pid)
 		}
-	})
-	log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, pg, len(list))
+	}
+	if len(pids) == 0 {
+		return
+	}
+	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
+	if err := filmrepo.RefreshSearchTagsByPids(pids...); err != nil {
+		log.Printf("[Spider] 站点 %s 采集后刷新搜索标签失败: %v", s.Name, err)
+		return
+	}
+	filmrepo.ClearAllSearchTagsCache()
+	log.Printf("[Spider] 站点 %s 采集后已批量刷新搜索标签, 分类数=%d", s.Name, len(pids))
 }
 
 // collectFilmById 采集指定ID的影片信息
@@ -1020,7 +1130,7 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 		collectLifecycle.endSource(s.Id)
 	}()
 
-	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
+	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids), false)
 	if err != nil {
 		return err
 	}
@@ -1043,46 +1153,6 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 		return err
 	}
 	return nil
-}
-
-// ConcurrentPageSpider 并发分页采集, 不限类型
-func ConcurrentPageSpider(ctx context.Context, capacity int, workerLimit int, s *model.FilmSource, h int, collectFunc func(ctx context.Context, s *model.FilmSource, hour, pageNumber int)) {
-	// 开启协程并发执行
-	ch := make(chan int, capacity)
-	for i := 1; i <= capacity; i++ {
-		ch <- i
-	}
-	close(ch)
-	if workerLimit <= 0 {
-		workerLimit = 1
-	}
-	GoroutineNum := min(capacity, workerLimit)
-	// waitCh 必须带缓冲(容量=GoroutineNum)：ctx 取消时等待循环提前退出，
-	// worker 仍会执行 waitCh<-0，无缓冲则永久阻塞导致 goroutine 泄漏
-	waitCh := make(chan int, GoroutineNum)
-	for i := 0; i < GoroutineNum; i++ {
-		go func() {
-			defer func() { waitCh <- 0 }()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case pg, ok := <-ch:
-					if !ok {
-						return
-					}
-					// 执行对应的采集方法
-					collectFunc(ctx, s, h, pg)
-				}
-			}
-		}()
-	}
-	for i := 0; i < GoroutineNum; i++ {
-		<-waitCh
-	}
-	if ctx.Err() != nil {
-		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
-	}
 }
 
 // BatchCollect 批量采集, 采集指定的所有站点最近x小时内更新的数据
@@ -1209,13 +1279,13 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 
 	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
-		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, "recover_fetch", err)
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
 	}
 
 	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
-		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, err)
+		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, "recover_save", err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}

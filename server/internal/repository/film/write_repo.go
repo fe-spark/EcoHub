@@ -278,10 +278,19 @@ func SaveFilmIndex(s model.FilmIndex) error {
 }
 
 func SaveDetails(id string, list []model.MovieDetail) error {
+	_, err := saveDetails(id, list, true)
+	return err
+}
+
+func SaveDetailsForCollect(id string, list []model.MovieDetail) ([]int64, error) {
+	return saveDetails(id, list, false)
+}
+
+func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([]int64, error) {
 	infoList, infoByKey := buildFilmIndexesFromDetails(id, list)
 	infoList = filterValidFilmIndexes(infoList)
 	if len(infoList) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -298,12 +307,14 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, filmIndexContentKeys(infoList))
 		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
-		return err
+		return nil, err
 	}
 
 	clearFilmIndexCachesByPids(infoList)
-	BatchHandleSearchTag(infoList...)
-	return nil
+	if refreshSearchTags {
+		BatchHandleSearchTag(infoList...)
+	}
+	return collectSearchTagPidList(infoList), nil
 }
 
 func filmIndexContentKeys(infos []model.FilmIndex) []string {
@@ -375,10 +386,7 @@ func BatchHandleSearchTag(infos ...model.FilmIndex) {
 		return
 	}
 
-	pids := make([]int64, 0, len(infos))
-	for pid := range collectSearchTagPids(infos) {
-		pids = append(pids, pid)
-	}
+	pids := collectSearchTagPidList(infos)
 	if err := RefreshSearchTagsByPids(pids...); err != nil {
 		log.Printf("RefreshSearchTagsByPids Error: %v", err)
 		return
@@ -489,6 +497,15 @@ func collectSearchTagPids(infos []model.FilmIndex) map[int64]bool {
 		if info.Pid > 0 {
 			pids[info.Pid] = true
 		}
+	}
+	return pids
+}
+
+func collectSearchTagPidList(infos []model.FilmIndex) []int64 {
+	pidSet := collectSearchTagPids(infos)
+	pids := make([]int64, 0, len(pidSet))
+	for pid := range pidSet {
+		pids = append(pids, pid)
 	}
 	return pids
 }

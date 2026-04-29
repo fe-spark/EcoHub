@@ -265,7 +265,7 @@ func findPendingFailure(tx *gorm.DB, fl model.FailureRecord) (*model.FailureReco
 }
 
 // SaveFailureRecord 添加采集失效记录
-func SaveFailureRecord(fl model.FailureRecord) {
+func SaveFailureRecord(fl model.FailureRecord) error {
 	if fl.RetryCount <= 0 {
 		fl.RetryCount = 1
 	}
@@ -299,6 +299,7 @@ func SaveFailureRecord(fl model.FailureRecord) {
 	if err != nil {
 		log.Println("Save failure record affairs failed:", err)
 	}
+	return err
 }
 
 // FailureRecordList 获取所有的采集失效记录
