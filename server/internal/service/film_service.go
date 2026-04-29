@@ -63,11 +63,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		sourceId = master[0].Id
 	}
 
-	if err := filmrepo.SaveDetail(sourceId, detail); err != nil {
-		return err
-	}
-
-	return filmrepo.FlushPendingDerivedRefresh(sourceId)
+	return filmrepo.SaveDetail(sourceId, detail)
 }
 
 // DelFilm 删除分类影片

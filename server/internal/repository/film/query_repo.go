@@ -183,7 +183,6 @@ func applyVisibleCategoryFilter(query *gorm.DB) *gorm.DB {
 		}
 		return query.Where(visibleQuery)
 	}
-
 	return query.Where("cid IN ? OR (pid IN ? AND cid = 0)", categoryIDs, rootIDs)
 }
 

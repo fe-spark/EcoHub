@@ -364,12 +364,10 @@ func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 func flushSourcePending(source model.FilmSource) error {
 	switch source.Grade {
 	case model.MasterCollect:
-		if err := filmrepo.FlushPendingDerivedRefresh(source.Id); err != nil {
-			return fmt.Errorf("flush derived refresh failed: %w", err)
-		}
+		return nil
 	case model.SlaveCollect:
-		if err := filmrepo.FlushPendingSlaveSummaryRefresh(source.Id); err != nil {
-			return fmt.Errorf("flush slave summary refresh failed: %w", err)
+		if err := filmrepo.FlushPendingSlavePlaySummaryRefresh(source.Id); err != nil {
+			return fmt.Errorf("flush slave play summary refresh failed: %w", err)
 		}
 	}
 	return nil

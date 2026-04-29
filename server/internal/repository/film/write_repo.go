@@ -295,14 +295,32 @@ func SaveDetails(id string, list []model.MovieDetail) error {
 		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
 			return err
 		}
-		return nil
+		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, filmIndexContentKeys(infoList))
+		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
 		return err
 	}
 
-	UpdateSearchTagsForVisibleCollect(infoList...)
-	ScheduleDerivedRefresh(id, infoList...)
+	clearFilmIndexCachesByPids(infoList)
+	BatchHandleSearchTag(infoList...)
 	return nil
+}
+
+func filmIndexContentKeys(infos []model.FilmIndex) []string {
+	keys := make([]string, 0, len(infos))
+	seen := make(map[string]struct{}, len(infos))
+	for _, info := range infos {
+		key := strings.TrimSpace(info.ContentKey)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {

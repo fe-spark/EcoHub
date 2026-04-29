@@ -10,26 +10,26 @@ import (
 	"server/internal/model"
 )
 
-var slaveSummaryRefresh = newSlaveSummaryRefreshScheduler()
+var slavePlaySummaryRefresh = newSlavePlaySummaryRefreshScheduler()
 
-const slaveSummaryRefreshMIDChunkSize = 500
+const slavePlaySummaryRefreshMIDChunkSize = 500
 
-type slaveSummaryRefreshScheduler struct {
+type slavePlaySummaryRefreshScheduler struct {
 	mu     sync.Mutex
-	states map[string]*slaveSummaryRefreshState
+	states map[string]*slavePlaySummaryRefreshState
 }
 
-type slaveSummaryRefreshState struct {
+type slavePlaySummaryRefreshState struct {
 	pending  map[int64]struct{}
 	flushing bool
 	waiters  []chan error
 }
 
-func newSlaveSummaryRefreshScheduler() *slaveSummaryRefreshScheduler {
-	return &slaveSummaryRefreshScheduler{states: make(map[string]*slaveSummaryRefreshState)}
+func newSlavePlaySummaryRefreshScheduler() *slavePlaySummaryRefreshScheduler {
+	return &slavePlaySummaryRefreshScheduler{states: make(map[string]*slavePlaySummaryRefreshState)}
 }
 
-func ScheduleSlaveSummaryRefresh(sourceID string, infos ...model.FilmIndex) {
+func ScheduleSlavePlaySummaryRefresh(sourceID string, infos ...model.FilmIndex) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || len(infos) == 0 {
 		return
@@ -45,14 +45,14 @@ func ScheduleSlaveSummaryRefresh(sourceID string, infos ...model.FilmIndex) {
 		return
 	}
 
-	slaveSummaryRefresh.schedule(sourceID, midSet)
+	slavePlaySummaryRefresh.schedule(sourceID, midSet)
 }
 
-func FlushPendingSlaveSummaryRefresh(sourceID string) error {
-	return slaveSummaryRefresh.flush(sourceID)
+func FlushPendingSlavePlaySummaryRefresh(sourceID string) error {
+	return slavePlaySummaryRefresh.flush(sourceID)
 }
 
-func (s *slaveSummaryRefreshScheduler) schedule(sourceID string, midSet map[int64]struct{}) {
+func (s *slavePlaySummaryRefreshScheduler) schedule(sourceID string, midSet map[int64]struct{}) {
 	s.mu.Lock()
 	state := s.getOrCreateStateLocked(sourceID)
 	for mid := range midSet {
@@ -61,10 +61,10 @@ func (s *slaveSummaryRefreshScheduler) schedule(sourceID string, midSet map[int6
 	pendingCount := len(state.pending)
 	s.mu.Unlock()
 
-	log.Printf("[SlaveSummaryRefresh] 入队 source=%s, added_mid=%d, pending_mid=%d, start_worker=%t", sourceID, len(midSet), pendingCount, false)
+	log.Printf("[SlavePlaySummaryRefresh] 入队 source=%s, added_mid=%d, pending_mid=%d, start_worker=%t", sourceID, len(midSet), pendingCount, false)
 }
 
-func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
+func (s *slavePlaySummaryRefreshScheduler) flush(sourceID string) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return nil
@@ -75,7 +75,7 @@ func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
 		state := s.states[sourceID]
 		if state == nil {
 			s.mu.Unlock()
-			log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
+			log.Printf("[SlavePlaySummaryRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
 			return nil
 		}
 		if state.flushing {
@@ -89,7 +89,7 @@ func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
 		}
 		if len(state.pending) == 0 {
 			s.mu.Unlock()
-			log.Printf("[SlaveSummaryRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
+			log.Printf("[SlavePlaySummaryRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
 			return nil
 		}
 		pending := state.pending
@@ -98,14 +98,14 @@ func (s *slaveSummaryRefreshScheduler) flush(sourceID string) error {
 		state.flushing = true
 		s.mu.Unlock()
 
-		log.Printf("[SlaveSummaryRefresh] Flush请求 source=%s, pending_mid=%d, running=%t, start_worker=%t", sourceID, pendingCount, false, true)
-		err := flushSlaveSummaryRefreshSource(sourceID, pending)
+		log.Printf("[SlavePlaySummaryRefresh] Flush请求 source=%s, pending_mid=%d, running=%t, start_worker=%t", sourceID, pendingCount, false, true)
+		err := flushSlavePlaySummaryRefreshSource(sourceID, pending)
 		s.finishFlush(sourceID, err)
 		return err
 	}
 }
 
-func (s *slaveSummaryRefreshScheduler) finishFlush(sourceID string, err error) {
+func (s *slavePlaySummaryRefreshScheduler) finishFlush(sourceID string, err error) {
 	s.mu.Lock()
 	state := s.states[sourceID]
 	if state == nil {
@@ -125,17 +125,17 @@ func (s *slaveSummaryRefreshScheduler) finishFlush(sourceID string, err error) {
 	}
 }
 
-func (s *slaveSummaryRefreshScheduler) getOrCreateStateLocked(sourceID string) *slaveSummaryRefreshState {
+func (s *slavePlaySummaryRefreshScheduler) getOrCreateStateLocked(sourceID string) *slavePlaySummaryRefreshState {
 	state := s.states[sourceID]
 	if state != nil {
 		return state
 	}
-	state = &slaveSummaryRefreshState{pending: make(map[int64]struct{})}
+	state = &slavePlaySummaryRefreshState{pending: make(map[int64]struct{})}
 	s.states[sourceID] = state
 	return state
 }
 
-func flushSlaveSummaryRefreshSource(sourceID string, midSet map[int64]struct{}) error {
+func flushSlavePlaySummaryRefreshSource(sourceID string, midSet map[int64]struct{}) error {
 	if len(midSet) == 0 {
 		return nil
 	}
@@ -148,9 +148,9 @@ func flushSlaveSummaryRefreshSource(sourceID string, midSet map[int64]struct{}) 
 		return mids[i] < mids[j]
 	})
 
-	log.Printf("[SlaveSummaryRefresh] 开始刷新 source=%s, mid_count=%d", sourceID, len(mids))
-	for start := 0; start < len(mids); start += slaveSummaryRefreshMIDChunkSize {
-		end := start + slaveSummaryRefreshMIDChunkSize
+	log.Printf("[SlavePlaySummaryRefresh] 开始刷新 source=%s, mid_count=%d", sourceID, len(mids))
+	for start := 0; start < len(mids); start += slavePlaySummaryRefreshMIDChunkSize {
+		end := start + slavePlaySummaryRefreshMIDChunkSize
 		if end > len(mids) {
 			end = len(mids)
 		}
@@ -162,6 +162,6 @@ func flushSlaveSummaryRefreshSource(sourceID string, midSet map[int64]struct{}) 
 			return err
 		}
 	}
-	log.Printf("[SlaveSummaryRefresh] 刷新完成 source=%s, mid_count=%d", sourceID, len(mids))
+	log.Printf("[SlavePlaySummaryRefresh] 刷新完成 source=%s, mid_count=%d", sourceID, len(mids))
 	return nil
 }
