@@ -6,34 +6,55 @@ import (
 	"time"
 )
 
-func TestCollectWriteLaneWritesFirstQueueToReachBatchSize(t *testing.T) {
-	lane := newCollectWriteLane()
+func TestCollectWriteLaneSelectsLargestReadyQueueEachTurn(t *testing.T) {
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page <= collectWriteMaxPagesPerTurn; page++ {
-		if err := lane.submit(ctx, collectWriteJob{sourceID: "first", sourceName: "first", page: page}); err != nil {
-			t.Fatalf("submit first page %d: %v", page, err)
+		if err := lane.submit(ctx, collectWriteJob{sourceID: "a", sourceName: "a", page: page}); err != nil {
+			t.Fatalf("submit a page %d: %v", page, err)
 		}
 	}
-	for page := 1; page <= collectWriteMaxPagesPerTurn+5; page++ {
-		if err := lane.submit(ctx, collectWriteJob{sourceID: "second", sourceName: "second", page: page}); err != nil {
-			t.Fatalf("submit second page %d: %v", page, err)
+	for page := 1; page <= collectWriteMaxPagesPerTurn+12; page++ {
+		if err := lane.submit(ctx, collectWriteJob{sourceID: "b", sourceName: "b", page: page}); err != nil {
+			t.Fatalf("submit b page %d: %v", page, err)
+		}
+	}
+	for page := 1; page <= collectWriteMaxPagesPerTurn+3; page++ {
+		if err := lane.submit(ctx, collectWriteJob{sourceID: "c", sourceName: "c", page: page}); err != nil {
+			t.Fatalf("submit c page %d: %v", page, err)
 		}
 	}
 
-	batch := lane.nextBatch()
+	batch, _ := lane.nextBatch()
 	if len(batch) != collectWriteMaxPagesPerTurn {
 		t.Fatalf("expected first batch size %d, got %d", collectWriteMaxPagesPerTurn, len(batch))
 	}
 	for _, job := range batch {
-		if job.sourceID != "first" {
-			t.Fatalf("expected first queue to reach batch size to write first, got source %s", job.sourceID)
+		if job.sourceID != "b" {
+			t.Fatalf("expected largest ready queue b to write first, got source %s", job.sourceID)
+		}
+	}
+
+	for page := 1; page <= 25; page++ {
+		if err := lane.submit(ctx, collectWriteJob{sourceID: "a", sourceName: "a", page: collectWriteMaxPagesPerTurn + page}); err != nil {
+			t.Fatalf("submit extra a page %d: %v", page, err)
+		}
+	}
+
+	batch, _ = lane.nextBatch()
+	if len(batch) != collectWriteMaxPagesPerTurn {
+		t.Fatalf("expected second batch size %d, got %d", collectWriteMaxPagesPerTurn, len(batch))
+	}
+	for _, job := range batch {
+		if job.sourceID != "a" {
+			t.Fatalf("expected scheduler to recount and pick a, got source %s", job.sourceID)
 		}
 	}
 }
 
 func TestCollectWriteLaneDoesNotWriteBeforeBatchSize(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page < collectWriteMaxPagesPerTurn; page++ {
@@ -49,7 +70,7 @@ func TestCollectWriteLaneDoesNotWriteBeforeBatchSize(t *testing.T) {
 }
 
 func TestCollectWriteLaneFlushesTailWhenSourceFinished(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page <= 5; page++ {
@@ -59,14 +80,45 @@ func TestCollectWriteLaneFlushesTailWhenSourceFinished(t *testing.T) {
 	}
 	lane.finishSource("source")
 
-	batch := lane.nextBatch()
+	batch, meta := lane.nextBatch()
 	if len(batch) != 5 {
 		t.Fatalf("expected tail batch size 5, got %d", len(batch))
+	}
+	if !meta.tail {
+		t.Fatal("expected finished short batch to be marked as tail")
+	}
+}
+
+func TestCollectWriteLaneMarksFinalShortBatchAsTailAfterFullBatch(t *testing.T) {
+	lane := newCollectWriteLane("test")
+	ctx := context.Background()
+
+	for page := 1; page <= collectWriteMaxPagesPerTurn+5; page++ {
+		if err := lane.submit(ctx, collectWriteJob{sourceID: "source", sourceName: "source", page: page}); err != nil {
+			t.Fatalf("submit page %d: %v", page, err)
+		}
+	}
+	lane.finishSource("source")
+
+	firstBatch, firstMeta := lane.nextBatch()
+	if len(firstBatch) != collectWriteMaxPagesPerTurn {
+		t.Fatalf("expected first batch size %d, got %d", collectWriteMaxPagesPerTurn, len(firstBatch))
+	}
+	if firstMeta.tail {
+		t.Fatal("expected first full batch to not be marked as tail")
+	}
+
+	tailBatch, tailMeta := lane.nextBatch()
+	if len(tailBatch) != 5 {
+		t.Fatalf("expected final tail batch size 5, got %d", len(tailBatch))
+	}
+	if !tailMeta.tail {
+		t.Fatal("expected final short batch after full batch to be marked as tail")
 	}
 }
 
 func TestCollectWriteLaneLimitsBatchSize(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page <= collectWriteMaxPagesPerTurn+5; page++ {
@@ -75,7 +127,7 @@ func TestCollectWriteLaneLimitsBatchSize(t *testing.T) {
 		}
 	}
 
-	batch := lane.nextBatch()
+	batch, _ := lane.nextBatch()
 	if len(batch) != collectWriteMaxPagesPerTurn {
 		t.Fatalf("expected batch size %d, got %d", collectWriteMaxPagesPerTurn, len(batch))
 	}
@@ -89,7 +141,7 @@ func TestCollectWriteLaneLimitsBatchSize(t *testing.T) {
 }
 
 func TestCollectWriteLaneSubmitWaitsForPendingCapacity(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page <= collectWriteMaxPendingPagesPerSource; page++ {
@@ -122,7 +174,7 @@ func TestCollectWriteLaneSubmitWaitsForPendingCapacity(t *testing.T) {
 }
 
 func TestCollectWriteLaneSubmitReturnsWhenContextCanceled(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx := context.Background()
 
 	for page := 1; page <= collectWriteMaxPendingPagesPerSource; page++ {
@@ -151,7 +203,7 @@ func TestCollectWriteLaneSubmitReturnsWhenContextCanceled(t *testing.T) {
 }
 
 func TestCollectWriteLaneSubmitRejectsAlreadyCanceledContext(t *testing.T) {
-	lane := newCollectWriteLane()
+	lane := newCollectWriteLane("test")
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
