@@ -43,12 +43,8 @@ var retryBackoffs = []time.Duration{
 }
 
 const (
-	// 批量/自动采集最多同时派发的站点数，3 核服务器需要控制全局请求和写库压力。
-	defaultSourceCollectConcurrency = 4
-	// 站点 Interval 表示每采集 50 页后的冷却间隔，而不是每个请求都等待。
-	sourcePageRequestBurstSize = 50
-	// 请求可以并发，但写库必须收敛；本地 MySQL 在高并发 upsert+标签刷新下容易出现 i/o timeout。
-	collectDBWriteConcurrency = 3
+	// 每个写入批次已由调度器串行化，这里保留单写入信号量作为最终保护。
+	collectDBWriteConcurrency = 1
 	// 单站连续分页失败达到阈值后直接终止该站点，避免坏站点长期占用批量采集并发槽。
 	collectSourceConsecutiveFailureLimit = 10
 	// 批量采集只按低频进度打印，避免每页刷屏但保留观察采集是否推进的关键信息。
@@ -81,14 +77,12 @@ var taskMu sync.Mutex
 
 var collectLifecycle = newCollectLifecycle()
 
-// requestGates 按站点控制分页请求批次冷却：每 sourcePageRequestBurstSize 个分页请求后等待站点 Interval。
-// 它只串行化调度计数，不串行化真实 HTTP 请求；同批次分页允许并发在途。
+// requestGates 按站点控制外部采集接口请求间隔：同一站点两次请求之间至少等待站点 Interval。
 var requestGates sync.Map
 
 type sourceRequestGate struct {
-	mu                        sync.Mutex
-	nextAllowedAt             time.Time
-	pageRequestsSinceCooldown int
+	mu            sync.Mutex
+	nextAllowedAt time.Time
 }
 
 func ClearLimiter(sourceID string) {
@@ -100,7 +94,6 @@ func ClearLimiter(sourceID string) {
 		gate := val.(*sourceRequestGate)
 		gate.mu.Lock()
 		gate.nextAllowedAt = time.Time{}
-		gate.pageRequestsSinceCooldown = 0
 		gate.mu.Unlock()
 	}
 }
@@ -481,11 +474,16 @@ func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 func flushSourcePending(source model.FilmSource) error {
 	switch source.Grade {
 	case model.MasterCollect:
+		// 主站采集会改变影片列表和筛选项，站点收尾时再清一次，保证采集完成后 TVBox 看到新数据。
+		filmrepo.ClearTVBoxListCache()
+		filmrepo.ClearTVBoxConfigCache()
 		return nil
 	case model.SlaveCollect:
 		if err := filmrepo.FlushPendingSlavePlaySummaryRefresh(source.Id); err != nil {
 			return fmt.Errorf("flush slave play summary refresh failed: %w", err)
 		}
+		// 附属站采集只影响播放源摘要，最终可见结果在列表缓存里。
+		filmrepo.ClearTVBoxListCache()
 	}
 	return nil
 }
@@ -566,7 +564,7 @@ func getSourceRequestGate(sourceID string) *sourceRequestGate {
 	return actual.(*sourceRequestGate)
 }
 
-func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string, countPageInterval bool) (func(error), error) {
+func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string) (func(error), error) {
 	if s == nil {
 		return func(error) {}, errors.New("采集站信息不存在")
 	}
@@ -580,14 +578,7 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string,
 		if waitUntil.IsZero() || !waitUntil.After(now) {
 			grantedAt := now
 			interval := getSourceInterval(s.Id, s)
-			gate.nextAllowedAt = time.Time{}
-			if countPageInterval {
-				gate.pageRequestsSinceCooldown++
-				if gate.pageRequestsSinceCooldown >= sourcePageRequestBurstSize {
-					gate.pageRequestsSinceCooldown = 0
-					gate.nextAllowedAt = grantedAt.Add(interval)
-				}
-			}
+			gate.nextAllowedAt = grantedAt.Add(interval)
 			gate.mu.Unlock()
 			return func(requestErr error) {
 				if requestErr == nil {
@@ -630,7 +621,7 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		default:
 		}
 
-		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt), false)
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt))
 		if err != nil {
 			return 0, err
 		}
@@ -663,7 +654,7 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt), true)
+		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
 		if err != nil {
 			return nil, err
 		}
@@ -724,8 +715,10 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	}
 	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
-	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，并发上限=%d", tag, len(sources), defaultSourceCollectConcurrency)
-	runSourcesGroupWithLimit(sources, h, tag, defaultSourceCollectConcurrency, runVersion)
+	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，站点并发不限制", tag, len(sources))
+	collectWrites.beginSources(sources)
+	defer collectWrites.endSources(sources)
+	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion)
 	if err := collectLifecycle.flushPending(); err != nil {
 		log.Printf("[%s] 批量采集收尾刷新失败: %v", tag, err)
 	}
@@ -745,13 +738,17 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 	}
 	var wg sync.WaitGroup
 
-	for _, src := range sources {
+	for idx, src := range sources {
 		if isDispatchStopped(runVersion) {
 			log.Printf("[%s] 检测到一键终止，停止派发剩余站点任务", tag)
+			for _, skipped := range sources[idx:] {
+				collectWrites.finishSource(skipped.Grade, skipped.Id)
+			}
 			break
 		}
 		if isCollectProgressStopped(src.Id) {
 			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
+			collectWrites.finishSource(src.Grade, src.Id)
 			continue
 		}
 		wg.Add(1)
@@ -765,6 +762,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 					<-sem
 				}
 			}()
+			defer collectWrites.finishSource(fs.Grade, fs.Id)
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
 				return
@@ -1052,7 +1050,7 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	return r
 }
 
-// collectFilmPages 将请求与写库拆成流水线：请求并发执行，写库交给主站/附属站分 lane 调度器串行落库。
+// collectFilmPages 将请求与写库拆成流水线：请求并发执行，写库交给全局调度器按批次串行落库。
 func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) error {
 	if pageCount <= 0 {
 		return nil
@@ -1330,7 +1328,7 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 		collectLifecycle.endSource(s.Id)
 	}()
 
-	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids), false)
+	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
 	if err != nil {
 		return err
 	}

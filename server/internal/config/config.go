@@ -63,6 +63,8 @@ const (
 	SearchTagsVersionKey = RedisKeyPrefix + ":Search:Tags:Version"
 	// TVBoxConfigCacheKey TVBox 分类及筛选配置缓存 key
 	TVBoxConfigCacheKey = RedisKeyPrefix + ":TVBox:Config"
+	// TVBoxNetworkConfigCacheKey TVBox/影视仓一键网络配置缓存 key 前缀
+	TVBoxNetworkConfigCacheKey = RedisKeyPrefix + ":TVBox:NetworkConfig"
 	// IndexPageCacheKey 首页数据缓存 key
 	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
 	// CategoryVersionKey 分类版本号缓存 key

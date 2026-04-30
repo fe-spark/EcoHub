@@ -6,6 +6,7 @@ import (
 	"log"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
@@ -19,6 +20,14 @@ import (
 type CollectService struct{}
 
 var CollectSvc = new(CollectService)
+
+func clearProvideNetworkConfigCache() {
+	pattern := config.TVBoxNetworkConfigCacheKey + ":*"
+	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
+	for iter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, iter.Val())
+	}
+}
 
 func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 	sources := repository.GetCollectSourceList()
@@ -149,6 +158,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			return syncErr
 		}
 	}
+	clearProvideNetworkConfigCache()
 	return nil
 }
 
@@ -203,12 +213,14 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 				return syncErr
 			}
 		}
+		clearProvideNetworkConfigCache()
 		return nil
 	}
 	if err := repository.AddCollectSource(source); err != nil {
 		return err
 	}
 	spider.ClearLimiter(source.Id)
+	clearProvideNetworkConfigCache()
 	return nil
 }
 
@@ -224,6 +236,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 		return err
 	}
 	spider.ClearLimiter(id)
+	clearProvideNetworkConfigCache()
 	return nil
 }
 

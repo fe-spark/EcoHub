@@ -1,13 +1,18 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
+	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -177,6 +182,14 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
+	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+		var cached gin.H
+		if json.Unmarshal([]byte(data), &cached) == nil {
+			c.JSON(200, cached)
+			return
+		}
+	}
 
 	apiPath := baseURL + "/api/provide/vod"
 
@@ -192,7 +205,7 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		},
 	}
 
-	for _, source := range service.CollectSvc.GetFilmSourceList() {
+	for _, source := range repository.GetCollectSourceList() {
 		if !source.State {
 			continue
 		}
@@ -212,6 +225,9 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		"wallpaper": "",
 		"logo":      "",
 		"sites":     sites,
+	}
+	if data, err := json.Marshal(configJson); err == nil {
+		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
 	}
 
 	c.JSON(200, configJson)
