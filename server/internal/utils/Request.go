@@ -115,7 +115,6 @@ func ApiGet(r *RequestInfo) {
 	// 记录本次请求的 referer（局部变量，无竞态）
 	var lastURL string
 	var targetURL string
-	loggedError := false
 
 	c.OnRequest(func(req *colly.Request) {
 		setBrowserHeaders(req, lastURL)
@@ -130,15 +129,11 @@ func ApiGet(r *RequestInfo) {
 				r.Err = "request failed"
 			}
 			r.Err = r.Err + ", status=" + strconv.Itoa(response.StatusCode) + ", url=" + response.Request.URL.String()
-			log.Printf("请求异常: URL: %s Error: %s\n", response.Request.URL, err)
-			loggedError = true
 			return
 		}
 		if r.Err == "" && targetURL != "" {
 			r.Err = "request failed, url=" + targetURL
 		}
-		log.Printf("请求异常: URL: %s Error: %v\n", targetURL, err)
-		loggedError = true
 	})
 
 	c.OnResponse(func(response *colly.Response) {
@@ -158,9 +153,6 @@ func ApiGet(r *RequestInfo) {
 	if err != nil {
 		if r.Err == "" {
 			r.Err = err.Error()
-		}
-		if !loggedError {
-			log.Println("获取数据失败: ", err)
 		}
 	}
 }

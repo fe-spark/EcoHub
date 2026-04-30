@@ -27,6 +27,8 @@ var searchTagsVisibleCacheState struct {
 	lastAt time.Time
 }
 
+var movieSourceMappingWriteMu sync.Mutex
+
 func filmIndexContentKeyUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "content_key"}},
@@ -108,21 +110,6 @@ func buildMovieSourceMappings(list []model.FilmIndex, keyToMid map[string]int64)
 	return mappings
 }
 
-// saveMovieSourceMappings 仅维护“站点原始影片 ID -> 全局影片 ID”的最小映射，
-// 供后台单片更新时把统一 mid 翻译回各站自己的 source_mid。
-func saveMovieSourceMappings(mappings []model.MovieSourceMapping) {
-	saveMovieSourceMappingsTx(db.Mdb, mappings)
-}
-
-func saveMovieSourceMappingsTx(tx *gorm.DB, mappings []model.MovieSourceMapping) {
-	if len(mappings) == 0 {
-		return
-	}
-	if err := tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200).Error; err != nil {
-		log.Printf("saveMovieSourceMappings 失败: %v\n", err)
-	}
-}
-
 func saveFilmIndexesAndMappings(list []model.FilmIndex) (map[string]int64, error) {
 	return saveFilmIndexesAndMappingsTx(db.Mdb, list)
 }
@@ -150,6 +137,8 @@ func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping
 	if len(mappings) == 0 {
 		return nil
 	}
+	movieSourceMappingWriteMu.Lock()
+	defer movieSourceMappingWriteMu.Unlock()
 	return tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, 200).Error
 }
 

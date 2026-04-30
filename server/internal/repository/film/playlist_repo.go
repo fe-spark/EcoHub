@@ -250,8 +250,7 @@ func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos
 		})
 	}
 
-	saveMovieSourceMappings(mappings)
-	return nil
+	return saveMovieSourceMappingsTxE(db.Mdb, mappings)
 }
 
 func resolveSlaveGlobalMid(detail model.MovieDetail, globalMidByKey map[string]int64) (int64, bool) {

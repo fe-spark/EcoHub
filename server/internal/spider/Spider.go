@@ -51,6 +51,9 @@ const (
 	collectDBWriteConcurrency = 3
 	// 单站连续分页失败达到阈值后直接终止该站点，避免坏站点长期占用批量采集并发槽。
 	collectSourceConsecutiveFailureLimit = 10
+	// 批量采集只按低频进度打印，避免每页刷屏但保留观察采集是否推进的关键信息。
+	collectProgressLogPageStep = 100
+	collectFailureLogStep      = 10
 )
 
 // activeTasks 存储当前活跃采集任务的信息
@@ -60,7 +63,7 @@ var activeTasks sync.Map
 // 每次执行一键终止都会递增版本号，旧版本调度器检测到版本变化后不再继续启动新站点任务。
 var stopAllVersion atomic.Uint64
 
-// sourceWriteLocks 按站点串行化附属站写库，避免多页并发刷新播放列表与摘要时互相覆盖。
+// sourceWriteLocks 按站点串行化写库，避免同一站点多页事务并发 upsert/delete/update 时互相死锁。
 var sourceWriteLocks sync.Map
 
 var collectDBWriteSem = make(chan struct{}, collectDBWriteConcurrency)
@@ -125,7 +128,6 @@ func runCollectDBWriteWithRetry(ctx context.Context, sourceName string, page int
 			return err
 		}
 		backoff := time.Duration(attempt*300) * time.Millisecond
-		log.Printf("[Spider][DBRetry] 站点 %s 第 %d 页写库遇到可重试错误 attempt=%d/%d backoff_ms=%d err=%v", sourceName, page, attempt, collectDBWriteRetries, backoff.Milliseconds(), err)
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -929,6 +931,9 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	var err error
 	switch s.Grade {
 	case model.MasterCollect:
+		lock := getSourceWriteLock(s.Id)
+		lock.Lock()
+		defer lock.Unlock()
 		err = runCollectDBWrite(func() error {
 			return saveMaster(s.Id, list)
 		})
@@ -943,14 +948,13 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	case model.SlaveCollect:
 		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
-		err = runCollectDBWrite(func() error {
+		defer lock.Unlock()
+		err = runCollectDBWriteWithRetry(context.Background(), s.Name, 0, func() error {
 			return filmrepo.SaveSitePlayList(s.Id, list)
 		})
 		if err != nil {
-			lock.Unlock()
 			return fmt.Errorf("save slave playlists failed: %w", err)
 		}
-		lock.Unlock()
 	}
 	return nil
 }
@@ -961,6 +965,9 @@ func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page 
 	}
 
 	var affectedPids []int64
+	lock := getSourceWriteLock(s.Id)
+	lock.Lock()
+	defer lock.Unlock()
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
 		pids, err := filmrepo.SaveDetailsForCollect(s.Id, list)
 		if err != nil {
@@ -998,10 +1005,18 @@ func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error
 	}
 }
 
-type collectPageResult struct {
-	page int
-	list []model.MovieDetail
-	err  error
+type collectPageStats struct {
+	latestPage int
+	success    int
+	failed     int
+}
+
+func shouldLogCollectProgress(done, total int) bool {
+	return done == total || done%collectProgressLogPageStep == 0
+}
+
+func shouldLogCollectFailure(failed int) bool {
+	return failed == 1 || failed%collectFailureLogStep == 0
 }
 
 func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
@@ -1013,7 +1028,7 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	return r
 }
 
-// collectFilmPages 将请求与写库拆成流水线：请求 worker 不等待写库完成即可继续抓后续页。
+// collectFilmPages 将请求与写库拆成流水线：请求并发执行，写库交给主站/附属站分 lane 调度器串行落库。
 func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) error {
 	if pageCount <= 0 {
 		return nil
@@ -1024,17 +1039,117 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		requestWorkerLimit = 1
 	}
 	requestWorkers := min(pageCount, requestWorkerLimit)
-	writeWorkers := min(pageCount, collectDBWriteConcurrency)
-	if writeWorkers <= 0 {
-		writeWorkers = 1
-	}
 
 	pages := make(chan int, pageCount)
-	results := make(chan collectPageResult, writeWorkers)
+	writeCompletions := make(chan collectWriteCompletion, pageCount)
 	for pg := 1; pg <= pageCount; pg++ {
 		pages <- pg
 	}
 	close(pages)
+
+	var writeWG sync.WaitGroup
+	affectedPids := make(map[int64]struct{})
+	var affectedPidsMu sync.Mutex
+	var consecutiveFailuresMu sync.Mutex
+	consecutiveFailures := 0
+	var stopErr error
+	var stopOnce sync.Once
+	var statsMu sync.Mutex
+	stats := collectPageStats{}
+	lastLoggedDone := 0
+	logProgress := func(force bool) {
+		statsMu.Lock()
+		snapshot := stats
+		done := snapshot.success + snapshot.failed
+		if !force {
+			if done == lastLoggedDone || !shouldLogCollectProgress(done, pageCount) {
+				statsMu.Unlock()
+				return
+			}
+		}
+		lastLoggedDone = done
+		statsMu.Unlock()
+
+		log.Printf("[Spider] 站点 %s 采集进度 完成=%d/%d，成功=%d，失败=%d，最新页=%d", s.Name, done, pageCount, snapshot.success, snapshot.failed, snapshot.latestPage)
+	}
+	recordPageFinished := func(page int, success bool) collectPageStats {
+		statsMu.Lock()
+		if page > stats.latestPage {
+			stats.latestPage = page
+		}
+		if success {
+			stats.success++
+		} else {
+			stats.failed++
+		}
+		snapshot := stats
+		statsMu.Unlock()
+		return snapshot
+	}
+	recordFailure := func(page int, stage string, err error) {
+		consecutiveFailuresMu.Lock()
+		consecutiveFailures++
+		currentFailures := consecutiveFailures
+		consecutiveFailuresMu.Unlock()
+
+		if currentFailures < collectSourceConsecutiveFailureLimit {
+			return
+		}
+		stopOnce.Do(func() {
+			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, collectSourceConsecutiveFailureLimit)
+			log.Printf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
+			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+				progress.Status = "failed"
+			})
+			cancel()
+		})
+	}
+	recordSuccess := func() {
+		consecutiveFailuresMu.Lock()
+		consecutiveFailures = 0
+		consecutiveFailuresMu.Unlock()
+	}
+	markStopped := func() {
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Status = "stopped"
+		})
+	}
+	recordPageFailure := func(page int, stage string, err error) {
+		snapshot := recordPageFinished(page, false)
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Failed = snapshot.failed
+			if page > progress.Current {
+				progress.Current = page
+			}
+		})
+		saveFilmPageFailure(s, h, page, stage, err)
+		if shouldLogCollectFailure(snapshot.failed) {
+			log.Printf("[Spider] 站点 %s 采集失败累计=%d，最近失败 page=%d stage=%s err=%v", s.Name, snapshot.failed, page, stage, err)
+		}
+		recordFailure(page, stage, err)
+		logProgress(false)
+	}
+	recordPageSuccess := func(page int, pids []int64) {
+		snapshot := recordPageFinished(page, true)
+		recordSuccess()
+		if len(pids) > 0 {
+			affectedPidsMu.Lock()
+			for _, pid := range pids {
+				if pid > 0 {
+					affectedPids[pid] = struct{}{}
+				}
+			}
+			affectedPidsMu.Unlock()
+		}
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			progress.Success = snapshot.success
+			progress.Failed = snapshot.failed
+			if page > progress.Current {
+				progress.Current = page
+			}
+		})
+		logProgress(false)
+	}
 
 	var requestWG sync.WaitGroup
 	requestWG.Add(requestWorkers)
@@ -1062,102 +1177,64 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 					if err == nil && len(list) == 0 {
 						err = errors.New("response list is empty")
 					}
-					select {
-					case <-ctx.Done():
-						updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-							progress.Status = "stopped"
-						})
+					if err != nil {
+						if ctx.Err() != nil {
+							markStopped()
+							return
+						}
+						recordPageFailure(pg, "fetch", err)
+						continue
+					}
+					if ctx.Err() != nil {
+						markStopped()
 						return
-					case results <- collectPageResult{page: pg, list: list, err: err}:
+					}
+
+					page := pg
+					items := list
+					writeWG.Add(1)
+					submitErr := collectWrites.submit(ctx, collectWriteJob{
+						sourceID:   s.Id,
+						sourceName: s.Name,
+						grade:      s.Grade,
+						page:       page,
+						write: func() ([]int64, error) {
+							return saveCollectedFilmForCollect(ctx, s, page, items)
+						},
+						complete: func(completion collectWriteCompletion) {
+							writeCompletions <- completion
+							writeWG.Done()
+						},
+					})
+					if submitErr != nil {
+						writeWG.Done()
+						if ctx.Err() != nil {
+							updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+								progress.Status = "stopped"
+							})
+							return
+						}
+						recordPageFailure(page, "enqueue", submitErr)
 					}
 				}
 			}
 		}()
 	}
-
 	go func() {
 		requestWG.Wait()
-		close(results)
+		collectWrites.finishSource(s.Grade, s.Id)
+		writeWG.Wait()
+		close(writeCompletions)
 	}()
 
-	var writeWG sync.WaitGroup
-	affectedPids := make(map[int64]struct{})
-	var affectedPidsMu sync.Mutex
-	var consecutiveFailuresMu sync.Mutex
-	consecutiveFailures := 0
-	var stopErr error
-	var stopOnce sync.Once
-	recordFailure := func(page int, stage string, err error) {
-		consecutiveFailuresMu.Lock()
-		consecutiveFailures++
-		currentFailures := consecutiveFailures
-		consecutiveFailuresMu.Unlock()
-
-		if currentFailures < collectSourceConsecutiveFailureLimit {
-			return
+	for completion := range writeCompletions {
+		if completion.err != nil {
+			recordPageFailure(completion.page, completion.stage, completion.err)
+			continue
 		}
-		stopOnce.Do(func() {
-			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, collectSourceConsecutiveFailureLimit)
-			log.Printf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
-			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-				progress.Status = "failed"
-			})
-			cancel()
-		})
+		recordPageSuccess(completion.page, completion.pids)
 	}
-	recordSuccess := func() {
-		consecutiveFailuresMu.Lock()
-		consecutiveFailures = 0
-		consecutiveFailuresMu.Unlock()
-	}
-	writeWG.Add(writeWorkers)
-	for i := 0; i < writeWorkers; i++ {
-		go func() {
-			defer writeWG.Done()
-			for result := range results {
-				if result.err != nil {
-					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-						progress.Failed++
-						if result.page > progress.Current {
-							progress.Current = result.page
-						}
-					})
-					saveFilmPageFailure(s, h, result.page, "fetch", result.err)
-					recordFailure(result.page, "fetch", result.err)
-					continue
-				}
-				pids, err := saveCollectedFilmForCollect(ctx, s, result.page, result.list)
-				if err != nil {
-					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-						progress.Failed++
-						if result.page > progress.Current {
-							progress.Current = result.page
-						}
-					})
-					saveFilmPageFailure(s, h, result.page, "save", err)
-					recordFailure(result.page, "save", err)
-					continue
-				}
-				recordSuccess()
-				if len(pids) > 0 {
-					affectedPidsMu.Lock()
-					for _, pid := range pids {
-						if pid > 0 {
-							affectedPids[pid] = struct{}{}
-						}
-					}
-					affectedPidsMu.Unlock()
-				}
-				updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-					progress.Success++
-					if result.page > progress.Current {
-						progress.Current = result.page
-					}
-				})
-			}
-		}()
-	}
-	writeWG.Wait()
+	logProgress(true)
 	scheduleCollectSearchTagsFlush(s, affectedPids)
 	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)

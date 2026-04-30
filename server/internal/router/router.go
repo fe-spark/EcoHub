@@ -9,7 +9,12 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
-	r := gin.Default()
+	r := gin.New()
+	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{
+		"/api/index",
+		"/api/manage/collect/list",
+	}}))
+	r.Use(gin.Recovery())
 	r.Use(middleware.Cors())
 
 	r.Static(config.FilmPictureAccess, config.FilmPictureUploadDir)
