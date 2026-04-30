@@ -285,6 +285,30 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	return nil
 }
 
+func (s *collectLifecycleState) waitAndBeginSource(sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return errors.New("采集站点不存在")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.flushing {
+		s.cond.Wait()
+	}
+	for {
+		if _, ok := s.activeSources[sourceID]; !ok {
+			s.activeSources[sourceID] = struct{}{}
+			s.activeCount++
+			return nil
+		}
+		s.cond.Wait()
+		for s.flushing {
+			s.cond.Wait()
+		}
+	}
+}
+
 func (s *collectLifecycleState) endSource(sourceID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -449,9 +473,9 @@ func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 	if s.activeCount > 0 {
 		s.activeCount--
 	}
-	if s.activeCount == 0 {
-		s.cond.Broadcast()
-	}
+	// 某个站点释放后，需要唤醒等待同站点重试的协程重新竞争。
+	// flushPending/runExclusive 也依赖该广播在 activeCount 归零时继续推进。
+	s.cond.Broadcast()
 }
 
 func flushSourcePending(source model.FilmSource) error {
@@ -998,7 +1022,7 @@ func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error
 		PageNumber: pg,
 		Hour:       h,
 		Cause:      fmt.Sprintf("%s: %v", phase, err),
-		Status:     1,
+		Status:     model.FailureRecordStatusPending,
 	})
 	if recordErr != nil {
 		log.Printf("[Spider][Failure] 失败页记录保存失败 source_id=%s source=%s page=%d hour=%d phase=%s err=%v record_err=%v", s.Id, s.Name, pg, h, phase, err, recordErr)
@@ -1437,11 +1461,13 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	return ""
 }
 
-// recoverFilmPage 重试单条失败页：成功后标记原记录已处理，失败则更新待处理记录
+// recoverFilmPage 重试单条失败页：无论成功或失败都将记录移出待重试队列，并保留最终结果。
 func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord) {
 	if s == nil || fr == nil {
 		return
 	}
+	status := model.FailureRecordStatusFailed
+	defer repository.UpdateFailureRecordStatus(fr, status)
 	select {
 	case <-ctx.Done():
 		return
@@ -1465,7 +1491,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
-	repository.ChangeRecord(fr, 0)
+	status = model.FailureRecordStatusSuccess
 }
 
 // ======================================================= 采集拓展内容  =======================================================
@@ -1478,7 +1504,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		log.Printf("[Spider] 重试失败: 站点 %s 不存在\n", fr.OriginId)
 		return
 	}
-	if err := collectLifecycle.beginSource(s.Id); err != nil {
+	if err := collectLifecycle.waitAndBeginSource(s.Id); err != nil {
 		log.Printf("[Spider] 站点 %s 无法启动失败页重试: %v\n", s.Id, err)
 		return
 	}
@@ -1528,7 +1554,7 @@ func FullRecoverSpider() {
 		go func(source model.FilmSource, pending []model.FailureRecord) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := collectLifecycle.beginSource(source.Id); err != nil {
+			if err := collectLifecycle.waitAndBeginSource(source.Id); err != nil {
 				log.Printf("[Spider] 站点 %s 无法启动失败页重试: %v\n", source.Id, err)
 				return
 			}

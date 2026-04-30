@@ -48,7 +48,9 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
 	}
 	ft.State = state
-	repository.UpdateFilmTask(ft)
+	if err := repository.UpdateFilmTask(ft); err != nil {
+		return fmt.Errorf("定时任务状态保存失败: %w", err)
+	}
 	// 同步重载运行时引擎
 	if err := spider.ReloadCronTask(id); err != nil {
 		return fmt.Errorf("定时任务重载失败: %w", err)
@@ -58,7 +60,9 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 
 // UpdateFilmCron 更新定时任务的状态信息
 func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
-	repository.UpdateFilmTask(t)
+	if err := repository.UpdateFilmTask(t); err != nil {
+		return fmt.Errorf("定时任务保存失败: %w", err)
+	}
 	// 同步重载运行时引擎（可能修改了 Cron 表达式或采集站列表）
 	if err := spider.ReloadCronTask(t.Id); err != nil {
 		return fmt.Errorf("定时任务重载失败: %w", err)

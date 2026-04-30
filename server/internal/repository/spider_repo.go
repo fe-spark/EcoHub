@@ -17,7 +17,7 @@ import (
 // --------- Crontab Tasks -----------
 
 // SaveFilmTask 保存影视采集任务信息
-func SaveFilmTask(t model.FilmCollectTask) {
+func SaveFilmTask(t model.FilmCollectTask) error {
 	rec := model.CrontabRecord{
 		TaskId:    t.Id,
 		Time:      t.Time,
@@ -54,6 +54,7 @@ func SaveFilmTask(t model.FilmCollectTask) {
 	if err != nil {
 		log.Println("SaveFilmTask Error:", err)
 	}
+	return err
 }
 
 // GetAllFilmTask 获取所有的任务信息
@@ -103,8 +104,8 @@ func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
 }
 
 // UpdateFilmTask 更新定时任务信息 (直接覆盖 Id 对应的定时任务信息)
-func UpdateFilmTask(t model.FilmCollectTask) {
-	SaveFilmTask(t)
+func UpdateFilmTask(t model.FilmCollectTask) error {
+	return SaveFilmTask(t)
 }
 
 // DelFilmTask 通过 Id 删除对应的定时任务信息
@@ -250,8 +251,9 @@ func ExistCollectSourceList() bool {
 // --------- Failure Record -----------
 
 func pendingFailureScope(tx *gorm.DB, fl model.FailureRecord) *gorm.DB {
-	return tx.Where("origin_id = ? AND page_number = ? AND hour = ? AND status = 1",
+	return tx.Where("origin_id = ? AND page_number = ? AND hour = ? AND status = ?",
 		fl.OriginId, fl.PageNumber, fl.Hour,
+		model.FailureRecordStatusPending,
 	)
 }
 
@@ -320,7 +322,7 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	dto.GetPage(qw, vo.Paging)
 	// 获取分页查询的数据
 	var list []model.FailureRecord
-	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("updated_at DESC, id DESC").Find(&list).Error; err != nil {
+	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("created_at DESC, id DESC").Find(&list).Error; err != nil {
 		log.Println(err)
 		return nil
 	}
@@ -341,7 +343,7 @@ func FindRecordById(id uint) *model.FailureRecord {
 func PendingRecord() []model.FailureRecord {
 	var list []model.FailureRecord
 	if err := db.Mdb.
-		Where("(hour > 4320 OR hour < 0) AND status = 1").
+		Where("(hour > 4320 OR hour < 0) AND status = ?", model.FailureRecordStatusPending).
 		Order("created_at ASC, id ASC").
 		Find(&list).Error; err != nil {
 		log.Println("Query pending failure records failed:", err)
@@ -350,7 +352,7 @@ func PendingRecord() []model.FailureRecord {
 
 	var fr model.FailureRecord
 	if err := db.Mdb.
-		Where("hour > 0 AND hour < 4320 AND status = 1").
+		Where("hour > 0 AND hour < 4320 AND status = ?", model.FailureRecordStatusPending).
 		Order("hour DESC, created_at ASC, id ASC").
 		First(&fr).Error; err == nil {
 		list = append(list, fr)
@@ -362,16 +364,16 @@ func PendingRecord() []model.FailureRecord {
 	return list
 }
 
-// ChangeRecord 修改已完成二次采集的记录状态
-func ChangeRecord(fr *model.FailureRecord, status int) {
+// UpdateFailureRecordStatus 修改失败记录的重试结果状态。
+func UpdateFailureRecordStatus(fr *model.FailureRecord, status int) {
 	if fr == nil || fr.ID == 0 {
 		return
 	}
 	db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status)
 }
 
-// RetryRecord 修改重试采集成功的记录
-func RetryRecord(id uint, status int) error {
+// UpdateFailureRecordStatusByID 按 ID 修改失败记录的重试结果状态。
+func UpdateFailureRecordStatusByID(id uint, status int) error {
 	// 查询 id 对应的失败记录
 	fr := FindRecordById(id)
 	if fr == nil {
@@ -380,9 +382,9 @@ func RetryRecord(id uint, status int) error {
 	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
 }
 
-// DelDoneRecord 删除已处理的记录信息 -- 逻辑删除
-func DelDoneRecord() {
-	if err := db.Mdb.Where("status = ?", 0).Delete(&model.FailureRecord{}).Error; err != nil {
+// DeleteRetriedRecords 删除已有重试结果的记录信息 -- 逻辑删除。
+func DeleteRetriedRecords() {
+	if err := db.Mdb.Where("status IN ?", []int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}).Delete(&model.FailureRecord{}).Error; err != nil {
 		log.Println("Delete failure record failed:", err)
 	}
 }

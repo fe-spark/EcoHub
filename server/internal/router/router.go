@@ -93,7 +93,7 @@ func SetupRouter() *gin.Engine {
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
 			collect.POST(`/record/retry/all`, handler.CollectHd.CollectRecoverAll)
-			collect.POST(`/record/clear/done`, handler.CollectHd.ClearDoneRecord)
+			collect.POST(`/record/clear/result`, handler.CollectHd.ClearRetriedRecords)
 			collect.POST(`/record/clear/all`, handler.CollectHd.ClearAllRecord)
 		}
 

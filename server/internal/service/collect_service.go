@@ -233,7 +233,12 @@ func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.Fai
 
 func (s *CollectService) GetRecordOptions() model.OptionGroup {
 	options := make(model.OptionGroup)
-	options["status"] = []model.Option{{Name: "全部", Value: -1}, {Name: "待重试", Value: 1}, {Name: "已处理", Value: 0}}
+	options["status"] = []model.Option{
+		{Name: "全部", Value: -1},
+		{Name: "待重试", Value: model.FailureRecordStatusPending},
+		{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
+		{Name: "重试失败", Value: model.FailureRecordStatusFailed},
+	}
 
 	originOptions := []model.Option{{Name: "全部", Value: ""}}
 	for _, v := range repository.GetCollectSourceList() {
@@ -256,8 +261,8 @@ func (s *CollectService) RecoverAll() {
 	go spider.FullRecoverSpider()
 }
 
-func (s *CollectService) ClearDoneRecord() {
-	repository.DelDoneRecord()
+func (s *CollectService) ClearRetriedRecords() {
+	repository.DeleteRetriedRecords()
 }
 
 func (s *CollectService) ClearAllRecord() {
