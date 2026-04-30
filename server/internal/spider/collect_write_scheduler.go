@@ -2,6 +2,7 @@ package spider
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -38,8 +39,8 @@ type collectWriteScheduler struct {
 
 func newCollectWriteScheduler() *collectWriteScheduler {
 	s := &collectWriteScheduler{
-		master: newCollectWriteLane(),
-		slave:  newCollectWriteLane(),
+		master: newCollectWriteLane("主站"),
+		slave:  newCollectWriteLane("附属站"),
 	}
 	go s.master.run()
 	go s.slave.run()
@@ -62,10 +63,10 @@ func (s *collectWriteScheduler) finishSource(grade model.SourceGrade, sourceID s
 }
 
 type collectWriteLane struct {
+	name   string
 	mu     sync.Mutex
 	cond   *sync.Cond
 	queues map[string]*collectWriteQueue
-	seq    uint64
 }
 
 type collectWriteQueue struct {
@@ -73,11 +74,11 @@ type collectWriteQueue struct {
 	sourceName string
 	pending    []collectWriteJob
 	done       bool
-	readySeq   uint64
+	readyLog   bool
 }
 
-func newCollectWriteLane() *collectWriteLane {
-	lane := &collectWriteLane{queues: make(map[string]*collectWriteQueue)}
+func newCollectWriteLane(name string) *collectWriteLane {
+	lane := &collectWriteLane{name: name, queues: make(map[string]*collectWriteQueue)}
 	lane.cond = sync.NewCond(&lane.mu)
 	return lane
 }
@@ -136,15 +137,27 @@ func (l *collectWriteLane) queueFor(job collectWriteJob) *collectWriteQueue {
 
 func (l *collectWriteLane) run() {
 	for {
-		batch := l.nextBatch()
+		batch, meta := l.nextBatch()
+		log.Printf("[Spider][WriteScheduler] %s lane 开始写入 source=%s batch=%d pending_after_pick=%d tail=%t", l.name, meta.sourceName, len(batch), meta.pendingAfterPick, meta.tail)
+		failed := 0
 		for _, job := range batch {
 			pids, err := job.write()
+			if err != nil {
+				failed++
+			}
 			job.complete(collectWriteCompletion{page: job.page, pids: pids, err: err, stage: "save"})
 		}
+		log.Printf("[Spider][WriteScheduler] %s lane 完成写入 source=%s batch=%d failed=%d pending_after_pick=%d tail=%t", l.name, meta.sourceName, len(batch), failed, meta.pendingAfterPick, meta.tail)
 	}
 }
 
-func (l *collectWriteLane) nextBatch() []collectWriteJob {
+type collectWriteBatchMeta struct {
+	sourceName       string
+	pendingAfterPick int
+	tail             bool
+}
+
+func (l *collectWriteLane) nextBatch() ([]collectWriteJob, collectWriteBatchMeta) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -154,14 +167,19 @@ func (l *collectWriteLane) nextBatch() []collectWriteJob {
 			batchSize := min(len(selected.pending), collectWriteMaxPagesPerTurn)
 			batch := append([]collectWriteJob(nil), selected.pending[:batchSize]...)
 			selected.pending = selected.pending[batchSize:]
-			selected.readySeq = 0
+			meta := collectWriteBatchMeta{
+				sourceName:       selected.sourceName,
+				pendingAfterPick: len(selected.pending),
+				tail:             selected.done && len(selected.pending) == 0 && batchSize < collectWriteMaxPagesPerTurn,
+			}
+			selected.readyLog = false
 			if len(selected.pending) == 0 {
 				delete(l.queues, selected.sourceID)
 			} else {
 				l.markReadyLocked(selected)
 			}
 			l.cond.Broadcast()
-			return batch
+			return batch, meta
 		}
 		l.cond.Wait()
 	}
@@ -170,10 +188,10 @@ func (l *collectWriteLane) nextBatch() []collectWriteJob {
 func (l *collectWriteLane) selectQueueLocked() *collectWriteQueue {
 	var selected *collectWriteQueue
 	for _, queue := range l.queues {
-		if queue.readySeq == 0 || len(queue.pending) == 0 {
+		if !queue.isReady() {
 			continue
 		}
-		if selected == nil || queue.readySeq < selected.readySeq {
+		if selected == nil || len(queue.pending) > len(selected.pending) {
 			selected = queue
 		}
 	}
@@ -181,12 +199,19 @@ func (l *collectWriteLane) selectQueueLocked() *collectWriteQueue {
 }
 
 func (l *collectWriteLane) markReadyLocked(queue *collectWriteQueue) {
-	if queue.readySeq > 0 || len(queue.pending) == 0 {
+	if !queue.isReady() {
 		return
 	}
-	if len(queue.pending) < collectWriteMaxPagesPerTurn && !queue.done {
+	if queue.readyLog {
 		return
 	}
-	l.seq++
-	queue.readySeq = l.seq
+	queue.readyLog = true
+	log.Printf("[Spider][WriteScheduler] %s lane 站点 %s 进入写入队列 pending=%d tail=%t", l.name, queue.sourceName, len(queue.pending), len(queue.pending) < collectWriteMaxPagesPerTurn && queue.done)
+}
+
+func (q *collectWriteQueue) isReady() bool {
+	if len(q.pending) == 0 {
+		return false
+	}
+	return len(q.pending) >= collectWriteMaxPagesPerTurn || q.done
 }
