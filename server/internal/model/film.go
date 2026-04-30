@@ -136,7 +136,7 @@ type FilmIndexIdentity struct {
 	DbId       int64  `json:"dbId" gorm:"index"`                         // 豆瓣ID (用于精准去重)
 }
 
-// FilmIndexCategory 分类归属层：记录采集入库时确定的分类结果。
+// FilmIndexCategory 分类层：RootCategoryKey/CategoryKey 是来源分类身份；Pid/Cid/CName 仅作写入快照和兼容展示。
 type FilmIndexCategory struct {
 	Cid              int64  `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
 	Pid              int64  `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID

@@ -6,6 +6,7 @@ interface CollectStats {
   total: number;
   enabled: number;
   running: number;
+  waiting: number;
   masters: number;
 }
 
@@ -46,7 +47,7 @@ export default function CollectOverview({
           </Col>
           <Col xs={12} lg={6} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic title="运行任务" value={stats.running} />
+              <Statistic title="采集中" value={stats.running} suffix={stats.waiting > 0 ? `等待 ${stats.waiting}` : undefined} />
             </div>
           </Col>
           <Col xs={12} lg={6} className={styles.overviewCol}>

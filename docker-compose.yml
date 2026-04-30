@@ -101,5 +101,3 @@ volumes:
   eco-mysql-data:
   eco-redis-data:
 
-
-

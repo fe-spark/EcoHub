@@ -68,7 +68,6 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		return err
 	}
 
-	log.Printf("[Playlist] 为站点 %s 保存了 %d 条记录\n", sourceID, len(playlists))
 	return nil
 }
 

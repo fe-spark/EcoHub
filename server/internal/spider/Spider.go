@@ -43,10 +43,14 @@ var retryBackoffs = []time.Duration{
 }
 
 const (
-	// 站点 Interval 表示每采集 10 页后的冷却间隔，而不是每个请求都等待。
-	sourcePageRequestBurstSize = 10
+	// 批量/自动采集最多同时派发的站点数，3 核服务器需要控制全局请求和写库压力。
+	defaultSourceCollectConcurrency = 4
+	// 站点 Interval 表示每采集 50 页后的冷却间隔，而不是每个请求都等待。
+	sourcePageRequestBurstSize = 50
 	// 请求可以并发，但写库必须收敛；本地 MySQL 在高并发 upsert+标签刷新下容易出现 i/o timeout。
 	collectDBWriteConcurrency = 3
+	// 单站连续分页失败达到阈值后直接终止该站点，避免坏站点长期占用批量采集并发槽。
+	collectSourceConsecutiveFailureLimit = 10
 )
 
 // activeTasks 存储当前活跃采集任务的信息
@@ -65,12 +69,16 @@ var collectProgress sync.Map
 
 var pictureSyncRunning atomic.Bool
 
+var asyncPendingFlushMu sync.Mutex
+
+var asyncMasterSearchTagsMu sync.Mutex
+
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
 var collectLifecycle = newCollectLifecycle()
 
-// requestGates 按站点控制分页请求批次冷却：每 10 个分页请求后等待站点 Interval。
+// requestGates 按站点控制分页请求批次冷却：每 sourcePageRequestBurstSize 个分页请求后等待站点 Interval。
 // 它只串行化调度计数，不串行化真实 HTTP 请求；同批次分页允许并发在途。
 var requestGates sync.Map
 
@@ -285,6 +293,57 @@ func (s *collectLifecycleState) endSourceAndFlush(source model.FilmSource) error
 	return s.finishSourceAndFlush(source)
 }
 
+func (s *collectLifecycleState) endSourceAndQueueFlush(source model.FilmSource) {
+	source.Id = strings.TrimSpace(source.Id)
+	if source.Id == "" {
+		return
+	}
+	s.mu.Lock()
+	s.finishSourceLocked(source.Id)
+	if source.Grade != model.SlaveCollect {
+		s.pendingFlushSources[source.Id] = source
+	}
+	s.mu.Unlock()
+
+	if source.Grade == model.SlaveCollect {
+		flushSourcePendingAsync(source)
+	}
+}
+
+func flushSourcePendingAsync(source model.FilmSource) {
+	go func() {
+		asyncPendingFlushMu.Lock()
+		defer asyncPendingFlushMu.Unlock()
+
+		if err := flushSourcePending(source); err != nil {
+			log.Printf("[Spider] 站点 %s 异步收尾刷新失败: %v", source.Name, err)
+		}
+	}()
+}
+
+func (s *collectLifecycleState) flushPending() error {
+	s.mu.Lock()
+	for s.flushing || s.activeCount > 0 {
+		s.cond.Wait()
+	}
+	if len(s.pendingFlushSources) == 0 {
+		s.mu.Unlock()
+		return nil
+	}
+	pending := s.pendingFlushSources
+	s.pendingFlushSources = make(map[string]model.FilmSource)
+	s.flushing = true
+	s.mu.Unlock()
+
+	err := flushPendingSources(pending)
+
+	s.mu.Lock()
+	s.flushing = false
+	s.mu.Unlock()
+	s.cond.Broadcast()
+	return err
+}
+
 func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) error {
 	source.Id = strings.TrimSpace(source.Id)
 	if source.Id == "" {
@@ -487,8 +546,6 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string,
 	}
 
 	gate := getSourceRequestGate(s.Id)
-	requestedAt := time.Now()
-	log.Printf("[Spider][RateLimit] 站点 %s %s等待批次冷却 at=%d", s.Name, tag, requestedAt.UnixMilli())
 
 	for {
 		gate.mu.Lock()
@@ -505,13 +562,9 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string,
 					gate.nextAllowedAt = grantedAt.Add(interval)
 				}
 			}
-			nextAllowedAt := gate.nextAllowedAt
-			burstCount := gate.pageRequestsSinceCooldown
 			gate.mu.Unlock()
-			log.Printf("[Spider][RateLimit] 站点 %s %s开始请求 at=%d queue_wait_ms=%d burst_count=%d next_at=%d", s.Name, tag, grantedAt.UnixMilli(), grantedAt.Sub(requestedAt).Milliseconds(), burstCount, nextAllowedAt.UnixMilli())
 			return func(requestErr error) {
 				if requestErr == nil {
-					log.Printf("[Spider][RateLimit] 站点 %s %s成功", s.Name, tag)
 					return
 				}
 				if utils.IsRateLimitedErr(requestErr) {
@@ -525,13 +578,11 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string,
 					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，延长保护冷却 cooldown_ms=%d next_at=%d err=%v", s.Name, tag, interval.Milliseconds(), nextAllowedAt.UnixMilli(), requestErr)
 					return
 				}
-				log.Printf("[Spider][RateLimit] 站点 %s %s失败，保留启动间隔 err=%v", s.Name, tag, requestErr)
 			}, nil
 		}
 
 		cooldown := waitUntil.Sub(now)
 		gate.mu.Unlock()
-		log.Printf("[Spider][RateLimit] 站点 %s %s冷却中 wait_ms=%d next_at=%d", s.Name, tag, cooldown.Milliseconds(), waitUntil.UnixMilli())
 		timer := time.NewTimer(cooldown)
 		select {
 		case <-ctx.Done():
@@ -560,11 +611,9 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		pageCount, err := spiderCore.GetPageCount(r)
 		if err == nil {
 			release(nil)
-			log.Printf("[Spider][RateLimit] 站点 %s 页数请求完成 attempt=%d at=%d page_count=%d", s.Name, attempt, time.Now().UnixMilli(), pageCount)
 			return pageCount, nil
 		}
 		release(err)
-		log.Printf("[Spider][RateLimit] 站点 %s 页数请求失败 attempt=%d at=%d err=%v", s.Name, attempt, time.Now().UnixMilli(), err)
 		lastErr = err
 		if attempt < pageCountRetryTimes && utils.IsRateLimitedErr(err) {
 			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
@@ -595,15 +644,12 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		list, err := spiderCore.GetFilmDetail(r)
 		if err == nil && len(list) > 0 {
 			release(nil)
-			log.Printf("[Spider][RateLimit] 站点 %s 分页请求完成 pg=%s attempt=%d at=%d item_count=%d", s.Name, page, attempt, time.Now().UnixMilli(), len(list))
 			return list, nil
 		}
 		release(err)
 		if err != nil {
-			log.Printf("[Spider][RateLimit] 站点 %s 分页请求失败 pg=%s attempt=%d at=%d err=%v", s.Name, page, attempt, time.Now().UnixMilli(), err)
 			lastErr = err
 		} else {
-			log.Printf("[Spider][RateLimit] 站点 %s 分页请求空结果 pg=%s attempt=%d at=%d", s.Name, page, attempt, time.Now().UnixMilli())
 			lastErr = errors.New("response list is empty")
 		}
 		if attempt < filmDetailRetryTimes && utils.IsRateLimitedErr(lastErr) {
@@ -652,8 +698,11 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	}
 	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
-	log.Printf("[%s] 主站/附属站同时协程并发采集，站点数=%d", tag, len(sources))
-	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion)
+	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，并发上限=%d", tag, len(sources), defaultSourceCollectConcurrency)
+	runSourcesGroupWithLimit(sources, h, tag, defaultSourceCollectConcurrency, runVersion)
+	if err := collectLifecycle.flushPending(); err != nil {
+		log.Printf("[%s] 批量采集收尾刷新失败: %v", tag, err)
+	}
 }
 
 func isDispatchStopped(runVersion uint64) bool {
@@ -742,9 +791,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 			}
 			return
 		}
-		if flushErr := collectLifecycle.endSourceAndFlush(*s); retErr == nil && flushErr != nil {
-			retErr = flushErr
-		}
+		collectLifecycle.endSourceAndQueueFlush(*s)
 	}()
 
 	// 同站跳过：如果该站点已有采集任务在运行，则跳过此次采集任务
@@ -823,7 +870,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
-	collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h)
+	if err := collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h); err != nil {
+		return err
+	}
 	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
 	}
@@ -946,9 +995,7 @@ func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error
 	})
 	if recordErr != nil {
 		log.Printf("[Spider][Failure] 失败页记录保存失败 source_id=%s source=%s page=%d hour=%d phase=%s err=%v record_err=%v", s.Id, s.Name, pg, h, phase, err, recordErr)
-		return
 	}
-	log.Printf("[Spider][Failure] 已记录失败页 source_id=%s source=%s page=%d hour=%d phase=%s err=%v", s.Id, s.Name, pg, h, phase, err)
 }
 
 type collectPageResult struct {
@@ -967,10 +1014,12 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 }
 
 // collectFilmPages 将请求与写库拆成流水线：请求 worker 不等待写库完成即可继续抓后续页。
-func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) {
+func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) error {
 	if pageCount <= 0 {
-		return
+		return nil
 	}
+	ctx, cancel := context.WithCancel(parentCtx)
+	defer cancel()
 	if requestWorkerLimit <= 0 {
 		requestWorkerLimit = 1
 	}
@@ -1034,6 +1083,33 @@ func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int
 	var writeWG sync.WaitGroup
 	affectedPids := make(map[int64]struct{})
 	var affectedPidsMu sync.Mutex
+	var consecutiveFailuresMu sync.Mutex
+	consecutiveFailures := 0
+	var stopErr error
+	var stopOnce sync.Once
+	recordFailure := func(page int, stage string, err error) {
+		consecutiveFailuresMu.Lock()
+		consecutiveFailures++
+		currentFailures := consecutiveFailures
+		consecutiveFailuresMu.Unlock()
+
+		if currentFailures < collectSourceConsecutiveFailureLimit {
+			return
+		}
+		stopOnce.Do(func() {
+			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, collectSourceConsecutiveFailureLimit)
+			log.Printf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
+			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+				progress.Status = "failed"
+			})
+			cancel()
+		})
+	}
+	recordSuccess := func() {
+		consecutiveFailuresMu.Lock()
+		consecutiveFailures = 0
+		consecutiveFailuresMu.Unlock()
+	}
 	writeWG.Add(writeWorkers)
 	for i := 0; i < writeWorkers; i++ {
 		go func() {
@@ -1047,7 +1123,7 @@ func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int
 						}
 					})
 					saveFilmPageFailure(s, h, result.page, "fetch", result.err)
-					log.Printf("[Spider] 站点 %s 第 %d 页抓取失败: %v", s.Name, result.page, result.err)
+					recordFailure(result.page, "fetch", result.err)
 					continue
 				}
 				pids, err := saveCollectedFilmForCollect(ctx, s, result.page, result.list)
@@ -1059,9 +1135,10 @@ func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int
 						}
 					})
 					saveFilmPageFailure(s, h, result.page, "save", err)
-					log.Printf("[Spider] 站点 %s 第 %d 页写库失败: %v", s.Name, result.page, err)
+					recordFailure(result.page, "save", err)
 					continue
 				}
+				recordSuccess()
 				if len(pids) > 0 {
 					affectedPidsMu.Lock()
 					for _, pid := range pids {
@@ -1077,15 +1154,18 @@ func collectFilmPages(ctx context.Context, pageCount int, requestWorkerLimit int
 						progress.Current = result.page
 					}
 				})
-				log.Printf("[Spider] 站点 %s 第 %d 页采集完成, 本页 %d 条", s.Name, result.page, len(result.list))
 			}
 		}()
 	}
 	writeWG.Wait()
-	flushCollectSearchTags(s, affectedPids)
+	scheduleCollectSearchTagsFlush(s, affectedPids)
 	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
+	if stopErr != nil {
+		return stopErr
+	}
+	return nil
 }
 
 func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}) {
@@ -1108,6 +1188,23 @@ func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}
 	}
 	filmrepo.ClearAllSearchTagsCache()
 	log.Printf("[Spider] 站点 %s 采集后已批量刷新搜索标签, 分类数=%d", s.Name, len(pids))
+}
+
+func scheduleCollectSearchTagsFlush(s *model.FilmSource, affectedPids map[int64]struct{}) {
+	if s.Grade != model.MasterCollect || len(affectedPids) == 0 {
+		return
+	}
+	pending := make(map[int64]struct{}, len(affectedPids))
+	for pid := range affectedPids {
+		pending[pid] = struct{}{}
+	}
+	source := *s
+	go func() {
+		asyncMasterSearchTagsMu.Lock()
+		defer asyncMasterSearchTagsMu.Unlock()
+
+		flushCollectSearchTags(&source, pending)
+	}()
 }
 
 // collectFilmById 采集指定ID的影片信息

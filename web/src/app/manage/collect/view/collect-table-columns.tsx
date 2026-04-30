@@ -1,10 +1,13 @@
 import { Button, Flex, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from "antd";
 import { DeleteOutlined, EditOutlined, PauseOutlined, PoweroffOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
+import dayjs from "dayjs";
 import { collectDuration, type FilmSource } from "./types";
 
 interface CollectTableColumnsOptions {
   activeCollectIds: string[];
+  runningCollectIds: string[];
+  startingCollectIds: string[];
   onUpdateItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
   onChangeSourceState: (record: FilmSource) => void;
   onStartTask: (record: FilmSource) => void;
@@ -15,6 +18,8 @@ interface CollectTableColumnsOptions {
 
 export function createCollectTableColumns({
   activeCollectIds,
+  runningCollectIds,
+  startingCollectIds,
   onUpdateItem,
   onChangeSourceState,
   onStartTask,
@@ -55,12 +60,12 @@ export function createCollectTableColumns({
     {
       title: "采集进度",
       dataIndex: "progress",
-      width: 220,
       render: (_, record) => {
         const progress = record.progress;
         if (!progress) {
           return <Typography.Text type="secondary">未采集</Typography.Text>;
         }
+
         const total = Math.max(progress.total, 0);
         const done = Math.min(
           progress.success + progress.failed,
@@ -72,8 +77,18 @@ export function createCollectTableColumns({
           : done > 0
             ? `${done}`
             : "即将开始采集";
+        const statusText = progress.status === "starting"
+          ? "等待中"
+          : progress.status === "failed"
+            ? "失败"
+            : progress.status === "stopped"
+              ? "已停止"
+              : progress.status === "done"
+                ? "已完成"
+                : "采集中";
         return (
           <Flex vertical gap={4}>
+            <Typography.Text type={progress.status === "starting" ? "secondary" : undefined}>{statusText}</Typography.Text>
             <Progress
               percent={percent}
               size="small"
@@ -86,6 +101,16 @@ export function createCollectTableColumns({
           </Flex>
         );
       },
+    },
+    {
+      title: "上次采集",
+      dataIndex: "lastCollectTime",
+      align: "center",
+      render: (value?: string) => (
+        value
+          ? <Typography.Text>{dayjs(value).format("YYYY-MM-DD HH:mm:ss")}</Typography.Text>
+          : <Typography.Text type="secondary">暂无</Typography.Text>
+      ),
     },
     {
       title: "图片同步",
@@ -148,6 +173,8 @@ export function createCollectTableColumns({
       align: "center",
       render: (_, record) => {
         const isRunning = activeCollectIds.includes(record.id);
+        const isCollecting = runningCollectIds.includes(record.id);
+        const isWaiting = startingCollectIds.includes(record.id);
         return (
           <Space size={4}>
             {!isRunning ? (
@@ -155,7 +182,7 @@ export function createCollectTableColumns({
                 <Button type="primary" icon={<PoweroffOutlined />} onClick={() => onStartTask(record)} />
               </Tooltip>
             ) : (
-              <Tooltip title="停止采集">
+              <Tooltip title={isWaiting ? "停止等待" : isCollecting ? "停止采集" : "停止任务"}>
                 <Button danger icon={<PauseOutlined />} onClick={() => onStopTask(record.id)} />
               </Tooltip>
             )}

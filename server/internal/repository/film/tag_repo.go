@@ -352,15 +352,14 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	}
 
 	res := make(map[string]any)
-	tagTypes := []string{"OriginalCategory", "Category", "Plot", "Area", "Language", "Year", "Sort"}
+	tagTypes := []string{"Category", "Plot", "Area", "Language", "Year", "Sort"}
 	allTitles := map[string]string{
-		"OriginalCategory": "类别",
-		"Category":         "类型",
-		"Plot":             "剧情",
-		"Area":             "地区",
-		"Language":         "语言",
-		"Year":             "年份",
-		"Sort":             "排序",
+		"Category": "类型",
+		"Plot":     "剧情",
+		"Area":     "地区",
+		"Language": "语言",
+		"Year":     "年份",
+		"Sort":     "排序",
 	}
 
 	tagMap := make(map[string]any)
@@ -369,16 +368,6 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	itemsByType := loadSearchTagItemsByType(st)
 
 	for _, t := range tagTypes {
-		if t == "OriginalCategory" {
-			sticky := getStickySearchTagValue(st, t)
-			options := buildOriginalCategorySearchOptions(pid, sticky)
-			if hasEffectiveSearchOptions(options) {
-				tagMap[t] = options
-				activeTitles[t] = allTitles[t]
-				activeSortList = append(activeSortList, t)
-			}
-			continue
-		}
 		if t == "Category" {
 			sticky := getStickySearchTagValue(st, t)
 			options := buildCategorySearchOptions(pid, sticky)

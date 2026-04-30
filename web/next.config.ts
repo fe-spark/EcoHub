@@ -1,8 +1,6 @@
 import type { NextConfig } from "next";
 import os from "os";
 
-const cpuCount = Math.max(1, os.cpus().length - 1);
-
 const apiUrl = process.env.API_URL?.trim();
 
 if (!apiUrl) {
@@ -29,10 +27,6 @@ const nextConfig: NextConfig = {
         as: "*.module.css",
       },
     },
-  },
-  experimental: {
-    // 自动获取 CPU 核心数量进行构建并行化
-    cpus: cpuCount,
   },
 };
 

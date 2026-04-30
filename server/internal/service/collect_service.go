@@ -1,8 +1,10 @@
 package service
 
 import (
+	"database/sql"
 	"errors"
 	"log"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -25,14 +27,36 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 	for _, progress := range spider.GetActiveTaskProgress() {
 		progressByID[progress.Id] = progress
 	}
+	lastCollectTimeByID := getLastCollectTimeBySource(sources)
 	for _, source := range sources {
-		item := model.FilmSourceListItem{FilmSource: source}
+		item := model.FilmSourceListItem{FilmSource: source, LastCollectTime: lastCollectTimeByID[source.Id]}
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
 		list = append(list, item)
 	}
 	return list
+}
+
+func getLastCollectTimeBySource(sources []model.FilmSource) map[string]*time.Time {
+	result := make(map[string]*time.Time, len(sources))
+	for _, source := range sources {
+		var last sql.NullTime
+		query := db.Mdb.Model(&model.FilmIndex{})
+		if source.Grade == model.SlaveCollect {
+			query = db.Mdb.Model(&model.MoviePlaylist{})
+		}
+		if err := query.Where("source_id = ?", source.Id).Select("MAX(updated_at)").Scan(&last).Error; err != nil {
+			log.Printf("GetLastCollectTimeBySource Error: source=%s err=%v", source.Id, err)
+			continue
+		}
+		if !last.Valid || last.Time.IsZero() {
+			continue
+		}
+		value := last.Time
+		result[source.Id] = &value
+	}
+	return result
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {

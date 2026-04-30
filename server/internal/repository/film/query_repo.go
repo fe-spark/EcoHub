@@ -46,6 +46,89 @@ func categoryStableKey(id int64) string {
 	return strings.TrimSpace(support.GetCategoryStableKeyByID(support.ResolveCategoryID(id)))
 }
 
+func currentCategoryIDsBySourceKey(sourceKey string) []int64 {
+	sourceKey = strings.TrimSpace(sourceKey)
+	if sourceKey == "" {
+		return nil
+	}
+	var mappings []model.CategoryMapping
+	if err := db.Mdb.Find(&mappings).Error; err != nil {
+		return nil
+	}
+	ids := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, mapping := range mappings {
+		if support.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey {
+			continue
+		}
+		if mapping.CategoryId <= 0 {
+			continue
+		}
+		if _, ok := seen[mapping.CategoryId]; ok {
+			continue
+		}
+		seen[mapping.CategoryId] = struct{}{}
+		ids = append(ids, mapping.CategoryId)
+	}
+	return ids
+}
+
+func currentRootCategoryIDsForSearch(search model.FilmIndex) []int64 {
+	ids := currentCategoryIDsBySourceKey(search.RootCategoryKey)
+	if len(ids) == 0 && search.Pid > 0 {
+		ids = []int64{support.ResolveCategoryID(search.Pid)}
+	}
+	roots := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		rootID := support.GetRootId(id)
+		if rootID <= 0 {
+			rootID = id
+		}
+		if rootID <= 0 {
+			continue
+		}
+		if _, ok := seen[rootID]; ok {
+			continue
+		}
+		seen[rootID] = struct{}{}
+		roots = append(roots, rootID)
+	}
+	return roots
+}
+
+func currentCategoryIDsForSearch(search model.FilmIndex) []int64 {
+	ids := currentCategoryIDsBySourceKey(search.CategoryKey)
+	if len(ids) == 0 && search.Cid > 0 {
+		ids = []int64{support.ResolveCategoryID(search.Cid)}
+	}
+	return ids
+}
+
+func applySameCurrentRootCategoryFilter(query *gorm.DB, search model.FilmIndex) *gorm.DB {
+	rootIDs := currentRootCategoryIDsForSearch(search)
+	if len(rootIDs) == 0 {
+		return query.Where("1 = 0")
+	}
+	rootQuery := db.Mdb.Where("1 = 0")
+	for _, rootID := range rootIDs {
+		rootQuery = rootQuery.Or(applyCategoryFieldFilter(db.Mdb.Model(&model.FilmIndex{}), "pid", rootID))
+	}
+	return query.Where(rootQuery)
+}
+
+func applySameCurrentCategoryFilter(query *gorm.DB, search model.FilmIndex) *gorm.DB {
+	categoryIDs := currentCategoryIDsForSearch(search)
+	if len(categoryIDs) == 0 {
+		return query.Where("1 = 0")
+	}
+	categoryQuery := db.Mdb.Where("1 = 0")
+	for _, categoryID := range categoryIDs {
+		categoryQuery = categoryQuery.Or(applyCategoryFieldFilter(db.Mdb.Model(&model.FilmIndex{}), "cid", categoryID))
+	}
+	return query.Where(categoryQuery)
+}
+
 func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
 	if len(categoryIDs) == 0 {
 		return nil
@@ -70,14 +153,41 @@ func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
 	return keys
 }
 
-func visibleChildCategoryIDs(rootID int64) []int64 {
-	if rootID <= 0 {
+func visibleDescendantCategoryIDs(categoryID int64) []int64 {
+	if categoryID <= 0 {
 		return nil
 	}
-	var ids []int64
-	db.Mdb.Model(&model.Category{}).
-		Where("pid = ? AND `show` = ?", rootID, true).
-		Pluck("id", &ids)
+	ids := make([]int64, 0)
+	queue := []int64{categoryID}
+	seen := map[int64]struct{}{categoryID: {}}
+	for len(queue) > 0 {
+		parentID := queue[0]
+		queue = queue[1:]
+
+		var children []model.Category
+		db.Mdb.Where("pid = ? AND `show` = ?", parentID, true).Order("sort ASC, id ASC").Find(&children)
+		for _, child := range children {
+			if child.Id <= 0 {
+				continue
+			}
+			if _, ok := seen[child.Id]; ok {
+				continue
+			}
+			seen[child.Id] = struct{}{}
+			ids = append(ids, child.Id)
+			queue = append(queue, child.Id)
+		}
+	}
+	return ids
+}
+
+func visibleCategoryAndDescendantIDs(categoryID int64) []int64 {
+	categoryID = support.ResolveCategoryID(categoryID)
+	if categoryID <= 0 {
+		return nil
+	}
+	ids := []int64{categoryID}
+	ids = append(ids, visibleDescendantCategoryIDs(categoryID)...)
 	return ids
 }
 
@@ -87,16 +197,14 @@ func categorySourceKeys(field string, id int64) []string {
 		return nil
 	}
 	if field == "cid" {
-		return sourceCategoryKeysByCategoryIDs([]int64{category.Id})
+		return sourceCategoryKeysByCategoryIDs(visibleCategoryAndDescendantIDs(category.Id))
 	}
 
 	rootID := category.Id
 	if category.Pid > 0 {
 		rootID = support.GetRootId(category.Id)
 	}
-	categoryIDs := []int64{rootID}
-	categoryIDs = append(categoryIDs, visibleChildCategoryIDs(rootID)...)
-	return sourceCategoryKeysByCategoryIDs(categoryIDs)
+	return sourceCategoryKeysByCategoryIDs(visibleCategoryAndDescendantIDs(rootID))
 }
 
 func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
@@ -108,8 +216,7 @@ func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
 	if category.Pid > 0 {
 		rootID = support.GetRootId(category.Id)
 	}
-	visibleCategoryIDs := []int64{rootID}
-	visibleCategoryIDs = append(visibleCategoryIDs, visibleChildCategoryIDs(rootID)...)
+	visibleCategoryIDs := visibleCategoryAndDescendantIDs(rootID)
 	return sourceCategoryKeysByCategoryIDs([]int64{rootID}), sourceCategoryKeysByCategoryIDs(visibleCategoryIDs)
 }
 
@@ -558,11 +665,7 @@ func queryRelatedCandidates(search model.FilmIndex, limit int, apply func(query 
 	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid != ?", search.Mid).
 		Where("deleted_at IS NULL")
-	if strings.TrimSpace(search.RootCategoryKey) != "" {
-		query = query.Where("root_category_key = ?", strings.TrimSpace(search.RootCategoryKey))
-	} else {
-		query = query.Where("pid = ?", search.Pid)
-	}
+	query = applySameCurrentRootCategoryFilter(query, search)
 	if apply != nil {
 		query = apply(query)
 	}
@@ -596,10 +699,7 @@ func loadRelatedCandidates(search model.FilmIndex, limit int) []model.FilmIndex 
 	}
 	if search.Cid > 0 {
 		list = appendUniqueRelatedCandidates(list, queryRelatedCandidates(search, cidLimit, func(query *gorm.DB) *gorm.DB {
-			if strings.TrimSpace(search.CategoryKey) != "" {
-				return query.Where("category_key = ?", strings.TrimSpace(search.CategoryKey))
-			}
-			return query.Where("cid = ?", search.Cid)
+			return applySameCurrentCategoryFilter(query, search)
 		}), seen, limit)
 	}
 	for _, tag := range tags {
@@ -807,11 +907,7 @@ func loadFallbackCandidates(search model.FilmIndex, limit int, exclude map[int64
 		Where("mid != ?", search.Mid).
 		Where("deleted_at IS NULL").
 		Where("update_stamp > ?", hotSince)
-	if strings.TrimSpace(search.RootCategoryKey) != "" {
-		pidHotQuery = pidHotQuery.Where("root_category_key = ?", strings.TrimSpace(search.RootCategoryKey))
-	} else {
-		pidHotQuery = pidHotQuery.Where("pid = ?", search.Pid)
-	}
+	pidHotQuery = applySameCurrentRootCategoryFilter(pidHotQuery, search)
 	if err := pidHotQuery.
 		Order("year DESC, hits DESC, mid DESC").
 		Limit(limit * 2).
@@ -827,11 +923,7 @@ func loadFallbackCandidates(search model.FilmIndex, limit int, exclude map[int64
 	pidQuery := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid != ?", search.Mid).
 		Where("deleted_at IS NULL")
-	if strings.TrimSpace(search.RootCategoryKey) != "" {
-		pidQuery = pidQuery.Where("root_category_key = ?", strings.TrimSpace(search.RootCategoryKey))
-	} else {
-		pidQuery = pidQuery.Where("pid = ?", search.Pid)
-	}
+	pidQuery = applySameCurrentRootCategoryFilter(pidQuery, search)
 	if err := pidQuery.
 		Order(latestUpdateOrderSQL).
 		Limit(limit * 2).
@@ -852,11 +944,7 @@ func buildRelatedMovieQuery(search model.FilmIndex, coreToken string, tags []str
 	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid != ?", search.Mid).
 		Where("deleted_at IS NULL")
-	if strings.TrimSpace(search.RootCategoryKey) != "" {
-		query = query.Where("root_category_key = ?", strings.TrimSpace(search.RootCategoryKey))
-	} else {
-		query = query.Where("pid = ?", search.Pid)
-	}
+	query = applySameCurrentRootCategoryFilter(query, search)
 
 	nameCondition := db.Mdb.Where("name LIKE ? OR sub_title LIKE ?", nameLike, nameLike)
 	for _, tag := range tags {
@@ -884,11 +972,7 @@ func getFallbackRelatedSearchInfos(search model.FilmIndex, page *dto.Page) []mod
 	query := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid != ?", search.Mid).
 		Where("deleted_at IS NULL")
-	if strings.TrimSpace(search.CategoryKey) != "" {
-		query = query.Where("category_key = ?", strings.TrimSpace(search.CategoryKey))
-	} else {
-		query = query.Where("cid = ?", search.Cid)
-	}
+	query = applySameCurrentCategoryFilter(query, search)
 	if err := query.
 		Order(latestUpdateOrderSQL).
 		Offset(getPageOffset(page)).
@@ -1097,7 +1181,6 @@ func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
 
 func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
 	query = ApplyCategoryFilter(query, st.Pid, st.Cid)
-	query = applyOriginalCategoryFilter(query, st.Pid, st.OriginalCategory)
 
 	if st.Year != "" {
 		query = applyYearTagFilter(query, st.Pid, "Year", st.Year)

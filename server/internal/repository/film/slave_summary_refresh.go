@@ -58,10 +58,7 @@ func (s *slavePlaySummaryRefreshScheduler) schedule(sourceID string, midSet map[
 	for mid := range midSet {
 		state.pending[mid] = struct{}{}
 	}
-	pendingCount := len(state.pending)
 	s.mu.Unlock()
-
-	log.Printf("[SlavePlaySummaryRefresh] 入队 source=%s, added_mid=%d, pending_mid=%d, start_worker=%t", sourceID, len(midSet), pendingCount, false)
 }
 
 func (s *slavePlaySummaryRefreshScheduler) flush(sourceID string) error {
@@ -75,7 +72,6 @@ func (s *slavePlaySummaryRefreshScheduler) flush(sourceID string) error {
 		state := s.states[sourceID]
 		if state == nil {
 			s.mu.Unlock()
-			log.Printf("[SlavePlaySummaryRefresh] Flush跳过 source=%s, reason=no_state", sourceID)
 			return nil
 		}
 		if state.flushing {
@@ -89,16 +85,13 @@ func (s *slavePlaySummaryRefreshScheduler) flush(sourceID string) error {
 		}
 		if len(state.pending) == 0 {
 			s.mu.Unlock()
-			log.Printf("[SlavePlaySummaryRefresh] Flush跳过 source=%s, reason=no_pending", sourceID)
 			return nil
 		}
 		pending := state.pending
-		pendingCount := len(pending)
 		state.pending = make(map[int64]struct{})
 		state.flushing = true
 		s.mu.Unlock()
 
-		log.Printf("[SlavePlaySummaryRefresh] Flush请求 source=%s, pending_mid=%d, running=%t, start_worker=%t", sourceID, pendingCount, false, true)
 		err := flushSlavePlaySummaryRefreshSource(sourceID, pending)
 		s.finishFlush(sourceID, err)
 		return err

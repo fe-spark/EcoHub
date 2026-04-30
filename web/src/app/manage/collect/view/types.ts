@@ -7,6 +7,7 @@ export interface FilmSource {
   grade: number;
   interval: number;
   cd?: number;
+  lastCollectTime?: string;
   progress?: CollectProgress | null;
 }
 

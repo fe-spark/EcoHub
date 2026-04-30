@@ -145,7 +145,6 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	}
 	params.Pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	params.Cid, _ = strconv.ParseInt(cidStr, 10, 64)
-	params.OriginalCategory = strings.TrimSpace(c.DefaultQuery("OriginalCategory", ""))
 	params.Plot = c.DefaultQuery("Plot", "")
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
@@ -182,14 +181,13 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 		"list":   list,
 		"search": searchTags,
 		"params": map[string]string{
-			"Pid":              pidStr,
-			"Category":         cidStr,
-			"OriginalCategory": params.OriginalCategory,
-			"Plot":             params.Plot,
-			"Area":             params.Area,
-			"Language":         params.Language,
-			"Year":             yStr,
-			"Sort":             params.Sort,
+			"Pid":      pidStr,
+			"Category": cidStr,
+			"Plot":     params.Plot,
+			"Area":     params.Area,
+			"Language": params.Language,
+			"Year":     yStr,
+			"Sort":     params.Sort,
 		},
 		"page": page,
 	}, "分类影片数据获取成功", c)

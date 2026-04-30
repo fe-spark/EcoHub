@@ -209,6 +209,7 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 		}
 
 		sourceTypeToCategory := make(map[int64]int64, len(plans))
+		sourceTypeToChildrenParentCategory := make(map[int64]int64, len(plans))
 		sourceTypeToDisplayKey := make(map[int64]string, len(plans))
 		claimedCategoryIDs := make(map[int64]struct{}, len(plans))
 		seenSourceType := make(map[int64]struct{}, len(plans))
@@ -220,15 +221,44 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 			normalizedName := normalizeCategoryPlanName(plan)
 
 			pid := int64(0)
+			parentDisplayKey := sourceTypeToDisplayKey[plan.ParentSourceTypeId]
 			if plan.ParentSourceTypeId > 0 {
-				parentId, ok := sourceTypeToCategory[plan.ParentSourceTypeId]
+				parentId, ok := sourceTypeToChildrenParentCategory[plan.ParentSourceTypeId]
 				if !ok {
 					return fmt.Errorf("来源父分类不存在: %d", plan.ParentSourceTypeId)
 				}
 				pid = parentId
+
+				rawName := strings.TrimSpace(plan.Name)
+				subName := support.NormalizeSubCategoryName(rawName)
+				if subName != "" && subName != rawName {
+					subStableKey := buildDisplayCategoryStableKey(pid, subName, parentDisplayKey)
+					subCategory, err := ensureDisplayCategoryTx(tx, currentMap, stableKeyToCategory, categoryByParentName, pid, subName, subStableKey, plan.Sort, preserveBusinessFields)
+					if err != nil {
+						return err
+					}
+					claimedCategoryIDs[subCategory.Id] = struct{}{}
+					pid = subCategory.Id
+					parentDisplayKey = subCategory.StableKey
+					normalizedName = rawName
+				}
+			} else {
+				rawName := strings.TrimSpace(plan.Name)
+				rootName := support.NormalizeRootCategoryName(rawName)
+				if rootName != "" && rootName != rawName {
+					rootStableKey := buildDisplayCategoryStableKey(0, rootName, "")
+					rootCategory, err := ensureDisplayCategoryTx(tx, currentMap, stableKeyToCategory, categoryByParentName, 0, rootName, rootStableKey, plan.Sort, preserveBusinessFields)
+					if err != nil {
+						return err
+					}
+					claimedCategoryIDs[rootCategory.Id] = struct{}{}
+					pid = rootCategory.Id
+					parentDisplayKey = rootCategory.StableKey
+					normalizedName = rawName
+				}
 			}
 
-			stableKey := buildDisplayCategoryStableKey(pid, normalizedName, sourceTypeToDisplayKey[plan.ParentSourceTypeId])
+			stableKey := buildDisplayCategoryStableKey(pid, normalizedName, parentDisplayKey)
 			if stableKey == "" {
 				return fmt.Errorf("来源分类稳定标识生成失败: %d", plan.SourceTypeId)
 			}
@@ -256,6 +286,11 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				sourceTypeToCategory[plan.SourceTypeId] = existingCategory.Id
 				sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
 				claimedCategoryIDs[existingCategory.Id] = struct{}{}
+				if plan.ParentSourceTypeId == 0 && pid > 0 {
+					sourceTypeToChildrenParentCategory[plan.SourceTypeId] = pid
+				} else {
+					sourceTypeToChildrenParentCategory[plan.SourceTypeId] = existingCategory.Id
+				}
 				continue
 			}
 
@@ -263,6 +298,11 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				sourceTypeToCategory[plan.SourceTypeId] = existingCategory.Id
 				sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
 				claimedCategoryIDs[existingCategory.Id] = struct{}{}
+				if plan.ParentSourceTypeId == 0 && pid > 0 {
+					sourceTypeToChildrenParentCategory[plan.SourceTypeId] = pid
+				} else {
+					sourceTypeToChildrenParentCategory[plan.SourceTypeId] = existingCategory.Id
+				}
 				continue
 			}
 
@@ -311,6 +351,11 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 			claimedCategoryIDs[categoryId] = struct{}{}
 			sourceTypeToCategory[plan.SourceTypeId] = categoryId
 			sourceTypeToDisplayKey[plan.SourceTypeId] = stableKey
+			if plan.ParentSourceTypeId == 0 && pid > 0 {
+				sourceTypeToChildrenParentCategory[plan.SourceTypeId] = pid
+			} else {
+				sourceTypeToChildrenParentCategory[plan.SourceTypeId] = categoryId
+			}
 		}
 
 		if preserveBusinessFields {
@@ -339,6 +384,9 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 			staleCategoryIDs := make([]int64, 0)
 			for categoryId := range existingCategoryIDs {
 				if _, ok := activeCategoryIDs[categoryId]; ok {
+					continue
+				}
+				if _, ok := claimedCategoryIDs[categoryId]; ok {
 					continue
 				}
 				staleCategoryIDs = append(staleCategoryIDs, categoryId)
@@ -398,8 +446,8 @@ func loadSourceCategoryPlacementsBySourceIDs(sourceIDs []string) (map[string][]s
 }
 
 func RefreshFutureCategoryMappingsFromSourceCategories() error {
-	// 这里只刷新 categories/category_mappings/cacheSourceMap，不回刷已经固化的历史 film_index。
-	// 历史影片在查询时通过最新来源映射自然归入新展示分组。
+	// 这里只刷新 categories/category_mappings/cacheSourceMap，不回写资源数据。
+	// 已采集影片在查询时通过最新来源映射自然归入当前展示分组。
 	var sourceIDs []string
 	if err := db.Mdb.Model(&model.FilmSource{}).Where("state = ? AND grade = ?", true, model.MasterCollect).Pluck("id", &sourceIDs).Error; err != nil {
 		return err
@@ -420,7 +468,18 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	RefreshCategoryCache()
 	ReloadMappingRules()
 	touchCategoryVersion()
+	support.TouchSearchTagsVersion()
+	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	ClearIndexPageCache()
+	clearProvideListCache()
 	return nil
+}
+
+func clearProvideListCache() {
+	iter := db.Rdb.Scan(db.Cxt, 0, config.TVBoxList+":*", config.MaxScanCount).Iterator()
+	for iter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, iter.Val())
+	}
 }
 
 func GetSourceCategoryTree(sourceId string) (*model.CategoryTree, error) {
@@ -501,6 +560,44 @@ func normalizeCategoryPlanName(plan sourceCategoryPlacement) string {
 
 func categoryParentNameKey(pid int64, name string) string {
 	return fmt.Sprintf("%d:%s", pid, strings.TrimSpace(name))
+}
+
+func ensureDisplayCategoryTx(tx *gorm.DB, currentMap map[int64]model.Category, stableKeyToCategory map[string]model.Category, categoryByParentName map[string]model.Category, pid int64, name string, stableKey string, sort int, preserveBusinessFields bool) (model.Category, error) {
+	if category, ok := categoryByParentName[categoryParentNameKey(pid, name)]; ok {
+		updates := map[string]any{
+			"pid":        pid,
+			"name":       name,
+			"stable_key": stableKey,
+		}
+		if !preserveBusinessFields {
+			updates["sort"] = sort
+			updates["show"] = true
+			updates["alias"] = ""
+		}
+		if err := tx.Model(&model.Category{}).Where("id = ?", category.Id).Updates(updates).Error; err != nil {
+			return model.Category{}, err
+		}
+		category.Pid = pid
+		category.Name = name
+		category.StableKey = stableKey
+		currentMap[category.Id] = category
+		stableKeyToCategory[stableKey] = category
+		categoryByParentName[categoryParentNameKey(pid, name)] = category
+		return category, nil
+	}
+
+	if category, ok := stableKeyToCategory[stableKey]; ok {
+		return category, nil
+	}
+
+	category := model.Category{Pid: pid, Name: name, StableKey: stableKey, Show: true, Sort: sort}
+	if err := tx.Create(&category).Error; err != nil {
+		return model.Category{}, err
+	}
+	currentMap[category.Id] = category
+	stableKeyToCategory[stableKey] = category
+	categoryByParentName[categoryParentNameKey(pid, name)] = category
+	return category, nil
 }
 
 func buildDisplayCategoryStableKey(pid int64, name string, parentKey string) string {
@@ -671,20 +768,10 @@ func GetActiveCategoryTree() model.CategoryTree {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 
-	// 2. 获取活跃的 Pid (MainCategory) 和 Cid (Category)
-	var activeCids []int64
-	db.Mdb.Table(model.TableFilmIndex).Distinct("cid").Pluck("cid", &activeCids)
-	activeCidMap := make(map[int64]bool)
-	for _, id := range activeCids {
-		activeCidMap[id] = true
-	}
-
-	var activePids []int64
-	db.Mdb.Table(model.TableFilmIndex).Distinct("pid").Pluck("pid", &activePids)
-	activePidMap := make(map[int64]bool)
-	for _, id := range activePids {
-		activePidMap[id] = true
-	}
+	// 2. 基于当前 category_mappings 和资源来源分类 key 判断活跃分类。
+	// pid/cid 是写入时快照，规则合并或拆分后不能再作为活跃分类真源。
+	activeCategoryMap := loadActiveCategoryIDsFromCurrentMappings()
+	activeVisibleMap := buildActiveCategoryAncestorMap(activeCategoryMap)
 
 	// 3. 构建树
 	var allList []model.Category
@@ -713,16 +800,13 @@ func GetActiveCategoryTree() model.CategoryTree {
 		nodes[c.Id] = node
 	}
 
-	// 第二遍：处理子类并更新父大类的活跃状态
+	// 第二遍：按活跃分类及其祖先关系挂载整棵展示树。
 	for _, c := range allList {
-		if activeCidMap[c.Id] {
-			if c.Pid == 0 {
-				// 本身就是大类，直接标记活跃
-				activePidMap[c.Id] = true
-			} else if parent, ok := nodes[c.Pid]; ok {
-				parent.Children = append(parent.Children, nodes[c.Id])
-				activePidMap[c.Pid] = true
-			}
+		if !activeVisibleMap[c.Id] || c.Pid == 0 {
+			continue
+		}
+		if parent, ok := nodes[c.Pid]; ok && activeVisibleMap[c.Pid] {
+			parent.Children = append(parent.Children, nodes[c.Id])
 		}
 	}
 
@@ -732,7 +816,7 @@ func GetActiveCategoryTree() model.CategoryTree {
 			continue
 		}
 		node := nodes[c.Id]
-		if activePidMap[c.Id] || len(node.Children) > 0 {
+		if activeVisibleMap[c.Id] {
 			root.Children = append(root.Children, node)
 		}
 	}
@@ -744,6 +828,70 @@ func GetActiveCategoryTree() model.CategoryTree {
 	}
 
 	return root
+}
+
+func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
+	active := make(map[int64]bool)
+	filmCategoryKeys := loadFilmCategorySourceKeys()
+	if len(filmCategoryKeys) == 0 {
+		return active
+	}
+
+	var mappings []model.CategoryMapping
+	if err := db.Mdb.Find(&mappings).Error; err != nil {
+		return active
+	}
+	for _, mapping := range mappings {
+		key := support.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
+		if key == "" || !filmCategoryKeys[key] || mapping.CategoryId <= 0 {
+			continue
+		}
+		active[mapping.CategoryId] = true
+	}
+	return active
+}
+
+func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]bool {
+	visible := make(map[int64]bool, len(activeCategoryMap))
+	for categoryID := range activeCategoryMap {
+		currentID := categoryID
+		for currentID > 0 {
+			if visible[currentID] {
+				break
+			}
+			visible[currentID] = true
+			currentID = support.GetParentId(currentID)
+		}
+	}
+	return visible
+}
+
+func loadFilmCategorySourceKeys() map[string]bool {
+	keys := make(map[string]bool)
+	var categoryKeys []string
+	db.Mdb.Model(&model.FilmIndex{}).
+		Distinct("category_key").
+		Where("category_key <> '' AND category_key IS NOT NULL").
+		Pluck("category_key", &categoryKeys)
+	for _, key := range categoryKeys {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys[key] = true
+		}
+	}
+
+	var rootKeys []string
+	db.Mdb.Model(&model.FilmIndex{}).
+		Distinct("root_category_key").
+		Where("root_category_key <> '' AND root_category_key IS NOT NULL").
+		Pluck("root_category_key", &rootKeys)
+	for _, key := range rootKeys {
+		key = strings.TrimSpace(key)
+		if key != "" {
+			keys[key] = true
+		}
+	}
+	return keys
 }
 
 func isValidActiveCategoryTree(tree model.CategoryTree) bool {

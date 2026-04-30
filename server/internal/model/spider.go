@@ -120,7 +120,8 @@ type CollectProgress struct {
 
 type FilmSourceListItem struct {
 	FilmSource
-	Progress *CollectProgress `json:"progress,omitempty"`
+	LastCollectTime *time.Time       `json:"lastCollectTime,omitempty"`
+	Progress        *CollectProgress `json:"progress,omitempty"`
 }
 
 type Option struct {

@@ -50,6 +50,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd ?? 24),
+    lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
   };
 }
@@ -81,14 +82,25 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
+  const runningCollectIds = useMemo(
+    () => siteList.filter((item) => item.progress?.status === "running").map((item) => item.id),
+    [siteList],
+  );
+
+  const startingCollectIds = useMemo(
+    () => siteList.filter((item) => item.progress?.status === "starting").map((item) => item.id),
+    [siteList],
+  );
+
   const stats = useMemo(
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      running: activeCollectIds.length,
+      running: runningCollectIds.length,
+      waiting: startingCollectIds.length,
       masters: siteList.filter((item) => item.grade === 0).length,
     }),
-    [activeCollectIds.length, siteList],
+    [runningCollectIds.length, siteList, startingCollectIds.length],
   );
 
   const masterSite = useMemo(
@@ -395,6 +407,8 @@ const masterStatus = useMemo(() => {
 
   const columns = createCollectTableColumns({
     activeCollectIds,
+    runningCollectIds,
+    startingCollectIds,
     onUpdateItem: updateSiteListItem,
     onChangeSourceState: (record) => void changeSourceState(record),
     onStartTask: (record) => void startTask(record),
