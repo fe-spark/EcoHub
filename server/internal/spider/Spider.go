@@ -1215,7 +1215,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 							return
 						}
 						recordPageFailure(page, "enqueue", submitErr)
+						continue
 					}
+					recordSuccess()
 				}
 			}
 		}()
