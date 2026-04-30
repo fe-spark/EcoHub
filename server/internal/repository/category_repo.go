@@ -470,6 +470,7 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	touchCategoryVersion()
 	support.TouchSearchTagsVersion()
 	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)
 	ClearIndexPageCache()
 	clearProvideListCache()
 	return nil

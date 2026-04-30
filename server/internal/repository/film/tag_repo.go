@@ -133,17 +133,22 @@ func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
 func baseSearchTagFactQuery(st model.SearchTagsVO) *gorm.DB {
 	st = normalizeSearchTagsVO(st)
 	query := db.Mdb.Model(&model.FilmIndex{})
-	return ApplyCategoryFilter(query, st.Pid, st.Cid)
+	// 筛选项不联动：选项统计固定在当前一级分类内；列表查询仍在 BuildFilmIndexQueryByTags 中完整应用所有筛选条件。
+	return ApplyCategoryFilter(query, st.Pid, 0)
 }
 
 func searchTagItemsByColumn(st model.SearchTagsVO, tagType string, column string) []model.SearchTagItem {
+	return searchTagItemsByColumnFromQuery(baseSearchTagFactQuery(st), tagType, column)
+}
+
+func searchTagItemsByColumnFromQuery(query *gorm.DB, tagType string, column string) []model.SearchTagItem {
 	type tagCount struct {
 		Value string
 		Score int64
 	}
 
 	var rows []tagCount
-	if err := baseSearchTagFactQuery(st).
+	if err := query.
 		Select(fmt.Sprintf("%s AS value, COUNT(*) AS score", column)).
 		Where(hasTextValue(column)).
 		Group(column).
@@ -164,13 +169,17 @@ func searchTagItemsByColumn(st model.SearchTagsVO, tagType string, column string
 }
 
 func searchYearTagItems(st model.SearchTagsVO) []model.SearchTagItem {
+	return searchYearTagItemsFromQuery(baseSearchTagFactQuery(st))
+}
+
+func searchYearTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
 	type yearCount struct {
 		Value int64
 		Score int64
 	}
 
 	var rows []yearCount
-	if err := baseSearchTagFactQuery(st).
+	if err := query.
 		Select("year AS value, COUNT(*) AS score").
 		Where("year > 0").
 		Group("year").
@@ -188,8 +197,12 @@ func searchYearTagItems(st model.SearchTagsVO) []model.SearchTagItem {
 }
 
 func searchPlotTagItems(st model.SearchTagsVO) []model.SearchTagItem {
+	return searchPlotTagItemsFromQuery(baseSearchTagFactQuery(st))
+}
+
+func searchPlotTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
 	var classTags []string
-	if err := baseSearchTagFactQuery(st).
+	if err := query.
 		Where(hasTextValue("class_tag")).
 		Pluck("class_tag", &classTags).Error; err != nil {
 		return nil
@@ -220,16 +233,20 @@ func searchPlotTagItems(st model.SearchTagsVO) []model.SearchTagItem {
 }
 
 func loadSearchTagItemsByType(st model.SearchTagsVO) map[string][]model.SearchTagItem {
+	return loadSearchTagItemsByTypeFromQuery(st, baseSearchTagFactQuery(st))
+}
+
+func loadSearchTagItemsByTypeFromQuery(st model.SearchTagsVO, query *gorm.DB) map[string][]model.SearchTagItem {
 	st = normalizeSearchTagsVO(st)
 	itemsByType := make(map[string][]model.SearchTagItem)
 	if st.Pid <= 0 {
 		return itemsByType
 	}
 
-	itemsByType["Area"] = searchTagItemsByColumn(st, "Area", "area")
-	itemsByType["Language"] = searchTagItemsByColumn(st, "Language", "language")
-	itemsByType["Year"] = searchYearTagItems(st)
-	itemsByType["Plot"] = searchPlotTagItems(st)
+	itemsByType["Area"] = searchTagItemsByColumnFromQuery(query.Session(&gorm.Session{}), "Area", "area")
+	itemsByType["Language"] = searchTagItemsByColumnFromQuery(query.Session(&gorm.Session{}), "Language", "language")
+	itemsByType["Year"] = searchYearTagItemsFromQuery(query.Session(&gorm.Session{}))
+	itemsByType["Plot"] = searchPlotTagItemsFromQuery(query.Session(&gorm.Session{}))
 	return itemsByType
 }
 
