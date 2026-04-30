@@ -1,4 +1,7 @@
 import type { NextConfig } from "next";
+import os from "os";
+
+const cpuCount = Math.max(1, Math.min(4, os.cpus().length - 1));
 
 const apiUrl = process.env.API_URL?.trim();
 
@@ -8,9 +11,6 @@ if (!apiUrl) {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  typescript: {
-    ignoreBuildErrors: true,
-  },
   env: {
     API_URL: apiUrl,
   },
@@ -29,6 +29,10 @@ const nextConfig: NextConfig = {
         as: "*.module.css",
       },
     },
+  },
+  experimental: {
+    // 自动获取 CPU 核心数量进行构建并行化
+    cpus: cpuCount,
   },
 };
 
