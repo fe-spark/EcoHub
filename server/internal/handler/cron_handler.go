@@ -59,6 +59,9 @@ func (h *CronHandler) FilmCronUpdate(c *gin.Context) {
 		return
 	}
 	task.Spec = spec
+	if remark := strings.TrimSpace(t.Remark); remark != "" {
+		task.Remark = remark
+	}
 	if err := service.CronSvc.UpdateFilmCron(task); err != nil {
 		dto.Failed(fmt.Sprint("更新失败: ", err.Error()), c)
 		return

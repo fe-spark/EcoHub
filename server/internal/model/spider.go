@@ -77,6 +77,15 @@ type FailureRecord struct {
 	RetryCount int    `json:"retryCount"` // 重试累计次数
 }
 
+const (
+	// FailureRecordStatusPending 等待后续定时重试。
+	FailureRecordStatusPending = 1
+	// FailureRecordStatusSuccess 本次重试已成功，不再进入后续定时队列。
+	FailureRecordStatusSuccess = 0
+	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
+	FailureRecordStatusFailed = 2
+)
+
 func (fr FailureRecord) TableName() string {
 	return "failure_records"
 }

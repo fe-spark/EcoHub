@@ -181,7 +181,9 @@ func (s *InitService) CollectCrontabInit() {
 
 func (s *InitService) registerTask(task model.FilmCollectTask) {
 	if !task.State {
-		repository.UpdateFilmTask(task)
+		if err := repository.UpdateFilmTask(task); err != nil {
+			log.Println("UpdateFilmTask Error: ", err)
+		}
 		return
 	}
 
@@ -200,26 +202,28 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 	if err == nil {
 		task.Cid = cid
 		spider.RegisterTaskCid(task.Id, task.Cid)
-		repository.UpdateFilmTask(task)
+		if err := repository.UpdateFilmTask(task); err != nil {
+			log.Println("UpdateFilmTask Error: ", err)
+		}
 	}
 }
 
 func (s *InitService) createDefaultTasks() {
 	task := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
-		Model: 0, State: false, Remark: fmt.Sprintf("每20分钟自动采集已启用站点最近 %d 小时内更新的影片", config.DefaultUpdateTime),
+		Model: 0, State: false, Remark: "自动采集已启用站点更新的影片",
 	}
 	s.registerTask(task)
 
 	recoverTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryWeekSpec,
-		Model: 2, State: false, Remark: "每周日凌晨4点清理采集失败的记录",
+		Model: 2, State: false, Remark: "清理采集失败记录",
 	}
 	s.registerTask(recoverTask)
 
 	orphanTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryDaySpec,
-		Model: 3, State: false, Remark: "每天凌晨0点清理无主影片的孤儿播放列表",
+		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
 	s.registerTask(orphanTask)
 }

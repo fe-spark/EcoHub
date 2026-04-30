@@ -96,8 +96,8 @@ const (
 
 	// DefaultUpdateSpec 每20分钟执行一次
 	DefaultUpdateSpec = "0 */20 * * * ?"
-	// EveryWeekSpec 每周日凌晨4点更新一次
-	EveryWeekSpec = "0 0 4 * * 0"
+	// EveryWeekSpec 每天凌晨4点执行一次
+	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
 	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片

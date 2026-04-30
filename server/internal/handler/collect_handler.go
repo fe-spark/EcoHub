@@ -292,9 +292,9 @@ func (h *CollectHandler) CollectRecoverAll(c *gin.Context) {
 	dto.SuccessOnlyMsg("恢复任务已成功开启!!!", c)
 }
 
-func (h *CollectHandler) ClearDoneRecord(c *gin.Context) {
-	service.CollectSvc.ClearDoneRecord()
-	dto.SuccessOnlyMsg("处理完成的记录信息已删除!!!", c)
+func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
+	service.CollectSvc.ClearRetriedRecords()
+	dto.SuccessOnlyMsg("已有重试结果的记录已删除", c)
 }
 
 func (h *CollectHandler) ClearAllRecord(c *gin.Context) {
