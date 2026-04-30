@@ -31,8 +31,7 @@ export default function CategoryRulePageView() {
       <Alert
         type="info"
         showIcon
-        message="规则立即刷新分类映射"
-        description="一级/二级规则用于把来源分类合并到目标展示分类；保存后会刷新分类树和来源映射，历史影片不重写、不重采集，查询时会按最新映射归入新分组。"
+        message="保存后会刷新展示分类和来源映射，不会重写历史影片。"
       />
 
       <RuleWorkspace ruleTotals={ruleTotals} onRuleTotalsChange={handleRuleTotalsChange} />

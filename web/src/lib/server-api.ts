@@ -33,13 +33,25 @@ export async function serverGet<T = any>(
   path: string,
   params?: Record<string, string | number | undefined>,
 ): Promise<ApiResponse<T>> {
-  const response = await fetch(buildApiUrl(path, params), {
+  const apiUrl = buildApiUrl(path, params);
+  const response = await fetch(apiUrl, {
     cache: "no-store",
   });
 
+  const body = await response.text();
   if (!response.ok) {
-    throw new Error(`服务端请求失败: ${response.status} ${response.statusText}`);
+    throw new Error(`服务端请求失败: ${response.status} ${response.statusText} ${body.slice(0, 200)}`.trim());
   }
 
-  return (await response.json()) as ApiResponse<T>;
+  if (!body.trim()) {
+    throw new Error(`服务端返回空响应: ${apiUrl}`);
+  }
+
+  try {
+    return JSON.parse(body) as ApiResponse<T>;
+  } catch (error) {
+    throw new Error(
+      `服务端返回非 JSON 响应: ${apiUrl}; ${error instanceof Error ? error.message : String(error)}; ${body.slice(0, 200)}`,
+    );
+  }
 }

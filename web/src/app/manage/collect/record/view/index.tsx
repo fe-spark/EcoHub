@@ -35,7 +35,24 @@ interface FailRecord {
   cause: string;
   status: number;
   retryCount: number;
+  CreatedAt: string;
   UpdatedAt: string;
+}
+
+const FAILURE_RECORD_STATUS = {
+  pending: 1,
+  success: 0,
+  failed: 2,
+} as const;
+
+function renderStatusTag(status: number) {
+  if (status === FAILURE_RECORD_STATUS.pending) {
+    return <Tag color="warning">待重试</Tag>;
+  }
+  if (status === FAILURE_RECORD_STATUS.success) {
+    return <Tag color="success">重试成功</Tag>;
+  }
+  return <Tag color="error">重试失败</Tag>;
 }
 
 export default function FailureRecordPageView() {
@@ -97,8 +114,8 @@ export default function FailureRecordPageView() {
     else message.error(resp.msg);
   };
 
-  const handleCleanDone = async () => {
-    const resp = await ApiPost("/manage/collect/record/clear/done", {});
+  const handleCleanResult = async () => {
+    const resp = await ApiPost("/manage/collect/record/clear/result", {});
     if (resp.code === 0) {
       message.success(resp.msg);
       getRecords();
@@ -159,12 +176,7 @@ export default function FailureRecordPageView() {
       title: "状态",
       dataIndex: "status",
       align: "center",
-      render: (v) =>
-        v === 1 ? (
-          <Tag color="warning">待重试</Tag>
-        ) : (
-          <Tag color="success">已处理</Tag>
-        ),
+      render: (v) => renderStatusTag(v),
     },
     {
       title: "重试次数",
@@ -173,8 +185,8 @@ export default function FailureRecordPageView() {
       render: (v) => <Tag color={v > 1 ? "volcano" : "default"}>{v || 1}</Tag>,
     },
     {
-      title: "执行时间",
-      dataIndex: "UpdatedAt",
+      title: "请求时间",
+      dataIndex: "CreatedAt",
       align: "center",
       render: (v) => dayjs(v).format("YYYY-MM-DD HH:mm:ss"),
     },
@@ -200,10 +212,10 @@ export default function FailureRecordPageView() {
 
   return (
     <div className={styles.pageBody}>
-      <ManagePageHeader
-        title="失败记录"
-        description="查看采集失败明细、快速重试异常任务，并统一清理已处理或全部失败记录。"
-      />
+        <ManagePageHeader
+          title="失败记录"
+          description="查看采集失败明细、快速重试异常任务，并统一清理已有重试结果或全部失败记录。"
+        />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
         <Select
@@ -268,7 +280,7 @@ export default function FailureRecordPageView() {
                   全部重试
                 </Button>
               </Popconfirm>
-              <Popconfirm title="确认清除已处理记录？" onConfirm={handleCleanDone}>
+              <Popconfirm title="确认清除已有重试结果的记录？" onConfirm={handleCleanResult}>
                 <Button
                   icon={<WarningOutlined />}
                   style={{
@@ -276,7 +288,7 @@ export default function FailureRecordPageView() {
                     borderColor: "var(--ant-color-warning)",
                   }}
                 >
-                  清除已处理
+                  清除重试结果
                 </Button>
               </Popconfirm>
               <Popconfirm title="确认清除所有记录？" onConfirm={handleCleanAll}>

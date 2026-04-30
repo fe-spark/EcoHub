@@ -1,26 +1,23 @@
 "use client";
 
 import React, { useState, useEffect, useCallback } from "react";
-import { Table, Tag, Switch, Button, Modal, Input, Form, Tooltip, Space } from "antd";
+import { Table, Tag, Switch, Button, Modal, Form, Tooltip, Space } from "antd";
 import { EditOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
-
-interface CronTask {
-  id: string;
-  cid: string;
-  spec: string;
-  remark: string;
-  model: number;
-  ids: string[];
-  time: number;
-  state: boolean;
-  preV?: string;
-  next?: string;
-}
+import EditScheduleForm from "./components/edit-schedule-form";
+import {
+  getTaskDescription,
+  getTaskScheduleText,
+  getTaskTypeText,
+  toTaskFormValues,
+  type CronTask,
+  buildCronSpec,
+  buildTaskDescription,
+} from "./utils/schedule";
 
 export default function CronManagePageView() {
   const [taskList, setTaskList] = useState<CronTask[]>([]);
@@ -29,6 +26,7 @@ export default function CronManagePageView() {
 
   const [editOpen, setEditOpen] = useState(false);
   const [form] = Form.useForm();
+  const editModel = Form.useWatch("model", form);
 
   const getTaskList = useCallback(async () => {
     setLoading(true);
@@ -62,7 +60,10 @@ export default function CronManagePageView() {
     form.resetFields();
     const resp = await ApiGet("/manage/cron/find", { id });
     if (resp.code === 0) {
-      form.setFieldsValue(resp.data);
+      const task = resp.data as CronTask;
+      form.setFieldsValue({
+        ...toTaskFormValues(task),
+      });
       setEditOpen(true);
     } else {
       message.error(resp.msg);
@@ -72,7 +73,8 @@ export default function CronManagePageView() {
   const onEditFinish = async (values: any) => {
     const resp = await ApiPost("/manage/cron/update", {
       id: values.id,
-      spec: values.spec,
+      spec: buildCronSpec(values),
+      remark: buildTaskDescription(values),
     });
     if (resp.code === 0) {
       message.success(resp.msg);
@@ -97,22 +99,21 @@ export default function CronManagePageView() {
       dataIndex: "remark",
       align: "left",
       ellipsis: true,
+      render: (_, record) => getTaskDescription(record),
     },
     {
       title: "任务类型",
       dataIndex: "model",
       align: "center",
       render: (v) => (
-        <Tag color="cyan">
-          {v === 0
-            ? "自动更新"
-            : v === 1
-              ? "自定义更新"
-              : v === 2
-                ? "采集重试"
-                : "孤儿清理"}
-        </Tag>
+        <Tag color="cyan">{getTaskTypeText(v)}</Tag>
       ),
+    },
+    {
+      title: "运行时间",
+      key: "schedule",
+      align: "center",
+      render: (_, record) => <Tag>{getTaskScheduleText(record)}</Tag>,
     },
     {
       title: "是否启用",
@@ -145,7 +146,7 @@ export default function CronManagePageView() {
       align: "center",
       fixed: "right",
       render: (_, record) => (
-        <Tooltip title="修改时间">
+        <Tooltip title="修改运行时间">
           <Button
             type="primary"
             shape="circle"
@@ -182,26 +183,14 @@ export default function CronManagePageView() {
       />
 
       <Modal
-        title="修改定时任务时间"
+        title="修改运行时间"
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={() => form.validateFields().then(onEditFinish)}
         width={560}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="id" hidden>
-            <Input />
-          </Form.Item>
-          <Form.Item label="任务标识" name="id">
-            <Input disabled />
-          </Form.Item>
-          <Form.Item
-            label="执行时间"
-            name="spec"
-            rules={[{ required: true, message: "请输入Cron表达式" }]}
-          >
-            <Input placeholder="例如: 0 */20 * * * ? (每20分钟执行一次)" />
-          </Form.Item>
+          <EditScheduleForm editModel={Number(editModel)} />
         </Form>
       </Modal>
     </div>
