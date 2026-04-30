@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/url"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -24,7 +26,76 @@ type ProvideService struct{}
 
 var ProvideSvc = new(ProvideService)
 
+func currentProvideCategoryIDsBySourceKey(sourceKey string) []int64 {
+	sourceKey = strings.TrimSpace(sourceKey)
+	if sourceKey == "" {
+		return nil
+	}
+
+	var mappings []model.CategoryMapping
+	if err := db.Mdb.Find(&mappings).Error; err != nil {
+		log.Printf("currentProvideCategoryIDsBySourceKey Error: %v", err)
+		return nil
+	}
+
+	ids := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, mapping := range mappings {
+		if support.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey || mapping.CategoryId <= 0 {
+			continue
+		}
+		if _, ok := seen[mapping.CategoryId]; ok {
+			continue
+		}
+		seen[mapping.CategoryId] = struct{}{}
+		ids = append(ids, mapping.CategoryId)
+	}
+	return ids
+}
+
+func resolveProvideCurrentCategoryID(filmIndex model.FilmIndex) int64 {
+	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.CategoryKey); len(ids) > 0 {
+		return ids[0]
+	}
+	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.RootCategoryKey); len(ids) > 0 {
+		return ids[0]
+	}
+	if filmIndex.Cid > 0 {
+		return repository.ResolveCategoryID(filmIndex.Cid)
+	}
+	if filmIndex.Pid > 0 {
+		return repository.ResolveCategoryID(filmIndex.Pid)
+	}
+	return 0
+}
+
+func resolveProvideCurrentRootCategoryID(filmIndex model.FilmIndex) int64 {
+	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.RootCategoryKey); len(ids) > 0 {
+		rootID := repository.GetRootId(ids[0])
+		if rootID > 0 {
+			return rootID
+		}
+		return ids[0]
+	}
+	if categoryID := resolveProvideCurrentCategoryID(filmIndex); categoryID > 0 {
+		rootID := repository.GetRootId(categoryID)
+		if rootID > 0 {
+			return rootID
+		}
+		return categoryID
+	}
+	return 0
+}
+
 func resolveProvideType(filmIndex model.FilmIndex) (int64, string) {
+	if categoryID := resolveProvideCurrentCategoryID(filmIndex); categoryID > 0 {
+		if name := repository.GetCategoryNameById(categoryID); name != "" {
+			return categoryID, name
+		}
+		if name := repository.GetMainCategoryName(categoryID); name != "" {
+			return categoryID, name
+		}
+	}
 	if filmIndex.Cid > 0 {
 		if name := repository.GetCategoryNameById(filmIndex.Cid); name != "" {
 			return filmIndex.Cid, name
@@ -404,7 +475,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		detail := model.FilmDetail{
 			VodID:       s.Mid,
 			TypeID:      typeID,
-			TypeID1:     s.Pid,
+			TypeID1:     resolveProvideCurrentRootCategoryID(s),
 			TypeName:    typeName,
 			VodName:     s.Name,
 			VodEn:       s.Initial,

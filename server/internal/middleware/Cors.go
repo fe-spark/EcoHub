@@ -3,6 +3,7 @@ package middleware
 import (
 	"log"
 	"net/http"
+	"server/internal/model/dto"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,6 +36,10 @@ func Cors() gin.HandlerFunc {
 		defer func() {
 			if err := recover(); err != nil {
 				log.Printf("Panic info is: %v\n", err)
+				if !c.Writer.Written() {
+					dto.CustomResult(http.StatusInternalServerError, dto.FAILED, nil, "服务端异常", c)
+				}
+				c.Abort()
 			}
 		}()
 

@@ -1108,11 +1108,11 @@ func applyYearTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where("year <= 0 OR year IS NULL")
+		othersQuery := db.Mdb.Where("year <= 0 OR year IS NULL")
 		if len(topVals) > 0 {
-			query = query.Or("year > 0 AND year NOT IN ?", topVals)
+			othersQuery = othersQuery.Or("year > 0 AND year NOT IN ?", topVals)
 		}
-		return query
+		return query.Where(othersQuery)
 	case model.TagUnknownValue:
 		return query.Where("year <= 0 OR year IS NULL")
 	default:
@@ -1124,14 +1124,14 @@ func applyTextTagFilter(query *gorm.DB, pid int64, fieldName string, column stri
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where(hasTextValue(column))
+		othersQuery := db.Mdb.Where(hasTextValue(column))
 		if len(topVals) > 0 {
-			query = query.Where(fmt.Sprintf("%s NOT IN ?", column), topVals)
+			othersQuery = othersQuery.Where(fmt.Sprintf("%s NOT IN ?", column), topVals)
 		}
 		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
-			query = query.Or(fmt.Sprintf("%s = ?", column), abnormal)
+			othersQuery = othersQuery.Or(fmt.Sprintf("%s = ?", column), abnormal)
 		}
-		return query
+		return query.Where(othersQuery)
 	case model.TagUnknownValue:
 		return query.Where(isUnknownTextValue(column))
 	default:
@@ -1143,18 +1143,18 @@ func applyPlotTagFilter(query *gorm.DB, pid int64, fieldName string, value strin
 	switch value {
 	case model.TagOthersValue:
 		topVals := GetTopTagValues(pid, fieldName)
-		query = query.Where(hasTextValue("class_tag"))
+		othersQuery := db.Mdb.Where(hasTextValue("class_tag"))
 		excludeCount := len(topVals)
 		if excludeCount > maxPlotExcludes {
 			excludeCount = maxPlotExcludes
 		}
 		for i := 0; i < excludeCount; i++ {
-			query = query.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%v%%", topVals[i]))
+			othersQuery = othersQuery.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%v%%", topVals[i]))
 		}
 		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
-			query = query.Or("class_tag LIKE ?", fmt.Sprintf("%%%v%%", abnormal))
+			othersQuery = othersQuery.Or("class_tag LIKE ?", fmt.Sprintf("%%%v%%", abnormal))
 		}
-		return query
+		return query.Where(othersQuery)
 	case model.TagUnknownValue:
 		return query.Where(isUnknownTextValue("class_tag"))
 	default:

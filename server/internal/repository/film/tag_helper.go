@@ -62,7 +62,11 @@ func AppendStickySearchTag(items []model.SearchTagItem, sticky string, topCount 
 	}
 	for _, item := range items[topCount:] {
 		if item.Value == sticky {
-			return append(displayItems, item)
+			if len(displayItems) == 0 {
+				return []model.SearchTagItem{item}
+			}
+			displayItems[len(displayItems)-1] = item
+			return displayItems
 		}
 	}
 	return displayItems
@@ -99,6 +103,24 @@ func SortYearSearchTagItems(items []model.SearchTagItem) []model.SearchTagItem {
 	return sorted
 }
 
+func SortSearchTagItems(tagType string, items []model.SearchTagItem) []model.SearchTagItem {
+	if strings.EqualFold(tagType, "Year") {
+		return SortYearSearchTagItems(items)
+	}
+	if len(items) < 2 {
+		return items
+	}
+
+	sorted := append([]model.SearchTagItem(nil), items...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].Score != sorted[j].Score {
+			return sorted[i].Score > sorted[j].Score
+		}
+		return sorted[i].Value < sorted[j].Value
+	})
+	return sorted
+}
+
 func ParseSearchTagYear(value string) (int, bool) {
 	year, err := strconv.Atoi(strings.TrimSpace(value))
 	if err != nil || year <= 0 {
@@ -111,6 +133,9 @@ func isAbnormalSearchTagItem(tagType string, item model.SearchTagItem) bool {
 	value := strings.TrimSpace(item.Value)
 	name := strings.TrimSpace(item.Name)
 	if value == "" || name == "" {
+		return true
+	}
+	if isOthersSearchTagValue(value) || isOthersSearchTagValue(name) {
 		return true
 	}
 
@@ -155,6 +180,15 @@ func isAbnormalTextTagValue(value string, minLen int, maxLen int) bool {
 	return false
 }
 
+func isOthersSearchTagValue(value string) bool {
+	switch strings.TrimSpace(value) {
+	case model.TagOthersValue, model.TagOthersName, "其它":
+		return true
+	default:
+		return false
+	}
+}
+
 func SplitSearchTagItems(tagType string, items []model.SearchTagItem) ([]model.SearchTagItem, []model.SearchTagItem) {
 	normalItems := make([]model.SearchTagItem, 0, len(items))
 	abnormalItems := make([]model.SearchTagItem, 0)
@@ -169,18 +203,22 @@ func SplitSearchTagItems(tagType string, items []model.SearchTagItem) ([]model.S
 }
 
 func FormatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string, includeOthers bool) []map[string]string {
-	normalItems, abnormalItems := SplitSearchTagItems(tagType, items)
-	items = normalItems
-	if strings.EqualFold(tagType, "Year") {
-		items = SortYearSearchTagItems(items)
-	}
+	return formatSearchTagItems(tagType, items, sticky, includeOthers, SearchTagDisplayLimit)
+}
 
-	topCount := SearchTagDisplayLimit
-	if len(items) < topCount {
-		topCount = len(items)
+func formatSearchTagItems(tagType string, items []model.SearchTagItem, sticky string, includeOthers bool, limit int) []map[string]string {
+	normalItems, abnormalItems := SplitSearchTagItems(tagType, items)
+	items = SortSearchTagItems(tagType, normalItems)
+
+	displayItems := items
+	if limit > 0 {
+		topCount := limit
+		if len(items) < topCount {
+			topCount = len(items)
+		}
+		displayItems = AppendStickySearchTag(items, sticky, topCount)
 	}
-	displayItems := AppendStickySearchTag(items, sticky, topCount)
-	hasMore := len(items) > SearchTagDisplayLimit
+	hasMore := limit > 0 && len(items) > limit
 	hasOthers := hasMore || len(abnormalItems) > 0 || includeOthers
 
 	tagStrs := make([]string, 0, len(displayItems))
