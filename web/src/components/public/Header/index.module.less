@@ -152,14 +152,31 @@
 }
 
 .navHomeItem {
-  color: var(--public-text-1);
+  color: var(--public-text-3);
   font-size: 14px;
   font-weight: 700;
   padding: 8px 12px;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--public-surface-2) 78%, rgba(255, 255, 255, 0.04));
+  background: transparent;
   white-space: nowrap;
   flex-shrink: 0;
+  transition: all 0.3s ease;
+
+  &:hover {
+    color: var(--public-text-1);
+    background: color-mix(in srgb, var(--public-surface-3) 82%, rgba(255, 255, 255, 0.04));
+  }
+}
+
+.navItemActive,
+.navHomeItemActive {
+  color: #faad14 !important;
+  background: rgba(250, 173, 20, 0.1) !important;
+  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.18);
+
+  &::after {
+    width: 100% !important;
+  }
 }
 
 .navScroller {
@@ -295,6 +312,16 @@
     border-color: rgba(250, 173, 20, 0.3);
     background: rgba(250, 173, 20, 0.08);
     box-shadow: 0 14px 26px rgba(0, 0, 0, 0.14);
+  }
+}
+
+.navCatalogItemActive {
+  border-color: rgba(250, 173, 20, 0.42);
+  background: rgba(250, 173, 20, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.12);
+
+  .navCatalogName {
+    color: #faad14;
   }
 }
 
@@ -598,6 +625,13 @@
     color: #faad14;
     border-color: rgba(250, 173, 20, 0.28);
   }
+}
+
+.mobileNavItemActive {
+  color: #faad14;
+  border-color: rgba(250, 173, 20, 0.38);
+  background: rgba(250, 173, 20, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.1);
 }
 
 @media (max-width: 520px) {

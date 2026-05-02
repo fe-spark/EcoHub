@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Button, Drawer, Empty, Input } from "antd";
 import {
   SearchOutlined,
@@ -40,6 +40,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
   const [desktopCatalogOpen, setDesktopCatalogOpen] = useState(false);
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const { message } = useAppMessage();
   const desktopCatalogRef = useRef<HTMLDivElement>(null);
@@ -83,6 +84,9 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
+  const activePid = pathname === "/filmClassify" ? searchParams.get("Pid") : null;
+  const isHomeActive = pathname === "/";
+  const isCategoryActive = (id: string) => activePid === id;
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -186,7 +190,10 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         {/* Navigation Area - Dynamic & Flexible */}
         <div className={styles.navArea} ref={desktopCatalogRef}>
           <nav className={styles.navLinks}>
-            <a onClick={() => router.push("/")} className={styles.navHomeItem}>
+            <a
+              onClick={() => router.push("/")}
+              className={`${styles.navHomeItem} ${isHomeActive ? styles.navHomeItemActive : ""}`}
+            >
               首页
             </a>
 
@@ -195,7 +202,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 <a
                   key={nav.id}
                   onClick={() => navigateToCategory(nav.id)}
-                  className={styles.navItem}
+                  className={`${styles.navItem} ${isCategoryActive(nav.id) ? styles.navItemActive : ""}`}
                 >
                   {nav.name}
                 </a>
@@ -224,7 +231,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 <button
                   key={nav.id}
                   type="button"
-                  className={styles.navCatalogItem}
+                  className={`${styles.navCatalogItem} ${isCategoryActive(nav.id) ? styles.navCatalogItemActive : ""}`}
                   onClick={() => navigateToCategory(nav.id)}
                 >
                   <span className={styles.navCatalogName}>{nav.name}</span>
@@ -279,13 +286,16 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         className={styles.mobileDrawer}
       >
         <div className={styles.mobileNav}>
-          <div className={styles.mobileNavItem} onClick={() => { router.push("/"); setMobileMenuVisible(false); }}>
+          <div
+            className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
+            onClick={() => { router.push("/"); setMobileMenuVisible(false); }}
+          >
             <HomeOutlined /> <span>首页</span>
           </div>
           {navList.map((nav) => (
             <div 
               key={nav.id} 
-              className={styles.mobileNavItem} 
+              className={`${styles.mobileNavItem} ${isCategoryActive(nav.id) ? styles.mobileNavItemActive : ""}`}
               onClick={() => navigateToCategory(nav.id)}
             >
               <FireOutlined /> <span>{nav.name}</span>
