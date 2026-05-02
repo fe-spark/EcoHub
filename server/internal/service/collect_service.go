@@ -49,27 +49,52 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 
 func getLastCollectTimeBySource(sources []model.FilmSource) map[string]*time.Time {
 	result := make(map[string]*time.Time, len(sources))
+	masterIDs := make([]string, 0, len(sources))
+	slaveIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
-		var last sql.NullTime
-		query := db.Mdb.Model(&model.FilmIndex{})
 		if source.Grade == model.SlaveCollect {
-			query = db.Mdb.Model(&model.MoviePlaylist{})
-		}
-		if err := query.Where("source_id = ?", source.Id).Select("MAX(updated_at)").Scan(&last).Error; err != nil {
-			log.Printf("GetLastCollectTimeBySource Error: source=%s err=%v", source.Id, err)
+			slaveIDs = append(slaveIDs, source.Id)
 			continue
 		}
-		if !last.Valid || last.Time.IsZero() {
-			continue
-		}
-		value := last.Time
-		result[source.Id] = &value
+		masterIDs = append(masterIDs, source.Id)
 	}
+	fillLastCollectTime(result, db.Mdb.Model(&model.FilmIndex{}), masterIDs)
+	fillLastCollectTime(result, db.Mdb.Model(&model.MoviePlaylist{}), slaveIDs)
 	return result
+}
+
+func fillLastCollectTime(result map[string]*time.Time, query *gorm.DB, sourceIDs []string) {
+	if len(sourceIDs) == 0 {
+		return
+	}
+	type lastCollectRow struct {
+		SourceID string       `gorm:"column:source_id"`
+		Last     sql.NullTime `gorm:"column:last_collect_time"`
+	}
+	var rows []lastCollectRow
+	if err := query.
+		Select("source_id, MAX(updated_at) AS last_collect_time").
+		Where("source_id IN ?", sourceIDs).
+		Group("source_id").
+		Scan(&rows).Error; err != nil {
+		log.Printf("GetLastCollectTimeBySource Error: err=%v", err)
+		return
+	}
+	for _, row := range rows {
+		if !row.Last.Valid || row.Last.Time.IsZero() {
+			continue
+		}
+		value := row.Last.Time
+		result[row.SourceID] = &value
+	}
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
 	return repository.FindCollectSourceById(id)
+}
+
+func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
+	return repository.GetEnabledCollectSourceList()
 }
 
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {

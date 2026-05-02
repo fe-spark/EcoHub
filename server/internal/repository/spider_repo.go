@@ -147,6 +147,16 @@ func GetCollectSourceListByGrade(grade model.SourceGrade) []model.FilmSource {
 	return list
 }
 
+// GetEnabledCollectSourceList 获取已启用采集站列表。
+func GetEnabledCollectSourceList() []model.FilmSource {
+	var list []model.FilmSource
+	if err := db.Mdb.Where("state = ?", true).Order("grade ASC").Find(&list).Error; err != nil {
+		log.Println("GetEnabledCollectSourceList Error:", err)
+		return nil
+	}
+	return list
+}
+
 // FindCollectSourceById 通过 Id 标识获取对应的资源站信息
 func FindCollectSourceById(id string) *model.FilmSource {
 	var fs model.FilmSource

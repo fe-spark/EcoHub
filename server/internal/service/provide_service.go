@@ -331,10 +331,10 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
 		return 1, 1, 0, []model.FilmList{}
 	}
-	// 1. 针对第一页的首页请求尝试 Redis 缓存 (依赖主动失效，TTL 设为 12 小时作为兜底)
+	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
-	if pg <= 1 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" && cid == 0 {
-		cacheKey = fmt.Sprintf("%s:%d:C%d:S%s:L%d", config.TVBoxList, t, cid, sort, limit)
+	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
+		cacheKey = fmt.Sprintf("%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, t, cid, pg, sort, limit)
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
 				Current   int

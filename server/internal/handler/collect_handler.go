@@ -224,10 +224,8 @@ func (h *CollectHandler) StopCollect(c *gin.Context) {
 
 func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 	var l []model.FilmTaskOptions
-	for _, v := range service.CollectSvc.GetFilmSourceList() {
-		if v.State {
-			l = append(l, model.FilmTaskOptions{Id: v.Id, Name: v.Name})
-		}
+	for _, v := range service.CollectSvc.GetEnabledFilmSources() {
+		l = append(l, model.FilmTaskOptions{Id: v.Id, Name: v.Name})
 	}
 	dto.Success(l, "影视源信息获取成功", c)
 }
