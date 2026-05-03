@@ -28,6 +28,15 @@ func ReloadMappingRules() {
 	support.ReloadMappingRules()
 }
 
+func ResetMappingRules() error {
+	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.MappingRule{}.TableName())).Error; err != nil {
+		return err
+	}
+	TouchRuleVersion()
+	ReloadMappingRules()
+	return nil
+}
+
 func TouchRuleVersion() {
 	support.TouchRuleVersion()
 }

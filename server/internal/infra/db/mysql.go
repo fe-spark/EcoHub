@@ -2,7 +2,9 @@ package db
 
 import (
 	"database/sql"
+	"log"
 	"server/internal/config"
+	"sync"
 	"time"
 
 	"gorm.io/driver/mysql"
@@ -13,7 +15,12 @@ import (
 
 var Mdb *gorm.DB
 
+var mysqlMu sync.Mutex
+
 func InitMysql() (err error) {
+	mysqlMu.Lock()
+	defer mysqlMu.Unlock()
+
 	userDsn := config.MysqlDsn
 	manageDsn := config.GetRootMysqlDsn()
 
@@ -37,7 +44,7 @@ func InitMysql() (err error) {
 	}
 
 	// 统一在数据库生命周期处理完成后，再建立业务连接池
-	Mdb, err = gorm.Open(mysql.New(mysql.Config{
+	newDB, err := gorm.Open(mysql.New(mysql.Config{
 		DSN:                       userDsn,
 		DefaultStringSize:         255,   //string类型字段默认长度
 		DisableDatetimePrecision:  true,  // 禁用 datetime 精度
@@ -55,18 +62,60 @@ func InitMysql() (err error) {
 		return err
 	}
 
-	sqlDB, err := Mdb.DB()
+	sqlDB, err := newDB.DB()
 	if err != nil {
 		return err
 	}
 
-	// 设置连接池
-	sqlDB.SetMaxIdleConns(10)                  // 最大空闲连接数
-	sqlDB.SetMaxOpenConns(50)                  // 最大打开连接数
-	sqlDB.SetConnMaxLifetime(time.Hour)        // 连接最大复用时间
-	sqlDB.SetConnMaxIdleTime(time.Minute * 10) // 空闲连接最大存活时间
+	// 前台读链路已切快照表，连接池保持保守上限，避免采集期把 MySQL 连接打满。
+	sqlDB.SetMaxIdleConns(5)
+	sqlDB.SetMaxOpenConns(20)
+	sqlDB.SetConnMaxLifetime(time.Minute * 30)
+	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
+	if err := sqlDB.Ping(); err != nil {
+		_ = sqlDB.Close()
+		return err
+	}
+
+	old := Mdb
+	Mdb = newDB
+	if old != nil {
+		if oldSQL, closeErr := old.DB(); closeErr == nil {
+			_ = oldSQL.Close()
+		}
+	}
 
 	return nil
+}
+
+func StartMysqlHealthCheck() {
+	go func() {
+		ticker := time.NewTicker(time.Second * 15)
+		defer ticker.Stop()
+		for range ticker.C {
+			mysqlMu.Lock()
+			current := Mdb
+			mysqlMu.Unlock()
+
+			if current == nil {
+				if err := InitMysql(); err != nil {
+					log.Printf("[MySQL] 重建连接失败: %v", err)
+				}
+				continue
+			}
+			sqlDB, err := current.DB()
+			if err != nil || sqlDB.Ping() != nil {
+				if err != nil {
+					log.Printf("[MySQL] 获取连接池失败，尝试重建连接: %v", err)
+				} else {
+					log.Printf("[MySQL] 健康检查失败，尝试重建连接")
+				}
+				if rebuildErr := InitMysql(); rebuildErr != nil {
+					log.Printf("[MySQL] 重建连接失败: %v", rebuildErr)
+				}
+			}
+		}
+	}()
 }
 
 func openSQLConn(dsn string) (*sql.DB, error) {

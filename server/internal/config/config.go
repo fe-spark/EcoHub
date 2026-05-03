@@ -73,6 +73,14 @@ const (
 	RuleVersionKey = RedisKeyPrefix + ":Rule:Version"
 	// TVBoxList TVBox 列表页缓存前缀
 	TVBoxList = RedisKeyPrefix + ":TVBox:List"
+	// SnapshotActiveVersionKey 前台只读影片列表快照当前生效版本
+	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
+	// SnapshotBuildVersionKey 最近一次快照构建版本
+	SnapshotBuildVersionKey = RedisKeyPrefix + ":Snapshot:BuildVersion"
+	// FilmClassifyCacheKey 分类首页快照缓存前缀
+	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
+	// FilmClassifySearchKey 分类筛选快照缓存前缀
+	FilmClassifySearchKey = RedisKeyPrefix + ":FilmClassifySearch"
 
 	// VirtualPictureKey 待同步图片临时存储 key
 	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"

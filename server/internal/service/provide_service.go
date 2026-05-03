@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 	"sort"
 	"strconv"
@@ -18,98 +17,12 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
 type ProvideService struct{}
 
 var ProvideSvc = new(ProvideService)
-
-func currentProvideCategoryIDsBySourceKey(sourceKey string) []int64 {
-	sourceKey = strings.TrimSpace(sourceKey)
-	if sourceKey == "" {
-		return nil
-	}
-
-	var mappings []model.CategoryMapping
-	if err := db.Mdb.Find(&mappings).Error; err != nil {
-		log.Printf("currentProvideCategoryIDsBySourceKey Error: %v", err)
-		return nil
-	}
-
-	ids := make([]int64, 0)
-	seen := make(map[int64]struct{})
-	for _, mapping := range mappings {
-		if support.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId) != sourceKey || mapping.CategoryId <= 0 {
-			continue
-		}
-		if _, ok := seen[mapping.CategoryId]; ok {
-			continue
-		}
-		seen[mapping.CategoryId] = struct{}{}
-		ids = append(ids, mapping.CategoryId)
-	}
-	return ids
-}
-
-func resolveProvideCurrentCategoryID(filmIndex model.FilmIndex) int64 {
-	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.CategoryKey); len(ids) > 0 {
-		return ids[0]
-	}
-	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.RootCategoryKey); len(ids) > 0 {
-		return ids[0]
-	}
-	if filmIndex.Cid > 0 {
-		return repository.ResolveCategoryID(filmIndex.Cid)
-	}
-	if filmIndex.Pid > 0 {
-		return repository.ResolveCategoryID(filmIndex.Pid)
-	}
-	return 0
-}
-
-func resolveProvideCurrentRootCategoryID(filmIndex model.FilmIndex) int64 {
-	if ids := currentProvideCategoryIDsBySourceKey(filmIndex.RootCategoryKey); len(ids) > 0 {
-		rootID := repository.GetRootId(ids[0])
-		if rootID > 0 {
-			return rootID
-		}
-		return ids[0]
-	}
-	if categoryID := resolveProvideCurrentCategoryID(filmIndex); categoryID > 0 {
-		rootID := repository.GetRootId(categoryID)
-		if rootID > 0 {
-			return rootID
-		}
-		return categoryID
-	}
-	return 0
-}
-
-func resolveProvideType(filmIndex model.FilmIndex) (int64, string) {
-	if categoryID := resolveProvideCurrentCategoryID(filmIndex); categoryID > 0 {
-		if name := repository.GetCategoryNameById(categoryID); name != "" {
-			return categoryID, name
-		}
-		if name := repository.GetMainCategoryName(categoryID); name != "" {
-			return categoryID, name
-		}
-	}
-	if filmIndex.Cid > 0 {
-		if name := repository.GetCategoryNameById(filmIndex.Cid); name != "" {
-			return filmIndex.Cid, name
-		}
-		return filmIndex.Cid, filmIndex.CName
-	}
-	if filmIndex.Pid > 0 {
-		if name := repository.GetMainCategoryName(filmIndex.Pid); name != "" {
-			return filmIndex.Pid, name
-		}
-		return filmIndex.Pid, filmIndex.CName
-	}
-	return 0, filmIndex.CName
-}
 
 // GetVodDirectBySource 获取指定采集站直连原始数据(MacCMS 兼容)
 func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int, wd string, h int, ids string, year int, area, lang, plot, sort string) ([]byte, error) {
@@ -331,10 +244,11 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
 		return 1, 1, 0, []model.FilmList{}
 	}
+	version := filmrepo.GetActiveSnapshotVersion()
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		cacheKey = fmt.Sprintf("%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, t, cid, pg, sort, limit)
+		cacheKey = fmt.Sprintf("%s:v%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, t, cid, pg, sort, limit)
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
 				Current   int
@@ -371,7 +285,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		Year:     strings.TrimSpace(year),
 		Sort:     strings.TrimSpace(sort),
 	}
-	query := filmrepo.BuildFilmIndexQueryByTags(db.Mdb.Model(&model.FilmIndex{}), searchTags)
+	query := filmrepo.BuildSnapshotQueryByTags(version, searchTags)
 
 	if wd != "" {
 		query = query.Where("name LIKE ? OR sub_title LIKE ?", "%"+wd+"%", "%"+wd+"%")
@@ -384,21 +298,21 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 
 	dto.GetPage(query, &page)
 
-	var sl []model.FilmIndex
+	var sl []model.FilmListSnapshot
 	query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl)
 
 	var vodList []model.FilmList
 	for _, s := range sl {
-		typeID, typeName := resolveProvideType(s)
+		typeID, typeName := resolveProvideTypeFromSnapshot(s)
 		vodList = append(vodList, model.FilmList{
 			VodID:       s.Mid,
 			VodName:     s.Name,
 			TypeID:      typeID,
 			TypeName:    typeName,
 			VodEn:       s.Initial,
-			VodTime:     resolveProvideVodTime(s),
+			VodTime:     resolveProvideSnapshotVodTime(s),
 			VodRemarks:  s.Remarks,
-			VodPlayFrom: resolveProvidePlayFromSummary(s),
+			VodPlayFrom: resolveProvideSnapshotPlayFromSummary(s),
 			VodPic:      s.Picture,
 		})
 	}
@@ -419,32 +333,18 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	return page.Current, page.PageCount, page.Total, vodList
 }
 
-func resolveProvidePlayFromSummary(filmIndex model.FilmIndex) string {
-	return strings.TrimSpace(filmIndex.PlayFromSummary)
-}
-
-func resolveProvideVodTime(filmIndex model.FilmIndex) string {
-	stamp := filmIndex.CollectStamp
-	if stamp <= 0 {
-		stamp = filmIndex.UpdateStamp
-	}
-	if stamp <= 0 {
-		return ""
-	}
-	return time.Unix(stamp, 0).Format("2006-01-02 15:04:05")
-}
-
 // GetVodDetail 获取视频详情（带播放列表）
 func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 	var detailList []model.FilmDetail
+	version := filmrepo.GetActiveSnapshotVersion()
 
 	for _, idStr := range ids {
 		idInt, err := strconv.Atoi(idStr)
 		if err != nil {
 			continue
 		}
-		var s model.FilmIndex
-		if err := db.Mdb.Where("mid = ?", idStr).First(&s).Error; err != nil {
+		snapshot := filmrepo.GetSnapshotByMid(version, int64(idInt))
+		if snapshot == nil {
 			continue
 		}
 
@@ -456,7 +356,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		if movieDetailVo.Id == 0 && movieDetailVo.Name == "" {
 			continue
 		}
-		typeID, typeName := resolveProvideType(s)
+		typeID, typeName := resolveProvideTypeFromSnapshot(*snapshot)
 
 		var playFromList []string
 		var playUrlList []string
@@ -473,14 +373,14 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		}
 
 		detail := model.FilmDetail{
-			VodID:       s.Mid,
+			VodID:       snapshot.Mid,
 			TypeID:      typeID,
-			TypeID1:     resolveProvideCurrentRootCategoryID(s),
+			TypeID1:     resolveProvideCurrentRootCategoryIDFromSnapshot(*snapshot),
 			TypeName:    typeName,
-			VodName:     s.Name,
-			VodEn:       s.Initial,
-			VodTime:     resolveProvideVodTime(s),
-			VodRemarks:  s.Remarks,
+			VodName:     snapshot.Name,
+			VodEn:       snapshot.Initial,
+			VodTime:     resolveProvideSnapshotVodTime(*snapshot),
+			VodRemarks:  snapshot.Remarks,
 			VodPlayFrom: strings.Join(playFromList, "$$$"),
 			VodPlayURL:  strings.Join(playUrlList, "$$$"),
 			VodPic:      movieDetailVo.Picture,
@@ -495,7 +395,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			VodLang:     movieDetailVo.Language,
 			VodYear:     movieDetailVo.Year,
 			VodState:    movieDetailVo.State,
-			VodHits:     s.Hits,
+			VodHits:     snapshot.Hits,
 			VodScore:    movieDetailVo.DbScore,
 			VodContent:  movieDetailVo.Content,
 		}

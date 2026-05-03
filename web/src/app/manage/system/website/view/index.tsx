@@ -82,9 +82,9 @@ export default function SiteConfigPageView() {
   const [editingItem, setEditingItem] = useState<ConfigItem | null>(null);
   const [editingValue, setEditingValue] = useState<string | boolean>("");
   const [saving, setSaving] = useState(false);
-  const [clearOpen, setClearOpen] = useState(false);
-  const [clearPassword, setClearPassword] = useState("");
-  const [clearing, setClearing] = useState(false);
+  const [resetFilmsOpen, setResetFilmsOpen] = useState(false);
+  const [resetFilmsPassword, setResetFilmsPassword] = useState("");
+  const [resettingFilms, setResettingFilms] = useState(false);
   const { message } = useAppMessage();
 
   const getBasicInfo = useCallback(async () => {
@@ -145,25 +145,25 @@ export default function SiteConfigPageView() {
     }
   };
 
-  const clearFilms = async () => {
-    if (!clearPassword) {
+  const resetFilms = async () => {
+    if (!resetFilmsPassword) {
       message.error("请输入管理密码");
       return;
     }
-    setClearing(true);
+    setResettingFilms(true);
     try {
       const resp = await ApiPost("/manage/spider/clear", {
-        password: clearPassword,
+        password: resetFilmsPassword,
       });
       if (resp.code === 0) {
         message.success(resp.msg);
-        setClearOpen(false);
-        setClearPassword("");
+        setResetFilmsOpen(false);
+        setResetFilmsPassword("");
         return;
       }
-      message.error(resp.msg || "清空全站影视数据失败");
+      message.error(resp.msg || "重置全站影视数据失败");
     } finally {
-      setClearing(false);
+      setResettingFilms(false);
     }
   };
 
@@ -215,13 +215,13 @@ export default function SiteConfigPageView() {
       <Card size="small" title="危险操作" className={styles.dangerCard}>
         <Flex justify="space-between" align="center" gap={16} wrap="wrap">
           <Space direction="vertical" size={4} className={styles.dangerText}>
-            <Typography.Text type="danger" strong>清空全站影视数据</Typography.Text>
+            <Typography.Text type="danger" strong>恢复全站默认值</Typography.Text>
             <Typography.Text type="secondary">
-              清空主站影片、附属站播放源、分类映射、搜索标签、轮播与采集失败记录，并重建当前启用主站分类。
+              清空影视与采集派生数据，并恢复默认配置、默认账号、默认采集源、默认定时任务、默认轮播和主站原始分类。
             </Typography.Text>
           </Space>
-          <Button danger icon={<DeleteOutlined />} onClick={() => setClearOpen(true)}>
-            清空全站影视数据
+          <Button danger icon={<DeleteOutlined />} onClick={() => setResetFilmsOpen(true)}>
+            恢复默认值
           </Button>
         </Flex>
       </Card>
@@ -260,15 +260,15 @@ export default function SiteConfigPageView() {
       </Modal>
 
       <Modal
-        title="清空全站影视数据"
-        open={clearOpen}
+        title="恢复全站默认值"
+        open={resetFilmsOpen}
         onCancel={() => {
-          setClearOpen(false);
-          setClearPassword("");
+          setResetFilmsOpen(false);
+          setResetFilmsPassword("");
         }}
-        onOk={() => void clearFilms()}
-        okText="确认清空"
-        confirmLoading={clearing}
+        onOk={() => void resetFilms()}
+        okText="确认恢复默认值"
+        confirmLoading={resettingFilms}
         okButtonProps={{ danger: true }}
         destroyOnHidden
       >
@@ -277,12 +277,12 @@ export default function SiteConfigPageView() {
             showIcon
             type="error"
             message="该操作不可逆"
-            description="会清空全站影视数据并重建主站分类框架。执行期间会停止采集任务，请确认当前没有误操作风险。"
+            description="会停止采集任务，清空影视库存、快照、播放源、分类映射、失败记录等采集派生数据，并恢复系统默认网站配置、内置账号、默认采集源、默认定时任务、默认轮播和主站原始分类。"
           />
           <Input.Password
             placeholder="请输入管理密码"
-            value={clearPassword}
-            onChange={(event) => setClearPassword(event.target.value)}
+            value={resetFilmsPassword}
+            onChange={(event) => setResetFilmsPassword(event.target.value)}
           />
         </Flex>
       </Modal>

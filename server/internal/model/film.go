@@ -195,6 +195,51 @@ func (FilmIndex) TableName() string {
 	return TableFilmIndex
 }
 
+// FilmListSnapshot 是前台列表与 TVBox 列表的只读快照。
+// 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
+type FilmListSnapshot struct {
+	gorm.Model
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
+	ContentKey      string `json:"contentKey" gorm:"size:128;index"`
+	SourceId        string `json:"sourceId" gorm:"index"`
+	DbId            int64  `json:"dbId" gorm:"index"`
+
+	Cid              int64  `json:"cid" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Pid              int64  `json:"pid" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index;index:idx_snapshot_root_key_update;index:idx_snapshot_root_key_hits;index:idx_snapshot_filter_root_score;index:idx_snapshot_filter_root_update;index:idx_snapshot_filter_root_hits"`
+	CategoryKey      string `json:"categoryKey" gorm:"size:128;index;index:idx_snapshot_category_key_update;index:idx_snapshot_category_key_hits"`
+	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"`
+	CName            string `json:"cName"`
+
+	SeriesKey       string  `json:"seriesKey" gorm:"size:128;index"`
+	Name            string  `json:"name"`
+	SubTitle        string  `json:"subTitle"`
+	ClassTag        string  `json:"classTag"`
+	Area            string  `json:"area" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Language        string  `json:"language" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Year            int64   `json:"year" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Initial         string  `json:"initial"`
+	Score           float64 `json:"score" gorm:"index;index:idx_snapshot_filter_score"`
+	UpdateStamp     int64   `json:"updateStamp" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_filter_update"`
+	Hits            int64   `json:"hits" gorm:"index;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_hits"`
+	State           string  `json:"state"`
+	Remarks         string  `json:"remarks"`
+	Picture         string  `json:"picture"`
+	PictureSlide    string  `json:"pictureSlide" gorm:"size:512"`
+	Actor           string  `json:"actor"`
+	Director        string  `json:"director"`
+	Blurb           string  `json:"blurb"`
+	CollectStamp    int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`
+	CategoryVersion string  `json:"categoryVersion" gorm:"size:64;index"`
+	RuleVersion     string  `json:"ruleVersion" gorm:"size:64;index"`
+	PlayFromSummary string  `json:"playFromSummary"`
+}
+
+func (FilmListSnapshot) TableName() string {
+	return TableFilmListSnapshot
+}
+
 // SearchTagItem 影片检索标签持久化模型 (MySQL)
 type SearchTagItem struct {
 	gorm.Model

@@ -83,16 +83,23 @@ export function createCollectTableColumns({
             ? "失败"
             : progress.status === "stopped"
               ? "已停止"
-              : progress.status === "done"
-                ? "已完成"
-                : "采集中";
+              : progress.status === "finalizing"
+                ? "收尾发布中"
+                : progress.status === "done"
+                  ? "已完成"
+                  : "采集中";
+        const progressStatus = progress.status === "failed" || progress.failed > 0
+          ? "exception"
+          : progress.status === "done"
+            ? "success"
+            : "active";
         return (
           <Flex vertical gap={4}>
             <Typography.Text type={progress.status === "starting" ? "secondary" : undefined}>{statusText}</Typography.Text>
             <Progress
               percent={percent}
               size="small"
-              status={progress.failed > 0 ? "exception" : "active"}
+              status={progressStatus}
             />
             <Typography.Text type="secondary">
               {progressText}

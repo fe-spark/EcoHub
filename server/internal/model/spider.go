@@ -39,7 +39,7 @@ type CronSourceRel struct {
 }
 
 func (CronSourceRel) TableName() string {
-	return "cron_source_rel"
+	return TableCronSourceRel
 }
 
 type SourceGrade int

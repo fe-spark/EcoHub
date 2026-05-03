@@ -83,7 +83,7 @@ export default function CollectManagePageView() {
   );
 
   const runningCollectIds = useMemo(
-    () => siteList.filter((item) => item.progress?.status === "running").map((item) => item.id),
+    () => siteList.filter((item) => item.progress?.status === "running" || item.progress?.status === "finalizing").map((item) => item.id),
     [siteList],
   );
 
@@ -96,11 +96,11 @@ export default function CollectManagePageView() {
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      running: runningCollectIds.length,
+      running: siteList.filter((item) => item.progress?.status === "running" || item.progress?.status === "finalizing").length,
       waiting: startingCollectIds.length,
       masters: siteList.filter((item) => item.grade === 0).length,
     }),
-    [runningCollectIds.length, siteList, startingCollectIds.length],
+    [siteList, startingCollectIds.length],
   );
 
   const masterSite = useMemo(

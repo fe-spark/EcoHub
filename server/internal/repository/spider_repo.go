@@ -118,6 +118,41 @@ func DelFilmTask(id string) {
 	})
 }
 
+func ResetFilmTasks(tasks []model.FilmCollectTask) error {
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CronSourceRel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CrontabRecord{}).Error; err != nil {
+			return err
+		}
+		for _, task := range tasks {
+			rec := model.CrontabRecord{
+				TaskId:    task.Id,
+				Time:      task.Time,
+				Spec:      task.Spec,
+				TaskModel: task.Model,
+				State:     task.State,
+				Remark:    task.Remark,
+			}
+			if err := tx.Create(&rec).Error; err != nil {
+				return err
+			}
+			if len(task.Ids) == 0 {
+				continue
+			}
+			rels := make([]model.CronSourceRel, 0, len(task.Ids))
+			for _, sid := range task.Ids {
+				rels = append(rels, model.CronSourceRel{TaskId: task.Id, SourceId: sid})
+			}
+			if err := tx.Create(&rels).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 // ExistTask 是否存在定时任务相关信息
 func ExistTask() bool {
 	var count int64
@@ -249,6 +284,23 @@ func ClearAllCollectSource() {
 	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.TableFilmSource)).Error; err != nil {
 		log.Println("TRUNCATE table film_sources Error:", err)
 	}
+}
+
+func ResetCollectSources(list []model.FilmSource) error {
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
+			return err
+		}
+		for i := range list {
+			if list[i].Id == "" {
+				list[i].Id = utils.GenerateHashKey(list[i].Uri)
+			}
+		}
+		if len(list) == 0 {
+			return nil
+		}
+		return tx.Create(&list).Error
+	})
 }
 
 // ExistCollectSourceList 查询是否已经存在站点 list 相关数据

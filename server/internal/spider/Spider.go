@@ -68,8 +68,6 @@ var collectProgress sync.Map
 
 var pictureSyncRunning atomic.Bool
 
-var asyncPendingFlushMu sync.Mutex
-
 var asyncMasterSearchTagsMu sync.Mutex
 
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
@@ -241,6 +239,36 @@ func markSourcesCollectStarting(sources []model.FilmSource) {
 	}
 }
 
+func markSourcesFinalizing(sources map[string]model.FilmSource) {
+	for _, source := range sources {
+		updateCollectProgress(source.Id, func(progress *model.CollectProgress) {
+			if progress.Status == "starting" || progress.Status == "running" || progress.Status == "stopped" || progress.Status == "done" {
+				progress.Status = "finalizing"
+			}
+		})
+	}
+}
+
+func markSourcesPublished(sources map[string]model.FilmSource) {
+	for _, source := range sources {
+		updateCollectProgress(source.Id, func(progress *model.CollectProgress) {
+			if progress.Status == "finalizing" {
+				progress.Status = "done"
+			}
+		})
+	}
+}
+
+func markSourcesFinalizeFailed(sources map[string]model.FilmSource) {
+	for _, source := range sources {
+		updateCollectProgress(source.Id, func(progress *model.CollectProgress) {
+			if progress.Status == "finalizing" {
+				progress.Status = "failed"
+			}
+		})
+	}
+}
+
 type collectLifecycleState struct {
 	mu                  sync.Mutex
 	cond                *sync.Cond
@@ -319,25 +347,8 @@ func (s *collectLifecycleState) endSourceAndQueueFlush(source model.FilmSource) 
 	}
 	s.mu.Lock()
 	s.finishSourceLocked(source.Id)
-	if source.Grade != model.SlaveCollect {
-		s.pendingFlushSources[source.Id] = source
-	}
+	s.pendingFlushSources[source.Id] = source
 	s.mu.Unlock()
-
-	if source.Grade == model.SlaveCollect {
-		flushSourcePendingAsync(source)
-	}
-}
-
-func flushSourcePendingAsync(source model.FilmSource) {
-	go func() {
-		asyncPendingFlushMu.Lock()
-		defer asyncPendingFlushMu.Unlock()
-
-		if err := flushSourcePending(source); err != nil {
-			log.Printf("[Spider] 站点 %s 异步收尾刷新失败: %v", source.Name, err)
-		}
-	}()
 }
 
 func (s *collectLifecycleState) flushPending() error {
@@ -455,6 +466,29 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	return err
 }
 
+func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond * 200)
+	defer ticker.Stop()
+
+	for {
+		s.mu.Lock()
+		activeCount := s.activeCount
+		flushing := s.flushing
+		s.mu.Unlock()
+		if activeCount == 0 && !flushing {
+			return nil
+		}
+
+		select {
+		case <-deadline.C:
+			return fmt.Errorf("等待采集任务停止超时: active=%d flushing=%t", activeCount, flushing)
+		case <-ticker.C:
+		}
+	}
+}
+
 func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 	if sourceID = strings.TrimSpace(sourceID); sourceID == "" {
 		return
@@ -469,23 +503,6 @@ func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 	// 某个站点释放后，需要唤醒等待同站点重试的协程重新竞争。
 	// flushPending/runExclusive 也依赖该广播在 activeCount 归零时继续推进。
 	s.cond.Broadcast()
-}
-
-func flushSourcePending(source model.FilmSource) error {
-	switch source.Grade {
-	case model.MasterCollect:
-		// 主站采集会改变影片列表和筛选项，站点收尾时再清一次，保证采集完成后 TVBox 看到新数据。
-		filmrepo.ClearTVBoxListCache()
-		filmrepo.ClearTVBoxConfigCache()
-		return nil
-	case model.SlaveCollect:
-		if err := filmrepo.FlushPendingSlavePlaySummaryRefresh(source.Id); err != nil {
-			return fmt.Errorf("flush slave play summary refresh failed: %w", err)
-		}
-		// 附属站采集只影响播放源摘要，最终可见结果在列表缓存里。
-		filmrepo.ClearTVBoxListCache()
-	}
-	return nil
 }
 
 func flushPendingSources(sourceMap map[string]model.FilmSource) error {
@@ -503,16 +520,63 @@ func flushPendingSources(sourceMap map[string]model.FilmSource) error {
 		return sources[i].Grade == model.MasterCollect
 	})
 
-	flushErrors := make([]string, 0)
+	markSourcesFinalizing(sourceMap)
+	if err := finalizeCollectRun(sources); err != nil {
+		markSourcesFinalizeFailed(sourceMap)
+		return err
+	}
+	markSourcesPublished(sourceMap)
+	return nil
+}
+
+func finalizeCollectRun(sources []model.FilmSource) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	start := time.Now()
+	log.Printf("[Spider][Finalizer] 开始收尾发布 source_count=%d", len(sources))
+
+	if err := flushMasterSideEffects(sources); err != nil {
+		return err
+	}
+	if err := flushPlaySummaryRefresh(); err != nil {
+		return err
+	}
+	version, err := publishFilmSnapshot()
+	if err != nil {
+		return err
+	}
+	log.Printf("[Spider][Finalizer] 收尾发布完成 version=%s source_count=%d cost=%s", version, len(sources), time.Since(start))
+	return nil
+}
+
+func flushMasterSideEffects(sources []model.FilmSource) error {
 	for _, source := range sources {
-		if err := flushSourcePending(source); err != nil {
-			flushErrors = append(flushErrors, fmt.Sprintf("source=%s: %v", source.Name, err))
+		if source.Grade == model.MasterCollect {
+			filmrepo.ClearTVBoxConfigCache()
+			return nil
 		}
 	}
-	if len(flushErrors) > 0 {
-		return errors.New(strings.Join(flushErrors, "; "))
-	}
 	return nil
+}
+
+func flushPlaySummaryRefresh() error {
+	start := time.Now()
+	if err := filmrepo.FlushPendingPlaySummaryRefresh(); err != nil {
+		return fmt.Errorf("flush play summary refresh failed: %w", err)
+	}
+	log.Printf("[Spider][Finalizer] 播放源摘要刷新完成 cost=%s", time.Since(start))
+	return nil
+}
+
+func publishFilmSnapshot() (string, error) {
+	start := time.Now()
+	version := filmrepo.NewSnapshotVersion()
+	if err := filmrepo.ActivateRebuiltFilmListSnapshot(version); err != nil {
+		return "", fmt.Errorf("rebuild film list snapshot failed: %w", err)
+	}
+	log.Printf("[Spider][Finalizer] 前台影片列表快照已重建并切换 version=%s cost=%s", version, time.Since(start))
+	return version, nil
 }
 
 func flushSourcesPending(tag string, sources []model.FilmSource) {
@@ -787,6 +851,7 @@ func HandleCollect(id string, h int) error {
 }
 
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool) (retErr error) {
+	hadWrites := false
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
@@ -808,11 +873,30 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		return err
 	}
 	defer func() {
+		originalErr := retErr
+		if originalErr != nil && !hadWrites {
+			collectLifecycle.endSource(s.Id)
+			return
+		}
 		if flushAtEnd {
+			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+				if progress.Status == "starting" || progress.Status == "running" || progress.Status == "stopped" || progress.Status == "done" {
+					progress.Status = "finalizing"
+				}
+			})
 			flushErr := collectLifecycle.finishSourceAndFlush(*s)
-			if retErr == nil && flushErr != nil {
+			if originalErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
+			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+				if flushErr != nil && progress.Status == "finalizing" {
+					progress.Status = "failed"
+					return
+				}
+				if progress.Status == "finalizing" {
+					progress.Status = "done"
+				}
+			})
 			return
 		}
 		collectLifecycle.endSourceAndQueueFlush(*s)
@@ -894,7 +978,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
-	if err := collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h); err != nil {
+	hadWrites, err = collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h)
+	if err != nil {
 		return err
 	}
 	if ctx.Err() != nil {
@@ -1051,9 +1136,9 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 }
 
 // collectFilmPages 将请求与写库拆成流水线：请求并发执行，写库交给全局调度器按批次串行落库。
-func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) error {
+func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) (bool, error) {
 	if pageCount <= 0 {
-		return nil
+		return false, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -1264,9 +1349,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
 	if stopErr != nil {
-		return stopErr
+		return stats.success > 0, stopErr
 	}
-	return nil
+	return stats.success > 0, nil
 }
 
 func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}) {
@@ -1288,6 +1373,7 @@ func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}
 		return
 	}
 	filmrepo.ClearAllSearchTagsCache()
+	filmrepo.ClearTVBoxConfigCache()
 	log.Printf("[Spider] 站点 %s 采集后已批量刷新搜索标签, 分类数=%d", s.Name, len(pids))
 }
 
@@ -1400,6 +1486,9 @@ func AutoCollect(h int) {
 // ClearSpider 删除所有已采集的影片信息，并与采集写库互斥。
 func ClearSpider() error {
 	StopAllTasks()
+	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
+		return err
+	}
 	return collectLifecycle.runExclusive(func() error {
 		return filmrepo.FilmZero()
 	})
@@ -1620,7 +1709,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		state.mu.RLock()
 		progress := state.data
 		state.mu.RUnlock()
-		if progress.Status == "starting" {
+		if progress.Status == "starting" || progress.Status == "finalizing" {
 			list = append(list, progress)
 		}
 		return true
@@ -1652,11 +1741,17 @@ func StopAllTasks() {
 				progress.Status = "stopped"
 			})
 		}
-		activeTasks.Delete(key)
 		return true
 	})
 	if count > 0 {
 		log.Printf("[Spider] 已强制停止 %d 个活跃采集任务\n", count)
+		go finalizeStoppedCollectTasks()
+	}
+}
+
+func finalizeStoppedCollectTasks() {
+	if err := collectLifecycle.flushPending(); err != nil {
+		log.Printf("[Spider] 终止采集后收尾刷新失败: %v", err)
 	}
 }
 

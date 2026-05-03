@@ -65,10 +65,10 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		return
 	}
 	if err := service.SpiderSvc.ClearFilms(); err != nil {
-		dto.Failed(fmt.Sprint("影视数据清空失败: ", err.Error()), c)
+		dto.Failed(fmt.Sprint("影视数据重置失败: ", err.Error()), c)
 		return
 	}
-	dto.SuccessOnlyMsg("全站影视数据已清空，主站分类已重建!!!", c)
+	dto.SuccessOnlyMsg("全站数据已恢复默认值，默认采集源、定时任务、配置、轮播和分类已重建!!!", c)
 }
 
 // SingleUpdateSpider 单一影片主站更新采集

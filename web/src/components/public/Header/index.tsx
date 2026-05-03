@@ -18,7 +18,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
 
 interface NavItem {
-  id: string;
+  id: string | number;
   name: string;
 }
 
@@ -39,6 +39,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
   const [desktopCatalogOpen, setDesktopCatalogOpen] = useState(false);
+  const [activeCategoryId, setActiveCategoryId] = useState("");
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -84,9 +85,13 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
-  const activePid = pathname === "/filmClassify" ? searchParams.get("Pid") : null;
+  const activePid = pathname.startsWith("/filmClassify") ? searchParams.get("Pid") : null;
   const isHomeActive = pathname === "/";
-  const isCategoryActive = (id: string) => activePid === id;
+  const isCategoryActive = (id: string | number) => activeCategoryId === String(id);
+
+  useEffect(() => {
+    setActiveCategoryId(activePid ? String(activePid) : "");
+  }, [activePid]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -162,10 +167,12 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     </div>
   );
 
-  const navigateToCategory = (id: string) => {
+  const navigateToCategory = (id: string | number) => {
+    const nextId = String(id);
+    setActiveCategoryId(nextId);
     setDesktopCatalogOpen(false);
     setMobileMenuVisible(false);
-    router.push(`/filmClassify?Pid=${id}`);
+    router.push(`/filmClassify?Pid=${encodeURIComponent(nextId)}`);
   };
 
   return (
@@ -191,7 +198,10 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         <div className={styles.navArea} ref={desktopCatalogRef}>
           <nav className={styles.navLinks}>
             <a
-              onClick={() => router.push("/")}
+              onClick={() => {
+                setActiveCategoryId("");
+                router.push("/");
+              }}
               className={`${styles.navHomeItem} ${isHomeActive ? styles.navHomeItemActive : ""}`}
             >
               首页
@@ -288,7 +298,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         <div className={styles.mobileNav}>
           <div
             className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
-            onClick={() => { router.push("/"); setMobileMenuVisible(false); }}
+            onClick={() => { setActiveCategoryId(""); router.push("/"); setMobileMenuVisible(false); }}
           >
             <HomeOutlined /> <span>首页</span>
           </div>

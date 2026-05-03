@@ -8,6 +8,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -25,7 +26,7 @@ func (s *InitService) DefaultDataInit() {
 		s.TableInit()
 	} else {
 		db.Mdb.AutoMigrate(
-			&model.User{}, &model.FilmIndex{}, &model.FileInfo{}, &model.FailureRecord{},
+			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
 			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
 			&model.MovieMatchKey{},
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.SearchTagItem{},
@@ -42,6 +43,13 @@ func (s *InitService) DefaultDataInit() {
 	s.BasicConfigInit()
 	s.BannersInit()
 	s.SpiderInit()
+	s.ensureFilmListSnapshot()
+}
+
+func (s *InitService) ensureFilmListSnapshot() {
+	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
+		log.Printf("[Init] 前台影片列表快照引导失败: %v", err)
+	}
 }
 
 func clearStartupCaches() {
@@ -63,6 +71,7 @@ func (s *InitService) TableInit() {
 	err := db.Mdb.AutoMigrate(
 		&model.User{},
 		&model.FilmIndex{},
+		&model.FilmListSnapshot{},
 		&model.FileInfo{},
 		&model.FailureRecord{},
 		&model.MovieDetailInfo{},
@@ -119,13 +128,17 @@ func (s *InitService) BannersInit() {
 	if repository.ExistBannersConfig() {
 		return
 	}
-	bl := model.Banners{
+	bl := defaultBanners()
+	_ = repository.SaveBanners(bl)
+}
+
+func defaultBanners() model.Banners {
+	return model.Banners{
 		model.Banner{Id: utils.GenerateSalt(), Name: "樱花庄的宠物女孩", Year: 2020, CName: "日韩动漫", Poster: "https://s2.loli.net/2024/02/21/Wt1QDhabdEI7HcL.jpg", Picture: "https://s2.loli.net/2024/02/21/Wt1QDhabdEI7HcL.jpg", PictureSlide: "https://img.bfzypic.com/upload/vod/20230424-43/06e79232a4650aea00f7476356a49847.jpg", Remark: "已完结"},
 		model.Banner{Id: utils.GenerateSalt(), Name: "从零开始的异世界生活", Year: 2020, CName: "日韩动漫", Poster: "https://s2.loli.net/2024/02/21/UkpdhIRO12fsy6C.jpg", Picture: "https://s2.loli.net/2024/02/21/UkpdhIRO12fsy6C.jpg", PictureSlide: "https://img.bfzypic.com/upload/vod/20230424-43/06e79232a4650aea00f7476356a49847.jpg", Remark: "已完结"},
 		model.Banner{Id: utils.GenerateSalt(), Name: "五等分的花嫁", Year: 2020, CName: "日韩动漫", Poster: "https://s2.loli.net/2024/02/21/wXJr59Zuv4tcKNp.jpg", Picture: "https://s2.loli.net/2024/02/21/wXJr59Zuv4tcKNp.jpg", PictureSlide: "https://img.bfzypic.com/upload/vod/20230424-43/06e79232a4650aea00f7476356a49847.jpg", Remark: "已完结"},
 		model.Banner{Id: utils.GenerateSalt(), Name: "我的青春恋爱物语果然有问题", Year: 2020, CName: "日韩动漫", Poster: "https://s2.loli.net/2024/02/21/oMAGzSliK2YbhRu.jpg", Picture: "https://s2.loli.net/2024/02/21/oMAGzSliK2YbhRu.jpg", PictureSlide: "https://img.bfzypic.com/upload/vod/20230424-43/06e79232a4650aea00f7476356a49847.jpg", Remark: "已完结"},
 	}
-	_ = repository.SaveBanners(bl)
 }
 
 func (s *InitService) SpiderInit() {
@@ -142,8 +155,14 @@ func (s *InitService) FilmSourceInit() {
 	if repository.ExistCollectSourceList() {
 		return
 	}
-	// 直接初始化采集源 - 使用 URI 哈希作为 ID 确保服务重启后顺序一致且支持主从切换
-	l := []model.FilmSource{
+	if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
+		log.Println("BatchAddCollectSource Error: ", err)
+	}
+}
+
+func defaultFilmSources() []model.FilmSource {
+	// 使用 URI 哈希作为 ID，确保重置后顺序一致且支持主从切换。
+	return []model.FilmSource{
 		{Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
 		{Name: "HD(OK)", Uri: `https://okzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
 		{Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
@@ -158,9 +177,6 @@ func (s *InitService) FilmSourceInit() {
 		{Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
 		{Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
 		{Name: "卧龙(WL)", Uri: `https://collect.wolongzy.cc/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-	}
-	if err := repository.BatchAddCollectSource(l); err != nil {
-		log.Println("BatchAddCollectSource Error: ", err)
 	}
 }
 
@@ -208,22 +224,54 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 	}
 }
 
+func registerRuntimeTask(task model.FilmCollectTask) error {
+	if !task.State {
+		return repository.UpdateFilmTask(task)
+	}
+
+	var cid cron.EntryID
+	var err error
+	switch task.Model {
+	case 0:
+		cid, err = spider.AddAutoUpdateCron(task.Id, task.Spec)
+	case 1:
+		cid, err = spider.AddFilmUpdateCron(task.Id, task.Spec)
+	case 2:
+		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
+	case 3:
+		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
+	default:
+		return fmt.Errorf("不支持的定时任务类型: %d", task.Model)
+	}
+	if err != nil {
+		return err
+	}
+	task.Cid = cid
+	spider.RegisterTaskCid(task.Id, task.Cid)
+	return repository.UpdateFilmTask(task)
+}
+
 func (s *InitService) createDefaultTasks() {
+	for _, task := range defaultFilmTasks() {
+		s.registerTask(task)
+	}
+}
+
+func defaultFilmTasks() []model.FilmCollectTask {
 	task := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
 		Model: 0, State: false, Remark: "自动采集已启用站点更新的影片",
 	}
-	s.registerTask(task)
 
 	recoverTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryWeekSpec,
 		Model: 2, State: false, Remark: "清理采集失败记录",
 	}
-	s.registerTask(recoverTask)
 
 	orphanTask := model.FilmCollectTask{
 		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryDaySpec,
 		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
-	s.registerTask(orphanTask)
+
+	return []model.FilmCollectTask{task, recoverTask, orphanTask}
 }

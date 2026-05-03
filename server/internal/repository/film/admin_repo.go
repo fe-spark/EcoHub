@@ -54,6 +54,7 @@ func DelFilmSearch(id int64) error {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
+		DeleteActiveSnapshotsByMids(id)
 		ClearSearchTagsCache(info.Pid)
 		ClearTVBoxListCache()
 		support.ClearIndexPageCache()
@@ -80,6 +81,7 @@ func ShieldFilmSearch(cid int64) error {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
+		DeleteActiveSnapshotsByCategory("cid", cid)
 		ClearSearchTagsCache(pID)
 	}
 	ClearTVBoxListCache()
@@ -100,6 +102,7 @@ func ShieldRootFilmSearch(pid int64) error {
 		log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 		return rebuildErr
 	}
+	DeleteActiveRootSnapshots(pid)
 	ClearSearchTagsCache(pid)
 	ClearTVBoxListCache()
 	support.ClearIndexPageCache()
@@ -124,6 +127,7 @@ func RecoverFilmSearch(cid int64) error {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 			return rebuildErr
 		}
+		RestoreActiveSnapshotsByCategory(cid)
 		ClearSearchTagsCache(pID)
 	}
 	ClearTVBoxListCache()
@@ -189,6 +193,9 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -232,6 +239,7 @@ func FilmZero() error {
 	tables := []string{
 		model.TableMovieDetail,
 		model.TableFilmIndex,
+		model.TableFilmListSnapshot,
 		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableCategory,
@@ -256,6 +264,7 @@ func FilmZero() error {
 	}
 	time.Sleep(100 * time.Millisecond)
 
+	ClearSnapshotState()
 	RefreshMasterDataCaches()
 	return nil
 }
@@ -269,6 +278,7 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 	}); err != nil {
 		return err
 	}
+	ClearSnapshotState()
 	RefreshMasterDataCaches()
 	return nil
 }
@@ -364,6 +374,7 @@ func CleanSearchWithoutDetail() int64 {
 		}
 	}
 	clearFilmIndexCachesByPidSet(pidSet)
+	DeleteActiveSnapshotsByMids(mids...)
 	ClearTVBoxListCache()
 	return int64(len(mids))
 }

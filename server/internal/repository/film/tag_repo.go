@@ -112,11 +112,12 @@ func shouldAlwaysExposeSearchTag(tagType string) bool {
 	}
 }
 
-func buildSearchTagCacheKey(st model.SearchTagsVO) string {
+func buildSearchTagCacheKey(st model.SearchTagsVO, snapshotVersion string) string {
 	st = normalizeSearchTagsVO(st)
-	return fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s",
+	return fmt.Sprintf("%s:v%s:s%s:%d:%d:%s:%s:%s:%s:%s",
 		config.SearchTags,
 		getSearchTagsCacheVersion(),
+		snapshotVersion,
 		st.Pid, st.Cid,
 		st.OriginalCategory, st.Area, st.Language, st.Year, st.Plot,
 	)
@@ -130,15 +131,15 @@ func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
 	return st
 }
 
-func baseSearchTagFactQuery(st model.SearchTagsVO) *gorm.DB {
+func baseSearchTagFactQuery(st model.SearchTagsVO, snapshotVersion string) *gorm.DB {
 	st = normalizeSearchTagsVO(st)
-	query := db.Mdb.Model(&model.FilmIndex{})
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", strings.TrimSpace(snapshotVersion))
 	// 筛选项不联动：选项统计固定在当前一级分类内；列表查询仍在 BuildFilmIndexQueryByTags 中完整应用所有筛选条件。
 	return ApplyCategoryFilter(query, st.Pid, 0)
 }
 
 func searchTagItemsByColumn(st model.SearchTagsVO, tagType string, column string) []model.SearchTagItem {
-	return searchTagItemsByColumnFromQuery(baseSearchTagFactQuery(st), tagType, column)
+	return searchTagItemsByColumnFromQuery(baseSearchTagFactQuery(st, GetActiveSnapshotVersion()), tagType, column)
 }
 
 func searchTagItemsByColumnFromQuery(query *gorm.DB, tagType string, column string) []model.SearchTagItem {
@@ -169,7 +170,7 @@ func searchTagItemsByColumnFromQuery(query *gorm.DB, tagType string, column stri
 }
 
 func searchYearTagItems(st model.SearchTagsVO) []model.SearchTagItem {
-	return searchYearTagItemsFromQuery(baseSearchTagFactQuery(st))
+	return searchYearTagItemsFromQuery(baseSearchTagFactQuery(st, GetActiveSnapshotVersion()))
 }
 
 func searchYearTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
@@ -197,7 +198,7 @@ func searchYearTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
 }
 
 func searchPlotTagItems(st model.SearchTagsVO) []model.SearchTagItem {
-	return searchPlotTagItemsFromQuery(baseSearchTagFactQuery(st))
+	return searchPlotTagItemsFromQuery(baseSearchTagFactQuery(st, GetActiveSnapshotVersion()))
 }
 
 func searchPlotTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
@@ -233,7 +234,12 @@ func searchPlotTagItemsFromQuery(query *gorm.DB) []model.SearchTagItem {
 }
 
 func loadSearchTagItemsByType(st model.SearchTagsVO) map[string][]model.SearchTagItem {
-	return loadSearchTagItemsByTypeFromQuery(st, baseSearchTagFactQuery(st))
+	return loadSearchTagItemsByTypeForVersion(st, GetActiveSnapshotVersion())
+
+}
+
+func loadSearchTagItemsByTypeForVersion(st model.SearchTagsVO, snapshotVersion string) map[string][]model.SearchTagItem {
+	return loadSearchTagItemsByTypeFromQuery(st, baseSearchTagFactQuery(st, snapshotVersion))
 }
 
 func loadSearchTagItemsByTypeFromQuery(st model.SearchTagsVO, query *gorm.DB) map[string][]model.SearchTagItem {
@@ -284,13 +290,14 @@ func getAbnormalSearchTagValues(pid int64, tagType string) []string {
 	return values
 }
 
-func hasOthersSearchFacts(pid int64, tagType string) bool {
+func hasOthersSearchFacts(pid int64, tagType string, snapshotVersion string) bool {
 	pid = support.ResolveCategoryID(pid)
-	if pid <= 0 {
+	snapshotVersion = strings.TrimSpace(snapshotVersion)
+	if pid <= 0 || snapshotVersion == "" {
 		return false
 	}
 
-	query := buildCategoryQuery("pid", pid)
+	query := applyCategoryFieldFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", snapshotVersion), "pid", pid)
 	switch tagType {
 	case "Year":
 		query = query.Where("year <= 0 OR year IS NULL")
@@ -359,12 +366,19 @@ func buildOriginalCategorySearchOptions(pid int64, sticky string) []map[string]s
 func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	st = normalizeSearchTagsVO(st)
 	pid := st.Pid
-	cacheKey := buildSearchTagCacheKey(st)
+	snapshotVersion := GetActiveSnapshotVersion()
+	cacheKey := ""
 
-	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-		var res map[string]any
-		if json.Unmarshal([]byte(data), &res) == nil {
-			return res
+	if snapshotVersion != "" {
+		cacheKey = buildSearchTagCacheKey(st, snapshotVersion)
+	}
+
+	if cacheKey != "" {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var res map[string]any
+			if json.Unmarshal([]byte(data), &res) == nil {
+				return res
+			}
 		}
 	}
 
@@ -382,7 +396,10 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	tagMap := make(map[string]any)
 	activeTitles := make(map[string]string)
 	activeSortList := make([]string, 0)
-	itemsByType := loadSearchTagItemsByType(st)
+	itemsByType := make(map[string][]model.SearchTagItem)
+	if snapshotVersion != "" {
+		itemsByType = loadSearchTagItemsByTypeForVersion(st, snapshotVersion)
+	}
 
 	for _, t := range tagTypes {
 		if t == "Category" {
@@ -410,7 +427,7 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 		}
 
 		sticky := getStickySearchTagValue(st, t)
-		options := FormatSearchTagItems(t, items, sticky, hasOthersSearchFacts(pid, t))
+		options := FormatSearchTagItems(t, items, sticky, hasOthersSearchFacts(pid, t, snapshotVersion))
 		if hasEffectiveSearchOptions(options) || shouldAlwaysExposeSearchTag(t) {
 			tagMap[t] = options
 			activeTitles[t] = allTitles[t]
@@ -422,8 +439,10 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	res["sortList"] = activeSortList
 	res["tags"] = tagMap
 
-	if data, err := json.Marshal(res); err == nil {
-		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*2)
+	if cacheKey != "" {
+		if data, err := json.Marshal(res); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*2)
+		}
 	}
 
 	return res

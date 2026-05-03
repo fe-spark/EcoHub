@@ -79,7 +79,7 @@ func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.Movie
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
 		return err
 	}
-	ScheduleSlavePlaySummaryRefresh(sourceID, infos...)
+	SchedulePlaySummaryRefresh(infos...)
 	return nil
 }
 

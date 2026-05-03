@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"log"
 
 	"server/internal/model"
@@ -19,6 +20,45 @@ func clearCategorySyncRedisCaches() {
 	filmrepo.ClearAllSearchTagsCache()
 	filmrepo.ClearTVBoxListCache()
 	repository.ClearIndexPageCache()
+}
+
+func resetDefaultSiteData() error {
+	if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
+		return fmt.Errorf("恢复默认网站配置失败: %w", err)
+	}
+	if err := repository.SaveBanners(defaultBanners()); err != nil {
+		return fmt.Errorf("恢复默认轮播失败: %w", err)
+	}
+	if err := repository.ResetMappingRules(); err != nil {
+		return fmt.Errorf("恢复默认映射规则失败: %w", err)
+	}
+	if err := repository.ResetBuiltinAccounts(); err != nil {
+		return fmt.Errorf("恢复默认账号失败: %w", err)
+	}
+	return nil
+}
+
+func resetDefaultCollectSources() error {
+	if err := repository.ResetCollectSources(defaultFilmSources()); err != nil {
+		return fmt.Errorf("恢复默认采集源失败: %w", err)
+	}
+	return nil
+}
+
+func resetDefaultCronTasks() error {
+	for _, task := range repository.GetAllFilmTask() {
+		spider.RemoveCronByTaskId(task.Id)
+	}
+	tasks := defaultFilmTasks()
+	if err := repository.ResetFilmTasks(tasks); err != nil {
+		return fmt.Errorf("恢复默认定时任务失败: %w", err)
+	}
+	for _, task := range tasks {
+		if err := registerRuntimeTask(task); err != nil {
+			return fmt.Errorf("注册默认定时任务失败: %w", err)
+		}
+	}
+	return nil
 }
 
 func finalizeCategorySync() {
@@ -55,12 +95,21 @@ func (s *SpiderService) AutoCollect(time int) {
 	go spider.AutoCollect(time)
 }
 
-// ClearFilms 删除采集的数据信息
+// ClearFilms 恢复全站业务数据默认值。
 func (s *SpiderService) ClearFilms() error {
 	if err := spider.ClearSpider(); err != nil {
 		return err
 	}
-	if err := s.SyncMasterCategoryTree(); err != nil {
+	if err := resetDefaultSiteData(); err != nil {
+		return err
+	}
+	if err := resetDefaultCollectSources(); err != nil {
+		return err
+	}
+	if err := resetDefaultCronTasks(); err != nil {
+		return err
+	}
+	if err := s.FilmClassCollect(); err != nil {
 		return err
 	}
 	return nil

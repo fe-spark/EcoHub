@@ -105,3 +105,15 @@ func LoadMovieMatchKeys(filmIndex *model.FilmIndex, detail *model.MovieDetail) [
 	}
 	return BuildMovieMatchKeys(detail.DbId, detail.Name)
 }
+
+func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []string {
+	if snapshot != nil && snapshot.Mid > 0 {
+		if keys := loadMovieMatchKeysByMids([]int64{snapshot.Mid})[snapshot.Mid]; len(keys) > 0 {
+			return keys
+		}
+	}
+	if detail == nil {
+		return nil
+	}
+	return BuildMovieMatchKeys(detail.DbId, detail.Name)
+}

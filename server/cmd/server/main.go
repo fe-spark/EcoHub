@@ -53,6 +53,9 @@ func main() {
 }
 
 func start() {
+	db.StartRedisHealthCheck()
+	db.StartMysqlHealthCheck()
+
 	service.InitSvc.DefaultDataInit()
 
 	r := router.SetupRouter()

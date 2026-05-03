@@ -171,6 +171,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	}
 
 	if masterLookup || masterUriChanged || masterDowngrade {
+		filmrepo.ClearSnapshotState()
 		filmrepo.RefreshMasterDataCaches()
 		if source.Grade == model.MasterCollect && source.State {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
@@ -232,6 +233,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			return err
 		}
 		spider.ClearLimiter(source.Id)
+		filmrepo.ClearSnapshotState()
 		filmrepo.RefreshMasterDataCaches()
 		if source.State {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {

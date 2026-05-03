@@ -18,7 +18,7 @@ export interface CollectProgress {
   current: number;
   success: number;
   failed: number;
-  status: string;
+  status: "starting" | "running" | "stopped" | "finalizing" | "done" | "failed" | string;
 }
 
 export interface BatchOption {
