@@ -29,7 +29,7 @@ func (s *InitService) DefaultDataInit() {
 			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
 			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
 			&model.MovieMatchKey{},
-			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.SearchTagItem{},
+			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.CollectSourceStats{}, &model.SearchTagItem{},
 			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
 			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
 		)
@@ -80,6 +80,7 @@ func (s *InitService) TableInit() {
 		&model.MovieMatchKey{},
 		&model.VirtualPictureQueue{},
 		&model.FilmSource{},
+		&model.CollectSourceStats{},
 		&model.SearchTagItem{},
 		&model.CrontabRecord{},
 		&model.SiteConfigRecord{},

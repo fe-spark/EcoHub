@@ -64,6 +64,16 @@ func (f *FilmSource) TableName() string {
 	return "film_sources"
 }
 
+type CollectSourceStats struct {
+	gorm.Model
+	SourceId        string     `gorm:"uniqueIndex;size:32"`
+	LastCollectTime *time.Time `gorm:"index"`
+}
+
+func (CollectSourceStats) TableName() string {
+	return TableCollectSourceStats
+}
+
 // FailureRecord 失败采集记录信息机构体
 type FailureRecord struct {
 	gorm.Model

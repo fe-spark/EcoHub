@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -192,6 +194,69 @@ func GetEnabledCollectSourceList() []model.FilmSource {
 	return list
 }
 
+func GetCollectSourceStats(sourceIDs []string) map[string]*time.Time {
+	result := make(map[string]*time.Time, len(sourceIDs))
+	if len(sourceIDs) == 0 {
+		return result
+	}
+	var rows []model.CollectSourceStats
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).Find(&rows).Error; err != nil {
+		log.Println("GetCollectSourceStats Error:", err)
+		return result
+	}
+	for _, row := range rows {
+		if row.LastCollectTime == nil || row.LastCollectTime.IsZero() {
+			continue
+		}
+		value := *row.LastCollectTime
+		result[row.SourceId] = &value
+	}
+	return result
+}
+
+func TouchCollectSourceStatsTx(tx *gorm.DB, sourceID string, at time.Time) error {
+	if sourceID == "" {
+		return nil
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{SourceId: sourceID, LastCollectTime: &at}
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"last_collect_time": at,
+			"updated_at":        now,
+			"deleted_at":        nil,
+		}),
+	}).Create(&stat).Error
+}
+
+func DeleteCollectSourceStatsTx(tx *gorm.DB, sourceIDs ...string) error {
+	ids := make([]string, 0, len(sourceIDs))
+	seen := make(map[string]struct{}, len(sourceIDs))
+	for _, sourceID := range sourceIDs {
+		sourceID = strings.TrimSpace(sourceID)
+		if sourceID == "" {
+			continue
+		}
+		if _, ok := seen[sourceID]; ok {
+			continue
+		}
+		seen[sourceID] = struct{}{}
+		ids = append(ids, sourceID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return tx.Where("source_id IN ?", ids).Unscoped().Delete(&model.CollectSourceStats{}).Error
+}
+
+func ClearCollectSourceStatsTx(tx *gorm.DB) error {
+	return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CollectSourceStats{}).Error
+}
+
 // FindCollectSourceById 通过 Id 标识获取对应的资源站信息
 func FindCollectSourceById(id string) *model.FilmSource {
 	var fs model.FilmSource
@@ -289,6 +354,9 @@ func ClearAllCollectSource() {
 func ResetCollectSources(list []model.FilmSource) error {
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
+			return err
+		}
+		if err := ClearCollectSourceStatsTx(tx); err != nil {
 			return err
 		}
 		for i := range list {

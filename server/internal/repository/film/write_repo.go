@@ -13,6 +13,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/support"
 	"server/internal/utils"
 
@@ -298,6 +299,9 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 	}); err != nil {
 		return nil, err
 	}
+	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
+		log.Printf("TouchCollectSourceStats Error: %v", err)
+	}
 
 	clearFilmIndexCachesByPids(infoList)
 	if refreshSearchTags {
@@ -347,6 +351,9 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
 		return err
+	}
+	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
+		log.Printf("TouchCollectSourceStats Error: %v", err)
 	}
 
 	BatchHandleSearchTag(snapshot)

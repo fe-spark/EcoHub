@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"log"
 	"strings"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
@@ -62,9 +64,12 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		log.Printf("SaveSitePlayList Error: %v", err)
 		return err
 	}
-
 	if err := scheduleSearchInfoRefreshByPlaylists(sourceID, list); err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
+		return err
+	}
+	if err := repository.TouchCollectSourceStatsTx(db.Mdb, sourceID, time.Now()); err != nil {
+		log.Printf("TouchCollectSourceStats Error: %v", err)
 		return err
 	}
 

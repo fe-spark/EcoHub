@@ -9,6 +9,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
@@ -196,6 +197,9 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
 		return err
 	}
+	if err := repository.DeleteCollectSourceStatsTx(tx, ids...); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -242,6 +246,7 @@ func FilmZero() error {
 		model.TableFilmListSnapshot,
 		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
+		model.TableCollectSourceStats,
 		model.TableCategory,
 		model.TableVirtualPicture,
 		model.TableSearchTag,
