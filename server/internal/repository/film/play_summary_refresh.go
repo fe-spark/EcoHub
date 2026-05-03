@@ -4,6 +4,7 @@ import (
 	"log"
 	"sort"
 	"sync"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -94,8 +95,10 @@ func flushPlaySummaryRefreshMids(midSet map[int64]struct{}) error {
 		return mids[i] < mids[j]
 	})
 
+	startedAt := time.Now()
 	log.Printf("[PlaySummaryRefresh] 开始刷新 mid_count=%d", len(mids))
 	for start := 0; start < len(mids); start += playSummaryRefreshMIDChunkSize {
+		chunkStartedAt := time.Now()
 		end := start + playSummaryRefreshMIDChunkSize
 		if end > len(mids) {
 			end = len(mids)
@@ -107,7 +110,15 @@ func flushPlaySummaryRefreshMids(midSet map[int64]struct{}) error {
 		if err := RefreshPlayFromSummaryByIndexesTx(db.Mdb, infos); err != nil {
 			return err
 		}
+		log.Printf(
+			"[PlaySummaryRefresh] 刷新进度 mid=%d/%d chunk=%d cost=%s total_cost=%s",
+			end,
+			len(mids),
+			end-start,
+			time.Since(chunkStartedAt),
+			time.Since(startedAt),
+		)
 	}
-	log.Printf("[PlaySummaryRefresh] 刷新完成 mid_count=%d", len(mids))
+	log.Printf("[PlaySummaryRefresh] 刷新完成 mid_count=%d cost=%s", len(mids), time.Since(startedAt))
 	return nil
 }

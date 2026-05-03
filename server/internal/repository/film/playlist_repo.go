@@ -333,19 +333,36 @@ func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 	}
 
 	keysByMid := loadMovieMatchKeysByMidsTx(tx, mids)
+	allKeys := make([]string, 0, len(infos)*4)
+	for _, keys := range keysByMid {
+		allKeys = append(allKeys, keys...)
+	}
+	allKeys = UniqueKeys(allKeys)
+
+	sources := make([]model.FilmSource, 0)
+	sourceIDs := make([]string, 0)
+	for _, source := range support.GetCollectSourceList() {
+		if source.Grade != model.SlaveCollect || !source.State {
+			continue
+		}
+		sources = append(sources, source)
+		sourceIDs = append(sourceIDs, source.Id)
+	}
+
+	playlistsBySourceKey, err := loadPlaylistsBySourceAndKeysTx(tx, sourceIDs, allKeys)
+	if err != nil {
+		return nil, err
+	}
 	for _, info := range infos {
 		groupsBySource := make(map[string][]model.PlayLinkVo)
 		lookupKeys := keysByMid[info.Mid]
-		if len(lookupKeys) == 0 {
+		if len(lookupKeys) == 0 || len(playlistsBySourceKey) == 0 {
 			result[info.Mid] = groupsBySource
 			continue
 		}
 
-		for _, source := range support.GetCollectSourceList() {
-			if source.Grade != model.SlaveCollect || !source.State {
-				continue
-			}
-			groups := getMultiplePlayGroupsByKeysTx(tx, source.Id, source.Name, lookupKeys)
+		for _, source := range sources {
+			groups := buildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, lookupKeys, playlistsBySourceKey)
 			if len(groups) == 0 {
 				continue
 			}
@@ -354,6 +371,71 @@ func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 		result[info.Mid] = groupsBySource
 	}
 	return result, nil
+}
+
+func loadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []string) (map[string]map[string][]model.MoviePlaylist, error) {
+	if len(sourceIDs) == 0 || len(keys) == 0 {
+		return nil, nil
+	}
+
+	var playlists []model.MoviePlaylist
+	if err := tx.Where("source_id IN ? AND movie_key IN ?", sourceIDs, keys).
+		Order("source_id ASC").
+		Order("movie_key ASC").
+		Order("group_index ASC").
+		Find(&playlists).Error; err != nil {
+		return nil, err
+	}
+
+	result := make(map[string]map[string][]model.MoviePlaylist)
+	for _, playlist := range playlists {
+		byKey := result[playlist.SourceId]
+		if byKey == nil {
+			byKey = make(map[string][]model.MoviePlaylist)
+			result[playlist.SourceId] = byKey
+		}
+		byKey[playlist.MovieKey] = append(byKey[playlist.MovieKey], playlist)
+	}
+	return result, nil
+}
+
+func buildPlayGroupsFromLoadedPlaylists(
+	siteID string,
+	siteName string,
+	keys []string,
+	playlistsBySourceKey map[string]map[string][]model.MoviePlaylist,
+) []model.PlayLinkVo {
+	byKey := playlistsBySourceKey[siteID]
+	if len(byKey) == 0 {
+		return nil
+	}
+	for _, key := range UniqueKeys(keys) {
+		matched := byKey[key]
+		if len(matched) == 0 {
+			continue
+		}
+
+		groups := make([]model.PlayLinkVo, 0, len(matched))
+		for _, playlist := range matched {
+			var links []model.MovieUrlInfo
+			if err := json.Unmarshal([]byte(playlist.Content), &links); err != nil || len(links) == 0 {
+				continue
+			}
+
+			displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
+			groupID := BuildPlayGroupID(siteID, playlist.GroupName, playlist.GroupIndex, len(matched))
+			groups = append(groups, model.PlayLinkVo{
+				Id:       groupID,
+				SourceId: siteID,
+				Name:     displayName,
+				LinkList: links,
+			})
+		}
+		if len(groups) > 0 {
+			return groups
+		}
+	}
+	return nil
 }
 
 // LoadSourceMidByGlobalMid 通过全局影片 ID 获取指定站点的原始影片 ID。

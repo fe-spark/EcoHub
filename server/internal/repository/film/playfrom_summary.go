@@ -10,6 +10,7 @@ import (
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func BuildPlayFromSummary(filmIndex model.FilmIndex, detail *model.MovieDetail, groupsBySource map[string][]model.PlayLinkVo) string {
@@ -114,19 +115,41 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		return err
 	}
 
+	summaries := make(map[int64]string, len(orderedInfos))
 	for _, info := range orderedInfos {
 		var detailPtr *model.MovieDetail
 		if detail, ok := detailByMid[info.Mid]; ok {
 			detailPtr = &detail
 		}
-		summary := BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
-		if err := tx.Model(&model.FilmIndex{}).
-			Where("mid = ?", info.Mid).
-			Update("play_from_summary", summary).Error; err != nil {
-			return err
-		}
+		summaries[info.Mid] = BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
 	}
-	return nil
+	return batchUpdatePlayFromSummariesTx(tx, summaries)
+}
+
+func batchUpdatePlayFromSummariesTx(tx *gorm.DB, summaries map[int64]string) error {
+	if len(summaries) == 0 {
+		return nil
+	}
+
+	caseExpr := "CASE mid"
+	mids := make([]int64, 0, len(summaries))
+	args := make([]any, 0, len(summaries)*2)
+	for mid, summary := range summaries {
+		if mid <= 0 {
+			continue
+		}
+		caseExpr += " WHEN ? THEN ?"
+		args = append(args, mid, summary)
+		mids = append(mids, mid)
+	}
+	if len(mids) == 0 {
+		return nil
+	}
+	caseExpr += " ELSE play_from_summary END"
+
+	return tx.Model(&model.FilmIndex{}).
+		Where("mid IN ?", mids).
+		Update("play_from_summary", clause.Expr{SQL: caseExpr, Vars: args}).Error
 }
 
 func ClearProvideListCache() {
