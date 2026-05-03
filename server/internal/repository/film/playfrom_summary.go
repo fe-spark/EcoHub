@@ -2,7 +2,9 @@ package film
 
 import (
 	"encoding/json"
+	"log"
 	"strings"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -14,8 +16,21 @@ import (
 )
 
 func BuildPlayFromSummary(filmIndex model.FilmIndex, detail *model.MovieDetail, groupsBySource map[string][]model.PlayLinkVo) string {
+	return buildPlayFromSummaryWithSources(filmIndex, detail, groupsBySource, support.GetCollectSourceList())
+}
+
+func buildPlayFromSummaryWithSources(
+	filmIndex model.FilmIndex,
+	detail *model.MovieDetail,
+	groupsBySource map[string][]model.PlayLinkVo,
+	sources []model.FilmSource,
+) string {
 	playNames := make([]string, 0)
 	seen := make(map[string]struct{})
+	sourceNameByID := make(map[string]string, len(sources))
+	for _, source := range sources {
+		sourceNameByID[source.Id] = source.Name
+	}
 	appendName := func(name string) {
 		name = strings.TrimSpace(name)
 		if name == "" {
@@ -29,10 +44,7 @@ func BuildPlayFromSummary(filmIndex model.FilmIndex, detail *model.MovieDetail, 
 	}
 
 	if detail != nil {
-		siteName := ""
-		if filmIndex.SourceId != "" {
-			siteName = findCollectSourceName(filmIndex.SourceId)
-		}
+		siteName := sourceNameByID[filmIndex.SourceId]
 		for index, links := range detail.PlayList {
 			if len(links) == 0 {
 				continue
@@ -46,7 +58,7 @@ func BuildPlayFromSummary(filmIndex model.FilmIndex, detail *model.MovieDetail, 
 	}
 
 	if len(groupsBySource) > 0 {
-		for _, source := range support.GetCollectSourceList() {
+		for _, source := range sources {
 			if source.Grade != model.SlaveCollect || !source.State {
 				continue
 			}
@@ -97,10 +109,13 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		mids = append(mids, info.Mid)
 	}
 
+	startedAt := time.Now()
 	var detailInfos []model.MovieDetailInfo
 	if err := tx.Where("mid IN ?", mids).Find(&detailInfos).Error; err != nil {
 		return err
 	}
+	detailCost := time.Since(startedAt)
+	parseStartedAt := time.Now()
 	detailByMid := make(map[int64]model.MovieDetail, len(detailInfos))
 	for _, item := range detailInfos {
 		var detail model.MovieDetail
@@ -109,11 +124,16 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		}
 		detailByMid[item.Mid] = detail
 	}
+	parseCost := time.Since(parseStartedAt)
 
+	playlistStartedAt := time.Now()
 	playlistGroups, err := loadPlaylistGroupsByInfosTx(tx, orderedInfos)
 	if err != nil {
 		return err
 	}
+	playlistCost := time.Since(playlistStartedAt)
+	buildStartedAt := time.Now()
+	sources := support.GetCollectSourceList()
 
 	summaries := make(map[int64]string, len(orderedInfos))
 	for _, info := range orderedInfos {
@@ -121,9 +141,24 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		if detail, ok := detailByMid[info.Mid]; ok {
 			detailPtr = &detail
 		}
-		summaries[info.Mid] = BuildPlayFromSummary(info, detailPtr, playlistGroups[info.Mid])
+		summaries[info.Mid] = buildPlayFromSummaryWithSources(info, detailPtr, playlistGroups[info.Mid], sources)
 	}
-	return batchUpdatePlayFromSummariesTx(tx, summaries)
+	buildCost := time.Since(buildStartedAt)
+	updateStartedAt := time.Now()
+	if err := batchUpdatePlayFromSummariesTx(tx, summaries); err != nil {
+		return err
+	}
+	log.Printf(
+		"[PlaySummaryRefresh] chunk明细 mid_count=%d detail=%s parse=%s playlist=%s build=%s update=%s total=%s",
+		len(orderedInfos),
+		detailCost,
+		parseCost,
+		playlistCost,
+		buildCost,
+		time.Since(updateStartedAt),
+		time.Since(startedAt),
+	)
+	return nil
 }
 
 func batchUpdatePlayFromSummariesTx(tx *gorm.DB, summaries map[int64]string) error {
@@ -158,13 +193,4 @@ func ClearProvideListCache() {
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
-}
-
-func findCollectSourceName(sourceID string) string {
-	for _, source := range support.GetCollectSourceList() {
-		if source.Id == sourceID {
-			return source.Name
-		}
-	}
-	return ""
 }

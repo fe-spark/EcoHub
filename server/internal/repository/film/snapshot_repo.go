@@ -56,13 +56,16 @@ func RebuildFilmListSnapshot(version string) error {
 		version = NewSnapshotVersion()
 	}
 
+	startedAt := time.Now()
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
 			return err
 		}
 
 		var lastID uint
+		total := 0
 		for {
+			batchStartedAt := time.Now()
 			var indexes []model.FilmIndex
 			if err := tx.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
 				Where("film_index.id > ?", lastID).
@@ -83,6 +86,16 @@ func RebuildFilmListSnapshot(version string) error {
 			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapshots, snapshotBuildBatchSize).Error; err != nil {
 				return err
 			}
+			total += len(snapshots)
+			log.Printf(
+				"[Snapshot] 构建进度 version=%s total=%d batch=%d last_id=%d cost=%s total_cost=%s",
+				version,
+				total,
+				len(snapshots),
+				lastID,
+				time.Since(batchStartedAt),
+				time.Since(startedAt),
+			)
 		}
 
 		return nil
