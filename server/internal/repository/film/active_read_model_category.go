@@ -11,7 +11,7 @@ import (
 
 func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	readModel := requireActiveFilmReadModel(version)
-	snapshots := readModel.categorySnapshots(field, id)
+	snapshots := readModel.projectedCategorySnapshots(field, id)
 	sortSnapshotsBySearchTag(snapshots, "update_stamp")
 	return BuildMovieBasicInfosFromSnapshots(sliceSnapshots(snapshots, limit, offset)...)
 }
@@ -19,7 +19,7 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
 	page = ensurePage(page)
 	readModel := requireActiveFilmReadModel(version)
-	snapshots := readModel.categorySnapshots(field, id)
+	snapshots := readModel.projectedCategorySnapshots(field, id)
 	sortSnapshotsBySearchTag(snapshots, "update_stamp")
 	page.Total = len(snapshots)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
@@ -32,7 +32,7 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	readModel := requireActiveFilmReadModel(version)
 	hotSince := time.Now().AddDate(0, -1, 0).Unix()
-	all := readModel.categorySnapshots(field, id)
+	all := readModel.projectedCategorySnapshots(field, id)
 	snapshots := make([]model.FilmListSnapshot, 0, len(all))
 	for _, snapshot := range all {
 		if snapshot.UpdateStamp > hotSince {
@@ -54,7 +54,7 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 func GetSnapshotMovieListBySortReadModel(version string, sortType int, pid int64, page *dto.Page) []model.MovieBasicInfo {
 	page = ensurePage(page)
 	readModel := requireActiveFilmReadModel(version)
-	snapshots := readModel.categorySnapshots("pid", pid)
+	snapshots := readModel.projectedCategorySnapshots("pid", pid)
 	switch sortType {
 	case 0:
 		sort.SliceStable(snapshots, func(i, j int) bool {
@@ -81,20 +81,16 @@ func GetSnapshotMovieListBySortReadModel(version string, sortType int, pid int64
 	return BuildMovieBasicInfosFromSnapshots(pageSnapshots(snapshots, page)...)
 }
 
-func (m *FilmReadModel) categorySnapshots(field string, id int64) []model.FilmListSnapshot {
+func (m *FilmReadModel) projectedCategorySnapshots(field string, id int64) []model.FilmListSnapshot {
 	id = support.ResolveCategoryID(id)
 	if id <= 0 {
 		return []model.FilmListSnapshot{}
 	}
 	if field == "pid" {
-		return m.snapshotsByMIDs(m.ByPid[id])
+		return m.projectedSnapshotsByPid(id)
 	}
 	snapshots := make([]model.FilmListSnapshot, 0)
-	for _, mid := range m.AllMIDs {
-		snapshot, exists := m.ByMid[mid]
-		if !exists {
-			continue
-		}
+	for _, snapshot := range m.projectedSnapshots() {
 		if support.ResolveCategoryID(snapshot.Cid) == id {
 			snapshots = append(snapshots, snapshot)
 		}

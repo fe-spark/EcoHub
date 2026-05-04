@@ -55,7 +55,7 @@ export default async function RootLayout({
   const siteConfig = await getSiteConfig();
 
   return (
-    <html lang="zh-CN">
+		<html lang="zh-CN" suppressHydrationWarning>
       <body>
         <AntdRegistry>
           <GlobalThemeProvider fontFamily={APP_FONT_FAMILY}>

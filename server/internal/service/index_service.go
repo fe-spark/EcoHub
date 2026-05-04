@@ -33,8 +33,9 @@ func normalizeIndexPage(page *dto.Page) *dto.Page {
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
 	version := filmrepo.GetActiveReadModelVersion()
+	ruleVersion := repository.GetRuleVersion()
 	// 1. 尝试从 Redis 获取缓存
-	cacheKey := fmt.Sprintf("%s:s%s", repository.GetVersionedIndexPageCacheKey(), version)
+	cacheKey := fmt.Sprintf("%s:s%s:r%s", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
 	if version != "" {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			res := make(map[string]any)
@@ -216,7 +217,8 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 		return playList
 	}
 
-	sc := repository.GetCollectSourceListByGrade(model.SlaveCollect)
+	slaveSources := repository.GetCollectSourceListByGrade(model.SlaveCollect)
+	querySources := make([]model.FilmSource, 0, len(slaveSources))
 	seenSourceIDs := make(map[string]struct{}, len(playList))
 	for _, item := range playList {
 		sourceID := strings.TrimSpace(item.SourceId)
@@ -229,14 +231,19 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 		seenSourceIDs[sourceID] = struct{}{}
 	}
 
-	for _, source := range sc {
+	for _, source := range slaveSources {
 		if !source.State {
 			continue
 		}
 		if _, ok := seenSourceIDs[source.Id]; ok {
 			continue
 		}
-		groups := filmrepo.GetMultiplePlayGroupsByKeys(source.Id, source.Name, names)
+		querySources = append(querySources, source)
+	}
+
+	groupsBySource := filmrepo.GetMultiplePlayGroupsBySourcesAndKeys(querySources, names)
+	for _, source := range querySources {
+		groups := groupsBySource[source.Id]
 		if len(groups) > 0 {
 			playList = append(playList, groups...)
 		}

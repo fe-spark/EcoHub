@@ -118,12 +118,6 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	if err := RebuildFilmListSnapshot(version); err != nil {
 		return err
 	}
-	if err := RebuildFilterOptionSnapshot(version); err != nil {
-		return err
-	}
-	if err := RebuildFilterIndexSnapshot(version); err != nil {
-		return err
-	}
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
@@ -136,8 +130,6 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
 	pruneOldFilmListSnapshots(snapshotRetainVersions)
-	pruneOldFilterOptionSnapshots(snapshotRetainVersions)
-	pruneOldFilterIndexSnapshots(snapshotRetainVersions)
 	return nil
 }
 
@@ -374,12 +366,6 @@ func RestoreActiveSnapshotsByCategory(cid int64) {
 }
 
 func rebuildActiveFilterOptions(version string) {
-	if err := RebuildFilterOptionSnapshot(version); err != nil {
-		log.Printf("RebuildFilterOptionSnapshot Error: %v", err)
-	}
-	if err := RebuildFilterIndexSnapshot(version); err != nil {
-		log.Printf("RebuildFilterIndexSnapshot Error: %v", err)
-	}
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		log.Printf("LoadActiveFilmReadModel Error: %v", err)
 	}
@@ -390,13 +376,14 @@ func RefreshActiveReadModelArtifacts() error {
 	if strings.TrimSpace(version) == "" {
 		return nil
 	}
-	if err := RebuildFilterOptionSnapshot(version); err != nil {
+	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
-	if err := RebuildFilterIndexSnapshot(version); err != nil {
-		return err
-	}
-	return LoadActiveFilmReadModel(version)
+	return nil
+}
+
+func RefreshActiveSnapshotReadModel() error {
+	return RefreshActiveReadModelArtifacts()
 }
 
 func UpsertActiveSnapshotByMid(mid int64) error {

@@ -45,6 +45,7 @@ func RebuildFilterIndexSnapshot(version string) error {
 
 			indexes := make([]model.FilmFilterIndexSnapshot, 0, len(snapshots)*6)
 			for _, snapshot := range snapshots {
+				snapshot = projectSnapshotCategory(snapshot)
 				indexes = append(indexes, buildFilterIndexRows(version, snapshot)...)
 				lastID = snapshot.ID
 			}
