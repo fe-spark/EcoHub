@@ -117,7 +117,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmrepo.GetSearchTag(model.SearchTagsVO{Pid: category.Id})
+			searchTags := filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveSnapshotVersion(), category.Id)
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags

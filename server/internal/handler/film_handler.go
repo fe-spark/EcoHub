@@ -71,8 +71,8 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}
 
 	s.Paging = dto.GetPageParams(c)
-	options := service.FilmSvc.GetSearchOptions()
 	sl := service.FilmSvc.GetFilmPage(s)
+	options := service.FilmSvc.GetSearchOptions()
 	dto.Success(gin.H{
 		"params":  s,
 		"list":    sl,

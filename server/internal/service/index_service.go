@@ -200,25 +200,13 @@ func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []m
 	if snapshot == nil {
 		return []model.MovieBasicInfo{}
 	}
-	relatedTags := model.SearchTagsVO{Pid: snapshot.Pid, Cid: snapshot.Cid, Plot: snapshot.ClassTag, Sort: "update_stamp"}
-	queryPage := *page
-	queryPage.PageSize++
-	list := filmrepo.ListFilmSnapshotsByTagsFast(version, relatedTags, &queryPage)
-	filtered := make([]model.FilmListSnapshot, 0, page.PageSize)
-	for _, item := range list {
-		if item.Mid != snapshot.Mid {
-			filtered = append(filtered, item)
-			if len(filtered) >= page.PageSize {
-				break
-			}
-		}
-	}
-	return filmrepo.BuildMovieBasicInfosFromSnapshots(filtered...)
+	list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
+	return filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
 }
 
 // SearchTags 整合对应分类的搜索tag
 func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
-	return filmrepo.GetSearchTag(st)
+	return filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveSnapshotVersion(), st.Pid)
 }
 
 func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []model.PlayLinkVo {
@@ -305,27 +293,8 @@ func resolvePrimarySourceName(playFrom []string, index int) string {
 func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) []model.MovieBasicInfo {
 	page = normalizeIndexPage(page)
 	version := filmrepo.GetActiveSnapshotVersion()
-	cacheKey := filmrepo.SnapshotSearchCacheKey(version, st, page)
-	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-		var res struct {
-			List []model.MovieBasicInfo `json:"list"`
-			Page dto.Page               `json:"page"`
-		}
-		if json.Unmarshal([]byte(data), &res) == nil {
-			*page = res.Page
-			return res.List
-		}
-	}
-
 	sl := filmrepo.ListFilmSnapshotsByTagsFast(version, st, page)
-	list := filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
-	if data, err := json.Marshal(struct {
-		List []model.MovieBasicInfo `json:"list"`
-		Page dto.Page               `json:"page"`
-	}{list, *page}); err == nil {
-		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
-	}
-	return list
+	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据

@@ -110,6 +110,15 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	if err := RebuildFilmListSnapshot(version); err != nil {
 		return err
 	}
+	if err := RebuildFilterOptionSnapshot(version); err != nil {
+		return err
+	}
+	if err := RebuildFilterIndexSnapshot(version); err != nil {
+		return err
+	}
+	if err := LoadActiveFilmReadModel(version); err != nil {
+		return err
+	}
 	if err := SetActiveSnapshotVersion(version); err != nil {
 		return err
 	}
@@ -118,8 +127,9 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	}
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
-	WarmSnapshotFilterCaches(version)
 	pruneOldFilmListSnapshots(snapshotRetainVersions)
+	pruneOldFilterOptionSnapshots(snapshotRetainVersions)
+	pruneOldFilterIndexSnapshots(snapshotRetainVersions)
 	return nil
 }
 
@@ -167,6 +177,54 @@ func pruneOldFilmListSnapshots(retain int) {
 
 	if err := db.Mdb.Where("snapshot_version NOT IN ?", versions).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
 		log.Printf("pruneOldFilmListSnapshots Delete Error: %v", err)
+	}
+}
+
+func pruneOldFilterOptionSnapshots(retain int) {
+	if retain <= 0 {
+		retain = 1
+	}
+
+	var versions []string
+	if err := db.Mdb.Model(&model.FilmFilterOptionSnapshot{}).
+		Select("snapshot_version").
+		Group("snapshot_version").
+		Order("MAX(id) DESC").
+		Limit(retain).
+		Pluck("snapshot_version", &versions).Error; err != nil {
+		log.Printf("pruneOldFilterOptionSnapshots Versions Error: %v", err)
+		return
+	}
+	if len(versions) == 0 {
+		return
+	}
+
+	if err := db.Mdb.Where("snapshot_version NOT IN ?", versions).Unscoped().Delete(&model.FilmFilterOptionSnapshot{}).Error; err != nil {
+		log.Printf("pruneOldFilterOptionSnapshots Delete Error: %v", err)
+	}
+}
+
+func pruneOldFilterIndexSnapshots(retain int) {
+	if retain <= 0 {
+		retain = 1
+	}
+
+	var versions []string
+	if err := db.Mdb.Model(&model.FilmFilterIndexSnapshot{}).
+		Select("snapshot_version").
+		Group("snapshot_version").
+		Order("MAX(id) DESC").
+		Limit(retain).
+		Pluck("snapshot_version", &versions).Error; err != nil {
+		log.Printf("pruneOldFilterIndexSnapshots Versions Error: %v", err)
+		return
+	}
+	if len(versions) == 0 {
+		return
+	}
+
+	if err := db.Mdb.Where("snapshot_version NOT IN ?", versions).Unscoped().Delete(&model.FilmFilterIndexSnapshot{}).Error; err != nil {
+		log.Printf("pruneOldFilterIndexSnapshots Delete Error: %v", err)
 	}
 }
 
@@ -235,6 +293,7 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 	}
 	if result.RowsAffected > 0 {
 		RefreshAccessDataCaches()
+		rebuildActiveFilterOptions(version)
 	}
 }
 
@@ -251,6 +310,7 @@ func DeleteActiveSnapshotsByCategory(field string, id int64) {
 	}
 	if result.RowsAffected > 0 {
 		RefreshAccessDataCaches()
+		rebuildActiveFilterOptions(version)
 	}
 }
 
@@ -268,6 +328,7 @@ func DeleteActiveRootSnapshots(pid int64) {
 	}
 	if result.RowsAffected > 0 {
 		RefreshAccessDataCaches()
+		rebuildActiveFilterOptions(version)
 	}
 }
 
@@ -301,11 +362,19 @@ func RestoreActiveSnapshotsByCategory(cid int64) {
 		return
 	}
 	RefreshAccessDataCaches()
+	rebuildActiveFilterOptions(version)
 }
 
-func BuildSnapshotQueryByTags(version string, st model.SearchTagsVO) *gorm.DB {
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", strings.TrimSpace(version))
-	return BuildFilmIndexQueryByTags(query, st)
+func rebuildActiveFilterOptions(version string) {
+	if err := RebuildFilterOptionSnapshot(version); err != nil {
+		log.Printf("RebuildFilterOptionSnapshot Error: %v", err)
+	}
+	if err := RebuildFilterIndexSnapshot(version); err != nil {
+		log.Printf("RebuildFilterIndexSnapshot Error: %v", err)
+	}
+	if err := LoadActiveFilmReadModel(version); err != nil {
+		log.Printf("LoadActiveFilmReadModel Error: %v", err)
+	}
 }
 
 func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
@@ -368,99 +437,25 @@ func normalizeMovieDetailLists(detail *model.MovieDetail) {
 	}
 }
 
-func ListFilmSnapshotsByTags(version string, st model.SearchTagsVO, page *dto.Page) []model.FilmListSnapshot {
-	page = ensurePage(page)
-	qw := BuildSnapshotQueryByTags(version, st)
-
-	dto.GetPage(qw, page)
-	var snapshots []model.FilmListSnapshot
-	if err := qw.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&snapshots).Error; err != nil {
-		log.Printf("ListFilmSnapshotsByTags Error: %v", err)
-		return nil
-	}
-	return snapshots
-}
-
-func SearchSnapshotsByKeyword(version string, keyword string, page *dto.Page) []model.FilmListSnapshot {
-	page = ensurePage(page)
-	version = strings.TrimSpace(version)
-	keywordQuery := buildNameKeywordQuery(keyword)
-	var snapshots []model.FilmListSnapshot
-	query := applyVisibleCategoryFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)).
-		Where(keywordQuery).
-		Order("year DESC, " + latestUpdateOrderSQL)
-
-	dto.GetPage(query, page)
-	if err := query.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&snapshots).Error; err != nil {
-		log.Printf("SearchSnapshotsByKeyword Error: %v", err)
-		return nil
-	}
-	return snapshots
-}
-
 func GetSnapshotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	var snapshots []model.FilmListSnapshot
-	query := applyCategoryFieldFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", strings.TrimSpace(version)), field, id)
-	if err := query.Order(latestUpdateOrderSQL).Limit(limit).Offset(offset).Find(&snapshots).Error; err != nil {
-		log.Printf("GetSnapshotMovieListByCategory Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return GetSnapshotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
 func GetSnapshotMovieListByCategoryPage(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	page = ensurePage(page)
-	var snapshots []model.FilmListSnapshot
-	query := applyCategoryFieldFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", strings.TrimSpace(version)), field, id)
-	dto.GetPage(query, page)
-	if err := query.Order(latestUpdateOrderSQL).Limit(page.PageSize).Offset(getPageOffset(page)).Find(&snapshots).Error; err != nil {
-		log.Printf("GetSnapshotMovieListByCategoryPage Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return GetSnapshotMovieListByCategoryPageReadModel(version, field, id, page)
 }
 
 func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	var snapshots []model.FilmListSnapshot
-	hotSince := time.Now().AddDate(0, -1, 0).Unix()
-	query := applyCategoryFieldFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", strings.TrimSpace(version)), field, id)
-	if err := query.Where("update_stamp > ?", hotSince).
-		Order("year DESC, hits DESC, mid DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&snapshots).Error; err != nil {
-		log.Printf("GetSnapshotHotMovieListByCategory Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
 func GetSnapshotMovieListBySort(version string, sortType int, pid int64, page *dto.Page) []model.MovieBasicInfo {
-	page = ensurePage(page)
-	var snapshots []model.FilmListSnapshot
-	query := applyMovieSortQuery(applyCategoryFieldFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version), "pid", pid), sortType)
-	if err := query.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&snapshots).Error; err != nil {
-		log.Printf("GetSnapshotMovieListBySort Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return GetSnapshotMovieListBySortReadModel(version, sortType, pid, page)
 }
 
 func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string {
 	page = ensurePage(page)
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
-}
-
-func SnapshotSearchCacheKey(version string, st model.SearchTagsVO, page *dto.Page) string {
-	page = ensurePage(page)
-	st = normalizeSearchTagsVO(st)
-	payload := struct {
-		Version string
-		Tags    model.SearchTagsVO
-		Page    dto.Page
-	}{Version: version, Tags: st, Page: *page}
-	data, _ := json.Marshal(payload)
-	return fmt.Sprintf("%s:%x", config.FilmClassifySearchKey, data)
 }
 
 func RefreshAccessDataCaches() {
@@ -477,12 +472,12 @@ func RefreshAccessDataCaches() {
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
-		fmt.Sprintf("%s:*", config.FilmClassifySearchKey),
 		fmt.Sprintf("%s:*", config.SearchTags),
 	)
 }
 
 func ClearSnapshotState() {
+	ClearActiveFilmReadModel()
 	db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey, config.SnapshotBuildVersionKey)
 	RefreshAccessDataCaches()
 }
