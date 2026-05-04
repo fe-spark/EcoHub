@@ -96,7 +96,10 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 		return errors.New("需要更新的分类信息不存在")
 	}
 
-	return repository.UpdateCategoryStatus(class.Id, updates)
+	if err := repository.UpdateCategoryStatus(class.Id, updates); err != nil {
+		return err
+	}
+	return filmrepo.RefreshActiveReadModelArtifacts()
 }
 
 func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTree {
@@ -122,5 +125,8 @@ func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
 	if len(cleanNodes) == 0 {
 		return errors.New("分类结构不能为空")
 	}
-	return repository.SaveCategoryTreeStructure(cleanNodes)
+	if err := repository.SaveCategoryTreeStructure(cleanNodes); err != nil {
+		return err
+	}
+	return filmrepo.RefreshActiveReadModelArtifacts()
 }

@@ -145,6 +145,9 @@ func buildSortFilterOptions(version string, pid int64) []model.FilmFilterOptionS
 
 func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveReadModelVersion()
+	}
 	pid = support.ResolveCategoryID(pid)
 	if version == "" || pid <= 0 {
 		return map[string]any{}
@@ -161,7 +164,7 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 }
 
 func EnsureActiveFilterOptionSnapshot() error {
-	version := GetActiveSnapshotVersion()
+	version := GetActiveReadModelVersion()
 	if version == "" {
 		return nil
 	}
@@ -214,7 +217,7 @@ func buildFilterOptionResponse(rows []model.FilmFilterOptionSnapshot) map[string
 }
 
 func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
-	version := GetActiveSnapshotVersion()
+	version := GetActiveReadModelVersion()
 	if version == "" {
 		return map[int64]map[string]any{}
 	}

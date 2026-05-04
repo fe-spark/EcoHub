@@ -156,7 +156,11 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 
 	cat := service.IndexSvc.GetPidCategory(params.Pid)
 
-	list := service.IndexSvc.GetFilmsByTags(params, page)
+	list, err := service.IndexSvc.GetFilmsByTags(params, page)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	if list == nil {
 		list = make([]model.MovieBasicInfo, 0)
 	}

@@ -333,6 +333,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		return nil
 	}
 
+	var savedMid int64
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, []model.FilmIndex{snapshot})
 		if err != nil {
@@ -348,6 +349,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		if len(reloadedIndexes) == 0 {
 			return nil
 		}
+		savedMid = reloadedIndexes[0].Mid
 		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
 		return err
@@ -359,6 +361,12 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	BatchHandleSearchTag(snapshot)
 	clearDetailCaches(snapshot.Pid)
 	ClearProvideListCache()
+	if err := UpsertActiveSnapshotByMid(savedMid); err != nil {
+		return err
+	}
+	if err := RefreshActiveReadModelArtifacts(); err != nil {
+		return err
+	}
 	return nil
 }
 

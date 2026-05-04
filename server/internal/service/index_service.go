@@ -32,7 +32,7 @@ func normalizeIndexPage(page *dto.Page) *dto.Page {
 
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	// 1. 尝试从 Redis 获取缓存
 	cacheKey := fmt.Sprintf("%s:s%s", repository.GetVersionedIndexPageCacheKey(), version)
 	if version != "" {
@@ -92,7 +92,7 @@ func (i *IndexService) IndexPage() map[string]any {
 
 // GetFilmDetail 影片详情信息页面处理
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
 	if snapshot == nil {
 		return model.MovieDetailVo{}, nil
@@ -151,7 +151,7 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 
 // SearchFilmInfo 获取关键字匹配的影片信息
 func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	sl := filmrepo.SearchSnapshotsByKeywordFast(version, key, page)
 	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
 }
@@ -159,7 +159,7 @@ func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieB
 // GetFilmCategory 根据Pid或Cid获取指定的分页数据
 func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) []model.MovieBasicInfo {
 	var basicList []model.MovieBasicInfo
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	page = normalizeIndexPage(page)
 	switch idType {
 	case "pid":
@@ -195,7 +195,7 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
 	page = normalizeIndexPage(page)
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	snapshot := filmrepo.GetSnapshotByMid(version, detail.Id)
 	if snapshot == nil {
 		return []model.MovieBasicInfo{}
@@ -206,7 +206,7 @@ func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []m
 
 // SearchTags 整合对应分类的搜索tag
 func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
-	return filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveSnapshotVersion(), st.Pid)
+	return filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveReadModelVersion(), st.Pid)
 }
 
 func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []model.PlayLinkVo {
@@ -290,16 +290,19 @@ func resolvePrimarySourceName(playFrom []string, index int) string {
 }
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
-func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) []model.MovieBasicInfo {
+func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]model.MovieBasicInfo, error) {
 	page = normalizeIndexPage(page)
-	version := filmrepo.GetActiveSnapshotVersion()
+	if err := validateReadModelSearchTags(st); err != nil {
+		return nil, err
+	}
+	version := filmrepo.GetActiveReadModelVersion()
 	sl := filmrepo.ListFilmSnapshotsByTagsFast(version, st, page)
-	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
+	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...), nil
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	cacheKey := filmrepo.SnapshotClassifyCacheKey(version, pid, page)
 	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 		var cached map[string]any

@@ -96,7 +96,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 
 	switch ac {
 	case "list":
-		page, pagecount, total, vodList := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+			return
+		}
 		if vodList == nil {
 			vodList = []model.FilmList{}
 		}
@@ -132,7 +136,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 				"filters":   filters,
 			})
 		} else {
-			page, pagecount, total, vodListSimple := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+			page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+			if err != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+				return
+			}
 			var _idsArr []string
 			for _, v := range vodListSimple {
 				_idsArr = append(_idsArr, strconv.FormatInt(v.VodID, 10))
@@ -156,7 +164,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		}
 
 	default:
-		page, pagecount, total, vodList := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+			return
+		}
 		if vodList == nil {
 			vodList = []model.FilmList{}
 		}

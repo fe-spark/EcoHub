@@ -101,7 +101,7 @@ func buildFilterIndexRows(version string, snapshot model.FilmListSnapshot) []mod
 }
 
 func EnsureActiveFilterIndexSnapshot() error {
-	version := GetActiveSnapshotVersion()
+	version := GetActiveReadModelVersion()
 	if version == "" {
 		return nil
 	}

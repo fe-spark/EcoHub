@@ -117,7 +117,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveSnapshotVersion(), category.Id)
+			searchTags := filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveReadModelVersion(), category.Id)
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -237,14 +237,14 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 }
 
 // GetVodList 获取视频列表 (支持多维度筛选)
-func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList) {
+func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		return 1, 1, 0, []model.FilmList{}
+		return 1, 1, 0, []model.FilmList{}, nil
 	}
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
@@ -257,7 +257,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 				VodList   []model.FilmList
 			}
 			if json.Unmarshal([]byte(data), &res) == nil {
-				return res.Current, res.PageCount, res.Total, res.VodList
+				return res.Current, res.PageCount, res.Total, res.VodList, nil
 			}
 		}
 	}
@@ -273,7 +273,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		cid = repository.ResolveCategoryID(cid)
 	}
 	if cid == model.TagUncategorizedValue && pid <= 0 {
-		return 1, 1, 0, []model.FilmList{}
+		return 1, 1, 0, []model.FilmList{}, nil
 	}
 
 	searchTags := model.SearchTagsVO{
@@ -284,6 +284,9 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		Plot:     strings.TrimSpace(plot),
 		Year:     strings.TrimSpace(year),
 		Sort:     strings.TrimSpace(sort),
+	}
+	if err := validateReadModelSearchTags(searchTags); err != nil {
+		return page.Current, 1, 0, []model.FilmList{}, err
 	}
 	sl := filmrepo.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
 
@@ -316,13 +319,13 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		}
 	}
 
-	return page.Current, page.PageCount, page.Total, vodList
+	return page.Current, page.PageCount, page.Total, vodList, nil
 }
 
 // GetVodDetail 获取视频详情（带播放列表）
 func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 	var detailList []model.FilmDetail
-	version := filmrepo.GetActiveSnapshotVersion()
+	version := filmrepo.GetActiveReadModelVersion()
 
 	for _, idStr := range ids {
 		idInt, err := strconv.Atoi(idStr)

@@ -13,7 +13,7 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	readModel := requireActiveFilmReadModel(version)
 	tags := splitClassTags(snapshot.ClassTag)
 	if len(tags) == 0 {
-		return []model.FilmListSnapshot{}
+		return readModel.relatedByCategory(snapshot, page)
 	}
 
 	candidateSet := make(map[int64]struct{})
@@ -41,6 +41,31 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 		snapshots = append(snapshots, candidate)
 	}
 	sortRelatedSnapshots(snapshots, tags)
+	page.Total = len(snapshots)
+	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+	if page.PageCount <= 0 {
+		page.PageCount = 1
+	}
+	return pageSnapshots(snapshots, page)
+}
+
+func (m *FilmReadModel) relatedByCategory(snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
+	mids := m.baseMIDs(snapshot.Pid)
+	snapshots := make([]model.FilmListSnapshot, 0, len(mids))
+	for _, mid := range mids {
+		if mid == snapshot.Mid {
+			continue
+		}
+		candidate, ok := m.ByMid[mid]
+		if !ok {
+			continue
+		}
+		if snapshot.Cid > 0 && candidate.Cid != snapshot.Cid {
+			continue
+		}
+		snapshots = append(snapshots, candidate)
+	}
+	sortSnapshotsBySearchTag(snapshots, "update_stamp")
 	page.Total = len(snapshots)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
 	if page.PageCount <= 0 {

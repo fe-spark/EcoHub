@@ -46,6 +46,14 @@ func SetActiveSnapshotVersion(version string) error {
 	return db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err()
 }
 
+func GetActiveReadModelVersion() string {
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil {
+		return GetActiveSnapshotVersion()
+	}
+	return readModel.Version
+}
+
 func NewSnapshotVersion() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
 }
@@ -375,6 +383,41 @@ func rebuildActiveFilterOptions(version string) {
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		log.Printf("LoadActiveFilmReadModel Error: %v", err)
 	}
+}
+
+func RefreshActiveReadModelArtifacts() error {
+	version := GetActiveReadModelVersion()
+	if strings.TrimSpace(version) == "" {
+		return nil
+	}
+	if err := RebuildFilterOptionSnapshot(version); err != nil {
+		return err
+	}
+	if err := RebuildFilterIndexSnapshot(version); err != nil {
+		return err
+	}
+	return LoadActiveFilmReadModel(version)
+}
+
+func UpsertActiveSnapshotByMid(mid int64) error {
+	version := GetActiveReadModelVersion()
+	if strings.TrimSpace(version) == "" || mid <= 0 {
+		return nil
+	}
+	index := GetFilmIndexById(mid)
+	if index == nil || index.Mid <= 0 {
+		return fmt.Errorf("影片索引不存在: %d", mid)
+	}
+	snapshot := buildFilmListSnapshot(version, *index)
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("snapshot_version = ? AND mid = ?", version, mid).Delete(&model.FilmListSnapshot{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&snapshot).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {

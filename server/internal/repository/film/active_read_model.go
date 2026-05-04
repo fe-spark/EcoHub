@@ -83,9 +83,13 @@ func GetActiveFilmReadModel() *FilmReadModel {
 }
 
 func requireActiveFilmReadModel(version string) *FilmReadModel {
+	version = strings.TrimSpace(version)
 	readModel := GetActiveFilmReadModel()
 	if readModel == nil {
 		panic("ActiveReadModel 未加载")
+	}
+	if version != "" && readModel.Version != version {
+		panic("ActiveReadModel 版本不一致")
 	}
 	return readModel
 }
@@ -211,7 +215,7 @@ func SearchSnapshotsByKeywordReadModel(version string, keyword string, page *dto
 func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	startedAt := time.Now()
 	page := ensurePage(s.Paging)
-	readModel := requireActiveFilmReadModel(GetActiveSnapshotVersion())
+	readModel := requireActiveFilmReadModel("")
 
 	indexes := make([]model.FilmIndex, 0, len(readModel.AllMIDs))
 	for _, mid := range readModel.AllMIDs {
