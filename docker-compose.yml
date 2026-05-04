@@ -1,13 +1,20 @@
+x-local-credentials:
+  mysql-root-password: &mysql_root_password ecohub
+  mysql-database: &mysql_database eco
+  mysql-user: &mysql_user eco
+  mysql-password: &mysql_password ecohub
+  redis-password: &redis_password ecohub
+
 services:
   mysql:
     container_name: Eco-mysql
     image: mysql:8.4
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: root_local_password
-      MYSQL_DATABASE: eco
-      MYSQL_USER: eco
-      MYSQL_PASSWORD: eco_local_password
+      MYSQL_ROOT_PASSWORD: *mysql_root_password
+      MYSQL_DATABASE: *mysql_database
+      MYSQL_USER: *mysql_user
+      MYSQL_PASSWORD: *mysql_password
     ports:
       - 3306:3306
     volumes:
@@ -25,7 +32,9 @@ services:
     container_name: Eco-redis
     image: redis:7.4-alpine
     restart: always
-    command: ["redis-server", "--requirepass", "redis_local_password"]
+    environment:
+      REDIS_PASSWORD: *redis_password
+    command: ["redis-server", "--requirepass", *redis_password]
     ports:
       - 6379:6379
     volumes:
@@ -33,7 +42,7 @@ services:
     networks:
       - Eco-network
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a redis_local_password ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli -a $${REDIS_PASSWORD} ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -65,15 +74,15 @@ services:
     restart: always
     environment:
       PORT: 8080
-      JWT_SECRET: change_me_to_a_long_random_string
+      JWT_SECRET: ecohub_2026!local@dev_secret$001
       MYSQL_HOST: mysql
       MYSQL_PORT: 3306
-      MYSQL_USER: eco
-      MYSQL_PASSWORD: eco_local_password
-      MYSQL_DBNAME: eco
+      MYSQL_USER: *mysql_user
+      MYSQL_PASSWORD: *mysql_password
+      MYSQL_DBNAME: *mysql_database
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: redis_local_password
+      REDIS_PASSWORD: *redis_password
       REDIS_DB: 0
     ports:
       - 0.0.0.0:8080:8080
@@ -100,4 +109,3 @@ networks:
 volumes:
   eco-mysql-data:
   eco-redis-data:
-
