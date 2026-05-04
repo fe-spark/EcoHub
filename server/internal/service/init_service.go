@@ -26,7 +26,7 @@ func (s *InitService) DefaultDataInit() {
 		s.TableInit()
 	} else {
 		db.Mdb.AutoMigrate(
-			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
+			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FilmFilterOptionSnapshot{}, &model.FilmFilterIndexSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
 			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
 			&model.MovieMatchKey{},
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.CollectSourceStats{}, &model.SearchTagItem{},
@@ -44,11 +44,32 @@ func (s *InitService) DefaultDataInit() {
 	s.BannersInit()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
+	s.ensureFilterOptionSnapshot()
+	s.ensureFilterIndexSnapshot()
+	s.loadActiveFilmReadModel()
 }
 
 func (s *InitService) ensureFilmListSnapshot() {
 	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
 		log.Printf("[Init] 前台影片列表快照引导失败: %v", err)
+	}
+}
+
+func (s *InitService) ensureFilterOptionSnapshot() {
+	if err := filmrepo.EnsureActiveFilterOptionSnapshot(); err != nil {
+		log.Printf("[Init] 筛选项快照引导失败: %v", err)
+	}
+}
+
+func (s *InitService) ensureFilterIndexSnapshot() {
+	if err := filmrepo.EnsureActiveFilterIndexSnapshot(); err != nil {
+		log.Printf("[Init] 筛选倒排索引引导失败: %v", err)
+	}
+}
+
+func (s *InitService) loadActiveFilmReadModel() {
+	if err := filmrepo.LoadActiveFilmReadModel(""); err != nil {
+		log.Printf("[Init] 影片内存读模型加载失败: %v", err)
 	}
 }
 
@@ -72,6 +93,8 @@ func (s *InitService) TableInit() {
 		&model.User{},
 		&model.FilmIndex{},
 		&model.FilmListSnapshot{},
+		&model.FilmFilterOptionSnapshot{},
+		&model.FilmFilterIndexSnapshot{},
 		&model.FileInfo{},
 		&model.FailureRecord{},
 		&model.MovieDetailInfo{},

@@ -240,6 +240,43 @@ func (FilmListSnapshot) TableName() string {
 	return TableFilmListSnapshot
 }
 
+// FilmFilterOptionSnapshot 是当前前台快照版本下的筛选项读模型。
+// 它在快照发布阶段生成，前台、后台和 TVBox 配置只读取该表，不在请求链路实时聚合标签。
+type FilmFilterOptionSnapshot struct {
+	gorm.Model
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup"`
+	Pid             int64  `json:"pid" gorm:"uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup;not null"`
+	TagType         string `json:"tagType" gorm:"size:32;uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup;not null"`
+	Name            string `json:"name" gorm:"size:128;not null"`
+	Value           string `json:"value" gorm:"size:128;uniqueIndex:uidx_filter_option;not null"`
+	Score           int64  `json:"score" gorm:"index;default:0"`
+	Sort            int    `json:"sort" gorm:"index;default:0"`
+}
+
+func (FilmFilterOptionSnapshot) TableName() string {
+	return TableFilterOption
+}
+
+// FilmFilterIndexSnapshot 是当前前台快照版本下的筛选倒排索引。
+// 它把 Category/Plot/Area/Language/Year 映射到影片 mid，避免请求时扫描 class_tag 或全量快照。
+type FilmFilterIndexSnapshot struct {
+	gorm.Model
+	SnapshotVersion string  `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup"`
+	Pid             int64   `json:"pid" gorm:"uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
+	Cid             int64   `json:"cid" gorm:"index"`
+	TagType         string  `json:"tagType" gorm:"size:32;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
+	TagValue        string  `json:"tagValue" gorm:"size:128;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
+	Mid             int64   `json:"mid" gorm:"uniqueIndex:uidx_filter_index;index;not null"`
+	Year            int64   `json:"year" gorm:"index"`
+	UpdateStamp     int64   `json:"updateStamp" gorm:"index"`
+	Hits            int64   `json:"hits" gorm:"index"`
+	Score           float64 `json:"score" gorm:"index"`
+}
+
+func (FilmFilterIndexSnapshot) TableName() string {
+	return TableFilterIndex
+}
+
 // SearchTagItem 影片检索标签持久化模型 (MySQL)
 type SearchTagItem struct {
 	gorm.Model

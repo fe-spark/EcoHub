@@ -6,6 +6,8 @@ const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
 	TableFilmListSnapshot   = "film_list_snapshot"
+	TableFilterOption       = "film_filter_option_snapshot"
+	TableFilterIndex        = "film_filter_index_snapshot"
 	TableMovieDetail        = "movie_detail_info"
 	TableMoviePlaylist      = "movie_playlist"
 	TableMovieMatchKey      = "movie_match_key"

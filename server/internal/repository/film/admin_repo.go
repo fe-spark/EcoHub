@@ -201,6 +201,12 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
 		return err
 	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmFilterOptionSnapshot{}).Error; err != nil {
+		return err
+	}
+	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmFilterIndexSnapshot{}).Error; err != nil {
+		return err
+	}
 	if err := repository.DeleteCollectSourceStatsTx(tx, ids...); err != nil {
 		return err
 	}
@@ -248,6 +254,8 @@ func FilmZero() error {
 		model.TableMovieDetail,
 		model.TableFilmIndex,
 		model.TableFilmListSnapshot,
+		model.TableFilterOption,
+		model.TableFilterIndex,
 		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableCollectSourceStats,

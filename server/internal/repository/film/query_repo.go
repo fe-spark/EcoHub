@@ -18,8 +18,6 @@ import (
 	"gorm.io/gorm"
 )
 
-const maxPlotExcludes = 5
-
 func hasTextValue(column string) string {
 	return fmt.Sprintf("(%s <> '' AND %s IS NOT NULL)", column, column)
 }
@@ -415,99 +413,6 @@ func buildCategoryQuery(field string, id int64) *gorm.DB {
 	return applyCategoryFieldFilter(db.Mdb.Model(&model.FilmIndex{}), field, id)
 }
 
-func applyPageStats(query *gorm.DB, page *dto.Page) *dto.Page {
-	page = ensurePage(page)
-	dto.GetPage(query, page)
-	return page
-}
-
-func queryMovieListByCategory(field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	var filmIndexes []model.FilmIndex
-	if err := buildCategoryQuery(field, id).
-		Order(latestUpdateOrderSQL).
-		Limit(limit).
-		Offset(offset).
-		Find(&filmIndexes).Error; err != nil {
-		log.Printf("queryMovieListByCategory Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfos(filmIndexes...)
-}
-
-func queryHotMoviesByCategory(field string, id int64, limit int, offset int) []model.FilmIndex {
-	var filmIndexes []model.FilmIndex
-	hotSince := time.Now().AddDate(0, -1, 0).Unix()
-	if err := buildCategoryQuery(field, id).
-		Where("update_stamp > ?", hotSince).
-		Order("year DESC, hits DESC, mid DESC").
-		Limit(limit).
-		Offset(offset).
-		Find(&filmIndexes).Error; err != nil {
-		log.Printf("queryHotMoviesByCategory Error: %v", err)
-		return nil
-	}
-	return filmIndexes
-}
-
-func applyMovieSortQuery(query *gorm.DB, sortType int) *gorm.DB {
-	switch sortType {
-	case 0:
-		return query.Order("year DESC, " + latestUpdateOrderSQL)
-	case 1:
-		return query.Order("hits DESC, mid DESC")
-	case 2:
-		return query.Order(latestUpdateOrderSQL)
-	default:
-		return query.Order(latestUpdateOrderSQL)
-	}
-}
-
-func queryMovieListBySort(pid int64, sortType int, limit int, offset int) []model.MovieBasicInfo {
-	var filmIndexes []model.FilmIndex
-	query := applyMovieSortQuery(buildCategoryQuery("pid", pid), sortType)
-	if err := query.Limit(limit).Offset(offset).Find(&filmIndexes).Error; err != nil {
-		log.Printf("queryMovieListBySort Error: %v", err)
-		return nil
-	}
-	return BuildMovieBasicInfos(filmIndexes...)
-}
-
-// GetMovieListByPid 获取指定父类 ID 的影片基本信息
-func GetMovieListByPid(pid int64, page *dto.Page) []model.MovieBasicInfo {
-	page = applyPageStats(buildCategoryQuery("pid", pid), page)
-	return GetMovieListByPidLimit(pid, page.PageSize, getPageOffset(page))
-}
-
-// GetMovieListByPidLimit 轻量级获取指定父类 ID 列表 (无 Count)
-func GetMovieListByPidLimit(pid int64, limit, offset int) []model.MovieBasicInfo {
-	return queryMovieListByCategory("pid", pid, limit, offset)
-}
-
-// GetMovieListByCid 获取指定子类 ID 的影片基本信息
-func GetMovieListByCid(cid int64, page *dto.Page) []model.MovieBasicInfo {
-	page = applyPageStats(buildCategoryQuery("cid", cid), page)
-	return GetMovieListByCidLimit(cid, page.PageSize, getPageOffset(page))
-}
-
-// GetMovieListByCidLimit 轻量级获取指定子类 ID 列表 (无 Count)
-func GetMovieListByCidLimit(cid int64, limit, offset int) []model.MovieBasicInfo {
-	return queryMovieListByCategory("cid", cid, limit, offset)
-}
-
-func SearchFilmKeyword(keyword string, page *dto.Page) []model.FilmIndex {
-	page = ensurePage(page)
-	keywordQuery := buildNameKeywordQuery(keyword)
-	var filmIndexes []model.FilmIndex
-	query := applyVisibleCategoryFilter(db.Mdb.Model(&model.FilmIndex{})).
-		Where(keywordQuery).
-		Order("year DESC, " + latestUpdateOrderSQL)
-
-	dto.GetPage(query, page)
-	query.Limit(page.PageSize).Offset(getPageOffset(page)).Find(&filmIndexes)
-
-	return filmIndexes
-}
-
 func ensurePage(page *dto.Page) *dto.Page {
 	if page == nil {
 		return &dto.Page{Current: 1, PageSize: 20}
@@ -519,12 +424,6 @@ func ensurePage(page *dto.Page) *dto.Page {
 		page.PageSize = 20
 	}
 	return page
-}
-
-func buildNameKeywordQuery(keyword string) *gorm.DB {
-	keyword = strings.TrimSpace(keyword)
-	keywordLike := fmt.Sprintf("%%%s%%", keyword)
-	return db.Mdb.Where("name LIKE ? OR sub_title LIKE ?", keywordLike, keywordLike)
 }
 
 func getPageOffset(page *dto.Page) int {
@@ -1060,194 +959,10 @@ func GetMovieDetail(cid int64, mid int64) *model.MovieDetail {
 	return &detail
 }
 
-func GetSearchPage(s model.SearchVo) []model.FilmIndex {
-	page := ensurePage(s.Paging)
-
-	query := applySearchPageFilters(db.Mdb.Model(&model.FilmIndex{}), s).Order(latestUpdateOrderSQL)
-
-	dto.GetPage(query, page)
-	var sl []model.FilmIndex
-	if err := query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl).Error; err != nil {
-		log.Printf("GetSearchPage Error: %v", err)
-		return nil
-	}
-	return sl
-}
-
-func applySearchPageFilters(query *gorm.DB, s model.SearchVo) *gorm.DB {
-	if s.Name != "" {
-		query = query.Where("name LIKE ?", fmt.Sprintf("%%%s%%", s.Name))
-	}
-
-	query = ApplyCategoryFilter(query, s.Pid, s.Cid)
-
-	if s.Plot != "" {
-		query = query.Where("class_tag LIKE ?", fmt.Sprintf("%%%s%%", s.Plot))
-	}
-	if s.Area != "" {
-		query = query.Where("area = ?", s.Area)
-	}
-	if s.Language != "" {
-		query = query.Where("language = ?", s.Language)
-	}
-	if s.Year > 0 {
-		query = query.Where("year = ?", s.Year)
-	}
-
-	if s.BeginTime > 0 {
-		query = query.Where("update_stamp >= ?", s.BeginTime)
-	}
-	if s.EndTime > 0 {
-		query = query.Where("update_stamp <= ?", s.EndTime)
-	}
-
-	return query
-}
-
-func applyYearTagFilter(query *gorm.DB, pid int64, fieldName string, value string) *gorm.DB {
-	switch value {
-	case model.TagOthersValue:
-		topVals := GetTopTagValues(pid, fieldName)
-		othersQuery := db.Mdb.Where("year <= 0 OR year IS NULL")
-		if len(topVals) > 0 {
-			othersQuery = othersQuery.Or("year > 0 AND year NOT IN ?", topVals)
-		}
-		return query.Where(othersQuery)
-	case model.TagUnknownValue:
-		return query.Where("year <= 0 OR year IS NULL")
-	default:
-		return query.Where("year = ?", value)
-	}
-}
-
-func applyTextTagFilter(query *gorm.DB, pid int64, fieldName string, column string, value string) *gorm.DB {
-	switch value {
-	case model.TagOthersValue:
-		topVals := GetTopTagValues(pid, fieldName)
-		othersQuery := db.Mdb.Where(hasTextValue(column))
-		if len(topVals) > 0 {
-			othersQuery = othersQuery.Where(fmt.Sprintf("%s NOT IN ?", column), topVals)
-		}
-		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
-			othersQuery = othersQuery.Or(fmt.Sprintf("%s = ?", column), abnormal)
-		}
-		return query.Where(othersQuery)
-	case model.TagUnknownValue:
-		return query.Where(isUnknownTextValue(column))
-	default:
-		return query.Where(fmt.Sprintf("%s = ?", column), value)
-	}
-}
-
-func applyPlotTagFilter(query *gorm.DB, pid int64, fieldName string, value string) *gorm.DB {
-	switch value {
-	case model.TagOthersValue:
-		topVals := GetTopTagValues(pid, fieldName)
-		othersQuery := db.Mdb.Where(hasTextValue("class_tag"))
-		excludeCount := len(topVals)
-		if excludeCount > maxPlotExcludes {
-			excludeCount = maxPlotExcludes
-		}
-		for i := 0; i < excludeCount; i++ {
-			othersQuery = othersQuery.Where("class_tag NOT LIKE ?", fmt.Sprintf("%%%v%%", topVals[i]))
-		}
-		for _, abnormal := range getAbnormalSearchTagValues(pid, fieldName) {
-			othersQuery = othersQuery.Or("class_tag LIKE ?", fmt.Sprintf("%%%v%%", abnormal))
-		}
-		return query.Where(othersQuery)
-	case model.TagUnknownValue:
-		return query.Where(isUnknownTextValue("class_tag"))
-	default:
-		return query.Where("class_tag LIKE ?", fmt.Sprintf("%%%v%%", value))
-	}
-}
-
-func applySearchTagSort(query *gorm.DB, value string) *gorm.DB {
-	if value == "" {
-		value = "update_stamp"
-	}
-	column, allowed := allowedSearchSortColumns[value]
-	if !allowed {
-		column = allowedSearchSortColumns["update_stamp"]
-	}
-	if strings.EqualFold(column, "update_stamp") {
-		return query.Order(latestUpdateOrderSQL)
-	}
-	if strings.EqualFold(column, "year") {
-		return query.Order("year DESC, " + latestUpdateOrderSQL)
-	}
-	return query.Order(fmt.Sprintf("%s DESC, mid DESC", column))
-}
-
-func applySearchTagFilters(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
-	query = ApplyCategoryFilter(query, st.Pid, st.Cid)
-
-	if st.Year != "" {
-		query = applyYearTagFilter(query, st.Pid, "Year", st.Year)
-	}
-	if st.Area != "" {
-		query = applyTextTagFilter(query, st.Pid, "Area", "area", st.Area)
-	}
-	if st.Language != "" {
-		query = applyTextTagFilter(query, st.Pid, "Language", "language", st.Language)
-	}
-	if st.Plot != "" {
-		query = applyPlotTagFilter(query, st.Pid, "Plot", st.Plot)
-	}
-
-	return applySearchTagSort(query, st.Sort)
-}
-
-func BuildFilmIndexQueryByTags(query *gorm.DB, st model.SearchTagsVO) *gorm.DB {
-	st = normalizeSearchTagsVO(st)
-	return applySearchTagFilters(query, st)
-}
-
-func ListFilmIndexesByTags(st model.SearchTagsVO, page *dto.Page) []model.FilmIndex {
-	page = ensurePage(page)
-	qw := BuildFilmIndexQueryByTags(db.Mdb.Model(&model.FilmIndex{}), st)
-
-	dto.GetPage(qw, page)
-	var filmIndexes []model.FilmIndex
-	if err := qw.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&filmIndexes).Error; err != nil {
-		log.Printf("ListFilmIndexesByTags Error: %v", err)
-		return nil
-	}
-	return filmIndexes
-}
-
 func GetFilmIndexById(id int64) *model.FilmIndex {
 	s := model.FilmIndex{}
 	if err := db.Mdb.Where("mid = ?", id).First(&s).Error; err != nil {
 		return nil
 	}
 	return &s
-}
-
-// GetHotMovieByPid 获取当前级分类下的热门影片
-func GetHotMovieByPid(pid int64, page *dto.Page) []model.FilmIndex {
-	page = ensurePage(page)
-	return GetHotMovieByPidLimit(pid, page.PageSize, getPageOffset(page))
-}
-
-// GetHotMovieByPidLimit 轻量级获取热门影片
-func GetHotMovieByPidLimit(pid int64, limit, offset int) []model.FilmIndex {
-	return queryHotMoviesByCategory("pid", pid, limit, offset)
-}
-
-// GetHotMovieByCid 获取当前分类下的热门影片
-func GetHotMovieByCid(cid int64, page *dto.Page) []model.FilmIndex {
-	page = ensurePage(page)
-	return GetHotMovieByCidLimit(cid, page.PageSize, getPageOffset(page))
-}
-
-// GetHotMovieByCidLimit 轻量级获取热门影片
-func GetHotMovieByCidLimit(cid int64, limit, offset int) []model.FilmIndex {
-	return queryHotMoviesByCategory("cid", cid, limit, offset)
-}
-
-// GetMovieListBySort 通过排序类型返回对应的影片基本信息
-func GetMovieListBySort(t int, pid int64, page *dto.Page) []model.MovieBasicInfo {
-	page = ensurePage(page)
-	return queryMovieListBySort(pid, t, page.PageSize, getPageOffset(page))
 }

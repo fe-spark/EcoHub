@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"log"
 	"strings"
 	"time"
 
@@ -22,25 +23,26 @@ func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
 
 // GetSearchOptions 获取影片检索的select的选项options
 func (s *FilmService) GetSearchOptions() map[string]any {
+	startedAt := time.Now()
 	options := make(map[string]any)
 	tree := repository.GetActiveCategoryTree()
 	tree.Name = "全部分类"
 	options["class"] = conver.ConvertCategoryList(&tree)
 	options["year"] = make([]map[string]string, 0)
-	tagGroup := make(map[int64]map[string]any)
+	tagGroup := filmrepo.GetAdminFilterOptionSnapshots()
 	if tree.Children != nil {
 		for _, t := range tree.Children {
-			option := filmrepo.GetSearchOptions(model.SearchTagsVO{Pid: t.Id})
-			if len(option) > 0 {
-				tagGroup[t.Id] = option
-				if v, ok := options["year"].([]map[string]string); !ok || len(v) == 0 {
-					options["year"] = tagGroup[t.Id]["Year"]
-				}
+			option := tagGroup[t.Id]
+			if len(option) == 0 {
+				continue
 			}
-
+			if v, ok := options["year"].([]map[string]string); !ok || len(v) == 0 {
+				options["year"] = option["Year"]
+			}
 		}
 	}
 	options["tags"] = tagGroup
+	log.Printf("[ManageFilmSearch] 筛选选项快照读取 cost=%s", time.Since(startedAt))
 	return options
 }
 
