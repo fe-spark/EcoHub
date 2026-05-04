@@ -81,7 +81,7 @@ services:
       REDIS_PASSWORD: *redis_password
       REDIS_DB: 0
     ports:
-      - 0.0.0.0:8080:8080
+      - 0.0.0.0:18080:8080
     depends_on:
       mysql:
         condition: service_healthy
