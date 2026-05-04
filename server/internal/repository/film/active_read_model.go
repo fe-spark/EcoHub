@@ -135,7 +135,7 @@ func ensureProjectedFilmReadModel(readModel *FilmReadModel) *ProjectedFilmReadMo
 		if snapshot.Pid > 0 {
 			projected.ByPid[snapshot.Pid] = append(projected.ByPid[snapshot.Pid], mid)
 		}
-		for _, row := range buildFilterIndexRows(readModel.Version, snapshot) {
+		for _, row := range buildFilterIndexRowsWithResolvedCategory(readModel.Version, snapshot, snapshot.Pid, snapshot.Cid) {
 			projected.ByTag[readModelTagKey(row.TagType, row.TagValue)] = append(projected.ByTag[readModelTagKey(row.TagType, row.TagValue)], mid)
 		}
 	}

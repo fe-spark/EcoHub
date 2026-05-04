@@ -65,6 +65,12 @@ func RebuildFilterIndexSnapshot(version string) error {
 }
 
 func buildFilterIndexRows(version string, snapshot model.FilmListSnapshot) []model.FilmFilterIndexSnapshot {
+	pid := support.ResolveCategoryID(snapshot.Pid)
+	cid := support.ResolveCategoryID(snapshot.Cid)
+	return buildFilterIndexRowsWithResolvedCategory(version, snapshot, pid, cid)
+}
+
+func buildFilterIndexRowsWithResolvedCategory(version string, snapshot model.FilmListSnapshot, pid int64, cid int64) []model.FilmFilterIndexSnapshot {
 	rows := make([]model.FilmFilterIndexSnapshot, 0, 6)
 	appendRow := func(tagType string, tagValue string) {
 		tagValue = strings.TrimSpace(tagValue)
@@ -73,8 +79,8 @@ func buildFilterIndexRows(version string, snapshot model.FilmListSnapshot) []mod
 		}
 		rows = append(rows, model.FilmFilterIndexSnapshot{
 			SnapshotVersion: version,
-			Pid:             support.ResolveCategoryID(snapshot.Pid),
-			Cid:             support.ResolveCategoryID(snapshot.Cid),
+			Pid:             pid,
+			Cid:             cid,
 			TagType:         tagType,
 			TagValue:        tagValue,
 			Mid:             snapshot.Mid,
@@ -85,10 +91,10 @@ func buildFilterIndexRows(version string, snapshot model.FilmListSnapshot) []mod
 		})
 	}
 
-	if snapshot.Cid > 0 {
-		appendRow("Category", strconv.FormatInt(support.ResolveCategoryID(snapshot.Cid), 10))
-	} else if snapshot.Pid > 0 {
-		appendRow("Category", strconv.FormatInt(support.ResolveCategoryID(snapshot.Pid), 10))
+	if cid > 0 {
+		appendRow("Category", strconv.FormatInt(cid, 10))
+	} else if pid > 0 {
+		appendRow("Category", strconv.FormatInt(pid, 10))
 	}
 	for _, tag := range splitClassTags(snapshot.ClassTag) {
 		appendRow("Plot", tag)

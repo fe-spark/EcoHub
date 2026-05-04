@@ -344,21 +344,33 @@ func buildProjectedFilterOptionResponses(version string, projected *ProjectedFil
 		log.Printf("BuildProjectedFilterOptionResponses Error: %v", err)
 		return map[int64]map[string]any{}
 	}
+	var categories []model.Category
+	if err := db.Mdb.Where("`show` = ?", true).Order("pid ASC, sort ASC, id ASC").Find(&categories).Error; err != nil {
+		log.Printf("BuildProjectedFilterOptionResponses Categories Error: %v", err)
+		return map[int64]map[string]any{}
+	}
+	childrenByPid := make(map[int64][]model.Category)
+	for _, category := range categories {
+		if category.Pid <= 0 {
+			continue
+		}
+		childrenByPid[category.Pid] = append(childrenByPid[category.Pid], category)
+	}
 
 	responses := make(map[int64]map[string]any, len(roots))
 	for _, root := range roots {
-		pid := support.ResolveCategoryID(root.Id)
+		pid := root.Id
 		if pid <= 0 {
 			continue
 		}
-		responses[pid] = buildFilterOptionResponse(buildProjectedFilterOptionRows(version, pid, projected))
+		responses[pid] = buildFilterOptionResponse(buildProjectedFilterOptionRows(version, pid, projected, childrenByPid[pid]))
 	}
 	return responses
 }
 
-func buildProjectedFilterOptionRows(version string, pid int64, projected *ProjectedFilmReadModel) []model.FilmFilterOptionSnapshot {
+func buildProjectedFilterOptionRows(version string, pid int64, projected *ProjectedFilmReadModel, categories []model.Category) []model.FilmFilterOptionSnapshot {
 	rows := make([]model.FilmFilterOptionSnapshot, 0)
-	rows = append(rows, buildCategoryFilterOptionsFromProjectedReadModel(version, pid, projected)...)
+	rows = append(rows, buildCategoryFilterOptionsFromProjectedReadModel(version, pid, projected, categories)...)
 	itemsByType := loadSearchTagItemsByTypeFromProjectedReadModel(pid, projected)
 	for _, tagType := range filterOptionTagTypes {
 		rows = append(rows, buildTagFilterOptions(version, pid, tagType, itemsByType[tagType])...)
@@ -367,7 +379,7 @@ func buildProjectedFilterOptionRows(version string, pid int64, projected *Projec
 	return rows
 }
 
-func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64, projected *ProjectedFilmReadModel) []model.FilmFilterOptionSnapshot {
+func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64, projected *ProjectedFilmReadModel, categories []model.Category) []model.FilmFilterOptionSnapshot {
 	options := []model.FilmFilterOptionSnapshot{{
 		SnapshotVersion: version,
 		Pid:             pid,
@@ -384,16 +396,11 @@ func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64,
 		if !ok || snapshot.Cid <= 0 {
 			continue
 		}
-		counts[support.ResolveCategoryID(snapshot.Cid)]++
+		counts[snapshot.Cid]++
 	}
 
-	var categories []model.Category
-	if err := db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&categories).Error; err != nil {
-		return options
-	}
 	for index, category := range categories {
-		resolvedID := support.ResolveCategoryID(category.Id)
-		if counts[resolvedID] <= 0 {
+		if counts[category.Id] <= 0 {
 			continue
 		}
 		options = append(options, model.FilmFilterOptionSnapshot{
@@ -402,7 +409,7 @@ func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64,
 			TagType:         "Category",
 			Name:            category.Name,
 			Value:           fmt.Sprint(category.Id),
-			Score:           counts[resolvedID],
+			Score:           counts[category.Id],
 			Sort:            index + 1,
 		})
 	}

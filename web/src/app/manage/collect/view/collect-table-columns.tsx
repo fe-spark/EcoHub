@@ -69,10 +69,11 @@ export function createCollectTableColumns({
         }
 
         const total = Math.max(progress.total, 0);
-        const done = Math.min(
-          progress.success + progress.failed,
-          total || progress.success + progress.failed,
-        );
+				const finished = progress.success + progress.failed;
+				const done = Math.min(
+					Math.max(progress.current, finished),
+					total || Math.max(progress.current, finished),
+				);
         const percent = total > 0 ? Math.round((done / total) * 100) : 0;
         const progressText = total > 0
           ? `${done}/${total}`
