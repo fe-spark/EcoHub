@@ -653,6 +653,18 @@ func (m *FilmReadModel) projectedSnapshotByMID(mid int64) (model.FilmListSnapsho
 	return snapshot, ok
 }
 
+func GetProjectedSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
+	if mid <= 0 {
+		return nil
+	}
+	readModel := requireActiveFilmReadModel(version)
+	snapshot, ok := readModel.projectedSnapshotByMID(mid)
+	if !ok {
+		return nil
+	}
+	return &snapshot
+}
+
 func (m *FilmReadModel) projectedSnapshots() []model.FilmListSnapshot {
 	projected := ensureProjectedFilmReadModel(m)
 	snapshots := make([]model.FilmListSnapshot, 0, len(projected.AllMIDs))

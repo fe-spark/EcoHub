@@ -245,10 +245,11 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 	version := filmrepo.GetActiveReadModelVersion()
+	ruleVersion := repository.GetRuleVersion()
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		cacheKey = fmt.Sprintf("%s:v%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, t, cid, pg, sort, limit)
+		cacheKey = fmt.Sprintf("%s:v%s:r%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, t, cid, pg, sort, limit)
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
 				Current   int
@@ -332,7 +333,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		if err != nil {
 			continue
 		}
-		snapshot := filmrepo.GetSnapshotByMid(version, int64(idInt))
+		snapshot := filmrepo.GetProjectedSnapshotByMid(version, int64(idInt))
 		if snapshot == nil {
 			continue
 		}
