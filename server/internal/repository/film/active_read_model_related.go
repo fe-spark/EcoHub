@@ -11,27 +11,35 @@ import (
 func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
 	page = ensurePage(page)
 	readModel := requireActiveFilmReadModel(version)
+	snapshot = projectSnapshotCategory(snapshot)
+	if !isVisibleProjectedSnapshot(snapshot) {
+		return []model.FilmListSnapshot{}
+	}
 	tags := splitClassTags(snapshot.ClassTag)
 	if len(tags) == 0 {
 		return readModel.relatedByCategory(snapshot, page)
 	}
 
 	candidateSet := make(map[int64]struct{})
-	baseSet := midsToSet(readModel.baseMIDs(snapshot.Pid))
-	for _, tag := range tags {
-		for _, mid := range readModel.ByTag[readModelTagKey("Plot", tag)] {
-			if mid == snapshot.Mid {
-				continue
-			}
-			if _, ok := baseSet[mid]; ok {
-				candidateSet[mid] = struct{}{}
+	for _, candidate := range readModel.projectedSnapshotsByPid(snapshot.Pid) {
+		if candidate.Mid == snapshot.Mid {
+			continue
+		}
+		if snapshot.Cid > 0 && candidate.Cid != snapshot.Cid {
+			continue
+		}
+		for _, tag := range tags {
+			for _, candidateTag := range splitClassTags(candidate.ClassTag) {
+				if candidateTag == tag {
+					candidateSet[candidate.Mid] = struct{}{}
+				}
 			}
 		}
 	}
 
 	snapshots := make([]model.FilmListSnapshot, 0, len(candidateSet))
 	for mid := range candidateSet {
-		candidate, ok := readModel.ByMid[mid]
+		candidate, ok := readModel.projectedSnapshotByMID(mid)
 		if !ok {
 			continue
 		}
@@ -50,13 +58,17 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 }
 
 func (m *FilmReadModel) relatedByCategory(snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
-	mids := m.baseMIDs(snapshot.Pid)
+	projected := ensureProjectedFilmReadModel(m)
+	mids := projected.ByPid[snapshot.Pid]
+	if snapshot.Pid <= 0 {
+		mids = projected.AllMIDs
+	}
 	snapshots := make([]model.FilmListSnapshot, 0, len(mids))
 	for _, mid := range mids {
 		if mid == snapshot.Mid {
 			continue
 		}
-		candidate, ok := m.ByMid[mid]
+		candidate, ok := projected.ByMid[mid]
 		if !ok {
 			continue
 		}

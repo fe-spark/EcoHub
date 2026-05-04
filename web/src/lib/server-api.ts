@@ -6,6 +6,8 @@ export interface ApiResponse<T = any> {
   data: T;
 }
 
+const serverFetchTimeoutMs = 15000;
+
 function getServerApiOrigin(): string {
   const apiUrl = process.env.API_URL?.trim();
   if (!apiUrl) {
@@ -34,9 +36,22 @@ export async function serverGet<T = any>(
   params?: Record<string, string | number | undefined>,
 ): Promise<ApiResponse<T>> {
   const apiUrl = buildApiUrl(path, params);
-  const response = await fetch(apiUrl, {
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
+  let response: Response;
+  try {
+    response = await fetch(apiUrl, {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error(`服务端请求超时: ${apiUrl}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   const body = await response.text();
   if (!response.ok) {

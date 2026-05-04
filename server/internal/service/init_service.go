@@ -44,26 +44,12 @@ func (s *InitService) DefaultDataInit() {
 	s.BannersInit()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
-	s.ensureFilterOptionSnapshot()
-	s.ensureFilterIndexSnapshot()
 	s.loadActiveFilmReadModel()
 }
 
 func (s *InitService) ensureFilmListSnapshot() {
 	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
 		log.Printf("[Init] 前台影片列表快照引导失败: %v", err)
-	}
-}
-
-func (s *InitService) ensureFilterOptionSnapshot() {
-	if err := filmrepo.EnsureActiveFilterOptionSnapshot(); err != nil {
-		log.Printf("[Init] 筛选项快照引导失败: %v", err)
-	}
-}
-
-func (s *InitService) ensureFilterIndexSnapshot() {
-	if err := filmrepo.EnsureActiveFilterIndexSnapshot(); err != nil {
-		log.Printf("[Init] 筛选倒排索引引导失败: %v", err)
 	}
 }
 

@@ -65,6 +65,7 @@ export default function CollectManagePageView() {
   const mountedRef = useRef(false);
   const pollFailuresRef = useRef(0);
   const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  const collectDurationOverridesRef = useRef<Record<string, number>>({});
 
   const [sourceForm] = Form.useForm<SourceFormValues>();
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
@@ -154,7 +155,11 @@ const masterStatus = useMemo(() => {
               normalizeSource(item),
             )
           : [];
-        setSiteList(list);
+        const overrides = collectDurationOverridesRef.current;
+        setSiteList(list.map((item) => ({
+          ...item,
+          cd: overrides[item.id] ?? item.cd,
+        })));
         setSelectedSourceIds((current) =>
           current.filter((id) => list.some((item) => item.id === id)),
         );
@@ -200,6 +205,17 @@ const masterStatus = useMemo(() => {
     [],
   );
 
+  const changeCollectDuration = useCallback(
+    (id: string, value: number) => {
+      collectDurationOverridesRef.current = {
+        ...collectDurationOverridesRef.current,
+        [id]: value,
+      };
+      updateSiteListItem(id, (item) => ({ ...item, cd: value }));
+    },
+    [updateSiteListItem],
+  );
+
   const changeSourceState = async (record: FilmSource) => {
     const resp = await ApiPost("/manage/collect/change", {
       id: record.id,
@@ -243,9 +259,10 @@ const masterStatus = useMemo(() => {
   };
 
   const startTask = async (record: FilmSource) => {
+    const collectTime = collectDurationOverridesRef.current[record.id] ?? record.cd ?? 24;
     const resp = await ApiPost("/manage/spider/start", {
       id: record.id,
-      time: record.cd || 24,
+      time: collectTime,
       batch: false,
     });
     if (resp.code === 0) {
@@ -410,6 +427,7 @@ const masterStatus = useMemo(() => {
     runningCollectIds,
     startingCollectIds,
     onUpdateItem: updateSiteListItem,
+    onChangeCollectDuration: changeCollectDuration,
     onChangeSourceState: (record) => void changeSourceState(record),
     onStartTask: (record) => void startTask(record),
     onStopTask: (id) => void stopTask(id),

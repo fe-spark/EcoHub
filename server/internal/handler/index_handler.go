@@ -19,6 +19,49 @@ func Health(c *gin.Context) {
 	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
 }
 
+func hasSearchOptions(searchTags map[string]any) bool {
+	tags, ok := searchTags["tags"].(map[string]any)
+	if !ok {
+		return false
+	}
+	for key, value := range tags {
+		if key == "Sort" {
+			continue
+		}
+		if hasRealSearchTagList(value) {
+			return true
+		}
+	}
+	return false
+}
+
+func hasRealSearchTagList(value any) bool {
+	list, ok := value.([]map[string]string)
+	if ok {
+		for _, item := range list {
+			if strings.TrimSpace(item["Value"]) != "" {
+				return true
+			}
+		}
+		return false
+	}
+
+	rawList, ok := value.([]any)
+	if !ok {
+		return false
+	}
+	for _, raw := range rawList {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if value, ok := item["Value"].(string); ok && strings.TrimSpace(value) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) string {
 	if preferred != "" {
 		for _, source := range playSources {
@@ -184,10 +227,9 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 		}
 	}
 
-	dto.Success(gin.H{
-		"title":  titleObj,
-		"list":   list,
-		"search": searchTags,
+	response := gin.H{
+		"title": titleObj,
+		"list":  list,
 		"params": map[string]string{
 			"Pid":      pidStr,
 			"Category": cidStr,
@@ -198,7 +240,11 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 			"Sort":     params.Sort,
 		},
 		"page": page,
-	}, "分类影片数据获取成功", c)
+	}
+	if hasSearchOptions(searchTags) {
+		response["search"] = searchTags
+	}
+	dto.Success(response, "分类影片数据获取成功", c)
 }
 
 // FilmClassify  影片分类首页数据展示

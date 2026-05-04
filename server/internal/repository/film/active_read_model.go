@@ -1,6 +1,7 @@
 package film
 
 import (
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -16,12 +17,35 @@ import (
 type FilmReadModel struct {
 	Version string
 	ByMid   map[int64]model.FilmListSnapshot
-	ByPid   map[int64][]int64
-	ByTag   map[string][]int64
 	AllMIDs []int64
 }
 
+type ProjectedFilmReadModel struct {
+	SnapshotVersion string
+	RuleVersion     string
+	ByMid           map[int64]model.FilmListSnapshot
+	ByPid           map[int64][]int64
+	ByTag           map[string][]int64
+	FilterOptions   map[int64]map[string]any
+	AllMIDs         []int64
+}
+
+type readModelProjectionContext struct {
+	sourceKeyToCategoryIDs map[string][]int64
+	categoriesByID         map[int64]model.Category
+	categoryIDByStableKey  map[string]int64
+	categoryIDByParentName map[string]int64
+	rootIDByID             map[int64]int64
+	resolvedSourceCategory map[string]int64
+}
+
 var activeFilmReadModel atomic.Value
+var activeProjectedFilmReadModel atomic.Value
+
+func init() {
+	activeFilmReadModel.Store(newEmptyFilmReadModel(""))
+	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel("", ""))
+}
 
 func LoadActiveFilmReadModel(version string) error {
 	version = strings.TrimSpace(version)
@@ -36,15 +60,13 @@ func LoadActiveFilmReadModel(version string) error {
 
 	startedAt := time.Now()
 	var snapshots []model.FilmListSnapshot
-	if err := applyVisibleCategoryFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)).Find(&snapshots).Error; err != nil {
+	if err := db.Mdb.Where("snapshot_version = ?", version).Find(&snapshots).Error; err != nil {
 		return err
 	}
 
 	readModel := &FilmReadModel{
 		Version: version,
 		ByMid:   make(map[int64]model.FilmListSnapshot, len(snapshots)),
-		ByPid:   make(map[int64][]int64),
-		ByTag:   make(map[string][]int64),
 		AllMIDs: make([]int64, 0, len(snapshots)),
 	}
 
@@ -55,33 +77,354 @@ func LoadActiveFilmReadModel(version string) error {
 		}
 		readModel.ByMid[mid] = snapshot
 		readModel.AllMIDs = append(readModel.AllMIDs, mid)
-		pid := support.ResolveCategoryID(snapshot.Pid)
-		if pid > 0 {
-			readModel.ByPid[pid] = append(readModel.ByPid[pid], mid)
-		}
-		for _, row := range buildFilterIndexRows(version, snapshot) {
-			key := readModelTagKey(row.TagType, row.TagValue)
-			readModel.ByTag[key] = append(readModel.ByTag[key], mid)
-		}
 	}
 
 	activeFilmReadModel.Store(readModel)
-	log.Printf("[ActiveReadModel] 加载完成 version=%s films=%d tags=%d cost=%s", version, len(readModel.ByMid), len(readModel.ByTag), time.Since(startedAt))
+	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel(version, ""))
+	ensureProjectedFilmReadModel(readModel)
+	log.Printf("[ActiveReadModel] 加载完成 version=%s films=%d cost=%s", version, len(readModel.ByMid), time.Since(startedAt))
 	return nil
+}
+
+func RefreshActiveProjectedReadModel() error {
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil {
+		return nil
+	}
+	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel(readModel.Version, ""))
+	ensureProjectedFilmReadModel(readModel)
+	RefreshAccessDataCaches()
+	return nil
+}
+
+func newEmptyProjectedFilmReadModel(snapshotVersion string, ruleVersion string) *ProjectedFilmReadModel {
+	return &ProjectedFilmReadModel{
+		SnapshotVersion: strings.TrimSpace(snapshotVersion),
+		RuleVersion:     strings.TrimSpace(ruleVersion),
+		ByMid:           make(map[int64]model.FilmListSnapshot),
+		ByPid:           make(map[int64][]int64),
+		ByTag:           make(map[string][]int64),
+		FilterOptions:   make(map[int64]map[string]any),
+		AllMIDs:         []int64{},
+	}
+}
+
+func ensureProjectedFilmReadModel(readModel *FilmReadModel) *ProjectedFilmReadModel {
+	ruleVersion := support.GetRuleVersion()
+	if value := activeProjectedFilmReadModel.Load(); value != nil {
+		projected, _ := value.(*ProjectedFilmReadModel)
+		if projected != nil && projected.SnapshotVersion == readModel.Version && projected.RuleVersion == ruleVersion {
+			return projected
+		}
+	}
+
+	startedAt := time.Now()
+	ctx := newReadModelProjectionContext()
+	projected := newEmptyProjectedFilmReadModel(readModel.Version, ruleVersion)
+	for _, mid := range readModel.AllMIDs {
+		snapshot, ok := readModel.ByMid[mid]
+		if !ok {
+			continue
+		}
+		snapshot = projectSnapshotCategoryWithContext(snapshot, ctx)
+		if !isVisibleProjectedSnapshotWithContext(snapshot, ctx) {
+			continue
+		}
+		projected.ByMid[mid] = snapshot
+		projected.AllMIDs = append(projected.AllMIDs, mid)
+		if snapshot.Pid > 0 {
+			projected.ByPid[snapshot.Pid] = append(projected.ByPid[snapshot.Pid], mid)
+		}
+		for _, row := range buildFilterIndexRows(readModel.Version, snapshot) {
+			projected.ByTag[readModelTagKey(row.TagType, row.TagValue)] = append(projected.ByTag[readModelTagKey(row.TagType, row.TagValue)], mid)
+		}
+	}
+	projected.FilterOptions = buildProjectedFilterOptionResponses(readModel.Version, projected)
+	activeProjectedFilmReadModel.Store(projected)
+	log.Printf("[ActiveReadModel] 投影索引加载完成 snapshot=%s rule=%s films=%d tags=%d cost=%s", readModel.Version, ruleVersion, len(projected.ByMid), len(projected.ByTag), time.Since(startedAt))
+	return projected
+}
+
+func newReadModelProjectionContext() readModelProjectionContext {
+	ctx := readModelProjectionContext{
+		sourceKeyToCategoryIDs: make(map[string][]int64),
+		categoriesByID:         make(map[int64]model.Category),
+		categoryIDByStableKey:  make(map[string]int64),
+		categoryIDByParentName: make(map[string]int64),
+		rootIDByID:             make(map[int64]int64),
+		resolvedSourceCategory: make(map[string]int64),
+	}
+
+	var categories []model.Category
+	if err := db.Mdb.Find(&categories).Error; err == nil {
+		for _, category := range categories {
+			ctx.categoriesByID[category.Id] = category
+			if stableKey := strings.TrimSpace(category.StableKey); stableKey != "" {
+				ctx.categoryIDByStableKey[stableKey] = category.Id
+			}
+			ctx.categoryIDByParentName[categoryParentNameKey(category.Pid, category.Name)] = category.Id
+		}
+	}
+	ctx.sourceKeyToCategoryIDs = ctx.buildSourceCategoryProjectionMap()
+	return ctx
+}
+
+func (ctx readModelProjectionContext) buildSourceCategoryProjectionMap() map[string][]int64 {
+	var sourceCategories []model.SourceCategory
+	if err := db.Mdb.Order("source_id ASC, depth ASC, parent_source_type_id ASC, sort ASC, id ASC").Find(&sourceCategories).Error; err != nil {
+		return map[string][]int64{}
+	}
+
+	sourceCategoryByKey := make(map[string]model.SourceCategory, len(sourceCategories))
+	for _, item := range sourceCategories {
+		key := support.BuildSourceCategoryKey(item.SourceId, item.SourceTypeId)
+		if key == "" {
+			continue
+		}
+		sourceCategoryByKey[key] = item
+	}
+
+	result := make(map[string][]int64, len(sourceCategories))
+	for _, item := range sourceCategories {
+		key := support.BuildSourceCategoryKey(item.SourceId, item.SourceTypeId)
+		if key == "" {
+			continue
+		}
+		categoryID := ctx.resolveSourceCategoryID(item, sourceCategoryByKey)
+		if categoryID <= 0 {
+			continue
+		}
+		result[key] = []int64{categoryID}
+	}
+	return result
+}
+
+func (ctx readModelProjectionContext) resolveSourceCategoryID(item model.SourceCategory, sourceCategoryByKey map[string]model.SourceCategory) int64 {
+	key := support.BuildSourceCategoryKey(item.SourceId, item.SourceTypeId)
+	if key == "" {
+		return 0
+	}
+	if categoryID, ok := ctx.resolvedSourceCategory[key]; ok {
+		return categoryID
+	}
+	defer func() {
+		if _, ok := ctx.resolvedSourceCategory[key]; !ok {
+			ctx.resolvedSourceCategory[key] = 0
+		}
+	}()
+
+	rawName := strings.TrimSpace(item.RawName)
+	if rawName == "" {
+		return 0
+	}
+	if item.ParentSourceTypeId <= 0 {
+		rootName := support.NormalizeRootCategoryName(rawName)
+		if rootName != rawName {
+			rootID := ctx.findDisplayCategoryID(0, rootName)
+			if rootID <= 0 {
+				return 0
+			}
+			categoryID := ctx.findDisplayCategoryID(rootID, rawName)
+			ctx.resolvedSourceCategory[key] = categoryID
+			return categoryID
+		}
+		categoryID := ctx.findDisplayCategoryID(0, rootName)
+		ctx.resolvedSourceCategory[key] = categoryID
+		return categoryID
+	}
+
+	parentKey := support.BuildSourceCategoryKey(item.SourceId, item.ParentSourceTypeId)
+	parent, ok := sourceCategoryByKey[parentKey]
+	if !ok {
+		return 0
+	}
+	parentID := ctx.resolveSourceCategoryID(parent, sourceCategoryByKey)
+	if parentID <= 0 {
+		return 0
+	}
+	subName := support.NormalizeSubCategoryName(rawName)
+	categoryID := ctx.findDisplayCategoryID(parentID, subName)
+	ctx.resolvedSourceCategory[key] = categoryID
+	return categoryID
+}
+
+func (ctx readModelProjectionContext) findDisplayCategoryID(pid int64, name string) int64 {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0
+	}
+	if id := ctx.categoryIDByParentName[categoryParentNameKey(pid, name)]; id > 0 {
+		return id
+	}
+	stableKey := buildProjectionCategoryStableKey(pid, name, ctx.categoriesByID)
+	return ctx.categoryIDByStableKey[stableKey]
+}
+
+func categoryParentNameKey(pid int64, name string) string {
+	return fmt.Sprintf("%d:%s", pid, strings.TrimSpace(name))
+}
+
+func buildProjectionCategoryStableKey(pid int64, name string, categoriesByID map[int64]model.Category) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return ""
+	}
+	if pid == 0 {
+		return fmt.Sprintf("display:root:%s", name)
+	}
+	parentKey := strings.TrimSpace(categoriesByID[pid].StableKey)
+	if parentKey == "" {
+		return fmt.Sprintf("display:sub:%d:%s", pid, name)
+	}
+	return fmt.Sprintf("%s/%s", parentKey, name)
+}
+
+func (ctx readModelProjectionContext) rootID(id int64) int64 {
+	if id <= 0 {
+		return 0
+	}
+	if rootID, ok := ctx.rootIDByID[id]; ok {
+		return rootID
+	}
+	curr := id
+	for range [8]int{} {
+		category, ok := ctx.categoriesByID[curr]
+		if !ok || category.Pid == 0 {
+			ctx.rootIDByID[id] = curr
+			return curr
+		}
+		curr = category.Pid
+	}
+	ctx.rootIDByID[id] = curr
+	return curr
+}
+
+func (ctx readModelProjectionContext) isRootCategory(id int64) bool {
+	category, ok := ctx.categoriesByID[id]
+	return ok && category.Pid == 0
+}
+
+func (ctx readModelProjectionContext) categoryName(id int64) string {
+	category, ok := ctx.categoriesByID[id]
+	if !ok {
+		return ""
+	}
+	return category.Name
+}
+
+func (ctx readModelProjectionContext) currentRootCategoryIDs(search model.FilmIndex) []int64 {
+	ids := ctx.sourceKeyToCategoryIDs[strings.TrimSpace(search.RootCategoryKey)]
+	if len(ids) == 0 && search.Pid > 0 {
+		ids = []int64{search.Pid}
+	}
+	roots := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		rootID := ctx.rootID(id)
+		if rootID <= 0 {
+			rootID = id
+		}
+		if rootID <= 0 {
+			continue
+		}
+		if _, ok := seen[rootID]; ok {
+			continue
+		}
+		seen[rootID] = struct{}{}
+		roots = append(roots, rootID)
+	}
+	return roots
+}
+
+func (ctx readModelProjectionContext) currentCategoryIDs(search model.FilmIndex) []int64 {
+	ids := ctx.sourceKeyToCategoryIDs[strings.TrimSpace(search.CategoryKey)]
+	if len(ids) == 0 && search.Cid > 0 {
+		ids = []int64{search.Cid}
+	}
+	return ids
+}
+
+func projectSnapshotCategory(snapshot model.FilmListSnapshot) model.FilmListSnapshot {
+	return projectSnapshotCategoryWithContext(snapshot, newReadModelProjectionContext())
+}
+
+func projectSnapshotCategoryWithContext(snapshot model.FilmListSnapshot, ctx readModelProjectionContext) model.FilmListSnapshot {
+	index := filmIndexFromSnapshot(snapshot)
+	rootIDs := ctx.currentRootCategoryIDs(index)
+	if len(rootIDs) > 0 {
+		snapshot.Pid = rootIDs[0]
+	}
+
+	categoryIDs := ctx.currentCategoryIDs(index)
+	for _, id := range categoryIDs {
+		if id <= 0 {
+			continue
+		}
+		rootID := ctx.rootID(id)
+		if rootID <= 0 {
+			rootID = id
+		}
+		if snapshot.Pid <= 0 {
+			snapshot.Pid = rootID
+		}
+		if id != snapshot.Pid && !ctx.isRootCategory(id) {
+			snapshot.Cid = id
+			break
+		}
+	}
+
+	if snapshot.Cid > 0 {
+		snapshot.CName = ctx.categoryName(snapshot.Cid)
+	}
+	if strings.TrimSpace(snapshot.CName) == "" && snapshot.Pid > 0 {
+		snapshot.CName = ctx.categoryName(snapshot.Pid)
+	}
+	return snapshot
+}
+
+func isVisibleProjectedSnapshot(snapshot model.FilmListSnapshot) bool {
+	return isVisibleProjectedSnapshotWithContext(snapshot, newReadModelProjectionContext())
+}
+
+func isVisibleProjectedSnapshotWithContext(snapshot model.FilmListSnapshot, ctx readModelProjectionContext) bool {
+	if snapshot.Pid <= 0 {
+		return false
+	}
+	pid := snapshot.Pid
+	rootID := ctx.rootID(pid)
+	if rootID <= 0 {
+		rootID = pid
+	}
+	root, ok := ctx.categoriesByID[rootID]
+	if !ok || !root.Show {
+		return false
+	}
+	if snapshot.Cid <= 0 {
+		return true
+	}
+	cid := snapshot.Cid
+	category, ok := ctx.categoriesByID[cid]
+	if !ok || !category.Show {
+		return false
+	}
+	if category.Pid > 0 {
+		parent, ok := ctx.categoriesByID[category.Pid]
+		return ok && parent.Show
+	}
+	return true
 }
 
 func newEmptyFilmReadModel(version string) *FilmReadModel {
 	return &FilmReadModel{
 		Version: version,
 		ByMid:   make(map[int64]model.FilmListSnapshot),
-		ByPid:   make(map[int64][]int64),
-		ByTag:   make(map[string][]int64),
 		AllMIDs: []int64{},
 	}
 }
 
 func ClearActiveFilmReadModel() {
-	activeFilmReadModel.Store((*FilmReadModel)(nil))
+	activeFilmReadModel.Store(newEmptyFilmReadModel(""))
+	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel("", ""))
 }
 
 func GetActiveFilmReadModel() *FilmReadModel {
@@ -111,8 +454,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 	st = normalizeSearchTagsVO(st)
 	readModel := requireActiveFilmReadModel(version)
 
-	mids := readModel.matchMIDs(st)
-	snapshots := readModel.snapshotsByMIDs(mids)
+	snapshots := readModel.projectedSnapshotsByTags(st)
 	sortSnapshotsBySearchTag(snapshots, st.Sort)
 	page.Total = len(snapshots)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
@@ -144,19 +486,15 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	st = normalizeSearchTagsVO(st)
 	readModel := requireActiveFilmReadModel(version)
 
-	mids := readModel.matchMIDs(st)
 	keyword = strings.TrimSpace(keyword)
 	var timeLimit int64
 	if recentHours > 0 {
 		timeLimit = time.Now().Add(-time.Duration(recentHours) * time.Hour).Unix()
 	}
 
-	snapshots := make([]model.FilmListSnapshot, 0, len(mids))
-	for _, mid := range mids {
-		snapshot, exists := readModel.ByMid[mid]
-		if !exists {
-			continue
-		}
+	baseSnapshots := readModel.projectedSnapshotsByTags(st)
+	snapshots := make([]model.FilmListSnapshot, 0, len(baseSnapshots))
+	for _, snapshot := range baseSnapshots {
 		if keyword != "" && !strings.Contains(snapshot.Name, keyword) && !strings.Contains(snapshot.SubTitle, keyword) {
 			continue
 		}
@@ -193,12 +531,9 @@ func SearchSnapshotsByKeywordReadModel(version string, keyword string, page *dto
 	keyword = strings.TrimSpace(keyword)
 	readModel := requireActiveFilmReadModel(version)
 
-	snapshots := make([]model.FilmListSnapshot, 0, len(readModel.AllMIDs))
-	for _, mid := range readModel.AllMIDs {
-		snapshot, exists := readModel.ByMid[mid]
-		if !exists {
-			continue
-		}
+	baseSnapshots := readModel.projectedSnapshots()
+	snapshots := make([]model.FilmListSnapshot, 0, len(baseSnapshots))
+	for _, snapshot := range baseSnapshots {
 		if keyword == "" || strings.Contains(snapshot.Name, keyword) || strings.Contains(snapshot.SubTitle, keyword) {
 			snapshots = append(snapshots, snapshot)
 		}
@@ -229,11 +564,7 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	readModel := requireActiveFilmReadModel("")
 
 	indexes := make([]model.FilmIndex, 0, len(readModel.AllMIDs))
-	for _, mid := range readModel.AllMIDs {
-		snapshot, exists := readModel.ByMid[mid]
-		if !exists {
-			continue
-		}
+	for _, snapshot := range readModel.projectedSnapshots() {
 		index := filmIndexFromSnapshot(snapshot)
 		if matchesAdminSearch(index, s) {
 			indexes = append(indexes, index)
@@ -277,33 +608,6 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	return indexes[offset:end]
 }
 
-func (m *FilmReadModel) matchMIDs(st model.SearchTagsVO) []int64 {
-	clauses := buildReadModelFilterClauses(&st)
-
-	base := m.baseMIDs(st.Pid)
-	if len(clauses) == 0 {
-		return append([]int64(nil), base...)
-	}
-
-	candidateSet := midsToSet(base)
-	for _, clause := range clauses {
-		indexedMIDs := m.ByTag[readModelTagKey(clause.TagType, clause.TagValue)]
-		if len(indexedMIDs) == 0 {
-			return []int64{}
-		}
-		candidateSet = intersectMIDSet(candidateSet, indexedMIDs)
-		if len(candidateSet) == 0 {
-			return []int64{}
-		}
-	}
-
-	mids := make([]int64, 0, len(candidateSet))
-	for mid := range candidateSet {
-		mids = append(mids, mid)
-	}
-	return mids
-}
-
 func buildReadModelFilterClauses(st *model.SearchTagsVO) []filterIndexClause {
 	clauses, ok := buildFilterIndexClauses(st)
 	if ok {
@@ -324,21 +628,88 @@ func buildReadModelFilterClauses(st *model.SearchTagsVO) []filterIndexClause {
 }
 
 func (m *FilmReadModel) baseMIDs(pid int64) []int64 {
+	projected := ensureProjectedFilmReadModel(m)
 	pid = support.ResolveCategoryID(pid)
 	if pid <= 0 {
-		return m.AllMIDs
+		return projected.AllMIDs
 	}
-	return m.ByPid[pid]
+	return projected.ByPid[pid]
 }
 
 func (m *FilmReadModel) snapshotsByMIDs(mids []int64) []model.FilmListSnapshot {
 	snapshots := make([]model.FilmListSnapshot, 0, len(mids))
+	projected := ensureProjectedFilmReadModel(m)
 	for _, mid := range mids {
-		if snapshot, ok := m.ByMid[mid]; ok {
+		if snapshot, ok := projected.ByMid[mid]; ok {
 			snapshots = append(snapshots, snapshot)
 		}
 	}
 	return snapshots
+}
+
+func (m *FilmReadModel) projectedSnapshotByMID(mid int64) (model.FilmListSnapshot, bool) {
+	projected := ensureProjectedFilmReadModel(m)
+	snapshot, ok := projected.ByMid[mid]
+	return snapshot, ok
+}
+
+func (m *FilmReadModel) projectedSnapshots() []model.FilmListSnapshot {
+	projected := ensureProjectedFilmReadModel(m)
+	snapshots := make([]model.FilmListSnapshot, 0, len(projected.AllMIDs))
+	for _, mid := range projected.AllMIDs {
+		snapshot, ok := projected.ByMid[mid]
+		if !ok {
+			continue
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots
+}
+
+func (m *FilmReadModel) projectedSnapshotsByPid(pid int64) []model.FilmListSnapshot {
+	projected := ensureProjectedFilmReadModel(m)
+	pid = support.ResolveCategoryID(pid)
+	if pid <= 0 {
+		return m.projectedSnapshots()
+	}
+	snapshots := make([]model.FilmListSnapshot, 0)
+	for _, mid := range projected.ByPid[pid] {
+		snapshot, ok := projected.ByMid[mid]
+		if !ok {
+			continue
+		}
+		snapshots = append(snapshots, snapshot)
+	}
+	return snapshots
+}
+
+func (m *FilmReadModel) projectedSnapshotsByTags(st model.SearchTagsVO) []model.FilmListSnapshot {
+	st = normalizeSearchTagsVO(st)
+	clauses := buildReadModelFilterClauses(&st)
+	projected := ensureProjectedFilmReadModel(m)
+	base := projected.ByPid[support.ResolveCategoryID(st.Pid)]
+	if st.Pid <= 0 {
+		base = projected.AllMIDs
+	}
+	if len(clauses) == 0 {
+		return m.snapshotsByMIDs(base)
+	}
+	candidateSet := midsToSet(base)
+	for _, clause := range clauses {
+		indexedMIDs := projected.ByTag[readModelTagKey(clause.TagType, clause.TagValue)]
+		if len(indexedMIDs) == 0 {
+			return []model.FilmListSnapshot{}
+		}
+		candidateSet = intersectMIDSet(candidateSet, indexedMIDs)
+		if len(candidateSet) == 0 {
+			return []model.FilmListSnapshot{}
+		}
+	}
+	mids := make([]int64, 0, len(candidateSet))
+	for mid := range candidateSet {
+		mids = append(mids, mid)
+	}
+	return m.snapshotsByMIDs(mids)
 }
 
 func midsToSet(mids []int64) map[int64]struct{} {
@@ -409,8 +780,4 @@ func filmIndexFromSnapshot(snapshot model.FilmListSnapshot) model.FilmIndex {
 			PlayFromSummary: snapshot.PlayFromSummary,
 		},
 	}
-}
-
-func init() {
-	activeFilmReadModel.Store((*FilmReadModel)(nil))
 }

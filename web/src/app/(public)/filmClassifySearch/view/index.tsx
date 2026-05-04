@@ -15,6 +15,13 @@ export default function FilmClassifySearchPageView({
   const router = useRouter();
   const { title, list, search, params, page } = data;
   const safeList = Array.isArray(list) ? list : [];
+  const safeSearch = {
+    titles: search?.titles ?? {},
+    sortList: Array.isArray(search?.sortList) ? search.sortList : [],
+    tags: search?.tags ?? {},
+  };
+  const safeParams = params ?? {};
+  const safePage = page ?? { total: 0, pageSize: 20 };
 
   const normalizeTagValue = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -54,19 +61,19 @@ export default function FilmClassifySearchPageView({
     <div className={styles.container}>
       <div className={styles.resultHeader}>
         <div className={styles.count}>
-          <span>{title?.name || "全部"}</span>共 {page.total} 部影片
+          <span>{title?.name || "全部"}</span>共 {safePage.total ?? 0} 部影片
         </div>
       </div>
 
       <div className={styles.filterSection}>
-        {search.sortList.map((key: string) => (
+        {safeSearch.sortList.map((key: string) => (
           <div key={key} className={styles.filterRow}>
-            <div className={styles.label}>{search.titles[key]}</div>
+            <div className={styles.label}>{safeSearch.titles[key]}</div>
             <div className={styles.options}>
-              {getSafeTags(search.tags[key]).map((tag: any, index: number) => (
+              {getSafeTags(safeSearch.tags[key]).map((tag: any, index: number) => (
                 <span
                   key={`${key}-${tag.Value}-${tag.Name}-${index}`}
-                  className={`${styles.option} ${normalizeTagValue(params[key]) === normalizeTagValue(tag.Value) ? styles.active : ""}`}
+                  className={`${styles.option} ${normalizeTagValue(safeParams[key]) === normalizeTagValue(tag.Value) ? styles.active : ""}`}
                   onClick={() => handleTagClick(key, tag.Value)}
                 >
                   {tag.Name}
@@ -85,8 +92,8 @@ export default function FilmClassifySearchPageView({
         <div className={styles.paginationWrapper}>
           <Pagination
             current={parseInt(currentParams.current || "1", 10)}
-            total={page.total}
-            pageSize={page.pageSize || 20}
+            total={safePage.total ?? 0}
+            pageSize={safePage.pageSize || 20}
             onChange={handlePageChange}
             showSizeChanger={false}
             hideOnSinglePage

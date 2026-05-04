@@ -164,18 +164,6 @@ func loadSearchTagItemsByTypeFromQuery(st model.SearchTagsVO, query *gorm.DB) ma
 	return itemsByType
 }
 
-func loadLegacySearchTagItemsByType(pid int64) map[string][]model.SearchTagItem {
-	pid = support.ResolveCategoryID(pid)
-	var allItems []model.SearchTagItem
-	db.Mdb.Where("pid = ? AND score > 0", pid).Order("tag_type ASC, score DESC, value ASC, id ASC").Find(&allItems)
-
-	itemsByType := make(map[string][]model.SearchTagItem)
-	for _, item := range allItems {
-		itemsByType[item.TagType] = append(itemsByType[item.TagType], item)
-	}
-	return itemsByType
-}
-
 func buildOriginalCategorySearchOptions(pid int64, sticky string) []map[string]string {
 	formatted := HandleTagStr("OriginalCategory", true)
 	pid = support.ResolveCategoryID(pid)

@@ -9,6 +9,7 @@ interface CollectTableColumnsOptions {
   runningCollectIds: string[];
   startingCollectIds: string[];
   onUpdateItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
+  onChangeCollectDuration: (id: string, value: number) => void;
   onChangeSourceState: (record: FilmSource) => void;
   onStartTask: (record: FilmSource) => void;
   onStopTask: (id: string) => void;
@@ -21,6 +22,7 @@ export function createCollectTableColumns({
   runningCollectIds,
   startingCollectIds,
   onUpdateItem,
+  onChangeCollectDuration,
   onChangeSourceState,
   onStartTask,
   onStopTask,
@@ -168,7 +170,7 @@ export function createCollectTableColumns({
           style={{ width: "100%" }}
           options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
           onChange={(value) => {
-            onUpdateItem(record.id, (item) => ({ ...item, cd: value }));
+            onChangeCollectDuration(record.id, value);
           }}
         />
       ),

@@ -272,6 +272,40 @@ func GetMultiplePlayGroupsByKeys(siteID, siteName string, keys []string) []model
 	return getMultiplePlayGroupsByKeysTx(db.Mdb, siteID, siteName, keys)
 }
 
+func GetMultiplePlayGroupsBySourcesAndKeys(sources []model.FilmSource, keys []string) map[string][]model.PlayLinkVo {
+	orderedKeys := UniqueKeys(keys)
+	if len(sources) == 0 || len(orderedKeys) == 0 {
+		return nil
+	}
+
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if strings.TrimSpace(source.Id) != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	if len(sourceIDs) == 0 {
+		return nil
+	}
+
+	playlistsBySourceKey, err := loadPlaylistsBySourceAndKeysTx(db.Mdb, sourceIDs, orderedKeys)
+	if err != nil {
+		return nil
+	}
+	if len(playlistsBySourceKey) == 0 {
+		return nil
+	}
+
+	result := make(map[string][]model.PlayLinkVo, len(sources))
+	for _, source := range sources {
+		groups := buildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, orderedKeys, playlistsBySourceKey)
+		if len(groups) > 0 {
+			result[source.Id] = groups
+		}
+	}
+	return result
+}
+
 func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []string) []model.PlayLinkVo {
 	orderedKeys := UniqueKeys(keys)
 	if siteID == "" || len(orderedKeys) == 0 {

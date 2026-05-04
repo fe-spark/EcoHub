@@ -2,7 +2,6 @@ package repository
 
 import (
 	"fmt"
-	"log"
 	"strings"
 
 	"server/internal/infra/db"
@@ -163,20 +162,12 @@ func CreateMappingRule(rule *model.MappingRule) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	if IsCategoryMappingGroup(rule.Group) {
-		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
-			log.Printf("[MappingRule] 规则已创建，但分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
-		}
-	}
+	ClearIndexPageCache()
 	return nil
 }
 
 func UpdateMappingRule(rule *model.MappingRule) error {
 	if err := EnsureMappingRuleIndexes(); err != nil {
-		return err
-	}
-	oldRule, err := GetMappingRuleByID(rule.ID)
-	if err != nil {
 		return err
 	}
 	rule.MatchType = strings.TrimSpace(rule.MatchType)
@@ -194,29 +185,17 @@ func UpdateMappingRule(rule *model.MappingRule) error {
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	if IsCategoryMappingGroup(rule.Group) || (oldRule != nil && IsCategoryMappingGroup(oldRule.Group)) {
-		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
-			log.Printf("[MappingRule] 规则已更新，但分类映射刷新失败: id=%d group=%s err=%v", rule.ID, rule.Group, err)
-		}
-	}
+	ClearIndexPageCache()
 	return nil
 }
 
 func DeleteMappingRule(id uint) error {
-	rule, err := GetMappingRuleByID(id)
-	if err != nil {
-		return err
-	}
 	if err := db.Mdb.Unscoped().Delete(&model.MappingRule{}, id).Error; err != nil {
 		return err
 	}
 	TouchRuleVersion()
 	ReloadMappingRules()
-	if rule != nil && IsCategoryMappingGroup(rule.Group) {
-		if err := RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
-			log.Printf("[MappingRule] 规则已删除，但分类映射刷新失败: id=%d group=%s err=%v", id, rule.Group, err)
-		}
-	}
+	ClearIndexPageCache()
 	return nil
 }
 

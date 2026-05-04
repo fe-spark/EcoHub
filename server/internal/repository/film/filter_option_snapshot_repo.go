@@ -17,6 +17,14 @@ var filterOptionTagTypes = []string{"Plot", "Area", "Language", "Year"}
 
 var filterOptionResponseOrder = []string{"Category", "Plot", "Area", "Language", "Year", "Sort"}
 
+func emptyFilterOptionResponse() map[string]any {
+	return map[string]any{
+		"titles":   map[string]string{},
+		"sortList": []string{},
+		"tags":     map[string]any{},
+	}
+}
+
 func RebuildFilterOptionSnapshot(version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -40,8 +48,8 @@ func RebuildFilterOptionSnapshot(version string) error {
 			if pid <= 0 {
 				continue
 			}
-			options = append(options, buildCategoryFilterOptions(tx, version, pid)...)
-			itemsByType := loadLegacySearchTagItemsByType(pid)
+			options = append(options, buildCategoryFilterOptionsFromReadModel(version, pid)...)
+			itemsByType := loadSearchTagItemsByTypeFromReadModel(version, pid)
 			for _, tagType := range filterOptionTagTypes {
 				options = append(options, buildTagFilterOptions(version, pid, tagType, itemsByType[tagType])...)
 			}
@@ -60,7 +68,7 @@ func RebuildFilterOptionSnapshot(version string) error {
 	return nil
 }
 
-func buildCategoryFilterOptions(tx *gorm.DB, version string, pid int64) []model.FilmFilterOptionSnapshot {
+func buildCategoryFilterOptionsFromReadModel(version string, pid int64) []model.FilmFilterOptionSnapshot {
 	options := []model.FilmFilterOptionSnapshot{{
 		SnapshotVersion: version,
 		Pid:             pid,
@@ -71,20 +79,84 @@ func buildCategoryFilterOptions(tx *gorm.DB, version string, pid int64) []model.
 		Sort:            0,
 	}}
 
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil || readModel.Version != version {
+		return options
+	}
+	counts := make(map[int64]int64)
+	for _, snapshot := range readModel.projectedSnapshotsByPid(pid) {
+		if snapshot.Cid <= 0 {
+			continue
+		}
+		counts[support.ResolveCategoryID(snapshot.Cid)]++
+	}
+
 	var categories []model.Category
-	tx.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&categories)
+	if err := db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&categories).Error; err != nil {
+		return options
+	}
 	for index, category := range categories {
+		resolvedID := support.ResolveCategoryID(category.Id)
+		if counts[resolvedID] <= 0 {
+			continue
+		}
 		options = append(options, model.FilmFilterOptionSnapshot{
 			SnapshotVersion: version,
 			Pid:             pid,
 			TagType:         "Category",
 			Name:            category.Name,
 			Value:           fmt.Sprint(category.Id),
-			Score:           int64(len(categories) - index),
+			Score:           counts[resolvedID],
 			Sort:            index + 1,
 		})
 	}
 	return options
+}
+
+func loadSearchTagItemsByTypeFromReadModel(version string, pid int64) map[string][]model.SearchTagItem {
+	itemsByType := make(map[string][]model.SearchTagItem)
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil || readModel.Version != version || pid <= 0 {
+		return itemsByType
+	}
+	areaCounts := make(map[string]int64)
+	languageCounts := make(map[string]int64)
+	yearCounts := make(map[string]int64)
+	plotCounts := make(map[string]int64)
+	for _, snapshot := range readModel.projectedSnapshotsByPid(pid) {
+		if value := normalizeSearchTagValue("Area", snapshot.Area); value != "" {
+			areaCounts[value]++
+		}
+		if value := normalizeSearchTagValue("Language", snapshot.Language); value != "" {
+			languageCounts[value]++
+		}
+		if snapshot.Year > 0 {
+			yearCounts[fmt.Sprint(snapshot.Year)]++
+		}
+		for _, tag := range splitClassTags(snapshot.ClassTag) {
+			if value := normalizeSearchTagValue("Plot", tag); value != "" {
+				plotCounts[value]++
+			}
+		}
+	}
+	itemsByType["Area"] = searchTagItemsFromCounts("Area", areaCounts)
+	itemsByType["Language"] = searchTagItemsFromCounts("Language", languageCounts)
+	itemsByType["Year"] = searchTagItemsFromCounts("Year", yearCounts)
+	itemsByType["Plot"] = searchTagItemsFromCounts("Plot", plotCounts)
+	return itemsByType
+}
+
+func searchTagItemsFromCounts(tagType string, counts map[string]int64) []model.SearchTagItem {
+	items := make([]model.SearchTagItem, 0, len(counts))
+	for value, score := range counts {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		items = append(items, model.SearchTagItem{TagType: tagType, Name: value, Value: value, Score: score})
+	}
+	items = SortSearchTagItems(tagType, items)
+	return items
 }
 
 func buildTagFilterOptions(version string, pid int64, tagType string, items []model.SearchTagItem) []model.FilmFilterOptionSnapshot {
@@ -150,17 +222,17 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 	}
 	pid = support.ResolveCategoryID(pid)
 	if version == "" || pid <= 0 {
-		return map[string]any{}
+		return emptyFilterOptionResponse()
 	}
-
-	var rows []model.FilmFilterOptionSnapshot
-	if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).
-		Order("sort ASC, score DESC, id ASC").Find(&rows).Error; err != nil {
-		log.Printf("GetFilterOptionSnapshot Error: %v", err)
-		return map[string]any{}
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil || readModel.Version != version {
+		return emptyFilterOptionResponse()
 	}
-
-	return buildFilterOptionResponse(rows)
+	projected := ensureProjectedFilmReadModel(readModel)
+	if response := projected.FilterOptions[pid]; response != nil {
+		return response
+	}
+	return emptyFilterOptionResponse()
 }
 
 func EnsureActiveFilterOptionSnapshot() error {
@@ -201,7 +273,7 @@ func buildFilterOptionResponse(rows []model.FilmFilterOptionSnapshot) map[string
 
 	for _, tagType := range filterOptionResponseOrder {
 		list := grouped[tagType]
-		if len(list) == 0 {
+		if !hasRealFilterOptionItems(tagType, list) {
 			continue
 		}
 		tags[tagType] = list
@@ -216,29 +288,159 @@ func buildFilterOptionResponse(rows []model.FilmFilterOptionSnapshot) map[string
 	}
 }
 
+func hasRealFilterOptionItems(tagType string, list []map[string]string) bool {
+	if len(list) == 0 {
+		return false
+	}
+	if tagType == "Sort" {
+		for _, item := range list {
+			if strings.TrimSpace(item["Value"]) != "" {
+				return true
+			}
+		}
+		return false
+	}
+
+	for _, item := range list {
+		if strings.TrimSpace(item["Value"]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 	version := GetActiveReadModelVersion()
 	if version == "" {
 		return map[int64]map[string]any{}
 	}
-
-	var rows []model.FilmFilterOptionSnapshot
-	if err := db.Mdb.Where("snapshot_version = ?", version).
-		Order("pid ASC, sort ASC, score DESC, id ASC").Find(&rows).Error; err != nil {
-		log.Printf("GetAdminFilterOptionSnapshots Error: %v", err)
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil || readModel.Version != version {
 		return map[int64]map[string]any{}
 	}
-
-	grouped := make(map[int64][]model.FilmFilterOptionSnapshot)
-	for _, row := range rows {
-		grouped[row.Pid] = append(grouped[row.Pid], row)
-	}
-
-	result := make(map[int64]map[string]any, len(grouped))
-	for pid, groupRows := range grouped {
-		response := buildFilterOptionResponse(groupRows)
+	projected := ensureProjectedFilmReadModel(readModel)
+	result := make(map[int64]map[string]any, len(projected.FilterOptions))
+	for pid, response := range projected.FilterOptions {
 		tags, _ := response["tags"].(map[string]any)
 		result[pid] = tags
 	}
 	return result
+}
+
+func buildRuntimeFilterOptionRows(version string, pid int64) []model.FilmFilterOptionSnapshot {
+	rows := make([]model.FilmFilterOptionSnapshot, 0)
+	rows = append(rows, buildCategoryFilterOptionsFromReadModel(version, pid)...)
+	itemsByType := loadSearchTagItemsByTypeFromReadModel(version, pid)
+	for _, tagType := range filterOptionTagTypes {
+		rows = append(rows, buildTagFilterOptions(version, pid, tagType, itemsByType[tagType])...)
+	}
+	rows = append(rows, buildSortFilterOptions(version, pid)...)
+	return rows
+}
+
+func buildProjectedFilterOptionResponses(version string, projected *ProjectedFilmReadModel) map[int64]map[string]any {
+	var roots []model.Category
+	if err := db.Mdb.Where("pid = ? AND `show` = ?", 0, true).Order("sort ASC, id ASC").Find(&roots).Error; err != nil {
+		log.Printf("BuildProjectedFilterOptionResponses Error: %v", err)
+		return map[int64]map[string]any{}
+	}
+
+	responses := make(map[int64]map[string]any, len(roots))
+	for _, root := range roots {
+		pid := support.ResolveCategoryID(root.Id)
+		if pid <= 0 {
+			continue
+		}
+		responses[pid] = buildFilterOptionResponse(buildProjectedFilterOptionRows(version, pid, projected))
+	}
+	return responses
+}
+
+func buildProjectedFilterOptionRows(version string, pid int64, projected *ProjectedFilmReadModel) []model.FilmFilterOptionSnapshot {
+	rows := make([]model.FilmFilterOptionSnapshot, 0)
+	rows = append(rows, buildCategoryFilterOptionsFromProjectedReadModel(version, pid, projected)...)
+	itemsByType := loadSearchTagItemsByTypeFromProjectedReadModel(pid, projected)
+	for _, tagType := range filterOptionTagTypes {
+		rows = append(rows, buildTagFilterOptions(version, pid, tagType, itemsByType[tagType])...)
+	}
+	rows = append(rows, buildSortFilterOptions(version, pid)...)
+	return rows
+}
+
+func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64, projected *ProjectedFilmReadModel) []model.FilmFilterOptionSnapshot {
+	options := []model.FilmFilterOptionSnapshot{{
+		SnapshotVersion: version,
+		Pid:             pid,
+		TagType:         "Category",
+		Name:            "全部",
+		Value:           "",
+		Score:           0,
+		Sort:            0,
+	}}
+
+	counts := make(map[int64]int64)
+	for _, mid := range projected.ByPid[pid] {
+		snapshot, ok := projected.ByMid[mid]
+		if !ok || snapshot.Cid <= 0 {
+			continue
+		}
+		counts[support.ResolveCategoryID(snapshot.Cid)]++
+	}
+
+	var categories []model.Category
+	if err := db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&categories).Error; err != nil {
+		return options
+	}
+	for index, category := range categories {
+		resolvedID := support.ResolveCategoryID(category.Id)
+		if counts[resolvedID] <= 0 {
+			continue
+		}
+		options = append(options, model.FilmFilterOptionSnapshot{
+			SnapshotVersion: version,
+			Pid:             pid,
+			TagType:         "Category",
+			Name:            category.Name,
+			Value:           fmt.Sprint(category.Id),
+			Score:           counts[resolvedID],
+			Sort:            index + 1,
+		})
+	}
+	return options
+}
+
+func loadSearchTagItemsByTypeFromProjectedReadModel(pid int64, projected *ProjectedFilmReadModel) map[string][]model.SearchTagItem {
+	itemsByType := make(map[string][]model.SearchTagItem)
+	if projected == nil || pid <= 0 {
+		return itemsByType
+	}
+	areaCounts := make(map[string]int64)
+	languageCounts := make(map[string]int64)
+	yearCounts := make(map[string]int64)
+	plotCounts := make(map[string]int64)
+	for _, mid := range projected.ByPid[pid] {
+		snapshot, ok := projected.ByMid[mid]
+		if !ok {
+			continue
+		}
+		if value := normalizeSearchTagValue("Area", snapshot.Area); value != "" {
+			areaCounts[value]++
+		}
+		if value := normalizeSearchTagValue("Language", snapshot.Language); value != "" {
+			languageCounts[value]++
+		}
+		if snapshot.Year > 0 {
+			yearCounts[fmt.Sprint(snapshot.Year)]++
+		}
+		for _, tag := range splitClassTags(snapshot.ClassTag) {
+			if value := normalizeSearchTagValue("Plot", tag); value != "" {
+				plotCounts[value]++
+			}
+		}
+	}
+	itemsByType["Area"] = searchTagItemsFromCounts("Area", areaCounts)
+	itemsByType["Language"] = searchTagItemsFromCounts("Language", languageCounts)
+	itemsByType["Year"] = searchTagItemsFromCounts("Year", yearCounts)
+	itemsByType["Plot"] = searchTagItemsFromCounts("Plot", plotCounts)
+	return itemsByType
 }

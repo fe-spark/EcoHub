@@ -7,6 +7,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 )
 
 type ManageService struct{}
@@ -91,7 +92,10 @@ func (s *ManageService) CreateMappingRule(rule model.MappingRule) error {
 	if err := ensureMappingRuleEffectPointAvailable(rule); err != nil {
 		return err
 	}
-	return repository.CreateMappingRule(&rule)
+	if err := repository.CreateMappingRule(&rule); err != nil {
+		return err
+	}
+	return refreshProjectedReadModelAfterMappingRuleChange(rule.Group)
 }
 
 func (s *ManageService) UpdateMappingRule(rule model.MappingRule) error {
@@ -103,20 +107,53 @@ func (s *ManageService) UpdateMappingRule(rule model.MappingRule) error {
 	if rule.ID == 0 {
 		return dtoError("规则 ID 不能为空")
 	}
+	oldRule, err := repository.GetMappingRuleByID(rule.ID)
+	if err != nil {
+		return err
+	}
 	if err := validateMappingRule(rule); err != nil {
 		return err
 	}
 	if err := ensureMappingRuleEffectPointAvailable(rule); err != nil {
 		return err
 	}
-	return repository.UpdateMappingRule(&rule)
+	if err := repository.UpdateMappingRule(&rule); err != nil {
+		return err
+	}
+	oldGroup := ""
+	if oldRule != nil {
+		oldGroup = oldRule.Group
+	}
+	return refreshProjectedReadModelAfterMappingRuleChange(oldGroup, rule.Group)
 }
 
 func (s *ManageService) DeleteMappingRule(id uint) error {
 	if id == 0 {
 		return dtoError("规则 ID 不能为空")
 	}
-	return repository.DeleteMappingRule(id)
+	rule, err := repository.GetMappingRuleByID(id)
+	if err != nil {
+		return err
+	}
+	if err := repository.DeleteMappingRule(id); err != nil {
+		return err
+	}
+	if rule == nil {
+		return nil
+	}
+	return refreshProjectedReadModelAfterMappingRuleChange(rule.Group)
+}
+
+func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
+	for _, group := range groups {
+		if repository.IsCategoryMappingGroup(group) {
+			if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+				return err
+			}
+			return filmrepo.RefreshActiveProjectedReadModel()
+		}
+	}
+	return nil
 }
 
 func (s *ManageService) CheckMappingRuleConflict(rule model.MappingRule) (MappingRuleConflictResult, error) {
