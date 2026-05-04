@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -19,6 +20,7 @@ var CronCollect *cron.Cron = CreateCron()
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
 var taskCidMap = make(map[string]cron.EntryID)
 var taskCidLock sync.RWMutex
+var orphanCleanTaskLock sync.Mutex
 
 // RegisterTaskCid 将 taskId 与运行时 cron.EntryID 关联
 func RegisterTaskCid(taskId string, cid cron.EntryID) {
@@ -196,29 +198,38 @@ func executeTask(ft model.FilmCollectTask) {
 		FullRecoverSpider()
 		log.Println("执行一次失败采集恢复任务")
 	case 3: // 附属站播放列表孤儿清理
-		activeIDs := GetActiveTasks()
-		if len(activeIDs) > 0 {
-			masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
-			masterIDSet := make(map[string]struct{}, len(masters))
-			for _, master := range masters {
-				masterIDSet[master.Id] = struct{}{}
-			}
-			for _, activeID := range activeIDs {
-				if _, isMaster := masterIDSet[activeID]; isMaster {
-					log.Println("[CleanOrphan] 主站正在采集中，跳过本次孤儿清理，等待下次执行")
-					return
-				}
-			}
-		}
-		n := filmrepo.CleanOrphanPlaylists()
-		m := filmrepo.CleanEmptyFilms()
-		x := filmrepo.CleanSearchWithoutDetail()
-		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
+		executeOrphanCleanTask()
 	default:
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
 	}
 
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
+}
+
+func executeOrphanCleanTask() {
+	orphanCleanTaskLock.Lock()
+	defer orphanCleanTaskLock.Unlock()
+
+	startedAt := time.Now()
+	if err := collectLifecycle.runExclusive(func() error {
+		n, orphanChanged, err := filmrepo.CleanOrphanPlaylists()
+		if err != nil {
+			return fmt.Errorf("清理孤儿播放列表失败: %w", err)
+		}
+		m := filmrepo.CleanEmptyFilms()
+		x := filmrepo.CleanSearchWithoutDetail()
+		if orphanChanged || m > 0 || x > 0 {
+			if err := filmrepo.RefreshAfterDataClean(); err != nil {
+				return fmt.Errorf("刷新清理后的前台读模型失败: %w", err)
+			}
+		}
+		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
+		return nil
+	}); err != nil {
+		log.Printf("[CleanOrphan] 数据清理任务执行失败: %v", err)
+		return
+	}
+	log.Printf("[CleanOrphan] 数据清理任务执行完成，cost=%s", time.Since(startedAt))
 }
 
 // RunTaskOnce 立即手动执行一次任务

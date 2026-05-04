@@ -1,0 +1,124 @@
+package film
+
+import (
+	"log"
+	"time"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+)
+
+const (
+	orphanPlaylistScanBatchSize   = 500
+	orphanPlaylistDeleteBatchSize = 200
+	orphanPlaylistBatchCooldown   = 50 * time.Millisecond
+)
+
+type orphanPlaylistRow struct {
+	ID uint
+}
+
+// CleanOrphanPlaylists 清理与主站匹配键索引脱离关联的附属站播放列表。
+func CleanOrphanPlaylists() (int64, bool, error) {
+	total, err := cleanOrphanPlaylistsInBatches()
+	if err != nil {
+		return total, total > 0, err
+	}
+	if total > 0 {
+		log.Printf("[CleanOrphan] 已清理 %d 条孤儿 movie_playlist 记录", total)
+	}
+	return total, total > 0, nil
+}
+
+func cleanOrphanPlaylistsInBatches() (int64, error) {
+	if hasKeys, err := hasMovieMatchKeys(); err != nil {
+		return 0, err
+	} else if !hasKeys {
+		log.Println("[CleanOrphan] movie_match_key 为空，跳过孤儿清理")
+		return 0, nil
+	}
+
+	var total int64
+	var lastID uint
+	for {
+		rows, err := loadOrphanPlaylistRows(lastID)
+		if err != nil {
+			return total, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+
+		ids := make([]uint, 0, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+			if row.ID > lastID {
+				lastID = row.ID
+			}
+		}
+		deleted, err := deleteOrphanPlaylistsByIDs(ids)
+		if err != nil {
+			return total, err
+		}
+		total += deleted
+		if deleted > 0 {
+			log.Printf("[CleanOrphan] 分批清理进度 deleted=%d total=%d last_id=%d", deleted, total, lastID)
+		}
+		time.Sleep(orphanPlaylistBatchCooldown)
+	}
+	if total == 0 {
+		log.Println("[CleanOrphan] movie_playlist 无孤儿记录")
+	}
+	return total, nil
+}
+
+func hasMovieMatchKeys() (bool, error) {
+	var count int64
+	if err := db.Mdb.Model(&model.MovieMatchKey{}).Limit(1).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func loadOrphanPlaylistRows(lastID uint) ([]orphanPlaylistRow, error) {
+	var rows []orphanPlaylistRow
+	err := db.Mdb.Model(&model.MoviePlaylist{}).
+		Select("movie_playlist.id").
+		Where("movie_playlist.id > ?", lastID).
+		Where("NOT EXISTS (?)",
+			db.Mdb.Model(&model.MovieMatchKey{}).
+				Select("1").
+				Where("movie_match_key.match_key = movie_playlist.movie_key"),
+		).
+		Order("movie_playlist.id ASC").
+		Limit(orphanPlaylistScanBatchSize).
+		Scan(&rows).Error
+	return rows, err
+}
+
+func deleteOrphanPlaylistsByIDs(ids []uint) (int64, error) {
+	var total int64
+	for i := 0; i < len(ids); i += orphanPlaylistDeleteBatchSize {
+		end := i + orphanPlaylistDeleteBatchSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		result := db.Mdb.Where("id IN ?", ids[i:end]).Delete(&model.MoviePlaylist{})
+		if result.Error != nil {
+			return total, result.Error
+		}
+		total += result.RowsAffected
+	}
+	return total, nil
+}
+
+func RefreshAfterDataClean() error {
+	var infos []model.FilmIndex
+	if err := db.Mdb.Find(&infos).Error; err != nil {
+		return err
+	}
+	if err := RefreshPlayFromSummaryByIndexes(infos); err != nil {
+		return err
+	}
+	return ActivateRebuiltFilmListSnapshot(NewSnapshotVersion())
+}
