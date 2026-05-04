@@ -56,6 +56,7 @@ func DelFilmSearch(id int64) error {
 			return rebuildErr
 		}
 		DeleteActiveSnapshotsByMids(id)
+		ClearAdminFilmSearchCache()
 		ClearSearchTagsCache(info.Pid)
 		ClearTVBoxListCache()
 		support.ClearIndexPageCache()
@@ -83,6 +84,7 @@ func ShieldFilmSearch(cid int64) error {
 			return rebuildErr
 		}
 		DeleteActiveSnapshotsByCategory("cid", cid)
+		ClearAdminFilmSearchCache()
 		ClearSearchTagsCache(pID)
 	}
 	ClearTVBoxListCache()
@@ -104,6 +106,7 @@ func ShieldRootFilmSearch(pid int64) error {
 		return rebuildErr
 	}
 	DeleteActiveRootSnapshots(pid)
+	ClearAdminFilmSearchCache()
 	ClearSearchTagsCache(pid)
 	ClearTVBoxListCache()
 	support.ClearIndexPageCache()
@@ -129,6 +132,7 @@ func RecoverFilmSearch(cid int64) error {
 			return rebuildErr
 		}
 		RestoreActiveSnapshotsByCategory(cid)
+		ClearAdminFilmSearchCache()
 		ClearSearchTagsCache(pID)
 	}
 	ClearTVBoxListCache()
@@ -205,7 +209,7 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 
 // ClearSearchTagsCache 清除特定分类的所有复合搜索标签缓存
 func ClearSearchTagsCache(pid int64) {
-	pattern := fmt.Sprintf("%s:v*:%d:*", config.SearchTags, pid)
+	pattern := fmt.Sprintf("%s:*", config.SearchTags)
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(ctx) {
@@ -270,6 +274,7 @@ func FilmZero() error {
 	time.Sleep(100 * time.Millisecond)
 
 	ClearSnapshotState()
+	ClearAdminFilmSearchCache()
 	RefreshMasterDataCaches()
 	return nil
 }
@@ -284,6 +289,7 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 		return err
 	}
 	ClearSnapshotState()
+	ClearAdminFilmSearchCache()
 	RefreshMasterDataCaches()
 	return nil
 }

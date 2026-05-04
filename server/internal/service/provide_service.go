@@ -285,21 +285,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		Year:     strings.TrimSpace(year),
 		Sort:     strings.TrimSpace(sort),
 	}
-	query := filmrepo.BuildSnapshotQueryByTags(version, searchTags)
-
-	if wd != "" {
-		query = query.Where("name LIKE ? OR sub_title LIKE ?", "%"+wd+"%", "%"+wd+"%")
-	}
-
-	if h > 0 {
-		timeLimit := time.Now().Add(-time.Duration(h) * time.Hour).Unix()
-		query = query.Where("update_stamp >= ?", timeLimit)
-	}
-
-	dto.GetPage(query, &page)
-
-	var sl []model.FilmListSnapshot
-	query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&sl)
+	sl := filmrepo.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
 
 	var vodList []model.FilmList
 	for _, s := range sl {

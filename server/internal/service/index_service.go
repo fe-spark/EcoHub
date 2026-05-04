@@ -152,7 +152,7 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 // SearchFilmInfo 获取关键字匹配的影片信息
 func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
 	version := filmrepo.GetActiveSnapshotVersion()
-	sl := filmrepo.SearchSnapshotsByKeyword(version, key, page)
+	sl := filmrepo.SearchSnapshotsByKeywordFast(version, key, page)
 	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
 }
 
@@ -203,7 +203,7 @@ func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []m
 	relatedTags := model.SearchTagsVO{Pid: snapshot.Pid, Cid: snapshot.Cid, Plot: snapshot.ClassTag, Sort: "update_stamp"}
 	queryPage := *page
 	queryPage.PageSize++
-	list := filmrepo.ListFilmSnapshotsByTags(version, relatedTags, &queryPage)
+	list := filmrepo.ListFilmSnapshotsByTagsFast(version, relatedTags, &queryPage)
 	filtered := make([]model.FilmListSnapshot, 0, page.PageSize)
 	for _, item := range list {
 		if item.Mid != snapshot.Mid {
@@ -317,7 +317,7 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) []m
 		}
 	}
 
-	sl := filmrepo.ListFilmSnapshotsByTags(version, st, page)
+	sl := filmrepo.ListFilmSnapshotsByTagsFast(version, st, page)
 	list := filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
 	if data, err := json.Marshal(struct {
 		List []model.MovieBasicInfo `json:"list"`
