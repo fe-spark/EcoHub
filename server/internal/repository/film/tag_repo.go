@@ -114,13 +114,17 @@ func shouldAlwaysExposeSearchTag(tagType string) bool {
 
 func buildSearchTagCacheKey(st model.SearchTagsVO, snapshotVersion string) string {
 	st = normalizeSearchTagsVO(st)
-	return fmt.Sprintf("%s:v%s:s%s:%d:%d:%s:%s:%s:%s:%s",
+	return fmt.Sprintf("%s:v%s:s%s:%d",
 		config.SearchTags,
 		getSearchTagsCacheVersion(),
 		snapshotVersion,
-		st.Pid, st.Cid,
-		st.OriginalCategory, st.Area, st.Language, st.Year, st.Plot,
+		st.Pid,
 	)
+}
+
+type searchTagFacts struct {
+	ItemsByType map[string][]model.SearchTagItem `json:"itemsByType"`
+	HasOthers   map[string]bool                  `json:"hasOthers"`
 }
 
 func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
@@ -375,13 +379,36 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 
 	if cacheKey != "" {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var res map[string]any
-			if json.Unmarshal([]byte(data), &res) == nil {
-				return res
+			var facts searchTagFacts
+			if json.Unmarshal([]byte(data), &facts) == nil {
+				return buildSearchTagResponse(st, snapshotVersion, facts)
 			}
 		}
 	}
 
+	facts := searchTagFacts{
+		ItemsByType: make(map[string][]model.SearchTagItem),
+		HasOthers:   make(map[string]bool),
+	}
+	if snapshotVersion != "" {
+		facts.ItemsByType = loadSearchTagItemsByTypeForVersion(st, snapshotVersion)
+	}
+	for _, t := range []string{"Plot", "Area", "Language", "Year"} {
+		facts.HasOthers[t] = hasOthersSearchFacts(pid, t, snapshotVersion)
+	}
+
+	if cacheKey != "" {
+		if data, err := json.Marshal(facts); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*2)
+		}
+	}
+
+	return buildSearchTagResponse(st, snapshotVersion, facts)
+}
+
+func buildSearchTagResponse(st model.SearchTagsVO, snapshotVersion string, facts searchTagFacts) map[string]any {
+	st = normalizeSearchTagsVO(st)
+	pid := st.Pid
 	res := make(map[string]any)
 	tagTypes := []string{"Category", "Plot", "Area", "Language", "Year", "Sort"}
 	allTitles := map[string]string{
@@ -396,9 +423,13 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	tagMap := make(map[string]any)
 	activeTitles := make(map[string]string)
 	activeSortList := make([]string, 0)
-	itemsByType := make(map[string][]model.SearchTagItem)
-	if snapshotVersion != "" {
-		itemsByType = loadSearchTagItemsByTypeForVersion(st, snapshotVersion)
+	itemsByType := facts.ItemsByType
+	if itemsByType == nil {
+		itemsByType = make(map[string][]model.SearchTagItem)
+	}
+	hasOthers := facts.HasOthers
+	if hasOthers == nil {
+		hasOthers = make(map[string]bool)
 	}
 
 	for _, t := range tagTypes {
@@ -427,7 +458,7 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 		}
 
 		sticky := getStickySearchTagValue(st, t)
-		options := FormatSearchTagItems(t, items, sticky, hasOthersSearchFacts(pid, t, snapshotVersion))
+		options := FormatSearchTagItems(t, items, sticky, hasOthers[t])
 		if hasEffectiveSearchOptions(options) || shouldAlwaysExposeSearchTag(t) {
 			tagMap[t] = options
 			activeTitles[t] = allTitles[t]
@@ -438,12 +469,6 @@ func GetSearchTag(st model.SearchTagsVO) map[string]any {
 	res["titles"] = activeTitles
 	res["sortList"] = activeSortList
 	res["tags"] = tagMap
-
-	if cacheKey != "" {
-		if data, err := json.Marshal(res); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*2)
-		}
-	}
 
 	return res
 }

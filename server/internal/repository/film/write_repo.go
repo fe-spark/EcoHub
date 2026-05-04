@@ -389,6 +389,7 @@ func BatchHandleSearchTag(infos ...model.FilmIndex) {
 	}
 
 	ClearAllSearchTagsCache()
+	ClearAdminFilmSearchCache()
 }
 
 func UpdateSearchTagsForVisibleCollect(infos ...model.FilmIndex) {
@@ -414,6 +415,7 @@ func invalidateSearchTagsVisibleCacheThrottled() {
 	searchTagsVisibleCacheState.mu.Unlock()
 
 	ClearAllSearchTagsCache()
+	ClearAdminFilmSearchCache()
 }
 
 func normalizeOrderedPids(pids []int64) []int64 {

@@ -117,6 +117,8 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 		log.Printf("Set SnapshotBuildVersion Error: %v", err)
 	}
 	RefreshAccessDataCaches()
+	ClearAdminFilmSearchCache()
+	WarmSnapshotFilterCaches(version)
 	pruneOldFilmListSnapshots(snapshotRetainVersions)
 	return nil
 }

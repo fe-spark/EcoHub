@@ -17,7 +17,7 @@ var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
 func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
-	return filmrepo.GetSearchPage(vo)
+	return filmrepo.GetSearchPageFast(vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
