@@ -465,6 +465,9 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 			return err
 		}
 	}
+	if err := deleteOrphanDisplayRootCategories(); err != nil {
+		return err
+	}
 	RefreshCategoryCache()
 	ReloadMappingRules()
 	touchCategoryVersion()
@@ -474,6 +477,47 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	ClearIndexPageCache()
 	clearProvideListCache()
 	return nil
+}
+
+func deleteOrphanDisplayRootCategories() error {
+	var categories []model.Category
+	if err := db.Mdb.Order("pid ASC, id ASC").Find(&categories).Error; err != nil {
+		return err
+	}
+
+	childCountByPid := make(map[int64]int)
+	for _, category := range categories {
+		if category.Pid > 0 {
+			childCountByPid[category.Pid]++
+		}
+	}
+
+	var mappedCategoryIDs []int64
+	if err := db.Mdb.Model(&model.CategoryMapping{}).Distinct("category_id").Pluck("category_id", &mappedCategoryIDs).Error; err != nil {
+		return err
+	}
+	mapped := make(map[int64]struct{}, len(mappedCategoryIDs))
+	for _, id := range mappedCategoryIDs {
+		mapped[id] = struct{}{}
+	}
+
+	orphanIDs := make([]int64, 0)
+	for _, category := range categories {
+		if category.Pid != 0 {
+			continue
+		}
+		if childCountByPid[category.Id] > 0 {
+			continue
+		}
+		if _, ok := mapped[category.Id]; ok {
+			continue
+		}
+		orphanIDs = append(orphanIDs, category.Id)
+	}
+	if len(orphanIDs) == 0 {
+		return nil
+	}
+	return db.Mdb.Where("id IN ?", orphanIDs).Delete(&model.Category{}).Error
 }
 
 func clearProvideListCache() {
