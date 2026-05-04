@@ -21,6 +21,7 @@ func SetupRouter() *gin.Engine {
 
 	api := r.Group("/api")
 
+	api.GET(`/health`, handler.Health)
 	api.GET(`/index`, handler.IndexHd.Index)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)

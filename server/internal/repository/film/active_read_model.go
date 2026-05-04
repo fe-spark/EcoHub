@@ -29,7 +29,8 @@ func LoadActiveFilmReadModel(version string) error {
 		version = GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		activeFilmReadModel.Store((*FilmReadModel)(nil))
+		activeFilmReadModel.Store(newEmptyFilmReadModel(""))
+		log.Printf("[ActiveReadModel] 空库启动，已加载空读模型")
 		return nil
 	}
 
@@ -67,6 +68,16 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModel.Store(readModel)
 	log.Printf("[ActiveReadModel] 加载完成 version=%s films=%d tags=%d cost=%s", version, len(readModel.ByMid), len(readModel.ByTag), time.Since(startedAt))
 	return nil
+}
+
+func newEmptyFilmReadModel(version string) *FilmReadModel {
+	return &FilmReadModel{
+		Version: version,
+		ByMid:   make(map[int64]model.FilmListSnapshot),
+		ByPid:   make(map[int64][]int64),
+		ByTag:   make(map[string][]int64),
+		AllMIDs: []int64{},
+	}
 }
 
 func ClearActiveFilmReadModel() {

@@ -15,6 +15,10 @@ type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
 
+func Health(c *gin.Context) {
+	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
+}
+
 func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) string {
 	if preferred != "" {
 		for _, source := range playSources {
