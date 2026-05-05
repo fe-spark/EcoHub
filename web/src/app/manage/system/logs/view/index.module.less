@@ -1,0 +1,90 @@
+.pageStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.headerArea,
+.filterCard {
+  flex: none;
+}
+
+.toolbar {
+  width: 100%;
+}
+
+.keywordInput {
+  width: 240px;
+}
+
+.levelSelect {
+  width: 130px;
+}
+
+.logCard {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.logBody {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: auto;
+  padding: 12px;
+  border-radius: 10px;
+  background: #07111f;
+  color: #d7e3f4;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.logLine {
+  display: grid;
+  grid-template-columns: 56px 70px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.lineNo {
+  color: rgba(215, 227, 244, 0.38);
+  text-align: right;
+  user-select: none;
+}
+
+.level {
+  min-width: 0;
+}
+
+.message {
+  min-width: 0;
+}
+
+@media (max-width: 768px) {
+  .keywordInput,
+  .levelSelect {
+    width: 100%;
+  }
+
+  .logBody {
+    padding: 10px;
+  }
+
+  .logLine {
+    grid-template-columns: 42px minmax(0, 1fr);
+  }
+
+  .level {
+    display: none;
+  }
+}

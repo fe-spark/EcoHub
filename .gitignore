@@ -31,5 +31,4 @@ package-lock.json
 # 文件保留路径
 static/
 AGENTS.md
-logs
-
+server/logs/
