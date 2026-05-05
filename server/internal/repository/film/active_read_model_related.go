@@ -11,18 +11,15 @@ import (
 func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
 	page = ensurePage(page)
 	readModel := requireActiveFilmReadModel(version)
-	snapshot = projectSnapshotCategory(snapshot)
-	if !isVisibleProjectedSnapshot(snapshot) {
+	projectedSnapshot, ok := readModel.projectedSnapshotByMID(snapshot.Mid)
+	if !ok {
 		return []model.FilmListSnapshot{}
 	}
+	snapshot = projectedSnapshot
 
 	candidates := make([]relatedSnapshotScore, 0)
 	for _, candidate := range readModel.projectedSnapshotsByPid(snapshot.Pid) {
 		if candidate.Mid == snapshot.Mid {
-			continue
-		}
-		candidate = projectSnapshotCategory(candidate)
-		if !isVisibleProjectedSnapshot(candidate) {
 			continue
 		}
 		score := scoreRelatedSnapshot(snapshot, candidate)
@@ -211,10 +208,6 @@ func appendTopScoredCategoryFallbacks(readModel *FilmReadModel, current model.Fi
 	fallbacks := make([]model.FilmListSnapshot, 0)
 	for _, candidate := range readModel.projectedSnapshotsByPid(current.Pid) {
 		if _, ok := seen[candidate.Mid]; ok {
-			continue
-		}
-		candidate = projectSnapshotCategory(candidate)
-		if !isVisibleProjectedSnapshot(candidate) {
 			continue
 		}
 		if current.Cid > 0 && candidate.Cid != current.Cid {

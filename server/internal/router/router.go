@@ -23,6 +23,7 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
+	api.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
 	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
 	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
 	api.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)

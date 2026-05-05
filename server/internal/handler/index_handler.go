@@ -1,8 +1,10 @@
 package handler
 
 import (
+	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -90,6 +92,15 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) s
 	return ""
 }
 
+func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
+	cost := time.Since(startedAt)
+	if cost < 500*time.Millisecond {
+		return
+	}
+	args := append([]any{"[IndexHandler][Slow]", name, "cost", cost}, fields...)
+	log.Println(args...)
+}
+
 // Index 首页数据
 func (h *IndexHandler) Index(c *gin.Context) {
 	data := service.IndexSvc.IndexPage()
@@ -108,6 +119,7 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 
 // FilmPlayInfo 影视播放页数据
 func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
+	totalStartedAt := time.Now()
 	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
 	if err != nil {
 		dto.Failed("请求异常,暂无影片信息!!!", c)
@@ -119,7 +131,9 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("请求异常,暂无影片信息!!!", c)
 		return
 	}
+	detailStartedAt := time.Now()
 	detail, err := service.IndexSvc.GetFilmDetail(id)
+	logSlowIndexStep("FilmPlayInfo.GetFilmDetail", detailStartedAt, "id", id)
 	if err != nil {
 		dto.Failed("影片详情数据异常", c)
 		return
@@ -155,15 +169,35 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		}
 	}
 
-	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(detail.MovieDetail, &page)
+	logSlowIndexStep("FilmPlayInfo.total", totalStartedAt, "id", id)
 	dto.Success(gin.H{
 		"detail":          detail,
 		"current":         currentPlay,
 		"currentPlayFrom": playFrom,
 		"currentEpisode":  episode,
-		"relate":          relateMovie,
+		"relate":          []model.MovieBasicInfo{},
 	}, "影片播放信息获取成功", c)
+}
+
+// FilmRelate 影视播放页相关推荐数据
+func (h *IndexHandler) FilmRelate(c *gin.Context) {
+	startedAt := time.Now()
+	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
+	if err != nil || id <= 0 {
+		dto.Failed("请求异常,暂无影片信息!!!", c)
+		return
+	}
+
+	detail, err := service.IndexSvc.GetFilmDetailOnly(id)
+	if err != nil || detail.Id == 0 {
+		dto.Failed("影片详情数据异常", c)
+		return
+	}
+
+	page := dto.Page{Current: 0, PageSize: 14}
+	relateMovie := service.IndexSvc.RelateMovie(detail, &page)
+	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
+	dto.Success(relateMovie, "相关推荐获取成功", c)
 }
 
 // SearchFilm 通过片名模糊匹配库存中的信息

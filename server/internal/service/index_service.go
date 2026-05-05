@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -28,6 +29,15 @@ func normalizeIndexPage(page *dto.Page) *dto.Page {
 		page.PageSize = 20
 	}
 	return page
+}
+
+func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
+	cost := time.Since(startedAt)
+	if cost < 500*time.Millisecond {
+		return
+	}
+	args := append([]any{"[IndexService][Slow]", name, "cost", cost}, fields...)
+	log.Println(args...)
 }
 
 // IndexPage 首页数据处理
@@ -87,19 +97,48 @@ func (i *IndexService) IndexPage() map[string]any {
 
 // GetFilmDetail 影片详情信息页面处理
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
+	startedAt := time.Now()
 	version := filmrepo.GetActiveReadModelVersion()
+	snapshotStartedAt := time.Now()
 	snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
+	logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
 	if snapshot == nil {
 		return model.MovieDetailVo{}, nil
 	}
+	detailStartedAt := time.Now()
 	movieDetail := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+	logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 	if movieDetail == nil {
 		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
 		return model.MovieDetailVo{}, nil
 	}
 	res := model.MovieDetailVo{MovieDetail: *movieDetail}
+	multipleStartedAt := time.Now()
 	res.List = multipleSource(snapshot, movieDetail)
+	logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
+	logSlowIndexServiceStep("GetFilmDetail.total", startedAt, "id", id)
 	return res, nil
+}
+
+// GetFilmDetailOnly 读取影片详情主体，不聚合附属站播放源。
+func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
+	startedAt := time.Now()
+	version := filmrepo.GetActiveReadModelVersion()
+	snapshotStartedAt := time.Now()
+	snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
+	logSlowIndexServiceStep("GetFilmDetailOnly.snapshot", snapshotStartedAt, "id", id)
+	if snapshot == nil {
+		return model.MovieDetail{}, nil
+	}
+	detailStartedAt := time.Now()
+	movieDetail := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+	logSlowIndexServiceStep("GetFilmDetailOnly.detail", detailStartedAt, "id", id)
+	if movieDetail == nil {
+		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+		return model.MovieDetail{}, nil
+	}
+	logSlowIndexServiceStep("GetFilmDetailOnly.total", startedAt, "id", id)
+	return *movieDetail, nil
 }
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
@@ -189,14 +228,23 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // RelateMovie 根据当前影片信息匹配相关的影片
 func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
+	startedAt := time.Now()
 	page = normalizeIndexPage(page)
 	version := filmrepo.GetActiveReadModelVersion()
+	snapshotStartedAt := time.Now()
 	snapshot := filmrepo.GetSnapshotByMid(version, detail.Id)
+	logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", detail.Id)
 	if snapshot == nil {
 		return []model.MovieBasicInfo{}
 	}
+	listStartedAt := time.Now()
 	list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
-	return filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
+	logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", detail.Id)
+	buildStartedAt := time.Now()
+	result := filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
+	logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", detail.Id)
+	logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", detail.Id)
+	return result
 }
 
 // SearchTags 整合对应分类的搜索tag
@@ -205,13 +253,20 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 }
 
 func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []model.PlayLinkVo {
+	startedAt := time.Now()
+	primaryStartedAt := time.Now()
 	playList := buildPrimaryPlaySources(snapshot, detail)
+	logSlowIndexServiceStep("multipleSource.primary", primaryStartedAt, "id", snapshot.Mid)
+	keysStartedAt := time.Now()
 	names := filmrepo.LoadMovieMatchKeysBySnapshot(snapshot, detail)
+	logSlowIndexServiceStep("multipleSource.matchKeys", keysStartedAt, "id", snapshot.Mid)
 	if len(names) == 0 {
 		return playList
 	}
 
+	sourcesStartedAt := time.Now()
 	slaveSources := repository.GetCollectSourceListByGrade(model.SlaveCollect)
+	logSlowIndexServiceStep("multipleSource.sources", sourcesStartedAt, "id", snapshot.Mid)
 	querySources := make([]model.FilmSource, 0, len(slaveSources))
 	seenSourceIDs := make(map[string]struct{}, len(playList))
 	for _, item := range playList {
@@ -235,7 +290,9 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 		querySources = append(querySources, source)
 	}
 
+	groupsStartedAt := time.Now()
 	groupsBySource := filmrepo.GetMultiplePlayGroupsBySourcesAndKeys(querySources, names)
+	logSlowIndexServiceStep("multipleSource.playlists", groupsStartedAt, "id", snapshot.Mid, "sources", len(querySources), "keys", len(names))
 	for _, source := range querySources {
 		groups := groupsBySource[source.Id]
 		if len(groups) > 0 {
@@ -243,6 +300,7 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 		}
 	}
 
+	logSlowIndexServiceStep("multipleSource.total", startedAt, "id", snapshot.Mid, "sources", len(querySources), "keys", len(names))
 	return playList
 }
 
