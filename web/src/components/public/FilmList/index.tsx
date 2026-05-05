@@ -25,6 +25,7 @@ interface FilmListProps {
   col?: number;
   className?: string;
   loading?: boolean;
+  onOpenPlayPage?: (id: string, href: string) => void;
 }
 // Internal Component for individual film card
 function FilmCard({
@@ -40,11 +41,25 @@ function FilmCard({
 }) {
   const [imgLoaded, setImgLoaded] = React.useState(false);
   const [imgError, setImgError] = React.useState(false);
+  const imgRef = React.useRef<HTMLImageElement | null>(null);
   const id = item.mid || item.id;
 
   React.useEffect(() => {
     setImgLoaded(false);
     setImgError(false);
+    const frame = window.requestAnimationFrame(() => {
+      const img = imgRef.current;
+      if (!img || img.getAttribute("src") !== item.picture) {
+        return;
+      }
+      if (img.complete && img.naturalWidth > 0) {
+        setImgLoaded(true);
+      }
+      if (img.complete && img.naturalWidth === 0) {
+        setImgError(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [item.picture]);
 
   if (id === "-99") return null;
@@ -57,6 +72,7 @@ function FilmCard({
             /* 影片卡片图片全部来自后端动态地址，这里维持原生 img 与懒加载策略 */
             /* eslint-disable-next-line @next/next/no-img-element */
             <img
+              ref={imgRef}
               src={item.picture}
               className={`${styles.poster} ${imgLoaded ? styles.posterLoaded : ""}`}
               alt={item.name}
@@ -116,6 +132,7 @@ export default function FilmList({
   col,
   className,
   loading = false,
+  onOpenPlayPage,
 }: FilmListProps) {
   const router = useRouter();
 
@@ -169,7 +186,12 @@ export default function FilmList({
   }
 
   const handleOpenPlayPage = (id: string) => {
-    router.push(resolvePlayEntryPath(id));
+    const href = resolvePlayEntryPath(id);
+    if (onOpenPlayPage) {
+      onOpenPlayPage(id, href);
+      return;
+    }
+    router.push(href);
   };
 
   return (

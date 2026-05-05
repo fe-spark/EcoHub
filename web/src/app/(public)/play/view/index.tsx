@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { StepForwardOutlined, PlayCircleOutlined } from "@ant-design/icons";
+import { LoadingOutlined, StepForwardOutlined, PlayCircleOutlined } from "@ant-design/icons";
 import FilmList from "@/components/public/FilmList";
 import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -71,6 +71,7 @@ export default function PlayPageView({
   const [autoplay, setAutoplay] = useState(true);
   const [playerError, setPlayerError] = useState(false);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
+  const [openingRelatedId, setOpeningRelatedId] = useState("");
 
   const activeEpRef = useRef<HTMLDivElement>(null);
   const activeTabRef = useRef<HTMLDivElement>(null);
@@ -168,6 +169,17 @@ export default function PlayPageView({
     });
   };
 
+  const handleOpenRelatedFilm = useCallback(
+    (id: string, href: string) => {
+      if (!id || id === String(filmId)) {
+        return;
+      }
+      setOpeningRelatedId(id);
+      window.location.assign(href);
+    },
+    [filmId],
+  );
+
   const persistHistory = useCallback(
     (currentTime?: number, duration?: number) => {
       if (!currentFilm || !current || !playingSourceId) return;
@@ -248,6 +260,12 @@ export default function PlayPageView({
 
   return (
     <div className={styles.container}>
+      {openingRelatedId && (
+        <div className={styles.pageOpeningMask}>
+          <LoadingOutlined />
+          <span>正在重新加载影片...</span>
+        </div>
+      )}
       <div className={styles.bgWrapper}>
         {/* 播放页背景图来自动态视频资源，当前不走 next/image 优化链路 */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -454,7 +472,11 @@ export default function PlayPageView({
 
       <div className={styles.recommendation}>
         <h2 className={styles.sectionTitle}>相关推荐</h2>
-        <FilmList list={relatedFilms} className={styles.classifyGrid} />
+        <FilmList
+          list={relatedFilms}
+          className={styles.classifyGrid}
+          onOpenPlayPage={handleOpenRelatedFilm}
+        />
       </div>
     </div>
   );

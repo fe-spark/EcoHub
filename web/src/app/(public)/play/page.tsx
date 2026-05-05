@@ -60,6 +60,7 @@ export default async function PlayPage({
 
   return (
     <PlayPageView
+      key={filmId}
       data={playPageData}
       filmId={filmId}
       initialTime={initialTime}

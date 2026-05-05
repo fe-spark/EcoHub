@@ -22,6 +22,7 @@ export default function FilmClassifySearchPageView({
   };
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 20 };
+  const categoryKey = [safeParams.Pid || currentParams.Pid || "", safeParams.Category || currentParams.Category || ""].join(":");
 
   const normalizeTagValue = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -85,7 +86,7 @@ export default function FilmClassifySearchPageView({
       </div>
 
       <div className={styles.content}>
-        <FilmList list={safeList} className={styles.classifyGrid} />
+        <FilmList key={categoryKey} list={safeList} className={styles.classifyGrid} />
       </div>
 
       {safeList.length > 0 && (

@@ -92,7 +92,7 @@ const (
 	FailureRecordStatusPending = 1
 	// FailureRecordStatusSuccess 本次重试已成功，不再进入后续定时队列。
 	FailureRecordStatusSuccess = 0
-	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
+	// FailureRecordStatusFailed 已达到最大自动重试次数，不再进入后续定时队列。
 	FailureRecordStatusFailed = 2
 )
 

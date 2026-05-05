@@ -36,6 +36,7 @@ export async function serverGet<T = any>(
   params?: Record<string, string | number | undefined>,
 ): Promise<ApiResponse<T>> {
   const apiUrl = buildApiUrl(path, params);
+  console.info(`[SSR][API] GET ${apiUrl}`);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
   let response: Response;

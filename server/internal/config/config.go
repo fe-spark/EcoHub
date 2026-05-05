@@ -113,7 +113,7 @@ const (
 	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片
 	DefaultUpdateTime = 3
 	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用
-	DefaultSpiderInterval = 500
+	DefaultSpiderInterval = 200
 )
 
 // -------------------------Database Connection Params-----------------------------------

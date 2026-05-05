@@ -10,6 +10,22 @@
   gap: 32px;
 }
 
+.pageOpeningMask {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: var(--public-text-1);
+  font-size: 18px;
+  font-weight: 800;
+  background: color-mix(in srgb, var(--public-page-bg) 72%, rgba(0, 0, 0, 0.72));
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
 .emptyPage {
   min-height: calc(100vh - 76px);
   display: grid;

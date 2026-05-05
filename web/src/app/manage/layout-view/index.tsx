@@ -27,6 +27,7 @@ import {
   SunOutlined,
   MoonOutlined,
   DesktopOutlined,
+  FileTextOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -87,6 +88,11 @@ const menuItems: MenuItem[] = [
       { key: "/manage/system/users", label: "账号管理" },
     ],
   },
+  {
+    key: "/manage/system/logs",
+    icon: <FileTextOutlined />,
+    label: "系统日志",
+  },
 ];
 
 function resolveMenuKey(pathname: string) {
@@ -119,6 +125,9 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/system/users")) {
     return "/manage/system/users";
+  }
+  if (pathname.startsWith("/manage/system/logs")) {
+    return "/manage/system/logs";
   }
   if (pathname.startsWith("/manage/file")) {
     return "/manage/file";
@@ -167,6 +176,7 @@ export default function ManageLayoutView({
   const router = useRouter();
   const pathname = usePathname();
   const selectedKey = resolveMenuKey(pathname);
+  const isLogPage = pathname.startsWith("/manage/system/logs");
 
   useEffect(() => {
     ApiGet("/manage/user/info").then((resp) => {
@@ -332,8 +342,8 @@ export default function ManageLayoutView({
           </Space>
         </Header>
         <Content
-          className={styles.content}
-          style={{ flex: 1, overflow: "auto" }}
+          className={`${styles.content} ${isLogPage ? styles.contentFixed : ""}`}
+          style={{ flex: 1, overflow: isLogPage ? "hidden" : "auto" }}
         >
           {children}
         </Content>

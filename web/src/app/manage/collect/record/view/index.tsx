@@ -11,6 +11,7 @@ import {
   Popconfirm,
   Pagination,
   Tooltip,
+  Typography,
 } from "antd";
 import {
   ReloadOutlined,
@@ -25,6 +26,7 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
+const RECOVER_MAX_RETRY_COUNT = 5;
 
 interface FailRecord {
   ID: number;
@@ -47,12 +49,22 @@ const FAILURE_RECORD_STATUS = {
 
 function renderStatusTag(status: number) {
   if (status === FAILURE_RECORD_STATUS.pending) {
-    return <Tag color="warning">待重试</Tag>;
+    return <Tag color="processing">待自动重试</Tag>;
   }
   if (status === FAILURE_RECORD_STATUS.success) {
     return <Tag color="success">重试成功</Tag>;
   }
-  return <Tag color="error">重试失败</Tag>;
+  return <Tag color="error">最终失败</Tag>;
+}
+
+function normalizeStatusOptionLabel(name: string, value: number) {
+  if (value === FAILURE_RECORD_STATUS.pending) {
+    return "待自动重试";
+  }
+  if (value === FAILURE_RECORD_STATUS.failed) {
+    return "最终失败";
+  }
+  return name;
 }
 
 export default function FailureRecordPageView() {
@@ -104,14 +116,18 @@ export default function FailureRecordPageView() {
 
   const handleRetry = async (id: number) => {
     const resp = await ApiPost("/manage/collect/record/retry", { id });
-    if (resp.code === 0) message.success(resp.msg);
-    else message.error(resp.msg);
+    if (resp.code === 0) {
+      message.success(resp.msg);
+      void getRecords();
+    } else message.error(resp.msg);
   };
 
   const handleRetryAll = async () => {
     const resp = await ApiPost("/manage/collect/record/retry/all", {});
-    if (resp.code === 0) message.success(resp.msg);
-    else message.error(resp.msg);
+    if (resp.code === 0) {
+      message.success(resp.msg);
+      void getRecords();
+    } else message.error(resp.msg);
   };
 
   const handleCleanResult = async () => {
@@ -170,7 +186,7 @@ export default function FailureRecordPageView() {
       dataIndex: "cause",
       align: "left",
       ellipsis: true,
-      render: (v) => <Tag color="red">{v}</Tag>,
+      render: (v) => <Typography.Text type="danger">{v}</Typography.Text>,
     },
     {
       title: "状态",
@@ -182,7 +198,11 @@ export default function FailureRecordPageView() {
       title: "重试次数",
       dataIndex: "retryCount",
       align: "center",
-      render: (v) => <Tag color={v > 1 ? "volcano" : "default"}>{v || 1}</Tag>,
+      render: (v) => {
+        const retryCount = v || 1;
+        const color = retryCount >= RECOVER_MAX_RETRY_COUNT ? "error" : retryCount > 1 ? "warning" : "default";
+        return <Tag color={color}>{retryCount}/{RECOVER_MAX_RETRY_COUNT}</Tag>;
+      },
     },
     {
       title: "请求时间",
@@ -195,18 +215,28 @@ export default function FailureRecordPageView() {
       key: "action",
       align: "center",
       fixed: "right",
-      render: (_, record) => (
-        <Tooltip title="采集重试">
-          <Button
-            type="primary"
-            shape="circle"
-            size="small"
-            style={{ background: "#52c41a", borderColor: "#52c41a" }}
-            icon={<ReloadOutlined />}
-            onClick={() => handleRetry(record.ID)}
-          />
-        </Tooltip>
-      ),
+      render: (_, record) => {
+        const isSuccess = record.status === FAILURE_RECORD_STATUS.success;
+        const isFinalFailed = record.status === FAILURE_RECORD_STATUS.failed;
+        const tooltipTitle = isSuccess
+          ? "已重试成功，无需再次重试"
+          : isFinalFailed
+            ? "手动再试，失败后仍保持最终失败"
+            : "立即重试此记录";
+        return (
+          <Tooltip title={tooltipTitle}>
+            <Button
+              type="primary"
+              shape="circle"
+              size="small"
+              disabled={isSuccess}
+              style={isSuccess ? undefined : { background: "#52c41a", borderColor: "#52c41a" }}
+              icon={<ReloadOutlined />}
+              onClick={() => handleRetry(record.ID)}
+            />
+          </Tooltip>
+        );
+      },
     },
   ];
 
@@ -214,7 +244,7 @@ export default function FailureRecordPageView() {
     <div className={styles.pageBody}>
         <ManagePageHeader
           title="失败记录"
-          description="查看采集失败明细、快速重试异常任务，并统一清理已有重试结果或全部失败记录。"
+          description="查看采集失败明细、自动重试次数和最终失败记录，并统一清理已有重试结果或全部失败记录。"
         />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
@@ -234,7 +264,7 @@ export default function FailureRecordPageView() {
           value={params.status}
           onChange={(v) => setParams({ ...params, status: v })}
           options={options.status?.map((o: any) => ({
-            label: o.name,
+            label: normalizeStatusOptionLabel(o.name, o.value),
             value: o.value,
           }))}
           className={styles.statusSelect}
@@ -275,9 +305,9 @@ export default function FailureRecordPageView() {
           <div className={styles.tableHeader}>
             <div className={styles.tableTitle}>失败记录列表</div>
             <Space size={[8, 8]} wrap className={styles.tableActions}>
-              <Popconfirm title="确认重试所有失效记录？" onConfirm={handleRetryAll}>
+              <Popconfirm title="确认立即重试所有待自动重试记录？" onConfirm={handleRetryAll}>
                 <Button type="primary" icon={<ReloadOutlined />}>
-                  全部重试
+                  重试待重试记录
                 </Button>
               </Popconfirm>
               <Popconfirm title="确认清除已有重试结果的记录？" onConfirm={handleCleanResult}>

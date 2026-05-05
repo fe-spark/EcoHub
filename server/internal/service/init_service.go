@@ -173,20 +173,20 @@ func (s *InitService) FilmSourceInit() {
 func defaultFilmSources() []model.FilmSource {
 	// 使用 URI 哈希作为 ID，确保重置后顺序一致且支持主从切换。
 	return []model.FilmSource{
-		{Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(OK)", Uri: `https://okzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(HM)", Uri: `https://json.heimuer.xyz/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "魔都(MD)", Uri: `https://www.mdzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(DB)", Uri: `https://caiji.dbzy.tv/api.php/provide/vod/from/dbm3u8/at/json/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Grade: model.MasterCollect, SyncPictures: false, State: true, Interval: 500},
-		{Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(LZ)", Uri: `https://cj.lziapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
-		{Name: "卧龙(WL)", Uri: `https://collect.wolongzy.cc/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: 500},
+		{Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(OK)", Uri: `https://okzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(HM)", Uri: `https://json.heimuer.xyz/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "魔都(MD)", Uri: `https://www.mdzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(DB)", Uri: `https://caiji.dbzy.tv/api.php/provide/vod/from/dbm3u8/at/json/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Grade: model.MasterCollect, SyncPictures: false, State: true, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(LZ)", Uri: `https://cj.lziapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
+		{Name: "卧龙(WL)", Uri: `https://collect.wolongzy.cc/api.php/provide/vod/`, Grade: model.SlaveCollect, SyncPictures: false, State: false, Interval: config.DefaultSpiderInterval},
 	}
 }
 
