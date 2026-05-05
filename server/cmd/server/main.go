@@ -2,22 +2,39 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
+	"os"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/router"
 	"server/internal/service"
+
+	"github.com/gin-gonic/gin"
 )
 
 func init() {
+	setupLogging()
 	if err := waitForRedis(30, 2*time.Second); err != nil {
 		panic(err)
 	}
 	if err := waitForMySQL(30, 2*time.Second); err != nil {
 		panic(err)
 	}
+}
+
+func setupLogging() {
+	if err := syslog.Init(); err != nil {
+		log.Printf("[Init] 系统日志初始化失败: %v", err)
+		return
+	}
+	writer := io.MultiWriter(os.Stdout, syslog.Writer())
+	log.SetOutput(writer)
+	gin.DefaultWriter = writer
+	gin.DefaultErrorWriter = writer
 }
 
 func waitForRedis(maxRetries int, interval time.Duration) error {

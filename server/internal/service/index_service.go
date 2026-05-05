@@ -46,13 +46,7 @@ func (i *IndexService) IndexPage() map[string]any {
 	}
 
 	Info := make(map[string]any)
-	tree := model.CategoryTree{Id: 0, Name: "分类信息", Children: make([]*model.CategoryTree, 0)}
-	sysTree := repository.GetCategoryTree()
-	for _, c := range sysTree.Children {
-		if c.Show {
-			tree.Children = append(tree.Children, c)
-		}
-	}
+	tree := repository.GetActiveCategoryTree()
 	Info["category"] = tree
 	list := make([]map[string]any, 0)
 	for _, c := range tree.Children {

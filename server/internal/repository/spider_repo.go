@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -303,6 +304,7 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if s.Id == "" {
 		s.Id = utils.GenerateHashKey(s.Uri)
 	}
+	normalizeCollectSourceDefaults(&s)
 	return tx.Create(&s).Error
 }
 
@@ -313,6 +315,7 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 		if list[i].Id == "" {
 			list[i].Id = utils.GenerateHashKey(list[i].Uri)
 		}
+		normalizeCollectSourceDefaults(&list[i])
 	}
 	return db.Mdb.Create(list).Error
 }
@@ -330,6 +333,7 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if count > 0 {
 		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
 	}
+	normalizeCollectSourceDefaults(&s)
 	return tx.Save(&s).Error
 }
 
@@ -363,12 +367,19 @@ func ResetCollectSources(list []model.FilmSource) error {
 			if list[i].Id == "" {
 				list[i].Id = utils.GenerateHashKey(list[i].Uri)
 			}
+			normalizeCollectSourceDefaults(&list[i])
 		}
 		if len(list) == 0 {
 			return nil
 		}
 		return tx.Create(&list).Error
 	})
+}
+
+func normalizeCollectSourceDefaults(source *model.FilmSource) {
+	if source.Interval <= 0 {
+		source.Interval = config.DefaultSpiderInterval
+	}
 }
 
 // ExistCollectSourceList 查询是否已经存在站点 list 相关数据
@@ -500,6 +511,29 @@ func UpdateFailureRecordStatus(fr *model.FailureRecord, status int) {
 		return
 	}
 	db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status)
+}
+
+// MarkFailureRecordRetryFailed 更新当前失败记录的失败原因，并用数据库当前重试次数判断是否最终失败。
+func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetryCount int) (bool, int, error) {
+	if fr == nil || fr.ID == 0 {
+		return false, 0, errors.New("failure record not found")
+	}
+	if maxRetryCount <= 0 {
+		return false, 0, errors.New("max retry count must be positive")
+	}
+	updates := map[string]any{
+		"cause":       cause,
+		"retry_count": gorm.Expr("retry_count + ?", 1),
+		"status":      gorm.Expr("CASE WHEN status = ? OR retry_count >= ? THEN ? ELSE status END", model.FailureRecordStatusFailed, maxRetryCount-1, model.FailureRecordStatusFailed),
+	}
+	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
+		return false, 0, err
+	}
+	var current model.FailureRecord
+	if err := db.Mdb.Select("status", "retry_count").First(&current, fr.ID).Error; err != nil {
+		return false, 0, err
+	}
+	return current.Status == model.FailureRecordStatusFailed, current.RetryCount, nil
 }
 
 // UpdateFailureRecordStatusByID 按 ID 修改失败记录的重试结果状态。

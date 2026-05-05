@@ -10,10 +10,7 @@ import (
 
 func SetupRouter() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.LoggerWithConfig(gin.LoggerConfig{SkipPaths: []string{
-		"/api/index",
-		"/api/manage/collect/list",
-	}}))
+	r.Use(middleware.AccessLog())
 	r.Use(gin.Recovery())
 	r.Use(middleware.Cors())
 
@@ -43,6 +40,10 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
 			sysConfig.POST(`/basic/update`, handler.ManageHd.UpdateSiteBasic)
 			sysConfig.POST(`/basic/reset`, handler.ManageHd.ResetSiteBasic)
+		}
+		systemLog := manageRoute.Group(`/system/logs`)
+		{
+			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}
 
 		// 轮播相关

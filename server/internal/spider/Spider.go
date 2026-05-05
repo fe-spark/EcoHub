@@ -35,6 +35,7 @@ const (
 	pageCountRetryTimes   = 2
 	filmDetailRetryTimes  = 2
 	collectDBWriteRetries = 3
+	recoverMaxRetryCount  = 5
 )
 
 var retryBackoffs = []time.Duration{
@@ -929,9 +930,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 						progress.Status = "failed"
 						return
 					}
-					if progress.Status != "stopped" {
-						progress.Status = "done"
-					}
 				})
 				log.Printf("[Spider] 站点 %s 任务结束\n", id)
 			}
@@ -1548,13 +1546,11 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	return ""
 }
 
-// recoverFilmPage 重试单条失败页：无论成功或失败都将记录移出待重试队列，并保留最终结果。
+// recoverFilmPage 重试单条失败页：成功后出队，失败未达上限时继续保留待重试。
 func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord) {
 	if s == nil || fr == nil {
 		return
 	}
-	status := model.FailureRecordStatusFailed
-	defer repository.UpdateFailureRecordStatus(fr, status)
 	select {
 	case <-ctx.Done():
 		return
@@ -1568,17 +1564,32 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 
 	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
-		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, "recover_fetch", err)
+		markRecoverFailure(s, fr, "recover_fetch", err)
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
 	}
 
 	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
-		saveFilmPageFailure(s, fr.Hour, fr.PageNumber, "recover_save", err)
+		markRecoverFailure(s, fr, "recover_save", err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
-	status = model.FailureRecordStatusSuccess
+	repository.UpdateFailureRecordStatus(fr, model.FailureRecordStatusSuccess)
+}
+
+func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) {
+	if err == nil {
+		err = errors.New("unknown error")
+	}
+	cause := fmt.Sprintf("%s: %v", phase, err)
+	final, retryCount, updateErr := repository.MarkFailureRecordRetryFailed(fr, cause, recoverMaxRetryCount)
+	if updateErr != nil {
+		log.Printf("[Spider][Recover] 失败记录更新失败 source_id=%s source=%s page=%d hour=%d err=%v", s.Id, s.Name, fr.PageNumber, fr.Hour, updateErr)
+		return
+	}
+	if final {
+		log.Printf("[Spider][Recover] 失败页达到最大自动重试次数 source_id=%s source=%s page=%d hour=%d retry_count=%d", s.Id, s.Name, fr.PageNumber, fr.Hour, retryCount)
+	}
 }
 
 // ======================================================= 采集拓展内容  =======================================================
@@ -1709,7 +1720,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		state.mu.RLock()
 		progress := state.data
 		state.mu.RUnlock()
-		if progress.Status == "starting" || progress.Status == "finalizing" {
+		if progress.Status == "starting" || progress.Status == "running" || progress.Status == "finalizing" {
 			list = append(list, progress)
 		}
 		return true

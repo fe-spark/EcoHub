@@ -69,12 +69,11 @@ export function createCollectTableColumns({
         }
 
         const total = Math.max(progress.total, 0);
-				const finished = progress.success + progress.failed;
-				const done = Math.min(
-					Math.max(progress.current, finished),
-					total || Math.max(progress.current, finished),
-				);
-        const percent = total > 0 ? Math.round((done / total) * 100) : 0;
+        const finished = Math.max(progress.success + progress.failed, 0);
+        const done = Math.min(finished, total || finished);
+        const isDone = progress.status === "done";
+        const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
+        const percent = isDone ? 100 : Math.min(rawPercent, 99);
         const progressText = total > 0
           ? `${done}/${total}`
           : done > 0
@@ -91,11 +90,10 @@ export function createCollectTableColumns({
                 : progress.status === "done"
                   ? "已完成"
                   : "采集中";
-        const progressStatus = progress.status === "failed" || progress.failed > 0
-          ? "exception"
-          : progress.status === "done"
-            ? "success"
-            : "active";
+        const progressStatus = progress.status === "running" || progress.status === "finalizing"
+          ? "active"
+          : "normal";
+        const progressStrokeColor = progress.failed > 0 ? "#faad14" : undefined;
         return (
           <Flex vertical gap={4}>
             <Typography.Text type={progress.status === "starting" ? "secondary" : undefined}>{statusText}</Typography.Text>
@@ -103,6 +101,8 @@ export function createCollectTableColumns({
               percent={percent}
               size="small"
               status={progressStatus}
+              strokeColor={progressStrokeColor}
+              format={(value) => `${value ?? 0}%`}
             />
             <Typography.Text type="secondary">
               {progressText}
