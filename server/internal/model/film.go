@@ -161,8 +161,8 @@ type FilmIndexContent struct {
 	Hits         int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State        string  `json:"state"`                                                                                      // 状态 正片|预告
 	Remarks      string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
-	Picture      string  `json:"picture"`                                                                                    // 竖版封面图
-	PictureSlide string  `json:"pictureSlide" gorm:"size:512"`                                                               // 横版幻灯图
+	Picture      string  `json:"picture" gorm:"type:text"`                                                                   // 竖版封面图
+	PictureSlide string  `json:"pictureSlide" gorm:"type:text"`                                                              // 横版幻灯图
 	Actor        string  `json:"actor" gorm:"type:text"`                                                                     // 主演
 	Director     string  `json:"director" gorm:"type:text"`                                                                  // 导演
 	Blurb        string  `json:"blurb" gorm:"type:text"`                                                                     // 简介, 不完整
@@ -225,8 +225,8 @@ type FilmListSnapshot struct {
 	Hits            int64   `json:"hits" gorm:"index;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_hits"`
 	State           string  `json:"state"`
 	Remarks         string  `json:"remarks"`
-	Picture         string  `json:"picture"`
-	PictureSlide    string  `json:"pictureSlide" gorm:"size:512"`
+	Picture         string  `json:"picture" gorm:"type:text"`
+	PictureSlide    string  `json:"pictureSlide" gorm:"type:text"`
 	Actor           string  `json:"actor" gorm:"type:text"`
 	Director        string  `json:"director" gorm:"type:text"`
 	Blurb           string  `json:"blurb" gorm:"type:text"`
