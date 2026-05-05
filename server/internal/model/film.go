@@ -150,8 +150,8 @@ type FilmIndexCategory struct {
 type FilmIndexContent struct {
 	SeriesKey    string  `json:"seriesKey" gorm:"size:128;index"`                                                            // 系列标识，用于相关推荐召回与排序
 	Name         string  `json:"name"`                                                                                       // 片名
-	SubTitle     string  `json:"subTitle"`                                                                                   // 影片子标题
-	ClassTag     string  `json:"classTag"`                                                                                   // 类型标签
+	SubTitle     string  `json:"subTitle" gorm:"type:text"`                                                                  // 影片子标题
+	ClassTag     string  `json:"classTag" gorm:"type:text"`                                                                  // 类型标签
 	Area         string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 地区
 	Language     string  `json:"language" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"` // 语言
 	Year         int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 年份
@@ -163,9 +163,9 @@ type FilmIndexContent struct {
 	Remarks      string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
 	Picture      string  `json:"picture"`                                                                                    // 竖版封面图
 	PictureSlide string  `json:"pictureSlide" gorm:"size:512"`                                                               // 横版幻灯图
-	Actor        string  `json:"actor"`                                                                                      // 主演
-	Director     string  `json:"director"`                                                                                   // 导演
-	Blurb        string  `json:"blurb"`                                                                                      // 简介, 不完整
+	Actor        string  `json:"actor" gorm:"type:text"`                                                                     // 主演
+	Director     string  `json:"director" gorm:"type:text"`                                                                  // 导演
+	Blurb        string  `json:"blurb" gorm:"type:text"`                                                                     // 简介, 不完整
 }
 
 // FilmIndexVersion 入库版本层：用于排障与版本追踪。
@@ -214,8 +214,8 @@ type FilmListSnapshot struct {
 
 	SeriesKey       string  `json:"seriesKey" gorm:"size:128;index"`
 	Name            string  `json:"name"`
-	SubTitle        string  `json:"subTitle"`
-	ClassTag        string  `json:"classTag"`
+	SubTitle        string  `json:"subTitle" gorm:"type:text"`
+	ClassTag        string  `json:"classTag" gorm:"type:text"`
 	Area            string  `json:"area" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
 	Language        string  `json:"language" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
 	Year            int64   `json:"year" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
@@ -227,9 +227,9 @@ type FilmListSnapshot struct {
 	Remarks         string  `json:"remarks"`
 	Picture         string  `json:"picture"`
 	PictureSlide    string  `json:"pictureSlide" gorm:"size:512"`
-	Actor           string  `json:"actor"`
-	Director        string  `json:"director"`
-	Blurb           string  `json:"blurb"`
+	Actor           string  `json:"actor" gorm:"type:text"`
+	Director        string  `json:"director" gorm:"type:text"`
+	Blurb           string  `json:"blurb" gorm:"type:text"`
 	CollectStamp    int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`
 	CategoryVersion string  `json:"categoryVersion" gorm:"size:64;index"`
 	RuleVersion     string  `json:"ruleVersion" gorm:"size:64;index"`
