@@ -70,6 +70,7 @@ function normalizeStatusOptionLabel(name: string, value: number) {
 export default function FailureRecordPageView() {
   const [records, setRecords] = useState<FailRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [queuedRetryIds, setQueuedRetryIds] = useState<Set<number>>(() => new Set());
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState({
     originId: "",
@@ -117,7 +118,15 @@ export default function FailureRecordPageView() {
   const handleRetry = async (id: number) => {
     const resp = await ApiPost("/manage/collect/record/retry", { id });
     if (resp.code === 0) {
-      message.success(resp.msg);
+      setQueuedRetryIds((prev) => new Set(prev).add(id));
+      message.success("重试任务已加入队列；如果对应站点正在采集，会在采集结束后自动执行");
+      window.setTimeout(() => {
+        setQueuedRetryIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+      }, 5000);
       void getRecords();
     } else message.error(resp.msg);
   };
@@ -218,8 +227,11 @@ export default function FailureRecordPageView() {
       render: (_, record) => {
         const isSuccess = record.status === FAILURE_RECORD_STATUS.success;
         const isFinalFailed = record.status === FAILURE_RECORD_STATUS.failed;
+        const isQueued = queuedRetryIds.has(record.ID);
         const tooltipTitle = isSuccess
           ? "已重试成功，无需再次重试"
+          : isQueued
+            ? "已加入重试队列；同站点全量采集中时会等待采集结束"
           : isFinalFailed
             ? "手动再试，失败后仍保持最终失败"
             : "立即重试此记录";
@@ -229,7 +241,8 @@ export default function FailureRecordPageView() {
               type="primary"
               shape="circle"
               size="small"
-              disabled={isSuccess}
+              loading={isQueued}
+              disabled={isSuccess || isQueued}
               style={isSuccess ? undefined : { background: "#52c41a", borderColor: "#52c41a" }}
               icon={<ReloadOutlined />}
               onClick={() => handleRetry(record.ID)}

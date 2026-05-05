@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { LoadingOutlined, StepForwardOutlined, PlayCircleOutlined } from "@ant-design/icons";
-import FilmList from "@/components/public/FilmList";
 import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
+import RelatedFilmsSection from "./RelatedFilmsSection";
 import styles from "./index.module.less";
 
 function parseInitialTimeParam(value?: string): number {
@@ -80,7 +80,6 @@ export default function PlayPageView({
   const sourceMenuRef = useRef<HTMLDivElement>(null);
 
   const currentFilm = data?.detail;
-  const relatedFilms = data?.relate;
 
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
@@ -470,14 +469,11 @@ export default function PlayPageView({
         </div>
       </div>
 
-      <div className={styles.recommendation}>
-        <h2 className={styles.sectionTitle}>相关推荐</h2>
-        <FilmList
-          list={relatedFilms}
-          className={styles.classifyGrid}
-          onOpenPlayPage={handleOpenRelatedFilm}
-        />
-      </div>
+      <RelatedFilmsSection
+        filmId={filmId}
+        initialList={data?.relate}
+        onOpenPlayPage={handleOpenRelatedFilm}
+      />
     </div>
   );
 }
