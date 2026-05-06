@@ -397,6 +397,7 @@ func UpsertActiveSnapshotByMid(mid int64) error {
 func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	activeSnapshotUpsertMu.Lock()
 	defer activeSnapshotUpsertMu.Unlock()
+	startedAt := time.Now()
 
 	version := GetActiveReadModelVersion()
 	if strings.TrimSpace(version) == "" {
@@ -415,47 +416,99 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 		return version, 0, nil
 	}
 
-	var indexes []model.FilmIndex
-	if err := db.Mdb.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
-		Where("film_index.mid IN ?", ids).
-		Find(&indexes).Error; err != nil {
-		return "", 0, err
-	}
-
-	snapshots := make([]model.FilmListSnapshot, 0, len(indexes))
-	keptMIDs := make([]int64, 0, len(indexes))
-	for _, index := range indexes {
-		if index.Mid <= 0 {
-			continue
-		}
-		snapshots = append(snapshots, buildFilmListSnapshot(version, index))
-		keptMIDs = append(keptMIDs, index.Mid)
-	}
-	deletedMIDs := diffMIDs(ids, keptMIDs)
-
+	allSnapshots := make([]model.FilmListSnapshot, 0, len(ids))
+	allDeletedMIDs := make([]int64, 0)
+	processed := 0
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, ids).Delete(&model.FilmListSnapshot{}).Error; err != nil {
-			return err
-		}
-		if len(snapshots) > 0 {
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapshots, snapshotBuildBatchSize).Error; err != nil {
+		for _, batchIDs := range chunkSnapshotMIDs(ids, snapshotBuildBatchSize) {
+			batchStartedAt := time.Now()
+
+			var indexes []model.FilmIndex
+			queryStartedAt := time.Now()
+			if err := tx.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
+				Where("film_index.mid IN ?", batchIDs).
+				Find(&indexes).Error; err != nil {
 				return err
 			}
-		}
-		if err := ReplaceFilterIndexSnapshotsTx(tx, version, snapshots, ids); err != nil {
-			return err
+			queryCost := time.Since(queryStartedAt)
+
+			buildStartedAt := time.Now()
+			batchSnapshots := make([]model.FilmListSnapshot, 0, len(indexes))
+			keptMIDs := make([]int64, 0, len(indexes))
+			for _, index := range indexes {
+				if index.Mid <= 0 {
+					continue
+				}
+				batchSnapshots = append(batchSnapshots, buildFilmListSnapshot(version, index))
+				keptMIDs = append(keptMIDs, index.Mid)
+			}
+			deletedMIDs := diffMIDs(batchIDs, keptMIDs)
+			buildCost := time.Since(buildStartedAt)
+
+			writeStartedAt := time.Now()
+			if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmListSnapshot{}).Error; err != nil {
+				return err
+			}
+			if len(batchSnapshots) > 0 {
+				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batchSnapshots, snapshotBuildBatchSize).Error; err != nil {
+					return err
+				}
+			}
+			if err := ReplaceFilterIndexSnapshotsTx(tx, version, batchSnapshots, batchIDs); err != nil {
+				return err
+			}
+			writeCost := time.Since(writeStartedAt)
+
+			allSnapshots = append(allSnapshots, batchSnapshots...)
+			allDeletedMIDs = append(allDeletedMIDs, deletedMIDs...)
+			processed += len(batchIDs)
+			log.Printf(
+				"[Snapshot] 快速增量发布进度 version=%s mid=%d/%d batch=%d updated=%d deleted=%d query=%s build=%s write=%s cost=%s total_cost=%s",
+				version,
+				processed,
+				len(ids),
+				len(batchIDs),
+				len(batchSnapshots),
+				len(deletedMIDs),
+				queryCost,
+				buildCost,
+				writeCost,
+				time.Since(batchStartedAt),
+				time.Since(startedAt),
+			)
 		}
 		return nil
 	}); err != nil {
 		return "", 0, err
 	}
 
-	if err := ApplyActiveFilmReadModelSnapshots(version, snapshots, deletedMIDs); err != nil {
+	applyStartedAt := time.Now()
+	if err := ApplyActiveFilmReadModelSnapshots(version, allSnapshots, allDeletedMIDs); err != nil {
 		return "", 0, err
 	}
+	applyCost := time.Since(applyStartedAt)
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
-	return version, len(snapshots), nil
+	log.Printf("[Snapshot] 快速增量发布完成 version=%s input=%d updated=%d deleted=%d apply=%s total_cost=%s", version, len(ids), len(allSnapshots), len(allDeletedMIDs), applyCost, time.Since(startedAt))
+	return version, len(allSnapshots), nil
+}
+
+func chunkSnapshotMIDs(ids []int64, size int) [][]int64 {
+	if len(ids) == 0 {
+		return nil
+	}
+	if size <= 0 {
+		size = snapshotBuildBatchSize
+	}
+	chunks := make([][]int64, 0, (len(ids)+size-1)/size)
+	for start := 0; start < len(ids); start += size {
+		end := start + size
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[start:end])
+	}
+	return chunks
 }
 
 func normalizeSnapshotMIDs(mids []int64) []int64 {
