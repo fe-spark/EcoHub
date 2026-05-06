@@ -1,117 +1,78 @@
-# 服务器部署说明
+# Docker 部署说明
 
-当前仓库提供的 `docker-compose.yml` 可用于服务器部署，包含这些服务：
+仓库根目录提供 `docker-compose.yml`，可用于部署 EcoHub 的前端、后端、MySQL 和 Redis。
 
-- `web`：Next.js 前端
-- `server`：Go API 服务
-- `mysql`：可选的 MySQL 服务
-- `redis`：可选的 Redis 服务
+## 服务组成
 
-部署时请先明确你属于哪一种场景：
-
-1. 宿主机或外部环境已经有可用的 MySQL / Redis
-2. 宿主机没有 MySQL / Redis，准备直接使用 Compose 内置的 MySQL / Redis
+| 服务 | 说明 | 默认镜像 / 构建 |
+| --- | --- | --- |
+| `web` | Next.js 前端，对外入口 | `./web/Dockerfile` |
+| `server` | Go API 服务 | `./server/Dockerfile` |
+| `mysql` | 可选 MySQL 8.4 | `mysql:8.4` |
+| `redis` | 可选 Redis 7.4 | `redis:7.4-alpine` |
 
 ## 前置条件
 
 - Docker 20+
 - Docker Compose 2+
-- Docker 镜像拉取能力
+- 能拉取基础镜像
 
-## 当前 Compose 约定
+## 默认约定
 
-- `web` 对外暴露 `3000`
-- `server` 不再直接暴露宿主机端口，只在容器网络内监听 `8080`
-- `web` 构建期和运行期都会收到 `API_URL=http://server:8080`
-- 浏览器端访问当前站点下的 `/api/*`，再由 Next rewrite 转发到 `server`
-- Compose 运行时不读取 `server/.env`、`web/.env.production`，也不需要 `--env-file`
-- `docker-compose.yml` 里的 `JWT_SECRET` 只是占位值，正式部署前必须替换，可用 `openssl rand -hex 32` 生成
+- `web` 对外暴露 `3000`。
+- `server` 默认监听 `8080`，对外映射为 `18080`，同时供 `web` 通过容器网络访问。
+- 内置 `mysql` / `redis` 默认不向宿主机暴露端口；只在 Compose 网络内供 `server` 访问。
+- `web` 的 `API_URL` 默认为 `http://server:${SERVER_PORT:-8080}`。
+- 浏览器端访问当前站点 `/api/*`，由 Next 转发到 `server`。
+- Compose 会自动读取根目录 `.env`，不读取 `server/.env` 或 `web/.env.local`。
+- `mysql` 和 `redis` 已配置 Docker volume：`eco-mysql-data`、`eco-redis-data`。
 
-这意味着：
+## 配置入口
 
-- 正常对外入口是 `web`，例如 `http://你的服务器:3000`
-- 外部访问 API 也走 `web` 的 `/api/*`
-- `server` 只提供给 `web` 和其他容器内部访问
-
-## 场景一：宿主机已有 MySQL / Redis
-
-适用场景：
-
-- 你的服务器本机已经安装了 MySQL / Redis
-- 或者你准备连接外部数据库、云数据库、远程 Redis
-- 不希望启动 Compose 内置的 `mysql` / `redis`
-
-### 1. 修改 `docker-compose.yml`
-
-重点修改 `server.environment` 中这几项：
-
-```yml
-server:
-  environment:
-    PORT: 8080
-    JWT_SECRET: your_generated_secret # 可用 openssl rand -hex 32 生成
-    MYSQL_HOST: host.docker.internal
-    MYSQL_PORT: 3306
-    MYSQL_USER: your_mysql_user
-    MYSQL_PASSWORD: your_mysql_password
-    MYSQL_DBNAME: your_mysql_db
-    REDIS_HOST: host.docker.internal
-    REDIS_PORT: 6379
-    REDIS_PASSWORD: your_redis_password
-    REDIS_DB: 0
-```
-
-如何填写：
-
-- 如果 MySQL / Redis 就运行在 Docker 宿主机上，可优先写 `host.docker.internal`
-- 如果它们运行在其他机器上，请直接写真实 IP、域名或内网地址
-- 如果 Redis 没有密码，可把 `REDIS_PASSWORD` 留空字符串
-- `JWT_SECRET` 必须替换为你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
-
-### 2. 启动应用服务
+先复制根目录配置模板：
 
 ```bash
-docker compose up --build -d server web
+cp .env.example .env
 ```
 
-### 3. 结果说明
+正式部署前至少修改 `.env` 中这些值：
 
-- Compose 只会启动 `server` 和 `web`
-- 不会启动内置 `mysql` / `redis`
-- 不会占用宿主机 `3306` / `6379`
-- `server` 会按你写入的地址连接宿主机或外部 MySQL / Redis
+- `JWT_SECRET`
+- MySQL root 密码、业务库用户和密码
+- Redis 密码
 
-## 场景二：宿主机没有 MySQL / Redis
+对外端口只需要填写宿主机端口号；`SERVER_PORT` 是后端容器内部监听端口，`web` 的 `API_URL` 会跟随它：
 
-适用场景：
-
-- 服务器上还没有数据库和缓存
-- 希望直接使用仓库内置的 MySQL / Redis 容器
-
-### 1. 保持或确认 `docker-compose.yml` 中默认值正确
-
-当前默认配置就是给 Compose 内置服务准备的：
-
-```yml
-server:
-  environment:
-    PORT: 8080
-    JWT_SECRET: your_generated_secret # 可用 openssl rand -hex 32 生成
-    MYSQL_HOST: mysql
-    MYSQL_PORT: 3306
-    MYSQL_USER: eco
-    MYSQL_PASSWORD: eco_local_password
-    MYSQL_DBNAME: eco
-    REDIS_HOST: redis
-    REDIS_PORT: 6379
-    REDIS_PASSWORD: redis_local_password
-    REDIS_DB: 0
+```env
+WEB_PUBLIC_PORT=3000
+SERVER_PUBLIC_PORT=18080
+SERVER_PORT=8080
 ```
 
-你至少要做两件事：
+内置 MySQL / Redis 默认不对宿主机暴露端口。如果需要直连调试，请临时在 `docker-compose.yml` 的对应服务中添加 `ports`，并优先绑定 `127.0.0.1`。
 
-- 把 `JWT_SECRET` 改成你自己的高强度随机值，可用 `openssl rand -hex 32` 生成
-- 如果你不想用默认数据库密码，也同步修改 `mysql.environment`、`redis.command` 和 `server.environment` 中对应的密码
+生成 `JWT_SECRET`：
+
+```bash
+openssl rand -hex 32
+```
+
+不要把真实生产密码提交到仓库。
+
+## 场景一：使用 Compose 内置 MySQL / Redis
+
+适合服务器上还没有数据库和缓存的情况。
+
+### 1. 确认配置
+
+`.env` 中应保持容器服务名：
+
+```env
+MYSQL_HOST=mysql
+REDIS_HOST=redis
+```
+
+如果修改数据库或 Redis 密码，只改根目录 `.env`。
 
 ### 2. 启动全部服务
 
@@ -119,25 +80,49 @@ server:
 docker compose up --build -d mysql redis server web
 ```
 
-### 3. 结果说明
+### 3. 访问
 
-- Compose 会启动内置 `mysql`、`redis`、`server`、`web`
-- `server` 会通过容器网络连接 `mysql:3306` 和 `redis:6379`
-- 宿主机也会被映射出 `3306` 和 `6379`
-
-如果宿主机本身已经有人占用了 `3306` 或 `6379`，这种模式会启动失败，你要么释放对应端口，要么改 Compose 里的宿主机映射端口。
-
-## 启动后如何访问
-
-- 前端首页：`http://你的服务器:3000`
-- 后台入口：`http://你的服务器:3000/manage`
-- 对外 API：`http://你的服务器:3000/api/*`
+- 前台：`http://你的服务器:3000`
+- 后台：`http://你的服务器:3000/manage`
+- API：`http://你的服务器:3000/api/*`
+- 直连后端：`http://你的服务器:18080`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
-注意：
+如果宿主机已有服务占用 `3000` 或 `18080`，修改 `.env` 中对应的 `*_PUBLIC_PORT`。MySQL / Redis 默认不发布端口，不会占用宿主机 `3306` / `6379`。
 
-- 当前 Compose 默认不把 `server` 直接暴露到宿主机
-- 如果你确实需要从宿主机单独访问后端，再额外给 `server` 增加一个不冲突的端口映射，例如 `18080:8080`
+## 场景二：连接外部 MySQL / Redis
+
+适合已有宿主机数据库、远程数据库、云数据库或独立 Redis 的情况。
+
+### 1. 修改后端连接信息
+
+在根目录 `.env` 中修改：
+
+```env
+MYSQL_HOST=host.docker.internal
+MYSQL_PORT=3306
+MYSQL_USER=your_mysql_user
+MYSQL_PASSWORD=your_mysql_password
+MYSQL_DBNAME=your_mysql_db
+REDIS_HOST=host.docker.internal
+REDIS_PORT=6379
+REDIS_PASSWORD=your_redis_password
+REDIS_DB=0
+```
+
+地址填写建议：
+
+- 数据库在 Docker 宿主机：优先使用 `host.docker.internal`。
+- 数据库在其他机器：填写真实 IP、域名或内网地址。
+- Redis 无密码：`REDIS_PASSWORD` 留空字符串。
+
+### 2. 只启动应用服务
+
+```bash
+docker compose up --build -d server web
+```
+
+这种方式不会启动 Compose 内置的 `mysql` 和 `redis`。
 
 ## 常用命令
 
@@ -145,21 +130,30 @@ docker compose up --build -d mysql redis server web
 docker compose ps
 docker compose logs -f web
 docker compose logs -f server
+docker compose logs -f mysql
+docker compose logs -f redis
 docker compose restart web
 docker compose restart server
 docker compose down
 docker compose down -v
 ```
 
+`docker compose down -v` 会删除 MySQL / Redis volume，数据会丢失。
+
 ## 持久化建议
 
-海报和图库文件默认存放在 API 容器内部的：
+内置 MySQL / Redis 已配置 volume：
+
+- `eco-mysql-data`
+- `eco-redis-data`
+
+海报和图库文件默认在 API 容器内：
 
 ```text
 /app/static/upload/gallery
 ```
 
-生产环境建议挂载卷，例如：
+生产环境建议挂载到宿主机：
 
 ```yaml
 services:
@@ -168,45 +162,41 @@ services:
       - /path/to/gallery:/app/static/upload/gallery
 ```
 
-同时如果你使用 Compose 内置 MySQL / Redis，当前仓库已经为它们配置了 Docker volume：
+## 反向代理建议
 
-- `eco-mysql-data`
-- `eco-redis-data`
+生产环境建议只暴露 `web`，由反向代理统一处理 HTTPS 和域名：
 
-## 网络说明
-
-当前 `server` 服务包含：
-
-```yaml
-extra_hosts:
-  - "host.docker.internal:host-gateway"
+```text
+https://your-domain.com        -> web:3000
+https://your-domain.com/api/*  -> web:3000/api/* -> server:${SERVER_PORT:-8080}
 ```
 
-这主要用于容器访问宿主机上的 MySQL / Redis。
+如果不需要外部直连后端，可以移除或限制 `server` 的 `SERVER_PUBLIC_PORT:SERVER_PORT` 端口映射。
 
-如果你的数据库和 Redis 不在宿主机，而是在其他机器或容器网络中，请把 `docker-compose.yml` 中 `server.environment` 的 `MYSQL_HOST` 和 `REDIS_HOST` 改成实际地址。
+## 健康检查
 
-## 生产建议
+- `server` 健康检查：`/api/health`
+- `web` 依赖 `server` 健康后启动
+- `server` 启动时由应用自身连接 MySQL 和 Redis，数据库不可达时会退出或保持不健康
 
-- 默认账号 `admin / admin`、`guest / guest` 仅用于初始化或演示，部署后应立即修改密码或直接禁用
-- `JWT_SECRET` 必须使用单独的高强度随机值，可用 `openssl rand -hex 32` 生成
-- 优先通过反向代理暴露统一入口，而不是直接暴露 API 服务
-- 为前端站点启用 HTTPS
-- 不要把真实生产密码直接提交到仓库；如果需要长期维护，建议把 `docker-compose.yml` 中的敏感值迁移到安全的部署系统或密钥管理方案
+排查启动问题时优先查看：
 
-## 常见问题
+```bash
+docker compose logs -f server
+docker compose logs -f web
+```
 
-- `server` 容器启动失败并提示缺少环境变量
-  - 检查 `docker-compose.yml` 中 `server.environment` 是否把 `JWT_SECRET` 等必填项写全
-  - 如果还没生成 `JWT_SECRET`，可先执行 `openssl rand -hex 32`
-- 使用宿主机 MySQL / Redis 时连接失败
-  - 先确认宿主机或外部数据库地址填写正确
-  - 再确认数据库用户允许来自容器网络的连接
-  - 最后检查宿主机防火墙是否放通
-- 使用内置 MySQL / Redis 时启动失败
-  - 检查宿主机 `3306` / `6379` 是否已被占用
-  - 执行 `docker compose logs -f mysql`
-  - 执行 `docker compose logs -f redis`
-- 前端打开后接口全部失败
-  - 检查 `server` 容器是否已经启动并通过健康检查
-  - 检查 `web` 容器中的 `API_URL` 是否仍然指向 `http://server:8080`
+## 安全建议
+
+- 部署后立即修改默认账号 `admin / admin`、`guest / guest`。
+- `JWT_SECRET` 必须每个环境单独生成。
+- 不要在公开仓库中保留生产数据库密码和 Redis 密码。
+- 优先通过 HTTPS 暴露前端入口。
+- 不建议直接把数据库、Redis 或后端 API 暴露到公网。
+
+## 相关文档
+
+- [根目录总览](./README.md)
+- [服务端说明](./server/README.md)
+- [前端说明](./web/README.md)
+- [FAQ 与排障](./README-FAQ.md)

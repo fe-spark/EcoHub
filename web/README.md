@@ -1,23 +1,14 @@
 # Web
 
-`web/` 是 EcoHub 的 Next.js 前端，包含：
+`web/` 是 EcoHub 的 Next.js 前端，包含前台站点、登录页和管理后台。
 
-- 前台站点
-- 登录页
-- 管理后台
+## 职责边界
 
-## 前端结构图
-
-```mermaid
-flowchart LR
-    Public["(public) 前台页面"] --> ServerApi["src/lib/server-api.ts"]
-    Public --> ClientUi["客户端交互组件"]
-    ClientUi --> ClientApi["src/lib/client-api.ts"]
-    Manage["manage 后台页面"] --> ClientApi
-    Login["login 登录页"] --> ClientApi
-    ServerApi --> Backend["Go API"]
-    ClientApi --> Backend
-```
+- 前台首页、分类页、搜索页、详情页、播放页。
+- 登录页和后台管理页面。
+- 浏览器端 `/api/*` 请求转发。
+- Server Component 首屏取数。
+- 后台登录态预拦截和客户端错误处理。
 
 ## 技术栈
 
@@ -29,7 +20,21 @@ flowchart LR
 - Less / CSS Modules
 - Artplayer / Hls.js
 
-## 启动
+## 架构概览
+
+```mermaid
+flowchart LR
+    Public["src/app/(public)"] --> ServerAPI["src/lib/server-api.ts"]
+    Public --> ClientUI["客户端交互组件"]
+    ClientUI --> ClientAPI["src/lib/client-api.ts"]
+    Manage["src/app/manage"] --> ClientAPI
+    Login["src/app/login"] --> ClientAPI
+    ServerAPI --> Backend["Go API"]
+    ClientAPI --> Rewrite["Next rewrite /api/*"]
+    Rewrite --> Backend
+```
+
+## 本地启动
 
 ### 1. 安装依赖
 
@@ -38,94 +43,67 @@ cd web
 npm install
 ```
 
-### 2. 配置环境变量
-
-运行 `web` 时，需要配置 `.env.local` 中的环境变量。
-
-推荐先复制示例文件：
+### 2. 准备环境变量
 
 ```bash
 cd web
 cp .env.example .env.local
 ```
 
-示例内容：
+默认示例：
 
 ```env
 PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
-其中最关键的是 `API_URL`：
+`API_URL` 必须指向 Next 服务端能够访问到的 Go API 地址。
 
-- 供 Next 在服务端取数时访问后端
-- 供 Next rewrite 把浏览器端 `/api/*` 请求转发到真实后端
-
-如果是跨机器访问或反向代理，请改成后端真实可访问地址：
-
-```env
-PORT=3000
-API_URL=http://your-api-origin
-```
-
-- 当前实现已拆分 `server-api` 与 `client-api`，分别服务于服务端取数和客户端交互
-- 浏览器端默认请求当前站点下的 `/api/*`，再由 Next rewrite 转发到 `API_URL`
-- 大多数情况下只需要确认 `API_URL`
-- 运行 `web` 时，Next 会自动加载 `web/.env.local`
-
-环境变量填写建议：
-
-- `PORT`：前端开发端口，默认 `3000`
-- `API_URL`：后端真实可访问地址，必须带协议头，例如 `http://127.0.0.1:8080`
-
-常见配置：
-
-1. 前后端都在当前机器上运行
-
-```env
-PORT=3000
-API_URL=http://127.0.0.1:8080
-```
-
-2. 前端在本机，后端在另一台机器
-
-```env
-PORT=3000
-API_URL=http://192.168.1.20:8080
-```
-
-3. 需要修改前端开发端口
-
-```env
-PORT=3100
-API_URL=http://127.0.0.1:8080
-```
-
-如果你修改了 `PORT`，前端访问地址也会跟着变化，例如 `http://127.0.0.1:3100`。
-
-### 3. 启动开发环境
+### 3. 启动开发服务
 
 ```bash
 cd web
 npm run dev
 ```
 
-Next 会自动加载 `web/.env.local`。
+默认访问：
 
-### 4. 启动成功后
+- 前台：`http://127.0.0.1:3000`
+- 登录页：`http://127.0.0.1:3000/login`
+- 后台：`http://127.0.0.1:3000/manage`
 
-- 访问地址默认是 `http://127.0.0.1:3000`
-- 后台地址固定为 `/manage`
-- 登录页固定为 `/login`
-- 如果后端地址改了，需要同步修改 `web/.env.local` 中的 `API_URL`
+## 环境变量
 
-## API 地址
+| 变量 | 必填 | 说明 |
+| --- | --- | --- |
+| `PORT` | 否 | Next 监听端口，默认 `3000` |
+| `API_URL` | 是 | Go API 地址，用于服务端取数和 `/api/*` 转发 |
 
-前端代码中的请求会按职责分层使用 `API_URL`：
+常见配置：
 
-- 公共内容页优先在 Server Component 中通过 `src/lib/server-api.ts` 取数
-- 客户端交互与后台请求通过 `src/lib/client-api.ts` 发起
-- `API_URL` 同时用于 Next 转发浏览器端请求和服务端取数
+1. 前后端都在本机：
+
+```env
+PORT=3000
+API_URL=http://127.0.0.1:8080
+```
+
+2. 后端在另一台机器：
+
+```env
+PORT=3000
+API_URL=http://192.168.1.20:8080
+```
+
+3. Docker Compose 容器网络：
+
+```env
+API_URL=http://server:${SERVER_PORT:-8080}
+```
+
+## API 请求模型
+
+浏览器端默认请求当前站点下的 `/api/*`，Next 再转发到 `API_URL`。
 
 ```mermaid
 sequenceDiagram
@@ -133,10 +111,26 @@ sequenceDiagram
     participant Next as Next.js
     participant API as Go API
 
-    Browser->>Next: 请求当前站点 /api/index
-    Next->>API: 转发到 API_URL 对应地址
-    API-->>Browser: 返回 JSON
+    Browser->>Next: GET /api/index
+    Next->>API: 转发到 API_URL/api/index
+    API-->>Next: JSON
+    Next-->>Browser: JSON
 ```
+
+代码分层：
+
+- `src/lib/server-api.ts`：Server Component 取数。
+- `src/lib/client-api.ts`：浏览器端交互请求。
+- `next.config.ts`：配置 `/api/*` rewrite。
+- `src/proxy.ts`：后台路由预拦截。
+
+## 鉴权边界
+
+- 登录态由后端下发 `HttpOnly` cookie：`ecohub_auth_token`。
+- `/manage` 只在 `src/proxy.ts` 中检查 cookie 是否存在。
+- 前端不验证 token 真伪，不做最终权限判断。
+- `/api/manage/*` 的 JWT 校验、Redis token 校验、写权限控制都在后端完成。
+- 客户端请求收到 `401` 会跳转 `/login`，收到 `403` 会提示无权限。
 
 ## 目录结构
 
@@ -149,54 +143,31 @@ web/
 ├── src/components/         # 业务组件
 ├── src/lib/                # API 封装、消息、公共逻辑
 ├── src/proxy.ts            # /manage 路由预拦截
-├── next.config.ts          # Next 构建配置
-└── package.json
+├── next.config.ts          # Next 构建与 rewrite 配置
+├── package.json
+└── Dockerfile
 ```
-
-## 请求与鉴权
-
-### API 请求
-
-- `(public)` 目录下的内容页默认使用 Server Component 做首屏取数
-- `manage`、`login`、`play` 等强交互页面继续使用 Client Component
-- `src/lib/server-api.ts` 负责服务端读接口
-- `src/lib/client-api.ts` 负责浏览器端交互请求与错误处理
-- `API_URL` 为必填项，未配置时前端无法正常启动或取数
-
-### 后台访问控制
-
-- `/manage` 路由由 `src/proxy.ts` 做预拦截
-- 这里仅检查 `ecohub_auth_token` cookie 是否存在
-- 不做角色校验，也不验证 token 真伪
-- 真正的 token 校验、自动续期和写权限控制都在后端完成
-- 如果前端与后端不是同源部署，需要额外确保跨域 cookie 与 CORS 配置正确
-
-这意味着：
-
-- 前端预拦截主要用于未登录时的快速跳转
-- 后端接口才是最终权限边界
-- 客户端 `axios` 拦截器会在 `401` 时跳转 `/login`，在 `403` 时提示无权限
 
 ## 常用命令
 
 ```bash
 cd web
 npm run dev
-
-cd web
 npm run build
 npm run start
 npm run lint
 ```
 
-## 当前约束
+## 注意事项
 
-- 管理后台依赖后端下发的 `HttpOnly` cookie 登录态
-- 如果后端入口变化，需要同步更新环境变量并重新启动前端
+- `API_URL` 改动后需要重启 Next 服务。
+- Docker 中的 `127.0.0.1` 指向 `web` 容器自身，不是 `server` 容器。
+- 后台页面能打开不代表接口鉴权一定有效，最终以后端接口返回为准。
+- 如果前后端跨域部署，需要额外确认 cookie、CORS 和反向代理配置。
 
 ## 相关文档
 
-- [根目录说明](../README.md)
+- [根目录总览](../README.md)
 - [服务端说明](../server/README.md)
 - [Docker 部署说明](../README-Docker.md)
 - [FAQ 与排障](../README-FAQ.md)

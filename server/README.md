@@ -1,15 +1,18 @@
 # Server
 
-`server/` 是 EcoHub 的 Go 服务端，负责：
+`server/` 是 EcoHub 的 Go API 服务，负责采集、归并、列表快照、缓存、开放接口和后台鉴权。
 
-- 采集源管理与数据采集
-- 影片检索、详情聚合、播放源聚合
-- 分类映射与联动筛选
-- 管理后台接口
-- TVBox / MacCMS 兼容接口
-- 登录态与后台鉴权
+## 职责边界
 
-## 服务端架构
+- 采集源管理与 Spider 调度。
+- 主站影片主数据入库。
+- 附属站播放列表补源。
+- 影片搜索、详情聚合、播放源聚合。
+- 分类映射、筛选标签、列表快照和倒排索引。
+- 管理后台 API、登录态、访客只读权限。
+- TVBox / MacCMS 兼容接口。
+
+## 架构概览
 
 ```mermaid
 flowchart LR
@@ -17,9 +20,9 @@ flowchart LR
     Middleware --> Handler["handler"]
     Handler --> Service["service"]
     Service --> Repo["repository"]
+    Service --> Spider["spider"]
     Repo --> MySQL["MySQL"]
     Repo --> Redis["Redis"]
-    Service --> Spider["spider"]
 ```
 
 ## 运行要求
@@ -28,7 +31,7 @@ flowchart LR
 - MySQL 8+
 - Redis 7+
 
-## 启动
+## 本地启动
 
 ### 1. 准备环境变量
 
@@ -37,9 +40,7 @@ cd server
 cp .env.example .env
 ```
 
-按你的实际环境修改 `server/.env`。
-
-常见示例：
+最小配置示例：
 
 ```env
 PORT=8080
@@ -57,7 +58,11 @@ REDIS_PASSWORD=your_redis_password
 REDIS_DB=0
 ```
 
-如果 MySQL / Redis 不在当前机器上，请把 `MYSQL_HOST` / `REDIS_HOST` 改成真实可访问地址。
+`JWT_SECRET` 必须使用高强度随机值，可用下面命令生成：
+
+```bash
+openssl rand -hex 32
+```
 
 ### 2. 启动服务
 
@@ -66,36 +71,20 @@ cd server
 go run ./cmd/server
 ```
 
-服务启动时会自动加载当前目录下的 `server/.env`。
+服务启动时会自动读取 `server/.env`。
 
-### 3. 启动成功后
+### 3. 启动结果
 
-- 服务监听端口由 `PORT` 决定，默认是 `8080`
-- 首次启动会初始化数据库表、默认站点配置和内置账号
-- 如果数据库或 Redis 不可达，服务会在启动阶段报错退出
+- API 默认监听 `8080`，由 `PORT` 决定。
+- 启动阶段会连接 MySQL 和 Redis，不可达会直接退出。
+- 首次启动会自动建表、初始化基础配置、默认站点、内置账号和定时任务。
 
 ## 环境变量
 
-运行 `server` 时，服务会自动读取 `server/.env`。
-
-- `PORT`：服务监听端口，默认 `8080`
-- `JWT_SECRET`：JWT 签名密钥，必须填写随机高强度值，可用 `openssl rand -hex 32` 生成
-- `MYSQL_HOST` / `REDIS_HOST`：填运行 `server` 时实际能访问到的地址
-- `MYSQL_PORT` / `REDIS_PORT`：填数据库和 Redis 的真实端口
-- `MYSQL_USER` / `MYSQL_PASSWORD` / `MYSQL_DBNAME`：填数据库真实账号、密码和库名
-- `REDIS_PASSWORD`：如果 Redis 未设置密码，可留空
-- `REDIS_DB`：一般保持 `0`
-
-生成 `JWT_SECRET`：
-
-```bash
-openssl rand -hex 32
-```
-
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `PORT` | 是 | 服务监听端口 |
-| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败，可用 `openssl rand -hex 32` 生成 |
+| `PORT` | 是 | API 监听端口 |
+| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败 |
 | `MYSQL_HOST` | 是 | MySQL 地址 |
 | `MYSQL_PORT` | 是 | MySQL 端口 |
 | `MYSQL_USER` | 是 | MySQL 用户 |
@@ -106,115 +95,77 @@ openssl rand -hex 32
 | `REDIS_PASSWORD` | 否 | Redis 密码 |
 | `REDIS_DB` | 否 | Redis DB，默认 `0` |
 
-常见配置：
+常见地址写法：
 
-1. MySQL / Redis 都在当前机器上
+- MySQL / Redis 在本机：`127.0.0.1`
+- MySQL / Redis 在另一台机器：填写内网 IP、域名或公网地址
+- Docker Compose 内部访问：`mysql`、`redis`
+- 容器访问宿主机服务：`host.docker.internal`
 
-```env
-MYSQL_HOST=127.0.0.1
-REDIS_HOST=127.0.0.1
-```
+## 启动初始化
 
-2. MySQL / Redis 在另一台服务器
+服务启动后会执行这些初始化动作：
 
-```env
-MYSQL_HOST=192.168.1.10
-REDIS_HOST=192.168.1.11
-```
+- 等待 MySQL 和 Redis 可用。
+- 执行 `AutoMigrate`。
+- 清理项目自身缓存。
+- 初始化映射引擎、标准大类、分类缓存。
+- 初始化内置账号、基础站点配置、默认轮播图。
+- 初始化默认采集源和定时任务。
+- 加载或构建前台列表快照、筛选项和读模型。
+- 启动 cron 调度器。
 
-3. 数据库和 Redis 在其他开发环境或云服务
-
-- 把 `MYSQL_HOST` / `REDIS_HOST` 改成对应域名、内网地址或公网地址
-- 同时确认防火墙、白名单和数据库账号授权已经放通
-
-## 启动后初始化
-
-服务启动后会按当前数据库状态执行这些初始化逻辑：
-
-- 等待 Redis 和 MySQL 可用
-- 首次启动时建表；常规重启时执行 `AutoMigrate`
-- 启动阶段清理项目自身缓存
-- 初始化映射引擎、标准大类和分类缓存
-- 初始化内置账号、基础站点配置和默认轮播图
-- 初始化默认采集源和定时任务
-- 执行统一重建，刷新分类、筛选、首页和开放接口所需数据
-- 启动 cron 调度器
-
-需要注意：
-
-- 已存在的旧数据结构如果和当前实现不一致，仍需要额外做一次清理或调整
-
-当前代码会自动补齐两个内置账号：
-
-| 类型 | 账号 | 密码 | 权限 |
-| --- | --- | --- | --- |
-| 管理员 | `admin` | `admin` | 可读可写 |
-| 访客 | `guest` | `guest` | 只读 |
-
-这些默认账号仅用于初始化或演示环境。对外使用前应立即修改密码，或直接替换为你自己的账号体系。
-
-## 采集与聚合逻辑
+## 采集模型
 
 ```mermaid
 flowchart TD
-    A["定时任务 / 手动触发"] --> B["Spider 启动"]
-    B --> C{"采集站等级"}
-    C -->|主站| D["写入影片主数据"]
-    C -->|附属站| E["补充播放源与站点映射"]
-    D --> F["生成分类映射与筛选标签"]
-    E --> G["详情页聚合多播放源 / 单片更新全部站点"]
-    F --> H["前台 / 后台 / Provide 接口可见"]
-    G --> H
+    Trigger["定时任务 / 手动触发"] --> Spider["Spider"]
+    Spider --> Level{"站点等级"}
+    Level -->|主站| Master["写入影片主数据"]
+    Level -->|附属站| Slave["写入播放列表"]
+    Master --> Snapshot["发布列表快照 / 筛选索引"]
+    Slave --> Aggregate["详情页补充播放源"]
+    Snapshot --> PublicAPI["前台 / 后台 / Provide 接口"]
+    Aggregate --> PublicAPI
 ```
 
-当前实现有几个关键约束：
+核心约束：
 
-- 任意时刻只允许一个主站
-- 站点升级为主站时，会自动降级旧主站
-- 主站变更或主站 URI 变更时，会停止采集任务并清空主数据，再由新主站重建
-- 内容归并优先使用豆瓣 ID，没有豆瓣 ID 时使用片名哈希
-- 附属站会采集并持久化播放列表
-- 系统支持后台按同一影片触发多个站点的同步更新
+- 任意时刻只允许一个主站。
+- 主站负责影片主数据和检索入口。
+- 附属站只补充播放列表。
+- 内容归并优先使用豆瓣 ID，缺失时使用内容指纹。
+- 主站切换或主站 URI 变更会停止采集并重建主数据。
+- 后台支持对单部影片触发全部站点更新。
 
-## 分类、筛选与排序语义
+## 快照与缓存
 
-当前公共分类搜索和 TVBox 列表接口共用同一套查询语义，避免两套逻辑长期漂移。
+前台列表不直接扫描采集中的临时状态，而是读取发布后的快照和读模型：
 
-### 分类重建
+- `film_index` 保存影片检索入口。
+- `film_list_snapshot` 保存前台列表快照。
+- `film_filter_index_snapshot` 保存筛选倒排索引。
+- 活跃快照版本记录在 Redis。
+- 增量发布按 affected mids 分批处理数据库 SQL，事务成功后一次性刷新内存读模型。
 
-- 分类树变更、主站切换、初始化完成后，会统一重建分类与筛选结果
-- 重建时会优先保留来源分类语义，减少历史分类污染
+缓存策略：
 
-### 筛选标签
+- 服务启动时只清理 EcoHub 自身缓存。
+- 分类重建、主站切换、快照发布后会刷新相关缓存。
+- 首页、筛选配置、TVBox 列表会跟随快照发布收敛。
 
-- 类型、剧情、地区、语言、年份、排序都由后端统一生成
-- 剧情、地区、语言、年份四类标签支持“其他”
-- “其他”会按实际影片数据决定是否显示
+## 分类、筛选与排序
 
-### 排序定义
+公共分类搜索、后台列表和 TVBox 列表使用同一套后端语义：
 
-- 最近更新
-- 人气
-- 评分
-- 时间
-
-其中最近更新现在只反映主站资源更新时间，不再受附属播放源同步影响。
-
-## 缓存与失效
-
-当前缓存策略的目标是“只清项目自己的数据，同时把页面结果统一收敛”。
-
-- 服务启动时会清理项目自身缓存
-- 不会误删同一缓存实例中的其它服务数据
-- 分类重建、主站切换后会主动刷新分类、筛选、首页和开放接口相关缓存
-
-如果你修改了分类、主站或采集数据，但接口仍返回旧结果，优先检查是否是旧实例未重启，或历史缓存尚未刷新。
+- 分类优先使用来源分类映射。
+- 剧情、地区、语言、年份支持“其他”。
+- 排序包含最近更新、人气、评分、时间。
+- 最近更新只看主站资源更新时间，不受附属播放源同步影响。
 
 ## 接口分组
 
-### 公共接口
-
-这类接口不要求登录：
+公共接口：
 
 - `/api/index`
 - `/api/navCategory`
@@ -228,43 +179,48 @@ flowchart TD
 - `/api/provide/vod`
 - `/api/provide/config`
 
-### 登录相关接口
+登录接口：
 
 - `POST /api/login`
 - `POST /api/logout`
 
-其中 `/api/logout` 需要已登录。
+后台接口：
 
-### 后台接口
+- `/api/manage/*`
 
-`/api/manage/*` 全部挂载了鉴权中间件，覆盖这些模块：
-
-- 首页概览
-- 站点配置
-- 轮播管理
-- 用户管理
-- 采集源与失败记录
-- 定时任务
-- Spider 操作
-- 影片管理
-- 文件管理
+后台接口覆盖首页概览、站点配置、轮播、用户、采集源、失败记录、定时任务、Spider 操作、影片管理和文件管理。
 
 ## 鉴权模型
 
-当前后台鉴权流程如下：
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant API as Go API
+    participant Redis
 
-1. `POST /api/login` 登录成功
-2. 后端下发 `HttpOnly` cookie：`ecohub_auth_token`
-3. `/api/manage/*` 和 `/api/logout` 由后端中间件校验 cookie 中的 JWT
-4. JWT 通过后，还会继续校验 Redis 中保存的当前有效 token
-5. JWT 已过期但 Redis 中 token 仍有效时，会自动刷新 cookie
+    Browser->>API: POST /api/login
+    API->>Redis: 保存当前有效 token
+    API-->>Browser: Set-Cookie ecohub_auth_token
+    Browser->>API: 请求 /api/manage/*
+    API->>API: 校验 JWT
+    API->>Redis: 校验 token 一致性
+    API-->>Browser: 返回数据 / 401 / 403
+```
 
-这意味着：
+- 登录态使用 `HttpOnly` cookie：`ecohub_auth_token`。
+- 后端是最终鉴权边界。
+- `/api/manage/*` 和 `/api/logout` 会校验 JWT 与 Redis 中的当前 token。
+- JWT 过期但 Redis token 仍有效时，会自动刷新 cookie。
+- 访客账号可以读取后台数据，写操作会被 `WriteAccess` 拦截。
 
-- 前端不维护 localStorage token
-- 后端是唯一真实鉴权边界
-- 账号在其他设备重新登录后，旧 token 会失效
-- 访客账号可以读，但写操作会被 `WriteAccess` 拦截
+## 默认账号
+
+| 类型 | 账号 | 密码 | 权限 |
+| --- | --- | --- | --- |
+| 管理员 | `admin` | `admin` | 可读可写 |
+| 访客 | `guest` | `guest` | 只读 |
+
+默认账号仅适合初始化和演示。对外部署后请立即修改密码。
 
 ## 主要目录
 
@@ -273,7 +229,7 @@ server/
 ├── cmd/server/             # 入口
 ├── internal/config/        # 配置与常量
 ├── internal/router/        # 路由
-├── internal/middleware/    # CORS / JWT
+├── internal/middleware/    # CORS / JWT / 写权限
 ├── internal/handler/       # HTTP 处理层
 ├── internal/service/       # 业务逻辑
 ├── internal/repository/    # 数据访问层
@@ -283,14 +239,15 @@ server/
 └── internal/utils/         # 工具函数
 ```
 
-## 常用开发命令
+## 常用命令
 
 ```bash
 cd server
+go run ./cmd/server
 go test ./...
 ```
 
-如果本地 Go 缓存目录受限，可显式指定：
+如果本地 Go 缓存目录受限：
 
 ```bash
 cd server
@@ -299,7 +256,7 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 
 ## 相关文档
 
-- [根目录说明](../README.md)
+- [根目录总览](../README.md)
 - [前端说明](../web/README.md)
 - [Docker 部署说明](../README-Docker.md)
 - [FAQ 与排障](../README-FAQ.md)
