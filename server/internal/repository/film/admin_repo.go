@@ -227,6 +227,11 @@ func ClearSearchTagsCache(pid int64) {
 // ClearTVBoxConfigCache 清除 TVBox 配置缓存
 func ClearTVBoxConfigCache() {
 	db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)
+	pattern := config.TVBoxConfigCacheKey + ":*"
+	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
+	for iter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, iter.Val())
+	}
 }
 
 func ClearTVBoxListCache() {

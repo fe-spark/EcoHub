@@ -84,7 +84,8 @@ func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int
 // GetClassList 获取格式化的分类列表和筛选条件
 func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[string]any) {
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
-	cacheKey := config.TVBoxConfigCacheKey
+	categoryVersion := repository.GetCategoryVersion()
+	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
 	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 		var res struct {
 			ClassList []model.FilmClass
@@ -246,10 +247,11 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	}
 	version := filmrepo.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
+	categoryVersion := repository.GetCategoryVersion()
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		cacheKey = fmt.Sprintf("%s:v%s:r%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, t, cid, pg, sort, limit)
+		cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
 				Current   int
