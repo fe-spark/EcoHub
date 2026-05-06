@@ -283,6 +283,7 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 		return nil, nil
 	}
 
+	affectedMIDs := make([]int64, 0, len(infoList))
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, infoList)
 		if err != nil {
@@ -295,6 +296,7 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 			return err
 		}
 		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, filmIndexContentKeys(infoList))
+		affectedMIDs = collectFilmIndexMIDs(reloadedIndexes)
 		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
 		return nil, err
@@ -307,7 +309,23 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 	if refreshSearchTags {
 		BatchHandleSearchTag(infoList...)
 	}
-	return collectSearchTagPidList(infoList), nil
+	return affectedMIDs, nil
+}
+
+func collectFilmIndexMIDs(infos []model.FilmIndex) []int64 {
+	midSet := make(map[int64]struct{}, len(infos))
+	mids := make([]int64, 0, len(infos))
+	for _, info := range infos {
+		if info.Mid <= 0 {
+			continue
+		}
+		if _, ok := midSet[info.Mid]; ok {
+			continue
+		}
+		midSet[info.Mid] = struct{}{}
+		mids = append(mids, info.Mid)
+	}
+	return mids
 }
 
 func filmIndexContentKeys(infos []model.FilmIndex) []string {
@@ -487,6 +505,17 @@ func RefreshSearchTagsByPids(pids ...int64) error {
 		ClearSearchTagsCache(pid)
 	}
 	return nil
+}
+
+func RefreshSearchTagsByMids(mids ...int64) error {
+	if len(mids) == 0 {
+		return nil
+	}
+	var infos []model.FilmIndex
+	if err := db.Mdb.Select("pid").Where("mid IN ?", mids).Find(&infos).Error; err != nil {
+		return err
+	}
+	return RefreshSearchTagsByPids(collectSearchTagPidList(infos)...)
 }
 
 func RebuildSearchTagsByPids(pids ...int64) error {

@@ -18,7 +18,12 @@ type playSummaryRefreshScheduler struct {
 	mu       sync.Mutex
 	pending  map[int64]struct{}
 	flushing bool
-	waiters  []chan error
+	waiters  []chan playSummaryRefreshResult
+}
+
+type playSummaryRefreshResult struct {
+	mids []int64
+	err  error
 }
 
 func newPlaySummaryRefreshScheduler() *playSummaryRefreshScheduler {
@@ -39,25 +44,28 @@ func SchedulePlaySummaryRefresh(infos ...model.FilmIndex) {
 	playSummaryRefresh.mu.Unlock()
 }
 
-func FlushPendingPlaySummaryRefresh() error {
+func FlushPendingPlaySummaryRefresh() ([]int64, error) {
 	return playSummaryRefresh.flush()
 }
 
-func (s *playSummaryRefreshScheduler) flush() error {
+func (s *playSummaryRefreshScheduler) flush() ([]int64, error) {
+	flushedMIDs := make([]int64, 0)
 	for {
 		s.mu.Lock()
 		if s.flushing {
-			ack := make(chan error, 1)
+			ack := make(chan playSummaryRefreshResult, 1)
 			s.waiters = append(s.waiters, ack)
 			s.mu.Unlock()
-			if err := <-ack; err != nil {
-				return err
+			result := <-ack
+			flushedMIDs = append(flushedMIDs, result.mids...)
+			if result.err != nil {
+				return normalizePlaySummaryMIDs(flushedMIDs), result.err
 			}
 			continue
 		}
 		if len(s.pending) == 0 {
 			s.mu.Unlock()
-			return nil
+			return normalizePlaySummaryMIDs(flushedMIDs), nil
 		}
 		pending := s.pending
 		s.pending = make(map[int64]struct{})
@@ -65,12 +73,14 @@ func (s *playSummaryRefreshScheduler) flush() error {
 		s.mu.Unlock()
 
 		err := flushPlaySummaryRefreshMids(pending)
-		s.finishFlush(err)
-		return err
+		mids := sortedMIDsFromSet(pending)
+		s.finishFlush(playSummaryRefreshResult{mids: mids, err: err})
+		flushedMIDs = append(flushedMIDs, mids...)
+		return normalizePlaySummaryMIDs(flushedMIDs), err
 	}
 }
 
-func (s *playSummaryRefreshScheduler) finishFlush(err error) {
+func (s *playSummaryRefreshScheduler) finishFlush(result playSummaryRefreshResult) {
 	s.mu.Lock()
 	s.flushing = false
 	waiters := s.waiters
@@ -78,7 +88,7 @@ func (s *playSummaryRefreshScheduler) finishFlush(err error) {
 	s.mu.Unlock()
 
 	for _, waiter := range waiters {
-		waiter <- err
+		waiter <- result
 	}
 }
 
@@ -87,13 +97,7 @@ func flushPlaySummaryRefreshMids(midSet map[int64]struct{}) error {
 		return nil
 	}
 
-	mids := make([]int64, 0, len(midSet))
-	for mid := range midSet {
-		mids = append(mids, mid)
-	}
-	sort.Slice(mids, func(i, j int) bool {
-		return mids[i] < mids[j]
-	})
+	mids := sortedMIDsFromSet(midSet)
 
 	startedAt := time.Now()
 	log.Printf("[PlaySummaryRefresh] 开始刷新 mid_count=%d", len(mids))
@@ -121,4 +125,36 @@ func flushPlaySummaryRefreshMids(midSet map[int64]struct{}) error {
 	}
 	log.Printf("[PlaySummaryRefresh] 刷新完成 mid_count=%d cost=%s", len(mids), time.Since(startedAt))
 	return nil
+}
+
+func sortedMIDsFromSet(midSet map[int64]struct{}) []int64 {
+	mids := make([]int64, 0, len(midSet))
+	for mid := range midSet {
+		if mid > 0 {
+			mids = append(mids, mid)
+		}
+	}
+	sort.Slice(mids, func(i, j int) bool {
+		return mids[i] < mids[j]
+	})
+	return mids
+}
+
+func normalizePlaySummaryMIDs(mids []int64) []int64 {
+	if len(mids) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(mids))
+	midSet := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		midSet[mid] = struct{}{}
+	}
+	return sortedMIDsFromSet(midSet)
 }

@@ -12,6 +12,7 @@ import (
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type filterIndexClause struct {
@@ -121,6 +122,25 @@ func EnsureActiveFilterIndexSnapshot() error {
 		return nil
 	}
 	return RebuildFilterIndexSnapshot(version)
+}
+
+func ReplaceFilterIndexSnapshotsTx(tx *gorm.DB, version string, snapshots []model.FilmListSnapshot, mids []int64) error {
+	version = strings.TrimSpace(version)
+	if version == "" || len(mids) == 0 {
+		return nil
+	}
+	if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, mids).Delete(&model.FilmFilterIndexSnapshot{}).Error; err != nil {
+		return err
+	}
+	rows := make([]model.FilmFilterIndexSnapshot, 0, len(snapshots)*6)
+	for _, snapshot := range snapshots {
+		snapshot = projectSnapshotCategory(snapshot)
+		rows = append(rows, buildFilterIndexRows(version, snapshot)...)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(rows, 1000).Error
 }
 
 func buildFilterIndexClauses(st *model.SearchTagsVO) ([]filterIndexClause, bool) {

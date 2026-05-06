@@ -18,7 +18,7 @@ var collectWrites = newCollectWriteScheduler()
 
 type collectWriteCompletion struct {
 	page  int
-	pids  []int64
+	mids  []int64
 	err   error
 	stage string
 }
@@ -195,11 +195,11 @@ func (l *collectWriteLane) run(workerID int) {
 		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 开始写入 sources=%s pending=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), meta.tail)
 		failed := 0
 		for _, job := range jobs {
-			pids, err := job.write()
+			mids, err := job.write()
 			if err != nil {
 				failed++
 			}
-			job.complete(collectWriteCompletion{page: job.page, pids: pids, err: err, stage: "save"})
+			job.complete(collectWriteCompletion{page: job.page, mids: mids, err: err, stage: "save"})
 		}
 		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 完成写入 sources=%s pending=%d failed=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), failed, meta.tail)
 		finish()

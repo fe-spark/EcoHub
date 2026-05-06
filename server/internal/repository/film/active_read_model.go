@@ -5,6 +5,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -41,6 +42,7 @@ type readModelProjectionContext struct {
 
 var activeFilmReadModel atomic.Value
 var activeProjectedFilmReadModel atomic.Value
+var activeFilmReadModelMu sync.Mutex
 
 func init() {
 	activeFilmReadModel.Store(newEmptyFilmReadModel(""))
@@ -48,6 +50,12 @@ func init() {
 }
 
 func LoadActiveFilmReadModel(version string) error {
+	activeFilmReadModelMu.Lock()
+	defer activeFilmReadModelMu.Unlock()
+	return loadActiveFilmReadModelLocked(version)
+}
+
+func loadActiveFilmReadModelLocked(version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -94,6 +102,65 @@ func RefreshActiveProjectedReadModel() error {
 	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel(readModel.Version, ""))
 	ensureProjectedFilmReadModel(readModel)
 	RefreshAccessDataCaches()
+	return nil
+}
+
+func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmListSnapshot, deletedMIDs []int64) error {
+	activeFilmReadModelMu.Lock()
+	defer activeFilmReadModelMu.Unlock()
+	return applyActiveFilmReadModelSnapshotsLocked(version, snapshots, deletedMIDs)
+}
+
+func applyActiveFilmReadModelSnapshotsLocked(version string, snapshots []model.FilmListSnapshot, deletedMIDs []int64) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return nil
+	}
+	current := GetActiveFilmReadModel()
+	if current == nil || current.Version != version {
+		return fmt.Errorf("active read model version mismatch: current=%s target=%s", GetActiveReadModelVersion(), version)
+	}
+
+	byMid := make(map[int64]model.FilmListSnapshot, len(current.ByMid)+len(snapshots))
+	allMIDs := make([]int64, 0, len(current.AllMIDs)+len(snapshots))
+	for _, mid := range current.AllMIDs {
+		if snapshot, ok := current.ByMid[mid]; ok {
+			byMid[mid] = snapshot
+			allMIDs = append(allMIDs, mid)
+		}
+	}
+
+	deleted := make(map[int64]struct{}, len(deletedMIDs))
+	for _, mid := range deletedMIDs {
+		if mid > 0 {
+			deleted[mid] = struct{}{}
+			delete(byMid, mid)
+		}
+	}
+	if len(deleted) > 0 {
+		kept := allMIDs[:0]
+		for _, mid := range allMIDs {
+			if _, ok := deleted[mid]; !ok {
+				kept = append(kept, mid)
+			}
+		}
+		allMIDs = kept
+	}
+
+	for _, snapshot := range snapshots {
+		if snapshot.Mid <= 0 {
+			continue
+		}
+		if _, existed := byMid[snapshot.Mid]; !existed {
+			allMIDs = append(allMIDs, snapshot.Mid)
+		}
+		byMid[snapshot.Mid] = snapshot
+	}
+
+	readModel := &FilmReadModel{Version: version, ByMid: byMid, AllMIDs: allMIDs}
+	activeFilmReadModel.Store(readModel)
+	activeProjectedFilmReadModel.Store(newEmptyProjectedFilmReadModel(version, ""))
+	ensureProjectedFilmReadModel(readModel)
 	return nil
 }
 

@@ -69,8 +69,6 @@ var collectProgress sync.Map
 
 var pictureSyncRunning atomic.Bool
 
-var asyncMasterSearchTagsMu sync.Mutex
-
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
@@ -276,6 +274,8 @@ type collectLifecycleState struct {
 	activeSources       map[string]struct{}
 	activeCount         int
 	pendingFlushSources map[string]model.FilmSource
+	affectedMIDs        map[int64]struct{}
+	masterAffectedMIDs  map[int64]struct{}
 	flushing            bool
 }
 
@@ -283,6 +283,8 @@ func newCollectLifecycle() *collectLifecycleState {
 	state := &collectLifecycleState{
 		activeSources:       make(map[string]struct{}),
 		pendingFlushSources: make(map[string]model.FilmSource),
+		affectedMIDs:        make(map[int64]struct{}),
+		masterAffectedMIDs:  make(map[int64]struct{}),
 	}
 	state.cond = sync.NewCond(&state.mu)
 	return state
@@ -352,6 +354,88 @@ func (s *collectLifecycleState) endSourceAndQueueFlush(source model.FilmSource) 
 	s.mu.Unlock()
 }
 
+func (s *collectLifecycleState) addAffectedMIDs(mids []int64) {
+	if len(mids) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, mid := range mids {
+		if mid > 0 {
+			s.affectedMIDs[mid] = struct{}{}
+		}
+	}
+}
+
+func (s *collectLifecycleState) addMasterAffectedMIDs(mids []int64) {
+	if len(mids) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, mid := range mids {
+		if mid > 0 {
+			s.affectedMIDs[mid] = struct{}{}
+			s.masterAffectedMIDs[mid] = struct{}{}
+		}
+	}
+}
+
+func (s *collectLifecycleState) restorePendingFlush(pending map[string]model.FilmSource, affectedMIDs []int64, masterMIDs []int64) {
+	if len(pending) == 0 && len(affectedMIDs) == 0 && len(masterMIDs) == 0 {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, source := range pending {
+		if strings.TrimSpace(id) != "" {
+			s.pendingFlushSources[id] = source
+		}
+	}
+	for _, mid := range affectedMIDs {
+		if mid > 0 {
+			s.affectedMIDs[mid] = struct{}{}
+		}
+	}
+	for _, mid := range masterMIDs {
+		if mid > 0 {
+			s.affectedMIDs[mid] = struct{}{}
+			s.masterAffectedMIDs[mid] = struct{}{}
+		}
+	}
+	s.cond.Broadcast()
+}
+
+func (s *collectLifecycleState) drainAffectedMIDsLocked() []int64 {
+	if len(s.affectedMIDs) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(s.affectedMIDs))
+	for mid := range s.affectedMIDs {
+		if mid > 0 {
+			mids = append(mids, mid)
+		}
+	}
+	s.affectedMIDs = make(map[int64]struct{})
+	sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
+	return mids
+}
+
+func (s *collectLifecycleState) drainMasterAffectedMIDsLocked() []int64 {
+	if len(s.masterAffectedMIDs) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(s.masterAffectedMIDs))
+	for mid := range s.masterAffectedMIDs {
+		if mid > 0 {
+			mids = append(mids, mid)
+		}
+	}
+	s.masterAffectedMIDs = make(map[int64]struct{})
+	sort.Slice(mids, func(i, j int) bool { return mids[i] < mids[j] })
+	return mids
+}
+
 func (s *collectLifecycleState) flushPending() error {
 	s.mu.Lock()
 	for s.flushing || s.activeCount > 0 {
@@ -363,10 +447,15 @@ func (s *collectLifecycleState) flushPending() error {
 	}
 	pending := s.pendingFlushSources
 	s.pendingFlushSources = make(map[string]model.FilmSource)
+	affectedMIDs := s.drainAffectedMIDsLocked()
+	masterMIDs := s.drainMasterAffectedMIDsLocked()
 	s.flushing = true
 	s.mu.Unlock()
 
-	err := flushPendingSources(pending)
+	finalMIDs, finalMasterMIDs, err := flushPendingSources(pending, affectedMIDs, masterMIDs)
+	if err != nil {
+		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
+	}
 
 	s.mu.Lock()
 	s.flushing = false
@@ -393,10 +482,15 @@ func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) er
 	}
 	pending := s.pendingFlushSources
 	s.pendingFlushSources = make(map[string]model.FilmSource)
+	affectedMIDs := s.drainAffectedMIDsLocked()
+	masterMIDs := s.drainMasterAffectedMIDsLocked()
 	s.flushing = true
 	s.mu.Unlock()
 
-	err := flushPendingSources(pending)
+	finalMIDs, finalMasterMIDs, err := flushPendingSources(pending, affectedMIDs, masterMIDs)
+	if err != nil {
+		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
+	}
 
 	s.mu.Lock()
 	s.flushing = false
@@ -405,7 +499,7 @@ func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) er
 	return err
 }
 
-func (s *collectLifecycleState) runFlush(flush func() error) error {
+func (s *collectLifecycleState) runFlush(flush func([]int64, []int64) error) error {
 	s.mu.Lock()
 	for s.flushing || s.activeCount > 0 {
 		s.cond.Wait()
@@ -415,15 +509,22 @@ func (s *collectLifecycleState) runFlush(flush func() error) error {
 		pending = s.pendingFlushSources
 		s.pendingFlushSources = make(map[string]model.FilmSource)
 	}
+	affectedMIDs := s.drainAffectedMIDsLocked()
+	masterMIDs := s.drainMasterAffectedMIDsLocked()
 	s.flushing = true
 	s.mu.Unlock()
 
 	var err error
 	if len(pending) > 0 {
-		err = flushPendingSources(pending)
+		var finalMIDs []int64
+		var finalMasterMIDs []int64
+		finalMIDs, finalMasterMIDs, err = flushPendingSources(pending, affectedMIDs, masterMIDs)
+		if err != nil {
+			s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
+		}
 	}
 	if err == nil {
-		err = flush()
+		err = flush(affectedMIDs, masterMIDs)
 	}
 
 	s.mu.Lock()
@@ -444,9 +545,14 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	if len(s.pendingFlushSources) > 0 {
 		pending := s.pendingFlushSources
 		s.pendingFlushSources = make(map[string]model.FilmSource)
+		affectedMIDs := s.drainAffectedMIDsLocked()
+		masterMIDs := s.drainMasterAffectedMIDsLocked()
 		s.flushing = true
 		s.mu.Unlock()
-		flushErr := flushPendingSources(pending)
+		finalMIDs, finalMasterMIDs, flushErr := flushPendingSources(pending, affectedMIDs, masterMIDs)
+		if flushErr != nil {
+			s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
+		}
 		s.mu.Lock()
 		s.flushing = false
 		if flushErr != nil {
@@ -506,9 +612,9 @@ func (s *collectLifecycleState) finishSourceLocked(sourceID string) {
 	s.cond.Broadcast()
 }
 
-func flushPendingSources(sourceMap map[string]model.FilmSource) error {
+func flushPendingSources(sourceMap map[string]model.FilmSource, affectedMIDs []int64, masterMIDs []int64) ([]int64, []int64, error) {
 	if len(sourceMap) == 0 {
-		return nil
+		return affectedMIDs, masterMIDs, nil
 	}
 	sources := make([]model.FilmSource, 0, len(sourceMap))
 	for _, source := range sourceMap {
@@ -522,38 +628,44 @@ func flushPendingSources(sourceMap map[string]model.FilmSource) error {
 	})
 
 	markSourcesFinalizing(sourceMap)
-	if err := finalizeCollectRun(sources); err != nil {
+	finalMIDs, finalMasterMIDs, err := finalizeCollectRun(sources, affectedMIDs, masterMIDs)
+	if err != nil {
 		markSourcesFinalizeFailed(sourceMap)
-		return err
+		return finalMIDs, finalMasterMIDs, err
 	}
 	markSourcesPublished(sourceMap)
-	return nil
+	return finalMIDs, finalMasterMIDs, nil
 }
 
-func finalizeCollectRun(sources []model.FilmSource) error {
+func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, masterMIDs []int64) ([]int64, []int64, error) {
 	if len(sources) == 0 {
-		return nil
+		return affectedMIDs, masterMIDs, nil
 	}
 	start := time.Now()
 	log.Printf("[Spider][Finalizer] 开始收尾发布 source_count=%d", len(sources))
 
-	if err := flushMasterSideEffects(sources); err != nil {
-		return err
+	if err := flushMasterSideEffects(sources, masterMIDs); err != nil {
+		return affectedMIDs, masterMIDs, err
 	}
-	if err := flushPlaySummaryRefresh(); err != nil {
-		return err
-	}
-	version, err := publishFilmSnapshot()
+	playSummaryMIDs, err := flushPlaySummaryRefresh()
+	affectedMIDs = append(affectedMIDs, playSummaryMIDs...)
 	if err != nil {
-		return err
+		return affectedMIDs, masterMIDs, err
+	}
+	version, err := publishFilmSnapshot(affectedMIDs)
+	if err != nil {
+		return affectedMIDs, masterMIDs, err
 	}
 	log.Printf("[Spider][Finalizer] 收尾发布完成 version=%s source_count=%d cost=%s", version, len(sources), time.Since(start))
-	return nil
+	return affectedMIDs, masterMIDs, nil
 }
 
-func flushMasterSideEffects(sources []model.FilmSource) error {
+func flushMasterSideEffects(sources []model.FilmSource, masterMIDs []int64) error {
 	for _, source := range sources {
 		if source.Grade == model.MasterCollect {
+			if err := filmrepo.RefreshSearchTagsByMids(masterMIDs...); err != nil {
+				return fmt.Errorf("刷新主站搜索标签失败: %w", err)
+			}
 			filmrepo.ClearTVBoxConfigCache()
 			return nil
 		}
@@ -561,23 +673,45 @@ func flushMasterSideEffects(sources []model.FilmSource) error {
 	return nil
 }
 
-func flushPlaySummaryRefresh() error {
+func flushPlaySummaryRefresh() ([]int64, error) {
 	start := time.Now()
-	if err := filmrepo.FlushPendingPlaySummaryRefresh(); err != nil {
-		return fmt.Errorf("flush play summary refresh failed: %w", err)
+	mids, err := filmrepo.FlushPendingPlaySummaryRefresh()
+	if err != nil {
+		return mids, fmt.Errorf("flush play summary refresh failed: %w", err)
 	}
-	log.Printf("[Spider][Finalizer] 播放源摘要刷新完成 cost=%s", time.Since(start))
-	return nil
+	log.Printf("[Spider][Finalizer] 播放源摘要刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
+	return mids, nil
 }
 
-func publishFilmSnapshot() (string, error) {
+func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()
-	version := filmrepo.NewSnapshotVersion()
-	if err := filmrepo.ActivateRebuiltFilmListSnapshot(version); err != nil {
-		return "", fmt.Errorf("rebuild film list snapshot failed: %w", err)
+	mids := normalizeAffectedMIDs(affectedMIDs)
+	version, updated, err := filmrepo.UpsertActiveSnapshotsByMids(mids...)
+	if err != nil {
+		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
 	}
-	log.Printf("[Spider][Finalizer] 前台影片列表快照已重建并切换 version=%s cost=%s", version, time.Since(start))
+	log.Printf("[Spider][Finalizer] 前台影片列表快照已增量发布 version=%s input=%d updated=%d cost=%s", version, len(mids), updated, time.Since(start))
 	return version, nil
+}
+
+func normalizeAffectedMIDs(mids []int64) []int64 {
+	if len(mids) == 0 {
+		return nil
+	}
+	seen := make(map[int64]struct{}, len(mids))
+	res := make([]int64, 0, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		res = append(res, mid)
+	}
+	sort.Slice(res, func(i, j int) bool { return res[i] < res[j] })
+	return res
 }
 
 func flushSourcesPending(tag string, sources []model.FilmSource) {
@@ -597,8 +731,9 @@ func flushSourcesPending(tag string, sources []model.FilmSource) {
 		return
 	}
 
-	if err := collectLifecycle.runFlush(func() error {
-		return flushPendingSources(flushMap)
+	if err := collectLifecycle.runFlush(func(affectedMIDs []int64, masterMIDs []int64) error {
+		_, _, err := flushPendingSources(flushMap, affectedMIDs, masterMIDs)
+		return err
 	}); err != nil {
 		log.Printf("[%s] 收尾刷新失败: %v", tag, err)
 	}
@@ -1153,8 +1288,6 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	close(pages)
 
 	var writeWG sync.WaitGroup
-	affectedPids := make(map[int64]struct{})
-	var affectedPidsMu sync.Mutex
 	var consecutiveFailuresMu sync.Mutex
 	consecutiveFailures := 0
 	var stopErr error
@@ -1234,17 +1367,13 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		recordFailure(page, stage, err)
 		logProgress(false)
 	}
-	recordPageSuccess := func(page int, pids []int64) {
+	recordPageSuccess := func(page int, mids []int64) {
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
-		if len(pids) > 0 {
-			affectedPidsMu.Lock()
-			for _, pid := range pids {
-				if pid > 0 {
-					affectedPids[pid] = struct{}{}
-				}
-			}
-			affectedPidsMu.Unlock()
+		if s.Grade == model.MasterCollect {
+			collectLifecycle.addMasterAffectedMIDs(mids)
+		} else {
+			collectLifecycle.addAffectedMIDs(mids)
 		}
 		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
 			progress.Success = snapshot.success
@@ -1339,10 +1468,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			recordPageFailure(completion.page, completion.stage, completion.err)
 			continue
 		}
-		recordPageSuccess(completion.page, completion.pids)
+		recordPageSuccess(completion.page, completion.mids)
 	}
 	logProgress(true)
-	scheduleCollectSearchTagsFlush(s, affectedPids)
 	if ctx.Err() != nil {
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
@@ -1350,46 +1478,6 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		return stats.success > 0, stopErr
 	}
 	return stats.success > 0, nil
-}
-
-func flushCollectSearchTags(s *model.FilmSource, affectedPids map[int64]struct{}) {
-	if s.Grade != model.MasterCollect || len(affectedPids) == 0 {
-		return
-	}
-	pids := make([]int64, 0, len(affectedPids))
-	for pid := range affectedPids {
-		if pid > 0 {
-			pids = append(pids, pid)
-		}
-	}
-	if len(pids) == 0 {
-		return
-	}
-	sort.Slice(pids, func(i, j int) bool { return pids[i] < pids[j] })
-	if err := filmrepo.RefreshSearchTagsByPids(pids...); err != nil {
-		log.Printf("[Spider] 站点 %s 采集后刷新搜索标签失败: %v", s.Name, err)
-		return
-	}
-	filmrepo.ClearAllSearchTagsCache()
-	filmrepo.ClearTVBoxConfigCache()
-	log.Printf("[Spider] 站点 %s 采集后已批量刷新搜索标签, 分类数=%d", s.Name, len(pids))
-}
-
-func scheduleCollectSearchTagsFlush(s *model.FilmSource, affectedPids map[int64]struct{}) {
-	if s.Grade != model.MasterCollect || len(affectedPids) == 0 {
-		return
-	}
-	pending := make(map[int64]struct{}, len(affectedPids))
-	for pid := range affectedPids {
-		pending[pid] = struct{}{}
-	}
-	source := *s
-	go func() {
-		asyncMasterSearchTagsMu.Lock()
-		defer asyncMasterSearchTagsMu.Unlock()
-
-		flushCollectSearchTags(&source, pending)
-	}()
 }
 
 // collectFilmById 采集指定ID的影片信息
@@ -1569,10 +1657,16 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	}
 
-	if err = saveCollectedFilm(s, list, filmrepo.SaveDetails); err != nil {
+	mids, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
+	if err != nil {
 		markRecoverFailure(s, fr, "recover_save", err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
+	}
+	if s.Grade == model.MasterCollect {
+		collectLifecycle.addMasterAffectedMIDs(mids)
+	} else {
+		collectLifecycle.addAffectedMIDs(mids)
 	}
 	repository.UpdateFailureRecordStatus(fr, model.FailureRecordStatusSuccess)
 }

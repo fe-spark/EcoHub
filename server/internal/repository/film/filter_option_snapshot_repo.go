@@ -251,6 +251,14 @@ func EnsureActiveFilterOptionSnapshot() error {
 	return RebuildFilterOptionSnapshot(version)
 }
 
+func ClearFilterOptionSnapshotsTx(tx *gorm.DB, version string) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return nil
+	}
+	return tx.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmFilterOptionSnapshot{}).Error
+}
+
 func buildFilterOptionResponse(rows []model.FilmFilterOptionSnapshot) map[string]any {
 	tags := make(map[string]any)
 	titles := make(map[string]string)

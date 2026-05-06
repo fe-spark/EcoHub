@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/config"
@@ -21,6 +22,8 @@ const (
 	snapshotBuildBatchSize = 1000
 	snapshotRetainVersions = 2
 )
+
+var activeSnapshotUpsertMu sync.Mutex
 
 func GetActiveSnapshotVersion() string {
 	version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
@@ -387,24 +390,116 @@ func RefreshActiveSnapshotReadModel() error {
 }
 
 func UpsertActiveSnapshotByMid(mid int64) error {
+	_, _, err := UpsertActiveSnapshotsByMids(mid)
+	return err
+}
+
+func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
+	activeSnapshotUpsertMu.Lock()
+	defer activeSnapshotUpsertMu.Unlock()
+
 	version := GetActiveReadModelVersion()
-	if strings.TrimSpace(version) == "" || mid <= 0 {
-		return nil
+	if strings.TrimSpace(version) == "" {
+		version = GetActiveSnapshotVersion()
 	}
-	index := GetFilmIndexById(mid)
-	if index == nil || index.Mid <= 0 {
-		return fmt.Errorf("影片索引不存在: %d", mid)
+	if strings.TrimSpace(version) == "" {
+		version = NewSnapshotVersion()
+		if err := ActivateRebuiltFilmListSnapshot(version); err != nil {
+			return "", 0, err
+		}
+		return version, 0, nil
 	}
-	snapshot := buildFilmListSnapshot(version, *index)
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("snapshot_version = ? AND mid = ?", version, mid).Delete(&model.FilmListSnapshot{}).Error; err != nil {
+
+	ids := normalizeSnapshotMIDs(mids)
+	if len(ids) == 0 {
+		return version, 0, nil
+	}
+
+	var indexes []model.FilmIndex
+	if err := db.Mdb.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
+		Where("film_index.mid IN ?", ids).
+		Find(&indexes).Error; err != nil {
+		return "", 0, err
+	}
+
+	snapshots := make([]model.FilmListSnapshot, 0, len(indexes))
+	keptMIDs := make([]int64, 0, len(indexes))
+	for _, index := range indexes {
+		if index.Mid <= 0 {
+			continue
+		}
+		snapshots = append(snapshots, buildFilmListSnapshot(version, index))
+		keptMIDs = append(keptMIDs, index.Mid)
+	}
+	deletedMIDs := diffMIDs(ids, keptMIDs)
+
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, ids).Delete(&model.FilmListSnapshot{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&snapshot).Error; err != nil {
+		if len(snapshots) > 0 {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapshots, snapshotBuildBatchSize).Error; err != nil {
+				return err
+			}
+		}
+		if err := ReplaceFilterIndexSnapshotsTx(tx, version, snapshots, ids); err != nil {
 			return err
 		}
+		return ClearFilterOptionSnapshotsTx(tx, version)
+	}); err != nil {
+		return "", 0, err
+	}
+
+	if err := ApplyActiveFilmReadModelSnapshots(version, snapshots, deletedMIDs); err != nil {
+		return "", 0, err
+	}
+	if err := RebuildFilterOptionSnapshot(version); err != nil {
+		return "", 0, err
+	}
+	RefreshAccessDataCaches()
+	ClearAdminFilmSearchCache()
+	return version, len(snapshots), nil
+}
+
+func normalizeSnapshotMIDs(mids []int64) []int64 {
+	if len(mids) == 0 {
 		return nil
-	})
+	}
+	ids := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		ids = append(ids, mid)
+	}
+	return ids
+}
+
+func diffMIDs(all []int64, kept []int64) []int64 {
+	if len(all) == 0 {
+		return nil
+	}
+	keptSet := make(map[int64]struct{}, len(kept))
+	for _, mid := range kept {
+		if mid > 0 {
+			keptSet[mid] = struct{}{}
+		}
+	}
+	deleted := make([]int64, 0)
+	for _, mid := range all {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := keptSet[mid]; !ok {
+			deleted = append(deleted, mid)
+		}
+	}
+	return deleted
 }
 
 func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
