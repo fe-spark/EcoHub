@@ -19,15 +19,15 @@ type orphanPlaylistRow struct {
 }
 
 // CleanOrphanPlaylists 清理与主站匹配键索引脱离关联的附属站播放列表。
-func CleanOrphanPlaylists() (int64, bool, error) {
+func CleanOrphanPlaylists() (int64, error) {
 	total, err := cleanOrphanPlaylistsInBatches()
 	if err != nil {
-		return total, total > 0, err
+		return total, err
 	}
 	if total > 0 {
 		log.Printf("[CleanOrphan] 已清理 %d 条孤儿 movie_playlist 记录", total)
 	}
-	return total, total > 0, nil
+	return total, nil
 }
 
 func cleanOrphanPlaylistsInBatches() (int64, error) {
@@ -84,6 +84,7 @@ func loadOrphanPlaylistRows(lastID uint) ([]orphanPlaylistRow, error) {
 	var rows []orphanPlaylistRow
 	err := db.Mdb.Model(&model.MoviePlaylist{}).
 		Select("movie_playlist.id").
+		Joins("JOIN film_sources ON film_sources.id = movie_playlist.source_id AND film_sources.grade = ?", model.SlaveCollect).
 		Where("movie_playlist.id > ?", lastID).
 		Where("NOT EXISTS (?)",
 			db.Mdb.Model(&model.MovieMatchKey{}).

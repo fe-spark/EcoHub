@@ -212,13 +212,14 @@ func executeOrphanCleanTask() {
 
 	startedAt := time.Now()
 	if err := collectLifecycle.runExclusive(func() error {
-		n, orphanChanged, err := filmrepo.CleanOrphanPlaylists()
+		n, err := filmrepo.CleanOrphanPlaylists()
 		if err != nil {
 			return fmt.Errorf("清理孤儿播放列表失败: %w", err)
 		}
 		m := filmrepo.CleanEmptyFilms()
 		x := filmrepo.CleanSearchWithoutDetail()
-		if orphanChanged || m > 0 || x > 0 {
+		// 附属站孤儿播放列表是匹配不到主站框架的冗余数据；只有主站索引清理才需要刷新读模型。
+		if m > 0 || x > 0 {
 			if err := filmrepo.RefreshAfterDataClean(); err != nil {
 				return fmt.Errorf("刷新清理后的前台读模型失败: %w", err)
 			}
