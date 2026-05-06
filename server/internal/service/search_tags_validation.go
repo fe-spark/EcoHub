@@ -19,7 +19,7 @@ func validateReadModelSearchTags(st model.SearchTagsVO) error {
 
 func isUnsupportedTagValue(value string) bool {
 	switch strings.TrimSpace(value) {
-	case model.TagUnknownValue, model.TagOthersValue:
+	case model.TagUnknownValue:
 		return true
 	default:
 		return false

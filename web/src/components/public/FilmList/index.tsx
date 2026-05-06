@@ -16,8 +16,34 @@ interface FilmItem {
   year: string;
   cName: string;
   area: string;
+  language?: string;
+  classTag?: string;
   remarks: string;
   blurb?: string;
+}
+
+function normalizeMetaValue(value?: string | number | null) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "0") {
+    return "";
+  }
+  return text;
+}
+
+function getPrimaryPlotTag(classTag?: string) {
+  return normalizeMetaValue(classTag)
+    .split(/[,，/|、\s]+/)
+    .map((tag) => tag.trim())
+    .find(Boolean) || "";
+}
+
+function buildFilmMetaTags(item: FilmItem) {
+  return [
+    normalizeMetaValue(item.year?.slice(0, 4)),
+    normalizeMetaValue(item.area?.split(",")[0]),
+    normalizeMetaValue(item.language),
+    getPrimaryPlotTag(item.classTag),
+  ].filter(Boolean);
 }
 
 interface FilmListProps {
@@ -43,6 +69,7 @@ function FilmCard({
   const [imgError, setImgError] = React.useState(false);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const id = item.mid || item.id;
+  const metaTags = buildFilmMetaTags(item);
 
   React.useEffect(() => {
     setImgLoaded(false);
@@ -90,8 +117,9 @@ function FilmCard({
 
           {/* Bottom Tags (Always visible) */}
           <div className={styles.tagGroup}>
-            <span className={styles.tag}>{item.year?.slice(0, 4)}</span>
-            <span className={styles.tag}>{item.cName}</span>
+            {metaTags.map((tag, index) => (
+              <span key={`${tag}-${index}`} className={styles.tag}>{tag}</span>
+            ))}
           </div>
 
           {/* Hover Overlay - Premium Design */}
@@ -99,9 +127,12 @@ function FilmCard({
             <div className={styles.overlayContent}>
               <h3 className={styles.overlayTitle}>{item.name}</h3>
               <div className={styles.overlayMeta}>
-                <span>{item.year}</span>
-                <span className={styles.dot}>•</span>
-                <span>{item.area?.split(",")[0]}</span>
+                {metaTags.map((tag, index) => (
+                  <React.Fragment key={`${tag}-${index}`}>
+                    {index > 0 && <span className={styles.dot}>•</span>}
+                    <span>{tag}</span>
+                  </React.Fragment>
+                ))}
               </div>
               <p className={styles.overlayBlurb}>
                 {item.blurb || "暂无简介，点击查看更多精彩内容..."}

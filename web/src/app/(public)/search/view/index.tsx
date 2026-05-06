@@ -9,6 +9,21 @@ import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
+function normalizeMetaValue(value?: string | number | null) {
+  const text = String(value ?? "").trim();
+  if (!text || text === "0") {
+    return "";
+  }
+  return text;
+}
+
+function getPrimaryPlotTag(classTag?: string) {
+  return normalizeMetaValue(classTag)
+    .split(/[,，/|、\s]+/)
+    .map((tag) => tag.trim())
+    .find(Boolean) || "";
+}
+
 export default function SearchPageView({
   data,
   keyword,
@@ -83,8 +98,18 @@ export default function SearchPageView({
                     {movie.cName && (
                       <span className={`${styles.tag} ${styles.category}`}>{movie.cName}</span>
                     )}
-                    {movie.year && <span className={styles.tag}>{movie.year}</span>}
-                    {movie.area && <span className={styles.tag}>{movie.area}</span>}
+                    {normalizeMetaValue(movie.year) && (
+                      <span className={styles.tag}>{normalizeMetaValue(movie.year)}</span>
+                    )}
+                    {normalizeMetaValue(movie.area) && (
+                      <span className={styles.tag}>{normalizeMetaValue(movie.area)}</span>
+                    )}
+                    {normalizeMetaValue(movie.language) && (
+                      <span className={styles.tag}>{normalizeMetaValue(movie.language)}</span>
+                    )}
+                    {getPrimaryPlotTag(movie.classTag) && (
+                      <span className={styles.tag}>{getPrimaryPlotTag(movie.classTag)}</span>
+                    )}
                   </div>
                   <div className={styles.meta}>
                     <span>导演:</span> {movie.director || "未知"}

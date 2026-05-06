@@ -364,5 +364,6 @@ type PlayLinkVo struct {
 // MovieDetailVo 影片详情数据, 播放源合并版
 type MovieDetailVo struct {
 	MovieDetail
-	List []PlayLinkVo `json:"list"`
+	List            []PlayLinkVo `json:"list"`
+	LocalUpdateTime int64        `json:"localUpdateTime"` // 本地详情更新时间戳
 }

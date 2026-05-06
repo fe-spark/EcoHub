@@ -564,25 +564,25 @@ func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 	return &snapshot
 }
 
-func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) *model.MovieDetail {
+func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDetail, int64) {
 	if snapshot.Mid <= 0 {
-		return nil
+		return nil, 0
 	}
 	var movieDetailInfo model.MovieDetailInfo
 	if err := db.Mdb.Where("mid = ?", snapshot.Mid).First(&movieDetailInfo).Error; err != nil {
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
 			log.Printf("GetMovieDetailBySnapshot Error: %v", err)
 		}
-		return nil
+		return nil, 0
 	}
 	var detail model.MovieDetail
 	if err := json.Unmarshal([]byte(movieDetailInfo.Content), &detail); err != nil {
 		log.Printf("Unmarshal Snapshot MovieDetail Error: %v", err)
-		return nil
+		return nil, 0
 	}
 	ApplyFilmListSnapshot(&detail, snapshot)
 	normalizeMovieDetailLists(&detail)
-	return &detail
+	return &detail, movieDetailInfo.UpdatedAt.Unix()
 }
 
 func normalizeMovieDetailLists(detail *model.MovieDetail) {

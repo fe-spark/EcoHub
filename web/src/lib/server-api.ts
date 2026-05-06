@@ -34,6 +34,7 @@ function buildApiUrl(path: string, params?: Record<string, string | number | und
 export async function serverGet<T = any>(
   path: string,
   params?: Record<string, string | number | undefined>,
+  headers?: HeadersInit,
 ): Promise<ApiResponse<T>> {
   const apiUrl = buildApiUrl(path, params);
   console.info(`[SSR][API] GET ${apiUrl}`);
@@ -43,6 +44,7 @@ export async function serverGet<T = any>(
   try {
     response = await fetch(apiUrl, {
       cache: "no-store",
+      headers,
       signal: controller.signal,
     });
   } catch (error) {
