@@ -445,15 +445,12 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 		if err := ReplaceFilterIndexSnapshotsTx(tx, version, snapshots, ids); err != nil {
 			return err
 		}
-		return ClearFilterOptionSnapshotsTx(tx, version)
+		return nil
 	}); err != nil {
 		return "", 0, err
 	}
 
 	if err := ApplyActiveFilmReadModelSnapshots(version, snapshots, deletedMIDs); err != nil {
-		return "", 0, err
-	}
-	if err := RebuildFilterOptionSnapshot(version); err != nil {
 		return "", 0, err
 	}
 	RefreshAccessDataCaches()
