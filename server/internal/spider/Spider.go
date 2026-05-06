@@ -69,6 +69,8 @@ var collectProgress sync.Map
 
 var pictureSyncRunning atomic.Bool
 
+var asyncMasterSearchTagsMu sync.Mutex
+
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
 var taskMu sync.Mutex
 
@@ -663,14 +665,33 @@ func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, master
 func flushMasterSideEffects(sources []model.FilmSource, masterMIDs []int64) error {
 	for _, source := range sources {
 		if source.Grade == model.MasterCollect {
-			if err := filmrepo.RefreshSearchTagsByMids(masterMIDs...); err != nil {
-				return fmt.Errorf("刷新主站搜索标签失败: %w", err)
-			}
+			scheduleMasterSearchTagsRefresh(masterMIDs)
 			filmrepo.ClearTVBoxConfigCache()
 			return nil
 		}
 	}
 	return nil
+}
+
+func scheduleMasterSearchTagsRefresh(masterMIDs []int64) {
+	mids := normalizeAffectedMIDs(masterMIDs)
+	if len(mids) == 0 {
+		return
+	}
+	go func() {
+		asyncMasterSearchTagsMu.Lock()
+		defer asyncMasterSearchTagsMu.Unlock()
+
+		start := time.Now()
+		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新开始 mid_count=%d", len(mids))
+		if err := filmrepo.RefreshSearchTagsByMids(mids...); err != nil {
+			log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新失败 mid_count=%d err=%v", len(mids), err)
+			return
+		}
+		filmrepo.ClearAllSearchTagsCache()
+		filmrepo.ClearAdminFilmSearchCache()
+		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
+	}()
 }
 
 func flushPlaySummaryRefresh() ([]int64, error) {
