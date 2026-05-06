@@ -18,11 +18,12 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	snapshot = projectedSnapshot
 
 	candidates := make([]relatedSnapshotScore, 0)
+	context := buildRelatedSnapshotContext(snapshot)
 	for _, candidate := range readModel.projectedSnapshotsByPid(snapshot.Pid) {
 		if candidate.Mid == snapshot.Mid {
 			continue
 		}
-		score := scoreRelatedSnapshot(snapshot, candidate)
+		score := scoreRelatedSnapshot(context, candidate)
 		if score < relatedSnapshotMinScore {
 			continue
 		}
@@ -30,7 +31,9 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	}
 	sortRelatedSnapshots(candidates)
 	snapshots := relatedScoresToSnapshots(candidates)
-	snapshots = appendTopScoredCategoryFallbacks(readModel, snapshot, snapshots)
+	if len(snapshots) < pageEnd(page) {
+		snapshots = appendTopScoredCategoryFallbacks(readModel, snapshot, snapshots)
+	}
 	page.Total = len(snapshots)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
 	if page.PageCount <= 0 {
@@ -46,15 +49,34 @@ type relatedSnapshotScore struct {
 	score    int
 }
 
-func scoreRelatedSnapshot(current model.FilmListSnapshot, candidate model.FilmListSnapshot) int {
+type relatedSnapshotContext struct {
+	snapshot  model.FilmListSnapshot
+	coreToken string
+	tagSet    map[string]struct{}
+	directors map[string]struct{}
+	actors    map[string]struct{}
+}
+
+func buildRelatedSnapshotContext(snapshot model.FilmListSnapshot) relatedSnapshotContext {
+	return relatedSnapshotContext{
+		snapshot:  snapshot,
+		coreToken: extractCoreSearchToken(snapshot.Name),
+		tagSet:    buildTagSet(splitClassTags(snapshot.ClassTag)),
+		directors: splitPeopleSet(snapshot.Director),
+		actors:    splitPeopleSet(snapshot.Actor),
+	}
+}
+
+func scoreRelatedSnapshot(context relatedSnapshotContext, candidate model.FilmListSnapshot) int {
+	current := context.snapshot
 	relationScore := 0
 	if current.SeriesKey != "" && current.SeriesKey == candidate.SeriesKey {
 		relationScore += 100
 	}
-	relationScore += titleRelatedScore(current, candidate)
-	relationScore += tagRelatedScore(splitClassTags(current.ClassTag), splitClassTags(candidate.ClassTag))
-	relationScore += peopleRelatedScore(current.Director, candidate.Director, 24)
-	relationScore += peopleRelatedScore(current.Actor, candidate.Actor, 18)
+	relationScore += titleRelatedScore(context.coreToken, candidate)
+	relationScore += tagRelatedScore(context.tagSet, splitClassTags(candidate.ClassTag))
+	relationScore += peopleRelatedScore(context.directors, candidate.Director, 24)
+	relationScore += peopleRelatedScore(context.actors, candidate.Actor, 18)
 	if relationScore == 0 {
 		return 0
 	}
@@ -67,8 +89,7 @@ func scoreRelatedSnapshot(current model.FilmListSnapshot, candidate model.FilmLi
 	return score
 }
 
-func titleRelatedScore(current model.FilmListSnapshot, candidate model.FilmListSnapshot) int {
-	coreToken := extractCoreSearchToken(current.Name)
+func titleRelatedScore(coreToken string, candidate model.FilmListSnapshot) int {
 	if coreToken == "" {
 		return 0
 	}
@@ -91,11 +112,10 @@ func titleRelatedScore(current model.FilmListSnapshot, candidate model.FilmListS
 	}
 }
 
-func tagRelatedScore(currentTags []string, candidateTags []string) int {
-	if len(currentTags) == 0 || len(candidateTags) == 0 {
+func tagRelatedScore(currentSet map[string]struct{}, candidateTags []string) int {
+	if len(currentSet) == 0 || len(candidateTags) == 0 {
 		return 0
 	}
-	currentSet := buildTagSet(currentTags)
 	score := 0
 	for _, tag := range candidateTags {
 		if _, ok := currentSet[tag]; ok {
@@ -108,8 +128,7 @@ func tagRelatedScore(currentTags []string, candidateTags []string) int {
 	return score
 }
 
-func peopleRelatedScore(current string, candidate string, maxScore int) int {
-	currentSet := splitPeopleSet(current)
+func peopleRelatedScore(currentSet map[string]struct{}, candidate string, maxScore int) int {
 	if len(currentSet) == 0 {
 		return 0
 	}
@@ -123,6 +142,11 @@ func peopleRelatedScore(current string, candidate string, maxScore int) int {
 		}
 	}
 	return score
+}
+
+func pageEnd(page *dto.Page) int {
+	page = ensurePage(page)
+	return getPageOffset(page) + page.PageSize
 }
 
 func splitPeopleSet(raw string) map[string]struct{} {

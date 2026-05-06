@@ -585,6 +585,18 @@ func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDeta
 	return &detail, movieDetailInfo.UpdatedAt.Unix()
 }
 
+func HasMovieDetail(mid int64) bool {
+	if mid <= 0 {
+		return false
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.MovieDetailInfo{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
+		log.Printf("HasMovieDetail Error: %v", err)
+		return false
+	}
+	return count > 0
+}
+
 func normalizeMovieDetailLists(detail *model.MovieDetail) {
 	if detail == nil {
 		return

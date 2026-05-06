@@ -226,24 +226,28 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 	return nil
 }
 
-// RelateMovie 根据当前影片信息匹配相关的影片
-func (i *IndexService) RelateMovie(detail model.MovieDetail, page *dto.Page) []model.MovieBasicInfo {
+// RelateMovie 根据当前影片快照匹配相关的影片
+func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	page = normalizeIndexPage(page)
 	version := filmrepo.GetActiveReadModelVersion()
 	snapshotStartedAt := time.Now()
-	snapshot := filmrepo.GetSnapshotByMid(version, detail.Id)
-	logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", detail.Id)
+	snapshot := filmrepo.GetSnapshotByMid(version, mid)
+	logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
 	if snapshot == nil {
+		return []model.MovieBasicInfo{}
+	}
+	if !filmrepo.HasMovieDetail(snapshot.Mid) {
+		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
 		return []model.MovieBasicInfo{}
 	}
 	listStartedAt := time.Now()
 	list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
-	logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", detail.Id)
+	logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
 	buildStartedAt := time.Now()
 	result := filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
-	logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", detail.Id)
-	logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", detail.Id)
+	logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
+	logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
 	return result
 }
 

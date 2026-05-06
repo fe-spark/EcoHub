@@ -188,14 +188,8 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 		return
 	}
 
-	detail, err := service.IndexSvc.GetFilmDetailOnly(id)
-	if err != nil || detail.Id == 0 {
-		dto.Failed("影片详情数据异常", c)
-		return
-	}
-
 	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(detail, &page)
+	relateMovie := service.IndexSvc.RelateMovie(int64(id), &page)
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
 	dto.Success(relateMovie, "相关推荐获取成功", c)
 }
