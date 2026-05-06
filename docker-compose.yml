@@ -1,26 +1,23 @@
-x-local-credentials:
-  mysql-root-password: &mysql_root_password ecohub
-  mysql-database: &mysql_database eco
-  mysql-user: &mysql_user eco
-  mysql-password: &mysql_password ecohub
-  redis-password: &redis_password ecohub
-
 services:
   mysql:
     container_name: Eco-mysql
     image: mysql:8.4
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: *mysql_root_password
-      MYSQL_DATABASE: *mysql_database
-      MYSQL_USER: *mysql_user
-      MYSQL_PASSWORD: *mysql_password
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-ecohub}
+      MYSQL_DATABASE: ${MYSQL_DBNAME:-eco}
+      MYSQL_USER: ${MYSQL_USER:-eco}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
     volumes:
       - eco-mysql-data:/var/lib/mysql
     networks:
       - Eco-network
     healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      test:
+        [
+          "CMD-SHELL",
+          "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent",
+        ]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -31,8 +28,8 @@ services:
     image: redis:7.4-alpine
     restart: always
     environment:
-      REDIS_PASSWORD: *redis_password
-    command: ["redis-server", "--requirepass", *redis_password]
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-ecohub}"]
     volumes:
       - eco-redis-data:/data
     networks:
@@ -50,12 +47,12 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        API_URL: http://server:8080
+        API_URL: http://server:${SERVER_PORT:-8080}
     environment:
-      API_URL: http://server:8080
+      API_URL: http://server:${SERVER_PORT:-8080}
     restart: always
     ports:
-      - 3000:3000
+      - ${WEB_PUBLIC_PORT:-3000}:3000
     networks:
       - Eco-network
     depends_on:
@@ -69,30 +66,26 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
-      PORT: 8080
-      JWT_SECRET: ecohub_2026!local@dev_secret$001
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
-      MYSQL_USER: *mysql_user
-      MYSQL_PASSWORD: *mysql_password
-      MYSQL_DBNAME: *mysql_database
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
-      REDIS_PASSWORD: *redis_password
-      REDIS_DB: 0
+      PORT: ${SERVER_PORT:-8080}
+      JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
+      MYSQL_USER: ${MYSQL_USER:-eco}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
+      MYSQL_DBNAME: ${MYSQL_DBNAME:-eco}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
+      REDIS_DB: ${REDIS_DB:-0}
     ports:
-      - 0.0.0.0:18080:8080
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
     networks:
       - Eco-network
     extra_hosts:
       - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:$${PORT}/api/health"]
+      test:
+        ["CMD-SHELL", "wget -q --spider http://localhost:$${PORT}/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5

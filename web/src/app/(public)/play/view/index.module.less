@@ -1,8 +1,7 @@
 .container {
   width: 100%;
-  max-width: 1440px;
   margin: 0 auto;
-  padding: 24px 40px;
+  padding: 24px 0 0;
   position: relative;
   min-height: 100vh;
   display: flex;
@@ -628,12 +627,6 @@
   width: 100%;
 }
 
-@media (max-width: 1440px) {
-  .container {
-    padding: 24px 30px;
-  }
-}
-
 @media (max-width: 1200px) {
   .mainContent {
     grid-template-columns: minmax(0, 1fr) 300px;
@@ -690,10 +683,8 @@
 
 @media (max-width: 768px) {
   .container {
-    padding: 0 0 24px 0;
+    padding: 0;
     gap: 20px;
-    max-width: 100vw;
-    overflow-x: hidden;
   }
 
   .playerWrapper {
