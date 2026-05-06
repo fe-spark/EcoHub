@@ -59,6 +59,8 @@ const menuItems: MenuItem[] = [
     label: "内容管理",
     children: [
       { key: "/manage/film", label: "影片列表" },
+      { key: "/manage/collect/category", label: "分类管理" },
+      { key: "/manage/collect/category/rules", label: "分类规则" },
     ],
   },
   {
@@ -67,8 +69,6 @@ const menuItems: MenuItem[] = [
     label: "采集中心",
     children: [
       { key: "/manage/collect", label: "采集站点" },
-      { key: "/manage/collect/category", label: "分类管理" },
-      { key: "/manage/collect/category/rules", label: "分类规则" },
       { key: "/manage/collect/record", label: "失败记录" },
       { key: "/manage/cron", label: "计划任务" },
     ],
