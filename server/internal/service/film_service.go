@@ -99,7 +99,7 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 	if err := repository.UpdateCategoryStatus(class.Id, updates); err != nil {
 		return err
 	}
-	if err := filmrepo.RefreshActiveReadModelArtifacts(); err != nil {
+	if err := filmrepo.RefreshActiveProjectedReadModel(); err != nil {
 		return err
 	}
 	filmrepo.ClearTVBoxConfigCache()
@@ -133,7 +133,7 @@ func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
 	if err := repository.SaveCategoryTreeStructure(cleanNodes); err != nil {
 		return err
 	}
-	if err := filmrepo.RefreshActiveReadModelArtifacts(); err != nil {
+	if err := filmrepo.RefreshActiveProjectedReadModel(); err != nil {
 		return err
 	}
 	filmrepo.ClearTVBoxConfigCache()
