@@ -858,7 +858,6 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 
 func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCategory) normalizedSearchMeta {
 	score, _ := strconv.ParseFloat(detail.DbScore, 64)
-	stamp, _ := time.ParseInLocation(time.DateTime, detail.UpdateTime, time.Local)
 	year, err := strconv.ParseInt(regexp.MustCompile(`[1-9][0-9]{3}`).FindString(detail.ReleaseDate), 10, 64)
 	if err != nil {
 		year = 0
@@ -870,7 +869,7 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 
 	return normalizedSearchMeta{
 		Score:       score,
-		UpdateStamp: stamp.Unix(),
+		UpdateStamp: time.Now().Unix(),
 		Year:        year,
 		Area:        finalArea,
 		Language:    finalLang,
