@@ -113,52 +113,6 @@ func buildCategoryFilterOptionsFromReadModel(version string, pid int64) []model.
 	return options
 }
 
-func loadSearchTagItemsByTypeFromReadModel(version string, pid int64) map[string][]model.SearchTagItem {
-	itemsByType := make(map[string][]model.SearchTagItem)
-	readModel := GetActiveFilmReadModel()
-	if readModel == nil || readModel.Version != version || pid <= 0 {
-		return itemsByType
-	}
-	areaCounts := make(map[string]int64)
-	languageCounts := make(map[string]int64)
-	yearCounts := make(map[string]int64)
-	plotCounts := make(map[string]int64)
-	for _, snapshot := range readModel.projectedSnapshotsByPid(pid) {
-		if value := normalizeSearchTagValue("Area", snapshot.Area); value != "" {
-			areaCounts[value]++
-		}
-		if value := normalizeSearchTagValue("Language", snapshot.Language); value != "" {
-			languageCounts[value]++
-		}
-		if snapshot.Year > 0 {
-			yearCounts[fmt.Sprint(snapshot.Year)]++
-		}
-		for _, tag := range splitClassTags(snapshot.ClassTag) {
-			if value := normalizeSearchTagValue("Plot", tag); value != "" {
-				plotCounts[value]++
-			}
-		}
-	}
-	itemsByType["Area"] = searchTagItemsFromCounts("Area", areaCounts)
-	itemsByType["Language"] = searchTagItemsFromCounts("Language", languageCounts)
-	itemsByType["Year"] = searchTagItemsFromCounts("Year", yearCounts)
-	itemsByType["Plot"] = searchTagItemsFromCounts("Plot", plotCounts)
-	return itemsByType
-}
-
-func searchTagItemsFromCounts(tagType string, counts map[string]int64) []model.SearchTagItem {
-	items := make([]model.SearchTagItem, 0, len(counts))
-	for value, score := range counts {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
-		}
-		items = append(items, model.SearchTagItem{TagType: tagType, Name: value, Value: value, Score: score})
-	}
-	items = SortSearchTagItems(tagType, items)
-	return items
-}
-
 func buildTagFilterOptions(version string, pid int64, tagType string, items []model.SearchTagItem) []model.FilmFilterOptionSnapshot {
 	formatted := formatFilterOptionItems(tagType, items)
 	options := make([]model.FilmFilterOptionSnapshot, 0, len(formatted))
@@ -182,20 +136,7 @@ func buildTagFilterOptions(version string, pid int64, tagType string, items []mo
 }
 
 func formatFilterOptionItems(tagType string, items []model.SearchTagItem) []map[string]string {
-	normalItems, _ := SplitSearchTagItems(tagType, items)
-	normalItems = SortSearchTagItems(tagType, normalItems)
-	normalItems = LimitSearchTagItems(normalItems, SearchTagDisplayLimit)
-
-	tagStrs := make([]string, 0, len(normalItems))
-	for _, item := range normalItems {
-		name := strings.TrimSpace(item.Name)
-		value := strings.TrimSpace(item.Value)
-		if name == "" || value == "" {
-			continue
-		}
-		tagStrs = append(tagStrs, fmt.Sprintf("%s:%s", name, value))
-	}
-	return HandleTagStr(tagType, true, tagStrs...)
+	return formatSearchTagItems(tagType, items, "", false, SearchTagDisplayLimit)
 }
 
 func buildSortFilterOptions(version string, pid int64) []model.FilmFilterOptionSnapshot {
@@ -422,40 +363,4 @@ func buildCategoryFilterOptionsFromProjectedReadModel(version string, pid int64,
 		})
 	}
 	return options
-}
-
-func loadSearchTagItemsByTypeFromProjectedReadModel(pid int64, projected *ProjectedFilmReadModel) map[string][]model.SearchTagItem {
-	itemsByType := make(map[string][]model.SearchTagItem)
-	if projected == nil || pid <= 0 {
-		return itemsByType
-	}
-	areaCounts := make(map[string]int64)
-	languageCounts := make(map[string]int64)
-	yearCounts := make(map[string]int64)
-	plotCounts := make(map[string]int64)
-	for _, mid := range projected.ByPid[pid] {
-		snapshot, ok := projected.ByMid[mid]
-		if !ok {
-			continue
-		}
-		if value := normalizeSearchTagValue("Area", snapshot.Area); value != "" {
-			areaCounts[value]++
-		}
-		if value := normalizeSearchTagValue("Language", snapshot.Language); value != "" {
-			languageCounts[value]++
-		}
-		if snapshot.Year > 0 {
-			yearCounts[fmt.Sprint(snapshot.Year)]++
-		}
-		for _, tag := range splitClassTags(snapshot.ClassTag) {
-			if value := normalizeSearchTagValue("Plot", tag); value != "" {
-				plotCounts[value]++
-			}
-		}
-	}
-	itemsByType["Area"] = searchTagItemsFromCounts("Area", areaCounts)
-	itemsByType["Language"] = searchTagItemsFromCounts("Language", languageCounts)
-	itemsByType["Year"] = searchTagItemsFromCounts("Year", yearCounts)
-	itemsByType["Plot"] = searchTagItemsFromCounts("Plot", plotCounts)
-	return itemsByType
 }

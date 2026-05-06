@@ -106,13 +106,13 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		return model.MovieDetailVo{}, nil
 	}
 	detailStartedAt := time.Now()
-	movieDetail := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+	movieDetail, localUpdateTime := filmrepo.GetMovieDetailBySnapshot(*snapshot)
 	logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 	if movieDetail == nil {
 		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
 		return model.MovieDetailVo{}, nil
 	}
-	res := model.MovieDetailVo{MovieDetail: *movieDetail}
+	res := model.MovieDetailVo{MovieDetail: *movieDetail, LocalUpdateTime: localUpdateTime}
 	multipleStartedAt := time.Now()
 	res.List = multipleSource(snapshot, movieDetail)
 	logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
@@ -131,7 +131,7 @@ func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 		return model.MovieDetail{}, nil
 	}
 	detailStartedAt := time.Now()
-	movieDetail := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+	movieDetail, _ := filmrepo.GetMovieDetailBySnapshot(*snapshot)
 	logSlowIndexServiceStep("GetFilmDetailOnly.detail", detailStartedAt, "id", id)
 	if movieDetail == nil {
 		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)

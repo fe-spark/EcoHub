@@ -764,14 +764,16 @@ func (m *FilmReadModel) projectedSnapshotsByPid(pid int64) []model.FilmListSnaps
 
 func (m *FilmReadModel) projectedSnapshotsByTags(st model.SearchTagsVO) []model.FilmListSnapshot {
 	st = normalizeSearchTagsVO(st)
-	clauses := buildReadModelFilterClauses(&st)
+	otherFilters := buildOtherReadModelFilters(st)
+	stForIndex := clearOtherReadModelFilters(st)
+	clauses := buildReadModelFilterClauses(&stForIndex)
 	projected := ensureProjectedFilmReadModel(m)
-	base := projected.ByPid[support.ResolveCategoryID(st.Pid)]
-	if st.Pid <= 0 {
+	base := projected.ByPid[support.ResolveCategoryID(stForIndex.Pid)]
+	if stForIndex.Pid <= 0 {
 		base = projected.AllMIDs
 	}
 	if len(clauses) == 0 {
-		return m.snapshotsByMIDs(base)
+		return filterOtherSearchTagSnapshots(m.snapshotsByMIDs(base), stForIndex, otherFilters, projected.FilterOptions)
 	}
 	candidateSet := midsToSet(base)
 	for _, clause := range clauses {
@@ -788,7 +790,7 @@ func (m *FilmReadModel) projectedSnapshotsByTags(st model.SearchTagsVO) []model.
 	for mid := range candidateSet {
 		mids = append(mids, mid)
 	}
-	return m.snapshotsByMIDs(mids)
+	return filterOtherSearchTagSnapshots(m.snapshotsByMIDs(mids), stForIndex, otherFilters, projected.FilterOptions)
 }
 
 func midsToSet(mids []int64) map[int64]struct{} {

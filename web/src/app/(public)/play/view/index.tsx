@@ -41,6 +41,17 @@ function buildInitialPlaybackState(data: any, initialTime?: string) {
   };
 }
 
+function formatLocalUpdateTime(value?: string | number | null) {
+  const stamp = Number(value);
+  if (!Number.isFinite(stamp) || stamp <= 0) return "";
+
+  const date = new Date(stamp * 1000);
+  if (Number.isNaN(date.getTime())) return "";
+
+  const pad = (part: number) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+}
+
 interface PlayPageViewProps {
   data: any;
   filmId: string;
@@ -257,6 +268,8 @@ export default function PlayPageView({
     );
   }
 
+  const localUpdateTime = formatLocalUpdateTime(currentFilm.localUpdateTime);
+
   return (
     <div className={styles.container}>
       {openingRelatedId && (
@@ -279,6 +292,7 @@ export default function PlayPageView({
                 <h1 className={styles.filmTitle}>{currentFilm.name}</h1>
               <div className={styles.meta}>
                 <span className={styles.active}>{currentFilm.descriptor.remarks}</span>
+                {localUpdateTime && <span className={styles.localUpdateTime}>{localUpdateTime} 更新</span>}
                 <span>|</span>
                 <span>{currentFilm.descriptor.cName}</span>
                 <span>|</span>
