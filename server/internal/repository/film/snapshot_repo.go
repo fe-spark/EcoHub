@@ -582,7 +582,7 @@ func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDeta
 	}
 	ApplyFilmListSnapshot(&detail, snapshot)
 	normalizeMovieDetailLists(&detail)
-	return &detail, movieDetailInfo.UpdatedAt.Unix()
+	return &detail, snapshot.UpdateStamp
 }
 
 func HasMovieDetail(mid int64) bool {
