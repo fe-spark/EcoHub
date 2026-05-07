@@ -134,6 +134,17 @@ func saveFilmIndexesAndMappingsTx(tx *gorm.DB, list []model.FilmIndex) (map[stri
 	return keyToMid, nil
 }
 
+func saveMovieSourceMappingsByIndexesTx(tx *gorm.DB, list []model.FilmIndex) error {
+	if len(list) == 0 {
+		return nil
+	}
+	keyToMid := loadFilmIndexMidMapByContentKeysTx(tx, buildContentKeys(list))
+	if keyToMid == nil {
+		return fmt.Errorf("load film index mids failed")
+	}
+	return saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(list, keyToMid))
+}
+
 func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping) error {
 	if len(mappings) == 0 {
 		return nil
@@ -154,6 +165,107 @@ func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) (
 		infoByKey[info.ContentKey] = info
 	}
 	return infoList, infoByKey
+}
+
+func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, error) {
+	unchangedKeys := make(map[string]struct{})
+	contentKeys := filmIndexContentKeys(infos)
+	if len(contentKeys) == 0 {
+		return unchangedKeys, nil
+	}
+
+	existingInfos := reloadFilmIndexesByContentKeysTx(tx, contentKeys)
+	if len(existingInfos) == 0 {
+		return unchangedKeys, nil
+	}
+	existingByKey := make(map[string]model.FilmIndex, len(existingInfos))
+	mids := make([]int64, 0, len(existingInfos))
+	for _, existing := range existingInfos {
+		existingByKey[existing.ContentKey] = existing
+		if existing.Mid > 0 {
+			mids = append(mids, existing.Mid)
+		}
+	}
+
+	existingDetailsByMid, err := loadMovieDetailsByMidsTx(tx, mids)
+	if err != nil {
+		return nil, err
+	}
+	for index := range infos {
+		existing, ok := existingByKey[infos[index].ContentKey]
+		if !ok || existing.UpdateStamp <= 0 {
+			continue
+		}
+		oldDetail, ok := existingDetailsByMid[existing.Mid]
+		if !ok {
+			continue
+		}
+		newDetail, ok := detailsByKey[infos[index].ContentKey]
+		if !ok {
+			continue
+		}
+		applyPersistedMasterCategory(&infos[index], existing)
+		if sameStoredMasterDetail(oldDetail, newDetail) {
+			unchangedKeys[infos[index].ContentKey] = struct{}{}
+			continue
+		}
+		if sameMasterEpisodeState(oldDetail, newDetail) {
+			infos[index].UpdateStamp = existing.UpdateStamp
+		}
+	}
+	return unchangedKeys, nil
+}
+
+func loadMovieDetailsByMidsTx(tx *gorm.DB, mids []int64) (map[int64]model.MovieDetail, error) {
+	result := make(map[int64]model.MovieDetail)
+	if len(mids) == 0 {
+		return result, nil
+	}
+
+	var detailInfos []model.MovieDetailInfo
+	if err := tx.Where("mid IN ?", mids).Find(&detailInfos).Error; err != nil {
+		return nil, err
+	}
+	for _, detailInfo := range detailInfos {
+		var detail model.MovieDetail
+		if err := json.Unmarshal([]byte(detailInfo.Content), &detail); err != nil {
+			return nil, fmt.Errorf("parse movie detail mid=%d failed: %w", detailInfo.Mid, err)
+		}
+		result[detailInfo.Mid] = detail
+	}
+	return result, nil
+}
+
+func sameMasterEpisodeState(oldDetail model.MovieDetail, newDetail model.MovieDetail) bool {
+	return masterEpisodeSignature(oldDetail) == masterEpisodeSignature(newDetail)
+}
+
+func sameStoredMasterDetail(oldDetail model.MovieDetail, newDetail model.MovieDetail) bool {
+	oldDetail.Id = 0
+	newDetail.Id = 0
+	oldData, _ := json.Marshal(oldDetail)
+	newData, _ := json.Marshal(newDetail)
+	return string(oldData) == string(newData)
+}
+
+func applyPersistedMasterCategory(newInfo *model.FilmIndex, existing model.FilmIndex) {
+	newInfo.FilmIndexCategory = existing.FilmIndexCategory
+}
+
+func masterEpisodeSignature(detail model.MovieDetail) string {
+	payload := struct {
+		PlayFrom []string               `json:"playFrom"`
+		PlayList [][]model.MovieUrlInfo `json:"playList"`
+		Remarks  string                 `json:"remarks"`
+		State    string                 `json:"state"`
+	}{
+		PlayFrom: detail.PlayFrom,
+		PlayList: detail.PlayList,
+		Remarks:  strings.TrimSpace(detail.Remarks),
+		State:    strings.TrimSpace(detail.State),
+	}
+	data, _ := json.Marshal(payload)
+	return string(data)
 }
 
 func movieDetailInfoUpsert() clause.OnConflict {
@@ -277,25 +389,40 @@ func SaveDetailsForCollect(id string, list []model.MovieDetail) ([]int64, error)
 }
 
 func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([]int64, error) {
-	infoList, infoByKey := buildFilmIndexesFromDetails(id, list)
+	infoList, _ := buildFilmIndexesFromDetails(id, list)
 	infoList = filterValidFilmIndexes(infoList)
 	if len(infoList) == 0 {
 		return nil, nil
 	}
 
+	changedInfos := make([]model.FilmIndex, 0, len(infoList))
 	affectedMIDs := make([]int64, 0, len(infoList))
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, infoList)
+		unchangedKeys, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey(list))
 		if err != nil {
 			return err
 		}
-		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, list, infoByKey, keyToMid)); err != nil {
+		var infoByKey map[string]model.FilmIndex
+		changedDetails := list
+		changedInfos, infoByKey, changedDetails = filterChangedMasterWrites(infoList, list, unchangedKeys)
+		if err := saveMovieSourceMappingsByIndexesTx(tx, infoList); err != nil {
 			return err
 		}
-		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(list, infoByKey, keyToMid)); err != nil {
+		if len(changedInfos) == 0 {
+			return nil
+		}
+
+		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, changedInfos)
+		if err != nil {
 			return err
 		}
-		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, filmIndexContentKeys(infoList))
+		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, changedDetails, infoByKey, keyToMid)); err != nil {
+			return err
+		}
+		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(changedDetails, infoByKey, keyToMid)); err != nil {
+			return err
+		}
+		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, filmIndexContentKeys(changedInfos))
 		affectedMIDs = collectFilmIndexMIDs(reloadedIndexes)
 		return RefreshPlayFromSummaryByIndexesTx(tx, reloadedIndexes)
 	}); err != nil {
@@ -305,9 +432,13 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 		log.Printf("TouchCollectSourceStats Error: %v", err)
 	}
 
-	clearFilmIndexCachesByPids(infoList)
+	if len(changedInfos) == 0 {
+		return affectedMIDs, nil
+	}
+
+	clearFilmIndexCachesByPids(changedInfos)
 	if refreshSearchTags {
-		BatchHandleSearchTag(infoList...)
+		BatchHandleSearchTag(changedInfos...)
 	}
 	return affectedMIDs, nil
 }
@@ -326,6 +457,43 @@ func collectFilmIndexMIDs(infos []model.FilmIndex) []int64 {
 		mids = append(mids, info.Mid)
 	}
 	return mids
+}
+
+func detailMapByContentKey(details []model.MovieDetail) map[string]model.MovieDetail {
+	detailsByKey := make(map[string]model.MovieDetail, len(details))
+	for _, detail := range details {
+		detailsByKey[BuildContentKey(detail)] = detail
+	}
+	return detailsByKey
+}
+
+func filterChangedMasterWrites(infos []model.FilmIndex, details []model.MovieDetail, unchangedKeys map[string]struct{}) ([]model.FilmIndex, map[string]model.FilmIndex, []model.MovieDetail) {
+	if len(unchangedKeys) == 0 {
+		infoByKey := make(map[string]model.FilmIndex, len(infos))
+		for _, info := range infos {
+			infoByKey[info.ContentKey] = info
+		}
+		return infos, infoByKey, details
+	}
+
+	changedInfos := make([]model.FilmIndex, 0, len(infos))
+	changedInfoByKey := make(map[string]model.FilmIndex, len(infos))
+	for _, info := range infos {
+		if _, ok := unchangedKeys[info.ContentKey]; ok {
+			continue
+		}
+		changedInfos = append(changedInfos, info)
+		changedInfoByKey[info.ContentKey] = info
+	}
+
+	changedDetails := make([]model.MovieDetail, 0, len(details))
+	for _, detail := range details {
+		if _, ok := unchangedKeys[BuildContentKey(detail)]; ok {
+			continue
+		}
+		changedDetails = append(changedDetails, detail)
+	}
+	return changedInfos, changedInfoByKey, changedDetails
 }
 
 func filmIndexContentKeys(infos []model.FilmIndex) []string {
@@ -351,16 +519,32 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		return nil
 	}
 
+	changed := false
 	var savedMid int64
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, []model.FilmIndex{snapshot})
+		infoList := []model.FilmIndex{snapshot}
+		unchangedKeys, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}))
 		if err != nil {
 			return err
 		}
-		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, []model.MovieDetail{detail}, map[string]model.FilmIndex{snapshot.ContentKey: snapshot}, keyToMid)); err != nil {
+		writeInfos, infoByKey, writeDetails := filterChangedMasterWrites(infoList, []model.MovieDetail{detail}, unchangedKeys)
+		if len(writeInfos) == 0 {
+			if err := saveMovieSourceMappingsByIndexesTx(tx, infoList); err != nil {
+				return err
+			}
+			return nil
+		}
+		snapshot = writeInfos[0]
+		changed = true
+
+		keyToMid, err := saveFilmIndexesAndMappingsTx(tx, writeInfos)
+		if err != nil {
 			return err
 		}
-		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings([]model.MovieDetail{detail}, map[string]model.FilmIndex{snapshot.ContentKey: snapshot}, keyToMid)); err != nil {
+		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, writeDetails, infoByKey, keyToMid)); err != nil {
+			return err
+		}
+		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(writeDetails, infoByKey, keyToMid)); err != nil {
 			return err
 		}
 		reloadedIndexes := reloadFilmIndexesByContentKeysTx(tx, []string{snapshot.ContentKey})
@@ -374,6 +558,9 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	}
 	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
 		log.Printf("TouchCollectSourceStats Error: %v", err)
+	}
+	if !changed {
+		return nil
 	}
 
 	BatchHandleSearchTag(snapshot)
