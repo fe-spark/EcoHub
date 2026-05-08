@@ -240,6 +240,14 @@ func markSourcesCollectStarting(sources []model.FilmSource) {
 	}
 }
 
+func PrepareSingleCollectStart(source model.FilmSource) error {
+	if isCollectAlreadyQueuedOrRunning(source.Id) {
+		return fmt.Errorf("站点 %s 已在采集队列或正在运行，已跳过本次采集", source.Name)
+	}
+	markSourcesCollectStarting([]model.FilmSource{source})
+	return nil
+}
+
 func markSourcesFinalizing(sources map[string]model.FilmSource) {
 	for _, source := range sources {
 		updateCollectProgress(source.Id, func(progress *model.CollectProgress) {
@@ -992,7 +1000,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				return
 			}
-			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false); err != nil {
+			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false); err != nil {
 				log.Printf("[%s] 采集站点 %s 失败: %v", tag, fs.Name, err)
 			}
 		}(src)
@@ -1004,18 +1012,22 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 
 // HandleCollect 影视采集  id-采集站ID h-时长/h
 func HandleCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true)
+	return handleCollectWithStopVersion(id, h, nil, true, false)
 }
 
-func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool) (retErr error) {
+func HandlePreparedCollect(id string, h int) error {
+	return handleCollectWithStopVersion(id, h, nil, true, true)
+}
+
+func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool) (retErr error) {
 	hadWrites := false
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
-	if runVersion != nil && isCollectProgressStopped(id) {
+	if (runVersion != nil || allowPreparedStart) && isCollectProgressStopped(id) {
 		return errors.New("任务已被停止，跳过启动")
 	}
-	if runVersion == nil && isCollectProgressStarting(id) {
+	if runVersion == nil && !allowPreparedStart && isCollectProgressStarting(id) {
 		return errors.New("该采集站已在批量队列中，已跳过本次采集")
 	}
 	// 1. 首先通过ID获取对应采集站信息
