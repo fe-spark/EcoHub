@@ -9,9 +9,8 @@ import (
 )
 
 const (
-	orphanPlaylistScanBatchSize   = 5000
-	orphanPlaylistDeleteBatchSize = 500
-	orphanPlaylistBatchCooldown   = 20 * time.Millisecond
+	orphanPlaylistScanBatchSize = 50000
+	orphanPlaylistBatchCooldown = 5 * time.Millisecond
 )
 
 type orphanPlaylistRow struct {
@@ -45,32 +44,17 @@ func cleanOrphanPlaylistsInBatches() (int64, error) {
 	var total int64
 	var lastID uint
 	for {
-		candidates, err := loadPlaylistCandidateRows(lastID)
+		rangeStart := lastID
+		rangeEnd, ok, err := loadPlaylistCandidateRange(rangeStart)
 		if err != nil {
 			return total, err
 		}
-		if len(candidates) == 0 {
+		if !ok {
 			break
 		}
+		lastID = rangeEnd
 
-		candidateIDs := make([]uint, 0, len(candidates))
-		for _, row := range candidates {
-			candidateIDs = append(candidateIDs, row.ID)
-			if row.ID > lastID {
-				lastID = row.ID
-			}
-		}
-
-		ids, err := loadOrphanPlaylistIDs(candidateIDs)
-		if err != nil {
-			return total, err
-		}
-		if len(ids) == 0 {
-			time.Sleep(orphanPlaylistBatchCooldown)
-			continue
-		}
-
-		deleted, err := deleteOrphanPlaylistsByIDs(ids)
+		deleted, err := deleteOrphanPlaylistsInRange(rangeStart, rangeEnd)
 		if err != nil {
 			return total, err
 		}
@@ -94,7 +78,7 @@ func hasMovieMatchKeys() (bool, error) {
 	return row.ID > 0, nil
 }
 
-func loadPlaylistCandidateRows(lastID uint) ([]playlistCandidateRow, error) {
+func loadPlaylistCandidateRange(lastID uint) (uint, bool, error) {
 	var rows []playlistCandidateRow
 	err := db.Mdb.Model(&model.MoviePlaylist{}).
 		Select("movie_playlist.id").
@@ -103,44 +87,33 @@ func loadPlaylistCandidateRows(lastID uint) ([]playlistCandidateRow, error) {
 		Order("movie_playlist.id ASC").
 		Limit(orphanPlaylistScanBatchSize).
 		Scan(&rows).Error
-	return rows, err
-}
-
-func loadOrphanPlaylistIDs(candidateIDs []uint) ([]uint, error) {
-	if len(candidateIDs) == 0 {
-		return nil, nil
-	}
-	var rows []orphanPlaylistRow
-	err := db.Mdb.Model(&model.MoviePlaylist{}).
-		Select("movie_playlist.id").
-		Joins("LEFT JOIN movie_match_key ON movie_match_key.match_key = movie_playlist.movie_key").
-		Where("movie_playlist.id IN ?", candidateIDs).
-		Where("movie_match_key.id IS NULL").
-		Scan(&rows).Error
 	if err != nil {
-		return nil, err
+		return 0, false, err
 	}
-	ids := make([]uint, 0, len(rows))
-	for _, row := range rows {
-		ids = append(ids, row.ID)
+	if len(rows) == 0 {
+		return 0, false, nil
 	}
-	return ids, nil
+	return rows[len(rows)-1].ID, true, nil
 }
 
-func deleteOrphanPlaylistsByIDs(ids []uint) (int64, error) {
-	var total int64
-	for i := 0; i < len(ids); i += orphanPlaylistDeleteBatchSize {
-		end := i + orphanPlaylistDeleteBatchSize
-		if end > len(ids) {
-			end = len(ids)
-		}
-		result := db.Mdb.Where("id IN ?", ids[i:end]).Delete(&model.MoviePlaylist{})
-		if result.Error != nil {
-			return total, result.Error
-		}
-		total += result.RowsAffected
+func deleteOrphanPlaylistsInRange(rangeStart uint, rangeEnd uint) (int64, error) {
+	if rangeEnd <= rangeStart {
+		return 0, nil
 	}
-	return total, nil
+	result := db.Mdb.Exec(`
+		DELETE movie_playlist
+		FROM movie_playlist
+		JOIN film_sources ON film_sources.id = movie_playlist.source_id AND film_sources.grade = ?
+		LEFT JOIN movie_match_key ON movie_match_key.match_key = movie_playlist.movie_key
+		WHERE movie_playlist.id > ?
+			AND movie_playlist.id <= ?
+			AND movie_playlist.deleted_at IS NULL
+			AND movie_match_key.id IS NULL
+	`, model.SlaveCollect, rangeStart, rangeEnd)
+	if result.Error != nil {
+		return 0, result.Error
+	}
+	return result.RowsAffected, nil
 }
 
 func RefreshAfterDataClean() error {
