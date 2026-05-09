@@ -3,7 +3,6 @@ package spider
 import (
 	"context"
 	"log"
-	"strings"
 	"sync"
 
 	"server/internal/model"
@@ -11,7 +10,7 @@ import (
 
 const (
 	collectWriteMaxPendingPages = 200
-	collectWriteLaneWorkers     = 1
+	collectWriteLaneWorkers     = 2
 )
 
 var collectWrites = newCollectWriteScheduler()
@@ -46,26 +45,15 @@ func (s *collectWriteScheduler) submit(ctx context.Context, job collectWriteJob)
 	return s.lane.submit(ctx, job)
 }
 
-func (s *collectWriteScheduler) beginSources(sources []model.FilmSource) {
-	s.lane.beginSources(sources)
-}
-
-func (s *collectWriteScheduler) endSources(sources []model.FilmSource) {
-	s.lane.endSources(sources)
-}
-
 func (s *collectWriteScheduler) finishSource(_ model.SourceGrade, sourceID string) {
 	s.lane.finishSource(sourceID)
 }
 
 type collectWriteLane struct {
-	name    string
-	mu      sync.Mutex
-	cond    *sync.Cond
-	queues  map[string]*collectWriteQueue
-	active  map[string]struct{}
-	done    map[string]struct{}
-	writing bool
+	name   string
+	mu     sync.Mutex
+	cond   *sync.Cond
+	queues map[string]*collectWriteQueue
 }
 
 type collectWriteQueue struct {
@@ -81,39 +69,9 @@ func newCollectWriteLane(name string) *collectWriteLane {
 	lane := &collectWriteLane{
 		name:   name,
 		queues: make(map[string]*collectWriteQueue),
-		active: make(map[string]struct{}),
-		done:   make(map[string]struct{}),
 	}
 	lane.cond = sync.NewCond(&lane.mu)
 	return lane
-}
-
-func (l *collectWriteLane) beginSources(sources []model.FilmSource) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	for _, source := range sources {
-		if source.Id == "" {
-			continue
-		}
-		l.active[source.Id] = struct{}{}
-		delete(l.done, source.Id)
-	}
-	l.cond.Broadcast()
-}
-
-func (l *collectWriteLane) endSources(sources []model.FilmSource) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	for _, source := range sources {
-		if source.Id == "" {
-			continue
-		}
-		delete(l.active, source.Id)
-		delete(l.done, source.Id)
-	}
-	l.cond.Broadcast()
 }
 
 func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) error {
@@ -154,14 +112,11 @@ func (l *collectWriteLane) finishSource(sourceID string) {
 
 	queue, ok := l.queues[sourceID]
 	if !ok {
-		l.done[sourceID] = struct{}{}
-		l.cond.Broadcast()
 		return
 	}
 	queue.done = true
 	if len(queue.pending) == 0 && !queue.writing {
 		delete(l.queues, sourceID)
-		l.done[sourceID] = struct{}{}
 		l.cond.Broadcast()
 		return
 	}
@@ -192,7 +147,7 @@ func (l *collectWriteLane) start() {
 func (l *collectWriteLane) run(workerID int) {
 	for {
 		jobs, meta, finish := l.nextJobs()
-		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 开始写入 sources=%s pending=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), meta.tail)
+		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 开始写入 source=%s pending=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), meta.tail)
 		failed := 0
 		for _, job := range jobs {
 			mids, err := job.write()
@@ -201,7 +156,7 @@ func (l *collectWriteLane) run(workerID int) {
 			}
 			job.complete(collectWriteCompletion{page: job.page, mids: mids, err: err, stage: "save"})
 		}
-		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 完成写入 sources=%s pending=%d failed=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), failed, meta.tail)
+		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 完成写入 source=%s pending=%d failed=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), failed, meta.tail)
 		finish()
 	}
 }
@@ -211,104 +166,64 @@ type collectWriteBatchMeta struct {
 	tail       bool
 }
 
+// nextJobs blocks until exactly one ready queue is available and returns its
+// pending jobs. Each worker takes a single source so multiple workers can write
+// different sources concurrently — same-source serialization is preserved by
+// the per-queue writing flag.
 func (l *collectWriteLane) nextJobs() ([]collectWriteJob, collectWriteBatchMeta, func()) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
 	for {
-		selected := l.selectQueuesLocked()
-		if len(selected) > 0 {
-			jobs, meta, finish := l.takeJobsLocked(selected)
-			return jobs, meta, finish
+		queue := l.selectQueueLocked()
+		if queue != nil {
+			return l.takeQueueLocked(queue)
 		}
 		l.cond.Wait()
 	}
 }
 
-func (l *collectWriteLane) takeJobsLocked(selected []*collectWriteQueue) ([]collectWriteJob, collectWriteBatchMeta, func()) {
-	jobs := make([]collectWriteJob, 0)
-	sourceIDs := make([]string, 0, len(selected))
-	sourceNames := make([]string, 0, len(selected))
-	tail := true
-	for _, queue := range selected {
-		jobs = append(jobs, queue.pending...)
-		queue.pending = nil
-		queue.writing = true
-		queue.readyLog = false
-		sourceIDs = append(sourceIDs, queue.sourceID)
-		sourceNames = append(sourceNames, queue.sourceName)
-		if !queue.done {
-			tail = false
-		}
-	}
-	l.writing = true
+func (l *collectWriteLane) takeQueueLocked(queue *collectWriteQueue) ([]collectWriteJob, collectWriteBatchMeta, func()) {
+	jobs := queue.pending
+	queue.pending = nil
+	queue.writing = true
+	queue.readyLog = false
+	sourceID := queue.sourceID
 	meta := collectWriteBatchMeta{
-		sourceName: strings.Join(sourceNames, ","),
-		tail:       tail,
+		sourceName: queue.sourceName,
+		tail:       queue.done,
 	}
 	l.cond.Broadcast()
 	return jobs, meta, func() {
-		l.finishWriting(sourceIDs)
+		l.finishWriting(sourceID)
 	}
 }
 
-func (l *collectWriteLane) finishWriting(sourceIDs []string) {
+func (l *collectWriteLane) finishWriting(sourceID string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	l.writing = false
-	for _, sourceID := range sourceIDs {
-		queue, ok := l.queues[sourceID]
-		if !ok {
-			continue
-		}
-		queue.writing = false
-		if queue.done && len(queue.pending) == 0 {
-			delete(l.queues, sourceID)
-			l.done[sourceID] = struct{}{}
-		} else {
-			l.markReadyLocked(queue)
-		}
+	queue, ok := l.queues[sourceID]
+	if !ok {
+		l.cond.Broadcast()
+		return
+	}
+	queue.writing = false
+	if queue.done && len(queue.pending) == 0 {
+		delete(l.queues, sourceID)
+	} else {
+		l.markReadyLocked(queue)
 	}
 	l.cond.Broadcast()
 }
 
-func (l *collectWriteLane) selectQueuesLocked() []*collectWriteQueue {
-	if l.writing {
-		return nil
-	}
-	selected := make([]*collectWriteQueue, 0)
-	for _, queue := range l.queues {
-		if !queue.isReady() {
-			continue
-		}
-		selected = append(selected, queue)
-	}
-	if len(l.active) > 0 && !l.activeSourcesReadyLocked() {
-		return nil
-	}
-	return selected
-}
-
-func (l *collectWriteLane) activeSourcesReadyLocked() bool {
-	for sourceID := range l.active {
-		if _, ok := l.done[sourceID]; ok {
-			continue
-		}
-		queue, ok := l.queues[sourceID]
-		if !ok || !queue.isReady() {
-			return false
-		}
-	}
-	return true
-}
-
 func (l *collectWriteLane) selectQueueLocked() *collectWriteQueue {
-	selected := l.selectQueuesLocked()
-	if len(selected) == 0 {
-		return nil
+	for _, queue := range l.queues {
+		if queue.isReady() {
+			return queue
+		}
 	}
-	return selected[0]
+	return nil
 }
 
 func (l *collectWriteLane) markReadyLocked(queue *collectWriteQueue) {

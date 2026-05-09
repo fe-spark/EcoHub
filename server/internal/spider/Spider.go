@@ -44,8 +44,6 @@ var retryBackoffs = []time.Duration{
 }
 
 const (
-	// 每个写入批次已由调度器串行化，这里保留单写入信号量作为最终保护。
-	collectDBWriteConcurrency = 1
 	// 单站连续分页失败达到阈值后直接终止该站点，避免坏站点长期占用批量采集并发槽。
 	collectSourceConsecutiveFailureLimit = 10
 	// 批量采集只按低频进度打印，避免每页刷屏但保留观察采集是否推进的关键信息。
@@ -62,8 +60,6 @@ var stopAllVersion atomic.Uint64
 
 // sourceWriteLocks 按站点串行化写库，避免同一站点多页事务并发 upsert/delete/update 时互相死锁。
 var sourceWriteLocks sync.Map
-
-var collectDBWriteSem = make(chan struct{}, collectDBWriteConcurrency)
 
 var collectProgress sync.Map
 
@@ -106,16 +102,10 @@ func getSourceWriteLock(sourceID string) *sync.Mutex {
 	return actual.(*sync.Mutex)
 }
 
-func runCollectDBWrite(write func() error) error {
-	collectDBWriteSem <- struct{}{}
-	defer func() { <-collectDBWriteSem }()
-	return write()
-}
-
 func runCollectDBWriteWithRetry(ctx context.Context, sourceName string, page int, write func() error) error {
 	var err error
 	for attempt := 1; attempt <= collectDBWriteRetries; attempt++ {
-		err = runCollectDBWrite(write)
+		err = write()
 		if err == nil || !isRetryableDBWriteErr(err) || attempt == collectDBWriteRetries {
 			return err
 		}
@@ -446,31 +436,47 @@ func (s *collectLifecycleState) drainMasterAffectedMIDsLocked() []int64 {
 	return mids
 }
 
-func (s *collectLifecycleState) flushPending() error {
-	s.mu.Lock()
+func (s *collectLifecycleState) waitIdleLocked() {
 	for s.flushing || s.activeCount > 0 {
 		s.cond.Wait()
 	}
-	if len(s.pendingFlushSources) == 0 {
-		s.mu.Unlock()
-		return nil
+}
+
+// drainPendingLocked snapshots and clears pendingFlushSources/affected MIDs
+// and sets flushing=true. Caller must hold s.mu and call finishFlushing after.
+func (s *collectLifecycleState) drainPendingLocked() (map[string]model.FilmSource, []int64, []int64) {
+	var pending map[string]model.FilmSource
+	if len(s.pendingFlushSources) > 0 {
+		pending = s.pendingFlushSources
+		s.pendingFlushSources = make(map[string]model.FilmSource)
 	}
-	pending := s.pendingFlushSources
-	s.pendingFlushSources = make(map[string]model.FilmSource)
 	affectedMIDs := s.drainAffectedMIDsLocked()
 	masterMIDs := s.drainMasterAffectedMIDsLocked()
 	s.flushing = true
-	s.mu.Unlock()
+	return pending, affectedMIDs, masterMIDs
+}
 
-	finalMIDs, finalMasterMIDs, err := flushPendingSources(pending, affectedMIDs, masterMIDs)
-	if err != nil {
-		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
-	}
-
+func (s *collectLifecycleState) finishFlushing() {
 	s.mu.Lock()
 	s.flushing = false
 	s.mu.Unlock()
 	s.cond.Broadcast()
+}
+
+func (s *collectLifecycleState) flushPending() error {
+	s.mu.Lock()
+	s.waitIdleLocked()
+	pending, affectedMIDs, masterMIDs := s.drainPendingLocked()
+	s.mu.Unlock()
+	defer s.finishFlushing()
+
+	if pending == nil {
+		return nil
+	}
+	finalMIDs, finalMasterMIDs, err := flushPendingSources(pending, affectedMIDs, masterMIDs)
+	if err != nil {
+		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
+	}
 	return err
 }
 
@@ -483,51 +489,31 @@ func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) er
 	s.mu.Lock()
 	s.finishSourceLocked(source.Id)
 	s.pendingFlushSources[source.Id] = source
-	for s.flushing || s.activeCount > 0 {
-		s.cond.Wait()
-	}
-	if len(s.pendingFlushSources) == 0 {
-		s.mu.Unlock()
+	s.waitIdleLocked()
+	pending, affectedMIDs, masterMIDs := s.drainPendingLocked()
+	s.mu.Unlock()
+	defer s.finishFlushing()
+
+	if pending == nil {
 		return nil
 	}
-	pending := s.pendingFlushSources
-	s.pendingFlushSources = make(map[string]model.FilmSource)
-	affectedMIDs := s.drainAffectedMIDsLocked()
-	masterMIDs := s.drainMasterAffectedMIDsLocked()
-	s.flushing = true
-	s.mu.Unlock()
-
 	finalMIDs, finalMasterMIDs, err := flushPendingSources(pending, affectedMIDs, masterMIDs)
 	if err != nil {
 		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
 	}
-
-	s.mu.Lock()
-	s.flushing = false
-	s.mu.Unlock()
-	s.cond.Broadcast()
 	return err
 }
 
 func (s *collectLifecycleState) runFlush(flush func([]int64, []int64) error) error {
 	s.mu.Lock()
-	for s.flushing || s.activeCount > 0 {
-		s.cond.Wait()
-	}
-	var pending map[string]model.FilmSource
-	if len(s.pendingFlushSources) > 0 {
-		pending = s.pendingFlushSources
-		s.pendingFlushSources = make(map[string]model.FilmSource)
-	}
-	affectedMIDs := s.drainAffectedMIDsLocked()
-	masterMIDs := s.drainMasterAffectedMIDsLocked()
-	s.flushing = true
+	s.waitIdleLocked()
+	pending, affectedMIDs, masterMIDs := s.drainPendingLocked()
 	s.mu.Unlock()
+	defer s.finishFlushing()
 
 	var err error
-	if len(pending) > 0 {
-		var finalMIDs []int64
-		var finalMasterMIDs []int64
+	if pending != nil {
+		var finalMIDs, finalMasterMIDs []int64
 		finalMIDs, finalMasterMIDs, err = flushPendingSources(pending, affectedMIDs, masterMIDs)
 		if err != nil {
 			s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
@@ -536,51 +522,24 @@ func (s *collectLifecycleState) runFlush(flush func([]int64, []int64) error) err
 	if err == nil {
 		err = flush(affectedMIDs, masterMIDs)
 	}
-
-	s.mu.Lock()
-	s.flushing = false
-	s.mu.Unlock()
-	s.cond.Broadcast()
 	return err
 }
 
 func (s *collectLifecycleState) runExclusive(action func() error) error {
 	s.mu.Lock()
-	for s.flushing {
-		s.cond.Wait()
-	}
-	for s.activeCount > 0 {
-		s.cond.Wait()
-	}
-	if len(s.pendingFlushSources) > 0 {
-		pending := s.pendingFlushSources
-		s.pendingFlushSources = make(map[string]model.FilmSource)
-		affectedMIDs := s.drainAffectedMIDsLocked()
-		masterMIDs := s.drainMasterAffectedMIDsLocked()
-		s.flushing = true
-		s.mu.Unlock()
+	s.waitIdleLocked()
+	pending, affectedMIDs, masterMIDs := s.drainPendingLocked()
+	s.mu.Unlock()
+	defer s.finishFlushing()
+
+	if pending != nil {
 		finalMIDs, finalMasterMIDs, flushErr := flushPendingSources(pending, affectedMIDs, masterMIDs)
 		if flushErr != nil {
 			s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
-		}
-		s.mu.Lock()
-		s.flushing = false
-		if flushErr != nil {
-			s.mu.Unlock()
-			s.cond.Broadcast()
 			return flushErr
 		}
 	}
-	s.flushing = true
-	s.mu.Unlock()
-
-	err := action()
-
-	s.mu.Lock()
-	s.flushing = false
-	s.mu.Unlock()
-	s.cond.Broadcast()
-	return err
+	return action()
 }
 
 func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
@@ -945,8 +904,6 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag string) {
 	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
 	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，站点并发不限制", tag, len(sources))
-	collectWrites.beginSources(sources)
-	defer collectWrites.endSources(sources)
 	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion)
 	if err := collectLifecycle.flushPending(); err != nil {
 		log.Printf("[%s] 批量采集收尾刷新失败: %v", tag, err)
@@ -1207,9 +1164,7 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
 		defer lock.Unlock()
-		err = runCollectDBWrite(func() error {
-			return saveMaster(s.Id, list)
-		})
+		err = saveMaster(s.Id, list)
 		if err != nil {
 			return fmt.Errorf("save master details failed: %w", err)
 		}
