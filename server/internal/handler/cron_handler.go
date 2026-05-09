@@ -82,3 +82,22 @@ func (h *CronHandler) ChangeTaskState(c *gin.Context) {
 	}
 	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]更新成功", t.Id), c)
 }
+
+// RunFilmCronTask 立即手动执行一次定时任务
+func (h *CronHandler) RunFilmCronTask(c *gin.Context) {
+	t := model.FilmCollectTask{}
+	if err := c.ShouldBindJSON(&t); err != nil {
+		dto.Failed("请求参数异常!!!", c)
+		return
+	}
+	id := strings.TrimSpace(t.Id)
+	if id == "" {
+		dto.Failed("任务Id不能为空", c)
+		return
+	}
+	if err := service.CronSvc.RunFilmCronTaskOnce(id); err != nil {
+		dto.Failed(fmt.Sprint("手动执行失败: ", err.Error()), c)
+		return
+	}
+	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]已触发，执行结果请查看运行日志", id), c)
+}

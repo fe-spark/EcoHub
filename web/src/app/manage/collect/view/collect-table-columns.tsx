@@ -1,31 +1,27 @@
 import { Button, Flex, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip, Typography } from "antd";
-import { DeleteOutlined, EditOutlined, PauseOutlined, PoweroffOutlined } from "@ant-design/icons";
+import { DeleteOutlined, EditOutlined, PoweroffOutlined, StopOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { collectDuration, type FilmSource } from "./types";
 
 interface CollectTableColumnsOptions {
   activeCollectIds: string[];
-  runningCollectIds: string[];
-  startingCollectIds: string[];
   onUpdateItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
   onChangeSourceState: (record: FilmSource) => void;
   onStartTask: (record: FilmSource) => void;
-  onStopTask: (id: string) => void;
+  onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
 }
 
 export function createCollectTableColumns({
   activeCollectIds,
-  runningCollectIds,
-  startingCollectIds,
   onUpdateItem,
   onChangeCollectDuration,
   onChangeSourceState,
   onStartTask,
-  onStopTask,
+  onTerminateTask,
   onEditSource,
   onDeleteSource,
 }: CollectTableColumnsOptions): ColumnsType<FilmSource> {
@@ -126,34 +122,47 @@ export function createCollectTableColumns({
       title: "图片同步",
       dataIndex: "syncPictures",
       align: "center",
-      render: (value: boolean, record) => (
-        <Switch
-          checked={value}
-          disabled={record.grade === 1}
-          checkedChildren="开启"
-          unCheckedChildren="关闭"
-          onChange={(checked) => {
-            onUpdateItem(record.id, (item) => ({ ...item, syncPictures: checked }));
-            onChangeSourceState({ ...record, syncPictures: checked });
-          }}
-        />
-      ),
+      render: (value: boolean, record) => {
+        const isRunning = activeCollectIds.includes(record.id);
+        return (
+          <Switch
+            checked={value}
+            disabled={record.grade === 1 || isRunning}
+            checkedChildren="开启"
+            unCheckedChildren="关闭"
+            onChange={(checked) => {
+              onUpdateItem(record.id, (item) => ({ ...item, syncPictures: checked }));
+              onChangeSourceState({ ...record, syncPictures: checked });
+            }}
+          />
+        );
+      },
     },
     {
       title: "启用状态",
       dataIndex: "state",
       align: "center",
-      render: (value: boolean, record) => (
-        <Switch
-          checked={value}
-          checkedChildren="启用"
-          unCheckedChildren="禁用"
-          onChange={(checked) => {
-            onUpdateItem(record.id, (item) => ({ ...item, state: checked }));
-            onChangeSourceState({ ...record, state: checked });
-          }}
-        />
-      ),
+      render: (value: boolean, record) => {
+        const isRunning = activeCollectIds.includes(record.id);
+        if (isRunning) {
+          return (
+            <Tag color={record.state ? "processing" : "warning"}>
+              {record.state ? "采集中" : "已终止·等待完成"}
+            </Tag>
+          );
+        }
+        return (
+          <Switch
+            checked={value}
+            checkedChildren="启用"
+            unCheckedChildren="禁用"
+            onChange={(checked) => {
+              onUpdateItem(record.id, (item) => ({ ...item, state: checked }));
+              onChangeSourceState({ ...record, state: checked });
+            }}
+          />
+        );
+      },
     },
     {
       title: "请求间隔",
@@ -164,17 +173,21 @@ export function createCollectTableColumns({
     {
       title: "采集时长",
       align: "center",
-      render: (_, record) => (
-        <Select
-          size="small"
-          value={record.cd}
-          style={{ width: "100%" }}
-          options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
-          onChange={(value) => {
-            onChangeCollectDuration(record.id, value);
-          }}
-        />
-      ),
+      render: (_, record) => {
+        const isRunning = activeCollectIds.includes(record.id);
+        return (
+          <Select
+            size="small"
+            value={record.cd}
+            disabled={isRunning}
+            style={{ width: "100%" }}
+            options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
+            onChange={(value) => {
+              onChangeCollectDuration(record.id, value);
+            }}
+          />
+        );
+      },
     },
     {
       title: "操作",
@@ -183,19 +196,32 @@ export function createCollectTableColumns({
       align: "center",
       render: (_, record) => {
         const isRunning = activeCollectIds.includes(record.id);
-        const isCollecting = runningCollectIds.includes(record.id);
-        const isWaiting = startingCollectIds.includes(record.id);
+        if (isRunning) {
+          return (
+            <Popconfirm
+              title="停止该站点后续请求？"
+              description="将禁用该站点；已请求数据会继续入库。"
+              onConfirm={() => onTerminateTask(record.id)}
+              disabled={!record.state}
+              okText="停止请求"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button
+                danger
+                icon={<StopOutlined />}
+                disabled={!record.state}
+              >
+                {record.state ? "停止请求" : "已停止"}
+              </Button>
+            </Popconfirm>
+          );
+        }
         return (
           <Space size={4}>
-            {!isRunning ? (
-              <Tooltip title="开始采集">
-                <Button type="primary" icon={<PoweroffOutlined />} onClick={() => onStartTask(record)} />
-              </Tooltip>
-            ) : (
-              <Tooltip title={isWaiting ? "停止等待" : isCollecting ? "停止采集" : "停止任务"}>
-                <Button danger icon={<PauseOutlined />} onClick={() => onStopTask(record.id)} />
-              </Tooltip>
-            )}
+            <Tooltip title="开始采集">
+              <Button type="primary" icon={<PoweroffOutlined />} onClick={() => onStartTask(record)} />
+            </Tooltip>
             <Tooltip title="编辑站点">
               <Button icon={<EditOutlined />} onClick={() => onEditSource(record.id)} />
             </Tooltip>

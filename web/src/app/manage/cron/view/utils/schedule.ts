@@ -9,6 +9,7 @@ export interface CronTask {
   state: boolean;
   preV?: string;
   next?: string;
+  running?: boolean;
 }
 
 export type ScheduleMode = "interval" | "daily" | "weekly" | "monthly" | "advanced";

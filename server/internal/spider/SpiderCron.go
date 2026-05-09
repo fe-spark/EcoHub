@@ -22,6 +22,9 @@ var taskCidMap = make(map[string]cron.EntryID)
 var taskCidLock sync.RWMutex
 var orphanCleanTaskLock sync.Mutex
 
+// runningCronTasks 记录当前正在执行的定时任务 ID,用于前端展示"执行中"以及禁用编辑操作。
+var runningCronTasks sync.Map
+
 // RegisterTaskCid 将 taskId 与运行时 cron.EntryID 关联
 func RegisterTaskCid(taskId string, cid cron.EntryID) {
 	taskCidLock.Lock()
@@ -176,12 +179,22 @@ func ReloadCronTask(id string) error {
 	return nil
 }
 
-// executeTask 执行特定的定时任务逻辑（内部统一调用）
+// executeTask 执行特定的定时任务逻辑（cron 调度入口）。
+// 通过 runningCronTasks 的原子 LoadOrStore 保证同一任务同一时刻只跑一份;
+// 重叠的触发(慢任务跨调度周期、cron 与手动同时来)直接 skip。
 func executeTask(ft model.FilmCollectTask) {
 	if !ft.State {
 		return
 	}
+	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
+		log.Printf("定时任务跳过: Task[%s] 已在执行中\n", ft.Id)
+		return
+	}
+	defer runningCronTasks.Delete(ft.Id)
+	runTaskBody(ft)
+}
 
+func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
 	switch ft.Model {
@@ -234,15 +247,26 @@ func executeOrphanCleanTask() {
 }
 
 // RunTaskOnce 立即手动执行一次任务
-func RunTaskOnce(id string) {
+func RunTaskOnce(id string) error {
+	ft, err := repository.GetFilmTaskById(id)
+	if err != nil {
+		return err
+	}
+	if !ft.State {
+		return fmt.Errorf("定时任务已禁用，请先启用后再手动执行")
+	}
+	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
+		return fmt.Errorf("定时任务正在执行中，请等待当前执行完成")
+	}
 	go func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("RunTaskOnce Failed: ", err)
-			return
-		}
-		// 手动触发不需要再次检查 State，因为通常是在开启时主动调用
-		// 但为了安全，底层的 executeTask 依然会检查
-		executeTask(ft)
+		defer runningCronTasks.Delete(ft.Id)
+		runTaskBody(ft)
 	}()
+	return nil
+}
+
+// IsCronTaskRunning 报告指定 cron 任务是否正在执行
+func IsCronTaskRunning(id string) bool {
+	_, ok := runningCronTasks.Load(id)
+	return ok
 }

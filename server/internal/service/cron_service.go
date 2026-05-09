@@ -29,7 +29,12 @@ func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
 		if !e.Prev.IsZero() {
 			preV = e.Prev.In(cst).Format(time.DateTime)
 		}
-		taskVo := model.CronTaskVo{FilmCollectTask: t, PreV: preV, Next: nextV}
+		taskVo := model.CronTaskVo{
+			FilmCollectTask: t,
+			PreV:            preV,
+			Next:            nextV,
+			Running:         spider.IsCronTaskRunning(t.Id),
+		}
 		l = append(l, taskVo)
 	}
 	return l
@@ -68,4 +73,9 @@ func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
 		return fmt.Errorf("定时任务重载失败: %w", err)
 	}
 	return nil
+}
+
+// RunFilmCronTaskOnce 立即手动执行一次定时任务
+func (s *CronService) RunFilmCronTaskOnce(id string) error {
+	return spider.RunTaskOnce(id)
 }
