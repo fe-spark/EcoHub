@@ -14,7 +14,6 @@ import {
   Popconfirm,
   Space,
   Table,
-  Tag,
 } from "antd";
 import { PauseOutlined, PlusOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -80,11 +79,6 @@ export default function CollectManagePageView() {
 
   const activeCollectIds = useMemo(
     () => siteList.filter((item) => item.progress).map((item) => item.id),
-    [siteList],
-  );
-
-  const runningCollectIds = useMemo(
-    () => siteList.filter((item) => item.progress?.status === "running" || item.progress?.status === "finalizing").map((item) => item.id),
     [siteList],
   );
 
@@ -274,13 +268,17 @@ const masterStatus = useMemo(() => {
   };
 
   const stopTask = async (id: string) => {
-    const resp = await ApiPost("/manage/collect/stop", { id });
+    const resp = await ApiPost("/manage/collect/change", {
+      id,
+      state: false,
+      syncPictures: siteList.find((item) => item.id === id)?.syncPictures ?? false,
+    });
     if (resp.code === 0) {
-      message.success("已请求停止任务");
+      message.success("已停止后续请求，已请求数据将继续入库");
       await getCollectList();
       return;
     }
-    message.error(resp.msg || "停止任务失败");
+    message.error(resp.msg || "终止任务失败");
   };
 
   const delSource = async (id: string) => {
@@ -424,13 +422,11 @@ const masterStatus = useMemo(() => {
 
   const columns = createCollectTableColumns({
     activeCollectIds,
-    runningCollectIds,
-    startingCollectIds,
     onUpdateItem: updateSiteListItem,
     onChangeCollectDuration: changeCollectDuration,
     onChangeSourceState: (record) => void changeSourceState(record),
     onStartTask: (record) => void startTask(record),
-    onStopTask: (id) => void stopTask(id),
+    onTerminateTask: (id) => void stopTask(id),
     onEditSource: (id) => void openEditDialog(id),
     onDeleteSource: (id) => void delSource(id),
   });
@@ -480,7 +476,7 @@ const masterStatus = useMemo(() => {
                   </Button>
                   <Popconfirm
                     title="批量禁用采集站？"
-                    description="禁用后，正在运行的对应站点采集任务会被请求停止。"
+                    description="禁用后会停止选中站点的后续请求，已请求数据会继续入库，并阻止后续批量/自动采集调度。"
                     okText="确认禁用"
                     cancelText="取消"
                     okButtonProps={{ danger: true }}

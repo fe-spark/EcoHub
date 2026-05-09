@@ -230,6 +230,17 @@ func markSourcesCollectStarting(sources []model.FilmSource) {
 	}
 }
 
+func StopTask(sourceID string) {
+	updateCollectProgress(sourceID, func(progress *model.CollectProgress) {
+		if progress.Status == "starting" || progress.Status == "running" {
+			progress.Status = "stopped"
+		}
+	})
+	if val, ok := activeTasks.Load(sourceID); ok {
+		val.(collectTask).cancel()
+	}
+}
+
 func PrepareSingleCollectStart(source model.FilmSource) error {
 	if isCollectAlreadyQueuedOrRunning(source.Id) {
 		return fmt.Errorf("站点 %s 已在采集队列或正在运行，已跳过本次采集", source.Name)
@@ -1407,21 +1418,16 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 						recordPageFailure(pg, "fetch", err)
 						continue
 					}
-					if ctx.Err() != nil {
-						markStopped()
-						return
-					}
-
 					page := pg
 					items := list
 					writeWG.Add(1)
-					submitErr := collectWrites.submit(ctx, collectWriteJob{
+					submitErr := collectWrites.submit(context.Background(), collectWriteJob{
 						sourceID:   s.Id,
 						sourceName: s.Name,
 						grade:      s.Grade,
 						page:       page,
 						write: func() ([]int64, error) {
-							return saveCollectedFilmForCollect(ctx, s, page, items)
+							return saveCollectedFilmForCollect(context.Background(), s, page, items)
 						},
 						complete: func(completion collectWriteCompletion) {
 							writeCompletions <- completion
@@ -1845,19 +1851,6 @@ func StopAllTasks() {
 func finalizeStoppedCollectTasks() {
 	if err := collectLifecycle.flushPending(); err != nil {
 		log.Printf("[Spider] 终止采集后收尾刷新失败: %v", err)
-	}
-}
-
-// StopTask 强行停止指定站点的采集任务
-func StopTask(id string) {
-	updateCollectProgress(id, func(progress *model.CollectProgress) {
-		if progress.Status == "starting" || progress.Status == "running" {
-			progress.Status = "stopped"
-		}
-	})
-	if val, ok := activeTasks.Load(id); ok {
-		val.(collectTask).cancel()
-		activeTasks.Delete(id)
 	}
 }
 

@@ -112,8 +112,9 @@ type RecordRequestVo struct {
 // CronTaskVo 定时任务数据response
 type CronTaskVo struct {
 	FilmCollectTask
-	PreV string `json:"preV"` // 上次执行时间
-	Next string `json:"next"` // 下次执行时间
+	PreV    string `json:"preV"`    // 上次执行时间
+	Next    string `json:"next"`    // 下次执行时间
+	Running bool   `json:"running"` // 当前是否正在执行
 }
 
 // FilmTaskOptions 影视采集任务添加时需要的options

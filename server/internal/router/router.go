@@ -91,7 +91,6 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/change/batch`, handler.CollectHd.FilmSourceBatchChange)
 			collect.POST(`/del`, handler.CollectHd.FilmSourceDel)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
-			collect.POST(`/stop`, handler.CollectHd.StopCollect)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
@@ -107,6 +106,7 @@ func SetupRouter() *gin.Engine {
 			collectCron.GET(`/find`, handler.CronHd.GetFilmCronTask)
 			collectCron.POST(`/update`, handler.CronHd.FilmCronUpdate)
 			collectCron.POST(`/change`, handler.CronHd.ChangeTaskState)
+			collectCron.POST(`/run`, handler.CronHd.RunFilmCronTask)
 		}
 
 		// spider 数据采集
