@@ -110,7 +110,7 @@ type MovieSourceMapping struct {
 type MoviePlaylist struct {
 	gorm.Model
 	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
-	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group"`
+	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group;index:idx_movie_playlist_movie_key"`
 	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"`
 	GroupName  string `gorm:"type:varchar(255)"`
 	Content    string `gorm:"type:longtext"`
