@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	orphanPlaylistScanBatchSize = 50000
+	orphanPlaylistScanBatchSize = 5000
 	orphanPlaylistBatchCooldown = 5 * time.Millisecond
 )
 
@@ -45,6 +45,7 @@ func cleanOrphanPlaylistsInBatches() (int64, error) {
 	var lastID uint
 	for {
 		rangeStart := lastID
+		loadStartedAt := time.Now()
 		rangeEnd, ok, err := loadPlaylistCandidateRange(rangeStart)
 		if err != nil {
 			return total, err
@@ -53,15 +54,15 @@ func cleanOrphanPlaylistsInBatches() (int64, error) {
 			break
 		}
 		lastID = rangeEnd
+		log.Printf("[CleanOrphan] 分批扫描区间 range=(%d,%d] cost=%s", rangeStart, rangeEnd, time.Since(loadStartedAt))
 
+		startedAt := time.Now()
 		deleted, err := deleteOrphanPlaylistsInRange(rangeStart, rangeEnd)
 		if err != nil {
 			return total, err
 		}
 		total += deleted
-		if deleted > 0 {
-			log.Printf("[CleanOrphan] 分批清理进度 deleted=%d total=%d last_id=%d", deleted, total, lastID)
-		}
+		log.Printf("[CleanOrphan] 分批清理进度 range=(%d,%d] deleted=%d total=%d cost=%s", rangeStart, rangeEnd, deleted, total, time.Since(startedAt))
 		time.Sleep(orphanPlaylistBatchCooldown)
 	}
 	if total == 0 {
@@ -82,7 +83,6 @@ func loadPlaylistCandidateRange(lastID uint) (uint, bool, error) {
 	var rows []playlistCandidateRow
 	err := db.Mdb.Model(&model.MoviePlaylist{}).
 		Select("movie_playlist.id").
-		Joins("JOIN film_sources ON film_sources.id = movie_playlist.source_id AND film_sources.grade = ?", model.SlaveCollect).
 		Where("movie_playlist.id > ?", lastID).
 		Order("movie_playlist.id ASC").
 		Limit(orphanPlaylistScanBatchSize).
