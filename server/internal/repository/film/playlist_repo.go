@@ -60,11 +60,12 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		return nil
 	}
 
-	if err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey); err != nil {
+	changedMovieKeys, err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey)
+	if err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
 		return err
 	}
-	if err := scheduleSearchInfoRefreshByPlaylists(sourceID, list); err != nil {
+	if err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changedMovieKeys); err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
 		return err
 	}
@@ -76,12 +77,19 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 	return nil
 }
 
-func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail) error {
+func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changedMovieKeys []string) error {
 	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
 		return err
 	}
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
+		return err
+	}
+	changedInfos, err := loadMatchedSearchInfosByMovieKeys(changedMovieKeys)
+	if err != nil {
+		return err
+	}
+	if err := touchSlavePlaylistUpdateStamps(changedInfos); err != nil {
 		return err
 	}
 	SchedulePlaySummaryRefresh(infos...)
@@ -166,7 +174,56 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 	return ordered, nil
 }
 
-func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) error {
+func loadMatchedSearchInfosByMovieKeys(movieKeys []string) ([]model.FilmIndex, error) {
+	midsByLookupKey := loadMidCandidatesByMatchKeys(movieKeys)
+	if len(midsByLookupKey) == 0 {
+		return nil, nil
+	}
+
+	midSet := make(map[int64]struct{}, len(movieKeys))
+	for _, mids := range midsByLookupKey {
+		for _, mid := range mids {
+			if mid > 0 {
+				midSet[mid] = struct{}{}
+			}
+		}
+	}
+	if len(midSet) == 0 {
+		return nil, nil
+	}
+
+	mids := make([]int64, 0, len(midSet))
+	for mid := range midSet {
+		mids = append(mids, mid)
+	}
+
+	var infos []model.FilmIndex
+	if err := db.Mdb.Where("mid IN ?", mids).Find(&infos).Error; err != nil {
+		return nil, err
+	}
+	return infos, nil
+}
+
+func touchSlavePlaylistUpdateStamps(infos []model.FilmIndex) error {
+	mids := make([]int64, 0, len(infos))
+	seen := make(map[int64]struct{}, len(infos))
+	for _, info := range infos {
+		if info.Mid <= 0 {
+			continue
+		}
+		if _, ok := seen[info.Mid]; ok {
+			continue
+		}
+		seen[info.Mid] = struct{}{}
+		mids = append(mids, info.Mid)
+	}
+	if len(mids) == 0 {
+		return nil
+	}
+	return db.Mdb.Model(&model.FilmIndex{}).Where("mid IN ?", mids).Update("update_stamp", time.Now().Unix()).Error
+}
+
+func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) ([]string, error) {
 	movieKeys := make([]string, 0, len(keysByMovieKey))
 	for movieKey := range keysByMovieKey {
 		if strings.TrimSpace(movieKey) == "" {
@@ -175,7 +232,15 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		movieKeys = append(movieKeys, movieKey)
 	}
 
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+	var changedMovieKeys []string
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		existing, err := loadPlaylistSignaturesTx(tx, sourceID, movieKeys)
+		if err != nil {
+			return err
+		}
+		incoming := buildPlaylistSignatures(playlists)
+		changedMovieKeys = diffPlaylistMovieKeys(existing, incoming, movieKeys)
+
 		if len(movieKeys) > 0 {
 			if err := tx.Unscoped().
 				Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
@@ -194,6 +259,71 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return changedMovieKeys, nil
+}
+
+type playlistSignature struct {
+	GroupIndex int
+	GroupName  string
+	Content    string
+}
+
+func loadPlaylistSignaturesTx(tx *gorm.DB, sourceID string, movieKeys []string) (map[string][]playlistSignature, error) {
+	result := make(map[string][]playlistSignature, len(movieKeys))
+	if len(movieKeys) == 0 {
+		return result, nil
+	}
+	var rows []model.MoviePlaylist
+	if err := tx.Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
+		Order("movie_key ASC, group_index ASC").
+		Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		result[row.MovieKey] = append(result[row.MovieKey], playlistSignature{
+			GroupIndex: row.GroupIndex,
+			GroupName:  row.GroupName,
+			Content:    row.Content,
+		})
+	}
+	return result, nil
+}
+
+func buildPlaylistSignatures(playlists []model.MoviePlaylist) map[string][]playlistSignature {
+	result := make(map[string][]playlistSignature, len(playlists))
+	for _, playlist := range playlists {
+		result[playlist.MovieKey] = append(result[playlist.MovieKey], playlistSignature{
+			GroupIndex: playlist.GroupIndex,
+			GroupName:  playlist.GroupName,
+			Content:    playlist.Content,
+		})
+	}
+	return result
+}
+
+func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map[string][]playlistSignature, movieKeys []string) []string {
+	changed := make([]string, 0, len(movieKeys))
+	for _, movieKey := range movieKeys {
+		if !samePlaylistSignatures(existing[movieKey], incoming[movieKey]) {
+			changed = append(changed, movieKey)
+		}
+	}
+	return changed
+}
+
+func samePlaylistSignatures(left []playlistSignature, right []playlistSignature) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func DeletePlaylistBySourceId(sourceID string) error {
