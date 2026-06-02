@@ -140,7 +140,22 @@ func RecoverFilmSearch(cid int64) error {
 	return nil
 }
 
-func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
+func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
+	ids := normalizeSourceIDs(sourceIDs...)
+	if len(ids) == 0 {
+		return nil
+	}
+
+	if err := clearMasterDataBySourceIDs(db.Mdb, ids); err != nil {
+		return err
+	}
+	ClearSnapshotState()
+	ClearAdminFilmSearchCache()
+	RefreshMasterDataCaches()
+	return nil
+}
+
+func normalizeSourceIDs(sourceIDs ...string) []string {
 	ids := make([]string, 0, len(sourceIDs))
 	seen := make(map[string]struct{}, len(sourceIDs))
 	for _, sourceID := range sourceIDs {
@@ -154,61 +169,46 @@ func ClearMasterDataBySourceIDsTx(tx *gorm.DB, sourceIDs ...string) error {
 		seen[sourceID] = struct{}{}
 		ids = append(ids, sourceID)
 	}
-	if len(ids) == 0 {
-		return nil
-	}
+	return ids
+}
 
-	var mids []int64
-	if err := tx.Model(&model.FilmIndex{}).Where("source_id IN ?", ids).Pluck("mid", &mids).Error; err != nil {
-		return err
-	}
-
-	if err := tx.Where("source_id IN ?", ids).Delete(&model.FilmIndex{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Where("source_id IN ?", ids).Delete(&model.MoviePlaylist{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Where("source_id IN ?", ids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-		return err
-	}
-	if err := deleteMovieMatchKeysByMids(tx, mids); err != nil {
-		return err
-	}
-	if len(mids) > 0 {
-		if err := tx.Where("mid IN ?", mids).Delete(&model.Banner{}).Error; err != nil {
+func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
+	// 主站切换会重建主数据和读模型，直接硬清理避免 gorm.Model 软删除产生海量 UPDATE。
+	for _, table := range masterDataResetTables() {
+		if err := truncateTable(conn, table); err != nil {
 			return err
 		}
 	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SearchTagItem{}).Error; err != nil {
+	if err := conn.Unscoped().Where("source_id IN ?", sourceIDs).Delete(&model.MoviePlaylist{}).Error; err != nil {
 		return err
 	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.VirtualPictureQueue{}).Error; err != nil {
+	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
 		return err
 	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Category{}).Error; err != nil {
-		return err
+	return nil
+}
+
+func masterDataResetTables() []string {
+	return []string{
+		model.TableMovieDetail,
+		model.TableFilmIndex,
+		model.TableFilmListSnapshot,
+		model.TableFilterOption,
+		model.TableFilterIndex,
+		model.TableMovieMatchKey,
+		model.TableMovieSourceMapping,
+		model.TableSearchTag,
+		model.TableVirtualPicture,
+		model.TableCategory,
+		model.TableCategoryMapping,
+		model.TableSourceCategory,
+		model.TableBanners,
 	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmFilterOptionSnapshot{}).Error; err != nil {
-		return err
-	}
-	if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.FilmFilterIndexSnapshot{}).Error; err != nil {
-		return err
-	}
-	if err := repository.DeleteCollectSourceStatsTx(tx, ids...); err != nil {
-		return err
+}
+
+func truncateTable(conn *gorm.DB, table string) error {
+	if err := conn.Exec(fmt.Sprintf("TRUNCATE table %s", table)).Error; err != nil {
+		return fmt.Errorf("truncate %s failed: %w", table, err)
 	}
 	return nil
 }
@@ -296,15 +296,7 @@ func FilmZero() error {
 // 旧主站会清空主数据和自身相关映射，新主站会清空其旧附属站播放列表与映射。
 // 其它附属站的数据保持不动，由新主站重建骨架后继续挂接。
 func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return ClearMasterDataBySourceIDsTx(tx, sourceIDs...)
-	}); err != nil {
-		return err
-	}
-	ClearSnapshotState()
-	ClearAdminFilmSearchCache()
-	RefreshMasterDataCaches()
-	return nil
+	return ClearMasterDataBySourceIDsFast(sourceIDs...)
 }
 
 func RefreshMasterDataCaches() {
