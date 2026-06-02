@@ -108,21 +108,9 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if masterLookup {
-			if err := filmrepo.DeletePlaylistBySourceIdTx(tx, source.Id); err != nil {
-				log.Printf("[Collect] 清理站点 %s 的旧有播放列表失败: %v", source.Name, err)
-				return errors.New("清理新主站旧附属站数据失败，请重试")
-			}
-
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
 				log.Printf("[Collect] 自动降级旧主站失败: %v", err)
 				return errors.New("主站自动降级失败，请重试")
-			}
-		}
-
-		if masterLookup || masterUriChanged || masterDowngrade {
-			if err := filmrepo.ClearMasterDataBySourceIDsTx(tx, affectedSourceIDs...); err != nil {
-				log.Printf("[Collect] 主站切换数据清理失败: %v", err)
-				return errors.New("主站切换数据清理失败，请重试")
 			}
 		}
 
@@ -132,14 +120,19 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		return err
 	}
 
+	if masterLookup || masterUriChanged || masterDowngrade {
+		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
+			log.Printf("[Collect] 主站切换数据清理失败: %v", err)
+			return errors.New("主站切换数据清理失败，请重试")
+		}
+	}
+
 	spider.ClearLimiter(source.Id)
 	if old.State && !source.State {
 		spider.StopTask(source.Id)
 	}
 
 	if masterLookup || masterUriChanged || masterDowngrade {
-		filmrepo.ClearSnapshotState()
-		filmrepo.RefreshMasterDataCaches()
 		if source.Grade == model.MasterCollect && source.State {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 				return syncErr
@@ -188,10 +181,6 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 
 		log.Printf("[Collect] 新增站点 %s 为主采集站，自动降级现有主站...", source.Name)
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			if err := filmrepo.ClearMasterDataBySourceIDsTx(tx, affectedSourceIDs...); err != nil {
-				log.Printf("[Collect] 新主站接管前数据清理失败: %v", err)
-				return errors.New("主站切换数据清理失败，请重试")
-			}
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
 				return err
 			}
@@ -199,9 +188,11 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 		}); err != nil {
 			return err
 		}
+		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
+			log.Printf("[Collect] 新主站接管前数据清理失败: %v", err)
+			return errors.New("主站切换数据清理失败，请重试")
+		}
 		spider.ClearLimiter(source.Id)
-		filmrepo.ClearSnapshotState()
-		filmrepo.RefreshMasterDataCaches()
 		if source.State {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 				return syncErr
