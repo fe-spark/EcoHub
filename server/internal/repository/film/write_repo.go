@@ -148,17 +148,23 @@ func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping
 	return tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, upsertBatchSize).Error
 }
 
-func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) ([]model.FilmIndex, map[string]model.FilmIndex) {
+func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) ([]model.FilmIndex, map[string]model.FilmIndex, error) {
 	infoList := make([]model.FilmIndex, 0, len(details))
 	infoByKey := make(map[string]model.FilmIndex, len(details))
 	categoryVersion := support.GetCategoryVersion()
 	ruleVersion := support.GetRuleVersion()
 	for _, detail := range details {
-		info := ConvertFilmIndex(sourceID, detail, categoryVersion, ruleVersion)
+		if strings.TrimSpace(detail.Name) == "" {
+			continue
+		}
+		info, err := ConvertFilmIndex(sourceID, detail, categoryVersion, ruleVersion)
+		if err != nil {
+			return nil, nil, err
+		}
 		infoList = append(infoList, info)
 		infoByKey[info.ContentKey] = info
 	}
-	return infoList, infoByKey
+	return infoList, infoByKey, nil
 }
 
 func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, error) {
@@ -172,6 +178,7 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 	if len(existingInfos) == 0 {
 		return unchangedKeys, nil
 	}
+	changedAt := time.Now().Unix()
 	existingByKey := make(map[string]model.FilmIndex, len(existingInfos))
 	mids := make([]int64, 0, len(existingInfos))
 	for _, existing := range existingInfos {
@@ -203,9 +210,7 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 			unchangedKeys[infos[index].ContentKey] = struct{}{}
 			continue
 		}
-		if sameMasterEpisodeState(oldDetail, newDetail) {
-			infos[index].UpdateStamp = existing.UpdateStamp
-		}
+		infos[index].UpdateStamp = changedAt
 	}
 	return unchangedKeys, nil
 }
@@ -228,10 +233,6 @@ func loadMovieDetailsByMidsTx(tx *gorm.DB, mids []int64) (map[int64]model.MovieD
 		result[detailInfo.Mid] = detail
 	}
 	return result, nil
-}
-
-func sameMasterEpisodeState(oldDetail model.MovieDetail, newDetail model.MovieDetail) bool {
-	return masterEpisodeSignature(oldDetail) == masterEpisodeSignature(newDetail)
 }
 
 func sameStoredMasterDetail(oldDetail model.MovieDetail, newDetail model.MovieDetail) bool {
@@ -383,7 +384,10 @@ func SaveDetailsForCollect(id string, list []model.MovieDetail) ([]int64, error)
 }
 
 func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([]int64, error) {
-	infoList, _ := buildFilmIndexesFromDetails(id, list)
+	infoList, _, err := buildFilmIndexesFromDetails(id, list)
+	if err != nil {
+		return nil, err
+	}
 	infoList = filterValidFilmIndexes(infoList)
 	if len(infoList) == 0 {
 		return nil, nil
@@ -521,7 +525,10 @@ func filmIndexContentKeys(infos []model.FilmIndex) []string {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
-	snapshot := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
+	snapshot, err := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
+	if err != nil {
+		return err
+	}
 	if strings.TrimSpace(snapshot.Name) == "" {
 		return nil
 	}
@@ -1191,11 +1198,15 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	return result
 }
 
-func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCategory) normalizedSearchMeta {
+func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCategory) (normalizedSearchMeta, error) {
 	score, _ := strconv.ParseFloat(detail.DbScore, 64)
 	year, err := strconv.ParseInt(regexp.MustCompile(`[1-9][0-9]{3}`).FindString(detail.ReleaseDate), 10, 64)
 	if err != nil {
 		year = 0
+	}
+	updateStamp, err := utils.ParseCollectUpdateTime(detail.UpdateTime)
+	if err != nil {
+		return normalizedSearchMeta{}, fmt.Errorf("影片更新时间解析失败 name=%s id=%d updateTime=%q: %w", detail.Name, detail.Id, detail.UpdateTime, err)
 	}
 
 	finalArea := support.NormalizeArea(detail.Area)
@@ -1204,12 +1215,12 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 
 	return normalizedSearchMeta{
 		Score:       score,
-		UpdateStamp: time.Now().Unix(),
+		UpdateStamp: updateStamp,
 		Year:        year,
 		Area:        finalArea,
 		Language:    finalLang,
 		ClassTag:    support.CleanPlotTags(detail.ClassTag, finalArea, mainCategoryName, category.CName),
-	}
+	}, nil
 }
 
 func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta, categoryVersion string, ruleVersion string) model.FilmIndex {
@@ -1256,8 +1267,11 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 	}
 }
 
-func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) model.FilmIndex {
+func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
-	meta := normalizeSearchMetadata(detail, category)
-	return buildFilmIndex(sourceId, detail, category, meta, categoryVersion, ruleVersion)
+	meta, err := normalizeSearchMetadata(detail, category)
+	if err != nil {
+		return model.FilmIndex{}, err
+	}
+	return buildFilmIndex(sourceId, detail, category, meta, categoryVersion, ruleVersion), nil
 }
