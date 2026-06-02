@@ -146,12 +146,16 @@ func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
 		return nil
 	}
 
+	startedAt := time.Now()
 	if err := clearMasterDataBySourceIDs(db.Mdb, ids); err != nil {
 		return err
 	}
-	ClearSnapshotState()
+	clearCost := time.Since(startedAt)
+
+	cacheStartedAt := time.Now()
 	ClearAdminFilmSearchCache()
-	RefreshMasterDataCaches()
+	InvalidateMasterSwitchCaches()
+	log.Printf("[Collect] 主站切换数据重置完成 sources=%d clear=%s cache=%s total=%s", len(ids), clearCost, time.Since(cacheStartedAt), time.Since(startedAt))
 	return nil
 }
 
@@ -175,12 +179,13 @@ func normalizeSourceIDs(sourceIDs ...string) []string {
 func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 	// 主站切换会重建主数据和读模型，直接硬清理避免 gorm.Model 软删除产生海量 UPDATE。
 	for _, table := range masterDataResetTables() {
+		startedAt := time.Now()
 		if err := truncateTable(conn, table); err != nil {
 			return err
 		}
-	}
-	if err := conn.Unscoped().Where("source_id IN ?", sourceIDs).Delete(&model.MoviePlaylist{}).Error; err != nil {
-		return err
+		if cost := time.Since(startedAt); cost > time.Second {
+			log.Printf("[Collect] 主站切换清表较慢 table=%s cost=%s", table, cost)
+		}
 	}
 	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
 		return err
@@ -195,6 +200,7 @@ func masterDataResetTables() []string {
 		model.TableFilmListSnapshot,
 		model.TableFilterOption,
 		model.TableFilterIndex,
+		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableMovieSourceMapping,
 		model.TableSearchTag,
@@ -292,9 +298,8 @@ func FilmZero() error {
 	return nil
 }
 
-// ClearMasterDataBySourceIDs 清理指定站点在主站切换时必须重置的数据。
-// 旧主站会清空主数据和自身相关映射，新主站会清空其旧附属站播放列表与映射。
-// 其它附属站的数据保持不动，由新主站重建骨架后继续挂接。
+// ClearMasterDataBySourceIDs 清理主站切换时必须重建的主数据和播放源读模型。
+// 主站切换会让所有影片骨架失效，附属站播放列表也必须重新挂接，因此这里直接整体重置。
 func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 	return ClearMasterDataBySourceIDsFast(sourceIDs...)
 }
@@ -305,6 +310,24 @@ func RefreshMasterDataCaches() {
 	db.Rdb.Del(db.Cxt, config.BannersKey)
 	ClearTVBoxListCache()
 	ClearTVBoxConfigCache()
+}
+
+func InvalidateMasterSwitchCaches() {
+	ClearActiveFilmReadModel()
+	support.RefreshCategoryCache()
+	support.InitMappingEngine()
+	support.TouchCategoryVersion()
+	bumpSearchTagsCacheVersion()
+	db.Rdb.Del(
+		db.Cxt,
+		config.SnapshotActiveVersionKey,
+		config.SnapshotBuildVersionKey,
+		config.ActiveCategoryTreeKey,
+		config.CategoryTreeKey,
+		config.TVBoxConfigCacheKey,
+		config.VirtualPictureKey,
+		config.BannersKey,
+	)
 }
 
 // CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录
