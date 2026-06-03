@@ -40,6 +40,12 @@ func CleanOrphanPlaylists() (int64, error) {
 }
 
 func cleanOrphanPlaylistsInBatches() (int64, error) {
+	if hasSnapshot, err := HasPublishedFilmListSnapshot(); err != nil {
+		return 0, err
+	} else if !hasSnapshot {
+		log.Println("[CleanOrphan] 主站快照未发布，跳过孤儿播放列表清理")
+		return 0, nil
+	}
 	if hasKeys, err := hasMovieMatchKeys(); err != nil {
 		return 0, err
 	} else if !hasKeys {
@@ -79,6 +85,14 @@ func cleanOrphanPlaylistsInBatches() (int64, error) {
 		log.Println("[CleanOrphan] movie_playlist 无孤儿记录")
 	}
 	return total, nil
+}
+
+func HasPublishedFilmListSnapshot() (bool, error) {
+	var row orphanPlaylistRow
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select("id").Limit(1).Scan(&row).Error; err != nil {
+		return false, err
+	}
+	return row.ID > 0, nil
 }
 
 func hasMovieMatchKeys() (bool, error) {

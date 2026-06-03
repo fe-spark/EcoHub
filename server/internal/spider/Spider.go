@@ -287,6 +287,7 @@ type collectLifecycleState struct {
 	pendingFlushSources map[string]model.FilmSource
 	affectedMIDs        map[int64]struct{}
 	masterAffectedMIDs  map[int64]struct{}
+	pendingMasterMIDs   map[string]map[int64]struct{}
 	flushing            bool
 }
 
@@ -296,6 +297,7 @@ func newCollectLifecycle() *collectLifecycleState {
 		pendingFlushSources: make(map[string]model.FilmSource),
 		affectedMIDs:        make(map[int64]struct{}),
 		masterAffectedMIDs:  make(map[int64]struct{}),
+		pendingMasterMIDs:   make(map[string]map[int64]struct{}),
 	}
 	state.cond = sync.NewCond(&state.mu)
 	return state
@@ -318,6 +320,16 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	s.activeSources[sourceID] = struct{}{}
 	s.activeCount++
 	return nil
+}
+
+func (s *collectLifecycleState) beginMasterRebuild(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pendingMasterMIDs[sourceID] = make(map[int64]struct{})
 }
 
 func (s *collectLifecycleState) waitAndBeginSource(sourceID string) error {
@@ -376,6 +388,55 @@ func (s *collectLifecycleState) addAffectedMIDs(mids []int64) {
 			s.affectedMIDs[mid] = struct{}{}
 		}
 	}
+}
+
+func (s *collectLifecycleState) addPendingMasterMIDs(sourceID string, mids []int64) {
+	if len(mids) == 0 {
+		return
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.pendingMasterMIDs[sourceID]
+	if pending == nil {
+		pending = make(map[int64]struct{})
+		s.pendingMasterMIDs[sourceID] = pending
+	}
+	for _, mid := range mids {
+		if mid > 0 {
+			pending[mid] = struct{}{}
+		}
+	}
+}
+
+func (s *collectLifecycleState) publishPendingMasterMIDs(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.pendingMasterMIDs[sourceID]
+	delete(s.pendingMasterMIDs, sourceID)
+	for mid := range pending {
+		if mid > 0 {
+			s.affectedMIDs[mid] = struct{}{}
+			s.masterAffectedMIDs[mid] = struct{}{}
+		}
+	}
+}
+
+func (s *collectLifecycleState) discardPendingMasterMIDs(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.pendingMasterMIDs, sourceID)
 }
 
 func (s *collectLifecycleState) addMasterAffectedMIDs(mids []int64) {
@@ -685,6 +746,14 @@ func flushPlaySummaryRefresh() ([]int64, error) {
 func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()
 	mids := normalizeAffectedMIDs(affectedMIDs)
+	if len(mids) == 0 {
+		if hasSnapshot, err := filmrepo.HasPublishedFilmListSnapshot(); err != nil {
+			return "", err
+		} else if !hasSnapshot {
+			log.Printf("[Spider][Finalizer] 主站快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
+			return "", nil
+		}
+	}
 	version, updated, err := filmrepo.UpsertActiveSnapshotsByMids(mids...)
 	if err != nil {
 		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
@@ -1009,11 +1078,21 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
+	isMasterFullCollect := s.Grade == model.MasterCollect && h < 0
+	if isMasterFullCollect {
+		collectLifecycle.beginMasterRebuild(s.Id)
+	}
 	defer func() {
 		originalErr := retErr
-		if originalErr != nil && !hadWrites {
+		if originalErr != nil && (!hadWrites || shouldSkipCollectPublishOnError(*s, h)) {
+			if isMasterFullCollect {
+				collectLifecycle.discardPendingMasterMIDs(s.Id)
+			}
 			collectLifecycle.endSource(s.Id)
 			return
+		}
+		if isMasterFullCollect {
+			collectLifecycle.publishPendingMasterMIDs(s.Id)
 		}
 		if flushAtEnd {
 			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
@@ -1369,7 +1448,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	recordPageSuccess := func(page int, mids []int64) {
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
-		if s.Grade == model.MasterCollect {
+		if s.Grade == model.MasterCollect && h < 0 {
+			collectLifecycle.addPendingMasterMIDs(s.Id, mids)
+		} else if s.Grade == model.MasterCollect {
 			collectLifecycle.addMasterAffectedMIDs(mids)
 		} else {
 			collectLifecycle.addAffectedMIDs(mids)
@@ -1471,7 +1552,14 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	if stopErr != nil {
 		return stats.success > 0, stopErr
 	}
+	if s.Grade == model.MasterCollect && h < 0 && stats.failed > 0 {
+		return stats.success > 0, fmt.Errorf("主站全量采集存在失败页 failed=%d，跳过本次框架发布", stats.failed)
+	}
 	return stats.success > 0, nil
+}
+
+func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
+	return source.Grade == model.MasterCollect && h < 0
 }
 
 // collectFilmById 采集指定ID的影片信息

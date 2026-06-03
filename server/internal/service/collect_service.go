@@ -80,7 +80,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	// 2. 强制单主站机制：如果新等级设为主站，则自动将旧主站降级
 	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
-		log.Printf("[Collect] 站点 %s 提升为主采集站，清理其旧有附属站播放列表并降级现有主站...", source.Name)
+		log.Printf("[Collect] 站点 %s 提升为主采集站，保留附属站播放列表并降级现有主站...", source.Name)
 	}
 
 	// 3. 检测主站切换并清理数据

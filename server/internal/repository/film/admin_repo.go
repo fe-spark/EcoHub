@@ -177,7 +177,7 @@ func normalizeSourceIDs(sourceIDs ...string) []string {
 }
 
 func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
-	// 主站切换会重建主数据和读模型，直接硬清理避免 gorm.Model 软删除产生海量 UPDATE。
+	// 主站切换只重建影片骨架和派生读模型；附属站播放列表是补充信息，继续保留等待新主站匹配键重新挂接。
 	for _, table := range masterDataResetTables() {
 		startedAt := time.Now()
 		if err := truncateTable(conn, table); err != nil {
@@ -200,7 +200,6 @@ func masterDataResetTables() []string {
 		model.TableFilmListSnapshot,
 		model.TableFilterOption,
 		model.TableFilterIndex,
-		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableMovieSourceMapping,
 		model.TableSearchTag,
@@ -298,8 +297,8 @@ func FilmZero() error {
 	return nil
 }
 
-// ClearMasterDataBySourceIDs 清理主站切换时必须重建的主数据和播放源读模型。
-// 主站切换会让所有影片骨架失效，附属站播放列表也必须重新挂接，因此这里直接整体重置。
+// ClearMasterDataBySourceIDs 清理主站切换时必须重建的影片骨架和派生读模型。
+// 附属站播放列表是影视补充信息，保留原始 movie_key，等待新主站全量采集后重新聚合。
 func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 	return ClearMasterDataBySourceIDsFast(sourceIDs...)
 }
