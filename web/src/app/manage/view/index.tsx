@@ -53,10 +53,7 @@ const quickEntries = [
 export default function ManagePageView() {
   return (
     <div className={styles.dashboard}>
-      <ManagePageHeader
-        title="管理后台"
-        description="保留高频管理入口，直接进入最常用的后台页面。"
-      />
+      <ManagePageHeader title="管理后台" />
 
       <Card className={styles.panelCard}>
         <section className={styles.sectionBlock}>
@@ -64,7 +61,11 @@ export default function ManagePageView() {
             {quickEntries.map((entry) => {
               const Icon = entry.icon;
               return (
-                <Link key={entry.key} href={entry.href} className={styles.entryCard}>
+                <Link
+                  key={entry.key}
+                  href={entry.href}
+                  className={styles.entryCard}
+                >
                   <div className={styles.entryCardHead}>
                     <Icon className={styles.entryIcon} />
                     <div className={styles.entryTitle}>{entry.title}</div>
