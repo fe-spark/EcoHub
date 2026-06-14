@@ -59,8 +59,6 @@ services:
       REDIS_DB: ${REDIS_DB:-0}
     volumes:
       - ${ECOHUB_DATA_DIR:-${HOME}/.ecohub}/uploads:/app/static/upload
-    ports:
-      - 127.0.0.1:${SERVER_PUBLIC_PORT:-18080}:8080
     networks:
       - Eco-network
     depends_on:
