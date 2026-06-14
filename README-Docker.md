@@ -1,30 +1,33 @@
 # Docker 部署说明
 
-仓库根目录提供两份 Compose 配置：
+本文只讲 Docker 部署。普通用户推荐使用“发布版部署”，不需要 clone 源码，也不需要分别运行 `ecohub-web` 和 `ecohub-server`。
 
-- `docker-compose.release.yml`：发布版开箱即用配置，直接使用已发布镜像，内置 MySQL / Redis，数据默认放在用户目录。
-- `docker-compose.yml`：开发/源码部署配置，从本地 `web/` 和 `server/` 构建镜像。
+## 部署方式选择
 
-## 服务组成
-
-| 服务 | 说明 | 默认镜像 / 构建 |
+| 场景 | 推荐方式 | 说明 |
 | --- | --- | --- |
-| `web` | Next.js 前端，对外入口 | `./web/Dockerfile` |
-| `server` | Go API 服务 | `./server/Dockerfile` |
-| `mysql` | 可选 MySQL 8.4 | `mysql:8.4` |
-| `redis` | 可选 Redis 7.4 | `redis:7.4-alpine` |
+| 只想直接运行 EcoHub | 发布版部署 | 下载一份 Compose 文件，自动拉取 GHCR 镜像，内置 MySQL / Redis |
+| 想从当前源码构建镜像 | 源码版部署 | 使用仓库根目录 `docker-compose.yml`，从 `web/` 和 `server/` 本地构建 |
+| 已有 MySQL / Redis | 外部数据库部署 | 修改 `.env` 连接信息，只启动 `server` 和 `web` |
 
 ## 前置条件
 
 - Docker 20+
 - Docker Compose 2+
-- 能拉取基础镜像
+- 服务器可以访问 GitHub Container Registry 和 Docker Hub
 
-## 发布版：开箱即用
+## 发布版部署（推荐）
 
-适合只想运行 EcoHub 的用户。无需 clone 源码，也不需要分别理解 `ecohub-web` 和 `ecohub-server` 两个镜像。
+发布版使用 [docker-compose.release.yml](./docker-compose.release.yml)，默认启动四个容器：
 
-### 1. 下载发布版 Compose 文件
+| 容器 | 作用 | 镜像 |
+| --- | --- | --- |
+| `Eco-web` | 前台、播放页、登录页、管理后台 | `ghcr.io/fe-spark/ecohub-web:v1.0.0` |
+| `Eco-server` | Go API、采集、缓存、鉴权、开放接口 | `ghcr.io/fe-spark/ecohub-server:v1.0.0` |
+| `Eco-mysql` | 内置 MySQL 数据库 | `mysql:8.4` |
+| `Eco-redis` | 内置 Redis 缓存 | `redis:7.4-alpine` |
+
+### 1. 准备目录
 
 ```bash
 mkdir -p ~/ecohub
@@ -32,18 +35,34 @@ cd ~/ecohub
 curl -L -o docker-compose.yml https://raw.githubusercontent.com/fe-spark/EcoHub/main/docker-compose.release.yml
 ```
 
-### 2. 启动
+### 2. 可选配置
+
+不创建 `.env` 也可以启动；正式部署建议创建 `.env` 修改密码和密钥：
+
+```env
+ECOHUB_VERSION=v1.0.0
+ECOHUB_DATA_DIR=/data/ecohub
+
+WEB_PUBLIC_PORT=3000
+SERVER_PUBLIC_PORT=18080
+
+JWT_SECRET=change_me_to_a_long_random_string
+MYSQL_ROOT_PASSWORD=change_me
+MYSQL_PASSWORD=change_me
+REDIS_PASSWORD=change_me
+```
+
+生成 `JWT_SECRET`：
+
+```bash
+openssl rand -hex 32
+```
+
+### 3. 启动
 
 ```bash
 docker compose up -d
 ```
-
-默认会启动：
-
-- `Eco-web`：前台和管理后台入口
-- `Eco-server`：后端 API 服务
-- `Eco-mysql`：内置 MySQL
-- `Eco-redis`：内置 Redis
 
 默认访问：
 
@@ -51,7 +70,7 @@ docker compose up -d
 - 后台：`http://你的服务器:3000/manage`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
-### 3. 数据目录
+### 4. 数据目录
 
 发布版默认把数据放在当前用户目录：
 
@@ -61,39 +80,15 @@ docker compose up -d
 ~/.ecohub/uploads
 ```
 
-如果要指定其他目录：
+如果设置了 `ECOHUB_DATA_DIR=/data/ecohub`，则会写入：
 
-```bash
-ECOHUB_DATA_DIR=/data/ecohub docker compose up -d
+```text
+/data/ecohub/mysql
+/data/ecohub/redis
+/data/ecohub/uploads
 ```
 
-### 4. 常用配置
-
-可以在 `~/ecohub/.env` 中覆盖默认值：
-
-```env
-ECOHUB_VERSION=v1.0.0
-ECOHUB_DATA_DIR=/data/ecohub
-WEB_PUBLIC_PORT=3000
-SERVER_PUBLIC_PORT=18080
-JWT_SECRET=change_me_to_a_long_random_string
-MYSQL_ROOT_PASSWORD=change_me
-MYSQL_PASSWORD=change_me
-REDIS_PASSWORD=change_me
-```
-
-正式部署前建议至少修改：
-
-- `JWT_SECRET`
-- `MYSQL_ROOT_PASSWORD`
-- `MYSQL_PASSWORD`
-- `REDIS_PASSWORD`
-
-生成 `JWT_SECRET`：
-
-```bash
-openssl rand -hex 32
-```
+不要随意删除这些目录。删除后数据库、缓存和上传图片会丢失。
 
 ### 5. 更新
 
@@ -103,88 +98,41 @@ docker compose pull
 docker compose up -d
 ```
 
-如果要升级到新版本，修改 `.env` 中的 `ECOHUB_VERSION` 后再执行上面的命令。
+升级到新版本时，先修改 `.env` 中的 `ECOHUB_VERSION`，再执行上面的命令。
 
-## 默认约定
+## 源码版部署
 
-- `web` 对外暴露 `3000`。
-- `server` 默认监听 `8080`，对外映射为 `18080`，同时供 `web` 通过容器网络访问。
-- 内置 `mysql` / `redis` 默认不向宿主机暴露端口；只在 Compose 网络内供 `server` 访问。
-- `web` 的 `API_URL` 默认为 `http://server:${SERVER_PORT:-8080}`。
-- 浏览器端访问当前站点 `/api/*`，由 Next 转发到 `server`。
-- Compose 会自动读取根目录 `.env`，不读取 `server/.env` 或 `web/.env.local`。
-- `mysql` 和 `redis` 已配置 Docker volume：`eco-mysql-data`、`eco-redis-data`。
+源码版适合开发者或需要自己构建镜像的场景。它使用仓库根目录的 [docker-compose.yml](./docker-compose.yml)。
 
-## 源码版配置入口
-
-先复制根目录配置模板：
+### 1. 准备配置
 
 ```bash
 cp .env.example .env
 ```
 
-正式部署前至少修改 `.env` 中这些值：
+正式部署前至少修改：
 
 - `JWT_SECRET`
-- MySQL root 密码、业务库用户和密码
-- Redis 密码
+- `MYSQL_ROOT_PASSWORD`
+- `MYSQL_PASSWORD`
+- `REDIS_PASSWORD`
 
-对外端口只需要填写宿主机端口号；`SERVER_PORT` 是后端容器内部监听端口，`web` 的 `API_URL` 会跟随它：
-
-```env
-WEB_PUBLIC_PORT=3000
-SERVER_PUBLIC_PORT=18080
-SERVER_PORT=8080
-```
-
-内置 MySQL / Redis 默认不对宿主机暴露端口。如果需要直连调试，请临时在 `docker-compose.yml` 的对应服务中添加 `ports`，并优先绑定 `127.0.0.1`。
-
-生成 `JWT_SECRET`：
-
-```bash
-openssl rand -hex 32
-```
-
-不要把真实生产密码提交到仓库。
-
-## 场景一：使用 Compose 内置 MySQL / Redis
-
-适合服务器上还没有数据库和缓存的情况。
-
-### 1. 确认配置
-
-`.env` 中应保持容器服务名：
-
-```env
-MYSQL_HOST=mysql
-REDIS_HOST=redis
-```
-
-如果修改数据库或 Redis 密码，只改根目录 `.env`。
-
-### 2. 启动全部服务
+### 2. 使用内置 MySQL / Redis
 
 ```bash
 docker compose up --build -d mysql redis server web
 ```
 
-### 3. 访问
+默认访问：
 
 - 前台：`http://你的服务器:3000`
 - 后台：`http://你的服务器:3000/manage`
-- API：`http://你的服务器:3000/api/*`
-- 直连后端：`http://你的服务器:18080`
+- 后端直连：`http://你的服务器:18080`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
-如果宿主机已有服务占用 `3000` 或 `18080`，修改 `.env` 中对应的 `*_PUBLIC_PORT`。MySQL / Redis 默认不发布端口，不会占用宿主机 `3306` / `6379`。
+### 3. 连接外部 MySQL / Redis
 
-## 场景二：连接外部 MySQL / Redis
-
-适合已有宿主机数据库、远程数据库、云数据库或独立 Redis 的情况。
-
-### 1. 修改后端连接信息
-
-在根目录 `.env` 中修改：
+如果你已经有数据库和 Redis，修改根目录 `.env`：
 
 ```env
 MYSQL_HOST=host.docker.internal
@@ -192,25 +140,24 @@ MYSQL_PORT=3306
 MYSQL_USER=your_mysql_user
 MYSQL_PASSWORD=your_mysql_password
 MYSQL_DBNAME=your_mysql_db
+
 REDIS_HOST=host.docker.internal
 REDIS_PORT=6379
 REDIS_PASSWORD=your_redis_password
 REDIS_DB=0
 ```
 
-地址填写建议：
-
-- 数据库在 Docker 宿主机：优先使用 `host.docker.internal`。
-- 数据库在其他机器：填写真实 IP、域名或内网地址。
-- Redis 无密码：`REDIS_PASSWORD` 留空字符串。
-
-### 2. 只启动应用服务
+只启动应用服务：
 
 ```bash
 docker compose up --build -d server web
 ```
 
-这种方式不会启动 Compose 内置的 `mysql` 和 `redis`。
+地址填写建议：
+
+- 数据库在 Docker 宿主机：使用 `host.docker.internal`。
+- 数据库在其他机器：填写真实 IP、域名或内网地址。
+- Redis 无密码：`REDIS_PASSWORD` 留空字符串。
 
 ## 常用命令
 
@@ -223,49 +170,48 @@ docker compose logs -f redis
 docker compose restart web
 docker compose restart server
 docker compose down
+```
+
+删除容器但保留数据：
+
+```bash
+docker compose down
+```
+
+删除容器和 Compose volume：
+
+```bash
 docker compose down -v
 ```
 
-`docker compose down -v` 会删除 MySQL / Redis volume，数据会丢失。
+发布版的数据是宿主机目录挂载，主要由 `ECOHUB_DATA_DIR` 或 `~/.ecohub` 决定；源码版默认使用 Docker volume。
 
-## 持久化建议
+## 端口说明
 
-内置 MySQL / Redis 已配置 volume：
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `WEB_PUBLIC_PORT` | `3000` | 前台和后台入口端口 |
+| `SERVER_PUBLIC_PORT` | `18080` | 后端直连端口，发布版默认只绑定 `127.0.0.1` |
+| `SERVER_PORT` | `8080` | 后端容器内部监听端口，通常不需要改 |
 
-- `eco-mysql-data`
-- `eco-redis-data`
-
-海报和图库文件默认在 API 容器内：
-
-```text
-/app/static/upload/gallery
-```
-
-生产环境建议挂载到宿主机：
-
-```yaml
-services:
-  server:
-    volumes:
-      - /path/to/gallery:/app/static/upload/gallery
-```
+浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端。
 
 ## 反向代理建议
 
-生产环境建议只暴露 `web`，由反向代理统一处理 HTTPS 和域名：
+生产环境建议只暴露 Web，并由 Nginx、Caddy 或其他反向代理处理 HTTPS：
 
 ```text
 https://your-domain.com        -> web:3000
-https://your-domain.com/api/*  -> web:3000/api/* -> server:${SERVER_PORT:-8080}
+https://your-domain.com/api/*  -> web:3000/api/* -> server:8080
 ```
 
-如果不需要外部直连后端，可以移除或限制 `server` 的 `SERVER_PUBLIC_PORT:SERVER_PORT` 端口映射。
+如果不需要外部直连后端，可以限制或移除 `SERVER_PUBLIC_PORT` 对外映射。
 
-## 健康检查
+## 健康检查与排障
 
 - `server` 健康检查：`/api/health`
-- `web` 依赖 `server` 健康后启动
-- `server` 启动时由应用自身连接 MySQL 和 Redis，数据库不可达时会退出或保持不健康
+- `web` 会等待 `server` 健康后启动
+- `server` 启动时会连接 MySQL 和 Redis，连接失败会退出或保持不健康
 
 排查启动问题时优先查看：
 
@@ -274,13 +220,20 @@ docker compose logs -f server
 docker compose logs -f web
 ```
 
+如果容器反复重启，重点检查：
+
+- `.env` 中数据库和 Redis 密码是否一致
+- `JWT_SECRET` 是否已配置
+- `WEB_PUBLIC_PORT` 是否被宿主机其他服务占用
+- 服务器是否可以拉取 GHCR 和 Docker Hub 镜像
+
 ## 安全建议
 
 - 部署后立即修改默认账号 `admin / admin`、`guest / guest`。
-- `JWT_SECRET` 必须每个环境单独生成。
-- 不要在公开仓库中保留生产数据库密码和 Redis 密码。
+- `JWT_SECRET` 每个环境单独生成。
+- 不要把真实生产密码提交到仓库。
 - 优先通过 HTTPS 暴露前端入口。
-- 不建议直接把数据库、Redis 或后端 API 暴露到公网。
+- 不建议直接把 MySQL、Redis 或后端 API 暴露到公网。
 
 ## 相关文档
 

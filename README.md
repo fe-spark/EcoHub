@@ -106,25 +106,7 @@ npm run dev
 
 ### Docker 部署
 
-先复制根目录统一配置，并按需修改端口、密钥和数据库连接：
-
-```bash
-cp .env.example .env
-```
-
-使用 Compose 内置 MySQL / Redis：
-
-```bash
-docker compose up --build -d mysql redis server web
-```
-
-只启动应用服务并连接外部 MySQL / Redis：
-
-```bash
-docker compose up --build -d server web
-```
-
-部署配置只改根目录 `.env`。内置 MySQL / Redis 默认不对宿主机暴露端口，仅在 Compose 网络内供后端访问。完整部署说明见 [Docker 部署说明](./README-Docker.md)。
+Docker / GHCR 镜像和 Compose 部署方式见 [Docker 部署说明](./README-Docker.md)。
 
 ## 文档导航
 
