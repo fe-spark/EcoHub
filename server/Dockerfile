@@ -1,6 +1,9 @@
 FROM golang:1.24-alpine
 
-LABEL maintainer="spark"
+LABEL maintainer="spark" \
+      org.opencontainers.image.title="EcoHub Server" \
+      org.opencontainers.image.description="EcoHub Go API server for collection, aggregation, cache, authentication, and open interfaces." \
+      org.opencontainers.image.source="https://github.com/fe-spark/EcoHub"
 
 ENV GO111MODULE=on \
     CGO_ENABLED=0 \
