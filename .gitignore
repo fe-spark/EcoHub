@@ -24,7 +24,7 @@ web/.env.local
 node_modules/
 dist/
 package-lock.json
-
+.opencode.json
 .idea/
 .idea
 .vscode
