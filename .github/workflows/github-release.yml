@@ -58,12 +58,12 @@ jobs:
         run: |
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
-              --title "EcoHub $VERSION 正式版" \
+              --title "$VERSION" \
               --notes-file RELEASE.md \
               --latest
           else
             gh release create "$VERSION" \
-              --title "EcoHub $VERSION 正式版" \
+              --title "$VERSION" \
               --notes-file RELEASE.md \
               --latest
           fi
