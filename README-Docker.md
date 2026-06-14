@@ -1,6 +1,9 @@
 # Docker 部署说明
 
-仓库根目录提供 `docker-compose.yml`，可用于部署 EcoHub 的前端、后端、MySQL 和 Redis。
+仓库根目录提供两份 Compose 配置：
+
+- `docker-compose.release.yml`：发布版开箱即用配置，直接使用已发布镜像，内置 MySQL / Redis，数据默认放在用户目录。
+- `docker-compose.yml`：开发/源码部署配置，从本地 `web/` 和 `server/` 构建镜像。
 
 ## 服务组成
 
@@ -17,6 +20,91 @@
 - Docker Compose 2+
 - 能拉取基础镜像
 
+## 发布版：开箱即用
+
+适合只想运行 EcoHub 的用户。无需 clone 源码，也不需要分别理解 `ecohub-web` 和 `ecohub-server` 两个镜像。
+
+### 1. 下载发布版 Compose 文件
+
+```bash
+mkdir -p ~/ecohub
+cd ~/ecohub
+curl -L -o docker-compose.yml https://raw.githubusercontent.com/fe-spark/EcoHub/main/docker-compose.release.yml
+```
+
+### 2. 启动
+
+```bash
+docker compose up -d
+```
+
+默认会启动：
+
+- `Eco-web`：前台和管理后台入口
+- `Eco-server`：后端 API 服务
+- `Eco-mysql`：内置 MySQL
+- `Eco-redis`：内置 Redis
+
+默认访问：
+
+- 前台：`http://你的服务器:3000`
+- 后台：`http://你的服务器:3000/manage`
+- TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
+
+### 3. 数据目录
+
+发布版默认把数据放在当前用户目录：
+
+```text
+~/.ecohub/mysql
+~/.ecohub/redis
+~/.ecohub/uploads
+```
+
+如果要指定其他目录：
+
+```bash
+ECOHUB_DATA_DIR=/data/ecohub docker compose up -d
+```
+
+### 4. 常用配置
+
+可以在 `~/ecohub/.env` 中覆盖默认值：
+
+```env
+ECOHUB_VERSION=v1.0.0
+ECOHUB_DATA_DIR=/data/ecohub
+WEB_PUBLIC_PORT=3000
+SERVER_PUBLIC_PORT=18080
+JWT_SECRET=change_me_to_a_long_random_string
+MYSQL_ROOT_PASSWORD=change_me
+MYSQL_PASSWORD=change_me
+REDIS_PASSWORD=change_me
+```
+
+正式部署前建议至少修改：
+
+- `JWT_SECRET`
+- `MYSQL_ROOT_PASSWORD`
+- `MYSQL_PASSWORD`
+- `REDIS_PASSWORD`
+
+生成 `JWT_SECRET`：
+
+```bash
+openssl rand -hex 32
+```
+
+### 5. 更新
+
+```bash
+cd ~/ecohub
+docker compose pull
+docker compose up -d
+```
+
+如果要升级到新版本，修改 `.env` 中的 `ECOHUB_VERSION` 后再执行上面的命令。
+
 ## 默认约定
 
 - `web` 对外暴露 `3000`。
@@ -27,7 +115,7 @@
 - Compose 会自动读取根目录 `.env`，不读取 `server/.env` 或 `web/.env.local`。
 - `mysql` 和 `redis` 已配置 Docker volume：`eco-mysql-data`、`eco-redis-data`。
 
-## 配置入口
+## 源码版配置入口
 
 先复制根目录配置模板：
 
