@@ -8,7 +8,6 @@ LABEL maintainer="spark" \
 ENV GO111MODULE=on \
     CGO_ENABLED=0 \
     GOOS=linux \
-    GOARCH=amd64 \
     TZ=Asia/Shanghai
 
 RUN apk add --no-cache ca-certificates tzdata
