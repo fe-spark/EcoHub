@@ -44,7 +44,6 @@ ECOHUB_VERSION=v1.0.0
 ECOHUB_DATA_DIR=/data/ecohub
 
 WEB_PUBLIC_PORT=3000
-SERVER_PUBLIC_PORT=18080
 
 JWT_SECRET=change_me_to_a_long_random_string
 MYSQL_ROOT_PASSWORD=change_me
@@ -68,6 +67,7 @@ docker compose up -d
 
 - 前台：`http://你的服务器:3000`
 - 后台：`http://你的服务器:3000/manage`
+- API：`http://你的服务器:3000/api/*`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
 ### 4. 数据目录
@@ -127,7 +127,7 @@ docker compose up --build -d mysql redis server web
 
 - 前台：`http://你的服务器:3000`
 - 后台：`http://你的服务器:3000/manage`
-- 后端直连：`http://你的服务器:18080`
+- API：`http://你的服务器:3000/api/*`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
 ### 3. 连接外部 MySQL / Redis
@@ -191,10 +191,10 @@ docker compose down -v
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `WEB_PUBLIC_PORT` | `3000` | 前台和后台入口端口 |
-| `SERVER_PUBLIC_PORT` | `18080` | 后端直连端口，发布版默认只绑定 `127.0.0.1` |
-| `SERVER_PORT` | `8080` | 后端容器内部监听端口，通常不需要改 |
+| `SERVER_PUBLIC_PORT` | `18080` | 源码版调试端口；发布版默认不暴露后端端口 |
+| `SERVER_PORT` | `8080` | 后端容器内部监听端口，只供 Web 容器通过内网访问 |
 
-浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端。
+发布版默认只对外暴露 Web。浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端容器。
 
 ## 反向代理建议
 
@@ -205,7 +205,7 @@ https://your-domain.com        -> web:3000
 https://your-domain.com/api/*  -> web:3000/api/* -> server:8080
 ```
 
-如果不需要外部直连后端，可以限制或移除 `SERVER_PUBLIC_PORT` 对外映射。
+不建议把后端 API 直接暴露到公网；对外统一访问 Web 域名下的 `/api/*`。
 
 ## 健康检查与排障
 
