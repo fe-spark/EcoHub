@@ -64,10 +64,24 @@ interface NavItem {
   children: NavChildItem[];
 }
 
+interface MovieBasicInfo {
+  id: string;
+  mid?: string;
+  name: string;
+  picture: string;
+  year: string;
+  cName: string;
+  area: string;
+  language?: string;
+  classTag?: string;
+  remarks: string;
+  blurb?: string;
+}
+
 interface ContentSection {
   nav: NavItem;
-  movies: any[];
-  hot: any[];
+  movies: MovieBasicInfo[];
+  hot: MovieBasicInfo[];
 }
 
 export default function HomePageView({
@@ -295,7 +309,7 @@ export default function HomePageView({
                   <div
                     key={movieIndex}
                     className={styles.hotItem}
-                    onClick={() => router.push(resolvePlayEntryPath(movie.mid))}
+                    onClick={() => router.push(resolvePlayEntryPath(movie.id))}
                   >
                     <span className={styles.rank}>{movieIndex + 1}.</span>
                     <span className={styles.name}>{movie.name}</span>
