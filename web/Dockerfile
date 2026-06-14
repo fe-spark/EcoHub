@@ -1,8 +1,8 @@
 # ---- Base Stage ----
-FROM node:20-alpine AS base
+FROM --platform=$BUILDPLATFORM node:20-alpine AS build-base
 
 # ---- Dependencies Stage ----
-FROM base AS deps
+FROM build-base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package-lock.json* ./
@@ -10,7 +10,7 @@ RUN --mount=type=cache,target=/root/.npm \
     npm install
 
 # ---- Builder Stage ----
-FROM base AS builder
+FROM build-base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/app/.next/cache \
     npm run build
 
 # ---- Runner Stage ----
-FROM base AS runner
+FROM node:20-alpine AS runner
 WORKDIR /app
 
 LABEL org.opencontainers.image.title="EcoHub Web" \
