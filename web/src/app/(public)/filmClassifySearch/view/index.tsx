@@ -1,5 +1,7 @@
 "use client";
 
+import { useMemo, useState, useTransition } from "react";
+import { LoadingOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { Pagination } from "antd";
 import FilmList from "@/components/public/FilmList";
@@ -13,6 +15,8 @@ export default function FilmClassifySearchPageView({
   currentParams: Record<string, string>;
 }) {
   const router = useRouter();
+  const [isRoutePending, startTransition] = useTransition();
+  const [navigatingUrl, setNavigatingUrl] = useState("");
   const { title, list, search, params, page } = data;
   const safeList = Array.isArray(list) ? list : [];
   const safeSearch = {
@@ -23,6 +27,12 @@ export default function FilmClassifySearchPageView({
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 20 };
   const categoryKey = [safeParams.Pid || currentParams.Pid || "", safeParams.Category || currentParams.Category || ""].join(":");
+  const currentQueryString = useMemo(
+    () => new URLSearchParams(currentParams).toString(),
+    [currentParams],
+  );
+  const currentUrl = `/filmClassifySearch?${currentQueryString}`;
+  const isPending = isRoutePending || (navigatingUrl !== "" && navigatingUrl !== currentUrl);
 
   const normalizeTagValue = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -41,6 +51,10 @@ export default function FilmClassifySearchPageView({
   };
 
   const handleTagClick = (key: string, value: string) => {
+    if (isPending) {
+      return;
+    }
+
     const nextParams = new URLSearchParams(currentParams);
     const normalizedValue = normalizeTagValue(value);
     if (normalizedValue === "") {
@@ -49,24 +63,46 @@ export default function FilmClassifySearchPageView({
       nextParams.set(key, normalizedValue);
     }
     nextParams.set("current", "1");
-    router.push(`/filmClassifySearch?${nextParams.toString()}`);
+    const nextUrl = `/filmClassifySearch?${nextParams.toString()}`;
+
+    if (nextUrl === currentUrl) {
+      return;
+    }
+
+    setNavigatingUrl(nextUrl);
+    startTransition(() => {
+      router.push(nextUrl);
+    });
   };
 
   const handlePageChange = (pageNo: number) => {
+    if (isPending) {
+      return;
+    }
+
     const nextParams = new URLSearchParams(currentParams);
     nextParams.set("current", pageNo.toString());
-    router.push(`/filmClassifySearch?${nextParams.toString()}`);
+    const nextUrl = `/filmClassifySearch?${nextParams.toString()}`;
+
+    if (nextUrl === currentUrl) {
+      return;
+    }
+
+    setNavigatingUrl(nextUrl);
+    startTransition(() => {
+      router.push(nextUrl);
+    });
   };
 
   return (
-    <div className={styles.container}>
+    <div className={`${styles.container} ${isPending ? styles.isPending : ""}`}>
       <div className={styles.resultHeader}>
         <div className={styles.count}>
           <span>{title?.name || "全部"}</span>共 {safePage.total ?? 0} 部影片
         </div>
       </div>
 
-      <div className={styles.filterSection}>
+      <div className={styles.filterSection} aria-busy={isPending}>
         {safeSearch.sortList.map((key: string) => (
           <div key={key} className={styles.filterRow}>
             <div className={styles.label}>{safeSearch.titles[key]}</div>
@@ -75,6 +111,7 @@ export default function FilmClassifySearchPageView({
                 <span
                   key={`${key}-${tag.Value}-${tag.Name}-${index}`}
                   className={`${styles.option} ${normalizeTagValue(safeParams[key]) === normalizeTagValue(tag.Value) ? styles.active : ""}`}
+                  aria-disabled={isPending}
                   onClick={() => handleTagClick(key, tag.Value)}
                 >
                   {tag.Name}
@@ -86,6 +123,12 @@ export default function FilmClassifySearchPageView({
       </div>
 
       <div className={styles.content}>
+        {isPending && (
+          <div className={styles.contentLoadingMask} role="status" aria-live="polite">
+            <LoadingOutlined />
+            <span>正在筛选影片...</span>
+          </div>
+        )}
         <FilmList key={categoryKey} list={safeList} className={styles.classifyGrid} />
       </div>
 
@@ -96,6 +139,7 @@ export default function FilmClassifySearchPageView({
             total={safePage.total ?? 0}
             pageSize={safePage.pageSize || 20}
             onChange={handlePageChange}
+            disabled={isPending}
             showSizeChanger={false}
             hideOnSinglePage
           />

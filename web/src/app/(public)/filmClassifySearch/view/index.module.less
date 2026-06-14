@@ -1,5 +1,17 @@
 .container {
   width: 100%;
+  position: relative;
+}
+
+.isPending {
+  .filterSection,
+  .paginationWrapper {
+    pointer-events: none;
+  }
+
+  .option {
+    cursor: wait;
+  }
 }
 
 .filterSection {
@@ -51,6 +63,11 @@
   transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   background: var(--public-surface-3);
 
+  &[aria-disabled="true"] {
+    opacity: 0.58;
+    transform: none;
+  }
+
   &:hover {
     color: var(--public-text-1);
     background: var(--public-surface-3);
@@ -63,6 +80,33 @@
     color: var(--public-on-accent);
     box-shadow: 0 4px 12px rgba(250, 140, 22, 0.4);
     transform: scale(1.05);
+  }
+}
+
+.content {
+  position: relative;
+  min-height: 280px;
+}
+
+.contentLoadingMask {
+  position: absolute;
+  inset: -12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--public-page-bg) 66%, rgba(0, 0, 0, 0.34));
+  color: var(--public-text-1);
+  font-size: 15px;
+  font-weight: 800;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  :global(.anticon) {
+    color: #fa8c16;
+    font-size: 24px;
   }
 }
 

@@ -440,11 +440,13 @@
 
 .sectionBody {
   display: flex;
-  gap: 24px;
+  gap: 32px;
+  align-items: flex-start;
 }
 
 .filmGrid {
   flex: 1;
+  min-width: 0;
 }
 
 .homeList {
@@ -452,17 +454,21 @@
 }
 
 .sideList {
-  width: 220px;
+  width: 280px;
   flex: none;
+  padding: 18px 16px 16px;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  background: var(--public-surface-1);
+  border: 1px solid var(--public-border-1);
   border-radius: 8px;
   box-shadow: var(--public-shadow-sm);
+  box-sizing: border-box;
 
   .sideTitle {
     font-size: 16px;
     font-weight: 800;
-    margin-bottom: 20px;
+    margin-bottom: 12px;
     display: flex;
     align-items: center;
     gap: 8px;
@@ -482,8 +488,9 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 0;
+  min-height: 44px;
   border-bottom: 1px solid var(--public-border-1);
+  border-radius: 6px;
   cursor: pointer;
   transition: all 0.2s ease;
 
@@ -492,6 +499,8 @@
   }
 
   &:hover {
+    background: var(--public-surface-hover);
+
     .name {
       color: #fa8c16;
       transform: translateX(4px);
@@ -504,7 +513,8 @@
   }
 
   .rank {
-    width: 20px;
+    flex: 0 0 22px;
+    width: 22px;
     height: 20px;
     display: flex;
     align-items: center;
@@ -528,6 +538,7 @@
 
   .name {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -662,18 +673,36 @@
 
   .sectionHeader {
     gap: 12px;
-    align-items: flex-start;
+    align-items: center;
 
     .left {
+      min-width: 0;
       font-size: 18px;
 
       .icon {
+        flex: 0 0 auto;
         font-size: 24px;
+      }
+
+      a {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     }
 
     .nav {
-      display: none;
+      display: flex;
+      flex: 0 0 auto;
+      gap: 0;
+
+      a:not(.more) {
+        display: none;
+      }
+
+      .more {
+        white-space: nowrap;
+      }
     }
   }
 
