@@ -85,7 +85,7 @@ services:
       - "host.docker.internal:host-gateway"
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q --spider http://localhost:$${PORT}/api/health"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${PORT}/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
