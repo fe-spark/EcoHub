@@ -1,24 +1,24 @@
 # Docker 部署说明
 
-本文只讲 Docker 部署。普通用户推荐使用“发布版部署”，不需要 clone 源码，也不需要分别运行 `ecohub-web` 和 `ecohub-server`。
+本文只讲 Docker 部署。普通用户推荐使用“发布版部署”，不需要下载源码，也不需要分别启动前端和后端。
 
 ## 部署方式选择
 
 | 场景 | 推荐方式 | 说明 |
 | --- | --- | --- |
-| 只想直接运行 EcoHub | 发布版部署 | 执行安装脚本生成 Compose 文件和统一 `.env`，自动拉取 GHCR 镜像，内置 MySQL / Redis |
-| 想从当前源码构建镜像 | 源码版部署 | 使用仓库根目录 `docker-compose.yml`，从 `web/` 和 `server/` 本地构建 |
+| 只想直接运行 EcoHub | 发布版部署 | 执行安装脚本生成部署文件和 `.env`，自动下载已发布镜像，内置 MySQL / Redis |
+| 想从当前源码构建镜像 | 源码版部署 | 使用仓库根目录 `docker-compose.yml`，从 `web/` 和 `server/` 本地构建镜像 |
 | 已有 MySQL / Redis | 外部数据库部署 | 修改 `.env` 连接信息，只启动 `server` 和 `web` |
 
 ## 前置条件
 
 - Docker 20+
 - Docker Compose 2+
-- 服务器可以访问 GitHub Container Registry 和 Docker Hub
+- 服务器可以访问 GitHub 镜像仓库和 Docker Hub
 
 ## 发布版部署（推荐）
 
-发布版使用 [deploy/release/compose.yml](./deploy/release/compose.yml)，默认启动四个容器：
+发布版使用 [deploy/release/compose.yml](./deploy/release/compose.yml)。安装脚本会把它下载成 `~/ecohub/docker-compose.yml`，默认启动四个容器：
 
 | 容器 | 作用 | 镜像 |
 | --- | --- | --- |
@@ -27,17 +27,17 @@
 | `Eco-mysql` | 内置 MySQL 数据库 | `mysql:8.4` |
 | `Eco-redis` | 内置 Redis 缓存 | `redis:7.4-alpine` |
 
-### 1. 安装发布版配置
+### 1. 下载安装文件
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 ```
 
-安装脚本默认写入 `~/ecohub`，会生成 `docker-compose.yml`，并在 `.env` 不存在时从根目录 [.env.example](./.env.example) 创建同结构配置。
+安装脚本默认写入 `~/ecohub`，会生成 `docker-compose.yml`。如果 `.env` 不存在，脚本会从根目录 [.env.example](./.env.example) 复制一份同结构配置。
 
 ### 2. 修改配置
 
-发布版和源码版共用根目录 [.env.example](./.env.example) 这一套 `.env` 结构。正式部署前至少修改 `JWT_SECRET`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `REDIS_PASSWORD`。
+发布版和源码版使用同一套 `.env` 配置结构。正式部署前至少修改 `JWT_SECRET`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `REDIS_PASSWORD`。
 
 生成 `JWT_SECRET`：
 
@@ -56,7 +56,7 @@ docker compose up -d
 - 前台：`http://你的服务器:3000`
 - 后台：`http://你的服务器:3000/manage`
 - API：`http://你的服务器:3000/api/*`
-- 后端直连 API：`http://你的服务器:18080/api/*`
+- 后端直连接口：`http://你的服务器:18080/api/*`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
 ### 4. 数据目录
@@ -159,7 +159,7 @@ docker compose down
 docker compose down
 ```
 
-删除容器和 Compose volume：
+删除容器和源码版默认数据卷：
 
 ```bash
 docker compose down -v
@@ -172,21 +172,23 @@ docker compose down -v
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `WEB_PUBLIC_PORT` | `3000` | 前台和后台入口端口 |
-| `SERVER_PUBLIC_PORT` | `18080` | 后端直连 API 端口 |
+| `SERVER_PUBLIC_PORT` | `18080` | 后端直连接口端口 |
 | `SERVER_PORT` | `8080` | 后端容器内部监听端口，只供 Web 容器通过内网访问 |
 
-浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端容器。`SERVER_PUBLIC_PORT` 只用于需要直连后端 API 的场景。
+后端接口地址本身就以 `/api` 开头，所以访问 `SERVER_PUBLIC_PORT` 直连后端时也要带 `/api/...`，例如 `http://你的服务器:18080/api/health`。
+
+浏览器访问 Web 端口下的 `/api/*` 时，请求会先到前端容器，再转发到后端容器。`SERVER_PUBLIC_PORT` 只用于需要直接调后端接口的场景。
 
 ## 反向代理建议
 
-生产环境建议只暴露 Web，并由 Nginx、Caddy 或其他反向代理处理 HTTPS：
+生产环境建议只对外开放 Web 端口，并由 Nginx、Caddy 或其他反向代理处理 HTTPS：
 
 ```text
 https://your-domain.com        -> web:3000
 https://your-domain.com/api/*  -> web:3000/api/* -> server:8080
 ```
 
-不建议把后端 API 直接暴露到公网；对外统一访问 Web 域名下的 `/api/*`。
+不建议把后端接口直接暴露到公网；对外统一访问 Web 域名下的 `/api/*`。
 
 ## 健康检查与排障
 
@@ -206,7 +208,7 @@ docker compose logs -f web
 - `.env` 中数据库和 Redis 密码是否一致
 - `JWT_SECRET` 是否已配置
 - `WEB_PUBLIC_PORT` 是否被宿主机其他服务占用
-- 服务器是否可以拉取 GHCR 和 Docker Hub 镜像
+- 服务器是否可以下载 GitHub 镜像仓库和 Docker Hub 镜像
 
 ## 安全建议
 
@@ -214,7 +216,7 @@ docker compose logs -f web
 - `JWT_SECRET` 每个环境单独生成。
 - 不要把真实生产密码提交到仓库。
 - 优先通过 HTTPS 暴露前端入口。
-- 不建议直接把 MySQL、Redis 或后端 API 暴露到公网。
+- 不建议直接把 MySQL、Redis 或后端接口暴露到公网。
 
 ## 相关文档
 
