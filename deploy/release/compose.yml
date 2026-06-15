@@ -9,7 +9,7 @@ services:
       MYSQL_USER: ${MYSQL_USER:-eco}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
     volumes:
-      - ${ECOHUB_DATA_DIR:-${HOME}/.ecohub}/mysql:/var/lib/mysql
+      - ./data/mysql:/var/lib/mysql
     networks:
       - Eco-network
     healthcheck:
@@ -31,7 +31,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-ecohub}"]
     volumes:
-      - ${ECOHUB_DATA_DIR:-${HOME}/.ecohub}/redis:/data
+      - ./data/redis:/data
     networks:
       - Eco-network
     healthcheck:
@@ -43,22 +43,24 @@ services:
 
   server:
     container_name: Eco-server
-    image: ghcr.io/fe-spark/ecohub-server:${ECOHUB_VERSION:-v1.0.0}
+    image: ghcr.io/fe-spark/ecohub-server:v1.0.0
     restart: always
     environment:
-      PORT: 8080
+      PORT: ${SERVER_PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
-      MYSQL_HOST: mysql
-      MYSQL_PORT: 3306
+      MYSQL_HOST: ${MYSQL_HOST:-mysql}
+      MYSQL_PORT: ${MYSQL_PORT:-3306}
       MYSQL_USER: ${MYSQL_USER:-eco}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
       MYSQL_DBNAME: ${MYSQL_DBNAME:-eco}
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
+    ports:
+      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
     volumes:
-      - ${ECOHUB_DATA_DIR:-${HOME}/.ecohub}/uploads:/app/static/upload
+      - ./data/uploads:/app/static/upload
     networks:
       - Eco-network
     depends_on:
@@ -67,7 +69,8 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/health"]
+      test:
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${PORT}/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -75,10 +78,10 @@ services:
 
   web:
     container_name: Eco-web
-    image: ghcr.io/fe-spark/ecohub-web:${ECOHUB_VERSION:-v1.0.0}
+    image: ghcr.io/fe-spark/ecohub-web:v1.0.0
     restart: always
     environment:
-      API_URL: http://server:8080
+      API_URL: http://server:${SERVER_PORT:-8080}
     ports:
       - ${WEB_PUBLIC_PORT:-3000}:3000
     networks:

@@ -6,7 +6,7 @@
 
 | 场景 | 推荐方式 | 说明 |
 | --- | --- | --- |
-| 只想直接运行 EcoHub | 发布版部署 | 下载一份 Compose 文件，自动拉取 GHCR 镜像，内置 MySQL / Redis |
+| 只想直接运行 EcoHub | 发布版部署 | 执行安装脚本生成 Compose 文件和统一 `.env`，自动拉取 GHCR 镜像，内置 MySQL / Redis |
 | 想从当前源码构建镜像 | 源码版部署 | 使用仓库根目录 `docker-compose.yml`，从 `web/` 和 `server/` 本地构建 |
 | 已有 MySQL / Redis | 外部数据库部署 | 修改 `.env` 连接信息，只启动 `server` 和 `web` |
 
@@ -18,7 +18,7 @@
 
 ## 发布版部署（推荐）
 
-发布版使用 [docker-compose.release.yml](./docker-compose.release.yml)，默认启动四个容器：
+发布版使用 [deploy/release/compose.yml](./deploy/release/compose.yml)，默认启动四个容器：
 
 | 容器 | 作用 | 镜像 |
 | --- | --- | --- |
@@ -27,29 +27,17 @@
 | `Eco-mysql` | 内置 MySQL 数据库 | `mysql:8.4` |
 | `Eco-redis` | 内置 Redis 缓存 | `redis:7.4-alpine` |
 
-### 1. 准备目录
+### 1. 安装发布版配置
 
 ```bash
-mkdir -p ~/ecohub
-cd ~/ecohub
-curl -L -o docker-compose.yml https://raw.githubusercontent.com/fe-spark/EcoHub/main/docker-compose.release.yml
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 ```
 
-### 2. 可选配置
+安装脚本默认写入 `~/ecohub`，会生成 `docker-compose.yml`，并在 `.env` 不存在时从根目录 [.env.example](./.env.example) 创建同结构配置。
 
-不创建 `.env` 也可以启动；正式部署建议创建 `.env` 修改密码和密钥：
+### 2. 修改配置
 
-```env
-ECOHUB_VERSION=v1.0.0
-ECOHUB_DATA_DIR=/data/ecohub
-
-WEB_PUBLIC_PORT=3000
-
-JWT_SECRET=change_me_to_a_long_random_string
-MYSQL_ROOT_PASSWORD=change_me
-MYSQL_PASSWORD=change_me
-REDIS_PASSWORD=change_me
-```
+发布版和源码版共用根目录 [.env.example](./.env.example) 这一套 `.env` 结构。正式部署前至少修改 `JWT_SECRET`、`MYSQL_ROOT_PASSWORD`、`MYSQL_PASSWORD` 和 `REDIS_PASSWORD`。
 
 生成 `JWT_SECRET`：
 
@@ -68,24 +56,17 @@ docker compose up -d
 - 前台：`http://你的服务器:3000`
 - 后台：`http://你的服务器:3000/manage`
 - API：`http://你的服务器:3000/api/*`
+- 后端直连 API：`http://你的服务器:18080/api/*`
 - TVBox / 影视仓配置：`http://你的服务器:3000/api/provide/config`
 
 ### 4. 数据目录
 
-发布版默认把数据放在当前用户目录：
+发布版默认把数据放在安装目录下：
 
 ```text
-~/.ecohub/mysql
-~/.ecohub/redis
-~/.ecohub/uploads
-```
-
-如果设置了 `ECOHUB_DATA_DIR=/data/ecohub`，则会写入：
-
-```text
-/data/ecohub/mysql
-/data/ecohub/redis
-/data/ecohub/uploads
+~/ecohub/data/mysql
+~/ecohub/data/redis
+~/ecohub/data/uploads
 ```
 
 不要随意删除这些目录。删除后数据库、缓存和上传图片会丢失。
@@ -98,7 +79,7 @@ docker compose pull
 docker compose up -d
 ```
 
-升级到新版本时，先修改 `.env` 中的 `ECOHUB_VERSION`，再执行上面的命令。
+升级到新版本时，执行上面的命令重新拉取镜像并重建容器即可。
 
 ## 源码版部署
 
@@ -184,17 +165,17 @@ docker compose down
 docker compose down -v
 ```
 
-发布版的数据是宿主机目录挂载，主要由 `ECOHUB_DATA_DIR` 或 `~/.ecohub` 决定；源码版默认使用 Docker volume。
+发布版默认使用安装目录下的 `data/` 持久化数据；源码版默认使用 Docker volume。
 
 ## 端口说明
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `WEB_PUBLIC_PORT` | `3000` | 前台和后台入口端口 |
-| `SERVER_PUBLIC_PORT` | `18080` | 源码版调试端口；发布版默认不暴露后端端口 |
+| `SERVER_PUBLIC_PORT` | `18080` | 后端直连 API 端口 |
 | `SERVER_PORT` | `8080` | 后端容器内部监听端口，只供 Web 容器通过内网访问 |
 
-发布版默认只对外暴露 Web。浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端容器。
+浏览器访问 `/api/*` 时，请求会先到 Web，再由 Next.js 转发到后端容器。`SERVER_PUBLIC_PORT` 只用于需要直连后端 API 的场景。
 
 ## 反向代理建议
 
