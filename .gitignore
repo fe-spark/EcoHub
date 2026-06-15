@@ -18,6 +18,7 @@ web/.env.local
 # Dependency directories (remove the comment below to include it)
 # vendor/
 .codegraph/
+.claude/
 
 
 #忽略client相关依赖缓存
