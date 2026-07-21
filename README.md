@@ -19,7 +19,7 @@ EcoHub 是一个前后端分离的影视聚合系统。后端负责定时采集�
 - 新用户注册即送体验流量
 
 👉 专属优惠注册链接（支持本项目）：  
-[https://xn--9kqz23b19z.com/#/register?code=xAmvfdic](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
+[良心云](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
 
 > 个人实测稳定，适合当主力备用梯 + 大流量下载，2 块钱试错成本几乎为 0。
 
