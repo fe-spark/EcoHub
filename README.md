@@ -8,6 +8,21 @@ EcoHub 是一个前后端分离的影视聚合系统。后端负责定时采集�
 
 - [CloudCone](https://app.cloudcone.com/?ref=14393) — 演示站用的就是这家的服务器，**不限制 IO**（不少便宜 VPS 会卡 IO，跑数据库和采集容易卡死）。海外机器最大的好处就是**免备案、拿到就能用**，部署爬虫、做这种站很顺手，顺便还能搭个自己用的代理。注册与购买可使用邀请链接支持此项目。
 
+## 推荐机场（科学上网）
+
+部署海外服务器、采集源、调试接口时，稳定的代理几乎是刚需。这里推荐目前性价比极高的直连机场 **良心云**：
+
+- **2 元 / 月 100G**，6 元直接 1000G（1T），真正的价格屠夫
+- 全直连 AWS + 甲骨文高配机器，VLESS Reality + Hysteria2 双协议
+- 全节点解锁 Netflix / Disney+ / TikTok / ChatGPT，无审计、1 倍流量
+- 支持新疆、河南、福建等特殊地区，晚高峰也能看 4K
+- 新用户注册即送体验流量
+
+👉 专属优惠注册链接（支持本项目）：  
+[https://xn--9kqz23b19z.com/#/register?code=xAmvfdic](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
+
+> 个人实测稳定，适合当主力备用梯 + 大流量下载，2 块钱试错成本几乎为 0。
+
 ## 演示入口
 
 - 演示站点：[https://eco.fe-spark.cn](https://eco.fe-spark.cn)
