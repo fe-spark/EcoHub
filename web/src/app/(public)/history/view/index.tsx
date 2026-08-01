@@ -15,6 +15,8 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 
+import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+
 function readHistoryList(): any[] {
   const historyMap = readHistoryMap();
   return (Object.values(historyMap) as any[]).sort(
@@ -45,6 +47,11 @@ export default function HistoryPageView() {
     return `已观看 ${percent}%`;
   };
 
+  const handlePlayLink = (link: string) => {
+    startNavigationLoading("进入播放页...");
+    router.push(link);
+  };
+
   return (
     <div className={styles.container}>
       <h1 className={styles.title}>观看历史</h1>
@@ -59,10 +66,10 @@ export default function HistoryPageView() {
                 src={item.picture || FALLBACK_IMG}
                 className={styles.poster}
                 alt={item.name}
-                onClick={() => router.push(item.link)}
+                onClick={() => handlePlayLink(item.link)}
               />
               <div className={styles.info}>
-                <h3 onClick={() => router.push(item.link)}>{item.name}</h3>
+                <h3 onClick={() => handlePlayLink(item.link)}>{item.name}</h3>
                 <div className={styles.meta}>
                   <span>
                     <ClockCircleOutlined style={{ marginRight: 4 }} />
