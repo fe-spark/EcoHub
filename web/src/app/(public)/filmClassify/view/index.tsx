@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import FilmList from "@/components/public/FilmList";
+import { startNavigationLoading } from "@/components/public/TopLoadingBar";
 import styles from "./index.module.less";
 
 export default function FilmClassifyPageView({
@@ -14,13 +15,18 @@ export default function FilmClassifyPageView({
   const router = useRouter();
   const { title, content } = data;
 
+  const pushWithLoading = (href: string, label = "页面加载中") => {
+    startNavigationLoading(label);
+    router.push(href);
+  };
+
   const renderSection = (titleStr: string, list: any[], sort: string) => (
     <div className={styles.section}>
       <div className={styles.sectionHeader}>
         <span className={styles.titleText}>{titleStr}</span>
         <a
           className={styles.moreBtn}
-          onClick={() => router.push(`/filmClassifySearch?Pid=${pid}&Sort=${sort}`)}
+          onClick={() => pushWithLoading(`/filmClassifySearch?Pid=${pid}&Sort=${sort}`, "分类加载中")}
         >
           更多 &gt;
         </a>
@@ -32,11 +38,11 @@ export default function FilmClassifyPageView({
   return (
     <div className={styles.container}>
       <div className={styles.title}>
-        <a className={styles.active} onClick={() => router.push(`/filmClassify?Pid=${pid}`)}>
+        <a className={styles.active} onClick={() => pushWithLoading(`/filmClassify?Pid=${pid}`, "分类加载中")}>
           {title.name}
         </a>
         <div className={styles.line} />
-        <a onClick={() => router.push(`/filmClassifySearch?Pid=${pid}`)}>{title.name}库</a>
+        <a onClick={() => pushWithLoading(`/filmClassifySearch?Pid=${pid}`, "分类加载中")}>{title.name}库</a>
       </div>
 
       <div className={styles.content}>

@@ -16,6 +16,7 @@ import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
+import { startNavigationLoading } from "@/components/public/TopLoadingBar";
 
 interface NavItem {
   id: string | number;
@@ -74,12 +75,18 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     message.success("已清空历史记录");
   };
 
+  const navigateWithLoading = useCallback((href: string, label = "页面加载中") => {
+    // 点击当下立刻给反馈，不依赖 Next loading.tsx（同页改 query 时往往不会触发）
+    startNavigationLoading(label);
+    router.push(href);
+  }, [router]);
+
   const handleSearch = () => {
     if (!keyword.trim()) {
       message.error("请输入搜索关键词");
       return;
     }
-    router.push(`/search?search=${encodeURIComponent(keyword)}`);
+    navigateWithLoading(`/search?search=${encodeURIComponent(keyword)}`, "搜索中");
   };
 
   const [showHistory, setShowHistory] = useState(false);
@@ -146,7 +153,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               key={idx}
               className={styles.historyItem}
               onClick={() => {
-                router.push(item.link);
+                navigateWithLoading(item.link, "页面加载中");
                 setShowHistory(false);
               }}
               style={{ cursor: "pointer" }}
@@ -169,10 +176,27 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
   const navigateToCategory = (id: string | number) => {
     const nextId = String(id);
+    const href = `/filmClassify?Pid=${encodeURIComponent(nextId)}`;
+    // 同一分类重复点击不重复开 loading，避免卡住
+    if (pathname.startsWith("/filmClassify") && searchParams.get("Pid") === nextId) {
+      setDesktopCatalogOpen(false);
+      setMobileMenuVisible(false);
+      return;
+    }
     setActiveCategoryId(nextId);
     setDesktopCatalogOpen(false);
     setMobileMenuVisible(false);
-    router.push(`/filmClassify?Pid=${encodeURIComponent(nextId)}`);
+    navigateWithLoading(href, "分类加载中");
+  };
+
+  const navigateHome = () => {
+    setActiveCategoryId("");
+    setDesktopCatalogOpen(false);
+    setMobileMenuVisible(false);
+    if (pathname === "/") {
+      return;
+    }
+    navigateWithLoading("/", "页面加载中");
   };
 
   return (
@@ -185,7 +209,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
           </div>
           
           {siteInfo?.siteName && (
-            <div className={styles.siteName} onClick={() => router.push("/")}>
+            <div className={styles.siteName} onClick={navigateHome}>
               {/* 站点 logo 由后台配置提供，当前保持原生 img 避免额外远程域名配置 */}
               {/* eslint-disable-next-line @next/next/no-img-element */}
               {siteInfo.logo && <img src={siteInfo.logo} alt="logo" className={styles.logoImg} />}
@@ -198,10 +222,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         <div className={styles.navArea} ref={desktopCatalogRef}>
           <nav className={styles.navLinks}>
             <a
-              onClick={() => {
-                setActiveCategoryId("");
-                router.push("/");
-              }}
+              onClick={navigateHome}
               className={`${styles.navHomeItem} ${isHomeActive ? styles.navHomeItemActive : ""}`}
             >
               首页
@@ -280,7 +301,15 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               {historyContent}
             </div>
             
-            <div className={styles.mobileSearchBtn} onClick={() => router.push("/search")}>
+            <div
+              className={styles.mobileSearchBtn}
+              onClick={() => {
+                if (pathname === "/search" && !searchParams.get("search")) {
+                  return;
+                }
+                navigateWithLoading("/search", "页面加载中");
+              }}
+            >
               <SearchOutlined />
             </div>
           </div>
@@ -298,7 +327,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         <div className={styles.mobileNav}>
           <div
             className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
-            onClick={() => { setActiveCategoryId(""); router.push("/"); setMobileMenuVisible(false); }}
+            onClick={navigateHome}
           >
             <HomeOutlined /> <span>首页</span>
           </div>

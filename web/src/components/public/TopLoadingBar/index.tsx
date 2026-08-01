@@ -8,6 +8,8 @@ interface TopLoadingBarProps {
   finishOnWindowLoad?: boolean;
 }
 
+const SAFETY_TIMEOUT_MS = 15000;
+
 let hostEl: HTMLDivElement | null = null;
 let barEl: HTMLSpanElement | null = null;
 let srOnlyEl: HTMLSpanElement | null = null;
@@ -16,14 +18,17 @@ let progress = 0;
 let progressTimer = 0;
 let finishTimer = 0;
 let hideTimer = 0;
+let safetyTimer = 0;
 
 function clearTimers() {
   window.clearInterval(progressTimer);
   window.clearTimeout(finishTimer);
   window.clearTimeout(hideTimer);
+  window.clearTimeout(safetyTimer);
   progressTimer = 0;
   finishTimer = 0;
   hideTimer = 0;
+  safetyTimer = 0;
 }
 
 function ensureElements(label: string) {
@@ -75,6 +80,14 @@ function showBar(label: string) {
     const step = progress < 45 ? 12 : progress < 72 ? 7 : 4;
     renderProgress(Math.min(progress + step, 90));
   }, 90);
+
+  // 网络极差时防止 loading 永久挂起
+  safetyTimer = window.setTimeout(() => {
+    if (activeCount > 0) {
+      activeCount = 0;
+      finishBar();
+    }
+  }, SAFETY_TIMEOUT_MS);
 }
 
 function finishBar() {
@@ -106,6 +119,31 @@ function stopLoading() {
   if (activeCount === 0) {
     finishBar();
   }
+}
+
+/** 点击导航时立刻显示顶栏 loading（不等 loading.tsx 挂载） */
+export function startNavigationLoading(label = "页面加载中") {
+  if (typeof window === "undefined") {
+    return;
+  }
+  startLoading(label);
+}
+
+/** 路由切换完成（或失败兜底）后关闭顶栏 loading */
+export function stopNavigationLoading() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  stopLoading();
+}
+
+/** 强制结束所有导航 loading（安全兜底） */
+export function forceStopNavigationLoading() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  activeCount = 0;
+  finishBar();
 }
 
 export default function TopLoadingBar({

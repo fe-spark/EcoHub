@@ -169,6 +169,9 @@ body {
   overscroll-behavior: none;
   touch-action: manipulation;
   -webkit-text-size-adjust: 100%;
+  /* 移动端避免 EffectCards / 阴影 / 负边距把页面撑出横向滚动条 */
+  overflow-x: clip;
+  max-width: 100%;
   font-family:
     "Inter",
     -apple-system,

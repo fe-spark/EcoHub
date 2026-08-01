@@ -5,6 +5,7 @@ import { ConfigProvider, theme } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import Header from "@/components/public/Header";
 import Footer from "@/components/public/Footer";
+import NavigationLoadingListener from "@/components/public/NavigationLoading";
 import styles from "./index.module.less";
 
 interface NavItem {
@@ -44,6 +45,7 @@ export default function PublicLayoutView({
       <div className={styles.layoutWrapper}>
         <Suspense fallback={null}>
           <Header navList={navList} />
+          <NavigationLoadingListener />
         </Suspense>
         <main className={`${styles.publicMain} page-entry`}>{children}</main>
         <Footer />

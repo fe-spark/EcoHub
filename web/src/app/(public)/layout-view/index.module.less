@@ -5,26 +5,35 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 .publicMain {
+  /* 与固定 Header 高度对齐：默认 80px + 留白 */
+  --public-header-offset: 100px;
+
   flex: 1;
   width: 100%;
-  max-width: 1440px;
+  max-width: min(1440px, 100%);
   margin: 0 auto;
-  padding: 100px var(--public-safe-gutter) 40px;
+  padding: var(--public-header-offset) var(--public-safe-gutter) 40px;
   position: relative;
   box-sizing: border-box;
+  overflow-x: clip;
 }
 
 @media (max-width: 768px) {
   .publicMain {
-    padding-top: 76px;
+    /* Header 固定 80px，原先 76px 会顶进导航栏被盖住 */
+    --public-header-offset: 96px;
   }
 }
 
 @media (max-width: 576px) {
   .publicMain {
+    --public-header-offset: 92px;
     padding-bottom: 24px;
   }
 }

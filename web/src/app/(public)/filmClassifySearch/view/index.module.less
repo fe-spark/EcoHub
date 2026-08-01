@@ -26,88 +26,118 @@
 
 .filterRow {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 16px;
   padding: 12px 0;
   border-bottom: 1px solid var(--public-border-1);
+  min-width: 0;
 
   &:last-child {
     border-bottom: none;
   }
 
   .label {
+    flex: 0 0 60px;
     width: 60px;
-    padding-top: 6px;
     font-size: 14px;
     font-weight: 700;
     color: var(--public-text-6);
     text-transform: uppercase;
     letter-spacing: 1px;
+    line-height: 32px;
   }
 
   .options {
     flex: 1;
+    min-width: 0;
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: center;
     gap: 8px;
+    /* 上下留白，避免选中态被 overflow 裁切成“背景割裂” */
+    padding: 2px 2px 2px 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: contain;
+    scroll-behavior: smooth;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+      height: 0;
+    }
   }
 }
 
 .option {
+  flex: 0 0 auto;
+  white-space: nowrap;
   padding: 6px 16px;
   border-radius: 8px;
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.4;
   color: var(--public-text-3);
   cursor: pointer;
-  transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  background: var(--public-surface-3);
+  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease;
+  background-color: var(--public-surface-3);
+  border: 1px solid transparent;
+  user-select: none;
+  /* 避免 transform/阴影被滚动容器裁切 */
+  transform: none;
+  box-shadow: none;
 
   &[aria-disabled="true"] {
     opacity: 0.58;
-    transform: none;
+    pointer-events: none;
   }
 
-  &:hover {
+  &:hover:not(.active) {
     color: var(--public-text-1);
-    background: var(--public-surface-3);
-    padding-left: 20px;
-    padding-right: 12px;
+    background-color: var(--public-surface-hover);
   }
 
   &.active {
-    background: #fa8c16;
-    color: var(--public-on-accent);
-    box-shadow: 0 4px 12px rgba(250, 140, 22, 0.4);
-    transform: scale(1.05);
+    background-color: #fa8c16;
+    background-image: none;
+    color: #fff;
+    border-color: #fa8c16;
+    box-shadow: none;
   }
 }
 
 .content {
   position: relative;
-  min-height: 280px;
+  min-height: 320px;
 }
 
-.contentLoadingMask {
-  position: absolute;
-  inset: -12px;
-  z-index: 10;
+/* 隐藏旧列表后的正式加载区：占位清晰，不盖在旧内容上 */
+.contentLoading {
+  min-height: 360px;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--public-page-bg) 66%, rgba(0, 0, 0, 0.34));
-  color: var(--public-text-1);
-  font-size: 15px;
-  font-weight: 800;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  gap: 14px;
+  padding: 48px 20px;
+  border-radius: 16px;
+  background: var(--public-surface-2);
+  border: 1px dashed color-mix(in srgb, #fa8c16 28%, var(--public-border-1));
+}
 
-  :global(.anticon) {
-    color: #fa8c16;
-    font-size: 24px;
-  }
+.contentLoadingTitle {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--public-text-1);
+}
+
+.contentLoadingHint {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--public-text-4);
 }
 
 .resultHeader {
@@ -150,12 +180,19 @@
 
   .filterRow {
     flex-direction: column;
+    align-items: stretch;
     gap: 8px;
 
     .label {
-      width: 100%;
-      padding-top: 0;
+      flex: none;
+      width: auto;
+      line-height: 1.2;
       font-size: 12px;
+    }
+
+    .options {
+      width: 100%;
+      padding-bottom: 2px;
     }
   }
 
