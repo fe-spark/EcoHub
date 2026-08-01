@@ -1,7 +1,5 @@
-/* 卡片堆叠 Hero：overflow 保持 visible，避免拖动被裁 */
-
 .hero {
-  --deck-w: 300px;
+  --deck-w: 320px;
 
   position: relative;
   width: 100%;
@@ -41,32 +39,42 @@
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(ellipse 55% 70% at 78% 48%, rgba(var(--primary-color-rgb), 0.18), transparent 55%),
-    linear-gradient(115deg, rgba(8, 10, 16, 0.88) 0%, rgba(8, 10, 16, 0.42) 46%, rgba(8, 10, 16, 0.78) 100%);
+    radial-gradient(ellipse 65% 75% at 50% 50%, rgba(var(--primary-color-rgb), 0.22), transparent 70%),
+    radial-gradient(ellipse 55% 70% at 85% 48%, rgba(var(--primary-color-rgb), 0.18), transparent 55%),
+    linear-gradient(115deg, rgba(8, 10, 16, 0.92) 0%, rgba(8, 10, 16, 0.52) 50%, rgba(8, 10, 16, 0.82) 100%);
 }
 
-.layout {
+.shell {
   position: relative;
   z-index: 1;
-  display: grid;
-  grid-template-columns: minmax(300px, 1fr) var(--deck-w);
-  grid-template-areas: "copy deck";
-  gap: 48px;
-  align-items: center;
   width: 100%;
-  max-width: 100%;
-  min-height: 440px;
-  padding: 32px 96px 48px 40px;
+  max-width: 1440px;
+  margin: 0 auto;
+  padding-top: 36px;
+  padding-bottom: 52px;
+  padding-left: clamp(40px, 4vw, 56px);
+  padding-right: clamp(72px, 7vw, 96px);
   box-sizing: border-box;
 }
 
-/* 卡片堆 */
+.layout {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(32px, 4vw, 64px);
+  width: 100%;
+  min-height: 420px;
+  box-sizing: border-box;
+}
+
+/* 卡片堆：贴右 */
 .deck {
-  grid-area: deck;
   position: relative;
   z-index: 2;
+  flex: 0 0 var(--deck-w);
   width: var(--deck-w);
-  justify-self: end;
+  margin-left: auto;
 }
 
 .deckSwiper {
@@ -152,16 +160,17 @@
   border-color: rgba(var(--primary-color-rgb), 0.96);
 }
 
-/* 左侧信息：直接铺在背景上，不做 Card 盒子 */
+/* 文案：充实信息密度 */
 .copy {
-  grid-area: copy;
+  flex: 1 1 560px;
   min-width: 0;
-  max-width: 520px;
+  max-width: 620px;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   justify-content: center;
   gap: 14px;
+  text-align: left;
 }
 
 .eyebrow {
@@ -193,6 +202,36 @@
   white-space: nowrap;
 }
 
+.badgeRating {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 180, 0, 0.15);
+  border: 1px solid rgba(255, 180, 0, 0.32);
+  color: #ffca28;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.badgeQuality {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  white-space: nowrap;
+}
+
 .counter {
   display: inline-flex;
   align-items: center;
@@ -213,10 +252,11 @@
 .title {
   margin: 0;
   width: 100%;
-  height: 2.4em;
+  height: auto;
+  max-height: 2.6em;
   color: #fff;
   font-size: clamp(24px, 2.8vw, 36px);
-  line-height: 1.2;
+  line-height: 1.25;
   font-weight: 900;
   letter-spacing: -0.02em;
   overflow: hidden;
@@ -248,10 +288,38 @@
   color: rgba(255, 255, 255, 0.82);
 }
 
+.tagHighlight {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  border: 1px solid rgba(var(--primary-color-rgb), 0.35);
+  background: rgba(var(--primary-color-rgb), 0.12);
+  color: rgba(var(--primary-color-rgb), 0.95);
+}
+
+.blurb {
+  margin: 2px 0 6px 0;
+  color: rgba(255, 255, 255, 0.68);
+  font-size: 13.5px;
+  line-height: 1.6;
+  max-width: 560px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  word-break: break-word;
+}
+
 .playBtn {
   align-self: flex-start;
   height: 46px !important;
-  padding: 0 26px !important;
+  padding: 0 28px !important;
   border: none !important;
   border-radius: 999px !important;
   background: linear-gradient(
@@ -263,23 +331,29 @@
   font-size: 15px !important;
   font-weight: 800 !important;
   box-shadow: 0 16px 34px rgba(var(--primary-color-rgb), 0.36) !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 20px 40px rgba(var(--primary-color-rgb), 0.5) !important;
+  }
 }
 
 .thumbs {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
-  gap: 10px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
   width: 100%;
-  max-width: 320px;
-  margin-top: 4px;
+  margin-top: 6px;
   padding-top: 14px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
   box-sizing: border-box;
 }
 
 .thumb {
-  width: 100%;
-  aspect-ratio: 2 / 3;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 78px;
   padding: 0;
   border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 10px;
@@ -310,10 +384,21 @@
     min-height: 440px;
   }
 
+  .shell {
+    padding-top: 28px;
+    padding-bottom: 48px;
+    padding-left: clamp(32px, 3.5vw, 48px);
+    padding-right: clamp(56px, 6vw, 80px);
+  }
+
   .layout {
     gap: 28px;
-    padding: 24px 72px 40px 28px;
-    min-height: 400px;
+    min-height: 380px;
+  }
+
+  .copy {
+    flex: 0 1 420px;
+    max-width: 440px;
   }
 
   .title {
@@ -329,21 +414,22 @@
     border-radius: 16px;
   }
 
+  .shell {
+    padding: 20px 28px 40px 16px; /* 右 28 > 左 16 */
+  }
+
   .layout {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "deck"
-      "copy";
-    justify-items: center;
+    flex-direction: column;
+    justify-content: flex-start;
     /* 卡片堆与下方标题/标签/播放 的间距 */
     gap: 28px;
     min-height: 0;
-    padding: 20px 24px 40px;
+    width: 100%;
   }
 
   .deck {
-    grid-area: deck;
-    justify-self: center;
+    order: 1;
+    flex: 0 0 auto;
     margin-bottom: 8px;
   }
 
@@ -352,7 +438,8 @@
   }
 
   .copy {
-    grid-area: copy;
+    order: 2;
+    flex: 0 0 auto;
     width: 100%;
     max-width: none;
     align-items: center;
@@ -399,8 +486,11 @@
     border-radius: 14px;
   }
 
+  .shell {
+    padding: 16px 24px 36px 12px; /* 右 24 > 左 12 */
+  }
+
   .layout {
-    padding: 16px 12px 36px;
     gap: 24px;
   }
 

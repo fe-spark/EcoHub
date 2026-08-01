@@ -38,12 +38,9 @@ export default function FilmClassifySearchPageView({
   const currentUrl = `/filmClassifySearch?${currentQueryString}`;
   const isPending = isRoutePending || (navigatingUrl !== "" && navigatingUrl !== currentUrl);
 
-  // 路由落地后清本地 pending 标记（顶栏 loading 由 NavigationLoadingListener 关闭）
-  useEffect(() => {
-    if (navigatingUrl && navigatingUrl === currentUrl) {
-      setNavigatingUrl("");
-    }
-  }, [currentUrl, navigatingUrl]);
+  if (navigatingUrl && navigatingUrl === currentUrl) {
+    setNavigatingUrl("");
+  }
 
   const normalizeTagValue = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -88,7 +85,7 @@ export default function FilmClassifySearchPageView({
       timers.forEach((id) => window.clearTimeout(id));
     };
     // 仅 URL / pending 变化时滚动，避免 params 对象引用抖动
-  }, [currentUrl, isPending, sortListKey]);
+  }, [currentUrl, isPending, sortListKey, safeSearch.sortList]);
 
   const beginNavigation = (nextUrl: string, label: string) => {
     setNavigatingUrl(nextUrl);
