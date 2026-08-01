@@ -1,11 +1,51 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import { LoadingOutlined } from "@ant-design/icons";
+import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { LoadingOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { Pagination } from "antd";
 import FilmList from "@/components/public/FilmList";
 import styles from "./index.module.less";
+
+import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+
+/**
+ * 单行筛选行滚动箭头 Hook
+ * 检测 .options 容器是否可向左/右滚动，提供滚动方法
+ */
+function useScrollArrows(dep: string) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [canLeft, setCanLeft] = useState(false);
+  const [canRight, setCanRight] = useState(false);
+
+  const check = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 2);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+  }, []);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    check();
+    el.addEventListener("scroll", check, { passive: true });
+    const ro = new ResizeObserver(check);
+    ro.observe(el);
+    return () => {
+      el.removeEventListener("scroll", check);
+      ro.disconnect();
+    };
+  }, [check, dep]);
+
+  const scrollBy = useCallback((dir: number) => {
+    const el = ref.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * el.clientWidth * 0.6, behavior: "smooth" });
+  }, []);
+
+  return { ref, canLeft, canRight, scrollLeft: () => scrollBy(-1), scrollRight: () => scrollBy(1) };
+}
 
 export default function FilmClassifySearchPageView({
   data,
@@ -69,6 +109,7 @@ export default function FilmClassifySearchPageView({
       return;
     }
 
+    startNavigationLoading("筛选影片中...");
     setNavigatingUrl(nextUrl);
     startTransition(() => {
       router.push(nextUrl);
@@ -88,6 +129,7 @@ export default function FilmClassifySearchPageView({
       return;
     }
 
+    startNavigationLoading("加载页面中...");
     setNavigatingUrl(nextUrl);
     startTransition(() => {
       router.push(nextUrl);
@@ -104,21 +146,16 @@ export default function FilmClassifySearchPageView({
 
       <div className={styles.filterSection} aria-busy={isPending}>
         {safeSearch.sortList.map((key: string) => (
-          <div key={key} className={styles.filterRow}>
-            <div className={styles.label}>{safeSearch.titles[key]}</div>
-            <div className={styles.options}>
-              {getSafeTags(safeSearch.tags[key]).map((tag: any, index: number) => (
-                <span
-                  key={`${key}-${tag.Value}-${tag.Name}-${index}`}
-                  className={`${styles.option} ${normalizeTagValue(safeParams[key]) === normalizeTagValue(tag.Value) ? styles.active : ""}`}
-                  aria-disabled={isPending}
-                  onClick={() => handleTagClick(key, tag.Value)}
-                >
-                  {tag.Name}
-                </span>
-              ))}
-            </div>
-          </div>
+          <FilterRow
+            key={key}
+            filterKey={key}
+            label={safeSearch.titles[key]}
+            tags={getSafeTags(safeSearch.tags[key])}
+            activeValue={normalizeTagValue(safeParams[key])}
+            isPending={isPending}
+            onTagClick={handleTagClick}
+            normalizeTagValue={normalizeTagValue}
+          />
         ))}
       </div>
 
@@ -145,6 +182,57 @@ export default function FilmClassifySearchPageView({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+/** 单行筛选行：带左右箭头滚动控制 */
+function FilterRow({
+  filterKey,
+  label,
+  tags,
+  activeValue,
+  isPending,
+  onTagClick,
+  normalizeTagValue,
+}: {
+  filterKey: string;
+  label: string;
+  tags: any[];
+  activeValue: string;
+  isPending: boolean;
+  onTagClick: (key: string, value: string) => void;
+  normalizeTagValue: (v: unknown) => string;
+}) {
+  const { ref, canLeft, canRight, scrollLeft, scrollRight } = useScrollArrows(filterKey);
+
+  return (
+    <div className={styles.filterRow}>
+      <div className={styles.label}>{label}</div>
+      <div className={styles.optionsWrap}>
+        {canLeft && (
+          <button type="button" className={`${styles.arrowBtn} ${styles.arrowLeft}`} onClick={scrollLeft} aria-label="向左滚动">
+            <LeftOutlined />
+          </button>
+        )}
+        <div className={styles.options} ref={ref}>
+          {tags.map((tag: any, index: number) => (
+            <span
+              key={`${filterKey}-${tag.Value}-${tag.Name}-${index}`}
+              className={`${styles.option} ${activeValue === normalizeTagValue(tag.Value) ? styles.active : ""}`}
+              aria-disabled={isPending}
+              onClick={() => onTagClick(filterKey, tag.Value)}
+            >
+              {tag.Name}
+            </span>
+          ))}
+        </div>
+        {canRight && (
+          <button type="button" className={`${styles.arrowBtn} ${styles.arrowRight}`} onClick={scrollRight} aria-label="向右滚动">
+            <RightOutlined />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

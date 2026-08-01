@@ -639,3 +639,90 @@
     grid-template-columns: 1fr;
   }
 }
+
+// Full Screen Loading Mask Overlay
+.fullScreenMask {
+  position: fixed !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 999999 !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 16px;
+  background: rgba(10, 12, 16, 0.75) !important;
+  backdrop-filter: blur(16px) !important;
+  -webkit-backdrop-filter: blur(16px) !important;
+  animation: fadeInMask 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  pointer-events: all !important;
+  user-select: none;
+}
+
+.maskContent {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px 48px;
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--public-surface-1, #181c24) 90%, transparent);
+  border: 1px solid rgba(250, 173, 20, 0.35);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 35px rgba(250, 173, 20, 0.2);
+}
+
+.maskSpinner {
+  font-size: 42px;
+  color: #faad14;
+  margin-bottom: 14px;
+}
+
+.maskText {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+@keyframes fadeInMask {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+// Nav Loading Indicators
+.navItemLoading {
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.navLoadingIcon {
+  margin-right: 6px;
+  font-size: 13px;
+  color: #faad14;
+}
+
+.catalogLoadingIcon {
+  margin-left: auto;
+  font-size: 14px;
+  color: #faad14;
+}
+
+.navCatalogItemLoading {
+  opacity: 0.85;
+  border-color: rgba(250, 173, 20, 0.4) !important;
+}
+
+.mobileNavItemLoading {
+  opacity: 0.85;
+}
+

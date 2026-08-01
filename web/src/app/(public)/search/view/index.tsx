@@ -24,6 +24,8 @@ function getPrimaryPlotTag(classTag?: string) {
     .find(Boolean) || "";
 }
 
+import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+
 export default function SearchPageView({
   data,
   keyword,
@@ -43,10 +45,12 @@ export default function SearchPageView({
       return;
     }
 
+    startNavigationLoading("搜索加载中...");
     router.push(`/search?search=${encodeURIComponent(searchKeyword)}&current=1`);
   };
 
   const handlePageChange = (page: number) => {
+    startNavigationLoading("页面加载中...");
     router.push(`/search?search=${encodeURIComponent(keyword)}&current=${page}`);
   };
 

@@ -104,6 +104,11 @@ export function finishNavigationLoading() {
   stopLoading();
 }
 
+export function forceFinishNavigationLoading() {
+  activeCount = 0;
+  finishBar();
+}
+
 function startLoading(label: string) {
   activeCount += 1;
   showBar(label);
