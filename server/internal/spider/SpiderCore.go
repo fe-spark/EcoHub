@@ -3,6 +3,7 @@ package spider
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"strconv"
@@ -50,14 +51,19 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 		log.Println("filmListPage 数据获取异常 : Resp Is Empty")
 		return nil, errors.New("filmListPage 数据获取异常 : Resp Is Empty")
 	}
-	err := json.Unmarshal(r.Resp, &filmListPage)
+	if err := json.Unmarshal(r.Resp, &filmListPage); err != nil {
+		return nil, fmt.Errorf("filmListPage JSON unmarshal error: %w", err)
+	}
 	// 获取分类列表信息
 	cl := filmListPage.Class
+	if len(cl) == 0 {
+		return &model.CategoryTree{}, nil
+	}
 	parentHints := jc.inferCategoryParents(r, cl)
 	// 组装分类数据信息树形结构
 	tree := conver.GenCategoryTreeWithParentHints(cl, parentHints)
 
-	return tree, err
+	return tree, nil
 }
 
 func (jc *JsonCollect) inferCategoryParents(r utils.RequestInfo, classes []model.FilmClass) map[int64]int64 {

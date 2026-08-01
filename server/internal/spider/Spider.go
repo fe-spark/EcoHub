@@ -33,8 +33,8 @@ import (
 var spiderCore = &JsonCollect{}
 
 const (
-	pageCountRetryTimes   = 2
-	filmDetailRetryTimes  = 2
+	pageCountRetryTimes   = 3
+	filmDetailRetryTimes  = 3
 	collectDBWriteRetries = 3
 	recoverMaxRetryCount  = 5
 )
@@ -79,6 +79,7 @@ var requestGates sync.Map
 type sourceRequestGate struct {
 	mu            sync.Mutex
 	nextAllowedAt time.Time
+	rateLimitHits int
 }
 
 func ClearLimiter(sourceID string) {
@@ -90,6 +91,7 @@ func ClearLimiter(sourceID string) {
 		gate := val.(*sourceRequestGate)
 		gate.mu.Lock()
 		gate.nextAllowedAt = time.Time{}
+		gate.rateLimitHits = 0
 		gate.mu.Unlock()
 	}
 }
@@ -399,12 +401,16 @@ func markSourcesCollectStarting(sources []model.FilmSource) {
 	}
 }
 
-func StopTask(sourceID string) {
+func markProgressStopped(sourceID string) {
 	updateCollectProgress(sourceID, func(progress *model.CollectProgress) {
 		if progress.Status == progressStatusStarting || progress.Status == progressStatusRunning {
 			progress.Status = progressStatusStopped
 		}
 	})
+}
+
+func StopTask(sourceID string) {
+	markProgressStopped(sourceID)
 	if val, ok := activeTasks.Load(sourceID); ok {
 		val.(collectTask).cancel()
 	}
@@ -1023,17 +1029,36 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 			gate.mu.Unlock()
 			return func(requestErr error) {
 				if requestErr == nil {
+					gate.mu.Lock()
+					if gate.rateLimitHits > 0 {
+						gate.rateLimitHits = 0
+					}
+					gate.mu.Unlock()
 					return
 				}
 				if utils.IsRateLimitedErr(requestErr) {
-					protectUntil := time.Now().Add(interval)
 					gate.mu.Lock()
+					gate.rateLimitHits++
+					hits := gate.rateLimitHits
+					if hits > 5 {
+						hits = 5
+					}
+					// 指数退避：每次 429 限流保护时间按 2^(hits-1) 翻倍延长 (1s, 2s, 4s, 8s, 16s)
+					backoffFactor := time.Duration(1 << uint(hits-1))
+					cooldown := interval * backoffFactor
+					if cooldown < 1*time.Second {
+						cooldown = 1 * time.Second
+					}
+					if cooldown > 15*time.Second {
+						cooldown = 15 * time.Second
+					}
+					protectUntil := time.Now().Add(cooldown)
 					if gate.nextAllowedAt.Before(protectUntil) {
 						gate.nextAllowedAt = protectUntil
 					}
 					nextAllowedAt := gate.nextAllowedAt
 					gate.mu.Unlock()
-					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，延长保护冷却 cooldown_ms=%d next_at=%d err=%v", s.Name, tag, interval.Milliseconds(), nextAllowedAt.UnixMilli(), requestErr)
+					log.Printf("[Spider][RateLimit] 站点 %s %s触发限流，指数退避冷却 cooldown_ms=%d (hits=%d) next_at=%d err=%v", s.Name, tag, cooldown.Milliseconds(), hits, nextAllowedAt.UnixMilli(), requestErr)
 					return
 				}
 			}, nil
@@ -1073,7 +1098,7 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		}
 		release(err)
 		lastErr = err
-		if attempt < pageCountRetryTimes && utils.IsRateLimitedErr(err) {
+		if attempt < pageCountRetryTimes {
 			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
 				return 0, waitErr
 			}
@@ -1110,7 +1135,7 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		} else {
 			lastErr = errors.New("response list is empty")
 		}
-		if attempt < filmDetailRetryTimes && utils.IsRateLimitedErr(lastErr) {
+		if attempt < filmDetailRetryTimes {
 			if waitErr := waitRetryBackoff(ctx, attempt); waitErr != nil {
 				return nil, waitErr
 			}
@@ -1434,41 +1459,49 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 	return nil
 }
 
+func saveVirtualPicturesIfEnabled(s *model.FilmSource, list []model.MovieDetail) error {
+	if s.SyncPictures {
+		if err := repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
+			return fmt.Errorf("save virtual pictures failed: %w", err)
+		}
+	}
+	return nil
+}
+
+func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) error {
+	lock := getSourceWriteLock(s.Id)
+	lock.Lock()
+	defer lock.Unlock()
+	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
+		return filmrepo.SaveSitePlayList(s.Id, list)
+	})
+	if err != nil {
+		return fmt.Errorf("save slave playlists failed: %w", err)
+	}
+	return nil
+}
+
 // saveCollectedFilm 将已采集的 list 按站点类型写入存储，消除 collectFilm/collectFilmById 中的重复 switch 块。
 // saveMaster 由调用方注入，区分批量(SaveDetails)与单条(SaveDetail)两种写入策略。
 func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) error {
-	var err error
 	switch s.Grade {
 	case model.MasterCollect:
 		lock := getSourceWriteLock(s.Id)
 		lock.Lock()
 		defer lock.Unlock()
-		err = saveMaster(s.Id, list)
-		if err != nil {
+		if err := saveMaster(s.Id, list); err != nil {
 			return fmt.Errorf("save master details failed: %w", err)
 		}
-		if s.SyncPictures {
-			if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
-				return fmt.Errorf("save virtual pictures failed: %w", err)
-			}
-		}
+		return saveVirtualPicturesIfEnabled(s, list)
 	case model.SlaveCollect:
-		lock := getSourceWriteLock(s.Id)
-		lock.Lock()
-		defer lock.Unlock()
-		err = runCollectDBWriteWithRetry(context.Background(), s.Name, 0, func() error {
-			return filmrepo.SaveSitePlayList(s.Id, list)
-		})
-		if err != nil {
-			return fmt.Errorf("save slave playlists failed: %w", err)
-		}
+		return saveSlavePlaylists(context.Background(), s, 0, list)
 	}
 	return nil
 }
 
 func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
 	if s.Grade != model.MasterCollect {
-		return nil, saveCollectedFilm(s, list, filmrepo.SaveDetails)
+		return nil, saveSlavePlaylists(ctx, s, page, list)
 	}
 
 	var affectedPids []int64
@@ -1486,10 +1519,8 @@ func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page 
 	if err != nil {
 		return nil, fmt.Errorf("save master details failed: %w", err)
 	}
-	if s.SyncPictures {
-		if err = repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
-			return nil, fmt.Errorf("save virtual pictures failed: %w", err)
-		}
+	if err := saveVirtualPicturesIfEnabled(s, list); err != nil {
+		return nil, err
 	}
 	return affectedPids, nil
 }
@@ -1615,9 +1646,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		consecutiveFailuresMu.Unlock()
 	}
 	markStopped := func() {
-		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-			progress.Status = progressStatusStopped
-		})
+		markProgressStopped(s.Id)
 	}
 	// maybeMarkPagePhaseDone 最后一页完成后立刻切到 page_done，
 	// 避免 success+failed 已满仍长期显示「采集中」。
@@ -1674,9 +1703,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			for {
 				select {
 				case <-ctx.Done():
-					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-						progress.Status = progressStatusStopped
-					})
+					markStopped()
 					return
 				case pg, ok := <-pages:
 					if !ok {
@@ -1720,15 +1747,12 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 					if submitErr != nil {
 						writeWG.Done()
 						if ctx.Err() != nil {
-							updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-								progress.Status = progressStatusStopped
-							})
+							markStopped()
 							return
 						}
 						recordPageFailure(page, "enqueue", submitErr)
 						continue
 					}
-					recordSuccess()
 				}
 			}
 		}()
@@ -1825,8 +1849,7 @@ func BatchCollect(h int, ids ...string) {
 	runSourcesWithLimit(sources, h, "Batch-Collect")
 }
 
-func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
-	sources := repository.GetCollectSourceListByGrade(grade)
+func filterEnabledSources(sources []model.FilmSource) []model.FilmSource {
 	enabled := make([]model.FilmSource, 0, len(sources))
 	for _, s := range sources {
 		if s.State {
@@ -1836,15 +1859,13 @@ func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
 	return enabled
 }
 
+func getEnabledSourcesByGrade(grade model.SourceGrade) []model.FilmSource {
+	return filterEnabledSources(repository.GetCollectSourceListByGrade(grade))
+}
+
 // AutoCollect 自动进行对所有已启用站点的采集任务
 func AutoCollect(h int) {
-	sources := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0, len(sources))
-	for _, source := range sources {
-		if source.State {
-			enabled = append(enabled, source)
-		}
-	}
+	enabled := filterEnabledSources(repository.GetCollectSourceList())
 	if len(enabled) == 0 {
 		log.Println("[Spider] 自动采集：未找到任何启用的站点")
 		return
@@ -1873,13 +1894,7 @@ func CollectSingleFilm(ids string) {
 		return
 	}
 
-	all := repository.GetCollectSourceList()
-	enabled := make([]model.FilmSource, 0, len(all))
-	for _, source := range all {
-		if source.State {
-			enabled = append(enabled, source)
-		}
-	}
+	enabled := filterEnabledSources(repository.GetCollectSourceList())
 	if len(enabled) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
 		return
@@ -2162,11 +2177,7 @@ func StopAllTasks() {
 			count++
 		}
 		if id, ok := key.(string); ok {
-			updateCollectProgress(id, func(progress *model.CollectProgress) {
-				if progress.Status == progressStatusStarting || progress.Status == progressStatusRunning {
-					progress.Status = progressStatusStopped
-				}
-			})
+			markProgressStopped(id)
 		}
 		return true
 	})
