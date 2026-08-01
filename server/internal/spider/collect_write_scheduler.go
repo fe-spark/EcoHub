@@ -93,10 +93,11 @@ type collectWriteLane struct {
 	totalPending int
 
 	// 反压观测
-	backpressureWaits   atomic.Int64
-	backpressureWaitNs  atomic.Int64
-	lastBackpressureLog atomic.Int64 // unix nano，限频
-	lastDepthLog        atomic.Int64
+	backpressureWaits        atomic.Int64
+	backpressureWaitNs       atomic.Int64
+	lastBackpressureLog      atomic.Int64 // unix nano，进入反压限频
+	lastBackpressureLeaveLog atomic.Int64 // unix nano，离开反压限频
+	lastDepthLog             atomic.Int64
 }
 
 type collectWriteQueue struct {
@@ -273,7 +274,7 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 		leaveSource = queue.sourceName
 		leavePending = len(queue.pending)
 		leaveGlobal = l.totalPending
-		logLeave = leaveWait >= 500*time.Millisecond
+		logLeave = leaveWait >= 2*time.Second && l.shouldLogBackpressureLeave()
 		l.backpressureWaits.Add(1)
 		l.backpressureWaitNs.Add(leaveWait.Nanoseconds())
 	}
@@ -297,6 +298,15 @@ func (l *collectWriteLane) shouldLogBackpressureEnter() bool {
 		return false
 	}
 	return l.lastBackpressureLog.CompareAndSwap(last, now)
+}
+
+func (l *collectWriteLane) shouldLogBackpressureLeave() bool {
+	now := time.Now().UnixNano()
+	last := l.lastBackpressureLeaveLog.Load()
+	if last != 0 && now-last < int64(3*time.Second) {
+		return false
+	}
+	return l.lastBackpressureLeaveLog.CompareAndSwap(last, now)
 }
 
 func (l *collectWriteLane) logBackpressureLeave(canceled bool, reason backpressureReason, sourceName string, wait time.Duration, sourcePending, globalPending int) {
