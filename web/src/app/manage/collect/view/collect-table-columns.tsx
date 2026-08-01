@@ -2,7 +2,7 @@ import { Button, Flex, Popconfirm, Progress, Select, Space, Switch, Tag, Tooltip
 import { DeleteOutlined, EditOutlined, PoweroffOutlined, StopOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
-import { collectDuration, type FilmSource } from "./types";
+import { collectDuration, resolveCollectStatusText, type FilmSource } from "./types";
 
 interface CollectTableColumnsOptions {
   activeCollectIds: string[];
@@ -69,30 +69,40 @@ export function createCollectTableColumns({
         const done = Math.min(finished, total || finished);
         const isDone = progress.status === "done";
         const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
-        const percent = isDone ? 100 : Math.min(rawPercent, 99);
+        // 未 done 前封顶 99%；等待收尾/发布阶段固定 99%，避免“满页却像没结束”的误解。
+        const inPostPagePhase =
+          progress.status === "page_done" ||
+          progress.status === "waiting_publish" ||
+          progress.status === "finalizing";
+        const percent = isDone ? 100 : inPostPagePhase ? 99 : Math.min(rawPercent, 99);
         const progressText = total > 0
           ? `${done}/${total}`
           : done > 0
             ? `${done}`
             : "即将开始采集";
-        const statusText = progress.status === "starting"
-          ? "等待中"
-          : progress.status === "failed"
-            ? "失败"
-            : progress.status === "stopped"
-              ? "已停止"
-              : progress.status === "finalizing"
-                ? "收尾发布中"
-                : progress.status === "done"
-                  ? "已完成"
-                  : "采集中";
-        const progressStatus = progress.status === "running" || progress.status === "finalizing"
-          ? "active"
-          : "normal";
+        const statusText = resolveCollectStatusText(progress.status);
+        const progressStatus =
+          progress.status === "running" ||
+          progress.status === "finalizing" ||
+          progress.status === "waiting_publish"
+            ? "active"
+            : progress.status === "failed"
+              ? "exception"
+              : progress.status === "done"
+                ? "success"
+                : "normal";
         const progressStrokeColor = progress.failed > 0 ? "#faad14" : undefined;
         return (
           <Flex vertical gap={4}>
-            <Typography.Text type={progress.status === "starting" ? "secondary" : undefined}>{statusText}</Typography.Text>
+            <Typography.Text
+              type={
+                progress.status === "starting" || progress.status === "waiting_publish"
+                  ? "secondary"
+                  : undefined
+              }
+            >
+              {statusText}
+            </Typography.Text>
             <Progress
               percent={percent}
               size="small"
@@ -145,9 +155,20 @@ export function createCollectTableColumns({
       render: (value: boolean, record) => {
         const isRunning = activeCollectIds.includes(record.id);
         if (isRunning) {
+          const phase = record.progress?.status;
+          let label = "采集中";
+          if (!record.state) {
+            label = "已终止·等待完成";
+          } else if (phase === "waiting_publish" || phase === "page_done") {
+            label = "等待收尾";
+          } else if (phase === "finalizing") {
+            label = "收尾发布中";
+          } else if (phase === "starting") {
+            label = "排队中";
+          }
           return (
             <Tag color={record.state ? "processing" : "warning"}>
-              {record.state ? "采集中" : "已终止·等待完成"}
+              {label}
             </Tag>
           );
         }

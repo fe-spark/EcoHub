@@ -24,6 +24,7 @@ import { createCollectTableColumns } from "./collect-table-columns";
 import CollectOverview from "./collect-overview";
 import SourceFormModal from "./source-form-modal";
 import {
+  isActiveCollectStatus,
   type BatchOption,
   type FilmSource,
   type SourceFormValues,
@@ -77,13 +78,12 @@ export default function CollectManagePageView() {
   const [batchTime, setBatchTime] = useState(24);
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
 
+  // 仅「仍在生命周期内」的任务禁用操作；done/failed 短暂展示进度但不锁按钮。
   const activeCollectIds = useMemo(
-    () => siteList.filter((item) => item.progress).map((item) => item.id),
-    [siteList],
-  );
-
-  const startingCollectIds = useMemo(
-    () => siteList.filter((item) => item.progress?.status === "starting").map((item) => item.id),
+    () =>
+      siteList
+        .filter((item) => isActiveCollectStatus(item.progress?.status))
+        .map((item) => item.id),
     [siteList],
   );
 
@@ -91,11 +91,19 @@ export default function CollectManagePageView() {
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      running: siteList.filter((item) => item.progress?.status === "running" || item.progress?.status === "finalizing").length,
-      waiting: startingCollectIds.length,
+      // 真正在拉页/写库
+      running: siteList.filter((item) => item.progress?.status === "running").length,
+      // 排队 + 分页完成等待整批收尾
+      waiting: siteList.filter(
+        (item) =>
+          item.progress?.status === "starting" ||
+          item.progress?.status === "page_done" ||
+          item.progress?.status === "waiting_publish" ||
+          item.progress?.status === "finalizing",
+      ).length,
       masters: siteList.filter((item) => item.grade === 0).length,
     }),
-    [siteList, startingCollectIds.length],
+    [siteList],
   );
 
   const masterSite = useMemo(

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -39,8 +40,43 @@ const (
 	// MAXGoroutine max goroutine, 执行spider中对协程的数量限制
 	MAXGoroutine = 10
 
+	// 采集写库默认值（可被环境变量覆盖，见 InitConfig）。
+	DefaultCollectWriteMaxInflight              = 2
+	DefaultCollectWritePagesPerSec              = 12
+	DefaultCollectWriteBurstPages               = 2
+	DefaultCollectWriteMaxPendingPagesPerSource = 50
+	DefaultCollectWriteMaxPendingPagesGlobal    = 150
+	DefaultCollectStatsFlushIntervalSec         = 5
+	DefaultCollectCacheFlushIntervalSec         = 5
+	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
+	DefaultCollectProgressRetainSec = 60
+	// DefaultCollectProgressStaleSec 活跃状态（含 waiting_publish）超时秒数，超时标 failed 可重采。
+	DefaultCollectProgressStaleSec = 30 * 60
+
 	FilmPictureUploadDir = "./static/upload/gallery"
 	FilmPictureAccess    = "/api/upload/pic/poster/"
+)
+
+// 采集写阀 / 合并写 运行时参数（InitConfig 可从 env 覆盖）。
+var (
+	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
+	CollectWriteMaxInflight = DefaultCollectWriteMaxInflight
+	// CollectWritePagesPerSec 写库稳态流速（页/秒）。
+	CollectWritePagesPerSec = DefaultCollectWritePagesPerSec
+	// CollectWriteBurstPages 写库允许的小突发（页）。
+	CollectWriteBurstPages = DefaultCollectWriteBurstPages
+	// CollectWriteMaxPendingPagesPerSource 单站写库队列上限。
+	CollectWriteMaxPendingPagesPerSource = DefaultCollectWriteMaxPendingPagesPerSource
+	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
+	CollectWriteMaxPendingPagesGlobal = DefaultCollectWriteMaxPendingPagesGlobal
+	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
+	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
+	// CollectCacheFlushIntervalSec 采集 Redis 缓存合并清理最小间隔（秒）。
+	CollectCacheFlushIntervalSec = DefaultCollectCacheFlushIntervalSec
+	// CollectProgressRetainSec done/failed 进度保留秒数。
+	CollectProgressRetainSec = DefaultCollectProgressRetainSec
+	// CollectProgressStaleSec 活跃进度超时秒数。
+	CollectProgressStaleSec = DefaultCollectProgressStaleSec
 )
 
 // -------------------------redis key-----------------------------------
@@ -203,6 +239,38 @@ func InitConfig() {
 		}
 	}
 	fmt.Printf("[Config] 加载 Redis 地址: %s, DB: %d\n", RedisAddr, RedisDBNo)
+
+	loadCollectRuntimeConfig()
+}
+
+// loadCollectRuntimeConfig 从环境变量覆盖采集写阀等参数（未设置则保留默认）。
+func loadCollectRuntimeConfig() {
+	CollectWriteMaxInflight = envInt("COLLECT_WRITE_MAX_INFLIGHT", CollectWriteMaxInflight)
+	CollectWritePagesPerSec = envInt("COLLECT_WRITE_PAGES_PER_SEC", CollectWritePagesPerSec)
+	CollectWriteBurstPages = envInt("COLLECT_WRITE_BURST_PAGES", CollectWriteBurstPages)
+	CollectWriteMaxPendingPagesPerSource = envInt("COLLECT_WRITE_PENDING_PER_SOURCE", CollectWriteMaxPendingPagesPerSource)
+	CollectWriteMaxPendingPagesGlobal = envInt("COLLECT_WRITE_PENDING_GLOBAL", CollectWriteMaxPendingPagesGlobal)
+	CollectStatsFlushIntervalSec = envInt("COLLECT_STATS_FLUSH_INTERVAL_SEC", CollectStatsFlushIntervalSec)
+	CollectCacheFlushIntervalSec = envInt("COLLECT_CACHE_FLUSH_INTERVAL_SEC", CollectCacheFlushIntervalSec)
+	CollectProgressRetainSec = envInt("COLLECT_PROGRESS_RETAIN_SEC", CollectProgressRetainSec)
+	CollectProgressStaleSec = envInt("COLLECT_PROGRESS_STALE_SEC", CollectProgressStaleSec)
+
+	fmt.Printf("[Config] 采集写阀: inflight=%d pages/s=%d burst=%d pending/source=%d pending/global=%d retain=%ds stale=%ds\n",
+		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
+		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
+		CollectProgressRetainSec, CollectProgressStaleSec)
+}
+
+func envInt(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n <= 0 {
+		return fallback
+	}
+	return n
 }
 
 // GetRootMysqlDsn 获取不带数据库名的 DSN，用于 CREATE DATABASE 等管理操作

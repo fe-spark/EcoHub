@@ -70,9 +70,9 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
 		return err
 	}
-	if err := repository.TouchCollectSourceStatsTx(db.Mdb, sourceID, time.Now()); err != nil {
-		log.Printf("TouchCollectSourceStats Error: %v", err)
-		return err
+	// 仅在有播放源实质变更时更新 last_collect_time。
+	if len(changes) > 0 {
+		repository.NoteCollectSourceStats(sourceID)
 	}
 
 	return nil
