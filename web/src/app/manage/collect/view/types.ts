@@ -11,6 +11,17 @@ export interface FilmSource {
   progress?: CollectProgress | null;
 }
 
+export type CollectProgressStatus =
+  | "starting"
+  | "running"
+  | "page_done"
+  | "waiting_publish"
+  | "finalizing"
+  | "done"
+  | "failed"
+  | "stopped"
+  | string;
+
 export interface CollectProgress {
   id: string;
   name: string;
@@ -18,7 +29,41 @@ export interface CollectProgress {
   current: number;
   success: number;
   failed: number;
-  status: "starting" | "running" | "stopped" | "finalizing" | "done" | "failed" | string;
+  status: CollectProgressStatus;
+}
+
+/** 仍处于采集生命周期、列表应展示进度的状态 */
+export function isActiveCollectStatus(status?: string | null): boolean {
+  return (
+    status === "starting" ||
+    status === "running" ||
+    status === "page_done" ||
+    status === "waiting_publish" ||
+    status === "finalizing"
+  );
+}
+
+export function resolveCollectStatusText(status?: string | null): string {
+  switch (status) {
+    case "starting":
+      return "等待中";
+    case "running":
+      return "采集中";
+    case "page_done":
+      return "分页完成";
+    case "waiting_publish":
+      return "等待收尾";
+    case "finalizing":
+      return "收尾发布中";
+    case "done":
+      return "已完成";
+    case "failed":
+      return "失败";
+    case "stopped":
+      return "已停止";
+    default:
+      return status ? String(status) : "采集中";
+  }
 }
 
 export interface BatchOption {
