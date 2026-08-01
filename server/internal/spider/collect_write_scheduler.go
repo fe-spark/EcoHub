@@ -10,7 +10,7 @@ import (
 
 const (
 	collectWriteMaxPendingPages = 200
-	collectWriteLaneWorkers     = 2
+	collectWriteLaneWorkers     = 4
 )
 
 var collectWrites = newCollectWriteScheduler()

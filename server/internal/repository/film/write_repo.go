@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -68,6 +69,9 @@ func upsertFilmIndexesTx(tx *gorm.DB, list []model.FilmIndex) error {
 	if len(list) == 0 {
 		return nil
 	}
+	sort.Slice(list, func(i, j int) bool {
+		return list[i].ContentKey < list[j].ContentKey
+	})
 	return tx.Clauses(filmIndexContentKeyUpsert()).CreateInBatches(&list, upsertBatchSize).Error
 }
 
@@ -145,6 +149,12 @@ func saveMovieSourceMappingsTxE(tx *gorm.DB, mappings []model.MovieSourceMapping
 	}
 	movieSourceMappingWriteMu.Lock()
 	defer movieSourceMappingWriteMu.Unlock()
+	sort.Slice(mappings, func(i, j int) bool {
+		if mappings[i].SourceId == mappings[j].SourceId {
+			return mappings[i].SourceMid < mappings[j].SourceMid
+		}
+		return mappings[i].SourceId < mappings[j].SourceId
+	})
 	return tx.Clauses(movieSourceMappingUpsert()).CreateInBatches(&mappings, upsertBatchSize).Error
 }
 
