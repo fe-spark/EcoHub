@@ -2,16 +2,27 @@ package spider
 
 import (
 	"context"
+	"fmt"
 	"log"
+	"sort"
 	"sync"
+	"sync/atomic"
+	"time"
 
+	"server/internal/config"
 	"server/internal/model"
+
+	"golang.org/x/time/rate"
 )
 
-const (
-	collectWriteMaxPendingPages = 200
-	collectWriteLaneWorkers     = 2
-)
+// 写库调度采用「水龙头」模型：
+//  1. 有活再取 token（避免空转吞 token）
+//  2. take 单页 + 跨站 round-robin
+//  3. 全局限速在 writing 占用之外完成，写槽只服务真实 SQL
+//  4. 同站 writing 互斥；worker panic 必释放 writing
+//  5. 单站 + 全局有界 buffer，满则反压拉页
+//
+// 外部 API：submit / finishSource / snapshot。
 
 var collectWrites = newCollectWriteScheduler()
 
@@ -29,6 +40,17 @@ type collectWriteJob struct {
 	page       int
 	write      func() ([]int64, error)
 	complete   func(collectWriteCompletion)
+}
+
+// collectWriteSnapshot 写库缓冲水位快照，供日志与后续进度 API 使用。
+type collectWriteSnapshot struct {
+	PendingTotal     int `json:"pendingTotal"`
+	PendingSources   int `json:"pendingSources"`
+	WritingSources   int `json:"writingSources"`
+	MaxPendingSource int `json:"maxPendingSource"`
+	MaxPendingGlobal int `json:"maxPendingGlobal"`
+	PagesPerSec      int `json:"pagesPerSec"`
+	MaxInflight      int `json:"maxInflight"`
 }
 
 type collectWriteScheduler struct {
@@ -49,11 +71,32 @@ func (s *collectWriteScheduler) finishSource(_ model.SourceGrade, sourceID strin
 	s.lane.finishSource(sourceID)
 }
 
+func (s *collectWriteScheduler) snapshot() collectWriteSnapshot {
+	return s.lane.snapshot()
+}
+
 type collectWriteLane struct {
-	name   string
-	mu     sync.Mutex
-	cond   *sync.Cond
-	queues map[string]*collectWriteQueue
+	name     string
+	mu       sync.Mutex
+	cond     *sync.Cond
+	queues   map[string]*collectWriteQueue
+	order    []string // sourceID 稳定顺序，用于 round-robin
+	rrCursor int      // 下一次 RR 起始下标
+	limiter  *rate.Limiter
+	workers  int
+
+	// 有界水箱（构造时从 config 拷贝，测试可覆盖）。
+	maxPerSource int
+	maxGlobal    int
+
+	// totalPending 所有站 pending 页数之和，O(1) 做全局水位判断。
+	totalPending int
+
+	// 反压观测
+	backpressureWaits   atomic.Int64
+	backpressureWaitNs  atomic.Int64
+	lastBackpressureLog atomic.Int64 // unix nano，限频
+	lastDepthLog        atomic.Int64
 }
 
 type collectWriteQueue struct {
@@ -62,16 +105,74 @@ type collectWriteQueue struct {
 	pending    []collectWriteJob
 	done       bool
 	writing    bool
-	readyLog   bool
 }
 
+type backpressureReason string
+
+const (
+	bpNone       backpressureReason = ""
+	bpSourceFull backpressureReason = "source_full"
+	bpGlobalFull backpressureReason = "global_full"
+)
+
 func newCollectWriteLane(name string) *collectWriteLane {
+	pagesPerSec := float64(config.CollectWritePagesPerSec)
+	if pagesPerSec <= 0 {
+		pagesPerSec = float64(config.DefaultCollectWritePagesPerSec)
+	}
+	burst := config.CollectWriteBurstPages
+	if burst <= 0 {
+		burst = config.DefaultCollectWriteBurstPages
+	}
+	workers := config.CollectWriteMaxInflight
+	if workers <= 0 {
+		workers = config.DefaultCollectWriteMaxInflight
+	}
+
+	maxPerSource := config.CollectWriteMaxPendingPagesPerSource
+	if maxPerSource <= 0 {
+		maxPerSource = config.DefaultCollectWriteMaxPendingPagesPerSource
+	}
+	maxGlobal := config.CollectWriteMaxPendingPagesGlobal
+	if maxGlobal <= 0 {
+		maxGlobal = config.DefaultCollectWriteMaxPendingPagesGlobal
+	}
+
 	lane := &collectWriteLane{
-		name:   name,
-		queues: make(map[string]*collectWriteQueue),
+		name:         name,
+		queues:       make(map[string]*collectWriteQueue),
+		order:        make([]string, 0, 16),
+		limiter:      rate.NewLimiter(rate.Limit(pagesPerSec), burst),
+		workers:      workers,
+		maxPerSource: maxPerSource,
+		maxGlobal:    maxGlobal,
 	}
 	lane.cond = sync.NewCond(&lane.mu)
 	return lane
+}
+
+func (l *collectWriteLane) maxPendingPerSource() int {
+	if l.maxPerSource <= 0 {
+		return config.DefaultCollectWriteMaxPendingPagesPerSource
+	}
+	return l.maxPerSource
+}
+
+func (l *collectWriteLane) maxPendingGlobal() int {
+	if l.maxGlobal <= 0 {
+		return config.DefaultCollectWriteMaxPendingPagesGlobal
+	}
+	return l.maxGlobal
+}
+
+func (l *collectWriteLane) submitBlockedReason(queue *collectWriteQueue) backpressureReason {
+	if len(queue.pending) >= l.maxPendingPerSource() {
+		return bpSourceFull
+	}
+	if l.totalPending >= l.maxPendingGlobal() {
+		return bpGlobalFull
+	}
+	return bpNone
 }
 
 func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) error {
@@ -91,19 +192,92 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 	defer l.mu.Unlock()
 
 	queue := l.queueFor(job)
-	for len(queue.pending) >= collectWriteMaxPendingPages {
+	var (
+		waitStart  time.Time
+		waited     bool
+		lastReason backpressureReason
+	)
+	for {
+		reason := l.submitBlockedReason(queue)
+		if reason == bpNone {
+			break
+		}
+		lastReason = reason
 		if err := ctx.Err(); err != nil {
+			if waited {
+				l.recordBackpressureWait(waitStart, lastReason, queue, true)
+			}
 			return err
 		}
+		if !waited {
+			waitStart = time.Now()
+			waited = true
+			l.maybeLogBackpressureEnter(reason, queue)
+		}
 		l.cond.Wait()
+		if q, ok := l.queues[job.sourceID]; ok {
+			queue = q
+		} else {
+			queue = l.queueFor(job)
+		}
 	}
 	if err := ctx.Err(); err != nil {
+		if waited {
+			l.recordBackpressureWait(waitStart, lastReason, queue, true)
+		}
 		return err
 	}
+
 	queue.pending = append(queue.pending, job)
-	l.markReadyLocked(queue)
+	l.totalPending++
+	if waited {
+		l.recordBackpressureWait(waitStart, lastReason, queue, false)
+	}
 	l.cond.Signal()
 	return nil
+}
+
+func (l *collectWriteLane) maybeLogBackpressureEnter(reason backpressureReason, queue *collectWriteQueue) {
+	now := time.Now().UnixNano()
+	last := l.lastBackpressureLog.Load()
+	if last != 0 && now-last < int64(2*time.Second) {
+		return
+	}
+	if !l.lastBackpressureLog.CompareAndSwap(last, now) {
+		return
+	}
+	// 日志在持锁路径外调用方保证；此处仅格式化字段。
+	name, sp, gp := "", 0, l.totalPending
+	if queue != nil {
+		name = queue.sourceName
+		sp = len(queue.pending)
+	}
+	log.Printf("[Spider][WriteScheduler] %s 反压等待 reason=%s source=%s source_pending=%d global_pending=%d/%d source_limit=%d",
+		l.name, reason, name, sp, gp, l.maxPendingGlobal(), l.maxPendingPerSource())
+}
+
+func (l *collectWriteLane) recordBackpressureWait(start time.Time, reason backpressureReason, queue *collectWriteQueue, canceled bool) {
+	if start.IsZero() {
+		return
+	}
+	d := time.Since(start)
+	l.backpressureWaits.Add(1)
+	l.backpressureWaitNs.Add(d.Nanoseconds())
+	if d < 500*time.Millisecond && !canceled {
+		return
+	}
+	status := "resumed"
+	if canceled {
+		status = "canceled"
+	}
+	sourcePending := 0
+	sourceName := ""
+	if queue != nil {
+		sourcePending = len(queue.pending)
+		sourceName = queue.sourceName
+	}
+	log.Printf("[Spider][WriteScheduler] %s 反压结束 status=%s reason=%s source=%s wait=%s source_pending=%d global_pending=%d/%d",
+		l.name, status, reason, sourceName, d.Round(time.Millisecond), sourcePending, l.totalPending, l.maxPendingGlobal())
 }
 
 func (l *collectWriteLane) finishSource(sourceID string) {
@@ -116,85 +290,199 @@ func (l *collectWriteLane) finishSource(sourceID string) {
 	}
 	queue.done = true
 	if len(queue.pending) == 0 && !queue.writing {
-		delete(l.queues, sourceID)
+		l.removeQueueLocked(sourceID)
 		l.cond.Broadcast()
 		return
 	}
-	l.markReadyLocked(queue)
 	l.cond.Signal()
 }
 
 func (l *collectWriteLane) queueFor(job collectWriteJob) *collectWriteQueue {
 	queue, ok := l.queues[job.sourceID]
 	if ok {
+		if job.sourceName != "" {
+			queue.sourceName = job.sourceName
+		}
 		return queue
 	}
 	queue = &collectWriteQueue{sourceID: job.sourceID, sourceName: job.sourceName}
 	l.queues[job.sourceID] = queue
+	l.order = append(l.order, job.sourceID)
 	return queue
 }
 
-func (l *collectWriteLane) start() {
-	workerCount := collectWriteLaneWorkers
-	if workerCount <= 0 {
-		workerCount = 1
+func (l *collectWriteLane) removeQueueLocked(sourceID string) {
+	delete(l.queues, sourceID)
+	for i, id := range l.order {
+		if id == sourceID {
+			l.order = append(l.order[:i], l.order[i+1:]...)
+			if len(l.order) == 0 {
+				l.rrCursor = 0
+			} else {
+				l.rrCursor %= len(l.order)
+			}
+			break
+		}
 	}
-	for workerID := 1; workerID <= workerCount; workerID++ {
+}
+
+func (l *collectWriteLane) start() {
+	for workerID := 1; workerID <= l.workers; workerID++ {
 		go l.run(workerID)
 	}
+	log.Printf("[Spider][WriteScheduler] %s lane 已启动 workers=%d pages_per_sec=%.0f burst=%d pending_per_source=%d pending_global=%d",
+		l.name, l.workers, float64(l.limiter.Limit()), l.limiter.Burst(), l.maxPendingPerSource(), l.maxPendingGlobal())
 }
 
 func (l *collectWriteLane) run(workerID int) {
 	for {
-		jobs, meta, finish := l.nextJobs()
-		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 开始写入 source=%s pending=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), meta.tail)
-		failed := 0
-		for _, job := range jobs {
-			mids, err := job.write()
-			if err != nil {
-				failed++
-			}
-			job.complete(collectWriteCompletion{page: job.page, mids: mids, err: err, stage: "save"})
+		// 1) 等到有可写任务（不占 writing、不吞 token）
+		l.waitUntilWork()
+
+		// 2) 预留限速 token（尚未 take）。若 take 失败必须 Cancel 退还，避免空烧页/秒额度。
+		res := l.limiter.Reserve()
+		if !res.OK() {
+			// 极限配置（rate≈0）下兜底，避免忙等。
+			time.Sleep(10 * time.Millisecond)
+			continue
 		}
-		log.Printf("[Spider][WriteScheduler] %s lane worker=%d 完成写入 source=%s pending=%d failed=%d tail=%t", l.name, workerID, meta.sourceName, len(jobs), failed, meta.tail)
-		finish()
+		if delay := res.Delay(); delay > 0 {
+			time.Sleep(delay)
+		}
+
+		// 3) 取页；可能被其它 worker 抢先
+		job, meta, finish, ok := l.tryTakeOne()
+		if !ok {
+			// 关键：退还本次 reservation，保证实际写库速率贴近 pages_per_sec。
+			res.Cancel()
+			continue
+		}
+
+		func() {
+			defer finish()
+
+			start := time.Now()
+			var mids []int64
+			var err error
+			func() {
+				defer func() {
+					if rec := recover(); rec != nil {
+						log.Printf("[Spider][WriteScheduler] %s lane worker=%d panic source=%s page=%d: %v",
+							l.name, workerID, job.sourceName, job.page, rec)
+						err = fmt.Errorf("write panic: %v", rec)
+					}
+				}()
+				mids, err = job.write()
+			}()
+			job.complete(collectWriteCompletion{page: job.page, mids: mids, err: err, stage: "save"})
+
+			if shouldLogCollectWrite(job.page) || err != nil || meta.tail {
+				status := "ok"
+				if err != nil {
+					status = "fail"
+				}
+				log.Printf("[Spider][WriteScheduler] %s lane worker=%d source=%s page=%d status=%s source_pending=%d global_pending=%d tail=%t cost=%s",
+					l.name, workerID, meta.sourceName, job.page, status, meta.sourcePending, meta.globalPending, meta.tail, time.Since(start))
+			}
+		}()
+		l.maybeLogDepth()
 	}
 }
 
-type collectWriteBatchMeta struct {
-	sourceName string
-	tail       bool
-}
-
-// nextJobs blocks until exactly one ready queue is available and returns its
-// pending jobs. Each worker takes a single source so multiple workers can write
-// different sources concurrently — same-source serialization is preserved by
-// the per-queue writing flag.
-func (l *collectWriteLane) nextJobs() ([]collectWriteJob, collectWriteBatchMeta, func()) {
+func (l *collectWriteLane) waitUntilWork() {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-
-	for {
-		queue := l.selectQueueLocked()
-		if queue != nil {
-			return l.takeQueueLocked(queue)
-		}
+	// 仅探测是否有可写队列，不推进 RR cursor（避免空转吞轮转公平性）。
+	for !l.hasReadyWorkLocked() {
 		l.cond.Wait()
 	}
 }
 
-func (l *collectWriteLane) takeQueueLocked(queue *collectWriteQueue) ([]collectWriteJob, collectWriteBatchMeta, func()) {
-	jobs := queue.pending
-	queue.pending = nil
+func (l *collectWriteLane) hasReadyWorkLocked() bool {
+	for _, id := range l.order {
+		queue := l.queues[id]
+		if queue != nil && queue.isReady() {
+			return true
+		}
+	}
+	return false
+}
+
+func (l *collectWriteLane) tryTakeOne() (collectWriteJob, collectWriteJobMeta, func(), bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	queue := l.selectQueueRoundRobinLocked()
+	if queue == nil {
+		return collectWriteJob{}, collectWriteJobMeta{}, nil, false
+	}
+	job, meta, finish := l.takeOneLocked(queue)
+	return job, meta, finish, true
+}
+
+func (l *collectWriteLane) maybeLogDepth() {
+	now := time.Now().UnixNano()
+	last := l.lastDepthLog.Load()
+	if last != 0 && now-last < int64(5*time.Second) {
+		return
+	}
+	if !l.lastDepthLog.CompareAndSwap(last, now) {
+		return
+	}
+	snap := l.snapshot()
+	waits := l.backpressureWaits.Load()
+	var avgWait time.Duration
+	if waits > 0 {
+		avgWait = time.Duration(l.backpressureWaitNs.Load() / waits)
+	}
+	log.Printf("[Spider][WriteScheduler] %s 水位 global_pending=%d/%d sources=%d writing=%d bp_waits=%d bp_avg_wait=%s",
+		l.name, snap.PendingTotal, snap.MaxPendingGlobal, snap.PendingSources, snap.WritingSources, waits, avgWait.Round(time.Millisecond))
+}
+
+type collectWriteJobMeta struct {
+	sourceName    string
+	sourcePending int
+	globalPending int
+	tail          bool
+}
+
+func (l *collectWriteLane) selectQueueRoundRobinLocked() *collectWriteQueue {
+	n := len(l.order)
+	if n == 0 {
+		return nil
+	}
+	if l.rrCursor >= n {
+		l.rrCursor = 0
+	}
+	for i := 0; i < n; i++ {
+		idx := (l.rrCursor + i) % n
+		queue := l.queues[l.order[idx]]
+		if queue == nil {
+			continue
+		}
+		if queue.isReady() {
+			l.rrCursor = (idx + 1) % n
+			return queue
+		}
+	}
+	return nil
+}
+
+func (l *collectWriteLane) takeOneLocked(queue *collectWriteQueue) (collectWriteJob, collectWriteJobMeta, func()) {
+	job := queue.pending[0]
+	queue.pending = queue.pending[1:]
+	if l.totalPending > 0 {
+		l.totalPending--
+	}
 	queue.writing = true
-	queue.readyLog = false
 	sourceID := queue.sourceID
-	meta := collectWriteBatchMeta{
-		sourceName: queue.sourceName,
-		tail:       queue.done,
+	meta := collectWriteJobMeta{
+		sourceName:    queue.sourceName,
+		sourcePending: len(queue.pending),
+		globalPending: l.totalPending,
+		tail:          queue.done && len(queue.pending) == 0,
 	}
 	l.cond.Broadcast()
-	return jobs, meta, func() {
+	return job, meta, func() {
 		l.finishWriting(sourceID)
 	}
 }
@@ -210,36 +498,62 @@ func (l *collectWriteLane) finishWriting(sourceID string) {
 	}
 	queue.writing = false
 	if queue.done && len(queue.pending) == 0 {
-		delete(l.queues, sourceID)
-	} else {
-		l.markReadyLocked(queue)
+		l.removeQueueLocked(sourceID)
 	}
 	l.cond.Broadcast()
 }
 
-func (l *collectWriteLane) selectQueueLocked() *collectWriteQueue {
-	for _, queue := range l.queues {
-		if queue.isReady() {
-			return queue
+func (q *collectWriteQueue) isReady() bool {
+	return !q.writing && len(q.pending) > 0
+}
+
+func (l *collectWriteLane) snapshot() collectWriteSnapshot {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	writing := 0
+	for _, q := range l.queues {
+		if q.writing {
+			writing++
 		}
 	}
-	return nil
+	return collectWriteSnapshot{
+		PendingTotal:     l.totalPending,
+		PendingSources:   len(l.queues),
+		WritingSources:   writing,
+		MaxPendingSource: l.maxPendingPerSource(),
+		MaxPendingGlobal: l.maxPendingGlobal(),
+		PagesPerSec:      int(l.limiter.Limit()),
+		MaxInflight:      l.workers,
+	}
 }
 
-func (l *collectWriteLane) markReadyLocked(queue *collectWriteQueue) {
-	if !queue.isReady() {
-		return
+func shouldLogCollectWrite(page int) bool {
+	if page <= 0 {
+		return true
 	}
-	if queue.readyLog {
-		return
+	if page <= 5 {
+		return true
 	}
-	queue.readyLog = true
-	log.Printf("[Spider][WriteScheduler] %s lane 站点 %s 进入写入队列 pending=%d tail=%t", l.name, queue.sourceName, len(queue.pending), queue.done)
+	return page%50 == 0
 }
 
-func (q *collectWriteQueue) isReady() bool {
-	if q.writing || len(q.pending) == 0 {
-		return false
+func (l *collectWriteLane) pendingSourceIDs() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	ids := make([]string, 0, len(l.order))
+	ids = append(ids, l.order...)
+	sort.Strings(ids)
+	return ids
+}
+
+// nextJob 保留给单测：阻塞取一页（内部走 wait+try 语义的简化版）。
+func (l *collectWriteLane) nextJob() (collectWriteJob, collectWriteJobMeta, func()) {
+	for {
+		l.waitUntilWork()
+		job, meta, finish, ok := l.tryTakeOne()
+		if ok {
+			return job, meta, finish
+		}
 	}
-	return true
 }
