@@ -3,6 +3,7 @@ package film
 import (
 	"encoding/json"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -299,6 +300,16 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 			continue
 		}
 		movieKeys = append(movieKeys, movieKey)
+	}
+	sort.Strings(movieKeys)
+
+	if len(playlists) > 0 {
+		sort.Slice(playlists, func(i, j int) bool {
+			if playlists[i].MovieKey == playlists[j].MovieKey {
+				return playlists[i].GroupIndex < playlists[j].GroupIndex
+			}
+			return playlists[i].MovieKey < playlists[j].MovieKey
+		})
 	}
 
 	var changes []playlistChange

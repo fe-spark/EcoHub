@@ -1,12 +1,18 @@
 package utils
 
 import (
+	"bytes"
+	"compress/flate"
+	"compress/gzip"
 	"crypto/tls"
+	"fmt"
+	"io"
 	"log"
 	"math/rand"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gocolly/colly/v2"
@@ -15,6 +21,20 @@ import (
 /*
 网络请求, 数据爬取
 */
+
+// 共享 HTTP Transport，复用 TCP 长连接与 DNS 缓存
+var sharedTransport = &http.Transport{
+	MaxIdleConns:        200,
+	MaxIdleConnsPerHost: 30,
+	IdleConnTimeout:     90 * time.Second,
+	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
+}
+
+// 共享单例 HTTP 客户端
+var httpClient = &http.Client{
+	Transport: sharedTransport,
+	Timeout:   20 * time.Second,
+}
 
 var Client = CreateClient()
 
@@ -27,132 +47,137 @@ type RequestInfo struct {
 	Err    string      `json:"err"`    // 错误信息
 }
 
-// userAgents 现代主流浏览器 UA 池（Chrome / Firefox / Edge，定期更新版本号即可）
+// userAgents 现代主流浏览器 UA 池（Chrome / Firefox / Edge）
 var userAgents = []string{
-	// Chrome Windows
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-	// Chrome macOS
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-	// Edge Windows
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0",
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36 Edg/121.0.0.0",
-	// Firefox Windows
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
 	"Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-	// Firefox macOS
 	"Mozilla/5.0 (Macintosh; Intel Mac OS X 14.3; rv:123.0) Gecko/20100101 Firefox/123.0",
 }
 
-// randomUA 从 UA 池中随机选取一个
 func randomUA() string {
 	return userAgents[rand.Intn(len(userAgents))]
 }
 
-// setBrowserHeaders 为请求设置完整的浏览器伪装头部
-func setBrowserHeaders(req *colly.Request, referer string) {
-	ua := randomUA()
-	req.Headers.Set("User-Agent", ua)
-	req.Headers.Set("Accept", "application/json, text/plain, */*")
-	req.Headers.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-	// 不声明 br：Go 标准库不支持 Brotli 解压，声明后服务端可能回 br 编码导致乱码
-	req.Headers.Set("Accept-Encoding", "gzip, deflate")
-	req.Headers.Set("Connection", "keep-alive")
-	req.Headers.Set("Cache-Control", "no-cache")
+func setHTTPRequestHeaders(req *http.Request, customHeader http.Header) {
+	req.Header.Set("User-Agent", randomUA())
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+	req.Header.Set("Connection", "keep-alive")
+	req.Header.Set("Cache-Control", "no-cache")
 
-	// 同域 Referer（仅 host 相同时注入，避免 Sec-Fetch 校验失败）
-	if referer != "" && referer != req.URL.String() {
-		refHost := extractHost(referer)
-		if refHost != "" && refHost == req.URL.Host {
-			req.Headers.Set("Referer", referer)
+	if customHeader != nil {
+		for k, v := range customHeader {
+			if strings.EqualFold(k, "timeout") {
+				continue
+			}
+			for _, val := range v {
+				req.Header.Add(k, val)
+			}
 		}
 	}
 }
 
-// extractHost 从 rawURL 中提取 host，解析失败时返回空字符串
-func extractHost(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return ""
-	}
-	return u.Host
-}
-
-func containsStr(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
-// CreateClient 初始化请求客户端（不挂载 OnRequest，由各调用方按需设置）
-// 跳过 TLS 证书验证：采集站部分使用过期/自签证书，浏览器会忽略警告继续访问，此处与之对齐
+// CreateClient 初始化 Colly 客户端（保持兼容）
 func CreateClient() *colly.Collector {
 	c := colly.NewCollector()
 	c.MaxDepth = 1
 	c.AllowURLRevisit = true
 	c.SetRequestTimeout(20 * time.Second)
-	c.WithTransport(&http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-	})
+	c.WithTransport(sharedTransport)
 	return c
 }
 
-// ApiGet 请求数据的方法
-func ApiGet(r *RequestInfo) {
-	c := Client.Clone()
+// decompressBody 自动检测并解压 Gzip / Deflate 压缩数据
+func decompressBody(resp *http.Response) ([]byte, error) {
+	var reader io.Reader = resp.Body
 
-	if r.Header != nil {
-		if t, _ := strconv.Atoi(r.Header.Get("timeout")); t > 0 {
-			c.SetRequestTimeout(time.Duration(t) * time.Second)
+	encoding := strings.ToLower(resp.Header.Get("Content-Encoding"))
+	if encoding == "gzip" {
+		gz, err := gzip.NewReader(resp.Body)
+		if err != nil {
+			return nil, err
+		}
+		defer gz.Close()
+		reader = gz
+	} else if encoding == "deflate" {
+		flateReader := flate.NewReader(resp.Body)
+		defer flateReader.Close()
+		reader = flateReader
+	}
+
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	// 魔法头双重校验：若未声明 Content-Encoding 但开头为 Gzip 标志位 \x1f\x8b，则强制解压
+	if len(body) >= 2 && body[0] == 0x1f && body[1] == 0x8b {
+		gz, err := gzip.NewReader(bytes.NewReader(body))
+		if err == nil {
+			decompressed, err := io.ReadAll(gz)
+			gz.Close()
+			if err == nil {
+				return decompressed, nil
+			}
 		}
 	}
 
-	// 记录本次请求的 referer（局部变量，无竞态）
-	var lastURL string
-	var targetURL string
+	return body, nil
+}
 
-	c.OnRequest(func(req *colly.Request) {
-		setBrowserHeaders(req, lastURL)
-	})
-
-	c.OnError(func(response *colly.Response, err error) {
-		if err != nil {
-			r.Err = err.Error()
-		}
-		if response != nil && response.Request != nil && response.Request.URL != nil {
-			if r.Err == "" {
-				r.Err = "request failed"
-			}
-			r.Err = r.Err + ", status=" + strconv.Itoa(response.StatusCode) + ", url=" + response.Request.URL.String()
-			return
-		}
-		if r.Err == "" && targetURL != "" {
-			r.Err = "request failed, url=" + targetURL
-		}
-	})
-
-	c.OnResponse(func(response *colly.Response) {
-		if (response.StatusCode == 200 || (response.StatusCode >= 300 && response.StatusCode <= 399)) && len(response.Body) > 0 {
-			r.Resp = response.Body
-			r.Err = ""
-		} else {
-			r.Resp = []byte{}
-			r.Err = "unexpected response status=" + strconv.Itoa(response.StatusCode) + ", url=" + response.Request.URL.String()
-		}
-		lastURL = response.Request.URL.String()
-	})
-
+// ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
+func ApiGet(r *RequestInfo) {
 	targetUrl := buildUrl(r.Uri, r.Params)
-	targetURL = targetUrl
-	err := c.Visit(targetUrl)
+	req, err := http.NewRequest("GET", targetUrl, nil)
 	if err != nil {
-		if r.Err == "" {
-			r.Err = err.Error()
+		r.Resp = nil
+		r.Err = fmt.Sprintf("create request failed: %v, url=%s", err, targetUrl)
+		return
+	}
+
+	setHTTPRequestHeaders(req, r.Header)
+
+	client := httpClient
+	if r.Header != nil {
+		if t, _ := strconv.Atoi(r.Header.Get("timeout")); t > 0 {
+			client = &http.Client{
+				Transport: sharedTransport,
+				Timeout:   time.Duration(t) * time.Second,
+			}
+		}
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		r.Resp = nil
+		r.Err = fmt.Sprintf("%v, url=%s", err, targetUrl)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := decompressBody(resp)
+	if err != nil {
+		r.Resp = nil
+		r.Err = fmt.Sprintf("decompress/read response failed: %v, url=%s", err, targetUrl)
+		return
+	}
+
+	if (resp.StatusCode == 200 || (resp.StatusCode >= 300 && resp.StatusCode <= 399)) && len(body) > 0 {
+		r.Resp = body
+		r.Err = ""
+	} else {
+		r.Resp = nil
+		if resp.StatusCode == http.StatusTooManyRequests {
+			r.Err = fmt.Sprintf("Too Many Requests, status=%d, url=%s", resp.StatusCode, targetUrl)
+		} else {
+			r.Err = fmt.Sprintf("unexpected response status=%d, url=%s", resp.StatusCode, targetUrl)
 		}
 	}
 }
@@ -161,41 +186,27 @@ func IsRateLimitedErr(err error) bool {
 	if err == nil {
 		return false
 	}
-	return containsStr(err.Error(), "Too Many Requests")
+	return strings.Contains(err.Error(), "Too Many Requests") || strings.Contains(err.Error(), "status=429")
 }
 
-// ApiTest 处理API请求后的数据, 主测试
+// ApiTest 处理 API 测试请求
 func ApiTest(r *RequestInfo) error {
-	c := CreateClient()
-
-	c.OnRequest(func(req *colly.Request) {
-		setBrowserHeaders(req, "")
-	})
-
-	c.OnResponse(func(response *colly.Response) {
-		if (response.StatusCode == 200 || (response.StatusCode >= 300 && response.StatusCode <= 399)) && len(response.Body) > 0 {
-			r.Resp = response.Body
-		} else {
-			r.Resp = []byte{}
-		}
-	})
-
-	targetUrl := buildUrl(r.Uri, r.Params)
-	err := c.Visit(targetUrl)
-	if err != nil {
-		log.Printf("ApiTest 访问失败: %s, Error: %v\n", targetUrl, err)
+	ApiGet(r)
+	if r.Err != "" {
+		log.Printf("ApiTest 访问失败: %s, Error: %s\n", buildUrl(r.Uri, r.Params), r.Err)
+		return fmt.Errorf("%s", r.Err)
 	}
-	return err
+	return nil
 }
 
-// buildUrl 安全地拼接 URL 和参数
+// buildUrl 安全拼接 URL 和 Query 参数
 func buildUrl(base string, params url.Values) string {
 	if len(params) == 0 {
 		return base
 	}
 	u, err := url.Parse(base)
 	if err != nil {
-		if containsStr(base, "?") {
+		if strings.Contains(base, "?") {
 			return base + "&" + params.Encode()
 		}
 		return base + "?" + params.Encode()

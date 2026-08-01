@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/url"
 	"sort"
 	"strconv"
@@ -1122,11 +1123,14 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 	if attempt <= 0 {
 		attempt = 1
 	}
-	delayIndex := attempt - 1
-	if delayIndex >= len(retryBackoffs) {
-		delayIndex = len(retryBackoffs) - 1
+	base := time.Duration(1<<uint(attempt-1)) * time.Second
+	if base > 10*time.Second {
+		base = 10 * time.Second
 	}
-	timer := time.NewTimer(retryBackoffs[delayIndex])
+	jitter := time.Duration(rand.Intn(500)) * time.Millisecond
+	delay := base + jitter
+
+	timer := time.NewTimer(delay)
 	defer timer.Stop()
 
 	select {
