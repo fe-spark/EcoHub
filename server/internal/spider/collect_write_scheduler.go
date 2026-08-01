@@ -188,15 +188,25 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 	})
 	defer stopCancelWake()
 
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	queue := l.queueFor(job)
 	var (
-		waitStart  time.Time
-		waited     bool
-		lastReason backpressureReason
+		waitStart     time.Time
+		waited        bool
+		lastReason    backpressureReason
+		logEnter      bool
+		enterSource   string
+		enterPending  int
+		enterGlobal   int
+		logLeave      bool
+		leaveCanceled bool
+		leaveSource   string
+		leavePending  int
+		leaveGlobal   int
+		leaveReason   backpressureReason
+		leaveWait     time.Duration
 	)
+
+	l.mu.Lock()
+	queue := l.queueFor(job)
 	for {
 		reason := l.submitBlockedReason(queue)
 		if reason == bpNone {
@@ -205,14 +215,29 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 		lastReason = reason
 		if err := ctx.Err(); err != nil {
 			if waited {
-				l.recordBackpressureWait(waitStart, lastReason, queue, true)
+				leaveWait = time.Since(waitStart)
+				leaveCanceled = true
+				leaveReason = lastReason
+				leaveSource = queue.sourceName
+				leavePending = len(queue.pending)
+				leaveGlobal = l.totalPending
+				logLeave = true // always log cancellations
+				l.backpressureWaits.Add(1)
+				l.backpressureWaitNs.Add(leaveWait.Nanoseconds())
+			}
+			l.mu.Unlock()
+			if logLeave {
+				l.logBackpressureLeave(leaveCanceled, leaveReason, leaveSource, leaveWait, leavePending, leaveGlobal)
 			}
 			return err
 		}
 		if !waited {
 			waitStart = time.Now()
 			waited = true
-			l.maybeLogBackpressureEnter(reason, queue)
+			enterSource = queue.sourceName
+			enterPending = len(queue.pending)
+			enterGlobal = l.totalPending
+			logEnter = l.shouldLogBackpressureEnter()
 		}
 		l.cond.Wait()
 		if q, ok := l.queues[job.sourceID]; ok {
@@ -223,7 +248,19 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 	}
 	if err := ctx.Err(); err != nil {
 		if waited {
-			l.recordBackpressureWait(waitStart, lastReason, queue, true)
+			leaveWait = time.Since(waitStart)
+			leaveCanceled = true
+			leaveReason = lastReason
+			leaveSource = queue.sourceName
+			leavePending = len(queue.pending)
+			leaveGlobal = l.totalPending
+			logLeave = true
+			l.backpressureWaits.Add(1)
+			l.backpressureWaitNs.Add(leaveWait.Nanoseconds())
+		}
+		l.mu.Unlock()
+		if logLeave {
+			l.logBackpressureLeave(leaveCanceled, leaveReason, leaveSource, leaveWait, leavePending, leaveGlobal)
 		}
 		return err
 	}
@@ -231,53 +268,44 @@ func (l *collectWriteLane) submit(ctx context.Context, job collectWriteJob) erro
 	queue.pending = append(queue.pending, job)
 	l.totalPending++
 	if waited {
-		l.recordBackpressureWait(waitStart, lastReason, queue, false)
+		leaveWait = time.Since(waitStart)
+		leaveReason = lastReason
+		leaveSource = queue.sourceName
+		leavePending = len(queue.pending)
+		leaveGlobal = l.totalPending
+		logLeave = leaveWait >= 500*time.Millisecond
+		l.backpressureWaits.Add(1)
+		l.backpressureWaitNs.Add(leaveWait.Nanoseconds())
 	}
 	l.cond.Signal()
+	l.mu.Unlock()
+
+	if logEnter {
+		log.Printf("[Spider][WriteScheduler] %s 反压等待 reason=%s source=%s source_pending=%d global_pending=%d/%d source_limit=%d",
+			l.name, lastReason, enterSource, enterPending, enterGlobal, l.maxPendingGlobal(), l.maxPendingPerSource())
+	}
+	if logLeave {
+		l.logBackpressureLeave(leaveCanceled, leaveReason, leaveSource, leaveWait, leavePending, leaveGlobal)
+	}
 	return nil
 }
 
-func (l *collectWriteLane) maybeLogBackpressureEnter(reason backpressureReason, queue *collectWriteQueue) {
+func (l *collectWriteLane) shouldLogBackpressureEnter() bool {
 	now := time.Now().UnixNano()
 	last := l.lastBackpressureLog.Load()
 	if last != 0 && now-last < int64(2*time.Second) {
-		return
+		return false
 	}
-	if !l.lastBackpressureLog.CompareAndSwap(last, now) {
-		return
-	}
-	// 日志在持锁路径外调用方保证；此处仅格式化字段。
-	name, sp, gp := "", 0, l.totalPending
-	if queue != nil {
-		name = queue.sourceName
-		sp = len(queue.pending)
-	}
-	log.Printf("[Spider][WriteScheduler] %s 反压等待 reason=%s source=%s source_pending=%d global_pending=%d/%d source_limit=%d",
-		l.name, reason, name, sp, gp, l.maxPendingGlobal(), l.maxPendingPerSource())
+	return l.lastBackpressureLog.CompareAndSwap(last, now)
 }
 
-func (l *collectWriteLane) recordBackpressureWait(start time.Time, reason backpressureReason, queue *collectWriteQueue, canceled bool) {
-	if start.IsZero() {
-		return
-	}
-	d := time.Since(start)
-	l.backpressureWaits.Add(1)
-	l.backpressureWaitNs.Add(d.Nanoseconds())
-	if d < 500*time.Millisecond && !canceled {
-		return
-	}
+func (l *collectWriteLane) logBackpressureLeave(canceled bool, reason backpressureReason, sourceName string, wait time.Duration, sourcePending, globalPending int) {
 	status := "resumed"
 	if canceled {
 		status = "canceled"
 	}
-	sourcePending := 0
-	sourceName := ""
-	if queue != nil {
-		sourcePending = len(queue.pending)
-		sourceName = queue.sourceName
-	}
 	log.Printf("[Spider][WriteScheduler] %s 反压结束 status=%s reason=%s source=%s wait=%s source_pending=%d global_pending=%d/%d",
-		l.name, status, reason, sourceName, d.Round(time.Millisecond), sourcePending, l.totalPending, l.maxPendingGlobal())
+		l.name, status, reason, sourceName, wait.Round(time.Millisecond), sourcePending, globalPending, l.maxPendingGlobal())
 }
 
 func (l *collectWriteLane) finishSource(sourceID string) {

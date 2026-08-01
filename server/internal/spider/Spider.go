@@ -1615,6 +1615,16 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			progress.Status = progressStatusStopped
 		})
 	}
+	// maybeMarkPagePhaseDone 最后一页完成后立刻切到 page_done，
+	// 避免 success+failed 已满仍长期显示「采集中」。
+	maybeMarkPagePhaseDone := func(progress *model.CollectProgress, snapshot collectPageStats) {
+		if progress.Status != progressStatusRunning && progress.Status != progressStatusStarting {
+			return
+		}
+		if progress.Total > 0 && snapshot.success+snapshot.failed >= progress.Total {
+			progress.Status = progressStatusPageDone
+		}
+	}
 	recordPageFailure := func(page int, stage string, err error) {
 		snapshot := recordPageFinished(page, false)
 		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
@@ -1622,6 +1632,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			if page > progress.Current {
 				progress.Current = page
 			}
+			maybeMarkPagePhaseDone(progress, snapshot)
 		})
 		saveFilmPageFailure(s, h, page, stage, err)
 		if shouldLogCollectFailure(snapshot.failed) {
@@ -1646,6 +1657,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			if page > progress.Current {
 				progress.Current = page
 			}
+			maybeMarkPagePhaseDone(progress, snapshot)
 		})
 		logProgress(false)
 	}
