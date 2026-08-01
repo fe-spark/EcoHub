@@ -439,17 +439,20 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) ([
 	}); err != nil {
 		return nil, err
 	}
-	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
-		log.Printf("TouchCollectSourceStats Error: %v", err)
-	}
-
 	if len(changedInfos) == 0 {
 		return affectedMIDs, nil
 	}
 
-	clearFilmIndexCachesByPids(changedInfos)
+	// 仅在有实质变更时更新 last_collect_time / 失效缓存。
 	if refreshSearchTags {
+		if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
+			log.Printf("TouchCollectSourceStats Error: %v", err)
+		}
+		clearFilmIndexCachesByPids(changedInfos)
 		BatchHandleSearchTag(changedInfos...)
+	} else {
+		repository.NoteCollectSourceStats(id)
+		NoteCollectCacheInvalidationByIndexes(changedInfos)
 	}
 	return affectedMIDs, nil
 }

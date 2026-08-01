@@ -47,7 +47,11 @@ export default function CollectOverview({
           </Col>
           <Col xs={12} lg={6} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic title="采集中" value={stats.running} suffix={stats.waiting > 0 ? `等待 ${stats.waiting}` : undefined} />
+              <Statistic
+                title="采集中"
+                value={stats.running}
+                suffix={stats.waiting > 0 ? `收尾/排队 ${stats.waiting}` : undefined}
+              />
             </div>
           </Col>
           <Col xs={12} lg={6} className={styles.overviewCol}>
