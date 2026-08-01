@@ -22,8 +22,8 @@
 
 | 容器 | 作用 | 镜像 |
 | --- | --- | --- |
-| `Eco-web` | 前台、播放页、登录页、管理后台 | `ghcr.io/fe-spark/ecohub-web:v1.0.0` |
-| `Eco-server` | Go API、采集、缓存、鉴权、开放接口 | `ghcr.io/fe-spark/ecohub-server:v1.0.0` |
+| `Eco-web` | 前台、播放页、登录页、管理后台 | `ghcr.io/fe-spark/ecohub-web:v1.1.0` |
+| `Eco-server` | Go API、采集、缓存、鉴权、开放接口 | `ghcr.io/fe-spark/ecohub-server:v1.1.0` |
 | `Eco-mysql` | 内置 MySQL 数据库 | `mysql:8.4` |
 | `Eco-redis` | 内置 Redis 缓存 | `redis:7.4-alpine` |
 
