@@ -43,7 +43,7 @@ services:
 
   server:
     container_name: Eco-server
-    image: ghcr.io/fe-spark/ecohub-server:v1.1.0
+    image: ghcr.io/fe-spark/ecohub-server:latest
     restart: always
     environment:
       PORT: ${SERVER_PORT:-8080}
@@ -78,7 +78,7 @@ services:
 
   web:
     container_name: Eco-web
-    image: ghcr.io/fe-spark/ecohub-web:v1.1.0
+    image: ghcr.io/fe-spark/ecohub-web:latest
     restart: always
     environment:
       API_URL: http://server:${SERVER_PORT:-8080}
