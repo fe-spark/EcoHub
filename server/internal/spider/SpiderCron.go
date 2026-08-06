@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 
@@ -199,19 +200,19 @@ func runTaskBody(ft model.FilmCollectTask) {
 
 	switch ft.Model {
 	case 0: // 自动更新已启用站点
-		AutoCollect(ft.Time)
+		AutoCollectTriggered(model.NotifyTriggerCron, ft.Time)
 		log.Println("执行一次自动更新任务")
 	case 1: // 更新指定资源站
 		if len(ft.Ids) == 0 {
 			log.Printf("定时任务[%s]未配置资源站，跳过执行\n", ft.Id)
 			return
 		}
-		BatchCollect(ft.Time, ft.Ids...)
+		BatchCollectTriggered(model.NotifyTriggerCron, ft.Time, ft.Ids...)
 	case 2: // 失败采集恢复
 		FullRecoverSpider()
 		log.Println("执行一次失败采集恢复任务")
 	case 3: // 附属站播放列表孤儿清理
-		executeOrphanCleanTask()
+		executeOrphanCleanTask(ft)
 	default:
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
 	}
@@ -219,11 +220,12 @@ func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
 }
 
-func executeOrphanCleanTask() {
+func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	orphanCleanTaskLock.Lock()
 	defer orphanCleanTaskLock.Unlock()
 
 	startedAt := time.Now()
+	var cleanDetail string
 	if err := collectLifecycle.runExclusive(func() error {
 		n, err := filmrepo.CleanOrphanPlaylists()
 		if err != nil {
@@ -237,13 +239,16 @@ func executeOrphanCleanTask() {
 				return fmt.Errorf("刷新清理后的前台读模型失败: %w", err)
 			}
 		}
+		cleanDetail = fmt.Sprintf("删除孤儿 %d、空记录 %d、缺失详情 %d", n, m, x)
 		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
 		return nil
 	}); err != nil {
 		log.Printf("[CleanOrphan] 数据清理任务执行失败: %v", err)
+		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
 		return
 	}
 	log.Printf("[CleanOrphan] 数据清理任务执行完成，cost=%s", time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
 }
 
 // RunTaskOnce 立即手动执行一次任务

@@ -32,6 +32,7 @@ func (s *InitService) DefaultDataInit() {
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.CollectSourceStats{}, &model.SearchTagItem{},
 			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
 			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
+			&model.NotifyConfigRecord{},
 		)
 	}
 	ensureMappingRuleIndexes()
@@ -99,6 +100,7 @@ func (s *InitService) TableInit() {
 		&model.MappingRule{},
 		&model.CategoryMapping{},
 		&model.SourceCategory{},
+		&model.NotifyConfigRecord{},
 	)
 	if err != nil {
 		log.Println("Database AutoMigrate Failed:", err)

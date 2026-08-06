@@ -85,6 +85,7 @@ const menuItems: MenuItem[] = [
     label: "系统设置",
     children: [
       { key: "/manage/system/website", label: "网站配置" },
+      { key: "/manage/system/notify", label: "通知设置" },
       { key: "/manage/system/banners", label: "首页封面" },
       { key: "/manage/system/users", label: "账号管理" },
     ],
@@ -120,6 +121,9 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/system/website")) {
     return "/manage/system/website";
+  }
+  if (pathname.startsWith("/manage/system/notify")) {
+    return "/manage/system/notify";
   }
   if (pathname.startsWith("/manage/system/banners")) {
     return "/manage/system/banners";
