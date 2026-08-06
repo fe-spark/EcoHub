@@ -1,10 +1,10 @@
 "use client";
 
 import React from "react";
-import { useRouter } from "next/navigation";
 import { Button, Empty, Row, Col } from "antd";
 import { PlaySquareOutlined } from "@ant-design/icons";
 import AppLoading from "@/components/public/Loading";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
@@ -165,7 +165,7 @@ export default function FilmList({
   loading = false,
   onOpenPlayPage,
 }: FilmListProps) {
-  const router = useRouter();
+  const { navigate } = useContentNavigate();
 
   const { props: colProps, className: colClassName } = React.useMemo(() => {
     // Default to 6 columns if not specified
@@ -222,7 +222,7 @@ export default function FilmList({
       onOpenPlayPage(id, href);
       return;
     }
-    router.push(href);
+    navigate(href, "进入播放页...");
   };
 
   return (

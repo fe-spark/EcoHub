@@ -1,13 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { LoadingOutlined, LeftOutlined, RightOutlined } from "@ant-design/icons";
+import { LeftOutlined, RightOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { Pagination } from "antd";
 import FilmList from "@/components/public/FilmList";
+import AppLoading from "@/components/public/Loading";
 import styles from "./index.module.less";
-
-import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+import {
+  forceFinishNavigationLoading,
+  startNavigationLoading,
+} from "@/components/public/TopLoadingBar";
 
 /**
  * 单行筛选行滚动箭头 Hook
@@ -67,12 +70,57 @@ export default function FilmClassifySearchPageView({
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 20 };
   const categoryKey = [safeParams.Pid || currentParams.Pid || "", safeParams.Category || currentParams.Category || ""].join(":");
-  const currentQueryString = useMemo(
-    () => new URLSearchParams(currentParams).toString(),
-    [currentParams],
+
+  /** 语义化 query 比较：忽略键序与空值，避免 page 过滤假值后全等失败卡 loading */
+  const normalizeQueryKey = useCallback((input: string | Record<string, string>) => {
+    let entries: [string, string][];
+    if (typeof input === "string") {
+      const q = input.includes("?") ? input.slice(input.indexOf("?") + 1) : input;
+      entries = [...new URLSearchParams(q).entries()];
+    } else {
+      entries = Object.entries(input);
+    }
+    const filtered = entries
+      .filter(([k, v]) => !k.startsWith("_") && v !== "")
+      .sort(([a], [b]) => a.localeCompare(b));
+    return new URLSearchParams(filtered).toString();
+  }, []);
+
+  const currentQueryKey = useMemo(
+    () => normalizeQueryKey(currentParams),
+    [currentParams, normalizeQueryKey],
   );
-  const currentUrl = `/filmClassifySearch?${currentQueryString}`;
-  const isPending = isRoutePending || (navigatingUrl !== "" && navigatingUrl !== currentUrl);
+  const currentUrl = `/filmClassifySearch?${currentQueryKey}`;
+  const reachedTarget =
+    navigatingUrl === "" ||
+    normalizeQueryKey(navigatingUrl) === currentQueryKey;
+  const isPending = isRoutePending || (navigatingUrl !== "" && !reachedTarget);
+  const loadingBarStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (isPending) {
+      loadingBarStartedRef.current = true;
+      return;
+    }
+    if (loadingBarStartedRef.current) {
+      loadingBarStartedRef.current = false;
+      forceFinishNavigationLoading();
+    }
+    if (navigatingUrl && reachedTarget) {
+      setNavigatingUrl("");
+    }
+  }, [isPending, navigatingUrl, reachedTarget]);
+
+  useEffect(() => {
+    if (!navigatingUrl) {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setNavigatingUrl("");
+      forceFinishNavigationLoading();
+    }, 15_000);
+    return () => window.clearTimeout(timer);
+  }, [navigatingUrl]);
 
   const normalizeTagValue = (value: unknown) =>
     typeof value === "string" ? value.trim() : "";
@@ -90,6 +138,17 @@ export default function FilmClassifySearchPageView({
     });
   };
 
+  const pushFilterUrl = (nextUrl: string, barLabel: string) => {
+    if (nextUrl === currentUrl || isPending) {
+      return;
+    }
+    startNavigationLoading(barLabel);
+    setNavigatingUrl(nextUrl);
+    startTransition(() => {
+      router.push(nextUrl);
+    });
+  };
+
   const handleTagClick = (key: string, value: string) => {
     if (isPending) {
       return;
@@ -103,17 +162,7 @@ export default function FilmClassifySearchPageView({
       nextParams.set(key, normalizedValue);
     }
     nextParams.set("current", "1");
-    const nextUrl = `/filmClassifySearch?${nextParams.toString()}`;
-
-    if (nextUrl === currentUrl) {
-      return;
-    }
-
-    startNavigationLoading("筛选影片中...");
-    setNavigatingUrl(nextUrl);
-    startTransition(() => {
-      router.push(nextUrl);
-    });
+    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "筛选影片中...");
   };
 
   const handlePageChange = (pageNo: number) => {
@@ -123,17 +172,7 @@ export default function FilmClassifySearchPageView({
 
     const nextParams = new URLSearchParams(currentParams);
     nextParams.set("current", pageNo.toString());
-    const nextUrl = `/filmClassifySearch?${nextParams.toString()}`;
-
-    if (nextUrl === currentUrl) {
-      return;
-    }
-
-    startNavigationLoading("加载页面中...");
-    setNavigatingUrl(nextUrl);
-    startTransition(() => {
-      router.push(nextUrl);
-    });
+    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "加载列表中...");
   };
 
   return (
@@ -144,6 +183,7 @@ export default function FilmClassifySearchPageView({
         </div>
       </div>
 
+      {/* 筛选区始终保留，不进入全屏 loading */}
       <div className={styles.filterSection} aria-busy={isPending}>
         {safeSearch.sortList.map((key: string) => (
           <FilterRow
@@ -159,24 +199,24 @@ export default function FilmClassifySearchPageView({
         ))}
       </div>
 
+      {/* 仅列表区域 loading */}
       <div className={styles.content}>
-        {isPending && (
-          <div className={styles.contentLoadingMask} role="status" aria-live="polite">
-            <LoadingOutlined />
-            <span>正在筛选影片...</span>
+        {isPending ? (
+          <div className={styles.listLoading} role="status" aria-live="polite">
+            <AppLoading text="列表加载中" size="default" showHints={false} />
           </div>
+        ) : (
+          <FilmList key={categoryKey} list={safeList} className={styles.classifyGrid} />
         )}
-        <FilmList key={categoryKey} list={safeList} className={styles.classifyGrid} />
       </div>
 
-      {safeList.length > 0 && (
+      {!isPending && safeList.length > 0 && (
         <div className={styles.paginationWrapper}>
           <Pagination
             current={parseInt(currentParams.current || "1", 10)}
             total={safePage.total ?? 0}
             pageSize={safePage.pageSize || 20}
             onChange={handlePageChange}
-            disabled={isPending}
             showSizeChanger={false}
             hideOnSinglePage
           />
@@ -211,7 +251,13 @@ function FilterRow({
       <div className={styles.label}>{label}</div>
       <div className={styles.optionsWrap}>
         {canLeft && (
-          <button type="button" className={`${styles.arrowBtn} ${styles.arrowLeft}`} onClick={scrollLeft} aria-label="向左滚动">
+          <button
+            type="button"
+            className={`${styles.arrowBtn} ${styles.arrowLeft}`}
+            onClick={scrollLeft}
+            aria-label="向左滚动"
+            disabled={isPending}
+          >
             <LeftOutlined />
           </button>
         )}
@@ -221,14 +267,24 @@ function FilterRow({
               key={`${filterKey}-${tag.Value}-${tag.Name}-${index}`}
               className={`${styles.option} ${activeValue === normalizeTagValue(tag.Value) ? styles.active : ""}`}
               aria-disabled={isPending}
-              onClick={() => onTagClick(filterKey, tag.Value)}
+              onClick={() => {
+                if (!isPending) {
+                  onTagClick(filterKey, tag.Value);
+                }
+              }}
             >
               {tag.Name}
             </span>
           ))}
         </div>
         {canRight && (
-          <button type="button" className={`${styles.arrowBtn} ${styles.arrowRight}`} onClick={scrollRight} aria-label="向右滚动">
+          <button
+            type="button"
+            className={`${styles.arrowBtn} ${styles.arrowRight}`}
+            onClick={scrollRight}
+            aria-label="向右滚动"
+            disabled={isPending}
+          >
             <RightOutlined />
           </button>
         )}

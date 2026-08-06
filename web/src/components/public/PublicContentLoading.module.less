@@ -1,0 +1,114 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--public-page-bg);
+  color: var(--public-text-1);
+  gap: 0;
+}
+
+.fill {
+  flex: 1;
+  min-height: 0;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: min(100%, 360px);
+  padding: 8px 20px 24px;
+  box-sizing: border-box;
+}
+
+/* 超时行动区：玻璃卡片，与上方 loading 成组 */
+.slowCard {
+  margin-top: 22px;
+  width: 100%;
+  padding: 16px 18px 14px;
+  border-radius: 16px;
+  border: 1px solid var(--public-border-2);
+  background: color-mix(in srgb, var(--public-surface-2) 88%, transparent);
+  box-shadow: var(--public-shadow-sm);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  animation: riseIn 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.slowTip {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.5;
+  color: var(--public-text-4);
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+.refreshBtn {
+  appearance: none;
+  border: none;
+  cursor: pointer;
+  min-width: 132px;
+  height: 40px;
+  padding: 0 22px;
+  border-radius: 999px;
+  font-size: 13.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--public-on-accent);
+  background: linear-gradient(
+    145deg,
+    color-mix(in srgb, var(--primary-color) 92%, white),
+    var(--primary-color) 55%,
+    color-mix(in srgb, var(--primary-color) 78%, #c2410c)
+  );
+  box-shadow:
+    0 10px 24px rgba(var(--primary-color-rgb), 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease,
+    filter 0.2s ease;
+}
+
+.refreshBtn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow:
+    0 14px 30px rgba(var(--primary-color-rgb), 0.34),
+    inset 0 1px 0 rgba(255, 255, 255, 0.32);
+}
+
+.refreshBtn:active {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slowCard {
+    animation: none;
+  }
+
+  .refreshBtn {
+    transition: none;
+  }
+}

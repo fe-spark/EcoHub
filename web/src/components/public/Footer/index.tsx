@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import SiteLogo from "@/components/public/SiteLogo";
 
 export default function Footer() {
   const { config } = useSiteConfig();
@@ -19,9 +20,11 @@ export default function Footer() {
   return (
     <footer className={styles.footer}>
       <div className={styles.footerInfo}>
-        {/* 站点 logo 来自后台配置的动态地址，这里不强依赖 next/image 的远程配置 */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        {config?.logo && <img src={config.logo} alt="logo" className={styles.footerLogo} />}
+        <SiteLogo
+          src={config?.logo}
+          className={styles.footerLogo}
+          fetchPriority="low"
+        />
         <span className={styles.footerSiteName}>{config?.siteName}</span>
       </div>
       <p className={styles.copyright}>

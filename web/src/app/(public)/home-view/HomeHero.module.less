@@ -1,5 +1,29 @@
+/* 海报区保持电影感暗底浅字；壳层/描边/主色跟随主题 token */
 .hero {
   --deck-w: 320px;
+  --hero-shell-bg: #0b0d13;
+  --hero-border: var(--public-border-2);
+  --hero-inset: rgba(255, 255, 255, 0.06);
+  --hero-card-bg: #151922;
+  --hero-card-ring: rgba(255, 255, 255, 0.12);
+  --hero-card-shadow: 0 28px 50px rgba(0, 0, 0, 0.5);
+  --hero-text-1: #ffffff;
+  --hero-text-2: rgba(255, 255, 255, 0.9);
+  --hero-text-3: rgba(255, 255, 255, 0.68);
+  --hero-text-muted: rgba(255, 255, 255, 0.48);
+  --hero-chip-bg: rgba(255, 255, 255, 0.08);
+  --hero-chip-border: rgba(255, 255, 255, 0.16);
+  --hero-tag-bg: rgba(255, 255, 255, 0.06);
+  --hero-tag-border: rgba(255, 255, 255, 0.12);
+  --hero-dot: rgba(255, 255, 255, 0.32);
+  --hero-dot-border: rgba(255, 255, 255, 0.16);
+  --hero-thumb-border: rgba(255, 255, 255, 0.14);
+  --hero-thumb-bg: rgba(255, 255, 255, 0.04);
+  --hero-divider: rgba(255, 255, 255, 0.1);
+  --hero-shade:
+    radial-gradient(ellipse 65% 75% at 50% 50%, rgba(var(--primary-color-rgb), 0.22), transparent 70%),
+    radial-gradient(ellipse 55% 70% at 85% 48%, rgba(var(--primary-color-rgb), 0.18), transparent 55%),
+    linear-gradient(115deg, rgba(8, 10, 16, 0.92) 0%, rgba(8, 10, 16, 0.52) 50%, rgba(8, 10, 16, 0.82) 100%);
 
   position: relative;
   width: 100%;
@@ -8,11 +32,24 @@
   margin-bottom: 48px;
   overflow: hidden;
   border-radius: 24px;
-  background: #0b0d13;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--hero-shell-bg);
+  border: 1px solid var(--hero-border);
   box-shadow:
     var(--public-shadow-lg),
-    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    inset 0 1px 0 var(--hero-inset);
+}
+
+:global(html[data-theme="light"]) .hero {
+  --hero-shell-bg: color-mix(in srgb, var(--public-surface-2) 78%, #0f121a 22%);
+  --hero-border: var(--public-border-2);
+  --hero-inset: rgba(255, 255, 255, 0.55);
+  --hero-card-bg: #1a1f2b;
+  --hero-card-ring: rgba(16, 18, 24, 0.12);
+  --hero-card-shadow: 0 24px 44px rgba(16, 18, 24, 0.18);
+  --hero-shade:
+    radial-gradient(ellipse 65% 75% at 50% 50%, rgba(var(--primary-color-rgb), 0.16), transparent 70%),
+    radial-gradient(ellipse 55% 70% at 85% 48%, rgba(var(--primary-color-rgb), 0.12), transparent 55%),
+    linear-gradient(115deg, rgba(12, 14, 22, 0.88) 0%, rgba(12, 14, 22, 0.48) 50%, rgba(12, 14, 22, 0.78) 100%);
 }
 
 .backdrop {
@@ -35,13 +72,15 @@
   opacity: 0.62;
 }
 
+:global(html[data-theme="light"]) .backdropImage {
+  filter: blur(56px) saturate(1.1) brightness(0.78);
+  opacity: 0.5;
+}
+
 .backdropShade {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(ellipse 65% 75% at 50% 50%, rgba(var(--primary-color-rgb), 0.22), transparent 70%),
-    radial-gradient(ellipse 55% 70% at 85% 48%, rgba(var(--primary-color-rgb), 0.18), transparent 55%),
-    linear-gradient(115deg, rgba(8, 10, 16, 0.92) 0%, rgba(8, 10, 16, 0.52) 50%, rgba(8, 10, 16, 0.82) 100%);
+  background: var(--hero-shade);
 }
 
 .shell {
@@ -105,11 +144,11 @@
   border: 0;
   border-radius: 20px;
   overflow: hidden;
-  background: #151922;
+  background: var(--hero-card-bg);
   cursor: grab;
   box-shadow:
-    0 28px 50px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.12);
+    var(--hero-card-shadow),
+    0 0 0 1px var(--hero-card-ring);
 
   &:active {
     cursor: grabbing;
@@ -144,9 +183,9 @@
   width: 8px;
   height: 8px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid var(--hero-dot-border);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.32);
+  background: var(--hero-dot);
   cursor: pointer;
   transition: width 0.2s ease, background 0.2s ease, border-color 0.2s ease;
 }
@@ -171,7 +210,7 @@
 
 .eyebrow {
   margin: 0;
-  color: rgba(255, 255, 255, 0.48);
+  color: var(--hero-text-muted);
   font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.22em;
@@ -192,7 +231,7 @@
   padding: 0 12px;
   border-radius: 999px;
   background: rgba(var(--primary-color-rgb), 0.95);
-  color: #fff;
+  color: var(--public-on-accent);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
@@ -219,9 +258,9 @@
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.16);
-  color: rgba(255, 255, 255, 0.9);
+  background: var(--hero-chip-bg);
+  border: 1px solid var(--hero-chip-border);
+  color: var(--hero-text-2);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.05em;
@@ -232,7 +271,7 @@
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  color: rgba(255, 255, 255, 0.55);
+  color: var(--hero-text-muted);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -250,7 +289,7 @@
   width: 100%;
   height: auto;
   max-height: 2.6em;
-  color: #fff;
+  color: var(--hero-text-1);
   font-size: clamp(24px, 2.8vw, 36px);
   line-height: 1.25;
   font-weight: 900;
@@ -279,9 +318,9 @@
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.06);
-  color: rgba(255, 255, 255, 0.82);
+  border: 1px solid var(--hero-tag-border);
+  background: var(--hero-tag-bg);
+  color: var(--hero-text-2);
 }
 
 .tagHighlight {
@@ -300,7 +339,7 @@
 
 .blurb {
   margin: 2px 0 6px 0;
-  color: rgba(255, 255, 255, 0.68);
+  color: var(--hero-text-3);
   font-size: 13.5px;
   line-height: 1.6;
   max-width: 560px;
@@ -323,7 +362,7 @@
     rgba(var(--primary-color-rgb), 1),
     rgba(var(--primary-color-rgb), 0.74)
   ) !important;
-  color: #fff !important;
+  color: var(--public-on-accent) !important;
   font-size: 15px !important;
   font-weight: 800 !important;
   box-shadow: 0 16px 34px rgba(var(--primary-color-rgb), 0.36) !important;
@@ -342,7 +381,7 @@
   width: 100%;
   margin-top: 6px;
   padding-top: 14px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--hero-divider);
   box-sizing: border-box;
 }
 
@@ -351,12 +390,12 @@
   width: 52px;
   height: 78px;
   padding: 0;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--hero-thumb-border);
   border-radius: 10px;
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
-  background-color: rgba(255, 255, 255, 0.04);
+  background-color: var(--hero-thumb-bg);
   cursor: pointer;
   opacity: 0.55;
   transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;

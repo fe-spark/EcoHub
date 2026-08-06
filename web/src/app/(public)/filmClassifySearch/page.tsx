@@ -25,8 +25,12 @@ export default async function FilmClassifySearchPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = await searchParams;
+  // 过滤 Next 内部参数（_rsc 等），避免传给后端
   const currentParams = Object.fromEntries(
     Object.entries(resolvedSearchParams).flatMap(([key, value]) => {
+      if (key.startsWith("_")) {
+        return [];
+      }
       if (Array.isArray(value)) {
         return [[key, value[0] ?? ""]];
       }

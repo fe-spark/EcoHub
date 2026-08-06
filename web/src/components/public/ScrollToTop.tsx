@@ -1,16 +1,28 @@
 "use client";
 
-import { useEffect } from "react";
+import { Suspense, useEffect } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
-export default function ScrollToTop() {
+/**
+ * 路由变化滚回顶部。
+ * useSearchParams 必须隔离在内层 + Suspense，禁止包进 Header/Footer 等同级大树。
+ */
+function ScrollToTopInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const routeKey = `${pathname}?${searchParams.toString()}`;
 
   useEffect(() => {
-    // 监听到路由或参数变化时，直接无脑瞬间滚回顶部，无论数据是否已加载
     window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-  }, [pathname, searchParams]);
+  }, [routeKey]);
 
   return null;
+}
+
+export default function ScrollToTop() {
+  return (
+    <Suspense fallback={null}>
+      <ScrollToTopInner />
+    </Suspense>
+  );
 }
