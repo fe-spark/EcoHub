@@ -19,6 +19,7 @@ web/.env.local
 # vendor/
 .codegraph/
 .claude/
+.ai/
 
 
 #忽略client相关依赖缓存

@@ -708,3 +708,43 @@ func LoadSourceMidByGlobalMid(globalMid int64, sourceID string) int64 {
 	}
 	return mapping.SourceMid
 }
+
+// LoadGlobalMidsBySourceMids 将附属站 source_mid 列表映射为全局 mid（依赖已写入的 mapping）。
+func LoadGlobalMidsBySourceMids(sourceID string, sourceMids []int64) []int64 {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(sourceMids) == 0 {
+		return nil
+	}
+	uniq := make([]int64, 0, len(sourceMids))
+	seen := make(map[int64]struct{}, len(sourceMids))
+	for _, mid := range sourceMids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+	var mappings []model.MovieSourceMapping
+	if err := db.Mdb.Where("source_id = ? AND source_mid IN ?", sourceID, uniq).Find(&mappings).Error; err != nil {
+		return nil
+	}
+	out := make([]int64, 0, len(mappings))
+	outSeen := make(map[int64]struct{}, len(mappings))
+	for _, m := range mappings {
+		if m.GlobalMid <= 0 {
+			continue
+		}
+		if _, ok := outSeen[m.GlobalMid]; ok {
+			continue
+		}
+		outSeen[m.GlobalMid] = struct{}{}
+		out = append(out, m.GlobalMid)
+	}
+	return out
+}

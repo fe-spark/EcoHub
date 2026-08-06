@@ -42,6 +42,10 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
 			sysConfig.POST(`/basic/update`, handler.ManageHd.UpdateSiteBasic)
 			sysConfig.POST(`/basic/reset`, handler.ManageHd.ResetSiteBasic)
+
+			sysConfig.GET(`/notify`, handler.NotifyHd.GetNotifyConfig)
+			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)
+			sysConfig.POST(`/notify/test`, handler.NotifyHd.TestNotify)
 		}
 		systemLog := manageRoute.Group(`/system/logs`)
 		{

@@ -25,4 +25,5 @@ const (
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
 	TableFileInfo           = "file_info"
+	TableNotifyConfig       = "notify_config"
 )
