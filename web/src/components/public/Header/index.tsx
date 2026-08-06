@@ -1,8 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useRef, useState, useTransition } from "react";
-import { createPortal } from "react-dom";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import React, {
+  Suspense,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import { usePathname, useSearchParams } from "next/navigation";
 import { Button, Drawer, Empty, Input } from "antd";
 import {
   SearchOutlined,
@@ -12,17 +17,13 @@ import {
   HomeOutlined,
   FireOutlined,
   DownOutlined,
-  LoadingOutlined,
 } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
-import {
-  startNavigationLoading,
-  finishNavigationLoading,
-  forceFinishNavigationLoading,
-} from "@/components/public/TopLoadingBar";
+import { usePublicContentLoading } from "@/components/public/PublicContentLoading";
+import SiteLogo from "@/components/public/SiteLogo";
 
 interface NavItem {
   id: string | number;
@@ -39,6 +40,26 @@ interface HistoryItem {
   timeStamp: number;
 }
 
+/**
+ * 仅这一层调用 useSearchParams，并放在内层 Suspense 里。
+ * 避免整棵 Header（含 logo img）因 query 变化被卸载重挂载而重新拉图。
+ */
+function SearchParamsBridge({
+  onChange,
+}: {
+  onChange: (next: { search: string; pid: string | null }) => void;
+}) {
+  const searchParams = useSearchParams();
+  const search = searchParams.get("search") || "";
+  const pid = searchParams.get("Pid");
+
+  useEffect(() => {
+    onChange({ search, pid });
+  }, [search, pid, onChange]);
+
+  return null;
+}
+
 export default function Header({ navList }: { navList: NavItem[] }) {
   const [keyword, setKeyword] = useState("");
   const { config: siteInfo } = useSiteConfig();
@@ -47,26 +68,29 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const [mobileMenuVisible, setMobileMenuVisible] = useState(false);
   const [desktopCatalogOpen, setDesktopCatalogOpen] = useState(false);
   const [activeCategoryId, setActiveCategoryId] = useState("");
-  
-  const [mounted, setMounted] = useState(false);
+  const [urlPid, setUrlPid] = useState<string | null>(null);
+
   const [isNavigating, setIsNavigating] = useState(false);
-  const [isPending, startTransition] = useTransition();
   const [pendingCategoryId, setPendingCategoryId] = useState<string | null>(null);
 
-  const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
   const { message } = useAppMessage();
   const desktopCatalogRef = useRef<HTMLDivElement>(null);
+  const {
+    navigate: layoutNavigate,
+    active: contentLoadingActive,
+  } = usePublicContentLoading();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
+  const [keywordFromUrl, setKeywordFromUrl] = useState("");
 
-  const urlSearch = searchParams.get("search") || "";
-  useEffect(() => {
-    setKeyword(urlSearch);
-  }, [urlSearch]);
+  const onSearchParamsChange = useCallback(
+    (next: { search: string; pid: string | null }) => {
+      setKeyword(next.search);
+      setKeywordFromUrl(next.search);
+      setUrlPid(next.pid);
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleScroll = () => {
@@ -77,34 +101,13 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // 监听路由变化完成，关闭遮罩与 Loading 状态
+  // 布局 content loading 结束后，同步清掉 Header 导航中状态
   useEffect(() => {
-    setIsNavigating(false);
-    setPendingCategoryId(null);
-    forceFinishNavigationLoading();
-  }, [pathname, searchParams]);
-
-  // 移动端/桌面端加载遮罩开启时强制锁定背景滚动
-  useEffect(() => {
-    if (isNavigating && !pathname.startsWith("/search")) {
-      const originalOverflow = document.body.style.overflow;
-      const originalTouchAction = document.body.style.touchAction;
-      document.body.style.overflow = "hidden";
-      document.body.style.touchAction = "none";
-
-      const preventTouch = (e: TouchEvent) => {
-        e.preventDefault();
-      };
-
-      document.addEventListener("touchmove", preventTouch, { passive: false });
-
-      return () => {
-        document.body.style.overflow = originalOverflow;
-        document.body.style.touchAction = originalTouchAction;
-        document.removeEventListener("touchmove", preventTouch);
-      };
+    if (isNavigating && !contentLoadingActive) {
+      setIsNavigating(false);
+      setPendingCategoryId(null);
     }
-  }, [isNavigating, pathname]);
+  }, [isNavigating, contentLoadingActive]);
 
   const loadHistory = useCallback(() => {
     const historyMap = readHistoryMap();
@@ -121,27 +124,33 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   };
 
   const handleSearch = () => {
-    if (!keyword.trim()) {
+    const q = keyword.trim();
+    if (!q) {
       message.error("请输入搜索关键词");
       return;
     }
-    setPendingCategoryId("search");
-    startNavigationLoading("搜索加载中...");
-    startTransition(() => {
-      router.push(`/search?search=${encodeURIComponent(keyword)}`);
-    });
+    const href = `/search?search=${encodeURIComponent(q)}`;
+    // 同 keyword 且已在搜索页：不重复导航
+    if (pathname === "/search" && keywordFromUrl === q) {
+      return;
+    }
+    beginHeaderNavigation("search", "搜索加载中...", href);
   };
 
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
-  const activePid = pathname.startsWith("/filmClassify") ? searchParams.get("Pid") : null;
+  const activePid = pathname.startsWith("/filmClassify") ? urlPid : null;
   const isHomeActive = pathname === "/";
   const isCategoryActive = (id: string | number) => activeCategoryId === String(id);
 
+  // 导航进行中保持乐观高亮，避免 URL 尚未更新时被 activePid 冲掉
   useEffect(() => {
+    if (isNavigating) {
+      return;
+    }
     setActiveCategoryId(activePid ? String(activePid) : "");
-  }, [activePid]);
+  }, [activePid, isNavigating]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -177,36 +186,50 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     }
   };
 
+  const beginHeaderNavigation = (pendingId: string, label: string, href: string) => {
+    setPendingCategoryId(pendingId);
+    setDesktopCatalogOpen(false);
+    setMobileMenuVisible(false);
+    setIsNavigating(true);
+    // 走布局级 navigate：transition 不挂在会被卸载的页面组件上
+    layoutNavigate(href, label);
+  };
+
   const navigateToCategory = (id: string | number) => {
     const nextId = String(id);
+
+    // 已在该分类页：不重复导航（避免整页内容 loading 卡死）
+    if (
+      pathname.startsWith("/filmClassify") &&
+      activePid !== null &&
+      String(activePid) === nextId
+    ) {
+      setDesktopCatalogOpen(false);
+      setMobileMenuVisible(false);
+      return;
+    }
 
     if (isNavigating && pendingCategoryId === nextId) {
       return;
     }
 
-    setPendingCategoryId(nextId);
     setActiveCategoryId(nextId);
-    setDesktopCatalogOpen(false);
-    setMobileMenuVisible(false);
-    setIsNavigating(true);
-
-    startNavigationLoading("分类加载中...");
-
-    startTransition(() => {
-      router.push(`/filmClassify?Pid=${encodeURIComponent(nextId)}`);
-    });
+    beginHeaderNavigation(
+      nextId,
+      "分类加载中...",
+      `/filmClassify?Pid=${encodeURIComponent(nextId)}`,
+    );
   };
 
   const navigateToHome = () => {
-    if (isNavigating) return;
-    setPendingCategoryId("home");
+    if (pathname === "/") {
+      return;
+    }
+    if (isNavigating && pendingCategoryId === "home") {
+      return;
+    }
     setActiveCategoryId("");
-    setMobileMenuVisible(false);
-    setIsNavigating(true);
-    startNavigationLoading("首页加载中...");
-    startTransition(() => {
-      router.push("/");
-    });
+    beginHeaderNavigation("home", "首页加载中...", "/");
   };
 
   const historyContent = (
@@ -228,12 +251,8 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               key={idx}
               className={styles.historyItem}
               onClick={() => {
-                setIsNavigating(true);
-                startNavigationLoading("页面加载中...");
-                startTransition(() => {
-                  router.push(item.link);
-                });
                 setShowHistory(false);
+                beginHeaderNavigation(`history:${item.link}`, "页面加载中...", item.link);
               }}
               style={{ cursor: "pointer" }}
             >
@@ -253,64 +272,15 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     </div>
   );
 
-  const headerHeight = scrolled ? 64 : 80;
-  const isSearchPage = pathname.startsWith("/search");
-  const showMask = mounted && isNavigating && !isSearchPage;
-
   return (
     <>
-      {/* 内容区域遮罩（搜索页不展示暗色遮罩，确保移动端搜索框 100% 亮起不被挡） */}
-      {showMask && createPortal(
-        <div
-          onTouchMove={(e) => e.preventDefault()}
-          style={{
-            position: "fixed",
-            top: `${headerHeight}px`,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            width: "100vw",
-            height: `calc(100vh - ${headerHeight}px)`,
-            zIndex: 999,
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: "rgba(10, 12, 16, 0.75)",
-            backdropFilter: "blur(16px)",
-            WebkitBackdropFilter: "blur(16px)",
-            pointerEvents: "all",
-            userSelect: "none",
-            margin: 0,
-            padding: 0,
-            transition: "top 0.3s ease, height 0.3s ease",
-          }}
-        >
-          <div
-            style={{
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "32px 48px",
-              borderRadius: "20px",
-              backgroundColor: "rgba(24, 28, 36, 0.95)",
-              border: "1px solid rgba(250, 173, 20, 0.35)",
-              boxShadow: "0 20px 50px rgba(0, 0, 0, 0.6), 0 0 35px rgba(250, 173, 20, 0.2)",
-            }}
-          >
-            <LoadingOutlined style={{ fontSize: 44, color: "#faad14", marginBottom: 16 }} />
-            <span style={{ color: "#ffffff", fontSize: 16, fontWeight: 700, letterSpacing: "0.5px" }}>
-              正在加载...
-            </span>
-          </div>
-        </div>,
-        document.body
-      )}
-
+      {/* useSearchParams 仅挂在空桥接组件上，fallback 也为 null，不会拆掉 logo DOM */}
+      <Suspense fallback={null}>
+        <SearchParamsBridge onChange={onSearchParamsChange} />
+      </Suspense>
       <header className={`${styles.headerWrap} ${scrolled ? styles.scrolled : ""}`}>
         <div className={styles.headerInner}>
-          {/* LOGO Area */}
+          {/* LOGO Area：稳定挂载，导航时不 remount */}
           <div className={styles.logoArea}>
             <div className={styles.mobileMenuTrigger} onClick={() => setMobileMenuVisible(true)}>
               <MenuOutlined />
@@ -318,9 +288,11 @@ export default function Header({ navList }: { navList: NavItem[] }) {
             
             {siteInfo?.siteName && (
               <div className={styles.siteName} onClick={navigateToHome}>
-                {/* 站点 logo 由后台配置提供，当前保持原生 img 避免额外远程域名配置 */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                {siteInfo.logo && <img src={siteInfo.logo} alt="logo" className={styles.logoImg} />}
+                <SiteLogo
+                  src={siteInfo.logo}
+                  className={styles.logoImg}
+                  fetchPriority="high"
+                />
                 <span className={styles.logoText}>{siteInfo.siteName}</span>
               </div>
             )}
@@ -416,12 +388,12 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 {historyContent}
               </div>
               
-              <div className={styles.mobileSearchBtn} onClick={() => {
-                startNavigationLoading("搜索加载中...");
-                startTransition(() => {
-                  router.push("/search");
-                });
-              }}>
+              <div
+                className={styles.mobileSearchBtn}
+                onClick={() => {
+                  beginHeaderNavigation("search", "搜索加载中...", "/search");
+                }}
+              >
                 <SearchOutlined />
               </div>
             </div>

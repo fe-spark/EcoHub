@@ -10,12 +10,47 @@
 
 .publicMain {
   flex: 1;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
+  /* Header fixed：用 padding 腾出顶栏；底部留给 Footer 上方的内容区 */
   padding: 100px var(--public-safe-gutter) 40px;
   position: relative;
   box-sizing: border-box;
+  min-height: 0;
+}
+
+/* loading：在 main 的 flex 子项里撑满 Header～Footer 之间的可视区 */
+.publicMainLoading {
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--public-page-bg);
+  color: var(--public-text-1);
+  box-sizing: border-box;
+}
+
+/* 导航 loading 时仍挂载 children，仅隐藏，保证 transition settle 存活 */
+.mainContentHidden {
+  display: none;
+}
+
+.mainContentVisible {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+
+  /* 页面根容器若自带 flex:1，可吃满 main 剩余高度 */
+  > * {
+    min-height: 0;
+  }
 }
 
 @media (max-width: 768px) {

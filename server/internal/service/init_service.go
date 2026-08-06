@@ -126,7 +126,8 @@ func (s *InitService) BasicConfigInit() {
 func defaultBasicConfig() model.BasicConfig {
 	return model.BasicConfig{
 		SiteName: "EcoHub",
-		Logo:     "https://raw.githubusercontent.com/fe-spark/EcoHub/main/logo.png",
+		// 初始为空：前端未配置时用本地 /logo.png；后台配置后按配置原样加载
+		Logo:     "",
 		Keyword:  "在线视频, 免费观影",
 		Describe: "自动采集, 多播放源集成,在线观影网站",
 		State:    true,

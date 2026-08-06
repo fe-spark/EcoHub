@@ -1,9 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import FilmList from "@/components/public/FilmList";
 import styles from "./index.module.less";
-import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 
 export default function FilmClassifyPageView({
   data,
@@ -12,12 +11,11 @@ export default function FilmClassifyPageView({
   data: any;
   pid: string;
 }) {
-  const router = useRouter();
   const { title, content } = data;
+  const { navigate } = useContentNavigate();
 
   const handleNavigate = (url: string, label: string = "页面加载中") => {
-    startNavigationLoading(label);
-    router.push(url);
+    navigate(url, label);
   };
 
   const renderSection = (titleStr: string, list: any[], sort: string) => (

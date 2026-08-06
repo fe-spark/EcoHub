@@ -59,7 +59,7 @@
 
   &:hover {
     background: var(--public-surface-hover);
-    color: #faad14;
+    color: var(--primary-color);
   }
 }
 
@@ -86,12 +86,12 @@
     font-weight: 900;
     line-height: 1;
     letter-spacing: -1.5px;
-    background: linear-gradient(135deg, #faad14 0%, #fa541c 100%);
+    background: linear-gradient(135deg, var(--primary-color) 0%, color-mix(in srgb, var(--primary-color) 35%, #c2410c) 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
     text-transform: uppercase;
-    filter: drop-shadow(0 2px 8px rgba(250, 173, 20, 0.25));
+    filter: drop-shadow(0 2px 8px rgba(var(--primary-color-rgb), 0.25));
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -137,7 +137,7 @@
       left: 50%;
       width: 0;
       height: 2px;
-      background: #faad14;
+      background: var(--primary-color);
       transition: all 0.3s ease;
       transform: translateX(-50%);
       border-radius: 4px;
@@ -170,9 +170,9 @@
 
 .navItemActive,
 .navHomeItemActive {
-  color: #faad14 !important;
-  background: rgba(250, 173, 20, 0.1) !important;
-  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.18);
+  color: var(--primary-color) !important;
+  background: rgba(var(--primary-color-rgb), 0.1) !important;
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-color-rgb), 0.18);
 
   &::after {
     width: 100% !important;
@@ -210,16 +210,16 @@
   white-space: nowrap;
 
   &:hover {
-    color: #faad14;
-    border-color: rgba(250, 173, 20, 0.32);
-    background: color-mix(in srgb, var(--public-surface-hover) 80%, rgba(250, 173, 20, 0.08));
+    color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.32);
+    background: color-mix(in srgb, var(--public-surface-hover) 80%, rgba(var(--primary-color-rgb), 0.08));
   }
 }
 
 .navCatalogBtnActive {
-  color: #faad14;
-  border-color: rgba(250, 173, 20, 0.4);
-  background: rgba(250, 173, 20, 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-color-rgb), 0.4);
+  background: rgba(var(--primary-color-rgb), 0.1);
 }
 
 .navCatalogIcon {
@@ -309,19 +309,19 @@
 
   &:hover {
     transform: translateY(-2px);
-    border-color: rgba(250, 173, 20, 0.3);
-    background: rgba(250, 173, 20, 0.08);
+    border-color: rgba(var(--primary-color-rgb), 0.3);
+    background: rgba(var(--primary-color-rgb), 0.08);
     box-shadow: 0 14px 26px rgba(0, 0, 0, 0.14);
   }
 }
 
 .navCatalogItemActive {
-  border-color: rgba(250, 173, 20, 0.42);
-  background: rgba(250, 173, 20, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.12);
+  border-color: rgba(var(--primary-color-rgb), 0.42);
+  background: rgba(var(--primary-color-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-color-rgb), 0.12);
 
   .navCatalogName {
-    color: #faad14;
+    color: var(--primary-color);
   }
 }
 
@@ -357,9 +357,9 @@
   }
 
   &:focus-within {
-    border-color: #faad14;
+    border-color: var(--primary-color);
     background: color-mix(in srgb, var(--public-page-bg) 40%, transparent);
-    box-shadow: 0 0 15px rgba(250, 173, 20, 0.1);
+    box-shadow: 0 0 15px rgba(var(--primary-color-rgb), 0.1);
   }
 
   :global(.ant-input) {
@@ -380,13 +380,13 @@
     align-items: center;
     justify-content: center;
     border-radius: 8px !important;
-    background: #faad14 !important;
+    background: var(--primary-color) !important;
     border: none !important;
     margin-left: 8px;
     transition: all 0.3s ease;
 
-    &:hover { background: #ffa940 !important; }
-    :global(.anticon) { font-size: 13px; color: #fff; }
+    &:hover { background: color-mix(in srgb, var(--primary-color) 82%, white) !important; }
+    :global(.anticon) { font-size: 13px; color: var(--public-on-accent); }
   }
 }
 
@@ -412,14 +412,14 @@
 
   &:hover {
     background: var(--public-surface-hover);
-    color: #faad14;
-    border-color: rgba(250, 173, 20, 0.2);
+    color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.2);
   }
 
   &.active {
-    background: rgba(250, 173, 20, 0.1);
-    color: #faad14;
-    border-color: rgba(250, 173, 20, 0.3);
+    background: rgba(var(--primary-color-rgb), 0.1);
+    color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.3);
   }
 }
 
@@ -452,7 +452,7 @@
   align-items: center;
   gap: 10px;
   border-bottom: 1px solid var(--public-border-1);
-  .icon { font-size: 18px; color: #faad14; }
+  .icon { font-size: 18px; color: var(--primary-color); }
   .title { flex: 1; font-weight: 700; font-size: 15px; color: var(--public-text-1); }
   .clear { cursor: pointer; font-size: 16px; color: var(--public-text-6); transition: all 0.2s; &:hover { color: #ff4d4f; } }
 }
@@ -470,7 +470,7 @@
   gap: 4px;
   transition: all 0.2s;
   cursor: pointer;
-  &:hover { background: rgba(250, 173, 20, 0.05); .filmTitle { color: #faad14; } }
+  &:hover { background: rgba(var(--primary-color-rgb), 0.05); .filmTitle { color: var(--primary-color); } }
   .filmTitle { font-size: 14px; font-weight: 600; color: var(--public-text-2); }
   .episode { font-size: 11px; color: var(--public-text-5); }
 }
@@ -594,7 +594,7 @@
 
 .drawerTitle {
   font-weight: 900; font-size: 22px;
-  background: linear-gradient(135deg, #faad14 0%, #fa541c 100%);
+  background: linear-gradient(135deg, var(--primary-color) 0%, color-mix(in srgb, var(--primary-color) 35%, #c2410c) 100%);
   -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent;
 }
 
@@ -622,16 +622,16 @@
 
   &:hover {
     background: var(--public-surface-hover);
-    color: #faad14;
-    border-color: rgba(250, 173, 20, 0.28);
+    color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.28);
   }
 }
 
 .mobileNavItemActive {
-  color: #faad14;
-  border-color: rgba(250, 173, 20, 0.38);
-  background: rgba(250, 173, 20, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(250, 173, 20, 0.1);
+  color: var(--primary-color);
+  border-color: rgba(var(--primary-color-rgb), 0.38);
+  background: rgba(var(--primary-color-rgb), 0.12);
+  box-shadow: inset 0 0 0 1px rgba(var(--primary-color-rgb), 0.1);
 }
 
 @media (max-width: 520px) {
@@ -640,66 +640,7 @@
   }
 }
 
-// Full Screen Loading Mask Overlay
-.fullScreenMask {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  z-index: 999999 !important;
-  display: flex !important;
-  flex-direction: column !important;
-  align-items: center !important;
-  justify-content: center !important;
-  gap: 16px;
-  background: rgba(10, 12, 16, 0.75) !important;
-  backdrop-filter: blur(16px) !important;
-  -webkit-backdrop-filter: blur(16px) !important;
-  animation: fadeInMask 0.2s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  pointer-events: all !important;
-  user-select: none;
-}
-
-.maskContent {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 28px 48px;
-  border-radius: 20px;
-  background: color-mix(in srgb, var(--public-surface-1, #181c24) 90%, transparent);
-  border: 1px solid rgba(250, 173, 20, 0.35);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 35px rgba(250, 173, 20, 0.2);
-}
-
-.maskSpinner {
-  font-size: 42px;
-  color: #faad14;
-  margin-bottom: 14px;
-}
-
-.maskText {
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-}
-
-@keyframes fadeInMask {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-// Nav Loading Indicators
+// Nav Loading Indicators（导航项上的小 spinner，非全屏遮罩）
 .navItemLoading {
   opacity: 0.85;
   pointer-events: none;
@@ -708,18 +649,18 @@
 .navLoadingIcon {
   margin-right: 6px;
   font-size: 13px;
-  color: #faad14;
+  color: var(--primary-color);
 }
 
 .catalogLoadingIcon {
   margin-left: auto;
   font-size: 14px;
-  color: #faad14;
+  color: var(--primary-color);
 }
 
 .navCatalogItemLoading {
   opacity: 0.85;
-  border-color: rgba(250, 173, 20, 0.4) !important;
+  border-color: rgba(var(--primary-color-rgb), 0.4) !important;
 }
 
 .mobileNavItemLoading {

@@ -232,7 +232,7 @@ a {
   }
 }
 
-/* Global Full Screen Loading Mask Overlay */
+/* Global Full Screen Loading Mask Overlay — 跟随 data-theme token */
 .globalFullScreenMask {
   position: fixed !important;
   top: 0 !important;
@@ -246,7 +246,7 @@ a {
   flex-direction: column !important;
   align-items: center !important;
   justify-content: center !important;
-  background: rgba(10, 12, 16, 0.75) !important;
+  background: color-mix(in srgb, var(--public-page-bg) 72%, transparent) !important;
   backdrop-filter: blur(16px) !important;
   -webkit-backdrop-filter: blur(16px) !important;
   pointer-events: all !important;
@@ -262,20 +262,20 @@ a {
   justify-content: center !important;
   padding: 28px 48px !important;
   border-radius: 20px !important;
-  background: rgba(24, 28, 36, 0.92) !important;
-  border: 1px solid rgba(250, 173, 20, 0.4) !important;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 35px rgba(250, 173, 20, 0.2) !important;
+  background: color-mix(in srgb, var(--public-surface-2) 94%, transparent) !important;
+  border: 1px solid rgba(var(--primary-color-rgb), 0.4) !important;
+  box-shadow: var(--public-shadow-lg), 0 0 28px rgba(var(--primary-color-rgb), 0.16) !important;
   transform: translateZ(0);
 }
 
 .globalMaskSpinner {
   font-size: 44px !important;
-  color: #faad14 !important;
+  color: var(--primary-color) !important;
   margin-bottom: 14px !important;
 }
 
 .globalMaskText {
-  color: #ffffff !important;
+  color: var(--public-text-1) !important;
   font-size: 16px !important;
   font-weight: 700 !important;
   letter-spacing: 0.5px !important;
