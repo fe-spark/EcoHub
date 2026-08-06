@@ -8,6 +8,8 @@ import AppLoading from "@/components/public/Loading";
 
 export interface SiteConfig {
   siteName: string;
+  /** 网站访问地址（公网根），Logo 跳转与站外链接复用 */
+  siteUrl?: string;
   logo: string;
   keyword: string;
   describe: string;

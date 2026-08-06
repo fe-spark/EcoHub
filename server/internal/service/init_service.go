@@ -128,6 +128,8 @@ func (s *InitService) BasicConfigInit() {
 func defaultBasicConfig() model.BasicConfig {
 	return model.BasicConfig{
 		SiteName: "EcoHub",
+		// 网站访问地址：Logo 跳转与 Telegram 播放链接；初始为空需在后台配置
+		SiteURL: "",
 		// 初始为空：前端未配置时用本地 /logo.png；后台配置后按配置原样加载
 		Logo:     "",
 		Keyword:  "在线视频, 免费观影",

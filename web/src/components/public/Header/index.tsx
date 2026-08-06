@@ -232,6 +232,33 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     beginHeaderNavigation("home", "首页加载中...", "/");
   };
 
+  /** Logo 点击：优先跳转网站配置的 siteUrl，否则回前台首页 */
+  const navigateFromLogo = () => {
+    const siteUrl = String(siteInfo?.siteUrl || "").trim();
+    if (siteUrl) {
+      try {
+        const target = new URL(siteUrl, window.location.origin);
+        if (target.origin === window.location.origin) {
+          const path = `${target.pathname}${target.search}${target.hash}` || "/";
+          if (path === "/" || path === pathname) {
+            if (pathname === "/") return;
+            setActiveCategoryId("");
+            beginHeaderNavigation("home", "首页加载中...", "/");
+            return;
+          }
+          window.location.assign(target.href);
+          return;
+        }
+        window.open(target.href, "_blank", "noopener,noreferrer");
+        return;
+      } catch {
+        window.open(siteUrl, "_blank", "noopener,noreferrer");
+        return;
+      }
+    }
+    navigateToHome();
+  };
+
   const historyContent = (
     <div className={`${styles.historyPanel} ${showHistory ? styles.show : ""}`}>
       <div className={styles.historyHeader}>
@@ -287,7 +314,11 @@ export default function Header({ navList }: { navList: NavItem[] }) {
             </div>
             
             {siteInfo?.siteName && (
-              <div className={styles.siteName} onClick={navigateToHome}>
+              <div
+                className={styles.siteName}
+                onClick={navigateFromLogo}
+                title={siteInfo.siteUrl ? `打开 ${siteInfo.siteUrl}` : "回首页"}
+              >
                 <SiteLogo
                   src={siteInfo.logo}
                   className={styles.logoImg}

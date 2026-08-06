@@ -15,7 +15,9 @@ type MidAccumulator struct {
 	truncated map[string]bool
 }
 
-// Acc 全局 mid 累计器（随批次 Drain 清空）。
+// Acc 全局 mid 累计器（随批次 Drain / ClearSources 清空）。
+// 注意：按 sourceID 隔离；同一 source 若并发多任务会串扰，调用方应避免同 source 并行采集，
+// 并在批次结束调用 ClearSources 兜底。
 var Acc = NewMidAccumulator()
 
 func NewMidAccumulator() *MidAccumulator {

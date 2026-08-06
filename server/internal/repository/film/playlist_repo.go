@@ -732,6 +732,7 @@ func LoadGlobalMidsBySourceMids(sourceID string, sourceMids []int64) []int64 {
 	}
 	var mappings []model.MovieSourceMapping
 	if err := db.Mdb.Where("source_id = ? AND source_mid IN ?", sourceID, uniq).Find(&mappings).Error; err != nil {
+		log.Printf("[playlist] LoadGlobalMidsBySourceMids source=%s err=%v", sourceID, err)
 		return nil
 	}
 	out := make([]int64, 0, len(mappings))

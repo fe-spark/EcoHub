@@ -8,9 +8,48 @@ import (
 	"unicode/utf8"
 
 	"server/internal/model"
+	"server/internal/repository"
 )
 
 const telegramMaxMessageLen = 4096
+
+// sitePlayBaseURL 读取网站配置中的 siteUrl（测试可覆盖 sitePlayBaseURLFn）。
+var sitePlayBaseURLFn = func() string {
+	return strings.TrimSpace(repository.GetSiteBasic().SiteURL)
+}
+
+// filmPlayURL 使用网站配置中的 siteUrl 拼播放页；未配置则返回空。
+func filmPlayURL(mid int64) string {
+	if mid <= 0 {
+		return ""
+	}
+	base := strings.TrimSpace(sitePlayBaseURLFn())
+	if base == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s/play?id=%d", strings.TrimRight(base, "/"), mid)
+}
+
+// formatFilmLine 影片明细一行：名称 + 可点击 #mid（跳转站内播放页）。
+func formatFilmLine(film model.FilmNotifyItem) string {
+	name := strings.TrimSpace(film.Name)
+	if name == "" {
+		name = fmt.Sprintf("#%d", film.Mid)
+	}
+	name = truncateRunes(name, 80)
+	idLabel := fmt.Sprintf("#%d", film.Mid)
+	if href := filmPlayURL(film.Mid); href != "" {
+		return fmt.Sprintf("· %s (<a href=\"%s\">%s</a>)\n",
+			html.EscapeString(name),
+			html.EscapeString(href),
+			html.EscapeString(idLabel),
+		)
+	}
+	return fmt.Sprintf("· %s (<code>%s</code>)\n",
+		html.EscapeString(name),
+		html.EscapeString(idLabel),
+	)
+}
 
 func formatTitlePrefix(siteName string) string {
 	siteName = strings.TrimSpace(siteName)
@@ -45,152 +84,137 @@ func gradeLabel(grade int) string {
 	return "附属"
 }
 
-func formatBatchSummary(payload model.CollectBatchNotifyPayload, maxFilms int) []string {
-	if maxFilms <= 0 {
-		maxFilms = 30
+// formatBatchOverview 采集结果总览（不含影片明细；明细用内联键盘分页消息）。
+func formatBatchOverview(payload model.CollectBatchNotifyPayload, filmItemCount, pageSize int) string {
+	if pageSize <= 0 {
+		pageSize = 30
 	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 采集结果</b>\n", formatTitlePrefix(payload.SiteName))
-	fmt.Fprintf(&b, "触发: %s\n", html.EscapeString(triggerLabel(payload.Trigger)))
+	var overview strings.Builder
+	fmt.Fprintf(&overview, "<b>%s 采集结果</b>\n", formatTitlePrefix(payload.SiteName))
+	fmt.Fprintf(&overview, "<b>⚡ 触发:</b> %s\n", html.EscapeString(triggerLabel(payload.Trigger)))
 	if payload.DurationSec > 0 {
-		fmt.Fprintf(&b, "耗时: %s\n", html.EscapeString(formatDuration(payload.DurationSec)))
+		fmt.Fprintf(&overview, "<b>⏱ 耗时:</b> %s\n", html.EscapeString(formatDuration(payload.DurationSec)))
 	}
-	fmt.Fprintf(&b, "源: ✅%d  ❌%d  影片: %d 部\n",
+	fmt.Fprintf(&overview, "<b>📊 统计:</b> 源 ✅<b>%d</b> · ❌<b>%d</b> | 影片 <b>%d</b> 部\n",
 		payload.SuccessSources, payload.FailedSources, payload.TotalFilms)
 	if errMsg := strings.TrimSpace(payload.FinalizeError); errMsg != "" {
-		fmt.Fprintf(&b, "收尾错误: %s\n", html.EscapeString(truncateRunes(errMsg, 300)))
+		fmt.Fprintf(&overview, "<b>⚠️ 收尾错误:</b> <code>%s</code>\n", html.EscapeString(truncateRunes(errMsg, 300)))
 	}
 
-	filmBudget := maxFilms
-	if !payload.IncludeFilmDetails {
-		filmBudget = 0
-	}
 	for _, src := range payload.Sources {
-		fmt.Fprintf(&b, "\n")
-		statusIcon := statusIcon(src.Status)
-		fmt.Fprintf(&b, "<b>%s %s</b> (%s)\n",
-			statusIcon,
+		overview.WriteByte('\n')
+		fmt.Fprintf(&overview, "<b>%s %s</b> <code>(%s)</code>\n",
+			statusIcon(src.Status),
 			html.EscapeString(src.SourceName),
 			html.EscapeString(gradeLabel(src.Grade)),
 		)
-		fmt.Fprintf(&b, "页 %d/%d · 成功 %d · 失败 %d",
+		fmt.Fprintf(&overview, "页 <code>%d/%d</code> · 成功 <code>%d</code> · 失败 <code>%d</code>",
 			src.PageCurrent, src.PageTotal, src.SuccessCnt, src.FailedCnt)
 		if src.FilmsTotal > 0 {
-			fmt.Fprintf(&b, " · 影片 %d", src.FilmsTotal)
+			fmt.Fprintf(&overview, " · 影片 <b>%d</b>", src.FilmsTotal)
 		}
-		b.WriteByte('\n')
+		overview.WriteByte('\n')
 		if errMsg := strings.TrimSpace(src.Error); errMsg != "" {
-			fmt.Fprintf(&b, "原因: %s\n", html.EscapeString(truncateRunes(errMsg, 200)))
-		}
-		if filmBudget > 0 && len(src.Films) > 0 {
-			shown := 0
-			for _, film := range src.Films {
-				if filmBudget <= 0 {
-					break
-				}
-				name := film.Name
-				if name == "" {
-					name = fmt.Sprintf("#%d", film.Mid)
-				}
-				fmt.Fprintf(&b, "· %s (#%d)\n", html.EscapeString(truncateRunes(name, 80)), film.Mid)
-				filmBudget--
-				shown++
-			}
-			remain := src.FilmsTotal - shown
-			if remain < 0 {
-				remain = 0
-			}
-			if src.FilmsTrunc || remain > 0 {
-				if remain == 0 && src.FilmsTrunc {
-					remain = src.FilmsTotal - shown
-				}
-				if remain > 0 {
-					fmt.Fprintf(&b, "· … 另有 %d 部\n", remain)
-				}
-			}
+			fmt.Fprintf(&overview, "❌ <code>原因: %s</code>\n", html.EscapeString(truncateRunes(errMsg, 200)))
 		}
 	}
 
-	return splitTelegramMessages(b.String())
+	if payload.IncludeFilmDetails && filmItemCount > 0 {
+		pages := (filmItemCount + pageSize - 1) / pageSize
+		fmt.Fprintf(&overview, "\n📋 <b>影片明细</b> 共 <b>%d</b> 条 · <b>%d</b> 页（每页 %d 条）\n",
+			filmItemCount, pages, pageSize)
+		fmt.Fprintf(&overview, "<i>请点击下方消息的「上一页 / 下一页」浏览</i>\n")
+	}
+	return overview.String()
+}
+
+// formatBatchSummary 兼容旧调用：仅返回总览文本（可能按 4096 拆分）。
+// 带按钮的影片列表由 PublishBatchSummary 单独发送。
+func formatBatchSummary(payload model.CollectBatchNotifyPayload, maxFilms int) []string {
+	n := 0
+	for _, s := range payload.Sources {
+		n += len(s.Films)
+	}
+	return splitTelegramMessages(formatBatchOverview(payload, n, maxFilms))
 }
 
 func formatSourceFailed(siteName, sourceName, sourceID, reason string, at time.Time) []string {
-	return formatSourceAlert(siteName, "采集源失败", "failed", sourceName, sourceID, reason, at)
+	return formatSourceAlert(siteName, "采集源失败告警", "failed", sourceName, sourceID, reason, at)
 }
 
 func formatProgressStale(siteName, sourceName, sourceID, reason string, at time.Time) []string {
-	return formatSourceAlert(siteName, "采集进度超时", "stale", sourceName, sourceID, reason, at)
+	return formatSourceAlert(siteName, "采集进度超时告警", "stale", sourceName, sourceID, reason, at)
 }
 
 func formatSourceAlert(siteName, title, status, sourceName, sourceID, reason string, at time.Time) []string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s %s</b>\n", formatTitlePrefix(siteName), html.EscapeString(title))
-	fmt.Fprintf(&b, "源: %s", html.EscapeString(sourceName))
+	fmt.Fprintf(&b, "<b>%s ⚠️ %s</b>\n", formatTitlePrefix(siteName), html.EscapeString(title))
+	fmt.Fprintf(&b, "<b>📌 采集源:</b> %s", html.EscapeString(sourceName))
 	if sourceID != "" {
-		fmt.Fprintf(&b, " (%s)", html.EscapeString(sourceID))
+		fmt.Fprintf(&b, " (<code>%s</code>)", html.EscapeString(sourceID))
 	}
 	b.WriteByte('\n')
-	fmt.Fprintf(&b, "状态: %s\n", html.EscapeString(status))
+	fmt.Fprintf(&b, "<b>🚨 状态:</b> <code>%s</code>\n", html.EscapeString(status))
 	if reason != "" {
-		fmt.Fprintf(&b, "原因: %s\n", html.EscapeString(truncateRunes(reason, 400)))
+		fmt.Fprintf(&b, "<b>❌ 原因:</b> <code>%s</code>\n", html.EscapeString(truncateRunes(reason, 400)))
 	}
 	if !at.IsZero() {
-		fmt.Fprintf(&b, "时间: %s\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
 	}
 	return []string{b.String()}
 }
 
 func formatFinalizeFailed(siteName, reason string, sourceCount int, at time.Time) []string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 采集收尾失败</b>\n", formatTitlePrefix(siteName))
-	fmt.Fprintf(&b, "涉及源数: %d\n", sourceCount)
+	fmt.Fprintf(&b, "<b>%s ⚠️ 采集收尾失败</b>\n", formatTitlePrefix(siteName))
+	fmt.Fprintf(&b, "<b>📊 涉及源数:</b> <code>%d</code>\n", sourceCount)
 	if reason != "" {
-		fmt.Fprintf(&b, "原因: %s\n", html.EscapeString(truncateRunes(reason, 500)))
+		fmt.Fprintf(&b, "<b>❌ 原因:</b> <code>%s</code>\n", html.EscapeString(truncateRunes(reason, 500)))
 	}
 	if !at.IsZero() {
-		fmt.Fprintf(&b, "时间: %s\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
 	}
 	return []string{b.String()}
 }
 
 func formatCronFailed(siteName, taskID, remark, reason string, at time.Time) []string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 定时任务失败</b>\n", formatTitlePrefix(siteName))
+	fmt.Fprintf(&b, "<b>%s 🚨 定时任务失败</b>\n", formatTitlePrefix(siteName))
 	if taskID != "" {
-		fmt.Fprintf(&b, "任务: %s\n", html.EscapeString(taskID))
+		fmt.Fprintf(&b, "<b>📌 任务ID:</b> <code>%s</code>\n", html.EscapeString(taskID))
 	}
 	if remark != "" {
-		fmt.Fprintf(&b, "备注: %s\n", html.EscapeString(remark))
+		fmt.Fprintf(&b, "<b>📝 备注:</b> %s\n", html.EscapeString(remark))
 	}
 	if reason != "" {
-		fmt.Fprintf(&b, "原因: %s\n", html.EscapeString(truncateRunes(reason, 400)))
+		fmt.Fprintf(&b, "<b>❌ 原因:</b> <code>%s</code>\n", html.EscapeString(truncateRunes(reason, 400)))
 	}
 	if !at.IsZero() {
-		fmt.Fprintf(&b, "时间: %s\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
 	}
 	return []string{b.String()}
 }
 
 func formatCronDone(siteName, taskID, remark, detail string, at time.Time) []string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 定时任务完成</b>\n", formatTitlePrefix(siteName))
+	fmt.Fprintf(&b, "<b>%s ✅ 定时任务完成</b>\n", formatTitlePrefix(siteName))
 	if taskID != "" {
-		fmt.Fprintf(&b, "任务: %s\n", html.EscapeString(taskID))
+		fmt.Fprintf(&b, "<b>📌 任务ID:</b> <code>%s</code>\n", html.EscapeString(taskID))
 	}
 	if remark != "" {
-		fmt.Fprintf(&b, "备注: %s\n", html.EscapeString(remark))
+		fmt.Fprintf(&b, "<b>📝 备注:</b> %s\n", html.EscapeString(remark))
 	}
 	if detail != "" {
-		fmt.Fprintf(&b, "%s\n", html.EscapeString(truncateRunes(detail, 400)))
+		fmt.Fprintf(&b, "<b>📋 明细:</b> %s\n", html.EscapeString(truncateRunes(detail, 400)))
 	}
 	if !at.IsZero() {
-		fmt.Fprintf(&b, "时间: %s\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
 	}
 	return []string{b.String()}
 }
 
 func formatTestMessage(siteName string) string {
-	return fmt.Sprintf("<b>%s 通知测试</b>\nTelegram 通知已连通。\n时间: %s",
+	return fmt.Sprintf("<b>%s 通知测试</b>\n✅ <b>Telegram 通知服务联通成功！</b>\n🕒 <b>发送时间:</b> <code>%s</code>",
 		formatTitlePrefix(siteName),
 		html.EscapeString(time.Now().In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)),
 	)
@@ -260,7 +284,7 @@ func splitTelegramMessages(text string) []string {
 	if len(runes) > 0 && len(parts) >= 3 {
 		// 第三条已满，丢弃剩余并在末尾提示
 		last := parts[len(parts)-1]
-		hint := "\n…消息过长，已截断，详见后台"
+		hint := "\n<i>…消息过长，已截断，详见后台</i>"
 		if utf8.RuneCountInString(last)+utf8.RuneCountInString(hint) > telegramMaxMessageLen {
 			r := []rune(last)
 			keep := telegramMaxMessageLen - utf8.RuneCountInString(hint)

@@ -5,6 +5,8 @@ import "gorm.io/gorm"
 // BasicConfig 网站基本信息 (返回前端DTO与Redis缓存结构相同)
 type BasicConfig struct {
 	SiteName string `json:"siteName"` // 网站名称
+	// SiteURL 网站访问地址（公网根地址，如 https://example.com），用于 Logo 跳转与 Telegram 播放链接等
+	SiteURL  string `json:"siteUrl"`
 	Logo     string `json:"logo"`     // 网站logo
 	Keyword  string `json:"keyword"`  // seo关键字
 	Describe string `json:"describe"` // 网站描述信息
@@ -42,6 +44,7 @@ func (bl Banners) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }
 type SiteConfigRecord struct {
 	gorm.Model
 	SiteName string `gorm:"size:128"`
+	SiteURL  string `gorm:"size:512;column:site_url"` // 网站访问地址
 	Logo     string `gorm:"size:512"`
 	Keyword  string `gorm:"size:256"`
 	Describe string `gorm:"size:512"`
