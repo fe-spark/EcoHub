@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { Button, Pagination, Empty } from "antd";
 import { SearchOutlined, CaretRightOutlined } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import styles from "./index.module.less";
 
 function normalizeMetaValue(value?: string | number | null) {
@@ -24,8 +24,6 @@ function getPrimaryPlotTag(classTag?: string) {
     .find(Boolean) || "";
 }
 
-import { startNavigationLoading } from "@/components/public/TopLoadingBar";
-
 export default function SearchPageView({
   data,
   keyword,
@@ -35,7 +33,7 @@ export default function SearchPageView({
   keyword: string;
   current: string;
 }) {
-  const router = useRouter();
+  const { navigate } = useContentNavigate();
   const { message } = useAppMessage();
   const [searchKeyword, setSearchKeyword] = useState(keyword);
 
@@ -45,17 +43,24 @@ export default function SearchPageView({
       return;
     }
 
-    startNavigationLoading("搜索加载中...");
-    router.push(`/search?search=${encodeURIComponent(searchKeyword)}&current=1`);
+    navigate(
+      `/search?search=${encodeURIComponent(searchKeyword)}&current=1`,
+      "搜索加载中...",
+    );
   };
 
   const handlePageChange = (page: number) => {
-    startNavigationLoading("页面加载中...");
-    router.push(`/search?search=${encodeURIComponent(keyword)}&current=${page}`);
+    navigate(
+      `/search?search=${encodeURIComponent(keyword)}&current=${page}`,
+      "页面加载中...",
+    );
   };
 
   const handlePlay = (id: string) => {
-    router.push(resolvePlayEntryPath(id, { sourceId: "0", episodeIndex: 0 }));
+    navigate(
+      resolvePlayEntryPath(id, { sourceId: "0", episodeIndex: 0 }),
+      "进入播放页...",
+    );
   };
 
   return (
@@ -88,12 +93,12 @@ export default function SearchPageView({
                   src={movie.picture || FALLBACK_IMG}
                   className={styles.poster}
                   alt={movie.name}
-                  onClick={() => router.push(resolvePlayEntryPath(movie.id))}
+                  onClick={() => handlePlay(movie.id)}
                   style={{ cursor: "pointer" }}
                 />
                 <div className={styles.intro}>
                   <h3
-                    onClick={() => router.push(resolvePlayEntryPath(movie.id))}
+                    onClick={() => handlePlay(movie.id)}
                     style={{ cursor: "pointer" }}
                   >
                     {movie.name}

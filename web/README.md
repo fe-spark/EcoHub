@@ -57,7 +57,7 @@ PORT=3000
 API_URL=http://127.0.0.1:8080
 ```
 
-`API_URL` 必须指向 Next 服务端能够访问到的 Go API 地址。
+`API_URL` 填 Next 进程能访问到的后端地址即可（带不带 `/api` 都行，程序会自动规范化）。
 
 ### 3. 启动开发服务
 
@@ -77,7 +77,7 @@ npm run dev
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
 | `PORT` | 否 | Next 监听端口，默认 `3000` |
-| `API_URL` | 是 | Go API 地址，用于服务端取数和 `/api/*` 转发 |
+| `API_URL` | 是 | 后端服务地址（服务端取数 + 浏览器接口转发；带不带 `/api` 均可） |
 
 常见配置：
 
@@ -103,7 +103,7 @@ API_URL=http://server:${SERVER_PORT:-8080}
 
 ## API 请求模型
 
-浏览器端默认请求当前站点下的 `/api/*`，Next 再转发到 `API_URL`。
+浏览器只请求当前站点的接口路径；Next 按 `API_URL` 转发到后端（你无需手写 `/api` 拼接规则）。
 
 ```mermaid
 sequenceDiagram
@@ -112,7 +112,7 @@ sequenceDiagram
     participant API as Go API
 
     Browser->>Next: GET /api/index
-    Next->>API: 转发到 API_URL/api/index
+    Next->>API: 转发到后端对应接口
     API-->>Next: JSON
     Next-->>Browser: JSON
 ```

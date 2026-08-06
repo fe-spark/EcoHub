@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useState, useCallback } from "react";
-import { useRouter } from "next/navigation";
 import { Empty, Popconfirm } from "antd";
 import {
   DeleteOutlined,
@@ -14,8 +13,7 @@ import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
-
-import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 
 function readHistoryList(): any[] {
   const historyMap = readHistoryMap();
@@ -25,7 +23,7 @@ function readHistoryList(): any[] {
 }
 
 export default function HistoryPageView() {
-  const router = useRouter();
+  const { navigate } = useContentNavigate();
   const [historyList, setHistoryList] = useState<any[]>(readHistoryList);
   const { message } = useAppMessage();
 
@@ -48,8 +46,7 @@ export default function HistoryPageView() {
   };
 
   const handlePlayLink = (link: string) => {
-    startNavigationLoading("进入播放页...");
-    router.push(link);
+    navigate(link, "进入播放页...");
   };
 
   return (

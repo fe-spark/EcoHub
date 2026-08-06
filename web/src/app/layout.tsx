@@ -36,7 +36,9 @@ export async function generateMetadata(): Promise<Metadata> {
   if (siteConfig?.siteName) generated.title = siteConfig.siteName;
   if (siteConfig?.describe) generated.description = siteConfig.describe;
   if (siteConfig?.keyword) generated.keywords = siteConfig.keyword;
-  if (siteConfig?.logo) generated.icons = { icon: siteConfig.logo };
+  // favicon 与 SiteLogo 一致：未配置用本地默认；已配置原样使用（含相对路径 / 外链）
+  const logo = siteConfig?.logo?.trim() || "";
+  generated.icons = { icon: logo || "/logo.png" };
 
   return generated;
 }
