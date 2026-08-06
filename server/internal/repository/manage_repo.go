@@ -52,10 +52,29 @@ func ExistBannersConfig() bool {
 	return count > 0
 }
 
+// NormalizeSiteURL 规范化网站访问地址：trim、去尾斜杠；非法 scheme 返回空。
+func NormalizeSiteURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	raw = strings.TrimRight(raw, "/")
+	lower := strings.ToLower(raw)
+	if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") {
+		return raw
+	}
+	// 允许无 scheme 时补 https://
+	if strings.Contains(raw, ".") && !strings.Contains(raw, " ") {
+		return "https://" + strings.TrimLeft(raw, "/")
+	}
+	return ""
+}
+
 // SaveSiteBasic 保存网站基本配置信息 (MySQL + Redis 短期缓存)
 func SaveSiteBasic(c model.BasicConfig) error {
+	c.SiteURL = NormalizeSiteURL(c.SiteURL)
 	rec := model.SiteConfigRecord{
-		SiteName: c.SiteName, Logo: c.Logo,
+		SiteName: c.SiteName, SiteURL: c.SiteURL, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -70,6 +89,7 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	data, _ := json.Marshal(c)
 	if err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err(); err != nil {
 		log.Println("SaveSiteBasic Redis Error:", err)
+		_ = db.Rdb.Del(db.Cxt, config.SiteConfigBasic).Err()
 	}
 	ClearIndexPageCache()
 	return nil
@@ -81,6 +101,7 @@ func GetSiteBasic() model.BasicConfig {
 	// 1. Redis 缓存
 	if data := db.Rdb.Get(db.Cxt, config.SiteConfigBasic).Val(); data != "" {
 		if err := json.Unmarshal([]byte(data), &c); err == nil {
+			c.SiteURL = NormalizeSiteURL(c.SiteURL)
 			return c
 		}
 		log.Println("GetSiteBasic Redis Unmarshal Error")
@@ -93,7 +114,7 @@ func GetSiteBasic() model.BasicConfig {
 		return c
 	}
 	c = model.BasicConfig{
-		SiteName: rec.SiteName, Logo: rec.Logo,
+		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
 	}
 	// 回填缓存

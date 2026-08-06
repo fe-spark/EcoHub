@@ -14,6 +14,7 @@ import styles from "./index.module.less";
 
 interface SiteConfigValues {
   siteName: string;
+  siteUrl: string;
   keyword: string;
   logo: string;
   state: boolean;
@@ -27,10 +28,12 @@ interface ConfigItem {
   field: EditableField;
   label: string;
   type: "text" | "textarea" | "switch" | "image";
+  hint?: string;
 }
 
 const DEFAULT_CONFIG: SiteConfigValues = {
   siteName: "",
+  siteUrl: "",
   keyword: "",
   logo: "",
   state: false,
@@ -40,6 +43,12 @@ const DEFAULT_CONFIG: SiteConfigValues = {
 
 const CONFIG_ITEMS: ConfigItem[] = [
   { field: "siteName", label: "网站名称", type: "text" },
+  {
+    field: "siteUrl",
+    label: "网站地址",
+    type: "text",
+    hint: "公网访问根地址，如 https://example.com。用于点击 Logo 跳转，以及 Telegram 通知中的播放链接。",
+  },
   { field: "logo", label: "网站 Logo", type: "image" },
   { field: "keyword", label: "搜索关键字", type: "text" },
   { field: "describe", label: "网站描述", type: "textarea" },
@@ -50,6 +59,7 @@ const CONFIG_ITEMS: ConfigItem[] = [
 function normalizeConfig(data: Partial<SiteConfigValues> | undefined): SiteConfigValues {
   return {
     siteName: String(data?.siteName ?? ""),
+    siteUrl: String(data?.siteUrl ?? "").trim(),
     keyword: String(data?.keyword ?? ""),
     logo: String(data?.logo ?? ""),
     state: Boolean(data?.state),
@@ -177,7 +187,7 @@ export default function SiteConfigPageView() {
     <div className={styles.formPanel}>
       <ManagePageHeader
         title="网站配置"
-        description="集中维护站点名称、描述、Logo 与站点可用状态等基础信息。"
+        description="集中维护站点名称、网站地址、描述、Logo 与站点可用状态等基础信息。"
         actions={
           <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
             重置配置
@@ -204,7 +214,16 @@ export default function SiteConfigPageView() {
               >
                 <List.Item.Meta
                   title={item.label}
-                  description={renderPreviewValue(item, config[item.field])}
+                  description={
+                    <Flex vertical gap={2}>
+                      {renderPreviewValue(item, config[item.field])}
+                      {item.hint ? (
+                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                          {item.hint}
+                        </Typography.Text>
+                      ) : null}
+                    </Flex>
+                  }
                 />
               </List.Item>
             )}

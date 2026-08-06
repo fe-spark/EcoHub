@@ -84,13 +84,17 @@ func cacheNotifyConfig(cfg model.NotifyConfig) {
 		return
 	}
 	if err := db.Rdb.Set(db.Cxt, config.NotifyConfigKey, data, config.ConfigCacheTTL).Err(); err != nil {
+		// Set 失败时删掉旧 key，避免后续读到过期 Token/配置（最长可残留 ConfigCacheTTL）。
 		log.Println("SaveNotifyConfig Redis Error:", err)
+		if delErr := db.Rdb.Del(db.Cxt, config.NotifyConfigKey).Err(); delErr != nil {
+			log.Println("SaveNotifyConfig Redis Del Error:", delErr)
+		}
 	}
 }
 
 func normalizeNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 	cfg.BotToken = strings.TrimSpace(cfg.BotToken)
-	cfg.ChatIDs = normalizeChatIDs(cfg.ChatIDs)
+	cfg.ChatIDs = NormalizeChatIDs(cfg.ChatIDs)
 	if cfg.MaxFilmsInMessage <= 0 {
 		cfg.MaxFilmsInMessage = 30
 	}
@@ -106,7 +110,8 @@ func normalizeNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 	return cfg
 }
 
-func normalizeChatIDs(ids []string) []string {
+// NormalizeChatIDs 去空、trim、去重（notify 校验与持久化共用）。
+func NormalizeChatIDs(ids []string) []string {
 	if len(ids) == 0 {
 		return []string{}
 	}

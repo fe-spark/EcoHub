@@ -35,12 +35,15 @@ func takeSourceError(sourceID string) string {
 }
 
 // emitBatchSummaryForSources 根据源列表与进度组装并发送批次摘要。
+// 收尾失败只写入摘要的 FinalizeError，不再单独 PublishFinalizeFailed，避免双发。
 func emitBatchSummaryForSources(trigger string, sources []model.FilmSource, startedAt time.Time, finalizeErr error) {
 	if len(sources) == 0 {
 		return
 	}
+	sourceIDs := make([]string, 0, len(sources))
 	results := make([]model.SourceNotifyResult, 0, len(sources))
 	for _, src := range sources {
+		sourceIDs = append(sourceIDs, src.Id)
 		progress, ok := collectProgressSnapshot(src.Id)
 		if !ok {
 			// 无进度时不默认 done，避免误报成功；由调用方保证有进度，或改用 Direct 结果。
@@ -70,10 +73,18 @@ func emitBatchSummaryForSources(trigger string, sources []model.FilmSource, star
 	finMsg := ""
 	if finalizeErr != nil {
 		finMsg = finalizeErr.Error()
-		notify.PublishFinalizeFailed(len(sources), finMsg)
 	}
 	payload := notify.BuildBatchPayload(trigger, results, startedAt, time.Now(), finMsg)
+	// 摘要开启时收尾错误只写在摘要里；摘要关闭时才单独发 finalize 告警，避免双发。
+	if finalizeErr != nil && !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
+		notify.PublishFinalizeFailed(len(sources), finMsg)
+	}
 	notify.PublishBatchSummary(payload)
+	// Drain 后兜底清 Acc / 错误缓存，降低跨批次串扰
+	notify.Acc.ClearSources(sourceIDs...)
+	for _, id := range sourceIDs {
+		takeSourceError(id)
+	}
 }
 
 // emitBatchSummaryDirect 使用调用方给出的源结果发摘要（不依赖 collectProgress）。
@@ -81,13 +92,27 @@ func emitBatchSummaryDirect(trigger string, results []model.SourceNotifyResult, 
 	if len(results) == 0 {
 		return
 	}
+	sourceIDs := make([]string, 0, len(results))
+	for _, r := range results {
+		if id := strings.TrimSpace(r.SourceID); id != "" {
+			sourceIDs = append(sourceIDs, id)
+		}
+	}
 	finMsg := ""
 	if finalizeErr != nil {
 		finMsg = finalizeErr.Error()
-		notify.PublishFinalizeFailed(len(results), finMsg)
 	}
 	payload := notify.BuildBatchPayload(trigger, results, startedAt, time.Now(), finMsg)
+	if finalizeErr != nil && !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
+		notify.PublishFinalizeFailed(len(results), finMsg)
+	}
 	notify.PublishBatchSummary(payload)
+	if len(sourceIDs) > 0 {
+		notify.Acc.ClearSources(sourceIDs...)
+		for _, id := range sourceIDs {
+			takeSourceError(id)
+		}
+	}
 }
 
 // emitSourceFailedNotify 单源失败即时通知（限流在 notify 内）。

@@ -40,11 +40,22 @@ func (h *NotifyHandler) UpdateNotifyConfig(c *gin.Context) {
 	dto.Success(notify.PublicConfig(merged), "通知配置已保存", c)
 }
 
-// TestNotify 发送测试消息到已配置的全部 Chat。
+// notifyTestReq 测试发送可选草稿（不落库）。空字段沿用已保存配置。
+type notifyTestReq struct {
+	BotToken string   `json:"botToken"`
+	ChatIDs  []string `json:"chatIds"`
+}
+
+// TestNotify 发送测试消息。可带表单草稿 Token/Chat，无需先保存。
 func (h *NotifyHandler) TestNotify(c *gin.Context) {
-	result, err := notify.SendTest()
+	var req notifyTestReq
+	// body 可为空；解析失败时按无 body 处理（兼容旧客户端）
+	_ = c.ShouldBindJSON(&req)
+
+	result, err := notify.SendTestWith(req.BotToken, req.ChatIDs)
 	if err != nil {
-		dto.Failed(err.Error(), c)
+		// 附带各 Chat 失败明细，便于前端展示具体 Telegram 原因（如 chat not found）。
+		dto.FailedWithData(result, err.Error(), c)
 		return
 	}
 	dto.Success(result, "测试消息已发送", c)

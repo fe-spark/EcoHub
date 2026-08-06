@@ -10,6 +10,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
+	"server/internal/notify"
 	"server/internal/router"
 	"server/internal/service"
 
@@ -74,6 +75,8 @@ func start() {
 	db.StartMysqlHealthCheck()
 
 	service.InitSvc.DefaultDataInit()
+	// Telegram 内联键盘分页（上一页/下一页）回调轮询
+	notify.EnsureBotPoller()
 
 	r := router.SetupRouter()
 	_ = r.Run(fmt.Sprintf(":%s", config.ListenerPort))

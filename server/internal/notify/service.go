@@ -82,21 +82,11 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 		cfg.BotToken = token
 	}
 
-	chatIDs := make([]string, 0, len(cfg.ChatIDs))
-	seen := make(map[string]struct{})
-	for _, id := range cfg.ChatIDs {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
+	chatIDs := repository.NormalizeChatIDs(cfg.ChatIDs)
+	for _, id := range chatIDs {
 		if !chatIDPattern.MatchString(id) {
 			return model.NotifyConfig{}, fmt.Errorf("无效的 Chat ID: %s", id)
 		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		chatIDs = append(chatIDs, id)
 	}
 	cfg.ChatIDs = chatIDs
 
@@ -128,7 +118,12 @@ func GetConfig() model.NotifyConfig {
 
 // SaveConfig 保存配置。
 func SaveConfig(cfg model.NotifyConfig) error {
-	return repository.SaveNotifyConfig(cfg)
+	if err := repository.SaveNotifyConfig(cfg); err != nil {
+		return err
+	}
+	// Token 变更后刷新 Telegram 回调轮询
+	EnsureBotPoller()
+	return nil
 }
 
 // siteName 读取站点名用于消息前缀。
@@ -159,6 +154,11 @@ func eventEnabled(cfg model.NotifyConfig, event string) bool {
 	}
 }
 
+// IsEventEnabled 读取当前配置判断某事件是否开启（总开关 + 子开关）。
+func IsEventEnabled(event string) bool {
+	return eventEnabled(GetConfig(), event)
+}
+
 // PublishBatchSummary 异步发送采集批次摘要。
 // 每批摘要不走 MinInterval 限流：合法批次不得因同 trigger 被静默丢弃。
 func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
@@ -181,9 +181,42 @@ func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
 				payload.Sources[i].Films = nil
 			}
 		}
-		messages := formatBatchSummary(payload, cfg.MaxFilmsInMessage)
-		sendMessages(cfg, messages)
+		sendBatchSummaryWithPager(cfg, payload)
 	})
+}
+
+// sendBatchSummaryWithPager 发送总览 + 带「上一页/下一页」按钮的影片列表（单条可翻页）。
+func sendBatchSummaryWithPager(cfg model.NotifyConfig, payload model.CollectBatchNotifyPayload) {
+	pageSize := cfg.MaxFilmsInMessage
+	if pageSize <= 0 {
+		pageSize = 30
+	}
+	if pageSize > 80 {
+		pageSize = 80
+	}
+
+	sess := buildFilmPageSessionFromPayload(payload, pageSize)
+	overview := formatBatchOverview(payload, len(sess.Items), pageSize)
+	// 总览可能较长，仍按 4096 拆分（无按钮）
+	sendMessages(cfg, splitTelegramMessages(overview))
+
+	if !payload.IncludeFilmDetails || len(sess.Items) == 0 {
+		return
+	}
+
+	sessionID, err := saveFilmPageSession(sess)
+	if err != nil {
+		log.Printf("[Notify] 保存影片分页会话失败: %v", err)
+		// 降级：只发第一页纯文本
+		sendMessages(cfg, []string{formatFilmListPage(sess, 1)})
+		return
+	}
+	totalPages := sess.totalPages()
+	text := formatFilmListPage(sess, 1)
+	markup := buildPageKeyboard(sessionID, 1, totalPages)
+	sendMessagesWithMarkup(cfg, text, markup)
+	// 确保 bot 在处理回调
+	EnsureBotPoller()
 }
 
 // PublishSourceFailed 单源失败即时告警。
@@ -267,33 +300,72 @@ func PublishCronDone(taskID, remark, detail string) {
 	})
 }
 
-// SendTest 同步向全部 Chat 发送测试消息。
+// SendTest 使用已保存配置发送测试消息。
 func SendTest() (model.NotifyTestResult, error) {
-	cfg := GetConfig()
-	if strings.TrimSpace(cfg.BotToken) == "" {
-		return model.NotifyTestResult{}, fmt.Errorf("请先配置并保存 Bot Token")
+	return SendTestWith("", nil)
+}
+
+// 测试发送最小间隔，避免管理端被当作 Telegram 代发代理刷接口。
+const testSendMinInterval = 3 * time.Second
+
+// SendTestWith 使用请求中的草稿 Token/Chat 发送测试（不落库）。
+// botToken 为空或脱敏时沿用已保存 Token；chatIDs 为空时沿用已保存列表。
+// 管理端可提交草稿 Token 联通验证；接口有最小间隔限流，降低被当代理刷用的风险。
+func SendTestWith(botToken string, chatIDs []string) (model.NotifyTestResult, error) {
+	if !globalRate.allow("notify:test_send", testSendMinInterval) {
+		return model.NotifyTestResult{}, fmt.Errorf("测试发送过于频繁，请 %s 后再试", testSendMinInterval)
 	}
-	if len(cfg.ChatIDs) == 0 {
-		return model.NotifyTestResult{}, fmt.Errorf("请先配置至少一个 Chat ID")
+	cfg := GetConfig()
+	token := strings.TrimSpace(botToken)
+	if token == "" || IsMaskedToken(token) {
+		token = cfg.BotToken
+	}
+	ids := repository.NormalizeChatIDs(chatIDs)
+	if len(ids) == 0 {
+		ids = append([]string(nil), cfg.ChatIDs...)
+	}
+	for _, id := range ids {
+		if !chatIDPattern.MatchString(id) {
+			return model.NotifyTestResult{}, fmt.Errorf("无效的 Chat ID: %s", id)
+		}
+	}
+	if strings.TrimSpace(token) == "" {
+		return model.NotifyTestResult{}, fmt.Errorf("请先填写 Bot Token")
+	}
+	if len(ids) == 0 {
+		return model.NotifyTestResult{}, fmt.Errorf("请先填写至少一个 Chat ID")
 	}
 	text := formatTestMessage(siteName())
 	result := model.NotifyTestResult{}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	for _, chatID := range cfg.ChatIDs {
-		if err := client.sendMessage(ctx, cfg.BotToken, chatID, text); err != nil {
+	for _, chatID := range ids {
+		if err := client.sendMessage(ctx, token, chatID, text); err != nil {
 			result.Failed = append(result.Failed, model.NotifyChatError{
 				ChatID: chatID,
 				Error:  err.Error(),
 			})
+			log.Printf("[Notify] 测试发送失败 chat=%s err=%v", chatID, err)
 			continue
 		}
 		result.Sent++
 	}
 	if result.Sent == 0 {
-		return result, fmt.Errorf("全部 Chat 发送失败")
+		return result, fmt.Errorf("全部 Chat 发送失败: %s", summarizeChatErrors(result.Failed))
 	}
 	return result, nil
+}
+
+// summarizeChatErrors 将各 Chat 失败原因拼成可读摘要（供 API msg 展示）。
+func summarizeChatErrors(failed []model.NotifyChatError) string {
+	if len(failed) == 0 {
+		return "未知原因"
+	}
+	parts := make([]string, 0, len(failed))
+	for _, f := range failed {
+		parts = append(parts, fmt.Sprintf("%s (%s)", f.ChatID, f.Error))
+	}
+	return strings.Join(parts, "; ")
 }
 
 func enrichFilmNames(payload *model.CollectBatchNotifyPayload) {
@@ -313,26 +385,43 @@ func enrichFilmNames(payload *model.CollectBatchNotifyPayload) {
 }
 
 func sendMessages(cfg model.NotifyConfig, messages []string) {
-	if len(messages) == 0 || len(cfg.ChatIDs) == 0 || strings.TrimSpace(cfg.BotToken) == "" {
+	for _, msg := range messages {
+		sendMessagesWithMarkup(cfg, msg, nil)
+	}
+}
+
+func sendMessagesWithMarkup(cfg model.NotifyConfig, text string, markup *InlineKeyboardMarkup) {
+	if strings.TrimSpace(text) == "" || len(cfg.ChatIDs) == 0 || strings.TrimSpace(cfg.BotToken) == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	var wg sync.WaitGroup
+	var (
+		wg       sync.WaitGroup
+		failMu   sync.Mutex
+		failN    int
+		lastFail string
+	)
 	for _, chatID := range cfg.ChatIDs {
-		for _, msg := range messages {
-			wg.Add(1)
-			go func(chatID, msg string) {
-				defer wg.Done()
-				sendSem <- struct{}{}
-				defer func() { <-sendSem }()
-				if err := client.sendMessage(ctx, cfg.BotToken, chatID, msg); err != nil {
-					log.Printf("[Notify] Telegram 发送失败 chat=%s err=%v", chatID, err)
-				}
-			}(chatID, msg)
-		}
+		wg.Add(1)
+		go func(chatID string) {
+			defer wg.Done()
+			sendSem <- struct{}{}
+			defer func() { <-sendSem }()
+			if err := client.sendMessageWithMarkup(ctx, cfg.BotToken, chatID, text, markup); err != nil {
+				failMu.Lock()
+				failN++
+				lastFail = err.Error()
+				failMu.Unlock()
+				log.Printf("[Notify] Telegram 发送失败 chat=%s err=%v", chatID, err)
+			}
+		}(chatID)
 	}
 	wg.Wait()
+	if failN > 0 {
+		log.Printf("[Notify] 本轮发送完成 chats=%d failures=%d last_err=%s",
+			len(cfg.ChatIDs), failN, lastFail)
+	}
 }
 
 func safePublish(fn func()) {

@@ -228,7 +228,14 @@ export default function ManageLayoutView({
 
   const menuNode = (
     <>
-      <div className={styles.logoWrap} onClick={() => window.open("/", "_blank")}>
+      <div
+        className={styles.logoWrap}
+        onClick={() => {
+          const url = String(siteInfo?.siteUrl || "").trim() || "/";
+          window.open(url, "_blank", "noopener,noreferrer");
+        }}
+        title={siteInfo?.siteUrl ? `打开 ${siteInfo.siteUrl}` : "打开前台首页"}
+      >
         <Avatar
           src={resolveSiteLogoSrc(siteInfo?.logo)}
           size={34}
