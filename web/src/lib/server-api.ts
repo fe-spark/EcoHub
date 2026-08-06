@@ -1,4 +1,5 @@
 import "server-only";
+import { buildBackendApiUrl } from "@/lib/api-base";
 
 export interface ApiResponse<T = any> {
   code: number;
@@ -8,27 +9,12 @@ export interface ApiResponse<T = any> {
 
 const serverFetchTimeoutMs = 15000;
 
-function getServerApiOrigin(): string {
+function requireApiUrl(): string {
   const apiUrl = process.env.API_URL?.trim();
   if (!apiUrl) {
-    throw new Error("缺少环境变量 API_URL，无法推导服务端请求地址");
+    throw new Error("缺少环境变量 API_URL，无法请求后端");
   }
-
-  return apiUrl.replace(/\/+$/, "");
-}
-
-function buildApiUrl(path: string, params?: Record<string, string | number | undefined>): string {
-  const url = new URL(`/api${path}`, getServerApiOrigin());
-
-  if (params) {
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== "") {
-        url.searchParams.set(key, String(value));
-      }
-    });
-  }
-
-  return url.toString();
+  return apiUrl;
 }
 
 export async function serverGet<T = any>(
@@ -36,8 +22,11 @@ export async function serverGet<T = any>(
   params?: Record<string, string | number | undefined>,
   headers?: HeadersInit,
 ): Promise<ApiResponse<T>> {
-  const apiUrl = buildApiUrl(path, params);
-  console.info(`[SSR][API] GET ${apiUrl}`);
+  const apiUrl = buildBackendApiUrl(requireApiUrl(), path, params);
+  const devLog = process.env.NODE_ENV === "development";
+  if (devLog) {
+    console.info(`[SSR][API] GET ${apiUrl}`);
+  }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
   let response: Response;
@@ -58,7 +47,9 @@ export async function serverGet<T = any>(
 
   const body = await response.text();
   if (!response.ok) {
-    throw new Error(`服务端请求失败: ${response.status} ${response.statusText} ${body.slice(0, 200)}`.trim());
+    throw new Error(
+      `服务端请求失败: ${response.status} ${response.statusText} ${body.slice(0, 200)}`.trim(),
+    );
   }
 
   if (!body.trim()) {
@@ -66,7 +57,19 @@ export async function serverGet<T = any>(
   }
 
   try {
-    return JSON.parse(body) as ApiResponse<T>;
+    const parsed = JSON.parse(body) as ApiResponse<T>;
+    if (devLog) {
+      const dataHint =
+        parsed?.data == null
+          ? "data=null"
+          : typeof parsed.data === "object"
+            ? `data.keys=${Object.keys(parsed.data as object).join(",")}`
+            : `data.type=${typeof parsed.data}`;
+      console.info(
+        `[SSR][API] ← ${response.status} code=${String(parsed?.code)} bytes=${body.length} ${dataHint} ${apiUrl}`,
+      );
+    }
+    return parsed;
   } catch (error) {
     throw new Error(
       `服务端返回非 JSON 响应: ${apiUrl}; ${error instanceof Error ? error.message : String(error)}; ${body.slice(0, 200)}`,

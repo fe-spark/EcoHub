@@ -34,6 +34,7 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
+import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import styles from "./index.module.less";
 
 const { Sider, Header, Content } = Layout;
@@ -224,14 +225,12 @@ export default function ManageLayoutView({
   const menuNode = (
     <>
       <div className={styles.logoWrap} onClick={() => window.open("/", "_blank")}>
-        {siteInfo?.logo && (
-          <Avatar
-            src={siteInfo.logo}
-            size={34}
-            shape="square"
-            className={styles.logoIcon}
-          />
-        )}
+        <Avatar
+          src={resolveSiteLogoSrc(siteInfo?.logo)}
+          size={34}
+          shape="square"
+          className={styles.logoIcon}
+        />
         {(!collapsed || isMobile) && siteInfo?.siteName && (
           <span className={styles.siteName}>{siteInfo.siteName}</span>
         )}

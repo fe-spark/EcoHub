@@ -58,6 +58,7 @@ function renderProgress(nextProgress: number) {
 
 function showBar(label: string) {
   ensureElements(label);
+  // 取消未完成的收尾动画，避免与新一次 start 打架
   clearTimers();
   renderProgress(12);
 
@@ -78,11 +79,18 @@ function showBar(label: string) {
 }
 
 function finishBar() {
-  if (!hostEl || !barEl) {
+  clearTimers();
+
+  if (!hostEl) {
+    progress = 0;
     return;
   }
 
-  clearTimers();
+  // 已隐藏且进度为 0 时无需再动画（防止重复 forceFinish 闪一下）
+  if (hostEl.style.opacity === "0" && progress <= 0) {
+    return;
+  }
+
   renderProgress(100);
 
   finishTimer = window.setTimeout(() => {
@@ -104,6 +112,7 @@ export function finishNavigationLoading() {
   stopLoading();
 }
 
+/** 无论 activeCount 如何，强制收起顶栏进度条 */
 export function forceFinishNavigationLoading() {
   activeCount = 0;
   finishBar();

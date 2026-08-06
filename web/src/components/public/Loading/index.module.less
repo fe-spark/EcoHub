@@ -1,0 +1,348 @@
+.wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  user-select: none;
+}
+
+.stage {
+  /* 外环线宽：珠点贴线宽中心 */
+  --loader-size: 72px;
+  --ring-outer-bw: 1.5px;
+  --ring-inner-inset: 14%;
+  --ring-inner-bw: 1px;
+  --ring-outer-r: calc(var(--loader-size) / 2 - var(--ring-outer-bw) / 2);
+  --ring-inner-r: calc(var(--loader-size) * (1 - 2 * 0.14) / 2 - var(--ring-inner-bw) / 2);
+  position: relative;
+  width: var(--loader-size);
+  height: var(--loader-size);
+  display: grid;
+  place-items: center;
+}
+
+.small .stage {
+  --loader-size: 44px;
+}
+
+.default .stage {
+  --loader-size: 58px;
+}
+
+.large .stage {
+  --loader-size: 88px;
+}
+
+.glow {
+  position: absolute;
+  inset: -36%;
+  border-radius: 50%;
+  background:
+    radial-gradient(
+      circle at 50% 45%,
+      rgba(var(--primary-color-rgb), 0.32) 0%,
+      rgba(var(--primary-color-rgb), 0.1) 38%,
+      transparent 68%
+    );
+  filter: blur(1px);
+  animation: glowPulse 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+.ringOuter {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: var(--ring-outer-bw) dashed rgba(var(--primary-color-rgb), 0.38);
+  opacity: 0.95;
+  pointer-events: none;
+}
+
+.ringInner {
+  position: absolute;
+  inset: var(--ring-inner-inset);
+  border-radius: 50%;
+  box-sizing: border-box;
+  border: var(--ring-inner-bw) solid rgba(var(--primary-color-rgb), 0.16);
+  pointer-events: none;
+}
+
+.trackOuter,
+.trackInner {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.trackOuter {
+  animation: spin 9s linear infinite;
+}
+
+.trackInner {
+  animation: spin 6s linear infinite reverse;
+}
+
+.bead {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 50%;
+  background: var(--primary-color);
+  box-shadow:
+    0 0 0 1px rgba(var(--primary-color-rgb), 0.2),
+    0 0 12px rgba(var(--primary-color-rgb), 0.45);
+  will-change: transform;
+}
+
+.beadLg {
+  --bead: 6px;
+  width: var(--bead);
+  height: var(--bead);
+  margin: calc(var(--bead) / -2) 0 0 calc(var(--bead) / -2);
+  transform: rotate(0deg) translateY(calc(var(--ring-outer-r) * -1));
+}
+
+.beadOpposite {
+  opacity: 0.7;
+  --bead: 4.5px;
+  width: var(--bead);
+  height: var(--bead);
+  margin: calc(var(--bead) / -2) 0 0 calc(var(--bead) / -2);
+  transform: rotate(180deg) translateY(calc(var(--ring-outer-r) * -1));
+}
+
+.beadSm {
+  --bead: 3.5px;
+  width: var(--bead);
+  height: var(--bead);
+  margin: calc(var(--bead) / -2) 0 0 calc(var(--bead) / -2);
+  background: color-mix(in srgb, var(--primary-color) 70%, white);
+  box-shadow: 0 0 8px rgba(var(--primary-color-rgb), 0.4);
+  transform: rotate(90deg) translateY(calc(var(--ring-inner-r) * -1));
+}
+
+.core {
+  position: relative;
+  z-index: 1;
+  width: 46%;
+  height: 46%;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(
+    155deg,
+    color-mix(in srgb, var(--primary-color) 92%, white) 0%,
+    var(--primary-color) 48%,
+    color-mix(in srgb, var(--primary-color) 78%, #c2410c) 100%
+  );
+  box-shadow:
+    0 10px 28px rgba(var(--primary-color-rgb), 0.32),
+    0 0 0 1px rgba(255, 255, 255, 0.08) inset,
+    0 1px 0 rgba(255, 255, 255, 0.35) inset;
+  animation: coreBob 2.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+.playIcon {
+  width: 38%;
+  height: 38%;
+  margin-left: 6%;
+  color: var(--public-on-accent);
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.18));
+}
+
+/* 声波特效：更细、更轻 */
+.bars {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 3px;
+  height: 14px;
+  opacity: 0.9;
+}
+
+.bar {
+  width: 2.5px;
+  border-radius: 99px;
+  background: linear-gradient(
+    180deg,
+    rgba(var(--primary-color-rgb), 0.95),
+    rgba(var(--primary-color-rgb), 0.45)
+  );
+  animation: barDance 1.15s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite;
+  transform-origin: bottom center;
+}
+
+.bar:nth-child(1) {
+  height: 5px;
+  animation-delay: 0s;
+}
+.bar:nth-child(2) {
+  height: 10px;
+  animation-delay: 0.1s;
+}
+.bar:nth-child(3) {
+  height: 14px;
+  animation-delay: 0.2s;
+}
+.bar:nth-child(4) {
+  height: 9px;
+  animation-delay: 0.08s;
+}
+.bar:nth-child(5) {
+  height: 6px;
+  animation-delay: 0.16s;
+}
+
+.small .bars {
+  height: 10px;
+  gap: 2.5px;
+}
+
+.small .bar {
+  width: 2px;
+}
+
+/* 文案区 */
+.copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.label {
+  margin: 0;
+  max-width: 280px;
+  color: var(--public-text-1);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-align: center;
+  line-height: 1.45;
+}
+
+.small .label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.hint {
+  margin: 0;
+  min-height: 1.3em;
+  max-width: 260px;
+  color: var(--public-text-5);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-align: center;
+  line-height: 1.5;
+  animation: hintFade 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dotTrail {
+  display: inline-flex;
+  width: 1.05em;
+  margin-left: 2px;
+  vertical-align: baseline;
+}
+
+.dotTrail span {
+  opacity: 0.22;
+  animation: dotBlink 1.35s ease-in-out infinite;
+}
+
+.dotTrail span:nth-child(1) {
+  animation-delay: 0s;
+}
+.dotTrail span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+.dotTrail span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes glowPulse {
+  0%,
+  100% {
+    opacity: 0.5;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+}
+
+@keyframes coreBob {
+  0%,
+  100% {
+    transform: translateY(0) scale(1);
+  }
+  50% {
+    transform: translateY(-2px) scale(1.03);
+  }
+}
+
+@keyframes barDance {
+  0%,
+  100% {
+    transform: scaleY(0.4);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scaleY(1);
+    opacity: 1;
+  }
+}
+
+@keyframes dotBlink {
+  0%,
+  100% {
+    opacity: 0.2;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+
+@keyframes hintFade {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glow,
+  .trackOuter,
+  .trackInner,
+  .core,
+  .bar,
+  .hint,
+  .dotTrail span {
+    animation: none !important;
+  }
+
+  .bar {
+    opacity: 0.75;
+    transform: none;
+  }
+
+  .dotTrail span {
+    opacity: 0.75;
+  }
+}

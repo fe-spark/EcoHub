@@ -84,7 +84,10 @@ export default function GlobalThemeProvider({
   const handleSelect = useCallback((m: ThemeMode) => setMode(m), []);
 
   const isDark = effective === "dark";
-  const showDock = mounted && !pathname.startsWith("/manage") && pathname !== "/login";
+  // 前台专属：大号分页 / 主题坞；后台与登录页保持 antd 默认尺寸
+  const isPublicFront =
+    !pathname.startsWith("/manage") && pathname !== "/login";
+  const showDock = mounted && isPublicFront;
 
   const contextValue = useMemo(
     () => ({ mode, effective, setMode }),
@@ -92,25 +95,45 @@ export default function GlobalThemeProvider({
   );
 
   const providerTheme = useMemo(() => {
-    const primaryColor =
-      typeof window !== "undefined"
-        ? getComputedStyle(document.documentElement).getPropertyValue("--primary-color").trim() || DEFAULT_PRIMARY_COLOR
-        : DEFAULT_PRIMARY_COLOR;
-    return {
-      algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-      token: {
-        colorPrimary: primaryColor,
-        fontFamily,
-      },
+    // 禁止在 SSR/CSR 分支读 window/getComputedStyle，否则 token/hash 不一致会触发 hydration mismatch
+    const algorithm = isDark ? theme.darkAlgorithm : theme.defaultAlgorithm;
+    const baseToken = {
+      colorPrimary: DEFAULT_PRIMARY_COLOR,
+      fontFamily,
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, fontFamily, effective]);
+    // 用 getDesignToken 补齐前台分页色彩，避免仅改尺寸导致层次变弱
+    const designToken = theme.getDesignToken({
+      algorithm,
+      token: baseToken,
+    });
+
+    return {
+      algorithm,
+      cssVar: { key: "app" },
+      // 固定 hashed，避免嵌套 Provider / useId 导致 css-var-_R_* 服务端与客户端不同
+      hashed: true,
+      token: baseToken,
+      components: isPublicFront
+        ? {
+            // 仅前台：原 PublicLayoutView 分页 token（勿全局污染 /manage）
+            Pagination: {
+              itemSize: 55,
+              fontSize: 18,
+              itemBg: designToken.colorFillQuaternary,
+              itemActiveBg: designToken.colorPrimary,
+              itemActiveColor: designToken.colorTextLightSolid,
+              colorText: designToken.colorText,
+              colorTextDisabled: designToken.colorTextDisabled,
+              colorBgContainer: "transparent",
+              colorBorder: designToken.colorBorderSecondary,
+            },
+          }
+        : undefined,
+    };
+  }, [isDark, fontFamily, isPublicFront]);
 
   return (
-    <ConfigProvider
-      locale={zhCN}
-      theme={{ ...providerTheme, cssVar: { key: "app-theme" } }}
-    >
+    <ConfigProvider locale={zhCN} theme={providerTheme}>
       <ThemeModeContext.Provider value={contextValue}>
         <App>
           {children}

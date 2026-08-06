@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import {
   VideoCameraOutlined,
   PlaySquareOutlined,
@@ -9,7 +8,7 @@ import {
   FireOutlined,
 } from "@ant-design/icons";
 import FilmList from "@/components/public/FilmList";
-import { startNavigationLoading } from "@/components/public/TopLoadingBar";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
 import styles from "./index.module.less";
@@ -55,7 +54,12 @@ export default function HomePageView({
     content: ContentSection[];
   };
 }) {
-  const router = useRouter();
+  const { navigate } = useContentNavigate();
+
+  // 与 Hero 一致：走布局级 navigate，展示整页内容 loading
+  const goPlay = (id: string) => {
+    navigate(resolvePlayEntryPath(id), "进入播放页...");
+  };
 
   const getSectionIcon = (name: string) => {
     if (name.includes("电影")) {
@@ -86,8 +90,7 @@ export default function HomePageView({
                 {getSectionIcon(section.nav.name)}
                 <a
                   onClick={() => {
-                    startNavigationLoading("分类加载中");
-                    router.push(`/filmClassify?Pid=${section.nav.id}`);
+                    navigate(`/filmClassify?Pid=${section.nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
@@ -99,9 +102,9 @@ export default function HomePageView({
                   <a
                     key={childIndex}
                     onClick={() => {
-                      startNavigationLoading("分类加载中");
-                      router.push(
+                      navigate(
                         `/filmClassifySearch?Pid=${child.pid}&Category=${child.id}`,
+                        "分类加载中",
                       );
                     }}
                     style={{ cursor: "pointer" }}
@@ -112,8 +115,7 @@ export default function HomePageView({
                 <a
                   className={styles.more}
                   onClick={() => {
-                    startNavigationLoading("分类加载中");
-                    router.push(`/filmClassify?Pid=${section.nav.id}`);
+                    navigate(`/filmClassify?Pid=${section.nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
@@ -140,7 +142,7 @@ export default function HomePageView({
                   <div
                     key={movieIndex}
                     className={styles.hotItem}
-                    onClick={() => router.push(resolvePlayEntryPath(movie.id))}
+                    onClick={() => goPlay(movie.id)}
                   >
                     <span className={styles.rank}>{movieIndex + 1}.</span>
                     <span className={styles.name}>{movie.name}</span>
