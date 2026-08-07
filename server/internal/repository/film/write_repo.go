@@ -490,6 +490,9 @@ func SaveDetailsForCollect(id string, list []model.MovieDetail) (CollectWriteRes
 
 func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (CollectWriteResult, error) {
 	var out CollectWriteResult
+	if err := EnsureContentKeySchemaReady(nil); err != nil {
+		return out, err
+	}
 	infoList, _, err := buildFilmIndexesFromDetails(id, list)
 	if err != nil {
 		return out, err
@@ -652,7 +655,12 @@ func collectFilmIndexMIDs(infos []model.FilmIndex) []int64 {
 func detailMapByContentKey(details []model.MovieDetail) map[string]model.MovieDetail {
 	detailsByKey := make(map[string]model.MovieDetail, len(details))
 	for _, detail := range details {
-		detailsByKey[BuildContentKey(detail)] = detail
+		key := BuildContentKey(detail)
+		if key == "" {
+			// 无源站 id 且无法生成 name 指纹：不能作为主站身份，丢弃
+			continue
+		}
+		detailsByKey[key] = detail
 	}
 	return detailsByKey
 }
@@ -704,6 +712,9 @@ func filmIndexContentKeys(infos []model.FilmIndex) []string {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
+	if err := EnsureContentKeySchemaReady(nil); err != nil {
+		return err
+	}
 	snapshot, err := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
 		return err

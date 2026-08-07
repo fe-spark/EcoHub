@@ -255,9 +255,9 @@ func sanitizeTelegramErr(err error, token, proxyLabel string) error {
 			hint = "连接 Telegram API 超时"
 		}
 		if proxyLabel == "" {
-			return fmt.Errorf("%s（当前直连）。国内网络通常需代理：在 server 环境变量设置 TELEGRAM_PROXY，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7891，然后重启服务", hint)
+			return fmt.Errorf("%s（直连）。可设置 TELEGRAM_PROXY 后重启", hint)
 		}
-		return fmt.Errorf("%s（已走代理 %s）。请检查代理是否可用、是否允许访问 api.telegram.org", hint, proxyLabel)
+		return fmt.Errorf("%s（代理 %s 不可用）", hint, proxyLabel)
 	}
 	return fmt.Errorf("%s", msg)
 }

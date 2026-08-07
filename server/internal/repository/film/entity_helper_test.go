@@ -66,6 +66,31 @@ func TestDetailMapByContentKeyKeepsDistinctVods(t *testing.T) {
 	}
 }
 
+func TestDetailMapByContentKeySkipsEmptyKey(t *testing.T) {
+	list := []model.MovieDetail{
+		{}, // 无 id 无片名 → 空 ContentKey，应丢弃
+		{Id: 1, Name: "有片"},
+	}
+	m := detailMapByContentKey(list)
+	if len(m) != 1 {
+		t.Fatalf("空 key 应跳过, want 1 got %d", len(m))
+	}
+	if _, ok := m["vod_1"]; !ok {
+		t.Fatalf("want vod_1, got %#v", m)
+	}
+}
+
+func TestBuildContentKeyPrefersVodOverDouban(t *testing.T) {
+	d := model.MovieDetail{
+		Id:              99,
+		Name:            "某剧",
+		MovieDescriptor: model.MovieDescriptor{DbId: 123456},
+	}
+	if got := BuildContentKey(d); got != "vod_99" {
+		t.Fatalf("want vod_99, got %q", got)
+	}
+}
+
 func makeEpisodes(n int) []model.MovieUrlInfo {
 	out := make([]model.MovieUrlInfo, n)
 	for i := 0; i < n; i++ {
