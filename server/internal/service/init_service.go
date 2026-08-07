@@ -33,6 +33,7 @@ func (s *InitService) DefaultDataInit() {
 			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
 			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
 			&model.NotifyConfigRecord{},
+			&model.NotifyChangeBatch{}, &model.NotifyChangeMid{},
 		)
 	}
 	ensureMappingRuleIndexes()
@@ -101,6 +102,8 @@ func (s *InitService) TableInit() {
 		&model.CategoryMapping{},
 		&model.SourceCategory{},
 		&model.NotifyConfigRecord{},
+		&model.NotifyChangeBatch{},
+		&model.NotifyChangeMid{},
 	)
 	if err != nil {
 		log.Println("Database AutoMigrate Failed:", err)

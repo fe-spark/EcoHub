@@ -1,18 +1,21 @@
 package notify
 
 import (
-	"fmt"
 	"server/internal/infra/db"
 	"server/internal/model"
 )
 
-// ResolveFilmNames 批量查询 mid → 片名。
-func ResolveFilmNames(mids []int64) map[int64]string {
-	out := make(map[int64]string, len(mids))
-	if len(mids) == 0 {
+type filmMeta struct {
+	Name        string
+	UpdateStamp int64
+}
+
+// ResolveFilmMeta 批量查询 mid → 片名与 update_stamp。
+func ResolveFilmMeta(mids []int64) map[int64]filmMeta {
+	out := make(map[int64]filmMeta, len(mids))
+	if len(mids) == 0 || db.Mdb == nil {
 		return out
 	}
-	// 去重
 	uniq := make([]int64, 0, len(mids))
 	seen := make(map[int64]struct{}, len(mids))
 	for _, mid := range mids {
@@ -32,21 +35,14 @@ func ResolveFilmNames(mids []int64) map[int64]string {
 			end = len(uniq)
 		}
 		var rows []model.FilmIndex
-		if err := db.Mdb.Select("mid", "name").Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
+		if err := db.Mdb.Select("mid", "name", "update_stamp").Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
 			continue
 		}
 		for _, row := range rows {
 			if row.Mid > 0 {
-				out[row.Mid] = row.Name
+				out[row.Mid] = filmMeta{Name: row.Name, UpdateStamp: row.UpdateStamp}
 			}
 		}
 	}
 	return out
-}
-
-func filmDisplayName(mid int64, names map[int64]string) string {
-	if name, ok := names[mid]; ok && name != "" {
-		return name
-	}
-	return fmt.Sprintf("#%d", mid)
 }

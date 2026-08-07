@@ -49,7 +49,6 @@ type notifyTestReq struct {
 // TestNotify 发送测试消息。可带表单草稿 Token/Chat，无需先保存。
 func (h *NotifyHandler) TestNotify(c *gin.Context) {
 	var req notifyTestReq
-	// body 可为空；解析失败时按无 body 处理（兼容旧客户端）
 	_ = c.ShouldBindJSON(&req)
 
 	result, err := notify.SendTestWith(req.BotToken, req.ChatIDs)

@@ -5,87 +5,60 @@ import (
 	"sync"
 )
 
-const maxMidsPerSource = 500
-
-// MidAccumulator 按采集源累计本批 mid（有界，防全量 OOM）。
+// MidAccumulator 按源统计变更次数；mid 明细写入 MySQL 批次表（无内存全量列表）。
 type MidAccumulator struct {
-	mu        sync.Mutex
-	bySource  map[string]map[int64]struct{}
-	counts    map[string]int
-	truncated map[string]bool
+	mu     sync.Mutex
+	counts map[string]int
 }
 
-// Acc 全局 mid 累计器（随批次 Drain / ClearSources 清空）。
-// 注意：按 sourceID 隔离；同一 source 若并发多任务会串扰，调用方应避免同 source 并行采集，
-// 并在批次结束调用 ClearSources 兜底。
+// Acc 全局累计器（仅计数；明细见 change_batch）。
 var Acc = NewMidAccumulator()
 
 func NewMidAccumulator() *MidAccumulator {
-	return &MidAccumulator{
-		bySource:  make(map[string]map[int64]struct{}),
-		counts:    make(map[string]int),
-		truncated: make(map[string]bool),
-	}
+	return &MidAccumulator{counts: make(map[string]int)}
 }
 
-// Add 记录 source 下成功写入的 mid。
-func (a *MidAccumulator) Add(sourceID string, mids ...int64) {
+// Add 按源计数，并将 mid 写入指定变更批次（明细落 MySQL，全局去重）。
+func (a *MidAccumulator) Add(batch *ChangeBatch, sourceID string, mids ...int64) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || len(mids) == 0 {
 		return
 	}
+	// 先落库（全局去重），再计数（按调用方传入去重）
+	if batch != nil {
+		batch.AppendMids(mids...)
+	}
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	set := a.bySource[sourceID]
-	if set == nil {
-		set = make(map[int64]struct{})
-		a.bySource[sourceID] = set
-	}
+	seen := make(map[int64]struct{}, len(mids))
 	for _, mid := range mids {
 		if mid <= 0 {
 			continue
 		}
-		if _, ok := set[mid]; ok {
+		if _, ok := seen[mid]; ok {
 			continue
 		}
+		seen[mid] = struct{}{}
 		a.counts[sourceID]++
-		if len(set) >= maxMidsPerSource {
-			a.truncated[sourceID] = true
-			continue
-		}
-		set[mid] = struct{}{}
 	}
 }
 
-// DrainSource 取出并清除某源累计。
+// DrainSource 取出并清除某源计数；Films 列表为空（明细在 MySQL 批次中）。
 func (a *MidAccumulator) DrainSource(sourceID string) (mids []int64, total int, truncated bool) {
 	sourceID = strings.TrimSpace(sourceID)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	set := a.bySource[sourceID]
 	total = a.counts[sourceID]
-	truncated = a.truncated[sourceID]
-	delete(a.bySource, sourceID)
 	delete(a.counts, sourceID)
-	delete(a.truncated, sourceID)
-	if len(set) == 0 {
-		return nil, total, truncated
-	}
-	mids = make([]int64, 0, len(set))
-	for mid := range set {
-		mids = append(mids, mid)
-	}
-	return mids, total, truncated
+	return nil, total, false
 }
 
-// ClearSources 清除指定源（批次结束后兜底）。
+// ClearSources 清除指定源计数。
 func (a *MidAccumulator) ClearSources(sourceIDs ...string) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, id := range sourceIDs {
-		id = strings.TrimSpace(id)
-		delete(a.bySource, id)
-		delete(a.counts, id)
-		delete(a.truncated, id)
+		delete(a.counts, strings.TrimSpace(id))
 	}
 }

@@ -30,7 +30,7 @@ func filmPlayURL(mid int64) string {
 	return fmt.Sprintf("%s/play?id=%d", strings.TrimRight(base, "/"), mid)
 }
 
-// formatFilmLine 影片明细一行：名称 + 可点击 #mid（跳转站内播放页）。
+// formatFilmLine 影片一行：片名可点进站内播放页（依赖网站配置 siteUrl）。
 func formatFilmLine(film model.FilmNotifyItem) string {
 	name := strings.TrimSpace(film.Name)
 	if name == "" {
@@ -39,9 +39,10 @@ func formatFilmLine(film model.FilmNotifyItem) string {
 	name = truncateRunes(name, 80)
 	idLabel := fmt.Sprintf("#%d", film.Mid)
 	if href := filmPlayURL(film.Mid); href != "" {
-		return fmt.Sprintf("· %s (<a href=\"%s\">%s</a>)\n",
-			html.EscapeString(name),
+		// 片名整段可点；Telegram 内打开浏览器/内置 WebView，非聊天窗内嵌播放
+		return fmt.Sprintf("· <a href=\"%s\">%s</a> (<code>%s</code>)\n",
 			html.EscapeString(href),
+			html.EscapeString(name),
 			html.EscapeString(idLabel),
 		)
 	}
@@ -84,58 +85,69 @@ func gradeLabel(grade int) string {
 	return "附属"
 }
 
-// formatBatchOverview 采集结果总览（不含影片明细；明细用内联键盘分页消息）。
-func formatBatchOverview(payload model.CollectBatchNotifyPayload, filmItemCount, pageSize int) string {
+// formatBatchOverview 采集概要（普通 HTML，不用 <pre>，避免 TG 显示「复制代码」）。
+// listN=去重后列表条数（与更新列表一致）；pageSize 用于算页数。
+// 分源字段：变更=FilmsTotal，失败=FailedCnt，成功页=SuccessCnt。
+func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSize int) string {
 	if pageSize <= 0 {
 		pageSize = 30
 	}
+	// 头行「变更」与列表一致：优先 listN；无明细时用 payload.TotalFilms（已是去重语义时由 Build 保证）
+	headerChanged := listN
+	if headerChanged <= 0 {
+		headerChanged = payload.TotalFilms
+	}
 	var overview strings.Builder
-	fmt.Fprintf(&overview, "<b>%s 采集结果</b>\n", formatTitlePrefix(payload.SiteName))
-	fmt.Fprintf(&overview, "<b>⚡ 触发:</b> %s\n", html.EscapeString(triggerLabel(payload.Trigger)))
+	fmt.Fprintf(&overview, "<b>%s 采集概要</b>\n", formatTitlePrefix(payload.SiteName))
+	fmt.Fprintf(&overview, "⚡ %s", html.EscapeString(triggerLabel(payload.Trigger)))
 	if payload.DurationSec > 0 {
-		fmt.Fprintf(&overview, "<b>⏱ 耗时:</b> %s\n", html.EscapeString(formatDuration(payload.DurationSec)))
+		fmt.Fprintf(&overview, " · ⏱ %s", html.EscapeString(formatDuration(payload.DurationSec)))
 	}
-	fmt.Fprintf(&overview, "<b>📊 统计:</b> 源 ✅<b>%d</b> · ❌<b>%d</b> | 影片 <b>%d</b> 部\n",
-		payload.SuccessSources, payload.FailedSources, payload.TotalFilms)
+	overview.WriteByte('\n')
+	fmt.Fprintf(&overview, "📊 源 ✅<b>%d</b> · ❌<b>%d</b> | 变更 <b>%d</b> 部\n",
+		payload.SuccessSources, payload.FailedSources, headerChanged)
 	if errMsg := strings.TrimSpace(payload.FinalizeError); errMsg != "" {
-		fmt.Fprintf(&overview, "<b>⚠️ 收尾错误:</b> <code>%s</code>\n", html.EscapeString(truncateRunes(errMsg, 300)))
+		fmt.Fprintf(&overview, "⚠️ 收尾: <code>%s</code>\n", html.EscapeString(truncateRunes(errMsg, 200)))
 	}
 
-	for _, src := range payload.Sources {
+	sumChanged, sumFail, sumOKPage := 0, 0, 0
+	if len(payload.Sources) > 0 {
 		overview.WriteByte('\n')
-		fmt.Fprintf(&overview, "<b>%s %s</b> <code>(%s)</code>\n",
-			statusIcon(src.Status),
-			html.EscapeString(src.SourceName),
-			html.EscapeString(gradeLabel(src.Grade)),
-		)
-		fmt.Fprintf(&overview, "页 <code>%d/%d</code> · 成功 <code>%d</code> · 失败 <code>%d</code>",
-			src.PageCurrent, src.PageTotal, src.SuccessCnt, src.FailedCnt)
-		if src.FilmsTotal > 0 {
-			fmt.Fprintf(&overview, " · 影片 <b>%d</b>", src.FilmsTotal)
+		for _, src := range payload.Sources {
+			sumChanged += src.FilmsTotal
+			sumFail += src.FailedCnt
+			sumOKPage += src.SuccessCnt
+			name := strings.TrimSpace(src.SourceName)
+			if name == "" {
+				name = "未命名源"
+			}
+			name = truncateRunes(name, 40)
+			grade := gradeLabel(src.Grade)
+			fmt.Fprintf(&overview, "%s <b>%s</b>（%s）\n",
+				statusIcon(src.Status),
+				html.EscapeString(name),
+				html.EscapeString(grade),
+			)
+			fmt.Fprintf(&overview, "    变更 <b>%d</b> · 失败 <b>%d</b> · 成功页 <b>%d</b>\n",
+				src.FilmsTotal, src.FailedCnt, src.SuccessCnt)
+			if errMsg := strings.TrimSpace(src.Error); errMsg != "" {
+				fmt.Fprintf(&overview, "    ❌ <code>%s</code>\n",
+					html.EscapeString(truncateRunes(errMsg, 120)))
+			}
 		}
-		overview.WriteByte('\n')
-		if errMsg := strings.TrimSpace(src.Error); errMsg != "" {
-			fmt.Fprintf(&overview, "❌ <code>原因: %s</code>\n", html.EscapeString(truncateRunes(errMsg, 200)))
+		fmt.Fprintf(&overview, "\n<b>合计</b>  变更 <b>%d</b> · 失败 <b>%d</b> · 成功页 <b>%d</b>\n",
+			sumChanged, sumFail, sumOKPage)
+		if listN > 0 && sumChanged > listN {
+			fmt.Fprintf(&overview, "<i>分源合计 %d，去重影片 %d</i>\n", sumChanged, listN)
 		}
 	}
 
-	if payload.IncludeFilmDetails && filmItemCount > 0 {
-		pages := (filmItemCount + pageSize - 1) / pageSize
-		fmt.Fprintf(&overview, "\n📋 <b>影片明细</b> 共 <b>%d</b> 条 · <b>%d</b> 页（每页 %d 条）\n",
-			filmItemCount, pages, pageSize)
-		fmt.Fprintf(&overview, "<i>请点击下方消息的「上一页 / 下一页」浏览</i>\n")
+	if listN > 0 {
+		pages := (listN + pageSize - 1) / pageSize
+		fmt.Fprintf(&overview, "\n📋 更新列表 <b>%d</b> 部 · <b>%d</b> 页\n", listN, pages)
+		fmt.Fprintf(&overview, "<i>主站框架或附属站播放源有更新的影片；点击浏览，可翻页</i>\n")
 	}
 	return overview.String()
-}
-
-// formatBatchSummary 兼容旧调用：仅返回总览文本（可能按 4096 拆分）。
-// 带按钮的影片列表由 PublishBatchSummary 单独发送。
-func formatBatchSummary(payload model.CollectBatchNotifyPayload, maxFilms int) []string {
-	n := 0
-	for _, s := range payload.Sources {
-		n += len(s.Films)
-	}
-	return splitTelegramMessages(formatBatchOverview(payload, n, maxFilms))
 }
 
 func formatSourceFailed(siteName, sourceName, sourceID, reason string, at time.Time) []string {
@@ -206,6 +218,29 @@ func formatCronDone(siteName, taskID, remark, detail string, at time.Time) []str
 	}
 	if detail != "" {
 		fmt.Fprintf(&b, "<b>📋 明细:</b> %s\n", html.EscapeString(truncateRunes(detail, 400)))
+	}
+	if !at.IsZero() {
+		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+	}
+	return []string{b.String()}
+}
+
+// formatSourceConfigChanged 采集源配置变更通知（新增/删除/主站切换/启用停用等）。
+func formatSourceConfigChanged(siteName, sourceName, sourceID string, changes []string, at time.Time) []string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s 🔧 采集源配置变更</b>\n", formatTitlePrefix(siteName))
+	fmt.Fprintf(&b, "<b>📌 站点:</b> %s", html.EscapeString(sourceName))
+	if sourceID != "" {
+		fmt.Fprintf(&b, " (<code>%s</code>)", html.EscapeString(sourceID))
+	}
+	b.WriteByte('\n')
+	if len(changes) > 0 {
+		b.WriteString("<b>🛠 变更:</b>\n")
+		for _, ch := range changes {
+			fmt.Fprintf(&b, "· %s\n", html.EscapeString(ch))
+		}
+	} else {
+		b.WriteString("<b>🛠 操作:</b> 配置已更新\n")
 	}
 	if !at.IsZero() {
 		fmt.Fprintf(&b, "<b>🕒 时间:</b> <code>%s</code>\n", html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))

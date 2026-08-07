@@ -3,13 +3,13 @@ package notify
 import (
 	"context"
 	"log"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Telegram long-polling：处理内联键盘回调（上一页/下一页）。
-// 不依赖公网 webhook，适合内网/Docker 部署。
+// Telegram long-polling：内联键盘回调 + /search 文本指令。
 
 var (
 	pollerMu     sync.Mutex
@@ -17,8 +17,7 @@ var (
 	pollerToken  string
 )
 
-// EnsureBotPoller 按当前已保存 Bot Token 启停轮询。
-// 无 Token 时停止；Token 变化时重启。
+// EnsureBotPoller 按已保存 Bot Token 启停轮询。无 Token 停止；Token 变化则重启。
 func EnsureBotPoller() {
 	cfg := GetConfig()
 	token := strings.TrimSpace(cfg.BotToken)
@@ -36,7 +35,7 @@ func EnsureBotPoller() {
 	pollerCancel = cancel
 	pollerToken = token
 	go runBotPoller(ctx, token)
-	log.Printf("[Notify] Telegram 回调查询已启动（内联键盘分页）")
+	log.Printf("[Notify] Telegram Bot 轮询已启动（/search + 列表翻页）")
 }
 
 func stopBotPollerLocked() {
@@ -48,9 +47,8 @@ func stopBotPollerLocked() {
 }
 
 func runBotPoller(ctx context.Context, token string) {
-	// 清除 webhook，避免与 getUpdates 冲突
 	{
-		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 		if err := client.deleteWebhook(cctx, token); err != nil {
 			log.Printf("[Notify] deleteWebhook: %v", err)
 		}
@@ -59,6 +57,7 @@ func runBotPoller(ctx context.Context, token string) {
 
 	var offset int64
 	backoff := time.Second
+	commandsOK := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -66,7 +65,12 @@ func runBotPoller(ctx context.Context, token string) {
 		default:
 		}
 
-		// long poll：timeout 25s，外层 context 略长
+		if !commandsOK {
+			if registerBotCommands(ctx, token) {
+				commandsOK = true
+			}
+		}
+
 		reqCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
 		updates, err := client.getUpdates(reqCtx, token, offset, 25)
 		cancel()
@@ -92,8 +96,58 @@ func runBotPoller(ctx context.Context, token string) {
 				offset = u.UpdateID + 1
 			}
 			if u.CallbackQuery != nil {
-				handleFilmPageCallback(token, u.CallbackQuery)
+				dispatchCallback(token, u.CallbackQuery)
+			}
+			if u.Message != nil {
+				handleBotMessage(token, u.Message)
 			}
 		}
+	}
+}
+
+func registerBotCommands(ctx context.Context, token string) bool {
+	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	err := client.setMyCommands(cctx, token, []botCommand{
+		{Command: "search", Description: "搜索影片 /search 关键词"},
+		{Command: "s", Description: "搜索简写 /s 关键词"},
+		{Command: "start", Description: "开始使用"},
+	})
+	if err != nil {
+		log.Printf("[Notify] setMyCommands 失败（将重试）: %v", err)
+		return false
+	}
+	log.Printf("[Notify] 已注册 Bot 指令: /search /s /start")
+	return true
+}
+
+func dispatchCallback(token string, cb *telegramCallback) {
+	if cb == nil {
+		return
+	}
+	// Message/Chat 缺失时拒绝，避免绕过白名单进入翻页/搜索处理
+	if cb.Message == nil || cb.Message.Chat == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, "无法定位消息", true)
+		cancel()
+		return
+	}
+	chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
+	if !isAllowedChat(chatID, cb.Message.Chat.Username) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, "会话未授权", true)
+		cancel()
+		return
+	}
+	data := strings.TrimSpace(cb.Data)
+	switch {
+	case strings.HasPrefix(data, callbackPrefix+":"):
+		handleFilmPageCallback(token, cb)
+	case strings.HasPrefix(data, searchCallbackPrefix+":"):
+		handleSearchPageCallback(token, cb)
+	default:
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, "未知操作", false)
+		cancel()
 	}
 }

@@ -25,9 +25,10 @@ func DefaultNotifyConfig() model.NotifyConfig {
 			CollectProgressStale:  true,
 			CronTaskFailed:        true,
 			CronTaskDone:          false,
+			SourceConfigChanged:   true,
 		},
 		IncludeFilmDetails: true,
-		MaxFilmsInMessage:  30,
+		MaxFilmsInMessage:  model.DefaultMaxFilmsInMessage,
 		MinIntervalSec:     60,
 	}
 }
@@ -96,10 +97,11 @@ func normalizeNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 	cfg.BotToken = strings.TrimSpace(cfg.BotToken)
 	cfg.ChatIDs = NormalizeChatIDs(cfg.ChatIDs)
 	if cfg.MaxFilmsInMessage <= 0 {
-		cfg.MaxFilmsInMessage = 30
+		cfg.MaxFilmsInMessage = model.DefaultMaxFilmsInMessage
 	}
-	if cfg.MaxFilmsInMessage > 80 {
-		cfg.MaxFilmsInMessage = 80
+	// 与 model.MaxFilmsInMessageCap 一致（分页每页条数上限）
+	if cfg.MaxFilmsInMessage > model.MaxFilmsInMessageCap {
+		cfg.MaxFilmsInMessage = model.MaxFilmsInMessageCap
 	}
 	if cfg.MinIntervalSec < 0 {
 		cfg.MinIntervalSec = 0

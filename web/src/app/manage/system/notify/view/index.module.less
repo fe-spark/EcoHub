@@ -51,6 +51,20 @@
   }
 }
 
+.enableSwitch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+}
+
+.enableLabel {
+  font-size: 13px;
+  white-space: nowrap;
+}
+
 .form {
   :global(.ant-form-item) {
     margin-bottom: 16px;
@@ -83,6 +97,24 @@
   :global(.ant-select-selection-overflow) {
     gap: 4px;
   }
+}
+
+.testRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+}
+
+.testHint {
+  flex: 1;
+  min-width: 160px;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .eventGrid {

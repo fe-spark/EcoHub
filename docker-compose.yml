@@ -10,6 +10,9 @@ services:
       MYSQL_PASSWORD: ${MYSQL_PASSWORD:-ecohub}
     volumes:
       - eco-mysql-data:/var/lib/mysql
+    # 仅本机映射，方便宿主机 go run 本地开发；全容器部署仍走 Eco-network 服务名
+    ports:
+      - "127.0.0.1:3306:3306"
     networks:
       - Eco-network
     healthcheck:
@@ -32,6 +35,9 @@ services:
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD:-ecohub}"]
     volumes:
       - eco-redis-data:/data
+    # 仅本机映射，方便宿主机 go run 本地开发；全容器部署仍走 Eco-network 服务名
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - Eco-network
     healthcheck:

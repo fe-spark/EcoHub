@@ -2,12 +2,14 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	"server/internal/spider"
@@ -145,7 +147,64 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 		}
 	}
 	clearProvideNetworkConfigCache()
+	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
+		notify.PublishSourceConfigChanged(source.Name, source.Id, changes)
+	}
+	// masterLookup：旧主站被自动降级且主数据已清空，单独通知，避免切换静默
+	if masterLookup {
+		for _, m := range masters {
+			if m.Id == source.Id {
+				continue
+			}
+			notify.PublishSourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"})
+		}
+	}
 	return nil
+}
+
+// sourceChangeLabels 对比 old→next 生成源配置变更描述；无差异时返回 nil。
+func sourceChangeLabels(old, next model.FilmSource) []string {
+	var changes []string
+	if old.State != next.State {
+		changes = append(changes, fmt.Sprintf("启用状态: %s → %s", sourceStateLabel(old.State), sourceStateLabel(next.State)))
+	}
+	if old.Grade != next.Grade {
+		changes = append(changes, fmt.Sprintf("站点类型: %s → %s", sourceGradeLabel(old.Grade), sourceGradeLabel(next.Grade)))
+	}
+	if old.Uri != next.Uri {
+		changes = append(changes, "接口地址已变更")
+	}
+	if old.Name != next.Name {
+		changes = append(changes, fmt.Sprintf("站点名称: %s → %s", old.Name, next.Name))
+	}
+	if old.SyncPictures != next.SyncPictures {
+		changes = append(changes, fmt.Sprintf("图片同步: %s → %s", sourceOnOffLabel(old.SyncPictures), sourceOnOffLabel(next.SyncPictures)))
+	}
+	if old.Interval != next.Interval {
+		changes = append(changes, fmt.Sprintf("请求间隔: %dms → %dms", old.Interval, next.Interval))
+	}
+	return changes
+}
+
+func sourceStateLabel(on bool) string {
+	if on {
+		return "已启用"
+	}
+	return "已停用"
+}
+
+func sourceGradeLabel(g model.SourceGrade) string {
+	if g == model.MasterCollect {
+		return "主站"
+	}
+	return "附属站"
+}
+
+func sourceOnOffLabel(on bool) string {
+	if on {
+		return "开"
+	}
+	return "关"
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
@@ -199,13 +258,23 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			}
 		}
 		clearProvideNetworkConfigCache()
+		notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源（主站）"})
+		// 现有主站被自动降级且主数据已清空，单独通知
+		for _, m := range masters {
+			notify.PublishSourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"})
+		}
 		return nil
+	}
+	// 附属站新增：与主站分支一致，先基于 URI 生成稳定 ID，供通知限流 key 与消息展示使用。
+	if source.Id == "" {
+		source.Id = utils.GenerateHashKey(source.Uri)
 	}
 	if err := repository.AddCollectSource(source); err != nil {
 		return err
 	}
 	spider.ClearLimiter(source.Id)
 	clearProvideNetworkConfigCache()
+	notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源（附属站）"})
 	return nil
 }
 
@@ -222,6 +291,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 	}
 	spider.ClearLimiter(id)
 	clearProvideNetworkConfigCache()
+	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
 	return nil
 }
 

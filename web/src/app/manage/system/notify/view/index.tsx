@@ -7,6 +7,7 @@ import {
   Card,
   Checkbox,
   Col,
+  ConfigProvider,
   Divider,
   Flex,
   Form,
@@ -47,6 +48,7 @@ interface NotifyEventSwitches {
   collectProgressStale: boolean;
   cronTaskFailed: boolean;
   cronTaskDone: boolean;
+  sourceConfigChanged: boolean;
 }
 
 interface NotifyConfigValues {
@@ -66,6 +68,7 @@ const DEFAULT_EVENTS: NotifyEventSwitches = {
   collectProgressStale: true,
   cronTaskFailed: true,
   cronTaskDone: false,
+  sourceConfigChanged: true,
 };
 
 const DEFAULT_CONFIG: NotifyConfigValues = {
@@ -74,7 +77,7 @@ const DEFAULT_CONFIG: NotifyConfigValues = {
   chatIds: [],
   events: { ...DEFAULT_EVENTS },
   includeFilmDetails: true,
-  maxFilmsInMessage: 30,
+  maxFilmsInMessage: 15,
   minIntervalSec: 60,
 };
 
@@ -92,7 +95,7 @@ const EVENT_OPTIONS: EventOption[] = [
     label: "采集结果摘要",
     badge: "批次汇总",
     badgeColor: "blue",
-    hint: "整批采集结束后推送成功/失败源与影片明细列表",
+    hint: "整批采集结束后推送各源统计；更新列表含主站框架更新或附属站播放源更新的影片",
   },
   {
     field: "collectSourceFailed",
@@ -129,6 +132,13 @@ const EVENT_OPTIONS: EventOption[] = [
     badgeColor: "green",
     hint: "定时任务成功完成时推送通知（默认关闭，避免频发打扰）",
   },
+  {
+    field: "sourceConfigChanged",
+    label: "采集源配置变更",
+    badge: "配置变更",
+    badgeColor: "cyan",
+    hint: "新增/删除采集源、主站与附属站切换、接口地址变更、启用/停用等配置操作发生时推送",
+  },
 ];
 
 function normalizeConfig(data: Partial<NotifyConfigValues> | undefined): NotifyConfigValues {
@@ -141,7 +151,7 @@ function normalizeConfig(data: Partial<NotifyConfigValues> | undefined): NotifyC
       ...(data?.events ?? {}),
     },
     includeFilmDetails: data?.includeFilmDetails !== false,
-    maxFilmsInMessage: Number(data?.maxFilmsInMessage || 30),
+    maxFilmsInMessage: Number(data?.maxFilmsInMessage || 15),
     minIntervalSec: Number(data?.minIntervalSec ?? 60),
   };
 }
@@ -163,6 +173,15 @@ export default function NotifyConfigPageView() {
     if (!watchedEvents) return 0;
     return Object.values(watchedEvents).filter(Boolean).length;
   }, [watchedEvents]);
+
+  // Token（含已保存脱敏）+ 至少一个 Chat ID 即可测，无需先保存
+  const canTest = useMemo(() => {
+    const token = String(watchedBotToken ?? "").trim();
+    const chats = Array.isArray(watchedChatIds)
+      ? watchedChatIds.map(String).map((s) => s.trim()).filter(Boolean)
+      : [];
+    return token.length > 0 && chats.length > 0;
+  }, [watchedBotToken, watchedChatIds]);
 
   const loadConfig = useCallback(async () => {
     setFetching(true);
@@ -206,14 +225,20 @@ export default function NotifyConfigPageView() {
   const handleTest = async () => {
     try {
       const values = form.getFieldsValue(true) as NotifyConfigValues;
-      const chatIds = (values.chatIds || []).map(String).filter(Boolean);
+      const botToken = String(values.botToken ?? "").trim();
+      const chatIds = (values.chatIds || []).map(String).map((s) => s.trim()).filter(Boolean);
+      if (!botToken) {
+        message.error("请填写 Bot Token");
+        return;
+      }
       if (!chatIds.length) {
         message.error("请至少填写一个 Chat ID");
         return;
       }
       setTesting(true);
+      // 直接提交当前表单草稿，后端不落库；脱敏 Token 会沿用已保存值
       const resp = await ApiPost("/manage/config/notify/test", {
-        botToken: values.botToken ?? "",
+        botToken,
         chatIds,
       });
       const data = resp.data as
@@ -252,6 +277,7 @@ export default function NotifyConfigPageView() {
       collectProgressStale: status,
       cronTaskFailed: status,
       cronTaskDone: status,
+      sourceConfigChanged: status,
     };
     form.setFieldsValue({ events: nextEvents });
   };
@@ -260,14 +286,11 @@ export default function NotifyConfigPageView() {
     <div className={styles.page}>
       <ManagePageHeader
         title="通知设置"
-        description="配置 Telegram Bot 消息推送。可先发起联通测试，确认收到消息后再保存生效。"
+        description="配置 Telegram Bot 消息推送。在「通信连接配置」填好 Token 与 Chat ID 后可直接发送测试，无需先保存。"
         actions={
           <Space wrap>
             <Button icon={<ReloadOutlined />} loading={fetching} onClick={() => void loadConfig()}>
               刷新
-            </Button>
-            <Button icon={<SendOutlined />} loading={testing} onClick={() => void handleTest()}>
-              发送测试
             </Button>
             <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
               保存配置
@@ -277,11 +300,18 @@ export default function NotifyConfigPageView() {
       />
 
       <Spin spinning={fetching} description="正在加载通知配置...">
+        <Form
+          form={form}
+          layout="vertical"
+          className={styles.form}
+          initialValues={DEFAULT_CONFIG}
+          disabled={fetching || saving}
+        >
         <Flex vertical gap={20} className={styles.contentStack}>
-          {/* Status Summary Header Card */}
+          {/* Status Summary Header Card + 启用开关 */}
           <Card size="small" className={styles.overviewCard}>
             <Flex align="center" justify="space-between" wrap="wrap" gap={16}>
-              <Flex align="center" gap={12} wrap="wrap">
+              <Flex align="center" gap={12} wrap="wrap" style={{ flex: 1, minWidth: 220 }}>
                 <div className={styles.botIconWrapper}>
                   <RobotOutlined className={styles.botIcon} />
                 </div>
@@ -301,12 +331,12 @@ export default function NotifyConfigPageView() {
                     )}
                   </Flex>
                   <Typography.Text type="secondary" className={styles.overviewSub}>
-                    实时捕获采集、抓取告警与后台定时任务事件并推送至 Telegram
+                    实时捕获采集、抓取告警与后台定时任务事件并推送至 Telegram；关闭开关后停止业务推送，联通测试不受影响。
                   </Typography.Text>
                 </Flex>
               </Flex>
 
-              <Flex align="center" gap={8} wrap="wrap" className={styles.badgeGroup}>
+              <Flex align="center" gap={12} wrap="wrap" className={styles.badgeGroup}>
                 <Tooltip title="Token 是否填写或存在已有凭证">
                   <Tag color={watchedBotToken ? "processing" : "warning"}>
                     {watchedBotToken ? "Bot Token 已设置" : "未设置 Token"}
@@ -322,17 +352,19 @@ export default function NotifyConfigPageView() {
                     {activeEventsCount} / {EVENT_OPTIONS.length} 个事件开启
                   </Tag>
                 </Tooltip>
+
+                <div className={styles.enableSwitch}>
+                  <Typography.Text type="secondary" className={styles.enableLabel}>
+                    启用通知
+                  </Typography.Text>
+                  <Form.Item name="enabled" valuePropName="checked" noStyle>
+                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+                  </Form.Item>
+                </div>
               </Flex>
             </Flex>
           </Card>
 
-          <Form
-            form={form}
-            layout="vertical"
-            className={styles.form}
-            initialValues={DEFAULT_CONFIG}
-            disabled={fetching || saving}
-          >
           <Row gutter={[16, 16]} align="stretch">
             {/* Left Grid: Connection & Rules */}
             <Col xs={24} lg={11} xl={10}>
@@ -348,15 +380,6 @@ export default function NotifyConfigPageView() {
                   }
                   className={styles.card}
                 >
-                  <Form.Item
-                    label="启用通知"
-                    name="enabled"
-                    valuePropName="checked"
-                    extra="关闭后停止所有 Telegram 消息推送，但不影响配置保存与测试发送。"
-                  >
-                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                  </Form.Item>
-
                   <Form.Item
                     label="Bot Token"
                     name="botToken"
@@ -391,6 +414,32 @@ export default function NotifyConfigPageView() {
                       allowClear
                     />
                   </Form.Item>
+
+                  <div className={styles.testRow}>
+                    <Typography.Text type="secondary" className={styles.testHint}>
+                      使用上方当前填写内容联通测试，无需先点「保存配置」。
+                    </Typography.Text>
+                    {/* 跳出 Form disabled，仅按 canTest 控制可点 */}
+                    <ConfigProvider componentDisabled={false}>
+                      <Tooltip
+                        title={
+                          canTest
+                            ? "向当前 Chat ID 发送一条测试消息"
+                            : "请先填写 Bot Token 与至少一个 Chat ID"
+                        }
+                      >
+                        <Button
+                          type="primary"
+                          icon={<SendOutlined />}
+                          loading={testing}
+                          disabled={!canTest || fetching}
+                          onClick={() => void handleTest()}
+                        >
+                          发送测试
+                        </Button>
+                      </Tooltip>
+                    </ConfigProvider>
+                  </div>
                 </Card>
 
                 {/* Content & Limitation Card */}
@@ -405,13 +454,13 @@ export default function NotifyConfigPageView() {
                   className={styles.card}
                 >
                   <Form.Item
-                    label="摘要附带影片明细"
+                    label="摘要展示更新列表"
                     name="includeFilmDetails"
                     valuePropName="checked"
-                    tooltip="开启后批次采集摘要将附带新增/更新的影片名称；单片更新始终不带明细"
-                    extra="关闭后推送仅包含成功与失败统计计数，缩减消息体积"
+                    tooltip="开启后批次采集摘要将附带更新列表（含新增/更新的影片）；单片更新始终不带列表"
+                    extra="禁用后推送仅包含成功与失败统计计数，缩减消息体积"
                   >
-                    <Switch checkedChildren="包含明细" unCheckedChildren="仅发计数" />
+                    <Switch checkedChildren="启用" unCheckedChildren="禁用" />
                   </Form.Item>
 
                   <Row gutter={16}>
@@ -419,9 +468,9 @@ export default function NotifyConfigPageView() {
                       <Form.Item
                         label="消息内最多影片数"
                         name="maxFilmsInMessage"
-                        tooltip="单条通知消息中最多展示的影片明细条数（范围 1–80），超出时自动显示「另有 N 部」"
+                        tooltip="更新列表每页最多影片数（范围 1–20，与 Telegram 按钮布局一致）"
                       >
-                        <InputNumber min={1} max={80} style={{ width: "100%" }} />
+                        <InputNumber min={1} max={20} style={{ width: "100%" }} />
                       </Form.Item>
                     </Col>
                     <Col xs={24} sm={12}>
@@ -501,8 +550,8 @@ export default function NotifyConfigPageView() {
               </Card>
             </Col>
           </Row>
-        </Form>
         </Flex>
+        </Form>
       </Spin>
     </div>
   );

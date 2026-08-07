@@ -36,7 +36,7 @@ func takeSourceError(sourceID string) string {
 
 // emitBatchSummaryForSources 根据源列表与进度组装并发送批次摘要。
 // 收尾失败只写入摘要的 FinalizeError，不再单独 PublishFinalizeFailed，避免双发。
-func emitBatchSummaryForSources(trigger string, sources []model.FilmSource, startedAt time.Time, finalizeErr error) {
+func emitBatchSummaryForSources(batch *notify.ChangeBatch, trigger string, sources []model.FilmSource, startedAt time.Time, finalizeErr error) {
 	if len(sources) == 0 {
 		return
 	}
@@ -74,7 +74,7 @@ func emitBatchSummaryForSources(trigger string, sources []model.FilmSource, star
 	if finalizeErr != nil {
 		finMsg = finalizeErr.Error()
 	}
-	payload := notify.BuildBatchPayload(trigger, results, startedAt, time.Now(), finMsg)
+	payload := notify.BuildBatchPayload(batch, trigger, results, startedAt, time.Now(), finMsg)
 	// 摘要开启时收尾错误只写在摘要里；摘要关闭时才单独发 finalize 告警，避免双发。
 	if finalizeErr != nil && !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
 		notify.PublishFinalizeFailed(len(sources), finMsg)
@@ -88,7 +88,7 @@ func emitBatchSummaryForSources(trigger string, sources []model.FilmSource, star
 }
 
 // emitBatchSummaryDirect 使用调用方给出的源结果发摘要（不依赖 collectProgress）。
-func emitBatchSummaryDirect(trigger string, results []model.SourceNotifyResult, startedAt time.Time, finalizeErr error) {
+func emitBatchSummaryDirect(batch *notify.ChangeBatch, trigger string, results []model.SourceNotifyResult, startedAt time.Time, finalizeErr error) {
 	if len(results) == 0 {
 		return
 	}
@@ -102,7 +102,7 @@ func emitBatchSummaryDirect(trigger string, results []model.SourceNotifyResult, 
 	if finalizeErr != nil {
 		finMsg = finalizeErr.Error()
 	}
-	payload := notify.BuildBatchPayload(trigger, results, startedAt, time.Now(), finMsg)
+	payload := notify.BuildBatchPayload(batch, trigger, results, startedAt, time.Now(), finMsg)
 	if finalizeErr != nil && !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
 		notify.PublishFinalizeFailed(len(results), finMsg)
 	}
@@ -133,10 +133,12 @@ func emitProgressStaleNotify(sourceID, sourceName, oldStatus string, age time.Du
 	notify.PublishProgressStale(sourceID, sourceName, oldStatus, age)
 }
 
-// noteCollectedMIDs 累计本源成功写入的 mid。
-func noteCollectedMIDs(sourceID string, mids []int64) {
+// noteCollectedMIDs 累计本源「应进更新列表」的 mid。
+// 主站：剧集/播放源结构变更或新片（片名标点、备注、链接签名等噪声不计入）。
+// 附属站：播放列表集数/线路结构变更且已匹配主站的全局 mid（仅链接刷新不计入）。
+func noteCollectedMIDs(batch *notify.ChangeBatch, sourceID string, mids []int64) {
 	if len(mids) == 0 {
 		return
 	}
-	notify.Acc.Add(sourceID, mids...)
+	notify.Acc.Add(batch, sourceID, mids...)
 }
