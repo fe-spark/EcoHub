@@ -171,7 +171,7 @@ export default function SiteConfigPageView() {
         setResetFilmsPassword("");
         return;
       }
-      message.error(resp.msg || "重置全站影视数据失败");
+      message.error(resp.msg || "重置站点数据失败");
     } finally {
       setResettingFilms(false);
     }
@@ -234,13 +234,14 @@ export default function SiteConfigPageView() {
       <Card size="small" title="危险操作" className={styles.dangerCard}>
         <Flex justify="space-between" align="center" gap={16} wrap="wrap">
           <Space direction="vertical" size={4} className={styles.dangerText}>
-            <Typography.Text type="danger" strong>恢复全站默认值</Typography.Text>
+            <Typography.Text type="danger" strong>重置站点数据</Typography.Text>
             <Typography.Text type="secondary">
               清空影视与采集派生数据，并恢复默认配置、默认账号、默认采集源、默认定时任务、默认轮播和主站原始分类。
+              破坏性版本升级后须先执行本操作，再重新配置并全量采集。
             </Typography.Text>
           </Space>
           <Button danger icon={<DeleteOutlined />} onClick={() => setResetFilmsOpen(true)}>
-            恢复默认值
+            重置站点数据
           </Button>
         </Flex>
       </Card>
@@ -279,14 +280,14 @@ export default function SiteConfigPageView() {
       </Modal>
 
       <Modal
-        title="恢复全站默认值"
+        title="重置站点数据"
         open={resetFilmsOpen}
         onCancel={() => {
           setResetFilmsOpen(false);
           setResetFilmsPassword("");
         }}
         onOk={() => void resetFilms()}
-        okText="确认恢复默认值"
+        okText="确认重置站点数据"
         confirmLoading={resettingFilms}
         okButtonProps={{ danger: true }}
         destroyOnHidden
@@ -296,7 +297,7 @@ export default function SiteConfigPageView() {
             showIcon
             type="error"
             message="该操作不可逆"
-            description="会停止采集任务，清空影视库存、快照、播放源、分类映射、失败记录等采集派生数据，并恢复系统默认网站配置、内置账号、默认采集源、默认定时任务、默认轮播和主站原始分类。"
+            description="会停止采集任务，清空影视库存、快照、播放源、分类映射、失败记录等采集派生数据，并恢复系统默认网站配置、内置账号、默认采集源、默认定时任务、默认轮播和主站原始分类。完成后需重新配置站点并全量采集。"
           />
           <Input.Password
             placeholder="请输入管理密码"

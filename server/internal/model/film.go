@@ -131,7 +131,7 @@ func (MovieMatchKey) TableName() string {
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
 	Mid        int64  `json:"mid" gorm:"uniqueIndex:idx_mid"`            // 影片ID (全局唯一)
-	ContentKey string `json:"contentKey" gorm:"uniqueIndex:idx_content"` // 主站内容指纹：优先豆瓣ID，其次规范化片名
+	ContentKey string `json:"contentKey" gorm:"uniqueIndex:idx_content"` // 主站内容指纹：优先 vod_{源站vod_id}，无 ID 时 name_{hash}
 	SourceId   string `json:"sourceId" gorm:"index"`                     // 来源站点ID
 	DbId       int64  `json:"dbId" gorm:"index"`                         // 豆瓣ID (用于精准去重)
 }

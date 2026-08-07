@@ -38,7 +38,7 @@ jobs:
             version="v$(node -p "require('./web/package.json').version")"
           fi
 
-          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          if [[ ! "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "Invalid version: $version" >&2
             exit 1
           fi
@@ -48,22 +48,36 @@ jobs:
             exit 1
           fi
 
+          prerelease=false
+          if [[ "$version" =~ - ]]; then
+            prerelease=true
+          fi
+
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
         shell: bash
         run: |
+          extra_flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            extra_flags+=(--prerelease)
+          else
+            extra_flags+=(--latest)
+          fi
+
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
               --title "$VERSION" \
               --notes-file RELEASE.md \
-              --latest
+              "${extra_flags[@]}"
           else
             gh release create "$VERSION" \
               --title "$VERSION" \
               --notes-file RELEASE.md \
-              --latest
+              "${extra_flags[@]}"
           fi
