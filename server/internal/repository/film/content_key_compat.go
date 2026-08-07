@@ -3,16 +3,31 @@ package film
 import (
 	"errors"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
+	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 
 	"gorm.io/gorm"
 )
 
-// ErrLegacyContentKeySchema 旧版 name_* 库存，需先重置再采集。
-var ErrLegacyContentKeySchema = errors.New("检测到旧版库存，请先「重置站点数据」再全量采集")
+// ErrLegacyContentKeySchema 迁移后仍残留 name_* 时的兜底错误。
+var ErrLegacyContentKeySchema = errors.New("旧库存未能完全迁移，请重置站点数据或查看服务日志")
+
+const (
+	// ContentKeyMigrationNoticeKey 后台公告：已自动迁移，建议全量采集。
+	ContentKeyMigrationNoticeKey = config.RedisKeyPrefix + ":Notice:ContentKeyMigrated"
+	// ContentKeyMigrationFailedKey 后台公告：启动/写库迁移失败。
+	ContentKeyMigrationFailedKey = config.RedisKeyPrefix + ":Notice:ContentKeyMigrateFailed"
+	// contentKeyMigrationNoticeTTL 迁移成功提示保留时长（避免永久黄条）。
+	contentKeyMigrationNoticeTTL = 14 * 24 * time.Hour
+	// contentKeyMigrateBatch 单次加载待迁移行上限（防超大库一次占内存）。
+	contentKeyMigrateBatch = 2000
+)
 
 var contentKeySchemaCache struct {
 	mu     sync.Mutex
@@ -20,7 +35,11 @@ var contentKeySchemaCache struct {
 	legacy bool
 }
 
-// InvalidateContentKeySchemaCache 在清库/重置后调用，避免沿用升级前的判定结果。
+// migrateContentKeyMu 串行化迁移：启动、后台入口、写库可能并发调用，
+// 避免多个事务同时改写同一批 content_key 造成锁竞争。
+var migrateContentKeyMu sync.Mutex
+
+// InvalidateContentKeySchemaCache 清库/迁移后调用。
 func InvalidateContentKeySchemaCache() {
 	contentKeySchemaCache.mu.Lock()
 	defer contentKeySchemaCache.mu.Unlock()
@@ -28,8 +47,14 @@ func InvalidateContentKeySchemaCache() {
 	contentKeySchemaCache.legacy = false
 }
 
-// HasLegacyContentKeyInventory 是否存在旧版主站身份键：
-// content_key 为 name_* 且 mid>0。v1.1.5 起有 id 的主站行应使用 vod_*。
+func setContentKeySchemaCache(legacy bool) {
+	contentKeySchemaCache.mu.Lock()
+	defer contentKeySchemaCache.mu.Unlock()
+	contentKeySchemaCache.known = true
+	contentKeySchemaCache.legacy = legacy
+}
+
+// HasLegacyContentKeyInventory 是否仍存在 name_* 且 mid>0（仅统计未软删行）。
 func HasLegacyContentKeyInventory(gdb *gorm.DB) (bool, error) {
 	if gdb == nil {
 		gdb = db.Mdb
@@ -48,33 +73,313 @@ func HasLegacyContentKeyInventory(gdb *gorm.DB) (bool, error) {
 	return n > 0, nil
 }
 
-// EnsureContentKeySchemaReady 主站写入/主站采集前调用。
-// 存在旧版 name_* 库存时返回 ErrLegacyContentKeySchema，避免 mid 唯一键冲突。
-func EnsureContentKeySchemaReady(gdb *gorm.DB) error {
-	contentKeySchemaCache.mu.Lock()
-	if contentKeySchemaCache.known {
-		legacy := contentKeySchemaCache.legacy
-		contentKeySchemaCache.mu.Unlock()
-		if legacy {
-			return ErrLegacyContentKeySchema
+// HasContentKeyMigrationNotice 是否展示「已迁移、建议全量采集」公告。
+func HasContentKeyMigrationNotice() bool {
+	return redisKeyExists(ContentKeyMigrationNoticeKey)
+}
+
+// HasContentKeyMigrationFailed 是否展示迁移失败公告。
+func HasContentKeyMigrationFailed() bool {
+	return redisKeyExists(ContentKeyMigrationFailedKey)
+}
+
+func redisKeyExists(key string) bool {
+	if db.Rdb == nil {
+		return false
+	}
+	n, err := db.Rdb.Exists(db.Cxt, key).Result()
+	return err == nil && n > 0
+}
+
+// ClearContentKeyMigrationNotice 重置站点 / 主站全量成功后清除「已迁移」公告。
+func ClearContentKeyMigrationNotice() {
+	redisDel(ContentKeyMigrationNoticeKey)
+}
+
+// ClearContentKeyMigrationFailed 迁移成功或清库后清除失败标记。
+func ClearContentKeyMigrationFailed() {
+	redisDel(ContentKeyMigrationFailedKey)
+}
+
+func redisDel(key string) {
+	if db.Rdb == nil {
+		return
+	}
+	_ = db.Rdb.Del(db.Cxt, key).Err()
+}
+
+func markContentKeyMigrationNotice() {
+	if db.Rdb == nil {
+		return
+	}
+	_ = db.Rdb.Set(db.Cxt, ContentKeyMigrationNoticeKey, time.Now().UTC().Format(time.RFC3339), contentKeyMigrationNoticeTTL).Err()
+}
+
+func markContentKeyMigrationFailed(reason string) {
+	if db.Rdb == nil {
+		return
+	}
+	msg := strings.TrimSpace(reason)
+	if msg == "" {
+		msg = "unknown"
+	}
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	_ = db.Rdb.Set(db.Cxt, ContentKeyMigrationFailedKey, msg, contentKeyMigrationNoticeTTL).Err()
+}
+
+// MigrateLegacyContentKeys 将 name_* + mid>0 改写为 vod_{mid}（幂等，可移植 GORM 实现）。
+// 1) 释放软删行占用的 vod_{mid} 唯一键；2) 迁移活跃 name_*；3) 同步快照 content_key。
+// 返回成功改写的 film_index 活跃行数。
+func MigrateLegacyContentKeys(gdb *gorm.DB) (int64, error) {
+	// 全局串行：并发调用方（启动/后台/写库）排队执行，后到者幂等快速返回。
+	migrateContentKeyMu.Lock()
+	defer migrateContentKeyMu.Unlock()
+
+	if gdb == nil {
+		gdb = db.Mdb
+	}
+	if gdb == nil {
+		return 0, fmt.Errorf("database not ready")
+	}
+
+	legacy, err := HasLegacyContentKeyInventory(gdb)
+	if err != nil {
+		return 0, err
+	}
+	if !legacy {
+		InvalidateContentKeySchemaCache()
+		ClearContentKeyMigrationFailed()
+		setContentKeySchemaCache(false)
+		return 0, nil
+	}
+
+	var indexUpdated int64
+	err = gdb.Transaction(func(tx *gorm.DB) error {
+		n, err := migrateLegacyFilmIndexesTx(tx)
+		if err != nil {
+			return err
+		}
+		indexUpdated = n
+		if err := migrateSnapshotContentKeysTx(tx); err != nil {
+			return err
 		}
 		return nil
+	})
+	if err != nil {
+		markContentKeyMigrationFailed(err.Error())
+		InvalidateContentKeySchemaCache()
+		return 0, err
 	}
-	contentKeySchemaCache.mu.Unlock()
+
+	InvalidateContentKeySchemaCache()
+	still, stillErr := HasLegacyContentKeyInventory(gdb)
+	if stillErr != nil {
+		markContentKeyMigrationFailed(stillErr.Error())
+		return indexUpdated, stillErr
+	}
+	setContentKeySchemaCache(still)
+
+	if indexUpdated > 0 {
+		markContentKeyMigrationNotice()
+		ClearContentKeyMigrationFailed()
+		log.Printf("[ContentKey] migrated film_index rows=%d name_* -> vod_{mid}", indexUpdated)
+	}
+	if still {
+		log.Printf("[ContentKey] residual name_* rows remain after migrate (target key occupied)")
+		if indexUpdated == 0 {
+			markContentKeyMigrationFailed("residual name_* after migrate")
+		}
+	} else {
+		ClearContentKeyMigrationFailed()
+	}
+	return indexUpdated, nil
+}
+
+// migrateLegacyFilmIndexesTx 逐行迁移，兼容 MySQL/SQLite，并正确处理软删唯一键占用。
+func migrateLegacyFilmIndexesTx(tx *gorm.DB) (int64, error) {
+	var updated int64
+	// 目标 key 被活跃行占用而无法迁移的行：后续批次不再重复扫描。
+	var blockedIDs []uint
+	for {
+		q := tx.Model(&model.FilmIndex{}).
+			Where("content_key LIKE ? AND mid > ?", contentKeyNamePrefix+"%", 0)
+		if len(blockedIDs) > 0 {
+			q = q.Where("id NOT IN ?", blockedIDs)
+		}
+		var lives []model.FilmIndex
+		if err := q.Order("id ASC").
+			Limit(contentKeyMigrateBatch).
+			Find(&lives).Error; err != nil {
+			return updated, err
+		}
+		if len(lives) == 0 {
+			return updated, nil
+		}
+
+		batchMoved := 0
+		for i := range lives {
+			live := &lives[i]
+			newKey := fmt.Sprintf("%s%d", contentKeyVodPrefix, live.Mid)
+
+			// 软删占用目标 key：改名为 del_{id}，释放唯一索引（含软删行）。
+			var tombs []model.FilmIndex
+			if err := tx.Unscoped().Model(&model.FilmIndex{}).
+				Where("content_key = ? AND id <> ? AND deleted_at IS NOT NULL", newKey, live.ID).
+				Find(&tombs).Error; err != nil {
+				return updated, err
+			}
+			for _, tomb := range tombs {
+				if err := tx.Unscoped().Model(&model.FilmIndex{}).
+					Where("id = ?", tomb.ID).
+					Update("content_key", fmt.Sprintf("del_%d", tomb.ID)).Error; err != nil {
+					return updated, err
+				}
+			}
+
+			// 仍有任意行（含活跃）占用目标 key → 跳过本行并记录，避免反复扫描
+			var occupy int64
+			if err := tx.Unscoped().Model(&model.FilmIndex{}).
+				Where("content_key = ? AND id <> ?", newKey, live.ID).
+				Limit(1).
+				Count(&occupy).Error; err != nil {
+				return updated, err
+			}
+			if occupy > 0 {
+				blockedIDs = append(blockedIDs, live.ID)
+				continue
+			}
+
+			if err := tx.Model(&model.FilmIndex{}).
+				Where("id = ? AND content_key LIKE ?", live.ID, contentKeyNamePrefix+"%").
+				Update("content_key", newKey).Error; err != nil {
+				return updated, err
+			}
+			updated++
+			batchMoved++
+		}
+
+		// 本批无人可迁（全是目标 key 被活跃行占用）→ 结束，避免死循环
+		if batchMoved == 0 {
+			return updated, nil
+		}
+	}
+}
+
+func migrateSnapshotContentKeysTx(tx *gorm.DB) error {
+	if !tx.Migrator().HasTable(&model.FilmListSnapshot{}) {
+		return nil
+	}
+	// 可移植：避免 MySQL CONCAT / SQLite 方言差异；失败则事务回滚。
+	var snaps []model.FilmListSnapshot
+	if err := tx.Model(&model.FilmListSnapshot{}).
+		Where("content_key LIKE ? AND mid > ?", contentKeyNamePrefix+"%", 0).
+		Find(&snaps).Error; err != nil {
+		return err
+	}
+	for i := range snaps {
+		s := &snaps[i]
+		newKey := fmt.Sprintf("%s%d", contentKeyVodPrefix, s.Mid)
+		if err := tx.Model(&model.FilmListSnapshot{}).
+			Where("id = ?", s.ID).
+			Update("content_key", newKey).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// EnsureContentKeySchemaReady 写库前：尽量迁移；仍有 name_* 则拒绝写入。
+func EnsureContentKeySchemaReady(gdb *gorm.DB) error {
+	contentKeySchemaCache.mu.Lock()
+	if contentKeySchemaCache.known && contentKeySchemaCache.legacy {
+		contentKeySchemaCache.mu.Unlock()
+		return ErrLegacyContentKeySchema
+	}
+	if contentKeySchemaCache.known && !contentKeySchemaCache.legacy {
+		contentKeySchemaCache.mu.Unlock()
+		legacy, err := HasLegacyContentKeyInventory(gdb)
+		if err != nil {
+			return fmt.Errorf("库存检查失败: %w", err)
+		}
+		if !legacy {
+			return nil
+		}
+		InvalidateContentKeySchemaCache()
+	} else {
+		contentKeySchemaCache.mu.Unlock()
+	}
+
+	if _, err := MigrateLegacyContentKeys(gdb); err != nil {
+		return fmt.Errorf("库存迁移失败: %w", err)
+	}
 
 	legacy, err := HasLegacyContentKeyInventory(gdb)
 	if err != nil {
 		return fmt.Errorf("库存检查失败: %w", err)
 	}
-
-	contentKeySchemaCache.mu.Lock()
-	contentKeySchemaCache.known = true
-	contentKeySchemaCache.legacy = legacy
-	contentKeySchemaCache.mu.Unlock()
-
+	setContentKeySchemaCache(legacy)
 	if legacy {
 		return ErrLegacyContentKeySchema
 	}
 	return nil
 }
 
+// AdminContentKeyNotice 供后台 ManageIndex 使用。
+type AdminContentKeyNotice struct {
+	Level      string
+	Code       string
+	Message    string
+	ActionPath string
+	ActionText string
+}
+
+// ListAdminContentKeyNotices 进入后台时的公告列表（先尝试迁移再展示）。
+func ListAdminContentKeyNotices() []AdminContentKeyNotice {
+	out := make([]AdminContentKeyNotice, 0, 2)
+
+	if _, err := MigrateLegacyContentKeys(nil); err != nil {
+		log.Printf("[ContentKey] admin migrate: %v", err)
+		out = append(out, AdminContentKeyNotice{
+			Level:      "error",
+			Code:       "content_key_migrate_failed",
+			Message:    "旧库存自动迁移失败，请查看服务日志或重置站点数据",
+			ActionPath: "/manage/system/website",
+			ActionText: "去重置",
+		})
+		return out
+	}
+
+	if HasContentKeyMigrationFailed() {
+		out = append(out, AdminContentKeyNotice{
+			Level:      "error",
+			Code:       "content_key_migrate_failed",
+			Message:    "旧库存自动迁移失败，请查看服务日志或重置站点数据",
+			ActionPath: "/manage/system/website",
+			ActionText: "去重置",
+		})
+	}
+
+	if legacy, err := HasLegacyContentKeyInventory(nil); err == nil && legacy {
+		out = append(out, AdminContentKeyNotice{
+			Level:      "error",
+			Code:       "legacy_content_key",
+			Message:    "部分旧库存未能自动迁移，请重置站点数据或查看日志",
+			ActionPath: "/manage/system/website",
+			ActionText: "去重置",
+		})
+		return out
+	}
+
+	if HasContentKeyMigrationNotice() {
+		out = append(out, AdminContentKeyNotice{
+			Level:      "warning",
+			Code:       "content_key_migrated",
+			Message:    "主站身份键已自动迁移，建议主站全量采集以补齐历史误合并影片",
+			ActionPath: "/manage/collect",
+			ActionText: "去采集",
+		})
+	}
+	return out
+}

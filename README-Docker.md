@@ -81,8 +81,8 @@ docker compose up -d
 
 升级到新版本时，执行上面的命令重新拉取镜像并重建容器即可。
 
-> **v1.1.5 / v1.1.5-beta.1 起破坏性变更**：主站 `ContentKey` 改为 `vod_{源站vod_id}`，**不做启动自动迁移**。  
-> 升级后请在后台 **网站配置 → 重置站点数据**，再全量采集。禁止新旧 server 混连同一库采集。详见 [RELEASE.md](./RELEASE.md)。
+> **v1.1.5 起**：主站 `ContentKey` 改为 `vod_{源站vod_id}`；启动会把旧 `name_*` **自动迁移**为 `vod_{mid}`。  
+> 后台会提示建议主站全量采集（补齐历史误合并）。禁止新旧 server 混连同一库。详见 [RELEASE.md](./RELEASE.md)。
 
 ## 源码版部署
 
