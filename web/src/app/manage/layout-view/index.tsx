@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
+import Link from "next/link";
 import {
   Layout,
   Menu,
@@ -12,6 +13,7 @@ import {
   Tag,
   Drawer,
   Grid,
+  Alert,
 } from "antd";
 import {
   HomeOutlined,
@@ -36,6 +38,14 @@ import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import styles from "./index.module.less";
+
+type AdminNotice = {
+  level?: string;
+  code?: string;
+  message: string;
+  actionPath?: string;
+  actionText?: string;
+};
 
 const { Sider, Header, Content } = Layout;
 const { useBreakpoint } = Grid;
@@ -175,6 +185,7 @@ export default function ManageLayoutView({
   const { config: siteInfo } = useSiteConfig();
   const { mode, setMode } = useThemeMode();
   const [userInfo, setUserInfo] = useState<any>(null);
+  const [notices, setNotices] = useState<AdminNotice[]>([]);
   const screens = useBreakpoint();
   const isMobile = !screens.lg;
 
@@ -190,6 +201,15 @@ export default function ManageLayoutView({
       }
     });
   }, []);
+
+  // 进入后台及路由切换时刷新公告（重置站点数据后应消失）
+  useEffect(() => {
+    ApiGet("/manage/index").then((resp) => {
+      if (resp.code === 0 && Array.isArray(resp.data?.notices)) {
+        setNotices(resp.data.notices as AdminNotice[]);
+      }
+    });
+  }, [pathname]);
 
   const onMenuClick: MenuProps["onClick"] = ({ key }) => {
     if (isMobile) {
@@ -355,6 +375,34 @@ export default function ManageLayoutView({
           className={`${styles.content} ${isLogPage ? styles.contentFixed : ""}`}
           style={{ flex: 1, overflow: isLogPage ? "hidden" : "auto" }}
         >
+          {notices.length > 0 && (
+            <div className={styles.noticeStack}>
+              {notices.map((n) => (
+                <Alert
+                  key={n.code || n.message}
+                  type={
+                    n.level === "warning"
+                      ? "warning"
+                      : n.level === "info"
+                        ? "info"
+                        : "error"
+                  }
+                  showIcon
+                  message={n.message}
+                  action={
+                    n.actionPath ? (
+                      <Link href={n.actionPath}>
+                        <Button size="small" type="primary" danger={n.level !== "info" && n.level !== "warning"}>
+                          {n.actionText || "查看"}
+                        </Button>
+                      </Link>
+                    ) : undefined
+                  }
+                  className={styles.noticeAlert}
+                />
+              ))}
+            </div>
+          )}
           {children}
         </Content>
       </Layout>

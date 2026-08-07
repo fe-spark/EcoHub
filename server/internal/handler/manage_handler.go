@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	filmrepo "server/internal/repository/film"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -18,8 +19,27 @@ type ManageHandler struct{}
 
 var ManageHd = new(ManageHandler)
 
+// AdminNotice 后台顶部公告（进入后台即可见）。
+type AdminNotice struct {
+	Level      string `json:"level"` // error | warning | info
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	ActionPath string `json:"actionPath,omitempty"`
+	ActionText string `json:"actionText,omitempty"`
+}
+
 func (h *ManageHandler) ManageIndex(c *gin.Context) {
-	dto.SuccessOnlyMsg("后台管理中心", c)
+	notices := make([]AdminNotice, 0, 2)
+	if legacy, err := filmrepo.HasLegacyContentKeyInventory(nil); err == nil && legacy {
+		notices = append(notices, AdminNotice{
+			Level:      "error",
+			Code:       "legacy_content_key",
+			Message:    "检测到旧版库存，请先「重置站点数据」再全量采集",
+			ActionPath: "/manage/system/website",
+			ActionText: "去重置",
+		})
+	}
+	dto.Success(gin.H{"notices": notices}, "后台管理中心", c)
 }
 
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------
