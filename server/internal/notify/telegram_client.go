@@ -6,27 +6,140 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"os"
+	"regexp"
 	"strings"
 	"time"
+
+	xproxy "golang.org/x/net/proxy"
 )
 
 const telegramAPIBase = "https://api.telegram.org"
 
+// botTokenURLPattern 匹配错误信息中的 /bot<token>/，避免把 Token 回传前端。
+var botTokenURLPattern = regexp.MustCompile(`(?i)/bot[0-9]{5,}:[A-Za-z0-9_-]+/`)
+
 type telegramClient struct {
 	httpClient *http.Client
+	proxyURL   string // 脱敏展示用，仅 host:port
 }
 
 func newTelegramClient() *telegramClient {
-	return &telegramClient{
-		httpClient: &http.Client{Timeout: 35 * time.Second},
+	transport, proxyLabel, err := buildTelegramTransport()
+	if err != nil {
+		// 通知可选：代理配置错误不拖垮整进程，回退直连并打日志
+		log.Printf("[Notify] Telegram 代理配置无效，回退直连: %v", err)
+		transport = defaultTelegramTransport()
+		proxyLabel = ""
 	}
+	if proxyLabel != "" {
+		log.Printf("[Notify] Telegram API 使用代理: %s", proxyLabel)
+	}
+	return &telegramClient{
+		httpClient: &http.Client{
+			Timeout:   45 * time.Second,
+			Transport: transport,
+		},
+		proxyURL: proxyLabel,
+	}
+}
+
+func defaultTelegramTransport() *http.Transport {
+	return &http.Transport{
+		DialContext: (&net.Dialer{
+			Timeout:   12 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   12 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
+}
+
+// buildTelegramTransport 优先 TELEGRAM_PROXY，其次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY。
+// 支持 http / https / socks5 代理。
+func buildTelegramTransport() (*http.Transport, string, error) {
+	proxyRaw := firstNonEmpty(
+		os.Getenv("TELEGRAM_PROXY"),
+		os.Getenv("HTTPS_PROXY"),
+		os.Getenv("https_proxy"),
+		os.Getenv("HTTP_PROXY"),
+		os.Getenv("http_proxy"),
+		os.Getenv("ALL_PROXY"),
+		os.Getenv("all_proxy"),
+	)
+	base := defaultTelegramTransport()
+	if proxyRaw == "" {
+		return base, "", nil
+	}
+	u, err := url.Parse(proxyRaw)
+	if err != nil {
+		return nil, "", fmt.Errorf("解析代理地址失败: %w", err)
+	}
+	scheme := strings.ToLower(u.Scheme)
+	label := proxyDisplay(u)
+
+	switch scheme {
+	case "http", "https":
+		base.Proxy = http.ProxyURL(u)
+		return base, label, nil
+	case "socks5", "socks5h":
+		// socks5h = 在代理侧解析 DNS
+		var auth *xproxy.Auth
+		if u.User != nil {
+			pass, _ := u.User.Password()
+			auth = &xproxy.Auth{User: u.User.Username(), Password: pass}
+		}
+		dialer, err := xproxy.SOCKS5("tcp", u.Host, auth, &net.Dialer{
+			Timeout:   12 * time.Second,
+			KeepAlive: 30 * time.Second,
+		})
+		if err != nil {
+			return nil, "", fmt.Errorf("创建 SOCKS5 代理失败: %w", err)
+		}
+		if cd, ok := dialer.(xproxy.ContextDialer); ok {
+			base.DialContext = cd.DialContext
+		} else {
+			base.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			}
+		}
+		return base, label, nil
+	default:
+		return nil, "", fmt.Errorf("不支持的代理协议 %q（请用 http:// 或 socks5://）", scheme)
+	}
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
+}
+
+func proxyDisplay(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	host := u.Host
+	if host == "" {
+		host = u.String()
+	}
+	return u.Scheme + "://" + host
 }
 
 // Inline keyboard types (Telegram Bot API).
 type InlineKeyboardButton struct {
 	Text         string `json:"text"`
 	CallbackData string `json:"callback_data,omitempty"`
+	URL          string `json:"url,omitempty"` // 打开链接（站内播放页）
 }
 
 type InlineKeyboardMarkup struct {
@@ -52,25 +165,25 @@ func (c *telegramClient) apiCall(ctx context.Context, token, method string, payl
 		}
 		bodyReader = bytes.NewReader(raw)
 	}
-	url := fmt.Sprintf("%s/bot%s/%s", telegramAPIBase, token, method)
+	// URL 含 token，仅用于请求；错误信息必须脱敏
+	apiURL := fmt.Sprintf("%s/bot%s/%s", telegramAPIBase, token, method)
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
 		if attempt > 0 {
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, sanitizeTelegramErr(ctx.Err(), token, c.proxyURL)
 			case <-time.After(400 * time.Millisecond):
 			}
 		}
 		var rdr io.Reader = bodyReader
 		if payload != nil {
-			// re-marshal for retry (body may be consumed)
 			raw, _ := json.Marshal(payload)
 			rdr = bytes.NewReader(raw)
 		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, rdr)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, rdr)
 		if err != nil {
-			return nil, err
+			return nil, sanitizeTelegramErr(err, token, c.proxyURL)
 		}
 		if payload != nil {
 			req.Header.Set("Content-Type", "application/json")
@@ -106,9 +219,47 @@ func (c *telegramClient) apiCall(ctx context.Context, token, method string, payl
 		return apiResp.Result, nil
 	}
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, sanitizeTelegramErr(lastErr, token, c.proxyURL)
 	}
 	return nil, fmt.Errorf("telegram 请求失败")
+}
+
+// sanitizeTelegramErr 去掉错误中的 Bot Token，并对超时/连不通给出可操作提示。
+func sanitizeTelegramErr(err error, token, proxyLabel string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	if token != "" {
+		msg = strings.ReplaceAll(msg, token, MaskBotToken(token))
+	}
+	msg = botTokenURLPattern.ReplaceAllString(msg, "/bot***/")
+	// 去掉完整 URL 里可能残留的敏感段
+	msg = strings.ReplaceAll(msg, "https://api.telegram.org", "Telegram API")
+
+	lower := strings.ToLower(msg)
+	isTimeout := strings.Contains(lower, "deadline exceeded") ||
+		strings.Contains(lower, "i/o timeout") ||
+		strings.Contains(lower, "tls handshake timeout") ||
+		strings.Contains(lower, "context canceled") ||
+		strings.Contains(lower, "client.timeout")
+	isNet := isTimeout ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "no such host") ||
+		strings.Contains(lower, "network is unreachable") ||
+		strings.Contains(lower, "connection reset")
+
+	if isNet {
+		hint := "无法连接 Telegram API"
+		if isTimeout {
+			hint = "连接 Telegram API 超时"
+		}
+		if proxyLabel == "" {
+			return fmt.Errorf("%s（当前直连）。国内网络通常需代理：在 server 环境变量设置 TELEGRAM_PROXY，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:7891，然后重启服务", hint)
+		}
+		return fmt.Errorf("%s（已走代理 %s）。请检查代理是否可用、是否允许访问 api.telegram.org", hint, proxyLabel)
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 func (c *telegramClient) sendMessage(ctx context.Context, token, chatID, text string) error {
@@ -168,10 +319,25 @@ func (c *telegramClient) deleteWebhook(ctx context.Context, token string) error 
 	return err
 }
 
+type botCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+func (c *telegramClient) setMyCommands(ctx context.Context, token string, commands []botCommand) error {
+	if len(commands) == 0 {
+		return nil
+	}
+	_, err := c.apiCall(ctx, token, "setMyCommands", map[string]any{
+		"commands": commands,
+	})
+	return err
+}
+
 type telegramUpdate struct {
-	UpdateID      int64              `json:"update_id"`
-	CallbackQuery *telegramCallback  `json:"callback_query"`
-	Message       *telegramMessage   `json:"message"`
+	UpdateID      int64             `json:"update_id"`
+	CallbackQuery *telegramCallback `json:"callback_query"`
+	Message       *telegramMessage  `json:"message"`
 }
 
 type telegramCallback struct {
@@ -182,9 +348,10 @@ type telegramCallback struct {
 }
 
 type telegramMessage struct {
-	MessageID int64  `json:"message_id"`
+	MessageID int64 `json:"message_id"`
 	Chat      *struct {
-		ID int64 `json:"id"`
+		ID       int64  `json:"id"`
+		Username string `json:"username"` // 公开群/频道/用户的 @username（不含 @ 前缀）
 	} `json:"chat"`
 	Text string `json:"text"`
 }
@@ -198,7 +365,8 @@ func (c *telegramClient) getUpdates(ctx context.Context, token string, offset in
 	payload := map[string]any{
 		"offset":  offset,
 		"timeout": timeoutSec,
-		"allowed_updates": []string{"callback_query"},
+		// 回调分页 + /search 文本指令
+		"allowed_updates": []string{"callback_query", "message"},
 	}
 	result, err := c.apiCall(ctx, token, "getUpdates", payload)
 	if err != nil {

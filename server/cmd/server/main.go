@@ -75,7 +75,7 @@ func start() {
 	db.StartMysqlHealthCheck()
 
 	service.InitSvc.DefaultDataInit()
-	// Telegram 内联键盘分页（上一页/下一页）回调轮询
+	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token）
 	notify.EnsureBotPoller()
 
 	r := router.SetupRouter()

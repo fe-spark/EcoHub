@@ -91,10 +91,10 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 	cfg.ChatIDs = chatIDs
 
 	if cfg.MaxFilmsInMessage <= 0 {
-		cfg.MaxFilmsInMessage = 30
+		cfg.MaxFilmsInMessage = model.DefaultMaxFilmsInMessage
 	}
-	if cfg.MaxFilmsInMessage > 80 {
-		return model.NotifyConfig{}, fmt.Errorf("maxFilmsInMessage 范围为 1-80")
+	if cfg.MaxFilmsInMessage > model.MaxFilmsInMessageCap {
+		return model.NotifyConfig{}, fmt.Errorf("maxFilmsInMessage 范围为 1-%d", model.MaxFilmsInMessageCap)
 	}
 	if cfg.MinIntervalSec < 0 || cfg.MinIntervalSec > 3600 {
 		return model.NotifyConfig{}, fmt.Errorf("minIntervalSec 范围为 0-3600")
@@ -149,6 +149,8 @@ func eventEnabled(cfg model.NotifyConfig, event string) bool {
 		return cfg.Events.CronTaskFailed
 	case model.NotifyEventCronTaskDone:
 		return cfg.Events.CronTaskDone
+	case model.NotifyEventSourceConfigChanged:
+		return cfg.Events.SourceConfigChanged
 	default:
 		return false
 	}
@@ -159,8 +161,8 @@ func IsEventEnabled(event string) bool {
 	return eventEnabled(GetConfig(), event)
 }
 
-// PublishBatchSummary 异步发送采集批次摘要。
-// 每批摘要不走 MinInterval 限流：合法批次不得因同 trigger 被静默丢弃。
+// PublishBatchSummary 异步发送采集批次摘要（不走 MinInterval）。
+// 批次由 BuildBatchPayload 在同步阶段写入 payload.ChangeBatchID，异步发送不再读全局状态。
 func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
 	go safePublish(func() {
 		cfg := GetConfig()
@@ -168,55 +170,51 @@ func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
 			return
 		}
 		payload.SiteName = siteName()
-		if payload.Trigger == model.NotifyTriggerSingleUpdate {
+		// 单片更新不附明细；其余服从配置
+		if payload.Trigger == model.NotifyTriggerSingleUpdate || !cfg.IncludeFilmDetails {
 			payload.IncludeFilmDetails = false
-		} else {
-			payload.IncludeFilmDetails = payload.IncludeFilmDetails && cfg.IncludeFilmDetails
 		}
-		// 补全影片名
-		if payload.IncludeFilmDetails {
-			enrichFilmNames(&payload)
-		} else {
-			for i := range payload.Sources {
-				payload.Sources[i].Films = nil
-			}
-		}
-		sendBatchSummaryWithPager(cfg, payload)
+		sendBatchSummary(cfg, payload)
 	})
 }
 
-// sendBatchSummaryWithPager 发送总览 + 带「上一页/下一页」按钮的影片列表（单条可翻页）。
-func sendBatchSummaryWithPager(cfg model.NotifyConfig, payload model.CollectBatchNotifyPayload) {
-	pageSize := cfg.MaxFilmsInMessage
-	if pageSize <= 0 {
-		pageSize = 30
+// sendBatchSummary 发概要；变更 mid 在 MySQL 批次表，按钮带 batch_id。
+func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPayload) {
+	pageSize := clampPageSize(cfg.MaxFilmsInMessage)
+
+	batchID := strings.TrimSpace(payload.ChangeBatchID)
+	listN := 0
+	if batchID != "" {
+		listN = CountChangeMids(batchID)
 	}
-	if pageSize > 80 {
-		pageSize = 80
+	// 无活跃批次时，payload 仍可能有统计；列表依赖 MySQL
+	if payload.IncludeFilmDetails && listN > 0 {
+		// 头行变更与列表一致
+		if payload.TotalFilms < listN {
+			payload.TotalFilms = listN
+		}
+		overview := formatBatchOverview(payload, listN, pageSize)
+		parts := splitTelegramMessages(overview)
+		buttonPart := parts[len(parts)-1]
+		if err := SaveChangeBatchMeta(batchID, payload.SiteName, buttonPart, pageSize, listN); err != nil {
+			log.Printf("[Notify] 保存变更批次元数据失败: %v", err)
+			sendMessages(cfg, parts)
+			return
+		}
+		for i, part := range parts {
+			var markup *InlineKeyboardMarkup
+			if i == len(parts)-1 {
+				markup = buildOverviewKeyboard(batchID)
+			}
+			sendMessagesWithMarkup(cfg, part, markup)
+		}
+		EnsureBotPoller()
+		return
 	}
 
-	sess := buildFilmPageSessionFromPayload(payload, pageSize)
-	overview := formatBatchOverview(payload, len(sess.Items), pageSize)
-	// 总览可能较长，仍按 4096 拆分（无按钮）
+	// 无列表：仍结束可能残留的空批次
+	overview := formatBatchOverview(payload, 0, pageSize)
 	sendMessages(cfg, splitTelegramMessages(overview))
-
-	if !payload.IncludeFilmDetails || len(sess.Items) == 0 {
-		return
-	}
-
-	sessionID, err := saveFilmPageSession(sess)
-	if err != nil {
-		log.Printf("[Notify] 保存影片分页会话失败: %v", err)
-		// 降级：只发第一页纯文本
-		sendMessages(cfg, []string{formatFilmListPage(sess, 1)})
-		return
-	}
-	totalPages := sess.totalPages()
-	text := formatFilmListPage(sess, 1)
-	markup := buildPageKeyboard(sessionID, 1, totalPages)
-	sendMessagesWithMarkup(cfg, text, markup)
-	// 确保 bot 在处理回调
-	EnsureBotPoller()
 }
 
 // PublishSourceFailed 单源失败即时告警。
@@ -300,6 +298,23 @@ func PublishCronDone(taskID, remark, detail string) {
 	})
 }
 
+// PublishSourceConfigChanged 采集源配置变更通知（新增/删除/主站切换/启用停用等）。
+// changes 为变更描述列表（如「启用状态: 已启用 → 已停用」），按源限流。
+func PublishSourceConfigChanged(sourceName, sourceID string, changes []string) {
+	go safePublish(func() {
+		cfg := GetConfig()
+		if !eventEnabled(cfg, model.NotifyEventSourceConfigChanged) {
+			return
+		}
+		key := model.NotifyEventSourceConfigChanged + ":" + sourceID
+		if !allowOrLog(key, time.Duration(cfg.MinIntervalSec)*time.Second) {
+			return
+		}
+		messages := formatSourceConfigChanged(siteName(), sourceName, sourceID, changes, time.Now())
+		sendMessages(cfg, messages)
+	})
+}
+
 // SendTest 使用已保存配置发送测试消息。
 func SendTest() (model.NotifyTestResult, error) {
 	return SendTestWith("", nil)
@@ -337,10 +352,12 @@ func SendTestWith(botToken string, chatIDs []string) (model.NotifyTestResult, er
 	}
 	text := formatTestMessage(siteName())
 	result := model.NotifyTestResult{}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// 给代理握手 + TLS 留足时间；真正连不通仍会在 transport 层提前失败
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Second)
 	defer cancel()
 	for _, chatID := range ids {
 		if err := client.sendMessage(ctx, token, chatID, text); err != nil {
+			// err 已经过 sanitizeTelegramErr，不含完整 Token
 			result.Failed = append(result.Failed, model.NotifyChatError{
 				ChatID: chatID,
 				Error:  err.Error(),
@@ -366,22 +383,6 @@ func summarizeChatErrors(failed []model.NotifyChatError) string {
 		parts = append(parts, fmt.Sprintf("%s (%s)", f.ChatID, f.Error))
 	}
 	return strings.Join(parts, "; ")
-}
-
-func enrichFilmNames(payload *model.CollectBatchNotifyPayload) {
-	all := make([]int64, 0)
-	for _, src := range payload.Sources {
-		for _, f := range src.Films {
-			all = append(all, f.Mid)
-		}
-	}
-	names := ResolveFilmNames(all)
-	for i := range payload.Sources {
-		for j := range payload.Sources[i].Films {
-			mid := payload.Sources[i].Films[j].Mid
-			payload.Sources[i].Films[j].Name = filmDisplayName(mid, names)
-		}
-	}
 }
 
 func sendMessages(cfg model.NotifyConfig, messages []string) {
@@ -433,18 +434,14 @@ func safePublish(fn func()) {
 	fn()
 }
 
-// BuildSourceResult 从进度与 mid 累计组装 SourceNotifyResult。
-// FilmsTotal 仅来自 mid 累计，不用页成功数冒充影片数。
+// BuildSourceResult 从进度与 Acc 计数组装 SourceNotifyResult。
+// FilmsTotal=本源变更次数；明细 mid 在 MySQL 变更批次（跨源去重）。
 func BuildSourceResult(source model.FilmSource, progress model.CollectProgress, errMsg string) model.SourceNotifyResult {
 	status := strings.TrimSpace(progress.Status)
 	if status == "" {
 		status = "done"
 	}
-	mids, total, truncated := Acc.DrainSource(source.Id)
-	films := make([]model.FilmNotifyItem, 0, len(mids))
-	for _, mid := range mids {
-		films = append(films, model.FilmNotifyItem{Mid: mid})
-	}
+	_, total, _ := Acc.DrainSource(source.Id)
 	return model.SourceNotifyResult{
 		SourceID:    source.Id,
 		SourceName:  source.Name,
@@ -455,9 +452,7 @@ func BuildSourceResult(source model.FilmSource, progress model.CollectProgress, 
 		PageCurrent: progress.Current,
 		SuccessCnt:  progress.Success,
 		FailedCnt:   progress.Failed,
-		Films:       films,
 		FilmsTotal:  total,
-		FilmsTrunc:  truncated,
 	}
 }
 
@@ -466,17 +461,10 @@ func BuildSourceResultDirect(source model.FilmSource, status, errMsg string) mod
 	if status == "" {
 		status = "done"
 	}
-	mids, total, truncated := Acc.DrainSource(source.Id)
-	films := make([]model.FilmNotifyItem, 0, len(mids))
-	for _, mid := range mids {
-		films = append(films, model.FilmNotifyItem{Mid: mid})
-	}
+	_, total, _ := Acc.DrainSource(source.Id)
 	successCnt, failedCnt := 0, 0
 	if status == "done" {
 		successCnt = 1
-		if total == 0 {
-			total = 1
-		}
 	} else if status == "failed" {
 		failedCnt = 1
 	}
@@ -488,14 +476,13 @@ func BuildSourceResultDirect(source model.FilmSource, status, errMsg string) mod
 		Error:      errMsg,
 		SuccessCnt: successCnt,
 		FailedCnt:  failedCnt,
-		Films:      films,
 		FilmsTotal: total,
-		FilmsTrunc: truncated,
 	}
 }
 
 // BuildBatchPayload 组装批次摘要。
-func BuildBatchPayload(trigger string, sources []model.SourceNotifyResult, startedAt, finishedAt time.Time, finalizeErr string) model.CollectBatchNotifyPayload {
+// TotalFilms 优先用批次去重条数，否则分源 FilmsTotal 之和；ChangeBatchID 随批次显式写入。
+func BuildBatchPayload(batch *ChangeBatch, trigger string, sources []model.SourceNotifyResult, startedAt, finishedAt time.Time, finalizeErr string) model.CollectBatchNotifyPayload {
 	if finishedAt.IsZero() {
 		finishedAt = time.Now()
 	}
@@ -506,36 +493,24 @@ func BuildBatchPayload(trigger string, sources []model.SourceNotifyResult, start
 			duration = 0
 		}
 	}
-	success, failed, filmTotal := 0, 0, 0
-	seenFilm := make(map[int64]struct{})
+	success, failed, sumSource := 0, 0, 0
 	for _, s := range sources {
 		switch s.Status {
 		case "failed", "stopped":
-			// stopped 计入失败侧，避免头行 ✅/❌ 与列表条数对不上
 			failed++
 		case "done":
 			success++
 		default:
-			// starting/running 等异常残留按失败统计
 			if s.Status != "" {
 				failed++
 			}
 		}
-		filmTotal += s.FilmsTotal
-		for _, f := range s.Films {
-			seenFilm[f.Mid] = struct{}{}
-		}
+		sumSource += s.FilmsTotal
 	}
-	uniqFilms := filmTotal
-	if len(seenFilm) > 0 {
-		uniqFilms = len(seenFilm)
-		// 若有截断，仍以 FilmsTotal 之和为准更贴近实际
-		sum := 0
-		for _, s := range sources {
-			sum += s.FilmsTotal
-		}
-		if sum > uniqFilms {
-			uniqFilms = sum
+	filmTotal := sumSource
+	if batch != nil {
+		if n := batch.Count(); n > 0 {
+			filmTotal = n
 		}
 	}
 	return model.CollectBatchNotifyPayload{
@@ -547,9 +522,9 @@ func BuildBatchPayload(trigger string, sources []model.SourceNotifyResult, start
 		TotalSources:       len(sources),
 		SuccessSources:     success,
 		FailedSources:      failed,
-		TotalFilms:         uniqFilms,
+		TotalFilms:         filmTotal,
 		IncludeFilmDetails: true,
 		FinalizeError:      finalizeErr,
+		ChangeBatchID:      batch.ID(),
 	}
 }
-

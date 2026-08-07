@@ -15,6 +15,12 @@ type NotifyConfig struct {
 	MinIntervalSec     int  `json:"minIntervalSec"`
 }
 
+// 通知消息中影片数约束（分页每页条数上限），后端校验/默认值统一来自此处。
+const (
+	MaxFilmsInMessageCap     = 20
+	DefaultMaxFilmsInMessage = 15
+)
+
 // NotifyEventSwitches 各事件开关。
 type NotifyEventSwitches struct {
 	CollectBatchSummary   bool `json:"collectBatchSummary"`
@@ -23,6 +29,7 @@ type NotifyEventSwitches struct {
 	CollectProgressStale  bool `json:"collectProgressStale"`
 	CronTaskFailed        bool `json:"cronTaskFailed"`
 	CronTaskDone          bool `json:"cronTaskDone"`
+	SourceConfigChanged   bool `json:"sourceConfigChanged"`
 }
 
 // NotifyConfigRecord 通知配置持久化（单行表，Payload 为 NotifyConfig JSON）。
@@ -53,6 +60,7 @@ const (
 	NotifyEventCollectProgressStale  = "collect_progress_stale"
 	NotifyEventCronTaskFailed        = "cron_task_failed"
 	NotifyEventCronTaskDone          = "cron_task_done"
+	NotifyEventSourceConfigChanged   = "source_config_changed"
 )
 
 // CollectBatchNotifyPayload 批次采集摘要载荷。
@@ -69,22 +77,22 @@ type CollectBatchNotifyPayload struct {
 	TotalFilms         int                  `json:"totalFilms"`
 	IncludeFilmDetails bool                 `json:"includeFilmDetails"`
 	FinalizeError      string               `json:"finalizeError,omitempty"`
+	// ChangeBatchID 批次标识，由 BuildBatchPayload 在同步阶段写入；异步发送只读此值。
+	ChangeBatchID string `json:"-"`
 }
 
 // SourceNotifyResult 单源结果。
 type SourceNotifyResult struct {
-	SourceID    string           `json:"sourceId"`
-	SourceName  string           `json:"sourceName"`
-	Grade       int              `json:"grade"`
-	Status      string           `json:"status"`
-	Error       string           `json:"error,omitempty"`
-	PageTotal   int              `json:"pageTotal"`
-	PageCurrent int              `json:"pageCurrent"`
-	SuccessCnt  int              `json:"successCnt"`
-	FailedCnt   int              `json:"failedCnt"`
-	Films       []FilmNotifyItem `json:"films,omitempty"`
-	FilmsTotal  int              `json:"filmsTotal"`
-	FilmsTrunc  bool             `json:"filmsTruncated"`
+	SourceID    string `json:"sourceId"`
+	SourceName  string `json:"sourceName"`
+	Grade       int    `json:"grade"`
+	Status      string `json:"status"`
+	Error       string `json:"error,omitempty"`
+	PageTotal   int    `json:"pageTotal"`
+	PageCurrent int    `json:"pageCurrent"`
+	SuccessCnt  int    `json:"successCnt"`
+	FailedCnt   int    `json:"failedCnt"`
+	FilmsTotal  int    `json:"filmsTotal"`
 }
 
 // FilmNotifyItem 影片明细项。
@@ -95,12 +103,37 @@ type FilmNotifyItem struct {
 
 // NotifyTestResult 测试发送结果。
 type NotifyTestResult struct {
-	Sent   int                `json:"sent"`
-	Failed []NotifyChatError  `json:"failed,omitempty"`
+	Sent   int               `json:"sent"`
+	Failed []NotifyChatError `json:"failed,omitempty"`
 }
 
 // NotifyChatError 单个 Chat 发送失败。
 type NotifyChatError struct {
 	ChatID string `json:"chatId"`
 	Error  string `json:"error"`
+}
+
+// NotifyChangeBatch 采集更新列表批次（MySQL，替代 Redis 会话，mid 无上限）。
+type NotifyChangeBatch struct {
+	ID        string    `gorm:"primaryKey;size:16"`
+	SiteName  string    `gorm:"size:128"`
+	PageSize  int       `gorm:"not null;default:15"`
+	Total     int       `gorm:"not null;default:0"`
+	Overview  string    `gorm:"type:text"` // 带按钮那一段概要，返回时 edit 用
+	CreatedAt time.Time `gorm:"index"`
+	ExpireAt  time.Time `gorm:"index"`
+}
+
+func (NotifyChangeBatch) TableName() string {
+	return TableNotifyChangeBatch
+}
+
+// NotifyChangeMid 批次内变更影片 mid（全局去重）。
+type NotifyChangeMid struct {
+	BatchID string `gorm:"primaryKey;size:16;index"`
+	Mid     int64  `gorm:"primaryKey;index"`
+}
+
+func (NotifyChangeMid) TableName() string {
+	return TableNotifyChangeMid
 }

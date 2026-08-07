@@ -17,9 +17,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
+// SaveSitePlayList 写入附属站播放列表，返回「播放源实质变更」对应的全局 mid。
+func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error) {
 	if len(list) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	var playlists []model.MoviePlaylist
@@ -59,39 +60,42 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) error {
 	}
 
 	if len(keysByMovieKey) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	changes, err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey)
 	if err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
-		return err
+		return nil, err
 	}
-	if err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes); err != nil {
+	changedMids, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
+	if err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
-		return err
+		return nil, err
 	}
 	// 仅在有播放源实质变更时更新 last_collect_time。
 	if len(changes) > 0 {
 		repository.NoteCollectSourceStats(sourceID)
 	}
 
-	return nil
+	return changedMids, nil
 }
 
-func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) error {
+// scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳，并返回有变更的全局 mid。
+func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) ([]int64, error) {
 	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
-		return err
+		return nil, err
 	}
-	if err := touchSlavePlaylistUpdateStamps(changes); err != nil {
-		return err
+	changedMids, err := touchSlavePlaylistUpdateStamps(changes)
+	if err != nil {
+		return nil, err
 	}
 	SchedulePlaySummaryRefresh(infos...)
-	return nil
+	return changedMids, nil
 }
 
 func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmIndex, error) {
@@ -202,13 +206,21 @@ func loadMatchedSearchInfosByMovieKeys(movieKeys []string) ([]model.FilmIndex, e
 	return infos, nil
 }
 
-func touchSlavePlaylistUpdateStamps(changes []playlistChange) error {
-	updateStampByMid, err := buildSlavePlaylistUpdateStamps(changes)
+// touchSlavePlaylistUpdateStamps 刷新「剧集结构变更」影片的 update_stamp，返回这些全局 mid。
+// 仅链接签名变化的保存已在 saveGroupedPlaylists 完成，不抬 stamp、不进更新列表。
+func touchSlavePlaylistUpdateStamps(changes []playlistChange) ([]int64, error) {
+	notifyChanges := make([]playlistChange, 0, len(changes))
+	for _, c := range changes {
+		if c.NotifyWorthy {
+			notifyChanges = append(notifyChanges, c)
+		}
+	}
+	updateStampByMid, err := buildSlavePlaylistUpdateStamps(notifyChanges)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(updateStampByMid) == 0 {
-		return nil
+		return nil, nil
 	}
 	caseExpr := "CASE mid"
 	mids := make([]int64, 0, len(updateStampByMid))
@@ -219,9 +231,12 @@ func touchSlavePlaylistUpdateStamps(changes []playlistChange) error {
 		mids = append(mids, mid)
 	}
 	caseExpr += " ELSE update_stamp END"
-	return db.Mdb.Model(&model.FilmIndex{}).
+	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid IN ?", mids).
-		Update("update_stamp", clause.Expr{SQL: caseExpr, Vars: args}).Error
+		Update("update_stamp", clause.Expr{SQL: caseExpr, Vars: args}).Error; err != nil {
+		return nil, err
+	}
+	return mids, nil
 }
 
 func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, error) {
@@ -346,8 +361,9 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 }
 
 type playlistChange struct {
-	MovieKey    string
-	FirstInsert bool
+	MovieKey     string
+	FirstInsert  bool
+	NotifyWorthy bool // 集数结构/线路变更才进更新列表；仅链接变化为 false
 }
 
 type playlistSignature struct {
@@ -392,12 +408,17 @@ func buildPlaylistSignatures(playlists []model.MoviePlaylist) map[string][]playl
 func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map[string][]playlistSignature, movieKeys []string) []playlistChange {
 	changed := make([]playlistChange, 0, len(movieKeys))
 	for _, movieKey := range movieKeys {
-		if !samePlaylistSignatures(existing[movieKey], incoming[movieKey]) {
-			changed = append(changed, playlistChange{
-				MovieKey:    movieKey,
-				FirstInsert: len(existing[movieKey]) == 0,
-			})
+		left, right := existing[movieKey], incoming[movieKey]
+		if samePlaylistSignatures(left, right) {
+			continue
 		}
+		first := len(left) == 0
+		// 保存仍要写（链接可能刷新）；更新列表仅在集数/线路结构变化时计入
+		changed = append(changed, playlistChange{
+			MovieKey:     movieKey,
+			FirstInsert:  first,
+			NotifyWorthy: first || !samePlaylistEpisodeStructure(left, right),
+		})
 	}
 	return changed
 }
@@ -407,11 +428,74 @@ func samePlaylistSignatures(left []playlistSignature, right []playlistSignature)
 		return false
 	}
 	for index := range left {
-		if left[index] != right[index] {
+		if left[index].GroupIndex != right[index].GroupIndex {
+			return false
+		}
+		if left[index].GroupName != right[index].GroupName {
+			return false
+		}
+		if normalizePlaylistCompareContent(left[index].Content) != normalizePlaylistCompareContent(right[index].Content) {
 			return false
 		}
 	}
 	return true
+}
+
+// samePlaylistEpisodeStructure 仅比线路与集数标签，忽略播放链接（防盗链/CDN 签名噪声）。
+func samePlaylistEpisodeStructure(left []playlistSignature, right []playlistSignature) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index].GroupIndex != right[index].GroupIndex {
+			return false
+		}
+		if left[index].GroupName != right[index].GroupName {
+			return false
+		}
+		if playlistEpisodeLabelSignature(left[index].Content) != playlistEpisodeLabelSignature(right[index].Content) {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizePlaylistCompareContent 归一化播放列表内容用于「是否需要写库」对比：
+// trim 集数、去掉链接 query。仅用于对比，不影响实际保存的播放数据。
+func normalizePlaylistCompareContent(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return raw
+	}
+	var links []model.MovieUrlInfo
+	if err := json.Unmarshal([]byte(raw), &links); err != nil {
+		return raw
+	}
+	out := make([]model.MovieUrlInfo, len(links))
+	for i, u := range links {
+		out[i] = model.MovieUrlInfo{
+			Episode: strings.TrimSpace(u.Episode),
+			Link:    stripURLQuery(strings.TrimSpace(u.Link)),
+		}
+	}
+	data, _ := json.Marshal(out)
+	return string(data)
+}
+
+// playlistEpisodeLabelSignature 仅集数标签序列，用于更新列表判定。
+func playlistEpisodeLabelSignature(raw string) string {
+	if strings.TrimSpace(raw) == "" {
+		return "[]"
+	}
+	var links []model.MovieUrlInfo
+	if err := json.Unmarshal([]byte(raw), &links); err != nil {
+		return raw
+	}
+	labels := make([]string, len(links))
+	for i, u := range links {
+		labels[i] = strings.TrimSpace(u.Episode)
+	}
+	data, _ := json.Marshal(labels)
+	return string(data)
 }
 
 func DeletePlaylistBySourceId(sourceID string) error {
@@ -707,45 +791,4 @@ func LoadSourceMidByGlobalMid(globalMid int64, sourceID string) int64 {
 		return 0
 	}
 	return mapping.SourceMid
-}
-
-// LoadGlobalMidsBySourceMids 将附属站 source_mid 列表映射为全局 mid（依赖已写入的 mapping）。
-func LoadGlobalMidsBySourceMids(sourceID string, sourceMids []int64) []int64 {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" || len(sourceMids) == 0 {
-		return nil
-	}
-	uniq := make([]int64, 0, len(sourceMids))
-	seen := make(map[int64]struct{}, len(sourceMids))
-	for _, mid := range sourceMids {
-		if mid <= 0 {
-			continue
-		}
-		if _, ok := seen[mid]; ok {
-			continue
-		}
-		seen[mid] = struct{}{}
-		uniq = append(uniq, mid)
-	}
-	if len(uniq) == 0 {
-		return nil
-	}
-	var mappings []model.MovieSourceMapping
-	if err := db.Mdb.Where("source_id = ? AND source_mid IN ?", sourceID, uniq).Find(&mappings).Error; err != nil {
-		log.Printf("[playlist] LoadGlobalMidsBySourceMids source=%s err=%v", sourceID, err)
-		return nil
-	}
-	out := make([]int64, 0, len(mappings))
-	outSeen := make(map[int64]struct{}, len(mappings))
-	for _, m := range mappings {
-		if m.GlobalMid <= 0 {
-			continue
-		}
-		if _, ok := outSeen[m.GlobalMid]; ok {
-			continue
-		}
-		outSeen[m.GlobalMid] = struct{}{}
-		out = append(out, m.GlobalMid)
-	}
-	return out
 }

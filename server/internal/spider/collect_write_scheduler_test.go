@@ -26,7 +26,7 @@ func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 			sourceName: "A",
 			grade:      model.SlaveCollect,
 			page:       p,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		}); err != nil {
 			t.Fatalf("submit A page %d: %v", p, err)
@@ -39,7 +39,7 @@ func TestWriteLaneRoundRobinInterleavesSources(t *testing.T) {
 			sourceName: "B",
 			grade:      model.SlaveCollect,
 			page:       p,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		}); err != nil {
 			t.Fatalf("submit B page %d: %v", p, err)
@@ -85,7 +85,7 @@ func TestWriteLaneSameSourceSerial(t *testing.T) {
 			sourceID:   "S1",
 			sourceName: "S1",
 			page:       p,
-			write: func() ([]int64, error) {
+			write: func() (collectWriteMids, error) {
 				cur := inflight.Add(1)
 				for {
 					old := maxInflight.Load()
@@ -95,7 +95,7 @@ func TestWriteLaneSameSourceSerial(t *testing.T) {
 				}
 				time.Sleep(5 * time.Millisecond)
 				inflight.Add(-1)
-				return nil, nil
+				return collectWriteMids{}, nil
 			},
 			complete: func(collectWriteCompletion) { wg.Done() },
 		}); err != nil {
@@ -128,7 +128,7 @@ func TestWriteLaneRateLimitApprox(t *testing.T) {
 			sourceID:   "R1",
 			sourceName: "R1",
 			page:       p,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) { wg.Done() },
 		}); err != nil {
 			t.Fatalf("submit: %v", err)
@@ -162,7 +162,7 @@ func TestWriteLaneGlobalBackpressure(t *testing.T) {
 			sourceID:   "A",
 			sourceName: "A",
 			page:       p,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		}); err != nil {
 			t.Fatalf("fill submit %d: %v", p, err)
@@ -183,7 +183,7 @@ func TestWriteLaneGlobalBackpressure(t *testing.T) {
 			sourceID:   "B",
 			sourceName: "B",
 			page:       100,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		})
 		if err != nil {
@@ -233,7 +233,7 @@ func TestWriteLaneSourceBackpressure(t *testing.T) {
 			sourceID:   "S",
 			sourceName: "S",
 			page:       p,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		}); err != nil {
 			t.Fatalf("fill submit %d: %v", p, err)
@@ -248,7 +248,7 @@ func TestWriteLaneSourceBackpressure(t *testing.T) {
 			sourceID:   "S",
 			sourceName: "S",
 			page:       3,
-			write:      func() ([]int64, error) { return nil, nil },
+			write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 			complete:   func(collectWriteCompletion) {},
 		})
 		if err != nil {
@@ -292,7 +292,7 @@ func TestWriteLanePanicReleasesWriting(t *testing.T) {
 		sourceID:   "P1",
 		sourceName: "P1",
 		page:       1,
-		write: func() ([]int64, error) {
+		write: func() (collectWriteMids, error) {
 			panic("boom")
 		},
 		complete: func(c collectWriteCompletion) {
@@ -308,7 +308,7 @@ func TestWriteLanePanicReleasesWriting(t *testing.T) {
 		sourceID:   "P1",
 		sourceName: "P1",
 		page:       2,
-		write:      func() ([]int64, error) { return nil, nil },
+		write:      func() (collectWriteMids, error) { return collectWriteMids{}, nil },
 		complete:   func(collectWriteCompletion) { secondDone.Done() },
 	}); err != nil {
 		t.Fatalf("submit follow-up job: %v", err)
@@ -349,9 +349,9 @@ func TestWriteLaneReserveCancelDoesNotStarve(t *testing.T) {
 			sourceID:   src,
 			sourceName: src,
 			page:       p,
-			write: func() ([]int64, error) {
+			write: func() (collectWriteMids, error) {
 				time.Sleep(2 * time.Millisecond)
-				return nil, nil
+				return collectWriteMids{}, nil
 			},
 			complete: func(collectWriteCompletion) { wg.Done() },
 		}); err != nil {

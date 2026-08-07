@@ -32,6 +32,25 @@ func TestMaskBotToken(t *testing.T) {
 	}
 }
 
+func TestSanitizeTelegramErr(t *testing.T) {
+	token := "1234567890:AAFakeTokenForUnitTestOnly_xyz"
+	raw := fmt.Errorf(`Post "https://api.telegram.org/bot%s/sendMessage": context deadline exceeded`, token)
+	got := sanitizeTelegramErr(raw, token, "").Error()
+	if strings.Contains(got, token) {
+		t.Fatalf("token leaked: %s", got)
+	}
+	if strings.Contains(got, "AAFakeToken") {
+		t.Fatalf("token fragment leaked: %s", got)
+	}
+	if !strings.Contains(got, "TELEGRAM_PROXY") {
+		t.Fatalf("expected proxy hint: %s", got)
+	}
+	got2 := sanitizeTelegramErr(raw, token, "http://127.0.0.1:7890").Error()
+	if !strings.Contains(got2, "7890") || strings.Contains(got2, token) {
+		t.Fatalf("proxy path: %s", got2)
+	}
+}
+
 func TestValidateAndMergeUpdateKeepToken(t *testing.T) {
 	old := model.NotifyConfig{
 		BotToken: "123456:REALTOKENVALUE",
@@ -44,7 +63,7 @@ func TestValidateAndMergeUpdateKeepToken(t *testing.T) {
 		Events: model.NotifyEventSwitches{
 			CollectBatchSummary: true,
 		},
-		MaxFilmsInMessage: 30,
+		MaxFilmsInMessage: 15,
 		MinIntervalSec:    60,
 	}
 	merged, err := ValidateAndMergeUpdate(old, incoming)
@@ -64,7 +83,7 @@ func TestValidateChatID(t *testing.T) {
 	_, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
 		Enabled:           false,
 		ChatIDs:           []string{"not valid!"},
-		MaxFilmsInMessage: 30,
+		MaxFilmsInMessage: 15,
 	})
 	if err == nil {
 		t.Fatal("expected invalid chat id error")
@@ -72,13 +91,34 @@ func TestValidateChatID(t *testing.T) {
 	cfg, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
 		Enabled:           false,
 		ChatIDs:           []string{"-100123", "@mychannel"},
-		MaxFilmsInMessage: 30,
+		MaxFilmsInMessage: 15,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(cfg.ChatIDs) != 2 {
 		t.Fatalf("got %v", cfg.ChatIDs)
+	}
+}
+
+func TestValidateMaxFilmsInMessageCap(t *testing.T) {
+	old := model.NotifyConfig{}
+	_, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
+		Enabled:           false,
+		MaxFilmsInMessage: 21,
+	})
+	if err == nil {
+		t.Fatal("expected maxFilmsInMessage over cap to fail")
+	}
+	cfg, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
+		Enabled:           false,
+		MaxFilmsInMessage: 0,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxFilmsInMessage != 15 {
+		t.Fatalf("default want 15, got %d", cfg.MaxFilmsInMessage)
 	}
 }
 
@@ -92,47 +132,35 @@ func TestNormalizeChatIDsViaRepo(t *testing.T) {
 	}
 }
 
-func TestMidAccumulatorBound(t *testing.T) {
+func TestMidAccumulatorCountsOnly(t *testing.T) {
 	acc := NewMidAccumulator()
-	mids := make([]int64, 0, maxMidsPerSource+10)
-	for i := int64(1); i <= int64(maxMidsPerSource)+10; i++ {
-		mids = append(mids, i)
-	}
-	acc.Add("src1", mids...)
-	got, total, truncated := acc.DrainSource("src1")
-	if !truncated {
-		t.Fatal("expected truncated")
-	}
-	if total != maxMidsPerSource+10 {
+	// 无 DB 时 batch 为 nil，落库为空操作，计数仍工作
+	acc.Add(nil, "src1", 1, 2, 2, 3)
+	_, total, _ := acc.DrainSource("src1")
+	if total != 3 {
 		t.Fatalf("total=%d", total)
 	}
-	if len(got) != maxMidsPerSource {
-		t.Fatalf("len=%d", len(got))
+	_, total2, _ := acc.DrainSource("src1")
+	if total2 != 0 {
+		t.Fatalf("after drain total=%d", total2)
 	}
 }
 
-func TestFormatBatchSummary(t *testing.T) {
+func TestFormatBatchOverview(t *testing.T) {
 	payload := model.CollectBatchNotifyPayload{
-		Trigger:            model.NotifyTriggerManual,
-		SiteName:           "测试站",
-		DurationSec:        90,
-		SuccessSources:     1,
-		FailedSources:      1,
-		TotalFilms:         2,
-		IncludeFilmDetails: true,
+		Trigger:        model.NotifyTriggerManual,
+		SiteName:       "测试站",
+		DurationSec:    90,
+		SuccessSources: 1,
+		FailedSources:  1,
+		TotalFilms:     2,
 		Sources: []model.SourceNotifyResult{
 			{
-				SourceName:  "主站A",
-				Grade:       0,
-				Status:      "done",
-				PageTotal:   2,
-				PageCurrent: 2,
-				SuccessCnt:  2,
-				FilmsTotal:  2,
-				Films: []model.FilmNotifyItem{
-					{Mid: 1, Name: "影片一"},
-					{Mid: 2, Name: "影片二"},
-				},
+				SourceName: "主站A",
+				Grade:      0,
+				Status:     "done",
+				SuccessCnt: 2,
+				FilmsTotal: 2,
 			},
 			{
 				SourceName: "附属B",
@@ -143,23 +171,15 @@ func TestFormatBatchSummary(t *testing.T) {
 			},
 		},
 	}
-	msgs := formatBatchSummary(payload, 30)
-	if len(msgs) == 0 {
-		t.Fatal("empty messages")
-	}
-	joined := strings.Join(msgs, "\n")
+	joined := formatBatchOverview(payload, 2, 15)
 	if !strings.Contains(joined, "测试站") {
 		t.Fatalf("missing site name: %s", joined)
 	}
-	// 总览不含具体片名（片名在带按钮的列表消息里）
-	if strings.Contains(joined, "影片一") {
-		t.Fatalf("overview should not embed film lines: %s", joined)
+	if !strings.Contains(joined, "变更") || !strings.Contains(joined, "失败") || !strings.Contains(joined, "成功页") {
+		t.Fatalf("expected source metrics: %s", joined)
 	}
-	if !strings.Contains(joined, "上一页") && !strings.Contains(joined, "影片明细") {
-		// 至少提示有明细
-		if !strings.Contains(joined, "明细") {
-			t.Fatalf("expected film list hint: %s", joined)
-		}
+	if !strings.Contains(joined, "更新列表") {
+		t.Fatalf("expected film list hint: %s", joined)
 	}
 	if strings.Contains(joined, "<script>") {
 		t.Fatal("should escape html")
@@ -167,48 +187,72 @@ func TestFormatBatchSummary(t *testing.T) {
 	if !strings.Contains(joined, "timeout") {
 		t.Fatal("missing error")
 	}
+	if strings.Contains(joined, "<pre>") {
+		t.Fatalf("overview must not use pre/code block: %s", joined)
+	}
+	if !strings.Contains(joined, "主站A") || !strings.Contains(joined, "合计") {
+		t.Fatalf("expected source list + total: %s", joined)
+	}
 }
 
-func TestFormatFilmListPageAndKeyboard(t *testing.T) {
+func TestParsePageCallback(t *testing.T) {
 	prev := sitePlayBaseURLFn
 	sitePlayBaseURLFn = func() string { return "" }
 	t.Cleanup(func() { sitePlayBaseURLFn = prev })
 
-	items := make([]FilmPageItem, 0, 75)
-	for i := 1; i <= 75; i++ {
-		items = append(items, FilmPageItem{
-			SourceName: "主站",
-			Grade:      0,
-			Mid:        int64(i),
-			Name:       fmt.Sprintf("片%d", i),
-		})
-	}
-	sess := FilmPageSession{SiteName: "分页站", PageSize: 30, TotalCount: 75, Items: items}
-	if sess.totalPages() != 3 {
-		t.Fatalf("totalPages=%d", sess.totalPages())
-	}
-	p1 := formatFilmListPage(sess, 1)
-	if !strings.Contains(p1, "第 1/3 页") || !strings.Contains(p1, "片1") {
-		t.Fatalf("page1: %s", p1)
-	}
-	p3 := formatFilmListPage(sess, 3)
-	if !strings.Contains(p3, "第 3/3 页") || !strings.Contains(p3, "片75") {
-		t.Fatalf("page3: %s", p3)
-	}
-	kb := buildPageKeyboard("abc123", 2, 3)
-	if kb == nil || len(kb.InlineKeyboard) != 1 || len(kb.InlineKeyboard[0]) != 3 {
-		t.Fatalf("keyboard: %+v", kb)
-	}
-	// 中间页应有上一页、下一页
-	if !strings.Contains(kb.InlineKeyboard[0][0].Text, "上一页") {
-		t.Fatalf("prev btn: %s", kb.InlineKeyboard[0][0].Text)
-	}
-	if !strings.Contains(kb.InlineKeyboard[0][2].Text, "下一页") {
-		t.Fatalf("next btn: %s", kb.InlineKeyboard[0][2].Text)
-	}
-	sid, page, kind, ok := parsePageCallback("nfp:abc123:2")
+	sid, page, kind, ok := parsePagedCallback(callbackPrefix, "nfp:abc123:2")
 	if !ok || sid != "abc123" || page != 2 || kind != "page" {
 		t.Fatalf("parse page: %v %v %v %v", sid, page, kind, ok)
+	}
+	_, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open")
+	if !ok || kind != "open" {
+		t.Fatalf("parse open: %v %v", kind, ok)
+	}
+	_, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:back")
+	if !ok || kind != "back" {
+		t.Fatalf("parse back: %v %v", kind, ok)
+	}
+	ov := buildOverviewKeyboard("abc123")
+	if ov == nil || len(ov.InlineKeyboard) != 1 || !strings.Contains(ov.InlineKeyboard[0][0].Text, "更新列表") {
+		t.Fatalf("overview keyboard: %+v", ov)
+	}
+	kb := buildPagedKeyboard(callbackPrefix, "abc123", 2, 3, true)
+	if kb == nil || len(kb.InlineKeyboard) < 2 {
+		t.Fatalf("keyboard: %+v", kb)
+	}
+}
+
+func TestIsAllowedChatUsernameMatch(t *testing.T) {
+	cfg := model.NotifyConfig{ChatIDs: []string{"-100123", "@mychannel"}}
+	if !chatAllowed(cfg, "-100123", "") {
+		t.Fatal("numeric chat id should match")
+	}
+	if !chatAllowed(cfg, "-100456", "mychannel") {
+		t.Fatal("@username should match via chat username")
+	}
+	if !chatAllowed(cfg, "-100456", "@mychannel") {
+		t.Fatal("@username with @ prefix should match")
+	}
+	if chatAllowed(cfg, "-100789", "") {
+		t.Fatal("unknown chat should be rejected")
+	}
+	if chatAllowed(cfg, "-100789", "other") {
+		t.Fatal("unknown username should be rejected")
+	}
+}
+
+func TestParseBotCommand(t *testing.T) {
+	cmd, args := parseBotCommand("/search 流浪地球")
+	if cmd != "search" || args != "流浪地球" {
+		t.Fatalf("got %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/s@MyBot 关键词")
+	if cmd != "s" || args != "关键词" {
+		t.Fatalf("got %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("hello")
+	if cmd != "" || args != "" {
+		t.Fatalf("non-cmd: %q %q", cmd, args)
 	}
 }
 
@@ -230,6 +274,9 @@ func TestFormatFilmLine(t *testing.T) {
 	if !strings.Contains(linked, `href="https://demo.example.com/play?id=42"`) {
 		t.Fatalf("expected play link: %s", linked)
 	}
+	if !strings.Contains(linked, ">测试片<") {
+		t.Fatalf("name should be link text: %s", linked)
+	}
 }
 
 func TestFormatProgressStale(t *testing.T) {
@@ -241,8 +288,8 @@ func TestFormatProgressStale(t *testing.T) {
 }
 
 func TestBuildBatchPayloadCountsStopped(t *testing.T) {
-	payload := BuildBatchPayload(model.NotifyTriggerManual, []model.SourceNotifyResult{
-		{Status: "done"},
+	payload := BuildBatchPayload(nil, model.NotifyTriggerManual, []model.SourceNotifyResult{
+		{Status: "done", FilmsTotal: 1},
 		{Status: "stopped"},
 		{Status: "failed"},
 	}, time.Now().Add(-time.Minute), time.Now(), "")
@@ -261,5 +308,31 @@ func TestRateLimiter(t *testing.T) {
 	}
 	if !r.allow("other", time.Minute) {
 		t.Fatal("other key should allow")
+	}
+}
+
+func TestFormatSearchListPage(t *testing.T) {
+	prev := sitePlayBaseURLFn
+	sitePlayBaseURLFn = func() string { return "" }
+	t.Cleanup(func() { sitePlayBaseURLFn = prev })
+
+	mids := make([]int64, 0, 15)
+	for i := 1; i <= 15; i++ {
+		mids = append(mids, int64(i))
+	}
+	sess := searchSession{
+		SiteName: "搜站",
+		PageSize: 10,
+		Mids:     mids,
+		Keyword:  "片",
+		HitTotal: 15,
+	}
+	p1 := formatSearchListPage(sess, 1)
+	if !strings.Contains(p1, "1/2") || !strings.Contains(p1, "#1") {
+		t.Fatalf("page1: %s", p1)
+	}
+	kb := buildPagedKeyboard(searchCallbackPrefix, "sid", 1, 2, false)
+	if kb == nil || len(kb.InlineKeyboard) != 1 || !strings.Contains(kb.InlineKeyboard[0][2].Text, "下一页") {
+		t.Fatalf("search kb: %+v", kb)
 	}
 }

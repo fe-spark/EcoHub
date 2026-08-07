@@ -27,10 +27,11 @@ import (
 var collectWrites = newCollectWriteScheduler()
 
 type collectWriteCompletion struct {
-	page  int
-	mids  []int64
-	err   error
-	stage string
+	page         int
+	notifyMIDs   []int64 // 更新列表
+	affectedMIDs []int64 // 快照/缓存收尾
+	err          error
+	stage        string
 }
 
 type collectWriteJob struct {
@@ -38,7 +39,7 @@ type collectWriteJob struct {
 	sourceName string
 	grade      model.SourceGrade
 	page       int
-	write      func() ([]int64, error)
+	write      func() (collectWriteMids, error)
 	complete   func(collectWriteCompletion)
 }
 
@@ -400,7 +401,7 @@ func (l *collectWriteLane) run(workerID int) {
 			defer finish()
 
 			start := time.Now()
-			var mids []int64
+			var mids collectWriteMids
 			var err error
 			func() {
 				defer func() {
@@ -412,7 +413,13 @@ func (l *collectWriteLane) run(workerID int) {
 				}()
 				mids, err = job.write()
 			}()
-			job.complete(collectWriteCompletion{page: job.page, mids: mids, err: err, stage: "save"})
+			job.complete(collectWriteCompletion{
+				page:         job.page,
+				notifyMIDs:   mids.Notify,
+				affectedMIDs: mids.Affected,
+				err:          err,
+				stage:        "save",
+			})
 
 			if shouldLogCollectWrite(job.page) || err != nil || meta.tail {
 				status := "ok"

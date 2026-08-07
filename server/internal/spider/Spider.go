@@ -189,14 +189,14 @@ func collectProgressSnapshot(sourceID string) (model.CollectProgress, bool) {
 // page_done: 分页拉取+写库已结束（单站即将收尾）
 // waiting_publish: 批量场景下本站已采完，等待整批统一发布
 const (
-	progressStatusStarting        = "starting"
-	progressStatusRunning         = "running"
-	progressStatusPageDone        = "page_done"
-	progressStatusWaitingPublish  = "waiting_publish"
-	progressStatusFinalizing      = "finalizing"
-	progressStatusDone            = "done"
-	progressStatusFailed          = "failed"
-	progressStatusStopped         = "stopped"
+	progressStatusStarting       = "starting"
+	progressStatusRunning        = "running"
+	progressStatusPageDone       = "page_done"
+	progressStatusWaitingPublish = "waiting_publish"
+	progressStatusFinalizing     = "finalizing"
+	progressStatusDone           = "done"
+	progressStatusFailed         = "failed"
+	progressStatusStopped        = "stopped"
 )
 
 func isActiveCollectStatus(status string) bool {
@@ -971,7 +971,7 @@ func normalizeAffectedMIDs(mids []int64) []int64 {
 	return res
 }
 
-func flushSourcesPending(tag, trigger string, sources []model.FilmSource, startedAt time.Time) {
+func flushSourcesPending(tag, trigger string, sources []model.FilmSource, startedAt time.Time, batch *notify.ChangeBatch) {
 	if len(sources) == 0 {
 		return
 	}
@@ -1005,7 +1005,7 @@ func flushSourcesPending(tag, trigger string, sources []model.FilmSource, starte
 		finalizeErr = err
 	}
 	if trigger != "" {
-		emitBatchSummaryForSources(trigger, ordered, startedAt, finalizeErr)
+		emitBatchSummaryForSources(batch, trigger, ordered, startedAt, finalizeErr)
 	}
 }
 
@@ -1205,24 +1205,26 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string)
 	if len(sources) == 0 {
 		return
 	}
+	// 变更 mid 写入 MySQL 批次（无内存全量、无 Redis 会话），批次显式沿采集链传递
+	batch := notify.StartChangeBatch()
 	startedAt := time.Now()
 	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
 	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，站点并发不限制", tag, len(sources))
-	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion)
+	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion, batch)
 	var finalizeErr error
 	if err := collectLifecycle.flushPending(); err != nil {
 		log.Printf("[%s] 批量采集收尾刷新失败: %v", tag, err)
 		finalizeErr = err
 	}
-	emitBatchSummaryForSources(trigger, sources, startedAt, finalizeErr)
+	emitBatchSummaryForSources(batch, trigger, sources, startedAt, finalizeErr)
 }
 
 func isDispatchStopped(runVersion uint64) bool {
 	return stopAllVersion.Load() != runVersion
 }
 
-func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64) {
+func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batch *notify.ChangeBatch) {
 	if len(sources) == 0 {
 		return
 	}
@@ -1265,7 +1267,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				return
 			}
-			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false); err != nil {
+			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batch); err != nil {
 				log.Printf("[%s] 采集站点 %s 失败: %v", tag, fs.Name, err)
 			}
 		}(src)
@@ -1277,14 +1279,14 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 
 // HandleCollect 影视采集  id-采集站ID h-时长/h
 func HandleCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, false)
+	return handleCollectWithStopVersion(id, h, nil, true, false, nil)
 }
 
 func HandlePreparedCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, true)
+	return handleCollectWithStopVersion(id, h, nil, true, true, nil)
 }
 
-func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool) (retErr error) {
+func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool, batch *notify.ChangeBatch) (retErr error) {
 	hadWrites := false
 	collectStartedAt := time.Now()
 	if runVersion != nil && isDispatchStopped(*runVersion) {
@@ -1307,6 +1309,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
+	// 确认可开跑后再开变更批次，避免 early-return 泄漏/误开。
+	// 单站（flushAtEnd）独立开批；批量由 runSourcesWithLimit 统一开启并传入。
+	if flushAtEnd {
+		batch = notify.StartChangeBatch()
+	}
 	isMasterFullCollect := s.Grade == model.MasterCollect && h < 0
 	if isMasterFullCollect {
 		collectLifecycle.beginMasterRebuild(s.Id)
@@ -1324,7 +1331,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 				// 未进入统一收尾的单站失败：只发批次摘要。
 				// 即时 source_failed 由熔断路径发送，避免 minInterval=0 时双发。
 				noteSourceError(s.Id, originalErr.Error())
-				emitBatchSummaryForSources(model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, originalErr)
+				emitBatchSummaryForSources(batch, model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, originalErr)
 			}
 			return
 		}
@@ -1351,7 +1358,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 				}
 			})
 			// 单站采集（flushAtEnd）在收尾后直接发批次摘要
-			emitBatchSummaryForSources(model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, flushErr)
+			emitBatchSummaryForSources(batch, model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, flushErr)
 			return
 		}
 		// 批量：分页已结束则保持 waiting_publish，等待整批 flushPending。
@@ -1441,7 +1448,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
-	hadWrites, err = collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h)
+	hadWrites, err = collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h, batch)
 	if err != nil {
 		return err
 	}
@@ -1507,17 +1514,23 @@ func saveVirtualPicturesIfEnabled(s *model.FilmSource, list []model.MovieDetail)
 	return nil
 }
 
-func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) error {
+func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
 	lock := getSourceWriteLock(s.Id)
 	lock.Lock()
 	defer lock.Unlock()
+	var changedMids []int64
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
-		return filmrepo.SaveSitePlayList(s.Id, list)
+		mids, err := filmrepo.SaveSitePlayList(s.Id, list)
+		if err != nil {
+			return err
+		}
+		changedMids = mids
+		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("save slave playlists failed: %w", err)
+		return nil, fmt.Errorf("save slave playlists failed: %w", err)
 	}
-	return nil
+	return changedMids, nil
 }
 
 // saveCollectedFilm 将已采集的 list 按站点类型写入存储，消除 collectFilm/collectFilmById 中的重复 switch 块。
@@ -1533,45 +1546,47 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 		}
 		return saveVirtualPicturesIfEnabled(s, list)
 	case model.SlaveCollect:
-		return saveSlavePlaylists(context.Background(), s, 0, list)
+		_, err := saveSlavePlaylists(context.Background(), s, 0, list)
+		return err
 	}
 	return nil
 }
 
-func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
+// collectWriteMids 采集写结果：Notify 进更新列表；Affected 供快照/缓存收尾。
+type collectWriteMids struct {
+	Notify   []int64
+	Affected []int64
+}
+
+func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	if s.Grade != model.MasterCollect {
-		if err := saveSlavePlaylists(ctx, s, page, list); err != nil {
-			return nil, err
+		// 附属站：返回剧集结构变更 mid（链接噪声不进列表）
+		mids, err := saveSlavePlaylists(ctx, s, page, list)
+		if err != nil {
+			return collectWriteMids{}, err
 		}
-		// 附属站写入后 mapping 已落库，解析全局 mid 供通知明细
-		sourceMids := make([]int64, 0, len(list))
-		for _, d := range list {
-			if d.Id > 0 {
-				sourceMids = append(sourceMids, d.Id)
-			}
-		}
-		return filmrepo.LoadGlobalMidsBySourceMids(s.Id, sourceMids), nil
+		return collectWriteMids{Notify: mids, Affected: mids}, nil
 	}
 
-	var affectedPids []int64
+	var result filmrepo.CollectWriteResult
 	lock := getSourceWriteLock(s.Id)
 	lock.Lock()
 	defer lock.Unlock()
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
-		pids, err := filmrepo.SaveDetailsForCollect(s.Id, list)
+		r, err := filmrepo.SaveDetailsForCollect(s.Id, list)
 		if err != nil {
 			return err
 		}
-		affectedPids = pids
+		result = r
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("save master details failed: %w", err)
+		return collectWriteMids{}, fmt.Errorf("save master details failed: %w", err)
 	}
 	if err := saveVirtualPicturesIfEnabled(s, list); err != nil {
-		return nil, err
+		return collectWriteMids{}, err
 	}
-	return affectedPids, nil
+	return collectWriteMids{Notify: result.NotifyMIDs, Affected: result.AffectedMIDs}, nil
 }
 
 func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error) {
@@ -1616,7 +1631,7 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 }
 
 // collectFilmPages 将请求与写库拆成流水线：请求并发执行，写库交给全局调度器按批次串行落库。
-func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int) (bool, error) {
+func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int, batch *notify.ChangeBatch) (bool, error) {
 	if pageCount <= 0 {
 		return false, nil
 	}
@@ -1724,16 +1739,17 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		recordFailure(page, stage, err)
 		logProgress(false)
 	}
-	recordPageSuccess := func(page int, mids []int64) {
+	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
-		noteCollectedMIDs(s.Id, mids)
+		// 更新列表只记剧集结构变更；快照/缓存收尾用全部业务写入 mid
+		noteCollectedMIDs(batch, s.Id, notifyMIDs)
 		if s.Grade == model.MasterCollect && h < 0 {
-			collectLifecycle.addPendingMasterMIDs(s.Id, mids)
+			collectLifecycle.addPendingMasterMIDs(s.Id, affectedMIDs)
 		} else if s.Grade == model.MasterCollect {
-			collectLifecycle.addMasterAffectedMIDs(mids)
+			collectLifecycle.addMasterAffectedMIDs(affectedMIDs)
 		} else {
-			collectLifecycle.addAffectedMIDs(mids)
+			collectLifecycle.addAffectedMIDs(affectedMIDs)
 		}
 		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
 			progress.Success = snapshot.success
@@ -1787,7 +1803,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 						sourceName: s.Name,
 						grade:      s.Grade,
 						page:       page,
-						write: func() ([]int64, error) {
+						write: func() (collectWriteMids, error) {
 							return saveCollectedFilmForCollect(context.Background(), s, page, items)
 						},
 						complete: func(completion collectWriteCompletion) {
@@ -1820,7 +1836,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 			recordPageFailure(completion.page, completion.stage, completion.err)
 			continue
 		}
-		recordPageSuccess(completion.page, completion.mids)
+		recordPageSuccess(completion.page, completion.notifyMIDs, completion.affectedMIDs)
 	}
 	logProgress(true)
 	if ctx.Err() != nil {
@@ -1839,14 +1855,14 @@ func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
 	return source.Grade == model.MasterCollect && h < 0
 }
 
-// collectFilmById 采集指定ID的影片信息
-func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr error) {
+// collectFilmById 采集指定ID的影片信息，返回实质变更的全局 mid（无变更则空）。
+func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedMids []int64, retErr error) {
 	if s == nil {
-		return errors.New("采集站信息不存在")
+		return nil, errors.New("采集站信息不存在")
 	}
 	if err := collectLifecycle.beginSource(s.Id); err != nil {
 		log.Printf("[Spider] 站点 %s 无法启动单片采集: %v\n", s.Id, err)
-		return err
+		return nil, err
 	}
 	defer func() {
 		if flushAtEnd {
@@ -1861,7 +1877,7 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 
 	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", "1")
@@ -1869,19 +1885,27 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (retErr e
 	list, err := spiderCore.GetFilmDetail(r)
 	if err != nil {
 		release(err)
-		return fmt.Errorf("get movie detail failed: %w", err)
+		return nil, fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
 		release(errors.New("response list is empty"))
-		return errors.New("get movie detail failed: response list is empty")
+		return nil, errors.New("get movie detail failed: response list is empty")
 	}
 	release(nil)
-	if err := saveCollectedFilm(s, list, func(id string, l []model.MovieDetail) error {
-		return filmrepo.SaveDetail(id, l[0])
-	}); err != nil {
-		return err
+
+	// 与批量路径一致：只返回实质变更 mid
+	written, err := saveCollectedFilmForCollect(context.Background(), s, 1, list)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	// 单片更新：通知与收尾均用 Notify（剧集结构变更）；Affected 由上层 finish 路径处理时再取
+	// 此处返回 Notify 供 noteCollectedMIDs；Affected 在 flush 侧靠 mapping/读模型全量刷新
+	if s.Grade == model.MasterCollect {
+		collectLifecycle.addMasterAffectedMIDs(written.Affected)
+	} else {
+		collectLifecycle.addAffectedMIDs(written.Affected)
+	}
+	return written.Notify, nil
 }
 
 // BatchCollect 批量采集, 采集指定的所有站点最近x小时内更新的数据
@@ -1966,6 +1990,7 @@ func CollectSingleFilm(ids string) {
 	}
 
 	startedAt := time.Now()
+	batch := notify.StartChangeBatch()
 	type singleResult struct {
 		source model.FilmSource
 		err    error
@@ -1984,12 +2009,12 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			err := collectFilmById(sourceMid, &src, false)
+			mids, err := collectFilmById(sourceMid, &src, false)
 			if err != nil {
 				log.Printf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
-			} else {
-				// 单片成功：用全局 mid 计入通知（摘要默认不带明细，但仍统计影片数）
-				noteCollectedMIDs(src.Id, []int64{globalMid})
+			} else if len(mids) > 0 {
+				// 仅实质变更（主站框架或附属播放源）才计入
+				noteCollectedMIDs(batch, src.Id, mids)
 			}
 			mu.Lock()
 			results = append(results, singleResult{source: src, err: err})
@@ -2042,7 +2067,7 @@ func CollectSingleFilm(ids string) {
 			FailedCnt:  1,
 		})
 	}
-	emitBatchSummaryDirect(model.NotifyTriggerSingleUpdate, notifyResults, startedAt, finalizeErr)
+	emitBatchSummaryDirect(batch, model.NotifyTriggerSingleUpdate, notifyResults, startedAt, finalizeErr)
 }
 
 func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
@@ -2060,7 +2085,7 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 }
 
 // recoverFilmPage 重试单条失败页：成功后出队，失败未达上限时继续保留待重试。
-func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord) {
+func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord, batch *notify.ChangeBatch) {
 	if s == nil || fr == nil {
 		return
 	}
@@ -2082,17 +2107,17 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	}
 
-	mids, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
+	written, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
 	if err != nil {
 		markRecoverFailure(s, fr, "recover_save", err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
-	noteCollectedMIDs(s.Id, mids)
+	noteCollectedMIDs(batch, s.Id, written.Notify)
 	if s.Grade == model.MasterCollect {
-		collectLifecycle.addMasterAffectedMIDs(mids)
+		collectLifecycle.addMasterAffectedMIDs(written.Affected)
 	} else {
-		collectLifecycle.addAffectedMIDs(mids)
+		collectLifecycle.addAffectedMIDs(written.Affected)
 	}
 	repository.UpdateFailureRecordStatus(fr, model.FailureRecordStatusSuccess)
 }
@@ -2123,10 +2148,11 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		return
 	}
 	startedAt := time.Now()
+	batch := notify.StartChangeBatch()
 	if err := collectLifecycle.waitAndBeginSource(s.Id); err != nil {
 		log.Printf("[Spider] 站点 %s 无法启动失败页重试: %v\n", s.Id, err)
 		emitSourceFailedNotify(s.Id, s.Name, err.Error())
-		emitBatchSummaryDirect(model.NotifyTriggerRecover, []model.SourceNotifyResult{
+		emitBatchSummaryDirect(batch, model.NotifyTriggerRecover, []model.SourceNotifyResult{
 			notify.BuildSourceResultDirect(*s, progressStatusFailed, err.Error()),
 		}, startedAt, err)
 		return
@@ -2137,9 +2163,9 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 			log.Printf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v\n", s.Id, err)
 			finalizeErr = err
 		}
-		emitBatchSummaryForSources(model.NotifyTriggerRecover, []model.FilmSource{*s}, startedAt, finalizeErr)
+		emitBatchSummaryForSources(batch, model.NotifyTriggerRecover, []model.FilmSource{*s}, startedAt, finalizeErr)
 	}()
-	recoverFilmPage(context.Background(), s, fr)
+	recoverFilmPage(context.Background(), s, fr, batch)
 }
 
 // FullRecoverSpider 扫描记录表中的失败记录, 并发重试各失败页
@@ -2156,6 +2182,8 @@ func FullRecoverSpider() {
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	startedAt := time.Now()
+	// 恢复重试同样开变更批次，避免失败页变更 mid 丢失
+	batch := notify.StartChangeBatch()
 	for i := range list {
 		fr := list[i]
 		s := repository.FindCollectSourceById(fr.OriginId)
@@ -2188,12 +2216,12 @@ func FullRecoverSpider() {
 			defer collectLifecycle.endSource(source.Id)
 			for i := range pending {
 				record := pending[i]
-				recoverFilmPage(context.Background(), &source, &record)
+				recoverFilmPage(context.Background(), &source, &record, batch)
 			}
 		}(src, recordsCopy)
 	}
 	wg.Wait()
-	flushSourcesPending("FullRecoverSpider", model.NotifyTriggerRecover, sourcesToFlush, startedAt)
+	flushSourcesPending("FullRecoverSpider", model.NotifyTriggerRecover, sourcesToFlush, startedAt, batch)
 }
 
 // ======================================================= 公共方法  =======================================================
