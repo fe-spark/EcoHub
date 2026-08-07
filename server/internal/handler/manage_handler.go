@@ -30,13 +30,13 @@ type AdminNotice struct {
 
 func (h *ManageHandler) ManageIndex(c *gin.Context) {
 	notices := make([]AdminNotice, 0, 2)
-	if legacy, err := filmrepo.HasLegacyContentKeyInventory(nil); err == nil && legacy {
+	for _, n := range filmrepo.ListAdminContentKeyNotices() {
 		notices = append(notices, AdminNotice{
-			Level:      "error",
-			Code:       "legacy_content_key",
-			Message:    "检测到旧版库存，请先「重置站点数据」再全量采集",
-			ActionPath: "/manage/system/website",
-			ActionText: "去重置",
+			Level:      n.Level,
+			Code:       n.Code,
+			Message:    n.Message,
+			ActionPath: n.ActionPath,
+			ActionText: n.ActionText,
 		})
 	}
 	dto.Success(gin.H{"notices": notices}, "后台管理中心", c)

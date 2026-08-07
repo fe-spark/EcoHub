@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/notify"
+	filmrepo "server/internal/repository/film"
 	"server/internal/router"
 	"server/internal/service"
 
@@ -75,6 +76,13 @@ func start() {
 
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()
+
+	// 旧版 name_* ContentKey → vod_{mid}（幂等）；无需清库即可继续增量采集。
+	if n, err := filmrepo.MigrateLegacyContentKeys(nil); err != nil {
+		log.Printf("[ContentKey] ERROR migrate failed: %v (admin will show notice; master writes blocked until fixed)", err)
+	} else if n > 0 {
+		log.Printf("[ContentKey] migrated %d film_index rows", n)
+	}
 
 	service.InitSvc.DefaultDataInit()
 	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token）

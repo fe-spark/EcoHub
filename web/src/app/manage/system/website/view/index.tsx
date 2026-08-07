@@ -190,7 +190,7 @@ export default function SiteConfigPageView() {
         description="集中维护站点名称、网站地址、描述、Logo 与站点可用状态等基础信息。"
         actions={
           <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
-            重置配置
+            还原
           </Button>
         }
       />
