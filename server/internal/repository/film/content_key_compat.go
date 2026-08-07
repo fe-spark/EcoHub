@@ -156,6 +156,7 @@ func MigrateLegacyContentKeys(gdb *gorm.DB) (int64, error) {
 	}
 
 	var indexUpdated int64
+	log.Printf("[ContentKey] migrate start: name_* rows pending, running %s batch path", gdb.Dialector.Name())
 	err = gdb.Transaction(func(tx *gorm.DB) error {
 		n, err := migrateLegacyFilmIndexesTx(tx)
 		if err != nil {
@@ -197,8 +198,69 @@ func MigrateLegacyContentKeys(gdb *gorm.DB) (int64, error) {
 	return indexUpdated, nil
 }
 
-// migrateLegacyFilmIndexesTx 逐行迁移，兼容 MySQL/SQLite，并正确处理软删唯一键占用。
+// migrateLegacyFilmIndexesTx 按方言分发：
+//   - MySQL 生产路径：批量 SQL（软删释放 + 分块 UPDATE），百万级库存秒级完成；
+//   - 其它（SQLite 单测）：逐行兼容实现。
 func migrateLegacyFilmIndexesTx(tx *gorm.DB) (int64, error) {
+	if tx.Dialector.Name() == "mysql" {
+		return migrateLegacyFilmIndexesMysqlTx(tx)
+	}
+	return migrateLegacyFilmIndexesGenericTx(tx)
+}
+
+// migrateLegacyFilmIndexesMysqlTx MySQL 批量迁移，避免百万行逐行 SQL。
+// 1) 软删行占用目标 vod_{mid} → 改 del_{id} 释放唯一键；
+// 2) 按 id 分块 UPDATE name_* → vod_{mid}（目标被任意行占用则跳过）。
+func migrateLegacyFilmIndexesMysqlTx(tx *gorm.DB) (int64, error) {
+	now := time.Now().Format("2006-01-02 15:04:05")
+
+	// 软删占用目标 key：改名为 del_{id}（self-join，一条 SQL）。
+	if err := tx.Exec(`UPDATE film_index AS t
+INNER JOIN film_index AS live
+  ON live.content_key LIKE ?
+ AND live.mid > 0
+ AND live.deleted_at IS NULL
+ AND t.content_key = CONCAT(?, live.mid)
+ AND t.id <> live.id
+SET t.content_key = CONCAT('del_', t.id), t.updated_at = ?
+WHERE t.deleted_at IS NOT NULL`,
+		contentKeyNamePrefix+"%", contentKeyVodPrefix, now).Error; err != nil {
+		return 0, err
+	}
+
+	// 分块迁移：避免单条 UPDATE 锁全部行/巨型 undo。
+	var maxID uint
+	if err := tx.Model(&model.FilmIndex{}).Select("IFNULL(MAX(id), 0)").Scan(&maxID).Error; err != nil {
+		return 0, err
+	}
+	var updated int64
+	const blockStep = 100000
+	for lo := uint(0); lo < maxID; lo += blockStep {
+		hi := lo + blockStep
+		res := tx.Exec(`UPDATE film_index AS fi
+SET fi.content_key = CONCAT(?, fi.mid), fi.updated_at = ?
+WHERE fi.content_key LIKE ?
+  AND fi.mid > 0
+  AND fi.deleted_at IS NULL
+  AND fi.id > ? AND fi.id <= ?
+  AND NOT EXISTS (
+    SELECT 1 FROM film_index AS o
+    WHERE o.content_key = CONCAT(?, fi.mid) AND o.id <> fi.id
+  )`,
+			contentKeyVodPrefix, now, contentKeyNamePrefix+"%", lo, hi, contentKeyVodPrefix)
+		if res.Error != nil {
+			return updated, res.Error
+		}
+		if res.RowsAffected > 0 {
+			updated += res.RowsAffected
+			log.Printf("[ContentKey] migrate progress id<=%d rows=%d total=%d", hi, res.RowsAffected, updated)
+		}
+	}
+	return updated, nil
+}
+
+// migrateLegacyFilmIndexesGenericTx 逐行迁移（SQLite 单测路径）。
+func migrateLegacyFilmIndexesGenericTx(tx *gorm.DB) (int64, error) {
 	var updated int64
 	// 目标 key 被活跃行占用而无法迁移的行：后续批次不再重复扫描。
 	var blockedIDs []uint
@@ -271,7 +333,14 @@ func migrateSnapshotContentKeysTx(tx *gorm.DB) error {
 	if !tx.Migrator().HasTable(&model.FilmListSnapshot{}) {
 		return nil
 	}
-	// 可移植：避免 MySQL CONCAT / SQLite 方言差异；失败则事务回滚。
+	// MySQL：批量更新（快照 content_key 非唯一约束）。
+	if tx.Dialector.Name() == "mysql" {
+		return tx.Exec(`UPDATE film_list_snapshot
+SET content_key = CONCAT(?, mid), updated_at = ?
+WHERE content_key LIKE ? AND mid > 0`,
+			contentKeyVodPrefix, time.Now().Format("2006-01-02 15:04:05"), contentKeyNamePrefix+"%").Error
+	}
+	// SQLite 单测路径：逐行。
 	var snaps []model.FilmListSnapshot
 	if err := tx.Model(&model.FilmListSnapshot{}).
 		Where("content_key LIKE ? AND mid > ?", contentKeyNamePrefix+"%", 0).
