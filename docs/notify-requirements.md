@@ -99,7 +99,9 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 
 更新列表只收录「业务实质变更」的影片，噪声字段不判为更新：
 
-- **主站**（`masterBusinessSignature` 指纹）：对比片名/副标/封面(去 query)/播放源/播放列表(trim + 链接去 query)/备注/状态/演职/年代地区/分类；**排除** Hits/UpdateTime/AddTime/DbScore/简介/横图/语言/别名等噪声；封面只比 path（忽略 CDN query）；播放链接 query（防盗链签名）不参与判定。
+- **主站身份键**（`BuildContentKey`，**破坏性**，见 `RELEASE.md` v1.1.5 / beta）：优先 `vod_{源站 vod_id}`，保证主站同一源下不同影片 ID 各自独立。**禁止**仅用规范化片名做主站主键——源站常见「烬九州第四季」与「烬九州：第四季」等近似片名并存且集数不同，旧版 `name_{hash}` 会合并为同一 mid，增量采集时播放结构互相覆盖，更新列表反复刷同一批片。豆瓣/片名哈希仅用于附属站跨站匹配（`movie_match_key`）。
+  - **无启动自动迁移**。升级后须在管理后台 **网站配置 → 重置站点数据** 清空旧库存，再全量采集；禁止新旧 server 混连同一库采集。
+- **主站**（`masterBusinessSignature` 指纹）：对比片名/副标/封面(去 query)/播放源/播放列表(trim + 链接去 query)/备注/状态/演职/年代地区/分类；**排除** Hits/UpdateTime/AddTime/DbScore/简介/横图/语言/别名等噪声；封面只比 path（忽略 CDN query）；播放链接 query（防盗链签名）不参与判定。更新列表进一步只计剧集/线路结构变更或新片（`filterPlayStructureNotifyMIDs`）。
 - **附属站**（`samePlaylistSignatures`）：逐字段比较分组序号/组名/内容；内容对比前归一化（集数 trim、链接去 query）；仅链接签名变化不判为"播放源实质变更"，链接地址（域名/path）真变化仍判变更。
 - 剧集增删、片名/备注/状态变化等真实更新仍会被捕获。
 

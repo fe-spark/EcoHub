@@ -24,23 +24,23 @@ func clearCategorySyncRedisCaches() {
 
 func resetDefaultSiteData() error {
 	if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
-		return fmt.Errorf("恢复默认网站配置失败: %w", err)
+		return fmt.Errorf("重置默认网站配置失败: %w", err)
 	}
 	if err := repository.SaveBanners(defaultBanners()); err != nil {
-		return fmt.Errorf("恢复默认轮播失败: %w", err)
+		return fmt.Errorf("重置默认轮播失败: %w", err)
 	}
 	if err := repository.ResetMappingRules(); err != nil {
-		return fmt.Errorf("恢复默认映射规则失败: %w", err)
+		return fmt.Errorf("重置默认映射规则失败: %w", err)
 	}
 	if err := repository.ResetBuiltinAccounts(); err != nil {
-		return fmt.Errorf("恢复默认账号失败: %w", err)
+		return fmt.Errorf("重置默认账号失败: %w", err)
 	}
 	return nil
 }
 
 func resetDefaultCollectSources() error {
 	if err := repository.ResetCollectSources(defaultFilmSources()); err != nil {
-		return fmt.Errorf("恢复默认采集源失败: %w", err)
+		return fmt.Errorf("重置默认采集源失败: %w", err)
 	}
 	return nil
 }
@@ -51,7 +51,7 @@ func resetDefaultCronTasks() error {
 	}
 	tasks := defaultFilmTasks()
 	if err := repository.ResetFilmTasks(tasks); err != nil {
-		return fmt.Errorf("恢复默认定时任务失败: %w", err)
+		return fmt.Errorf("重置默认定时任务失败: %w", err)
 	}
 	for _, task := range tasks {
 		if err := registerRuntimeTask(task); err != nil {
@@ -98,7 +98,7 @@ func (s *SpiderService) AutoCollect(time int) {
 	go spider.AutoCollect(time)
 }
 
-// ClearFilms 恢复全站业务数据默认值。
+// ClearFilms 重置站点业务数据：清空影视/采集派生数据，并恢复默认配置与内置采集源等。
 func (s *SpiderService) ClearFilms() error {
 	if err := spider.ClearSpider(); err != nil {
 		return err
