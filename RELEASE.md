@@ -1,3 +1,40 @@
+# v1.1.5-beta.9
+
+> **预发布（prerelease）**：数据重置重构（异步 + 真实进度 + 独立入口 + 影响面统计），**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.9`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.9`
+
+## 相对 beta.8
+
+- **数据重置重构**：
+  - 重置改为**异步执行**：点击确认后立即返回「数据重置已发起」，后台真实执行；前端轮询进度接口，按**关键节点**展示真实进度（停止任务 → 清空影视库存 → 清空派生数据 → 清空分类映射 → 清理缓存），失败时透出真实错误
+  - 重置范围收敛为纯采集数据：不再重建分类（分类属采集数据，全量采集时自动从主站同步，消除外部网络依赖）、不再重置任何配置类数据（网站配置、轮播、映射规则、采集源、定时任务）与账号
+  - 修复清表后采集统计内存缓冲回写旧数据（`ResetCollectStatsCoalescer`）
+  - 入口迁移为侧边栏**独立顶级菜单「数据重置」**（红色警示样式），页面提供**影响面统计**（影视库存 / 列表快照 / 分类 / 失败记录），重置完成后自动刷新归零
+- **采集站点列表**：各列设置合理宽度，站点 URI 超长截断 + 悬停查看完整地址
+- **数据重置进度/统计接口**：`GET /manage/spider/clear/progress`、`GET /manage/spider/clear/stats`
+
+## 修复
+
+- 数据重置清空影视数据后，内存采集统计缓冲可能回写旧 `last_collect_time`
+- 数据重置不再因主站分类树拉取失败而受影响（分类重建改由全量采集自动完成）
+
+## 部署（beta.9）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.9
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.9
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.8
 
 > **预发布（prerelease）**：更新列表防抖与共享匹配键去噪，**不会**覆盖 `:latest`。

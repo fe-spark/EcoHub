@@ -262,25 +262,40 @@ func ClearAllSearchTagsCache() {
 func FilmZero() error {
 	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key。
 	defer ClearLegacyContentKeyNotices()
-	tables := []string{
+
+	// 关键节点：清空影视库存
+	ReportResetProgress(20, "正在清空影视库存")
+	for _, t := range []string{
 		model.TableMovieDetail,
 		model.TableFilmIndex,
-		model.TableFilmListSnapshot,
-		model.TableFilterOption,
-		model.TableFilterIndex,
 		model.TableMoviePlaylist,
 		model.TableMovieMatchKey,
-		model.TableCollectSourceStats,
-		model.TableCategory,
-		model.TableVirtualPicture,
-		model.TableSearchTag,
-		model.TableBanners,
-		model.TableFailureRecord,
-	}
-	for _, t := range tables {
+	} {
 		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
 		}
+	}
+
+	// 关键节点：清空采集派生数据（快照/筛选/搜索标签/统计/虚拟图/失败记录）
+	ReportResetProgress(45, "正在清空派生数据")
+	for _, t := range []string{
+		model.TableFilmListSnapshot,
+		model.TableFilterOption,
+		model.TableFilterIndex,
+		model.TableCollectSourceStats,
+		model.TableVirtualPicture,
+		model.TableSearchTag,
+		model.TableFailureRecord,
+	} {
+		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
+			return fmt.Errorf("truncate %s failed: %w", t, err)
+		}
+	}
+
+	// 关键节点：清空分类与映射
+	ReportResetProgress(70, "正在清空分类与映射")
+	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.TableCategory)).Error; err != nil {
+		return fmt.Errorf("truncate %s failed: %w", model.TableCategory, err)
 	}
 	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return fmt.Errorf("clear movie source mappings failed: %w", err)
@@ -293,9 +308,12 @@ func FilmZero() error {
 	}
 	time.Sleep(100 * time.Millisecond)
 
+	// 关键节点：清理缓存
+	ReportResetProgress(90, "正在清理缓存")
 	ClearSnapshotState()
 	ClearAdminFilmSearchCache()
 	RefreshMasterDataCaches()
+	ReportResetProgress(95, "数据清空完成")
 	return nil
 }
 

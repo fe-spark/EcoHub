@@ -33,6 +33,15 @@ func collectStatsMinInterval() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
+// ResetCollectStatsCoalescer 清空采集统计合并缓冲。
+// 数据重置（清空 collect_source_stats 表）时必须调用，避免内存 pending 的旧统计随后被回写复活。
+func ResetCollectStatsCoalescer() {
+	collectStats.mu.Lock()
+	collectStats.pending = make(map[string]time.Time)
+	collectStats.lastFlushed = make(map[string]time.Time)
+	collectStats.mu.Unlock()
+}
+
 // NoteCollectSourceStats 记录「有数据写入」的采集站活动；距上次落盘超过最小间隔时才写库。
 func NoteCollectSourceStats(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)

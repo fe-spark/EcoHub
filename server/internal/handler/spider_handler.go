@@ -2,8 +2,10 @@ package handler
 
 import (
 	"fmt"
+	"sync/atomic"
 
 	"server/internal/config"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -50,7 +52,10 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 	dto.SuccessOnlyMsg("采集任务已成功开启!!!", c)
 }
 
-// ClearAllFilm 删除所有film信息
+// resetSiteDataRunning 防止并发重复触发站点数据重置（重置为长耗时异步任务）
+var resetSiteDataRunning atomic.Bool
+
+// ClearAllFilm 删除所有film信息：密钥校验通过后立即返回成功，重置在后台异步执行。
 func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 	var req struct {
 		Password string `json:"password"`
@@ -59,16 +64,33 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	pwd := req.Password
-	if !verifyPassword(c, pwd) {
+	if !verifyPassword(c, req.Password) {
 		dto.Failed("重置失败, 密钥校验失败!!!", c)
 		return
 	}
-	if err := service.SpiderSvc.ClearFilms(); err != nil {
-		dto.Failed(fmt.Sprint("重置站点数据失败: ", err.Error()), c)
+	if !resetSiteDataRunning.CompareAndSwap(false, true) {
+		dto.Failed("站点数据正在重置中，请勿重复操作", c)
 		return
 	}
-	dto.SuccessOnlyMsg("站点数据已重置，默认采集源、定时任务、配置、轮播和分类已重建，请重新全量采集", c)
+	go func() {
+		defer resetSiteDataRunning.Store(false)
+		if err := service.SpiderSvc.ClearFilms(); err != nil {
+			syslog.Errorf("[数据重置] 重置失败: %v", err)
+			return
+		}
+		syslog.Infof("[数据重置] 重置完成")
+	}()
+	dto.SuccessOnlyMsg("数据重置已开始，正在清空影视与采集数据", c)
+}
+
+// ResetProgress 返回数据重置实时进度（供前端轮询）
+func (h *SpiderHandler) ResetProgress(c *gin.Context) {
+	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
+}
+
+// ResetImpactStats 返回数据重置影响面统计（将清空的数据量）
+func (h *SpiderHandler) ResetImpactStats(c *gin.Context) {
+	dto.Success(service.SpiderSvc.ResetImpactStats(), "获取成功", c)
 }
 
 // SingleUpdateSpider 单一影片主站更新采集

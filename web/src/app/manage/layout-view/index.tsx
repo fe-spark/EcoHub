@@ -30,6 +30,7 @@ import {
   MoonOutlined,
   DesktopOutlined,
   FileTextOutlined,
+  WarningOutlined,
 } from "@ant-design/icons";
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -105,9 +106,17 @@ const menuItems: MenuItem[] = [
     icon: <FileTextOutlined />,
     label: "系统日志",
   },
+  {
+    key: "/manage/reset",
+    icon: <WarningOutlined style={{ color: "var(--ant-color-error)" }} />,
+    label: <span style={{ color: "var(--ant-color-error)" }}>数据重置</span>,
+  },
 ];
 
 function resolveMenuKey(pathname: string) {
+  if (pathname.startsWith("/manage/reset")) {
+    return "/manage/reset";
+  }
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";
   }
@@ -202,7 +211,7 @@ export default function ManageLayoutView({
     });
   }, []);
 
-  // 进入后台及路由切换时刷新公告（重置站点数据后应消失）
+  // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
     ApiGet("/manage/index").then((resp) => {
       if (resp.code === 0 && Array.isArray(resp.data?.notices)) {

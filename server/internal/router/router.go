@@ -119,6 +119,8 @@ func SetupRouter() *gin.Engine {
 		{
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
+			spiderRoute.GET(`/clear/progress`, handler.SpiderHd.ResetProgress)
+			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.ResetImpactStats)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)
 		}
