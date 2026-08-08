@@ -181,3 +181,47 @@ func TestMarkSourcePagesFinishedStatuses(t *testing.T) {
 		collectProgress.Delete(id)
 	}
 }
+
+// 0 页时列表状态须与生命周期一致：批量 → waiting_publish，单站 → page_done（再由 defer 收尾）。
+func TestZeroPageProgressStatusMatchesLifecycle(t *testing.T) {
+	const (
+		batchID  = "zero-page-batch"
+		singleID = "zero-page-single"
+	)
+	for _, id := range []string{batchID, singleID} {
+		collectProgress.Delete(id)
+	}
+
+	// 模拟 handleCollect 0 页分支（与生产代码同一套状态赋值）
+	markZeroPageProgress := func(id string, flushAtEnd bool) {
+		ensureCollectProgress(id, id)
+		updateCollectProgress(id, func(p *model.CollectProgress) {
+			p.Total = 0
+			p.Current = 0
+			p.Success = 0
+			p.Failed = 0
+			if flushAtEnd {
+				p.Status = progressStatusPageDone
+			} else {
+				p.Status = progressStatusWaitingPublish
+			}
+		})
+	}
+
+	markZeroPageProgress(batchID, false)
+	if snap, _ := collectProgressSnapshot(batchID); snap.Status != progressStatusWaitingPublish {
+		t.Fatalf("batch zero-page want waiting_publish, got %q", snap.Status)
+	}
+	if !isActiveCollectStatus(progressStatusWaitingPublish) {
+		t.Fatal("waiting_publish must stay active so list shows 等待收尾")
+	}
+
+	markZeroPageProgress(singleID, true)
+	if snap, _ := collectProgressSnapshot(singleID); snap.Status != progressStatusPageDone {
+		t.Fatalf("single zero-page want page_done, got %q", snap.Status)
+	}
+
+	for _, id := range []string{batchID, singleID} {
+		collectProgress.Delete(id)
+	}
+}

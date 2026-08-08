@@ -44,6 +44,13 @@ func (NotifyConfigRecord) TableName() string {
 	return TableNotifyConfig
 }
 
+// SourceConfigChangeItem 批量源配置变更通知中的单条（源 + 变更描述），批量操作聚合发送用。
+type SourceConfigChangeItem struct {
+	SourceName string   `json:"sourceName"`
+	SourceID   string   `json:"sourceId"`
+	Changes    []string `json:"changes"`
+}
+
 // 采集通知 Trigger 常量。
 const (
 	NotifyTriggerManual       = "manual"

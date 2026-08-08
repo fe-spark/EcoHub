@@ -74,12 +74,26 @@ export function createCollectTableColumns({
           progress.status === "page_done" ||
           progress.status === "waiting_publish" ||
           progress.status === "finalizing";
-        const percent = isDone ? 100 : inPostPagePhase ? 99 : Math.min(rawPercent, 99);
+        // 0 页完成（无新内容）：收尾前 99%，完成后 100%
+        const zeroPageFinished =
+          total === 0 &&
+          (inPostPagePhase || isDone || progress.status === "failed" || progress.status === "stopped");
+        const percent = isDone
+          ? 100
+          : inPostPagePhase || zeroPageFinished
+            ? 99
+            : progress.status === "starting"
+              ? 0
+              : Math.min(rawPercent, 99);
         const progressText = total > 0
           ? `${done}/${total}`
-          : done > 0
-            ? `${done}`
-            : "即将开始采集";
+          : zeroPageFinished
+            ? "无新内容"
+            : done > 0
+              ? `${done}`
+              : progress.status === "starting"
+                ? "排队中"
+                : "即将开始采集";
         const statusText = resolveCollectStatusText(progress.status);
         const progressStatus =
           progress.status === "running" ||

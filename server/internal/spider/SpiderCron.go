@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repository"
@@ -198,23 +199,39 @@ func executeTask(ft model.FilmCollectTask) {
 func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
+	var runErr error
+	var doneDetail string
 	switch ft.Model {
 	case 0: // 自动更新已启用站点
 		AutoCollectTriggered(model.NotifyTriggerCron, ft.Time)
+		doneDetail = "自动更新已启用站点"
 		log.Println("执行一次自动更新任务")
 	case 1: // 更新指定资源站
 		if len(ft.Ids) == 0 {
+			runErr = fmt.Errorf("定时任务[%s]未配置资源站，跳过执行", ft.Id)
 			log.Printf("定时任务[%s]未配置资源站，跳过执行\n", ft.Id)
-			return
+			break
 		}
 		BatchCollectTriggered(model.NotifyTriggerCron, ft.Time, ft.Ids...)
+		doneDetail = fmt.Sprintf("更新指定资源站 %d 个", len(ft.Ids))
 	case 2: // 失败采集恢复
 		FullRecoverSpider()
+		doneDetail = "失败采集恢复"
 		log.Println("执行一次失败采集恢复任务")
-	case 3: // 附属站播放列表孤儿清理
+	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
+		return
 	default:
+		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
+	}
+
+	// 采集类定时任务（模型 0/1/2）补齐 cron_task_done/failed 事件；
+	// 采集源层面的成败仍由批次概要承载，此处只覆盖任务级成功与结构性失败。
+	if runErr != nil {
+		notify.PublishCronFailed(ft.Id, ft.Remark, runErr.Error())
+	} else {
+		notify.PublishCronDone(ft.Id, ft.Remark, doneDetail)
 	}
 
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
@@ -243,7 +260,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
 		return nil
 	}); err != nil {
-		log.Printf("[CleanOrphan] 数据清理任务执行失败: %v", err)
+		syslog.Errorf("[CleanOrphan] 数据清理任务执行失败: %v", err)
 		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
 		return
 	}

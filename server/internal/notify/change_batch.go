@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 
 	"gorm.io/gorm/clause"
@@ -47,7 +48,7 @@ func StartChangeBatch() *ChangeBatch {
 		ExpireAt:  now.Add(changeBatchTTL),
 	}
 	if err := db.Mdb.Create(&rec).Error; err != nil {
-		log.Printf("[Notify] 创建变更批次失败: %v", err)
+		syslog.Errorf("[Notify] 创建变更批次失败: %v", err)
 		return nil
 	}
 	return &ChangeBatch{id: id}
@@ -86,7 +87,7 @@ func (b *ChangeBatch) AppendMids(mids ...int64) {
 		return
 	}
 	if err := db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(rows, 200).Error; err != nil {
-		log.Printf("[Notify] 写入变更 mid 失败 batch=%s: %v", b.id, err)
+		syslog.Errorf("[Notify] 写入变更 mid 失败 batch=%s: %v", b.id, err)
 	}
 }
 
@@ -189,15 +190,21 @@ func SaveChangeBatchMeta(batchID, siteName, overview string, pageSize, total int
 }
 
 // LoadChangeBatch 加载批次元数据。
+// 先按 id 查行，再在 Go 端判过期（避免 SQL 端 time.Time 参数与 datetime 列的时区/精度比较差异），
+// 错误信息携带 expire_at 便于回调侧日志定位「刚收到就过期」类问题。
 func LoadChangeBatch(batchID string) (model.NotifyChangeBatch, error) {
 	var rec model.NotifyChangeBatch
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
 		return rec, fmt.Errorf("empty batch")
 	}
-	err := db.Mdb.Where("id = ? AND expire_at > ?", batchID, time.Now()).First(&rec).Error
+	err := db.Mdb.Where("id = ?", batchID).First(&rec).Error
 	if err != nil {
 		return rec, err
+	}
+	if rec.ExpireAt.Before(time.Now()) {
+		return rec, fmt.Errorf("批次已过期 id=%s expire_at=%s", batchID,
+			rec.ExpireAt.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime))
 	}
 	if rec.PageSize <= 0 {
 		rec.PageSize = 15
@@ -218,9 +225,20 @@ func purgeExpiredChangeBatches() {
 			return
 		}
 		ids := make([]string, 0, len(expired))
+		oldest, newest := expired[0].ExpireAt, expired[0].ExpireAt
 		for _, e := range expired {
 			ids = append(ids, e.ID)
+			if e.ExpireAt.Before(oldest) {
+				oldest = e.ExpireAt
+			}
+			if e.ExpireAt.After(newest) {
+				newest = e.ExpireAt
+			}
 		}
+		log.Printf("[Notify] 清理过期变更批次 count=%d expire_range=[%s ~ %s]",
+			len(expired),
+			oldest.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime),
+			newest.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime))
 		_ = db.Mdb.Where("batch_id IN ?", ids).Delete(&model.NotifyChangeMid{}).Error
 		_ = db.Mdb.Where("id IN ?", ids).Delete(&model.NotifyChangeBatch{}).Error
 		if len(expired) < batchLimit {

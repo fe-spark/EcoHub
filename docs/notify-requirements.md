@@ -34,7 +34,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 |---|---|---|---|---|
 | `enabled` | bool | false | — | 通知总开关；关闭时所有业务推送停止（联通测试不受影响） |
 | `botToken` | string | 空 | 启用时必填 | Telegram Bot Token，保存后脱敏展示 |
-| `chatIds` | []string | 空 | 启用时至少 1 个 | 接收目标；格式校验 `^\d+$`、`^-100\d+$`、`^@\w+$`；去空/trim/去重 |
+| `chatIds` | []string | 空 | 启用时至少 1 个 | 接收目标；格式校验（正则 `^(-?\d+|@[A-Za-z0-9_]+)$`，**仅启用时校验**，禁用状态允许保存以便清理残留）；去空/trim/去重 |
 | `events.*` | 7 个 bool | 见 3.2 | — | 各事件订阅开关 |
 | `includeFilmDetails` | bool | true | — | 摘要是否展示更新列表（含按钮入口） |
 | `maxFilmsInMessage` | int | 15 | 1–20 | 更新列表每页最多影片数 |
@@ -59,12 +59,12 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 | # | 事件 key | 配置字段 | 默认 | 触发时机 | 限流维度 |
 |---|---|---|---|---|---|
 | 1 | `collect_batch_summary` | `collectBatchSummary` | true | 整批采集结束后推送各源统计；收尾失败写入摘要 `FinalizeError` 行 | 不限流（按批次自然频率） |
-| 2 | `collect_source_failed` | `collectSourceFailed` | true | 单源连续失败达到阈值被终止时即时告警 | `事件:sourceID` |
+| 2 | `collect_source_failed` | `collectSourceFailed` | true | 单源连续失败达到阈值被终止时即时告警。**批量采集且批次摘要开启时并入概要不单独发送**（避免逐源轰炸）；单站采集或概要关闭时保持即时告警 | `事件:sourceID` |
 | 3 | `collect_finalize_failed` | `collectFinalizeFailed` | true | 快照更新/摘要刷新等收尾发布失败。**仅在摘要事件关闭时单独发送**，避免与摘要中的收尾错误双发 | `事件` |
 | 4 | `collect_progress_stale` | `collectProgressStale` | true | 采集任务卡住被强制标记失败（进度超时） | `事件:sourceID` |
-| 5 | `cron_task_failed` | `cronTaskFailed` | true | 后台定时任务（清理/自动任务等）运行失败 | `事件:taskID` |
-| 6 | `cron_task_done` | `cronTaskDone` | false | 定时任务成功完成（默认关闭，避免频发打扰） | `事件:taskID` |
-| 7 | `source_config_changed` | `sourceConfigChanged` | true | 采集源配置变更：编辑（等级/URI/启用停用/图片同步/名称/间隔）、新增、删除、主站切换（含被自动降级的旧主站通知） | `事件:sourceID` |
+| 5 | `cron_task_failed` | `cronTaskFailed` | true | 后台定时任务运行失败。覆盖全部任务模型（0 自动更新 / 1 指定源 / 2 失败恢复 / 3 孤儿清理）；采集类任务的源级失败仍由批次概要承载，此处覆盖任务级结构性失败（未配置源/类型废弃等） | `事件:taskID` |
+| 6 | `cron_task_done` | `cronTaskDone` | false | 定时任务成功完成（默认关闭，避免频发打扰）。覆盖模型 0/1/2（模型 3 由清理任务内部发送） | `事件:taskID` |
+| 7 | `source_config_changed` | `sourceConfigChanged` | true | 采集源配置变更：编辑（等级/URI/启用停用/图片同步/名称/间隔）、新增、删除、主站切换（含被自动降级的旧主站通知）。**批量启用/禁用聚合发送「批量 N 个」**（超长按页拆分 `N 个 · i/m`，不截断丢源）；中途失败仍推送已成功变更 | 单源 `事件:sourceID`；批量 `事件:batch:<源ID集合指纹>`（不同源集合互不限流） |
 
 **事件 7 详细触发场景（`collect_service.go`）：**
 
@@ -75,6 +75,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 | 新增主站 | `新增采集源（主站）`；若自动降级现有主站，另向被降级旧主站单独发送 `原主站已降级为附属站，主站数据已清空` |
 | 附属→主站升级 | 升级源发 `站点类型: 附属站 → 主站`；被自动降级的旧主站单独发送降级通知 |
 | 删除站点 | `删除采集源` |
+| 批量启用/禁用 | 聚合为 `采集源配置变更（批量 N 个）`（多页时 `批量 N 个 · i/m`），逐源列出变更；部分源失败时仍通知已成功项 |
 
 ### 3.3 消息格式
 

@@ -2,7 +2,6 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"os"
 	"time"
@@ -29,13 +28,16 @@ func init() {
 
 func setupLogging() {
 	if err := syslog.Init(); err != nil {
+		// Init 失败时仍打到 stdout，避免完全静默
+		log.SetOutput(os.Stdout)
 		log.Printf("[Init] 系统日志初始化失败: %v", err)
 		return
 	}
-	writer := io.MultiWriter(os.Stdout, syslog.Writer())
-	log.SetOutput(writer)
-	gin.DefaultWriter = writer
-	gin.DefaultErrorWriter = writer
+	// 级别在写入时确定：默认 log/gin 输出为 INFO；gin 错误流为 ERROR。
+	// syslog.Writer 内部已镜像 stdout + 落盘，勿再套 MultiWriter 以免双写。
+	log.SetOutput(syslog.Writer())
+	gin.DefaultWriter = syslog.Writer()
+	gin.DefaultErrorWriter = syslog.LevelWriter(syslog.LevelError)
 }
 
 func waitForRedis(maxRetries int, interval time.Duration) error {
