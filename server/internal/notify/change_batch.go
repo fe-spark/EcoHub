@@ -3,6 +3,7 @@ package notify
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -13,10 +14,19 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 
+	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 const changeBatchTTL = 48 * time.Hour
+
+// 批次加载错误分类：回调侧据此给出准确提示，避免一律「列表已过期」掩盖真实原因
+// （批次不存在往往是多实例共用 Bot Token、回调被另一实例消费所致）。
+var (
+	ErrChangeBatchEmpty    = errors.New("变更批次为空")
+	ErrChangeBatchNotFound = errors.New("变更批次不存在")
+	ErrChangeBatchExpired  = errors.New("变更批次已过期")
+)
 
 var changeBatchMu sync.Mutex
 
@@ -196,14 +206,17 @@ func LoadChangeBatch(batchID string) (model.NotifyChangeBatch, error) {
 	var rec model.NotifyChangeBatch
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
-		return rec, fmt.Errorf("empty batch")
+		return rec, ErrChangeBatchEmpty
 	}
 	err := db.Mdb.Where("id = ?", batchID).First(&rec).Error
 	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return rec, ErrChangeBatchNotFound
+		}
 		return rec, err
 	}
 	if rec.ExpireAt.Before(time.Now()) {
-		return rec, fmt.Errorf("批次已过期 id=%s expire_at=%s", batchID,
+		return rec, fmt.Errorf("%w id=%s expire_at=%s", ErrChangeBatchExpired, batchID,
 			rec.ExpireAt.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime))
 	}
 	if rec.PageSize <= 0 {

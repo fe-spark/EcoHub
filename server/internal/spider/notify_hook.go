@@ -134,8 +134,10 @@ func emitProgressStaleNotify(sourceID, sourceName, oldStatus string, age time.Du
 }
 
 // noteCollectedMIDs 累计本源「应进更新列表」的 mid。
-// 主站：剧集/播放源结构变更或新片（片名标点、备注、链接签名等噪声不计入）。
-// 附属站：播放列表集数/线路结构变更且已匹配主站的全局 mid（仅链接刷新不计入）。
+// 约定：列表条目必须是主站已有影片（全局 mid）；任一播放源剧集/线路结构变更都算更新：
+//   - 主站：新片或主站框架播放结构变更；
+//   - 附属站：已匹配到主站 mid 的 playlist 剧集/线路结构变更（扩展主站播放源）。
+// 仅链接刷新、备注/Hits 等噪声不计入；未匹配主站的附属片不进列表。
 func noteCollectedMIDs(batch *notify.ChangeBatch, sourceID string, mids []int64) {
 	if len(mids) == 0 {
 		return

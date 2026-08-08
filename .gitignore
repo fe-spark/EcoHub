@@ -35,3 +35,4 @@ package-lock.json
 static/
 AGENTS.md
 server/logs/
+server/internal/spider/logs/

@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
@@ -68,7 +69,7 @@ func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []int64, 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s 本次更新列表</b>\n", formatTitlePrefix(sess.SiteName))
-	fmt.Fprintf(&b, "<i>主站框架或附属站播放源更新均计入</i>\n")
+	fmt.Fprintf(&b, "<i>主站已有影片；主站框架或附属播放源剧集/线路有更新才计入</i>\n")
 	fmt.Fprintf(&b, "📄 第 <b>%d/%d</b> 页 · 本页 <b>%d</b> · <code>%d–%d</code> / <b>%d</b>\n",
 		page, totalPages, len(chunk), start+1, end, total)
 	if len(chunk) > 0 {
@@ -132,7 +133,17 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 	if err != nil {
 		// 打日志便于定位「刚收到就过期」类问题：批次是否真的不存在、expire_at 是否异常
 		log.Printf("[Notify] 更新列表回调批次不可用 batch=%s err=%v", batchID, err)
-		_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表已过期，请重新采集", true)
+		switch {
+		case errors.Is(err, ErrChangeBatchNotFound):
+			// 常见根因：多实例共用 Bot Token，回调被另一实例消费，其库无此批次
+			_ = client.answerCallbackQuery(ctx, token, cb.ID, "批次不存在（可能由另一实例发送）", true)
+		case errors.Is(err, ErrChangeBatchExpired):
+			_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表已过期，请重新采集", true)
+		case errors.Is(err, ErrChangeBatchEmpty):
+			_ = client.answerCallbackQuery(ctx, token, cb.ID, "批次为空", false)
+		default:
+			_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表加载失败，请稍后重试", true)
+		}
 		return
 	}
 	totalPages := sess.totalPages()
