@@ -3,6 +3,7 @@ package film
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"server/internal/model"
@@ -35,9 +36,13 @@ type SlavePlaylistDiff struct {
 }
 
 // DiffSlavePlaylistGroups 对比同一 movie_key 下的 playlist 组。
+// 与生产 saveGroupedPlaylists 对齐：先按 (movie_key, group_index) 排序去重
+// （同一影片多条目共享匹配键时，落库后写覆盖，仅最后一行生效），再对比。
+// 通知判定仅计「新增集数/新增线路」：集数相同（仅顺序/链接变化）不通知；
+// 集数回退（源站抖动/下架）不通知且 WouldWrite=false（生产不覆盖已存内容）。
 func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePlaylist) SlavePlaylistDiff {
-	left := playlistsToSignatures(existing)
-	right := playlistsToSignatures(incoming)
+	left := playlistsToSignatures(sortDedupePlaylists(existing))
+	right := playlistsToSignatures(sortDedupePlaylists(incoming))
 	diff := SlavePlaylistDiff{
 		MovieKey:    movieKey,
 		ExistingSig: formatPlaylistStructure(left),
@@ -47,22 +52,44 @@ func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePl
 		diff.Reason = "完全一致（含归一化后的链接 path）"
 		return diff
 	}
-	diff.WouldWrite = true
 	first := len(left) == 0
 	diff.FirstInsert = first
 	if first {
+		diff.WouldWrite = true
 		diff.NotifyWorthy = true
 		diff.Reason = "首次写入（库中无该 movie_key 的 playlist）"
 		return diff
 	}
-	if !samePlaylistEpisodeStructure(left, right) {
-		diff.NotifyWorthy = true
-		diff.Reason = "集数/线路结构变化（会进更新列表）"
+	if len(right) == 0 {
+		diff.Reason = "该 key 本次无内容（源站改名/条目消失的残留，不进更新列表）"
 		return diff
 	}
-	diff.NotifyWorthy = false
-	diff.Reason = "仅链接等非结构变化（写库但不进更新列表）"
+	switch {
+	case playlistStructureGrew(left, right):
+		diff.WouldWrite = true
+		diff.NotifyWorthy = true
+		diff.Reason = "新增集数/线路（会进更新列表）"
+	case playlistStructureSameEpisodes(left, right):
+		diff.WouldWrite = true
+		diff.Reason = "集数相同（仅顺序/链接变化，写库但不进更新列表）"
+	default:
+		diff.Reason = "集数回退/内容不同（源站抖动，不写库不进更新列表）"
+	}
 	return diff
+}
+
+// sortDedupePlaylists 排序并按 (movie_key, group_index) 去重（保留最后一行）。
+func sortDedupePlaylists(rows []model.MoviePlaylist) []model.MoviePlaylist {
+	if len(rows) < 2 {
+		return rows
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].MovieKey == rows[j].MovieKey {
+			return rows[i].GroupIndex < rows[j].GroupIndex
+		}
+		return rows[i].MovieKey < rows[j].MovieKey
+	})
+	return dedupePlaylistRows(rows)
 }
 
 // MasterNotifyExplain 主站「若用 incoming 覆盖 old」时的写库/通知判定说明。

@@ -145,7 +145,7 @@ func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSiz
 	if listN > 0 {
 		pages := (listN + pageSize - 1) / pageSize
 		fmt.Fprintf(&overview, "\n📋 更新列表 <b>%d</b> 部 · <b>%d</b> 页\n", listN, pages)
-		fmt.Fprintf(&overview, "<i>主站框架或附属站播放源有更新的影片；点击浏览，可翻页</i>\n")
+		fmt.Fprintf(&overview, "<i>主站已有影片的播放源更新（含附属站扩源）；点击浏览，可翻页</i>\n")
 	}
 	return overview.String()
 }

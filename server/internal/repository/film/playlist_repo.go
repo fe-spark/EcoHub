@@ -512,6 +512,11 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 			}
 			return playlists[i].MovieKey < playlists[j].MovieKey
 		})
+		// 同一 (movie_key, group_index) 只保留最后一行：同一影片在源站常有多个条目
+		// （如「XXX英语」「XXX国语」共享豆瓣匹配键），都会写入同一 (key, group) 槽位，
+		// 落库按唯一键后写覆盖。签名必须与落库语义对齐，否则每次采集都会把
+		// 「多条目并存」误判为结构变化，更新列表反复刷同一 mid。
+		playlists = dedupePlaylistRows(playlists)
 	}
 
 	var changes []playlistChange
@@ -523,20 +528,44 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		incoming := buildPlaylistSignatures(playlists)
 		changes = diffPlaylistMovieKeys(existing, incoming, movieKeys)
 
-		if len(movieKeys) > 0 {
+		// 集数回退的 key 不写库（保护已存最大集数，避免源站抖动反复刷新）：
+		// 正在更新的连载剧源站/CDN 常在不同请求返回不同集数（16↔18），
+		// 若每次都按「最新抓到」覆盖，DB 会在两个版本间震荡，更新列表反复刷同一 mid。
+		skipWrite := make(map[string]bool, len(changes))
+		for _, c := range changes {
+			if c.SkipWrite {
+				skipWrite[c.MovieKey] = true
+			}
+		}
+		writeKeys := movieKeys[:0]
+		for _, k := range movieKeys {
+			if !skipWrite[k] {
+				writeKeys = append(writeKeys, k)
+			}
+		}
+
+		if len(writeKeys) > 0 {
 			if err := tx.Unscoped().
-				Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
+				Where("source_id = ? AND movie_key IN ?", sourceID, writeKeys).
 				Delete(&model.MoviePlaylist{}).Error; err != nil {
 				return err
 			}
 		}
 
 		if len(playlists) > 0 {
-			if err := tx.Clauses(clause.OnConflict{
-				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "deleted_at"}),
-			}).Create(&playlists).Error; err != nil {
-				return err
+			writePlaylists := playlists[:0]
+			for _, p := range playlists {
+				if !skipWrite[p.MovieKey] {
+					writePlaylists = append(writePlaylists, p)
+				}
+			}
+			if len(writePlaylists) > 0 {
+				if err := tx.Clauses(clause.OnConflict{
+					Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
+					DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "deleted_at"}),
+				}).Create(&writePlaylists).Error; err != nil {
+					return err
+				}
 			}
 		}
 		return nil
@@ -550,7 +579,8 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 type playlistChange struct {
 	MovieKey     string
 	FirstInsert  bool
-	NotifyWorthy bool // 集数结构/线路变更才进更新列表；仅链接变化为 false
+	NotifyWorthy bool // 新增集数/新线路/首次写入才进更新列表；仅链接、顺序、集数回退为 false
+	SkipWrite    bool // 集数回退（源站抖动/下架）：不覆盖已存内容，避免 DB 震荡导致反复上报
 }
 
 type playlistSignature struct {
@@ -600,14 +630,141 @@ func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map
 			continue
 		}
 		first := len(left) == 0
-		// 保存仍要写（链接可能刷新）；更新列表仅在集数/线路结构变化时计入
+		notifyWorthy := false
+		skipWrite := false
+		switch {
+		case len(right) == 0:
+			// right 为空 = 该 key 本次未出现（源站改名/条目消失后的残留或陈旧 key）→ 不是内容更新，
+			// 不进更新列表，否则改名/条目切换会让同一 mid 每批反复上报。
+		case first:
+			// 首次写入：确为新增内容
+			notifyWorthy = true
+		default:
+			// 仅「新增集数/新增线路」进更新列表：
+			// 集数相同（仅链接/顺序变化）不通知；集数减少（源站抖动或下架）不通知且不写库，
+			// 保护已存最大集数，避免 DB 在两个版本间震荡、更新列表反复刷同一 mid。
+			grew := playlistStructureGrew(left, right)
+			if grew {
+				notifyWorthy = true
+			} else if !playlistStructureSameEpisodes(left, right) {
+				skipWrite = true
+			}
+		}
 		changed = append(changed, playlistChange{
 			MovieKey:     movieKey,
 			FirstInsert:  first,
-			NotifyWorthy: first || !samePlaylistEpisodeStructure(left, right),
+			NotifyWorthy: notifyWorthy,
+			SkipWrite:    skipWrite,
 		})
 	}
 	return changed
+}
+
+// playlistGroupKey 线路分组标识（分组序号 + 线路名）。
+type playlistGroupKey struct {
+	GroupIndex int
+	GroupName  string
+}
+
+// playlistStructureGrew 判断 incoming 相对 existing 是否「新增集数/新增线路」：
+// 按 (GroupIndex, GroupName) 对齐，集数标签做无序多重集比较。
+// 任一组新增集数或出现新线路 → true；任一组集数减少、线路消失或内容不同 → false（视为抖动/回退）。
+func playlistStructureGrew(left, right []playlistSignature) bool {
+	leftByGroup, rightByGroup := groupPlaylistSignatures(left), groupPlaylistSignatures(right)
+	grew := false
+	for key, rightLabels := range rightByGroup {
+		leftLabels, ok := leftByGroup[key]
+		if !ok {
+			grew = true // 新增线路
+			continue
+		}
+		lm, rm := episodeLabelMultiset(leftLabels), episodeLabelMultiset(rightLabels)
+		if !multisetSuperset(rm, lm) {
+			return false // 该组集数减少/内容不同 → 回退，不视为新增
+		}
+		if len(rm) > len(lm) {
+			grew = true
+		}
+	}
+	for key := range leftByGroup {
+		if _, ok := rightByGroup[key]; !ok {
+			return false // 线路消失 → 回退
+		}
+	}
+	return grew
+}
+
+// playlistStructureSameEpisodes 判断两侧集数多重集是否完全一致（忽略顺序与链接）。
+func playlistStructureSameEpisodes(left, right []playlistSignature) bool {
+	leftByGroup, rightByGroup := groupPlaylistSignatures(left), groupPlaylistSignatures(right)
+	if len(leftByGroup) != len(rightByGroup) {
+		return false
+	}
+	for key, leftLabels := range leftByGroup {
+		rightLabels, ok := rightByGroup[key]
+		if !ok {
+			return false
+		}
+		lm, rm := episodeLabelMultiset(leftLabels), episodeLabelMultiset(rightLabels)
+		if len(lm) != len(rm) || !multisetSuperset(lm, rm) {
+			return false
+		}
+	}
+	return true
+}
+
+func groupPlaylistSignatures(sigs []playlistSignature) map[playlistGroupKey][]string {
+	out := make(map[playlistGroupKey][]string, len(sigs))
+	for _, s := range sigs {
+		key := playlistGroupKey{GroupIndex: s.GroupIndex, GroupName: strings.TrimSpace(s.GroupName)}
+		var links []model.MovieUrlInfo
+		if err := json.Unmarshal([]byte(s.Content), &links); err != nil {
+			continue
+		}
+		for _, u := range links {
+			if label := strings.TrimSpace(u.Episode); label != "" {
+				out[key] = append(out[key], label)
+			}
+		}
+	}
+	return out
+}
+
+// episodeLabelMultiset 集数标签多重集（无序、保留重复）。
+func episodeLabelMultiset(labels []string) map[string]int {
+	m := make(map[string]int, len(labels))
+	for _, l := range labels {
+		m[l]++
+	}
+	return m
+}
+
+// multisetSuperset a ⊇ b：a 中每个标签出现次数 ≥ b。
+func multisetSuperset(a, b map[string]int) bool {
+	for label, n := range b {
+		if a[label] < n {
+			return false
+		}
+	}
+	return true
+}
+
+// dedupePlaylistRows 按 (movie_key, group_index) 去重，保留最后一行。
+// 入参需已按 movie_key ASC, group_index ASC 排序；与落库 OnConflict 后写覆盖语义一致。
+func dedupePlaylistRows(rows []model.MoviePlaylist) []model.MoviePlaylist {
+	if len(rows) < 2 {
+		return rows
+	}
+	out := rows[:0]
+	for i := 0; i < len(rows); {
+		j := i + 1
+		for j < len(rows) && rows[j].MovieKey == rows[i].MovieKey && rows[j].GroupIndex == rows[i].GroupIndex {
+			j++
+		}
+		out = append(out, rows[j-1])
+		i = j
+	}
+	return out
 }
 
 func samePlaylistSignatures(left []playlistSignature, right []playlistSignature) bool {

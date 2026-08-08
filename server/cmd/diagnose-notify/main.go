@@ -277,6 +277,11 @@ func main() {
 				continue
 			}
 			incoming := filmrepo.BuildIncomingSlavePlaylists(slave.Id, live)
+			// 附属站 live 的 key 可能与主站推导 key 不一致（如「XXX国语」条目只挂在自己的
+			// 片名 key 下）：补查这些 key 的历史行，避免把「已存在的行」误判为首次写入。
+			if extra, err := loadSlavePlaylistsByKeys(slave.Id, playlistKeys(incoming)); err == nil && len(extra) > 0 {
+				rows = append(rows, extra...)
+			}
 			// 按 movie_key 分组对比
 			existingByKey := groupPlaylists(rows)
 			incomingByKey := groupPlaylists(incoming)
@@ -429,6 +434,44 @@ func loadSlavePlaylists(sourceID string, mid int64, masterDetail model.MovieDeta
 		Order("movie_key ASC, group_index ASC").
 		Find(&rows).Error
 	return rows, err
+}
+
+// loadSlavePlaylistsByKeys 按给定 movie_key 集合查询附属站既有 playlist 行。
+func loadSlavePlaylistsByKeys(sourceID string, keys []string) ([]model.MoviePlaylist, error) {
+	keys = uniqueNonEmptyKeys(keys)
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	var rows []model.MoviePlaylist
+	err := db.Mdb.Where("source_id = ? AND movie_key IN ?", sourceID, keys).
+		Order("movie_key ASC, group_index ASC").
+		Find(&rows).Error
+	return rows, err
+}
+
+func uniqueNonEmptyKeys(keys []string) []string {
+	seen := make(map[string]struct{}, len(keys))
+	out := make([]string, 0, len(keys))
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	return out
+}
+
+func playlistKeys(rows []model.MoviePlaylist) []string {
+	out := make([]string, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, r.MovieKey)
+	}
+	return out
 }
 
 func resolveSourceMid(sourceID string, globalMid int64) int64 {

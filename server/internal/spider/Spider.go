@@ -1562,7 +1562,9 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 	return nil
 }
 
-// collectWriteMids 采集写结果：Notify 进更新列表；Affected 供快照/缓存收尾。
+// collectWriteMids 采集写结果。
+// Notify：进 Telegram「更新列表」——主站新片/播放结构变更，或附属站已匹配主站片的 playlist 剧集/线路结构变更；
+// Affected：快照/缓存收尾用 mid。
 type collectWriteMids struct {
 	Notify   []int64
 	Affected []int64
@@ -1570,7 +1572,7 @@ type collectWriteMids struct {
 
 func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	if s.Grade != model.MasterCollect {
-		// 附属站：返回剧集结构变更 mid（链接噪声不进列表）
+		// 附属站：扩展主站播放源；剧集/线路结构变更且已匹配主站 mid 的，进更新列表（仅链接刷新不进）
 		mids, err := saveSlavePlaylists(ctx, s, page, list)
 		if err != nil {
 			return collectWriteMids{}, err
@@ -1759,7 +1761,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
-		// 更新列表只记剧集结构变更；快照/缓存收尾用全部业务写入 mid
+		// 更新列表记 Notify mid；快照/缓存收尾用 Affected
 		noteCollectedMIDs(batch, s.Id, notifyMIDs)
 		if s.Grade == model.MasterCollect && h < 0 {
 			collectLifecycle.addPendingMasterMIDs(s.Id, affectedMIDs)
@@ -1910,13 +1912,11 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedM
 	}
 	release(nil)
 
-	// 与批量路径一致：只返回实质变更 mid
+	// 与批量路径一致：Notify 供更新列表；Affected 供收尾
 	written, err := saveCollectedFilmForCollect(context.Background(), s, 1, list)
 	if err != nil {
 		return nil, err
 	}
-	// 单片更新：通知与收尾均用 Notify（剧集结构变更）；Affected 由上层 finish 路径处理时再取
-	// 此处返回 Notify 供 noteCollectedMIDs；Affected 在 flush 侧靠 mapping/读模型全量刷新
 	if s.Grade == model.MasterCollect {
 		collectLifecycle.addMasterAffectedMIDs(written.Affected)
 	} else {
@@ -2030,7 +2030,7 @@ func CollectSingleFilm(ids string) {
 			if err != nil {
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
 			} else if len(mids) > 0 {
-				// 仅实质变更（主站框架或附属播放源）才计入
+				// 主站结构变更/新片，或附属站已匹配主站片的播放源结构变更
 				noteCollectedMIDs(batch, src.Id, mids)
 			}
 			mu.Lock()
