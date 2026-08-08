@@ -23,7 +23,6 @@ import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectMasterPanel from "./collect-master-panel";
 import CollectSourceCard from "./collect-source-card";
-import CollectOverview from "./collect-overview";
 import SourceFormModal from "./source-form-modal";
 import {
   isActiveCollectStatus,
@@ -115,30 +114,6 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const stats = useMemo(
-    () => ({
-      total: siteList.length,
-      enabled: siteList.filter((item) => item.state).length,
-      // 真正在拉页/写库
-      running: siteList.filter((item) => item.progress?.status === "running").length,
-      // 排队 + 分页完成等待整批收尾
-      waiting: siteList.filter(
-        (item) =>
-          item.progress?.status === "starting" ||
-          item.progress?.status === "page_done" ||
-          item.progress?.status === "waiting_publish" ||
-          item.progress?.status === "finalizing",
-      ).length,
-      masters: siteList.filter((item) => item.grade === 0).length,
-    }),
-    [siteList],
-  );
-
-  const masterSite = useMemo(
-    () => siteList.find((item) => item.grade === 0) ?? null,
-    [siteList],
-  );
-
   /** 业务上主采集站应唯一；异常时可能多于 1，仍全部列出便于修正 */
   const masterSites = useMemo(
     () => siteList.filter((item) => item.grade === 0),
@@ -149,16 +124,6 @@ export default function CollectManagePageView() {
     () => siteList.filter((item) => item.grade !== 0),
     [siteList],
   );
-
-  const masterStatus = useMemo(() => {
-    if (stats.masters === 1) {
-      return { text: "正常", color: "success" as const };
-    }
-    if (stats.masters === 0) {
-      return { text: "缺少主采集站", color: "warning" as const };
-    }
-    return { text: `${stats.masters} 个主采集站`, color: "error" as const };
-  }, [stats.masters]);
 
   const clearPollTimer = useCallback(() => {
     if (timerRef.current) {
@@ -616,35 +581,28 @@ export default function CollectManagePageView() {
         }
       />
 
-      <div className={styles.layout}>
-        <CollectOverview
-          stats={stats}
-          masterSite={masterSite}
-          masterStatus={masterStatus}
-        />
-
-        <div className={styles.cardPanel}>
-          <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
-            <div className={styles.toolbar}>
-              <Space size={[8, 8]} wrap>
-                <span className={styles.toolbarHint}>
-                  共 {siteList.length} 个采集站
-                  {selectedCount > 0 ? ` · 已选 ${selectedCount}` : ""}
-                </span>
-                <Button onClick={selectAllSources}>全选</Button>
-                <Button onClick={invertSelection}>反选</Button>
-                <Button disabled={selectedCount === 0} onClick={clearSelection}>
-                  清空选择
-                </Button>
-              </Space>
-              <Space size={[8, 8]} wrap>
-                <Button
-                  loading={batchStateUpdating}
-                  disabled={selectedCount === 0}
-                  onClick={() => void batchChangeSourceState(true)}
-                >
-                  批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
-                </Button>
+      <div className={styles.cardPanel}>
+        <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
+          <div className={styles.toolbar}>
+            <Space size={[8, 8]} wrap>
+              <span className={styles.toolbarHint}>
+                共 {siteList.length} 个采集站
+                {selectedCount > 0 ? ` · 已选 ${selectedCount}` : ""}
+              </span>
+              <Button onClick={selectAllSources}>全选</Button>
+              <Button onClick={invertSelection}>反选</Button>
+              <Button disabled={selectedCount === 0} onClick={clearSelection}>
+                清空选择
+              </Button>
+            </Space>
+            <Space size={[8, 8]} wrap>
+              <Button
+                loading={batchStateUpdating}
+                disabled={selectedCount === 0}
+                onClick={() => void batchChangeSourceState(true)}
+              >
+                批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
+              </Button>
                 <Popconfirm
                   title="批量禁用采集站？"
                   description="禁用后会停止选中采集站的后续请求，已请求数据会继续入库，并阻止后续批量/自动采集调度。"
@@ -750,7 +708,6 @@ export default function CollectManagePageView() {
               />
             </div>
           )}
-        </div>
       </div>
 
       <SourceFormModal

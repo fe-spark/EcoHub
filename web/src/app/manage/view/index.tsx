@@ -10,6 +10,7 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import CollectOverview from "@/app/manage/collect/view/collect-overview";
 import styles from "./index.module.less";
 
 const quickEntries = [
@@ -53,9 +54,14 @@ const quickEntries = [
 export default function ManagePageView() {
   return (
     <div className={styles.dashboard}>
-      <ManagePageHeader title="管理后台" />
+      <ManagePageHeader
+        title="工作台"
+        description="采集运行概况与常用入口。"
+      />
 
-      <Card className={styles.panelCard}>
+      <CollectOverview />
+
+      <Card className={styles.panelCard} title="快捷入口" size="small">
         <section className={styles.sectionBlock}>
           <div className={styles.entryGrid}>
             {quickEntries.map((entry) => {
