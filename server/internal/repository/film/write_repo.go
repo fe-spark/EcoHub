@@ -37,9 +37,11 @@ var searchTagsVisibleCacheState struct {
 
 var movieSourceMappingWriteMu sync.Mutex
 
-func filmIndexContentKeyUpsert() clause.OnConflict {
+// filmIndexMidUpsert 按 mid 冲突更新（主站 mid = 源站 vod_id）。
+// 旧库存 content_key=name_* 时仍能命中同一行，并在更新时懒升 content_key→vod_*。
+func filmIndexMidUpsert() clause.OnConflict {
 	return clause.OnConflict{
-		Columns:   []clause.Column{{Name: "content_key"}},
+		Columns:   []clause.Column{{Name: "mid"}},
 		DoUpdates: clause.AssignmentColumns(filmIndexUpsertUpdateColumns),
 	}
 }
@@ -70,10 +72,58 @@ func upsertFilmIndexesTx(tx *gorm.DB, list []model.FilmIndex) error {
 	if len(list) == 0 {
 		return nil
 	}
+	// 软删占键可安全释放；活跃行占键则报错，避免生产误改他片身份键。
+	if err := releaseConflictingContentKeysTx(tx, list); err != nil {
+		return err
+	}
 	sort.Slice(list, func(i, j int) bool {
-		return list[i].ContentKey < list[j].ContentKey
+		return list[i].Mid < list[j].Mid
 	})
-	return tx.Clauses(filmIndexContentKeyUpsert()).CreateInBatches(&list, upsertBatchSize).Error
+	return tx.Clauses(filmIndexMidUpsert()).CreateInBatches(&list, upsertBatchSize).Error
+}
+
+// releaseConflictingContentKeysTx 处理 content_key=目标 且 mid≠本批归属 的占用行：
+//   - 软删行：改名为 del_{id}，释放唯一键（常见、安全）；
+//   - 活跃行：直接报错，不自动抢键（脏数据需人工处理，避免写坏库存）。
+func releaseConflictingContentKeysTx(tx *gorm.DB, list []model.FilmIndex) error {
+	for _, item := range list {
+		key := strings.TrimSpace(item.ContentKey)
+		if key == "" || item.Mid <= 0 {
+			continue
+		}
+		var occupants []model.FilmIndex
+		if err := tx.Unscoped().Model(&model.FilmIndex{}).
+			Select("id", "mid", "deleted_at").
+			Where("content_key = ? AND mid <> ?", key, item.Mid).
+			Find(&occupants).Error; err != nil {
+			return err
+		}
+		for _, o := range occupants {
+			if !o.DeletedAt.Valid {
+				return fmt.Errorf("content_key %q 已被活跃 mid=%d 占用，无法写入 mid=%d（请检查脏数据或重置冲突片）",
+					key, o.Mid, item.Mid)
+			}
+			if err := tx.Unscoped().Model(&model.FilmIndex{}).
+				Where("id = ?", o.ID).
+				Update("content_key", fmt.Sprintf("del_%d", o.ID)).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// keyToMidFromIndexes 主站 mid 即全局 mid，映射可直接由本批索引构造（不依赖 DB content_key 是否已懒升）。
+func keyToMidFromIndexes(list []model.FilmIndex) map[string]int64 {
+	out := make(map[string]int64, len(list))
+	for _, item := range list {
+		key := strings.TrimSpace(item.ContentKey)
+		if key == "" || item.Mid <= 0 {
+			continue
+		}
+		out[key] = item.Mid
+	}
+	return out
 }
 
 func loadFilmIndexMidMapByContentKeys(contentKeys []string) map[string]int64 {
@@ -134,8 +184,8 @@ func saveFilmIndexesAndMappingsTx(tx *gorm.DB, list []model.FilmIndex) (map[stri
 		return nil, err
 	}
 
-	keyToMid := loadFilmIndexMidMapByContentKeysTx(tx, buildContentKeys(list))
-	if keyToMid == nil {
+	keyToMid := keyToMidFromIndexes(list)
+	if len(keyToMid) == 0 {
 		return nil, fmt.Errorf("load film index mids failed")
 	}
 	if err := saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(list, keyToMid)); err != nil {
@@ -181,22 +231,21 @@ func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) (
 func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, map[int64]model.MovieDetail, error) {
 	unchangedKeys := make(map[string]struct{})
 	oldDetailsByMid := make(map[int64]model.MovieDetail)
-	contentKeys := filmIndexContentKeys(infos)
-	if len(contentKeys) == 0 {
+	// 按 mid 命中旧行：兼容 content_key 仍为 name_* 的库存（无需 bulk 迁移）。
+	mids := filmIndexMIDs(infos)
+	if len(mids) == 0 {
 		return unchangedKeys, oldDetailsByMid, nil
 	}
 
-	existingInfos := reloadFilmIndexesByContentKeysTx(tx, contentKeys)
+	existingInfos := reloadFilmIndexesByMidsTx(tx, mids)
 	if len(existingInfos) == 0 {
 		return unchangedKeys, oldDetailsByMid, nil
 	}
 	changedAt := time.Now().Unix()
-	existingByKey := make(map[string]model.FilmIndex, len(existingInfos))
-	mids := make([]int64, 0, len(existingInfos))
+	existingByMid := make(map[int64]model.FilmIndex, len(existingInfos))
 	for _, existing := range existingInfos {
-		existingByKey[existing.ContentKey] = existing
 		if existing.Mid > 0 {
-			mids = append(mids, existing.Mid)
+			existingByMid[existing.Mid] = existing
 		}
 	}
 
@@ -206,7 +255,7 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 	}
 	oldDetailsByMid = existingDetailsByMid
 	for index := range infos {
-		existing, ok := existingByKey[infos[index].ContentKey]
+		existing, ok := existingByMid[infos[index].Mid]
 		if !ok || existing.UpdateStamp <= 0 {
 			continue
 		}
@@ -220,6 +269,10 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 		}
 		applyPersistedMasterCategory(&infos[index], existing)
 		if sameStoredMasterDetail(oldDetail, newDetail) {
+			// 业务无变更但 content_key 仍为 name_* 等旧值：强制写一次完成懒升（重采即升 vod_*）。
+			if strings.TrimSpace(existing.ContentKey) != strings.TrimSpace(infos[index].ContentKey) {
+				continue
+			}
 			unchangedKeys[infos[index].ContentKey] = struct{}{}
 			continue
 		}
@@ -490,9 +543,6 @@ func SaveDetailsForCollect(id string, list []model.MovieDetail) (CollectWriteRes
 
 func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (CollectWriteResult, error) {
 	var out CollectWriteResult
-	if err := EnsureContentKeySchemaReady(nil); err != nil {
-		return out, err
-	}
 	infoList, _, err := buildFilmIndexesFromDetails(id, list)
 	if err != nil {
 		return out, err
@@ -521,8 +571,9 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 			}
 		}
 
-		keyToMid := loadFilmIndexMidMapByContentKeysTx(tx, buildContentKeys(infoList))
-		if keyToMid == nil {
+		// 主站 mid=源站 id：直接由本批构造，避免未懒升行 content_key 仍为 name_* 时反查 miss。
+		keyToMid := keyToMidFromIndexes(infoList)
+		if len(keyToMid) == 0 {
 			return fmt.Errorf("load film index mids failed")
 		}
 		if err := saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(infoList, keyToMid)); err != nil {
@@ -712,9 +763,6 @@ func filmIndexContentKeys(infos []model.FilmIndex) []string {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
-	if err := EnsureContentKeySchemaReady(nil); err != nil {
-		return err
-	}
 	snapshot, err := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
 		return err
@@ -740,8 +788,8 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 			changed = true
 		}
 
-		keyToMid := loadFilmIndexMidMapByContentKeysTx(tx, buildContentKeys(infoList))
-		if keyToMid == nil {
+		keyToMid := keyToMidFromIndexes(infoList)
+		if len(keyToMid) == 0 {
 			return fmt.Errorf("load film index mids failed")
 		}
 		if err := saveMovieSourceMappingsTxE(tx, buildMovieSourceMappings(infoList, keyToMid)); err != nil {
@@ -798,6 +846,33 @@ func reloadFilmIndexesByContentKeysTx(tx *gorm.DB, contentKeys []string) []model
 	}
 	var infos []model.FilmIndex
 	if err := tx.Where("content_key IN ?", contentKeys).Find(&infos).Error; err != nil {
+		return nil
+	}
+	return infos
+}
+
+func filmIndexMIDs(infos []model.FilmIndex) []int64 {
+	mids := make([]int64, 0, len(infos))
+	seen := make(map[int64]struct{}, len(infos))
+	for _, info := range infos {
+		if info.Mid <= 0 {
+			continue
+		}
+		if _, ok := seen[info.Mid]; ok {
+			continue
+		}
+		seen[info.Mid] = struct{}{}
+		mids = append(mids, info.Mid)
+	}
+	return mids
+}
+
+func reloadFilmIndexesByMidsTx(tx *gorm.DB, mids []int64) []model.FilmIndex {
+	if len(mids) == 0 {
+		return nil
+	}
+	var infos []model.FilmIndex
+	if err := tx.Where("mid IN ?", mids).Find(&infos).Error; err != nil {
 		return nil
 	}
 	return infos
