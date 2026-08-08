@@ -9,8 +9,10 @@ import (
 	"server/internal/repository/support"
 )
 
+// filmIndexUpsertUpdateColumns 主站按 mid 冲突更新时写入的列。
+// 含 content_key：旧库 name_* 在被再次采集时懒升为 vod_*，无需启动 bulk 迁移。
 var filmIndexUpsertUpdateColumns = []string{
-	"source_id", "cid", "pid", "root_category_key", "category_key", "original_category", "name", "sub_title", "c_name", "class_tag",
+	"content_key", "source_id", "cid", "pid", "root_category_key", "category_key", "original_category", "name", "sub_title", "c_name", "class_tag",
 	"series_key", "area", "language", "year", "initial", "score",
 	"update_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp", "category_version", "rule_version",
 	"picture", "picture_slide", "actor", "director", "blurb", "updated_at", "deleted_at",

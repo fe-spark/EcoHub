@@ -738,10 +738,6 @@ func (s *collectLifecycleState) flushPending() error {
 	if err != nil {
 		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
 	}
-	// 主站写入已成功落库 → 主站已采集，收起「建议全量」提示（批量收尾路径）。
-	if err == nil && len(finalMasterMIDs) > 0 {
-		filmrepo.ClearContentKeyMigrationNotice()
-	}
 	return err
 }
 
@@ -767,10 +763,6 @@ func (s *collectLifecycleState) finishSourceAndFlush(source model.FilmSource) er
 		s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
 		return err
 	}
-	// 本批含主站写入且已成功落库 → 主站已采集，「建议全量」提示可收起。
-	if len(finalMasterMIDs) > 0 {
-		filmrepo.ClearContentKeyMigrationNotice()
-	}
 	return nil
 }
 
@@ -782,9 +774,9 @@ func (s *collectLifecycleState) runFlush(flush func([]int64, []int64) error) err
 	defer s.finishFlushing()
 
 	var err error
-	var finalMasterMIDs []int64
 	if pending != nil {
 		var finalMIDs []int64
+		var finalMasterMIDs []int64
 		finalMIDs, finalMasterMIDs, err = flushPendingSources(pending, affectedMIDs, masterMIDs)
 		if err != nil {
 			s.restorePendingFlush(pending, finalMIDs, finalMasterMIDs)
@@ -792,10 +784,6 @@ func (s *collectLifecycleState) runFlush(flush func([]int64, []int64) error) err
 	}
 	if err == nil {
 		err = flush(affectedMIDs, masterMIDs)
-	}
-	// 主站写入已成功落库 → 主站已采集，收起「建议全量」提示（批量收尾路径）。
-	if err == nil && len(finalMasterMIDs) > 0 {
-		filmrepo.ClearContentKeyMigrationNotice()
 	}
 	return err
 }
@@ -1371,10 +1359,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 					progress.Status = progressStatusDone
 				}
 			})
-			// 主站全量成功收尾后收起「已迁移请全量」公告
-			if isMasterFullCollect && originalErr == nil && flushErr == nil {
-				filmrepo.ClearContentKeyMigrationNotice()
-			}
 			// 单站采集（flushAtEnd）在收尾后直接发批次摘要
 			emitBatchSummaryForSources(batch, model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, flushErr)
 			return

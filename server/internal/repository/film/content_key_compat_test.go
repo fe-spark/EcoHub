@@ -1,8 +1,10 @@
 package film
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/model"
 
@@ -13,7 +15,6 @@ import (
 
 func openContentKeyTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	// 每个测试独立 in-memory 库
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
@@ -21,13 +22,13 @@ func openContentKeyTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.FilmIndex{}, &model.FilmListSnapshot{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FilmIndex{}, &model.MovieDetailInfo{}); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
 	return gdb
 }
 
-func seedIndex(t *testing.T, gdb *gorm.DB, mid int64, contentKey, name string) model.FilmIndex {
+func seedIndexWithKey(t *testing.T, gdb *gorm.DB, mid int64, contentKey, name string) model.FilmIndex {
 	t.Helper()
 	row := model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{
@@ -35,7 +36,10 @@ func seedIndex(t *testing.T, gdb *gorm.DB, mid int64, contentKey, name string) m
 			ContentKey: contentKey,
 			SourceId:   "master",
 		},
-		FilmIndexContent: model.FilmIndexContent{Name: name},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:        name,
+			UpdateStamp: time.Now().Unix(),
+		},
 	}
 	if err := gdb.Create(&row).Error; err != nil {
 		t.Fatalf("seed index mid=%d key=%s: %v", mid, contentKey, err)
@@ -43,163 +47,204 @@ func seedIndex(t *testing.T, gdb *gorm.DB, mid int64, contentKey, name string) m
 	return row
 }
 
-func TestMigrateLegacyContentKeysBasic(t *testing.T) {
-	gdb := openContentKeyTestDB(t)
-	seedIndex(t, gdb, 87682, "name_abc", "烬九州第四季")
-	seedIndex(t, gdb, 100, "name_xyz", "别的片")
-
-	n, err := MigrateLegacyContentKeys(gdb)
+func seedDetail(t *testing.T, gdb *gorm.DB, mid int64, detail model.MovieDetail) {
+	t.Helper()
+	data, err := json.Marshal(detail)
 	if err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if n != 2 {
-		t.Fatalf("want 2 migrated, got %d", n)
-	}
-
-	var keys []string
-	if err := gdb.Model(&model.FilmIndex{}).Order("mid").Pluck("content_key", &keys).Error; err != nil {
 		t.Fatal(err)
 	}
-	if len(keys) != 2 || keys[0] != "vod_100" || keys[1] != "vod_87682" {
-		t.Fatalf("keys=%v want [vod_100 vod_87682]", keys)
-	}
-
-	// 幂等
-	n2, err := MigrateLegacyContentKeys(gdb)
-	if err != nil {
-		t.Fatalf("migrate2: %v", err)
-	}
-	if n2 != 0 {
-		t.Fatalf("idempotent want 0, got %d", n2)
-	}
-	legacy, err := HasLegacyContentKeyInventory(gdb)
-	if err != nil || legacy {
-		t.Fatalf("legacy after migrate: legacy=%v err=%v", legacy, err)
+	if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, SourceId: "master", Content: string(data)}).Error; err != nil {
+		t.Fatalf("seed detail mid=%d: %v", mid, err)
 	}
 }
 
-func TestMigrateLegacyContentKeysFreesSoftDeletedOccupant(t *testing.T) {
+// TestUpsertByMidLazilyUpgradesContentKey 旧 name_* 行按 mid 命中后懒升 content_key→vod_*。
+func TestUpsertByMidLazilyUpgradesContentKey(t *testing.T) {
 	gdb := openContentKeyTestDB(t)
+	seedIndexWithKey(t, gdb, 87682, "name_oldhash", "烬九州第四季")
 
-	// 软删行占着 vod_1
-	tomb := seedIndex(t, gdb, 999, "vod_1", "tomb")
+	incoming := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:        87682,
+			ContentKey: "vod_87682",
+			SourceId:   "master",
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:        "烬九州第四季",
+			UpdateStamp: time.Now().Unix(),
+		},
+	}}
+	if err := upsertFilmIndexesTx(gdb, incoming); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	var row model.FilmIndex
+	if err := gdb.Where("mid = ?", 87682).First(&row).Error; err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if row.ContentKey != "vod_87682" {
+		t.Fatalf("content_key want vod_87682 got %s", row.ContentKey)
+	}
+	var n int64
+	if err := gdb.Model(&model.FilmIndex{}).Count(&n).Error; err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 row after upsert, got %d", n)
+	}
+}
+
+// TestUpsertByMidFreesSoftDeletedContentKey 软删占用 vod_* 时先释放再懒升。
+func TestUpsertByMidFreesSoftDeletedContentKey(t *testing.T) {
+	gdb := openContentKeyTestDB(t)
+	tomb := seedIndexWithKey(t, gdb, 999, "vod_1", "tomb")
 	if err := gdb.Delete(&tomb).Error; err != nil {
 		t.Fatalf("soft delete: %v", err)
 	}
+	seedIndexWithKey(t, gdb, 1, "name_one", "live")
 
-	// 活跃 name_* 要迁到 vod_1
-	seedIndex(t, gdb, 1, "name_one", "live")
-
-	n, err := MigrateLegacyContentKeys(gdb)
-	if err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
-	if n != 1 {
-		t.Fatalf("want 1 migrated, got %d", n)
+	incoming := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:        1,
+			ContentKey: "vod_1",
+			SourceId:   "master",
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:        "live",
+			UpdateStamp: time.Now().Unix(),
+		},
+	}}
+	if err := upsertFilmIndexesTx(gdb, incoming); err != nil {
+		t.Fatalf("upsert: %v", err)
 	}
 
 	var live model.FilmIndex
 	if err := gdb.Where("mid = ?", 1).First(&live).Error; err != nil {
-		t.Fatal(err)
+		t.Fatalf("live: %v", err)
 	}
 	if live.ContentKey != "vod_1" {
-		t.Fatalf("live key=%q", live.ContentKey)
+		t.Fatalf("live content_key=%s", live.ContentKey)
 	}
 
-	var soft model.FilmIndex
-	if err := gdb.Unscoped().Where("id = ?", tomb.ID).First(&soft).Error; err != nil {
+	var tombKey string
+	if err := gdb.Unscoped().Model(&model.FilmIndex{}).
+		Select("content_key").
+		Where("id = ?", tomb.ID).
+		Scan(&tombKey).Error; err != nil {
 		t.Fatal(err)
 	}
-	if soft.ContentKey != fmt.Sprintf("del_%d", tomb.ID) {
-		t.Fatalf("tomb key=%q want del_%d", soft.ContentKey, tomb.ID)
+	want := fmt.Sprintf("del_%d", tomb.ID)
+	if tombKey != want {
+		t.Fatalf("tomb key=%s want %s", tombKey, want)
 	}
 }
 
-func TestMigrateLegacyContentKeysSkipsOccupiedActiveKey(t *testing.T) {
+// TestUpsertByMidRejectsLiveOccupantContentKey 活跃行占着目标 key 时拒绝写入，不抢键。
+func TestUpsertByMidRejectsLiveOccupantContentKey(t *testing.T) {
 	gdb := openContentKeyTestDB(t)
-	// mid=10 name 待迁 → vod_10
-	seedIndex(t, gdb, 10, "name_ten", "need")
-	// mid=11 脏数据占用 content_key=vod_10
-	seedIndex(t, gdb, 11, "vod_10", "occupier")
+	seedIndexWithKey(t, gdb, 999, "vod_1", "wrong-owner")
+	seedIndexWithKey(t, gdb, 1, "name_one", "live")
 
-	n, err := MigrateLegacyContentKeys(gdb)
+	incoming := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:        1,
+			ContentKey: "vod_1",
+			SourceId:   "master",
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:        "live",
+			UpdateStamp: time.Now().Unix(),
+		},
+	}}
+	if err := upsertFilmIndexesTx(gdb, incoming); err == nil {
+		t.Fatal("expect error when live row occupies content_key")
+	}
+
+	// 冲突方与本行均未改
+	var wrong model.FilmIndex
+	if err := gdb.Where("mid = ?", 999).First(&wrong).Error; err != nil {
+		t.Fatal(err)
+	}
+	if wrong.ContentKey != "vod_1" {
+		t.Fatalf("live occupant must stay, got %s", wrong.ContentKey)
+	}
+	var live model.FilmIndex
+	if err := gdb.Where("mid = ?", 1).First(&live).Error; err != nil {
+		t.Fatal(err)
+	}
+	if live.ContentKey != "name_one" {
+		t.Fatalf("target mid content_key must stay name_*, got %s", live.ContentKey)
+	}
+}
+
+// TestLegacyContentKeyForcesWriteEvenIfBusinessSame 业务无变更但 name_*→vod_* 必须强制写。
+func TestLegacyContentKeyForcesWriteEvenIfBusinessSame(t *testing.T) {
+	gdb := openContentKeyTestDB(t)
+	seedIndexWithKey(t, gdb, 100, "name_legacy", "片A")
+	detail := model.MovieDetail{
+		Id: 100, Name: "片A",
+		PlayFrom:        []string{"线路1"},
+		PlayList:        [][]model.MovieUrlInfo{{{Episode: "1", Link: "http://x/1"}}},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "完结", State: "正片"},
+	}
+	seedDetail(t, gdb, 100, detail)
+
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100, ContentKey: "vod_100", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片A", UpdateStamp: time.Now().Unix()},
+	}}
+	detailsByKey := map[string]model.MovieDetail{"vod_100": detail}
+	unchanged, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey)
 	if err != nil {
-		t.Fatalf("migrate: %v", err)
+		t.Fatalf("stamp: %v", err)
 	}
-	if n != 0 {
-		t.Fatalf("occupied target should skip, got n=%d", n)
-	}
-	var row model.FilmIndex
-	if err := gdb.Where("mid = ?", 10).First(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	if row.ContentKey != "name_ten" {
-		t.Fatalf("should remain name_ten, got %q", row.ContentKey)
-	}
-	legacy, _ := HasLegacyContentKeyInventory(gdb)
-	if !legacy {
-		t.Fatal("expect residual legacy")
+	if _, ok := unchanged["vod_100"]; ok {
+		t.Fatal("legacy content_key must force write, must not be unchanged")
 	}
 }
 
-func TestMigrateLegacyContentKeysUpdatesSnapshots(t *testing.T) {
+// TestStampUnchangedWhenContentKeyAlreadyVod 已是 vod_* 且业务无变更 → unchanged。
+func TestStampUnchangedWhenContentKeyAlreadyVod(t *testing.T) {
 	gdb := openContentKeyTestDB(t)
-	seedIndex(t, gdb, 3, "name_snap", "片")
-
-	snap := model.FilmListSnapshot{
-		SnapshotVersion: "v1",
-		Mid:             3,
-		ContentKey:      "name_snap",
-		Name:            "片",
+	seedIndexWithKey(t, gdb, 100, "vod_100", "片A")
+	detail := model.MovieDetail{
+		Id: 100, Name: "片A",
+		PlayFrom:        []string{"线路1"},
+		PlayList:        [][]model.MovieUrlInfo{{{Episode: "1", Link: "http://x/1"}}},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "完结", State: "正片"},
 	}
-	if err := gdb.Create(&snap).Error; err != nil {
-		t.Fatal(err)
-	}
+	seedDetail(t, gdb, 100, detail)
 
-	n, err := MigrateLegacyContentKeys(gdb)
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100, ContentKey: "vod_100", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片A", UpdateStamp: time.Now().Unix()},
+	}}
+	// query 噪声不应触发业务变更
+	detailsByKey := map[string]model.MovieDetail{
+		"vod_100": {
+			Id: 100, Name: "片A",
+			PlayFrom:        []string{"线路1"},
+			PlayList:        [][]model.MovieUrlInfo{{{Episode: "1", Link: "http://x/1?sig=new"}}},
+			MovieDescriptor: model.MovieDescriptor{Remarks: "完结", State: "正片"},
+		},
+	}
+	unchanged, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey)
 	if err != nil {
-		t.Fatalf("migrate: %v", err)
+		t.Fatalf("stamp: %v", err)
 	}
-	if n != 1 {
-		t.Fatalf("n=%d", n)
-	}
-	var got model.FilmListSnapshot
-	if err := gdb.Where("mid = ?", 3).First(&got).Error; err != nil {
-		t.Fatal(err)
-	}
-	if got.ContentKey != "vod_3" {
-		t.Fatalf("snapshot key=%q", got.ContentKey)
+	if _, ok := unchanged["vod_100"]; !ok {
+		t.Fatalf("expect unchanged when already vod_*, got %v", unchanged)
 	}
 }
 
-func TestMigrateLegacyContentKeysIdempotentEmpty(t *testing.T) {
-	gdb := openContentKeyTestDB(t)
-	seedIndex(t, gdb, 1, "vod_1", "already new")
-	n, err := MigrateLegacyContentKeys(gdb)
-	if err != nil || n != 0 {
-		t.Fatalf("n=%d err=%v", n, err)
-	}
-}
-
-func TestEnsureContentKeySchemaReadyAfterMigrate(t *testing.T) {
-	gdb := openContentKeyTestDB(t)
-	seedIndex(t, gdb, 42, "name_x", "x")
-	InvalidateContentKeySchemaCache()
-	if err := EnsureContentKeySchemaReady(gdb); err != nil {
-		t.Fatalf("ensure: %v", err)
-	}
-	// 第二次应快速通过
-	if err := EnsureContentKeySchemaReady(gdb); err != nil {
-		t.Fatalf("ensure2: %v", err)
-	}
-}
-
-func TestEnsureContentKeySchemaReadyBlocksResidual(t *testing.T) {
-	gdb := openContentKeyTestDB(t)
-	seedIndex(t, gdb, 10, "name_ten", "need")
-	seedIndex(t, gdb, 11, "vod_10", "occupier")
-	InvalidateContentKeySchemaCache()
-	if err := EnsureContentKeySchemaReady(gdb); err == nil {
-		t.Fatal("expect error on residual")
+// TestKeyToMidFromIndexes 映射不依赖 DB content_key。
+func TestKeyToMidFromIndexes(t *testing.T) {
+	m := keyToMidFromIndexes([]model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, ContentKey: "vod_1"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, ContentKey: "vod_2"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 0, ContentKey: "vod_0"}},
+	})
+	if len(m) != 2 || m["vod_1"] != 1 || m["vod_2"] != 2 {
+		t.Fatalf("map=%v", m)
 	}
 }

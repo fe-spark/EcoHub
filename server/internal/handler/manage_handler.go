@@ -8,7 +8,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmrepo "server/internal/repository/film"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -29,17 +28,8 @@ type AdminNotice struct {
 }
 
 func (h *ManageHandler) ManageIndex(c *gin.Context) {
-	notices := make([]AdminNotice, 0, 2)
-	for _, n := range filmrepo.ListAdminContentKeyNotices() {
-		notices = append(notices, AdminNotice{
-			Level:      n.Level,
-			Code:       n.Code,
-			Message:    n.Message,
-			ActionPath: n.ActionPath,
-			ActionText: n.ActionText,
-		})
-	}
-	dto.Success(gin.H{"notices": notices}, "后台管理中心", c)
+	// notices 预留后台顶部公告；ContentKey 已改为写路径懒兼容，不再在启动时 bulk 迁移。
+	dto.Success(gin.H{"notices": []AdminNotice{}}, "后台管理中心", c)
 }
 
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------

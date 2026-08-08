@@ -260,12 +260,8 @@ func ClearAllSearchTagsCache() {
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() error {
-	// 清库后 ContentKey 缓存与迁移公告一并清理。
-	defer func() {
-		InvalidateContentKeySchemaCache()
-		ClearContentKeyMigrationNotice()
-		ClearContentKeyMigrationFailed()
-	}()
+	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key。
+	defer ClearLegacyContentKeyNotices()
 	tables := []string{
 		model.TableMovieDetail,
 		model.TableFilmIndex,

@@ -1,73 +1,61 @@
-# v1.1.5-beta.4
+# v1.1.5-beta.5
 
-> **预发布（prerelease）**：修复百万级库存启动卡死，**不会**覆盖 `:latest`。
+> **预发布（prerelease）**：取消启动 bulk ContentKey 迁移，改为写路径懒兼容，**不会**覆盖 `:latest`。
 
 镜像：
 
-- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.4`
-- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.4`
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.5`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.5`
 
-## 相对 beta.3
+## 相对 beta.4 / beta.3
 
-- **修复**：ContentKey 迁移改为 MySQL 批量 SQL（软删释放 + 每 10 万行分块 `UPDATE ... NOT EXISTS`），百万级库存由「逐行 SQL 数十分钟」降为「十余条 SQL 秒级完成」，不再启动卡死
-- 迁移日志新增 `migrate start` 与分块 `migrate progress`
-- SQLite 逐行路径仅保留给单测
+- **取消**启动 / 写库前 bulk 迁移 `name_*` → `vod_*`（不再卡启动、不再挡写库）
+- **写路径兼容**：主站按 `mid`（= 源站 vod_id）冲突更新；重采即懒升 `content_key`（业务无变更也会升）；未再采的旧行保持 `name_*`，展示/播放不受影响
+- 新片仍用 `vod_{源站id}`，避免片名误合并
+- 软删占键自动释放；**活跃行**占着目标 `content_key` 时写库失败并打日志（不抢键）
+- 历史误合并片需再次采集对应 vod 后才会拆成多条
 
 ## 破坏性变更（BREAKING）
 
 ### 主站 `ContentKey` 身份键
 
-- **行为变更**：指纹优先 `vod_{源站 vod_id}`，不再用规范化片名做主站主键。
-- **启动自动迁移**：`name_*`+`mid>0` → `vod_{mid}`（幂等），**无需清库**。曾误合并的第二部片需再采才会出现。
-- **后台公告**：建议全量采集；迁移失败/残留则提示重置。
-- **建议步骤**：部署启动 → 看后台公告 → **建议主站全量采集**。
-- **不可混版本**；可选仍可重置站点后全量重建。
+- **行为变更**：新写入优先 `vod_{源站 vod_id}`。
+- **旧库存**：不改写；随采集懒升。
+- **建议**：升级后正常增量即可；若曾出现片名误合并，对相关片或主站做一次全量采集。
 
 ## 修复
 
+- 启动迁移卡死 / 迁移体验差（改为不迁旧数据）
 - 主站更新列表反复推送相同影片（ContentKey 片名误合并）
-- 百万+ 库存启动迁移卡死（改为 MySQL 批量分块迁移）
-- 后台文案：「恢复默认值」更名为「重置站点数据」，明确为清库重建而非仅恢复配置字段
-- 根目录 / server `.env.example` 与 compose 对齐 Telegram 代理与采集写阀变量
+- 后台文案：「恢复默认值」→「重置站点数据」
+- `.env.example` / compose 对齐 Telegram 代理与采集写阀变量
+
+## 部署（beta.5）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.5
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.5
+# 可选：TELEGRAM_PROXY=http://host.docker.internal:7890
+# 1. 建议先停自动/定时采集
+# 2. 拉取并启动（无需清库、无需启动迁移等待）
+docker compose pull && docker compose up -d
+# 3. 正常增量采集即可；曾误合并的片建议主站全量采一次
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
+# v1.1.5-beta.4
+
+预发布：曾用 MySQL 批量 bulk 迁移 ContentKey；**beta.5 起取消 bulk 迁移**，改写路径懒兼容。镜像：`…:v1.1.5-beta.4`。
 
 ---
 
 # v1.1.5-beta.3
 
-> **预发布（prerelease）**：验证 ContentKey 自动迁移与后台公告，**不会**覆盖 `:latest`。
-
-镜像：
-
-- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.3`
-- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.3`
-
-## 相对 beta.2
-
-- 启动/后台入口自动迁移 `name_*` → `vod_{mid}`（释放软删占用键；同步快照）
-- 后台公告：迁移成功（建议全量，14 天或主站收尾后消失）/ 残留或失败（去重置）
-- 写库兜底拦截未迁净库存
-
-## 修复
-
-- 主站更新列表反复推送相同影片（ContentKey 片名误合并）
-- 后台文案：「恢复默认值」更名为「重置站点数据」，明确为清库重建而非仅恢复配置字段
-- 根目录 / server `.env.example` 与 compose 对齐 Telegram 代理与采集写阀变量
-
-## 部署（beta）
-
-```bash
-# 将 compose 中的镜像 tag 从 latest 改为 beta，例如：
-#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.2
-#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.2
-# 可选：.env 中配置 TELEGRAM_PROXY=http://host.docker.internal:7890
-# 1. 停自动采集 / 定时采集
-# 2. 拉取并启动 beta 镜像（勿与旧 server 混连同一库）
-docker compose pull && docker compose up -d
-# 3. 管理后台：网站配置 → 重置站点数据（密码确认）
-# 4. 重新配置站点后，主站全量采集
-```
-
-默认账号：`admin / admin`（管理员）、`guest / guest`（只读）。正式部署请修改密码与 `JWT_SECRET`。
+预发布：ContentKey 自动迁移与后台公告。镜像：`…:v1.1.5-beta.3`。
 
 ---
 
