@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"log"
 
 	"server/internal/model"
@@ -20,45 +19,6 @@ func clearCategorySyncRedisCaches() {
 	filmrepo.ClearAllSearchTagsCache()
 	filmrepo.ClearTVBoxListCache()
 	repository.ClearIndexPageCache()
-}
-
-func resetDefaultSiteData() error {
-	if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
-		return fmt.Errorf("重置默认网站配置失败: %w", err)
-	}
-	if err := repository.SaveBanners(defaultBanners()); err != nil {
-		return fmt.Errorf("重置默认轮播失败: %w", err)
-	}
-	if err := repository.ResetMappingRules(); err != nil {
-		return fmt.Errorf("重置默认映射规则失败: %w", err)
-	}
-	if err := repository.ResetBuiltinAccounts(); err != nil {
-		return fmt.Errorf("重置默认账号失败: %w", err)
-	}
-	return nil
-}
-
-func resetDefaultCollectSources() error {
-	if err := repository.ResetCollectSources(defaultFilmSources()); err != nil {
-		return fmt.Errorf("重置默认采集源失败: %w", err)
-	}
-	return nil
-}
-
-func resetDefaultCronTasks() error {
-	for _, task := range repository.GetAllFilmTask() {
-		spider.RemoveCronByTaskId(task.Id)
-	}
-	tasks := defaultFilmTasks()
-	if err := repository.ResetFilmTasks(tasks); err != nil {
-		return fmt.Errorf("重置默认定时任务失败: %w", err)
-	}
-	for _, task := range tasks {
-		if err := registerRuntimeTask(task); err != nil {
-			return fmt.Errorf("注册默认定时任务失败: %w", err)
-		}
-	}
-	return nil
 }
 
 func finalizeCategorySync() {
@@ -98,24 +58,32 @@ func (s *SpiderService) AutoCollect(time int) {
 	go spider.AutoCollect(time)
 }
 
-// ClearFilms 重置站点业务数据：清空影视/采集派生数据，并恢复默认配置与内置采集源等。
-func (s *SpiderService) ClearFilms() error {
+// ClearFilms 重置站点业务数据：清空影视/采集派生数据。
+// 分类属于采集数据，重置后重新全量采集时自动从主站同步，无需在此重建。
+// 注意：不重置任何账号与密码，也不恢复任何配置类数据（网站配置、轮播、映射规则、采集源、定时任务均保留）。
+// 全程按关键节点上报真实进度，供前端轮询展示。
+func (s *SpiderService) ClearFilms() (retErr error) {
+	filmrepo.StartResetProgress()
+	defer func() {
+		if retErr != nil {
+			filmrepo.FinishResetProgress(retErr)
+		}
+	}()
 	if err := spider.ClearSpider(); err != nil {
 		return err
 	}
-	if err := resetDefaultSiteData(); err != nil {
-		return err
-	}
-	if err := resetDefaultCollectSources(); err != nil {
-		return err
-	}
-	if err := resetDefaultCronTasks(); err != nil {
-		return err
-	}
-	if err := s.FilmClassCollect(); err != nil {
-		return err
-	}
+	filmrepo.FinishResetProgress(nil)
 	return nil
+}
+
+// ResetProgress 返回数据重置实时进度
+func (s *SpiderService) ResetProgress() filmrepo.ResetProgress {
+	return filmrepo.GetResetProgress()
+}
+
+// ResetImpactStats 返回数据重置影响面统计（将清空的数据量）
+func (s *SpiderService) ResetImpactStats() filmrepo.ResetImpactStats {
+	return filmrepo.GetResetImpactStats()
 }
 
 // SyncCollect 同步主站单片采集

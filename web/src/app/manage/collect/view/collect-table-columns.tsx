@@ -37,6 +37,7 @@ export function createCollectTableColumns({
     {
       title: "站点",
       dataIndex: "name",
+      width: 280,
       align: "left",
       render: (name: string, record) => (
         <Flex vertical gap={6}>
@@ -49,15 +50,24 @@ export function createCollectTableColumns({
               {record.state ? "已启用" : "已禁用"}
             </Tag>
           </Space>
-          <Typography.Link href={record.uri} target="_blank" rel="noopener noreferrer">
-            {record.uri}
-          </Typography.Link>
+          <Tooltip title={record.uri}>
+            <Typography.Link
+              href={record.uri}
+              target="_blank"
+              rel="noopener noreferrer"
+              ellipsis
+              style={{ maxWidth: 248 }}
+            >
+              {record.uri}
+            </Typography.Link>
+          </Tooltip>
         </Flex>
       ),
     },
     {
       title: "采集进度",
       dataIndex: "progress",
+      width: 170,
       render: (_, record) => {
         const progress = record.progress;
         if (!progress) {
@@ -135,6 +145,7 @@ export function createCollectTableColumns({
     {
       title: "上次采集",
       dataIndex: "lastCollectTime",
+      width: 160,
       align: "center",
       render: (value?: string) => (
         value
@@ -145,6 +156,7 @@ export function createCollectTableColumns({
     {
       title: "图片同步",
       dataIndex: "syncPictures",
+      width: 90,
       align: "center",
       render: (value: boolean, record) => {
         const isRunning = activeCollectIds.includes(record.id);
@@ -165,6 +177,7 @@ export function createCollectTableColumns({
     {
       title: "启用状态",
       dataIndex: "state",
+      width: 110,
       align: "center",
       render: (value: boolean, record) => {
         const isRunning = activeCollectIds.includes(record.id);
@@ -202,11 +215,13 @@ export function createCollectTableColumns({
     {
       title: "请求间隔",
       dataIndex: "interval",
+      width: 100,
       align: "center",
       render: (value: number) => <Tag bordered={false}>{value > 0 ? `${value} ms` : "无限制"}</Tag>,
     },
     {
       title: "采集时长",
+      width: 110,
       align: "center",
       render: (_, record) => {
         const isRunning = activeCollectIds.includes(record.id);
@@ -227,6 +242,7 @@ export function createCollectTableColumns({
     {
       title: "操作",
       key: "action",
+      width: 150,
       fixed: "right",
       align: "center",
       render: (_, record) => {

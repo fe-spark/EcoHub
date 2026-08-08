@@ -1,7 +1,6 @@
 package repository
 
 import (
-	"fmt"
 	"log"
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -21,15 +20,6 @@ func ExistUserTable() bool {
 func InitBuiltinAccounts() {
 	ensureBuiltinUser(config.DefaultAdminUser, config.DefaultAdminPass, "administrator@gmail.com", "Spark", model.UserRoleAdmin)
 	ensureBuiltinUser(config.DefaultVisitorUser, config.DefaultVisitorPass, "guest@example.com", "访客", model.UserRoleVisitor)
-}
-
-func ResetBuiltinAccounts() error {
-	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.TableUser)).Error; err != nil {
-		return err
-	}
-	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
-	InitBuiltinAccounts()
-	return nil
 }
 
 func ensureBuiltinUser(userName, password, email, nickName string, role int) {

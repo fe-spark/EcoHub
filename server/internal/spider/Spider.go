@@ -1982,11 +1982,15 @@ func AutoCollectTriggered(trigger string, h int) {
 
 // ClearSpider 删除所有已采集的影片信息，并与采集写库互斥。
 func ClearSpider() error {
+	filmrepo.ReportResetProgress(5, "正在停止采集任务")
 	StopAllTasks()
 	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
 		return err
 	}
+	filmrepo.ReportResetProgress(15, "正在清空数据")
 	return collectLifecycle.runExclusive(func() error {
+		// 清空采集统计合并缓冲，防止清表后内存 pending 的旧统计回写复活
+		repository.ResetCollectStatsCoalescer()
 		return filmrepo.FilmZero()
 	})
 }

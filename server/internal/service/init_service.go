@@ -248,33 +248,6 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 	}
 }
 
-func registerRuntimeTask(task model.FilmCollectTask) error {
-	if !task.State {
-		return repository.UpdateFilmTask(task)
-	}
-
-	var cid cron.EntryID
-	var err error
-	switch task.Model {
-	case 0:
-		cid, err = spider.AddAutoUpdateCron(task.Id, task.Spec)
-	case 1:
-		cid, err = spider.AddFilmUpdateCron(task.Id, task.Spec)
-	case 2:
-		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
-	case 3:
-		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
-	default:
-		return fmt.Errorf("不支持的定时任务类型: %d", task.Model)
-	}
-	if err != nil {
-		return err
-	}
-	task.Cid = cid
-	spider.RegisterTaskCid(task.Id, task.Cid)
-	return repository.UpdateFilmTask(task)
-}
-
 func (s *InitService) createDefaultTasks() {
 	for _, task := range defaultFilmTasks() {
 		s.registerTask(task)
