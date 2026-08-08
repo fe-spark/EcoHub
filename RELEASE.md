@@ -1,3 +1,40 @@
+# v1.1.5-beta.7
+
+> **预发布（prerelease）**：修复连续采集更新列表反复推送相同影片，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.7`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.7`
+
+## 相对 beta.6
+
+- **附属站更新列表去噪**：同一 `match_key` 命中多个 mid（如「烬九州：第二季」与「烬九州第二季」标点双包）时只通知最优 mid，避免一次变更推两条近似片名
+- **FirstInsert 通知**：写库前若该附属站已为该 mid 写过 playlist，仅扩展 match key 不再当「新片上线」刷屏
+- **播放源摘要刷新收窄**：只刷新本批有 playlist 写入的 mid，不再把页内全部匹配片刷进 finalizer（消除「每次 mid_count=76」类误导日志与多余快照压力）
+- **诊断工具**：`server/cmd/diagnose-notify`（`scripts/diagnose-notify.sh`）分析当天变更批次、库/源站结构对比与双次拉取抖动
+
+## 修复
+
+- 连续批量采集 TG「更新列表」反复出现同一批/近似片名影片
+- 附属站 match_key 一对多 mid 导致 stamp/通知扩散
+- 收尾 PlaySummary / 快照范围过宽
+
+## 部署（beta.7）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.7
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.7
+docker compose pull && docker compose up -d
+```
+
+可选：库存中标点双包片（同一季两个 `vod_*`）仍可能并存于前台，可按 `movie_match_key` 多 mid 分组人工合并；通知侧已不再双推。
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.6
 
 > **预发布（prerelease）**：Telegram 通知健壮性与系统日志结构化升级，**不会**覆盖 `:latest`。

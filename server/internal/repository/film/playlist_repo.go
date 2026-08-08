@@ -63,12 +63,16 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 		return nil, nil
 	}
 
+	// 写库前记录「该站是否已为 mid 写过 playlist」，供 FirstInsert 通知降噪
+	// （若写库后再查，本批新 key 已被写入，会把真·首次也误判为 key 扩展）
+	preHasPlaylist := preflightSourcePlaylistPresence(sourceID, keysByMovieKey)
+
 	changes, err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey)
 	if err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
 		return nil, err
 	}
-	changedMids, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
+	changedMids, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes, preHasPlaylist)
 	if err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
 		return nil, err
@@ -81,8 +85,32 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 	return changedMids, nil
 }
 
+// preflightSourcePlaylistPresence 在写入前，按本批 movie_key 可能命中的 mid，查询该附属站是否已有 playlist。
+func preflightSourcePlaylistPresence(sourceID string, keysByMovieKey map[string]struct{}) map[int64]bool {
+	keys := make([]string, 0, len(keysByMovieKey))
+	for k := range keysByMovieKey {
+		keys = append(keys, k)
+	}
+	midsByKey := loadMidCandidatesByMatchKeys(keys)
+	mids := make([]int64, 0, len(midsByKey))
+	seen := make(map[int64]struct{})
+	for _, list := range midsByKey {
+		for _, mid := range list {
+			if mid <= 0 {
+				continue
+			}
+			if _, ok := seen[mid]; ok {
+				continue
+			}
+			seen[mid] = struct{}{}
+			mids = append(mids, mid)
+		}
+	}
+	return sourceHasPlaylistForMIDs(sourceID, mids)
+}
+
 // scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳，并返回有变更的全局 mid。
-func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) ([]int64, error) {
+func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange, preHasPlaylist map[int64]bool) ([]int64, error) {
 	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
 		return nil, err
@@ -90,12 +118,71 @@ func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.Movie
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
 		return nil, err
 	}
-	changedMids, err := touchSlavePlaylistUpdateStamps(changes)
+	// 更新列表 mid：仅结构变更 / 真·首次匹配（一对一 mid，见 buildSlavePlaylistUpdateStamps）
+	changedMids, err := touchSlavePlaylistUpdateStamps(sourceID, changes, preHasPlaylist)
 	if err != nil {
 		return nil, err
 	}
-	SchedulePlaySummaryRefresh(infos...)
+	// 播放源摘要：仅对本批有 playlist 写入的 mid 刷新，避免每次把页内全部匹配片（数十上百）刷进 finalizer
+	if refreshMIDs := slavePlaylistAffectedMIDs(changes); len(refreshMIDs) > 0 {
+		refreshInfos := filterFilmIndexesByMIDs(infos, refreshMIDs)
+		if len(refreshInfos) == 0 {
+			// infos 可能因匹配策略未包含某 mid：按 mid 回表
+			var rows []model.FilmIndex
+			if err := db.Mdb.Where("mid IN ?", refreshMIDs).Find(&rows).Error; err == nil {
+				refreshInfos = rows
+			}
+		}
+		SchedulePlaySummaryRefresh(refreshInfos...)
+	}
 	return changedMids, nil
+}
+
+func filterFilmIndexesByMIDs(infos []model.FilmIndex, mids []int64) []model.FilmIndex {
+	if len(infos) == 0 || len(mids) == 0 {
+		return nil
+	}
+	want := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid > 0 {
+			want[mid] = struct{}{}
+		}
+	}
+	out := make([]model.FilmIndex, 0, len(want))
+	for _, info := range infos {
+		if _, ok := want[info.Mid]; ok {
+			out = append(out, info)
+		}
+	}
+	return out
+}
+
+// slavePlaylistAffectedMIDs 任意 playlist 写入（含仅链接刷新）涉及的 mid，每个 movie_key 只取一个最优 mid。
+func slavePlaylistAffectedMIDs(changes []playlistChange) []int64 {
+	if len(changes) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(changes))
+	for _, c := range changes {
+		if k := strings.TrimSpace(c.MovieKey); k != "" {
+			keys = append(keys, k)
+		}
+	}
+	midsByKey := loadMidCandidatesByMatchKeys(keys)
+	seen := make(map[int64]struct{})
+	out := make([]int64, 0, len(changes))
+	for _, c := range changes {
+		mid := pickBestMidForMatchKey(midsByKey[c.MovieKey])
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		out = append(out, mid)
+	}
+	return out
 }
 
 func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmIndex, error) {
@@ -208,14 +295,16 @@ func loadMatchedSearchInfosByMovieKeys(movieKeys []string) ([]model.FilmIndex, e
 
 // touchSlavePlaylistUpdateStamps 刷新「剧集结构变更」影片的 update_stamp，返回这些全局 mid。
 // 仅链接签名变化的保存已在 saveGroupedPlaylists 完成，不抬 stamp、不进更新列表。
-func touchSlavePlaylistUpdateStamps(changes []playlistChange) ([]int64, error) {
+// preHasPlaylist 必须在写库前计算：同一附属站已有 playlist 的 mid，其 FirstInsert 仅表示新 key 扩展。
+func touchSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange, preHasPlaylist map[int64]bool) ([]int64, error) {
+	_ = sourceID
 	notifyChanges := make([]playlistChange, 0, len(changes))
 	for _, c := range changes {
 		if c.NotifyWorthy {
 			notifyChanges = append(notifyChanges, c)
 		}
 	}
-	updateStampByMid, err := buildSlavePlaylistUpdateStamps(notifyChanges)
+	updateStampByMid, err := buildSlavePlaylistUpdateStamps(notifyChanges, preHasPlaylist)
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +328,10 @@ func touchSlavePlaylistUpdateStamps(changes []playlistChange) ([]int64, error) {
 	return mids, nil
 }
 
-func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, error) {
+func buildSlavePlaylistUpdateStamps(changes []playlistChange, preHasPlaylist map[int64]bool) (map[int64]int64, error) {
+	if preHasPlaylist == nil {
+		preHasPlaylist = map[int64]bool{}
+	}
 	movieKeys := make([]string, 0, len(changes))
 	changeByKey := make(map[string]playlistChange, len(changes))
 	for _, change := range changes {
@@ -253,16 +345,31 @@ func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, 
 	if len(midsByLookupKey) == 0 {
 		return nil, nil
 	}
-	firstInsertMIDs := make([]int64, 0, len(changes))
-	for movieKey, mids := range midsByLookupKey {
-		if !changeByKey[movieKey].FirstInsert {
+
+	// 每个 movie_key 只绑定一个最优 mid，避免标点重复片（烬九州：第二季 / 烬九州第二季）共享 key 时双双进更新列表
+	midByKey := make(map[string]int64, len(midsByLookupKey))
+	for key, mids := range midsByLookupKey {
+		mid := pickBestMidForMatchKey(mids)
+		if mid <= 0 {
 			continue
 		}
-		for _, mid := range mids {
-			if mid > 0 {
-				firstInsertMIDs = append(firstInsertMIDs, mid)
-			}
+		midByKey[key] = mid
+	}
+	if len(midByKey) == 0 {
+		return nil, nil
+	}
+
+	firstInsertMIDs := make([]int64, 0, len(changes))
+	for movieKey, mid := range midByKey {
+		change := changeByKey[movieKey]
+		if !change.FirstInsert {
+			continue
 		}
+		// 写库前已有该站 playlist：只是多写了一个 match key，不按「首次上线」通知
+		if preHasPlaylist[mid] {
+			continue
+		}
+		firstInsertMIDs = append(firstInsertMIDs, mid)
 	}
 	masterUpdateStampByMid, err := loadMasterUpdateStampsByMids(firstInsertMIDs)
 	if err != nil {
@@ -270,26 +377,106 @@ func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, 
 	}
 
 	now := time.Now().Unix()
-	result := make(map[int64]int64, len(changes))
-	for movieKey, mids := range midsByLookupKey {
+	result := make(map[int64]int64, len(midByKey))
+	for movieKey, mid := range midByKey {
 		change := changeByKey[movieKey]
-		for _, mid := range mids {
-			if mid <= 0 {
-				continue
-			}
-			updateStamp := now
-			if change.FirstInsert {
-				updateStamp = masterUpdateStampByMid[mid]
-			}
+		// FirstInsert 但 mid 写库前已有 playlist：不进更新列表（不写 stamp）
+		if change.FirstInsert && preHasPlaylist[mid] {
+			continue
+		}
+		// 非 FirstInsert 的 NotifyWorthy 已是结构变更；FirstInsert 真首次则抬 stamp
+		updateStamp := now
+		if change.FirstInsert {
+			updateStamp = masterUpdateStampByMid[mid]
 			if updateStamp <= 0 {
 				continue
 			}
-			if existing, ok := result[mid]; !ok || updateStamp > existing {
-				result[mid] = updateStamp
-			}
+		}
+		if existing, ok := result[mid]; !ok || updateStamp > existing {
+			result[mid] = updateStamp
 		}
 	}
 	return result, nil
+}
+
+// pickBestMidForMatchKey 同一 match_key 命中多个 mid 时只保留一个（update_stamp 新者优先，其次 mid 大）。
+// 源站常并存「烬九州：第二季」与「烬九州第二季」两个 vod_id，归一化后共享 match_key。
+func pickBestMidForMatchKey(mids []int64) int64 {
+	uniq := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	if len(uniq) == 0 {
+		return 0
+	}
+	if len(uniq) == 1 {
+		return uniq[0]
+	}
+	var rows []model.FilmIndex
+	if err := db.Mdb.Select("mid", "update_stamp").Where("mid IN ?", uniq).Find(&rows).Error; err != nil || len(rows) == 0 {
+		// 回退：取最大 mid（通常更新）
+		best := uniq[0]
+		for _, mid := range uniq[1:] {
+			if mid > best {
+				best = mid
+			}
+		}
+		return best
+	}
+	best := rows[0]
+	for _, row := range rows[1:] {
+		if row.UpdateStamp > best.UpdateStamp || (row.UpdateStamp == best.UpdateStamp && row.Mid > best.Mid) {
+			best = row
+		}
+	}
+	return best.Mid
+}
+
+// sourceHasPlaylistForMIDs 判断附属站是否已通过任一 match_key 为这些 mid 写过 playlist。
+func sourceHasPlaylistForMIDs(sourceID string, mids []int64) map[int64]bool {
+	out := make(map[int64]bool, len(mids))
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(mids) == 0 || db.Mdb == nil {
+		return out
+	}
+	keysByMid := loadMovieMatchKeysByMids(mids)
+	allKeys := make([]string, 0, len(mids)*2)
+	keyToMids := make(map[string][]int64)
+	for mid, keys := range keysByMid {
+		for _, k := range keys {
+			k = strings.TrimSpace(k)
+			if k == "" {
+				continue
+			}
+			allKeys = append(allKeys, k)
+			keyToMids[k] = append(keyToMids[k], mid)
+		}
+	}
+	allKeys = UniqueKeys(allKeys)
+	if len(allKeys) == 0 {
+		return out
+	}
+	var existingKeys []string
+	if err := db.Mdb.Model(&model.MoviePlaylist{}).
+		Where("source_id = ? AND movie_key IN ?", sourceID, allKeys).
+		Distinct().
+		Pluck("movie_key", &existingKeys).Error; err != nil {
+		return out
+	}
+	for _, k := range existingKeys {
+		for _, mid := range keyToMids[k] {
+			out[mid] = true
+		}
+	}
+	return out
 }
 
 func loadMasterUpdateStampsByMids(mids []int64) (map[int64]int64, error) {

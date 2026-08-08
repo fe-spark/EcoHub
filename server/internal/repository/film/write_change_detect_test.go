@@ -134,6 +134,15 @@ func TestPlaylistEpisodeStructureIgnoresLinkOnly(t *testing.T) {
 	}
 }
 
+func TestPickBestMidForMatchKeySingle(t *testing.T) {
+	if got := pickBestMidForMatchKey([]int64{0, 42, 42}); got != 42 {
+		t.Fatalf("want 42, got %d", got)
+	}
+	if got := pickBestMidForMatchKey(nil); got != 0 {
+		t.Fatalf("want 0, got %d", got)
+	}
+}
+
 func TestMasterSignatureIgnoresNamePunctNoise(t *testing.T) {
 	base := model.MovieDetail{Name: "烬九州：第四季"}
 	noisy := base
