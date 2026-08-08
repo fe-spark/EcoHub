@@ -46,4 +46,13 @@ export const ApiPost = <T = any>(
   return instance.post(url, data) as any;
 };
 
+/** 长耗时请求（如批量站点连通性检测），可单独指定超时时间（ms）。 */
+export const ApiPostLong = <T = any>(
+  url: string,
+  data?: any,
+  timeout = 300000,
+): Promise<ApiResponse<T>> => {
+  return instance.post(url, data, { timeout }) as any;
+};
+
 export default instance;

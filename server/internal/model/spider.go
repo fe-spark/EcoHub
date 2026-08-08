@@ -128,6 +128,21 @@ type FilmSourceStateBatchRequest struct {
 	State bool     `json:"state"`
 }
 
+// SourceHealthItem 失效源检测结果项（连通性测试未通过或无法参与检测的站点）
+type SourceHealthItem struct {
+	Id     string      `json:"id"`
+	Name   string      `json:"name"`
+	Uri    string      `json:"uri"`
+	Grade  SourceGrade `json:"grade"`
+	State  bool        `json:"state"`
+	Reason string      `json:"reason"`
+}
+
+// FilmSourceDelBatchRequest 批量删除采集站请求
+type FilmSourceDelBatchRequest struct {
+	Ids []string `json:"ids"`
+}
+
 type CollectProgress struct {
 	Id      string `json:"id"`
 	Name    string `json:"name"`

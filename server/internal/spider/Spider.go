@@ -210,6 +210,90 @@ func isActiveCollectStatus(status string) bool {
 	}
 }
 
+func isTerminalCollectStatus(status string) bool {
+	switch status {
+	case progressStatusDone, progressStatusFailed, progressStatusStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// hasAnyLiveOrActiveCollect 是否仍有未完成的采集（含 live task 与活跃进度）。
+// 有则保留全部终态进度，避免部分卡片进度条先消失。
+func hasAnyLiveOrActiveCollect() bool {
+	has := false
+	activeTasks.Range(func(key, value any) bool {
+		has = true
+		return false
+	})
+	if has {
+		return true
+	}
+	collectProgress.Range(func(key, value any) bool {
+		state := value.(*collectProgressState)
+		state.mu.RLock()
+		active := isActiveCollectStatus(state.data.Status)
+		state.mu.RUnlock()
+		if active {
+			has = true
+			return false
+		}
+		return true
+	})
+	return has
+}
+
+// latestTerminalProgressTime 最晚进入终态的时间；无终态时 ok=false。
+func latestTerminalProgressTime() (latest time.Time, ok bool) {
+	collectProgress.Range(func(key, value any) bool {
+		state := value.(*collectProgressState)
+		state.mu.RLock()
+		status := state.data.Status
+		updated := state.updated
+		state.mu.RUnlock()
+		if !isTerminalCollectStatus(status) {
+			return true
+		}
+		if !ok || updated.After(latest) {
+			latest = updated
+			ok = true
+		}
+		return true
+	})
+	return latest, ok
+}
+
+// purgeAllTerminalProgress 删除全部 done/failed/stopped 进度（统一消失）。
+func purgeAllTerminalProgress() {
+	collectProgress.Range(func(key, value any) bool {
+		id, _ := key.(string)
+		state := value.(*collectProgressState)
+		state.mu.RLock()
+		terminal := isTerminalCollectStatus(state.data.Status)
+		state.mu.RUnlock()
+		if terminal {
+			collectProgress.Delete(id)
+		}
+		return true
+	})
+}
+
+// maybePurgeTerminalProgressTogether 全部采集结束后，以最晚终态时间为基准保留 retain，再一次性清空。
+func maybePurgeTerminalProgressTogether(now time.Time) {
+	if hasAnyLiveOrActiveCollect() {
+		return
+	}
+	latest, ok := latestTerminalProgressTime()
+	if !ok {
+		return
+	}
+	if now.Sub(latest) < progressRetainDuration() {
+		return
+	}
+	purgeAllTerminalProgress()
+}
+
 func canEnterFinalizing(status string) bool {
 	switch status {
 	case progressStatusStarting, progressStatusRunning, progressStatusPageDone,
@@ -300,11 +384,10 @@ func refreshAndIsBlockingSourceProgress(sourceID string) bool {
 	return true
 }
 
-// pruneStaleCollectProgress 后台巡检：超时活跃 → failed；过期 done/failed/stopped → 删除。
+// pruneStaleCollectProgress 后台巡检：超时活跃 → failed；全部结束后终态进度统一删除。
 func pruneStaleCollectProgress() {
 	now := time.Now()
 	staleAfter := progressStaleDuration()
-	retainFor := progressRetainDuration()
 	collectProgress.Range(func(key, value any) bool {
 		id, _ := key.(string)
 		state := value.(*collectProgressState)
@@ -312,8 +395,7 @@ func pruneStaleCollectProgress() {
 		status := state.data.Status
 		updated := state.updated
 		age := now.Sub(updated)
-		switch {
-		case isActiveCollectStatus(status):
+		if isActiveCollectStatus(status) {
 			if _, live := activeTasks.Load(id); live && (status == progressStatusRunning || status == progressStatusStarting) {
 				state.mu.Unlock()
 				return true
@@ -327,16 +409,12 @@ func pruneStaleCollectProgress() {
 				emitProgressStaleNotify(id, name, status, age)
 				return true
 			}
-		case status == progressStatusDone || status == progressStatusFailed || status == progressStatusStopped:
-			if age >= retainFor {
-				state.mu.Unlock()
-				collectProgress.Delete(id)
-				return true
-			}
 		}
 		state.mu.Unlock()
 		return true
 	})
+	// 终态不按单卡超时删除：有活跃采集时全部保留；全部完成后再统一消失。
+	maybePurgeTerminalProgressTogether(now)
 }
 
 var progressHousekeepingOnce sync.Once
@@ -1208,10 +1286,18 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string)
 	if len(sources) == 0 {
 		return
 	}
+	markSourcesCollectStarting(sources)
+	runSourcesWithLimitCore(sources, h, tag, trigger)
+}
+
+// runSourcesWithLimitCore 假定 sources 已过滤且已 mark starting（或由调用方保证）。
+func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger string) {
+	if len(sources) == 0 {
+		return
+	}
 	// 变更 mid 写入 MySQL 批次（无内存全量、无 Redis 会话），批次显式沿采集链传递
 	batch := notify.StartChangeBatch()
 	startedAt := time.Now()
-	markSourcesCollectStarting(sources)
 	runVersion := stopAllVersion.Load()
 	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，站点并发不限制", tag, len(sources))
 	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion, batch)
@@ -1925,6 +2011,34 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedM
 	return written.Notify, nil
 }
 
+// PrepareBatchCollectStart 同步过滤可采站点并标记 starting（0%），供接口立即返回后列表可见进度。
+// 返回已标记的站点列表；调用方应在 goroutine 中执行 BatchCollectPrepared。
+func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, error) {
+	sources := make([]model.FilmSource, 0, len(ids))
+	for _, id := range ids {
+		if fs := repository.FindCollectSourceById(id); fs != nil && fs.State {
+			sources = append(sources, *fs)
+		}
+	}
+	sources = filterCollectableSources(sources, "Batch-Collect")
+	if len(sources) == 0 {
+		return nil, fmt.Errorf("没有可启动的采集站（均未启用或已在采集中）")
+	}
+	markSourcesCollectStarting(sources)
+	return sources, nil
+}
+
+// BatchCollectPrepared 对已 Prepare 的站点执行批量采集（不再二次 filter/mark）。
+func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
+	if len(sources) == 0 {
+		return
+	}
+	if trigger == "" {
+		trigger = model.NotifyTriggerManual
+	}
+	runSourcesWithLimitCore(sources, h, "Batch-Collect", trigger)
+}
+
 // BatchCollect 批量采集, 采集指定的所有站点最近x小时内更新的数据
 func BatchCollect(h int, ids ...string) {
 	BatchCollectTriggered(model.NotifyTriggerManual, h, ids...)
@@ -2253,11 +2367,19 @@ func FullRecoverSpider() {
 
 // CollectApiTest 测试采集接口是否可用
 func CollectApiTest(s model.FilmSource) error {
+	return CollectApiTestWithTimeout(s, 0)
+}
+
+// CollectApiTestWithTimeout 测试采集接口是否可用；timeoutSeconds > 0 时使用指定请求超时（秒）。
+func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
 	// 使用 ac=list 测试：获取分类列表，所有标准 Mac CMS 站均支持，
 	// 且不需要额外过滤参数（ac=detail 在无 h/t 参数时部分站点会返回 400）
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("ac", "list")
 	r.Params.Set("pg", "1")
+	if timeoutSeconds > 0 {
+		r.Header = map[string][]string{"timeout": {strconv.Itoa(timeoutSeconds)}}
+	}
 	err := utils.ApiTest(&r)
 	// 首先核对接口返回值类型
 	if err == nil {
@@ -2285,7 +2407,6 @@ func GetActiveTaskProgress() []model.CollectProgress {
 
 	list := make([]model.CollectProgress, 0)
 	seen := make(map[string]struct{})
-	retainFor := progressRetainDuration()
 	staleAfter := progressStaleDuration()
 	now := time.Now()
 
@@ -2307,10 +2428,9 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		state := value.(*collectProgressState)
 		state.mu.Lock()
 		progress := state.data
-		updated := state.updated
-		age := now.Sub(updated)
+		age := now.Sub(state.updated)
 
-		// 活跃但已超时且无 live task → 就地 failed，仍可按 retain 短暂展示。
+		// 活跃但已超时且无 live task → 就地 failed，仍参与统一保留。
 		if isActiveCollectStatus(progress.Status) {
 			_, live := activeTasks.Load(id)
 			liveFetch := live && (progress.Status == progressStatusRunning || progress.Status == progressStatusStarting)
@@ -2320,34 +2440,43 @@ func GetActiveTaskProgress() []model.CollectProgress {
 				progress.Status = progressStatusFailed
 				state.data.Status = progressStatusFailed
 				state.updated = now
-				updated = now
 				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, old, age.Round(time.Second))
-				// 解锁后再发通知，避免持锁调用外部逻辑
 				state.mu.Unlock()
 				emitProgressStaleNotify(id, name, old, age)
 				list = append(list, progress)
 				return true
-			} else {
-				state.mu.Unlock()
-				list = append(list, progress)
-				return true
 			}
+			state.mu.Unlock()
+			list = append(list, progress)
+			return true
 		}
 
-		if progress.Status == progressStatusDone || progress.Status == progressStatusFailed || progress.Status == progressStatusStopped {
-			if now.Sub(updated) < retainFor {
-				state.mu.Unlock()
-				list = append(list, progress)
-				return true
-			}
-			// 超过保留窗口：删除，避免 map 无限增长。
+		// 终态：有活跃采集时一律保留；全部结束后由 maybePurge 统一清空。
+		if isTerminalCollectStatus(progress.Status) {
 			state.mu.Unlock()
-			collectProgress.Delete(id)
+			list = append(list, progress)
 			return true
 		}
 		state.mu.Unlock()
 		return true
 	})
+
+	// 列表读取时也尝试统一清理，避免仅依赖后台 ticker。
+	maybePurgeTerminalProgressTogether(now)
+	// purge 后剔除 map 中已不存在的终态快照
+	if n := len(list); n > 0 {
+		filtered := list[:0]
+		for _, p := range list {
+			if isTerminalCollectStatus(p.Status) {
+				if _, still := collectProgress.Load(p.Id); !still {
+					continue
+				}
+			}
+			filtered = append(filtered, p)
+		}
+		list = filtered
+	}
+
 	return list
 }
 
