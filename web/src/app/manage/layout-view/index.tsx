@@ -66,6 +66,16 @@ const menuItems: MenuItem[] = [
     label: "工作台",
   },
   {
+    key: "sub-collect",
+    icon: <ThunderboltOutlined />,
+    label: "采集中心",
+    children: [
+      { key: "/manage/collect", label: "采集站" },
+      { key: "/manage/collect/record", label: "失败记录" },
+      { key: "/manage/cron", label: "计划任务" },
+    ],
+  },
+  {
     key: "sub-film",
     icon: <VideoCameraOutlined />,
     label: "内容管理",
@@ -73,16 +83,6 @@ const menuItems: MenuItem[] = [
       { key: "/manage/film", label: "影片列表" },
       { key: "/manage/collect/category", label: "分类管理" },
       { key: "/manage/collect/category/rules", label: "分类规则" },
-    ],
-  },
-  {
-    key: "sub-collect",
-    icon: <ThunderboltOutlined />,
-    label: "采集中心",
-    children: [
-      { key: "/manage/collect", label: "采集站点" },
-      { key: "/manage/collect/record", label: "失败记录" },
-      { key: "/manage/cron", label: "计划任务" },
     ],
   },
   {

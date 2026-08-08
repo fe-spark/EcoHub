@@ -73,6 +73,35 @@ export interface BatchOption {
   state?: boolean;
 }
 
+/** 失效源检测结果项 */
+export interface InvalidSourceItem {
+  id: string;
+  name: string;
+  uri: string;
+  grade: number;
+  state: boolean;
+  reason: string;
+}
+
+/** 检测或删除时被跳过的采集站 */
+export interface CleanupSkippedItem {
+  id: string;
+  name?: string;
+  reason: string;
+}
+
+export interface CheckAllResult {
+  checked: number;
+  ok: number;
+  failed: InvalidSourceItem[];
+  skipped: CleanupSkippedItem[];
+}
+
+export interface DelBatchResult {
+  deleted: string[];
+  skipped: CleanupSkippedItem[];
+}
+
 export interface SourceFormValues {
   name: string;
   uri: string;

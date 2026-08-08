@@ -47,9 +47,13 @@ func (s *SpiderService) StartCollect(id string, h int) error {
 	return nil
 }
 
-// BatchCollect 批量采集
+// BatchCollect 批量采集：同步标记 starting(0%) 后异步执行，列表可立即显示进度。
 func (s *SpiderService) BatchCollect(time int, ids []string) error {
-	go spider.BatchCollect(time, ids...)
+	sources, err := spider.PrepareBatchCollectStart(ids)
+	if err != nil {
+		return err
+	}
+	go spider.BatchCollectPrepared(model.NotifyTriggerManual, time, sources)
 	return nil
 }
 

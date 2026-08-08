@@ -34,33 +34,764 @@
   text-align: center;
 }
 
-.tableBlock {
+/* ===== 工具栏 ===== */
+.cardPanel {
   grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.toolbarCard {
+  min-width: 0;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.toolbarHint {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  margin-inline-end: 4px;
+}
+
+.toolbarDivider {
+  margin-inline: 2px;
+}
+
+/* ===== 失效源清理弹窗 ===== */
+.cleanupLoading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 180px;
+  padding: 48px 16px;
+  text-align: center;
+}
+
+.cleanupContent {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.cleanupList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.cleanupItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+}
+
+.cleanupItemHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.cleanupItemName {
+  max-width: 100%;
+}
+
+.cleanupItemUri {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanupItemReason {
+  font-size: 12px;
+  color: var(--ant-color-error);
+  overflow-wrap: anywhere;
+}
+
+.cleanupSkipped {
+  font-size: 12px;
+}
+
+.cleanupFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* ===== 主站条 + 附属站网格 ===== */
+.sourceGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
+}
+
+.masterSection,
+.affiliateSection {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 2px;
+}
+
+.sectionTitle {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--ant-color-text);
+}
+
+.sectionHint {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.sectionCount {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ant-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+.sectionWarn {
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--ant-color-warning);
+}
+
+.masterList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* 主站横向操作条：左信息 | 中进度(定宽) | 右操作(内容宽) */
+.masterPanel {
+  --master-accent: var(--ant-color-border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  padding: 12px 14px 12px 12px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-left: 3px solid var(--master-accent);
+  border-radius: 12px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.masterPanel:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--ant-color-primary) 24%,
+    var(--ant-color-border-secondary)
+  );
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--ant-color-text) 5%, transparent);
+}
+
+.masterPanelSelected {
+  border-color: color-mix(
+    in srgb,
+    var(--ant-color-primary) 50%,
+    var(--ant-color-border-secondary)
+  );
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 16%, transparent);
+}
+
+.masterToneRunning {
+  --master-accent: var(--ant-color-primary);
+}
+
+.masterToneEnabled {
+  --master-accent: var(--ant-color-success);
+}
+
+.masterToneDisabled {
+  --master-accent: var(--ant-color-border);
+  opacity: 0.78;
+}
+
+.masterToneStopping {
+  --master-accent: var(--ant-color-warning);
+}
+
+/* 左：信息区，吃掉剩余宽度，过长省略 */
+.masterPanelMain {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1 1 0;
+  min-width: 180px;
+}
+
+.masterPanelIdentity {
+  flex: 1;
+  min-width: 0;
+}
+
+.masterPanelTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.masterPanelName {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.masterPanelTitleRow .statusPill {
+  flex: none;
+}
+
+.masterPanelUri {
+  display: block;
+  margin-top: 2px;
+  max-width: 100%;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.masterPanelUri:hover {
+  color: var(--ant-color-primary);
+  text-decoration: underline;
+}
+
+.masterPanelMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 2px;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.masterPanelMetaSep {
+  color: var(--ant-color-text-quaternary);
+}
+
+/* 进度贴在信息区下方，最大宽度有限 */
+.masterPanelProgress {
+  margin-top: 8px;
+  max-width: 320px;
+  min-width: 0;
+}
+
+/* 右：操作区贴内容，不拉伸 */
+.masterPanelOps {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+  margin-left: auto;
+  align-self: center;
+}
+
+.masterDuration {
+  width: 112px;
+  flex: none;
+}
+
+.masterActionBtn {
+  flex: none;
+}
+
+.masterEmpty {
+  min-width: 0;
+  padding: 18px 16px;
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ant-color-text-tertiary);
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 45%, transparent);
+}
+
+/* 附属站：多卡网格（同排卡片 stretch 等高） */
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.emptyCard {
+  min-width: 0;
+  padding: 48px 16px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 14px;
+}
+
+.groupEmpty {
+  min-width: 0;
+  padding: 16px;
+  border: 1px dashed var(--ant-color-border-secondary);
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ant-color-text-quaternary);
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 40%, transparent);
+}
+
+@media (max-width: 900px) {
+  .masterPanel {
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .masterPanelMain {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .masterPanelProgress {
+    max-width: 100%;
+  }
+
+  .masterPanelOps {
+    flex: 1 1 100%;
+    margin-left: 26px;
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .masterPanelOps {
+    margin-left: 0;
+  }
+
+  .masterDuration {
+    width: 120px;
+  }
+
+  .progressInline {
+    flex-wrap: wrap;
+  }
+
+  .progressInlineBar {
+    max-width: none;
+    flex: 1 1 100%;
+    order: 3;
+  }
+}
+
+/* ===== 单个采集站卡片 ===== */
+/* 默认保持中性容器底，状态只靠左边细条 + 状态胶囊区分，避免大块染色 */
+.sourceCard {
+  --card-accent: var(--ant-color-border);
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  padding: 16px 18px 18px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 14px;
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.sourceCard::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--card-accent);
+  transition: background 0.2s ease;
+}
+
+.sourceCard:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(
+    in srgb,
+    var(--ant-color-primary) 28%,
+    var(--ant-color-border-secondary)
+  );
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--ant-color-text) 6%, transparent);
+}
+
+.sourceCardSelected {
+  border-color: color-mix(
+    in srgb,
+    var(--ant-color-primary) 55%,
+    var(--ant-color-border-secondary)
+  );
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 18%, transparent),
+    0 6px 16px color-mix(in srgb, var(--ant-color-primary) 8%, transparent);
+}
+
+/* 采集中 */
+.toneRunning {
+  --card-accent: var(--ant-color-primary);
+}
+
+/* 已启用：安静的成功色细条 */
+.toneEnabled {
+  --card-accent: var(--ant-color-success);
+}
+
+/* 已禁用：无强调色，整体略降对比 */
+.toneDisabled {
+  --card-accent: transparent;
+  opacity: 0.72;
+}
+
+.toneDisabled .cardName {
+  color: var(--ant-color-text-secondary);
+  font-weight: 500;
+}
+
+.toneDisabled .cardUri,
+.toneDisabled .metaValue,
+.toneDisabled .metaLabel,
+.toneDisabled .controlLabel {
+  color: var(--ant-color-text-quaternary);
+}
+
+.toneDisabled:hover {
+  opacity: 0.88;
+}
+
+/* 终止收尾中 */
+.toneStopping {
+  --card-accent: var(--ant-color-warning);
+}
+
+/* 头部 */
+.cardHead {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.cardHeadMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.cardTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cardName {
+  flex: 1;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardUri {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.cardUri:hover {
+  color: var(--ant-color-primary);
+  text-decoration: underline;
+}
+
+/* 状态胶囊：轻色块 + 圆点，不抢卡片主体 */
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 20px;
+  font-weight: 500;
+  white-space: nowrap;
+  border: none;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.statusRunning {
+  color: var(--ant-color-primary);
+  background: var(--ant-color-primary-bg);
+}
+
+.statusRunning .statusDot {
+  animation: statusPulse 1.2s ease-in-out infinite;
+}
+
+.statusEnabled {
+  color: var(--ant-color-success);
+  background: var(--ant-color-success-bg);
+}
+
+.statusDisabled {
+  color: var(--ant-color-text-tertiary);
+  background: var(--ant-color-fill-tertiary);
+}
+
+.statusStopping {
+  color: var(--ant-color-warning);
+  background: var(--ant-color-warning-bg);
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+/* 进度 */
+.cardProgress {
+  margin-top: 14px;
+  min-width: 0;
+}
+
+.progressWrap {
+  min-width: 0;
+}
+
+.progressHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.progressLabel {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.progressPercent {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.progressBar {
+  margin: 0;
+  padding: 0;
+}
+
+.progressMetaText {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+/* 主站横条：百分比 | 进度条 | 计数 单行 */
+.progressInline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.progressInline .progressPercent {
+  flex: none;
+  min-width: 2.5em;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.progressInlineBar {
+  flex: 1 1 auto;
+  min-width: 72px;
+  max-width: 160px;
+  margin: 0 !important;
+  padding: 0;
+  line-height: 1;
+}
+
+.progressInlineBar :global(.ant-progress-outer) {
+  margin-inline-end: 0 !important;
+  padding-inline-end: 0 !important;
+}
+
+.progressInline .progressMetaText {
+  flex: none;
+  margin-top: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+  white-space: nowrap;
+}
+
+/* 底部区沉底：同排卡片高度一致时，元信息/操作仍贴底对齐 */
+.cardFoot {
+  display: flex;
+  flex-direction: column;
+  margin-top: auto;
   min-width: 0;
   width: 100%;
 }
 
-.selectedRow > td {
-  background: color-mix(in srgb, var(--ant-color-primary) 5%, transparent) !important;
-}
-
-.selectedRow:hover > td {
-  background: color-mix(in srgb, var(--ant-color-primary) 8%, transparent) !important;
-}
-
-.tableHeader {
+/* 元信息 */
+.cardMeta {
   display: flex;
-  align-items: flex-start;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 16px;
+  margin: 14px 0 0;
+  padding: 0;
 }
 
-.tableActions {
+.metaItem {
   display: flex;
-  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
 }
 
+.metaLabel {
+  flex: none;
+  margin: 0;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.metaValue {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.metaValueMuted {
+  color: var(--ant-color-text-quaternary);
+}
+
+/* 参数控制 */
+.cardControls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--ant-color-border-secondary);
+}
+
+.controlLabel {
+  flex: none;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.controlValue {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 操作 */
+.cardActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.actionPrimary {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ===== 概览卡片 ===== */
 .masterDescriptions {
   min-width: 0;
 }
@@ -73,12 +804,7 @@
   word-break: break-all;
 }
 
-@media (max-width: 1200px) {
-  .tableActions {
-    width: 100%;
-  }
-}
-
+/* ===== 响应式 ===== */
 @media (max-width: 1200px) {
   .layout {
     grid-template-columns: 1fr;
@@ -90,7 +816,32 @@
     min-height: 96px;
   }
 
-  .tableActions {
+  .toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .toolbar > :global(.ant-space) {
+    width: 100%;
+  }
+
+  .toolbar > button {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .sourceCard {
+    padding: 14px 14px 16px;
+  }
+
+  .cardActions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .cardActions > button {
     width: 100%;
   }
 }

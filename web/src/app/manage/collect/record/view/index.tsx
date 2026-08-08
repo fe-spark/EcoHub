@@ -119,7 +119,7 @@ export default function FailureRecordPageView() {
     const resp = await ApiPost("/manage/collect/record/retry", { id });
     if (resp.code === 0) {
       setQueuedRetryIds((prev) => new Set(prev).add(id));
-      message.success("重试任务已加入队列；如果对应站点正在采集，会在采集结束后自动执行");
+      message.success("重试任务已加入队列；如果对应采集站正在采集，会在采集结束后自动执行");
       window.setTimeout(() => {
         setQueuedRetryIds((prev) => {
           const next = new Set(prev);
@@ -231,7 +231,7 @@ export default function FailureRecordPageView() {
         const tooltipTitle = isSuccess
           ? "已重试成功，无需再次重试"
           : isQueued
-            ? "已加入重试队列；同站点全量采集中时会等待采集结束"
+            ? "已加入重试队列；同采集站全量采集中时会等待采集结束"
           : isFinalFailed
             ? "手动再试，失败后仍保持最终失败"
             : "立即重试此记录";

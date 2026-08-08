@@ -37,12 +37,12 @@ export default function CollectOverview({
         <Row gutter={[16, 16]} className={styles.overviewRow}>
           <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic title="站点总数" value={stats.total} />
+              <Statistic title="采集站总数" value={stats.total} />
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic title="启用站点" value={stats.enabled} />
+              <Statistic title="已启用" value={stats.enabled} />
             </div>
           </Col>
           <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
@@ -58,7 +58,7 @@ export default function CollectOverview({
           <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic
-                title="主站状态"
+                title="主采集站"
                 value={stats.masters}
                 suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
               />
@@ -69,14 +69,14 @@ export default function CollectOverview({
 
       <Card
         size="small"
-        title="当前主站"
+        title="当前主采集站"
         className={styles.summaryCard}
         styles={{ body: { height: "100%" } }}
         extra={masterSite ? <Tag color="gold">已生效</Tag> : <Tag color="error">未配置</Tag>}
       >
         {masterSite ? (
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>
-            <Descriptions.Item label="站点名称">{masterSite.name}</Descriptions.Item>
+            <Descriptions.Item label="名称">{masterSite.name}</Descriptions.Item>
             <Descriptions.Item label="接口地址">
               <Typography.Link
                 href={masterSite.uri}
@@ -103,7 +103,7 @@ export default function CollectOverview({
             <Descriptions.Item label="状态">
               <Tag color="warning">未配置</Tag>
             </Descriptions.Item>
-            <Descriptions.Item label="说明">需要先指定一个主站</Descriptions.Item>
+            <Descriptions.Item label="说明">需要先配置一个主采集站</Descriptions.Item>
           </Descriptions>
         )}
       </Card>

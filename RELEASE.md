@@ -1,3 +1,44 @@
+# v1.1.5-beta.10
+
+> **预发布（prerelease）**：采集站管理 UI 重构、进度生命周期与失效源清理，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.10`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.10`
+
+## 相对 beta.9
+
+- **采集站管理页重构**：表格改为主采集站横条 + 附属采集站卡片网格；启用/禁用用左边条与状态胶囊区分；同排卡片等高、底部操作沉底对齐
+- **主站 / 附属站分类展示**：主采集站单卡操作条，附属采集站多卡网格；全局操作（清理失效源、终止全部、新增采集站）上移页头，工具栏仅保留批量选择操作
+- **采集进度体验**：
+  - 点击开始采集立即展示 **0% / 排队中**（单站与批量均同步标记 `starting`，前端乐观更新）
+  - 终态进度（done/failed/stopped）在仍有活跃采集时全部保留，**全部结束后统一消失**，避免部分卡片进度条先没
+  - 进度区恢复阶段文案：等待收尾 / 收尾发布中 等（`resolveCollectStatusText`）
+- **失效源清理**：批量检测采集站接口连通性，弹窗确认后批量删除失效源
+- **文案统一**：采集相关 UI 统一为「采集站 / 主采集站 / 附属采集站」；侧栏菜单采集中心排在内容管理之前
+- **初始化**：移除首页封面/轮播示例预设数据，新环境不再自动写入
+
+## 修复
+
+- 批量采集启动后进度条迟迟不出现（改为同步 `PrepareBatchCollectStart`）
+- 失败站进度单独超时消失导致网格参差、有的有进度有的没有
+- 卡片进度区缺失「等待收尾 / 收尾发布中」阶段展示
+- 清理失效源 loading 使用 antd 6 废弃的 `tip`，改为 `description`
+
+## 部署（beta.10）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.10
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.10
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.9
 
 > **预发布（prerelease）**：数据重置重构（异步 + 真实进度 + 独立入口 + 影响面统计），**不会**覆盖 `:latest`。

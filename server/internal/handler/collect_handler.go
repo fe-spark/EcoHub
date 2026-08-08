@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/model"
@@ -186,6 +187,125 @@ func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
 		return
 	}
 	dto.SuccessOnlyMsg("删除成功", c)
+}
+
+// ------------------------------------------------------ 失效源检测与清理 ------------------------------------------------------
+
+// FilmSourceCheckAll 批量对每个采集站执行接口测试，返回无法正常采集的站点列表。
+// 正在采集中的站点与主站不参与测试，会以 skipped 形式返回并附原因。
+func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
+	sources := service.CollectSvc.GetFilmSourceList()
+
+	const concurrency = 10
+	sem := make(chan struct{}, concurrency)
+	var mu sync.Mutex
+	failed := make([]model.SourceHealthItem, 0)
+	skipped := make([]model.SourceHealthItem, 0)
+	okCount := 0
+
+	var wg sync.WaitGroup
+	for _, src := range sources {
+		src := src
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+
+			item := model.SourceHealthItem{
+				Id:    src.Id,
+				Name:  src.Name,
+				Uri:   src.Uri,
+				Grade: src.Grade,
+				State: src.State,
+			}
+			if spider.IsTaskRunning(src.Id) {
+				item.Reason = "站点正在采集，已跳过检测"
+				mu.Lock()
+				skipped = append(skipped, item)
+				mu.Unlock()
+				return
+			}
+			if src.Grade == model.MasterCollect {
+				item.Reason = "主站无法直接删除，请先降级为附属站"
+				mu.Lock()
+				skipped = append(skipped, item)
+				mu.Unlock()
+				return
+			}
+			if err := spider.CollectApiTest(src.FilmSource); err != nil {
+				item.Reason = err.Error()
+				mu.Lock()
+				failed = append(failed, item)
+				mu.Unlock()
+				return
+			}
+			mu.Lock()
+			okCount++
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	dto.Success(gin.H{
+		"checked": len(sources),
+		"ok":      okCount,
+		"failed":  failed,
+		"skipped": skipped,
+	}, "站点连通性检测完成", c)
+}
+
+// FilmSourceDelBatch 批量删除采集站，返回实际删除与跳过（含原因）的站点。
+func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
+	req := model.FilmSourceDelBatchRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	ids := make([]string, 0, len(req.Ids))
+	seen := make(map[string]struct{}, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		dto.Failed("请选择需要删除的采集站", c)
+		return
+	}
+
+	type deleteResult struct {
+		Id     string `json:"id"`
+		Name   string `json:"name"`
+		Reason string `json:"reason"`
+	}
+	deleted := make([]string, 0, len(ids))
+	skipped := make([]deleteResult, 0)
+
+	for _, id := range ids {
+		src := service.CollectSvc.GetFilmSource(id)
+		if src == nil {
+			skipped = append(skipped, deleteResult{Id: id, Reason: "采集站不存在，可能已被删除"})
+			continue
+		}
+		if spider.IsTaskRunning(id) {
+			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: "站点正在采集，请先停止后再删除"})
+			continue
+		}
+		if err := service.CollectSvc.DelFilmSource(id); err != nil {
+			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: err.Error()})
+			continue
+		}
+		deleted = append(deleted, id)
+	}
+
+	dto.Success(gin.H{"deleted": deleted, "skipped": skipped}, "批量删除完成", c)
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {

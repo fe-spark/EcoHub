@@ -9,24 +9,31 @@ import React, {
 } from "react";
 import {
   Button,
-  Flex,
+  Card,
+  Empty,
   Form,
   Popconfirm,
   Space,
-  Table,
 } from "antd";
-import { PauseOutlined, PlusOutlined } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { ClearOutlined, PauseOutlined, PlusOutlined } from "@ant-design/icons";
+import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectModal from "./batch-collect-modal";
-import { createCollectTableColumns } from "./collect-table-columns";
+import CleanupInvalidModal from "./cleanup-invalid-modal";
+import CollectMasterPanel from "./collect-master-panel";
+import CollectSourceCard from "./collect-source-card";
 import CollectOverview from "./collect-overview";
 import SourceFormModal from "./source-form-modal";
 import {
   isActiveCollectStatus,
   type BatchOption,
+  type CheckAllResult,
+  type CleanupSkippedItem,
+  type CollectProgress,
+  type DelBatchResult,
   type FilmSource,
+  type InvalidSourceItem,
   type SourceFormValues,
 } from "./types";
 import styles from "./index.module.less";
@@ -35,6 +42,19 @@ interface CollectListItemResponse extends Partial<FilmSource> {
   id: string;
   name: string;
   uri: string;
+}
+
+/** 启动瞬间本地进度：0%，避免等轮询才出现进度条 */
+function makeStartingProgress(id: string, name: string): CollectProgress {
+  return {
+    id,
+    name,
+    total: 0,
+    current: 0,
+    success: 0,
+    failed: 0,
+    status: "starting",
+  };
 }
 
 const POLL_INTERVAL = 4000;
@@ -78,6 +98,14 @@ export default function CollectManagePageView() {
   const [batchTime, setBatchTime] = useState(24);
   const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
 
+  // 失效源检测与清理
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [cleanupScanning, setCleanupScanning] = useState(false);
+  const [cleanupDeleting, setCleanupDeleting] = useState(false);
+  const [invalidSources, setInvalidSources] = useState<InvalidSourceItem[]>([]);
+  const [cleanupSkipped, setCleanupSkipped] = useState<CleanupSkippedItem[]>([]);
+  const cleanupScanCanceledRef = useRef(false);
+
   // 仅「仍在生命周期内」的任务禁用操作；done/failed 短暂展示进度但不锁按钮。
   const activeCollectIds = useMemo(
     () =>
@@ -111,14 +139,25 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-const masterStatus = useMemo(() => {
+  /** 业务上主采集站应唯一；异常时可能多于 1，仍全部列出便于修正 */
+  const masterSites = useMemo(
+    () => siteList.filter((item) => item.grade === 0),
+    [siteList],
+  );
+
+  const affiliateSites = useMemo(
+    () => siteList.filter((item) => item.grade !== 0),
+    [siteList],
+  );
+
+  const masterStatus = useMemo(() => {
     if (stats.masters === 1) {
       return { text: "正常", color: "success" as const };
     }
     if (stats.masters === 0) {
-      return { text: "缺少主站", color: "warning" as const };
+      return { text: "缺少主采集站", color: "warning" as const };
     }
-    return { text: `${stats.masters} 个主站`, color: "error" as const };
+    return { text: `${stats.masters} 个主采集站`, color: "error" as const };
   }, [stats.masters]);
 
   const clearPollTimer = useCallback(() => {
@@ -218,15 +257,103 @@ const masterStatus = useMemo(() => {
     [updateSiteListItem],
   );
 
-  const changeSourceState = async (record: FilmSource) => {
-    const resp = await ApiPost("/manage/collect/change", {
-      id: record.id,
-      state: record.state,
-      syncPictures: record.syncPictures,
-    });
-    if (resp.code !== 0) {
-      message.error(resp.msg || "状态更新失败");
-      await getCollectList();
+  const handleSelectSource = useCallback((id: string, checked: boolean) => {
+    setSelectedSourceIds((current) =>
+      checked ? [...current, id] : current.filter((item) => item !== id),
+    );
+  }, []);
+
+  const selectAllSources = useCallback(() => {
+    setSelectedSourceIds(siteList.map((item) => item.id));
+  }, [siteList]);
+
+  const invertSelection = useCallback(() => {
+    setSelectedSourceIds((current) =>
+      siteList.filter((item) => !current.includes(item.id)).map((item) => item.id),
+    );
+  }, [siteList]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedSourceIds([]);
+  }, []);
+
+  // 批量检测所有采集站接口连通性，收集采集不通的源
+  const startCleanupScan = async () => {
+    cleanupScanCanceledRef.current = false;
+    setCleanupScanning(true);
+    setCleanupOpen(true);
+    try {
+      const resp = await ApiPostLong<CheckAllResult>("/manage/collect/check/all", {});
+      if (resp.code === 0) {
+        const data = resp.data ?? { checked: 0, ok: 0, failed: [], skipped: [] };
+        const failed = Array.isArray(data.failed) ? data.failed : [];
+        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+        setInvalidSources(failed);
+        setCleanupSkipped(skipped);
+        if (failed.length === 0) {
+          setCleanupOpen(false);
+          const skipText =
+            skipped.length > 0
+              ? `，跳过 ${skipped.length} 个（${skipped
+                  .map((item) => item.name || item.id)
+                  .join("、")}）`
+              : "";
+          message.success(`检测完成：全部 ${data.checked ?? 0} 个采集站接口正常，无需清理${skipText}`);
+          return;
+        }
+        if (!cleanupScanCanceledRef.current) {
+          setCleanupOpen(true);
+        }
+        return;
+      }
+      setCleanupOpen(false);
+      message.error(resp.msg || "失效源检测失败");
+    } catch {
+      setCleanupOpen(false);
+      message.error("失效源检测失败");
+    } finally {
+      setCleanupScanning(false);
+    }
+  };
+
+  const cancelCleanup = () => {
+    cleanupScanCanceledRef.current = true;
+    setCleanupOpen(false);
+  };
+
+  // 确认清理：批量删除失效源
+  const confirmCleanup = async () => {
+    if (invalidSources.length === 0) {
+      return;
+    }
+    setCleanupDeleting(true);
+    try {
+      const resp = await ApiPost<DelBatchResult>("/manage/collect/del/batch", {
+        ids: invalidSources.map((item) => item.id),
+      });
+      if (resp.code === 0) {
+        const data = resp.data ?? { deleted: [], skipped: [] };
+        const deleted = Array.isArray(data.deleted) ? data.deleted : [];
+        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
+        message.success(`已删除 ${deleted.length} 个失效采集站`);
+        if (skipped.length > 0) {
+          message.warning(
+            `${skipped.length} 个采集站未删除：${skipped
+              .map((item) => `${item.name || item.id}（${item.reason}）`)
+              .join("；")}`,
+          );
+        }
+        setCleanupOpen(false);
+        setInvalidSources([]);
+        setCleanupSkipped([]);
+        await getCollectList();
+        return;
+      }
+      message.error(resp.msg || "清理失败");
+    } catch {
+      message.error("清理失败");
+    } finally {
+      setCleanupDeleting(false);
     }
   };
 
@@ -239,7 +366,7 @@ const masterStatus = useMemo(() => {
 
     const sourceIdsToUpdate = selectedSources.filter((item) => item.state !== state).map((item) => item.id);
     if (sourceIdsToUpdate.length === 0) {
-      message.info(state ? "选中站点已全部启用" : "选中站点已全部禁用");
+      message.info(state ? "选中采集站已全部启用" : "选中采集站已全部禁用");
       return;
     }
 
@@ -252,7 +379,7 @@ const masterStatus = useMemo(() => {
       if (resp.code !== 0) {
         message.error(resp.msg || `批量${state ? "启用" : "禁用"}失败`);
       } else {
-        message.success(`已${state ? "启用" : "禁用"} ${sourceIdsToUpdate.length} 个站点`);
+        message.success(`已${state ? "启用" : "禁用"} ${sourceIdsToUpdate.length} 个采集站`);
       }
       await getCollectList();
     } finally {
@@ -261,6 +388,15 @@ const masterStatus = useMemo(() => {
   };
 
   const startTask = async (record: FilmSource) => {
+    if (isActiveCollectStatus(record.progress?.status)) {
+      message.warning("该采集站已在采集中");
+      return;
+    }
+    // 点击后立即展示 0% 进度条，再等接口与列表校准
+    updateSiteListItem(record.id, (item) => ({
+      ...item,
+      progress: makeStartingProgress(record.id, record.name),
+    }));
     const collectTime = collectDurationOverridesRef.current[record.id] ?? record.cd ?? 24;
     const resp = await ApiPost("/manage/spider/start", {
       id: record.id,
@@ -269,10 +405,11 @@ const masterStatus = useMemo(() => {
     });
     if (resp.code === 0) {
       message.success(resp.msg);
-      await getCollectList();
+      void getCollectList(true);
       return;
     }
     message.error(resp.msg || "启动采集失败");
+    await getCollectList();
   };
 
   const stopTask = async (id: string) => {
@@ -330,7 +467,7 @@ const masterStatus = useMemo(() => {
       setSourceModalOpen(true);
       return;
     }
-    message.error(resp.msg || "获取站点信息失败");
+    message.error(resp.msg || "获取采集站信息失败");
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
@@ -348,7 +485,7 @@ const masterStatus = useMemo(() => {
         await getCollectList();
         return;
       }
-      message.error(resp.msg || "保存站点失败");
+      message.error(resp.msg || "保存采集站失败");
     } finally {
       setSubmitting(false);
     }
@@ -383,11 +520,11 @@ const masterStatus = useMemo(() => {
         .map(String)
         .filter((id) => enabledIds.has(id));
       if (selectedSourceIds.length === 0) {
-        message.warning("请先选择要采集的站点");
+        message.warning("请先选择要采集的采集站");
         return;
       }
       if (selectedEnabledIds.length === 0) {
-        message.warning("选中的站点均未启用，无法批量采集");
+        message.warning("选中的采集站均未启用，无法批量采集");
         return;
       }
       const options = allOptions.filter((item) => selectedEnabledIds.includes(item.id));
@@ -396,14 +533,23 @@ const masterStatus = useMemo(() => {
       setBatchOpen(true);
       return;
     }
-    message.error(resp.msg || "加载批量采集站点失败");
+    message.error(resp.msg || "加载批量采集列表失败");
   };
 
   const startBatchCollect = async () => {
     if (batchIds.length === 0) {
-      message.warning("请至少选择一个站点");
+      message.warning("请至少选择一个采集站");
       return;
     }
+    const idSet = new Set(batchIds);
+    // 批量启动：先本地全部置为 starting 0%，关闭弹窗即可看到进度
+    setSiteList((current) =>
+      current.map((item) =>
+        idSet.has(item.id) && !isActiveCollectStatus(item.progress?.status)
+          ? { ...item, progress: makeStartingProgress(item.id, item.name) }
+          : item,
+      ),
+    );
     const resp = await ApiPost("/manage/spider/start", {
       ids: batchIds,
       time: batchTime,
@@ -412,10 +558,12 @@ const masterStatus = useMemo(() => {
     if (resp.code === 0) {
       message.success(resp.msg);
       setBatchOpen(false);
-      await getCollectList();
+      void getCollectList(true);
       return;
     }
     message.error(resp.msg || "批量采集启动失败");
+    setBatchOpen(false);
+    await getCollectList();
   };
 
   const submitStopAllTasks = async () => {
@@ -428,24 +576,44 @@ const masterStatus = useMemo(() => {
     message.error(resp.msg || "终止任务失败");
   };
 
-  const columns = createCollectTableColumns({
-    activeCollectIds,
-    onUpdateItem: updateSiteListItem,
-    onChangeCollectDuration: changeCollectDuration,
-    onChangeSourceState: (record) => void changeSourceState(record),
-    onStartTask: (record) => void startTask(record),
-    onTerminateTask: (id) => void stopTask(id),
-    onEditSource: (id) => void openEditDialog(id),
-    onDeleteSource: (id) => void delSource(id),
-  });
-
   const selectedCount = selectedSourceIds.length;
 
   return (
     <div className={styles.pageBody}>
       <ManagePageHeader
-        title="采集站点"
-        description="统一管理主站、附属站与采集任务。"
+        title="采集站"
+        description="统一管理主采集站、附属采集站与采集任务。"
+        actions={
+          <>
+            <Button
+              icon={<ClearOutlined />}
+              loading={cleanupScanning}
+              onClick={() => void startCleanupScan()}
+            >
+              清理失效源
+            </Button>
+            <Popconfirm
+              title="一键终止所有采集"
+              description="确定要强制终止当前所有正在运行的采集任务吗？"
+              onConfirm={() => void submitStopAllTasks()}
+              okText="确认终止"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              disabled={activeCollectIds.length === 0}
+            >
+              <Button
+                danger
+                icon={<PauseOutlined />}
+                disabled={activeCollectIds.length === 0}
+              >
+                终止全部任务
+              </Button>
+            </Popconfirm>
+            <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
+              新增采集站
+            </Button>
+          </>
+        }
       />
 
       <div className={styles.layout}>
@@ -455,91 +623,134 @@ const masterStatus = useMemo(() => {
           masterStatus={masterStatus}
         />
 
-        <Table
-          rowKey="id"
-          size="middle"
-          rowSelection={{
-            selectedRowKeys: selectedSourceIds,
-            onChange: setSelectedSourceIds,
-          }}
-          columns={columns}
-          dataSource={siteList}
-          loading={loading}
-          pagination={false}
-          scroll={{ x: "max-content" }}
-          rowClassName={(record) =>
-            selectedSourceIds.includes(record.id) ? styles.selectedRow : ""
-          }
-          className={styles.tableBlock}
-          title={() => (
-            <div className={styles.tableHeader}>
-              <Space size={[12, 8]} wrap>
-                <Space size={[8, 8]} wrap>
+        <div className={styles.cardPanel}>
+          <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
+            <div className={styles.toolbar}>
+              <Space size={[8, 8]} wrap>
+                <span className={styles.toolbarHint}>
+                  共 {siteList.length} 个采集站
+                  {selectedCount > 0 ? ` · 已选 ${selectedCount}` : ""}
+                </span>
+                <Button onClick={selectAllSources}>全选</Button>
+                <Button onClick={invertSelection}>反选</Button>
+                <Button disabled={selectedCount === 0} onClick={clearSelection}>
+                  清空选择
+                </Button>
+              </Space>
+              <Space size={[8, 8]} wrap>
+                <Button
+                  loading={batchStateUpdating}
+                  disabled={selectedCount === 0}
+                  onClick={() => void batchChangeSourceState(true)}
+                >
+                  批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                </Button>
+                <Popconfirm
+                  title="批量禁用采集站？"
+                  description="禁用后会停止选中采集站的后续请求，已请求数据会继续入库，并阻止后续批量/自动采集调度。"
+                  okText="确认禁用"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
+                  disabled={selectedCount === 0}
+                  onConfirm={() => void batchChangeSourceState(false)}
+                >
                   <Button
+                    danger
                     loading={batchStateUpdating}
                     disabled={selectedCount === 0}
-                    onClick={() => void batchChangeSourceState(true)}
                   >
-                    批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
+                    批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
                   </Button>
-                  <Popconfirm
-                    title="批量禁用采集站？"
-                    description="禁用后会停止选中站点的后续请求，已请求数据会继续入库，并阻止后续批量/自动采集调度。"
-                    okText="确认禁用"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    disabled={selectedCount === 0}
-                    onConfirm={() => void batchChangeSourceState(false)}
-                  >
-                    <Button
-                      danger
-                      loading={batchStateUpdating}
-                      disabled={selectedCount === 0}
-                    >
-                      批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
-                    </Button>
-                  </Popconfirm>
-                  <Button
-                    disabled={selectedCount === 0}
-                    onClick={() => void openBatchCollect()}
-                  >
-                    批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
-                  </Button>
-                </Space>
-              </Space>
-              <Space size={[8, 8]} wrap className={styles.tableActions}>
+                </Popconfirm>
                 <Button
                   type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={openAddDialog}
+                  ghost
+                  disabled={selectedCount === 0}
+                  onClick={() => void openBatchCollect()}
                 >
-                  新增站点
+                  批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
                 </Button>
               </Space>
             </div>
+          </Card>
+
+          {siteList.length > 0 ? (
+            <div className={styles.sourceGroups}>
+              {/* 主采集站：横向操作条（唯一配置） */}
+              <section className={styles.masterSection}>
+                <header className={styles.sectionHead}>
+                  <h3 className={styles.sectionTitle}>主采集站</h3>
+                  <span className={styles.sectionHint}>全局唯一数据源</span>
+                  {masterSites.length > 1 ? (
+                    <span className={styles.sectionWarn}>
+                      当前有 {masterSites.length} 个，请只保留一个
+                    </span>
+                  ) : null}
+                </header>
+                {masterSites.length > 0 ? (
+                  <div className={styles.masterList}>
+                    {masterSites.map((site) => (
+                      <CollectMasterPanel
+                        key={site.id}
+                        record={site}
+                        selected={selectedSourceIds.includes(site.id)}
+                        active={activeCollectIds.includes(site.id)}
+                        onSelect={handleSelectSource}
+                        onChangeCollectDuration={changeCollectDuration}
+                        onStartTask={(record) => void startTask(record)}
+                        onTerminateTask={(id) => void stopTask(id)}
+                        onEditSource={(id) => void openEditDialog(id)}
+                        onDeleteSource={(id) => void delSource(id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={styles.masterEmpty}>
+                    未配置主采集站。新增采集站时将类型设为「主采集站」。
+                  </div>
+                )}
+              </section>
+
+              {/* 附属采集站：多源卡片网格 */}
+              <section className={styles.affiliateSection}>
+                <header className={styles.sectionHead}>
+                  <h3 className={styles.sectionTitle}>附属采集站</h3>
+                  <span className={styles.sectionCount}>{affiliateSites.length}</span>
+                </header>
+                {affiliateSites.length > 0 ? (
+                  <div className={styles.cardGrid}>
+                    {affiliateSites.map((site) => (
+                      <CollectSourceCard
+                        key={site.id}
+                        record={site}
+                        selected={selectedSourceIds.includes(site.id)}
+                        active={activeCollectIds.includes(site.id)}
+                        onSelect={handleSelectSource}
+                        onChangeCollectDuration={changeCollectDuration}
+                        onStartTask={(record) => void startTask(record)}
+                        onTerminateTask={(id) => void stopTask(id)}
+                        onEditSource={(id) => void openEditDialog(id)}
+                        onDeleteSource={(id) => void delSource(id)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className={styles.groupEmpty}>暂无附属采集站</div>
+                )}
+              </section>
+            </div>
+          ) : (
+            <div className={styles.emptyCard}>
+              <Empty
+                description={
+                  loading
+                    ? "采集站加载中…"
+                    : "暂无采集站，点击「新增采集站」开始配置"
+                }
+              />
+            </div>
           )}
-          footer={() => (
-            <Flex justify="flex-end">
-              <Popconfirm
-                title="一键终止所有采集"
-                description="确定要强制终止当前所有正在运行的采集任务吗？"
-                onConfirm={() => void submitStopAllTasks()}
-                okText="确认终止"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-                disabled={activeCollectIds.length === 0}
-              >
-                <Button
-                  danger
-                  icon={<PauseOutlined />}
-                  disabled={activeCollectIds.length === 0}
-                >
-                  终止全部任务
-                </Button>
-              </Popconfirm>
-            </Flex>
-          )}
-        />
+        </div>
       </div>
 
       <SourceFormModal
@@ -563,6 +774,15 @@ const masterStatus = useMemo(() => {
         onBatchTimeChange={setBatchTime}
       />
 
+      <CleanupInvalidModal
+        open={cleanupOpen}
+        scanning={cleanupScanning}
+        deleting={cleanupDeleting}
+        invalidSources={invalidSources}
+        skipped={cleanupSkipped}
+        onCancel={cancelCleanup}
+        onConfirm={() => void confirmCleanup()}
+      />
     </div>
   );
 }

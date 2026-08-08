@@ -23,7 +23,7 @@ const quickEntries = [
   {
     key: "collect",
     icon: DatabaseOutlined,
-    title: "采集站点",
+    title: "采集站",
     description: "配置主站、附属站与批量采集任务。",
     href: "/manage/collect",
   },
