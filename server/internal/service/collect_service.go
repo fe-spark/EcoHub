@@ -8,6 +8,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repository"
@@ -66,7 +67,15 @@ func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
 	return repository.GetEnabledCollectSourceList()
 }
 
+// UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
+	return s.updateFilmSource(source, nil)
+}
+
+// updateFilmSource 编辑采集源配置核心逻辑。
+// collector 非 nil 时（批量操作）不直接发送通知，而是把各源变更追加到收集器，
+// 由调用方统一发送聚合通知，避免批量操作逐源轰炸。
+func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]notify.SourceConfigChangeItem) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -111,7 +120,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if masterLookup {
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
-				log.Printf("[Collect] 自动降级旧主站失败: %v", err)
+				syslog.Errorf("[Collect] 自动降级旧主站失败: %v", err)
 				return errors.New("主站自动降级失败，请重试")
 			}
 		}
@@ -124,7 +133,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 
 	if masterLookup || masterUriChanged || masterDowngrade {
 		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
-			log.Printf("[Collect] 主站切换数据清理失败: %v", err)
+			syslog.Errorf("[Collect] 主站切换数据清理失败: %v", err)
 			return errors.New("主站切换数据清理失败，请重试")
 		}
 	}
@@ -148,7 +157,7 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	}
 	clearProvideNetworkConfigCache()
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
-		notify.PublishSourceConfigChanged(source.Name, source.Id, changes)
+		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
 	}
 	// masterLookup：旧主站被自动降级且主数据已清空，单独通知，避免切换静默
 	if masterLookup {
@@ -156,10 +165,23 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 			if m.Id == source.Id {
 				continue
 			}
-			notify.PublishSourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"})
+			notifySourceConfigChanged(m.Name, m.Id, []string{"原主站已降级为附属站，主站数据已清空"}, collector)
 		}
 	}
 	return nil
+}
+
+// notifySourceConfigChanged 单条源配置变更通知：批量收集器非空时累积到收集器，否则立即发送。
+func notifySourceConfigChanged(sourceName, sourceID string, changes []string, collector *[]notify.SourceConfigChangeItem) {
+	if collector != nil {
+		*collector = append(*collector, notify.SourceConfigChangeItem{
+			SourceName: sourceName,
+			SourceID:   sourceID,
+			Changes:    changes,
+		})
+		return
+	}
+	notify.PublishSourceConfigChanged(sourceName, sourceID, changes)
 }
 
 // sourceChangeLabels 对比 old→next 生成源配置变更描述；无差异时返回 nil。
@@ -208,21 +230,29 @@ func sourceOnOffLabel(on bool) string {
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
+	var collector []notify.SourceConfigChangeItem
+	var firstErr error
 	for _, id := range ids {
 		source := repository.FindCollectSourceById(id)
 		if source == nil {
-			return errors.New("采集站信息不存在")
+			firstErr = errors.New("采集站信息不存在")
+			break
 		}
 		if source.State == state {
 			continue
 		}
 		next := *source
 		next.State = state
-		if err := s.UpdateFilmSource(next); err != nil {
-			return err
+		if err := s.updateFilmSource(next, &collector); err != nil {
+			firstErr = err
+			break
 		}
 	}
-	return nil
+	// 全成功或部分成功均发送已收集的变更，避免中途失败时静默丢失已生效的源
+	if len(collector) > 0 {
+		notify.PublishSourceConfigsChanged(collector)
+	}
+	return firstErr
 }
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
@@ -248,7 +278,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			return err
 		}
 		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
-			log.Printf("[Collect] 新主站接管前数据清理失败: %v", err)
+			syslog.Errorf("[Collect] 新主站接管前数据清理失败: %v", err)
 			return errors.New("主站切换数据清理失败，请重试")
 		}
 		spider.ClearLimiter(source.Id)

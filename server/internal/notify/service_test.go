@@ -5,10 +5,50 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"server/internal/model"
 	"server/internal/repository"
 )
+
+func TestIsTelegramGetUpdatesConflict(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{fmt.Errorf("telegram api: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"), true},
+		{fmt.Errorf("CONFLICT: terminated by other getUpdates request"), true},
+		// webhook 未清除属另一类错误，不应误判为多实例冲突
+		{fmt.Errorf("Conflict: can't use getUpdates method while webhook is active"), false},
+		{fmt.Errorf("telegram api: Unauthorized"), false},
+		{fmt.Errorf("connection timeout"), false},
+	}
+	for _, tc := range cases {
+		if got := isTelegramGetUpdatesConflict(tc.err); got != tc.want {
+			t.Fatalf("err=%v got=%v want=%v", tc.err, got, tc.want)
+		}
+	}
+}
+
+func TestIsTelegramWebhookActiveError(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{nil, false},
+		{fmt.Errorf("Conflict: can't use getUpdates method while webhook is active"), true},
+		{fmt.Errorf("CONFLICT: CAN'T USE GETUPDATES METHOD WHILE WEBHOOK IS ACTIVE"), true},
+		// 多实例冲突不应误判为 webhook 错误
+		{fmt.Errorf("telegram api: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"), false},
+		{fmt.Errorf("telegram api: Unauthorized"), false},
+	}
+	for _, tc := range cases {
+		if got := isTelegramWebhookActiveError(tc.err); got != tc.want {
+			t.Fatalf("err=%v got=%v want=%v", tc.err, got, tc.want)
+		}
+	}
+}
 
 func TestMaskBotToken(t *testing.T) {
 	if MaskBotToken("") != "" {
@@ -80,13 +120,23 @@ func TestValidateAndMergeUpdateKeepToken(t *testing.T) {
 
 func TestValidateChatID(t *testing.T) {
 	old := model.NotifyConfig{}
+	// 禁用状态下不校验 Chat ID 格式（允许保存残留无效 ID，便于清理配置）
 	_, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
 		Enabled:           false,
 		ChatIDs:           []string{"not valid!"},
 		MaxFilmsInMessage: 15,
 	})
+	if err != nil {
+		t.Fatalf("disabled config should skip chat id validation: %v", err)
+	}
+	// 启用状态下无效 Chat ID 必须报错
+	_, err = ValidateAndMergeUpdate(old, model.NotifyConfig{
+		Enabled:           true,
+		ChatIDs:           []string{"not valid!"},
+		MaxFilmsInMessage: 15,
+	})
 	if err == nil {
-		t.Fatal("expected invalid chat id error")
+		t.Fatal("expected invalid chat id error when enabled")
 	}
 	cfg, err := ValidateAndMergeUpdate(old, model.NotifyConfig{
 		Enabled:           false,
@@ -335,4 +385,93 @@ func TestFormatSearchListPage(t *testing.T) {
 	if kb == nil || len(kb.InlineKeyboard) != 1 || !strings.Contains(kb.InlineKeyboard[0][2].Text, "下一页") {
 		t.Fatalf("search kb: %+v", kb)
 	}
+}
+
+func TestFormatSourceConfigsChangedPaging(t *testing.T) {
+	// 构造足够多条目，确保超过 4096 触发分页
+	items := make([]SourceConfigChangeItem, 0, 80)
+	for i := 0; i < 80; i++ {
+		items = append(items, SourceConfigChangeItem{
+			SourceName: fmt.Sprintf("采集源名称-%03d-较长一点便于占位", i),
+			SourceID:   fmt.Sprintf("source-id-%03d-abcdefghijklmnopqrstuvwxyz", i),
+			Changes:    []string{"启用状态: 已启用 → 已停用", "请求间隔: 100ms → 200ms"},
+		})
+	}
+	at := time.Date(2026, 8, 8, 12, 0, 0, 0, time.FixedZone("CST", 8*3600))
+	parts := formatSourceConfigsChanged("测试站", items, at)
+	if len(parts) < 2 {
+		t.Fatalf("expected multi-page messages, got %d parts", len(parts))
+	}
+	joined := strings.Join(parts, "\n")
+	if !strings.Contains(parts[0], "· 1/") {
+		t.Fatalf("page1 header missing: %s", truncateForTest(parts[0], 120))
+	}
+	if !strings.Contains(joined, "批量 80 个") {
+		t.Fatalf("missing total count: %s", truncateForTest(joined, 200))
+	}
+	// 时间戳只在末页
+	if strings.Contains(parts[0], "🕒 时间") {
+		t.Fatal("timestamp should only appear on last page")
+	}
+	if !strings.Contains(parts[len(parts)-1], "🕒 时间") {
+		t.Fatal("last page should include timestamp")
+	}
+	for i, p := range parts {
+		if n := utf8.RuneCountInString(p); n > telegramMaxMessageLen {
+			t.Fatalf("part %d exceeds telegram limit: %d", i, n)
+		}
+	}
+	// 不应丢源：最后一页仍含高序号源
+	if !strings.Contains(joined, "source-id-079") {
+		t.Fatal("expected last source id retained across pages")
+	}
+	if strings.Contains(joined, "<script>") {
+		t.Fatal("should escape html if present")
+	}
+}
+
+func TestFormatSourceConfigsChangedEscape(t *testing.T) {
+	parts := formatSourceConfigsChanged("站", []SourceConfigChangeItem{{
+		SourceName: `A<script>`,
+		SourceID:   "id1",
+		Changes:    []string{`x <y> & z`},
+	}}, time.Time{})
+	if len(parts) != 1 {
+		t.Fatalf("want 1 part, got %d", len(parts))
+	}
+	if strings.Contains(parts[0], "<script>") || strings.Contains(parts[0], "<y>") {
+		t.Fatalf("unescaped html: %s", parts[0])
+	}
+	if !strings.Contains(parts[0], "批量 1 个") || strings.Contains(parts[0], "· 1/") {
+		t.Fatalf("single page should not show page index: %s", parts[0])
+	}
+}
+
+func TestSourceConfigBatchRateKey(t *testing.T) {
+	a := []SourceConfigChangeItem{
+		{SourceID: "b", SourceName: "B"},
+		{SourceID: "a", SourceName: "A"},
+	}
+	b := []SourceConfigChangeItem{
+		{SourceID: "a", SourceName: "A"},
+		{SourceID: "b", SourceName: "B"},
+	}
+	// 同一源集合（顺序无关）应得到相同 key
+	if sourceConfigBatchRateKey(a) != sourceConfigBatchRateKey(b) {
+		t.Fatal("same source set should share rate key")
+	}
+	c := []SourceConfigChangeItem{{SourceID: "c", SourceName: "C"}}
+	if sourceConfigBatchRateKey(a) == sourceConfigBatchRateKey(c) {
+		t.Fatal("different source sets must not share rate key")
+	}
+	if !strings.HasPrefix(sourceConfigBatchRateKey(a), model.NotifyEventSourceConfigChanged+":batch:") {
+		t.Fatalf("unexpected key prefix: %s", sourceConfigBatchRateKey(a))
+	}
+}
+
+func truncateForTest(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }

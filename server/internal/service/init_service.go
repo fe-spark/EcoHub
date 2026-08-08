@@ -6,6 +6,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -51,13 +52,13 @@ func (s *InitService) DefaultDataInit() {
 
 func (s *InitService) ensureFilmListSnapshot() {
 	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
-		log.Printf("[Init] 前台影片列表快照引导失败: %v", err)
+		syslog.Errorf("[Init] 前台影片列表快照引导失败: %v", err)
 	}
 }
 
 func (s *InitService) loadActiveFilmReadModel() {
 	if err := filmrepo.LoadActiveFilmReadModel(""); err != nil {
-		log.Printf("[Init] 影片内存读模型加载失败: %v", err)
+		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
 	}
 }
 
@@ -65,12 +66,17 @@ func clearStartupCaches() {
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, config.RedisProjectKeyPattern, config.MaxScanCount).Iterator()
 	for iter.Next(ctx) {
-		if err := db.Rdb.Del(ctx, iter.Val()).Err(); err != nil {
-			log.Printf("[Init] Redis 键删除失败 %s: %v", iter.Val(), err)
+		key := iter.Val()
+		// 保留 Bot 轮询跨实例领导锁，避免多实例同时启动时互相清锁导致双 getUpdates
+		if key == config.NotifyBotPollerLockKey {
+			continue
+		}
+		if err := db.Rdb.Del(ctx, key).Err(); err != nil {
+			syslog.Errorf("[Init] Redis 键删除失败 %s: %v", key, err)
 		}
 	}
 	if err := iter.Err(); err != nil {
-		log.Printf("[Init] Redis 模式清理失败 %s: %v", config.RedisProjectKeyPattern, err)
+		syslog.Errorf("[Init] Redis 模式清理失败 %s: %v", config.RedisProjectKeyPattern, err)
 	}
 
 	log.Printf("[Init] Redis 前缀 %s 相关键已清空", config.RedisKeyPrefix)
@@ -106,7 +112,7 @@ func (s *InitService) TableInit() {
 		&model.NotifyChangeMid{},
 	)
 	if err != nil {
-		log.Println("Database AutoMigrate Failed:", err)
+		syslog.Errorf("Database AutoMigrate Failed: %v", err)
 		return
 	}
 	ensureMappingRuleIndexes()
@@ -116,7 +122,7 @@ func (s *InitService) TableInit() {
 
 func ensureMappingRuleIndexes() {
 	if err := repository.EnsureMappingRuleIndexes(); err != nil {
-		log.Println("Ensure mapping rule indexes failed:", err)
+		syslog.Errorf("Ensure mapping rule indexes failed: %v", err)
 	}
 }
 
@@ -174,7 +180,7 @@ func (s *InitService) FilmSourceInit() {
 		return
 	}
 	if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
-		log.Println("BatchAddCollectSource Error: ", err)
+		syslog.Errorf("BatchAddCollectSource Error: %v", err)
 	}
 }
 
@@ -216,7 +222,7 @@ func (s *InitService) CollectCrontabInit() {
 func (s *InitService) registerTask(task model.FilmCollectTask) {
 	if !task.State {
 		if err := repository.UpdateFilmTask(task); err != nil {
-			log.Println("UpdateFilmTask Error: ", err)
+			syslog.Errorf("UpdateFilmTask Error: %v", err)
 		}
 		return
 	}
@@ -237,7 +243,7 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		task.Cid = cid
 		spider.RegisterTaskCid(task.Id, task.Cid)
 		if err := repository.UpdateFilmTask(task); err != nil {
-			log.Println("UpdateFilmTask Error: ", err)
+			syslog.Errorf("UpdateFilmTask Error: %v", err)
 		}
 	}
 }

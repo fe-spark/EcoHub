@@ -248,6 +248,96 @@ func formatSourceConfigChanged(siteName, sourceName, sourceID string, changes []
 	return []string{b.String()}
 }
 
+// formatSourceConfigChangeItemBlock 单条源变更块（不含页眉/时间）。
+func formatSourceConfigChangeItemBlock(item SourceConfigChangeItem) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>📌 站点:</b> %s", html.EscapeString(strings.TrimSpace(item.SourceName)))
+	if id := strings.TrimSpace(item.SourceID); id != "" {
+		fmt.Fprintf(&b, " (<code>%s</code>)", html.EscapeString(id))
+	}
+	b.WriteByte('\n')
+	if len(item.Changes) > 0 {
+		b.WriteString("<b>🛠 变更:</b>\n")
+		for _, ch := range item.Changes {
+			fmt.Fprintf(&b, "· %s\n", html.EscapeString(ch))
+		}
+	} else {
+		b.WriteString("<b>🛠 操作:</b> 配置已更新\n")
+	}
+	return b.String()
+}
+
+// formatSourceConfigsChanged 批量采集源配置变更聚合通知（批量启用/禁用等）。
+// 按条目贪心装箱，单条消息不超过 Telegram 4096 上限；多页时带「N 个 · i/m」页眉，不截断丢源。
+func formatSourceConfigsChanged(siteName string, items []SourceConfigChangeItem, at time.Time) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	blocks := make([]string, 0, len(items))
+	for _, item := range items {
+		blocks = append(blocks, formatSourceConfigChangeItemBlock(item))
+	}
+
+	// 预留页眉 + 时间戳空间，正文按块装箱
+	const reserveRunes = 180
+	bodyLimit := telegramMaxMessageLen - reserveRunes
+	if bodyLimit < 256 {
+		bodyLimit = telegramMaxMessageLen / 2
+	}
+
+	var groups [][]string
+	var cur []string
+	curLen := 0
+	for _, block := range blocks {
+		bl := utf8.RuneCountInString(block)
+		need := bl
+		if len(cur) > 0 {
+			need += 1 // 块间换行
+		}
+		if len(cur) > 0 && curLen+need > bodyLimit {
+			groups = append(groups, cur)
+			cur = nil
+			curLen = 0
+			need = bl
+		}
+		cur = append(cur, block)
+		curLen += need
+	}
+	if len(cur) > 0 {
+		groups = append(groups, cur)
+	}
+
+	total, pages := len(items), len(groups)
+	out := make([]string, 0, pages)
+	for i, group := range groups {
+		var b strings.Builder
+		if pages > 1 {
+			fmt.Fprintf(&b, "<b>%s 🔧 采集源配置变更（批量 %d 个 · %d/%d）</b>\n",
+				formatTitlePrefix(siteName), total, i+1, pages)
+		} else {
+			fmt.Fprintf(&b, "<b>%s 🔧 采集源配置变更（批量 %d 个）</b>\n",
+				formatTitlePrefix(siteName), total)
+		}
+		for _, block := range group {
+			b.WriteByte('\n')
+			b.WriteString(block)
+		}
+		// 时间戳只挂末页，避免每页重复
+		if !at.IsZero() && i == pages-1 {
+			fmt.Fprintf(&b, "\n<b>🕒 时间:</b> <code>%s</code>\n",
+				html.EscapeString(at.In(time.FixedZone("CST", 8*3600)).Format(time.DateTime)))
+		}
+		part := b.String()
+		// 单块极端超长时兜底拆分（最多 3 段并截断提示）
+		if utf8.RuneCountInString(part) > telegramMaxMessageLen {
+			out = append(out, splitTelegramMessages(part)...)
+		} else {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
 func formatTestMessage(siteName string) string {
 	return fmt.Sprintf("<b>%s 通知测试</b>\n✅ <b>Telegram 通知服务联通成功！</b>\n🕒 <b>发送时间:</b> <code>%s</code>",
 		formatTitlePrefix(siteName),

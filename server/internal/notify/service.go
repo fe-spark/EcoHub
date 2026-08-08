@@ -2,23 +2,30 @@ package notify
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"log"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 )
 
 var (
-	// 数字 chat id（含负数群组）或 @username
-	chatIDPattern = regexp.MustCompile(`^(-?\d+|@[A-Za-z0-9_]{5,})$`)
+	// 数字 chat id（含负数群组/频道）或 @username
+	chatIDPattern = regexp.MustCompile(`^(-?\d+|@[A-Za-z0-9_]+)$`)
 	sendSem       = make(chan struct{}, 4)
 	client        = newTelegramClient()
 )
+
+// SourceConfigChangeItem 批量源配置变更通知项（结构定义见 model 包，此处导出别名）。
+type SourceConfigChangeItem = model.SourceConfigChangeItem
 
 // MaskBotToken Token 脱敏展示。
 func MaskBotToken(token string) string {
@@ -83,9 +90,12 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 	}
 
 	chatIDs := repository.NormalizeChatIDs(cfg.ChatIDs)
-	for _, id := range chatIDs {
-		if !chatIDPattern.MatchString(id) {
-			return model.NotifyConfig{}, fmt.Errorf("无效的 Chat ID: %s", id)
+	// 仅启用时校验 Chat ID 格式：禁用状态下允许保存（含清理残留无效 ID），避免无法保存配置
+	if cfg.Enabled {
+		for _, id := range chatIDs {
+			if !chatIDPattern.MatchString(id) {
+				return model.NotifyConfig{}, fmt.Errorf("无效的 Chat ID: %s", id)
+			}
 		}
 	}
 	cfg.ChatIDs = chatIDs
@@ -197,7 +207,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 		parts := splitTelegramMessages(overview)
 		buttonPart := parts[len(parts)-1]
 		if err := SaveChangeBatchMeta(batchID, payload.SiteName, buttonPart, pageSize, listN); err != nil {
-			log.Printf("[Notify] 保存变更批次元数据失败: %v", err)
+			syslog.Errorf("[Notify] 保存变更批次元数据失败: %v", err)
 			sendMessages(cfg, parts)
 			return
 		}
@@ -315,6 +325,52 @@ func PublishSourceConfigChanged(sourceName, sourceID string, changes []string) {
 	})
 }
 
+// PublishSourceConfigsChanged 批量采集源配置变更通知（批量启用/禁用等），聚合发送（超长按页拆分）。
+// 限流 key 为事件 + 源 ID 集合指纹：同一批源短时间重复操作会限流，不同源集合互不拦截。
+func PublishSourceConfigsChanged(items []SourceConfigChangeItem) {
+	if len(items) == 0 {
+		return
+	}
+	go safePublish(func() {
+		cfg := GetConfig()
+		if !eventEnabled(cfg, model.NotifyEventSourceConfigChanged) {
+			return
+		}
+		key := sourceConfigBatchRateKey(items)
+		if !allowOrLog(key, time.Duration(cfg.MinIntervalSec)*time.Second) {
+			return
+		}
+		messages := formatSourceConfigsChanged(siteName(), items, time.Now())
+		sendMessages(cfg, messages)
+	})
+}
+
+// sourceConfigBatchRateKey 批量配置变更限流 key：按去重排序后的源 ID 指纹，避免固定 :batch 互踩。
+func sourceConfigBatchRateKey(items []SourceConfigChangeItem) string {
+	ids := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, it := range items {
+		id := strings.TrimSpace(it.SourceID)
+		if id == "" {
+			id = strings.TrimSpace(it.SourceName)
+		}
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	if len(ids) == 0 {
+		return model.NotifyEventSourceConfigChanged + ":batch:empty"
+	}
+	sum := sha1.Sum([]byte(strings.Join(ids, "\n")))
+	return model.NotifyEventSourceConfigChanged + ":batch:" + hex.EncodeToString(sum[:8])
+}
+
 // SendTest 使用已保存配置发送测试消息。
 func SendTest() (model.NotifyTestResult, error) {
 	return SendTestWith("", nil)
@@ -362,7 +418,7 @@ func SendTestWith(botToken string, chatIDs []string) (model.NotifyTestResult, er
 				ChatID: chatID,
 				Error:  err.Error(),
 			})
-			log.Printf("[Notify] 测试发送失败 chat=%s err=%v", chatID, err)
+			syslog.Errorf("[Notify] 测试发送失败 chat=%s err=%v", chatID, err)
 			continue
 		}
 		result.Sent++
@@ -414,7 +470,7 @@ func sendMessagesWithMarkup(cfg model.NotifyConfig, text string, markup *InlineK
 				failN++
 				lastFail = err.Error()
 				failMu.Unlock()
-				log.Printf("[Notify] Telegram 发送失败 chat=%s err=%v", chatID, err)
+				syslog.Errorf("[Notify] Telegram 发送失败 chat=%s err=%v", chatID, err)
 			}
 		}(chatID)
 	}
@@ -428,7 +484,7 @@ func sendMessagesWithMarkup(cfg model.NotifyConfig, text string, markup *InlineK
 func safePublish(fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("[Notify] 发送协程 panic: %v", r)
+			syslog.Errorf("[Notify] 发送协程 panic: %v", r)
 		}
 	}()
 	fn()

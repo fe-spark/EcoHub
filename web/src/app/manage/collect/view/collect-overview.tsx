@@ -35,26 +35,27 @@ export default function CollectOverview({
         styles={{ body: { height: "100%" } }}
       >
         <Row gutter={[16, 16]} className={styles.overviewRow}>
-          <Col xs={12} lg={6} className={styles.overviewCol}>
+          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="站点总数" value={stats.total} />
             </div>
           </Col>
-          <Col xs={12} lg={6} className={styles.overviewCol}>
+          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="启用站点" value={stats.enabled} />
             </div>
           </Col>
-          <Col xs={12} lg={6} className={styles.overviewCol}>
+          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic
-                title="采集中"
-                value={stats.running}
-                suffix={stats.waiting > 0 ? `收尾/排队 ${stats.waiting}` : undefined}
-              />
+              <Statistic title="采集中" value={stats.running} />
             </div>
           </Col>
-          <Col xs={12} lg={6} className={styles.overviewCol}>
+          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+            <div className={styles.overviewStat}>
+              <Statistic title="收尾/排队" value={stats.waiting} />
+            </div>
+          </Col>
+          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic
                 title="主站状态"

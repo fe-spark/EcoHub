@@ -139,6 +139,8 @@ const (
 	SiteConfigBasic = RedisKeyPrefix + ":Config:Site:Basic"
 	// NotifyConfigKey Telegram 通知配置缓存
 	NotifyConfigKey = RedisKeyPrefix + ":Config:Notify"
+	// NotifyBotPollerLockKey Telegram getUpdates 跨实例领导锁（启动清缓存时须保留）
+	NotifyBotPollerLockKey = RedisKeyPrefix + ":Notify:BotPoller:Lock"
 	// BannersKey 轮播组件key
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
 

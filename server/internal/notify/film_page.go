@@ -130,6 +130,8 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 
 	sess, err := loadFilmPageSession(batchID)
 	if err != nil {
+		// 打日志便于定位「刚收到就过期」类问题：批次是否真的不存在、expire_at 是否异常
+		log.Printf("[Notify] 更新列表回调批次不可用 batch=%s err=%v", batchID, err)
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表已过期，请重新采集", true)
 		return
 	}
