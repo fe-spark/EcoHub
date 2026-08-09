@@ -1,3 +1,39 @@
+# v1.1.5-beta.16
+
+> **预发布（prerelease）**：修复系统日志页无法在剩余空间滚动（依赖锁定 + 系统设置 Tab 自绘化），**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.16`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.16`
+
+## 修复：系统日志页内容超出屏幕且无法滚动
+
+**根因**：`package-lock.json` 被 `.gitignore` 忽略从未入库，CI 构建时 `npm install` 按 caret 范围解析到新版 antd（Tabs 内部 DOM 由 `ant-tabs-content-holder` 更名为 `ant-tabs-body-holder`），前端样式选择器全部落空，日志区高度约束链断开、内容撑出屏幕且无法滚动。本地 `npm run dev` 因 node_modules 为旧版 antd 而表现正常，故长期未被发现。
+
+**修复（两层）**：
+
+1. **依赖确定性（通用防线）**：
+   - `package-lock.json` 入库（antd 精确锁定 `6.3.5`）
+   - `web/Dockerfile` 由 `npm install` 改为 `npm ci`，严格按 lockfile 安装，本地与 CI 构建产物一致，杜绝同类版本漂移
+2. **系统设置 Tab 自绘化**：
+   - 系统设置页弃用 antd `Tabs`，改为自绘 Tab 栏（`tabBar`/`tabItem`/`tabContent` 全自控 flex 高度约束）
+   - 删除全部依赖 antd Tabs 内部类名（`ant-tabs-content-holder` 等）的样式，后续 antd 升级不再影响该页布局
+   - URL `?tab=` 同步、`role=tablist/tab/tabpanel` 与 `aria-selected` 保留
+
+## 部署（beta.16）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.16
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.16
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.15
 
 > **预发布（prerelease）**：前台视觉与主题细节优化、登录页亮色模式支持、影视卡片无图占位兜底与系统设置页滚动布局收口，**不会**覆盖 `:latest`。
