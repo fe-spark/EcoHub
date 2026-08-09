@@ -8,68 +8,57 @@
   min-height: 0;
 }
 
-.tabs {
-  min-width: 0;
+.tabBar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  overflow-x: auto;
+}
+
+.tabItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 46px;
+  padding: 0 16px;
+  border: none;
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  white-space: nowrap;
+  transition: color 0.2s ease;
+
+  &:hover {
+    color: var(--ant-color-primary);
+  }
+}
+
+.tabItemActive {
+  color: var(--ant-color-primary);
+  font-weight: 600;
+  border-bottom-color: var(--ant-color-primary);
+}
+
+.tabIcon {
+  display: inline-flex;
+  align-items: center;
+  font-size: 15px;
+}
+
+.tabContent {
   flex: 1;
+  min-height: 0;
+  min-width: 0;
   display: flex;
   flex-direction: column;
-  min-height: 0;
-
-  :global(.ant-tabs-content-holder) {
-    flex: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  :global(.ant-tabs-content) {
-    flex: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  :global(.ant-tabs-tabpane) {
-    flex: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  :global(.ant-tabs-tabpane-active) {
-    flex: 1;
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-
-  /* 兼容新版 antd/@rc-component/tabs（Tabs 内部 content-holder/content 更名为 body-holder/body）：
-     若 antd 升级后渲染 body-holder/body 结构，同样贯通高度约束，避免日志区撑出屏幕无法滚动 */
-  :global(.ant-tabs-body-holder) {
-    flex: 1;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
-
-  :global(.ant-tabs-body) {
-    flex: 1;
-    height: 100%;
-    min-height: 0;
-    display: flex;
-    flex-direction: column;
-  }
 }
-
-
-.tabs :global(.ant-tabs-nav) {
-  margin-bottom: 16px;
-}
-
 
 .tabPaneScrollable {
   flex: 1;
@@ -87,6 +76,3 @@
   gap: 16px;
   min-width: 0;
 }
-
-
-
