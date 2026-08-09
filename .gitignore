@@ -25,7 +25,6 @@ web/.env.local
 #忽略client相关依赖缓存
 node_modules/
 dist/
-package-lock.json
 .opencode.json
 .idea/
 .idea
