@@ -1,5 +1,6 @@
 package config
 
 // Version 产品版本号；可用 -ldflags "-X server/internal/config.Version=..." 在构建时覆盖。
-// 与 web/package.json / git tag 对齐（如 1.1.5-beta.12）。
-var Version = "1.1.5-beta.12"
+// 与 web/package.json / git tag 对齐（如 1.1.5-beta.14）。
+var Version = "1.1.5-beta.14"
+

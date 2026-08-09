@@ -9,12 +9,12 @@
 }
 
 :global(html[data-theme="light"]) {
-  --film-placeholder-bg: var(--public-surface-2);
-  --film-tag-bg: rgba(var(--primary-color-rgb), 0.12);
-  --film-tag-text: var(--public-on-accent);
-  --film-tag-border: rgba(255, 255, 255, 0.18);
-  --film-overlay-meta-text: rgba(255, 255, 255, 0.88);
-  --film-overlay-blurb-text: rgba(255, 255, 255, 0.8);
+  --film-placeholder-bg: #eef2f9;
+  --film-tag-bg: rgba(var(--primary-color-rgb), 0.1);
+  --film-tag-text: var(--primary-color);
+  --film-tag-border: rgba(var(--primary-color-rgb), 0.25);
+  --film-overlay-meta-text: rgba(255, 255, 255, 0.95);
+  --film-overlay-blurb-text: rgba(255, 255, 255, 0.85);
 }
 
 // Flex override classes for non-24-divisor column counts (5, 7) or specific overrides
@@ -321,7 +321,7 @@
 
   .subText {
     font-size: 12px;
-    color: var(--public-text-5);
+    color: var(--public-text-3);
     font-weight: 500;
     white-space: nowrap;
     overflow: hidden;

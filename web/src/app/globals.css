@@ -45,41 +45,46 @@
 
 @media (prefers-color-scheme: light) {
   :root {
-    --public-page-bg: #f5f7fb;
-    --public-surface-1: rgba(255, 255, 255, 0.62);
-    --public-surface-2: rgba(255, 255, 255, 0.78);
-    --public-surface-3: rgba(16, 18, 24, 0.04);
-    --public-surface-hover: rgba(255, 255, 255, 0.66);
-    --public-border-1: rgba(16, 18, 24, 0.08);
-    --public-border-2: rgba(16, 18, 24, 0.12);
-    --public-border-3: rgba(16, 18, 24, 0.18);
-    --public-text-1: #101218;
-    --public-text-2: rgba(16, 18, 24, 0.9);
-    --public-text-3: rgba(16, 18, 24, 0.72);
-    --public-text-4: rgba(16, 18, 24, 0.58);
-    --public-text-5: rgba(16, 18, 24, 0.44);
-    --public-text-6: rgba(16, 18, 24, 0.32);
+    --public-page-bg: #f4f6fc;
+    --public-page-bg-mesh: radial-gradient(at 15% 15%, rgba(250, 140, 22, 0.08) 0px, transparent 50%),
+                           radial-gradient(at 85% 20%, rgba(99, 102, 241, 0.07) 0px, transparent 45%),
+                           radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.05) 0px, transparent 50%),
+                           #f4f6fc;
+    --public-surface-1: rgba(255, 255, 255, 0.82);
+    --public-surface-2: rgba(255, 255, 255, 0.94);
+    --public-surface-3: rgba(240, 243, 250, 0.88);
+    --public-surface-hover: #ffffff;
+    --public-border-1: rgba(250, 140, 22, 0.16);
+    --public-border-2: rgba(226, 232, 240, 0.9);
+    --public-border-3: rgba(203, 213, 225, 0.95);
+    --public-text-1: #0f172a;
+    --public-text-2: #334155;
+    --public-text-3: #64748b;
+    --public-text-4: #94a3b8;
+    --public-text-5: #cbd5e1;
+    --public-text-6: #e2e8f0;
     --public-on-accent: #ffffff;
-    --public-shadow-sm: 0 6px 18px rgba(16, 18, 24, 0.08);
-    --public-shadow-md: 0 10px 30px rgba(16, 18, 24, 0.1);
-    --public-shadow-lg: 0 18px 40px rgba(16, 18, 24, 0.14);
+    --public-shadow-sm: 0 4px 14px rgba(250, 140, 22, 0.06), 0 2px 6px rgba(15, 23, 42, 0.04);
+    --public-shadow-md: 0 10px 28px rgba(250, 140, 22, 0.08), 0 4px 12px rgba(15, 23, 42, 0.05);
+    --public-shadow-lg: 0 20px 48px rgba(250, 140, 22, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
     --public-overlay-main: linear-gradient(to top,
-        rgba(245, 247, 251, 0.96) 0%,
-        rgba(245, 247, 251, 0.75) 55%,
-        rgba(245, 247, 251, 0.1) 100%);
+        rgba(244, 246, 252, 0.98) 0%,
+        rgba(244, 246, 252, 0.8) 55%,
+        rgba(244, 246, 252, 0.15) 100%);
     --public-overlay-card: linear-gradient(to top,
-        rgba(10, 11, 16, 0.88) 0%,
-        rgba(10, 11, 16, 0.56) 52%,
-        rgba(10, 11, 16, 0.12) 100%);
+        rgba(15, 23, 42, 0.88) 0%,
+        rgba(15, 23, 42, 0.45) 50%,
+        transparent 100%);
     --public-overlay-banner: linear-gradient(to top,
-        rgba(0, 0, 0, 0.95) 0%,
-        rgba(0, 0, 0, 0.4) 50%,
+        rgba(15, 23, 42, 0.92) 0%,
+        rgba(15, 23, 42, 0.35) 50%,
         transparent 100%);
   }
 }
 
 html[data-theme="dark"] {
   --public-page-bg: #0a0b10;
+  --public-page-bg-mesh: none;
   --public-surface-1: rgba(255, 255, 255, 0.02);
   --public-surface-2: rgba(255, 255, 255, 0.03);
   --public-surface-3: rgba(255, 255, 255, 0.05);
@@ -112,35 +117,39 @@ html[data-theme="dark"] {
 }
 
 html[data-theme="light"] {
-  --public-page-bg: #f5f7fb;
-  --public-surface-1: rgba(255, 255, 255, 0.62);
-  --public-surface-2: rgba(255, 255, 255, 0.78);
-  --public-surface-3: rgba(16, 18, 24, 0.04);
-  --public-surface-hover: rgba(255, 255, 255, 0.66);
-  --public-border-1: rgba(16, 18, 24, 0.08);
-  --public-border-2: rgba(16, 18, 24, 0.12);
-  --public-border-3: rgba(16, 18, 24, 0.18);
-  --public-text-1: #101218;
-  --public-text-2: rgba(16, 18, 24, 0.9);
-  --public-text-3: rgba(16, 18, 24, 0.72);
-  --public-text-4: rgba(16, 18, 24, 0.58);
-  --public-text-5: rgba(16, 18, 24, 0.44);
-  --public-text-6: rgba(16, 18, 24, 0.32);
+  --public-page-bg: #f4f6fc;
+  --public-page-bg-mesh: radial-gradient(at 15% 15%, rgba(250, 140, 22, 0.08) 0px, transparent 50%),
+                         radial-gradient(at 85% 20%, rgba(99, 102, 241, 0.07) 0px, transparent 45%),
+                         radial-gradient(at 50% 80%, rgba(236, 72, 153, 0.05) 0px, transparent 50%),
+                         #f4f6fc;
+  --public-surface-1: rgba(255, 255, 255, 0.82);
+  --public-surface-2: rgba(255, 255, 255, 0.94);
+  --public-surface-3: rgba(240, 243, 250, 0.88);
+  --public-surface-hover: #ffffff;
+  --public-border-1: rgba(250, 140, 22, 0.16);
+  --public-border-2: rgba(226, 232, 240, 0.9);
+  --public-border-3: rgba(203, 213, 225, 0.95);
+  --public-text-1: #0f172a;
+  --public-text-2: #334155;
+  --public-text-3: #64748b;
+  --public-text-4: #94a3b8;
+  --public-text-5: #cbd5e1;
+  --public-text-6: #e2e8f0;
   --public-on-accent: #ffffff;
-  --public-shadow-sm: 0 6px 18px rgba(16, 18, 24, 0.08);
-  --public-shadow-md: 0 10px 30px rgba(16, 18, 24, 0.1);
-  --public-shadow-lg: 0 18px 40px rgba(16, 18, 24, 0.14);
+  --public-shadow-sm: 0 4px 14px rgba(250, 140, 22, 0.06), 0 2px 6px rgba(15, 23, 42, 0.04);
+  --public-shadow-md: 0 10px 28px rgba(250, 140, 22, 0.08), 0 4px 12px rgba(15, 23, 42, 0.05);
+  --public-shadow-lg: 0 20px 48px rgba(250, 140, 22, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
   --public-overlay-main: linear-gradient(to top,
-      rgba(245, 247, 251, 0.96) 0%,
-      rgba(245, 247, 251, 0.75) 55%,
-      rgba(245, 247, 251, 0.1) 100%);
+      rgba(244, 246, 252, 0.98) 0%,
+      rgba(244, 246, 252, 0.8) 55%,
+      rgba(244, 246, 252, 0.15) 100%);
   --public-overlay-card: linear-gradient(to top,
-      rgba(10, 11, 16, 0.98) 0%,
-      rgba(10, 11, 16, 0.8) 50%,
-      rgba(10, 11, 16, 0.4) 100%);
+      rgba(15, 23, 42, 0.88) 0%,
+      rgba(15, 23, 42, 0.45) 50%,
+      transparent 100%);
   --public-overlay-banner: linear-gradient(to top,
-      rgba(0, 0, 0, 0.95) 0%,
-      rgba(0, 0, 0, 0.4) 50%,
+      rgba(15, 23, 42, 0.92) 0%,
+      rgba(15, 23, 42, 0.35) 50%,
       transparent 100%);
 }
 
@@ -165,6 +174,8 @@ button,
 html,
 body {
   background: var(--public-page-bg);
+  background-image: var(--public-page-bg-mesh);
+  background-attachment: fixed;
   color: var(--public-text-1);
   overscroll-behavior: none;
   touch-action: manipulation;

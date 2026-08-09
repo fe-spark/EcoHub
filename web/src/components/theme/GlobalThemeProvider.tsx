@@ -97,11 +97,26 @@ export default function GlobalThemeProvider({
   const providerTheme = useMemo(() => {
     // 禁止在 SSR/CSR 分支读 window/getComputedStyle，否则 token/hash 不一致会触发 hydration mismatch
     const algorithm = isDark ? theme.darkAlgorithm : theme.defaultAlgorithm;
-    const baseToken = {
-      colorPrimary: DEFAULT_PRIMARY_COLOR,
-      fontFamily,
-    };
-    // 用 getDesignToken 补齐前台分页色彩，避免仅改尺寸导致层次变弱
+    const baseToken = isDark
+      ? {
+          colorPrimary: DEFAULT_PRIMARY_COLOR,
+          fontFamily,
+        }
+      : {
+          colorPrimary: DEFAULT_PRIMARY_COLOR,
+          colorPrimaryBg: "#fff7e6",
+          colorPrimaryBgHover: "#ffe7ba",
+          colorBgLayout: "#f4f6fc",
+          colorBgContainer: "#ffffff",
+          colorBgElevated: "#ffffff",
+          colorBorderSecondary: "#eef0f6",
+          colorText: "#0f172a",
+          colorTextSecondary: "#475569",
+          colorTextTertiary: "#94a3b8",
+          borderRadius: 10,
+          fontFamily,
+        };
+
     const designToken = theme.getDesignToken({
       algorithm,
       token: baseToken,
@@ -110,25 +125,35 @@ export default function GlobalThemeProvider({
     return {
       algorithm,
       cssVar: { key: "app" },
-      // 固定 hashed，避免嵌套 Provider / useId 导致 css-var-_R_* 服务端与客户端不同
       hashed: true,
       token: baseToken,
-      components: isPublicFront
-        ? {
-            // 仅前台：原 PublicLayoutView 分页 token（勿全局污染 /manage）
-            Pagination: {
-              itemSize: 55,
-              fontSize: 18,
-              itemBg: designToken.colorFillQuaternary,
-              itemActiveBg: designToken.colorPrimary,
-              itemActiveColor: designToken.colorTextLightSolid,
-              colorText: designToken.colorText,
-              colorTextDisabled: designToken.colorTextDisabled,
-              colorBgContainer: "transparent",
-              colorBorder: designToken.colorBorderSecondary,
-            },
-          }
-        : undefined,
+      components: {
+        ...(isPublicFront
+          ? {
+              Pagination: {
+                itemSize: 55,
+                fontSize: 18,
+                itemBg: designToken.colorFillQuaternary,
+                itemActiveBg: designToken.colorPrimary,
+                itemActiveColor: designToken.colorTextLightSolid,
+                colorText: designToken.colorText,
+                colorTextDisabled: designToken.colorTextDisabled,
+                colorBgContainer: "transparent",
+                colorBorder: designToken.colorBorderSecondary,
+              },
+            }
+          : {}),
+        Card: {
+          colorBgContainer: isDark ? "rgba(255, 255, 255, 0.03)" : "#ffffff",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(250, 140, 22, 0.14)",
+        },
+        Menu: {
+          itemBg: "transparent",
+          itemSelectedBg: isDark ? "rgba(250, 140, 22, 0.16)" : "#fff7e6",
+          itemSelectedColor: DEFAULT_PRIMARY_COLOR,
+          itemHoverBg: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(250, 140, 22, 0.08)",
+        },
+      },
     };
   }, [isDark, fontFamily, isPublicFront]);
 
