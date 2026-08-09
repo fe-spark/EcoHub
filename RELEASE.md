@@ -1,3 +1,44 @@
+# v1.1.5-beta.12
+
+> **预发布（prerelease）**：系统设置 UI 架构重构统一、配置备份导入导出与站点展示配置收敛，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.12`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.12`
+
+## 相对 beta.11
+
+- **系统设置页面 UI 重构与统一**：
+  - 侧栏「系统设置」下收敛为统一 Tabs 页面（`/manage/system`），支持 URL Query（`?tab=website|notify|security|logs`）持久化与深层链接：
+    - **网站配置**（`website`）：融合网站基本信息与首页封面管理，移除原二级独立封面页面与冗余跳转
+    - **通知配置**（`notify`）：Telegram Bot 通知与消息测试配置
+    - **数据安全**（`security`）：全新数据安全模块，合并配置备份与数据重置
+    - **系统日志**（`logs`）：系统日志与采集操作记录
+  - 统一操作按钮规范与头部描述，规范无框样式与响应式网格布局
+- **站点配置备份导入/导出**：
+  - 新增配置备份能力（`GET /manage/system/backup/export`、`POST /manage/system/backup/import`），支持一键导出包含网站配置、采集站、定时任务、首页封面、通知配置与映射规则的 JSON 备份文件（不含影视库存与账号密码）
+  - 导入支持**按模块勾选恢复**与**管理密码二次验证**
+  - 导入采集站或定时任务时自动安全停止正在运行的采集任务并清理限流器
+- **站点展示配置与初始化收敛**：
+  - 统一网站基本信息与首页封面的初始化逻辑，默认封面保持为空（由后台维护）
+  - 重置网站基本信息时同步还原默认展示配置并清空首页封面
+- **数据重置模块整合**：
+  - 「数据重置」入口统一归入「系统设置 → 数据安全」选项卡下，不再作为独立菜单分散放置
+
+## 部署（beta.12）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.12
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.12
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.11
 
 > **预发布（prerelease）**：采集站管理交互收敛、批量总进度与 2C2G 采集默认提速，**不会**覆盖 `:latest`。

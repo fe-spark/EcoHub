@@ -23,7 +23,6 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
-import CollectMasterPanel from "./collect-master-panel";
 import CollectSourceCard from "./collect-source-card";
 import SourceFormModal from "./source-form-modal";
 import {
@@ -123,14 +122,15 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  /** 业务上主采集站应唯一；异常时可能多于 1，仍全部列出便于修正 */
-  const masterSites = useMemo(
-    () => siteList.filter((item) => item.grade === 0),
-    [siteList],
-  );
+  /** 主站优先，其余保持列表顺序，同一网格展示 */
+  const displaySites = useMemo(() => {
+    const masters = siteList.filter((item) => item.grade === 0);
+    const others = siteList.filter((item) => item.grade !== 0);
+    return [...masters, ...others];
+  }, [siteList]);
 
-  const affiliateSites = useMemo(
-    () => siteList.filter((item) => item.grade !== 0),
+  const masterCount = useMemo(
+    () => siteList.filter((item) => item.grade === 0).length,
     [siteList],
   );
 
@@ -747,11 +747,21 @@ export default function CollectManagePageView() {
         title="采集站"
         description={
           <>
-            统一管理主采集站、附属采集站与采集任务
+            统一管理采集站与采集任务
             <span className={styles.headerMeta}>
               · {siteList.length}/{MAX_COLLECT_SOURCES}
             </span>
           </>
+        }
+        actions={
+          <Button
+            danger
+            loading={cleanupScanning}
+            disabled={siteList.length === 0}
+            onClick={() => void startCleanupScan()}
+          >
+            清理失效源
+          </Button>
         }
       />
 
@@ -797,7 +807,7 @@ export default function CollectManagePageView() {
                 disabled={selectedCount === 0}
                 onConfirm={() => void batchChangeSourceState(false)}
               >
-                <Button loading={batchStateUpdating} disabled={selectedCount === 0}>
+                <Button danger loading={batchStateUpdating} disabled={selectedCount === 0}>
                   批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
                 </Button>
               </Popconfirm>
@@ -815,32 +825,6 @@ export default function CollectManagePageView() {
                 </Button>
               </Popconfirm>
             </Space>
-          </div>
-          <div className={styles.toolbarSecondary}>
-            <Typography.Link
-              className={styles.toolbarLink}
-              disabled={cleanupScanning || siteList.length === 0}
-              onClick={() => {
-                if (!cleanupScanning && siteList.length > 0) {
-                  void startCleanupScan();
-                }
-              }}
-            >
-              {cleanupScanning ? "正在检测失效源…" : "清理失效采集源"}
-            </Typography.Link>
-            {canAddSource ? (
-              <>
-                <span className={styles.toolbarDot}>·</span>
-                <Typography.Link className={styles.toolbarLink} onClick={openAddDialog}>
-                  新增采集站
-                </Typography.Link>
-              </>
-            ) : (
-              <>
-                <span className={styles.toolbarDot}>·</span>
-                <span className={styles.toolbarMuted}>已达 {MAX_COLLECT_SOURCES} 站上限</span>
-              </>
-            )}
           </div>
         </Card>
 
@@ -893,90 +877,52 @@ export default function CollectManagePageView() {
 
         {siteList.length > 0 ? (
           <div className={styles.sourceGroups}>
-            {/* 主采集站：横向操作条（唯一配置） */}
-            <section className={styles.masterSection}>
-              <header className={styles.sectionHead}>
-                <h3 className={styles.sectionTitle}>主采集站</h3>
-                <span className={styles.sectionHint}>全局唯一数据源</span>
-                {masterSites.length > 1 ? (
-                  <span className={styles.sectionWarn}>
-                    当前有 {masterSites.length} 个，请只保留一个
-                  </span>
+            {masterCount === 0 ? (
+              <div className={styles.masterTip}>
+                尚未配置主采集站
+                {canAddSource ? (
+                  <>
+                    ，
+                    <Typography.Link onClick={openAddDialog}>新增</Typography.Link>
+                    时将类型设为「主采集站」
+                  </>
                 ) : null}
-              </header>
-              {masterSites.length > 0 ? (
-                <div className={styles.masterList}>
-                  {masterSites.map((site) => (
-                    <CollectMasterPanel
-                      key={site.id}
-                      record={site}
-                      selected={selectedSourceIds.includes(site.id)}
-                      active={activeCollectIds.includes(site.id)}
-                      onSelect={handleSelectSource}
-                      onChangeCollectDuration={changeCollectDuration}
-                      onStartTask={(record) => void startTask(record)}
-                      onTerminateTask={(id) => void stopTask(id)}
-                      onEditSource={(id) => void openEditDialog(id)}
-                      onDeleteSource={(id) => void delSource(id)}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className={styles.masterEmpty}>
-                  未配置主采集站。
-                  {canAddSource ? (
-                    <>
-                      {" "}
-                      <Typography.Link onClick={openAddDialog}>新增采集站</Typography.Link>
-                      时将类型设为「主采集站」。
-                    </>
-                  ) : (
-                    "请先清理或调整现有采集站后再新增主站。"
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* 附属采集站：多源卡片网格 */}
-            <section className={styles.affiliateSection}>
-              <header className={styles.sectionHead}>
-                <h3 className={styles.sectionTitle}>附属采集站</h3>
-                <span className={styles.sectionCount}>{affiliateSites.length}</span>
-              </header>
-              {affiliateSites.length > 0 || canAddSource ? (
-                <div className={styles.cardGrid}>
-                  {affiliateSites.map((site) => (
-                    <CollectSourceCard
-                      key={site.id}
-                      record={site}
-                      selected={selectedSourceIds.includes(site.id)}
-                      active={activeCollectIds.includes(site.id)}
-                      onSelect={handleSelectSource}
-                      onChangeCollectDuration={changeCollectDuration}
-                      onStartTask={(record) => void startTask(record)}
-                      onTerminateTask={(id) => void stopTask(id)}
-                      onEditSource={(id) => void openEditDialog(id)}
-                      onDeleteSource={(id) => void delSource(id)}
-                    />
-                  ))}
-                  {canAddSource ? (
-                    <button
-                      type="button"
-                      className={styles.addSourceTile}
-                      onClick={openAddDialog}
-                    >
-                      <PlusOutlined className={styles.addSourceIcon} />
-                      <span className={styles.addSourceLabel}>新增采集站</span>
-                      <span className={styles.addSourceHint}>
-                        还可添加 {MAX_COLLECT_SOURCES - siteList.length} 个
-                      </span>
-                    </button>
-                  ) : null}
-                </div>
-              ) : (
-                <div className={styles.groupEmpty}>暂无附属采集站</div>
-              )}
-            </section>
+              </div>
+            ) : null}
+            {masterCount > 1 ? (
+              <div className={styles.masterTipWarn}>
+                当前有 {masterCount} 个主采集站，业务上应只保留一个
+              </div>
+            ) : null}
+            <div className={styles.cardGrid}>
+              {displaySites.map((site) => (
+                <CollectSourceCard
+                  key={site.id}
+                  record={site}
+                  selected={selectedSourceIds.includes(site.id)}
+                  active={activeCollectIds.includes(site.id)}
+                  onSelect={handleSelectSource}
+                  onChangeCollectDuration={changeCollectDuration}
+                  onStartTask={(record) => void startTask(record)}
+                  onTerminateTask={(id) => void stopTask(id)}
+                  onEditSource={(id) => void openEditDialog(id)}
+                  onDeleteSource={(id) => void delSource(id)}
+                />
+              ))}
+              {canAddSource ? (
+                <button
+                  type="button"
+                  className={styles.addSourceTile}
+                  onClick={openAddDialog}
+                >
+                  <PlusOutlined className={styles.addSourceIcon} />
+                  <span className={styles.addSourceLabel}>新增采集站</span>
+                  <span className={styles.addSourceHint}>
+                    还可添加 {MAX_COLLECT_SOURCES - siteList.length} 个
+                  </span>
+                </button>
+              ) : null}
+            </div>
           </div>
         ) : (
           <div className={styles.emptyCard}>

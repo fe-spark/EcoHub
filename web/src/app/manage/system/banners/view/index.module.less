@@ -4,18 +4,48 @@
   gap: 16px;
 }
 
+.tableCard {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-head) {
+    min-height: 52px;
+    padding: 0 18px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-head-wrapper) {
+    min-height: 52px;
+    align-items: center;
+  }
+
+  :global(.ant-card-extra) {
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.ant-card-body) {
+    padding: 0;
+  }
+}
+
+
+
 .tableHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
 }
 
 .tableTitle {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 32px;
+  line-height: 24px;
 }
 
 .tableActions {
@@ -28,3 +58,4 @@
     width: 100%;
   }
 }
+

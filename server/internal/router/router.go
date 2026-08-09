@@ -46,6 +46,10 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/notify`, handler.NotifyHd.GetNotifyConfig)
 			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)
 			sysConfig.POST(`/notify/test`, handler.NotifyHd.TestNotify)
+
+			// 配置备份：导出/导入（不含影视库存与账号）
+			sysConfig.GET(`/backup/export`, handler.ManageHd.ExportConfigBackup)
+			sysConfig.POST(`/backup/import`, handler.ManageHd.ImportConfigBackup)
 		}
 		systemLog := manageRoute.Group(`/system/logs`)
 		{

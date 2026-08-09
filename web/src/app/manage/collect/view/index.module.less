@@ -36,38 +36,6 @@
   flex: none;
 }
 
-.toolbarDivider {
-  margin-inline: 2px;
-}
-
-.toolbarSecondary {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px dashed var(--ant-color-border-secondary);
-}
-
-.toolbarLink {
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.toolbarDot {
-  color: var(--ant-color-text-quaternary);
-  font-size: 12px;
-  line-height: 20px;
-  user-select: none;
-}
-
-.toolbarMuted {
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--ant-color-text-quaternary);
-}
-
 .headerMeta {
   margin-inline-start: 4px;
   font-variant-numeric: tabular-nums;
@@ -240,228 +208,36 @@
   justify-content: flex-end;
 }
 
-/* ===== 主站条 + 附属站网格 ===== */
+/* ===== 采集站统一网格 ===== */
 .sourceGroups {
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 12px;
   min-width: 0;
 }
 
-.masterSection,
-.affiliateSection {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.masterTip,
+.masterTipWarn {
   min-width: 0;
-}
-
-.sectionHead {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-  padding: 0 2px;
-}
-
-.sectionTitle {
-  margin: 0;
-  font-size: 14px;
-  font-weight: 600;
-  line-height: 22px;
-  color: var(--ant-color-text);
-}
-
-.sectionHint {
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--ant-color-text-quaternary);
-}
-
-.sectionCount {
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--ant-color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.sectionWarn {
-  font-size: 12px;
-  line-height: 20px;
-  color: var(--ant-color-warning);
-}
-
-.masterList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-
-/* 主站横向操作条：左信息 | 中进度(定宽) | 右操作(内容宽) */
-.masterPanel {
-  --master-accent: var(--ant-color-border);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  min-width: 0;
-  padding: 12px 14px 12px 12px;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-left: 3px solid var(--master-accent);
-  border-radius: 12px;
-  cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.masterPanel:hover {
-  border-color: color-mix(
-    in srgb,
-    var(--ant-color-primary) 24%,
-    var(--ant-color-border-secondary)
-  );
-  box-shadow: 0 4px 14px color-mix(in srgb, var(--ant-color-text) 5%, transparent);
-}
-
-.masterPanelSelected {
-  border-color: color-mix(
-    in srgb,
-    var(--ant-color-primary) 50%,
-    var(--ant-color-border-secondary)
-  );
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 16%, transparent);
-}
-
-.masterToneRunning {
-  --master-accent: var(--ant-color-primary);
-}
-
-.masterToneEnabled {
-  --master-accent: var(--ant-color-success);
-}
-
-.masterToneDisabled {
-  --master-accent: var(--ant-color-border);
-  opacity: 0.78;
-}
-
-.masterToneStopping {
-  --master-accent: var(--ant-color-warning);
-}
-
-/* 左：信息区，吃掉剩余宽度，过长省略 */
-.masterPanelMain {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  flex: 1 1 0;
-  min-width: 180px;
-}
-
-.masterPanelIdentity {
-  flex: 1;
-  min-width: 0;
-}
-
-.masterPanelTitleRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.masterPanelName {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 22px;
-  color: var(--ant-color-text);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.masterPanelTitleRow .statusPill {
-  flex: none;
-}
-
-.masterPanelUri {
-  display: block;
-  margin-top: 2px;
-  max-width: 100%;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--ant-color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-decoration: none;
-}
-
-.masterPanelUri:hover {
-  color: var(--ant-color-primary);
-  text-decoration: underline;
-}
-
-.masterPanelMeta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: 6px;
-  row-gap: 2px;
-  margin-top: 4px;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--ant-color-text-tertiary);
-}
-
-.masterPanelMetaSep {
-  color: var(--ant-color-text-quaternary);
-}
-
-/* 进度贴在信息区下方，最大宽度有限 */
-.masterPanelProgress {
-  margin-top: 8px;
-  max-width: 320px;
-  min-width: 0;
-}
-
-/* 右：操作区贴内容，不拉伸 */
-.masterPanelOps {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 8px;
-  margin-left: auto;
-  align-self: center;
-}
-
-.masterDuration {
-  width: 112px;
-  flex: none;
-}
-
-.masterActionBtn {
-  flex: none;
-}
-
-.masterEmpty {
-  min-width: 0;
-  padding: 18px 16px;
-  border: 1px dashed var(--ant-color-border);
-  border-radius: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
   font-size: 13px;
   line-height: 20px;
-  color: var(--ant-color-text-tertiary);
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 45%, transparent);
 }
 
-/* 附属站：多卡网格（同排卡片 stretch 等高） */
+.masterTip {
+  color: var(--ant-color-text-secondary);
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  border: 1px dashed var(--ant-color-border);
+}
+
+.masterTipWarn {
+  color: var(--ant-color-warning);
+  background: var(--ant-color-warning-bg);
+  border: 1px solid color-mix(in srgb, var(--ant-color-warning) 28%, transparent);
+}
+
+/* 多卡网格（同排卡片 stretch 等高） */
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -478,48 +254,7 @@
   border-radius: 14px;
 }
 
-.groupEmpty {
-  min-width: 0;
-  padding: 16px;
-  border: 1px dashed var(--ant-color-border-secondary);
-  border-radius: 12px;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--ant-color-text-quaternary);
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 40%, transparent);
-}
-
-@media (max-width: 900px) {
-  .masterPanel {
-    flex-wrap: wrap;
-    row-gap: 10px;
-  }
-
-  .masterPanelMain {
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-
-  .masterPanelProgress {
-    max-width: 100%;
-  }
-
-  .masterPanelOps {
-    flex: 1 1 100%;
-    margin-left: 26px;
-    flex-wrap: wrap;
-  }
-}
-
 @media (max-width: 640px) {
-  .masterPanelOps {
-    margin-left: 0;
-  }
-
-  .masterDuration {
-    width: 120px;
-  }
-
   .progressInline {
     flex-wrap: wrap;
   }
@@ -653,6 +388,64 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* 主站卡片：左侧金条 + 轻微暖底，右上角彩带 */
+.sourceCardMaster {
+  --card-accent: #faad14;
+  background: color-mix(in srgb, #faad14 6%, var(--ant-color-bg-container));
+}
+
+.sourceCardMaster.toneRunning {
+  --card-accent: var(--ant-color-primary);
+}
+
+.sourceCardMaster.toneEnabled {
+  --card-accent: #faad14;
+}
+
+.sourceCardMaster.toneStopping {
+  --card-accent: var(--ant-color-warning);
+}
+
+/* 右上角斜向彩带角标 */
+.masterRibbon {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 2;
+  width: 72px;
+  height: 72px;
+  overflow: hidden;
+  pointer-events: none;
+  border-radius: 0 14px 0 0;
+}
+
+.masterRibbonText {
+  position: absolute;
+  top: 12px;
+  right: -22px;
+  width: 96px;
+  padding: 3px 0;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.12em;
+  text-align: center;
+  color: #5c3b00;
+  background: linear-gradient(180deg, #ffd666 0%, #faad14 55%, #d48806 100%);
+  box-shadow: 0 2px 6px color-mix(in srgb, #d48806 35%, transparent);
+  transform: rotate(45deg);
+  transform-origin: center;
+}
+
+/* 角标旁状态胶囊略左移，避免与彩带重叠 */
+.sourceCardMaster .cardHead {
+  padding-right: 28px;
+}
+
+.sourceCardMaster .statusPill {
+  margin-right: 4px;
 }
 
 .cardUri {

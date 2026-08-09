@@ -156,7 +156,12 @@ function normalizeConfig(data: Partial<NotifyConfigValues> | undefined): NotifyC
   };
 }
 
-export default function NotifyConfigPageView() {
+interface NotifyConfigPageViewProps {
+  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
+  embedded?: boolean;
+}
+
+export default function NotifyConfigPageView({ embedded = false }: NotifyConfigPageViewProps) {
   const [form] = Form.useForm<NotifyConfigValues>();
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -168,6 +173,8 @@ export default function NotifyConfigPageView() {
   const watchedBotToken = Form.useWatch("botToken", form);
   const watchedChatIds = Form.useWatch("chatIds", form);
   const watchedEvents = Form.useWatch("events", form);
+  /** 未开启通知时锁定其余配置项 */
+  const configLocked = !watchedEnabled;
 
   const activeEventsCount = useMemo(() => {
     if (!watchedEvents) return 0;
@@ -284,22 +291,16 @@ export default function NotifyConfigPageView() {
 
   return (
     <div className={styles.page}>
-      <ManagePageHeader
-        title="通知设置"
-        description="配置 Telegram Bot 消息推送。在「通信连接配置」填好 Token 与 Chat ID 后可直接发送测试，无需先保存。"
-        actions={
-          <Space wrap>
-            <Button icon={<ReloadOutlined />} loading={fetching} onClick={() => void loadConfig()}>
-              刷新
-            </Button>
-            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()}>
-              保存配置
-            </Button>
-          </Space>
-        }
-      />
+
+      {embedded ? null : (
+        <ManagePageHeader
+          title="通知设置"
+          description="配置 Telegram Bot 消息推送。先开启通知，再填写连接与事件；底部可刷新或保存。"
+        />
+      )}
 
       <Spin spinning={fetching} description="正在加载通知配置...">
+
         <Form
           form={form}
           layout="vertical"
@@ -307,278 +308,336 @@ export default function NotifyConfigPageView() {
           initialValues={DEFAULT_CONFIG}
           disabled={fetching || saving}
         >
-        <Flex vertical gap={20} className={styles.contentStack}>
-          {/* Status Summary Header Card + 启用开关 */}
-          <Card size="small" className={styles.overviewCard}>
-            <Flex align="center" justify="space-between" wrap="wrap" gap={16}>
-              <Flex align="center" gap={12} wrap="wrap" style={{ flex: 1, minWidth: 220 }}>
-                <div className={styles.botIconWrapper}>
-                  <RobotOutlined className={styles.botIcon} />
-                </div>
-                <Flex vertical gap={2}>
-                  <Flex align="center" gap={8} wrap="wrap">
-                    <Typography.Text strong className={styles.overviewTitle}>
-                      Telegram Bot 推送状态
-                    </Typography.Text>
-                    {watchedEnabled ? (
-                      <Tag color="success" icon={<CheckCircleOutlined />}>
-                        推送已开启
-                      </Tag>
-                    ) : (
-                      <Tag color="default" icon={<StopOutlined />}>
-                        推送已禁用
-                      </Tag>
-                    )}
-                  </Flex>
-                  <Typography.Text type="secondary" className={styles.overviewSub}>
-                    实时捕获采集、抓取告警与后台定时任务事件并推送至 Telegram；关闭开关后停止业务推送，联通测试不受影响。
-                  </Typography.Text>
-                </Flex>
-              </Flex>
-
-              <Flex align="center" gap={12} wrap="wrap" className={styles.badgeGroup}>
-                <Tooltip title="Token 是否填写或存在已有凭证">
-                  <Tag color={watchedBotToken ? "processing" : "warning"}>
-                    {watchedBotToken ? "Bot Token 已设置" : "未设置 Token"}
-                  </Tag>
-                </Tooltip>
-                <Tooltip title="当前配置的接收目标 Chat ID 数量">
-                  <Tag color={watchedChatIds?.length ? "purple" : "default"}>
-                    {watchedChatIds?.length ? `${watchedChatIds.length} 个 Chat ID` : "未配置 Chat ID"}
-                  </Tag>
-                </Tooltip>
-                <Tooltip title="已开启的事件订阅数量">
-                  <Tag color={activeEventsCount > 0 ? "blue" : "default"}>
-                    {activeEventsCount} / {EVENT_OPTIONS.length} 个事件开启
-                  </Tag>
-                </Tooltip>
-
-                <div className={styles.enableSwitch}>
-                  <Typography.Text type="secondary" className={styles.enableLabel}>
-                    启用通知
-                  </Typography.Text>
-                  <Form.Item name="enabled" valuePropName="checked" noStyle>
-                    <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-                  </Form.Item>
-                </div>
-              </Flex>
-            </Flex>
-          </Card>
-
-          <Row gutter={[16, 16]} align="stretch">
-            {/* Left Grid: Connection & Rules */}
-            <Col xs={24} lg={11} xl={10}>
-              <Flex vertical gap={16} style={{ height: "100%" }}>
-                {/* Bot Connection Card */}
-                <Card
-                  size="small"
-                  title={
-                    <Space>
-                      <RobotOutlined style={{ color: "#1677ff" }} />
-                      <span>通信连接配置</span>
-                    </Space>
-                  }
-                  className={styles.card}
-                >
-                  <Form.Item
-                    label="Bot Token"
-                    name="botToken"
-                    extra="向 @BotFather 创建 Bot 获得；保存后自动脱敏隐藏，留空或保持脱敏表示不修改。"
-                  >
-                    <Input.Password
-                      placeholder="例如 123456789:AAHgf..."
-                      autoComplete="off"
-                    />
-                  </Form.Item>
-
-                  <Form.Item
-                    label="Chat ID (接收目标)"
-                    name="chatIds"
-                    extra="支持个人数字 ID、群组/频道 @username 或 -100xxxxxxxxxx；需先向 Bot 发送 /start。输入后按 Enter 或逗号生成标签。"
-                    rules={[
-                      {
-                        validator: async (_, value: string[]) => {
-                          const enabled = form.getFieldValue("enabled");
-                          if (enabled && (!value || value.length === 0)) {
-                            throw new Error("启用通知时至少填写一个 Chat ID");
-                          }
-                        },
-                      },
-                    ]}
-                  >
-                    <Select
-                      className={styles.chatIdsSelect}
-                      mode="tags"
-                      tokenSeparators={[",", " ", "\n"]}
-                      placeholder="例如 123456789 或 -100123456789"
-                      allowClear
-                    />
-                  </Form.Item>
-
-                  <div className={styles.testRow}>
-                    <Typography.Text type="secondary" className={styles.testHint}>
-                      使用上方当前填写内容联通测试，无需先点「保存配置」。
-                    </Typography.Text>
-                    {/* 跳出 Form disabled，仅按 canTest 控制可点 */}
-                    <ConfigProvider componentDisabled={false}>
-                      <Tooltip
-                        title={
-                          canTest
-                            ? "向当前 Chat ID 发送一条测试消息"
-                            : "请先填写 Bot Token 与至少一个 Chat ID"
-                        }
-                      >
-                        <Button
-                          type="primary"
-                          icon={<SendOutlined />}
-                          loading={testing}
-                          disabled={!canTest || fetching}
-                          onClick={() => void handleTest()}
-                        >
-                          发送测试
-                        </Button>
-                      </Tooltip>
-                    </ConfigProvider>
+          <Flex vertical gap={20} className={styles.contentStack}>
+            {/* 总开关：未开启时下方配置锁定 */}
+            <Card size="small" className={styles.overviewCard}>
+              <Flex align="center" justify="space-between" wrap="wrap" gap={16}>
+                <Flex align="center" gap={12} wrap="wrap" style={{ flex: 1, minWidth: 220 }}>
+                  <div className={styles.botIconWrapper}>
+                    <RobotOutlined className={styles.botIcon} />
                   </div>
-                </Card>
+                  <Flex vertical gap={2}>
+                    <Flex align="center" gap={8} wrap="wrap">
+                      <Typography.Text strong className={styles.overviewTitle}>
+                        Telegram Bot 推送
+                      </Typography.Text>
+                      {watchedEnabled ? (
+                        <Tag color="success" icon={<CheckCircleOutlined />}>
+                          已开启
+                        </Tag>
+                      ) : (
+                        <Tag color="default" icon={<StopOutlined />}>
+                          已关闭
+                        </Tag>
+                      )}
+                    </Flex>
+                    <Typography.Text type="secondary" className={styles.overviewSub}>
+                      {watchedEnabled
+                        ? "推送已开启，可配置连接、内容与事件订阅。"
+                        : "请先开启通知，再配置 Token、Chat ID 与事件规则。"}
+                    </Typography.Text>
+                  </Flex>
+                </Flex>
 
-                {/* Content & Limitation Card */}
-                <Card
-                  size="small"
-                  title={
-                    <Space>
-                      <ControlOutlined style={{ color: "#722ed1" }} />
-                      <span>内容格式与限流</span>
-                    </Space>
-                  }
-                  className={styles.card}
-                >
-                  <Form.Item
-                    label="摘要展示更新列表"
-                    name="includeFilmDetails"
-                    valuePropName="checked"
-                    tooltip="开启后批次采集摘要将附带更新列表（含新增/更新的影片）；单片更新始终不带列表"
-                    extra="禁用后推送仅包含成功与失败统计计数，缩减消息体积"
-                  >
-                    <Switch checkedChildren="启用" unCheckedChildren="禁用" />
-                  </Form.Item>
+                <Flex align="center" gap={12} wrap="wrap" className={styles.badgeGroup}>
+                  {watchedEnabled ? (
+                    <>
+                      <Tooltip title="Token 是否填写或存在已有凭证">
+                        <Tag color={watchedBotToken ? "processing" : "warning"}>
+                          {watchedBotToken ? "Bot Token 已设置" : "未设置 Token"}
+                        </Tag>
+                      </Tooltip>
+                      <Tooltip title="当前配置的接收目标 Chat ID 数量">
+                        <Tag color={watchedChatIds?.length ? "purple" : "default"}>
+                          {watchedChatIds?.length
+                            ? `${watchedChatIds.length} 个 Chat ID`
+                            : "未配置 Chat ID"}
+                        </Tag>
+                      </Tooltip>
+                      <Tooltip title="已开启的事件订阅数量">
+                        <Tag color={activeEventsCount > 0 ? "blue" : "default"}>
+                          {activeEventsCount} / {EVENT_OPTIONS.length} 个事件开启
+                        </Tag>
+                      </Tooltip>
+                    </>
+                  ) : null}
 
-                  <Row gutter={16}>
-                    <Col xs={24} sm={12}>
-                      <Form.Item
-                        label="消息内最多影片数"
-                        name="maxFilmsInMessage"
-                        tooltip="更新列表每页最多影片数（范围 1–20，与 Telegram 按钮布局一致）"
-                      >
-                        <InputNumber min={1} max={20} style={{ width: "100%" }} />
-                      </Form.Item>
-                    </Col>
-                    <Col xs={24} sm={12}>
-                      <Form.Item
-                        label="同类事件最小间隔"
-                        name="minIntervalSec"
-                        tooltip="同一类事件在设定的秒数间隔内最多只推送一次；0 表示不受防刷限流"
-                      >
-                        <InputNumber
-                          min={0}
-                          max={3600}
-                          addonAfter="秒"
-                          style={{ width: "100%" }}
+                  <div className={styles.enableSwitch}>
+                    <Typography.Text type="secondary" className={styles.enableLabel}>
+                      启用通知
+                    </Typography.Text>
+                    {/* 总开关不受「配置锁定」影响，始终可切换 */}
+                    <ConfigProvider componentDisabled={false}>
+                      <Form.Item name="enabled" valuePropName="checked" noStyle>
+                        <Switch
+                          checkedChildren="开启"
+                          unCheckedChildren="关闭"
+                          disabled={fetching || saving}
                         />
                       </Form.Item>
-                    </Col>
-                  </Row>
-                </Card>
+                    </ConfigProvider>
+                  </div>
+
+                  <Divider type="vertical" style={{ height: 24, margin: "0 4px" }} />
+
+                  <Space size={8}>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      loading={fetching}
+                      disabled={saving}
+                      onClick={() => void loadConfig()}
+                    >
+                      刷新
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<SaveOutlined />}
+                      loading={saving}
+                      disabled={fetching}
+                      onClick={() => void handleSave()}
+                    >
+                      保存配置
+                    </Button>
+                  </Space>
+                </Flex>
               </Flex>
-            </Col>
+            </Card>
 
-            {/* Right Grid: Notification Event Subscription Rules */}
-            <Col xs={24} lg={13} xl={14}>
-              <Card
-                size="small"
-                title={
-                  <Space>
-                    <BellOutlined style={{ color: "#fa8c16" }} />
-                    <span>触发事件与订阅规则</span>
-                  </Space>
-                }
-                extra={
-                  <Space size={4}>
-                    <Button
-                      type="link"
-                      size="small"
-                      icon={<CheckOutlined />}
-                      onClick={() => handleSelectAllEvents(true)}
-                    >
-                      全选
-                    </Button>
-                    <Divider type="vertical" />
-                    <Button
-                      type="link"
-                      size="small"
-                      danger
-                      icon={<ClearOutlined />}
-                      onClick={() => handleSelectAllEvents(false)}
-                    >
-                      清空
-                    </Button>
-                  </Space>
-                }
-                className={styles.card}
+
+            <div
+              className={`${styles.configBody}${configLocked ? ` ${styles.configBodyLocked}` : ""}`}
+            >
+              <fieldset
+                disabled={configLocked || fetching || saving}
+                className={styles.configFieldset}
               >
-                <div className={styles.eventGrid}>
-                  {EVENT_OPTIONS.map((item) => (
-                    <Form.Item
-                      key={item.field}
-                      name={["events", item.field]}
-                      valuePropName="checked"
-                      className={styles.eventItemWrapper}
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} lg={12}>
+                    <Card
+                      size="small"
+                      title={
+                        <Space>
+                          <RobotOutlined style={{ color: "#1677ff" }} />
+                          <span>通信连接配置</span>
+                        </Space>
+                      }
+                      className={styles.card}
                     >
-                      <EventCard item={item} />
-                    </Form.Item>
-                  ))}
-                </div>
+                      <Form.Item
+                        label="Bot Token"
+                        name="botToken"
+                        extra="向 @BotFather 创建 Bot 获得；保存后自动脱敏隐藏，留空或保持脱敏表示不修改。"
+                      >
+                        <Input.Password
+                          placeholder="例如 123456789:AAHgf..."
+                          autoComplete="off"
+                        />
+                      </Form.Item>
 
-                <Alert
-                  className={styles.tipAlert}
-                  type="info"
-                  showIcon
-                  icon={<InfoCircleOutlined />}
-                  message="推送提醒小贴士"
-                  description="针对生产环境，建议保持「单源失败即时告警」与「收尾发布失败」开启，以便第一时间掌握采集源状态；若频繁发布定时任务，可保持「定时任务完成」关闭。"
-                />
-              </Card>
-            </Col>
-          </Row>
-        </Flex>
+                      <Form.Item
+                        label="Chat ID (接收目标)"
+                        name="chatIds"
+                        extra="支持个人数字 ID、群组/频道 @username 或 -100xxxxxxxxxx；需先向 Bot 发送 /start。输入后按 Enter 或逗号生成标签。"
+                        rules={[
+                          {
+                            validator: async (_, value: string[]) => {
+                              const enabled = form.getFieldValue("enabled");
+                              if (enabled && (!value || value.length === 0)) {
+                                throw new Error("启用通知时至少填写一个 Chat ID");
+                              }
+                            },
+                          },
+                        ]}
+                      >
+                        <Select
+                          className={styles.chatIdsSelect}
+                          mode="tags"
+                          tokenSeparators={[",", " ", "\n"]}
+                          placeholder="例如 123456789 或 -100123456789"
+                          allowClear
+                        />
+                      </Form.Item>
+
+                      <div className={styles.testRow}>
+                        <Typography.Text type="secondary" className={styles.testHint}>
+                          使用上方当前填写内容联通测试，无需先点「保存配置」。
+                        </Typography.Text>
+                        <ConfigProvider componentDisabled={false}>
+                          <Tooltip
+                            title={
+                              configLocked
+                                ? "请先开启通知"
+                                : canTest
+                                  ? "向当前 Chat ID 发送一条测试消息"
+                                  : "请先填写 Bot Token 与至少一个 Chat ID"
+                            }
+                          >
+                            <Button
+                              type="primary"
+                              icon={<SendOutlined />}
+                              loading={testing}
+                              disabled={configLocked || !canTest || fetching}
+                              onClick={() => void handleTest()}
+                            >
+                              发送测试
+                            </Button>
+                          </Tooltip>
+                        </ConfigProvider>
+                      </div>
+                    </Card>
+                  </Col>
+
+                  <Col xs={24} lg={12}>
+                    <Card
+                      size="small"
+                      title={
+                        <Space>
+                          <ControlOutlined style={{ color: "#722ed1" }} />
+                          <span>内容格式与限流</span>
+                        </Space>
+                      }
+                      className={styles.card}
+                    >
+                      <Form.Item
+                        label="摘要展示更新列表"
+                        name="includeFilmDetails"
+                        valuePropName="checked"
+                        tooltip="开启后批次采集摘要将附带更新列表（含新增/更新的影片）；单片更新始终不带列表"
+                        extra="禁用后推送仅包含成功与失败统计计数，缩减消息体积"
+                      >
+                        <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+                      </Form.Item>
+
+                      <Row gutter={16}>
+                        <Col xs={24} sm={12}>
+                          <Form.Item
+                            label="消息内最多影片数"
+                            name="maxFilmsInMessage"
+                            tooltip="更新列表每页最多影片数（范围 1–20，与 Telegram 按钮布局一致）"
+                          >
+                            <InputNumber min={1} max={20} style={{ width: "100%" }} />
+                          </Form.Item>
+                        </Col>
+                        <Col xs={24} sm={12}>
+                          <Form.Item
+                            label="同类事件最小间隔"
+                            name="minIntervalSec"
+                            tooltip="同一类事件在设定的秒数间隔内最多只推送一次；0 表示不受防刷限流"
+                          >
+                            <InputNumber
+                              min={0}
+                              max={3600}
+                              addonAfter="秒"
+                              style={{ width: "100%" }}
+                            />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                    </Card>
+                  </Col>
+
+                  <Col span={24}>
+                    <Card
+                      size="small"
+                      title={
+                        <Space>
+                          <BellOutlined style={{ color: "#fa8c16" }} />
+                          <span>触发事件与订阅规则</span>
+                        </Space>
+                      }
+                      extra={
+                        <Space size={4}>
+                          <Button
+                            type="link"
+                            size="small"
+                            icon={<CheckOutlined />}
+                            disabled={configLocked}
+                            onClick={() => handleSelectAllEvents(true)}
+                          >
+                            全选
+                          </Button>
+                          <Divider type="vertical" />
+                          <Button
+                            type="link"
+                            size="small"
+                            danger
+                            icon={<ClearOutlined />}
+                            disabled={configLocked}
+                            onClick={() => handleSelectAllEvents(false)}
+                          >
+                            清空
+                          </Button>
+                        </Space>
+                      }
+                      className={styles.card}
+                    >
+                      <div className={styles.eventGrid}>
+                        {EVENT_OPTIONS.map((item) => (
+                          <Form.Item
+                            key={item.field}
+                            name={["events", item.field]}
+                            valuePropName="checked"
+                            className={styles.eventItemWrapper}
+                          >
+                            <EventCard item={item} disabled={configLocked} />
+                          </Form.Item>
+                        ))}
+
+                      </div>
+
+                      <Alert
+                        className={styles.tipAlert}
+                        type="info"
+                        showIcon
+                        icon={<InfoCircleOutlined />}
+                        message="推送提醒小贴士"
+                        description="针对生产环境，建议保持「单源失败即时告警」与「收尾发布失败」开启，以便第一时间掌握采集源状态；若频繁发布定时任务，可保持「定时任务完成」关闭。"
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+
+              </fieldset>
+            </div>
+
+          </Flex>
         </Form>
       </Spin>
     </div>
   );
 }
 
+
 interface EventCardProps {
   item: EventOption;
   checked?: boolean;
   value?: boolean;
+  disabled?: boolean;
   onChange?: (checked: boolean) => void;
 }
 
-function EventCard({ item, checked, value, onChange }: EventCardProps) {
+function EventCard({ item, checked, value, disabled, onChange }: EventCardProps) {
   const isChecked = Boolean(checked ?? value);
   return (
     <div
-      className={`${styles.eventTile} ${isChecked ? styles.eventTileActive : ""}`}
-      onClick={() => onChange?.(!isChecked)}
+      className={`${styles.eventTile} ${isChecked ? styles.eventTileActive : ""}${
+        disabled ? ` ${styles.eventTileDisabled}` : ""
+      }`}
+      onClick={() => {
+        if (!disabled) {
+          onChange?.(!isChecked);
+        }
+      }}
     >
-      <Flex align="flex-start" gap={10}>
+      <Flex align="flex-start" gap={10} style={{ height: "100%" }}>
         <Checkbox
           checked={isChecked}
+          disabled={disabled}
           onChange={(e) => onChange?.(e.target.checked)}
           onClick={(e) => e.stopPropagation()}
           className={styles.eventCheckbox}
         />
-        <Flex vertical gap={4} style={{ flex: 1, minWidth: 0 }}>
+        <Flex vertical gap={4} style={{ flex: 1, minWidth: 0, height: "100%", justifyContent: "space-between" }}>
           <Flex align="center" justify="space-between" gap={8} wrap="wrap">
             <Typography.Text strong className={styles.eventTitle}>
               {item.label}
@@ -592,6 +651,7 @@ function EventCard({ item, checked, value, onChange }: EventCardProps) {
           </Typography.Text>
         </Flex>
       </Flex>
+
     </div>
   );
 }

@@ -33,7 +33,7 @@ interface CollectSourceCardProps {
   onDeleteSource: (id: string) => void;
 }
 
-/** 附属采集站卡片 */
+/** 采集站卡片（主站 / 附属站统一形态，主站用徽章区分） */
 export default function CollectSourceCard({
   record,
   selected,
@@ -46,10 +46,12 @@ export default function CollectSourceCard({
   onDeleteSource,
 }: CollectSourceCardProps) {
   const isRunning = active;
+  const isMaster = record.grade === 0;
   const { label: statusLabel, tone: statusTone } = resolveSourceStatus(record, active);
 
   const cardClassNames = [
     styles.sourceCard,
+    isMaster ? styles.sourceCardMaster : "",
     toneClassMap[statusTone],
     selected ? styles.sourceCardSelected : "",
   ]
@@ -58,6 +60,11 @@ export default function CollectSourceCard({
 
   return (
     <div className={cardClassNames} onClick={() => onSelect(record.id, !selected)}>
+      {isMaster ? (
+        <span className={styles.masterRibbon} title="全局唯一数据源" aria-label="主站">
+          <span className={styles.masterRibbonText}>主站</span>
+        </span>
+      ) : null}
       <div className={styles.cardHead}>
         <Checkbox
           checked={selected}
@@ -164,9 +171,15 @@ export default function CollectSourceCard({
           <Tooltip title="编辑采集站">
             <Button icon={<EditOutlined />} onClick={() => onEditSource(record.id)} />
           </Tooltip>
-          <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
-            <Button danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          {isMaster ? (
+            <Tooltip title="主站不可直接删除，请先改为附属站">
+              <Button danger icon={<DeleteOutlined />} disabled />
+            </Tooltip>
+          ) : (
+            <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
+              <Button danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          )}
         </div>
       </div>
     </div>

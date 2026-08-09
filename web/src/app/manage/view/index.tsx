@@ -1,17 +1,27 @@
 "use client";
 
-import React from "react";
-import { Card } from "antd";
+import React, { useCallback, useEffect, useState } from "react";
+import { Card, Col, Row, Statistic, Typography } from "antd";
 import Link from "next/link";
 import {
   AppstoreOutlined,
   DatabaseOutlined,
+  FileTextOutlined,
+  FolderOpenOutlined,
   PictureOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
+import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
 import styles from "./index.module.less";
+
+interface FilmInventoryStats {
+  films: number;
+  snapshots: number;
+  categories: number;
+  failures: number;
+}
 
 const quickEntries = [
   {
@@ -52,14 +62,75 @@ const quickEntries = [
 ];
 
 export default function ManagePageView() {
+  const [stats, setStats] = useState<FilmInventoryStats | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    ApiGet<FilmInventoryStats>("/manage/spider/clear/stats")
+      .then((resp) => {
+        if (active && resp.code === 0 && resp.data) {
+          setStats(resp.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
+
   return (
     <div className={styles.dashboard}>
       <ManagePageHeader
         title="工作台"
-        description="采集运行概况与常用入口。"
+        description="采集运行概况、影视数据规模与常用入口。"
       />
 
       <CollectOverview />
+
+      <Card
+        className={styles.panelCard}
+        size="small"
+        title="当前影视数据规模"
+        extra={
+          <Link href="/manage/system?tab=security" className={styles.statsLink}>
+            数据安全
+          </Link>
+        }
+      >
+        <Row gutter={[16, 16]}>
+          <Col xs={12} sm={12} md={6}>
+            <Statistic
+              title="影视库存"
+              value={stats?.films ?? "—"}
+              prefix={<VideoCameraOutlined />}
+            />
+          </Col>
+          <Col xs={12} sm={12} md={6}>
+            <Statistic
+              title="列表快照"
+              value={stats?.snapshots ?? "—"}
+              prefix={<DatabaseOutlined />}
+            />
+          </Col>
+          <Col xs={12} sm={12} md={6}>
+            <Statistic
+              title="分类"
+              value={stats?.categories ?? "—"}
+              prefix={<FolderOpenOutlined />}
+            />
+          </Col>
+          <Col xs={12} sm={12} md={6}>
+            <Statistic
+              title="失败记录"
+              value={stats?.failures ?? "—"}
+              prefix={<FileTextOutlined />}
+            />
+          </Col>
+        </Row>
+        <Typography.Text type="secondary" className={styles.statsNote}>
+          反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
+        </Typography.Text>
+      </Card>
 
       <Card className={styles.panelCard} title="快捷入口" size="small">
         <section className={styles.sectionBlock}>

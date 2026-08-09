@@ -1,0 +1,68 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.sectionCard {
+  min-width: 0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-head) {
+    min-height: 52px;
+    padding: 0 18px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-head-wrapper) {
+    min-height: 52px;
+    align-items: center;
+  }
+
+  :global(.ant-card-extra) {
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.ant-card-body) {
+    padding: 16px;
+  }
+}
+
+
+
+.sectionHead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.sectionText {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.moduleGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 4px;
+}
+
+.importPreview {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ant-color-text-secondary);
+}

@@ -4,6 +4,22 @@
   gap: 16px;
 }
 
+.tableCard {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-body) {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  :global(.ant-table-wrapper .ant-table-title) {
+    padding: 0 0 12px 0;
+  }
+}
+
 .filterBar {
   display: flex;
   flex-wrap: wrap;
@@ -12,7 +28,7 @@
 
 .tableHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
@@ -28,9 +44,11 @@
 }
 
 .tableTitle {
-  font-size: 16px;
+  display: flex;
+  align-items: center;
+  font-size: 15px;
   font-weight: 600;
-  line-height: 32px;
+  line-height: 24px;
 }
 
 .tableActions {
@@ -63,3 +81,4 @@
     justify-content: flex-start;
   }
 }
+
