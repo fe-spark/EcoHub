@@ -131,7 +131,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			banners = model.Banners{}
 		}
 		if err := repository.SaveBanners(banners); err != nil {
-			return fmt.Errorf("导入首页封面失败: %w", err)
+			return fmt.Errorf("导入首页轮播失败: %w", err)
 		}
 	}
 

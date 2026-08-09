@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-/** 兼容旧入口：首页封面 → 系统设置 · 网站配置（同页含封面） */
+/** 兼容旧入口：首页轮播已移至 内容管理 → 首页轮播 */
 export default function BannersPage() {
-  redirect("/manage/system?tab=website");
+  redirect("/manage/banners");
 }

@@ -60,13 +60,13 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
-// ResetSiteBasic 重置网站展示配置（基本信息默认值 + 清空首页封面）
+// ResetSiteBasic 重置网站基本信息为默认值（首页轮播已移入内容管理，重置不再清空轮播）
 func (h *ManageHandler) ResetSiteBasic(c *gin.Context) {
 	if err := service.ManageSvc.ResetSiteBasic(); err != nil {
 		dto.Failed(fmt.Sprint("配置信息重置失败: ", err), c)
 		return
 	}
-	dto.SuccessOnlyMsg("已还原默认网站配置，并清空首页封面", c)
+	dto.SuccessOnlyMsg("已还原默认网站配置", c)
 }
 
 // ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------
@@ -139,7 +139,7 @@ func (h *ManageHandler) BannerAdd(c *gin.Context) {
 	b.Id = utils.GenerateSalt()
 	bl := service.ManageSvc.GetBanners()
 	if len(bl) >= 6 {
-		dto.Failed("Banners最大阈值为6, 无法添加新的banner信息", c)
+		dto.Failed("首页轮播最多支持 6 条，无法继续添加", c)
 		return
 	}
 	bl = append(bl, b)

@@ -108,12 +108,7 @@ function resolvePreviewPicture(
   return "";
 }
 
-interface BannersPageViewProps {
-  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
-  embedded?: boolean;
-}
-
-export default function BannersPageView({ embedded = false }: BannersPageViewProps) {
+export default function BannersPageView() {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const { message } = useAppMessage();
@@ -150,17 +145,6 @@ export default function BannersPageView({ embedded = false }: BannersPageViewPro
 
   useEffect(() => {
     void fetchBanners();
-  }, [fetchBanners]);
-
-  // 网站配置「还原默认」会清空封面，同页需同步刷新
-  useEffect(() => {
-    const onSiteWebReset = () => {
-      void fetchBanners();
-    };
-    window.addEventListener("ecohub:site-web-config-reset", onSiteWebReset);
-    return () => {
-      window.removeEventListener("ecohub:site-web-config-reset", onSiteWebReset);
-    };
   }, [fetchBanners]);
 
   const handleDelete = async (id: string) => {
@@ -562,19 +546,17 @@ export default function BannersPageView({ embedded = false }: BannersPageViewPro
 
   return (
     <div className={styles.pageStack}>
-      {embedded ? null : (
-        <ManagePageHeader
-          title="首页封面"
-          description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
-        />
-      )}
+      <ManagePageHeader
+        title="首页轮播"
+        description="维护首页和推荐位所用的轮播内容，统一管理排序、轮播图与影片绑定信息。"
+      />
 
       <Card
         size="small"
         title={
           <Space>
             <PictureOutlined style={{ color: "#1677ff" }} />
-            <span>{embedded ? "首页封面" : "封面列表"}</span>
+            <span>轮播列表</span>
           </Space>
         }
         extra={
@@ -583,7 +565,7 @@ export default function BannersPageView({ embedded = false }: BannersPageViewPro
             icon={<PlusCircleOutlined />}
             onClick={openCreateEditor}
           >
-            添加封面
+            添加轮播
           </Button>
         }
         className={styles.tableCard}
@@ -602,7 +584,7 @@ export default function BannersPageView({ embedded = false }: BannersPageViewPro
 
 
       <Modal
-        title={editorMode === "create" ? "添加封面" : "修改封面信息"}
+        title={editorMode === "create" ? "添加轮播" : "修改轮播信息"}
         open={editorVisible}
         onOk={handleSubmit}
         onCancel={closeEditor}

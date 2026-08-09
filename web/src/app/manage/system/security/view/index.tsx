@@ -47,7 +47,7 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "site", label: "网站配置" },
   { key: "filmSources", label: "采集站" },
   { key: "cronTasks", label: "计划任务" },
-  { key: "banners", label: "首页封面" },
+  { key: "banners", label: "首页轮播" },
   { key: "notify", label: "通知配置" },
   { key: "mappingRules", label: "映射规则" },
 ];
