@@ -37,27 +37,32 @@ var (
 )
 
 const (
-	// MAXGoroutine max goroutine, 执行spider中对协程的数量限制
-	MAXGoroutine = 10
+	// MAXGoroutine 历史常量：单站分页 worker 默认值（优先用 CollectPageWorkers）。
+	MAXGoroutine = 6
 
-	// 采集写库默认值（可被环境变量覆盖，见 InitConfig）。
-	DefaultCollectWriteMaxInflight              = 2
-	DefaultCollectWritePagesPerSec              = 12
-	DefaultCollectWriteBurstPages               = 2
-	DefaultCollectWriteMaxPendingPagesPerSource = 50
-	DefaultCollectWriteMaxPendingPagesGlobal    = 150
+	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发）。
+	// 可通过环境变量覆盖（见 loadCollectRuntimeConfig）。
+	DefaultCollectWriteMaxInflight              = 3  // 写库事务并发（2 核可承受 3）
+	DefaultCollectWritePagesPerSec              = 24 // 稳态页/秒（主要吞吐闸）
+	DefaultCollectWriteBurstPages               = 8  // 突发，减少写阀空转
+	DefaultCollectWriteMaxPendingPagesPerSource = 48 // 单站写队列
+	DefaultCollectWriteMaxPendingPagesGlobal    = 144 // 全局写队列
+	DefaultCollectPageWorkers                   = 6  // 单站分页 HTTP 并发
+	DefaultCollectPageWorkersSolo               = 10 // 仅 1 站在跑时提高页并发，吃满写阀
+	DefaultCollectSourceConcurrency             = 6  // 批量同时跑的站点数；0=不限制
 	DefaultCollectStatsFlushIntervalSec         = 5
 	DefaultCollectCacheFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
 	DefaultCollectProgressRetainSec = 60
-	// DefaultCollectProgressStaleSec 活跃状态（含 waiting_publish）超时秒数，超时标 failed 可重采。
+	// DefaultCollectProgressStaleSec 无 live task 的 starting/running 超时秒数，超时标 failed 可重采。
+	// 不含 waiting_publish / finalizing / page_done（整批收尾等待，不按单站超时）。
 	DefaultCollectProgressStaleSec = 30 * 60
 
 	FilmPictureUploadDir = "./static/upload/gallery"
 	FilmPictureAccess    = "/api/upload/pic/poster/"
 )
 
-// 采集写阀 / 合并写 运行时参数（InitConfig 可从 env 覆盖）。
+// 采集写阀 / 并发 运行时参数（InitConfig 可从 env 覆盖）。
 var (
 	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
 	CollectWriteMaxInflight = DefaultCollectWriteMaxInflight
@@ -69,6 +74,12 @@ var (
 	CollectWriteMaxPendingPagesPerSource = DefaultCollectWriteMaxPendingPagesPerSource
 	// CollectWriteMaxPendingPagesGlobal 全局写库缓冲上限。
 	CollectWriteMaxPendingPagesGlobal = DefaultCollectWriteMaxPendingPagesGlobal
+	// CollectPageWorkers 单站分页请求并发数。
+	CollectPageWorkers = DefaultCollectPageWorkers
+	// CollectPageWorkersSolo 仅 1 个 live 任务时的页并发（单站全量提速）。
+	CollectPageWorkersSolo = DefaultCollectPageWorkersSolo
+	// CollectSourceConcurrency 批量采集同时运行的站点数；0 表示不限制。
+	CollectSourceConcurrency = DefaultCollectSourceConcurrency
 	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
 	// CollectCacheFlushIntervalSec 采集 Redis 缓存合并清理最小间隔（秒）。
@@ -153,7 +164,7 @@ const (
 	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片
 	DefaultUpdateTime = 3
 	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用
-	DefaultSpiderInterval = 200
+	DefaultSpiderInterval = 100
 )
 
 // -------------------------Database Connection Params-----------------------------------
@@ -247,25 +258,38 @@ func InitConfig() {
 	loadCollectRuntimeConfig()
 }
 
-// loadCollectRuntimeConfig 从环境变量覆盖采集写阀等参数（未设置则保留默认）。
+// loadCollectRuntimeConfig 从环境变量覆盖采集写阀/并发等参数（未设置则保留 2C2G 默认）。
 func loadCollectRuntimeConfig() {
-	CollectWriteMaxInflight = envInt("COLLECT_WRITE_MAX_INFLIGHT", CollectWriteMaxInflight)
-	CollectWritePagesPerSec = envInt("COLLECT_WRITE_PAGES_PER_SEC", CollectWritePagesPerSec)
-	CollectWriteBurstPages = envInt("COLLECT_WRITE_BURST_PAGES", CollectWriteBurstPages)
-	CollectWriteMaxPendingPagesPerSource = envInt("COLLECT_WRITE_PENDING_PER_SOURCE", CollectWriteMaxPendingPagesPerSource)
-	CollectWriteMaxPendingPagesGlobal = envInt("COLLECT_WRITE_PENDING_GLOBAL", CollectWriteMaxPendingPagesGlobal)
-	CollectStatsFlushIntervalSec = envInt("COLLECT_STATS_FLUSH_INTERVAL_SEC", CollectStatsFlushIntervalSec)
-	CollectCacheFlushIntervalSec = envInt("COLLECT_CACHE_FLUSH_INTERVAL_SEC", CollectCacheFlushIntervalSec)
-	CollectProgressRetainSec = envInt("COLLECT_PROGRESS_RETAIN_SEC", CollectProgressRetainSec)
-	CollectProgressStaleSec = envInt("COLLECT_PROGRESS_STALE_SEC", CollectProgressStaleSec)
+	CollectWriteMaxInflight = envIntPositive("COLLECT_WRITE_MAX_INFLIGHT", CollectWriteMaxInflight)
+	CollectWritePagesPerSec = envIntPositive("COLLECT_WRITE_PAGES_PER_SEC", CollectWritePagesPerSec)
+	CollectWriteBurstPages = envIntPositive("COLLECT_WRITE_BURST_PAGES", CollectWriteBurstPages)
+	CollectWriteMaxPendingPagesPerSource = envIntPositive("COLLECT_WRITE_PENDING_PER_SOURCE", CollectWriteMaxPendingPagesPerSource)
+	CollectWriteMaxPendingPagesGlobal = envIntPositive("COLLECT_WRITE_PENDING_GLOBAL", CollectWriteMaxPendingPagesGlobal)
+	CollectPageWorkers = envIntPositive("COLLECT_PAGE_WORKERS", CollectPageWorkers)
+	CollectPageWorkersSolo = envIntPositive("COLLECT_PAGE_WORKERS_SOLO", CollectPageWorkersSolo)
+	// 0 = 站点并发不限制（大机器可设 0）
+	CollectSourceConcurrency = envIntNonNegative("COLLECT_SOURCE_CONCURRENCY", CollectSourceConcurrency)
+	CollectStatsFlushIntervalSec = envIntPositive("COLLECT_STATS_FLUSH_INTERVAL_SEC", CollectStatsFlushIntervalSec)
+	CollectCacheFlushIntervalSec = envIntPositive("COLLECT_CACHE_FLUSH_INTERVAL_SEC", CollectCacheFlushIntervalSec)
+	CollectProgressRetainSec = envIntPositive("COLLECT_PROGRESS_RETAIN_SEC", CollectProgressRetainSec)
+	CollectProgressStaleSec = envIntPositive("COLLECT_PROGRESS_STALE_SEC", CollectProgressStaleSec)
+	if CollectPageWorkersSolo < CollectPageWorkers {
+		CollectPageWorkersSolo = CollectPageWorkers
+	}
 
-	fmt.Printf("[Config] 采集写阀: inflight=%d pages/s=%d burst=%d pending/source=%d pending/global=%d retain=%ds stale=%ds\n",
+	srcLimit := "不限制"
+	if CollectSourceConcurrency > 0 {
+		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
+	}
+	fmt.Printf("[Config] 采集(2C2G速度档) 写阀 inflight=%d pages/s=%d burst=%d pending=%d/%d | 页并发=%d(单站=%d) 站并发=%s | retain=%ds stale=%ds\n",
 		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
+		CollectPageWorkers, CollectPageWorkersSolo, srcLimit,
 		CollectProgressRetainSec, CollectProgressStaleSec)
 }
 
-func envInt(key string, fallback int) int {
+// envIntPositive 解析正整数环境变量；空/非法/≤0 时用 fallback。
+func envIntPositive(key string, fallback int) int {
 	raw := strings.TrimSpace(os.Getenv(key))
 	if raw == "" {
 		return fallback
@@ -275,6 +299,24 @@ func envInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+// envIntNonNegative 允许 0（表示关闭限制）；空/非法/<0 时用 fallback。
+func envIntNonNegative(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 0 {
+		return fallback
+	}
+	return n
+}
+
+// envInt 兼容旧调用：正整数。
+func envInt(key string, fallback int) int {
+	return envIntPositive(key, fallback)
 }
 
 // GetRootMysqlDsn 获取不带数据库名的 DSN，用于 CREATE DATABASE 等管理操作

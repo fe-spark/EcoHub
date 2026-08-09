@@ -29,20 +29,33 @@ func TestIsCollectAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 		t.Fatal("expected blocking on fresh waiting_publish")
 	}
 
-	// 3) waiting_publish 超时 → 标 failed 且不阻挡
+	// 3) waiting_publish 即使很久仍阻挡，且不因超时标 failed（整批收尾等待）
 	state.mu.Lock()
 	state.data.Status = progressStatusWaitingPublish
+	state.updated = time.Now().Add(-progressStaleDuration() - time.Minute)
+	state.mu.Unlock()
+	if !isCollectAlreadyQueuedOrRunning(sourceID) {
+		t.Fatal("expected blocking on long waiting_publish (batch finalize wait)")
+	}
+	snap, ok := collectProgressSnapshot(sourceID)
+	if !ok || snap.Status != progressStatusWaitingPublish {
+		t.Fatalf("waiting_publish must not stale-fail, got ok=%v status=%q", ok, snap.Status)
+	}
+
+	// 4) 无 live 的 running 超时 → failed 且不阻挡
+	state.mu.Lock()
+	state.data.Status = progressStatusRunning
 	state.updated = time.Now().Add(-progressStaleDuration() - time.Second)
 	state.mu.Unlock()
 	if isCollectAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected not blocking after stale waiting_publish")
+		t.Fatal("expected not blocking after stale running without live task")
 	}
-	snap, ok := collectProgressSnapshot(sourceID)
+	snap, ok = collectProgressSnapshot(sourceID)
 	if !ok || snap.Status != progressStatusFailed {
-		t.Fatalf("expected status failed after stale prune, got ok=%v status=%q", ok, snap.Status)
+		t.Fatalf("expected status failed after stale running, got ok=%v status=%q", ok, snap.Status)
 	}
 
-	// 4) live activeTasks + running → 阻挡（即使 updated 很旧）
+	// 5) live activeTasks + running → 阻挡（即使 updated 很旧）
 	activeTasks.Store(sourceID, collectTask{cancel: func() {}, reqId: "req"})
 	state.mu.Lock()
 	state.data.Status = progressStatusRunning
@@ -154,14 +167,61 @@ func TestGetActiveTaskProgressClearsAllTerminalTogether(t *testing.T) {
 	}
 }
 
-func TestGetActiveTaskProgressMarksStaleWaitingPublishFailed(t *testing.T) {
-	const sourceID = "progress-stale-list"
+func TestGetActiveTaskProgressDoesNotStaleWaitingPublish(t *testing.T) {
+	const sourceID = "progress-wait-publish-long"
 	collectProgress.Delete(sourceID)
 	activeTasks.Delete(sourceID)
 
-	state := ensureCollectProgress(sourceID, "Stale")
+	state := ensureCollectProgress(sourceID, "WaitPublish")
 	state.mu.Lock()
 	state.data.Status = progressStatusWaitingPublish
+	state.updated = time.Now().Add(-progressStaleDuration() - time.Minute)
+	state.mu.Unlock()
+
+	list := GetActiveTaskProgress()
+	found := false
+	for _, p := range list {
+		if p.Id == sourceID {
+			found = true
+			if p.Status != progressStatusWaitingPublish {
+				t.Fatalf("waiting_publish must stay, got %q", p.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected long waiting_publish still listed")
+	}
+
+	snap, ok := collectProgressSnapshot(sourceID)
+	if !ok || snap.Status != progressStatusWaitingPublish {
+		t.Fatalf("map status should remain waiting_publish, ok=%v status=%q", ok, snap.Status)
+	}
+	collectProgress.Delete(sourceID)
+}
+
+func TestPrioritizeCollectSourcesMasterFirst(t *testing.T) {
+	sources := []model.FilmSource{
+		{Id: "s1", Name: "A", Grade: model.SlaveCollect},
+		{Id: "m1", Name: "M", Grade: model.MasterCollect},
+		{Id: "s2", Name: "B", Grade: model.SlaveCollect},
+	}
+	out := prioritizeCollectSources(sources)
+	if len(out) != 3 || out[0].Id != "m1" {
+		t.Fatalf("master should be first, got %+v", out)
+	}
+	if out[1].Id != "s1" || out[2].Id != "s2" {
+		t.Fatalf("slave order should be stable, got %+v", out)
+	}
+}
+
+func TestGetActiveTaskProgressMarksStaleRunningWithoutLive(t *testing.T) {
+	const sourceID = "progress-stale-running"
+	collectProgress.Delete(sourceID)
+	activeTasks.Delete(sourceID)
+
+	state := ensureCollectProgress(sourceID, "StaleRun")
+	state.mu.Lock()
+	state.data.Status = progressStatusRunning
 	state.updated = time.Now().Add(-progressStaleDuration() - time.Second)
 	state.mu.Unlock()
 
@@ -171,13 +231,12 @@ func TestGetActiveTaskProgressMarksStaleWaitingPublishFailed(t *testing.T) {
 		if p.Id == sourceID {
 			found = true
 			if p.Status != progressStatusFailed {
-				t.Fatalf("expected failed after stale, got %q", p.Status)
+				t.Fatalf("expected failed after stale running, got %q", p.Status)
 			}
 		}
 	}
 	if !found {
-		// 刚变 failed 且 retain 窗口内应仍可见
-		t.Fatal("expected stale progress to appear as failed within retain window")
+		t.Fatal("expected stale running to appear as failed within retain window")
 	}
 
 	snap, ok := collectProgressSnapshot(sourceID)

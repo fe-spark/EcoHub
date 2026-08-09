@@ -29,10 +29,144 @@
   font-size: 13px;
   color: var(--ant-color-text-secondary);
   margin-inline-end: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbarActions {
+  flex: none;
 }
 
 .toolbarDivider {
   margin-inline: 2px;
+}
+
+.toolbarSecondary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--ant-color-border-secondary);
+}
+
+.toolbarLink {
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.toolbarDot {
+  color: var(--ant-color-text-quaternary);
+  font-size: 12px;
+  line-height: 20px;
+  user-select: none;
+}
+
+.toolbarMuted {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.headerMeta {
+  margin-inline-start: 4px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ant-color-text-tertiary);
+}
+
+/* ===== 批量任务总进度 ===== */
+.batchProgressBar {
+  display: flex;
+  align-items: center;
+  gap: 12px 16px;
+  min-width: 0;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--ant-color-primary-bg) 70%, var(--ant-color-bg-container));
+  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 18%, var(--ant-color-border-secondary));
+  border-radius: 12px;
+}
+
+.batchProgressMain {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.batchProgressHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+}
+
+.batchProgressTitle {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ant-color-text);
+}
+
+.batchProgressStats {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.batchStopBtn {
+  flex: none;
+  align-self: center;
+}
+
+/* 网格末尾的「新增」占位瓦片 */
+.addSourceTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 168px;
+  min-width: 0;
+  padding: 20px 16px;
+  margin: 0;
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 40%, transparent);
+  color: var(--ant-color-text-secondary);
+  cursor: pointer;
+  transition:
+    border-color 0.2s ease,
+    color 0.2s ease,
+    background 0.2s ease;
+}
+
+.addSourceTile:hover {
+  border-color: var(--ant-color-primary);
+  color: var(--ant-color-primary);
+  background: color-mix(in srgb, var(--ant-color-primary-bg) 55%, transparent);
+}
+
+.addSourceIcon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.addSourceLabel {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 22px;
+}
+
+.addSourceHint {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.addSourceTile:hover .addSourceHint {
+  color: inherit;
+  opacity: 0.75;
 }
 
 /* ===== 失效源清理弹窗 ===== */
@@ -773,6 +907,14 @@
   }
 
   .toolbar > button {
+    width: 100%;
+  }
+
+  .batchProgressBar {
+    flex-wrap: wrap;
+  }
+
+  .batchStopBtn {
     width: 100%;
   }
 }

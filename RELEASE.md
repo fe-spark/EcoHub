@@ -1,3 +1,42 @@
+# v1.1.5-beta.11
+
+> **预发布（prerelease）**：采集站管理交互收敛、批量总进度与 2C2G 采集默认提速，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.11`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.11`
+
+## 相对 beta.10
+
+- **采集站页交互收敛**：
+  - 去掉页头常驻「终止全部 / 清理失效源 / 新增」按钮堆叠
+  - 批量采集启动后出现**总进度条**，进行中可终止任务；总进度文案按阶段展示（采集中 / 收尾 / 完成），不再显示无意义的 `0/N 站`
+  - 工具栏批量操作顺序：批量采集 → 批量启用 → 批量禁用 → 批量删除（标准按钮样式）
+  - 「清理失效采集源 / 新增采集站」改为工具栏次级文字链接；附属站网格末尾虚线瓦片新增
+- **采集站数量上限 12**：前后端一致校验；达上限隐藏新增入口
+- **批量删除**：勾选后一键删除；主站与采集中站点自动跳过并提示原因
+- **采集默认提速（2C2G 速度档）**：
+  - 写阀默认：inflight 3 / 24 页/秒 / burst 8 / 单站队列 48 / 全局 144
+  - 页并发：`COLLECT_PAGE_WORKERS=6`，单站 solo 时 `10` 吃满写阀
+  - 站点并发：默认同时跑 6 站（`COLLECT_SOURCE_CONCURRENCY`，0=不限制）；主站优先派发
+  - 默认请求间隔 100ms
+- **收尾进度不误超时**：`page_done` / `waiting_publish` / `finalizing` 不再按单站 stale 标 failed
+- **移除** `diagnose-notify` 诊断命令（脚本仍在 `server/scripts/`，需时可自行恢复）
+
+## 部署（beta.11）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.11
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.11
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.10
 
 > **预发布（prerelease）**：采集站管理 UI 重构、进度生命周期与失效源清理，**不会**覆盖 `:latest`。
