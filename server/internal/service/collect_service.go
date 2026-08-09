@@ -255,7 +255,16 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 	return firstErr
 }
 
+// MaxCollectSources 采集站数量上限（与前端 MAX_COLLECT_SOURCES 一致）
+const MaxCollectSources = 12
+
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
+	// 新增时校验总数上限（更新走 Update 不经过此路径）
+	existing := repository.GetCollectSourceList()
+	if len(existing) >= MaxCollectSources {
+		return fmt.Errorf("采集站数量已达上限（%d 个），请先删除不用的采集站", MaxCollectSources)
+	}
+
 	// 强制单主站机制：如果新增站点为主站，自动降级现有主站
 	if source.Grade == model.MasterCollect {
 		if source.Id == "" {

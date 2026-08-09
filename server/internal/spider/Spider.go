@@ -219,6 +219,32 @@ func isTerminalCollectStatus(status string) bool {
 	}
 }
 
+// isPostFetchCollectStatus 分页已结束、等待整批收尾/发布的阶段。
+// 这些状态可能因其它站仍在采而挂很久，禁止按单站 30m 未更新标 failed。
+func isPostFetchCollectStatus(status string) bool {
+	switch status {
+	case progressStatusPageDone, progressStatusWaitingPublish, progressStatusFinalizing:
+		return true
+	default:
+		return false
+	}
+}
+
+// shouldMarkProgressStale 仅对「无 live task 的 starting/running」做超时 failed。
+// waiting_publish / finalizing / page_done 属正常等待整批收尾，不超时。
+func shouldMarkProgressStale(status string, live bool, age, staleAfter time.Duration) bool {
+	if age < staleAfter {
+		return false
+	}
+	if isPostFetchCollectStatus(status) {
+		return false
+	}
+	if live && (status == progressStatusRunning || status == progressStatusStarting) {
+		return false
+	}
+	return status == progressStatusStarting || status == progressStatusRunning
+}
+
 // hasAnyLiveOrActiveCollect 是否仍有未完成的采集（含 live task 与活跃进度）。
 // 有则保留全部终态进度，避免部分卡片进度条先消失。
 func hasAnyLiveOrActiveCollect() bool {
@@ -362,13 +388,18 @@ func refreshAndIsBlockingSourceProgress(sourceID string) bool {
 		return false
 	}
 	_, live := activeTasks.Load(sourceID)
+	age := now.Sub(state.updated)
+	// 收尾等待：仍阻挡重采，但不超时 failed。
+	if isPostFetchCollectStatus(state.data.Status) {
+		state.mu.Unlock()
+		return true
+	}
 	if live && (state.data.Status == progressStatusRunning || state.data.Status == progressStatusStarting) {
 		state.mu.Unlock()
 		return true
 	}
-	// waiting_publish / finalizing / 无 live task 的 starting|running：看是否超时。
-	age := now.Sub(state.updated)
-	if age >= staleAfter {
+	// 无 live task 的 starting/running 超时 → failed，允许重采。
+	if shouldMarkProgressStale(state.data.Status, live, age, staleAfter) {
 		old := state.data.Status
 		name := state.data.Name
 		state.data.Status = progressStatusFailed
@@ -377,7 +408,6 @@ func refreshAndIsBlockingSourceProgress(sourceID string) bool {
 		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed",
 			sourceID, old, age.Round(time.Second))
 		emitProgressStaleNotify(sourceID, name, old, age)
-		// 刚标 failed，不再阻挡重采。
 		return false
 	}
 	state.mu.Unlock()
@@ -396,11 +426,8 @@ func pruneStaleCollectProgress() {
 		updated := state.updated
 		age := now.Sub(updated)
 		if isActiveCollectStatus(status) {
-			if _, live := activeTasks.Load(id); live && (status == progressStatusRunning || status == progressStatusStarting) {
-				state.mu.Unlock()
-				return true
-			}
-			if age >= staleAfter {
+			_, live := activeTasks.Load(id)
+			if shouldMarkProgressStale(status, live, age, staleAfter) {
 				name := state.data.Name
 				state.data.Status = progressStatusFailed
 				state.updated = now
@@ -1270,12 +1297,58 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 	}
 }
 
-func getSourcePageConcurrency(s *model.FilmSource) int {
-	limit := config.MAXGoroutine
-	if limit <= 0 {
-		limit = 1
+func countLiveCollectTasks() int {
+	n := 0
+	activeTasks.Range(func(key, value any) bool {
+		n++
+		return true
+	})
+	return n
+}
+
+// getSourcePageConcurrency 单站分页 HTTP 并发；仅 1 站在跑时用 Solo 档吃满写阀。
+func getSourcePageConcurrency(_ *model.FilmSource) int {
+	base := config.CollectPageWorkers
+	if base <= 0 {
+		base = config.DefaultCollectPageWorkers
 	}
-	return limit
+	solo := config.CollectPageWorkersSolo
+	if solo <= 0 {
+		solo = config.DefaultCollectPageWorkersSolo
+	}
+	if solo < base {
+		solo = base
+	}
+	// live<=1：单站全量/仅剩一站时提高页并发
+	if countLiveCollectTasks() <= 1 {
+		if solo <= 0 {
+			return 1
+		}
+		return solo
+	}
+	if base <= 0 {
+		return 1
+	}
+	return base
+}
+
+// prioritizeCollectSources 主采集站优先派发，便于有限站并发时先跑主站。
+func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
+	if len(sources) <= 1 {
+		return sources
+	}
+	out := make([]model.FilmSource, 0, len(sources))
+	for _, s := range sources {
+		if s.Grade == model.MasterCollect {
+			out = append(out, s)
+		}
+	}
+	for _, s := range sources {
+		if s.Grade != model.MasterCollect {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string) {
@@ -1295,12 +1368,24 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	if len(sources) == 0 {
 		return
 	}
+	sources = prioritizeCollectSources(sources)
 	// 变更 mid 写入 MySQL 批次（无内存全量、无 Redis 会话），批次显式沿采集链传递
 	batch := notify.StartChangeBatch()
 	startedAt := time.Now()
 	runVersion := stopAllVersion.Load()
-	log.Printf("[%s] 主站/附属站并发采集，站点数=%d，站点并发不限制", tag, len(sources))
-	runSourcesGroupWithLimit(sources, h, tag, 0, runVersion, batch)
+	// 2C2G 默认限制同时跑的站点数，避免 N 站 × 页 worker 把内存/写阀打爆。
+	sourceLimit := config.CollectSourceConcurrency
+	if sourceLimit < 0 {
+		sourceLimit = 0
+	}
+	limitDesc := "不限制"
+	if sourceLimit > 0 {
+		limitDesc = fmt.Sprintf("%d", sourceLimit)
+	}
+	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 写阀 inflight=%d pages/s=%d",
+		tag, len(sources), limitDesc, config.CollectPageWorkers,
+		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
+	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batch)
 	var finalizeErr error
 	if err := collectLifecycle.flushPending(); err != nil {
 		syslog.Errorf("[%s] 批量采集收尾刷新失败: %v", tag, err)
@@ -2314,7 +2399,10 @@ func FullRecoverSpider() {
 	seen := make(map[string]struct{}, len(list))
 	recordsBySource := make(map[string][]model.FailureRecord, len(list))
 	sourceByID := make(map[string]model.FilmSource, len(list))
-	limit := config.MAXGoroutine
+	limit := config.CollectPageWorkers
+	if limit <= 0 {
+		limit = config.DefaultCollectPageWorkers
+	}
 	if limit <= 0 {
 		limit = 1
 	}
@@ -2430,11 +2518,10 @@ func GetActiveTaskProgress() []model.CollectProgress {
 		progress := state.data
 		age := now.Sub(state.updated)
 
-		// 活跃但已超时且无 live task → 就地 failed，仍参与统一保留。
+		// 无 live 的 starting/running 超时 → failed；waiting_publish 等收尾态不超时。
 		if isActiveCollectStatus(progress.Status) {
 			_, live := activeTasks.Load(id)
-			liveFetch := live && (progress.Status == progressStatusRunning || progress.Status == progressStatusStarting)
-			if !liveFetch && age >= staleAfter {
+			if shouldMarkProgressStale(progress.Status, live, age, staleAfter) {
 				old := progress.Status
 				name := progress.Name
 				progress.Status = progressStatusFailed
