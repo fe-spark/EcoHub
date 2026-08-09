@@ -106,10 +106,10 @@ export default function GlobalThemeProvider({
           colorPrimary: DEFAULT_PRIMARY_COLOR,
           colorPrimaryBg: "#fff7e6",
           colorPrimaryBgHover: "#ffe7ba",
-          colorBgLayout: "#f4f6fc",
+          colorBgLayout: "#f8fafc",
           colorBgContainer: "#ffffff",
           colorBgElevated: "#ffffff",
-          colorBorderSecondary: "#eef0f6",
+          colorBorderSecondary: "#e2e8f0",
           colorText: "#0f172a",
           colorTextSecondary: "#475569",
           colorTextTertiary: "#94a3b8",
@@ -145,7 +145,7 @@ export default function GlobalThemeProvider({
           : {}),
         Card: {
           colorBgContainer: isDark ? "rgba(255, 255, 255, 0.03)" : "#ffffff",
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.08)" : "rgba(250, 140, 22, 0.14)",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.08)" : "#e2e8f0",
         },
         Menu: {
           itemBg: "transparent",

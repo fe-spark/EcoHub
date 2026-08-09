@@ -13,6 +13,7 @@ import {
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import styles from "./index.module.less";
 
 export default function LoginPageView() {
@@ -22,6 +23,8 @@ export default function LoginPageView() {
   const router = useRouter();
   const { message } = useAppMessage();
   const { config: siteInfo } = useSiteConfig();
+  const { effective } = useThemeMode();
+  const isDark = effective === "dark";
 
   const handleLogin = async () => {
     if (!userName || !password) {
@@ -47,18 +50,21 @@ export default function LoginPageView() {
     <ConfigProvider
       locale={zhCN}
       theme={{
-        algorithm: theme.darkAlgorithm,
+        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
         token: {
           colorPrimary: "#fa8c16",
           borderRadius: 16,
+          colorText: isDark ? "#ffffff" : "#0f172a",
+          colorTextPlaceholder: isDark ? "rgba(255, 255, 255, 0.45)" : "#94a3b8",
         },
         components: {
           Input: {
-            colorBgContainer: "rgba(255, 255, 255, 0.04)",
-            colorBorder: "rgba(255, 255, 255, 0.1)",
+            colorBgContainer: isDark ? "rgba(255, 255, 255, 0.04)" : "#ffffff",
+            colorBorder: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(250, 140, 22, 0.2)",
+            colorText: isDark ? "#ffffff" : "#0f172a",
+            colorTextPlaceholder: isDark ? "rgba(255, 255, 255, 0.45)" : "#94a3b8",
             controlHeightLG: 50,
             paddingContentHorizontal: 16,
-            // 确保内部 input 元素透明
             colorBgContainerDisabled: "transparent",
           },
           Button: {

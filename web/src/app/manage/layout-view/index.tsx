@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
+
 
 
 import Link from "next/link";
@@ -184,11 +185,10 @@ export default function ManageLayoutView({
 
   const router = useRouter();
   const pathname = usePathname();
-  const searchParams = useSearchParams();
+  const isSystemPage = pathname.startsWith("/manage/system");
   const selectedKey = resolveMenuKey(pathname);
-  const isLogPage =
-    pathname.startsWith("/manage/system/logs") ||
-    (pathname === "/manage/system" && searchParams?.get("tab") === "logs");
+
+
 
 
 
@@ -371,9 +371,10 @@ export default function ManageLayoutView({
           </Space>
         </Header>
         <Content
-          className={`${styles.content} ${isLogPage ? styles.contentFixed : ""}`}
-          style={{ flex: 1, overflow: isLogPage ? "hidden" : "auto" }}
+          className={`${styles.content} ${isSystemPage ? styles.contentFixed : ""}`}
+          style={{ flex: 1, overflow: isSystemPage ? "hidden" : "auto" }}
         >
+
           {notices.length > 0 && (
             <div className={styles.noticeStack}>
               {notices.map((n) => (

@@ -51,9 +51,11 @@ function SystemSettingsBody() {
         label: "网站配置",
         icon: <GlobalOutlined />,
         children: (
-          <div className={styles.websitePane}>
-            <SiteConfigPageView embedded />
-            <BannersPageView embedded />
+          <div className={styles.tabPaneScrollable}>
+            <div className={styles.websitePane}>
+              <SiteConfigPageView embedded />
+              <BannersPageView embedded />
+            </div>
           </div>
         ),
       },
@@ -61,13 +63,21 @@ function SystemSettingsBody() {
         key: "notify",
         label: "通知配置",
         icon: <BellOutlined />,
-        children: <NotifyConfigPageView embedded />,
+        children: (
+          <div className={styles.tabPaneScrollable}>
+            <NotifyConfigPageView embedded />
+          </div>
+        ),
       },
       {
         key: "security",
         label: "数据安全",
         icon: <SafetyCertificateOutlined />,
-        children: <DataSecurityPageView embedded />,
+        children: (
+          <div className={styles.tabPaneScrollable}>
+            <DataSecurityPageView embedded />
+          </div>
+        ),
       },
       {
         key: "logs",
@@ -78,6 +88,7 @@ function SystemSettingsBody() {
     ],
     [],
   );
+
 
   return (
     <div className={styles.page}>
