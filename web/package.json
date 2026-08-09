@@ -21,7 +21,7 @@
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
     "@types/video.js": "^7.3.58",
-    "antd": "^6.3.1",
+    "antd": "6.3.5",
     "artplayer": "^5.3.0",
     "axios": "^1.13.5",
     "dayjs": "^1.11.19",

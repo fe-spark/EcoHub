@@ -5,9 +5,10 @@ FROM --platform=$BUILDPLATFORM node:20-alpine AS build-base
 FROM build-base AS deps
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-COPY package.json package-lock.json* ./
+# package-lock.json 已入库，npm ci 严格按 lockfile 安装，杜绝依赖版本漂移
+COPY package.json package-lock.json ./
 RUN --mount=type=cache,target=/root/.npm \
-    npm install
+    npm ci
 
 # ---- Builder Stage ----
 FROM build-base AS builder
