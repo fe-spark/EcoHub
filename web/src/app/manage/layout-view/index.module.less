@@ -96,7 +96,7 @@
   transition: all 0.3s ease;
 
   &:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: var(--ant-color-fill-tertiary);
     color: var(--ant-color-primary);
   }
 }
@@ -129,7 +129,10 @@
 .contentFixed {
   display: flex;
   flex-direction: column;
+  height: 100%;
+  min-height: 0;
 }
+
 
 .menuDrawer :global(.ant-drawer-header) {
   padding: 16px 20px;

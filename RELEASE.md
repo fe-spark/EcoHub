@@ -1,4 +1,37 @@
+# v1.1.5-beta.14
+
+> **预发布（prerelease）**：系统设置 UI 风格统一与重构、多余 Alert 提示精简、通知事件规则网格自适应等高对齐与全屏日志高度透传，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.14`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.14`
+
+## 相对 beta.13
+
+- **系统设置 UI 风格统一与样式细节优化**：
+  - 收拢为统一 4 主 Tabs 结构（网站配置、通知配置、数据安全、系统日志），移除了侧边栏多余菜单项
+  - 统一所有卡片的头部 Icon 规范、Title 格式、`12px` 容器圆角与 `52px` 按钮垂直居中内边距
+  - 彻底清除多余堆叠的 Alert 提示框，将保存、刷新、还原默认、添加封面等主操作按钮统一收拢至 Card 头部右上角
+  - 修复说明文字换行受限问题，取消 `max-width: 640px` 限制，支持宽屏下单行自然展开
+  - 重构通知配置事件订阅网格，采用自适应响应式布局 (`minmax(320px, 1fr)`) 与 94px 强制像素级等高对齐
+  - 全面贯通系统日志 Flex 高度透传，实现 Log 终端充满 100% 页面剩余可见高度且零外层页面滚动条
+
+## 部署（beta.14）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.14
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.14
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.13
+
 
 > **预发布（prerelease）**：用户角色权限管理与账号体系升级、侧栏菜单与导航文案规范统一，**不会**覆盖 `:latest`。
 
