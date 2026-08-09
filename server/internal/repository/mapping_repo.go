@@ -199,6 +199,42 @@ func DeleteMappingRule(id uint) error {
 	return nil
 }
 
+// ReplaceMappingRules 用导出规则整体替换映射规则表
+func ReplaceMappingRules(exports []model.MappingRuleExport) error {
+	if err := EnsureMappingRuleIndexes(); err != nil {
+		return err
+	}
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.MappingRule{}).Error; err != nil {
+			return err
+		}
+		if len(exports) == 0 {
+			return nil
+		}
+		rows := make([]model.MappingRule, 0, len(exports))
+		for _, item := range exports {
+			matchType := strings.TrimSpace(item.MatchType)
+			if matchType == "" {
+				matchType = "exact"
+			}
+			rows = append(rows, model.MappingRule{
+				Group:     strings.TrimSpace(item.Group),
+				Raw:       strings.TrimSpace(item.Raw),
+				Target:    strings.TrimSpace(item.Target),
+				MatchType: matchType,
+				Remarks:   strings.TrimSpace(item.Remarks),
+			})
+		}
+		return tx.Create(&rows).Error
+	}); err != nil {
+		return err
+	}
+	TouchRuleVersion()
+	ReloadMappingRules()
+	ClearIndexPageCache()
+	return nil
+}
+
 func GetAreaMapping() map[string]string {
 	return support.GetAreaMapping()
 }

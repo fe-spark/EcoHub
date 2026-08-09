@@ -8,9 +8,18 @@
   overflow: hidden;
 }
 
-.headerArea,
+.headerArea {
+  flex: none;
+}
+
 .filterCard {
   flex: none;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-body) {
+    padding: 14px 16px;
+  }
 }
 
 .toolbar {
@@ -30,7 +39,25 @@
   flex: 1;
   flex-direction: column;
   min-height: 0;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-head) {
+    min-height: 46px;
+    padding: 0 16px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-body) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    padding: 12px;
+  }
 }
+
+
 
 .logBody {
   flex: 1;

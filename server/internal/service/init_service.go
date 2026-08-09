@@ -43,7 +43,8 @@ func (s *InitService) DefaultDataInit() {
 	repository.InitMainCategories()
 	repository.InitBuiltinAccounts()
 
-	s.BasicConfigInit()
+	// 网站基本信息 + 首页封面 同属站点展示配置，一并初始化
+	s.SiteWebConfigInit()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
@@ -125,12 +126,21 @@ func ensureMappingRuleIndexes() {
 	}
 }
 
-func (s *InitService) BasicConfigInit() {
-	if repository.ExistSiteConfig() {
+// SiteWebConfigInit 初始化网站展示配置：基本信息 + 首页封面（同一入口，不再拆分）
+func (s *InitService) SiteWebConfigInit() {
+	// 首次：写入默认基本信息；首页封面默认空列表（与基本信息同属站点展示配置）
+	if !repository.ExistSiteConfig() {
+		if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
+			syslog.Errorf("SiteWebConfigInit SaveSiteBasic Error: %v", err)
+		}
+		if err := repository.SaveBanners(defaultBanners()); err != nil {
+			syslog.Errorf("SiteWebConfigInit SaveBanners Error: %v", err)
+		}
 		return
 	}
-	bc := defaultBasicConfig()
-	_ = repository.SaveSiteBasic(bc) // SaveSiteBasic 内部应处理 FirstOrCreate 逻辑
+	// 已初始化：回填网站配置与封面的 Redis 缓存
+	_ = repository.GetSiteBasic()
+	_ = repository.GetBanners()
 }
 
 func defaultBasicConfig() model.BasicConfig {
@@ -145,6 +155,11 @@ func defaultBasicConfig() model.BasicConfig {
 		State:    true,
 		Hint:     "网站升级中, 暂时无法访问 !!!",
 	}
+}
+
+// defaultBanners 默认首页封面（空列表；封面由运营在后台维护）
+func defaultBanners() model.Banners {
+	return model.Banners{}
 }
 
 func (s *InitService) SpiderInit() {

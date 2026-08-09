@@ -1,12 +1,19 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
 import { Button, Card, Input, Select, Space, Switch, Tag, Typography } from "antd";
-import { ClearOutlined, CopyOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ClearOutlined, CopyOutlined, FileTextOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
+
+interface SystemLogsPageViewProps {
+  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
+  embedded?: boolean;
+}
+
 
 const INITIAL_LOG_LINES = 500;
 const MAX_LOG_LINES = 1000;
@@ -50,7 +57,7 @@ function levelTag(level: LogLevel) {
   return <Tag color="processing">INFO</Tag>;
 }
 
-export default function SystemLogsPageView() {
+export default function SystemLogsPageView({ embedded = false }: SystemLogsPageViewProps) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -166,12 +173,14 @@ export default function SystemLogsPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <div className={styles.headerArea}>
-        <ManagePageHeader
-          title="系统日志"
-          description="级别由服务端写入时确定并随接口下发；页面打开期间按游标增量刷新，前端最多展示最近 1000 行。"
-        />
-      </div>
+      {embedded ? null : (
+        <div className={styles.headerArea}>
+          <ManagePageHeader
+            title="系统日志"
+            description="级别由服务端写入时确定并随接口下发；页面打开期间按游标增量刷新，前端最多展示最近 1000 行。"
+          />
+        </div>
+      )}
 
       <Card className={styles.filterCard}>
         <Space size={[8, 8]} wrap className={styles.toolbar}>
@@ -217,7 +226,12 @@ export default function SystemLogsPageView() {
       </Card>
 
       <Card
-        title="日志输出"
+        title={
+          <Space>
+            <FileTextOutlined style={{ color: "#1677ff" }} />
+            <span>日志输出</span>
+          </Space>
+        }
         styles={{ body: { display: "flex", flex: 1, minHeight: 0, padding: 12 } }}
         extra={(
           <Space size={[8, 8]} wrap>
@@ -230,6 +244,7 @@ export default function SystemLogsPageView() {
         )}
         className={styles.logCard}
       >
+
         <div ref={logBodyRef} className={styles.logBody}>
           {filteredEntries.length === 0 ? (
             <Typography.Text type="secondary">暂无匹配日志</Typography.Text>

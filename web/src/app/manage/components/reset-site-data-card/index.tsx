@@ -1,8 +1,6 @@
-"use client";
-
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Flex, Input, Modal, Progress, Typography } from "antd";
-import { DeleteOutlined } from "@ant-design/icons";
+import { Alert, Button, Card, Flex, Input, Modal, Progress, Space, Typography } from "antd";
+import { DeleteOutlined, WarningOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./index.module.less";
@@ -94,13 +92,23 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
 
   return (
     <>
-      <Card size="small" title="危险操作" className={styles.dangerCard}>
+      <Card
+        size="small"
+        title={
+          <Space>
+            <WarningOutlined style={{ color: "#ff4d4f" }} />
+            <span>危险操作</span>
+          </Space>
+        }
+        className={styles.dangerCard}
+      >
+
         <Flex vertical gap={12}>
           <Flex justify="space-between" align="center" gap={16} wrap="wrap">
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空所有影视与采集数据，破坏性升级后重新全量采集前执行。
+                清空影视库存、快照、分类与失败记录等采集派生数据；账号与配置类数据保留。体量可在工作台查看。
               </Typography.Text>
             </Flex>
             <Button danger icon={<DeleteOutlined />} onClick={() => setResetOpen(true)}>
@@ -144,7 +152,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             message="该操作不可逆"
-            description="将清空所有影视与采集数据（影片库存、快照、播放源映射、失败记录、分类），且无法恢复。"
+            description="将清空影视库存、列表快照、播放源映射、失败记录与分类等采集派生数据，且无法恢复。网站配置、采集站、账号等不受影响。"
           />
           <Input.Password
             placeholder="请输入管理密码"

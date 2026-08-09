@@ -1,5 +1,6 @@
-import ResetPageView from "./view";
+import { redirect } from "next/navigation";
 
+/** 兼容旧入口：数据重置 → 系统设置 · 数据安全 */
 export default function ResetPage() {
-  return <ResetPageView />;
+  redirect("/manage/system?tab=security");
 }

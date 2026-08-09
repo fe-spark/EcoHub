@@ -27,7 +27,9 @@ import {
   DeleteOutlined,
   PlusCircleOutlined,
   UploadOutlined,
+  PictureOutlined,
 } from "@ant-design/icons";
+
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
@@ -106,7 +108,12 @@ function resolvePreviewPicture(
   return "";
 }
 
-export default function BannersPageView() {
+interface BannersPageViewProps {
+  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
+  embedded?: boolean;
+}
+
+export default function BannersPageView({ embedded = false }: BannersPageViewProps) {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const { message } = useAppMessage();
@@ -142,7 +149,18 @@ export default function BannersPageView() {
   }, [message]);
 
   useEffect(() => {
-    fetchBanners();
+    void fetchBanners();
+  }, [fetchBanners]);
+
+  // 网站配置「还原默认」会清空封面，同页需同步刷新
+  useEffect(() => {
+    const onSiteWebReset = () => {
+      void fetchBanners();
+    };
+    window.addEventListener("ecohub:site-web-config-reset", onSiteWebReset);
+    return () => {
+      window.removeEventListener("ecohub:site-web-config-reset", onSiteWebReset);
+    };
   }, [fetchBanners]);
 
   const handleDelete = async (id: string) => {
@@ -544,34 +562,44 @@ export default function BannersPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <ManagePageHeader
-        title="首页封面"
-        description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
-      />
+      {embedded ? null : (
+        <ManagePageHeader
+          title="首页封面"
+          description="维护首页和推荐位所用的封面内容，统一管理排序、封面图与影片绑定信息。"
+        />
+      )}
 
-      <Table
-        dataSource={banners}
-        columns={columns}
-        rowKey="id"
-        loading={loading}
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        title={() => (
-          <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>封面列表</div>
-            <Space size={[8, 8]} wrap className={styles.tableActions}>
-              <Button
-                type="primary"
-                icon={<PlusCircleOutlined />}
-                onClick={openCreateEditor}
-              >
-                添加封面
-              </Button>
-            </Space>
-          </div>
-        )}
-      />
+      <Card
+        size="small"
+        title={
+          <Space>
+            <PictureOutlined style={{ color: "#1677ff" }} />
+            <span>{embedded ? "首页封面" : "封面列表"}</span>
+          </Space>
+        }
+        extra={
+          <Button
+            type="primary"
+            icon={<PlusCircleOutlined />}
+            onClick={openCreateEditor}
+          >
+            添加封面
+          </Button>
+        }
+        className={styles.tableCard}
+      >
+        <Table
+          dataSource={banners}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+        />
+      </Card>
+
+
 
       <Modal
         title={editorMode === "create" ? "添加封面" : "修改封面信息"}

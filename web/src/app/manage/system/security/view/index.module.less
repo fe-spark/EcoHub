@@ -1,10 +1,12 @@
-.pageStack {
+.page {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
-.tableCard {
+.sectionCard {
+  min-width: 0;
   border-radius: 12px;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 
@@ -26,36 +28,41 @@
   }
 
   :global(.ant-card-body) {
-    padding: 0;
+    padding: 16px;
   }
 }
 
 
 
-.tableHeader {
+.sectionHead {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.tableTitle {
-  display: flex;
-  align-items: center;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 24px;
-}
-
-.tableActions {
-  display: flex;
+  gap: 16px;
   flex-wrap: wrap;
 }
 
-@media (max-width: 768px) {
-  .tableActions {
-    width: 100%;
-  }
+.sectionText {
+  flex: 1 1 220px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
+.moduleGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 4px;
+}
+
+.importPreview {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--ant-color-text-secondary);
+}

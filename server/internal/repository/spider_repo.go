@@ -175,6 +175,25 @@ func GetCollectSourceList() []model.FilmSource {
 	return list
 }
 
+// ReplaceCollectSources 用备份列表整体替换采集站（事务清空后写入）
+func ReplaceCollectSources(list []model.FilmSource) error {
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
+			return err
+		}
+		if len(list) == 0 {
+			return nil
+		}
+		for i := range list {
+			if list[i].Id == "" && list[i].Uri != "" {
+				list[i].Id = utils.GenerateHashKey(list[i].Uri)
+			}
+			normalizeCollectSourceDefaults(&list[i])
+		}
+		return tx.Create(&list).Error
+	})
+}
+
 // GetCollectSourceListByGrade 返回指定类型的采集 Api 信息 Master | Slave
 func GetCollectSourceListByGrade(grade model.SourceGrade) []model.FilmSource {
 	var list []model.FilmSource

@@ -1,5 +1,8 @@
-import SystemLogsPageView from "./view";
+import { redirect } from "next/navigation";
 
 export default function SystemLogsPage() {
-  return <SystemLogsPageView />;
+  redirect("/manage/system?tab=logs");
 }
+
+
+

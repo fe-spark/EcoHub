@@ -1,7 +1,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+
+
 import Link from "next/link";
 import {
   Layout,
@@ -18,20 +20,20 @@ import {
 import {
   HomeOutlined,
   ThunderboltOutlined,
-  ClockCircleOutlined,
   VideoCameraOutlined,
   FolderOpenOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   LogoutOutlined,
   UserOutlined,
+  TeamOutlined,
+  SettingOutlined,
   BgColorsOutlined,
   SunOutlined,
   MoonOutlined,
   DesktopOutlined,
-  FileTextOutlined,
-  WarningOutlined,
 } from "@ant-design/icons";
+
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
@@ -91,31 +93,21 @@ const menuItems: MenuItem[] = [
     label: "图片素材",
   },
   {
-    key: "sub-system",
-    icon: <ClockCircleOutlined />,
+    key: "/manage/system",
+    icon: <SettingOutlined />,
     label: "系统设置",
-    children: [
-      { key: "/manage/system/website", label: "网站配置" },
-      { key: "/manage/system/notify", label: "通知设置" },
-      { key: "/manage/system/banners", label: "首页封面" },
-      { key: "/manage/system/users", label: "账号管理" },
-    ],
   },
   {
-    key: "/manage/system/logs",
-    icon: <FileTextOutlined />,
-    label: "系统日志",
-  },
-  {
-    key: "/manage/reset",
-    icon: <WarningOutlined style={{ color: "var(--ant-color-error)" }} />,
-    label: <span style={{ color: "var(--ant-color-error)" }}>数据重置</span>,
+    key: "/manage/system/users",
+    icon: <TeamOutlined />,
+    label: "账号管理",
   },
 ];
 
 function resolveMenuKey(pathname: string) {
+  // 旧数据重置入口并入系统设置 · 数据安全
   if (pathname.startsWith("/manage/reset")) {
-    return "/manage/reset";
+    return "/manage/system";
   }
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";
@@ -138,26 +130,15 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/cron")) {
     return "/manage/cron";
   }
-  if (pathname.startsWith("/manage/system/website")) {
-    return "/manage/system/website";
-  }
-  if (pathname.startsWith("/manage/system/notify")) {
-    return "/manage/system/notify";
-  }
-  if (pathname.startsWith("/manage/system/banners")) {
-    return "/manage/system/banners";
-  }
-  if (pathname.startsWith("/manage/system/users")) {
-    return "/manage/system/users";
-  }
-  if (pathname.startsWith("/manage/system/logs")) {
-    return "/manage/system/logs";
+  if (pathname.startsWith("/manage/system")) {
+    return "/manage/system";
   }
   if (pathname.startsWith("/manage/file")) {
     return "/manage/file";
   }
   return "/manage";
 }
+
 
 function collectOpenKeys(items: MenuItem[], selectedKey: string) {
   const openKeys: string[] = [];
@@ -200,8 +181,14 @@ export default function ManageLayoutView({
 
   const router = useRouter();
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const selectedKey = resolveMenuKey(pathname);
-  const isLogPage = pathname.startsWith("/manage/system/logs");
+  const isLogPage =
+    pathname.startsWith("/manage/system/logs") ||
+    (pathname === "/manage/system" && searchParams?.get("tab") === "logs");
+
+
+
 
   useEffect(() => {
     ApiGet("/manage/user/info").then((resp) => {

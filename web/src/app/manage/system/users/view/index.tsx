@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+
 import {
   Table,
   Button,
@@ -15,6 +16,7 @@ import {
   Tag,
   Popconfirm,
   Avatar,
+  Card,
 } from "antd";
 import {
   UserOutlined,
@@ -23,6 +25,7 @@ import {
   DeleteOutlined,
   LockOutlined,
   MailOutlined,
+  TeamOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -30,7 +33,14 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
 const { Option } = Select;
-export default function UsersPageView() {
+
+interface UsersPageViewProps {
+  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
+  embedded?: boolean;
+}
+
+export default function UsersPageView({ embedded = false }: UsersPageViewProps) {
+
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState([]);
   const [total, setTotal] = useState(0);
@@ -242,70 +252,78 @@ export default function UsersPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <ManagePageHeader
-        title="账号管理"
-        description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
-      />
-
-      <Space size={[8, 8]} wrap className={styles.filterBar}>
-        <Input
-          placeholder="搜索用户名"
-          value={searchText}
-          onChange={(event) => setSearchText(event.target.value)}
-          onPressEnter={() => handleSearch(searchText)}
-          className={styles.searchInput}
-          allowClear
+      {embedded ? null : (
+        <ManagePageHeader
+          title="账号管理"
+          description="统一维护后台账号、权限身份和基础状态，支持快速搜索与编辑。"
         />
-        <Button
-          type="primary"
-          onClick={() => handleSearch(searchText)}
-          className={styles.searchButton}
-        >
-          搜索
-        </Button>
-      </Space>
+      )}
 
-      <Table
-        columns={columns}
-        dataSource={data}
-        rowKey="id"
-        loading={loading}
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        title={() => (
-          <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>账号列表</div>
-            <Space size={[8, 8]} wrap className={styles.tableActions}>
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={handleAdd}
-                disabled={!currentUser?.canWrite}
-              >
-                新增用户
-              </Button>
-            </Space>
-          </div>
-        )}
-        footer={() => (
-          <div className={styles.pagination}>
-            <Pagination
-              current={current}
-              pageSize={pageSize}
-              total={total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50, 100, 500]}
-              showTotal={(total) => `共 ${total} 条`}
-              onChange={(page, size) => {
-                setCurrent(page);
-                setPageSize(size);
-                fetchData(page, size);
-              }}
-            />
-          </div>
-        )}
-      />
+      <Card size="small" className={styles.tableCard}>
+        <Space size={[8, 8]} wrap className={styles.filterBar}>
+          <Input
+            placeholder="搜索用户名"
+            value={searchText}
+            onChange={(event) => setSearchText(event.target.value)}
+            onPressEnter={() => handleSearch(searchText)}
+            className={styles.searchInput}
+            allowClear
+          />
+          <Button
+            type="primary"
+            onClick={() => handleSearch(searchText)}
+            className={styles.searchButton}
+          >
+            搜索
+          </Button>
+        </Space>
+
+        <Table
+          columns={columns}
+          dataSource={data}
+          rowKey="id"
+          loading={loading}
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          title={() => (
+            <div className={styles.tableHeader}>
+              <div className={styles.tableTitle}>
+                <TeamOutlined style={{ color: "#1677ff", marginRight: 8 }} />
+                <span>账号列表</span>
+              </div>
+              <Space size={[8, 8]} wrap className={styles.tableActions}>
+                <Button
+                  type="primary"
+                  icon={<PlusOutlined />}
+                  onClick={handleAdd}
+                  disabled={!currentUser?.canWrite}
+                >
+                  新增用户
+                </Button>
+              </Space>
+            </div>
+          )}
+          footer={() => (
+            <div className={styles.pagination}>
+              <Pagination
+                current={current}
+                pageSize={pageSize}
+                total={total}
+                showSizeChanger
+                pageSizeOptions={[10, 20, 50, 100, 500]}
+                showTotal={(total) => `共 ${total} 条`}
+                onChange={(page, size) => {
+                  setCurrent(page);
+                  setPageSize(size);
+                  fetchData(page, size);
+                }}
+              />
+            </div>
+          )}
+        />
+      </Card>
+
 
       <Modal
         title={editingUser ? "编辑用户" : "新增用户"}

@@ -29,9 +29,12 @@ func (s *ManageService) UpdateSiteBasic(c model.BasicConfig) error {
 	return repository.SaveSiteBasic(c)
 }
 
-// ResetSiteBasic 重置网站配置信息
+// ResetSiteBasic 重置网站展示配置：基本信息恢复默认，首页封面清空（与初始化同源）
 func (s *ManageService) ResetSiteBasic() error {
-	return repository.SaveSiteBasic(defaultBasicConfig())
+	if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
+		return err
+	}
+	return repository.SaveBanners(defaultBanners())
 }
 
 // GetBanners 获取轮播组件信息

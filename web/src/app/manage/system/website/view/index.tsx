@@ -1,10 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Avatar, Button, Card, Flex, Input, List, Modal, Spin, Switch, Tag, Typography } from "antd";
+import { Alert, Avatar, Button, Card, Flex, Input, List, Modal, Space, Spin, Switch, Tag, Typography } from "antd";
+
 import {
   EditOutlined,
   ReloadOutlined,
+  SettingOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -85,7 +87,12 @@ function renderPreviewValue(item: ConfigItem, value: SiteConfigValues[EditableFi
   return text ? <Typography.Text ellipsis>{text}</Typography.Text> : <Typography.Text type="secondary">未设置</Typography.Text>;
 }
 
-export default function SiteConfigPageView() {
+interface SiteConfigPageViewProps {
+  /** 嵌入系统设置 Tabs 时隐藏独立页头 */
+  embedded?: boolean;
+}
+
+export default function SiteConfigPageView({ embedded = false }: SiteConfigPageViewProps) {
   const [config, setConfig] = useState<SiteConfigValues>(DEFAULT_CONFIG);
   const [fetching, setFetching] = useState(false);
   const [editingItem, setEditingItem] = useState<ConfigItem | null>(null);
@@ -141,8 +148,12 @@ export default function SiteConfigPageView() {
     try {
       const resp = await ApiPost("/manage/config/basic/reset");
       if (resp.code === 0) {
-        message.success(resp.msg);
+        message.success(resp.msg || "已还原默认基本信息并清空首页封面");
         await getBasicInfo();
+        // 通知同页首页封面区块刷新（网站配置与封面同属一页）
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new Event("ecohub:site-web-config-reset"));
+        }
       } else {
         message.error(resp.msg);
       }
@@ -157,20 +168,35 @@ export default function SiteConfigPageView() {
     void getBasicInfo();
   }, [getBasicInfo]);
 
+  const resetAction = (
+    <Button icon={<ReloadOutlined />} loading={fetching} onClick={() => void handleReset()}>
+      还原默认
+    </Button>
+  );
+
   return (
     <div className={styles.formPanel}>
-      <ManagePageHeader
-        title="网站配置"
-        description="集中维护站点名称、网站地址、描述、Logo 与站点可用状态等基础信息。"
-        actions={
-          <Button icon={<ReloadOutlined />} loading={fetching} onClick={handleReset}>
-            还原
-          </Button>
-        }
-      />
+      {embedded ? null : (
+        <ManagePageHeader
+          title="网站配置"
+          description="维护站点基本信息与首页封面；还原将恢复默认基本信息并清空封面。"
+          actions={resetAction}
+        />
+      )}
 
       <Spin spinning={fetching} description="正在加载网站配置...">
-        <Card size="small">
+
+        <Card
+          size="small"
+          title={
+            <Space>
+              <SettingOutlined style={{ color: "#1677ff" }} />
+              <span>基本信息</span>
+            </Space>
+          }
+          extra={embedded ? resetAction : null}
+          className={styles.card}
+        >
           <List
             dataSource={CONFIG_ITEMS}
             renderItem={(item) => (
@@ -204,6 +230,8 @@ export default function SiteConfigPageView() {
           />
         </Card>
       </Spin>
+
+
 
       <Modal
         title={editorTitle}

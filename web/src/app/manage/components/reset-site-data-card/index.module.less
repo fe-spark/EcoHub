@@ -1,11 +1,38 @@
 .dangerCard {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
   border-color: var(--ant-color-error-border);
   background: var(--ant-color-error-bg);
+
+  :global(.ant-card-head) {
+    min-height: 52px;
+    padding: 0 18px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-head-wrapper) {
+    min-height: 52px;
+    align-items: center;
+  }
+
+  :global(.ant-card-extra) {
+    padding: 10px 0;
+    display: flex;
+    align-items: center;
+  }
+
+  :global(.ant-card-body) {
+    padding: 16px;
+  }
 }
 
+
+
 .dangerText {
-  max-width: 640px;
+  flex: 1 1 220px;
+  min-width: 0;
 }
+
 
 .resetProgress {
   display: flex;
