@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Button, Empty, Row, Col } from "antd";
-import { PlaySquareOutlined } from "@ant-design/icons";
+import { PlaySquareOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import AppLoading from "@/components/public/Loading";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
@@ -110,6 +110,13 @@ function FilmCard({
               }}
               loading="lazy"
             />
+          )}
+
+          {(imgError || !item.picture) && (
+            <div className={styles.placeholderFallback}>
+              <VideoCameraOutlined className={styles.placeholderIcon} />
+              <span className={styles.placeholderTitle}>{item.name?.split("[")[0]}</span>
+            </div>
           )}
 
           {/* Top Right Badge */}

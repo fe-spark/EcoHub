@@ -1,3 +1,40 @@
+# v1.1.5-beta.15
+
+> **预发布（prerelease）**：前台视觉与主题细节优化、登录页亮色模式支持、影视卡片无图占位兜底与系统设置页滚动布局收口，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.15`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.15`
+
+## 相对 beta.14
+
+- **登录页亮色模式支持**：登录页由固定暗色改为跟随全局主题（亮/暗），亮色下提供渐变背景、白底卡片与表单样式，并修复浏览器自动填充导致的输入框黑底问题
+- **前台视觉与主题细节优化**：
+  - 亮色主题文字色阶加深（`--public-text-2~6`），提升正文/辅助文字对比度；搜索框 placeholder 颜色同步修正
+  - Ant Design Card 亮/暗显式背景、边框与阴影规则，亮色下卡片更清爽、暗色下更通透
+  - 全局亮色 token 微调（`colorBgLayout`、`colorBorderSecondary`、Card 边框色）
+- **影视卡片列表升级**：
+  - 无封面/封面加载失败时展示占位兜底（图标 + 片名），不再留空图裂
+  - 卡片标签组改为深色毛玻璃风格，年份徽标橙色渐变高亮，亮色主题下保持高对比
+  - 悬停主色光晕与扫光 shimmer 细节优化
+- **分类筛选激活态**：激活 Tab 改为橙色渐变（`#fa8c16 → #fa541c`）并带光晕，与全局主色观感统一
+- **系统设置页滚动布局收口**：各 Tab 内容区独立滚动（`tabPaneScrollable`），系统设置页整体高度透传，日志终端不再撑出外层页面滚动条
+- **系统日志终端样式**：深色终端风格升级（边框、内阴影、字号与行距微调）
+
+## 部署（beta.15）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.15
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.15
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.14
 
 > **预发布（prerelease）**：系统设置 UI 风格统一与重构、多余 Alert 提示精简、通知事件规则网格自适应等高对齐与全屏日志高度透传，**不会**覆盖 `:latest`。

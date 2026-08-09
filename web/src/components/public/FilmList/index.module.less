@@ -9,10 +9,10 @@
 }
 
 :global(html[data-theme="light"]) {
-  --film-placeholder-bg: #eef2f9;
-  --film-tag-bg: rgba(var(--primary-color-rgb), 0.1);
-  --film-tag-text: var(--primary-color);
-  --film-tag-border: rgba(var(--primary-color-rgb), 0.25);
+  --film-placeholder-bg: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+  --film-tag-bg: rgba(255, 255, 255, 0.92);
+  --film-tag-text: #0f172a;
+  --film-tag-border: rgba(226, 232, 240, 0.9);
   --film-overlay-meta-text: rgba(255, 255, 255, 0.95);
   --film-overlay-blurb-text: rgba(255, 255, 255, 0.85);
 }
@@ -68,8 +68,8 @@
 
     .posterWrapper {
       box-shadow:
-        0 20px 40px rgba(0, 0, 0, 0.8),
-        0 0 0 1px rgba(var(--primary-color-rgb), 0.3);
+        0 20px 40px rgba(var(--primary-color-rgb), 0.22),
+        0 0 0 1px rgba(var(--primary-color-rgb), 0.35);
 
       .poster {
         transform: scale(1.1);
@@ -103,10 +103,10 @@
   border-radius: 12px;
   overflow: hidden;
   background: var(--film-placeholder-bg);
-  box-shadow: var(--public-shadow-sm);
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
   transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
   margin-bottom: 12px;
-  border: 1px solid var(--public-border-1);
+  border: 1px solid var(--public-border-2);
 
   .poster {
     position: absolute;
@@ -120,13 +120,41 @@
   }
 }
 
+.placeholderFallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px;
+  text-align: center;
+  z-index: 0;
+  background: var(--film-placeholder-bg);
+}
+
+.placeholderIcon {
+  font-size: 32px;
+  color: var(--primary-color);
+  opacity: 0.45;
+}
+
+.placeholderTitle {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--public-text-3);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .posterLoaded {
   opacity: 1 !important;
 }
 
 .loadingBg {
-  // 关键修复：移除 posterPulse 呼吸动画，保留扫光 shimer
-
   &::before {
     content: "";
     position: absolute;
@@ -134,7 +162,7 @@
     z-index: 0;
     background: linear-gradient(100deg,
         transparent 10%,
-        rgba(255, 255, 255, 0.08) 45%,
+        rgba(255, 255, 255, 0.18) 45%,
         transparent 80%);
     transform: translateX(-120%);
     animation: posterShimmer 1.7s ease-in-out infinite;
@@ -146,14 +174,14 @@
   position: absolute;
   top: 10px;
   right: 10px;
-  background: rgba(var(--primary-color-rgb), 0.95); /* Increased opacity to compensate for lack of blur */
-  color: var(--public-on-accent);
+  background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+  color: #ffffff;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: 6px;
   font-size: 11px;
   font-weight: 700;
   z-index: 2;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 8px rgba(250, 140, 22, 0.35);
   transition: opacity 0.25s ease;
 }
 
@@ -162,39 +190,58 @@
   bottom: 0;
   left: 0;
   width: 100%;
-  padding: 8px;
-  /* Slightly tighter base padding */
+  padding: 8px 10px;
   display: flex;
   flex-wrap: nowrap;
-  /* FORCE NO WRAP */
   overflow: hidden;
-  gap: 4px;
-  /* Reduced gap for more space */
+  gap: 5px;
   z-index: 2;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+  background: linear-gradient(to top, rgba(15, 23, 42, 0.65) 0%, transparent 100%);
   transition: opacity 0.3s ease;
 
   .tag {
-    background: var(--film-tag-bg);
-    color: var(--film-tag-text);
-    padding: 2px 6px;
-    border-radius: 4px;
-    /* Slightly smaller radius for more content space */
-    font-size: 10px;
+    background: rgba(15, 23, 42, 0.78);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #ffffff;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-size: 10.5px;
     font-weight: 700;
-    border: 1px solid var(--film-tag-border);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.25);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     flex-shrink: 1;
-    /* Allow to shrink if container is too small */
     min-width: 0;
-    /* Enable shrinking below content size */
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 
     &:first-child {
       flex-shrink: 0;
-      /* Year shouldn't shrink usually */
+      background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+      color: #ffffff;
+      border: none;
+      box-shadow: 0 2px 8px rgba(250, 140, 22, 0.45);
+    }
+  }
+}
+
+:global(html[data-theme="light"]) {
+  .tagGroup {
+    background: linear-gradient(to top, rgba(15, 23, 42, 0.35) 0%, transparent 100%);
+
+    .tag {
+      background: rgba(15, 23, 42, 0.82);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.3);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+
+      &:first-child {
+        background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+        color: #ffffff;
+        border: none;
+        box-shadow: 0 2px 8px rgba(250, 140, 22, 0.45);
+      }
     }
   }
 }

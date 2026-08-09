@@ -95,6 +95,38 @@
   color: rgba(255, 255, 255, 0.3);
 }
 
+.form :global(input:-webkit-autofill) {
+  -webkit-text-fill-color: var(--public-text-1) !important;
+  transition: background-color 50000s ease-in-out 0s !important;
+}
+
+:global(html[data-theme="light"]) {
+  .container {
+    background:
+      radial-gradient(circle at 20% 30%, rgba(99, 102, 241, 0.08) 0%, transparent 45%),
+      radial-gradient(circle at 80% 70%, rgba(250, 140, 22, 0.1) 0%, transparent 45%),
+      #f4f6fc;
+  }
+
+  .card {
+    background: rgba(255, 255, 255, 0.9);
+    border: 1px solid rgba(226, 232, 240, 0.95);
+    box-shadow: 0 20px 50px rgba(250, 140, 22, 0.1), 0 8px 24px rgba(15, 23, 42, 0.06);
+  }
+
+  .siteName {
+    color: #0f172a;
+  }
+
+  .subTitle {
+    color: #64748b;
+  }
+
+  .footer {
+    color: #94a3b8;
+  }
+}
+
 @media (max-width: 480px) {
   .card {
     width: calc(100% - 40px);
