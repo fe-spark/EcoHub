@@ -78,7 +78,16 @@ func (s *UserService) AddUser(u model.User) error {
 	if exist := repository.GetUserByNameOrEmail(u.UserName); exist != nil {
 		return errors.New("用户名已存在")
 	}
-	u.Role = model.UserRoleNormal
+	// 检查邮箱是否重复
+	if u.Email != "" {
+		if exist := repository.GetUserByNameOrEmail(u.Email); exist != nil && exist.ID != 0 {
+			return errors.New("邮箱已被其它账号使用")
+		}
+	}
+	// 校验角色，若非有效角色则默认设置为普通用户
+	if u.Role != model.UserRoleAdmin && u.Role != model.UserRoleVisitor && u.Role != model.UserRoleNormal {
+		u.Role = model.UserRoleNormal
+	}
 	// 密码加密
 	u.Salt = utils.GenerateSalt()
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
@@ -94,6 +103,11 @@ func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
 	u := oldUser
 
 	if req.Email != nil {
+		if *req.Email != "" && *req.Email != oldUser.Email {
+			if exist := repository.GetUserByNameOrEmail(*req.Email); exist != nil && exist.ID != oldUser.ID {
+				return errors.New("邮箱已被其它账号使用")
+			}
+		}
 		u.Email = *req.Email
 	}
 	if req.NickName != nil {
@@ -108,17 +122,23 @@ func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
 	if req.Status != nil {
 		u.Status = *req.Status
 	}
+	roleChanged := false
 	if req.Role != nil {
+		if *req.Role != oldUser.Role {
+			roleChanged = true
+		}
 		u.Role = *req.Role
 	}
-	// 内置账号保护：禁止禁用默认超管和访客用户
+	// 内置账号保护：禁止禁用或修改默认超管和访客用户的角色
 	if oldUser.ID == config.UserIdInitialVal {
 		u.Status = 0
 		u.Role = model.UserRoleAdmin
+		roleChanged = false
 	}
 	if oldUser.UserName == config.DefaultVisitorUser {
 		u.Status = 0
 		u.Role = model.UserRoleVisitor
+		roleChanged = false
 	}
 	// 如果修改了密码，需要重新加密
 	if req.Password != nil && *req.Password != "" {
@@ -126,8 +146,8 @@ func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
 		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
 	}
 	repository.UpdateUserInfo(u)
-	// 如果用户被禁用（Status == 1），强制清除其登录状态
-	if u.Status == 1 {
+	// 如果用户被禁用（Status == 1）或角色变更，强制清除其登录状态使 Token 失效
+	if u.Status == 1 || roleChanged {
 		_ = repository.ClearUserToken(u.ID)
 	}
 	return nil

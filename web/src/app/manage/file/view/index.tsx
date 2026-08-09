@@ -122,7 +122,7 @@ export default function FileUploadPageView() {
   return (
     <div className={styles.galleryPanel}>
       <ManagePageHeader
-        title="图片素材"
+        title="素材中心"
         description="管理全站影视海报、封面素材与图库资源，支持拖拽至内容区上传。"
         actions={<Tag color="processing">共计 {page.total} 张图片</Tag>}
       />

@@ -108,6 +108,19 @@ func (h *UserHandler) UserAdd(c *gin.Context) {
 		dto.Failed("用户名和密码必填!!!", c)
 		return
 	}
+	// 如果非超级管理员尝试创建非普通用户角色，强制重置为普通用户
+	if u.Role != model.UserRoleNormal {
+		v, ok := c.Get(config.AuthUserClaims)
+		if !ok {
+			u.Role = model.UserRoleNormal
+		} else {
+			uc, _ := v.(*utils.UserClaims)
+			if uc.UserID != config.UserIdInitialVal && !model.IsAdminRole(uc.Role) {
+				u.Role = model.UserRoleNormal
+			}
+		}
+	}
+
 	if err := service.UserSvc.AddUser(u); err != nil {
 		dto.Failed(err.Error(), c)
 		return
@@ -126,19 +139,25 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 		dto.Failed("用户ID缺失!!!", c)
 		return
 	}
-	// 非超级管理员不可修改超级管理员信息
-	if req.ID == config.UserIdInitialVal {
-		v, ok := c.Get(config.AuthUserClaims)
-		if !ok {
-			dto.Failed("鉴权失败，请重新登录", c)
-			return
-		}
-		uc, _ := v.(*utils.UserClaims)
-		if uc.UserID != config.UserIdInitialVal {
-			dto.Failed("权限不足，仅超级管理员可修改超级管理员信息", c)
-			return
-		}
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
 	}
+	uc, _ := v.(*utils.UserClaims)
+	isOperatorAdmin := uc.UserID == config.UserIdInitialVal || model.IsAdminRole(uc.Role)
+
+	// 非超级管理员不可修改默认超级管理员信息
+	if req.ID == config.UserIdInitialVal && !isOperatorAdmin {
+		dto.Failed("权限不足，仅超级管理员可修改默认超级管理员信息", c)
+		return
+	}
+	// 变更角色需要超级管理员权限
+	if req.Role != nil && !isOperatorAdmin {
+		dto.Failed("权限不足，仅超级管理员可修改用户角色", c)
+		return
+	}
+
 	if err := service.UserSvc.UpdateUser(req); err != nil {
 		dto.Failed(err.Error(), c)
 		return
@@ -154,7 +173,8 @@ func (h *UserHandler) UserDelete(c *gin.Context) {
 		return
 	}
 	uc, _ := v.(*utils.UserClaims)
-	if uc.UserID != config.UserIdInitialVal {
+	isOperatorAdmin := uc.UserID == config.UserIdInitialVal || model.IsAdminRole(uc.Role)
+	if !isOperatorAdmin {
 		dto.Failed("权限不足，仅超级管理员可删除用户", c)
 		return
 	}

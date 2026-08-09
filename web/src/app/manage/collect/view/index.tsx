@@ -744,7 +744,7 @@ export default function CollectManagePageView() {
   return (
     <div className={styles.pageBody}>
       <ManagePageHeader
-        title="采集站"
+        title="采集中心"
         description={
           <>
             统一管理采集站与采集任务

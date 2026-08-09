@@ -120,7 +120,7 @@ export default function CollectOverview() {
         className={styles.summaryCard}
         extra={
           <Link href="/manage/collect" style={{ fontSize: 13 }}>
-            采集站管理
+            采集中心
           </Link>
         }
         styles={{ body: { height: "100%" } }}

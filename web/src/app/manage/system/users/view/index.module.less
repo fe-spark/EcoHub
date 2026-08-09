@@ -4,6 +4,42 @@
   gap: 16px;
 }
 
+.filterCard {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+
+  :global(.ant-card-body) {
+    padding: 12px 16px;
+  }
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filterLeft {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filterRight {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.searchInput {
+  width: 260px;
+  max-width: 100%;
+}
+
 .tableCard {
   border-radius: 12px;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
@@ -20,27 +56,12 @@
   }
 }
 
-.filterBar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
 .tableHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
-}
-
-.searchInput {
-  width: 250px;
-  max-width: 100%;
-}
-
-.searchButton {
-  flex: none;
 }
 
 .tableTitle {
@@ -53,27 +74,49 @@
 
 .tableActions {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userInfo {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.userName {
+  font-weight: 600;
+  color: var(--ant-color-text);
+  line-height: 1.4;
+}
+
+.userMeta {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
 }
 
 .pagination {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
   flex-wrap: wrap;
   gap: 12px;
 }
 
 @media (max-width: 768px) {
-  .filterBar {
+  .filterBar,
+  .filterLeft,
+  .filterRight {
     width: 100%;
   }
 
-  .tableActions {
-    width: 100%;
-  }
-
-  .searchInput,
-  .searchButton {
+  .searchInput {
     width: 100%;
   }
 
@@ -81,4 +124,3 @@
     justify-content: flex-start;
   }
 }
-
