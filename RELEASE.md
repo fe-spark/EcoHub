@@ -1,3 +1,34 @@
+# v1.1.5-beta.13
+
+> **预发布（prerelease）**：用户角色权限管理与账号体系升级、侧栏菜单与导航文案规范统一，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.13`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.13`
+
+## 相对 beta.12
+
+- **用户角色权限管理与账号体系升级**：
+  - 服务端支持用户角色定义（`role`: 0 普通用户 / 1 超级管理员 / 2 访客只读），完善账号创建、编辑与权限校验规则
+  - 特殊账号保护：系统预置 `admin` 与 `visitor` 账号防越权禁用或删除
+  - 前端「账号管理」页面重构：搜索栏整合数据量统计、模态框新增角色设置与表单额外提示、删除操作增加危险二次确认
+- **侧边栏与导航文案规范统一**：
+  - 侧边栏菜单与工作台快捷入口统一命名规范（如「采集站」→「采集中心」、「图片素材」→「素材中心」、「用户管理」→「账号管理」）
+
+## 部署（beta.13）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.13
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.13
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.12
 
 > **预发布（prerelease）**：系统设置 UI 架构重构统一、配置备份导入导出与站点展示配置收敛，**不会**覆盖 `:latest`。

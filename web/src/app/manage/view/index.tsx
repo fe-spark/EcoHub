@@ -34,7 +34,7 @@ const quickEntries = [
   {
     key: "collect",
     icon: DatabaseOutlined,
-    title: "采集站",
+    title: "采集中心",
     description: "配置主站、附属站与批量采集任务。",
     href: "/manage/collect",
   },
@@ -55,7 +55,7 @@ const quickEntries = [
   {
     key: "assets",
     icon: PictureOutlined,
-    title: "图片素材",
+    title: "素材中心",
     description: "上传、预览和整理站内会用到的封面图与素材图。",
     href: "/manage/file",
   },

@@ -70,9 +70,9 @@ const menuItems: MenuItem[] = [
   {
     key: "sub-collect",
     icon: <ThunderboltOutlined />,
-    label: "采集中心",
+    label: "采集管理",
     children: [
-      { key: "/manage/collect", label: "采集站" },
+      { key: "/manage/collect", label: "采集中心" },
       { key: "/manage/collect/record", label: "失败记录" },
       { key: "/manage/cron", label: "计划任务" },
     ],
@@ -90,7 +90,7 @@ const menuItems: MenuItem[] = [
   {
     key: "/manage/file",
     icon: <FolderOpenOutlined />,
-    label: "图片素材",
+    label: "素材中心",
   },
   {
     key: "/manage/system",
@@ -129,6 +129,9 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/cron")) {
     return "/manage/cron";
+  }
+  if (pathname.startsWith("/manage/system/users")) {
+    return "/manage/system/users";
   }
   if (pathname.startsWith("/manage/system")) {
     return "/manage/system";
