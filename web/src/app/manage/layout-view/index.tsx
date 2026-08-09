@@ -84,6 +84,7 @@ const menuItems: MenuItem[] = [
     label: "内容管理",
     children: [
       { key: "/manage/film", label: "影片列表" },
+      { key: "/manage/banners", label: "首页轮播" },
       { key: "/manage/collect/category", label: "分类管理" },
       { key: "/manage/collect/category/rules", label: "分类规则" },
     ],
@@ -109,6 +110,9 @@ function resolveMenuKey(pathname: string) {
   // 旧数据重置入口并入系统设置 · 数据安全
   if (pathname.startsWith("/manage/reset")) {
     return "/manage/system";
+  }
+  if (pathname.startsWith("/manage/banners")) {
+    return "/manage/banners";
   }
   if (pathname.startsWith("/manage/film/add")) {
     return "/manage/film";

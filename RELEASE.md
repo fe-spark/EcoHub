@@ -1,3 +1,34 @@
+# v1.1.5-beta.17
+
+> **预发布（prerelease）**：首页轮播管理移入内容管理、后端初始化不再维护轮播配置、功能文案统一为「首页轮播」，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.17`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.17`
+
+## 相对 beta.16
+
+- **首页轮播移入内容管理**：
+  - 轮播（原「首页封面」）从「系统设置 → 网站配置」中移出，成为「内容管理」下的独立页面 `/manage/banners`
+  - 旧入口 `/manage/system/banners` 自动重定向到新地址，老书签不受影响
+  - 网站配置 Tab 仅保留基本信息；「还原默认」不再清空轮播数据（轮播改由内容管理独立维护）
+- **后端初始化移除轮播配置**：新环境初始化不再写入/预热轮播配置，轮播数据完全由后台维护
+- **文案统一**：「首页封面」全部更名为「首页轮播」（侧边栏菜单、轮播管理页、备份导入模块、后端提示与错误消息）；表单内「影片封面 / 封面图」指影片自身封面图，保持不变
+
+## 部署（beta.17）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.17
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.17
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.16
 
 > **预发布（prerelease）**：修复系统日志页无法在剩余空间滚动（依赖锁定 + 系统设置 Tab 自绘化），**不会**覆盖 `:latest`。

@@ -11,7 +11,6 @@ import {
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import SiteConfigPageView from "@/app/manage/system/website/view";
-import BannersPageView from "@/app/manage/system/banners/view";
 import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
@@ -72,7 +71,6 @@ function SystemSettingsBody() {
           <div className={styles.tabPaneScrollable}>
             <div className={styles.websitePane}>
               <SiteConfigPageView embedded />
-              <BannersPageView embedded />
             </div>
           </div>
         );
@@ -83,7 +81,7 @@ function SystemSettingsBody() {
     <div className={styles.page}>
       <ManagePageHeader
         title="系统设置"
-        description="网站配置（基本信息与首页封面）、通知配置、数据安全（备份 / 重置）与系统日志。"
+        description="网站配置（基本信息）、通知配置、数据安全（备份 / 重置）与系统日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {MAIN_TABS.map((tab) => {

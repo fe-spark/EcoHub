@@ -148,12 +148,8 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
     try {
       const resp = await ApiPost("/manage/config/basic/reset");
       if (resp.code === 0) {
-        message.success(resp.msg || "已还原默认基本信息并清空首页封面");
+        message.success(resp.msg || "已还原默认基本信息");
         await getBasicInfo();
-        // 通知同页首页封面区块刷新（网站配置与封面同属一页）
-        if (typeof window !== "undefined") {
-          window.dispatchEvent(new Event("ecohub:site-web-config-reset"));
-        }
       } else {
         message.error(resp.msg);
       }
@@ -179,7 +175,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
       {embedded ? null : (
         <ManagePageHeader
           title="网站配置"
-          description="维护站点基本信息与首页封面；还原将恢复默认基本信息并清空封面。"
+          description="维护站点基本信息；还原将恢复默认基本信息。"
           actions={resetAction}
         />
       )}

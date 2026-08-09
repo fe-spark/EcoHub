@@ -29,12 +29,9 @@ func (s *ManageService) UpdateSiteBasic(c model.BasicConfig) error {
 	return repository.SaveSiteBasic(c)
 }
 
-// ResetSiteBasic 重置网站展示配置：基本信息恢复默认，首页封面清空（与初始化同源）
+// ResetSiteBasic 重置网站基本信息为默认值（首页轮播已移入内容管理，重置不再触碰轮播）
 func (s *ManageService) ResetSiteBasic() error {
-	if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
-		return err
-	}
-	return repository.SaveBanners(defaultBanners())
+	return repository.SaveSiteBasic(defaultBasicConfig())
 }
 
 // GetBanners 获取轮播组件信息
