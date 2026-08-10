@@ -38,8 +38,8 @@ type SlavePlaylistDiff struct {
 // DiffSlavePlaylistGroups 对比同一 movie_key 下的 playlist 组。
 // 与生产 saveGroupedPlaylists 对齐：先按 (movie_key, group_index) 排序去重
 // （同一影片多条目共享匹配键时，落库后写覆盖，仅最后一行生效），再对比。
-// 通知判定仅计「新增集数/新增线路」：集数相同（仅顺序/链接变化）不通知；
-// 集数回退（源站抖动/下架）不通知且 WouldWrite=false（生产不覆盖已存内容）。
+// 通知判定仅计「任一线路最后一项分集标签变化（含新增/回退/顺序变化）」：
+// 最后一项相同（仅链接/中间集变化）不通知。
 func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePlaylist) SlavePlaylistDiff {
 	left := playlistsToSignatures(sortDedupePlaylists(existing))
 	right := playlistsToSignatures(sortDedupePlaylists(incoming))
@@ -64,16 +64,12 @@ func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePl
 		diff.Reason = "该 key 本次无内容（源站改名/条目消失的残留，不进更新列表）"
 		return diff
 	}
-	switch {
-	case playlistStructureGrew(left, right):
-		diff.WouldWrite = true
+	diff.WouldWrite = true
+	if playlistLastEpisodeChanged(left, right) {
 		diff.NotifyWorthy = true
-		diff.Reason = "新增集数/线路（会进更新列表）"
-	case playlistStructureSameEpisodes(left, right):
-		diff.WouldWrite = true
-		diff.Reason = "集数相同（仅顺序/链接变化，写库但不进更新列表）"
-	default:
-		diff.Reason = "集数回退/内容不同（源站抖动，不写库不进更新列表）"
+		diff.Reason = "任一线路最后一集有变化（含新增/回退，进更新列表）"
+	} else {
+		diff.Reason = "各线路最后一项分集标签相同（仅链接/中间集变化，写库但不进更新列表）"
 	}
 	return diff
 }
@@ -120,7 +116,7 @@ func ExplainMasterNotify(old model.MovieDetail, hasOld bool, incoming model.Movi
 	ex.BusinessChanged = !SameMasterBusiness(old, incoming)
 	ex.StructureChanged = !SameMasterPlayStructure(old, incoming)
 	ex.WouldWrite = ex.BusinessChanged
-	ex.WouldNotify = ex.StructureChanged // 仅当会写库时才走到 filter；结构变才 notify
+	ex.WouldNotify = ex.StructureChanged // 仅当会写库时才走到 filter；最后一集变化才 notify
 	// 生产路径：只有 business 变更才写库，再在 changed 里按结构筛 Notify。
 	// 若业务不变则不会写、也不会 notify。
 	if !ex.BusinessChanged {
@@ -130,11 +126,11 @@ func ExplainMasterNotify(old model.MovieDetail, hasOld bool, incoming model.Movi
 	}
 	if ex.StructureChanged {
 		ex.WouldNotify = true
-		ex.Reason = "业务有变更且播放结构变化 → 写库且进更新列表"
+		ex.Reason = "业务有变更且任一线路最后一集有变化（含新增/回退）→ 写库且进更新列表"
 		return ex
 	}
 	ex.WouldNotify = false
-	ex.Reason = "业务有变更但播放结构未变（元数据/链接噪声）→ 写库但不进更新列表"
+	ex.Reason = "业务有变更但各线路最后一集未变（元数据/链接噪声）→ 写库但不进更新列表"
 	return ex
 }
 

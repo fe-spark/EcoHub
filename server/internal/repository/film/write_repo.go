@@ -276,12 +276,6 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 			unchangedKeys[infos[index].ContentKey] = struct{}{}
 			continue
 		}
-		// 结构回退（集数减少/内容不同）：源站抖动，不覆盖已存内容、不标记更新，
-		// 避免 DB 在两个版本间震荡导致更新列表反复刷同一 mid（连载剧发布期常见）。
-		if masterStructureRegressed(oldDetail, newDetail) {
-			unchangedKeys[infos[index].ContentKey] = struct{}{}
-			continue
-		}
 		infos[index].UpdateStamp = changedAt
 	}
 	return unchangedKeys, oldDetailsByMid, nil
@@ -629,9 +623,8 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 }
 
 // filterPlayStructureNotifyMIDs 从业务写入的影片中筛出应进「更新列表」的 mid：
-// 新片，或新结构相对旧结构**新增集数/新增线路**（`masterStructureGrew`）。
-// 集数相同（仅链接/顺序/线路名变化）与集数回退（源站抖动/下架）都不计入，
-// 否则连载剧发布期同一 mid 会随源站数据抖动反复上报。
+// 新片，或任一线路「最后一项分集标签」相对旧数据有变化（含新增集数/新增线路/集数回退）。
+// 各线路最后一项相同（仅链接/中间集变化）不计入。
 func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[string]model.MovieDetail, oldByMid map[int64]model.MovieDetail) []int64 {
 	if len(changed) == 0 {
 		return nil
@@ -651,7 +644,7 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 			continue
 		}
 		oldDetail, hasOld := oldByMid[mid]
-		if !hasOld || masterStructureGrew(oldDetail, newDetail) {
+		if !hasOld || masterLastEpisodeChanged(oldDetail, newDetail) {
 			seen[mid] = struct{}{}
 			out = append(out, mid)
 		}
@@ -659,8 +652,8 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 	return out
 }
 
-// masterPlaylistSignatures 把主站详情转成与附属站一致的线路签名列表（线路名 + 集数标签），
-// 复用 playlistStructureGrew / playlistStructureSameEpisodes 做「是否新增集数」判定。
+// masterPlaylistSignatures 把主站详情转成与附属站一致的线路签名列表（线路名 + 集数内容），
+// 复用 playlistLastEpisodeChanged 做「最后一集变化」判定。
 func masterPlaylistSignatures(d model.MovieDetail) []playlistSignature {
 	n := len(d.PlayList)
 	sigs := make([]playlistSignature, 0, n)
@@ -675,33 +668,31 @@ func masterPlaylistSignatures(d model.MovieDetail) []playlistSignature {
 	return sigs
 }
 
-// masterStructureGrew 新结构相对旧结构是否新增集数/新增线路（无序比较）。
-func masterStructureGrew(oldDetail, newDetail model.MovieDetail) bool {
-	return playlistStructureGrew(masterPlaylistSignatures(oldDetail), masterPlaylistSignatures(newDetail))
+// masterLastEpisodeChanged 新详情相对旧详情，任一线路「最后一项分集标签」是否变化（含新增/回退）。
+func masterLastEpisodeChanged(oldDetail, newDetail model.MovieDetail) bool {
+	return playlistLastEpisodeChanged(masterPlaylistSignatures(oldDetail), masterPlaylistSignatures(newDetail))
 }
 
-// masterStructureRegressed 新结构相对旧结构是否「集数回退/内容不同」。
-func masterStructureRegressed(oldDetail, newDetail model.MovieDetail) bool {
-	if samePlayStructure(oldDetail, newDetail) {
-		return false
-	}
-	return !masterStructureGrew(oldDetail, newDetail)
-}
-
-// samePlayStructure 判断播放结构是否一致（线路名 + 各线路集数标签）；忽略播放链接。
+// samePlayStructure 判断播放结构是否一致（线路 + 各线路最后一集标签）；忽略播放链接。
 func samePlayStructure(oldDetail, newDetail model.MovieDetail) bool {
 	return playStructureSignature(oldDetail) == playStructureSignature(newDetail)
 }
 
 func playStructureSignature(detail model.MovieDetail) string {
-	payload := struct {
-		PlayFrom []string   `json:"playFrom"`
-		Episodes [][]string `json:"episodes"`
-	}{
-		PlayFrom: normalizeStringSlice(detail.PlayFrom),
-		Episodes: normalizeEpisodeLabels(detail.PlayList),
+	type row struct {
+		Index int    `json:"i"`
+		Name  string `json:"name"`
+		Last  string `json:"last"`
 	}
-	data, _ := json.Marshal(payload)
+	rows := make([]row, 0, len(detail.PlayList))
+	for i, links := range detail.PlayList {
+		name := ""
+		if i < len(detail.PlayFrom) {
+			name = strings.TrimSpace(detail.PlayFrom[i])
+		}
+		rows = append(rows, row{Index: i, Name: name, Last: lastEpisodeLabel(links)})
+	}
+	data, _ := json.Marshal(rows)
 	return string(data)
 }
 

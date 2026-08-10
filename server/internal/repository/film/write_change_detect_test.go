@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 
 	"server/internal/model"
@@ -107,33 +108,68 @@ func TestSamePlaylistSignaturesIgnoresLinkQuery(t *testing.T) {
 	}
 }
 
-func TestPlaylistEpisodeStructureIgnoresLinkOnly(t *testing.T) {
+func TestPlaylistLastEpisodeChanged(t *testing.T) {
 	left := []playlistSignature{
 		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"01","link":"http://a/1.m3u8?sign=aaa"},{"episode":"02","link":"http://a/2.m3u8"}]`},
 	}
 	linkOnly := []playlistSignature{
 		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"01","link":"http://cdn/x/1.m3u8?sign=zzz"},{"episode":"02","link":"http://cdn/x/2.m3u8?t=1"}]`},
 	}
-	if !samePlaylistEpisodeStructure(left, linkOnly) {
-		t.Fatal("仅链接变化不应视为剧集结构变更")
+	if playlistLastEpisodeChanged(left, linkOnly) {
+		t.Fatal("仅链接变化（最后一集仍为 02）不应视为更新")
+	}
+	// 中间集链接变化但最后一项不变 → 不算
+	midChanged := []playlistSignature{
+		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"01","link":"http://a/1.m3u8"},{"episode":"02","link":"http://b/2.m3u8"}]`},
+	}
+	if playlistLastEpisodeChanged(left, midChanged) {
+		t.Fatal("中间集链接/内容变化但最后一项未变不应视为更新")
 	}
 	epAdded := []playlistSignature{
 		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"01","link":"http://a/1.m3u8"},{"episode":"02","link":"http://a/2.m3u8"},{"episode":"03","link":"http://a/3.m3u8"}]`},
 	}
-	if samePlaylistEpisodeStructure(left, epAdded) {
-		t.Fatal("增集应视为剧集结构变更")
+	if !playlistLastEpisodeChanged(left, epAdded) {
+		t.Fatal("增集（最后一集 02→03）应视为更新")
+	}
+	// 集数回退（02→01）：用户要求「不一样算更新」
+	epRegressed := []playlistSignature{
+		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"01","link":"http://a/1.m3u8"}]`},
+	}
+	if !playlistLastEpisodeChanged(left, epRegressed) {
+		t.Fatal("集数回退（最后一集 02→01）应视为更新")
+	}
+	// 顺序变化：最后一项从 02 变 01 → 判为变化（实现依赖源站有序返回）
+	reordered := []playlistSignature{
+		{GroupIndex: 0, GroupName: "m3u8", Content: `[{"episode":"02","link":"http://a/2.m3u8"},{"episode":"01","link":"http://a/1.m3u8"}]`},
+	}
+	if !playlistLastEpisodeChanged(left, reordered) {
+		t.Fatal("顺序变化导致最后一项不同，应判为变化")
+	}
+	// 新增线路 → 变化
+	twoLines := append(append([]playlistSignature{}, left...), playlistSignature{GroupIndex: 1, GroupName: "line2", Content: left[0].Content})
+	if !playlistLastEpisodeChanged(left, twoLines) {
+		t.Fatal("新增线路应视为更新")
+	}
+	// 线路消失 → 变化
+	if !playlistLastEpisodeChanged(twoLines, left) {
+		t.Fatal("线路消失应视为更新")
 	}
 	// diff：链接变化要写库但不 NotifyWorthy；增集 NotifyWorthy
 	existing := map[string][]playlistSignature{"k": left}
 	incomingLink := map[string][]playlistSignature{"k": linkOnly}
 	ch := diffPlaylistMovieKeys(existing, incomingLink, []string{"k"})
 	if len(ch) != 1 || ch[0].NotifyWorthy {
-		t.Fatalf("链接变化应写库且不通知: %+v", ch)
+		t.Fatalf("仅链接变化应写库且不通知: %+v", ch)
 	}
 	incomingEp := map[string][]playlistSignature{"k": epAdded}
 	ch2 := diffPlaylistMovieKeys(existing, incomingEp, []string{"k"})
 	if len(ch2) != 1 || !ch2[0].NotifyWorthy {
 		t.Fatalf("增集应写库且通知: %+v", ch2)
+	}
+	incomingRegressed := map[string][]playlistSignature{"k": epRegressed}
+	ch3 := diffPlaylistMovieKeys(existing, incomingRegressed, []string{"k"})
+	if len(ch3) != 1 || !ch3[0].NotifyWorthy {
+		t.Fatalf("回退应写库且通知: %+v", ch3)
 	}
 }
 
@@ -299,45 +335,8 @@ func TestSharedKeyMultiEntryNoFalseNotify(t *testing.T) {
 	}
 }
 
-// TestPlaylistStructureGrew 仅「新增集数/新增线路」视为值得通知的结构变化；
-// 集数相同（顺序/链接变化）与集数回退（源站抖动）都不是新增。
-func TestPlaylistStructureGrew(t *testing.T) {
-	sig := func(labels ...string) playlistSignature {
-		content := make([]model.MovieUrlInfo, 0, len(labels))
-		for _, l := range labels {
-			content = append(content, model.MovieUrlInfo{Episode: l, Link: "http://a/1.m3u8"})
-		}
-		data, _ := json.Marshal(content)
-		return playlistSignature{GroupIndex: 0, GroupName: "m3u8", Content: string(data)}
-	}
-
-	ep16 := []playlistSignature{sig("第01集", "第02集", "第03集", "第04集", "第05集", "第06集", "第07集", "第08集", "第09集", "第10集", "第11集", "第12集", "第13集", "第14集", "第15集", "第16集")}
-	ep18 := []playlistSignature{sig("第01集", "第02集", "第03集", "第04集", "第05集", "第06集", "第07集", "第08集", "第09集", "第10集", "第11集", "第12集", "第13集", "第14集", "第15集", "第16集", "第17集", "第18集")}
-
-	if !playlistStructureGrew(ep16, ep18) {
-		t.Fatal("16→18 应视为新增集数")
-	}
-	if playlistStructureGrew(ep18, ep16) {
-		t.Fatal("18→16 集数回退不应视为新增")
-	}
-	// 集数相同但顺序打乱 / 链接变化 → 不是新增
-	reordered := []playlistSignature{sig("第16集", "第15集", "第14集", "第13集", "第12集", "第11集", "第10集", "第09集", "第08集", "第07集", "第06集", "第05集", "第04集", "第03集", "第02集", "第01集")}
-	if playlistStructureGrew(ep16, reordered) {
-		t.Fatal("集数相同仅顺序变化不应视为新增")
-	}
-	// 新增线路
-	twoLines := append(append([]playlistSignature{}, ep16...), playlistSignature{GroupIndex: 1, GroupName: "line2", Content: ep16[0].Content})
-	if !playlistStructureGrew(ep16, twoLines) {
-		t.Fatal("新增线路应视为结构变化")
-	}
-	// 线路消失 → 回退
-	if playlistStructureGrew(twoLines, ep16) {
-		t.Fatal("线路消失不应视为新增")
-	}
-}
-
-// TestDiffPlaylistMovieKeysGrowthRegression 集数新增 → 通知且写库；
-// 集数回退 → 不通知且 SkipWrite（保护已存最大集数）；集数相同仅顺序变化 → 写库但不通知。
+// TestDiffPlaylistMovieKeysGrowthRegression 集数新增/回退 → 通知且写库；
+// 集数相同仅顺序/链接变化 → 写库但不通知。
 func TestDiffPlaylistMovieKeysGrowthRegression(t *testing.T) {
 	content := func(labels ...string) string {
 		urls := make([]model.MovieUrlInfo, 0, len(labels))
@@ -353,23 +352,33 @@ func TestDiffPlaylistMovieKeysGrowthRegression(t *testing.T) {
 
 	// 16 → 18：通知 + 写库
 	ch := diffPlaylistMovieKeys(map[string][]playlistSignature{"k": ep16}, map[string][]playlistSignature{"k": ep18}, []string{"k"})
-	if len(ch) != 1 || !ch[0].NotifyWorthy || ch[0].SkipWrite {
+	if len(ch) != 1 || !ch[0].NotifyWorthy {
 		t.Fatalf("16→18 应通知且写库: %+v", ch)
 	}
-	// 18 → 16（源站抖动回退）：不通知 + 不写库
+	// 18 → 16（回退）：同样通知 + 写库（用户要求「不一样算更新」）
 	ch = diffPlaylistMovieKeys(map[string][]playlistSignature{"k": ep18}, map[string][]playlistSignature{"k": ep16}, []string{"k"})
-	if len(ch) != 1 || ch[0].NotifyWorthy || !ch[0].SkipWrite {
-		t.Fatalf("18→16 回退应不通知且不写库: %+v", ch)
+	if len(ch) != 1 || !ch[0].NotifyWorthy {
+		t.Fatalf("18→16 回退应通知且写库: %+v", ch)
 	}
-	// 16 → 16（仅顺序变化）：写库但不通知
+	// 16 → 16（顺序打乱，最后一项从 16 变 01）：判为变化 → 通知（依赖源站有序）
 	ch = diffPlaylistMovieKeys(map[string][]playlistSignature{"k": ep16}, map[string][]playlistSignature{"k": reordered}, []string{"k"})
-	if len(ch) != 1 || ch[0].NotifyWorthy || ch[0].SkipWrite {
-		t.Fatalf("集数相同仅顺序变化应写库不通知: %+v", ch)
+	if len(ch) != 1 || !ch[0].NotifyWorthy {
+		t.Fatalf("顺序变化导致最后一项不同应通知: %+v", ch)
+	}
+	// 16 → 16（仅第 1 集链接变化，最后一项仍为 16）：写库但不通知
+	midLinkChanged := []playlistSignature{{
+		GroupIndex: 0,
+		GroupName:  "m3u8",
+		Content:    strings.Replace(ep16[0].Content, `"link":"http://a/1.m3u8"`, `"link":"http://b/9.m3u8"`, 1),
+	}}
+	ch = diffPlaylistMovieKeys(map[string][]playlistSignature{"k": ep16}, map[string][]playlistSignature{"k": midLinkChanged}, []string{"k"})
+	if len(ch) != 1 || ch[0].NotifyWorthy {
+		t.Fatalf("最后一项相同仅链接变化应写库不通知: %+v", ch)
 	}
 }
 
-// TestMasterStructureGrew 主站「新增集数才通知」语义。
-func TestMasterStructureGrew(t *testing.T) {
+// TestMasterLastEpisodeChanged 主站「任一线路最后一集变化才通知」语义（回退也算）。
+func TestMasterLastEpisodeChanged(t *testing.T) {
 	detail := func(eps int) model.MovieDetail {
 		playlist := make([]model.MovieUrlInfo, 0, eps)
 		for i := 1; i <= eps; i++ {
@@ -377,19 +386,42 @@ func TestMasterStructureGrew(t *testing.T) {
 		}
 		return model.MovieDetail{PlayFrom: []string{"m3u8"}, PlayList: [][]model.MovieUrlInfo{playlist}}
 	}
-	if !masterStructureGrew(detail(16), detail(18)) {
-		t.Fatal("16→18 应视为新增集数")
+	if !masterLastEpisodeChanged(detail(16), detail(18)) {
+		t.Fatal("16→18 应视为最后一集变化")
 	}
-	if masterStructureGrew(detail(18), detail(16)) {
-		t.Fatal("18→16 回退不应视为新增")
+	if !masterLastEpisodeChanged(detail(18), detail(16)) {
+		t.Fatal("18→16 回退也应视为最后一集变化")
 	}
-	if masterStructureGrew(detail(16), detail(16)) {
-		t.Fatal("集数相同不应视为新增")
+	if masterLastEpisodeChanged(detail(16), detail(16)) {
+		t.Fatal("最后一集相同不应视为变化")
 	}
-	if masterStructureRegressed(detail(16), detail(18)) {
-		t.Fatal("16→18 不应视为回退")
+}
+
+// TestLastEpisodeLabel 最后一集 = 源站返回顺序的最后一个非空分集标签原文（不解析数字）。
+func TestLastEpisodeLabel(t *testing.T) {
+	u := func(ep string) model.MovieUrlInfo { return model.MovieUrlInfo{Episode: ep} }
+	// 电视剧递增集数
+	if got := lastEpisodeLabel([]model.MovieUrlInfo{u("第01集"), u("第02集"), u("第03集")}); got != "第03集" {
+		t.Fatalf("want 第03集, got %q", got)
 	}
-	if !masterStructureRegressed(detail(18), detail(16)) {
-		t.Fatal("18→16 应视为回退")
+	// 综艺日期型
+	if got := lastEpisodeLabel([]model.MovieUrlInfo{u("第20240107期"), u("第20260809期")}); got != "第20260809期" {
+		t.Fatalf("want 第20260809期, got %q", got)
+	}
+	// 综艺同日分片（上/中/纯享）：取源站顺序最后一个分片
+	if got := lastEpisodeLabel([]model.MovieUrlInfo{u("第20260810期上"), u("第20260810期中"), u("第20260810期中纯享")}); got != "第20260810期中纯享" {
+		t.Fatalf("want 第20260810期中纯享, got %q", got)
+	}
+	// 无数字标签（电影 HD/正片）
+	if got := lastEpisodeLabel([]model.MovieUrlInfo{u("正片"), u("HD")}); got != "HD" {
+		t.Fatalf("want HD, got %q", got)
+	}
+	// 跳过空标签，取最后一个非空
+	if got := lastEpisodeLabel([]model.MovieUrlInfo{u("第01集"), {Episode: "  "}, u("第02集")}); got != "第02集" {
+		t.Fatalf("want 第02集, got %q", got)
+	}
+	// 空列表
+	if got := lastEpisodeLabel(nil); got != "" {
+		t.Fatalf("空列表 want 空, got %q", got)
 	}
 }
