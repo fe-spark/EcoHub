@@ -78,12 +78,13 @@ export default function FilmListPageView() {
   const { message } = useAppMessage();
 
   const getFilmPage = useCallback(
-    async (p?: any) => {
+    async (p?: any, overrideParams?: any) => {
       setLoading(true);
       const pg = p || page;
+      const reqParams = overrideParams || params;
       try {
         const resp = await ApiGet("/manage/film/search/list", {
-          ...params,
+          ...reqParams,
           current: pg.current,
           pageSize: pg.pageSize,
         });
@@ -165,8 +166,35 @@ export default function FilmListPageView() {
       p.endTime = "";
     }
     setParams(p);
-    setPage({ ...page, current: 1 });
-    getFilmPage({ ...page, current: 1 });
+    const newPage = { ...page, current: 1 };
+    setPage(newPage);
+    void getFilmPage(newPage, p);
+  };
+
+  const onReset = () => {
+    const emptyParams = {
+      name: "",
+      pid: 0,
+      cid: 0,
+      plot: "",
+      area: "",
+      language: "",
+      year: "",
+      beginTime: "",
+      endTime: "",
+    };
+    setParams(emptyParams);
+    setClassId(0);
+    setDateRange(null);
+    setOptions((prev: any) => ({
+      ...prev,
+      Plot: [],
+      Area: [],
+      Language: [],
+    }));
+    const newPage = { ...page, current: 1 };
+    setPage(newPage);
+    void getFilmPage(newPage, emptyParams);
   };
 
   const handleUpdateSingle = useCallback(
@@ -410,8 +438,11 @@ export default function FilmListPageView() {
           onChange={(v) => setDateRange(v)}
           className={styles.dateRange}
         />
-        <Button type="primary" onClick={onSearch} className={styles.searchButton}>
+        <Button type="primary" icon={<SearchOutlined />} onClick={onSearch} className={styles.searchButton}>
           搜索
+        </Button>
+        <Button icon={<ReloadOutlined />} onClick={onReset}>
+          重置
         </Button>
       </Space>
 

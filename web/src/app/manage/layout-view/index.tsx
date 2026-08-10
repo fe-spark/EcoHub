@@ -95,14 +95,14 @@ const menuItems: MenuItem[] = [
     label: "素材中心",
   },
   {
-    key: "/manage/system",
-    icon: <SettingOutlined />,
-    label: "系统设置",
-  },
-  {
     key: "/manage/system/users",
     icon: <TeamOutlined />,
     label: "账号管理",
+  },
+  {
+    key: "/manage/system",
+    icon: <SettingOutlined />,
+    label: "系统设置",
   },
 ];
 

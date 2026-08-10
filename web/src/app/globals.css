@@ -55,8 +55,8 @@
     --public-surface-3: rgba(240, 243, 250, 0.88);
     --public-surface-hover: #ffffff;
     --public-border-1: rgba(250, 140, 22, 0.16);
-    --public-border-2: rgba(226, 232, 240, 0.9);
-    --public-border-3: rgba(203, 213, 225, 0.95);
+    --public-border-2: #e2e8f0;
+    --public-border-3: #cbd5e1;
     --public-text-1: #0f172a;
     --public-text-2: #1e293b;
     --public-text-3: #334155;
@@ -64,9 +64,9 @@
     --public-text-5: #475569;
     --public-text-6: #64748b;
     --public-on-accent: #ffffff;
-    --public-shadow-sm: 0 4px 14px rgba(250, 140, 22, 0.06), 0 2px 6px rgba(15, 23, 42, 0.04);
-    --public-shadow-md: 0 10px 28px rgba(250, 140, 22, 0.08), 0 4px 12px rgba(15, 23, 42, 0.05);
-    --public-shadow-lg: 0 20px 48px rgba(250, 140, 22, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+    --public-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.03);
+    --public-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.04);
+    --public-shadow-lg: 0 8px 20px rgba(15, 23, 42, 0.05);
     --public-overlay-main: linear-gradient(to top,
         rgba(244, 246, 252, 0.98) 0%,
         rgba(244, 246, 252, 0.8) 55%,
@@ -127,8 +127,8 @@ html[data-theme="light"] {
   --public-surface-3: rgba(240, 243, 250, 0.88);
   --public-surface-hover: #ffffff;
   --public-border-1: rgba(250, 140, 22, 0.16);
-  --public-border-2: rgba(226, 232, 240, 0.9);
-  --public-border-3: rgba(203, 213, 225, 0.95);
+  --public-border-2: #e2e8f0;
+  --public-border-3: #cbd5e1;
   --public-text-1: #0f172a;
   --public-text-2: #1e293b;
   --public-text-3: #334155;
@@ -136,9 +136,9 @@ html[data-theme="light"] {
   --public-text-5: #475569;
   --public-text-6: #64748b;
   --public-on-accent: #ffffff;
-  --public-shadow-sm: 0 4px 14px rgba(250, 140, 22, 0.06), 0 2px 6px rgba(15, 23, 42, 0.04);
-  --public-shadow-md: 0 10px 28px rgba(250, 140, 22, 0.08), 0 4px 12px rgba(15, 23, 42, 0.05);
-  --public-shadow-lg: 0 20px 48px rgba(250, 140, 22, 0.12), 0 8px 24px rgba(15, 23, 42, 0.08);
+  --public-shadow-sm: 0 2px 6px rgba(15, 23, 42, 0.04);
+  --public-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.06);
+  --public-shadow-lg: 0 8px 20px rgba(15, 23, 42, 0.08);
   --public-overlay-main: linear-gradient(to top,
       rgba(244, 246, 252, 0.98) 0%,
       rgba(244, 246, 252, 0.8) 55%,
@@ -236,13 +236,13 @@ a {
 html[data-theme="light"] {
   --ant-color-bg-container: #ffffff;
   --ant-color-bg-elevated: #ffffff;
-  --ant-color-bg-layout: #f8fafc;
+  --ant-color-bg-layout: #f4f6fc;
 }
 
 html[data-theme="light"] .ant-card {
   background-color: #ffffff !important;
   border: 1px solid #e2e8f0 !important;
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.05), 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05), 0 1px 2px rgba(15, 23, 42, 0.03) !important;
 }
 
 html[data-theme="dark"] .ant-card {

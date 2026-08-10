@@ -128,7 +128,7 @@ export default function CollectSourceCard({
             <Select
               size="small"
               value={record.cd}
-              disabled={isRunning}
+              disabled={isRunning || !record.state}
               style={{ width: "100%" }}
               options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
               onChange={(value) => {
@@ -159,14 +159,19 @@ export default function CollectSourceCard({
               </Button>
             </Popconfirm>
           ) : (
-            <Button
-              type="primary"
-              icon={<PoweroffOutlined />}
-              onClick={() => onStartTask(record)}
-              className={styles.actionPrimary}
-            >
-              开始采集
-            </Button>
+            <Tooltip title={!record.state ? "该采集站已被禁用，无法发起采集" : undefined}>
+              <span>
+                <Button
+                  type="primary"
+                  icon={<PoweroffOutlined />}
+                  onClick={() => onStartTask(record)}
+                  disabled={!record.state}
+                  className={styles.actionPrimary}
+                >
+                  开始采集
+                </Button>
+              </span>
+            </Tooltip>
           )}
           <Tooltip title="编辑采集站">
             <Button icon={<EditOutlined />} onClick={() => onEditSource(record.id)} />

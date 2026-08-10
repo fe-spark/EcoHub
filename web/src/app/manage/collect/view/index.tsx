@@ -540,6 +540,10 @@ export default function CollectManagePageView() {
   };
 
   const startTask = async (record: FilmSource) => {
+    if (!record.state) {
+      message.warning("该采集站已被禁用，无法发起采集");
+      return;
+    }
     if (isActiveCollectStatus(record.progress?.status)) {
       message.warning("该采集站已在采集中");
       return;

@@ -32,6 +32,7 @@ import {
 
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
@@ -347,9 +348,18 @@ export default function BannersPageView() {
       title: "影片封面",
       dataIndex: "picture",
       key: "picture",
-      align: "left" as const,
+      align: "center" as const,
       render: (src: string) => (
-        <AntImage src={src} height={50} style={{ objectFit: "cover" }} />
+        <div style={{ display: "flex", justifyContent: "center" }}>
+          <AntImage 
+            src={src || FALLBACK_IMG} 
+            width={48}
+            height={64} 
+            style={{ objectFit: "cover", background: "var(--public-surface-3)", borderRadius: 4 }} 
+            fallback={FALLBACK_IMG}
+            placeholder={<div style={{ width: '100%', height: '100%', background: 'var(--public-surface-3)', borderRadius: 4 }} />}
+          />
+        </div>
       ),
     },
     {
@@ -422,10 +432,12 @@ export default function BannersPageView() {
           <Flex gap={16} align="flex-start">
             <div style={{ flexShrink: 0 }}>
               <AntImage
-                src={previewPicture}
+                src={previewPicture || FALLBACK_IMG}
                 width={96}
                 height={132}
-                style={{ objectFit: "cover", borderRadius: 8 }}
+                style={{ objectFit: "cover", borderRadius: 8, background: "var(--public-surface-3)" }}
+                fallback={FALLBACK_IMG}
+                placeholder={<div style={{ width: '100%', height: '100%', background: 'var(--public-surface-3)', borderRadius: 8 }} />}
               />
             </div>
             <Space
@@ -534,10 +546,12 @@ export default function BannersPageView() {
       {previewPicture && (
         <Card size="small" title="影片封面预览" style={{ borderRadius: 12 }}>
           <AntImage
-            src={previewPicture}
+            src={previewPicture || FALLBACK_IMG}
             width={160}
             height={220}
-            style={{ objectFit: "cover", borderRadius: 8 }}
+            style={{ objectFit: "cover", borderRadius: 8, background: "var(--public-surface-3)" }}
+            fallback={FALLBACK_IMG}
+            placeholder={<div style={{ width: '100%', height: '100%', background: 'var(--public-surface-3)', borderRadius: 8 }} />}
           />
         </Card>
       )}

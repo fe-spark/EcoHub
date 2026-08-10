@@ -2,7 +2,13 @@ import React, { useCallback, useMemo, useRef } from "react";
 import { Button, Empty, Space, Switch, Table, Tag, Typography, Card } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { HolderOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  FolderOpenOutlined,
+  HolderOutlined,
+  ReloadOutlined,
+  SaveOutlined,
+  SubnodeOutlined,
+} from "@ant-design/icons";
 import {
   DndContext,
   PointerSensor,
@@ -51,7 +57,6 @@ function SortableTableRow(props: React.HTMLAttributes<HTMLTableRowElement> & { "
     ...props.style,
     transform: CSS.Translate.toString(transform),
     transition,
-    cursor: "move",
     ...(isDragging ? { position: "relative", zIndex: 1 } : {}),
   };
 
@@ -134,52 +139,99 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     {
       title: "排序",
       key: "drag",
-      width: 72,
+      width: 60,
       align: "center",
-      render: () => <HolderOutlined className={styles.dragHandle} />,
+      render: () => <HolderOutlined className={styles.dragHandle} title="按住拖拽排序" />,
     },
     {
       title: "ID",
       dataIndex: "id",
-      width: 90,
+      width: 70,
       align: "center",
-      render: (value: number) => <Typography.Text type="secondary">{value}</Typography.Text>,
-    },
-    {
-      ...Table.EXPAND_COLUMN,
-      width: 48,
+      render: (value: number) => (
+        <Typography.Text type="secondary" style={{ fontSize: 12, color: "#8c8c8c" }}>
+          #{value}
+        </Typography.Text>
+      ),
     },
     {
       title: "分类名称",
       dataIndex: "name",
-      render: (value: string, record) => (
-        <Space size={[8, 4]} wrap>
-          <Typography.Text strong>{value}</Typography.Text>
-          <Tag color={record.pid === 0 ? "gold" : "blue"}>{record.pid === 0 ? "一级分类" : "二级分类"}</Tag>
-          {record.show ? <Tag color="success">显示</Tag> : <Tag color="warning">隐藏</Tag>}
-        </Space>
-      ),
+      render: (value: string, record) => {
+        const isRoot = record.pid === 0;
+        const subCount = record.children?.length || 0;
+        return (
+          <Space size={8} align="center" wrap>
+            {isRoot ? (
+              <FolderOpenOutlined style={{ color: "#fa8c16", fontSize: 16 }} />
+            ) : (
+              <SubnodeOutlined style={{ color: "#1677ff", fontSize: 14 }} />
+            )}
+            <Typography.Text strong={isRoot} style={{ fontSize: isRoot ? 15 : 14 }}>
+              {value}
+            </Typography.Text>
+            {isRoot ? (
+              <Tag color="gold" bordered={false} style={{ fontWeight: 600 }}>
+                一级主类
+              </Tag>
+            ) : (
+              <Tag color="blue" bordered={false}>
+                二级分类
+              </Tag>
+            )}
+            {isRoot && subCount > 0 ? (
+              <Tag color="default" bordered={false} style={{ fontSize: 12 }}>
+                含 {subCount} 个子类
+              </Tag>
+            ) : null}
+            {record.show ? (
+              <Tag color="success" bordered={false}>
+                显示
+              </Tag>
+            ) : (
+              <Tag color="warning" bordered={false}>
+                隐藏
+              </Tag>
+            )}
+          </Space>
+        );
+      },
     },
     {
-      title: "父级",
+      title: "层级关系",
       dataIndex: "pid",
-      width: 90,
+      width: 110,
       align: "center",
-      render: (value: number) => (value === 0 ? <Typography.Text type="secondary">-</Typography.Text> : value),
+      render: (value: number) =>
+        value === 0 ? (
+          <Typography.Text type="secondary">根分类</Typography.Text>
+        ) : (
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            父级 ID: {value}
+          </Typography.Text>
+        ),
     },
     {
-      title: "序号",
+      title: "排序序号",
       dataIndex: "sort",
       width: 90,
       align: "center",
-      render: (value?: number) => value || 0,
+      render: (value?: number) => (
+        <Typography.Text type="secondary">{value || 0}</Typography.Text>
+      ),
     },
     {
-      title: "子分类",
+      title: "子项数",
       dataIndex: "children",
-      width: 100,
+      width: 90,
       align: "center",
-      render: (children?: FilmClassNode[]) => children?.length || 0,
+      render: (children?: FilmClassNode[], record?: FilmClassNode) => {
+        if (record?.pid === 0) {
+          const count = children?.length || 0;
+          return <Tag color={count > 0 ? "processing" : "default"}>{count}</Tag>;
+        }
+        return <Typography.Text type="secondary">-</Typography.Text>;
+      },
     },
     {
       title: "显示",
@@ -224,6 +276,33 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
             size="middle"
             scroll={{ x: "max-content" }}
             locale={{ emptyText: <Empty description="暂无分类数据" /> }}
+            rowClassName={(record) => {
+              const isExpandable = (record.children?.length || 0) > 0;
+              const levelClass = record.pid === 0 ? styles.level1Row : styles.level2Row;
+              return `${levelClass} ${isExpandable ? styles.expandableRow : ""}`;
+            }}
+            onRow={(record) => ({
+              onClick: (event: React.MouseEvent) => {
+                const target = event.target as HTMLElement;
+                if (
+                  target.closest(".ant-switch") ||
+                  target.closest(".ant-btn") ||
+                  target.closest("button") ||
+                  target.closest("input") ||
+                  target.closest(`.${styles.dragHandle}`) ||
+                  target.closest(".ant-table-row-expand-icon")
+                ) {
+                  return;
+                }
+                if ((record.children?.length || 0) > 0) {
+                  const isExpanded = expandedKeys.includes(record.id);
+                  const nextKeys = isExpanded
+                    ? expandedKeys.filter((k) => k !== record.id)
+                    : [...expandedKeys, record.id];
+                  onExpand(nextKeys);
+                }
+              },
+            })}
             title={() => (
               <div className={styles.tableHeader}>
                 <div className={styles.tableTitle}>分类管理</div>
@@ -244,6 +323,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
               expandedRowKeys: expandedKeys,
               rowExpandable: (record) => (record.children?.length || 0) > 0,
               onExpandedRowsChange: onExpand,
+              expandIconColumnIndex: 2,
             }}
           />
         </SortableContext>

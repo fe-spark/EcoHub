@@ -15,6 +15,7 @@ import {
   Card,
 } from "antd";
 import {
+  SearchOutlined,
   ReloadOutlined,
   DeleteOutlined,
   WarningOutlined,
@@ -79,6 +80,7 @@ export default function FailureRecordPageView() {
     beginTime: "",
     endTime: "",
   });
+  const [dateRange, setDateRange] = useState<any>(null);
   const [options, setOptions] = useState<any>({
     origin: [],
     status: [],
@@ -86,12 +88,13 @@ export default function FailureRecordPageView() {
   const { message } = useAppMessage();
 
   const getRecords = useCallback(
-    async (p?: any) => {
+    async (p?: any, overrideParams?: any) => {
       setLoading(true);
       const pg = p || page;
+      const reqParams = overrideParams || params;
       try {
         const resp = await ApiGet("/manage/collect/record/list", {
-          ...params,
+          ...reqParams,
           current: pg.current,
           pageSize: pg.pageSize,
         });
@@ -285,8 +288,10 @@ export default function FailureRecordPageView() {
         />
         <RangePicker
           showTime
+          value={dateRange}
           className={styles.dateRange}
           onChange={(dates) => {
+            setDateRange(dates);
             if (dates && dates[0] && dates[1]) {
               setParams({
                 ...params,
@@ -300,10 +305,33 @@ export default function FailureRecordPageView() {
         />
         <Button
           type="primary"
-          onClick={() => getRecords()}
+          icon={<SearchOutlined />}
+          onClick={() => {
+            const newPage = { ...page, current: 1 };
+            setPage(newPage);
+            void getRecords(newPage, params);
+          }}
           className={styles.searchButton}
         >
-          查询
+          搜索
+        </Button>
+        <Button
+          icon={<ReloadOutlined />}
+          onClick={() => {
+            const defaultParams = {
+              originId: "",
+              status: -1,
+              beginTime: "",
+              endTime: "",
+            };
+            setParams(defaultParams);
+            setDateRange(null);
+            const newPage = { ...page, current: 1 };
+            setPage(newPage);
+            void getRecords(newPage, defaultParams);
+          }}
+        >
+          重置
         </Button>
       </Space>
 

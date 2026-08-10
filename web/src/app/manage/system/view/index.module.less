@@ -27,44 +27,56 @@ html[data-theme="dark"] .panelCard {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 8px;
-  background: var(--ant-color-bg-container);
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
+  gap: 24px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  background: transparent;
   overflow-x: auto;
 }
 
-html[data-theme="dark"] .tabBar {
-  border-color: rgba(255, 255, 255, 0.18);
-}
-
 .tabItem {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 38px;
-  padding: 0 14px;
+  height: 42px;
+  padding: 0 4px;
   border: none;
-  border-radius: 8px;
   background: transparent;
   color: var(--ant-color-text-secondary);
   font-size: 14px;
-  line-height: 1;
+  font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease;
 
   &:hover {
     color: #fa8c16;
-    background: rgba(250, 140, 22, 0.08);
+  }
+
+  &::after {
+    content: "";
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: #fa8c16;
+    border-radius: 2px 2px 0 0;
+    opacity: 0;
+    transform: scaleX(0.7);
+    transition: all 0.2s ease;
   }
 }
 
 .tabItemActive {
   color: #fa8c16 !important;
   font-weight: 600;
-  background: rgba(250, 140, 22, 0.12) !important;
+
+  &::after {
+    opacity: 1;
+    transform: scaleX(1);
+  }
 }
 
 .tabIcon {
