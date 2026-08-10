@@ -26,6 +26,16 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  async headers() {
+    // 让浏览器发送系统主题提示（Sec-CH-Prefers-Color-Scheme），
+    // SSR 才能对"跟随系统"用户直接输出正确主题，避免首屏闪烁
+    return [
+      {
+        source: "/:path*",
+        headers: [{ key: "Accept-CH", value: "Sec-CH-Prefers-Color-Scheme" }],
+      },
+    ];
+  },
   turbopack: {
     rules: {
       "*.module.less": {
