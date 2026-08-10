@@ -1,3 +1,38 @@
+# v1.1.5-beta.18
+
+> **预发布（prerelease）**：采集档位按 CPU 自动选型、Telegram 代理变量收敛为 `TG_PROXY`、更新列表判定统一为「最后一集」，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.18`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.18`
+
+## 相对 beta.17
+
+- **采集档位自动选型（`COLLECT_PROFILE`）**：
+  - 采集写阀与并发不再固定 2C2G 速度档，启动时按服务器 CPU 核数自动选档：≤2 核 `light`、3–7 核 `standard`、≥8 核 `high`
+  - 可选 `COLLECT_PROFILE=auto|light|standard|high` 手动覆盖；原写阀/并发环境变量（`COLLECT_WRITE_*`、`COLLECT_PAGE_*`、`COLLECT_SOURCE_CONCURRENCY` 等）移除，无需再手动调参
+  - compose 与 `.env.example` 同步收敛
+- **Telegram 代理变量改名**：`TELEGRAM_PROXY` → `TG_PROXY`（仍优先于通用 `HTTPS_PROXY` 等）；错误提示、测试与文档同步
+- **更新列表判定收敛为「最后一集」**：
+  - 主站与附属站进更新列表的判定，从「新增集数/新增线路、回退不通知」改为「任一线路最后一项分集标签有变化（含新增/回退/顺序变化）」
+  - 不解析数字，按源站返回顺序取最后一个非空分集标签，剧（`第01集…`）、综艺（`日期期`）、电影（`HD/正片`）通用
+  - 取舍：源站/CDN 集数抖动（如 16↔18）会随批次反复上报同一 mid，属预期行为
+- **前台视觉微调**：影视卡片亮色主题占位底色加深、加载 shimmer 更清晰；首页 Hero 亮色专属样式移除，统一深色视觉
+
+## 部署（beta.18）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.18
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.18
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.17
 
 > **预发布（prerelease）**：首页轮播管理移入内容管理、后端初始化不再维护轮播配置、功能文案统一为「首页轮播」，**不会**覆盖 `:latest`。
