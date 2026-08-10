@@ -82,7 +82,7 @@ func TestSanitizeTelegramErr(t *testing.T) {
 	if strings.Contains(got, "AAFakeToken") {
 		t.Fatalf("token fragment leaked: %s", got)
 	}
-	if !strings.Contains(got, "TELEGRAM_PROXY") {
+	if !strings.Contains(got, "TG_PROXY") {
 		t.Fatalf("expected proxy hint: %s", got)
 	}
 	got2 := sanitizeTelegramErr(raw, token, "http://127.0.0.1:7890").Error()
