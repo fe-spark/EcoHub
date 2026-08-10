@@ -8,42 +8,63 @@
   min-height: 0;
 }
 
+.panelCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  :global(.ant-card-body) {
+    padding: 16px;
+  }
+}
+
+html[data-theme="dark"] .panelCard {
+  border-color: rgba(255, 255, 255, 0.18) !important;
+}
+
 .tabBar {
   flex: none;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 0 4px;
-  border-bottom: 1px solid var(--ant-color-border-secondary);
+  padding: 4px 8px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
   overflow-x: auto;
+}
+
+html[data-theme="dark"] .tabBar {
+  border-color: rgba(255, 255, 255, 0.18);
 }
 
 .tabItem {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 46px;
-  padding: 0 16px;
+  height: 38px;
+  padding: 0 14px;
   border: none;
+  border-radius: 8px;
   background: transparent;
   color: var(--ant-color-text-secondary);
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -1px;
   white-space: nowrap;
-  transition: color 0.2s ease;
+  transition: all 0.2s ease;
 
   &:hover {
-    color: var(--ant-color-primary);
+    color: #fa8c16;
+    background: rgba(250, 140, 22, 0.08);
   }
 }
 
 .tabItemActive {
-  color: var(--ant-color-primary);
+  color: #fa8c16 !important;
   font-weight: 600;
-  border-bottom-color: var(--ant-color-primary);
+  background: rgba(250, 140, 22, 0.12) !important;
 }
 
 .tabIcon {

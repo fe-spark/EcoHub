@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography } from "antd";
+import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography, Card } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -241,62 +241,65 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
 
   return (
     <div className={styles.ruleWorkspace}>
-      <Space size={[8, 8]} wrap className={styles.filterBar}>
-        <Select
-          value={ruleGroup}
-          options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
-          onChange={(value) => setRuleGroup(value)}
-          className={styles.groupSelect}
-        />
-        <Input
-          allowClear
-          placeholder="搜索原始值、目标值或说明"
-          value={keyword}
-          onChange={(event) => setKeyword(event.target.value)}
-          onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}
-          className={styles.searchInput}
-        />
-        <Button type="primary" onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)} className={styles.searchButton}>
-          搜索
-        </Button>
-      </Space>
+      <Card className={styles.panelCard}>
+        <Space size={[8, 8]} wrap className={styles.filterBar} style={{ marginBottom: 16 }}>
+          <Select
+            value={ruleGroup}
+            options={CATEGORY_GROUPS.map((group) => ({ value: group, label: resolveGroupLabel(group) }))}
+            onChange={(value) => setRuleGroup(value)}
+            className={styles.groupSelect}
+          />
+          <Input
+            allowClear
+            placeholder="搜索原始值、目标值或说明"
+            value={keyword}
+            onChange={(event) => setKeyword(event.target.value)}
+            onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}
+            className={styles.searchInput}
+          />
+          <Button type="primary" onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)} className={styles.searchButton}>
+            搜索
+          </Button>
+        </Space>
 
-      <Table<MappingRuleRecord>
-        rowKey="id"
-        columns={ruleColumns}
-        dataSource={rules}
-        loading={rulesLoading}
-        size="middle"
-        pagination={false}
-        scroll={{ x: "max-content" }}
-        title={() => (
-          <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>分类规则</div>
-            <Space size={[8, 8]} wrap className={styles.tableActions}>
-              <Tag color="processing">一级 {ruleTotals[ROOT_GROUP] || 0} / 二级 {ruleTotals[SUB_GROUP] || 0}</Tag>
-              <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()])}>
-                刷新规则
-              </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
-                新增规则
-              </Button>
-            </Space>
-          </div>
-        )}
-        footer={() => (
-          <div className={styles.pagination}>
-            <Pagination
-              current={paging.current}
-              pageSize={paging.pageSize}
-              total={paging.total}
-              showSizeChanger
-              pageSizeOptions={[10, 20, 50, 100, 500]}
-              showTotal={(total) => `共 ${total} 条`}
-              onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup)}
-            />
-          </div>
-        )}
-      />
+        <Table<MappingRuleRecord>
+          bordered
+          rowKey="id"
+          columns={ruleColumns}
+          dataSource={rules}
+          loading={rulesLoading}
+          size="middle"
+          pagination={false}
+          scroll={{ x: "max-content" }}
+          title={() => (
+            <div className={styles.tableHeader}>
+              <div className={styles.tableTitle}>分类规则</div>
+              <Space size={[8, 8]} wrap className={styles.tableActions}>
+                <Tag color="processing">一级 {ruleTotals[ROOT_GROUP] || 0} / 二级 {ruleTotals[SUB_GROUP] || 0}</Tag>
+                <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()])}>
+                  刷新规则
+                </Button>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+                  新增规则
+                </Button>
+              </Space>
+            </div>
+          )}
+          footer={() => (
+            <div className={styles.pagination}>
+              <Pagination
+                current={paging.current}
+                pageSize={paging.pageSize}
+                total={paging.total}
+                showSizeChanger
+                pageSizeOptions={[10, 20, 50, 100, 500]}
+                showTotal={(total) => `共 ${total} 条`}
+                onChange={(page, pageSize) => void fetchRules(page, pageSize, keyword, ruleGroup)}
+              />
+            </div>
+          )}
+        />
+      </Card>
 
       <RuleEditorModal
         open={editorVisible}

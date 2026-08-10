@@ -114,12 +114,11 @@ export default function CollectOverview() {
   return (
     <div className={styles.overviewGrid}>
       <Card
-        size="small"
         title="运行概览"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
         extra={
-          <Link href="/manage/collect" style={{ fontSize: 13 }}>
+          <Link href="/manage/collect" style={{ fontSize: 13, color: "#fa8c16" }}>
             采集中心
           </Link>
         }
@@ -159,7 +158,6 @@ export default function CollectOverview() {
       </Card>
 
       <Card
-        size="small"
         title="当前主采集站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}

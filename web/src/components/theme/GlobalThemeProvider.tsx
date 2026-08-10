@@ -106,6 +106,8 @@ export default function GlobalThemeProvider({
     const baseToken = isDark
       ? {
           colorPrimary: DEFAULT_PRIMARY_COLOR,
+          colorBorderSecondary: "rgba(255, 255, 255, 0.16)",
+          colorBorder: "rgba(255, 255, 255, 0.2)",
           fontFamily,
         }
       : {
@@ -151,13 +153,21 @@ export default function GlobalThemeProvider({
           : {}),
         Card: {
           colorBgContainer: isDark ? "rgba(255, 255, 255, 0.03)" : "#ffffff",
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.08)" : "#e2e8f0",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#cbd5e1",
+          colorBorder: isDark ? "rgba(255, 255, 255, 0.18)" : "#cbd5e1",
+        },
+        Table: {
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          borderColor: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          headerBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#fafafa",
+          rowHoverBg: isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
         },
         Menu: {
           itemBg: "transparent",
-          itemSelectedBg: isDark ? "rgba(250, 140, 22, 0.16)" : "#fff7e6",
-          itemSelectedColor: DEFAULT_PRIMARY_COLOR,
-          itemHoverBg: isDark ? "rgba(255, 255, 255, 0.05)" : "rgba(250, 140, 22, 0.08)",
+          itemSelectedBg: isDark ? "rgba(250, 140, 22, 0.28)" : "#ffe7ba",
+          itemSelectedColor: isDark ? "#ffa940" : "#d46b08",
+          itemHoverBg: isDark ? "rgba(250, 140, 22, 0.12)" : "rgba(250, 140, 22, 0.12)",
+          itemHoverColor: DEFAULT_PRIMARY_COLOR,
         },
       },
     };

@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Button, Empty, Space, Switch, Table, Tag, Typography } from "antd";
+import { Button, Empty, Space, Switch, Table, Tag, Typography, Card } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { HolderOutlined, ReloadOutlined, SaveOutlined } from "@ant-design/icons";
@@ -214,6 +214,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       >
         <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
           <Table<FilmClassNode>
+            bordered
             rowKey="id"
             columns={columns}
             dataSource={classTree}

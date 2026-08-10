@@ -551,35 +551,33 @@ export default function BannersPageView() {
         description="维护首页和推荐位所用的轮播内容，统一管理排序、轮播图与影片绑定信息。"
       />
 
-      <Card
-        size="small"
-        title={
-          <Space>
-            <PictureOutlined style={{ color: "#1677ff" }} />
-            <span>轮播列表</span>
-          </Space>
-        }
-        extra={
-          <Button
-            type="primary"
-            icon={<PlusCircleOutlined />}
-            onClick={openCreateEditor}
-          >
-            添加轮播
-          </Button>
-        }
-        className={styles.tableCard}
-      >
-        <Table
-          dataSource={banners}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          size="middle"
-          pagination={false}
-          scroll={{ x: "max-content" }}
-        />
-      </Card>
+      <Table
+        bordered
+        dataSource={banners}
+        columns={columns}
+        rowKey="id"
+        loading={loading}
+        size="middle"
+        pagination={false}
+        scroll={{ x: "max-content" }}
+        title={() => (
+          <div className={styles.tableHeader}>
+            <div className={styles.tableTitle}>
+              <PictureOutlined style={{ color: "#fa8c16", marginRight: 8 }} />
+              <span>轮播列表</span>
+            </div>
+            <div className={styles.tableActions}>
+              <Button
+                type="primary"
+                icon={<PlusCircleOutlined />}
+                onClick={openCreateEditor}
+              >
+                添加轮播
+              </Button>
+            </div>
+          </div>
+        )}
+      />
 
 
 
