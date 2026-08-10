@@ -61,11 +61,11 @@ func defaultTelegramTransport() *http.Transport {
 	}
 }
 
-// buildTelegramTransport 优先 TELEGRAM_PROXY，其次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY。
+// buildTelegramTransport 优先 TG_PROXY，其次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY。
 // 支持 http / https / socks5 代理。
 func buildTelegramTransport() (*http.Transport, string, error) {
 	proxyRaw := firstNonEmpty(
-		os.Getenv("TELEGRAM_PROXY"),
+		os.Getenv("TG_PROXY"),
 		os.Getenv("HTTPS_PROXY"),
 		os.Getenv("https_proxy"),
 		os.Getenv("HTTP_PROXY"),
@@ -255,7 +255,7 @@ func sanitizeTelegramErr(err error, token, proxyLabel string) error {
 			hint = "连接 Telegram API 超时"
 		}
 		if proxyLabel == "" {
-			return fmt.Errorf("%s（直连）。可设置 TELEGRAM_PROXY 后重启", hint)
+			return fmt.Errorf("%s（直连）。可设置 TG_PROXY 后重启", hint)
 		}
 		return fmt.Errorf("%s（代理 %s 不可用）", hint, proxyLabel)
 	}

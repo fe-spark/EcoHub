@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -40,16 +41,17 @@ const (
 	// MAXGoroutine 历史常量：单站分页 worker 默认值（优先用 CollectPageWorkers）。
 	MAXGoroutine = 6
 
-	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发）。
-	// 可通过环境变量覆盖（见 loadCollectRuntimeConfig）。
-	DefaultCollectWriteMaxInflight              = 3  // 写库事务并发（2 核可承受 3）
-	DefaultCollectWritePagesPerSec              = 24 // 稳态页/秒（主要吞吐闸）
-	DefaultCollectWriteBurstPages               = 8  // 突发，减少写阀空转
-	DefaultCollectWriteMaxPendingPagesPerSource = 48 // 单站写队列
+	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发），
+	// 同时作为运行时参数为 0 时的兜底默认值。实际档位按 CPU 核数自动选
+	// （见 resolveCollectProfile），可用 COLLECT_PROFILE 手动覆盖。
+	DefaultCollectWriteMaxInflight              = 3   // 写库事务并发（2 核可承受 3）
+	DefaultCollectWritePagesPerSec              = 24  // 稳态页/秒（主要吞吐闸）
+	DefaultCollectWriteBurstPages               = 8   // 突发，减少写阀空转
+	DefaultCollectWriteMaxPendingPagesPerSource = 48  // 单站写队列
 	DefaultCollectWriteMaxPendingPagesGlobal    = 144 // 全局写队列
-	DefaultCollectPageWorkers                   = 6  // 单站分页 HTTP 并发
-	DefaultCollectPageWorkersSolo               = 10 // 仅 1 站在跑时提高页并发，吃满写阀
-	DefaultCollectSourceConcurrency             = 6  // 批量同时跑的站点数；0=不限制
+	DefaultCollectPageWorkers                   = 6   // 单站分页 HTTP 并发
+	DefaultCollectPageWorkersSolo               = 10  // 仅 1 站在跑时提高页并发，吃满写阀
+	DefaultCollectSourceConcurrency             = 6   // 批量同时跑的站点数；0=不限制
 	DefaultCollectStatsFlushIntervalSec         = 5
 	DefaultCollectCacheFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
@@ -62,7 +64,7 @@ const (
 	FilmPictureAccess    = "/api/upload/pic/poster/"
 )
 
-// 采集写阀 / 并发 运行时参数（InitConfig 可从 env 覆盖）。
+// 采集写阀 / 并发 运行时参数（InitConfig 按 CPU 核数自动选档，见 resolveCollectProfile）。
 var (
 	// CollectWriteMaxInflight 全局同时进行的写库事务上限。
 	CollectWriteMaxInflight = DefaultCollectWriteMaxInflight
@@ -258,65 +260,96 @@ func InitConfig() {
 	loadCollectRuntimeConfig()
 }
 
-// loadCollectRuntimeConfig 从环境变量覆盖采集写阀/并发等参数（未设置则保留 2C2G 默认）。
-func loadCollectRuntimeConfig() {
-	CollectWriteMaxInflight = envIntPositive("COLLECT_WRITE_MAX_INFLIGHT", CollectWriteMaxInflight)
-	CollectWritePagesPerSec = envIntPositive("COLLECT_WRITE_PAGES_PER_SEC", CollectWritePagesPerSec)
-	CollectWriteBurstPages = envIntPositive("COLLECT_WRITE_BURST_PAGES", CollectWriteBurstPages)
-	CollectWriteMaxPendingPagesPerSource = envIntPositive("COLLECT_WRITE_PENDING_PER_SOURCE", CollectWriteMaxPendingPagesPerSource)
-	CollectWriteMaxPendingPagesGlobal = envIntPositive("COLLECT_WRITE_PENDING_GLOBAL", CollectWriteMaxPendingPagesGlobal)
-	CollectPageWorkers = envIntPositive("COLLECT_PAGE_WORKERS", CollectPageWorkers)
-	CollectPageWorkersSolo = envIntPositive("COLLECT_PAGE_WORKERS_SOLO", CollectPageWorkersSolo)
-	// 0 = 站点并发不限制（大机器可设 0）
-	CollectSourceConcurrency = envIntNonNegative("COLLECT_SOURCE_CONCURRENCY", CollectSourceConcurrency)
-	CollectStatsFlushIntervalSec = envIntPositive("COLLECT_STATS_FLUSH_INTERVAL_SEC", CollectStatsFlushIntervalSec)
-	CollectCacheFlushIntervalSec = envIntPositive("COLLECT_CACHE_FLUSH_INTERVAL_SEC", CollectCacheFlushIntervalSec)
-	CollectProgressRetainSec = envIntPositive("COLLECT_PROGRESS_RETAIN_SEC", CollectProgressRetainSec)
-	CollectProgressStaleSec = envIntPositive("COLLECT_PROGRESS_STALE_SEC", CollectProgressStaleSec)
-	if CollectPageWorkersSolo < CollectPageWorkers {
-		CollectPageWorkersSolo = CollectPageWorkers
+// collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。
+type collectProfile struct {
+	writeMaxInflight      int
+	writePagesPerSec      int
+	writeBurstPages       int
+	writePendingPerSource int
+	writePendingGlobal    int
+	pageWorkers           int
+	pageWorkersSolo       int
+	sourceConcurrency     int
+}
+
+// collectProfiles 档位数值表（light 与 Default* 兜底一致）。
+var collectProfiles = map[string]collectProfile{
+	"light": {
+		writeMaxInflight:      3,
+		writePagesPerSec:      24,
+		writeBurstPages:       8,
+		writePendingPerSource: 48,
+		writePendingGlobal:    144,
+		pageWorkers:           6,
+		pageWorkersSolo:       10,
+		sourceConcurrency:     6,
+	},
+	"standard": {
+		writeMaxInflight:      6,
+		writePagesPerSec:      48,
+		writeBurstPages:       12,
+		writePendingPerSource: 96,
+		writePendingGlobal:    288,
+		pageWorkers:           10,
+		pageWorkersSolo:       16,
+		sourceConcurrency:     8,
+	},
+	"high": {
+		writeMaxInflight:      10,
+		writePagesPerSec:      96,
+		writeBurstPages:       20,
+		writePendingPerSource: 160,
+		writePendingGlobal:    480,
+		pageWorkers:           16,
+		pageWorkersSolo:       24,
+		sourceConcurrency:     12,
+	},
+}
+
+// resolveCollectProfile 解析采集档位：COLLECT_PROFILE 显式指定（auto|light|standard|high）；
+// auto 或未设置时按 CPU 核数自动选档（≤2=light，3-7=standard，≥8=high）。
+func resolveCollectProfile() (collectProfile, string) {
+	name := strings.ToLower(strings.TrimSpace(os.Getenv("COLLECT_PROFILE")))
+	if name == "" || name == "auto" {
+		name = ""
+	} else if p, ok := collectProfiles[name]; ok {
+		return p, name
+	} else {
+		fmt.Printf("[Config] COLLECT_PROFILE=%q 无效，回退自动选档\n", name)
+		name = ""
 	}
+	switch n := runtime.NumCPU(); {
+	case n <= 2:
+		return collectProfiles["light"], "light"
+	case n >= 8:
+		return collectProfiles["high"], "high"
+	default:
+		return collectProfiles["standard"], "standard"
+	}
+}
+
+// loadCollectRuntimeConfig 按服务器资源自动选择采集写阀/并发档位（无环境变量配置）。
+func loadCollectRuntimeConfig() {
+	p, name := resolveCollectProfile()
+	CollectWriteMaxInflight = p.writeMaxInflight
+	CollectWritePagesPerSec = p.writePagesPerSec
+	CollectWriteBurstPages = p.writeBurstPages
+	CollectWriteMaxPendingPagesPerSource = p.writePendingPerSource
+	CollectWriteMaxPendingPagesGlobal = p.writePendingGlobal
+	CollectPageWorkers = p.pageWorkers
+	CollectPageWorkersSolo = p.pageWorkersSolo
+	CollectSourceConcurrency = p.sourceConcurrency
 
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集(2C2G速度档) 写阀 inflight=%d pages/s=%d burst=%d pending=%d/%d | 页并发=%d(单站=%d) 站并发=%s | retain=%ds stale=%ds\n",
+	fmt.Printf("[Config] 采集档位=%s（CPU=%d核） 写阀 inflight=%d pages/s=%d burst=%d pending=%d/%d | 页并发=%d(单站=%d) 站并发=%s | retain=%ds stale=%ds\n",
+		name, runtime.NumCPU(),
 		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, CollectPageWorkersSolo, srcLimit,
 		CollectProgressRetainSec, CollectProgressStaleSec)
-}
-
-// envIntPositive 解析正整数环境变量；空/非法/≤0 时用 fallback。
-func envIntPositive(key string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n <= 0 {
-		return fallback
-	}
-	return n
-}
-
-// envIntNonNegative 允许 0（表示关闭限制）；空/非法/<0 时用 fallback。
-func envIntNonNegative(key string, fallback int) int {
-	raw := strings.TrimSpace(os.Getenv(key))
-	if raw == "" {
-		return fallback
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil || n < 0 {
-		return fallback
-	}
-	return n
-}
-
-// envInt 兼容旧调用：正整数。
-func envInt(key string, fallback int) int {
-	return envIntPositive(key, fallback)
 }
 
 // GetRootMysqlDsn 获取不带数据库名的 DSN，用于 CREATE DATABASE 等管理操作
