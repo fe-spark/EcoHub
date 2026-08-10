@@ -1,3 +1,36 @@
+# v1.1.5-beta.19
+
+> **预发布（prerelease）**：主题 SSR 首屏直出防闪烁、后台管理页亮暗主题适配与样式收敛，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.19`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.19`
+
+## 相对 beta.18
+
+- **主题首屏防闪烁（SSR 直出）**：
+  - 服务端按用户选择（cookie）与系统偏好（`Sec-CH-Prefers-Color-Scheme`）直接计算主题，`<html>` 预置 `data-theme` / `colorScheme`，首屏（含 antd 样式）即正确主题，不再水合后从深色切到浅色
+  - 水合前内联脚本同步设置主题，杜绝主题闪烁；主题选择（localStorage）同步写入 `app-theme` cookie，手动选择优先，未选择时跟随系统
+- **后台管理页亮暗主题适配与样式收敛**：
+  - antd Token 显式定义亮/暗：Table 表头背景与行 hover 主色高亮、Card 边框、Menu 选中与悬停态（亮色 `#ffe7ba` / `#d46b08`，暗色橙调高亮）
+  - 工作台「当前影视数据规模」统计卡片自绘重构（图标 + 数值网格卡片），弃用 antd Statistic
+  - 管理各页样式统一收敛为 CSS 变量规范：统一 12px 圆角、卡片边框/背景/阴影与页头样式（采集中心、轮播、定时任务、素材中心、影视、账号管理、系统设置、工作台与后台布局）
+  - 采集分类规则工作区（rule-workspace）布局重排
+
+## 部署（beta.19）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.19
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.19
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.18
 
 > **预发布（prerelease）**：采集档位按 CPU 自动选型、Telegram 代理变量收敛为 `TG_PROXY`、更新列表判定统一为「最后一集」，**不会**覆盖 `:latest`。
