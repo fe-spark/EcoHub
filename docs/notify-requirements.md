@@ -147,7 +147,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 
 - **Token**：任何错误信息（发送/回调/测试）不回传完整 Token；日志不输出 Token。
 - **白名单**：回调与指令均校验 Chat（数字 ID 或 `@username` 匹配配置列表）；回调缺 `Message/Chat` 直接拒绝。
-- **代理**：支持 `TELEGRAM_PROXY`（优先）→ `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY`；协议 `http/https/socks5`；代理配置错误回退直连并打日志，不拖垮进程。
+- **代理**：支持 `TG_PROXY`（优先）→ `HTTPS_PROXY/HTTP_PROXY/ALL_PROXY`；协议 `http/https/socks5`；代理配置错误回退直连并打日志，不拖垮进程。
 - **超时重试**：API 调用超时 45s；5xx 重试一次（间隔 400ms），429 不重试直接报错。
 
 ### 3.7 异步与容错
@@ -235,7 +235,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 ## 8. 部署与配置
 
 - 服务启动时（`main.go`）调用 `EnsureBotPoller`：已保存 Token 则启动 Telegram 长轮询（删除 webhook、注册命令），无 Token 停止。
-- 环境变量：`TELEGRAM_PROXY`（可选，如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7891`）优先于通用代理变量。
+- 环境变量：`TG_PROXY`（可选，如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7891`）优先于通用代理变量。
 - 升级注意：**已保存过通知配置的实例**，旧配置 JSON 不含 `sourceConfigChanged` 字段，反序列化后该事件默认为关闭；如需默认开启，请在管理后台手动打开或重新保存一次配置。
 
 ## 9. 待办与已知限制
