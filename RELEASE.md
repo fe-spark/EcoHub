@@ -1,3 +1,41 @@
+# v1.1.5-beta.20
+
+> **预发布（prerelease）**：重置按钮搜索状态透传修正、分类管理树状表格层级重构与智能折叠、工作台全真实接口图表与排布优化、系统设置 Tabs 规范重构及浅色模式全局边框对比度修复，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.20`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.20`
+
+## 相对 beta.19
+
+- **重置按钮参数修正与状态透传**：
+  - 修复 `/manage/film`（影视管理）与 `/manage/collect/record`（失败记录）点击重置后由于 React 异步闭包导致传旧参数查询的问题，重置后立即绕过 closure 直采全新清空数据
+- **分类管理树状表格层级视觉与智能折叠**：
+  - 移除分类表格最左侧 48px 独立空白展开列，将折叠/展开图标直接收拢嵌套至「分类名称」列中
+  - 新增一级主类（金黄底色 + 文件夹图标 + 专属 Badge）与二级分类（分支图标）背景与层次区分
+  - 弱化 ID 与 Parent ID 视觉高亮为柔和灰字（`#8c8c8c`）；实现表格整行点击展开/折叠，并智能识别忽略 Switch 开关、按钮与拖拽句柄
+- **工作台排布与 100% 真实接口图表重构**：
+  - 工作台排布调整（运行概览顶置、快捷入口、定时任务与存储体量真实图表、影视数据规模）
+  - 彻底移除虚构流速趋势图，重构为 100% 后端真实接口驱动的「定时任务自动化调度」（`/manage/cron/list`）与「影视数据体量构成」（`/manage/spider/clear/stats`）
+- **系统设置 Tab 栏结构升级**：
+  - 弃用灰色包裹胶囊框，重构为符合现代 UI 规范的极简标准下划线页签（Line Tabs）与 2px 主题色下划线指示条
+- **全局浅色主题边框与分割线对比度修复**：
+  - 修复浅色模式下全局边框色（`#f0f0f0`）过于淡薄隐形的问题，提升 `colorBorder` 与 `--public-border-2` 至标准 Slate 色阶 `#e2e8f0` / `#cbd5e1`，配合微暗阴影使全站卡片轮廓与表格分割线清晰显现
+
+## 部署（beta.20）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.20
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.20
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.19
 
 > **预发布（prerelease）**：主题 SSR 首屏直出防闪烁、后台管理页亮暗主题适配与样式收敛，**不会**覆盖 `:latest`。

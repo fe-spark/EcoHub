@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Button, Card, Input, Select, Space, Switch, Tag, Typography } from "antd";
-import { ClearOutlined, CopyOutlined, FileTextOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined } from "@ant-design/icons";
+import { ClearOutlined, CopyOutlined, FileTextOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
@@ -65,8 +65,9 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
   const [cursorExpired, setCursorExpired] = useState(false);
   const [lastReceivedAt, setLastReceivedAt] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
+  const [inputKeyword, setInputKeyword] = useState("");
   const [keyword, setKeyword] = useState("");
-  const [level, setLevel] = useState("all");
+  const [level, setLevel] = useState<string>("all");
   const logBodyRef = useRef<HTMLDivElement | null>(null);
   const cursorRef = useRef(0);
   const deltaFetchingRef = useRef(false);
@@ -200,13 +201,37 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
           <Button icon={<CopyOutlined />} onClick={copyLogs} disabled={filteredEntries.length === 0}>
             复制当前日志
           </Button>
-          <Input.Search
+          <Input
             allowClear
             placeholder="关键词过滤"
             className={styles.keywordInput}
-            value={keyword}
-            onChange={(event) => setKeyword(event.target.value)}
+            value={inputKeyword}
+            onChange={(event) => {
+              const val = event.target.value;
+              setInputKeyword(val);
+              if (val === "" && keyword !== "") {
+                setKeyword("");
+              }
+            }}
+            onPressEnter={() => setKeyword(inputKeyword.trim())}
           />
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            onClick={() => setKeyword(inputKeyword.trim())}
+          >
+            搜索
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              setInputKeyword("");
+              setKeyword("");
+              setLevel("all");
+            }}
+          >
+            重置
+          </Button>
           <Select
             className={styles.levelSelect}
             value={level}

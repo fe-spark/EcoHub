@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag, Typography, Card } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
 import {
   checkCategoryRuleConflict,
@@ -257,8 +257,19 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
             onPressEnter={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)}
             className={styles.searchInput}
           />
-          <Button type="primary" onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)} className={styles.searchButton}>
+          <Button type="primary" icon={<SearchOutlined />} onClick={() => void fetchRules(1, paging.pageSize, keyword, ruleGroup)} className={styles.searchButton}>
             搜索
+          </Button>
+          <Button
+            icon={<ReloadOutlined />}
+            onClick={() => {
+              setKeyword("");
+              const defaultGroup = CATEGORY_GROUPS[0] || "all";
+              setRuleGroup(defaultGroup);
+              void fetchRules(1, paging.pageSize, "", defaultGroup);
+            }}
+          >
+            重置
           </Button>
         </Space>
 

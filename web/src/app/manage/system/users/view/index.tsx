@@ -30,6 +30,8 @@ import {
   CheckCircleOutlined,
   StopOutlined,
   UserAddOutlined,
+  SearchOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -51,7 +53,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   const [total, setTotal] = useState(0);
   const [current, setCurrent] = useState(1);
   const [pageSize, setPageSize] = useState(10);
-  const [searchText, setSearchText] = useState("");
+  const [inputValue, setInputValue] = useState("");
+  const [searchKeyword, setSearchKeyword] = useState("");
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -71,7 +74,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   }, []);
 
   const fetchData = useCallback(
-    async (page = current, size = pageSize, name = searchText) => {
+    async (page = current, size = pageSize, name = searchKeyword) => {
       setLoading(true);
       try {
         const resp = await ApiGet("/manage/user/list", {
@@ -89,7 +92,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         setLoading(false);
       }
     },
-    [current, pageSize, searchText],
+    [current, pageSize, searchKeyword],
   );
 
   useEffect(() => {
@@ -98,9 +101,27 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   }, [fetchCurrentUser, fetchData]);
 
   const handleSearch = (value: string) => {
-    setSearchText(value);
+    const trimmed = value.trim();
+    setInputValue(trimmed);
+    setSearchKeyword(trimmed);
     setCurrent(1);
-    fetchData(1, pageSize, value);
+    void fetchData(1, pageSize, trimmed);
+  };
+
+  const handleReset = () => {
+    setInputValue("");
+    setSearchKeyword("");
+    setCurrent(1);
+    void fetchData(1, pageSize, "");
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setInputValue(val);
+    if (val === "" && searchKeyword !== "") {
+      setSearchKeyword("");
+      setCurrent(1);
+    }
   };
 
   const handleAdd = () => {
@@ -297,15 +318,29 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
       <Card size="small" className={styles.filterCard}>
         <div className={styles.filterBar}>
           <div className={styles.filterLeft}>
-            <Input.Search
-              placeholder="搜索用户名"
-              value={searchText}
-              onChange={(e) => setSearchText(e.target.value)}
-              onSearch={(val) => handleSearch(val)}
-              className={styles.searchInput}
-              allowClear
-              enterButton="搜索"
-            />
+            <Space size={8}>
+              <Input
+                placeholder="搜索用户名"
+                value={inputValue}
+                onChange={handleInputChange}
+                onPressEnter={() => handleSearch(inputValue)}
+                className={styles.searchInput}
+                allowClear
+              />
+              <Button
+                type="primary"
+                icon={<SearchOutlined />}
+                onClick={() => handleSearch(inputValue)}
+              >
+                搜索
+              </Button>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleReset}
+              >
+                重置
+              </Button>
+            </Space>
           </div>
           <div className={styles.filterRight}>
             <Tag color="processing">共 {total} 条账号数据</Tag>
