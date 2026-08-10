@@ -1,7 +1,9 @@
 import type { Metadata, Viewport } from "next";
+import { cookies, headers } from "next/headers";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
 import GlobalThemeProvider from "@/components/theme/GlobalThemeProvider";
 import SiteGuard, { SiteConfig } from "@/components/common/SiteGuard";
+import { THEME_INIT_SCRIPT, THEME_COOKIE_KEY, isThemeMode } from "@/lib/theme";
 import { serverGet } from "@/lib/server-api";
 import "./globals.css";
 
@@ -56,11 +58,23 @@ export default async function RootLayout({
 }>) {
   const siteConfig = await getSiteConfig();
 
+  // SSR 直接输出正确主题：手动选择（cookie）优先，未选择时用系统偏好（客户端提示头）
+  const savedMode = (await cookies()).get(THEME_COOKIE_KEY)?.value;
+  const initialMode = isThemeMode(savedMode) ? savedMode : "system";
+  let initialEffective: "dark" | "light";
+  if (initialMode !== "system") {
+    initialEffective = initialMode;
+  } else {
+    const clientHint = (await headers()).get("sec-ch-prefers-color-scheme");
+    initialEffective = clientHint === "light" || clientHint === "dark" ? clientHint : "dark";
+  }
+
   return (
-		<html lang="zh-CN" suppressHydrationWarning>
+    <html lang="zh-CN" suppressHydrationWarning data-theme={initialEffective} style={{ colorScheme: initialEffective }}>
       <body>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <AntdRegistry>
-          <GlobalThemeProvider fontFamily={APP_FONT_FAMILY}>
+          <GlobalThemeProvider fontFamily={APP_FONT_FAMILY} initialMode={initialMode} initialEffective={initialEffective}>
             <SiteGuard initialConfig={siteConfig}>
               {children}
             </SiteGuard>

@@ -7,8 +7,8 @@ import zhCN from "antd/locale/zh_CN";
 import dayjs from "dayjs";
 import "dayjs/locale/zh-cn";
 import ThemeDock, { type ThemeMode } from "./ThemeDock";
+import { THEME_STORAGE_KEY, writeThemeCookie, isThemeMode } from "@/lib/theme";
 
-const STORAGE_KEY = "app-theme";
 const DEFAULT_PRIMARY_COLOR = "#fa8c16";
 
 type ThemeContextValue = {
@@ -35,24 +35,29 @@ function resolveEffective(mode: ThemeMode): "dark" | "light" {
 
 function getSavedMode(): ThemeMode {
   if (typeof window === "undefined") return "system";
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved === "dark" || saved === "light" || saved === "system") return saved;
-  return "system";
+  const saved = localStorage.getItem(THEME_STORAGE_KEY);
+  return isThemeMode(saved) ? saved : "system";
 }
 
 export default function GlobalThemeProvider({
   children,
   fontFamily,
+  initialMode,
+  initialEffective,
 }: {
   children: React.ReactNode;
   fontFamily: string;
+  initialMode: ThemeMode;
+  initialEffective: "dark" | "light";
 }) {
   const pathname = usePathname();
-  const [mode, setMode] = useState<ThemeMode>("system");
-  const [effective, setEffective] = useState<"dark" | "light">("dark");
+  // initialMode/initialEffective 由 SSR 根据 cookie/系统偏好计算，
+  // 首屏渲染（含 antd 样式）即正确主题，避免水合后再从深色切换到浅色
+  const [mode, setMode] = useState<ThemeMode>(initialMode);
+  const [effective, setEffective] = useState<"dark" | "light">(initialEffective);
   const [mounted, setMounted] = useState(false);
 
-  // 避免 SSR/CSR Hydration 不一致，先用默认值，挂载后同步 localStorage
+  // 初始主题已由 SSR 按 cookie/系统偏好输出；挂载后再以 localStorage 兜底（正常情况下两者一致）
   useEffect(() => {
     dayjs.locale("zh-cn");
     setMounted(true);
@@ -73,7 +78,8 @@ export default function GlobalThemeProvider({
 
   useEffect(() => {
     setEffective(resolveEffective(mode));
-    localStorage.setItem(STORAGE_KEY, mode);
+    localStorage.setItem(THEME_STORAGE_KEY, mode);
+    writeThemeCookie(mode);
   }, [mode]);
 
   useEffect(() => {
