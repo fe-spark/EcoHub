@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
-import { Card, Col, Row, Statistic, Typography } from "antd";
+import React, { useEffect, useState } from "react";
+import { Card, Typography } from "antd";
 import Link from "next/link";
 import {
   AppstoreOutlined,
@@ -89,7 +89,6 @@ export default function ManagePageView() {
 
       <Card
         className={styles.panelCard}
-        size="small"
         title="当前影视数据规模"
         extra={
           <Link href="/manage/system?tab=security" className={styles.statsLink}>
@@ -97,62 +96,69 @@ export default function ManagePageView() {
           </Link>
         }
       >
-        <Row gutter={[16, 16]}>
-          <Col xs={12} sm={12} md={6}>
-            <Statistic
-              title="影视库存"
-              value={stats?.films ?? "—"}
-              prefix={<VideoCameraOutlined />}
-            />
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Statistic
-              title="列表快照"
-              value={stats?.snapshots ?? "—"}
-              prefix={<DatabaseOutlined />}
-            />
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Statistic
-              title="分类"
-              value={stats?.categories ?? "—"}
-              prefix={<FolderOpenOutlined />}
-            />
-          </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Statistic
-              title="失败记录"
-              value={stats?.failures ?? "—"}
-              prefix={<FileTextOutlined />}
-            />
-          </Col>
-        </Row>
-        <Typography.Text type="secondary" className={styles.statsNote}>
+        <div className={styles.statsGrid}>
+          {[
+            {
+              title: "影视库存",
+              value: stats?.films,
+              icon: VideoCameraOutlined,
+            },
+            {
+              title: "列表快照",
+              value: stats?.snapshots,
+              icon: DatabaseOutlined,
+            },
+            {
+              title: "分类",
+              value: stats?.categories,
+              icon: FolderOpenOutlined,
+            },
+            {
+              title: "失败记录",
+              value: stats?.failures,
+              icon: FileTextOutlined,
+            },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <div key={item.title} className={styles.statsCard}>
+                <div className={styles.statsIcon}>
+                  <Icon />
+                </div>
+                <div className={styles.statsBody}>
+                  <div className={styles.statsValue}>{item.value ?? "—"}</div>
+                  <div className={styles.statsTitle}>{item.title}</div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <Typography.Text className={styles.statsNote}>
           反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
         </Typography.Text>
       </Card>
 
-      <Card className={styles.panelCard} title="快捷入口" size="small">
-        <section className={styles.sectionBlock}>
-          <div className={styles.entryGrid}>
-            {quickEntries.map((entry) => {
-              const Icon = entry.icon;
-              return (
-                <Link
-                  key={entry.key}
-                  href={entry.href}
-                  className={styles.entryCard}
-                >
-                  <div className={styles.entryCardHead}>
-                    <Icon className={styles.entryIcon} />
-                    <div className={styles.entryTitle}>{entry.title}</div>
+      <Card className={styles.panelCard} title="快捷入口">
+        <div className={styles.entryGrid}>
+          {quickEntries.map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <Link
+                key={entry.key}
+                href={entry.href}
+                className={styles.entryCard}
+              >
+                <div className={styles.entryCardHead}>
+                  <div className={styles.entryIconWrap}>
+                    <Icon />
                   </div>
-                  <div className={styles.stepDesc}>{entry.description}</div>
-                </Link>
-              );
-            })}
-          </div>
-        </section>
+                  <div className={styles.entryTitle}>{entry.title}</div>
+                </div>
+                <div className={styles.stepDesc}>{entry.description}</div>
+              </Link>
+            );
+          })}
+        </div>
       </Card>
     </div>
   );

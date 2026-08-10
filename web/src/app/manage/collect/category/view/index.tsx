@@ -28,7 +28,7 @@ export default function CategoryWorkspacePageView() {
     <div className={styles.pageBody}>
       <ManagePageHeader title="分类管理" description="维护当前主采集站分类框架、排序与显示状态；分类不允许删除，只能隐藏或显示。" />
 
-      <Card size="small">
+      <Card className={styles.panelCard}>
         <Descriptions size="small" column={{ xs: 1, md: 2, xl: 4 }}>
           <Descriptions.Item label="分类节点">{treeState.stats.total}</Descriptions.Item>
           <Descriptions.Item label="一级 / 二级">{treeState.stats.roots} / {treeState.stats.children}</Descriptions.Item>

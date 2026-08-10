@@ -313,52 +313,51 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         </div>
       </Card>
 
-      <Card size="small" className={styles.tableCard}>
-        <Table
-          columns={columns}
-          dataSource={data}
-          rowKey="id"
-          loading={loading}
-          size="middle"
-          pagination={false}
-          scroll={{ x: "max-content" }}
-          title={() => (
-            <div className={styles.tableHeader}>
-              <div className={styles.tableTitle}>
-                <TeamOutlined style={{ color: "#1677ff", marginRight: 8 }} />
-                <span>账号列表</span>
-              </div>
-              <div className={styles.tableActions}>
-                <Button
-                  type="primary"
-                  icon={<PlusOutlined />}
-                  onClick={handleAdd}
-                  disabled={!currentUser?.canWrite}
-                >
-                  新增账号
-                </Button>
-              </div>
+      <Table
+        bordered
+        columns={columns}
+        dataSource={data}
+        rowKey="id"
+        loading={loading}
+        size="middle"
+        pagination={false}
+        scroll={{ x: "max-content" }}
+        title={() => (
+          <div className={styles.tableHeader}>
+            <div className={styles.tableTitle}>
+              <TeamOutlined style={{ color: "#fa8c16", marginRight: 8 }} />
+              <span>账号列表</span>
             </div>
-          )}
-          footer={() => (
-            <div className={styles.pagination}>
-              <Pagination
-                current={current}
-                pageSize={pageSize}
-                total={total}
-                showSizeChanger
-                pageSizeOptions={[10, 20, 50, 100]}
-                showTotal={(total) => `共 ${total} 条`}
-                onChange={(page, size) => {
-                  setCurrent(page);
-                  setPageSize(size);
-                  fetchData(page, size);
-                }}
-              />
+            <div className={styles.tableActions}>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={handleAdd}
+                disabled={!currentUser?.canWrite}
+              >
+                新增账号
+              </Button>
             </div>
-          )}
-        />
-      </Card>
+          </div>
+        )}
+        footer={() => (
+          <div className={styles.pagination}>
+            <Pagination
+              current={current}
+              pageSize={pageSize}
+              total={total}
+              showSizeChanger
+              pageSizeOptions={[10, 20, 50, 100]}
+              showTotal={(total) => `共 ${total} 条`}
+              onChange={(page, size) => {
+                setCurrent(page);
+                setPageSize(size);
+                fetchData(page, size);
+              }}
+            />
+          </div>
+        )}
+      />
 
       <Modal
         title={

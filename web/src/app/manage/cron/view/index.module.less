@@ -4,23 +4,36 @@
   gap: 16px;
 }
 
+.panelCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  :global(.ant-card-body) {
+    padding: 16px;
+  }
+}
+
 .tableHeader {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 12px;
 }
 
 .tableTitle {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   line-height: 32px;
+  color: var(--ant-color-text);
 }
 
 .tableActions {
   display: flex;
   flex-wrap: wrap;
+  gap: 8px;
 }
 
 @media (max-width: 1200px) {

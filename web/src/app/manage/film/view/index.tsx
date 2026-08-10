@@ -13,6 +13,7 @@ import {
   Tooltip,
   Pagination,
   Typography,
+  Card,
 } from "antd";
 import { useRouter } from "next/navigation";
 import {
@@ -415,6 +416,7 @@ export default function FilmListPageView() {
       </Space>
 
       <Table
+        bordered
         columns={columns}
         dataSource={list}
         rowKey="mid"

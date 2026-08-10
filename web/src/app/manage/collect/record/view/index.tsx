@@ -12,6 +12,7 @@ import {
   Pagination,
   Tooltip,
   Typography,
+  Card,
 } from "antd";
 import {
   ReloadOutlined,
@@ -255,14 +256,14 @@ export default function FailureRecordPageView() {
 
   return (
     <div className={styles.pageBody}>
-        <ManagePageHeader
-          title="失败记录"
-          description="查看采集失败明细、自动重试次数和最终失败记录，并统一清理已有重试结果或全部失败记录。"
-        />
+      <ManagePageHeader
+        title="失败记录"
+        description="查看采集失败明细、自动重试次数和最终失败记录，并统一清理已有重试结果或全部失败记录。"
+      />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
         <Select
-          placeholder="采集来源"
+          placeholder="采集源"
           value={params.originId || undefined}
           onChange={(v) => setParams({ ...params, originId: v })}
           options={options.origin?.map((o: any) => ({
@@ -307,6 +308,7 @@ export default function FailureRecordPageView() {
       </Space>
 
       <Table
+        bordered
         columns={columns}
         dataSource={records}
         rowKey="ID"

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Table, Tag, Switch, Button, Modal, Form, Tooltip, Space, Popconfirm } from "antd";
+import { Table, Tag, Switch, Button, Modal, Form, Tooltip, Space, Popconfirm, Card } from "antd";
 import { EditOutlined, ThunderboltOutlined, StopOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -259,6 +259,7 @@ export default function CronManagePageView() {
       />
 
       <Table
+        bordered
         columns={columns}
         dataSource={taskList}
         rowKey="id"

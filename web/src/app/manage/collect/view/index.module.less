@@ -14,6 +14,14 @@
 
 .toolbarCard {
   min-width: 0;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  :global(.ant-card-body) {
+    padding: 16px;
+  }
 }
 
 .toolbar {
@@ -48,10 +56,10 @@
   align-items: center;
   gap: 12px 16px;
   min-width: 0;
-  padding: 12px 14px;
-  background: color-mix(in srgb, var(--ant-color-primary-bg) 70%, var(--ant-color-bg-container));
-  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 18%, var(--ant-color-border-secondary));
-  border-radius: 12px;
+  padding: 12px 16px;
+  background: rgba(250, 140, 22, 0.06);
+  border: 1px solid rgba(250, 140, 22, 0.2);
+  border-radius: 10px;
 }
 
 .batchProgressMain {
@@ -93,36 +101,33 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  min-height: 168px;
+  gap: 8px;
+  min-height: 180px;
   min-width: 0;
-  padding: 20px 16px;
+  padding: 16px;
   margin: 0;
-  border: 1px dashed var(--ant-color-border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 40%, transparent);
+  border: 1px dashed rgba(250, 140, 22, 0.4);
+  border-radius: 10px;
+  background: rgba(250, 140, 22, 0.03);
   color: var(--ant-color-text-secondary);
   cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    color 0.2s ease,
-    background 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .addSourceTile:hover {
-  border-color: var(--ant-color-primary);
-  color: var(--ant-color-primary);
-  background: color-mix(in srgb, var(--ant-color-primary-bg) 55%, transparent);
+  border-color: #fa8c16;
+  color: #fa8c16;
+  background: rgba(250, 140, 22, 0.08);
 }
 
 .addSourceIcon {
-  font-size: 20px;
+  font-size: 24px;
   line-height: 1;
 }
 
 .addSourceLabel {
   font-size: 14px;
-  font-weight: 500;
+  font-weight: 600;
   line-height: 22px;
 }
 
@@ -134,110 +139,39 @@
 
 .addSourceTile:hover .addSourceHint {
   color: inherit;
-  opacity: 0.75;
-}
-
-/* ===== 失效源清理弹窗 ===== */
-.cleanupLoading {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 180px;
-  padding: 48px 16px;
-  text-align: center;
-}
-
-.cleanupContent {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.cleanupList {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  max-height: 320px;
-  overflow-y: auto;
-  padding-right: 4px;
-}
-
-.cleanupItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
-  background: var(--ant-color-bg-container);
-}
-
-.cleanupItemHead {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  min-width: 0;
-}
-
-.cleanupItemName {
-  max-width: 100%;
-}
-
-.cleanupItemUri {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.cleanupItemReason {
-  font-size: 12px;
-  color: var(--ant-color-error);
-  overflow-wrap: anywhere;
-}
-
-.cleanupSkipped {
-  font-size: 12px;
-}
-
-.cleanupFooter {
-  display: flex;
-  justify-content: flex-end;
+  opacity: 0.85;
 }
 
 /* ===== 采集站统一网格 ===== */
 .sourceGroups {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
   min-width: 0;
 }
 
 .masterTip,
 .masterTipWarn {
   min-width: 0;
-  padding: 10px 14px;
-  border-radius: 10px;
+  padding: 12px 16px;
+  border-radius: 8px;
   font-size: 13px;
   line-height: 20px;
 }
 
 .masterTip {
   color: var(--ant-color-text-secondary);
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  background: var(--ant-color-bg-container);
   border: 1px dashed var(--ant-color-border);
 }
 
 .masterTipWarn {
-  color: var(--ant-color-warning);
-  background: var(--ant-color-warning-bg);
-  border: 1px solid color-mix(in srgb, var(--ant-color-warning) 28%, transparent);
+  color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
+  border: 1px solid rgba(250, 173, 20, 0.25);
 }
 
-/* 多卡网格（同排卡片 stretch 等高） */
+/* 多卡网格 */
 .cardGrid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
@@ -249,9 +183,9 @@
 .emptyCard {
   min-width: 0;
   padding: 48px 16px;
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 55%, transparent);
+  background: var(--ant-color-bg-container);
   border: 1px dashed var(--ant-color-border);
-  border-radius: 14px;
+  border-radius: 12px;
 }
 
 @media (max-width: 640px) {
@@ -267,25 +201,20 @@
 }
 
 /* ===== 单个采集站卡片 ===== */
-/* 默认保持中性容器底，状态只靠左边细条 + 状态胶囊区分，避免大块染色 */
 .sourceCard {
-  --card-accent: var(--ant-color-border);
+  --card-accent: var(--ant-color-border-secondary);
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-width: 0;
-  padding: 16px 18px 18px;
+  padding: 16px;
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 14px;
+  border-radius: 10px;
   cursor: pointer;
-  transition:
-    border-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease,
-    opacity 0.2s ease;
+  transition: all 0.2s ease;
 }
 
 .sourceCard::before {
@@ -302,36 +231,26 @@
 
 .sourceCard:hover {
   transform: translateY(-2px);
-  border-color: color-mix(
-    in srgb,
-    var(--ant-color-primary) 28%,
-    var(--ant-color-border-secondary)
-  );
-  box-shadow: 0 8px 20px color-mix(in srgb, var(--ant-color-text) 6%, transparent);
+  border-color: #fa8c16;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
 }
 
 .sourceCardSelected {
-  border-color: color-mix(
-    in srgb,
-    var(--ant-color-primary) 55%,
-    var(--ant-color-border-secondary)
-  );
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 18%, transparent),
-    0 6px 16px color-mix(in srgb, var(--ant-color-primary) 8%, transparent);
+  border-color: #fa8c16;
+  box-shadow: 0 0 0 1px #fa8c16;
 }
 
 /* 采集中 */
 .toneRunning {
-  --card-accent: var(--ant-color-primary);
+  --card-accent: #ff7a00;
 }
 
-/* 已启用：安静的成功色细条 */
+/* 已启用：平静的绿色细条 */
 .toneEnabled {
-  --card-accent: var(--ant-color-success);
+  --card-accent: #52c41a;
 }
 
-/* 已禁用：无强调色，整体略降对比 */
+/* 已禁用 */
 .toneDisabled {
   --card-accent: transparent;
   opacity: 0.72;
@@ -353,9 +272,8 @@
   opacity: 0.88;
 }
 
-/* 终止收尾中 */
 .toneStopping {
-  --card-accent: var(--ant-color-warning);
+  --card-accent: #faad14;
 }
 
 /* 头部 */
@@ -390,14 +308,14 @@
   white-space: nowrap;
 }
 
-/* 主站卡片：左侧金条 + 轻微暖底，右上角彩带 */
+/* 主站卡片 */
 .sourceCardMaster {
   --card-accent: #faad14;
-  background: color-mix(in srgb, #faad14 6%, var(--ant-color-bg-container));
+  background: rgba(250, 173, 20, 0.04);
 }
 
 .sourceCardMaster.toneRunning {
-  --card-accent: var(--ant-color-primary);
+  --card-accent: #ff7a00;
 }
 
 .sourceCardMaster.toneEnabled {
@@ -405,7 +323,7 @@
 }
 
 .sourceCardMaster.toneStopping {
-  --card-accent: var(--ant-color-warning);
+  --card-accent: #faad14;
 }
 
 /* 右上角斜向彩带角标 */
@@ -414,34 +332,32 @@
   top: 0;
   right: 0;
   z-index: 2;
-  width: 72px;
-  height: 72px;
+  width: 68px;
+  height: 68px;
   overflow: hidden;
   pointer-events: none;
-  border-radius: 0 14px 0 0;
+  border-radius: 0 10px 0 0;
 }
 
 .masterRibbonText {
   position: absolute;
-  top: 12px;
-  right: -22px;
+  top: 10px;
+  right: -24px;
   width: 96px;
-  padding: 3px 0;
-  font-size: 11px;
+  padding: 2px 0;
+  font-size: 10px;
   font-weight: 700;
-  line-height: 16px;
-  letter-spacing: 0.12em;
+  line-height: 14px;
+  letter-spacing: 0.1em;
   text-align: center;
   color: #5c3b00;
   background: linear-gradient(180deg, #ffd666 0%, #faad14 55%, #d48806 100%);
-  box-shadow: 0 2px 6px color-mix(in srgb, #d48806 35%, transparent);
   transform: rotate(45deg);
   transform-origin: center;
 }
 
-/* 角标旁状态胶囊略左移，避免与彩带重叠 */
 .sourceCardMaster .cardHead {
-  padding-right: 28px;
+  padding-right: 24px;
 }
 
 .sourceCardMaster .statusPill {
@@ -462,20 +378,20 @@
 }
 
 .cardUri:hover {
-  color: var(--ant-color-primary);
+  color: #fa8c16;
   text-decoration: underline;
 }
 
-/* 状态胶囊：轻色块 + 圆点，不抢卡片主体 */
+/* 状态胶囊 */
 .statusPill {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   flex: none;
   padding: 1px 8px;
   border-radius: 999px;
   font-size: 12px;
-  line-height: 20px;
+  line-height: 18px;
   font-weight: 500;
   white-space: nowrap;
   border: none;
@@ -490,8 +406,8 @@
 }
 
 .statusRunning {
-  color: var(--ant-color-primary);
-  background: var(--ant-color-primary-bg);
+  color: #ff7a00;
+  background: rgba(255, 122, 0, 0.1);
 }
 
 .statusRunning .statusDot {
@@ -499,8 +415,8 @@
 }
 
 .statusEnabled {
-  color: var(--ant-color-success);
-  background: var(--ant-color-success-bg);
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.1);
 }
 
 .statusDisabled {
@@ -509,8 +425,8 @@
 }
 
 .statusStopping {
-  color: var(--ant-color-warning);
-  background: var(--ant-color-warning-bg);
+  color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
 }
 
 @keyframes statusPulse {
@@ -525,7 +441,7 @@
 
 /* 进度 */
 .cardProgress {
-  margin-top: 14px;
+  margin-top: 12px;
   min-width: 0;
 }
 
@@ -538,7 +454,7 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .progressLabel {
@@ -547,7 +463,7 @@
 }
 
 .progressPercent {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--ant-color-text);
   font-variant-numeric: tabular-nums;
@@ -559,12 +475,11 @@
 }
 
 .progressMetaText {
-  margin-top: 6px;
+  margin-top: 4px;
   font-size: 12px;
   color: var(--ant-color-text-secondary);
 }
 
-/* 主站横条：百分比 | 进度条 | 计数 单行 */
 .progressInline {
   display: flex;
   align-items: center;
@@ -602,7 +517,7 @@
   white-space: nowrap;
 }
 
-/* 底部区沉底：同排卡片高度一致时，元信息/操作仍贴底对齐 */
+/* 底部区 */
 .cardFoot {
   display: flex;
   flex-direction: column;
@@ -611,13 +526,12 @@
   width: 100%;
 }
 
-/* 元信息 */
 .cardMeta {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 16px;
-  margin: 14px 0 0;
+  gap: 12px;
+  margin: 12px 0 0;
   padding: 0;
 }
 
@@ -637,7 +551,7 @@
 
 .metaValue {
   margin: 0;
-  font-size: 13px;
+  font-size: 12px;
   color: var(--ant-color-text);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -649,15 +563,14 @@
   color: var(--ant-color-text-quaternary);
 }
 
-/* 参数控制 */
 .cardControls {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px dashed var(--ant-color-border-secondary);
 }
 
@@ -672,13 +585,12 @@
   min-width: 0;
 }
 
-/* 操作 */
 .cardActions {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 14px;
-  padding-top: 14px;
+  margin-top: 12px;
+  padding-top: 12px;
   border-top: 1px solid var(--ant-color-border-secondary);
 }
 
@@ -687,7 +599,6 @@
   min-width: 0;
 }
 
-/* ===== 响应式 ===== */
 @media (max-width: 768px) {
   .toolbar {
     flex-direction: column;
@@ -714,7 +625,7 @@
 
 @media (max-width: 480px) {
   .sourceCard {
-    padding: 14px 14px 16px;
+    padding: 12px 14px;
   }
 
   .cardActions {

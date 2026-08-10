@@ -15,12 +15,15 @@ export default function ManagePageHeader(props: ManagePageHeaderProps) {
   return (
     <div className={styles.header}>
       <div className={styles.content}>
-        <Typography.Title level={3} className={styles.title}>
-          {title}
-        </Typography.Title>
-        {description ? <Typography.Text type="secondary">{description}</Typography.Text> : null}
+        <div className={styles.titleRow}>
+          <span className={styles.indicator} />
+          <Typography.Title level={3} className={styles.title}>
+            {title}
+          </Typography.Title>
+        </div>
+        {description ? <div className={styles.description}>{description}</div> : null}
       </div>
-      {actionNodes.length > 0 ? <Space wrap className={styles.actions}>{actionNodes}</Space> : null}
+      {actionNodes.length > 0 ? <div className={styles.actions}>{actionNodes}</div> : null}
     </div>
   );
 }
