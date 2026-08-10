@@ -9,7 +9,7 @@
 }
 
 :global(html[data-theme="light"]) {
-  --film-placeholder-bg: linear-gradient(135deg, #f8fafc 0%, #edf2f7 100%);
+  --film-placeholder-bg: linear-gradient(135deg, #e3e8f1 0%, #d7deea 100%);
   --film-tag-bg: rgba(255, 255, 255, 0.92);
   --film-tag-text: #0f172a;
   --film-tag-border: rgba(226, 232, 240, 0.9);
@@ -168,6 +168,13 @@
     animation: posterShimmer 1.7s ease-in-out infinite;
     pointer-events: none;
   }
+}
+
+:global(html[data-theme="light"]) .loadingBg::before {
+  background: linear-gradient(100deg,
+      transparent 10%,
+      rgba(100, 116, 139, 0.3) 45%,
+      transparent 80%);
 }
 
 .remark {
