@@ -69,7 +69,7 @@ func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []int64, 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s 本次更新列表</b>\n", formatTitlePrefix(sess.SiteName))
-	fmt.Fprintf(&b, "<i>主站已有影片；主站框架或附属播放源剧集/线路有更新才计入</i>\n")
+	fmt.Fprintf(&b, "<i>主站已有影片；任一播放源「最后一集」有变化才计入</i>\n")
 	fmt.Fprintf(&b, "📄 第 <b>%d/%d</b> 页 · 本页 <b>%d</b> · <code>%d–%d</code> / <b>%d</b>\n",
 		page, totalPages, len(chunk), start+1, end, total)
 	if len(chunk) > 0 {

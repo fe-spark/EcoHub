@@ -1734,7 +1734,8 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 }
 
 // collectWriteMids 采集写结果。
-// Notify：进 Telegram「更新列表」——主站新片/播放结构变更，或附属站已匹配主站片的 playlist 剧集/线路结构变更；
+// Notify：进 Telegram「更新列表」——主站新片/任一线路最后一项分集标签变化，
+// 或附属站已匹配主站片的 playlist 最后一项分集标签变化（含新增/回退）；
 // Affected：快照/缓存收尾用 mid。
 type collectWriteMids struct {
 	Notify   []int64
@@ -1743,7 +1744,7 @@ type collectWriteMids struct {
 
 func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	if s.Grade != model.MasterCollect {
-		// 附属站：扩展主站播放源；剧集/线路结构变更且已匹配主站 mid 的，进更新列表（仅链接刷新不进）
+		// 附属站：扩展主站播放源；最后一项分集标签变化且已匹配主站 mid 的，进更新列表（仅链接/中间集变化不进）
 		mids, err := saveSlavePlaylists(ctx, s, page, list)
 		if err != nil {
 			return collectWriteMids{}, err
