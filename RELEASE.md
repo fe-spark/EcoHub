@@ -1,3 +1,33 @@
+# v2.0.0-beta.2
+
+> **预发布（prerelease）**：Telegram 更新列表按「分集数量增加」去重，并展示触发更新的源名称，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.0-beta.2`
+
+## 相对 v2.0.0-beta.1
+
+- **更新列表去重（跨源集数）**：
+  - 仅当本源任一线路分集数量严格大于全库已有最大集数时才进入更新列表
+  - 某源已更新到 15 集后，后续源同样 15 集不再重复触发
+  - 附属站首次写入同样走全库最大集数校验；排除本源旧 playlist，避免自比较误判
+- **更新列表展示源名称**：
+  - `notify_change_mid` 记录并合并触发源名（`source_name`，多源逗号拼接）
+  - 影片行尾部展示 `[源名]`（HTML 转义）
+
+## 部署（v2.0.0-beta.2）
+
+```bash
+# compose 镜像 tag 示例（预发布版本不会自动覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.0-beta.2
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v2.0.0-beta.1
 
 > **预发布（prerelease）**：重构 CI/CD 容器构建体系，推出全新的 All-in-One 单镜像架构。将 Web 前端与 Server 后端合并打包为单一 `ecohub` 镜像，由 Supervisord 统一托管并发运行，简化单容器部署与拉取流程，**不会**覆盖 `:latest`。

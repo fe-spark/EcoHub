@@ -54,7 +54,7 @@ func loadFilmPageSession(batchID string) (FilmPageSession, error) {
 }
 
 // formatFilmListPageWithChunk 使用已加载的 mid 页渲染，避免回调路径重复查库。
-func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []int64, total, start, end int) string {
+func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int) string {
 	if total <= 0 && len(chunk) == 0 {
 		return fmt.Sprintf("<b>%s 本次更新列表</b>\n<i>本批无影片内容/播放源变更</i>\n", formatTitlePrefix(sess.SiteName))
 	}
@@ -65,7 +65,11 @@ func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []int64, 
 	if page < 1 {
 		page = 1
 	}
-	meta := ResolveFilmMeta(chunk)
+	mids := make([]int64, 0, len(chunk))
+	for _, item := range chunk {
+		mids = append(mids, item.Mid)
+	}
+	meta := ResolveFilmMeta(mids)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "<b>%s 本次更新列表</b>\n", formatTitlePrefix(sess.SiteName))
@@ -80,13 +84,13 @@ func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []int64, 
 		}
 	}
 	b.WriteByte('\n')
-	for i, mid := range chunk {
-		name := meta[mid].Name
+	for i, item := range chunk {
+		name := meta[item.Mid].Name
 		if utf8.RuneCountInString(name) > 40 {
 			r := []rune(name)
 			name = string(r[:40]) + "…"
 		}
-		line := formatFilmLine(model.FilmNotifyItem{Mid: mid, Name: name})
+		line := formatFilmLine(model.FilmNotifyItem{Mid: item.Mid, Name: name, SourceName: item.SourceName})
 		line = strings.TrimPrefix(line, "· ")
 		b.WriteString(fmt.Sprintf("%d. ", start+i+1))
 		b.WriteString(line)

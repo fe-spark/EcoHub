@@ -74,11 +74,18 @@ func (b *ChangeBatch) ID() string {
 	return b.id
 }
 
-// AppendMids 将 mid 写入批次（主键冲突忽略，可安全并发调用）。
-func (b *ChangeBatch) AppendMids(mids ...int64) {
+// ChangeMidItem 包含 mid 与触发更新的源名称。
+type ChangeMidItem struct {
+	Mid        int64
+	SourceName string
+}
+
+// AppendMids 将 mid 及其源名称写入批次（主键冲突时拼接源名称，可安全并发调用）。
+func (b *ChangeBatch) AppendMids(sourceName string, mids ...int64) {
 	if b == nil || len(mids) == 0 || db.Mdb == nil {
 		return
 	}
+	sourceName = strings.TrimSpace(sourceName)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	rows := make([]model.NotifyChangeMid, 0, len(mids))
@@ -91,12 +98,27 @@ func (b *ChangeBatch) AppendMids(mids ...int64) {
 			continue
 		}
 		seen[mid] = struct{}{}
-		rows = append(rows, model.NotifyChangeMid{BatchID: b.id, Mid: mid})
+		rows = append(rows, model.NotifyChangeMid{BatchID: b.id, Mid: mid, SourceName: sourceName})
 	}
 	if len(rows) == 0 {
 		return
 	}
-	if err := db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(rows, 200).Error; err != nil {
+	onConflict := clause.OnConflict{DoNothing: true}
+	if sourceName != "" {
+		onConflict = clause.OnConflict{
+			Columns: []clause.Column{{Name: "batch_id"}, {Name: "mid"}},
+			DoUpdates: clause.Assignments(map[string]any{
+				// 用分隔串匹配，避免 FIND_IN_SET 对含逗号源名误判
+				"source_name": gorm.Expr(
+					"CASE WHEN source_name IS NULL OR source_name = '' THEN ? "+
+						"WHEN CONCAT(', ', source_name, ', ') LIKE CONCAT('%, ', ?, ', %') THEN source_name "+
+						"ELSE CONCAT(source_name, ', ', ?) END",
+					sourceName, sourceName, sourceName,
+				),
+			}),
+		}
+	}
+	if err := db.Mdb.Clauses(onConflict).CreateInBatches(rows, 200).Error; err != nil {
 		syslog.Errorf("[Notify] 写入变更 mid 失败 batch=%s: %v", b.id, err)
 	}
 }
@@ -141,8 +163,8 @@ func clampPageSize(pageSize int) int {
 	return pageSize
 }
 
-// LoadChangeMidPage 按 update_stamp 新→旧分页取 mid（1-based page）。
-func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []int64, total, start, end, pageOut int, err error) {
+// LoadChangeMidPage 按 update_stamp 新→旧分页取 mid 及其源名称（1-based page）。
+func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidItem, total, start, end, pageOut int, err error) {
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
 		return nil, 0, 0, 0, 1, fmt.Errorf("empty batch")
@@ -163,11 +185,12 @@ func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []int64, total
 
 	// 关联 film_index 按更新时间排序；无索引时 mid 倒序兜底
 	type row struct {
-		Mid int64
+		Mid        int64
+		SourceName string
 	}
 	var rows []row
 	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Select("c.mid").
+		Select("c.mid, c.source_name").
 		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
 		Where("c.batch_id = ?", batchID).
 		Order("f.update_stamp DESC, c.mid DESC").
@@ -175,9 +198,9 @@ func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []int64, total
 	if err = q.Scan(&rows).Error; err != nil {
 		return nil, 0, 0, 0, page, err
 	}
-	chunk = make([]int64, 0, len(rows))
+	chunk = make([]ChangeMidItem, 0, len(rows))
 	for _, r := range rows {
-		chunk = append(chunk, r.Mid)
+		chunk = append(chunk, ChangeMidItem{Mid: r.Mid, SourceName: r.SourceName})
 	}
 	start = offset
 	end = offset + len(chunk)

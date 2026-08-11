@@ -1928,7 +1928,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
 		// 更新列表记 Notify mid；快照/缓存收尾用 Affected
-		noteCollectedMIDs(batch, s.Id, notifyMIDs)
+		noteCollectedMIDs(batch, s.Id, s.Name, notifyMIDs)
 		if s.Grade == model.MasterCollect && h < 0 {
 			collectLifecycle.addPendingMasterMIDs(s.Id, affectedMIDs)
 		} else if s.Grade == model.MasterCollect {
@@ -2229,7 +2229,7 @@ func CollectSingleFilm(ids string) {
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
 			} else if len(mids) > 0 {
 				// 主站结构变更/新片，或附属站已匹配主站片的播放源结构变更
-				noteCollectedMIDs(batch, src.Id, mids)
+				noteCollectedMIDs(batch, src.Id, src.Name, mids)
 			}
 			mu.Lock()
 			results = append(results, singleResult{source: src, err: err})
@@ -2328,7 +2328,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
-	noteCollectedMIDs(batch, s.Id, written.Notify)
+	noteCollectedMIDs(batch, s.Id, s.Name, written.Notify)
 	if s.Grade == model.MasterCollect {
 		collectLifecycle.addMasterAffectedMIDs(written.Affected)
 	} else {

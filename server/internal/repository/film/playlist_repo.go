@@ -268,14 +268,13 @@ func loadMatchedSearchInfosByMovieKeys(movieKeys []string) ([]model.FilmIndex, e
 // touchSlavePlaylistUpdateStamps 刷新「应进更新列表」影片的 update_stamp，返回这些全局 mid。
 // 仅链接/中间集变化（各线路最后一项标签相同）的保存已在 saveGroupedPlaylists 完成，不抬 stamp、不进更新列表。
 func touchSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) ([]int64, error) {
-	_ = sourceID
 	notifyChanges := make([]playlistChange, 0, len(changes))
 	for _, c := range changes {
 		if c.NotifyWorthy {
 			notifyChanges = append(notifyChanges, c)
 		}
 	}
-	updateStampByMid, err := buildSlavePlaylistUpdateStamps(notifyChanges)
+	updateStampByMid, err := buildSlavePlaylistUpdateStamps(sourceID, notifyChanges)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +298,7 @@ func touchSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 	return mids, nil
 }
 
-func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, error) {
+func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (map[int64]int64, error) {
 	movieKeys := make([]string, 0, len(changes))
 	changeByKey := make(map[string]playlistChange, len(changes))
 	for _, change := range changes {
@@ -327,6 +326,12 @@ func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, 
 		return nil, nil
 	}
 
+	allMIDs := make([]int64, 0, len(midByKey))
+	for _, mid := range midByKey {
+		allMIDs = append(allMIDs, mid)
+	}
+	existingCountsMap, _ := loadExistingEpisodeCountsByMIDs(db.Mdb, allMIDs, sourceID)
+
 	firstInsertMIDs := make([]int64, 0, len(changes))
 	for movieKey, mid := range midByKey {
 		change := changeByKey[movieKey]
@@ -344,7 +349,13 @@ func buildSlavePlaylistUpdateStamps(changes []playlistChange) (map[int64]int64, 
 	result := make(map[int64]int64, len(midByKey))
 	for movieKey, mid := range midByKey {
 		change := changeByKey[movieKey]
-		// 非 FirstInsert 的 NotifyWorthy 已是「最后一集变化」；FirstInsert 首次写入则抬 stamp
+		// 全库已有线路：仅当本源分集数量严格大于历史最大集数才进更新列表（含附属站首次写入）
+		existingCounts := existingCountsMap[mid]
+		newCounts := extractEpisodeCountsFromPlaylistSignatures(change.Signatures)
+		if !isEpisodeCountHigher(newCounts, existingCounts) {
+			// 数量未增加（如已有15集，后更新的源也是15集） -> 不进更新列表
+			continue
+		}
 		updateStamp := now
 		if change.FirstInsert {
 			updateStamp = masterUpdateStampByMid[mid]
@@ -477,6 +488,7 @@ type playlistChange struct {
 	MovieKey     string
 	FirstInsert  bool
 	NotifyWorthy bool // 任一线路「最后一项分集标签」有变化（含新增/回退/顺序变化）或首次写入才进更新列表；仅链接/中间集变化为 false
+	Signatures   []playlistSignature
 }
 
 type playlistSignature struct {
@@ -543,6 +555,7 @@ func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map
 			MovieKey:     movieKey,
 			FirstInsert:  first,
 			NotifyWorthy: notifyWorthy,
+			Signatures:   right,
 		})
 	}
 	return changed
