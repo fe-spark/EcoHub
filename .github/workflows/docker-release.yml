@@ -21,23 +21,8 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and push ${{ matrix.service }} image
+    name: Build and push all-in-one image
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: web
-            context: ./web
-            dockerfile: ./web/Dockerfile
-            image: ecohub-web
-            build-args: |
-              API_URL=http://server:8080
-          - service: server
-            context: ./server
-            dockerfile: ./server/Dockerfile
-            image: ecohub-server
-            build-args: ""
 
     steps:
       - name: Checkout
@@ -62,7 +47,7 @@ jobs:
             exit 1
           fi
 
-          image_base="${REGISTRY}/${owner}/${{ matrix.image }}"
+          image_base="${REGISTRY}/${owner}/ecohub"
           tags="${image_base}:${version}"
           # Only promote formal releases to :latest (never overwrite with beta/rc).
           if [[ ! "$version" =~ - ]]; then
@@ -93,11 +78,11 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v7
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          build-args: ${{ matrix.build-args }}
           tags: ${{ steps.meta.outputs.tags }}
-          cache-from: type=gha,scope=${{ matrix.service }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          cache-from: type=gha,scope=all-in-one
+          cache-to: type=gha,mode=max,scope=all-in-one
+
