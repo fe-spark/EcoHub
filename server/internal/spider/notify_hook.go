@@ -139,9 +139,9 @@ func emitProgressStaleNotify(sourceID, sourceName, oldStatus string, age time.Du
 //   - 附属站：已匹配到主站 mid 的 playlist「任一线路最后一集」变化（含新增/回退）。
 //
 // 仅链接刷新、中间集变化、备注/Hits 等噪声不计入；未匹配主站的附属片不进列表。
-func noteCollectedMIDs(batch *notify.ChangeBatch, sourceID string, mids []int64) {
+func noteCollectedMIDs(batch *notify.ChangeBatch, sourceID, sourceName string, mids []int64) {
 	if len(mids) == 0 {
 		return
 	}
-	notify.Acc.Add(batch, sourceID, mids...)
+	notify.Acc.Add(batch, sourceID, sourceName, mids...)
 }

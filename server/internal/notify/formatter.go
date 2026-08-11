@@ -30,7 +30,7 @@ func filmPlayURL(mid int64) string {
 	return fmt.Sprintf("%s/play?id=%d", strings.TrimRight(base, "/"), mid)
 }
 
-// formatFilmLine 影片一行：片名可点进站内播放页（依赖网站配置 siteUrl）。
+// formatFilmLine 影片一行：片名可点进站内播放页（依赖网站配置 siteUrl），尾部挂源名称。
 func formatFilmLine(film model.FilmNotifyItem) string {
 	name := strings.TrimSpace(film.Name)
 	if name == "" {
@@ -38,17 +38,23 @@ func formatFilmLine(film model.FilmNotifyItem) string {
 	}
 	name = truncateRunes(name, 80)
 	idLabel := fmt.Sprintf("#%d", film.Mid)
+	sourceSuffix := ""
+	if src := strings.TrimSpace(film.SourceName); src != "" {
+		sourceSuffix = fmt.Sprintf(" [%s]", html.EscapeString(src))
+	}
 	if href := filmPlayURL(film.Mid); href != "" {
 		// 片名整段可点；Telegram 内打开浏览器/内置 WebView，非聊天窗内嵌播放
-		return fmt.Sprintf("· <a href=\"%s\">%s</a> (<code>%s</code>)\n",
+		return fmt.Sprintf("· <a href=\"%s\">%s</a> (<code>%s</code>)%s\n",
 			html.EscapeString(href),
 			html.EscapeString(name),
 			html.EscapeString(idLabel),
+			sourceSuffix,
 		)
 	}
-	return fmt.Sprintf("· %s (<code>%s</code>)\n",
+	return fmt.Sprintf("· %s (<code>%s</code>)%s\n",
 		html.EscapeString(name),
 		html.EscapeString(idLabel),
+		sourceSuffix,
 	)
 }
 

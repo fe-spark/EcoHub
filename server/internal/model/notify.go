@@ -104,8 +104,9 @@ type SourceNotifyResult struct {
 
 // FilmNotifyItem 影片明细项。
 type FilmNotifyItem struct {
-	Mid  int64  `json:"mid"`
-	Name string `json:"name"`
+	Mid        int64  `json:"mid"`
+	Name       string `json:"name"`
+	SourceName string `json:"sourceName,omitempty"`
 }
 
 // NotifyTestResult 测试发送结果。
@@ -137,8 +138,9 @@ func (NotifyChangeBatch) TableName() string {
 
 // NotifyChangeMid 批次内变更影片 mid（全局去重）。
 type NotifyChangeMid struct {
-	BatchID string `gorm:"primaryKey;size:16;index"`
-	Mid     int64  `gorm:"primaryKey;index"`
+	BatchID    string `gorm:"primaryKey;size:16;index"`
+	Mid        int64  `gorm:"primaryKey;index"`
+	SourceName string `gorm:"size:1024"`
 }
 
 func (NotifyChangeMid) TableName() string {

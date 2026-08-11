@@ -623,12 +623,20 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 }
 
 // filterPlayStructureNotifyMIDs 从业务写入的影片中筛出应进「更新列表」的 mid：
-// 新片，或任一线路「最后一项分集标签」相对旧数据有变化（含新增集数/新增线路/集数回退）。
-// 各线路最后一项相同（仅链接/中间集变化）不计入。
+// 新片，或任一线路分集数量严格大于全库已有最大集数。
+// 数量未增加（如已有15集，后更新的源也是15集）不计入更新列表。
 func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[string]model.MovieDetail, oldByMid map[int64]model.MovieDetail) []int64 {
 	if len(changed) == 0 {
 		return nil
 	}
+	mids := make([]int64, 0, len(changed))
+	for _, info := range changed {
+		if info.Mid > 0 {
+			mids = append(mids, info.Mid)
+		}
+	}
+	existingCountsMap, _ := loadExistingEpisodeCountsByMIDs(nil, mids, "")
+
 	out := make([]int64, 0, len(changed))
 	seen := make(map[int64]struct{}, len(changed))
 	for _, info := range changed {
@@ -643,8 +651,14 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 		if !ok {
 			continue
 		}
-		oldDetail, hasOld := oldByMid[mid]
-		if !hasOld || masterLastEpisodeChanged(oldDetail, newDetail) {
+
+		existingCounts := existingCountsMap[mid]
+		if oldDetail, hasOld := oldByMid[mid]; hasOld {
+			existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
+		}
+
+		newCounts := extractEpisodeCountsFromDetail(newDetail)
+		if isEpisodeCountHigher(newCounts, existingCounts) {
 			seen[mid] = struct{}{}
 			out = append(out, mid)
 		}

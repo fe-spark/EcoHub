@@ -185,7 +185,7 @@ func TestNormalizeChatIDsViaRepo(t *testing.T) {
 func TestMidAccumulatorCountsOnly(t *testing.T) {
 	acc := NewMidAccumulator()
 	// 无 DB 时 batch 为 nil，落库为空操作，计数仍工作
-	acc.Add(nil, "src1", 1, 2, 2, 3)
+	acc.Add(nil, "src1", "源1", 1, 2, 2, 3)
 	_, total, _ := acc.DrainSource("src1")
 	if total != 3 {
 		t.Fatalf("total=%d", total)
@@ -320,12 +320,15 @@ func TestFormatFilmLine(t *testing.T) {
 	}
 
 	sitePlayBaseURLFn = func() string { return "https://demo.example.com" }
-	linked := formatFilmLine(model.FilmNotifyItem{Mid: 42, Name: "测试片"})
+	linked := formatFilmLine(model.FilmNotifyItem{Mid: 42, Name: "测试片", SourceName: "红牛资源"})
 	if !strings.Contains(linked, `href="https://demo.example.com/play?id=42"`) {
 		t.Fatalf("expected play link: %s", linked)
 	}
 	if !strings.Contains(linked, ">测试片<") {
 		t.Fatalf("name should be link text: %s", linked)
+	}
+	if !strings.Contains(linked, "[红牛资源]") {
+		t.Fatalf("expected source name suffix: %s", linked)
 	}
 }
 

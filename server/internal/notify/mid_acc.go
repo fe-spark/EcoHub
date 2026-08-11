@@ -19,14 +19,14 @@ func NewMidAccumulator() *MidAccumulator {
 }
 
 // Add 按源计数，并将 mid 写入指定变更批次（明细落 MySQL，全局去重）。
-func (a *MidAccumulator) Add(batch *ChangeBatch, sourceID string, mids ...int64) {
+func (a *MidAccumulator) Add(batch *ChangeBatch, sourceID, sourceName string, mids ...int64) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || len(mids) == 0 {
 		return
 	}
 	// 先落库（全局去重），再计数（按调用方传入去重）
 	if batch != nil {
-		batch.AppendMids(mids...)
+		batch.AppendMids(sourceName, mids...)
 	}
 
 	a.mu.Lock()
