@@ -20,7 +20,6 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     id: item.id,
     name: item.name,
     uri: item.uri,
-    syncPictures: Boolean(item.syncPictures),
     state: Boolean(item.state),
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
@@ -178,11 +177,6 @@ export default function CollectOverview() {
             <Descriptions.Item label="启用状态">
               <Tag color={masterSite.state ? "success" : "default"} variant="filled">
                 {masterSite.state ? "启用中" : "已停用"}
-              </Tag>
-            </Descriptions.Item>
-            <Descriptions.Item label="图片同步">
-              <Tag color={masterSite.syncPictures ? "processing" : "default"} variant="filled">
-                {masterSite.syncPictures ? "开启" : "关闭"}
               </Tag>
             </Descriptions.Item>
           </Descriptions>

@@ -1,9 +1,7 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Select, Switch, Typography } from "antd";
+import { Button, Form, Input, InputNumber, Modal, Radio, Select, Switch } from "antd";
 import { useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import { collectDuration, type SourceFormValues } from "./types";
-
-const { Text } = Typography;
 
 interface SourceFormModalProps {
   open: boolean;
@@ -20,8 +18,6 @@ export default function SourceFormModal(props: SourceFormModalProps) {
   const { open, mode, loading, testing, form, onCancel, onSubmit, onTest } =
     props;
   const { canWrite } = useManagePermission();
-  const currentGrade = Form.useWatch("grade", form);
-
   const title = useMemo(
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
@@ -79,11 +75,6 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           <Radio.Group
             optionType="button"
             buttonStyle="solid"
-            onChange={(event) => {
-              if (event.target.value === 1) {
-                form.setFieldValue("syncPictures", false);
-              }
-            }}
             options={[
               { label: "主采集站", value: 0 },
               { label: "附属采集站", value: 1 },
@@ -102,22 +93,6 @@ export default function SourceFormModal(props: SourceFormModalProps) {
             options={collectDuration.map((item) => ({ label: item.label, value: item.time }))}
           />
         </Form.Item>
-        {currentGrade === 0 ? (
-          <Form.Item
-            label="图片同步"
-            name="syncPictures"
-            valuePropName="checked"
-            extra="采集时把影片封面下载到服务器素材中心，可统一搜索、改名与管理。"
-          >
-            <Switch checkedChildren="开启" unCheckedChildren="关闭" />
-          </Form.Item>
-        ) : (
-          <Form.Item label="图片同步">
-            <Text type="secondary">
-              附属采集站仅扩展主站影片的播放源，不产生独立影片与封面，无需图片同步。
-            </Text>
-          </Form.Item>
-        )}
         <Form.Item label="是否启用" name="state" valuePropName="checked">
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>

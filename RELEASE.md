@@ -1,3 +1,45 @@
+# v1.1.5-beta.21
+
+> **预发布（prerelease）**：采集进度会话展示优化、素材中心收敛为用户上传、移除采集图片同步、管理端权限透传与 ImagePicker 选用封面、系统设置 Tabs 滚动修复，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.21`
+- `ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.21`
+
+## 相对 beta.20
+
+- **采集中心进度会话与展示优化**：
+  - 顶部总进度支持单站/批量：活跃任务 + 终态保留期内任务一并计入，结束后保留倒计时再隐藏，避免进度条瞬间消失
+  - 进度保留窗口由 60s 收敛为 10s（足够轮询 + 前端结束态展示），降低刷新后残留闪回
+  - 采集站卡片/进度环与总览样式收敛，交互与批量采集体验统一
+- **素材中心仅保留用户上传**：
+  - 移除「采集图片同步」能力（接口 `/manage/file/sync`、采集站 `syncPictures` 配置、虚拟图片队列写入与修复逻辑）
+  - 素材列表不再按全部/关联影片筛选，仅展示用户上传素材；启动时一次性清理历史采集同步图库记录与本地文件
+  - 新增管理端 `ImagePicker`，轮播/影片编辑可直接从素材中心选用封面；上传白名单统一（jpg/jpeg/png/webp/ico）
+- **管理端写权限透传**：
+  - `ManagePermissionProvider` 基于用户 `canWrite` 下发；采集/素材等写操作统一受控
+- **账号与重置增强**：
+  - 用户列表支持按角色、状态筛选
+  - 数据重置完成后自动同步主站分类树，避免重置后分类空档
+- **系统设置 Tabs 滚动修复**：
+  - Tab 栏禁止纵向滚动条，下划线指示条贴底对齐，避免浅色/窄屏下出现多余竖条
+- **其它体验**：
+  - 前台 Header/Loading 与主题相关小优化；管理布局菜单展开与通知 Alert API 适配；网站设置与用户管理页样式收敛
+
+## 部署（beta.21）
+
+```bash
+# compose 镜像 tag 示例（不会覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub-server:v1.1.5-beta.21
+#   image: ghcr.io/fe-spark/ecohub-web:v1.1.5-beta.21
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.20
 
 > **预发布（prerelease）**：重置按钮搜索状态透传修正、分类管理树状表格层级重构与智能折叠、工作台全真实接口图表与排布优化、系统设置 Tabs 规范重构及浅色模式全局边框对比度修复，**不会**覆盖 `:latest`。

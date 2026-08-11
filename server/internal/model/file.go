@@ -19,13 +19,7 @@ func (f *FileInfo) TableName() string {
 	return "files"
 }
 
-// VirtualPicture 采集入站,待同步的图片信息
-type VirtualPicture struct {
-	Id   int64  `json:"id"`
-	Link string `json:"link"`
-}
-
-// VirtualPictureQueue 待同步图片队列 (MySQL)
+// VirtualPictureQueue 历史采集图片同步队列表（功能已移除，仅保留表结构兼容与重置清空）
 type VirtualPictureQueue struct {
 	gorm.Model
 	Mid  int64  `gorm:"uniqueIndex"`

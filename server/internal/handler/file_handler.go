@@ -8,7 +8,6 @@ import (
 
 	"server/internal/config"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -18,21 +17,6 @@ import (
 type FileHandler struct{}
 
 var FileHd = new(FileHandler)
-
-// SyncPictures 手动触发采集图片同步
-func (h *FileHandler) SyncPictures(c *gin.Context) {
-	if !repository.AcquirePictureSync() {
-		dto.Failed("图片同步任务正在执行中，请稍后再试", c)
-		return
-	}
-	go func() {
-		defer repository.ReleasePictureSync()
-		// 先补齐本地缺失文件，再处理待同步队列
-		repository.RepairMissingPictures()
-		repository.SyncFilmPicture()
-	}()
-	dto.SuccessOnlyMsg("图片同步已启动（含缺失文件修复）", c)
-}
 
 var allowedImageExt = map[string]bool{
 	"jpg":  true,
@@ -162,14 +146,10 @@ func (h *FileHandler) DelFile(c *gin.Context) {
 	dto.SuccessOnlyMsg("文件已删除", c)
 }
 
-// PhotoWall 照片墙数据
+// PhotoWall 照片墙数据（仅用户上传素材）
 func (h *FileHandler) PhotoWall(c *gin.Context) {
 	page := dto.GetPageParams(c)
-	scope := strings.TrimSpace(c.DefaultQuery("scope", "all"))
-	if scope != "manual" && scope != "related" {
-		scope = "all"
-	}
 	name := strings.TrimSpace(c.DefaultQuery("name", ""))
-	pl := service.FileSvc.GetPhotoPage(scope, name, page)
+	pl := service.FileSvc.GetPhotoPage(name, page)
 	dto.Success(gin.H{"list": pl, "page": page}, "图片分页数据获取成功", c)
 }

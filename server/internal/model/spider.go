@@ -55,7 +55,8 @@ type FilmSource struct {
 	Name         string      `json:"name" gorm:"size:64"`             // 采集站点备注名
 	Uri          string      `json:"uri" gorm:"uniqueIndex;size:255"` // 采集链接
 	Grade        SourceGrade `json:"grade"`                           // 采集站等级 主站点 || 附属站
-	SyncPictures bool        `json:"syncPictures"`                    // 是否同步图片到服务器
+	// SyncPictures 已废弃：采集不再下载封面到素材中心，字段仅兼容旧库列
+	SyncPictures bool        `json:"-"`
 	State        bool        `json:"state"`                           // 是否启用
 	Interval     int         `json:"interval"`                        // 采集时间间隔 单位/ms
 	Cd           int         `json:"cd"`                              // 采集时长 单位/小时

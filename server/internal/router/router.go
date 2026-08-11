@@ -156,7 +156,6 @@ func SetupRouter() *gin.Engine {
 		{
 			fileRoute.POST(`/upload`, handler.FileHd.SingleUpload)
 			fileRoute.POST(`/upload/multiple`, handler.FileHd.MultipleUpload)
-			fileRoute.POST(`/sync`, handler.FileHd.SyncPictures)
 			fileRoute.POST(`/rename`, handler.FileHd.RenameFile)
 			fileRoute.POST(`/del`, handler.FileHd.DelFile)
 			fileRoute.GET(`/list`, handler.FileHd.PhotoWall)

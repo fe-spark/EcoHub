@@ -47,10 +47,6 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if s.SyncPictures && (s.Grade == model.SlaveCollect) {
-		dto.Failed("附属采集站不支持图片同步，该功能仅主采集站可用", c)
-		return
-	}
 	if err := spider.CollectApiTest(s); err != nil {
 		dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
 		return
@@ -70,10 +66,6 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 	}
 	if err := validFilmSource(s); err != nil {
 		dto.Failed(err.Error(), c)
-		return
-	}
-	if s.SyncPictures && (s.Grade == model.SlaveCollect) {
-		dto.Failed("附属采集站不支持图片同步，该功能仅主采集站可用", c)
 		return
 	}
 	if s.Id == "" {
@@ -113,17 +105,12 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 		dto.Failed("数据异常,资源站信息不存在", c)
 		return
 	}
-	if s.SyncPictures && (fs.Grade == model.SlaveCollect) {
-		dto.Failed("附属站点无法开启图片同步功能", c)
-		return
-	}
-	if s.State != fs.State || s.SyncPictures != fs.SyncPictures {
+	if s.State != fs.State {
 		upds := model.FilmSource{
 			Id:           fs.Id,
 			Name:         fs.Name,
 			Uri:          fs.Uri,
 			Grade:        fs.Grade,
-			SyncPictures: s.SyncPictures,
 			State:        s.State,
 			Interval:     fs.Interval,
 			Cd:           fs.Cd,

@@ -250,13 +250,3 @@ func ConvertPlayUrl(playUrl string) []model.MovieUrlInfo {
 	return result
 }
 
-// ConvertVirtualPicture 将影片详情信息转化为虚拟图片信息
-func ConvertVirtualPicture(details []model.MovieDetail) []model.VirtualPicture {
-	var l []model.VirtualPicture
-	for _, d := range details {
-		if len(d.Picture) > 0 {
-			l = append(l, model.VirtualPicture{Id: d.Id, Link: d.Picture})
-		}
-	}
-	return l
-}

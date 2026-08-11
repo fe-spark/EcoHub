@@ -87,7 +87,6 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     id: item.id,
     name: item.name,
     uri: item.uri,
-    syncPictures: Boolean(item.syncPictures),
     state: Boolean(item.state),
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
@@ -475,7 +474,6 @@ export default function CollectManagePageView() {
         name: record.name,
         uri: record.uri,
         grade: record.grade,
-        syncPictures: record.syncPictures,
         state: record.state,
         interval: record.interval,
         cd: value,
@@ -717,7 +715,6 @@ export default function CollectManagePageView() {
     sourceForm.resetFields();
     sourceForm.setFieldsValue({
       grade: 1,
-      syncPictures: false,
       state: false,
       interval: 0,
       cd: 24,
@@ -735,7 +732,6 @@ export default function CollectManagePageView() {
       sourceForm.setFieldsValue({
         name: String(resp.data.name ?? ""),
         uri: String(resp.data.uri ?? ""),
-        syncPictures: Boolean(resp.data.syncPictures),
         state: Boolean(resp.data.state),
         grade: Number(resp.data.grade ?? 1),
         interval: Number(resp.data.interval ?? 0),
