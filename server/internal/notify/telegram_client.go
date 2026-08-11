@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -263,12 +264,17 @@ func sanitizeTelegramErr(err error, token, proxyLabel string) error {
 }
 
 func (c *telegramClient) sendMessage(ctx context.Context, token, chatID, text string) error {
-	return c.sendMessageWithMarkup(ctx, token, chatID, text, nil)
+	return c.sendMessageToTarget(ctx, token, chatID, "", text, nil)
 }
 
 func (c *telegramClient) sendMessageWithMarkup(ctx context.Context, token, chatID, text string, markup *InlineKeyboardMarkup) error {
+	return c.sendMessageToTarget(ctx, token, chatID, "", text, markup)
+}
+
+func (c *telegramClient) sendMessageToTarget(ctx context.Context, token, chatID, threadID, text string, markup *InlineKeyboardMarkup) error {
 	token = strings.TrimSpace(token)
 	chatID = strings.TrimSpace(chatID)
+	threadID = strings.TrimSpace(threadID)
 	if token == "" || chatID == "" {
 		return fmt.Errorf("bot token 或 chat id 为空")
 	}
@@ -277,6 +283,12 @@ func (c *telegramClient) sendMessageWithMarkup(ctx context.Context, token, chatI
 		"text":                     text,
 		"parse_mode":               "HTML",
 		"disable_web_page_preview": true,
+	}
+	if threadID != "" {
+		// Bot API 要求 message_thread_id 为整数
+		if tid, err := strconv.ParseInt(threadID, 10, 64); err == nil && tid > 0 {
+			payload["message_thread_id"] = tid
+		}
 	}
 	if markup != nil && len(markup.InlineKeyboard) > 0 {
 		payload["reply_markup"] = markup

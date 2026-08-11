@@ -151,7 +151,6 @@ func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSiz
 	if listN > 0 {
 		pages := (listN + pageSize - 1) / pageSize
 		fmt.Fprintf(&overview, "\n📋 更新列表 <b>%d</b> 部 · <b>%d</b> 页\n", listN, pages)
-		fmt.Fprintf(&overview, "<i>主站已有影片的播放源更新（含附属站扩源）；点击浏览，可翻页</i>\n")
 	}
 	return overview.String()
 }
@@ -435,4 +434,49 @@ func lastNewline(runes []rune) int {
 		}
 	}
 	return -1
+}
+
+func severityBadge(level model.Severity) string {
+	switch level {
+	case model.SeverityInfo:
+		return "ℹ️ INFO"
+	case model.SeverityNotice:
+		return "📢 NOTICE"
+	case model.SeverityWarn:
+		return "⚠️ WARN"
+	case model.SeverityError:
+		return "🚨 ERROR"
+	case model.SeverityCritical:
+		return "🔥 CRITICAL"
+	default:
+		return string(level)
+	}
+}
+
+// formatEventHTML 统一事件格式化。
+func formatEventHTML(siteName string, evt model.NotifyEvent) string {
+	var b strings.Builder
+	prefix := formatTitlePrefix(siteName)
+	badge := severityBadge(evt.Severity)
+	title := strings.TrimSpace(evt.Title)
+	if title == "" {
+		title = evt.Key
+	}
+	fmt.Fprintf(&b, "<b>%s %s</b> [%s]\n", prefix, html.EscapeString(title), badge)
+	if summary := strings.TrimSpace(evt.Summary); summary != "" {
+		fmt.Fprintf(&b, "%s\n", html.EscapeString(summary))
+	}
+	if len(evt.Data) > 0 {
+		b.WriteString("\n📋 <b>详细信息:</b>\n")
+		for k, v := range evt.Data {
+			valStr := fmt.Sprintf("%v", v)
+			fmt.Fprintf(&b, "· <code>%s</code>: %s\n", html.EscapeString(k), html.EscapeString(valStr))
+		}
+	}
+	t := evt.Timestamp
+	if t.IsZero() {
+		t = time.Now()
+	}
+	fmt.Fprintf(&b, "\n🕒 %s\n", t.Format("2006-01-02 15:04:05"))
+	return b.String()
 }

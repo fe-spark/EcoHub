@@ -210,6 +210,25 @@ func GetCollectSourceListByGrade(grade model.SourceGrade) []model.FilmSource {
 	return list
 }
 
+// PickMasterSourceForCategory 选取用于分类树同步的主站。
+// 规则：分类树只能来自主站；优先已启用主站；无启用时用任意主站（含未启用）；
+// 没有任何主站时返回 nil（没有主站就不能有分类树）。
+func PickMasterSourceForCategory() *model.FilmSource {
+	masters := GetCollectSourceListByGrade(model.MasterCollect)
+	if len(masters) == 0 {
+		return nil
+	}
+	for i := range masters {
+		if masters[i].State {
+			m := masters[i]
+			return &m
+		}
+	}
+	// 未启用的主站仍可作为分类树唯一来源
+	m := masters[0]
+	return &m
+}
+
 // GetEnabledCollectSourceList 获取已启用采集站列表。
 func GetEnabledCollectSourceList() []model.FilmSource {
 	var list []model.FilmSource

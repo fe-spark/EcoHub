@@ -18,6 +18,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
@@ -1365,6 +1366,28 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	if len(sources) == 0 {
 		return
 	}
+
+	// 闭环保底：本地分类树为空时，仅从主站同步（含未启用主站）。
+	// 没有主站就不能有分类树——不从附属站拉分类。
+	if db.Mdb != nil {
+		var categoryCount int64
+		_ = db.Mdb.Model(&model.Category{}).Count(&categoryCount).Error
+		if categoryCount == 0 {
+			syslog.Warnf("[Spider] 检测到本地分类树为空(0 个分类)，尝试从主站同步分类树...")
+			target := repository.PickMasterSourceForCategory()
+			if target == nil {
+				syslog.Warnf("[Spider] 无主采集站，跳过分类树同步（没有主站就不能有分类树）")
+			} else if err := CollectCategory(target); err != nil {
+				syslog.Errorf("[Spider] 采集前自动同步主站分类失败 name=%s state=%v: %v",
+					target.Name, target.State, err)
+			} else {
+				repository.RefreshCategoryCache()
+				syslog.Infof("[Spider] 采集前自动同步主站分类成功 name=%s state=%v",
+					target.Name, target.State)
+			}
+		}
+	}
+
 	sources = prioritizeCollectSources(sources)
 	// 变更 mid 写入 MySQL 批次（无内存全量、无 Redis 会话），批次显式沿采集链传递
 	batch := notify.StartChangeBatch()
@@ -1673,6 +1696,10 @@ func ResetCategory(s *model.FilmSource) error {
 func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) error {
 	if s == nil {
 		return errors.New("采集站信息不存在")
+	}
+	// 硬约束：分类树只能来自主站，禁止附属站写入分类树
+	if s.Grade != model.MasterCollect {
+		return fmt.Errorf("分类树只能从主采集站同步，当前站 grade=%d name=%s", s.Grade, s.Name)
 	}
 	// 获取分类树形数据
 	categoryTree, err := spiderCore.GetCategoryTree(utils.RequestInfo{Uri: s.Uri, Params: url.Values{}})

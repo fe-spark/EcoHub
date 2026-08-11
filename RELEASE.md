@@ -1,3 +1,41 @@
+# v2.0.0-beta.3
+
+> **预发布（prerelease）**：Telegram 通知路由矩阵（等级 / 免打扰 / 无更新静音）、更新列表按导航大类筛选，以及分类树严格仅从主站同步，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.0-beta.3`
+
+## 相对 v2.0.0-beta.2
+
+- **通知路由与策略**：
+  - 支持 Severity（INFO/NOTICE/WARN/ERROR/CRITICAL）、Category（collect/cron/audit）与 Quiet Hours 免打扰（东八区；ERROR/CRITICAL 默认可穿透）
+  - `onlyNotifyOnUpdate`：无更新且无失败时跳过批次摘要；历史配置缺字段默认开启
+  - Targets 路由（Chat / Forum Thread / 最低等级 / 分类订阅）；`ChatIDs` 为成员真相源，保存与读取时与 Targets 对齐，避免改 Chat 仍发到旧目标
+  - Bot 命令白名单与发送目标同源（`effectiveTargets`）
+- **Telegram 更新列表按分类浏览**：
+  - 概要键盘按首页导航大类统计并打开筛选列表；callback 使用短下标编码规避 64 字节限制
+  - 兼容旧 `open_名称` / `页码_名称` 回调
+- **分类树硬约束**：
+  - 分类树只能来自主站（含未启用主站）；无主站则不构建分类树，禁止附属站写入
+  - 采集前空分类兜底与 `SyncMasterCategoryTree` / 重置分类统一走 `PickMasterSourceForCategory`
+- **采集健壮性**：
+  - 影片 `update_stamp` 解析失败时用当前时间兜底，避免整条元数据入库失败
+- **管理端通知设置 UI**：
+  - 分区重构（连接 / 内容限流与免打扰 / 事件分组）；新增无更新静音与 Quiet Hours 表单项
+
+## 部署（v2.0.0-beta.3）
+
+```bash
+# compose 镜像 tag 示例（预发布版本不会自动覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.0-beta.3
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v2.0.0-beta.2
 
 > **预发布（prerelease）**：Telegram 更新列表按「分集数量增加」去重，并展示触发更新的源名称，**不会**覆盖 `:latest`。

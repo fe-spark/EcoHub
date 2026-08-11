@@ -103,43 +103,37 @@ func (s *SpiderService) SyncCollect(ids string) {
 	go spider.CollectSingleFilm(ids)
 }
 
-// FilmClassCollect 重置为主站原始分类并清空业务属性
+// FilmClassCollect 重置为主站原始分类并清空业务属性。
+// 分类树只能来自主站（含未启用）；无主站则拒绝操作。
 func (s *SpiderService) FilmClassCollect() error {
-	l := repository.GetCollectSourceListByGrade(model.MasterCollect)
-	if l == nil {
-		return errors.New("未获取到主采集站信息")
+	target := repository.PickMasterSourceForCategory()
+	if target == nil {
+		return errors.New("未获取到主采集站信息，没有主站不能构建分类树")
 	}
-	for _, fs := range l {
-		if fs.State {
-			if err := spider.ResetCategory(&fs); err != nil {
-				return err
-			}
-			finalizeCategorySync()
-			return nil
-		}
+	if err := spider.ResetCategory(target); err != nil {
+		return err
 	}
-	return errors.New("未获取到已启用的主采集站信息")
+	finalizeCategorySync()
+	return nil
 }
 
+// SyncMasterCategoryTree 从主站同步分类树。
+// 必须使用主站（优先已启用，否则用未启用主站）；没有任何主站时失败，不从附属站拉分类。
 func (s *SpiderService) SyncMasterCategoryTree() error {
-	l := repository.GetCollectSourceListByGrade(model.MasterCollect)
-	if len(l) == 0 {
-		return errors.New("未获取到主采集站信息")
+	targetSource := repository.PickMasterSourceForCategory()
+	if targetSource == nil {
+		return errors.New("未获取到主采集站信息，没有主站不能有分类树")
 	}
-	for _, fs := range l {
-		if !fs.State {
-			continue
-		}
-		log.Printf("[SpiderService] 启动同步主站分类: name=%s id=%s uri=%s", fs.Name, fs.Id, fs.Uri)
-		if err := spider.CollectCategory(&fs); err != nil {
-			log.Printf("[SpiderService] 主站分类同步失败: name=%s id=%s err=%v", fs.Name, fs.Id, err)
-			return err
-		}
-		finalizeCategorySync()
-		log.Printf("[SpiderService] 主站分类同步完成: name=%s id=%s", fs.Name, fs.Id)
-		return nil
+
+	log.Printf("[SpiderService] 启动同步主站分类: name=%s id=%s uri=%s state=%v",
+		targetSource.Name, targetSource.Id, targetSource.Uri, targetSource.State)
+	if err := spider.CollectCategory(targetSource); err != nil {
+		log.Printf("[SpiderService] 主站分类同步失败: name=%s id=%s err=%v", targetSource.Name, targetSource.Id, err)
+		return err
 	}
-	return errors.New("未获取到已启用的主采集站信息")
+	finalizeCategorySync()
+	log.Printf("[SpiderService] 主站分类同步完成: name=%s id=%s", targetSource.Name, targetSource.Id)
+	return nil
 }
 
 // StopAllTasks 强制停止所有採集任務

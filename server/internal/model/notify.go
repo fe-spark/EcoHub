@@ -2,17 +2,57 @@ package model
 
 import "time"
 
+// Severity 通知严重程度。
+type Severity string
+
+const (
+	SeverityInfo     Severity = "INFO"
+	SeverityNotice   Severity = "NOTICE"
+	SeverityWarn     Severity = "WARN"
+	SeverityError    Severity = "ERROR"
+	SeverityCritical Severity = "CRITICAL"
+)
+
+// 通知领域分类 Category
+const (
+	CategoryCollect = "collect"
+	CategoryCron    = "cron"
+	CategoryAudit   = "audit"
+)
+
+// NotifyTarget 通知接收目标（支持 Chat ID 和 Telegram Topic Thread ID）。
+type NotifyTarget struct {
+	ID                   string   `json:"id"`
+	Name                 string   `json:"name"`
+	ChatID               string   `json:"chatId"`
+	ThreadID             string   `json:"threadId,omitempty"` // Telegram Forum Topic Thread ID
+	Enabled              bool     `json:"enabled"`
+	MinLevel             Severity `json:"minLevel,omitempty"`
+	SubscribedCategories []string `json:"subscribedCategories,omitempty"`
+}
+
+// NotifyQuietHours 免打扰时段设置。
+type NotifyQuietHours struct {
+	Enabled     bool       `json:"enabled"`
+	Start       string     `json:"start"`       // HH:mm 格式，例如 "23:00"
+	End         string     `json:"end"`         // HH:mm 格式，例如 "07:00"
+	AllowLevels []Severity `json:"allowLevels"` // 静音期间仍允许穿透的等级，默认 ["ERROR", "CRITICAL"]
+}
+
 // NotifyConfig Telegram 通知配置（MySQL JSON + Redis 缓存）。
 type NotifyConfig struct {
-	Enabled  bool     `json:"enabled"`
-	BotToken string   `json:"botToken"`
-	ChatIDs  []string `json:"chatIds"`
+	Enabled  bool           `json:"enabled"`
+	BotToken string         `json:"botToken"`
+	ChatIDs  []string       `json:"chatIds"` // 向后兼容旧版
+	Targets  []NotifyTarget `json:"targets"` // 新版路由目标
 
 	Events NotifyEventSwitches `json:"events"`
 
-	IncludeFilmDetails bool `json:"includeFilmDetails"`
-	MaxFilmsInMessage  int  `json:"maxFilmsInMessage"`
-	MinIntervalSec     int  `json:"minIntervalSec"`
+	IncludeFilmDetails bool             `json:"includeFilmDetails"`
+	OnlyNotifyOnUpdate bool             `json:"onlyNotifyOnUpdate"` // 无更新且无失败时跳过推送
+	MaxFilmsInMessage  int              `json:"maxFilmsInMessage"`
+	MinIntervalSec     int              `json:"minIntervalSec"`
+	QuietHours         NotifyQuietHours `json:"quietHours"`
 }
 
 // 通知消息中影片数约束（分页每页条数上限），后端校验/默认值统一来自此处。
@@ -20,6 +60,18 @@ const (
 	MaxFilmsInMessageCap     = 20
 	DefaultMaxFilmsInMessage = 15
 )
+
+// NotifyEvent 统一事件模型 Envelope
+type NotifyEvent struct {
+	ID        string                 `json:"id"`
+	Key       string                 `json:"key"`        // e.g. "collect_batch_summary"
+	Category  string                 `json:"category"`   // e.g. "collect", "cron", "audit"
+	Severity  Severity               `json:"severity"`   // e.g. "INFO", "WARN", "ERROR"
+	Title     string                 `json:"title"`
+	Summary   string                 `json:"summary"`
+	Data      map[string]interface{} `json:"data,omitempty"`
+	Timestamp time.Time              `json:"timestamp"`
+}
 
 // NotifyEventSwitches 各事件开关。
 type NotifyEventSwitches struct {

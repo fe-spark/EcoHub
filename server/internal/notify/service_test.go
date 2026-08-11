@@ -116,6 +116,77 @@ func TestValidateAndMergeUpdateKeepToken(t *testing.T) {
 	if len(merged.ChatIDs) != 2 {
 		t.Fatalf("chat ids: %v", merged.ChatIDs)
 	}
+	// Targets 应与 ChatIDs 对齐
+	if len(merged.Targets) != 2 {
+		t.Fatalf("targets should match chatIDs: %+v", merged.Targets)
+	}
+}
+
+func TestValidateAndMergeUpdateSyncsTargetsWithChatIDs(t *testing.T) {
+	old := model.NotifyConfig{
+		BotToken: "123456:REALTOKENVALUE",
+		ChatIDs:  []string{"A"},
+		Targets: []model.NotifyTarget{
+			{ChatID: "A", ThreadID: "10", Enabled: true, MinLevel: model.SeverityError, Name: "主题A"},
+		},
+	}
+	// 前端只改 chatIds，不传 targets（或仍带陈旧 A）
+	incoming := model.NotifyConfig{
+		Enabled:           false,
+		ChatIDs:           []string{"C"},
+		Targets:           []model.NotifyTarget{{ChatID: "A", Enabled: true}}, // 陈旧
+		MaxFilmsInMessage: 15,
+		MinIntervalSec:    60,
+	}
+	merged, err := ValidateAndMergeUpdate(old, incoming)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged.ChatIDs) != 1 || merged.ChatIDs[0] != "C" {
+		t.Fatalf("chatIDs: %v", merged.ChatIDs)
+	}
+	if len(merged.Targets) != 1 || merged.Targets[0].ChatID != "C" {
+		t.Fatalf("stale target A must be dropped: %+v", merged.Targets)
+	}
+
+	// 保留仍在成员列表中的 Thread 元数据
+	incoming2 := model.NotifyConfig{
+		Enabled:           false,
+		ChatIDs:           []string{"A"},
+		MaxFilmsInMessage: 15,
+		MinIntervalSec:    60,
+	}
+	merged2, err := ValidateAndMergeUpdate(old, incoming2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(merged2.Targets) != 1 || merged2.Targets[0].ThreadID != "10" || merged2.Targets[0].MinLevel != model.SeverityError {
+		t.Fatalf("should preserve thread meta for A: %+v", merged2.Targets)
+	}
+}
+
+func TestChatAllowedUsesEffectiveTargets(t *testing.T) {
+	cfg := model.NotifyConfig{
+		// ChatIDs 与 Targets 故意不一致：发送/鉴权应以 Targets 为准（effectiveTargets）
+		ChatIDs: []string{"-100111"},
+		Targets: []model.NotifyTarget{
+			{ChatID: "-100999", Enabled: true},
+			{ChatID: "@mychannel", Enabled: true},
+			{ChatID: "-100000", Enabled: false},
+		},
+	}
+	if !chatAllowed(cfg, "-100999", "") {
+		t.Fatal("enabled target chat should allow")
+	}
+	if !chatAllowed(cfg, "-100456", "mychannel") {
+		t.Fatal("username should match target")
+	}
+	if chatAllowed(cfg, "-100111", "") {
+		t.Fatal("chat only in ChatIDs but not in Targets should not allow when Targets set")
+	}
+	if chatAllowed(cfg, "-100000", "") {
+		t.Fatal("disabled target should not allow")
+	}
 }
 
 func TestValidateChatID(t *testing.T) {
@@ -250,17 +321,37 @@ func TestParsePageCallback(t *testing.T) {
 	sitePlayBaseURLFn = func() string { return "" }
 	t.Cleanup(func() { sitePlayBaseURLFn = prev })
 
-	sid, page, kind, ok := parsePagedCallback(callbackPrefix, "nfp:abc123:2")
-	if !ok || sid != "abc123" || page != 2 || kind != "page" {
-		t.Fatalf("parse page: %v %v %v %v", sid, page, kind, ok)
+	sid, page, catIdx, cat, kind, ok := parsePagedCallback(callbackPrefix, "nfp:abc123:2")
+	if !ok || sid != "abc123" || page != 2 || kind != "page" || cat != "" || catIdx != catIdxAll {
+		t.Fatalf("parse page: %v %v %v %v %v %v", sid, page, catIdx, cat, kind, ok)
 	}
-	_, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open")
-	if !ok || kind != "open" {
-		t.Fatalf("parse open: %v %v", kind, ok)
+	_, _, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open")
+	if !ok || kind != "open" || catIdx != catIdxAll {
+		t.Fatalf("parse open: %v %v %v", kind, catIdx, ok)
 	}
-	_, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:back")
+	// 新格式：分类用下标，避免 callback_data 超长
+	_, _, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:openc1")
+	if !ok || kind != "open" || catIdx != 1 {
+		t.Fatalf("parse openc1: kind=%v catIdx=%v ok=%v", kind, catIdx, ok)
+	}
+	_, page, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:3c0")
+	if !ok || kind != "page" || page != 3 || catIdx != 0 {
+		t.Fatalf("parse 3c0: page=%v catIdx=%v kind=%v ok=%v", page, catIdx, kind, ok)
+	}
+	// 兼容旧消息：open_{名称}
+	_, _, catIdx, cat, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open_动漫")
+	if !ok || kind != "open" || cat != "动漫" || catIdx != catIdxAll {
+		t.Fatalf("parse open_动漫: kind=%v cat=%v catIdx=%v ok=%v", kind, cat, catIdx, ok)
+	}
+	_, _, _, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:back")
 	if !ok || kind != "back" {
 		t.Fatalf("parse back: %v %v", kind, ok)
+	}
+	if got := formatOpenCallback(callbackPrefix, "abc123", 2); got != "nfp:abc123:openc2" {
+		t.Fatalf("formatOpenCallback: %s", got)
+	}
+	if got := formatPageCallback(callbackPrefix, "abc123", 4, 1); got != "nfp:abc123:4c1" {
+		t.Fatalf("formatPageCallback: %s", got)
 	}
 	ov := buildOverviewKeyboard("abc123")
 	if ov == nil || len(ov.InlineKeyboard) != 1 || !strings.Contains(ov.InlineKeyboard[0][0].Text, "更新列表") {
@@ -273,6 +364,7 @@ func TestParsePageCallback(t *testing.T) {
 }
 
 func TestIsAllowedChatUsernameMatch(t *testing.T) {
+	// 无 Targets 时 effectiveTargets 由 ChatIDs 包装
 	cfg := model.NotifyConfig{ChatIDs: []string{"-100123", "@mychannel"}}
 	if !chatAllowed(cfg, "-100123", "") {
 		t.Fatal("numeric chat id should match")
@@ -471,6 +563,96 @@ func TestSourceConfigBatchRateKey(t *testing.T) {
 		t.Fatalf("unexpected key prefix: %s", sourceConfigBatchRateKey(a))
 	}
 }
+
+func TestLevelAndCategoryFiltering(t *testing.T) {
+	if !isLevelAllowed(model.SeverityWarn, model.SeverityError) {
+		t.Fatal("ERROR should be allowed when target min level is WARN")
+	}
+	if isLevelAllowed(model.SeverityError, model.SeverityInfo) {
+		t.Fatal("INFO should be blocked when target min level is ERROR")
+	}
+
+	if !isCategorySubscribed([]string{"collect"}, "collect.batch_summary") {
+		t.Fatal("collect.batch_summary should match collect category subscription")
+	}
+	if isCategorySubscribed([]string{"cron"}, "collect.batch_summary") {
+		t.Fatal("collect.batch_summary should not match cron category subscription")
+	}
+}
+
+func TestIsInQuietHours(t *testing.T) {
+	qh := model.NotifyQuietHours{
+		Enabled: true,
+		Start:   "23:00",
+		End:     "07:00",
+	}
+
+	// 23:30 应该在免打扰时段内
+	night := time.Date(2026, 8, 11, 23, 30, 0, 0, time.Local)
+	if !isInQuietHours(qh, night) {
+		t.Fatal("23:30 should be in quiet hours [23:00-07:00]")
+	}
+
+	// 12:00 应该不在免打扰时段内
+	noon := time.Date(2026, 8, 11, 12, 0, 0, 0, time.Local)
+	if isInQuietHours(qh, noon) {
+		t.Fatal("12:00 should not be in quiet hours [23:00-07:00]")
+	}
+}
+
+func TestOnlyNotifyOnUpdateFiltering(t *testing.T) {
+	// 与 sendBatchSummary 一致：有更新看 listN，有失败看 FailedSources / FinalizeError
+	listN := 0
+	payload := model.CollectBatchNotifyPayload{
+		TotalFilms:     0,
+		FailedSources:  0,
+		SuccessSources: 2,
+		FinalizeError:  "",
+	}
+	hasChanges := listN > 0
+	hasFailures := payload.FailedSources > 0 || strings.TrimSpace(payload.FinalizeError) != ""
+	if hasChanges || hasFailures {
+		t.Fatal("zero listN and no failures should mute when OnlyNotifyOnUpdate")
+	}
+
+	listN = 5
+	hasChanges = listN > 0
+	if !hasChanges {
+		t.Fatal("listN>0 must count as changes")
+	}
+
+	payload.FailedSources = 1
+	listN = 0
+	hasChanges = listN > 0
+	hasFailures = payload.FailedSources > 0 || strings.TrimSpace(payload.FinalizeError) != ""
+	if hasChanges || !hasFailures {
+		t.Fatal("failures alone must still notify")
+	}
+}
+
+func TestShouldMuteByQuietHours(t *testing.T) {
+	cfg := model.NotifyConfig{
+		QuietHours: model.NotifyQuietHours{
+			Enabled:     true,
+			Start:       "00:00",
+			End:         "23:59",
+			AllowLevels: []model.Severity{model.SeverityError, model.SeverityCritical},
+		},
+	}
+	// 几乎全天免打扰：INFO 应静音，ERROR 可穿透
+	if !shouldMuteByQuietHours(cfg, model.SeverityInfo) {
+		t.Fatal("INFO should be muted in quiet hours")
+	}
+	if shouldMuteByQuietHours(cfg, model.SeverityError) {
+		t.Fatal("ERROR should pierce quiet hours")
+	}
+	cfg.QuietHours.Enabled = false
+	if shouldMuteByQuietHours(cfg, model.SeverityInfo) {
+		t.Fatal("disabled quiet hours should not mute")
+	}
+}
+
+
 
 func truncateForTest(s string, n int) string {
 	if len(s) <= n {
