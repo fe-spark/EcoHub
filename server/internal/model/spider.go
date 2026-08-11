@@ -58,6 +58,7 @@ type FilmSource struct {
 	SyncPictures bool        `json:"syncPictures"`                    // 是否同步图片到服务器
 	State        bool        `json:"state"`                           // 是否启用
 	Interval     int         `json:"interval"`                        // 采集时间间隔 单位/ms
+	Cd           int         `json:"cd"`                              // 采集时长 单位/小时
 }
 
 func (f *FilmSource) TableName() string {

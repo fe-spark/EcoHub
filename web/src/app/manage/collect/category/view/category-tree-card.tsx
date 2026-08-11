@@ -171,25 +171,25 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
               {value}
             </Typography.Text>
             {isRoot ? (
-              <Tag color="gold" bordered={false} style={{ fontWeight: 600 }}>
+              <Tag color="gold" variant="filled" style={{ fontWeight: 600 }}>
                 一级主类
               </Tag>
             ) : (
-              <Tag color="blue" bordered={false}>
+              <Tag color="blue" variant="filled">
                 二级分类
               </Tag>
             )}
             {isRoot && subCount > 0 ? (
-              <Tag color="default" bordered={false} style={{ fontSize: 12 }}>
+              <Tag color="default" variant="filled" style={{ fontSize: 12 }}>
                 含 {subCount} 个子类
               </Tag>
             ) : null}
             {record.show ? (
-              <Tag color="success" bordered={false}>
+              <Tag color="success" variant="filled">
                 显示
               </Tag>
             ) : (
-              <Tag color="warning" bordered={false}>
+              <Tag color="warning" variant="filled">
                 隐藏
               </Tag>
             )}

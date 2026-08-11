@@ -227,9 +227,13 @@ export function PublicContentLoadingPanel({
   className?: string;
 }) {
   const [showRefresh, setShowRefresh] = useState(false);
+  const [prevLabel, setPrevLabel] = useState(label);
+  if (label !== prevLabel) {
+    setPrevLabel(label);
+    setShowRefresh(false);
+  }
 
   useEffect(() => {
-    setShowRefresh(false);
     const timer = window.setTimeout(() => {
       setShowRefresh(true);
     }, SLOW_LOADING_MS);

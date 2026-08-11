@@ -1,7 +1,20 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Avatar, Button, Card, Flex, Input, List, Modal, Space, Spin, Switch, Tag, Typography } from "antd";
+import {
+  Avatar,
+  Button,
+  Card,
+  Flex,
+  Input,
+  List,
+  Modal,
+  Space,
+  Spin,
+  Switch,
+  Tag,
+  Typography,
+} from "antd";
 
 import {
   EditOutlined,
@@ -10,6 +23,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
@@ -77,14 +91,22 @@ function renderPreviewValue(item: ConfigItem, value: SiteConfigValues[EditableFi
     const src = String(value || "").trim();
     if (!src) return <Typography.Text type="secondary">未设置</Typography.Text>;
     return (
-      <Flex align="center" gap={10}>
-        <Avatar src={src} shape="square" size={34} className={styles.logoPreview} />
-        <Typography.Text ellipsis>{src}</Typography.Text>
-      </Flex>
+      <Space size={8} align="center">
+        <Avatar src={src} shape="square" size={32} style={{ borderRadius: 8 }} />
+        <Typography.Text ellipsis style={{ maxWidth: 360 }}>
+          {src}
+        </Typography.Text>
+      </Space>
     );
   }
   const text = String(value || "").trim();
-  return text ? <Typography.Text ellipsis>{text}</Typography.Text> : <Typography.Text type="secondary">未设置</Typography.Text>;
+  return text ? (
+    <Typography.Text ellipsis style={{ maxWidth: 520 }}>
+      {text}
+    </Typography.Text>
+  ) : (
+    <Typography.Text type="secondary">未设置</Typography.Text>
+  );
 }
 
 interface SiteConfigPageViewProps {
@@ -99,6 +121,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
   const [editingValue, setEditingValue] = useState<string | boolean>("");
   const [saving, setSaving] = useState(false);
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   const getBasicInfo = useCallback(async () => {
     setFetching(true);
@@ -158,7 +181,10 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
     }
   };
 
-  const editorTitle = useMemo(() => (editingItem ? `编辑${editingItem.label}` : "编辑配置"), [editingItem]);
+  const editorTitle = useMemo(
+    () => (editingItem ? `编辑${editingItem.label}` : "编辑配置"),
+    [editingItem],
+  );
 
   useEffect(() => {
     void getBasicInfo();
@@ -181,65 +207,63 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
       )}
 
       <Spin spinning={fetching} description="正在加载网站配置...">
-
         <Card
-          size="small"
           title={
-            <Space>
+            <Space size={8}>
               <SettingOutlined style={{ color: "#1677ff" }} />
               <span>基本信息</span>
             </Space>
           }
           extra={embedded ? resetAction : null}
           className={styles.card}
+          styles={{ body: { padding: "8px 16px" } }}
         >
           <List
+            itemLayout="horizontal"
             dataSource={CONFIG_ITEMS}
+            split
             renderItem={(item) => (
               <List.Item
+                style={{ padding: "16px 0" }}
                 actions={[
                   <Button
                     key="edit"
-                    type="text"
+                    type="link"
                     icon={<EditOutlined />}
+                    disabled={!canWrite}
                     onClick={() => openEditor(item)}
                   >
                     编辑
                   </Button>,
                 ]}
               >
-                <List.Item.Meta
-                  title={item.label}
-                  description={
-                    <Flex vertical gap={2}>
-                      {renderPreviewValue(item, config[item.field])}
-                      {item.hint ? (
-                        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                          {item.hint}
-                        </Typography.Text>
-                      ) : null}
-                    </Flex>
-                  }
-                />
+                <Space direction="vertical" size={4} className={styles.configMeta}>
+                  <Typography.Text strong>{item.label}</Typography.Text>
+                  <div className={styles.configValue}>{renderPreviewValue(item, config[item.field])}</div>
+                  {item.hint ? (
+                    <Typography.Text type="secondary" className={styles.configHint}>
+                      {item.hint}
+                    </Typography.Text>
+                  ) : null}
+                </Space>
               </List.Item>
             )}
           />
         </Card>
       </Spin>
 
-
-
       <Modal
         title={editorTitle}
         open={Boolean(editingItem)}
         onCancel={closeEditor}
+        okButtonProps={{ disabled: !canWrite }}
         onOk={() => void saveEditingItem()}
         okText="保存"
         confirmLoading={saving}
         destroyOnHidden
       >
         {editingItem?.type === "switch" ? (
-          <Flex align="center" justify="space-between" className={styles.switchEditor}>
+          <Flex align="center" justify="space-between" style={{ minHeight: 48 }}>
             <Typography.Text>{editingItem.label}</Typography.Text>
             <Switch
               checked={Boolean(editingValue)}

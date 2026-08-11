@@ -75,7 +75,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
-            message="发现冲突规则"
+            title="发现冲突规则"
             description={
               <Space direction="vertical" size={4}>
                 {conflictRules.map((item) => (
@@ -89,14 +89,14 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
           />
         ) : null}
         {checkingConflict && conflictRules.length === 0 ? (
-          <Alert style={{ marginBottom: 16 }} type="info" showIcon message="正在检查冲突..." />
+          <Alert style={{ marginBottom: 16 }} type="info" showIcon title="正在检查冲突..." />
         ) : null}
 
         <Alert
           style={{ marginBottom: 16 }}
           type={watchedMatchType === "regex" ? "warning" : "info"}
           showIcon
-          message={
+          title={
             watchedMatchType === "regex"
               ? "建议从 ^ 开头、$ 结尾收紧范围，避免一条规则误吞过多分类。分类规则会刷新展示分类与来源映射，不回写历史影片。"
               : "精确匹配只会命中完全相同的原始分类名，优先级高于正则规则。"
@@ -106,7 +106,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
         {watchedMatchType === "regex" ? (
           <Card size="small" title="正则命中预览" style={{ marginBottom: 16 }}>
             {!regexPreview.valid ? (
-              <Alert type="error" showIcon message={`正则无效：${regexPreview.error}`} />
+              <Alert type="error" showIcon title={`正则无效：${regexPreview.error}`} />
             ) : (
               <Space direction="vertical" size={12} style={{ width: "100%" }}>
                 <div className={styles.previewTags}>
@@ -122,7 +122,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
                 <Alert
                   type={regexPreview.matches.length > 0 ? "success" : "warning"}
                   showIcon
-                  message={
+                  title={
                     regexPreview.matches.length > 0
                       ? `当前正则命中 ${regexPreview.matches.length} 个示例分类。`
                       : "当前正则未命中任何示例，请检查范围是否过窄。"

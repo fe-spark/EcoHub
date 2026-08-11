@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"strings"
 	"sync/atomic"
 
 	"server/internal/config"
@@ -17,6 +18,26 @@ import (
 type SpiderHandler struct{}
 
 var SpiderHd = new(SpiderHandler)
+
+// StopTask 停止单个采集任务（仅停止任务，不禁用采集站）。
+func (h *SpiderHandler) StopTask(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if strings.TrimSpace(req.Id) == "" {
+		dto.Failed("参数异常，采集站标识不能为空", c)
+		return
+	}
+	if err := service.SpiderSvc.StopTask(req.Id); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("已发送停止指令，采集任务正在停止", c)
+}
 
 // StarSpider 开启并执行采集任务
 func (h *SpiderHandler) StarSpider(c *gin.Context) {

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Alert, Card, Descriptions, Tag } from "antd";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import RuleWorkspace from "../../view/rule-workspace";
 import styles from "../../view/index.module.less";
@@ -16,23 +15,6 @@ export default function CategoryRulePageView() {
   return (
     <div className={styles.pageBody}>
       <ManagePageHeader title="分类规则" description="将主采集站来源分类合并到前台展示分类。" />
-
-      <Card className={styles.panelCard}>
-        <Descriptions size="small" column={{ xs: 1, md: 2 }}>
-          <Descriptions.Item label="一级规则">
-            <Tag color="gold">{ruleTotals[ROOT_GROUP] || 0}</Tag>
-          </Descriptions.Item>
-          <Descriptions.Item label="二级规则">
-            <Tag color="blue">{ruleTotals[SUB_GROUP] || 0}</Tag>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      <Alert
-        type="info"
-        showIcon
-        message="保存后会刷新展示分类和来源映射，不会重写历史影片。"
-      />
 
       <RuleWorkspace ruleTotals={ruleTotals} onRuleTotalsChange={handleRuleTotalsChange} />
     </div>

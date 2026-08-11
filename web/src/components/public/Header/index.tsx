@@ -102,12 +102,10 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   }, []);
 
   // 布局 content loading 结束后，同步清掉 Header 导航中状态
-  useEffect(() => {
-    if (isNavigating && !contentLoadingActive) {
-      setIsNavigating(false);
-      setPendingCategoryId(null);
-    }
-  }, [isNavigating, contentLoadingActive]);
+  if (isNavigating && !contentLoadingActive) {
+    setIsNavigating(false);
+    setPendingCategoryId(null);
+  }
 
   const loadHistory = useCallback(() => {
     const historyMap = readHistoryMap();
@@ -145,12 +143,12 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const isCategoryActive = (id: string | number) => activeCategoryId === String(id);
 
   // 导航进行中保持乐观高亮，避免 URL 尚未更新时被 activePid 冲掉
-  useEffect(() => {
-    if (isNavigating) {
-      return;
+  if (!isNavigating) {
+    const nextActiveCategoryId = activePid ? String(activePid) : "";
+    if (nextActiveCategoryId !== activeCategoryId) {
+      setActiveCategoryId(nextActiveCategoryId);
     }
-    setActiveCategoryId(activePid ? String(activePid) : "");
-  }, [activePid, isNavigating]);
+  }
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {

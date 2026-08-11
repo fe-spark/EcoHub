@@ -63,7 +63,7 @@ func (s *SpiderService) AutoCollect(time int) {
 }
 
 // ClearFilms 重置站点业务数据：清空影视/采集派生数据。
-// 分类属于采集数据，重置后重新全量采集时自动从主站同步，无需在此重建。
+// 清空完成后自动同步主站分类，避免后续增量采集因分类映射缺失导致影片“已入库但列表不可见”。
 // 注意：不重置任何账号与密码，也不恢复任何配置类数据（网站配置、轮播、映射规则、采集源、定时任务均保留）。
 // 全程按关键节点上报真实进度，供前端轮询展示。
 func (s *SpiderService) ClearFilms() (retErr error) {
@@ -76,6 +76,14 @@ func (s *SpiderService) ClearFilms() (retErr error) {
 	if err := spider.ClearSpider(); err != nil {
 		return err
 	}
+	// 分类与影视库存一并清空后必须立即重建，否则主站采集写入的 pid/cid 为 0，
+	// 读模型会按不可见过滤，出现日志入库成功但影片列表为空。
+	filmrepo.ReportResetProgress(96, "正在同步主站分类")
+	if err := s.SyncMasterCategoryTree(); err != nil {
+		log.Printf("[SpiderService] 重置后主站分类同步失败: %v", err)
+		return err
+	}
+	filmrepo.ReportResetProgress(100, "重置完成，主站分类已同步")
 	filmrepo.FinishResetProgress(nil)
 	return nil
 }
@@ -137,4 +145,14 @@ func (s *SpiderService) SyncMasterCategoryTree() error {
 // StopAllTasks 强制停止所有採集任務
 func (s *SpiderService) StopAllTasks() {
 	spider.StopAllTasks()
+}
+
+// StopTask 停止指定采集站的任务（仅停止任务，不影响采集站启用状态）。
+func (s *SpiderService) StopTask(id string) error {
+	fs := repository.FindCollectSourceById(id)
+	if fs == nil {
+		return errors.New("采集站信息不存在")
+	}
+	spider.StopTask(id)
+	return nil
 }

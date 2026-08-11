@@ -13,6 +13,8 @@ import (
 	"server/internal/repository/support"
 
 	"gorm.io/gorm"
+
+	"server/internal/utils"
 )
 
 func bumpSearchTagsCacheVersion() {
@@ -290,6 +292,13 @@ func FilmZero() error {
 		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
 		}
+	}
+	// 图库元数据与本地文件一并清理，避免重置后 DB 有记录、磁盘无文件导致素材中心黑块
+	if err := db.Mdb.Exec("TRUNCATE table files").Error; err != nil {
+		return fmt.Errorf("truncate files failed: %w", err)
+	}
+	if err := utils.ClearGalleryDir(); err != nil {
+		return fmt.Errorf("clear gallery dir failed: %w", err)
 	}
 
 	// 关键节点：清空分类与映射

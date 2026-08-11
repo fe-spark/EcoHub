@@ -205,6 +205,9 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	if old.Interval != next.Interval {
 		changes = append(changes, fmt.Sprintf("请求间隔: %dms → %dms", old.Interval, next.Interval))
 	}
+	if old.Cd != next.Cd {
+		changes = append(changes, fmt.Sprintf("采集时长: %d小时 → %d小时", old.Cd, next.Cd))
+	}
 	return changes
 }
 

@@ -63,8 +63,8 @@ func (s *UserService) VerifyUserPassword(id uint, password string) bool {
 }
 
 // GetUserPage 用户分页
-func (s *UserService) GetUserPage(page *dto.Page, userName string) []model.UserInfoVo {
-	list := repository.GetUserPage(page, userName)
+func (s *UserService) GetUserPage(page *dto.Page, userName string, role, status int) []model.UserInfoVo {
+	list := repository.GetUserPage(page, userName, role, status)
 	var voList []model.UserInfoVo
 	for _, u := range list {
 		voList = append(voList, buildUserInfoVo(u))

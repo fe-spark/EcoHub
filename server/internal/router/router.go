@@ -1,6 +1,7 @@
 package router
 
 import (
+	"mime"
 	"server/internal/config"
 	"server/internal/handler"
 	"server/internal/middleware"
@@ -9,6 +10,10 @@ import (
 )
 
 func SetupRouter() *gin.Engine {
+	// 部分运行环境系统 mime 库可能缺失 webp/ico，主动注册保证图库可渲染
+	_ = mime.AddExtensionType(".webp", "image/webp")
+	_ = mime.AddExtensionType(".ico", "image/x-icon")
+
 	r := gin.New()
 	r.Use(middleware.AccessLog())
 	r.Use(gin.Recovery())
@@ -124,6 +129,7 @@ func SetupRouter() *gin.Engine {
 		spiderRoute := manageRoute.Group(`/spider`)
 		{
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
+			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
 			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
 			spiderRoute.GET(`/clear/progress`, handler.SpiderHd.ResetProgress)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.ResetImpactStats)
@@ -150,6 +156,8 @@ func SetupRouter() *gin.Engine {
 		{
 			fileRoute.POST(`/upload`, handler.FileHd.SingleUpload)
 			fileRoute.POST(`/upload/multiple`, handler.FileHd.MultipleUpload)
+			fileRoute.POST(`/sync`, handler.FileHd.SyncPictures)
+			fileRoute.POST(`/rename`, handler.FileHd.RenameFile)
 			fileRoute.POST(`/del`, handler.FileHd.DelFile)
 			fileRoute.GET(`/list`, handler.FileHd.PhotoWall)
 		}

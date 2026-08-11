@@ -55,7 +55,8 @@ const (
 	DefaultCollectStatsFlushIntervalSec         = 5
 	DefaultCollectCacheFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
-	DefaultCollectProgressRetainSec = 60
+	// 仅保留足够前端完成结束态展示的窗口（轮询 + 倒计时），过后查询不到，避免残留到下次进入。
+	DefaultCollectProgressRetainSec = 10
 	// DefaultCollectProgressStaleSec 无 live task 的 starting/running 超时秒数，超时标 failed 可重采。
 	// 不含 waiting_publish / finalizing / page_done（整批收尾等待，不按单站超时）。
 	DefaultCollectProgressStaleSec = 30 * 60

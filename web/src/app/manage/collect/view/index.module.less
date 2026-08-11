@@ -57,13 +57,25 @@
   gap: 12px 16px;
   min-width: 0;
   padding: 12px 16px;
-  background: rgba(250, 140, 22, 0.06);
-  border: 1px solid rgba(250, 140, 22, 0.2);
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
   border-radius: 10px;
 }
 
 .batchProgressMain {
   flex: 1 1 auto;
+  min-width: 0;
+}
+
+.batchProgressRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.batchProgressFill {
+  flex: 1;
   min-width: 0;
 }
 
@@ -74,6 +86,13 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   margin-bottom: 6px;
+}
+
+.batchProgressHeadRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
 }
 
 .batchProgressTitle {
@@ -92,7 +111,6 @@
 
 .batchStopBtn {
   flex: none;
-  align-self: center;
 }
 
 /* 网格末尾的「新增」占位瓦片 */
@@ -226,18 +244,24 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--card-accent);
-  transition: background 0.2s ease;
+  transition: background 0.2s ease, opacity 0.2s ease;
 }
 
 .sourceCard:hover {
   transform: translateY(-2px);
-  border-color: #fa8c16;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  border-color: var(--card-accent);
+  background: color-mix(in srgb, var(--card-accent) 6%, var(--ant-color-bg-container));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
+}
+
+.sourceCard:hover::before,
+.sourceCardSelected::before {
+  opacity: 0;
 }
 
 .sourceCardSelected {
-  border-color: #fa8c16;
-  box-shadow: 0 0 0 1px #fa8c16;
+  border-color: var(--card-accent);
+  box-shadow: 0 0 0 1px var(--card-accent);
 }
 
 /* 采集中 */
@@ -270,6 +294,13 @@
 
 .toneDisabled:hover {
   opacity: 0.88;
+  border-color: var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+}
+
+.toneDisabled.sourceCardSelected {
+  border-color: var(--ant-color-border-secondary);
+  box-shadow: 0 0 0 1px var(--ant-color-border-secondary);
 }
 
 .toneStopping {
@@ -527,17 +558,23 @@
 }
 
 .cardMeta {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
   margin: 12px 0 0;
   padding: 0;
 }
 
+.metaCol {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
 .metaItem {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 4px;
   min-width: 0;
 }
@@ -550,6 +587,7 @@
 }
 
 .metaValue {
+  flex: 1;
   margin: 0;
   font-size: 12px;
   color: var(--ant-color-text);
@@ -563,15 +601,13 @@
   color: var(--ant-color-text-quaternary);
 }
 
-.cardControls {
+.controlCol {
   display: flex;
+  flex-direction: row;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
   min-width: 0;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px dashed var(--ant-color-border-secondary);
+  grid-column: 1 / -1;
 }
 
 .controlLabel {
@@ -580,23 +616,33 @@
   color: var(--ant-color-text-secondary);
 }
 
-.controlValue {
-  flex: 1;
-  min-width: 0;
-}
-
 .cardActions {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  min-height: 40px;
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--ant-color-border-secondary);
 }
 
-.actionPrimary {
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex: 1;
   min-width: 0;
+}
+
+.ringGroup {
+  flex: none;
+  line-height: 1;
+}
+
+.progressRing {
+  flex: none;
+  line-height: 1;
 }
 
 @media (max-width: 768px) {
@@ -617,10 +663,6 @@
   .batchProgressBar {
     flex-wrap: wrap;
   }
-
-  .batchStopBtn {
-    width: 100%;
-  }
 }
 
 @media (max-width: 480px) {
@@ -636,4 +678,79 @@
   .cardActions > button {
     width: 100%;
   }
+
+  .progressRing {
+    align-self: flex-end;
+  }
+}
+
+/* ===== 清理失效源弹窗 ===== */
+.cleanupLoading {
+  display: flex;
+  justify-content: center;
+  padding: 24px 0;
+}
+
+.cleanupContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+
+.cleanupList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 360px;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.cleanupItem {
+  min-width: 0;
+  padding: 12px 16px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.cleanupItemHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cleanupItemName {
+  flex: 1;
+  min-width: 0;
+}
+
+.cleanupItemUri {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cleanupItemReason {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-error);
+}
+
+.cleanupSkipped {
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.cleanupFooter {
+  display: flex;
+  justify-content: flex-end;
 }

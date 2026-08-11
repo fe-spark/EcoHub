@@ -17,9 +17,10 @@ import {
   Space,
   Typography,
 } from "antd";
-import { PlusOutlined, StopOutlined } from "@ant-design/icons";
+import { PlusOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
@@ -46,6 +47,21 @@ interface CollectListItemResponse extends Partial<FilmSource> {
   uri: string;
 }
 
+/** 顶部总进度条会话快照 */
+interface OverallProgressView {
+  total: number;
+  activeCount: number;
+  doneCount: number;
+  failedCount: number;
+  fetchingCount: number;
+  wrappingCount: number;
+  percent: number;
+  success: number;
+  failed: number;
+  running: boolean;
+  statsText: string;
+}
+
 /** 启动瞬间本地进度：0%，避免等轮询才出现进度条 */
 function makeStartingProgress(id: string, name: string): CollectProgress {
   return {
@@ -61,6 +77,10 @@ function makeStartingProgress(id: string, name: string): CollectProgress {
 
 const POLL_INTERVAL = 4000;
 const MAX_POLL_FAILURES = 10;
+/** 采集全部完成/失败后，顶部总进度条保留展示的时长 */
+const OVERALL_DONE_KEEP_MS = 5000;
+/** 结束倒计时的初始秒数（与 OVERALL_DONE_KEEP_MS 对应） */
+const OVERALL_DONE_KEEP_SECONDS = OVERALL_DONE_KEEP_MS / 1000;
 
 function normalizeSource(item: CollectListItemResponse): FilmSource {
   return {
@@ -71,7 +91,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     state: Boolean(item.state),
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
-    cd: Number(item.cd ?? 24),
+    cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
   };
@@ -79,6 +99,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
 
 export default function CollectManagePageView() {
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
   const [batchStateUpdating, setBatchStateUpdating] = useState(false);
@@ -88,13 +109,13 @@ export default function CollectManagePageView() {
   const mountedRef = useRef(false);
   const pollFailuresRef = useRef(0);
   const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
-  const collectDurationOverridesRef = useRef<Record<string, number>>({});
 
   const [sourceForm] = Form.useForm<SourceFormValues>();
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [testing, setTesting] = useState(false);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -112,6 +133,28 @@ export default function CollectManagePageView() {
   /** 本页发起的批量采集会话 ID；用于展示总进度条，全部结束后自动收起 */
   const [batchRunIds, setBatchRunIds] = useState<string[]>([]);
   const [stoppingAll, setStoppingAll] = useState(false);
+  /** 顶部总进度：进行中或结束倒计时内的最近一次会话快照 */
+  const [overallSession, setOverallSession] = useState<OverallProgressView | null>(null);
+  const overallDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** 结束倒计时剩余秒数（页面上可见） */
+  const [overallCountdown, setOverallCountdown] = useState<number | null>(null);
+  const overallCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  /** 结束态已展示并倒计时隐藏后，残留期内不再闪回 */
+  const overallHiddenRef = useRef(false);
+  /** 启动结束倒计时时的任务 ID 快照，供到期隐藏卡片进度使用 */
+  const overallDoneIdsRef = useRef<string[]>([]);
+  /** 本次挂载是否见过运行中任务：挂载即结束态说明是上次会话残留，不展示 */
+  const hasSeenRunningRef = useRef(false);
+  /** 顶部进度条已倒计时隐藏的终态任务；同步隐藏对应卡片环形进度 */
+  const [hiddenDoneIds, setHiddenDoneIds] = useState<string[]>([]);
+
+  const clearOverallCountdown = useCallback(() => {
+    if (overallCountdownRef.current) {
+      clearInterval(overallCountdownRef.current);
+      overallCountdownRef.current = null;
+    }
+    setOverallCountdown(null);
+  }, []);
 
   // 仅「仍在生命周期内」的任务禁用操作；done/failed 短暂展示进度但不锁按钮。
   const activeCollectIds = useMemo(
@@ -139,19 +182,24 @@ export default function CollectManagePageView() {
   /**
    * 总进度条覆盖的任务 ID：
    * - 本页批量启动后优先用 batchRunIds（含已完成站，进度可到 100%）
-   * - 刷新后若仍有 ≥2 个活跃任务，用 activeCollectIds 兜底
+   * - 单个/批量采集均展示：活跃任务 + 仍有终态进度残留（完成/失败后保留期内）都计入，
+   *   避免结束后顶部进度条瞬间消失
    */
   const overallTaskIds = useMemo(() => {
     if (batchRunIds.length > 0) {
       return batchRunIds;
     }
-    if (activeCollectIds.length >= 2) {
-      return activeCollectIds;
+    const withProgress = siteList
+      .filter((item) => item.progress != null)
+      .map((item) => item.id);
+    const ids = [...new Set([...activeCollectIds, ...withProgress])];
+    if (ids.length >= 1) {
+      return ids;
     }
     return [] as string[];
-  }, [batchRunIds, activeCollectIds]);
+  }, [batchRunIds, activeCollectIds, siteList]);
 
-  const overallProgress = useMemo(() => {
+  const overallProgress = useMemo<OverallProgressView | null>(() => {
     if (overallTaskIds.length === 0) {
       return null;
     }
@@ -272,6 +320,62 @@ export default function CollectManagePageView() {
     }
   }, [batchRunIds, activeCollectIds, siteList]);
 
+  // 顶部总进度：进行中实时更新；全部结束（完成/失败/停止）后保留 OVERALL_DONE_KEEP_MS 再隐藏
+  useEffect(() => {
+    if (overallProgress) {
+      if (overallProgress.running) {
+        hasSeenRunningRef.current = true;
+        overallHiddenRef.current = false;
+        setOverallSession(overallProgress);
+        clearOverallCountdown();
+        if (overallDoneTimerRef.current) {
+          clearTimeout(overallDoneTimerRef.current);
+          overallDoneTimerRef.current = null;
+        }
+      } else if (!hasSeenRunningRef.current && !overallDoneTimerRef.current) {
+        // 挂载即结束态：上次会话的终态残留，不展示
+        setOverallSession(null);
+        setHiddenDoneIds((prev) => [...new Set([...prev, ...overallTaskIds])]);
+      } else if (!overallHiddenRef.current && !overallDoneTimerRef.current) {
+        // 本次会话刚结束：启动结束倒计时
+        setOverallSession(overallProgress);
+        overallDoneIdsRef.current = overallTaskIds;
+        setOverallCountdown(OVERALL_DONE_KEEP_SECONDS);
+        overallCountdownRef.current = setInterval(() => {
+          setOverallCountdown((prev) => (prev == null || prev <= 1 ? prev : prev - 1));
+        }, 1000);
+        overallDoneTimerRef.current = setTimeout(() => {
+          overallDoneTimerRef.current = null;
+          overallHiddenRef.current = true;
+          clearOverallCountdown();
+          setOverallSession(null);
+          setHiddenDoneIds((prev) => [...new Set([...prev, ...overallDoneIdsRef.current])]);
+        }, OVERALL_DONE_KEEP_MS);
+      }
+    } else if (overallTaskIds.length === 0) {
+      overallHiddenRef.current = false;
+      clearOverallCountdown();
+      if (overallDoneTimerRef.current) {
+        clearTimeout(overallDoneTimerRef.current);
+        overallDoneTimerRef.current = null;
+      }
+      setOverallSession(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- overallTaskIds 仅用于启动结束倒计时时的任务快照
+  }, [clearOverallCountdown, overallProgress, overallTaskIds.length]);
+
+  // 站点重新变为活跃（再次采集）时，取消卡片进度隐藏
+  useEffect(() => {
+    if (hiddenDoneIds.length === 0) {
+      return;
+    }
+    const activeSet = new Set(activeCollectIds);
+    setHiddenDoneIds((prev) => {
+      const next = prev.filter((id) => !activeSet.has(id));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [activeCollectIds, hiddenDoneIds]);
+
   const clearPollTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
@@ -308,11 +412,7 @@ export default function CollectManagePageView() {
               normalizeSource(item),
             )
           : [];
-        const overrides = collectDurationOverridesRef.current;
-        setSiteList(list.map((item) => ({
-          ...item,
-          cd: overrides[item.id] ?? item.cd,
-        })));
+        setSiteList(list);
         setSelectedSourceIds((current) =>
           current.filter((id) => list.some((item) => item.id === id)),
         );
@@ -322,7 +422,7 @@ export default function CollectManagePageView() {
       }
     } catch {
       pollFailuresRef.current += 1;
-      message.error("采集站列表加载失败");
+      // 拦截器已统一提示，避免重复弹窗
     } finally {
       if (!mountedRef.current) {
         return;
@@ -346,8 +446,13 @@ export default function CollectManagePageView() {
     return () => {
       mountedRef.current = false;
       clearPollTimer();
+      clearOverallCountdown();
+      if (overallDoneTimerRef.current) {
+        clearTimeout(overallDoneTimerRef.current);
+        overallDoneTimerRef.current = null;
+      }
     };
-  }, [clearPollTimer, getCollectList]);
+  }, [clearOverallCountdown, clearPollTimer, getCollectList]);
 
   const updateSiteListItem = useCallback(
     (id: string, updater: (record: FilmSource) => FilmSource) => {
@@ -359,14 +464,28 @@ export default function CollectManagePageView() {
   );
 
   const changeCollectDuration = useCallback(
-    (id: string, value: number) => {
-      collectDurationOverridesRef.current = {
-        ...collectDurationOverridesRef.current,
-        [id]: value,
-      };
+    async (id: string, value: number) => {
+      const record = siteList.find((item) => item.id === id);
+      if (!record) {
+        return;
+      }
       updateSiteListItem(id, (item) => ({ ...item, cd: value }));
+      const resp = await ApiPost("/manage/collect/update", {
+        id,
+        name: record.name,
+        uri: record.uri,
+        grade: record.grade,
+        syncPictures: record.syncPictures,
+        state: record.state,
+        interval: record.interval,
+        cd: value,
+      });
+      if (resp.code !== 0) {
+        message.error(resp.msg || "保存采集时长失败");
+        updateSiteListItem(id, (item) => ({ ...item, cd: record.cd }));
+      }
     },
-    [updateSiteListItem],
+    [message, siteList, updateSiteListItem],
   );
 
   const handleSelectSource = useCallback((id: string, checked: boolean) => {
@@ -422,7 +541,7 @@ export default function CollectManagePageView() {
       message.error(resp.msg || "失效源检测失败");
     } catch {
       setCleanupOpen(false);
-      message.error("失效源检测失败");
+      // 拦截器已统一提示，避免重复弹窗
     } finally {
       setCleanupScanning(false);
     }
@@ -463,7 +582,7 @@ export default function CollectManagePageView() {
       }
       message.error(resp.msg || "清理失败");
     } catch {
-      message.error("清理失败");
+      // 拦截器已统一提示，避免重复弹窗
     } finally {
       setCleanupDeleting(false);
     }
@@ -533,7 +652,7 @@ export default function CollectManagePageView() {
       }
       message.error(resp.msg || "批量删除失败");
     } catch {
-      message.error("批量删除失败");
+      // 拦截器已统一提示，避免重复弹窗
     } finally {
       setBatchDeleting(false);
     }
@@ -553,7 +672,7 @@ export default function CollectManagePageView() {
       ...item,
       progress: makeStartingProgress(record.id, record.name),
     }));
-    const collectTime = collectDurationOverridesRef.current[record.id] ?? record.cd ?? 24;
+    const collectTime = record.cd ?? 24;
     const resp = await ApiPost("/manage/spider/start", {
       id: record.id,
       time: collectTime,
@@ -569,13 +688,9 @@ export default function CollectManagePageView() {
   };
 
   const stopTask = async (id: string) => {
-    const resp = await ApiPost("/manage/collect/change", {
-      id,
-      state: false,
-      syncPictures: siteList.find((item) => item.id === id)?.syncPictures ?? false,
-    });
+    const resp = await ApiPost("/manage/spider/stop", { id });
     if (resp.code === 0) {
-      message.success("已停止后续请求，已请求数据将继续入库");
+      message.success("已停止该采集任务，已请求数据将继续入库");
       await getCollectList();
       return;
     }
@@ -605,6 +720,7 @@ export default function CollectManagePageView() {
       syncPictures: false,
       state: false,
       interval: 0,
+      cd: 24,
       name: "",
       uri: "",
     });
@@ -623,6 +739,7 @@ export default function CollectManagePageView() {
         state: Boolean(resp.data.state),
         grade: Number(resp.data.grade ?? 1),
         interval: Number(resp.data.interval ?? 0),
+        cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
       });
       setSourceModalOpen(true);
       return;
@@ -654,14 +771,24 @@ export default function CollectManagePageView() {
   const testApi = async () => {
     try {
       const values = await sourceForm.validateFields();
+      setTesting(true);
+      message.loading({
+        key: "collect-test",
+        content: "正在测试接口，请稍候...",
+      });
       const resp = await ApiPost("/manage/collect/test", values);
       if (resp.code === 0) {
-        message.success(resp.msg);
+        message.success({ key: "collect-test", content: resp.msg });
         return;
       }
-      message.error(resp.msg || "接口测试失败");
+      message.error({
+        key: "collect-test",
+        content: resp.msg || "接口测试失败",
+      });
     } catch {
       // 表单校验失败时不额外提示。
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -761,7 +888,7 @@ export default function CollectManagePageView() {
           <Button
             danger
             loading={cleanupScanning}
-            disabled={siteList.length === 0}
+            disabled={!canWrite || siteList.length === 0}
             onClick={() => void startCleanupScan()}
           >
             清理失效源
@@ -790,14 +917,14 @@ export default function CollectManagePageView() {
             <Space size={8} wrap className={styles.toolbarActions}>
               <Button
                 type="primary"
-                disabled={selectedCount === 0}
+                disabled={!canWrite || selectedCount === 0}
                 onClick={() => void openBatchCollect()}
               >
                 批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
               </Button>
               <Button
                 loading={batchStateUpdating}
-                disabled={selectedCount === 0}
+                disabled={!canWrite || selectedCount === 0}
                 onClick={() => void batchChangeSourceState(true)}
               >
                 批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
@@ -811,7 +938,11 @@ export default function CollectManagePageView() {
                 disabled={selectedCount === 0}
                 onConfirm={() => void batchChangeSourceState(false)}
               >
-                <Button danger loading={batchStateUpdating} disabled={selectedCount === 0}>
+                <Button
+                  danger
+                  loading={batchStateUpdating}
+                  disabled={!canWrite || selectedCount === 0}
+                >
                   批量禁用{selectedCount > 0 ? ` (${selectedCount})` : ""}
                 </Button>
               </Popconfirm>
@@ -824,7 +955,11 @@ export default function CollectManagePageView() {
                 disabled={selectedCount === 0}
                 onConfirm={() => void batchDeleteSources()}
               >
-                <Button danger loading={batchDeleting} disabled={selectedCount === 0}>
+                <Button
+                  danger
+                  loading={batchDeleting}
+                  disabled={!canWrite || selectedCount === 0}
+                >
                   批量删除{selectedCount > 0 ? ` (${selectedCount})` : ""}
                 </Button>
               </Popconfirm>
@@ -832,50 +967,58 @@ export default function CollectManagePageView() {
           </div>
         </Card>
 
-        {overallProgress ? (
+        {overallSession ? (
           <div className={styles.batchProgressBar}>
             <div className={styles.batchProgressMain}>
               <div className={styles.batchProgressHead}>
                 <span className={styles.batchProgressTitle}>
-                  {overallProgress.running ? "批量采集进行中" : "批量采集已结束"}
+                  {overallSession.running ? "采集进行中" : "采集已结束"}
                 </span>
-                <span className={styles.batchProgressStats}>
-                  {overallProgress.statsText}
+                <span className={styles.batchProgressHeadRight}>
+                  <span className={styles.batchProgressStats}>
+                    {overallSession.statsText}
+                    {!overallSession.running && overallCountdown != null
+                      ? ` · ${overallCountdown}s 后关闭`
+                      : ""}
+                  </span>
+                  {overallSession.running ? (
+                    <Popconfirm
+                      title="终止当前采集任务？"
+                      description="将强制停止当前所有进行中的采集；已请求数据会继续入库。"
+                      onConfirm={() => void submitStopAllTasks()}
+                      okText="确认终止"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true, loading: stoppingAll }}
+                    >
+                      <Button
+                        danger
+                        size="small"
+                        loading={stoppingAll}
+                        disabled={!canWrite}
+                        className={styles.batchStopBtn}
+                      >
+                        终止
+                      </Button>
+                    </Popconfirm>
+                  ) : null}
                 </span>
               </div>
-              <Progress
-                percent={overallProgress.percent}
-                status={
-                  overallProgress.running
-                    ? "active"
-                    : overallProgress.failedCount > 0
-                      ? "exception"
-                      : "success"
-                }
-                strokeColor={overallProgress.failed > 0 ? "#faad14" : undefined}
-                size="small"
-              />
-            </div>
-            {overallProgress.running ? (
-              <Popconfirm
-                title="终止全部采集任务？"
-                description="将强制停止当前所有进行中的采集；已请求数据会继续入库。"
-                onConfirm={() => void submitStopAllTasks()}
-                okText="确认终止"
-                cancelText="取消"
-                okButtonProps={{ danger: true, loading: stoppingAll }}
-              >
-                <Button
-                  danger
+              <div className={styles.batchProgressRow}>
+                <Progress
+                  percent={overallSession.percent}
+                  status={
+                    overallSession.running
+                      ? "active"
+                      : overallSession.failedCount > 0
+                        ? "normal"
+                        : "success"
+                  }
+                  strokeColor={overallSession.failed > 0 ? "#faad14" : undefined}
                   size="small"
-                  icon={<StopOutlined />}
-                  loading={stoppingAll}
-                  className={styles.batchStopBtn}
-                >
-                  终止任务
-                </Button>
-              </Popconfirm>
-            ) : null}
+                  className={styles.batchProgressFill}
+                />
+              </div>
+            </div>
           </div>
         ) : null}
 
@@ -884,7 +1027,7 @@ export default function CollectManagePageView() {
             {masterCount === 0 ? (
               <div className={styles.masterTip}>
                 尚未配置主采集站
-                {canAddSource ? (
+                {canAddSource && canWrite ? (
                   <>
                     ，
                     <Typography.Link onClick={openAddDialog}>新增</Typography.Link>
@@ -899,21 +1042,27 @@ export default function CollectManagePageView() {
               </div>
             ) : null}
             <div className={styles.cardGrid}>
-              {displaySites.map((site) => (
-                <CollectSourceCard
-                  key={site.id}
-                  record={site}
-                  selected={selectedSourceIds.includes(site.id)}
-                  active={activeCollectIds.includes(site.id)}
-                  onSelect={handleSelectSource}
-                  onChangeCollectDuration={changeCollectDuration}
-                  onStartTask={(record) => void startTask(record)}
-                  onTerminateTask={(id) => void stopTask(id)}
-                  onEditSource={(id) => void openEditDialog(id)}
-                  onDeleteSource={(id) => void delSource(id)}
-                />
-              ))}
-              {canAddSource ? (
+              {displaySites.map((site) => {
+                const hiddenDone =
+                  hiddenDoneIds.includes(site.id) &&
+                  site.progress != null &&
+                  !isActiveCollectStatus(site.progress.status);
+                return (
+                  <CollectSourceCard
+                    key={site.id}
+                    record={hiddenDone ? { ...site, progress: null } : site}
+                    selected={selectedSourceIds.includes(site.id)}
+                    active={activeCollectIds.includes(site.id)}
+                    onSelect={handleSelectSource}
+                    onChangeCollectDuration={changeCollectDuration}
+                    onStartTask={(record) => void startTask(record)}
+                    onTerminateTask={(id) => void stopTask(id)}
+                    onEditSource={(id) => void openEditDialog(id)}
+                    onDeleteSource={(id) => void delSource(id)}
+                  />
+                );
+              })}
+              {canAddSource && canWrite ? (
                 <button
                   type="button"
                   className={styles.addSourceTile}
@@ -934,12 +1083,12 @@ export default function CollectManagePageView() {
               description={
                 loading
                   ? "采集站加载中…"
-                  : canAddSource
+                  : canAddSource && canWrite
                     ? "暂无采集站"
                     : `暂无采集站（上限 ${MAX_COLLECT_SOURCES}）`
               }
             >
-              {!loading && canAddSource ? (
+              {!loading && canAddSource && canWrite ? (
                 <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
                   新增采集站
                 </Button>
@@ -953,6 +1102,7 @@ export default function CollectManagePageView() {
         open={sourceModalOpen}
         mode={sourceModalMode}
         loading={submitting}
+        testing={testing}
         form={sourceForm}
         onCancel={() => setSourceModalOpen(false)}
         onSubmit={handleSubmitSource}

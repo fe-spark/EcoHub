@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { collectDuration, type FilmSource } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
+import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
@@ -47,6 +48,7 @@ export default function CollectSourceCard({
 }: CollectSourceCardProps) {
   const isRunning = active;
   const isMaster = record.grade === 0;
+  const { canWrite } = useManagePermission();
   const { label: statusLabel, tone: statusTone } = resolveSourceStatus(record, active);
 
   const cardClassNames = [
@@ -93,15 +95,9 @@ export default function CollectSourceCard({
         </span>
       </div>
 
-      {record.progress ? (
-        <div className={styles.cardProgress} onClick={(event) => event.stopPropagation()}>
-          <CollectProgressView progress={record.progress} />
-        </div>
-      ) : null}
-
-      {/* 底部信息/操作沉底：进度消失后卡片仍与同排等高，按钮对齐 */}
+      {/* 底部信息/操作沉底：进度改为环形固定占位，卡片高度恒定 */}
       <div className={styles.cardFoot}>
-        <dl className={styles.cardMeta} onClick={(event) => event.stopPropagation()}>
+        <div className={styles.cardMeta} onClick={(event) => event.stopPropagation()}>
           <div className={styles.metaItem}>
             <dt className={styles.metaLabel}>上次采集：</dt>
             <dd
@@ -120,71 +116,78 @@ export default function CollectSourceCard({
               {record.interval > 0 ? `${record.interval} ms` : "无限制"}
             </dd>
           </div>
-        </dl>
-
-        <div className={styles.cardControls} onClick={(event) => event.stopPropagation()}>
-          <span className={styles.controlLabel}>采集时长</span>
-          <div className={styles.controlValue}>
-            <Select
-              size="small"
-              value={record.cd}
-              disabled={isRunning || !record.state}
-              style={{ width: "100%" }}
-              options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
-              onChange={(value) => {
-                onChangeCollectDuration(record.id, value);
-              }}
-            />
+          <div className={styles.metaItem}>
+            <dt className={styles.metaLabel}>采集时长：</dt>
+            <dd className={styles.metaValue}>
+              <Select
+                size="small"
+                value={record.cd}
+                disabled={!canWrite || isRunning || !record.state}
+                style={{ width: "100%" }}
+                options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
+                onChange={(value) => {
+                  onChangeCollectDuration(record.id, value);
+                }}
+              />
+            </dd>
           </div>
         </div>
 
         <div className={styles.cardActions} onClick={(event) => event.stopPropagation()}>
-          {isRunning ? (
+          <div className={styles.actionGroup}>
+            {isRunning ? (
             <Popconfirm
-              title="停止该采集站后续请求？"
-              description="将禁用该采集站；已请求数据会继续入库。"
+              title="停止当前采集任务？"
+              description="仅停止采集任务，采集站保持启用；已请求数据会继续入库。"
               onConfirm={() => onTerminateTask(record.id)}
-              disabled={!record.state}
-              okText="停止请求"
-              cancelText="取消"
-              okButtonProps={{ danger: true }}
-            >
-              <Button
-                danger
-                icon={<StopOutlined />}
                 disabled={!record.state}
-                className={styles.actionPrimary}
+                okText="停止采集"
+                cancelText="取消"
+                okButtonProps={{ danger: true }}
               >
-                {record.state ? "停止请求" : "已停止"}
-              </Button>
-            </Popconfirm>
-          ) : (
-            <Tooltip title={!record.state ? "该采集站已被禁用，无法发起采集" : undefined}>
-              <span>
                 <Button
-                  type="primary"
-                  icon={<PoweroffOutlined />}
-                  onClick={() => onStartTask(record)}
-                  disabled={!record.state}
-                  className={styles.actionPrimary}
+                  danger
+                  icon={<StopOutlined />}
+                  disabled={!canWrite || !record.state}
                 >
-                  开始采集
+                  {record.state ? "停止采集" : "已停止"}
                 </Button>
-              </span>
+              </Popconfirm>
+            ) : (
+              <Tooltip title={!record.state ? "该采集站已被禁用，无法发起采集" : undefined}>
+                <span>
+                  <Button
+                    type="primary"
+                    icon={<PoweroffOutlined />}
+                    onClick={() => onStartTask(record)}
+                    disabled={!canWrite || !record.state}
+                  >
+                    开始采集
+                  </Button>
+                </span>
+              </Tooltip>
+            )}
+            <Tooltip title="编辑采集站">
+              <Button
+                icon={<EditOutlined />}
+                disabled={!canWrite}
+                onClick={() => onEditSource(record.id)}
+              />
             </Tooltip>
-          )}
-          <Tooltip title="编辑采集站">
-            <Button icon={<EditOutlined />} onClick={() => onEditSource(record.id)} />
-          </Tooltip>
-          {isMaster ? (
-            <Tooltip title="主站不可直接删除，请先改为附属站">
-              <Button danger icon={<DeleteOutlined />} disabled />
-            </Tooltip>
-          ) : (
-            <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
-              <Button danger icon={<DeleteOutlined />} />
-            </Popconfirm>
-          )}
+            {isMaster ? (
+              <Tooltip title="主站不可直接删除，请先改为附属站">
+                <Button danger icon={<DeleteOutlined />} disabled />
+              </Tooltip>
+            ) : (
+              <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
+                <Button danger icon={<DeleteOutlined />} disabled={!canWrite} />
+              </Popconfirm>
+            )}
+          </div>
+
+          <div className={styles.ringGroup}>
+            <CollectProgressView progress={record.progress} variant="ring" />
+          </div>
         </div>
       </div>
     </div>

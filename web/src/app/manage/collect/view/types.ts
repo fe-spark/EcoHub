@@ -109,6 +109,7 @@ export interface SourceFormValues {
   state: boolean;
   grade: number;
   interval: number;
+  cd: number;
 }
 
 export const collectDuration = [

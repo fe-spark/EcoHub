@@ -3,6 +3,7 @@ import { Alert, Button, Card, Flex, Input, Modal, Progress, Space, Typography } 
 import { DeleteOutlined, WarningOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 interface ResetProgress {
@@ -27,6 +28,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
   const pollTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
@@ -111,7 +113,12 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
                 清空影视库存、快照、分类与失败记录等采集派生数据；账号与配置类数据保留。体量可在工作台查看。
               </Typography.Text>
             </Flex>
-            <Button danger icon={<DeleteOutlined />} onClick={() => setResetOpen(true)}>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              disabled={!canWrite}
+              onClick={() => setResetOpen(true)}
+            >
               数据重置
             </Button>
           </Flex>
@@ -151,8 +158,8 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
           <Alert
             showIcon
             type="error"
-            message="该操作不可逆"
-            description="将清空影视库存、列表快照、播放源映射、失败记录与分类等采集派生数据，且无法恢复。网站配置、采集站、账号等不受影响。"
+            title="该操作不可逆"
+            description="将清空影视库存、列表快照、播放源映射、失败记录与分类等采集派生数据，且无法恢复。清空完成后会自动同步主站分类，便于立即重新采集。网站配置、采集站、账号等不受影响。"
           />
           <Input.Password
             placeholder="请输入管理密码"

@@ -43,7 +43,7 @@ export default function ResetPageView() {
     <div className={styles.formPanel}>
       <ManagePageHeader
         title="数据重置"
-        description="清空所有影视与采集数据，重新全量采集前执行。"
+        description="清空所有影视与采集数据；完成后自动同步主站分类，可直接重新采集。"
       />
 
       <Card size="small" title="当前数据规模（重置将清空以下数据）">
@@ -78,7 +78,7 @@ export default function ResetPageView() {
           </Col>
         </Row>
         <Typography.Text type="secondary" style={{ fontSize: 12, display: "block", marginTop: 8 }}>
-          重置后以上数据将全部清空；账号、网站配置、采集源、定时任务等不受影响。
+          重置后以上数据将全部清空，并自动同步主站分类；账号、网站配置、采集源、定时任务等不受影响。
         </Typography.Text>
       </Card>
 

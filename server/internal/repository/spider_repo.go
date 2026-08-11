@@ -172,6 +172,9 @@ func GetCollectSourceList() []model.FilmSource {
 		log.Println("GetCollectSourceList Error:", err)
 		return nil
 	}
+	for i := range list {
+		normalizeCollectCd(&list[i])
+	}
 	return list
 }
 
@@ -201,6 +204,9 @@ func GetCollectSourceListByGrade(grade model.SourceGrade) []model.FilmSource {
 		log.Println("GetCollectSourceListByGrade Error:", err)
 		return nil
 	}
+	for i := range list {
+		normalizeCollectCd(&list[i])
+	}
 	return list
 }
 
@@ -210,6 +216,9 @@ func GetEnabledCollectSourceList() []model.FilmSource {
 	if err := db.Mdb.Where("state = ?", true).Order("grade ASC").Find(&list).Error; err != nil {
 		log.Println("GetEnabledCollectSourceList Error:", err)
 		return nil
+	}
+	for i := range list {
+		normalizeCollectCd(&list[i])
 	}
 	return list
 }
@@ -283,6 +292,7 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	if err := db.Mdb.Where("id = ?", id).First(&fs).Error; err != nil {
 		return nil
 	}
+	normalizeCollectCd(&fs)
 	return &fs
 }
 
@@ -398,6 +408,14 @@ func ResetCollectSources(list []model.FilmSource) error {
 func normalizeCollectSourceDefaults(source *model.FilmSource) {
 	if source.Interval <= 0 {
 		source.Interval = config.DefaultSpiderInterval
+	}
+	normalizeCollectCd(source)
+}
+
+// normalizeCollectCd 读取路径兜底：历史数据 cd 列可能为 0，统一按默认 24 小时处理。
+func normalizeCollectCd(source *model.FilmSource) {
+	if source.Cd <= 0 {
+		source.Cd = 24
 	}
 }
 

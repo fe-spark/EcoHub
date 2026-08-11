@@ -48,7 +48,7 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		return
 	}
 	if s.SyncPictures && (s.Grade == model.SlaveCollect) {
-		dto.Failed("附属站点无法开启图片同步功能", c)
+		dto.Failed("附属采集站不支持图片同步，该功能仅主采集站可用", c)
 		return
 	}
 	if err := spider.CollectApiTest(s); err != nil {
@@ -73,7 +73,7 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		return
 	}
 	if s.SyncPictures && (s.Grade == model.SlaveCollect) {
-		dto.Failed("附属站点无法开启图片同步功能", c)
+		dto.Failed("附属采集站不支持图片同步，该功能仅主采集站可用", c)
 		return
 	}
 	if s.Id == "" {
@@ -126,6 +126,7 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 			SyncPictures: s.SyncPictures,
 			State:        s.State,
 			Interval:     fs.Interval,
+			Cd:           fs.Cd,
 		}
 		if err := service.CollectSvc.UpdateFilmSource(upds); err != nil {
 			dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)

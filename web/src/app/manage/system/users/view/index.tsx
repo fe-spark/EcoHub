@@ -14,7 +14,6 @@ import {
   Tag,
   Popconfirm,
   Avatar,
-  Card,
   Typography,
 } from "antd";
 import {
@@ -24,7 +23,6 @@ import {
   DeleteOutlined,
   LockOutlined,
   MailOutlined,
-  TeamOutlined,
   CrownOutlined,
   EyeOutlined,
   CheckCircleOutlined,
@@ -55,6 +53,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   const [pageSize, setPageSize] = useState(10);
   const [inputValue, setInputValue] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [roleFilter, setRoleFilter] = useState(-1);
+  const [statusFilter, setStatusFilter] = useState(-1);
   const [currentUser, setCurrentUser] = useState<any>(null);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -74,13 +74,21 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   }, []);
 
   const fetchData = useCallback(
-    async (page = current, size = pageSize, name = searchKeyword) => {
+    async (
+      page = current,
+      size = pageSize,
+      name = searchKeyword,
+      role = roleFilter,
+      status = statusFilter,
+    ) => {
       setLoading(true);
       try {
         const resp = await ApiGet("/manage/user/list", {
           current: page,
           pageSize: size,
           userName: name,
+          role,
+          status,
         });
         if (resp.code === 0) {
           setData(resp.data.list || []);
@@ -92,7 +100,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         setLoading(false);
       }
     },
-    [current, pageSize, searchKeyword],
+    [current, pageSize, searchKeyword, roleFilter, statusFilter],
   );
 
   useEffect(() => {
@@ -105,14 +113,16 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
     setInputValue(trimmed);
     setSearchKeyword(trimmed);
     setCurrent(1);
-    void fetchData(1, pageSize, trimmed);
+    void fetchData(1, pageSize, trimmed, roleFilter, statusFilter);
   };
 
   const handleReset = () => {
     setInputValue("");
     setSearchKeyword("");
+    setRoleFilter(-1);
+    setStatusFilter(-1);
     setCurrent(1);
-    void fetchData(1, pageSize, "");
+    void fetchData(1, pageSize, "", -1, -1);
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -315,38 +325,56 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         />
       )}
 
-      <Card size="small" className={styles.filterCard}>
-        <div className={styles.filterBar}>
-          <div className={styles.filterLeft}>
-            <Space size={8}>
-              <Input
-                placeholder="搜索用户名"
-                value={inputValue}
-                onChange={handleInputChange}
-                onPressEnter={() => handleSearch(inputValue)}
-                className={styles.searchInput}
-                allowClear
-              />
-              <Button
-                type="primary"
-                icon={<SearchOutlined />}
-                onClick={() => handleSearch(inputValue)}
-              >
-                搜索
-              </Button>
-              <Button
-                icon={<ReloadOutlined />}
-                onClick={handleReset}
-              >
-                重置
-              </Button>
-            </Space>
-          </div>
-          <div className={styles.filterRight}>
-            <Tag color="processing">共 {total} 条账号数据</Tag>
-          </div>
+      <div className={styles.filterBar}>
+        <div className={styles.filterLeft}>
+          <Space size={8}>
+            <Select
+              placeholder="全部角色"
+              value={roleFilter}
+              onChange={(value) => setRoleFilter(value)}
+              options={[
+                { value: -1, label: "全部角色" },
+                { value: 0, label: "普通用户" },
+                { value: 1, label: "超级管理员" },
+                { value: 2, label: "访客" },
+              ]}
+              style={{ width: 130 }}
+            />
+            <Select
+              placeholder="全部状态"
+              value={statusFilter}
+              onChange={(value) => setStatusFilter(value)}
+              options={[
+                { value: -1, label: "全部状态" },
+                { value: 0, label: "正常" },
+                { value: 1, label: "禁用" },
+              ]}
+              style={{ width: 120 }}
+            />
+            <Input
+              placeholder="搜索用户名"
+              value={inputValue}
+              onChange={handleInputChange}
+              onPressEnter={() => handleSearch(inputValue)}
+              className={styles.searchInput}
+              allowClear
+            />
+            <Button
+              type="primary"
+              icon={<SearchOutlined />}
+              onClick={() => handleSearch(inputValue)}
+            >
+              搜索
+            </Button>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={handleReset}
+            >
+              重置
+            </Button>
+          </Space>
         </div>
-      </Card>
+      </div>
 
       <Table
         bordered
@@ -359,10 +387,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         scroll={{ x: "max-content" }}
         title={() => (
           <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>
-              <TeamOutlined style={{ color: "#fa8c16", marginRight: 8 }} />
-              <span>账号列表</span>
-            </div>
+            <div className={styles.tableTitle}>账号列表</div>
             <div className={styles.tableActions}>
               <Button
                 type="primary"

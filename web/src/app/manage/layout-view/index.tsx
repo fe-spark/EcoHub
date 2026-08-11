@@ -41,6 +41,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
+import { ManagePermissionProvider } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 type AdminNotice = {
@@ -148,27 +149,20 @@ function resolveMenuKey(pathname: string) {
 }
 
 
-function collectOpenKeys(items: MenuItem[], selectedKey: string) {
+function collectAllOpenKeys(items: MenuItem[]) {
   const openKeys: string[] = [];
   for (const item of items) {
     if (
       !item ||
       typeof item !== "object" ||
       !("children" in item) ||
-      !item.children
+      !item.children ||
+      !("key" in item) ||
+      typeof item.key !== "string"
     ) {
       continue;
     }
-    const hasMatch = item.children.some(
-      (child) =>
-        child &&
-        typeof child === "object" &&
-        "key" in child &&
-        child.key === selectedKey,
-    );
-    if (hasMatch && "key" in item && typeof item.key === "string") {
-      openKeys.push(item.key);
-    }
+    openKeys.push(item.key);
   }
   return openKeys;
 }
@@ -230,7 +224,7 @@ export default function ManageLayoutView({
     }
   };
 
-  const openKeys = collectOpenKeys(menuItems, selectedKey);
+  const openKeys = collectAllOpenKeys(menuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
       key: "light",
@@ -392,7 +386,7 @@ export default function ManageLayoutView({
                         : "error"
                   }
                   showIcon
-                  message={n.message}
+                  title={n.message}
                   action={
                     n.actionPath ? (
                       <Link href={n.actionPath}>
@@ -407,17 +401,19 @@ export default function ManageLayoutView({
               ))}
             </div>
           )}
-          {children}
+          <ManagePermissionProvider canWrite={userInfo?.canWrite !== false}>
+            {children}
+          </ManagePermissionProvider>
         </Content>
       </Layout>
       <Drawer
         title="后台菜单"
         placement="left"
-        width={280}
+        size={280}
         open={isMobile && drawerOpen}
         onClose={() => setDrawerOpen(false)}
         className={styles.menuDrawer}
-        bodyStyle={{ padding: 0 }}
+        styles={{ body: { padding: 0 } }}
       >
         <div className={styles.drawerInner}>{menuNode}</div>
       </Drawer>
