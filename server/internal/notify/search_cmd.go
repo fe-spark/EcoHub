@@ -87,8 +87,15 @@ func chatAllowed(cfg model.NotifyConfig, chatID, chatUsername string) bool {
 	if uname != "" {
 		uname = "@" + strings.TrimPrefix(uname, "@")
 	}
-	for _, id := range cfg.ChatIDs {
-		id = strings.TrimSpace(id)
+	// 与发送路由同源：走 effectiveTargets（Targets 优先，空则回落 ChatIDs）
+	for _, t := range effectiveTargets(cfg) {
+		if !t.Enabled {
+			continue
+		}
+		id := strings.TrimSpace(t.ChatID)
+		if id == "" {
+			continue
+		}
 		if id == chatID {
 			return true
 		}
@@ -328,7 +335,7 @@ func handleSearchPageCallback(token string, cb *telegramCallback) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	sessionID, page, kind, ok := parsePagedCallback(searchCallbackPrefix, cb.Data)
+	sessionID, page, _, _, kind, ok := parsePagedCallback(searchCallbackPrefix, cb.Data)
 	if !ok {
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "无效操作", false)
 		return

@@ -13,6 +13,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
+	"server/internal/repository"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -163,14 +164,203 @@ func clampPageSize(pageSize int) int {
 	return pageSize
 }
 
-// LoadChangeMidPage 按 update_stamp 新→旧分页取 mid 及其源名称（1-based page）。
-func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidItem, total, start, end, pageOut int, err error) {
+// CategoryCountItem 按首页顶栏导航大类统计项（与 /navCategory 一致）。
+type CategoryCountItem struct {
+	CategoryID   int64  // 顶级分类 ID；「其他」为 0
+	CategoryName string // 与首页顶栏 Name 一致
+	Count        int
+}
+
+// navTopCategories 与 IndexService.GetNavCategory / 前端首页顶栏同源：
+// GetCategoryTree().Children 中 Show=true 的顶级大类。
+func navTopCategories() []model.Category {
+	tree := repository.GetCategoryTree()
+	out := make([]model.Category, 0, len(tree.Children))
+	for _, c := range tree.Children {
+		if c == nil || !c.Show {
+			continue
+		}
+		out = append(out, model.Category{
+			Id:   c.Id,
+			Pid:  c.Pid,
+			Name: c.Name,
+			Sort: c.Sort,
+		})
+	}
+	return out
+}
+
+func navTopCategoryIDs(nav []model.Category) []int64 {
+	ids := make([]int64, 0, len(nav))
+	for _, c := range nav {
+		if c.Id > 0 {
+			ids = append(ids, c.Id)
+		}
+	}
+	return ids
+}
+
+// applyNavCategoryFilter 按顶级大类 pid 筛选（与首页按 pid 归类一致）。
+// cat 为空/全部：不筛选；「其他」：pid 为空或不属于任一导航大类。
+func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64) *gorm.DB {
+	if cat == nil {
+		return q
+	}
+	name := strings.TrimSpace(cat.CategoryName)
+	if name == "" || name == "全部" {
+		return q
+	}
+	if name == "其他" {
+		if len(navIDs) == 0 {
+			// 无导航大类时全部视为其他，不额外收窄
+			return q
+		}
+		return q.Where("f.pid = 0 OR f.pid NOT IN ?", navIDs)
+	}
+	if cat.CategoryID > 0 {
+		return q.Where("f.pid = ?", cat.CategoryID)
+	}
+	// 未知分类名且无 ID：不匹配任何影片
+	return q.Where("1 = 0")
+}
+
+// resolveCategoryFilter 将分类名解析为筛选项（优先统计列表 ID；兼容旧 callback 仅名称）。
+func resolveCategoryFilter(batchID, category string) *CategoryCountItem {
+	category = strings.TrimSpace(category)
+	if category == "" || category == "全部" {
+		return nil
+	}
+	if category == "其他" {
+		return &CategoryCountItem{CategoryID: 0, CategoryName: "其他"}
+	}
+	// 先走本批次统计项（含 ID）
+	for _, c := range GetChangeBatchCategoryCounts(batchID) {
+		if c.CategoryName == category {
+			item := c
+			return &item
+		}
+	}
+	// 再按导航名解析
+	for _, n := range navTopCategories() {
+		if n.Name == category {
+			return &CategoryCountItem{CategoryID: n.Id, CategoryName: n.Name}
+		}
+	}
+	return &CategoryCountItem{CategoryID: 0, CategoryName: category}
+}
+
+// GetChangeBatchCategoryCounts 按首页顶栏大类统计批次内影片数。
+// 顺序与导航一致（非仅按数量倒序）；仅输出本批有片的大类，末尾可附加「其他」。
+func GetChangeBatchCategoryCounts(batchID string) []CategoryCountItem {
 	batchID = strings.TrimSpace(batchID)
+	if batchID == "" || db.Mdb == nil {
+		return nil
+	}
+	nav := navTopCategories()
+	navIDs := navTopCategoryIDs(nav)
+
+	// 按 film_index.pid（写入时即为顶级大类 ID）聚合
+	type pidRow struct {
+		Pid   int64 `gorm:"column:pid"`
+		Count int   `gorm:"column:cnt"`
+	}
+	var rows []pidRow
+	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
+		Select("f.pid AS pid, COUNT(DISTINCT c.mid) AS cnt").
+		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
+		Where("c.batch_id = ?", batchID).
+		Group("f.pid")
+	if err := q.Scan(&rows).Error; err != nil {
+		syslog.Errorf("[Notify] 获取变更批次分类统计失败 batch=%s: %v", batchID, err)
+		return nil
+	}
+
+	countByPid := make(map[int64]int, len(rows))
+	otherCount := 0
+	navSet := make(map[int64]struct{}, len(navIDs))
+	for _, id := range navIDs {
+		navSet[id] = struct{}{}
+	}
+	for _, r := range rows {
+		if r.Count <= 0 {
+			continue
+		}
+		if r.Pid > 0 {
+			if _, ok := navSet[r.Pid]; ok {
+				countByPid[r.Pid] += r.Count
+				continue
+			}
+		}
+		otherCount += r.Count
+	}
+
+	res := make([]CategoryCountItem, 0, len(nav)+1)
+	// 严格按首页顶栏顺序输出
+	for _, n := range nav {
+		if cnt := countByPid[n.Id]; cnt > 0 {
+			res = append(res, CategoryCountItem{
+				CategoryID:   n.Id,
+				CategoryName: n.Name,
+				Count:        cnt,
+			})
+		}
+	}
+	if otherCount > 0 {
+		res = append(res, CategoryCountItem{
+			CategoryID:   0,
+			CategoryName: "其他",
+			Count:        otherCount,
+		})
+	}
+	return res
+}
+
+// ResolveCategoryByIndex 按统计列表下标解析分类名；越界返回空（视为全部）。
+func ResolveCategoryByIndex(batchID string, idx int) string {
+	item := ResolveCategoryItemByIndex(batchID, idx)
+	if item == nil {
+		return ""
+	}
+	return item.CategoryName
+}
+
+// ResolveCategoryItemByIndex 按统计列表下标解析完整分类项（含顶级 ID）。
+func ResolveCategoryItemByIndex(batchID string, idx int) *CategoryCountItem {
+	if idx < 0 {
+		return nil
+	}
+	cats := GetChangeBatchCategoryCounts(batchID)
+	if idx >= len(cats) {
+		return nil
+	}
+	item := cats[idx]
+	return &item
+}
+
+// LoadChangeMidPageCategory 按导航大类筛选并分页取 mid 及其源名称。
+// category 为空/"全部" 表示全部；名称须与首页顶栏一致，或为「其他」。
+func LoadChangeMidPageCategory(batchID, category string, page, pageSize int) (chunk []ChangeMidItem, total, start, end, pageOut int, err error) {
+	batchID = strings.TrimSpace(batchID)
+	category = strings.TrimSpace(category)
 	if batchID == "" {
 		return nil, 0, 0, 0, 1, fmt.Errorf("empty batch")
 	}
 	pageSize = clampPageSize(pageSize)
-	total = CountChangeMids(batchID)
+	navIDs := navTopCategoryIDs(navTopCategories())
+	filter := resolveCategoryFilter(batchID, category)
+
+	if filter == nil {
+		total = CountChangeMids(batchID)
+	} else {
+		var n int64
+		countQuery := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
+			Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
+			Where("c.batch_id = ?", batchID)
+		countQuery = applyNavCategoryFilter(countQuery, filter, navIDs)
+		_ = countQuery.Count(&n).Error
+		total = int(n)
+	}
+
 	if total == 0 {
 		return nil, 0, 0, 0, 1, nil
 	}
@@ -183,7 +373,6 @@ func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidIte
 	}
 	offset := (page - 1) * pageSize
 
-	// 关联 film_index 按更新时间排序；无索引时 mid 倒序兜底
 	type row struct {
 		Mid        int64
 		SourceName string
@@ -192,9 +381,10 @@ func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidIte
 	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
 		Select("c.mid, c.source_name").
 		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
-		Where("c.batch_id = ?", batchID).
-		Order("f.update_stamp DESC, c.mid DESC").
-		Offset(offset).Limit(pageSize)
+		Where("c.batch_id = ?", batchID)
+	q = applyNavCategoryFilter(q, filter, navIDs)
+
+	q = q.Order("f.update_stamp DESC, c.mid DESC").Offset(offset).Limit(pageSize)
 	if err = q.Scan(&rows).Error; err != nil {
 		return nil, 0, 0, 0, page, err
 	}
@@ -205,6 +395,11 @@ func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidIte
 	start = offset
 	end = offset + len(chunk)
 	return chunk, total, start, end, page, nil
+}
+
+// LoadChangeMidPage 按 update_stamp 新→旧分页取 mid 及其源名称（1-based page）。
+func LoadChangeMidPage(batchID string, page, pageSize int) (chunk []ChangeMidItem, total, start, end, pageOut int, err error) {
+	return LoadChangeMidPageCategory(batchID, "", page, pageSize)
 }
 
 // SaveChangeBatchMeta 写入概要文案与分页参数。

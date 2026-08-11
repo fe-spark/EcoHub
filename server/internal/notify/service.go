@@ -100,6 +100,13 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 	}
 	cfg.ChatIDs = chatIDs
 
+	// ChatIDs 为成员真相源：合并旧配置与请求中的 Target 元数据（Thread/等级/订阅），
+	// 再按 ChatIDs 重建，避免前端只改 chatIds 时残留旧 Targets 导致仍发到旧群。
+	targetSources := make([]model.NotifyTarget, 0, len(old.Targets)+len(cfg.Targets))
+	targetSources = append(targetSources, old.Targets...)
+	targetSources = append(targetSources, cfg.Targets...)
+	cfg.Targets = repository.RebuildTargetsFromChatIDs(cfg.ChatIDs, targetSources)
+
 	if cfg.MaxFilmsInMessage <= 0 {
 		cfg.MaxFilmsInMessage = model.DefaultMaxFilmsInMessage
 	}
@@ -108,6 +115,18 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 	}
 	if cfg.MinIntervalSec < 0 || cfg.MinIntervalSec > 3600 {
 		return model.NotifyConfig{}, fmt.Errorf("minIntervalSec 范围为 0-3600")
+	}
+
+	if cfg.QuietHours.Enabled {
+		if strings.TrimSpace(cfg.QuietHours.Start) == "" || strings.TrimSpace(cfg.QuietHours.End) == "" {
+			return model.NotifyConfig{}, fmt.Errorf("启用免打扰时必须填写开始与结束时间 (HH:mm)")
+		}
+		if _, _, err := parseHHMM(cfg.QuietHours.Start); err != nil {
+			return model.NotifyConfig{}, fmt.Errorf("免打扰开始时间格式无效，应为 HH:mm")
+		}
+		if _, _, err := parseHHMM(cfg.QuietHours.End); err != nil {
+			return model.NotifyConfig{}, fmt.Errorf("免打扰结束时间格式无效，应为 HH:mm")
+		}
 	}
 
 	if cfg.Enabled {
@@ -197,6 +216,18 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 	if batchID != "" {
 		listN = CountChangeMids(batchID)
 	}
+
+	// 判定是否有真正更新的影片或故障报错
+	hasChanges := listN > 0
+	hasFailures := payload.FailedSources > 0 || strings.TrimSpace(payload.FinalizeError) != ""
+	if cfg.OnlyNotifyOnUpdate && !hasChanges && !hasFailures {
+		log.Printf("[Notify] 批次采集无更新且无失败，已触发自动静音跳过推送 (OnlyNotifyOnUpdate=true)")
+		return
+	}
+	severity := model.SeverityInfo
+	if hasFailures {
+		severity = model.SeverityError
+	}
 	// 无活跃批次时，payload 仍可能有统计；列表依赖 MySQL
 	if payload.IncludeFilmDetails && listN > 0 {
 		// 头行变更与列表一致
@@ -208,7 +239,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 		buttonPart := parts[len(parts)-1]
 		if err := SaveChangeBatchMeta(batchID, payload.SiteName, buttonPart, pageSize, listN); err != nil {
 			syslog.Errorf("[Notify] 保存变更批次元数据失败: %v", err)
-			sendMessages(cfg, parts)
+			sendMessages(cfg, severity, model.CategoryCollect, parts)
 			return
 		}
 		for i, part := range parts {
@@ -216,7 +247,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 			if i == len(parts)-1 {
 				markup = buildOverviewKeyboard(batchID)
 			}
-			sendMessagesWithMarkup(cfg, part, markup)
+			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, markup)
 		}
 		EnsureBotPoller()
 		return
@@ -224,7 +255,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 
 	// 无列表：仍结束可能残留的空批次
 	overview := formatBatchOverview(payload, 0, pageSize)
-	sendMessages(cfg, splitTelegramMessages(overview))
+	sendMessages(cfg, severity, model.CategoryCollect, splitTelegramMessages(overview))
 }
 
 // PublishSourceFailed 单源失败即时告警。
@@ -239,7 +270,7 @@ func PublishSourceFailed(sourceID, sourceName, reason string) {
 			return
 		}
 		messages := formatSourceFailed(siteName(), sourceName, sourceID, reason, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityError, model.CategoryCollect, messages)
 	})
 }
 
@@ -256,7 +287,7 @@ func PublishProgressStale(sourceID, sourceName, oldStatus string, age time.Durat
 		}
 		reason := fmt.Sprintf("进度超时 status=%s age=%s", oldStatus, age.Round(time.Second))
 		messages := formatProgressStale(siteName(), sourceName, sourceID, reason, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityWarn, model.CategoryCollect, messages)
 	})
 }
 
@@ -272,7 +303,7 @@ func PublishFinalizeFailed(sourceCount int, reason string) {
 			return
 		}
 		messages := formatFinalizeFailed(siteName(), reason, sourceCount, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityError, model.CategoryCollect, messages)
 	})
 }
 
@@ -288,7 +319,7 @@ func PublishCronFailed(taskID, remark, reason string) {
 			return
 		}
 		messages := formatCronFailed(siteName(), taskID, remark, reason, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityError, model.CategoryCron, messages)
 	})
 }
 
@@ -304,7 +335,7 @@ func PublishCronDone(taskID, remark, detail string) {
 			return
 		}
 		messages := formatCronDone(siteName(), taskID, remark, detail, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityInfo, model.CategoryCron, messages)
 	})
 }
 
@@ -321,7 +352,7 @@ func PublishSourceConfigChanged(sourceName, sourceID string, changes []string) {
 			return
 		}
 		messages := formatSourceConfigChanged(siteName(), sourceName, sourceID, changes, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityNotice, model.CategoryAudit, messages)
 	})
 }
 
@@ -341,7 +372,7 @@ func PublishSourceConfigsChanged(items []SourceConfigChangeItem) {
 			return
 		}
 		messages := formatSourceConfigsChanged(siteName(), items, time.Now())
-		sendMessages(cfg, messages)
+		sendMessages(cfg, model.SeverityNotice, model.CategoryAudit, messages)
 	})
 }
 
@@ -441,14 +472,195 @@ func summarizeChatErrors(failed []model.NotifyChatError) string {
 	return strings.Join(parts, "; ")
 }
 
-func sendMessages(cfg model.NotifyConfig, messages []string) {
+func sendMessages(cfg model.NotifyConfig, severity model.Severity, category string, messages []string) {
 	for _, msg := range messages {
-		sendMessagesWithMarkup(cfg, msg, nil)
+		sendMessagesWithMarkup(cfg, severity, category, msg, nil)
 	}
 }
 
-func sendMessagesWithMarkup(cfg model.NotifyConfig, text string, markup *InlineKeyboardMarkup) {
-	if strings.TrimSpace(text) == "" || len(cfg.ChatIDs) == 0 || strings.TrimSpace(cfg.BotToken) == "" {
+var severityRank = map[model.Severity]int{
+	model.SeverityInfo:     1,
+	model.SeverityNotice:   2,
+	model.SeverityWarn:     3,
+	model.SeverityError:    4,
+	model.SeverityCritical: 5,
+}
+
+func isLevelAllowed(targetMin model.Severity, evtLevel model.Severity) bool {
+	if targetMin == "" {
+		return true
+	}
+	rTarget, ok1 := severityRank[targetMin]
+	rEvt, ok2 := severityRank[evtLevel]
+	if !ok1 || !ok2 {
+		return true
+	}
+	return rEvt >= rTarget
+}
+
+func isCategorySubscribed(subscribed []string, category string) bool {
+	if len(subscribed) == 0 {
+		return true
+	}
+	for _, c := range subscribed {
+		if c == category || strings.HasPrefix(category, c+".") {
+			return true
+		}
+	}
+	return false
+}
+
+func parseHHMM(s string) (int, int, error) {
+	parts := strings.Split(s, ":")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("invalid time format")
+	}
+	var h, m int
+	_, err := fmt.Sscanf(s, "%d:%d", &h, &m)
+	if err != nil {
+		return 0, 0, err
+	}
+	if h < 0 || h > 23 || m < 0 || m > 59 {
+		return 0, 0, fmt.Errorf("invalid time range")
+	}
+	return h, m, nil
+}
+
+// quietHoursLocation 免打扰按业务时区（东八区）计算，避免 Docker 默认 UTC 导致时段偏移。
+var quietHoursLocation = func() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
+}()
+
+func isInQuietHours(qh model.NotifyQuietHours, now time.Time) bool {
+	if !qh.Enabled || qh.Start == "" || qh.End == "" {
+		return false
+	}
+	startHour, startMin, err1 := parseHHMM(qh.Start)
+	endHour, endMin, err2 := parseHHMM(qh.End)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+
+	local := now.In(quietHoursLocation)
+	curMinute := local.Hour()*60 + local.Minute()
+	startMinute := startHour*60 + startMin
+	endMinute := endHour*60 + endMin
+
+	if startMinute < endMinute {
+		return curMinute >= startMinute && curMinute < endMinute
+	}
+	// 跨午夜：如 23:00–07:00
+	return curMinute >= startMinute || curMinute < endMinute
+}
+
+// shouldMuteByQuietHours 免打扰时段内且等级不在穿透列表时静音。
+func shouldMuteByQuietHours(cfg model.NotifyConfig, severity model.Severity) bool {
+	if !isInQuietHours(cfg.QuietHours, time.Now()) {
+		return false
+	}
+	for _, lvl := range cfg.QuietHours.AllowLevels {
+		if lvl == severity {
+			return false
+		}
+	}
+	return true
+}
+
+// effectiveTargets 优先 Targets；空时由 ChatIDs 兼容包装。
+func effectiveTargets(cfg model.NotifyConfig) []model.NotifyTarget {
+	if len(cfg.Targets) > 0 {
+		return cfg.Targets
+	}
+	if len(cfg.ChatIDs) == 0 {
+		return nil
+	}
+	targets := make([]model.NotifyTarget, 0, len(cfg.ChatIDs))
+	for _, id := range cfg.ChatIDs {
+		targets = append(targets, model.NotifyTarget{
+			ID:       id,
+			Name:     id,
+			ChatID:   id,
+			Enabled:  true,
+			MinLevel: model.SeverityInfo,
+		})
+	}
+	return targets
+}
+
+// routeTargets 按免打扰、最低等级、分类订阅筛选接收目标。
+// muted=true 表示被免打扰整体静音（调用方应跳过发送）。
+func routeTargets(cfg model.NotifyConfig, severity model.Severity, category string) (targets []model.NotifyTarget, muted bool) {
+	if shouldMuteByQuietHours(cfg, severity) {
+		return nil, true
+	}
+	for _, t := range effectiveTargets(cfg) {
+		if !t.Enabled || strings.TrimSpace(t.ChatID) == "" {
+			continue
+		}
+		if !isLevelAllowed(t.MinLevel, severity) {
+			continue
+		}
+		if category != "" && !isCategorySubscribed(t.SubscribedCategories, category) {
+			continue
+		}
+		targets = append(targets, t)
+	}
+	return targets, false
+}
+
+// Dispatch 派发统一事件，根据 Severity、Category、QuietHours、Targets 订阅矩阵进行精准路由分发。
+func Dispatch(ctx context.Context, evt model.NotifyEvent) {
+	_ = ctx
+	go safePublish(func() {
+		cfg := GetConfig()
+		if !cfg.Enabled {
+			return
+		}
+		// 事件特定开关校验
+		if evt.Key != "" && !eventEnabled(cfg, evt.Key) {
+			return
+		}
+
+		// 限流控制
+		if evt.Key != "" {
+			interval := time.Duration(cfg.MinIntervalSec) * time.Second
+			if evt.Key == model.NotifyEventCollectBatchSummary {
+				interval = 0 // 摘要按批次自然频率
+			}
+			entityID := ""
+			if id, ok := evt.Data["entity_id"].(string); ok {
+				entityID = id
+			}
+			limitKey := evt.Key
+			if entityID != "" {
+				limitKey = evt.Key + ":" + entityID
+			}
+			if interval > 0 && !allowOrLog(limitKey, interval) {
+				return
+			}
+		}
+
+		// 格式化 HTML 内容
+		htmlText := formatEventHTML(siteName(), evt)
+		sendMessagesWithMarkup(cfg, evt.Severity, evt.Category, htmlText, nil)
+	})
+}
+
+func sendMessagesWithMarkup(cfg model.NotifyConfig, severity model.Severity, category, text string, markup *InlineKeyboardMarkup) {
+	targets, muted := routeTargets(cfg, severity, category)
+	if muted {
+		log.Printf("[Notify] muted by quiet hours severity=%s category=%s", severity, category)
+		return
+	}
+	sendMessagesToTargets(cfg, targets, text, markup)
+}
+
+func sendMessagesToTargets(cfg model.NotifyConfig, targets []model.NotifyTarget, text string, markup *InlineKeyboardMarkup) {
+	if strings.TrimSpace(text) == "" || len(targets) == 0 || strings.TrimSpace(cfg.BotToken) == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -459,25 +671,28 @@ func sendMessagesWithMarkup(cfg model.NotifyConfig, text string, markup *InlineK
 		failN    int
 		lastFail string
 	)
-	for _, chatID := range cfg.ChatIDs {
+	for _, target := range targets {
+		if !target.Enabled || strings.TrimSpace(target.ChatID) == "" {
+			continue
+		}
 		wg.Add(1)
-		go func(chatID string) {
+		go func(t model.NotifyTarget) {
 			defer wg.Done()
 			sendSem <- struct{}{}
 			defer func() { <-sendSem }()
-			if err := client.sendMessageWithMarkup(ctx, cfg.BotToken, chatID, text, markup); err != nil {
+			if err := client.sendMessageToTarget(ctx, cfg.BotToken, t.ChatID, t.ThreadID, text, markup); err != nil {
 				failMu.Lock()
 				failN++
 				lastFail = err.Error()
 				failMu.Unlock()
-				syslog.Errorf("[Notify] Telegram 发送失败 chat=%s err=%v", chatID, err)
+				syslog.Errorf("[Notify] Telegram 发送失败 target=%s chat=%s thread=%s err=%v", t.Name, t.ChatID, t.ThreadID, err)
 			}
-		}(chatID)
+		}(target)
 	}
 	wg.Wait()
 	if failN > 0 {
-		log.Printf("[Notify] 本轮发送完成 chats=%d failures=%d last_err=%s",
-			len(cfg.ChatIDs), failN, lastFail)
+		log.Printf("[Notify] 本轮发送完成 targets=%d failures=%d last_err=%s",
+			len(targets), failN, lastFail)
 	}
 }
 

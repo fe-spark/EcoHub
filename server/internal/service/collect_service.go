@@ -143,14 +143,16 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		spider.StopTask(source.Id)
 	}
 
-	if masterLookup || masterUriChanged || masterDowngrade {
-		if source.Grade == model.MasterCollect && source.State {
+	// 分类树只跟主站走（主站未启用也可同步）；无主站则不同步、不从附属站构建
+	if masterLookup || masterUriChanged {
+		if source.Grade == model.MasterCollect {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 				return syncErr
 			}
 		}
 	}
-	if source.Grade == model.MasterCollect && source.State && old.State != source.State {
+	// 主站启用/停用变更：停用后仍可用该主站 URI 同步分类；降级后若无主站则 Sync 会失败（符合「无主站无分类树」）
+	if source.Grade == model.MasterCollect && old.State != source.State {
 		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 			return syncErr
 		}
@@ -285,10 +287,9 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 			return errors.New("主站切换数据清理失败，请重试")
 		}
 		spider.ClearLimiter(source.Id)
-		if source.State {
-			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
-				return syncErr
-			}
+		// 新增主站即同步分类树（未启用也要同步；分类树只认主站）
+		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
+			return syncErr
 		}
 		clearProvideNetworkConfigCache()
 		notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源（主站）"})

@@ -1513,7 +1513,11 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 	}
 	updateStamp, err := utils.ParseCollectUpdateTime(detail.UpdateTime)
 	if err != nil {
-		return normalizedSearchMeta{}, fmt.Errorf("影片更新时间解析失败 name=%s id=%d updateTime=%q: %w", detail.Name, detail.Id, detail.UpdateTime, err)
+		// 解析失败不阻断入库；用当前时间兜底，避免整条元数据失败
+		// 可能影响按 update_stamp 排序的「最新」顺序，属可接受降级
+		log.Printf("[FilmWrite] 更新时间解析失败，使用当前时间兜底 name=%s id=%d updateTime=%q err=%v",
+			detail.Name, detail.Id, detail.UpdateTime, err)
+		updateStamp = time.Now().Unix()
 	}
 
 	finalArea := support.NormalizeArea(detail.Area)

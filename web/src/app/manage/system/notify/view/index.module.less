@@ -2,20 +2,23 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
   width: 100%;
 }
 
 .contentStack {
   width: 100%;
+  min-width: 0;
 }
 
 .configBody {
   min-width: 0;
-  transition: opacity 0.2s ease;
+  transition: opacity 0.3s ease, filter 0.3s ease;
 }
 
 .configBodyLocked {
   opacity: 0.55;
+  filter: grayscale(0.15);
 }
 
 .configFieldset {
@@ -25,58 +28,20 @@
   min-width: 0;
 }
 
-.footerBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 16px;
-  margin-top: 20px;
-  padding: 16px 20px;
-  border-radius: 12px;
-  background: var(--ant-color-bg-container, #ffffff);
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-  border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
-}
-
-.footerHint {
-  flex: 1 1 220px;
-  font-size: 13px;
-  line-height: 20px;
-}
-
-
+/* Overview Header Card */
 .overviewCard {
+  width: 100%;
   border-radius: 12px;
-  background: var(--ant-color-bg-container, #ffffff);
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 
   :global(.ant-card-body) {
-    padding: 14px 16px;
+    padding: 16px 20px;
   }
-}
-
-.botIconWrapper {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 42px;
-  height: 42px;
-  border-radius: 10px;
-  background: rgba(22, 119, 255, 0.08);
-  color: #1677ff;
-  font-size: 22px;
-  flex-shrink: 0;
 }
 
 .overviewTitle {
   font-size: 15px;
-  line-height: 1.4;
-}
-
-.overviewSub {
-  font-size: 12px;
-  line-height: 1.4;
+  font-weight: 600;
 }
 
 .badgeGroup {
@@ -92,7 +57,6 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-left: 4px;
   padding-left: 12px;
   border-left: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
 }
@@ -102,9 +66,10 @@
   white-space: nowrap;
 }
 
+/* Section Cards Layout */
 .form {
   :global(.ant-form-item) {
-    margin-bottom: 16px;
+    margin-bottom: 18px;
   }
 
   :global(.ant-form-item:last-child) {
@@ -113,39 +78,25 @@
 }
 
 .card {
-  height: 100%;
+  width: 100%;
+  min-width: 0;
   border-radius: 12px;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 
-  :global(.ant-card-head) {
-    min-height: 52px;
-    padding: 0 18px;
+  :global(.ant-card-head-title) {
     font-weight: 600;
   }
 
-  :global(.ant-card-head-wrapper) {
-    min-height: 52px;
-    align-items: center;
-  }
-
-  :global(.ant-card-extra) {
-    padding: 10px 0;
-    display: flex;
-    align-items: center;
-  }
-
   :global(.ant-card-body) {
-    padding: 16px;
+    padding: 20px 24px;
   }
 }
-
-
 
 .chatIdsSelect {
   width: 100%;
 
   :global(.ant-select-selection-overflow) {
-    gap: 4px;
+    gap: 6px;
   }
 }
 
@@ -153,86 +104,95 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 16px;
   flex-wrap: wrap;
-  margin-top: 4px;
-  padding-top: 14px;
-  border-top: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+  margin-top: 16px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
+  border: 1px dashed var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
 }
 
 .testHint {
   flex: 1;
-  min-width: 160px;
+  min-width: 180px;
   font-size: 12px;
   line-height: 1.5;
 }
 
-.eventGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 14px;
-  margin-bottom: 16px;
+/* Quiet Hours Panel */
+.quietHoursPanel {
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
+  border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+}
 
-  @media (max-width: 576px) {
-    grid-template-columns: 1fr;
+/* Sub-group cards inside Section 3 */
+.subGroupCard {
+  border-radius: 10px;
+  height: 100%;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.01));
+  border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+
+  :global(.ant-card-head) {
+    padding: 0 16px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  :global(.ant-card-body) {
+    padding: 14px;
   }
 }
 
+.groupDesc {
+  display: block;
+  font-size: 12px;
+  line-height: 1.45;
+  margin-bottom: 12px;
+}
 
 .eventItemWrapper {
   margin-bottom: 0 !important;
-  height: 100%;
-
-  :global(.ant-form-item-control),
-  :global(.ant-form-item-control-input),
-  :global(.ant-form-item-control-input-content) {
-    height: 100%;
-    min-height: auto;
-  }
 }
 
-
+/* Event Tile Cards */
 .eventTile {
   position: relative;
-  height: 94px;
-  min-height: 94px;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 12px 14px;
+  padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
+  background: var(--ant-color-bg-container, #ffffff);
   cursor: pointer;
   transition: all 0.2s ease-in-out;
   user-select: none;
 
   &:hover {
     border-color: #1677ff;
-    background: var(--ant-color-primary-bg-hover, rgba(22, 119, 255, 0.06));
-    box-shadow: 0 2px 6px rgba(22, 119, 255, 0.12);
+    background: var(--ant-color-primary-bg-hover, rgba(22, 119, 255, 0.04));
+    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.1);
   }
 }
 
 .eventTileDisabled {
   cursor: not-allowed;
+  opacity: 0.6;
 
   &:hover {
-    border-color: var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
-    background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+    border-color: var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
+    background: var(--ant-color-bg-container, #ffffff);
     box-shadow: none;
   }
 }
 
 .eventTileActive {
   border-color: #1677ff;
-  background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.08));
-
-  &:hover {
-    border-color: #1677ff;
-    background: var(--ant-color-primary-bg-hover, rgba(22, 119, 255, 0.12));
-  }
+  background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.04));
 }
 
 .eventCheckbox {
@@ -240,8 +200,8 @@
 }
 
 .eventTitle {
-  font-size: 14px;
-  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .eventBadge {
@@ -254,44 +214,11 @@
 
 .eventHint {
   font-size: 12px;
-  line-height: 18px;
-  min-height: 36px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  line-height: 1.45;
   color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
 }
 
-
 .tipAlert {
-  border-radius: 8px;
-
-  :global(.ant-alert-message) {
-    font-weight: 600;
-    font-size: 13px;
-    margin-bottom: 2px;
-  }
-
-  :global(.ant-alert-description) {
-    font-size: 12px;
-    line-height: 1.5;
-  }
-}
-
-@media (max-width: 576px) {
-  .overviewCard {
-    :global(.ant-card-body) {
-      padding: 12px;
-    }
-  }
-
-  .badgeGroup {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .eventTile {
-    padding: 10px 12px;
-  }
+  border-radius: 12px;
+  margin-top: 0;
 }
