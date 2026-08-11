@@ -1,3 +1,32 @@
+# v2.0.0-beta.1
+
+> **预发布（prerelease）**：重构 CI/CD 容器构建体系，推出全新的 All-in-One 单镜像架构。将 Web 前端与 Server 后端合并打包为单一 `ecohub` 镜像，由 Supervisord 统一托管并发运行，简化单容器部署与拉取流程，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.0-beta.1`
+
+## 相对 v1.1.5-beta.21
+
+- **镜像架构重构（All-in-One）**：
+  - 将原本独立的 `ecohub-web` 和 `ecohub-server` 镜像融合为统一镜像 `ecohub`
+  - 使用 Docker 多阶段构建（Multi-stage build），保留 Go 二进制构建与 Next.js 独立运行包编译
+  - 引入 Supervisord 作为容器内 PID 1 进程管理器，同时管理 Go 后端（8080 端口）与 Node.js 独立端（3000 端口）
+- **CI 流水线同步升级**：
+  - 更新 `.github/workflows/docker-release.yml`，改为构建并推送单一 `ecohub` 标签镜像
+
+## 部署（v2.0.0-beta.1）
+
+```bash
+# compose 镜像 tag 示例（预发布版本不会自动覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.0-beta.1
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v1.1.5-beta.21
 
 > **预发布（prerelease）**：采集进度会话展示优化、素材中心收敛为用户上传、移除采集图片同步、管理端权限透传与 ImagePicker 选用封面、系统设置 Tabs 滚动修复，**不会**覆盖 `:latest`。

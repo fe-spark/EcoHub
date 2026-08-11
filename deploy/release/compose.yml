@@ -41,9 +41,9 @@ services:
       retries: 10
       start_period: 10s
 
-  server:
-    container_name: Eco-server
-    image: ghcr.io/fe-spark/ecohub-server:latest
+  ecohub:
+    container_name: Eco-hub
+    image: ghcr.io/fe-spark/ecohub:latest
     restart: always
     environment:
       PORT: ${SERVER_PORT:-8080}
@@ -65,6 +65,7 @@ services:
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
+      - ${WEB_PUBLIC_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
     volumes:
       - ./data/uploads:/app/static/upload
@@ -79,25 +80,11 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${PORT}/api/health"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-
-  web:
-    container_name: Eco-web
-    image: ghcr.io/fe-spark/ecohub-web:latest
-    restart: always
-    environment:
-      API_URL: http://server:${SERVER_PORT:-8080}
-    ports:
-      - ${WEB_PUBLIC_PORT:-3000}:3000
-    networks:
-      - Eco-network
-    depends_on:
-      server:
-        condition: service_healthy
 
 networks:
   Eco-network:
