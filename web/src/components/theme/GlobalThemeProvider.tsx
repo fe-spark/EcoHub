@@ -117,7 +117,7 @@ export default function GlobalThemeProvider({
           colorBgLayout: "#f4f6fc",
           colorBgContainer: "#ffffff",
           colorBgElevated: "#ffffff",
-          colorBorderSecondary: "#e2e8f0",
+          colorBorderSecondary: "#e9eef3",
           colorBorder: "#e2e8f0",
           colorText: "#0f172a",
           colorTextSecondary: "#475569",
@@ -154,11 +154,11 @@ export default function GlobalThemeProvider({
           : {}),
         Card: {
           colorBgContainer: isDark ? "rgba(255, 255, 255, 0.03)" : "#ffffff",
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e9eef3",
           colorBorder: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
         },
         Table: {
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e9eef3",
           borderColor: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
           headerBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#f8fafc",
           rowHoverBg: isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",

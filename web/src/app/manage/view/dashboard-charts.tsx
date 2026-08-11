@@ -3,18 +3,17 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { Card, Tag, Typography, Spin, Button, Switch, message } from "antd";
 import {
-  BarChartOutlined,
   DatabaseOutlined,
   ReloadOutlined,
   FileTextOutlined,
   VideoCameraOutlined,
   ClockCircleOutlined,
-  ScheduleOutlined,
   ThunderboltOutlined,
   SyncOutlined,
   ClearOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
+import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./dashboard-charts.module.less";
 
 const { Text } = Typography;
@@ -37,6 +36,7 @@ interface InventoryStats {
 }
 
 export default function DashboardCharts() {
+  const { canWrite } = useManagePermission();
   const [cronTasks, setCronTasks] = useState<CronTaskItem[]>([]);
   const [stats, setStats] = useState<InventoryStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -77,7 +77,7 @@ export default function DashboardCharts() {
         message.error(resp.msg || "操作失败");
       }
     } catch {
-      message.error("网络错误");
+      // 拦截器已统一提示，避免重复弹窗
     }
   };
 
@@ -117,7 +117,7 @@ export default function DashboardCharts() {
   if (loading && cronTasks.length === 0 && !stats) {
     return (
       <div className={styles.loadingWrapper}>
-        <Spin tip="正在加载系统实时状态数据..." />
+        <Spin description="正在加载系统实时状态数据..." />
       </div>
     );
   }
@@ -129,7 +129,6 @@ export default function DashboardCharts() {
         className={styles.chartCard}
         title={
           <div className={styles.cardHeaderTitle}>
-            <ScheduleOutlined className={styles.titleIcon} />
             <span>定时任务自动化调度</span>
           </div>
         }
@@ -163,7 +162,7 @@ export default function DashboardCharts() {
                           <span className={styles.cronTitle}>
                             {meta.title}
                           </span>
-                          <Tag color="orange" bordered={false} className={styles.cronSpecTag}>
+                          <Tag color="orange" variant="filled" className={styles.cronSpecTag}>
                             {task.spec}
                           </Tag>
                         </div>
@@ -176,6 +175,7 @@ export default function DashboardCharts() {
                       <Switch
                         size="small"
                         checked={task.state}
+                        disabled={!canWrite}
                         onChange={() => void handleToggleTask(task)}
                       />
                     </div>
@@ -204,12 +204,11 @@ export default function DashboardCharts() {
         className={styles.chartCard}
         title={
           <div className={styles.cardHeaderTitle}>
-            <BarChartOutlined className={styles.titleIcon} />
             <span>影视数据体量构成</span>
           </div>
         }
         extra={
-          <Tag color="orange" bordered={false}>
+          <Tag color="orange" variant="filled">
             {inventoryMetrics.categories} 个分类
           </Tag>
         }

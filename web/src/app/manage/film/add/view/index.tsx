@@ -28,10 +28,17 @@ import {
   DatabaseOutlined,
   PlayCircleOutlined,
   ContainerOutlined,
+  PictureOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import ImagePicker from "@/app/manage/components/image-picker";
+import {
+  IMAGE_UPLOAD_ACCEPT,
+  isAllowedImageFile,
+} from "@/lib/imageUpload";
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
@@ -41,10 +48,12 @@ function FilmAddForm() {
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get("id");
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   useEffect(() => {
     ApiGet("/manage/film/class/tree").then((resp: any) => {
@@ -145,6 +154,11 @@ function FilmAddForm() {
 
   const customUpload = async (options: any) => {
     const { file, onSuccess, onError } = options;
+    if (!isAllowedImageFile(file)) {
+      message.error("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片");
+      onError?.(new Error("unsupported image type"));
+      return;
+    }
     const formData = new FormData();
     formData.append("file", file);
 
@@ -159,7 +173,7 @@ function FilmAddForm() {
         onError(resp.msg);
       }
     } catch (err: any) {
-      message.error("上传失败");
+      // 拦截器已统一提示，避免重复弹窗
       onError(err);
     }
   };
@@ -257,18 +271,31 @@ function FilmAddForm() {
                       className={styles.posterInput}
                       placeholder="输入图片URL或上传"
                       addonAfter={
-                        <Upload
-                          customRequest={customUpload}
-                          showUploadList={false}
-                        >
+                        <Space size={4}>
+                          <Upload
+                            customRequest={customUpload}
+                            showUploadList={false}
+                            accept={IMAGE_UPLOAD_ACCEPT}
+                            disabled={!canWrite}
+                          >
+                            <Button
+                              icon={<UploadOutlined />}
+                              type="text"
+                              size="small"
+                            >
+                              上传封面
+                            </Button>
+                          </Upload>
                           <Button
-                            icon={<UploadOutlined />}
+                            icon={<PictureOutlined />}
                             type="text"
                             size="small"
+                            disabled={!canWrite}
+                            onClick={() => setPickerOpen(true)}
                           >
-                            上传封面
+                            选图
                           </Button>
-                        </Upload>
+                        </Space>
                       }
                     />
                   </Form.Item>
@@ -488,6 +515,7 @@ function FilmAddForm() {
                 icon={<SaveOutlined />}
                 onClick={() => form.submit()}
                 loading={loading}
+                disabled={!canWrite}
               >
                 {id ? "确认保存更新" : "立即提交"}
               </Button>
@@ -495,6 +523,15 @@ function FilmAddForm() {
           </Flex>
         </Space>
       </Form>
+
+      <ImagePicker
+        open={pickerOpen}
+        onCancel={() => setPickerOpen(false)}
+        onSelect={(link) => {
+          form.setFieldValue("picture", link);
+          setPickerOpen(false);
+        }}
+      />
     </div>
   );
 }

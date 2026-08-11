@@ -24,6 +24,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
@@ -86,6 +87,7 @@ export default function FailureRecordPageView() {
     status: [],
   });
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   const getRecords = useCallback(
     async (p?: any, overrideParams?: any) => {
@@ -246,7 +248,7 @@ export default function FailureRecordPageView() {
               shape="circle"
               size="small"
               loading={isQueued}
-              disabled={isSuccess || isQueued}
+              disabled={!canWrite || isSuccess || isQueued}
               style={isSuccess ? undefined : { background: "#52c41a", borderColor: "#52c41a" }}
               icon={<ReloadOutlined />}
               onClick={() => handleRetry(record.ID)}
@@ -349,13 +351,14 @@ export default function FailureRecordPageView() {
             <div className={styles.tableTitle}>失败记录列表</div>
             <Space size={[8, 8]} wrap className={styles.tableActions}>
               <Popconfirm title="确认立即重试所有待自动重试记录？" onConfirm={handleRetryAll}>
-                <Button type="primary" icon={<ReloadOutlined />}>
+                <Button type="primary" icon={<ReloadOutlined />} disabled={!canWrite}>
                   重试待重试记录
                 </Button>
               </Popconfirm>
               <Popconfirm title="确认清除已有重试结果的记录？" onConfirm={handleCleanResult}>
                 <Button
                   icon={<WarningOutlined />}
+                  disabled={!canWrite}
                   style={{
                     color: "var(--ant-color-warning)",
                     borderColor: "var(--ant-color-warning)",
@@ -365,7 +368,7 @@ export default function FailureRecordPageView() {
                 </Button>
               </Popconfirm>
               <Popconfirm title="确认清除所有记录？" onConfirm={handleCleanAll}>
-                <Button danger icon={<DeleteOutlined />}>
+                <Button danger icon={<DeleteOutlined />} disabled={!canWrite}>
                   清除所有
                 </Button>
               </Popconfirm>

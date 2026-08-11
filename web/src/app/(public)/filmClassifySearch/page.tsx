@@ -41,7 +41,7 @@ export default async function FilmClassifySearchPage({
   const { data, error } = await getFilmClassifySearchData(currentParams);
   if (!data) {
     return (
-      <Alert type="error" showIcon message={error || "分类筛选数据获取失败"} />
+      <Alert type="error" showIcon title={error || "分类筛选数据获取失败"} />
     );
   }
 
@@ -50,7 +50,7 @@ export default async function FilmClassifySearchPage({
       <Alert
         type="warning"
         showIcon
-        message="当前分类已失效，请从最新分类导航重新进入"
+        title="当前分类已失效，请从最新分类导航重新进入"
       />
     );
   }

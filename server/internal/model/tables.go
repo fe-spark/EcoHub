@@ -24,7 +24,7 @@ const (
 	TableCronSourceRel      = "cron_source_rel"
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
-	TableFileInfo           = "file_info"
+	TableFileInfo           = "files"
 	TableNotifyConfig       = "notify_config"
 	TableNotifyChangeBatch  = "notify_change_batch"
 	TableNotifyChangeMid    = "notify_change_mid"

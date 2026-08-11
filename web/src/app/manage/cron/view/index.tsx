@@ -6,6 +6,7 @@ import { EditOutlined, ThunderboltOutlined, StopOutlined } from "@ant-design/ico
 import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 import EditScheduleForm from "./components/edit-schedule-form";
@@ -26,6 +27,7 @@ export default function CronManagePageView() {
   const [loading, setLoading] = useState(false);
   const [runningId, setRunningId] = useState<string | null>(null);
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   const [editOpen, setEditOpen] = useState(false);
   const [form] = Form.useForm();
@@ -166,6 +168,7 @@ export default function CronManagePageView() {
         return (
           <Switch
             checked={v}
+            disabled={!canWrite}
             onChange={(checked) => changeTaskState(record.id, checked)}
             checkedChildren="启用"
             unCheckedChildren="禁用"
@@ -206,7 +209,7 @@ export default function CronManagePageView() {
                 danger
                 size="small"
                 icon={<StopOutlined />}
-                disabled={!record.state}
+                disabled={!canWrite || !record.state}
               >
                 {record.state ? "终止" : "已终止"}
               </Button>
@@ -231,7 +234,7 @@ export default function CronManagePageView() {
                     shape="circle"
                     size="small"
                     icon={<ThunderboltOutlined />}
-                    disabled={runDisabled}
+                    disabled={!canWrite || runDisabled}
                     loading={isRunning}
                   />
                 </Popconfirm>
@@ -242,6 +245,7 @@ export default function CronManagePageView() {
                 shape="circle"
                 size="small"
                 icon={<EditOutlined />}
+                disabled={!canWrite}
                 onClick={() => openEditDialog(record.id)}
               />
             </Tooltip>
@@ -279,6 +283,7 @@ export default function CronManagePageView() {
         title="修改运行时间"
         open={editOpen}
         onCancel={() => setEditOpen(false)}
+        okButtonProps={{ disabled: !canWrite }}
         onOk={() => form.validateFields().then(onEditFinish)}
         width={560}
       >

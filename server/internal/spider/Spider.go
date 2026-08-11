@@ -66,8 +66,6 @@ var sourceWriteLocks sync.Map
 
 var collectProgress sync.Map
 
-var pictureSyncRunning atomic.Bool
-
 var asyncMasterSearchTagsMu sync.Mutex
 
 // taskMu 保护同一站点 cancel+Store 的原子性，防止并发截停竞态
@@ -1483,6 +1481,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
+	// 主站采集前兜底：分类被重置/清空后若未同步，影片会以 pid=0 入库并被列表读模型隐藏。
+	if err := ensureMasterCategoriesReady(s); err != nil {
+		retErr = err
+		return err
+	}
 	// 确认可开跑后再开变更批次，避免 early-return 泄漏/误开。
 	// 单站（flushAtEnd）独立开批；批量由 runSourcesWithLimit 统一开启并传入。
 	if flushAtEnd {
@@ -1647,13 +1650,30 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 }
 
 func triggerPictureSync() {
-	if !pictureSyncRunning.CompareAndSwap(false, true) {
+	if !repository.AcquirePictureSync() {
 		return
 	}
 	go func() {
-		defer pictureSyncRunning.Store(false)
+		defer repository.ReleasePictureSync()
 		repository.SyncFilmPicture()
 	}()
+}
+
+// ensureMasterCategoriesReady 在主站影片采集前确保本地分类与映射可用。
+// 仅在分类表为空时触发，避免覆盖用户已调整的业务分类属性。
+func ensureMasterCategoriesReady(s *model.FilmSource) error {
+	if s == nil || s.Grade != model.MasterCollect {
+		return nil
+	}
+	if repository.ExistsCategoryTree() {
+		return nil
+	}
+	log.Printf("[Spider] 分类为空，采集前自动同步主站分类: name=%s id=%s uri=%s", s.Name, s.Id, s.Uri)
+	if err := CollectCategory(s); err != nil {
+		return fmt.Errorf("采集前同步主站分类失败: %w", err)
+	}
+	log.Printf("[Spider] 采集前主站分类同步完成: name=%s id=%s", s.Name, s.Id)
+	return nil
 }
 
 // CollectCategory 影视分类采集

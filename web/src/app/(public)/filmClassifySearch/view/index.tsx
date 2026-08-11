@@ -106,10 +106,11 @@ export default function FilmClassifySearchPageView({
       loadingBarStartedRef.current = false;
       forceFinishNavigationLoading();
     }
-    if (navigatingUrl && reachedTarget) {
-      setNavigatingUrl("");
-    }
-  }, [isPending, navigatingUrl, reachedTarget]);
+  }, [isPending]);
+
+  if (!isPending && navigatingUrl && reachedTarget) {
+    setNavigatingUrl("");
+  }
 
   useEffect(() => {
     if (!navigatingUrl) {

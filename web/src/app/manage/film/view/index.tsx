@@ -29,6 +29,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
@@ -50,6 +51,7 @@ interface FilmItem {
 
 export default function FilmListPageView() {
   const router = useRouter();
+  const { canWrite } = useManagePermission();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
@@ -349,6 +351,7 @@ export default function FilmListPageView() {
                     className={`${styles.syncIcon} ${syncingIds.includes(record.mid) ? styles.syncing : ""}`}
                   />
                 }
+                disabled={!canWrite}
                 onClick={() => handleUpdateSingle(record.mid)}
               />
             </Tooltip>
@@ -359,6 +362,7 @@ export default function FilmListPageView() {
                 size="small"
                 style={{ background: "#1890ff", borderColor: "#1890ff" }}
                 icon={<EditOutlined />}
+                disabled={!canWrite}
                 onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
               />
             </Tooltip>
@@ -373,6 +377,7 @@ export default function FilmListPageView() {
                   shape="circle"
                   size="small"
                   icon={<DeleteOutlined />}
+                  disabled={!canWrite}
                 />
               </Tooltip>
             </Popconfirm>
@@ -380,7 +385,7 @@ export default function FilmListPageView() {
         ),
       },
     ],
-    [syncingIds, router, handleDelFilm, handleUpdateSingle],
+    [syncingIds, router, handleDelFilm, handleUpdateSingle, canWrite],
   );
 
   return (
@@ -462,6 +467,7 @@ export default function FilmListPageView() {
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
+                disabled={!canWrite}
                 onClick={() => router.push("/manage/film/add")}
               >
                 新增影视

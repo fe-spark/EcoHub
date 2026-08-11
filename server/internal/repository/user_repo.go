@@ -92,11 +92,17 @@ func UpdateUserInfo(u model.User) {
 }
 
 // GetUserPage 分页获取用户信息
-func GetUserPage(page *dto.Page, userName string) []model.User {
+func GetUserPage(page *dto.Page, userName string, role, status int) []model.User {
 	var list []model.User
 	query := db.Mdb.Model(&model.User{})
 	if userName != "" {
 		query = query.Where("user_name LIKE ?", "%"+userName+"%")
+	}
+	if role >= 0 {
+		query = query.Where("role = ?", role)
+	}
+	if status >= 0 {
+		query = query.Where("status = ?", status)
 	}
 	dto.GetPage(query, page)
 	query.Order("id DESC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list)

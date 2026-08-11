@@ -40,7 +40,7 @@ export default function CleanupInvalidModal({
           <Alert
             type="warning"
             showIcon
-            message={`检测到 ${invalidSources.length} 个采集不通的采集站`}
+            title={`检测到 ${invalidSources.length} 个采集不通的采集站`}
             description="删除后无法恢复；已禁用的采集站也会一并删除，请确认无误后再操作。"
           />
 
@@ -51,11 +51,11 @@ export default function CleanupInvalidModal({
                   <Typography.Text strong ellipsis className={styles.cleanupItemName}>
                     {item.name}
                   </Typography.Text>
-                  <Tag color={item.grade === 0 ? "gold" : "default"} bordered={false}>
+                  <Tag color={item.grade === 0 ? "gold" : "default"} variant="filled">
                     {item.grade === 0 ? "主采集站" : "附属采集站"}
                   </Tag>
                   {!item.state ? (
-                    <Tag color="default" bordered={false}>
+                    <Tag color="default" variant="filled">
                       已禁用
                     </Tag>
                   ) : null}

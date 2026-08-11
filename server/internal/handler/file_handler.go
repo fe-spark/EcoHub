@@ -8,6 +8,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -17,6 +18,34 @@ import (
 type FileHandler struct{}
 
 var FileHd = new(FileHandler)
+
+// SyncPictures 手动触发采集图片同步
+func (h *FileHandler) SyncPictures(c *gin.Context) {
+	if !repository.AcquirePictureSync() {
+		dto.Failed("图片同步任务正在执行中，请稍后再试", c)
+		return
+	}
+	go func() {
+		defer repository.ReleasePictureSync()
+		// 先补齐本地缺失文件，再处理待同步队列
+		repository.RepairMissingPictures()
+		repository.SyncFilmPicture()
+	}()
+	dto.SuccessOnlyMsg("图片同步已启动（含缺失文件修复）", c)
+}
+
+var allowedImageExt = map[string]bool{
+	"jpg":  true,
+	"jpeg": true,
+	"png":  true,
+	"webp": true,
+	"ico":  true,
+}
+
+func isAllowedImage(filename string) bool {
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
+	return allowedImageExt[ext]
+}
 
 // SingleUpload 单文件上传, 暂定为图片上传
 func (h *FileHandler) SingleUpload(c *gin.Context) {
@@ -30,6 +59,10 @@ func (h *FileHandler) SingleUpload(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
+	if !isAllowedImage(file.Filename) {
+		dto.Failed("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片", c)
+		return
+	}
 
 	fileName := fmt.Sprintf("%s/%s%s", config.FilmPictureUploadDir, utils.RandomString(8), filepath.Ext(file.Filename))
 	err = c.SaveUploadedFile(file, fileName)
@@ -39,8 +72,39 @@ func (h *FileHandler) SingleUpload(c *gin.Context) {
 	}
 
 	uc := v.(*utils.UserClaims)
-	link := service.FileSvc.SingleFileUpload(fileName, int(uc.UserID))
+	name := strings.TrimSpace(c.PostForm("name"))
+	if name == "" {
+		name = strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
+	}
+	link := service.FileSvc.SingleFileUpload(fileName, name, int(uc.UserID))
 	dto.Success(link, "上传成功", c)
+}
+
+// RenameFile 重命名素材
+func (h *FileHandler) RenameFile(c *gin.Context) {
+	var req struct {
+		Id   string `json:"id"`
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	id, err := strconv.ParseUint(strings.TrimSpace(req.Id), 10, 64)
+	if err != nil {
+		dto.Failed("操作失败, 未获取到需重命名的文件标识信息", c)
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		dto.Failed("素材名称不能为空", c)
+		return
+	}
+	if e := service.FileSvc.RenameFile(uint(id), name); e != nil {
+		dto.Failed(fmt.Sprint("重命名失败", e.Error()), c)
+		return
+	}
+	dto.SuccessOnlyMsg("素材名称已更新", c)
 }
 
 // MultipleUpload 批量文件上传
@@ -60,13 +124,18 @@ func (h *FileHandler) MultipleUpload(c *gin.Context) {
 
 	var fileNames []string
 	for _, file := range files {
+		if !isAllowedImage(file.Filename) {
+			dto.Failed("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片", c)
+			return
+		}
 		fileName := fmt.Sprintf("%s/%s%s", config.FilmPictureUploadDir, utils.RandomString(8), filepath.Ext(file.Filename))
 		err = c.SaveUploadedFile(file, fileName)
 		if err != nil {
 			dto.Failed(err.Error(), c)
 			return
 		}
-		fileNames = append(fileNames, service.FileSvc.SingleFileUpload(fileName, int(uc.UserID)))
+		name := strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
+		fileNames = append(fileNames, service.FileSvc.SingleFileUpload(fileName, name, int(uc.UserID)))
 	}
 
 	dto.Success(fileNames, "上传成功", c)
@@ -96,7 +165,11 @@ func (h *FileHandler) DelFile(c *gin.Context) {
 // PhotoWall 照片墙数据
 func (h *FileHandler) PhotoWall(c *gin.Context) {
 	page := dto.GetPageParams(c)
-	page.PageSize = 39
-	pl := service.FileSvc.GetPhotoPage(page)
+	scope := strings.TrimSpace(c.DefaultQuery("scope", "all"))
+	if scope != "manual" && scope != "related" {
+		scope = "all"
+	}
+	name := strings.TrimSpace(c.DefaultQuery("name", ""))
+	pl := service.FileSvc.GetPhotoPage(scope, name, page)
 	dto.Success(gin.H{"list": pl, "page": page}, "图片分页数据获取成功", c)
 }

@@ -18,6 +18,7 @@ import type { UploadProps } from "antd";
 import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ResetSiteDataCard from "@/app/manage/components/reset-site-data-card";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
@@ -108,6 +109,7 @@ interface DataSecurityPageViewProps {
 /** 数据安全：配置备份导入/导出 + 影视数据重置 */
 export default function DataSecurityPageView({ embedded = false }: DataSecurityPageViewProps) {
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
   const [exporting, setExporting] = useState(false);
 
   const [importOpen, setImportOpen] = useState(false);
@@ -215,7 +217,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         <Alert
           type="info"
           showIcon
-          message="配置备份与数据重置"
+          title="配置备份与数据重置"
           description={
             <>
               导出/导入仅包含站点配置（网站、采集站、计划任务、封面、通知、映射规则），不含影视库存与账号密码。
@@ -251,6 +253,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
               type="primary"
               icon={<DownloadOutlined />}
               loading={exporting}
+              disabled={!canWrite}
               onClick={() => void handleExport()}
             >
               导出配置
@@ -265,10 +268,17 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
               </Typography.Text>
             </div>
             <Space wrap>
-              <Upload accept=".json,application/json" showUploadList={false} beforeUpload={beforeUpload}>
-                <Button icon={<UploadOutlined />}>选择备份文件</Button>
+              <Upload
+                accept=".json,application/json"
+                showUploadList={false}
+                beforeUpload={beforeUpload}
+                disabled={!canWrite}
+              >
+                <Button icon={<UploadOutlined />} disabled={!canWrite}>
+                  选择备份文件
+                </Button>
               </Upload>
-              <Button type="primary" disabled={!backup} onClick={openImport}>
+              <Button type="primary" disabled={!canWrite || !backup} onClick={openImport}>
                 导入配置
               </Button>
             </Space>
@@ -299,7 +309,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
           <Alert
             type="warning"
             showIcon
-            message="导入将覆盖所选模块的现有配置，且不可自动回滚"
+            title="导入将覆盖所选模块的现有配置，且不可自动回滚"
           />
           <div>
             <Typography.Text type="secondary">导入模块</Typography.Text>

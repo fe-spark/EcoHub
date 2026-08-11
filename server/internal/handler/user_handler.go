@@ -89,8 +89,10 @@ func (h *UserHandler) UserInfo(c *gin.Context) {
 func (h *UserHandler) UserListPage(c *gin.Context) {
 	paging := dto.GetPageParams(c)
 	userName := c.DefaultQuery("userName", "")
+	role, _ := strconv.Atoi(c.DefaultQuery("role", "-1"))
+	status, _ := strconv.Atoi(c.DefaultQuery("status", "-1"))
 
-	list := service.UserSvc.GetUserPage(paging, userName)
+	list := service.UserSvc.GetUserPage(paging, userName, role, status)
 	dto.Success(gin.H{
 		"list":  list,
 		"total": paging.Total,

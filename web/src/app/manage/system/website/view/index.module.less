@@ -1,55 +1,28 @@
-.card {
-  border-radius: 12px;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-
-  :global(.ant-card-head) {
-    min-height: 52px;
-    padding: 0 18px;
-    font-weight: 600;
-  }
-
-  :global(.ant-card-head-wrapper) {
-    min-height: 52px;
-    align-items: center;
-  }
-
-  :global(.ant-card-extra) {
-    padding: 10px 0;
-    display: flex;
-    align-items: center;
-  }
-
-  :global(.ant-card-body) {
-    padding: 16px;
-  }
-}
-
-
 .formPanel {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  min-width: 0;
 }
 
-.embedToolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  flex-wrap: wrap;
+.card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 }
 
-.sectionHint {
-  flex: 1 1 200px;
-  font-size: 13px;
+/* 约束配置值区域，避免 Tag/文本被横向撑满 */
+.configMeta {
+  width: 100%;
+  min-width: 0;
+}
+
+.configValue {
+  display: inline-flex;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.configHint {
+  font-size: 12px;
   line-height: 20px;
 }
-
-.logoPreview {
-  border-radius: 10px;
-}
-
-.switchEditor {
-  min-height: 48px;
-}
-

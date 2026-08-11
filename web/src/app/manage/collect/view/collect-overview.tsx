@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Col, Descriptions, Row, Statistic, Tag, Typography } from "antd";
+import { Card, Descriptions, Statistic, Tag, Typography } from "antd";
 import Link from "next/link";
 import { ApiGet } from "@/lib/client-api";
 import type { FilmSource } from "./types";
@@ -24,7 +24,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     state: Boolean(item.state),
     grade: Number(item.grade ?? 1),
     interval: Number(item.interval ?? 0),
-    cd: Number(item.cd ?? 24),
+    cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
   };
@@ -122,30 +122,29 @@ export default function CollectOverview() {
             采集中心
           </Link>
         }
-        styles={{ body: { height: "100%" } }}
       >
-        <Row gutter={[16, 16]} className={styles.overviewRow}>
-          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+        <div className={styles.overviewRow}>
+          <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="采集站总数" value={stats.total} />
             </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+          </div>
+          <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="已启用" value={stats.enabled} />
             </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+          </div>
+          <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="采集中" value={stats.running} />
             </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+          </div>
+          <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="收尾/排队" value={stats.waiting} />
             </div>
-          </Col>
-          <Col xs={12} sm={8} lg={4} className={styles.overviewCol}>
+          </div>
+          <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic
                 title="主采集站"
@@ -153,15 +152,14 @@ export default function CollectOverview() {
                 suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
               />
             </div>
-          </Col>
-        </Row>
+          </div>
+        </div>
       </Card>
 
       <Card
         title="当前主采集站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
-        styles={{ body: { height: "100%" } }}
         extra={masterSite ? <Tag color="gold">已生效</Tag> : <Tag color="error">未配置</Tag>}
       >
         {masterSite ? (
@@ -178,12 +176,12 @@ export default function CollectOverview() {
               </Typography.Link>
             </Descriptions.Item>
             <Descriptions.Item label="启用状态">
-              <Tag color={masterSite.state ? "success" : "default"} bordered={false}>
+              <Tag color={masterSite.state ? "success" : "default"} variant="filled">
                 {masterSite.state ? "启用中" : "已停用"}
               </Tag>
             </Descriptions.Item>
             <Descriptions.Item label="图片同步">
-              <Tag color={masterSite.syncPictures ? "processing" : "default"} bordered={false}>
+              <Tag color={masterSite.syncPictures ? "processing" : "default"} variant="filled">
                 {masterSite.syncPictures ? "开启" : "关闭"}
               </Tag>
             </Descriptions.Item>

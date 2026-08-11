@@ -108,6 +108,7 @@
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   transition: all 0.2s ease;
+  min-height: 0;
 }
 
 html[data-theme="dark"] .imageCard {
@@ -120,13 +121,58 @@ html[data-theme="dark"] .imageCard {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
 }
 
+.nameBar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-bg-container);
+  border-top: 1px solid var(--ant-color-border-secondary);
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.nameText {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.renameIcon {
+  flex-shrink: 0;
+  font-size: 12px;
+  color: #fa8c16;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.imageCard:hover .renameIcon {
+  opacity: 1;
+}
+
+.relatedBadge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  margin-inline-end: 0;
+  z-index: 1;
+  backdrop-filter: blur(4px);
+}
+
 .thumbnailWrapper {
+  position: relative;
   width: 100%;
-  aspect-ratio: 1;
+  height: 0;
+  padding-bottom: 100%;
   overflow: hidden;
 }
 
 .thumbnail {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -183,6 +229,19 @@ html[data-theme="dark"] .imageCard {
 .deleteBtn:hover {
   background: #ff4d4f !important;
   border-color: #ff4d4f !important;
+}
+
+.disabledBtn {
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
+  cursor: not-allowed;
+}
+
+.disabledBtn:hover {
+  color: rgba(255, 255, 255, 0.45);
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.2);
 }
 
 .emptyState {

@@ -19,28 +19,43 @@ func NewFileService() *FileService {
 
 var FileSvc = new(FileService)
 
-func (s *FileService) SingleFileUpload(fileName string, uid int) string {
+func (s *FileService) SingleFileUpload(fileName string, name string, uid int) string {
 	var f = model.FileInfo{
 		Link: fmt.Sprint(config.FilmPictureAccess, filepath.Base(fileName)),
 		Uid:  uid,
 		Type: 0,
+		Name: name,
 	}
 	f.Fid = strings.TrimSuffix(filepath.Base(fileName), filepath.Ext(fileName))
-	f.FileType = strings.TrimPrefix(filepath.Ext(fileName), ".")
+	f.FileType = strings.ToLower(strings.TrimPrefix(filepath.Ext(fileName), "."))
 	repository.SaveGallery(f)
 	return f.Link
 }
 
-func (s *FileService) GetPhotoPage(page *dto.Page) []model.FileInfo {
-	var tl = []string{"jpeg", "jpg", "png", "webp"}
-	return repository.GetFileInfoPage(tl, page)
+func (s *FileService) GetPhotoPage(scope string, name string, page *dto.Page) []model.FileInfo {
+	var tl = []string{"jpeg", "jpg", "png", "webp", "ico"}
+	return repository.GetFileInfoPage(tl, scope, name, page)
+}
+
+func (s *FileService) RenameFile(id uint, name string) error {
+	f := repository.GetFileInfoById(id)
+	if f.ID == 0 {
+		return fmt.Errorf("图片不存在")
+	}
+	return repository.RenameFileInfo(id, name)
 }
 
 func (s *FileService) RemoveFileById(id uint) error {
 	f := repository.GetFileInfoById(id)
+	if f.ID == 0 {
+		return fmt.Errorf("图片不存在")
+	}
+	if f.RelevanceId > 0 {
+		return fmt.Errorf("该图片已关联影片资源，禁止删除")
+	}
 	storagePath := repository.StoragePath(&f)
 	err := os.Remove(storagePath)
-	if err != nil {
+	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	repository.DelFileInfo(id)

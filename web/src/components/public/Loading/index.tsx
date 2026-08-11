@@ -40,11 +40,16 @@ export default function AppLoading({
     if (!enableHints) {
       return;
     }
-    setHintIndex(Math.floor(Math.random() * FUN_HINTS.length));
+    const firstTimer = window.setTimeout(() => {
+      setHintIndex(Math.floor(Math.random() * FUN_HINTS.length));
+    }, 0);
     const timer = window.setInterval(() => {
       setHintIndex((i) => (i + 1) % FUN_HINTS.length);
     }, 3200);
-    return () => window.clearInterval(timer);
+    return () => {
+      window.clearTimeout(firstTimer);
+      window.clearInterval(timer);
+    };
   }, [enableHints, loadingText]);
 
   const sizeClass = useMemo(() => {

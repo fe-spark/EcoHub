@@ -38,6 +38,7 @@ import {
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
@@ -167,6 +168,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
   const { message } = useAppMessage();
+  const { canWrite } = useManagePermission();
 
   // Watch real-time form values for header summary status
   const watchedEnabled = Form.useWatch("enabled", form);
@@ -393,7 +395,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                       type="primary"
                       icon={<SaveOutlined />}
                       loading={saving}
-                      disabled={fetching}
+                      disabled={!canWrite || fetching}
                       onClick={() => void handleSave()}
                     >
                       保存配置
@@ -476,7 +478,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                               type="primary"
                               icon={<SendOutlined />}
                               loading={testing}
-                              disabled={configLocked || !canTest || fetching}
+                              disabled={!canWrite || configLocked || !canTest || fetching}
                               onClick={() => void handleTest()}
                             >
                               发送测试
@@ -590,7 +592,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                         type="info"
                         showIcon
                         icon={<InfoCircleOutlined />}
-                        message="推送提醒小贴士"
+                        title="推送提醒小贴士"
                         description="针对生产环境，建议保持「单源失败即时告警」与「收尾发布失败」开启，以便第一时间掌握采集源状态；若频繁发布定时任务，可保持「定时任务完成」关闭。"
                       />
                     </Card>
