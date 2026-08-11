@@ -23,7 +23,6 @@ import (
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/spider/conver"
 	"server/internal/utils"
 )
 
@@ -1642,21 +1641,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		// 分页阶段完成：单站 → page_done；批量 → waiting_publish（defer 中也会兜底）。
 		markSourcePagesFinished(id, flushAtEnd)
 	}
-	if s.Grade == model.MasterCollect && s.SyncPictures {
-		triggerPictureSync()
-	}
-
 	return nil
-}
-
-func triggerPictureSync() {
-	if !repository.AcquirePictureSync() {
-		return
-	}
-	go func() {
-		defer repository.ReleasePictureSync()
-		repository.SyncFilmPicture()
-	}()
 }
 
 // ensureMasterCategoriesReady 在主站影片采集前确保本地分类与映射可用。
@@ -1706,14 +1691,6 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 	return nil
 }
 
-func saveVirtualPicturesIfEnabled(s *model.FilmSource, list []model.MovieDetail) error {
-	if s.SyncPictures {
-		if err := repository.SaveVirtualPic(conver.ConvertVirtualPicture(list)); err != nil {
-			return fmt.Errorf("save virtual pictures failed: %w", err)
-		}
-	}
-	return nil
-}
 
 func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
 	lock := getSourceWriteLock(s.Id)
@@ -1745,7 +1722,7 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 		if err := saveMaster(s.Id, list); err != nil {
 			return fmt.Errorf("save master details failed: %w", err)
 		}
-		return saveVirtualPicturesIfEnabled(s, list)
+		return nil
 	case model.SlaveCollect:
 		_, err := saveSlavePlaylists(context.Background(), s, 0, list)
 		return err
@@ -1786,9 +1763,6 @@ func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page 
 	})
 	if err != nil {
 		return collectWriteMids{}, fmt.Errorf("save master details failed: %w", err)
-	}
-	if err := saveVirtualPicturesIfEnabled(s, list); err != nil {
-		return collectWriteMids{}, err
 	}
 	return collectWriteMids{Notify: result.NotifyMIDs, Affected: result.AffectedMIDs}, nil
 }

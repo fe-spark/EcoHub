@@ -13,7 +13,6 @@ import {
   Tooltip,
   Tag,
   Button,
-  Select,
   Input,
   Modal,
 } from "antd";
@@ -24,7 +23,6 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   FormOutlined,
-  SyncOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import {
@@ -41,42 +39,32 @@ const { Text } = Typography;
 interface PhotoItem {
   ID: number;
   link: string;
-  relevanceId: number;
   name: string;
   fid: string;
 }
-
-type GalleryScope = "all" | "manual" | "related";
 
 export default function FileUploadPageView() {
   const [list, setList] = useState<PhotoItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [page, setPage] = useState({ current: 1, pageSize: 36, total: 0 });
-  const [scope, setScope] = useState<GalleryScope>("all");
   const [keyword, setKeyword] = useState("");
   const [inputValue, setInputValue] = useState("");
   const [renameTarget, setRenameTarget] = useState<PhotoItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
-  const [syncing, setSyncing] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [previewIndex, setPreviewIndex] = useState(0);
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
   const getPhotoList = useCallback(
-    async (
-      current = 1,
-      scopeType: GalleryScope = scope,
-      name = keyword,
-    ) => {
+    async (current = 1, name = keyword) => {
       setLoading(true);
       try {
         const resp = await ApiGet("/manage/file/list", {
           current,
           pageSize: 36,
-          scope: scopeType,
           name,
         });
         if (resp.code === 0) {
@@ -93,7 +81,7 @@ export default function FileUploadPageView() {
         setLoading(false);
       }
     },
-    [scope, keyword],
+    [keyword],
   );
 
   useEffect(() => {
@@ -101,32 +89,10 @@ export default function FileUploadPageView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleScopeChange = (value: GalleryScope) => {
-    setScope(value);
-    getPhotoList(1, value, keyword);
-  };
-
   const handleSearch = (value: string) => {
     const kw = value.trim();
     setKeyword(kw);
-    getPhotoList(1, scope, kw);
-  };
-
-  const handleSyncPictures = async () => {
-    setSyncing(true);
-    try {
-      const resp = await ApiPost("/manage/file/sync");
-      if (resp.code === 0) {
-        message.success(resp.msg);
-        window.setTimeout(() => {
-          getPhotoList(page.current);
-        }, 1500);
-      } else {
-        message.error(resp.msg);
-      }
-    } finally {
-      setSyncing(false);
-    }
+    getPhotoList(1, kw);
   };
 
   const copyLink = async (link: string) => {
@@ -242,10 +208,6 @@ export default function FileUploadPageView() {
   };
 
   const delImage = async (item: PhotoItem) => {
-    if (item.relevanceId > 0) {
-      message.warning("该图片已关联影片资源，禁止删除");
-      return;
-    }
     const resp = await ApiPost("/manage/file/del", { id: String(item.ID) });
     if (resp.code === 0) {
       message.success(resp.msg);
@@ -259,19 +221,9 @@ export default function FileUploadPageView() {
     <div className={styles.galleryPanel}>
       <ManagePageHeader
         title="素材中心"
-        description="管理全站影视海报、封面素材与图库资源，支持拖拽至内容区上传。"
+        description="管理用户上传的海报与封面素材，可在影片/轮播编辑中选用覆盖封面。"
         actions={
           <Space size={8}>
-            <Select
-              value={scope}
-              onChange={handleScopeChange}
-              style={{ width: 116 }}
-              options={[
-                { value: "all", label: "全部图片" },
-                { value: "manual", label: "手动上传" },
-                { value: "related", label: "关联影片" },
-              ]}
-            />
             <Input.Search
               placeholder="搜索素材名称"
               allowClear
@@ -285,14 +237,6 @@ export default function FileUploadPageView() {
               onSearch={handleSearch}
               style={{ width: 200 }}
             />
-            <Button
-              icon={<SyncOutlined />}
-              loading={syncing}
-              disabled={!canWrite}
-              onClick={handleSyncPictures}
-            >
-              同步采集图片
-            </Button>
             <Tag color="processing">共计 {page.total} 张图片</Tag>
             <Upload
               customRequest={customUpload}
@@ -342,7 +286,7 @@ export default function FileUploadPageView() {
               </div>
               <Text style={{ color: "var(--ant-color-primary)", opacity: 0.8 }}>
                 {canWrite
-                  ? "支持批量上传多张海报图片到当前内容库"
+                  ? "支持批量上传 JPG/PNG/WebP/ICO"
                   : "当前账号为访客，不支持上传或修改素材"}
               </Text>
             </div>
@@ -374,14 +318,6 @@ export default function FileUploadPageView() {
                           loading="lazy"
                           decoding="async"
                         />
-                        {item.relevanceId > 0 && (
-                          <Tag
-                            color="orange"
-                            className={styles.relatedBadge}
-                          >
-                            已关联
-                          </Tag>
-                        )}
                         <div className={styles.overlay}>
                           <Space size="middle">
                             <Tooltip title="查看大图">
@@ -403,14 +339,8 @@ export default function FileUploadPageView() {
                                 <CopyOutlined />
                               </div>
                             </Tooltip>
-                            {item.relevanceId > 0 || !canWrite ? (
-                              <Tooltip
-                                title={
-                                  canWrite
-                                    ? "已关联影片，禁止删除"
-                                    : "访客仅可查看，无法删除"
-                                }
-                              >
+                            {!canWrite ? (
+                              <Tooltip title="访客仅可查看，无法删除">
                                 <div
                                   className={`${styles.actionBtn} ${styles.disabledBtn}`}
                                 >
@@ -460,7 +390,7 @@ export default function FileUploadPageView() {
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={
                       <Text type="secondary">
-                        内容库暂无图片，直接拖拽或点击右下角按钮上传
+                        暂无上传素材，拖拽到内容区或点击右上角上传
                       </Text>
                     }
                   />

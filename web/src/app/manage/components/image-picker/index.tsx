@@ -9,7 +9,6 @@ import styles from "./index.module.less";
 interface PickerItem {
   ID: number;
   link: string;
-  relevanceId: number;
   name: string;
   fid: string;
 }

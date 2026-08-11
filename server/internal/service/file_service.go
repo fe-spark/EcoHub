@@ -32,9 +32,9 @@ func (s *FileService) SingleFileUpload(fileName string, name string, uid int) st
 	return f.Link
 }
 
-func (s *FileService) GetPhotoPage(scope string, name string, page *dto.Page) []model.FileInfo {
+func (s *FileService) GetPhotoPage(name string, page *dto.Page) []model.FileInfo {
 	var tl = []string{"jpeg", "jpg", "png", "webp", "ico"}
-	return repository.GetFileInfoPage(tl, scope, name, page)
+	return repository.GetFileInfoPage(tl, name, page)
 }
 
 func (s *FileService) RenameFile(id uint, name string) error {
@@ -50,10 +50,7 @@ func (s *FileService) RemoveFileById(id uint) error {
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
 	}
-	if f.RelevanceId > 0 {
-		return fmt.Errorf("该图片已关联影片资源，禁止删除")
-	}
-	storagePath := repository.StoragePath(&f)
+storagePath := repository.StoragePath(&f)
 	err := os.Remove(storagePath)
 	if err != nil && !os.IsNotExist(err) {
 		return err

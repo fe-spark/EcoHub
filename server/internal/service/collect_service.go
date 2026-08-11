@@ -199,9 +199,6 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	if old.Name != next.Name {
 		changes = append(changes, fmt.Sprintf("站点名称: %s → %s", old.Name, next.Name))
 	}
-	if old.SyncPictures != next.SyncPictures {
-		changes = append(changes, fmt.Sprintf("图片同步: %s → %s", sourceOnOffLabel(old.SyncPictures), sourceOnOffLabel(next.SyncPictures)))
-	}
 	if old.Interval != next.Interval {
 		changes = append(changes, fmt.Sprintf("请求间隔: %dms → %dms", old.Interval, next.Interval))
 	}
@@ -225,12 +222,6 @@ func sourceGradeLabel(g model.SourceGrade) string {
 	return "附属站"
 }
 
-func sourceOnOffLabel(on bool) string {
-	if on {
-		return "开"
-	}
-	return "关"
-}
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
 	var collector []notify.SourceConfigChangeItem

@@ -2,7 +2,6 @@ export interface FilmSource {
   id: string;
   name: string;
   uri: string;
-  syncPictures: boolean;
   state: boolean;
   grade: number;
   interval: number;
@@ -105,7 +104,6 @@ export interface DelBatchResult {
 export interface SourceFormValues {
   name: string;
   uri: string;
-  syncPictures: boolean;
   state: boolean;
   grade: number;
   interval: number;
