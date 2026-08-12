@@ -28,6 +28,10 @@ EcoHub 是一个前后端分离的影视聚合系统。后端负责定时采集�
 - 管理后台：[https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage)
 - 演示访客账号/密码：`guest / guest`
 
+## 当前版本
+
+正式版 **v2.0+** 发布形态为 **All-in-One 单镜像** `ghcr.io/fe-spark/ecohub`（同容器托管 Web + API）。变更记录见 [RELEASE.md](./RELEASE.md)。
+
 ## 项目定位
 
 EcoHub 的核心不是把多个资源站简单平铺入库，而是以“单主站 + 多附属站”的方式归并内容：
@@ -124,9 +128,16 @@ npm run dev
 - [服务端说明](./server/README.md)
 - [前端说明](./web/README.md)
 
-### Docker 部署
+### Docker 部署（推荐）
 
-Docker / GHCR 镜像和 Compose 部署方式见 [Docker 部署说明](./README-Docker.md)。
+发布版一键安装（拉取 `ghcr.io/fe-spark/ecohub:latest` + 内置 MySQL/Redis）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+cd ~/ecohub && docker compose up -d
+```
+
+镜像与 Compose 细节见 [Docker 部署说明](./README-Docker.md)；版本说明见 [RELEASE.md](./RELEASE.md)。
 
 ## 文档导航
 
@@ -134,7 +145,8 @@ Docker / GHCR 镜像和 Compose 部署方式见 [Docker 部署说明](./README-D
 | --- | --- |
 | [server/README.md](./server/README.md) | 服务端启动、环境变量、采集模型、接口分组、鉴权模型 |
 | [web/README.md](./web/README.md) | 前端启动、API 转发、页面结构、鉴权边界 |
-| [README-Docker.md](./README-Docker.md) | Docker Compose 部署、外部数据库、内置数据库、持久化建议 |
+| [README-Docker.md](./README-Docker.md) | All-in-One 发布版 / 源码版 Compose、外部库、持久化 |
+| [RELEASE.md](./RELEASE.md) | 版本变更与镜像 tag |
 | [README-FAQ.md](./README-FAQ.md) | 主站机制、缓存、排序、登录态、Docker 常见问题 |
 
 ## 默认账号
