@@ -9,6 +9,7 @@
 | 场景 | 推荐方式 | 说明 |
 | --- | --- | --- |
 | 只想直接运行 EcoHub | 发布版部署 | 安装脚本生成 compose + `.env`，拉取已发布镜像，内置 MySQL / Redis |
+| 用 1Panel 图形化部署 | [1Panel 教程](./README-1Panel.md) | 编排粘贴 compose + `.env`，网站反代与 HTTPS |
 | 想从当前源码构建 | 源码版部署 | 仓库根目录 `docker-compose.yml` 本地构建（开发仍可拆成 web/server 两服务） |
 | 已有 MySQL / Redis | 外部数据库部署 | 改 `.env` 连接信息，不启内置 mysql/redis |
 
@@ -244,6 +245,7 @@ docker compose logs -f redis
 ## 相关文档
 
 - [根目录总览](./README.md)
+- [1Panel 一键部署](./README-1Panel.md)
 - [版本变更](./RELEASE.md)
 - [服务端说明](./server/README.md)
 - [前端说明](./web/README.md)
