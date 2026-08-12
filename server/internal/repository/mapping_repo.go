@@ -150,9 +150,6 @@ func IsCategoryMappingGroup(group string) bool {
 }
 
 func CreateMappingRule(rule *model.MappingRule) error {
-	if err := EnsureMappingRuleIndexes(); err != nil {
-		return err
-	}
 	rule.MatchType = strings.TrimSpace(rule.MatchType)
 	if rule.MatchType == "" {
 		rule.MatchType = "exact"
@@ -167,9 +164,6 @@ func CreateMappingRule(rule *model.MappingRule) error {
 }
 
 func UpdateMappingRule(rule *model.MappingRule) error {
-	if err := EnsureMappingRuleIndexes(); err != nil {
-		return err
-	}
 	rule.MatchType = strings.TrimSpace(rule.MatchType)
 	if rule.MatchType == "" {
 		rule.MatchType = "exact"

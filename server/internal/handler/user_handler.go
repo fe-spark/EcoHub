@@ -149,6 +149,11 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 	uc, _ := v.(*utils.UserClaims)
 	isOperatorAdmin := uc.UserID == config.UserIdInitialVal || model.IsAdminRole(uc.Role)
 
+	// 非管理员只能更新自己的账号，防止横向越权
+	if !isOperatorAdmin && uc.UserID != uint(req.ID) {
+		dto.Failed("权限不足，仅可修改本人账号信息", c)
+		return
+	}
 	// 非超级管理员不可修改默认超级管理员信息
 	if req.ID == config.UserIdInitialVal && !isOperatorAdmin {
 		dto.Failed("权限不足，仅超级管理员可修改默认超级管理员信息", c)

@@ -117,29 +117,43 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
 
     playerRef.current = art;
 
-    // 破解 autoMini 延迟：实现毫秒级响应的小窗触发
-    let rafId: number;
-    if (!isMobile) {
-      const checkMiniTrigger = () => {
+    // 小窗触发：用 IntersectionObserver + 滚动监听，避免 rAF 常驻循环占 CPU
+    let miniRafId = 0;
+    let onScrollOrResize: (() => void) | null = null;
+    let miniObserver: IntersectionObserver | null = null;
+    if (!isMobile && artRef.current) {
+      const updateMiniState = () => {
         if (!artRef.current || !art) return;
-
-        // 全屏场景下禁用小窗切换
         if (art.fullscreen || art.fullscreenWeb) {
           if (art.mini) art.mini = false;
-          rafId = requestAnimationFrame(checkMiniTrigger);
           return;
         }
-
         const rect = artRef.current.getBoundingClientRect();
-        // 阈值破解：底部剩余 100px 时立即开启，顶部进入 -50px 时立刻关闭
         if (rect.bottom < 100) {
           if (art.playing && !art.mini) art.mini = true;
         } else if (rect.top > -50) {
           if (art.mini) art.mini = false;
         }
-        rafId = requestAnimationFrame(checkMiniTrigger);
       };
-      rafId = requestAnimationFrame(checkMiniTrigger);
+      const scheduleMiniCheck = () => {
+        if (miniRafId) return;
+        miniRafId = requestAnimationFrame(() => {
+          miniRafId = 0;
+          updateMiniState();
+        });
+      };
+      onScrollOrResize = scheduleMiniCheck;
+      window.addEventListener("scroll", scheduleMiniCheck, { passive: true });
+      window.addEventListener("resize", scheduleMiniCheck);
+      if (typeof IntersectionObserver !== "undefined") {
+        miniObserver = new IntersectionObserver(scheduleMiniCheck, {
+          root: null,
+          rootMargin: "100px 0px 100px 0px",
+          threshold: [0, 0.01, 1],
+        });
+        miniObserver.observe(artRef.current);
+      }
+      scheduleMiniCheck();
     }
 
     art.on("ready", () => {
@@ -173,7 +187,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     });
 
     return () => {
-      if (rafId) cancelAnimationFrame(rafId);
+      if (miniRafId) cancelAnimationFrame(miniRafId);
+      if (onScrollOrResize) {
+        window.removeEventListener("scroll", onScrollOrResize);
+        window.removeEventListener("resize", onScrollOrResize);
+      }
+      miniObserver?.disconnect();
       if (hlsRef.current) {
         hlsRef.current.destroy();
         hlsRef.current = null;
