@@ -113,69 +113,78 @@ EcoHub 不内置影视数据。首次搭建完成后，需要先在后台配置�
 
 ## Docker 与部署
 
-### Docker 里的 `API_URL` 需要手动配置吗
+### 发布版是一个容器还是两个？
 
-不需要手动配置。Compose 会按 `SERVER_PORT` 自动生成：
+**v2.0+ 发布版是 All-in-One 单镜像** `ghcr.io/fe-spark/ecohub`：同一容器内用 Supervisord 跑 Next（`:3000`）和 Go API（`:8080`）。compose 服务名一般为 `ecohub`（容器名 `Eco-hub`），另加内置 `mysql` / `redis`。
+
+旧文档里的 `ecohub-web` / `ecohub-server` 双镜像已废弃。源码版根目录 `docker-compose.yml` 仍可拆成 `web` + `server` 便于本地构建，与发布版形态不同。
+
+### 发布版里还要配置 `API_URL` 吗？
+
+**发布版不需要。** 镜像内默认 `API_URL=http://127.0.0.1:8080`（同容器回环访问 Go）。
+
+**源码版**（拆分 web/server 服务）由 compose 注入类似：
 
 ```env
 API_URL=http://server:${SERVER_PORT:-8080}
 ```
 
-`API_URL` 是前端容器访问后端容器时用的内部地址。Docker 容器里的 `127.0.0.1` 指向容器自己，不是后端容器，所以不要在根目录 `.env` 中配置它。配置时带不带末尾 `/api` 都可以，程序会自动规范化。
+不要把「容器里的 `127.0.0.1`」当成宿主机上的后端：那只在 All-in-One 同容器场景成立。带不带末尾 `/api` 均可，程序会规范化。
 
-访问路径有两种模型，不要混用：
+访问路径两种模型：
 
-- 浏览器经 Next 代理：请求站点自己的 `/api/*`（rewrite 到后端）。
-- 直连后端端口（如 `SERVER_PUBLIC_PORT` 探活）：后端本身也以 `/api` 开头，例如 `/api/health`。
+- 浏览器经站点：`/api/*`（Next rewrite → Go）。
+- 直连后端端口（`SERVER_PUBLIC_PORT`，默认 `18080`）：路径仍以 `/api` 开头，如 `/api/health`。
 
 ### Docker 环境连不上宿主机数据库怎么办
 
 优先检查：
 
 - `MYSQL_HOST` / `REDIS_HOST` 是否是容器可访问地址。
-- Linux 环境下 `host.docker.internal` 是否可用。
-- 数据库用户是否允许容器网络来源连接。
-- 宿主机防火墙是否放通端口。
+- Linux 下 `host.docker.internal` 是否可用（仓库 compose 已配 `extra_hosts`）。
+- 数据库用户是否允许容器网段连接。
+- 防火墙是否放通端口。
 - MySQL / Redis 是否只监听了 `127.0.0.1`。
 
 ### 使用内置 MySQL / Redis 启动失败怎么办
 
 优先检查：
 
-- 宿主机 `3306` 或 `6379` 是否已被占用。
-- `docker compose logs -f mysql`。
-- `docker compose logs -f redis`。
-- `server.environment` 中的数据库、Redis 密码是否和服务配置一致。
-- 内置 MySQL / Redis 默认不对宿主机暴露端口，不会占用宿主机 `3306` / `6379`。
+- `docker compose logs -f mysql` / `redis`。
+- `.env` 中密码是否与 compose 注入一致。
+- 发布版内置库默认**不**映射到宿主机 `3306`/`6379`；源码版为方便本地 `go run` 可能映射 `127.0.0.1:3306` 等，注意冲突。
 
 ### 前端打开后接口全部失败怎么办
 
 优先检查：
 
-- `server` 容器是否健康。
-- `web` 容器中的 `API_URL` 是否与 `SERVER_PORT` 一致。
+- 发布版：`docker compose logs -f ecohub`，以及 `http://主机:18080/api/health`。
+- 源码版：`server` 是否 healthy；`web` 的 `API_URL` 是否指向可解析的 `server` 服务。
 - 反向代理是否正确转发 `/api/*`。
-- 浏览器请求是否被 HTTPS、CORS 或 cookie 策略拦截。
+- 浏览器是否被 HTTPS、CORS 或 cookie 策略拦截。
 
-### `web` 和 `server` 为什么会端口冲突
+### 本地开发时 `web` 和 `server` 端口冲突
 
-本地开发约定：
+- `server` 默认 `8080`，`web` 默认 `3000`。
+- 不要把 Next 改到 `8080`。改 `web/.env.local` 的 `PORT` 后需重启前端。
 
-- `server` 默认监听 `8080`。
-- `web` 默认监听 `3000`。
+### 从 v1.x 升级到 v2.0 要注意什么
 
-如果手动把 Next 改到 `8080`，就会和后端冲突。修改 `web/.env.local` 中的 `PORT` 后需要重启前端服务。
+- 换成单镜像 compose（见 [README-Docker.md](./README-Docker.md)「从 v1.x 双镜像升级」）。
+- 备份数据后 `pull` + `up -d`；不要新旧 server 混连同一库。
+- 正式版 tag 会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
 
 ## 已知注意项
 
 - `/api/config/basic` 当前仍是公开接口。
 - 前端 lint 可能仍有图片优化相关 warning。
-- 是否启动内置 MySQL / Redis，取决于你执行的 `docker compose up` 命令里包含哪些服务。
+- 是否启动内置 MySQL / Redis，取决于 compose 里是否包含对应服务。
 - 一次整理特别多影片时，服务会有短暂的内存上涨。
 
 ## 文档入口
 
 - [根目录总览](./README.md)
+- [版本变更](./RELEASE.md)
 - [服务端说明](./server/README.md)
 - [前端说明](./web/README.md)
 - [Docker 部署说明](./README-Docker.md)
