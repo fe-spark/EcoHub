@@ -188,3 +188,4 @@ API_URL=http://server:${SERVER_PORT:-8080}
 - [服务端说明](./server/README.md)
 - [前端说明](./web/README.md)
 - [Docker 部署说明](./README-Docker.md)
+- [1Panel 一键部署](./README-1Panel.md)

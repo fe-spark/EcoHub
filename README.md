@@ -82,6 +82,7 @@ flowchart TD
 ├── scripts/             # 发布版安装脚本
 ├── docker-compose.yml   # 源码版 Web / API / MySQL / Redis 容器编排
 ├── README-Docker.md     # Docker 部署说明
+├── README-1Panel.md     # 1Panel 一键部署教程
 ├── README-FAQ.md        # FAQ 与排障
 ├── server/README.md     # 服务端开发说明
 └── web/README.md        # 前端开发说明
@@ -137,7 +138,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 cd ~/ecohub && docker compose up -d
 ```
 
-镜像与 Compose 细节见 [Docker 部署说明](./README-Docker.md)；版本说明见 [RELEASE.md](./RELEASE.md)。
+镜像与 Compose 细节见 [Docker 部署说明](./README-Docker.md)；**1Panel 图形化一键部署**见 [1Panel 教程](./README-1Panel.md)；版本说明见 [RELEASE.md](./RELEASE.md)。
 
 ## 文档导航
 
@@ -146,6 +147,7 @@ cd ~/ecohub && docker compose up -d
 | [server/README.md](./server/README.md) | 服务端启动、环境变量、采集模型、接口分组、鉴权模型 |
 | [web/README.md](./web/README.md) | 前端启动、API 转发、页面结构、鉴权边界 |
 | [README-Docker.md](./README-Docker.md) | All-in-One 发布版 / 源码版 Compose、外部库、持久化 |
+| [README-1Panel.md](./README-1Panel.md) | 1Panel 编排一键部署、网站反代与 HTTPS、更新 |
 | [RELEASE.md](./RELEASE.md) | 版本变更与镜像 tag |
 | [README-FAQ.md](./README-FAQ.md) | 主站机制、缓存、排序、登录态、Docker 常见问题 |
 
