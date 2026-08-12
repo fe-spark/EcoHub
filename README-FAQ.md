@@ -170,7 +170,7 @@ API_URL=http://server:${SERVER_PORT:-8080}
 
 ### 从 v1.x 升级到 v2.0 要注意什么
 
-- 换成单镜像 compose（见 [README-Docker.md](./README-Docker.md)「从 v1.x 双镜像升级」）。
+- 换成单镜像 compose（见 [README-Deploy.md](./README-Deploy.md)「从 v1.x 双镜像升级」）。
 - 备份数据后 `pull` + `up -d`；不要新旧 server 混连同一库。
 - 正式版 tag 会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
 
@@ -187,5 +187,4 @@ API_URL=http://server:${SERVER_PORT:-8080}
 - [版本变更](./RELEASE.md)
 - [服务端说明](./server/README.md)
 - [前端说明](./web/README.md)
-- [Docker 部署说明](./README-Docker.md)
-- [1Panel 一键部署](./README-1Panel.md)
+- [部署指南](./README-Deploy.md)
