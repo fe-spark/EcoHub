@@ -27,7 +27,8 @@ cd ~/ecohub && docker compose pull && docker compose up -d
 #   image: ghcr.io/fe-spark/ecohub:v2.0.1
 ```
 
-默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。  
+全部署方式见 [README-Deploy.md](./README-Deploy.md)。
 
 ---
 
