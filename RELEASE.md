@@ -1,3 +1,60 @@
+# v2.0.0
+
+> **正式版**：All-in-One 单镜像部署、Telegram 通知路由矩阵与更新列表增强、分类树仅从主站同步。正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.0`
+- `ghcr.io/fe-spark/ecohub:latest`
+
+## 版本定位
+
+`v2.0.0` 将 Web 与 Server 合并为单一 All-in-One 镜像，并完成 Telegram 通知策略、更新列表去噪/分类浏览与分类树主站约束等能力收敛，适合生产环境直接拉取 `:latest` 或固定 `v2.0.0`。
+
+## 主要变更（相对 v1.1.x）
+
+### 镜像与部署
+
+- **All-in-One 单镜像**：`ecohub-web` / `ecohub-server` 融合为 `ghcr.io/fe-spark/ecohub`
+- 多阶段构建 + Supervisord 同容器托管 Go API（8080）与 Next.js（3000）
+- 发布版 Compose / 安装脚本默认使用 `ecohub:latest`
+
+### Telegram 通知
+
+- Severity（INFO/NOTICE/WARN/ERROR/CRITICAL）、Category（collect/cron/audit）与 Quiet Hours 免打扰（东八区；ERROR/CRITICAL 默认可穿透）
+- `onlyNotifyOnUpdate`：无更新且无失败时跳过批次摘要
+- Targets 路由（Chat / Forum Thread / 最低等级 / 分类订阅）；`ChatIDs` 与 Targets 对齐
+- Bot 命令白名单与发送目标同源
+- 更新列表按导航大类筛选浏览；callback 短下标编码规避 64 字节限制
+
+### 更新列表与采集
+
+- 跨源按「分集数量严格增加」去重，并展示触发源名称
+- 影片 `update_stamp` 解析失败时用当前时间兜底
+- 分类树只能来自主站（含未启用主站）；无主站不构建分类树，禁止附属站写入
+
+### 管理端与其它（含 v1.1.5 系列）
+
+- 通知设置 UI 分区重构；系统设置 Tabs、主题 SSR 防闪烁、浅色边框对比度等
+- 采集进度会话、素材中心仅用户上传、管理端写权限透传、工作台真实接口图表等
+
+预发布迭代明细见下文 `v2.0.0-beta.1` ~ `beta.3` 与 `v1.1.5-beta.*` 各节。
+
+## 部署（v2.0.0）
+
+```bash
+# 推荐：安装脚本 + 发布版 Compose（默认 :latest）
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+cd ~/ecohub && docker compose pull && docker compose up -d
+
+# 或固定版本：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.0
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v2.0.0-beta.3
 
 > **预发布（prerelease）**：Telegram 通知路由矩阵（等级 / 免打扰 / 无更新静音）、更新列表按导航大类筛选，以及分类树严格仅从主站同步，**不会**覆盖 `:latest`。
