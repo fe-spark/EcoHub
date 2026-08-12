@@ -81,26 +81,96 @@ go run ./cmd/server
 
 ## 环境变量
 
+本地 `go run` 使用 `server/.env`（见 [server/.env.example](./.env.example)）。Docker / 1Panel 使用仓库根目录 [.env.example](../.env.example)；compose 会把 `SERVER_PORT` 注入为进程内的 `PORT`。
+
+### 服务与鉴权
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `PORT` | 是 | 无 | API 监听端口；未设置启动 panic。Docker 发布版由 compose 的 `SERVER_PORT`（默认 `8080`）注入 |
+| `JWT_SECRET` | 是 | 无 | JWT 签名密钥；未设置启动 panic。生产必须用高强度随机串 |
+
+### MySQL
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `MYSQL_HOST` | 是 | 无 | 主机；本机 `127.0.0.1`，Compose 内置库 `mysql`，容器访宿主机 `host.docker.internal` |
+| `MYSQL_PORT` | 是 | 无 | 端口，通常 `3306` |
+| `MYSQL_USER` | 是 | 无 | 用户名 |
+| `MYSQL_PASSWORD` | 否 | 空 | 密码；空密码仅适合本地无鉴权实例 |
+| `MYSQL_DBNAME` | 是 | 无 | 业务库名 |
+
+`MYSQL_HOST` / `MYSQL_PORT` / `MYSQL_USER` / `MYSQL_DBNAME` 任一为空会启动 panic。
+
+### Redis
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `REDIS_HOST` | 是 | 无 | 主机；本机 `127.0.0.1`，Compose 内置 `redis` |
+| `REDIS_PORT` | 是 | 无 | 端口，通常 `6379` |
+| `REDIS_PASSWORD` | 否 | 空 | 密码；无密码可留空 |
+| `REDIS_DB` | 否 | `0` | DB 编号；非数字时忽略并保持默认 |
+
+`REDIS_HOST` / `REDIS_PORT` 为空会启动 panic。
+
+### 采集档位
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `COLLECT_PROFILE` | 否 | `auto` | 采集写阀与并发档位：`auto` / `light` / `standard` / `high` |
+
+- `auto` 或未设置：按 CPU 核数自动选档（≤2 → `light`，3–7 → `standard`，≥8 → `high`）
+- `light`：保守（约 2C2G）
+- `standard`：中档
+- `high`：高并发（约 8C+）
+- 非法值会打日志并回退自动选档
+- 写阀、分页 worker、源站并发等由档位内置表决定，**无需**再配其它采集并发环境变量
+
+### Telegram 与代理（可选）
+
+Bot Token / Chat ID / 路由策略在**管理后台**配置，不通过环境变量。进程环境仅控制出网代理（发送时读取，优先级从上到下）：
+
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `PORT` | 是 | API 监听端口 |
-| `JWT_SECRET` | 是 | JWT 签名密钥，未配置会启动失败 |
-| `MYSQL_HOST` | 是 | MySQL 地址 |
-| `MYSQL_PORT` | 是 | MySQL 端口 |
-| `MYSQL_USER` | 是 | MySQL 用户 |
-| `MYSQL_PASSWORD` | 否 | MySQL 密码 |
-| `MYSQL_DBNAME` | 是 | 业务库名 |
-| `REDIS_HOST` | 是 | Redis 地址 |
-| `REDIS_PORT` | 是 | Redis 端口 |
-| `REDIS_PASSWORD` | 否 | Redis 密码 |
-| `REDIS_DB` | 否 | Redis DB，默认 `0` |
+| `TG_PROXY` | 否 | Telegram **专用**代理，优先于通用代理；支持 `http://` / `https://` / `socks5://` / `socks5h://` |
+| `HTTPS_PROXY` / `https_proxy` | 否 | 通用 HTTPS 代理（Telegram 次选） |
+| `HTTP_PROXY` / `http_proxy` | 否 | 通用 HTTP 代理 |
+| `ALL_PROXY` / `all_proxy` | 否 | 全局代理兜底 |
 
-常见地址写法：
+示例：
 
-- MySQL / Redis 在本机：`127.0.0.1`
-- MySQL / Redis 在另一台机器：填写内网 IP、域名或公网地址
-- Docker Compose 内部访问：`mysql`、`redis`
-- 容器访问宿主机服务：`host.docker.internal`
+```env
+# 本机 Clash / V2Ray
+TG_PROXY=http://127.0.0.1:7890
+# 或
+TG_PROXY=socks5://127.0.0.1:7891
+
+# Docker 内访问宿主机代理（发布版 / 源码版 compose 已配 host.docker.internal）
+# TG_PROXY=http://host.docker.internal:7890
+```
+
+国内直连 `api.telegram.org` 常超时，建议至少配置 `TG_PROXY`。`HTTPS_PROXY` 等也会影响其它依赖系统代理的出站（若业务侧使用）；Telegram 客户端明确按上表解析。
+
+### Docker 根目录变量对照（非 server 进程直接读取）
+
+发布版 / 源码版 compose 还使用下列变量，**注入或映射**到容器，与 `server` 进程内变量对应关系：
+
+| 根目录 `.env` | 作用 |
+| --- | --- |
+| `SERVER_PORT` | 映射为容器内 `PORT` |
+| `WEB_PUBLIC_PORT` | 宿主机暴露 Web（Next）端口，默认 `3000` |
+| `SERVER_PUBLIC_PORT` | 宿主机暴露 API 直连端口，默认 `18080` → 容器 `SERVER_PORT` |
+| `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` 等 | 通过 compose `environment` 注入 server（或 All-in-One）进程 |
+
+完整 Docker 说明见 [Docker 部署](../README-Docker.md)、[1Panel 教程](../README-1Panel.md)。
+
+### 地址写法小结
+
+- 本机开发：`127.0.0.1`
+- 其它机器：内网 IP / 域名
+- Compose 服务名：`mysql`、`redis`
+- 容器访问宿主机：`host.docker.internal`
 
 ## 启动初始化
 
@@ -260,4 +330,6 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 - [根目录总览](../README.md)
 - [前端说明](../web/README.md)
 - [Docker 部署说明](../README-Docker.md)
+- [1Panel 一键部署](../README-1Panel.md)
 - [FAQ 与排障](../README-FAQ.md)
+- [版本变更](../RELEASE.md)
