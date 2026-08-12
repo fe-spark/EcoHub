@@ -1,3 +1,36 @@
+# v2.0.1
+
+> **补丁版**：安全、稳定性与性能修复；正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.1`
+- `ghcr.io/fe-spark/ecohub:latest`
+
+## 修复
+
+- **UserUpdate 越权**：非管理员仅可修改本人账号，阻断横向改他人资料
+- **CORS**：带凭证时仅允许与请求 Host 一致的 Origin；OPTIONS 预检正确 Abort，并设置 `Vary: Origin`
+- **JWT 过期解析**：过期路径在返回 Claims 前做 nil 防护，避免 panic
+- **采集任务 panic**：`RunTaskOnce` 异步执行增加 recover，防止单任务崩溃影响进程
+- **映射规则写路径 DDL**：`Create/UpdateMappingRule` 移除运行时 `EnsureMappingRuleIndexes`，索引仅在初始化保证
+- **VideoPlayer 小窗检测**：去掉常驻 rAF 循环，改为 IntersectionObserver + scroll/resize 节流
+
+## 部署（v2.0.1）
+
+```bash
+# 推荐：安装脚本 + 发布版 Compose（默认 :latest）
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+cd ~/ecohub && docker compose pull && docker compose up -d
+
+# 或固定版本：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.1
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。
+
+---
+
 # v2.0.0
 
 > **正式版**：All-in-One 单镜像部署、Telegram 通知路由矩阵与更新列表增强、分类树仅从主站同步。正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。

@@ -3,34 +3,32 @@ package middleware
 import (
 	"log"
 	"net/http"
+	"net/url"
 	"server/internal/model/dto"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-// Cors 开启跨域请求
+// Cors 开启跨域请求。带凭证时仅回显与当前请求 Host 一致的 Origin，避免任意源反射。
 func Cors() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		method := c.Request.Method
-		origin := c.Request.Header.Get("Origin") //请求头部
-		if origin != "" {
-			//接收客户端发送的origin （重要！）
+		origin := c.Request.Header.Get("Origin")
+		if origin != "" && isAllowedCORSOrigin(c, origin) {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-			//服务器支持的所有跨域请求的方法
-			c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE,UPDATE")
-			//允许跨域设置可以返回其他子段，可以自定义字段
+			c.Header("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE, UPDATE")
 			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Length, X-CSRF-Token, Token,session, Content-Type")
-			// 允许浏览器（客户端）可以解析的头部 （重要）
 			c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
-			//设置缓存时间
 			c.Header("Access-Control-Max-Age", "172800")
-			//允许客户端传递校验信息比如 cookie (重要)
 			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Vary", "Origin")
 		}
 
-		//允许类型校验
 		if method == "OPTIONS" {
 			c.JSON(http.StatusOK, "ok!")
+			c.Abort()
+			return
 		}
 
 		defer func() {
@@ -45,4 +43,20 @@ func Cors() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+func isAllowedCORSOrigin(c *gin.Context, origin string) bool {
+	u, err := url.Parse(origin)
+	if err != nil || u.Host == "" {
+		return false
+	}
+	reqHost := strings.TrimSpace(c.GetHeader("X-Forwarded-Host"))
+	if reqHost == "" {
+		reqHost = c.Request.Host
+	}
+	// X-Forwarded-Host 可能带端口列表，只取第一段
+	if i := strings.IndexByte(reqHost, ','); i >= 0 {
+		reqHost = strings.TrimSpace(reqHost[:i])
+	}
+	return strings.EqualFold(u.Host, reqHost)
 }

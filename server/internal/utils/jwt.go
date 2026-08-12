@@ -44,7 +44,7 @@ func ParseToken(tokenStr string) (*UserClaims, error) {
 		return []byte(config.JwtSecret), nil
 	})
 	if err != nil {
-		if errors.Is(err, jwt.ErrTokenExpired) {
+		if errors.Is(err, jwt.ErrTokenExpired) && token != nil && token.Claims != nil {
 			claims, _ := token.Claims.(*UserClaims)
 			return claims, err
 		}

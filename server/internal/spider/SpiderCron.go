@@ -282,6 +282,11 @@ func RunTaskOnce(id string) error {
 	}
 	go func() {
 		defer runningCronTasks.Delete(ft.Id)
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Spider] Cron task panic recovered: task=%s err=%v", ft.Id, r)
+			}
+		}()
 		runTaskBody(ft)
 	}()
 	return nil
