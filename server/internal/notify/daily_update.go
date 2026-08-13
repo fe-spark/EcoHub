@@ -101,19 +101,12 @@ func handleDailyUpdateCommand(token, chatID, chatType string) {
 }
 
 func formatDailyCategoryPrompt(sess dailySession) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 每日更新</b>\n", formatTitlePrefix(sess.SiteName))
-	fmt.Fprintf(&b, "🕒 近 24 小时 %s – %s\n", html.EscapeString(sess.FromLabel), html.EscapeString(sess.UntilLabel))
-	fmt.Fprintf(&b, "📋 <b>%d</b> 部\n", len(sess.AllMids))
-	if len(sess.Cats) == 0 {
-		return b.String()
-	}
-	b.WriteByte('\n')
-	for _, c := range sess.Cats {
-		icon := getCategoryIcon(c.CategoryName)
-		fmt.Fprintf(&b, "· %s %s <b>%d</b>\n", icon, html.EscapeString(c.CategoryName), c.Count)
-	}
-	return b.String()
+	return fmt.Sprintf(
+		"<b>%s 每日更新</b>\n🕒 近 24 小时 %s – %s",
+		formatTitlePrefix(sess.SiteName),
+		html.EscapeString(sess.FromLabel),
+		html.EscapeString(sess.UntilLabel),
+	)
 }
 
 func sendDailyListWithoutSession(token, chatID string, sess dailySession, catIdx int) error {

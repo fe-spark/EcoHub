@@ -107,12 +107,12 @@ func (i *IndexService) IndexPage() map[string]any {
 }
 
 // HomeDailyUpdates 只从「近 24h 采集变更 mid」池中随机取 limit 条（不是全站随机）。
-// 池来源与 TG /daily 相同：notify_change_mid，再经读模型可见性过滤。
-func (i *IndexService) HomeDailyUpdates(limit int) []model.MovieBasicInfo {
+// exclude 为当前批次 id，下一批从剩余池抽取；剩余为空时才回到全池。
+func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
 	if limit <= 0 {
 		limit = homeDailyUpdateLimit
 	}
-	return pickRandomMovieInfos(i.homeDailyUpdatePool(), limit)
+	return pickRandomMovieInfos(i.homeDailyUpdatePool(), limit, exclude)
 }
 
 func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
@@ -159,19 +159,38 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	return list
 }
 
-func pickRandomMovieInfos(src []model.MovieBasicInfo, n int) []model.MovieBasicInfo {
+func pickRandomMovieInfos(src []model.MovieBasicInfo, n int, exclude []int64) []model.MovieBasicInfo {
 	if n <= 0 || len(src) == 0 {
 		return []model.MovieBasicInfo{}
 	}
-	if len(src) <= n {
-		out := make([]model.MovieBasicInfo, len(src))
-		copy(out, src)
+	skip := make(map[int64]struct{}, len(exclude))
+	for _, id := range exclude {
+		if id > 0 {
+			skip[id] = struct{}{}
+		}
+	}
+	pool := src
+	if len(skip) > 0 {
+		left := make([]model.MovieBasicInfo, 0, len(src))
+		for _, item := range src {
+			if _, hit := skip[item.Id]; hit {
+				continue
+			}
+			left = append(left, item)
+		}
+		if len(left) > 0 {
+			pool = left
+		}
+	}
+	if len(pool) <= n {
+		out := make([]model.MovieBasicInfo, len(pool))
+		copy(out, pool)
 		return out
 	}
-	perm := rand.Perm(len(src))
+	perm := rand.Perm(len(pool))
 	out := make([]model.MovieBasicInfo, n)
 	for i := 0; i < n; i++ {
-		out[i] = src[perm[i]]
+		out[i] = pool[perm[i]]
 	}
 	return out
 }
