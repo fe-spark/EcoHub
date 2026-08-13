@@ -11,6 +11,7 @@ import FilmList from "@/components/public/FilmList";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
+import DailyUpdates from "./DailyUpdates";
 import styles from "./index.module.less";
 
 interface NavChildItem {
@@ -77,6 +78,8 @@ export default function HomePageView({
   return (
     <div className={styles.container}>
       <HomeHero banners={data.banners || []} />
+
+      <DailyUpdates />
 
       {data.content.map((section, idx) => {
         if (!section.nav.show) {

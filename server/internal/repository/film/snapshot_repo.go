@@ -564,6 +564,63 @@ func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 	return &snapshot
 }
 
+// GetSnapshotsByMidsOrdered 按 mid 列表顺序取当前版本快照；无快照的 mid 跳过。
+func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
+	version = strings.TrimSpace(version)
+	if version == "" || len(mids) == 0 || db.Mdb == nil {
+		return nil
+	}
+	uniq := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	if len(uniq) == 0 {
+		return nil
+	}
+	byMid := make(map[int64]model.FilmListSnapshot, len(uniq))
+	const chunk = 200
+	for start := 0; start < len(uniq); start += chunk {
+		end := start + chunk
+		if end > len(uniq) {
+			end = len(uniq)
+		}
+		var rows []model.FilmListSnapshot
+		if err := db.Mdb.Where("snapshot_version = ? AND mid IN ?", version, uniq[start:end]).Find(&rows).Error; err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if row.Mid > 0 {
+				byMid[row.Mid] = row
+			}
+		}
+	}
+	out := make([]model.FilmListSnapshot, 0, len(mids))
+	emitted := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := emitted[mid]; ok {
+			continue
+		}
+		snap, ok := byMid[mid]
+		if !ok {
+			continue
+		}
+		emitted[mid] = struct{}{}
+		out = append(out, snap)
+	}
+	return out
+}
+
 func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDetail, int64) {
 	if snapshot.Mid <= 0 {
 		return nil, 0
@@ -652,6 +709,7 @@ func RefreshAccessDataCaches() {
 		config.CategoryTreeKey,
 		config.TVBoxConfigCacheKey,
 		config.BannersKey,
+		config.IndexDailyUpdatesCacheKey,
 	)
 	bumpSearchTagsCacheVersion()
 	clearCachePatterns(

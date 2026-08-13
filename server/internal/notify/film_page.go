@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"strconv"
 	"strings"
@@ -76,18 +77,49 @@ func getCategoryIcon(name string) string {
 	}
 }
 
+// formatCategoryPickFallback 无批次概要文案时，返回与「每日更新」一致的分类引导。
+func formatCategoryPickFallback(sess FilmPageSession) string {
+	total := sess.Total
+	if total <= 0 {
+		total = CountChangeMids(sess.BatchID)
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "<b>%s 更新列表</b>\n", formatTitlePrefix(sess.SiteName))
+	fmt.Fprintf(&b, "📋 共 <b>%d</b> 部有更新\n", total)
+	cats := GetChangeBatchCategoryCounts(sess.BatchID)
+	if len(cats) == 0 {
+		fmt.Fprintf(&b, "\n<i>点下方按钮查看更新列表</i>")
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\n<b>有更新的分类</b>：\n")
+	for _, c := range cats {
+		icon := getCategoryIcon(c.CategoryName)
+		fmt.Fprintf(&b, "· %s %s <b>%d</b>\n", icon, html.EscapeString(c.CategoryName), c.Count)
+	}
+	fmt.Fprintf(&b, "\n<i>请点下方分类查看影片列表</i>")
+	return b.String()
+}
+
 func buildOverviewKeyboard(batchID string) *InlineKeyboardMarkup {
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
 		return nil
 	}
-	cats := GetChangeBatchCategoryCounts(batchID)
+	return buildCategoryKeyboard(callbackPrefix, batchID, GetChangeBatchCategoryCounts(batchID))
+}
+
+// buildCategoryKeyboard 分类入口键盘（采集概要 / 每日更新共用布局）。
+func buildCategoryKeyboard(prefix, sessionID string, cats []CategoryCountItem) *InlineKeyboardMarkup {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return nil
+	}
 	if len(cats) == 0 {
 		return &InlineKeyboardMarkup{
 			InlineKeyboard: [][]InlineKeyboardButton{{
 				{
 					Text:         "📋 查看更新列表",
-					CallbackData: formatOpenCallback(callbackPrefix, batchID, catIdxAll),
+					CallbackData: formatOpenCallback(prefix, sessionID, catIdxAll),
 				},
 			}},
 		}
@@ -103,7 +135,7 @@ func buildOverviewKeyboard(batchID string) *InlineKeyboardMarkup {
 		// 按钮文案可含完整分类名；callback 只用短下标，规避 64 字节限制
 		btn := InlineKeyboardButton{
 			Text:         fmt.Sprintf("%s %s (%d)", icon, c.CategoryName, c.Count),
-			CallbackData: formatOpenCallback(callbackPrefix, batchID, i),
+			CallbackData: formatOpenCallback(prefix, sessionID, i),
 		}
 		currentRow = append(currentRow, btn)
 		if len(currentRow) == 2 {
@@ -115,7 +147,7 @@ func buildOverviewKeyboard(batchID string) *InlineKeyboardMarkup {
 	if len(cats) > 1 {
 		btnAll := InlineKeyboardButton{
 			Text:         fmt.Sprintf("📋 全部 (%d)", totalSum),
-			CallbackData: formatOpenCallback(callbackPrefix, batchID, catIdxAll),
+			CallbackData: formatOpenCallback(prefix, sessionID, catIdxAll),
 		}
 		currentRow = append(currentRow, btnAll)
 	}
@@ -128,16 +160,19 @@ func buildOverviewKeyboard(batchID string) *InlineKeyboardMarkup {
 }
 
 func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int) string {
-	return formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, "")
+	return formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, "", "")
 }
 
-func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int, category string) string {
+func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int, category, listTitle string) string {
+	if strings.TrimSpace(listTitle) == "" {
+		listTitle = "本次更新列表"
+	}
 	categoryTitle := ""
 	if category != "" && category != "全部" {
 		categoryTitle = fmt.Sprintf(" · %s%s", getCategoryIcon(category), category)
 	}
 	if total <= 0 && len(chunk) == 0 {
-		return fmt.Sprintf("<b>%s 本次更新列表%s</b>\n<i>本分类暂无变更内容</i>\n", formatTitlePrefix(sess.SiteName), categoryTitle)
+		return fmt.Sprintf("<b>%s %s%s</b>\n<i>本分类暂无变更内容</i>\n", formatTitlePrefix(sess.SiteName), listTitle, categoryTitle)
 	}
 	mids := make([]int64, 0, len(chunk))
 	for _, item := range chunk {
@@ -151,7 +186,7 @@ func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk [
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 本次更新列表%s</b>\n", formatTitlePrefix(sess.SiteName), categoryTitle)
+	fmt.Fprintf(&b, "<b>%s %s%s</b>\n", formatTitlePrefix(sess.SiteName), listTitle, categoryTitle)
 	fmt.Fprintf(&b, "📄 第 <b>%d/%d</b> 页 · 本页 <b>%d</b> · <code>%d–%d</code> / <b>%d</b>\n",
 		page, totalPages, len(chunk), start+1, end, total)
 	if len(chunk) > 0 {
@@ -225,9 +260,11 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 			return
 		}
 		chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
+		// 返回分类选择：优先批次概要（采集推送同源）；无概要时回退为分类引导文案
+		// 键盘始终与采集概要一致（buildOverviewKeyboard）
 		text := strings.TrimSpace(sess.OverviewText)
 		if text == "" {
-			text = fmt.Sprintf("<b>%s 采集概要</b>\n<i>概要内容已失效</i>", formatTitlePrefix(sess.SiteName))
+			text = formatCategoryPickFallback(sess)
 		}
 		markup := buildOverviewKeyboard(batchID)
 		if err := client.editMessageText(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil {
@@ -237,7 +274,7 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 				return
 			}
 		}
-		_ = client.answerCallbackQuery(ctx, token, cb.ID, "已返回概要", false)
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, "已返回分类", false)
 		return
 	}
 
@@ -277,7 +314,7 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 			}
 		}
 	}
-	text := formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, category)
+	text := formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, category, "")
 	markup := buildPagedKeyboardCategory(callbackPrefix, batchID, kbCatIdx, page, totalPages, true)
 	if err := client.editMessageText(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil {
 		if !strings.Contains(err.Error(), "message is not modified") {

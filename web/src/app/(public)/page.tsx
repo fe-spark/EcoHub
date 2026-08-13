@@ -9,7 +9,10 @@ async function getHomeData() {
     }>("/index");
 
     if (response.code === 0 && response.data) {
-      return response.data;
+      return {
+        banners: response.data.banners ?? [],
+        content: response.data.content ?? [],
+      };
     }
   } catch (error) {
     console.error("fetch home data error:", error);

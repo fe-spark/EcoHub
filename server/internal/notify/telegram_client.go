@@ -147,6 +147,18 @@ type InlineKeyboardMarkup struct {
 	InlineKeyboard [][]InlineKeyboardButton `json:"inline_keyboard"`
 }
 
+// Reply keyboard（输入框上方常驻按钮）。
+type KeyboardButton struct {
+	Text string `json:"text"`
+}
+
+type ReplyKeyboardMarkup struct {
+	Keyboard        [][]KeyboardButton `json:"keyboard"`
+	ResizeKeyboard  bool               `json:"resize_keyboard,omitempty"`
+	IsPersistent    bool               `json:"is_persistent,omitempty"`
+	OneTimeKeyboard bool               `json:"one_time_keyboard,omitempty"`
+}
+
 type telegramAPIResponse struct {
 	OK          bool            `json:"ok"`
 	Description string          `json:"description"`
@@ -271,7 +283,12 @@ func (c *telegramClient) sendMessageWithMarkup(ctx context.Context, token, chatI
 	return c.sendMessageToTarget(ctx, token, chatID, "", text, markup)
 }
 
-func (c *telegramClient) sendMessageToTarget(ctx context.Context, token, chatID, threadID, text string, markup *InlineKeyboardMarkup) error {
+// sendMessageWithReplyKeyboard 发送带底部常驻键盘的消息。
+func (c *telegramClient) sendMessageWithReplyKeyboard(ctx context.Context, token, chatID, text string, keyboard *ReplyKeyboardMarkup) error {
+	return c.sendMessageToTarget(ctx, token, chatID, "", text, keyboard)
+}
+
+func (c *telegramClient) sendMessageToTarget(ctx context.Context, token, chatID, threadID, text string, markup any) error {
 	token = strings.TrimSpace(token)
 	chatID = strings.TrimSpace(chatID)
 	threadID = strings.TrimSpace(threadID)
@@ -290,11 +307,42 @@ func (c *telegramClient) sendMessageToTarget(ctx context.Context, token, chatID,
 			payload["message_thread_id"] = tid
 		}
 	}
-	if markup != nil && len(markup.InlineKeyboard) > 0 {
-		payload["reply_markup"] = markup
+	if rm := replyMarkupPayload(markup); rm != nil {
+		payload["reply_markup"] = rm
 	}
 	_, err := c.apiCall(ctx, token, "sendMessage", payload)
 	return err
+}
+
+// replyMarkupPayload 将内联/常驻键盘规范为可序列化 payload；空键盘返回 nil。
+func replyMarkupPayload(markup any) any {
+	if markup == nil {
+		return nil
+	}
+	switch m := markup.(type) {
+	case *InlineKeyboardMarkup:
+		if m == nil || len(m.InlineKeyboard) == 0 {
+			return nil
+		}
+		return m
+	case InlineKeyboardMarkup:
+		if len(m.InlineKeyboard) == 0 {
+			return nil
+		}
+		return m
+	case *ReplyKeyboardMarkup:
+		if m == nil || len(m.Keyboard) == 0 {
+			return nil
+		}
+		return m
+	case ReplyKeyboardMarkup:
+		if len(m.Keyboard) == 0 {
+			return nil
+		}
+		return m
+	default:
+		return markup
+	}
 }
 
 func (c *telegramClient) editMessageText(ctx context.Context, token, chatID string, messageID int64, text string, markup *InlineKeyboardMarkup) error {
@@ -364,12 +412,15 @@ type telegramMessage struct {
 	Chat      *struct {
 		ID       int64  `json:"id"`
 		Username string `json:"username"` // 公开群/频道/用户的 @username（不含 @ 前缀）
+		Type     string `json:"type"`     // private / group / supergroup / channel
 	} `json:"chat"`
-	Text string `json:"text"`
+	From *telegramUser `json:"from"`
+	Text string        `json:"text"`
 }
 
 type telegramUser struct {
-	ID int64 `json:"id"`
+	ID       int64  `json:"id"`
+	Username string `json:"username"`
 }
 
 func (c *telegramClient) getUpdates(ctx context.Context, token string, offset int64, timeoutSec int) ([]telegramUpdate, error) {

@@ -64,9 +64,9 @@ const (
 // NotifyEvent 统一事件模型 Envelope
 type NotifyEvent struct {
 	ID        string                 `json:"id"`
-	Key       string                 `json:"key"`        // e.g. "collect_batch_summary"
-	Category  string                 `json:"category"`   // e.g. "collect", "cron", "audit"
-	Severity  Severity               `json:"severity"`   // e.g. "INFO", "WARN", "ERROR"
+	Key       string                 `json:"key"`      // e.g. "collect_batch_summary"
+	Category  string                 `json:"category"` // e.g. "collect", "cron", "audit"
+	Severity  Severity               `json:"severity"` // e.g. "INFO", "WARN", "ERROR"
 	Title     string                 `json:"title"`
 	Summary   string                 `json:"summary"`
 	Data      map[string]interface{} `json:"data,omitempty"`
@@ -190,9 +190,10 @@ func (NotifyChangeBatch) TableName() string {
 
 // NotifyChangeMid 批次内变更影片 mid（全局去重）。
 type NotifyChangeMid struct {
-	BatchID    string `gorm:"primaryKey;size:16;index"`
-	Mid        int64  `gorm:"primaryKey;index"`
-	SourceName string `gorm:"size:1024"`
+	BatchID    string    `gorm:"primaryKey;size:16;index"`
+	Mid        int64     `gorm:"primaryKey;index"`
+	SourceName string    `gorm:"size:1024"`
+	CreatedAt  time.Time `gorm:"index"` // 写入时间；每日更新按此列切 24h 窗
 }
 
 func (NotifyChangeMid) TableName() string {

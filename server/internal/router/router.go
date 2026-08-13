@@ -26,6 +26,7 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/health`, handler.Health)
 	api.HEAD(`/health`, handler.Health)
 	api.GET(`/index`, handler.IndexHd.Index)
+	api.GET(`/index/dailyUpdates`, handler.IndexHd.DailyUpdates)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)

@@ -228,18 +228,18 @@ func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) (
 	return infoList, infoByKey, nil
 }
 
-func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, map[int64]model.MovieDetail, error) {
+func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, map[int64]model.MovieDetail, map[int64][]int, error) {
 	unchangedKeys := make(map[string]struct{})
 	oldDetailsByMid := make(map[int64]model.MovieDetail)
 	// 按 mid 命中旧行：兼容 content_key 仍为 name_* 的库存（无需 bulk 迁移）。
 	mids := filmIndexMIDs(infos)
 	if len(mids) == 0 {
-		return unchangedKeys, oldDetailsByMid, nil
+		return unchangedKeys, oldDetailsByMid, nil, nil
 	}
 
 	existingInfos := reloadFilmIndexesByMidsTx(tx, mids)
 	if len(existingInfos) == 0 {
-		return unchangedKeys, oldDetailsByMid, nil
+		return unchangedKeys, oldDetailsByMid, nil, nil
 	}
 	changedAt := time.Now().Unix()
 	existingByMid := make(map[int64]model.FilmIndex, len(existingInfos))
@@ -251,9 +251,14 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 
 	existingDetailsByMid, err := loadMovieDetailsByMidsTx(tx, mids)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	oldDetailsByMid = existingDetailsByMid
+	// 写前读库存集数；失败则中止，避免空 map 被当成「库里没有集」而整页刷 stamp
+	existingCountsMap, err := loadExistingEpisodeCountsByMIDs(tx, mids, "")
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	for index := range infos {
 		existing, ok := existingByMid[infos[index].Mid]
 		if !ok || existing.UpdateStamp <= 0 {
@@ -276,9 +281,17 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 			unchangedKeys[infos[index].ContentKey] = struct{}{}
 			continue
 		}
-		infos[index].UpdateStamp = changedAt
+		// 业务仍写库，但 update_stamp 只在概要会记为「更新」时刷新：
+		// 新片或分集数量严格增加。备注/演员/封面等不顶「最近更新」。
+		existingCounts := existingCountsMap[existing.Mid]
+		existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
+		if isEpisodeCountHigher(extractEpisodeCountsFromDetail(newDetail), existingCounts) {
+			infos[index].UpdateStamp = changedAt
+		} else {
+			infos[index].UpdateStamp = existing.UpdateStamp
+		}
 	}
-	return unchangedKeys, oldDetailsByMid, nil
+	return unchangedKeys, oldDetailsByMid, existingCountsMap, nil
 }
 
 func loadMovieDetailsByMidsTx(tx *gorm.DB, mids []int64) (map[int64]model.MovieDetail, error) {
@@ -557,12 +570,14 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 	var infoByKey map[string]model.FilmIndex
 	var changedDetails []model.MovieDetail
 	var oldDetailsByMid map[int64]model.MovieDetail
+	var preWriteCounts map[int64][]int
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		unchangedKeys, oldDetails, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailsByKey)
+		unchangedKeys, oldDetails, counts, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailsByKey)
 		if err != nil {
 			return err
 		}
 		oldDetailsByMid = oldDetails
+		preWriteCounts = counts
 		changedInfos, infoByKey, changedDetails = filterChangedMasterWrites(infoList, list, unchangedKeys)
 
 		if len(changedInfos) > 0 {
@@ -605,8 +620,8 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 		return out, nil
 	}
 
-	// 更新列表：仅剧集结构变更或新片；元数据噪声写库不进列表
-	out.NotifyMIDs = filterPlayStructureNotifyMIDs(changedInfos, detailsByKey, oldDetailsByMid)
+	// 更新列表：仅剧集结构变更或新片；用写前集数，避免刚写入的详情被当成 existing
+	out.NotifyMIDs = filterPlayStructureNotifyMIDs(changedInfos, detailsByKey, oldDetailsByMid, preWriteCounts)
 
 	// 仅在有实质变更时更新 last_collect_time / 失效缓存。
 	if refreshSearchTags {
@@ -625,17 +640,10 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 // filterPlayStructureNotifyMIDs 从业务写入的影片中筛出应进「更新列表」的 mid：
 // 新片，或任一线路分集数量严格大于全库已有最大集数。
 // 数量未增加（如已有15集，后更新的源也是15集）不计入更新列表。
-func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[string]model.MovieDetail, oldByMid map[int64]model.MovieDetail) []int64 {
+func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[string]model.MovieDetail, oldByMid map[int64]model.MovieDetail, existingCountsMap map[int64][]int) []int64 {
 	if len(changed) == 0 {
 		return nil
 	}
-	mids := make([]int64, 0, len(changed))
-	for _, info := range changed {
-		if info.Mid > 0 {
-			mids = append(mids, info.Mid)
-		}
-	}
-	existingCountsMap, _ := loadExistingEpisodeCountsByMIDs(nil, mids, "")
 
 	out := make([]int64, 0, len(changed))
 	seen := make(map[int64]struct{}, len(changed))
@@ -652,7 +660,10 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 			continue
 		}
 
-		existingCounts := existingCountsMap[mid]
+		var existingCounts []int
+		if existingCountsMap != nil {
+			existingCounts = append(existingCounts, existingCountsMap[mid]...)
+		}
 		if oldDetail, hasOld := oldByMid[mid]; hasOld {
 			existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
 		}
@@ -817,7 +828,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	var savedMid int64
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		infoList := []model.FilmIndex{snapshot}
-		unchangedKeys, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}))
+		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}))
 		if err != nil {
 			return err
 		}
