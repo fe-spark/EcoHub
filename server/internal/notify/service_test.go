@@ -473,6 +473,25 @@ func TestSetSearchAwaitRequiresRedis(t *testing.T) {
 	}
 }
 
+func TestFormatDailyCategoryPrompt(t *testing.T) {
+	got := formatDailyCategoryPrompt(dailySession{
+		SiteName:   "测试站",
+		AllMids:    []int64{1, 2, 3},
+		FromLabel:  "08-13 10:00",
+		UntilLabel: "08-14 10:00",
+		Cats: []CategoryCountItem{{
+			CategoryName: "电影",
+			Count:        2,
+		}},
+	})
+	if !strings.Contains(got, "每日更新") || !strings.Contains(got, "08-13 10:00") {
+		t.Fatalf("prompt: %s", got)
+	}
+	if strings.Contains(got, "电影") || strings.Contains(got, "部") {
+		t.Fatalf("prompt should not list category or count: %s", got)
+	}
+}
+
 func TestFormatDailyListPageTitle(t *testing.T) {
 	sess := dailySession{SiteName: "测试站", PageSize: 10}
 	got := formatDailyListPage(sess, catIdxAll, 1, nil, 0, 0, 0)

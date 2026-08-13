@@ -107,13 +107,35 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 首页「每日更新」独立接口：仅从近 24h 变更池中随机 12 条。
+// DailyUpdates 首页「每日更新」独立接口：从近 24h 变更池随机抽取，exclude 排除当前批次。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	data := service.IndexSvc.HomeDailyUpdates(0)
+	data := service.IndexSvc.HomeDailyUpdates(0, parseDailyUpdateExclude(c.Query("exclude")))
 	if data == nil {
 		data = make([]model.MovieBasicInfo, 0)
 	}
 	dto.Success(data, "每日更新获取成功", c)
+}
+
+func parseDailyUpdateExclude(raw string) []int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]int64, 0, len(parts))
+	seen := make(map[int64]struct{}, len(parts))
+	for _, part := range parts {
+		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
+		if err != nil || id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 // CategoriesInfo 分类信息获取

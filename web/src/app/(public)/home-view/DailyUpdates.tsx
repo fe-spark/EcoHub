@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CalendarOutlined } from "@ant-design/icons";
 import FilmList from "@/components/public/FilmList";
 import styles from "./index.module.less";
 
-const REFRESH_MS = 2 * 60 * 1000;
+const REFRESH_MS = 15 * 1000;
 
 interface DailyFilm {
   id: string;
@@ -21,8 +21,13 @@ interface DailyFilm {
   blurb?: string;
 }
 
+function filmId(item: DailyFilm) {
+  return String(item.id ?? item.mid ?? "").trim();
+}
+
 export default function DailyUpdates() {
   const [list, setList] = useState<DailyFilm[] | null>(null);
+  const listRef = useRef<DailyFilm[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -38,8 +43,15 @@ export default function DailyUpdates() {
     };
 
     const load = async () => {
+      const exclude = (listRef.current ?? [])
+        .map(filmId)
+        .filter(Boolean)
+        .join(",");
+      const url = exclude
+        ? `/api/index/dailyUpdates?exclude=${encodeURIComponent(exclude)}`
+        : "/api/index/dailyUpdates";
       try {
-        const res = await fetch("/api/index/dailyUpdates", { cache: "no-store" });
+        const res = await fetch(url, { cache: "no-store" });
         if (!res.ok) {
           throw new Error(String(res.status));
         }
@@ -51,6 +63,7 @@ export default function DailyUpdates() {
           throw new Error(String(json.code));
         }
         const next = Array.isArray(json.data) ? json.data : [];
+        listRef.current = next;
         setList(next);
         scheduleNext();
       } catch {
@@ -89,7 +102,7 @@ export default function DailyUpdates() {
           <FilmList
             list={list.map((m) => ({
               ...m,
-              id: String(m.id ?? m.mid ?? ""),
+              id: filmId(m),
             }))}
             className={styles.homeList}
             col={6}

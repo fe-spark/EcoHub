@@ -241,7 +241,6 @@ func registerBotCommands(ctx context.Context, token string) bool {
 	err := client.setMyCommands(cctx, token, []botCommand{
 		{Command: "start", Description: "开始"},
 		{Command: "daily", Description: "每日更新"},
-		{Command: "updates", Description: "每日更新"},
 		{Command: "search", Description: "搜索"},
 		{Command: "help", Description: "帮助"},
 	})
@@ -249,7 +248,7 @@ func registerBotCommands(ctx context.Context, token string) bool {
 		syslog.Warnf("[Notify] setMyCommands 失败（将重试）: %v", err)
 		return false
 	}
-	log.Printf("[Notify] 已注册 Bot 指令: /start /daily /updates /search /help")
+	log.Printf("[Notify] 已注册 Bot 指令: /start /daily /search /help")
 	return true
 }
 
