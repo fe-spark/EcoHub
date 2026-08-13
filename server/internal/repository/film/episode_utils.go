@@ -84,17 +84,19 @@ func loadExistingEpisodeCountsByMIDs(tx *gorm.DB, mids []int64, excludeSourceID 
 	excludeSourceID = strings.TrimSpace(excludeSourceID)
 
 	var detailRows []model.MovieDetailInfo
-	if err := tx.Where("mid IN ?", mids).Find(&detailRows).Error; err == nil {
-		for _, row := range detailRows {
-			if strings.TrimSpace(row.Content) == "" {
-				continue
-			}
-			var detail model.MovieDetail
-			if err := json.Unmarshal([]byte(row.Content), &detail); err == nil {
-				counts := extractEpisodeCountsFromDetail(detail)
-				out[row.Mid] = append(out[row.Mid], counts...)
-			}
+	if err := tx.Where("mid IN ?", mids).Find(&detailRows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range detailRows {
+		if strings.TrimSpace(row.Content) == "" {
+			continue
 		}
+		var detail model.MovieDetail
+		if err := json.Unmarshal([]byte(row.Content), &detail); err != nil {
+			continue
+		}
+		counts := extractEpisodeCountsFromDetail(detail)
+		out[row.Mid] = append(out[row.Mid], counts...)
 	}
 
 	keysByMid := loadMovieMatchKeysByMidsTx(tx, mids)
@@ -114,21 +116,23 @@ func loadExistingEpisodeCountsByMIDs(tx *gorm.DB, mids []int64, excludeSourceID 
 			q = q.Where("source_id <> ?", excludeSourceID)
 		}
 		var playlistRows []model.MoviePlaylist
-		if err := q.Find(&playlistRows).Error; err == nil {
-			for _, row := range playlistRows {
-				if strings.TrimSpace(row.Content) == "" {
-					continue
-				}
-				mid := keyToMid[row.MovieKey]
-				if mid <= 0 {
-					continue
-				}
-				var links []model.MovieUrlInfo
-				if err := json.Unmarshal([]byte(row.Content), &links); err == nil {
-					if n := episodeCount(links); n > 0 {
-						out[mid] = append(out[mid], n)
-					}
-				}
+		if err := q.Find(&playlistRows).Error; err != nil {
+			return nil, err
+		}
+		for _, row := range playlistRows {
+			if strings.TrimSpace(row.Content) == "" {
+				continue
+			}
+			mid := keyToMid[row.MovieKey]
+			if mid <= 0 {
+				continue
+			}
+			var links []model.MovieUrlInfo
+			if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
+				continue
+			}
+			if n := episodeCount(links); n > 0 {
+				out[mid] = append(out[mid], n)
 			}
 		}
 	}

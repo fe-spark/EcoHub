@@ -330,7 +330,10 @@ func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 	for _, mid := range midByKey {
 		allMIDs = append(allMIDs, mid)
 	}
-	existingCountsMap, _ := loadExistingEpisodeCountsByMIDs(db.Mdb, allMIDs, sourceID)
+	existingCountsMap, err := loadExistingEpisodeCountsByMIDs(db.Mdb, allMIDs, sourceID)
+	if err != nil {
+		return nil, err
+	}
 
 	firstInsertMIDs := make([]int64, 0, len(changes))
 	for movieKey, mid := range midByKey {

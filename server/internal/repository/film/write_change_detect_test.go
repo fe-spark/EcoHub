@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"server/internal/model"
 )
@@ -55,6 +56,56 @@ func TestSameStoredMasterDetailIgnoresVolatileFields(t *testing.T) {
 	nameChanged.Name = "测试片（改名）"
 	if sameStoredMasterDetail(base, nameChanged) {
 		t.Fatal("片名变化应视为内容更新")
+	}
+}
+
+func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
+	const oldStamp int64 = 1_700_000_000
+	gdb := openContentKeyTestDB(t)
+	old := model.MovieDetail{
+		Id: 200, Name: "连载片",
+		PlayFrom: []string{"线路1"},
+		PlayList: [][]model.MovieUrlInfo{{{Episode: "01", Link: "http://x/1"}}},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "更新至01", State: "连载"},
+	}
+	row := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: oldStamp},
+	}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedDetail(t, gdb, 200, old)
+
+	// 仅备注变化：写库但不刷 stamp
+	remarksOnly := old
+	remarksOnly.Remarks = "更新至01（修正）"
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: time.Now().Unix()},
+	}}
+	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_200": remarksOnly}); err != nil {
+		t.Fatal(err)
+	}
+	if infos[0].UpdateStamp != oldStamp {
+		t.Fatalf("remarks-only should keep stamp %d, got %d", oldStamp, infos[0].UpdateStamp)
+	}
+
+	// 集数增加：与概要 NotifyMIDs 一致，刷 stamp
+	moreEps := old
+	moreEps.PlayList = [][]model.MovieUrlInfo{
+		{{Episode: "01", Link: "http://x/1"}, {Episode: "02", Link: "http://x/2"}},
+	}
+	moreEps.Remarks = "更新至02"
+	infos2 := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: time.Now().Unix()},
+	}}
+	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos2, map[string]model.MovieDetail{"vod_200": moreEps}); err != nil {
+		t.Fatal(err)
+	}
+	if infos2[0].UpdateStamp <= oldStamp {
+		t.Fatalf("episode increase should bump stamp, got %d", infos2[0].UpdateStamp)
 	}
 }
 
@@ -247,7 +298,7 @@ func TestFilterPlayStructureNotifyMIDs(t *testing.T) {
 		// mid=3 多一集 → 通知
 		3: {PlayFrom: []string{"a"}, PlayList: [][]model.MovieUrlInfo{{{Episode: "01", Link: "http://old/1"}}}},
 	}
-	got := filterPlayStructureNotifyMIDs(changed, details, old)
+	got := filterPlayStructureNotifyMIDs(changed, details, old, nil)
 	if len(got) != 2 || got[0] != 1 || got[1] != 3 {
 		t.Fatalf("want [1,3], got %v", got)
 	}

@@ -23,9 +23,16 @@ import (
 const (
 	searchCallbackPrefix = "nsr"
 	searchSessionPref    = ":Notify:SearchPage:"
+	searchAwaitPref      = ":Notify:SearchAwait:"
 	searchPageSize       = 10
 	searchMaxFetch       = 200
 	searchSessionTTL     = 48 * time.Hour
+	searchAwaitTTL       = 5 * time.Minute
+
+	// 底部常驻键盘按钮文案（与用户点击发送的纯文本完全一致）
+	btnDailyUpdate = "📅 每日更新"
+	btnSearchQuery = "🔍 搜索查询"
+	btnHelp        = "❓ 帮助"
 )
 
 // searchSession 搜索结果（条数有限，仍用 Redis 存 mid 列表）。
@@ -46,33 +53,172 @@ func handleBotMessage(token string, msg *telegramMessage) {
 		return
 	}
 	chatID := strconv.FormatInt(msg.Chat.ID, 10)
-	cmd, args := parseBotCommand(text)
-	if cmd == "" {
-		return
+	userID := int64(0)
+	if msg.From != nil {
+		userID = msg.From.ID
 	}
+	cmd, args := parseBotCommand(text)
 
+	// 白名单：指令 / 按钮 / 搜索待命态均需校验
 	if !isAllowedChat(chatID, msg.Chat.Username) {
-		log.Printf("[Notify] 忽略指令 chat=%s cmd=/%s（不在通知 Chat ID 列表）", chatID, cmd)
+		// 未授权时仅对明确指令/按钮回应，避免群聊闲聊被刷
+		if cmd == "" && !isMenuButtonText(text) {
+			return
+		}
+		label := cmd
+		if label == "" {
+			label = text
+		}
+		log.Printf("[Notify] 忽略指令 chat=%s cmd=%s（不在通知 Chat ID 列表）", chatID, label)
 		_ = replyText(token, chatID,
 			fmt.Sprintf("当前会话 Chat ID 为 <code>%s</code>，未在后台「通知设置 → 通信连接」的 Chat ID 列表中，无法使用指令。\n请把该 ID 加入配置并保存。",
 				html.EscapeString(chatID)))
 		return
 	}
 
-	switch cmd {
-	case "start", "help":
-		_ = replyText(token, chatID,
-			"<b>EcoHub Bot</b>\n"+
-				"<code>/search 关键词</code> — 搜索影片\n"+
-				"<code>/s 关键词</code> — 同上")
-	case "search", "s":
-		handleSearchCommand(token, chatID, args)
-	default:
-		_ = replyText(token, chatID,
-			"<b>可用指令</b>\n"+
-				"<code>/search 关键词</code> — 搜索影片\n"+
-				"<code>/s 关键词</code> — 同上")
+	chatType := ""
+	if msg.Chat != nil {
+		chatType = msg.Chat.Type
 	}
+
+	// 底部常驻按钮（纯文本）
+	switch text {
+	case btnDailyUpdate:
+		clearSearchAwait(chatID, userID)
+		handleDailyUpdateCommand(token, chatID, chatType)
+		return
+	case btnSearchQuery:
+		handleSearchPrompt(token, chatID, userID, chatType)
+		return
+	case btnHelp:
+		clearSearchAwait(chatID, userID)
+		_ = replyTextWithMenu(token, chatID, chatType, botHelpHTML())
+		return
+	}
+
+	if cmd != "" {
+		switch cmd {
+		case "start":
+			clearSearchAwait(chatID, userID)
+			_ = replyTextWithMenu(token, chatID, chatType, botWelcomeHTML())
+		case "help":
+			clearSearchAwait(chatID, userID)
+			_ = replyTextWithMenu(token, chatID, chatType, botHelpHTML())
+		case "search":
+			clearSearchAwait(chatID, userID)
+			handleSearchCommand(token, chatID, chatType, args)
+		case "daily", "updates":
+			clearSearchAwait(chatID, userID)
+			handleDailyUpdateCommand(token, chatID, chatType)
+		default:
+			clearSearchAwait(chatID, userID)
+			_ = replyTextWithMenu(token, chatID, chatType, botHelpHTML())
+		}
+		return
+	}
+
+	// 点过「搜索查询」后的下一条纯文本视为关键词（仅私聊待命）
+	if consumeSearchAwait(chatID, userID) {
+		handleSearchCommand(token, chatID, chatType, text)
+	}
+}
+
+func isMenuButtonText(text string) bool {
+	switch strings.TrimSpace(text) {
+	case btnDailyUpdate, btnSearchQuery, btnHelp:
+		return true
+	default:
+		return false
+	}
+}
+
+func mainReplyKeyboard() *ReplyKeyboardMarkup {
+	return &ReplyKeyboardMarkup{
+		Keyboard: [][]KeyboardButton{
+			{{Text: btnDailyUpdate}, {Text: btnSearchQuery}},
+			{{Text: btnHelp}},
+		},
+		ResizeKeyboard: true,
+		IsPersistent:   true,
+	}
+}
+
+func botWelcomeHTML() string {
+	return "<b>EcoHub Bot</b>\n" +
+		"📅 每日更新\n" +
+		"🔍 搜索查询\n" +
+		"❓ 帮助\n\n" +
+		"<code>/daily</code>\n" +
+		"<code>/search 关键词</code>"
+}
+
+func botHelpHTML() string {
+	return "<b>使用说明</b>\n" +
+		"📅 每日更新  <code>/daily</code>\n" +
+		"🔍 搜索查询  <code>/search 关键词</code>\n" +
+		"❓ 帮助"
+}
+
+func isPrivateChat(chatType string) bool {
+	return strings.EqualFold(strings.TrimSpace(chatType), "private")
+}
+
+// menuKeyboardForChat 仅私聊下发 ReplyKeyboard；群/超级群隐私模式收不到非 / 消息。
+func menuKeyboardForChat(chatType string) *ReplyKeyboardMarkup {
+	if isPrivateChat(chatType) {
+		return mainReplyKeyboard()
+	}
+	return nil
+}
+
+func replyTextWithMenu(token, chatID, chatType, text string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if kb := menuKeyboardForChat(chatType); kb != nil {
+		return client.sendMessageWithReplyKeyboard(ctx, token, chatID, text, kb)
+	}
+	return client.sendMessage(ctx, token, chatID, text)
+}
+
+func handleSearchPrompt(token, chatID string, userID int64, chatType string) {
+	if !isPrivateChat(chatType) || db.Rdb == nil {
+		_ = replyTextWithMenu(token, chatID, chatType, "<b>🔍 搜索查询</b>\n<code>/search 关键词</code>")
+		return
+	}
+	if err := setSearchAwait(chatID, userID); err != nil {
+		log.Printf("[Notify] 设置搜索待命失败: %v", err)
+		_ = replyTextWithMenu(token, chatID, chatType, "<b>🔍 搜索查询</b>\n<code>/search 关键词</code>")
+		return
+	}
+	_ = replyTextWithMenu(token, chatID, chatType, "<b>🔍 搜索查询</b>\n请发送关键词")
+}
+
+func searchAwaitRedisKey(chatID string, userID int64) string {
+	return config.RedisKeyPrefix + searchAwaitPref + chatID + ":" + strconv.FormatInt(userID, 10)
+}
+
+func setSearchAwait(chatID string, userID int64) error {
+	if db.Rdb == nil || strings.TrimSpace(chatID) == "" {
+		return fmt.Errorf("redis 未就绪")
+	}
+	return db.Rdb.Set(db.Cxt, searchAwaitRedisKey(chatID, userID), "1", searchAwaitTTL).Err()
+}
+
+func clearSearchAwait(chatID string, userID int64) {
+	if db.Rdb == nil || strings.TrimSpace(chatID) == "" {
+		return
+	}
+	_ = db.Rdb.Del(db.Cxt, searchAwaitRedisKey(chatID, userID)).Err()
+}
+
+// consumeSearchAwait 若存在待命则删除并返回 true。
+func consumeSearchAwait(chatID string, userID int64) bool {
+	if db.Rdb == nil || strings.TrimSpace(chatID) == "" {
+		return false
+	}
+	key := searchAwaitRedisKey(chatID, userID)
+	n, err := db.Rdb.Del(db.Cxt, key).Result()
+	return err == nil && n > 0
 }
 
 // isAllowedChat 校验 chat 是否在通知白名单。数值 chatID 与 @username 任一匹配即通过：
@@ -133,11 +279,10 @@ func replyText(token, chatID, text string) error {
 	return client.sendMessage(ctx, token, chatID, text)
 }
 
-func handleSearchCommand(token, chatID, keyword string) {
+func handleSearchCommand(token, chatID, chatType, keyword string) {
 	keyword = strings.TrimSpace(keyword)
 	if keyword == "" {
-		_ = replyText(token, chatID,
-			"<b>🔍 搜索影片</b>\n用法：<code>/search 关键词</code>\n例如：<code>/search 流浪地球</code>")
+		_ = replyTextWithMenu(token, chatID, chatType, "<b>🔍 搜索查询</b>\n<code>/search 关键词</code>")
 		return
 	}
 	if utf8.RuneCountInString(keyword) > 64 {

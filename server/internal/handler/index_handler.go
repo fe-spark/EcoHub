@@ -107,6 +107,15 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
+// DailyUpdates 首页「每日更新」独立接口：仅从近 24h 变更池中随机 12 条。
+func (h *IndexHandler) DailyUpdates(c *gin.Context) {
+	data := service.IndexSvc.HomeDailyUpdates(0)
+	if data == nil {
+		data = make([]model.MovieBasicInfo, 0)
+	}
+	dto.Success(data, "每日更新获取成功", c)
+}
+
 // CategoriesInfo 分类信息获取
 func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 	data := service.IndexSvc.GetNavCategory()
