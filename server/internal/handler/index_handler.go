@@ -109,11 +109,23 @@ func (h *IndexHandler) Index(c *gin.Context) {
 
 // DailyUpdates 首页「每日更新」独立接口：从近 24h 变更池随机抽取，exclude 排除当前批次。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	data := service.IndexSvc.HomeDailyUpdates(0, parseDailyUpdateExclude(c.Query("exclude")))
+	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
 	if data == nil {
 		data = make([]model.MovieBasicInfo, 0)
 	}
 	dto.Success(data, "每日更新获取成功", c)
+}
+
+func parseDailyUpdateLimit(raw string) int {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func parseDailyUpdateExclude(raw string) []int64 {

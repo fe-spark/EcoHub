@@ -58,9 +58,9 @@ export default async function RootLayout({
 }>) {
   const siteConfig = await getSiteConfig();
 
-  // SSR 直接输出正确主题：手动选择（cookie）优先，未选择时用系统偏好（客户端提示头）
+  // SSR 直接输出正确主题：手动选择（cookie）优先，未选择时默认暗色
   const savedMode = (await cookies()).get(THEME_COOKIE_KEY)?.value;
-  const initialMode = isThemeMode(savedMode) ? savedMode : "system";
+  const initialMode = isThemeMode(savedMode) ? savedMode : "dark";
   let initialEffective: "dark" | "light";
   if (initialMode !== "system") {
     initialEffective = initialMode;

@@ -1,3 +1,35 @@
+# v2.0.2
+
+> **正式版**：首页每日更新与 Telegram `/daily` 成体系落地。正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.2`
+- `ghcr.io/fe-spark/ecohub:latest`
+
+## 相对 v2.0.1
+
+- **首页每日更新**：独立接口 `/api/index/dailyUpdates`，从近 24 小时采集变更池抽取；支持 `limit`、`exclude` 换批
+- **Telegram `/daily`**：近 24 小时更新先分类入口再翻页；斜杠菜单仅保留 `/daily`
+- **落库与推送解耦**：关闭采集摘要通知时仍写入 `notify_change_mid`，供首页与 Bot 每日更新使用
+- **更新判定**：`update_stamp` 与更新列表仅在新片或分集数量严格增加时刷新；附属站查集数失败则中止，避免误记更新
+
+## 部署（v2.0.2）
+
+```bash
+# 推荐：安装脚本 + 发布版 Compose（默认 :latest）
+curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
+cd ~/ecohub && docker compose pull && docker compose up -d
+
+# 或固定版本：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.2
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。  
+全部署方式见 [README-Deploy.md](./README-Deploy.md)。
+
+---
+
 # v2.0.2-beta.2
 
 > **预发布（prerelease）**：首页每日更新 15 秒换批、TG `/daily` 文案与指令菜单收敛，**不会**覆盖 `:latest`。
