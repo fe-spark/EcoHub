@@ -381,6 +381,10 @@ export default function DailyUpdates() {
             >
               <Poster src={lead.picture} alt={leadName} className={styles.posterImg} />
               {lead.remarks ? <span className={styles.leadRemark}>{lead.remarks}</span> : null}
+              <span className={styles.cardShade} />
+              <span className={styles.cardMeta}>
+                <span className={styles.cardName}>{leadName}</span>
+              </span>
             </button>
 
             <div className={styles.leadSide}>
@@ -395,10 +399,10 @@ export default function DailyUpdates() {
                     ))}
                   </div>
                 ) : null}
-                <p className={styles.blurb}>
-                  {lead.blurb || "近 24 小时新入库内容，点击即可观看最新进度。"}
-                </p>
               </div>
+              <p className={styles.blurb}>
+                {lead.blurb || "近 24 小时新入库内容，点击即可观看最新进度。"}
+              </p>
 
               {rail.length > 0 ? (
                 <div className={styles.rail} aria-label="本批其他更新">

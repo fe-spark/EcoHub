@@ -196,7 +196,7 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
             {active.blurb ? (
               <p className={styles.blurb}>{active.blurb}</p>
             ) : (
-              <p className={styles.blurb}>
+              <p className={`${styles.blurb} ${styles.blurbFallback}`}>
                 震撼视觉体验，呈现高帧率全高清画面与纯正环绕声效，带您体验沉浸式观影之旅。
               </p>
             )}
@@ -296,6 +296,9 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
                       className={styles.cardImg}
                       style={{ backgroundImage: `url(${getPoster(item)})` }}
                     />
+                    {item.cName ? (
+                      <span className={styles.cardChip}>{item.cName}</span>
+                    ) : null}
                   </button>
                 </SwiperSlide>
               ))}
