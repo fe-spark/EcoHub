@@ -38,7 +38,8 @@ type ChangeBatch struct {
 	id string
 }
 
-// StartChangeBatch 开启新批次。DB 不可用或通知关闭等异常时返回 nil，调用方按「无批次」降级。
+// StartChangeBatch 开启新批次。DB 不可用时返回 nil，调用方按「无批次」降级。
+// 落库与「是否推送采集摘要」解耦：首页/TG 每日更新依赖 mid 表，关通知时仍记录变更。
 func StartChangeBatch() *ChangeBatch {
 	if db.Mdb == nil {
 		return nil
@@ -46,10 +47,6 @@ func StartChangeBatch() *ChangeBatch {
 	changeBatchMu.Lock()
 	defer changeBatchMu.Unlock()
 	purgeExpiredChangeBatches()
-	// 通知关闭时短路：不创建批次，避免采集热路径向 MySQL 写入无人消费的变更 mid
-	if !IsEventEnabled(model.NotifyEventCollectBatchSummary) {
-		return nil
-	}
 	id := newChangeBatchID()
 	now := time.Now()
 	rec := model.NotifyChangeBatch{
@@ -99,7 +96,7 @@ func (b *ChangeBatch) AppendMids(sourceName string, mids ...int64) {
 			continue
 		}
 		seen[mid] = struct{}{}
-		rows = append(rows, model.NotifyChangeMid{BatchID: b.id, Mid: mid, SourceName: sourceName})
+		rows = append(rows, model.NotifyChangeMid{BatchID: b.id, Mid: mid, SourceName: sourceName, CreatedAt: time.Now()})
 	}
 	if len(rows) == 0 {
 		return
@@ -256,8 +253,7 @@ func GetChangeBatchCategoryCounts(batchID string) []CategoryCountItem {
 	if batchID == "" || db.Mdb == nil {
 		return nil
 	}
-	nav := navTopCategories()
-	navIDs := navTopCategoryIDs(nav)
+	navIDs := navTopCategoryIDs(navTopCategories())
 
 	// 按 film_index.pid（写入时即为顶级大类 ID）聚合
 	type pidRow struct {
@@ -293,26 +289,7 @@ func GetChangeBatchCategoryCounts(batchID string) []CategoryCountItem {
 		}
 		otherCount += r.Count
 	}
-
-	res := make([]CategoryCountItem, 0, len(nav)+1)
-	// 严格按首页顶栏顺序输出
-	for _, n := range nav {
-		if cnt := countByPid[n.Id]; cnt > 0 {
-			res = append(res, CategoryCountItem{
-				CategoryID:   n.Id,
-				CategoryName: n.Name,
-				Count:        cnt,
-			})
-		}
-	}
-	if otherCount > 0 {
-		res = append(res, CategoryCountItem{
-			CategoryID:   0,
-			CategoryName: "其他",
-			Count:        otherCount,
-		})
-	}
-	return res
+	return categoryCountsFromPidMap(countByPid, otherCount)
 }
 
 // ResolveCategoryByIndex 按统计列表下标解析分类名；越界返回空（视为全部）。
@@ -415,6 +392,179 @@ func SaveChangeBatchMeta(batchID, siteName, overview string, pageSize, total int
 		"page_size": pageSize,
 		"total":     total,
 	}).Error
+}
+
+// notifyCST 通知侧自然日边界（与消息时间展示一致）。
+func notifyCST() *time.Location {
+	return time.FixedZone("CST", 8*3600)
+}
+
+// Rolling24hWindow 滚动近 24 小时：now-24h（含）到 now（含）。
+func Rolling24hWindow(now time.Time) (from, to time.Time) {
+	return now.Add(-24 * time.Hour), now
+}
+
+// LoadChangeMidsBetween 汇总时间窗内各采集批次的变更 mid（与采集概要进列表逻辑同源）。
+// 数据来自 notify_change_mid：采集写库时经 filterPlayStructureNotifyMIDs / 附属站最后一集判定后写入。
+// 时间窗按 mid 写入时间（c.created_at）筛选；旧行无写入时间时回落批次开批时间。
+// 同 mid 跨批次去重，源名合并；按 film update_stamp 新→旧排序。
+// limit>0 时只取前 N 条（首页卡片）；limit<=0 不截断（TG 每日更新全窗）。
+func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, error) {
+	if db.Mdb == nil {
+		return nil, fmt.Errorf("数据库未就绪")
+	}
+	if to.Before(from) {
+		return nil, nil
+	}
+	type row struct {
+		Mid        int64
+		SourceName string
+	}
+	var rows []row
+	// 按 mid 聚合；源名用 GROUP_CONCAT 合并各批次
+	// GREATEST(写入时间, 开批时间)：长采集中途写入的 mid 仍落在窗内；旧数据无 created_at 时等同开批时间
+	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
+		Select("c.mid AS mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(c.source_name), '') ORDER BY c.source_name SEPARATOR ', ') AS source_name").
+		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
+		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
+		Where("GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) >= ? AND GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) <= ?", from, to).
+		Group("c.mid").
+		Order("MAX(f.update_stamp) DESC, c.mid DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]ChangeMidItem, 0, len(rows))
+	for _, r := range rows {
+		if r.Mid <= 0 {
+			continue
+		}
+		out = append(out, ChangeMidItem{Mid: r.Mid, SourceName: strings.TrimSpace(r.SourceName)})
+	}
+	return out, nil
+}
+
+// categoryCountsFromPidMap 导航大类顺序聚合 pid→count（与 GetChangeBatchCategoryCounts 一致）。
+func categoryCountsFromPidMap(countByPid map[int64]int, otherCount int) []CategoryCountItem {
+	nav := navTopCategories()
+	res := make([]CategoryCountItem, 0, len(nav)+1)
+	for _, n := range nav {
+		if cnt := countByPid[n.Id]; cnt > 0 {
+			res = append(res, CategoryCountItem{
+				CategoryID:   n.Id,
+				CategoryName: n.Name,
+				Count:        cnt,
+			})
+		}
+	}
+	if otherCount > 0 {
+		res = append(res, CategoryCountItem{
+			CategoryID:   0,
+			CategoryName: "其他",
+			Count:        otherCount,
+		})
+	}
+	return res
+}
+
+// loadFilmPids 批量 mid → 顶级分类 pid。查询失败返回 error，避免把残缺结果打进「其他」。
+func loadFilmPids(mids []int64) (map[int64]int64, error) {
+	out := make(map[int64]int64, len(mids))
+	if len(mids) == 0 || db.Mdb == nil {
+		return out, nil
+	}
+	uniq := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	const chunk = 200
+	for start := 0; start < len(uniq); start += chunk {
+		end := start + chunk
+		if end > len(uniq) {
+			end = len(uniq)
+		}
+		var rows []struct {
+			Mid int64
+			Pid int64
+		}
+		if err := db.Mdb.Table(model.TableFilmIndex).
+			Select("mid, pid").
+			Where("mid IN ?", uniq[start:end]).
+			Scan(&rows).Error; err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			out[r.Mid] = r.Pid
+		}
+	}
+	return out, nil
+}
+
+// BuildCategoryPlanForMids 按首页导航大类划分 mid（顺序/「其他」规则与采集概要分类一致）。
+// 返回有片的分类列表，以及与之对齐的各分类 mid 子集（仍保持 all 中的相对顺序）。
+func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, catMids [][]int64, err error) {
+	if len(all) == 0 {
+		return nil, nil, nil
+	}
+	mids := make([]int64, 0, len(all))
+	for _, it := range all {
+		mids = append(mids, it.Mid)
+	}
+	pidByMid, err := loadFilmPids(mids)
+	if err != nil {
+		return nil, nil, err
+	}
+	nav := navTopCategories()
+	navIDs := navTopCategoryIDs(nav)
+	navSet := make(map[int64]struct{}, len(navIDs))
+	for _, id := range navIDs {
+		navSet[id] = struct{}{}
+	}
+
+	// 先按导航大类分桶，保持 all 的排序
+	buckets := make(map[int64][]ChangeMidItem, len(nav)+1)
+	var other []ChangeMidItem
+	for _, it := range all {
+		pid := pidByMid[it.Mid]
+		if pid > 0 {
+			if _, ok := navSet[pid]; ok {
+				buckets[pid] = append(buckets[pid], it)
+				continue
+			}
+		}
+		other = append(other, it)
+	}
+
+	countByPid := make(map[int64]int, len(buckets))
+	for pid, list := range buckets {
+		countByPid[pid] = len(list)
+	}
+	cats = categoryCountsFromPidMap(countByPid, len(other))
+	catMids = make([][]int64, len(cats))
+	for i, c := range cats {
+		var items []ChangeMidItem
+		if c.CategoryName == "其他" {
+			items = other
+		} else {
+			items = buckets[c.CategoryID]
+		}
+		ids := make([]int64, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.Mid)
+		}
+		catMids[i] = ids
+	}
+	return cats, catMids, nil
 }
 
 // LoadChangeBatch 加载批次元数据。

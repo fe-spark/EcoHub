@@ -4,14 +4,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+)
+
+const (
+	homeDailyUpdateLimit    = 12
+	homeDailyUpdateCacheTTL = 2 * time.Minute
 )
 
 type IndexService struct{}
@@ -46,53 +54,154 @@ func (i *IndexService) IndexPage() map[string]any {
 	ruleVersion := repository.GetRuleVersion()
 	// 1. 尝试从 Redis 获取缓存
 	cacheKey := fmt.Sprintf("%s:s%s:r%s", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
+	var Info map[string]any
 	if version != "" {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			res := make(map[string]any)
 			if json.Unmarshal([]byte(data), &res) == nil {
-				return res
+				Info = res
 			}
 		}
 	}
 
-	Info := make(map[string]any)
-	tree := repository.GetActiveCategoryTree()
-	Info["category"] = tree
-	list := make([]map[string]any, 0)
-	for _, c := range tree.Children {
-		var movies []model.MovieBasicInfo
-		var hotMovies []model.MovieBasicInfo
-		if c.Children != nil {
-			movies = filmrepo.GetSnapshotMovieListByCategory(version, "pid", c.Id, 14, 0)
-			hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "pid", c.Id, 14, 0)
-		} else {
-			movies = filmrepo.GetSnapshotMovieListByCategory(version, "cid", c.Id, 14, 0)
-			hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "cid", c.Id, 14, 0)
+	if Info == nil {
+		Info = make(map[string]any)
+		tree := repository.GetActiveCategoryTree()
+		Info["category"] = tree
+		list := make([]map[string]any, 0)
+		for _, c := range tree.Children {
+			var movies []model.MovieBasicInfo
+			var hotMovies []model.MovieBasicInfo
+			if c.Children != nil {
+				movies = filmrepo.GetSnapshotMovieListByCategory(version, "pid", c.Id, 14, 0)
+				hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "pid", c.Id, 14, 0)
+			} else {
+				movies = filmrepo.GetSnapshotMovieListByCategory(version, "cid", c.Id, 14, 0)
+				hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "cid", c.Id, 14, 0)
+			}
+			if movies == nil {
+				movies = make([]model.MovieBasicInfo, 0)
+			}
+			if hotMovies == nil {
+				hotMovies = make([]model.MovieBasicInfo, 0)
+			}
+			item := map[string]any{"nav": c, "movies": movies, "hot": hotMovies}
+			list = append(list, item)
 		}
-		if movies == nil {
-			movies = make([]model.MovieBasicInfo, 0)
+		Info["content"] = list
+		banners := repository.GetBanners()
+		if banners == nil {
+			banners = make(model.Banners, 0)
 		}
-		if hotMovies == nil {
-			hotMovies = make([]model.MovieBasicInfo, 0)
-		}
-		item := map[string]any{"nav": c, "movies": movies, "hot": hotMovies}
-		list = append(list, item)
-	}
-	Info["content"] = list
-	banners := repository.GetBanners()
-	if banners == nil {
-		banners = make(model.Banners, 0)
-	}
-	Info["banners"] = banners
+		Info["banners"] = banners
 
-	// 2. 写入 Redis 缓存 (设置长 TTL，但依靠 AfterSave 钩子主动刷新)
-	if version != "" {
-		if data, err := json.Marshal(Info); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24)
+		// 2. 写入 Redis 缓存 (设置长 TTL，但依靠 AfterSave 钩子主动刷新)
+		if version != "" {
+			if data, err := json.Marshal(Info); err == nil {
+				db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24)
+			}
 		}
 	}
 
 	return Info
+}
+
+// HomeDailyUpdates 只从「近 24h 采集变更 mid」池中随机取 limit 条（不是全站随机）。
+// exclude 为当前批次 id，下一批从剩余池抽取；剩余为空时才回到全池。
+func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
+	if limit <= 0 {
+		limit = homeDailyUpdateLimit
+	}
+	return pickRandomMovieInfos(i.homeDailyUpdatePool(), limit, exclude)
+}
+
+func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
+	empty := make([]model.MovieBasicInfo, 0)
+	cacheKey := config.IndexDailyUpdatesCacheKey
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var list []model.MovieBasicInfo
+			if json.Unmarshal([]byte(data), &list) == nil {
+				if list == nil {
+					return empty
+				}
+				return list
+			}
+		}
+	}
+
+	from, to := notify.Rolling24hWindow(time.Now())
+	items, err := notify.LoadChangeMidsBetween(from, to, 0)
+	if err != nil {
+		log.Printf("[IndexService] homeDailyUpdates load mids: %v", err)
+		return empty
+	}
+	if len(items) == 0 {
+		storeHomeDailyUpdatesCache(cacheKey, empty)
+		return empty
+	}
+
+	version := filmrepo.GetActiveReadModelVersion()
+	readModel := filmrepo.GetActiveFilmReadModel()
+	if version == "" || readModel == nil || readModel.Version != version {
+		return empty
+	}
+	mids := make([]int64, 0, len(items))
+	for _, it := range items {
+		mids = append(mids, it.Mid)
+	}
+	snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+	if list == nil {
+		list = empty
+	}
+	storeHomeDailyUpdatesCache(cacheKey, list)
+	return list
+}
+
+func pickRandomMovieInfos(src []model.MovieBasicInfo, n int, exclude []int64) []model.MovieBasicInfo {
+	if n <= 0 || len(src) == 0 {
+		return []model.MovieBasicInfo{}
+	}
+	skip := make(map[int64]struct{}, len(exclude))
+	for _, id := range exclude {
+		if id > 0 {
+			skip[id] = struct{}{}
+		}
+	}
+	pool := src
+	if len(skip) > 0 {
+		left := make([]model.MovieBasicInfo, 0, len(src))
+		for _, item := range src {
+			if _, hit := skip[item.Id]; hit {
+				continue
+			}
+			left = append(left, item)
+		}
+		if len(left) > 0 {
+			pool = left
+		}
+	}
+	if len(pool) <= n {
+		out := make([]model.MovieBasicInfo, len(pool))
+		copy(out, pool)
+		return out
+	}
+	perm := rand.Perm(len(pool))
+	out := make([]model.MovieBasicInfo, n)
+	for i := 0; i < n; i++ {
+		out[i] = pool[perm[i]]
+	}
+	return out
+}
+
+func storeHomeDailyUpdatesCache(cacheKey string, list []model.MovieBasicInfo) {
+	if db.Rdb == nil {
+		return
+	}
+	if raw, err := json.Marshal(list); err == nil {
+		_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), homeDailyUpdateCacheTTL).Err()
+	}
 }
 
 // GetFilmDetail 影片详情信息页面处理

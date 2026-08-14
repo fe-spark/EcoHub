@@ -239,15 +239,16 @@ func registerBotCommands(ctx context.Context, token string) bool {
 	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	err := client.setMyCommands(cctx, token, []botCommand{
-		{Command: "search", Description: "搜索影片 /search 关键词"},
-		{Command: "s", Description: "搜索简写 /s 关键词"},
-		{Command: "start", Description: "开始使用"},
+		{Command: "start", Description: "开始"},
+		{Command: "daily", Description: "每日更新"},
+		{Command: "search", Description: "搜索"},
+		{Command: "help", Description: "帮助"},
 	})
 	if err != nil {
 		syslog.Warnf("[Notify] setMyCommands 失败（将重试）: %v", err)
 		return false
 	}
-	log.Printf("[Notify] 已注册 Bot 指令: /search /s /start")
+	log.Printf("[Notify] 已注册 Bot 指令: /start /daily /search /help")
 	return true
 }
 
@@ -273,6 +274,8 @@ func dispatchCallback(token string, cb *telegramCallback) {
 	switch {
 	case strings.HasPrefix(data, callbackPrefix+":"):
 		handleFilmPageCallback(token, cb)
+	case strings.HasPrefix(data, dailyCallbackPrefix+":"):
+		handleDailyPageCallback(token, cb)
 	case strings.HasPrefix(data, searchCallbackPrefix+":"):
 		handleSearchPageCallback(token, cb)
 	default:

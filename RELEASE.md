@@ -1,3 +1,59 @@
+# v2.0.2-beta.2
+
+> **预发布（prerelease）**：首页每日更新 15 秒换批、TG `/daily` 文案与指令菜单收敛，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.2-beta.2`
+
+## 相对 v2.0.2-beta.1
+
+- **首页换批**：每日更新每 15 秒刷新；请求携带当前批 `exclude` id，下一批从剩余池抽取，抽完再回绕全池
+- **Telegram 指令**：斜杠菜单去掉重复的 `/updates`，只保留 `/daily`
+- **每日更新正文**：分类入口消息不再列出类别和数量，仅保留标题与 24 小时时间窗
+
+## 部署（v2.0.2-beta.2）
+
+```bash
+# compose 镜像 tag 示例（预发布版本不会自动覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.2-beta.2
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。  
+全部署方式见 [README-Deploy.md](./README-Deploy.md)。
+
+---
+
+# v2.0.2-beta.1
+
+> **预发布（prerelease）**：首页「每日更新」、Telegram `/daily` 与采集变更落库解耦，**不会**覆盖 `:latest`。
+
+镜像：
+
+- `ghcr.io/fe-spark/ecohub:v2.0.2-beta.1`
+
+## 相对 v2.0.1
+
+- **首页每日更新**：独立接口 `/api/index/dailyUpdates`，从近 24 小时采集变更池随机展示 12 条（读模型可见性过滤）
+- **Telegram `/daily` / `/updates`**：按 mid 写入时间汇总近 24 小时更新，先分类入口再翻页列表；私聊常驻键盘（每日更新 / 搜索 / 帮助）
+- **落库与推送解耦**：关闭采集摘要通知时仍写入 `notify_change_mid`，供首页与 Bot 每日更新使用
+- **更新判定**：`update_stamp` 与更新列表仅在新片或分集数量严格增加时刷新；附属站查集数失败则中止，避免误记更新
+- **部署说明**：补充 v1 升 v2 后建议重置站点数据并全量采集
+
+## 部署（v2.0.2-beta.1）
+
+```bash
+# compose 镜像 tag 示例（预发布版本不会自动覆盖 :latest）：
+#   image: ghcr.io/fe-spark/ecohub:v2.0.2-beta.1
+docker compose pull && docker compose up -d
+```
+
+默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。  
+全部署方式见 [README-Deploy.md](./README-Deploy.md)。
+
+---
+
 # v2.0.1
 
 > **补丁版**：安全、稳定性与性能修复；正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。

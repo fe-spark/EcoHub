@@ -3,6 +3,7 @@ package film
 import (
 	"fmt"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -107,6 +108,64 @@ func BuildMovieBasicInfos(infos ...model.FilmIndex) []model.MovieBasicInfo {
 		})
 	}
 	return list
+}
+
+// BuildMovieBasicInfosByMidsOrdered 按 mid 列表顺序批量查 FilmIndex 并转 BasicInfo（缺失 mid 跳过）。
+func BuildMovieBasicInfosByMidsOrdered(mids []int64) []model.MovieBasicInfo {
+	if len(mids) == 0 {
+		return []model.MovieBasicInfo{}
+	}
+	uniq := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	if len(uniq) == 0 {
+		return []model.MovieBasicInfo{}
+	}
+
+	byMid := make(map[int64]model.FilmIndex, len(uniq))
+	const chunk = 200
+	for start := 0; start < len(uniq); start += chunk {
+		end := start + chunk
+		if end > len(uniq) {
+			end = len(uniq)
+		}
+		var rows []model.FilmIndex
+		if err := db.Mdb.Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
+			continue
+		}
+		for _, row := range rows {
+			if row.Mid > 0 {
+				byMid[row.Mid] = row
+			}
+		}
+	}
+
+	out := make([]model.FilmIndex, 0, len(mids))
+	emitted := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := emitted[mid]; ok {
+			continue
+		}
+		info, ok := byMid[mid]
+		if !ok {
+			continue
+		}
+		emitted[mid] = struct{}{}
+		out = append(out, info)
+	}
+	return BuildMovieBasicInfos(out...)
 }
 
 func BuildMovieBasicInfosFromSnapshots(infos ...model.FilmListSnapshot) []model.MovieBasicInfo {

@@ -119,8 +119,8 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 #### 3.4.2 批次与明细
 
 - 一次采集 = 一个变更批次（`ChangeBatch`，MySQL 持久化，48h TTL，全局去重）。
-- 变更 mid 写入 `notify_change_mid`（`OnConflict DoNothing` 去重）；批次创建时清理过期批次。
-- **通知关闭时短路**：`collect_batch_summary` 事件关闭或总开关关闭时不创建批次、不写变更 mid（避免采集热路径向 MySQL 写入无人消费的数据）；此时摘要的"变更数"回退为分源合计。
+- 变更 mid 写入 `notify_change_mid`（`OnConflict DoNothing` 去重，记录 `created_at` 写入时间）；批次创建时清理过期批次。
+- **落库与推送解耦**：总开关 / `collect_batch_summary` 关闭时仍创建批次并写变更 mid（首页「每日更新」与 TG `/daily` 依赖该表）；仅摘要推送短路，此时摘要的「变更数」回退为分源合计。
 - 批次去重条数作为摘要头部「变更 N 部」与列表总条数。
 
 #### 3.4.3 按钮与翻页
@@ -130,11 +130,14 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 - 列表按影片 `update_stamp` 新→旧排序，每页 `maxFilmsInMessage` 条（1–20）；展示序号、片名（可点击跳站内播放页，需后台配置公网网站地址，否则提示不可跳转）、`#mid`。
 - 列表/搜索会话过期（批次 48h / 搜索 48h）回调提示"已过期，请重新采集/搜索"。
 
-#### 3.4.4 /search 指令
+#### 3.4.4 Bot 指令与键盘
 
-- Bot 注册命令 `/search`、`/s`（简写）、`/start`。
+- Bot 注册命令 `/start`、`/daily`、`/search`、`/help`。
+- `/daily`：汇总近 24 小时各批次 `notify_change_mid`（按 mid **写入时间**切窗，旧行回落批次开批时间），先出分类入口再进列表（`🔙 返回分类`；回调前缀 `ndu:`）。
+- 私聊下发常驻 ReplyKeyboard（📅 每日更新 / 🔍 搜索查询 / ❓ 帮助）；群/超级群不发键盘（默认隐私模式收不到非 `/` 消息），请用斜杠命令。
 - 仅通知配置中的 Chat ID 白名单可用；非白名单会话回复提示并引导加入配置。
-- 关键词最多 64 字；按搜索快照检索（最多取 200 条），结果按片名链接展示、分页浏览（回调前缀 `nsr:`）。
+- `/search` 关键词最多 64 字；私聊点「搜索查询」后下一条纯文本视为关键词（Redis 待命失败则回退 `/search 关键词` 提示）。
+- 搜索按快照检索（最多取 200 条），结果按片名链接展示、分页浏览（回调前缀 `nsr:`）。
 
 ### 3.5 限流与防刷
 
@@ -186,13 +189,14 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 │                                                          │
 │ 更新列表：StartChangeBatch → AppendMids(MySQL 去重)       │
 │          → 摘要按钮 → film_page 翻页回调                   │
+│ 每日更新：LoadChangeMidsBetween → /daily + 首页卡片        │
 │ 轮询：EnsureBotPoller → getUpdates long-poll             │
-│      → dispatchCallback（nfp 翻页 / nsr 搜索）             │
-│      → handleBotMessage（/search）                        │
+│      → dispatchCallback（nfp / ndu / nsr）                 │
+│      → handleBotMessage（/daily /search /help）            │
 └──────────────────────────────────────────────────────────┘
 ```
 
-数据流：采集源（spider）→ 变更判定（film 包）→ `noteCollectedMIDs` 累计 → 批次落库 → 批次摘要异步发送 → 用户按钮翻页 / `/search`。
+数据流：采集源（spider）→ 变更判定（film 包）→ `noteCollectedMIDs` 累计 → 批次落库 → 批次摘要异步发送 → 用户按钮翻页 / `/daily` / `/search`。首页「每日更新」读同一张 mid 表，经读模型可见性过滤后展示。
 
 ## 6. 接口定义
 
@@ -208,7 +212,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 |---|---|---|
 | `notify_config` | `payload`(JSON) | 单行配置；`NotifyConfig` 序列化（含 `events` 七开关） |
 | `notify_change_batch` | `id`(16位hex) / `site_name` / `page_size` / `total` / `overview` / `created_at` / `expire_at` | 变更批次元数据，48h 过期 |
-| `notify_change_mid` | `batch_id` + `mid` 复合主键 | 批次内变更影片 mid（全局去重） |
+| `notify_change_mid` | `batch_id` + `mid` 复合主键 / `created_at` | 批次内变更影片 mid（全局去重）；`created_at` 供 24h 窗筛选 |
 
 配置 JSON 结构：
 
