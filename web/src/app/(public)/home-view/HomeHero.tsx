@@ -234,8 +234,8 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
               className={styles.deckSwiper}
               effect="cards"
               cardsEffect={{
-                perSlideOffset: 12,
-                perSlideRotate: 2,
+                perSlideOffset: 16,
+                perSlideRotate: 3,
                 rotate: true,
                 slideShadows: true,
               }}

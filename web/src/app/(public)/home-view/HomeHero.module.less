@@ -92,9 +92,11 @@
 .deck {
   position: relative;
   z-index: 2;
-  flex: 0 0 var(--deck-w);
-  width: var(--deck-w);
+  flex: 0 0 calc(var(--deck-w) + 40px);
+  width: calc(var(--deck-w) + 40px);
   margin-left: auto;
+  padding-right: 40px;
+  overflow: visible;
 }
 
 .deckSwiper {
@@ -446,6 +448,9 @@
   .deck {
     order: 1;
     flex: 0 0 auto;
+    width: calc(var(--deck-w) + 32px);
+    padding-right: 16px;
+    padding-left: 16px;
     margin-bottom: 8px;
   }
 

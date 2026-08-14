@@ -20,7 +20,7 @@ export const THEME_INIT_SCRIPT = `(function () {
   try {
     var mode = localStorage.getItem(${JSON.stringify(THEME_STORAGE_KEY)});
     if (mode !== "dark" && mode !== "light" && mode !== "system") {
-      mode = "system";
+      mode = "dark";
     }
     var effective = mode === "system"
       ? (window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark")

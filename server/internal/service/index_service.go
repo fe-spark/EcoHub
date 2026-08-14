@@ -18,7 +18,8 @@ import (
 )
 
 const (
-	homeDailyUpdateLimit    = 12
+	homeDailyUpdateLimit    = 6
+	homeDailyUpdateLimitMax = 12
 	homeDailyUpdateCacheTTL = 2 * time.Minute
 )
 
@@ -111,6 +112,9 @@ func (i *IndexService) IndexPage() map[string]any {
 func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
 	if limit <= 0 {
 		limit = homeDailyUpdateLimit
+	}
+	if limit > homeDailyUpdateLimitMax {
+		limit = homeDailyUpdateLimitMax
 	}
 	return pickRandomMovieInfos(i.homeDailyUpdatePool(), limit, exclude)
 }

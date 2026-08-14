@@ -34,9 +34,9 @@ function resolveEffective(mode: ThemeMode): "dark" | "light" {
 }
 
 function getSavedMode(): ThemeMode {
-  if (typeof window === "undefined") return "system";
+  if (typeof window === "undefined") return "dark";
   const saved = localStorage.getItem(THEME_STORAGE_KEY);
-  return isThemeMode(saved) ? saved : "system";
+  return isThemeMode(saved) ? saved : "dark";
 }
 
 export default function GlobalThemeProvider({
