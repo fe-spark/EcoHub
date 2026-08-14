@@ -9,7 +9,7 @@ import (
 // catIdxAll 表示不按分类筛选（全部）。
 const catIdxAll = -1
 
-// buildPagedKeyboard 分页内联键盘：上一页/页码/下一页；withBack 时追加「返回概要」
+// buildPagedKeyboard 分页内联键盘：上一页/页码/下一页；withBack 时追加「返回分类」
 func buildPagedKeyboard(prefix, sessionID string, page, totalPages int, withBack bool) *InlineKeyboardMarkup {
 	return buildPagedKeyboardCategory(prefix, sessionID, catIdxAll, page, totalPages, withBack)
 }
@@ -56,7 +56,7 @@ func buildPagedKeyboardCategory(prefix, sessionID string, catIdx, page, totalPag
 	}
 	if withBack {
 		rows = append(rows, []InlineKeyboardButton{{
-			Text:         "🔙 返回概要",
+			Text:         "🔙 返回分类",
 			CallbackData: fmt.Sprintf("%s:%s:back", prefix, sessionID),
 		}})
 	}

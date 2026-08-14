@@ -117,6 +117,8 @@ const (
 	TVBoxNetworkConfigCacheKey = RedisKeyPrefix + ":TVBox:NetworkConfig"
 	// IndexPageCacheKey 首页数据缓存 key
 	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
+	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
+	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
 	// CategoryVersionKey 分类版本号缓存 key
 	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
 	// RuleVersionKey 分类规则版本号缓存 key

@@ -732,6 +732,20 @@ func GetProjectedSnapshotByMid(version string, mid int64) *model.FilmListSnapsho
 	return &snapshot
 }
 
+// GetProjectedSnapshotsByMidsOrdered 按 mid 顺序取读模型投影后的可见快照。
+// 读模型未就绪或版本不一致时返回 nil（调用方勿把结果当「确认无片」缓存）。
+func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
+	version = strings.TrimSpace(version)
+	if version == "" || len(mids) == 0 {
+		return nil
+	}
+	readModel := GetActiveFilmReadModel()
+	if readModel == nil || readModel.Version != version {
+		return nil
+	}
+	return readModel.snapshotsByMIDs(mids)
+}
+
 func (m *FilmReadModel) projectedSnapshots() []model.FilmListSnapshot {
 	projected := ensureProjectedFilmReadModel(m)
 	snapshots := make([]model.FilmListSnapshot, 0, len(projected.AllMIDs))

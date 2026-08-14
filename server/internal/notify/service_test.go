@@ -388,13 +388,122 @@ func TestParseBotCommand(t *testing.T) {
 	if cmd != "search" || args != "流浪地球" {
 		t.Fatalf("got %q %q", cmd, args)
 	}
-	cmd, args = parseBotCommand("/s@MyBot 关键词")
-	if cmd != "s" || args != "关键词" {
+	cmd, args = parseBotCommand("/search@MyBot 关键词")
+	if cmd != "search" || args != "关键词" {
 		t.Fatalf("got %q %q", cmd, args)
 	}
 	cmd, args = parseBotCommand("hello")
 	if cmd != "" || args != "" {
 		t.Fatalf("non-cmd: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/daily")
+	if cmd != "daily" || args != "" {
+		t.Fatalf("daily: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/updates")
+	if cmd != "updates" || args != "" {
+		t.Fatalf("updates: %q %q", cmd, args)
+	}
+}
+
+func TestRolling24hWindow(t *testing.T) {
+	loc := notifyCST()
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, loc)
+	from, to := Rolling24hWindow(now)
+	if !to.Equal(now) {
+		t.Fatalf("to should be query time, got %v", to)
+	}
+	wantFrom := now.Add(-24 * time.Hour)
+	if !from.Equal(wantFrom) {
+		t.Fatalf("from want %v got %v", wantFrom, from)
+	}
+	// 23:59 的更新在次日上午仍落在窗内
+	at2359 := time.Date(2026, 8, 12, 23, 59, 0, 0, loc)
+	if at2359.Before(from) || at2359.After(to) {
+		t.Fatalf("23:59 yesterday should be inside window [%v, %v]", from, to)
+	}
+}
+
+func TestMenuButtonAndReplyKeyboard(t *testing.T) {
+	if !isMenuButtonText(btnDailyUpdate) || !isMenuButtonText(btnSearchQuery) || !isMenuButtonText(btnHelp) {
+		t.Fatal("menu buttons should be recognized")
+	}
+	if isMenuButtonText("随便说") || isMenuButtonText("/search") {
+		t.Fatal("non-menu text should not match")
+	}
+	kb := mainReplyKeyboard()
+	if kb == nil || len(kb.Keyboard) != 2 {
+		t.Fatalf("keyboard rows: %+v", kb)
+	}
+	if kb.Keyboard[0][0].Text != btnDailyUpdate || kb.Keyboard[0][1].Text != btnSearchQuery {
+		t.Fatalf("row0: %+v", kb.Keyboard[0])
+	}
+	if kb.Keyboard[1][0].Text != btnHelp {
+		t.Fatalf("row1: %+v", kb.Keyboard[1])
+	}
+	if !kb.ResizeKeyboard || !kb.IsPersistent {
+		t.Fatalf("keyboard flags: resize=%v persistent=%v", kb.ResizeKeyboard, kb.IsPersistent)
+	}
+	if replyMarkupPayload(kb) == nil {
+		t.Fatal("reply keyboard payload should be non-nil")
+	}
+	if replyMarkupPayload((*InlineKeyboardMarkup)(nil)) != nil {
+		t.Fatal("nil inline markup should yield nil payload")
+	}
+	if replyMarkupPayload(&InlineKeyboardMarkup{}) != nil {
+		t.Fatal("empty inline markup should yield nil payload")
+	}
+	if !isPrivateChat("private") || !isPrivateChat("PRIVATE") {
+		t.Fatal("private chat should match")
+	}
+	if isPrivateChat("group") || isPrivateChat("supergroup") || isPrivateChat("") {
+		t.Fatal("non-private should not get reply keyboard")
+	}
+	if menuKeyboardForChat("private") == nil {
+		t.Fatal("private chat should receive reply keyboard")
+	}
+	if menuKeyboardForChat("supergroup") != nil || menuKeyboardForChat("group") != nil {
+		t.Fatal("group chats should not receive reply keyboard")
+	}
+}
+
+func TestSetSearchAwaitRequiresRedis(t *testing.T) {
+	if err := setSearchAwait("123", 1); err == nil {
+		t.Fatal("expected error when redis is unavailable")
+	}
+}
+
+func TestFormatDailyCategoryPrompt(t *testing.T) {
+	got := formatDailyCategoryPrompt(dailySession{
+		SiteName:   "测试站",
+		AllMids:    []int64{1, 2, 3},
+		FromLabel:  "08-13 10:00",
+		UntilLabel: "08-14 10:00",
+		Cats: []CategoryCountItem{{
+			CategoryName: "电影",
+			Count:        2,
+		}},
+	})
+	if !strings.Contains(got, "每日更新") || !strings.Contains(got, "08-13 10:00") {
+		t.Fatalf("prompt: %s", got)
+	}
+	if strings.Contains(got, "电影") || strings.Contains(got, "部") {
+		t.Fatalf("prompt should not list category or count: %s", got)
+	}
+}
+
+func TestFormatDailyListPageTitle(t *testing.T) {
+	sess := dailySession{SiteName: "测试站", PageSize: 10}
+	got := formatDailyListPage(sess, catIdxAll, 1, nil, 0, 0, 0)
+	if !strings.Contains(got, "每日更新列表") {
+		t.Fatalf("want 每日更新列表, got %s", got)
+	}
+	if strings.Contains(got, "本次更新列表") {
+		t.Fatalf("should not use collect-batch title: %s", got)
+	}
+	collect := formatFilmListPageWithChunkCategory(FilmPageSession{SiteName: "测试站"}, 1, nil, 0, 0, 0, "", "")
+	if !strings.Contains(collect, "本次更新列表") {
+		t.Fatalf("collect list should keep default title: %s", collect)
 	}
 }
 
@@ -651,8 +760,6 @@ func TestShouldMuteByQuietHours(t *testing.T) {
 		t.Fatal("disabled quiet hours should not mute")
 	}
 }
-
-
 
 func truncateForTest(s string, n int) string {
 	if len(s) <= n {
