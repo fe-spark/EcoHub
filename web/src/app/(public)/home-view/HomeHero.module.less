@@ -121,6 +121,7 @@
 }
 
 .card {
+  position: relative;
   display: block;
   width: 100%;
   height: 100%;
@@ -146,6 +147,10 @@
   background-position: center;
   background-size: cover;
   background-repeat: no-repeat;
+}
+
+.cardChip {
+  display: none;
 }
 
 .bannerDots {
@@ -427,20 +432,28 @@
 
 @media (max-width: 768px) {
   .hero {
-    --deck-w: min(72vw, 300px);
+    --deck-w: min(68vw, 280px);
     min-height: 0;
-    margin-bottom: 40px;
-    border-radius: 16px;
+    margin: 0 0 36px;
+    overflow: visible;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .backdrop {
+    display: none;
   }
 
   .shell {
-    padding: 20px 28px 40px 16px;
+    padding: 4px 0 0;
   }
 
   .layout {
     flex-direction: column;
     justify-content: flex-start;
-    gap: 28px;
+    gap: 36px;
     min-height: 0;
     width: 100%;
   }
@@ -448,14 +461,9 @@
   .deck {
     order: 1;
     flex: 0 0 auto;
-    width: calc(var(--deck-w) + 32px);
-    padding-right: 16px;
-    padding-left: 16px;
-    margin-bottom: 8px;
-  }
-
-  .bannerDots {
-    bottom: 14px;
+    width: calc(var(--deck-w) + 28px);
+    padding: 0 14px 8px;
+    margin: 0 auto;
   }
 
   .copy {
@@ -468,12 +476,18 @@
     gap: 10px;
   }
 
-  .eyebrow {
-    display: none;
+  .eyebrow,
+  .copyHead,
+  .badgeQuality,
+  .counter,
+  .tags,
+  .blurbFallback,
+  .thumbs {
+    display: none !important;
   }
 
-  .copyHead {
-    justify-content: center;
+  .playBtn {
+    display: none !important;
   }
 
   .title {
@@ -481,18 +495,40 @@
     text-align: center;
   }
 
-  .tags {
-    justify-content: center;
+  .blurb {
+    display: -webkit-box;
+    max-width: 34em;
+    margin: 0 auto;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--hero-text-3);
+    font-size: 13px;
+    line-height: 1.55;
+    text-align: center;
   }
 
-  .playBtn {
-    align-self: center;
-    min-width: 160px;
-    height: 40px !important;
-    font-size: 14px !important;
+  .cardChip {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    z-index: 2;
+    display: inline-flex;
+    max-width: calc(100% - 20px);
+    padding: 2px 8px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(var(--primary-color-rgb), 0.92);
+    color: #fff;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 18px;
+    white-space: nowrap;
+    text-overflow: ellipsis;
   }
 
-  .thumbs {
+  .bannerDots {
     display: none;
   }
 
@@ -503,19 +539,15 @@
 
 @media (max-width: 480px) {
   .hero {
-    --deck-w: min(78vw, 300px);
-    border-radius: 14px;
-  }
-
-  .shell {
-    padding: 16px 24px 36px 12px;
+    --deck-w: min(72vw, 260px);
+    margin-bottom: 32px;
   }
 
   .layout {
-    gap: 24px;
+    gap: 32px;
   }
 
   .title {
-    font-size: 17px;
+    font-size: 16px;
   }
 }

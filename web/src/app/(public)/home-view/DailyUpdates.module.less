@@ -291,6 +291,11 @@
   &:focus-visible {
     box-shadow: 0 18px 36px rgba(0, 0, 0, 0.3);
   }
+
+  .cardShade,
+  .cardMeta {
+    display: none;
+  }
 }
 
 .leadSide {
@@ -589,23 +594,56 @@
 }
 
 @media (max-width: 1199px) {
+  .panel::before,
+  .panel::after {
+    display: none;
+  }
+
+  .bandGlow {
+    display: block;
+    inset: 0;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+
   .lead {
-    grid-template-columns: clamp(200px, 22vw, 240px) minmax(0, 1fr);
-    gap: 18px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 10px;
+    align-items: start;
+  }
+
+  .leadSide {
+    display: contents;
+  }
+
+  .leadCopy,
+  .blurb {
+    display: none;
+  }
+
+  .leadPoster {
+    grid-column: 1;
+    grid-row: 1;
+    align-self: stretch;
+    border-radius: 12px;
+
+    .cardShade,
+    .cardMeta {
+      display: block;
+    }
+  }
+
+  .rail {
+    display: contents;
+  }
+
+  .card {
+    align-self: stretch;
   }
 }
 
 @media (max-width: 768px) {
-  .panel::after {
-    background: linear-gradient(
-      90deg,
-      var(--public-page-bg) 0%,
-      transparent 10%,
-      transparent 90%,
-      var(--public-page-bg) 100%
-    );
-  }
-
   .daily {
     margin-bottom: 32px;
   }
@@ -624,41 +662,10 @@
   }
 
   .lead {
-    grid-template-columns: 112px minmax(0, 1fr);
-    gap: 14px;
+    gap: 10px 8px;
   }
 
-  .leadPoster {
-    border-radius: 12px;
-  }
-
-  .leadSide {
-    display: contents;
-  }
-
-  .leadCopy {
-    grid-column: 2;
-    grid-row: 1;
-  }
-
-  .rail {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 4px;
-    flex: none;
-  }
-
-  .leadTitle {
-    font-size: 18px;
-  }
-
-  .blurb {
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    font-size: 12.5px;
-  }
-
+  .leadPoster,
   .card {
     border-radius: 10px;
   }
@@ -667,14 +674,6 @@
 @media (max-width: 576px) {
   .eyebrow {
     letter-spacing: 0.08em;
-  }
-
-  .tags {
-    display: none;
-  }
-
-  .blurb {
-    display: none;
   }
 }
 
