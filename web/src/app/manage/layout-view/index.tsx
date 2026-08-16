@@ -33,7 +33,9 @@ import {
   SunOutlined,
   MoonOutlined,
   DesktopOutlined,
+  GithubOutlined,
 } from "@ant-design/icons";
+import { PROJECT_GITHUB_URL } from "@/lib/project";
 
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -317,6 +319,16 @@ export default function ManageLayoutView({
            </Space>
 
           <Space size="small" className={styles.userArea}>
+            <Button
+              type="text"
+              icon={<GithubOutlined />}
+              className={styles.headerIconBtn}
+              href={PROJECT_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              title="打开 GitHub 项目地址"
+              aria-label="打开 GitHub 项目地址"
+            />
             <Dropdown
               menu={{
                 selectedKeys: [mode],

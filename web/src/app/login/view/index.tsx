@@ -9,7 +9,9 @@ import {
   LockOutlined,
   EyeOutlined,
   EyeInvisibleOutlined,
+  GithubOutlined,
 } from "@ant-design/icons";
+import { PROJECT_GITHUB_URL } from "@/lib/project";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
@@ -119,8 +121,20 @@ export default function LoginPageView() {
           </div>
 
           <div className={styles.footer}>
-            © {new Date().getFullYear()}
-            {siteInfo?.siteName ? ` ${siteInfo.siteName}` : ""}
+            <span>
+              © {new Date().getFullYear()}
+              {siteInfo?.siteName ? ` ${siteInfo.siteName}` : ""}
+            </span>
+            <a
+              href={PROJECT_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.githubLink}
+              title="打开 GitHub 项目地址"
+            >
+              <GithubOutlined />
+              <span>GitHub 项目地址</span>
+            </a>
           </div>
         </div>
       </div>

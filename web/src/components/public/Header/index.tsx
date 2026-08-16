@@ -17,6 +17,7 @@ import {
   HomeOutlined,
   FireOutlined,
   DownOutlined,
+  GithubOutlined,
 } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -24,6 +25,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
 import { usePublicContentLoading } from "@/components/public/PublicContentLoading";
 import SiteLogo from "@/components/public/SiteLogo";
+import { PROJECT_GITHUB_URL } from "@/lib/project";
 
 interface NavItem {
   id: string | number;
@@ -407,6 +409,16 @@ export default function Header({ navList }: { navList: NavItem[] }) {
             </div>
 
             <div className={styles.actions}>
+              <a
+                href={PROJECT_GITHUB_URL}
+                target="_blank"
+                rel="noopener noreferrer"
+                className={styles.actionBtn}
+                title="打开 GitHub 项目地址"
+                aria-label="打开 GitHub 项目地址"
+              >
+                <GithubOutlined />
+              </a>
               <div className={styles.historyWrapper} ref={historyRef}>
                 <div 
                   className={`${styles.actionBtn} ${showHistory ? styles.active : ""}`} 
@@ -456,6 +468,15 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 </div>
               );
             })}
+            <a
+              href={PROJECT_GITHUB_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={styles.mobileNavItem}
+              title="打开 GitHub 项目地址"
+            >
+              <GithubOutlined /> <span>GitHub 项目地址</span>
+            </a>
           </div>
         </Drawer>
       </header>

@@ -143,20 +143,32 @@ func mainReplyKeyboard() *ReplyKeyboardMarkup {
 	}
 }
 
+func botProjectHTML() string {
+	url := strings.TrimSpace(config.ProjectURL)
+	if url == "" {
+		return ""
+	}
+	label := strings.TrimPrefix(url, "https://")
+	label = strings.TrimPrefix(label, "http://")
+	return fmt.Sprintf("🔗 项目地址 <a href=\"%s\">%s</a>", html.EscapeString(url), html.EscapeString(label))
+}
+
 func botWelcomeHTML() string {
 	return "<b>EcoHub Bot</b>\n" +
 		"📅 每日更新\n" +
 		"🔍 搜索查询\n" +
 		"❓ 帮助\n\n" +
 		"<code>/daily</code>\n" +
-		"<code>/search 关键词</code>"
+		"<code>/search 关键词</code>\n\n" +
+		botProjectHTML()
 }
 
 func botHelpHTML() string {
 	return "<b>使用说明</b>\n" +
 		"📅 每日更新  <code>/daily</code>\n" +
 		"🔍 搜索查询  <code>/search 关键词</code>\n" +
-		"❓ 帮助"
+		"❓ 帮助\n\n" +
+		botProjectHTML()
 }
 
 func isPrivateChat(chatType string) bool {
@@ -270,7 +282,56 @@ func parseBotCommand(text string) (cmd, args string) {
 	if at := strings.IndexByte(head, '@'); at >= 0 {
 		head = head[:at]
 	}
-	return strings.ToLower(strings.TrimSpace(head)), args
+	return strings.ToLower(strings.TrimSpace(head)), stripCommandMentions(args)
+}
+
+// stripCommandMentions 去掉群聊客户端插在指令参数里的 @bot 提及。
+// 例：/search 仙逆 @My_Bot、/search @My_Bot 仙逆、/search 仙逆@My_Bot
+func stripCommandMentions(args string) string {
+	args = strings.TrimSpace(args)
+	if args == "" {
+		return ""
+	}
+	fields := strings.Fields(args)
+	out := make([]string, 0, len(fields))
+	for _, f := range fields {
+		if isTelegramMentionToken(f) {
+			continue
+		}
+		if at := strings.LastIndexByte(f, '@'); at > 0 && isTelegramUsername(f[at+1:]) {
+			f = f[:at]
+			if strings.TrimSpace(f) == "" {
+				continue
+			}
+		}
+		out = append(out, f)
+	}
+	return strings.Join(out, " ")
+}
+
+func isTelegramMentionToken(s string) bool {
+	if len(s) < 2 || s[0] != '@' {
+		return false
+	}
+	return isTelegramUsername(s[1:])
+}
+
+// isTelegramUsername 匹配 Telegram 公开用户名：5–32 位，字母开头，仅字母数字下划线。
+func isTelegramUsername(s string) bool {
+	n := len(s)
+	if n < 5 || n > 32 {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		c := s[i]
+		if i == 0 && !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) {
+			return false
+		}
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_') {
+			return false
+		}
+	}
+	return true
 }
 
 func replyText(token, chatID, text string) error {
