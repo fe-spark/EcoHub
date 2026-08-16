@@ -404,6 +404,32 @@ func TestParseBotCommand(t *testing.T) {
 	if cmd != "updates" || args != "" {
 		t.Fatalf("updates: %q %q", cmd, args)
 	}
+
+	// 群聊客户端常把 @bot 追加在关键词后，或插在指令与关键词之间
+	cmd, args = parseBotCommand("/search 仙逆 @fe_spark_eco_server_bot")
+	if cmd != "search" || args != "仙逆" {
+		t.Fatalf("trailing mention: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/search @fe_spark_eco_server_bot 仙逆")
+	if cmd != "search" || args != "仙逆" {
+		t.Fatalf("leading mention: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/search 仙逆@fe_spark_eco_server_bot")
+	if cmd != "search" || args != "仙逆" {
+		t.Fatalf("glued mention: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/search@fe_spark_eco_server_bot 仙逆 @fe_spark_eco_server_bot")
+	if cmd != "search" || args != "仙逆" {
+		t.Fatalf("head+tail mention: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/daily @fe_spark_eco_server_bot")
+	if cmd != "daily" || args != "" {
+		t.Fatalf("daily mention-only args: %q %q", cmd, args)
+	}
+	cmd, args = parseBotCommand("/search 仙逆 第一季")
+	if cmd != "search" || args != "仙逆 第一季" {
+		t.Fatalf("multi-word keyword: %q %q", cmd, args)
+	}
 }
 
 func TestRolling24hWindow(t *testing.T) {
