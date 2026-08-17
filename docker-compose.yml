@@ -92,6 +92,9 @@ services:
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
       - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
+    volumes:
+      # 已跑过无此卷的 Eco-server：先 docker cp Eco-server:/app/static/upload/gallery 出来再 up
+      - eco-server-uploads:/app/static/upload
     networks:
       - Eco-network
     extra_hosts:
@@ -111,3 +114,4 @@ networks:
 volumes:
   eco-mysql-data:
   eco-redis-data:
+  eco-server-uploads:
