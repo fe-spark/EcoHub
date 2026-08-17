@@ -39,8 +39,13 @@ export async function generateMetadata(): Promise<Metadata> {
   if (siteConfig?.describe) generated.description = siteConfig.describe;
   if (siteConfig?.keyword) generated.keywords = siteConfig.keyword;
   // favicon 与 SiteLogo 一致：未配置用本地默认；已配置原样使用（含相对路径 / 外链）
-  const logo = siteConfig?.logo?.trim() || "";
-  generated.icons = { icon: logo || "/logo.png" };
+  // 不放 app/favicon.ico：文件约定会再注入 /favicon.ico，浏览器会盖掉这里的动态 logo
+  const iconUrl = siteConfig?.logo?.trim() || "/logo.png";
+  generated.icons = {
+    icon: iconUrl,
+    shortcut: iconUrl,
+    apple: iconUrl,
+  };
 
   return generated;
 }

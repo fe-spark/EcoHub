@@ -215,6 +215,7 @@ export default function BannersPageView() {
     setSelectedFilm(null);
     setFilmOptions([]);
     setCurrentRow(null);
+    setPickerOpen(false);
   };
 
   const openCreateEditor = () => {
@@ -627,16 +628,15 @@ export default function BannersPageView() {
         <Form form={form} layout="vertical" preserve={false}>
           {formItems}
         </Form>
+        <ImagePicker
+          open={pickerOpen}
+          onCancel={() => setPickerOpen(false)}
+          onSelect={(link) => {
+            form.setFieldValue("picture", link);
+            setPickerOpen(false);
+          }}
+        />
       </Modal>
-
-      <ImagePicker
-        open={pickerOpen}
-        onCancel={() => setPickerOpen(false)}
-        onSelect={(link) => {
-          form.setFieldValue("picture", link);
-          setPickerOpen(false);
-        }}
-      />
     </div>
   );
 }

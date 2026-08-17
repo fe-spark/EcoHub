@@ -61,7 +61,10 @@ export default function CollectSourceCard({
     .join(" ");
 
   return (
-    <div className={cardClassNames} onClick={() => onSelect(record.id, !selected)}>
+    <div
+      className={cardClassNames}
+      onClick={() => onSelect(record.id, !selected)}
+    >
       {isMaster ? (
         <span className={styles.masterRibbon} title="全局唯一数据源" aria-label="主站">
           <span className={styles.masterRibbonText}>主站</span>

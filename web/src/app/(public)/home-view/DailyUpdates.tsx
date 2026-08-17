@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { SyncOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
-import { playDailyIonSwap, preloadPictures } from "./dailyIon";
+import { playDailyIonSwap } from "./dailyIon";
 import { bindPixelHover } from "./pixelHover";
 import styles from "./DailyUpdates.module.less";
 
@@ -52,6 +53,22 @@ function filmTags(item: DailyFilm) {
   return tags.filter(Boolean);
 }
 
+async function fetchDailyUpdates(exclude: string): Promise<DailyFilm[]> {
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
+  if (exclude) {
+    params.set("exclude", exclude);
+  }
+  const res = await fetch(`/api/index/dailyUpdates?${params.toString()}`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new Error(String(res.status));
+  }
+  const json = (await res.json()) as { code: number; data?: DailyFilm[] };
+  if (json.code !== 0) {
+    throw new Error(String(json.code));
+  }
+  return Array.isArray(json.data) ? json.data : [];
+}
+
 function Poster({
   src,
   alt,
@@ -66,6 +83,12 @@ function Poster({
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   useEffect(() => {
+    const current = imgRef.current;
+    if (current && current.getAttribute("src") === (src || "") && current.complete) {
+      setLoaded(current.naturalWidth > 0);
+      setFailed(current.naturalWidth === 0);
+      return;
+    }
     setLoaded(false);
     setFailed(false);
     const frame = window.requestAnimationFrame(() => {
@@ -127,6 +150,7 @@ export default function DailyUpdates() {
   const [glowCurr, setGlowCurr] = useState("");
   const [glowPrev, setGlowPrev] = useState("");
   const [hovering, setHovering] = useState(false);
+  const [copyLead, setCopyLead] = useState<DailyFilm | null>(null);
 
   const clearTimer = () => {
     if (timerRef.current) {
@@ -162,71 +186,79 @@ export default function DailyUpdates() {
       return;
     }
     inFlightRef.current = true;
-    if (manual) {
+    clearTimer();
+    const hasCurrent = (listRef.current ?? []).length > 0;
+    if (manual || hasCurrent) {
       setShuffling(true);
     }
 
     const exclude = (listRef.current ?? []).map(filmId).filter(Boolean).join(",");
-    const params = new URLSearchParams({ limit: String(PAGE_SIZE) });
-    if (exclude) {
-      params.set("exclude", exclude);
-    }
-    const url = `/api/index/dailyUpdates?${params.toString()}`;
+    const stage = stageRef.current;
+    const canvas = canvasRef.current;
+    const canIon = Boolean(hasCurrent && stage && canvas && !ionBusyRef.current);
+
+    const loadNext = async () => {
+      const next = await fetchDailyUpdates(exclude);
+      if (cancelledRef.current || next.length === 0) {
+        return null;
+      }
+      return {
+        apply: () => {
+          listRef.current = next;
+          flushSync(() => {
+            setList(next);
+          });
+        },
+      };
+    };
 
     try {
-      const res = await fetch(url, { cache: "no-store" });
-      if (!res.ok) {
-        throw new Error(String(res.status));
-      }
-      const json = (await res.json()) as { code: number; data?: DailyFilm[] };
-      if (cancelledRef.current) {
-        return;
-      }
-      if (json.code !== 0) {
-        throw new Error(String(json.code));
-      }
-      const next = Array.isArray(json.data) ? json.data : [];
-      if (next.length === 0) {
-        return;
-      }
-
-      const apply = () => {
-        listRef.current = next;
-        setList(next);
-      };
-
-      const stage = stageRef.current;
-      const canvas = canvasRef.current;
-      const hasCurrent = (listRef.current ?? []).length > 0;
-      if (!hasCurrent || !stage || !canvas || ionBusyRef.current) {
-        apply();
+      if (!canIon || !stage || !canvas) {
+        const result = await loadNext();
+        result?.apply();
+        const nextLead = listRef.current?.[0];
+        if (nextLead) {
+          setCopyLead(nextLead);
+        }
         return;
       }
 
       ionBusyRef.current = true;
+      const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
+      const pending = loadNext().catch(() => null);
       try {
-        await preloadPictures(next.map((item) => item.picture).filter(Boolean));
-        if (cancelledRef.current) {
-          return;
-        }
-        const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
         await playDailyIonSwap({
           canvas,
           stage,
           slots,
-          nextPictures: next.map((item) => item.picture),
+          pending,
           onHide: () => {
             stage.classList.add(styles.stageIon);
           },
-          onSwap: apply,
           onReveal: () => {
             stage.classList.remove(styles.stageIon);
           },
+          onLeadReady: () => {
+            const nextLead = listRef.current?.[0];
+            if (nextLead) {
+              setCopyLead(nextLead);
+            }
+          },
         });
       } catch {
-        apply();
+        const result = await pending;
+        result?.apply();
+        const nextLead = listRef.current?.[0];
+        if (nextLead) {
+          setCopyLead(nextLead);
+        }
       } finally {
         stage.classList.remove(styles.stageIon);
+        stage.querySelectorAll("[data-ion-fx]").forEach((el) => {
+          el.removeAttribute("data-ion-fx");
+        });
+        const ionCtx = canvas.getContext("2d");
+        ionCtx?.clearRect(0, 0, canvas.width, canvas.height);
         ionBusyRef.current = false;
       }
     } catch {
@@ -299,14 +331,20 @@ export default function DailyUpdates() {
     };
   }, [list ? 1 : 0]);
 
-  const leadPicture = list?.[0]?.picture || "";
   useEffect(() => {
-    if (!leadPicture || leadPicture === glowCurr) {
+    if (list?.[0] && !copyLead) {
+      setCopyLead(list[0]);
+    }
+  }, [copyLead, list]);
+
+  const glowPicture = (copyLead ?? list?.[0])?.picture || "";
+  useEffect(() => {
+    if (!glowPicture || glowPicture === glowCurr) {
       return;
     }
     setGlowPrev(glowCurr);
-    setGlowCurr(leadPicture);
-  }, [glowCurr, leadPicture]);
+    setGlowCurr(glowPicture);
+  }, [glowCurr, glowPicture]);
 
   useEffect(() => {
     if (!glowPrev) {
@@ -322,8 +360,10 @@ export default function DailyUpdates() {
 
   const lead = list[0];
   const rail = list.slice(1);
+  const shown = copyLead ?? lead;
   const leadName = filmTitle(lead.name);
-  const tags = filmTags(lead);
+  const shownName = filmTitle(shown.name);
+  const tags = filmTags(shown);
 
   return (
     <section className={styles.daily} aria-label="每日更新">
@@ -388,8 +428,8 @@ export default function DailyUpdates() {
             </button>
 
             <div className={styles.leadSide}>
-              <div className={styles.leadCopy}>
-                <h3 className={styles.leadTitle}>{leadName}</h3>
+              <div className={styles.leadCopy} key={filmId(shown)}>
+                <h3 className={styles.leadTitle}>{shownName}</h3>
                 {tags.length > 0 ? (
                   <div className={styles.tags}>
                     {tags.map((tag) => (
@@ -400,8 +440,8 @@ export default function DailyUpdates() {
                   </div>
                 ) : null}
               </div>
-              <p className={styles.blurb}>
-                {lead.blurb || "近 24 小时新入库内容，点击即可观看最新进度。"}
+              <p className={styles.blurb} key={`blurb-${filmId(shown)}`}>
+                {shown.blurb || "近 24 小时新入库内容，点击即可观看最新进度。"}
               </p>
 
               {rail.length > 0 ? (
@@ -434,11 +474,11 @@ export default function DailyUpdates() {
         </div>
         </div>
 
-        {!hovering ? (
-          <div className={styles.progress} aria-hidden>
+        <div className={styles.progress} aria-hidden>
+          {!hovering && !shuffling ? (
             <i key={tick} style={{ animationDuration: `${REFRESH_MS}ms` }} />
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </div>
     </section>
   );

@@ -21,28 +21,31 @@ export default function Footer() {
 
   return (
     <footer className={styles.footer}>
-      <div className={styles.footerInfo}>
-        <SiteLogo
-          src={config?.logo}
-          className={styles.footerLogo}
-          fetchPriority="low"
-        />
-        <span className={styles.footerSiteName}>{config?.siteName}</span>
+      <div className={styles.bar}>
+        <div className={styles.brand}>
+          <SiteLogo
+            src={config?.logo}
+            className={styles.footerLogo}
+            fetchPriority="low"
+          />
+          <span className={styles.footerSiteName}>{config?.siteName}</span>
+        </div>
+        <p className={styles.meta}>
+          <span>© {currentYear} {config?.siteName}</span>
+          <span className={styles.dot} aria-hidden>
+            ·
+          </span>
+          <a
+            href={PROJECT_GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="打开 GitHub 项目地址"
+          >
+            <GithubOutlined />
+            <span>GitHub</span>
+          </a>
+        </p>
       </div>
-      <p className={styles.copyright}>
-        © {currentYear} {config?.siteName}. All rights reserved.
-      </p>
-      <p className={styles.projectLink}>
-        <a
-          href={PROJECT_GITHUB_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          title="打开 GitHub 项目地址"
-        >
-          <GithubOutlined />
-          <span>GitHub 项目地址</span>
-        </a>
-      </p>
       <p className={styles.disclaimer}>
         本站所有内容均来自互联网分享站点所提供的公开引用资源，未提供资源上传、存储服务。
       </p>
