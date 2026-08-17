@@ -143,15 +143,16 @@
 .leadPoster,
 .leadCopy,
 .card {
-  transition: opacity 0.5s ease;
+  transition: none;
 }
 
 .stageIon {
-  .leadPoster,
-  .leadCopy,
-  .card {
+  [data-ion-slot] {
+    pointer-events: none;
+  }
+
+  [data-ion-slot][data-ion-fx] {
     opacity: 0;
-    transition: none;
   }
 }
 
@@ -381,6 +382,7 @@
   justify-content: center;
   gap: 10px;
   min-width: 0;
+  animation: dailyIn 0.24s ease;
 }
 
 .leadTitle {
@@ -428,6 +430,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   line-clamp: 2;
+  animation: dailyIn 0.24s ease;
 }
 
 .rail {
@@ -682,6 +685,10 @@
   .stage,
   .progress i,
   .card,
+  .leadCopy,
+  .blurb,
+  .bandGlowIn,
+  .bandGlowOut,
   .loadingBg::before {
     animation: none !important;
     transition: none !important;
