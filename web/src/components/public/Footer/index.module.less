@@ -1,66 +1,78 @@
 .footer {
   position: relative;
-  text-align: center;
   width: 100%;
-  padding: 24px 40px;
+  padding: 16px var(--public-safe-gutter, 40px);
   margin-top: auto;
   color: var(--public-text-6);
-  font-size: 13px;
-  line-height: 1.8;
+  font-size: 12px;
+  line-height: 1.5;
+  text-align: center;
   border-top: 1px solid var(--public-border-1);
+  box-sizing: border-box;
+}
 
-  .footerInfo {
-    display: flex;
+.bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.footerLogo {
+  height: 24px;
+  object-fit: contain;
+}
+
+.footerSiteName {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--public-text-2);
+}
+
+.meta {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--public-text-5);
+
+  a {
+    display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 12px;
-    margin-bottom: 12px;
+    gap: 4px;
+    color: inherit;
+    text-decoration: none;
+    transition: color 0.2s ease;
 
-    .footerLogo {
-      height: 24px;
-      object-fit: contain;
-    }
-
-    .footerSiteName {
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--public-text-2);
+    &:hover {
+      color: var(--primary-color);
     }
   }
+}
 
-  .copyright {
-    margin-bottom: 8px;
-    font-size: 12px;
-  }
+.dot {
+  opacity: 0.45;
+}
 
-  .projectLink {
-    margin: 0 0 8px;
-
-    a {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      color: var(--public-text-5);
-      text-decoration: none;
-      font-size: 13px;
-      transition: color 0.2s ease;
-
-      &:hover {
-        color: var(--primary-color);
-      }
-    }
-  }
-
-  .disclaimer {
-    max-width: 800px;
-    margin: 0 auto;
-    font-weight: 500;
-  }
+.disclaimer {
+  max-width: 800px;
+  margin: 8px auto 0;
+  font-weight: 500;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 @media (max-width: 768px) {
   .footer {
-    padding: 24px 20px;
+    padding: 16px 16px;
   }
 }
