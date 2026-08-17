@@ -898,9 +898,8 @@ export default function CollectManagePageView() {
             <Space size={[8, 8]} wrap>
               <span className={styles.toolbarHint}>
                 共 {siteList.length}/{MAX_COLLECT_SOURCES} 个
-                {selectedCount > 0 ? ` · 已选 ${selectedCount}` : ""}
               </span>
-              <Button size="small" onClick={selectAllSources}>
+              <Button size="small" data-tour="collect-select-all" onClick={selectAllSources}>
                 全选
               </Button>
               <Button size="small" onClick={invertSelection}>
@@ -914,6 +913,7 @@ export default function CollectManagePageView() {
               <Button
                 type="primary"
                 disabled={!canWrite || selectedCount === 0}
+                data-tour="collect-batch"
                 onClick={() => void openBatchCollect()}
               >
                 批量采集{selectedCount > 0 ? ` (${selectedCount})` : ""}
@@ -921,6 +921,7 @@ export default function CollectManagePageView() {
               <Button
                 loading={batchStateUpdating}
                 disabled={!canWrite || selectedCount === 0}
+                data-tour="collect-batch-enable"
                 onClick={() => void batchChangeSourceState(true)}
               >
                 批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
@@ -964,7 +965,7 @@ export default function CollectManagePageView() {
         </Card>
 
         {overallSession ? (
-          <div className={styles.batchProgressBar}>
+          <div className={styles.batchProgressBar} data-tour="collect-progress">
             <div className={styles.batchProgressMain}>
               <div className={styles.batchProgressHead}>
                 <span className={styles.batchProgressTitle}>

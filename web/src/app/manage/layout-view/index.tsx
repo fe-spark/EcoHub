@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 
@@ -34,6 +34,7 @@ import {
   MoonOutlined,
   DesktopOutlined,
   GithubOutlined,
+  QuestionCircleOutlined,
 } from "@ant-design/icons";
 import { PROJECT_GITHUB_URL } from "@/lib/project";
 
@@ -44,6 +45,7 @@ import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import { ManagePermissionProvider } from "@/lib/manage-permission";
+import ManageTour, { replayManageTour } from "@/app/manage/components/manage-tour";
 import styles from "./index.module.less";
 
 type AdminNotice = {
@@ -76,9 +78,9 @@ const menuItems: MenuItem[] = [
     icon: <ThunderboltOutlined />,
     label: "采集管理",
     children: [
-      { key: "/manage/collect", label: "采集中心" },
-      { key: "/manage/collect/record", label: "失败记录" },
-      { key: "/manage/cron", label: "计划任务" },
+      { key: "/manage/collect", label: <span data-tour="menu-collect">采集中心</span> },
+      { key: "/manage/collect/record", label: <span data-tour="menu-record">失败记录</span> },
+      { key: "/manage/cron", label: <span data-tour="menu-cron">计划任务</span> },
     ],
   },
   {
@@ -86,10 +88,10 @@ const menuItems: MenuItem[] = [
     icon: <VideoCameraOutlined />,
     label: "内容管理",
     children: [
-      { key: "/manage/film", label: "影片列表" },
+      { key: "/manage/film", label: <span data-tour="menu-film">影片列表</span> },
       { key: "/manage/banners", label: "首页轮播" },
-      { key: "/manage/collect/category", label: "分类管理" },
-      { key: "/manage/collect/category/rules", label: "分类规则" },
+      { key: "/manage/collect/category", label: <span data-tour="menu-category">分类管理</span> },
+      { key: "/manage/collect/category/rules", label: <span data-tour="menu-rules">分类规则</span> },
     ],
   },
   {
@@ -226,6 +228,17 @@ export default function ManageLayoutView({
     }
   };
 
+  const onNeedMenu = useCallback((need: boolean) => {
+    if (isMobile) {
+      setDrawerOpen(need);
+      return;
+    }
+    if (need) {
+      setCollapsed(false);
+    }
+  }, [isMobile]);
+
+
   const openKeys = collectAllOpenKeys(menuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
@@ -265,15 +278,17 @@ export default function ManageLayoutView({
           <span className={styles.siteName}>{siteInfo.siteName}</span>
         )}
       </div>
-      <Menu
-        mode="inline"
-        className={styles.menu}
-        style={{ borderInlineEnd: 0 }}
-        selectedKeys={[selectedKey]}
-        defaultOpenKeys={openKeys}
-        items={menuItems}
-        onClick={onMenuClick}
-      />
+      <div className={styles.menuTourTarget}>
+        <Menu
+          mode="inline"
+          className={styles.menu}
+          style={{ borderInlineEnd: 0 }}
+          selectedKeys={[selectedKey]}
+          defaultOpenKeys={openKeys}
+          items={menuItems}
+          onClick={onMenuClick}
+        />
+      </div>
     </>
   );
 
@@ -351,6 +366,12 @@ export default function ManageLayoutView({
                 menu={{
                   items: [
                     {
+                      key: "tour",
+                      icon: <QuestionCircleOutlined />,
+                      label: "新手引导",
+                      onClick: replayManageTour,
+                    },
+                    {
                       key: "logout",
                       icon: <LogoutOutlined />,
                       label: "退出登录",
@@ -418,6 +439,12 @@ export default function ManageLayoutView({
           </ManagePermissionProvider>
         </Content>
       </Layout>
+      <ManageTour
+        isMobile={isMobile}
+        canWrite={userInfo?.canWrite !== false}
+        permissionReady={userInfo != null}
+        onNeedMenu={onNeedMenu}
+      />
       <Drawer
         title="后台菜单"
         placement="left"
