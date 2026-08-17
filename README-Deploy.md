@@ -84,17 +84,6 @@ docker compose up -d
 ~/ecohub/data/uploads
 ```
 
-从会把素材写到 `/app/server/static/upload` 的旧镜像升到本版本时，**必须先在旧容器上拷到卷，再 pull / up**（只做一次；本版本之后不必再做）：
-
-```bash
-docker exec Eco-hub sh -c 'if [ -d /app/server/static/upload/gallery ]; then mkdir -p /app/static/upload/gallery && cp -an /app/server/static/upload/gallery/. /app/static/upload/gallery/; echo 已拷到卷; else echo 无需迁移（旧目录不存在或已是新布局）; fi'
-cd ~/ecohub
-docker compose pull
-docker compose up -d
-```
-
-已是本版本则直接：
-
 ```bash
 cd ~/ecohub
 docker compose pull
@@ -263,19 +252,13 @@ REDIS_DB=0
 
 ### 5. 更新
 
-数据在 `./data/mysql`、`./data/redis`、`./data/uploads`。
-
-从会把素材写到 `/app/server/static/upload` 的旧镜像升到本版本时，**先在旧容器上拷到卷，再拉取重建**（只做一次）：
-
-```bash
-docker exec Eco-hub sh -c 'if [ -d /app/server/static/upload/gallery ]; then mkdir -p /app/static/upload/gallery && cp -an /app/server/static/upload/gallery/. /app/static/upload/gallery/; echo 已拷到卷; else echo 无需迁移（旧目录不存在或已是新布局）; fi'
-```
-
 编排中改镜像 tag（可选）→ 拉取 → 重建，或：
 
 ```bash
 docker compose pull && docker compose up -d
 ```
+
+数据在 `./data/mysql`、`./data/redis`、`./data/uploads`。
 
 ---
 
@@ -287,14 +270,6 @@ docker compose pull && docker compose up -d
 cp .env.example .env
 # 修改 JWT_SECRET、密码等
 docker compose up --build -d
-```
-
-已跑过无上传卷的 `Eco-server` 时，先把图拷出再 `up`，否则空 volume 会盖住容器层旧文件：
-
-```bash
-docker cp Eco-server:/app/static/upload/gallery ./_gallery_bak
-docker compose up --build -d
-docker cp ./_gallery_bak/. Eco-server:/app/static/upload/gallery/
 ```
 
 访问端口与发布版相同。源码版 `API_URL` 由 compose 注入；发布版不需要配。
