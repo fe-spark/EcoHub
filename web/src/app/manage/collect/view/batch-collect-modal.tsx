@@ -64,6 +64,7 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
       onCancel={onCancel}
       onOk={onSubmit}
       okText="开始采集"
+      okButtonProps={{ "data-tour": "collect-batch-submit" }}
       width={960}
       destroyOnHidden
     >
