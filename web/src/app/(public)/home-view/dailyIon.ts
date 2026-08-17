@@ -1,28 +1,11 @@
-const OUT_MS = 280;
-const IN_MS = 480;
-const MAX_PARTICLES = 720;
-const PALETTE_DARK = ["#fa8c16", "#ffd27a", "#ffffff"];
-const PALETTE_LIGHT = ["#9a3412", "#c2410c", "#ea580c", "#1e293b"];
+import { clampInCard, drawScraps, retargetScraps, spawnScraps } from "./dailyIonScrap";
 
-function isLightTheme() {
-  return typeof document !== "undefined" && document.documentElement.dataset.theme === "light";
-}
+const OUT_MS = 380;
+const IN_MS = 720;
+const MIN_HOLD_MS = 240;
 
-function activePalette() {
-  return isLightTheme() ? PALETTE_LIGHT : PALETTE_DARK;
-}
-
-type Particle = {
-  x: number;
-  y: number;
-  ox: number;
-  oy: number;
-  tx: number;
-  ty: number;
-  dx: number;
-  dy: number;
-  size: number;
-  color: string;
+export type IonPending = {
+  apply: () => void;
 };
 
 function prefersReducedMotion() {
@@ -33,62 +16,18 @@ function easeOut(t: number) {
   return 1 - (1 - t) * (1 - t);
 }
 
-function spawn(slots: HTMLElement[], stage: DOMRect, count: number): Particle[] {
-  const palette = activePalette();
-  const light = isLightTheme();
-  const weights = slots.map((slot, index) => {
-    const rect = slot.getBoundingClientRect();
-    return index === 0 ? rect.width * rect.height * 1.8 : rect.width * rect.height;
-  });
-  const total = weights.reduce((sum, w) => sum + w, 0) || 1;
-  const out: Particle[] = [];
-  for (let s = 0; s < slots.length; s += 1) {
-    const rect = slots[s].getBoundingClientRect();
-    const n = Math.max(24, Math.round((weights[s] / total) * count));
-    const ox = rect.left - stage.left;
-    const oy = rect.top - stage.top;
-    for (let i = 0; i < n && out.length < count; i += 1) {
-      const px = ox + Math.random() * rect.width;
-      const py = oy + Math.random() * rect.height;
-      const ang = Math.random() * Math.PI * 2;
-      const spd = 6 + Math.random() * 12;
-      out.push({
-        x: px,
-        y: py,
-        ox: px,
-        oy: py,
-        tx: px,
-        ty: py,
-        dx: Math.cos(ang) * spd,
-        dy: Math.sin(ang) * spd,
-        size: light ? 1.6 + Math.random() * 1.4 : 1 + Math.random() * 1.1,
-        color: palette[i % palette.length],
-      });
-    }
-  }
-  return out;
+function easeInOut(t: number) {
+  return t < 0.5 ? 2 * t * t : 1 - ((2 - 2 * t) * (2 - 2 * t)) / 2;
 }
 
-function draw(ctx: CanvasRenderingContext2D, particles: Particle[], alpha: number) {
-  const palette = activePalette();
-  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-  ctx.globalAlpha = isLightTheme() ? Math.min(1, alpha * 1.25) : alpha;
-  for (let c = 0; c < palette.length; c += 1) {
-    ctx.fillStyle = palette[c];
-    for (let i = 0; i < particles.length; i += 1) {
-      const p = particles[i];
-      if (p.color !== palette[c]) {
-        continue;
-      }
-      ctx.fillRect(p.x, p.y, p.size, p.size);
-    }
-  }
-}
-
-function animate(duration: number, onFrame: (t: number) => void) {
+function animate(duration: number, onFrame: (t: number) => void, alive: () => boolean) {
   return new Promise<void>((resolve) => {
     const start = performance.now();
     const loop = (now: number) => {
+      if (!alive()) {
+        resolve();
+        return;
+      }
       const t = Math.min(1, (now - start) / duration);
       onFrame(t);
       if (t < 1) {
@@ -101,96 +40,280 @@ function animate(duration: number, onFrame: (t: number) => void) {
   });
 }
 
-export async function preloadPictures(urls: string[]) {
-  await Promise.all(
-    urls.filter(Boolean).map(
-      (url) =>
-        new Promise<void>((resolve) => {
-          const img = new Image();
-          img.onload = () => resolve();
-          img.onerror = () => resolve();
-          img.src = url;
-        }),
-    ),
-  );
+function holdUntil<T>(
+  ctx: CanvasRenderingContext2D,
+  scraps: ReturnType<typeof spawnScraps>,
+  ready: Promise<T>,
+  alive: () => boolean,
+): Promise<T | null> {
+  let done = false;
+  ready.finally(() => {
+    done = true;
+  });
+  return new Promise((resolve, reject) => {
+    const start = performance.now();
+    const loop = (now: number) => {
+      if (!alive()) {
+        resolve(null);
+        return;
+      }
+      if (done) {
+        ready.then(resolve, reject);
+        return;
+      }
+      const sec = (now - start) / 1000;
+      for (let i = 0; i < scraps.length; i += 1) {
+        const p = scraps[i];
+        const wave = Math.sin(sec * p.freq + p.phase);
+        p.x = p.holdX + p.px * wave * p.amp;
+        p.y = p.holdY + p.py * wave * p.amp * 0.5;
+        p.w = p.homeW;
+        p.h = p.homeH;
+        clampInCard(p);
+      }
+      drawScraps(ctx, scraps, 1);
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  });
+}
+
+function fitCanvas(canvas: HTMLCanvasElement, stage: DOMRect) {
+  const w = Math.max(1, Math.round(stage.width));
+  const h = Math.max(1, Math.round(stage.height));
+  if (canvas.width !== w) {
+    canvas.width = w;
+  }
+  if (canvas.height !== h) {
+    canvas.height = h;
+  }
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+}
+
+function nextFrame() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
+}
+
+function slotSettled(slot: HTMLElement) {
+  const img = slot.querySelector("img");
+  if (!(img instanceof HTMLImageElement)) {
+    return false;
+  }
+  return img.complete && img.naturalWidth > 0;
+}
+
+function clearIonVisuals(stage: HTMLElement, ctx: CanvasRenderingContext2D | null) {
+  const marked = stage.querySelectorAll("[data-ion-fx]");
+  for (let i = 0; i < marked.length; i += 1) {
+    marked[i].removeAttribute("data-ion-fx");
+  }
+  if (ctx) {
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  }
+}
+
+function markShatterSlots(slots: HTMLElement[]) {
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i];
+    const img = slot.querySelector("img");
+    if (img instanceof HTMLImageElement && img.naturalWidth > 0) {
+      slot.setAttribute("data-ion-fx", "");
+    } else {
+      slot.removeAttribute("data-ion-fx");
+    }
+  }
+}
+
+function revealSettledSlots(stage: HTMLElement, force: boolean, onLeadReady?: () => void) {
+  const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
+  const hidden = new Set<number>();
+  for (let i = 0; i < slots.length; i += 1) {
+    const slot = slots[i];
+    if (!slot.hasAttribute("data-ion-fx")) {
+      continue;
+    }
+    if (force || slotSettled(slot)) {
+      slot.removeAttribute("data-ion-fx");
+      if (i === 0) {
+        onLeadReady?.();
+      }
+    } else {
+      hidden.add(i);
+    }
+  }
+  return hidden;
+}
+
+async function applyPending(
+  pending: Promise<IonPending | null>,
+  onReveal: () => void,
+  onLeadReady?: () => void,
+) {
+  const result = await pending.catch(() => null);
+  result?.apply();
+  onLeadReady?.();
+  onReveal();
+}
+
+async function waitSlotBitmaps(stage: HTMLElement, ms: number, alive: () => boolean) {
+  const start = performance.now();
+  while (alive() && performance.now() - start < ms) {
+    const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
+    const waiting = slots.some((slot) => slot.hasAttribute("data-ion-fx") && !slotSettled(slot));
+    if (!waiting) {
+      return;
+    }
+    await nextFrame();
+  }
 }
 
 export async function playDailyIonSwap(options: {
   canvas: HTMLCanvasElement;
   stage: HTMLElement;
   slots: HTMLElement[];
-  nextPictures: string[];
+  pending: Promise<IonPending | null>;
   onHide: () => void;
-  onSwap: () => void;
   onReveal: () => void;
+  onLeadReady?: () => void;
 }) {
-  const { canvas, stage, slots, onHide, onSwap, onReveal } = options;
+  const { canvas, stage, slots, pending, onHide, onReveal, onLeadReady } = options;
+  const alive = () => canvas.isConnected;
+  let ctx: CanvasRenderingContext2D | null = null;
   if (prefersReducedMotion() || slots.length === 0) {
-    onSwap();
-    onReveal();
+    await applyPending(pending, onReveal, onLeadReady);
     return;
   }
 
   const stageRect = stage.getBoundingClientRect();
-  canvas.width = Math.max(1, Math.round(stageRect.width));
-  canvas.height = Math.max(1, Math.round(stageRect.height));
-  canvas.style.width = "100%";
-  canvas.style.height = "100%";
-  const ctx = canvas.getContext("2d", { alpha: true });
+  fitCanvas(canvas, stageRect);
+  ctx = canvas.getContext("2d", { alpha: true });
   if (!ctx) {
-    onSwap();
-    onReveal();
+    await applyPending(pending, onReveal, onLeadReady);
     return;
   }
 
-  const particles = spawn(slots, stageRect, MAX_PARTICLES);
+  try {
+  const scraps = spawnScraps(slots, stageRect);
+  if (scraps.length === 0) {
+    await applyPending(pending, onReveal, onLeadReady);
+    return;
+  }
+
+  drawScraps(ctx, scraps, 1);
+  markShatterSlots(slots);
   onHide();
 
-  await animate(OUT_MS, (t) => {
-    const e = easeOut(t);
-    for (let i = 0; i < particles.length; i += 1) {
-      const p = particles[i];
-      p.x = p.ox + p.dx * e;
-      p.y = p.oy + p.dy * e;
-    }
-    draw(ctx, particles, 1 - t * 0.35);
-  });
+  await animate(
+    OUT_MS,
+    (t) => {
+      for (let i = 0; i < scraps.length; i += 1) {
+        const p = scraps[i];
+        const e = easeOut(Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay)));
+        p.x = p.homeX + p.wx * e;
+        p.y = p.homeY + p.wy * e;
+        p.w = p.homeW;
+        p.h = p.homeH;
+        clampInCard(p);
+      }
+      drawScraps(ctx, scraps, 1);
+    },
+    alive,
+  );
 
-  onSwap();
-  await new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
+  for (let i = 0; i < scraps.length; i += 1) {
+    scraps[i].holdX = scraps[i].x;
+    scraps[i].holdY = scraps[i].y;
+  }
+
+  let holdTimer: number | undefined;
+  const minHold = new Promise<void>((resolve) => {
+    holdTimer = window.setTimeout(resolve, MIN_HOLD_MS);
   });
+  const result = await holdUntil(
+    ctx,
+    scraps,
+    Promise.all([pending.catch(() => null), minHold]).then(([next]) => next),
+    alive,
+  );
+  if (holdTimer != null) {
+    window.clearTimeout(holdTimer);
+  }
+
+  if (!alive()) {
+    return;
+  }
+
+  result?.apply();
+  await waitSlotBitmaps(stage, 1500, alive);
+  if (!alive()) {
+    return;
+  }
 
   const nextRect = stage.getBoundingClientRect();
+  fitCanvas(canvas, nextRect);
   const nextSlots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
-  const targets = spawn(nextSlots, nextRect, particles.length);
-  for (let i = 0; i < particles.length; i += 1) {
-    const p = particles[i];
-    const dst = targets[i] || targets[0];
-    p.ox = p.x;
-    p.oy = p.y;
-    p.tx = dst ? dst.tx : p.x;
-    p.ty = dst ? dst.ty : p.y;
-  }
-
-  let revealed = false;
-  await animate(IN_MS, (t) => {
-    const e = easeOut(t);
-    for (let i = 0; i < particles.length; i += 1) {
-      const p = particles[i];
-      p.x = p.ox + (p.tx - p.ox) * e;
-      p.y = p.oy + (p.ty - p.oy) * e;
-    }
-    const fade = t < 0.5 ? 0.55 + t * 0.45 : 1 - (t - 0.5) * 2;
-    draw(ctx, particles, Math.max(0, fade));
-    if (!revealed && t >= 0.42) {
-      revealed = true;
-      onReveal();
-    }
-  });
-
-  if (!revealed) {
+  if (nextSlots.length !== slots.length) {
+    revealSettledSlots(stage, true, onLeadReady);
     onReveal();
+    return;
   }
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  retargetScraps(scraps, nextSlots, nextRect, Boolean(result));
+  drawScraps(ctx, scraps, 1);
+  if (!nextSlots[0]?.hasAttribute("data-ion-fx")) {
+    onLeadReady?.();
+  }
+
+  await animate(
+    IN_MS,
+    (t) => {
+      for (let i = 0; i < scraps.length; i += 1) {
+        const p = scraps[i];
+        const local = Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay));
+        const e = easeInOut(local);
+        p.x = p.holdX + (p.homeX - p.holdX) * e;
+        p.y = p.holdY + (p.homeY - p.holdY) * e;
+        p.w = p.homeW;
+        p.h = p.homeH;
+        p.mix = p.altImg ? Math.max(0, Math.min(1, (local - 0.12) / 0.28)) : 0;
+        clampInCard(p);
+      }
+      drawScraps(ctx, scraps, 1);
+    },
+    alive,
+  );
+
+  if (!alive()) {
+    return;
+  }
+
+  const until = performance.now() + 2000;
+  while (alive()) {
+    const hidden = revealSettledSlots(stage, performance.now() >= until, onLeadReady);
+    const left = scraps.filter((p) => hidden.has(p.slotIndex));
+    if (left.length === 0) {
+      break;
+    }
+    const sec = performance.now() / 1000;
+    for (let i = 0; i < left.length; i += 1) {
+      const p = left[i];
+      const wave = Math.sin(sec * p.freq + p.phase);
+      p.x = p.homeX + p.px * wave * p.amp;
+      p.y = p.homeY + p.py * wave * p.amp * 0.5;
+      clampInCard(p);
+    }
+    drawScraps(ctx, left, 1);
+    await nextFrame();
+  }
+
+  if (!alive()) {
+    return;
+  }
+  revealSettledSlots(stage, true, onLeadReady);
+  onReveal();
+  } finally {
+    clearIonVisuals(stage, ctx);
+  }
 }

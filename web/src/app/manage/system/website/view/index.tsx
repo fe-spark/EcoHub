@@ -18,13 +18,16 @@ import {
 
 import {
   EditOutlined,
+  PictureOutlined,
   ReloadOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { useSiteConfig } from "@/components/common/SiteGuard";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import ImagePicker from "@/app/manage/components/image-picker";
 import styles from "./index.module.less";
 
 interface SiteConfigValues {
@@ -64,7 +67,12 @@ const CONFIG_ITEMS: ConfigItem[] = [
     type: "text",
     hint: "公网访问根地址，如 https://example.com。用于点击 Logo 跳转，以及 Telegram 通知中的播放链接。",
   },
-  { field: "logo", label: "网站 Logo", type: "image" },
+  {
+    field: "logo",
+    label: "网站 Logo",
+    type: "image",
+    hint: "可粘贴图片地址，或从素材中心选择。建议使用方形小图（32×32 或 64×64 PNG）。",
+  },
   { field: "keyword", label: "搜索关键字", type: "text" },
   { field: "describe", label: "网站描述", type: "textarea" },
   { field: "state", label: "网站状态", type: "switch" },
@@ -119,9 +127,11 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
   const [fetching, setFetching] = useState(false);
   const [editingItem, setEditingItem] = useState<ConfigItem | null>(null);
   const [editingValue, setEditingValue] = useState<string | boolean>("");
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+  const { refresh: refreshSiteConfig } = useSiteConfig();
 
   const getBasicInfo = useCallback(async () => {
     setFetching(true);
@@ -145,6 +155,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
   const closeEditor = () => {
     setEditingItem(null);
     setEditingValue("");
+    setPickerOpen(false);
   };
 
   const saveEditingItem = async () => {
@@ -158,6 +169,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
         setConfig(normalizeConfig(nextConfig));
         closeEditor();
         await getBasicInfo();
+        await refreshSiteConfig();
         return;
       }
       message.error(resp.msg);
@@ -173,6 +185,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
       if (resp.code === 0) {
         message.success(resp.msg || "已还原默认基本信息");
         await getBasicInfo();
+        await refreshSiteConfig();
       } else {
         message.error(resp.msg);
       }
@@ -278,12 +291,47 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
             value={String(editingValue ?? "")}
             onChange={(event) => setEditingValue(event.target.value)}
           />
+        ) : editingItem?.type === "image" ? (
+          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+            {String(editingValue || "").trim() ? (
+              <Avatar
+                src={String(editingValue)}
+                shape="square"
+                size={64}
+                style={{ borderRadius: 8 }}
+              />
+            ) : null}
+            <Space.Compact style={{ width: "100%" }}>
+              <Input
+                value={String(editingValue ?? "")}
+                onChange={(event) => setEditingValue(event.target.value)}
+                placeholder="输入 Logo 地址，或从素材中心选择"
+                disabled={!canWrite}
+              />
+              <Button
+                icon={<PictureOutlined />}
+                disabled={!canWrite}
+                onClick={() => setPickerOpen(true)}
+              >
+                选图
+              </Button>
+            </Space.Compact>
+          </Space>
         ) : (
           <Input
             value={String(editingValue ?? "")}
             onChange={(event) => setEditingValue(event.target.value)}
           />
         )}
+        <ImagePicker
+          open={pickerOpen}
+          title="从素材中心选择 Logo"
+          onCancel={() => setPickerOpen(false)}
+          onSelect={(link) => {
+            setEditingValue(link);
+            setPickerOpen(false);
+          }}
+        />
       </Modal>
     </div>
   );
