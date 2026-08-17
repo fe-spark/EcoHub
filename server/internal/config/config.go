@@ -35,6 +35,10 @@ var (
 
 	// JwtSecret JWT 签名密钥
 	JwtSecret = ""
+
+	// FilmPictureUploadDir 用户上传素材落地目录。
+	// 容器内 /app/static/upload 可写时用卷路径，否则回退相对路径供本地 go run。
+	FilmPictureUploadDir = filmPictureUploadDirLocal
 )
 
 const (
@@ -61,8 +65,9 @@ const (
 	// 不含 waiting_publish / finalizing / page_done（整批收尾等待，不按单站超时）。
 	DefaultCollectProgressStaleSec = 30 * 60
 
-	FilmPictureUploadDir = "./static/upload/gallery"
-	FilmPictureAccess    = "/api/upload/pic/poster/"
+	filmPictureUploadDirContainer = "/app/static/upload/gallery"
+	filmPictureUploadDirLocal     = "./static/upload/gallery"
+	FilmPictureAccess             = "/api/upload/pic/poster/"
 )
 
 // 采集写阀 / 并发 运行时参数（InitConfig 按 CPU 核数自动选档，见 resolveCollectProfile）。
@@ -260,7 +265,18 @@ func InitConfig() {
 	}
 	fmt.Printf("[Config] 加载 Redis 地址: %s, DB: %d\n", RedisAddr, RedisDBNo)
 
+	FilmPictureUploadDir = resolveFilmPictureUploadDir()
+	fmt.Printf("[Config] 素材目录: %s\n", FilmPictureUploadDir)
+
 	loadCollectRuntimeConfig()
+}
+
+// resolveFilmPictureUploadDir 发布卷挂在 /app/static/upload；能建该目录则用绝对路径，否则本地相对路径。
+func resolveFilmPictureUploadDir() string {
+	if err := os.MkdirAll(filmPictureUploadDirContainer, os.ModePerm); err != nil {
+		return filmPictureUploadDirLocal
+	}
+	return filmPictureUploadDirContainer
 }
 
 // collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。

@@ -1,30 +1,46 @@
-# v2.0.4
+# v2.1.0
 
-> **补丁版**：管理后台增加首次采集引导；站点品牌保存后即时生效，并修正首页每日更新换批过渡。正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
+> **破坏性改动**：素材上传改走发布卷。从旧 All-in-One 升级**必须先拷文件，再 pull**。直接 `docker compose pull && up -d` 会丢掉已上传素材。正式版会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
 
 镜像：
 
-- `ghcr.io/fe-spark/ecohub:v2.0.4`
+- `ghcr.io/fe-spark/ecohub:v2.1.0`
 - `ghcr.io/fe-spark/ecohub:latest`
 
-## 新增
+## 破坏性改动（必读）
 
-- **后台新手引导**：首次进入管理后台时，按采集中心 → 全选 / 批量启用 / 批量采集 → 分类、规则、计划任务、失败记录、影片的路径走通；只读账号不自动弹出，可从用户菜单回放
+素材文件改为写入发布卷 `data/uploads`（容器内 `/app/static/upload/gallery`）。此前 All-in-One 写在容器可写层 `/app/server/static/upload/gallery`。**直接 `docker compose pull && up -d` 会丢掉已上传素材**（MySQL `files` 记录还在，素材中心裂图）。影片、站点配置、账号不受影响。
+
+从旧镜像升级时，**必须先在仍运行旧镜像的容器上执行**，再拉新镜像（只做一次；本版本之后不必再做）：
+
+```bash
+docker exec Eco-hub sh -c 'if [ -d /app/server/static/upload/gallery ]; then mkdir -p /app/static/upload/gallery && cp -an /app/server/static/upload/gallery/. /app/static/upload/gallery/; echo 已拷到卷; else echo 无需迁移（旧目录不存在或已是新布局）; fi'
+```
+
+源码版 `Eco-server`（此前无上传卷）先把图拷出再 `up`，否则空 volume 会盖住容器层旧文件：
+
+```bash
+docker cp Eco-server:/app/static/upload/gallery ./_gallery_bak
+docker compose up --build -d
+docker cp ./_gallery_bak/. Eco-server:/app/static/upload/gallery/
+```
 
 ## 修复
 
-- **站点品牌**：网站配置保存后页头 / 侧栏 Logo 与站点名即时刷新，标签图标走后台 Logo
-- **每日更新**：修正首页换批过渡，避免批次切换时的闪动或衔接错误
+- **素材中心**：用户上传落到发布卷，升级重建容器不再丢图
 
-## 部署（v2.0.4）
+## 部署（v2.1.0）
 
 ```bash
+# 已有旧版 All-in-One：先拷素材到卷（旧目录不存在会提示并跳过）
+docker exec Eco-hub sh -c 'if [ -d /app/server/static/upload/gallery ]; then mkdir -p /app/static/upload/gallery && cp -an /app/server/static/upload/gallery/. /app/static/upload/gallery/; echo 已拷到卷; else echo 无需迁移（旧目录不存在或已是新布局）; fi'
+
 # 推荐：安装脚本 + 发布版 Compose（默认 :latest）
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 cd ~/ecohub && docker compose pull && docker compose up -d
 
 # 或固定版本：
-#   image: ghcr.io/fe-spark/ecohub:v2.0.4
+#   image: ghcr.io/fe-spark/ecohub:v2.1.0
 ```
 
 默认账号：`admin / admin`、`guest / guest`。正式部署请改密码与 `JWT_SECRET`。  
