@@ -125,18 +125,12 @@ function readProgressPhase(): ProgressPhase | null {
 
 function collectWaitDescription(phase: ProgressPhase | null, ended: boolean) {
   if (phase === "running") {
-    return "采集进行中，完成后可进入下一步。";
+    return "采集进行中，结束后可进入下一步。";
   }
-  if (phase === "failed") {
-    return "采集失败，请重新批量采集后再继续。";
+  if (ended || phase === "done" || phase === "failed" || phase === "stopped") {
+    return "采集已结束，可以进入下一步。";
   }
-  if (phase === "stopped") {
-    return "采集已终止，请重新批量采集后再继续。";
-  }
-  if (ended || phase === "done") {
-    return "采集已完成，可以进入下一步。";
-  }
-  return "开始采集后可看顶部进度；主站采完并发布后才能进入下一步。";
+  return "开始采集后可看顶部进度；采集结束后即可进入下一步。";
 }
 
 function readDone() {
@@ -347,12 +341,8 @@ export default function ManageTour({
       if (!sawRunningRef.current) {
         return;
       }
-      if (phase === "done") {
+      if (phase === "done" || phase === "failed" || phase === "stopped") {
         setProgressEnded(true);
-        return;
-      }
-      if (phase === "failed" || phase === "stopped") {
-        setProgressEnded(false);
       }
     };
     const obs = new MutationObserver(check);

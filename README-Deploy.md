@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。
+固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。发布版后台可点「立即升级并重启」（compose 需挂载 `/var/run/docker.sock`，新 compose 已包含）。挂载 socket 等于容器内进程可操作宿主机 Docker，仅可写账号能触发升级；不需要在线升级可去掉该卷。
 
 ### 5. 从 v1.x 升级
 
@@ -189,6 +189,7 @@ services:
       - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
     volumes:
       - ./data/uploads:/app/static/upload
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - Eco-network
     extra_hosts:

@@ -1,9 +1,9 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Modal, Space, Typography } from "antd";
 import { CloudUploadOutlined } from "@ant-design/icons";
-import { ApiGet } from "@/lib/client-api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./index.module.less";
 
@@ -15,10 +15,15 @@ interface AppVersionInfo {
   releaseName?: string;
   releaseNotes?: string;
   breaking?: boolean;
+  canUpgrade?: boolean;
+  upgradePhase?: string;
+  upgradeError?: string;
 }
 
-function buildUpgradeScript() {
-  return "cd ~/ecohub\ndocker compose pull && docker compose up -d";
+const FALLBACK_CMD = "cd ~/ecohub\ndocker compose pull && docker compose up -d";
+
+function sleep(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 export default function SiderVersion({
@@ -30,10 +35,13 @@ export default function SiderVersion({
 }) {
   const [info, setInfo] = useState<AppVersionInfo | null>(null);
   const [open, setOpen] = useState(false);
-  const [copying, setCopying] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeHint, setUpgradeHint] = useState("");
+  const abortRef = useRef(false);
   const { message } = useAppMessage();
 
   useEffect(() => {
+    abortRef.current = false;
     ApiGet("/manage/version")
       .then((resp) => {
         if (resp.code === 0 && resp.data) {
@@ -41,40 +49,94 @@ export default function SiderVersion({
         }
       })
       .catch(() => {});
+    return () => {
+      abortRef.current = true;
+    };
   }, []);
 
   const current = info?.current || "";
   const hasUpdate = Boolean(info?.hasUpdate);
   const label = current ? `v${current.replace(/^v/i, "")}` : "—";
 
-  const copyUpgrade = async () => {
+  const waitUntilBack = async () => {
+    setUpgradeHint("正在拉取 latest…");
+    let disconnected = false;
+    for (let i = 0; i < 90 && !abortRef.current; i += 1) {
+      await sleep(2000);
+      try {
+        const resp = await fetch("/api/manage/version", {
+          credentials: "include",
+          cache: "no-store",
+        });
+        if (!resp.ok) {
+          disconnected = true;
+          break;
+        }
+        const json = (await resp.json()) as {
+          code?: number;
+          data?: AppVersionInfo;
+        };
+        if (json.code === 0 && json.data?.upgradePhase === "failed") {
+          throw new Error(json.data.upgradeError || "升级失败");
+        }
+        if (json.code === 0 && json.data?.upgradePhase === "recreating") {
+          setUpgradeHint("正在重启容器…");
+        }
+      } catch (err) {
+        if (err instanceof Error && err.message && err.message !== "Failed to fetch") {
+          throw err;
+        }
+        disconnected = true;
+        break;
+      }
+    }
+    if (!disconnected) {
+      throw new Error("仍在拉取镜像，请稍后重试或检查网络");
+    }
+    setUpgradeHint("服务重启中，等待恢复…");
+    for (let i = 0; i < 60 && !abortRef.current; i += 1) {
+      await sleep(2000);
+      try {
+        const resp = await fetch("/api/health", { cache: "no-store" });
+        if (resp.ok) {
+          window.location.reload();
+          return;
+        }
+      } catch {
+        /* 重启窗口内连不上是预期 */
+      }
+    }
+    throw new Error("重启后未恢复，请手动刷新页面");
+  };
+
+  const startUpgrade = async () => {
     if (!info || !canWrite) {
-      message.warning("访客仅可查看，无法一键升级");
+      message.warning("访客仅可查看，无法升级");
       return;
     }
-    const script = buildUpgradeScript();
-    setCopying(true);
+    if (info.breaking) {
+      message.warning("本次为破坏性改动，请按 Release 说明手动升级");
+      return;
+    }
+    if (!info.canUpgrade) {
+      message.warning("当前环境未挂载 docker.sock，无法在线重启");
+      return;
+    }
+    abortRef.current = false;
+    setUpgrading(true);
+    setUpgradeHint("已提交升级");
     try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(script);
-      } else {
-        const ta = document.createElement("textarea");
-        ta.value = script;
-        ta.style.position = "fixed";
-        ta.style.opacity = "0";
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand("copy");
-        document.body.removeChild(ta);
+      const resp = await ApiPost("/manage/version/upgrade");
+      if (resp.code !== 0) {
+        throw new Error(resp.msg || "升级请求失败");
       }
-      message.success("已复制升级命令，请到服务器安装目录执行");
-      if (info.releaseUrl) {
-        window.open(info.releaseUrl, "_blank", "noopener,noreferrer");
-      }
-    } catch {
-      message.error("复制失败，请手动复制弹窗中的命令");
-    } finally {
-      setCopying(false);
+      message.success(resp.msg || "已开始升级");
+      await waitUntilBack();
+    } catch (err) {
+      const text = err instanceof Error ? err.message : "升级失败";
+      message.error(text);
+      setUpgrading(false);
+      setUpgradeHint("");
     }
   };
 
@@ -106,11 +168,21 @@ export default function SiderVersion({
               <Button
                 type="primary"
                 icon={<CloudUploadOutlined />}
-                loading={copying}
-                disabled={!canWrite}
-                onClick={copyUpgrade}
+                loading={upgrading}
+                disabled={
+                  !canWrite || !info?.canUpgrade || !!info?.breaking || upgrading
+                }
+                onClick={() => {
+                  Modal.confirm({
+                    title: "立即升级并重启？",
+                    content: "将拉取 latest 并重建当前容器，页面会短暂断开。",
+                    okText: "升级",
+                    cancelText: "取消",
+                    onOk: () => startUpgrade(),
+                  });
+                }}
               >
-                一键升级
+                {upgrading ? "正在升级" : "立即升级并重启"}
               </Button>
             ) : null}
           </Space>
@@ -126,8 +198,19 @@ export default function SiderVersion({
               type="warning"
               showIcon
               title="本次为破坏性改动"
-              description="已部署旧版须先按 Release 说明处理（例如拷贝素材到卷），再 pull。全新安装不必执行迁移。"
+              description="请先按 Release 说明处理后再升级，不能使用在线重启。"
             />
+          ) : null}
+          {hasUpdate && !info?.canUpgrade && !info?.breaking ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="当前环境不能在线重启"
+              description="发布版需挂载 /var/run/docker.sock。也可在服务器执行下方命令。"
+            />
+          ) : null}
+          {upgrading && upgradeHint ? (
+            <Alert type="info" showIcon title="升级进行中" description={upgradeHint} />
           ) : null}
           {info?.releaseName || info?.releaseNotes ? (
             <pre className={styles.notes}>
@@ -138,12 +221,12 @@ export default function SiderVersion({
               未能获取 GitHub Release（网络不可达时只显示当前版本）。
             </Typography.Paragraph>
           )}
-          {hasUpdate ? (
+          {hasUpdate && (!info?.canUpgrade || info?.breaking) ? (
             <>
               <Typography.Text type="secondary">
-                容器无法自行替换镜像。一键升级会复制下面的命令，请到服务器安装目录执行：
+                到服务器安装目录执行：
               </Typography.Text>
-              <pre className={styles.cmd}>{buildUpgradeScript()}</pre>
+              <pre className={styles.cmd}>{FALLBACK_CMD}</pre>
             </>
           ) : null}
         </div>
