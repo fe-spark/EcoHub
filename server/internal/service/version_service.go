@@ -59,7 +59,7 @@ func (s *VersionService) GetAppVersion() AppVersionInfo {
 	info.ReleaseURL = latest.HTMLURL
 	info.ReleaseName = latest.Name
 	info.ReleaseNotes = latest.Body
-	info.Breaking = strings.Contains(latest.Body, "破坏性改动") || strings.Contains(latest.Body, "破坏性变更")
+	info.Breaking = strings.Contains(latest.Body, "破坏性改动")
 	info.HasUpdate = isNewerVersion(latest.TagName, info.Current)
 	return info
 }
