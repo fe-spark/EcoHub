@@ -100,11 +100,10 @@ function buildStorageAlerts(storage?: StorageStatus | null): StorageAlert[] {
     alerts.push({
       key: "missing",
       title: `有 ${storage.missingCount} 条素材文件缺失`,
-      detail:
-        "数据库有记录但磁盘没有对应图片，列表会显示裂图。常见于旧版升级时未先把文件拷到卷。",
+      detail: "在服务器 compose 目录执行（1Panel 若挂的是 ./uploads，把 data/uploads 改成 uploads）：",
       steps: [
-        "若旧容器还在：按当次 Release 的破坏性改动，把 /app/server/static/upload/gallery 拷到卷后再 pull",
-        "若已经重建：可写层文件已丢失，只能重新上传这些素材",
+        "mkdir -p ./data/uploads/gallery && docker cp Eco-hub:/app/server/static/upload/gallery/. ./data/uploads/gallery/",
+        "拷不出来就重新上传这些图",
       ],
     });
   }

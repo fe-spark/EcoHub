@@ -14,6 +14,10 @@ func TestIsNewerVersion(t *testing.T) {
 		{"v3.0.0", "2.9.9", true},
 		{"v2.1.0", "2.1.0-beta.1", true},
 		{"v2.1.0-beta.1", "2.1.0", false},
+		{"v2.1.0-beta.2", "2.1.0-beta.1", true},
+		{"v2.1.0-beta.1", "2.1.0-beta.2", false},
+		{"v2.1.0-beta.2", "2.1.0-beta.2", false},
+		{"v2.1.1-beta.1", "2.1.0-beta.9", true},
 	}
 	for _, c := range cases {
 		if got := isNewerVersion(c.latest, c.current); got != c.want {

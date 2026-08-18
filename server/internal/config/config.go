@@ -112,8 +112,10 @@ const (
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
-	// LatestReleaseCacheKey GitHub 最新 Release 缓存
+	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
 	LatestReleaseCacheKey = RedisKeyPrefix + ":Version:LatestRelease"
+	// LatestReleasePreCacheKey 当前为测试版时，含 pre-release 的最新缓存
+	LatestReleasePreCacheKey = RedisKeyPrefix + ":Version:LatestRelease:pre"
 	// LatestReleaseCacheTTL 版本检查缓存，避免打满 GitHub 匿名限额
 	LatestReleaseCacheTTL = time.Hour
 
