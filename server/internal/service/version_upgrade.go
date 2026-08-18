@@ -75,10 +75,24 @@ func (s *VersionService) StartUpgrade() error {
 		upgrading.Store(false)
 		return fmt.Errorf("无法识别当前容器，仅发布版 All-in-One 支持在线升级")
 	}
-	image := latestImageRef(configImageFromInspect(insp))
+	info := s.GetAppVersion()
+	if !info.HasUpdate || info.Latest == "" {
+		upgrading.Store(false)
+		return fmt.Errorf("没有可升级版本")
+	}
+	image := taggedImage(configImageFromInspect(insp), info.Latest)
 	setUpgradeState("pulling", "")
 	go runContainerUpgrade(engine, insp, image)
 	return nil
+}
+
+func taggedImage(current, tag string) string {
+	repo, _ := splitImageTag(latestImageRef(current))
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return repo + ":latest"
+	}
+	return repo + ":" + tag
 }
 
 func configImageFromInspect(insp containerInspect) string {

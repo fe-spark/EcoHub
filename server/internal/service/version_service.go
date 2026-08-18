@@ -47,43 +47,45 @@ func (s *VersionService) GetAppVersion() AppVersionInfo {
 		UpgradePhase: st.Phase,
 		UpgradeError: st.Error,
 	}
-	latest, err := s.loadLatestRelease()
+	onPre := isPreRelease(info.Current, "", false)
+	latest, err := s.loadLatestRelease(onPre)
 	if err != nil || latest.TagName == "" {
 		if err != nil {
 			log.Printf("[Version] 获取 GitHub Release 失败: %v", err)
 		}
 		return info
 	}
-	if isPreRelease(latest.TagName, latest.Name, latest.Prerelease) {
-		return info
-	}
 	info.Latest = latest.TagName
 	info.ReleaseURL = latest.HTMLURL
 	info.ReleaseName = latest.Name
 	info.ReleaseNotes = latest.Body
-	info.Breaking = strings.Contains(latest.Body, "破坏性改动")
+	info.Breaking = strings.Contains(latest.Body, "破坏性改动") || strings.Contains(latest.Body, "破坏性变更")
 	info.HasUpdate = isNewerVersion(latest.TagName, info.Current)
 	return info
 }
 
-func (s *VersionService) loadLatestRelease() (githubReleaseCache, error) {
-	if raw, err := db.Rdb.Get(db.Cxt, config.LatestReleaseCacheKey).Result(); err == nil && raw != "" {
+func (s *VersionService) loadLatestRelease(includePre bool) (githubReleaseCache, error) {
+	key := config.LatestReleaseCacheKey
+	if includePre {
+		key = config.LatestReleasePreCacheKey
+	}
+	if raw, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && raw != "" {
 		var cached githubReleaseCache
 		if json.Unmarshal([]byte(raw), &cached) == nil && cached.TagName != "" {
 			return cached, nil
 		}
 	}
-	rel, err := fetchGithubLatestRelease()
+	rel, err := fetchGithubLatestRelease(includePre)
 	if err != nil {
 		return githubReleaseCache{}, err
 	}
 	if b, err := json.Marshal(rel); err == nil {
-		_ = db.Rdb.Set(db.Cxt, config.LatestReleaseCacheKey, b, config.LatestReleaseCacheTTL).Err()
+		_ = db.Rdb.Set(db.Cxt, key, b, config.LatestReleaseCacheTTL).Err()
 	}
 	return rel, nil
 }
 
-func fetchGithubLatestRelease() (githubReleaseCache, error) {
+func fetchGithubLatestRelease(includePre bool) (githubReleaseCache, error) {
 	url := fmt.Sprintf("https://api.github.com/repos/%s/releases?per_page=20", githubRepoPath())
 	req, err := http.NewRequest(http.MethodGet, url, nil)
 	if err != nil {
@@ -116,24 +118,35 @@ func fetchGithubLatestRelease() (githubReleaseCache, error) {
 	if err := json.Unmarshal(body, &raw); err != nil {
 		return githubReleaseCache{}, err
 	}
+	var best githubReleaseCache
 	for _, item := range raw {
 		if item.Draft {
 			continue
 		}
 		tag := strings.TrimSpace(item.TagName)
 		name := strings.TrimSpace(item.Name)
-		if isPreRelease(tag, name, item.Prerelease) {
+		pre := isPreRelease(tag, name, item.Prerelease)
+		if pre && !includePre {
 			continue
 		}
-		return githubReleaseCache{
+		cand := githubReleaseCache{
 			TagName:    tag,
 			HTMLURL:    strings.TrimSpace(item.HTMLURL),
 			Name:       name,
 			Body:       strings.TrimSpace(item.Body),
-			Prerelease: false,
-		}, nil
+			Prerelease: pre,
+		}
+		if best.TagName == "" || isNewerVersion(cand.TagName, best.TagName) {
+			best = cand
+		}
 	}
-	return githubReleaseCache{}, fmt.Errorf("无正式版 Release")
+	if best.TagName == "" {
+		if includePre {
+			return githubReleaseCache{}, fmt.Errorf("无可用 Release")
+		}
+		return githubReleaseCache{}, fmt.Errorf("无正式版 Release")
+	}
+	return best, nil
 }
 
 func isPreRelease(tag, name string, flagged bool) bool {
@@ -182,8 +195,8 @@ func githubRepoPath() string {
 }
 
 func isNewerVersion(latest, current string) bool {
-	lm, ln, lp, lok := parseSemver(latest)
-	cm, cn, cp, cok := parseSemver(current)
+	lm, ln, lp, lpre, lok := parseSemverFull(latest)
+	cm, cn, cp, cpre, cok := parseSemverFull(current)
 	if !lok || !cok {
 		return normalizeVer(latest) != normalizeVer(current) && latest != ""
 	}
@@ -196,27 +209,91 @@ func isNewerVersion(latest, current string) bool {
 	if lp != cp {
 		return lp > cp
 	}
-	return !isPreRelease(latest, "", false) && isPreRelease(current, "", false)
+	if lpre == "" && cpre != "" {
+		return true
+	}
+	if lpre != "" && cpre == "" {
+		return false
+	}
+	return comparePreRelease(lpre, cpre) > 0
 }
 
 func parseSemver(raw string) (major, minor, patch int, ok bool) {
+	major, minor, patch, _, ok = parseSemverFull(raw)
+	return major, minor, patch, ok
+}
+
+func parseSemverFull(raw string) (major, minor, patch int, pre string, ok bool) {
 	s := normalizeVer(raw)
-	if i := strings.IndexAny(s, "-+"); i >= 0 {
+	if i := strings.IndexByte(s, '+'); i >= 0 {
+		s = s[:i]
+	}
+	if i := strings.IndexByte(s, '-'); i >= 0 {
+		pre = s[i+1:]
 		s = s[:i]
 	}
 	parts := strings.Split(s, ".")
 	if len(parts) < 2 || len(parts) > 3 {
-		return 0, 0, 0, false
+		return 0, 0, 0, "", false
 	}
 	nums := make([]int, 3)
 	for i, p := range parts {
 		n, err := strconv.Atoi(p)
 		if err != nil {
-			return 0, 0, 0, false
+			return 0, 0, 0, "", false
 		}
 		nums[i] = n
 	}
-	return nums[0], nums[1], nums[2], true
+	return nums[0], nums[1], nums[2], pre, true
+}
+
+func comparePreRelease(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		var ai, bi string
+		if i < len(as) {
+			ai = as[i]
+		}
+		if i < len(bs) {
+			bi = bs[i]
+		}
+		if ai == bi {
+			continue
+		}
+		if ai == "" {
+			return -1
+		}
+		if bi == "" {
+			return 1
+		}
+		an, aErr := strconv.Atoi(ai)
+		bn, bErr := strconv.Atoi(bi)
+		if aErr == nil && bErr == nil {
+			if an < bn {
+				return -1
+			}
+			if an > bn {
+				return 1
+			}
+			continue
+		}
+		if aErr == nil {
+			return -1
+		}
+		if bErr == nil {
+			return 1
+		}
+		if ai < bi {
+			return -1
+		}
+		return 1
+	}
+	return 0
 }
 
 func normalizeVer(raw string) string {

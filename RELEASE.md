@@ -1,6 +1,4 @@
-测试版 **v2.1.0-beta.1**，镜像 `ghcr.io/fe-spark/ecohub:v2.1.0-beta.1`，**不会**覆盖 `:latest`。
-
-> **破坏性变更**：已部署旧版必须按下面做完再启动。全新安装、本版本之后的升级不必再做。正式版才会覆盖 `:latest`。
+> **破坏性变更**：已部署旧版必须按下面做完再启动。全新安装、本版本之后的升级不必再做。正式版会覆盖 `:latest`。
 
 ## 必须执行
 
@@ -13,13 +11,11 @@ mkdir -p ~/ecohub/data/uploads/gallery
 docker cp Eco-hub:/app/server/static/upload/gallery/. ~/ecohub/data/uploads/gallery/
 ```
 
-然后重新拉安装脚本并启动（测试版把镜像改成 beta 标签）：
+然后重新拉安装脚本并启动：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 cd ~/ecohub
-# 测试本 beta 时把 image 改成：
-#   ghcr.io/fe-spark/ecohub:v2.1.0-beta.1
 docker compose stop
 docker compose pull
 docker compose up -d
