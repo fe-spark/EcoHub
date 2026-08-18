@@ -581,10 +581,16 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                       <Col xs={24} sm={12}>
                         <Form.Item
                           label="同类事件最小间隔"
-                          name="minIntervalSec"
                           tooltip="同一类事件在设定的秒数间隔内最多只推送一次；0 表示不受防刷限流"
                         >
-                          <InputNumber min={0} max={3600} addonAfter="秒" style={{ width: "100%" }} />
+                          <Space.Compact block>
+                            <Form.Item name="minIntervalSec" noStyle>
+                              <InputNumber min={0} max={3600} style={{ width: "100%" }} />
+                            </Form.Item>
+                            <Button disabled tabIndex={-1}>
+                              秒
+                            </Button>
+                          </Space.Compact>
                         </Form.Item>
                       </Col>
                     </Row>

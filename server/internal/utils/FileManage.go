@@ -11,10 +11,7 @@ import (
 */
 
 func CreateBaseDir() error {
-	if _, err := os.Stat(config.FilmPictureUploadDir); os.IsNotExist(err) {
-		return os.MkdirAll(config.FilmPictureUploadDir, os.ModePerm)
-	}
-	return nil
+	return os.MkdirAll(config.FilmPictureUploadDir, os.ModePerm)
 }
 
 func RemoveFile(path string) error {

@@ -76,9 +76,26 @@
   gap: 24px;
 }
 
+.field {
+  min-height: 48px;
+  padding-inline: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.fieldIcon {
+  color: var(--ant-color-primary);
+}
+
 .btn {
-  height: 54px !important;
+  height: 56px;
   margin-top: 12px;
+  font-weight: 700;
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
+  box-shadow: 0 8px 20px rgba(250, 140, 22, 0.2);
 
   &:hover {
     transform: translateY(-2px);
@@ -141,6 +158,11 @@
 
   .footer {
     color: #94a3b8;
+  }
+
+  .field {
+    background: #ffffff;
+    border-color: rgba(250, 140, 22, 0.2);
   }
 
   .githubLink:hover {
