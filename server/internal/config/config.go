@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -37,7 +38,7 @@ var (
 	JwtSecret = ""
 
 	// FilmPictureUploadDir 用户上传素材落地目录。
-	// 容器内 /app/static/upload 可写时用卷路径，否则回退相对路径供本地 go run。
+	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
 	FilmPictureUploadDir = filmPictureUploadDirLocal
 )
 
@@ -111,6 +112,10 @@ const (
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
+	// LatestReleaseCacheKey GitHub 最新 Release 缓存
+	LatestReleaseCacheKey = RedisKeyPrefix + ":Version:LatestRelease"
+	// LatestReleaseCacheTTL 版本检查缓存，避免打满 GitHub 匿名限额
+	LatestReleaseCacheTTL = time.Hour
 
 	// SearchTags 搜索分类标签缓存 key (前缀)
 	SearchTags = RedisKeyPrefix + ":Search:Tags"
@@ -271,12 +276,62 @@ func InitConfig() {
 	loadCollectRuntimeConfig()
 }
 
-// resolveFilmPictureUploadDir 发布卷挂在 /app/static/upload；能建该目录则用绝对路径，否则本地相对路径。
+// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。
 func resolveFilmPictureUploadDir() string {
-	if err := os.MkdirAll(filmPictureUploadDirContainer, os.ModePerm); err != nil {
-		return filmPictureUploadDirLocal
+	if runningInContainer() {
+		return filmPictureUploadDirContainer
 	}
-	return filmPictureUploadDirContainer
+	return filmPictureUploadDirLocal
+}
+
+func runningInContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	switch filepath.Dir(exe) {
+	case "/app", "/app/server":
+		return true
+	default:
+		return false
+	}
+}
+
+// ContainerUploadVolumeOK 非容器或已挂 /app/static/upload 为 true。
+func ContainerUploadVolumeOK() bool {
+	if !runningInContainer() {
+		return true
+	}
+	return uploadPathIsMounted()
+}
+
+// EnsureContainerUploadVolume 未挂卷时返回错误供启动日志，不阻断启动。
+func EnsureContainerUploadVolume() error {
+	if ContainerUploadVolumeOK() {
+		return nil
+	}
+	return fmt.Errorf("素材目录 %s 未挂载发布卷 /app/static/upload", FilmPictureUploadDir)
+}
+
+func uploadPathIsMounted() bool {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		switch fields[4] {
+		case "/app/static/upload", "/app/static/upload/gallery":
+			return true
+		}
+	}
+	return false
 }
 
 // collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。

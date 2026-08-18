@@ -4,6 +4,9 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
+	"time"
+
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -30,6 +33,7 @@ func ExistFileTable() bool {
 // SaveGallery 保存图片关联信息
 func SaveGallery(f model.FileInfo) {
 	db.Mdb.Create(&f)
+	invalidateMissingGalleryCache()
 }
 
 // GetFileInfoById 通过ID获取对应的图片信息
@@ -65,6 +69,47 @@ func RenameFileInfo(id uint, name string) error {
 
 func DelFileInfo(id uint) {
 	db.Mdb.Unscoped().Delete(&model.FileInfo{}, id)
+	invalidateMissingGalleryCache()
+}
+
+var (
+	missingGalleryMu    sync.Mutex
+	missingGalleryCount int
+	missingGalleryAt    time.Time
+)
+
+const missingGalleryTTL = 30 * time.Second
+
+func invalidateMissingGalleryCache() {
+	missingGalleryMu.Lock()
+	missingGalleryAt = time.Time{}
+	missingGalleryMu.Unlock()
+}
+
+// CountMissingUserGallery 用户上传素材中磁盘文件已不存在的条数（短 TTL，避免列表热路径每次全量 Stat）。
+func CountMissingUserGallery() int {
+	missingGalleryMu.Lock()
+	defer missingGalleryMu.Unlock()
+	if !missingGalleryAt.IsZero() && time.Since(missingGalleryAt) < missingGalleryTTL {
+		return missingGalleryCount
+	}
+	var list []model.FileInfo
+	if err := db.Mdb.Where("relevance_id = 0").Find(&list).Error; err != nil {
+		return missingGalleryCount
+	}
+	n := 0
+	for i := range list {
+		path := StoragePath(&list[i])
+		if path == "" {
+			continue
+		}
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			n++
+		}
+	}
+	missingGalleryCount = n
+	missingGalleryAt = time.Now()
+	return n
 }
 
 // PurgeSyncedGallery 清理历史采集同步产生的图库记录及本地文件（素材中心仅保留用户上传）

@@ -15,6 +15,7 @@ import {
   Button,
   Input,
   Modal,
+  Alert,
 } from "antd";
 import {
   PlusOutlined,
@@ -32,6 +33,7 @@ import {
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import dayjs from "dayjs";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -41,10 +43,57 @@ interface PhotoItem {
   link: string;
   name: string;
   fid: string;
+  CreatedAt?: string;
+}
+
+interface StorageStatus {
+  volumeMounted: boolean;
+  missingCount: number;
+}
+
+interface StorageAlert {
+  key: string;
+  title: string;
+  detail: string;
+  steps: string[];
+}
+
+function buildStorageAlerts(storage?: StorageStatus | null): StorageAlert[] {
+  if (!storage) {
+    return [];
+  }
+  const alerts: StorageAlert[] = [];
+  if (storage.volumeMounted === false) {
+    alerts.push({
+      key: "volume",
+      title: "素材目录未挂载发布卷",
+      detail:
+        "当前写入容器可写层，升级重建会丢掉已上传素材。发布卷应为 /app/static/upload。",
+      steps: [
+        "发布版 compose 为 ecohub 增加卷：./data/uploads:/app/static/upload",
+        "源码版 compose 为 server 增加卷：eco-server-uploads:/app/static/upload",
+        "改完后执行 docker compose up -d 重启对应容器",
+      ],
+    });
+  }
+  if (storage.missingCount > 0) {
+    alerts.push({
+      key: "missing",
+      title: `有 ${storage.missingCount} 条素材文件缺失`,
+      detail:
+        "数据库有记录但磁盘没有对应图片，列表会显示裂图。常见于旧版升级时未先把文件拷到卷。",
+      steps: [
+        "若旧容器还在：按当次 Release 的破坏性改动，把 /app/server/static/upload/gallery 拷到卷后再 pull",
+        "若已经重建：可写层文件已丢失，只能重新上传这些素材",
+      ],
+    });
+  }
+  return alerts;
 }
 
 export default function FileUploadPageView() {
   const [list, setList] = useState<PhotoItem[]>([]);
+  const [storage, setStorage] = useState<StorageStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [page, setPage] = useState({ current: 1, pageSize: 36, total: 0 });
@@ -57,6 +106,7 @@ export default function FileUploadPageView() {
   const [previewIndex, setPreviewIndex] = useState(0);
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+  const alerts = buildStorageAlerts(storage);
 
   const getPhotoList = useCallback(
     async (current = 1, name = keyword) => {
@@ -69,6 +119,7 @@ export default function FileUploadPageView() {
         });
         if (resp.code === 0) {
           setList(resp.data.list || []);
+          setStorage(resp.data.storage ?? null);
           if (resp.data.page) {
             setPage({
               current: resp.data.page.current,
@@ -256,6 +307,26 @@ export default function FileUploadPageView() {
           </Space>
         }
       />
+      {alerts.map((item) => (
+        <Alert
+          key={item.key}
+          type="error"
+          showIcon
+          title={item.title}
+          description={
+            <div className={styles.alertBody}>
+              <div>{item.detail}</div>
+              {item.steps?.length ? (
+                <ol className={styles.alertSteps}>
+                  {item.steps.map((step) => (
+                    <li key={step}>{step}</li>
+                  ))}
+                </ol>
+              ) : null}
+            </div>
+          }
+        />
+      ))}
 
       <div
         className={styles.container}
@@ -367,16 +438,25 @@ export default function FileUploadPageView() {
                           </Space>
                         </div>
                       </div>
-                      {(item.name || item.fid) && (
-                        <div
-                          className={styles.nameBar}
-                          title="点击重命名"
-                          onClick={() => openRename(item)}
-                        >
-                          <span className={styles.nameText}>
-                            {item.name || item.fid}
-                          </span>
-                          <FormOutlined className={styles.renameIcon} />
+                      {(item.name || item.fid || item.CreatedAt) && (
+                        <div className={styles.cardMeta}>
+                          {(item.name || item.fid) && (
+                            <div
+                              className={styles.nameBar}
+                              title="点击重命名"
+                              onClick={() => openRename(item)}
+                            >
+                              <span className={styles.nameText}>
+                                {item.name || item.fid}
+                              </span>
+                              <FormOutlined className={styles.renameIcon} />
+                            </div>
+                          )}
+                          {item.CreatedAt ? (
+                            <div className={styles.dateBar} title="上传日期">
+                              {dayjs(item.CreatedAt).format("YYYY-MM-DD HH:mm")}
+                            </div>
+                          ) : null}
                         </div>
                       )}
                     </div>

@@ -41,6 +41,7 @@ func SetupRouter() *gin.Engine {
 	manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
 	{
 		manageRoute.GET(`/index`, handler.ManageHd.ManageIndex)
+		manageRoute.GET(`/version`, handler.ManageHd.AppVersion)
 
 		// 系统相关
 		sysConfig := manageRoute.Group(`/config`)

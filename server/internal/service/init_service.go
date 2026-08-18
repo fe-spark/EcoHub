@@ -44,7 +44,10 @@ func (s *InitService) DefaultDataInit() {
 	repository.InitBuiltinAccounts()
 	if err := utils.CreateBaseDir(); err != nil {
 		syslog.Errorf("[Init] 素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err)
-		panic(fmt.Sprintf("素材目录创建失败: %v", err))
+		panic(fmt.Sprintf("素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err))
+	}
+	if err := config.EnsureContainerUploadVolume(); err != nil {
+		syslog.Warnf("[Init] %v", err)
 	}
 	// 一次性清理历史采集同步图库（素材中心仅保留用户上传）
 	repository.PurgeSyncedGallery()
