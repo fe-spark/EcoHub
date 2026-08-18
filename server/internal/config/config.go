@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +36,10 @@ var (
 
 	// JwtSecret JWT 签名密钥
 	JwtSecret = ""
+
+	// FilmPictureUploadDir 用户上传素材落地目录。
+	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
+	FilmPictureUploadDir = filmPictureUploadDirLocal
 )
 
 const (
@@ -61,8 +66,9 @@ const (
 	// 不含 waiting_publish / finalizing / page_done（整批收尾等待，不按单站超时）。
 	DefaultCollectProgressStaleSec = 30 * 60
 
-	FilmPictureUploadDir = "./static/upload/gallery"
-	FilmPictureAccess    = "/api/upload/pic/poster/"
+	filmPictureUploadDirContainer = "/app/static/upload/gallery"
+	filmPictureUploadDirLocal     = "./static/upload/gallery"
+	FilmPictureAccess             = "/api/upload/pic/poster/"
 )
 
 // 采集写阀 / 并发 运行时参数（InitConfig 按 CPU 核数自动选档，见 resolveCollectProfile）。
@@ -106,6 +112,12 @@ const (
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
+	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
+	LatestReleaseCacheKey = RedisKeyPrefix + ":Version:LatestRelease"
+	// LatestReleasePreCacheKey 当前为测试版时，含 pre-release 的最新缓存
+	LatestReleasePreCacheKey = RedisKeyPrefix + ":Version:LatestRelease:pre"
+	// LatestReleaseCacheTTL 版本检查缓存，避免打满 GitHub 匿名限额
+	LatestReleaseCacheTTL = time.Hour
 
 	// SearchTags 搜索分类标签缓存 key (前缀)
 	SearchTags = RedisKeyPrefix + ":Search:Tags"
@@ -192,7 +204,22 @@ const (
 )
 
 // init func for loading from env
+func IsUpgradeHelper() bool {
+	if os.Getenv("ECOHUB_UPGRADE_HELPER") == "1" {
+		return true
+	}
+	for _, a := range os.Args[1:] {
+		if a == "upgrade-helper" {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
+	if IsUpgradeHelper() {
+		return
+	}
 	// 本地直接运行服务端时，优先从当前目录 .env 加载环境变量。
 	// Docker Compose 会显式注入 environment，这里不会覆盖已存在的值。
 	_ = godotenv.Load()
@@ -260,7 +287,68 @@ func InitConfig() {
 	}
 	fmt.Printf("[Config] 加载 Redis 地址: %s, DB: %d\n", RedisAddr, RedisDBNo)
 
+	FilmPictureUploadDir = resolveFilmPictureUploadDir()
+	fmt.Printf("[Config] 素材目录: %s\n", FilmPictureUploadDir)
+
 	loadCollectRuntimeConfig()
+}
+
+// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。
+func resolveFilmPictureUploadDir() string {
+	if runningInContainer() {
+		return filmPictureUploadDirContainer
+	}
+	return filmPictureUploadDirLocal
+}
+
+func runningInContainer() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return false
+	}
+	switch filepath.Dir(exe) {
+	case "/app", "/app/server":
+		return true
+	default:
+		return false
+	}
+}
+
+// ContainerUploadVolumeOK 非容器或已挂 /app/static/upload 为 true。
+func ContainerUploadVolumeOK() bool {
+	if !runningInContainer() {
+		return true
+	}
+	return uploadPathIsMounted()
+}
+
+// EnsureContainerUploadVolume 未挂卷时返回错误供启动日志，不阻断启动。
+func EnsureContainerUploadVolume() error {
+	if ContainerUploadVolumeOK() {
+		return nil
+	}
+	return fmt.Errorf("素材目录 %s 未挂载发布卷 /app/static/upload", FilmPictureUploadDir)
+}
+
+func uploadPathIsMounted() bool {
+	data, err := os.ReadFile("/proc/self/mountinfo")
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 5 {
+			continue
+		}
+		switch fields[4] {
+		case "/app/static/upload", "/app/static/upload/gallery":
+			return true
+		}
+	}
+	return false
 }
 
 // collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。

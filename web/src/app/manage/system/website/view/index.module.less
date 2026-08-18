@@ -10,8 +10,27 @@
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
 }
 
+.configList {
+  display: flex;
+  flex-direction: column;
+}
+
+.configItem {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.configItem:last-child {
+  border-bottom: none;
+}
+
 /* 约束配置值区域，避免 Tag/文本被横向撑满 */
 .configMeta {
+  flex: 1;
   width: 100%;
   min-width: 0;
 }

@@ -110,6 +110,15 @@ export interface SourceFormValues {
   cd: number;
 }
 
+export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
+  name: "",
+  uri: "",
+  state: false,
+  grade: 1,
+  interval: 0,
+  cd: 24,
+};
+
 export const collectDuration = [
   { label: "采集今日", time: 24 },
   { label: "采集三天", time: 72 },

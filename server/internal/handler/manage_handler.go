@@ -33,6 +33,18 @@ func (h *ManageHandler) ManageIndex(c *gin.Context) {
 	dto.Success(gin.H{"notices": []AdminNotice{}}, "后台管理中心", c)
 }
 
+func (h *ManageHandler) AppVersion(c *gin.Context) {
+	dto.Success(service.VersionSvc.GetAppVersion(), "版本信息获取成功", c)
+}
+
+func (h *ManageHandler) UpgradeApp(c *gin.Context) {
+	if err := service.VersionSvc.StartUpgrade(); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("已开始拉取 latest，容器即将重启", c)
+}
+
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------
 
 // SiteBasicConfig  网站基本配置

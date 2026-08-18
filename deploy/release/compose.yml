@@ -69,6 +69,8 @@ services:
       - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
     volumes:
       - ./data/uploads:/app/static/upload
+      # 后台「立即升级」通过 socket 拉 latest 并重建本容器
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - Eco-network
     extra_hosts:

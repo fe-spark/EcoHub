@@ -11,6 +11,50 @@
   gap: 16px;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.searchInput {
+  width: 200px;
+}
+
+.dateRange {
+  width: 360px;
+  max-width: 100%;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin-left: auto;
+}
+
+.alertBody {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.alertSteps {
+  margin: 0;
+  padding-left: 16px;
+}
+
 .uploadSection {
   display: none;
 }
@@ -121,18 +165,31 @@ html[data-theme="dark"] .imageCard {
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
 }
 
+.cardMeta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 8px 8px;
+  background: var(--ant-color-bg-container);
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
 .nameBar {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 4px 8px;
   font-size: 12px;
   color: var(--ant-color-text-secondary);
-  background: var(--ant-color-bg-container);
-  border-top: 1px solid var(--ant-color-border-secondary);
   cursor: pointer;
   overflow: hidden;
+}
+
+.dateBar {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--ant-color-text-tertiary);
+  text-align: center;
 }
 
 .nameText {
@@ -261,6 +318,16 @@ html[data-theme="dark"] .imageCard {
 @media (max-width: 768px) {
   .galleryPanel {
     padding: 0;
+  }
+
+  .searchInput,
+  .dateRange {
+    width: 100%;
+  }
+
+  .toolbarRight {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .imageGrid {

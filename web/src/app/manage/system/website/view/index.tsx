@@ -7,7 +7,6 @@ import {
   Card,
   Flex,
   Input,
-  List,
   Modal,
   Space,
   Spin,
@@ -231,37 +230,31 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
           className={styles.card}
           styles={{ body: { padding: "8px 16px" } }}
         >
-          <List
-            itemLayout="horizontal"
-            dataSource={CONFIG_ITEMS}
-            split
-            renderItem={(item) => (
-              <List.Item
-                style={{ padding: "16px 0" }}
-                actions={[
-                  <Button
-                    key="edit"
-                    type="link"
-                    icon={<EditOutlined />}
-                    disabled={!canWrite}
-                    onClick={() => openEditor(item)}
-                  >
-                    编辑
-                  </Button>,
-                ]}
-              >
-                <Space direction="vertical" size={4} className={styles.configMeta}>
+          <div className={styles.configList}>
+            {CONFIG_ITEMS.map((item) => (
+              <div key={item.field} className={styles.configItem}>
+                <Space orientation="vertical" size={4} className={styles.configMeta}>
                   <Typography.Text strong>{item.label}</Typography.Text>
-                  <div className={styles.configValue}>{renderPreviewValue(item, config[item.field])}</div>
+                  <div className={styles.configValue}>
+                    {renderPreviewValue(item, config[item.field])}
+                  </div>
                   {item.hint ? (
                     <Typography.Text type="secondary" className={styles.configHint}>
                       {item.hint}
                     </Typography.Text>
                   ) : null}
                 </Space>
-              </List.Item>
-            )}
-          />
+                <Button
+                  type="link"
+                  icon={<EditOutlined />}
+                  disabled={!canWrite}
+                  onClick={() => openEditor(item)}
+                >
+                  编辑
+                </Button>
+              </div>
+            ))}
+          </div>
         </Card>
       </Spin>
 
@@ -292,7 +285,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
             onChange={(event) => setEditingValue(event.target.value)}
           />
         ) : editingItem?.type === "image" ? (
-          <Space direction="vertical" size={12} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={12} style={{ width: "100%" }}>
             {String(editingValue || "").trim() ? (
               <Avatar
                 src={String(editingValue)}

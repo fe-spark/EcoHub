@@ -46,6 +46,7 @@ import type { ThemeMode } from "@/components/theme/ThemeDock";
 import { resolveSiteLogoSrc } from "@/components/public/SiteLogo";
 import { ManagePermissionProvider } from "@/lib/manage-permission";
 import ManageTour, { replayManageTour } from "@/app/manage/components/manage-tour";
+import SiderVersion from "@/app/manage/components/sider-version";
 import styles from "./index.module.less";
 
 type AdminNotice = {
@@ -289,6 +290,10 @@ export default function ManageLayoutView({
           onClick={onMenuClick}
         />
       </div>
+      <SiderVersion
+        collapsed={collapsed && !isMobile}
+        canWrite={userInfo?.canWrite !== false}
+      />
     </>
   );
 

@@ -1,5 +1,5 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Select, Switch } from "antd";
-import { useMemo } from "react";
+import { Button, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch } from "antd";
+import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import { collectDuration, type SourceFormValues } from "./types";
 
@@ -8,20 +8,30 @@ interface SourceFormModalProps {
   mode: "add" | "edit";
   loading: boolean;
   testing?: boolean;
-  form: ReturnType<typeof Form.useForm<SourceFormValues>>[0];
+  initialValues: SourceFormValues;
+  formNonce: number;
   onCancel: () => void;
   onSubmit: (values: SourceFormValues) => Promise<void> | void;
-  onTest: () => void;
+  onTest: (values: SourceFormValues) => void;
 }
 
 export default function SourceFormModal(props: SourceFormModalProps) {
-  const { open, mode, loading, testing, form, onCancel, onSubmit, onTest } =
+  const { open, mode, loading, testing, initialValues, formNonce, onCancel, onSubmit, onTest } =
     props;
+  const [form] = Form.useForm<SourceFormValues>();
   const { canWrite } = useManagePermission();
   const title = useMemo(
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
   );
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    form.resetFields();
+    form.setFieldsValue(initialValues);
+  }, [open, form, initialValues]);
 
   return (
     <Modal
@@ -38,7 +48,14 @@ export default function SourceFormModal(props: SourceFormModalProps) {
       mask={{ closable: !loading }}
       destroyOnHidden
       footer={[
-        <Button key="test" onClick={onTest} loading={testing} disabled={!canWrite}>
+        <Button
+          key="test"
+          onClick={() => {
+            void form.validateFields().then(onTest);
+          }}
+          loading={testing}
+          disabled={!canWrite}
+        >
           测试接口
         </Button>,
         <Button key="cancel" onClick={onCancel} disabled={loading}>
@@ -56,9 +73,12 @@ export default function SourceFormModal(props: SourceFormModalProps) {
       ]}
     >
       <Form<SourceFormValues>
+        key={formNonce}
         form={form}
         layout="vertical"
         disabled={loading}
+        preserve={false}
+        initialValues={initialValues}
         onFinish={onSubmit}
       >
         <Form.Item
@@ -83,10 +103,16 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         </Form.Item>
         <Form.Item
           label="请求间隔"
-          name="interval"
           tooltip="单次请求的额外间隔时间，单位毫秒；0 代表不限制。"
         >
-          <InputNumber min={0} step={100} style={{ width: "100%" }} addonAfter="ms" />
+          <Space.Compact block>
+            <Form.Item name="interval" noStyle>
+              <InputNumber min={0} step={100} style={{ width: "100%" }} />
+            </Form.Item>
+            <Button disabled tabIndex={-1}>
+              ms
+            </Button>
+          </Space.Compact>
         </Form.Item>
         <Form.Item label="采集时长" name="cd" tooltip="单次采集的时间范围，保存后作为该采集站的默认采集时长。">
           <Select

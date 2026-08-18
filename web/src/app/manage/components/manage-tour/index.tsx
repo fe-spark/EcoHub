@@ -4,12 +4,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { Button, Tour } from "antd";
 import type { TourProps } from "antd";
-import { ApiGet } from "@/lib/client-api";
-import { isActiveCollectStatus } from "@/app/manage/collect/view/types";
+import styles from "./index.module.less";
 
 const STORAGE_KEY = "ecohub_manage_tour_done_v2";
 const REPLAY_EVENT = "ecohub:replay-manage-tour";
 const PROGRESS_TARGET = "[data-tour='collect-progress']";
+/** 引导停在采集步时通知采集页：进度条不要倒计时收起 */
+export const TOUR_HOLD_PROGRESS_ATTR = "data-tour-hold-progress";
+export const COLLECT_BATCH_FAILED_EVENT = "ecohub:collect-batch-failed";
 
 type GuideStep = {
   title: string;
@@ -21,7 +23,7 @@ type GuideStep = {
   requireClick?: string;
   /** 批量弹窗里的确认按钮，需在 requireClick 之后再点 */
   submitClick?: string;
-  /** 主站采集结束（含发布）后才能下一步 */
+  /** 进度条采集结束后才能下一步 */
   waitMasterDone?: boolean;
 };
 
@@ -37,7 +39,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "全选采集站",
     description:
-      "点「全选」，把内置主站和附属站都勾上。后面批量启用、批量采集都基于这次选择。",
+      "把内置主站和附属站都勾上。后面批量启用、批量采集都基于这次选择。",
     route: "/manage/collect",
     target: "[data-tour='collect-select-all']",
     placement: "bottom",
@@ -46,7 +48,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "批量启用",
     description:
-      "点「批量启用」，保证选中的站都能采。没启用的站批量采集会跳过。",
+      "选中的站需要先启用才能采。没启用的站批量采集会跳过。",
     route: "/manage/collect",
     target: "[data-tour='collect-batch-enable']",
     placement: "bottom",
@@ -55,7 +57,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "批量采集",
     description:
-      "点「批量采集」，在弹窗里确认后点「开始采集」。开始后可看进度和终止；主站采完并发布后才能进入下一步。",
+      "主站和附属站可同时采，发布会等主站采完。开始后可看进度和终止。",
     route: "/manage/collect",
     target: "[data-tour='collect-batch']",
     placement: "bottom",
@@ -66,7 +68,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "分类管理",
     description:
-      "主站采完、分类树同步后点这里。分类不能删，只能隐藏或显示，并调整排序。",
+      "分类不能删，只能隐藏或显示，并调整排序。",
     route: "/manage/collect/category",
     target: "[data-tour='menu-category']",
     placement: "right",
@@ -105,10 +107,31 @@ const GUIDE_STEPS: GuideStep[] = [
   },
 ];
 
-type CollectListItem = {
-  grade?: number;
-  progress?: { status?: string } | null;
-};
+type ProgressPhase = "running" | "done" | "failed" | "stopped";
+
+function readProgressPhase(): ProgressPhase | null {
+  const el = queryTarget(PROGRESS_TARGET);
+  const phase = el?.getAttribute("data-tour-progress");
+  if (
+    phase === "running" ||
+    phase === "done" ||
+    phase === "failed" ||
+    phase === "stopped"
+  ) {
+    return phase;
+  }
+  return null;
+}
+
+function collectWaitDescription(phase: ProgressPhase | null, ended: boolean) {
+  if (phase === "running") {
+    return "采集进行中，结束后可进入下一步。";
+  }
+  if (ended || phase === "done" || phase === "failed" || phase === "stopped") {
+    return "采集已结束，可以进入下一步。";
+  }
+  return "开始采集后可看顶部进度；采集结束后即可进入下一步。";
+}
 
 function readDone() {
   try {
@@ -127,7 +150,7 @@ function markDone() {
 }
 
 function queryTarget(selector: string | null) {
-  if (!selector) {
+  if (!selector || typeof document === "undefined") {
     return null;
   }
   return document.querySelector<HTMLElement>(selector);
@@ -135,17 +158,6 @@ function queryTarget(selector: string | null) {
 
 function isMenuTarget(target: string | null) {
   return Boolean(target?.includes("menu-"));
-}
-
-function resolveMaster(items: CollectListItem[]) {
-  const master = items.find((item) => Number(item.grade) === 0);
-  const status = master?.progress?.status;
-  return {
-    status,
-    active: isActiveCollectStatus(status),
-    done: status === "done",
-    failed: status === "failed" || status === "stopped",
-  };
 }
 
 export default function ManageTour({
@@ -165,22 +177,24 @@ export default function ManageTour({
   const [current, setCurrent] = useState(0);
   const [clicked, setClicked] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [seenDone, setSeenDone] = useState(false);
+  const [progressEnded, setProgressEnded] = useState(false);
   const [targetTick, setTargetTick] = useState(0);
-  const [master, setMaster] = useState(resolveMaster([]));
+  const [modalOpen, setModalOpen] = useState(false);
+  const [progressPhase, setProgressPhase] = useState<ProgressPhase | null>(null);
   const queuedRef = useRef<number | null>(null);
+  /** 本轮必须先见到进度条 running，才认 done，避免上一轮结束态误开下一步 */
+  const sawRunningRef = useRef(false);
 
   const step = GUIDE_STEPS[current];
   const needClick = Boolean(step?.requireClick);
   const needSubmit = Boolean(step?.submitClick);
   const needWait = Boolean(step?.waitMasterDone);
-  const sessionDone = seenDone || master.done;
   const skipActions = !canWrite;
   const canNext = skipActions
     ? true
     : (!needClick || clicked) &&
       (!needSubmit || submitted) &&
-      (!needWait || (submitted && sessionDone && !master.active && !master.failed));
+      (!needWait || (submitted && progressEnded));
 
   const onNeedMenuRef = useRef(onNeedMenu);
   onNeedMenuRef.current = onNeedMenu;
@@ -210,10 +224,8 @@ export default function ManageTour({
       queuedRef.current = index;
       setClicked(false);
       setSubmitted(false);
-      setSeenDone(false);
-      if (index === 0) {
-        setMaster(resolveMaster([]));
-      }
+      setProgressEnded(false);
+      sawRunningRef.current = false;
       if (pathnameRef.current !== next.route) {
         setOpen(false);
         router.push(next.route);
@@ -259,6 +271,16 @@ export default function ManageTour({
   }, [showStep]);
 
   useEffect(() => {
+    const onFail = () => {
+      sawRunningRef.current = false;
+      setSubmitted(false);
+      setProgressEnded(false);
+    };
+    window.addEventListener(COLLECT_BATCH_FAILED_EVENT, onFail);
+    return () => window.removeEventListener(COLLECT_BATCH_FAILED_EVENT, onFail);
+  }, []);
+
+  useEffect(() => {
     if (!permissionReady || !canWrite || readDone()) {
       return;
     }
@@ -279,8 +301,9 @@ export default function ManageTour({
         setClicked(true);
       }
       if (step.submitClick && el.closest(step.submitClick)) {
+        sawRunningRef.current = false;
         setSubmitted(true);
-        setSeenDone(false);
+        setProgressEnded(false);
       }
     };
     document.addEventListener("click", onClick, true);
@@ -291,51 +314,59 @@ export default function ManageTour({
     if (!open) {
       return;
     }
-    const selectors = [step?.target, step?.requireClick, step?.submitClick, PROGRESS_TARGET].filter(
-      (item): item is string => Boolean(item),
-    );
-    let prev = selectors.map((item) => Boolean(queryTarget(item))).join(",");
+    const selectors = [
+      step?.target,
+      step?.requireClick,
+      step?.submitClick,
+      PROGRESS_TARGET,
+    ].filter((item): item is string => Boolean(item));
+    let prev = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${readProgressPhase()}`;
     const check = () => {
-      const next = selectors.map((item) => Boolean(queryTarget(item))).join(",");
+      const phase = readProgressPhase();
+      setModalOpen(Boolean(step?.submitClick && queryTarget(step.submitClick)));
+      setProgressPhase(phase);
+      const next = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${phase}`;
       if (next !== prev) {
         prev = next;
         setTargetTick((n) => n + 1);
       }
-    };
-    const obs = new MutationObserver(check);
-    obs.observe(document.body, { childList: true, subtree: true });
-    check();
-    return () => obs.disconnect();
-  }, [open, step]);
-
-  useEffect(() => {
-    if (!open || !step?.waitMasterDone || !submitted) {
-      return;
-    }
-    let cancelled = false;
-    const pull = async () => {
-      try {
-        const resp = await ApiGet<CollectListItem[]>("/manage/collect/list");
-        if (!cancelled && resp.code === 0 && Array.isArray(resp.data)) {
-          const next = resolveMaster(resp.data);
-          setMaster(next);
-          if (next.done) {
-            setSeenDone(true);
-          }
-        }
-      } catch {
-        /* ignore */
+      if (!submitted || !step?.waitMasterDone) {
+        return;
+      }
+      if (phase === "running") {
+        sawRunningRef.current = true;
+        setProgressEnded(false);
+        return;
+      }
+      if (!sawRunningRef.current) {
+        return;
+      }
+      if (phase === "done" || phase === "failed" || phase === "stopped") {
+        setProgressEnded(true);
       }
     };
-    void pull();
-    const timer = window.setInterval(() => {
-      void pull();
-    }, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
+    const obs = new MutationObserver(check);
+    obs.observe(document.body, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-tour-progress"],
+    });
+    check();
+    return () => obs.disconnect();
   }, [open, step, submitted]);
+
+  useEffect(() => {
+    const hold = Boolean(open && needWait && submitted);
+    if (hold) {
+      document.documentElement.setAttribute(TOUR_HOLD_PROGRESS_ATTR, "1");
+    } else {
+      document.documentElement.removeAttribute(TOUR_HOLD_PROGRESS_ATTR);
+    }
+    return () => {
+      document.documentElement.removeAttribute(TOUR_HOLD_PROGRESS_ATTR);
+    };
+  }, [open, needWait, submitted]);
 
   const closeTour = () => {
     queuedRef.current = null;
@@ -343,49 +374,41 @@ export default function ManageTour({
     setOpen(false);
   };
 
-  const modalOpen = Boolean(step?.submitClick && queryTarget(step.submitClick));
-  const waitingCollect = Boolean(needWait && submitted && !sessionDone);
+  const watchingProgress = Boolean(needWait && submitted);
   const liveTarget = modalOpen
     ? (step?.submitClick ?? null)
-    : waitingCollect && queryTarget(PROGRESS_TARGET)
+    : watchingProgress
       ? PROGRESS_TARGET
       : (step?.target ?? null);
-  const maskOff = modalOpen || waitingCollect;
-
-  let description = step?.description;
-  if (skipActions && (needClick || needSubmit || needWait)) {
-    description = "当前是只读账号，无法执行采集操作，可直接下一步浏览菜单和页面。";
-  } else if (needWait) {
-    if (master.active) {
-      description = "采集进行中，可看进度条或点终止。发布会等主站采完，完成后「下一步」才会亮起。";
-    } else if (master.failed) {
-      description = "这次采集失败或已停止，请重新走一遍「批量采集」。成功并发布后才能继续。";
-    } else if (sessionDone) {
-      description = "主站已采集完成（含发布），可以进入下一步看分类。";
-    } else if (submitted) {
-      description = "已发起采集。可继续看进度；主站采完并发布后，「下一步」才会亮起。";
-    } else {
-      description = "请先点「批量采集」，再在弹窗里点「开始采集」。";
-    }
-  }
 
   const currentStep: NonNullable<TourProps["steps"]>[number] = {
     title: step?.title,
-    placement: step?.placement,
+    placement: watchingProgress && !modalOpen ? "top" : step?.placement,
     target: () => queryTarget(liveTarget),
-    description,
+    description: watchingProgress
+      ? collectWaitDescription(progressPhase, progressEnded)
+      : step?.description,
   };
 
   const last = current >= GUIDE_STEPS.length - 1;
 
   return (
     <Tour
-      key={`${pathname}-${current}-${clicked}-${submitted}-${maskOff}-${targetTick}`}
+      key={`${pathname}-${current}-${modalOpen ? "modal" : watchingProgress ? "progress" : "page"}-${targetTick}`}
       open={open}
       current={0}
       onClose={closeTour}
       steps={[currentStep]}
-      mask={maskOff ? false : { color: "rgba(0,0,0,0.45)" }}
+      zIndex={1100}
+      classNames={{ section: styles.panel }}
+      styles={{
+        section: {
+          border: "1px solid var(--ant-color-primary)",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
+          background: "var(--ant-color-bg-layout)",
+        },
+      }}
+      mask={watchingProgress && !modalOpen ? false : { color: "rgba(0,0,0,0.45)" }}
       actionsRender={() => [
         <Button key="skip" size="small" onClick={closeTour}>
           跳过
@@ -403,7 +426,11 @@ export default function ManageTour({
             showStep(current + 1);
           }}
         >
-          {last ? "完成" : needWait && !canNext ? "等待采集完成" : "下一步"}
+          {last
+            ? "完成"
+            : watchingProgress && !progressEnded && progressPhase === "running"
+              ? "等待采集完成"
+              : "下一步"}
         </Button>,
       ]}
     />
