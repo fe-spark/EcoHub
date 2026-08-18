@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Button, Input, ConfigProvider, theme } from "antd";
-import zhCN from "antd/locale/zh_CN";
+import { Button, Input } from "antd";
 import {
   UserOutlined,
   LockOutlined,
@@ -15,8 +14,9 @@ import { PROJECT_GITHUB_URL } from "@/lib/project";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
-import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 import styles from "./index.module.less";
+
+const fieldClassNames = { affixWrapper: styles.field };
 
 export default function LoginPageView() {
   const [userName, setUserName] = useState("");
@@ -25,8 +25,6 @@ export default function LoginPageView() {
   const router = useRouter();
   const { message } = useAppMessage();
   const { config: siteInfo } = useSiteConfig();
-  const { effective } = useThemeMode();
-  const isDark = effective === "dark";
 
   const handleLogin = async () => {
     if (!userName || !password) {
@@ -49,95 +47,62 @@ export default function LoginPageView() {
   };
 
   return (
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        algorithm: isDark ? theme.darkAlgorithm : theme.defaultAlgorithm,
-        token: {
-          colorPrimary: "#fa8c16",
-          borderRadius: 16,
-          colorText: isDark ? "#ffffff" : "#0f172a",
-          colorTextPlaceholder: isDark ? "rgba(255, 255, 255, 0.45)" : "#94a3b8",
-        },
-        components: {
-          Input: {
-            colorBgContainer: isDark ? "rgba(255, 255, 255, 0.04)" : "#ffffff",
-            colorBorder: isDark ? "rgba(255, 255, 255, 0.1)" : "rgba(250, 140, 22, 0.2)",
-            colorText: isDark ? "#ffffff" : "#0f172a",
-            colorTextPlaceholder: isDark ? "rgba(255, 255, 255, 0.45)" : "#94a3b8",
-            controlHeightLG: 50,
-            paddingContentHorizontal: 16,
-            colorBgContainerDisabled: "transparent",
-          },
-          Button: {
-            controlHeightLG: 54,
-            fontWeight: 700,
-            borderRadiusLG: 16,
-            colorPrimary: "#fa8c16",
-          },
-        },
-      }}
-    >
-      <div className={styles.container}>
-        <div className={styles.card}>
-          <div className={styles.brand}>
-            {siteInfo?.siteName && <div className={styles.siteName}>{siteInfo.siteName}</div>}
-            <div className={styles.subTitle}>Management System</div>
-          </div>
+    <div className={styles.container}>
+      <div className={styles.card}>
+        <div className={styles.brand}>
+          {siteInfo?.siteName && <div className={styles.siteName}>{siteInfo.siteName}</div>}
+          <div className={styles.subTitle}>Management System</div>
+        </div>
 
-          <div className={styles.form}>
-            <Input
-              size="large"
-              placeholder="用户名 / 邮箱"
-              prefix={<UserOutlined style={{ color: "var(--ant-color-primary)" }} />}
-              value={userName}
-              onChange={(e) => setUserName(e.target.value)}
-              onPressEnter={handleLogin}
-            />
-            <Input.Password
-              size="large"
-              placeholder="密码"
-              prefix={<LockOutlined style={{ color: "var(--ant-color-primary)" }} />}
-              iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onPressEnter={handleLogin}
-            />
-            <Button
-              type="primary"
-              size="large"
-              loading={loading}
-              onClick={handleLogin}
-              className={styles.btn}
-              block
-              style={{
-                background: "linear-gradient(135deg, #fa8c16 0%, #fa541c 100%)",
-                border: "none",
-                boxShadow: "0 8px 20px rgba(250, 140, 22, 0.2)",
-              }}
-            >
-              SIGN IN
-            </Button>
-          </div>
+        <div className={styles.form}>
+          <Input
+            size="large"
+            placeholder="用户名 / 邮箱"
+            prefix={<UserOutlined className={styles.fieldIcon} />}
+            classNames={fieldClassNames}
+            value={userName}
+            onChange={(e) => setUserName(e.target.value)}
+            onPressEnter={handleLogin}
+          />
+          <Input.Password
+            size="large"
+            placeholder="密码"
+            prefix={<LockOutlined className={styles.fieldIcon} />}
+            classNames={fieldClassNames}
+            iconRender={(visible) => (visible ? <EyeOutlined /> : <EyeInvisibleOutlined />)}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onPressEnter={handleLogin}
+          />
+          <Button
+            type="primary"
+            size="large"
+            loading={loading}
+            onClick={handleLogin}
+            className={styles.btn}
+            block
+          >
+            SIGN IN
+          </Button>
+        </div>
 
-          <div className={styles.footer}>
-            <span>
-              © {new Date().getFullYear()}
-              {siteInfo?.siteName ? ` ${siteInfo.siteName}` : ""}
-            </span>
-            <a
-              href={PROJECT_GITHUB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.githubLink}
-              title="打开 GitHub 项目地址"
-            >
-              <GithubOutlined />
-              <span>GitHub 项目地址</span>
-            </a>
-          </div>
+        <div className={styles.footer}>
+          <span>
+            © {new Date().getFullYear()}
+            {siteInfo?.siteName ? ` ${siteInfo.siteName}` : ""}
+          </span>
+          <a
+            href={PROJECT_GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={styles.githubLink}
+            title="打开 GitHub 项目地址"
+          >
+            <GithubOutlined />
+            <span>GitHub 项目地址</span>
+          </a>
         </div>
       </div>
-    </ConfigProvider>
+    </div>
   );
 }

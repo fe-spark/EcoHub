@@ -11,11 +11,11 @@ import {
   Popconfirm,
   Spin,
   Tooltip,
-  Tag,
   Button,
   Input,
   Modal,
   Alert,
+  DatePicker,
 } from "antd";
 import {
   PlusOutlined,
@@ -24,6 +24,8 @@ import {
   CloudUploadOutlined,
   CopyOutlined,
   FormOutlined,
+  SearchOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import {
@@ -37,6 +39,24 @@ import dayjs from "dayjs";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
+const { RangePicker } = DatePicker;
+
+type DateRangeValue = [dayjs.Dayjs, dayjs.Dayjs] | null;
+
+const RANGE_TIME_DEFAULT: [dayjs.Dayjs, dayjs.Dayjs] = [
+  dayjs("00:00:00", "HH:mm:ss"),
+  dayjs("23:59:59", "HH:mm:ss"),
+];
+
+function formatDateRange(range: DateRangeValue) {
+  if (!range?.[0] || !range?.[1]) {
+    return { beginTime: "", endTime: "" };
+  }
+  return {
+    beginTime: range[0].format("YYYY-MM-DD HH:mm:ss"),
+    endTime: range[1].format("YYYY-MM-DD HH:mm:ss"),
+  };
+}
 
 interface PhotoItem {
   ID: number;
@@ -99,6 +119,11 @@ export default function FileUploadPageView() {
   const [page, setPage] = useState({ current: 1, pageSize: 36, total: 0 });
   const [keyword, setKeyword] = useState("");
   const [inputValue, setInputValue] = useState("");
+  const [dateRange, setDateRange] = useState<DateRangeValue>(null);
+  const [appliedRange, setAppliedRange] = useState({
+    beginTime: "",
+    endTime: "",
+  });
   const [renameTarget, setRenameTarget] = useState<PhotoItem | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
@@ -109,13 +134,19 @@ export default function FileUploadPageView() {
   const alerts = buildStorageAlerts(storage);
 
   const getPhotoList = useCallback(
-    async (current = 1, name = keyword) => {
+    async (
+      current = 1,
+      name = keyword,
+      range = appliedRange,
+    ) => {
       setLoading(true);
       try {
         const resp = await ApiGet("/manage/file/list", {
           current,
           pageSize: 36,
           name,
+          beginTime: range.beginTime,
+          endTime: range.endTime,
         });
         if (resp.code === 0) {
           setList(resp.data.list || []);
@@ -132,7 +163,7 @@ export default function FileUploadPageView() {
         setLoading(false);
       }
     },
-    [keyword],
+    [keyword, appliedRange],
   );
 
   useEffect(() => {
@@ -140,10 +171,21 @@ export default function FileUploadPageView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSearch = (value: string) => {
-    const kw = value.trim();
+  const handleSearch = () => {
+    const kw = inputValue.trim();
+    const range = formatDateRange(dateRange);
     setKeyword(kw);
-    getPhotoList(1, kw);
+    setAppliedRange(range);
+    void getPhotoList(1, kw, range);
+  };
+
+  const handleReset = () => {
+    const emptyRange = { beginTime: "", endTime: "" };
+    setInputValue("");
+    setKeyword("");
+    setDateRange(null);
+    setAppliedRange(emptyRange);
+    void getPhotoList(1, "", emptyRange);
   };
 
   const copyLink = async (link: string) => {
@@ -273,40 +315,59 @@ export default function FileUploadPageView() {
       <ManagePageHeader
         title="素材中心"
         description="管理用户上传的海报与封面素材，可在影片/轮播编辑中选用覆盖封面。"
-        actions={
-          <Space size={8}>
-            <Input.Search
-              placeholder="搜索素材名称"
-              allowClear
-              value={inputValue}
-              onChange={(e) => {
-                setInputValue(e.target.value);
-                if (!e.target.value.trim()) {
-                  handleSearch("");
-                }
-              }}
-              onSearch={handleSearch}
-              style={{ width: 200 }}
-            />
-            <Tag color="processing">共计 {page.total} 张图片</Tag>
-            <Upload
-              customRequest={customUpload}
-              multiple
-              showUploadList={false}
-              accept={IMAGE_UPLOAD_ACCEPT}
+      />
+      <div className={styles.toolbar}>
+        <Space size={[8, 8]} wrap className={styles.filterBar}>
+          <Input
+            placeholder="搜索素材名称"
+            allowClear
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onPressEnter={handleSearch}
+            className={styles.searchInput}
+          />
+          <RangePicker
+            showTime={{ defaultValue: RANGE_TIME_DEFAULT }}
+            value={dateRange}
+            onChange={(dates) => {
+              setDateRange(
+                dates && dates[0] && dates[1]
+                  ? [dates[0], dates[1]]
+                  : null,
+              );
+            }}
+            className={styles.dateRange}
+            placeholder={["开始时间", "结束时间"]}
+          />
+          <Button
+            type="primary"
+            icon={<SearchOutlined />}
+            onClick={handleSearch}
+          >
+            搜索
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={handleReset}>
+            重置
+          </Button>
+        </Space>
+        <div className={styles.toolbarRight}>
+          <Upload
+            customRequest={customUpload}
+            multiple
+            showUploadList={false}
+            accept={IMAGE_UPLOAD_ACCEPT}
+            disabled={!canWrite}
+          >
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
               disabled={!canWrite}
             >
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                disabled={!canWrite}
-              >
-                上传图片
-              </Button>
-            </Upload>
-          </Space>
-        }
-      />
+              上传图片
+            </Button>
+          </Upload>
+        </div>
+      </div>
       {alerts.map((item) => (
         <Alert
           key={item.key}
@@ -470,7 +531,9 @@ export default function FileUploadPageView() {
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                     description={
                       <Text type="secondary">
-                        暂无上传素材，拖拽到内容区或点击右上角上传
+                        {keyword || appliedRange.beginTime || appliedRange.endTime
+                          ? "没有符合条件的素材，可调整筛选或点击重置"
+                          : "暂无上传素材，拖拽到内容区或点击工具栏上传"}
                       </Text>
                     }
                   />
@@ -479,19 +542,16 @@ export default function FileUploadPageView() {
             )}
           </Spin>
 
-          {page.total > page.pageSize && (
-            <div className={styles.pagination}>
-              <Pagination
-                current={page.current}
-                pageSize={page.pageSize}
-                total={page.total}
-                onChange={(p) => getPhotoList(p)}
-                showSizeChanger={false}
-                showTotal={(total) => `共 ${total} 条`}
-                hideOnSinglePage
-              />
-            </div>
-          )}
+          <div className={styles.pagination}>
+            <Pagination
+              current={page.current}
+              pageSize={page.pageSize}
+              total={page.total}
+              onChange={(p) => getPhotoList(p)}
+              showSizeChanger={false}
+              showTotal={(total) => `共 ${total} 条`}
+            />
+          </div>
         </div>
       </div>
 

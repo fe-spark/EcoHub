@@ -1,4 +1,4 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Select, Switch } from "antd";
+import { Button, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch } from "antd";
 import { useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import { collectDuration, type SourceFormValues } from "./types";
@@ -9,13 +9,14 @@ interface SourceFormModalProps {
   loading: boolean;
   testing?: boolean;
   form: ReturnType<typeof Form.useForm<SourceFormValues>>[0];
+  initialValues: SourceFormValues;
   onCancel: () => void;
   onSubmit: (values: SourceFormValues) => Promise<void> | void;
   onTest: () => void;
 }
 
 export default function SourceFormModal(props: SourceFormModalProps) {
-  const { open, mode, loading, testing, form, onCancel, onSubmit, onTest } =
+  const { open, mode, loading, testing, form, initialValues, onCancel, onSubmit, onTest } =
     props;
   const { canWrite } = useManagePermission();
   const title = useMemo(
@@ -59,6 +60,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         form={form}
         layout="vertical"
         disabled={loading}
+        initialValues={initialValues}
         onFinish={onSubmit}
       >
         <Form.Item
@@ -83,10 +85,16 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         </Form.Item>
         <Form.Item
           label="请求间隔"
-          name="interval"
           tooltip="单次请求的额外间隔时间，单位毫秒；0 代表不限制。"
         >
-          <InputNumber min={0} step={100} style={{ width: "100%" }} addonAfter="ms" />
+          <Space.Compact block>
+            <Form.Item name="interval" noStyle>
+              <InputNumber min={0} step={100} style={{ width: "100%" }} />
+            </Form.Item>
+            <Button disabled tabIndex={-1}>
+              ms
+            </Button>
+          </Space.Compact>
         </Form.Item>
         <Form.Item label="采集时长" name="cd" tooltip="单次采集的时间范围，保存后作为该采集站的默认采集时长。">
           <Select

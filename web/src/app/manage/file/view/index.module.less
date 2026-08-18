@@ -11,6 +11,39 @@
   gap: 16px;
 }
 
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filterBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.searchInput {
+  width: 200px;
+}
+
+.dateRange {
+  width: 360px;
+  max-width: 100%;
+}
+
+.toolbarRight {
+  display: flex;
+  align-items: center;
+  flex: none;
+  margin-left: auto;
+}
+
 .alertBody {
   display: flex;
   flex-direction: column;
@@ -285,6 +318,16 @@ html[data-theme="dark"] .imageCard {
 @media (max-width: 768px) {
   .galleryPanel {
     padding: 0;
+  }
+
+  .searchInput,
+  .dateRange {
+    width: 100%;
+  }
+
+  .toolbarRight {
+    width: 100%;
+    justify-content: flex-end;
   }
 
   .imageGrid {
