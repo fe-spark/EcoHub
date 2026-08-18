@@ -11,7 +11,6 @@ import {
   Button,
   Card,
   Empty,
-  Form,
   Popconfirm,
   Progress,
   Space,
@@ -130,11 +129,11 @@ export default function CollectManagePageView() {
   const pollFailuresRef = useRef(0);
   const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
 
-  const [sourceForm] = Form.useForm<SourceFormValues>();
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
   const [sourceInitialValues, setSourceInitialValues] =
     useState<SourceFormValues>(SOURCE_FORM_DEFAULTS);
+  const [sourceFormNonce, setSourceFormNonce] = useState(0);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -802,6 +801,7 @@ export default function CollectManagePageView() {
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
+    setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
   };
 
@@ -818,6 +818,7 @@ export default function CollectManagePageView() {
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
       });
+      setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
       return;
     }
@@ -845,9 +846,8 @@ export default function CollectManagePageView() {
     }
   };
 
-  const testApi = async () => {
+  const testApi = async (values: SourceFormValues) => {
     try {
-      const values = await sourceForm.validateFields();
       setTesting(true);
       message.loading({
         key: "collect-test",
@@ -863,7 +863,7 @@ export default function CollectManagePageView() {
         content: resp.msg || "接口测试失败",
       });
     } catch {
-      // 表单校验失败时不额外提示。
+      message.error({ key: "collect-test", content: "接口测试失败，请稍后重试" });
     } finally {
       setTesting(false);
     }
@@ -1208,12 +1208,13 @@ export default function CollectManagePageView() {
       </div>
 
       <SourceFormModal
+        key={sourceFormNonce}
         open={sourceModalOpen}
         mode={sourceModalMode}
         loading={submitting}
         testing={testing}
-        form={sourceForm}
         initialValues={sourceInitialValues}
+        formNonce={sourceFormNonce}
         onCancel={() => setSourceModalOpen(false)}
         onSubmit={handleSubmitSource}
         onTest={testApi}

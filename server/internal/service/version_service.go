@@ -26,6 +26,9 @@ type AppVersionInfo struct {
 	ReleaseName  string `json:"releaseName"`
 	ReleaseNotes string `json:"releaseNotes"`
 	Breaking     bool   `json:"breaking"`
+	CanUpgrade   bool   `json:"canUpgrade"`
+	UpgradePhase string `json:"upgradePhase"`
+	UpgradeError string `json:"upgradeError"`
 }
 
 type githubReleaseCache struct {
@@ -37,7 +40,13 @@ type githubReleaseCache struct {
 }
 
 func (s *VersionService) GetAppVersion() AppVersionInfo {
-	info := AppVersionInfo{Current: strings.TrimSpace(config.Version)}
+	st := currentUpgradeState()
+	info := AppVersionInfo{
+		Current:      strings.TrimSpace(config.Version),
+		CanUpgrade:   s.CanOnlineUpgrade(),
+		UpgradePhase: st.Phase,
+		UpgradeError: st.Error,
+	}
 	latest, err := s.loadLatestRelease()
 	if err != nil || latest.TagName == "" {
 		if err != nil {

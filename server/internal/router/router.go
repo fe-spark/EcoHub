@@ -42,6 +42,7 @@ func SetupRouter() *gin.Engine {
 	{
 		manageRoute.GET(`/index`, handler.ManageHd.ManageIndex)
 		manageRoute.GET(`/version`, handler.ManageHd.AppVersion)
+		manageRoute.POST(`/version/upgrade`, handler.ManageHd.UpgradeApp)
 
 		// 系统相关
 		sysConfig := manageRoute.Group(`/config`)
