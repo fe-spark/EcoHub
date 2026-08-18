@@ -1,4 +1,4 @@
-import { Form, Input, InputNumber, Select, Space, Tag } from "antd";
+import { Button, Form, Input, InputNumber, Select, Space, Tag } from "antd";
 
 import {
   cronFieldHelp,
@@ -56,11 +56,21 @@ export default function EditScheduleForm({ editModel }: EditScheduleFormProps) {
             return (
               <Form.Item
                 label="循环间隔"
-                name="intervalMinutes"
-                rules={[{ required: true, message: "请输入循环分钟数" }]}
                 extra="适合自动更新这类持续轮询任务。"
+                required
               >
-                <InputNumber min={1} max={59} addonAfter="分钟" style={{ width: 220 }} />
+                <Space.Compact>
+                  <Form.Item
+                    name="intervalMinutes"
+                    noStyle
+                    rules={[{ required: true, message: "请输入循环分钟数" }]}
+                  >
+                    <InputNumber min={1} max={59} style={{ width: 160 }} />
+                  </Form.Item>
+                  <Button disabled tabIndex={-1}>
+                    分钟
+                  </Button>
+                </Space.Compact>
               </Form.Item>
             );
           }

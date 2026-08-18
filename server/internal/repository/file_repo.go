@@ -44,14 +44,20 @@ func GetFileInfoById(id uint) model.FileInfo {
 }
 
 // GetFileInfoPage 获取素材分页数据（仅用户手动上传，relevance_id = 0）
-// name 支持素材名称模糊搜索
-func GetFileInfoPage(tl []string, name string, page *dto.Page) []model.FileInfo {
+// name 支持素材名称模糊搜索；beginTime/endTime 为零值时不按时间过滤
+func GetFileInfoPage(tl []string, name string, beginTime, endTime time.Time, page *dto.Page) []model.FileInfo {
 	var fl []model.FileInfo
 	query := db.Mdb.Model(&model.FileInfo{}).
 		Where("file_type IN ?", tl).
 		Where("relevance_id = 0")
 	if name != "" {
 		query = query.Where("(name LIKE ? OR fid LIKE ?)", "%"+name+"%", "%"+name+"%")
+	}
+	if !beginTime.IsZero() {
+		query = query.Where("created_at >= ?", beginTime)
+	}
+	if !endTime.IsZero() {
+		query = query.Where("created_at <= ?", endTime)
 	}
 	query = query.Order("id DESC")
 	dto.GetPage(query, page)
