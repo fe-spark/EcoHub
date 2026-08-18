@@ -14,7 +14,6 @@ import {
 import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
-import DashboardCharts from "./dashboard-charts";
 import styles from "./index.module.less";
 
 interface FilmInventoryStats {
@@ -88,31 +87,6 @@ export default function ManagePageView() {
 
       <CollectOverview />
 
-      <Card className={styles.panelCard} title="快捷入口">
-        <div className={styles.entryGrid}>
-          {quickEntries.map((entry) => {
-            const Icon = entry.icon;
-            return (
-              <Link
-                key={entry.key}
-                href={entry.href}
-                className={styles.entryCard}
-              >
-                <div className={styles.entryCardHead}>
-                  <div className={styles.entryIconWrap}>
-                    <Icon />
-                  </div>
-                  <div className={styles.entryTitle}>{entry.title}</div>
-                </div>
-                <div className={styles.stepDesc}>{entry.description}</div>
-              </Link>
-            );
-          })}
-        </div>
-      </Card>
-
-      <DashboardCharts />
-
       <Card
         className={styles.panelCard}
         title="当前影视数据规模"
@@ -162,6 +136,29 @@ export default function ManagePageView() {
         <Typography.Text className={styles.statsNote}>
           反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
         </Typography.Text>
+      </Card>
+
+      <Card className={styles.panelCard} title="快捷入口">
+        <div className={styles.entryGrid}>
+          {quickEntries.map((entry) => {
+            const Icon = entry.icon;
+            return (
+              <Link
+                key={entry.key}
+                href={entry.href}
+                className={styles.entryCard}
+              >
+                <div className={styles.entryCardHead}>
+                  <div className={styles.entryIconWrap}>
+                    <Icon />
+                  </div>
+                  <div className={styles.entryTitle}>{entry.title}</div>
+                </div>
+                <div className={styles.stepDesc}>{entry.description}</div>
+              </Link>
+            );
+          })}
+        </div>
       </Card>
     </div>
   );

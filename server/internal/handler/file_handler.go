@@ -151,5 +151,5 @@ func (h *FileHandler) PhotoWall(c *gin.Context) {
 	page := dto.GetPageParams(c)
 	name := strings.TrimSpace(c.DefaultQuery("name", ""))
 	pl := service.FileSvc.GetPhotoPage(name, page)
-	dto.Success(gin.H{"list": pl, "page": page}, "图片分页数据获取成功", c)
+	dto.Success(gin.H{"list": pl, "page": page, "storage": service.FileSvc.StorageStatus()}, "图片分页数据获取成功", c)
 }

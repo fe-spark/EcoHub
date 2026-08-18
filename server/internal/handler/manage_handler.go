@@ -33,6 +33,10 @@ func (h *ManageHandler) ManageIndex(c *gin.Context) {
 	dto.Success(gin.H{"notices": []AdminNotice{}}, "后台管理中心", c)
 }
 
+func (h *ManageHandler) AppVersion(c *gin.Context) {
+	dto.Success(service.VersionSvc.GetAppVersion(), "版本信息获取成功", c)
+}
+
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------
 
 // SiteBasicConfig  网站基本配置

@@ -37,6 +37,19 @@ func (s *FileService) GetPhotoPage(name string, page *dto.Page) []model.FileInfo
 	return repository.GetFileInfoPage(tl, name, page)
 }
 
+// StorageStatus 素材存储探测结果；文案由前端组装。
+type StorageStatus struct {
+	VolumeMounted bool `json:"volumeMounted"`
+	MissingCount  int  `json:"missingCount"`
+}
+
+func (s *FileService) StorageStatus() StorageStatus {
+	return StorageStatus{
+		VolumeMounted: config.ContainerUploadVolumeOK(),
+		MissingCount:  repository.CountMissingUserGallery(),
+	}
+}
+
 func (s *FileService) RenameFile(id uint, name string) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {
@@ -50,7 +63,7 @@ func (s *FileService) RemoveFileById(id uint) error {
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
 	}
-storagePath := repository.StoragePath(&f)
+	storagePath := repository.StoragePath(&f)
 	err := os.Remove(storagePath)
 	if err != nil && !os.IsNotExist(err) {
 		return err

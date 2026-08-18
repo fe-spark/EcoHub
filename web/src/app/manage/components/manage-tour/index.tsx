@@ -6,6 +6,7 @@ import { Button, Tour } from "antd";
 import type { TourProps } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import { isActiveCollectStatus } from "@/app/manage/collect/view/types";
+import styles from "./index.module.less";
 
 const STORAGE_KEY = "ecohub_manage_tour_done_v2";
 const REPLAY_EVENT = "ecohub:replay-manage-tour";
@@ -350,7 +351,7 @@ export default function ManageTour({
     : waitingCollect && queryTarget(PROGRESS_TARGET)
       ? PROGRESS_TARGET
       : (step?.target ?? null);
-  const maskOff = modalOpen || waitingCollect;
+  const maskOff = waitingCollect;
 
   let description = step?.description;
   if (skipActions && (needClick || needSubmit || needWait)) {
@@ -385,6 +386,15 @@ export default function ManageTour({
       current={0}
       onClose={closeTour}
       steps={[currentStep]}
+      zIndex={1100}
+      classNames={{ section: styles.panel }}
+      styles={{
+        section: {
+          border: "1px solid var(--ant-color-primary)",
+          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
+          background: "var(--ant-color-bg-layout)",
+        },
+      }}
       mask={maskOff ? false : { color: "rgba(0,0,0,0.45)" }}
       actionsRender={() => [
         <Button key="skip" size="small" onClick={closeTour}>
