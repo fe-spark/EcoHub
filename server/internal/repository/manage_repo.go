@@ -73,9 +73,11 @@ func NormalizeSiteURL(raw string) string {
 // SaveSiteBasic 保存网站基本配置信息 (MySQL + Redis 短期缓存)
 func SaveSiteBasic(c model.BasicConfig) error {
 	c.SiteURL = NormalizeSiteURL(c.SiteURL)
+	c.Tip = model.NormalizeTipConfig(c.Tip)
 	rec := model.SiteConfigRecord{
 		SiteName: c.SiteName, SiteURL: c.SiteURL, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
+		TipJSON: model.EncodeTipJSON(c.Tip),
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{}).Error; err != nil {
@@ -102,6 +104,7 @@ func GetSiteBasic() model.BasicConfig {
 	if data := db.Rdb.Get(db.Cxt, config.SiteConfigBasic).Val(); data != "" {
 		if err := json.Unmarshal([]byte(data), &c); err == nil {
 			c.SiteURL = NormalizeSiteURL(c.SiteURL)
+			c.Tip = model.NormalizeTipConfig(c.Tip)
 			return c
 		}
 		log.Println("GetSiteBasic Redis Unmarshal Error")
@@ -111,11 +114,13 @@ func GetSiteBasic() model.BasicConfig {
 	var rec model.SiteConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
 		log.Println("GetSiteBasic MySQL Error:", err)
+		c.Tip = model.DefaultTipConfig()
 		return c
 	}
 	c = model.BasicConfig{
 		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
+		Tip: model.DecodeTipJSON(rec.TipJSON),
 	}
 	// 回填缓存
 	data, _ := json.Marshal(c)
