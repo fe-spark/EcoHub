@@ -2,16 +2,60 @@ package model
 
 import "gorm.io/gorm"
 
+const (
+	TipChannelWeChat  = "wechat"
+	TipChannelAlipay  = "alipay"
+	TipChannelCustom  = "custom"
+	MaxTipChannels    = 4
+	MaxTipTitleLen    = 32
+	MaxTipMessageLen  = 120
+	MaxTipLabelLen    = 32
+	MaxTipImageLen    = 512
+	MaxTipLinkLen     = 512
+	DefaultTipTitle   = "赞赏支持"
+	DefaultTipMessage = "如果这个站对你有帮助，欢迎请作者喝杯咖啡"
+)
+
+// TipChannel 前台赞赏渠道（收款码或外链）
+type TipChannel struct {
+	Key     string `json:"key"`
+	Label   string `json:"label"`
+	QrImage string `json:"qrImage"`
+	Link    string `json:"link"`
+}
+
+// TipConfig 前台赞赏展示配置
+type TipConfig struct {
+	Enabled  bool         `json:"enabled"`
+	Title    string       `json:"title"`
+	Message  string       `json:"message"`
+	Channels []TipChannel `json:"channels"`
+}
+
+// DefaultTipConfig 关闭状态的默认赞赏配置（预置微信 / 支付宝空渠道）
+func DefaultTipConfig() TipConfig {
+	return TipConfig{
+		Enabled: false,
+		Title:   DefaultTipTitle,
+		Message: DefaultTipMessage,
+		Channels: []TipChannel{
+			{Key: TipChannelWeChat, Label: "微信"},
+			{Key: TipChannelAlipay, Label: "支付宝"},
+		},
+	}
+}
+
 // BasicConfig 网站基本信息 (返回前端DTO与Redis缓存结构相同)
 type BasicConfig struct {
 	SiteName string `json:"siteName"` // 网站名称
 	// SiteURL 网站访问地址（公网根地址，如 https://example.com），用于 Logo 跳转与 Telegram 播放链接等
-	SiteURL  string `json:"siteUrl"`
-	Logo     string `json:"logo"`     // 网站logo
-	Keyword  string `json:"keyword"`  // seo关键字
-	Describe string `json:"describe"` // 网站描述信息
-	State    bool   `json:"state"`    // 网站状态 开启 || 关闭
-	Hint     string `json:"hint"`     // 网站关闭提示
+	SiteURL  string    `json:"siteUrl"`
+	Logo     string    `json:"logo"`     // 网站logo
+	Keyword  string    `json:"keyword"`  // seo关键字
+	Describe string    `json:"describe"` // 网站描述信息
+	State    bool      `json:"state"`    // 网站状态 开启 || 关闭
+	Hint     string    `json:"hint"`     // 网站关闭提示
+	Tip      TipConfig `json:"tip"`      // 前台赞赏
 }
 
 // Banner 首页横幅信息
@@ -50,6 +94,7 @@ type SiteConfigRecord struct {
 	Describe string `gorm:"size:512"`
 	State    bool
 	Hint     string `gorm:"size:512"`
+	TipJSON  string `gorm:"type:text;column:tip_json"` // TipConfig JSON
 }
 
 // MappingRule 定义从采集源到标准系统的转换规则 (地区/语言/标签黑名单)

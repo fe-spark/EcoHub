@@ -1,0 +1,61 @@
+.card {
+  border-radius: 12px;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.channelsHead {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.channel {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+}
+
+.channelMain {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 120px minmax(180px, 1.2fr) minmax(160px, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.channelQr {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.channelQrInput {
+  flex: 1;
+  min-width: 0;
+}
+
+.channelLabel,
+.channelLink {
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .channel {
+    flex-direction: column;
+  }
+
+  .channelMain {
+    grid-template-columns: 1fr;
+  }
+}

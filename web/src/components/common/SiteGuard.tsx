@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Result } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import AppLoading from "@/components/public/Loading";
+import type { TipConfig } from "@/lib/tip";
 
 export interface SiteConfig {
   siteName: string;
@@ -15,6 +16,7 @@ export interface SiteConfig {
   describe: string;
   state: boolean;
   hint: string;
+  tip?: TipConfig;
 }
 
 interface SiteConfigContextType {

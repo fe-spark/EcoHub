@@ -160,6 +160,7 @@ func defaultBasicConfig() model.BasicConfig {
 		Describe: "自动采集, 多播放源集成,在线观影网站",
 		State:    true,
 		Hint:     "网站升级中, 暂时无法访问 !!!",
+		Tip:      model.DefaultTipConfig(),
 	}
 }
 

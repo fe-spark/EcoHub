@@ -1,23 +1,19 @@
 "use client";
 
-import React from "react";
-import { useRouter, usePathname } from "next/navigation";
-import {
-  GithubOutlined,
-  HomeOutlined,
-  SyncOutlined,
-  HistoryOutlined,
-  HeartOutlined,
-  UserOutlined,
-} from "@ant-design/icons";
+import React, { useState } from "react";
+import { GithubOutlined, HeartOutlined } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import SiteLogo from "@/components/public/SiteLogo";
+import TipModal from "@/components/public/TipModal";
 import { PROJECT_GITHUB_URL } from "@/lib/project";
+import { hasVisibleTip } from "@/lib/tip";
 
 export default function Footer() {
   const { config } = useSiteConfig();
   const currentYear = new Date().getFullYear();
+  const [tipOpen, setTipOpen] = useState(false);
+  const showTip = hasVisibleTip(config?.tip);
 
   return (
     <footer className={styles.footer}>
@@ -44,11 +40,30 @@ export default function Footer() {
             <GithubOutlined />
             <span>GitHub</span>
           </a>
+          {showTip ? (
+            <>
+              <span className={styles.dot} aria-hidden>
+                ·
+              </span>
+              <button
+                type="button"
+                className={styles.tipBtn}
+                onClick={() => setTipOpen(true)}
+                aria-label="打开赞赏"
+              >
+                <HeartOutlined />
+                <span>赞赏</span>
+              </button>
+            </>
+          ) : null}
         </p>
       </div>
       <p className={styles.disclaimer}>
         本站所有内容均来自互联网分享站点所提供的公开引用资源，未提供资源上传、存储服务。
       </p>
+      {showTip ? (
+        <TipModal open={tipOpen} tip={config?.tip} onClose={() => setTipOpen(false)} />
+      ) : null}
     </footer>
   );
 }

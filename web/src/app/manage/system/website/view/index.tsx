@@ -8,6 +8,7 @@ import {
   Flex,
   Input,
   Modal,
+  Popconfirm,
   Space,
   Spin,
   Switch,
@@ -27,19 +28,13 @@ import { useManagePermission } from "@/lib/manage-permission";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ImagePicker from "@/app/manage/components/image-picker";
+import { createDefaultTipConfig, normalizeTipConfig } from "@/lib/tip";
+import TipConfigCard, { type SiteBasicPayload } from "./tip-config-card";
 import styles from "./index.module.less";
 
-interface SiteConfigValues {
-  siteName: string;
-  siteUrl: string;
-  keyword: string;
-  logo: string;
-  state: boolean;
-  describe: string;
-  hint: string;
-}
+type SiteConfigValues = SiteBasicPayload;
 
-type EditableField = keyof SiteConfigValues;
+type EditableField = Exclude<keyof SiteConfigValues, "tip">;
 
 interface ConfigItem {
   field: EditableField;
@@ -56,6 +51,7 @@ const DEFAULT_CONFIG: SiteConfigValues = {
   state: false,
   describe: "",
   hint: "",
+  tip: createDefaultTipConfig(),
 };
 
 const CONFIG_ITEMS: ConfigItem[] = [
@@ -87,6 +83,7 @@ function normalizeConfig(data: Partial<SiteConfigValues> | undefined): SiteConfi
     state: Boolean(data?.state),
     describe: String(data?.describe ?? ""),
     hint: String(data?.hint ?? ""),
+    tip: normalizeTipConfig(data?.tip),
   };
 }
 
@@ -157,21 +154,31 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
     setPickerOpen(false);
   };
 
+  const persistConfig = useCallback(
+    async (nextConfig: SiteConfigValues) => {
+      const resp = await ApiPost("/manage/config/basic/update", nextConfig);
+      if (resp.code === 0) {
+        message.success(resp.msg);
+        setConfig(normalizeConfig(nextConfig));
+        await getBasicInfo();
+        await refreshSiteConfig();
+        return true;
+      }
+      message.error(resp.msg);
+      return false;
+    },
+    [getBasicInfo, message, refreshSiteConfig],
+  );
+
   const saveEditingItem = async () => {
     if (!editingItem) return;
     const nextConfig = { ...config, [editingItem.field]: editingValue };
     setSaving(true);
     try {
-      const resp = await ApiPost("/manage/config/basic/update", nextConfig);
-      if (resp.code === 0) {
-        message.success(resp.msg);
-        setConfig(normalizeConfig(nextConfig));
+      const ok = await persistConfig(nextConfig);
+      if (ok) {
         closeEditor();
-        await getBasicInfo();
-        await refreshSiteConfig();
-        return;
       }
-      message.error(resp.msg);
     } finally {
       setSaving(false);
     }
@@ -203,9 +210,19 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
   }, [getBasicInfo]);
 
   const resetAction = (
-    <Button icon={<ReloadOutlined />} loading={fetching} onClick={() => void handleReset()}>
-      还原默认
-    </Button>
+    <Popconfirm
+      title="还原默认网站配置？"
+      description="网站基本信息和赞赏配置都会恢复默认，已保存的收款码设置会清除。"
+      okText="还原"
+      cancelText="取消"
+      okButtonProps={{ danger: true }}
+      disabled={!canWrite}
+      onConfirm={() => void handleReset()}
+    >
+      <Button icon={<ReloadOutlined />} loading={fetching} disabled={!canWrite}>
+        还原默认
+      </Button>
+    </Popconfirm>
   );
 
   return (
@@ -213,49 +230,52 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
       {embedded ? null : (
         <ManagePageHeader
           title="网站配置"
-          description="维护站点基本信息；还原将恢复默认基本信息。"
+          description="维护站点基本信息与赞赏入口；还原将恢复默认基本信息与赞赏配置。"
           actions={resetAction}
         />
       )}
 
       <Spin spinning={fetching} description="正在加载网站配置...">
-        <Card
-          title={
-            <Space size={8}>
-              <SettingOutlined style={{ color: "#1677ff" }} />
-              <span>基本信息</span>
-            </Space>
-          }
-          extra={embedded ? resetAction : null}
-          className={styles.card}
-          styles={{ body: { padding: "8px 16px" } }}
-        >
-          <div className={styles.configList}>
-            {CONFIG_ITEMS.map((item) => (
-              <div key={item.field} className={styles.configItem}>
-                <Space orientation="vertical" size={4} className={styles.configMeta}>
-                  <Typography.Text strong>{item.label}</Typography.Text>
-                  <div className={styles.configValue}>
-                    {renderPreviewValue(item, config[item.field])}
-                  </div>
-                  {item.hint ? (
-                    <Typography.Text type="secondary" className={styles.configHint}>
-                      {item.hint}
-                    </Typography.Text>
-                  ) : null}
-                </Space>
-                <Button
-                  type="link"
-                  icon={<EditOutlined />}
-                  disabled={!canWrite}
-                  onClick={() => openEditor(item)}
-                >
-                  编辑
-                </Button>
-              </div>
-            ))}
-          </div>
-        </Card>
+        <div className={styles.formPanel}>
+          <Card
+            title={
+              <Space size={8}>
+                <SettingOutlined style={{ color: "#1677ff" }} />
+                <span>基本信息</span>
+              </Space>
+            }
+            extra={embedded ? resetAction : null}
+            className={styles.card}
+            styles={{ body: { padding: "8px 16px" } }}
+          >
+            <div className={styles.configList}>
+              {CONFIG_ITEMS.map((item) => (
+                <div key={item.field} className={styles.configItem}>
+                  <Space orientation="vertical" size={4} className={styles.configMeta}>
+                    <Typography.Text strong>{item.label}</Typography.Text>
+                    <div className={styles.configValue}>
+                      {renderPreviewValue(item, config[item.field])}
+                    </div>
+                    {item.hint ? (
+                      <Typography.Text type="secondary" className={styles.configHint}>
+                        {item.hint}
+                      </Typography.Text>
+                    ) : null}
+                  </Space>
+                  <Button
+                    type="link"
+                    icon={<EditOutlined />}
+                    disabled={!canWrite}
+                    onClick={() => openEditor(item)}
+                  >
+                    编辑
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Card>
+          <TipConfigCard siteConfig={config} canWrite={canWrite} onSave={persistConfig} />
+        </div>
       </Spin>
 
       <Modal

@@ -81,7 +81,7 @@ function SystemSettingsBody() {
     <div className={styles.page}>
       <ManagePageHeader
         title="系统设置"
-        description="网站配置（基本信息）、通知配置、数据安全（备份 / 重置）与系统日志。"
+        description="网站配置（基本信息、赞赏）、通知配置、数据安全（备份 / 重置）与系统日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {MAIN_TABS.map((tab) => {

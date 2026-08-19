@@ -1,31 +1,11 @@
-> **破坏性变更**：已部署旧版必须按下面做完再启动。全新安装、本版本之后的升级不必再做。正式版会覆盖 `:latest`。
+## v2.1.1
 
-## 必须执行
+已部署 **v2.1.0** 的站点：后台点「立即升级并重启」，或执行 `docker compose pull && docker compose up -d`。正式版会覆盖 `:latest`。
 
-会覆盖 `docker-compose.yml`，保留 `.env` 和 `data/`。
+从 **v2.1.0 之前** 升级的，请先按 [v2.1.0 说明](https://github.com/fe-spark/EcoHub/releases/tag/v2.1.0) 做完素材卷迁移，再升到本版本。
 
-旧容器还在且传过素材，先拷到宿主机（否则图会丢）：
+### 本版本变更
 
-```bash
-mkdir -p ~/ecohub/data/uploads/gallery
-docker cp Eco-hub:/app/server/static/upload/gallery/. ~/ecohub/data/uploads/gallery/
-```
-
-然后重新拉安装脚本并启动：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
-cd ~/ecohub
-docker compose stop
-docker compose pull
-docker compose up -d
-```
-
-之后有新版本：后台点「立即升级并重启」，或再执行 `stop && pull && up -d`。
-
-## 本版本其它变更
-
-- 素材中心：上传落到发布卷；列表支持时间筛选并始终分页
-- 发布版后台可拉 `latest` 并重启当前容器
-- 采集结束即可引导下一步；采集站弹窗不再残留上次输入
-- 登录页去掉嵌套 ConfigProvider，消除 hydration 报错
+- 系统设置 → 网站配置新增「赞赏」：可开关、自定义文案，配置微信 / 支付宝收款码或外链
+- 开启且至少有一个收款码或外链时，前台页脚显示赞赏入口
+- 赞赏配置随网站配置备份 / 还原
