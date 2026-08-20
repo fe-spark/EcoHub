@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - RELEASE.md
+      - docs/RELEASE.md
       - web/package.json
       - .github/workflows/github-release.yml
   workflow_dispatch:
@@ -96,12 +96,12 @@ jobs:
           if gh release view "$VERSION" >/dev/null 2>&1; then
             gh release edit "$VERSION" \
               --title "$VERSION" \
-              --notes-file RELEASE.md \
+              --notes-file docs/RELEASE.md \
               "${extra_flags[@]}"
           else
             gh release create "$VERSION" \
               --title "$VERSION" \
-              --notes-file RELEASE.md \
+              --notes-file docs/RELEASE.md \
               "${extra_flags[@]}"
           fi
 

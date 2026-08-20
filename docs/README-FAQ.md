@@ -1,5 +1,7 @@
 # FAQ 与排障
 
+中文 | [English](./README-FAQ_EN.md)
+
 这份文档只覆盖当前仓库的真实实现。
 
 ## 采集与数据
@@ -32,6 +34,8 @@
 ### 为什么搭建完成看不到影片
 
 EcoHub 不内置影视数据。首次搭建完成后，需要先在后台配置采集源，并执行采集任务。
+
+第一次全量采集**可能要数个小时**，片源越多越久。采集还在跑时，前台、后台列表和 TVBox 都不会有完整片库，看起来像空站，这是正常的。
 
 采集任务完成后，系统还会整理列表和筛选数据。整理完成后，前台首页、分类、搜索、详情页、后台影片列表以及 TVBox / MacCMS 接口才能看到这些影片。
 
@@ -168,9 +172,9 @@ API_URL=http://server:${SERVER_PORT:-8080}
 - `server` 默认 `8080`，`web` 默认 `3000`。
 - 不要把 Next 改到 `8080`。改 `web/.env.local` 的 `PORT` 后需重启前端。
 
-### 从 v1.x 升级到 v2.0 要注意什么
+### 从 v1.x 升级到 v2.x 要注意什么
 
-- 换成单镜像 compose（见 [README-Deploy.md](./README-Deploy.md)「从 v1.x 双镜像升级」）。
+- 换成单镜像 compose（见 [部署指南 · 从 v1.x 升级](./README-Deploy.md#5-从-v1x-升级)）。
 - 备份数据后 `pull` + `up -d`；不要新旧 server 混连同一库。
 - 正式版 tag 会覆盖 `ghcr.io/fe-spark/ecohub:latest`。
 
@@ -183,8 +187,9 @@ API_URL=http://server:${SERVER_PORT:-8080}
 
 ## 文档入口
 
-- [根目录总览](./README.md)
+- [根目录总览](../README.md)
 - [版本变更](./RELEASE.md)
-- [服务端说明](./server/README.md)
-- [前端说明](./web/README.md)
+- [服务端说明](../server/README.md)
+- [前端说明](../web/README.md)
 - [部署指南](./README-Deploy.md)
+- [English](./README-FAQ_EN.md)

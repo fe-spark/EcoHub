@@ -1,8 +1,10 @@
 # EcoHub 部署指南
 
+中文 | [English](./README-Deploy_EN.md)
+
 发布镜像 `ghcr.io/fe-spark/ecohub`（All-in-One：同容器 Supervisord 托管 Go API `:8080` 与 Next.js `:3000`）。普通用户用 **安装脚本** 或 **1Panel** 即可。
 
-> Compose：[deploy/release/compose.yml](./deploy/release/compose.yml) · 环境变量模板：[.env.example](./.env.example) · 版本：[RELEASE.md](./RELEASE.md)
+> Compose：[deploy/release/compose.yml](../deploy/release/compose.yml) · 环境变量模板：[.env.example](../.env.example) · 版本：[RELEASE.md](./RELEASE.md)
 
 旧的 `ecohub-web` / `ecohub-server` 双镜像已废弃（v2.0+）。
 
@@ -15,9 +17,9 @@
 | 命令行一键 | [安装脚本](#方式-a安装脚本推荐) |
 | 1Panel 图形化 | [1Panel](#方式-b1panel) |
 | 改源码本地构建 | [源码版 Compose](#方式-c源码版-compose) |
-| 本机开发 | [README.md](./README.md)「本地开发」 |
+| 本机开发 | [README.md](../README.md)「本地开发」 |
 
-自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。变量含义见 [server/README.md](./server/README.md)。
+自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。变量含义见 [server/README.md](../server/README.md)。
 
 ---
 
@@ -74,7 +76,7 @@ docker compose up -d
 
 默认账号（**立刻改密**）：`admin` / `admin`，`guest` / `guest`。
 
-首次需在后台配置 **采集源** 并执行采集，否则前台无影片。
+首次需在后台配置 **采集源** 并执行采集，否则前台无影片。第一次全量采集**可能要数个小时**，**采集完成并发布后数据才会展示**。
 
 ### 4. 数据与更新
 
@@ -117,7 +119,7 @@ v1 旧库存到 v2 后，**建议重置站点数据并全量采集一次**，让
 
 1. **容器** → **编排** → **创建**，名称如 `ecohub`。  
 2. 工作目录例如 `/opt/1panel/apps/ecohub`。  
-3. 粘贴与 [deploy/release/compose.yml](./deploy/release/compose.yml) 一致的内容：
+3. 粘贴与 [deploy/release/compose.yml](../deploy/release/compose.yml) 一致的内容：
 
 ```yaml
 services:
@@ -265,7 +267,7 @@ docker compose pull && docker compose up -d
 
 ## 方式 C：源码版 Compose
 
-适合开发或自行构建。根目录 [docker-compose.yml](./docker-compose.yml)（`web` + `server` 本地 build）。**生产请用 All-in-One 发布版。**
+适合开发或自行构建。根目录 [docker-compose.yml](../docker-compose.yml)（`web` + `server` 本地 build）。**生产请用 All-in-One 发布版。**
 
 ```bash
 cp .env.example .env
@@ -329,4 +331,4 @@ docker compose logs -f server
 
 ## 相关文档
 
-- [README.md](./README.md) · [RELEASE.md](./RELEASE.md) · [server/README.md](./server/README.md) · [web/README.md](./web/README.md) · [README-FAQ.md](./README-FAQ.md)
+- [README.md](../README.md) · [RELEASE.md](./RELEASE.md) · [server/README.md](../server/README.md) · [web/README.md](../web/README.md) · [README-FAQ.md](./README-FAQ.md) · [English](./README-Deploy_EN.md)
