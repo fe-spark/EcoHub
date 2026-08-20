@@ -2,7 +2,7 @@
 
 中文 | [English](./README-Deploy_EN.md)
 
-发布镜像 `ghcr.io/fe-spark/ecohub`（All-in-One：同容器 Supervisord 托管 Go API `:8080` 与 Next.js `:3000`）。普通用户用 **安装脚本** 或 **1Panel** 即可。
+发布镜像 `ghcr.io/fe-spark/ecohub`（All-in-One：同容器 Supervisord 托管 Go API `:8080` 与 Next.js `:3000`）。可选用 **安装脚本**、**1Panel** 或 **手动部署**。
 
 > Compose：[deploy/release/compose.yml](../deploy/release/compose.yml) · 环境变量模板：[.env.example](../.env.example) · 版本：[RELEASE.md](./RELEASE.md)
 
@@ -14,12 +14,11 @@
 
 | 场景 | 章节 |
 | --- | --- |
-| 命令行一键 | [安装脚本](#方式-a安装脚本推荐) |
-| 1Panel 图形化 | [1Panel](#方式-b1panel) |
-| 改源码本地构建 | [源码版 Compose](#方式-c源码版-compose) |
-| 本机开发 | [README.md](../README.md)「本地开发」 |
+| 命令行一键 | [安装脚本](#方式-1安装脚本推荐) |
+| 1Panel 图形化 | [1Panel](#方式-21panel) |
+| 直接运行镜像 | [手动部署](#方式-3手动部署) |
 
-自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。变量含义见 [server/README.md](../server/README.md)。
+自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。变量含义见 `.env.example`。
 
 ---
 
@@ -27,7 +26,7 @@
 
 | 项 | 说明 |
 | --- | --- |
-| Docker | 20+，Compose 2+（1Panel 自带即可） |
+| Docker | 20+；方式 1 / 2 还需 Compose 2+（1Panel 自带） |
 | 网络 | 能拉 `ghcr.io`、`docker.io`（国内可配镜像加速） |
 | 端口 | 至少空闲 Web 端口（默认 `3000`） |
 | 资源 | 建议 ≥ 2 核 2G；采集任务多时适当加内存 |
@@ -42,7 +41,7 @@ openssl rand -hex 32
 
 ---
 
-## 方式 A：安装脚本（推荐）
+## 方式 1：安装脚本（推荐）
 
 默认三个容器：`Eco-hub`（应用）、`Eco-mysql`、`Eco-redis`。
 
@@ -94,26 +93,9 @@ docker compose up -d
 
 固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。发布版后台可点「立即升级并重启」（compose 需挂载 `/var/run/docker.sock`，新 compose 已包含）。挂载 socket 等于容器内进程可操作宿主机 Docker，仅可写账号能触发升级；不需要在线升级可去掉该卷。
 
-### 5. 从 v1.x 升级
-
-1. 备份 `data/`。  
-2. 停掉旧栈（v1 的 `ecohub-web` / `ecohub-server` 等），换成 All-in-One 发布版 compose（`ghcr.io/fe-spark/ecohub`）。  
-3. `.env` 指向同一库后 `pull` + `up -d`。  
-4. 禁止新旧 server 混连同一库。
-
-#### 对齐数据（建议）
-
-v1 旧库存到 v2 后，**建议重置站点数据并全量采集一次**，让 ContentKey、快照、分类树与多源播放列表按 v2 规则重新对齐，避免残留脏数据导致匹配偏差或列表不一致。
-
-- 管理后台 → **重置站点数据**（或等价清空业务表）  
-- 重新配置 / 确认采集源（主站 + 附属站）→ 执行 **全量采集**（不要只跑增量）  
-- 用户上传素材（`data/uploads`）可按需保留；影片主数据与播放源以本次全量采集结果为准  
-
-若不重置，多数场景仍可直接跑 v2，但数据可能未完全按新模型对齐，出现问题再按上面步骤处理即可。
-
 ---
 
-## 方式 B：1Panel
+## 方式 2：1Panel
 
 ### 1. 新建编排
 
@@ -242,7 +224,7 @@ REDIS_DB=0
 
 ### 3. 启动
 
-保存 → 启动；确认 `Eco-hub`、`Eco-mysql`、`Eco-redis` 运行中。访问同方式 A。
+保存 → 启动；确认 `Eco-hub`、`Eco-mysql`、`Eco-redis` 运行中。访问同方式 1。
 
 也可先跑安装脚本，再在 1Panel 容器列表中查看/接管。
 
@@ -265,17 +247,65 @@ docker compose pull && docker compose up -d
 
 ---
 
-## 方式 C：源码版 Compose
+## 方式 3：手动部署
 
-适合开发或自行构建。根目录 [docker-compose.yml](../docker-compose.yml)（`web` + `server` 本地 build）。**生产请用 All-in-One 发布版。**
+不使用 Compose。自行创建网络与数据目录，依次运行 MySQL、Redis 与 `ghcr.io/fe-spark/ecohub`。访问地址与默认账号同方式 1。
+
+将下面的密码与密钥换成强随机值后再执行。
 
 ```bash
-cp .env.example .env
-# 修改 JWT_SECRET、密码等
-docker compose up --build -d
+mkdir -p ~/ecohub/data/mysql ~/ecohub/data/redis ~/ecohub/data/uploads
+docker network inspect Eco-network >/dev/null 2>&1 || docker network create Eco-network
+
+MYSQL_ROOT_PASSWORD='请改成强密码'
+MYSQL_PASSWORD='请改成强密码'
+REDIS_PASSWORD='请改成强密码'
+JWT_SECRET="$(openssl rand -hex 32)"
+
+docker pull mysql:8.4
+docker pull redis:7.4-alpine
+docker pull ghcr.io/fe-spark/ecohub:latest
+
+docker run -d --name Eco-mysql --restart always --network Eco-network \
+  -e MYSQL_ROOT_PASSWORD="$MYSQL_ROOT_PASSWORD" \
+  -e MYSQL_DATABASE=eco \
+  -e MYSQL_USER=eco \
+  -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+  -v ~/ecohub/data/mysql:/var/lib/mysql \
+  mysql:8.4
+
+docker run -d --name Eco-redis --restart always --network Eco-network \
+  -v ~/ecohub/data/redis:/data \
+  redis:7.4-alpine \
+  redis-server --requirepass "$REDIS_PASSWORD"
+
+until docker exec Eco-mysql mysql -ueco -p"$MYSQL_PASSWORD" -e 'SELECT 1' eco >/dev/null 2>&1; do
+  sleep 2
+done
+
+docker run -d --name Eco-hub --restart always --network Eco-network \
+  --add-host=host.docker.internal:host-gateway \
+  -p 3000:3000 \
+  -p 18080:8080 \
+  -e PORT=8080 \
+  -e JWT_SECRET="$JWT_SECRET" \
+  -e MYSQL_HOST=Eco-mysql \
+  -e MYSQL_PORT=3306 \
+  -e MYSQL_USER=eco \
+  -e MYSQL_PASSWORD="$MYSQL_PASSWORD" \
+  -e MYSQL_DBNAME=eco \
+  -e REDIS_HOST=Eco-redis \
+  -e REDIS_PORT=6379 \
+  -e REDIS_PASSWORD="$REDIS_PASSWORD" \
+  -e REDIS_DB=0 \
+  -v ~/ecohub/data/uploads:/app/static/upload \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/fe-spark/ecohub:latest
 ```
 
-访问端口与发布版相同。源码版 `API_URL` 由 compose 注入；发布版不需要配。
+容器内访问数据库须用容器名 `Eco-mysql` / `Eco-redis`，不要写 `127.0.0.1`。自备库时不要创建上述 MySQL / Redis 容器，把 `MYSQL_HOST` / `REDIS_HOST` 改成可达地址（宿主机上的库可用 `host.docker.internal`）。首次初始化 MySQL 数据目录可能需要数十秒，就绪探测失败时查看 `docker logs Eco-mysql`。
+
+查看日志：`docker logs -f Eco-hub`。更新镜像：`docker pull ghcr.io/fe-spark/ecohub:latest` 后删除并按上面的参数重新 `docker run` Eco-hub（或使用后台「立即升级并重启」，需挂载 `/var/run/docker.sock`）。
 
 ---
 
@@ -293,28 +323,34 @@ docker compose up --build -d
 
 ## 常用命令
 
+方式 1 / 2：
+
 ```bash
-# 发布版
 docker compose ps
 docker compose logs -f ecohub
 docker compose restart ecohub
 docker compose down
-
-# 源码版
-docker compose logs -f web
-docker compose logs -f server
 ```
 
-发布版数据在安装目录 `data/`；源码版默认 Docker volume（`down -v` 会删）。
+方式 3：
+
+```bash
+docker logs -f Eco-hub
+docker restart Eco-hub
+docker inspect Eco-hub --format '{{range .Config.Env}}{{println .}}{{end}}'
+```
+
+数据在安装目录 `data/`（方式 3 默认 `~/ecohub/data`）。
 
 ---
 
 ## 排障
 
-- 探活：`http://主机:18080/api/health`  
-- 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`  
-- 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`  
-- Telegram 发不出：配 `TG_PROXY`；Token 在后台配置  
+- 探活：`http://主机:18080/api/health`
+- 方式 1 / 2 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`
+- 方式 3 反复重启：`docker logs Eco-hub`，用 `docker inspect Eco-hub` 核对环境变量与端口
+- 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`
+- Telegram 发不出：方式 1 / 2 在 `.env` 配 `TG_PROXY`；方式 3 在 `docker run` 增加 `-e TG_PROXY=...`；Token 在后台配置  
 
 更多：[README-FAQ.md](./README-FAQ.md)
 
@@ -331,4 +367,4 @@ docker compose logs -f server
 
 ## 相关文档
 
-- [README.md](../README.md) · [RELEASE.md](./RELEASE.md) · [server/README.md](../server/README.md) · [web/README.md](../web/README.md) · [README-FAQ.md](./README-FAQ.md) · [English](./README-Deploy_EN.md)
+- [README.md](../README.md) · [RELEASE.md](./RELEASE.md) · [README-FAQ.md](./README-FAQ.md) · [English](./README-Deploy_EN.md)
