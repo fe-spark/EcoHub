@@ -24,7 +24,7 @@
 
 ## Overview
 
-EcoHub is a self-hosted media aggregation system. It collects from multiple sources into one searchable, playable library: the master supplies titles and categories, slaves attach extra play lines for the same title, and collect can run on a schedule. After deploy you get a public site for browse, filter, search, and playback, plus an admin panel for sources, categories, and catalog. Clients can use the TVBox / YingShiCang subscribe URL `/api/provide/config` and the MacCMS-compatible API `/api/provide/vod`. The release is the All-in-One image `ghcr.io/fe-spark/ecohub`. Current version: **v2.1.1**.
+EcoHub is a self-hosted media aggregation system. It unifies multiple collect sources into one library, with web playback and TVBox subscription.
 
 ## Online demo
 
