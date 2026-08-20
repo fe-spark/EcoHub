@@ -24,7 +24,7 @@
 
 ## Overview
 
-EcoHub is a self-hosted media aggregation system. It unifies multiple collect sources into one library, with web playback and TVBox subscription.
+EcoHub is a high-performance, modern full-stack multi-source media aggregation system. It delivers a smooth web viewing experience and includes automated collection plus an admin panel, so developers and enthusiasts can quickly set up a private media library.
 
 ## Online demo
 
