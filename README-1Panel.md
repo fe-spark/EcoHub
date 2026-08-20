@@ -2,4 +2,4 @@
 
 本文已并入统一部署文档：
 
-**[README-Deploy.md](./README-Deploy.md#方式-b1panel)**
+**[docs/README-Deploy.md](./docs/README-Deploy.md#方式-b1panel)**

@@ -169,5 +169,5 @@ npm run lint
 
 - [根目录总览](../README.md)
 - [服务端说明](../server/README.md)
-- [部署指南](../README-Deploy.md)
-- [FAQ 与排障](../README-FAQ.md)
+- [部署指南](../docs/README-Deploy.md)
+- [FAQ 与排障](../docs/README-FAQ.md)
