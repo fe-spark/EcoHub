@@ -163,7 +163,7 @@ TG_PROXY=socks5://127.0.0.1:7891
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
 | `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` 等 | 通过 compose `environment` 注入 server（或 All-in-One）进程 |
 
-完整部署说明见 [部署指南](../README-Deploy.md)。
+完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 
 ### 地址写法小结
 
@@ -329,6 +329,7 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 
 - [根目录总览](../README.md)
 - [前端说明](../web/README.md)
-- [部署指南](../README-Deploy.md)
-- [FAQ 与排障](../README-FAQ.md)
-- [版本变更](../RELEASE.md)
+- [部署指南](../docs/README-Deploy.md)
+- [FAQ 与排障](../docs/README-FAQ.md)
+- [版本变更](../docs/RELEASE.md)
+- [Telegram 通知行为](./notify.md)
