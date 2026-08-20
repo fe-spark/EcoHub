@@ -1,152 +1,92 @@
 <div align="center">
 
-<img src="../logo.png" alt="EcoHub Logo" width="128" />
+<img src="../logo.png" alt="EcoHub" width="120" />
 
 # EcoHub
 
-[![Go](https://img.shields.io/badge/Go-1.24-00ADD8.svg)](https://golang.org/)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org/)
-[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1.svg)](https://www.mysql.com/)
-[![Redis](https://img.shields.io/badge/Redis-7-DC382D.svg)](https://redis.io/)
-[![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
-[![License](https://img.shields.io/badge/License-MIT-green.svg)](../LICENSE)
+[![Release](https://img.shields.io/github/v/release/fe-spark/EcoHub)](https://github.com/fe-spark/EcoHub/releases)
+[![Go](https://img.shields.io/badge/Go-1.24-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs&logoColor=white)](https://nextjs.org/)
+[![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)](https://www.mysql.com/)
+[![Redis](https://img.shields.io/badge/Redis-7-DC382D?logo=redis&logoColor=white)](https://redis.io/)
+[![License](https://img.shields.io/github/license/fe-spark/EcoHub)](../LICENSE)
 
-**Your own media site: watch on computer, TV, and phone**
+**Self-hosted media aggregation**
 
 [中文](../README.md) | English
 
-One command installs the site and the admin panel. Add sources, run a collect, then use it in the browser, TVBox, or YingShiCang.
-
-[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy guide](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md)
+[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md)
 
 </div>
 
-## ⚠️ Before you start
+> **Notice**  
+> EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 
-- **For learning and exchange only.** This project does not provide or store any media files. Sources come from collect APIs you configure yourself.
-- **Use it legally.** Follow the laws where you live and the terms of each source. You take all risk.
-- **Star if it helps.** A ⭐ is the best way to support the project.
+## Overview
 
-## ❤️ Recommendations
+EcoHub is a self-hosted media aggregation system. It collects from multiple sources into one searchable, playable library: the master supplies titles and categories, slaves attach extra play lines for the same title, and collect can run on a schedule. After deploy you get a public site for browse, filter, search, and playback, plus an admin panel for sources, categories, and catalog. Clients can use the TVBox / YingShiCang subscribe URL `/api/provide/config` and the MacCMS-compatible API `/api/provide/vod`. The release is the All-in-One image `ghcr.io/fe-spark/ecohub`. Current version: **v2.1.1**.
 
-### Server
-
-[CloudCone](https://app.cloudcone.com/?ref=14393) — the demo runs here. **No IO throttle** (many cheap VPS boxes choke IO, then the database and collect jobs freeze). Overseas machines skip ICP filing: you get the box and you can use it. Good for crawlers, this kind of site, and a personal proxy. Buying through the invite link supports the project.
-
-### Proxy / VPN
-
-A stable proxy is almost required when you deploy overseas, reach collect sources, or debug APIs. **LiangXinYun** is a high-value direct-connect option:
-
-- **¥2 / month for 100G**, ¥6 for 1000G (1T)
-- Direct AWS + Oracle high-spec nodes, VLESS Reality + Hysteria2
-- Netflix / Disney+ / TikTok / ChatGPT unblocked, no audit, 1× traffic
-- Works in restricted regions (Xinjiang, Henan, Fujian, etc.); 4K at peak hours
-- New sign-ups get trial traffic
-
-👉 Exclusive signup (supports this project): [Register LiangXinYun](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
-
-> Stable in personal use. Fine as a daily backup line plus heavy downloads. Monthly purchase is a simple way to limit risk.
-
-## ✨ What it does
-
-| You want to… | EcoHub |
-| --- | --- |
-| Run a media site for yourself or family | Open the browser: search, browse by category, play |
-| Watch on a TV or set-top box | Paste one config URL into **TVBox / YingShiCang** |
-| Merge several sites into one library | **Master** owns the catalog (titles, categories, descriptions). **Slaves** add extra play lines for the same title |
-| Avoid clicking collect every day | Turn on scheduled tasks |
-| Know when a show updates | Optional **Telegram** push after collect |
-| Change homepage, banners, categories | All in the web admin. No code edits |
-
-> A first start already includes built-in collect sources. Your job is: **enable → collect → wait → watch**.
-
-## 📺 Try the demo
+## Online demo
 
 | Entry | URL |
 | --- | --- |
-| Site (watch) | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
+| Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
-| Demo account | `guest` / `guest` (read-only) |
 
-Current release **v2.1** is a single Docker image `ghcr.io/fe-spark/ecohub` (site + admin together). Changelog: [RELEASE.md](./RELEASE.md).
+Read-only demo account: `guest` / `guest`. This account cannot save settings. For a real deployment, use your own accounts and change the default passwords.
 
-## 🚀 Install in five minutes
+## Recommendations
 
-Install [Docker](https://docs.docker.com/get-docker/) 20+ and Docker Compose 2+ first. **2 CPU / 2G RAM** is a reasonable start.
+### Server
+
+[CloudCone](https://app.cloudcone.com/?ref=14393) hosts the demonstration site and does **not throttle disk I/O**. Many low-cost VPS plans impose I/O limits, which can stall the database and collect jobs. Overseas instances do not require ICP filing and are available immediately after provisioning. They are suitable for collect workloads, deployments of this kind, and a self-hosted network egress.
+
+### Proxy service
+
+A stable network proxy is typically required when deploying overseas hosts, reaching collect sources, or debugging APIs. **LiangXinYun** is a direct-connect option:
+
+- **¥2 / month for 100G**, ¥6 for 1000G (1T)
+- Direct AWS and Oracle nodes; VLESS Reality and Hysteria2
+- Netflix, Disney+, TikTok, and ChatGPT unblocked; no traffic audit; 1× multiplier
+- Coverage includes Xinjiang, Henan, and Fujian; 4K playback during peak hours
+- New registrations receive trial traffic
+
+[Register LiangXinYun](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
+
+## Quick start
+
+Docker 20+ and Compose 2+ are required. A minimum of 2 CPU cores and 2 GB RAM is recommended.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/install-release.sh | sh
 cd ~/ecohub
-# Edit .env: at least change JWT_SECRET and database passwords
+```
+
+Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, change the MySQL / Redis passwords, then start:
+
+```bash
 docker compose up -d
 ```
 
-Then open:
-
-| URL | What |
+| URL | Purpose |
 | --- | --- |
-| `http://SERVER_IP:3000` | Watch |
-| `http://SERVER_IP:3000/manage` | Admin |
-| `http://SERVER_IP:3000/api/provide/config` | TVBox / YingShiCang config |
+| `http://<host>:3000` | Public site |
+| `http://<host>:3000/manage` | Administration panel |
+| `http://<host>:3000/api/provide/config` | TVBox / YingShiCang subscription URL |
+| `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
+| `http://<host>:18080/api/*` | Direct API access (do not expose to the public internet) |
 
-Default accounts (**change passwords before exposing the site**):
+Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only). Default passwords must be changed before any public deployment.
 
-| Role | User | Password | Access |
-| --- | --- | --- | --- |
-| Admin | `admin` | `admin` | Config, collect, films |
-| Guest | `guest` | `guest` | Read only |
+An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
 
-> 1Panel GUI, your own database, domain reverse proxy: [Deploy guide](./README-Deploy_EN.md).
+Telegram notifications are configured under **System settings → Notify**. Hosts in mainland China frequently time out when reaching Telegram; set `TG_PROXY=http://host.docker.internal:7890` in `.env`. See [server/notify.md](../server/notify.md).
 
-The site is empty after install. That is expected. Open admin **采集中心**, run the first full collect (**several hours** is normal), and wait until it finishes and publishes. The admin has a first-run tour.
+## Local development
 
-## 📱 Where to use it
+Start MySQL 8 and Redis 7 locally. Run the API and the web app in two terminals, both from the repository root.
 
-This is your own site. Plug it in here:
-
-### Browser
-
-Open the site URL on a computer or phone. Share one link with family.
-
-### TVBox / YingShiCang (TV, boxes)
-
-1. Open Config / Subscribe
-2. Paste (replace the IP):
-
-```text
-http://SERVER_IP:3000/api/provide/config
-```
-
-3. Save and refresh. An EcoHub source appears. Search, categories, and filters match the website.
-
-If you have a domain and HTTPS, replace `http://SERVER_IP:3000` with that domain.
-
-### Other compatible clients
-
-MacCMS-style API:
-
-```text
-http://SERVER_IP:3000/api/provide/vod
-```
-
-Works with players or small tools that already speak this API.
-
-### Telegram (optional)
-
-Want “collect finished / this show updated” on your phone: open **系统设置 · 通知配置**, fill Bot Token and Chat ID. Servers in mainland China often time out talking to Telegram. In Docker you can add:
-
-```env
-TG_PROXY=http://host.docker.internal:7890
-```
-
-Use your local proxy port.
-
-## 🛠️ Local development
-
-Use this only when you change code. For personal hosting, Docker above is enough.
-
-1. Run MySQL 8 and Redis 7 locally.
-2. Start the API:
+API:
 
 ```bash
 cd server
@@ -154,7 +94,7 @@ cp .env.example .env
 go run ./cmd/server
 ```
 
-3. Start the web app:
+Web:
 
 ```bash
 cd web
@@ -163,39 +103,17 @@ npm install
 npm run dev
 ```
 
-4. Open:
+Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `http://127.0.0.1:8080`. [Server](../server/README.md) · [Web](../web/README.md)
 
-- Site: `http://127.0.0.1:3000`
-- Admin: `http://127.0.0.1:3000/manage`
-- API: `http://127.0.0.1:8080`
+## Documentation
 
-More detail:
-
-- [Server](../server/README.md)
-- [Web](../web/README.md)
-
-## 📚 More docs
-
-| Doc | When |
+| Document | Contents |
 | --- | --- |
-| [Deploy guide](./README-Deploy_EN.md) | Install script, 1Panel, source compose, reverse proxy |
-| [FAQ](./README-FAQ_EN.md) | Empty catalog, collect, cache, login, Docker |
-| [Release notes](./RELEASE.md) | Upgrades, image tags |
-| [Server](../server/README.md) | Env vars, APIs, auth (developers) |
-| [Web](../web/README.md) | Pages and local start (developers) |
-
-Chinese versions: [README.md](../README.md) · [Deploy](./README-Deploy.md) · [FAQ](./README-FAQ.md).
-
-## Common snags
-
-| Symptom | Check first |
-| --- | --- |
-| Site opens, zero titles | The first full collect can take several hours. Nothing shows until it finishes and publishes. Watch Collect progress |
-| Collect keeps failing | Source URL is dead, or the server cannot reach the source (overseas box / proxy) |
-| Admin opens, you cannot change anything | Are you on `guest`? Guests are read-only |
-| TV search is empty | Config URL must be `.../api/provide/config`, and collect must have finished |
-
-More: [FAQ](./README-FAQ_EN.md).
+| [Deploy](./README-Deploy_EN.md) | Install script, 1Panel, manual deploy, reverse proxy, upgrades |
+| [FAQ](./README-FAQ_EN.md) | Empty catalog, collect, cache, authentication |
+| [Release notes](./RELEASE.md) | Changelog, image tags |
+| [Server](../server/README.md) / [Web](../web/README.md) | Environment variables, APIs, local startup |
+| [Chinese README](../README.md) | 中文总览 |
 
 ## Star History
 
@@ -209,10 +127,4 @@ More: [FAQ](./README-FAQ_EN.md).
 
 ---
 
-<div align="center">
-
-MIT License · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub)
-
-If this project helps you, please leave a ⭐ Star.
-
-</div>
+[MIT](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues)

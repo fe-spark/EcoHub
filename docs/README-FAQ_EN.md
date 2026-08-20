@@ -1,194 +1,67 @@
-# FAQ and troubleshooting
+# FAQ
 
 [中文](./README-FAQ.md) | English
 
-This page only covers what the current repo actually does.
-
 ## Collect and data
 
-### Why do I have to configure a master?
+### Why is the site empty after setup?
 
-The master stores film basics, categories, details, and the public list. Without a master, slave play URLs have nowhere to attach, and search / detail pages have no base data.
+The release image does not ship catalog data. First boot writes default collect sources, but it does not finish a collect by itself. Run collect in the administration panel. The first full collect may take several hours; more sources take longer.
 
-### How do master and slave split the work?
+The public site, the admin film list, and TVBox / MacCMS all read the snapshot / in-memory read model published after collect, not the tables while collect is still running. An empty site before that publish is expected.
 
-- Master writes the film record.
-- Slaves write playlists.
-- Detail and play pages attach slave sources under the master film.
-- Admin can “update all sites” for one film.
+### How do master and slave sites differ? Why is a master required?
+
+The master writes film records (`film_index`, details, search entry). Slaves only write playlists. Detail and play pages attach slave sources under a matched master film. Admin can “update all sites” for one film.
+
+Without a master, playlists have nowhere to attach, and the category tree is not built from slaves. Only one master is allowed. Adding or promoting a master demotes the previous one.
 
 ### Why rebuild after switching the master?
 
-The master owns basics, categories, and search. After a switch, rebuild with the new master so old and new categories, details, and lists do not mix.
+The master owns film basics, categories, and search. Switching the master, changing its URI, or demoting it stops collect and clears that master’s film data, then rebuilds from the new master so old and new categories, details, and lists do not mix. Slave playlists are kept and rematched after the new master’s full collect.
 
-### Why dedupe titles?
+### How are titles deduplicated and aligned across sites?
 
-Douban ID is preferred to decide whether two rows are the same film. Without that ID, title and similar fields help. That cuts duplicate films and search hits.
+Two keys, not “always merge by Douban ID”:
 
-### What happens if I stop a collect by hand?
+- **Master identity** (`film_index.content_key`): `vod_{id}` when the source `vod_id` exists, otherwise a title hash. Different `vod_id`s on the master stay as two rows even if the title or Douban ID matches.
+- **Cross-site match** (`movie_match_key`): how slaves attach to a master film. Douban identity first (including season/segment in the title), then a normalized title. If one key hits several mids, the newer `update_stamp` wins.
 
-Stop blocks new pages and cancels running jobs. Rows that already landed keep getting finished so the site can still show them.
+### What happens if a collect is stopped manually?
 
-If some pages wrote successfully before the stop, the site may only show that partial increment.
+Stop interrupts tasks that are still fetching pages and cancels their context. Sources already in `page_done` / `waiting_publish` still finish and publish.
 
-### Why is the site empty after I finish setup?
+A **master full** collect that errors or is stopped does **not** publish the pending mids from that run (they are discarded). The database may already contain partial writes, but the public read model stays on the previous snapshot. A master increment or a slave collect that already wrote rows still finalizes and publishes that increment.
 
-EcoHub does not ship media data. After the first install, configure collect sources in admin and run a collect.
+## Snapshots and cache
 
-The first full collect **can take several hours**, longer with more sources. While it is still running, the site, admin list, and TVBox stay empty or incomplete. That is expected.
+### Why publish a snapshot after collect? Why can an incremental publish still take time?
 
-When collect finishes, the system also prepares lists and filters. After that, home, categories, search, details, the admin film list, and TVBox / MacCMS APIs can show those titles.
+Tables keep changing during collect. Finalize refreshes play summaries, publishes the list snapshot, and swaps the in-memory read model. Public lists, filters, the admin film list, and TVBox / MacCMS all read that result.
 
-## Snapshots, filters, and cache
+An incremental publish still processes affected mids: snapshot rows, filter indexes, and the read model. A large catalog costs database time and memory. The read model stays in memory for the whole library; it is not only a short spike during publish.
 
-### Why publish a snapshot after collect?
+### Why didn’t the public site change after a config edit?
 
-Data keeps changing during collect. After collect ends, the system prepares one copy for pages. Public lists, filters, and TVBox APIs read that prepared copy. Pages stay steadier and faster.
+Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
 
-### Why can an incremental publish still take time?
+Film lists, categories, and filters follow the snapshot / read model. Changing sources does not fill the public site until collect finishes and a snapshot is published. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared on publish. If they still differ, check the running instance and request parameters.
 
-Even a partial update still:
+### What does “recently updated” use? Do category pages match TVBox?
 
-- Checks that films and details are valid
-- Updates public list data
-- Updates category, year, region, and other filters
-- Refreshes in-process cache
+Recently updated sorts snapshots by `update_stamp` descending (then `mid`). That stamp is not refreshed on every master-field change:
 
-A large batch still costs database writes and cache refresh.
+- Master: new titles, or a strictly higher episode count. Remarks, cast, and cover do not move the sort.
+- Slave: only when the film already matches a master mid **and** this source’s episode count is strictly higher than the historical maximum. Adding extra play lines, changing URLs, or changing the last-episode label without a higher count does not change the sort. A slave’s first attach keeps the master’s existing stamp.
 
-### Why didn’t the site change after I edited config?
-
-Common causes:
-
-- Browser cache
-- CDN or reverse-proxy cache
-- The running instance is not the latest code
-- You changed a field the public site does not show
-- List and filter data after collect is not finished yet
-
-The backend refreshes its own cache after a master switch, category rebuild, or list publish. It cannot control browser, CDN, or external proxy caches.
-
-### Why should the public category page match TVBox?
-
-They use the same query rules:
-
-- Same category conditions
-- Same plot, region, language, year filter meaning
-- Same “other” handling
-- Same sort rules
-
-If they still differ, check cache, which instance is running, and request parameters first.
-
-### What does “recently updated” actually use?
-
-Recently updated only looks at the master’s resource update time.
-
-That means:
-
-- Master data changes move recently updated
-- Syncing slave play sources does not change that sort
-- Public category pages and TVBox lists sort the same way
+Public category filters and TVBox share the same read-model rules (category, plot / region / language / year, sort). TVBox plain lists add a Redis cache, so short-lived mismatches are usually cache.
 
 ## Login and permissions
 
-### Why can I open admin pages but APIs say I am not logged in?
+### Why can admin pages open while APIs report not logged in?
 
-`/manage` only checks that a cookie exists on the frontend. Real JWT checks, Redis token checks, and permissions run on `/api/manage/*`.
+The edge middleware only checks that the `ecohub_auth_token` cookie exists. Opening `/manage` also has the server layout call `/api/manage/user/info`, where the backend validates the JWT and Redis token; failure redirects to `/login`. If a token later expires, is replaced by another device, or disappears from Redis while the admin page is already open, subsequent APIs may still return unauthorized. Trust the API response.
 
-Getting into the shell does not mean APIs will work. Trust the API response.
+### How do guest and default accounts work?
 
-### Why cookies instead of localStorage?
-
-Admin login uses an `HttpOnly` cookie:
-
-- The frontend does not store the token itself
-- The backend owns the session and auto-renewal
-- Frontend scripts are less able to read the token
-
-### What can a guest account do?
-
-Guests can view admin data. Every write is rejected by the backend `WriteAccess` middleware.
-
-Demo guest: `guest / guest`.
-
-### Can I use the default accounts in production?
-
-No. Defaults are for first boot and demos. After a public deploy, change passwords or replace the account system.
-
-## Docker and deploy
-
-### Is the release one container or two?
-
-**v2.0+ release is one All-in-One image** `ghcr.io/fe-spark/ecohub`: Supervisord runs Next (`:3000`) and Go API (`:8080`) in the same container. Compose service is usually `ecohub` (container `Eco-hub`), plus bundled `mysql` / `redis`.
-
-Old `ecohub-web` / `ecohub-server` images are retired. Root `docker-compose.yml` for source still splits `web` + `server` for local builds. That is not the release shape.
-
-### Do I still set `API_URL` on the release?
-
-**No.** Inside the image the default is `API_URL=http://127.0.0.1:8080` (loopback to Go in the same container).
-
-**Source compose** (split web/server) injects something like:
-
-```env
-API_URL=http://server:${SERVER_PORT:-8080}
-```
-
-Do not treat “`127.0.0.1` inside the container” as the host backend. That only works in the All-in-One same-container case. Trailing `/api` is optional; the app normalizes it.
-
-Two access models:
-
-- Browser via the site: `/api/*` (Next rewrite → Go)
-- Direct API port (`SERVER_PUBLIC_PORT`, default `18080`): path still starts with `/api`, e.g. `/api/health`
-
-### Docker cannot reach a database on the host
-
-Check first:
-
-- `MYSQL_HOST` / `REDIS_HOST` is an address the container can reach
-- `host.docker.internal` works on Linux (this repo’s compose already sets `extra_hosts`)
-- The DB user allows the container network
-- Firewall allows the port
-- MySQL / Redis is not bound only to `127.0.0.1`
-
-### Bundled MySQL / Redis fail to start
-
-Check first:
-
-- `docker compose logs -f mysql` / `redis`
-- Passwords in `.env` match what compose injects
-- Release bundled DBs are **not** mapped to host `3306`/`6379` by default; source compose may map `127.0.0.1:3306` for local `go run` — watch for conflicts
-
-### Site opens, every API fails
-
-Check first:
-
-- Release: `docker compose logs -f ecohub`, and `http://HOST:18080/api/health`
-- Source: `server` is healthy; web `API_URL` points at a resolvable `server` service
-- Reverse proxy forwards `/api/*` correctly
-- Browser is not blocked by HTTPS, CORS, or cookie policy
-
-### `web` and `server` port clash in local development
-
-- `server` defaults to `8080`, `web` to `3000`
-- Do not move Next onto `8080`. After changing `PORT` in `web/.env.local`, restart the frontend
-
-### What to watch when upgrading v1.x to v2.x
-
-- Switch to the single-image compose (see [Deploy guide · Upgrade from v1.x](./README-Deploy_EN.md#5-upgrade-from-v1x))
-- Back up data, then `pull` + `up -d`. Do not let old and new servers share one database
-- Release tags overwrite `ghcr.io/fe-spark/ecohub:latest`
-
-## Known notes
-
-- `/api/config/basic` is still a public API
-- Frontend lint may still warn about image optimization
-- Bundled MySQL / Redis only start if compose includes those services
-- Preparing a very large film set can bump memory for a short time
-
-## Doc index
-
-- [README (English)](./README_EN.md)
-- [Release notes](./RELEASE.md)
-- [Server](../server/README.md)
-- [Web](../web/README.md)
-- [Deploy guide (English)](./README-Deploy_EN.md)
+Built-in accounts: `admin` / `admin` (read/write), `guest` / `guest` (visitor). Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Default accounts are for first boot and demos. Change the passwords before any public deployment.
