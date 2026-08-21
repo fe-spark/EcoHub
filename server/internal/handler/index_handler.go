@@ -107,7 +107,7 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 首页「每日更新」独立接口：从近 24h 变更池随机抽取，exclude 排除当前批次。
+// DailyUpdates 近 24h 更新。不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
 	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
 	if data == nil {
