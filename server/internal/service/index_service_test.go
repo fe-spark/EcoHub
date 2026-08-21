@@ -34,3 +34,21 @@ func TestPickRandomMovieInfosWrapsWhenAllExcluded(t *testing.T) {
 		t.Fatalf("want wrap to full pool 3, got %d", len(got))
 	}
 }
+
+func TestSelectDailyUpdatesAllWhenLimitNotPositive(t *testing.T) {
+	src := []model.MovieBasicInfo{{Id: 1}, {Id: 2}, {Id: 3}}
+	got := selectDailyUpdates(src, 0, []int64{1})
+	if len(got) != 3 {
+		t.Fatalf("want all 3, got %d", len(got))
+	}
+	if got[0].Id != 1 || got[2].Id != 3 {
+		t.Fatalf("want original order, got %+v", got)
+	}
+}
+
+func TestSelectDailyUpdatesEmptyPool(t *testing.T) {
+	got := selectDailyUpdates(nil, 0, nil)
+	if got == nil || len(got) != 0 {
+		t.Fatalf("want empty slice, got %#v", got)
+	}
+}

@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	homeDailyUpdateLimit    = 6
 	homeDailyUpdateLimitMax = 12
 	homeDailyUpdateCacheTTL = 2 * time.Minute
 )
@@ -107,16 +106,25 @@ func (i *IndexService) IndexPage() map[string]any {
 	return Info
 }
 
-// HomeDailyUpdates 只从「近 24h 采集变更 mid」池中随机取 limit 条（不是全站随机）。
-// exclude 为当前批次 id，下一批从剩余池抽取；剩余为空时才回到全池。
+// HomeDailyUpdates 近 24h 采集变更。
+// limit<=0（不传）返回全部，保持池内顺序；limit>0 时从池中随机取，exclude 排除当前批次。
 func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
+	return selectDailyUpdates(i.homeDailyUpdatePool(), limit, exclude)
+}
+
+func selectDailyUpdates(pool []model.MovieBasicInfo, limit int, exclude []int64) []model.MovieBasicInfo {
+	if len(pool) == 0 {
+		return []model.MovieBasicInfo{}
+	}
 	if limit <= 0 {
-		limit = homeDailyUpdateLimit
+		out := make([]model.MovieBasicInfo, len(pool))
+		copy(out, pool)
+		return out
 	}
 	if limit > homeDailyUpdateLimitMax {
 		limit = homeDailyUpdateLimitMax
 	}
-	return pickRandomMovieInfos(i.homeDailyUpdatePool(), limit, exclude)
+	return pickRandomMovieInfos(pool, limit, exclude)
 }
 
 func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
