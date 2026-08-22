@@ -26,6 +26,8 @@
 
 EcoHub is a high-performance, modern full-stack multi-source media aggregation system. It delivers a smooth web viewing experience and includes automated collection plus an admin panel, so developers and enthusiasts can quickly set up a private media library.
 
+The HarmonyOS native app lives in [ecohub-harmony](https://github.com/fe-spark/ecohub-harmony). It ships a HAP, not this repo's server or web UI.
+
 ## Online demo
 
 | Entry | URL |
