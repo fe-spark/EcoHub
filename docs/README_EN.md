@@ -26,7 +26,10 @@
 
 EcoHub is a high-performance, modern full-stack multi-source media aggregation system. It delivers a smooth web viewing experience and includes automated collection plus an admin panel, so developers and enthusiasts can quickly set up a private media library.
 
-[EcoHub for OHOS App](https://github.com/fe-spark/ecohub-for-ohos) is a separate native app repo. It ships a HAP, not this repo's server or web UI.
+Client apps live in separate repos, not this repo's server or web UI:
+
+- [App for OHOS](https://github.com/fe-spark/app-for-ohos) (HAP)
+- [App for Android](https://github.com/fe-spark/app-for-android)
 
 ## Online demo
 
