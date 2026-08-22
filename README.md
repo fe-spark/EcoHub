@@ -26,7 +26,7 @@
 
 EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不仅提供极致流畅的 Web 观影体验，还集成了强大的自动化采集与管理后台，旨在帮助开发者和影视爱好者快速搭建属于自己的私人影视库。
 
-鸿蒙客户端 [EcoHub App for OHOS](https://github.com/fe-spark/ecohubapp-for-ohos) 是独立 App 仓库，安装包是 HAP，不是本仓库的服务端或 Web。
+鸿蒙客户端 [EcoHub for OHOS App](https://github.com/fe-spark/ecohub-for-ohos) 是独立 App 仓库，安装包是 HAP，不是本仓库的服务端或 Web。
 
 ## 在线演示
 

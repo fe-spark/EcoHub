@@ -1,3 +1,3 @@
-[submodule "ecohubapp-for-ohos"]
-	path = ecohubapp-for-ohos
-	url = https://github.com/fe-spark/ecohubapp-for-ohos.git
+[submodule "ecohub-for-ohos"]
+	path = ecohub-for-ohos
+	url = https://github.com/fe-spark/ecohub-for-ohos.git
