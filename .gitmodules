@@ -1,6 +1,6 @@
 [submodule "app-for-ohos"]
 	path = app-for-ohos
-	url = https://github.com/fe-spark/app-for-ohos.git
+	url = https://github.com/fe-spark/EcoHub-for-OHOS.git
 [submodule "app-for-android"]
 	path = app-for-android
-	url = https://github.com/fe-spark/app-for-android.git
+	url = https://github.com/fe-spark/EcoHub-for-Android.git

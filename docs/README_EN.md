@@ -28,8 +28,8 @@ EcoHub is a high-performance, modern full-stack multi-source media aggregation s
 
 Client apps live in separate repos, not this repo's server or web UI:
 
-- [EcoHub for OHOS](https://github.com/fe-spark/app-for-ohos) (HAP)
-- [EcoHub for Android](https://github.com/fe-spark/app-for-android)
+- [EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) (HAP)
+- [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)
 
 ## Online demo
 
