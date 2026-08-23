@@ -28,8 +28,8 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 
 客户端是独立 App 仓库，不是本仓库的服务端或 Web：
 
-- [App for OHOS](https://github.com/fe-spark/app-for-ohos)（HAP）
-- [App for Android](https://github.com/fe-spark/app-for-android)
+- [EcoHub for OHOS](https://github.com/fe-spark/app-for-ohos)（HAP）
+- [EcoHub for Android](https://github.com/fe-spark/app-for-android)
 
 
 ## 在线演示
