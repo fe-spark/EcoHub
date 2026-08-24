@@ -103,7 +103,57 @@ func (i *IndexService) IndexPage() map[string]any {
 		}
 	}
 
+	// 轮播条数与配置一致；更新状态与最近更新同源（全库最大集数），不走 24h 首页缓存。
+	Info["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
 	return Info
+}
+
+func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
+	if len(list) == 0 {
+		return
+	}
+	mids := make([]int64, 0, len(list))
+	for _, item := range list {
+		if item.Id > 0 {
+			mids = append(mids, item.Id)
+		}
+	}
+	live := filmrepo.LiveUpdateRemarksByMIDs(mids)
+	if len(live) == 0 {
+		return
+	}
+	for i := range list {
+		if remark, ok := live[list[i].Id]; ok {
+			list[i].Remarks = remark
+		}
+	}
+}
+
+func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
+	if banners == nil {
+		return make(model.Banners, 0)
+	}
+	if len(banners) == 0 {
+		return banners
+	}
+	mids := make([]int64, 0, len(banners))
+	for _, b := range banners {
+		if b.Mid > 0 {
+			mids = append(mids, b.Mid)
+		}
+	}
+	live := filmrepo.LiveUpdateRemarksByMIDs(mids)
+	if len(live) == 0 {
+		return banners
+	}
+	out := make(model.Banners, len(banners))
+	copy(out, banners)
+	for i := range out {
+		if remark, ok := live[out[i].Mid]; ok {
+			out[i].Remark = remark
+		}
+	}
+	return out
 }
 
 // HomeDailyUpdates 近 24h 采集变更。
@@ -167,6 +217,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	if list == nil {
 		list = empty
 	}
+	applyLiveRemarksToMovies(list)
 	storeHomeDailyUpdatesCache(cacheKey, list)
 	return list
 }
