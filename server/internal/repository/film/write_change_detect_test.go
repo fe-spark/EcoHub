@@ -543,9 +543,14 @@ func TestSlaveShouldBumpStamp(t *testing.T) {
 		t.Fatal("后到的源追到同一集数不应重进最近更新")
 	}
 	// 非首次：自己 119→120，全库还是 119
-	first := playlistChange{NotifyWorthy: true, CountIncreased: true, Signatures: eps(120)}
+	first := playlistChange{NotifyWorthy: true, CountIncreased: true, PrevMaxCount: 119, Signatures: eps(120)}
 	if !slaveShouldBumpStamp(first, []int{119}) {
 		t.Fatal("第一个写到 120 的源应顶最近更新")
+	}
+	// 已领先 120，仅最后一集标签变化：写前全库最大已是自己的 120，不重进
+	lead := playlistChange{NotifyWorthy: true, PrevMaxCount: 120, Signatures: eps(120)}
+	if slaveShouldBumpStamp(lead, []int{119}) {
+		t.Fatal("已领先源仅改最后一集标签不应重进最近更新")
 	}
 }
 

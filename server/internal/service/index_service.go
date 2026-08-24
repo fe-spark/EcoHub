@@ -187,6 +187,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 				if list == nil {
 					return empty
 				}
+				applyLiveRemarksToMovies(list)
 				return list
 			}
 		}
@@ -217,8 +218,8 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	if list == nil {
 		list = empty
 	}
-	applyLiveRemarksToMovies(list)
 	storeHomeDailyUpdatesCache(cacheKey, list)
+	applyLiveRemarksToMovies(list)
 	return list
 }
 
