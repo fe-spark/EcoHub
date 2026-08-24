@@ -1484,6 +1484,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	hadWrites := false
 	collectStartedAt := time.Now()
 	var collectCtx context.Context
+	statsOwned := false
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
@@ -1520,13 +1521,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	}
 	defer func() {
 		originalErr := retErr
-		if trigger == model.NotifyTriggerCron {
+		if trigger == model.NotifyTriggerCron && statsOwned {
+			// 只处理本轮 Suppress 过的源，避免跳过/撞车时解开同站正在跑的任务。
+			repository.UnsuppressCollectSourceStats(s.Id)
 			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
-				repository.UnsuppressCollectSourceStats(s.Id)
 				repository.NoteCollectSourceStats(s.Id)
-			} else {
-				// 停止 / 取消 / 失败：丢弃本轮热路径 pending，避免 last_collect_time 截断补窗。
-				repository.DropCollectSourceStatsPending(s.Id)
 			}
 		}
 		// 无论成功/失败/停止，结束本站时刷出合并的 stats 与缓存清理。
@@ -1601,6 +1600,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	taskMu.Unlock()
 	if trigger == model.NotifyTriggerCron {
 		repository.SuppressCollectSourceStats(s.Id)
+		statsOwned = true
 	}
 
 	// 任务完成后清理（仅当当前任务仍是自己时）

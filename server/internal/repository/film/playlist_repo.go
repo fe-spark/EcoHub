@@ -349,14 +349,18 @@ func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 }
 
 // slaveShouldBumpStamp 附属站是否应顶「最近更新」并记入每日更新。
-// 本源须有追集（首次写入 / 最后一集变了 / 自己集数变多），且最大集数严格大于全库其它源。
-// 附属站 A 先到 120 会顶上榜；第二天 B 也到 120 只写 playlist，不重进列表。
-// 首次写入通过门闩时用当前时间，不再套主站旧 stamp。
-func slaveShouldBumpStamp(change playlistChange, globalCounts []int) bool {
+// 本源须有追集，且 incoming 最大集数严格大于写前全库最大（其它源 + 本源旧集数）。
+// playlist 已先落库，otherCounts 不含本源；用 PrevMaxCount 补回写前自己的集数。
+func slaveShouldBumpStamp(change playlistChange, otherCounts []int) bool {
 	if !change.FirstInsert && !change.NotifyWorthy && !change.CountIncreased {
 		return false
 	}
-	return isEpisodeCountHigher(extractEpisodeCountsFromPlaylistSignatures(change.Signatures), globalCounts)
+	global := make([]int, 0, len(otherCounts)+1)
+	global = append(global, otherCounts...)
+	if change.PrevMaxCount > 0 {
+		global = append(global, change.PrevMaxCount)
+	}
+	return isEpisodeCountHigher(extractEpisodeCountsFromPlaylistSignatures(change.Signatures), global)
 }
 
 // pickBestMidForMatchKey 同一 match_key 命中多个 mid 时只保留一个（update_stamp 新者优先，其次 mid 大）。
@@ -462,6 +466,7 @@ type playlistChange struct {
 	FirstInsert    bool
 	NotifyWorthy   bool // 任一线路「最后一项分集标签」有变化（含新增/回退/顺序变化）或首次写入
 	CountIncreased bool // 相对本源上次 playlist，最大集数变多（含中间插集、最后一项仍是「完结」）
+	PrevMaxCount   int  // 本源写前最大集数；与其它源合计成写前全库最大
 	Signatures     []playlistSignature
 }
 
@@ -514,6 +519,7 @@ func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map
 		first := len(left) == 0
 		notifyWorthy := false
 		countIncreased := false
+		prevMax := maxEpisodeCount(extractEpisodeCountsFromPlaylistSignatures(left))
 		if len(right) > 0 {
 			countIncreased = isEpisodeCountHigher(
 				extractEpisodeCountsFromPlaylistSignatures(right),
@@ -537,6 +543,7 @@ func diffPlaylistMovieKeys(existing map[string][]playlistSignature, incoming map
 			FirstInsert:    first,
 			NotifyWorthy:   notifyWorthy,
 			CountIncreased: countIncreased,
+			PrevMaxCount:   prevMax,
 			Signatures:     right,
 		})
 	}
