@@ -78,11 +78,10 @@ docker compose up -d
 | --- | --- |
 | `http://<主机>:3000` | 前台 |
 | `http://<主机>:3000/manage` | 管理后台 |
+| `http://<主机>:3000/api` | 客户端（[EcoHub for OHOS](./app-for-ohos) / [EcoHub for Android](./app-for-android)）服务接入地址 |
 | `http://<主机>:3000/api/provide/config` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 | `http://<主机>:18080/api/*` | API 直连（请勿对公网开放） |
-| [`app-for-ohos/`](./app-for-ohos) | EcoHub for OHOS 鸿蒙客户端源码 |
-| [`app-for-android/`](./app-for-android) | EcoHub for Android 安卓客户端源码 |
 
 默认账号：`admin` / `admin`（读写）、`guest` / `guest`（只读）。对外部署前须立即修改默认密码。
 
