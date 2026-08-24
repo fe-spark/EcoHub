@@ -405,7 +405,7 @@ func Rolling24hWindow(now time.Time) (from, to time.Time) {
 }
 
 // LoadChangeMidsBetween 汇总时间窗内各采集批次的变更 mid（与采集概要进列表逻辑同源）。
-// 数据来自 notify_change_mid：采集写库时经 filterPlayStructureNotifyMIDs / 附属站最后一集判定后写入。
+// 数据来自 notify_change_mid：采集写库时经 filterPlayStructureNotifyMIDs / 附属站「全库最大集数」判定后写入。
 // 时间窗按 mid 写入时间（c.created_at）筛选；旧行无写入时间时回落批次开批时间。
 // 同 mid 跨批次去重，源名合并；按 film update_stamp 新→旧排序。
 // limit>0 时只取前 N 条（首页卡片）；limit<=0 不截断（TG 每日更新全窗）。

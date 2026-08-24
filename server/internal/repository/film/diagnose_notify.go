@@ -28,7 +28,7 @@ func SameMasterBusiness(a, b model.MovieDetail) bool {
 type SlavePlaylistDiff struct {
 	MovieKey     string
 	WouldWrite   bool // 内容有差异（含仅链接变化）
-	NotifyWorthy bool // 会进更新列表
+	NotifyWorthy bool // 可能进入 stamp 路径；生产还要过全库最大集数才真正上榜
 	FirstInsert  bool
 	Reason       string
 	ExistingSig  string
@@ -38,8 +38,8 @@ type SlavePlaylistDiff struct {
 // DiffSlavePlaylistGroups 对比同一 movie_key 下的 playlist 组。
 // 与生产 saveGroupedPlaylists 对齐：先按 (movie_key, group_index) 排序去重
 // （同一影片多条目共享匹配键时，落库后写覆盖，仅最后一行生效），再对比。
-// 通知判定仅计「任一线路最后一项分集标签变化（含新增/回退/顺序变化）」：
-// 最后一项相同（仅链接/中间集变化）不通知。
+// 可能进 stamp 路径：首次写入、最后一集标签变化、或自己集数变多。
+// 生产最终还要过全库最大集数；仅链接变化不进。
 func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePlaylist) SlavePlaylistDiff {
 	left := playlistsToSignatures(sortDedupePlaylists(existing))
 	right := playlistsToSignatures(sortDedupePlaylists(incoming))
@@ -57,7 +57,7 @@ func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePl
 	if first {
 		diff.WouldWrite = true
 		diff.NotifyWorthy = true
-		diff.Reason = "首次写入（库中无该 movie_key 的 playlist）"
+		diff.Reason = "首次写入（库中无该 movie_key 的 playlist）；生产还要过全库最大集数才上榜"
 		return diff
 	}
 	if len(right) == 0 {
@@ -67,9 +67,12 @@ func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePl
 	diff.WouldWrite = true
 	if playlistLastEpisodeChanged(left, right) {
 		diff.NotifyWorthy = true
-		diff.Reason = "任一线路最后一集有变化（含新增/回退，进更新列表）"
+		diff.Reason = "任一线路最后一集有变化（含新增/回退）；生产还要过全库最大集数才上榜"
+	} else if isEpisodeCountHigher(extractEpisodeCountsFromPlaylistSignatures(right), extractEpisodeCountsFromPlaylistSignatures(left)) {
+		diff.NotifyWorthy = true
+		diff.Reason = "最后一集标签相同但自己集数变多（中间插集）；若全库已有相同或更多集数则不上榜"
 	} else {
-		diff.Reason = "各线路最后一项分集标签相同（仅链接/中间集变化，写库但不进更新列表）"
+		diff.Reason = "各线路最后一项分集标签相同且集数未增加（仅链接变化，写库但不进更新列表）"
 	}
 	return diff
 }
@@ -116,21 +119,19 @@ func ExplainMasterNotify(old model.MovieDetail, hasOld bool, incoming model.Movi
 	ex.BusinessChanged = !SameMasterBusiness(old, incoming)
 	ex.StructureChanged = !SameMasterPlayStructure(old, incoming)
 	ex.WouldWrite = ex.BusinessChanged
-	ex.WouldNotify = ex.StructureChanged // 仅当会写库时才走到 filter；最后一集变化才 notify
-	// 生产路径：只有 business 变更才写库，再在 changed 里按结构筛 Notify。
-	// 若业务不变则不会写、也不会 notify。
+	// 生产路径：业务变更才写库；进更新列表还须本源集数大于全库最大（此处无其它源，只比旧详情）。
 	if !ex.BusinessChanged {
 		ex.WouldNotify = false
 		ex.Reason = "业务指纹一致 → 不写库，不进更新列表"
 		return ex
 	}
-	if ex.StructureChanged {
+	if isEpisodeCountHigher(extractEpisodeCountsFromDetail(incoming), extractEpisodeCountsFromDetail(old)) {
 		ex.WouldNotify = true
-		ex.Reason = "业务有变更且任一线路最后一集有变化（含新增/回退）→ 写库且进更新列表"
+		ex.Reason = "业务有变更且自己集数变多 → 写库；若其它源已有相同或更多集数则生产路径仍不进最近更新"
 		return ex
 	}
 	ex.WouldNotify = false
-	ex.Reason = "业务有变更但各线路最后一集未变（元数据/链接噪声）→ 写库但不进更新列表"
+	ex.Reason = "业务有变更但集数未超过已有最大（元数据/链接噪声或后到的同集数源）→ 写库但不进更新列表"
 	return ex
 }
 

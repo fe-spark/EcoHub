@@ -11,17 +11,20 @@ import (
 )
 
 // collectStatsCoalescer 合并采集热路径中的 last_collect_time 写库。
-// 仅在有真实写库活动时 Note；结束时只 flush pending，不为空跑强行更新时间。
+// 有真实写库时 Note；定时采集整次成功结束（含 0 变更）再 Note。
+// suppressed 源的 Note 被忽略，避免中途写入把「上次成功」提前到熔断/停止时刻。
 type collectStatsCoalescer struct {
 	mu          sync.Mutex
 	pending     map[string]time.Time // sourceID -> 最近活动时间
 	lastFlushed map[string]time.Time
+	suppressed  map[string]struct{}
 	minInterval time.Duration
 }
 
 var collectStats = &collectStatsCoalescer{
 	pending:     make(map[string]time.Time),
 	lastFlushed: make(map[string]time.Time),
+	suppressed:  make(map[string]struct{}),
 	minInterval: collectStatsMinInterval(),
 }
 
@@ -39,6 +42,45 @@ func ResetCollectStatsCoalescer() {
 	collectStats.mu.Lock()
 	collectStats.pending = make(map[string]time.Time)
 	collectStats.lastFlushed = make(map[string]time.Time)
+	collectStats.suppressed = make(map[string]struct{})
+	collectStats.mu.Unlock()
+}
+
+// SuppressCollectSourceStats 忽略该源后续 Note，直到 Unsuppress 或 DropPending。
+// 定时采集开始后调用，避免热路径写库把 last_collect_time 提前到任务中途。
+func SuppressCollectSourceStats(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	if collectStats.suppressed == nil {
+		collectStats.suppressed = make(map[string]struct{})
+	}
+	collectStats.suppressed[sourceID] = struct{}{}
+	collectStats.mu.Unlock()
+}
+
+// UnsuppressCollectSourceStats 恢复该源 Note（不自动写入）。
+func UnsuppressCollectSourceStats(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	delete(collectStats.suppressed, sourceID)
+	collectStats.mu.Unlock()
+}
+
+// DropCollectSourceStatsPending 丢弃该源未落盘的 pending，并解除 suppress。
+func DropCollectSourceStatsPending(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
+	}
+	collectStats.mu.Lock()
+	delete(collectStats.pending, sourceID)
+	delete(collectStats.suppressed, sourceID)
 	collectStats.mu.Unlock()
 }
 
@@ -50,6 +92,10 @@ func NoteCollectSourceStats(sourceID string) {
 	}
 	now := time.Now()
 	collectStats.mu.Lock()
+	if _, held := collectStats.suppressed[sourceID]; held {
+		collectStats.mu.Unlock()
+		return
+	}
 	collectStats.pending[sourceID] = now
 	last := collectStats.lastFlushed[sourceID]
 	shouldFlush := last.IsZero() || now.Sub(last) >= collectStats.minInterval

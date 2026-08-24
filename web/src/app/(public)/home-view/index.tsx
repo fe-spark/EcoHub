@@ -47,68 +47,14 @@ interface ContentSection {
   hot: MovieBasicInfo[];
 }
 
-const HERO_DECK_SIZE = 5;
-
-function heroId(item: { id?: string; mid?: string }) {
-  return String(item.mid || item.id || "").trim();
-}
-
-function filmToHero(film: MovieBasicInfo): HeroBannerItem {
-  const id = heroId(film);
+function asHeroBanner(item: HeroBannerItem & { remark?: string }): HeroBannerItem {
+  const id = String(item.mid || item.id || "").trim();
   return {
-    id,
-    mid: id,
-    name: film.name,
-    picture: film.picture,
-    poster: film.picture,
-    year: film.year,
-    cName: film.cName,
-    area: film.area,
-    remarks: film.remarks,
-    blurb: film.blurb,
+    ...item,
+    id: item.id || id,
+    mid: item.mid || id,
+    remarks: item.remarks || item.remark || "",
   };
-}
-
-function buildHeroDeck(
-  banners: HeroBannerItem[],
-  content: ContentSection[],
-): HeroBannerItem[] {
-  const seen = new Set<string>();
-  const deck: HeroBannerItem[] = [];
-
-  const push = (item: HeroBannerItem) => {
-    const id = heroId(item);
-    if (!id || seen.has(id)) {
-      return;
-    }
-    if (!item.picture && !item.poster && !item.pictureSlide) {
-      return;
-    }
-    seen.add(id);
-    deck.push({
-      ...item,
-      id: item.id || id,
-      mid: item.mid || id,
-    });
-  };
-
-  for (const banner of banners) {
-    push(banner);
-  }
-
-  for (const section of content) {
-    for (const film of [...(section.hot || []), ...(section.movies || [])]) {
-      if (deck.length >= HERO_DECK_SIZE) {
-        break;
-      }
-      push(filmToHero(film));
-    }
-    if (deck.length >= HERO_DECK_SIZE) {
-      break;
-    }
-  }
-
-  return deck;
 }
 
 export default function HomePageView({
@@ -120,7 +66,7 @@ export default function HomePageView({
   };
 }) {
   const { navigate } = useContentNavigate();
-  const heroDeck = buildHeroDeck(data.banners || [], data.content || []);
+  const heroDeck = (data.banners || []).map(asHeroBanner);
 
   // 与 Hero 一致：走布局级 navigate，展示整页内容 loading
   const goPlay = (id: string) => {
