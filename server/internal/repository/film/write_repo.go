@@ -254,7 +254,7 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 		return nil, nil, nil, err
 	}
 	oldDetailsByMid = existingDetailsByMid
-	// 写前读库存集数；失败则中止，避免空 map 被当成「库里没有集」而整页刷 stamp
+	// 写前读全库集数（主站旧详情 + 其它源 playlist）；失败则中止，避免空 map 被当成「没有集」整页刷 stamp
 	existingCountsMap, err := loadExistingEpisodeCountsByMIDs(tx, mids, "")
 	if err != nil {
 		return nil, nil, nil, err
@@ -281,8 +281,8 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 			unchangedKeys[infos[index].ContentKey] = struct{}{}
 			continue
 		}
-		// 业务仍写库，但 update_stamp 只在概要会记为「更新」时刷新：
-		// 新片或分集数量严格增加。备注/演员/封面等不顶「最近更新」。
+		// 只有本源写出的最大集数严格大于全库已有最大集数才顶「最近更新」。
+		// 附属站已先追到 120 时，主站后补 120 只写详情，不重进列表。
 		existingCounts := existingCountsMap[existing.Mid]
 		existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
 		if isEpisodeCountHigher(extractEpisodeCountsFromDetail(newDetail), existingCounts) {
@@ -548,8 +548,8 @@ type CollectWriteResult struct {
 	NotifyMIDs   []int64
 }
 
-// SaveDetailsForCollect 采集写主站详情。返回的 NotifyMIDs 仅含「剧集/播放源结构」真变更或新片，
-// 片名标点/备注/封面/链接签名等噪声写库时不进入更新列表。
+// SaveDetailsForCollect 采集写主站详情。返回的 NotifyMIDs 仅含新片，或本源集数第一次超过全库最大集数。
+// 片名标点/备注/封面/链接签名等噪声写库时不进入更新列表；其它源已有相同集数不重进列表。
 func SaveDetailsForCollect(id string, list []model.MovieDetail) (CollectWriteResult, error) {
 	return saveDetails(id, list, false)
 }
@@ -620,7 +620,7 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 		return out, nil
 	}
 
-	// 更新列表：仅剧集结构变更或新片；用写前集数，避免刚写入的详情被当成 existing
+	// 更新列表：新片，或本源最大集数严格大于全库已有（含附属站）最大集数
 	out.NotifyMIDs = filterPlayStructureNotifyMIDs(changedInfos, detailsByKey, oldDetailsByMid, preWriteCounts)
 
 	// 仅在有实质变更时更新 last_collect_time / 失效缓存。
@@ -638,8 +638,8 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 }
 
 // filterPlayStructureNotifyMIDs 从业务写入的影片中筛出应进「更新列表」的 mid：
-// 新片，或任一线路分集数量严格大于全库已有最大集数。
-// 数量未增加（如已有15集，后更新的源也是15集）不计入更新列表。
+// 新片，或本源最大集数严格大于全库已有最大集数（主站旧详情 + 附属站 playlist）。
+// 其它源已经到 120 集后，本源再追到 120 只写库，不重进最近更新。
 func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[string]model.MovieDetail, oldByMid map[int64]model.MovieDetail, existingCountsMap map[int64][]int) []int64 {
 	if len(changed) == 0 {
 		return nil
@@ -667,9 +667,7 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 		if oldDetail, hasOld := oldByMid[mid]; hasOld {
 			existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
 		}
-
-		newCounts := extractEpisodeCountsFromDetail(newDetail)
-		if isEpisodeCountHigher(newCounts, existingCounts) {
+		if isEpisodeCountHigher(extractEpisodeCountsFromDetail(newDetail), existingCounts) {
 			seen[mid] = struct{}{}
 			out = append(out, mid)
 		}
@@ -828,7 +826,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	var savedMid int64
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		infoList := []model.FilmIndex{snapshot}
-		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}))
+		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail})) //nolint:dogsled // 第 2/3 返回值此处不需要
 		if err != nil {
 			return err
 		}

@@ -242,6 +242,14 @@ func GetEnabledCollectSourceList() []model.FilmSource {
 	return list
 }
 
+func GetLastCollectTime(sourceID string) *time.Time {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil {
+		return nil
+	}
+	return GetCollectSourceStats([]string{sourceID})[sourceID]
+}
+
 func GetCollectSourceStats(sourceIDs []string) map[string]*time.Time {
 	result := make(map[string]*time.Time, len(sourceIDs))
 	if len(sourceIDs) == 0 {

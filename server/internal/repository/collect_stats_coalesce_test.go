@@ -29,3 +29,50 @@ func TestNoteCollectSourceStatsCoalescesPending(t *testing.T) {
 		t.Fatalf("pending timestamp missing: %v", at)
 	}
 }
+
+func TestSuppressCollectSourceStatsIgnoresNote(t *testing.T) {
+	ResetCollectStatsCoalescer()
+	collectStats.mu.Lock()
+	collectStats.minInterval = time.Hour
+	collectStats.lastFlushed["src-hold"] = time.Now()
+	collectStats.mu.Unlock()
+
+	SuppressCollectSourceStats("src-hold")
+	NoteCollectSourceStats("src-hold")
+
+	collectStats.mu.Lock()
+	_, pending := collectStats.pending["src-hold"]
+	collectStats.mu.Unlock()
+	if pending {
+		t.Fatal("suppressed source should not pending")
+	}
+
+	UnsuppressCollectSourceStats("src-hold")
+	NoteCollectSourceStats("src-hold")
+	collectStats.mu.Lock()
+	_, pending = collectStats.pending["src-hold"]
+	collectStats.mu.Unlock()
+	if !pending {
+		t.Fatal("after unsuppress, note should pending")
+	}
+}
+
+func TestDropCollectSourceStatsPendingClearsHold(t *testing.T) {
+	ResetCollectStatsCoalescer()
+	collectStats.mu.Lock()
+	collectStats.minInterval = time.Hour
+	collectStats.lastFlushed["src-drop"] = time.Now()
+	collectStats.mu.Unlock()
+
+	NoteCollectSourceStats("src-drop")
+	SuppressCollectSourceStats("src-drop")
+	DropCollectSourceStatsPending("src-drop")
+
+	collectStats.mu.Lock()
+	_, pending := collectStats.pending["src-drop"]
+	_, held := collectStats.suppressed["src-drop"]
+	collectStats.mu.Unlock()
+	if pending || held {
+		t.Fatal("drop should clear pending and suppress")
+	}
+}
