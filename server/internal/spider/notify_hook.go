@@ -134,11 +134,11 @@ func emitProgressStaleNotify(sourceID, sourceName, oldStatus string, age time.Du
 }
 
 // noteCollectedMIDs 累计本源「应进更新列表」的 mid。
-// 约定：列表条目必须是主站已有影片（全局 mid）；任一播放源「最后一集」有变化都算更新：
-//   - 主站：新片或任一线路「最后一集」标签变化（含新增/回退）；
-//   - 附属站：已匹配到主站 mid 的 playlist「任一线路最后一集」变化（含新增/回退）。
+// 约定：列表条目必须是主站已有影片（全局 mid）；只有本源最大集数第一次超过全库最大才算更新：
+//   - 主站：新片，或主站集数 > 全库（含附属站）已有最大集数；
+//   - 附属站：已匹配主站 mid，且本源追集后集数 > 全库其它源；首次通过时 stamp=现在（不套主站旧时间）。
 //
-// 仅链接刷新、中间集变化、备注/Hits 等噪声不计入；未匹配主站的附属片不进列表。
+// 后到的源追到同一集数、仅链接刷新、备注/Hits 不计入；未匹配主站的附属片不进列表。
 func noteCollectedMIDs(batch *notify.ChangeBatch, sourceID, sourceName string, mids []int64) {
 	if len(mids) == 0 {
 		return
