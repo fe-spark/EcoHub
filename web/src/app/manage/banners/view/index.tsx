@@ -16,7 +16,6 @@ import {
   Upload,
   Select,
   Card,
-  Collapse,
   Row,
   Col,
   Image as AntImage,
@@ -62,7 +61,6 @@ type BannerFormValues = {
   name: string;
   cName: string;
   year?: number;
-  remark?: string;
   picture: string;
   sort?: number;
 };
@@ -135,7 +133,6 @@ export default function BannersPageView() {
   const watchedName = Form.useWatch("name", form);
   const watchedCName = Form.useWatch("cName", form);
   const watchedYear = Form.useWatch("year", form);
-  const watchedRemark = Form.useWatch("remark", form);
   const watchedPicture = Form.useWatch("picture", form);
 
   const fetchBanners = useCallback(async () => {
@@ -192,7 +189,6 @@ export default function BannersPageView() {
     name: film.name || "",
     cName: film.cName || "",
     year: parseInt(String(film.year || "0"), 10) || undefined,
-    remark: film.remarks || "",
     picture: film.picture || "",
   });
 
@@ -233,7 +229,6 @@ export default function BannersPageView() {
       name: record.name,
       cName: record.cName,
       year: record.year,
-      remark: record.remark,
       picture: resolveEditablePicture(record),
       sort: record.sort,
     });
@@ -256,7 +251,6 @@ export default function BannersPageView() {
       name: values.name.trim(),
       cName: values.cName.trim(),
       year: values.year,
-      remark: values.remark?.trim() || "",
       poster: shouldSyncAllImages
         ? nextPicture
         : currentRow?.poster || nextPicture,
@@ -265,6 +259,7 @@ export default function BannersPageView() {
         ? nextPicture
         : currentRow?.pictureSlide || nextPicture,
       sort: values.sort ?? 0,
+      remark: "",
     };
   };
 
@@ -272,8 +267,7 @@ export default function BannersPageView() {
   const previewName = watchedName || previewFilm?.name || "未选择影片";
   const previewCategory = watchedCName || previewFilm?.cName || "未分类";
   const previewYear = watchedYear || previewFilm?.year || "未知年份";
-  const previewBaseRemark = selectedFilm?.remarks || currentRow?.remark || "";
-  const previewRemark = watchedRemark || previewBaseRemark || "暂无状态";
+  const previewRemark = selectedFilm?.remarks || "前台按片库实时状态展示";
   const previewArea = selectedFilm?.area || "未知地区";
   const previewDirector = selectedFilm?.director || "暂无";
   const previewActor = selectedFilm?.actor || "暂无";
@@ -382,15 +376,6 @@ export default function BannersPageView() {
       key: "sort",
       align: "center" as const,
       render: (s: number) => <Tag>{s}</Tag>,
-    },
-    {
-      title: "连载状态",
-      dataIndex: "remark",
-      key: "remark",
-      align: "center" as const,
-      render: (t: string) => (
-        <Tag color={t.includes("更新") ? "processing" : "success"}>{t}</Tag>
-      ),
     },
     {
       title: "操作",
@@ -518,25 +503,6 @@ export default function BannersPageView() {
           </Form.Item>
         </Col>
       </Row>
-      <Collapse
-        size="small"
-        items={[
-          {
-            key: "basic-fields",
-            label: "补充信息",
-            forceRender: true,
-            children: (
-              <Row gutter={12}>
-                <Col span={24}>
-                  <Form.Item name="remark" label="更新状态">
-                    <Input placeholder="例如: 已完结 / 更新至20集" />
-                  </Form.Item>
-                </Col>
-              </Row>
-            ),
-          },
-        ]}
-      />
       <Form.Item
         label="影片封面"
         extra="统一使用采集接口的 vod_pic 字段，可手动替换，但只维护这一张图。"

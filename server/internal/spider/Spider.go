@@ -1405,7 +1405,7 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 写阀 inflight=%d pages/s=%d",
 		tag, len(sources), limitDesc, config.CollectPageWorkers,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
-	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batch)
+	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batch, trigger)
 	var finalizeErr error
 	if err := collectLifecycle.flushPending(); err != nil {
 		syslog.Errorf("[%s] 批量采集收尾刷新失败: %v", tag, err)
@@ -1418,7 +1418,7 @@ func isDispatchStopped(runVersion uint64) bool {
 	return stopAllVersion.Load() != runVersion
 }
 
-func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batch *notify.ChangeBatch) {
+func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batch *notify.ChangeBatch, trigger string) {
 	if len(sources) == 0 {
 		return
 	}
@@ -1461,7 +1461,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				return
 			}
-			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batch); err != nil {
+			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batch, trigger); err != nil {
 				syslog.Errorf("[%s] 采集站点 %s 失败: %v", tag, fs.Name, err)
 			}
 		}(src)
@@ -1473,16 +1473,18 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 
 // HandleCollect 影视采集  id-采集站ID h-时长/h
 func HandleCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, false, nil)
+	return handleCollectWithStopVersion(id, h, nil, true, false, nil, model.NotifyTriggerManual)
 }
 
 func HandlePreparedCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, true, nil)
+	return handleCollectWithStopVersion(id, h, nil, true, true, nil, model.NotifyTriggerManual)
 }
 
-func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool, batch *notify.ChangeBatch) (retErr error) {
+func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool, batch *notify.ChangeBatch, trigger string) (retErr error) {
 	hadWrites := false
 	collectStartedAt := time.Now()
+	var collectCtx context.Context
+	statsOwned := false
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
@@ -1519,6 +1521,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	}
 	defer func() {
 		originalErr := retErr
+		if trigger == model.NotifyTriggerCron && statsOwned {
+			// 只处理本轮 Suppress 过的源，避免跳过/撞车时解开同站正在跑的任务。
+			repository.UnsuppressCollectSourceStats(s.Id)
+			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
+				repository.NoteCollectSourceStats(s.Id)
+			}
+		}
 		// 无论成功/失败/停止，结束本站时刷出合并的 stats 与缓存清理。
 		flushCollectHotpathSideEffects(s.Id)
 		if originalErr != nil && (!hadWrites || shouldSkipCollectPublishOnError(*s, h)) {
@@ -1586,8 +1595,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", id)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
+	collectCtx = ctx
 	activeTasks.Store(id, collectTask{cancel: cancel, reqId: reqId})
 	taskMu.Unlock()
+	if trigger == model.NotifyTriggerCron {
+		repository.SuppressCollectSourceStats(s.Id)
+		statsOwned = true
+	}
 
 	// 任务完成后清理（仅当当前任务仍是自己时）
 	defer func() {
@@ -1616,6 +1630,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	// 如果 h == 0 则直接返回错误信息
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
+	}
+	// 定时增量按源补窗；手动采集保持调用方选择的 h。
+	if shouldCatchUpCollectHours(trigger, h) {
+		origH := h
+		h = resolveCollectHours(h, repository.GetLastCollectTime(s.Id), time.Now())
+		if h > origH {
+			log.Printf("[Spider] 站点 %s 定时采集窗口补齐 %dh → %dh（距上次成功采集）\n", s.Name, origH, h)
+		}
 	}
 	// 如果 h = -1 则进行全量采集
 	if h > 0 {
@@ -1758,8 +1780,7 @@ func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster
 }
 
 // collectWriteMids 采集写结果。
-// Notify：进 Telegram「更新列表」——主站新片/任一线路最后一项分集标签变化，
-// 或附属站已匹配主站片的 playlist 最后一项分集标签变化（含新增/回退）；
+// Notify：进更新列表——本源集数第一次超过全库最大（含新片）；后到的同集数源不重复计入；
 // Affected：快照/缓存收尾用 mid。
 type collectWriteMids struct {
 	Notify   []int64
@@ -1768,7 +1789,7 @@ type collectWriteMids struct {
 
 func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	if s.Grade != model.MasterCollect {
-		// 附属站：扩展主站播放源；最后一项分集标签变化且已匹配主站 mid 的，进更新列表（仅链接/中间集变化不进）
+		// 附属站：扩展主站播放源；本源追集且集数超过全库其它源时进更新列表
 		mids, err := saveSlavePlaylists(ctx, s, page, list)
 		if err != nil {
 			return collectWriteMids{}, err

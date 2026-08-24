@@ -25,6 +25,7 @@ export interface HeroBannerItem {
   year: string;
   cName: string;
   area?: string;
+  remark?: string;
   remarks?: string;
   blurb?: string;
   score?: string | number;
@@ -188,8 +189,8 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
               {active.area ? (
                 <span className={styles.tag}>{active.area}</span>
               ) : null}
-              {active.remarks ? (
-                <span className={styles.tagHighlight}>{active.remarks}</span>
+              {active.remarks || active.remark ? (
+                <span className={styles.tagHighlight}>{active.remarks || active.remark}</span>
               ) : null}
             </div>
 

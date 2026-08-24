@@ -304,6 +304,42 @@ func TestFilterPlayStructureNotifyMIDs(t *testing.T) {
 	}
 }
 
+func TestFilterPlayStructureNotifyMIDsSkipsWhenOtherSourceAlreadyHasCount(t *testing.T) {
+	changed := []model.FilmIndex{
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 9, ContentKey: "k9"}},
+	}
+	details := map[string]model.MovieDetail{
+		"k9": {PlayList: [][]model.MovieUrlInfo{{{Episode: "01"}, {Episode: "02"}}}},
+	}
+	old := map[int64]model.MovieDetail{
+		9: {PlayList: [][]model.MovieUrlInfo{{{Episode: "01"}}}},
+	}
+	// 附属站已有 2 集：主站 1→2 写详情，不重进最近更新
+	got := filterPlayStructureNotifyMIDs(changed, details, old, map[int64][]int{9: {2}})
+	if len(got) != 0 {
+		t.Fatalf("其它源已有相同集数不应通知，got %v", got)
+	}
+	// 全库仍是 1 集：主站先到 2 应通知
+	got = filterPlayStructureNotifyMIDs(changed, details, old, nil)
+	if len(got) != 1 || got[0] != 9 {
+		t.Fatalf("全库最大还是 1 时主站 1→2 应通知，got %v", got)
+	}
+}
+
+func TestFilterPlayStructureNotifyMIDsMiddleInsertSameLastLabel(t *testing.T) {
+	oldDetail := model.MovieDetail{PlayList: [][]model.MovieUrlInfo{
+		{{Episode: "01"}, {Episode: "02"}, {Episode: "完结"}},
+	}}
+	newDetail := model.MovieDetail{PlayList: [][]model.MovieUrlInfo{
+		{{Episode: "01"}, {Episode: "02"}, {Episode: "03"}, {Episode: "完结"}},
+	}}
+	changed := []model.FilmIndex{{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, ContentKey: "k4"}}}
+	got := filterPlayStructureNotifyMIDs(changed, map[string]model.MovieDetail{"k4": newDetail}, map[int64]model.MovieDetail{4: oldDetail}, nil)
+	if len(got) != 1 {
+		t.Fatalf("中间插集且全库最大未到新集数时应通知，got %v", got)
+	}
+}
+
 // TestDedupePlaylistRowsKeepsLastPerKeyGroup 同一 (movie_key, group_index) 多行（同片多条目
 // 共享匹配键）只保留最后一行，与落库唯一键后写覆盖语义一致。
 func TestDedupePlaylistRowsKeepsLastPerKeyGroup(t *testing.T) {
@@ -445,6 +481,76 @@ func TestMasterLastEpisodeChanged(t *testing.T) {
 	}
 	if masterLastEpisodeChanged(detail(16), detail(16)) {
 		t.Fatal("最后一集相同不应视为变化")
+	}
+}
+
+func TestDiffPlaylistCountIncreasedMiddleInsert(t *testing.T) {
+	content := func(labels ...string) string {
+		urls := make([]model.MovieUrlInfo, 0, len(labels))
+		for _, l := range labels {
+			urls = append(urls, model.MovieUrlInfo{Episode: l, Link: "http://a/1.m3u8"})
+		}
+		data, _ := json.Marshal(urls)
+		return string(data)
+	}
+	oldSig := []playlistSignature{{GroupIndex: 0, GroupName: "m3u8", Content: content("01", "02", "完结")}}
+	newSig := []playlistSignature{{GroupIndex: 0, GroupName: "m3u8", Content: content("01", "02", "03", "完结")}}
+	ch := diffPlaylistMovieKeys(map[string][]playlistSignature{"k": oldSig}, map[string][]playlistSignature{"k": newSig}, []string{"k"})
+	if len(ch) != 1 {
+		t.Fatalf("中间插集应写库, got %+v", ch)
+	}
+	if ch[0].NotifyWorthy {
+		t.Fatalf("最后一项仍是完结，NotifyWorthy 应为 false: %+v", ch[0])
+	}
+	if !ch[0].CountIncreased {
+		t.Fatalf("集数 3→4 应为 CountIncreased: %+v", ch[0])
+	}
+	if !slaveShouldBumpStamp(ch[0], nil) {
+		t.Fatal("全库还没有 4 集时中间插集应顶最近更新")
+	}
+	if slaveShouldBumpStamp(ch[0], []int{4}) {
+		t.Fatal("其它源已有 4 集时不应重进最近更新")
+	}
+}
+
+func TestSlaveShouldBumpStamp(t *testing.T) {
+	eps := func(n int) []playlistSignature {
+		urls := make([]model.MovieUrlInfo, 0, n)
+		for i := 1; i <= n; i++ {
+			urls = append(urls, model.MovieUrlInfo{Episode: fmt.Sprintf("%02d", i), Link: "http://a/1"})
+		}
+		data, _ := json.Marshal(urls)
+		return []playlistSignature{{GroupIndex: 0, GroupName: "m3u8", Content: string(data)}}
+	}
+	// 首次写入：全库已有 12 集，本源也是 12 → 不刷屏
+	same := playlistChange{FirstInsert: true, NotifyWorthy: true, CountIncreased: true, Signatures: eps(12)}
+	if slaveShouldBumpStamp(same, []int{12}) {
+		t.Fatal("同集数新源不应顶最近更新")
+	}
+	// 首次写入：全库 10，本源 12 → 第一个写到 12 的源，stamp=现在
+	catchUp := playlistChange{FirstInsert: true, NotifyWorthy: true, CountIncreased: true, Signatures: eps(12)}
+	if !slaveShouldBumpStamp(catchUp, []int{10}) {
+		t.Fatal("附属站先追集且超过全库最大应顶最近更新")
+	}
+	// 非首次：仅链接
+	linkOnly := playlistChange{NotifyWorthy: false, CountIncreased: false, Signatures: eps(12)}
+	if slaveShouldBumpStamp(linkOnly, []int{10}) {
+		t.Fatal("仅链接变化不应顶最近更新")
+	}
+	// 非首次：自己 119→120，但其它源已经 120
+	late := playlistChange{NotifyWorthy: true, CountIncreased: true, Signatures: eps(120)}
+	if slaveShouldBumpStamp(late, []int{120}) {
+		t.Fatal("后到的源追到同一集数不应重进最近更新")
+	}
+	// 非首次：自己 119→120，全库还是 119
+	first := playlistChange{NotifyWorthy: true, CountIncreased: true, PrevMaxCount: 119, Signatures: eps(120)}
+	if !slaveShouldBumpStamp(first, []int{119}) {
+		t.Fatal("第一个写到 120 的源应顶最近更新")
+	}
+	// 已领先 120，仅最后一集标签变化：写前全库最大已是自己的 120，不重进
+	lead := playlistChange{NotifyWorthy: true, PrevMaxCount: 120, Signatures: eps(120)}
+	if slaveShouldBumpStamp(lead, []int{119}) {
+		t.Fatal("已领先源仅改最后一集标签不应重进最近更新")
 	}
 }
 
