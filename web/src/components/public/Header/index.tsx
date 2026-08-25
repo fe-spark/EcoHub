@@ -25,7 +25,7 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
 import { usePublicContentLoading } from "@/components/public/PublicContentLoading";
 import SiteLogo from "@/components/public/SiteLogo";
-import { PROJECT_GITHUB_URL } from "@/lib/project";
+import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 
 interface NavItem {
   id: string | number;
@@ -313,20 +313,18 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               <MenuOutlined />
             </div>
             
-            {siteInfo?.siteName && (
-              <div
-                className={styles.siteName}
-                onClick={navigateFromLogo}
-                title={siteInfo.siteUrl ? `打开 ${siteInfo.siteUrl}` : "回首页"}
-              >
-                <SiteLogo
-                  src={siteInfo.logo}
-                  className={styles.logoImg}
-                  fetchPriority="high"
-                />
-                <span className={styles.logoText}>{siteInfo.siteName}</span>
-              </div>
-            )}
+            <div
+              className={styles.siteName}
+              onClick={navigateFromLogo}
+              title={siteInfo?.siteUrl ? `打开 ${siteInfo.siteUrl}` : "回首页"}
+            >
+              <SiteLogo
+                src={siteInfo?.logo}
+                className={styles.logoImg}
+                fetchPriority="high"
+              />
+              <span className={styles.logoText}>{siteInfo?.siteName || DEFAULT_SITE_NAME}</span>
+            </div>
           </div>
 
           {/* Navigation Area - Dynamic & Flexible */}

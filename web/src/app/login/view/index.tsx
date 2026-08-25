@@ -10,7 +10,7 @@ import {
   EyeInvisibleOutlined,
   GithubOutlined,
 } from "@ant-design/icons";
-import { PROJECT_GITHUB_URL } from "@/lib/project";
+import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
@@ -46,11 +46,13 @@ export default function LoginPageView() {
     }
   };
 
+  const displaySiteName = siteInfo?.siteName || DEFAULT_SITE_NAME;
+
   return (
     <div className={styles.container}>
       <div className={styles.card}>
         <div className={styles.brand}>
-          {siteInfo?.siteName && <div className={styles.siteName}>{siteInfo.siteName}</div>}
+          <div className={styles.siteName}>{displaySiteName}</div>
           <div className={styles.subTitle}>Management System</div>
         </div>
 
@@ -88,8 +90,7 @@ export default function LoginPageView() {
 
         <div className={styles.footer}>
           <span>
-            © {new Date().getFullYear()}
-            {siteInfo?.siteName ? ` ${siteInfo.siteName}` : ""}
+            © {new Date().getFullYear()} {displaySiteName}
           </span>
           <a
             href={PROJECT_GITHUB_URL}

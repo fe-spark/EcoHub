@@ -12,6 +12,7 @@ import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import HomeHero, { type HeroBannerItem } from "./HomeHero";
 import DailyUpdates from "./DailyUpdates";
+import HomeEmptyGuide from "./HomeEmptyGuide";
 import styles from "./index.module.less";
 
 interface NavChildItem {
@@ -85,6 +86,20 @@ export default function HomePageView({
     }
     return <RocketOutlined className={styles.icon} />;
   };
+
+  const hasContent =
+    Array.isArray(data.content) &&
+    data.content.some(
+      (section) =>
+        section.nav?.show &&
+        ((section.movies && section.movies.length > 0) ||
+          (section.hot && section.hot.length > 0)),
+    );
+  const isEmpty = heroDeck.length === 0 && !hasContent;
+
+  if (isEmpty) {
+    return <HomeEmptyGuide />;
+  }
 
   return (
     <div className={styles.container}>

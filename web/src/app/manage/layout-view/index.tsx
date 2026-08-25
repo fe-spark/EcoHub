@@ -36,7 +36,7 @@ import {
   GithubOutlined,
   QuestionCircleOutlined,
 } from "@ant-design/icons";
-import { PROJECT_GITHUB_URL } from "@/lib/project";
+import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 
 import type { MenuProps } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -275,8 +275,8 @@ export default function ManageLayoutView({
           shape="square"
           className={styles.logoIcon}
         />
-        {(!collapsed || isMobile) && siteInfo?.siteName && (
-          <span className={styles.siteName}>{siteInfo.siteName}</span>
+        {(!collapsed || isMobile) && (
+          <span className={styles.siteName}>{siteInfo?.siteName || DEFAULT_SITE_NAME}</span>
         )}
       </div>
       <div className={styles.menuTourTarget}>

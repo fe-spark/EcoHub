@@ -1,8 +1,11 @@
 package spider
 
 import (
+	"context"
+	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"server/internal/model"
 )
@@ -153,5 +156,58 @@ func TestCollectLifecycleState_AffectedMIDsDrain(t *testing.T) {
 	}
 	if !reflect.DeepEqual(master, expectedMaster) {
 		t.Errorf("master MIDs = %v; want %v", master, expectedMaster)
+	}
+}
+
+func TestAdaptiveRateLimiting_SmoothBackoff(t *testing.T) {
+	const sourceID = "test_source_rl"
+	ClearLimiter(sourceID)
+	defer ClearLimiter(sourceID)
+
+	source := &model.FilmSource{
+		Id:       sourceID,
+		Name:     "Test RL",
+		Interval: 50,
+	}
+
+	// 1) 首次请求放行，并模拟上游返回 429 限流错误
+	release1, err := waitSourceRequestTurn(context.Background(), source, "test-turn-1")
+	if err != nil {
+		t.Fatalf("unexpected wait turn error: %v", err)
+	}
+	release1(errors.New("HTTP 429 Too Many Requests"))
+
+	gate := getSourceRequestGate(sourceID)
+	gate.mu.Lock()
+	hits := gate.rateLimitHits
+	nextAllowed := gate.nextAllowedAt
+	gate.mu.Unlock()
+
+	if hits != 1 {
+		t.Fatalf("expected rateLimitHits=1 after 429, got %d", hits)
+	}
+	if !nextAllowed.After(time.Now()) {
+		t.Fatalf("expected nextAllowedAt to be in the future after 429 backoff")
+	}
+
+	// 2) 再次请求放行（模拟冷却后），并模拟请求成功，hits 应递减
+	gate.mu.Lock()
+	gate.nextAllowedAt = time.Now().Add(-100 * time.Millisecond) // 模拟冷却结束
+	gate.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	release2, err := waitSourceRequestTurn(ctx, source, "test-turn-2")
+	if err != nil {
+		t.Fatalf("unexpected wait turn error: %v", err)
+	}
+	release2(nil) // 成功放行释放
+
+	gate.mu.Lock()
+	hitsAfterSuccess := gate.rateLimitHits
+	gate.mu.Unlock()
+
+	if hitsAfterSuccess != 0 {
+		t.Fatalf("expected rateLimitHits=0 after success, got %d", hitsAfterSuccess)
 	}
 }

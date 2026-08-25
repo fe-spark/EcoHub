@@ -315,6 +315,9 @@ func ClearCollectSourceStatsTx(tx *gorm.DB) error {
 
 // FindCollectSourceById 通过 Id 标识获取对应的资源站信息
 func FindCollectSourceById(id string) *model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
 	var fs model.FilmSource
 	if err := db.Mdb.Where("id = ?", id).First(&fs).Error; err != nil {
 		return nil

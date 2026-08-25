@@ -1,11 +1,14 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"time"
+
+	"github.com/redis/go-redis/v9"
 )
 
 // SaveUserToken 将用户登录成功后的token字符串存放到redis中
@@ -18,7 +21,9 @@ func SaveUserToken(token string, userId uint) error {
 func GetUserTokenById(userId uint) string {
 	token, err := db.Rdb.Get(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId)).Result()
 	if err != nil {
-		log.Println(err)
+		if !errors.Is(err, redis.Nil) {
+			log.Printf("[AuthRepo] 获取用户 Token 失败 userId=%d: %v", userId, err)
+		}
 		return ""
 	}
 	return token
