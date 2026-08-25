@@ -29,12 +29,14 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ImagePicker from "@/app/manage/components/image-picker";
 import { createDefaultTipConfig, normalizeTipConfig } from "@/lib/tip";
+import { createDefaultNoticeConfig, normalizeNoticeConfig } from "@/lib/notice";
 import TipConfigCard, { type SiteBasicPayload } from "./tip-config-card";
+import NoticeConfigCard from "./notice-config-card";
 import styles from "./index.module.less";
 
 type SiteConfigValues = SiteBasicPayload;
 
-type EditableField = Exclude<keyof SiteConfigValues, "tip">;
+type EditableField = Exclude<keyof SiteConfigValues, "tip" | "notice">;
 
 interface ConfigItem {
   field: EditableField;
@@ -52,6 +54,7 @@ const DEFAULT_CONFIG: SiteConfigValues = {
   describe: "",
   hint: "",
   tip: createDefaultTipConfig(),
+  notice: createDefaultNoticeConfig(),
 };
 
 const CONFIG_ITEMS: ConfigItem[] = [
@@ -84,6 +87,7 @@ function normalizeConfig(data: Partial<SiteConfigValues> | undefined): SiteConfi
     describe: String(data?.describe ?? ""),
     hint: String(data?.hint ?? ""),
     tip: normalizeTipConfig(data?.tip),
+    notice: normalizeNoticeConfig(data?.notice),
   };
 }
 
@@ -275,6 +279,7 @@ export default function SiteConfigPageView({ embedded = false }: SiteConfigPageV
             </div>
           </Card>
           <TipConfigCard siteConfig={config} canWrite={canWrite} onSave={persistConfig} />
+          <NoticeConfigCard siteConfig={config} canWrite={canWrite} onSave={persistConfig} />
         </div>
       </Spin>
 

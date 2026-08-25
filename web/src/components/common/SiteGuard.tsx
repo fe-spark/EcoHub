@@ -6,6 +6,7 @@ import { Result } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import AppLoading from "@/components/public/Loading";
 import type { TipConfig } from "@/lib/tip";
+import type { NoticeConfig } from "@/lib/notice";
 
 export interface SiteConfig {
   siteName: string;
@@ -17,6 +18,7 @@ export interface SiteConfig {
   state: boolean;
   hint: string;
   tip?: TipConfig;
+  notice?: NoticeConfig;
 }
 
 interface SiteConfigContextType {
