@@ -446,6 +446,62 @@ func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, erro
 	return out, nil
 }
 
+// LoadChangeMidsBetweenPaged 分页获取时间窗内变更的 mid 及去重后的总数量。
+func LoadChangeMidsBetweenPaged(from, to time.Time, current, pageSize int) ([]ChangeMidItem, int, error) {
+	if db.Mdb == nil {
+		return nil, 0, fmt.Errorf("数据库未就绪")
+	}
+	if to.Before(from) {
+		return nil, 0, nil
+	}
+	if current <= 0 {
+		current = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+
+	baseQuery := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
+		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
+		Where("GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) >= ? AND GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) <= ?", from, to)
+
+	var total int64
+	if err := baseQuery.Select("COUNT(DISTINCT c.mid)").Scan(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if total == 0 {
+		return []ChangeMidItem{}, 0, nil
+	}
+
+	type row struct {
+		Mid        int64
+		SourceName string
+	}
+	var rows []row
+	offset := (current - 1) * pageSize
+	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
+		Select("c.mid AS mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(c.source_name), '') ORDER BY c.source_name SEPARATOR ', ') AS source_name").
+		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
+		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
+		Where("GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) >= ? AND GREATEST(COALESCE(c.created_at, b.created_at), b.created_at) <= ?", from, to).
+		Group("c.mid").
+		Order("MAX(f.update_stamp) DESC, c.mid DESC").
+		Offset(offset).
+		Limit(pageSize)
+
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, 0, err
+	}
+	out := make([]ChangeMidItem, 0, len(rows))
+	for _, r := range rows {
+		if r.Mid <= 0 {
+			continue
+		}
+		out = append(out, ChangeMidItem{Mid: r.Mid, SourceName: strings.TrimSpace(r.SourceName)})
+	}
+	return out, int(total), nil
+}
+
 // categoryCountsFromPidMap 导航大类顺序聚合 pid→count（与 GetChangeBatchCategoryCounts 一致）。
 func categoryCountsFromPidMap(countByPid map[int64]int, otherCount int) []CategoryCountItem {
 	nav := navTopCategories()

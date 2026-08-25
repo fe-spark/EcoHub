@@ -157,9 +157,120 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 }
 
 // HomeDailyUpdates 近 24h 采集变更。
-// limit<=0（不传）返回全部，保持池内顺序；limit>0 时从池中随机取，exclude 排除当前批次。
-func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
-	return selectDailyUpdates(i.homeDailyUpdatePool(), limit, exclude)
+// 若请求带分页参数（page != nil），则返回分页数据；
+// 若为首页卡片小数量（limit <= 24），则利用 Redis 短缓存候选池进行随机抽取（支持换一换与 exclude 剔除）；
+// 若传了较大 limit（如 limit=1000），则严格按 limit 从数据库按更新时间倒序取前 N 条，若带 exclude 则剔除对应项；
+// 若不传 limit 且不传 page，则取全部变更记录。
+func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64, page *dto.Page) ([]model.MovieBasicInfo, *dto.Page) {
+	if page != nil {
+		page = filmrepo.EnsurePage(page)
+		from, to := notify.Rolling24hWindow(time.Now())
+		items, total, err := notify.LoadChangeMidsBetweenPaged(from, to, page.Current, page.PageSize)
+		if err != nil {
+			log.Printf("[IndexService] HomeDailyUpdates load paged mids: %v", err)
+			return []model.MovieBasicInfo{}, page
+		}
+		page.Total = total
+		page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+		if page.PageCount <= 0 {
+			page.PageCount = 1
+		}
+		if len(items) == 0 {
+			return []model.MovieBasicInfo{}, page
+		}
+
+		version := filmrepo.GetActiveReadModelVersion()
+		mids := make([]int64, 0, len(items))
+		for _, it := range items {
+			mids = append(mids, it.Mid)
+		}
+		snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+		list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+		if list == nil {
+			list = make([]model.MovieBasicInfo, 0)
+		}
+		applyLiveRemarksToMovies(list)
+		return list, page
+	}
+
+	// 首页卡片小数量场景（limit > 0 且 <= 24）：走 Redis 候选池随机轮换
+	if limit > 0 && limit <= homeDailyUpdateLimitMax {
+		pool := i.homeDailyUpdatePool()
+		list := selectDailyUpdates(pool, limit, exclude)
+		applyLiveRemarksToMovies(list)
+		return list, nil
+	}
+
+	// 当明确指定了较大 limit（例如 limit=1000）
+	if limit > 0 {
+		from, to := notify.Rolling24hWindow(time.Now())
+		// 若有排除项 exclude，向数据库多查一些以保证排除后依然尽量凑足 limit 条
+		fetchLimit := limit
+		if len(exclude) > 0 {
+			fetchLimit += len(exclude)
+		}
+		items, err := notify.LoadChangeMidsBetween(from, to, fetchLimit)
+		if err != nil {
+			log.Printf("[IndexService] HomeDailyUpdates load mids: %v", err)
+			return []model.MovieBasicInfo{}, nil
+		}
+		if len(items) == 0 {
+			return []model.MovieBasicInfo{}, nil
+		}
+
+		excludeMap := make(map[int64]struct{}, len(exclude))
+		for _, id := range exclude {
+			if id > 0 {
+				excludeMap[id] = struct{}{}
+			}
+		}
+
+		mids := make([]int64, 0, min(limit, len(items)))
+		for _, it := range items {
+			if _, skip := excludeMap[it.Mid]; skip {
+				continue
+			}
+			mids = append(mids, it.Mid)
+			if len(mids) >= limit {
+				break
+			}
+		}
+		if len(mids) == 0 {
+			return []model.MovieBasicInfo{}, nil
+		}
+
+		version := filmrepo.GetActiveReadModelVersion()
+		snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+		list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+		if list == nil {
+			list = make([]model.MovieBasicInfo, 0)
+		}
+		applyLiveRemarksToMovies(list)
+		return list, nil
+	}
+
+	// limit <= 0 且无分页参数：拉取全量 24h 变更
+	from, to := notify.Rolling24hWindow(time.Now())
+	items, err := notify.LoadChangeMidsBetween(from, to, 0)
+	if err != nil {
+		log.Printf("[IndexService] HomeDailyUpdates load all mids: %v", err)
+		return []model.MovieBasicInfo{}, nil
+	}
+	if len(items) == 0 {
+		return []model.MovieBasicInfo{}, nil
+	}
+	version := filmrepo.GetActiveReadModelVersion()
+	mids := make([]int64, 0, len(items))
+	for _, it := range items {
+		mids = append(mids, it.Mid)
+	}
+	snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+	if list == nil {
+		list = make([]model.MovieBasicInfo, 0)
+	}
+	applyLiveRemarksToMovies(list)
+	return list, nil
 }
 
 func selectDailyUpdates(pool []model.MovieBasicInfo, limit int, exclude []int64) []model.MovieBasicInfo {
@@ -177,6 +288,8 @@ func selectDailyUpdates(pool []model.MovieBasicInfo, limit int, exclude []int64)
 	return pickRandomMovieInfos(pool, limit, exclude)
 }
 
+const homeDailyUpdatePoolCap = 120
+
 func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	empty := make([]model.MovieBasicInfo, 0)
 	cacheKey := config.IndexDailyUpdatesCacheKey
@@ -187,14 +300,13 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 				if list == nil {
 					return empty
 				}
-				applyLiveRemarksToMovies(list)
 				return list
 			}
 		}
 	}
 
 	from, to := notify.Rolling24hWindow(time.Now())
-	items, err := notify.LoadChangeMidsBetween(from, to, 0)
+	items, err := notify.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
 	if err != nil {
 		log.Printf("[IndexService] homeDailyUpdates load mids: %v", err)
 		return empty
@@ -219,7 +331,6 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 		list = empty
 	}
 	storeHomeDailyUpdatesCache(cacheKey, list)
-	applyLiveRemarksToMovies(list)
 	return list
 }
 

@@ -413,7 +413,7 @@ func buildCategoryQuery(field string, id int64) *gorm.DB {
 	return applyCategoryFieldFilter(db.Mdb.Model(&model.FilmIndex{}), field, id)
 }
 
-func ensurePage(page *dto.Page) *dto.Page {
+func EnsurePage(page *dto.Page) *dto.Page {
 	if page == nil {
 		return &dto.Page{Current: 1, PageSize: 20}
 	}
@@ -424,6 +424,10 @@ func ensurePage(page *dto.Page) *dto.Page {
 		page.PageSize = 20
 	}
 	return page
+}
+
+func ensurePage(page *dto.Page) *dto.Page {
+	return EnsurePage(page)
 }
 
 func getPageOffset(page *dto.Page) int {
