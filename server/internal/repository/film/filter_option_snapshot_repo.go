@@ -204,18 +204,6 @@ func buildSortFilterOptions(version string, pid int64) []model.FilmFilterOptionS
 	return options
 }
 
-func isFilterOptionRowsComplete(rows []model.FilmFilterOptionSnapshot) bool {
-	if len(rows) == 0 {
-		return false
-	}
-	tagTypes := make(map[string]bool)
-	for _, r := range rows {
-		tagTypes[r.TagType] = true
-	}
-	// 完整的筛选维度必须包含 Category 以及 Area/Language/Year/Plot 等至少多个维度
-	return tagTypes["Category"] && tagTypes["Area"] && tagTypes["Language"] && tagTypes["Year"] && tagTypes["Plot"]
-}
-
 func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -231,40 +219,20 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				// 检查缓存的完整性，如果缓存中只有少于 3 个维度（比如只有 Category 和 Sort），视为不完整跳过
-				if sortList, ok := cached["sortList"].([]any); ok && len(sortList) >= 3 {
-					return cached
-				}
+				return cached
 			}
 		}
 	}
 
 	var rows []model.FilmFilterOptionSnapshot
 	if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).Order("sort ASC, id ASC").Find(&rows).Error; err == nil && len(rows) > 0 {
-		// 如果数据库中存在完整数据，直接返回
-		if isFilterOptionRowsComplete(rows) {
-			res := buildFilterOptionResponse(rows)
-			if db.Rdb != nil {
-				if raw, err := json.Marshal(res); err == nil {
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
-				}
+		res := buildFilterOptionResponse(rows)
+		if db.Rdb != nil {
+			if raw, err := json.Marshal(res); err == nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
 			}
-			return res
 		}
-	}
-
-	// 兜底与自愈：如果 DB 中该版本筛选快照不存在或属于残缺脏数据（例如历史版本仅有 Category/Sort），立即执行懒加载全量重建
-	if err := RebuildFilterOptionSnapshot(version); err == nil {
-		var retryRows []model.FilmFilterOptionSnapshot
-		if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).Order("sort ASC, id ASC").Find(&retryRows).Error; err == nil && len(retryRows) > 0 {
-			res := buildFilterOptionResponse(retryRows)
-			if db.Rdb != nil {
-				if raw, err := json.Marshal(res); err == nil {
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
-				}
-			}
-			return res
-		}
+		return res
 	}
 
 	return emptyFilterOptionResponse()
@@ -274,14 +242,6 @@ func EnsureActiveFilterOptionSnapshot() error {
 	version := GetActiveSnapshotVersion()
 	if version == "" {
 		return nil
-	}
-
-	var rows []model.FilmFilterOptionSnapshot
-	// 抽样检查当前版本筛选标签的完整性
-	if err := db.Mdb.Where("snapshot_version = ?", version).Limit(100).Find(&rows).Error; err == nil && len(rows) > 0 {
-		if isFilterOptionRowsComplete(rows) {
-			return nil
-		}
 	}
 
 	return RebuildFilterOptionSnapshot(version)
