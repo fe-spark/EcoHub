@@ -119,19 +119,12 @@ func buildCategoryFilterOptionsFromDB(tx *gorm.DB, version string, pid int64) []
 }
 
 func loadSearchTagItemsByTypeFromDB(tx *gorm.DB, version string, pid int64) map[string][]model.SearchTagItem {
-	type tagFieldRow struct {
-		Area     string `gorm:"column:area"`
-		Language string `gorm:"column:language"`
-		Year     int64  `gorm:"column:year"`
-		ClassTag string `gorm:"column:class_tag"`
-	}
-
 	areaCounts := make(map[string]int64)
 	languageCounts := make(map[string]int64)
 	yearCounts := make(map[string]int64)
 	plotCounts := make(map[string]int64)
 
-	var batchRows []tagFieldRow
+	var batchRows []model.FilmListSnapshot
 	err := tx.Model(&model.FilmListSnapshot{}).
 		Select("area, language, year, class_tag").
 		Where("snapshot_version = ? AND pid = ?", version, pid).
