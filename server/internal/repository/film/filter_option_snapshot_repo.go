@@ -120,32 +120,45 @@ func buildCategoryFilterOptionsFromDB(tx *gorm.DB, version string, pid int64) []
 
 func loadSearchTagItemsByTypeFromDB(tx *gorm.DB, version string, pid int64) map[string][]model.SearchTagItem {
 	type tagFieldRow struct {
-		Area     string
-		Language string
-		Year     int64
-		ClassTag string
+		Area     string `gorm:"column:area"`
+		Language string `gorm:"column:language"`
+		Year     int64  `gorm:"column:year"`
+		ClassTag string `gorm:"column:class_tag"`
 	}
-	var snapshots []model.FilmListSnapshot
-	_ = tx.Model(&model.FilmListSnapshot{}).
+
+	areaCounts := make(map[string]int64)
+	languageCounts := make(map[string]int64)
+	yearCounts := make(map[string]int64)
+	plotCounts := make(map[string]int64)
+
+	var batchRows []tagFieldRow
+	err := tx.Model(&model.FilmListSnapshot{}).
 		Select("area, language, year, class_tag").
 		Where("snapshot_version = ? AND pid = ?", version, pid).
-		FindInBatches(&[]tagFieldRow{}, 2000, func(batchTx *gorm.DB, batch int) error {
-			var rows []tagFieldRow
-			if err := batchTx.Scan(&rows).Error; err != nil {
-				return err
-			}
-			for _, r := range rows {
-				snapshots = append(snapshots, model.FilmListSnapshot{
-					Area:     r.Area,
-					Language: r.Language,
-					Year:     r.Year,
-					ClassTag: r.ClassTag,
-				})
+		FindInBatches(&batchRows, 2000, func(batchTx *gorm.DB, batch int) error {
+			for _, r := range batchRows {
+				countSingleSearchTag("Area", r.Area, areaCounts)
+				countSingleSearchTag("Language", r.Language, languageCounts)
+				if r.Year > 0 {
+					yearCounts[fmt.Sprint(r.Year)]++
+				} else {
+					yearCounts[model.TagUnknownValue]++
+				}
+				countPlotSearchTags(r.ClassTag, plotCounts)
 			}
 			return nil
 		}).Error
 
-	return searchTagItemsByTypeFromSnapshots(snapshots)
+	if err != nil {
+		log.Printf("[FilterOptionSnapshot] loadSearchTagItemsByTypeFromDB failed: %v", err)
+	}
+
+	return map[string][]model.SearchTagItem{
+		"Area":     searchTagItemsFromCounts("Area", areaCounts),
+		"Language": searchTagItemsFromCounts("Language", languageCounts),
+		"Year":     searchTagItemsFromCounts("Year", yearCounts),
+		"Plot":     searchTagItemsFromCounts("Plot", plotCounts),
+	}
 }
 
 func buildTagFilterOptions(version string, pid int64, tagType string, items []model.SearchTagItem) []model.FilmFilterOptionSnapshot {
