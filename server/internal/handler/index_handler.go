@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -107,27 +109,92 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 近 24h 更新。
-// 当传入 page 或 current 时按标准分页返回 { list: [...], page: {...} }；
-// 当仅传入 limit / exclude 时保持列表返回以兼容首页卡片轮换。
+// DailyUpdates 近 24h 更新（保持 beta.3 原始接口契约：不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次）。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	pageParam := parseDailyUpdatePage(c)
-	limit := parseDailyUpdateLimit(c.Query("limit"))
-	exclude := parseDailyUpdateExclude(c.Query("exclude"))
-
-	data, page := service.IndexSvc.HomeDailyUpdates(limit, exclude, pageParam)
-	if page != nil {
-		dto.Success(gin.H{
-			"list": data,
-			"page": page,
-		}, "每日更新获取成功", c)
-		return
-	}
-
+	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
 	if data == nil {
 		data = make([]model.MovieBasicInfo, 0)
 	}
 	dto.Success(data, "每日更新获取成功", c)
+}
+
+// DailyUpdatesV2 新每日更新接口（全新独立接口，无需兼容老接口）：
+// 1. 支持流式传输（stream=1 或 stream=true，使用 NDJSON/chunked 逐步输出）
+// 2. 支持标准分页（page/pageSize 或 current/size）
+// 3. 支持随机轮换（random=1 或 random=true，搭配 exclude 参数）
+func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
+	stream := c.Query("stream") == "true" || c.Query("stream") == "1"
+	if stream {
+		batchSize, _ := strconv.Atoi(c.Query("batchSize"))
+		if batchSize <= 0 {
+			batchSize, _ = strconv.Atoi(c.Query("pageSize"))
+		}
+		if batchSize <= 0 {
+			batchSize, _ = strconv.Atoi(c.Query("size"))
+		}
+		if batchSize <= 0 {
+			batchSize = 50
+		}
+
+		c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+		c.Header("Transfer-Encoding", "chunked")
+		c.Header("Cache-Control", "no-cache")
+		c.Header("Connection", "keep-alive")
+
+		w := c.Writer
+		flusher, ok := w.(http.Flusher)
+
+		err := service.IndexSvc.StreamDailyUpdates(batchSize, func(batch []model.MovieBasicInfo, currentBatch int, totalCount int) error {
+			chunk := gin.H{
+				"batch": currentBatch,
+				"total": totalCount,
+				"count": len(batch),
+				"list":  batch,
+			}
+			raw, marshalErr := json.Marshal(chunk)
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, writeErr := w.Write(append(raw, '\n')); writeErr != nil {
+				return writeErr
+			}
+			if ok {
+				flusher.Flush()
+			}
+			return nil
+		})
+		if err != nil {
+			log.Printf("[DailyUpdatesV2] stream error: %v", err)
+			errChunk, _ := json.Marshal(gin.H{"error": err.Error()})
+			_, _ = w.Write(append(errChunk, '\n'))
+			if ok {
+				flusher.Flush()
+			}
+		}
+		return
+	}
+
+	pageParam := parseDailyUpdatePage(c)
+	if pageParam == nil {
+		pageParam = &dto.Page{Current: 1, PageSize: 20}
+	}
+	random := c.Query("random") == "true" || c.Query("random") == "1"
+	exclude := parseDailyUpdateExclude(c.Query("exclude"))
+
+	list, page, err := service.IndexSvc.DailyUpdatesPaged(service.DailyUpdateListReq{
+		Page:    pageParam,
+		Random:  random,
+		Exclude: exclude,
+	})
+	if err != nil {
+		dto.Failed("获取每日更新失败", c)
+		return
+	}
+
+	dto.Success(gin.H{
+		"list": list,
+		"page": page,
+	}, "获取每日更新成功", c)
 }
 
 func parseDailyUpdatePage(c *gin.Context) *dto.Page {
