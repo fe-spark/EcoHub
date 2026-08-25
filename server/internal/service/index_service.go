@@ -53,26 +53,39 @@ func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
 	log.Println(args...)
 }
 
+var indexPageSfGroup singleflight.Group
+
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
 	version := filmrepo.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
-	// 1. 尝试从 Redis 获取缓存
 	cacheKey := fmt.Sprintf("%s:s%s:r%s", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
-	var Info map[string]any
-	if version != "" {
+
+	// 1. 尝试从 Redis 获取缓存
+	if version != "" && db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			res := make(map[string]any)
-			if json.Unmarshal([]byte(data), &res) == nil {
-				Info = res
+			if json.Unmarshal([]byte(data), &res) == nil && res != nil {
+				res["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
+				return res
 			}
 		}
 	}
 
-	if Info == nil {
-		Info = make(map[string]any)
+	val, err, _ := indexPageSfGroup.Do("IndexPage", func() (any, error) {
+		// Double check 缓存
+		if version != "" && db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				res := make(map[string]any)
+				if json.Unmarshal([]byte(data), &res) == nil && res != nil {
+					return res, nil
+				}
+			}
+		}
+
+		info := make(map[string]any)
 		tree := repository.GetActiveCategoryTree()
-		Info["category"] = tree
+		info["category"] = tree
 		list := make([]map[string]any, 0)
 		for _, c := range tree.Children {
 			var movies []model.MovieBasicInfo
@@ -93,24 +106,40 @@ func (i *IndexService) IndexPage() map[string]any {
 			item := map[string]any{"nav": c, "movies": movies, "hot": hotMovies}
 			list = append(list, item)
 		}
-		Info["content"] = list
+		info["content"] = list
 		banners := repository.GetBanners()
 		if banners == nil {
 			banners = make(model.Banners, 0)
 		}
-		Info["banners"] = banners
+		info["banners"] = banners
 
-		// 2. 写入 Redis 缓存 (设置长 TTL，但依靠 AfterSave 钩子主动刷新)
-		if version != "" {
-			if data, err := json.Marshal(Info); err == nil {
-				db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24)
+		// 2. 写入 Redis 缓存
+		if version != "" && db.Rdb != nil {
+			if data, err := json.Marshal(info); err == nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24).Err()
 			}
+		}
+		return info, nil
+	})
+
+	if err != nil || val == nil {
+		return map[string]any{
+			"category": repository.GetActiveCategoryTree(),
+			"content":  []map[string]any{},
+			"banners":  repository.GetBanners(),
 		}
 	}
 
-	// 轮播条数与配置一致；更新状态与最近更新同源（全库最大集数），不走 24h 首页缓存。
-	Info["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
-	return Info
+	rawInfo, ok := val.(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	outInfo := make(map[string]any, len(rawInfo))
+	for k, v := range rawInfo {
+		outInfo[k] = v
+	}
+	outInfo["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
+	return outInfo
 }
 
 func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
