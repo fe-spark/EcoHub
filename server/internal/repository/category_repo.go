@@ -875,8 +875,45 @@ func GetActiveCategoryTree() model.CategoryTree {
 	return root
 }
 
+func loadActiveSnapshotVersion() string {
+	if db.Rdb != nil {
+		if version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result(); err == nil && strings.TrimSpace(version) != "" {
+			return strings.TrimSpace(version)
+		}
+	}
+	return ""
+}
+
 func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
 	active := make(map[int64]bool)
+	version := loadActiveSnapshotVersion()
+	if version != "" && db.Mdb != nil {
+		var pids []int64
+		_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+			Distinct("pid").
+			Where("snapshot_version = ? AND pid > 0", version).
+			Pluck("pid", &pids).Error
+		for _, id := range pids {
+			if id > 0 {
+				active[id] = true
+			}
+		}
+
+		var cids []int64
+		_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+			Distinct("cid").
+			Where("snapshot_version = ? AND cid > 0", version).
+			Pluck("cid", &cids).Error
+		for _, id := range cids {
+			if id > 0 {
+				active[id] = true
+			}
+		}
+		if len(active) > 0 {
+			return active
+		}
+	}
+
 	filmCategoryKeys := loadFilmCategorySourceKeys()
 	if len(filmCategoryKeys) == 0 {
 		return active
