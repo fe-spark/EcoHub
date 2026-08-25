@@ -121,6 +121,9 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	if err := RebuildFilmListSnapshot(version); err != nil {
 		return err
 	}
+	if err := RebuildFilterOptionSnapshot(version); err != nil {
+		log.Printf("RebuildFilterOptionSnapshot Error: %v", err)
+	}
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
@@ -133,6 +136,7 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
 	pruneOldFilmListSnapshots(snapshotRetainVersions)
+	pruneOldFilterOptionSnapshots(snapshotRetainVersions)
 	return nil
 }
 
@@ -718,6 +722,7 @@ func RefreshAccessDataCaches() {
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
 		fmt.Sprintf("%s:*", config.SearchTags),
+		"EcoHub:filter_option:*",
 	)
 }
 

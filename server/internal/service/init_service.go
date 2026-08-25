@@ -64,6 +64,9 @@ func (s *InitService) ensureFilmListSnapshot() {
 	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
 		syslog.Errorf("[Init] 前台影片列表快照引导失败: %v", err)
 	}
+	if err := filmrepo.EnsureActiveFilterOptionSnapshot(); err != nil {
+		syslog.Errorf("[Init] 前台影片筛选标签快照引导失败: %v", err)
+	}
 }
 
 func (s *InitService) loadActiveFilmReadModel() {
