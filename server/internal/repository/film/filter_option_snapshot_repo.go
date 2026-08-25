@@ -126,7 +126,7 @@ func loadSearchTagItemsByTypeFromDB(tx *gorm.DB, version string, pid int64) map[
 
 	var batchRows []model.FilmListSnapshot
 	err := tx.Model(&model.FilmListSnapshot{}).
-		Select("area, language, year, class_tag").
+		Select("id, area, language, year, class_tag").
 		Where("snapshot_version = ? AND pid = ?", version, pid).
 		FindInBatches(&batchRows, 2000, func(batchTx *gorm.DB, batch int) error {
 			for _, r := range batchRows {

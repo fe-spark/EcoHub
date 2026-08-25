@@ -1,7 +1,6 @@
 package film
 
 import (
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -54,91 +53,35 @@ func formatLiveRemark(last string, n int) string {
 // maxLiveRemarksBatchSize 单次分批查询详情与播放列表的大小，防止单次 SQL 携带过多参数和产生大内存占用
 const maxLiveRemarksBatchSize = 100
 
-// LiveUpdateRemarksByMIDs 按全库主站详情 + 附属站 playlist 最大集数生成展示用更新状态。
-// 内部采用分批流式查询，即使传入上千个 mid 也不会打爆单次内存。
+// LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。
 func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
 	out := make(map[int64]string, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return out
 	}
 
-	prog := make(map[int64]*liveProgress, len(mids))
-	ensure := func(mid int64) *liveProgress {
-		p := prog[mid]
-		if p == nil {
-			p = &liveProgress{}
-			prog[mid] = p
-		}
-		return p
+	version := GetActiveSnapshotVersion()
+	if version == "" {
+		return out
 	}
 
-	for i := 0; i < len(mids); i += maxLiveRemarksBatchSize {
-		end := min(i+maxLiveRemarksBatchSize, len(mids))
-		batchMids := mids[i:end]
-
-		var detailRows []model.MovieDetailInfo
-		if err := db.Mdb.Select("mid, content").Where("mid IN ?", batchMids).Find(&detailRows).Error; err != nil {
-			log.Printf("[Film] LiveUpdateRemarks 读详情失败: %v", err)
-		} else {
-			for _, row := range detailRows {
-				if row.Mid <= 0 || strings.TrimSpace(row.Content) == "" {
-					continue
-				}
-				var detail model.MovieDetail
-				if err := json.Unmarshal([]byte(row.Content), &detail); err != nil {
-					continue
-				}
-				p := ensure(row.Mid)
-				p.masterRemarks = strings.TrimSpace(detail.Remarks)
-				p.masterCount = maxEpisodeCount(extractEpisodeCountsFromDetail(detail))
-				for _, group := range detail.PlayList {
-					n := episodeCount(group)
-					if n > 0 {
-						p.note(n, lastEpisodeLabel(group))
-					}
-				}
-			}
-		}
-
-		keysByMid := loadMovieMatchKeysByMidsTx(db.Mdb, batchMids)
-		allKeys := make([]string, 0)
-		keyToMid := make(map[string]int64)
-		for mid, keys := range keysByMid {
-			for _, k := range keys {
-				if k != "" {
-					allKeys = append(allKeys, k)
-					keyToMid[k] = mid
-				}
-			}
-		}
-		if len(allKeys) > 0 {
-			var playlistRows []model.MoviePlaylist
-			if err := db.Mdb.Select("movie_key, content").Where("movie_key IN ?", allKeys).Find(&playlistRows).Error; err != nil {
-				log.Printf("[Film] LiveUpdateRemarks 读 playlist 失败: %v", err)
-			} else {
-				for _, row := range playlistRows {
-					mid := keyToMid[row.MovieKey]
-					if mid <= 0 || strings.TrimSpace(row.Content) == "" {
-						continue
-					}
-					var links []model.MovieUrlInfo
-					if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
-						continue
-					}
-					n := episodeCount(links)
-					if n > 0 {
-						ensure(mid).note(n, lastEpisodeLabel(links))
-					}
-				}
-			}
-		}
+	type row struct {
+		Mid     int64
+		Remarks string
+	}
+	var rows []row
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+		Select("mid, remarks").
+		Where("snapshot_version = ? AND mid IN ?", version, mids).
+		Scan(&rows).Error; err != nil {
+		log.Printf("[Film] LiveUpdateRemarks 读快照状态失败: %v", err)
+		return out
 	}
 
-	for mid, p := range prog {
-		if p == nil {
-			continue
+	for _, r := range rows {
+		if strings.TrimSpace(r.Remarks) != "" {
+			out[r.Mid] = strings.TrimSpace(r.Remarks)
 		}
-		out[mid] = pickLiveRemark(p.masterCount, p.masterRemarks, p.last, p.count)
 	}
 	return out
 }
