@@ -406,8 +406,7 @@ func Rolling24hWindow(now time.Time) (from, to time.Time) {
 
 // LoadChangeMidsBetween 汇总时间窗内各采集批次的变更 mid（与采集概要进列表逻辑同源）。
 // 数据来自 notify_change_mid：采集写库时经 filterPlayStructureNotifyMIDs / 附属站「全库最大集数」判定后写入。
-// 批次时间（b.created_at）利用索引进行 48h 预筛，最终按 mid 写入时间（COALESCE(c.created_at, b.created_at)）落入 [from, to] 窗口。
-// 同 mid 跨批次去重，源名合并；按 film update_stamp 新→旧排序。
+// 直接按 c.created_at 索引进行范围筛选，同 mid 跨批次去重，源名合并；按最新变更时间倒序。
 // limit>0 时只取前 N 条（首页卡片）；limit<=0 不截断（TG 每日更新全窗）。
 func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, error) {
 	if db.Mdb == nil {
@@ -421,14 +420,12 @@ func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, erro
 		SourceName string
 	}
 	var rows []row
-	// 按 mid 聚合；源名用 GROUP_CONCAT 合并各批次
-	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Select("c.mid AS mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(c.source_name), '') ORDER BY c.source_name SEPARATOR ', ') AS source_name").
-		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
-		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
-		Where("b.created_at >= ? AND b.created_at <= ? AND COALESCE(c.created_at, b.created_at) BETWEEN ? AND ?", from.Add(-48*time.Hour), to, from, to).
-		Group("c.mid").
-		Order("MAX(f.update_stamp) DESC, c.mid DESC")
+	// 单表直接按 created_at 范围查询，命中 created_at 索引，按最新变更时间倒序
+	q := db.Mdb.Table(model.TableNotifyChangeMid).
+		Select("mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(source_name), '') ORDER BY source_name SEPARATOR ', ') AS source_name, MAX(created_at) AS latest_time").
+		Where("created_at >= ? AND created_at <= ?", from, to).
+		Group("mid").
+		Order("latest_time DESC, mid DESC")
 	if limit > 0 {
 		q = q.Limit(limit)
 	}
@@ -460,12 +457,11 @@ func LoadChangeMidsBetweenPaged(from, to time.Time, current, pageSize int) ([]Ch
 		pageSize = 20
 	}
 
-	baseQuery := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
-		Where("b.created_at >= ? AND b.created_at <= ? AND COALESCE(c.created_at, b.created_at) BETWEEN ? AND ?", from.Add(-48*time.Hour), to, from, to)
+	baseQuery := db.Mdb.Table(model.TableNotifyChangeMid).
+		Where("created_at >= ? AND created_at <= ?", from, to)
 
 	var total int64
-	if err := baseQuery.Select("COUNT(DISTINCT c.mid)").Scan(&total).Error; err != nil {
+	if err := baseQuery.Select("COUNT(DISTINCT mid)").Scan(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	if total == 0 {
@@ -478,13 +474,11 @@ func LoadChangeMidsBetweenPaged(from, to time.Time, current, pageSize int) ([]Ch
 	}
 	var rows []row
 	offset := (current - 1) * pageSize
-	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Select("c.mid AS mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(c.source_name), '') ORDER BY c.source_name SEPARATOR ', ') AS source_name").
-		Joins("INNER JOIN "+model.TableNotifyChangeBatch+" AS b ON b.id = c.batch_id").
-		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
-		Where("b.created_at >= ? AND b.created_at <= ? AND COALESCE(c.created_at, b.created_at) BETWEEN ? AND ?", from.Add(-48*time.Hour), to, from, to).
-		Group("c.mid").
-		Order("MAX(f.update_stamp) DESC, c.mid DESC").
+	q := db.Mdb.Table(model.TableNotifyChangeMid).
+		Select("mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(source_name), '') ORDER BY source_name SEPARATOR ', ') AS source_name, MAX(created_at) AS latest_time").
+		Where("created_at >= ? AND created_at <= ?", from, to).
+		Group("mid").
+		Order("latest_time DESC, mid DESC").
 		Offset(offset).
 		Limit(pageSize)
 

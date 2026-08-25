@@ -151,6 +151,7 @@ func ensureSnapshotPerformanceIndexes() {
 		"CREATE INDEX idx_snap_pid_hits ON film_list_snapshot(snapshot_version, pid, hits)",
 		"CREATE INDEX idx_snap_cid_hits ON film_list_snapshot(snapshot_version, cid, hits)",
 		"CREATE INDEX idx_snap_pid_year ON film_list_snapshot(snapshot_version, pid, year, update_stamp)",
+		"CREATE INDEX idx_notify_change_mid_created_mid ON notify_change_mid(created_at, mid)",
 	}
 	for _, sql := range queries {
 		if err := db.Mdb.Exec(sql).Error; err != nil {

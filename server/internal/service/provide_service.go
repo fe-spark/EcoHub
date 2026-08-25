@@ -242,7 +242,12 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if limit <= 0 {
 		limit = 20
 	}
+	wd = strings.TrimSpace(wd)
 	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
+	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
+	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 	version := filmrepo.GetActiveReadModelVersion()

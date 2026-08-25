@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -20,8 +22,10 @@ import (
 
 const (
 	homeDailyUpdateLimitMax = 12
-	homeDailyUpdateCacheTTL = 2 * time.Minute
+	homeDailyUpdateCacheTTL = 5 * time.Minute
 )
+
+var dailyUpdateSfGroup singleflight.Group
 
 type IndexService struct{}
 
@@ -323,34 +327,59 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 		}
 	}
 
-	from, to := notify.Rolling24hWindow(time.Now())
-	items, err := notify.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
-	if err != nil {
-		log.Printf("[IndexService] homeDailyUpdates load mids: %v", err)
-		return empty
-	}
-	if len(items) == 0 {
-		storeHomeDailyUpdatesCache(cacheKey, empty)
-		return empty
-	}
+	val, err, _ := dailyUpdateSfGroup.Do("homeDailyUpdatePool", func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var list []model.MovieBasicInfo
+				if json.Unmarshal([]byte(data), &list) == nil {
+					if list == nil {
+						return empty, nil
+					}
+					return list, nil
+				}
+			}
+		}
 
-	version := filmrepo.GetActiveReadModelVersion()
-	readModel := filmrepo.GetActiveFilmReadModel()
-	if version == "" || readModel == nil || readModel.Version != version {
+		from, to := notify.Rolling24hWindow(time.Now())
+		items, err := notify.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
+		if err != nil {
+			log.Printf("[IndexService] homeDailyUpdates load mids: %v", err)
+			return empty, nil
+		}
+		if len(items) == 0 {
+			storeHomeDailyUpdatesCache(cacheKey, empty)
+			return empty, nil
+		}
+
+		version := filmrepo.GetActiveReadModelVersion()
+		readModel := filmrepo.GetActiveFilmReadModel()
+		if version == "" || readModel == nil || readModel.Version != version {
+			return empty, nil
+		}
+		mids := make([]int64, 0, len(items))
+		for _, it := range items {
+			mids = append(mids, it.Mid)
+		}
+		snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+		list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+		if list == nil {
+			list = empty
+		}
+		storeHomeDailyUpdatesCache(cacheKey, list)
+		return list, nil
+	})
+
+	if err != nil || val == nil {
 		return empty
 	}
-	mids := make([]int64, 0, len(items))
-	for _, it := range items {
-		mids = append(mids, it.Mid)
+	resList, ok := val.([]model.MovieBasicInfo)
+	if !ok || len(resList) == 0 {
+		return empty
 	}
-	snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
-	list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
-	if list == nil {
-		list = empty
-	}
-	storeHomeDailyUpdatesCache(cacheKey, list)
-	applyLiveRemarksToMovies(list)
-	return list
+	out := make([]model.MovieBasicInfo, len(resList))
+	copy(out, resList)
+	applyLiveRemarksToMovies(out)
+	return out
 }
 
 func pickRandomMovieInfos(src []model.MovieBasicInfo, n int, exclude []int64) []model.MovieBasicInfo {

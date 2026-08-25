@@ -198,6 +198,31 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}
 	}
 
+	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
+	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+
+	// 1. 尝试从 Redis 读 Provide 缓存
+	cacheKey := fmt.Sprintf("EcoHub:provide:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+		version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var item searchCacheItem
+			if json.Unmarshal([]byte(data), &item) == nil {
+				page.Total = item.Total
+				page.PageCount = item.PageCount
+				log.Printf(
+					"[ProvideVod] 命中缓存 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
+					st.Pid, st.Cid, keyword, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
+				)
+				return item.Snapshots
+			}
+		}
+	}
+
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
 	if st.Pid > 0 {
 		query = query.Where("pid = ?", st.Pid)
@@ -237,6 +262,22 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}
 	}
 
+	// 2. 写入 Redis 缓存
+	if db.Rdb != nil {
+		item := searchCacheItem{
+			Total:     page.Total,
+			PageCount: page.PageCount,
+			Snapshots: snapshots,
+		}
+		if raw, err := json.Marshal(item); err == nil {
+			ttl := 3 * time.Minute
+			if len(snapshots) == 0 {
+				ttl = 1 * time.Minute // 空结果防穿透短缓存
+			}
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+		}
+	}
+
 	log.Printf(
 		"[ProvideVod] 筛选完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
 		st.Pid,
@@ -265,6 +306,13 @@ func SearchSnapshotsByKeywordReadModel(version string, keyword string, page *dto
 		version = GetActiveSnapshotVersion()
 	}
 	if version == "" || keyword == "" {
+		return []model.FilmListSnapshot{}
+	}
+
+	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
+	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+		page.Total = 0
+		page.PageCount = 1
 		return []model.FilmListSnapshot{}
 	}
 
@@ -303,14 +351,18 @@ func SearchSnapshotsByKeywordReadModel(version string, keyword string, page *dto
 		return []model.FilmListSnapshot{}
 	}
 
-	if db.Rdb != nil && len(snapshots) > 0 {
+	if db.Rdb != nil {
 		item := searchCacheItem{
 			Total:     page.Total,
 			PageCount: page.PageCount,
 			Snapshots: snapshots,
 		}
 		if raw, err := json.Marshal(item); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 3*time.Minute).Err()
+			ttl := 3 * time.Minute
+			if len(snapshots) == 0 {
+				ttl = 1 * time.Minute // 空结果防穿透短缓存
+			}
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
 		}
 	}
 
