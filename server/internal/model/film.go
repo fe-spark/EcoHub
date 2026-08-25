@@ -199,30 +199,30 @@ func (FilmIndex) TableName() string {
 // 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
 type FilmListSnapshot struct {
 	gorm.Model
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year"`
 	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
 	ContentKey      string `json:"contentKey" gorm:"size:128;index"`
 	SourceId        string `json:"sourceId" gorm:"index"`
 	DbId            int64  `json:"dbId" gorm:"index"`
 
-	Cid              int64  `json:"cid" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
-	Pid              int64  `json:"pid" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
-	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index;index:idx_snapshot_root_key_update;index:idx_snapshot_root_key_hits;index:idx_snapshot_filter_root_score;index:idx_snapshot_filter_root_update;index:idx_snapshot_filter_root_hits"`
-	CategoryKey      string `json:"categoryKey" gorm:"size:128;index;index:idx_snapshot_category_key_update;index:idx_snapshot_category_key_hits"`
+	Cid              int64  `json:"cid" gorm:"index;index:idx_snap_cid_update;index:idx_snap_cid_hits"`
+	Pid              int64  `json:"pid" gorm:"index;index:idx_snap_pid_update;index:idx_snap_pid_hits;index:idx_snap_pid_year"`
+	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index"`
+	CategoryKey      string `json:"categoryKey" gorm:"size:128;index"`
 	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"`
 	CName            string `json:"cName"`
 
 	SeriesKey       string  `json:"seriesKey" gorm:"size:128;index"`
-	Name            string  `json:"name"`
+	Name            string  `json:"name" gorm:"index:idx_snap_search_name"`
 	SubTitle        string  `json:"subTitle" gorm:"type:text"`
 	ClassTag        string  `json:"classTag" gorm:"type:text"`
-	Area            string  `json:"area" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
-	Language        string  `json:"language" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
-	Year            int64   `json:"year" gorm:"index;index:idx_snapshot_filter_score;index:idx_snapshot_filter_update;index:idx_snapshot_filter_hits"`
+	Area            string  `json:"area" gorm:"index"`
+	Language        string  `json:"language" gorm:"index"`
+	Year            int64   `json:"year" gorm:"index;index:idx_snap_pid_year"`
 	Initial         string  `json:"initial"`
-	Score           float64 `json:"score" gorm:"index;index:idx_snapshot_filter_score"`
-	UpdateStamp     int64   `json:"updateStamp" gorm:"index;index:idx_snapshot_pid_update;index:idx_snapshot_cid_update;index:idx_snapshot_filter_update"`
-	Hits            int64   `json:"hits" gorm:"index;index:idx_snapshot_pid_hits;index:idx_snapshot_cid_hits;index:idx_snapshot_filter_hits"`
+	Score           float64 `json:"score" gorm:"index"`
+	UpdateStamp     int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year"`
+	Hits            int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
 	State           string  `json:"state"`
 	Remarks         string  `json:"remarks"`
 	Picture         string  `json:"picture" gorm:"type:text"`

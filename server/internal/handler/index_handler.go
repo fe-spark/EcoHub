@@ -107,13 +107,58 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 近 24h 更新。不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次。
+// DailyUpdates 近 24h 更新。
+// 当传入 page 或 current 时按标准分页返回 { list: [...], page: {...} }；
+// 当仅传入 limit / exclude 时保持列表返回以兼容首页卡片轮换。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
+	pageParam := parseDailyUpdatePage(c)
+	limit := parseDailyUpdateLimit(c.Query("limit"))
+	exclude := parseDailyUpdateExclude(c.Query("exclude"))
+
+	data, page := service.IndexSvc.HomeDailyUpdates(limit, exclude, pageParam)
+	if page != nil {
+		dto.Success(gin.H{
+			"list": data,
+			"page": page,
+		}, "每日更新获取成功", c)
+		return
+	}
+
 	if data == nil {
 		data = make([]model.MovieBasicInfo, 0)
 	}
 	dto.Success(data, "每日更新获取成功", c)
+}
+
+func parseDailyUpdatePage(c *gin.Context) *dto.Page {
+	pageRaw := strings.TrimSpace(c.Query("page"))
+	if pageRaw == "" {
+		pageRaw = strings.TrimSpace(c.Query("current"))
+	}
+	sizeRaw := strings.TrimSpace(c.Query("pageSize"))
+	if sizeRaw == "" {
+		sizeRaw = strings.TrimSpace(c.Query("size"))
+	}
+
+	// 如果没有显式传分页参数，返回 nil 保持兼容首页卡片
+	if pageRaw == "" && sizeRaw == "" {
+		return nil
+	}
+
+	current, _ := strconv.Atoi(pageRaw)
+	if current <= 0 {
+		current = 1
+	}
+	pageSize, _ := strconv.Atoi(sizeRaw)
+	if pageSize <= 0 {
+		// 若传了 limit，优先作为 pageSize
+		if limit, _ := strconv.Atoi(c.Query("limit")); limit > 0 {
+			pageSize = limit
+		} else {
+			pageSize = 20
+		}
+	}
+	return &dto.Page{Current: current, PageSize: pageSize}
 }
 
 func parseDailyUpdateLimit(raw string) int {

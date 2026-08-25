@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"log"
+	"strings"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -125,6 +126,7 @@ func (s *InitService) TableInit() {
 		return
 	}
 	ensureMappingRuleIndexes()
+	ensureSnapshotPerformanceIndexes()
 
 	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 }
@@ -132,6 +134,24 @@ func (s *InitService) TableInit() {
 func ensureMappingRuleIndexes() {
 	if err := repository.EnsureMappingRuleIndexes(); err != nil {
 		syslog.Errorf("Ensure mapping rule indexes failed: %v", err)
+	}
+}
+
+func ensureSnapshotPerformanceIndexes() {
+	queries := []string{
+		"CREATE INDEX idx_snap_pid_update ON film_list_snapshot(snapshot_version, pid, update_stamp)",
+		"CREATE INDEX idx_snap_cid_update ON film_list_snapshot(snapshot_version, cid, update_stamp)",
+		"CREATE INDEX idx_snap_pid_hits ON film_list_snapshot(snapshot_version, pid, hits)",
+		"CREATE INDEX idx_snap_cid_hits ON film_list_snapshot(snapshot_version, cid, hits)",
+		"CREATE INDEX idx_snap_pid_year ON film_list_snapshot(snapshot_version, pid, year, update_stamp)",
+	}
+	for _, sql := range queries {
+		if err := db.Mdb.Exec(sql).Error; err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate key name") && !strings.Contains(msg, "already exists") {
+				syslog.Errorf("ensureSnapshotPerformanceIndexes failed: %v", err)
+			}
+		}
 	}
 }
 

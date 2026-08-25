@@ -51,12 +51,17 @@ func formatLiveRemark(last string, n int) string {
 	return "更新至" + last
 }
 
+// maxLiveRemarksBatchSize 单次分批查询详情与播放列表的大小，防止单次 SQL 携带过多参数和产生大内存占用
+const maxLiveRemarksBatchSize = 100
+
 // LiveUpdateRemarksByMIDs 按全库主站详情 + 附属站 playlist 最大集数生成展示用更新状态。
+// 内部采用分批流式查询，即使传入上千个 mid 也不会打爆单次内存。
 func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
 	out := make(map[int64]string, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return out
 	}
+
 	prog := make(map[int64]*liveProgress, len(mids))
 	ensure := func(mid int64) *liveProgress {
 		p := prog[mid]
@@ -67,58 +72,63 @@ func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
 		return p
 	}
 
-	var detailRows []model.MovieDetailInfo
-	if err := db.Mdb.Where("mid IN ?", mids).Find(&detailRows).Error; err != nil {
-		log.Printf("[Film] LiveUpdateRemarks 读详情失败: %v", err)
-	} else {
-		for _, row := range detailRows {
-			if row.Mid <= 0 || strings.TrimSpace(row.Content) == "" {
-				continue
-			}
-			var detail model.MovieDetail
-			if err := json.Unmarshal([]byte(row.Content), &detail); err != nil {
-				continue
-			}
-			p := ensure(row.Mid)
-			p.masterRemarks = strings.TrimSpace(detail.Remarks)
-			p.masterCount = maxEpisodeCount(extractEpisodeCountsFromDetail(detail))
-			for _, group := range detail.PlayList {
-				n := episodeCount(group)
-				if n > 0 {
-					p.note(n, lastEpisodeLabel(group))
-				}
-			}
-		}
-	}
+	for i := 0; i < len(mids); i += maxLiveRemarksBatchSize {
+		end := min(i+maxLiveRemarksBatchSize, len(mids))
+		batchMids := mids[i:end]
 
-	keysByMid := loadMovieMatchKeysByMidsTx(db.Mdb, mids)
-	allKeys := make([]string, 0)
-	keyToMid := make(map[string]int64)
-	for mid, keys := range keysByMid {
-		for _, k := range keys {
-			if k != "" {
-				allKeys = append(allKeys, k)
-				keyToMid[k] = mid
+		var detailRows []model.MovieDetailInfo
+		if err := db.Mdb.Select("mid, content").Where("mid IN ?", batchMids).Find(&detailRows).Error; err != nil {
+			log.Printf("[Film] LiveUpdateRemarks 读详情失败: %v", err)
+		} else {
+			for _, row := range detailRows {
+				if row.Mid <= 0 || strings.TrimSpace(row.Content) == "" {
+					continue
+				}
+				var detail model.MovieDetail
+				if err := json.Unmarshal([]byte(row.Content), &detail); err != nil {
+					continue
+				}
+				p := ensure(row.Mid)
+				p.masterRemarks = strings.TrimSpace(detail.Remarks)
+				p.masterCount = maxEpisodeCount(extractEpisodeCountsFromDetail(detail))
+				for _, group := range detail.PlayList {
+					n := episodeCount(group)
+					if n > 0 {
+						p.note(n, lastEpisodeLabel(group))
+					}
+				}
 			}
 		}
-	}
-	if len(allKeys) > 0 {
-		var playlistRows []model.MoviePlaylist
-		if err := db.Mdb.Where("movie_key IN ?", allKeys).Find(&playlistRows).Error; err != nil {
-			log.Printf("[Film] LiveUpdateRemarks 读 playlist 失败: %v", err)
-		} else {
-			for _, row := range playlistRows {
-				mid := keyToMid[row.MovieKey]
-				if mid <= 0 || strings.TrimSpace(row.Content) == "" {
-					continue
+
+		keysByMid := loadMovieMatchKeysByMidsTx(db.Mdb, batchMids)
+		allKeys := make([]string, 0)
+		keyToMid := make(map[string]int64)
+		for mid, keys := range keysByMid {
+			for _, k := range keys {
+				if k != "" {
+					allKeys = append(allKeys, k)
+					keyToMid[k] = mid
 				}
-				var links []model.MovieUrlInfo
-				if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
-					continue
-				}
-				n := episodeCount(links)
-				if n > 0 {
-					ensure(mid).note(n, lastEpisodeLabel(links))
+			}
+		}
+		if len(allKeys) > 0 {
+			var playlistRows []model.MoviePlaylist
+			if err := db.Mdb.Select("movie_key, content").Where("movie_key IN ?", allKeys).Find(&playlistRows).Error; err != nil {
+				log.Printf("[Film] LiveUpdateRemarks 读 playlist 失败: %v", err)
+			} else {
+				for _, row := range playlistRows {
+					mid := keyToMid[row.MovieKey]
+					if mid <= 0 || strings.TrimSpace(row.Content) == "" {
+						continue
+					}
+					var links []model.MovieUrlInfo
+					if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
+						continue
+					}
+					n := episodeCount(links)
+					if n > 0 {
+						ensure(mid).note(n, lastEpisodeLabel(links))
+					}
 				}
 			}
 		}
