@@ -144,7 +144,7 @@ func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
 		w := c.Writer
 		flusher, ok := w.(http.Flusher)
 
-		err := service.IndexSvc.StreamDailyUpdates(batchSize, func(batch []model.MovieBasicInfo, currentBatch int, totalCount int) error {
+		err := service.IndexSvc.StreamDailyUpdates(c.Request.Context(), batchSize, func(batch []model.MovieBasicInfo, currentBatch int, totalCount int) error {
 			chunk := gin.H{
 				"batch": currentBatch,
 				"total": totalCount,

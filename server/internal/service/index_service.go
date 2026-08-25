@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -218,12 +219,20 @@ func (i *IndexService) DailyUpdatesPaged(req DailyUpdateListReq) ([]model.MovieB
 	return list, page, nil
 }
 
-// StreamDailyUpdates 流式分批查询近24h每日更新，通过回调 chunkFn 逐批发送数据，避免大批量时在内存积压
-func (i *IndexService) StreamDailyUpdates(batchSize int, chunkFn func(batch []model.MovieBasicInfo, currentBatch int, totalCount int) error) error {
+// StreamDailyUpdates 流式分批查询近24h每日更新，通过回调 chunkFn 逐批发送数据，避免大批量时在内存积压。
+// 接收 ctx 参数，在客户端断开或请求超时时能及时中止后续批次查询。
+func (i *IndexService) StreamDailyUpdates(ctx context.Context, batchSize int, chunkFn func(batch []model.MovieBasicInfo, currentBatch int, totalCount int) error) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if batchSize <= 0 {
 		batchSize = 50
 	} else if batchSize > 200 {
 		batchSize = 200
+	}
+
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 
 	from, to := notify.Rolling24hWindow(time.Now())
@@ -251,6 +260,9 @@ func (i *IndexService) StreamDailyUpdates(batchSize int, chunkFn func(batch []mo
 
 	pageCount := (total + batchSize - 1) / batchSize
 	for p := 2; p <= pageCount; p++ {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		items, _, err := notify.LoadChangeMidsBetweenPaged(from, to, p, batchSize)
 		if err != nil {
 			return err
