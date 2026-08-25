@@ -7,29 +7,6 @@ import (
 	"server/internal/model"
 )
 
-func loadSearchTagItemsByTypeFromReadModel(version string, pid int64) map[string][]model.SearchTagItem {
-	itemsByType := make(map[string][]model.SearchTagItem)
-	readModel := GetActiveFilmReadModel()
-	if readModel == nil || readModel.Version != version || pid <= 0 {
-		return itemsByType
-	}
-	return searchTagItemsByTypeFromSnapshots(readModel.projectedSnapshotsByPid(pid))
-}
-
-func loadSearchTagItemsByTypeFromProjectedReadModel(pid int64, projected *ProjectedFilmReadModel) map[string][]model.SearchTagItem {
-	itemsByType := make(map[string][]model.SearchTagItem)
-	if projected == nil || pid <= 0 {
-		return itemsByType
-	}
-	snapshots := make([]model.FilmListSnapshot, 0, len(projected.ByPid[pid]))
-	for _, mid := range projected.ByPid[pid] {
-		if snapshot, ok := projected.ByMid[mid]; ok {
-			snapshots = append(snapshots, snapshot)
-		}
-	}
-	return searchTagItemsByTypeFromSnapshots(snapshots)
-}
-
 func searchTagItemsByTypeFromSnapshots(snapshots []model.FilmListSnapshot) map[string][]model.SearchTagItem {
 	areaCounts := make(map[string]int64)
 	languageCounts := make(map[string]int64)
