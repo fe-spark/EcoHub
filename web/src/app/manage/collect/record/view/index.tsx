@@ -215,8 +215,9 @@ export default function FailureRecordPageView() {
       align: "center",
       render: (v) => {
         const retryCount = v || 1;
+        const displayCount = Math.min(retryCount, RECOVER_MAX_RETRY_COUNT);
         const color = retryCount >= RECOVER_MAX_RETRY_COUNT ? "error" : retryCount > 1 ? "warning" : "default";
-        return <Tag color={color}>{retryCount}/{RECOVER_MAX_RETRY_COUNT}</Tag>;
+        return <Tag color={color}>{displayCount}/{RECOVER_MAX_RETRY_COUNT}</Tag>;
       },
     },
     {

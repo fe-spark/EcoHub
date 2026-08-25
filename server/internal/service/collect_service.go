@@ -125,6 +125,14 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 			}
 		}
 
+		// 接口地址变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
+		if isUriChanged {
+			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
+				syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
+				return errors.New("清理原失败记录失败，请重试")
+			}
+		}
+
 		return repository.UpdateCollectSourceTx(tx, source)
 	})
 	if err != nil {

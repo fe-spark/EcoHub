@@ -52,6 +52,8 @@ func (s *InitService) DefaultDataInit() {
 	}
 	// 一次性清理历史采集同步图库（素材中心仅保留用户上传）
 	repository.PurgeSyncedGallery()
+	// 纠正历史超出上限的失败记录重试次数与状态
+	repository.NormalizeFailureRecordsRetryCount()
 
 	// 网站基本信息初始化（首页轮播已移入内容管理）
 	s.SiteWebConfigInit()
