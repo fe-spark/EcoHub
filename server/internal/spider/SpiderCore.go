@@ -48,8 +48,12 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 	// 解析resp数据
 	filmListPage := model.FilmListPage{}
 	if len(r.Resp) <= 0 {
-		log.Println("filmListPage 数据获取异常 : Resp Is Empty")
-		return nil, errors.New("filmListPage 数据获取异常 : Resp Is Empty")
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		log.Printf("filmListPage 数据获取异常: %s", errMsg)
+		return nil, fmt.Errorf("filmListPage 数据获取异常: %s", errMsg)
 	}
 	if err := json.Unmarshal(r.Resp, &filmListPage); err != nil {
 		return nil, fmt.Errorf("filmListPage JSON unmarshal error: %w", err)
@@ -193,7 +197,11 @@ func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) 
 	utils.ApiGet(&r)
 	//  判断请求结果是否为空, 如果为空直接输出错误并终止
 	if len(r.Resp) <= 0 {
-		err = errors.New("response is empty")
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		err = errors.New(errMsg)
 		return
 	}
 	// 获取pageCount
@@ -222,7 +230,11 @@ func (jc *JsonCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDet
 	// details := repository.DetailListInfo{}
 	// 如果返回数据为空则直接结束本次循环
 	if len(r.Resp) <= 0 {
-		err = errors.New(r.Err)
+		errMsg := r.Err
+		if errMsg == "" {
+			errMsg = "response is empty"
+		}
+		err = errors.New(errMsg)
 		return
 	}
 	// 序列化详情数据

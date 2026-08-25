@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	relatedSnapshotMinScore = 24
-	relatedCacheTTL         = 1 * time.Hour
-	maxRelatedRecommendCount = 28 // 相关推荐全局最大保留数量（前端展示通常为 14 条）
+	relatedSnapshotMinScore    = 24
+	relatedCacheTTL            = 1 * time.Hour
+	maxRelatedRecommendCount   = 28 // 相关推荐全局最大保留数量（前端展示通常为 14 条）
+	relatedFunnelMinCandidates = 35 // 候选集召回最低打底阈值
+	relatedSnapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, sub_title, series_key, director, actor, score, hits, update_stamp, remarks, state, picture, picture_slide, blurb, year, class_tag, area, language, play_from_summary"
 )
 
 type relatedCacheItem struct {
@@ -125,7 +127,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	// 候选 1：同系列优先（精确匹配）
 	if current.SeriesKey != "" {
 		var seriesRows []model.FilmListSnapshot
-		db.Mdb.Where("snapshot_version = ? AND series_key = ? AND mid != ?", version, current.SeriesKey, current.Mid).
+		db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND series_key = ? AND mid != ?", version, current.SeriesKey, current.Mid).
 			Order("update_stamp DESC, id DESC").Limit(15).Find(&seriesRows)
 		appendUnique(seriesRows)
 	}
@@ -134,25 +136,26 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	coreToken := extractCoreSearchToken(current.Name)
 	if coreToken != "" && len(list) < maxCandidates {
 		var titleRows []model.FilmListSnapshot
-		like := "%" + coreToken + "%"
-		db.Mdb.Where("snapshot_version = ? AND (name LIKE ? OR sub_title LIKE ?) AND mid != ?", version, like, like, current.Mid).
+		like := "%" + escapeLikePattern(coreToken) + "%"
+		db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND (name LIKE ? OR sub_title LIKE ?) AND mid != ?", version, like, like, current.Mid).
 			Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
 		appendUnique(titleRows)
 	}
 
-	// 候选 3：同细分类 (Cid) 候选
-	if current.Cid > 0 && len(list) < maxCandidates {
+	// 候选 3：同细分类 (Cid) 候选（早退阈值保证打分漏斗充足）
+	funnelThreshold := min(maxCandidates, relatedFunnelMinCandidates)
+	if current.Cid > 0 && len(list) < funnelThreshold {
 		var cidRows []model.FilmListSnapshot
-		db.Mdb.Where("snapshot_version = ? AND cid = ? AND mid != ?", version, current.Cid, current.Mid).
+		db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND cid = ? AND mid != ?", version, current.Cid, current.Mid).
 			Order("update_stamp DESC, id DESC").Limit(20).Find(&cidRows)
 		appendUnique(cidRows)
 	}
 
-	// 候选 4：主要标签匹配
+	// 候选 4：主要标签匹配（当候选集不足时触发标签扫描）
 	tags := splitClassTags(current.ClassTag)
-	if len(tags) > 0 && len(list) < maxCandidates {
+	if len(tags) > 0 && len(list) < funnelThreshold {
 		var tagRows []model.FilmListSnapshot
-		db.Mdb.Where("snapshot_version = ? AND pid = ? AND class_tag LIKE ? AND mid != ?", version, current.Pid, "%"+tags[0]+"%", current.Mid).
+		db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND pid = ? AND class_tag LIKE ? AND mid != ?", version, current.Pid, "%"+escapeLikePattern(tags[0])+"%", current.Mid).
 			Order("update_stamp DESC, id DESC").Limit(15).Find(&tagRows)
 		appendUnique(tagRows)
 	}
@@ -172,7 +175,7 @@ func appendCategoryFallbacks(version string, current model.FilmListSnapshot, sna
 		return snapshots
 	}
 
-	query := db.Mdb.Where("snapshot_version = ? AND mid != ?", version, current.Mid)
+	query := db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND mid != ?", version, current.Mid)
 	if current.Cid > 0 {
 		query = query.Where("cid = ?", current.Cid)
 	} else if current.Pid > 0 {
