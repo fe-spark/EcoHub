@@ -27,6 +27,7 @@ import {
   type TipChannelKey,
   type TipConfig,
 } from "@/lib/tip";
+import { type NoticeConfig } from "@/lib/notice";
 import styles from "./tip-config-card.module.less";
 
 export interface SiteBasicPayload {
@@ -38,6 +39,7 @@ export interface SiteBasicPayload {
   describe: string;
   hint: string;
   tip: TipConfig;
+  notice?: NoticeConfig;
 }
 
 interface TipConfigCardProps {

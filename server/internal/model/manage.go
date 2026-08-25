@@ -53,9 +53,10 @@ type BasicConfig struct {
 	Logo     string    `json:"logo"`     // 网站logo
 	Keyword  string    `json:"keyword"`  // seo关键字
 	Describe string    `json:"describe"` // 网站描述信息
-	State    bool      `json:"state"`    // 网站状态 开启 || 关闭
-	Hint     string    `json:"hint"`     // 网站关闭提示
-	Tip      TipConfig `json:"tip"`      // 前台赞赏
+	State    bool         `json:"state"`    // 网站状态 开启 || 关闭
+	Hint     string       `json:"hint"`     // 网站关闭提示
+	Tip      TipConfig    `json:"tip"`      // 前台赞赏
+	Notice   NoticeConfig `json:"notice"`   // 开屏公告
 }
 
 // Banner 首页横幅信息
@@ -87,14 +88,15 @@ func (bl Banners) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }
 // SiteConfigRecord 网站基础配置持久化 (MySQL单行表)
 type SiteConfigRecord struct {
 	gorm.Model
-	SiteName string `gorm:"size:128"`
-	SiteURL  string `gorm:"size:512;column:site_url"` // 网站访问地址
-	Logo     string `gorm:"size:512"`
-	Keyword  string `gorm:"size:256"`
-	Describe string `gorm:"size:512"`
-	State    bool
-	Hint     string `gorm:"size:512"`
-	TipJSON  string `gorm:"type:text;column:tip_json"` // TipConfig JSON
+	SiteName   string `gorm:"size:128"`
+	SiteURL    string `gorm:"size:512;column:site_url"` // 网站访问地址
+	Logo       string `gorm:"size:512"`
+	Keyword    string `gorm:"size:256"`
+	Describe   string `gorm:"size:512"`
+	State      bool
+	Hint       string `gorm:"size:512"`
+	TipJSON    string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
+	NoticeJSON string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
 }
 
 // MappingRule 定义从采集源到标准系统的转换规则 (地区/语言/标签黑名单)
