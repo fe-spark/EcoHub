@@ -21,6 +21,8 @@ type FilmReadModel struct {
 
 type filmSearchMemoryItem struct {
 	Mid         int64
+	Pid         int64
+	Cid         int64
 	Name        string
 	LowerName   string
 	Year        int64
@@ -67,12 +69,14 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 
 	var rows []struct {
 		Mid         int64
+		Pid         int64
+		Cid         int64
 		Name        string
 		Year        int64
 		UpdateStamp int64
 	}
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
-		Select("mid, name, year, update_stamp").
+		Select("mid, pid, cid, name, year, update_stamp").
 		Where("snapshot_version = ?", version).
 		Order("year DESC, update_stamp DESC, id DESC").
 		Scan(&rows).Error; err != nil {
@@ -85,6 +89,8 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 		if r.Mid > 0 && r.Name != "" {
 			items = append(items, filmSearchMemoryItem{
 				Mid:         r.Mid,
+				Pid:         r.Pid,
+				Cid:         r.Cid,
 				Name:        r.Name,
 				LowerName:   strings.ToLower(r.Name),
 				Year:        r.Year,
@@ -300,6 +306,67 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 	}
 
+	// 2. 若带有搜索关键词且无时间限制，优先走内存搜索索引（1~2ms 极速响应）
+	if keyword != "" && recentHours == 0 {
+		idx := getOrLoadFilmSearchMemoryIndex(version)
+		if idx != nil && len(idx.Items) > 0 {
+			lowerKey := strings.ToLower(keyword)
+			var matchedMids []int64
+			for _, item := range idx.Items {
+				if st.Pid > 0 && item.Pid != st.Pid {
+					continue
+				}
+				if st.Cid > 0 && item.Cid != st.Cid {
+					continue
+				}
+				if strings.Contains(item.LowerName, lowerKey) {
+					matchedMids = append(matchedMids, item.Mid)
+				}
+			}
+
+			page.Total = len(matchedMids)
+			page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+			if page.PageCount <= 0 {
+				page.PageCount = 1
+			}
+
+			var snapshots []model.FilmListSnapshot
+			offset := getPageOffset(page)
+			if offset < len(matchedMids) {
+				end := offset + page.PageSize
+				if end > len(matchedMids) {
+					end = len(matchedMids)
+				}
+				pageMids := matchedMids[offset:end]
+				snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+			}
+			if snapshots == nil {
+				snapshots = []model.FilmListSnapshot{}
+			}
+
+			if db.Rdb != nil {
+				item := searchCacheItem{
+					Total:     page.Total,
+					PageCount: page.PageCount,
+					Snapshots: snapshots,
+				}
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute // 空结果防穿透短缓存
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				}
+			}
+
+			log.Printf(
+				"[ProvideVod] 内存搜索完成 pid=%d cid=%d keyword=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
+				st.Pid, st.Cid, keyword, page.Total, page.Current, len(snapshots), time.Since(startedAt),
+			)
+			return snapshots
+		}
+	}
+
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
 	if st.Pid > 0 {
 		query = query.Where("pid = ?", st.Pid)
@@ -309,7 +376,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 	if keyword != "" {
 		like := "%" + escapeLikePattern(keyword) + "%"
-		query = query.Where("name LIKE ? OR sub_title LIKE ?", like, like)
+		query = query.Where("name LIKE ?", like)
 	}
 	if recentHours > 0 {
 		timeLimit := time.Now().Add(-time.Duration(recentHours) * time.Hour).Unix()
@@ -339,7 +406,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}
 	}
 
-	// 2. 写入 Redis 缓存
+	// 3. 写入 Redis 缓存
 	if db.Rdb != nil {
 		item := searchCacheItem{
 			Total:     page.Total,
@@ -507,7 +574,7 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	query := db.Mdb.Model(&model.FilmIndex{}).Where("deleted_at IS NULL")
 	if name := strings.TrimSpace(s.Name); name != "" {
 		like := "%" + escapeLikePattern(name) + "%"
-		query = query.Where("name LIKE ? OR sub_title LIKE ?", like, like)
+		query = query.Where("name LIKE ?", like)
 	}
 	if s.Pid > 0 {
 		query = query.Where("pid = ?", s.Pid)

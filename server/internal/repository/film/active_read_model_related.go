@@ -132,14 +132,35 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		appendUnique(seriesRows)
 	}
 
-	// 候选 2：核心片名匹配
+	// 候选 2：核心片名匹配（优先内存索引快速召回）
 	coreToken := extractCoreSearchToken(current.Name)
 	if coreToken != "" && len(list) < maxCandidates {
-		var titleRows []model.FilmListSnapshot
-		like := "%" + escapeLikePattern(coreToken) + "%"
-		db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND (name LIKE ? OR sub_title LIKE ?) AND mid != ?", version, like, like, current.Mid).
-			Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
-		appendUnique(titleRows)
+		idx := getOrLoadFilmSearchMemoryIndex(version)
+		if idx != nil && len(idx.Items) > 0 {
+			lowerKey := strings.ToLower(coreToken)
+			var matchedMids []int64
+			for _, item := range idx.Items {
+				if item.Mid == current.Mid {
+					continue
+				}
+				if strings.Contains(item.LowerName, lowerKey) {
+					matchedMids = append(matchedMids, item.Mid)
+					if len(matchedMids) >= 20 {
+						break
+					}
+				}
+			}
+			if len(matchedMids) > 0 {
+				titleRows := GetProjectedSnapshotsByMidsOrdered(version, matchedMids)
+				appendUnique(titleRows)
+			}
+		} else {
+			var titleRows []model.FilmListSnapshot
+			like := "%" + escapeLikePattern(coreToken) + "%"
+			db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND name LIKE ? AND mid != ?", version, like, current.Mid).
+				Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
+			appendUnique(titleRows)
+		}
 	}
 
 	// 候选 3：同细分类 (Cid) 候选（早退阈值保证打分漏斗充足）

@@ -415,12 +415,50 @@ func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, erro
 	if to.Before(from) {
 		return nil, nil
 	}
+
+	// 首页或小条数场景：直接走 (created_at, mid) 联合索引倒序流式提取，耗时 < 1ms，消除 MySQL 临时表与全量排序
+	if limit > 0 && limit <= 500 {
+		var rows []struct {
+			Mid        int64
+			SourceName string
+		}
+		scanLimit := limit * 3
+		if scanLimit < 300 {
+			scanLimit = 300
+		}
+		err := db.Mdb.Table(model.TableNotifyChangeMid).
+			Select("mid, source_name").
+			Where("created_at >= ? AND created_at <= ?", from, to).
+			Order("created_at DESC, mid DESC").
+			Limit(scanLimit).
+			Scan(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+
+		seen := make(map[int64]struct{}, limit)
+		out := make([]ChangeMidItem, 0, limit)
+		for _, r := range rows {
+			if r.Mid <= 0 {
+				continue
+			}
+			if _, ok := seen[r.Mid]; ok {
+				continue
+			}
+			seen[r.Mid] = struct{}{}
+			out = append(out, ChangeMidItem{Mid: r.Mid, SourceName: strings.TrimSpace(r.SourceName)})
+			if len(out) >= limit {
+				break
+			}
+		}
+		return out, nil
+	}
+
 	type row struct {
 		Mid        int64
 		SourceName string
 	}
 	var rows []row
-	// 单表直接按 created_at 范围查询，命中 created_at 索引，按最新变更时间倒序
 	q := db.Mdb.Table(model.TableNotifyChangeMid).
 		Select("mid, GROUP_CONCAT(DISTINCT NULLIF(TRIM(source_name), '') ORDER BY source_name SEPARATOR ', ') AS source_name, MAX(created_at) AS latest_time").
 		Where("created_at >= ? AND created_at <= ?", from, to).
