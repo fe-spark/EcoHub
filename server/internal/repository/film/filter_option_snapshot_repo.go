@@ -222,6 +222,20 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 		return res
 	}
 
+	// 兜底保护：如果 DB 中该版本筛选快照不存在，尝试按需懒加载重建
+	if err := RebuildFilterOptionSnapshot(version); err == nil {
+		var retryRows []model.FilmFilterOptionSnapshot
+		if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).Order("sort ASC, id ASC").Find(&retryRows).Error; err == nil && len(retryRows) > 0 {
+			res := buildFilterOptionResponse(retryRows)
+			if db.Rdb != nil {
+				if raw, err := json.Marshal(res); err == nil {
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
+				}
+			}
+			return res
+		}
+	}
+
 	return emptyFilterOptionResponse()
 }
 
