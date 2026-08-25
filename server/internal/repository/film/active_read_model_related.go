@@ -1,25 +1,62 @@
 package film
 
 import (
+	"encoding/json"
+	"fmt"
+	"log"
 	"sort"
 	"strings"
+	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 )
 
+const (
+	relatedSnapshotMinScore = 24
+	relatedCacheTTL         = 1 * time.Hour
+	maxRelatedRecommendCount = 28 // 相关推荐全局最大保留数量（前端展示通常为 14 条）
+)
+
+type relatedCacheItem struct {
+	Total     int                     `json:"total"`
+	PageCount int                     `json:"page_count"`
+	Snapshots []model.FilmListSnapshot `json:"snapshots"`
+}
+
 func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
+	startedAt := time.Now()
 	page = ensurePage(page)
-	readModel := requireActiveFilmReadModel(version)
-	projectedSnapshot, ok := readModel.projectedSnapshotByMID(snapshot.Mid)
-	if !ok {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || snapshot.Mid <= 0 {
 		return []model.FilmListSnapshot{}
 	}
-	snapshot = projectedSnapshot
 
-	candidates := make([]relatedSnapshotScore, 0)
+	// 1. 尝试从 Redis 缓存获取相关推荐
+	cacheKey := fmt.Sprintf("EcoHub:relate:v%s:%d:p%d:s%d", version, snapshot.Mid, page.Current, page.PageSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var item relatedCacheItem
+			if json.Unmarshal([]byte(data), &item) == nil {
+				page.Total = item.Total
+				page.PageCount = item.PageCount
+				log.Printf("[FilmRelate] 相关推荐命中缓存 mid=%d name=%q cache=HIT total=%d page=%d size=%d cost=%s",
+					snapshot.Mid, snapshot.Name, item.Total, page.Current, len(item.Snapshots), time.Since(startedAt))
+				return item.Snapshots
+			}
+		}
+	}
+
+	// 2. 漏斗召回最相关的候选集（最多 50 个候选）
+	candidates := loadRelatedSnapshotCandidates(version, snapshot, 50)
 	context := buildRelatedSnapshotContext(snapshot)
-	for _, candidate := range readModel.projectedSnapshotsByPid(snapshot.Pid) {
+
+	scoredList := make([]relatedSnapshotScore, 0, len(candidates))
+	for _, candidate := range candidates {
 		if candidate.Mid == snapshot.Mid {
 			continue
 		}
@@ -27,22 +64,135 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 		if score < relatedSnapshotMinScore {
 			continue
 		}
-		candidates = append(candidates, relatedSnapshotScore{snapshot: candidate, score: score})
+		scoredList = append(scoredList, relatedSnapshotScore{snapshot: candidate, score: score})
 	}
-	sortRelatedSnapshots(candidates)
-	snapshots := relatedScoresToSnapshots(candidates)
-	if len(snapshots) < pageEnd(page) {
-		snapshots = appendTopScoredCategoryFallbacks(readModel, snapshot, snapshots)
+	sortRelatedSnapshots(scoredList)
+	snapshots := relatedScoresToSnapshots(scoredList)
+
+	// 限制最高相关度结果数量
+	if len(snapshots) > maxRelatedRecommendCount {
+		snapshots = snapshots[:maxRelatedRecommendCount]
 	}
+
+	// 3. 兜底补齐（若相关推荐不足 maxRelatedRecommendCount 条，补齐到 maxRelatedRecommendCount）
+	if len(snapshots) < maxRelatedRecommendCount {
+		snapshots = appendCategoryFallbacks(version, snapshot, snapshots, maxRelatedRecommendCount)
+	}
+
 	page.Total = len(snapshots)
 	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
 	if page.PageCount <= 0 {
 		page.PageCount = 1
 	}
-	return pageSnapshots(snapshots, page)
+
+	result := pageSnapshots(snapshots, page)
+
+	// 4. 写入 Redis 缓存
+	if db.Rdb != nil && len(result) > 0 {
+		cachePayload := relatedCacheItem{
+			Total:     page.Total,
+			PageCount: page.PageCount,
+			Snapshots: result,
+		}
+		if raw, err := json.Marshal(cachePayload); err == nil {
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), relatedCacheTTL).Err()
+		}
+	}
+
+	log.Printf("[FilmRelate] 相关推荐计算完成 mid=%d name=%q cache=MISS candidates=%d scored=%d total=%d page=%d size=%d cost=%s",
+		snapshot.Mid, snapshot.Name, len(candidates), len(scoredList), page.Total, page.Current, len(result), time.Since(startedAt))
+	return result
 }
 
-const relatedSnapshotMinScore = 24
+func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapshot, maxCandidates int) []model.FilmListSnapshot {
+	seen := make(map[int64]struct{}, maxCandidates)
+	seen[current.Mid] = struct{}{}
+	list := make([]model.FilmListSnapshot, 0, maxCandidates)
+
+	appendUnique := func(src []model.FilmListSnapshot) {
+		for _, item := range src {
+			if _, ok := seen[item.Mid]; ok {
+				continue
+			}
+			seen[item.Mid] = struct{}{}
+			list = append(list, item)
+			if len(list) >= maxCandidates {
+				break
+			}
+		}
+	}
+
+	// 候选 1：同系列优先（精确匹配）
+	if current.SeriesKey != "" {
+		var seriesRows []model.FilmListSnapshot
+		db.Mdb.Where("snapshot_version = ? AND series_key = ? AND mid != ?", version, current.SeriesKey, current.Mid).
+			Order("update_stamp DESC, id DESC").Limit(15).Find(&seriesRows)
+		appendUnique(seriesRows)
+	}
+
+	// 候选 2：核心片名匹配
+	coreToken := extractCoreSearchToken(current.Name)
+	if coreToken != "" && len(list) < maxCandidates {
+		var titleRows []model.FilmListSnapshot
+		like := "%" + coreToken + "%"
+		db.Mdb.Where("snapshot_version = ? AND (name LIKE ? OR sub_title LIKE ?) AND mid != ?", version, like, like, current.Mid).
+			Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
+		appendUnique(titleRows)
+	}
+
+	// 候选 3：同细分类 (Cid) 候选
+	if current.Cid > 0 && len(list) < maxCandidates {
+		var cidRows []model.FilmListSnapshot
+		db.Mdb.Where("snapshot_version = ? AND cid = ? AND mid != ?", version, current.Cid, current.Mid).
+			Order("update_stamp DESC, id DESC").Limit(20).Find(&cidRows)
+		appendUnique(cidRows)
+	}
+
+	// 候选 4：主要标签匹配
+	tags := splitClassTags(current.ClassTag)
+	if len(tags) > 0 && len(list) < maxCandidates {
+		var tagRows []model.FilmListSnapshot
+		db.Mdb.Where("snapshot_version = ? AND pid = ? AND class_tag LIKE ? AND mid != ?", version, current.Pid, "%"+tags[0]+"%", current.Mid).
+			Order("update_stamp DESC, id DESC").Limit(15).Find(&tagRows)
+		appendUnique(tagRows)
+	}
+
+	return list
+}
+
+func appendCategoryFallbacks(version string, current model.FilmListSnapshot, snapshots []model.FilmListSnapshot, targetCount int) []model.FilmListSnapshot {
+	seen := make(map[int64]struct{}, len(snapshots)+1)
+	seen[current.Mid] = struct{}{}
+	for _, snap := range snapshots {
+		seen[snap.Mid] = struct{}{}
+	}
+
+	needed := targetCount - len(snapshots)
+	if needed <= 0 {
+		return snapshots
+	}
+
+	query := db.Mdb.Where("snapshot_version = ? AND mid != ?", version, current.Mid)
+	if current.Cid > 0 {
+		query = query.Where("cid = ?", current.Cid)
+	} else if current.Pid > 0 {
+		query = query.Where("pid = ?", current.Pid)
+	}
+
+	var fallbackRows []model.FilmListSnapshot
+	query.Order("hits DESC, score DESC, update_stamp DESC, id DESC").Limit(needed * 2).Find(&fallbackRows)
+	for _, row := range fallbackRows {
+		if _, ok := seen[row.Mid]; ok {
+			continue
+		}
+		seen[row.Mid] = struct{}{}
+		snapshots = append(snapshots, row)
+		if len(snapshots) >= targetCount {
+			break
+		}
+	}
+	return snapshots
+}
 
 type relatedSnapshotScore struct {
 	snapshot model.FilmListSnapshot
@@ -223,39 +373,3 @@ func relatedScoresToSnapshots(scores []relatedSnapshotScore) []model.FilmListSna
 	return snapshots
 }
 
-func appendTopScoredCategoryFallbacks(readModel *FilmReadModel, current model.FilmListSnapshot, snapshots []model.FilmListSnapshot) []model.FilmListSnapshot {
-	seen := make(map[int64]struct{}, len(snapshots)+1)
-	seen[current.Mid] = struct{}{}
-	for _, snapshot := range snapshots {
-		seen[snapshot.Mid] = struct{}{}
-	}
-	fallbacks := make([]model.FilmListSnapshot, 0)
-	for _, candidate := range readModel.projectedSnapshotsByPid(current.Pid) {
-		if _, ok := seen[candidate.Mid]; ok {
-			continue
-		}
-		if current.Cid > 0 && candidate.Cid != current.Cid {
-			continue
-		}
-		fallbacks = append(fallbacks, candidate)
-	}
-	sortTopScoredFallbackSnapshots(fallbacks)
-	return append(snapshots, fallbacks...)
-}
-
-func sortTopScoredFallbackSnapshots(snapshots []model.FilmListSnapshot) {
-	sort.SliceStable(snapshots, func(i, j int) bool {
-		left := snapshots[i]
-		right := snapshots[j]
-		if left.Score != right.Score {
-			return left.Score > right.Score
-		}
-		if left.Hits != right.Hits {
-			return left.Hits > right.Hits
-		}
-		if left.UpdateStamp != right.UpdateStamp {
-			return left.UpdateStamp > right.UpdateStamp
-		}
-		return left.Mid > right.Mid
-	})
-}

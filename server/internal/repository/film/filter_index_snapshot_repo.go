@@ -46,7 +46,6 @@ func RebuildFilterIndexSnapshot(version string) error {
 
 			indexes := make([]model.FilmFilterIndexSnapshot, 0, len(snapshots)*6)
 			for _, snapshot := range snapshots {
-				snapshot = projectSnapshotCategory(snapshot)
 				indexes = append(indexes, buildFilterIndexRows(version, snapshot)...)
 				lastID = snapshot.ID
 			}
@@ -134,7 +133,6 @@ func ReplaceFilterIndexSnapshotsTx(tx *gorm.DB, version string, snapshots []mode
 	}
 	rows := make([]model.FilmFilterIndexSnapshot, 0, len(snapshots)*6)
 	for _, snapshot := range snapshots {
-		snapshot = projectSnapshotCategory(snapshot)
 		rows = append(rows, buildFilterIndexRows(version, snapshot)...)
 	}
 	if len(rows) == 0 {
