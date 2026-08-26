@@ -553,24 +553,12 @@ func FindRecordById(id uint) *model.FailureRecord {
 func PendingRecord() []model.FailureRecord {
 	var list []model.FailureRecord
 	if err := db.Mdb.
-		Where("(hour > 4320 OR hour < 0) AND status = ?", model.FailureRecordStatusPending).
+		Where("status = ?", model.FailureRecordStatusPending).
 		Order("created_at ASC, id ASC").
 		Find(&list).Error; err != nil {
 		log.Println("Query pending failure records failed:", err)
 		return nil
 	}
-
-	var fr model.FailureRecord
-	if err := db.Mdb.
-		Where("hour > 0 AND hour < 4320 AND status = ?", model.FailureRecordStatusPending).
-		Order("hour DESC, created_at ASC, id ASC").
-		First(&fr).Error; err == nil {
-		list = append(list, fr)
-	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
-		log.Println("Query incremental failure record failed:", err)
-		return nil
-	}
-
 	return list
 }
 
@@ -613,6 +601,16 @@ func UpdateFailureRecordStatusByID(id uint, status int) error {
 		return errors.New("failure record not found")
 	}
 	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
+}
+
+// DeleteFailureRecord 按记录 ID 删除单个失败记录。
+func DeleteFailureRecord(fr *model.FailureRecord) {
+	if fr == nil || fr.ID == 0 {
+		return
+	}
+	if err := db.Mdb.Delete(&model.FailureRecord{}, fr.ID).Error; err != nil {
+		log.Printf("[Spider] 删除重试成功记录失败 id=%d: %v\n", fr.ID, err)
+	}
 }
 
 // DeleteRetriedRecords 删除已有重试结果的记录信息 -- 逻辑删除。
