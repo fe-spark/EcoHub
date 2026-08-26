@@ -137,10 +137,26 @@ export function getRecordColumns({
       fixed: "right",
       width: 80,
       render: (_, record) => {
+        const isQueued = queuedRetryIds.has(record.ID);
         const isSuccess = record.status === FAILURE_RECORD_STATUS.success;
         const isFinalFailed = record.status === FAILURE_RECORD_STATUS.failed;
-        const isQueued = queuedRetryIds.has(record.ID);
 
+        // 1. 处于重试中时，严格禁用操作按钮并展示 Loading
+        if (isQueued) {
+          return (
+            <Tooltip title="重试任务执行中，请稍候...">
+              <Button
+                shape="circle"
+                size="small"
+                loading
+                disabled
+                icon={<ReloadOutlined />}
+              />
+            </Tooltip>
+          );
+        }
+
+        // 2. 重试成功
         if (isSuccess) {
           return (
             <Tooltip title="已重试成功，无需重复重试">
@@ -149,14 +165,14 @@ export function getRecordColumns({
           );
         }
 
+        // 3. 最终失败（支持人工强行再次重试）
         if (isFinalFailed) {
           return (
-            <Tooltip title={isQueued ? "重试中..." : "已达自动重试上限(5/5)，点击可手动再次强制尝试"}>
+            <Tooltip title="已达自动重试上限(5/5)，点击可手动再次强制尝试">
               <Button
                 shape="circle"
                 size="small"
-                loading={isQueued}
-                disabled={!canWrite || isQueued}
+                disabled={!canWrite}
                 style={{
                   color: "var(--ant-color-warning)",
                   borderColor: "var(--ant-color-warning)",
@@ -168,14 +184,14 @@ export function getRecordColumns({
           );
         }
 
+        // 4. 正常待自动重试
         return (
-          <Tooltip title={isQueued ? "重试中..." : "立即重试此记录"}>
+          <Tooltip title="立即重试此记录">
             <Button
               type="primary"
               shape="circle"
               size="small"
-              loading={isQueued}
-              disabled={!canWrite || isQueued}
+              disabled={!canWrite}
               style={{ background: "#52c41a", borderColor: "#52c41a" }}
               icon={<ReloadOutlined />}
               onClick={() => onRetry(record.ID)}
