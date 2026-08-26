@@ -338,7 +338,7 @@ func DelCollectResource(id string) error {
 			return err
 		}
 		// 3. 删除采集失败记录
-		if err := tx.Where("origin_id = ?", id).Delete(&model.FailureRecord{}).Error; err != nil {
+		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
 		// 4. 删除采集站本身
@@ -483,12 +483,14 @@ func SaveFailureRecord(fl model.FailureRecord) error {
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		current, err := findPendingFailure(tx, fl)
 		if err == nil {
-			if err = tx.Model(&model.FailureRecord{}).Where("id = ?", current.ID).Updates(map[string]any{
+			updates := map[string]any{
 				"origin_name": fl.OriginName,
 				"uri":         fl.Uri,
 				"cause":       fl.Cause,
-				"retry_count": gorm.Expr("retry_count + ?", 1),
-			}).Error; err != nil {
+				"retry_count": gorm.Expr("CASE WHEN retry_count >= ? THEN ? ELSE retry_count + 1 END", model.MaxFailureRetryCount, model.MaxFailureRetryCount),
+				"status":      gorm.Expr("CASE WHEN status = ? OR retry_count >= ? THEN ? ELSE status END", model.FailureRecordStatusFailed, model.MaxFailureRetryCount-1, model.FailureRecordStatusFailed),
+			}
+			if err = tx.Model(&model.FailureRecord{}).Where("id = ?", current.ID).Updates(updates).Error; err != nil {
 				log.Println("Update failure record failed:", err)
 				return err
 			}
@@ -586,11 +588,11 @@ func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetr
 		return false, 0, errors.New("failure record not found")
 	}
 	if maxRetryCount <= 0 {
-		return false, 0, errors.New("max retry count must be positive")
+		maxRetryCount = model.MaxFailureRetryCount
 	}
 	updates := map[string]any{
 		"cause":       cause,
-		"retry_count": gorm.Expr("retry_count + ?", 1),
+		"retry_count": gorm.Expr("CASE WHEN retry_count >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
 		"status":      gorm.Expr("CASE WHEN status = ? OR retry_count >= ? THEN ? ELSE status END", model.FailureRecordStatusFailed, maxRetryCount-1, model.FailureRecordStatusFailed),
 	}
 	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
@@ -620,6 +622,27 @@ func DeleteRetriedRecords() {
 	}
 }
 
+// DeleteFailureRecordsByOriginIdTx 按源站 ID 物理清除对应的采集失败记录
+func DeleteFailureRecordsByOriginIdTx(tx *gorm.DB, originId string) error {
+	if tx == nil || originId == "" {
+		return nil
+	}
+	return tx.Where("origin_id = ?", originId).Delete(&model.FailureRecord{}).Error
+}
+
+// NormalizeFailureRecordsRetryCount 纠正历史超出上限的失败记录重试次数与状态
+func NormalizeFailureRecordsRetryCount() {
+	if db.Mdb == nil {
+		return
+	}
+	_ = db.Mdb.Model(&model.FailureRecord{}).
+		Where("retry_count > ?", model.MaxFailureRetryCount).
+		Updates(map[string]any{
+			"retry_count": model.MaxFailureRetryCount,
+			"status":      model.FailureRecordStatusFailed,
+		}).Error
+}
+
 // TruncateRecordTable  截断 record table
 func TruncateRecordTable() {
 	err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE Table %s", model.TableFailureRecord)).Error
@@ -627,3 +650,5 @@ func TruncateRecordTable() {
 		log.Println("TRUNCATE TABLE Error: ", err)
 	}
 }
+
+
