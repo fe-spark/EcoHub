@@ -117,7 +117,7 @@ func (h *UserHandler) UserAdd(c *gin.Context) {
 			u.Role = model.UserRoleNormal
 		} else {
 			uc, _ := v.(*utils.UserClaims)
-			if uc.UserID != config.UserIdInitialVal && !model.IsAdminRole(uc.Role) {
+			if !model.IsAdmin(uc.UserID, uc.Role) {
 				u.Role = model.UserRoleNormal
 			}
 		}
@@ -147,7 +147,7 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 		return
 	}
 	uc, _ := v.(*utils.UserClaims)
-	isOperatorAdmin := uc.UserID == config.UserIdInitialVal || model.IsAdminRole(uc.Role)
+	isOperatorAdmin := model.IsAdmin(uc.UserID, uc.Role)
 
 	// 非管理员只能更新自己的账号，防止横向越权
 	if !isOperatorAdmin && uc.UserID != uint(req.ID) {
@@ -180,7 +180,7 @@ func (h *UserHandler) UserDelete(c *gin.Context) {
 		return
 	}
 	uc, _ := v.(*utils.UserClaims)
-	isOperatorAdmin := uc.UserID == config.UserIdInitialVal || model.IsAdminRole(uc.Role)
+	isOperatorAdmin := model.IsAdmin(uc.UserID, uc.Role)
 	if !isOperatorAdmin {
 		dto.Failed("权限不足，仅超级管理员可删除用户", c)
 		return

@@ -39,14 +39,18 @@ type githubReleaseCache struct {
 	Prerelease bool   `json:"prerelease"`
 }
 
-func (s *VersionService) GetAppVersion() AppVersionInfo {
-	st := currentUpgradeState()
+func (s *VersionService) GetAppVersion(checkUpdate bool) AppVersionInfo {
 	info := AppVersionInfo{
-		Current:      strings.TrimSpace(config.Version),
-		CanUpgrade:   s.CanOnlineUpgrade(),
-		UpgradePhase: st.Phase,
-		UpgradeError: st.Error,
+		Current:    strings.TrimSpace(config.Version),
+		CanUpgrade: false,
 	}
+	if !checkUpdate {
+		return info
+	}
+	st := currentUpgradeState()
+	info.CanUpgrade = s.CanOnlineUpgrade()
+	info.UpgradePhase = st.Phase
+	info.UpgradeError = st.Error
 	onPre := isPreRelease(info.Current, "", false)
 	latest, err := s.loadLatestRelease(onPre)
 	if err != nil || latest.TagName == "" {

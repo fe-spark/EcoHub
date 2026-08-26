@@ -46,3 +46,27 @@ func TestIsPreRelease(t *testing.T) {
 		}
 	}
 }
+
+func TestGetAppVersionNoCheck(t *testing.T) {
+	setUpgradeState("pulling", "boom")
+	t.Cleanup(func() { setUpgradeState("idle", "") })
+
+	svc := &VersionService{}
+	info := svc.GetAppVersion(false)
+	if info.HasUpdate {
+		t.Fatalf("expected HasUpdate=false when checkUpdate is false")
+	}
+	if info.CanUpgrade {
+		t.Fatalf("expected CanUpgrade=false when checkUpdate is false")
+	}
+	if info.Latest != "" {
+		t.Fatalf("expected Latest to be empty when checkUpdate is false, got %q", info.Latest)
+	}
+	if info.UpgradePhase != "" {
+		t.Fatalf("expected UpgradePhase empty for non-admin check, got %q", info.UpgradePhase)
+	}
+	if info.UpgradeError != "" {
+		t.Fatalf("expected UpgradeError empty for non-admin check, got %q", info.UpgradeError)
+	}
+}
+
