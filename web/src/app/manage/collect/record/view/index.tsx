@@ -320,6 +320,11 @@ export default function FailureRecordPageView() {
             ? {
                 selectedRowKeys,
                 onChange: (keys) => setSelectedRowKeys(keys),
+                getCheckboxProps: (record) => ({
+                  disabled:
+                    queuedRetryIds.has(record.ID) ||
+                    record.status === FAILURE_RECORD_STATUS.success,
+                }),
               }
             : undefined
         }
