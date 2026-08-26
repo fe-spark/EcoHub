@@ -231,14 +231,13 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
 
 
       <Card
-        size="small"
+        className={styles.card}
         title={
-          <Space>
-            <CloudSyncOutlined style={{ color: "#1677ff" }} />
-            <span>配置备份</span>
+          <Space size={8} align="center">
+            <CloudSyncOutlined style={{ color: "var(--ant-color-primary)" }} />
+            <span>数据备份与恢复</span>
           </Space>
         }
-        className={styles.sectionCard}
       >
 
         <Flex vertical gap={16}>

@@ -24,14 +24,47 @@ func (s *ManageService) GetSiteBasicConfig() model.BasicConfig {
 	return repository.GetSiteBasic()
 }
 
-// UpdateSiteBasic 更新网站配置信息
-func (s *ManageService) UpdateSiteBasic(c model.BasicConfig) error {
-	return repository.SaveSiteBasic(c)
+// UpdateSiteBasic 更新网站基本信息（保留已存的 Tip 和 Notice，除非显式传入）
+func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
+	curr := repository.GetSiteBasic()
+	curr.SiteName = bc.SiteName
+	curr.SiteURL = bc.SiteURL
+	curr.Logo = bc.Logo
+	curr.Keyword = bc.Keyword
+	curr.Describe = bc.Describe
+	curr.State = bc.State
+	curr.Hint = bc.Hint
+	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
+		curr.Tip = bc.Tip
+	}
+	if bc.Notice.Title != "" || bc.Notice.Content != "" {
+		curr.Notice = bc.Notice
+	}
+	return repository.SaveSiteBasic(curr)
 }
 
-// ResetSiteBasic 重置网站基本信息为默认值（首页轮播已移入内容管理，重置不再触碰轮播）
-func (s *ManageService) ResetSiteBasic() error {
-	return repository.SaveSiteBasic(defaultBasicConfig())
+// GetSiteTipConfig 获取赞赏配置
+func (s *ManageService) GetSiteTipConfig() model.TipConfig {
+	return repository.GetSiteBasic().Tip
+}
+
+// UpdateSiteTipConfig 更新赞赏配置
+func (s *ManageService) UpdateSiteTipConfig(tip model.TipConfig) error {
+	curr := repository.GetSiteBasic()
+	curr.Tip = tip
+	return repository.SaveSiteBasic(curr)
+}
+
+// GetSiteNoticeConfig 获取站点公告配置
+func (s *ManageService) GetSiteNoticeConfig() model.NoticeConfig {
+	return repository.GetSiteBasic().Notice
+}
+
+// UpdateSiteNoticeConfig 更新站点公告配置
+func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error {
+	curr := repository.GetSiteBasic()
+	curr.Notice = notice
+	return repository.SaveSiteBasic(curr)
 }
 
 // GetBanners 获取轮播组件信息

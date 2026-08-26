@@ -6,14 +6,15 @@ interface ManagePageHeaderProps {
   title: string;
   description?: React.ReactNode;
   actions?: React.ReactNode;
+  className?: string;
 }
 
 export default function ManagePageHeader(props: ManagePageHeaderProps) {
-  const { title, description, actions } = props;
+  const { title, description, actions, className } = props;
   const actionNodes = React.Children.toArray(actions);
 
   return (
-    <div className={styles.header}>
+    <div className={`${styles.header} ${className || ""}`}>
       <div className={styles.content}>
         <div className={styles.titleRow}>
           <span className={styles.indicator} />

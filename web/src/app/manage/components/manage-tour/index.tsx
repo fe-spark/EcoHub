@@ -197,11 +197,14 @@ export default function ManageTour({
       (!needWait || (submitted && progressEnded));
 
   const onNeedMenuRef = useRef(onNeedMenu);
-  onNeedMenuRef.current = onNeedMenu;
   const pathnameRef = useRef(pathname);
-  pathnameRef.current = pathname;
   const isMobileRef = useRef(isMobile);
-  isMobileRef.current = isMobile;
+
+  useEffect(() => {
+    onNeedMenuRef.current = onNeedMenu;
+    pathnameRef.current = pathname;
+    isMobileRef.current = isMobile;
+  });
 
   const syncMenuForTarget = useCallback((target: string | null) => {
     const need = isMenuTarget(target);

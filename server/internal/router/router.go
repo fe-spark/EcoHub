@@ -50,7 +50,12 @@ func SetupRouter() *gin.Engine {
 		{
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
 			sysConfig.POST(`/basic/update`, handler.ManageHd.UpdateSiteBasic)
-			sysConfig.POST(`/basic/reset`, handler.ManageHd.ResetSiteBasic)
+
+			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
+			sysConfig.POST(`/tip/update`, handler.ManageHd.UpdateSiteTip)
+
+			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
+			sysConfig.POST(`/notice/update`, handler.ManageHd.UpdateSiteNotice)
 
 			sysConfig.GET(`/notify`, handler.NotifyHd.GetNotifyConfig)
 			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)

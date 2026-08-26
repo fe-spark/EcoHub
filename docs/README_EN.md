@@ -15,7 +15,7 @@
 
 [中文](../README.md) | English
 
-[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md)
+[Demo](https://eco.fe-spark.cn) · [Admin](https://eco.fe-spark.cn/manage) · [Deploy](./README-Deploy_EN.md) · [FAQ](./README-FAQ_EN.md) · [Telegram Group](https://t.me/+6O6MiUdVSOplNjQ0)
 
 </div>
 
@@ -120,6 +120,10 @@ Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `htt
 | [Server](../server/README.md) / [Web](../web/README.md) | Environment variables, APIs, local startup |
 | [Chinese README](../README.md) | 中文总览 |
 
+## Community
+
+- Telegram Group: [https://t.me/+6O6MiUdVSOplNjQ0](https://t.me/+6O6MiUdVSOplNjQ0)
+
 ## Star History
 
 <a href="https://star-history.dera.page/#fe-spark/EcoHub&Date">
@@ -132,4 +136,4 @@ Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `htt
 
 ---
 
-[MIT](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues)
+[MIT](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/+6O6MiUdVSOplNjQ0)

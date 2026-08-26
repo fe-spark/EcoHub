@@ -16,3 +16,4 @@
 | [服务端说明](../server/README.md) | 环境变量、接口、鉴权 |
 | [Telegram 通知](../server/notify.md) | 通知行为 |
 | [前端说明](../web/README.md) | 页面结构与本地启动 |
+| [Telegram 交流群](https://t.me/+6O6MiUdVSOplNjQ0) | 官方交流社群 |

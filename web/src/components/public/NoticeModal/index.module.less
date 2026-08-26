@@ -1,0 +1,68 @@
+.modal {
+  :global(.ant-modal-content) {
+    padding: 24px 24px 20px;
+    border-radius: 16px;
+    box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.12), 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  }
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.iconBadge {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background-color: color-mix(in srgb, var(--ant-color-primary) 12%, transparent);
+  color: var(--ant-color-primary, #fa8c16);
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  margin-bottom: 20px;
+  padding: 14px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+  border-radius: 10px;
+  background-color: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.content {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.75;
+  color: var(--ant-color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.confirmBtn {
+  min-width: 100px;
+  height: 36px;
+  border-radius: 8px;
+  font-weight: 500;
+}
