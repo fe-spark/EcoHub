@@ -220,7 +220,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	} else {
 		collectLifecycle.addAffectedMIDs(written.Affected)
 	}
-	repository.UpdateFailureRecordStatus(fr, model.FailureRecordStatusSuccess)
+	repository.DeleteFailureRecord(fr)
 }
 
 func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) {

@@ -34,33 +34,28 @@ type filmSearchMemoryIndex struct {
 	Items   []filmSearchMemoryItem
 }
 
-var activeFilmReadModel atomic.Value
+var activeFilmReadModel atomic.Pointer[FilmReadModel]
 var activeFilmReadModelMu sync.Mutex
 
-var activeFilmSearchIndex atomic.Value
+var activeFilmSearchIndex atomic.Pointer[filmSearchMemoryIndex]
 var activeFilmSearchIndexMu sync.Mutex
 
 func init() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
+	activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
 }
 
 func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	if version == "" {
 		return nil
 	}
-	val := activeFilmSearchIndex.Load()
-	if val != nil {
-		if idx, ok := val.(*filmSearchMemoryIndex); ok && idx.Version == version && len(idx.Items) > 0 {
-			return idx
-		}
+	if idx := activeFilmSearchIndex.Load(); idx != nil && idx.Version == version && len(idx.Items) > 0 {
+		return idx
 	}
 	activeFilmSearchIndexMu.Lock()
 	defer activeFilmSearchIndexMu.Unlock()
-	val = activeFilmSearchIndex.Load()
-	if val != nil {
-		if idx, ok := val.(*filmSearchMemoryIndex); ok && idx.Version == version && len(idx.Items) > 0 {
-			return idx
-		}
+	if idx := activeFilmSearchIndex.Load(); idx != nil && idx.Version == version && len(idx.Items) > 0 {
+		return idx
 	}
 
 	if db.Mdb == nil {
@@ -115,7 +110,14 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModelMu.Lock()
 	defer activeFilmReadModelMu.Unlock()
 	activeFilmReadModel.Store(&FilmReadModel{Version: version})
-	go getOrLoadFilmSearchMemoryIndex(version)
+	go func(ver string) {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[ActiveReadModel] 异步构建内存搜索索引发生异常: %v", r)
+			}
+		}()
+		getOrLoadFilmSearchMemoryIndex(ver)
+	}(version)
 	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
 	return nil
 }
@@ -132,16 +134,11 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 
 func ClearActiveFilmReadModel() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
-	activeFilmSearchIndex.Store((*filmSearchMemoryIndex)(nil))
+	activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
 }
 
 func GetActiveFilmReadModel() *FilmReadModel {
-	value := activeFilmReadModel.Load()
-	if value == nil {
-		return nil
-	}
-	readModel, _ := value.(*FilmReadModel)
-	return readModel
+	return activeFilmReadModel.Load()
 }
 
 func GetProjectedSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
