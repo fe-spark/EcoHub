@@ -48,15 +48,22 @@ export default function FailureRecordPageView() {
     origin: [],
     status: [],
   });
-  const pollTimerRef = useRef<number | null>(null);
+
+  const pageRef = useRef(page);
+  pageRef.current = page;
+  const paramsRef = useRef(params);
+  paramsRef.current = params;
+
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
   const getRecords = useCallback(
-    async (p?: any, overrideParams?: any) => {
-      setLoading(true);
-      const pg = p || page;
-      const reqParams = overrideParams || params;
+    async (p?: any, overrideParams?: any, silent = false) => {
+      if (!silent) {
+        setLoading(true);
+      }
+      const pg = p || pageRef.current;
+      const reqParams = overrideParams || paramsRef.current;
       try {
         const resp = await ApiGet("/manage/collect/record/list", {
           ...reqParams,
@@ -66,26 +73,26 @@ export default function FailureRecordPageView() {
         if (resp.code === 0) {
           setRecords(resp.data.list || []);
           if (resp.data.params?.paging) {
-            setPage(resp.data.params.paging);
+            setPage((prev) => ({
+              ...prev,
+              ...resp.data.params.paging,
+            }));
           }
           if (resp.data.options) {
             setOptions(resp.data.options);
           }
         }
       } finally {
-        setLoading(false);
+        if (!silent) {
+          setLoading(false);
+        }
       }
     },
-    [params, page],
+    [],
   );
 
   useEffect(() => {
     void getRecords();
-    return () => {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-      }
-    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -102,7 +109,7 @@ export default function FailureRecordPageView() {
             return next;
           });
         }, 5000);
-        void getRecords();
+        void getRecords(undefined, undefined, true);
       } else {
         message.error(resp.msg);
       }
@@ -167,7 +174,7 @@ export default function FailureRecordPageView() {
     setBatchRetrying(false);
     setSelectedRowKeys([]);
     message.success(`已完成批量重试提交：成功 ${successCount} 条，失败 ${failCount} 条`);
-    void getRecords();
+    void getRecords(undefined, undefined, false);
 
     window.setTimeout(() => {
       setProgressState((prev) => (prev ? { ...prev, active: false } : null));
@@ -183,76 +190,14 @@ export default function FailureRecordPageView() {
   };
 
   const handleRetryAll = async () => {
-    const pendingResp = await ApiGet("/manage/collect/record/list", {
-      status: FAILURE_RECORD_STATUS.pending,
-      current: 1,
-      pageSize: 1,
-    });
-    const totalPending = pendingResp.data?.params?.paging?.total || 0;
-
     const resp = await ApiPost("/manage/collect/record/retry/all", {});
     if (resp.code !== 0) {
       message.error(resp.msg);
       return;
     }
 
-    message.success(resp.msg || "已触发全量待处理项重试任务");
-
-    if (totalPending <= 0) {
-      void getRecords();
-      return;
-    }
-
-    setProgressState({
-      active: true,
-      type: "all",
-      total: totalPending,
-      completed: 0,
-      successCount: 0,
-      failCount: 0,
-      text: `全量重试执行中，初始待处理 ${totalPending} 条...`,
-    });
-
-    if (pollTimerRef.current) {
-      window.clearInterval(pollTimerRef.current);
-    }
-
-    let pollCount = 0;
-    pollTimerRef.current = window.setInterval(async () => {
-      pollCount++;
-      const checkResp = await ApiGet("/manage/collect/record/list", {
-        status: FAILURE_RECORD_STATUS.pending,
-        current: 1,
-        pageSize: 1,
-      });
-      const currentRemaining = checkResp.data?.params?.paging?.total ?? 0;
-      const completedCount = Math.max(0, totalPending - currentRemaining);
-      const isDone = currentRemaining === 0 || pollCount >= 24;
-
-      setProgressState({
-        active: true,
-        type: "all",
-        total: totalPending,
-        completed: isDone ? totalPending : completedCount,
-        successCount: completedCount,
-        failCount: 0,
-        text: isDone
-          ? `全量重试已完成 (${totalPending}/${totalPending})`
-          : `全量重试执行中: 剩余 ${currentRemaining} 条待处理 (${completedCount}/${totalPending})`,
-      });
-
-      void getRecords();
-
-      if (isDone) {
-        if (pollTimerRef.current) {
-          window.clearInterval(pollTimerRef.current);
-          pollTimerRef.current = null;
-        }
-        window.setTimeout(() => {
-          setProgressState((prev) => (prev ? { ...prev, active: false } : null));
-        }, 4000);
-      }
-    }, 2500);
+    message.success(resp.msg || "已触发全量待处理项重试任务，后台正在并发执行");
+    void getRecords(undefined, undefined, false);
   };
 
   const handleCleanResult = async () => {
@@ -337,7 +282,7 @@ export default function FailureRecordPageView() {
           type="primary"
           icon={<SearchOutlined />}
           onClick={() => {
-            const newPage = { ...page, current: 1 };
+            const newPage = { ...pageRef.current, current: 1 };
             setPage(newPage);
             void getRecords(newPage, params);
           }}
@@ -356,7 +301,7 @@ export default function FailureRecordPageView() {
             };
             setParams(defaultParams);
             setDateRange(null);
-            const newPage = { ...page, current: 1 };
+            const newPage = { ...pageRef.current, current: 1 };
             setPage(newPage);
             void getRecords(newPage, defaultParams);
           }}
@@ -411,14 +356,9 @@ export default function FailureRecordPageView() {
                   description="系统将并发拉取所有待自动重试状态的页面，已成功和已超限失败的记录不受影响。"
                   icon={<QuestionCircleOutlined style={{ color: "#1677ff" }} />}
                   onConfirm={handleRetryAll}
-                  disabled={!canWrite || progressState?.active}
+                  disabled={!canWrite}
                 >
-                  <Button
-                    type="primary"
-                    icon={<ReloadOutlined />}
-                    disabled={!canWrite || progressState?.active}
-                    loading={progressState?.active && progressState.type === "all"}
-                  >
+                  <Button type="primary" icon={<ReloadOutlined />} disabled={!canWrite}>
                     重试全部待处理
                   </Button>
                 </Popconfirm>
@@ -473,7 +413,7 @@ export default function FailureRecordPageView() {
               showTotal={(total) => `共 ${total} 条`}
               pageSizeOptions={[10, 20, 50, 100, 500]}
               onChange={(current, pageSize) => {
-                const newPage = { ...page, current, pageSize };
+                const newPage = { ...pageRef.current, current, pageSize };
                 setPage(newPage);
                 void getRecords(newPage);
               }}
