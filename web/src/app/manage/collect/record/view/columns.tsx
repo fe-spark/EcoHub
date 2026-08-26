@@ -6,15 +6,23 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   CheckOutlined,
+  LoadingOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { FailRecord, FAILURE_RECORD_STATUS, RECOVER_MAX_RETRY_COUNT } from "./types";
 
-export function renderStatusTag(status: number) {
+export function renderStatusTag(status: number, isRetrying?: boolean) {
+  if (isRetrying) {
+    return (
+      <Tag color="processing" icon={<LoadingOutlined />}>
+        重试中
+      </Tag>
+    );
+  }
   if (status === FAILURE_RECORD_STATUS.pending) {
     return (
-      <Tag color="processing" icon={<ClockCircleOutlined />}>
+      <Tag color="default" icon={<ClockCircleOutlined />}>
         待自动重试
       </Tag>
     );
@@ -98,17 +106,17 @@ export function getRecordColumns({
       title: "状态",
       dataIndex: "status",
       align: "center",
-      render: (v) => renderStatusTag(v),
+      render: (v, record) => renderStatusTag(v, queuedRetryIds.has(record.ID)),
     },
     {
       title: "重试次数",
       dataIndex: "retryCount",
       align: "center",
       render: (v) => {
-        const retryCount = v || 1;
+        const retryCount = v ?? 0;
         const displayCount = Math.min(retryCount, RECOVER_MAX_RETRY_COUNT);
         const color =
-          retryCount >= RECOVER_MAX_RETRY_COUNT ? "error" : retryCount > 1 ? "warning" : "default";
+          retryCount >= RECOVER_MAX_RETRY_COUNT ? "error" : retryCount > 0 ? "warning" : "default";
         return (
           <Tag color={color}>
             {displayCount}/{RECOVER_MAX_RETRY_COUNT}
@@ -143,7 +151,7 @@ export function getRecordColumns({
 
         if (isFinalFailed) {
           return (
-            <Tooltip title="已达自动重试上限(5/5)，点击可手动再次强制尝试">
+            <Tooltip title={isQueued ? "重试中..." : "已达自动重试上限(5/5)，点击可手动再次强制尝试"}>
               <Button
                 shape="circle"
                 size="small"
@@ -161,13 +169,7 @@ export function getRecordColumns({
         }
 
         return (
-          <Tooltip
-            title={
-              isQueued
-                ? "已加入重试队列；同采集站全量采集中时会等待采集结束"
-                : "立即重试此记录"
-            }
-          >
+          <Tooltip title={isQueued ? "重试中..." : "立即重试此记录"}>
             <Button
               type="primary"
               shape="circle"

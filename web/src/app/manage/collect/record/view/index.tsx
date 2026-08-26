@@ -22,9 +22,8 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import { FailRecord, FAILURE_RECORD_STATUS, RetryProgressState } from "./types";
+import { FailRecord, FAILURE_RECORD_STATUS } from "./types";
 import { getRecordColumns, normalizeStatusOptionLabel } from "./columns";
-import RetryProgressCard from "./retry-progress-card";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -35,7 +34,6 @@ export default function FailureRecordPageView() {
   const [queuedRetryIds, setQueuedRetryIds] = useState<Set<number>>(() => new Set());
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [batchRetrying, setBatchRetrying] = useState(false);
-  const [progressState, setProgressState] = useState<RetryProgressState | null>(null);
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState({
     originId: "",
@@ -98,19 +96,24 @@ export default function FailureRecordPageView() {
 
   const handleRetry = useCallback(
     async (id: number) => {
+      setQueuedRetryIds((prev) => new Set(prev).add(id));
       const resp = await ApiPost("/manage/collect/record/retry", { id });
       if (resp.code === 0) {
-        setQueuedRetryIds((prev) => new Set(prev).add(id));
-        message.success("重试任务已加入队列；若对应采集站正在运行，将在采集结束后自动执行");
+        message.success("重试任务已加入队列");
         window.setTimeout(() => {
           setQueuedRetryIds((prev) => {
             const next = new Set(prev);
             next.delete(id);
             return next;
           });
-        }, 5000);
-        void getRecords(undefined, undefined, true);
+          void getRecords(undefined, undefined, true);
+        }, 3000);
       } else {
+        setQueuedRetryIds((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
         message.error(resp.msg);
       }
     },
@@ -126,18 +129,6 @@ export default function FailureRecordPageView() {
       return;
     }
 
-    const total = targets.length;
-    setBatchRetrying(true);
-    setProgressState({
-      active: true,
-      type: "selected",
-      total,
-      completed: 0,
-      successCount: 0,
-      failCount: 0,
-      text: `正在提交选中重试任务 (0/${total})`,
-    });
-
     const targetIds = targets.map((t) => t.ID);
     setQueuedRetryIds((prev) => {
       const next = new Set(prev);
@@ -145,40 +136,22 @@ export default function FailureRecordPageView() {
       return next;
     });
 
+    setBatchRetrying(true);
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < targets.length; i++) {
-      const target = targets[i];
+    for (const target of targets) {
       const resp = await ApiPost("/manage/collect/record/retry", { id: target.ID });
       if (resp.code === 0) {
         successCount++;
       } else {
         failCount++;
       }
-      const completed = i + 1;
-      setProgressState({
-        active: true,
-        type: "selected",
-        total,
-        completed,
-        successCount,
-        failCount,
-        text:
-          completed === total
-            ? `已完成提交全部选中项 (${completed}/${total})`
-            : `正在提交重试任务 (${completed}/${total})`,
-      });
     }
 
     setBatchRetrying(false);
     setSelectedRowKeys([]);
-    message.success(`已完成批量重试提交：成功 ${successCount} 条，失败 ${failCount} 条`);
-    void getRecords(undefined, undefined, false);
-
-    window.setTimeout(() => {
-      setProgressState((prev) => (prev ? { ...prev, active: false } : null));
-    }, 4000);
+    message.success(`已提交重试任务：成功 ${successCount} 条，失败 ${failCount} 条`);
 
     window.setTimeout(() => {
       setQueuedRetryIds((prev) => {
@@ -186,18 +159,41 @@ export default function FailureRecordPageView() {
         targetIds.forEach((id) => next.delete(id));
         return next;
       });
-    }, 5000);
+      void getRecords(undefined, undefined, true);
+    }, 3000);
   };
 
   const handleRetryAll = async () => {
+    const pendingIds = records
+      .filter((r) => r.status === FAILURE_RECORD_STATUS.pending)
+      .map((r) => r.ID);
+    setQueuedRetryIds((prev) => {
+      const next = new Set(prev);
+      pendingIds.forEach((id) => next.add(id));
+      return next;
+    });
+
     const resp = await ApiPost("/manage/collect/record/retry/all", {});
     if (resp.code !== 0) {
+      setQueuedRetryIds((prev) => {
+        const next = new Set(prev);
+        pendingIds.forEach((id) => next.delete(id));
+        return next;
+      });
       message.error(resp.msg);
       return;
     }
 
-    message.success(resp.msg || "已触发全量待处理项重试任务，后台正在并发执行");
-    void getRecords(undefined, undefined, false);
+    message.success(resp.msg || "已触发全量待处理项重试，系统正在后台并发执行");
+
+    window.setTimeout(() => {
+      setQueuedRetryIds((prev) => {
+        const next = new Set(prev);
+        pendingIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      void getRecords(undefined, undefined, true);
+    }, 4000);
   };
 
   const handleCleanResult = async () => {
@@ -309,8 +305,6 @@ export default function FailureRecordPageView() {
           重置
         </Button>
       </Space>
-
-      <RetryProgressCard progressState={progressState} />
 
       <Table
         bordered
