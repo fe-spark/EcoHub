@@ -4,6 +4,8 @@ import React, { Suspense } from "react";
 import Header from "@/components/public/Header";
 import Footer from "@/components/public/Footer";
 import ScrollToTop from "@/components/public/ScrollToTop";
+import NoticeModal from "@/components/public/NoticeModal";
+import { useSiteConfig } from "@/components/common/SiteGuard";
 import {
   PublicContentLoadingProvider,
   PublicContentLoadingPanel,
@@ -49,6 +51,8 @@ export default function PublicLayoutView({
   children: React.ReactNode;
   navList: NavItem[];
 }) {
+  const { config } = useSiteConfig();
+
   return (
     // useSearchParams 在 Provider 内：包一层 Suspense 避免 CSR bailout 警告
     <Suspense fallback={null}>
@@ -58,6 +62,7 @@ export default function PublicLayoutView({
           <Header navList={navList} />
           <PublicMain>{children}</PublicMain>
           <Footer />
+          <NoticeModal notice={config?.notice} />
         </div>
       </PublicContentLoadingProvider>
     </Suspense>

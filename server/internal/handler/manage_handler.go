@@ -47,7 +47,7 @@ func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------
 
-// SiteBasicConfig  网站基本配置
+// SiteBasicConfig 网站基本配置
 func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 	dto.Success(service.ManageSvc.GetSiteBasicConfig(), "网站基本信息获取成功", c)
 }
@@ -72,13 +72,42 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
-// ResetSiteBasic 重置网站基本信息为默认值（首页轮播已移入内容管理，重置不再清空轮播）
-func (h *ManageHandler) ResetSiteBasic(c *gin.Context) {
-	if err := service.ManageSvc.ResetSiteBasic(); err != nil {
-		dto.Failed(fmt.Sprint("配置信息重置失败: ", err), c)
+// SiteTipConfig 获取赞赏配置
+func (h *ManageHandler) SiteTipConfig(c *gin.Context) {
+	dto.Success(service.ManageSvc.GetSiteTipConfig(), "赞赏配置获取成功", c)
+}
+
+// UpdateSiteTip 更新赞赏配置
+func (h *ManageHandler) UpdateSiteTip(c *gin.Context) {
+	var tip model.TipConfig
+	if err := c.ShouldBindJSON(&tip); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
 		return
 	}
-	dto.SuccessOnlyMsg("已还原默认网站配置", c)
+	if err := service.ManageSvc.UpdateSiteTipConfig(tip); err != nil {
+		dto.Failed(fmt.Sprint("赞赏配置更新失败: ", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("赞赏配置更新成功", c)
+}
+
+// SiteNoticeConfig 获取公告配置
+func (h *ManageHandler) SiteNoticeConfig(c *gin.Context) {
+	dto.Success(service.ManageSvc.GetSiteNoticeConfig(), "公告配置获取成功", c)
+}
+
+// UpdateSiteNotice 更新公告配置
+func (h *ManageHandler) UpdateSiteNotice(c *gin.Context) {
+	var notice model.NoticeConfig
+	if err := c.ShouldBindJSON(&notice); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	if err := service.ManageSvc.UpdateSiteNoticeConfig(notice); err != nil {
+		dto.Failed(fmt.Sprint("公告配置更新失败: ", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("公告配置更新成功", c)
 }
 
 // ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------

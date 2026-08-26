@@ -1,74 +1,99 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
-import { Button, Card, Flex, Input, Modal, Select, Space, Switch, Typography } from "antd";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  Card,
+  Checkbox,
+  Flex,
+  Input,
+  Space,
+  Spin,
+  Switch,
+  Typography,
+} from "antd";
 import {
   BellOutlined,
+  EditOutlined,
   EyeOutlined,
   SaveOutlined,
 } from "@ant-design/icons";
+import { ApiGet, ApiPost } from "@/lib/client-api";
+import { useAppMessage } from "@/lib/useAppMessage";
+import { useSiteConfig } from "@/components/common/SiteGuard";
+import NoticeModal from "@/components/public/NoticeModal";
 import {
   DEFAULT_NOTICE_TITLE,
   MAX_NOTICE_CONTENT_LEN,
   MAX_NOTICE_TITLE_LEN,
+  createDefaultNoticeConfig,
   normalizeNoticeConfig,
   type NoticeConfig,
 } from "@/lib/notice";
-import type { SiteBasicPayload } from "./tip-config-card";
 import styles from "./notice-config-card.module.less";
 
 interface NoticeConfigCardProps {
-  siteConfig: SiteBasicPayload;
   canWrite: boolean;
-  onSave: (next: SiteBasicPayload) => Promise<boolean>;
 }
 
-export default function NoticeConfigCard({
-  siteConfig,
-  canWrite,
-  onSave,
-}: NoticeConfigCardProps) {
-  const [draft, setDraft] = useState<NoticeConfig>(() =>
-    normalizeNoticeConfig(siteConfig.notice)
-  );
-  const [previewOpen, setPreviewOpen] = useState(false);
+export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
+  const [data, setData] = useState<NoticeConfig>(createDefaultNoticeConfig);
+  const [draft, setDraft] = useState<NoticeConfig>(createDefaultNoticeConfig);
+  const [isEditing, setIsEditing] = useState(false);
+  const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+
+  const { message } = useAppMessage();
+  const { refresh: refreshSiteConfig } = useSiteConfig();
+
+  const loadData = useCallback(async () => {
+    setFetching(true);
+    try {
+      const resp = await ApiGet("/manage/config/notice");
+      if (resp.code === 0 && resp.data) {
+        const normalized = normalizeNoticeConfig(resp.data);
+        setData(normalized);
+        setDraft(normalized);
+      }
+    } finally {
+      setFetching(false);
+    }
+  }, []);
 
   useEffect(() => {
-    setDraft(normalizeNoticeConfig(siteConfig.notice));
-  }, [siteConfig.notice]);
+    void loadData();
+  }, [loadData]);
 
   const hasDirty = useMemo(() => {
-    const orig = normalizeNoticeConfig(siteConfig.notice);
-    return JSON.stringify(draft) !== JSON.stringify(orig);
-  }, [draft, siteConfig.notice]);
+    return JSON.stringify(normalizeNoticeConfig(draft)) !== JSON.stringify(data);
+  }, [draft, data]);
 
-  const versionTags = useMemo(() => {
-    if (!draft.version.trim()) return [];
-    return draft.version
-      .split(/[,;\s]+/)
-      .map((v) => v.trim())
-      .filter(Boolean);
-  }, [draft.version]);
+  const currentValues = isEditing ? draft : data;
 
-  const handleVersionChange = (tags: string[]) => {
-    const cleaned = tags.map((t) => t.trim()).filter(Boolean);
-    setDraft((prev) => ({
-      ...prev,
-      version: cleaned.join(", "),
-    }));
+  const handleCancel = () => {
+    setDraft(data);
+    setIsEditing(false);
   };
 
   const handleSave = async () => {
     if (!canWrite) return;
     setSaving(true);
     try {
-      const ok = await onSave({
-        ...siteConfig,
-        notice: normalizeNoticeConfig(draft),
+      const nextNotice = normalizeNoticeConfig({
+        ...draft,
+        appVersion: "",
+        version: "",
       });
-      if (ok) {
-        setDraft(normalizeNoticeConfig(draft));
+      const resp = await ApiPost("/manage/config/notice/update", nextNotice);
+      if (resp.code === 0) {
+        message.success(resp.msg || "公告配置已保存");
+        setData(nextNotice);
+        setDraft(nextNotice);
+        setIsEditing(false);
+        await refreshSiteConfig();
+      } else {
+        message.error(resp.msg || "保存失败");
       }
     } finally {
       setSaving(false);
@@ -82,132 +107,157 @@ export default function NoticeConfigCard({
         title={
           <Space size={8} align="center">
             <BellOutlined style={{ color: "var(--ant-color-primary)" }} />
-            <span>开屏公告配置</span>
+            <span>站点公告配置</span>
           </Space>
         }
         extra={
           <Space size={8} align="center">
-            <Button
-              size="small"
-              icon={<EyeOutlined />}
-              onClick={() => setPreviewOpen(true)}
-            >
-              预览
-            </Button>
-            <Button
-              size="small"
-              type="primary"
-              icon={<SaveOutlined />}
-              disabled={!canWrite || !hasDirty}
-              loading={saving}
-              onClick={handleSave}
-            >
-              保存公告
-            </Button>
+            {isEditing ? (
+              <>
+                <Button size="small" disabled={saving} onClick={handleCancel}>
+                  取消
+                </Button>
+                <Button
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  预览
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<SaveOutlined />}
+                  disabled={!canWrite || !hasDirty}
+                  loading={saving}
+                  onClick={handleSave}
+                >
+                  保存公告
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  size="small"
+                  icon={<EyeOutlined />}
+                  onClick={() => setPreviewOpen(true)}
+                >
+                  预览
+                </Button>
+                <Button
+                  size="small"
+                  type="primary"
+                  icon={<EditOutlined />}
+                  disabled={!canWrite}
+                  onClick={() => {
+                    setDraft(data);
+                    setIsEditing(true);
+                  }}
+                >
+                  编辑
+                </Button>
+              </>
+            )}
           </Space>
         }
       >
-        <Flex vertical gap={20}>
-          {/* 开关 */}
-          <Flex align="center" justify="space-between">
-            <Flex vertical gap={2}>
-              <Typography.Text strong>启用开屏公告</Typography.Text>
-              <Typography.Text type="secondary">
-                开启后，App / Web 重新打开时将主动弹出提示窗口
-              </Typography.Text>
+        <Spin spinning={fetching} description="正在加载公告配置...">
+          <Flex vertical gap={16}>
+            {/* 总开关 */}
+            <Flex align="center" justify="space-between">
+              <Flex vertical gap={4}>
+                <Typography.Text strong>启用站点公告</Typography.Text>
+                <Typography.Text type="secondary">
+                  开启后向访问用户弹窗提示；关闭后任何终端均不弹出
+                </Typography.Text>
+              </Flex>
+              <Switch
+                disabled={!isEditing || !canWrite}
+                checked={currentValues.enabled}
+                checkedChildren="开启"
+                unCheckedChildren="关闭"
+                onChange={(enabled) =>
+                  setDraft((prev) => ({ ...prev, enabled }))
+                }
+              />
             </Flex>
-            <Switch
-              disabled={!canWrite}
-              checked={draft.enabled}
-              onChange={(enabled) =>
-                setDraft((prev) => ({ ...prev, enabled }))
-              }
-            />
+
+            {/* 展示终端 */}
+            <div className={styles.field}>
+              <Typography.Text strong>生效展示终端</Typography.Text>
+              <Space size={24} style={{ marginTop: 4 }}>
+                <Checkbox
+                  disabled={!isEditing || !canWrite}
+                  checked={currentValues.showInWeb}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, showInWeb: e.target.checked }))
+                  }
+                >
+                  Web 浏览器端
+                </Checkbox>
+                <Checkbox
+                  disabled={!isEditing || !canWrite}
+                  checked={currentValues.showInApp}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, showInApp: e.target.checked }))
+                  }
+                >
+                  App 移动客户端
+                </Checkbox>
+              </Space>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                可按需勾选需要弹出的端；若未勾选任何端，则等同于不弹出
+              </Typography.Text>
+            </div>
+
+            {/* 公告标题 */}
+            <div className={styles.field}>
+              <Flex justify="space-between" align="baseline">
+                <Typography.Text strong>公告标题</Typography.Text>
+                <Typography.Text type="secondary">
+                  {currentValues.title.length}/{MAX_NOTICE_TITLE_LEN}
+                </Typography.Text>
+              </Flex>
+              <Input
+                disabled={!isEditing || !canWrite}
+                maxLength={MAX_NOTICE_TITLE_LEN}
+                placeholder={DEFAULT_NOTICE_TITLE}
+                value={currentValues.title}
+                onChange={(e) =>
+                  setDraft((prev) => ({ ...prev, title: e.target.value }))
+                }
+              />
+            </div>
+
+            {/* 公告正文 */}
+            <div className={styles.field}>
+              <Flex justify="space-between" align="baseline">
+                <Typography.Text strong>公告正文</Typography.Text>
+                <Typography.Text type="secondary">
+                  {currentValues.content.length}/{MAX_NOTICE_CONTENT_LEN}
+                </Typography.Text>
+              </Flex>
+              <Input.TextArea
+                disabled={!isEditing || !canWrite}
+                maxLength={MAX_NOTICE_CONTENT_LEN}
+                rows={4}
+                placeholder="请输入公告内容，支持换行..."
+                value={currentValues.content}
+                onChange={(e) =>
+                  setDraft((prev) => ({ ...prev, content: e.target.value }))
+                }
+              />
+            </div>
           </Flex>
-
-          {/* 公告标题 */}
-          <div className={styles.field}>
-            <Flex justify="space-between" align="baseline">
-              <Typography.Text strong>公告标题</Typography.Text>
-              <Typography.Text type="secondary">
-                {draft.title.length}/{MAX_NOTICE_TITLE_LEN}
-              </Typography.Text>
-            </Flex>
-            <Input
-              disabled={!canWrite}
-              maxLength={MAX_NOTICE_TITLE_LEN}
-              placeholder={DEFAULT_NOTICE_TITLE}
-              value={draft.title}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, title: e.target.value }))
-              }
-            />
-          </div>
-
-          {/* 公告正文 */}
-          <div className={styles.field}>
-            <Flex justify="space-between" align="baseline">
-              <Typography.Text strong>公告正文</Typography.Text>
-              <Typography.Text type="secondary">
-                {draft.content.length}/{MAX_NOTICE_CONTENT_LEN}
-              </Typography.Text>
-            </Flex>
-            <Input.TextArea
-              disabled={!canWrite}
-              maxLength={MAX_NOTICE_CONTENT_LEN}
-              rows={4}
-              placeholder="请输入公告内容，支持换行..."
-              value={draft.content}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, content: e.target.value }))
-              }
-            />
-          </div>
-
-          {/* 目标版本号匹配（多 Tag 标签输入） */}
-          <div className={styles.field}>
-            <Flex justify="space-between" align="baseline">
-              <Typography.Text strong>目标版本号（留空所有版本都弹）</Typography.Text>
-              <Typography.Text type="secondary">
-                {versionTags.length > 0 ? `已选 ${versionTags.length} 个版本` : "全部版本"}
-              </Typography.Text>
-            </Flex>
-            <Select
-              mode="tags"
-              disabled={!canWrite}
-              style={{ width: "100%" }}
-              placeholder="默认留空面向所有版本生效；输入版本号后按回车添加（如 1.0.2、1.0.3）"
-              value={versionTags}
-              onChange={handleVersionChange}
-              tokenSeparators={[",", " ", "，", "；", ";"]}
-              options={[]}
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              留空表示全部版本都会弹出公告；若添加版本标签（如 1.0.3），则仅当客户端版本匹配时才弹出。
-            </Typography.Text>
-          </div>
-        </Flex>
+        </Spin>
       </Card>
 
-      {/* 预览弹窗 */}
-      <Modal
+      {/* 统一使用 NoticeModal 进行真实弹窗预览 */}
+      <NoticeModal
         open={previewOpen}
-        title={draft.title || DEFAULT_NOTICE_TITLE}
-        onCancel={() => setPreviewOpen(false)}
-        footer={[
-          <Button
-            key="ok"
-            type="primary"
-            onClick={() => setPreviewOpen(false)}
-          >
-            我知道了
-          </Button>,
-        ]}
-      >
-        <div className={styles.modalContent}>
-          {draft.content || <Typography.Text type="secondary">（暂无公告正文内容）</Typography.Text>}
-        </div>
-      </Modal>
+        notice={currentValues}
+        onClose={() => setPreviewOpen(false)}
+      />
     </>
   );
 }
