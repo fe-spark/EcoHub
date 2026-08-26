@@ -68,9 +68,6 @@ export default function NoticeModal({ notice, open: controlledOpen, onClose }: N
     }
   };
 
-  const title = notice?.title?.trim() || DEFAULT_NOTICE_TITLE;
-  const content = notice?.content?.trim() || "";
-
   if (!isControlled && !content) return null;
 
   return (
