@@ -11,61 +11,6 @@
   min-width: 0;
 }
 
-.configBody {
-  min-width: 0;
-  transition: opacity 0.3s ease, filter 0.3s ease;
-}
-
-.configBodyLocked {
-  opacity: 0.55;
-  filter: grayscale(0.15);
-}
-
-.configFieldset {
-  margin: 0;
-  padding: 0;
-  border: none;
-  min-width: 0;
-}
-
-/* Overview Header Card */
-.overviewCard {
-  width: 100%;
-  border-radius: 12px;
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-
-  :global(.ant-card-body) {
-    padding: 16px 20px;
-  }
-}
-
-.overviewTitle {
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.badgeGroup {
-  :global(.ant-tag) {
-    margin: 0;
-    padding: 2px 8px;
-    font-size: 12px;
-    border-radius: 4px;
-  }
-}
-
-.enableSwitch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-left: 12px;
-  border-left: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
-}
-
-.enableLabel {
-  font-size: 13px;
-  white-space: nowrap;
-}
-
 /* Section Cards Layout */
 .form {
   :global(.ant-form-item) {
@@ -82,45 +27,20 @@
   min-width: 0;
   border-radius: 12px;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px 0 rgba(0, 0, 0, 0.02);
-
-  :global(.ant-card-head-title) {
-    font-weight: 600;
-  }
-
-  :global(.ant-card-body) {
-    padding: 20px 24px;
-  }
 }
 
-.chatIdsSelect {
-  width: 100%;
-
-  :global(.ant-select-selection-overflow) {
-    gap: 6px;
-  }
-}
-
-.testRow {
+.testFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
   flex-wrap: wrap;
-  margin-top: 16px;
   padding: 12px 16px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
   border: 1px dashed var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
 }
 
-.testHint {
-  flex: 1;
-  min-width: 180px;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-/* Quiet Hours Panel */
 .quietHoursPanel {
   padding: 16px 20px;
   border-radius: 10px;
@@ -132,18 +52,11 @@
 .subGroupCard {
   border-radius: 10px;
   height: 100%;
-  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.01));
+  padding: 16px;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
   border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
-
-  :global(.ant-card-head) {
-    padding: 0 16px;
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  :global(.ant-card-body) {
-    padding: 14px;
-  }
+  display: flex;
+  flex-direction: column;
 }
 
 .groupDesc {
@@ -151,10 +64,7 @@
   font-size: 12px;
   line-height: 1.45;
   margin-bottom: 12px;
-}
-
-.eventItemWrapper {
-  margin-bottom: 0 !important;
+  color: var(--ant-color-text-secondary);
 }
 
 /* Event Tile Cards */
@@ -163,7 +73,7 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 6px;
   padding: 10px 12px;
   border-radius: 8px;
   border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
@@ -173,15 +83,15 @@
   user-select: none;
 
   &:hover {
-    border-color: #1677ff;
-    background: var(--ant-color-primary-bg-hover, rgba(22, 119, 255, 0.04));
-    box-shadow: 0 2px 8px rgba(22, 119, 255, 0.1);
+    border-color: #fa8c16;
+    background: var(--ant-color-primary-bg-hover, rgba(250, 140, 22, 0.04));
+    box-shadow: 0 2px 8px rgba(250, 140, 22, 0.1);
   }
 }
 
 .eventTileDisabled {
   cursor: not-allowed;
-  opacity: 0.6;
+  opacity: 0.75;
 
   &:hover {
     border-color: var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
@@ -191,17 +101,18 @@
 }
 
 .eventTileActive {
-  border-color: #1677ff;
-  background: var(--ant-color-primary-bg, rgba(22, 119, 255, 0.04));
+  border-color: #fa8c16;
+  background: var(--ant-color-primary-bg, rgba(250, 140, 22, 0.06));
 }
 
 .eventCheckbox {
-  margin-top: 2px;
+  margin-top: 1px;
 }
 
 .eventTitle {
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
+  color: var(--ant-color-text);
 }
 
 .eventBadge {
@@ -216,9 +127,4 @@
   font-size: 12px;
   line-height: 1.45;
   color: var(--ant-color-text-secondary, rgba(0, 0, 0, 0.45));
-}
-
-.tipAlert {
-  border-radius: 12px;
-  margin-top: 0;
 }

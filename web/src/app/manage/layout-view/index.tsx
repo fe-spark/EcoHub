@@ -33,6 +33,7 @@ import {
   SunOutlined,
   MoonOutlined,
   DesktopOutlined,
+  GlobalOutlined,
   GithubOutlined,
   QuestionCircleOutlined,
 } from "@ant-design/icons";
@@ -106,6 +107,11 @@ const menuItems: MenuItem[] = [
     label: "账号管理",
   },
   {
+    key: "/manage/system/website",
+    icon: <GlobalOutlined />,
+    label: "网站配置",
+  },
+  {
     key: "/manage/system",
     icon: <SettingOutlined />,
     label: "系统设置",
@@ -143,6 +149,9 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/system/users")) {
     return "/manage/system/users";
+  }
+  if (pathname.startsWith("/manage/system/website")) {
+    return "/manage/system/website";
   }
   if (pathname.startsWith("/manage/system")) {
     return "/manage/system";
@@ -188,7 +197,7 @@ export default function ManageLayoutView({
 
   const router = useRouter();
   const pathname = usePathname();
-  const isSystemPage = pathname.startsWith("/manage/system");
+  const isFixedTabbedPage = pathname === "/manage/system" || pathname.startsWith("/manage/system/website");
   const selectedKey = resolveMenuKey(pathname);
 
 
@@ -407,8 +416,8 @@ export default function ManageLayoutView({
           </Space>
         </Header>
         <Content
-          className={`${styles.content} ${isSystemPage ? styles.contentFixed : ""}`}
-          style={{ flex: 1, overflow: isSystemPage ? "hidden" : "auto" }}
+          className={`${styles.content} ${isFixedTabbedPage ? styles.contentFixed : ""}`}
+          style={{ flex: 1, overflow: isFixedTabbedPage ? "hidden" : "auto" }}
         >
 
           {notices.length > 0 && (
