@@ -476,8 +476,8 @@ func findPendingFailure(tx *gorm.DB, fl model.FailureRecord) (*model.FailureReco
 
 // SaveFailureRecord 添加采集失效记录
 func SaveFailureRecord(fl model.FailureRecord) error {
-	if fl.RetryCount <= 0 {
-		fl.RetryCount = 1
+	if fl.Status <= 0 {
+		fl.Status = model.FailureRecordStatusPending
 	}
 	// 数据量不多但存在并发问题，开启事务
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -487,8 +487,6 @@ func SaveFailureRecord(fl model.FailureRecord) error {
 				"origin_name": fl.OriginName,
 				"uri":         fl.Uri,
 				"cause":       fl.Cause,
-				"retry_count": gorm.Expr("CASE WHEN retry_count >= ? THEN ? ELSE retry_count + 1 END", model.MaxFailureRetryCount, model.MaxFailureRetryCount),
-				"status":      gorm.Expr("CASE WHEN status = ? OR retry_count >= ? THEN ? ELSE status END", model.FailureRecordStatusFailed, model.MaxFailureRetryCount-1, model.FailureRecordStatusFailed),
 			}
 			if err = tx.Model(&model.FailureRecord{}).Where("id = ?", current.ID).Updates(updates).Error; err != nil {
 				log.Println("Update failure record failed:", err)
@@ -580,8 +578,8 @@ func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetr
 	}
 	updates := map[string]any{
 		"cause":       cause,
-		"retry_count": gorm.Expr("CASE WHEN retry_count >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
-		"status":      gorm.Expr("CASE WHEN status = ? OR retry_count >= ? THEN ? ELSE status END", model.FailureRecordStatusFailed, maxRetryCount-1, model.FailureRecordStatusFailed),
+		"retry_count": gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
+		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE status END", maxRetryCount, model.FailureRecordStatusFailed),
 	}
 	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
 		return false, 0, err

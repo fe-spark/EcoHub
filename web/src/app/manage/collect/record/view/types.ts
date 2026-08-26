@@ -18,13 +18,3 @@ export const FAILURE_RECORD_STATUS = {
   success: 0,
   failed: 2,
 } as const;
-
-export interface RetryProgressState {
-  active: boolean;
-  type: "selected" | "all";
-  total: number;
-  completed: number;
-  successCount: number;
-  failCount: number;
-  text: string;
-}
