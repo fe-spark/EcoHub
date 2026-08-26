@@ -75,7 +75,7 @@ func (s *VersionService) StartUpgrade() error {
 		upgrading.Store(false)
 		return fmt.Errorf("无法识别当前容器，仅发布版 All-in-One 支持在线升级")
 	}
-	info := s.GetAppVersion()
+	info := s.GetAppVersion(true)
 	if !info.HasUpdate || info.Latest == "" {
 		upgrading.Store(false)
 		return fmt.Errorf("没有可升级版本")

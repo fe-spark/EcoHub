@@ -301,7 +301,7 @@ export default function ManageLayoutView({
       </div>
       <SiderVersion
         collapsed={collapsed && !isMobile}
-        canWrite={userInfo?.canWrite !== false}
+        isAdmin={Boolean(userInfo?.isAdmin)}
       />
     </>
   );

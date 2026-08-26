@@ -1,6 +1,8 @@
 package model
 
 import (
+	"server/internal/config"
+
 	"gorm.io/gorm"
 )
 
@@ -31,6 +33,10 @@ func IsVisitorRole(role int) bool {
 
 func UserCanWrite(role int) bool {
 	return !IsVisitorRole(role)
+}
+
+func IsAdmin(userID uint, role int) bool {
+	return userID == config.UserIdInitialVal || IsAdminRole(role)
 }
 
 type User struct {

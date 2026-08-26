@@ -172,7 +172,7 @@ func (s *UserService) DeleteUser(id uint) error {
 }
 
 func buildUserInfoVo(u model.User) model.UserInfoVo {
-	isAdmin := u.ID == config.UserIdInitialVal || model.IsAdminRole(u.Role)
+	isAdmin := model.IsAdmin(u.ID, u.Role)
 	isVisitor := model.IsVisitorRole(u.Role)
 	return model.UserInfoVo{
 		Id:        u.ID,

@@ -91,7 +91,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Pin a version by changing the compose image to `ghcr.io/fe-spark/ecohub:v2.0.1` (or similar). Release tags overwrite `:latest`. In the release admin you can click **Upgrade now and restart** (compose must mount `/var/run/docker.sock`; the new compose file already does). Mounting the socket means the process inside the container can talk to host Docker. Only write-capable accounts can trigger an upgrade. Drop that volume if you do not want in-app upgrades.
+Pin a version by changing the compose image to `ghcr.io/fe-spark/ecohub:v2.0.1` (or similar). Release tags overwrite `:latest`. In the release admin you can click **Upgrade now and restart** (compose must mount `/var/run/docker.sock`; the new compose file already does). Mounting the socket means the process inside the container can talk to host Docker. Only super administrator accounts can trigger an upgrade. Drop that volume if you do not want in-app upgrades.
 
 ---
 

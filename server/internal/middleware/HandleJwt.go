@@ -136,3 +136,29 @@ func WriteAccess() gin.HandlerFunc {
 		c.Next()
 	}
 }
+
+// AdminAccess 仅允许超级管理员访问
+func AdminAccess() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		v, ok := c.Get(config.AuthUserClaims)
+		if !ok {
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+			c.Abort()
+			return
+		}
+		uc, ok := v.(*utils.UserClaims)
+		if !ok || uc == nil {
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+			c.Abort()
+			return
+		}
+		if !model.IsAdmin(uc.UserID, uc.Role) {
+			dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可执行此操作", c)
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
+}
+

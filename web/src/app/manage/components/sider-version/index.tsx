@@ -28,10 +28,10 @@ function sleep(ms: number) {
 
 export default function SiderVersion({
   collapsed,
-  canWrite,
+  isAdmin = false,
 }: {
   collapsed: boolean;
-  canWrite: boolean;
+  isAdmin?: boolean;
 }) {
   const [info, setInfo] = useState<AppVersionInfo | null>(null);
   const [open, setOpen] = useState(false);
@@ -42,6 +42,7 @@ export default function SiderVersion({
 
   useEffect(() => {
     abortRef.current = false;
+    // 是否查更新由服务端按 JWT 超管身份决定，不随 isAdmin 重拉
     ApiGet("/manage/version")
       .then((resp) => {
         if (resp.code === 0 && resp.data) {
@@ -55,7 +56,7 @@ export default function SiderVersion({
   }, []);
 
   const current = info?.current || "";
-  const hasUpdate = Boolean(info?.hasUpdate);
+  const hasUpdate = Boolean(info?.hasUpdate) && isAdmin;
   const label = current ? `v${current.replace(/^v/i, "")}` : "—";
 
   const waitUntilBack = async () => {
@@ -110,8 +111,8 @@ export default function SiderVersion({
   };
 
   const startUpgrade = async () => {
-    if (!info || !canWrite) {
-      message.warning("访客仅可查看，无法升级");
+    if (!info || !isAdmin) {
+      message.warning("仅超级管理员可执行版本升级");
       return;
     }
     if (info.breaking) {
@@ -159,18 +160,18 @@ export default function SiderVersion({
         onCancel={() => setOpen(false)}
         footer={
           <Space>
-            {info?.releaseUrl ? (
+            {isAdmin && info?.releaseUrl ? (
               <Button href={info.releaseUrl} target="_blank" rel="noopener noreferrer">
                 打开 Release
               </Button>
             ) : null}
-            {hasUpdate ? (
+            {hasUpdate && isAdmin ? (
               <Button
                 type="primary"
                 icon={<CloudUploadOutlined />}
                 loading={upgrading}
                 disabled={
-                  !canWrite || !info?.canUpgrade || !!info?.breaking || upgrading
+                  !isAdmin || !info?.canUpgrade || !!info?.breaking || upgrading
                 }
                 onClick={() => {
                   Modal.confirm({
@@ -191,9 +192,9 @@ export default function SiderVersion({
         <div className={styles.modalBody}>
           <Typography.Text type="secondary">
             当前 {label}
-            {info?.latest ? `  ·  最新 ${info.latest}` : ""}
+            {isAdmin && info?.latest ? `  ·  最新 ${info.latest}` : ""}
           </Typography.Text>
-          {hasUpdate && info?.breaking ? (
+          {isAdmin && hasUpdate && info?.breaking ? (
             <Alert
               type="warning"
               showIcon
@@ -201,7 +202,7 @@ export default function SiderVersion({
               description="请先按 Release 说明处理后再升级，不能使用在线重启。"
             />
           ) : null}
-          {hasUpdate && !info?.canUpgrade && !info?.breaking ? (
+          {isAdmin && hasUpdate && !info?.canUpgrade && !info?.breaking ? (
             <Alert
               type="warning"
               showIcon
@@ -209,19 +210,21 @@ export default function SiderVersion({
               description="发布版需挂载 /var/run/docker.sock。也可在服务器执行下方命令。"
             />
           ) : null}
-          {upgrading && upgradeHint ? (
+          {isAdmin && upgrading && upgradeHint ? (
             <Alert type="info" showIcon title="升级进行中" description={upgradeHint} />
           ) : null}
-          {info?.releaseName || info?.releaseNotes ? (
-            <pre className={styles.notes}>
-              {[info.releaseName, info.releaseNotes].filter(Boolean).join("\n\n")}
-            </pre>
-          ) : (
-            <Typography.Paragraph type="secondary">
-              未能获取 GitHub Release（网络不可达时只显示当前版本）。
-            </Typography.Paragraph>
-          )}
-          {hasUpdate && (!info?.canUpgrade || info?.breaking) ? (
+          {isAdmin ? (
+            info?.releaseName || info?.releaseNotes ? (
+              <pre className={styles.notes}>
+                {[info.releaseName, info.releaseNotes].filter(Boolean).join("\n\n")}
+              </pre>
+            ) : (
+              <Typography.Paragraph type="secondary">
+                未能获取 GitHub Release（网络不可达时只显示当前版本）。
+              </Typography.Paragraph>
+            )
+          ) : null}
+          {isAdmin && hasUpdate && (!info?.canUpgrade || info?.breaking) ? (
             <>
               <Typography.Text type="secondary">
                 到服务器安装目录执行：

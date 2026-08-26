@@ -3,6 +3,7 @@ package handler
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -34,10 +35,26 @@ func (h *ManageHandler) ManageIndex(c *gin.Context) {
 }
 
 func (h *ManageHandler) AppVersion(c *gin.Context) {
-	dto.Success(service.VersionSvc.GetAppVersion(), "版本信息获取成功", c)
+	isAdmin := false
+	if v, ok := c.Get(config.AuthUserClaims); ok {
+		if uc, ok := v.(*utils.UserClaims); ok && uc != nil {
+			isAdmin = model.IsAdmin(uc.UserID, uc.Role)
+		}
+	}
+	dto.Success(service.VersionSvc.GetAppVersion(isAdmin), "版本信息获取成功", c)
 }
 
 func (h *ManageHandler) UpgradeApp(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可执行版本升级", c)
+		return
+	}
 	if err := service.VersionSvc.StartUpgrade(); err != nil {
 		dto.Failed(err.Error(), c)
 		return
