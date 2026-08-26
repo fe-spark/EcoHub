@@ -338,6 +338,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 }
 
 func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.FailureRecord {
+	repository.NormalizeFailureRecordsRetryCount()
 	return repository.FailureRecordList(params)
 }
 
@@ -362,6 +363,10 @@ func (s *CollectService) CollectRecover(id int) error {
 	fr := repository.FindRecordById(uint(id))
 	if fr == nil {
 		return errors.New("采集重试执行失败: 失败记录信息获取异常")
+	}
+	if fr.Status == model.FailureRecordStatusFailed {
+		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)
+		fr.Status = model.FailureRecordStatusPending
 	}
 	go spider.SingleRecoverSpider(fr)
 	return nil

@@ -579,7 +579,7 @@ func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetr
 	updates := map[string]any{
 		"cause":       cause,
 		"retry_count": gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
-		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE status END", maxRetryCount, model.FailureRecordStatusFailed),
+		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE ? END", maxRetryCount, model.FailureRecordStatusFailed, model.FailureRecordStatusPending),
 	}
 	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
 		return false, 0, err
@@ -626,16 +626,24 @@ func DeleteFailureRecordsByOriginIdTx(tx *gorm.DB, originId string) error {
 	return tx.Where("origin_id = ?", originId).Delete(&model.FailureRecord{}).Error
 }
 
-// NormalizeFailureRecordsRetryCount 纠正历史超出上限的失败记录重试次数与状态
+// NormalizeFailureRecordsRetryCount 纠正历史数据中状态与重试次数不一致的记录
 func NormalizeFailureRecordsRetryCount() {
 	if db.Mdb == nil {
 		return
 	}
+	// 1. 重试次数 >= 5 的，必须是 status = Failed (2)
 	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("retry_count > ?", model.MaxFailureRetryCount).
+		Where("retry_count >= ?", model.MaxFailureRetryCount).
 		Updates(map[string]any{
 			"retry_count": model.MaxFailureRetryCount,
 			"status":      model.FailureRecordStatusFailed,
+		}).Error
+
+	// 2. 重试次数 < 5 但是被错误标记成 Failed (2) 的历史脏数据，自动纠正回 Pending (1)
+	_ = db.Mdb.Model(&model.FailureRecord{}).
+		Where("retry_count < ? AND status = ?", model.MaxFailureRetryCount, model.FailureRecordStatusFailed).
+		Updates(map[string]any{
+			"status": model.FailureRecordStatusPending,
 		}).Error
 }
 
