@@ -170,6 +170,10 @@ async function waitSlotBitmaps(stage: HTMLElement, ms: number, alive: () => bool
   }
 }
 
+function isPageVisible() {
+  return typeof document === "undefined" || !document.hidden;
+}
+
 export async function playDailyIonSwap(options: {
   canvas: HTMLCanvasElement;
   stage: HTMLElement;
@@ -180,9 +184,9 @@ export async function playDailyIonSwap(options: {
   onLeadReady?: () => void;
 }) {
   const { canvas, stage, slots, pending, onHide, onReveal, onLeadReady } = options;
-  const alive = () => canvas.isConnected;
+  const alive = () => canvas.isConnected && isPageVisible();
   let ctx: CanvasRenderingContext2D | null = null;
-  if (prefersReducedMotion() || slots.length === 0) {
+  if (prefersReducedMotion() || slots.length === 0 || !isPageVisible()) {
     await applyPending(pending, onReveal, onLeadReady);
     return;
   }
@@ -243,6 +247,8 @@ export async function playDailyIonSwap(options: {
   }
 
   if (!alive()) {
+    const fallbackResult = await pending.catch(() => null);
+    fallbackResult?.apply();
     return;
   }
 

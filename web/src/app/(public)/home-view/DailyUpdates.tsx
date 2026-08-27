@@ -160,7 +160,12 @@ export default function DailyUpdates() {
   };
 
   const scheduleNext = () => {
-    if (cancelledRef.current || hoveringRef.current || inFlightRef.current) {
+    if (
+      cancelledRef.current ||
+      hoveringRef.current ||
+      inFlightRef.current ||
+      (typeof document !== "undefined" && document.hidden)
+    ) {
       return;
     }
     clearTimer();
@@ -182,7 +187,10 @@ export default function DailyUpdates() {
   );
 
   loadRef.current = async (manual = false) => {
-    if (inFlightRef.current) {
+    if (
+      inFlightRef.current ||
+      (!manual && typeof document !== "undefined" && document.hidden)
+    ) {
       return;
     }
     inFlightRef.current = true;
@@ -275,9 +283,20 @@ export default function DailyUpdates() {
   useEffect(() => {
     cancelledRef.current = false;
     void loadRef.current();
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        clearTimer();
+      } else if (!cancelledRef.current && !inFlightRef.current && !hoveringRef.current) {
+        scheduleNext();
+      }
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       cancelledRef.current = true;
       clearTimer();
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 
