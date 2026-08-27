@@ -1,8 +1,9 @@
-import { clampInCard, drawScraps, retargetScraps, spawnScraps } from "./dailyIonScrap";
+import { clampInCard, drawScraps, retargetSlotScraps, spawnScraps } from "./dailyIonScrap";
 
-const OUT_MS = 380;
-const IN_MS = 720;
-const MIN_HOLD_MS = 240;
+const OUT_MS = 360;
+const IN_MS = 500;
+const MIN_HOLD_MS = 160;
+const MAX_IMAGE_WAIT_MS = 1600;
 
 export type IonPending = {
   apply: () => void;
@@ -91,12 +92,6 @@ function fitCanvas(canvas: HTMLCanvasElement, stage: DOMRect) {
   canvas.style.height = "100%";
 }
 
-function nextFrame() {
-  return new Promise<void>((resolve) => {
-    requestAnimationFrame(() => resolve());
-  });
-}
-
 function slotSettled(slot: HTMLElement) {
   const img = slot.querySelector("img");
   if (!(img instanceof HTMLImageElement)) {
@@ -158,18 +153,6 @@ async function applyPending(
   onReveal();
 }
 
-async function waitSlotBitmaps(stage: HTMLElement, ms: number, alive: () => boolean) {
-  const start = performance.now();
-  while (alive() && performance.now() - start < ms) {
-    const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
-    const waiting = slots.some((slot) => slot.hasAttribute("data-ion-fx") && !slotSettled(slot));
-    if (!waiting) {
-      return;
-    }
-    await nextFrame();
-  }
-}
-
 function isPageVisible() {
   return typeof document === "undefined" || !document.hidden;
 }
@@ -200,126 +183,171 @@ export async function playDailyIonSwap(options: {
   }
 
   try {
-  const scraps = spawnScraps(slots, stageRect);
-  if (scraps.length === 0) {
-    await applyPending(pending, onReveal, onLeadReady);
-    return;
-  }
+    const scraps = spawnScraps(slots, stageRect);
+    if (scraps.length === 0) {
+      await applyPending(pending, onReveal, onLeadReady);
+      return;
+    }
 
-  drawScraps(ctx, scraps, 1);
-  markShatterSlots(slots);
-  onHide();
+    drawScraps(ctx, scraps, 1);
+    markShatterSlots(slots);
+    onHide();
 
-  await animate(
-    OUT_MS,
-    (t) => {
-      for (let i = 0; i < scraps.length; i += 1) {
-        const p = scraps[i];
-        const e = easeOut(Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay)));
-        p.x = p.homeX + p.wx * e;
-        p.y = p.homeY + p.wy * e;
-        p.w = p.homeW;
-        p.h = p.homeH;
-        clampInCard(p);
-      }
-      drawScraps(ctx, scraps, 1);
-    },
-    alive,
-  );
+    await animate(
+      OUT_MS,
+      (t) => {
+        for (let i = 0; i < scraps.length; i += 1) {
+          const p = scraps[i];
+          const e = easeOut(Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay)));
+          p.x = p.homeX + p.wx * e;
+          p.y = p.homeY + p.wy * e;
+          p.w = p.homeW;
+          p.h = p.homeH;
+          clampInCard(p);
+        }
+        drawScraps(ctx, scraps, 1);
+      },
+      alive,
+    );
 
-  for (let i = 0; i < scraps.length; i += 1) {
-    scraps[i].holdX = scraps[i].x;
-    scraps[i].holdY = scraps[i].y;
-  }
+    for (let i = 0; i < scraps.length; i += 1) {
+      scraps[i].holdX = scraps[i].x;
+      scraps[i].holdY = scraps[i].y;
+    }
 
-  let holdTimer: number | undefined;
-  const minHold = new Promise<void>((resolve) => {
-    holdTimer = window.setTimeout(resolve, MIN_HOLD_MS);
-  });
-  const result = await holdUntil(
-    ctx,
-    scraps,
-    Promise.all([pending.catch(() => null), minHold]).then(([next]) => next),
-    alive,
-  );
-  if (holdTimer != null) {
-    window.clearTimeout(holdTimer);
-  }
+    let holdTimer: number | undefined;
+    const minHold = new Promise<void>((resolve) => {
+      holdTimer = window.setTimeout(resolve, MIN_HOLD_MS);
+    });
+    const result = await holdUntil(
+      ctx,
+      scraps,
+      Promise.all([pending.catch(() => null), minHold]).then(([next]) => next),
+      alive,
+    );
+    if (holdTimer != null) {
+      window.clearTimeout(holdTimer);
+    }
 
-  if (!alive()) {
-    const fallbackResult = await pending.catch(() => null);
-    fallbackResult?.apply();
-    return;
-  }
+    if (!alive()) {
+      const fallbackResult = await pending.catch(() => null);
+      fallbackResult?.apply();
+      return;
+    }
 
-  result?.apply();
-  await waitSlotBitmaps(stage, 1500, alive);
-  if (!alive()) {
-    return;
-  }
+    // 将新数据应用到 React DOM 中挂载真实 <img>
+    result?.apply();
 
-  const nextRect = stage.getBoundingClientRect();
-  fitCanvas(canvas, nextRect);
-  const nextSlots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
-  if (nextSlots.length !== slots.length) {
+    const nextRect = stage.getBoundingClientRect();
+    fitCanvas(canvas, nextRect);
+    const nextSlots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
+    if (nextSlots.length !== slots.length) {
+      revealSettledSlots(stage, true, onLeadReady);
+      onReveal();
+      return;
+    }
+
+    // 渐进式独立汇聚：先加载好的卡片先汇聚并展现，未加载好的卡片保持离子粒子浮动
+    type SlotStatus = "holding" | "converging" | "done";
+    interface SlotState {
+      status: SlotStatus;
+      startTime: number;
+    }
+
+    const slotStates: SlotState[] = nextSlots.map(() => ({
+      status: "holding",
+      startTime: 0,
+    }));
+
+    const holdStart = performance.now();
+    const maxDeadline = holdStart + MAX_IMAGE_WAIT_MS;
+
+    await new Promise<void>((resolve) => {
+      const loop = (now: number) => {
+        if (!alive()) {
+          resolve();
+          return;
+        }
+
+        let allDone = true;
+
+        for (let s = 0; s < nextSlots.length; s += 1) {
+          const state = slotStates[s];
+          const slotEl = nextSlots[s];
+
+          if (state.status === "holding") {
+            allDone = false;
+            // 该卡片图片已就绪，或达到最大等待超时，立即启动该卡片的汇聚动画
+            if (slotSettled(slotEl) || now >= maxDeadline) {
+              retargetSlotScraps(scraps, s, slotEl, nextRect, Boolean(result));
+              state.status = "converging";
+              state.startTime = now;
+            } else {
+              // 仍未就绪：继续自然离子态浮动
+              const sec = (now - holdStart) / 1000;
+              for (let i = 0; i < scraps.length; i += 1) {
+                if (scraps[i].slotIndex === s) {
+                  const p = scraps[i];
+                  const wave = Math.sin(sec * p.freq + p.phase);
+                  p.x = p.holdX + p.px * wave * p.amp;
+                  p.y = p.holdY + p.py * wave * p.amp * 0.5;
+                  clampInCard(p);
+                }
+              }
+            }
+          }
+
+          if (state.status === "converging") {
+            const elapsed = now - state.startTime;
+            const t = Math.min(1, elapsed / IN_MS);
+
+            for (let i = 0; i < scraps.length; i += 1) {
+              if (scraps[i].slotIndex === s) {
+                const p = scraps[i];
+                const local = Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay));
+                const e = easeInOut(local);
+                p.x = p.holdX + (p.homeX - p.holdX) * e;
+                p.y = p.holdY + (p.homeY - p.holdY) * e;
+                p.w = p.homeW;
+                p.h = p.homeH;
+                p.mix = p.altImg ? Math.max(0, Math.min(1, (local - 0.12) / 0.28)) : 0;
+                clampInCard(p);
+              }
+            }
+
+            if (t >= 1) {
+              state.status = "done";
+              slotEl.removeAttribute("data-ion-fx");
+              if (s === 0) {
+                onLeadReady?.();
+              }
+            } else {
+              allDone = false;
+            }
+          }
+        }
+
+        if (allDone) {
+          resolve();
+          return;
+        }
+
+        const activeScraps = scraps.filter((p) => slotStates[p.slotIndex]?.status !== "done");
+        drawScraps(ctx, activeScraps, 1);
+        requestAnimationFrame(loop);
+      };
+
+      requestAnimationFrame(loop);
+    });
+
+    if (!alive()) {
+      return;
+    }
     revealSettledSlots(stage, true, onLeadReady);
     onReveal();
-    return;
-  }
-  retargetScraps(scraps, nextSlots, nextRect, Boolean(result));
-  drawScraps(ctx, scraps, 1);
-  if (!nextSlots[0]?.hasAttribute("data-ion-fx")) {
-    onLeadReady?.();
-  }
-
-  await animate(
-    IN_MS,
-    (t) => {
-      for (let i = 0; i < scraps.length; i += 1) {
-        const p = scraps[i];
-        const local = Math.max(0, (t - p.delay) / Math.max(0.001, 1 - p.delay));
-        const e = easeInOut(local);
-        p.x = p.holdX + (p.homeX - p.holdX) * e;
-        p.y = p.holdY + (p.homeY - p.holdY) * e;
-        p.w = p.homeW;
-        p.h = p.homeH;
-        p.mix = p.altImg ? Math.max(0, Math.min(1, (local - 0.12) / 0.28)) : 0;
-        clampInCard(p);
-      }
-      drawScraps(ctx, scraps, 1);
-    },
-    alive,
-  );
-
-  if (!alive()) {
-    return;
-  }
-
-  const until = performance.now() + 2000;
-  while (alive()) {
-    const hidden = revealSettledSlots(stage, performance.now() >= until, onLeadReady);
-    const left = scraps.filter((p) => hidden.has(p.slotIndex));
-    if (left.length === 0) {
-      break;
-    }
-    const sec = performance.now() / 1000;
-    for (let i = 0; i < left.length; i += 1) {
-      const p = left[i];
-      const wave = Math.sin(sec * p.freq + p.phase);
-      p.x = p.homeX + p.px * wave * p.amp;
-      p.y = p.homeY + p.py * wave * p.amp * 0.5;
-      clampInCard(p);
-    }
-    drawScraps(ctx, left, 1);
-    await nextFrame();
-  }
-
-  if (!alive()) {
-    return;
-  }
-  revealSettledSlots(stage, true, onLeadReady);
-  onReveal();
   } finally {
     clearIonVisuals(stage, ctx);
+    revealSettledSlots(stage, true, onLeadReady);
+    onReveal();
   }
 }
