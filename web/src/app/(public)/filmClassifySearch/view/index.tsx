@@ -1,16 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
-import { LeftOutlined, RightOutlined } from "@ant-design/icons";
+import React, { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import {
+  AppstoreOutlined,
+  ClearOutlined,
+  CompassOutlined,
+  FilterOutlined,
+  LeftOutlined,
+  RightOutlined,
+} from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { Pagination } from "antd";
 import FilmList from "@/components/public/FilmList";
 import AppLoading from "@/components/public/Loading";
-import styles from "./index.module.less";
+import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import {
   forceFinishNavigationLoading,
   startNavigationLoading,
 } from "@/components/public/TopLoadingBar";
+import styles from "./index.module.less";
 
 /**
  * 单行筛选行滚动箭头 Hook
@@ -58,9 +66,10 @@ export default function FilmClassifySearchPageView({
   currentParams: Record<string, string>;
 }) {
   const router = useRouter();
+  const { navigate } = useContentNavigate();
   const [isRoutePending, startTransition] = useTransition();
   const [navigatingUrl, setNavigatingUrl] = useState("");
-  const { title, list, search, params, page } = data;
+  const { title, list, search, params, page } = data || {};
   const safeList = Array.isArray(list) ? list : [];
   const safeSearch = {
     titles: search?.titles ?? {},
@@ -69,7 +78,9 @@ export default function FilmClassifySearchPageView({
   };
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 20 };
-  const categoryKey = [safeParams.Pid || currentParams.Pid || "", safeParams.Category || currentParams.Category || ""].join(":");
+  const pid = safeParams.Pid || currentParams.Pid || "0";
+  const categoryName = title?.name || "分类";
+  const categoryKey = [pid, safeParams.Category || currentParams.Category || ""].join(":");
 
   /** 语义化 query 比较：忽略键序与空值，避免 page 过滤假值后全等失败卡 loading */
   const normalizeQueryKey = useCallback((input: string | Record<string, string>) => {
@@ -176,41 +187,114 @@ export default function FilmClassifySearchPageView({
     pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "加载列表中...");
   };
 
+  const hasActiveFilters = useMemo(() => {
+    const filterKeys = ["Category", "Plot", "Area", "Language", "Year", "Sort"];
+    return filterKeys.some((k) => {
+      const val = currentParams[k];
+      if (!val) return false;
+      if (k === "Sort" && (val === "update_stamp" || val === "")) return false;
+      return true;
+    });
+  }, [currentParams]);
+
+  const handleResetFilters = () => {
+    if (isPending || !hasActiveFilters) {
+      return;
+    }
+    const nextParams = new URLSearchParams();
+    if (currentParams.Pid) {
+      nextParams.set("Pid", currentParams.Pid);
+    }
+    nextParams.set("current", "1");
+    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "重置筛选中...");
+  };
+
   return (
     <div className={`${styles.container} ${isPending ? styles.isPending : ""}`}>
-      <div className={styles.resultHeader}>
-        <div className={styles.count}>
-          <span>{title?.name || "全部"}</span>共 {safePage.total ?? 0} 部影片
+      {/* 头部专区氛围卡片 */}
+      <header className={styles.heroHeader}>
+        <div className={styles.heroGlow} aria-hidden />
+        <div className={styles.heroContent}>
+          <div className={styles.heroMeta}>
+            <span className={styles.eyebrow}>
+              <FilterOutlined className={styles.eyebrowIcon} />
+              <span>片库检索 · 共 {safePage.total ?? 0} 部</span>
+            </span>
+            <h1 className={styles.heroTitle}>{categoryName}片库</h1>
+            <p className={styles.heroDesc}>
+              多维标签极速检索，支持按剧情、地区、语言、年份与热度精准筛选
+            </p>
+          </div>
+
+          <div className={styles.headerActions}>
+            <div className={styles.tabSwitcher}>
+              <button
+                type="button"
+                className={styles.tabBtn}
+                onClick={() =>
+                  navigate(`/filmClassify?Pid=${pid}`, "分类专区加载中...")
+                }
+              >
+                <AppstoreOutlined />
+                <span>精选推荐</span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.tabBtn} ${styles.active}`}
+                onClick={() =>
+                  navigate(`/filmClassifySearch?Pid=${pid}`, "片库加载中...")
+                }
+              >
+                <CompassOutlined />
+                <span>全量片库</span>
+              </button>
+            </div>
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                className={styles.resetBtn}
+                onClick={handleResetFilters}
+                aria-label="重置所有筛选"
+              >
+                <ClearOutlined />
+                <span>重置筛选</span>
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      </header>
 
-      {/* 筛选区始终保留，不进入全屏 loading */}
-      <div className={styles.filterSection} aria-busy={isPending}>
-        {safeSearch.sortList.map((key: string) => (
-          <FilterRow
-            key={key}
-            filterKey={key}
-            label={safeSearch.titles[key]}
-            tags={getSafeTags(safeSearch.tags[key])}
-            activeValue={normalizeTagValue(safeParams[key])}
-            isPending={isPending}
-            onTagClick={handleTagClick}
-            normalizeTagValue={normalizeTagValue}
-          />
-        ))}
-      </div>
+      {/* 多维筛选面板 */}
+      {safeSearch.sortList.length > 0 && (
+        <div className={styles.filterSection} aria-busy={isPending}>
+          {safeSearch.sortList.map((key: string) => (
+            <FilterRow
+              key={key}
+              filterKey={key}
+              label={safeSearch.titles[key] || key}
+              tags={getSafeTags(safeSearch.tags[key])}
+              activeValue={normalizeTagValue(safeParams[key])}
+              isPending={isPending}
+              onTagClick={handleTagClick}
+              normalizeTagValue={normalizeTagValue}
+            />
+          ))}
+        </div>
+      )}
 
-      {/* 仅列表区域 loading */}
+      {/* 列表与局部加载 */}
       <div className={styles.content}>
         {isPending ? (
           <div className={styles.listLoading} role="status" aria-live="polite">
-            <AppLoading text="列表加载中" size="default" showHints={false} />
+            <AppLoading text="列表加载中..." size="default" showHints={false} />
           </div>
         ) : (
-          <FilmList key={categoryKey} list={safeList} className={styles.classifyGrid} />
+          <FilmList key={categoryKey} list={safeList} col={6} />
         )}
       </div>
 
+      {/* 分页控制 */}
       {!isPending && safeList.length > 0 && (
         <div className={styles.paginationWrapper}>
           <Pagination
@@ -227,7 +311,7 @@ export default function FilmClassifySearchPageView({
   );
 }
 
-/** 单行筛选行：带左右箭头滚动控制 */
+/** 单行筛选行：带左右滚动控制 */
 function FilterRow({
   filterKey,
   label,
@@ -263,20 +347,24 @@ function FilterRow({
           </button>
         )}
         <div className={styles.options} ref={ref}>
-          {tags.map((tag: any, index: number) => (
-            <span
-              key={`${filterKey}-${tag.Value}-${tag.Name}-${index}`}
-              className={`${styles.option} ${activeValue === normalizeTagValue(tag.Value) ? styles.active : ""}`}
-              aria-disabled={isPending}
-              onClick={() => {
-                if (!isPending) {
-                  onTagClick(filterKey, tag.Value);
-                }
-              }}
-            >
-              {tag.Name}
-            </span>
-          ))}
+          {tags.map((tag: any, index: number) => {
+            const val = normalizeTagValue(tag.Value);
+            const isActive = activeValue === val;
+            return (
+              <span
+                key={`${filterKey}-${tag.Value}-${tag.Name}-${index}`}
+                className={`${styles.option} ${isActive ? styles.active : ""}`}
+                aria-disabled={isPending}
+                onClick={() => {
+                  if (!isPending) {
+                    onTagClick(filterKey, tag.Value);
+                  }
+                }}
+              >
+                {tag.Name}
+              </span>
+            );
+          })}
         </div>
         {canRight && (
           <button
