@@ -3,6 +3,7 @@ package notify
 import (
 	"database/sql"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"server/internal/infra/db"
@@ -14,7 +15,18 @@ import (
 const (
 	DailyPidAll   int64 = 0
 	DailyPidOther int64 = -1
+	// 随机池上限：近 24h 去重 mid 按时间取前 N 再洗牌，避免 ORDER BY RAND() filesort。
+	dailyRandomPoolCap = 500
 )
+
+type dailyUpdateMidRow struct {
+	Mid int64 `gorm:"column:mid"`
+}
+
+type dailyPidCountRow struct {
+	Pid   sql.NullInt64 `gorm:"column:pid"`
+	Count int           `gorm:"column:cnt"`
+}
 
 // NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源。
 func NavTopCategories() []model.Category {
@@ -51,7 +63,7 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 }
 
 func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64) *gorm.DB {
-	q := db.Mdb.Table(model.TableNotifyChangeMid + " AS c").
+	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
 		Where("c.created_at >= ? AND c.created_at <= ?", from, to)
 	if pid != DailyPidAll {
 		q = q.Joins("LEFT JOIN " + model.TableFilmIndex + " AS f ON f.mid = c.mid")
@@ -105,20 +117,20 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	}
 
 	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
-
-	type row struct {
-		Mid int64 `gorm:"column:mid"`
-	}
-	var rows []row
 	listQ = listQ.Select("c.mid AS mid, MAX(c.created_at) AS latest_time").Group("c.mid")
+
+	var rows []dailyUpdateMidRow
 	if q.Random {
-		listQ = listQ.Order("RAND()").Limit(pageSize)
+		var pool []dailyUpdateMidRow
+		if err = listQ.Order("latest_time DESC, c.mid DESC").Limit(dailyRandomPoolCap).Scan(&pool).Error; err != nil {
+			return nil, total, err
+		}
+		rows = pickRandomDailyUpdateRows(pool, pageSize)
 	} else {
 		offset := (current - 1) * pageSize
-		listQ = listQ.Order("latest_time DESC, c.mid DESC").Offset(offset).Limit(pageSize)
-	}
-	if err = listQ.Scan(&rows).Error; err != nil {
-		return nil, total, err
+		if err = listQ.Order("latest_time DESC, c.mid DESC").Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+			return nil, total, err
+		}
 	}
 	mids = make([]int64, 0, len(rows))
 	for _, r := range rows {
@@ -129,9 +141,22 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	return mids, total, nil
 }
 
+func pickRandomDailyUpdateRows(rows []dailyUpdateMidRow, pageSize int) []dailyUpdateMidRow {
+	if len(rows) == 0 {
+		return []dailyUpdateMidRow{}
+	}
+	shuffled := append([]dailyUpdateMidRow(nil), rows...)
+	rand.Shuffle(len(shuffled), func(i, j int) {
+		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+	})
+	if pageSize > 0 && len(shuffled) > pageSize {
+		shuffled = shuffled[:pageSize]
+	}
+	return shuffled
+}
+
 // DailyUpdatePidCounts 近 24h 按导航大类聚合数量。navIDs 由调用方预取，避免重复全表扫描分类树。
-// 口径与列表一致：film_index 缺失的孤儿 mid（f.pid 为 NULL）计入 total（「全部」列表可见），
-// 但不计入 otherCount（「其他」列表经 applyNavCategoryFilter 排除 NULL）。
+// 孤儿 mid（film_index 缺失 / f.pid NULL）计入 total 与 otherCount，与「其他」列表口径一致。
 func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[int64]int, otherCount int, total int, err error) {
 	countByPid = map[int64]int{}
 	if db.Mdb == nil {
@@ -146,11 +171,7 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 		navSet[id] = struct{}{}
 	}
 
-	type pidRow struct {
-		Pid   sql.NullInt64 `gorm:"column:pid"`
-		Count int           `gorm:"column:cnt"`
-	}
-	var rows []pidRow
+	var rows []dailyPidCountRow
 	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
 		Select("f.pid AS pid, COUNT(DISTINCT c.mid) AS cnt").
 		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
@@ -159,7 +180,12 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 	if err = q.Scan(&rows).Error; err != nil {
 		return countByPid, 0, 0, err
 	}
+	countByPid, otherCount, total = accumulateDailyPidCounts(rows, navSet)
+	return countByPid, otherCount, total, nil
+}
 
+func accumulateDailyPidCounts(rows []dailyPidCountRow, navSet map[int64]struct{}) (countByPid map[int64]int, otherCount, total int) {
+	countByPid = map[int64]int{}
 	for _, r := range rows {
 		if r.Count <= 0 {
 			continue
@@ -171,11 +197,9 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 				continue
 			}
 		}
-		if r.Pid.Valid {
-			otherCount += r.Count
-		}
+		otherCount += r.Count
 	}
-	return countByPid, otherCount, total, nil
+	return countByPid, otherCount, total
 }
 
 // ClampDailyUpdateExclude 限制随机排除列表长度，避免 NOT IN 占位符/包过大。

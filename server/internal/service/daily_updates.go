@@ -125,13 +125,8 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 		log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
 		cats = []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: total}}
 	} else {
-		// 分类「全部」与当前列表 total 在非随机下应对齐；随机模式下 total 是剩余可抽数，
-		// 分类角标仍用全窗 catTotal，避免 tab 数字随 exclude 收缩。
-		allCount := catTotal
-		if !req.Random {
-			allCount = total
-		}
-		cats = AssembleDailyUpdateCategories(nav, countByPid, otherCount, allCount)
+		// 「全部」角标始终用全窗 catTotal；当前 tab 数量只放在 page.total。
+		cats = AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
 	}
 
 	return &DailyUpdateResult{List: list, Page: page, Categories: cats}, nil

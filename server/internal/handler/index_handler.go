@@ -117,9 +117,10 @@ func (h *IndexHandler) DailyUpdates(c *gin.Context) {
 }
 
 // DailyUpdatesV2 近 24h 更新：
-//   pid=0 全部；pid=-1 其他；pid>0 导航大类
-//   current/page + pageSize/size 标准分页
-//   random=1 时按分类随机抽样，exclude 排除已出现的 mid
+//
+//	pid=0 全部；pid=-1 其他；pid>0 导航大类
+//	current/page + pageSize/size 标准分页
+//	random=1 时按分类随机抽样，exclude 排除已出现的 mid
 func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
 	result, err := service.IndexSvc.DailyUpdatesV2(service.DailyUpdateListReq{
 		Pid: parseDailyUpdatePid(queryFirst(c, "pid", "Pid")),
@@ -153,6 +154,22 @@ func parseQueryInt(raw string, fallback int) int {
 	n, err := strconv.Atoi(raw)
 	if err != nil {
 		return fallback
+	}
+	return n
+}
+
+const (
+	hotKeywordsDefaultLimit = 8
+	hotKeywordsMaxLimit     = 20
+)
+
+func parseHotKeywordsLimit(raw string) int {
+	n := parseQueryInt(raw, hotKeywordsDefaultLimit)
+	if n <= 0 {
+		return hotKeywordsDefaultLimit
+	}
+	if n > hotKeywordsMaxLimit {
+		return hotKeywordsMaxLimit
 	}
 	return n
 }
@@ -316,7 +333,7 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 
 // HotKeywords 获取当前全站热门搜索推荐词
 func (h *IndexHandler) HotKeywords(c *gin.Context) {
-	limit := parseQueryInt(c.Query("limit"), 8)
+	limit := parseHotKeywordsLimit(c.Query("limit"))
 	list := service.IndexSvc.GetHotSearchKeywords(limit)
 	dto.Success(list, "热门搜索获取成功", c)
 }
