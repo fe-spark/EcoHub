@@ -210,11 +210,18 @@ export default function DailyUpdates() {
       if (cancelledRef.current || next.length === 0) {
         return null;
       }
+      // 获取到新数据直接更新首个影片的标题、简介与标签，无需等待图片与动画结束
+      if (next[0]) {
+        setCopyLead(next[0]);
+      }
       return {
         apply: () => {
           listRef.current = next;
           flushSync(() => {
             setList(next);
+            if (next[0]) {
+              setCopyLead(next[0]);
+            }
           });
         },
       };
@@ -224,10 +231,6 @@ export default function DailyUpdates() {
       if (!canIon || !stage || !canvas) {
         const result = await loadNext();
         result?.apply();
-        const nextLead = listRef.current?.[0];
-        if (nextLead) {
-          setCopyLead(nextLead);
-        }
         return;
       }
 
@@ -246,20 +249,10 @@ export default function DailyUpdates() {
           onReveal: () => {
             stage.classList.remove(styles.stageIon);
           },
-          onLeadReady: () => {
-            const nextLead = listRef.current?.[0];
-            if (nextLead) {
-              setCopyLead(nextLead);
-            }
-          },
         });
       } catch {
         const result = await pending;
         result?.apply();
-        const nextLead = listRef.current?.[0];
-        if (nextLead) {
-          setCopyLead(nextLead);
-        }
       } finally {
         stage.classList.remove(styles.stageIon);
         stage.querySelectorAll("[data-ion-fx]").forEach((el) => {
