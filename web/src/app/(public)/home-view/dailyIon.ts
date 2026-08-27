@@ -1,6 +1,7 @@
 import { clampInCard, drawScraps, retargetSlotScraps, spawnScraps } from "./dailyIonScrap";
 
-const OUT_MS = 360;
+// 散开要飞到随机格点，比原先几像素抖动更远
+const OUT_MS = 480;
 const IN_MS = 500;
 const MIN_HOLD_MS = 160;
 const MAX_IMAGE_WAIT_MS = 1600;

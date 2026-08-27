@@ -162,7 +162,7 @@ export function bindPixelHover(root: HTMLElement) {
     canvas.setAttribute("aria-hidden", "true");
     canvas.dataset.pixelFx = "1";
     canvas.style.cssText =
-      "position:absolute;left:0;top:0;pointer-events:none;z-index:4;border-radius:inherit;display:block;";
+      "position:absolute;left:0;top:0;pointer-events:none;z-index:0;border-radius:inherit;display:block;";
     slot.appendChild(canvas);
     const cover = slot.querySelector("img");
     if (cover) {

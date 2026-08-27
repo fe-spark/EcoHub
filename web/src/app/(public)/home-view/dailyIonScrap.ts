@@ -185,6 +185,38 @@ function shuffleOrder(n: number) {
   return order;
 }
 
+/** Sattolo：无不动点的单循环，散开时每块都会离开原格 */
+function derangeOrder(n: number) {
+  const order = Array.from({ length: n }, (_, i) => i);
+  for (let i = n - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * i);
+    const tmp = order[i];
+    order[i] = order[j];
+    order[j] = tmp;
+  }
+  return order;
+}
+
+/** 散开目标改成随机格点，避免只抖动几像素仍能看出原图 */
+function scrambleSlotScatter(scraps: Scrap[], start: number) {
+  const n = scraps.length - start;
+  if (n < 2) {
+    return;
+  }
+  const homesX = new Array<number>(n);
+  const homesY = new Array<number>(n);
+  for (let i = 0; i < n; i += 1) {
+    homesX[i] = scraps[start + i].homeX;
+    homesY[i] = scraps[start + i].homeY;
+  }
+  const order = derangeOrder(n);
+  for (let i = 0; i < n; i += 1) {
+    const p = scraps[start + i];
+    p.wx = homesX[order[i]] - p.homeX;
+    p.wy = homesY[order[i]] - p.homeY;
+  }
+}
+
 function layout(p: Scrap, slot: DOMRect, stage: DOMRect) {
   p.w = p.uw * slot.width;
   p.h = p.uh * slot.height;
@@ -227,10 +259,10 @@ export function spawnScraps(slots: HTMLElement[], stage: DOMRect): Scrap[] {
     const block = compact ? PIXEL_COMPACT : PIXEL;
     const pix = pixelate(img, rect.width, rect.height, block);
     const pieces = splitPixels(rect.width, rect.height, compact, s === 0);
+    const start = out.length;
     for (let i = 0; i < pieces.length; i += 1) {
       const piece = pieces[i];
       const ang = Math.random() * Math.PI * 2;
-      const force = 2 + Math.random() * 4;
       const p: Scrap = {
         slotIndex: s,
         u: piece.x / rect.width,
@@ -251,8 +283,8 @@ export function spawnScraps(slots: HTMLElement[], stage: DOMRect): Scrap[] {
         boxT: 0,
         boxR: 0,
         boxB: 0,
-        wx: Math.cos(ang) * force,
-        wy: Math.sin(ang) * force,
+        wx: 0,
+        wy: 0,
         px: -Math.sin(ang),
         py: Math.cos(ang),
         delay: Math.random() * 0.08,
@@ -276,6 +308,7 @@ export function spawnScraps(slots: HTMLElement[], stage: DOMRect): Scrap[] {
       bindFromPixel(p, pix, img, "img");
       out.push(p);
     }
+    scrambleSlotScatter(out, start);
   }
   return out;
 }
