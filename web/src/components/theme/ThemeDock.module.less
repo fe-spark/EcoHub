@@ -1,248 +1,118 @@
-// ── 整体容器（仅定位/拖拽，无视觉） ───────────────────────────
+// ── 固定右下角悬浮工具容器（桌面端专属） ───────────────────────────
 .dock {
   position: fixed;
-  z-index: 2147483000;
-  width: 44px;
-  height: 44px;
-  cursor: grab;
+  right: 28px;
+  bottom: 28px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
   user-select: none;
-  touch-action: none;
   -webkit-user-select: none;
-
-  transition:
-    top 0.26s cubic-bezier(0.2, 0.85, 0.2, 1),
-    left 0.26s cubic-bezier(0.2, 0.85, 0.2, 1),
-    transform 0.2s ease;
 }
 
-.dragging {
-  cursor: grabbing;
-  transition: none;
-
-  .trigger {
-    border-radius: 50% !important;
-    border: 1px solid color-mix(in srgb, var(--ant-color-primary) 34%, var(--ant-color-border-secondary)) !important;
-    padding-left: 0 !important;
-    padding-right: 0 !important;
-    transform: scale(1.06);
-  }
-}
-
-.snapping.left {
-  animation: dockSnapLeft 0.28s cubic-bezier(0.2, 0.85, 0.2, 1);
-}
-
-.snapping.right {
-  animation: dockSnapRight 0.28s cubic-bezier(0.2, 0.85, 0.2, 1);
-}
-
-@keyframes dockSnapLeft {
-  0% {
-    transform: translateX(8px);
-  }
-  65% {
-    transform: translateX(-1px);
-  }
-  100% {
-    transform: translateX(0);
-  }
-}
-
-@keyframes dockSnapRight {
-  0% {
-    transform: translateX(-8px);
-  }
-  65% {
-    transform: translateX(1px);
-  }
-  100% {
-    transform: translateX(0);
-  }
-}
-
-@keyframes snapLeft {
-  0% {
-    transform: translateX(7px) scale(0.98);
-  }
-  55% {
-    transform: translateX(-1px) scale(1.01);
-  }
-  100% {
-    transform: translateX(0) scale(1);
-  }
-}
-
-@keyframes snapRight {
-  0% {
-    transform: translateX(-7px) scale(0.98);
-  }
-  55% {
-    transform: translateX(1px) scale(1.01);
-  }
-  100% {
-    transform: translateX(0) scale(1);
+// 移动端彻底隐藏悬浮球（收纳至移动端汉堡菜单抽屉底部）
+@media (max-width: 768px) {
+  .dock {
+    display: none !important;
   }
 }
 
 // ── 圆形触发按钮 ────────────────────────────────────────────────
 .trigger {
-  position: relative;
-  width: 44px;
-  height: 44px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 32% 24%, color-mix(in srgb, var(--ant-color-primary) 26%, transparent), transparent 36%),
-    linear-gradient(145deg, color-mix(in srgb, var(--ant-color-bg-elevated) 94%, transparent), color-mix(in srgb, var(--ant-color-bg-container) 78%, transparent));
-  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 16%, var(--ant-color-border-secondary));
-  backdrop-filter: blur(18px) saturate(160%);
-  -webkit-backdrop-filter: blur(18px) saturate(160%);
-  box-shadow:
-    0 12px 34px rgba(0, 0, 0, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.18);
-  color: var(--ant-color-primary);
-  transition:
-    box-shadow 0.2s ease,
-    color 0.2s ease,
-    background 0.2s ease,
-    border-color 0.2s ease,
-    transform 0.15s ease;
-
-  &::before {
-    content: "";
-    position: absolute;
-    inset: 5px;
-    border-radius: inherit;
-    border: 1px solid color-mix(in srgb, var(--ant-color-primary) 20%, transparent);
-    pointer-events: none;
-  }
+  background: var(--public-surface-2);
+  border: 1px solid var(--public-border-2);
+  backdrop-filter: blur(16px) saturate(160%);
+  -webkit-backdrop-filter: blur(16px) saturate(160%);
+  box-shadow: var(--public-shadow-md);
+  color: var(--public-text-2);
+  cursor: pointer;
+  outline: none;
+  padding: 0;
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 
   svg {
     display: block;
-    position: relative;
-    z-index: 1;
     pointer-events: none;
-    transform: translateX(0);
+    transition: transform 0.3s ease;
   }
 
-  .dock:hover & {
-    border-color: color-mix(in srgb, var(--ant-color-primary) 36%, var(--ant-color-border-secondary));
-    box-shadow:
-      0 14px 38px rgba(0, 0, 0, 0.26),
-      0 0 0 4px color-mix(in srgb, var(--ant-color-primary) 10%, transparent),
-      inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    transform: translateY(-1px) scale(1.02);
+  &:hover {
+    color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.4);
+    background: var(--public-surface-hover);
+    transform: translateY(-2px);
+    box-shadow: var(--public-shadow-lg);
+
+    svg {
+      transform: scale(1.1);
+    }
   }
 
   .dock.expanded & {
-    color: var(--ant-color-primary);
-    background:
-      radial-gradient(circle at 32% 24%, color-mix(in srgb, var(--ant-color-primary) 34%, transparent), transparent 38%),
-      linear-gradient(145deg, color-mix(in srgb, var(--ant-color-primary-bg) 46%, var(--ant-color-bg-elevated)), var(--ant-color-bg-elevated));
-    border-color: color-mix(in srgb, var(--ant-color-primary) 44%, var(--ant-color-border-secondary));
-    box-shadow:
-      0 16px 44px rgba(0, 0, 0, 0.28),
-      0 0 0 5px color-mix(in srgb, var(--ant-color-primary) 12%, transparent),
-      inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    color: var(--primary-color);
+    border-color: var(--primary-color);
+    background: rgba(var(--primary-color-rgb), 0.12);
   }
 }
 
-// 贴边态：改为边缘标签形态（非圆形）
-.dock.left .trigger {
-  border-radius: 0 22px 22px 0;
-  border-left: none;
-  padding-left: 0;
-
-  svg {
-    transform: translateX(-1px);
-  }
-}
-
-.dock.right .trigger {
-  border-radius: 22px 0 0 22px;
-  border-right: none;
-  padding-right: 0;
-
-  svg {
-    transform: translateX(1px);
-  }
-}
-
-// ── 弹出选项面板 ─────────────────────────────────────────────────
+// ── 弹出选项面板（向上展开） ────────────────────────────────────
 .panel {
   position: absolute;
-  top: -2px;
+  bottom: calc(100% + 10px);
+  right: 0;
   display: flex;
-  align-items: center;
+  flex-direction: column;
   gap: 4px;
-  padding: 5px;
-  height: 48px;
-  border-radius: 24px;
-  background:
-    linear-gradient(145deg, color-mix(in srgb, var(--ant-color-bg-elevated) 94%, transparent), color-mix(in srgb, var(--ant-color-bg-container) 82%, transparent));
-  border: 1px solid color-mix(in srgb, var(--ant-color-primary) 14%, var(--ant-color-border-secondary));
-  backdrop-filter: blur(20px) saturate(165%);
-  -webkit-backdrop-filter: blur(20px) saturate(165%);
-  box-shadow:
-    0 18px 48px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+  padding: 6px;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--public-page-bg) 92%, transparent);
+  border: 1px solid var(--public-border-2);
+  backdrop-filter: blur(24px) saturate(160%);
+  -webkit-backdrop-filter: blur(24px) saturate(160%);
+  box-shadow: var(--public-shadow-lg);
   white-space: nowrap;
+  min-width: 120px;
 
   // 收起态
   opacity: 0;
   pointer-events: none;
-  transform: scale(0.88);
+  transform: translateY(8px) scale(0.96);
+  transform-origin: bottom right;
   transition:
     opacity 0.2s ease,
-    transform 0.2s cubic-bezier(0.34, 1.2, 0.64, 1);
+    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 
   // 展开态
   .dock.expanded & {
     opacity: 1;
     pointer-events: auto;
-    transform: scale(1);
-  }
-
-  // 吸附右侧时，面板向左展开
-  .dock.right & {
-    right: calc(100% + 10px);
-    left: auto;
-    transform-origin: right center;
-  }
-
-  // 吸附左侧时，面板向右展开
-  .dock.left & {
-    left: calc(100% + 10px);
-    right: auto;
-    transform-origin: left center;
+    transform: translateY(0) scale(1);
   }
 }
 
 // ── 单个选项按钮 ─────────────────────────────────────────────────
 .option {
   position: relative;
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 13px;
-  height: 36px;
+  gap: 8px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 18px;
+  border-radius: 8px;
   background: transparent;
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ant-color-text-secondary);
-  transition:
-    background 0.15s ease,
-    color 0.15s ease,
-    transform 0.15s ease,
-    box-shadow 0.15s ease;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--public-text-2);
+  transition: all 0.15s ease;
   outline: none;
-  flex-shrink: 0;
 
   svg {
     display: block;
@@ -250,47 +120,13 @@
   }
 
   &:hover {
-    background: color-mix(in srgb, var(--ant-color-primary-bg) 34%, var(--ant-color-fill-tertiary));
-    color: var(--ant-color-text);
-    transform: translateY(-1px);
+    background: var(--public-surface-hover);
+    color: var(--public-text-1);
   }
 
   &.active {
-    background: color-mix(in srgb, var(--ant-color-primary) 16%, var(--ant-color-primary-bg));
-    color: var(--ant-color-primary);
-    box-shadow:
-      inset 0 0 0 1px color-mix(in srgb, var(--ant-color-primary) 22%, transparent),
-      0 6px 16px color-mix(in srgb, var(--ant-color-primary) 14%, transparent);
-
-    &::after {
-      content: "";
-      position: absolute;
-      right: 8px;
-      bottom: 6px;
-      width: 4px;
-      height: 4px;
-      border-radius: 50%;
-      background: currentColor;
-    }
-  }
-}
-
-// ── 响应式 ───────────────────────────────────────────────────────
-@media (max-width: 768px) {
-  .option span {
-    display: none;
-  }
-
-  .option {
-    padding: 0 10px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dock,
-  .trigger,
-  .panel,
-  .option {
-    transition: none !important;
+    background: rgba(var(--primary-color-rgb), 0.12);
+    color: var(--primary-color);
+    font-weight: 700;
   }
 }

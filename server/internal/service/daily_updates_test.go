@@ -39,6 +39,15 @@ func TestNormalizeDailyUpdateReqClampAndRandomExclude(t *testing.T) {
 	if len(got.Exclude) != 2 {
 		t.Fatalf("random should keep exclude, got %v", got.Exclude)
 	}
+
+	over := make([]int64, dailyUpdateMaxExclude+10)
+	for i := range over {
+		over[i] = int64(i + 1)
+	}
+	got = normalizeDailyUpdateReq(DailyUpdateListReq{Random: true, Exclude: over})
+	if len(got.Exclude) != dailyUpdateMaxExclude {
+		t.Fatalf("exclude cap: want %d got %d", dailyUpdateMaxExclude, len(got.Exclude))
+	}
 }
 
 func TestFillDailyUpdatePage(t *testing.T) {

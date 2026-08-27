@@ -439,9 +439,67 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 
 // SearchFilmInfo 获取关键字匹配的影片信息
 func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) []model.MovieBasicInfo {
+	trimmed := strings.TrimSpace(key)
+	if trimmed != "" && db.Rdb != nil {
+		_ = db.Rdb.ZIncrBy(db.Cxt, "EcoHub:search:hot_keywords", 1, trimmed).Err()
+	}
 	version := filmrepo.GetActiveReadModelVersion()
-	sl := filmrepo.SearchSnapshotsByKeywordFast(version, key, page)
+	sl := filmrepo.SearchSnapshotsByKeywordFast(version, trimmed, page)
 	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
+}
+
+// GetHotSearchKeywords 获取全站热门搜索关键词（优先读 Redis 真实热搜榜，不足时由当前快照最高热度影片名补齐）
+func (i *IndexService) GetHotSearchKeywords(limit int) []string {
+	if limit <= 0 {
+		limit = 8
+	}
+	result := make([]string, 0, limit)
+	seen := make(map[string]struct{}, limit)
+
+	// 1. 优先从 Redis 热搜 ZSet 取前排搜索词
+	if db.Rdb != nil {
+		if keys, err := db.Rdb.ZRevRange(db.Cxt, "EcoHub:search:hot_keywords", 0, int64(limit-1)).Result(); err == nil {
+			for _, k := range keys {
+				trimmed := strings.TrimSpace(k)
+				if trimmed != "" {
+					if _, ok := seen[trimmed]; !ok {
+						seen[trimmed] = struct{}{}
+						result = append(result, trimmed)
+					}
+				}
+			}
+		}
+	}
+
+	// 2. 若热搜词不足 limit 个，从当前前台片库快照中按 hits DESC 提取最高热度影片名补齐
+	if len(result) < limit {
+		version := filmrepo.GetActiveReadModelVersion()
+		if version == "" {
+			version = filmrepo.GetActiveSnapshotVersion()
+		}
+		var snapshots []model.FilmListSnapshot
+		query := db.Mdb.Model(&model.FilmListSnapshot{}).
+			Select("name").
+			Where("snapshot_version = ? AND pid > 0", version).
+			Order("hits DESC, id DESC").
+			Limit(limit * 2)
+		if err := query.Find(&snapshots).Error; err == nil {
+			for _, snap := range snapshots {
+				name := strings.TrimSpace(snap.Name)
+				if name != "" {
+					if _, ok := seen[name]; !ok {
+						seen[name] = struct{}{}
+						result = append(result, name)
+						if len(result) >= limit {
+							break
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 // GetFilmCategory 根据Pid或Cid获取指定的分页数据

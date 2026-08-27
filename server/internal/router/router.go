@@ -33,6 +33,7 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
 	api.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
 	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
+	api.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
 	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
 	api.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
 	api.POST(`/login`, handler.UserHd.Login)

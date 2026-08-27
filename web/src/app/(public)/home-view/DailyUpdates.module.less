@@ -610,9 +610,60 @@
   }
 
   .lead {
+    grid-template-columns: clamp(180px, 22vw, 230px) minmax(0, 1fr);
+    gap: 14px 16px;
+  }
+
+  .leadSide {
+    gap: 10px;
+  }
+
+  .leadCopy {
+    gap: 8px;
+  }
+
+  .leadTitle {
+    font-size: clamp(17px, 1.8vw, 22px);
+  }
+
+  .tag {
+    min-height: 22px;
+    padding: 0 8px;
+    font-size: 11px;
+  }
+
+  .blurb {
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .rail {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 768px) {
+  .daily {
+    margin-bottom: 24px;
+  }
+
+  .head {
+    align-items: center;
+    padding: 12px 0 0;
+  }
+
+  .title {
+    font-size: 18px;
+  }
+
+  .stage {
+    padding: 10px 0 12px;
+  }
+
+  .lead {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px 10px;
+    gap: 10px 8px;
     align-items: start;
   }
 
@@ -626,10 +677,10 @@
   }
 
   .leadPoster {
-    grid-column: 1;
-    grid-row: 1;
+    grid-column: auto;
+    grid-row: auto;
     align-self: stretch;
-    border-radius: 12px;
+    border-radius: 10px;
 
     .cardShade,
     .cardMeta {
@@ -643,38 +694,15 @@
 
   .card {
     align-self: stretch;
-  }
-}
-
-@media (max-width: 768px) {
-  .daily {
-    margin-bottom: 32px;
-  }
-
-  .head {
-    align-items: center;
-    padding: 16px 0 0;
-  }
-
-  .title {
-    font-size: 20px;
-  }
-
-  .stage {
-    padding: 14px 0 16px;
-  }
-
-  .lead {
-    gap: 10px 8px;
-  }
-
-  .leadPoster,
-  .card {
     border-radius: 10px;
   }
 }
 
 @media (max-width: 576px) {
+  .lead {
+    gap: 8px 6px;
+  }
+
   .eyebrow {
     letter-spacing: 0.08em;
   }

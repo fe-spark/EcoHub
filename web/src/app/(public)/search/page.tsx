@@ -22,6 +22,18 @@ async function getSearchData(keyword: string, current: string) {
   return null;
 }
 
+async function getHotKeywordsData(): Promise<string[]> {
+  try {
+    const response = await serverGet<string[]>("/hotKeywords", { limit: 8 });
+    if (response.code === 0 && Array.isArray(response.data)) {
+      return response.data;
+    }
+  } catch (error) {
+    console.error("fetch hot keywords error:", error);
+  }
+  return [];
+}
+
 export default async function SearchPage({
   searchParams,
 }: {
@@ -32,7 +44,18 @@ export default async function SearchPage({
   const current = resolvedSearchParams.current;
   const keyword = Array.isArray(search) ? search[0] : (search ?? "");
   const currentPage = Array.isArray(current) ? current[0] : (current ?? "1");
-  const data = await getSearchData(keyword, currentPage);
 
-  return <SearchPageView data={data} keyword={keyword} current={currentPage} />;
+  const [data, hotKeywords] = await Promise.all([
+    getSearchData(keyword, currentPage),
+    getHotKeywordsData(),
+  ]);
+
+  return (
+    <SearchPageView
+      data={data}
+      keyword={keyword}
+      current={currentPage}
+      hotKeywords={hotKeywords}
+    />
+  );
 }

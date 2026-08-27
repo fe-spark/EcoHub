@@ -77,7 +77,7 @@ export default function FilmClassifySearchPageView({
     tags: search?.tags ?? {},
   };
   const safeParams = params ?? {};
-  const safePage = page ?? { total: 0, pageSize: 20 };
+  const safePage = page ?? { total: 0, pageSize: 48 };
   const pid = safeParams.Pid || currentParams.Pid || "0";
   const categoryName = title?.name || "分类";
   const categoryKey = [pid, safeParams.Category || currentParams.Category || ""].join(":");
