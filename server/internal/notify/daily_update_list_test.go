@@ -1,6 +1,9 @@
 package notify
 
-import "testing"
+import (
+	"database/sql"
+	"testing"
+)
 
 func TestDailyPidFilter(t *testing.T) {
 	if dailyPidFilter(DailyPidAll) != nil {
@@ -48,5 +51,49 @@ func TestDailyUpdateBaseQueryAllSkipsJoin(t *testing.T) {
 	}
 	if dailyPidFilter(DailyPidOther) == nil || dailyPidFilter(12) == nil {
 		t.Fatal("pid filter/-1/>0 still need join")
+	}
+}
+
+func TestAccumulateDailyPidCountsIncludesNullPidInOther(t *testing.T) {
+	navSet := map[int64]struct{}{1: {}, 2: {}}
+	rows := []dailyPidCountRow{
+		{Pid: sql.NullInt64{Int64: 1, Valid: true}, Count: 10},
+		{Pid: sql.NullInt64{Int64: 9, Valid: true}, Count: 3},
+		{Pid: sql.NullInt64{Valid: false}, Count: 2},
+		{Pid: sql.NullInt64{Int64: 0, Valid: true}, Count: 1},
+	}
+	byPid, other, total := accumulateDailyPidCounts(rows, navSet)
+	if total != 16 {
+		t.Fatalf("total: want 16 got %d", total)
+	}
+	if byPid[1] != 10 {
+		t.Fatalf("pid 1: want 10 got %d", byPid[1])
+	}
+	if other != 6 {
+		t.Fatalf("other should include non-nav + NULL + pid0, got %d", other)
+	}
+}
+
+func TestPickRandomDailyUpdateRows(t *testing.T) {
+	if got := pickRandomDailyUpdateRows(nil, 21); len(got) != 0 {
+		t.Fatalf("nil: %+v", got)
+	}
+	pool := []dailyUpdateMidRow{{Mid: 1}, {Mid: 2}, {Mid: 3}, {Mid: 4}}
+	got := pickRandomDailyUpdateRows(pool, 2)
+	if len(got) != 2 {
+		t.Fatalf("pageSize 2: %+v", got)
+	}
+	seen := map[int64]struct{}{}
+	for _, r := range pool {
+		seen[r.Mid] = struct{}{}
+	}
+	for _, r := range got {
+		if _, ok := seen[r.Mid]; !ok {
+			t.Fatalf("unexpected mid %d", r.Mid)
+		}
+	}
+	got = pickRandomDailyUpdateRows(pool, 21)
+	if len(got) != 4 {
+		t.Fatalf("under pageSize should keep all, got %d", len(got))
 	}
 }

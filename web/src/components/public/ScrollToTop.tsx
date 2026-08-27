@@ -13,7 +13,7 @@ function ScrollToTopInner() {
   const routeKey = `${pathname}?${searchParams.toString()}`;
 
   useEffect(() => {
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+    window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [routeKey]);
 
   return null;

@@ -33,6 +33,7 @@ const HOT_KEYWORDS = [
 ];
 
 const SEARCH_HISTORY_KEY = "ecohub_search_history";
+const SEARCH_VIEW_MODE_KEY = "ecohub_search_view_mode";
 
 function normalizeMetaValue(value?: string | number | null) {
   const text = String(value ?? "").trim();
@@ -68,7 +69,7 @@ function getInitialHistory(): string[] {
 function getInitialViewMode(): "grid" | "detail" {
   if (typeof window === "undefined") return "grid";
   try {
-    const stored = localStorage.getItem("ecohub_search_view_mode");
+    const stored = localStorage.getItem(SEARCH_VIEW_MODE_KEY);
     if (stored === "grid" || stored === "detail") {
       return stored;
     }
@@ -90,28 +91,12 @@ export default function SearchPageView({
   const { navigate } = useContentNavigate();
   const { message } = useAppMessage();
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [prevKeyword, setPrevKeyword] = useState(keyword);
-  const [history, setHistory] = useState<string[]>(getInitialHistory);
-  const [viewMode, setViewMode] = useState<"grid" | "detail">(getInitialViewMode);
-
-  if (prevKeyword !== keyword) {
-    setPrevKeyword(keyword);
-    setSearchKeyword(keyword);
-    const trimmed = keyword.trim();
-    if (trimmed) {
-      const currentList = getInitialHistory();
-      const nextHistory = [
-        trimmed,
-        ...currentList.filter((item) => item !== trimmed),
-      ].slice(0, 8);
-      setHistory(nextHistory);
-      try {
-        localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(nextHistory));
-      } catch {}
-    }
-  }
+  const [history, setHistory] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<"grid" | "detail">("grid");
 
   useEffect(() => {
+    setHistory(getInitialHistory());
+    setViewMode(getInitialViewMode());
     const handleStorage = () => {
       setHistory(getInitialHistory());
     };
@@ -122,6 +107,21 @@ export default function SearchPageView({
       window.removeEventListener("ecohub:search-history", handleStorage);
     };
   }, []);
+
+  useEffect(() => {
+    setSearchKeyword(keyword);
+    const trimmed = keyword.trim();
+    if (!trimmed) return;
+    const currentList = getInitialHistory();
+    const nextHistory = [
+      trimmed,
+      ...currentList.filter((item) => item !== trimmed),
+    ].slice(0, 8);
+    setHistory(nextHistory);
+    try {
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(nextHistory));
+    } catch {}
+  }, [keyword]);
 
   const saveHistory = (kw: string) => {
     const trimmed = kw.trim();
@@ -186,7 +186,7 @@ export default function SearchPageView({
   const toggleViewMode = (mode: "grid" | "detail") => {
     setViewMode(mode);
     try {
-      localStorage.setItem("ecohub_search_view_mode", mode);
+      localStorage.setItem(SEARCH_VIEW_MODE_KEY, mode);
     } catch {}
   };
 

@@ -42,6 +42,27 @@ func TestParseQueryInt(t *testing.T) {
 	}
 }
 
+func TestParseHotKeywordsLimit(t *testing.T) {
+	if parseHotKeywordsLimit("") != hotKeywordsDefaultLimit {
+		t.Fatal("empty")
+	}
+	if parseHotKeywordsLimit("x") != hotKeywordsDefaultLimit {
+		t.Fatal("invalid")
+	}
+	if parseHotKeywordsLimit("0") != hotKeywordsDefaultLimit {
+		t.Fatal("zero")
+	}
+	if parseHotKeywordsLimit("8") != 8 {
+		t.Fatal("want 8")
+	}
+	if parseHotKeywordsLimit("20") != 20 {
+		t.Fatal("want 20")
+	}
+	if parseHotKeywordsLimit("99999") != hotKeywordsMaxLimit {
+		t.Fatal("clamp max")
+	}
+}
+
 func TestParseDailyUpdateExcludeCap(t *testing.T) {
 	if parseDailyUpdateExclude("") != nil {
 		t.Fatal("empty")

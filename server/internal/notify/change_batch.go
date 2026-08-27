@@ -212,7 +212,7 @@ func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64) 
 			// 无导航大类时全部视为其他，不额外收窄
 			return q
 		}
-		return q.Where("f.pid = 0 OR f.pid NOT IN ?", navIDs)
+		return q.Where("f.pid IS NULL OR f.pid = 0 OR f.pid NOT IN ?", navIDs)
 	}
 	if cat.CategoryID > 0 {
 		return q.Where("f.pid = ?", cat.CategoryID)
