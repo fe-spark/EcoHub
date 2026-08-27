@@ -4,11 +4,12 @@ import React, {
   Suspense,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Button, Drawer, Empty, Input } from "antd";
+import { Drawer, Empty } from "antd";
 import {
   SearchOutlined,
   HistoryOutlined,
@@ -53,22 +54,20 @@ interface HistoryItem {
 function SearchParamsBridge({
   onChange,
 }: {
-  onChange: (next: { search: string; pid: string | null }) => void;
+  onChange: (next: { pid: string | null }) => void;
 }) {
   const searchParams = useSearchParams();
-  const search = searchParams.get("search") || "";
   const pid = searchParams.get("Pid");
 
   useEffect(() => {
-    onChange({ search, pid });
-  }, [search, pid, onChange]);
+    onChange({ pid });
+  }, [pid, onChange]);
 
   return null;
 }
 
 export default function Header({ navList }: { navList: NavItem[] }) {
   const { mode, setMode } = useThemeMode();
-  const [keyword, setKeyword] = useState("");
   const { config: siteInfo } = useSiteConfig();
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [scrolled, setScrolled] = useState(false);
@@ -83,17 +82,16 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const pathname = usePathname();
   const { message } = useAppMessage();
   const desktopCatalogRef = useRef<HTMLDivElement>(null);
+  const navHomeRef = useRef<HTMLAnchorElement>(null);
+  const navCatalogRef = useRef<HTMLButtonElement>(null);
+  const navMeasureRef = useRef<HTMLDivElement>(null);
   const {
     navigate: layoutNavigate,
     active: contentLoadingActive,
   } = usePublicContentLoading();
 
-  const [keywordFromUrl, setKeywordFromUrl] = useState("");
-
   const onSearchParamsChange = useCallback(
-    (next: { search: string; pid: string | null }) => {
-      setKeyword(next.search);
-      setKeywordFromUrl(next.search);
+    (next: { pid: string | null }) => {
       setUrlPid(next.pid);
     },
     [],
@@ -128,33 +126,13 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     message.success("已清空历史记录");
   };
 
-  const handleSearch = () => {
-    const q = keyword.trim();
-    if (!q) {
-      message.error("请输入搜索关键词");
-      return;
-    }
-    try {
-      const stored = localStorage.getItem("ecohub_search_history");
-      const list = stored ? JSON.parse(stored) : [];
-      const listArray = Array.isArray(list) ? list : [];
-      const nextList = [q, ...listArray.filter((item: string) => item !== q)].slice(0, 8);
-      localStorage.setItem("ecohub_search_history", JSON.stringify(nextList));
-      window.dispatchEvent(new Event("ecohub:search-history"));
-    } catch {}
-    const href = `/search?search=${encodeURIComponent(q)}`;
-    // 同 keyword 且已在搜索页：不重复导航
-    if (pathname === "/search" && keywordFromUrl === q) {
-      return;
-    }
-    beginHeaderNavigation("search", "搜索加载中...", href);
-  };
-
   const [showHistory, setShowHistory] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
   const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
+  const [visibleQuickCount, setVisibleQuickCount] = useState(quickNavs.length);
   const activePid = pathname.startsWith("/filmClassify") ? urlPid : null;
   const isHomeActive = pathname === "/";
+  const isSearchActive = pathname === "/search";
   const isCategoryActive = (id: string | number) => activeCategoryId === String(id);
 
   // 导航进行中保持乐观高亮，避免 URL 尚未更新时被 activePid 冲掉
@@ -190,6 +168,60 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     document.addEventListener("keydown", handleEscape);
     return () => document.removeEventListener("keydown", handleEscape);
   }, []);
+
+  const quickNavSignature = quickNavs.map((nav) => `${nav.id}:${nav.name}`).join("|");
+
+  useLayoutEffect(() => {
+    const area = desktopCatalogRef.current;
+    const home = navHomeRef.current;
+    const catalog = navCatalogRef.current;
+    const measure = navMeasureRef.current;
+    if (!area || !home || !catalog || !measure) {
+      return;
+    }
+
+    let cancelled = false;
+    const relayout = () => {
+      if (cancelled) {
+        return;
+      }
+      const items = Array.from(measure.children) as HTMLElement[];
+      const scrollerGap = parseFloat(getComputedStyle(measure).gap) || 10;
+      const links = home.parentElement;
+      const linksGap = links ? parseFloat(getComputedStyle(links).gap) || 14 : 14;
+      const available = Math.max(
+        0,
+        area.clientWidth - home.offsetWidth - catalog.offsetWidth - linksGap * 2,
+      );
+
+      let used = 0;
+      let count = 0;
+      for (const item of items) {
+        const width = item.offsetWidth;
+        if (width <= 0) {
+          continue;
+        }
+        const next = count === 0 ? width : used + scrollerGap + width;
+        if (next > available - 1) {
+          break;
+        }
+        used = next;
+        count += 1;
+      }
+
+      setVisibleQuickCount((prev) => (prev === count ? prev : count));
+    };
+
+    relayout();
+    const observer = new ResizeObserver(relayout);
+    observer.observe(area);
+    observer.observe(measure);
+    document.fonts?.ready?.then(relayout);
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+    };
+  }, [quickNavSignature]);
 
   const toggleHistory = () => {
     const nextShow = !showHistory;
@@ -243,6 +275,17 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     }
     setActiveCategoryId("");
     beginHeaderNavigation("home", "首页加载中...", "/");
+  };
+
+  const navigateToSearch = () => {
+    if (pathname === "/search") {
+      window.dispatchEvent(new Event("ecohub:focus-search"));
+      return;
+    }
+    if (isNavigating && pendingCategoryId === "search") {
+      return;
+    }
+    beginHeaderNavigation("search", "搜索加载中...", "/search");
   };
 
   /** Logo 点击：优先跳转网站配置的 siteUrl，否则回前台首页 */
@@ -342,8 +385,16 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
           {/* Navigation Area - Dynamic & Flexible */}
           <div className={styles.navArea} ref={desktopCatalogRef}>
+            <div className={styles.navMeasure} ref={navMeasureRef} aria-hidden="true">
+              {quickNavs.map((nav) => (
+                <span key={nav.id} className={styles.navItem}>
+                  {nav.name}
+                </span>
+              ))}
+            </div>
             <nav className={styles.navLinks}>
               <a
+                ref={navHomeRef}
                 onClick={navigateToHome}
                 className={`${styles.navHomeItem} ${isHomeActive ? styles.navHomeItemActive : ""}`}
               >
@@ -351,7 +402,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               </a>
 
               <div className={styles.navScroller}>
-                {quickNavs.map((nav) => {
+                {quickNavs.slice(0, visibleQuickCount).map((nav) => {
                   const isActive = isCategoryActive(nav.id);
                   return (
                     <a
@@ -366,6 +417,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
               </div>
 
               <button
+                ref={navCatalogRef}
                 type="button"
                 className={`${styles.navCatalogBtn} ${desktopCatalogOpen ? styles.navCatalogBtnActive : ""}`}
                 onClick={() => setDesktopCatalogOpen((open) => !open)}
@@ -403,22 +455,6 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
           {/* Action Area - Search & Actions */}
           <div className={styles.actionArea}>
-            <div className={styles.searchGroup}>
-              <Input
-                placeholder="搜索影片、动漫..."
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                variant="borderless"
-              />
-              <Button 
-                type="primary" 
-                icon={<SearchOutlined />} 
-                className={styles.searchBtn}
-                onClick={handleSearch}
-              />
-            </div>
-
             <div className={styles.actions}>
               <a
                 href={PROJECT_GITHUB_URL}
@@ -431,23 +467,26 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 <GithubOutlined />
               </a>
               <div className={styles.historyWrapper} ref={historyRef}>
-                <div 
-                  className={`${styles.actionBtn} ${showHistory ? styles.active : ""}`} 
+                <button
+                  type="button"
+                  className={`${styles.actionBtn} ${showHistory ? styles.active : ""}`}
                   onClick={toggleHistory}
+                  title="历史记录"
+                  aria-label="打开历史记录"
                 >
                   <HistoryOutlined />
-                </div>
+                </button>
                 {historyContent}
               </div>
-              
-              <div
-                className={styles.mobileSearchBtn}
-                onClick={() => {
-                  beginHeaderNavigation("search", "搜索加载中...", "/search");
-                }}
+              <button
+                type="button"
+                className={`${styles.actionBtn} ${isSearchActive ? styles.active : ""}`}
+                onClick={navigateToSearch}
+                title="搜索"
+                aria-label="打开搜索页"
               >
                 <SearchOutlined />
-              </div>
+              </button>
             </div>
           </div>
         </div>

@@ -40,7 +40,6 @@
   align-items: center;
   flex-shrink: 0;
   cursor: pointer;
-  min-width: 200px; // Maintain space for logo
 }
 
 .mobileMenuTrigger {
@@ -99,13 +98,13 @@
   }
 }
 
-// Nav Area (Centered)
+// Nav Area
 .navArea {
   flex: 1;
   min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: center; // CENTER navigation
+  justify-content: flex-start;
   height: 100%;
   position: relative;
 }
@@ -116,38 +115,40 @@
   align-items: center;
   justify-content: flex-start;
   height: 100%;
-  width: min(100%, 900px);
+  width: auto;
+  max-width: 100%;
+  min-width: 0;
+}
 
-  .navItem {
-    color: var(--public-text-3);
-    font-size: 14px;
-    font-weight: 600;
-    position: relative;
-    padding: 8px 10px;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    white-space: nowrap;
-    flex-shrink: 0;
-    border-radius: 999px;
-    background: transparent;
+.navItem {
+  color: var(--public-text-3);
+  font-size: 14px;
+  font-weight: 600;
+  position: relative;
+  padding: 8px 10px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: transparent;
 
-    &::after {
-      content: "";
-      position: absolute;
-      bottom: -2px;
-      left: 50%;
-      width: 0;
-      height: 2px;
-      background: var(--primary-color);
-      transition: all 0.3s ease;
-      transform: translateX(-50%);
-      border-radius: 4px;
-    }
+  &::after {
+    content: "";
+    position: absolute;
+    bottom: -2px;
+    left: 50%;
+    width: 0;
+    height: 2px;
+    background: var(--primary-color);
+    transition: all 0.3s ease;
+    transform: translateX(-50%);
+    border-radius: 4px;
+  }
 
-    &:hover {
-      color: var(--public-text-1);
-      background: color-mix(in srgb, var(--public-surface-3) 82%, rgba(255, 255, 255, 0.04));
-      &::after { width: 100%; }
-    }
+  &:hover {
+    color: var(--public-text-1);
+    background: color-mix(in srgb, var(--public-surface-3) 82%, rgba(255, 255, 255, 0.04));
+    &::after { width: 100%; }
   }
 }
 
@@ -179,18 +180,29 @@
   }
 }
 
+.navMeasure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: 100%;
+  height: 0;
+  min-height: 0;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+}
+
 .navScroller {
   display: flex;
   align-items: center;
   gap: 10px;
   min-width: 0;
-  flex: 1;
-  overflow-x: auto;
-  scrollbar-width: none;
-
-  &::-webkit-scrollbar {
-    display: none;
-  }
+  flex: 0 1 auto;
+  overflow: hidden;
 }
 
 .navCatalogBtn {
@@ -199,6 +211,7 @@
   gap: 8px;
   height: 40px;
   padding: 0 14px;
+  flex-shrink: 0;
   border: 1px solid var(--public-border-2);
   border-radius: 14px;
   background: color-mix(in srgb, var(--public-surface-3) 84%, rgba(255, 255, 255, 0.04));
@@ -337,57 +350,7 @@
   align-items: center;
   gap: 16px;
   flex-shrink: 0;
-  min-width: 200px; // Symmetry with logoArea
   justify-content: flex-end;
-}
-
-.searchGroup {
-  display: flex;
-  align-items: center;
-  width: 240px;
-  background: var(--public-surface-3);
-  border: 1px solid var(--public-border-3);
-  border-radius: 12px;
-  padding: 0 12px;
-  transition: all 0.3s ease;
-  height: 40px; // UNIFIED HEIGHT
-
-  &:hover {
-    border-color: var(--public-border-2);
-  }
-
-  &:focus-within {
-    border-color: var(--primary-color);
-    background: color-mix(in srgb, var(--public-page-bg) 40%, transparent);
-    box-shadow: 0 0 15px rgba(var(--primary-color-rgb), 0.1);
-  }
-
-  :global(.ant-input) {
-    background: transparent !important;
-    color: var(--public-text-1) !important;
-    font-size: 14px;
-    padding: 0 !important;
-    flex: 1;
-    &::placeholder { color: var(--public-text-4) !important; }
-  }
-
-  .searchBtn {
-    height: 28px;
-    width: 28px;
-    min-width: 28px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 8px !important;
-    background: var(--primary-color) !important;
-    border: none !important;
-    margin-left: 8px;
-    transition: all 0.3s ease;
-
-    &:hover { background: color-mix(in srgb, var(--primary-color) 82%, white) !important; }
-    :global(.anticon) { font-size: 13px; color: var(--public-on-accent); }
-  }
 }
 
 .actions {
@@ -410,6 +373,9 @@
   transition: all 0.3s ease;
   border: 1px solid transparent;
   text-decoration: none;
+  padding: 0;
+  appearance: none;
+  font-family: inherit;
 
   &:hover {
     background: var(--public-surface-hover);
@@ -423,8 +389,6 @@
     border-color: rgba(var(--primary-color-rgb), 0.3);
   }
 }
-
-.mobileSearchBtn { display: none; }
 
 // History & Overlays
 .historyWrapper { position: relative; }
@@ -478,9 +442,6 @@
 
 // Media Queries
 @media (max-width: 1280px) {
-  .logoArea, .actionArea { min-width: unset; }
-  .searchGroup { width: 200px; }
-
   .navCatalogPanel {
     width: min(calc(100vw - 80px), 920px);
   }
@@ -493,10 +454,6 @@
 
   .navLinks {
     gap: 12px;
-
-    .navItem {
-      font-size: 14px;
-    }
   }
 
   .navCatalogPanel {
@@ -509,14 +466,9 @@
       font-size: 20px;
     }
   }
-
-  .searchGroup {
-    width: 160px;
-  }
 }
 
 @media (max-width: 1024px) {
-  .logoArea { min-width: auto; }
   .siteName {
     .logoImg { height: 24px; }
     .logoText {
@@ -524,34 +476,34 @@
       max-width: 120px;
     }
   }
-  .searchGroup { display: none; }
-  .mobileSearchBtn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 38px;
-    height: 38px;
-    font-size: 18px;
-    color: var(--public-text-2);
-    background: var(--public-surface-3);
-    border-radius: 10px;
-    cursor: pointer;
-  }
 }
 
 @media (max-width: 860px) {
   .navArea { display: none; }
   .mobileMenuTrigger { display: flex; }
+  // 避免 relative 包装把 fixed 面板困在按钮宽度里
+  .historyWrapper {
+    position: static;
+  }
   .historyPanel {
     position: fixed;
     top: 80px;
     left: 0;
     right: 0;
-    width: 100% !important;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+    border-left: none;
+    border-right: none;
     border-radius: 0 0 16px 16px;
     transform: translateY(-10px);
   }
-  :global(.scrolled) .historyPanel { top: 64px; }
+  .historyPanel.show {
+    transform: translateY(0);
+  }
+  .headerWrap.scrolled .historyPanel {
+    top: 64px;
+  }
 }
 
 @media (max-width: 640px) {
@@ -580,8 +532,7 @@
     gap: 8px;
   }
 
-  .actionBtn,
-  .mobileSearchBtn {
+  .actionBtn {
     width: 36px;
     height: 36px;
     font-size: 16px;
