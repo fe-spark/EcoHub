@@ -186,15 +186,20 @@ func parseDailyUpdateLimit(raw string) int {
 	return n
 }
 
+const dailyUpdateExcludeCap = 500
+
 func parseDailyUpdateExclude(raw string) []int64 {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
 	parts := strings.Split(raw, ",")
-	out := make([]int64, 0, len(parts))
-	seen := make(map[int64]struct{}, len(parts))
+	out := make([]int64, 0, min(len(parts), dailyUpdateExcludeCap))
+	seen := make(map[int64]struct{}, min(len(parts), dailyUpdateExcludeCap))
 	for _, part := range parts {
+		if len(out) >= dailyUpdateExcludeCap {
+			break
+		}
 		id, err := strconv.ParseInt(strings.TrimSpace(part), 10, 64)
 		if err != nil || id <= 0 {
 			continue
@@ -309,6 +314,13 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	dto.Success(gin.H{"list": bl, "page": page}, "影片搜索成功", c)
 }
 
+// HotKeywords 获取当前全站热门搜索推荐词
+func (h *IndexHandler) HotKeywords(c *gin.Context) {
+	limit := parseQueryInt(c.Query("limit"), 8)
+	list := service.IndexSvc.GetHotSearchKeywords(limit)
+	dto.Success(list, "热门搜索获取成功", c)
+}
+
 // FilmTagSearch 通过tag获取满足条件的对应影片
 func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params := model.SearchTagsVO{}
@@ -328,7 +340,9 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Sort = c.DefaultQuery("Sort", "update_stamp")
 
 	page := dto.GetPageParams(c)
-	page.PageSize = 49
+	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
+		page.PageSize = 48
+	}
 
 	cat := service.IndexSvc.GetPidCategory(params.Pid)
 

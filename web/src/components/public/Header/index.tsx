@@ -18,6 +18,9 @@ import {
   FireOutlined,
   DownOutlined,
   GithubOutlined,
+  SunOutlined,
+  MoonOutlined,
+  DesktopOutlined,
 } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -26,6 +29,7 @@ import { clearHistoryMap, readHistoryMap } from "@/lib/historyStorage";
 import { usePublicContentLoading } from "@/components/public/PublicContentLoading";
 import SiteLogo from "@/components/public/SiteLogo";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
+import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
 
 interface NavItem {
   id: string | number;
@@ -63,6 +67,7 @@ function SearchParamsBridge({
 }
 
 export default function Header({ navList }: { navList: NavItem[] }) {
+  const { mode, setMode } = useThemeMode();
   const [keyword, setKeyword] = useState("");
   const { config: siteInfo } = useSiteConfig();
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
@@ -129,6 +134,14 @@ export default function Header({ navList }: { navList: NavItem[] }) {
       message.error("请输入搜索关键词");
       return;
     }
+    try {
+      const stored = localStorage.getItem("ecohub_search_history");
+      const list = stored ? JSON.parse(stored) : [];
+      const listArray = Array.isArray(list) ? list : [];
+      const nextList = [q, ...listArray.filter((item: string) => item !== q)].slice(0, 8);
+      localStorage.setItem("ecohub_search_history", JSON.stringify(nextList));
+      window.dispatchEvent(new Event("ecohub:search-history"));
+    } catch {}
     const href = `/search?search=${encodeURIComponent(q)}`;
     // 同 keyword 且已在搜索页：不重复导航
     if (pathname === "/search" && keywordFromUrl === q) {
@@ -447,34 +460,55 @@ export default function Header({ navList }: { navList: NavItem[] }) {
           size={280}
           className={styles.mobileDrawer}
         >
-          <div className={styles.mobileNav}>
-            <div
-              className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
-              onClick={navigateToHome}
-            >
-              <HomeOutlined /> <span>首页</span>
+          <div className={styles.mobileDrawerBody}>
+            <div className={styles.mobileNav}>
+              <div
+                className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
+                onClick={navigateToHome}
+              >
+                <HomeOutlined /> <span>首页</span>
+              </div>
+              {navList.map((nav) => {
+                const isActive = isCategoryActive(nav.id);
+                return (
+                  <div 
+                    key={nav.id} 
+                    className={`${styles.mobileNavItem} ${isActive ? styles.mobileNavItemActive : ""}`}
+                    onClick={() => navigateToCategory(nav.id)}
+                  >
+                    <FireOutlined /> <span>{nav.name}</span>
+                  </div>
+                );
+              })}
             </div>
-            {navList.map((nav) => {
-              const isActive = isCategoryActive(nav.id);
-              return (
-                <div 
-                  key={nav.id} 
-                  className={`${styles.mobileNavItem} ${isActive ? styles.mobileNavItemActive : ""}`}
-                  onClick={() => navigateToCategory(nav.id)}
+
+            {/* 移动端抽屉底部：主题外观切换 */}
+            <div className={styles.mobileThemeSection}>
+              <div className={styles.mobileThemeLabel}>外观模式</div>
+              <div className={styles.mobileThemeSegment}>
+                <button
+                  type="button"
+                  className={`${styles.themeOptionBtn} ${mode === "light" ? styles.themeOptionActive : ""}`}
+                  onClick={() => setMode("light")}
                 >
-                  <FireOutlined /> <span>{nav.name}</span>
-                </div>
-              );
-            })}
-            <a
-              href={PROJECT_GITHUB_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={styles.mobileNavItem}
-              title="打开 GitHub 项目地址"
-            >
-              <GithubOutlined /> <span>GitHub 项目地址</span>
-            </a>
+                  <SunOutlined /> <span>浅色</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.themeOptionBtn} ${mode === "dark" ? styles.themeOptionActive : ""}`}
+                  onClick={() => setMode("dark")}
+                >
+                  <MoonOutlined /> <span>深色</span>
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.themeOptionBtn} ${mode === "system" ? styles.themeOptionActive : ""}`}
+                  onClick={() => setMode("system")}
+                >
+                  <DesktopOutlined /> <span>系统</span>
+                </button>
+              </div>
+            </div>
           </div>
         </Drawer>
       </header>

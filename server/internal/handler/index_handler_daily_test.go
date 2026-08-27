@@ -1,6 +1,10 @@
 package handler
 
-import "testing"
+import (
+	"strconv"
+	"strings"
+	"testing"
+)
 
 func TestParseDailyUpdatePid(t *testing.T) {
 	if parseDailyUpdatePid("") != 0 {
@@ -35,5 +39,27 @@ func TestParseQueryInt(t *testing.T) {
 	}
 	if parseQueryInt("3", 21) != 3 {
 		t.Fatal("want 3")
+	}
+}
+
+func TestParseDailyUpdateExcludeCap(t *testing.T) {
+	if parseDailyUpdateExclude("") != nil {
+		t.Fatal("empty")
+	}
+	got := parseDailyUpdateExclude("1,2,2,abc,0,-3,4")
+	if len(got) != 3 || got[0] != 1 || got[1] != 2 || got[2] != 4 {
+		t.Fatalf("dedup/skip: %v", got)
+	}
+
+	parts := make([]string, dailyUpdateExcludeCap+20)
+	for i := range parts {
+		parts[i] = strconv.Itoa(i + 1)
+	}
+	got = parseDailyUpdateExclude(strings.Join(parts, ","))
+	if len(got) != dailyUpdateExcludeCap {
+		t.Fatalf("cap: want %d got %d", dailyUpdateExcludeCap, len(got))
+	}
+	if got[0] != 1 || got[len(got)-1] != int64(dailyUpdateExcludeCap) {
+		t.Fatalf("cap range: first=%d last=%d", got[0], got[len(got)-1])
 	}
 }

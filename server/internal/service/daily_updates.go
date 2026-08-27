@@ -12,6 +12,7 @@ import (
 
 const dailyUpdateDefaultPageSize = 21
 const dailyUpdateMaxPageSize = 100
+const dailyUpdateMaxExclude = 500
 
 // DailyUpdateListReq V2 每日更新：分类 + 标准分页 + 随机。
 type DailyUpdateListReq struct {
@@ -52,6 +53,8 @@ func normalizeDailyUpdateReq(req DailyUpdateListReq) DailyUpdateListReq {
 	req.Page = page
 	if !req.Random {
 		req.Exclude = nil
+	} else {
+		req.Exclude = notify.ClampDailyUpdateExclude(req.Exclude, dailyUpdateMaxExclude)
 	}
 	return req
 }
@@ -122,7 +125,13 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 		log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
 		cats = []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: total}}
 	} else {
-		cats = AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
+		// 分类「全部」与当前列表 total 在非随机下应对齐；随机模式下 total 是剩余可抽数，
+		// 分类角标仍用全窗 catTotal，避免 tab 数字随 exclude 收缩。
+		allCount := catTotal
+		if !req.Random {
+			allCount = total
+		}
+		cats = AssembleDailyUpdateCategories(nav, countByPid, otherCount, allCount)
 	}
 
 	return &DailyUpdateResult{List: list, Page: page, Categories: cats}, nil

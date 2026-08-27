@@ -51,10 +51,19 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 }
 
 func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64) *gorm.DB {
-	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
+	q := db.Mdb.Table(model.TableNotifyChangeMid + " AS c").
 		Where("c.created_at >= ? AND c.created_at <= ?", from, to)
+	if pid != DailyPidAll {
+		q = q.Joins("LEFT JOIN " + model.TableFilmIndex + " AS f ON f.mid = c.mid")
+	}
 	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs)
+}
+
+func applyDailyUpdateExclude(q *gorm.DB, random bool, exclude []int64) *gorm.DB {
+	if !random || len(exclude) == 0 {
+		return q
+	}
+	return q.Where("c.mid NOT IN ?", exclude)
 }
 
 func clampDailyUpdatePage(current, pageSize int) (int, int) {
@@ -71,7 +80,7 @@ func clampDailyUpdatePage(current, pageSize int) (int, int) {
 }
 
 // ListDailyUpdateMids 近 24h 变更 mid：标准分页或随机抽样。
-// 随机时忽略 offset，按排除列表抽一页；total 始终为筛选后全量。
+// 随机时忽略 offset，按排除列表抽一页；total 为筛选后（随机时再扣 exclude）可抽数量。
 func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err error) {
 	if db.Mdb == nil {
 		return nil, 0, fmt.Errorf("数据库未就绪")
@@ -85,7 +94,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 		navIDs = navTopCategoryIDs(navTopCategories())
 	}
 
-	base := dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs)
+	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
 	var n int64
 	if err = base.Select("COUNT(DISTINCT c.mid)").Scan(&n).Error; err != nil {
 		return nil, 0, err
@@ -95,10 +104,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 		return []int64{}, 0, nil
 	}
 
-	listQ := dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs)
-	if q.Random && len(q.Exclude) > 0 {
-		listQ = listQ.Where("c.mid NOT IN ?", q.Exclude)
-	}
+	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
 
 	type row struct {
 		Mid int64 `gorm:"column:mid"`
@@ -170,4 +176,12 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 		}
 	}
 	return countByPid, otherCount, total, nil
+}
+
+// ClampDailyUpdateExclude 限制随机排除列表长度，避免 NOT IN 占位符/包过大。
+func ClampDailyUpdateExclude(exclude []int64, max int) []int64 {
+	if max <= 0 || len(exclude) <= max {
+		return exclude
+	}
+	return exclude[:max]
 }
