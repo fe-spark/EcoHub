@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Button, Pagination } from "antd";
 import {
   AppstoreOutlined,
@@ -34,6 +34,19 @@ const HOT_KEYWORDS = [
 
 const SEARCH_HISTORY_KEY = "ecohub_search_history";
 const SEARCH_VIEW_MODE_KEY = "ecohub_search_view_mode";
+const FOCUS_SEARCH_EVENT = "ecohub:focus-search";
+
+function focusVisibleSearchInput(el: HTMLInputElement | null) {
+  if (!el) {
+    return false;
+  }
+  const rect = el.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+  el.focus();
+  return document.activeElement === el;
+}
 
 function normalizeMetaValue(value?: string | number | null) {
   const text = String(value ?? "").trim();
@@ -88,11 +101,45 @@ export default function SearchPageView({
   current: string;
   hotKeywords?: string[];
 }) {
-  const { navigate } = useContentNavigate();
+  const { navigate, isNavigating } = useContentNavigate();
   const { message } = useAppMessage();
+  const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
   const [history, setHistory] = useState<string[]>([]);
   const [viewMode, setViewMode] = useState<"grid" | "detail">("grid");
+
+  useEffect(() => {
+    const onFocusSearch = () => {
+      const el = inputRef.current;
+      if (!focusVisibleSearchInput(el) || !el) {
+        return;
+      }
+      if (el.value) {
+        el.select();
+      }
+    };
+    window.addEventListener(FOCUS_SEARCH_EVENT, onFocusSearch);
+    return () => window.removeEventListener(FOCUS_SEARCH_EVENT, onFocusSearch);
+  }, []);
+
+  useEffect(() => {
+    if (isNavigating || keyword.trim()) {
+      return;
+    }
+    let frame = 0;
+    let tries = 0;
+    const tryFocus = () => {
+      if (focusVisibleSearchInput(inputRef.current)) {
+        return;
+      }
+      if (tries < 8) {
+        tries += 1;
+        frame = window.requestAnimationFrame(tryFocus);
+      }
+    };
+    frame = window.requestAnimationFrame(tryFocus);
+    return () => window.cancelAnimationFrame(frame);
+  }, [isNavigating, keyword]);
 
   useEffect(() => {
     setHistory(getInitialHistory());
@@ -199,17 +246,18 @@ export default function SearchPageView({
 
   return (
     <div className={styles.container}>
-      {/* 移动端专属搜索栏（桌面端由顶部 Header 承载搜索输入） */}
-      <div className={styles.mobileSearchBar}>
-        <div className={styles.mobileInputBox}>
+      <div className={styles.searchBar}>
+        <div className={styles.searchInputBox}>
           <SearchOutlined className={styles.inputIcon} />
           <input
+            ref={inputRef}
             type="text"
             placeholder="搜索电影、剧集、动漫、综艺..."
             value={searchKeyword}
             onChange={(e) => setSearchKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && executeSearch(searchKeyword)}
             aria-label="搜索影视内容"
+            autoComplete="off"
           />
           {searchKeyword && (
             <button
