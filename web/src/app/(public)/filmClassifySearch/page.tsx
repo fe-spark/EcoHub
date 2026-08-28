@@ -1,4 +1,5 @@
 import FilmClassifySearchPageView from "./view";
+import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 import { Alert } from "antd";
 
@@ -56,6 +57,9 @@ export default async function FilmClassifySearchPage({
   }
 
   return (
-    <FilmClassifySearchPageView data={data} currentParams={currentParams} />
+    <>
+      <TrackPageView action="classify" resource={String(currentParams.Pid || currentParams.pid || "")} />
+      <FilmClassifySearchPageView data={data} currentParams={currentParams} />
+    </>
   );
 }

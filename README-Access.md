@@ -1,16 +1,16 @@
 # EcoHub 访问日志与请求画像方案
 
-状态：方案文档，尚未实施  
+状态：已实施（P0 双轨：页面埋点 + HTTP 健康度）  
 范围：Go API 访问采集、Redis 热聚合、管理后台「访问分析」  
-约束：不新增中间件栈 / 数据库；面向 2 核 2G 自托管
+约束：不新增中间件栈 / 数据库 / 图表库；面向 2 核 2G 自托管
 
 ---
 
 ## 1. 背景与现状
 
-EcoHub 是自托管影视聚合系统。流量来自 Web 前台、鸿蒙 / 安卓客户端、TVBox / 影视仓（`/api/provide/*`）以及管理后台。站点管理员目前只能在「系统设置 → 系统日志」里看到混在一起的文本行，无法回答：
+EcoHub 是自托管影视聚合系统。流量来自 Web 前台（Next.js SSR + 浏览器）、鸿蒙客户端、TVBox / 影视仓（`/api/provide/*`）以及管理后台。站点管理员目前只能在「系统设置 → 系统日志」里看到混在一起的文本行，无法回答：
 
-- 谁在访问（Web / App / TVBox）
+- 谁在访问（Web / OHOS / TVBox）
 - 在干什么（浏览 / 搜索 / 播放 / Provide 拉取）
 - 接口是否健康（QPS、延迟、4xx/5xx、慢请求）
 
@@ -21,15 +21,33 @@ EcoHub 是自托管影视聚合系统。流量来自 Web 前台、鸿蒙 / 安�
 | HTTP 访问 | `server/internal/middleware/access_log.go` 打一行 `[HTTP] status \| cost \| IP \| method path` | 非结构化，无法聚合 |
 | 落盘 | `server/internal/infra/syslog`：10MB 滚动、保留 7 天、内存缓冲 1 万行 | 与采集、通知、慢查询日志混写 |
 | 后台展示 | `/api/manage/system/logs/delta` + 系统日志页，最多 1000 行、关键词过滤 | 不能按接口 / 客户端 / 延迟 / 错误筛选 |
-| 噪声过滤 | 仅跳过 `/api/manage/collect/list`、`/api/manage/system/logs/delta` 的 2xx | `/api/health`、海报静态、TVBox 列表轮询仍进日志 |
-| 客户端识别 | OHOS 已设 `User-Agent: EcoHub-OHOS`；Android 无专用 UA | Web / TVBox / App 分不清 |
-| 真实 IP | `c.ClientIP()`，未配置 `TrustedProxies` | 反代后经常是容器或网关地址 |
+| 噪声过滤 | 仅跳过 `/api/manage/collect/list`、`/api/manage/system/logs/delta` 的 2xx | `/api/health`、海报静态、layout 级 API、TVBox 列表轮询仍进日志 |
+| 客户端识别 | OHOS **业务请求未设**专用 UA（`EcoHub-OHOS` 只出现在 GitHub 版本检查）；Android 仓库目前是 Flutter 模板，无业务请求 | Web / TVBox / App 分不清 |
+| 真实 IP | `c.ClientIP()`；Gin v1.9 默认信任全部代理 | 未收敛信任列表；SSR 直连 Go 时 IP 是 `127.0.0.1` |
 | 业务埋点 | 播放、搜索只服务业务，不记访问 | 无热搜、热播、入口分布 |
 
-### 1.2 结论
+### 1.2 流量形态（实施时必须按此建模）
+
+正式发布是 All-in-One：同容器 Supervisord 托管 Go `:8080` 与 Next `:3000`，`TZ=Asia/Shanghai`。
+
+| 来源 | 怎么打到 Go | 默认 `ClientIP()` |
+| --- | --- | --- |
+| Web 页面数据 | `web/src/lib/server-api.ts` 的 `serverGet()`，Node 直连 `API_URL`（生产 `http://127.0.0.1:8080`），**不转发访客 IP / UA** | `127.0.0.1` |
+| 浏览器 XHR | `/api/*` → Next rewrite → Go；可带 `X-Forwarded-For` | 信任 `127.0.0.1` 后为访客 IP |
+| OHOS | `HttpClient` 直打站点 `/api`，当前无 `EcoHub-OHOS` | 访客 IP（经 3000 时同 rewrite） |
+| TVBox | 文档入口 `:3000/api/provide/*`（rewrite）或直连 `:18080` | 见 TrustedProxies |
+| 管理后台 | 浏览器 XHR + 少量 SSR（`/manage/user/info`） | 同 Web |
+
+一次打开首页，SSR 至少打 `/api/config/basic`（根 layout）+ `/api/navCategory`（前台 layout）+ `/api/index`。若三条都当 PV，数字放大约 3 倍，UV 还会塌成本机地址。
+
+已有前台热搜：`EcoHub:search:hot_keywords`（仅搜索第 1 页且有命中才加分）。访问分析热搜是「原始请求次数」，**不要合并、不要改前台热搜逻辑**。
+
+### 1.3 结论
 
 访问日志与系统日志职责不同：前者是流量与画像，后者是排障。继续往 `ecohub.log` 堆 `[HTTP]` 行无法演进。  
 也不应把每条请求写成 MySQL 行：TVBox 轮询 + 采集轮询会打满 2 核 2G 的磁盘与 InnoDB。
+
+站点（Web/App）与 Provide（TVBox 轮询）必须分列展示。混在同一套 headline 里，PV / P95 / 最近明细会被 list 轮询带偏。
 
 ---
 
@@ -37,27 +55,28 @@ EcoHub 是自托管影视聚合系统。流量来自 Web 前台、鸿蒙 / 安�
 
 站点管理员打开后台即可回答三类问题：
 
-1. **谁在访问**：Web / OHOS / Android / TVBox，日 PV / UV，Top IP（打码）
-2. **在干什么**：首页、分类、搜索、播放、Provide 拉取
-3. **是否健康**：QPS、近似 P95、4xx/5xx、慢请求（≥500ms）
+1. **谁在访问**：Web / OHOS / TVBox；站点日 PV / UV（UV 不含 SSR、不含 Provide）
+2. **在干什么**：首页、分类、搜索、播放；Provide 拉取单独一块
+3. **是否健康**：站点 QPS、站点近似 P95、4xx/5xx、慢请求（≥500ms）
 
-可验收标准（P0）：
+不在 P0：Top IP、登录用户画像、TVBox 播片反查、Android 客户端。
 
-- 2xx 正常访问不再写入系统日志
-- 后台「访问分析」能看到今日 PV / UV、24h QPS、错误数、最近请求明细
-- 采集轮询、日志轮询、健康检查、海报静态、分析接口自身不进入画像
-- 请求路径不因分析功能变慢（采集失败或 channel 满只丢事件，不阻塞）
+可验收标准见 §16。
 
 ---
 
 ## 3. 非目标
 
 - 不引入 Elasticsearch / ClickHouse / Loki / Prometheus / Grafana
+- 不新增前端图表依赖（不用 `@ant-design/plots` / G2）
 - 不把访问明细做成登录用户画像（前台多数无登录）
 - 不在 Next.js 或 App 内再打一套前端点（会漏 TVBox，且可被关闭）
 - 不长期存储完整 IP、Cookie、JWT、完整 Query
 - 不把 Provide 的完整 query 当作 Path 基数（`ac=list|detail` 即可）
+- 不把 HMAC(IP) 宣传成匿名：IPv4 空间可爆破，只保证不落明文
 - 第一期不落 MySQL 日报（P2 可选）
+- 第一期不改 `clearStartupCaches` 的 `EcoHub:*` 扫描范围
+- 第一期不补 `main.go` SIGTERM 优雅退出（退出丢内存队列）
 
 ---
 
@@ -65,7 +84,7 @@ EcoHub 是自托管影视聚合系统。流量来自 Web 前台、鸿蒙 / 安�
 
 | 方案 | 做法 | 优点 | 缺点 | 结论 |
 | --- | --- | --- | --- | --- |
-| **A. 热聚合 + 短窗明细** | 中间件产结构化事件 → 有界 channel → Redis 计数 / HLL / ZSET + 最近 N 条 ring | 无新依赖，查询快，写放大可控 | 明细只保留几十小时 | **采用** |
+| **A. 热聚合 + 短窗明细** | 中间件产结构化事件 → 有界 channel → Redis 计数 / HLL / ZSET + 最近 N 条 ring | 无新依赖，查询快，写放大可控 | 明细只保留短窗；重启清缓存后归零 | **采用** |
 | B. 全量 MySQL 明细 | 每请求 INSERT | 实现直接、可任意翻历史 | TVBox / 采集高 QPS 拖垮库 | 不做主路径 |
 | C. 外部可观测栈 | Loki + Grafana 等 | 能力最强 | 违背「2 核 2G 开箱」 | 不做默认 |
 
@@ -79,25 +98,36 @@ P2 可将日聚合滚到 MySQL，保留 30～90 天趋势；明细仍不进 MySQ
 HTTP 请求
   │
   ├─ AccessLog 中间件（同步只做采集，目标 <1ms）
-  │     ├─ 跳过 health / 日志轮询 / 采集轮询 2xx / 海报静态 / 分析接口自身
-  │     ├─ 结构化 AccessEvent（路径脱敏、IP 打码、Action / ClientType）
+  │     ├─ 跳过 health / layout 噪声 / 日志轮询 / 采集轮询 2xx / 海报静态 / 分析接口自身
+  │     ├─ 结构化 AccessEvent（路径脱敏、IP 打码、Action / ClientType / Internal）
   │     └─ 非阻塞投递有界 channel（满则丢，dropped++）
   │
   ├─ 业务 handler（不变）
   │
-  └─ 后台 1 个 worker
-        ├─ Redis：分钟桶、日 UV、客户端 / 行为 Hash、Top ZSET、延迟桶、recent / slow / error List
+  └─ 后台 1 个 worker（panic recover，单协程）
+        ├─ Redis：站点分钟桶 / Provide 分钟字段、日 UV（仅站点非 SSR）、
+        │         客户端 / 行为 Hash、Top ZSET、站点延迟桶、recent / slow / error List
         └─ 仅 4xx/5xx 与慢请求（≥500ms）写入 syslog（运维通道）
 
 管理接口  GET /api/manage/access/overview|logs|tops
 后台页面  /manage/access
 ```
 
+启动顺序（必须）：
+
+1. `waitForRedis` / `waitForMySQL`
+2. `service.InitSvc.DefaultDataInit()`（内含 `clearStartupCaches`，会删 `EcoHub:*`）
+3. `access.StartCollector()`
+4. `router.SetupRouter()` → `r.Run`
+
 原则：
 
-- **中间件不写 Redis。** Redis 故障或短暂阻塞不能拖接口。
-- **2xx 正常访问不写系统日志。** 系统日志只留错误、慢请求、业务告警。
-- **分析失败静默降级。** worker 挂了，站点仍可用，后台显示「采集暂停 / 无数据」。
+- **画像用页面埋点，不用接口次数当 PV。** 前台 `POST /api/stat/view`（Web / OHOS），一次打开页面计 1。
+- **中间件只做健康与 TVBox。** QPS 延迟、4xx/5xx、慢请求、热接口、访问日志、Provide 计数仍走 HTTP。
+- **中间件不写 Redis（HTTP 采集）。** 埋点同样经有界 channel，满则丢。
+- **2xx 正常访问不写系统日志。**
+- **分析失败静默降级。**
+- **站点与 Provide 分列。** headline PV / UV 来自埋点。
 
 ---
 
@@ -109,36 +139,42 @@ HTTP 请求
 type AccessEvent struct {
     Ts         time.Time `json:"ts"`
     Method     string    `json:"method"`
-    Path       string    `json:"path"`       // 去 query、去换行、去 token
+    Path       string    `json:"path"`       // 去 query、去换行、去 token，最长 256
     Route      string    `json:"route"`      // public / provide / manage / health / static
     Action     string    `json:"action"`     // browse / search / play / classify / provide / manage / other
     Status     int       `json:"status"`
     LatencyMs  int64     `json:"latencyMs"`
-    Bytes      int       `json:"bytes"`
     ClientType string    `json:"clientType"` // web / ohos / android / tvbox / manage / crawler / unknown
+    Internal   string    `json:"internal,omitempty"` // ssr；空=外部请求
     IPHash     string    `json:"-"`          // HMAC(IP)，只用于 UV，不进明细 JSON
-    IPPreview  string    `json:"ipPreview"`  // IPv4 末段打码 1.2.3.x；IPv6 留前 48bit
-    UAFamily   string    `json:"uaFamily"`   // chrome / safari / ecohub-ohos / tvbox / bot / ...
+    IPPreview  string    `json:"ipPreview"`  // IPv4 末段打码；IPv6 留前 48bit；SSR 固定 "local"
+    UAFamily   string    `json:"uaFamily"`   // chrome / safari / ecohub-ohos / ecohub-ssr / tvbox / bot / ...
     Resource   string    `json:"resource"`   // 影片 ID 或搜索词（截断 32 字）
 }
 ```
 
-`IPHash` 不得下发前端。明细接口只返回 `IPPreview`。
+`IPHash` 不得下发前端。明细接口只返回 `IPPreview`。不采集 `Bytes`（P0 用不到）。
+
+`Internal=ssr` 判定：`User-Agent` 含 `EcoHub-SSR`（由 `serverGet` 写入）。
 
 ### 6.2 路径与资源提取
 
-| 接口 | Action | Resource |
-| --- | --- | --- |
-| `GET /api/index`、`/api/index/dailyUpdates`、`/api/dailyUpdates`、`/api/navCategory` | `browse` | 空 |
-| `GET /api/searchFilm` | `search` | `keyword` 截断 32 字 |
-| `GET /api/filmPlayInfo` | `play` | `id` |
-| `GET /api/filmClassify`、`/api/filmClassifySearch` | `classify` | 分类 / 标签摘要（可选） |
-| `GET /api/provide/vod` | `provide` | `ac`（list / detail / 空） |
-| `GET /api/provide/config` | `provide` | `config` |
-| `/api/manage/*` | `manage` | 空 |
-| 其他 | `other` | 空 |
+| 接口 | Action | Resource | 采集 |
+| --- | --- | --- | --- |
+| `GET /api/index` | `browse` | 空 | 是 |
+| `GET /api/index/dailyUpdates`、`/api/dailyUpdates` | — | — | **否**（首页组件轮询） |
+| `GET /api/searchFilm` | `search` | `keyword` 截断 32 字 | 是 |
+| `GET /api/filmPlayInfo` | `play` | `id` | 是 |
+| `GET /api/filmClassify`、`/api/filmClassifySearch` | `classify` | 分类 / 标签摘要（可选） | 是 |
+| `GET /api/provide/vod` | `provide` | `ac`（list / detail / 空） | 计数是；recent 见 §6.5 |
+| `GET /api/provide/config` | `provide` | `config` | 同上 |
+| `/api/manage/*` | `manage` | 空 | 是（已跳过的除外） |
+| `GET /api/navCategory`、`/api/config/basic`、`/api/hotKeywords` | — | — | **否**（layout / 辅助接口） |
+| 其他 | `other` | 空 | 是 |
 
-Provide 的 Path 归一为 `/api/provide/vod` 或 `/api/provide/config`，禁止把 `?t=&pg=&wd=` 拼进 Path，避免 ZSET 基数爆炸。
+Provide 的 Path 归一为 `/api/provide/vod` 或 `/api/provide/config`，禁止把 `?t=&pg=&wd=` 拼进 Path。
+
+热播 P0 只来自 `filmPlayInfo?id=`（Web SSR / OHOS 拉播放信息）。TVBox 播片走 `ac=detail&ids=`，P0 不进热播榜；文案写「Web/App 拉播放信息」，不要写成全站真实播放。
 
 ### 6.3 客户端判定
 
@@ -146,57 +182,90 @@ Provide 的 Path 归一为 `/api/provide/vod` 或 `/api/provide/config`，禁止
 
 | ClientType | 规则 |
 | --- | --- |
-| `ohos` | `User-Agent` 含 `EcoHub-OHOS`（鸿蒙客户端已设置） |
-| `android` | `User-Agent` 含 `EcoHub-Android`（**当前未设置，P1 补客户端 Header**） |
+| `ohos` | `User-Agent` 含 `EcoHub-OHOS`（**P0 给业务 HttpClient 补上**，见 §13） |
+| `android` | `User-Agent` 含 `EcoHub-Android`（当前无正式客户端，规则预留） |
 | `tvbox` | 路径前缀 `/api/provide/` |
 | `manage` | 路径前缀 `/api/manage/` |
-| `crawler` | UA 含 `bot` / `spider` / `crawler` / `curl` / `wget`（大小写不敏感） |
-| `web` | 其余前台 API |
+| `crawler` | UA 含 `bot` / `spider` / `crawler` / `curl` / `wget`（大小写不敏感）；**不含** `EcoHub-SSR` |
+| `web` | 其余前台 API（含 SSR，此时 `Internal=ssr`） |
 | `unknown` | 无法归类的静态或异常路径 |
 
-P0 不依赖 Android 改动：Android 流量会暂时记入 `web`，P1 补 UA 后自动分开。
+`EcoHub-SSR` 只标 `Internal`，ClientType 仍为 `web`（Next 页面流量）。OHOS 不走 SSR。
 
 ### 6.4 噪声过滤（不采集）
 
 在现有 skip 上扩展：
 
 - `GET|HEAD /api/health`
+- `GET /api/config/basic`（根 layout / SiteGuard / OHOS 拉站点配置）
+- `GET /api/navCategory`（前台 layout）
+- `GET /api/hotKeywords`（搜索页辅助）
+- `GET /api/index/dailyUpdates`、`/api/dailyUpdates`（首页组件，每 15s 还会轮询）
 - `GET /api/manage/system/logs/delta`
+- `GET /api/manage/user/info`、`/api/manage/index`、`/api/manage/version`（后台 layout 每次刷新都会打）
 - `GET /api/manage/collect/list` 且状态 &lt; 400
 - `GET /api/manage/access/*`（避免自采样）
 - 前缀 `/api/upload/pic/poster/`
 - 方法 `OPTIONS`（CORS 预检）
 
-`/api/provide/vod` **要记**，这是 TVBox 流量主体。
+### 6.5 Provide 写入策略
+
+`/api/provide/*` **要计数**，这是 TVBox 流量主体；但不得污染站点 headline。
+
+| 写入 | Provide 2xx（含 list 轮询） | Provide 4xx/5xx 或慢请求 |
+| --- | --- | --- |
+| 分钟桶 `provide_pv` / `provide_err*` | 是 | 是 |
+| `client[tvbox]`、`action[provide]`、`top:path` | 是 | 是 |
+| 站点 `pv` / `err*` / `hist` / 站点 UV | **否** | **否**（错误进 Provide 计数，不进站点 P95） |
+
+后台 `/api/manage/*` 的 2xx 同样不进站点 PV / UV / P95 / recent（与 Provide 相同），避免刷新管理页把「今日 PV」刷高。行为分布和热接口仍可看到 manage。
+| `recent` List | **否**（不抽样，避免 2000 条被刷光） | 是 |
+| `slow` / `error` List | 否 / 否 | 是 |
+| 站点 HLL UV | 否 | 否 |
+
+### 6.6 SSR 与 UV
+
+| | 行为 / 热搜 / 热播 / 站点 PV | 站点 UV（HLL） | `ipPreview` |
+| --- | --- | --- | --- |
+| `Internal=ssr` | 计入（否则播放页热播为空） | **不计入** | 固定 `local` |
+| 浏览器 / OHOS 直打 | 计入 | 计入（HMAC） | 打码 IP |
+| Provide | 见 §6.5 | 不计入站点 UV | 打码 IP（仅错误/慢请求进明细） |
+| 回环地址且非 ssr | 计入 | 计入（本机访客记 1） | `local` |
 
 ---
 
 ## 7. Redis 设计
 
-统一前缀 `EcoHub:Access:`，与现有 `EcoHub:*` 一致。启动时的 Redis 整批清理若扫 `EcoHub:*`，访问数据会随重启丢失——**这是可接受的**：热数据本身就有 TTL，重启后从零累计。若后续启动清理要保留访问数据，再把扫描模式收窄（P2 再议，第一期不改清理逻辑）。
+统一前缀 `EcoHub:Access:`。启动 `clearStartupCaches` 扫 `EcoHub:*` 会删掉访问键——**P0 接受**：collector 必须在清理之后启动，重启后从零累计。P2 再考虑扫描排除 `EcoHub:Access:*`。
+
+日桶、分钟桶的日期用 `time.Local`（镜像已 `TZ=Asia/Shanghai`）。
 
 | Key | 结构 | TTL | 用途 |
 | --- | --- | --- | --- |
-| `EcoHub:Access:min:{yyyyMMddHHmm}` | Hash：`pv` `err4` `err5` `cost_sum` | 48h | QPS / 错误曲线 |
-| `EcoHub:Access:uv:{yyyyMMdd}` | HyperLogLog(`IPHash`) | 14d | 日 UV |
-| `EcoHub:Access:client:{yyyyMMdd}` | Hash：`web` `ohos` `android` `tvbox` `manage` `crawler` `unknown` | 14d | 客户端占比 |
+| `EcoHub:Access:min:{yyyyMMddHHmm}` | Hash：`pv` `err4` `err5` `cost_sum` `provide_pv` `provide_err4` `provide_err5` | 48h | 站点 QPS + Provide QPS |
+| `EcoHub:Access:uv:{yyyyMMdd}` | HyperLogLog（仅站点、非 SSR） | 14d | 日 UV |
+| `EcoHub:Access:client:{yyyyMMdd}` | Hash：`web` `ohos` `android` `tvbox` `manage` `crawler` `unknown` | 14d | 客户端占比（含 tvbox 全量请求） |
 | `EcoHub:Access:action:{yyyyMMdd}` | Hash：`browse` `search` `play` `classify` `provide` `manage` `other` | 14d | 行为画像 |
 | `EcoHub:Access:top:path:{yyyyMMdd}` | ZSET（member=`METHOD path`） | 14d | 热接口 |
-| `EcoHub:Access:top:search:{yyyyMMdd}` | ZSET（member=关键词） | 14d | 热搜 |
-| `EcoHub:Access:top:play:{yyyyMMdd}` | ZSET（member=影片 ID） | 14d | 热播 |
-| `EcoHub:Access:hist:{yyyyMMdd}` | Hash：`b50` `b100` `b200` `b500` `b1000` `bInf` | 14d | 延迟分布 / 近似 P95 |
-| `EcoHub:Access:recent` | List，右侧 LPUSH，LTRIM 2000 | 48h | 访问日志 |
-| `EcoHub:Access:slow` | List，最近 200 条（`latencyMs >= 500`） | 7d | 慢请求 |
-| `EcoHub:Access:error` | List，最近 200 条（status ≥ 400） | 7d | 异常 |
-| `EcoHub:Access:meta:dropped` | 整数，进程内也可另计 | 14d | channel 丢弃计数 |
+| `EcoHub:Access:top:search:{yyyyMMdd}` | ZSET（member=关键词） | 14d | 访问分析热搜（原始次数） |
+| `EcoHub:Access:top:play:{yyyyMMdd}` | ZSET（member=影片 ID） | 14d | 热播（filmPlayInfo id） |
+| `EcoHub:Access:hist:{yyyyMMdd}` | Hash：`b50` `b100` `b200` `b500` `b1000` `bInf` | 14d | **仅站点**延迟分布 / 近似 P95 |
+| `EcoHub:Access:recent` | List，LPUSH + LTRIM 2000 | **无 TTL** | 访问日志 |
+| `EcoHub:Access:slow` | List，最近 200 条 | **无 TTL** | 慢请求 |
+| `EcoHub:Access:error` | List，最近 200 条 | **无 TTL** | 异常 |
+| `EcoHub:Access:meta:dropped` | 整数 | 14d | channel 丢弃计数 |
+
+`recent` / `slow` / `error` **禁止「只在新建时 EXPIRE」**：长寿命键若 48h 后过期，站点持续有流量也会整表蒸发。条数已由 LTRIM 封顶，不设 TTL。
+
+日桶 / 分钟桶带日期，EXPIRE 只在 key 新建时设（`EXISTS` 后决定，单 worker 无竞争）。
 
 写入策略：
 
-- worker 对单条事件用 pipeline 一次提交（INCR / PFADD / ZINCRBY / LPUSH / LTRIM / EXPIRE）
-- EXPIRE 只在 key 新建时设，避免每条请求刷新 TTL 放大写入
-- 延迟用固定桶，不用精确百分位结构；P95 用桶上界估算即可
+- worker 对单条事件用 pipeline 一次提交
+- Redis 错误打日志后继续，**worker 必须 recover**，禁止一条 panic 停采集
+- 延迟用固定桶；P95 只用站点 `hist`。从高桶往低桶累加至 ≥5%，命中桶上界作为近似 P95；全在最低桶则为该桶上界
 
-近似 P95：从高桶往低桶累加，命中的桶上界作为 P95。2 核 2G 够用，误差可接受。
+查询 `overview` 时 pipeline 读取当日分钟桶（最多 1440），服务端折成 **15 分钟点（96 点）** 再返回，不要把 1440 点丢给前端。
 
 ---
 
@@ -204,20 +273,20 @@ P0 不依赖 Android 改动：Android 流量会暂时记入 `web`，P1 补 UA �
 
 | 数据 | 处理 |
 | --- | --- |
-| 完整 IP | 不落盘、不下发。UV 用 `HMAC-SHA256(salt, ip)` 的 hex 前 16 字节 |
-| 明细 IP | IPv4 `a.b.c.x`；IPv6 保留前 48 bit，其余置零后再压缩显示 |
+| 完整 IP | 不落盘、不下发。UV 用 `HMAC-SHA256(salt, ip)` 的 hex 前 16 字节。IPv4 可爆破，只保证不落明文 |
+| 明细 IP | IPv4 `a.b.c.x`；IPv6 保留前 48 bit；SSR / 回环为 `local` |
 | Query | Path 去掉全部 query。`token` / `password` / `pwd` 即使误入也剥离 |
-| 搜索词 | 只进 `Resource` 与热搜 ZSET，截断 32 字，不做全文长期存储 |
+| 搜索词 | 只进 `Resource` 与热搜 ZSET，截断 32 字 |
 | Cookie / JWT | 不采集 |
-| HMAC salt | 独立配置 `ACCESS_IP_SALT`，缺省时用 `JWT_SECRET` 派生（`sha256("ecohub-access-ip:" + JWT_SECRET)`），文档中说明正式环境建议单独设置 |
+| HMAC salt | `ACCESS_IP_SALT`，缺省用 `JWT_SECRET` 派生（`sha256("ecohub-access-ip:" + JWT_SECRET)`）；正式环境建议单独设置 |
 
 权限：查询接口挂在现有 `manageRoute` 上，走 `AuthToken` + `WriteAccess`（与系统日志一致）。guest 只读。
+
+Gin v1.9 默认 `TrustedProxies` 为信任全部，任意人可对公网 `:18080` 伪造成 `X-Forwarded-For`。显式收敛信任列表同时是 **安全修复**。
 
 ---
 
 ## 9. 真实 IP（TrustedProxies）
-
-Gin 默认不信任任意 `X-Forwarded-For`。反代（1Panel / Nginx / Caddy）后 `ClientIP()` 经常是 Docker 网关。
 
 新增环境变量：
 
@@ -225,70 +294,108 @@ Gin 默认不信任任意 `X-Forwarded-For`。反代（1Panel / Nginx / Caddy）
 TRUSTED_PROXIES=127.0.0.1,::1
 ```
 
-- 默认 `127.0.0.1,::1`（同容器 Next 反代、本机）
-- 1Panel / 独立 Nginx 填反代容器或宿主机地址，例如 `172.17.0.1` 或内网网段
+- 默认 `127.0.0.1,::1`：覆盖正式 All-in-One（Next rewrite / SSR 均来自本机）
+- 反代到 **:3000**：Go 仍看到 127.0.0.1（Next rewrite），默认即可
+- 反代到 **:18080**（1Panel / Nginx 直打 Go）：必须把反代地址加入列表，例如 `172.17.0.1`
+- 源码 `docker-compose.yml` 分 `web` / `server` 两容器：默认不够，本地需把 Web 容器网段加入，或接受 Web 流量 IP 全是 Web 容器
 - 启动时 `engine.SetTrustedProxies(list)`；解析失败打 WARN 并回退默认值
-- 同时识别 `X-Forwarded-For` / `X-Real-IP`（Gin 已支持，关键是信任列表）
 
-不配对的后果：UV 塌缩成 1、Top IP 无意义。画像的客户端与行为统计仍可用。
+不配对的后果：UV / 打码 IP 失真，客户端与行为统计仍可用。
 
 ---
 
 ## 10. 后台产品
 
-独立侧栏菜单 **访问分析**（`/manage/access`），不塞进「系统设置 → 系统日志」。
+独立侧栏菜单 **访问分析**（`/manage/access`），不塞进「系统设置 → 系统日志」。放在「网站配置」与「系统设置」之间。图标用 `LineChartOutlined`。
 
-遵循 `.ai/ui-rules.md`：antd 6、CSS Module、8pt 间距、单层 Card、禁止 `:global`。
+UI 跟现有 manage 页（工作台 / 影片列表）：antd 6、CSS Module、`ManagePageHeader`（左侧橙条）、单层 Card（圆角 12、间距 16）、内容区 padding 24 / 移动 16。禁止 `:global` 覆盖第三方。  
+**不要**套用 `.ai/ui-rules.md`（鸿蒙 token）。  
+图表用 `Statistic` + CSS/SVG 条，不新增依赖。默认深色主题，浅色跟 antd token。
 
-页面三个区块（同一页滚动，不拆子路由）：
+一页滚动，三个 Card，不拆子路由。页头右侧：日期（默认今天，可切近 14 天内有数据的日期）+ 刷新。
+
+```
+┌ ManagePageHeader：访问分析                         [日期] [刷新]
+│ 站点请求画像（不含 TVBox 轮询）。重启后从零计。
+│
+├ Card「今日站点」  extra：不含 Provide / layout 噪声
+│  ┌ PV 8345 ┐ ┌ UV 678 ┐ ┌ 错误 13 ┐ ┌ P95 200ms ┐   ← 工作台同款 4 格
+│  └─────────┘ └────────┘ └─────────┘ └───────────┘
+│  虚线条：TVBox / Provide  请求 4000  错误 2     ← 不进上面四格
+│  ┌ 24h 折线（站点橙 + Provide 蓝，15 分钟点） ┐ ┌ 客户端横向条 ┐
+│  └──────────────────────────────────────────┘ └──────────────┘
+│
+├ Card「请求画像」
+│  ┌ 行为分布（横条） ┐ ┌ 热接口 Top10 ┐ ┌ 热搜 / 热播 ┐
+│  └──────────────────┘ └──────────────┘ └────────────┘
+│
+└ Card「访问日志」  extra：不含 Provide 的 2xx 轮询
+   [全部|慢请求|错误]  状态  客户端  [路径关键词]  [查询]
+   Table：时间 / 方法 / 路径 / 状态 / 耗时 / 客户端 / IP / UA
+```
+
+断点：≥1200 四格数字 + 折线/占比两列 + 画像三列；≤1200 数字两列、画像改单列；≤768 数字单列。日志表横向滚动。
 
 ### 10.1 概览
 
-- 数字：今日 PV、今日 UV、错误数（4xx+5xx）、近似 P95
-- 24 小时 QPS 折线（按分钟桶汇总到 5 分钟点，288 点太多则 15 分钟）
-- 客户端占比（饼图或横向条）
+站点四格（工作台 `statsCard` 同款：40px 橙底图标 + 22px 数字 + 12px 说明）：
+
+| 格 | 文案 | 数据 |
+| --- | --- | --- |
+| PV | 今日 PV · 页面业务请求 | `overview.pv` |
+| UV | 今日 UV · 不含 SSR / Provide | `overview.uv` |
+| 错误 | 错误数 · `4xx n · 5xx m` | `err4+err5` |
+| P95 | 近似 P95 · 站点延迟，不含 Provide | `p95Ms` |
+
+其下虚线条只展示 Provide，颜色弱于四格。折线 SVG polyline，不引入图表库。客户端横向条：web / tvbox / ohos / manage / crawler；脚注「Web 含 SSR 页面请求」。
+
+`dropped > 0` 时在页头 description 下用 `Alert` 提示「有 N 条分析事件因队列满被丢弃，站点请求未受影响」。
 
 ### 10.2 请求画像
 
-- 行为分布：browse / search / play / classify / provide / manage
-- 热接口 Top 10
-- 热搜 Top 10（P0 可先占位，有数据即显示；无搜索则为空态）
-- 热播 Top 10（影片 ID；P1 可反查片名）
+三列（移动单列）：
+
+- 行为：browse / provide / play / classify / search / manage，横条 + 计数
+- 热接口 Top 10：`GET /api/...` + 次数；等宽路径
+- 热搜 / 热播：左关键词或 `id xxx`，右「搜 n / 播 n」；脚注「热搜为原始请求次数，与前台热搜榜不同。热播是 Web/App 拉播放信息。」
+
+空态用 antd `Empty`，文案「暂无搜索 / 暂无播放记录」。
 
 ### 10.3 访问日志
 
-单层 Card 内：筛选 + 表格。
+快捷 Segmented：全部 / 慢请求 / 错误 → `source=recent|slow|error`。  
+筛选项：状态（全部 / 2xx / 4xx / 5xx）、客户端、路径关键词。点查询再请求，不边输入边打接口。
 
-筛选项：状态（全部 / 2xx / 4xx / 5xx）、客户端、路径关键词、仅慢请求。
+列：时间（`HH:mm:ss`，title 给完整 ISO）、方法、路径（等宽）、状态（Tag：2xx 绿 / 4xx 橙 / 5xx 红）、耗时（≥慢阈值用警告色）、客户端、IP、UA 族。SSR 行 IP 为 `local`、UA 为 `ecohub-ssr`。
 
-列：时间、方法、路径、状态、耗时、客户端、打码 IP、UA 族。
-
-快捷视图：全部 / 慢请求 / 错误。数据分别读 `recent` / `slow` / `error`。
-
-空态文案：「暂无访问记录。若站点刚启动或分析已关闭，属预期。」
+空态：「暂无访问记录。若站点刚启动或分析已关闭，属预期。」  
+接口失败：Card 内 `Alert`「访问分析暂不可用」，不要整页白屏。
 
 ---
 
 ## 11. 管理接口
 
-均需登录。只读，无 POST。
+均需登录。只读，无 POST。查询失败返回 `code != 0` 或空数据 + 明确 `msg`（如「访问分析暂不可用」），不要 500 拖垮后台页。
 
 ### `GET /api/manage/access/overview`
 
-Query：`day` 可选，默认当天（站点本地时区）。
+Query：`day` 可选，默认当天（`time.Local`）。
+
+`pv` / `uv` / `err4` / `err5` / `p95Ms` / `series[].pv` 均为 **站点**（不含 Provide）。
 
 ```json
 {
   "day": "2026-08-27",
-  "pv": 12345,
+  "pv": 8345,
   "uv": 678,
   "err4": 12,
   "err5": 1,
   "p95Ms": 200,
   "dropped": 0,
-  "client": { "web": 8000, "tvbox": 3000, "ohos": 1000, "android": 0, "manage": 300, "crawler": 45 },
+  "provide": { "pv": 4000, "err4": 2, "err5": 0 },
+  "client": { "web": 8000, "tvbox": 4000, "ohos": 1000, "android": 0, "manage": 300, "crawler": 45 },
   "action": { "browse": 5000, "search": 400, "play": 2000, "provide": 4000, "classify": 800, "manage": 300 },
-  "series": [{ "t": "2026-08-27T10:00:00+08:00", "pv": 80, "err4": 0, "err5": 0 }]
+  "series": [{ "t": "2026-08-27T10:00:00+08:00", "pv": 80, "err4": 0, "err5": 0, "providePv": 40 }]
 }
 ```
 
@@ -305,9 +412,9 @@ Query：`day`、`kind=path|search|play`、`limit` 默认 10 最大 50。
 
 ### `GET /api/manage/access/logs`
 
-Query：`source=recent|slow|error`（默认 recent）、`limit` 默认 100 最大 200、`status`、`client`、`q`（路径包含）。
+Query：`source=recent|slow|error`（默认 recent）、`limit` 默认与 source 上限相同（recent 2000 / slow·error 200）、`status`、`client`、`q`（路径包含）。前端表格分页，不一次铺开。
 
-过滤在服务端对 List 快照做，List 本身已有上限，不必上搜索引擎。
+过滤在服务端对 List 快照做。List 已有上限，不必上搜索引擎。
 
 ```json
 {
@@ -319,8 +426,9 @@ Query：`source=recent|slow|error`（默认 recent）、`limit` 默认 100 最�
       "status": 200,
       "latencyMs": 36,
       "clientType": "web",
-      "ipPreview": "203.0.113.x",
-      "uaFamily": "chrome",
+      "internal": "ssr",
+      "ipPreview": "local",
+      "uaFamily": "ecohub-ssr",
       "resource": "1024"
     }
   ]
@@ -338,7 +446,7 @@ Query：`source=recent|slow|error`（默认 recent）、`limit` 默认 100 最�
 | `ACCESS_LOG_ENABLED` | `true` | 关闭后中间件不采集、不写 Redis |
 | `ACCESS_SLOW_MS` | `500` | 慢请求阈值，同时决定是否写 syslog |
 | `ACCESS_RECENT_LIMIT` | `2000` | recent List 长度 |
-| `TRUSTED_PROXIES` | `127.0.0.1,::1` | 逗号分隔 |
+| `TRUSTED_PROXIES` | `127.0.0.1,::1` | 逗号分隔；见 §9 |
 | `ACCESS_IP_SALT` | 空（由 JWT_SECRET 派生） | IP HMAC 盐 |
 
 不新增 Docker 服务，不改 compose 拓扑。
@@ -351,32 +459,37 @@ Query：`source=recent|slow|error`（默认 recent）、`limit` 默认 100 最�
 server/internal/middleware/access_log.go      # 改造：产事件；2xx 不再 log.Printf
 server/internal/access/                       # 新增
   event.go                                    # 模型、脱敏、FromContext
-  classify.go                                 # Route / Action / ClientType / UAFamily
-  collector.go                                # channel、worker、丢弃计数、启停
-  redis_store.go                              # pipeline 写入
+  classify.go                                 # Route / Action / ClientType / Internal / UAFamily
+  collector.go                                # channel、worker recover、丢弃计数、启停
+  redis_store.go                              # pipeline 写入（站点 / Provide 分列）
   query.go                                    # overview / tops / logs 读取
-  access_test.go                              # 判定、脱敏、跳过路径
+  access_test.go                              # 判定、脱敏、跳过路径、SSR/Provide 分列
 server/internal/handler/access_handler.go     # 三个 GET
 server/internal/router/router.go              # 注册路由；SetTrustedProxies
 server/internal/config/config.go              # 上述环境变量
-server/cmd/server/main.go                     # 启动 collector
+server/cmd/server/main.go                     # DefaultDataInit 之后启动 collector
 
+web/src/lib/server-api.ts                     # 默认 User-Agent: EcoHub-SSR（调用方已设 UA 则不覆盖）
 web/src/app/manage/access/page.tsx
 web/src/app/manage/access/view/index.tsx
 web/src/app/manage/access/view/index.module.less
 web/src/app/manage/layout-view/index.tsx      # 侧栏增加「访问分析」
 
-.env.example                                  # 追加变量注释
+app-for-ohos/entry/src/main/ets/common/network/HttpClient.ets
+                                              # User-Agent: EcoHub-OHOS/{version}
+
+.env.example                                  # 追加变量注释（含 TrustedProxies 场景）
 ```
 
-Android 客户端（独立仓库 `app-for-android/`）P1：请求头增加 `User-Agent: EcoHub-Android/{version}`。  
-OHOS 已具备，无需改。
+OHOS 版本号与现有 `AppVersionUtil.getVersionName()` 对齐；取失败则用 `EcoHub-OHOS`。
+
+Android：`app-for-android/` 目前是 Flutter 模板，P0/P1 都不改。有正式客户端后再加 `EcoHub-Android/{version}`。
 
 单文件超过 500 行则按 `event` / `collector` / `redis_store` / `query` 拆分，禁止把 Redis 与 HTTP 塞进一个文件。
 
 ---
 
-## 14. 中间件示意
+## 14. 中间件与采集示意
 
 ```go
 func AccessLog() gin.HandlerFunc {
@@ -399,7 +512,16 @@ func AccessLog() gin.HandlerFunc {
 }
 ```
 
-channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序与 pipeline 竞争。进程退出时 `close(ch)` 并 drain 剩余事件，最多等 1 秒。
+`serverGet`：
+
+```ts
+headers: {
+  "User-Agent": "EcoHub-SSR",
+  ...headers, // 调用方显式传入的 UA 优先
+}
+```
+
+channel 容量 1024。worker 单协程 + `recover`。P0 **不**做进程退出 drain：当前 `r.Run` 无 SIGTERM 处理，补优雅退出超出本期范围；退出丢内存队列即可。
 
 现有 `sanitizeAccessLogPath` 的换行剥离保留，并扩展为去掉 query、限制 Path 长度 256。
 
@@ -412,7 +534,7 @@ channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序�
 | 用途 | 排障、采集、通知、慢 SQL | 流量与请求画像 |
 | 存储 | 文件滚动 + 内存 seq | Redis |
 | 后台入口 | 系统设置 → 系统日志 | 侧栏「访问分析」 |
-| HTTP 行 | 仅 4xx/5xx 与慢请求 | 全量（已过滤噪声） |
+| HTTP 行 | 仅 4xx/5xx 与慢请求 | 站点请求 + Provide 错误/慢请求 |
 
 实施后：打开系统日志不应再被正常 2xx 刷屏。
 
@@ -423,30 +545,35 @@ channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序�
 ### P0（本方案第一期，可独立上线）
 
 - 结构化采集 + Redis 聚合 + 后台概览 / 明细
+- 站点 / Provide 分列；SSR 打标；layout 噪声跳过
 - 2xx 退出系统日志
 - `TRUSTED_PROXIES`
-- 热搜 / 热播 ZSET 一并写入（有数据就展示，不依赖客户端改动）
+- `serverGet` 带 `EcoHub-SSR`；OHOS `HttpClient` 带 `EcoHub-OHOS/{version}`
+- 热搜 / 热播 ZSET 一并写入（有数据就展示）
 
 验收：
 
-1. 本机连续访问首页、搜索、播放，概览 PV 增加，明细可见对应 Path
-2. 打开系统日志，不再出现大量 2xx `[HTTP]`
-3. 连续刷新系统日志页，访问分析中不应出现 `/api/manage/system/logs/delta`
-4. `ACCESS_LOG_ENABLED=false` 后概览不再增长，接口正常
-5. Redis 临时断开：前台接口仍 200，后台概览为空或提示不可用，进程不 panic
+1. 打开首页：站点 PV 增加约 1（`/api/index`，另可能有客户端 `dailyUpdates`），**不应**出现 `/api/config/basic`、`/api/navCategory`；UV 不因 SSR 变成 1 个 `127.0.0.1`
+2. 搜索、播放：action 对应，热搜/热播有 key；播放明细 `internal=ssr` 且 `ipPreview=local`
+3. 连续打 `GET /api/provide/vod?ac=list`：Provide 计数涨，站点 P95 与 `recent` 不被刷没
+4. 打开系统日志，不再出现大量 2xx `[HTTP]`
+5. 连续刷新系统日志页，访问分析中不应出现 `/api/manage/system/logs/delta`
+6. `ACCESS_LOG_ENABLED=false` 后概览不再增长，接口正常
+7. Redis 临时断开：前台接口仍 200，后台概览为空或提示不可用，进程不 panic
 
 ### P1
 
-- Android `User-Agent: EcoHub-Android/{version}`
 - 热播 ID 反查片名
+- Provide `ac=detail` + `ids` 是否计入热播（需单独产品确认）
 - 慢请求单独卡片强化
 
 ### P2（按需）
 
 - MySQL 日聚合表 `access_daily_stats` / `access_daily_top`，保留 90 天
-- CSV 导出
-- 错误率超阈值走现有 Telegram 通知
-- 启动时 Redis 清理是否排除 `EcoHub:Access:*`
+- 启动 Redis 清理排除 `EcoHub:Access:*`
+- SIGTERM 时 drain channel（最多 1s）
+- CSV 导出、错误率超阈值走 Telegram
+- 正式 Android 客户端 UA
 
 ---
 
@@ -454,12 +581,15 @@ channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序�
 
 | 风险 | 处理 |
 | --- | --- |
-| Redis 与站点同机，高 QPS 写放大 | pipeline + 跳过噪声 + 单 worker；2xx 不再写磁盘 |
+| Redis 与站点同机，高 QPS 写放大 | pipeline + 跳过噪声 + Provide 2xx 不进 recent + 单 worker；2xx 不再写磁盘 |
 | channel 满丢事件 | `dropped` 计数展示在概览；宁丢分析不丢请求 |
-| 反代未配 TrustedProxies | UV / IP 失真，客户端与行为统计仍可用；文档与 `.env.example` 标明 |
-| 进程重启丢失分钟桶 | TTL 数据，可接受；P2 再考虑日报 |
-| Provide 被刷 | 只记归一 Path + `ac`，ZSET 不会被 query 打爆 |
-| 启动扫描删除全部 `EcoHub:*` | 第一期接受访问数据随清理归零；不在 P0 改全局清理 |
+| SSR 无访客 IP | 计入行为，不计入 UV；`ipPreview=local` |
+| Provide list 轮询 | 计数单独列；不进站点 PV/P95/recent |
+| 反代未配 TrustedProxies | UV / IP 失真；`.env.example` 按 :3000 / :18080 / 分容器标明 |
+| 进程重启丢失热数据 | 接受；P2 再考虑日报与清理排除 |
+| 进程退出丢队列 | 接受；不在 P0 补优雅退出 |
+| HMAC(IPv4) 可爆破 | 只承诺不落明文 |
+| 启动扫描删除 `EcoHub:*` | collector 在清理后启动；不在 P0 改全局清理 |
 
 更优但未采用的路径：ClickHouse / Loki 能存更长明细，但要额外容器与运维，不符合当前部署模型。
 
@@ -467,9 +597,12 @@ channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序�
 
 ## 18. 默认决策（实施时按此执行，除非另行变更）
 
-1. **范围**：P0 含流量 / 延迟 / 错误 / 最近明细，并写入热搜 / 热播（展示有则显示）。片名反查放到 P1。
+1. **范围**：P0 含站点流量 / 延迟 / 错误 / 最近明细，Provide 单独计数；写入热搜 / 热播（展示有则显示）。片名反查、Provide 热播放到 P1。
 2. **入口**：独立侧栏「访问分析」，不进系统设置 Tab。
-3. **明细保留**：Redis 最近 2000 条、TTL 48 小时；更长历史要等 P2 MySQL 日报，不做全量明细表。
+3. **明细**：`recent` 2000 条、无 TTL、不含 Provide 2xx；更长历史等 P2 MySQL 日报。
+4. **SSR**：打标并计入 browse/search/play/classify，不计入 UV。
+5. **OHOS UA**：P0 改同仓库 `HttpClient`；Android 不动。
+6. **图表**：不新加依赖。
 
 ---
 
@@ -477,9 +610,13 @@ channel 容量建议 1024。worker 单协程即可，避免 Redis 命令乱序�
 
 - 访问中间件：`server/internal/middleware/access_log.go`
 - 路由注册：`server/internal/router/router.go`（`r.Use(middleware.AccessLog())`）
+- 启动清理：`server/internal/service/init_service.go` `clearStartupCaches`
 - 系统日志：`server/internal/infra/syslog/logger.go`、`server/internal/handler/system_log_handler.go`
 - 后台系统日志页：`web/src/app/manage/system/logs/view/index.tsx`
 - 侧栏：`web/src/app/manage/layout-view/index.tsx`
 - Provide：`server/internal/handler/provide_handler.go`
 - 播放 / 搜索：`server/internal/handler/index_handler.go`（`FilmPlayInfo`、`SearchFilm`）
-- OHOS UA：`app-for-ohos/entry/src/main/ets/common/utils/AppVersionUtil.ets`
+- 前台热搜（勿合并）：`server/internal/service/hot_search.go`
+- Web SSR：`web/src/lib/server-api.ts`（`serverGet`）；页面：`web/src/app/(public)/**/page.tsx`、`layout.tsx`
+- OHOS 业务 HTTP：`app-for-ohos/entry/src/main/ets/common/network/HttpClient.ets`（当前无 EcoHub UA）
+- OHOS GitHub UA（勿误当作 API UA）：`app-for-ohos/entry/src/main/ets/common/utils/AppVersionUtil.ets`

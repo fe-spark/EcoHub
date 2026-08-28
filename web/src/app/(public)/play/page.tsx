@@ -1,4 +1,5 @@
 import PlayPageView from "./view";
+import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 
 async function getPlayData(
@@ -59,11 +60,14 @@ export default async function PlayPage({
   }
 
   return (
-    <PlayPageView
-      key={filmId}
-      data={playPageData}
-      filmId={filmId}
-      initialTime={initialTime}
-    />
+    <>
+      <TrackPageView action="play" resource={filmId} />
+      <PlayPageView
+        key={filmId}
+        data={playPageData}
+        filmId={filmId}
+        initialTime={initialTime}
+      />
+    </>
   );
 }

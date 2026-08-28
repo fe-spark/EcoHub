@@ -291,6 +291,7 @@ func InitConfig() {
 	fmt.Printf("[Config] 素材目录: %s\n", FilmPictureUploadDir)
 
 	loadCollectRuntimeConfig()
+	loadAccessRuntimeConfig()
 }
 
 // resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。

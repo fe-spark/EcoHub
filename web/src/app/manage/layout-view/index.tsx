@@ -36,6 +36,7 @@ import {
   GlobalOutlined,
   GithubOutlined,
   QuestionCircleOutlined,
+  LineChartOutlined,
 } from "@ant-design/icons";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 
@@ -112,6 +113,11 @@ const menuItems: MenuItem[] = [
     label: "网站配置",
   },
   {
+    key: "/manage/access",
+    icon: <LineChartOutlined />,
+    label: "访问分析",
+  },
+  {
     key: "/manage/system",
     icon: <SettingOutlined />,
     label: "系统设置",
@@ -152,6 +158,9 @@ function resolveMenuKey(pathname: string) {
   }
   if (pathname.startsWith("/manage/system/website")) {
     return "/manage/system/website";
+  }
+  if (pathname.startsWith("/manage/access")) {
+    return "/manage/access";
   }
   if (pathname.startsWith("/manage/system")) {
     return "/manage/system";

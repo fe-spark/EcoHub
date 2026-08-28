@@ -1,4 +1,5 @@
 import FilmClassifyPageView from "./view";
+import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 import { Alert } from "antd";
 
@@ -37,5 +38,10 @@ export default async function FilmClassifyPage({
     return <Alert type="warning" showIcon title="当前分类已失效，请从最新分类导航重新进入" />;
   }
 
-  return <FilmClassifyPageView data={data} pid={pid} />;
+  return (
+    <>
+      <TrackPageView action="classify" resource={pid} />
+      <FilmClassifyPageView data={data} pid={pid} />
+    </>
+  );
 }

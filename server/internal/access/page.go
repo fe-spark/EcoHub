@@ -1,0 +1,84 @@
+package access
+
+import (
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+var pageActions = map[string]struct{}{
+	"browse":   {},
+	"search":   {},
+	"play":     {},
+	"classify": {},
+}
+
+const pageMinInterval = 300 * time.Millisecond
+
+var (
+	pageHitMu   sync.Mutex
+	pageHitLast = map[string]time.Time{}
+)
+
+func TrackPage(c *gin.Context, action, resource string) {
+	Collect(buildPageEvent(c, action, resource))
+}
+
+func buildPageEvent(c *gin.Context, action, resource string) *AccessEvent {
+	if c == nil || c.Request == nil {
+		return nil
+	}
+	action = strings.ToLower(strings.TrimSpace(action))
+	if _, ok := pageActions[action]; !ok {
+		return nil
+	}
+	ua := c.Request.UserAgent()
+	if strings.Contains(ua, "EcoHub-SSR") || isCrawlerUA(ua) {
+		return nil
+	}
+	ip := strings.TrimSpace(c.ClientIP())
+	if pageTooFast(ip) {
+		return nil
+	}
+	return &AccessEvent{
+		Ts:         time.Now(),
+		Method:     "PAGE",
+		Path:       action,
+		Route:      "page",
+		Action:     action,
+		Status:     200,
+		ClientType: clientFromUA(ua),
+		IPHash:     HashIP(ip),
+		IPPreview:  IPPreview(ip),
+		UAFamily:   uaFamily("", ua),
+		Resource:   TruncateRunes(resource, maxResourceLen),
+	}
+}
+
+func pageTooFast(ip string) bool {
+	key := HashIP(ip)
+	if key == "" {
+		key = "unknown"
+	}
+	now := time.Now()
+	pageHitMu.Lock()
+	defer pageHitMu.Unlock()
+	if last, ok := pageHitLast[key]; ok && now.Sub(last) < pageMinInterval {
+		return true
+	}
+	pageHitLast[key] = now
+	if len(pageHitLast) > 10000 {
+		cutoff := now.Add(-pageMinInterval)
+		for k, t := range pageHitLast {
+			if t.Before(cutoff) && k != key {
+				delete(pageHitLast, k)
+			}
+		}
+		if len(pageHitLast) > 10000 {
+			pageHitLast = map[string]time.Time{key: now}
+		}
+	}
+	return false
+}

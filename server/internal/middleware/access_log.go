@@ -1,31 +1,30 @@
 package middleware
 
 import (
-	"log"
-	"strings"
 	"time"
+
+	"server/internal/access"
+	"server/internal/config"
+	"server/internal/infra/syslog"
 
 	"github.com/gin-gonic/gin"
 )
 
-var accessLogSkipPaths = map[string]struct{}{
-	"/api/manage/collect/list":      {},
-	"/api/manage/system/logs/delta": {},
-}
-
 func AccessLog() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
-		path := c.Request.URL.RequestURI()
-		routePath := c.Request.URL.Path
 		c.Next()
-		if _, ok := accessLogSkipPaths[routePath]; ok && c.Writer.Status() < 400 {
+		if !config.AccessLogEnabled {
 			return
 		}
-		log.Printf("[HTTP] %3d | %13s | %15s | %-7s %s", c.Writer.Status(), time.Since(start), c.ClientIP(), c.Request.Method, sanitizeAccessLogPath(path))
+		evt := access.FromContext(c, time.Since(start))
+		if evt == nil {
+			return
+		}
+		access.Collect(evt)
+		if evt.Status >= 400 || evt.LatencyMs >= config.AccessSlowMs {
+			syslog.Warnf("[HTTP] %d | %dms | %s | %s %s",
+				evt.Status, evt.LatencyMs, evt.IPPreview, evt.Method, evt.Path)
+		}
 	}
-}
-
-func sanitizeAccessLogPath(path string) string {
-	return strings.ReplaceAll(path, "\n", "")
 }
