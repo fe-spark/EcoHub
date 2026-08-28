@@ -171,8 +171,12 @@ func httpHealthSample(evt *AccessEvent) bool {
 	return evt.Action != "manage" && !isManagePath(evt.Path)
 }
 
+func isSSR(evt *AccessEvent) bool {
+	return evt != nil && (evt.Internal == "ssr" || evt.UAFamily == "ecohub-ssr")
+}
+
 func RecordRecent(evt *AccessEvent) bool {
-	if evt == nil || evt.Method == "PAGE" {
+	if evt == nil || evt.Method == "PAGE" || isSSR(evt) {
 		return false
 	}
 	if evt.Status >= 400 || evt.LatencyMs >= config.AccessSlowMs {
