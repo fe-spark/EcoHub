@@ -365,11 +365,17 @@ export default function Header({ navList }: { navList: NavItem[] }) {
         <div className={styles.headerInner}>
           {/* LOGO Area：稳定挂载，导航时不 remount */}
           <div className={styles.logoArea}>
-            <div className={styles.mobileMenuTrigger} onClick={() => setMobileMenuVisible(true)}>
+            <button
+              type="button"
+              className={styles.mobileMenuTrigger}
+              onClick={() => setMobileMenuVisible(true)}
+              aria-label="打开导航菜单"
+            >
               <MenuOutlined />
-            </div>
+            </button>
             
-            <div
+            <button
+              type="button"
               className={styles.siteName}
               onClick={navigateFromLogo}
               title={siteInfo?.siteUrl ? `打开 ${siteInfo.siteUrl}` : "回首页"}
@@ -380,7 +386,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 fetchPriority="high"
               />
               <span className={styles.logoText}>{siteInfo?.siteName || DEFAULT_SITE_NAME}</span>
-            </div>
+            </button>
           </div>
 
           {/* Navigation Area - Dynamic & Flexible */}
@@ -497,6 +503,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
           onClose={() => setMobileMenuVisible(false)}
           open={mobileMenuVisible}
           size={280}
+          zIndex={1300}
           className={styles.mobileDrawer}
         >
           <div className={styles.mobileDrawerBody}>

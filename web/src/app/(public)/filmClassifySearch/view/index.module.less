@@ -167,135 +167,39 @@
   }
 }
 
-.filterSection {
-  background: var(--public-surface-2);
-  border: 1px solid var(--public-border-2);
-  border-radius: 20px;
-  padding: 16px 24px;
-  margin-bottom: 24px;
-  box-shadow: var(--public-shadow-sm);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.filterRow {
-  display: flex;
+.mobileFilterSummary {
+  display: none;
   align-items: center;
-  gap: 16px;
-  padding: 6px 0;
-  border-bottom: 1px solid var(--public-border-1);
-  min-width: 0;
+  justify-content: space-between;
+  padding: 0 4px 12px;
+  font-size: 13px;
+  color: var(--public-text-3);
 
-  &:last-child {
-    border-bottom: none;
+  strong {
+    color: var(--primary-color);
+    font-weight: 800;
   }
 
-  .label {
-    flex: 0 0 52px;
-    width: 52px;
-    font-size: 13px;
-    font-weight: 700;
-    color: var(--public-text-2);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    line-height: 28px;
-  }
+  button {
+    background: transparent;
+    border: none;
+    color: #ff4d4f;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 0;
+    outline: none;
 
-  .optionsWrap {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    align-items: center;
-    position: relative;
-  }
-
-  .options {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-wrap: nowrap;
-    align-items: center;
-    gap: 8px;
-    padding: 2px 2px 2px 0;
-    overflow-x: auto;
-    overflow-y: hidden;
-    -webkit-overflow-scrolling: touch;
-    overscroll-behavior-x: contain;
-    scroll-behavior: smooth;
-    scrollbar-width: none;
-
-    &::-webkit-scrollbar {
-      display: none;
-      height: 0;
+    &:hover {
+      text-decoration: underline;
     }
   }
 }
 
-.option {
-  flex: 0 0 auto;
-  white-space: nowrap;
-  padding: 4px 14px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.4;
-  color: var(--public-text-3);
-  cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-  background-color: var(--public-surface-3);
-  border: 1px solid var(--public-border-1);
-  user-select: none;
-
-  &[aria-disabled="true"] {
-    opacity: 0.58;
-    pointer-events: none;
+@media (max-width: 768px) {
+  .mobileFilterSummary {
+    display: flex;
   }
-
-  &:hover:not(.active) {
-    color: var(--public-text-1);
-    background-color: var(--public-surface-hover);
-    border-color: var(--public-border-2);
-  }
-
-  &.active {
-    background: var(--primary-color) !important;
-    color: var(--public-on-accent) !important;
-    border-color: transparent !important;
-    font-weight: 700;
-    box-shadow: 0 2px 8px rgba(var(--primary-color-rgb), 0.35) !important;
-  }
-}
-
-.arrowBtn {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border-radius: 50%;
-  border: 1px solid var(--public-border-2);
-  background: var(--public-surface-3);
-  color: var(--public-text-3);
-  font-size: 11px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  z-index: 2;
-
-  &:hover {
-    background: var(--public-surface-hover);
-    color: var(--primary-color);
-    border-color: rgba(var(--primary-color-rgb), 0.4);
-  }
-}
-
-.arrowLeft {
-  margin-right: 6px;
-}
-
-.arrowRight {
-  margin-left: 6px;
 }
 
 .content {
@@ -345,12 +249,17 @@
 
   .heroHeader {
     padding: 16px;
-    margin-bottom: 16px;
+    margin-bottom: 14px;
     border-radius: 16px;
   }
 
   .heroTitle {
-    font-size: 22px;
+    font-size: 20px;
+  }
+
+  .heroDesc {
+    font-size: 12px;
+    line-height: 1.4;
   }
 
   .headerActions {
@@ -360,49 +269,26 @@
 
   .tabSwitcher {
     width: 100%;
+    padding: 4px;
+    gap: 4px;
+    border-radius: 12px;
+    background: var(--public-surface-3);
   }
 
   .tabBtn {
     flex: 1;
     justify-content: center;
-    padding: 6px 10px;
-  }
-
-  .resetBtn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  .filterSection {
-    padding: 12px 16px;
-    margin-bottom: 16px;
-    border-radius: 16px;
-  }
-
-  .filterRow {
-    flex-direction: column;
-    align-items: stretch;
+    min-height: 38px;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 600;
+    border-radius: 8px;
     gap: 6px;
 
-    .label {
-      flex: none;
-      width: auto;
-      line-height: 1.2;
-      font-size: 12px;
+    > span,
+    svg {
+      font-size: 14px;
     }
-
-    .optionsWrap {
-      width: 100%;
-    }
-
-    .options {
-      width: 100%;
-      padding-bottom: 2px;
-    }
-  }
-
-  .arrowBtn {
-    display: none;
   }
 
   .paginationWrapper {

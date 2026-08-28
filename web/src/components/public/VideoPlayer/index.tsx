@@ -62,7 +62,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       fullscreen: true,
       fullscreenWeb: !isMobile,
       mutex: true,
-      backdrop: true,
+      backdrop: false, // 禁用全屏 dim 遮罩，避免移动端（华为/手机浏览器）全屏变暗及拦截 Header 点击
       playsInline: true,
       // initialTime > 0 时业务层已指定跳转位置，关闭 autoPlayback 避免两套机制冲突；
       // 否则开启，让 Artplayer 以视频 URL 为 key 自动恢复每集各自的播放进度
@@ -106,14 +106,25 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
             video.src = url;
           }
-          // 对移动端进行原生标签补全
+          // 对移动端进行标准行内播放标签补全
           video.setAttribute("playsinline", "true");
           video.setAttribute("webkit-playsinline", "true");
-          video.setAttribute("x5-video-player-type", "h5");
-          video.setAttribute("x5-video-player-fullscreen", "true");
+          if (/MicroMessenger/i.test(navigator.userAgent)) {
+            video.setAttribute("x5-video-player-type", "h5");
+            video.setAttribute("x5-video-player-fullscreen", "true");
+          }
         },
       },
     });
+
+    if (art.template?.$video) {
+      const v = art.template.$video;
+      v.setAttribute("playsinline", "true");
+      v.setAttribute("webkit-playsinline", "true");
+      v.setAttribute("x5-playsinline", "true");
+      v.setAttribute("x5-video-player-type", "h5");
+      v.setAttribute("x5-video-player-fullscreen", "false");
+    }
 
     playerRef.current = art;
 
@@ -157,6 +168,12 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
 
     art.on("ready", () => {
+      if (art.template?.$video) {
+        const v = art.template.$video;
+        v.setAttribute("playsinline", "true");
+        v.setAttribute("webkit-playsinline", "true");
+        v.setAttribute("x5-playsinline", "true");
+      }
       if (initialTime > 0) {
         art.currentTime = initialTime;
       }

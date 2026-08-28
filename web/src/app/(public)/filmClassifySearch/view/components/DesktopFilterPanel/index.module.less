@@ -1,0 +1,230 @@
+.desktopPanel {
+  background: var(--public-surface-2);
+  border: 1px solid var(--public-border-2);
+  border-radius: 16px;
+  padding: 16px 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--public-shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.filterRows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--public-border-1);
+
+  &:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+  }
+
+  &:first-child {
+    padding-top: 0;
+  }
+}
+
+.label {
+  flex: 0 0 52px;
+  width: 52px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--public-text-3);
+  letter-spacing: 0.5px;
+  line-height: 30px;
+}
+
+.optionsArea {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.optionsWrap {
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.tagOption {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--public-text-3);
+  background: transparent;
+  border: 1px solid transparent;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.18s cubic-bezier(0.16, 1, 0.3, 1);
+  user-select: none;
+  white-space: nowrap;
+
+  &:hover:not(.active) {
+    color: var(--public-text-1);
+    background: var(--public-surface-hover);
+  }
+
+  &.active {
+    background: var(--primary-color);
+    color: var(--public-on-accent);
+    font-weight: 700;
+    box-shadow: 0 2px 8px rgba(var(--primary-color-rgb), 0.35);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+.expandBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary-color);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  outline: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity 0.2s ease;
+
+  &:hover {
+    opacity: 0.8;
+  }
+}
+
+// 底部已选条件面包屑
+.activeBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--public-surface-1);
+  border: 1px dashed var(--public-border-2);
+  border-radius: 10px;
+  margin-top: 4px;
+}
+
+.activeLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--public-text-3);
+  flex-shrink: 0;
+}
+
+.totalBadge {
+  color: var(--primary-color);
+  font-weight: 800;
+}
+
+.chipsWrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.activeChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(var(--primary-color-rgb), 0.1);
+  border: 1px solid rgba(var(--primary-color-rgb), 0.25);
+  color: var(--primary-color);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  user-select: none;
+
+  &:hover {
+    background: rgba(var(--primary-color-rgb), 0.2);
+    border-color: var(--primary-color);
+  }
+
+  &:active {
+    transform: scale(0.96);
+  }
+}
+
+.chipCategory {
+  opacity: 0.8;
+  font-weight: 500;
+}
+
+.chipValue {
+  font-weight: 700;
+}
+
+.chipClose {
+  font-size: 9px;
+  opacity: 0.8;
+  transition: transform 0.2s ease;
+
+  &:hover {
+    transform: scale(1.2);
+  }
+}
+
+.clearBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: transparent;
+  border: none;
+  color: var(--public-text-4);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.2s ease;
+  user-select: none;
+  margin-left: auto;
+
+  &:hover {
+    color: #ff4d4f;
+  }
+}
+
+@media (max-width: 768px) {
+  .desktopPanel {
+    display: none;
+  }
+}

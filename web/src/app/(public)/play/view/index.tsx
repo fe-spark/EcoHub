@@ -49,7 +49,17 @@ function formatLocalUpdateTime(value?: string | number | null) {
   if (Number.isNaN(date.getTime())) return "";
 
   const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function formatActorNames(value?: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "暂无";
+  return raw.replace(/\s*[，,、]\s*/g, " / ");
+}
+
+function resolveFilmScore(descriptor?: { score?: string; dbScore?: string }) {
+  return String(descriptor?.score || descriptor?.dbScore || "").trim() || "9.0";
 }
 
 interface PlayPageViewProps {
@@ -269,6 +279,15 @@ export default function PlayPageView({
   }
 
   const localUpdateTime = formatLocalUpdateTime(currentFilm.localUpdateTime);
+  const filmScore = resolveFilmScore(currentFilm.descriptor);
+  const actorText = formatActorNames(currentFilm.descriptor.actor);
+  const remarks = String(currentFilm.descriptor.remarks || "").trim();
+  const metaChips = [
+    localUpdateTime ? `${localUpdateTime} 更新` : "",
+    currentFilm.descriptor.cName,
+    currentFilm.descriptor.year,
+    currentFilm.descriptor.area,
+  ].filter(Boolean);
 
   return (
     <div className={styles.container}>
@@ -288,29 +307,33 @@ export default function PlayPageView({
       <div className={styles.mainContent}>
         <div className={styles.leftColumn}>
             <div className={styles.topInfoCard}>
-              <div className={styles.leftSection}>
-                <h1 className={styles.filmTitle}>{currentFilm.name}</h1>
-              <div className={styles.meta}>
-                <span className={styles.active}>{currentFilm.descriptor.remarks}</span>
-                {localUpdateTime && <span className={styles.localUpdateTime}>{localUpdateTime} 更新</span>}
-                <span>|</span>
-                <span>{currentFilm.descriptor.cName}</span>
-                <span>|</span>
-                <span>{currentFilm.descriptor.year}</span>
-                <span>|</span>
-                <span>{currentFilm.descriptor.area}</span>
-              </div>
-            </div>
-            <div className={styles.rightSection}>
-              <div className={styles.extraInfo}>
-                <div className={styles.scoreLabel}>综合评分</div>
-                <div className={styles.scoreValue}>
-                  {currentFilm.descriptor.score || "9.0"}
-                  <span>分</span>
+              <div className={styles.titleRow}>
+                <div className={styles.titleMain}>
+                  <h1 className={styles.filmTitle}>{currentFilm.name}</h1>
+                  {remarks ? <span className={styles.statusTag}>{remarks}</span> : null}
+                </div>
+                <div className={styles.scoreBadge} aria-label={`综合评分 ${filmScore} 分`}>
+                  <span className={styles.scoreCaption}>综合评分</span>
+                  <span className={styles.scoreNum}>
+                    {filmScore}
+                    <span className={styles.scoreUnit}>分</span>
+                  </span>
                 </div>
               </div>
+              {metaChips.length > 0 && (
+                <div className={styles.metaChips}>
+                  {metaChips.map((chip) => (
+                    <span key={chip} className={styles.metaChip}>
+                      {chip}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className={styles.actorRow}>
+                <span className={styles.actorLabel}>主演</span>
+                <span className={styles.actorValue}>{actorText}</span>
+              </div>
             </div>
-          </div>
 
           <div className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}>
             {current?.link && (
