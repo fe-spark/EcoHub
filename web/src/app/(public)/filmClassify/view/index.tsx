@@ -93,9 +93,6 @@ export default function FilmClassifyPageView({
               <span>专区精选</span>
             </span>
             <h1 className={styles.heroTitle}>{categoryName}专区</h1>
-            <p className={styles.heroDesc}>
-              汇聚热门新片、经典排行与近期持续更新的{categoryName}内容
-            </p>
           </div>
 
           <div className={styles.tabSwitcher}>

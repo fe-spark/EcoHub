@@ -22,7 +22,7 @@ function PublicMain({ children }: { children: React.ReactNode }) {
   const { active, label } = usePublicContentLoading();
 
   return (
-    <main className={`${styles.publicMain} page-entry`}>
+    <main className={styles.publicMain}>
       {/*
         必须同时保留 children 挂载（display:none），不能 {active ? loading : children}：
         否则发起 navigate 的页面会卸载，useTransition 收尾监听消失 → API 200 仍永远 loading。

@@ -148,81 +148,134 @@
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 20px;
-  padding: 24px 32px;
+  padding: 20px 24px;
   border: 1px solid var(--public-border-1);
   width: 100%;
   box-sizing: border-box;
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.titleRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px 16px;
+  min-width: 0;
+}
+
+.titleMain {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.filmTitle {
+  display: inline;
+  margin: 0;
+  font-size: clamp(20px, 2.4vw, 28px);
+  font-weight: 800;
+  color: var(--public-text-1);
+  letter-spacing: -0.4px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.statusTag {
+  display: inline-block;
+  vertical-align: middle;
+  margin: 0 0 2px 8px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: var(--primary-color);
+  background: rgba(var(--primary-color-rgb), 0.16);
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.scoreBadge {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  flex-shrink: 0;
+  min-width: 72px;
+  padding: 6px 12px;
+  border-radius: 12px;
+  background: rgba(var(--primary-color-rgb), 0.12);
+}
+
+.scoreCaption {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--public-text-4);
+}
+
+.scoreNum {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  color: var(--primary-color);
+}
+
+.scoreUnit {
+  margin-left: 2px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--public-text-4);
+}
+
+.metaChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.metaChip {
+  display: inline-flex;
   align-items: center;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--public-text-3);
+  background: var(--public-surface-3);
+}
 
-  .leftSection {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-  }
+.actorRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--public-text-3);
+  font-size: 13px;
+  line-height: 1.6;
+}
 
-  .rightSection {
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    border-left: 1px solid var(--public-border-2);
-    padding-left: 32px;
-    height: 100%;
-  }
+.actorLabel {
+  flex-shrink: 0;
+  margin-top: 1px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--public-text-4);
+  background: var(--public-surface-3);
+}
 
-  .filmTitle {
-    font-size: 26px;
-    font-weight: 900;
-    margin-bottom: 12px;
-    color: var(--public-text-1);
-    letter-spacing: -0.5px;
-    line-height: 1.2;
-
-    a:hover {
-      color: #fa8c16;
-    }
-  }
-
-  .meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px 16px;
-    color: var(--public-text-3);
-    font-size: 14px;
-
-    span.active {
-      color: #fa8c16;
-    }
-
-    .localUpdateTime {
-      font-weight: 700;
-    }
-  }
-
-  .extraInfo {
-    text-align: right;
-
-    .scoreLabel {
-      font-size: 13px;
-      color: var(--public-text-3);
-      margin-bottom: 4px;
-    }
-
-    .scoreValue {
-      font-size: 36px;
-      font-weight: 900;
-      color: #fa8c16;
-      line-height: 1;
-
-      span {
-        font-size: 16px;
-        color: var(--public-text-6);
-        margin-left: 4px;
-      }
-    }
-  }
+.actorValue {
+  min-width: 0;
+  color: var(--public-text-2);
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .mainContent {
@@ -644,24 +697,12 @@
 
 @media (max-width: 1024px) {
   .topInfoCard {
-    grid-template-columns: 1fr;
-    gap: 20px;
+    padding: 18px 20px;
+    gap: 10px;
+  }
 
-    .rightSection {
-      border-left: none;
-      border-top: 1px solid var(--public-border-2);
-      padding-left: 0;
-      padding-top: 20px;
-      justify-content: flex-start;
-
-      .extraInfo {
-        text-align: left;
-      }
-    }
-
-    .filmTitle {
-      font-size: 22px;
-    }
+  .scoreNum {
+    font-size: 20px;
   }
 
   .mainContent {
@@ -729,12 +770,30 @@
   }
 
   .topInfoCard {
-    padding: 20px 16px;
+    padding: 16px;
+    gap: 10px;
     border-radius: 0;
     border: none;
     border-bottom: 1px solid var(--public-border-1);
     background: transparent;
     backdrop-filter: none;
+  }
+
+  .titleRow {
+    gap: 8px 12px;
+  }
+
+  .scoreBadge {
+    min-width: 64px;
+    padding: 5px 10px;
+  }
+
+  .scoreNum {
+    font-size: 18px;
+  }
+
+  .actorRow {
+    font-size: 12px;
   }
 
   .infoArea {

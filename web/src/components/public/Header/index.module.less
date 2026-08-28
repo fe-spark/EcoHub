@@ -5,12 +5,13 @@
   left: 0;
   width: 100%;
   height: 80px;
-  z-index: 1000;
+  z-index: 1200;
   background: transparent;
   transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   align-items: center;
   backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 
   &.scrolled {
     height: 64px;
@@ -49,22 +50,34 @@
   width: 40px;
   height: 40px;
   font-size: 18px;
-  color: var(--public-text-2);
+  color: var(--public-text-1);
   cursor: pointer;
   background: var(--public-surface-3);
+  border: 1px solid var(--public-border-2);
   border-radius: 10px;
   margin-right: 16px;
+  padding: 0;
+  appearance: none;
+  touch-action: manipulation;
   transition: all 0.3s ease;
 
-  &:hover {
+  &:hover,
+  &:active {
     background: var(--public-surface-hover);
     color: var(--primary-color);
+    border-color: rgba(var(--primary-color-rgb), 0.3);
   }
 }
 
 .siteName {
   display: flex;
   align-items: center;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  touch-action: manipulation;
   transition: all 0.3s ease;
   min-width: 0;
 
@@ -85,7 +98,8 @@
     font-weight: 900;
     line-height: 1;
     letter-spacing: -1.5px;
-    background: linear-gradient(135deg, var(--primary-color) 0%, color-mix(in srgb, var(--primary-color) 35%, #c2410c) 100%);
+    color: var(--primary-color); /* 基础回退颜色，确保在文字裁剪失效时不会渲染为黑色 */
+    background: linear-gradient(135deg, var(--primary-color) 0%, #c2410c 100%);
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
@@ -470,24 +484,60 @@
 
 @media (max-width: 1024px) {
   .siteName {
-    .logoImg { height: 24px; }
+    .logoImg {
+      height: 32px;
+      margin-right: 10px;
+    }
     .logoText {
-      font-size: 18px !important;
-      max-width: 120px;
+      font-size: 20px !important;
+      max-width: 160px;
+      letter-spacing: -1px;
     }
   }
 }
 
 @media (max-width: 860px) {
+  .headerWrap {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 64px;
+    background: var(--public-page-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border-bottom: 1px solid var(--public-border-2);
+    opacity: 1 !important;
+    visibility: visible !important;
+    z-index: 1200;
+  }
   .navArea { display: none; }
-  .mobileMenuTrigger { display: flex; }
+  .mobileMenuTrigger {
+    display: flex;
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+    border-radius: 12px;
+    color: var(--public-text-1);
+    background: var(--public-surface-3);
+    border: 1px solid var(--public-border-2);
+  }
+  .actionBtn {
+    width: 44px;
+    height: 44px;
+    font-size: 18px;
+    border-radius: 12px;
+    color: var(--public-text-1);
+    background: var(--public-surface-3);
+    border: 1px solid var(--public-border-2);
+  }
   // 避免 relative 包装把 fixed 面板困在按钮宽度里
   .historyWrapper {
     position: static;
   }
   .historyPanel {
     position: fixed;
-    top: 80px;
+    top: 64px;
     left: 0;
     right: 0;
     width: auto;
@@ -496,6 +546,9 @@
     border-left: none;
     border-right: none;
     border-radius: 0 0 16px 16px;
+    background: var(--public-page-bg);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
     transform: translateY(-10px);
   }
   .historyPanel.show {
@@ -508,34 +561,41 @@
 
 @media (max-width: 640px) {
   .headerInner {
-    gap: 12px;
+    gap: 8px;
+    padding: 0 12px;
   }
 
   .mobileMenuTrigger {
-    margin-right: 12px;
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+    border-radius: 10px;
+    margin-right: 8px;
   }
 
   .siteName {
     .logoImg {
-      height: 22px;
-      margin-right: 10px;
+      height: 32px;
+      margin-right: 8px;
     }
 
     .logoText {
-      max-width: 92px;
-      font-size: 16px !important;
-      letter-spacing: -0.8px;
+      max-width: 140px;
+      font-size: 20px !important;
+      font-weight: 900;
+      letter-spacing: -1px;
     }
   }
 
   .actions {
-    gap: 8px;
+    gap: 6px;
   }
 
   .actionBtn {
-    width: 36px;
-    height: 36px;
-    font-size: 16px;
+    width: 40px;
+    height: 40px;
+    font-size: 17px;
+    border-radius: 10px;
   }
 }
 
