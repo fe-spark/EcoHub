@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"server/internal/access"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -91,6 +92,7 @@ func start() {
 	service.InitSvc.DefaultDataInit()
 	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token）
 	notify.EnsureBotPoller()
+	access.StartCollector()
 
 	r := router.SetupRouter()
 	_ = r.Run(fmt.Sprintf(":%s", config.ListenerPort))

@@ -1,4 +1,5 @@
 import SearchPageView from "./view";
+import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 
 async function getSearchData(keyword: string, current: string) {
@@ -51,11 +52,14 @@ export default async function SearchPage({
   ]);
 
   return (
-    <SearchPageView
-      data={data}
-      keyword={keyword}
-      current={currentPage}
-      hotKeywords={hotKeywords}
-    />
+    <>
+      <TrackPageView action={keyword.trim() ? "search" : "browse"} resource={keyword} />
+      <SearchPageView
+        data={data}
+        keyword={keyword}
+        current={currentPage}
+        hotKeywords={hotKeywords}
+      />
+    </>
   );
 }

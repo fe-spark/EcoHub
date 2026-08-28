@@ -29,11 +29,18 @@ export async function serverGet<T = any>(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
+  const merged: Record<string, string> = { "User-Agent": "EcoHub-SSR" };
+  if (headers) {
+    new Headers(headers).forEach((value, key) => {
+      merged[key] = value;
+    });
+  }
+
   let response: Response;
   try {
     response = await fetch(apiUrl, {
       cache: "no-store",
-      headers,
+      headers: merged,
       signal: controller.signal,
     });
   } catch (error) {

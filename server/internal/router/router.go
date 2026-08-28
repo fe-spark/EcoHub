@@ -4,6 +4,7 @@ import (
 	"mime"
 	"server/internal/config"
 	"server/internal/handler"
+	"server/internal/infra/syslog"
 	"server/internal/middleware"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +16,10 @@ func SetupRouter() *gin.Engine {
 	_ = mime.AddExtensionType(".ico", "image/x-icon")
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(config.TrustedProxies); err != nil {
+		syslog.Warnf("[HTTP] TRUSTED_PROXIES 解析失败，回退 %s: %v", config.DefaultTrustedProxies, err)
+		_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
+	}
 	r.Use(middleware.AccessLog())
 	r.Use(gin.Recovery())
 	r.Use(middleware.Cors())
@@ -36,6 +41,7 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
 	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
 	api.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
+	api.POST(`/stat/view`, handler.AccessHd.TrackView)
 	api.POST(`/login`, handler.UserHd.Login)
 	api.POST(`/logout`, middleware.AuthToken(), handler.UserHd.Logout)
 
@@ -69,6 +75,13 @@ func SetupRouter() *gin.Engine {
 		systemLog := manageRoute.Group(`/system/logs`)
 		{
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
+		}
+
+		accessRoute := manageRoute.Group(`/access`)
+		{
+			accessRoute.GET(`/overview`, handler.AccessHd.Overview)
+			accessRoute.GET(`/tops`, handler.AccessHd.Tops)
+			accessRoute.GET(`/logs`, handler.AccessHd.Logs)
 		}
 
 		// 轮播相关
