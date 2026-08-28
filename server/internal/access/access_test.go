@@ -128,6 +128,23 @@ func TestRecordRecent(t *testing.T) {
 	if !RecordRecent(bad) {
 		t.Fatal("provide error recent")
 	}
+	ssr := &AccessEvent{
+		Method: "GET", Path: "/api/index", Action: "http", Status: 200,
+		Internal: "ssr", UAFamily: "ecohub-ssr",
+	}
+	if RecordRecent(ssr) {
+		t.Fatal("ssr 2xx not in recent")
+	}
+	if !httpHealthSample(ssr) {
+		t.Fatal("ssr still in health hist")
+	}
+	ssrErr := &AccessEvent{
+		Method: "GET", Path: "/api/index", Action: "http", Status: 502,
+		Internal: "ssr", UAFamily: "ecohub-ssr",
+	}
+	if RecordRecent(ssrErr) {
+		t.Fatal("ssr not in recent even on error")
+	}
 }
 
 func TestEstimateP95(t *testing.T) {
