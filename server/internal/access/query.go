@@ -24,6 +24,7 @@ type Overview struct {
 	Provide ProvideStats     `json:"provide"`
 	Client  map[string]int64 `json:"client"`
 	Action  map[string]int64 `json:"action"`
+	Hist    map[string]int64 `json:"hist"`
 	Series  []SeriesPoint    `json:"series"`
 }
 
@@ -42,8 +43,12 @@ type SeriesPoint struct {
 }
 
 type TopItem struct {
-	Key   string `json:"key"`
-	Count int64  `json:"count"`
+	Key      string `json:"key"`
+	Count    int64  `json:"count"`
+	Title    string `json:"title,omitempty"`
+	Category string `json:"category,omitempty"`
+	Poster   string `json:"poster,omitempty"`
+	Year     int64  `json:"year,omitempty"`
 }
 
 func QueryOverview(day string) (*Overview, error) {
@@ -61,6 +66,7 @@ func QueryOverview(day string) (*Overview, error) {
 		Day:     target.Format("2006-01-02"),
 		Client:  map[string]int64{},
 		Action:  map[string]int64{},
+		Hist:    map[string]int64{},
 		Series:  []SeriesPoint{},
 		Dropped: Dropped(),
 	}
@@ -101,7 +107,9 @@ func QueryOverview(day string) (*Overview, error) {
 	out.UV = uvCmd.Val()
 	out.Client = parseIntMap(clientCmd.Val())
 	out.Action = parseIntMap(actionCmd.Val())
-	out.P95Ms = EstimateP95(parseIntMap(histCmd.Val()))
+	histVals := parseIntMap(histCmd.Val())
+	out.Hist = histVals
+	out.P95Ms = EstimateP95(histVals)
 	if n, err := droppedCmd.Int64(); err == nil && n > out.Dropped {
 		out.Dropped = n
 	}
@@ -200,6 +208,9 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 	for _, p := range pairs {
 		member, _ := p.Member.(string)
 		items = append(items, TopItem{Key: member, Count: int64(p.Score)})
+	}
+	if kind == "play" {
+		items = enrichPlayTopItems(items)
 	}
 	return items, nil
 }

@@ -55,11 +55,17 @@ func TestHTTPKindAndClient(t *testing.T) {
 	if httpKind("/api/manage/film/search/list") != "manage" {
 		t.Fatal("manage")
 	}
-	if ClassifyHTTPClient("/api/index", "EcoHub-OHOS/1.1.0") != "ohos" {
-		t.Fatal("ohos")
+	if ClassifyHTTPClient("/api/index", "EcoHub-OHOS/1.1.0") != "app" {
+		t.Fatal("ohos app")
 	}
-	if clientFromUA("EcoHub-OHOS/1.1.0") != "ohos" {
-		t.Fatal("page client ua")
+	if clientFromUA("EcoHub-OHOS/1.1.0") != "app" {
+		t.Fatal("page client ua ohos")
+	}
+	if clientFromUA("EcoHub-iOS/1.0.0") != "app" {
+		t.Fatal("page client ua ios")
+	}
+	if clientFromUA("EcoHub-Android/1.0.0") != "app" {
+		t.Fatal("page client ua android")
 	}
 	if ClassifyHTTPClient("/api/provide/vod", "Mozilla/5.0") != "tvbox" {
 		t.Fatal("tvbox by path")
@@ -85,12 +91,15 @@ func TestSanitizeAndNormalize(t *testing.T) {
 	}
 }
 
-func TestHTTPResourceOnlyProvide(t *testing.T) {
-	if httpResource("/api/searchFilm", url.Values{"keyword": {"庆余年"}}) != "" {
-		t.Fatal("search keyword not taken from http")
+func TestHTTPResource(t *testing.T) {
+	if httpResource("/api/filmPlayInfo", url.Values{"id": {"12345"}}) != "12345" {
+		t.Fatal("filmPlayInfo id")
 	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "list" {
-		t.Fatal("provide ac")
+		t.Fatal("provide ac list")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"999"}}) != "999" {
+		t.Fatal("provide ac detail ids")
 	}
 }
 
@@ -193,41 +202,41 @@ func TestBuildPageEvent(t *testing.T) {
 	config.AccessIPSalt = []byte("test-salt")
 	resetPageHit()
 
-	if buildPageEvent(nil, "browse", "") != nil {
+	if buildPageEvent(nil, "browse", "", "", "") != nil {
 		t.Fatal("nil ctx")
 	}
-	if buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.9"), "click", "") != nil {
+	if buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.9"), "click", "", "", "") != nil {
 		t.Fatal("unknown action")
 	}
 
 	resetPageHit()
-	if buildPageEvent(testPageCtx("EcoHub-SSR", "203.0.113.9"), "browse", "") != nil {
+	if buildPageEvent(testPageCtx("EcoHub-SSR", "203.0.113.9"), "browse", "", "", "") != nil {
 		t.Fatal("ssr skipped")
 	}
 	resetPageHit()
-	if buildPageEvent(testPageCtx("curl/8.0", "203.0.113.9"), "browse", "") != nil {
+	if buildPageEvent(testPageCtx("curl/8.0", "203.0.113.9"), "browse", "", "", "") != nil {
 		t.Fatal("crawler skipped")
 	}
 
 	resetPageHit()
-	loop := buildPageEvent(testPageCtx("Mozilla/5.0", "127.0.0.1"), "browse", "")
-	if loop == nil || loop.IPHash == "" || loop.IPPreview != "local" {
+	loop := buildPageEvent(testPageCtx("Mozilla/5.0", "127.0.0.1"), "browse", "", "web", "/")
+	if loop == nil || loop.IPHash == "" || loop.IPPreview != "local" || loop.ClientType != "web" || loop.Path != "/" {
 		t.Fatal("loopback still hashed")
 	}
 
 	resetPageHit()
 	long := strings.Repeat("影", maxResourceLen+8)
-	play := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.9"), "play", long)
-	if play == nil || play.Resource != strings.Repeat("影", maxResourceLen) {
+	play := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.9"), "play", long, "web", "/play?id=1")
+	if play == nil || play.Resource != strings.Repeat("影", maxResourceLen) || play.Path != "/play?id=1" {
 		t.Fatal("resource truncated")
 	}
 
 	resetPageHit()
-	first := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.10"), "search", "庆余年")
+	first := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.10"), "search", "庆余年", "web", "/search")
 	if first == nil {
 		t.Fatal("first search")
 	}
-	if buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.10"), "search", "庆余年") != nil {
+	if buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.10"), "search", "庆余年", "web", "/search") != nil {
 		t.Fatal("debounced")
 	}
 }
@@ -250,3 +259,19 @@ func TestFromContextSSR(t *testing.T) {
 		t.Fatalf("ssr event %+v", evt)
 	}
 }
+
+func TestEnrichPlayTopItems(t *testing.T) {
+	items := []TopItem{
+		{Key: "1024", Count: 10},
+		{Key: "id 2048", Count: 5},
+		{Key: "custom_keyword", Count: 3},
+	}
+	enriched := enrichPlayTopItems(items)
+	if len(enriched) != 3 {
+		t.Fatalf("want 3 items, got %d", len(enriched))
+	}
+	if enriched[0].Title == "" || enriched[1].Title == "" || enriched[2].Title != "custom_keyword" {
+		t.Fatalf("enrich items %+v", enriched)
+	}
+}
+

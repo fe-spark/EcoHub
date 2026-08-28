@@ -322,7 +322,8 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	keyword := c.DefaultQuery("keyword", "")
 	page := dto.GetPageParams(c)
 	page.PageSize = 10
-	bl := service.IndexSvc.SearchFilmInfo(strings.TrimSpace(keyword), page)
+	trimmed := strings.TrimSpace(keyword)
+	bl := service.IndexSvc.SearchFilmInfo(trimmed, page)
 	if page.Total <= 0 {
 		dto.Failed("暂无相关影片信息", c)
 		return

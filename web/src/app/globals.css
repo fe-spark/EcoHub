@@ -175,7 +175,6 @@ html,
 body {
   background: var(--public-page-bg);
   background-image: var(--public-page-bg-mesh);
-  background-attachment: fixed;
   color: var(--public-text-1);
   overscroll-behavior: none;
   touch-action: manipulation;

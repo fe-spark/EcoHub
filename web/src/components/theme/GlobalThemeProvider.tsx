@@ -107,7 +107,7 @@ export default function GlobalThemeProvider({
       ? {
           colorPrimary: DEFAULT_PRIMARY_COLOR,
           colorBorderSecondary: "rgba(255, 255, 255, 0.16)",
-          colorBorder: "rgba(255, 255, 255, 0.2)",
+          colorBorder: "rgba(255, 255, 255, 0.22)",
           fontFamily,
         }
       : {
@@ -117,8 +117,11 @@ export default function GlobalThemeProvider({
           colorBgLayout: "#f4f6fc",
           colorBgContainer: "#ffffff",
           colorBgElevated: "#ffffff",
-          colorBorderSecondary: "#e9eef3",
-          colorBorder: "#e2e8f0",
+          colorFillQuaternary: "#f8fafc",
+          colorFillTertiary: "#f1f5f9",
+          colorFillSecondary: "#e2e8f0",
+          colorBorderSecondary: "#e2e8f0",
+          colorBorder: "#cbd5e1",
           colorText: "#0f172a",
           colorTextSecondary: "#475569",
           colorTextTertiary: "#94a3b8",
@@ -154,12 +157,12 @@ export default function GlobalThemeProvider({
           : {}),
         Card: {
           colorBgContainer: isDark ? "rgba(255, 255, 255, 0.03)" : "#ffffff",
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e9eef3",
-          colorBorder: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.16)" : "#e2e8f0",
+          colorBorder: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
         },
         Table: {
-          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.18)" : "#e9eef3",
-          borderColor: isDark ? "rgba(255, 255, 255, 0.18)" : "#e2e8f0",
+          colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.16)" : "#e2e8f0",
+          borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
           headerBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#f8fafc",
           rowHoverBg: isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
         },

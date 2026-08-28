@@ -149,7 +149,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       width: 70,
       align: "center",
       render: (value: number) => (
-        <Typography.Text type="secondary" style={{ fontSize: 12, color: "#8c8c8c" }}>
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
           #{value}
         </Typography.Text>
       ),
@@ -161,36 +161,18 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
         const isRoot = record.pid === 0;
         const subCount = record.children?.length || 0;
         return (
-          <Space size={8} align="center" wrap>
+          <Space size={8} align="center">
             {isRoot ? (
-              <FolderOpenOutlined style={{ color: "#fa8c16", fontSize: 16 }} />
+              <FolderOpenOutlined style={{ color: "var(--ant-color-primary)", fontSize: 15 }} />
             ) : (
-              <SubnodeOutlined style={{ color: "#1677ff", fontSize: 14 }} />
+              <SubnodeOutlined style={{ color: "var(--ant-color-text-tertiary)", fontSize: 13 }} />
             )}
-            <Typography.Text strong={isRoot} style={{ fontSize: isRoot ? 15 : 14 }}>
+            <Typography.Text strong={isRoot} style={{ fontSize: isRoot ? 14 : 13 }}>
               {value}
             </Typography.Text>
-            {isRoot ? (
-              <Tag color="gold" variant="filled" style={{ fontWeight: 600 }}>
-                一级主类
-              </Tag>
-            ) : (
-              <Tag color="blue" variant="filled">
-                二级分类
-              </Tag>
-            )}
-            {isRoot && subCount > 0 ? (
-              <Tag color="default" variant="filled" style={{ fontSize: 12 }}>
-                含 {subCount} 个子类
-              </Tag>
-            ) : null}
-            {record.show ? (
-              <Tag color="success" variant="filled">
-                显示
-              </Tag>
-            ) : (
-              <Tag color="warning" variant="filled">
-                隐藏
+            {isRoot && subCount > 0 && (
+              <Tag color="default" style={{ marginInlineStart: 4, borderRadius: 4, fontSize: 12 }}>
+                {subCount} 个子类
               </Tag>
             )}
           </Space>
@@ -204,10 +186,12 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       align: "center",
       render: (value: number) =>
         value === 0 ? (
-          <Typography.Text type="secondary">根分类</Typography.Text>
+          <Tag color="orange" variant="filled">
+            一级主类
+          </Tag>
         ) : (
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-            父级 ID: {value}
+            二级 (PID: {value})
           </Typography.Text>
         ),
     },
@@ -228,7 +212,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       render: (children?: FilmClassNode[], record?: FilmClassNode) => {
         if (record?.pid === 0) {
           const count = children?.length || 0;
-          return <Tag color={count > 0 ? "processing" : "default"}>{count}</Tag>;
+          return <Typography.Text strong={count > 0}>{count}</Typography.Text>;
         }
         return <Typography.Text type="secondary">-</Typography.Text>;
       },

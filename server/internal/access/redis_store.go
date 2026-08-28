@@ -2,6 +2,7 @@ package access
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"server/internal/config"
@@ -88,6 +89,13 @@ func writeEvent(evt *AccessEvent) {
 		ak := actionKey(day)
 		pipe.HIncrBy(ctx, ak, "provide", 1)
 		pipe.ExpireNX(ctx, ak, ttlDay)
+
+		if evt.Resource != "" && evt.Resource != "list" && evt.Resource != "config" && evt.Resource != "detail" && evt.Resource != "videolist" {
+			plk := topPlayKey(day)
+			pipe.ZIncrBy(ctx, plk, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, plk, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, plk, ttlDay)
+		}
 	} else if httpHealthSample(evt) {
 		if evt.Status >= 500 {
 			pipe.HIncrBy(ctx, mk, "err5", 1)
@@ -99,6 +107,13 @@ func writeEvent(evt *AccessEvent) {
 		hk := histKey(day)
 		pipe.HIncrBy(ctx, hk, histBucket(evt.LatencyMs), 1)
 		pipe.ExpireNX(ctx, hk, ttlDay)
+
+		if strings.HasPrefix(evt.Path, "/api/filmPlayInfo") && evt.Resource != "" {
+			plk := topPlayKey(day)
+			pipe.ZIncrBy(ctx, plk, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, plk, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, plk, ttlDay)
+		}
 	}
 	pipe.ExpireNX(ctx, mk, ttlMinute)
 	pipe.ExpireNX(ctx, dk, ttlDay)

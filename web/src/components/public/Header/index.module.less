@@ -6,23 +6,38 @@
   width: 100%;
   height: 80px;
   z-index: 1200;
-  background: transparent;
-  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  background: rgba(10, 11, 16, 0.65);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  transition: height 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
   display: flex;
   align-items: center;
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
 
   &.scrolled {
     height: 64px;
-    background: color-mix(in srgb, var(--public-page-bg) 75%, transparent);
+    background: rgba(10, 11, 16, 0.82);
     backdrop-filter: blur(28px);
     -webkit-backdrop-filter: blur(28px);
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.28);
+  }
+}
+
+:global(html[data-theme="light"]) .headerWrap {
+  background: rgba(244, 246, 252, 0.65);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+
+  &.scrolled {
+    background: rgba(244, 246, 252, 0.82);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
   }
 }
 
 .headerInner {
+  position: relative;
+  z-index: 1;
   width: 100%;
   max-width: 1440px;
   margin: 0 auto;
@@ -498,18 +513,7 @@
 
 @media (max-width: 860px) {
   .headerWrap {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
     height: 64px;
-    background: var(--public-page-bg) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border-bottom: 1px solid var(--public-border-2);
-    opacity: 1 !important;
-    visibility: visible !important;
-    z-index: 1200;
   }
   .navArea { display: none; }
   .mobileMenuTrigger {
@@ -546,9 +550,9 @@
     border-left: none;
     border-right: none;
     border-radius: 0 0 16px 16px;
-    background: var(--public-page-bg);
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
+    background: color-mix(in srgb, var(--public-page-bg) 90%, transparent);
+    backdrop-filter: blur(30px);
+    -webkit-backdrop-filter: blur(30px);
     transform: translateY(-10px);
   }
   .historyPanel.show {

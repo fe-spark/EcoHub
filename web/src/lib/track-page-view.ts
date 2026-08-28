@@ -1,10 +1,16 @@
 const DEBOUNCE_MS = 2000;
 
-export function trackPageView(action: string, resource?: string) {
+export function trackPageView(
+  action: string,
+  resource?: string,
+  source: string = "web",
+  path?: string,
+) {
   if (typeof window === "undefined") {
     return;
   }
-  const key = `eh-pv:${action}:${window.location.pathname}:${resource || ""}`;
+  const currentPath = path || (window.location.pathname + window.location.search);
+  const key = `eh-pv:${action}:${currentPath}:${resource || ""}`;
   const now = Date.now();
   try {
     const last = Number(sessionStorage.getItem(key) || 0);
@@ -15,7 +21,12 @@ export function trackPageView(action: string, resource?: string) {
   } catch {
     // ignore quota / private mode
   }
-  const body = JSON.stringify({ action, resource: resource || "" });
+  const body = JSON.stringify({
+    action,
+    resource: resource || "",
+    source: source || "web",
+    path: currentPath,
+  });
   const url = "/api/stat/view";
   try {
     if (typeof navigator.sendBeacon === "function") {

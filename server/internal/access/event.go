@@ -110,10 +110,17 @@ func TruncateRunes(s string, max int) string {
 
 func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/provide/vod") {
-		return TruncateRunes(query.Get("ac"), maxResourceLen)
+		ac := query.Get("ac")
+		if (ac == "detail" || ac == "videolist") && query.Get("ids") != "" {
+			return TruncateRunes(query.Get("ids"), maxResourceLen)
+		}
+		return TruncateRunes(ac, maxResourceLen)
 	}
 	if strings.HasPrefix(path, "/api/provide/config") {
 		return "config"
+	}
+	if strings.HasPrefix(path, "/api/filmPlayInfo") {
+		return TruncateRunes(query.Get("id"), maxResourceLen)
 	}
 	return ""
 }
