@@ -51,10 +51,11 @@ func httpKind(path string) string {
 
 func clientFromUA(ua string) string {
 	switch {
-	case strings.Contains(ua, "EcoHub-OHOS"):
-		return "ohos"
-	case strings.Contains(ua, "EcoHub-Android"):
-		return "android"
+	case strings.Contains(ua, "EcoHub-iOS") || strings.Contains(ua, "EcoHub-IOS") ||
+		strings.Contains(ua, "EcoHub-OHOS") || strings.Contains(ua, "EcoHub-Android") ||
+		strings.Contains(ua, "EcoHub-App") || strings.Contains(ua, "EcoHubApp") ||
+		strings.Contains(ua, "EcoHub/"):
+		return "app"
 	case isCrawlerUA(ua):
 		return "crawler"
 	default:
@@ -92,6 +93,8 @@ func uaFamily(path, ua string) string {
 	switch {
 	case strings.Contains(ua, "EcoHub-SSR"):
 		return "ecohub-ssr"
+	case strings.Contains(ua, "EcoHub-iOS") || strings.Contains(ua, "EcoHub-IOS"):
+		return "ecohub-ios"
 	case strings.Contains(ua, "EcoHub-OHOS"):
 		return "ecohub-ohos"
 	case strings.Contains(ua, "EcoHub-Android"):

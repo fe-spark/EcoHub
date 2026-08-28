@@ -203,22 +203,65 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
   };
 
   const ruleColumns: ColumnsType<MappingRuleRecord> = [
-    { title: "ID", dataIndex: "id", width: 80, fixed: "left", align: "center", render: (value: number) => <Tag color="purple">{value}</Tag> },
     {
-      title: "分组",
-      dataIndex: "group",
+      title: "ID",
+      dataIndex: "id",
+      width: 70,
+      fixed: "left",
       align: "center",
-      render: (value: string) => <Tag color={value === ROOT_GROUP ? "gold" : "blue"}>{resolveGroupLabel(value)}</Tag>,
+      render: (value: number) => (
+        <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+          #{value}
+        </Typography.Text>
+      ),
     },
-    { title: "原始值", dataIndex: "raw", align: "left", render: (value: string) => <Typography.Text strong>{value}</Typography.Text> },
-    { title: "匹配方式", dataIndex: "matchType", align: "center", render: (value: string) => (value === "regex" ? "正则" : "精确") },
     {
-      title: "目标值",
+      title: "规则分组",
+      dataIndex: "group",
+      width: 120,
+      align: "center",
+      render: (value: string) => (
+        <Tag color={value === ROOT_GROUP ? "orange" : "blue"} variant="filled">
+          {resolveGroupLabel(value)}
+        </Tag>
+      ),
+    },
+    {
+      title: "原始值",
+      dataIndex: "raw",
+      align: "left",
+      render: (value: string) => <Typography.Text strong>{value}</Typography.Text>,
+    },
+    {
+      title: "匹配方式",
+      dataIndex: "matchType",
+      width: 100,
+      align: "center",
+      render: (value: string) => (
+        <Typography.Text type="secondary">
+          {value === "regex" ? "正则匹配" : "精确匹配"}
+        </Typography.Text>
+      ),
+    },
+    {
+      title: "目标展示值",
       dataIndex: "target",
       align: "left",
-      render: (value: string) => (value ? <Tag color="processing">{value}</Tag> : <Typography.Text type="secondary">未设置</Typography.Text>),
+      render: (value: string) =>
+        value ? (
+          <Typography.Text strong style={{ color: "var(--ant-color-primary)" }}>
+            {value}
+          </Typography.Text>
+        ) : (
+          <Typography.Text type="secondary">未设置</Typography.Text>
+        ),
     },
-    { title: "说明", dataIndex: "remarks", align: "left", render: (value: string) => value || <Typography.Text type="secondary">暂无说明</Typography.Text> },
+    {
+      title: "说明",
+      dataIndex: "remarks",
+      align: "left",
+      render: (value: string) => value || <Typography.Text type="secondary">-</Typography.Text>,
+    },
     {
       title: "操作",
       key: "action",

@@ -22,11 +22,11 @@ var (
 	pageHitLast = map[string]time.Time{}
 )
 
-func TrackPage(c *gin.Context, action, resource string) {
-	Collect(buildPageEvent(c, action, resource))
+func TrackPage(c *gin.Context, action, resource, source, path string) {
+	Collect(buildPageEvent(c, action, resource, source, path))
 }
 
-func buildPageEvent(c *gin.Context, action, resource string) *AccessEvent {
+func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
 	if c == nil || c.Request == nil {
 		return nil
 	}
@@ -42,14 +42,31 @@ func buildPageEvent(c *gin.Context, action, resource string) *AccessEvent {
 	if pageTooFast(ip) {
 		return nil
 	}
+
+	clientType := strings.ToLower(strings.TrimSpace(source))
+	if clientType == "android" || clientType == "ohos" || clientType == "ios" {
+		clientType = "app"
+	}
+	if clientType == "" {
+		clientType = clientFromUA(ua)
+	}
+
+	routePath := strings.TrimSpace(path)
+	if routePath == "" {
+		routePath = action
+	}
+	if len(routePath) > maxPathLen {
+		routePath = routePath[:maxPathLen]
+	}
+
 	return &AccessEvent{
 		Ts:         time.Now(),
 		Method:     "PAGE",
-		Path:       action,
+		Path:       routePath,
 		Route:      "page",
 		Action:     action,
 		Status:     200,
-		ClientType: clientFromUA(ua),
+		ClientType: clientType,
 		IPHash:     HashIP(ip),
 		IPPreview:  IPPreview(ip),
 		UAFamily:   uaFamily("", ua),

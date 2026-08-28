@@ -5,10 +5,10 @@
 }
 
 .panelCard {
-  border: 1px solid var(--ant-color-border-secondary);
+  border: 1px solid var(--ant-color-border);
   border-radius: 12px;
   background: var(--ant-color-bg-container);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 
   :global(.ant-card-head) {
     border-bottom: 1px solid var(--ant-color-border-secondary);
@@ -38,25 +38,29 @@
   gap: 12px;
   min-width: 0;
   padding: 14px 16px;
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 8px;
-  background: var(--ant-color-bg-container);
-  transition: border-color 0.2s ease;
+  border: 1px solid var(--ant-color-border);
+  border-radius: 10px;
+  background: var(--ant-color-fill-quaternary);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
 
   &:hover {
-    border-color: #fa8c16;
+    background: var(--ant-color-fill-tertiary);
+    border-color: var(--ant-color-primary-hover);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+    transform: translateY(-1px);
   }
 }
 
 .statsIcon {
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   display: flex;
   align-items: center;
   justify-content: center;
   border-radius: 8px;
-  background: rgba(250, 140, 22, 0.1);
+  background: rgba(250, 140, 22, 0.12);
   color: #fa8c16;
   font-size: 20px;
 }
@@ -67,13 +71,14 @@
 
 .statsValue {
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 700;
   line-height: 1.2;
   color: var(--ant-color-text);
 }
 
 .statsTitle {
   font-size: 12px;
+  font-weight: 500;
   color: var(--ant-color-text-secondary);
   margin-top: 2px;
 }
@@ -107,16 +112,18 @@
   gap: 8px;
   min-width: 0;
   padding: 16px;
-  border: 1px solid var(--ant-color-border-secondary);
+  border: 1px solid var(--ant-color-border);
   border-radius: 10px;
-  background: var(--ant-color-bg-container);
+  background: var(--ant-color-fill-quaternary);
   text-decoration: none;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: all 0.2s ease;
 
   &:hover {
-    border-color: #fa8c16;
+    background: var(--ant-color-fill-tertiary);
+    border-color: var(--ant-color-primary-hover);
     transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.08);
   }
 }
 

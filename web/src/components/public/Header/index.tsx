@@ -67,7 +67,7 @@ function SearchParamsBridge({
 }
 
 export default function Header({ navList }: { navList: NavItem[] }) {
-  const { mode, setMode } = useThemeMode();
+  const { mode, setMode, effective } = useThemeMode();
   const { config: siteInfo } = useSiteConfig();
   const [historyList, setHistoryList] = useState<HistoryItem[]>([]);
   const [scrolled, setScrolled] = useState(false);
@@ -361,7 +361,28 @@ export default function Header({ navList }: { navList: NavItem[] }) {
       <Suspense fallback={null}>
         <SearchParamsBridge onChange={onSearchParamsChange} />
       </Suspense>
-      <header className={`${styles.headerWrap} ${scrolled ? styles.scrolled : ""}`}>
+      <header
+        className={`${styles.headerWrap} ${scrolled ? styles.scrolled : ""}`}
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          width: "100%",
+          zIndex: 1200,
+          background: scrolled
+            ? (effective === "light" ? "rgba(244, 246, 252, 0.82)" : "rgba(10, 11, 16, 0.82)")
+            : (effective === "light" ? "rgba(244, 246, 252, 0.65)" : "rgba(10, 11, 16, 0.62)"),
+          backdropFilter: scrolled ? "blur(28px) saturate(180%)" : "blur(20px) saturate(180%)",
+          WebkitBackdropFilter: scrolled ? "blur(28px) saturate(180%)" : "blur(20px) saturate(180%)",
+          borderBottom: scrolled
+            ? (effective === "light" ? "1px solid rgba(0, 0, 0, 0.08)" : "1px solid rgba(255, 255, 255, 0.12)")
+            : (effective === "light" ? "1px solid rgba(0, 0, 0, 0.05)" : "1px solid rgba(255, 255, 255, 0.08)"),
+          boxShadow: scrolled
+            ? (effective === "light" ? "0 4px 20px rgba(0, 0, 0, 0.06)" : "0 4px 30px rgba(0, 0, 0, 0.28)")
+            : "none",
+          transition: "height 0.3s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease",
+        }}
+      >
         <div className={styles.headerInner}>
           {/* LOGO Area：稳定挂载，导航时不 remount */}
           <div className={styles.logoArea}>

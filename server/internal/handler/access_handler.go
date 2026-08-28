@@ -43,12 +43,14 @@ func (h *AccessHandler) TrackView(c *gin.Context) {
 	var body struct {
 		Action   string `json:"action"`
 		Resource string `json:"resource"`
+		Source   string `json:"source"`
+		Path     string `json:"path"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		dto.SuccessOnlyMsg("ok", c)
 		return
 	}
-	access.TrackPage(c, body.Action, body.Resource)
+	access.TrackPage(c, body.Action, body.Resource, body.Source, body.Path)
 	dto.SuccessOnlyMsg("ok", c)
 }
 
