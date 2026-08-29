@@ -325,34 +325,95 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* 🔵 请求耗时散点图 (Scatter Chart) */
-.scatterContainer {
+.heatWrap {
   width: 100%;
-  padding: 4px 0 0;
   min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.scatterSvg {
-  display: block;
-  width: 100%;
-  height: auto;
-}
-
-.scatterHeader {
+.heatLegend {
   display: flex;
   justify-content: flex-end;
-  align-items: center;
-  margin-bottom: 8px;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
 }
 
-.scatterDotGroup {
-  cursor: pointer;
-  transition: transform 0.15s ease;
+.heatLegendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 
-  &:hover circle {
-    stroke-width: 2;
-    filter: drop-shadow(0 0 4px currentColor);
+  i {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
   }
+}
+
+.heatGrid {
+  display: grid;
+  gap: 3px 3px;
+  width: 100%;
+}
+
+.heatRow {
+  display: contents;
+}
+
+.heatYLabel {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-right: 6px;
+  white-space: nowrap;
+}
+
+.heatCell {
+  height: 28px;
+  border: none;
+  border-radius: 3px;
+  padding: 0;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.heatCell:hover {
+  outline: 1px solid var(--ant-color-text-tertiary);
+  outline-offset: 0;
+}
+
+.heatXRow {
+  display: contents;
+}
+
+.heatXLabel {
+  font-size: 10px;
+  color: var(--ant-color-text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-align: center;
+  padding-top: 4px;
+}
+
+.heatHint,
+.heatHintMuted {
+  min-height: 18px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.heatHint {
+  color: var(--ant-color-text);
+}
+
+.heatHintMuted {
+  color: var(--ant-color-text-tertiary);
 }
 
 /* 📊 响应耗时分布柱状图 (Latency Histogram) */

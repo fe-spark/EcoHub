@@ -43,7 +43,7 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import TrendChart, { type SeriesPoint } from "./trend-chart";
 import DonutChart, { type DonutSlice } from "./donut-chart";
 import LatencyChart from "./latency-chart";
-import ScatterChart from "./scatter-chart";
+import LatencyHeatmap from "./latency-heatmap";
 import styles from "./index.module.less";
 
 type Overview = {
@@ -216,7 +216,7 @@ export default function AccessPageView() {
   const [keyword, setKeyword] = useState("");
   const [appliedQ, setAppliedQ] = useState("");
   const [logPage, setLogPage] = useState({ current: 1, pageSize: 20 });
-  const [latencyMode, setLatencyMode] = useState<"scatter" | "bar">("scatter");
+  const [latencyMode, setLatencyMode] = useState<"heat" | "bar">("heat");
 
   const dayParam = day.format("YYYY-MM-DD");
 
@@ -577,16 +577,16 @@ export default function AccessPageView() {
               optionType="button"
               buttonStyle="solid"
               options={[
-                { label: "散点分布", value: "scatter" },
-                { label: "柱状梯队", value: "bar" },
+                { label: "时序热力", value: "heat" },
+                { label: "柱状分布", value: "bar" },
               ]}
             />
           }
           loading={loading}
           styles={{ body: { padding: 16 } }}
         >
-          {latencyMode === "scatter" ? (
-            <ScatterChart logs={logs} />
+          {latencyMode === "heat" ? (
+            <LatencyHeatmap logs={logs} />
           ) : (
             <LatencyChart hist={overview?.hist} />
           )}
