@@ -17,6 +17,7 @@ var (
 )
 
 func StartCollector() {
+	startDailyRollup()
 	if !config.AccessLogEnabled {
 		syslog.Infof("[Access] 访问分析已关闭")
 		return

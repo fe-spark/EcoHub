@@ -36,6 +36,7 @@ func (s *InitService) DefaultDataInit() {
 			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
 			&model.NotifyConfigRecord{},
 			&model.NotifyChangeBatch{}, &model.NotifyChangeMid{},
+			&model.AccessDailyStats{}, &model.AccessDailyTop{},
 		)
 	}
 	ensureMappingRuleIndexes()
@@ -138,6 +139,8 @@ func (s *InitService) TableInit() {
 		&model.NotifyConfigRecord{},
 		&model.NotifyChangeBatch{},
 		&model.NotifyChangeMid{},
+		&model.AccessDailyStats{},
+		&model.AccessDailyTop{},
 	)
 	if err != nil {
 		syslog.Errorf("Database AutoMigrate Failed: %v", err)
