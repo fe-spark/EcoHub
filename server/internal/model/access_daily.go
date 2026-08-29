@@ -17,6 +17,7 @@ type AccessDailyStats struct {
 	ClientJSON  string    `json:"-" gorm:"type:text"`
 	ActionJSON  string    `json:"-" gorm:"type:text"`
 	HistJSON    string    `json:"-" gorm:"type:text"`
+	SeriesJSON  string    `json:"-" gorm:"type:text"`
 	RolledAt    time.Time `json:"rolledAt"`
 }
 

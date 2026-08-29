@@ -18,7 +18,6 @@ import styles from "./index.module.less";
 
 interface FilmInventoryStats {
   films: number;
-  snapshots: number;
   categories: number;
   failures: number;
 }
@@ -102,11 +101,6 @@ export default function ManagePageView() {
               title: "影视库存",
               value: stats?.films,
               icon: VideoCameraOutlined,
-            },
-            {
-              title: "列表快照",
-              value: stats?.snapshots,
-              icon: DatabaseOutlined,
             },
             {
               title: "分类",

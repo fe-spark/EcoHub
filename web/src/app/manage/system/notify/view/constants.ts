@@ -73,7 +73,7 @@ export const EVENT_GROUPS = [
 
 export const EVENT_OPTIONS: EventOption[] = [
   { field: "collectSourceFailed", category: "alert", label: "单源失败即时告警", badge: "核心告警", badgeColor: "red", hint: "某采集源连续失败达到上限终止时推送" },
-  { field: "collectFinalizeFailed", category: "alert", label: "收尾发布失败", badge: "系统异常", badgeColor: "orange", hint: "快照更新或摘要刷新失败时发送告警" },
+  { field: "collectFinalizeFailed", category: "alert", label: "收尾发布失败", badge: "系统异常", badgeColor: "orange", hint: "影视数据同步或摘要刷新失败时发送告警" },
   { field: "collectProgressStale", category: "alert", label: "采集进度超时", badge: "超时告警", badgeColor: "gold", hint: "采集任务卡住被强制标记为失败时提醒" },
   { field: "cronTaskFailed", category: "alert", label: "定时任务失败", badge: "任务失败", badgeColor: "volcano", hint: "后台定时调度运行失败告警" },
   { field: "collectBatchSummary", category: "digest", label: "采集结果摘要", badge: "批次汇总", badgeColor: "blue", hint: "整批采集结束后推送各源统计与更新列表" },

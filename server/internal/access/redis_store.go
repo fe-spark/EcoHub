@@ -33,8 +33,11 @@ func topSearchKey(day string) string {
 }
 func topPlayKey(day string) string { return config.AccessKeyPrefix + "top:play:" + day }
 func recentKey() string            { return config.AccessKeyPrefix + "recent" }
+func recentDayKey(day string) string { return config.AccessKeyPrefix + "recent:" + day }
 func slowKey() string              { return config.AccessKeyPrefix + "slow" }
+func slowDayKey(day string) string   { return config.AccessKeyPrefix + "slow:" + day }
 func errorKey() string             { return config.AccessKeyPrefix + "error" }
+func errorDayKey(day string) string  { return config.AccessKeyPrefix + "error:" + day }
 func droppedKey() string           { return config.AccessKeyPrefix + "meta:dropped" }
 
 func histBucket(ms int64) string {
@@ -67,6 +70,7 @@ func writeEvent(evt *AccessEvent) {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
+	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
 
@@ -121,6 +125,11 @@ func writeEvent(evt *AccessEvent) {
 			pipe.LPush(ctx, rk, payload)
 			pipe.LTrim(ctx, rk, 0, int64(config.AccessRecentLimit-1))
 			pipe.Expire(ctx, rk, ttlDay)
+
+			rkDay := recentDayKey(day)
+			pipe.LPush(ctx, rkDay, payload)
+			pipe.LTrim(ctx, rkDay, 0, int64(config.AccessRecentLimit-1))
+			pipe.Expire(ctx, rkDay, ttlDay)
 		}
 	}
 	if evt.LatencyMs >= config.AccessSlowMs {
@@ -130,6 +139,11 @@ func writeEvent(evt *AccessEvent) {
 			pipe.LPush(ctx, sk, payload)
 			pipe.LTrim(ctx, sk, 0, slowKeep-1)
 			pipe.Expire(ctx, sk, ttlDay)
+
+			skDay := slowDayKey(day)
+			pipe.LPush(ctx, skDay, payload)
+			pipe.LTrim(ctx, skDay, 0, slowKeep-1)
+			pipe.Expire(ctx, skDay, ttlDay)
 		}
 	}
 	if evt.Status >= 400 {
@@ -139,6 +153,11 @@ func writeEvent(evt *AccessEvent) {
 			pipe.LPush(ctx, ek, payload)
 			pipe.LTrim(ctx, ek, 0, errorKeep-1)
 			pipe.Expire(ctx, ek, ttlDay)
+
+			ekDay := errorDayKey(day)
+			pipe.LPush(ctx, ekDay, payload)
+			pipe.LTrim(ctx, ekDay, 0, errorKeep-1)
+			pipe.Expire(ctx, ekDay, ttlDay)
 		}
 	}
 
@@ -159,6 +178,7 @@ func writePageView(evt *AccessEvent) {
 	if ts.IsZero() {
 		ts = time.Now()
 	}
+	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
 	mk := minKey(ts)

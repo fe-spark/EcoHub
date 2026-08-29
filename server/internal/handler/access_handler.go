@@ -57,6 +57,7 @@ func (h *AccessHandler) TrackView(c *gin.Context) {
 func (h *AccessHandler) Logs(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
 	list, err := access.QueryLogs(
+		c.Query("day"),
 		c.DefaultQuery("source", "recent"),
 		c.Query("status"),
 		c.Query("client"),

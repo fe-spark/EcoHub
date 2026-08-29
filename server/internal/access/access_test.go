@@ -426,3 +426,18 @@ func TestFromContextPlayMember(t *testing.T) {
 		t.Fatalf("searchFilm must not rank as play: %+v member=%q", keyword, keyword.playMember)
 	}
 }
+
+func TestQueryLogsMatchStatus(t *testing.T) {
+	if !matchStatus("", 200) || !matchStatus("all", 500) {
+		t.Fatal("empty or all status matches everything")
+	}
+	if !matchStatus("2xx", 200) || !matchStatus("2xx", 204) || matchStatus("2xx", 400) {
+		t.Fatal("2xx matching")
+	}
+	if !matchStatus("4xx", 404) || matchStatus("4xx", 200) || matchStatus("4xx", 500) {
+		t.Fatal("4xx matching")
+	}
+	if !matchStatus("5xx", 500) || !matchStatus("5xx", 502) || matchStatus("5xx", 200) {
+		t.Fatal("5xx matching")
+	}
+}

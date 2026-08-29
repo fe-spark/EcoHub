@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Alert,
@@ -16,6 +16,7 @@ import {
   Table,
   Tag,
   Tooltip,
+  Typography,
 } from "antd";
 import {
   ClockCircleOutlined,
@@ -95,31 +96,31 @@ const CLIENT_MAP: Record<string, { label: string; icon: React.ReactNode; color: 
 
 const ACTION_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
   play: { label: "影视点播", icon: <PlayCircleOutlined />, color: "#1677ff" },
-  search: { label: "寻片检索", icon: <SearchOutlined />, color: "#13c2c2" },
-  browse: { label: "漫游发现", icon: <CompassOutlined />, color: "#52c41a" },
-  provide: { label: "设备同步", icon: <DatabaseOutlined />, color: "#fa8c16" },
+  search: { label: "寻片搜索", icon: <SearchOutlined />, color: "#13c2c2" },
+  browse: { label: "浏览探索", icon: <CompassOutlined />, color: "#52c41a" },
+  provide: { label: "TVBox 同步", icon: <DatabaseOutlined />, color: "#fa8c16" },
   classify: { label: "分类筛选", icon: <CompassOutlined />, color: "#722ed1" },
-  manage: { label: "后台管理", icon: <SettingOutlined />, color: "#eb2f96" },
+  manage: { label: "管理后台", icon: <SettingOutlined />, color: "#eb2f96" },
   other: { label: "其他请求", icon: <ThunderboltOutlined />, color: "#8c8c8c" },
 };
 
 function formatClientPrefix(clientType: string) {
   switch (clientType) {
     case "tvbox":
-      return "tvbox:";
+      return "tvbox";
     case "app":
     case "ios":
     case "android":
     case "ohos":
-      return "app:";
+      return "app";
     case "web":
-      return "web:";
+      return "web";
     case "crawler":
-      return "bot:";
+      return "bot";
     case "manage":
-      return "manage:";
+      return "manage";
     default:
-      return "client:";
+      return "client";
   }
 }
 
@@ -150,50 +151,139 @@ function statusTag(status: number) {
   return <Tag color="success">{status}</Tag>;
 }
 
-function resolveActionTag(row: LogRow) {
+function resolveActionInfo(row: LogRow): { tag: React.ReactNode; desc: string } {
   const path = row.path || "";
-  if (path.includes("/filmPlayInfo") || row.resource === "detail") {
-    return <Tag color="blue" icon={<PlayCircleOutlined />}>点播</Tag>;
-  }
-  if (path.includes("/searchFilm") || path.includes("/filmClassifySearch")) {
-    return <Tag color="cyan" icon={<SearchOutlined />}>搜索</Tag>;
-  }
-  if (path.includes("/index") || path.includes("/dailyUpdates") || path.includes("/navCategory")) {
-    return <Tag color="green" icon={<CompassOutlined />}>漫游</Tag>;
-  }
-  if (path.startsWith("/api/provide/")) {
-    if (row.resource === "list") return <Tag color="green" icon={<CompassOutlined />}>TVBox 漫游</Tag>;
-    if (row.resource === "config") return <Tag color="orange" icon={<DatabaseOutlined />}>TVBox 配置</Tag>;
-    return <Tag color="blue" icon={<PlayCircleOutlined />}>TVBox 点播</Tag>;
-  }
-  if (path.startsWith("/api/manage/")) {
-    return <Tag color="default" icon={<SettingOutlined />}>后台</Tag>;
-  }
-  return <Tag color="default">API</Tag>;
-}
+  const resource = row.resource || "";
 
-function resolveTargetDescription(row: LogRow) {
-  const path = row.path || "";
-  if (row.resource) {
-    if (path.includes("/filmPlayInfo")) {
-      return `播放 #${row.resource}`;
-    }
-    if (path.includes("/searchFilm")) {
-      return `搜索 "${row.resource}"`;
-    }
-    if (path.startsWith("/api/provide/vod")) {
-      if (row.resource === "detail") return "TVBox 播放详情";
-      if (row.resource === "list") return "TVBox 影片列表";
-      return `TVBox (${row.resource})`;
-    }
-    if (path.startsWith("/api/provide/config")) {
-      return "TVBox 订阅配置";
-    }
+  // 1. 点播
+  if (path.includes("/filmPlayInfo")) {
+    return {
+      tag: <Tag color="blue" icon={<PlayCircleOutlined />}>影视点播</Tag>,
+      desc: resource ? `播放影片 #${resource}` : "请求影片播放数据",
+    };
   }
-  if (path === "/api/index") return "首页数据";
-  if (path === "/api/dailyUpdates" || path === "/api/index/dailyUpdates") return "每日更新";
-  if (path === "/api/navCategory") return "分类导航";
-  return path;
+
+  // 2. 搜索
+  if (path.includes("/searchFilm")) {
+    return {
+      tag: <Tag color="cyan" icon={<SearchOutlined />}>寻片搜索</Tag>,
+      desc: resource ? `搜索关键词 "${resource}"` : "影片关键字检索",
+    };
+  }
+  if (path.includes("/hotKeywords")) {
+    return {
+      tag: <Tag color="cyan" icon={<FireOutlined />}>热搜词榜</Tag>,
+      desc: "获取实时热搜词榜单",
+    };
+  }
+
+  // 3. TVBox 接口
+  if (path.startsWith("/api/provide/vod")) {
+    if (resource === "detail" || row.action === "play") {
+      return {
+        tag: <Tag color="blue" icon={<PlayCircleOutlined />}>TVBox 点播</Tag>,
+        desc: "TVBox 播放详情与解析",
+      };
+    }
+    if (resource === "list" || !resource) {
+      return {
+        tag: <Tag color="orange" icon={<DesktopOutlined />}>TVBox 列表</Tag>,
+        desc: "TVBox 影片列表与分类同步",
+      };
+    }
+    return {
+      tag: <Tag color="cyan" icon={<SearchOutlined />}>TVBox 搜索</Tag>,
+      desc: `TVBox 寻片搜索 (${resource})`,
+    };
+  }
+  if (path.startsWith("/api/provide/config") || path.startsWith("/api/provide")) {
+    return {
+      tag: <Tag color="orange" icon={<DatabaseOutlined />}>TVBox 订阅</Tag>,
+      desc: "TVBox 订阅源配置加载",
+    };
+  }
+
+  // 4. 浏览探索
+  if (path === "/api/index") {
+    return {
+      tag: <Tag color="green" icon={<CompassOutlined />}>首页浏览</Tag>,
+      desc: "加载首页推荐与排片",
+    };
+  }
+  if (path.includes("/dailyUpdates")) {
+    return {
+      tag: <Tag color="green" icon={<CompassOutlined />}>每日更新</Tag>,
+      desc: "查看每日最新更新影片",
+    };
+  }
+  if (path.includes("/navCategory")) {
+    return {
+      tag: <Tag color="green" icon={<CompassOutlined />}>分类导航</Tag>,
+      desc: "获取顶部大分类导航",
+    };
+  }
+  if (path.includes("/filmClassify")) {
+    return {
+      tag: <Tag color="purple" icon={<CompassOutlined />}>分类筛选</Tag>,
+      desc: "多维度分类标签筛选",
+    };
+  }
+  if (path.includes("/filmRelate")) {
+    return {
+      tag: <Tag color="green" icon={<CompassOutlined />}>推荐相关</Tag>,
+      desc: "获取相关联影片推荐",
+    };
+  }
+
+  // 5. 账户认证
+  if (path.includes("/login")) {
+    return {
+      tag: <Tag color="volcano" icon={<UserOutlined />}>管理员登录</Tag>,
+      desc: "管理后台登录身份认证",
+    };
+  }
+  if (path.includes("/logout")) {
+    return {
+      tag: <Tag color="default" icon={<UserOutlined />}>退出登录</Tag>,
+      desc: "注销管理会话",
+    };
+  }
+
+  // 6. 管理后台
+  if (path.startsWith("/api/manage/")) {
+    let subDesc = "管理后台系统请求";
+    if (path.includes("/spider") || path.includes("/collect")) subDesc = "采集源与爬虫调度管理";
+    else if (path.includes("/film")) subDesc = "影片库存与类目管理";
+    else if (path.includes("/config")) subDesc = "系统参数与通知配置";
+    else if (path.includes("/cron")) subDesc = "定时任务管理与触发";
+    else if (path.includes("/access")) subDesc = "访问大盘与数据分析";
+    else if (path.includes("/user")) subDesc = "管理员账号与权限管理";
+    else if (path.includes("/mapping")) subDesc = "分类映射规则管理";
+    else if (path.includes("/banner")) subDesc = "轮播海报管理";
+    return {
+      tag: <Tag color="purple" icon={<SettingOutlined />}>管理后台</Tag>,
+      desc: subDesc,
+    };
+  }
+
+  if (path.includes("/stat/view")) {
+    return {
+      tag: <Tag color="geekblue" icon={<EyeOutlined />}>页面曝光</Tag>,
+      desc: resource ? `页面曝光 [${resource}]` : "前端页面访问统计埋点",
+    };
+  }
+
+  if (path.includes("/config/basic")) {
+    return {
+      tag: <Tag color="default" icon={<SettingOutlined />}>站点配置</Tag>,
+      desc: "获取站点基础配置信息",
+    };
+  }
+
+  return {
+    tag: <Tag color="default">通用接口</Tag>,
+    desc: path || "接口调用",
+  };
 }
 
 function disabledAccessDay(d: Dayjs) {
@@ -217,66 +307,167 @@ export default function AccessPageView() {
   const [appliedQ, setAppliedQ] = useState("");
   const [logPage, setLogPage] = useState({ current: 1, pageSize: 20 });
   const [latencyMode, setLatencyMode] = useState<"heat" | "bar">("heat");
+  const [refreshInterval, setRefreshInterval] = useState<number>(15);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string>("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const overviewGen = useRef(0);
+  const logsGen = useRef(0);
+  const overviewInFlight = useRef(false);
+  const logsInFlight = useRef(false);
 
   const dayParam = day.format("YYYY-MM-DD");
+  const isToday = day.isSame(dayjs(nowMs), "day");
 
-  const loadOverview = useCallback(async () => {
-    setLoading(true);
-    setError("");
-    try {
-      const [ov, search, play] = await Promise.all([
-        ApiGet<Overview>("/manage/access/overview", { day: dayParam }),
-        ApiGet<{ items: TopItem[] }>("/manage/access/tops", { day: dayParam, kind: "search", limit: 10 }),
-        ApiGet<{ items: TopItem[] }>("/manage/access/tops", { day: dayParam, kind: "play", limit: 10 }),
-      ]);
-      if (ov.code !== 0) {
-        setError(ov.msg || "访问分析暂不可用");
-        setOverview(null);
-        return;
-      }
-      setOverview(ov.data);
-      setSearchTops(search.data?.items || []);
-      setPlayTops(play.data?.items || []);
-    } catch {
-      setError("访问分析暂不可用");
-      setOverview(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [dayParam]);
+  useEffect(() => {
+    const ms = Math.max(dayjs(nowMs).endOf("day").diff(dayjs(nowMs)) + 50, 50);
+    const timer = window.setTimeout(() => setNowMs(Date.now()), ms);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [nowMs]);
 
-  const loadLogs = useCallback(async () => {
-    setLogPage((p) => ({ ...p, current: 1 }));
-    setLogLoading(true);
-    setLogError("");
-    try {
-      const resp = await ApiGet<{ list: LogRow[] }>("/manage/access/logs", {
-        source,
-        status: status || undefined,
-        client: client || undefined,
-        q: appliedQ.trim() || undefined,
-      });
-      if (resp.code === 0) {
-        setLogs(resp.data?.list || []);
-      } else {
-        setLogError(resp.msg || "访问日志暂不可用");
-        setLogs([]);
+  const loadOverview = useCallback(
+    async (silent = false) => {
+      if (silent && overviewInFlight.current) return;
+      overviewInFlight.current = true;
+      const gen = ++overviewGen.current;
+      if (!silent) {
+        setLoading(true);
+        setError("");
       }
-    } catch {
-      setLogError("访问日志暂不可用");
-      setLogs([]);
-    } finally {
-      setLogLoading(false);
-    }
-  }, [source, status, client, appliedQ]);
+      try {
+        const [ov, search, play] = await Promise.all([
+          ApiGet<Overview>("/manage/access/overview", { day: dayParam }),
+          ApiGet<{ items: TopItem[] }>("/manage/access/tops", { day: dayParam, kind: "search", limit: 10 }),
+          ApiGet<{ items: TopItem[] }>("/manage/access/tops", { day: dayParam, kind: "play", limit: 10 }),
+        ]);
+        if (gen !== overviewGen.current) return;
+        if (ov.code !== 0) {
+          if (!silent) {
+            setError(ov.msg || "访问分析暂不可用");
+            setOverview(null);
+          }
+          return;
+        }
+        setOverview(ov.data);
+        setSearchTops(search.data?.items || []);
+        setPlayTops(play.data?.items || []);
+        setLastRefreshedAt(dayjs().format("HH:mm:ss"));
+        setError("");
+      } catch {
+        if (gen !== overviewGen.current) return;
+        if (!silent) {
+          setError("访问分析暂不可用");
+          setOverview(null);
+        }
+      } finally {
+        if (gen === overviewGen.current) {
+          overviewInFlight.current = false;
+          if (!silent) {
+            setLoading(false);
+          }
+        }
+      }
+    },
+    [dayParam],
+  );
+
+  const loadLogs = useCallback(
+    async (
+      silent = false,
+      overrideParams?: { day?: string; source?: string; status?: string; client?: string; q?: string },
+    ) => {
+      if (silent && logsInFlight.current) return;
+      logsInFlight.current = true;
+      const gen = ++logsGen.current;
+      if (!silent) {
+        setLogLoading(true);
+        setLogError("");
+      }
+      try {
+        const queryDay = overrideParams?.day ?? dayParam;
+        const querySource = overrideParams?.source ?? source;
+        const queryStatus = overrideParams?.status !== undefined ? overrideParams.status : status;
+        const queryClient = overrideParams?.client !== undefined ? overrideParams.client : client;
+        const queryQ = overrideParams?.q !== undefined ? overrideParams.q : appliedQ.trim();
+
+        const resp = await ApiGet<{ list: LogRow[] }>("/manage/access/logs", {
+          day: queryDay,
+          source: querySource,
+          status: queryStatus || undefined,
+          client: queryClient || undefined,
+          q: queryQ || undefined,
+        });
+        if (gen !== logsGen.current) return;
+        if (resp.code === 0) {
+          setLogs(resp.data?.list || []);
+          setLogError("");
+        } else if (!silent) {
+          setLogError(resp.msg || "访问日志暂不可用");
+          setLogs([]);
+        }
+      } catch {
+        if (gen !== logsGen.current) return;
+        if (!silent) {
+          setLogError("访问日志暂不可用");
+          setLogs([]);
+        }
+      } finally {
+        if (gen === logsGen.current) {
+          logsInFlight.current = false;
+          if (!silent) {
+            setLogLoading(false);
+          }
+        }
+      }
+    },
+    [dayParam, source, status, client, appliedQ],
+  );
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
 
   useEffect(() => {
+    setLogPage((p) => ({ ...p, current: 1 }));
     void loadLogs();
   }, [loadLogs]);
+
+  useEffect(() => {
+    if (!isToday || refreshInterval <= 0) return;
+
+    const refresh = () => {
+      if (document.visibilityState !== "visible") return;
+      void loadOverview(true);
+      void loadLogs(true);
+    };
+
+    const timer = window.setInterval(refresh, refreshInterval * 1000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [isToday, refreshInterval, loadOverview, loadLogs]);
+
+  const handleResetLogs = () => {
+    const hasFilterChange =
+      appliedQ !== "" ||
+      status !== "" ||
+      client !== "" ||
+      source !== "recent";
+
+    setKeyword("");
+    setAppliedQ("");
+    setStatus("");
+    setClient("");
+    setSource("recent");
+    setLogPage((p) => ({ ...p, current: 1 }));
+
+    if (!hasFilterChange) {
+      void loadLogs(false, { day: dayParam, source: "recent", status: "", client: "", q: "" });
+    }
+  };
 
   // 终端设备分布饼图数据（直观归总为 Web、App、TVBox）
   const clientDonutData: DonutSlice[] = useMemo(() => {
@@ -338,7 +529,7 @@ export default function AccessPageView() {
     {
       title: "时间",
       dataIndex: "ts",
-      width: 90,
+      width: 85,
       render: (v: string) => {
         const t = dayjs(v);
         return (
@@ -349,22 +540,26 @@ export default function AccessPageView() {
       },
     },
     {
-      title: "场景",
+      title: "业务场景",
       key: "actionTag",
-      width: 100,
-      render: (_, r) => resolveActionTag(r),
+      width: 115,
+      render: (_, r) => resolveActionInfo(r).tag,
     },
     {
-      title: "路由",
+      title: "请求操作与路径",
       key: "target",
       ellipsis: true,
       render: (_, r) => {
         const route = formatRoutePath(r);
-        const desc = resolveTargetDescription(r);
+        const { desc } = resolveActionInfo(r);
         const prefix = formatClientPrefix(r.clientType);
         return (
           <div className={styles.logTargetCell}>
+            <div className={styles.logDescLine} title={desc}>
+              {desc}
+            </div>
             <div className={styles.logRouteLine}>
+              <span className={styles.methodTag}>{r.method || "GET"}</span>
               <span className={`${styles.clientPrefix} ${styles[`prefix_${r.clientType}`] || ""}`}>
                 {prefix}
               </span>
@@ -372,20 +567,19 @@ export default function AccessPageView() {
                 {route}
               </span>
             </div>
-            <div className={styles.logDescLine}>{desc}</div>
           </div>
         );
       },
     },
     {
-      title: "终端",
+      title: "终端设备",
       dataIndex: "clientType",
-      width: 110,
+      width: 115,
       render: (v: string) => {
-        const normalizedKey = (v === "ios" || v === "android" || v === "ohos") ? "app" : v;
+        const normalizedKey = v === "ios" || v === "android" || v === "ohos" ? "app" : v;
         const item = CLIENT_MAP[normalizedKey] || CLIENT_MAP.unknown;
         return (
-          <Space orientation="horizontal" size={4}>
+          <Space size={6} align="center">
             {item.icon}
             <span>{item.label}</span>
           </Space>
@@ -410,7 +604,7 @@ export default function AccessPageView() {
       render: (v: number) => statusTag(v),
     },
     {
-      title: "IP",
+      title: "客户端 IP",
       dataIndex: "ipPreview",
       width: 120,
       render: (v: string) => <span className={v === "local" ? styles.ipLocal : undefined}>{v}</span>,
@@ -422,18 +616,49 @@ export default function AccessPageView() {
       <ManagePageHeader
         title="访问分析"
         actions={
-          <Space>
+          <Space wrap size={[8, 8]}>
+            {lastRefreshedAt && isToday && (
+              <Typography.Text type="secondary" style={{ fontSize: 13, marginRight: 4 }}>
+                最后更新 {lastRefreshedAt}
+              </Typography.Text>
+            )}
+            {isToday ? (
+              <Select
+                value={refreshInterval}
+                onChange={setRefreshInterval}
+                options={[
+                  { label: "关闭自动刷新", value: 0 },
+                  { label: "5秒 自动刷新", value: 5 },
+                  { label: "10秒 自动刷新", value: 10 },
+                  { label: "15秒 自动刷新", value: 15 },
+                ]}
+                style={{ width: 160 }}
+              />
+            ) : null}
             <DatePicker
               value={day}
               allowClear={false}
               disabledDate={disabledAccessDay}
-              onChange={(v) => v && setDay(v)}
+              onChange={(v) => {
+                if (!v) return;
+                setDay(v);
+                setOverview(null);
+                setSearchTops([]);
+                setPlayTops([]);
+                setLogs([]);
+                setLoading(true);
+                setLogLoading(true);
+                setError("");
+                setLogError("");
+                setLastRefreshedAt("");
+              }}
             />
             <Button
               icon={<ReloadOutlined />}
+              loading={loading || logLoading}
               onClick={() => {
-                void loadOverview();
-                void loadLogs();
+                void loadOverview(false);
+                void loadLogs(false);
               }}
             >
               刷新
@@ -582,7 +807,7 @@ export default function AccessPageView() {
               ]}
             />
           }
-          loading={loading}
+          loading={loading || logLoading}
           styles={{ body: { padding: 16 } }}
         >
           {latencyMode === "heat" ? (
@@ -780,13 +1005,7 @@ export default function AccessPageView() {
 
             <Button
               icon={<ReloadOutlined />}
-              onClick={() => {
-                setKeyword("");
-                setAppliedQ("");
-                setStatus("");
-                setClient("");
-                setSource("recent");
-              }}
+              onClick={handleResetLogs}
             >
               重置
             </Button>

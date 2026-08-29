@@ -176,9 +176,12 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
 	searchCmd := pipe.ZRevRangeWithScores(ctx, topSearchKey(dayKey), 0, accessTopKeep-1)
 	playCmd := pipe.ZRevRangeWithScores(ctx, topPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
+	nMin := minuteSlotCount(day, time.Now().In(time.Local))
+	slots := queueMinuteSlots(pipe, day, nMin)
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return model.AccessDailyStats{}, nil, false, err
 	}
+	series, _ := foldMinuteSlots(slots)
 	dayVals := parseIntMap(dayCmd.Val())
 	clientVals := parseIntMap(clientCmd.Val())
 	actionVals := parseIntMap(actionCmd.Val())
@@ -198,6 +201,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 		ClientJSON:  marshalIntMap(clientVals),
 		ActionJSON:  marshalIntMap(actionVals),
 		HistJSON:    marshalIntMap(histVals),
+		SeriesJSON:  marshalSeries(series),
 		RolledAt:    time.Now(),
 	}
 
@@ -330,6 +334,6 @@ func overviewFromDaily(row model.AccessDailyStats) *Overview {
 		Client: unmarshalIntMap(row.ClientJSON),
 		Action: unmarshalIntMap(row.ActionJSON),
 		Hist:   unmarshalIntMap(row.HistJSON),
-		Series: []SeriesPoint{},
+		Series: unmarshalSeries(row.SeriesJSON),
 	}
 }

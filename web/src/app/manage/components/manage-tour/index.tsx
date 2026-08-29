@@ -100,7 +100,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "核对影片列表",
     description:
-      "快照发布后到这里搜主站影片。没有数据通常是采集未完成，或快照还没发布完。",
+      "采集完成后到这里查看主站影片。没有数据通常是采集未完成或正在收尾入库。",
     route: "/manage/film",
     target: "[data-tour='menu-film']",
     placement: "right",
