@@ -45,7 +45,7 @@ function logRatio(ms: number, domainMax: number) {
 }
 
 export default function ScatterChart({ logs = [] }: ScatterChartProps) {
-  const { ref, width } = useContainerWidth(500);
+  const { ref, width } = useContainerWidth(0);
   const [hoverItem, setHoverItem] = useState<{
     item: ScatterItem;
     x: number;
@@ -138,10 +138,14 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
       </div>
 
       <div className={styles.svgContainer} ref={ref}>
+        {width < 50 ? (
+          <div className={styles.scatterSvg} style={{ height }} />
+        ) : (
+        <>
         <svg
           className={styles.scatterSvg}
           viewBox={`0 0 ${width} ${height}`}
-          preserveAspectRatio="none"
+          preserveAspectRatio="xMinYMid meet"
           onMouseLeave={() => setHoverItem(null)}
         >
           <rect
@@ -271,6 +275,8 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
               <code>{hoverItem.item.path}</code>
             </div>
           </div>
+        )}
+        </>
         )}
       </div>
     </div>
