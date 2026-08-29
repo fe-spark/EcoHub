@@ -193,6 +193,10 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 	if limit > 50 {
 		limit = 50
 	}
+	fetch := limit
+	if kind == "play" {
+		fetch = playTopFetchCount(limit)
+	}
 	now := time.Now().In(time.Local)
 	target, err := parseDay(day, now)
 	if err != nil {
@@ -206,9 +210,9 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 		if _, ok := loadDailyStats(dayStr); ok {
 			switch kind {
 			case "search", "play":
-				items := loadDailyTops(dayStr, kind, limit)
+				items := loadDailyTops(dayStr, kind, fetch)
 				if kind == "play" {
-					items = enrichPlayTopItems(items)
+					items = takePlayTops(items, limit)
 				}
 				if items == nil {
 					items = []TopItem{}
@@ -233,7 +237,7 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 	default:
 		key = topPathKey(dayKey)
 	}
-	pairs, err := db.Rdb.ZRevRangeWithScores(db.Cxt, key, 0, int64(limit-1)).Result()
+	pairs, err := db.Rdb.ZRevRangeWithScores(db.Cxt, key, 0, int64(fetch-1)).Result()
 	if err != nil && err != redis.Nil {
 		return nil, err
 	}
@@ -243,7 +247,7 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 		items = append(items, TopItem{Key: member, Count: int64(p.Score)})
 	}
 	if kind == "play" {
-		items = enrichPlayTopItems(items)
+		items = takePlayTops(items, limit)
 	}
 	return items, nil
 }

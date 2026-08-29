@@ -98,8 +98,106 @@ func TestHTTPResource(t *testing.T) {
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "list" {
 		t.Fatal("provide ac list")
 	}
+	if httpResource("/api/provide/vod", url.Values{}) != "list" {
+		t.Fatal("provide empty ac is list")
+	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"999"}}) != "999" {
 		t.Fatal("provide ac detail ids")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"videolist"}, "ids": {"888"}}) != "888" {
+		t.Fatal("provide videolist ids")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"search"}, "wd": {"凡人"}}) != "凡人" {
+		t.Fatal("provide wd")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "wd": {"2024"}}) != "2024" {
+		t.Fatal("provide list wd takes priority over ac")
+	}
+	if httpResource("/api/searchFilm", url.Values{"keyword": {"斗罗"}}) != "斗罗" {
+		t.Fatal("searchFilm keyword")
+	}
+}
+
+func TestIsSingleFilmID(t *testing.T) {
+	cases := []struct {
+		input string
+		want  bool
+	}{
+		{"123", true},
+		{"id 123", true},
+		{" 456 ", true},
+		{"search", false},
+		{"class", false},
+		{"list", false},
+		{"detail", false},
+		{"123,456", false},
+		{"0", false},
+		{"-1", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isSingleFilmID(tc.input); got != tc.want {
+			t.Fatalf("isSingleFilmID(%q) = %v, want %v", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestPlayRankMember(t *testing.T) {
+	cases := []struct {
+		path  string
+		query url.Values
+		want  string
+	}{
+		{"/api/provide/vod", url.Values{"ac": {"search"}, "wd": {"2024"}}, ""},
+		{"/api/provide/vod", url.Values{"ac": {"list"}, "wd": {"1024"}}, ""},
+		{"/api/provide/vod", url.Values{"ac": {"search"}, "wd": {"凡人"}}, ""},
+		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"1024"}}, "1024"},
+		{"/api/provide/vod", url.Values{"ac": {"videolist"}, "ids": {"88"}}, "88"},
+		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"1,2"}}, ""},
+		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"id 77"}}, "77"},
+		{"/api/provide/vod", url.Values{"ac": {"list"}}, ""},
+		{"/api/filmPlayInfo", url.Values{"id": {"99"}}, "99"},
+		{"/api/filmPlayInfo", url.Values{"id": {"id 88"}}, "88"},
+		{"/api/filmPlayInfo", url.Values{"id": {"0"}}, ""},
+		{"/api/searchFilm", url.Values{"keyword": {"2024"}}, ""},
+	}
+	for _, tc := range cases {
+		if got := playRankMember(tc.path, tc.query); got != tc.want {
+			t.Fatalf("playRankMember(%q, %v) = %q, want %q", tc.path, tc.query, got, tc.want)
+		}
+	}
+}
+
+func TestPagePlayRankMember(t *testing.T) {
+	if pagePlayRankMember("play", "2048") != "2048" {
+		t.Fatal("numeric play")
+	}
+	if pagePlayRankMember("play", "id 2048") != "2048" {
+		t.Fatal("id prefix play")
+	}
+	if pagePlayRankMember("play", "庆余年") != "" {
+		t.Fatal("title must not rank as play")
+	}
+	if pagePlayRankMember("search", "2048") != "" {
+		t.Fatal("search action must not rank as play")
+	}
+}
+
+func TestEnrichPlayTopItems_FilterDirtyKeys(t *testing.T) {
+	input := []TopItem{
+		{Key: "search", Count: 497},
+		{Key: "class", Count: 26},
+		{Key: "999999", Count: 10},
+	}
+	res := enrichPlayTopItems(input)
+	if len(res) != 1 {
+		t.Fatalf("enrichPlayTopItems should filter invalid non-numeric keys, got len=%d", len(res))
+	}
+	if res[0].Key != "999999" || res[0].Count != 10 {
+		t.Fatalf("unexpected res[0]: %+v", res[0])
+	}
+	if res[0].Title != "影片 #999999" {
+		t.Fatalf("expected Title to be placeholder '影片 #999999', got %s", res[0].Title)
 	}
 }
 
@@ -227,8 +325,14 @@ func TestBuildPageEvent(t *testing.T) {
 	resetPageHit()
 	long := strings.Repeat("影", maxResourceLen+8)
 	play := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.9"), "play", long, "web", "/play?id=1")
-	if play == nil || play.Resource != strings.Repeat("影", maxResourceLen) || play.Path != "/play?id=1" {
+	if play == nil || play.Resource != strings.Repeat("影", maxResourceLen) || play.Path != "/play?id=1" || play.playMember != "" {
 		t.Fatal("resource truncated")
+	}
+
+	resetPageHit()
+	idPlay := buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.11"), "play", "id 2048", "web", "/play?id=2048")
+	if idPlay == nil || idPlay.playMember != "2048" {
+		t.Fatal("page play member")
 	}
 
 	resetPageHit()
@@ -267,11 +371,58 @@ func TestEnrichPlayTopItems(t *testing.T) {
 		{Key: "custom_keyword", Count: 3},
 	}
 	enriched := enrichPlayTopItems(items)
-	if len(enriched) != 3 {
-		t.Fatalf("want 3 items, got %d", len(enriched))
+	if len(enriched) != 2 {
+		t.Fatalf("want 2 valid film items (custom_keyword filtered), got %d", len(enriched))
 	}
-	if enriched[0].Title == "" || enriched[1].Title == "" || enriched[2].Title != "custom_keyword" {
+	if enriched[0].Title != "影片 #1024" || enriched[1].Title != "影片 #2048" {
 		t.Fatalf("enrich items %+v", enriched)
+	}
+	if enriched[1].Key != "2048" {
+		t.Fatalf("want canonical key 2048, got %q", enriched[1].Key)
 	}
 }
 
+func TestTakePlayTopsOverFetch(t *testing.T) {
+	items := []TopItem{
+		{Key: "search", Count: 497},
+		{Key: "class", Count: 26},
+		{Key: "1", Count: 10},
+		{Key: "2", Count: 9},
+		{Key: "3", Count: 8},
+	}
+	got := takePlayTops(items, 2)
+	if len(got) != 2 {
+		t.Fatalf("want 2 after filter+limit, got %d", len(got))
+	}
+	if got[0].Key != "1" || got[1].Key != "2" {
+		t.Fatalf("unexpected tops %+v", got)
+	}
+}
+
+func TestFromContextPlayMember(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	mk := func(rawURL string) *AccessEvent {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		req := httptest.NewRequest(http.MethodGet, rawURL, nil)
+		c.Request = req
+		return FromContext(c, time.Millisecond)
+	}
+
+	search := mk("/api/provide/vod?ac=search&wd=2024")
+	if search == nil || search.Resource != "2024" || search.playMember != "" {
+		t.Fatalf("numeric search must not rank as play: %+v member=%q", search, search.playMember)
+	}
+	detail := mk("/api/provide/vod?ac=detail&ids=1024")
+	if detail == nil || detail.playMember != "1024" {
+		t.Fatalf("detail ids should rank as play: %+v", detail)
+	}
+	info := mk("/api/filmPlayInfo?id=88")
+	if info == nil || info.playMember != "88" {
+		t.Fatalf("filmPlayInfo should rank as play: %+v", info)
+	}
+	keyword := mk("/api/searchFilm?keyword=2024")
+	if keyword == nil || keyword.Resource != "2024" || keyword.playMember != "" {
+		t.Fatalf("searchFilm must not rank as play: %+v member=%q", keyword, keyword.playMember)
+	}
+}

@@ -3,7 +3,6 @@ package access
 import (
 	"fmt"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -114,33 +113,55 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	return result
 }
 
-// enrichPlayTopItems 为热播榜填补真实片名、海报与分类
+// enrichPlayTopItems 为热播榜填补真实片名、海报与分类，并过滤非合法数字 ID 的脏数据
 func enrichPlayTopItems(items []TopItem) []TopItem {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
-		// Key 可能是 "1024" 或 "id 1024"
-		keyStr := strings.TrimSpace(it.Key)
-		keyStr = strings.TrimPrefix(keyStr, "id ")
-		if id, err := strconv.ParseInt(keyStr, 10, 64); err == nil && id > 0 {
+		if id, ok := parseFilmID(it.Key); ok {
 			ids = append(ids, id)
 		}
 	}
 
 	metaMap := resolveFilmMetas(ids)
-	for i, it := range items {
-		keyStr := strings.TrimSpace(it.Key)
-		keyStr = strings.TrimPrefix(keyStr, "id ")
-		if id, err := strconv.ParseInt(keyStr, 10, 64); err == nil && id > 0 {
-			if meta, ok := metaMap[id]; ok {
-				items[i].Title = meta.Title
-				items[i].Category = meta.Category
-				items[i].Poster = meta.Poster
-				items[i].Year = meta.Year
-			}
+	validItems := make([]TopItem, 0, len(items))
+	for _, it := range items {
+		id, ok := parseFilmID(it.Key)
+		if !ok {
+			continue
 		}
-		if items[i].Title == "" {
-			items[i].Title = it.Key
+		it.Key = strconv.FormatInt(id, 10)
+		if meta, ok := metaMap[id]; ok {
+			it.Title = meta.Title
+			it.Category = meta.Category
+			it.Poster = meta.Poster
+			it.Year = meta.Year
 		}
+		if it.Title == "" {
+			it.Title = fmt.Sprintf("影片 #%d", id)
+		}
+		validItems = append(validItems, it)
 	}
-	return items
+	return validItems
+}
+
+func playTopFetchCount(limit int) int {
+	if limit <= 0 {
+		limit = accessTopKeep
+	}
+	fetch := limit * 3
+	if fetch > zsetKeep {
+		fetch = zsetKeep
+	}
+	return fetch
+}
+
+func limitTopItems(items []TopItem, limit int) []TopItem {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
+}
+
+func takePlayTops(items []TopItem, limit int) []TopItem {
+	return limitTopItems(enrichPlayTopItems(items), limit)
 }

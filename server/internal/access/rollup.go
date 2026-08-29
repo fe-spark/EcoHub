@@ -175,7 +175,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	actionCmd := pipe.HGetAll(ctx, actionKey(dayKey))
 	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
 	searchCmd := pipe.ZRevRangeWithScores(ctx, topSearchKey(dayKey), 0, accessTopKeep-1)
-	playCmd := pipe.ZRevRangeWithScores(ctx, topPlayKey(dayKey), 0, accessTopKeep-1)
+	playCmd := pipe.ZRevRangeWithScores(ctx, topPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return model.AccessDailyStats{}, nil, false, err
 	}
@@ -203,7 +203,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 
 	tops := make([]model.AccessDailyTop, 0, accessTopKeep*2)
 	searchItems := zsetToTopItems(searchCmd.Val())
-	playItems := enrichPlayTopItems(zsetToTopItems(playCmd.Val()))
+	playItems := takePlayTops(zsetToTopItems(playCmd.Val()), accessTopKeep)
 	tops = append(tops, topItemsToRows(stats.Day, "search", searchItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "play", playItems)...)
 

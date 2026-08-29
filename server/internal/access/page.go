@@ -71,6 +71,7 @@ func buildPageEvent(c *gin.Context, action, resource, source, path string) *Acce
 		IPPreview:  IPPreview(ip),
 		UAFamily:   uaFamily("", ua),
 		Resource:   TruncateRunes(resource, maxResourceLen),
+		playMember: pagePlayRankMember(action, resource),
 	}
 }
 
