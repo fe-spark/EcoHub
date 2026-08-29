@@ -12,6 +12,7 @@ const toneClassMap: Record<StatusTone, string> = {
   enabled: styles.toneEnabled,
   disabled: styles.toneDisabled,
   stopping: styles.toneStopping,
+  failed: styles.toneFailed,
 };
 
 const statusClassMap: Record<StatusTone, string> = {
@@ -19,6 +20,7 @@ const statusClassMap: Record<StatusTone, string> = {
   enabled: styles.statusEnabled,
   disabled: styles.statusDisabled,
   stopping: styles.statusStopping,
+  failed: styles.statusFailed,
 };
 
 interface CollectSourceCardProps {
@@ -50,6 +52,8 @@ export default function CollectSourceCard({
   const isMaster = record.grade === 0;
   const { canWrite } = useManagePermission();
   const { label: statusLabel, tone: statusTone } = resolveSourceStatus(record, active);
+  const phase = record.progress?.status;
+  const canStop = phase === "starting" || phase === "running";
 
   const cardClassNames = [
     styles.sourceCard,
@@ -139,23 +143,41 @@ export default function CollectSourceCard({
         <div className={styles.cardActions} onClick={(event) => event.stopPropagation()}>
           <div className={styles.actionGroup}>
             {isRunning ? (
-            <Popconfirm
-              title="停止当前采集任务？"
-              description="仅停止采集任务，采集站保持启用；已请求数据会继续入库。"
-              onConfirm={() => onTerminateTask(record.id)}
-                disabled={!record.state}
-                okText="停止采集"
-                cancelText="取消"
-                okButtonProps={{ danger: true }}
-              >
-                <Button
-                  danger
-                  icon={<StopOutlined />}
-                  disabled={!canWrite || !record.state}
+              canStop ? (
+                <Popconfirm
+                  title="停止当前采集任务？"
+                  description="仅停止采集任务，采集站保持启用；已请求数据会继续入库。"
+                  onConfirm={() => onTerminateTask(record.id)}
+                  disabled={!record.state}
+                  okText="停止采集"
+                  cancelText="取消"
+                  okButtonProps={{ danger: true }}
                 >
-                  {record.state ? "停止采集" : "已停止"}
-                </Button>
-              </Popconfirm>
+                  <Button
+                    danger
+                    icon={<StopOutlined />}
+                    disabled={!canWrite || !record.state}
+                  >
+                    {record.state ? "停止采集" : "已停止"}
+                  </Button>
+                </Popconfirm>
+              ) : (
+                <Tooltip
+                  title={
+                    phase === "finalizing"
+                      ? "正在收尾发布，无法停止"
+                      : phase === "waiting_publish" || phase === "page_done"
+                        ? "等待收尾中，无法停止"
+                        : "数据抓取已完成，正在等待落库"
+                  }
+                >
+                  <span>
+                    <Button danger icon={<StopOutlined />} disabled>
+                      停止采集
+                    </Button>
+                  </span>
+                </Tooltip>
+              )
             ) : (
               <Tooltip title={!record.state ? "该采集站已被禁用，无法发起采集" : undefined}>
                 <span>
@@ -170,15 +192,19 @@ export default function CollectSourceCard({
                 </span>
               </Tooltip>
             )}
-            <Tooltip title="编辑采集站">
+            <Tooltip title={isRunning ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}
-                disabled={!canWrite}
+                disabled={!canWrite || isRunning}
                 onClick={() => onEditSource(record.id)}
               />
             </Tooltip>
             {isMaster ? (
               <Tooltip title="主站不可直接删除，请先改为附属站">
+                <Button danger icon={<DeleteOutlined />} disabled />
+              </Tooltip>
+            ) : isRunning ? (
+              <Tooltip title="采集进行中，禁止删除">
                 <Button danger icon={<DeleteOutlined />} disabled />
               </Tooltip>
             ) : (

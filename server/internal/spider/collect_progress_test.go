@@ -115,6 +115,115 @@ func TestGetActiveTaskProgressKeepsTerminalWhileAnyActive(t *testing.T) {
 	}
 }
 
+func TestCanEnterFinalizingSkipsStopped(t *testing.T) {
+	if canEnterFinalizing(progressStatusStopped) {
+		t.Fatal("用户停止后不应进入 finalizing，否则单站收尾会变成采集完成")
+	}
+	if canEnterFinalizing(progressStatusFailed) {
+		t.Fatal("failed 不应进入 finalizing")
+	}
+	for _, status := range []string{
+		progressStatusPageDone,
+		progressStatusWaitingPublish,
+		progressStatusRunning,
+		progressStatusStarting,
+	} {
+		if !canEnterFinalizing(status) {
+			t.Fatalf("%s 应能进入 finalizing", status)
+		}
+	}
+}
+
+func TestMarkProgressStoppedDoesNotClobberFailed(t *testing.T) {
+	const sourceID = "progress-failed-not-stopped"
+	collectProgress.Delete(sourceID)
+	activeTasks.Delete(sourceID)
+	t.Cleanup(func() {
+		collectProgress.Delete(sourceID)
+		activeTasks.Delete(sourceID)
+	})
+
+	state := ensureCollectProgress(sourceID, "FailedSource")
+	state.mu.Lock()
+	state.data.Status = progressStatusFailed
+	state.data.Success = 672
+	state.data.Failed = 10
+	state.mu.Unlock()
+
+	markProgressStopped(sourceID)
+	snap, ok := collectProgressSnapshot(sourceID)
+	if !ok || snap.Status != progressStatusFailed {
+		t.Fatalf("连续失败终态不得被标成 stopped, got ok=%v status=%q", ok, snap.Status)
+	}
+}
+
+func TestStampCollectPageRunningSkipsTerminal(t *testing.T) {
+	failed := model.CollectProgress{Status: progressStatusFailed, Current: 10}
+	stampCollectPageRunning(&failed, 20)
+	if failed.Status != progressStatusFailed {
+		t.Fatalf("failed 不可被写回 running, got %q", failed.Status)
+	}
+	if failed.Current != 10 {
+		t.Fatalf("终态页码不应被推进, got %d", failed.Current)
+	}
+
+	stopped := model.CollectProgress{Status: progressStatusStopped, Current: 5}
+	stampCollectPageRunning(&stopped, 8)
+	if stopped.Status != progressStatusStopped {
+		t.Fatalf("stopped 不可被写回 running, got %q", stopped.Status)
+	}
+
+	running := model.CollectProgress{Status: progressStatusStarting, Current: 1}
+	stampCollectPageRunning(&running, 3)
+	if running.Status != progressStatusRunning {
+		t.Fatalf("starting 应进入 running, got %q", running.Status)
+	}
+	if running.Current != 3 {
+		t.Fatalf("running 页码应为 3, got %d", running.Current)
+	}
+
+	wrapping := model.CollectProgress{Status: progressStatusWaitingPublish, Current: 5}
+	stampCollectPageRunning(&wrapping, 9)
+	if wrapping.Status != progressStatusWaitingPublish {
+		t.Fatalf("收尾态不可被写回 running, got %q", wrapping.Status)
+	}
+}
+
+func TestShouldWrapUpAfterFetchAbort(t *testing.T) {
+	if !shouldWrapUpAfterFetchAbort(10, false) {
+		t.Fatal("有成功且允许发布应进入收尾")
+	}
+	if shouldWrapUpAfterFetchAbort(0, false) {
+		t.Fatal("0 成功不应收尾，应直接失败")
+	}
+	if shouldWrapUpAfterFetchAbort(10, true) {
+		t.Fatal("主站全量跳过发布时不应走收尾发布")
+	}
+}
+
+func TestMarkSourcePagesFinishedAfterAbortEntersWrapUp(t *testing.T) {
+	const sourceID = "abort-wrap-up"
+	collectProgress.Delete(sourceID)
+	t.Cleanup(func() { collectProgress.Delete(sourceID) })
+
+	ensureCollectProgress(sourceID, "AbortWrap")
+	updateCollectProgress(sourceID, func(p *model.CollectProgress) {
+		p.Status = progressStatusRunning
+		p.Total = 698
+		p.Success = 672
+		p.Failed = 10
+		p.Current = 682
+	})
+	markSourcePagesFinished(sourceID, false)
+	snap, ok := collectProgressSnapshot(sourceID)
+	if !ok || snap.Status != progressStatusWaitingPublish {
+		t.Fatalf("连续失败停抓且有成功入库应变 waiting_publish, got ok=%v status=%q", ok, snap.Status)
+	}
+	if !isActiveCollectStatus(snap.Status) {
+		t.Fatal("收尾态必须仍在采集生命周期内")
+	}
+}
+
 func TestGetActiveTaskProgressClearsAllTerminalTogether(t *testing.T) {
 	const (
 		oldFailedID = "progress-old-failed"

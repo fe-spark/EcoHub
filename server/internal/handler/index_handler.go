@@ -22,14 +22,14 @@ func Health(c *gin.Context) {
 }
 
 func hasSearchOptions(searchTags map[string]any) bool {
+	if len(searchTags) == 0 {
+		return false
+	}
 	tags, ok := searchTags["tags"].(map[string]any)
 	if !ok {
 		return false
 	}
-	for key, value := range tags {
-		if key == "Sort" {
-			continue
-		}
+	for _, value := range tags {
 		if hasRealSearchTagList(value) {
 			return true
 		}

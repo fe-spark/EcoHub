@@ -241,14 +241,6 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		stopOnce.Do(func() {
 			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, collectSourceConsecutiveFailureLimit)
 			syslog.Errorf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
-			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-				progress.Status = progressStatusFailed
-			})
-			if flushAtEnd || !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
-				emitSourceFailedNotify(s.Id, s.Name, stopErr.Error())
-			} else {
-				noteSourceError(s.Id, stopErr.Error())
-			}
 			cancel()
 		})
 	}
@@ -258,6 +250,10 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		consecutiveFailuresMu.Unlock()
 	}
 	markStopped := func() {
+		// 连续失败停抓走收尾，不能写成用户「已停止」。
+		if stopErr != nil {
+			return
+		}
 		markProgressStopped(s.Id)
 	}
 	maybeMarkPagePhaseDone := func(progress *model.CollectProgress, snapshot collectPageStats) {
@@ -321,10 +317,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 						return
 					}
 					updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-						if pg > progress.Current {
-							progress.Current = pg
-						}
-						progress.Status = progressStatusRunning
+						stampCollectPageRunning(progress, pg)
 					})
 					list, err := getFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
 					if err == nil && len(list) == 0 {
@@ -386,6 +379,21 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
 	if stopErr != nil {
+		skipPublish := shouldSkipCollectPublishOnError(*s, h)
+		if shouldWrapUpAfterFetchAbort(stats.success, skipPublish) {
+			noteSourceError(s.Id, stopErr.Error())
+			return true, nil
+		}
+		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
+			if !isTerminalCollectStatus(progress.Status) {
+				progress.Status = progressStatusFailed
+			}
+		})
+		if flushAtEnd || !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
+			emitSourceFailedNotify(s.Id, s.Name, stopErr.Error())
+		} else {
+			noteSourceError(s.Id, stopErr.Error())
+		}
 		return stats.success > 0, stopErr
 	}
 	if s.Grade == model.MasterCollect && h < 0 && stats.failed > 0 {

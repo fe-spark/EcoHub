@@ -1,5 +1,5 @@
 import { Progress, Tooltip } from "antd";
-import { resolveCollectStatusText, type CollectProgress } from "./types";
+import { resolveCollectProgressStatusText, type CollectProgress } from "./types";
 import styles from "./index.module.less";
 
 interface CollectProgressViewProps {
@@ -40,8 +40,8 @@ export default function CollectProgressView({
         : progress.status === "starting"
           ? 0
           : Math.min(rawPercent, 99);
-  // 与旧表格列一致：展示「等待收尾 / 收尾发布中」等阶段文案
-  const statusText = progress ? resolveCollectStatusText(progress.status) : "暂无采集进度";
+  // 与旧表格列一致：展示「等待收尾 / 收尾发布中 / 部分失败」等阶段文案
+  const statusText = resolveCollectProgressStatusText(progress);
   const progressText = !progress
     ? "未开始"
     : total > 0
@@ -53,18 +53,17 @@ export default function CollectProgressView({
           : progress.status === "starting"
             ? "排队中"
             : "即将开始采集";
+  const isFullFail = progress?.status === "failed" && (progress.success ?? 0) === 0;
   const progressStatus = !progress
     ? "normal"
-    : progress.status === "running" ||
-        progress.status === "finalizing" ||
-        progress.status === "waiting_publish"
+    : progress.status === "running"
       ? "active"
-      : progress.status === "failed"
+      : isFullFail
         ? "exception"
         : progress.status === "done"
           ? "success"
           : "normal";
-  const progressStrokeColor = failed > 0 ? "#faad14" : undefined;
+  const progressStrokeColor = failed > 0 && !isFullFail ? "#faad14" : undefined;
 
   const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed}` : ""}`;
   // 收尾阶段：状态优先；计数作补充，避免只剩 9/9 看不出在发布

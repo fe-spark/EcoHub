@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Drawer } from "antd";
 import {
   CloseOutlined,
@@ -10,6 +10,11 @@ import {
   CheckOutlined,
 } from "@ant-design/icons";
 import { ActiveChipItem } from "../DesktopFilterPanel";
+import {
+  hasVisibleCategoryTags,
+  isDefaultSortValue,
+  resolveActiveTagValue,
+} from "../../filter-params";
 import styles from "./index.module.less";
 
 interface TagItem {
@@ -56,16 +61,20 @@ export default function MobileFilterDrawer({
 
   const activeCount = activeChips.length;
 
-  // 第一维度（如分类/类型），用于主栏快速横滑
-  const primaryKey = sortList[0] || "Category";
+  // 有子分类时主栏快滑分类；无 Category 时回退到排序
+  const hasCategory = hasVisibleCategoryTags(tagsMap["Category"]);
+  const primaryKey = hasCategory ? "Category" : "Sort";
   const primaryTags = tagsMap[primaryKey] || [];
-  const currentPrimaryVal = normalizeTagValue(activeParams[primaryKey]);
+  const currentPrimaryVal = resolveActiveTagValue(
+    primaryKey,
+    normalizeTagValue(activeParams[primaryKey]),
+  );
 
   const handleDraftTagClick = (key: string, val: string) => {
     const nextVal = normalizeTagValue(val);
     setDraftParams((prev) => {
       const next = { ...prev };
-      if (nextVal === "") {
+      if (nextVal === "" || isDefaultSortValue(key, nextVal)) {
         delete next[key];
       } else {
         next[key] = nextVal;
@@ -89,7 +98,7 @@ export default function MobileFilterDrawer({
 
   return (
     <div className={styles.mobileContainer}>
-      {/* 第 1 行：主操作栏（核心分类快捷横滑 + 筛选按钮） */}
+      {/* 第 1 行：主操作栏（分类快滑，无子分类时回退到排序） */}
       <div className={styles.mainBar}>
         <div className={styles.quickScroll}>
           {primaryTags.map((tag, index) => {
@@ -98,7 +107,7 @@ export default function MobileFilterDrawer({
 
             return (
               <button
-                key={`quick-${tag.Value}-${index}`}
+                key={`quick-${primaryKey}-${tag.Value}-${index}`}
                 type="button"
                 className={`${styles.quickTag} ${isActive ? styles.active : ""}`}
                 disabled={isPending}
@@ -202,7 +211,12 @@ export default function MobileFilterDrawer({
             {sortList.map((key) => {
               const label = titles[key] || key;
               const tags = tagsMap[key] || [];
-              const activeVal = normalizeTagValue(draftParams[key]);
+              if (tags.length === 0) return null;
+              if (key === "Category" && !hasVisibleCategoryTags(tags)) return null;
+              const activeVal = resolveActiveTagValue(
+                key,
+                normalizeTagValue(draftParams[key]),
+              );
 
               return (
                 <div key={`drawer-row-${key}`} className={styles.filterGroup}>

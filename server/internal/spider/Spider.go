@@ -389,7 +389,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	if err != nil {
 		return err
 	}
-	if ctx.Err() != nil {
+	if isCollectProgressStopped(id) {
 		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
 	} else {
 		markSourcePagesFinished(id, flushAtEnd)

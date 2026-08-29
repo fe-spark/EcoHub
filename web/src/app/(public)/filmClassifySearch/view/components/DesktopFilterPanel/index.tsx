@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { DownOutlined, UpOutlined, CloseOutlined, DeleteOutlined } from "@ant-design/icons";
+import { hasVisibleCategoryTags, resolveActiveTagValue } from "../../filter-params";
 import styles from "./index.module.less";
 
 interface TagItem {
@@ -52,7 +53,12 @@ export default function DesktopFilterPanel({
         {sortList.map((key) => {
           const label = titles[key] || key;
           const tags = tagsMap[key] || [];
-          const activeValue = normalizeTagValue(activeParams[key]);
+          if (tags.length === 0) return null;
+          if (key === "Category" && !hasVisibleCategoryTags(tags)) return null;
+          const activeValue = resolveActiveTagValue(
+            key,
+            normalizeTagValue(activeParams[key]),
+          );
 
           return (
             <DesktopRow
