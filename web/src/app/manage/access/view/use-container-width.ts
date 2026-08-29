@@ -1,26 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 export function useContainerWidth(defaultWidth = 600) {
-  const ref = useRef<HTMLDivElement>(null);
+  const [node, setNode] = useState<HTMLDivElement | null>(null);
   const [width, setWidth] = useState(defaultWidth);
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    setNode(el);
+  }, []);
 
   useEffect(() => {
-    if (!ref.current) return;
+    if (!node) return;
     const update = () => {
-      if (ref.current) {
-        const w = ref.current.getBoundingClientRect().width;
-        if (w > 50) {
-          setWidth(Math.floor(w));
-        }
+      const w = node.getBoundingClientRect().width;
+      if (w > 50) {
+        setWidth(Math.floor(w));
       }
     };
     update();
-    const observer = new ResizeObserver(() => update());
-    observer.observe(ref.current);
+    const observer = new ResizeObserver(update);
+    observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [node]);
 
   return { ref, width };
 }

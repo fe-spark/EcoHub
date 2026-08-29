@@ -45,7 +45,7 @@ function logRatio(ms: number, domainMax: number) {
 }
 
 export default function ScatterChart({ logs = [] }: ScatterChartProps) {
-  const { ref, width } = useContainerWidth(0);
+  const { ref, width } = useContainerWidth(640);
   const [hoverItem, setHoverItem] = useState<{
     item: ScatterItem;
     x: number;
@@ -115,8 +115,10 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
 
   if (validLogs.length === 0) {
     return (
-      <div className={styles.sparkEmpty}>
-        <span>暂无请求散点数据</span>
+      <div className={styles.scatterContainer} ref={ref}>
+        <div className={styles.sparkEmpty}>
+          <span>暂无请求散点数据</span>
+        </div>
       </div>
     );
   }
@@ -127,7 +129,7 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
   const newest = validLogs[0];
 
   return (
-    <div className={styles.scatterContainer}>
+    <div className={styles.scatterContainer} ref={ref}>
       <div className={styles.scatterHeader}>
         <Space size={12}>
           <Badge color="#52c41a" text="≤50ms" />
@@ -137,14 +139,10 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
         </Space>
       </div>
 
-      <div className={styles.svgContainer} ref={ref}>
-        {width < 50 ? (
-          <div className={styles.scatterSvg} style={{ height }} />
-        ) : (
-        <>
+      <div className={styles.svgContainer}>
         <svg
           className={styles.scatterSvg}
-          viewBox={`0 0 ${width} ${height}`}
+          viewBox={`0 0 ${Math.max(width, 320)} ${height}`}
           preserveAspectRatio="xMinYMid meet"
           onMouseLeave={() => setHoverItem(null)}
         >
@@ -275,8 +273,6 @@ export default function ScatterChart({ logs = [] }: ScatterChartProps) {
               <code>{hoverItem.item.path}</code>
             </div>
           </div>
-        )}
-        </>
         )}
       </div>
     </div>
