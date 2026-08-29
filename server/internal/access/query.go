@@ -52,14 +52,25 @@ type TopItem struct {
 }
 
 func QueryOverview(day string) (*Overview, error) {
-	if db.Rdb == nil {
-		return nil, fmt.Errorf("redis unavailable")
-	}
 	loc := time.Local
 	now := time.Now().In(loc)
 	target, err := parseDay(day, now)
 	if err != nil {
 		return nil, err
+	}
+	if !isLocalToday(target, now) {
+		if target.Before(retentionCutoff(now)) {
+			return emptyOverview(target), nil
+		}
+		if row, ok := loadDailyStats(target.Format("2006-01-02")); ok {
+			return overviewFromDaily(row), nil
+		}
+		if db.Rdb == nil {
+			return emptyOverview(target), nil
+		}
+	}
+	if db.Rdb == nil {
+		return nil, fmt.Errorf("redis unavailable")
 	}
 	dayKey := target.Format("20060102")
 	out := &Overview{
@@ -176,19 +187,41 @@ func QueryOverview(day string) (*Overview, error) {
 }
 
 func QueryTops(day, kind string, limit int) ([]TopItem, error) {
-	if db.Rdb == nil {
-		return nil, fmt.Errorf("redis unavailable")
-	}
 	if limit <= 0 {
 		limit = 10
 	}
 	if limit > 50 {
 		limit = 50
 	}
-	now := time.Now()
+	now := time.Now().In(time.Local)
 	target, err := parseDay(day, now)
 	if err != nil {
 		return nil, err
+	}
+	if !isLocalToday(target, now) {
+		if target.Before(retentionCutoff(now)) {
+			return []TopItem{}, nil
+		}
+		dayStr := target.Format("2006-01-02")
+		if _, ok := loadDailyStats(dayStr); ok {
+			switch kind {
+			case "search", "play":
+				items := loadDailyTops(dayStr, kind, limit)
+				if kind == "play" {
+					items = enrichPlayTopItems(items)
+				}
+				if items == nil {
+					items = []TopItem{}
+				}
+				return items, nil
+			}
+		}
+		if db.Rdb == nil {
+			return []TopItem{}, nil
+		}
+	}
+	if db.Rdb == nil {
+		return nil, fmt.Errorf("redis unavailable")
 	}
 	dayKey := target.Format("20060102")
 	var key string
@@ -281,6 +314,16 @@ func matchStatus(filter string, status int) bool {
 		return status >= 500 && status < 600
 	default:
 		return true
+	}
+}
+
+func emptyOverview(day time.Time) *Overview {
+	return &Overview{
+		Day:    day.Format("2006-01-02"),
+		Client: map[string]int64{},
+		Action: map[string]int64{},
+		Hist:   map[string]int64{},
+		Series: []SeriesPoint{},
 	}
 }
 

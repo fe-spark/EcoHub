@@ -28,4 +28,6 @@ const (
 	TableNotifyConfig       = "notify_config"
 	TableNotifyChangeBatch  = "notify_change_batch"
 	TableNotifyChangeMid    = "notify_change_mid"
+	TableAccessDailyStats   = "access_daily_stats"
+	TableAccessDailyTop     = "access_daily_top"
 )
