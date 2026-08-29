@@ -110,7 +110,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空影视库存、快照、分类与失败记录等采集派生数据；账号与配置类数据保留。体量可在工作台查看。
+                清空影视库存、分类与失败记录等采集派生数据；账号与配置类数据保留。体量可在工作台查看。
               </Typography.Text>
             </Flex>
             <Button
@@ -159,7 +159,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             title="该操作不可逆"
-            description="将清空影视库存、列表快照、播放源映射、失败记录与分类等采集派生数据，且无法恢复。清空完成后会自动同步主站分类，便于立即重新采集。网站配置、采集站、账号等不受影响。"
+            description="将清空影视库存、播放源映射、失败记录与分类等采集派生数据，且无法恢复。清空完成后会自动同步主站分类，便于立即重新采集。网站配置、采集站、账号等不受影响。"
           />
           <Input.Password
             placeholder="请输入管理密码"

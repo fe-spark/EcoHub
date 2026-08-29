@@ -63,7 +63,11 @@ func QueryOverview(day string) (*Overview, error) {
 			return emptyOverview(target), nil
 		}
 		if row, ok := loadDailyStats(target.Format("2006-01-02")); ok {
-			return overviewFromDaily(row), nil
+			out := overviewFromDaily(row)
+			if len(out.Series) == 0 {
+				out.Series = collectMinuteSeries(target, now)
+			}
+			return out, nil
 		}
 		if db.Rdb == nil {
 			return emptyOverview(target), nil
@@ -91,26 +95,8 @@ func QueryOverview(day string) (*Overview, error) {
 	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
 	droppedCmd := pipe.Get(ctx, droppedKey())
 
-	type minSlot struct {
-		t   time.Time
-		cmd *redis.MapStringStringCmd
-	}
-	start := time.Date(target.Year(), target.Month(), target.Day(), 0, 0, 0, 0, loc)
-	nMin := 0
-	if now.Sub(start) < ttlMinute {
-		nMin = 1440
-		if start.Year() == now.Year() && start.YearDay() == now.YearDay() {
-			nMin = now.Hour()*60 + now.Minute() + 1
-			if nMin > 1440 {
-				nMin = 1440
-			}
-		}
-	}
-	slots := make([]minSlot, 0, nMin)
-	for i := 0; i < nMin; i++ {
-		t := start.Add(time.Duration(i) * time.Minute)
-		slots = append(slots, minSlot{t: t, cmd: pipe.HGetAll(ctx, minKey(t))})
-	}
+	nMin := minuteSlotCount(target, now)
+	slots := queueMinuteSlots(pipe, target, nMin)
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, err
 	}
@@ -133,55 +119,25 @@ func QueryOverview(day string) (*Overview, error) {
 	out.Provide.Err4 = dayVals["provide_err4"]
 	out.Provide.Err5 = dayVals["provide_err5"]
 
-	var fold *SeriesPoint
-	var minPV, minErr4, minErr5, minPPV, minPE4, minPE5 int64
-	flush := func() {
-		if fold != nil {
-			out.Series = append(out.Series, *fold)
-			fold = nil
-		}
+	series, tot := foldMinuteSlots(slots)
+	out.Series = series
+	if tot.pv > out.PV {
+		out.PV = tot.pv
 	}
-	for _, slot := range slots {
-		vals := parseIntMap(slot.cmd.Val())
-		pv := vals["pv"]
-		err4 := vals["err4"]
-		err5 := vals["err5"]
-		ppv := vals["provide_pv"]
-		minPV += pv
-		minErr4 += err4
-		minErr5 += err5
-		minPPV += ppv
-		minPE4 += vals["provide_err4"]
-		minPE5 += vals["provide_err5"]
-
-		label := slot.t.Truncate(15 * time.Minute).Format(time.RFC3339)
-		if fold == nil || fold.T != label {
-			flush()
-			fold = &SeriesPoint{T: label}
-		}
-		fold.PV += pv
-		fold.Err4 += err4
-		fold.Err5 += err5
-		fold.ProvidePV += ppv
+	if tot.err4 > out.Err4 {
+		out.Err4 = tot.err4
 	}
-	flush()
-	if minPV > out.PV {
-		out.PV = minPV
+	if tot.err5 > out.Err5 {
+		out.Err5 = tot.err5
 	}
-	if minErr4 > out.Err4 {
-		out.Err4 = minErr4
+	if tot.providePV > out.Provide.PV {
+		out.Provide.PV = tot.providePV
 	}
-	if minErr5 > out.Err5 {
-		out.Err5 = minErr5
+	if tot.provideErr4 > out.Provide.Err4 {
+		out.Provide.Err4 = tot.provideErr4
 	}
-	if minPPV > out.Provide.PV {
-		out.Provide.PV = minPPV
-	}
-	if minPE4 > out.Provide.Err4 {
-		out.Provide.Err4 = minPE4
-	}
-	if minPE5 > out.Provide.Err5 {
-		out.Provide.Err5 = minPE5
+	if tot.provideErr5 > out.Provide.Err5 {
+		out.Provide.Err5 = tot.provideErr5
 	}
 	return out, nil
 }
@@ -214,10 +170,9 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 				if kind == "play" {
 					items = takePlayTops(items, limit)
 				}
-				if items == nil {
-					items = []TopItem{}
+				if len(items) > 0 {
+					return items, nil
 				}
-				return items, nil
 			}
 		}
 		if db.Rdb == nil {
@@ -252,10 +207,17 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 	return items, nil
 }
 
-func QueryLogs(source, status, client, q string, limit int) ([]AccessEvent, error) {
+func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent, error) {
 	if db.Rdb == nil {
 		return nil, fmt.Errorf("redis unavailable")
 	}
+	now := time.Now().In(time.Local)
+	target, err := parseDay(day, now)
+	if err != nil {
+		return nil, err
+	}
+	dayKey := target.Format("20060102")
+
 	max := config.AccessRecentLimit
 	if source == "slow" || source == "error" {
 		max = slowKeep
@@ -269,26 +231,46 @@ func QueryLogs(source, status, client, q string, limit int) ([]AccessEvent, erro
 	if limit > max {
 		limit = max
 	}
-	key := recentKey()
+
+	var key string
+	var fallbackKey string
 	fetch := int64(config.AccessRecentLimit)
 	switch source {
 	case "slow":
-		key = slowKey()
+		key = slowDayKey(dayKey)
+		fallbackKey = slowKey()
 		fetch = slowKeep
 	case "error":
-		key = errorKey()
+		key = errorDayKey(dayKey)
+		fallbackKey = errorKey()
 		fetch = errorKeep
+	default:
+		key = recentDayKey(dayKey)
+		fallbackKey = recentKey()
 	}
-	raw, err := db.Rdb.LRange(db.Cxt, key, 0, fetch-1).Result()
+
+	ctx := db.Cxt
+	raw, err := db.Rdb.LRange(ctx, key, 0, fetch-1).Result()
+	if err != nil || len(raw) == 0 {
+		raw, err = db.Rdb.LRange(ctx, fallbackKey, 0, fetch-1).Result()
+	}
 	if err != nil && err != redis.Nil {
 		return nil, err
 	}
+
+	loc := time.Local
+	targetY, targetM, targetD := target.Date()
 	q = strings.ToLower(strings.TrimSpace(q))
 	client = strings.TrimSpace(client)
 	out := make([]AccessEvent, 0, limit)
 	for _, line := range raw {
 		var evt AccessEvent
 		if json.Unmarshal([]byte(line), &evt) != nil {
+			continue
+		}
+		evtLoc := evt.Ts.In(loc)
+		ey, em, ed := evtLoc.Date()
+		if ey != targetY || em != targetM || ed != targetD {
 			continue
 		}
 		if !matchStatus(status, evt.Status) {
@@ -341,6 +323,132 @@ func parseDay(day string, now time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid day")
 	}
 	return t, nil
+}
+
+type minSlot struct {
+	t   time.Time
+	cmd *redis.MapStringStringCmd
+}
+
+type minuteTotals struct {
+	pv, err4, err5, providePV, provideErr4, provideErr5 int64
+}
+
+func dayStartLocal(target time.Time) time.Time {
+	t := target.In(time.Local)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
+}
+
+func minuteSlotCount(target, now time.Time) int {
+	start := dayStartLocal(target)
+	now = now.In(time.Local)
+	if !now.Before(start.Add(24*time.Hour + ttlMinute)) {
+		return 0
+	}
+	if start.Year() == now.Year() && start.YearDay() == now.YearDay() {
+		n := now.Hour()*60 + now.Minute() + 1
+		if n < 1 {
+			return 1
+		}
+		if n > 1440 {
+			return 1440
+		}
+		return n
+	}
+	return 1440
+}
+
+func queueMinuteSlots(pipe redis.Pipeliner, target time.Time, nMin int) []minSlot {
+	if nMin <= 0 || pipe == nil {
+		return nil
+	}
+	start := dayStartLocal(target)
+	slots := make([]minSlot, 0, nMin)
+	ctx := db.Cxt
+	for i := 0; i < nMin; i++ {
+		t := start.Add(time.Duration(i) * time.Minute)
+		slots = append(slots, minSlot{t: t, cmd: pipe.HGetAll(ctx, minKey(t))})
+	}
+	return slots
+}
+
+func foldMinuteSlots(slots []minSlot) ([]SeriesPoint, minuteTotals) {
+	var tot minuteTotals
+	series := make([]SeriesPoint, 0, (len(slots)+14)/15)
+	var fold *SeriesPoint
+	flush := func() {
+		if fold != nil {
+			series = append(series, *fold)
+			fold = nil
+		}
+	}
+	for _, slot := range slots {
+		vals := parseIntMap(slot.cmd.Val())
+		pv := vals["pv"]
+		err4 := vals["err4"]
+		err5 := vals["err5"]
+		ppv := vals["provide_pv"]
+		tot.pv += pv
+		tot.err4 += err4
+		tot.err5 += err5
+		tot.providePV += ppv
+		tot.provideErr4 += vals["provide_err4"]
+		tot.provideErr5 += vals["provide_err5"]
+
+		label := slot.t.Truncate(15 * time.Minute).Format(time.RFC3339)
+		if fold == nil || fold.T != label {
+			flush()
+			fold = &SeriesPoint{T: label}
+		}
+		fold.PV += pv
+		fold.Err4 += err4
+		fold.Err5 += err5
+		fold.ProvidePV += ppv
+	}
+	flush()
+	return series, tot
+}
+
+func collectMinuteSeries(target, now time.Time) []SeriesPoint {
+	if db.Rdb == nil {
+		return []SeriesPoint{}
+	}
+	nMin := minuteSlotCount(target, now)
+	if nMin <= 0 {
+		return []SeriesPoint{}
+	}
+	pipe := db.Rdb.Pipeline()
+	slots := queueMinuteSlots(pipe, target, nMin)
+	if _, err := pipe.Exec(db.Cxt); err != nil && err != redis.Nil {
+		return []SeriesPoint{}
+	}
+	series, _ := foldMinuteSlots(slots)
+	if series == nil {
+		return []SeriesPoint{}
+	}
+	return series
+}
+
+func marshalSeries(series []SeriesPoint) string {
+	if len(series) == 0 {
+		return "[]"
+	}
+	raw, err := json.Marshal(series)
+	if err != nil {
+		return "[]"
+	}
+	return string(raw)
+}
+
+func unmarshalSeries(raw string) []SeriesPoint {
+	if strings.TrimSpace(raw) == "" {
+		return []SeriesPoint{}
+	}
+	var out []SeriesPoint
+	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
+		return []SeriesPoint{}
+	}
+	return out
 }
 
 func parseIntMap(m map[string]string) map[string]int64 {

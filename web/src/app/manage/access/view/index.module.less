@@ -671,21 +671,47 @@
 .logTargetCell {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
+  min-width: 0;
+}
+
+.logDescLine {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text, rgba(0, 0, 0, 0.88));
+  line-height: 1.4;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .logRouteLine {
   display: flex;
   align-items: center;
   gap: 6px;
+  line-height: 1.4;
+  min-width: 0;
+}
+
+.methodTag {
+  font-size: 10px;
+  font-weight: 700;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 16px;
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-text-secondary);
+  flex: none;
 }
 
 .clientPrefix {
   font-size: 10px;
   font-weight: 600;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  padding: 1px 5px;
-  border-radius: 4px;
+  padding: 0 4px;
+  border-radius: 3px;
+  line-height: 16px;
   background: var(--ant-color-fill-secondary);
   color: var(--ant-color-text-secondary);
   flex: none;
@@ -718,13 +744,11 @@
 
 .logPath {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  color: var(--ant-color-text);
-}
-
-.logDescLine {
   font-size: 11px;
-  color: var(--ant-color-text-tertiary);
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .latencyFast {

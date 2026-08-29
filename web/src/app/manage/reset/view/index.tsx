@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Card, Col, Row, Statistic, Typography } from "antd";
-import { DatabaseOutlined, FileTextOutlined, FolderOpenOutlined, VideoCameraOutlined } from "@ant-design/icons";
+import { FileTextOutlined, FolderOpenOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ResetSiteDataCard from "@/app/manage/components/reset-site-data-card";
@@ -10,7 +10,6 @@ import styles from "./index.module.less";
 
 interface ResetImpactStats {
   films: number;
-  snapshots: number;
   categories: number;
   failures: number;
 }
@@ -48,28 +47,21 @@ export default function ResetPageView() {
 
       <Card size="small" title="当前数据规模（重置将清空以下数据）">
         <Row gutter={[16, 16]}>
-          <Col xs={12} sm={12} md={6}>
+          <Col xs={24} sm={8} md={8}>
             <Statistic
               title="影视库存"
               value={stats?.films ?? "—"}
               prefix={<VideoCameraOutlined />}
             />
           </Col>
-          <Col xs={12} sm={12} md={6}>
-            <Statistic
-              title="列表快照"
-              value={stats?.snapshots ?? "—"}
-              prefix={<DatabaseOutlined />}
-            />
-          </Col>
-          <Col xs={12} sm={12} md={6}>
+          <Col xs={12} sm={8} md={8}>
             <Statistic
               title="分类"
               value={stats?.categories ?? "—"}
               prefix={<FolderOpenOutlined />}
             />
           </Col>
-          <Col xs={12} sm={12} md={6}>
+          <Col xs={12} sm={8} md={8}>
             <Statistic
               title="失败记录"
               value={stats?.failures ?? "—"}

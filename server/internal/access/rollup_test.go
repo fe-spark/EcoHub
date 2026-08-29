@@ -150,7 +150,31 @@ func TestQueryOverviewReadsDailyForPastDay(t *testing.T) {
 		t.Fatalf("maps %+v %+v", ov.Client, ov.Action)
 	}
 	if len(ov.Series) != 0 {
-		t.Fatalf("historical series should be empty, got %d", len(ov.Series))
+		t.Fatalf("legacy daily row without series JSON should not invent points, got %d", len(ov.Series))
+	}
+}
+
+func TestQueryOverviewReadsPersistedSeries(t *testing.T) {
+	setupAccessDailyTestDB(t)
+	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
+	day := yesterday.Format("2006-01-02")
+	if err := persistDaily(model.AccessDailyStats{
+		Day:        day,
+		PV:         12,
+		ClientJSON: `{"web":12}`,
+		ActionJSON: `{"browse":12}`,
+		HistJSON:   `{}`,
+		SeriesJSON: `[{"t":"2026-08-29T00:00:00+08:00","pv":4,"providePv":1},{"t":"2026-08-29T00:15:00+08:00","pv":8}]`,
+		RolledAt:   time.Now(),
+	}, nil); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	ov, err := QueryOverview(day)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if ov.PV != 12 || len(ov.Series) != 2 || ov.Series[0].PV != 4 || ov.Series[1].PV != 8 {
+		t.Fatalf("persisted series %+v", ov)
 	}
 }
 
