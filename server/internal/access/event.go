@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -36,6 +37,7 @@ type AccessEvent struct {
 	IPPreview  string    `json:"ipPreview"`
 	UAFamily   string    `json:"uaFamily"`
 	Resource   string    `json:"resource"`
+	playMember string
 }
 
 func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
@@ -55,6 +57,7 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	if strings.Contains(ua, "EcoHub-SSR") {
 		internal = "ssr"
 	}
+	query := c.Request.URL.Query()
 	return &AccessEvent{
 		Ts:         time.Now(),
 		Method:     method,
@@ -67,7 +70,8 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 		Internal:   internal,
 		IPPreview:  IPPreview(c.ClientIP()),
 		UAFamily:   uaFamily(path, ua),
-		Resource:   httpResource(path, c.Request.URL.Query()),
+		Resource:   httpResource(path, query),
+		playMember: playRankMember(path, query),
 	}
 }
 
@@ -108,19 +112,73 @@ func TruncateRunes(s string, max int) string {
 	return string([]rune(s)[:max])
 }
 
+func parseFilmID(resource string) (int64, bool) {
+	resource = strings.TrimSpace(resource)
+	resource = strings.TrimPrefix(resource, "id ")
+	id, err := strconv.ParseInt(resource, 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
+}
+
+func canonicalFilmID(resource string) string {
+	id, ok := parseFilmID(resource)
+	if !ok {
+		return ""
+	}
+	return strconv.FormatInt(id, 10)
+}
+
+func isSingleFilmID(resource string) bool {
+	_, ok := parseFilmID(resource)
+	return ok
+}
+
+func playRankMember(path string, query url.Values) string {
+	if strings.HasPrefix(path, "/api/provide/vod") {
+		ac := strings.TrimSpace(query.Get("ac"))
+		if ac != "detail" && ac != "videolist" {
+			return ""
+		}
+		return canonicalFilmID(query.Get("ids"))
+	}
+	if strings.HasPrefix(path, "/api/filmPlayInfo") {
+		return canonicalFilmID(query.Get("id"))
+	}
+	return ""
+}
+
+func pagePlayRankMember(action, resource string) string {
+	if action != "play" {
+		return ""
+	}
+	return canonicalFilmID(resource)
+}
+
 func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/provide/vod") {
-		ac := query.Get("ac")
-		if (ac == "detail" || ac == "videolist") && query.Get("ids") != "" {
-			return TruncateRunes(query.Get("ids"), maxResourceLen)
+		ac := strings.TrimSpace(query.Get("ac"))
+		ids := strings.TrimSpace(query.Get("ids"))
+		if (ac == "detail" || ac == "videolist") && ids != "" {
+			return TruncateRunes(ids, maxResourceLen)
 		}
-		return TruncateRunes(ac, maxResourceLen)
+		if wd := strings.TrimSpace(query.Get("wd")); wd != "" {
+			return TruncateRunes(wd, maxResourceLen)
+		}
+		if ac != "" {
+			return TruncateRunes(ac, maxResourceLen)
+		}
+		return "list"
 	}
 	if strings.HasPrefix(path, "/api/provide/config") {
 		return "config"
 	}
 	if strings.HasPrefix(path, "/api/filmPlayInfo") {
 		return TruncateRunes(query.Get("id"), maxResourceLen)
+	}
+	if strings.HasPrefix(path, "/api/searchFilm") {
+		return TruncateRunes(query.Get("keyword"), maxResourceLen)
 	}
 	return ""
 }
