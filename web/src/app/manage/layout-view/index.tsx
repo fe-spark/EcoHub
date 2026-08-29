@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
 
 
@@ -222,6 +222,15 @@ export default function ManageLayoutView({
     });
   }, []);
 
+  useEffect(() => {
+    if (!userInfo || userInfo.isAdmin) {
+      return;
+    }
+    if (pathname.startsWith("/manage/access")) {
+      router.replace("/manage");
+    }
+  }, [userInfo, pathname, router]);
+
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
     ApiGet("/manage/index").then((resp) => {
@@ -258,7 +267,13 @@ export default function ManageLayoutView({
   }, [isMobile]);
 
 
-  const openKeys = collectAllOpenKeys(menuItems);
+  const visibleMenuItems = useMemo(() => {
+    if (userInfo?.isAdmin) {
+      return menuItems;
+    }
+    return menuItems.filter((item) => item?.key !== "/manage/access");
+  }, [userInfo?.isAdmin]);
+  const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
       key: "light",
@@ -304,7 +319,7 @@ export default function ManageLayoutView({
           style={{ borderInlineEnd: 0 }}
           selectedKeys={[selectedKey]}
           defaultOpenKeys={openKeys}
-          items={menuItems}
+          items={visibleMenuItems}
           onClick={onMenuClick}
         />
       </div>

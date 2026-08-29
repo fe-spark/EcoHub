@@ -42,6 +42,18 @@ export function isActiveCollectStatus(status?: string | null): boolean {
   );
 }
 
+export function isCollectWrapUpStatus(status?: string | null): boolean {
+  return (
+    status === "page_done" ||
+    status === "waiting_publish" ||
+    status === "finalizing"
+  );
+}
+
+export function isPartialCollectFailure(progress?: CollectProgress | null): boolean {
+  return (progress?.success ?? 0) > 0 && (progress?.failed ?? 0) > 0;
+}
+
 export function resolveCollectStatusText(status?: string | null): string {
   switch (status) {
     case "starting":
@@ -55,14 +67,30 @@ export function resolveCollectStatusText(status?: string | null): string {
     case "finalizing":
       return "收尾发布中";
     case "done":
-      return "已完成";
+      return "采集完成";
     case "failed":
-      return "失败";
+      return "采集失败";
     case "stopped":
       return "已停止";
     default:
       return status ? String(status) : "采集中";
   }
+}
+
+export function resolveCollectProgressStatusText(progress?: CollectProgress | null): string {
+  if (!progress) {
+    return "暂无采集进度";
+  }
+  if (isCollectWrapUpStatus(progress.status) && isPartialCollectFailure(progress)) {
+    return progress.status === "finalizing" ? "部分失败，收尾发布中" : "部分失败，等待收尾";
+  }
+  if (progress.status === "failed") {
+    return progress.success > 0 ? "部分失败" : "采集失败";
+  }
+  if (progress.status === "done" && progress.failed > 0) {
+    return "部分完成";
+  }
+  return resolveCollectStatusText(progress.status);
 }
 
 export interface BatchOption {

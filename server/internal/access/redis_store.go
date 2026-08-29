@@ -128,6 +128,7 @@ func writeEvent(evt *AccessEvent) {
 			rk := recentKey()
 			pipe.LPush(ctx, rk, payload)
 			pipe.LTrim(ctx, rk, 0, int64(config.AccessRecentLimit-1))
+			pipe.Expire(ctx, rk, ttlDay)
 		}
 	}
 	if evt.LatencyMs >= config.AccessSlowMs {
@@ -136,6 +137,7 @@ func writeEvent(evt *AccessEvent) {
 			sk := slowKey()
 			pipe.LPush(ctx, sk, payload)
 			pipe.LTrim(ctx, sk, 0, slowKeep-1)
+			pipe.Expire(ctx, sk, ttlDay)
 		}
 	}
 	if evt.Status >= 400 {
@@ -144,6 +146,7 @@ func writeEvent(evt *AccessEvent) {
 			ek := errorKey()
 			pipe.LPush(ctx, ek, payload)
 			pipe.LTrim(ctx, ek, 0, errorKeep-1)
+			pipe.Expire(ctx, ek, ttlDay)
 		}
 	}
 

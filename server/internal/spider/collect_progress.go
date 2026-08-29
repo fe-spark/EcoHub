@@ -114,10 +114,11 @@ func shouldMarkProgressStale(status string, live bool, age, staleAfter time.Dura
 	return status == progressStatusStarting || status == progressStatusRunning
 }
 
+// canEnterFinalizing 不含 stopped：用户停止后仍可 flush，但终态保持「已停止」，避免单站收尾写成采集完成。
 func canEnterFinalizing(status string) bool {
 	switch status {
 	case progressStatusStarting, progressStatusRunning, progressStatusPageDone,
-		progressStatusWaitingPublish, progressStatusStopped, progressStatusDone:
+		progressStatusWaitingPublish, progressStatusDone:
 		return true
 	default:
 		return false
@@ -249,6 +250,22 @@ func markProgressStopped(sourceID string) {
 			progress.Status = progressStatusStopped
 		}
 	})
+}
+
+// stampCollectPageRunning 记录正在抓取的页码。终态和收尾态不可被 worker 写回 running。
+func stampCollectPageRunning(progress *model.CollectProgress, page int) {
+	if isTerminalCollectStatus(progress.Status) || isPostFetchCollectStatus(progress.Status) {
+		return
+	}
+	if page > progress.Current {
+		progress.Current = page
+	}
+	progress.Status = progressStatusRunning
+}
+
+// shouldWrapUpAfterFetchAbort 连续失败停抓后，已有成功入库且允许发布时进入收尾，而不是立刻 failed/stopped。
+func shouldWrapUpAfterFetchAbort(success int, skipPublish bool) bool {
+	return success > 0 && !skipPublish
 }
 
 func StopTask(sourceID string) {

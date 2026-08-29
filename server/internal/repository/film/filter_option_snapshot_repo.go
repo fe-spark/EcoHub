@@ -19,11 +19,7 @@ var filterOptionTagTypes = []string{"Plot", "Area", "Language", "Year"}
 var filterOptionResponseOrder = []string{"Category", "Plot", "Area", "Language", "Year", "Sort"}
 
 func emptyFilterOptionResponse() map[string]any {
-	return map[string]any{
-		"titles":   map[string]string{},
-		"sortList": []string{},
-		"tags":     map[string]any{},
-	}
+	return buildFilterOptionResponse(buildSortFilterOptions("", 0))
 }
 
 func RebuildFilterOptionSnapshot(version string) error {
@@ -218,17 +214,21 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 	}
 
 	var rows []model.FilmFilterOptionSnapshot
-	if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).Order("sort ASC, id ASC").Find(&rows).Error; err == nil && len(rows) > 0 {
-		res := buildFilterOptionResponse(rows)
-		if db.Rdb != nil {
-			if raw, err := json.Marshal(res); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
-			}
-		}
-		return res
+	if err := db.Mdb.Where("snapshot_version = ? AND pid = ?", version, pid).Order("sort ASC, id ASC").Find(&rows).Error; err != nil {
+		log.Printf("[FilterOptionSnapshot] query failed version=%s pid=%d: %v", version, pid, err)
+		return emptyFilterOptionResponse()
+	}
+	if len(rows) == 0 {
+		return emptyFilterOptionResponse()
 	}
 
-	return emptyFilterOptionResponse()
+	res := buildFilterOptionResponse(rows)
+	if db.Rdb != nil {
+		if raw, err := json.Marshal(res); err == nil {
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
+		}
+	}
+	return res
 }
 
 func EnsureActiveFilterOptionSnapshot() error {
@@ -328,4 +328,3 @@ func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 	}
 	return result
 }
-

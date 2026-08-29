@@ -77,6 +77,10 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed("数据异常,资源站信息不存在", c)
 		return
 	}
+	if spider.IsTaskRunning(s.Id) {
+		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
+		return
+	}
 	if fs.Uri != s.Uri {
 		if err := spider.CollectApiTest(s); err != nil {
 			dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
@@ -107,13 +111,13 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 	}
 	if s.State != fs.State {
 		upds := model.FilmSource{
-			Id:           fs.Id,
-			Name:         fs.Name,
-			Uri:          fs.Uri,
-			Grade:        fs.Grade,
-			State:        s.State,
-			Interval:     fs.Interval,
-			Cd:           fs.Cd,
+			Id:       fs.Id,
+			Name:     fs.Name,
+			Uri:      fs.Uri,
+			Grade:    fs.Grade,
+			State:    s.State,
+			Interval: fs.Interval,
+			Cd:       fs.Cd,
 		}
 		if err := service.CollectSvc.UpdateFilmSource(upds); err != nil {
 			dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)

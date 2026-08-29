@@ -77,17 +77,26 @@ func (s *InitService) loadActiveFilmReadModel() {
 	}
 }
 
+func shouldRetainStartupRedisKey(key string) bool {
+	if strings.HasPrefix(key, config.RedisKeyPrefix+":User:Token:") {
+		return true
+	}
+	if key == config.NotifyBotPollerLockKey {
+		return true
+	}
+	// 访问分析有独立 TTL / 列表裁剪，重启不清，避免概览归零。
+	if strings.HasPrefix(key, config.AccessKeyPrefix) {
+		return true
+	}
+	return false
+}
+
 func clearStartupCaches() {
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, config.RedisProjectKeyPattern, config.MaxScanCount).Iterator()
 	for iter.Next(ctx) {
 		key := iter.Val()
-		// 保留管理员/用户登录凭证，避免重启导致在线用户掉线
-		if strings.HasPrefix(key, config.RedisKeyPrefix+":User:Token:") {
-			continue
-		}
-		// 保留 Bot 轮询跨实例领导锁，避免多实例同时启动时互相清锁导致双 getUpdates
-		if key == config.NotifyBotPollerLockKey {
+		if shouldRetainStartupRedisKey(key) {
 			continue
 		}
 		if err := db.Rdb.Del(ctx, key).Err(); err != nil {
@@ -98,7 +107,7 @@ func clearStartupCaches() {
 		syslog.Errorf("[Init] Redis 模式清理失败 %s: %v", config.RedisProjectKeyPattern, err)
 	}
 
-	log.Printf("[Init] Redis 业务临时缓存已清理 (用户登录态已保留)")
+	log.Printf("[Init] Redis 业务临时缓存已清理 (用户登录态与访问分析已保留)")
 }
 
 func (s *InitService) TableInit() {

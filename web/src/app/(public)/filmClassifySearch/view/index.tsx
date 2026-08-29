@@ -17,11 +17,8 @@ import {
 } from "@/components/public/TopLoadingBar";
 import DesktopFilterPanel, { ActiveChipItem } from "./components/DesktopFilterPanel";
 import MobileFilterDrawer from "./components/MobileFilterDrawer";
+import { isDefaultSortValue, normalizeTagValue } from "./filter-params";
 import styles from "./index.module.less";
-
-function normalizeTagValue(value: unknown) {
-  return typeof value === "string" ? value.trim() : "";
-}
 
 function getSafeTags(tags: any[] | undefined) {
   if (!Array.isArray(tags)) {
@@ -138,7 +135,7 @@ export default function FilmClassifySearchPageView({
 
     const nextParams = new URLSearchParams(currentParams);
     const normalizedValue = normalizeTagValue(value);
-    if (normalizedValue === "") {
+    if (normalizedValue === "" || isDefaultSortValue(key, normalizedValue)) {
       nextParams.delete(key);
     } else {
       nextParams.set(key, normalizedValue);
@@ -161,16 +158,16 @@ export default function FilmClassifySearchPageView({
   const activeChips = useMemo<ActiveChipItem[]>(() => {
     const items: ActiveChipItem[] = [];
     for (const key of safeSearch.sortList) {
-      const val = normalizeTagValue(currentParams[key]);
-      if (!val || val === "") continue;
-      if (key === "Sort" && (val === "update_stamp" || val === "default")) continue;
+      const rawVal = normalizeTagValue(currentParams[key]);
+      if (!rawVal || rawVal === "") continue;
+      if (isDefaultSortValue(key, rawVal)) continue;
 
       const tags = tagsMap[key] || [];
-      const matchTag = tags.find((t) => normalizeTagValue(t.Value) === val);
-      const name = matchTag?.Name || val;
+      const matchTag = tags.find((t) => normalizeTagValue(t.Value) === rawVal);
+      const name = matchTag?.Name || rawVal;
       const label = safeSearch.titles[key] || key;
 
-      items.push({ key, label, name, value: val });
+      items.push({ key, label, name, value: rawVal });
     }
     return items;
   }, [safeSearch.sortList, safeSearch.titles, tagsMap, currentParams]);
@@ -198,6 +195,9 @@ export default function FilmClassifySearchPageView({
     }
     for (const [k, v] of Object.entries(nextObj)) {
       if (v && v !== "" && k !== "Pid" && k !== "current") {
+        if (isDefaultSortValue(k, v)) {
+          continue;
+        }
         nextParams.set(k, v);
       }
     }

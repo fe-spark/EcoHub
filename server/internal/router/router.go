@@ -77,7 +77,7 @@ func SetupRouter() *gin.Engine {
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}
 
-		accessRoute := manageRoute.Group(`/access`)
+		accessRoute := manageRoute.Group(`/access`, middleware.AdminAccess())
 		{
 			accessRoute.GET(`/overview`, handler.AccessHd.Overview)
 			accessRoute.GET(`/tops`, handler.AccessHd.Tops)
