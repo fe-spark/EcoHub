@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Button, Pagination } from "antd";
 import {
   AppstoreOutlined,
@@ -66,6 +66,8 @@ function getPrimaryPlotTag(classTag?: string) {
   );
 }
 
+const EMPTY_HISTORY_LIST: string[] = [];
+
 function getInitialHistory(): string[] {
   if (typeof window === "undefined") return [];
   try {
@@ -80,15 +82,35 @@ function getInitialHistory(): string[] {
   return [];
 }
 
-function getInitialViewMode(): "grid" | "detail" {
+function subscribeHistory(callback: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", callback);
+  window.addEventListener("ecohub:search-history", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("ecohub:search-history", callback);
+  };
+}
+
+function getHistorySnapshot(): string {
+  if (typeof window === "undefined") return "[]";
+  return localStorage.getItem(SEARCH_HISTORY_KEY) || "[]";
+}
+
+function subscribeViewMode(callback: () => void) {
+  if (typeof window === "undefined") return () => {};
+  window.addEventListener("storage", callback);
+  window.addEventListener("ecohub:search-view-mode", callback);
+  return () => {
+    window.removeEventListener("storage", callback);
+    window.removeEventListener("ecohub:search-view-mode", callback);
+  };
+}
+
+function getViewModeSnapshot(): "grid" | "detail" {
   if (typeof window === "undefined") return "grid";
-  try {
-    const stored = localStorage.getItem(SEARCH_VIEW_MODE_KEY);
-    if (stored === "grid" || stored === "detail") {
-      return stored;
-    }
-  } catch {}
-  return "grid";
+  const stored = localStorage.getItem(SEARCH_VIEW_MODE_KEY);
+  return stored === "detail" ? "detail" : "grid";
 }
 
 const SORT_OPTIONS = [
@@ -116,8 +138,24 @@ export default function SearchPageView({
   const { message } = useAppMessage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [history, setHistory] = useState<string[]>([]);
-  const [viewMode, setViewMode] = useState<"grid" | "detail">("grid");
+  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}`);
+
+  if (prevParamsKey !== `${keyword}:${current}:${sort}`) {
+    setPrevParamsKey(`${keyword}:${current}:${sort}`);
+    setSearchKeyword(keyword);
+  }
+
+  const rawHistory = useSyncExternalStore(subscribeHistory, getHistorySnapshot, () => "[]");
+  const history = useMemo(() => {
+    try {
+      const parsed = JSON.parse(rawHistory);
+      return Array.isArray(parsed) ? parsed.slice(0, 8) : EMPTY_HISTORY_LIST;
+    } catch {
+      return EMPTY_HISTORY_LIST;
+    }
+  }, [rawHistory]);
+
+  const viewMode = useSyncExternalStore(subscribeViewMode, getViewModeSnapshot, () => "grid");
 
   useEffect(() => {
     const onFocusSearch = () => {
@@ -153,21 +191,6 @@ export default function SearchPageView({
   }, [isNavigating, keyword]);
 
   useEffect(() => {
-    setHistory(getInitialHistory());
-    setViewMode(getInitialViewMode());
-    const handleStorage = () => {
-      setHistory(getInitialHistory());
-    };
-    window.addEventListener("storage", handleStorage);
-    window.addEventListener("ecohub:search-history", handleStorage);
-    return () => {
-      window.removeEventListener("storage", handleStorage);
-      window.removeEventListener("ecohub:search-history", handleStorage);
-    };
-  }, []);
-
-  useEffect(() => {
-    setSearchKeyword(keyword);
     const trimmed = keyword.trim();
     if (!trimmed) return;
     const currentList = getInitialHistory();
@@ -175,9 +198,9 @@ export default function SearchPageView({
       trimmed,
       ...currentList.filter((item) => item !== trimmed),
     ].slice(0, 8);
-    setHistory(nextHistory);
     try {
       localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(nextHistory));
+      window.dispatchEvent(new Event("ecohub:search-history"));
     } catch {}
   }, [keyword]);
 
@@ -189,7 +212,6 @@ export default function SearchPageView({
       trimmed,
       ...currentList.filter((item) => item !== trimmed),
     ].slice(0, 8);
-    setHistory(nextHistory);
     try {
       localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(nextHistory));
       window.dispatchEvent(new Event("ecohub:search-history"));
@@ -199,7 +221,6 @@ export default function SearchPageView({
   const removeHistoryItem = (target: string) => {
     const currentList = getInitialHistory();
     const nextHistory = currentList.filter((item) => item !== target);
-    setHistory(nextHistory);
     try {
       localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(nextHistory));
       window.dispatchEvent(new Event("ecohub:search-history"));
@@ -207,7 +228,6 @@ export default function SearchPageView({
   };
 
   const clearHistory = () => {
-    setHistory([]);
     try {
       localStorage.removeItem(SEARCH_HISTORY_KEY);
       window.dispatchEvent(new Event("ecohub:search-history"));
@@ -220,6 +240,7 @@ export default function SearchPageView({
       message.warning("请输入搜索关键词");
       return;
     }
+    setSearchKeyword(trimmed);
     saveHistory(trimmed);
     navigate(
       `/search?search=${encodeURIComponent(trimmed)}&sort=${encodeURIComponent(sort)}&current=1`,
@@ -229,6 +250,7 @@ export default function SearchPageView({
 
   const handleSortChange = (newSort: string) => {
     if (newSort === sort) return;
+    setSearchKeyword(keyword);
     navigate(
       `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(newSort)}&current=1`,
       "排序切换中...",
@@ -236,6 +258,7 @@ export default function SearchPageView({
   };
 
   const handlePageChange = (page: number) => {
+    setSearchKeyword(keyword);
     navigate(
       `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(sort)}&current=${page}`,
       "页面加载中...",
@@ -250,9 +273,9 @@ export default function SearchPageView({
   };
 
   const toggleViewMode = (mode: "grid" | "detail") => {
-    setViewMode(mode);
     try {
       localStorage.setItem(SEARCH_VIEW_MODE_KEY, mode);
+      window.dispatchEvent(new Event("ecohub:search-view-mode"));
     } catch {}
   };
 
