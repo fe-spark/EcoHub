@@ -9,6 +9,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -317,19 +318,40 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 	dto.Success(relateMovie, "相关推荐获取成功", c)
 }
 
-// SearchFilm 通过片名模糊匹配库存中的信息
+const (
+	searchFilmDefaultPageSize = 12
+	searchFilmMaxPageSize     = 50
+)
+
+func clampSearchFilmPageSize(pageSize int, specified bool) int {
+	if !specified || pageSize <= 0 {
+		return searchFilmDefaultPageSize
+	}
+	if pageSize > searchFilmMaxPageSize {
+		return searchFilmMaxPageSize
+	}
+	return pageSize
+}
+
+func resolveSearchFilmPageSize(c *gin.Context, page *dto.Page) {
+	specified := c.Query("pageSize") != "" || c.Query("pagesize") != "" || c.Query("limit") != ""
+	page.PageSize = clampSearchFilmPageSize(page.PageSize, specified)
+}
+
+// SearchFilm 通过全维智能模糊检索库存中的信息（支持相关度/热度/最新/评分排序）
 func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	keyword := c.DefaultQuery("keyword", "")
+	sortField := utils.NormalizeSearchSortField(c.DefaultQuery("sort", ""))
 	page := dto.GetPageParams(c)
-	page.PageSize = 10
+	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
-	bl := service.IndexSvc.SearchFilmInfo(trimmed, page)
+	bl := service.IndexSvc.SearchFilmInfoWithSort(trimmed, sortField, page)
 	if page.Total <= 0 {
 		dto.Failed("暂无相关影片信息", c)
 		return
 	}
 
-	dto.Success(gin.H{"list": bl, "page": page}, "影片搜索成功", c)
+	dto.Success(gin.H{"list": bl, "page": page, "sort": sortField}, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词

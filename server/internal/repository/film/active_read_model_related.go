@@ -143,7 +143,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 				if item.Mid == current.Mid {
 					continue
 				}
-				if strings.Contains(item.LowerName, lowerKey) {
+				if strings.Contains(strings.ToLower(item.Name), lowerKey) {
 					matchedMids = append(matchedMids, item.Mid)
 					if len(matchedMids) >= 20 {
 						break

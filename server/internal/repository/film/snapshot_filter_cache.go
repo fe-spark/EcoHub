@@ -9,7 +9,11 @@ import (
 )
 
 func SearchSnapshotsByKeywordFast(version string, keyword string, page *dto.Page) []model.FilmListSnapshot {
-	return SearchSnapshotsByKeywordReadModel(version, keyword, page)
+	return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
+}
+
+func SearchSnapshotsByKeywordAndSortFast(version string, keyword string, sortField string, page *dto.Page) []model.FilmListSnapshot {
+	return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, sortField, page)
 }
 
 func ListProvideSnapshotsFast(version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) []model.FilmListSnapshot {

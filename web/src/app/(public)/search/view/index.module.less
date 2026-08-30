@@ -131,6 +131,47 @@
   }
 }
 
+.highlightMatched {
+  color: var(--primary-color);
+  font-weight: 700;
+}
+
+.sortBar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.sortChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--public-border-1);
+  background: var(--public-surface-2);
+  color: var(--public-text-3);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(.active) {
+    color: var(--public-text-1);
+    background: var(--public-surface-hover);
+    border-color: var(--public-border-2);
+  }
+
+  &.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: var(--public-on-accent);
+    font-weight: 700;
+  }
+}
+
 .totalBadge {
   font-size: 13px;
   color: var(--public-text-4);

@@ -11,12 +11,14 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.1.0
 	github.com/joho/godotenv v1.5.1
 	github.com/longbridgeapp/opencc v0.3.13
+	github.com/mozillazg/go-pinyin v0.21.0
 	github.com/redis/go-redis/v9 v9.0.2
 	github.com/robfig/cron/v3 v3.0.1
 	golang.org/x/net v0.8.0
 	golang.org/x/sync v0.19.0
 	golang.org/x/time v0.14.0
 	gorm.io/driver/mysql v1.4.7
+	gorm.io/driver/sqlite v1.4.4
 	gorm.io/gorm v1.25.5
 )
 
@@ -62,5 +64,4 @@ require (
 	google.golang.org/appengine v1.6.6 // indirect
 	google.golang.org/protobuf v1.30.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/driver/sqlite v1.4.4 // indirect
 )

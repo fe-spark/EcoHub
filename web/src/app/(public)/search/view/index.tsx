@@ -19,6 +19,7 @@ import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import FilmList from "@/components/public/FilmList";
+import HighlightMatchedText from "@/components/public/HighlightMatchedText";
 import styles from "./index.module.less";
 
 const HOT_KEYWORDS = [
@@ -90,15 +91,25 @@ function getInitialViewMode(): "grid" | "detail" {
   return "grid";
 }
 
+const SORT_OPTIONS = [
+  { key: "", label: "综合相关度" },
+  { key: "hits", label: "最多播放" },
+  { key: "latest", label: "最近更新" },
+  { key: "score", label: "最高评分" },
+  { key: "year", label: "上映年份" },
+];
+
 export default function SearchPageView({
   data,
   keyword,
   current,
+  sort = "",
   hotKeywords = [],
 }: {
   data: any;
   keyword: string;
   current: string;
+  sort?: string;
   hotKeywords?: string[];
 }) {
   const { navigate, isNavigating } = useContentNavigate();
@@ -211,14 +222,22 @@ export default function SearchPageView({
     }
     saveHistory(trimmed);
     navigate(
-      `/search?search=${encodeURIComponent(trimmed)}&current=1`,
+      `/search?search=${encodeURIComponent(trimmed)}&sort=${encodeURIComponent(sort)}&current=1`,
       "搜索加载中...",
+    );
+  };
+
+  const handleSortChange = (newSort: string) => {
+    if (newSort === sort) return;
+    navigate(
+      `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(newSort)}&current=1`,
+      "排序切换中...",
     );
   };
 
   const handlePageChange = (page: number) => {
     navigate(
-      `/search?search=${encodeURIComponent(keyword)}&current=${page}`,
+      `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(sort)}&current=${page}`,
       "页面加载中...",
     );
   };
@@ -252,7 +271,7 @@ export default function SearchPageView({
           <input
             ref={inputRef}
             type="text"
-            placeholder="搜索电影、剧集、动漫、综艺..."
+            placeholder="搜索电影、剧集、动漫、综艺、主演、导演..."
             value={searchKeyword}
             onChange={(e) => setSearchKeyword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && executeSearch(searchKeyword)}
@@ -319,6 +338,26 @@ export default function SearchPageView({
           </div>
         )}
       </header>
+
+      {/* YouTube 风格排序筛选栏 */}
+      {keyword && (
+        <div className={styles.sortBar} aria-label="排序方式">
+          {SORT_OPTIONS.map((opt) => {
+            const isActive = (opt.key === "" && (!sort || sort === "relevance")) || opt.key === sort;
+            return (
+              <button
+                type="button"
+                key={opt.key}
+                className={`${styles.sortChip} ${isActive ? styles.active : ""}`}
+                aria-pressed={isActive}
+                onClick={() => handleSortChange(opt.key)}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       {/* 快捷推荐与历史栏（常驻展示） */}
       <section className={styles.quickBar}>
@@ -391,7 +430,7 @@ export default function SearchPageView({
           {/* 模式 A：海报瀑布流网格 */}
           {viewMode === "grid" ? (
             <div className={styles.gridContainer}>
-              <FilmList list={data.list} col={6} />
+              <FilmList list={data.list} col={6} highlightQuery={keyword} />
             </div>
           ) : (
             /* 模式 B：图文详情卡片 */
@@ -419,7 +458,11 @@ export default function SearchPageView({
                       className={styles.filmName}
                       onClick={() => handlePlay(movie.id)}
                     >
-                      {movie.name}
+                      <HighlightMatchedText
+                        text={movie.name}
+                        query={keyword}
+                        className={styles.highlightMatched}
+                      />
                     </h3>
 
                     <div className={styles.tags}>
@@ -453,14 +496,30 @@ export default function SearchPageView({
                     <div className={styles.metaRow}>
                       <span className={styles.metaLabel}>导演</span>
                       <span className={styles.metaValue}>
-                        {movie.director || "暂无导演信息"}
+                        {movie.director ? (
+                          <HighlightMatchedText
+                            text={movie.director}
+                            query={keyword}
+                            className={styles.highlightMatched}
+                          />
+                        ) : (
+                          "暂无导演信息"
+                        )}
                       </span>
                     </div>
 
                     <div className={styles.metaRow}>
                       <span className={styles.metaLabel}>主演</span>
                       <span className={styles.metaValue}>
-                        {movie.actor || "暂无主演信息"}
+                        {movie.actor ? (
+                          <HighlightMatchedText
+                            text={movie.actor}
+                            query={keyword}
+                            className={styles.highlightMatched}
+                          />
+                        ) : (
+                          "暂无主演信息"
+                        )}
                       </span>
                     </div>
 
@@ -489,7 +548,7 @@ export default function SearchPageView({
             <Pagination
               current={parseInt(current || "1", 10)}
               total={data.page?.total ?? totalCount}
-              pageSize={data.page?.pageSize || 20}
+              pageSize={data.page?.pageSize || 12}
               onChange={handlePageChange}
               showSizeChanger={false}
               hideOnSinglePage
