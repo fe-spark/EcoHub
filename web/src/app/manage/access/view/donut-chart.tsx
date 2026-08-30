@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
+import { useContainerWidth } from "./use-container-width";
 import styles from "./index.module.less";
 
 export type DonutSlice = {
@@ -21,11 +22,17 @@ interface DonutChartProps {
 
 export default function DonutChart({
   data = [],
-  title = "总量",
+  title = "操作总量",
   unit = "次",
-  size = 180,
+  size: propSize,
 }: DonutChartProps) {
+  const { ref, width: containerWidth } = useContainerWidth(400);
   const [hoverKey, setHoverKey] = useState<string | null>(null);
+
+  // 响应式尺寸计算：根据卡片真实宽度自适应环形图大小
+  const isVertical = containerWidth < 280;
+  const isCompact = containerWidth < 380;
+  const size = propSize || (containerWidth < 340 ? 116 : containerWidth < 420 ? 130 : 148);
 
   const total = data.reduce((sum, item) => sum + (item.count || 0), 0);
   const activeItem = data.find((d) => d.key === hoverKey) || null;
@@ -46,7 +53,7 @@ export default function DonutChart({
     currentAngle = endAngle;
 
     const isHovered = hoverKey === item.key;
-    const offset = isHovered ? 4 : 0;
+    const offset = isHovered ? 3 : 0;
     const midAngle = (startAngle + endAngle) / 2;
     const offX = Math.cos(midAngle) * offset;
     const offY = Math.sin(midAngle) * offset;
@@ -76,7 +83,10 @@ export default function DonutChart({
   });
 
   return (
-    <div className={styles.donutContainer}>
+    <div
+      ref={ref}
+      className={`${styles.donutContainer} ${isVertical ? styles.donutContainerVertical : ""}`}
+    >
       <div className={styles.donutSvgWrap} style={{ width: size, height: size }}>
         <svg
           viewBox={`0 0 ${size} ${size}`}
@@ -121,11 +131,17 @@ export default function DonutChart({
               <div className={styles.centerVal} style={{ color: activeItem.color }}>
                 {activeItem.pct}%
               </div>
+              <div className={styles.centerSub}>
+                {activeItem.count.toLocaleString()} {unit}
+              </div>
             </>
           ) : (
             <>
               <div className={styles.centerLabel}>{title}</div>
-              <div className={styles.centerVal}>{total.toLocaleString()}</div>
+              <div className={styles.centerVal}>
+                {total.toLocaleString()}
+                <span className={styles.centerUnit}> {unit}</span>
+              </div>
             </>
           )}
         </div>
@@ -141,10 +157,28 @@ export default function DonutChart({
             onMouseLeave={() => setHoverKey(null)}
           >
             <div className={styles.legendDotCol}>
-              <span className={styles.legendDot} style={{ background: item.color }} />
-              <span className={styles.legendName}>{item.label}</span>
+              {item.icon ? (
+                <span className={styles.legendIconWrap} style={{ color: item.color }}>
+                  {item.icon}
+                </span>
+              ) : (
+                <span className={styles.legendDot} style={{ background: item.color }} />
+              )}
+              <span className={styles.legendName} title={item.label}>
+                {item.label}
+              </span>
             </div>
-            <div className={styles.legendValCol}>
+
+            <div className={styles.legendBarCol}>
+              <div className={styles.miniProgressWrap}>
+                <div
+                  className={styles.miniProgressBar}
+                  style={{
+                    width: `${Math.max(item.count > 0 ? 3 : 0, item.pct)}%`,
+                    background: item.color,
+                  }}
+                />
+              </div>
               <span className={styles.legendCount}>
                 {item.count.toLocaleString()} {unit}
               </span>

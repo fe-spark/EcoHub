@@ -131,18 +131,19 @@ export default function LatencyHeatmap({ logs = [] }: { logs?: HeatLog[] }) {
             </div>
           );
         })}
-        <div className={styles.heatXRow}>
-          <span />
-          {Array.from({ length: grid.cols }, (_, col) => {
-            const show =
-              col === 0 || col === grid.cols - 1 || col === Math.floor((grid.cols - 1) / 2);
-            return (
-              <span key={col} className={styles.heatXLabel}>
-                {show ? dayjs(grid.start + col * grid.step).format("HH:mm") : ""}
-              </span>
-            );
-          })}
-        </div>
+      </div>
+      <div className={styles.heatXAxis}>
+        <span className={styles.heatXStart}>
+          {dayjs(grid.start).format("HH:mm")}
+        </span>
+        {grid.cols > 2 && (
+          <span className={styles.heatXMid}>
+            {dayjs(grid.start + Math.floor((grid.cols - 1) / 2) * grid.step).format("HH:mm")}
+          </span>
+        )}
+        <span className={styles.heatXEnd}>
+          {dayjs(grid.start + (grid.cols - 1) * grid.step).format("HH:mm")}
+        </span>
       </div>
       {hover ? (
         <div className={styles.heatHint}>

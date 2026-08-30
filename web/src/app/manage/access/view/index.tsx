@@ -25,6 +25,7 @@ import {
   DesktopOutlined,
   EyeOutlined,
   FireOutlined,
+  InfoCircleOutlined,
   MobileOutlined,
   PieChartOutlined,
   PlayCircleOutlined,
@@ -43,6 +44,7 @@ import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import TrendChart, { type SeriesPoint } from "./trend-chart";
 import DonutChart, { type DonutSlice } from "./donut-chart";
+import ClientChannelCard, { type ClientChannelItem } from "./client-channel-card";
 import LatencyChart from "./latency-chart";
 import LatencyHeatmap from "./latency-heatmap";
 import styles from "./index.module.less";
@@ -85,13 +87,13 @@ type LogRow = {
   action?: string;
 };
 
-const CLIENT_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
-  web: { label: "Web 网页", icon: <DesktopOutlined />, color: "#fa8c16" },
-  app: { label: "App 客户端", icon: <MobileOutlined />, color: "#52c41a" },
-  tvbox: { label: "TVBox 电视", icon: <DesktopOutlined />, color: "#1677ff" },
-  crawler: { label: "爬虫 Bot", icon: <RobotOutlined />, color: "#faad14" },
-  manage: { label: "管理后台", icon: <SettingOutlined />, color: "#722ed1" },
-  unknown: { label: "其他", icon: <UserOutlined />, color: "#8c8c8c" },
+const CLIENT_MAP: Record<string, { label: string; icon: React.ReactNode; color: string; desc?: string }> = {
+  web: { label: "Web 网页端", icon: <DesktopOutlined />, color: "#fa8c16", desc: "桌面与手机浏览器 · 页面浏览与点播" },
+  tvbox: { label: "TVBox 电视", icon: <DesktopOutlined />, color: "#1677ff", desc: "影视仓与电视盒子 · 订阅源与播放同步" },
+  app: { label: "App 客户端", icon: <MobileOutlined />, color: "#52c41a", desc: "移动端原生应用 · 手机与鸿蒙客户端" },
+  crawler: { label: "爬虫 Bot", icon: <RobotOutlined />, color: "#faad14", desc: "搜索引擎与自动化爬虫 · 索引抓取" },
+  manage: { label: "管理后台", icon: <SettingOutlined />, color: "#722ed1", desc: "管理员后台系统操作 · 配置与调度" },
+  unknown: { label: "其他来源", icon: <UserOutlined />, color: "#8c8c8c", desc: "未识别设备或未知客户端请求" },
 };
 
 const ACTION_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -469,17 +471,18 @@ export default function AccessPageView() {
     }
   };
 
-  // 终端设备分布饼图数据（直观归总为 Web、App、TVBox）
-  const clientDonutData: DonutSlice[] = useMemo(() => {
+  // 终端设备渠道数据（直观归总为 Web、TVBox、App、爬虫等）
+  const clientChannelData: ClientChannelItem[] = useMemo(() => {
     const raw = overview?.client || {};
     const data: Record<string, number> = {
       web: raw.web || 0,
-      app: (raw.app || 0) + (raw.ohos || 0) + (raw.android || 0) + (raw.ios || 0),
       tvbox: raw.tvbox || 0,
+      app: (raw.app || 0) + (raw.ohos || 0) + (raw.android || 0) + (raw.ios || 0),
       crawler: raw.crawler || 0,
+      manage: raw.manage || 0,
     };
-    const primaryOrder = ["web", "app", "tvbox"];
-    const allOrder = ["web", "app", "tvbox", "crawler"];
+    const primaryOrder = ["web", "tvbox", "app"];
+    const allOrder = ["web", "tvbox", "app", "crawler", "manage"];
     const total = allOrder.reduce((s, k) => s + (data[k] || 0), 0);
     return allOrder
       .filter((k) => primaryOrder.includes(k) || (data[k] || 0) > 0)
@@ -490,6 +493,7 @@ export default function AccessPageView() {
           key: k,
           label: info.label,
           icon: info.icon,
+          desc: info.desc,
           count,
           pct: total > 0 && count > 0 ? Math.round((count / total) * 100) : 0,
           color: info.color,
@@ -501,7 +505,7 @@ export default function AccessPageView() {
   const actionDonutData: DonutSlice[] = useMemo(() => {
     const data = overview?.action || {};
     const primaryOrder = ["play", "search", "browse", "provide", "classify"];
-    const allOrder = ["play", "search", "browse", "provide", "classify", "other"];
+    const allOrder = ["play", "search", "browse", "provide", "classify", "manage", "other"];
     const total = allOrder.reduce((s, k) => s + (data[k] || 0), 0);
     return allOrder
       .filter((k) => primaryOrder.includes(k) || (data[k] || 0) > 0)
@@ -518,6 +522,14 @@ export default function AccessPageView() {
         };
       });
   }, [overview]);
+
+  const clientTotal = useMemo(() => {
+    return clientChannelData.reduce((s, item) => s + item.count, 0);
+  }, [clientChannelData]);
+
+  const actionTotal = useMemo(() => {
+    return actionDonutData.reduce((s, item) => s + item.count, 0);
+  }, [actionDonutData]);
 
   // 今日核心指标计算
   const totalPlayCount = (overview?.action?.play || 0) + (overview?.provide?.pv || 0);
@@ -744,7 +756,7 @@ export default function AccessPageView() {
         </div>
       </Card>
 
-      {/* 第一行图表（左宽右窄）：24 小时走势 (宽) + 终端设备分布 (窄) */}
+      {/* 第一行图表（左宽右窄）：24 小时走势 (宽) + 终端渠道分布 (窄) */}
       <div className={styles.gridWideLeft}>
         <Card
           className={styles.panelCard}
@@ -758,32 +770,52 @@ export default function AccessPageView() {
         <Card
           className={styles.panelCard}
           title={
-            <Space>
+            <Space size={6}>
               <PieChartOutlined style={{ color: "#fa8c16" }} />
-              <span>终端设备分布</span>
+              <span>终端渠道分布</span>
+              <Tooltip title="按访问来源设备统计请求总量与占比（Web网页端、TVBox电视、App移动端等）">
+                <InfoCircleOutlined style={{ color: "var(--ant-color-text-tertiary)", cursor: "pointer", fontSize: 13 }} />
+              </Tooltip>
             </Space>
+          }
+          extra={
+            clientTotal > 0 ? (
+              <span className={styles.hint}>
+                总请求量 <b style={{ color: "var(--ant-color-text)", fontWeight: 600 }}>{fmtNum(clientTotal)}</b> 次
+              </span>
+            ) : null
           }
           loading={loading}
           styles={{ body: { padding: 16 } }}
         >
-          <DonutChart data={clientDonutData} title="终端总计" />
+          <ClientChannelCard data={clientChannelData} />
         </Card>
       </div>
 
-      {/* 第二行图表（左窄右宽，交错呼应）：行为场景分布 (窄) + 服务响应耗时分布 (宽) */}
+      {/* 第二行图表（左窄右宽，交错呼应）：业务场景画像 (窄) + 服务响应耗时分布 (宽) */}
       <div className={styles.gridWideRight}>
         <Card
           className={styles.panelCard}
           title={
-            <Space>
+            <Space size={6}>
               <CompassOutlined style={{ color: "#52c41a" }} />
-              <span>行为场景分布</span>
+              <span>业务场景画像</span>
+              <Tooltip title="按业务功能分类统计全站请求操作量与占比（影视点播、寻片搜索、分类浏览、TVBox同步等）">
+                <InfoCircleOutlined style={{ color: "var(--ant-color-text-tertiary)", cursor: "pointer", fontSize: 13 }} />
+              </Tooltip>
             </Space>
+          }
+          extra={
+            actionTotal > 0 ? (
+              <span className={styles.hint}>
+                操作总量 <b style={{ color: "var(--ant-color-text)", fontWeight: 600 }}>{fmtNum(actionTotal)}</b> 次
+              </span>
+            ) : null
           }
           loading={loading}
           styles={{ body: { padding: 16 } }}
         >
-          <DonutChart data={actionDonutData} title="行为总计" />
+          <DonutChart data={actionDonutData} title="操作总量" unit="次" />
         </Card>
 
         <Card

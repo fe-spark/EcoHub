@@ -9,6 +9,17 @@
   border-radius: 12px;
   background: var(--ant-color-bg-container);
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+
+  :global(.ant-card-body) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    min-height: 0;
+  }
 }
 
 .hint {
@@ -132,13 +143,13 @@
 /* 图表网格：错落有致交错节奏 */
 .gridWideLeft {
   display: grid;
-  grid-template-columns: minmax(0, 1.85fr) minmax(0, 1.15fr);
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
   gap: 16px;
 }
 
 .gridWideRight {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1.85fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
   gap: 16px;
 }
 
@@ -216,9 +227,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 36px;
-  padding: 6px 12px;
-  min-height: 170px;
+  gap: 32px;
+  padding: 8px 12px;
+  min-height: 160px;
+  height: 100%;
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  box-sizing: border-box;
+}
+
+.donutContainerVertical {
+  flex-direction: column;
+  gap: 16px;
 }
 
 .donutSvgWrap {
@@ -257,11 +278,27 @@
   font-weight: 700;
   color: var(--ant-color-text);
   font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+  margin-top: 1px;
+}
+
+.centerUnit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+}
+
+.centerSub {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+  margin-top: 1px;
 }
 
 .donutLegend {
   flex: 1;
-  max-width: 280px;
+  max-width: 320px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -271,10 +308,12 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 4px 8px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
+  min-width: 0;
   transition: background 0.2s;
 
   &:hover,
@@ -286,8 +325,17 @@
 .legendDotCol {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
+.legendIconWrap {
+  display: inline-flex;
+  align-items: center;
+  font-size: 14px;
+  flex: none;
 }
 
 .legendDot {
@@ -303,26 +351,180 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-size: 12.5px;
 }
 
-.legendValCol {
+.legendBarCol {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: none;
 }
 
+.miniProgressWrap {
+  width: 72px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ant-color-fill-secondary);
+  overflow: hidden;
+  flex: none;
+}
+
+.miniProgressBar {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease;
+}
+
 .legendCount {
   color: var(--ant-color-text-secondary);
   font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  white-space: nowrap;
+  min-width: 38px;
+  text-align: right;
 }
 
 .legendPct {
   font-weight: 700;
   color: var(--ant-color-text);
-  min-width: 32px;
+  min-width: 30px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* 📱 终端设备渠道卡片 (Client Channel Card) */
+.clientChannelWrap {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.clientChannelEmpty {
+  padding: 24px 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clientChannelList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.clientChannelItem {
+  padding: 8px 12px;
+  border: 1px solid var(--ant-color-border-secondary, rgba(0, 0, 0, 0.06));
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.02));
+  transition: all 0.2s ease;
+
+  &:hover,
+  &.clientChannelActive {
+    background: var(--ant-color-fill-tertiary, rgba(0, 0, 0, 0.04));
+    border-color: var(--ant-color-border);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+}
+
+.clientChannelHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.clientChannelTitleCol {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.clientChannelIconWrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex: none;
+}
+
+.clientChannelMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.clientChannelName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  line-height: 1.2;
+}
+
+.clientChannelDesc {
+  font-size: 11px;
+  color: var(--ant-color-text-secondary);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clientChannelStats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+}
+
+.clientChannelCount {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.unitText {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-secondary);
+}
+
+.clientChannelBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.clientProgressBarWrap {
+  width: 100%;
+  height: 5px;
+  border-radius: 2.5px;
+  background: var(--ant-color-fill-secondary, rgba(0, 0, 0, 0.06));
+  overflow: hidden;
+}
+
+.clientProgressBarFill {
+  height: 100%;
+  border-radius: 2.5px;
+  transition: width 0.3s ease;
 }
 
 .heatWrap {
@@ -389,16 +591,28 @@
   outline-offset: 0;
 }
 
-.heatXRow {
-  display: contents;
-}
-
-.heatXLabel {
+.heatXAxis {
+  margin-left: 55px; // 52px Y-axis label + 3px gap
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 5px;
   font-size: 10px;
   color: var(--ant-color-text-tertiary);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  box-sizing: border-box;
+}
+
+.heatXStart {
+  text-align: left;
+}
+
+.heatXMid {
   text-align: center;
-  padding-top: 4px;
+}
+
+.heatXEnd {
+  text-align: right;
 }
 
 .heatHint,
