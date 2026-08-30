@@ -38,7 +38,7 @@ export default function SiderVersion({
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeHint, setUpgradeHint] = useState("");
   const abortRef = useRef(false);
-  const { message } = useAppMessage();
+  const { message, modal } = useAppMessage();
 
   useEffect(() => {
     abortRef.current = false;
@@ -174,7 +174,7 @@ export default function SiderVersion({
                   !isAdmin || !info?.canUpgrade || !!info?.breaking || upgrading
                 }
                 onClick={() => {
-                  Modal.confirm({
+                  modal.confirm({
                     title: "立即升级并重启？",
                     content: "将拉取 latest 并重建当前容器，页面会短暂断开。",
                     okText: "升级",
