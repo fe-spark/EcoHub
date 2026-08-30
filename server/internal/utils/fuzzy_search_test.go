@@ -2,36 +2,20 @@ package utils
 
 import (
 	"sort"
-	"strings"
 	"testing"
 )
 
 func testFilmItem(mid int64, name, sub, actor, director string, hits int64) FilmSearchItem {
-	variants := ToPinyinInitialVariants(name)
-	alts := ""
-	if len(variants) > 1 {
-		alts = strings.Join(variants[1:], " ")
+	item := FilmSearchItem{
+		Mid:      mid,
+		Name:     name,
+		SubTitle: sub,
+		Actor:    actor,
+		Director: director,
+		Hits:     hits,
 	}
-	initials := ""
-	if len(variants) > 0 {
-		initials = variants[0]
-	}
-	return FilmSearchItem{
-		Mid:               mid,
-		Name:              name,
-		CleanName:         CleanCompactText(name),
-		PinyinFull:        ToPinyin(name),
-		PinyinSyllables:   strings.Join(ToPinyinSyllables(name), " "),
-		PinyinInitials:    initials,
-		PinyinInitialAlts: alts,
-		SubTitle:          sub,
-		CleanSubTitle:     CleanCompactText(sub),
-		Actor:             actor,
-		CleanActor:        CleanCompactText(actor),
-		Director:          director,
-		CleanDirector:     CleanCompactText(director),
-		Hits:              hits,
-	}
+	FillSearchDerivedFields(&item)
+	return item
 }
 
 func TestPinyinConversion(t *testing.T) {
@@ -265,6 +249,19 @@ func TestScoreFilmMatchAndRanking(t *testing.T) {
 	}
 	if ScoreFilmMatch(filmNolan, qNolan) <= 0 {
 		t.Errorf("expected 'nolan' to match 'Christopher Nolan', got score %d", ScoreFilmMatch(filmNolan, qNolan))
+	}
+
+	qJoyPhrase := BuildQueryContext("joy of life")
+	if ScoreFilmMatch(filmJoy, qJoyPhrase) <= 0 {
+		t.Errorf("expected 'joy of life' to match 'Joy of Life 2', got score %d", ScoreFilmMatch(filmJoy, qJoyPhrase))
+	}
+	qNola := BuildQueryContext("nola")
+	if ScoreFilmMatch(filmNolan, qNola) <= 0 {
+		t.Errorf("expected prefix 'nola' to match 'Christopher Nolan', got score %d", ScoreFilmMatch(filmNolan, qNola))
+	}
+	filmEarth := testFilmItem(17, "流浪地球2", "The Wandering Earth II", "", "", 100)
+	if ScoreFilmMatch(filmEarth, BuildQueryContext("the wandering earth")) <= 0 {
+		t.Error("expected 'the wandering earth' to match English subtitle")
 	}
 
 	// 12. 相关作品墙不得误伤：搜「凡人修仙传」不能命中把该片名塞进副标题/主演的《斗罗大陆》
