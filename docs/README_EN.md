@@ -124,16 +124,6 @@ Public site: `http://127.0.0.1:3000`. Administration panel: `/manage`. API: `htt
 
 - Telegram Group: [https://t.me/+6O6MiUdVSOplNjQ0](https://t.me/+6O6MiUdVSOplNjQ0)
 
-## Star History
-
-<a href="https://star-history.dera.page/#fe-spark/EcoHub&Date">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=fe-spark/EcoHub&type=Date&theme=dark" />
-    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=fe-spark/EcoHub&type=Date" />
-    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=fe-spark/EcoHub&type=Date" />
-  </picture>
-</a>
-
 ---
 
 [MIT](../LICENSE) · [fe-spark/EcoHub](https://github.com/fe-spark/EcoHub) · [Issues](https://github.com/fe-spark/EcoHub/issues) · [Telegram Group](https://t.me/+6O6MiUdVSOplNjQ0)
