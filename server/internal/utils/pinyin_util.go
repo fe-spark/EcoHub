@@ -40,7 +40,10 @@ func init() {
 // ToPinyin 将中文字符串转换为无音调全拼（保留英数，去除非英数符号并转小写）
 // 例如："流浪地球 2" -> "liulangdiqiu2"
 func ToPinyin(s string) string {
-	s = TraditionalToSimplified(s)
+	return pinyinFullNormalized(TraditionalToSimplified(s))
+}
+
+func pinyinFullNormalized(s string) string {
 	if s == "" {
 		return ""
 	}
@@ -71,7 +74,10 @@ func ToPinyin(s string) string {
 // ToPinyinSyllables 将中文字符串转换为单个音节列表（保留英数小写）
 // 例如："流浪地球 2" -> ["liu", "lang", "di", "qiu", "2"]，"小夜测试" -> ["xiao", "ye", "ce", "shi"]
 func ToPinyinSyllables(s string) []string {
-	s = TraditionalToSimplified(s)
+	return pinyinSyllablesNormalized(TraditionalToSimplified(s))
+}
+
+func pinyinSyllablesNormalized(s string) []string {
 	if s == "" {
 		return nil
 	}
@@ -125,7 +131,10 @@ func ToPinyinInitials(s string) string {
 // ToPinyinInitialVariants 预计算简拼及其多音字变体，供索引阶段写入，查询热路径不再现场转拼音。
 // 第一个元素与 ToPinyinInitials 一致。
 func ToPinyinInitialVariants(s string) []string {
-	s = TraditionalToSimplified(s)
+	return pinyinInitialVariantsNormalized(TraditionalToSimplified(s))
+}
+
+func pinyinInitialVariantsNormalized(s string) []string {
 	if s == "" {
 		return nil
 	}

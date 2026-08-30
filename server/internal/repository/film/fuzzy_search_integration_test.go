@@ -2,14 +2,12 @@ package film
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/utils"
 
 	mysqlDriver "gorm.io/driver/mysql"
 	"gorm.io/driver/sqlite"
@@ -44,36 +42,19 @@ func TestRealDatabaseSearchQueries(t *testing.T) {
 		Scan(&rows).Error; err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	items := make([]filmSearchMemoryItem, 0, len(rows))
+	raw := make([]filmSearchIndexRow, 0, len(rows))
 	for _, r := range rows {
-		if r.Mid > 0 && r.Name != "" {
-			initials, alts := pinyinInitialIndexFields(r.Name)
-			items = append(items, filmSearchMemoryItem{
-				Mid:               r.Mid,
-				Pid:               r.Pid,
-				Cid:               r.Cid,
-				Name:              r.Name,
-				CleanName:         utils.CleanCompactText(r.Name),
-				PinyinFull:        utils.ToPinyin(r.Name),
-				PinyinSyllables:   strings.Join(utils.ToPinyinSyllables(r.Name), " "),
-				PinyinInitials:    initials,
-				PinyinInitialAlts: alts,
-				SubTitle:          r.SubTitle,
-				CleanSubTitle:     utils.CleanCompactText(r.SubTitle),
-				Actor:             r.Actor,
-				CleanActor:        utils.CleanCompactText(r.Actor),
-				Director:          r.Director,
-				CleanDirector:     utils.CleanCompactText(r.Director),
-				Hits:              r.Hits,
-				Score:             r.Score,
-				Year:              r.Year,
-				UpdateStamp:       r.UpdateStamp,
-			})
-		}
+		raw = append(raw, filmSearchIndexRow{
+			Mid: r.Mid, Pid: r.Pid, Cid: r.Cid, Name: r.Name,
+			SubTitle: r.SubTitle, Actor: r.Actor, Director: r.Director,
+			Hits: r.Hits, Score: r.Score, Year: r.Year, UpdateStamp: r.UpdateStamp,
+		})
 	}
-	t.Logf("Loaded %d items from database", len(items))
+	idx := &filmSearchMemoryIndex{Items: parallelBuildItems(raw)}
+	idx.buildInverted()
+	t.Logf("Loaded %d items from database", len(idx.Items))
 
-	matchedCeshi := scoreMemoryIndex(items, "ceshi", "", 0, 0)
+	matchedCeshi := scoreMemoryIndex(idx, "ceshi", "", 0, 0)
 	for _, m := range matchedCeshi {
 		if m.mid == 148491 { // 选择之她·他
 			t.Fatalf("search 'ceshi' should NOT match '选择之她·他' (Her Choices, His Decision)")
@@ -188,7 +169,7 @@ func setupTestDBForFuzzySearch(t *testing.T) (*gorm.DB, string) {
 			Name:            "星际穿越",
 			SubTitle:        "Interstellar",
 			Actor:           "马修·麦康纳 / 安妮·海瑟薇",
-			Director:        "克里斯托弗·诺兰",
+			Director:        "克里斯托弗·诺兰 / Christopher Nolan",
 			Hits:            22000,
 			Score:           9.6,
 			Year:            2014,
@@ -367,6 +348,28 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 		if res[0].Mid != 101 && res[0].Mid != 102 {
 			t.Errorf("expected 庆余年 drama, got Mid=%d (%s)", res[0].Mid, res[0].Name)
+		}
+	})
+
+	t.Run("EnglishPhrase_JoyOfLife", func(t *testing.T) {
+		page := &dto.Page{Current: 1, PageSize: 10}
+		res := SearchSnapshotsByKeywordAndSortReadModel(version, "joy of life", "", page)
+		if len(res) == 0 {
+			t.Fatalf("expected results for 'joy of life', got 0")
+		}
+		if res[0].Mid != 101 && res[0].Mid != 102 {
+			t.Errorf("expected 庆余年 for 'joy of life', got Mid=%d (%s)", res[0].Mid, res[0].Name)
+		}
+	})
+
+	t.Run("AsciiPrefix_Nola", func(t *testing.T) {
+		page := &dto.Page{Current: 1, PageSize: 10}
+		res := SearchSnapshotsByKeywordAndSortReadModel(version, "nola", "", page)
+		if len(res) == 0 {
+			t.Fatalf("expected results for 'nola', got 0")
+		}
+		if res[0].Mid != 108 {
+			t.Errorf("expected 星际穿越 for 'nola', got Mid=%d (%s)", res[0].Mid, res[0].Name)
 		}
 	})
 }

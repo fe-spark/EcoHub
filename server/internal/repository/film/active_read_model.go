@@ -16,11 +16,26 @@ import (
 	"server/internal/model/dto"
 	"server/internal/utils"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 )
 
 type FilmReadModel struct {
 	Version string
+}
+
+type filmSearchIndexRow struct {
+	Mid         int64
+	Pid         int64
+	Cid         int64
+	Name        string
+	SubTitle    string
+	Actor       string
+	Director    string
+	Hits        int64
+	Score       float64
+	Year        int64
+	UpdateStamp int64
 }
 
 type filmSearchMemoryItem struct {
@@ -30,15 +45,13 @@ type filmSearchMemoryItem struct {
 	Name              string
 	CleanName         string
 	PinyinFull        string
-	PinyinSyllables   string
+	PinyinSyllables   []string
 	PinyinInitials    string
 	PinyinInitialAlts string
-	SubTitle          string
-	CleanSubTitle     string
-	Actor             string
-	CleanActor        string
-	Director          string
-	CleanDirector     string
+	AliasSegs         []string
+	AliasWords        []string
+	PersonSegs        []string
+	PersonWords       []string
 	Hits              int64
 	Score             float64
 	Year              int64
@@ -55,8 +68,18 @@ type scoredSearchHit struct {
 }
 
 type filmSearchMemoryIndex struct {
-	Version string
-	Items   []filmSearchMemoryItem
+	Version              string
+	Items                []filmSearchMemoryItem
+	nameBigrams          map[string][]int32
+	nameUnigrams         map[rune][]int32
+	personBigrams        map[string][]int32
+	personExact          map[string][]int32
+	aliasBigrams         map[string][]int32
+	aliasExact           map[string][]int32
+	personWords          map[string][]int32
+	aliasWords           map[string][]int32
+	pinyinFullBigrams    map[string][]int32
+	pinyinInitialBigrams map[string][]int32
 }
 
 var activeFilmReadModel atomic.Pointer[FilmReadModel]
@@ -64,6 +87,7 @@ var activeFilmReadModelMu sync.Mutex
 
 var activeFilmSearchIndex atomic.Pointer[filmSearchMemoryIndex]
 var activeFilmSearchIndexMu sync.Mutex
+var searchIndexBuild singleflight.Group
 
 func init() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
@@ -74,32 +98,49 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	if version == "" {
 		return nil
 	}
-	if idx := activeFilmSearchIndex.Load(); idx != nil && idx.Version == version && len(idx.Items) > 0 {
+	if idx := loadedFilmSearchIndex(version); idx != nil {
 		return idx
 	}
-	activeFilmSearchIndexMu.Lock()
-	defer activeFilmSearchIndexMu.Unlock()
-	if idx := activeFilmSearchIndex.Load(); idx != nil && idx.Version == version && len(idx.Items) > 0 {
-		return idx
-	}
+	v, _, _ := searchIndexBuild.Do(version, func() (any, error) {
+		if idx := loadedFilmSearchIndex(version); idx != nil {
+			return idx, nil
+		}
+		built := buildFilmSearchMemoryIndex(version)
+		if built == nil {
+			return (*filmSearchMemoryIndex)(nil), nil
+		}
+		activeFilmSearchIndexMu.Lock()
+		defer activeFilmSearchIndexMu.Unlock()
+		if cur := loadedFilmSearchIndex(version); cur != nil {
+			return cur, nil
+		}
+		if cur := activeFilmSearchIndex.Load(); cur != nil && cur.Version != version && len(cur.Items) > 0 {
+			if m := activeFilmReadModel.Load(); m != nil && m.Version != "" && m.Version != version {
+				return built, nil
+			}
+		}
+		activeFilmSearchIndex.Store(built)
+		return built, nil
+	})
+	idx, _ := v.(*filmSearchMemoryIndex)
+	return idx
+}
 
+func loadedFilmSearchIndex(version string) *filmSearchMemoryIndex {
+	idx := activeFilmSearchIndex.Load()
+	if idx != nil && idx.Version == version && len(idx.Items) > 0 {
+		return idx
+	}
+	return nil
+}
+
+func buildFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	if db.Mdb == nil {
 		return nil
 	}
 
-	var rows []struct {
-		Mid         int64
-		Pid         int64
-		Cid         int64
-		Name        string
-		SubTitle    string
-		Actor       string
-		Director    string
-		Hits        int64
-		Score       float64
-		Year        int64
-		UpdateStamp int64
-	}
+	buildStarted := time.Now()
+	var rows []filmSearchIndexRow
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
 		Select("mid, pid, cid, name, sub_title, actor, director, hits, score, year, update_stamp").
 		Where("snapshot_version = ?", version).
@@ -107,40 +148,17 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 		log.Printf("[ActiveReadModel] 加载内存搜索索引失败: %v", err)
 		return nil
 	}
+	scanCost := time.Since(buildStarted)
+	log.Printf("[ActiveReadModel] 开始构建内存搜索索引 version=%s rows=%d scan=%s", version, len(rows), scanCost)
 
-	items := make([]filmSearchMemoryItem, 0, len(rows))
-	for _, r := range rows {
-		if r.Mid > 0 && r.Name != "" {
-			initials, alts := pinyinInitialIndexFields(r.Name)
-			items = append(items, filmSearchMemoryItem{
-				Mid:               r.Mid,
-				Pid:               r.Pid,
-				Cid:               r.Cid,
-				Name:              r.Name,
-				CleanName:         utils.CleanCompactText(r.Name),
-				PinyinFull:        utils.ToPinyin(r.Name),
-				PinyinSyllables:   strings.Join(utils.ToPinyinSyllables(r.Name), " "),
-				PinyinInitials:    initials,
-				PinyinInitialAlts: alts,
-				SubTitle:          r.SubTitle,
-				CleanSubTitle:     utils.CleanCompactText(r.SubTitle),
-				Actor:             r.Actor,
-				CleanActor:        utils.CleanCompactText(r.Actor),
-				Director:          r.Director,
-				CleanDirector:     utils.CleanCompactText(r.Director),
-				Hits:              r.Hits,
-				Score:             r.Score,
-				Year:              r.Year,
-				UpdateStamp:       r.UpdateStamp,
-			})
-		}
-	}
+	items := parallelBuildItems(rows)
 	newIdx := &filmSearchMemoryIndex{
 		Version: version,
 		Items:   items,
 	}
-	activeFilmSearchIndex.Store(newIdx)
-	log.Printf("[ActiveReadModel] 内存搜索索引已构建 version=%s count=%d", version, len(items))
+	newIdx.buildInverted()
+	log.Printf("[ActiveReadModel] 内存搜索索引已构建 version=%s count=%d scan=%s total=%s",
+		version, len(items), scanCost, time.Since(buildStarted))
 	return newIdx
 }
 
@@ -191,39 +209,6 @@ func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) []model.Fi
 	return GetSnapshotsByMidsOrdered(version, mids)
 }
 
-func pinyinInitialIndexFields(name string) (string, string) {
-	variants := utils.ToPinyinInitialVariants(name)
-	if len(variants) == 0 {
-		return "", ""
-	}
-	if len(variants) == 1 {
-		return variants[0], ""
-	}
-	return variants[0], strings.Join(variants[1:], " ")
-}
-
-func (item filmSearchMemoryItem) asSearchItem() utils.FilmSearchItem {
-	return utils.FilmSearchItem{
-		Mid:               item.Mid,
-		Name:              item.Name,
-		CleanName:         item.CleanName,
-		PinyinFull:        item.PinyinFull,
-		PinyinSyllables:   item.PinyinSyllables,
-		PinyinInitials:    item.PinyinInitials,
-		PinyinInitialAlts: item.PinyinInitialAlts,
-		SubTitle:          item.SubTitle,
-		CleanSubTitle:     item.CleanSubTitle,
-		Actor:             item.Actor,
-		CleanActor:        item.CleanActor,
-		Director:          item.Director,
-		CleanDirector:     item.CleanDirector,
-		Hits:              item.Hits,
-		Score:             item.Score,
-		Year:              item.Year,
-		UpdateStamp:       item.UpdateStamp,
-	}
-}
-
 func compareScoredHits(a, b scoredSearchHit, sortField string) bool {
 	switch sortField {
 	case "hits":
@@ -258,28 +243,55 @@ func compareScoredHits(a, b scoredSearchHit, sortField string) bool {
 	return a.mid > b.mid
 }
 
-func scoreMemoryIndex(items []filmSearchMemoryItem, keyword string, sortField string, pid, cid int64) []scoredSearchHit {
+func scoreOneItem(item *filmSearchMemoryItem, q utils.QueryContext, pid, cid int64) scoredSearchHit {
+	if pid > 0 && item.Pid != pid {
+		return scoredSearchHit{}
+	}
+	if cid > 0 && item.Cid != cid {
+		return scoredSearchHit{}
+	}
+	s := utils.ScoreFilmMatch(item.asSearchItem(), q)
+	if s <= 0 {
+		return scoredSearchHit{}
+	}
+	return scoredSearchHit{
+		mid:         item.Mid,
+		matchScore:  s,
+		hits:        item.Hits,
+		score:       item.Score,
+		year:        item.Year,
+		updateStamp: item.UpdateStamp,
+	}
+}
+
+func scoreMemoryIndex(idx *filmSearchMemoryIndex, keyword string, sortField string, pid, cid int64) []scoredSearchHit {
+	if idx == nil || len(idx.Items) == 0 {
+		return nil
+	}
 	q := utils.BuildQueryContext(keyword)
-	matched := make([]scoredSearchHit, 0)
-	for _, item := range items {
-		if pid > 0 && item.Pid != pid {
-			continue
-		}
-		if cid > 0 && item.Cid != cid {
-			continue
-		}
-		s := utils.ScoreFilmMatch(item.asSearchItem(), q)
-		if s > 0 {
-			matched = append(matched, scoredSearchHit{
-				mid:         item.Mid,
-				matchScore:  s,
-				hits:        item.Hits,
-				score:       item.Score,
-				year:        item.Year,
-				updateStamp: item.UpdateStamp,
-			})
+	cands := idx.collectCandidates(q)
+
+	matched := make([]scoredSearchHit, 0, 64)
+	appendHit := func(item *filmSearchMemoryItem) {
+		hit := scoreOneItem(item, q, pid, cid)
+		if hit.mid != 0 {
+			matched = append(matched, hit)
 		}
 	}
+
+	if cands == nil {
+		for i := range idx.Items {
+			appendHit(&idx.Items[i])
+		}
+	} else {
+		for _, id := range cands {
+			if int(id) < 0 || int(id) >= len(idx.Items) {
+				continue
+			}
+			appendHit(&idx.Items[id])
+		}
+	}
+
 	sort.SliceStable(matched, func(i, j int) bool {
 		return compareScoredHits(matched[i], matched[j], sortField)
 	})
@@ -491,11 +503,11 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 	}
 
-	// 2. 若带有搜索关键词且无时间限制，优先走内存搜索索引（1~2ms 极速响应）
+	// 2. 若带有搜索关键词且无时间限制，优先走内存倒排搜索索引
 	if keyword != "" && recentHours == 0 {
 		idx := getOrLoadFilmSearchMemoryIndex(version)
 		if idx != nil && len(idx.Items) > 0 {
-			matched := scoreMemoryIndex(idx.Items, keyword, st.Sort, st.Pid, st.Cid)
+			matched := scoreMemoryIndex(idx, keyword, st.Sort, st.Pid, st.Cid)
 			var snapshots []model.FilmListSnapshot
 			if pageMids := pageMidsFromHits(matched, page); len(pageMids) > 0 {
 				snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
@@ -634,10 +646,10 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 		}
 	}
 
-	// 2. 优先使用全内存片名索引智能模糊搜索（1~2ms 级极速响应）
+	// 2. 优先使用内存倒排索引模糊搜索
 	idx := getOrLoadFilmSearchMemoryIndex(version)
 	if idx != nil && len(idx.Items) > 0 {
-		matched := scoreMemoryIndex(idx.Items, keyword, sortField, 0, 0)
+		matched := scoreMemoryIndex(idx, keyword, sortField, 0, 0)
 		var snapshots []model.FilmListSnapshot
 		if pageMids := pageMidsFromHits(matched, page); len(pageMids) > 0 {
 			snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
