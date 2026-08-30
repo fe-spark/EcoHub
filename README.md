@@ -28,8 +28,8 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 
 客户端是独立 App 仓库（本项目以 Git Submodule 形式接入在 `app-for-ohos/` 与 `app-for-android/`）：
 
-- **EcoHub for OHOS** (鸿蒙客户端): [`app-for-ohos/`](./app-for-ohos) · [GitHub 仓库](https://github.com/fe-spark/EcoHub-for-OHOS)
-- **EcoHub for Android** (安卓客户端): [`app-for-android/`](./app-for-android) · [GitHub 仓库](https://github.com/fe-spark/EcoHub-for-Android)
+- **EcoHub for OHOS** (鸿蒙客户端): [fe-spark/EcoHub-for-OHOS](https://github.com/fe-spark/EcoHub-for-OHOS)
+- **EcoHub for Android** (安卓客户端): [fe-spark/EcoHub-for-Android](https://github.com/fe-spark/EcoHub-for-Android)
 
 
 ## 在线演示
@@ -78,7 +78,7 @@ docker compose up -d
 | --- | --- |
 | `http://<主机>:3000` | 前台 |
 | `http://<主机>:3000/manage` | 管理后台 |
-| `http://<主机>:3000/api` | 客户端（[EcoHub for OHOS](./app-for-ohos) / [EcoHub for Android](./app-for-android)）服务接入地址 |
+| `http://<主机>:3000/api` | 客户端（[EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) / [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)）服务接入地址 |
 | `http://<主机>:3000/api/provide/config` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 | `http://<主机>:18080/api/*` | API 直连（请勿对公网开放） |
