@@ -2,6 +2,21 @@ package handler
 
 import "testing"
 
+func TestClampSearchFilmPageSize(t *testing.T) {
+	if got := clampSearchFilmPageSize(20, false); got != 12 {
+		t.Fatalf("unspecified should default to 12, got %d", got)
+	}
+	if got := clampSearchFilmPageSize(0, true); got != 12 {
+		t.Fatalf("invalid specified size should default to 12, got %d", got)
+	}
+	if got := clampSearchFilmPageSize(24, true); got != 24 {
+		t.Fatalf("explicit size should be kept, got %d", got)
+	}
+	if got := clampSearchFilmPageSize(500, true); got != 50 {
+		t.Fatalf("oversize should cap at 50, got %d", got)
+	}
+}
+
 func TestHasSearchOptions(t *testing.T) {
 	if hasSearchOptions(nil) {
 		t.Fatal("nil should be false")

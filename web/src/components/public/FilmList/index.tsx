@@ -4,6 +4,7 @@ import React from "react";
 import { Button, Empty, Row, Col } from "antd";
 import { PlaySquareOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import AppLoading from "@/components/public/Loading";
+import HighlightMatchedText from "@/components/public/HighlightMatchedText";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
@@ -51,6 +52,7 @@ interface FilmListProps {
   col?: number;
   className?: string;
   loading?: boolean;
+  highlightQuery?: string;
   onOpenPlayPage?: (id: string, href: string) => void;
 }
 // Internal Component for individual film card
@@ -58,11 +60,13 @@ function FilmCard({
   item,
   colProps,
   colClassName,
+  highlightQuery,
   handleOpenPlayPage,
 }: {
   item: FilmItem;
   colProps: any;
   colClassName: string;
+  highlightQuery?: string;
   handleOpenPlayPage: (id: string) => void;
 }) {
   const [imgLoaded, setImgLoaded] = React.useState(false);
@@ -132,7 +136,9 @@ function FilmCard({
           {/* Hover Overlay - Premium Design */}
           <div className={styles.overlay}>
             <div className={styles.overlayContent}>
-              <h3 className={styles.overlayTitle}>{item.name}</h3>
+              <h3 className={styles.overlayTitle}>
+                <HighlightMatchedText text={item.name} query={highlightQuery} />
+              </h3>
               <div className={styles.overlayMeta}>
                 {metaTags.map((tag, index) => (
                   <React.Fragment key={`${tag}-${index}`}>
@@ -157,7 +163,9 @@ function FilmCard({
         </div>
 
         <div className={styles.infoLine}>
-          <span className={styles.name}>{item.name?.split("[")[0]}</span>
+          <span className={styles.name}>
+            <HighlightMatchedText text={item.name?.split("[")[0]} query={highlightQuery} />
+          </span>
           <span className={styles.subText}>{item.remarks}</span>
         </div>
       </div>
@@ -170,6 +178,7 @@ export default function FilmList({
   col,
   className,
   loading = false,
+  highlightQuery,
   onOpenPlayPage,
 }: FilmListProps) {
   const { navigate } = useContentNavigate();
@@ -241,6 +250,7 @@ export default function FilmList({
             item={item}
             colProps={colProps}
             colClassName={colClassName}
+            highlightQuery={highlightQuery}
             handleOpenPlayPage={handleOpenPlayPage}
           />
         ))}
