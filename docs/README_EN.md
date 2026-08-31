@@ -44,21 +44,16 @@ Read-only demo account: `guest` / `guest`. This account cannot save settings. Fo
 
 ### Server
 
-- [CloudCone](https://app.cloudcone.com/?ref=14393): Affordable VPS with unthrottled disk I/O.
+| Provider | Description | Link |
+| --- | --- | --- |
+| CloudCone | Affordable VPS with unthrottled disk I/O | [Visit](https://app.cloudcone.com/?ref=14393) |
 
 ### Network Service
 
-- [LiangXinYun](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic):
-  - **¥2 / month for 100G**, ¥6 for 1000G (1T)
-  - Direct AWS and Oracle nodes; VLESS Reality and Hysteria2
-  - Netflix, Disney+, TikTok, and ChatGPT unblocked; no traffic audit; 1× multiplier
-  - Coverage includes Xinjiang, Henan, and Fujian; 4K playback during peak hours
-  - New registrations receive trial traffic
-- [PeiQian Airport](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw):
-  - **As low as ¥1.5 / month**, ultra-low price with high bandwidth quota
-  - Direct connection supporting VLESS, Hysteria 2, and Shadowsocks
-  - Nodes across Hong Kong, Japan, Taiwan, Singapore, US, etc.
-  - Low-multiplier download nodes, ideal for high traffic and backup use
+| Provider | Features / Price | Link |
+| --- | --- | --- |
+| LiangXinYun | ¥2/mo for 100G, ¥6 for 1T; direct AWS/Oracle (VLESS/Hysteria2); unblock Netflix/Disney+/ChatGPT; 4K smooth | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| PeiQian Airport | As low as ¥1.5/mo; ultra-low price with huge traffic; direct multi-protocol (VLESS/Hysteria 2/SS); low-multiplier nodes | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
 
 ## Quick start
 
