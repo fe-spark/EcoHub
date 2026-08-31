@@ -66,6 +66,7 @@ func (i *IndexService) IndexPage() map[string]any {
 			res := make(map[string]any)
 			if json.Unmarshal([]byte(data), &res) == nil && res != nil {
 				res["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
+				overlayDynamicCategoryMovies(version, res)
 				return res
 			}
 		}
@@ -122,11 +123,13 @@ func (i *IndexService) IndexPage() map[string]any {
 	})
 
 	if err != nil || val == nil {
-		return map[string]any{
+		out := map[string]any{
 			"category": repository.GetActiveCategoryTree(),
 			"content":  []map[string]any{},
 			"banners":  repository.GetBanners(),
 		}
+		overlayDynamicCategoryMovies(version, out)
+		return out
 	}
 
 	rawInfo, ok := val.(map[string]any)
@@ -138,7 +141,87 @@ func (i *IndexService) IndexPage() map[string]any {
 		outInfo[k] = v
 	}
 	outInfo["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
+	overlayDynamicCategoryMovies(version, outInfo)
 	return outInfo
+}
+
+func extractCategoryID(nav any) (id int64, isPid bool) {
+	if nav == nil {
+		return 0, false
+	}
+	switch item := nav.(type) {
+	case model.CategoryTree:
+		return item.Id, len(item.Children) > 0
+	case *model.CategoryTree:
+		if item != nil {
+			return item.Id, len(item.Children) > 0
+		}
+	case map[string]any:
+		if v, ok := item["id"]; ok {
+			switch n := v.(type) {
+			case float64:
+				id = int64(n)
+			case int64:
+				id = n
+			case int:
+				id = int64(n)
+			}
+		}
+		if children, ok := item["children"]; ok && children != nil {
+			switch cList := children.(type) {
+			case []any:
+				isPid = len(cList) > 0
+			case []*model.CategoryTree:
+				isPid = len(cList) > 0
+			}
+		}
+	}
+	return id, isPid
+}
+
+func processDynamicRecommendSection(secMap map[string]any, version string) map[string]any {
+	itemCopy := make(map[string]any, len(secMap))
+	for k, v := range secMap {
+		itemCopy[k] = v
+	}
+	catID, isPid := extractCategoryID(itemCopy["nav"])
+	if catID > 0 {
+		field := "cid"
+		if isPid {
+			field = "pid"
+		}
+		dynamicMovies := filmrepo.GetSnapshotDynamicHotMovieListByCategory(version, field, catID, 14, 50)
+		if len(dynamicMovies) > 0 {
+			itemCopy["movies"] = dynamicMovies
+		}
+	}
+	return itemCopy
+}
+
+func overlayDynamicCategoryMovies(version string, outInfo map[string]any) {
+	rawContent, ok := outInfo["content"]
+	if !ok || rawContent == nil {
+		return
+	}
+
+	switch list := rawContent.(type) {
+	case []map[string]any:
+		newList := make([]map[string]any, len(list))
+		for i, section := range list {
+			newList[i] = processDynamicRecommendSection(section, version)
+		}
+		outInfo["content"] = newList
+	case []any:
+		newList := make([]any, len(list))
+		for i, rawSec := range list {
+			if secMap, ok := rawSec.(map[string]any); ok {
+				newList[i] = processDynamicRecommendSection(secMap, version)
+			} else {
+				newList[i] = rawSec
+			}
+		}
+		outInfo["content"] = newList
+	}
 }
 
 func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {

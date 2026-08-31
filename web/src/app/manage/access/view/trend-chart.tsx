@@ -39,14 +39,12 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
   const { ref, width } = useContainerWidth(600);
   const [hoverIndex, setHoverIndex] = useState<number | null>(null);
 
-  const pts = series || [];
-
   const totalSeries = useMemo(() => {
-    return pts.map((p) => ({
+    return (series || []).map((p) => ({
       t: p.t,
       count: (p.pv || 0) + (p.providePv || 0),
     }));
-  }, [pts]);
+  }, [series]);
 
   const maxVal = useMemo(() => {
     if (totalSeries.length === 0) return 10;

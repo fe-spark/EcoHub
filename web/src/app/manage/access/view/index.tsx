@@ -878,6 +878,7 @@ export default function AccessPageView() {
                   <div className={styles.hotPlayItem} key={`${item.key}-${idx}`}>
                     <div className={`${styles.rankBadge} ${rankClass}`}>{idx + 1}</div>
                     {item.poster ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={item.poster}
                         alt={displayName}
