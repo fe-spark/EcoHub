@@ -8,6 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmrepo "server/internal/repository/film"
 )
 
 type filmMetaCacheItem struct {
@@ -23,7 +24,7 @@ var (
 	filmMetaCache   = map[int64]filmMetaCacheItem{}
 )
 
-const filmMetaCacheTTL = 5 * time.Minute
+const filmMetaCacheTTL = 1 * time.Minute
 
 type filmSimpleRow struct {
 	Mid     int64  `gorm:"column:mid"`
@@ -33,7 +34,28 @@ type filmSimpleRow struct {
 	Year    int64  `gorm:"column:year"`
 }
 
-// resolveFilmMetas 批量反查影片片名、分类与海报（带内存短缓存）
+func parseYearInt(s string) int64 {
+	if len(s) >= 4 {
+		s = s[:4]
+	}
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
+}
+
+// InvalidateFilmMetaCache 淘汰指定影片或全部热播元数据缓存
+func InvalidateFilmMetaCache(mids ...int64) {
+	filmMetaCacheMu.Lock()
+	defer filmMetaCacheMu.Unlock()
+	if len(mids) == 0 {
+		filmMetaCache = map[int64]filmMetaCacheItem{}
+		return
+	}
+	for _, id := range mids {
+		delete(filmMetaCache, id)
+	}
+}
+
+// resolveFilmMetas 批量反查影片片名、分类与海报（优先从活跃只读快照与详情反查最新海报，带内存短缓存）
 func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	if len(filmIDs) == 0 {
 		return map[int64]filmMetaCacheItem{}
@@ -57,33 +79,84 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 		return result
 	}
 
-	var rows []filmSimpleRow
-	err := db.Mdb.Table(model.TableFilmIndex).
-		Select("mid, name, c_name, picture, year").
-		Where("mid IN ?", missing).
-		Find(&rows).Error
+	foundMap := make(map[int64]filmMetaCacheItem, len(missing))
+	unresolved := make([]int64, 0, len(missing))
 
-	if err != nil {
-		return result
+	// 1. 优先从当前活跃快照表 FilmListSnapshot 中查询（包含自定义封面和最新海报源封面）
+	activeVersion := filmrepo.GetActiveSnapshotVersion()
+	if activeVersion != "" {
+		var snapshots []model.FilmListSnapshot
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+			Select("mid, name, c_name, picture, year").
+			Where("snapshot_version = ? AND mid IN ?", activeVersion, missing).
+			Find(&snapshots).Error; err == nil {
+			for _, s := range snapshots {
+				foundMap[s.Mid] = filmMetaCacheItem{
+					Title:    s.Name,
+					Category: s.CName,
+					Poster:   s.Picture,
+					Year:     s.Year,
+					CachedAt: now,
+				}
+			}
+		}
 	}
 
-	foundMap := make(map[int64]filmSimpleRow, len(rows))
-	for _, r := range rows {
-		foundMap[r.Mid] = r
+	for _, id := range missing {
+		if _, ok := foundMap[id]; !ok {
+			unresolved = append(unresolved, id)
+		}
+	}
+
+	// 2. 若快照中未找到，从 movie_details 中查（用户自定义主表）
+	if len(unresolved) > 0 {
+		var details []model.MovieDetail
+		if err := db.Mdb.Model(&model.MovieDetail{}).
+			Where("id IN ?", unresolved).
+			Find(&details).Error; err == nil {
+			for _, d := range details {
+				foundMap[d.Id] = filmMetaCacheItem{
+					Title:    d.Name,
+					Category: d.CName,
+					Poster:   d.DisplayPicture(),
+					Year:     parseYearInt(d.Year),
+					CachedAt: now,
+				}
+			}
+		}
+	}
+
+	stillMissing := make([]int64, 0, len(unresolved))
+	for _, id := range unresolved {
+		if _, ok := foundMap[id]; !ok {
+			stillMissing = append(stillMissing, id)
+		}
+	}
+
+	// 3. 最终兜底从原始采集表 film_index 中查
+	if len(stillMissing) > 0 {
+		var rows []filmSimpleRow
+		if err := db.Mdb.Table(model.TableFilmIndex).
+			Select("mid, name, c_name, picture, year").
+			Where("mid IN ?", stillMissing).
+			Find(&rows).Error; err == nil {
+			for _, r := range rows {
+				foundMap[r.Mid] = filmMetaCacheItem{
+					Title:    r.Name,
+					Category: r.CName,
+					Poster:   r.Picture,
+					Year:     r.Year,
+					CachedAt: now,
+				}
+			}
+		}
 	}
 
 	filmMetaCacheMu.Lock()
 	defer filmMetaCacheMu.Unlock()
 
 	for _, id := range missing {
-		if row, ok := foundMap[id]; ok {
-			item := filmMetaCacheItem{
-				Title:    row.Name,
-				Category: row.CName,
-				Poster:   row.Picture,
-				Year:     row.Year,
-				CachedAt: now,
-			}
+		if item, ok := foundMap[id]; ok {
 			filmMetaCache[id] = item
 			result[id] = item
 		} else {
