@@ -34,7 +34,9 @@ async function getSiteConfig(): Promise<SiteConfig | null> {
 export async function generateMetadata(): Promise<Metadata> {
   const siteConfig = await getSiteConfig();
 
-  const generated: Metadata = {};
+  const generated: Metadata = {
+    referrer: "no-referrer",
+  };
   if (siteConfig?.siteName) generated.title = siteConfig.siteName;
   if (siteConfig?.describe) generated.description = siteConfig.describe;
   if (siteConfig?.keyword) generated.keywords = siteConfig.keyword;
