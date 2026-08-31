@@ -94,6 +94,32 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		t = int(classList[0].ID)
 	}
 
+	baseURL, _ := resolveProvideBaseURL(c)
+
+	normalizeVodListPic := func(list []model.FilmList) []model.FilmList {
+		if baseURL == "" {
+			return list
+		}
+		for i := range list {
+			if strings.HasPrefix(list[i].VodPic, "/") {
+				list[i].VodPic = baseURL + list[i].VodPic
+			}
+		}
+		return list
+	}
+
+	normalizeDetailListPic := func(list []model.FilmDetail) []model.FilmDetail {
+		if baseURL == "" {
+			return list
+		}
+		for i := range list {
+			if strings.HasPrefix(list[i].VodPic, "/") {
+				list[i].VodPic = baseURL + list[i].VodPic
+			}
+		}
+		return list
+	}
+
 	switch ac {
 	case "list":
 		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
@@ -112,7 +138,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			"limit":       limit,
 			"total":       total,
 			"recordcount": total,
-			"list":        vodList,
+			"list":        normalizeVodListPic(vodList),
 			"class":       classList,
 			"filters":     filters,
 		})
@@ -131,7 +157,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 				"pagecount": 1,
 				"limit":     "20",
 				"total":     len(vodList),
-				"list":      vodList,
+				"list":      normalizeDetailListPic(vodList),
 				"class":     classList,
 				"filters":   filters,
 			})
@@ -157,7 +183,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 				"limit":       limit,
 				"total":       total,
 				"recordcount": total,
-				"list":        detailList,
+				"list":        normalizeDetailListPic(detailList),
 				"class":       classList,
 				"filters":     filters,
 			})
@@ -180,7 +206,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			"limit":       limit,
 			"total":       total,
 			"recordcount": total,
-			"list":        vodList,
+			"list":        normalizeVodListPic(vodList),
 			"class":       classList,
 			"filters":     filters,
 		})

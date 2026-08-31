@@ -329,9 +329,13 @@ export default function BannersPageView() {
     try {
       const resp = await ApiPost("/manage/file/upload", formData);
       if (resp.code === 0) {
-        form.setFieldValue(fieldName, resp.data);
+        const fullUrl =
+          typeof window !== "undefined" && String(resp.data).startsWith("/")
+            ? `${window.location.origin}${resp.data}`
+            : resp.data;
+        form.setFieldValue(fieldName, fullUrl);
         message.success(resp.msg);
-        onSuccess?.(resp.data);
+        onSuccess?.(fullUrl);
       } else {
         message.error(resp.msg);
         onError?.(new Error(resp.msg));

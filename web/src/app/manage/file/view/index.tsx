@@ -188,9 +188,13 @@ export default function FileUploadPageView() {
   };
 
   const copyLink = async (link: string) => {
+    const fullLink =
+      typeof window !== "undefined" && link.startsWith("/")
+        ? `${window.location.origin}${link}`
+        : link;
     const fallbackCopy = () => {
       const ta = document.createElement("textarea");
-      ta.value = link;
+      ta.value = fullLink;
       ta.style.position = "fixed";
       ta.style.opacity = "0";
       document.body.appendChild(ta);
@@ -201,7 +205,7 @@ export default function FileUploadPageView() {
     };
     try {
       if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(link);
+        await navigator.clipboard.writeText(fullLink);
       } else if (!fallbackCopy()) {
         throw new Error("copy failed");
       }
