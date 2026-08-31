@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Form,
@@ -16,6 +16,10 @@ import {
   Col,
   Divider,
   Flex,
+  Tag,
+  Radio,
+  Image as AntImage,
+  Typography,
 } from "antd";
 import {
   UploadOutlined,
@@ -33,6 +37,7 @@ import {
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ImagePicker from "@/app/manage/components/image-picker";
 import {
@@ -42,6 +47,7 @@ import {
 import styles from "./index.module.less";
 
 const { TextArea } = Input;
+const { Text } = Typography;
 
 function FilmAddForm() {
   const [form] = Form.useForm();
@@ -54,6 +60,11 @@ function FilmAddForm() {
   const id = searchParams.get("id");
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+
+  const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
+  const watchedPicture = Form.useWatch("picture", form);
+
+  const loadedDetailRef = useRef<any>(null);
 
   useEffect(() => {
     ApiGet("/manage/film/class/tree").then((resp: any) => {
@@ -74,6 +85,7 @@ function FilmAddForm() {
         .then((resp: any) => {
           if (resp.code === 0 && resp.data?.detail) {
             const filmData = resp.data.detail;
+            loadedDetailRef.current = filmData;
             const filmDescriptor = filmData.descriptor || {};
 
             let playLinkStr = "";
@@ -84,12 +96,15 @@ function FilmAddForm() {
                 .join("#");
             }
 
+            const isCustom = filmData.isCustomPicture === true;
+            const customPic = filmData.customPicture || (isCustom ? filmData.picture : "");
             form.setFieldsValue({
               id: filmData.id,
               cid: filmData.cid,
               pid: filmData.pid,
               name: filmData.name,
-              picture: filmData.picture,
+              followPosterSource: !isCustom,
+              picture: customPic,
               subTitle: filmDescriptor.subTitle,
               initial: filmDescriptor.initial,
               classTag: filmDescriptor.classTag,
@@ -131,11 +146,17 @@ function FilmAddForm() {
   const onFinish = async (values: any) => {
     setLoading(true);
     try {
+      const isCustom = !values.followPosterSource;
+      const customPic = isCustom ? (values.picture || "").trim() : "";
+      const sourcePic = loadedDetailRef.current?.picture || "";
       const payload = {
         ...values,
         id: id ? Number(id) : 0,
         dbId: Number(values.dbId) || 0,
         hits: Number(values.hits) || 0,
+        isCustomPicture: isCustom,
+        customPicture: customPic,
+        picture: isCustom ? (sourcePic || customPic) : "",
       };
 
       const resp = await ApiPost("/manage/film/add", payload);
@@ -143,6 +164,7 @@ function FilmAddForm() {
         message.success(id ? "影视更新成功" : "影片添加成功");
         if (!id) {
           form.resetFields();
+          form.setFieldsValue({ followPosterSource: false });
         }
       } else {
         message.error(resp.msg);
@@ -205,6 +227,7 @@ function FilmAddForm() {
         initialValues={{
           dbId: 0,
           hits: 0,
+          followPosterSource: Boolean(id),
         }}
         requiredMark="optional"
       >
@@ -265,41 +288,94 @@ function FilmAddForm() {
                   <Input />
                 </Form.Item>
 
-                <Col xs={24} lg={12} xl={16}>
-                  <Form.Item label="影片海报" name="picture">
-                    <Input
-                      className={styles.posterInput}
-                      placeholder="输入图片URL或上传"
-                      addonAfter={
-                        <Space size={4}>
-                          <Upload
-                            customRequest={customUpload}
-                            showUploadList={false}
-                            accept={IMAGE_UPLOAD_ACCEPT}
-                            disabled={!canWrite}
-                          >
-                            <Button
-                              icon={<UploadOutlined />}
-                              type="text"
-                              size="small"
-                            >
-                              上传封面
-                            </Button>
-                          </Upload>
-                          <Button
-                            icon={<PictureOutlined />}
-                            type="text"
-                            size="small"
-                            disabled={!canWrite}
-                            onClick={() => setPickerOpen(true)}
-                          >
-                            选图
-                          </Button>
-                        </Space>
-                      }
+                <Col xs={24} lg={10} xl={8}>
+                  <Form.Item
+                    label="是否跟随海报源"
+                    name="followPosterSource"
+                    tooltip="开启自动同步海报源；关闭可自定义并锁定封面。"
+                    initialValue={Boolean(id)}
+                  >
+                    <Radio.Group
+                      buttonStyle="solid"
+                      options={[
+                        { label: "是（跟随海报源）", value: true },
+                        { label: "否（自定义封面）", value: false },
+                      ]}
                     />
                   </Form.Item>
                 </Col>
+
+                {watchedFollowPosterSource ? (
+                  <Col xs={24} lg={14} xl={16}>
+                    <Form.Item label="影片封面">
+                      <div
+                        style={{
+                          padding: "8px 12px",
+                          background: "rgba(255, 255, 255, 0.04)",
+                          borderRadius: 6,
+                          border: "1px dashed var(--ant-color-border)",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          minHeight: 32,
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
+                          已开启跟随海报源，将自动匹配最新封面与幻灯图。
+                        </Text>
+                        {(watchedPicture || loadedDetailRef.current?.picture) && (
+                          <AntImage
+                            src={watchedPicture || loadedDetailRef.current?.picture}
+                            height={32}
+                            style={{ borderRadius: 4, objectFit: "cover" }}
+                            fallback={FALLBACK_IMG}
+                          />
+                        )}
+                      </div>
+                    </Form.Item>
+                  </Col>
+                ) : (
+                  <Col xs={24} lg={14} xl={16}>
+                    <Form.Item
+                      label="封面图片地址"
+                      name="picture"
+                      rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
+                      tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
+                    >
+                      <Input
+                        className={styles.posterInput}
+                        placeholder="输入图片URL或上传"
+                        addonAfter={
+                          <Space size={4}>
+                            <Upload
+                              customRequest={customUpload}
+                              showUploadList={false}
+                              accept={IMAGE_UPLOAD_ACCEPT}
+                              disabled={!canWrite}
+                            >
+                              <Button
+                                icon={<UploadOutlined />}
+                                type="text"
+                                size="small"
+                              >
+                                上传封面
+                              </Button>
+                            </Upload>
+                            <Button
+                              icon={<PictureOutlined />}
+                              type="text"
+                              size="small"
+                              disabled={!canWrite}
+                              onClick={() => setPickerOpen(true)}
+                            >
+                              选图
+                            </Button>
+                          </Space>
+                        }
+                      />
+                    </Form.Item>
+                  </Col>
+                )}
               </Row>
             </Card>
 

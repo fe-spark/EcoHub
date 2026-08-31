@@ -51,8 +51,11 @@ func ApplyFilmIndex(detail *model.MovieDetail, info model.FilmIndex) {
 	detail.Language = info.Language
 	detail.State = info.State
 	detail.Remarks = info.Remarks
-	detail.Picture = info.Picture
-	detail.PictureSlide = info.PictureSlide
+	detail.Picture = info.DisplayPicture()
+	detail.PictureSlide = info.DisplayPictureSlide()
+	detail.CustomPicture = info.CustomPicture
+	detail.CustomPictureSlide = info.CustomPictureSlide
+	detail.IsCustomPicture = info.IsCustomPicture
 	detail.Actor = info.Actor
 	detail.Director = info.Director
 	detail.Blurb = info.Blurb
@@ -76,8 +79,11 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 	detail.Language = info.Language
 	detail.State = info.State
 	detail.Remarks = info.Remarks
-	detail.Picture = info.Picture
-	detail.PictureSlide = info.PictureSlide
+	detail.Picture = info.DisplayPicture()
+	detail.PictureSlide = info.DisplayPictureSlide()
+	detail.CustomPicture = info.CustomPicture
+	detail.CustomPictureSlide = info.CustomPictureSlide
+	detail.IsCustomPicture = info.IsCustomPicture
 	detail.Actor = info.Actor
 	detail.Director = info.Director
 	detail.Blurb = info.Blurb
@@ -97,8 +103,8 @@ func BuildMovieBasicInfos(infos ...model.FilmIndex) []model.MovieBasicInfo {
 			SubTitle:     s.SubTitle,
 			CName:        s.CName,
 			State:        s.State,
-			Picture:      s.Picture,
-			PictureSlide: s.PictureSlide,
+			Picture:      s.DisplayPicture(),
+			PictureSlide: s.DisplayPictureSlide(),
 			Actor:        s.Actor,
 			Director:     s.Director,
 			Blurb:        s.Blurb,
@@ -179,8 +185,8 @@ func BuildMovieBasicInfosFromSnapshots(infos ...model.FilmListSnapshot) []model.
 			SubTitle:     s.SubTitle,
 			CName:        s.CName,
 			State:        s.State,
-			Picture:      s.Picture,
-			PictureSlide: s.PictureSlide,
+			Picture:      s.DisplayPicture(),
+			PictureSlide: s.DisplayPictureSlide(),
 			Actor:        s.Actor,
 			Director:     s.Director,
 			Blurb:        s.Blurb,

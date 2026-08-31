@@ -228,7 +228,7 @@ func buildFilmIndexesFromDetails(sourceID string, details []model.MovieDetail) (
 	return infoList, infoByKey, nil
 }
 
-func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail) (map[string]struct{}, map[int64]model.MovieDetail, map[int64][]int, error) {
+func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, detailsByKey map[string]model.MovieDetail, isManual bool) (map[string]struct{}, map[int64]model.MovieDetail, map[int64][]int, error) {
 	unchangedKeys := make(map[string]struct{})
 	oldDetailsByMid := make(map[int64]model.MovieDetail)
 	// 按 mid 命中旧行：兼容 content_key 仍为 name_* 的库存（无需 bulk 迁移）。
@@ -263,7 +263,7 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 	if len(infos) > 0 {
 		sourceID = infos[0].SourceId
 	}
-	if err := ApplyExternalPosterSourceToMasterWritesTx(tx, sourceID, infos, detailsByKey, existingByMid); err != nil {
+	if err := ApplyExternalPosterSourceToMasterWritesTx(tx, sourceID, infos, detailsByKey, existingByMid, isManual); err != nil {
 		log.Printf("ApplyExternalPosterSourceToMasterWritesTx Error: %v", err)
 	}
 	for index := range infos {
@@ -339,31 +339,35 @@ func applyPersistedMasterCategory(newInfo *model.FilmIndex, existing model.FilmI
 // 不应视为内容更新；片名实质变化（改名）仍会触发。
 func masterBusinessSignature(detail model.MovieDetail) string {
 	payload := struct {
-		Name     string                 `json:"name"`
-		SubTitle string                 `json:"subTitle"`
-		Picture  string                 `json:"picture"`
-		PlayFrom []string               `json:"playFrom"`
-		PlayList [][]model.MovieUrlInfo `json:"playList"`
-		Remarks  string                 `json:"remarks"`
-		State    string                 `json:"state"`
-		Actor    string                 `json:"actor"`
-		Director string                 `json:"director"`
-		Year     string                 `json:"year"`
-		Area     string                 `json:"area"`
-		ClassTag string                 `json:"classTag"`
+		Name            string                 `json:"name"`
+		SubTitle        string                 `json:"subTitle"`
+		Picture         string                 `json:"picture"`
+		CustomPicture   string                 `json:"customPicture"`
+		IsCustomPicture bool                   `json:"isCustomPicture"`
+		PlayFrom        []string               `json:"playFrom"`
+		PlayList        [][]model.MovieUrlInfo `json:"playList"`
+		Remarks         string                 `json:"remarks"`
+		State           string                 `json:"state"`
+		Actor           string                 `json:"actor"`
+		Director        string                 `json:"director"`
+		Year            string                 `json:"year"`
+		Area            string                 `json:"area"`
+		ClassTag        string                 `json:"classTag"`
 	}{
-		Name:     normalizeNameForCompare(detail.Name),
-		SubTitle: strings.TrimSpace(detail.SubTitle),
-		Picture:  stripURLQuery(detail.Picture),
-		PlayFrom: normalizeStringSlice(detail.PlayFrom),
-		PlayList: normalizePlayList(detail.PlayList),
-		Remarks:  strings.TrimSpace(detail.Remarks),
-		State:    strings.TrimSpace(detail.State),
-		Actor:    strings.TrimSpace(detail.Actor),
-		Director: strings.TrimSpace(detail.Director),
-		Year:     strings.TrimSpace(detail.Year),
-		Area:     strings.TrimSpace(detail.Area),
-		ClassTag: strings.TrimSpace(detail.ClassTag),
+		Name:            normalizeNameForCompare(detail.Name),
+		SubTitle:        strings.TrimSpace(detail.SubTitle),
+		Picture:         stripURLQuery(detail.Picture),
+		CustomPicture:   stripURLQuery(detail.CustomPicture),
+		IsCustomPicture: detail.IsCustomPicture,
+		PlayFrom:        normalizeStringSlice(detail.PlayFrom),
+		PlayList:        normalizePlayList(detail.PlayList),
+		Remarks:         strings.TrimSpace(detail.Remarks),
+		State:           strings.TrimSpace(detail.State),
+		Actor:           strings.TrimSpace(detail.Actor),
+		Director:        strings.TrimSpace(detail.Director),
+		Year:            strings.TrimSpace(detail.Year),
+		Area:            strings.TrimSpace(detail.Area),
+		ClassTag:        strings.TrimSpace(detail.ClassTag),
 	}
 	data, _ := json.Marshal(payload)
 	return string(data)
@@ -459,6 +463,9 @@ func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByK
 		if strings.TrimSpace(info.PictureSlide) != "" {
 			detail.PictureSlide = info.PictureSlide
 		}
+		detail.CustomPicture = info.CustomPicture
+		detail.CustomPictureSlide = info.CustomPictureSlide
+		detail.IsCustomPicture = info.IsCustomPicture
 		data, _ := json.Marshal(detail)
 		detailInfos = append(detailInfos, model.MovieDetailInfo{
 			Mid:             globalMid,
@@ -585,7 +592,7 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 	var oldDetailsByMid map[int64]model.MovieDetail
 	var preWriteCounts map[int64][]int
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		unchangedKeys, oldDetails, counts, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailsByKey)
+		unchangedKeys, oldDetails, counts, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailsByKey, false)
 		if err != nil {
 			return err
 		}
@@ -827,6 +834,57 @@ func filmIndexContentKeys(infos []model.FilmIndex) []string {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
+	if detail.IsCustomPicture {
+		// 管理员设置了自定义封面：存入 CustomPicture 独立字段，确保绝不破坏 Picture（源站/海报源原图）
+		if strings.TrimSpace(detail.CustomPicture) == "" && strings.TrimSpace(detail.Picture) != "" {
+			detail.CustomPicture = strings.TrimSpace(detail.Picture)
+		}
+		// 如果 Picture 为空或被误传为自定义图，保留并恢复已有库存中的原图；新片则以自定义图打底
+		if strings.TrimSpace(detail.Picture) == "" || detail.Picture == detail.CustomPicture {
+			var existing model.FilmIndex
+			if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil && strings.TrimSpace(existing.Picture) != "" {
+				detail.Picture = existing.Picture
+				if strings.TrimSpace(existing.PictureSlide) != "" {
+					detail.PictureSlide = existing.PictureSlide
+				}
+			} else if strings.TrimSpace(detail.Picture) == "" {
+				detail.Picture = detail.CustomPicture
+			}
+		}
+	} else {
+		// 管理员选择跟随海报源：清空自定义海报，并自动同步当前启用的海报图源 (movie_poster)
+		detail.CustomPicture = ""
+		detail.CustomPictureSlide = ""
+
+		var existing model.FilmIndex
+		hasExisting := false
+		if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil {
+			hasExisting = true
+		}
+
+		matchedPoster := false
+		ps := repository.GetPosterSource()
+		if ps != nil && ps.State {
+			keys := BuildPlaylistMovieKeys(detail)
+			if posters, err := LoadPostersBySourceAndKeysTx(db.Mdb, ps.Id, keys); err == nil && len(posters) > 0 {
+				if matched := pickBestMatchedPoster(detail, posters); matched != nil && strings.TrimSpace(matched.Picture) != "" {
+					detail.Picture = strings.TrimSpace(matched.Picture)
+					if strings.TrimSpace(matched.PictureSlide) != "" {
+						detail.PictureSlide = strings.TrimSpace(matched.PictureSlide)
+					}
+					matchedPoster = true
+				}
+			}
+		}
+		// 若外部海报源未命中且存在已有库存，强制恢复库存中的底层采集原图（避免前端传入的旧自定义图污染底层 Picture）
+		if !matchedPoster && hasExisting && strings.TrimSpace(existing.Picture) != "" {
+			detail.Picture = existing.Picture
+			if strings.TrimSpace(existing.PictureSlide) != "" {
+				detail.PictureSlide = existing.PictureSlide
+			}
+		}
+	}
+
 	snapshot, err := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
 		return err
@@ -839,7 +897,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	var savedMid int64
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		infoList := []model.FilmIndex{snapshot}
-		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail})) //nolint:dogsled // 第 2/3 返回值此处不需要
+		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}), true) //nolint:dogsled // 第 2/3 返回值此处不需要
 		if err != nil {
 			return err
 		}
@@ -891,6 +949,12 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	BatchHandleSearchTag(snapshot)
 	clearDetailCaches(snapshot.Pid)
 	ClearProvideListCache()
+	if db.Rdb != nil && strings.TrimSpace(detail.Name) != "" {
+		version := GetActiveSnapshotVersion()
+		if version != "" {
+			clearCachePatterns(fmt.Sprintf("EcoHub:search:v%s:%s:*", version, strings.TrimSpace(detail.Name)))
+		}
+	}
 	if err := UpsertActiveSnapshotByMid(savedMid); err != nil {
 		return err
 	}
@@ -1585,12 +1649,15 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 			UpdateStamp:  meta.UpdateStamp,
 			Hits:         detail.Hits,
 			State:        detail.State,
-			Remarks:      detail.Remarks,
-			Picture:      detail.Picture,
-			PictureSlide: detail.PictureSlide,
-			Actor:        detail.Actor,
-			Director:     detail.Director,
-			Blurb:        detail.Blurb,
+			Remarks:            detail.Remarks,
+			Picture:            detail.Picture,
+			PictureSlide:       detail.PictureSlide,
+			CustomPicture:      detail.CustomPicture,
+			CustomPictureSlide: detail.CustomPictureSlide,
+			IsCustomPicture:    detail.IsCustomPicture,
+			Actor:              detail.Actor,
+			Director:           detail.Director,
+			Blurb:              detail.Blurb,
 		},
 		FilmIndexVersion: model.FilmIndexVersion{
 			CollectStamp:    detail.AddTime,

@@ -55,10 +55,27 @@ const maxLiveRemarksBatchSize = 100
 
 // LiveBannerSnapshot 轮播实时关联的影片动态信息
 type LiveBannerSnapshot struct {
-	Mid          int64
-	Remarks      string
-	Picture      string
-	PictureSlide string
+	Mid                int64
+	Remarks            string
+	Picture            string
+	PictureSlide       string
+	CustomPicture      string
+	CustomPictureSlide string
+	IsCustomPicture    bool
+}
+
+func (s LiveBannerSnapshot) DisplayPicture() string {
+	if s.IsCustomPicture && len(s.CustomPicture) > 0 {
+		return s.CustomPicture
+	}
+	return s.Picture
+}
+
+func (s LiveBannerSnapshot) DisplayPictureSlide() string {
+	if s.IsCustomPicture && len(s.CustomPictureSlide) > 0 {
+		return s.CustomPictureSlide
+	}
+	return s.PictureSlide
 }
 
 // LiveBannerSnapshotsByMIDs 从活跃快照读取展示用状态与最新海报/幻灯图（毫秒级索引直查）。
@@ -74,14 +91,17 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	}
 
 	type row struct {
-		Mid          int64
-		Remarks      string
-		Picture      string
-		PictureSlide string
+		Mid                int64
+		Remarks            string
+		Picture            string
+		PictureSlide       string
+		CustomPicture      string
+		CustomPictureSlide string
+		IsCustomPicture    bool
 	}
 	var rows []row
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
-		Select("mid, remarks, picture, picture_slide").
+		Select("mid, remarks, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("snapshot_version = ? AND mid IN ?", version, mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
@@ -90,10 +110,13 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 
 	for _, r := range rows {
 		out[r.Mid] = LiveBannerSnapshot{
-			Mid:          r.Mid,
-			Remarks:      strings.TrimSpace(r.Remarks),
-			Picture:      strings.TrimSpace(r.Picture),
-			PictureSlide: strings.TrimSpace(r.PictureSlide),
+			Mid:                r.Mid,
+			Remarks:            strings.TrimSpace(r.Remarks),
+			Picture:            strings.TrimSpace(r.Picture),
+			PictureSlide:       strings.TrimSpace(r.PictureSlide),
+			CustomPicture:      strings.TrimSpace(r.CustomPicture),
+			CustomPictureSlide: strings.TrimSpace(r.CustomPictureSlide),
+			IsCustomPicture:    r.IsCustomPicture,
 		}
 	}
 	return out

@@ -67,13 +67,42 @@ func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error 
 	return repository.SaveSiteBasic(curr)
 }
 
-// GetBanners 获取轮播组件信息
+// GetBanners 获取轮播组件信息（实时叠加片库状态与海报源）
 func (s *ManageService) GetBanners() model.Banners {
-	return repository.GetBanners()
+	return OverlayBannerLiveRemarks(repository.GetBanners())
 }
 
 // SaveBanners 保存轮播信息
 func (s *ManageService) SaveBanners(bl model.Banners) error {
+	if len(bl) == 0 {
+		return repository.SaveBanners(bl)
+	}
+	// 若轮播项为跟随海报源（IsCustomPic == false），自动查询快照获取最新海报与幻灯图打底并清空 custom_picture
+	mids := make([]int64, 0, len(bl))
+	for _, b := range bl {
+		if b.Mid > 0 && !b.IsCustomPic {
+			mids = append(mids, b.Mid)
+		}
+	}
+	if len(mids) > 0 {
+		liveData := filmrepo.LiveBannerSnapshotsByMIDs(mids)
+		for i := range bl {
+			if !bl[i].IsCustomPic {
+				bl[i].CustomPicture = ""
+				if snap, ok := liveData[bl[i].Mid]; ok {
+					dispPic := snap.DisplayPicture()
+					if dispPic != "" {
+						bl[i].Picture = dispPic
+						bl[i].Poster = dispPic
+					}
+					dispSlide := snap.DisplayPictureSlide()
+					if dispSlide != "" {
+						bl[i].PictureSlide = dispSlide
+					}
+				}
+			}
+		}
+	}
 	return repository.SaveBanners(bl)
 }
 

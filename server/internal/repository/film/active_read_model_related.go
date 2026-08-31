@@ -18,7 +18,7 @@ const (
 	relatedCacheTTL            = 1 * time.Hour
 	maxRelatedRecommendCount   = 28 // 相关推荐全局最大保留数量（前端展示通常为 14 条）
 	relatedFunnelMinCandidates = 35 // 候选集召回最低打底阈值
-	relatedSnapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, sub_title, series_key, director, actor, score, hits, update_stamp, remarks, state, picture, picture_slide, blurb, year, class_tag, area, language, play_from_summary"
+	relatedSnapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, sub_title, series_key, director, actor, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, blurb, year, class_tag, area, language, play_from_summary"
 )
 
 type relatedCacheItem struct {

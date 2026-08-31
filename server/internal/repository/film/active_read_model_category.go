@@ -17,7 +17,7 @@ import (
 const (
 	snapshotListCacheTTL = 10 * time.Minute
 	snapshotPageCacheTTL = 5 * time.Minute
-	basicSelectFields    = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, year"
+	basicSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
 )
 
 type categoryPageCacheItem struct {

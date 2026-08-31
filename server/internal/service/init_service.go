@@ -58,6 +58,9 @@ func (s *InitService) DefaultDataInit() {
 
 	// 网站基本信息初始化（首页轮播已移入内容管理）
 	s.SiteWebConfigInit()
+	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
+		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
+	}
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
@@ -123,6 +126,7 @@ func (s *InitService) TableInit() {
 		&model.MovieDetailInfo{},
 		&model.Category{},
 		&model.MoviePlaylist{},
+		&model.MoviePoster{},
 		&model.MovieMatchKey{},
 		&model.VirtualPictureQueue{},
 		&model.FilmSource{},
@@ -229,7 +233,7 @@ func (s *InitService) FilmSourceInit() {
 func defaultFilmSources() []model.FilmSource {
 	// 使用 URI 哈希作为 ID，确保重置后顺序一致且支持主从切换。
 	return []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Grade: model.MasterCollect, State: true, Interval: 200, Cd: 24},
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Grade: model.MasterCollect, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
 		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
 		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
 		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},

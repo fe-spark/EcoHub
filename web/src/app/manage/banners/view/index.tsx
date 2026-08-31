@@ -20,6 +20,7 @@ import {
   Col,
   Image as AntImage,
   Typography,
+  Radio,
 } from "antd";
 import {
   EditOutlined,
@@ -53,7 +54,9 @@ type BannerRecord = {
   poster: string;
   picture: string;
   pictureSlide?: string;
+  customPicture?: string;
   sort?: number;
+  isCustomPic?: boolean;
 };
 
 type BannerFormValues = {
@@ -61,8 +64,11 @@ type BannerFormValues = {
   name: string;
   cName: string;
   year?: number;
-  picture: string;
+  picture?: string;
+  customPicture?: string;
   sort?: number;
+  isCustomPic?: boolean;
+  followPosterSource?: boolean;
 };
 
 type FilmOption = {
@@ -87,7 +93,7 @@ function resolveEditablePicture(record?: Partial<BannerRecord> | null): string {
     return "";
   }
 
-  return record.picture || record.poster || record.pictureSlide || "";
+  return record.customPicture || (record.isCustomPic ? record.picture : "") || "";
 }
 
 function resolvePreviewPicture(
@@ -134,6 +140,7 @@ export default function BannersPageView() {
   const watchedCName = Form.useWatch("cName", form);
   const watchedYear = Form.useWatch("year", form);
   const watchedPicture = Form.useWatch("picture", form);
+  const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
 
   const fetchBanners = useCallback(async () => {
     setLoading(true);
@@ -189,7 +196,8 @@ export default function BannersPageView() {
     name: film.name || "",
     cName: film.cName || "",
     year: parseInt(String(film.year || "0"), 10) || undefined,
-    picture: film.picture || "",
+    picture: "",
+    followPosterSource: true,
   });
 
   const onFilmSelect = (val: number | string) => {
@@ -224,42 +232,68 @@ export default function BannersPageView() {
     resetEditorState();
     setEditorMode("edit");
     setCurrentRow(record);
-    form.setFieldsValue({
-      mid: record.mid,
-      name: record.name,
-      cName: record.cName,
-      year: record.year,
-      picture: resolveEditablePicture(record),
-      sort: record.sort,
-    });
     setEditorVisible(true);
   };
+
+  useEffect(() => {
+    if (editorVisible) {
+      if (editorMode === "edit" && currentRow) {
+        const isCustom = currentRow.isCustomPic === true;
+        form.setFieldsValue({
+          mid: currentRow.mid,
+          name: currentRow.name,
+          cName: currentRow.cName,
+          year: currentRow.year,
+          followPosterSource: !isCustom,
+          picture: isCustom ? resolveEditablePicture(currentRow) : "",
+          sort: currentRow.sort ?? 0,
+        });
+        if (currentRow.mid && currentRow.name) {
+          ApiGet("/searchFilm", { keyword: currentRow.name, current: 0 }).then((resp: any) => {
+            if (resp.code === 0 && resp.data?.list) {
+              const match = resp.data.list.find((f: any) => String(f.id) === String(currentRow.mid));
+              if (match) {
+                setSelectedFilm(match);
+              }
+            }
+          });
+        }
+      } else if (editorMode === "create") {
+        form.setFieldsValue({
+          followPosterSource: true,
+          sort: 0,
+        });
+      }
+    }
+  }, [editorVisible, editorMode, currentRow, form]);
 
   const closeEditor = () => {
     setEditorVisible(false);
   };
 
   const buildBannerPayload = (values: BannerFormValues): BannerRecord => {
-    const nextPicture = values.picture.trim();
-    const originalPicture = resolveEditablePicture(currentRow).trim();
-    const shouldSyncAllImages =
-      editorMode === "create" || nextPicture !== originalPicture;
+    const isCustom = values.followPosterSource === false;
+    const customPic = isCustom ? (values.picture || "").trim() : "";
+    const livePic =
+      selectedFilm?.picture ||
+      (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") ||
+      "";
 
     return {
       id: currentRow?.id || "",
-      mid: values.mid,
+      mid: values.mid || currentRow?.mid || 0,
       name: values.name.trim(),
       cName: values.cName.trim(),
       year: values.year,
-      poster: shouldSyncAllImages
-        ? nextPicture
-        : currentRow?.poster || nextPicture,
-      picture: nextPicture,
-      pictureSlide: shouldSyncAllImages
-        ? nextPicture
-        : currentRow?.pictureSlide || nextPicture,
+      poster: isCustom ? customPic : livePic,
+      picture: isCustom ? customPic : livePic,
+      pictureSlide: isCustom
+        ? customPic
+        : currentRow?.pictureSlide || selectedFilm?.picture || livePic,
+      customPicture: customPic,
       sort: values.sort ?? 0,
       remark: "",
+      isCustomPic: isCustom,
     };
   };
 
@@ -267,11 +301,18 @@ export default function BannersPageView() {
   const previewName = watchedName || previewFilm?.name || "未选择影片";
   const previewCategory = watchedCName || previewFilm?.cName || "未分类";
   const previewYear = watchedYear || previewFilm?.year || "未知年份";
-  const previewRemark = selectedFilm?.remarks || "前台按片库实时状态展示";
+  const previewRemark =
+    selectedFilm?.remarks || currentRow?.remark || "前台按片库实时状态展示";
   const previewArea = selectedFilm?.area || "未知地区";
   const previewDirector = selectedFilm?.director || "暂无";
   const previewActor = selectedFilm?.actor || "暂无";
-  const previewPicture = watchedPicture || resolvePreviewPicture(previewFilm);
+  const liveFilmPic =
+    selectedFilm?.picture ||
+    (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") ||
+    "";
+  const previewPicture = watchedFollowPosterSource
+    ? liveFilmPic
+    : (watchedPicture || liveFilmPic || resolvePreviewPicture(previewFilm));
 
   const handleCustomUpload = async (
     options: any,
@@ -324,7 +365,12 @@ export default function BannersPageView() {
       } else {
         message.error(resp.msg);
       }
-    } catch {}
+    } catch (err: any) {
+      if (err?.errorFields) {
+        return;
+      }
+      message.error(err?.message || "提交轮播信息失败");
+    }
   };
 
   const columns = [
@@ -357,8 +403,8 @@ export default function BannersPageView() {
       dataIndex: "picture",
       key: "picture",
       align: "center" as const,
-      render: (src: string) => (
-        <div style={{ display: "flex", justifyContent: "center" }}>
+      render: (src: string, record: BannerRecord) => (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
           <AntImage 
             src={src || FALLBACK_IMG} 
             width={48}
@@ -367,6 +413,19 @@ export default function BannersPageView() {
             fallback={FALLBACK_IMG}
             placeholder={<div style={{ width: '100%', height: '100%', background: 'var(--public-surface-3)', borderRadius: 4 }} />}
           />
+          {record.isCustomPic ? (
+            <Tooltip title="自定义封面（锁定保护）">
+              <Tag color="warning" style={{ margin: 0, fontSize: 11, lineHeight: "16px", padding: "0 4px", cursor: "help" }}>
+                自定义锁定
+              </Tag>
+            </Tooltip>
+          ) : (
+            <Tooltip title="跟随海报源（自动同步）">
+              <Tag color="processing" style={{ margin: 0, fontSize: 11, lineHeight: "16px", padding: "0 4px", cursor: "help" }}>
+                海报源联动
+              </Tag>
+            </Tooltip>
+          )}
         </div>
       ),
     },
@@ -424,8 +483,25 @@ export default function BannersPageView() {
           filterOption={false}
           onSearch={searchFilms}
           onChange={onFilmSelect}
+          value={selectedFilm?.id || currentRow?.mid || undefined}
           notFoundContent={filmLoading ? "搜索中..." : null}
-          options={filmOptions}
+          options={
+            filmOptions.length > 0
+              ? filmOptions
+              : currentRow?.mid
+                ? [
+                    {
+                      id: currentRow.mid,
+                      label: `${currentRow.name} (${currentRow.cName || "影片"})`,
+                      value: currentRow.mid,
+                      name: currentRow.name,
+                      cName: currentRow.cName,
+                      year: currentRow.year,
+                      picture: resolveEditablePicture(currentRow),
+                    },
+                  ]
+                : []
+          }
         />
       </Form.Item>
       {previewFilm && (
@@ -504,34 +580,78 @@ export default function BannersPageView() {
         </Col>
       </Row>
       <Form.Item
-        label="影片封面"
-        extra="统一使用采集接口的 vod_pic 字段，可手动替换，但只维护这一张图。"
+        label="是否跟随海报源"
+        name="followPosterSource"
+        tooltip="开启自动同步海报源；关闭可自定义并锁定图片。"
+        initialValue={true}
       >
-        <Space.Compact style={{ width: "100%" }}>
-          <Form.Item
-            name="picture"
-            noStyle
-            rules={[{ required: true, message: "请上传或填写封面图" }]}
-          >
-            <Input placeholder="输入封面访问 URL" />
-          </Form.Item>
-          <Upload
-            showUploadList={false}
-            accept={IMAGE_UPLOAD_ACCEPT}
-            customRequest={(o) => handleCustomUpload(o, "picture")}
-          >
-            <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
-              上传
-            </Button>
-          </Upload>
-          <Button
-            icon={<PictureOutlined />}
-            onClick={() => setPickerOpen(true)}
-          >
-            选图
-          </Button>
-        </Space.Compact>
+        <Radio.Group
+          buttonStyle="solid"
+          options={[
+            { label: "是（跟随海报源）", value: true },
+            { label: "否（自定义封面）", value: false },
+          ]}
+        />
       </Form.Item>
+
+      {watchedFollowPosterSource ? (
+        <Form.Item label="影片封面">
+          <div
+            style={{
+              padding: "8px 12px",
+              background: "rgba(255, 255, 255, 0.04)",
+              borderRadius: 6,
+              border: "1px dashed var(--ant-color-border)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              minHeight: 32,
+            }}
+          >
+            <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
+              已开启跟随海报源，将自动同步最新封面与幻灯图。
+            </Text>
+            {previewPicture && (
+              <AntImage
+                src={previewPicture || FALLBACK_IMG}
+                height={32}
+                style={{ borderRadius: 4, objectFit: "cover" }}
+                fallback={FALLBACK_IMG}
+              />
+            )}
+          </div>
+        </Form.Item>
+      ) : (
+        <Form.Item
+          label="封面图片地址"
+          tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
+        >
+          <Space.Compact style={{ width: "100%" }}>
+            <Form.Item
+              name="picture"
+              noStyle
+              rules={[{ required: true, message: "请输入自定义封面图片地址或上传/选图" }]}
+            >
+              <Input placeholder="输入封面访问 URL" />
+            </Form.Item>
+            <Upload
+              showUploadList={false}
+              accept={IMAGE_UPLOAD_ACCEPT}
+              customRequest={(o) => handleCustomUpload(o, "picture")}
+            >
+              <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
+                上传
+              </Button>
+            </Upload>
+            <Button
+              icon={<PictureOutlined />}
+              onClick={() => setPickerOpen(true)}
+            >
+              选图
+            </Button>
+          </Space.Compact>
+        </Form.Item>
+      )}
       {previewPicture && (
         <Card size="small" title="影片封面预览" style={{ borderRadius: 12 }}>
           <AntImage
@@ -591,7 +711,7 @@ export default function BannersPageView() {
         destroyOnHidden
         afterClose={resetEditorState}
       >
-        <Form form={form} layout="vertical" preserve={false}>
+        <Form form={form} layout="vertical">
           {formItems}
         </Form>
         <ImagePicker

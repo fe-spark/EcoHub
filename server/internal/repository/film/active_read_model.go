@@ -340,7 +340,7 @@ func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 
 const (
 	tagSearchCacheTTL    = 3 * time.Minute
-	snapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, year, class_tag, area, language"
+	snapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
 )
 
 type tagSearchCacheItem struct {

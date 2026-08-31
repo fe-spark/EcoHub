@@ -13,6 +13,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -268,15 +269,18 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 		Hits:             index.Hits,
 		State:            index.State,
 		Remarks:          index.Remarks,
-		Picture:          index.Picture,
-		PictureSlide:     index.PictureSlide,
-		Actor:            index.Actor,
-		Director:         index.Director,
-		Blurb:            index.Blurb,
-		CollectStamp:     index.CollectStamp,
-		CategoryVersion:  index.CategoryVersion,
-		RuleVersion:      index.RuleVersion,
-		PlayFromSummary:  index.PlayFromSummary,
+		Picture:            index.Picture,
+		PictureSlide:       index.PictureSlide,
+		CustomPicture:      index.CustomPicture,
+		CustomPictureSlide: index.CustomPictureSlide,
+		IsCustomPicture:    index.IsCustomPicture,
+		Actor:              index.Actor,
+		Director:           index.Director,
+		Blurb:              index.Blurb,
+		CollectStamp:       index.CollectStamp,
+		CategoryVersion:    index.CategoryVersion,
+		RuleVersion:        index.RuleVersion,
+		PlayFromSummary:    index.PlayFromSummary,
 	}
 }
 
@@ -497,6 +501,7 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	if err := ApplyActiveFilmReadModelSnapshots(version, nil, nil); err != nil {
 		return "", 0, err
 	}
+	InvalidateIncrementalSnapshotCaches(version, ids)
 	applyCost := time.Since(applyStartedAt)
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
@@ -728,6 +733,45 @@ func RefreshAccessDataCaches() {
 	)
 	bumpSearchTagsCacheVersion()
 	clearCachePatterns(
+		fmt.Sprintf("%s*", config.IndexPageCacheKey),
+		fmt.Sprintf("%s:*", config.TVBoxList),
+		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
+		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
+		fmt.Sprintf("%s:*", config.SearchTags),
+		"EcoHub:filter_option:*",
+	)
+}
+
+// InvalidateIncrementalSnapshotCaches 增量快照发布后的全链路缓存淘汰与内存读模型重置
+func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
+	support.ClearIndexPageCache()
+	ClearProvideListCache()
+	ClearActiveFilmReadModel()
+	if db.Rdb != nil && len(mids) > 0 {
+		// 精准批量删除被修改影片的详情与播放页缓存
+		pipe := db.Rdb.Pipeline()
+		for _, mid := range mids {
+			pipe.Del(db.Cxt, fmt.Sprintf("EcoHub:filmPlayInfo:%d", mid))
+		}
+		_, _ = pipe.Exec(db.Cxt)
+	}
+}
+
+func ClearAllSnapshotDynamicCaches() {
+	support.ClearIndexPageCache()
+	ClearActiveFilmReadModel()
+	clearCachePatterns(
+		"EcoHub:snap_cat:*",
+		"EcoHub:snap_cat_page:*",
+		"EcoHub:snap_hot:*",
+		"EcoHub:snap_hot_pool:*",
+		"EcoHub:snap_sort:*",
+		"EcoHub:tags_search:*",
+		"EcoHub:provide:*",
+		"EcoHub:search:*",
+		"EcoHub:related:*",
+		"EcoHub:relate:*",
+		"EcoHub:Index:Page:*",
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),

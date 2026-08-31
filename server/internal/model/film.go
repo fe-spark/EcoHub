@@ -76,13 +76,30 @@ type MovieDetail struct {
 	Cid             int64               `json:"cid"`          // 分类ID
 	Pid             int64               `json:"pid"`          // 一级分类ID
 	Name            string              `json:"name"`         // 片名
-	Picture         string              `json:"picture"`      // 竖版封面图
-	PictureSlide    string              `json:"pictureSlide"` // 横版幻灯图
-	PlayFrom        []string            `json:"playFrom"`     // 播放来源
-	DownFrom        string              `json:"DownFrom"`     // 下载来源 例: http
-	PlayList        [][]MovieUrlInfo    `json:"playList"`     // 播放地址url
-	DownloadList    [][]MovieUrlInfo    `json:"downloadList"` // 下载url地址
-	MovieDescriptor `json:"descriptor"` // 影片描述信息
+	Picture            string              `json:"picture"`            // 竖版封面图（源站/海报图源）
+	PictureSlide       string              `json:"pictureSlide"`       // 横版幻灯图（源站/海报图源）
+	CustomPicture      string              `json:"customPicture"`      // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string              `json:"customPictureSlide"` // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool                `json:"isCustomPicture"`    // 是否启用人工自定义海报
+	PlayFrom           []string            `json:"playFrom"`           // 播放来源
+	DownFrom           string              `json:"DownFrom"`           // 下载来源 例: http
+	PlayList           [][]MovieUrlInfo    `json:"playList"`           // 播放地址url
+	DownloadList       [][]MovieUrlInfo    `json:"downloadList"`       // 下载url地址
+	MovieDescriptor    `json:"descriptor"` // 影片描述信息
+}
+
+func (d MovieDetail) DisplayPicture() string {
+	if d.IsCustomPicture && len(d.CustomPicture) > 0 {
+		return d.CustomPicture
+	}
+	return d.Picture
+}
+
+func (d MovieDetail) DisplayPictureSlide() string {
+	if d.IsCustomPicture && len(d.CustomPictureSlide) > 0 {
+		return d.CustomPictureSlide
+	}
+	return d.PictureSlide
 }
 
 // MovieDetailInfo 影片详情持久化模型 (MySQL)
@@ -175,12 +192,29 @@ type FilmIndexContent struct {
 	UpdateStamp  int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
 	Hits         int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State        string  `json:"state"`                                                                                      // 状态 正片|预告
-	Remarks      string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
-	Picture      string  `json:"picture" gorm:"type:text"`                                                                   // 竖版封面图
-	PictureSlide string  `json:"pictureSlide" gorm:"type:text"`                                                              // 横版幻灯图
-	Actor        string  `json:"actor" gorm:"type:text"`                                                                     // 主演
-	Director     string  `json:"director" gorm:"type:text"`                                                                  // 导演
-	Blurb        string  `json:"blurb" gorm:"type:text"`                                                                     // 简介, 不完整
+	Remarks            string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
+	Picture            string  `json:"picture" gorm:"type:text"`                                                                   // 竖版封面图（源站/海报源原图）
+	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`                                                              // 横版幻灯图（源站/海报源原图）
+	CustomPicture      string  `json:"customPicture" gorm:"type:text"`                                                             // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`                                                        // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`                                                       // 是否人工自定义海报（锁定保护）
+	Actor              string  `json:"actor" gorm:"type:text"`                                                                     // 主演
+	Director           string  `json:"director" gorm:"type:text"`                                                                  // 导演
+	Blurb              string  `json:"blurb" gorm:"type:text"`                                                                     // 简介, 不完整
+}
+
+func (c FilmIndexContent) DisplayPicture() string {
+	if c.IsCustomPicture && len(c.CustomPicture) > 0 {
+		return c.CustomPicture
+	}
+	return c.Picture
+}
+
+func (c FilmIndexContent) DisplayPictureSlide() string {
+	if c.IsCustomPicture && len(c.CustomPictureSlide) > 0 {
+		return c.CustomPictureSlide
+	}
+	return c.PictureSlide
 }
 
 // FilmIndexVersion 入库版本层：用于排障与版本追踪。
@@ -227,28 +261,45 @@ type FilmListSnapshot struct {
 	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"`
 	CName            string `json:"cName"`
 
-	SeriesKey       string  `json:"seriesKey" gorm:"size:128;index"`
-	Name            string  `json:"name" gorm:"index:idx_snap_search_name"`
-	SubTitle        string  `json:"subTitle" gorm:"type:text"`
-	ClassTag        string  `json:"classTag" gorm:"type:text"`
-	Area            string  `json:"area" gorm:"index"`
-	Language        string  `json:"language" gorm:"index"`
-	Year            int64   `json:"year" gorm:"index;index:idx_snap_pid_year"`
-	Initial         string  `json:"initial"`
-	Score           float64 `json:"score" gorm:"index"`
-	UpdateStamp     int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year"`
-	Hits            int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
-	State           string  `json:"state"`
-	Remarks         string  `json:"remarks"`
-	Picture         string  `json:"picture" gorm:"type:text"`
-	PictureSlide    string  `json:"pictureSlide" gorm:"type:text"`
-	Actor           string  `json:"actor" gorm:"type:text"`
-	Director        string  `json:"director" gorm:"type:text"`
-	Blurb           string  `json:"blurb" gorm:"type:text"`
-	CollectStamp    int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`
-	CategoryVersion string  `json:"categoryVersion" gorm:"size:64;index"`
-	RuleVersion     string  `json:"ruleVersion" gorm:"size:64;index"`
-	PlayFromSummary string  `json:"playFromSummary"`
+	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`
+	Name               string  `json:"name" gorm:"index:idx_snap_search_name"`
+	SubTitle           string  `json:"subTitle" gorm:"type:text"`
+	ClassTag           string  `json:"classTag" gorm:"type:text"`
+	Area               string  `json:"area" gorm:"index"`
+	Language           string  `json:"language" gorm:"index"`
+	Year               int64   `json:"year" gorm:"index;index:idx_snap_pid_year"`
+	Initial            string  `json:"initial"`
+	Score              float64 `json:"score" gorm:"index"`
+	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year"`
+	Hits               int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
+	State              string  `json:"state"`
+	Remarks            string  `json:"remarks"`
+	Picture            string  `json:"picture" gorm:"type:text"`
+	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`
+	CustomPicture      string  `json:"customPicture" gorm:"type:text"`
+	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`
+	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`
+	Actor              string  `json:"actor" gorm:"type:text"`
+	Director           string  `json:"director" gorm:"type:text"`
+	Blurb              string  `json:"blurb" gorm:"type:text"`
+	CollectStamp       int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`
+	CategoryVersion    string  `json:"categoryVersion" gorm:"size:64;index"`
+	RuleVersion        string  `json:"ruleVersion" gorm:"size:64;index"`
+	PlayFromSummary    string  `json:"playFromSummary"`
+}
+
+func (s FilmListSnapshot) DisplayPicture() string {
+	if s.IsCustomPicture && len(s.CustomPicture) > 0 {
+		return s.CustomPicture
+	}
+	return s.Picture
+}
+
+func (s FilmListSnapshot) DisplayPictureSlide() string {
+	if s.IsCustomPicture && len(s.CustomPictureSlide) > 0 {
+		return s.CustomPictureSlide
+	}
+	return s.PictureSlide
 }
 
 func (FilmListSnapshot) TableName() string {
@@ -336,16 +387,19 @@ type SearchVo struct {
 
 // FilmDetailVo 添加影片对象
 type FilmDetailVo struct {
-	Id           int64    `json:"id"`           // 影片id
-	Cid          int64    `json:"cid"`          // 分类ID
-	Pid          int64    `json:"pid"`          // 一级分类ID
-	Name         string   `json:"name"`         // 片名
-	Picture      string   `json:"picture"`      // 竖版封面图
-	PictureSlide string   `json:"pictureSlide"` // 横版幻灯图
-	PlayFrom     []string `json:"playFrom"`     // 播放来源
-	DownFrom     string   `json:"DownFrom"`     // 下载来源 例: http
-	PlayLink     string   `json:"playLink"`     // 播放地址url
-	DownloadLink string   `json:"downloadLink"` // 下载url地址
+	Id                 int64    `json:"id"`                 // 影片id
+	Cid                int64    `json:"cid"`                // 分类ID
+	Pid                int64    `json:"pid"`                // 一级分类ID
+	Name               string   `json:"name"`               // 片名
+	Picture            string   `json:"picture"`            // 竖版封面图（源站/海报源原图）
+	PictureSlide       string   `json:"pictureSlide"`       // 横版幻灯图（源站/海报源原图）
+	CustomPicture      string   `json:"customPicture"`      // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string   `json:"customPictureSlide"` // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool     `json:"isCustomPicture"`    // 是否人工自定义海报（锁定保护）
+	PlayFrom           []string `json:"playFrom"`           // 播放来源
+	DownFrom           string   `json:"DownFrom"`           // 下载来源 例: http
+	PlayLink           string   `json:"playLink"`           // 播放地址url
+	DownloadLink       string   `json:"downloadLink"`       // 下载url地址
 	SubTitle     string   `json:"subTitle"`     // 子标题
 	CName        string   `json:"cName"`        // 分类名称
 	EnName       string   `json:"enName"`       // 英文名

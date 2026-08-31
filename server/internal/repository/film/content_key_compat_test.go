@@ -194,7 +194,7 @@ func TestLegacyContentKeyForcesWriteEvenIfBusinessSame(t *testing.T) {
 		FilmIndexContent:  model.FilmIndexContent{Name: "片A", UpdateStamp: time.Now().Unix()},
 	}}
 	detailsByKey := map[string]model.MovieDetail{"vod_100": detail}
-	unchanged, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey)
+	unchanged, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey, false)
 	if err != nil {
 		t.Fatalf("stamp: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestStampUnchangedWhenContentKeyAlreadyVod(t *testing.T) {
 			MovieDescriptor: model.MovieDescriptor{Remarks: "完结", State: "正片"},
 		},
 	}
-	unchanged, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey)
+	unchanged, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey, false)
 	if err != nil {
 		t.Fatalf("stamp: %v", err)
 	}

@@ -66,11 +66,13 @@ type Banner struct {
 	Name         string `gorm:"size:128" json:"name"`         // 影片名称
 	Year         int64  `json:"year"`                         // 上映年份
 	CName        string `gorm:"size:64" json:"cName"`         // 分类名称
-	Poster       string `gorm:"size:512" json:"poster"`       // 竖版海报图
-	Picture      string `gorm:"size:512" json:"picture"`      // 竖版封面图
-	PictureSlide string `gorm:"size:512" json:"pictureSlide"` // 横版幻灯图
-	Remark       string `gorm:"size:128" json:"remark"`       // 更新状态描述信息
-	Sort         int64  `json:"sort"`                         // 排序分値
+	Poster        string `gorm:"size:512" json:"poster"`        // 竖版海报图（最终展示）
+	Picture       string `gorm:"size:512" json:"picture"`       // 竖版封面图（片库/海报源原图）
+	PictureSlide  string `gorm:"size:512" json:"pictureSlide"`  // 横版幻灯图（片库/海报源原图）
+	CustomPicture string `gorm:"size:512" json:"customPicture"` // 自定义封面图（独立存储）
+	Remark        string `gorm:"size:128" json:"remark"`        // 更新状态描述信息
+	Sort          int64  `json:"sort"`                          // 排序分値
+	IsCustomPic   bool   `gorm:"default:false" json:"isCustomPic"` // 是否为人工自定义图片（锁定不被海报源覆盖）
 }
 
 func (Banner) TableName() string {
