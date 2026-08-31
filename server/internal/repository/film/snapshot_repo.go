@@ -51,11 +51,18 @@ func SetActiveSnapshotVersion(version string) error {
 }
 
 func GetActiveReadModelVersion() string {
-	readModel := GetActiveFilmReadModel()
-	if readModel == nil {
-		return GetActiveSnapshotVersion()
+	return activeReadModelVersion(GetActiveFilmReadModel(), GetActiveSnapshotVersion())
+}
+
+// activeReadModelVersion 取内存读模型版本；空指针或 Version 为空时回退到活跃快照版本。
+// ClearActiveFilmReadModel / init 都会写入 Version="" 的非空指针，不能把非空指针当成有效版本。
+func activeReadModelVersion(readModel *FilmReadModel, snapshotVersion string) string {
+	if readModel != nil {
+		if version := strings.TrimSpace(readModel.Version); version != "" {
+			return version
+		}
 	}
-	return readModel.Version
+	return snapshotVersion
 }
 
 func NewSnapshotVersion() string {
@@ -570,7 +577,10 @@ func diffMIDs(all []int64, kept []int64) []int64 {
 
 func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
-	if version == "" || mid <= 0 {
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || mid <= 0 || db.Mdb == nil {
 		return nil
 	}
 	var snapshot model.FilmListSnapshot
@@ -583,6 +593,9 @@ func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 // GetSnapshotsByMidsOrdered 按 mid 列表顺序取当前版本快照；无快照的 mid 跳过。
 func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
 	if version == "" || len(mids) == 0 || db.Mdb == nil {
 		return nil
 	}
@@ -742,11 +755,24 @@ func RefreshAccessDataCaches() {
 	)
 }
 
-// InvalidateIncrementalSnapshotCaches 增量快照发布后的全链路缓存淘汰与内存读模型重置
+// InvalidateIncrementalSnapshotCaches 增量快照发布后淘汰列表/播放缓存，并重置内存搜索索引。
+// 不能直接 ClearActiveFilmReadModel：它会把 Version 写成空字符串，播放详情随即全站失败。
 func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	ClearProvideListCache()
-	ClearActiveFilmReadModel()
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version != "" {
+		// 丢掉过期内存搜索索引，但立刻写回当前快照版本，避免播放详情读到空 version。
+		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
+		if err := LoadActiveFilmReadModel(version); err != nil {
+			log.Printf("[Snapshot] 增量发布后重载读模型失败 version=%s: %v", version, err)
+		}
+	} else {
+		ClearActiveFilmReadModel()
+	}
 	if db.Rdb != nil && len(mids) > 0 {
 		// 精准批量删除被修改影片的详情与播放页缓存
 		pipe := db.Rdb.Pipeline()
