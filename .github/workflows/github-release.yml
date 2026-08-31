@@ -51,7 +51,7 @@ jobs:
           set -e
 
           if [ "$ls_rc" -eq 0 ]; then
-            git fetch origin "refs/tags/$version:refs/tags/$version"
+            git fetch --force origin "refs/tags/$version:refs/tags/$version"
           elif [ "$ls_rc" -eq 2 ]; then
             if ! git rev-parse -q --verify "refs/tags/$version" >/dev/null; then
               git config user.name "github-actions[bot]"
@@ -59,7 +59,7 @@ jobs:
               git tag -a "$version" -m "$version"
             fi
             if ! git push origin "refs/tags/$version"; then
-              git fetch origin "refs/tags/$version:refs/tags/$version"
+              git fetch --force origin "refs/tags/$version:refs/tags/$version"
             fi
           else
             echo "Failed to query remote tags for $version" >&2
