@@ -13,8 +13,6 @@ interface CollectListItemResponse extends Partial<FilmSource> {
   uri: string;
 }
 
-const POLL_INTERVAL = 8000;
-
 function normalizeSource(item: CollectListItemResponse): FilmSource {
   return {
     id: item.id,
@@ -29,17 +27,14 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
   };
 }
 
-/** 工作台：运行概览 + 当前主采集站（自拉取列表，轻量轮询） */
+/** 工作台：运行概览 + 当前主采集站（进入页面拉取一次） */
 export default function CollectOverview() {
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(false);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = useCallback(async (silent = false) => {
-    if (!silent) {
-      setLoading(true);
-    }
+  const load = useCallback(async () => {
+    setLoading(true);
     try {
       const resp = await ApiGet("/manage/collect/list");
       if (!mountedRef.current) {
@@ -51,7 +46,7 @@ export default function CollectOverview() {
     } catch {
       // 工作台失败时保持上次数据，不打断入口区
     } finally {
-      if (mountedRef.current && !silent) {
+      if (mountedRef.current) {
         setLoading(false);
       }
     }
@@ -60,21 +55,8 @@ export default function CollectOverview() {
   useEffect(() => {
     mountedRef.current = true;
     void load();
-    const tick = () => {
-      timerRef.current = setTimeout(() => {
-        void load(true).finally(() => {
-          if (mountedRef.current) {
-            tick();
-          }
-        });
-      }, POLL_INTERVAL);
-    };
-    tick();
     return () => {
       mountedRef.current = false;
-      if (timerRef.current) {
-        clearTimeout(timerRef.current);
-      }
     };
   }, [load]);
 
@@ -82,14 +64,6 @@ export default function CollectOverview() {
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      running: siteList.filter((item) => item.progress?.status === "running").length,
-      waiting: siteList.filter(
-        (item) =>
-          item.progress?.status === "starting" ||
-          item.progress?.status === "page_done" ||
-          item.progress?.status === "waiting_publish" ||
-          item.progress?.status === "finalizing",
-      ).length,
       masters: siteList.filter((item) => item.grade === 0).length,
     }),
     [siteList],
@@ -131,16 +105,6 @@ export default function CollectOverview() {
           <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
               <Statistic title="已启用" value={stats.enabled} />
-            </div>
-          </div>
-          <div className={styles.overviewCol}>
-            <div className={styles.overviewStat}>
-              <Statistic title="采集中" value={stats.running} />
-            </div>
-          </div>
-          <div className={styles.overviewCol}>
-            <div className={styles.overviewStat}>
-              <Statistic title="收尾/排队" value={stats.waiting} />
             </div>
           </div>
           <div className={styles.overviewCol}>
