@@ -834,6 +834,12 @@ func filmIndexContentKeys(infos []model.FilmIndex) []string {
 }
 
 func SaveDetail(id string, detail model.MovieDetail) error {
+	var existing model.FilmIndex
+	hasExisting := false
+	if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil {
+		hasExisting = true
+	}
+
 	if detail.IsCustomPicture {
 		// 管理员设置了自定义封面：存入 CustomPicture 独立字段，确保绝不破坏 Picture（源站/海报源原图）
 		if strings.TrimSpace(detail.CustomPicture) == "" && strings.TrimSpace(detail.Picture) != "" {
@@ -841,8 +847,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		}
 		// 如果 Picture 为空或被误传为自定义图，保留并恢复已有库存中的原图；新片则以自定义图打底
 		if strings.TrimSpace(detail.Picture) == "" || detail.Picture == detail.CustomPicture {
-			var existing model.FilmIndex
-			if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil && strings.TrimSpace(existing.Picture) != "" {
+			if hasExisting && strings.TrimSpace(existing.Picture) != "" {
 				detail.Picture = existing.Picture
 				if strings.TrimSpace(existing.PictureSlide) != "" {
 					detail.PictureSlide = existing.PictureSlide
@@ -855,12 +860,6 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		// 管理员选择跟随海报源：清空自定义海报，并自动同步当前启用的海报图源 (movie_poster)
 		detail.CustomPicture = ""
 		detail.CustomPictureSlide = ""
-
-		var existing model.FilmIndex
-		hasExisting := false
-		if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil {
-			hasExisting = true
-		}
 
 		matchedPoster := false
 		ps := repository.GetPosterSource()
