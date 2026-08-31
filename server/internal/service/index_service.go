@@ -107,7 +107,7 @@ func (i *IndexService) IndexPage() map[string]any {
 			list = append(list, item)
 		}
 		info["content"] = list
-		banners := repository.GetBanners()
+		banners := overlayBannerLiveRemarks(repository.GetBanners())
 		if banners == nil {
 			banners = make(model.Banners, 0)
 		}
@@ -126,7 +126,7 @@ func (i *IndexService) IndexPage() map[string]any {
 		out := map[string]any{
 			"category": repository.GetActiveCategoryTree(),
 			"content":  []map[string]any{},
-			"banners":  repository.GetBanners(),
+			"banners":  overlayBannerLiveRemarks(repository.GetBanners()),
 		}
 		overlayDynamicCategoryMovies(version, out)
 		return out
@@ -258,15 +258,29 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 			mids = append(mids, b.Mid)
 		}
 	}
-	live := filmrepo.LiveUpdateRemarksByMIDs(mids)
-	if len(live) == 0 {
+	if len(mids) == 0 {
+		return banners
+	}
+	liveData := filmrepo.LiveBannerSnapshotsByMIDs(mids)
+	if len(liveData) == 0 {
 		return banners
 	}
 	out := make(model.Banners, len(banners))
 	copy(out, banners)
 	for i := range out {
-		if remark, ok := live[out[i].Mid]; ok {
-			out[i].Remark = remark
+		snap, ok := liveData[out[i].Mid]
+		if !ok {
+			continue
+		}
+		if snap.Remarks != "" {
+			out[i].Remark = snap.Remarks
+		}
+		if snap.Picture != "" {
+			out[i].Picture = snap.Picture
+			out[i].Poster = snap.Picture
+		}
+		if snap.PictureSlide != "" {
+			out[i].PictureSlide = snap.PictureSlide
 		}
 	}
 	return out

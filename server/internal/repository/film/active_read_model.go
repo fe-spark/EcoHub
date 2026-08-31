@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
@@ -29,9 +31,6 @@ type filmSearchIndexRow struct {
 	Pid         int64
 	Cid         int64
 	Name        string
-	SubTitle    string
-	Actor       string
-	Director    string
 	Hits        int64
 	Score       float64
 	Year        int64
@@ -42,20 +41,15 @@ type filmSearchMemoryItem struct {
 	Mid               int64
 	Pid               int64
 	Cid               int64
-	Name              string
-	CleanName         string
-	PinyinFull        string
-	PinyinSyllables   []string
-	PinyinInitials    string
-	PinyinInitialAlts string
-	AliasSegs         []string
-	AliasWords        []string
-	PersonSegs        []string
-	PersonWords       []string
 	Hits              int64
 	Score             float64
 	Year              int64
 	UpdateStamp       int64
+	Name              string
+	CleanName         string
+	PinyinFull        string
+	PinyinInitials    string
+	PinyinInitialAlts string
 }
 
 type scoredSearchHit struct {
@@ -72,12 +66,6 @@ type filmSearchMemoryIndex struct {
 	Items                []filmSearchMemoryItem
 	nameBigrams          map[string][]int32
 	nameUnigrams         map[rune][]int32
-	personBigrams        map[string][]int32
-	personExact          map[string][]int32
-	aliasBigrams         map[string][]int32
-	aliasExact           map[string][]int32
-	personWords          map[string][]int32
-	aliasWords           map[string][]int32
 	pinyinFullBigrams    map[string][]int32
 	pinyinInitialBigrams map[string][]int32
 }
@@ -142,7 +130,7 @@ func buildFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	buildStarted := time.Now()
 	var rows []filmSearchIndexRow
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
-		Select("mid, pid, cid, name, sub_title, actor, director, hits, score, year, update_stamp").
+		Select("mid, pid, cid, name, hits, score, year, update_stamp").
 		Where("snapshot_version = ?", version).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[ActiveReadModel] 加载内存搜索索引失败: %v", err)
@@ -177,6 +165,8 @@ func LoadActiveFilmReadModel(version string) error {
 			}
 		}()
 		getOrLoadFilmSearchMemoryIndex(ver)
+		runtime.GC()
+		debug.FreeOSMemory()
 	}(version)
 	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
 	return nil
