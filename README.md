@@ -45,21 +45,16 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 
 ### 服务器
 
-- [CloudCone](https://app.cloudcone.com/?ref=14393)：高性价比 VPS，磁盘 I/O 不受限。
+| 服务商 | 说明 | 链接 |
+| --- | --- | --- |
+| CloudCone | 高性价比 VPS，磁盘 I/O 不受限 | [前往选购](https://app.cloudcone.com/?ref=14393) |
 
 ### 网络服务
 
-- [良心云](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)：
-  - **2 元 / 月 100G**，6 元 1000G（1T）
-  - 直连 AWS 与 Oracle，协议为 VLESS Reality 与 Hysteria2
-  - 可解锁 Netflix、Disney+、TikTok、ChatGPT；无审计，流量倍率 1 倍
-  - 覆盖新疆、河南、福建等地区，高峰时段可播放 4K
-  - 新用户注册即获体验流量
-- [赔钱机场](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw)：
-  - **低至 1.5 元 / 月**，主打超低价与大流量高性价比
-  - 支持 VLESS、Hysteria 2、Shadowsocks 等多协议直连
-  - 节点覆盖香港、日本、台湾、新加坡、美国等地区
-  - 提供超低倍率大流量下载节点，适合高流量与备用需求
+| 服务商 | 特点 / 价格 | 链接 |
+| --- | --- | --- |
+| 良心云 | 2 元/月 100G，6 元 1T；直连 AWS/Oracle；支持 VLESS/Hysteria2；解锁 Netflix/Disney+/ChatGPT；4K 高清 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 赔钱机场 | 低至 1.5 元/月；超低价大流量；支持 VLESS/Hysteria 2/SS 多协议直连；含低倍率大流量下载节点 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
 
 ## 快速开始
 
