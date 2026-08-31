@@ -44,19 +44,21 @@ Read-only demo account: `guest` / `guest`. This account cannot save settings. Fo
 
 ### Server
 
-[CloudCone](https://app.cloudcone.com/?ref=14393) hosts the demonstration site and does **not throttle disk I/O**. Many low-cost VPS plans impose I/O limits, which can stall the database and collect jobs. Overseas instances do not require ICP filing and are available immediately after provisioning. They are suitable for collect workloads, deployments of this kind, and a self-hosted network egress.
+- [CloudCone](https://app.cloudcone.com/?ref=14393): Affordable VPS with unthrottled disk I/O.
 
-### Proxy service
+### Network Service
 
-A stable network proxy is typically required when deploying overseas hosts, reaching collect sources, or debugging APIs. **LiangXinYun** is a direct-connect option:
-
-- **¥2 / month for 100G**, ¥6 for 1000G (1T)
-- Direct AWS and Oracle nodes; VLESS Reality and Hysteria2
-- Netflix, Disney+, TikTok, and ChatGPT unblocked; no traffic audit; 1× multiplier
-- Coverage includes Xinjiang, Henan, and Fujian; 4K playback during peak hours
-- New registrations receive trial traffic
-
-[Register LiangXinYun](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic)
+- [LiangXinYun](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic):
+  - **¥2 / month for 100G**, ¥6 for 1000G (1T)
+  - Direct AWS and Oracle nodes; VLESS Reality and Hysteria2
+  - Netflix, Disney+, TikTok, and ChatGPT unblocked; no traffic audit; 1× multiplier
+  - Coverage includes Xinjiang, Henan, and Fujian; 4K playback during peak hours
+  - New registrations receive trial traffic
+- [PeiQian Airport](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw):
+  - **As low as ¥1.5 / month**, ultra-low price with high bandwidth quota
+  - Direct connection supporting VLESS, Hysteria 2, and Shadowsocks
+  - Nodes across Hong Kong, Japan, Taiwan, Singapore, US, etc.
+  - Low-multiplier download nodes, ideal for high traffic and backup use
 
 ## Quick start
 
