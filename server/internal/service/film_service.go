@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/access"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -65,7 +66,11 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		sourceId = master[0].Id
 	}
 
-	return filmrepo.SaveDetail(sourceId, detail)
+	if err := filmrepo.SaveDetail(sourceId, detail); err != nil {
+		return err
+	}
+	access.InvalidateFilmMetaCache(int64(fd.Id))
+	return nil
 }
 
 // DelFilm 删除分类影片
@@ -74,7 +79,11 @@ func (s *FilmService) DelFilm(id int64) error {
 	if filmIndex == nil || filmIndex.ID == 0 {
 		return errors.New("影片信息不存在")
 	}
-	return filmrepo.DelFilmSearch(id)
+	if err := filmrepo.DelFilmSearch(id); err != nil {
+		return err
+	}
+	access.InvalidateFilmMetaCache(id)
+	return nil
 }
 
 // GetFilmClassTree 获取影片分类信息
