@@ -45,7 +45,19 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 	return "", errors.New("无法解析当前请求域名，请检查反向代理 Host/X-Forwarded-Host 配置")
 }
 
-// HandleProvide 提供给外界采集的 MacCMS 兼容接口
+func normalizeMediaURL(raw, baseURL string) string {
+	if raw == "" || baseURL == "" {
+		return raw
+	}
+	if strings.HasPrefix(raw, "http://") || strings.HasPrefix(raw, "https://") {
+		return raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		return baseURL + raw
+	}
+	return baseURL + "/" + raw
+}
+
 func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	ac := c.Query("ac")
 	t, _ := strconv.Atoi(c.DefaultQuery("t", "0"))
@@ -101,9 +113,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			return list
 		}
 		for i := range list {
-			if strings.HasPrefix(list[i].VodPic, "/") {
-				list[i].VodPic = baseURL + list[i].VodPic
-			}
+			list[i].VodPic = normalizeMediaURL(list[i].VodPic, baseURL)
 		}
 		return list
 	}
@@ -113,9 +123,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			return list
 		}
 		for i := range list {
-			if strings.HasPrefix(list[i].VodPic, "/") {
-				list[i].VodPic = baseURL + list[i].VodPic
-			}
+			list[i].VodPic = normalizeMediaURL(list[i].VodPic, baseURL)
 		}
 		return list
 	}
