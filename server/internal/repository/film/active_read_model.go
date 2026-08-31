@@ -728,9 +728,144 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	startedAt := time.Now()
 	page := ensurePage(s.Paging)
+	name := strings.TrimSpace(s.Name)
+	version := strings.TrimSpace(GetActiveSnapshotVersion())
 
+	// 1. 如果有搜索词，优先走内存倒排搜索索引与极速过滤 (毫秒级响应)
+	if name != "" && version != "" {
+		idx := getOrLoadFilmSearchMemoryIndex(version)
+		if idx != nil && len(idx.Items) > 0 {
+			matched := scoreMemoryIndex(idx, name, "latest", s.Pid, s.Cid)
+
+			// 内存过滤年份与更新时间范围
+			filteredHits := make([]scoredSearchHit, 0, len(matched))
+			for _, hit := range matched {
+				if s.Year > 0 && hit.year != s.Year {
+					continue
+				}
+				if s.BeginTime > 0 && hit.updateStamp < s.BeginTime {
+					continue
+				}
+				if s.EndTime > 0 && hit.updateStamp > s.EndTime {
+					continue
+				}
+				filteredHits = append(filteredHits, hit)
+			}
+
+			// 如果带有次级标签筛选 (plot / area / language)，做快照级后置过滤
+			if s.Plot != "" || s.Area != "" || s.Language != "" {
+				allCandidateMids := make([]int64, len(filteredHits))
+				for i, h := range filteredHits {
+					allCandidateMids[i] = h.mid
+				}
+				allSnapshots := GetProjectedSnapshotsByMidsOrdered(version, allCandidateMids)
+				finalSnapshots := make([]model.FilmListSnapshot, 0, len(allSnapshots))
+				for _, snap := range allSnapshots {
+					if s.Plot != "" && !strings.Contains(snap.ClassTag, s.Plot) {
+						continue
+					}
+					if s.Area != "" && strings.TrimSpace(snap.Area) != s.Area {
+						continue
+					}
+					if s.Language != "" && strings.TrimSpace(snap.Language) != s.Language {
+						continue
+					}
+					finalSnapshots = append(finalSnapshots, snap)
+				}
+
+				page.Total = len(finalSnapshots)
+				page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+				if page.PageCount <= 0 {
+					page.PageCount = 1
+				}
+
+				offset := getPageOffset(page)
+				if offset >= len(finalSnapshots) {
+					return []model.FilmIndex{}
+				}
+				end := offset + page.PageSize
+				if end > len(finalSnapshots) {
+					end = len(finalSnapshots)
+				}
+				paged := finalSnapshots[offset:end]
+				log.Printf("[ManageFilmSearch] 内存模糊过滤完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
+					name, s.Pid, s.Cid, page.Total, page.Current, len(paged), time.Since(startedAt))
+				return convertSnapshotsToFilmIndexes(paged)
+			}
+
+			// 无次级标签筛选，直接在命中结果中分页切片
+			pageMids := pageMidsFromHits(filteredHits, page)
+			if len(pageMids) == 0 {
+				return []model.FilmIndex{}
+			}
+
+			snapshots := GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+			log.Printf("[ManageFilmSearch] 内存模糊检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
+				name, s.Pid, s.Cid, page.Total, page.Current, len(snapshots), time.Since(startedAt))
+			return convertSnapshotsToFilmIndexes(snapshots)
+		}
+	}
+
+	// 2. 无搜索词时，优先走轻量只读快照表 FilmListSnapshot 投影查询
+	if version != "" {
+		query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
+		if s.Pid > 0 {
+			query = query.Where("pid = ?", s.Pid)
+		}
+		if s.Cid > 0 {
+			query = query.Where("cid = ?", s.Cid)
+		}
+		if plot := strings.TrimSpace(s.Plot); plot != "" {
+			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
+		}
+		if area := strings.TrimSpace(s.Area); area != "" {
+			query = query.Where("area = ?", area)
+		}
+		if lang := strings.TrimSpace(s.Language); lang != "" {
+			query = query.Where("language = ?", lang)
+		}
+		if s.Year > 0 {
+			query = query.Where("year = ?", s.Year)
+		}
+		if s.BeginTime > 0 {
+			query = query.Where("update_stamp >= ?", s.BeginTime)
+		}
+		if s.EndTime > 0 {
+			query = query.Where("update_stamp <= ?", s.EndTime)
+		}
+
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return []model.FilmIndex{}
+		}
+		page.Total = int(total)
+		page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+		if page.PageCount <= 0 {
+			page.PageCount = 1
+		}
+
+		var snapshots []model.FilmListSnapshot
+		offset := getPageOffset(page)
+		if err := query.Select(snapshotSelectFields).Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
+			return []model.FilmIndex{}
+		}
+
+		log.Printf(
+			"[ManageFilmSearch] 快照检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
+			s.Name,
+			s.Pid,
+			s.Cid,
+			page.Total,
+			page.Current,
+			page.PageSize,
+			time.Since(startedAt),
+		)
+		return convertSnapshotsToFilmIndexes(snapshots)
+	}
+
+	// 3. 兜底降级：快照未初始化时查询底层 FilmIndex
 	query := db.Mdb.Model(&model.FilmIndex{}).Where("deleted_at IS NULL")
-	if name := strings.TrimSpace(s.Name); name != "" {
+	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
 	if s.Pid > 0 {
@@ -751,6 +886,12 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	if s.Year > 0 {
 		query = query.Where("year = ?", s.Year)
 	}
+	if s.BeginTime > 0 {
+		query = query.Where("update_stamp >= ?", s.BeginTime)
+	}
+	if s.EndTime > 0 {
+		query = query.Where("update_stamp <= ?", s.EndTime)
+	}
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -769,7 +910,7 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	}
 
 	log.Printf(
-		"[ManageFilmSearch] 检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
+		"[ManageFilmSearch] 降级检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
 		s.Name,
 		s.Pid,
 		s.Cid,
@@ -781,9 +922,72 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	return indexes
 }
 
+func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.FilmIndex {
+	if len(snapshots) == 0 {
+		return []model.FilmIndex{}
+	}
+	result := make([]model.FilmIndex, len(snapshots))
+	for i, snap := range snapshots {
+		result[i] = model.FilmIndex{
+			Model: gorm.Model{
+				ID:        snap.ID,
+				CreatedAt: snap.CreatedAt,
+				UpdatedAt: snap.UpdatedAt,
+			},
+			FilmIndexIdentity: model.FilmIndexIdentity{
+				Mid:        snap.Mid,
+				ContentKey: snap.ContentKey,
+				SourceId:   snap.SourceId,
+				DbId:       snap.DbId,
+			},
+			FilmIndexCategory: model.FilmIndexCategory{
+				Cid:              snap.Cid,
+				Pid:              snap.Pid,
+				RootCategoryKey:  snap.RootCategoryKey,
+				CategoryKey:      snap.CategoryKey,
+				OriginalCategory: snap.OriginalCategory,
+				CName:            snap.CName,
+			},
+			FilmIndexContent: model.FilmIndexContent{
+				SeriesKey:          snap.SeriesKey,
+				Name:               snap.Name,
+				SubTitle:           snap.SubTitle,
+				ClassTag:           snap.ClassTag,
+				Area:               snap.Area,
+				Language:           snap.Language,
+				Year:               snap.Year,
+				Initial:            snap.Initial,
+				Score:              snap.Score,
+				UpdateStamp:        snap.UpdateStamp,
+				Hits:               snap.Hits,
+				State:              snap.State,
+				Remarks:            snap.Remarks,
+				Picture:            snap.Picture,
+				PictureSlide:       snap.PictureSlide,
+				CustomPicture:      snap.CustomPicture,
+				CustomPictureSlide: snap.CustomPictureSlide,
+				IsCustomPicture:    snap.IsCustomPicture,
+				Actor:              snap.Actor,
+				Director:           snap.Director,
+				Blurb:              snap.Blurb,
+			},
+			FilmIndexVersion: model.FilmIndexVersion{
+				CollectStamp:    snap.CollectStamp,
+				CategoryVersion: snap.CategoryVersion,
+				RuleVersion:     snap.RuleVersion,
+			},
+			FilmIndexDerived: model.FilmIndexDerived{
+				PlayFromSummary: snap.PlayFromSummary,
+			},
+		}
+	}
+	return result
+}
+
 func escapeLikePattern(s string) string {
 	s = strings.ReplaceAll(s, "\\", "\\\\")
 	s = strings.ReplaceAll(s, "%", "\\%")
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
 }
+

@@ -311,6 +311,17 @@ func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 	if version == "" {
 		return map[int64]map[string]any{}
 	}
+
+	cacheKey := fmt.Sprintf("EcoHub:filter_option:admin:v%s", version)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[int64]map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil && len(cached) > 0 {
+				return cached
+			}
+		}
+	}
+
 	var rows []model.FilmFilterOptionSnapshot
 	if err := db.Mdb.Where("snapshot_version = ?", version).Order("pid ASC, sort ASC, id ASC").Find(&rows).Error; err != nil || len(rows) == 0 {
 		return map[int64]map[string]any{}
@@ -324,6 +335,12 @@ func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 		resp := buildFilterOptionResponse(pidRows)
 		if tags, _ := resp["tags"].(map[string]any); tags != nil {
 			result[pid] = tags
+		}
+	}
+
+	if db.Rdb != nil && len(result) > 0 {
+		if raw, err := json.Marshal(result); err == nil {
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
 		}
 	}
 	return result
