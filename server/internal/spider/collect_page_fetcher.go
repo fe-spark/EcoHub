@@ -174,7 +174,7 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	return r
 }
 
-func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int, flushAtEnd bool, batch *notify.ChangeBatch) (bool, error) {
+func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int, batchCtx *collectBatchContext) (bool, error) {
 	if pageCount <= 0 {
 		return false, nil
 	}
@@ -283,13 +283,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	recordPageSuccess := func(page int, notifyMIDs, affectedMIDs []int64) {
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
-		noteCollectedMIDs(batch, s.Id, s.Name, notifyMIDs)
-		if s.Grade == model.MasterCollect && h < 0 {
-			collectLifecycle.addPendingMasterMIDs(s.Id, affectedMIDs)
-		} else if s.Grade == model.MasterCollect {
-			collectLifecycle.addMasterAffectedMIDs(affectedMIDs)
-		} else {
-			collectLifecycle.addAffectedMIDs(affectedMIDs)
+		if batchCtx != nil {
+			noteCollectedMIDs(batchCtx.batch, s.Id, s.Name, notifyMIDs)
+			batchCtx.addAffectedMIDs(s, h, affectedMIDs)
 		}
 		updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
 			progress.Success = snapshot.success
@@ -393,11 +389,11 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 				progress.Status = progressStatusFailed
 			}
 		})
-		if flushAtEnd || !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
+		isStandalone := batchCtx != nil && batchCtx.isStandalone
+		if isStandalone || !notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
 			emitSourceFailedNotify(s.Id, s.Name, stopErr.Error())
-		} else {
-			noteSourceError(s.Id, stopErr.Error())
 		}
+		noteSourceError(s.Id, stopErr.Error())
 		return stats.success > 0, stopErr
 	}
 	if s.Grade == model.MasterCollect && h < 0 && stats.failed > 0 {

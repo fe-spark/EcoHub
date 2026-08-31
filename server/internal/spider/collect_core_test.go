@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -38,7 +39,7 @@ func TestResolveCategoryHintTarget(t *testing.T) {
 	}{
 		{classCount: 0, expected: 0},
 		{classCount: 1, expected: 1},
-		{classCount: 10, expected: 7}, // 10 * 0.7 = 7
+		{classCount: 10, expected: 7},  // 10 * 0.7 = 7
 		{classCount: 20, expected: 14}, // 20 * 0.7 = 14
 	}
 
@@ -137,25 +138,52 @@ func TestCollectLifecycleState_BeginAndEndSource(t *testing.T) {
 	lc.endSource(sourceID)
 }
 
-func TestCollectLifecycleState_AffectedMIDsDrain(t *testing.T) {
-	lc := newCollectLifecycle()
+func TestCollectBatchContext_Isolation(t *testing.T) {
+	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
+	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Grade: model.SlaveCollect}
+	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Grade: model.SlaveCollect}
 
-	lc.addAffectedMIDs([]int64{100, 200, 100, -5})
-	lc.addMasterAffectedMIDs([]int64{300, 200})
+	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
+	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)
 
-	lc.mu.Lock()
-	affected := lc.drainAffectedMIDsLocked()
-	master := lc.drainMasterAffectedMIDsLocked()
-	lc.mu.Unlock()
-
-	expectedAffected := []int64{100, 200, 300}
-	expectedMaster := []int64{200, 300}
-
-	if !reflect.DeepEqual(affected, expectedAffected) {
-		t.Errorf("affected MIDs = %v; want %v", affected, expectedAffected)
+	if !batchA.isStandalone {
+		t.Errorf("expected batch A isStandalone=true")
 	}
-	if !reflect.DeepEqual(master, expectedMaster) {
-		t.Errorf("master MIDs = %v; want %v", master, expectedMaster)
+	if batchB.isStandalone {
+		t.Errorf("expected batch B isStandalone=false")
+	}
+
+	// Batch A 产生 MIDs: 100, 200
+	batchA.addAffectedMIDs(&sourceA, 24, []int64{100, 200})
+
+	// Batch B 产生 MIDs: 300, 400
+	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
+
+	// 验证两批次各自独立持有自身 MIDs，互不泄露
+	batchA.mu.Lock()
+	midsA := make([]int64, 0, len(batchA.affectedMIDs))
+	for mid := range batchA.affectedMIDs {
+		midsA = append(midsA, mid)
+	}
+	sort.Slice(midsA, func(i, j int) bool { return midsA[i] < midsA[j] })
+	batchA.mu.Unlock()
+
+	batchB.mu.Lock()
+	midsB := make([]int64, 0, len(batchB.affectedMIDs))
+	for mid := range batchB.affectedMIDs {
+		midsB = append(midsB, mid)
+	}
+	sort.Slice(midsB, func(i, j int) bool { return midsB[i] < midsB[j] })
+	batchB.mu.Unlock()
+
+	expectedA := []int64{100, 200}
+	expectedB := []int64{300, 400}
+
+	if !reflect.DeepEqual(midsA, expectedA) {
+		t.Errorf("batch A MIDs = %v; want %v", midsA, expectedA)
+	}
+	if !reflect.DeepEqual(midsB, expectedB) {
+		t.Errorf("batch B MIDs = %v; want %v", midsB, expectedB)
 	}
 }
 
