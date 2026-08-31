@@ -99,6 +99,11 @@ export default function SourceFormModal(props: SourceFormModalProps) {
               { label: "主采集站", value: 0 },
               { label: "附属采集站", value: 1 },
             ]}
+            onChange={(e) => {
+              if (e.target.value === 0) {
+                form.setFieldValue("isPosterSource", true);
+              }
+            }}
           />
         </Form.Item>
         <Form.Item
@@ -123,7 +128,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           label="海报图源"
           name="isPosterSource"
           valuePropName="checked"
-          tooltip="设为全局海报图源后，该站采集时将使用其高清海报直接更新并填充主站对应影片的封面与幻灯图（全局仅限一个生效海报源）。"
+          tooltip="采集时用其高清海报填充主站对应影片（全局唯一，关闭自动回退主站）。"
         >
           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
         </Form.Item>

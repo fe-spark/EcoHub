@@ -245,6 +245,11 @@ func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
 	}
 }
 
+// OverlayBannerLiveRemarks 实时叠加片库最新状态、海报图源高清封面与幻灯图
+func OverlayBannerLiveRemarks(banners model.Banners) model.Banners {
+	return overlayBannerLiveRemarks(banners)
+}
+
 func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 	if banners == nil {
 		return make(model.Banners, 0)
@@ -275,12 +280,27 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if snap.Remarks != "" {
 			out[i].Remark = snap.Remarks
 		}
-		if snap.Picture != "" {
-			out[i].Picture = snap.Picture
-			out[i].Poster = snap.Picture
+		// 核心优先级：若该轮播项已由管理员手动自定义修改 (IsCustomPic == true)，严格展示用户的自定义图片（优先 CustomPicture，兼容历史 Picture 字段）
+		customPic := strings.TrimSpace(out[i].CustomPicture)
+		if customPic == "" {
+			customPic = strings.TrimSpace(out[i].Picture)
 		}
-		if snap.PictureSlide != "" {
-			out[i].PictureSlide = snap.PictureSlide
+		if out[i].IsCustomPic && customPic != "" {
+			out[i].Picture = customPic
+			out[i].Poster = customPic
+			if strings.TrimSpace(out[i].PictureSlide) == "" {
+				out[i].PictureSlide = customPic
+			}
+		} else {
+			dispPic := snap.DisplayPicture()
+			if dispPic != "" {
+				out[i].Picture = dispPic
+				out[i].Poster = dispPic
+			}
+			dispSlide := snap.DisplayPictureSlide()
+			if dispSlide != "" {
+				out[i].PictureSlide = dispSlide
+			}
 		}
 	}
 	return out

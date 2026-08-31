@@ -84,7 +84,7 @@ func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: time.Now().Unix()},
 	}}
-	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_200": remarksOnly}); err != nil {
+	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_200": remarksOnly}, false); err != nil {
 		t.Fatal(err)
 	}
 	if infos[0].UpdateStamp != oldStamp {
@@ -101,7 +101,7 @@ func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: time.Now().Unix()},
 	}}
-	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos2, map[string]model.MovieDetail{"vod_200": moreEps}); err != nil {
+	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos2, map[string]model.MovieDetail{"vod_200": moreEps}, false); err != nil {
 		t.Fatal(err)
 	}
 	if infos2[0].UpdateStamp <= oldStamp {

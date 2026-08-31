@@ -117,6 +117,10 @@ func SyncSlavePostersIfConfiguredTx(tx *gorm.DB, sourceID string, details []mode
 		if !ok {
 			continue
 		}
+		// 防冲刷保护：若该影片被人工手动修改/自定义锁定，坚决不覆盖
+		if curIndex.IsCustomPicture {
+			continue
+		}
 		pic := strings.TrimSpace(itemDetail.Picture)
 		slide := strings.TrimSpace(itemDetail.PictureSlide)
 		if stripURLQuery(curIndex.Picture) == stripURLQuery(pic) && (slide == "" || stripURLQuery(curIndex.PictureSlide) == stripURLQuery(slide)) {
@@ -233,7 +237,7 @@ func batchUpdateFilmIndexPostersTx(tx *gorm.DB, updates []pendingPosterUpdate) e
 			slideCase += " ELSE picture_slide END"
 			updateMap["picture_slide"] = clause.Expr{SQL: slideCase, Vars: slideArgs}
 		}
-		if err := tx.Model(&model.FilmIndex{}).Where("mid IN ?", mids).Updates(updateMap).Error; err != nil {
+		if err := tx.Model(&model.FilmIndex{}).Where("mid IN ? AND is_custom_picture = ?", mids, false).Updates(updateMap).Error; err != nil {
 			return err
 		}
 	}
@@ -315,23 +319,46 @@ func LoadPostersBySourceAndKeysTx(tx *gorm.DB, sourceID string, movieKeys []stri
 	return result, nil
 }
 
-// ApplyExternalPosterSourceToMasterWritesTx 主站写入时应用外部海报源：
-// 若海报源已先采（movie_poster 表中有高清图），直接取高清图覆盖主站新写入内容，彻底解耦时序依赖。
+// ApplyExternalPosterSourceToMasterWritesTx 主站写入时应用海报三层优先级：
+// 1. 若已有库存且被人工自定义锁定 (existing.IsCustomPicture == true)，保持原自定义海报，坚决不覆盖；
+// 2. 若当前启用了有效海报源且 movie_poster 命中该片高清图，应用海报源的高清海报与幻灯图；
+// 3. 否则保持主站自身采集到的封面海报。
 func ApplyExternalPosterSourceToMasterWritesTx(
 	tx *gorm.DB,
 	masterSourceID string,
 	infos []model.FilmIndex,
 	detailsByKey map[string]model.MovieDetail,
 	existingByMid map[int64]model.FilmIndex,
+	isManual bool,
 ) error {
+	// 1. 若非人工手动保存（即爬虫日常采集写入），执行人工自定义海报保护
+	if !isManual {
+		for index := range infos {
+			if existing, ok := existingByMid[infos[index].Mid]; ok && existing.IsCustomPicture {
+				infos[index].IsCustomPicture = true
+				infos[index].CustomPicture = existing.CustomPicture
+				infos[index].CustomPictureSlide = existing.CustomPictureSlide
+				if newDetail, ok := detailsByKey[infos[index].ContentKey]; ok {
+					newDetail.IsCustomPicture = true
+					newDetail.CustomPicture = existing.CustomPicture
+					newDetail.CustomPictureSlide = existing.CustomPictureSlide
+					detailsByKey[infos[index].ContentKey] = newDetail
+				}
+			}
+		}
+	}
+
 	ps := repository.GetPosterSource()
 	if ps == nil || ps.Id == masterSourceID || !ps.State {
 		return nil
 	}
 
-	// 收集本批详情的所有 match_keys
+	// 收集本批详情的所有 match_keys（跳过已自定义锁定的项）
 	allKeys := make([]string, 0, len(detailsByKey)*2)
 	for _, detail := range detailsByKey {
+		if detail.IsCustomPicture {
+			continue
+		}
 		allKeys = append(allKeys, BuildPlaylistMovieKeys(detail)...)
 	}
 	allKeys = UniqueKeys(allKeys)
@@ -342,9 +369,12 @@ func ApplyExternalPosterSourceToMasterWritesTx(
 	}
 
 	for index := range infos {
+		if infos[index].IsCustomPicture {
+			continue
+		}
 		contentKey := infos[index].ContentKey
 		newDetail, ok := detailsByKey[contentKey]
-		if !ok {
+		if !ok || newDetail.IsCustomPicture {
 			continue
 		}
 
@@ -371,7 +401,8 @@ func pickBestMatchedPoster(detail model.MovieDetail, postersByKey map[string]mod
 	}
 	for _, key := range BuildPlaylistMovieKeys(detail) {
 		if p, ok := postersByKey[key]; ok && strings.TrimSpace(p.Picture) != "" {
-			return &p
+			poster := p
+			return &poster
 		}
 	}
 	return nil

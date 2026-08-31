@@ -1,16 +1,16 @@
-测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.4`。
+测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.5`。
 
 ### 核心变更
 
-#### 1. 首页轮播图动态海报与幻灯图联动
-- **快照多字段毫秒级点查**：新增 `LiveBannerSnapshotsByMIDs` 接口，单次查询直接从当前活跃快照中按 `mid` 点查最新的集数状态（`Remarks`）、高清封面（`Picture` / `Poster`）与横版幻灯图（`PictureSlide`）。
-- **全自动联动生效**：首页与管理后台轮播组件加载时动态覆盖最新图源。海报图源重采后，首页顶部 Swiper 轮播无需人工干预、全自动升级展示最新的高清海报大图与幻灯图。
+#### 1. 影视与轮播自定义封面独立存储与防冲刷锁定
+- **双层字段解耦架构**：在 `film_index`、`film_list_snapshot` 及 `banners` 表中引入 `custom_picture` / `custom_picture_slide` / `is_custom_picture` 独立存储字段，彻底与源站/海报源底层原图（`picture` / `picture_slide`）解耦。
+- **采集防冲刷保护**：管理员手动自定义封面后系统自动加锁（`is_custom_picture = true`），后续日常采集、海报图源重采与批量更新坚决不覆盖用户自定义图片。
+- **无损回退还原原图**：管理员在后台重新切换为“跟随海报源”时，系统自动清空自定义字段并无损恢复底层海报源/主站高清封面，彻底解决“自定义后原图丢失无法找回”的问题。
 
-#### 2. 内存搜索索引 20w+ 深度轻量化与 GC 优化
-- **冗余倒排精简**：彻底剥离内存搜索项中常驻的演职员、副标题分词及 6 个大 Map 倒排索引，将搜索核心聚焦于片名、全拼、首字母简拼与多音字。
-- **内存开销大幅收敛**：20w+ 影片数据下常驻内存占用从 ~300MB+ 下降至 ~35MB，堆对象数量降低 >85%，索引构建完成后主动调用 GC 与 OS 内存归还，大幅降低垃圾回收停顿。
+#### 2. 首页轮播海报联动与多态展示优化
+- **管理端海报多态可视化**：轮播列表直观区分展示「海报源联动」与「自定义锁定」状态标签；
+- **智能打底与实时叠加**：保存轮播项时若选择跟随海报源，自动查询片库快照打底；前台展示时通过 `OverlayBannerLiveRemarks` 实时叠加最新快照状态与幻灯图，兼顾灵活性与一致性。
 
-#### 3. 20w+ 数据库稳定性与安全边界加固
-- **复合索引空间优化**：`MoviePoster.SourceId` 显式声明 `size:64`，大幅压缩 `uidx_poster_source_key` 复合索引体积与 Buffer Pool 占用。
-- **快照分块安全释放**：`pruneOldFilmListSnapshots` 升级为 5000 条 Chunk 循环物理删除，彻底消除超大数据量单次全表 DELETE 导致的行锁竞争与 Undo Log 膨胀。
-- **站点级联物理清理**：删除采集源时物理级联清除 `MoviePoster` 和 `MoviePlaylist` 残留数据，保持表空间高度精炼。
+#### 3. 增量快照全链路缓存精准淘汰与单站海报源兜底
+- **精准批量淘汰**：在增量快照发布流程（`InvalidateIncrementalSnapshotCaches`）中通过 Redis Pipeline 批量精准删除被修改影片的 `EcoHub:filmPlayInfo:<mid>` 缓存，并原子重置内存读模型与搜索索引，避免全量大面积缓存击穿。
+- **采集站海报源安全闭环**：添加、更新或删除采集源时，全自动执行 `EnsureDefaultPosterSourceTx` 兜底检查，当外部海报源关闭或移除时，自动将主站恢复为默认海报图源，保障系统始终具备稳定的海报抓取能力。
