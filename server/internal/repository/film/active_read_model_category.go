@@ -164,10 +164,9 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 		}
 	}
 
-	hotSince := time.Now().AddDate(0, -1, 0).Unix()
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).
 		Select(basicSelectFields).
-		Where("snapshot_version = ? AND update_stamp > ?", version, hotSince)
+		Where("snapshot_version = ?", version)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -211,10 +210,9 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 		}
 	}
 
-	hotSince := time.Now().AddDate(0, -1, 0).Unix()
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).
 		Select(basicSelectFields).
-		Where("snapshot_version = ? AND update_stamp > ?", version, hotSince)
+		Where("snapshot_version = ?", version)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -225,23 +223,7 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 	_ = query.Order("hits DESC, id DESC").Limit(poolSize).Find(&snapshots).Error
 	result := BuildMovieBasicInfosFromSnapshots(snapshots...)
 
-	// 若近一个月无热播数据，降级为全量历史按 hits 排序
-	if len(result) == 0 {
-		fallbackQuery := db.Mdb.Model(&model.FilmListSnapshot{}).
-			Select(basicSelectFields).
-			Where("snapshot_version = ?", version)
-		if field == "pid" {
-			fallbackQuery = fallbackQuery.Where("pid = ?", id)
-		} else {
-			fallbackQuery = fallbackQuery.Where("cid = ?", id)
-		}
-		var fallbackSnapshots []model.FilmListSnapshot
-		if err := fallbackQuery.Order("hits DESC, id DESC").Limit(poolSize).Find(&fallbackSnapshots).Error; err == nil {
-			result = BuildMovieBasicInfosFromSnapshots(fallbackSnapshots...)
-		}
-	}
-
-	if db.Rdb != nil {
+	if db.Rdb != nil && len(result) > 0 {
 		if raw, err := json.Marshal(result); err == nil {
 			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
 		}

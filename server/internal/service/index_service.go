@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -86,26 +87,31 @@ func (i *IndexService) IndexPage() map[string]any {
 		info := make(map[string]any)
 		tree := repository.GetActiveCategoryTree()
 		info["category"] = tree
-		list := make([]map[string]any, 0)
-		for _, c := range tree.Children {
-			var movies []model.MovieBasicInfo
-			var hotMovies []model.MovieBasicInfo
-			if c.Children != nil {
-				movies = filmrepo.GetSnapshotMovieListByCategory(version, "pid", c.Id, 14, 0)
-				hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "pid", c.Id, 14, 0)
-			} else {
-				movies = filmrepo.GetSnapshotMovieListByCategory(version, "cid", c.Id, 14, 0)
-				hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "cid", c.Id, 14, 0)
-			}
-			if movies == nil {
-				movies = make([]model.MovieBasicInfo, 0)
-			}
-			if hotMovies == nil {
-				hotMovies = make([]model.MovieBasicInfo, 0)
-			}
-			item := map[string]any{"nav": c, "movies": movies, "hot": hotMovies}
-			list = append(list, item)
+		list := make([]map[string]any, len(tree.Children))
+		var wg sync.WaitGroup
+		for idx, c := range tree.Children {
+			wg.Add(1)
+			go func(i int, cat *model.CategoryTree) {
+				defer wg.Done()
+				var movies []model.MovieBasicInfo
+				var hotMovies []model.MovieBasicInfo
+				if cat.Children != nil {
+					movies = filmrepo.GetSnapshotMovieListByCategory(version, "pid", cat.Id, 14, 0)
+					hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "pid", cat.Id, 14, 0)
+				} else {
+					movies = filmrepo.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+				}
+				if movies == nil {
+					movies = make([]model.MovieBasicInfo, 0)
+				}
+				if hotMovies == nil {
+					hotMovies = make([]model.MovieBasicInfo, 0)
+				}
+				list[i] = map[string]any{"nav": cat, "movies": movies, "hot": hotMovies}
+			}(idx, c)
 		}
+		wg.Wait()
 		info["content"] = list
 		banners := overlayBannerLiveRemarks(repository.GetBanners())
 		if banners == nil {
@@ -207,19 +213,31 @@ func overlayDynamicCategoryMovies(version string, outInfo map[string]any) {
 	switch list := rawContent.(type) {
 	case []map[string]any:
 		newList := make([]map[string]any, len(list))
+		var wg sync.WaitGroup
 		for i, section := range list {
-			newList[i] = processDynamicRecommendSection(section, version)
+			wg.Add(1)
+			go func(idx int, sec map[string]any) {
+				defer wg.Done()
+				newList[idx] = processDynamicRecommendSection(sec, version)
+			}(i, section)
 		}
+		wg.Wait()
 		outInfo["content"] = newList
 	case []any:
 		newList := make([]any, len(list))
+		var wg sync.WaitGroup
 		for i, rawSec := range list {
-			if secMap, ok := rawSec.(map[string]any); ok {
-				newList[i] = processDynamicRecommendSection(secMap, version)
-			} else {
-				newList[i] = rawSec
-			}
+			wg.Add(1)
+			go func(idx int, raw any) {
+				defer wg.Done()
+				if secMap, ok := raw.(map[string]any); ok {
+					newList[idx] = processDynamicRecommendSection(secMap, version)
+				} else {
+					newList[idx] = raw
+				}
+			}(i, rawSec)
 		}
+		wg.Wait()
 		outInfo["content"] = newList
 	}
 }
