@@ -55,6 +55,17 @@ func TestActiveReadModelVersionFallsBackWhenEmpty(t *testing.T) {
 }
 
 func TestClearActiveFilmReadModelLeavesEmptyNonNilPointer(t *testing.T) {
+	origRm := GetActiveFilmReadModel()
+	origIdx := activeFilmSearchIndex.Load()
+	defer func() {
+		if origRm != nil {
+			activeFilmReadModel.Store(origRm)
+		}
+		if origIdx != nil {
+			activeFilmSearchIndex.Store(origIdx)
+		}
+	}()
+
 	ClearActiveFilmReadModel()
 	rm := GetActiveFilmReadModel()
 	if rm == nil {
@@ -62,5 +73,33 @@ func TestClearActiveFilmReadModelLeavesEmptyNonNilPointer(t *testing.T) {
 	}
 	if rm.Version != "" {
 		t.Fatalf("ClearActiveFilmReadModel Version = %q, want empty", rm.Version)
+	}
+}
+
+func TestInvalidateActiveFilmSearchIndexPreservesReadModelVersion(t *testing.T) {
+	origRm := GetActiveFilmReadModel()
+	origIdx := activeFilmSearchIndex.Load()
+	defer func() {
+		if origRm != nil {
+			activeFilmReadModel.Store(origRm)
+		}
+		if origIdx != nil {
+			activeFilmSearchIndex.Store(origIdx)
+		}
+	}()
+
+	const testVer = "v-test-preserve-123"
+	_ = LoadActiveFilmReadModel(testVer)
+
+	InvalidateActiveFilmSearchIndex(testVer)
+
+	rm := GetActiveFilmReadModel()
+	if rm == nil || rm.Version != testVer {
+		t.Fatalf("InvalidateActiveFilmSearchIndex cleared version, got %+v, want version=%q", rm, testVer)
+	}
+
+	searchIdx := activeFilmSearchIndex.Load()
+	if searchIdx != nil && searchIdx.Version != "" && len(searchIdx.Items) > 0 {
+		t.Fatalf("InvalidateActiveFilmSearchIndex failed to mark memory search index stale, got %+v", searchIdx)
 	}
 }

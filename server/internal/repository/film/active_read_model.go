@@ -187,6 +187,22 @@ func ClearActiveFilmReadModel() {
 	activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
 }
 
+// InvalidateActiveFilmSearchIndex 增量发布后重置内存搜索索引并在后台异步重建，保持活跃读模型 Version 处于有效状态。
+func InvalidateActiveFilmSearchIndex(version string) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version != "" {
+		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
+		if err := LoadActiveFilmReadModel(version); err != nil {
+			log.Printf("[ActiveReadModel] 重载读模型失败 version=%s: %v", version, err)
+		}
+	} else {
+		ClearActiveFilmReadModel()
+	}
+}
+
 func GetActiveFilmReadModel() *FilmReadModel {
 	return activeFilmReadModel.Load()
 }

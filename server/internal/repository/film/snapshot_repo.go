@@ -317,8 +317,7 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 		return
 	}
 	if result.RowsAffected > 0 {
-		RefreshAccessDataCaches()
-		rebuildActiveFilterOptions(version)
+		InvalidateIncrementalSnapshotCaches(version, ids)
 	}
 }
 
@@ -755,8 +754,8 @@ func RefreshAccessDataCaches() {
 	)
 }
 
-// InvalidateIncrementalSnapshotCaches 增量快照发布后淘汰列表/播放缓存，并重置内存搜索索引。
-// 不能直接 ClearActiveFilmReadModel：它会把 Version 写成空字符串，播放详情随即全站失败。
+// InvalidateIncrementalSnapshotCaches 增量快照发布后精准淘汰列表/播放缓存，并重置内存搜索索引。
+// 严禁调用 ClearActiveFilmReadModel：防止 Version 被置空导致全站播放详情失败。
 func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	ClearProvideListCache()
@@ -764,15 +763,7 @@ func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version != "" {
-		// 丢掉过期内存搜索索引，但立刻写回当前快照版本，避免播放详情读到空 version。
-		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
-		if err := LoadActiveFilmReadModel(version); err != nil {
-			log.Printf("[Snapshot] 增量发布后重载读模型失败 version=%s: %v", version, err)
-		}
-	} else {
-		ClearActiveFilmReadModel()
-	}
+	InvalidateActiveFilmSearchIndex(version)
 	if db.Rdb != nil && len(mids) > 0 {
 		// 精准批量删除被修改影片的详情与播放页缓存
 		pipe := db.Rdb.Pipeline()
