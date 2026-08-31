@@ -259,6 +259,13 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	sourceID := ""
+	if len(infos) > 0 {
+		sourceID = infos[0].SourceId
+	}
+	if err := ApplyExternalPosterSourceToMasterWritesTx(tx, sourceID, infos, detailsByKey, existingByMid); err != nil {
+		log.Printf("ApplyExternalPosterSourceToMasterWritesTx Error: %v", err)
+	}
 	for index := range infos {
 		existing, ok := existingByMid[infos[index].Mid]
 		if !ok || existing.UpdateStamp <= 0 {
@@ -446,6 +453,12 @@ func buildMovieDetailInfos(sourceID string, details []model.MovieDetail, infoByK
 		}
 
 		detail.Id = globalMid
+		if strings.TrimSpace(info.Picture) != "" {
+			detail.Picture = info.Picture
+		}
+		if strings.TrimSpace(info.PictureSlide) != "" {
+			detail.PictureSlide = info.PictureSlide
+		}
 		data, _ := json.Marshal(detail)
 		detailInfos = append(detailInfos, model.MovieDetailInfo{
 			Mid:             globalMid,

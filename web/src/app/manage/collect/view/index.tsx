@@ -109,6 +109,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     uri: item.uri,
     state: Boolean(item.state),
     grade: Number(item.grade ?? 1),
+    isPosterSource: Boolean(item.isPosterSource),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
@@ -494,14 +495,19 @@ export default function CollectManagePageView() {
       }
       if (resp.code === 0) {
         pollFailuresRef.current = 0;
-        const list = Array.isArray(resp.data)
-          ? resp.data.map((item: CollectListItemResponse) =>
-              normalizeSource(item),
-            )
-          : [];
-        setSiteList(list);
+        const rawData = Array.isArray(resp.data) ? resp.data : [];
+        setSiteList((current) => {
+          const cdMap = new Map(current.map((item) => [item.id, item.cd]));
+          return rawData.map((item: CollectListItemResponse) => {
+            const normalized = normalizeSource(item);
+            if (cdMap.has(item.id) && cdMap.get(item.id)) {
+              normalized.cd = cdMap.get(item.id);
+            }
+            return normalized;
+          });
+        });
         setSelectedSourceIds((current) =>
-          current.filter((id) => list.some((item) => item.id === id)),
+          current.filter((id) => rawData.some((item: CollectListItemResponse) => item.id === id)),
         );
       } else {
         pollFailuresRef.current += 1;
@@ -551,27 +557,10 @@ export default function CollectManagePageView() {
   );
 
   const changeCollectDuration = useCallback(
-    async (id: string, value: number) => {
-      const record = siteList.find((item) => item.id === id);
-      if (!record) {
-        return;
-      }
+    (id: string, value: number) => {
       updateSiteListItem(id, (item) => ({ ...item, cd: value }));
-      const resp = await ApiPost("/manage/collect/update", {
-        id,
-        name: record.name,
-        uri: record.uri,
-        grade: record.grade,
-        state: record.state,
-        interval: record.interval,
-        cd: value,
-      });
-      if (resp.code !== 0) {
-        message.error(resp.msg || "保存采集时长失败");
-        updateSiteListItem(id, (item) => ({ ...item, cd: record.cd }));
-      }
     },
-    [message, siteList, updateSiteListItem],
+    [updateSiteListItem],
   );
 
   const handleSelectSource = useCallback((id: string, checked: boolean) => {
@@ -815,6 +804,7 @@ export default function CollectManagePageView() {
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
         grade: Number(resp.data.grade ?? 1),
+        isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
       });

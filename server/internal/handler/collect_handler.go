@@ -111,13 +111,14 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 	}
 	if s.State != fs.State {
 		upds := model.FilmSource{
-			Id:       fs.Id,
-			Name:     fs.Name,
-			Uri:      fs.Uri,
-			Grade:    fs.Grade,
-			State:    s.State,
-			Interval: fs.Interval,
-			Cd:       fs.Cd,
+			Id:             fs.Id,
+			Name:           fs.Name,
+			Uri:            fs.Uri,
+			Grade:          fs.Grade,
+			State:          s.State,
+			IsPosterSource: fs.IsPosterSource,
+			Interval:       fs.Interval,
+			Cd:             fs.Cd,
 		}
 		if err := service.CollectSvc.UpdateFilmSource(upds); err != nil {
 			dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)

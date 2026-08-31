@@ -116,6 +116,21 @@ type MoviePlaylist struct {
 	Content    string `gorm:"type:longtext"`
 }
 
+// MoviePoster 附属站海报图源持久化模型。
+// 当站点设为 IsPosterSource 时，采集时将海报按 match_key 写入该表。
+// 主站入库和附属站采集双向反查该表，彻底解耦时序依赖。
+type MoviePoster struct {
+	gorm.Model
+	SourceId     string `gorm:"uniqueIndex:uidx_poster_source_key;size:64"`
+	MovieKey     string `gorm:"uniqueIndex:uidx_poster_source_key;index:idx_movie_poster_movie_key;size:128"`
+	Picture      string `gorm:"type:text"`
+	PictureSlide string `gorm:"type:text"`
+}
+
+func (MoviePoster) TableName() string {
+	return TableMoviePoster
+}
+
 // MovieMatchKey 主站影片匹配键索引。
 // 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，供详情页实时补附属站播放源。
 type MovieMatchKey struct {

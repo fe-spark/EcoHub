@@ -89,43 +89,38 @@ func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.Movie
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
 		return nil, err
 	}
+	// 附属站海报同步：若当前源开启了 IsPosterSource，将高清海报同步写入主站影片并加入刷新列表
+	posterUpdatedMids, err := SyncSlavePostersIfConfiguredTx(db.Mdb, sourceID, details, infos)
+	if err != nil {
+		log.Printf("SyncSlavePostersIfConfiguredTx Error: %v", err)
+	}
+
 	// 更新列表：本源追集且集数超过全库其它源（后到的同集数源不重进）
 	changedMids, err := touchSlavePlaylistUpdateStamps(sourceID, changes)
 	if err != nil {
 		return nil, err
 	}
-	// 播放源摘要：仅对本批有 playlist 写入的 mid 刷新，避免每次把页内全部匹配片（数十上百）刷进 finalizer
-	if refreshMIDs := slavePlaylistAffectedMIDs(changes); len(refreshMIDs) > 0 {
-		refreshInfos := filterFilmIndexesByMIDs(infos, refreshMIDs)
-		if len(refreshInfos) == 0 {
-			// infos 可能因匹配策略未包含某 mid：按 mid 回表
-			var rows []model.FilmIndex
-			if err := db.Mdb.Where("mid IN ?", refreshMIDs).Find(&rows).Error; err == nil {
-				refreshInfos = rows
+	// 播放源摘要/海报刷新：对本批有 playlist 写入或海报更新的 mid 刷新，刷进 finalizer 增量发布快照
+	refreshMIDs := slavePlaylistAffectedMIDs(changes)
+	if len(posterUpdatedMids) > 0 {
+		refreshMIDs = append(refreshMIDs, posterUpdatedMids...)
+	}
+	if len(refreshMIDs) > 0 {
+		seen := make(map[int64]struct{}, len(refreshMIDs))
+		refreshInfos := make([]model.FilmIndex, 0, len(refreshMIDs))
+		for _, mid := range refreshMIDs {
+			if mid > 0 {
+				if _, ok := seen[mid]; !ok {
+					seen[mid] = struct{}{}
+					refreshInfos = append(refreshInfos, model.FilmIndex{
+						FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid},
+					})
+				}
 			}
 		}
 		SchedulePlaySummaryRefresh(refreshInfos...)
 	}
 	return changedMids, nil
-}
-
-func filterFilmIndexesByMIDs(infos []model.FilmIndex, mids []int64) []model.FilmIndex {
-	if len(infos) == 0 || len(mids) == 0 {
-		return nil
-	}
-	want := make(map[int64]struct{}, len(mids))
-	for _, mid := range mids {
-		if mid > 0 {
-			want[mid] = struct{}{}
-		}
-	}
-	out := make([]model.FilmIndex, 0, len(want))
-	for _, info := range infos {
-		if _, ok := want[info.Mid]; ok {
-			out = append(out, info)
-		}
-	}
-	return out
 }
 
 // slavePlaylistAffectedMIDs 任意 playlist 写入（含仅链接刷新）涉及的 mid，每个 movie_key 只取一个最优 mid。

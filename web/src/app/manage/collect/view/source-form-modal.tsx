@@ -119,6 +119,14 @@ export default function SourceFormModal(props: SourceFormModalProps) {
             options={collectDuration.map((item) => ({ label: item.label, value: item.time }))}
           />
         </Form.Item>
+        <Form.Item
+          label="海报图源"
+          name="isPosterSource"
+          valuePropName="checked"
+          tooltip="设为全局海报图源后，该站采集时将使用其高清海报直接更新并填充主站对应影片的封面与幻灯图（全局仅限一个生效海报源）。"
+        >
+          <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+        </Form.Item>
         <Form.Item label="是否启用" name="state" valuePropName="checked">
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>

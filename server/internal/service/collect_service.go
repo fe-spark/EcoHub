@@ -215,6 +215,13 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	if old.Cd != next.Cd {
 		changes = append(changes, fmt.Sprintf("采集时长: %d小时 → %d小时", old.Cd, next.Cd))
 	}
+	if old.IsPosterSource != next.IsPosterSource {
+		if next.IsPosterSource {
+			changes = append(changes, "海报图源: 设为优先海报图源")
+		} else {
+			changes = append(changes, "海报图源: 取消优先海报图源")
+		}
+	}
 	return changes
 }
 

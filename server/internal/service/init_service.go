@@ -29,7 +29,7 @@ func (s *InitService) DefaultDataInit() {
 	} else {
 		db.Mdb.AutoMigrate(
 			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FilmFilterOptionSnapshot{}, &model.FilmFilterIndexSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
-			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{},
+			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{}, &model.MoviePoster{},
 			&model.MovieMatchKey{},
 			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.CollectSourceStats{}, &model.SearchTagItem{},
 			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
