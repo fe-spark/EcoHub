@@ -427,8 +427,8 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 		return version, 0, nil
 	}
 
-	allSnapshots := make([]model.FilmListSnapshot, 0, len(ids))
-	allDeletedMIDs := make([]int64, 0)
+	updatedCount := 0
+	deletedCount := 0
 	processed := 0
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		for _, batchIDs := range chunkSnapshotMIDs(ids, snapshotBuildBatchSize) {
@@ -470,8 +470,8 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 			}
 			writeCost := time.Since(writeStartedAt)
 
-			allSnapshots = append(allSnapshots, batchSnapshots...)
-			allDeletedMIDs = append(allDeletedMIDs, deletedMIDs...)
+			updatedCount += len(batchSnapshots)
+			deletedCount += len(deletedMIDs)
 			processed += len(batchIDs)
 			log.Printf(
 				"[Snapshot] 快速增量发布进度 version=%s mid=%d/%d batch=%d updated=%d deleted=%d query=%s build=%s write=%s cost=%s total_cost=%s",
@@ -494,14 +494,14 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	}
 
 	applyStartedAt := time.Now()
-	if err := ApplyActiveFilmReadModelSnapshots(version, allSnapshots, allDeletedMIDs); err != nil {
+	if err := ApplyActiveFilmReadModelSnapshots(version, nil, nil); err != nil {
 		return "", 0, err
 	}
 	applyCost := time.Since(applyStartedAt)
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
-	log.Printf("[Snapshot] 快速增量发布完成 version=%s input=%d updated=%d deleted=%d apply=%s total_cost=%s", version, len(ids), len(allSnapshots), len(allDeletedMIDs), applyCost, time.Since(startedAt))
-	return version, len(allSnapshots), nil
+	log.Printf("[Snapshot] 快速增量发布完成 version=%s input=%d updated=%d deleted=%d apply=%s total_cost=%s", version, len(ids), updatedCount, deletedCount, applyCost, time.Since(startedAt))
+	return version, updatedCount, nil
 }
 
 func chunkSnapshotMIDs(ids []int64, size int) [][]int64 {

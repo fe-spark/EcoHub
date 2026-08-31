@@ -195,29 +195,21 @@ func IsAsciiAlphaNum(s string) bool {
 	return true
 }
 
-// FilmSearchItem 搜索索引项
+// FilmSearchItem 搜索索引项（纯片名与拼音轻量结构，零常驻 slice）
 type FilmSearchItem struct {
 	Mid               int64
 	Name              string
 	CleanName         string
 	PinyinFull        string
-	PinyinSyllables   []string
 	PinyinInitials    string
 	PinyinInitialAlts string
-	SubTitle          string
-	Actor             string
-	Director          string
-	AliasSegs         []string
-	AliasWords        []string
-	PersonSegs        []string
-	PersonWords       []string
 	Hits              int64
 	Score             float64
 	Year              int64
 	UpdateStamp       int64
 }
 
-// FillSearchDerivedFields 建索引时预计算清洗文本、拼音、别名/人名片段，查询热路径不再切分或 OpenCC。
+// FillSearchDerivedFields 建索引时预计算清洗文本与拼音。
 func FillSearchDerivedFields(item *FilmSearchItem) {
 	if item == nil {
 		return
@@ -225,7 +217,6 @@ func FillSearchDerivedFields(item *FilmSearchItem) {
 	normName := TraditionalToSimplified(item.Name)
 	item.CleanName = cleanCompactNormalized(normName)
 	item.PinyinFull = pinyinFullNormalized(normName)
-	item.PinyinSyllables = pinyinSyllablesNormalized(normName)
 	variants := pinyinInitialVariantsNormalized(normName)
 	if len(variants) > 0 {
 		item.PinyinInitials = variants[0]
@@ -233,8 +224,6 @@ func FillSearchDerivedFields(item *FilmSearchItem) {
 			item.PinyinInitialAlts = strings.Join(variants[1:], " ")
 		}
 	}
-	item.AliasSegs, item.AliasWords = BuildAliasFields(item.SubTitle)
-	item.PersonSegs, item.PersonWords = BuildPersonFields(item.Actor, item.Director)
 }
 
 // QueryContext 搜索词上下文
@@ -360,20 +349,24 @@ func scorePinyinMatch(item FilmSearchItem, cleanAsciiKey string) int {
 		return 0
 	}
 	best := 0
-	if len(item.PinyinSyllables) > 0 {
-		if s, ok := matchPinyinSyllables(item.PinyinSyllables, cleanAsciiKey); ok {
-			best = raiseScore(best, s)
+	nameForSyllables := item.CleanName
+	if nameForSyllables == "" && item.Name != "" {
+		nameForSyllables = CleanCompactText(item.Name)
+	}
+	if nameForSyllables != "" {
+		syllables := pinyinSyllablesNormalized(nameForSyllables)
+		if len(syllables) > 0 {
+			if s, ok := matchPinyinSyllables(syllables, cleanAsciiKey); ok {
+				best = raiseScore(best, s)
+			}
+		} else if item.PinyinFull != "" {
+			if len(cleanAsciiKey) >= 3 && item.PinyinFull == cleanAsciiKey {
+				best = raiseScore(best, 400)
+			}
 		}
 	} else if item.PinyinFull != "" {
 		if len(cleanAsciiKey) >= 3 && item.PinyinFull == cleanAsciiKey {
 			best = raiseScore(best, 400)
-		} else if len(cleanAsciiKey) >= 4 && strings.HasPrefix(item.PinyinFull, cleanAsciiKey) {
-			diff := len(item.PinyinFull) - len(cleanAsciiKey)
-			score := 360 - diff*3
-			if score < 310 {
-				score = 310
-			}
-			best = raiseScore(best, score)
 		}
 	}
 
@@ -411,235 +404,7 @@ func scorePinyinMatch(item FilmSearchItem, cleanAsciiKey string) int {
 	return best
 }
 
-func isFieldSegmentSplitter(r rune) bool {
-	switch r {
-	case '/', '|', ',', '，', '、', ';', '；', '\n', '\t':
-		return true
-	default:
-		return false
-	}
-}
-
-func splitFieldSegments(raw string) []string {
-	if strings.TrimSpace(raw) == "" {
-		return nil
-	}
-	parts := strings.FieldsFunc(raw, isFieldSegmentSplitter)
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-func looksLikeRelatedTitleDump(raw string) bool {
-	return len(splitFieldSegments(raw)) >= 3
-}
-
-func extractAsciiWords(raw string) []string {
-	if raw == "" {
-		return nil
-	}
-	lower := strings.ToLower(raw)
-	return strings.FieldsFunc(lower, func(r rune) bool {
-		return !((r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'))
-	})
-}
-
-func BuildAliasFields(raw string) (segs []string, words []string) {
-	words = extractAsciiWords(raw)
-	if looksLikeRelatedTitleDump(raw) {
-		return nil, words
-	}
-	parts := splitFieldSegments(raw)
-	if len(parts) == 0 {
-		c := CleanCompactText(raw)
-		if c == "" {
-			return nil, words
-		}
-		if len([]rune(c)) > 24 {
-			return nil, words
-		}
-		return []string{c}, words
-	}
-	segs = make([]string, 0, len(parts))
-	for _, p := range parts {
-		c := CleanCompactText(p)
-		if c != "" {
-			segs = append(segs, c)
-		}
-	}
-	return segs, words
-}
-
-func BuildPersonFields(actor, director string) (segs []string, words []string) {
-	appendPersons := func(raw string) {
-		if strings.TrimSpace(raw) == "" {
-			return
-		}
-		words = append(words, extractAsciiWords(raw)...)
-		parts := splitFieldSegments(raw)
-		if len(parts) == 0 {
-			parts = []string{raw}
-		}
-		for _, p := range parts {
-			c := CleanCompactText(p)
-			if c == "" {
-				continue
-			}
-			if len([]rune(c)) > 16 {
-				continue
-			}
-			segs = append(segs, c)
-		}
-	}
-	appendPersons(actor)
-	appendPersons(director)
-	return segs, words
-}
-
-func scoreAsciiWordList(words []string, q QueryContext, exactScore, containsScore int) int {
-	if len(words) == 0 || q.CleanRunes < 3 || len(q.Tokens) > 1 {
-		return 0
-	}
-	target := strings.ToLower(q.CleanKey)
-	best := 0
-	for _, w := range words {
-		if w == target {
-			return exactScore
-		}
-		if len(target) >= 4 && strings.HasPrefix(w, target) {
-			best = raiseScore(best, containsScore)
-		}
-	}
-	return best
-}
-
-func scorePersonSegs(segs, words []string, q QueryContext) int {
-	if q.IsAsciiOnly {
-		return scoreAsciiWordList(words, q, 210, 190)
-	}
-	if q.CleanRunes < 2 || q.CleanRunes >= 5 || len(segs) == 0 {
-		return 0
-	}
-	best := 0
-	for _, cSeg := range segs {
-		if cSeg == q.CleanKey {
-			best = raiseScore(best, 210)
-			continue
-		}
-		if strings.Contains(cSeg, q.CleanKey) {
-			best = raiseScore(best, 190)
-		}
-	}
-	return best
-}
-
-func scoreAliasSegs(segs, words []string, q QueryContext) int {
-	if q.IsAsciiOnly {
-		best := scoreAsciiWordList(words, q, 290, 260)
-		if q.CleanRunes < 3 {
-			return best
-		}
-		for i, c := range segs {
-			if c == q.CleanKey {
-				if i == 0 || q.CleanRunes < 4 {
-					best = raiseScore(best, 290)
-				}
-				continue
-			}
-			if strings.HasPrefix(c, q.CleanKey) {
-				best = raiseScore(best, 260)
-				continue
-			}
-			if strings.Contains(c, q.CleanKey) && len([]rune(c)) <= q.CleanRunes+4 {
-				best = raiseScore(best, 260)
-			}
-		}
-		return best
-	}
-	if len(segs) == 0 {
-		return 0
-	}
-	best := 0
-	for i, c := range segs {
-		if c == q.CleanKey {
-			if i == 0 || q.CleanRunes < 4 {
-				best = raiseScore(best, 290)
-			}
-			continue
-		}
-		if strings.HasPrefix(c, q.CleanKey) {
-			best = raiseScore(best, 260)
-			continue
-		}
-		if strings.Contains(c, q.CleanKey) && len([]rune(c)) <= q.CleanRunes+4 {
-			best = raiseScore(best, 260)
-		}
-	}
-	return best
-}
-
-func preparedSecondary(item *FilmSearchItem) {
-	if len(item.AliasSegs) == 0 && len(item.AliasWords) == 0 && item.SubTitle != "" {
-		item.AliasSegs, item.AliasWords = BuildAliasFields(item.SubTitle)
-	}
-	if len(item.PersonSegs) == 0 && len(item.PersonWords) == 0 && (item.Actor != "" || item.Director != "") {
-		item.PersonSegs, item.PersonWords = BuildPersonFields(item.Actor, item.Director)
-	}
-}
-
-func tokenHitsPersonOrAlias(token string, item FilmSearchItem) bool {
-	cTok := token
-	if cTok == "" {
-		return false
-	}
-	if IsAsciiAlphaNum(cTok) {
-		if len(cTok) < 2 {
-			return false
-		}
-		allowPrefix := len(cTok) >= 4
-		for _, w := range item.AliasWords {
-			if w == cTok || (allowPrefix && strings.HasPrefix(w, cTok)) {
-				return true
-			}
-		}
-		for _, w := range item.PersonWords {
-			if w == cTok || (allowPrefix && strings.HasPrefix(w, cTok)) {
-				return true
-			}
-		}
-		return false
-	}
-	n := len([]rune(cTok))
-	if n >= 2 && n < 5 {
-		for _, seg := range item.PersonSegs {
-			if seg == cTok || strings.Contains(seg, cTok) {
-				return true
-			}
-		}
-	}
-	for i, c := range item.AliasSegs {
-		if c == cTok {
-			if i == 0 || n < 4 {
-				return true
-			}
-			continue
-		}
-		if strings.HasPrefix(c, cTok) {
-			return true
-		}
-		if strings.Contains(c, cTok) && len([]rune(c)) <= n+4 {
-			return true
-		}
-	}
-	return false
-}
-
-// ScoreFilmMatch 计算影视与搜索词的匹配度得分（0 表示不匹配）
+// ScoreFilmMatch 计算影视片名与搜索词的匹配度得分（0 表示不匹配）
 func ScoreFilmMatch(item FilmSearchItem, q QueryContext) int {
 	if q.CleanKey == "" {
 		return 0
@@ -654,10 +419,12 @@ func ScoreFilmMatch(item FilmSearchItem, q QueryContext) int {
 
 	bestScore := 0
 
+	// 1. 片名完全匹配
 	if cleanName == q.CleanKey {
 		return 1000
 	}
 
+	// 2. 片名前缀或包含匹配
 	if strings.HasPrefix(cleanName, q.CleanKey) {
 		score := 850 - (nameRunes-queryRunes)*8
 		if score < 750 {
@@ -672,20 +439,14 @@ func ScoreFilmMatch(item FilmSearchItem, q QueryContext) int {
 		bestScore = raiseScore(bestScore, score)
 	}
 
+	// 3. 多 Token 分词匹配片名
 	if len(q.CleanTokens) > 1 {
-		preparedSecondary(&item)
 		nameHits := 0
-		crossHits := 0
 		tokenLen := 0
 		for _, tok := range q.CleanTokens {
 			tokenLen += len([]rune(tok))
 			if TokenMatchesText(tok, cleanName) {
 				nameHits++
-				crossHits++
-				continue
-			}
-			if tokenHitsPersonOrAlias(tok, item) {
-				crossHits++
 			}
 		}
 		if nameHits == len(q.CleanTokens) {
@@ -694,11 +455,10 @@ func ScoreFilmMatch(item FilmSearchItem, q QueryContext) int {
 				score = 520
 			}
 			bestScore = raiseScore(bestScore, score)
-		} else if crossHits == len(q.CleanTokens) {
-			bestScore = raiseScore(bestScore, 450)
 		}
 	}
 
+	// 4. 片名子序列跳字匹配（如 "凡人传" -> "凡人修仙传"）
 	if !q.IsAsciiOnly && queryRunes >= 3 && bestScore < 620 && IsSubsequence(q.CleanKey, cleanName) {
 		score := 480 - (nameRunes-queryRunes)*6
 		if score < 400 {
@@ -707,17 +467,10 @@ func ScoreFilmMatch(item FilmSearchItem, q QueryContext) int {
 		bestScore = raiseScore(bestScore, score)
 	}
 
+	// 5. 拼音匹配（全拼、首字母、多音字）
 	if q.IsAsciiOnly {
 		bestScore = raiseScore(bestScore, scorePinyinMatch(item, strings.ToLower(q.CleanKey)))
 	}
 
-	// 片名已经高相关时不再扫主演/副标题
-	if bestScore >= 620 {
-		return bestScore
-	}
-
-	preparedSecondary(&item)
-	bestScore = raiseScore(bestScore, scoreAliasSegs(item.AliasSegs, item.AliasWords, q))
-	bestScore = raiseScore(bestScore, scorePersonSegs(item.PersonSegs, item.PersonWords, q))
 	return bestScore
 }

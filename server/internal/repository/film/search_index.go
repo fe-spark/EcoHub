@@ -172,32 +172,24 @@ func intersectUnigrams(m map[rune][]int32, text string) []int32 {
 	return intersectSortedLists(lists)
 }
 
-func buildSearchItem(mid, pid, cid int64, name, sub, actor, director string, hits int64, score float64, year, updateStamp int64) filmSearchMemoryItem {
+func buildSearchItem(mid, pid, cid int64, name string, hits int64, score float64, year, updateStamp int64) filmSearchMemoryItem {
 	derived := utils.FilmSearchItem{
-		Name:     name,
-		SubTitle: sub,
-		Actor:    actor,
-		Director: director,
+		Name: name,
 	}
 	utils.FillSearchDerivedFields(&derived)
 	return filmSearchMemoryItem{
 		Mid:               mid,
 		Pid:               pid,
 		Cid:               cid,
-		Name:              name,
-		CleanName:         derived.CleanName,
-		PinyinFull:        derived.PinyinFull,
-		PinyinSyllables:   derived.PinyinSyllables,
-		PinyinInitials:    derived.PinyinInitials,
-		PinyinInitialAlts: derived.PinyinInitialAlts,
-		AliasSegs:         derived.AliasSegs,
-		AliasWords:        derived.AliasWords,
-		PersonSegs:        derived.PersonSegs,
-		PersonWords:       derived.PersonWords,
 		Hits:              hits,
 		Score:             score,
 		Year:              year,
 		UpdateStamp:       updateStamp,
+		Name:              name,
+		CleanName:         derived.CleanName,
+		PinyinFull:        derived.PinyinFull,
+		PinyinInitials:    derived.PinyinInitials,
+		PinyinInitialAlts: derived.PinyinInitialAlts,
 	}
 }
 
@@ -207,13 +199,8 @@ func (item filmSearchMemoryItem) asSearchItem() utils.FilmSearchItem {
 		Name:              item.Name,
 		CleanName:         item.CleanName,
 		PinyinFull:        item.PinyinFull,
-		PinyinSyllables:   item.PinyinSyllables,
 		PinyinInitials:    item.PinyinInitials,
 		PinyinInitialAlts: item.PinyinInitialAlts,
-		AliasSegs:         item.AliasSegs,
-		AliasWords:        item.AliasWords,
-		PersonSegs:        item.PersonSegs,
-		PersonWords:       item.PersonWords,
 		Hits:              item.Hits,
 		Score:             item.Score,
 		Year:              item.Year,
@@ -225,14 +212,8 @@ func (idx *filmSearchMemoryIndex) buildInverted() {
 	n := len(idx.Items)
 	idx.nameBigrams = make(map[string][]int32, n)
 	idx.nameUnigrams = make(map[rune][]int32, 4096)
-	idx.personBigrams = make(map[string][]int32, n)
-	idx.personExact = make(map[string][]int32, n)
-	idx.aliasBigrams = make(map[string][]int32, n)
-	idx.aliasExact = make(map[string][]int32, n)
-	idx.personWords = make(map[string][]int32, n)
-	idx.aliasWords = make(map[string][]int32, n)
 	idx.pinyinFullBigrams = make(map[string][]int32, n)
-	idx.pinyinInitialBigrams = make(map[string][]int32, n)
+	idx.pinyinInitialBigrams = make(map[string][]int32, n/2)
 
 	for i := range idx.Items {
 		id := int32(i)
@@ -245,20 +226,6 @@ func (idx *filmSearchMemoryIndex) buildInverted() {
 			for _, v := range strings.Fields(item.PinyinInitialAlts) {
 				addBigrams(idx.pinyinInitialBigrams, v, id)
 			}
-		}
-		for _, seg := range item.PersonSegs {
-			addPosting(idx.personExact, seg, id)
-			addBigrams(idx.personBigrams, seg, id)
-		}
-		for _, w := range item.PersonWords {
-			addWordAndPrefixes(idx.personWords, w, id)
-		}
-		for _, seg := range item.AliasSegs {
-			addPosting(idx.aliasExact, seg, id)
-			addBigrams(idx.aliasBigrams, seg, id)
-		}
-		for _, w := range item.AliasWords {
-			addWordAndPrefixes(idx.aliasWords, w, id)
 		}
 	}
 }
@@ -289,30 +256,9 @@ func (idx *filmSearchMemoryIndex) tokenPinyinCandidates(tok string) []int32 {
 	)
 }
 
-func (idx *filmSearchMemoryIndex) tokenSideCandidates(tok string) []int32 {
-	rs := []rune(tok)
-	var extra []int32
-	if utils.IsAsciiAlphaNum(tok) {
-		if len(tok) >= 2 {
-			extra = unionAscending(idx.personWords[tok], idx.aliasWords[tok])
-		}
-		if len(tok) >= 2 {
-			extra = unionAscending(extra, idx.aliasExact[tok])
-			extra = unionAscending(extra, intersectBigrams(idx.aliasBigrams, tok))
-		}
-		return extra
-	}
-	if len(rs) >= 2 && len(rs) < 5 {
-		extra = unionAscending(idx.personExact[tok], intersectBigrams(idx.personBigrams, tok))
-	}
-	extra = unionAscending(extra, idx.aliasExact[tok])
-	extra = unionAscending(extra, intersectBigrams(idx.aliasBigrams, tok))
-	return extra
-}
-
 func (idx *filmSearchMemoryIndex) tokenCandidates(tok string) []int32 {
 	return unionAscending(
-		unionAscending(idx.tokenNameCandidates(tok), idx.tokenSideCandidates(tok)),
+		idx.tokenNameCandidates(tok),
 		idx.tokenPinyinCandidates(tok),
 	)
 }
@@ -409,7 +355,7 @@ func parallelBuildItems(rows []filmSearchIndexRow) []filmSearchMemoryItem {
 				if r.Mid <= 0 || r.Name == "" {
 					continue
 				}
-				tmp[i] = buildSearchItem(r.Mid, r.Pid, r.Cid, r.Name, r.SubTitle, r.Actor, r.Director, r.Hits, r.Score, r.Year, r.UpdateStamp)
+				tmp[i] = buildSearchItem(r.Mid, r.Pid, r.Cid, r.Name, r.Hits, r.Score, r.Year, r.UpdateStamp)
 				valid[i] = true
 			}
 		}(start, end)

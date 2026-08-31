@@ -53,9 +53,17 @@ func formatLiveRemark(last string, n int) string {
 // maxLiveRemarksBatchSize 单次分批查询详情与播放列表的大小，防止单次 SQL 携带过多参数和产生大内存占用
 const maxLiveRemarksBatchSize = 100
 
-// LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。
-func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
-	out := make(map[int64]string, len(mids))
+// LiveBannerSnapshot 轮播实时关联的影片动态信息
+type LiveBannerSnapshot struct {
+	Mid          int64
+	Remarks      string
+	Picture      string
+	PictureSlide string
+}
+
+// LiveBannerSnapshotsByMIDs 从活跃快照读取展示用状态与最新海报/幻灯图（毫秒级索引直查）。
+func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
+	out := make(map[int64]LiveBannerSnapshot, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return out
 	}
@@ -66,21 +74,38 @@ func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
 	}
 
 	type row struct {
-		Mid     int64
-		Remarks string
+		Mid          int64
+		Remarks      string
+		Picture      string
+		PictureSlide string
 	}
 	var rows []row
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
-		Select("mid, remarks").
+		Select("mid, remarks, picture, picture_slide").
 		Where("snapshot_version = ? AND mid IN ?", version, mids).
 		Scan(&rows).Error; err != nil {
-		log.Printf("[Film] LiveUpdateRemarks 读快照状态失败: %v", err)
+		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
 		return out
 	}
 
 	for _, r := range rows {
-		if strings.TrimSpace(r.Remarks) != "" {
-			out[r.Mid] = strings.TrimSpace(r.Remarks)
+		out[r.Mid] = LiveBannerSnapshot{
+			Mid:          r.Mid,
+			Remarks:      strings.TrimSpace(r.Remarks),
+			Picture:      strings.TrimSpace(r.Picture),
+			PictureSlide: strings.TrimSpace(r.PictureSlide),
+		}
+	}
+	return out
+}
+
+// LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。
+func LiveUpdateRemarksByMIDs(mids []int64) map[int64]string {
+	snaps := LiveBannerSnapshotsByMIDs(mids)
+	out := make(map[int64]string, len(snaps))
+	for mid, s := range snaps {
+		if s.Remarks != "" {
+			out[mid] = s.Remarks
 		}
 	}
 	return out
