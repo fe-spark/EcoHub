@@ -91,7 +91,13 @@ export default function ImagePicker({
           key="confirm"
           type="primary"
           disabled={!selected}
-          onClick={() => onSelect(selected)}
+          onClick={() => {
+            const fullLink =
+              typeof window !== "undefined" && selected.startsWith("/")
+                ? `${window.location.origin}${selected}`
+                : selected;
+            onSelect(fullLink);
+          }}
         >
           使用此图片
         </Button>,

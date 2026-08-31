@@ -188,8 +188,12 @@ function FilmAddForm() {
       const resp = await ApiPost("/manage/file/upload", formData);
       if (resp.code === 0) {
         message.success(resp.msg);
-        form.setFieldValue("picture", resp.data);
-        onSuccess(resp.data);
+        const fullUrl =
+          typeof window !== "undefined" && String(resp.data).startsWith("/")
+            ? `${window.location.origin}${resp.data}`
+            : resp.data;
+        form.setFieldValue("picture", fullUrl);
+        onSuccess(fullUrl);
       } else {
         message.error(resp.msg);
         onError(resp.msg);
