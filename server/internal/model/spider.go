@@ -57,8 +57,9 @@ type FilmSource struct {
 	Grade        SourceGrade `json:"grade"`                           // 采集站等级 主站点 || 附属站
 	// SyncPictures 已废弃：采集不再下载封面到素材中心，字段仅兼容旧库列
 	SyncPictures bool        `json:"-"`
-	State        bool        `json:"state"`                           // 是否启用
-	Interval     int         `json:"interval"`                        // 采集时间间隔 单位/ms
+	State          bool        `json:"state"`                           // 是否启用
+	IsPosterSource bool        `json:"isPosterSource" gorm:"default:false"` // 是否为海报/封面图源（全局单选）
+	Interval       int         `json:"interval"`                        // 采集时间间隔 单位/ms
 	Cd           int         `json:"cd"`                              // 采集时长 单位/小时
 }
 

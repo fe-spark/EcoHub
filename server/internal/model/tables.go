@@ -10,6 +10,7 @@ const (
 	TableFilterIndex        = "film_filter_index_snapshot"
 	TableMovieDetail        = "movie_detail_info"
 	TableMoviePlaylist      = "movie_playlist"
+	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
 	TableCollectSourceStats = "collect_source_stats"

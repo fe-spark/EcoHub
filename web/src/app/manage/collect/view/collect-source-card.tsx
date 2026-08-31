@@ -83,6 +83,11 @@ export default function CollectSourceCard({
         <div className={styles.cardHeadMain}>
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
+            {record.isPosterSource ? (
+              <span className={styles.posterSourceTag} title="全局优先海报图源">
+                海报源
+              </span>
+            ) : null}
           </div>
           <Tooltip title={record.uri}>
             <a

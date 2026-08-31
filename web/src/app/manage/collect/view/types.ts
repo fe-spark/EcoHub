@@ -4,6 +4,7 @@ export interface FilmSource {
   uri: string;
   state: boolean;
   grade: number;
+  isPosterSource?: boolean;
   interval: number;
   cd?: number;
   lastCollectTime?: string;
@@ -134,6 +135,7 @@ export interface SourceFormValues {
   uri: string;
   state: boolean;
   grade: number;
+  isPosterSource: boolean;
   interval: number;
   cd: number;
 }
@@ -143,6 +145,7 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   uri: "",
   state: false,
   grade: 1,
+  isPosterSource: false,
   interval: 0,
   cd: 24,
 };

@@ -334,14 +334,18 @@ func DelCollectResource(id string) error {
 			return err
 		}
 		// 2. 删除附属站播放列表
-		if err := tx.Where("source_id = ?", id).Delete(&model.MoviePlaylist{}).Error; err != nil {
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePlaylist{}).Error; err != nil {
 			return err
 		}
-		// 3. 删除采集失败记录
+		// 3. 删除附属站海报图源数据
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePoster{}).Error; err != nil {
+			return err
+		}
+		// 4. 删除采集失败记录
 		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
-		// 4. 删除采集站本身
+		// 5. 删除采集站本身
 		return tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error
 	})
 }
@@ -364,6 +368,11 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		s.Id = utils.GenerateHashKey(s.Uri)
 	}
 	normalizeCollectSourceDefaults(&s)
+	if s.IsPosterSource {
+		if err := DemoteExistingPosterSourceTx(tx, s.Id); err != nil {
+			return err
+		}
+	}
 	return tx.Create(&s).Error
 }
 
@@ -393,6 +402,11 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
 	}
 	normalizeCollectSourceDefaults(&s)
+	if s.IsPosterSource {
+		if err := DemoteExistingPosterSourceTx(tx, s.Id); err != nil {
+			return err
+		}
+	}
 	return tx.Save(&s).Error
 }
 
@@ -405,6 +419,28 @@ func DemoteExistingMasterTx(tx *gorm.DB) error {
 	return tx.Model(&model.FilmSource{}).
 		Where("grade = ?", model.MasterCollect).
 		Update("grade", model.SlaveCollect).Error
+}
+
+// GetPosterSource 获取当前启用的优先海报图源站（如有）
+func GetPosterSource() *model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
+	var fs model.FilmSource
+	if err := db.Mdb.Where("is_poster_source = ? AND state = ?", true, true).First(&fs).Error; err != nil {
+		return nil
+	}
+	normalizeCollectCd(&fs)
+	return &fs
+}
+
+// DemoteExistingPosterSourceTx 互斥单海报源：将其他站点的 is_poster_source 设为 false
+func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
+	query := tx.Model(&model.FilmSource{}).Where("is_poster_source = ?", true)
+	if strings.TrimSpace(exceptID) != "" {
+		query = query.Where("id <> ?", exceptID)
+	}
+	return query.Update("is_poster_source", false).Error
 }
 
 // ClearAllCollectSource 删除所有采集站信息
