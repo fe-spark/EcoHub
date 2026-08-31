@@ -300,6 +300,8 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 			dispSlide := snap.DisplayPictureSlide()
 			if dispSlide != "" {
 				out[i].PictureSlide = dispSlide
+			} else if dispPic != "" {
+				out[i].PictureSlide = dispPic
 			}
 		}
 	}
