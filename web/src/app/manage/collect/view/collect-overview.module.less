@@ -34,7 +34,7 @@
 
 .overviewRow {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   height: 100%;
   align-items: stretch;
@@ -80,18 +80,6 @@
   overflow-wrap: anywhere;
   word-break: break-all;
   font-weight: 500;
-}
-
-@media (max-width: 1200px) {
-  .overviewRow {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
-@media (max-width: 768px) {
-  .overviewRow {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 640px) {
