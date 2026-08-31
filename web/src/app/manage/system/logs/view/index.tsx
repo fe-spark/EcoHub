@@ -63,6 +63,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [refreshError, setRefreshError] = useState(false);
   const [cursorExpired, setCursorExpired] = useState(false);
+  const [cursor, setCursor] = useState(0);
   const [lastReceivedAt, setLastReceivedAt] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [inputKeyword, setInputKeyword] = useState("");
@@ -79,7 +80,9 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
       const resp = await ApiGet<DeltaLogsResponse>("/manage/system/logs/delta", { lines: INITIAL_LOG_LINES });
       if (resp.code === 0) {
         const list = resp.data.entries || [];
-        cursorRef.current = resp.data.nextSeq || 0;
+        const nextSeq = resp.data.nextSeq || 0;
+        cursorRef.current = nextSeq;
+        setCursor(nextSeq);
         setCursorExpired(false);
         setRefreshError(false);
         setEntries(list);
@@ -119,13 +122,17 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
             level: "warn",
             line: `[SystemLog] 日志游标已过期，已从当前缓冲区最早序号 ${minSeq} 重新加载，过期窗口内日志可能已被截断`,
           };
-          cursorRef.current = resp.data.nextSeq || cursorRef.current;
+          const nextSeq = resp.data.nextSeq || cursorRef.current;
+          cursorRef.current = nextSeq;
+          setCursor(nextSeq);
           setCursorExpired(true);
           setEntries([notice, ...list].slice(-MAX_LOG_LINES));
           setLastReceivedAt(new Date().toLocaleTimeString());
           return;
         }
-        cursorRef.current = resp.data.nextSeq || cursorRef.current;
+        const nextSeq = resp.data.nextSeq || cursorRef.current;
+        cursorRef.current = nextSeq;
+        setCursor(nextSeq);
         setCursorExpired(false);
         setEntries((prev) => appendBoundedEntries(prev, list));
         if (list.length > 0) {
@@ -262,7 +269,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
           <Space size={[8, 8]} wrap>
             {renderRefreshStatus()}
             {lastReceivedAt && <Tag>最后接收 {lastReceivedAt}</Tag>}
-            <Tag>游标 {cursorRef.current}</Tag>
+            <Tag>游标 {cursor}</Tag>
             <Tag>缓存 {entries.length}/{MAX_LOG_LINES} 行</Tag>
             <Tag>展示 {filteredEntries.length} 行</Tag>
           </Space>

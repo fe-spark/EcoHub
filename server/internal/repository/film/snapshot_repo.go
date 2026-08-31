@@ -697,6 +697,10 @@ func GetSnapshotHotMovieListByCategory(version string, field string, id int64, l
 	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
+func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+	return GetSnapshotDynamicHotMovieListByCategoryReadModel(version, field, id, limit, poolSize)
+}
+
 func GetSnapshotMovieListBySort(version string, sortType int, pid int64, page *dto.Page) []model.MovieBasicInfo {
 	return GetSnapshotMovieListBySortReadModel(version, sortType, pid, page)
 }

@@ -152,14 +152,14 @@ export default function DailyUpdates() {
   const [hovering, setHovering] = useState(false);
   const [copyLead, setCopyLead] = useState<DailyFilm | null>(null);
 
-  const clearTimer = () => {
+  const clearTimer = useCallback(() => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = undefined;
     }
-  };
+  }, []);
 
-  const scheduleNext = () => {
+  const scheduleNext = useCallback(() => {
     if (
       cancelledRef.current ||
       hoveringRef.current ||
@@ -173,7 +173,7 @@ export default function DailyUpdates() {
     timerRef.current = setTimeout(() => {
       void loadRef.current();
     }, REFRESH_MS);
-  };
+  }, [clearTimer]);
 
   const goPlay = useCallback(
     (item: DailyFilm) => {
@@ -186,92 +186,94 @@ export default function DailyUpdates() {
     [navigate],
   );
 
-  loadRef.current = async (manual = false) => {
-    if (
-      inFlightRef.current ||
-      (!manual && typeof document !== "undefined" && document.hidden)
-    ) {
-      return;
-    }
-    inFlightRef.current = true;
-    clearTimer();
-    const hasCurrent = (listRef.current ?? []).length > 0;
-    if (manual || hasCurrent) {
-      setShuffling(true);
-    }
-
-    const exclude = (listRef.current ?? []).map(filmId).filter(Boolean).join(",");
-    const stage = stageRef.current;
-    const canvas = canvasRef.current;
-    const canIon = Boolean(hasCurrent && stage && canvas && !ionBusyRef.current);
-
-    const loadNext = async () => {
-      const next = await fetchDailyUpdates(exclude);
-      if (cancelledRef.current || next.length === 0) {
-        return null;
-      }
-      // 获取到新数据直接更新首个影片的标题、简介与标签，无需等待图片与动画结束
-      if (next[0]) {
-        setCopyLead(next[0]);
-      }
-      return {
-        apply: () => {
-          listRef.current = next;
-          flushSync(() => {
-            setList(next);
-            if (next[0]) {
-              setCopyLead(next[0]);
-            }
-          });
-        },
-      };
-    };
-
-    try {
-      if (!canIon || !stage || !canvas) {
-        const result = await loadNext();
-        result?.apply();
+  useEffect(() => {
+    loadRef.current = async (manual = false) => {
+      if (
+        inFlightRef.current ||
+        (!manual && typeof document !== "undefined" && document.hidden)
+      ) {
         return;
       }
+      inFlightRef.current = true;
+      clearTimer();
+      const hasCurrent = (listRef.current ?? []).length > 0;
+      if (manual || hasCurrent) {
+        setShuffling(true);
+      }
 
-      ionBusyRef.current = true;
-      const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
-      const pending = loadNext().catch(() => null);
+      const exclude = (listRef.current ?? []).map(filmId).filter(Boolean).join(",");
+      const stage = stageRef.current;
+      const canvas = canvasRef.current;
+      const canIon = Boolean(hasCurrent && stage && canvas && !ionBusyRef.current);
+
+      const loadNext = async () => {
+        const next = await fetchDailyUpdates(exclude);
+        if (cancelledRef.current || next.length === 0) {
+          return null;
+        }
+        // 获取到新数据直接更新首个影片的标题、简介与标签，无需等待图片与动画结束
+        if (next[0]) {
+          setCopyLead(next[0]);
+        }
+        return {
+          apply: () => {
+            listRef.current = next;
+            flushSync(() => {
+              setList(next);
+              if (next[0]) {
+                setCopyLead(next[0]);
+              }
+            });
+          },
+        };
+      };
+
       try {
-        await playDailyIonSwap({
-          canvas,
-          stage,
-          slots,
-          pending,
-          onHide: () => {
-            stage.classList.add(styles.stageIon);
-          },
-          onReveal: () => {
-            stage.classList.remove(styles.stageIon);
-          },
-        });
+        if (!canIon || !stage || !canvas) {
+          const result = await loadNext();
+          result?.apply();
+          return;
+        }
+
+        ionBusyRef.current = true;
+        const slots = [...stage.querySelectorAll<HTMLElement>("[data-ion-slot]")];
+        const pending = loadNext().catch(() => null);
+        try {
+          await playDailyIonSwap({
+            canvas,
+            stage,
+            slots,
+            pending,
+            onHide: () => {
+              stage.classList.add(styles.stageIon);
+            },
+            onReveal: () => {
+              stage.classList.remove(styles.stageIon);
+            },
+          });
+        } catch {
+          const result = await pending;
+          result?.apply();
+        } finally {
+          stage.classList.remove(styles.stageIon);
+          stage.querySelectorAll("[data-ion-fx]").forEach((el) => {
+            el.removeAttribute("data-ion-fx");
+          });
+          const ionCtx = canvas.getContext("2d");
+          ionCtx?.clearRect(0, 0, canvas.width, canvas.height);
+          ionBusyRef.current = false;
+        }
       } catch {
-        const result = await pending;
-        result?.apply();
+        // 保留当前批次，稍后重试
       } finally {
-        stage.classList.remove(styles.stageIon);
-        stage.querySelectorAll("[data-ion-fx]").forEach((el) => {
-          el.removeAttribute("data-ion-fx");
-        });
-        const ionCtx = canvas.getContext("2d");
-        ionCtx?.clearRect(0, 0, canvas.width, canvas.height);
-        ionBusyRef.current = false;
+        inFlightRef.current = false;
+        if (!cancelledRef.current) {
+          setShuffling(false);
+          scheduleNext();
+        }
       }
-    } catch {
-      // 保留当前批次，稍后重试
-    } finally {
-      inFlightRef.current = false;
-      if (!cancelledRef.current) {
-        setShuffling(false);
-        scheduleNext();
-      }
-    }
-  };
+    };
+  }, [clearTimer, scheduleNext]);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -291,10 +293,11 @@ export default function DailyUpdates() {
       clearTimer();
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, []);
+  }, [clearTimer, scheduleNext]);
 
+  const hasList = Boolean(list && list.length > 0);
   useEffect(() => {
-    if (!list) {
+    if (!hasList) {
       return;
     }
     const stage = stageRef.current;
@@ -341,7 +344,7 @@ export default function DailyUpdates() {
       stage.removeEventListener("pointerover", onOver);
       stage.removeEventListener("pointerout", onOut);
     };
-  }, [list ? 1 : 0]);
+  }, [hasList, clearTimer, scheduleNext]);
 
   useEffect(() => {
     if (list?.[0] && !copyLead) {

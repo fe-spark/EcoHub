@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"strings"
 	"time"
 
@@ -187,6 +188,93 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 
 	log.Printf("[FilmHotList] 获取分类热播列表 field=%s id=%d count=%d offset=%d limit=%d cost=%s",
 		field, id, len(result), offset, limit, time.Since(startedAt))
+	return result
+}
+
+func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) []model.MovieBasicInfo {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	id = support.ResolveCategoryID(id)
+	if version == "" || id <= 0 || poolSize <= 0 {
+		return []model.MovieBasicInfo{}
+	}
+
+	cacheKey := fmt.Sprintf("EcoHub:snap_hot_pool:v%s:%s:%d:%d", version, field, id, poolSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached []model.MovieBasicInfo
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached
+			}
+		}
+	}
+
+	hotSince := time.Now().AddDate(0, -1, 0).Unix()
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+		Select(basicSelectFields).
+		Where("snapshot_version = ? AND update_stamp > ?", version, hotSince)
+	if field == "pid" {
+		query = query.Where("pid = ?", id)
+	} else {
+		query = query.Where("cid = ?", id)
+	}
+
+	var snapshots []model.FilmListSnapshot
+	_ = query.Order("hits DESC, id DESC").Limit(poolSize).Find(&snapshots).Error
+	result := BuildMovieBasicInfosFromSnapshots(snapshots...)
+
+	// 若近一个月无热播数据，降级为全量历史按 hits 排序
+	if len(result) == 0 {
+		fallbackQuery := db.Mdb.Model(&model.FilmListSnapshot{}).
+			Select(basicSelectFields).
+			Where("snapshot_version = ?", version)
+		if field == "pid" {
+			fallbackQuery = fallbackQuery.Where("pid = ?", id)
+		} else {
+			fallbackQuery = fallbackQuery.Where("cid = ?", id)
+		}
+		var fallbackSnapshots []model.FilmListSnapshot
+		if err := fallbackQuery.Order("hits DESC, id DESC").Limit(poolSize).Find(&fallbackSnapshots).Error; err == nil {
+			result = BuildMovieBasicInfosFromSnapshots(fallbackSnapshots...)
+		}
+	}
+
+	if db.Rdb != nil {
+		if raw, err := json.Marshal(result); err == nil {
+			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
+		}
+	}
+	return result
+}
+
+func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+	if limit <= 0 {
+		return []model.MovieBasicInfo{}
+	}
+	if poolSize <= 0 {
+		poolSize = 50
+	}
+	pool := GetSnapshotHotPoolByCategoryReadModel(version, field, id, poolSize)
+	if len(pool) <= limit {
+		res := make([]model.MovieBasicInfo, len(pool))
+		copy(res, pool)
+		return res
+	}
+
+	indices := make([]int, len(pool))
+	for i := range indices {
+		indices[i] = i
+	}
+	rand.Shuffle(len(indices), func(i, j int) {
+		indices[i], indices[j] = indices[j], indices[i]
+	})
+
+	result := make([]model.MovieBasicInfo, limit)
+	for i := 0; i < limit; i++ {
+		result[i] = pool[indices[i]]
+	}
 	return result
 }
 

@@ -48,9 +48,11 @@ export default function FailureRecordPageView() {
   });
 
   const pageRef = useRef(page);
-  pageRef.current = page;
   const paramsRef = useRef(params);
-  paramsRef.current = params;
+  useEffect(() => {
+    pageRef.current = page;
+    paramsRef.current = params;
+  }, [page, params]);
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
