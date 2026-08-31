@@ -71,6 +71,10 @@ func (s *collectWriteScheduler) finishSource(_ model.SourceGrade, sourceID strin
 	s.lane.finishSource(sourceID)
 }
 
+func (s *collectWriteScheduler) cancelSource(_ model.SourceGrade, sourceID string) {
+	s.lane.cancelSource(sourceID)
+}
+
 func (s *collectWriteScheduler) snapshot() collectWriteSnapshot {
 	return s.lane.snapshot()
 }
@@ -333,6 +337,37 @@ func (l *collectWriteLane) finishSource(sourceID string) {
 		return
 	}
 	l.cond.Signal()
+}
+
+func (l *collectWriteLane) cancelSource(sourceID string) {
+	l.mu.Lock()
+	queue, ok := l.queues[sourceID]
+	if !ok {
+		l.mu.Unlock()
+		return
+	}
+	discarded := queue.pending
+	queue.pending = nil
+	l.totalPending -= len(discarded)
+	if l.totalPending < 0 {
+		l.totalPending = 0
+	}
+	queue.done = true
+	if !queue.writing {
+		l.removeQueueLocked(sourceID)
+	}
+	l.cond.Broadcast()
+	l.mu.Unlock()
+
+	for _, job := range discarded {
+		if job.complete != nil {
+			job.complete(collectWriteCompletion{
+				page:  job.page,
+				err:   context.Canceled,
+				stage: "canceled",
+			})
+		}
+	}
 }
 
 func (l *collectWriteLane) queueFor(job collectWriteJob) *collectWriteQueue {
