@@ -127,6 +127,8 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	startedAt := time.Now()
 	runVersion := stopAllVersion.Load()
 
+	batchCtx := newCollectBatchContext(trigger, tag, sources, batch, startedAt)
+
 	sourceLimit := config.CollectSourceConcurrency
 	if sourceLimit < 0 {
 		sourceLimit = 0
@@ -138,16 +140,16 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 写阀 inflight=%d pages/s=%d",
 		tag, len(sources), limitDesc, config.CollectPageWorkers,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
-	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batch, trigger)
+	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
 	var finalizeErr error
-	if err := collectLifecycle.flushPending(); err != nil {
+	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集收尾刷新失败: %v", tag, err)
 		finalizeErr = err
 	}
-	emitBatchSummaryForSources(batch, trigger, sources, startedAt, finalizeErr)
+	batchCtx.emitSummary(finalizeErr)
 }
 
-func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batch *notify.ChangeBatch, trigger string) {
+func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {
 	if len(sources) == 0 {
 		return
 	}
@@ -190,7 +192,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				return
 			}
-			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batch, trigger); err != nil {
+			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batchCtx); err != nil {
 				syslog.Errorf("[%s] 采集站点 %s 失败: %v", tag, fs.Name, err)
 			}
 		}(src)
@@ -200,16 +202,15 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 
 // HandleCollect 影视采集 id-采集站ID h-时长/h
 func HandleCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, false, nil, model.NotifyTriggerManual)
+	return handleCollectWithStopVersion(id, h, nil, true, false, nil)
 }
 
 func HandlePreparedCollect(id string, h int) error {
-	return handleCollectWithStopVersion(id, h, nil, true, true, nil, model.NotifyTriggerManual)
+	return handleCollectWithStopVersion(id, h, nil, true, true, nil)
 }
 
-func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtEnd bool, allowPreparedStart bool, batch *notify.ChangeBatch, trigger string) (retErr error) {
+func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
 	hadWrites := false
-	collectStartedAt := time.Now()
 	var collectCtx context.Context
 	statsOwned := false
 	if runVersion != nil && isDispatchStopped(*runVersion) {
@@ -232,20 +233,22 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
+	defer collectLifecycle.endSource(id)
+
 	if err := ensureMasterCategoriesReady(s); err != nil {
 		retErr = err
 		return err
 	}
-	if flushAtEnd {
-		batch = notify.StartChangeBatch()
+	if isStandalone {
+		batchCtx = newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{*s}, nil, time.Now(), true)
 	}
 	isMasterFullCollect := s.Grade == model.MasterCollect && h < 0
-	if isMasterFullCollect {
-		collectLifecycle.beginMasterRebuild(s.Id)
+	if isMasterFullCollect && batchCtx != nil {
+		batchCtx.beginMasterRebuild(s.Id)
 	}
 	defer func() {
 		originalErr := retErr
-		if trigger == model.NotifyTriggerCron && statsOwned {
+		if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron && statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
 			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
 				repository.NoteCollectSourceStats(s.Id)
@@ -253,39 +256,27 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 		}
 		flushCollectHotpathSideEffects(s.Id)
 		if originalErr != nil && (!hadWrites || shouldSkipCollectPublishOnError(*s, h)) {
-			if isMasterFullCollect {
-				collectLifecycle.discardPendingMasterMIDs(s.Id)
+			if isMasterFullCollect && batchCtx != nil {
+				batchCtx.discardPendingMasterMIDs(s.Id)
 			}
-			collectLifecycle.endSource(s.Id)
-			if flushAtEnd {
+			if isStandalone && batchCtx != nil {
 				noteSourceError(s.Id, originalErr.Error())
-				emitBatchSummaryForSources(batch, model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, originalErr)
+				batchCtx.emitSummary(originalErr)
 			}
 			return
 		}
-		if isMasterFullCollect {
-			collectLifecycle.publishPendingMasterMIDs(s.Id)
+		if isMasterFullCollect && batchCtx != nil {
+			batchCtx.publishPendingMasterMIDs(s.Id)
 		}
-		if flushAtEnd {
-			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-				if canEnterFinalizing(progress.Status) {
-					progress.Status = progressStatusFinalizing
-				}
-			})
-			flushErr := collectLifecycle.finishSourceAndFlush(*s)
+		if batchCtx != nil {
+			batchCtx.markSourceFinished(*s)
+		}
+		if isStandalone && batchCtx != nil {
+			flushErr := batchCtx.flushAndFinalize()
 			if originalErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
-			updateCollectProgress(s.Id, func(progress *model.CollectProgress) {
-				if flushErr != nil && progress.Status == progressStatusFinalizing {
-					progress.Status = progressStatusFailed
-					return
-				}
-				if progress.Status == progressStatusFinalizing {
-					progress.Status = progressStatusDone
-				}
-			})
-			emitBatchSummaryForSources(batch, model.NotifyTriggerManual, []model.FilmSource{*s}, collectStartedAt, flushErr)
+			batchCtx.emitSummary(flushErr)
 			return
 		}
 		if !isCollectProgressStopped(s.Id) {
@@ -296,7 +287,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 				}
 			})
 		}
-		collectLifecycle.endSourceAndQueueFlush(*s)
 	}()
 
 	reqId := utils.GenerateSalt()
@@ -315,7 +305,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	collectCtx = ctx
 	activeTasks.Store(id, collectTask{cancel: cancel, reqId: reqId})
 	taskMu.Unlock()
-	if trigger == model.NotifyTriggerCron {
+	if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron {
 		repository.SuppressCollectSourceStats(s.Id)
 		statsOwned = true
 	}
@@ -345,6 +335,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}
+	trigger := model.NotifyTriggerManual
+	if batchCtx != nil && batchCtx.trigger != "" {
+		trigger = batchCtx.trigger
+	}
 	if shouldCatchUpCollectHours(trigger, h) {
 		origH := h
 		h = resolveCollectHours(h, repository.GetLastCollectTime(s.Id), time.Now())
@@ -366,13 +360,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 			progress.Current = 0
 			progress.Success = 0
 			progress.Failed = 0
-			if flushAtEnd {
+			if isStandalone {
 				progress.Status = progressStatusPageDone
 			} else {
 				progress.Status = progressStatusWaitingPublish
 			}
 		})
-		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容) flushAtEnd=%v\n", s.Name, pageCount, flushAtEnd)
+		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容) isStandalone=%v\n", s.Name, pageCount, isStandalone)
 		return nil
 	}
 	updateCollectProgress(id, func(progress *model.CollectProgress) {
@@ -385,14 +379,14 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, flushAtE
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
 	pageWorkerLimit := getSourcePageConcurrency(s)
-	hadWrites, err = collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h, flushAtEnd, batch)
+	hadWrites, err = collectFilmPages(ctx, pageCount, pageWorkerLimit, s, h, batchCtx)
 	if err != nil {
 		return err
 	}
 	if isCollectProgressStopped(id) {
 		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
 	} else {
-		markSourcePagesFinished(id, flushAtEnd)
+		markSourcePagesFinished(id, isStandalone)
 	}
 	return nil
 }

@@ -21,7 +21,7 @@ import (
 	"server/internal/utils"
 )
 
-func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedMids []int64, retErr error) {
+func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
 		return nil, errors.New("采集站信息不存在")
 	}
@@ -29,16 +29,7 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedM
 		log.Printf("[Spider] 站点 %s 无法启动单片采集: %v\n", s.Id, err)
 		return nil, err
 	}
-	defer func() {
-		if flushAtEnd {
-			flushErr := collectLifecycle.finishSourceAndFlush(*s)
-			if retErr == nil && flushErr != nil {
-				retErr = flushErr
-			}
-			return
-		}
-		collectLifecycle.endSource(s.Id)
-	}()
+	defer collectLifecycle.endSource(s.Id)
 
 	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
 	if err != nil {
@@ -62,10 +53,9 @@ func collectFilmById(ids string, s *model.FilmSource, flushAtEnd bool) (changedM
 	if err != nil {
 		return nil, err
 	}
-	if s.Grade == model.MasterCollect {
-		collectLifecycle.addMasterAffectedMIDs(written.Affected)
-	} else {
-		collectLifecycle.addAffectedMIDs(written.Affected)
+	if batchCtx != nil {
+		batchCtx.markSourceFinished(*s)
+		batchCtx.addAffectedMIDs(s, 1, written.Affected)
 	}
 	return written.Notify, nil
 }
@@ -85,6 +75,8 @@ func CollectSingleFilm(ids string) {
 
 	startedAt := time.Now()
 	batch := notify.StartChangeBatch()
+	batchCtx := newCollectBatchContext(model.NotifyTriggerSingleUpdate, "单片更新", enabled, batch, startedAt)
+
 	type singleResult struct {
 		source model.FilmSource
 		err    error
@@ -103,7 +95,7 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			mids, err := collectFilmById(sourceMid, &src, false)
+			mids, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
 			} else if len(mids) > 0 {
@@ -116,23 +108,10 @@ func CollectSingleFilm(ids string) {
 	}
 	wg.Wait()
 
-	attempted := make([]model.FilmSource, 0, len(results))
-	for _, r := range results {
-		attempted = append(attempted, r.source)
-	}
 	var finalizeErr error
-	if len(attempted) > 0 {
-		flushMap := make(map[string]model.FilmSource, len(attempted))
-		for _, s := range attempted {
-			flushMap[s.Id] = s
-		}
-		if err := collectLifecycle.runFlush(func(affectedMIDs []int64, masterMIDs []int64) error {
-			_, _, err := flushPendingSources(flushMap, affectedMIDs, masterMIDs)
-			return err
-		}); err != nil {
-			syslog.Errorf("[CollectSingleFilm] 收尾刷新失败: %v", err)
-			finalizeErr = err
-		}
+	if err := batchCtx.flushAndFinalize(); err != nil {
+		syslog.Errorf("[CollectSingleFilm] 收尾刷新失败: %v", err)
+		finalizeErr = err
 	}
 
 	notifyResults := make([]model.SourceNotifyResult, 0, len(results))
@@ -186,7 +165,7 @@ func ClearSpider() error {
 	})
 }
 
-func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord, batch *notify.ChangeBatch) {
+func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord, batchCtx *collectBatchContext) {
 	if s == nil || fr == nil {
 		return
 	}
@@ -214,11 +193,9 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
-	noteCollectedMIDs(batch, s.Id, s.Name, written.Notify)
-	if s.Grade == model.MasterCollect {
-		collectLifecycle.addMasterAffectedMIDs(written.Affected)
-	} else {
-		collectLifecycle.addAffectedMIDs(written.Affected)
+	if batchCtx != nil {
+		noteCollectedMIDs(batchCtx.batch, s.Id, s.Name, written.Notify)
+		batchCtx.addAffectedMIDs(s, fr.Hour, written.Affected)
 	}
 	repository.DeleteFailureRecord(fr)
 }
@@ -246,6 +223,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 	}
 	startedAt := time.Now()
 	batch := notify.StartChangeBatch()
+	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "失败恢复", []model.FilmSource{*s}, batch, startedAt, true)
 	if err := collectLifecycle.waitAndBeginSource(s.Id); err != nil {
 		syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", s.Id, err)
 		if notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
@@ -257,15 +235,15 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		}
 		return
 	}
-	var finalizeErr error
-	defer func() {
-		if err := collectLifecycle.finishSourceAndFlush(*s); err != nil {
-			syslog.Errorf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v", s.Id, err)
-			finalizeErr = err
-		}
-		emitBatchSummaryForSources(batch, model.NotifyTriggerRecover, []model.FilmSource{*s}, startedAt, finalizeErr)
-	}()
-	recoverFilmPage(context.Background(), s, fr, batch)
+	defer collectLifecycle.endSource(s.Id)
+
+	recoverFilmPage(context.Background(), s, fr, batchCtx)
+	batchCtx.markSourceFinished(*s)
+	finalizeErr := batchCtx.flushAndFinalize()
+	if finalizeErr != nil {
+		syslog.Errorf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v", s.Id, finalizeErr)
+	}
+	batchCtx.emitSummary(finalizeErr)
 }
 
 func FullRecoverSpider() {
@@ -299,6 +277,7 @@ func FullRecoverSpider() {
 		}
 		recordsBySource[s.Id] = append(recordsBySource[s.Id], fr)
 	}
+	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "FullRecoverSpider", sourcesToFlush, batch, startedAt)
 	for sourceID, records := range recordsBySource {
 		src, ok := sourceByID[sourceID]
 		if !ok {
@@ -317,12 +296,18 @@ func FullRecoverSpider() {
 			defer collectLifecycle.endSource(source.Id)
 			for i := range pending {
 				record := pending[i]
-				recoverFilmPage(context.Background(), &source, &record, batch)
+				recoverFilmPage(context.Background(), &source, &record, batchCtx)
 			}
+			batchCtx.markSourceFinished(source)
 		}(src, recordsCopy)
 	}
 	wg.Wait()
-	flushSourcesPending("FullRecoverSpider", model.NotifyTriggerRecover, sourcesToFlush, startedAt, batch)
+	var finalizeErr error
+	if err := batchCtx.flushAndFinalize(); err != nil {
+		syslog.Errorf("[FullRecoverSpider] 收尾刷新失败: %v", err)
+		finalizeErr = err
+	}
+	batchCtx.emitSummary(finalizeErr)
 }
 
 func CollectApiTest(s model.FilmSource) error {
