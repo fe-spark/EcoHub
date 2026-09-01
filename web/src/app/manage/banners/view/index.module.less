@@ -4,32 +4,6 @@
   gap: 16px;
 }
 
-.tableCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 12px;
-  background: var(--ant-color-bg-container);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-
-  :global(.ant-card-head) {
-    border-bottom: 1px solid var(--ant-color-border-secondary);
-    min-height: 48px;
-    padding: 0 16px;
-  }
-
-  :global(.ant-card-head-title) {
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  :global(.ant-card-body) {
-    padding: 16px;
-  }
-}
-
-html[data-theme="dark"] .tableCard {
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
 .tableHeader {
   display: flex;
   align-items: center;
@@ -41,9 +15,19 @@ html[data-theme="dark"] .tableCard {
 .tableTitle {
   display: flex;
   align-items: center;
+  gap: 8px;
   font-size: 15px;
   font-weight: 600;
   line-height: 24px;
+}
+
+.countBadge {
+  font-size: 12px;
+  font-weight: normal;
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+  padding: 1px 8px;
+  border-radius: 10px;
 }
 
 .tableActions {
@@ -52,8 +36,90 @@ html[data-theme="dark"] .tableCard {
   gap: 8px;
 }
 
-@media (max-width: 768px) {
-  .tableActions {
-    width: 100%;
+/* 列表表格影片信息单元格 */
+.filmCell {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.posterThumb {
+  width: 52px;
+  height: 72px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.filmInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.filmName {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  line-height: 1.4;
+}
+
+.filmMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  font-size: 12px;
+}
+
+.filmId {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary, rgba(255, 255, 255, 0.45));
+  font-variant-numeric: tabular-nums;
+}
+
+/* 弹窗触发器与已选卡片样式 */
+.filmSelectTrigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 16px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    background: rgba(250, 140, 22, 0.04);
   }
+}
+
+.triggerIcon {
+  font-size: 28px;
+  color: var(--ant-color-primary);
+}
+
+.triggerText {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.triggerHint {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.filmSelectedCard {
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
 }

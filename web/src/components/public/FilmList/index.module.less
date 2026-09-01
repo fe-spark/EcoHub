@@ -258,7 +258,12 @@
 
     .tag {
       font-size: 9px;
-      padding: 1px 4px;
+      padding: 1px 5px;
+
+      /* 移动端窄卡片仅保留前2个最重要标签，避免因宽度不足被切断半个字，完整标签在下方文字区展示 */
+      &:nth-child(n+3) {
+        display: none;
+      }
     }
   }
 

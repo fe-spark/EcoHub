@@ -65,6 +65,7 @@ function FilmAddForm() {
   const watchedPicture = Form.useWatch("picture", form);
 
   const loadedDetailRef = useRef<any>(null);
+  const [loadedDetail, setLoadedDetail] = useState<any>(null);
 
   useEffect(() => {
     ApiGet("/manage/film/class/tree").then((resp: any) => {
@@ -86,6 +87,7 @@ function FilmAddForm() {
           if (resp.code === 0 && resp.data?.detail) {
             const filmData = resp.data.detail;
             loadedDetailRef.current = filmData;
+            setLoadedDetail(filmData);
             const filmDescriptor = filmData.descriptor || {};
 
             let playLinkStr = "";
@@ -327,9 +329,9 @@ function FilmAddForm() {
                         <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
                           已开启跟随海报源，将自动匹配最新封面与幻灯图。
                         </Text>
-                        {(watchedPicture || loadedDetailRef.current?.picture) && (
+                        {(watchedPicture || loadedDetail?.picture) && (
                           <AntImage
-                            src={watchedPicture || loadedDetailRef.current?.picture}
+                            src={watchedPicture || loadedDetail?.picture}
                             height={32}
                             style={{ borderRadius: 4, objectFit: "cover" }}
                             fallback={FALLBACK_IMG}

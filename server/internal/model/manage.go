@@ -71,8 +71,15 @@ type Banner struct {
 	PictureSlide  string `gorm:"size:512" json:"pictureSlide"`  // 横版幻灯图（片库/海报源原图）
 	CustomPicture string `gorm:"size:512" json:"customPicture"` // 自定义封面图（独立存储）
 	Remark        string `gorm:"size:128" json:"remark"`        // 更新状态描述信息
-	Sort          int64  `json:"sort"`                          // 排序分値
-	IsCustomPic   bool   `gorm:"default:false" json:"isCustomPic"` // 是否为人工自定义图片（锁定不被海报源覆盖）
+	Sort          int64   `json:"sort"`                             // 排序分値
+	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"` // 是否为人工自定义图片（锁定不被海报源覆盖）
+	Area          string  `gorm:"-" json:"area,omitempty"`          // 地区（由快照动态覆盖）
+	ClassTag      string  `gorm:"-" json:"classTag,omitempty"`      // 类型标签（由快照动态覆盖）
+	Actor         string  `gorm:"-" json:"actor,omitempty"`         // 主演（由快照动态覆盖）
+	Director      string  `gorm:"-" json:"director,omitempty"`      // 导演（由快照动态覆盖）
+	Blurb         string  `gorm:"-" json:"blurb,omitempty"`         // 简介（由快照动态覆盖）
+	Score         float64 `gorm:"-" json:"score,omitempty"`         // 真实评分（由快照动态覆盖）
+	Hits          int64   `gorm:"-" json:"hits,omitempty"`          // 真实热度（由快照动态覆盖）
 }
 
 func (Banner) TableName() string {

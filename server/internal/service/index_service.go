@@ -313,6 +313,27 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if snap.Remarks != "" {
 			out[i].Remark = snap.Remarks
 		}
+		if snap.Area != "" {
+			out[i].Area = snap.Area
+		}
+		if snap.ClassTag != "" {
+			out[i].ClassTag = snap.ClassTag
+		}
+		if snap.Actor != "" {
+			out[i].Actor = snap.Actor
+		}
+		if snap.Director != "" {
+			out[i].Director = snap.Director
+		}
+		if snap.Blurb != "" {
+			out[i].Blurb = snap.Blurb
+		}
+		if snap.Score > 0 {
+			out[i].Score = snap.Score
+		}
+		if snap.Hits > 0 {
+			out[i].Hits = snap.Hits
+		}
 		// 核心优先级：若该轮播项已由管理员手动自定义修改 (IsCustomPic == true)，严格展示用户的自定义图片（优先 CustomPicture，兼容历史 Picture 字段）
 		customPic := strings.TrimSpace(out[i].CustomPicture)
 		if customPic == "" {

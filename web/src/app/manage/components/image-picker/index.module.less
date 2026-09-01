@@ -15,16 +15,17 @@
   border: 2px solid transparent;
   cursor: pointer;
   background: var(--ant-color-bg-layout);
-  transition: border-color 0.2s ease, transform 0.2s ease;
-}
+  transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
 
-.card:hover {
-  border-color: var(--ant-color-primary);
-  transform: translateY(-2px);
+  &:hover {
+    border-color: var(--ant-color-primary);
+    transform: translateY(-2px);
+  }
 }
 
 .cardActive {
-  border-color: #fa8c16;
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.35) !important;
 }
 
 .thumb {
@@ -41,7 +42,7 @@
   bottom: 0;
   padding: 4px 8px;
   font-size: 12px;
-  color: #fff;
+  color: var(--ant-color-text-light-solid, #fff);
   background: linear-gradient(0deg, rgba(0, 0, 0, 0.72), rgba(0, 0, 0, 0));
   white-space: nowrap;
   overflow: hidden;
@@ -49,14 +50,21 @@
   text-align: center;
 }
 
-.check {
+.checkBadge {
   position: absolute;
   top: 8px;
   right: 8px;
-  font-size: 20px;
-  color: #fa8c16;
-  background: rgba(255, 255, 255, 0.9);
+  z-index: 3;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
+  background: var(--ant-color-primary);
+  color: var(--ant-color-text-light-solid, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  border: 1.5px solid var(--ant-color-bg-container, #ffffff);
 }
 
 .pagination {
