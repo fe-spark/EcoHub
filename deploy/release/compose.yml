@@ -46,7 +46,6 @@ services:
     image: ghcr.io/fe-spark/ecohub:latest
     restart: always
     environment:
-      PORT: ${SERVER_PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
@@ -65,8 +64,10 @@ services:
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
-      - ${WEB_PUBLIC_PORT:-3000}:3000
-      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
+      # 前台与管理后台（如需不对公网暴露裸端口，可写为 127.0.0.1:${WEB_PORT:-3000}:3000 配合反向代理）
+      - ${WEB_PORT:-3000}:3000
+      # 后端 API 直连（供 TVBox / 播放器直连；如无需直连可直接注释此行）
+      - 0.0.0.0:${SERVER_PORT:-18080}:8080
     volumes:
       - ./data/uploads:/app/static/upload
       # 后台「立即升级」通过 socket 拉 latest 并重建本容器

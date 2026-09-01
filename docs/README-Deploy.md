@@ -152,7 +152,6 @@ services:
     image: ghcr.io/fe-spark/ecohub:latest
     restart: always
     environment:
-      PORT: ${SERVER_PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
@@ -169,8 +168,8 @@ services:
       ALL_PROXY: ${ALL_PROXY:-}
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
-      - ${WEB_PUBLIC_PORT:-3000}:3000
-      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
+      - ${WEB_PORT:-3000}:3000
+      - 0.0.0.0:${SERVER_PORT:-18080}:8080
     volumes:
       - ./data/uploads:/app/static/upload
       - /var/run/docker.sock:/var/run/docker.sock
@@ -199,9 +198,8 @@ networks:
 ### 2. 环境变量
 
 ```env
-WEB_PUBLIC_PORT=3000
-SERVER_PUBLIC_PORT=18080
-SERVER_PORT=8080
+WEB_PORT=3000
+SERVER_PORT=18080
 
 JWT_SECRET=请替换为长随机串
 
@@ -220,7 +218,7 @@ REDIS_DB=0
 
 - 内置库：`MYSQL_HOST=mysql` / `REDIS_HOST=redis`，不要写成 `127.0.0.1`。  
 - 发布版 **无需** `API_URL`。  
-- 端口占用时改 `WEB_PUBLIC_PORT`，反代同步改。
+- 端口占用时改 `WEB_PORT`，反代同步改。
 
 ### 3. 启动
 
@@ -228,12 +226,15 @@ REDIS_DB=0
 
 也可先跑安装脚本，再在 1Panel 容器列表中查看/接管。
 
-### 4. 网站与 HTTPS
+### 4. 网站、HTTPS 与不对外开放裸端口
 
-1. **网站** → **创建网站** → **反向代理** → `http://127.0.0.1:3000`（或你的 `WEB_PUBLIC_PORT`）。  
+1. **网站** → **创建网站** → **反向代理** → `http://127.0.0.1:3000`（或你的 `WEB_PORT`）。  
 2. 申请 Let's Encrypt 或上传证书，开启 HTTPS。  
 3. `/api/*` **不要**单独指到 `18080`；整站走 `3000`，由容器内 Next 转发到 Go。  
-4. 防火墙放行 `80`/`443`；**不要**公网放行 `18080`、MySQL、Redis。
+4. **不对外开放裸端口（安全推荐）**：
+   - Docker 默认规则会穿透系统防火墙（如 UFW）。若要**禁止公网直接访问 3000 端口**，请在 `compose.yml` 中显式指定 `127.0.0.1:` 绑定（如 `127.0.0.1:${WEB_PORT:-3000}:3000`），此时公网无法直连，仅本机反向代理可用；
+   - 若无播放器直连需求，直接在 `compose.yml` 中注释或删除 `18080:8080` 端口映射；
+   - 防火墙放行 `80`/`443`；**不要**公网放行 `18080`、MySQL、Redis。
 
 ### 5. 更新
 
@@ -313,11 +314,10 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| `WEB_PUBLIC_PORT` | `3000` | 前台与后台入口 |
-| `SERVER_PUBLIC_PORT` | `18080` | 后端直连映射 |
-| `SERVER_PORT` | `8080` | 容器内 Go 监听（注入为 `PORT`） |
+| `WEB_PORT` | `3000` | 宿主机 Web 访问入口端口 |
+| `SERVER_PORT` | `18080` | 宿主机后端直连映射端口（可选） |
 
-生产建议只暴露 Web 端口（或反代后的 80/443）。
+生产建议只暴露 Web 端口（或反代后的 80/443）。如需**完全禁止外部直连裸端口**，请在 `compose.yml` 中将端口映射写为 `127.0.0.1:${WEB_PORT:-3000}:3000`，使端口仅限本机及 1Panel / Nginx 反向代理访问。
 
 ---
 

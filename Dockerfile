@@ -51,8 +51,7 @@ LABEL org.opencontainers.image.title="EcoHub All-in-One" \
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     TZ=Asia/Shanghai \
-    PORT=3000 \
-    SERVER_PORT=8080 \
+    PORT=8080 \
     API_URL=http://127.0.0.1:8080
 
 RUN apk add --no-cache ca-certificates tzdata supervisor

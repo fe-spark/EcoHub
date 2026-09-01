@@ -53,12 +53,12 @@ services:
       context: ./web
       dockerfile: Dockerfile
       args:
-        API_URL: http://server:${SERVER_PORT:-8080}
+        API_URL: http://server:8080
     environment:
-      API_URL: http://server:${SERVER_PORT:-8080}
+      API_URL: http://server:8080
     restart: always
     ports:
-      - ${WEB_PUBLIC_PORT:-3000}:3000
+      - ${WEB_PORT:-3000}:3000
     networks:
       - Eco-network
     depends_on:
@@ -72,7 +72,6 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
-      PORT: ${SERVER_PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
@@ -91,7 +90,7 @@ services:
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
-      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
+      - 0.0.0.0:${SERVER_PORT:-18080}:${PORT:-8080}
     volumes:
       - eco-server-uploads:/app/static/upload
     networks:
