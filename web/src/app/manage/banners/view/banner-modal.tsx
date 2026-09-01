@@ -197,8 +197,8 @@ export default function BannerModal({
     return {
       id: currentRow?.id || "",
       mid: values.mid || currentRow?.mid || 0,
-      name: values.name.trim(),
-      cName: values.cName.trim(),
+      name: String(values.name || "").trim(),
+      cName: String(values.cName || "").trim(),
       year: values.year,
       poster: isCustom ? customPic : livePic,
       picture: isCustom ? customPic : livePic,

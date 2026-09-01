@@ -92,6 +92,10 @@ func shouldRetainStartupRedisKey(key string) bool {
 	if strings.HasPrefix(key, config.AccessKeyPrefix) {
 		return true
 	}
+	// 快照版本号重启保留，避免版本丢失触发兜底重算与启动耗时突增
+	if key == config.SnapshotActiveVersionKey || key == config.SnapshotBuildVersionKey {
+		return true
+	}
 	return false
 }
 

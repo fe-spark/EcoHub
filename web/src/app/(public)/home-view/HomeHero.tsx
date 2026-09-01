@@ -22,8 +22,8 @@ export interface HeroBannerItem {
   poster?: string;
   picture: string;
   pictureSlide?: string;
-  year: string;
-  cName: string;
+  year?: string | number;
+  cName?: string;
   area?: string;
   classTag?: string;
   actor?: string;
@@ -35,43 +35,24 @@ export interface HeroBannerItem {
   hits?: number;
 }
 
-function parseClassTags(classTag?: string, limit = 2): string[] {
-  if (!classTag) return [];
-  return classTag
-    .split(/[,/|，、\s]+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 0 && t.length <= 8)
-    .slice(0, limit);
+function parseClassTags(classTag?: any, limit = 1): string[] {
+  return String(classTag || "").split(/[,/，\s]+/).filter(Boolean).slice(0, limit);
 }
 
-function resolveQualityBadge(remarks?: string): string {
-  if (!remarks) return "超清原画";
-  const upper = remarks.toUpperCase();
-  if (upper.includes("4K") || upper.includes("2160P")) return "4K 超清";
-  if (upper.includes("1080P") || upper.includes("蓝光") || upper.includes("BD")) return "1080P 蓝光";
-  if (upper.includes("HD") || upper.includes("720P") || upper.includes("超清") || upper.includes("高清")) return "HD 高清";
-  return "超清原画";
+function resolveQualityBadge(remarks?: any): string {
+  const text = String(remarks || "").toUpperCase();
+  if (text.includes("4K")) return "4K 超清";
+  if (text.includes("1080")) return "1080P";
+  if (text.includes("HD")) return "HD 高清";
+  return "4K 超清";
 }
 
 function resolveHeroSummary(item: HeroBannerItem): string {
-  if (item.blurb && item.blurb.trim()) {
-    return item.blurb.trim();
+  if (item.blurb) return String(item.blurb).trim();
+  if (item.director || item.actor) {
+    return [item.director && `导演：${item.director}`, item.actor && `主演：${item.actor}`].filter(Boolean).join(" · ");
   }
-  const credits: string[] = [];
-  if (item.director && item.director.trim()) {
-    credits.push(`导演：${item.director.trim()}`);
-  }
-  if (item.actor && item.actor.trim()) {
-    credits.push(`主演：${item.actor.trim()}`);
-  }
-  if (credits.length > 0) {
-    return credits.join(" · ");
-  }
-  const tagStr = parseClassTags(item.classTag, 3).join(" / ");
-  if (tagStr) {
-    return `精选热播${item.cName || "影视"}，类型涵盖 ${tagStr}。支持多线路极速秒播与高清画质，点击立即畅享精彩正片。`;
-  }
-  return `热播精选《${item.name}》，支持多线路极速解析与高清流畅播放，点击立即畅享精彩正片。`;
+  return `热播精选《${item.name || "影视"}》，高清流畅播放，点击立即畅享精彩正片。`;
 }
 
 function getBackdrop(item: HeroBannerItem) {
@@ -230,17 +211,17 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
               {active.score && Number(active.score) > 0 ? (
                 <span className={styles.tagRating}>★ {Number(active.score).toFixed(1)}</span>
               ) : null}
-              {active.year && active.year !== "0" ? (
-                <span className={styles.tag}>{active.year}</span>
+              {active.year && String(active.year) !== "0" ? (
+                <span className={styles.tag}>{String(active.year)}</span>
               ) : null}
               {active.area ? (
-                <span className={styles.tag}>{active.area}</span>
+                <span className={styles.tag}>{String(active.area)}</span>
               ) : null}
               {parseClassTags(active.classTag, 1).map((tag) => (
                 <span key={tag} className={styles.tag}>{tag}</span>
               ))}
               {active.remarks || active.remark ? (
-                <span className={styles.tagHighlight}>{active.remarks || active.remark}</span>
+                <span className={styles.tagHighlight}>{String(active.remarks || active.remark)}</span>
               ) : null}
             </div>
 
