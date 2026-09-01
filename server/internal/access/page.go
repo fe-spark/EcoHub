@@ -9,10 +9,10 @@ import (
 )
 
 var pageActions = map[string]struct{}{
-	"browse":   {},
-	"search":   {},
-	"play":     {},
-	"classify": {},
+	ActionBrowse:   {},
+	ActionSearch:   {},
+	ActionPlay:     {},
+	ActionClassify: {},
 }
 
 const pageMinInterval = 300 * time.Millisecond

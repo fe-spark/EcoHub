@@ -125,9 +125,9 @@ export default function EditScheduleForm({ editModel }: EditScheduleFormProps) {
               label="Cron"
               name="cronSpec"
               rules={[{ required: true, message: "请输入 Cron" }]}
-              extra={`${cronFieldHelp}；完整格式为“秒 分 时 日 月 周”，例如 0 */20 * * * ?`}
+              extra={`${cronFieldHelp}；完整格式为“秒 分 时 日 月 周”，例如 0 */30 * * * ?`}
             >
-              <Input placeholder="例如 0 */20 * * * ?" />
+              <Input placeholder="例如 0 */30 * * * ?" />
             </Form.Item>
           );
         }}

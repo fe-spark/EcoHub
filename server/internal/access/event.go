@@ -23,6 +23,14 @@ const (
 	ipHashBytes    = 16
 )
 
+const (
+	ActionSearch   = "search"
+	ActionPlay     = "play"
+	ActionBrowse   = "browse"
+	ActionClassify = "classify"
+	ActionProvide  = "provide"
+)
+
 type AccessEvent struct {
 	Ts         time.Time `json:"ts"`
 	Method     string    `json:"method"`
@@ -150,7 +158,7 @@ func playRankMember(path string, query url.Values) string {
 }
 
 func pagePlayRankMember(action, resource string) string {
-	if action != "play" {
+	if action != ActionPlay {
 		return ""
 	}
 	return canonicalFilmID(resource)
@@ -226,7 +234,7 @@ func isLoopbackIP(ip string) bool {
 }
 
 func IsProvide(evt *AccessEvent) bool {
-	return evt != nil && (evt.Action == "provide" || isProvidePath(evt.Path))
+	return evt != nil && (evt.Action == ActionProvide || isProvidePath(evt.Path))
 }
 
 func httpHealthSample(evt *AccessEvent) bool {

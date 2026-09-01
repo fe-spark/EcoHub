@@ -1,36 +1,29 @@
-正式版 **v2.5.0**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0` 与 `ghcr.io/fe-spark/ecohub:latest`。
+测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.1-beta.2`。
 
 ### 升级指引
 
-- **从已有版本升级**：执行 `docker compose pull && docker compose up -d` 即可（或后台「检查更新」一键平滑升级）。
+- **从已有版本升级**：执行 `docker compose pull && docker compose up -d` 即可。
 - **兼容性说明**：本版本完全向下兼容现有 MySQL 与 Redis 数据结构，无破坏性变更。
 
 ---
 
-### v2.5.0 核心变更
+### v2.5.1-beta.2 核心变更
 
-#### 1. 百万级片库内存架构极致优化（String Arena 扁平化与 2-gram 倒排索引重构）
-- **String Arena 扁平化内存池**：重构内存搜索模型，将百万级记录的 500 万独立堆字符串对象汇聚至单一连续字节池 `StringPool []byte`，结构体改用偏移量与长度索引，常驻内存降低 75%（降至 ~200MB），GC 标记 CPU 开销由 25% 骤降至 < 2%。
-- **Map 桶容量收敛与 Base-Offset 并行构建**：倒排索引预分配按实际 2-gram 词频上限（65536）收敛，多协程分块构建无锁合并，索引构建速度提升至 200ms 内。
-- **纯内存倒排打分切片**：移除片名模糊检索下对地区/语言标签的后置全量快照反查开销，检索直接走内存倒排索引打分与切片，大幅降低大词搜索的 I/O 抖动与数据库压力。
+#### 1. 访问分析增强与 SSR 真实客户端 IP 透传
+- **SSR 客户端 IP 与 UA 自动透传**：Next.js 服务端渲染向 Go 后端请求时，自动从 HTTP 上下文提取外部访客真实 `X-Forwarded-For`、`X-Real-IP` 及原始 User-Agent，彻底解决网页端访问被误识别为服务器自身公网 IP 的问题。
+- **网页端业务动作推入实时明细流水**：将网页端搜索（search）、点播（play）与分类筛选（classify）打点推入实时访问明细流水，与外部 API 请求统一展示，并支持智能识别搜索关键词与对应规范路径。
+- **Action 常量枚举重构**：消除分散的 Magic String，统一由 `ActionSearch` / `ActionPlay` / `ActionBrowse` / `ActionClassify` 枚举管理。
 
-#### 2. 首页数据与分类大区极速加载与 MySQL 索引优化
-- **组合索引精准命中**：分类热播列表（`GetSnapshotHotMovieListByCategoryReadModel`）与动态推荐池（`GetSnapshotHotPoolByCategoryReadModel`）移除破坏索引排序的范围过滤条件，完美命中 `idx_snap_pid_hits` 组合索引，彻底消除百万数据全表 Filesort，单次查询从 500ms 降至 < 0.5ms。
-- **全分类大区多协程并发构建**：`IndexPage` 内部遍历分类与 `overlayDynamicCategoryMovies` 动态池抽样全面重构为多 Goroutine 并发加载，分类查询从串行耗时累加转为并行加载，冷启动接口响应时间从 9400ms 降至 20ms 以内（缓存命中时保持 < 3ms）。
-- **Goroutine 异常兜底保护**：在并发子协程中统一注入 `defer recover()` 异常捕获与错误日志上报，杜绝子协程偶发异常导致主请求中断。
+#### 2. 定时采集默认周期调整
+- **默认间隔调优**：增量采集任务默认间隔由 20 分钟平稳调整为 30 分钟，减轻源站请求压力与数据库并发负担；前端表单、工具函数及帮助文案保持严格同步。
 
-#### 3. 全局海报源（Poster Source）联动与素材资产全链路升级
-- **影视与轮播自定义海报独立存储**：自定义海报与海报源解耦独立存储，新增防冲刷保护，杜绝自动采集覆盖自定义封面；增量快照缓存支持精准淘汰。
-- **轮播图海报联动与自动兜底**：轮播图跟随海报源时横版幻灯图兜底同步高清海报；管理后台轮播表单与选片组件全面重构模块化。
-- **后台素材选择器域名自动补齐**：后台素材选择弹窗（`ImagePicker`）、影片编辑（`film/add`）、轮播管理（`banners`）、网站 Logo 与赞赏渠道等全面支持完整域名回显与自动修复。
+#### 1. 恢复控制台全量 HTTP 请求日志打印与安全增强
+- **常规请求控制台日志恢复**：恢复状态码 `< 400` 且耗时正常请求的控制台输出，统一使用 `INFO` 级别，便于实时排查流量与请求情况。
+- **完整 URI 与 Query 回显**：日志输出由原本仅记录路径重构为输出完整请求 URI，精准呈现查询参数（如搜索词、分类 ID、影视 ID 等）。
+- **CRLF 注入防御与 Rune 边界截断**：全面净化请求 URI 中的换行字符（`\r\n`），超长 URI 采用 UTF-8 字符（rune）级截断与省略号保护，杜绝控制台字符截裂。
+- **自动化测试覆盖**：新增 AccessLog 中间件单元测试覆盖，使用 `t.Cleanup` 保证环境配置隔离。
 
-#### 4. 采集系统稳定性与架构解耦
-- **采集批次上下文隔离**：引入采集批次隔离机制，采集任务停止即时取消写入队列，保障生命周期自闭环。
-- **快照大事务解耦与 Pipeline 分批下发**：解耦快照生成与大事务处理，并在 `InvalidateIncrementalSnapshotCaches` 中为 Redis Pipeline 引入 1000 条 Chunk 分批执行机制，平抑超大批次变更时的 Redis 缓冲区开销。
-
-#### 5. 前台 SSR 渲染稳定性与类型加固
-- **影片卡片年份防御**：修复 `FilmList` 组件中 `buildFilmMetaTags` 在部分接口返回 `number` 类型年份时调用 `.slice()` 引发未捕获 `TypeError` 导致 Next.js SSR 500 崩溃的问题。
-- **首页焦点图辅助函数简化与类型加固**：重构并简化 `HomeHero` 焦点图中的画质识别、类型标签解析与剧情简介提取逻辑，全面防御空值与非字符串数据类型。
-
-#### 6. TVBox / MacCMS / 多端适配优化
-- **跨协议与相对路径智能补全**：修复 `normalizeMediaURL` 误将 `//img.xxx.com` 识别为绝对路径拼接 baseURL 的缺陷，自动根据当前服务协议补齐 `https:` 或 `http:`；对 `/` 开头的相对路径自动结合 Host 补全域名，保障 TVBox、影视仓及 Android/鸿蒙端播放器封面稳定展示。
+#### 2. 集群架构与功能延续（承接 v2.5.1-beta.0）
+- **Worker 纯读节点支持与守护模型**：支持 `NODE_ROLE=worker` 纯读模式，多容器进程自适应守护。
+- **集群快照多节点实时 Pub/Sub 同步**：Redis 事件广播与长轮询毫秒级快照热重载。
+- **多节点部署编排与文档**：Docker Compose Master-Worker 读写分离编排及部署文档。

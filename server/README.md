@@ -160,6 +160,7 @@ TG_PROXY=socks5://127.0.0.1:7891
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
+| `CLUSTER_ROLE` | 集群角色：`master`（默认，负责后台与定时任务）或 `worker`（从属读节点，禁用定时任务） |
 | `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
