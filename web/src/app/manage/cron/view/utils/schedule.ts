@@ -63,7 +63,7 @@ export function parseCronSpec(spec: string) {
   const parts = spec.trim().split(/\s+/);
   if (parts.length < 6) {
     return {
-      cronMinute: "*/20",
+      cronMinute: "*/30",
       cronHour: "*",
       cronDay: "*",
       cronMonth: "*",
@@ -117,7 +117,7 @@ export function toTaskFormValues(task: CronTask) {
     ...parsed,
     cronSpec: task.spec,
     scheduleMode,
-    intervalMinutes: Number(intervalMinutes || 20),
+    intervalMinutes: Number(intervalMinutes || 30),
     scheduleHour: Number(isPlainNumber(parsed.cronHour) ? parsed.cronHour : 0),
     scheduleMinute: Number(isPlainNumber(parsed.cronMinute) ? parsed.cronMinute : 0),
     scheduleWeek: Number(isPlainNumber(parsed.cronWeek) ? parsed.cronWeek : 0),
@@ -128,7 +128,7 @@ export function toTaskFormValues(task: CronTask) {
 export function buildCronSpec(values: any) {
   switch (values.scheduleMode as ScheduleMode) {
     case "interval":
-      return `0 */${values.intervalMinutes || 20} * * * ?`;
+      return `0 */${values.intervalMinutes || 30} * * * ?`;
     case "daily":
       return `0 ${values.scheduleMinute ?? 0} ${values.scheduleHour ?? 0} * * ?`;
     case "weekly":
@@ -149,7 +149,7 @@ export function getTaskScheduleText(task: CronTask) {
   const mode = detectScheduleMode(parsed);
 
   if (mode === "interval") {
-    const interval = parsed.cronMinute.match(/^\*\/(\d+)$/)?.[1] || "20";
+    const interval = parsed.cronMinute.match(/^\*\/(\d+)$/)?.[1] || "30";
     return `每隔 ${interval} 分钟运行一次`;
   }
   if (mode === "daily") {

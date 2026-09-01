@@ -90,7 +90,7 @@ func start() {
 	db.StartMysqlHealthCheck()
 
 	service.InitSvc.DefaultDataInit()
-	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token）
+	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token；Worker 纯读节点由 EnsureBotPoller 内部跳过）
 	notify.EnsureBotPoller()
 	access.StartCollector()
 

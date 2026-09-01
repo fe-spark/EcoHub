@@ -1,4 +1,5 @@
 import "server-only";
+import { headers as nextHeaders } from "next/headers";
 import { buildBackendApiUrl } from "@/lib/api-base";
 
 export interface ApiResponse<T = any> {
@@ -30,6 +31,25 @@ export async function serverGet<T = any>(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
   const merged: Record<string, string> = { "User-Agent": "EcoHub-SSR" };
+  try {
+    const reqHeaders = await nextHeaders();
+    const forwardedFor = reqHeaders.get("x-forwarded-for");
+    const realIp = reqHeaders.get("x-real-ip");
+    if (forwardedFor) {
+      merged["X-Forwarded-For"] = forwardedFor;
+    } else if (realIp) {
+      merged["X-Forwarded-For"] = realIp;
+    }
+    if (realIp) {
+      merged["X-Real-IP"] = realIp;
+    }
+    const ua = reqHeaders.get("user-agent");
+    if (ua) {
+      merged["X-Original-User-Agent"] = ua;
+    }
+  } catch {
+    // 无请求上下文时（如静态构建或后台生成）忽略
+  }
   if (headers) {
     new Headers(headers).forEach((value, key) => {
       merged[key] = value;

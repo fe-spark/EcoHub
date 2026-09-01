@@ -129,10 +129,10 @@ function formatClientPrefix(clientType: string) {
 function formatRoutePath(row: LogRow) {
   const path = row.path || "";
   if (row.resource) {
-    if (path.includes("/filmPlayInfo")) {
+    if (path.includes("/filmPlayInfo") || row.action === "play") {
       return `/api/filmPlayInfo?id=${row.resource}`;
     }
-    if (path.includes("/searchFilm")) {
+    if (path.includes("/searchFilm") || row.action === "search") {
       return `/api/searchFilm?keyword=${encodeURIComponent(row.resource)}`;
     }
     if (path.startsWith("/api/provide/vod")) {
@@ -158,7 +158,7 @@ function resolveActionInfo(row: LogRow): { tag: React.ReactNode; desc: string } 
   const resource = row.resource || "";
 
   // 1. 点播
-  if (path.includes("/filmPlayInfo")) {
+  if (path.includes("/filmPlayInfo") || row.action === "play") {
     return {
       tag: <Tag color="blue" icon={<PlayCircleOutlined />}>影视点播</Tag>,
       desc: resource ? `播放影片 #${resource}` : "请求影片播放数据",
@@ -166,7 +166,7 @@ function resolveActionInfo(row: LogRow): { tag: React.ReactNode; desc: string } 
   }
 
   // 2. 搜索
-  if (path.includes("/searchFilm")) {
+  if (path.includes("/searchFilm") || row.action === "search") {
     return {
       tag: <Tag color="cyan" icon={<SearchOutlined />}>寻片搜索</Tag>,
       desc: resource ? `搜索关键词 "${resource}"` : "影片关键字检索",
@@ -571,7 +571,7 @@ export default function AccessPageView() {
               {desc}
             </div>
             <div className={styles.logRouteLine}>
-              <span className={styles.methodTag}>{r.method || "GET"}</span>
+              <span className={styles.methodTag}>{r.method === "PAGE" ? "GET" : (r.method || "GET")}</span>
               <span className={`${styles.clientPrefix} ${styles[`prefix_${r.clientType}`] || ""}`}>
                 {prefix}
               </span>

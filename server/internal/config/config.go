@@ -1,6 +1,7 @@
 package config
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -40,6 +41,14 @@ var (
 	// FilmPictureUploadDir 用户上传素材落地目录。
 	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
 	FilmPictureUploadDir = filmPictureUploadDirLocal
+
+	// ClusterRole 当前节点在集群中的角色：master（默认，负责写与定时任务）或 worker（纯读节点）
+	ClusterRole = ClusterRoleMaster
+)
+
+const (
+	ClusterRoleMaster = "master"
+	ClusterRoleWorker = "worker"
 )
 
 const (
@@ -141,6 +150,8 @@ const (
 	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
 	// SnapshotBuildVersionKey 最近一次快照构建版本
 	SnapshotBuildVersionKey = RedisKeyPrefix + ":Snapshot:BuildVersion"
+	// SnapshotRevisionKey 快照修订版本号（增量或全量快照变动时自增，供多节点同步读模型与搜索索引）
+	SnapshotRevisionKey = RedisKeyPrefix + ":Snapshot:Revision"
 	// FilmClassifyCacheKey 分类首页快照缓存前缀
 	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
 	// FilmClassifySearchKey 分类筛选快照缓存前缀
@@ -172,8 +183,8 @@ const (
 	// BannersKey 轮播组件key
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
 
-	// DefaultUpdateSpec 每20分钟执行一次
-	DefaultUpdateSpec = "0 */20 * * * ?"
+	// DefaultUpdateSpec 每30分钟执行一次
+	DefaultUpdateSpec = "0 */30 * * * ?"
 	// EveryWeekSpec 每天凌晨4点执行一次
 	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
@@ -216,8 +227,23 @@ func IsUpgradeHelper() bool {
 	return false
 }
 
+func isTestEnv() bool {
+	if flag.Lookup("test.v") != nil {
+		return true
+	}
+	if len(os.Args) > 0 && (strings.HasSuffix(os.Args[0], ".test") || strings.HasSuffix(os.Args[0], ".test.exe")) {
+		return true
+	}
+	for _, arg := range os.Args {
+		if strings.HasPrefix(arg, "-test.") {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
-	if IsUpgradeHelper() {
+	if IsUpgradeHelper() || isTestEnv() {
 		return
 	}
 	// 本地直接运行服务端时，优先从当前目录 .env 加载环境变量。
@@ -292,6 +318,26 @@ func InitConfig() {
 
 	loadCollectRuntimeConfig()
 	loadAccessRuntimeConfig()
+
+	ClusterRole = parseClusterRole()
+	fmt.Printf("[Config] 集群角色: %s (CronEnabled: %v)\n", ClusterRole, IsCronEnabled())
+}
+
+func parseClusterRole() string {
+	if strings.ToLower(strings.TrimSpace(os.Getenv("CLUSTER_ROLE"))) == ClusterRoleWorker {
+		return ClusterRoleWorker
+	}
+	return ClusterRoleMaster
+}
+
+// IsClusterWorker 是否为集群 Worker 纯读节点
+func IsClusterWorker() bool {
+	return ClusterRole == ClusterRoleWorker
+}
+
+// IsCronEnabled 检查当前节点是否应启动定时采集任务调度器（Worker 节点自动禁用）
+func IsCronEnabled() bool {
+	return ClusterRole != ClusterRoleWorker
 }
 
 // resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。
