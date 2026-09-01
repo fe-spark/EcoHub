@@ -152,7 +152,6 @@ services:
     image: ghcr.io/fe-spark/ecohub:latest
     restart: always
     environment:
-      PORT: ${SERVER_PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
@@ -169,8 +168,8 @@ services:
       ALL_PROXY: ${ALL_PROXY:-}
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
     ports:
-      - ${WEB_PUBLIC_PORT:-3000}:3000
-      - 0.0.0.0:${SERVER_PUBLIC_PORT:-18080}:${SERVER_PORT:-8080}
+      - ${WEB_PORT:-3000}:3000
+      - 0.0.0.0:${SERVER_PORT:-18080}:8080
     volumes:
       - ./data/uploads:/app/static/upload
       - /var/run/docker.sock:/var/run/docker.sock
@@ -199,9 +198,8 @@ networks:
 ### 2. Environment variables
 
 ```env
-WEB_PUBLIC_PORT=3000
-SERVER_PUBLIC_PORT=18080
-SERVER_PORT=8080
+WEB_PORT=3000
+SERVER_PORT=18080
 
 JWT_SECRET=replace-with-a-long-random-string
 
@@ -220,7 +218,7 @@ REDIS_DB=0
 
 - Bundled databases: `MYSQL_HOST=mysql` / `REDIS_HOST=redis`. Do not write `127.0.0.1`.
 - Release image does **not** need `API_URL`.
-- If the port is taken, change `WEB_PUBLIC_PORT` and match the reverse proxy.
+- If the port is taken, change `WEB_PORT` and match the reverse proxy.
 
 ### 3. Start
 
@@ -228,12 +226,15 @@ Save → start. Confirm `Eco-hub`, `Eco-mysql`, and `Eco-redis` are running. URL
 
 You can also run the install script first, then inspect / take over the stack in 1Panel’s container list.
 
-### 4. Website and HTTPS
+### 4. Website, HTTPS, and Avoiding Public Port Exposure
 
-1. **Website** → **Create site** → **Reverse proxy** → `http://127.0.0.1:3000` (or your `WEB_PUBLIC_PORT`).
+1. **Website** → **Create site** → **Reverse proxy** → `http://127.0.0.1:3000` (or your `WEB_PORT`).
 2. Issue Let’s Encrypt or upload a cert, enable HTTPS.
 3. Do **not** point `/api/*` at `18080` by itself. Send the whole site through `3000`; Next inside the container forwards to Go.
-4. Open `80`/`443` on the firewall. Do **not** expose `18080`, MySQL, or Redis to the public internet.
+4. **Avoid exposing raw ports to the public internet (Recommended)**:
+   - Docker’s default iptables rules bypass system firewalls (like UFW). To **prevent direct public access to port 3000**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:${WEB_PORT:-3000}:3000`), so only the local reverse proxy can reach it.
+   - If direct player access is not needed, comment out or remove the `18080:8080` port mapping.
+   - Open `80`/`443` on the firewall. Do **not** expose `18080`, MySQL, or Redis to the public internet.
 
 ### 5. Update
 
@@ -313,11 +314,10 @@ Logs: `docker logs -f Eco-hub`. To update: `docker pull ghcr.io/fe-spark/ecohub:
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `WEB_PUBLIC_PORT` | `3000` | Site and admin |
-| `SERVER_PUBLIC_PORT` | `18080` | Direct API mapping |
-| `SERVER_PORT` | `8080` | Go listen port inside the container (injected as `PORT`) |
+| `WEB_PORT` | `3000` | Host Web access port |
+| `SERVER_PORT` | `18080` | Host direct API access port (optional) |
 
-In production, expose only the Web port (or 80/443 behind a reverse proxy).
+In production, expose only the Web port (or 80/443 behind a reverse proxy). To **completely prevent direct public access to raw ports**, set the port mapping in `compose.yml` to `127.0.0.1:${WEB_PORT:-3000}:3000`, making it accessible only via the local host and reverse proxy.
 
 ---
 

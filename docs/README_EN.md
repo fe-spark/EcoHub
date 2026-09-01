@@ -76,9 +76,11 @@ docker compose up -d
 | `http://<host>:3000/manage` | Administration panel |
 | `http://<host>:3000/api/provide/config` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
-| `http://<host>:18080/api/*` | Direct API access (do not expose to the public internet) |
+| `http://<host>:18080/api/*` | Direct API access (optional, for LAN or direct player access) |
 
 Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only). Default passwords must be changed before any public deployment.
+
+> **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
 
 An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
 
