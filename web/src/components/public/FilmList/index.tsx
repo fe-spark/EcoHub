@@ -14,12 +14,12 @@ interface FilmItem {
   mid?: string; // Some internal APIs use mid
   name: string;
   picture: string;
-  year: string;
-  cName: string;
-  area: string;
+  year?: string | number;
+  cName?: string;
+  area?: string;
   language?: string;
   classTag?: string;
-  remarks: string;
+  remarks?: string;
   blurb?: string;
 }
 
@@ -31,7 +31,7 @@ function normalizeMetaValue(value?: string | number | null) {
   return text;
 }
 
-function getPrimaryPlotTag(classTag?: string) {
+function getPrimaryPlotTag(classTag?: string | number | null) {
   return normalizeMetaValue(classTag)
     .split(/[,，/|、\s]+/)
     .map((tag) => tag.trim())
@@ -39,9 +39,11 @@ function getPrimaryPlotTag(classTag?: string) {
 }
 
 function buildFilmMetaTags(item: FilmItem) {
+  const yearStr = normalizeMetaValue(item.year);
+  const areaStr = normalizeMetaValue(item.area);
   return [
-    normalizeMetaValue(item.year?.slice(0, 4)),
-    normalizeMetaValue(item.area?.split(",")[0]),
+    normalizeMetaValue(yearStr ? yearStr.slice(0, 4) : ""),
+    normalizeMetaValue(areaStr ? areaStr.split(",")[0] : ""),
     normalizeMetaValue(item.language),
     getPrimaryPlotTag(item.classTag),
   ].filter(Boolean);
