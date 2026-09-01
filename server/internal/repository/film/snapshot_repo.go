@@ -765,12 +765,19 @@ func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 	}
 	InvalidateActiveFilmSearchIndex(version)
 	if db.Rdb != nil && len(mids) > 0 {
-		// 精准批量删除被修改影片的详情与播放页缓存
-		pipe := db.Rdb.Pipeline()
-		for _, mid := range mids {
-			pipe.Del(db.Cxt, fmt.Sprintf("EcoHub:filmPlayInfo:%d", mid))
+		// 精准批量删除被修改影片的详情与播放页缓存（按 1000 条分批下发，避免过大 Pipeline 占用缓冲区）
+		const pipeBatchSize = 1000
+		for i := 0; i < len(mids); i += pipeBatchSize {
+			end := i + pipeBatchSize
+			if end > len(mids) {
+				end = len(mids)
+			}
+			pipe := db.Rdb.Pipeline()
+			for _, mid := range mids[i:end] {
+				pipe.Del(db.Cxt, fmt.Sprintf("EcoHub:filmPlayInfo:%d", mid))
+			}
+			_, _ = pipe.Exec(db.Cxt)
 		}
-		_, _ = pipe.Exec(db.Cxt)
 	}
 }
 

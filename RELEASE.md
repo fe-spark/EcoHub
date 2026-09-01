@@ -1,7 +1,12 @@
-测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.12`。
+测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.13`。
 
 ### 核心变更
 
-#### 1. 首页数据（`/api/index`）百万级数据极速加载与 MySQL 索引优化
-- **完美匹配 `idx_snap_pid_hits` 组合索引**：分类热播列表（`GetSnapshotHotMovieListByCategoryReadModel`）与动态推荐池（`GetSnapshotHotPoolByCategoryReadModel`）移除破坏索引排序的范围过滤条件，直接按 `WHERE snapshot_version = ? AND pid = ? ORDER BY hits DESC, id DESC LIMIT 50` 命中 B-Tree 索引精准扫描，彻底消除多达数十次的百万数据全表 Filesort，单次查询从 500ms 降至 < 0.5ms。
-- **全分类大区多协程并发构建**：`IndexPage` 内部遍历分类与 `overlayDynamicCategoryMovies` 动态池抽样全面重构为 `sync.WaitGroup` 多 Goroutine 并发加载，分类查询从串行耗时累加转为并行加载，冷启动接口响应时间从 9400ms 降至 20ms 以内（缓存命中时保持 < 3ms）。
+#### 1. 热播影视详情降级查表与自定义海报解析修复
+- **修正模型查表**：`resolveFilmMetas` 第二层降级查询切换为持久化实体 `model.MovieDetailInfo` 并反序列化 `Content` JSON，彻底解决原业务结构体查表报错被静默忽略的问题，确保精准反查自定义海报与元数据。
+
+#### 2. 增量快照缓存精准淘汰 Pipeline 分批优化
+- **分批下发管道**：在 `InvalidateIncrementalSnapshotCaches` 中为 Redis Pipeline 引入 1000 条 Chunk 分批执行机制，有效平抑超大批次变更时的 Redis 缓冲区开销与瞬时延迟。
+
+#### 3. 首页多分类大区并发构建异常容错加固
+- **Goroutine 异常兜底**：在 `IndexPage` 及 `overlayDynamicCategoryMovies` 的并发子协程中统一注入 `defer recover()` 异常捕获与错误日志上报，杜绝子协程偶发异常导致主请求中断。
