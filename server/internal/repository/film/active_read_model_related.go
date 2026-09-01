@@ -139,11 +139,13 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		if idx != nil && len(idx.Items) > 0 {
 			lowerKey := strings.ToLower(coreToken)
 			var matchedMids []int64
-			for _, item := range idx.Items {
+			for i := range idx.Items {
+				item := &idx.Items[i]
 				if item.Mid == current.Mid {
 					continue
 				}
-				if strings.Contains(strings.ToLower(item.Name), lowerKey) {
+				name := idx.ItemName(item)
+				if strings.Contains(strings.ToLower(name), lowerKey) {
 					matchedMids = append(matchedMids, item.Mid)
 					if len(matchedMids) >= 20 {
 						break

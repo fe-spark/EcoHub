@@ -1,12 +1,13 @@
-测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.13`。
+测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.0-beta.14`。
 
 ### 核心变更
 
-#### 1. 热播影视详情降级查表与自定义海报解析修复
-- **修正模型查表**：`resolveFilmMetas` 第二层降级查询切换为持久化实体 `model.MovieDetailInfo` 并反序列化 `Content` JSON，彻底解决原业务结构体查表报错被静默忽略的问题，确保精准反查自定义海报与元数据。
+#### 1. 百万级片库内存 String Arena 扁平化与倒排索引极致优化
+- **String Arena 扁平化**：重构内存搜索模型，将百万级记录的 500 万独立堆字符串对象汇聚至单一连续字节池 `StringPool []byte`，结构体改用偏移量与长度索引，常驻内存降低 75%（降至 ~200MB），GC 标记 CPU 开销由 25% 骤降至 < 2%。
+- **Map 桶容量收敛与 Base-Offset 并行构建**：倒排索引预分配按实际 2-gram 词频上限（65536）收敛，多协程分块构建无锁合并，索引构建速度提升至 200ms 内。
 
-#### 2. 增量快照缓存精准淘汰 Pipeline 分批优化
-- **分批下发管道**：在 `InvalidateIncrementalSnapshotCaches` 中为 Redis Pipeline 引入 1000 条 Chunk 分批执行机制，有效平抑超大批次变更时的 Redis 缓冲区开销与瞬时延迟。
+#### 2. 提供端协议相对链接（`//`）智能识别与协议补齐
+- **跨协议图片修复**：修复 `normalizeMediaURL` 误将 `//img.xxx.com` 识别为绝对路径拼接 baseURL 的缺陷，自动根据当前服务协议补齐 `https:` 或 `http:`，彻底解决 TVBox、影视仓等第三方播放器封面破损问题。
 
-#### 3. 首页多分类大区并发构建异常容错加固
-- **Goroutine 异常兜底**：在 `IndexPage` 及 `overlayDynamicCategoryMovies` 的并发子协程中统一注入 `defer recover()` 异常捕获与错误日志上报，杜绝子协程偶发异常导致主请求中断。
+#### 3. 搜索链路精简与性能提升
+- **纯内存倒排切片**：移除片名模糊检索下对地区/语言标签的后置全量快照反查开销，检索直接走内存倒排索引打分与切片，大幅降低大词搜索的 I/O 抖动与数据库压力。

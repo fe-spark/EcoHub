@@ -46,8 +46,7 @@ func TestRealDatabaseSearchQueries(t *testing.T) {
 			Hits: r.Hits, Score: r.Score, Year: r.Year, UpdateStamp: r.UpdateStamp,
 		})
 	}
-	idx := &filmSearchMemoryIndex{Items: parallelBuildItems(raw)}
-	idx.buildInverted()
+	idx := buildSearchIndexFromRows("test", raw)
 	t.Logf("Loaded %d items from database", len(idx.Items))
 
 	matchedCeshi := scoreMemoryIndex(idx, "ceshi", "", 0, 0)
