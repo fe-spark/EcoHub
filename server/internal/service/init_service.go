@@ -22,6 +22,21 @@ type InitService struct{}
 var InitSvc = new(InitService)
 
 func (s *InitService) DefaultDataInit() {
+	if config.IsClusterWorker() {
+		log.Println("[Cluster] 当前节点为 Worker 纯读节点: 跳过公共 Redis 缓存清理、数据库迁移与后台写任务")
+		repository.InitMappingEngine()
+		if err := utils.CreateBaseDir(); err != nil {
+			syslog.Errorf("[Init] 素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err)
+		}
+		if err := config.EnsureContainerUploadVolume(); err != nil {
+			syslog.Warnf("[Init] %v", err)
+		}
+		filmrepo.SeedClusterSnapshotBaseline()
+		s.loadActiveFilmReadModel()
+		filmrepo.StartClusterSnapshotWatcher()
+		return
+	}
+
 	clearStartupCaches()
 
 	if !repository.ExistUserTable() {
@@ -92,8 +107,8 @@ func shouldRetainStartupRedisKey(key string) bool {
 	if strings.HasPrefix(key, config.AccessKeyPrefix) {
 		return true
 	}
-	// 快照版本号重启保留，避免版本丢失触发兜底重算与启动耗时突增
-	if key == config.SnapshotActiveVersionKey || key == config.SnapshotBuildVersionKey {
+	// 快照版本号与修订号重启保留，避免版本丢失触发兜底重算与启动耗时突增
+	if key == config.SnapshotActiveVersionKey || key == config.SnapshotBuildVersionKey || key == config.SnapshotRevisionKey {
 		return true
 	}
 	return false
@@ -253,6 +268,11 @@ func defaultFilmSources() []model.FilmSource {
 }
 
 func (s *InitService) CollectCrontabInit() {
+	if !config.IsCronEnabled() {
+		log.Printf("[Cluster] 当前节点已禁用定时采集调度器 (CLUSTER_ROLE=%s), 作为纯读 Worker 节点运行", config.ClusterRole)
+		return
+	}
+
 	if repository.ExistTask() {
 		if tasks := repository.GetAllFilmTask(); len(tasks) > 0 {
 			for _, task := range tasks {

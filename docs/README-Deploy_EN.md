@@ -321,6 +321,62 @@ In production, expose only the Web port (or 80/443 behind a reverse proxy). To *
 
 ---
 
+## Cluster & Multi-Node Deployment (`CLUSTER_ROLE`)
+
+When deploying across multiple VPS nodes for load balancing and high concurrency, specify node roles via environment variables:
+- `CLUSTER_ROLE=master` (Default): Master node, runs both Next.js Web and Go backend, handles management, database writes, and scheduled collect jobs (Cron).
+- `CLUSTER_ROLE=worker`: Read-only replica, **runs as a pure Go API instance (automatically skips the Next.js Web process to save substantial memory and disables the scheduled collect scheduler)**, dedicated to handling high-concurrency TVBox, YingShiCang, MacCMS, and public API traffic.
+- **Reverse Proxy (Nginx) Best Practices**:
+  - Route public web page browsing (`/`) and administration UI/APIs (`/manage`, `/api/manage/*`) strictly to the Master node (file uploads are handled under `/api/manage/file/upload` and naturally covered by this rule).
+  - High-concurrency read-only APIs and static poster image reads (`/api/`, including `/api/upload/pic/poster/`) should be distributed across the cluster load balancer (shared by Master and Worker nodes).
+  - **Nginx Configuration Example**:
+    ```nginx
+    upstream eco_cluster_api {
+        server 192.168.1.10:8080 weight=1; # Master Node API
+        server 192.168.1.11:8080 weight=2; # Worker 1 Node API
+        server 192.168.1.12:8080 weight=2; # Worker 2 Node API
+    }
+
+    upstream eco_master_web {
+        server 192.168.1.10:3000;          # Master Web frontend
+    }
+
+    upstream eco_master_api {
+        server 192.168.1.10:8080;          # Master API (writes and management)
+    }
+
+    server {
+        listen 80;
+        server_name your-domain.com;
+
+        # Administration UI routed to Master
+        location /manage {
+            proxy_pass http://eco_master_web;
+        }
+
+        # Administration write/upload APIs routed to Master
+        location /api/manage/ {
+            proxy_pass http://eco_master_api;
+        }
+
+        # High-concurrency read-only APIs and static poster images load balanced across cluster
+        location /api/ {
+            proxy_pass http://eco_cluster_api;
+        }
+
+        # Default web browsing requests routed to Master Web
+        location / {
+            proxy_pass http://eco_master_web;
+        }
+    }
+    ```
+- **Deployment order & data sync notes**:
+  - **Start Master first, then scale Workers**: Workers poll Redis for the snapshot version/revision every 3s and auto-align with the Master's read model and search index; if Master has not yet published the first snapshot, Workers load it automatically once it appears — no restart needed.
+  - **Share persistent storage**: snapshot data and static assets live in the database/shared disk; Workers must be able to read Master's snapshot data (e.g. `film_list_snapshot`). Mount `data/` on shared storage (NFS / cloud disk) and do not give Workers an empty database.
+  - **Workers are read-only at the application layer**: write endpoints under `/api/manage/*` (including uploads) are rejected directly by the backend (HTTP 403). Reverse-proxy routing is only the first layer of protection — defense in depth against accidental writes.
+
+---
+
 ## Common commands
 
 Methods 1 / 2:

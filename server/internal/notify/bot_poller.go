@@ -54,7 +54,11 @@ var (
 
 // EnsureBotPoller 按已保存 Bot Token 启停轮询。无 Token 停止；Token 变化则重启。
 // cancel + Wait 在锁外执行，避免长轮询退出时阻塞其它 Ensure 调用方。
+// Worker 纯读节点禁止启动 Telegram 轮询。
 func EnsureBotPoller() {
+	if config.IsClusterWorker() {
+		return
+	}
 	cfg := GetConfig()
 	token := strings.TrimSpace(cfg.BotToken)
 	ensureBotPoller(token, runBotPoller)

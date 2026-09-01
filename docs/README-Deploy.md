@@ -321,6 +321,62 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 ---
 
+## 集群部署与多节点（CLUSTER_ROLE）
+
+多台 VPS 搭建集群以分流抗高并发时，可通过环境变量指定节点角色：
+- `CLUSTER_ROLE=master`（默认）：主控节点，同时运行 Next.js Web 与 Go 后端，负责后台管理、写库及定时采集任务；
+- `CLUSTER_ROLE=worker`：从属读节点，**专职作为纯 Go API 节点运行（自动跳过 Next.js Web 进程以节约大量内存，同时自动禁用定时采集调度器）**，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务；
+- **反向代理（Nginx）最佳实践**：
+  - 前台网页浏览（`/`）与管理后台（`/manage`、`/api/manage/*`）固定打到 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，已被该规则自然覆盖）；
+  - 高并发只读 API 与海报静态图片读请求（`/api/`，含 `/api/upload/pic/poster/`）分流到集群负载均衡（由 Master 与多个 Worker 共同抗压）；
+  - **Nginx 配置示例**：
+    ```nginx
+    upstream eco_cluster_api {
+        server 192.168.1.10:8080 weight=1; # Master 节点 API
+        server 192.168.1.11:8080 weight=2; # Worker 1 节点 API
+        server 192.168.1.12:8080 weight=2; # Worker 2 节点 API
+    }
+
+    upstream eco_master_web {
+        server 192.168.1.10:3000;          # Master Web 页面
+    }
+
+    upstream eco_master_api {
+        server 192.168.1.10:8080;          # Master API（写操作与管理后台）
+    }
+
+    server {
+        listen 80;
+        server_name your-domain.com;
+
+        # 管理后台前端页面固定路由至 Master
+        location /manage {
+            proxy_pass http://eco_master_web;
+        }
+
+        # 管理后台写/改/配置/上传接口固定路由至 Master
+        location /api/manage/ {
+            proxy_pass http://eco_master_api;
+        }
+
+        # 高并发前台只读 API 及海报静态素材（/api/upload/pic/poster/）由 Master 与 Worker 集群共同分流负载
+        location /api/ {
+            proxy_pass http://eco_cluster_api;
+        }
+
+        # 默认网页浏览请求打到 Master Web
+        location / {
+            proxy_pass http://eco_master_web;
+        }
+    }
+    ```
+- **部署顺序与数据同步注意事项**：
+  - **先启动 Master，再扩容 Worker**：Worker 启动后每 3s 轮询 Redis 中的快照版本/修订号自动对齐 Master 的读模型与搜索索引；若 Master 尚未完成首次快照发布，Worker 会在首个快照发布后自动装载，无需重启。
+  - **共享持久化数据卷**：快照表与静态资源存放在数据库/共享磁盘，Worker 必须能读取 Master 写入的快照数据（`film_list_snapshot` 等），建议将 `data/` 挂载为共享存储（如 NFS / 云盘），不要为 Worker 单独建空库。
+  - **Worker 为应用层只读节点**：Worker 上 `/api/manage/*`（含上传）等写接口会被后端直接拒绝（HTTP 403），反向代理路由仅是第一层约束，双重防护避免误写。
+
+---
+
 ## 常用命令
 
 方式 1 / 2：
