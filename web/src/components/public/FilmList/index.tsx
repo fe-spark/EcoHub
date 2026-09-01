@@ -74,6 +74,7 @@ function FilmCard({
   const imgRef = React.useRef<HTMLImageElement | null>(null);
   const id = item.mid || item.id;
   const metaTags = buildFilmMetaTags(item);
+  const metaText = metaTags.join(" · ") || item.remarks;
 
   React.useEffect(() => {
     setImgLoaded(false);
@@ -166,7 +167,7 @@ function FilmCard({
           <span className={styles.name}>
             <HighlightMatchedText text={item.name?.split("[")[0]} query={highlightQuery} />
           </span>
-          <span className={styles.subText}>{item.remarks}</span>
+          <span className={styles.subText} title={metaText}>{metaText}</span>
         </div>
       </div>
     </Col>

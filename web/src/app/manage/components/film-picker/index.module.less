@@ -1,0 +1,277 @@
+.pickerContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* 顶部居中搜索区域 */
+.searchSection {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0 6px;
+}
+
+.searchBarWrapper {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  max-width: 560px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border);
+  border-radius: 24px;
+  padding: 2px 3px 2px 14px;
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+  }
+
+  &:focus-within {
+    border-color: var(--ant-color-primary);
+    box-shadow: 0 0 0 3px rgba(250, 140, 22, 0.18);
+  }
+}
+
+.searchInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--ant-color-text);
+  padding: 5px 6px;
+
+  &::placeholder {
+    color: var(--ant-color-text-tertiary, rgba(255, 255, 255, 0.35));
+  }
+}
+
+.searchBtn {
+  border-radius: 20px !important;
+  padding: 0 18px !important;
+  height: 32px !important;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 居中筛选与统计栏 */
+.filterRow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 560px;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.searchStats {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary, rgba(255, 255, 255, 0.45));
+
+  b {
+    color: var(--ant-color-primary);
+  }
+}
+
+/* 影片卡片网格列表 (流式自适应紧凑卡片) */
+.listScrollArea {
+  min-height: 320px;
+  max-height: 440px;
+  overflow-y: auto;
+  padding: 2px 4px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(135px, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(115px, 1fr));
+    gap: 8px;
+  }
+}
+
+.filmCard {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  cursor: pointer;
+  transition: transform 0.22s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.22s ease, border-color 0.22s ease;
+  user-select: none;
+
+  &:hover {
+    transform: translateY(-3px);
+    border-color: var(--ant-color-primary);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+
+    .poster {
+      transform: scale(1.04);
+    }
+  }
+}
+
+.cardActive {
+  border-color: var(--ant-color-primary) !important;
+  box-shadow: 0 0 0 2px rgba(250, 140, 22, 0.4) !important;
+  background: rgba(250, 140, 22, 0.04);
+}
+
+.posterContainer {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
+}
+
+.poster {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.topBadge {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  z-index: 2;
+  font-size: 10px;
+  line-height: 14px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  backdrop-filter: blur(4px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.bottomOverlay {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 6px 4px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.85) 0%, rgba(0, 0, 0, 0) 100%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  z-index: 2;
+}
+
+.remarkText {
+  font-size: 10px;
+  color: #ffa940;
+  font-weight: 500;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cardBody {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px 8px;
+}
+
+.cardTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.35;
+}
+
+.cardMetaRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--ant-color-text-secondary);
+}
+
+.cardSub {
+  font-size: 10px;
+  color: var(--ant-color-text-tertiary, rgba(255, 255, 255, 0.45));
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkBadge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 3;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--ant-color-primary);
+  color: var(--ant-color-text-light-solid, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  border: 1.5px solid var(--ant-color-bg-container, #ffffff);
+}
+
+/* 底部操作与选中提示栏 */
+.footerWrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.selectedChip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px 3px 5px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 14px;
+}
+
+.chipThumb {
+  width: 20px;
+  height: 28px;
+  border-radius: 3px;
+  object-fit: cover;
+}
+
+.chipTitle {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-primary);
+}
+
+.chipMeta {
+  font-size: 11px;
+  color: var(--ant-color-text-secondary);
+}
+
+.footerPlaceholder {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}

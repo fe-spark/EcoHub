@@ -153,6 +153,25 @@
   display: none;
 }
 
+.cardFeaturedBadge {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.62);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(8px);
+  color: #ffffff;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+}
+
 .bannerDots {
   position: absolute;
   left: 0;
@@ -236,6 +255,36 @@
   border: 1px solid rgba(255, 180, 0, 0.32);
   color: #ffca28;
   font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.badgeFeature {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(255, 120, 0, 0.14);
+  border: 1px solid rgba(255, 120, 0, 0.32);
+  color: #ff9100;
+  font-size: 11.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.badgeFeatured {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(255, 154, 0, 0.18), rgba(255, 87, 34, 0.18));
+  border: 1px solid rgba(255, 154, 0, 0.45);
+  color: #ff9800;
+  font-size: 11.5px;
   font-weight: 800;
   letter-spacing: 0.04em;
   white-space: nowrap;
@@ -402,6 +451,11 @@
     0 10px 20px rgba(0, 0, 0, 0.35);
 }
 
+.tagCategory,
+.tagRating {
+  display: none;
+}
+
 @media (max-width: 1100px) {
   .hero {
     --deck-w: 260px;
@@ -434,7 +488,7 @@
   .hero {
     --deck-w: min(68vw, 280px);
     min-height: 0;
-    margin: 0 0 36px;
+    margin: 0 0 24px;
     overflow: visible;
     border: none;
     border-radius: 0;
@@ -447,13 +501,13 @@
   }
 
   .shell {
-    padding: 4px 0 0;
+    padding: 0;
   }
 
   .layout {
     flex-direction: column;
     justify-content: flex-start;
-    gap: 36px;
+    gap: 14px;
     min-height: 0;
     width: 100%;
   }
@@ -462,7 +516,7 @@
     order: 1;
     flex: 0 0 auto;
     width: calc(var(--deck-w) + 28px);
-    padding: 0 14px 8px;
+    padding: 0 14px 4px;
     margin: 0 auto;
   }
 
@@ -473,40 +527,59 @@
     max-width: none;
     align-items: center;
     text-align: center;
-    gap: 10px;
+    gap: 8px;
   }
 
   .eyebrow,
   .copyHead,
-  .badgeQuality,
-  .counter,
-  .tags,
+  .blurb,
   .blurbFallback,
-  .thumbs {
-    display: none !important;
-  }
-
-  .playBtn {
+  .thumbs,
+  .playBtn,
+  .bannerDots {
     display: none !important;
   }
 
   .title {
+    margin: 0;
     font-size: 18px;
+    line-height: 1.3;
     text-align: center;
   }
 
-  .blurb {
-    display: -webkit-box;
-    max-width: 34em;
-    margin: 0 auto;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-    color: var(--hero-text-3);
-    font-size: 13px;
-    line-height: 1.55;
-    text-align: center;
+  .tags {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .tag,
+  .tagHighlight,
+  .tagCategory,
+  .tagRating {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .tagCategory {
+    background: rgba(var(--primary-color-rgb), 0.95);
+    color: var(--public-on-accent);
+    font-weight: 700;
+    border: none;
+  }
+
+  .tagRating {
+    background: rgba(255, 180, 0, 0.15);
+    border: 1px solid rgba(255, 180, 0, 0.35);
+    color: #ffca28;
+    font-weight: 800;
   }
 
   .cardChip {
@@ -528,10 +601,6 @@
     text-overflow: ellipsis;
   }
 
-  .bannerDots {
-    display: none;
-  }
-
   .card {
     border-radius: 16px;
   }
@@ -540,14 +609,31 @@
 @media (max-width: 480px) {
   .hero {
     --deck-w: min(72vw, 260px);
-    margin-bottom: 32px;
+    margin-bottom: 20px;
   }
 
   .layout {
-    gap: 32px;
+    gap: 12px;
+  }
+
+  .copy {
+    gap: 6px;
   }
 
   .title {
     font-size: 16px;
+  }
+
+  .tags {
+    gap: 4px;
+  }
+
+  .tag,
+  .tagHighlight,
+  .tagCategory,
+  .tagRating {
+    min-height: 20px;
+    padding: 0 6px;
+    font-size: 10.5px;
   }
 }

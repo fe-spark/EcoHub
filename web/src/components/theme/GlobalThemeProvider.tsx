@@ -161,9 +161,10 @@ export default function GlobalThemeProvider({
           colorBorder: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
         },
         Table: {
+          cellBg: isDark ? "#14151a" : "#ffffff",
+          headerBg: isDark ? "#1b1d24" : "#f8fafc",
           colorBorderSecondary: isDark ? "rgba(255, 255, 255, 0.16)" : "#e2e8f0",
           borderColor: isDark ? "rgba(255, 255, 255, 0.22)" : "#cbd5e1",
-          headerBg: isDark ? "rgba(255, 255, 255, 0.06)" : "#f8fafc",
           rowHoverBg: isDark ? "rgba(250, 140, 22, 0.1)" : "rgba(250, 140, 22, 0.05)",
         },
         Menu: {

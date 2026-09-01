@@ -57,6 +57,13 @@ const maxLiveRemarksBatchSize = 100
 type LiveBannerSnapshot struct {
 	Mid                int64
 	Remarks            string
+	Area               string
+	ClassTag           string
+	Actor              string
+	Director           string
+	Blurb              string
+	Score              float64
+	Hits               int64
 	Picture            string
 	PictureSlide       string
 	CustomPicture      string
@@ -93,6 +100,13 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	type row struct {
 		Mid                int64
 		Remarks            string
+		Area               string
+		ClassTag           string
+		Actor              string
+		Director           string
+		Blurb              string
+		Score              float64
+		Hits               int64
 		Picture            string
 		PictureSlide       string
 		CustomPicture      string
@@ -101,7 +115,7 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	}
 	var rows []row
 	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
-		Select("mid, remarks, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
+		Select("mid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("snapshot_version = ? AND mid IN ?", version, mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
@@ -112,6 +126,13 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		out[r.Mid] = LiveBannerSnapshot{
 			Mid:                r.Mid,
 			Remarks:            strings.TrimSpace(r.Remarks),
+			Area:               strings.TrimSpace(r.Area),
+			ClassTag:           strings.TrimSpace(r.ClassTag),
+			Actor:              strings.TrimSpace(r.Actor),
+			Director:           strings.TrimSpace(r.Director),
+			Blurb:              strings.TrimSpace(r.Blurb),
+			Score:              r.Score,
+			Hits:               r.Hits,
 			Picture:            strings.TrimSpace(r.Picture),
 			PictureSlide:       strings.TrimSpace(r.PictureSlide),
 			CustomPicture:      strings.TrimSpace(r.CustomPicture),

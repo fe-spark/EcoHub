@@ -25,10 +25,53 @@ export interface HeroBannerItem {
   year: string;
   cName: string;
   area?: string;
+  classTag?: string;
+  actor?: string;
+  director?: string;
   remark?: string;
   remarks?: string;
   blurb?: string;
   score?: string | number;
+  hits?: number;
+}
+
+function parseClassTags(classTag?: string, limit = 2): string[] {
+  if (!classTag) return [];
+  return classTag
+    .split(/[,/|，、\s]+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length > 0 && t.length <= 8)
+    .slice(0, limit);
+}
+
+function resolveQualityBadge(remarks?: string): string {
+  if (!remarks) return "超清原画";
+  const upper = remarks.toUpperCase();
+  if (upper.includes("4K") || upper.includes("2160P")) return "4K 超清";
+  if (upper.includes("1080P") || upper.includes("蓝光") || upper.includes("BD")) return "1080P 蓝光";
+  if (upper.includes("HD") || upper.includes("720P") || upper.includes("超清") || upper.includes("高清")) return "HD 高清";
+  return "超清原画";
+}
+
+function resolveHeroSummary(item: HeroBannerItem): string {
+  if (item.blurb && item.blurb.trim()) {
+    return item.blurb.trim();
+  }
+  const credits: string[] = [];
+  if (item.director && item.director.trim()) {
+    credits.push(`导演：${item.director.trim()}`);
+  }
+  if (item.actor && item.actor.trim()) {
+    credits.push(`主演：${item.actor.trim()}`);
+  }
+  if (credits.length > 0) {
+    return credits.join(" · ");
+  }
+  const tagStr = parseClassTags(item.classTag, 3).join(" / ");
+  if (tagStr) {
+    return `精选热播${item.cName || "影视"}，类型涵盖 ${tagStr}。支持多线路极速秒播与高清画质，点击立即畅享精彩正片。`;
+  }
+  return `热播精选《${item.name}》，支持多线路极速解析与高清流畅播放，点击立即畅享精彩正片。`;
 }
 
 function getBackdrop(item: HeroBannerItem) {
@@ -162,12 +205,13 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
               {active.cName ? (
                 <span className={styles.chip}>{active.cName}</span>
               ) : null}
-              {active.score ? (
-                <span className={styles.badgeRating}>★ {active.score}</span>
-              ) : (
-                <span className={styles.badgeRating}>★ 9.6</span>
-              )}
-              <span className={styles.badgeQuality}>4K 超清</span>
+              <span className={styles.badgeFeatured}>✨ 精选推荐</span>
+              {active.score && Number(active.score) > 0 ? (
+                <span className={styles.badgeRating}>★ {Number(active.score).toFixed(1)}</span>
+              ) : null}
+              <span className={styles.badgeQuality}>
+                {resolveQualityBadge(active.remarks || active.remark)}
+              </span>
               {multi ? (
                 <span className={styles.counter}>
                   {String(safeIndex + 1).padStart(2, "0")}
@@ -180,27 +224,27 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
             <h2 className={styles.title}>{active.name}</h2>
 
             <div className={styles.tags}>
+              {active.cName ? (
+                <span className={styles.tagCategory}>{active.cName}</span>
+              ) : null}
+              {active.score && Number(active.score) > 0 ? (
+                <span className={styles.tagRating}>★ {Number(active.score).toFixed(1)}</span>
+              ) : null}
               {active.year && active.year !== "0" ? (
                 <span className={styles.tag}>{active.year}</span>
-              ) : null}
-              {active.cName ? (
-                <span className={styles.tag}>{active.cName}</span>
               ) : null}
               {active.area ? (
                 <span className={styles.tag}>{active.area}</span>
               ) : null}
+              {parseClassTags(active.classTag, 1).map((tag) => (
+                <span key={tag} className={styles.tag}>{tag}</span>
+              ))}
               {active.remarks || active.remark ? (
                 <span className={styles.tagHighlight}>{active.remarks || active.remark}</span>
               ) : null}
             </div>
 
-            {active.blurb ? (
-              <p className={styles.blurb}>{active.blurb}</p>
-            ) : (
-              <p className={`${styles.blurb} ${styles.blurbFallback}`}>
-                震撼视觉体验，呈现高帧率全高清画面与纯正环绕声效，带您体验沉浸式观影之旅。
-              </p>
-            )}
+            <p className={styles.blurb}>{resolveHeroSummary(active)}</p>
 
             <Button
               type="primary"
@@ -297,9 +341,7 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
                       className={styles.cardImg}
                       style={{ backgroundImage: `url(${getPoster(item)})` }}
                     />
-                    {item.cName ? (
-                      <span className={styles.cardChip}>{item.cName}</span>
-                    ) : null}
+                    <span className={styles.cardFeaturedBadge}>✨ 精选</span>
                   </button>
                 </SwiperSlide>
               ))}

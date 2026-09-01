@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from "react";
 import { Modal, Spin, Empty, Pagination, Button, Input } from "antd";
-import { CheckCircleFilled } from "@ant-design/icons";
+import { CheckOutlined } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import styles from "./index.module.less";
 
@@ -143,7 +143,9 @@ export default function ImagePicker({
                   </div>
                 )}
                 {selected === item.link && (
-                  <CheckCircleFilled className={styles.check} />
+                  <div className={styles.checkBadge}>
+                    <CheckOutlined style={{ fontSize: 13, strokeWidth: 4 }} />
+                  </div>
                 )}
               </div>
             ))}
