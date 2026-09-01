@@ -1,4 +1,4 @@
-测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.1-beta.1`。
+测试版（Pre-release），Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.1-beta.2`。
 
 ### 升级指引
 
@@ -7,7 +7,15 @@
 
 ---
 
-### v2.5.1-beta.1 核心变更
+### v2.5.1-beta.2 核心变更
+
+#### 1. 访问分析增强与 SSR 真实客户端 IP 透传
+- **SSR 客户端 IP 与 UA 自动透传**：Next.js 服务端渲染向 Go 后端请求时，自动从 HTTP 上下文提取外部访客真实 `X-Forwarded-For`、`X-Real-IP` 及原始 User-Agent，彻底解决网页端访问被误识别为服务器自身公网 IP 的问题。
+- **网页端业务动作推入实时明细流水**：将网页端搜索（search）、点播（play）与分类筛选（classify）打点推入实时访问明细流水，与外部 API 请求统一展示，并支持智能识别搜索关键词与对应规范路径。
+- **Action 常量枚举重构**：消除分散的 Magic String，统一由 `ActionSearch` / `ActionPlay` / `ActionBrowse` / `ActionClassify` 枚举管理。
+
+#### 2. 定时采集默认周期调整
+- **默认间隔调优**：增量采集任务默认间隔由 20 分钟平稳调整为 30 分钟，减轻源站请求压力与数据库并发负担；前端表单、工具函数及帮助文案保持严格同步。
 
 #### 1. 恢复控制台全量 HTTP 请求日志打印与安全增强
 - **常规请求控制台日志恢复**：恢复状态码 `< 400` 且耗时正常请求的控制台输出，统一使用 `INFO` 级别，便于实时排查流量与请求情况。

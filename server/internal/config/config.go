@@ -183,8 +183,8 @@ const (
 	// BannersKey 轮播组件key
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
 
-	// DefaultUpdateSpec 每20分钟执行一次
-	DefaultUpdateSpec = "0 */20 * * * ?"
+	// DefaultUpdateSpec 每30分钟执行一次
+	DefaultUpdateSpec = "0 */30 * * * ?"
 	// EveryWeekSpec 每天凌晨4点执行一次
 	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次

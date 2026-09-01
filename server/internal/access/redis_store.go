@@ -200,7 +200,7 @@ func writePageView(evt *AccessEvent) {
 	pipe.HIncrBy(ctx, ak, evt.Action, 1)
 	pipe.ExpireNX(ctx, ak, ttlDay)
 
-	if evt.Action == "search" && evt.Resource != "" {
+	if evt.Action == ActionSearch && evt.Resource != "" {
 		sk := topSearchKey(day)
 		pipe.ZIncrBy(ctx, sk, 1, evt.Resource)
 		pipe.ZRemRangeByRank(ctx, sk, 0, int64(-zsetKeep-1))
@@ -211,6 +211,21 @@ func writePageView(evt *AccessEvent) {
 		pipe.ZIncrBy(ctx, plk, 1, evt.playMember)
 		pipe.ZRemRangeByRank(ctx, plk, 0, int64(-zsetKeep-1))
 		pipe.ExpireNX(ctx, plk, ttlDay)
+	}
+	// 网页端发生的业务交互（搜索、点播、分类筛选），推入实时明细流水
+	if (evt.Action == ActionSearch && evt.Resource != "") || evt.Action == ActionPlay || evt.Action == ActionClassify {
+		payload, err := json.Marshal(evt)
+		if err == nil {
+			rk := recentKey()
+			pipe.LPush(ctx, rk, payload)
+			pipe.LTrim(ctx, rk, 0, int64(config.AccessRecentLimit-1))
+			pipe.Expire(ctx, rk, ttlDay)
+
+			rkDay := recentDayKey(day)
+			pipe.LPush(ctx, rkDay, payload)
+			pipe.LTrim(ctx, rkDay, 0, int64(config.AccessRecentLimit-1))
+			pipe.Expire(ctx, rkDay, ttlDay)
+		}
 	}
 	if evt.IPHash != "" {
 		uk := uvKey(day)
