@@ -1,6 +1,7 @@
 package access
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"sync"
@@ -108,19 +109,22 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 		}
 	}
 
-	// 2. 若快照中未找到，从 movie_details 中查（用户自定义主表）
+	// 2. 若快照中未找到，从 movie_detail_info 中查（用户自定义主表）
 	if len(unresolved) > 0 {
-		var details []model.MovieDetail
-		if err := db.Mdb.Model(&model.MovieDetail{}).
-			Where("id IN ?", unresolved).
-			Find(&details).Error; err == nil {
-			for _, d := range details {
-				foundMap[d.Id] = filmMetaCacheItem{
-					Title:    d.Name,
-					Category: d.CName,
-					Poster:   d.DisplayPicture(),
-					Year:     parseYearInt(d.Year),
-					CachedAt: now,
+		var detailInfos []model.MovieDetailInfo
+		if err := db.Mdb.Model(&model.MovieDetailInfo{}).
+			Where("mid IN ?", unresolved).
+			Find(&detailInfos).Error; err == nil {
+			for _, info := range detailInfos {
+				var d model.MovieDetail
+				if err := json.Unmarshal([]byte(info.Content), &d); err == nil {
+					foundMap[info.Mid] = filmMetaCacheItem{
+						Title:    d.Name,
+						Category: d.CName,
+						Poster:   d.DisplayPicture(),
+						Year:     parseYearInt(d.Year),
+						CachedAt: now,
+					}
 				}
 			}
 		}
