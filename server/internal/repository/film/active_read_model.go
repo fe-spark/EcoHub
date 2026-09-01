@@ -38,18 +38,23 @@ type filmSearchIndexRow struct {
 }
 
 type filmSearchMemoryItem struct {
-	Mid               int64
-	Pid               int64
-	Cid               int64
-	Hits              int64
-	Score             float64
-	Year              int64
-	UpdateStamp       int64
-	Name              string
-	CleanName         string
-	PinyinFull        string
-	PinyinInitials    string
-	PinyinInitialAlts string
+	Mid              int64
+	Pid              int64
+	Cid              int64
+	Hits             int64
+	Score            float64
+	Year             int64
+	UpdateStamp      int64
+	NameOffset       uint32
+	NameLen          uint16
+	CleanNameOffset  uint32
+	CleanNameLen     uint16
+	PinyinFullOffset uint32
+	PinyinFullLen    uint16
+	PinyinInitOffset uint32
+	PinyinInitLen    uint16
+	PinyinAltOffset  uint32
+	PinyinAltLen     uint16
 }
 
 type scoredSearchHit struct {
@@ -63,6 +68,7 @@ type scoredSearchHit struct {
 
 type filmSearchMemoryIndex struct {
 	Version              string
+	StringPool           []byte
 	Items                []filmSearchMemoryItem
 	nameBigrams          map[string][]int32
 	nameUnigrams         map[rune][]int32
@@ -139,14 +145,9 @@ func buildFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	scanCost := time.Since(buildStarted)
 	log.Printf("[ActiveReadModel] 开始构建内存搜索索引 version=%s rows=%d scan=%s", version, len(rows), scanCost)
 
-	items := parallelBuildItems(rows)
-	newIdx := &filmSearchMemoryIndex{
-		Version: version,
-		Items:   items,
-	}
-	newIdx.buildInverted()
-	log.Printf("[ActiveReadModel] 内存搜索索引已构建 version=%s count=%d scan=%s total=%s",
-		version, len(items), scanCost, time.Since(buildStarted))
+	newIdx := buildSearchIndexFromRows(version, rows)
+	log.Printf("[ActiveReadModel] 内存搜索索引已构建 version=%s count=%d poolSize=%d scan=%s total=%s",
+		version, len(newIdx.Items), len(newIdx.StringPool), scanCost, time.Since(buildStarted))
 	return newIdx
 }
 
@@ -249,14 +250,18 @@ func compareScoredHits(a, b scoredSearchHit, sortField string) bool {
 	return a.mid > b.mid
 }
 
-func scoreOneItem(item *filmSearchMemoryItem, q utils.QueryContext, pid, cid int64) scoredSearchHit {
+func (idx *filmSearchMemoryIndex) scoreOneItem(itemIndex int, q utils.QueryContext, pid, cid int64) scoredSearchHit {
+	if itemIndex < 0 || itemIndex >= len(idx.Items) {
+		return scoredSearchHit{}
+	}
+	item := &idx.Items[itemIndex]
 	if pid > 0 && item.Pid != pid {
 		return scoredSearchHit{}
 	}
 	if cid > 0 && item.Cid != cid {
 		return scoredSearchHit{}
 	}
-	s := utils.ScoreFilmMatch(item.asSearchItem(), q)
+	s := utils.ScoreFilmMatch(idx.asSearchItem(itemIndex), q)
 	if s <= 0 {
 		return scoredSearchHit{}
 	}
@@ -278,8 +283,8 @@ func scoreMemoryIndex(idx *filmSearchMemoryIndex, keyword string, sortField stri
 	cands := idx.collectCandidates(q)
 
 	matched := make([]scoredSearchHit, 0, 64)
-	appendHit := func(item *filmSearchMemoryItem) {
-		hit := scoreOneItem(item, q, pid, cid)
+	appendHit := func(itemIndex int) {
+		hit := idx.scoreOneItem(itemIndex, q, pid, cid)
 		if hit.mid != 0 {
 			matched = append(matched, hit)
 		}
@@ -287,14 +292,14 @@ func scoreMemoryIndex(idx *filmSearchMemoryIndex, keyword string, sortField stri
 
 	if cands == nil {
 		for i := range idx.Items {
-			appendHit(&idx.Items[i])
+			appendHit(i)
 		}
 	} else {
 		for _, id := range cands {
 			if int(id) < 0 || int(id) >= len(idx.Items) {
 				continue
 			}
-			appendHit(&idx.Items[id])
+			appendHit(int(id))
 		}
 	}
 
@@ -752,48 +757,7 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 				filteredHits = append(filteredHits, hit)
 			}
 
-			// 如果带有次级标签筛选 (plot / area / language)，做快照级后置过滤
-			if s.Plot != "" || s.Area != "" || s.Language != "" {
-				allCandidateMids := make([]int64, len(filteredHits))
-				for i, h := range filteredHits {
-					allCandidateMids[i] = h.mid
-				}
-				allSnapshots := GetProjectedSnapshotsByMidsOrdered(version, allCandidateMids)
-				finalSnapshots := make([]model.FilmListSnapshot, 0, len(allSnapshots))
-				for _, snap := range allSnapshots {
-					if s.Plot != "" && !strings.Contains(snap.ClassTag, s.Plot) {
-						continue
-					}
-					if s.Area != "" && strings.TrimSpace(snap.Area) != s.Area {
-						continue
-					}
-					if s.Language != "" && strings.TrimSpace(snap.Language) != s.Language {
-						continue
-					}
-					finalSnapshots = append(finalSnapshots, snap)
-				}
-
-				page.Total = len(finalSnapshots)
-				page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-				if page.PageCount <= 0 {
-					page.PageCount = 1
-				}
-
-				offset := getPageOffset(page)
-				if offset >= len(finalSnapshots) {
-					return []model.FilmIndex{}
-				}
-				end := offset + page.PageSize
-				if end > len(finalSnapshots) {
-					end = len(finalSnapshots)
-				}
-				paged := finalSnapshots[offset:end]
-				log.Printf("[ManageFilmSearch] 内存模糊过滤完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
-					name, s.Pid, s.Cid, page.Total, page.Current, len(paged), time.Since(startedAt))
-				return convertSnapshotsToFilmIndexes(paged)
-			}
-
-			// 无次级标签筛选，直接在命中结果中分页切片
+			// 直接在命中结果中分页切片
 			pageMids := pageMidsFromHits(filteredHits, page)
 			if len(pageMids) == 0 {
 				return []model.FilmIndex{}

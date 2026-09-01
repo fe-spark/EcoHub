@@ -8,9 +8,7 @@ import (
 )
 
 func testSearchIndex(rows []filmSearchIndexRow) *filmSearchMemoryIndex {
-	idx := &filmSearchMemoryIndex{Items: parallelBuildItems(rows)}
-	idx.buildInverted()
-	return idx
+	return buildSearchIndexFromRows("test", rows)
 }
 
 func candMids(idx *filmSearchMemoryIndex, cands []int32) map[int64]struct{} {
