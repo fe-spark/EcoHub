@@ -37,8 +37,10 @@ func recentDayKey(day string) string { return config.AccessKeyPrefix + "recent:"
 func slowKey() string              { return config.AccessKeyPrefix + "slow" }
 func slowDayKey(day string) string   { return config.AccessKeyPrefix + "slow:" + day }
 func errorKey() string             { return config.AccessKeyPrefix + "error" }
-func errorDayKey(day string) string  { return config.AccessKeyPrefix + "error:" + day }
-func droppedKey() string           { return config.AccessKeyPrefix + "meta:dropped" }
+func errorDayKey(day string) string   { return config.AccessKeyPrefix + "error:" + day }
+func droppedKey() string              { return config.AccessKeyPrefix + "meta:dropped" }
+func droppedDayKey(day string) string  { return config.AccessKeyPrefix + "meta:dropped:" + day }
+func rollupLockKey() string            { return config.AccessKeyPrefix + "lock:daily_rollup" }
 
 func histBucket(ms int64) string {
 	switch {
@@ -165,6 +167,10 @@ func writeEvent(evt *AccessEvent) {
 		dk := droppedKey()
 		pipe.IncrBy(ctx, dk, n)
 		pipe.ExpireNX(ctx, dk, ttlDay)
+
+		dkDay := droppedDayKey(day)
+		pipe.IncrBy(ctx, dkDay, n)
+		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
@@ -236,6 +242,10 @@ func writePageView(evt *AccessEvent) {
 		dk := droppedKey()
 		pipe.IncrBy(ctx, dk, n)
 		pipe.ExpireNX(ctx, dk, ttlDay)
+
+		dkDay := droppedDayKey(day)
+		pipe.IncrBy(ctx, dkDay, n)
+		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
 		syslog.Errorf("[Access] 页面埋点写入失败: %v", err)

@@ -210,3 +210,29 @@ func TestQueryPastDayWithoutRedisReturnsEmpty(t *testing.T) {
 		t.Fatalf("want empty search tops, got %+v", items)
 	}
 }
+
+func TestPersistDailyWithDropped(t *testing.T) {
+	setupAccessDailyTestDB(t)
+	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
+	day := yesterday.Format("2006-01-02")
+	if err := persistDaily(model.AccessDailyStats{
+		Day:        day,
+		PV:         100,
+		UV:         20,
+		Dropped:    15,
+		ClientJSON: `{"web":100}`,
+		ActionJSON: `{"play":10}`,
+		HistJSON:   `{}`,
+		RolledAt:   time.Now(),
+	}, nil); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	ov, err := QueryOverview(day)
+	if err != nil {
+		t.Fatalf("QueryOverview error: %v", err)
+	}
+	if ov.Dropped != 15 {
+		t.Fatalf("ov.Dropped=%d want 15", ov.Dropped)
+	}
+}

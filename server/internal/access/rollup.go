@@ -2,6 +2,7 @@ package access
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 const (
 	accessRetainDays = 14
 	accessTopKeep    = 10
+	rollupLockTTL    = 10 * time.Minute
 )
 
 func rolledDayKey() string {
@@ -111,6 +113,31 @@ func RunDailyRollup() {
 	rollupMu.Lock()
 	defer rollupMu.Unlock()
 
+	if db.Rdb != nil {
+		ctx := db.Cxt
+		lockKey := rollupLockKey()
+		lockToken := fmt.Sprintf("%s-%d", CurrentNodeName(), time.Now().UnixNano())
+		locked, lockErr := db.Rdb.SetNX(ctx, lockKey, lockToken, rollupLockTTL).Result()
+		if lockErr != nil {
+			syslog.Errorf("[Access] 获取集群滚动分布式锁失败: %v", lockErr)
+			return
+		}
+		if !locked {
+			// 集群中已有其它主实例正在执行滚动落库，避免重复执行与 MySQL 死锁
+			return
+		}
+		defer func() {
+			releaseScript := redis.NewScript(`
+				if redis.call("get", KEYS[1]) == ARGV[1] then
+					return redis.call("del", KEYS[1])
+				else
+					return 0
+				end
+			`)
+			_ = releaseScript.Run(ctx, db.Rdb, []string{lockKey}, lockToken).Err()
+		}()
+	}
+
 	now := time.Now().In(time.Local)
 	yesterday := startOfLocalDay(now).AddDate(0, 0, -1)
 	cutoff := retentionCutoff(now)
@@ -120,6 +147,10 @@ func RunDailyRollup() {
 		return
 	}
 	days := daysToRoll(last, yesterday, cutoff)
+	// 若已对齐至昨天但在凌晨窗口（0点-3点），支持对昨天再次刷新快照，容纳 Worker 跨天缓冲队列中滞后写入的数据
+	if len(days) == 0 && last.Equal(yesterday) && now.Hour() < 3 {
+		days = []time.Time{yesterday}
+	}
 	for _, day := range days {
 		stats, tops, has, snapErr := snapshotDayFromRedis(day)
 		if snapErr != nil {
@@ -174,6 +205,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	clientCmd := pipe.HGetAll(ctx, clientKey(dayKey))
 	actionCmd := pipe.HGetAll(ctx, actionKey(dayKey))
 	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
+	droppedDayCmd := pipe.Get(ctx, droppedDayKey(dayKey))
 	searchCmd := pipe.ZRevRangeWithScores(ctx, topSearchKey(dayKey), 0, accessTopKeep-1)
 	playCmd := pipe.ZRevRangeWithScores(ctx, topPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
 	nMin := minuteSlotCount(day, time.Now().In(time.Local))
@@ -187,6 +219,11 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	actionVals := parseIntMap(actionCmd.Val())
 	histVals := parseIntMap(histCmd.Val())
 
+	var droppedCount int64
+	if n, err := droppedDayCmd.Int64(); err == nil && n > 0 {
+		droppedCount = n
+	}
+
 	stats := model.AccessDailyStats{
 		Day:         day.Format("2006-01-02"),
 		PV:          dayVals["pv"],
@@ -194,7 +231,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 		Err4:        dayVals["err4"],
 		Err5:        dayVals["err5"],
 		P95Ms:       EstimateP95(histVals),
-		Dropped:     0,
+		Dropped:     droppedCount,
 		ProvidePV:   dayVals["provide_pv"],
 		ProvideErr4: dayVals["provide_err4"],
 		ProvideErr5: dayVals["provide_err5"],
@@ -212,7 +249,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tops = append(tops, topItemsToRows(stats.Day, "play", playItems)...)
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.ProvidePV > 0 ||
-		stats.Err4 > 0 || stats.Err5 > 0 || len(clientVals) > 0 ||
+		stats.Err4 > 0 || stats.Err5 > 0 || stats.Dropped > 0 || len(clientVals) > 0 ||
 		len(actionVals) > 0 || len(tops) > 0
 	return stats, tops, has, nil
 }

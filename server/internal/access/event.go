@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -31,8 +33,40 @@ const (
 	ActionProvide  = "provide"
 )
 
+var (
+	currentNodeName string
+	nodeOnce        sync.Once
+)
+
+// CurrentNodeName 获取当前集群节点标识（优先 NODE_NAME -> CLUSTER_ROLE-hostname -> 主机名）
+func CurrentNodeName() string {
+	nodeOnce.Do(func() {
+		hostname, _ := os.Hostname()
+		currentNodeName = formatNodeName(config.ClusterRole, hostname, os.Getenv("NODE_NAME"))
+	})
+	return currentNodeName
+}
+
+func formatNodeName(role, hostname, envName string) string {
+	if name := strings.TrimSpace(envName); name != "" {
+		return name
+	}
+	runes := []rune(hostname)
+	if len(runes) > 12 {
+		hostname = string(runes[len(runes)-6:])
+	}
+	if role == "" {
+		role = "node"
+	}
+	if hostname != "" {
+		return role + "-" + hostname
+	}
+	return role
+}
+
 type AccessEvent struct {
 	Ts         time.Time `json:"ts"`
+	Node       string    `json:"node,omitempty"`
 	Method     string    `json:"method"`
 	Path       string    `json:"path"`
 	Route      string    `json:"route"`
@@ -68,6 +102,7 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	query := c.Request.URL.Query()
 	return &AccessEvent{
 		Ts:         time.Now(),
+		Node:       CurrentNodeName(),
 		Method:     method,
 		Path:       path,
 		Route:      kind,
