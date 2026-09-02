@@ -325,12 +325,13 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 多台 VPS 搭建集群以分流抗高并发时，可通过环境变量指定节点角色：
 - `CLUSTER_ROLE=master`（默认）：主控节点，同时运行 Next.js Web 与 Go 后端，负责后台管理、写库及定时采集任务；
-- `CLUSTER_ROLE=worker`：从属读节点，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务（自动禁用定时采集调度器，不清理公共 Redis 缓存，并通过 Redis Pub/Sub 毫秒级同步快照数据；同时运行 Next.js Web 进程，天然具备网页端容灾能力，主控升级维护时全站零宕机）；
+- `CLUSTER_ROLE=worker`：从属读节点，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务（自动禁用定时采集调度器，不清理公共 Redis 缓存，并通过 Redis Pub/Sub 毫秒级同步快照数据；同时运行 Next.js Web 进程，天然具备双活分流与平滑容灾能力）；
 - **反向代理（Nginx）最佳实践**：
-  - 前台网页浏览（`/`）平时主力由 Master 承载，配合 `backup` 将 Worker 节点作为备胎，主服务升级重启时秒级平滑无缝切换；
-  - 管理后台前端与写接口（`/manage`、`/api/manage/*`）固定打到 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，已被该规则自然覆盖）；
-  - 高并发只读 API 与海报静态图片读请求（`/api/`，含 `/api/upload/pic/poster/`）分流到集群负载均衡（由 Master 与多个 Worker 共同抗压）；
-  - **Nginx 配置示例（支持 Master 升级零宕机容灾）**：
+  - **前台网页浏览（`/`）**：推荐**双活负载均衡模式**（Master 与 Worker 共同分流网页渲染与前台搜索并发，按权重分配），配合 `proxy_next_upstream`，Master 升级重启时全量流量秒级无缝漂移到 Worker，兼具**算力倍增与零宕机容灾**；若只想将 Worker 用作备用，可标记为 `backup`；
+  - **管理后台前端与写接口（`/manage`、`/api/manage/*`）**：固定路由至 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，被该规则自然保护）；
+  - **用户自定义上传素材（`/api/upload/`）**：固定路由至 Master 节点（Logo、轮播海报等落盘在 Master 磁盘，这样 **Worker 节点无需配置复杂的跨机 NFS 存储，实现 100% 纯无状态化**）；
+  - **高并发只读 API（`/api/`）**：分流到集群负载均衡（由 Master 与多个 Worker 共同抗压，如 TVBox / 影视仓 / 播放器轮询）；
+  - **Nginx 配置示例（推荐双活全分流 + 零宕机容灾）**：
     ```nginx
     # 1. API 接口集群（Master 与 Worker 共同分流）
     upstream eco_cluster_api {
@@ -339,14 +340,14 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
         server 192.168.1.12:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 2 节点 API
     }
 
-    # 2. 前台网页集群（Master 为主力；Worker 节点作为 backup 备用容灾）
+    # 2. 前台网页集群（双活负载均衡模式；若仅需冷备容灾可将 Worker 标记为 backup）
     upstream eco_web_cluster {
-        server 192.168.1.10:3000 max_fails=2 fail_timeout=5s;          # Master Web 页面（主力）
-        server 192.168.1.11:3000 backup;                              # Worker 1 Web 页面（Master 升级重启时秒级无缝顶上）
+        server 192.168.1.10:3000 weight=1 max_fails=2 fail_timeout=5s; # Master Web 页面
+        server 192.168.1.11:3000 weight=2 max_fails=2 fail_timeout=5s; # Worker 1 Web 页面
     }
 
     upstream eco_master_api {
-        server 192.168.1.10:8080;                                      # Master API（写操作与管理后台）
+        server 192.168.1.10:8080;                                      # Master API（写操作、管理后台与本地素材）
     }
 
     server {
@@ -363,7 +364,12 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
             proxy_pass http://eco_master_api;
         }
 
-        # 高并发前台只读 API 及海报静态素材（/api/upload/pic/poster/）由 Master 与 Worker 集群共同分流负载
+        # 用户自定义上传静态素材（Logo、轮播图等，文件在 Master 磁盘，固定走 Master）
+        location /api/upload/ {
+            proxy_pass http://eco_master_api;
+        }
+
+        # 高并发前台只读 API（TVBox / 影视仓 / 分类 / 搜索）由 Master 与 Worker 集群共同分流负载
         location /api/ {
             proxy_pass http://eco_cluster_api;
             proxy_next_upstream error timeout http_502 http_503 http_504;
@@ -373,7 +379,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
 
-        # 默认网页浏览请求走网页集群（Master 重启时自动由 Worker 临时接管，全站不挂）
+        # 默认网页浏览请求走网页集群（双活分流，Master 重启时自动由 Worker 临时接管，全站不挂）
         location / {
             proxy_pass http://eco_web_cluster;
             proxy_next_upstream error timeout http_502 http_503 http_504;
@@ -387,7 +393,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
     ```
 - **部署顺序与数据同步注意事项**：
   - **先启动 Master，再扩容 Worker**：Worker 启动后每 3s 轮询 Redis 中的快照版本/修订号自动对齐 Master 的读模型与搜索索引；若 Master 尚未完成首次快照发布，Worker 会在首个快照发布后自动装载，无需重启。
-  - **共享持久化数据卷**：快照表与静态资源存放在数据库/共享磁盘，Worker 必须能读取 Master 写入的快照数据（`film_list_snapshot` 等），建议将 `data/` 挂载为共享存储（如 NFS / 云盘），不要为 Worker 单独建空库。
+  - **Worker 100% 纯无状态部署**：快照表与数据统一存放在 Master 的 MySQL 与 Redis 中（通过网络直连与 Pub/Sub 同步），静态素材由 Nginx `/api/upload/` 走 Master，因此 **Worker 机器无需配置跨机 NFS 共享存储，也无需挂载任何本地数据卷**，开箱即用，可随时秒级横向扩容。
   - **Worker 为应用层只读节点**：Worker 上 `/api/manage/*`（含上传）等写接口会被后端直接拒绝（HTTP 403），反向代理路由仅是第一层约束，双重防护避免误写。
 
 ---
