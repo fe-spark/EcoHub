@@ -29,6 +29,7 @@ func SetupRouter() *gin.Engine {
 
 	api := r.Group("/api")
 
+	// Deprecated: 后续废弃，探活统一使用 /api/config/basic
 	api.GET(`/health`, handler.Health)
 	api.HEAD(`/health`, handler.Health)
 	api.GET(`/index`, handler.IndexHd.Index)

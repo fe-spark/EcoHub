@@ -184,7 +184,7 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/health"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/config/basic"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -423,7 +423,7 @@ Data is in the install directory `data/` (Method 3 defaults to `~/ecohub/data`).
 
 ## Troubleshooting
 
-- Health: `http://HOST:18080/api/health`
+- Health: `http://HOST:18080/api/config/basic`
 - Methods 1 / 2 restart loop: check `.env` passwords, `JWT_SECRET`, port conflicts, `docker pull ghcr.io/fe-spark/ecohub:latest`
 - Method 3 restart loop: `docker logs Eco-hub`; use `docker inspect Eco-hub` for env and ports
 - Site opens, APIs fail: reverse proxy should target Web only; do not set `API_URL` on the release image

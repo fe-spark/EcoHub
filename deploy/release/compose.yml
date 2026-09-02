@@ -85,7 +85,7 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/health"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/config/basic"]
       interval: 10s
       timeout: 5s
       retries: 5
