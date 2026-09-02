@@ -61,6 +61,7 @@ func buildPageEvent(c *gin.Context, action, resource, source, path string) *Acce
 
 	return &AccessEvent{
 		Ts:         time.Now(),
+		Node:       CurrentNodeName(),
 		Method:     "PAGE",
 		Path:       routePath,
 		Route:      "page",
@@ -76,9 +77,13 @@ func buildPageEvent(c *gin.Context, action, resource, source, path string) *Acce
 }
 
 func pageTooFast(ip string) bool {
+	ip = strings.TrimSpace(ip)
+	if ip == "" || isLoopbackIP(ip) {
+		return false
+	}
 	key := HashIP(ip)
 	if key == "" {
-		key = "unknown"
+		return false
 	}
 	now := time.Now()
 	pageHitMu.Lock()

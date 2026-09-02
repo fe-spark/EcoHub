@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"server/internal/config"
@@ -83,7 +84,7 @@ func QueryOverview(day string) (*Overview, error) {
 		Action:  map[string]int64{},
 		Hist:    map[string]int64{},
 		Series:  []SeriesPoint{},
-		Dropped: Dropped(),
+		Dropped: 0,
 	}
 
 	ctx := db.Cxt
@@ -93,7 +94,7 @@ func QueryOverview(day string) (*Overview, error) {
 	clientCmd := pipe.HGetAll(ctx, clientKey(dayKey))
 	actionCmd := pipe.HGetAll(ctx, actionKey(dayKey))
 	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
-	droppedCmd := pipe.Get(ctx, droppedKey())
+	droppedDayCmd := pipe.Get(ctx, droppedDayKey(dayKey))
 
 	nMin := minuteSlotCount(target, now)
 	slots := queueMinuteSlots(pipe, target, nMin)
@@ -107,8 +108,13 @@ func QueryOverview(day string) (*Overview, error) {
 	histVals := parseIntMap(histCmd.Val())
 	out.Hist = histVals
 	out.P95Ms = EstimateP95(histVals)
-	if n, err := droppedCmd.Int64(); err == nil && n > out.Dropped {
+	if n, err := droppedDayCmd.Int64(); err == nil {
 		out.Dropped = n
+	}
+	if isLocalToday(target, now) {
+		if local := atomic.LoadInt64(&droppedUnsynced); local > 0 {
+			out.Dropped += local
+		}
 	}
 
 	dayVals := parseIntMap(dayCmd.Val())
@@ -279,7 +285,7 @@ func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent,
 		if client != "" && evt.ClientType != client {
 			continue
 		}
-		if q != "" && !strings.Contains(strings.ToLower(evt.Path), q) {
+		if !matchQuery(q, &evt) {
 			continue
 		}
 		out = append(out, evt)
@@ -301,6 +307,25 @@ func matchStatus(filter string, status int) bool {
 	default:
 		return true
 	}
+}
+
+func matchQuery(q string, evt *AccessEvent) bool {
+	if q == "" {
+		return true
+	}
+	if evt == nil {
+		return false
+	}
+	if strings.Contains(strings.ToLower(evt.Path), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.IPPreview), q) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(evt.Resource), q) {
+		return true
+	}
+	return false
 }
 
 func emptyOverview(day time.Time) *Overview {

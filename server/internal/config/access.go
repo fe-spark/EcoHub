@@ -11,15 +11,15 @@ import (
 const (
 	// AccessKeyPrefix 访问分析 Redis 前缀
 	AccessKeyPrefix = RedisKeyPrefix + ":Access:"
-	// DefaultTrustedProxies All-in-One / 本机反代
-	DefaultTrustedProxies = "127.0.0.1,::1"
+	// DefaultTrustedProxies All-in-One / 本机与内网反向代理 CIDR
+	DefaultTrustedProxies = "127.0.0.1,::1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
 )
 
 var (
 	AccessLogEnabled        = true
 	AccessSlowMs      int64 = 500
 	AccessRecentLimit       = 2000
-	TrustedProxies          = []string{"127.0.0.1", "::1"}
+	TrustedProxies          = []string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 	AccessIPSalt      []byte
 )
 
@@ -88,7 +88,7 @@ func ParseTrustedProxies(raw string) []string {
 		}
 	}
 	if len(out) == 0 {
-		return []string{"127.0.0.1", "::1"}
+		return ParseTrustedProxies(DefaultTrustedProxies)
 	}
 	return out
 }
