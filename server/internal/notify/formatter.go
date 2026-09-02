@@ -93,7 +93,6 @@ func gradeLabel(grade int) string {
 
 // formatBatchOverview 采集概要（普通 HTML，不用 <pre>，避免 TG 显示「复制代码」）。
 // listN=去重后列表条数（与更新列表一致）；pageSize 用于算页数。
-// 分源字段：变更=FilmsTotal，失败=FailedCnt，成功页=SuccessCnt。
 func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSize int) string {
 	if pageSize <= 0 {
 		pageSize = 30
@@ -110,41 +109,43 @@ func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSiz
 		fmt.Fprintf(&overview, " · ⏱ %s", html.EscapeString(formatDuration(payload.DurationSec)))
 	}
 	overview.WriteByte('\n')
-	fmt.Fprintf(&overview, "📊 源 ✅<b>%d</b> · ❌<b>%d</b> | 变更 <b>%d</b> 部\n",
-		payload.SuccessSources, payload.FailedSources, headerChanged)
+	if payload.FailedSources > 0 {
+		fmt.Fprintf(&overview, "📊 采集源：成功 <b>%d</b> 个，失败 <b>%d</b> 个\n",
+			payload.SuccessSources, payload.FailedSources)
+	} else {
+		fmt.Fprintf(&overview, "📊 采集源：成功 <b>%d</b> 个\n",
+			payload.SuccessSources)
+	}
+	fmt.Fprintf(&overview, "🎬 采集数量：更新 <b>%d</b> 部\n", headerChanged)
 	if errMsg := strings.TrimSpace(payload.FinalizeError); errMsg != "" {
 		fmt.Fprintf(&overview, "⚠️ 收尾: <code>%s</code>\n", html.EscapeString(truncateRunes(errMsg, 200)))
 	}
 
-	sumChanged, sumFail, sumOKPage := 0, 0, 0
-	if len(payload.Sources) > 0 {
+	// 仅列出失败/异常的源
+	var failedSources []model.SourceNotifyResult
+	for _, src := range payload.Sources {
+		if src.Status != "done" || strings.TrimSpace(src.Error) != "" {
+			failedSources = append(failedSources, src)
+		}
+	}
+	if len(failedSources) > 0 {
 		overview.WriteByte('\n')
-		for _, src := range payload.Sources {
-			sumChanged += src.FilmsTotal
-			sumFail += src.FailedCnt
-			sumOKPage += src.SuccessCnt
+		for _, src := range failedSources {
 			name := strings.TrimSpace(src.SourceName)
 			if name == "" {
 				name = "未命名源"
 			}
 			name = truncateRunes(name, 40)
 			grade := gradeLabel(src.Grade)
-			fmt.Fprintf(&overview, "%s <b>%s</b>（%s）\n",
-				statusIcon(src.Status),
+			errMsg := strings.TrimSpace(src.Error)
+			if errMsg == "" {
+				errMsg = "采集失败"
+			}
+			fmt.Fprintf(&overview, "❌ <b>%s</b>（%s）: <code>%s</code>\n",
 				html.EscapeString(name),
 				html.EscapeString(grade),
+				html.EscapeString(truncateRunes(errMsg, 120)),
 			)
-			fmt.Fprintf(&overview, "    变更 <b>%d</b> · 失败 <b>%d</b> · 成功页 <b>%d</b>\n",
-				src.FilmsTotal, src.FailedCnt, src.SuccessCnt)
-			if errMsg := strings.TrimSpace(src.Error); errMsg != "" {
-				fmt.Fprintf(&overview, "    ❌ <code>%s</code>\n",
-					html.EscapeString(truncateRunes(errMsg, 120)))
-			}
-		}
-		fmt.Fprintf(&overview, "\n<b>合计</b>  变更 <b>%d</b> · 失败 <b>%d</b> · 成功页 <b>%d</b>\n",
-			sumChanged, sumFail, sumOKPage)
-		if listN > 0 && sumChanged > listN {
-			fmt.Fprintf(&overview, "<i>分源合计 %d，去重影片 %d</i>\n", sumChanged, listN)
 		}
 	}
 

@@ -296,23 +296,23 @@ func TestFormatBatchOverview(t *testing.T) {
 	if !strings.Contains(joined, "测试站") {
 		t.Fatalf("missing site name: %s", joined)
 	}
-	if !strings.Contains(joined, "变更") || !strings.Contains(joined, "失败") || !strings.Contains(joined, "成功页") {
-		t.Fatalf("expected source metrics: %s", joined)
+	if !strings.Contains(joined, "采集源：成功") || !strings.Contains(joined, "采集数量：更新") || !strings.Contains(joined, "手动采集") {
+		t.Fatalf("expected trigger/metrics: %s", joined)
 	}
 	if !strings.Contains(joined, "更新列表") {
 		t.Fatalf("expected film list hint: %s", joined)
 	}
-	if strings.Contains(joined, "<script>") {
-		t.Fatal("should escape html")
+	if strings.Contains(joined, "主站A") {
+		t.Fatalf("overview should not include successful source: %s", joined)
 	}
-	if !strings.Contains(joined, "timeout") {
-		t.Fatal("missing error")
+	if !strings.Contains(joined, "附属B") || !strings.Contains(joined, "timeout") {
+		t.Fatalf("overview should list failed source and error: %s", joined)
+	}
+	if strings.Contains(joined, "<script>") {
+		t.Fatalf("overview should escape html in error: %s", joined)
 	}
 	if strings.Contains(joined, "<pre>") {
 		t.Fatalf("overview must not use pre/code block: %s", joined)
-	}
-	if !strings.Contains(joined, "主站A") || !strings.Contains(joined, "合计") {
-		t.Fatalf("expected source list + total: %s", joined)
 	}
 }
 
