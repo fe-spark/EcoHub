@@ -63,7 +63,7 @@ services:
       ALL_PROXY: ${ALL_PROXY:-}
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
-      # 集群角色（可选；默认 master 负责写与定时任务；集群从节点设为 worker 自动禁用定时采集）
+      # 集群角色（可选；默认 master 负责写与定时任务；集群从节点设为 worker 自动禁用定时采集并开启只读与快照同步）
       CLUSTER_ROLE: ${CLUSTER_ROLE:-master}
     ports:
       # 前台与管理后台（如需不对公网暴露裸端口，可写为 127.0.0.1:${WEB_PORT:-3000}:3000 配合反向代理）

@@ -325,24 +325,28 @@ In production, expose only the Web port (or 80/443 behind a reverse proxy). To *
 
 When deploying across multiple VPS nodes for load balancing and high concurrency, specify node roles via environment variables:
 - `CLUSTER_ROLE=master` (Default): Master node, runs both Next.js Web and Go backend, handles management, database writes, and scheduled collect jobs (Cron).
-- `CLUSTER_ROLE=worker`: Read-only replica, **runs as a pure Go API instance (automatically skips the Next.js Web process to save substantial memory and disables the scheduled collect scheduler)**, dedicated to handling high-concurrency TVBox, YingShiCang, MacCMS, and public API traffic.
+- `CLUSTER_ROLE=worker`: Read-only replica, dedicated to handling high-concurrency TVBox, YingShiCang, MacCMS, and public API traffic (automatically disables scheduled collectors, skips Redis cache purges, and syncs snapshots via Redis Pub/Sub; also runs Next.js Web process, enabling seamless zero-downtime failover for web traffic during Master upgrades).
 - **Reverse Proxy (Nginx) Best Practices**:
-  - Route public web page browsing (`/`) and administration UI/APIs (`/manage`, `/api/manage/*`) strictly to the Master node (file uploads are handled under `/api/manage/file/upload` and naturally covered by this rule).
-  - High-concurrency read-only APIs and static poster image reads (`/api/`, including `/api/upload/pic/poster/`) should be distributed across the cluster load balancer (shared by Master and Worker nodes).
-  - **Nginx Configuration Example**:
+  - Route public web page browsing (`/`) primarily to the Master node, with Worker nodes configured as `backup` for seamless failover during Master upgrades or maintenance.
+  - Route administration UI and write APIs (`/manage`, `/api/manage/*`) strictly to the Master node (file uploads under `/api/manage/file/upload` are covered naturally).
+  - High-concurrency read-only APIs and static poster images (`/api/`, including `/api/upload/pic/poster/`) are load balanced across Master and Worker nodes.
+  - **Nginx Configuration Example (Zero-Downtime Failover)**:
     ```nginx
+    # 1. Public API cluster (Master & Workers load balanced)
     upstream eco_cluster_api {
-        server 192.168.1.10:8080 weight=1; # Master Node API
-        server 192.168.1.11:8080 weight=2; # Worker 1 Node API
-        server 192.168.1.12:8080 weight=2; # Worker 2 Node API
+        server 192.168.1.10:8080 weight=1 max_fails=2 fail_timeout=5s; # Master Node API
+        server 192.168.1.11:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 1 Node API
+        server 192.168.1.12:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 2 Node API
     }
 
-    upstream eco_master_web {
-        server 192.168.1.10:3000;          # Master Web frontend
+    # 2. Public Web cluster (Master primary, Worker node as hot backup)
+    upstream eco_web_cluster {
+        server 192.168.1.10:3000 max_fails=2 fail_timeout=5s;          # Master Web frontend (Primary)
+        server 192.168.1.11:3000 backup;                              # Worker 1 Web frontend (Backup during Master restart)
     }
 
     upstream eco_master_api {
-        server 192.168.1.10:8080;          # Master API (writes and management)
+        server 192.168.1.10:8080;                                      # Master API (writes and management)
     }
 
     server {
@@ -351,7 +355,7 @@ When deploying across multiple VPS nodes for load balancing and high concurrency
 
         # Administration UI routed to Master
         location /manage {
-            proxy_pass http://eco_master_web;
+            proxy_pass http://192.168.1.10:3000;
         }
 
         # Administration write/upload APIs routed to Master
@@ -362,11 +366,22 @@ When deploying across multiple VPS nodes for load balancing and high concurrency
         # High-concurrency read-only APIs and static poster images load balanced across cluster
         location /api/ {
             proxy_pass http://eco_cluster_api;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_connect_timeout 2s;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
 
-        # Default web browsing requests routed to Master Web
+        # Default web browsing requests routed to web cluster (fails over to Worker if Master restarts)
         location / {
-            proxy_pass http://eco_master_web;
+            proxy_pass http://eco_web_cluster;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 15s;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
     }
     ```

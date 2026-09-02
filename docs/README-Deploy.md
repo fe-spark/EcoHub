@@ -325,24 +325,28 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 多台 VPS 搭建集群以分流抗高并发时，可通过环境变量指定节点角色：
 - `CLUSTER_ROLE=master`（默认）：主控节点，同时运行 Next.js Web 与 Go 后端，负责后台管理、写库及定时采集任务；
-- `CLUSTER_ROLE=worker`：从属读节点，**专职作为纯 Go API 节点运行（自动跳过 Next.js Web 进程以节约大量内存，同时自动禁用定时采集调度器）**，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务；
+- `CLUSTER_ROLE=worker`：从属读节点，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务（自动禁用定时采集调度器，不清理公共 Redis 缓存，并通过 Redis Pub/Sub 毫秒级同步快照数据；同时运行 Next.js Web 进程，天然具备网页端容灾能力，主控升级维护时全站零宕机）；
 - **反向代理（Nginx）最佳实践**：
-  - 前台网页浏览（`/`）与管理后台（`/manage`、`/api/manage/*`）固定打到 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，已被该规则自然覆盖）；
+  - 前台网页浏览（`/`）平时主力由 Master 承载，配合 `backup` 将 Worker 节点作为备胎，主服务升级重启时秒级平滑无缝切换；
+  - 管理后台前端与写接口（`/manage`、`/api/manage/*`）固定打到 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，已被该规则自然覆盖）；
   - 高并发只读 API 与海报静态图片读请求（`/api/`，含 `/api/upload/pic/poster/`）分流到集群负载均衡（由 Master 与多个 Worker 共同抗压）；
-  - **Nginx 配置示例**：
+  - **Nginx 配置示例（支持 Master 升级零宕机容灾）**：
     ```nginx
+    # 1. API 接口集群（Master 与 Worker 共同分流）
     upstream eco_cluster_api {
-        server 192.168.1.10:8080 weight=1; # Master 节点 API
-        server 192.168.1.11:8080 weight=2; # Worker 1 节点 API
-        server 192.168.1.12:8080 weight=2; # Worker 2 节点 API
+        server 192.168.1.10:8080 weight=1 max_fails=2 fail_timeout=5s; # Master 节点 API
+        server 192.168.1.11:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 1 节点 API
+        server 192.168.1.12:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 2 节点 API
     }
 
-    upstream eco_master_web {
-        server 192.168.1.10:3000;          # Master Web 页面
+    # 2. 前台网页集群（Master 为主力；Worker 节点作为 backup 备用容灾）
+    upstream eco_web_cluster {
+        server 192.168.1.10:3000 max_fails=2 fail_timeout=5s;          # Master Web 页面（主力）
+        server 192.168.1.11:3000 backup;                              # Worker 1 Web 页面（Master 升级重启时秒级无缝顶上）
     }
 
     upstream eco_master_api {
-        server 192.168.1.10:8080;          # Master API（写操作与管理后台）
+        server 192.168.1.10:8080;                                      # Master API（写操作与管理后台）
     }
 
     server {
@@ -351,7 +355,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
         # 管理后台前端页面固定路由至 Master
         location /manage {
-            proxy_pass http://eco_master_web;
+            proxy_pass http://192.168.1.10:3000;
         }
 
         # 管理后台写/改/配置/上传接口固定路由至 Master
@@ -362,11 +366,22 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
         # 高并发前台只读 API 及海报静态素材（/api/upload/pic/poster/）由 Master 与 Worker 集群共同分流负载
         location /api/ {
             proxy_pass http://eco_cluster_api;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_connect_timeout 2s;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
 
-        # 默认网页浏览请求打到 Master Web
+        # 默认网页浏览请求走网页集群（Master 重启时自动由 Worker 临时接管，全站不挂）
         location / {
-            proxy_pass http://eco_master_web;
+            proxy_pass http://eco_web_cluster;
+            proxy_next_upstream error timeout http_502 http_503 http_504;
+            proxy_connect_timeout 2s;
+            proxy_read_timeout 15s;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
     }
     ```
