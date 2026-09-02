@@ -9,8 +9,8 @@
 
 ### v2.5.1 核心变更
 
-#### 1. 多节点集群 Worker 纯读节点与快照实时同步
-- **Worker 纯读节点支持与守护模型**：支持 `NODE_ROLE=worker` 纯读模式，自适应容器守护模型（关闭采集、定时任务与 Telegram 机器人轮询等单写任务，专注于高并发读请求分流）。
+#### 1. 多节点集群 Worker 读节点、快照实时同步与网页升级平滑容灾
+- **Worker 读节点与双端平滑容灾**：支持 `CLUSTER_ROLE=worker` 模式，自动禁用定时采集调度器，不清理公共 Redis 缓存，并通过 Redis Pub/Sub 毫秒级同步快照数据；所有节点统一运行 Next.js Web 进程，配合 Nginx backup upstream 实现 Master 升级维护期间全站零宕机。
 - **集群快照多节点实时 Pub/Sub 同步**：基于 Redis Pub/Sub 事件广播与长轮询自适应毫秒级快照热重载，Master 写节点快照重建后 Worker 节点毫秒级无感知刷新。
 - **集群测试用例与部署编排**：新增完整集群配置与快照同步自动化测试用例，提供 Docker Compose Master-Worker 读写分离编排与部署文档。
 
