@@ -12,19 +12,17 @@ func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/manage") {
+		return true
+	}
 	switch path {
 	case "/api/health":
 		return method == http.MethodGet || method == http.MethodHead
+	case "/api/config/basic":
+		return status < 400
 	case "/api/stat/view":
 		return true
-	case "/api/manage/system/logs/delta":
-		return true
-	case "/api/manage/collect/list":
-		return status < 400
 	case "/api/index/dailyUpdates", "/api/dailyUpdates":
-		return true
-	}
-	if path == "/api/manage/access" || strings.HasPrefix(path, "/api/manage/access/") {
 		return true
 	}
 	return strings.HasPrefix(path, config.FilmPictureAccess)

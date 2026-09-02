@@ -18,6 +18,8 @@ type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
 
+// Health 健康检查接口
+// Deprecated: 后续废弃，探活统一使用 /api/config/basic
 func Health(c *gin.Context) {
 	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
 }
