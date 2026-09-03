@@ -30,19 +30,19 @@ func AccessLog() gin.HandlerFunc {
 			}
 		}
 
-		// 接口访问记录（仅记录业务与开放 API，/manage 开头的后台请求统统排除）
-		if config.ApiLogEnabled && !strings.HasPrefix(path, "/manage") && !strings.HasPrefix(path, "/api/manage") {
+		// 接口访问记录：排除后台与分析侧噪声（海报、探活、埋点），其余业务 API 入库
+		if config.ApiLogEnabled && access.ShouldRecordApiLog(c.Request.Method, path, status) {
 			ua := c.Request.UserAgent()
 			clientType := access.ClassifyHTTPClient(path, ua)
 			access.EnqueueApiAccessLog(&model.ApiAccessLog{
 				CreatedAt:  start,
-				Method:     c.Request.Method,
+				Method:     access.TruncateRunes(c.Request.Method, 8),
 				Path:       access.TruncateRunes(path, 191),
 				Query:      access.TruncateRunes(c.Request.URL.RawQuery, 500),
 				Status:     status,
 				DurationMs: elapsed.Milliseconds(),
-				IP:         clientIP,
-				ClientType: clientType,
+				IP:         access.TruncateRunes(clientIP, 45),
+				ClientType: access.TruncateRunes(clientType, 16),
 				DeviceId:   access.ResolveDeviceID(c, clientType, clientIP, ua),
 				UA:         access.TruncateRunes(ua, 255),
 			})
@@ -60,31 +60,17 @@ func AccessLog() gin.HandlerFunc {
 	}
 }
 
-// realClientIP 解析真实客户端访问 IP
-// 针对 Docker 容器网络、K8s Ingress、Nginx/Caddy 反向代理、Cloudflare CDN 及本机访问做精准识别
+// realClientIP 解析真实客户端访问 IP。
+// 只信任 Gin 基于 TrustedProxies 的 ClientIP，禁止直读客户端可控的 CF-Connecting-IP / X-Real-IP。
 func realClientIP(c *gin.Context) string {
 	if c == nil || c.Request == nil {
 		return "127.0.0.1"
 	}
-	// 1. 优先获取边缘 CDN (如 Cloudflare) 注入的真实客户端 IP
-	if cfIP := strings.TrimSpace(c.GetHeader("CF-Connecting-IP")); cfIP != "" {
-		if parsed := net.ParseIP(cfIP); parsed != nil {
-			return normalizeIP(cfIP, parsed)
-		}
-	}
-	// 2. 优先获取反向代理 (Nginx/Traefik/Ingress) 注入的 X-Real-IP
-	if realIP := strings.TrimSpace(c.GetHeader("X-Real-IP")); realIP != "" {
-		if parsed := net.ParseIP(realIP); parsed != nil {
-			return normalizeIP(realIP, parsed)
-		}
-	}
-	// 3. Gin 框架结合 TrustedProxies 解析的 ClientIP (支持 X-Forwarded-For)
 	if clientIP := strings.TrimSpace(c.ClientIP()); clientIP != "" {
 		if parsed := net.ParseIP(clientIP); parsed != nil {
 			return normalizeIP(clientIP, parsed)
 		}
 	}
-	// 4. TCP 连接 RemoteAddr 保底
 	host, _, err := net.SplitHostPort(c.Request.RemoteAddr)
 	if err == nil && host != "" {
 		if parsed := net.ParseIP(host); parsed != nil {

@@ -300,12 +300,23 @@ export default function ApiLogsPageView({ embedded = false }: ApiLogsPageViewPro
               showTime
               placeholder={["开始时间", "结束时间"]}
               style={{ width: 330 }}
+              disabledDate={(d) =>
+                d.isAfter(dayjs(), "day") ||
+                d.isBefore(dayjs().subtract(6, "day"), "day")
+              }
               value={dateRange ? [dayjs(dateRange[0]), dayjs(dateRange[1])] : null}
               onChange={(dates) => {
                 if (dates && dates[0] && dates[1]) {
+                  // 服务端会把单次查询收口到近 3 天，这里同步截断避免界面与数据不一致
+                  let start = dates[0];
+                  const end = dates[1];
+                  if (end.diff(start, "day") > 3) {
+                    start = end.subtract(3, "day");
+                    message.info("单次查询范围上限为 3 天，已自动收口");
+                  }
                   setDateRange([
-                    dates[0].format("YYYY-MM-DD HH:mm:ss"),
-                    dates[1].format("YYYY-MM-DD HH:mm:ss"),
+                    start.format("YYYY-MM-DD HH:mm:ss"),
+                    end.format("YYYY-MM-DD HH:mm:ss"),
                   ]);
                 } else {
                   setDateRange(null);

@@ -165,6 +165,9 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 	var pvCmd *redis.StringCmd
 	var platCmd *redis.MapStringStringCmd
 	var verCmd *redis.MapStringStringCmd
+	var androidVerCmd *redis.MapStringStringCmd
+	var harmonyVerCmd *redis.MapStringStringCmd
+	var iosVerCmd *redis.MapStringStringCmd
 	var tvboxDayCmd *redis.MapStringStringCmd
 	var browserCmd *redis.MapStringStringCmd
 	var osCmd *redis.MapStringStringCmd
@@ -191,6 +194,10 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 			pvCmd = pipe.Get(ctx, appAllPVKey(dayKey))
 			platCmd = pipe.HGetAll(ctx, appPlatformsKey(dayKey))
 			actionCmd = pipe.HGetAll(ctx, appActionKey(dayKey))
+			// App 全部平台无独立版本聚合 key，实时读取三端版本哈希后合并（与日归档 nested merge 口径一致）
+			androidVerCmd = pipe.HGetAll(ctx, appVersionKey("android", dayKey))
+			harmonyVerCmd = pipe.HGetAll(ctx, appVersionKey("harmony", dayKey))
+			iosVerCmd = pipe.HGetAll(ctx, appVersionKey("ios", dayKey))
 		}
 	} else if module == "tvbox" {
 		uvCmd = pipe.PFCount(ctx, tvboxUVKey(dayKey))
@@ -276,6 +283,15 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 	}
 	if verCmd != nil {
 		out.Versions = parseIntMap(verCmd.Val())
+	} else if androidVerCmd != nil {
+		merged := parseIntMap(androidVerCmd.Val())
+		for k, v := range parseIntMap(harmonyVerCmd.Val()) {
+			merged[k] += v
+		}
+		for k, v := range parseIntMap(iosVerCmd.Val()) {
+			merged[k] += v
+		}
+		out.Versions = merged
 	}
 	if browserCmd != nil {
 		out.Browsers = parseIntMap(browserCmd.Val())

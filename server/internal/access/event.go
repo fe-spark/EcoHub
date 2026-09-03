@@ -104,6 +104,10 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	if ShouldSkip(method, path, status) {
 		return nil
 	}
+	// HTTP 采集只保留 TVBox provide；页面埋点走 TrackPagePayload，避免普通 API 占满采集队列。
+	if !isProvidePath(path) {
+		return nil
+	}
 	path = NormalizePath(path)
 	kind := httpKind(path)
 	ua := c.Request.UserAgent()
@@ -322,9 +326,7 @@ func eventUVIdentity(evt *AccessEvent) string {
 	if evt == nil {
 		return ""
 	}
-	if id := strings.TrimSpace(evt.DeviceId); id != "" {
-		return id
-	}
+	// UV 只使用服务端派生身份；device_id 仅作流水展示，防止客户端枚举刷高独立用户。
 	if evt.uvMember != "" {
 		return evt.uvMember
 	}

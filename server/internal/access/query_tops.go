@@ -14,6 +14,38 @@ func QueryTops(day, kind string, limit int) ([]TopItem, error) {
 	return QueryTopsScope(day, kind, "", "", limit)
 }
 
+func scopedTopKind(kind, module, platform string) string {
+	kind = strings.ToLower(strings.TrimSpace(kind))
+	module = strings.ToLower(strings.TrimSpace(module))
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	if kind == "path" {
+		kind = "page"
+	}
+	switch kind {
+	case "page", "play", "search":
+		switch module {
+		case "web":
+			return "web_" + kind
+		case "tvbox":
+			return "tvbox_" + kind
+		case "app":
+			if platform == "android" || platform == "harmony" || platform == "ios" {
+				return platform + "_" + kind
+			}
+			return "app_" + kind
+		default:
+			if kind == "page" {
+				return "web_page"
+			}
+			return kind
+		}
+	case "classify":
+		return "classify"
+	default:
+		return kind
+	}
+}
+
 func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, error) {
 	if limit <= 0 {
 		limit = 10
@@ -30,38 +62,15 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 	if err != nil {
 		return nil, err
 	}
+	module = strings.ToLower(strings.TrimSpace(module))
+	platform = strings.ToLower(strings.TrimSpace(platform))
 	if !isLocalToday(target, now) {
 		if target.Before(retentionCutoff(now)) {
 			return []TopItem{}, nil
 		}
 		dayStr := target.Format("2006-01-02")
 		if _, ok := loadDailyStats(dayStr); ok {
-			queryKind := kind
-			if kind == "path" || kind == "page" {
-				if module == "app" {
-					queryKind = "app_page"
-				} else {
-					queryKind = "web_page"
-				}
-			} else if kind == "play" {
-				if module == "web" {
-					queryKind = "web_play"
-				} else if module == "app" {
-					queryKind = "app_play"
-				} else if module == "tvbox" {
-					queryKind = "tvbox_play"
-				}
-			} else if kind == "search" {
-				if module == "web" {
-					queryKind = "web_search"
-				} else if module == "app" {
-					queryKind = "app_search"
-				} else if module == "tvbox" {
-					queryKind = "tvbox_search"
-				}
-			} else if kind == "classify" {
-				queryKind = "classify"
-			}
+			queryKind := scopedTopKind(kind, module, platform)
 			items := loadDailyTops(dayStr, queryKind, fetch)
 			if kind == "play" {
 				items = takePlayTops(items, limit)
@@ -77,8 +86,6 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 	if db.Rdb == nil {
 		return nil, fmt.Errorf("redis unavailable")
 	}
-	module = strings.ToLower(strings.TrimSpace(module))
-	platform = strings.ToLower(strings.TrimSpace(platform))
 	dayKey := target.Format("20060102")
 	var key string
 	switch kind {

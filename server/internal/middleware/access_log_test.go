@@ -61,6 +61,30 @@ func TestAccessLogMiddleware(t *testing.T) {
 	})
 }
 
+func TestRealClientIPIgnoresSpoofedHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	if err := r.SetTrustedProxies([]string{"127.0.0.1"}); err != nil {
+		t.Fatalf("trusted proxies: %v", err)
+	}
+	var got string
+	r.GET("/ip", func(c *gin.Context) {
+		got = realClientIP(c)
+		c.Status(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ip", nil)
+	req.Header.Set("CF-Connecting-IP", "8.8.8.8")
+	req.Header.Set("X-Real-IP", "9.9.9.9")
+	req.Header.Set("X-Forwarded-For", "8.8.8.8")
+	req.RemoteAddr = "203.0.113.10:4321"
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if got != "203.0.113.10" {
+		t.Fatalf("client-spoofed IP headers must not win, got %s", got)
+	}
+}
+
 func TestSanitizeAccessLogURI(t *testing.T) {
 	cases := []struct {
 		input    string

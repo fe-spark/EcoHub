@@ -39,8 +39,16 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
   const [logSearch, setLogSearch] = useState("");
   const isFirstMount = useRef(true);
   const lastStateRef = useRef({ dayStr, platform });
+  // 竞态防护：静默轮询在途即跳过（避免请求无界叠加），响应只接受最新一批（防止慢响应覆盖新平台/日期结果）
+  const reqSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const fetchData = useCallback(async (silent = false) => {
+    if (silent && inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+    const seq = ++reqSeqRef.current;
     if (!silent) {
       setLoading(true);
     }
@@ -54,6 +62,9 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=app${pParam}&limit=100`),
       ]);
+      if (seq !== reqSeqRef.current) {
+        return;
+      }
       if (ovRes.code === 0 && ovRes.data) {
         setOverview(ovRes.data);
       }
@@ -79,8 +90,11 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
     } catch {
       // 忽略请求异常
     } finally {
-      if (!silent) {
-        setLoading(false);
+      if (seq === reqSeqRef.current) {
+        inFlightRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        }
       }
     }
   }, [dayStr, platform]);

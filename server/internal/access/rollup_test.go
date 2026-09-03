@@ -211,6 +211,41 @@ func TestQueryPastDayWithoutRedisReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestQueryTopsScopeHistoricalPlatform(t *testing.T) {
+	setupAccessDailyTestDB(t)
+	prevRdb := db.Rdb
+	db.Rdb = nil
+	t.Cleanup(func() { db.Rdb = prevRdb })
+
+	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
+	day := yesterday.Format("2006-01-02")
+	if err := persistDaily(model.AccessDailyStats{
+		Day: day, PV: 3, AppPV: 3, ClientJSON: "{}", ActionJSON: "{}", HistJSON: "{}", RolledAt: time.Now(),
+	}, []model.AccessDailyTop{
+		{Day: day, Kind: "app_page", Rank: 1, ItemKey: "/all-app", Count: 30},
+		{Day: day, Kind: "android_page", Rank: 1, ItemKey: "/android-only", Count: 12},
+		{Day: day, Kind: "ios_page", Rank: 1, ItemKey: "/ios-only", Count: 9},
+	}); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	android, err := QueryTopsScope(day, "page", "app", "android", 10)
+	if err != nil {
+		t.Fatalf("android tops: %v", err)
+	}
+	if len(android) != 1 || android[0].Key != "/android-only" {
+		t.Fatalf("android historical tops must not fall back to all-app, got %+v", android)
+	}
+
+	allApp, err := QueryTopsScope(day, "page", "app", "all", 10)
+	if err != nil {
+		t.Fatalf("app all tops: %v", err)
+	}
+	if len(allApp) != 1 || allApp[0].Key != "/all-app" {
+		t.Fatalf("app all historical tops %+v", allApp)
+	}
+}
+
 func TestPersistDailyWithDropped(t *testing.T) {
 	setupAccessDailyTestDB(t)
 	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)

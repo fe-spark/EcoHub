@@ -47,8 +47,16 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
   const [logSearch, setLogSearch] = useState("");
   const isFirstMount = useRef(true);
   const lastDayRef = useRef(dayStr);
+  // 竞态防护：静默轮询在途即跳过（避免请求无界叠加），响应只接受最新一批（防止慢响应覆盖新日期结果）
+  const reqSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const fetchData = useCallback(async (silent = false) => {
+    if (silent && inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+    const seq = ++reqSeqRef.current;
     if (!silent) {
       setLoading(true);
     }
@@ -60,6 +68,9 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=tvbox&limit=100`),
       ]);
+      if (seq !== reqSeqRef.current) {
+        return;
+      }
       if (ovRes.code === 0 && ovRes.data) {
         setOverview(ovRes.data);
       }
@@ -82,8 +93,11 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
     } catch {
       // 忽略请求异常
     } finally {
-      if (!silent) {
-        setLoading(false);
+      if (seq === reqSeqRef.current) {
+        inFlightRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        }
       }
     }
   }, [dayStr]);
@@ -184,18 +198,18 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
     },
   ];
 
-  // TVBox 接口调用分布
+  // TVBox 接口调用分布（零值类别不渲染，避免无流量时伪造扇区）
   const detailCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "影视点播").length;
   const searchCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "寻片搜索").length;
   const configCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "配置同步").length;
   const listCount = Math.max(0, logs.length - detailCount - searchCount - configCount);
 
   const tvboxSlices: DonutSlice[] = [
-    { name: "影视点播", value: detailCount || 1, color: "#fa8c16" },
-    { name: "寻片搜索", value: searchCount || 1, color: "#fa541c" },
-    { name: "源配置同步", value: configCount || 1, color: "#722ed1" },
-    { name: "分类与列表", value: listCount || 1, color: "#52c41a" },
-  ];
+    { name: "影视点播", value: detailCount, color: "#fa8c16" },
+    { name: "寻片搜索", value: searchCount, color: "#fa541c" },
+    { name: "源配置同步", value: configCount, color: "#722ed1" },
+    { name: "分类与列表", value: listCount, color: "#52c41a" },
+  ].filter((s) => s.value > 0);
 
   return (
     <div className={styles.subModuleWrapper}>
@@ -298,7 +312,11 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
           classNames={{ body: styles.centeredCardBody }}
           loading={loading}
         >
-          <DonutChart slices={tvboxSlices} centerLabel="电视端接口" />
+          {tvboxSlices.length === 0 ? (
+            <Empty description="暂无接口调用分布数据" />
+          ) : (
+            <DonutChart slices={tvboxSlices} centerLabel="电视端接口" />
+          )}
         </Card>
       </div>
 

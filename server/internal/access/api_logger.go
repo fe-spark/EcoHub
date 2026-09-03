@@ -10,6 +10,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
+
+	"gorm.io/gorm"
 )
 
 const (
@@ -21,6 +23,16 @@ const (
 	ApiLogFlushInterval = 1500 * time.Millisecond
 	// DefaultRetentionDays 默认保留 7 天滑动窗口
 	DefaultRetentionDays = 7
+	// apiLogFlushBackoff 落库失败冷却，禁止热路径每条日志立即重试整批
+	apiLogFlushBackoff = 2 * time.Second
+	// apiLogQueryMaxSpan 管理端单次列表查询允许的最大时间跨度，阻断跨全表深度扫描
+	apiLogQueryMaxSpan = 3 * 24 * time.Hour
+	// apiLogSearchSpan 关键字模糊搜索需回表过滤，窗口额外收口
+	apiLogSearchSpan = 24 * time.Hour
+	// apiLogMaxOffset 深分页物理上限：超过后不再继续取数
+	apiLogMaxOffset = 20000
+	// maxPruneIterations 单次修剪最大批次上限（20 批 * 5000 条 = 10 万条），防单次长事务拖垮从库或超时
+	maxPruneIterations = 20
 )
 
 var (
@@ -31,10 +43,14 @@ var (
 	tableMigrated  bool
 	tableMu        sync.Mutex
 	workerStopping atomic.Bool
+	workerDone     chan struct{}
+	workerDoneOnce sync.Once
+	pruneMu        sync.Mutex
 )
 
 func init() {
 	workerCtx, workerCancel = context.WithCancel(context.Background())
+	workerDone = make(chan struct{})
 	StartApiLogWorker()
 }
 
@@ -64,12 +80,26 @@ func StartApiLogWorker() {
 	})
 }
 
-// StopApiLogWorker 停止工作协程（优雅退出）
+// StopApiLogWorker 停止工作协程（优雅退出）。停止后 Enqueue 不再接收新日志，
+// worker 会排空通道内积压并尝试最终刷盘，完成后关闭 ApiLogWorkerDone 信号。
 func StopApiLogWorker() {
 	workerStopping.Store(true)
 	if workerCancel != nil {
 		workerCancel()
 	}
+}
+
+// ApiLogWorkerDone 返回 worker 完成排空与最终刷盘的信号，供优雅停机等待。
+func ApiLogWorkerDone() <-chan struct{} {
+	return workerDone
+}
+
+// capApiLogBatch 运存物理硬顶：超过 ApiLogQueueCapacity 时丢弃最旧积压，仅保留最新部分。
+func capApiLogBatch(batch []*model.ApiAccessLog) []*model.ApiAccessLog {
+	if len(batch) > ApiLogQueueCapacity {
+		return batch[len(batch)-ApiLogQueueCapacity:]
+	}
+	return batch
 }
 
 // EnqueueApiAccessLog 将接口请求日志丢入异步缓冲通道（主请求链路 0 阻塞、0 延迟）
@@ -88,55 +118,72 @@ func EnqueueApiAccessLog(item *model.ApiAccessLog) {
 func runBatchFlushWorker(ctx context.Context) {
 	ticker := time.NewTicker(ApiLogFlushInterval)
 	defer ticker.Stop()
+	defer func() {
+		workerDoneOnce.Do(func() { close(workerDone) })
+	}()
 
 	batch := make([]*model.ApiAccessLog, 0, ApiLogBatchSize)
+	var flushFailUntil time.Time
+	var batchRetryCount int
 
-	flush := func() {
+	flush := func(ignoreBackoff bool) {
 		if len(batch) == 0 {
 			return
 		}
-		if db.Mdb != nil {
-			ensureApiAccessLogTable()
-			if err := db.Mdb.CreateInBatches(batch, ApiLogBatchSize).Error; err != nil {
-				syslog.Errorf("[ApiLogWorker] 批量落库失败: %v", err)
-				// 失败时保留未落库数据，但若堆积超过硬顶，截断最老日志防止 OOM
-				if len(batch) > ApiLogQueueCapacity {
-					batch = batch[len(batch)-ApiLogQueueCapacity:]
-				}
+		// 缓冲硬顶：无论 DB 是否可用/退避是否生效，先丢弃最旧积压，保证运存上界
+		batch = capApiLogBatch(batch)
+		if db.Mdb == nil {
+			return
+		}
+		if !ignoreBackoff && apiLogFlushBlocked(flushFailUntil, time.Now()) {
+			// 退避期不重试整批，仅等待下一周期；内存上界已由上方硬顶裁剪保证
+			return
+		}
+		ensureApiAccessLogTable()
+		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+			return tx.CreateInBatches(batch, ApiLogBatchSize).Error
+		})
+		if err != nil {
+			batchRetryCount++
+			syslog.Errorf("[ApiLogWorker] 批量落库失败 (第 %d 次重试): %v", batchRetryCount, err)
+			if batchRetryCount >= 3 {
+				syslog.Errorf("[ApiLogWorker] 批次连续重试 %d 次失败，强制丢弃毒丸批次 (%d 条) 以恢复全局写队列", batchRetryCount, len(batch))
+				batch = batch[:0]
+				batchRetryCount = 0
+				flushFailUntil = time.Time{}
 				return
 			}
-			batch = make([]*model.ApiAccessLog, 0, ApiLogBatchSize)
-		} else {
-			// 数据库尚未就绪时，保留当前 batch（超容截断最老条目）
-			if len(batch) > ApiLogQueueCapacity {
-				batch = batch[len(batch)-ApiLogQueueCapacity:]
-			}
+			flushFailUntil = time.Now().Add(apiLogFlushBackoff)
+			return
 		}
+		batchRetryCount = 0
+		flushFailUntil = time.Time{}
+		batch = batch[:0]
 	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			// 停机时排空通道中的剩余日志并尝试最终刷盘
+			// 停机时排空通道中的剩余日志并尝试最终刷盘（忽略冷却，尽量落盘）
 			for {
 				select {
 				case item := <-apiLogQueue:
 					batch = append(batch, item)
 					if len(batch) >= ApiLogBatchSize {
-						flush()
+						flush(true)
 					}
 				default:
-					flush()
+					flush(true)
 					return
 				}
 			}
 		case item := <-apiLogQueue:
 			batch = append(batch, item)
 			if len(batch) >= ApiLogBatchSize {
-				flush()
+				flush(false)
 			}
 		case <-ticker.C:
-			flush()
+			flush(false)
 		}
 	}
 }
@@ -146,17 +193,24 @@ func PruneExpiredApiLogs(retentionDays int) (int64, error) {
 	if retentionDays <= 0 {
 		retentionDays = DefaultRetentionDays
 	}
+	if !pruneMu.TryLock() {
+		syslog.Warnf("[ApiLog] 上一次接口日志修剪仍处于执行中，跳过本次触发以防行锁争用")
+		return 0, nil
+	}
+	defer pruneMu.Unlock()
+
 	cutoff := time.Now().AddDate(0, 0, -retentionDays)
 	if db.Mdb == nil {
 		return 0, nil
 	}
 
 	var totalDeleted int64
-	// 分批按主键删除（每次 5000 条），防止大事务长时间锁表与主从延迟
-	for {
+	// 分批按主键递增删除（每次 5000 条，单次最多循环 20 批），防止大事务长时间锁表、主从复制延迟及 HTTP 504 超时
+	for i := 0; i < maxPruneIterations; i++ {
 		var ids []uint64
 		if err := db.Mdb.Model(&model.ApiAccessLog{}).
 			Where("created_at < ?", cutoff).
+			Order("id ASC").
 			Limit(5000).
 			Pluck("id", &ids).Error; err != nil {
 			return totalDeleted, err
@@ -225,27 +279,40 @@ func QueryApiAccessLogs(p ApiLogQueryParams) (*ApiLogQueryResult, error) {
 
 	tx := db.Mdb.Model(&model.ApiAccessLog{})
 
-	// 日期 / 时间范围筛选（若未指定任何时间范围，默认限制在近 3 天内，阻断跨全表无索引深度扫描）
+	// 日期 / 时间范围筛选：无论显式指定还是缺省，最终窗口都收口在保留窗口内，
+	// 阻断跨全表无索引深度扫描；关键字搜索（回表过滤成本高）窗口再收口到 24 小时。
 	loc := time.Local
 	now := time.Now().In(loc)
 	todayZero := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, loc)
+	defaultStart := todayZero.AddDate(0, 0, -2)
 
-	if p.StartTime != "" && p.EndTime != "" {
-		tx = tx.Where("created_at BETWEEN ? AND ?", p.StartTime, p.EndTime)
-	} else if p.Day != "" {
+	var start, end time.Time
+	switch {
+	case p.StartTime != "" && p.EndTime != "":
+		s, errS := time.ParseInLocation("2006-01-02 15:04:05", p.StartTime, loc)
+		e, errE := time.ParseInLocation("2006-01-02 15:04:05", p.EndTime, loc)
+		if errS != nil || errE != nil || e.Before(s) {
+			// 时间解析失败或区间反向时不漏过滤，回退默认近 3 天窗口保护
+			start, end = defaultStart, now
+		} else {
+			start, end = s, e
+		}
+	case p.Day != "":
 		startOfDay, err := time.ParseInLocation("2006-01-02", p.Day, loc)
 		if err != nil {
 			// Day 解析失败时不漏过滤，回退到默认近 3 天窗口保护，防止全表扫描
-			recentStart := todayZero.AddDate(0, 0, -2)
-			tx = tx.Where("created_at >= ?", recentStart)
+			start, end = defaultStart, now
 		} else {
-			nextDay := startOfDay.Add(24 * time.Hour)
-			tx = tx.Where("created_at >= ? AND created_at < ?", startOfDay, nextDay)
+			start, end = startOfDay, startOfDay.Add(24*time.Hour)
 		}
-	} else {
-		recentStart := todayZero.AddDate(0, 0, -2)
-		tx = tx.Where("created_at >= ?", recentStart)
+	default:
+		start, end = defaultStart, now
 	}
+	start, end = clampWindow(start, end, now, apiLogQueryMaxSpan)
+	if p.Q != "" {
+		start, end = clampWindow(start, end, now, apiLogSearchSpan)
+	}
+	tx = tx.Where("created_at >= ? AND created_at < ?", start, end)
 
 	// 请求方法筛选
 	if p.Method != "" && p.Method != "all" {
@@ -285,13 +352,14 @@ func QueryApiAccessLogs(p ApiLogQueryParams) (*ApiLogQueryResult, error) {
 		tx = tx.Where("client_type = ?", p.ClientType)
 	}
 
-	// 路径或 IP 关键字模糊搜索（转义 LIKE 通配符防全表注入匹配）
+	// 关键字模糊搜索（path / query / ip / device_id）。
+	// 用自定义 ESCAPE '|'：MySQL 里写 ESCAPE '\\' 会因反斜杠字符串转义生成非法 SQL，
+	// SQLite 又无默认转义，自定义转义符在两种方言下语义一致；搜索窗口已收口到 24h。
 	if p.Q != "" {
-		escaped := strings.ReplaceAll(p.Q, "\\", "\\\\")
-		escaped = strings.ReplaceAll(escaped, "%", "\\%")
-		escaped = strings.ReplaceAll(escaped, "_", "\\_")
-		likePattern := "%" + escaped + "%"
-		tx = tx.Where("path LIKE ? ESCAPE '\\' OR ip LIKE ? ESCAPE '\\' OR query LIKE ? ESCAPE '\\' OR device_id LIKE ? ESCAPE '\\'", likePattern, likePattern, likePattern, likePattern)
+		esc := strings.NewReplacer("|", "||", "%", "|%", "_", "|_")
+		like := "%" + esc.Replace(p.Q) + "%"
+		tx = tx.Where("path LIKE ? ESCAPE '|' OR query LIKE ? ESCAPE '|' OR ip LIKE ? ESCAPE '|' OR device_id LIKE ? ESCAPE '|'",
+			like, like, like, like)
 	}
 
 	var total int64
@@ -299,14 +367,28 @@ func QueryApiAccessLogs(p ApiLogQueryParams) (*ApiLogQueryResult, error) {
 		return nil, err
 	}
 
-	var list []model.ApiAccessLog
-	offset := (page - 1) * pageSize
-	if err := tx.Order("id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
-		return nil, err
-	}
-
 	// 统计今日宏观指标（带 30 秒短期缓存，防止分页频繁全量二次回表导致数据库 CPU 打满）
 	totalToday, errorToday, slowToday, avgMsToday := getTodayMacroStats(now, loc)
+
+	offset := (page - 1) * pageSize
+	if offset > apiLogMaxOffset {
+		// 深分页退化为全量排序扫描，物理阻断：超过上限不再取数（total 仍真实，供分页条展示）
+		return &ApiLogQueryResult{
+			List:       []model.ApiAccessLog{},
+			Total:      total,
+			Page:       page,
+			PageSize:   pageSize,
+			TotalToday: totalToday,
+			ErrorToday: errorToday,
+			SlowToday:  slowToday,
+			AvgMsToday: avgMsToday,
+		}, nil
+	}
+
+	var list []model.ApiAccessLog
+	if err := tx.Order("created_at DESC, id DESC").Offset(offset).Limit(pageSize).Find(&list).Error; err != nil {
+		return nil, err
+	}
 
 	return &ApiLogQueryResult{
 		List:       list,
@@ -376,7 +458,9 @@ func getTodayMacroStats(now time.Time, loc *time.Location) (int64, int64, int64,
 		Where("created_at >= ? AND created_at < ?", todayStart, tomorrowStart).
 		Scan(&row).Error; err != nil {
 		syslog.Errorf("[ApiLog] 统计今日宏观指标失败: %v", err)
-		return 0, 0, 0, 0
+		// 失败时设置短期退避（5 秒），防止并发请求瞬间穿透打垮数据库
+		todayStatsCacheTime = time.Now().Add(-25 * time.Second)
+		return cachedTotalToday, cachedErrorToday, cachedSlowToday, cachedAvgMsToday
 	}
 
 	cachedTotalToday = row.TotalToday
@@ -386,4 +470,23 @@ func getTodayMacroStats(now time.Time, loc *time.Location) (int64, int64, int64,
 	todayStatsCacheTime = time.Now()
 
 	return cachedTotalToday, cachedErrorToday, cachedSlowToday, cachedAvgMsToday
+}
+
+func apiLogFlushBlocked(failUntil, now time.Time) bool {
+	return !failUntil.IsZero() && now.Before(failUntil)
+}
+
+// clampWindow 把查询窗口收口到 max 跨度内；end 指向未来时收敛到当前时间附近，
+// 保证窗口始终落在真实数据区间。
+func clampWindow(start, end, now time.Time, max time.Duration) (time.Time, time.Time) {
+	if end.After(now.Add(time.Minute)) {
+		end = now.Add(time.Minute)
+	}
+	if start.IsZero() || end.IsZero() || end.Before(start) {
+		return start, end
+	}
+	if end.Sub(start) > max {
+		start = end.Add(-max)
+	}
+	return start, end
 }

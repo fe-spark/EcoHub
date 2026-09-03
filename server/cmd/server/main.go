@@ -1,9 +1,13 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"server/internal/access"
@@ -95,5 +99,35 @@ func start() {
 	access.StartCollector()
 
 	r := router.SetupRouter()
-	_ = r.Run(fmt.Sprintf(":%s", config.ListenerPort))
+	srv := &http.Server{
+		Addr:    fmt.Sprintf(":%s", config.ListenerPort),
+		Handler: r,
+	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[Shutdown] HTTP 服务异常退出: %v", err)
+		}
+	}()
+	log.Printf("[Init] EcoHub HTTP server listening on :%s", config.ListenerPort)
+
+	// 优雅停机：停止接收新请求 → 排空接口审计队列并最终刷盘
+	stopCh := make(chan os.Signal, 1)
+	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
+	<-stopCh
+	log.Printf("[Shutdown] 收到退出信号，开始优雅停机")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("[Shutdown] HTTP 优雅停机超时: %v", err)
+	}
+
+	access.StopApiLogWorker()
+	select {
+	case <-access.ApiLogWorkerDone():
+		log.Printf("[Shutdown] 接口访问日志已排空落盘")
+	case <-time.After(3 * time.Second):
+		log.Printf("[Shutdown] 等待接口日志落盘超时，强制退出")
+	}
+	log.Printf("[Shutdown] 退出完成")
 }
