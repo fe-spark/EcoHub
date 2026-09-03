@@ -131,6 +131,9 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 	if pageKey == "" {
 		pageKey = routePath
 	}
+	if p.Resource != "" {
+		pageKey += ":" + strings.TrimSpace(p.Resource)
+	}
 	if pageTooFast(ip, pageKey) {
 		return nil
 	}
