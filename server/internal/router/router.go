@@ -93,6 +93,12 @@ func SetupRouter() *gin.Engine {
 			accessRoute.GET(`/logs`, handler.AccessHd.Logs)
 		}
 
+		apiLogsRoute := manageRoute.Group(`/api-logs`, middleware.AdminAccess())
+		{
+			apiLogsRoute.GET(`/list`, handler.ApiLogHd.List)
+			apiLogsRoute.POST(`/prune`, handler.ApiLogHd.Prune)
+		}
+
 		// 轮播相关
 		banner := manageRoute.Group(`banner`)
 		{

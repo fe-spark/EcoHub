@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/access"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
@@ -144,6 +145,21 @@ func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
+// AddApiLogCleanCron 添加清理过期接口访问记录的定时任务
+func AddApiLogCleanCron(id, spec string) (cron.EntryID, error) {
+	if err := ValidSpec(spec); err != nil {
+		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))
+	}
+	return CronCollect.AddFunc(spec, func() {
+		ft, err := repository.GetFilmTaskById(id)
+		if err != nil {
+			log.Println("ApiLogCleanCron Exec Failed: ", err)
+			return
+		}
+		executeTask(ft)
+	})
+}
+
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
 	// 1. 获取最新配置
@@ -169,6 +185,8 @@ func ReloadCronTask(id string) error {
 		cid, err = AddFilmRecoverCron(ft.Id, ft.Spec)
 	case 3:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
+	case 4:
+		cid, err = AddApiLogCleanCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -221,6 +239,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
 		return
+	case 4: // 接口访问记录定期修剪（保留近 7 天）
+		executeApiLogCleanTask(ft)
+		return
 	default:
 		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
@@ -265,6 +286,19 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		return
 	}
 	log.Printf("[CleanOrphan] 数据清理任务执行完成，cost=%s", time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
+}
+
+func executeApiLogCleanTask(ft model.FilmCollectTask) {
+	startedAt := time.Now()
+	deleted, err := access.PruneExpiredApiLogs(7)
+	if err != nil {
+		syslog.Errorf("[ApiLogClean] 清理过期接口访问记录失败: %v", err)
+		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
+		return
+	}
+	cleanDetail := fmt.Sprintf("已成功清理 7 天前过期接口访问记录共 %d 条", deleted)
+	log.Printf("[ApiLogClean] %s，耗时=%s", cleanDetail, time.Since(startedAt))
 	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
 }
 

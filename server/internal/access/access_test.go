@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"server/internal/config"
+	"server/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -220,12 +221,15 @@ func TestIPPreviewAndHash(t *testing.T) {
 
 func TestRecordRecent(t *testing.T) {
 	web := &AccessEvent{Method: "GET", Path: "/api/index", Action: "http", Status: 200}
-	if !RecordRecent(web) || !httpHealthSample(web) {
-		t.Fatal("public http 2xx in recent and health")
+	if RecordRecent(web) {
+		t.Fatal("public http 2xx should NOT be in recent")
+	}
+	if !httpHealthSample(web) {
+		t.Fatal("public http 2xx should be in health")
 	}
 	page := &AccessEvent{Method: "PAGE", Action: "browse", Status: 200}
 	if RecordRecent(page) {
-		t.Fatal("page view not in http recent")
+		t.Fatal("page view handled in writePageView, not RecordRecent")
 	}
 	ok := &AccessEvent{Action: "provide", Path: "/api/provide/vod", Status: 200, LatencyMs: 20}
 	if RecordRecent(ok) || httpHealthSample(ok) {
@@ -236,8 +240,8 @@ func TestRecordRecent(t *testing.T) {
 		t.Fatal("manage 2xx not health/recent")
 	}
 	bad := &AccessEvent{Action: "provide", Path: "/api/provide/vod", Status: 502, LatencyMs: 20}
-	if !RecordRecent(bad) {
-		t.Fatal("provide error recent")
+	if RecordRecent(bad) {
+		t.Fatal("provide error handled in errorKey, not recent")
 	}
 	ssr := &AccessEvent{
 		Method: "GET", Path: "/api/index", Action: "http", Status: 200,
@@ -438,11 +442,20 @@ func TestQueryLogsMatchStatus(t *testing.T) {
 	if !matchStatus("2xx", 200) || !matchStatus("2xx", 204) || matchStatus("2xx", 400) {
 		t.Fatal("2xx matching")
 	}
+	if !matchStatus("3xx", 301) || !matchStatus("3xx", 302) || matchStatus("3xx", 200) {
+		t.Fatal("3xx matching")
+	}
 	if !matchStatus("4xx", 404) || matchStatus("4xx", 200) || matchStatus("4xx", 500) {
 		t.Fatal("4xx matching")
 	}
 	if !matchStatus("5xx", 500) || !matchStatus("5xx", 502) || matchStatus("5xx", 200) {
 		t.Fatal("5xx matching")
+	}
+	if !matchStatus("error", 400) || !matchStatus("error", 500) || matchStatus("error", 200) {
+		t.Fatal("error matching")
+	}
+	if !matchStatus("404", 404) || matchStatus("404", 500) || matchStatus("502", 200) {
+		t.Fatal("exact status matching")
 	}
 }
 
@@ -465,8 +478,11 @@ func TestQueryLogsMatchQuery(t *testing.T) {
 	if !matchQuery("filmplay", evt) {
 		t.Fatal("should match path case-insensitively")
 	}
-	if !matchQuery("1024", evt) {
-		t.Fatal("should match resource")
+	if !matchQuery("FILMPLAY", evt) {
+		t.Fatal("should match path with uppercase query")
+	}
+	if !matchQuery("  1024  ", evt) {
+		t.Fatal("should match resource with untrimmed query")
 	}
 	if matchQuery("10.0.0", evt) {
 		t.Fatal("should not match unrelated IP")
@@ -497,25 +513,68 @@ func TestCurrentNodeName(t *testing.T) {
 
 func TestPageTooFastSafety(t *testing.T) {
 	// 1. 空 IP 不误杀
-	if pageTooFast("") {
+	if pageTooFast("", "home") {
 		t.Fatal("empty IP must not be throttled")
 	}
 	// 2. 本地回环不误杀
-	if pageTooFast("127.0.0.1") {
+	if pageTooFast("127.0.0.1", "home") {
 		t.Fatal("loopback IP must not be throttled")
 	}
-	if pageTooFast("::1") {
+	if pageTooFast("::1", "home") {
 		t.Fatal("loopback IPv6 must not be throttled")
 	}
-	// 3. 正常 IP 在防抖窗口内第一次通过，紧接着第二次触发防抖
+	// 3. 正常 IP 同页面在防抖窗口内第一次通过，紧接着第二次触发防抖
 	testIP := "203.0.113.199"
-	first := pageTooFast(testIP)
+	first := pageTooFast(testIP, "home")
 	if first {
 		t.Fatal("first hit should pass")
 	}
-	second := pageTooFast(testIP)
+	second := pageTooFast(testIP, "home")
 	if !second {
-		t.Fatal("immediate second hit should be throttled")
+		t.Fatal("immediate second hit on same page should be throttled")
+	}
+	// 4. 同 IP 不同页面不应被防抖拦截（规格：同 IP + 同页面防刷）
+	diffPage := pageTooFast(testIP, "detail/1024")
+	if diffPage {
+		t.Fatal("hit on different page should pass")
+	}
+}
+
+func TestResolveDeviceID(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/api/index", nil)
+	c.Request.Header.Set("X-Device-Id", "web-device-1")
+	if got := ResolveDeviceID(c, "web", "1.1.1.1", "Mozilla"); got != "web-device-1" {
+		t.Fatalf("header device id, got %q", got)
+	}
+
+	c.Request = httptest.NewRequest("GET", "/api/film?device_id=q-did", nil)
+	if got := ResolveDeviceID(c, "web", "1.1.1.1", "Mozilla"); got != "q-did" {
+		t.Fatalf("query device id, got %q", got)
+	}
+
+	c.Request = httptest.NewRequest("GET", "/api/provide/vod?ac=list", nil)
+	got := ResolveDeviceID(c, "tvbox", "203.0.113.9", "TVBox/1.0")
+	if got == "" || !strings.HasPrefix(got, "tv_") {
+		t.Fatalf("expected tvbox virtual device id, got %q", got)
+	}
+}
+
+func TestEventUVIdentity(t *testing.T) {
+	withDevice := &AccessEvent{DeviceId: "dev-1", IPHash: "aaa", UAFamily: "chrome", uvMember: "hash-ua"}
+	if got := eventUVIdentity(withDevice); got != "dev-1" {
+		t.Fatalf("device id should win, got %s", got)
+	}
+	withUA := &AccessEvent{IPHash: "aaa", uvMember: "hash-ip-ua"}
+	if got := eventUVIdentity(withUA); got != "hash-ip-ua" {
+		t.Fatalf("expected uvMember, got %s", got)
+	}
+	ipOnly := &AccessEvent{IPHash: "aaa"}
+	if got := eventUVIdentity(ipOnly); got != "aaa" {
+		t.Fatalf("expected IPHash fallback, got %s", got)
 	}
 }
 
@@ -553,5 +612,251 @@ func TestFormatNodeName(t *testing.T) {
 	}
 	if got != "master-试节点-01" {
 		t.Fatalf("want master-试节点-01, got %q", got)
+	}
+}
+
+func TestBuildPageEventPayload_Platforms(t *testing.T) {
+	resetPageHit()
+	ctx := testPageCtx("Mozilla/5.0", "192.168.1.100")
+	pAndroid := TrackViewPayload{
+		Source:      "android",
+		Action:      "browse",
+		Page:        "HomePage",
+		AppVersion:  "1.2.0",
+		DeviceModel: "Xiaomi 14",
+	}
+	evtAndroid := buildPageEventPayload(ctx, pAndroid)
+	if evtAndroid == nil || evtAndroid.ClientType != "android" || evtAndroid.Page != "HomePage" || evtAndroid.AppVersion != "1.2.0" {
+		t.Fatalf("unexpected android event: %+v", evtAndroid)
+	}
+
+	resetPageHit()
+	pHarmony := TrackViewPayload{
+		Source:      "ohos",
+		Action:      "browse",
+		Page:        "PlayPage",
+		AppVersion:  "1.0.5",
+		DeviceModel: "HUAWEI Mate 60",
+	}
+	evtHarmony := buildPageEventPayload(ctx, pHarmony)
+	if evtHarmony == nil || evtHarmony.ClientType != "harmony" || evtHarmony.Page != "PlayPage" {
+		t.Fatalf("unexpected harmony event: %+v", evtHarmony)
+	}
+
+	resetPageHit()
+	pIOS := TrackViewPayload{
+		Source:     "ios",
+		Action:     "browse",
+		Page:       "SearchScreen",
+		AppVersion: "2.0.0",
+	}
+	evtIOS := buildPageEventPayload(ctx, pIOS)
+	if evtIOS == nil || evtIOS.ClientType != "ios" || evtIOS.Page != "SearchScreen" {
+		t.Fatalf("unexpected ios event: %+v", evtIOS)
+	}
+
+	resetPageHit()
+	pWeb := TrackViewPayload{
+		Source: "web",
+		Action: "browse",
+		Path:   "/play?id=1024",
+	}
+	evtWeb := buildPageEventPayload(ctx, pWeb)
+	if evtWeb == nil || evtWeb.ClientType != "web" || evtWeb.Page != "/play?id=1024" {
+		t.Fatalf("unexpected web event: %+v", evtWeb)
+	}
+}
+
+func TestScopeRedisKeys(t *testing.T) {
+	day := "20260903"
+	if !strings.Contains(webPVKey(day), "web:pv:20260903") {
+		t.Fatal("webPVKey")
+	}
+	if !strings.Contains(appPVKey("android", day), "app:android:pv:20260903") {
+		t.Fatal("appPVKey android")
+	}
+	if !strings.Contains(appPVKey("harmony", day), "app:harmony:pv:20260903") {
+		t.Fatal("appPVKey harmony")
+	}
+	if !strings.Contains(appPVKey("ios", day), "app:ios:pv:20260903") {
+		t.Fatal("appPVKey ios")
+	}
+	if !strings.Contains(appAllPVKey(day), "app:all:pv:20260903") {
+		t.Fatal("appAllPVKey")
+	}
+	if !strings.Contains(appPlatformsKey(day), "app:platforms:20260903") {
+		t.Fatal("appPlatformsKey")
+	}
+}
+
+func TestTruncateRunes_Utf8Safety(t *testing.T) {
+	// 测试中文字符不被截成破损字节
+	raw := "wd=斗罗大陆双神之战超级无敌好看"
+	truncated := TruncateRunes(raw, 5)
+	if truncated != "wd=斗罗" {
+		t.Fatalf("expected 'wd=斗罗', got %q", truncated)
+	}
+	if !utf8.ValidString(truncated) {
+		t.Fatalf("truncated string is not valid UTF-8: %q", truncated)
+	}
+
+	// 边界情况
+	if TruncateRunes("", 10) != "" {
+		t.Fatal("empty string should return empty")
+	}
+	if TruncateRunes("abc", 0) != "" {
+		t.Fatal("max 0 should return empty")
+	}
+}
+
+func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
+	seriesJSON := `[{"t":"2026-09-02T10:00:00Z","pv":100,"err4":0,"err5":0,"providePv":25}]`
+	row := model.AccessDailyStats{
+		Day:        "2026-09-02",
+		PV:         125,
+		UV:         80,
+		ProvidePV:  25,
+		ProvideUV:  15,
+		SeriesJSON: seriesJSON,
+	}
+
+	ov := overviewFromDailyScope(row, "tvbox", "")
+	if ov.PV != 25 || ov.UV != 15 {
+		t.Fatalf("expected TVBox PV=25, UV=15, got PV=%d, UV=%d", ov.PV, ov.UV)
+	}
+	if len(ov.Series) != 1 || ov.Series[0].PV != 25 {
+		t.Fatalf("expected TVBox Series[0].PV=25, got %+v", ov.Series)
+	}
+}
+
+func TestTVBox_FromContextActionAndQuery(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+
+	// 1. 测试点播
+	c.Request = httptest.NewRequest("GET", "/api/provide/vod?ac=detail&ids=1024", nil)
+	evt := FromContext(c, 10*time.Millisecond)
+	if evt == nil {
+		t.Fatal("expected non-nil evt")
+	}
+	if evt.Action != ActionPlay {
+		t.Fatalf("expected ActionPlay, got %s", evt.Action)
+	}
+	if evt.Resource != "1024" {
+		t.Fatalf("expected Resource 1024, got %s", evt.Resource)
+	}
+	if evt.Query != "ac=detail&ids=1024" {
+		t.Fatalf("expected Query ac=detail&ids=1024, got %s", evt.Query)
+	}
+	if evt.IPHash == "" {
+		t.Fatal("expected non-empty IPHash in HTTP event")
+	}
+	if evt.IPHash != HashIP(c.ClientIP()) {
+		t.Fatalf("expected IPHash %s, got %s", HashIP(c.ClientIP()), evt.IPHash)
+	}
+
+	// 2. 测试搜索
+	c.Request = httptest.NewRequest("GET", "/api/provide/vod?wd=%E7%BB%88%E6%9E%81%E4%B8%80%E7%8F%AD", nil)
+	evt2 := FromContext(c, 10*time.Millisecond)
+	if evt2 == nil {
+		t.Fatal("expected non-nil evt2")
+	}
+	if evt2.Action != ActionSearch {
+		t.Fatalf("expected ActionSearch, got %s", evt2.Action)
+	}
+	if evt2.Resource != "终极一班" {
+		t.Fatalf("expected Resource 终极一班, got %s", evt2.Resource)
+	}
+}
+
+func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
+	seriesJSON := `[{"t":"2026-09-02T10:00:00Z","pv":500,"webPv":30,"appPv":20,"androidPv":12,"harmonyPv":3,"iosPv":5,"providePv":50}]`
+	row := model.AccessDailyStats{
+		Day:            "2026-09-02",
+		PV:             500,
+		UV:             300,
+		WebPV:          30,
+		WebUV:          20,
+		AppPV:          20,
+		AppUV:          15,
+		ProvidePV:      50,
+		ProvideUV:      35,
+		SeriesJSON:     seriesJSON,
+		VersionJSON:    `{"1.0.0":10,"1.0.1":10}`,
+		PlatformJSON:   `{"android":15,"ios":5}`,
+		PlatformUVJSON: `{"android":8,"ios":3}`,
+		BrowserJSON:    `{"chrome":25}`,
+		OSJSON:         `{"Windows":18,"macOS":7}`,
+		ModelsJSON:     `{"Pixel 8":4}`,
+	}
+
+	// Web 端验证
+	webOv := overviewFromDailyScope(row, "web", "")
+	if webOv.PV != 30 || webOv.UV != 20 {
+		t.Fatalf("expected Web PV=30, UV=20, got PV=%d, UV=%d", webOv.PV, webOv.UV)
+	}
+	if len(webOv.Series) != 1 || webOv.Series[0].PV != 30 {
+		t.Fatalf("expected Web Series[0].PV=30, got %+v", webOv.Series)
+	}
+
+	// App 端验证
+	appOv := overviewFromDailyScope(row, "app", "")
+	if appOv.PV != 20 || appOv.UV != 15 {
+		t.Fatalf("expected App PV=20, UV=15, got PV=%d, UV=%d", appOv.PV, appOv.UV)
+	}
+	if len(appOv.Series) != 1 || appOv.Series[0].PV != 20 {
+		t.Fatalf("expected App Series[0].PV=20, got %+v", appOv.Series)
+	}
+	if appOv.Versions["1.0.0"] != 10 {
+		t.Fatalf("expected Versions[1.0.0]=10, got %+v", appOv.Versions)
+	}
+	if webOv.Browsers["chrome"] != 25 {
+		t.Fatalf("expected Web Browsers[chrome]=25, got %+v", webOv.Browsers)
+	}
+	if webOv.OS["Windows"] != 18 {
+		t.Fatalf("expected Web OS[Windows]=18, got %+v", webOv.OS)
+	}
+
+	// App 端分平台下钻验证（Issue 2）
+	androidOv := overviewFromDailyScope(row, "app", "android")
+	if androidOv.PV != 15 {
+		t.Fatalf("expected Android platform PV=15, got %d", androidOv.PV)
+	}
+	if androidOv.UV != 8 {
+		t.Fatalf("expected Android historical UV=8, got %d", androidOv.UV)
+	}
+	if len(androidOv.Series) != 1 || androidOv.Series[0].PV != 12 {
+		t.Fatalf("expected Android Series[0].PV=12, got %+v", androidOv.Series)
+	}
+	if appOv.Models["Pixel 8"] != 4 {
+		t.Fatalf("expected Models[Pixel 8]=4, got %+v", appOv.Models)
+	}
+}
+
+func TestModuleIsolationKeys(t *testing.T) {
+	day := "20260903"
+	// 验证各端 Top Play Key 完全独立
+	wpl := webTopPlayKey(day)
+	apl := appAllTopPlayKey(day)
+	tvpl := tvboxTopPlayKey(day)
+	if wpl == apl || wpl == tvpl || apl == tvpl {
+		t.Fatalf("top play keys must be isolated: w=%s a=%s tv=%s", wpl, apl, tvpl)
+	}
+
+	// 验证各端 Top Search Key 完全独立
+	wsk := webTopSearchKey(day)
+	ask := appAllTopSearchKey(day)
+	tvsk := tvboxTopSearchKey(day)
+	if wsk == ask || wsk == tvsk || ask == tvsk {
+		t.Fatalf("top search keys must be isolated: w=%s a=%s tv=%s", wsk, ask, tvsk)
+	}
+
+	// 验证各端 Action Key 完全独立
+	wak := webActionKey(day)
+	aak := appActionKey(day)
+	tvak := tvboxActionKey(day)
+	if wak == aak || wak == tvak || aak == tvak {
+		t.Fatalf("action keys must be isolated: w=%s a=%s tv=%s", wak, aak, tvak)
 	}
 }

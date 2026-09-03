@@ -39,22 +39,14 @@ func (s *InitService) DefaultDataInit() {
 
 	clearStartupCaches()
 
-	if !repository.ExistUserTable() {
-		s.TableInit()
-	} else {
-		db.Mdb.AutoMigrate(
-			&model.User{}, &model.FilmIndex{}, &model.FilmListSnapshot{}, &model.FilmFilterOptionSnapshot{}, &model.FilmFilterIndexSnapshot{}, &model.FileInfo{}, &model.FailureRecord{},
-			&model.MovieDetailInfo{}, &model.Category{}, &model.MoviePlaylist{}, &model.MoviePoster{},
-			&model.MovieMatchKey{},
-			&model.VirtualPictureQueue{}, &model.FilmSource{}, &model.CollectSourceStats{}, &model.SearchTagItem{},
-			&model.CrontabRecord{}, &model.SiteConfigRecord{}, &model.MovieSourceMapping{},
-			&model.Banner{}, &model.CronSourceRel{}, &model.MappingRule{}, &model.CategoryMapping{}, &model.SourceCategory{},
-			&model.NotifyConfigRecord{},
-			&model.NotifyChangeBatch{}, &model.NotifyChangeMid{},
-			&model.AccessDailyStats{}, &model.AccessDailyTop{},
-		)
+	isNewDatabase := !repository.ExistUserTable()
+
+	// 无论新库初始化还是已有库版本升级，统一执行单一事实来源 AllModels 的幂等迁移
+	s.TableInit()
+
+	if isNewDatabase {
+		db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 	}
-	ensureMappingRuleIndexes()
 
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
@@ -134,37 +126,7 @@ func clearStartupCaches() {
 }
 
 func (s *InitService) TableInit() {
-	err := db.Mdb.AutoMigrate(
-		&model.User{},
-		&model.FilmIndex{},
-		&model.FilmListSnapshot{},
-		&model.FilmFilterOptionSnapshot{},
-		&model.FilmFilterIndexSnapshot{},
-		&model.FileInfo{},
-		&model.FailureRecord{},
-		&model.MovieDetailInfo{},
-		&model.Category{},
-		&model.MoviePlaylist{},
-		&model.MoviePoster{},
-		&model.MovieMatchKey{},
-		&model.VirtualPictureQueue{},
-		&model.FilmSource{},
-		&model.CollectSourceStats{},
-		&model.SearchTagItem{},
-		&model.CrontabRecord{},
-		&model.SiteConfigRecord{},
-		&model.MovieSourceMapping{},
-		&model.Banner{},
-		&model.CronSourceRel{},
-		&model.MappingRule{},
-		&model.CategoryMapping{},
-		&model.SourceCategory{},
-		&model.NotifyConfigRecord{},
-		&model.NotifyChangeBatch{},
-		&model.NotifyChangeMid{},
-		&model.AccessDailyStats{},
-		&model.AccessDailyTop{},
-	)
+	err := db.Mdb.AutoMigrate(model.AllModels...)
 	if err != nil {
 		syslog.Errorf("Database AutoMigrate Failed: %v", err)
 		return
@@ -273,18 +235,31 @@ func (s *InitService) CollectCrontabInit() {
 		return
 	}
 
-	if repository.ExistTask() {
-		if tasks := repository.GetAllFilmTask(); len(tasks) > 0 {
-			for _, task := range tasks {
-				s.registerTask(task)
-			}
-		}
-	} else {
-		// 初始任务预设
-		s.createDefaultTasks()
+	// 幂等对齐系统默认任务并注册（新老数据库统一逻辑，自动补齐缺失任务，零兼容分支）
+	tasks := s.ensureDefaultTasks()
+	for _, task := range tasks {
+		s.registerTask(task)
 	}
 
 	spider.CronCollect.Start()
+}
+
+// ensureDefaultTasks 幂等检查并补齐默认任务（已存在跳过，缺失则自动持久化并返回）
+func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
+	existing := repository.GetAllFilmTask()
+	existingModels := make(map[int]bool, len(existing))
+	for _, t := range existing {
+		existingModels[t.Model] = true
+	}
+
+	for _, dt := range defaultFilmTasks() {
+		if !existingModels[dt.Model] {
+			if err := repository.SaveFilmTask(dt); err == nil {
+				existing = append(existing, dt)
+			}
+		}
+	}
+	return existing
 }
 
 func (s *InitService) registerTask(task model.FilmCollectTask) {
@@ -306,6 +281,8 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
 	case 3:
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
+	case 4:
+		cid, err = spider.AddApiLogCleanCron(task.Id, task.Spec)
 	}
 	if err == nil {
 		task.Cid = cid
@@ -313,6 +290,8 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		if err := repository.UpdateFilmTask(task); err != nil {
 			syslog.Errorf("UpdateFilmTask Error: %v", err)
 		}
+	} else {
+		syslog.Errorf("Task [%s, model=%d] Add Cron Error: %v", task.Id, task.Model, err)
 	}
 }
 
@@ -324,19 +303,24 @@ func (s *InitService) createDefaultTasks() {
 
 func defaultFilmTasks() []model.FilmCollectTask {
 	task := model.FilmCollectTask{
-		Id: utils.GenerateSalt(), Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
+		Id: "sys_cron_auto_collect", Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
 		Model: 0, State: false, Remark: "自动采集已启用站点更新的影片",
 	}
 
 	recoverTask := model.FilmCollectTask{
-		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryWeekSpec,
+		Id: "sys_cron_recover_collect", Time: 0, Spec: config.EveryWeekSpec,
 		Model: 2, State: false, Remark: "清理采集失败记录",
 	}
 
 	orphanTask := model.FilmCollectTask{
-		Id: utils.GenerateSalt(), Time: 0, Spec: config.EveryDaySpec,
+		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.EveryDaySpec,
 		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask}
+	apiLogTask := model.FilmCollectTask{
+		Id: "sys_cron_api_log_clean", Time: 0, Spec: "0 0 3 * * *",
+		Model: 4, State: true, Remark: "自动清理7天前的接口访问记录",
+	}
+
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, apiLogTask}
 }

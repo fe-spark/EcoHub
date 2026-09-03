@@ -48,6 +48,17 @@ func TestAccessLogMiddleware(t *testing.T) {
 			t.Fatalf("expected 404, got %d", w.Code)
 		}
 	})
+
+	t.Run("access log disabled but api log enabled", func(t *testing.T) {
+		config.AccessLogEnabled = false
+		config.ApiLogEnabled = true
+		req := httptest.NewRequest(http.MethodGet, "/api/test-ok", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
 }
 
 func TestSanitizeAccessLogURI(t *testing.T) {
