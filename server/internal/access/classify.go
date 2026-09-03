@@ -116,3 +116,23 @@ func uaFamily(path, ua string) string {
 		return "other"
 	}
 }
+
+func detectOS(ua string) string {
+	lower := strings.ToLower(ua)
+	switch {
+	case strings.Contains(lower, "windows"):
+		return "Windows"
+	case strings.Contains(lower, "macintosh") || strings.Contains(lower, "mac os x"):
+		return "macOS"
+	case strings.Contains(lower, "android"):
+		return "Android"
+	case strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad") || strings.Contains(lower, "ios"):
+		return "iOS"
+	case strings.Contains(lower, "openharmony") || strings.Contains(lower, "harmony"):
+		return "HarmonyOS"
+	case strings.Contains(lower, "linux"):
+		return "Linux"
+	default:
+		return "Other"
+	}
+}

@@ -15,6 +15,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
+	"server/internal/model"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -52,16 +53,21 @@ var (
 	pollerToken string            // 与 pollerGen 配套的 Bot Token
 )
 
-// EnsureBotPoller 按已保存 Bot Token 启停轮询。无 Token 停止；Token 变化则重启。
+// EnsureBotPoller 按已保存通知配置启停轮询。未启用通知或无 Token 时停止；Token 变化则重启。
 // cancel + Wait 在锁外执行，避免长轮询退出时阻塞其它 Ensure 调用方。
 // Worker 纯读节点禁止启动 Telegram 轮询。
 func EnsureBotPoller() {
 	if config.IsClusterWorker() {
 		return
 	}
-	cfg := GetConfig()
-	token := strings.TrimSpace(cfg.BotToken)
-	ensureBotPoller(token, runBotPoller)
+	ensureBotPoller(resolvePollerToken(GetConfig()), runBotPoller)
+}
+
+func resolvePollerToken(cfg model.NotifyConfig) string {
+	if !cfg.Enabled {
+		return ""
+	}
+	return strings.TrimSpace(cfg.BotToken)
 }
 
 // ensureBotPoller 是 EnsureBotPoller 的纯逻辑版本，runner 可注入以便并发回归测试。

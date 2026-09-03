@@ -31,4 +31,39 @@ const (
 	TableNotifyChangeMid    = "notify_change_mid"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
+	TableApiAccessLog       = "api_access_logs"
 )
+
+// AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
+var AllModels = []any{
+	&User{},
+	&FilmIndex{},
+	&FilmListSnapshot{},
+	&FilmFilterOptionSnapshot{},
+	&FilmFilterIndexSnapshot{},
+	&FileInfo{},
+	&FailureRecord{},
+	&MovieDetailInfo{},
+	&Category{},
+	&MoviePlaylist{},
+	&MoviePoster{},
+	&MovieMatchKey{},
+	&VirtualPictureQueue{},
+	&FilmSource{},
+	&CollectSourceStats{},
+	&SearchTagItem{},
+	&CrontabRecord{},
+	&SiteConfigRecord{},
+	&MovieSourceMapping{},
+	&Banner{},
+	&CronSourceRel{},
+	&MappingRule{},
+	&CategoryMapping{},
+	&SourceCategory{},
+	&NotifyConfigRecord{},
+	&NotifyChangeBatch{},
+	&NotifyChangeMid{},
+	&AccessDailyStats{},
+	&AccessDailyTop{},
+	&ApiAccessLog{},
+}

@@ -238,7 +238,7 @@ EcoHub 通过 Telegram Bot 向管理员推送系统运行事件，覆盖：
 
 ## 8. 部署与配置
 
-- 服务启动时（`main.go`）调用 `EnsureBotPoller`：已保存 Token 则启动 Telegram 长轮询（删除 webhook、注册命令），无 Token 停止。
+- 服务启动时（`main.go`）调用 `EnsureBotPoller`：已启用通知且已保存 Token 则启动 Telegram 长轮询（删除 webhook、注册命令），未启用通知或无 Token 停止。
 - 环境变量：`TG_PROXY`（可选，如 `http://127.0.0.1:7890`、`socks5://127.0.0.1:7891`）优先于通用代理变量。
 - 升级注意：**已保存过通知配置的实例**，旧配置 JSON 不含 `sourceConfigChanged` 字段，反序列化后该事件默认为关闭；如需默认开启，请在管理后台手动打开或重新保存一次配置。
 

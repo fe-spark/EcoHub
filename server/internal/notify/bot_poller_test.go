@@ -7,6 +7,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"server/internal/model"
 )
 
 // stopAllPollers 清空并停止当前已注册的轮询代，供测试收尾。
@@ -82,4 +84,45 @@ func TestEnsureBotPollerConcurrentStress(t *testing.T) {
 		}(w)
 	}
 	wg.Wait()
+}
+
+func TestResolvePollerToken(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  model.NotifyConfig
+		want string
+	}{
+		{
+			name: "通知已启用且有Token",
+			cfg: model.NotifyConfig{
+				Enabled:  true,
+				BotToken: " 123456:ABCDEF ",
+			},
+			want: "123456:ABCDEF",
+		},
+		{
+			name: "通知未启用即便有Token也应返回空",
+			cfg: model.NotifyConfig{
+				Enabled:  false,
+				BotToken: "123456:ABCDEF",
+			},
+			want: "",
+		},
+		{
+			name: "通知已启用但Token为空",
+			cfg: model.NotifyConfig{
+				Enabled:  true,
+				BotToken: "   ",
+			},
+			want: "",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolvePollerToken(tc.cfg); got != tc.want {
+				t.Fatalf("resolvePollerToken() = %q, want %q", got, tc.want)
+			}
+		})
+	}
 }
