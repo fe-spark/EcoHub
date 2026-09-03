@@ -2,9 +2,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter, usePathname } from "next/navigation";
-
-
-
 import Link from "next/link";
 import {
   Layout,
@@ -115,7 +112,7 @@ const menuItems: MenuItem[] = [
   {
     key: "/manage/access",
     icon: <LineChartOutlined />,
-    label: "访问分析",
+    label: "数据分析",
   },
   {
     key: "/manage/system",
@@ -125,49 +122,23 @@ const menuItems: MenuItem[] = [
 ];
 
 function resolveMenuKey(pathname: string) {
-  // 旧数据重置入口并入系统设置 · 数据安全
-  if (pathname.startsWith("/manage/reset")) {
-    return "/manage/system";
-  }
-  if (pathname.startsWith("/manage/banners")) {
-    return "/manage/banners";
-  }
-  if (pathname.startsWith("/manage/film/add")) {
-    return "/manage/film";
-  }
-  if (pathname.startsWith("/manage/collect/category/rules")) {
-    return "/manage/collect/category/rules";
-  }
-  if (pathname.startsWith("/manage/collect/category")) {
-    return "/manage/collect/category";
-  }
-  if (pathname.startsWith("/manage/film")) {
-    return "/manage/film";
-  }
-  if (pathname.startsWith("/manage/collect/record")) {
-    return "/manage/collect/record";
-  }
-  if (pathname.startsWith("/manage/collect")) {
-    return "/manage/collect";
-  }
-  if (pathname.startsWith("/manage/cron")) {
-    return "/manage/cron";
-  }
-  if (pathname.startsWith("/manage/system/users")) {
-    return "/manage/system/users";
-  }
-  if (pathname.startsWith("/manage/system/website")) {
-    return "/manage/system/website";
-  }
-  if (pathname.startsWith("/manage/access")) {
-    return "/manage/access";
-  }
-  if (pathname.startsWith("/manage/system")) {
-    return "/manage/system";
-  }
-  if (pathname.startsWith("/manage/file")) {
-    return "/manage/file";
-  }
+  // 旧数据重置与接口访问记录入口并入系统设置
+  if (pathname.startsWith("/manage/reset")) return "/manage/system";
+  if (pathname.startsWith("/manage/api-logs")) return "/manage/system";
+  if (pathname.startsWith("/manage/banners")) return "/manage/banners";
+  if (pathname.startsWith("/manage/film/add")) return "/manage/film";
+  if (pathname.startsWith("/manage/collect/category/rules")) return "/manage/collect/category/rules";
+  if (pathname.startsWith("/manage/collect/category")) return "/manage/collect/category";
+  if (pathname.startsWith("/manage/film")) return "/manage/film";
+  if (pathname.startsWith("/manage/collect/record")) return "/manage/collect/record";
+  if (pathname.startsWith("/manage/collect")) return "/manage/collect";
+  if (pathname.startsWith("/manage/cron")) return "/manage/cron";
+  if (pathname.startsWith("/manage/system/users")) return "/manage/system/users";
+  if (pathname.startsWith("/manage/system/website")) return "/manage/system/website";
+  if (pathname.startsWith("/manage/access")) return "/manage/access";
+  if (pathname.startsWith("/manage/api-logs")) return "/manage/api-logs";
+  if (pathname.startsWith("/manage/system")) return "/manage/system";
+  if (pathname.startsWith("/manage/file")) return "/manage/file";
   return "/manage";
 }
 

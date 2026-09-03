@@ -5,6 +5,7 @@ import Header from "@/components/public/Header";
 import Footer from "@/components/public/Footer";
 import ScrollToTop from "@/components/public/ScrollToTop";
 import NoticeModal from "@/components/public/NoticeModal";
+import RouteTracker from "@/components/public/RouteTracker";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import {
   PublicContentLoadingProvider,
@@ -58,6 +59,7 @@ export default function PublicLayoutView({
     <Suspense fallback={null}>
       <PublicContentLoadingProvider>
         <div className={styles.layoutWrapper}>
+          <RouteTracker />
           <ScrollToTop />
           <Header navList={navList} />
           <PublicMain>{children}</PublicMain>

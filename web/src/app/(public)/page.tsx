@@ -1,5 +1,4 @@
 import HomePageView from "./home-view";
-import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 
 async function getHomeData() {
@@ -28,10 +27,5 @@ async function getHomeData() {
 export default async function HomePage() {
   const data = await getHomeData();
 
-  return (
-    <>
-      <TrackPageView action="browse" />
-      <HomePageView data={data} />
-    </>
-  );
+  return <HomePageView data={data} />;
 }
