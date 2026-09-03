@@ -47,6 +47,34 @@ func TestShouldSkip(t *testing.T) {
 	}
 }
 
+func TestShouldRecordApiLog(t *testing.T) {
+	cases := []struct {
+		method, path string
+		status       int
+		want         bool
+	}{
+		{"GET", "/api/index", 200, true},
+		{"GET", "/api/provide/vod", 200, false},
+		{"GET", "/api/provide/vod", 404, true},
+		{"GET", "/api/provide/vod", 500, true},
+		{"GET", "/api/config/basic", 500, true},
+		{"GET", "/api/health", 200, false},
+		{"GET", "/api/config/basic", 200, false},
+		{"POST", "/api/stat/view", 200, false},
+		{"GET", "/api/upload/pic/poster/a.jpg", 200, false},
+		{"GET", "/api/manage/access/overview", 200, false},
+		{"GET", "/manage/system", 200, false},
+		{"OPTIONS", "/api/index", 204, false},
+		{"GET", "", 200, false},
+	}
+	for _, c := range cases {
+		got := ShouldRecordApiLog(c.method, c.path, c.status)
+		if got != c.want {
+			t.Fatalf("%s %s %d record=%v want %v", c.method, c.path, c.status, got, c.want)
+		}
+	}
+}
+
 func TestHTTPKindAndClient(t *testing.T) {
 	if httpKind("/api/index") != "http" {
 		t.Fatal("index is http not browse")
@@ -366,9 +394,16 @@ func TestFromContextSSR(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/index", nil)
 	req.Header.Set("User-Agent", "EcoHub-SSR")
 	c.Request = req
+	if evt := FromContext(c, time.Millisecond); evt != nil {
+		t.Fatalf("non-provide HTTP must not enter collector, got %+v", evt)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/provide/vod?ac=list", nil)
+	req.Header.Set("User-Agent", "EcoHub-SSR")
+	c.Request = req
 	evt := FromContext(c, time.Millisecond)
 	if evt == nil || evt.Internal != "ssr" || evt.UAFamily != "ecohub-ssr" {
-		t.Fatalf("ssr event %+v", evt)
+		t.Fatalf("ssr provide event %+v", evt)
 	}
 }
 
@@ -425,13 +460,14 @@ func TestFromContextPlayMember(t *testing.T) {
 	if detail == nil || detail.playMember != "1024" {
 		t.Fatalf("detail ids should rank as play: %+v", detail)
 	}
-	info := mk("/api/filmPlayInfo?id=88")
-	if info == nil || info.playMember != "88" {
-		t.Fatalf("filmPlayInfo should rank as play: %+v", info)
+	if info := mk("/api/filmPlayInfo?id=88"); info != nil {
+		t.Fatalf("filmPlayInfo HTTP must not enter collector, got %+v", info)
 	}
-	keyword := mk("/api/searchFilm?keyword=2024")
-	if keyword == nil || keyword.Resource != "2024" || keyword.playMember != "" {
-		t.Fatalf("searchFilm must not rank as play: %+v member=%q", keyword, keyword.playMember)
+	if keyword := mk("/api/searchFilm?keyword=2024"); keyword != nil {
+		t.Fatalf("searchFilm HTTP must not enter collector, got %+v", keyword)
+	}
+	if idx := mk("/api/index"); idx != nil {
+		t.Fatalf("public HTTP must not enter collector, got %+v", idx)
 	}
 }
 
@@ -500,7 +536,7 @@ func TestCurrentNodeName(t *testing.T) {
 	// 验证在 AccessEvent 中携带 node
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest("GET", "/api/index", nil)
+	req, _ := http.NewRequest("GET", "/api/provide/vod?ac=list", nil)
 	c.Request = req
 	evt := FromContext(c, 5*time.Millisecond)
 	if evt == nil {
@@ -565,8 +601,8 @@ func TestResolveDeviceID(t *testing.T) {
 
 func TestEventUVIdentity(t *testing.T) {
 	withDevice := &AccessEvent{DeviceId: "dev-1", IPHash: "aaa", UAFamily: "chrome", uvMember: "hash-ua"}
-	if got := eventUVIdentity(withDevice); got != "dev-1" {
-		t.Fatalf("device id should win, got %s", got)
+	if got := eventUVIdentity(withDevice); got != "hash-ua" {
+		t.Fatalf("client device_id must not be UV identity, got %s", got)
 	}
 	withUA := &AccessEvent{IPHash: "aaa", uvMember: "hash-ip-ua"}
 	if got := eventUVIdentity(withUA); got != "hash-ip-ua" {
@@ -575,6 +611,34 @@ func TestEventUVIdentity(t *testing.T) {
 	ipOnly := &AccessEvent{IPHash: "aaa"}
 	if got := eventUVIdentity(ipOnly); got != "aaa" {
 		t.Fatalf("expected IPHash fallback, got %s", got)
+	}
+	attacker := &AccessEvent{DeviceId: "eh_did_random_1", IPHash: "same-ip", uvMember: "hash-ip-ua"}
+	if got := eventUVIdentity(attacker); got != "hash-ip-ua" {
+		t.Fatalf("rotating device_id must not change UV, got %s", got)
+	}
+}
+
+func TestScopedTopKind(t *testing.T) {
+	if got := scopedTopKind("page", "app", "android"); got != "android_page" {
+		t.Fatalf("android page kind=%s", got)
+	}
+	if got := scopedTopKind("play", "app", "harmony"); got != "harmony_play" {
+		t.Fatalf("harmony play kind=%s", got)
+	}
+	if got := scopedTopKind("search", "app", "ios"); got != "ios_search" {
+		t.Fatalf("ios search kind=%s", got)
+	}
+	if got := scopedTopKind("page", "app", "all"); got != "app_page" {
+		t.Fatalf("app all page kind=%s", got)
+	}
+	if got := scopedTopKind("path", "web", ""); got != "web_page" {
+		t.Fatalf("web path kind=%s", got)
+	}
+	if got := scopedTopKind("play", "tvbox", ""); got != "tvbox_play" {
+		t.Fatalf("tvbox play kind=%s", got)
+	}
+	if got := scopedTopKind("classify", "app", "android"); got != "classify" {
+		t.Fatalf("classify stays global, got %s", got)
 	}
 }
 
@@ -828,6 +892,17 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 	if len(androidOv.Series) != 1 || androidOv.Series[0].PV != 12 {
 		t.Fatalf("expected Android Series[0].PV=12, got %+v", androidOv.Series)
+	}
+
+	nestedRow := row
+	nestedRow.VersionJSON = `{"android":{"2.5.4":7},"ios":{"2.5.4":2}}`
+	androidVer := overviewFromDailyScope(nestedRow, "app", "android")
+	if androidVer.Versions["2.5.4"] != 7 {
+		t.Fatalf("expected android versions 2.5.4=7, got %+v", androidVer.Versions)
+	}
+	allVer := overviewFromDailyScope(nestedRow, "app", "")
+	if allVer.Versions["2.5.4"] != 9 {
+		t.Fatalf("expected merged versions 2.5.4=9, got %+v", allVer.Versions)
 	}
 	if appOv.Models["Pixel 8"] != 4 {
 		t.Fatalf("expected Models[Pixel 8]=4, got %+v", appOv.Models)

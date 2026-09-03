@@ -61,6 +61,36 @@ func pageClientFromUA(ua string) string {
 	}
 }
 
+// isSafePagePath 只放行不会被 <a href> 当作协议解析的页面值。
+// page/path 来自公开无鉴权埋点接口，最终可能被管理端渲染为链接：
+// 拒绝 "//" 协议相对外链，以及以 scheme 语法（letter…:）开头的值。
+func isSafePagePath(s string) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return true
+	}
+	if strings.HasPrefix(s, "//") {
+		return false
+	}
+	first := s[0]
+	if !(first >= 'a' && first <= 'z' || first >= 'A' && first <= 'Z') {
+		return true // 不以字母开头，不可能是 URL scheme
+	}
+	for i := 1; i < len(s); i++ {
+		c := s[i]
+		if c == ':' {
+			return false // letter…[:] 即 scheme 前缀，禁止
+		}
+		if c == '/' || c == '?' || c == '#' {
+			return true // 到达 ':' 前先遇到路径分隔符，不是 scheme
+		}
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '+' || c == '-' || c == '.') {
+			return true // 冒号前出现非法 scheme 字符，不是 scheme
+		}
+	}
+	return true // 全程无冒号（如 "HomePage" 屏名），放行
+}
+
 func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
 	return buildPageEventPayload(c, TrackViewPayload{
 		Action:   action,
@@ -117,6 +147,12 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 		clientType = "web"
 	default:
 		clientType = pageClientFromUA(ua)
+	}
+
+	// Web 端 page/path 会被管理端渲染为链接，只放行不会被当作协议解析的值；
+	// 拒绝 "//" 协议相对外链与 scheme 前缀（javascript:/https:/data: 等）。App 屏名不受影响。
+	if clientType == "web" && (!isSafePagePath(page) || !isSafePagePath(routePath)) {
+		return nil
 	}
 
 	did := strings.TrimSpace(p.DeviceId)

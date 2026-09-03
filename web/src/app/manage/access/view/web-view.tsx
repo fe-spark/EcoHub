@@ -48,6 +48,16 @@ const OS_MAP: Record<string, { label: string; color: string }> = {
   other: { label: "其他系统", color: "var(--ant-color-text-tertiary, #8c8c8c)" },
 };
 
+// 页面值来自公开无鉴权埋点接口（/api/stat/view），只能作为站内相对路径渲染成链接，
+// 拒绝协议相对外链（//）与任何 URL scheme（javascript:/data:/https: 等），否则回退纯文本。
+function isSafeInternalHref(v: string): boolean {
+  const s = String(v ?? "").trim();
+  if (!s || s.startsWith("//")) return false;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s)) return false;
+  return s.startsWith("/");
+}
+
+
 export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: string; refreshKey?: number }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [tops, setTops] = useState<TopItem[]>([]);
@@ -59,8 +69,16 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
   const [logSearch, setLogSearch] = useState("");
   const isFirstMount = useRef(true);
   const lastDayRef = useRef(dayStr);
+  // 竞态防护：静默轮询在途即跳过（避免请求无界叠加），响应只接受最新一批（防止慢响应覆盖新筛选结果）
+  const reqSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const fetchData = useCallback(async (silent = false) => {
+    if (silent && inFlightRef.current) {
+      return;
+    }
+    inFlightRef.current = true;
+    const seq = ++reqSeqRef.current;
     if (!silent) {
       setLoading(true);
     }
@@ -73,6 +91,9 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=web&limit=100`),
       ]);
+      if (seq !== reqSeqRef.current) {
+        return;
+      }
       if (ovRes.code === 0 && ovRes.data) {
         setOverview(ovRes.data);
       }
@@ -98,8 +119,11 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
     } catch {
       // 忽略请求异常
     } finally {
-      if (!silent) {
-        setLoading(false);
+      if (seq === reqSeqRef.current) {
+        inFlightRef.current = false;
+        if (!silent) {
+          setLoading(false);
+        }
       }
     }
   }, [dayStr]);
@@ -202,9 +226,13 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         const target = record.page || path || "/";
         return (
           <Space orientation="vertical" size={2}>
-            <Link href={target} target="_blank" className={styles.topPageLink}>
-              {target}
-            </Link>
+            {isSafeInternalHref(target) ? (
+              <Link href={target} target="_blank" className={styles.topPageLink}>
+                {target}
+              </Link>
+            ) : (
+              <span className={styles.topPageLink}>{target}</span>
+            )}
             {record.pageTitle ? (
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 {record.pageTitle}
@@ -379,9 +407,13 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
                       </div>
                       <div className={styles.topInfo}>
                         <div className={styles.topTitleRow}>
-                          <Link href={item.key} target="_blank" className={styles.topPageLink}>
-                            {item.key}
-                          </Link>
+                          {isSafeInternalHref(item.key) ? (
+                            <Link href={item.key} target="_blank" className={styles.topPageLink}>
+                              {item.key}
+                            </Link>
+                          ) : (
+                            <span className={styles.topPageLink}>{item.key}</span>
+                          )}
                           <span className={styles.topCount}>{item.count.toLocaleString()} 次</span>
                         </div>
                         <div className={styles.progressBar}>

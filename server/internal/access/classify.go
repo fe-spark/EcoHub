@@ -7,6 +7,22 @@ import (
 	"server/internal/config"
 )
 
+// ShouldRecordApiLog 接口审计写入过滤：
+// - 后台与分析侧噪声路径（海报、探活、埋点）一律排除；
+// - TVBox provide 成功流量已由访问分析 Redis 统计，不再重复入库，仅保留 4xx/5xx 错误审计。
+func ShouldRecordApiLog(method, path string, status int) bool {
+	if path == "" {
+		return false
+	}
+	if strings.HasPrefix(path, "/manage") || strings.HasPrefix(path, "/api/manage") {
+		return false
+	}
+	if isProvidePath(path) && status < 400 {
+		return false
+	}
+	return !ShouldSkip(method, path, status)
+}
+
 // ShouldSkip 仅过滤日志噪声与自采样，不参与 PV。
 func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {

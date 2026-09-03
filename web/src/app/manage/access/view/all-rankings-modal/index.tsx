@@ -38,9 +38,14 @@ export default function AllRankingsModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const listRef = useRef<HTMLDivElement>(null);
+  // 竞态防护：同一次打开期间只保留最新一批请求的响应，防止慢响应覆盖切换 kind/日期后的榜单
+  const reqSeqRef = useRef(0);
+  const inFlightRef = useRef(false);
 
   const fetchAllData = useCallback(async () => {
-    if (!open) return;
+    if (!open || inFlightRef.current) return;
+    inFlightRef.current = true;
+    const seq = ++reqSeqRef.current;
     setLoading(true);
     try {
       const pParam = platform && platform !== "all" ? `&platform=${encodeURIComponent(platform)}` : "";
@@ -48,15 +53,23 @@ export default function AllRankingsModal({
       const res = await ApiGet<{ items: TopItem[] }>(
         `/manage/access/tops?day=${dayStr}${mParam}&kind=${kind}${pParam}&limit=2000`
       );
+      if (seq !== reqSeqRef.current) {
+        return;
+      }
       if (res.code === 0 && res.data?.items) {
         setItems(res.data.items);
       } else {
         setItems([]);
       }
     } catch {
-      setItems([]);
+      if (seq === reqSeqRef.current) {
+        setItems([]);
+      }
     } finally {
-      setLoading(false);
+      if (seq === reqSeqRef.current) {
+        inFlightRef.current = false;
+        setLoading(false);
+      }
     }
   }, [open, dayStr, module, kind, platform]);
 

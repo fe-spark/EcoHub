@@ -67,6 +67,47 @@ func marshalIntMap(m map[string]int64) string {
 	return string(raw)
 }
 
+func marshalNestedIntMap(m map[string]map[string]int64) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	raw, err := json.Marshal(m)
+	if err != nil {
+		return "{}"
+	}
+	return string(raw)
+}
+
+func mergeNestedIntMap(m map[string]map[string]int64) map[string]int64 {
+	merged := map[string]int64{}
+	for _, inner := range m {
+		for k, v := range inner {
+			merged[k] += v
+		}
+	}
+	return merged
+}
+
+// versionsFromDaily 解析日归档版本分布。新格式为按平台嵌套；旧格式为扁平 version->count，两者都可读。
+func versionsFromDaily(raw, platform string) map[string]int64 {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "{}" {
+		return map[string]int64{}
+	}
+	var nested map[string]map[string]int64
+	if err := json.Unmarshal([]byte(raw), &nested); err == nil && len(nested) > 0 {
+		platform = strings.ToLower(strings.TrimSpace(platform))
+		if platform != "" && platform != "all" {
+			if m := nested[platform]; len(m) > 0 {
+				return m
+			}
+			return map[string]int64{}
+		}
+		return mergeNestedIntMap(nested)
+	}
+	return unmarshalIntMap(raw)
+}
+
 func unmarshalIntMap(raw string) map[string]int64 {
 	out := map[string]int64{}
 	if raw == "" {
@@ -235,6 +276,21 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	appModelsCmd := pipe.HGetAll(ctx, appModelsKey(dayKey))
 	classifyCmd := pipe.ZRevRangeWithScores(ctx, topClassifyKey(dayKey), 0, accessTopKeep-1)
 
+	type platformTopCmds struct {
+		page   *redis.ZSliceCmd
+		play   *redis.ZSliceCmd
+		search *redis.ZSliceCmd
+	}
+	appPlatforms := []string{"android", "harmony", "ios"}
+	platTops := make(map[string]platformTopCmds, len(appPlatforms))
+	for _, p := range appPlatforms {
+		platTops[p] = platformTopCmds{
+			page:   pipe.ZRevRangeWithScores(ctx, appTopPageKey(p, dayKey), 0, accessTopKeep-1),
+			play:   pipe.ZRevRangeWithScores(ctx, appTopPlayKey(p, dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1)),
+			search: pipe.ZRevRangeWithScores(ctx, appTopSearchKey(p, dayKey), 0, accessTopKeep-1),
+		}
+	}
+
 	// TVBox 专属快照
 	tvboxUVCmd := pipe.PFCount(ctx, tvboxUVKey(dayKey))
 	tvboxPlayCmd := pipe.ZRevRangeWithScores(ctx, tvboxTopPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
@@ -265,16 +321,12 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 		appPV = v
 	}
 
-	allVersions := make(map[string]int64)
-	for k, v := range parseIntMap(androidVerCmd.Val()) {
-		allVersions[k] += v
+	versionByPlatform := map[string]map[string]int64{
+		"android": parseIntMap(androidVerCmd.Val()),
+		"harmony": parseIntMap(harmonyVerCmd.Val()),
+		"ios":     parseIntMap(iosVerCmd.Val()),
 	}
-	for k, v := range parseIntMap(harmonyVerCmd.Val()) {
-		allVersions[k] += v
-	}
-	for k, v := range parseIntMap(iosVerCmd.Val()) {
-		allVersions[k] += v
-	}
+	allVersions := mergeNestedIntMap(versionByPlatform)
 
 	platformUV := map[string]int64{
 		"android": androidUVCmd.Val(),
@@ -304,7 +356,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 		SeriesJSON:     marshalSeries(series),
 		PlatformJSON:   marshalIntMap(parseIntMap(platformsCmd.Val())),
 		PlatformUVJSON: marshalIntMap(platformUV),
-		VersionJSON:    marshalIntMap(allVersions),
+		VersionJSON:    marshalNestedIntMap(versionByPlatform),
 		BrowserJSON:    marshalIntMap(parseIntMap(webBrowserCmd.Val())),
 		OSJSON:         marshalIntMap(parseIntMap(webOSCmd.Val())),
 		ModelsJSON:     marshalIntMap(parseIntMap(appModelsCmd.Val())),
@@ -325,6 +377,12 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tops = append(tops, topItemsToRows(stats.Day, "web_search", zsetToTopItems(webSearchCmd.Val()))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_play", takePlayTops(zsetToTopItems(appPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_search", zsetToTopItems(appSearchCmd.Val()))...)
+	for _, p := range appPlatforms {
+		cmds := platTops[p]
+		tops = append(tops, topItemsToRows(stats.Day, p+"_page", zsetToTopItems(cmds.page.Val()))...)
+		tops = append(tops, topItemsToRows(stats.Day, p+"_play", takePlayTops(zsetToTopItems(cmds.play.Val()), accessTopKeep))...)
+		tops = append(tops, topItemsToRows(stats.Day, p+"_search", zsetToTopItems(cmds.search.Val()))...)
+	}
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_search", zsetToTopItems(tvboxSearchCmd.Val()))...)
 	tops = append(tops, topItemsToRows(stats.Day, "classify", zsetToTopItems(classifyCmd.Val()))...)
@@ -460,7 +518,7 @@ func overviewFromDailyScope(row model.AccessDailyStats, module, platform string)
 		Hist:      unmarshalIntMap(row.HistJSON),
 		Series:    unmarshalSeries(row.SeriesJSON),
 		Platforms: unmarshalIntMap(row.PlatformJSON),
-		Versions:  unmarshalIntMap(row.VersionJSON),
+		Versions:  versionsFromDaily(row.VersionJSON, platform),
 		Browsers:  unmarshalIntMap(row.BrowserJSON),
 		OS:        unmarshalIntMap(row.OSJSON),
 		Models:    unmarshalIntMap(row.ModelsJSON),
