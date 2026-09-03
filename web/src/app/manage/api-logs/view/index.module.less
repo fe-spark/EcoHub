@@ -1,18 +1,11 @@
-.pageStack {
+.pageWrapper {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  flex: 1;
-  height: 100%;
-  min-height: 0;
-  overflow: hidden;
+  width: 100%;
 }
 
-.headerArea {
-  flex: none;
-}
-
-.statusActionBar {
+.metricActionBar {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -25,33 +18,40 @@
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
-.statusGroup {
+.metricsGroup {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 24px;
   flex-wrap: wrap;
 }
 
-.statusItem {
+.metricItem {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.statusIcon {
+.metricIcon {
   font-size: 15px;
 }
 
-.statusLabel {
+.metricLabel {
   font-size: 13px;
   color: var(--ant-color-text-secondary);
 }
 
-.statusValue {
-  font-size: 15px;
-  font-weight: 600;
+.metricValue {
+  font-size: 16px;
+  font-weight: 700;
   color: var(--ant-color-text);
   font-family: monospace;
+}
+
+.metricSubText {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  font-weight: normal;
+  margin-left: 2px;
 }
 
 .filterCard {
@@ -76,28 +76,22 @@
   gap: 8px;
 }
 
-.logCard {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-height: 0;
-  border-radius: 10px;
-  border: 1px solid var(--ant-color-border-secondary);
+.tableCard {
   background: var(--ant-color-bg-container);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
   overflow: hidden;
 }
 
-.logHeader {
+.tableHeader {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 12px 16px;
   border-bottom: 1px solid var(--ant-color-border-secondary);
-  flex: none;
 }
 
-.logTitle {
+.tableTitle {
   font-size: 14px;
   font-weight: 600;
   color: var(--ant-color-text);
@@ -106,52 +100,75 @@
   gap: 8px;
 }
 
-.logSub {
+.tableCount {
   font-size: 12px;
   color: var(--ant-color-text-secondary);
   font-weight: normal;
 }
 
-.logBody {
-  flex: 1;
-  min-height: 0;
-  width: 100%;
-  overflow: auto;
-  padding: 14px 16px;
-  background: #0f172a;
-  color: #e2e8f0;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 12.5px;
-  line-height: 1.75;
-}
-
-.logLine {
-  display: grid;
-  grid-template-columns: 52px 64px minmax(0, 1fr);
+.expandBox {
+  padding: 12px 16px;
+  background: var(--ant-color-fill-quaternary);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
-  align-items: start;
-  white-space: pre-wrap;
-  word-break: break-word;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
-.lineNo {
-  color: rgba(215, 227, 244, 0.38);
-  text-align: right;
-  user-select: none;
+.expandRow {
+  display: flex;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.expandLabel {
+  width: 90px;
+  flex-shrink: 0;
+  color: var(--ant-color-text-secondary);
+  font-weight: 500;
+}
+
+.expandVal {
+  flex: 1;
+  color: var(--ant-color-text);
+  word-break: break-all;
   font-family: monospace;
 }
 
-.level {
-  min-width: 0;
+.pathCell {
+  font-family: monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  word-break: break-all;
 }
 
-.message {
-  min-width: 0;
+.ipCell {
+  font-family: monospace;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.durationBadgeFast {
+  color: #52c41a;
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.durationBadgeMedium {
+  color: var(--ant-color-primary, #fa8c16);
+  font-weight: 600;
+  font-family: monospace;
+}
+
+.durationBadgeSlow {
+  color: #ff4d4f;
+  font-weight: 700;
+  font-family: monospace;
 }
 
 @media (max-width: 768px) {
-  .statusActionBar {
+  .metricActionBar {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -161,12 +178,6 @@
   }
   .filterGroup {
     width: 100%;
-  }
-  .logLine {
-    grid-template-columns: 40px minmax(0, 1fr);
-  }
-  .level {
-    display: none;
   }
 }
 

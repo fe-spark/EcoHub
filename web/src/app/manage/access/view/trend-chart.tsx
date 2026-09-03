@@ -15,6 +15,7 @@ export type SeriesPoint = {
 
 interface TrendChartProps {
   series?: SeriesPoint[];
+  activeTab?: string;
 }
 
 function getSplinePath(pts: { x: number; y: number }[]): string {
@@ -42,7 +43,7 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
   const totalSeries = useMemo(() => {
     return (series || []).map((p) => ({
       t: p.t,
-      count: (p.pv || 0) + (p.providePv || 0),
+      count: p.pv || 0,
     }));
   }, [series]);
 
@@ -141,8 +142,8 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
         >
           <defs>
             <linearGradient id="areaGradientTotal" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#1677ff" stopOpacity="0.25" />
-              <stop offset="100%" stopColor="#1677ff" stopOpacity="0.0" />
+              <stop offset="0%" stopColor="var(--ant-color-primary, #fa8c16)" stopOpacity="0.25" />
+              <stop offset="100%" stopColor="var(--ant-color-primary, #fa8c16)" stopOpacity="0.0" />
             </linearGradient>
           </defs>
 
@@ -181,7 +182,7 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
           <path
             d={splinePath}
             fill="none"
-            stroke="#1677ff"
+            stroke="var(--ant-color-primary, #fa8c16)"
             strokeWidth="2"
             strokeLinecap="round"
           />
@@ -206,7 +207,7 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
               y1={padTop}
               x2={getX(hoverIndex)}
               y2={padTop + chartH}
-              stroke="#1677ff"
+              stroke="var(--ant-color-primary, #fa8c16)"
               strokeWidth="1.5"
               strokeDasharray="2 2"
             />
@@ -226,7 +227,7 @@ export default function TrendChart({ series = [] }: TrendChartProps) {
               {formatTimeRange(activePoint.t)}
             </div>
             <div className={styles.tooltipRow}>
-              <span>请求数:</span>
+              <span>浏览次数:</span>
               <b>{activePoint.count} 次</b>
             </div>
           </div>
