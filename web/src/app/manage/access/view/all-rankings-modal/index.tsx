@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Button, Empty, Input, Modal, Pagination, Space, Spin, Tag } from "antd";
 import {
+  AppstoreOutlined,
   FireOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -125,6 +126,8 @@ export default function AllRankingsModal({
         <div className={styles.headerTitle}>
           {isPlay ? (
             <VideoCameraOutlined style={{ color: "var(--ant-color-primary, #fa8c16)" }} />
+          ) : isClassify ? (
+            <AppstoreOutlined style={{ color: "var(--ant-color-success, #52c41a)" }} />
           ) : (
             <FireOutlined style={{ color: "#fa541c" }} />
           )}
@@ -135,7 +138,13 @@ export default function AllRankingsModal({
     >
       <div className={styles.filterRow}>
         <Input
-          placeholder={isPlay ? "搜索片名、分类或 ID..." : isClassify ? "搜索分类名称..." : "搜索关键词..."}
+          placeholder={
+            isPlay
+              ? "搜索片名、分类或 ID..."
+              : isClassify
+                ? "搜索分类名称或 ID..."
+                : "搜索关键词..."
+          }
           prefix={<SearchOutlined style={{ color: "var(--ant-color-text-tertiary)" }} />}
           allowClear
           value={keyword}
@@ -232,6 +241,55 @@ export default function AllRankingsModal({
                             />
                           </div>
                           <span className={styles.filmCount}>
+                            {item.count.toLocaleString()} 次
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+
+                if (isClassify) {
+                  const rawId = item.key.replace(/^id\s+/, "").trim();
+                  const isNumericId = /^\d+$/.test(rawId);
+                  const displayName = item.title || item.category || (isNumericId ? `分类 #${rawId}` : item.key);
+                  const classifyUrl = isNumericId ? `/filmClassify?Pid=${encodeURIComponent(rawId)}` : undefined;
+                  const showIdTag =
+                    isNumericId &&
+                    displayName !== `#${rawId}` &&
+                    displayName !== `分类 #${rawId}` &&
+                    displayName !== rawId;
+
+                  return (
+                    <div className={styles.listItem} key={item.key}>
+                      <div className={`${styles.rankBadge} ${rankClass}`}>{rankNumber}</div>
+                      <div className={styles.filmInfo}>
+                        <div className={styles.filmTitleRow}>
+                          {classifyUrl ? (
+                            <Link
+                              href={classifyUrl}
+                              target="_blank"
+                              className={styles.filmTitle}
+                            >
+                              {displayName}
+                            </Link>
+                          ) : (
+                            <span className={styles.filmTitle}>{displayName}</span>
+                          )}
+                          {showIdTag && (
+                            <Tag color="purple" className={styles.classifyIdTag}>
+                              #{rawId}
+                            </Tag>
+                          )}
+                        </div>
+                        <div className={styles.filmCountBarWrap}>
+                          <div className={styles.filmCountBar}>
+                            <div
+                              className={`${styles.filmCountBarFill} ${styles.classifyBarFill}`}
+                              style={{ width: `${barWidthPct}%` }}
+                            />
+                          </div>
+                          <span className={`${styles.filmCount} ${styles.classifyCount}`}>
                             {item.count.toLocaleString()} 次
                           </span>
                         </div>

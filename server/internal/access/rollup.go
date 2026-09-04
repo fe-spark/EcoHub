@@ -383,21 +383,21 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tops = append(tops, topItemsToRows(stats.Day, "app_page", appItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_play", takePlayTops(zsetToTopItems(webPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_search", zsetToTopItems(webSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "web_classify", filterNumericClassifyTops(zsetToTopItems(webClassifyCmd.Val())))...)
+	tops = append(tops, topItemsToRows(stats.Day, "web_classify", takeClassifyTops(zsetToTopItems(webClassifyCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_play", takePlayTops(zsetToTopItems(appPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_search", zsetToTopItems(appSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "app_classify", filterNumericClassifyTops(zsetToTopItems(appClassifyCmd.Val())))...)
+	tops = append(tops, topItemsToRows(stats.Day, "app_classify", takeClassifyTops(zsetToTopItems(appClassifyCmd.Val()), accessTopKeep))...)
 	for _, p := range appPlatforms {
 		cmds := platTops[p]
 		tops = append(tops, topItemsToRows(stats.Day, p+"_page", zsetToTopItems(cmds.page.Val()))...)
 		tops = append(tops, topItemsToRows(stats.Day, p+"_play", takePlayTops(zsetToTopItems(cmds.play.Val()), accessTopKeep))...)
 		tops = append(tops, topItemsToRows(stats.Day, p+"_search", zsetToTopItems(cmds.search.Val()))...)
-		tops = append(tops, topItemsToRows(stats.Day, p+"_classify", filterNumericClassifyTops(zsetToTopItems(cmds.classify.Val())))...)
+		tops = append(tops, topItemsToRows(stats.Day, p+"_classify", takeClassifyTops(zsetToTopItems(cmds.classify.Val()), accessTopKeep))...)
 	}
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_search", zsetToTopItems(tvboxSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "tvbox_classify", filterNumericClassifyTops(zsetToTopItems(tvboxClassifyCmd.Val())))...)
-	tops = append(tops, topItemsToRows(stats.Day, "classify", filterNumericClassifyTops(zsetToTopItems(classifyCmd.Val())))...)
+	tops = append(tops, topItemsToRows(stats.Day, "tvbox_classify", takeClassifyTops(zsetToTopItems(tvboxClassifyCmd.Val()), accessTopKeep))...)
+	tops = append(tops, topItemsToRows(stats.Day, "classify", takeClassifyTops(zsetToTopItems(classifyCmd.Val()), accessTopKeep))...)
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.WebPV > 0 || stats.AppPV > 0 ||
 		stats.ProvidePV > 0 || stats.Err4 > 0 || stats.Err5 > 0 || stats.Dropped > 0 ||

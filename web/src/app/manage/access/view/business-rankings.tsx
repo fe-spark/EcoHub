@@ -224,22 +224,39 @@ export default function BusinessRankings({
               const rankClass =
                 idx === 0 ? styles.rank1 : idx === 1 ? styles.rank2 : idx === 2 ? styles.rank3 : "";
               const barWidthPct = Math.max(4, Math.round((item.count / maxClassifyCount) * 100));
-              const displayName = item.title || item.category || item.key;
+              const rawId = item.key.replace(/^id\s+/, "").trim();
+              const isNumericId = /^\d+$/.test(rawId);
+              const displayName = item.title || item.category || (isNumericId ? `分类 #${rawId}` : item.key);
+              const showIdTag =
+                isNumericId &&
+                displayName !== `#${rawId}` &&
+                displayName !== `分类 #${rawId}` &&
+                displayName !== rawId;
               return (
                 <div className={styles.hotPlayItem} key={`${item.key}-${idx}`}>
                   <div className={`${styles.rankBadge} ${rankClass}`}>{idx + 1}</div>
                   <div className={styles.filmInfo}>
                     <div className={styles.filmTitleRow}>
                       <span className={styles.filmTitle}>{displayName}</span>
+                      {showIdTag && (
+                        <Tag color="purple" style={{ fontSize: 11, lineHeight: "18px", padding: "0 6px" }}>
+                          #{rawId}
+                        </Tag>
+                      )}
                     </div>
                     <div className={styles.filmCountBarWrap}>
                       <div className={styles.filmCountBar}>
                         <div
                           className={styles.filmCountBarFill}
-                          style={{ width: `${barWidthPct}%` }}
+                          style={{
+                            width: `${barWidthPct}%`,
+                            background: "linear-gradient(90deg, #52c41a, #73d13d)",
+                          }}
                         />
                       </div>
-                      <span className={styles.filmCount}>{item.count.toLocaleString()} 次</span>
+                      <span className={styles.filmCount} style={{ color: "var(--ant-color-success, #52c41a)" }}>
+                        {item.count.toLocaleString()} 次
+                      </span>
                     </div>
                   </div>
                 </div>

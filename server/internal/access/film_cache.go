@@ -293,8 +293,17 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 			catNameCache[c.Id] = c.Name
 			result[c.Id] = c.Name
 		}
+		// 缓存占位防穿透：库中未查到的 ID 记录占位符，防止无效/已删除 ID 高频打库
+		for _, id := range missing {
+			if _, ok := catNameCache[id]; !ok {
+				placeholder := fmt.Sprintf("分类 #%d", id)
+				catNameCache[id] = placeholder
+				result[id] = placeholder
+			}
+		}
 		catNameCacheMu.Unlock()
 	}
+
 	return result
 }
 
