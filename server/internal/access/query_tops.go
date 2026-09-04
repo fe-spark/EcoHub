@@ -2,6 +2,7 @@ package access
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -34,9 +35,6 @@ func scopedTopKind(kind, module, platform string) string {
 			}
 			return "app_" + kind
 		default:
-			if kind == "page" {
-				return "web_page"
-			}
 			return kind
 		}
 	case "classify":
@@ -54,7 +52,7 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		limit = zsetKeep
 	}
 	fetch := limit
-	if kind == "play" {
+	if kind == "play" || kind == "classify" {
 		fetch = playTopFetchCount(limit)
 	}
 	now := time.Now().In(time.Local)
@@ -72,8 +70,20 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		if _, ok := loadDailyStats(dayStr); ok {
 			queryKind := scopedTopKind(kind, module, platform)
 			items := loadDailyTops(dayStr, queryKind, fetch)
+			if len(items) == 0 && queryKind == "page" {
+				items = mergeTopItemsByCount(
+					loadDailyTops(dayStr, "web_page", fetch),
+					loadDailyTops(dayStr, "app_page", fetch),
+				)
+				if fetch > 0 && len(items) > fetch {
+					items = items[:fetch]
+				}
+			}
 			if kind == "play" {
 				items = takePlayTops(items, limit)
+			}
+			if kind == "classify" {
+				items = takeClassifyTops(items, limit)
 			}
 			if len(items) > 0 {
 				return items, nil
@@ -144,5 +154,37 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 	if kind == "play" {
 		items = takePlayTops(items, limit)
 	}
+	if kind == "classify" {
+		items = takeClassifyTops(items, limit)
+	}
 	return items, nil
+}
+
+func mergeTopItemsByCount(parts ...[]TopItem) []TopItem {
+	counts := make(map[string]int64, 16)
+	meta := make(map[string]TopItem, 16)
+	for _, items := range parts {
+		for _, it := range items {
+			if it.Key == "" {
+				continue
+			}
+			counts[it.Key] += it.Count
+			if _, ok := meta[it.Key]; !ok {
+				meta[it.Key] = it
+			}
+		}
+	}
+	out := make([]TopItem, 0, len(counts))
+	for k, n := range counts {
+		it := meta[k]
+		it.Count = n
+		out = append(out, it)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Count == out[j].Count {
+			return out[i].Key < out[j].Key
+		}
+		return out[i].Count > out[j].Count
+	})
+	return out
 }

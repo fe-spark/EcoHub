@@ -49,6 +49,18 @@ func TestAccessLogMiddleware(t *testing.T) {
 		}
 	})
 
+	t.Run("health skip still succeeds", func(t *testing.T) {
+		r.GET("/api/health", func(c *gin.Context) {
+			c.Status(http.StatusOK)
+		})
+		req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
 	t.Run("access log disabled but api log enabled", func(t *testing.T) {
 		config.AccessLogEnabled = false
 		config.ApiLogEnabled = true

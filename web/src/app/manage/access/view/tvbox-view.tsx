@@ -14,7 +14,8 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { ApiGet } from "@/lib/client-api";
 import TrendChart from "./trend-chart";
-import DonutChart, { type DonutSlice } from "./donut-chart";
+import { type DonutSlice } from "./donut-chart";
+import DistBarChart from "./dist-bar-chart";
 import BusinessRankings from "./business-rankings";
 import type { Overview, TopItem, LogRow } from "./types";
 import ResourceCell from "./resource-cell";
@@ -205,10 +206,34 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
   const listCount = Math.max(0, logs.length - detailCount - searchCount - configCount);
 
   const tvboxSlices: DonutSlice[] = [
-    { name: "影视点播", value: detailCount, color: "#fa8c16" },
-    { name: "寻片搜索", value: searchCount, color: "#fa541c" },
-    { name: "源配置同步", value: configCount, color: "#722ed1" },
-    { name: "分类与列表", value: listCount, color: "#52c41a" },
+    {
+      name: "寻片搜索",
+      value: searchCount,
+      color: "#fa541c",
+      icon: <SearchOutlined />,
+      desc: "电视端关键字与首字母搜片 (/vod ac=search)",
+    },
+    {
+      name: "分类与列表",
+      value: listCount,
+      color: "#52c41a",
+      icon: <DesktopOutlined />,
+      desc: "分类筛选与分页列表浏览 (/vod ac=list)",
+    },
+    {
+      name: "影视点播",
+      value: detailCount,
+      color: "#fa8c16",
+      icon: <PlayCircleOutlined />,
+      desc: "影片详情与播放地址解析 (/vod ac=detail)",
+    },
+    {
+      name: "源配置同步",
+      value: configCount,
+      color: "#722ed1",
+      icon: <SettingOutlined />,
+      desc: "TVBox 单仓/多仓配置拉取与订阅更新 (/config)",
+    },
   ].filter((s) => s.value > 0);
 
   return (
@@ -315,7 +340,7 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
           {tvboxSlices.length === 0 ? (
             <Empty description="暂无接口调用分布数据" />
           ) : (
-            <DonutChart slices={tvboxSlices} centerLabel="电视端接口" />
+            <DistBarChart slices={tvboxSlices} unit="次" />
           )}
         </Card>
       </div>

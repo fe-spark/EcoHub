@@ -48,13 +48,12 @@ func TrackPagePayload(c *gin.Context, p TrackViewPayload) {
 }
 
 func pageClientFromUA(ua string) string {
-	lower := strings.ToLower(ua)
 	switch {
-	case strings.Contains(ua, "EcoHub-OHOS") || strings.Contains(lower, "openharmony"):
+	case strings.Contains(ua, "EcoHub-OHOS"):
 		return "harmony"
-	case strings.Contains(ua, "EcoHub-iOS") || strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad"):
+	case strings.Contains(ua, "EcoHub-iOS") || strings.Contains(ua, "EcoHub-IOS"):
 		return "ios"
-	case strings.Contains(ua, "EcoHub-Android") || strings.Contains(lower, "android"):
+	case strings.Contains(ua, "EcoHub-Android"):
 		return "android"
 	default:
 		return "web"

@@ -128,11 +128,26 @@ func TestHTTPResource(t *testing.T) {
 	if httpResource("/api/filmPlayInfo", url.Values{"id": {"12345"}}) != "12345" {
 		t.Fatal("filmPlayInfo id")
 	}
-	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "list" {
-		t.Fatal("provide ac list")
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "" {
+		t.Fatal("provide ac list without t should be empty")
 	}
-	if httpResource("/api/provide/vod", url.Values{}) != "list" {
-		t.Fatal("provide empty ac is list")
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "t": {"19"}}) != "19" {
+		t.Fatal("provide ac list with t")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "tid": {"19"}}) != "19" {
+		t.Fatal("provide ac list with tid")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "t": {"all"}}) != "" {
+		t.Fatal("non-numeric t must not enter classify")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "t": {"19,20"}}) != "" {
+		t.Fatal("comma-separated t must not enter classify")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "t": {"0"}}) != "" {
+		t.Fatal("t=0 must not enter classify")
+	}
+	if httpResource("/api/provide/vod", url.Values{}) != "" {
+		t.Fatal("provide empty ac should be empty")
 	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"999"}}) != "999" {
 		t.Fatal("provide ac detail ids")
@@ -231,6 +246,34 @@ func TestEnrichPlayTopItems_FilterDirtyKeys(t *testing.T) {
 	}
 	if res[0].Title != "影片 #999999" {
 		t.Fatalf("expected Title to be placeholder '影片 #999999', got %s", res[0].Title)
+	}
+}
+
+func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
+	input := []TopItem{
+		{Key: "list", Count: 65},
+		{Key: "config", Count: 12},
+		{Key: "19", Count: 53},
+		{Key: "34", Count: 11},
+	}
+	res := enrichClassifyTopItems(input)
+	if len(res) != 2 {
+		t.Fatalf("enrichClassifyTopItems should filter invalid non-numeric keys like 'list', got len=%d", len(res))
+	}
+	if res[0].Key != "19" || res[0].Count != 53 {
+		t.Fatalf("unexpected res[0]: %+v", res[0])
+	}
+	if res[1].Key != "34" || res[1].Count != 11 {
+		t.Fatalf("unexpected res[1]: %+v", res[1])
+	}
+	// 在没有数据库连接时，Title 优雅兜底为 分类 #ID
+	if res[0].Title != "分类 #19" {
+		t.Fatalf("expected Title placeholder '分类 #19', got %s", res[0].Title)
+	}
+	// 测试截断与过滤结合
+	top1 := takeClassifyTops(input, 1)
+	if len(top1) != 1 || top1[0].Key != "19" {
+		t.Fatalf("takeClassifyTops limit=1 failed: %+v", top1)
 	}
 }
 
@@ -469,6 +512,19 @@ func TestFromContextPlayMember(t *testing.T) {
 	if idx := mk("/api/index"); idx != nil {
 		t.Fatalf("public HTTP must not enter collector, got %+v", idx)
 	}
+
+	homeList := mk("/api/provide/vod?ac=list")
+	if homeList == nil || homeList.Action != ActionProvide || homeList.Resource != "" {
+		t.Fatalf("list without t must stay provide: %+v", homeList)
+	}
+	classified := mk("/api/provide/vod?ac=list&t=19")
+	if classified == nil || classified.Action != ActionClassify || classified.Resource != "19" {
+		t.Fatalf("list with t must be classify: %+v", classified)
+	}
+	dirty := mk("/api/provide/vod?ac=list&t=all")
+	if dirty == nil || dirty.Action != ActionProvide || dirty.Resource != "" {
+		t.Fatalf("list with dirty t must stay provide: %+v", dirty)
+	}
 }
 
 func TestQueryLogsMatchStatus(t *testing.T) {
@@ -633,6 +689,12 @@ func TestScopedTopKind(t *testing.T) {
 	}
 	if got := scopedTopKind("path", "web", ""); got != "web_page" {
 		t.Fatalf("web path kind=%s", got)
+	}
+	if got := scopedTopKind("page", "", ""); got != "page" {
+		t.Fatalf("global page kind=%s", got)
+	}
+	if got := scopedTopKind("path", "", ""); got != "page" {
+		t.Fatalf("global path kind=%s", got)
 	}
 	if got := scopedTopKind("play", "tvbox", ""); got != "tvbox_play" {
 		t.Fatalf("tvbox play kind=%s", got)

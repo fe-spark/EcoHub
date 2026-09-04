@@ -48,14 +48,18 @@ func AccessLog() gin.HandlerFunc {
 			})
 		}
 
+		if access.ShouldSkip(c.Request.Method, path, status) {
+			return
+		}
 		uri := sanitizeAccessLogURI(c.Request.URL.RequestURI())
 		latMs := elapsed.Milliseconds()
+		ipLog := access.IPPreview(clientIP)
 		if status >= 400 || latMs >= config.AccessSlowMs {
 			syslog.Warnf("[HTTP] %d | %dms | %s | %s %s",
-				status, latMs, clientIP, c.Request.Method, uri)
+				status, latMs, ipLog, c.Request.Method, uri)
 		} else {
 			syslog.Infof("[HTTP] %d | %dms | %s | %s %s",
-				status, latMs, clientIP, c.Request.Method, uri)
+				status, latMs, ipLog, c.Request.Method, uri)
 		}
 	}
 }

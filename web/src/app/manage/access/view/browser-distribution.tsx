@@ -91,10 +91,10 @@ export default function BrowserDistributionCard({
   const availH = Math.max(50, containerHeight - 2 * (textReserveY + 10));
   const pieRadius = Math.max(25, Math.floor(Math.min(availW, availH) / 2));
 
-  // 纯函数计算每个扇区和折线
+  // 纯函数计算每个扇区和防重叠折线
   const slices = useMemo(() => {
     let currentAngle = -Math.PI / 2;
-    const result = [];
+    const rawSlices = [];
 
     for (let i = 0; i < list.length; i++) {
       const item = list[i];
@@ -124,42 +124,135 @@ export default function BrowserDistributionCard({
           ? ""
           : `M ${cx + offX} ${cy + offY} L ${x1} ${y1} A ${pieRadius} ${pieRadius} 0 ${largeArc} 1 ${x2} ${y2} Z`;
 
-      // 外部折线引出线（Leader line）
+      const labelAngle = list.length === 1 ? -Math.PI / 6 : midAngle;
+      const cosA = Math.cos(labelAngle);
+      const sinA = Math.sin(labelAngle);
+      const isRight = cosA >= 0;
+
       const p0 = {
-        x: cx + offX + pieRadius * Math.cos(midAngle),
-        y: cy + offY + pieRadius * Math.sin(midAngle),
+        x: cx + offX + pieRadius * cosA,
+        y: cy + offY + pieRadius * sinA,
       };
 
       const elbowDist = pieRadius + 10;
       const p1 = {
-        x: cx + offX + elbowDist * Math.cos(midAngle),
-        y: cy + offY + elbowDist * Math.sin(midAngle),
+        x: cx + offX + elbowDist * cosA,
+        y: cy + offY + elbowDist * sinA,
       };
 
-      const isRight = Math.cos(midAngle) >= 0;
-      const bendLen = 14;
-      const p2 = {
-        x: isRight ? p1.x + bendLen : p1.x - bendLen,
-        y: p1.y,
-      };
-
-      const textAnchor: "start" | "end" = isRight ? "start" : "end";
-      const textX = isRight ? p2.x + 4 : p2.x - 4;
-      const textY = p2.y + 4;
-
-      result.push({
+      rawSlices.push({
         ...item,
         pathD,
         isHovered,
-        linePoints: `${p0.x},${p0.y} ${p1.x},${p1.y} ${p2.x},${p2.y}`,
-        textAnchor,
-        textX,
-        textY,
+        isRight,
+        p0,
+        p1,
+        idealY: p1.y,
+        targetY: p1.y,
       });
     }
 
-    return result;
-  }, [list, total, hoveredKey, cx, cy, pieRadius]);
+    const leftGroup = rawSlices.filter((s) => !s.isRight);
+    const rightGroup = rawSlices.filter((s) => s.isRight);
+
+    leftGroup.sort((a, b) => a.p0.y - b.p0.y);
+    rightGroup.sort((a, b) => a.p0.y - b.p0.y);
+
+    const adjustGroupY = (group: typeof rawSlices) => {
+      if (group.length === 0) return;
+      const n = group.length;
+      const minY = 16;
+      const maxY = Math.max(minY + 20, containerHeight - 16);
+      const availH = maxY - minY;
+      const idealGap = 22;
+      const minGap = 16;
+      const gap = n > 1 ? Math.min(idealGap, Math.max(minGap, availH / n)) : idealGap;
+
+      const targets = group.map((s) => s.idealY);
+
+      for (let i = 0; i < n; i++) {
+        if (i === 0) {
+          targets[i] = Math.max(minY, targets[i]);
+        } else if (targets[i] < targets[i - 1] + gap) {
+          targets[i] = targets[i - 1] + gap;
+        }
+      }
+
+      for (let i = n - 1; i >= 0; i--) {
+        if (i === n - 1) {
+          targets[i] = Math.min(maxY, targets[i]);
+        } else if (targets[i] > targets[i + 1] - gap) {
+          targets[i] = targets[i + 1] - gap;
+        }
+      }
+
+      if (targets[0] < minY) {
+        const shift = minY - targets[0];
+        for (let i = 0; i < n; i++) {
+          targets[i] += shift;
+        }
+      }
+
+      for (let i = 0; i < n; i++) {
+        group[i].targetY = targets[i];
+      }
+    };
+
+    adjustGroupY(leftGroup);
+    adjustGroupY(rightGroup);
+
+    const bendLen = 14;
+    const textGap = 5;
+
+    return rawSlices.map((s) => {
+      const isRight = s.isRight;
+      const targetY = s.targetY;
+      const displayName = s.name.length > 7 ? s.name.slice(0, 6) + "…" : s.name;
+      const minMargin = 8;
+      const elbowX = isRight
+        ? Math.max(s.p1.x, cx + pieRadius + minMargin)
+        : Math.min(s.p1.x, cx - pieRadius - minMargin);
+
+      // 估算文本像素宽度
+      let textW = 0;
+      for (let j = 0; j < displayName.length; j++) {
+        textW += displayName.charCodeAt(j) > 255 ? 12 : 7;
+      }
+      textW += 5 + s.pctFormatted.length * 7 + 7;
+
+      let p3X = isRight ? elbowX + bendLen : elbowX - bendLen;
+      let textX = isRight ? p3X + textGap : p3X - textGap;
+
+      // 边界绝对安全夹紧约束（Boundary Clamping）
+      const paddingH = 8;
+      if (isRight) {
+        const maxTextX = containerWidth - paddingH - textW;
+        if (textX > maxTextX) {
+          textX = Math.max(cx + pieRadius + 10, maxTextX);
+          p3X = textX - textGap;
+        }
+      } else {
+        const minTextX = paddingH + textW;
+        if (textX < minTextX) {
+          textX = Math.min(cx - pieRadius - 10, minTextX);
+          p3X = textX + textGap;
+        }
+      }
+
+      const p2X = isRight ? Math.min(elbowX, p3X - 2) : Math.max(elbowX, p3X + 2);
+      const textAnchor: "start" | "end" = isRight ? "start" : "end";
+      const textY = targetY + 4;
+
+      return {
+        ...s,
+        displayName,
+        linePoints: `${s.p0.x.toFixed(1)},${s.p0.y.toFixed(1)} ${s.p1.x.toFixed(1)},${s.p1.y.toFixed(1)} ${p2X.toFixed(1)},${targetY.toFixed(1)} ${p3X.toFixed(1)},${targetY.toFixed(1)}`,
+        textAnchor,
+        textX,
+        textY,
+      };
+    });
+  }, [list, total, hoveredKey, cx, cy, pieRadius, containerWidth, containerHeight]);
 
   return (
     <Card
@@ -251,12 +344,15 @@ export default function BrowserDistributionCard({
                   onMouseEnter={() => setHoveredKey(slice.key)}
                   onMouseLeave={() => setHoveredKey(null)}
                 >
+                  <title>{`${slice.name}: ${slice.pctFormatted}% (${slice.count.toLocaleString()} 次)`}</title>
                   {/* 折线 */}
                   <polyline
                     points={slice.linePoints}
                     fill="none"
                     stroke={slice.color}
                     strokeWidth="1.2"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
                   />
 
                   {/* 外部标签：名称与百分比 */}
@@ -266,7 +362,7 @@ export default function BrowserDistributionCard({
                     textAnchor={slice.textAnchor}
                     className={styles.sliceLabelText}
                   >
-                    <tspan className={styles.sliceLabelName}>{slice.name}</tspan>
+                    <tspan className={styles.sliceLabelName}>{slice.displayName}</tspan>
                     <tspan dx="5" fill={slice.color} fontWeight="700">
                       {slice.pctFormatted}%
                     </tspan>

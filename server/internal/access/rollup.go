@@ -3,6 +3,7 @@ package access
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -250,6 +251,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	droppedDayCmd := pipe.Get(ctx, droppedDayKey(dayKey))
 	searchCmd := pipe.ZRevRangeWithScores(ctx, topSearchKey(dayKey), 0, accessTopKeep-1)
 	playCmd := pipe.ZRevRangeWithScores(ctx, topPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
+	pageCmd := pipe.ZRevRangeWithScores(ctx, topPathKey(dayKey), 0, accessTopKeep-1)
 
 	// Web 专属快照
 	webPVCmd := pipe.Get(ctx, webPVKey(dayKey))
@@ -371,6 +373,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 
 	tops = append(tops, topItemsToRows(stats.Day, "search", searchItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "play", playItems)...)
+	tops = append(tops, topItemsToRows(stats.Day, "page", zsetToTopItems(pageCmd.Val()))...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_page", webItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_page", appItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_play", takePlayTops(zsetToTopItems(webPlayCmd.Val()), accessTopKeep))...)
@@ -385,12 +388,23 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	}
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_search", zsetToTopItems(tvboxSearchCmd.Val()))...)
-	tops = append(tops, topItemsToRows(stats.Day, "classify", zsetToTopItems(classifyCmd.Val()))...)
+	tops = append(tops, topItemsToRows(stats.Day, "classify", filterNumericClassifyTops(zsetToTopItems(classifyCmd.Val())))...)
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.WebPV > 0 || stats.AppPV > 0 ||
 		stats.ProvidePV > 0 || stats.Err4 > 0 || stats.Err5 > 0 || stats.Dropped > 0 ||
 		len(clientVals) > 0 || len(actionVals) > 0 || len(tops) > 0 || len(allVersions) > 0
 	return stats, tops, has, nil
+}
+
+func filterNumericClassifyTops(items []TopItem) []TopItem {
+	valid := make([]TopItem, 0, len(items))
+	for _, it := range items {
+		if id, ok := parseFilmID(it.Key); ok {
+			it.Key = strconv.FormatInt(id, 10)
+			valid = append(valid, it)
+		}
+	}
+	return valid
 }
 
 func zsetToTopItems(pairs []redis.Z) []TopItem {
