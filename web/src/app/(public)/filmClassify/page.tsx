@@ -22,7 +22,7 @@ export default async function FilmClassifyPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const resolvedSearchParams = await searchParams;
-  const pidValue = resolvedSearchParams.Pid;
+  const pidValue = resolvedSearchParams.Pid || resolvedSearchParams.pid;
   const pid = Array.isArray(pidValue) ? pidValue[0] : pidValue;
 
   if (!pid) {

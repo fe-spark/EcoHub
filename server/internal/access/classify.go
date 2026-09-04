@@ -7,24 +7,38 @@ import (
 	"server/internal/config"
 )
 
+// ShouldRecordApiLog 接口审计写入过滤：
+// - 后台与分析侧噪声路径（海报、探活、埋点）一律排除；
+// - TVBox provide 成功流量已由访问分析 Redis 统计，不再重复入库，仅保留 4xx/5xx 错误审计。
+func ShouldRecordApiLog(method, path string, status int) bool {
+	if path == "" {
+		return false
+	}
+	if strings.HasPrefix(path, "/manage") || strings.HasPrefix(path, "/api/manage") {
+		return false
+	}
+	if isProvidePath(path) && status < 400 {
+		return false
+	}
+	return !ShouldSkip(method, path, status)
+}
+
 // ShouldSkip 仅过滤日志噪声与自采样，不参与 PV。
 func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {
 		return true
 	}
+	if strings.HasPrefix(path, "/api/manage") {
+		return true
+	}
 	switch path {
 	case "/api/health":
 		return method == http.MethodGet || method == http.MethodHead
+	case "/api/config/basic":
+		return status < 400
 	case "/api/stat/view":
 		return true
-	case "/api/manage/system/logs/delta":
-		return true
-	case "/api/manage/collect/list":
-		return status < 400
 	case "/api/index/dailyUpdates", "/api/dailyUpdates":
-		return true
-	}
-	if path == "/api/manage/access" || strings.HasPrefix(path, "/api/manage/access/") {
 		return true
 	}
 	return strings.HasPrefix(path, config.FilmPictureAccess)
@@ -116,5 +130,25 @@ func uaFamily(path, ua string) string {
 		return "firefox"
 	default:
 		return "other"
+	}
+}
+
+func detectOS(ua string) string {
+	lower := strings.ToLower(ua)
+	switch {
+	case strings.Contains(lower, "windows"):
+		return "Windows"
+	case strings.Contains(lower, "macintosh") || strings.Contains(lower, "mac os x"):
+		return "macOS"
+	case strings.Contains(lower, "android"):
+		return "Android"
+	case strings.Contains(lower, "iphone") || strings.Contains(lower, "ipad") || strings.Contains(lower, "ios"):
+		return "iOS"
+	case strings.Contains(lower, "openharmony") || strings.Contains(lower, "harmony"):
+		return "HarmonyOS"
+	case strings.Contains(lower, "linux"):
+		return "Linux"
+	default:
+		return "Other"
 	}
 }

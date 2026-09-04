@@ -181,7 +181,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
 
   return (
     <div className={styles.pageStack}>
-      {embedded ? null : (
+      {!embedded && (
         <div className={styles.headerArea}>
           <ManagePageHeader
             title="系统日志"
@@ -190,8 +190,30 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
         </div>
       )}
 
-      <Card className={styles.filterCard}>
-        <Space size={[8, 8]} wrap className={styles.toolbar}>
+      {/* 顶部状态与操作一体化栏 */}
+      <div className={styles.statusActionBar}>
+        <div className={styles.statusGroup}>
+          <div className={styles.statusItem}>
+            <span className={styles.statusLabel}>运行状态:</span>
+            {renderRefreshStatus()}
+          </div>
+          <div className={styles.statusItem}>
+            <span className={styles.statusLabel}>游标位置:</span>
+            <span className={styles.statusValue}>{cursor}</span>
+          </div>
+          <div className={styles.statusItem}>
+            <span className={styles.statusLabel}>内存缓冲:</span>
+            <span className={styles.statusValue}>{entries.length}/{MAX_LOG_LINES} 行</span>
+          </div>
+          {lastReceivedAt && (
+            <div className={styles.statusItem}>
+              <span className={styles.statusLabel}>最后接收:</span>
+              <span className={styles.statusValue}>{lastReceivedAt}</span>
+            </div>
+          )}
+        </div>
+
+        <Space size={8}>
           <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchRecentLogs}>
             刷新最近日志
           </Button>
@@ -202,80 +224,78 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
           >
             {autoRefresh ? "暂停刷新" : "恢复刷新"}
           </Button>
+          <Button icon={<CopyOutlined />} onClick={copyLogs} disabled={filteredEntries.length === 0}>
+            复制日志
+          </Button>
           <Button icon={<ClearOutlined />} onClick={() => setEntries([])}>
             清空显示
           </Button>
-          <Button icon={<CopyOutlined />} onClick={copyLogs} disabled={filteredEntries.length === 0}>
-            复制当前日志
-          </Button>
-          <Input
-            allowClear
-            placeholder="关键词过滤"
-            className={styles.keywordInput}
-            value={inputKeyword}
-            onChange={(event) => {
-              const val = event.target.value;
-              setInputKeyword(val);
-              if (val === "" && keyword !== "") {
-                setKeyword("");
-              }
-            }}
-            onPressEnter={() => setKeyword(inputKeyword.trim())}
-          />
-          <Button
-            type="primary"
-            icon={<SearchOutlined />}
-            onClick={() => setKeyword(inputKeyword.trim())}
-          >
-            搜索
-          </Button>
-          <Button
-            icon={<ReloadOutlined />}
-            onClick={() => {
-              setInputKeyword("");
-              setKeyword("");
-              setLevel("all");
-            }}
-          >
-            重置
-          </Button>
-          <Select
-            className={styles.levelSelect}
-            value={level}
-            onChange={setLevel}
-            options={[
-              { label: "全部等级", value: "all" },
-              { label: "INFO", value: "info" },
-              { label: "WARN", value: "warn" },
-              { label: "ERROR", value: "error" },
-            ]}
-          />
-          <Space>
-            <Typography.Text type="secondary">自动滚动</Typography.Text>
-            <Switch checked={autoScroll} onChange={setAutoScroll} />
-          </Space>
         </Space>
-      </Card>
+      </div>
 
-      <Card
-        title={
-          <Space>
-            <FileTextOutlined style={{ color: "#1677ff" }} />
+      {/* 结构化筛选工具栏 */}
+      <div className={styles.filterCard}>
+        <div className={styles.filterRow}>
+          <div className={styles.filterGroup}>
+            <Select
+              className={styles.levelSelect}
+              value={level}
+              style={{ width: 120 }}
+              onChange={setLevel}
+              options={[
+                { label: "全部等级", value: "all" },
+                { label: "INFO", value: "info" },
+                { label: "WARN", value: "warn" },
+                { label: "ERROR", value: "error" },
+              ]}
+            />
+
+            <Input.Search
+              allowClear
+              placeholder="过滤日志关键词..."
+              style={{ width: 250 }}
+              value={inputKeyword}
+              onChange={(event) => {
+                const val = event.target.value;
+                setInputKeyword(val);
+                if (val === "" && keyword !== "") {
+                  setKeyword("");
+                }
+              }}
+              onSearch={(val) => setKeyword(val.trim())}
+              enterButton={<SearchOutlined />}
+            />
+
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                setInputKeyword("");
+                setKeyword("");
+                setLevel("all");
+              }}
+            >
+              重置
+            </Button>
+          </div>
+
+          <div className={styles.filterGroup}>
+            <Space>
+              <Typography.Text type="secondary" style={{ fontSize: 13 }}>自动滚动</Typography.Text>
+              <Switch checked={autoScroll} onChange={setAutoScroll} size="small" />
+            </Space>
+          </div>
+        </div>
+      </div>
+
+      {/* 日志终端输出卡片 */}
+      <div className={styles.logCard}>
+        <div className={styles.logHeader}>
+          <div className={styles.logTitle}>
+            <FileTextOutlined style={{ color: "var(--ant-color-primary, #fa8c16)" }} />
             <span>日志输出</span>
-          </Space>
-        }
-        styles={{ body: { display: "flex", flex: 1, minHeight: 0, padding: 12 } }}
-        extra={(
-          <Space size={[8, 8]} wrap>
-            {renderRefreshStatus()}
-            {lastReceivedAt && <Tag>最后接收 {lastReceivedAt}</Tag>}
-            <Tag>游标 {cursor}</Tag>
-            <Tag>缓存 {entries.length}/{MAX_LOG_LINES} 行</Tag>
-            <Tag>展示 {filteredEntries.length} 行</Tag>
-          </Space>
-        )}
-        className={styles.logCard}
-      >
+            <span className={styles.logSub}>（当前展示 {filteredEntries.length} 行）</span>
+          </div>
+        </div>
 
         <div ref={logBodyRef} className={styles.logBody}>
           {filteredEntries.length === 0 ? (
@@ -293,7 +313,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
             })
           )}
         </div>
-      </Card>
+      </div>
     </div>
   );
 }
