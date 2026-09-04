@@ -184,7 +184,7 @@ services:
         condition: service_healthy
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/health"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/api/config/basic"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -423,7 +423,7 @@ docker inspect Eco-hub --format '{{range .Config.Env}}{{println .}}{{end}}'
 
 ## 排障
 
-- 探活：`http://主机:18080/api/health`
+- 探活：`http://主机:18080/api/config/basic`
 - 方式 1 / 2 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`
 - 方式 3 反复重启：`docker logs Eco-hub`，用 `docker inspect Eco-hub` 核对环境变量与端口
 - 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`

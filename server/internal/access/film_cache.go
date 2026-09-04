@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -185,6 +186,10 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 				delete(filmMetaCache, k)
 			}
 		}
+		// 若过期清理后依然超出上限（突发高频并发请求场景），硬顶重置防无界内存泄漏
+		if len(filmMetaCache) > 5000 {
+			filmMetaCache = make(map[int64]filmMetaCacheItem, 2000)
+		}
 	}
 
 	return result
@@ -241,4 +246,150 @@ func limitTopItems(items []TopItem, limit int) []TopItem {
 
 func takePlayTops(items []TopItem, limit int) []TopItem {
 	return limitTopItems(enrichPlayTopItems(items), limit)
+}
+
+var (
+	catNameCacheMu sync.RWMutex
+	catNameCache   = map[int64]string{}
+	catNameCacheAt time.Time
+)
+
+func resolveCategoryNames(ids []int64) map[int64]string {
+	if len(ids) == 0 {
+		return map[int64]string{}
+	}
+	result := make(map[int64]string, len(ids))
+	missing := make([]int64, 0, len(ids))
+
+	catNameCacheMu.RLock()
+	if time.Since(catNameCacheAt) < 5*time.Minute {
+		for _, id := range ids {
+			if name, ok := catNameCache[id]; ok {
+				result[id] = name
+			} else {
+				missing = append(missing, id)
+			}
+		}
+	} else {
+		missing = ids
+	}
+	catNameCacheMu.RUnlock()
+
+	if len(missing) == 0 || db.Mdb == nil {
+		return result
+	}
+
+	var cats []model.Category
+	if err := db.Mdb.Model(&model.Category{}).
+		Select("id, name").
+		Where("id IN ?", missing).
+		Find(&cats).Error; err == nil {
+		catNameCacheMu.Lock()
+		if time.Since(catNameCacheAt) >= 5*time.Minute {
+			catNameCache = map[int64]string{}
+			catNameCacheAt = time.Now()
+		}
+		for _, c := range cats {
+			catNameCache[c.Id] = c.Name
+			result[c.Id] = c.Name
+		}
+		catNameCacheMu.Unlock()
+	}
+	return result
+}
+
+// enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤非数字 ID 的脏数据（如历史遗留的 list/config 等）
+func enrichClassifyTopItems(items []TopItem) []TopItem {
+	ids := make([]int64, 0, len(items))
+	for _, it := range items {
+		if id, ok := parseFilmID(it.Key); ok {
+			ids = append(ids, id)
+		}
+	}
+
+	catMap := resolveCategoryNames(ids)
+	validItems := make([]TopItem, 0, len(items))
+	for _, it := range items {
+		id, ok := parseFilmID(it.Key)
+		if !ok {
+			// 直接丢弃非数字 member（如历史遗留的 "list", "config" 等脏数据）
+			continue
+		}
+		it.Key = strconv.FormatInt(id, 10)
+		if name, ok := catMap[id]; ok && name != "" {
+			it.Title = name
+			it.Category = name
+		}
+		if it.Title == "" {
+			it.Title = fmt.Sprintf("分类 #%d", id)
+		}
+		validItems = append(validItems, it)
+	}
+	return validItems
+}
+
+func takeClassifyTops(items []TopItem, limit int) []TopItem {
+	return limitTopItems(enrichClassifyTopItems(items), limit)
+}
+
+func isTvboxPlay(path, query string) bool {
+	if strings.HasPrefix(path, "/api/provide/vod") {
+		return (strings.Contains(query, "ac=detail") || strings.Contains(query, "ac=videolist") || strings.Contains(query, "ids=")) && strings.Contains(query, "ids=")
+	}
+	return false
+}
+
+// enrichLogEvents 为访问流水记录按动作类型精准补齐详情信息
+func enrichLogEvents(events []AccessEvent) []AccessEvent {
+	if len(events) == 0 {
+		return events
+	}
+	filmIDs := make([]int64, 0, len(events))
+	catIDs := make([]int64, 0, len(events))
+
+	for _, it := range events {
+		res := strings.TrimSpace(it.Resource)
+		if idx := strings.Index(res, ","); idx > 0 {
+			res = strings.TrimSpace(res[:idx])
+		}
+
+		// 仅点播行为才提取影片 ID，分类筛选与搜索严禁当做影片处理
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+			if id, ok := parseFilmID(res); ok {
+				filmIDs = append(filmIDs, id)
+			}
+		} else if it.Action == ActionClassify {
+			if id, ok := parseFilmID(res); ok {
+				catIDs = append(catIDs, id)
+			}
+		}
+	}
+
+	metaMap := resolveFilmMetas(filmIDs)
+	catMap := resolveCategoryNames(catIDs)
+
+	for i := range events {
+		it := &events[i]
+		res := strings.TrimSpace(it.Resource)
+		if idx := strings.Index(res, ","); idx > 0 {
+			res = strings.TrimSpace(res[:idx])
+		}
+
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+			if id, ok := parseFilmID(res); ok {
+				if meta, ok := metaMap[id]; ok {
+					it.ResourceTitle = meta.Title
+					it.ResourcePoster = meta.Poster
+					it.ResourceCat = meta.Category
+				}
+			}
+		} else if it.Action == ActionClassify {
+			if id, ok := parseFilmID(res); ok {
+				if name, ok := catMap[id]; ok && name != "" {
+					it.ResourceCat = name
+				}
+			}
+		}
+	}
+	return events
 }

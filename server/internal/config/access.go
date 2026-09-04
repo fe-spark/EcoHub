@@ -17,19 +17,21 @@ const (
 
 var (
 	AccessLogEnabled        = true
+	ApiLogEnabled           = true
 	AccessSlowMs      int64 = 500
-	AccessRecentLimit       = 2000
+	AccessRecentLimit       = 100
 	TrustedProxies          = []string{"127.0.0.1", "::1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"}
 	AccessIPSalt      []byte
 )
 
 func loadAccessRuntimeConfig() {
 	AccessLogEnabled = parseEnvBool("ACCESS_LOG_ENABLED", true)
+	ApiLogEnabled = parseEnvBool("API_LOG_ENABLED", true)
 	AccessSlowMs = parseEnvInt64("ACCESS_SLOW_MS", 500)
 	if AccessSlowMs < 1 {
 		AccessSlowMs = 500
 	}
-	AccessRecentLimit = int(parseEnvInt64("ACCESS_RECENT_LIMIT", 2000))
+	AccessRecentLimit = int(parseEnvInt64("ACCESS_RECENT_LIMIT", 100))
 	if AccessRecentLimit < 100 {
 		AccessRecentLimit = 100
 	}
@@ -43,8 +45,8 @@ func loadAccessRuntimeConfig() {
 		sum := sha256.Sum256([]byte("ecohub-access-ip:" + JwtSecret))
 		AccessIPSalt = sum[:]
 	}
-	fmt.Printf("[Config] 访问分析 enabled=%v slowMs=%d recent=%d proxies=%s\n",
-		AccessLogEnabled, AccessSlowMs, AccessRecentLimit, strings.Join(TrustedProxies, ","))
+	fmt.Printf("[Config] 访问分析 enabled=%v apiLog=%v slowMs=%d recent=%d proxies=%s\n",
+		AccessLogEnabled, ApiLogEnabled, AccessSlowMs, AccessRecentLimit, strings.Join(TrustedProxies, ","))
 }
 
 func parseEnvBool(key string, fallback bool) bool {

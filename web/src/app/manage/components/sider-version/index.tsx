@@ -98,7 +98,7 @@ export default function SiderVersion({
     for (let i = 0; i < 60 && !abortRef.current; i += 1) {
       await sleep(2000);
       try {
-        const resp = await fetch("/api/health", { cache: "no-store" });
+        const resp = await fetch("/api/config/basic", { cache: "no-store" });
         if (resp.ok) {
           window.location.reload();
           return;

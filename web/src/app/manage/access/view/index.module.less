@@ -12,14 +12,6 @@
   display: flex;
   flex-direction: column;
   height: 100%;
-
-  :global(.ant-card-body) {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    min-height: 0;
-  }
 }
 
 .hint {
@@ -32,25 +24,33 @@
 .statsGrid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 14px;
+
+  @media (max-width: 1100px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  @media (max-width: 600px) {
+    grid-template-columns: 1fr;
+  }
 }
 
 .statCard {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 14px;
   min-width: 0;
-  padding: 14px 16px;
-  border: 1px solid var(--ant-color-border);
-  border-radius: 10px;
-  background: var(--ant-color-fill-quaternary);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  transition: all 0.2s ease;
+  padding: 16px 18px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover {
-    background: var(--ant-color-fill-tertiary);
+    background: var(--ant-color-fill-quaternary);
     border-color: var(--ant-color-primary-hover);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
     transform: translateY(-1px);
   }
 }
@@ -66,9 +66,9 @@
   font-size: 20px;
 }
 
-.iconPlay {
-  background: rgba(22, 119, 255, 0.12);
-  color: #1677ff;
+.iconPv {
+  background: rgba(250, 140, 22, 0.12);
+  color: #fa8c16;
 }
 
 .iconUv {
@@ -76,9 +76,24 @@
   color: #52c41a;
 }
 
-.iconPv {
-  background: rgba(250, 140, 22, 0.12);
-  color: #fa8c16;
+.iconDepth {
+  background: rgba(24, 144, 255, 0.12);
+  color: #1677ff;
+}
+
+.iconAction {
+  background: rgba(114, 46, 209, 0.12);
+  color: #722ed1;
+}
+
+.iconPlay {
+  background: rgba(250, 84, 28, 0.12);
+  color: #fa541c;
+}
+
+.iconSearch {
+  background: rgba(114, 46, 209, 0.12);
+  color: #722ed1;
 }
 
 .iconHealth {
@@ -94,21 +109,27 @@
 .statBody {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .statValue {
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1.15;
-  color: var(--ant-color-text);
+  color: var(--ant-color-text-heading, var(--ant-color-text));
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.3px;
 }
 
 .statLabel {
   font-size: 13px;
   font-weight: 500;
   color: var(--ant-color-text-secondary);
-  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* TVBox 摘要横条 */
@@ -222,40 +243,485 @@
   }
 }
 
-/* 🥧 饼状图 / 环形图 (Donut Chart) */
+.ringChart {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  align-self: stretch;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+/* ⚡ TVBox 接口调用分布：全景分段比例条 + 胶囊条形排行 */
+.distBarContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 4px 2px;
+}
+
+.distTopSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.distRatioHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.distRatioTitle {
+  font-weight: 600;
+  color: var(--ant-color-text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+.distRatioTotal {
+  font-variant-numeric: tabular-nums;
+  b {
+    color: var(--ant-color-text);
+    font-weight: 700;
+  }
+}
+
+.distSegmentTrack {
+  display: flex;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+  box-sizing: border-box;
+  position: relative;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+.distSegmentSlice {
+  height: 100%;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  border-right: 2px solid var(--ant-color-bg-container, #141414);
+
+  &:last-child {
+    border-right: none;
+  }
+
+  &:hover,
+  &.distSegmentActive {
+    filter: brightness(1.25) saturate(1.2);
+    z-index: 2;
+  }
+}
+
+.distRankedList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.distRankedRow {
+  display: grid;
+  grid-template-columns: 280px 1fr 150px;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.06));
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+
+  &:hover,
+  &.distRowActive {
+    background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+    border-color: var(--ant-color-border, rgba(255, 255, 255, 0.2));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  }
+
+  &.distRowDimmed {
+    opacity: 0.45;
+  }
+
+  @media (max-width: 900px) {
+    grid-template-columns: 220px 1fr 120px;
+    gap: 12px;
+  }
+
+  @media (max-width: 640px) {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+}
+
+.distRowMeta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.distRankNum {
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-tertiary, rgba(255, 255, 255, 0.06));
+  color: var(--ant-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+
+  &.distRank1 {
+    color: #faad14;
+    background: rgba(250, 173, 20, 0.15);
+    border: 1px solid rgba(250, 173, 20, 0.3);
+  }
+  &.distRank2 {
+    color: #d9d9d9;
+    background: rgba(217, 217, 217, 0.12);
+    border: 1px solid rgba(217, 217, 217, 0.25);
+  }
+  &.distRank3 {
+    color: #fa8c16;
+    background: rgba(250, 140, 22, 0.12);
+    border: 1px solid rgba(250, 140, 22, 0.25);
+  }
+}
+
+.distIconWrap {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  flex: none;
+}
+
+.distTitles {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.distName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.distDesc {
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.distProgressCol {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+}
+
+.distTrack {
+  width: 100%;
+  height: 8px;
+  border-radius: 4px;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+  position: relative;
+}
+
+.distFill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), filter 0.2s ease;
+}
+
+.distStatsCol {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex: none;
+}
+
+.distCountText {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.distUnitText {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--ant-color-text-tertiary);
+  margin-left: 2px;
+}
+
+.distPctBadge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  min-width: 50px;
+  text-align: center;
+}
+
+.ringStage {
+  flex: 1;
+  min-height: 160px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.ringWrap {
+  position: relative;
+  flex: none;
+}
+
+.ringSvg {
+  display: block;
+  overflow: visible;
+}
+
+.ringDeco {
+  transform-box: fill-box;
+  transform-origin: center;
+  stroke: var(--ant-color-border, rgba(255, 255, 255, 0.12));
+  animation: ringSpin 28s linear infinite;
+}
+
+.ringTrack {
+  stroke: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.ringInner {
+  stroke: var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
+}
+
+@keyframes ringSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ringDeco {
+    animation: none;
+  }
+}
+
+.ringSlice {
+  cursor: pointer;
+  transition: fill-opacity 0.2s ease;
+}
+
+.ringGlowPath {
+  pointer-events: none;
+}
+
+.ringCenter {
+  position: absolute;
+  inset: 26%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+
+.ringCenterLabel {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  max-width: 90%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ringCenterVal {
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  color: var(--ant-color-text, #fff);
+}
+
+.ringCenterUnit {
+  font-size: 0.42em;
+  font-weight: 700;
+  margin-left: 1px;
+  opacity: 0.85;
+}
+
+.ringCenterSub {
+  margin-top: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary, #bfbfbf);
+  font-variant-numeric: tabular-nums;
+}
+
+.ringLegend {
+  flex: 0 1 auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-height: 42%;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ringChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.03));
+  color: var(--ant-color-text);
+  cursor: pointer;
+  line-height: 1;
+  font: inherit;
+}
+
+.ringChipHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.ringChipCount {
+  display: none;
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.ringChipTrack {
+  display: none;
+  width: 100%;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+}
+
+.ringChipBar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.ringChipActive {
+  border-color: var(--ant-color-border, rgba(255, 255, 255, 0.18));
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+}
+
+.ringChipDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.ringChipName {
+  font-size: 12px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ringChipPct {
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 旧环形图容器名保留给空态占位 */
 .donutContainer {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 32px;
-  padding: 8px 12px;
-  min-height: 160px;
+  gap: 24px;
+  padding: 10px 14px;
+  min-height: 200px;
   height: 100%;
   width: 100%;
-  max-width: 500px;
   margin: 0 auto;
   box-sizing: border-box;
 }
 
 .donutContainerVertical {
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
 
 .donutSvgWrap {
   position: relative;
   flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .donutSvg {
   display: block;
   overflow: visible;
+  filter: drop-shadow(0 4px 16px rgba(0, 0, 0, 0.28));
 }
 
 .donutSlice {
   cursor: pointer;
-  stroke: var(--ant-color-bg-container);
-  stroke-width: 1.5;
+  stroke: var(--ant-color-bg-container, #141414);
+  stroke-width: 2;
+  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.2s ease, filter 0.2s ease;
 }
 
 .donutCenter {
@@ -265,67 +731,106 @@
   transform: translate(-50%, -50%);
   text-align: center;
   pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 80%;
 }
 
 .centerLabel {
   font-size: 11px;
-  color: var(--ant-color-text-secondary);
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+  margin-bottom: 2px;
 }
 
 .centerVal {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--ant-color-text);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--ant-color-text, #ffffff);
   font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-  margin-top: 1px;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
 }
 
 .centerUnit {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 400;
-  color: var(--ant-color-text-secondary);
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  margin-left: 2px;
 }
 
 .centerSub {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--ant-color-text-secondary);
-  margin-top: 1px;
+  color: var(--ant-color-text-secondary, #bfbfbf);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
 }
 
 .donutLegend {
   flex: 1;
-  max-width: 320px;
-  min-width: 0;
+  max-width: 360px;
+  min-width: 170px;
+  max-height: 210px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding-right: 4px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
+  justify-content: center;
+
+  &::-webkit-scrollbar {
+    width: 4px;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--ant-color-fill-secondary);
+    border-radius: 2px;
+  }
 }
 
 .donutLegendRow {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 4px 8px;
-  border-radius: 6px;
+  flex-direction: column;
+  gap: 6px;
+  padding: 7px 11px;
+  border-radius: 8px;
   font-size: 12px;
   cursor: pointer;
   min-width: 0;
-  transition: background 0.2s;
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.06));
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.03));
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 
   &:hover,
   &.donutRowActive {
-    background: var(--ant-color-fill-secondary);
+    background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+    border-color: var(--ant-color-border, rgba(255, 255, 255, 0.16));
+    transform: translateX(2px);
   }
+}
+
+.legendRowHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
 }
 
 .legendDotCol {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   min-width: 0;
   flex: 1;
   overflow: hidden;
@@ -339,8 +844,8 @@
 }
 
 .legendDot {
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
   flex: none;
 }
@@ -351,7 +856,15 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 12px;
+}
+
+.legendValCol {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  font-size: 12px;
 }
 
 .legendBarCol {
@@ -359,6 +872,21 @@
   align-items: center;
   gap: 8px;
   flex: none;
+}
+
+.legendTrackWrap {
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
+  overflow: hidden;
+  position: relative;
+}
+
+.legendTrackBar {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .miniProgressWrap {
@@ -381,14 +909,13 @@
   font-variant-numeric: tabular-nums;
   font-size: 12px;
   white-space: nowrap;
-  min-width: 38px;
   text-align: right;
 }
 
 .legendPct {
   font-weight: 700;
   color: var(--ant-color-text);
-  min-width: 30px;
+  white-space: nowrap;
   text-align: right;
   font-variant-numeric: tabular-nums;
   font-size: 12px;
@@ -1018,3 +1545,498 @@
     }
   }
 }
+
+/* Web 与 App 访问分析专属模块样式 */
+.subModuleWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.platformSwitcherRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.switcherLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ant-color-text-secondary);
+}
+
+.statsCardsRow {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  @media (max-width: 768px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.statHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.statLabel {
+  font-size: 14px;
+  color: var(--ant-color-text-secondary);
+  font-weight: 500;
+}
+
+.statIcon {
+  font-size: 18px;
+}
+
+.statNumber {
+  font-size: 26px;
+  font-weight: 700;
+  color: var(--ant-color-text-heading);
+  line-height: 1.2;
+  margin-bottom: 4px;
+}
+
+.statDesc {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.chartCard {
+  border-radius: 12px;
+  min-height: 320px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.bottomGridRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+
+  @media (max-width: 1024px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.rankingsGridRow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+
+  @media (max-width: 1200px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.halfCard {
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 320px;
+}
+
+.centeredCardBody {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  box-sizing: border-box;
+}
+
+.topList {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.topListItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.topRankBadge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-text-secondary);
+  flex-shrink: 0;
+
+  &[data-top="1"] {
+    background: #ff4d4f;
+    color: #fff;
+  }
+
+  &[data-top="2"] {
+    background: #fa8c16;
+    color: #fff;
+  }
+
+  &[data-top="3"] {
+    background: #faad14;
+    color: #fff;
+  }
+}
+
+.topInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.topTitleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.topPageLink {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 380px;
+  display: inline-block;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
+.topCount {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  font-weight: 600;
+  flex-shrink: 0;
+  margin-left: 8px;
+}
+
+.progressBar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ant-color-fill-tertiary);
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--ant-color-primary, #fa8c16), #faad14);
+  transition: width 0.3s ease;
+}
+
+.tableCard {
+  border-radius: 12px;
+}
+
+.tableTitleRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+/* 板块化分区大盘架构样式 */
+.sectionBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  margin-bottom: 2px;
+}
+
+.sectionTitleRow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.sectionTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-text-heading);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionSubtitle {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  font-weight: 400;
+}
+
+.overviewGridRow {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 16px;
+
+  @media (max-width: 1280px) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.stats2x2Grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  height: 100%;
+}
+
+.compactStatCard {
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 8px;
+  min-height: 84px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--ant-color-primary-hover);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+  }
+}
+
+/* 顶部三端主模块切换大导航（带 8px 物理间距，彻底消除 hover 与选中粘连） */
+.moduleNavWrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.moduleNavItem {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  white-space: nowrap;
+
+  &:hover:not(.moduleNavItemActive) {
+    background: var(--ant-color-fill-tertiary);
+    color: var(--ant-color-text);
+  }
+}
+
+.moduleNavItemActive {
+  background: var(--ant-color-primary-bg, #fff7e6);
+  color: var(--ant-color-primary, #fa8c16);
+  border-color: var(--ant-color-primary-border, rgba(250, 140, 22, 0.3));
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+
+  .moduleNavIcon {
+    color: var(--ant-color-primary, #fa8c16);
+  }
+}
+
+.moduleNavIcon {
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+}
+
+.moduleNavLabel {
+  letter-spacing: 0.2px;
+}
+
+/* 移动端各端平台分流药丸切换器（带 6px 物理间距） */
+.pillNavWrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+}
+
+.pillNavItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ant-color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+
+  &:hover:not(.pillNavItemActive) {
+    background: var(--ant-color-fill-secondary);
+    color: var(--ant-color-text);
+  }
+}
+
+.pillNavItemActive {
+  background: var(--ant-color-primary-bg, #fff7e6);
+  color: var(--ant-color-primary, #fa8c16);
+  border-color: var(--ant-color-primary-border, rgba(250, 140, 22, 0.3));
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+html[data-theme="dark"] {
+  .moduleNavItemActive {
+    background: rgba(250, 140, 22, 0.16);
+    color: var(--ant-color-primary, #fa8c16);
+    border-color: rgba(250, 140, 22, 0.36);
+
+    .moduleNavIcon {
+      color: var(--ant-color-primary, #fa8c16);
+    }
+  }
+
+  .pillNavItemActive {
+    background: rgba(250, 140, 22, 0.16);
+    color: var(--ant-color-primary, #fa8c16);
+    border-color: rgba(250, 140, 22, 0.36);
+  }
+}
+
+/* 🥧 经典实心饼图（附带外部彩色引出折线与标签，严密约束文字不超出 Card） */
+.pieCardContainer {
+  width: 100%;
+  height: 100%;
+  flex: 1;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.pieSvg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.pieSlicesGroup {
+  transform-origin: center;
+}
+
+.pieSlicePath {
+  transition: opacity 0.2s ease, filter 0.2s ease;
+}
+
+.pieLabelsGroup {
+  user-select: none;
+}
+
+.sliceLabelText {
+  font-size: 12px;
+  font-family: inherit;
+  user-select: none;
+}
+
+.sliceLabelName {
+  font-weight: 500;
+  fill: var(--ant-color-text, #1f1f1f);
+}
+
+.donutCenterWrap {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+  border-radius: 50%;
+  z-index: 2;
+}
+
+.centerSubLabel {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90%;
+  margin-bottom: 2px;
+}
+
+.centerValue {
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--ant-color-text, #1f1f1f);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+.centerUnit {
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--ant-color-text-tertiary, #8c8c8c);
+  margin-top: 2px;
+}
+
+
+
+
+
+
+

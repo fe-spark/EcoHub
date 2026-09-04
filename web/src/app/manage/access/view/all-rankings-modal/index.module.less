@@ -1,0 +1,197 @@
+.headerTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  padding-right: 36px;
+}
+
+.filterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.searchBox {
+  max-width: 280px;
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.statsText {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+
+.statHighlight {
+  font-weight: 600;
+  color: var(--ant-color-primary);
+  margin-left: 4px;
+}
+
+.listWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.listItem {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary);
+  transition: all 0.2s ease;
+
+  &:hover {
+    background: var(--ant-color-fill-tertiary);
+    border-color: var(--ant-color-primary-hover);
+  }
+}
+
+.rankBadge {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: #8c8c8c;
+  flex: none;
+}
+
+.rank1 {
+  background: linear-gradient(135deg, #ff4d4f, #ff7875);
+  box-shadow: 0 2px 4px rgba(255, 77, 79, 0.3);
+}
+
+.rank2 {
+  background: linear-gradient(135deg, #fa8c16, #ffa940);
+  box-shadow: 0 2px 4px rgba(250, 140, 22, 0.3);
+}
+
+.rank3 {
+  background: linear-gradient(135deg, #faad14, #ffc53d);
+  box-shadow: 0 2px 4px rgba(250, 173, 20, 0.3);
+}
+
+.posterThumb {
+  width: 36px;
+  height: 50px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex: none;
+  background: var(--ant-color-fill-secondary);
+}
+
+.posterPlaceholder {
+  width: 36px;
+  height: 50px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ant-color-fill-secondary);
+  color: var(--ant-color-text-tertiary);
+  font-size: 18px;
+  flex: none;
+}
+
+.filmInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filmTitleRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.filmTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+
+  &:hover {
+    color: var(--ant-color-primary);
+  }
+}
+
+.filmCategoryTag {
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 6px;
+}
+
+.hint {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.filmCountBarWrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.filmCountBar {
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--ant-color-fill-secondary);
+  overflow: hidden;
+}
+
+.filmCountBarFill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #fa8c16, #ffa940);
+  transition: width 0.3s ease;
+}
+
+.searchBarFill {
+  background: linear-gradient(90deg, #fa541c, #ff7a45);
+}
+
+.filmCount {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ant-color-primary, #fa8c16);
+  flex: none;
+}
+
+.searchCount {
+  color: #fa541c;
+}
+
+.paginationWrapper {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}

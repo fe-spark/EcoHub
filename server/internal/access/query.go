@@ -1,32 +1,67 @@
 package access
 
 import (
-	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
 )
 
+const overviewCacheTTL = 5 * time.Second
+
+type overviewCacheEntry struct {
+	at time.Time
+	ov *Overview
+}
+
+var overviewCache sync.Map
+
+func overviewCacheKey(day, module, platform string) string {
+	return strings.TrimSpace(day) + "|" + strings.ToLower(strings.TrimSpace(module)) + "|" + strings.ToLower(strings.TrimSpace(platform))
+}
+
+func loadOverviewCache(key string) (*Overview, bool) {
+	val, ok := overviewCache.Load(key)
+	if !ok {
+		return nil, false
+	}
+	ent, ok := val.(overviewCacheEntry)
+	if !ok || time.Since(ent.at) >= overviewCacheTTL || ent.ov == nil {
+		return nil, false
+	}
+	return ent.ov, true
+}
+
+func storeOverviewCache(key string, ov *Overview) {
+	if ov == nil {
+		return
+	}
+	overviewCache.Store(key, overviewCacheEntry{at: time.Now(), ov: ov})
+}
+
 type Overview struct {
-	Day     string           `json:"day"`
-	PV      int64            `json:"pv"`
-	UV      int64            `json:"uv"`
-	Err4    int64            `json:"err4"`
-	Err5    int64            `json:"err5"`
-	P95Ms   int64            `json:"p95Ms"`
-	Dropped int64            `json:"dropped"`
-	Provide ProvideStats     `json:"provide"`
-	Client  map[string]int64 `json:"client"`
-	Action  map[string]int64 `json:"action"`
-	Hist    map[string]int64 `json:"hist"`
-	Series  []SeriesPoint    `json:"series"`
+	Day       string           `json:"day"`
+	PV        int64            `json:"pv"`
+	UV        int64            `json:"uv"`
+	Err4      int64            `json:"err4"`
+	Err5      int64            `json:"err5"`
+	P95Ms     int64            `json:"p95Ms"`
+	Dropped   int64            `json:"dropped"`
+	Provide   ProvideStats     `json:"provide"`
+	Client    map[string]int64 `json:"client"`
+	Action    map[string]int64 `json:"action"`
+	Hist      map[string]int64 `json:"hist"`
+	Series    []SeriesPoint    `json:"series"`
+	Platforms map[string]int64 `json:"platforms,omitempty"`
+	Versions  map[string]int64 `json:"versions,omitempty"`
+	Browsers  map[string]int64 `json:"browsers,omitempty"`
+	Models    map[string]int64 `json:"models,omitempty"`
+	OS        map[string]int64 `json:"os,omitempty"`
 }
 
 type ProvideStats struct {
@@ -41,6 +76,11 @@ type SeriesPoint struct {
 	Err4      int64  `json:"err4"`
 	Err5      int64  `json:"err5"`
 	ProvidePV int64  `json:"providePv"`
+	WebPV     int64  `json:"webPv,omitempty"`
+	AppPV     int64  `json:"appPv,omitempty"`
+	AndroidPV int64  `json:"androidPv,omitempty"`
+	HarmonyPV int64  `json:"harmonyPv,omitempty"`
+	IosPV     int64  `json:"iosPv,omitempty"`
 }
 
 type TopItem struct {
@@ -53,6 +93,27 @@ type TopItem struct {
 }
 
 func QueryOverview(day string) (*Overview, error) {
+	return QueryOverviewScope(day, "", "")
+}
+
+func QueryOverviewScope(day, module, platform string) (*Overview, error) {
+	now := time.Now().In(time.Local)
+	target, err := parseDay(day, now)
+	cacheLive := err == nil && isLocalToday(target, now)
+	cacheKey := overviewCacheKey(day, module, platform)
+	if cacheLive {
+		if ov, ok := loadOverviewCache(cacheKey); ok {
+			return ov, nil
+		}
+	}
+	ov, err := queryOverviewScopeFresh(day, module, platform)
+	if cacheLive && err == nil && ov != nil {
+		storeOverviewCache(cacheKey, ov)
+	}
+	return ov, err
+}
+
+func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 	loc := time.Local
 	now := time.Now().In(loc)
 	target, err := parseDay(day, now)
@@ -64,7 +125,7 @@ func QueryOverview(day string) (*Overview, error) {
 			return emptyOverview(target), nil
 		}
 		if row, ok := loadDailyStats(target.Format("2006-01-02")); ok {
-			out := overviewFromDaily(row)
+			out := overviewFromDailyScope(row, module, platform)
 			if len(out.Series) == 0 {
 				out.Series = collectMinuteSeries(target, now)
 			}
@@ -79,441 +140,203 @@ func QueryOverview(day string) (*Overview, error) {
 	}
 	dayKey := target.Format("20060102")
 	out := &Overview{
-		Day:     target.Format("2006-01-02"),
-		Client:  map[string]int64{},
-		Action:  map[string]int64{},
-		Hist:    map[string]int64{},
-		Series:  []SeriesPoint{},
-		Dropped: 0,
+		Day:       target.Format("2006-01-02"),
+		Client:    map[string]int64{},
+		Action:    map[string]int64{},
+		Hist:      map[string]int64{},
+		Series:    []SeriesPoint{},
+		Platforms: map[string]int64{},
+		Versions:  map[string]int64{},
+		Browsers:  map[string]int64{},
+		Models:    map[string]int64{},
+		OS:        map[string]int64{},
+		Dropped:   0,
 	}
 
 	ctx := db.Cxt
 	pipe := db.Rdb.Pipeline()
-	uvCmd := pipe.PFCount(ctx, uvKey(dayKey))
-	dayCmd := pipe.HGetAll(ctx, dayAggKey(dayKey))
+
+	module = strings.ToLower(strings.TrimSpace(module))
+	platform = strings.ToLower(strings.TrimSpace(platform))
+
 	clientCmd := pipe.HGetAll(ctx, clientKey(dayKey))
-	actionCmd := pipe.HGetAll(ctx, actionKey(dayKey))
-	histCmd := pipe.HGetAll(ctx, histKey(dayKey))
-	droppedDayCmd := pipe.Get(ctx, droppedDayKey(dayKey))
+	var actionCmd *redis.MapStringStringCmd
+	var uvCmd *redis.IntCmd
+	var pvCmd *redis.StringCmd
+	var platCmd *redis.MapStringStringCmd
+	var verCmd *redis.MapStringStringCmd
+	var androidVerCmd *redis.MapStringStringCmd
+	var harmonyVerCmd *redis.MapStringStringCmd
+	var iosVerCmd *redis.MapStringStringCmd
+	var tvboxDayCmd *redis.MapStringStringCmd
+	var browserCmd *redis.MapStringStringCmd
+	var osCmd *redis.MapStringStringCmd
+	var modelsCmd *redis.MapStringStringCmd
 
 	nMin := minuteSlotCount(target, now)
 	slots := queueMinuteSlots(pipe, target, nMin)
+
+	if module == "web" {
+		uvCmd = pipe.PFCount(ctx, webUVKey(dayKey))
+		pvCmd = pipe.Get(ctx, webPVKey(dayKey))
+		browserCmd = pipe.HGetAll(ctx, webBrowsersKey(dayKey))
+		osCmd = pipe.HGetAll(ctx, webOSKey(dayKey))
+		actionCmd = pipe.HGetAll(ctx, webActionKey(dayKey))
+	} else if module == "app" {
+		modelsCmd = pipe.HGetAll(ctx, appModelsKey(dayKey))
+		if platform != "" && platform != "all" {
+			uvCmd = pipe.PFCount(ctx, appUVKey(platform, dayKey))
+			pvCmd = pipe.Get(ctx, appPVKey(platform, dayKey))
+			verCmd = pipe.HGetAll(ctx, appVersionKey(platform, dayKey))
+			actionCmd = pipe.HGetAll(ctx, appPlatformActionKey(platform, dayKey))
+		} else {
+			uvCmd = pipe.PFCount(ctx, appAllUVKey(dayKey))
+			pvCmd = pipe.Get(ctx, appAllPVKey(dayKey))
+			platCmd = pipe.HGetAll(ctx, appPlatformsKey(dayKey))
+			actionCmd = pipe.HGetAll(ctx, appActionKey(dayKey))
+			// App 全部平台无独立版本聚合 key，实时读取三端版本哈希后合并（与日归档 nested merge 口径一致）
+			androidVerCmd = pipe.HGetAll(ctx, appVersionKey("android", dayKey))
+			harmonyVerCmd = pipe.HGetAll(ctx, appVersionKey("harmony", dayKey))
+			iosVerCmd = pipe.HGetAll(ctx, appVersionKey("ios", dayKey))
+		}
+	} else if module == "tvbox" {
+		uvCmd = pipe.PFCount(ctx, tvboxUVKey(dayKey))
+		pvCmd = pipe.Get(ctx, tvboxPVKey(dayKey))
+		tvboxDayCmd = pipe.HGetAll(ctx, dayAggKey(dayKey))
+		actionCmd = pipe.HGetAll(ctx, tvboxActionKey(dayKey))
+	} else {
+		// 全局概览
+		uvCmd = pipe.PFCount(ctx, uvKey(dayKey))
+		actionCmd = pipe.HGetAll(ctx, actionKey(dayKey))
+		dayCmd := pipe.HGetAll(ctx, dayAggKey(dayKey))
+		histCmd := pipe.HGetAll(ctx, histKey(dayKey))
+		droppedDayCmd := pipe.Get(ctx, droppedDayKey(dayKey))
+
+		if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
+			return nil, err
+		}
+
+		out.UV = uvCmd.Val()
+		out.Client = parseIntMap(clientCmd.Val())
+		out.Action = parseIntMap(actionCmd.Val())
+		histVals := parseIntMap(histCmd.Val())
+		out.Hist = histVals
+		out.P95Ms = EstimateP95(histVals)
+		if n, err := droppedDayCmd.Int64(); err == nil {
+			out.Dropped = n
+		}
+		if isLocalToday(target, now) {
+			if local := atomic.LoadInt64(&droppedUnsynced); local > 0 {
+				out.Dropped += local
+			}
+		}
+		dayVals := parseIntMap(dayCmd.Val())
+		out.PV = dayVals["pv"] + dayVals["provide_pv"]
+		out.Err4 = dayVals["err4"] + dayVals["provide_err4"]
+		out.Err5 = dayVals["err5"] + dayVals["provide_err5"]
+		out.Provide.PV = dayVals["provide_pv"]
+		out.Provide.Err4 = dayVals["provide_err4"]
+		out.Provide.Err5 = dayVals["provide_err5"]
+
+		series, tot := foldMinuteSlots(slots)
+		out.Series = series
+		if tot.pv > out.PV {
+			out.PV = tot.pv
+		}
+		return out, nil
+	}
+
 	if _, err := pipe.Exec(ctx); err != nil && err != redis.Nil {
 		return nil, err
 	}
 
 	out.UV = uvCmd.Val()
+	if pvCmd != nil {
+		if pvVal, err := pvCmd.Int64(); err == nil {
+			out.PV = pvVal
+		}
+	}
+	if module == "tvbox" {
+		if tvboxDayCmd != nil {
+			dayVals := parseIntMap(tvboxDayCmd.Val())
+			if out.PV == 0 {
+				out.PV = dayVals["provide_pv"]
+			}
+			out.Provide.PV = dayVals["provide_pv"]
+			out.Provide.Err4 = dayVals["provide_err4"]
+			out.Provide.Err5 = dayVals["provide_err5"]
+		}
+		series, _ := foldMinuteSlots(slots)
+		for i := range series {
+			series[i].PV = series[i].ProvidePV
+		}
+		out.Series = series
+		out.Client = parseIntMap(clientCmd.Val())
+		out.Action = parseIntMap(actionCmd.Val())
+		return out, nil
+	}
+
 	out.Client = parseIntMap(clientCmd.Val())
 	out.Action = parseIntMap(actionCmd.Val())
-	histVals := parseIntMap(histCmd.Val())
-	out.Hist = histVals
-	out.P95Ms = EstimateP95(histVals)
-	if n, err := droppedDayCmd.Int64(); err == nil {
-		out.Dropped = n
+	if platCmd != nil {
+		out.Platforms = parseIntMap(platCmd.Val())
 	}
-	if isLocalToday(target, now) {
-		if local := atomic.LoadInt64(&droppedUnsynced); local > 0 {
-			out.Dropped += local
+	if verCmd != nil {
+		out.Versions = parseIntMap(verCmd.Val())
+	} else if androidVerCmd != nil {
+		merged := parseIntMap(androidVerCmd.Val())
+		for k, v := range parseIntMap(harmonyVerCmd.Val()) {
+			merged[k] += v
 		}
-	}
-
-	dayVals := parseIntMap(dayCmd.Val())
-	out.PV = dayVals["pv"]
-	out.Err4 = dayVals["err4"]
-	out.Err5 = dayVals["err5"]
-	out.Provide.PV = dayVals["provide_pv"]
-	out.Provide.Err4 = dayVals["provide_err4"]
-	out.Provide.Err5 = dayVals["provide_err5"]
-
-	series, tot := foldMinuteSlots(slots)
-	out.Series = series
-	if tot.pv > out.PV {
-		out.PV = tot.pv
-	}
-	if tot.err4 > out.Err4 {
-		out.Err4 = tot.err4
-	}
-	if tot.err5 > out.Err5 {
-		out.Err5 = tot.err5
-	}
-	if tot.providePV > out.Provide.PV {
-		out.Provide.PV = tot.providePV
-	}
-	if tot.provideErr4 > out.Provide.Err4 {
-		out.Provide.Err4 = tot.provideErr4
-	}
-	if tot.provideErr5 > out.Provide.Err5 {
-		out.Provide.Err5 = tot.provideErr5
-	}
-	return out, nil
-}
-
-func QueryTops(day, kind string, limit int) ([]TopItem, error) {
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 50 {
-		limit = 50
-	}
-	fetch := limit
-	if kind == "play" {
-		fetch = playTopFetchCount(limit)
-	}
-	now := time.Now().In(time.Local)
-	target, err := parseDay(day, now)
-	if err != nil {
-		return nil, err
-	}
-	if !isLocalToday(target, now) {
-		if target.Before(retentionCutoff(now)) {
-			return []TopItem{}, nil
+		for k, v := range parseIntMap(iosVerCmd.Val()) {
+			merged[k] += v
 		}
-		dayStr := target.Format("2006-01-02")
-		if _, ok := loadDailyStats(dayStr); ok {
-			switch kind {
-			case "search", "play":
-				items := loadDailyTops(dayStr, kind, fetch)
-				if kind == "play" {
-					items = takePlayTops(items, limit)
-				}
-				if len(items) > 0 {
-					return items, nil
-				}
+		out.Versions = merged
+	}
+	if browserCmd != nil {
+		out.Browsers = parseIntMap(browserCmd.Val())
+	}
+	if osCmd != nil {
+		out.OS = parseIntMap(osCmd.Val())
+	}
+	if modelsCmd != nil {
+		out.Models = parseIntMap(modelsCmd.Val())
+	}
+
+	series, _ := foldMinuteSlots(slots)
+	if module == "web" {
+		for i := range series {
+			series[i].PV = series[i].WebPV
+		}
+	} else if module == "app" {
+		for i := range series {
+			switch platform {
+			case "android":
+				series[i].PV = series[i].AndroidPV
+			case "harmony":
+				series[i].PV = series[i].HarmonyPV
+			case "ios":
+				series[i].PV = series[i].IosPV
+			default:
+				series[i].PV = series[i].AppPV
 			}
 		}
-		if db.Rdb == nil {
-			return []TopItem{}, nil
-		}
 	}
-	if db.Rdb == nil {
-		return nil, fmt.Errorf("redis unavailable")
-	}
-	dayKey := target.Format("20060102")
-	var key string
-	switch kind {
-	case "search":
-		key = topSearchKey(dayKey)
-	case "play":
-		key = topPlayKey(dayKey)
-	default:
-		key = topPathKey(dayKey)
-	}
-	pairs, err := db.Rdb.ZRevRangeWithScores(db.Cxt, key, 0, int64(fetch-1)).Result()
-	if err != nil && err != redis.Nil {
-		return nil, err
-	}
-	items := make([]TopItem, 0, len(pairs))
-	for _, p := range pairs {
-		member, _ := p.Member.(string)
-		items = append(items, TopItem{Key: member, Count: int64(p.Score)})
-	}
-	if kind == "play" {
-		items = takePlayTops(items, limit)
-	}
-	return items, nil
-}
-
-func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent, error) {
-	if db.Rdb == nil {
-		return nil, fmt.Errorf("redis unavailable")
-	}
-	now := time.Now().In(time.Local)
-	target, err := parseDay(day, now)
-	if err != nil {
-		return nil, err
-	}
-	dayKey := target.Format("20060102")
-
-	max := config.AccessRecentLimit
-	if source == "slow" || source == "error" {
-		max = slowKeep
-	}
-	if max < 1 {
-		max = 200
-	}
-	if limit <= 0 {
-		limit = max
-	}
-	if limit > max {
-		limit = max
-	}
-
-	var key string
-	var fallbackKey string
-	fetch := int64(config.AccessRecentLimit)
-	switch source {
-	case "slow":
-		key = slowDayKey(dayKey)
-		fallbackKey = slowKey()
-		fetch = slowKeep
-	case "error":
-		key = errorDayKey(dayKey)
-		fallbackKey = errorKey()
-		fetch = errorKeep
-	default:
-		key = recentDayKey(dayKey)
-		fallbackKey = recentKey()
-	}
-
-	ctx := db.Cxt
-	raw, err := db.Rdb.LRange(ctx, key, 0, fetch-1).Result()
-	if err != nil || len(raw) == 0 {
-		raw, err = db.Rdb.LRange(ctx, fallbackKey, 0, fetch-1).Result()
-	}
-	if err != nil && err != redis.Nil {
-		return nil, err
-	}
-
-	loc := time.Local
-	targetY, targetM, targetD := target.Date()
-	q = strings.ToLower(strings.TrimSpace(q))
-	client = strings.TrimSpace(client)
-	out := make([]AccessEvent, 0, limit)
-	for _, line := range raw {
-		var evt AccessEvent
-		if json.Unmarshal([]byte(line), &evt) != nil {
-			continue
-		}
-		evtLoc := evt.Ts.In(loc)
-		ey, em, ed := evtLoc.Date()
-		if ey != targetY || em != targetM || ed != targetD {
-			continue
-		}
-		if !matchStatus(status, evt.Status) {
-			continue
-		}
-		if client != "" && evt.ClientType != client {
-			continue
-		}
-		if !matchQuery(q, &evt) {
-			continue
-		}
-		out = append(out, evt)
-		if len(out) >= limit {
-			break
-		}
-	}
+	out.Series = series
 	return out, nil
-}
-
-func matchStatus(filter string, status int) bool {
-	switch filter {
-	case "2xx":
-		return status >= 200 && status < 300
-	case "4xx":
-		return status >= 400 && status < 500
-	case "5xx":
-		return status >= 500 && status < 600
-	default:
-		return true
-	}
-}
-
-func matchQuery(q string, evt *AccessEvent) bool {
-	if q == "" {
-		return true
-	}
-	if evt == nil {
-		return false
-	}
-	if strings.Contains(strings.ToLower(evt.Path), q) {
-		return true
-	}
-	if strings.Contains(strings.ToLower(evt.IPPreview), q) {
-		return true
-	}
-	if strings.Contains(strings.ToLower(evt.Resource), q) {
-		return true
-	}
-	return false
 }
 
 func emptyOverview(day time.Time) *Overview {
 	return &Overview{
-		Day:    day.Format("2006-01-02"),
-		Client: map[string]int64{},
-		Action: map[string]int64{},
-		Hist:   map[string]int64{},
-		Series: []SeriesPoint{},
+		Day:       day.Format("2006-01-02"),
+		Client:    map[string]int64{},
+		Action:    map[string]int64{},
+		Hist:      map[string]int64{},
+		Series:    []SeriesPoint{},
+		Platforms: map[string]int64{},
+		Versions:  map[string]int64{},
+		Browsers:  map[string]int64{},
+		Models:    map[string]int64{},
+		OS:        map[string]int64{},
 	}
-}
-
-func parseDay(day string, now time.Time) (time.Time, error) {
-	day = strings.TrimSpace(day)
-	if day == "" {
-		return time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()), nil
-	}
-	t, err := time.ParseInLocation("2006-01-02", day, now.Location())
-	if err != nil {
-		return time.Time{}, fmt.Errorf("invalid day")
-	}
-	return t, nil
-}
-
-type minSlot struct {
-	t   time.Time
-	cmd *redis.MapStringStringCmd
-}
-
-type minuteTotals struct {
-	pv, err4, err5, providePV, provideErr4, provideErr5 int64
-}
-
-func dayStartLocal(target time.Time) time.Time {
-	t := target.In(time.Local)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.Local)
-}
-
-func minuteSlotCount(target, now time.Time) int {
-	start := dayStartLocal(target)
-	now = now.In(time.Local)
-	if !now.Before(start.Add(24*time.Hour + ttlMinute)) {
-		return 0
-	}
-	if start.Year() == now.Year() && start.YearDay() == now.YearDay() {
-		n := now.Hour()*60 + now.Minute() + 1
-		if n < 1 {
-			return 1
-		}
-		if n > 1440 {
-			return 1440
-		}
-		return n
-	}
-	return 1440
-}
-
-func queueMinuteSlots(pipe redis.Pipeliner, target time.Time, nMin int) []minSlot {
-	if nMin <= 0 || pipe == nil {
-		return nil
-	}
-	start := dayStartLocal(target)
-	slots := make([]minSlot, 0, nMin)
-	ctx := db.Cxt
-	for i := 0; i < nMin; i++ {
-		t := start.Add(time.Duration(i) * time.Minute)
-		slots = append(slots, minSlot{t: t, cmd: pipe.HGetAll(ctx, minKey(t))})
-	}
-	return slots
-}
-
-func foldMinuteSlots(slots []minSlot) ([]SeriesPoint, minuteTotals) {
-	var tot minuteTotals
-	series := make([]SeriesPoint, 0, (len(slots)+14)/15)
-	var fold *SeriesPoint
-	flush := func() {
-		if fold != nil {
-			series = append(series, *fold)
-			fold = nil
-		}
-	}
-	for _, slot := range slots {
-		vals := parseIntMap(slot.cmd.Val())
-		pv := vals["pv"]
-		err4 := vals["err4"]
-		err5 := vals["err5"]
-		ppv := vals["provide_pv"]
-		tot.pv += pv
-		tot.err4 += err4
-		tot.err5 += err5
-		tot.providePV += ppv
-		tot.provideErr4 += vals["provide_err4"]
-		tot.provideErr5 += vals["provide_err5"]
-
-		label := slot.t.Truncate(15 * time.Minute).Format(time.RFC3339)
-		if fold == nil || fold.T != label {
-			flush()
-			fold = &SeriesPoint{T: label}
-		}
-		fold.PV += pv
-		fold.Err4 += err4
-		fold.Err5 += err5
-		fold.ProvidePV += ppv
-	}
-	flush()
-	return series, tot
-}
-
-func collectMinuteSeries(target, now time.Time) []SeriesPoint {
-	if db.Rdb == nil {
-		return []SeriesPoint{}
-	}
-	nMin := minuteSlotCount(target, now)
-	if nMin <= 0 {
-		return []SeriesPoint{}
-	}
-	pipe := db.Rdb.Pipeline()
-	slots := queueMinuteSlots(pipe, target, nMin)
-	if _, err := pipe.Exec(db.Cxt); err != nil && err != redis.Nil {
-		return []SeriesPoint{}
-	}
-	series, _ := foldMinuteSlots(slots)
-	if series == nil {
-		return []SeriesPoint{}
-	}
-	return series
-}
-
-func marshalSeries(series []SeriesPoint) string {
-	if len(series) == 0 {
-		return "[]"
-	}
-	raw, err := json.Marshal(series)
-	if err != nil {
-		return "[]"
-	}
-	return string(raw)
-}
-
-func unmarshalSeries(raw string) []SeriesPoint {
-	if strings.TrimSpace(raw) == "" {
-		return []SeriesPoint{}
-	}
-	var out []SeriesPoint
-	if err := json.Unmarshal([]byte(raw), &out); err != nil || out == nil {
-		return []SeriesPoint{}
-	}
-	return out
-}
-
-func parseIntMap(m map[string]string) map[string]int64 {
-	out := make(map[string]int64, len(m))
-	for k, v := range m {
-		n, _ := strconv.ParseInt(v, 10, 64)
-		out[k] = n
-	}
-	return out
-}
-
-func EstimateP95(hist map[string]int64) int64 {
-	order := []struct {
-		key   string
-		upper int64
-	}{
-		{"bInf", 1000},
-		{"b1000", 1000},
-		{"b500", 500},
-		{"b200", 200},
-		{"b100", 100},
-		{"b50", 50},
-	}
-	var total int64
-	for _, b := range order {
-		total += hist[b.key]
-	}
-	if total <= 0 {
-		return 0
-	}
-	need := (total*5 + 99) / 100
-	if need < 1 {
-		need = 1
-	}
-	var acc int64
-	for _, b := range order {
-		acc += hist[b.key]
-		if acc >= need {
-			return b.upper
-		}
-	}
-	return 50
 }
