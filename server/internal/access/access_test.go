@@ -152,6 +152,21 @@ func TestHTTPResource(t *testing.T) {
 	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"999"}}) != "999" {
 		t.Fatal("provide ac detail ids")
 	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "t": {"19"}}) != "19" {
+		t.Fatal("provide ac detail with t should extract classify ID")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"videolist"}, "t": {"19"}}) != "19" {
+		t.Fatal("provide ac videolist with t should extract classify ID")
+	}
+	if httpResource("/api/provide/vod", url.Values{"t": {"19"}}) != "19" {
+		t.Fatal("provide bare t should extract classify ID")
+	}
+	if httpResource("/api/provide/vod", url.Values{"cid": {"19"}}) != "19" {
+		t.Fatal("provide cid should extract classify ID")
+	}
+	if httpResource("/api/provide/vod", url.Values{"ac": {"detail"}, "t": {"19"}, "ids": {"999"}}) != "999" {
+		t.Fatal("ids must take priority over t")
+	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"videolist"}, "ids": {"888"}}) != "888" {
 		t.Fatal("provide videolist ids")
 	}
@@ -521,6 +536,22 @@ func TestFromContextPlayMember(t *testing.T) {
 	if classified == nil || classified.Action != ActionClassify || classified.Resource != "19" {
 		t.Fatalf("list with t must be classify: %+v", classified)
 	}
+	detailClassify := mk("/api/provide/vod?ac=detail&t=19")
+	if detailClassify == nil || detailClassify.Action != ActionClassify || detailClassify.Resource != "19" {
+		t.Fatalf("detail with t must be classify: %+v", detailClassify)
+	}
+	videolistClassify := mk("/api/provide/vod?ac=videolist&t=19")
+	if videolistClassify == nil || videolistClassify.Action != ActionClassify || videolistClassify.Resource != "19" {
+		t.Fatalf("videolist with t must be classify: %+v", videolistClassify)
+	}
+	bareTClassify := mk("/api/provide/vod?t=19")
+	if bareTClassify == nil || bareTClassify.Action != ActionClassify || bareTClassify.Resource != "19" {
+		t.Fatalf("bare t must be classify: %+v", bareTClassify)
+	}
+	cidClassify := mk("/api/provide/vod?cid=19")
+	if cidClassify == nil || cidClassify.Action != ActionClassify || cidClassify.Resource != "19" {
+		t.Fatalf("cid must be classify: %+v", cidClassify)
+	}
 	dirty := mk("/api/provide/vod?ac=list&t=all")
 	if dirty == nil || dirty.Action != ActionProvide || dirty.Resource != "" {
 		t.Fatalf("list with dirty t must stay provide: %+v", dirty)
@@ -802,6 +833,30 @@ func TestBuildPageEventPayload_Platforms(t *testing.T) {
 	evtWeb := buildPageEventPayload(ctx, pWeb)
 	if evtWeb == nil || evtWeb.ClientType != "web" || evtWeb.Page != "/play?id=1024" {
 		t.Fatalf("unexpected web event: %+v", evtWeb)
+	}
+
+	resetPageHit()
+	pWebClassify := TrackViewPayload{
+		Source:   "web",
+		Action:   "classify",
+		Resource: "19",
+		Path:     "/filmClassify?Pid=19",
+	}
+	evtWebClassify := buildPageEventPayload(ctx, pWebClassify)
+	if evtWebClassify == nil || evtWebClassify.Action != ActionClassify || evtWebClassify.Resource != "19" || evtWebClassify.ClientType != "web" {
+		t.Fatalf("unexpected web classify event: %+v", evtWebClassify)
+	}
+
+	resetPageHit()
+	pAppClassify := TrackViewPayload{
+		Source:   "android",
+		Action:   "classify",
+		Resource: "19",
+		Page:     "FilterPage",
+	}
+	evtAppClassify := buildPageEventPayload(ctx, pAppClassify)
+	if evtAppClassify == nil || evtAppClassify.Action != ActionClassify || evtAppClassify.Resource != "19" || evtAppClassify.ClientType != "android" {
+		t.Fatalf("unexpected app classify event: %+v", evtAppClassify)
 	}
 }
 
