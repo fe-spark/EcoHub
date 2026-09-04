@@ -42,15 +42,16 @@ func droppedDayKey(day string) string  { return config.AccessKeyPrefix + "meta:d
 func rollupLockKey() string            { return config.AccessKeyPrefix + "lock:daily_rollup" }
 
 // Web 专属 Key
-func webPVKey(day string) string        { return config.AccessKeyPrefix + "web:pv:" + day }
-func webUVKey(day string) string        { return config.AccessKeyPrefix + "web:uv:" + day }
-func webTopPageKey(day string) string   { return config.AccessKeyPrefix + "web:top:page:" + day }
-func webTopPlayKey(day string) string   { return config.AccessKeyPrefix + "web:top:play:" + day }
-func webTopSearchKey(day string) string { return config.AccessKeyPrefix + "web:top:search:" + day }
-func webActionKey(day string) string    { return config.AccessKeyPrefix + "web:action:" + day }
-func webRecentDayKey(day string) string { return config.AccessKeyPrefix + "web:recent:" + day }
-func webBrowsersKey(day string) string  { return config.AccessKeyPrefix + "web:browsers:" + day }
-func webOSKey(day string) string        { return config.AccessKeyPrefix + "web:os:" + day }
+func webPVKey(day string) string          { return config.AccessKeyPrefix + "web:pv:" + day }
+func webUVKey(day string) string          { return config.AccessKeyPrefix + "web:uv:" + day }
+func webTopPageKey(day string) string     { return config.AccessKeyPrefix + "web:top:page:" + day }
+func webTopPlayKey(day string) string     { return config.AccessKeyPrefix + "web:top:play:" + day }
+func webTopSearchKey(day string) string   { return config.AccessKeyPrefix + "web:top:search:" + day }
+func webTopClassifyKey(day string) string { return config.AccessKeyPrefix + "web:top:classify:" + day }
+func webActionKey(day string) string      { return config.AccessKeyPrefix + "web:action:" + day }
+func webRecentDayKey(day string) string   { return config.AccessKeyPrefix + "web:recent:" + day }
+func webBrowsersKey(day string) string    { return config.AccessKeyPrefix + "web:browsers:" + day }
+func webOSKey(day string) string          { return config.AccessKeyPrefix + "web:os:" + day }
 
 // App 专属 Key
 func appPVKey(platform, day string) string {
@@ -68,17 +69,19 @@ func appTopPlayKey(platform, day string) string {
 func appTopSearchKey(platform, day string) string {
 	return config.AccessKeyPrefix + "app:" + platform + ":top:search:" + day
 }
+func appTopClassifyKey(platform, day string) string {
+	return config.AccessKeyPrefix + "app:" + platform + ":top:classify:" + day
+}
 func appVersionKey(platform, day string) string {
 	return config.AccessKeyPrefix + "app:" + platform + ":versions:" + day
 }
-func appAllPVKey(day string) string      { return config.AccessKeyPrefix + "app:all:pv:" + day }
-func appAllUVKey(day string) string      { return config.AccessKeyPrefix + "app:all:uv:" + day }
-func appAllTopPageKey(day string) string { return config.AccessKeyPrefix + "app:all:top:page:" + day }
-func appAllTopPlayKey(day string) string { return config.AccessKeyPrefix + "app:all:top:play:" + day }
-func appAllTopSearchKey(day string) string {
-	return config.AccessKeyPrefix + "app:all:top:search:" + day
-}
-func appActionKey(day string) string { return config.AccessKeyPrefix + "app:action:" + day }
+func appAllPVKey(day string) string          { return config.AccessKeyPrefix + "app:all:pv:" + day }
+func appAllUVKey(day string) string          { return config.AccessKeyPrefix + "app:all:uv:" + day }
+func appAllTopPageKey(day string) string     { return config.AccessKeyPrefix + "app:all:top:page:" + day }
+func appAllTopPlayKey(day string) string     { return config.AccessKeyPrefix + "app:all:top:play:" + day }
+func appAllTopSearchKey(day string) string   { return config.AccessKeyPrefix + "app:all:top:search:" + day }
+func appAllTopClassifyKey(day string) string { return config.AccessKeyPrefix + "app:all:top:classify:" + day }
+func appActionKey(day string) string         { return config.AccessKeyPrefix + "app:action:" + day }
 func appPlatformActionKey(platform, day string) string {
 	return config.AccessKeyPrefix + "app:" + platform + ":action:" + day
 }
@@ -87,12 +90,13 @@ func appModelsKey(day string) string    { return config.AccessKeyPrefix + "app:m
 func appRecentDayKey(day string) string { return config.AccessKeyPrefix + "app:recent:" + day }
 
 // TVBox 专属 Key
-func tvboxPVKey(day string) string        { return config.AccessKeyPrefix + "tvbox:pv:" + day }
-func tvboxUVKey(day string) string        { return config.AccessKeyPrefix + "tvbox:uv:" + day }
-func tvboxTopPlayKey(day string) string   { return config.AccessKeyPrefix + "tvbox:top:play:" + day }
-func tvboxTopSearchKey(day string) string { return config.AccessKeyPrefix + "tvbox:top:search:" + day }
-func tvboxActionKey(day string) string    { return config.AccessKeyPrefix + "tvbox:action:" + day }
-func tvboxRecentDayKey(day string) string { return config.AccessKeyPrefix + "tvbox:recent:" + day }
+func tvboxPVKey(day string) string          { return config.AccessKeyPrefix + "tvbox:pv:" + day }
+func tvboxUVKey(day string) string          { return config.AccessKeyPrefix + "tvbox:uv:" + day }
+func tvboxTopPlayKey(day string) string     { return config.AccessKeyPrefix + "tvbox:top:play:" + day }
+func tvboxTopSearchKey(day string) string   { return config.AccessKeyPrefix + "tvbox:top:search:" + day }
+func tvboxTopClassifyKey(day string) string { return config.AccessKeyPrefix + "tvbox:top:classify:" + day }
+func tvboxActionKey(day string) string      { return config.AccessKeyPrefix + "tvbox:action:" + day }
+func tvboxRecentDayKey(day string) string   { return config.AccessKeyPrefix + "tvbox:recent:" + day }
 
 func histBucket(ms int64) string {
 	switch {
@@ -203,6 +207,11 @@ func writeEvent(evt *AccessEvent) {
 			pipe.ZIncrBy(ctx, tck, 1, evt.Resource)
 			pipe.ZRemRangeByRank(ctx, tck, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, tck, ttlDay)
+
+			tvck := tvboxTopClassifyKey(day)
+			pipe.ZIncrBy(ctx, tvck, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, tvck, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, tvck, ttlDay)
 		}
 	}
 	pipe.ExpireNX(ctx, mk, ttlMinute)
@@ -316,6 +325,12 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, wplk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, wplk, ttlDay)
 		}
+		if evt.Action == ActionClassify && evt.Resource != "" {
+			wck := webTopClassifyKey(day)
+			pipe.ZIncrBy(ctx, wck, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, wck, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, wck, ttlDay)
+		}
 	} else {
 		pipe.HIncrBy(ctx, mk, "app_pv", 1)
 		platform := client
@@ -401,6 +416,17 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZIncrBy(ctx, applk, 1, evt.playMember)
 			pipe.ZRemRangeByRank(ctx, applk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, applk, ttlDay)
+		}
+		if evt.Action == ActionClassify && evt.Resource != "" {
+			ack := appAllTopClassifyKey(day)
+			pipe.ZIncrBy(ctx, ack, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, ack, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, ack, ttlDay)
+
+			apck := appTopClassifyKey(platform, day)
+			pipe.ZIncrBy(ctx, apck, 1, evt.Resource)
+			pipe.ZRemRangeByRank(ctx, apck, 0, int64(-zsetKeep-1))
+			pipe.ExpireNX(ctx, apck, ttlDay)
 		}
 	}
 

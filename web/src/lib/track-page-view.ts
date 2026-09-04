@@ -95,8 +95,9 @@ export function trackPageView(
     : "/api/stat/view";
   try {
     if (typeof navigator.sendBeacon === "function") {
-      navigator.sendBeacon(url, new Blob([body], { type: "application/json" }));
-      return;
+      if (navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) {
+        return;
+      }
     }
   } catch {
     // fall through

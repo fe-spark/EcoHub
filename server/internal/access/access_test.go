@@ -699,8 +699,20 @@ func TestScopedTopKind(t *testing.T) {
 	if got := scopedTopKind("play", "tvbox", ""); got != "tvbox_play" {
 		t.Fatalf("tvbox play kind=%s", got)
 	}
-	if got := scopedTopKind("classify", "app", "android"); got != "classify" {
-		t.Fatalf("classify stays global, got %s", got)
+	if got := scopedTopKind("classify", "app", "android"); got != "android_classify" {
+		t.Fatalf("android classify kind=%s", got)
+	}
+	if got := scopedTopKind("classify", "web", ""); got != "web_classify" {
+		t.Fatalf("web classify kind=%s", got)
+	}
+	if got := scopedTopKind("classify", "tvbox", ""); got != "tvbox_classify" {
+		t.Fatalf("tvbox classify kind=%s", got)
+	}
+	if got := scopedTopKind("classify", "app", "all"); got != "app_classify" {
+		t.Fatalf("app all classify kind=%s", got)
+	}
+	if got := scopedTopKind("classify", "", ""); got != "classify" {
+		t.Fatalf("global classify kind=%s", got)
 	}
 }
 
@@ -812,6 +824,18 @@ func TestScopeRedisKeys(t *testing.T) {
 	}
 	if !strings.Contains(appPlatformsKey(day), "app:platforms:20260903") {
 		t.Fatal("appPlatformsKey")
+	}
+	if !strings.Contains(webTopClassifyKey(day), "web:top:classify:20260903") {
+		t.Fatal("webTopClassifyKey")
+	}
+	if !strings.Contains(appTopClassifyKey("android", day), "app:android:top:classify:20260903") {
+		t.Fatal("appTopClassifyKey android")
+	}
+	if !strings.Contains(appAllTopClassifyKey(day), "app:all:top:classify:20260903") {
+		t.Fatal("appAllTopClassifyKey")
+	}
+	if !strings.Contains(tvboxTopClassifyKey(day), "tvbox:top:classify:20260903") {
+		t.Fatal("tvboxTopClassifyKey")
 	}
 }
 
