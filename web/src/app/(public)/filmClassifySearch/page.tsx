@@ -58,7 +58,10 @@ export default async function FilmClassifySearchPage({
 
   return (
     <>
-      <TrackPageView action="classify" resource={String(currentParams.Pid || currentParams.pid || "")} />
+      <TrackPageView
+        action="classify"
+        resource={String(currentParams.Pid || currentParams.pid || "")}
+      />
       <FilmClassifySearchPageView data={data} currentParams={currentParams} />
     </>
   );

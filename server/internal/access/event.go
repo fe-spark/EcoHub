@@ -119,15 +119,19 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	action := kind
 	if strings.HasPrefix(path, "/api/provide/vod") {
 		ac := strings.TrimSpace(query.Get("ac"))
-		if ac == "detail" || ac == "videolist" {
+		ids := strings.TrimSpace(query.Get("ids"))
+		wd := strings.TrimSpace(query.Get("wd"))
+		cid := provideClassifyID(query)
+
+		if ids != "" {
 			action = ActionPlay
-		} else if ac == "search" || strings.TrimSpace(query.Get("wd")) != "" {
+		} else if wd != "" || ac == "search" {
 			action = ActionSearch
-		} else if ac == "list" {
-			if provideClassifyID(query) != "" {
-				action = ActionClassify
-			}
-		} else if ac == "" && len(query) == 0 {
+		} else if cid != "" {
+			action = ActionClassify
+		} else if ac == "detail" || ac == "videolist" {
+			action = ActionPlay
+		} else if ac == "config" || (ac == "" && len(query) == 0) {
 			action = "config"
 		}
 	} else if strings.HasPrefix(path, "/api/provide/config") {
@@ -285,6 +289,9 @@ func provideClassifyID(query url.Values) string {
 	if t == "" {
 		t = strings.TrimSpace(query.Get("tid"))
 	}
+	if t == "" {
+		t = strings.TrimSpace(query.Get("cid"))
+	}
 	return canonicalFilmID(t)
 }
 
@@ -292,14 +299,17 @@ func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/provide/vod") {
 		ac := strings.TrimSpace(query.Get("ac"))
 		ids := strings.TrimSpace(query.Get("ids"))
-		if (ac == "detail" || ac == "videolist") && ids != "" {
+		if ids != "" {
 			return TruncateRunes(ids, maxResourceLen)
 		}
 		if wd := strings.TrimSpace(query.Get("wd")); wd != "" {
 			return TruncateRunes(wd, maxResourceLen)
 		}
-		if ac == "list" {
-			return provideClassifyID(query)
+		if cid := provideClassifyID(query); cid != "" {
+			return cid
+		}
+		if ac == "detail" || ac == "videolist" {
+			return ""
 		}
 		return ""
 	}

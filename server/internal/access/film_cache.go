@@ -334,7 +334,7 @@ func takeClassifyTops(items []TopItem, limit int) []TopItem {
 
 func isTvboxPlay(path, query string) bool {
 	if strings.HasPrefix(path, "/api/provide/vod") {
-		return strings.Contains(query, "ac=detail") || strings.Contains(query, "ac=videolist")
+		return (strings.Contains(query, "ac=detail") || strings.Contains(query, "ac=videolist") || strings.Contains(query, "ids=")) && strings.Contains(query, "ids=")
 	}
 	return false
 }
