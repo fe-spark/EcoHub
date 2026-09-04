@@ -259,6 +259,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	webTopCmd := pipe.ZRevRangeWithScores(ctx, webTopPageKey(dayKey), 0, accessTopKeep-1)
 	webPlayCmd := pipe.ZRevRangeWithScores(ctx, webTopPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
 	webSearchCmd := pipe.ZRevRangeWithScores(ctx, webTopSearchKey(dayKey), 0, accessTopKeep-1)
+	webClassifyCmd := pipe.ZRevRangeWithScores(ctx, webTopClassifyKey(dayKey), 0, accessTopKeep-1)
 	webBrowserCmd := pipe.HGetAll(ctx, webBrowsersKey(dayKey))
 	webOSCmd := pipe.HGetAll(ctx, webOSKey(dayKey))
 
@@ -268,6 +269,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	appTopCmd := pipe.ZRevRangeWithScores(ctx, appAllTopPageKey(dayKey), 0, accessTopKeep-1)
 	appPlayCmd := pipe.ZRevRangeWithScores(ctx, appAllTopPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
 	appSearchCmd := pipe.ZRevRangeWithScores(ctx, appAllTopSearchKey(dayKey), 0, accessTopKeep-1)
+	appClassifyCmd := pipe.ZRevRangeWithScores(ctx, appAllTopClassifyKey(dayKey), 0, accessTopKeep-1)
 	platformsCmd := pipe.HGetAll(ctx, appPlatformsKey(dayKey))
 	androidUVCmd := pipe.PFCount(ctx, appUVKey("android", dayKey))
 	harmonyUVCmd := pipe.PFCount(ctx, appUVKey("harmony", dayKey))
@@ -279,17 +281,19 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	classifyCmd := pipe.ZRevRangeWithScores(ctx, topClassifyKey(dayKey), 0, accessTopKeep-1)
 
 	type platformTopCmds struct {
-		page   *redis.ZSliceCmd
-		play   *redis.ZSliceCmd
-		search *redis.ZSliceCmd
+		page     *redis.ZSliceCmd
+		play     *redis.ZSliceCmd
+		search   *redis.ZSliceCmd
+		classify *redis.ZSliceCmd
 	}
 	appPlatforms := []string{"android", "harmony", "ios"}
 	platTops := make(map[string]platformTopCmds, len(appPlatforms))
 	for _, p := range appPlatforms {
 		platTops[p] = platformTopCmds{
-			page:   pipe.ZRevRangeWithScores(ctx, appTopPageKey(p, dayKey), 0, accessTopKeep-1),
-			play:   pipe.ZRevRangeWithScores(ctx, appTopPlayKey(p, dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1)),
-			search: pipe.ZRevRangeWithScores(ctx, appTopSearchKey(p, dayKey), 0, accessTopKeep-1),
+			page:     pipe.ZRevRangeWithScores(ctx, appTopPageKey(p, dayKey), 0, accessTopKeep-1),
+			play:     pipe.ZRevRangeWithScores(ctx, appTopPlayKey(p, dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1)),
+			search:   pipe.ZRevRangeWithScores(ctx, appTopSearchKey(p, dayKey), 0, accessTopKeep-1),
+			classify: pipe.ZRevRangeWithScores(ctx, appTopClassifyKey(p, dayKey), 0, accessTopKeep-1),
 		}
 	}
 
@@ -297,6 +301,7 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tvboxUVCmd := pipe.PFCount(ctx, tvboxUVKey(dayKey))
 	tvboxPlayCmd := pipe.ZRevRangeWithScores(ctx, tvboxTopPlayKey(dayKey), 0, int64(playTopFetchCount(accessTopKeep)-1))
 	tvboxSearchCmd := pipe.ZRevRangeWithScores(ctx, tvboxTopSearchKey(dayKey), 0, accessTopKeep-1)
+	tvboxClassifyCmd := pipe.ZRevRangeWithScores(ctx, tvboxTopClassifyKey(dayKey), 0, accessTopKeep-1)
 
 	nMin := minuteSlotCount(day, time.Now().In(time.Local))
 	slots := queueMinuteSlots(pipe, day, nMin)
@@ -378,16 +383,20 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	tops = append(tops, topItemsToRows(stats.Day, "app_page", appItems)...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_play", takePlayTops(zsetToTopItems(webPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "web_search", zsetToTopItems(webSearchCmd.Val()))...)
+	tops = append(tops, topItemsToRows(stats.Day, "web_classify", filterNumericClassifyTops(zsetToTopItems(webClassifyCmd.Val())))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_play", takePlayTops(zsetToTopItems(appPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "app_search", zsetToTopItems(appSearchCmd.Val()))...)
+	tops = append(tops, topItemsToRows(stats.Day, "app_classify", filterNumericClassifyTops(zsetToTopItems(appClassifyCmd.Val())))...)
 	for _, p := range appPlatforms {
 		cmds := platTops[p]
 		tops = append(tops, topItemsToRows(stats.Day, p+"_page", zsetToTopItems(cmds.page.Val()))...)
 		tops = append(tops, topItemsToRows(stats.Day, p+"_play", takePlayTops(zsetToTopItems(cmds.play.Val()), accessTopKeep))...)
 		tops = append(tops, topItemsToRows(stats.Day, p+"_search", zsetToTopItems(cmds.search.Val()))...)
+		tops = append(tops, topItemsToRows(stats.Day, p+"_classify", filterNumericClassifyTops(zsetToTopItems(cmds.classify.Val())))...)
 	}
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_play", takePlayTops(zsetToTopItems(tvboxPlayCmd.Val()), accessTopKeep))...)
 	tops = append(tops, topItemsToRows(stats.Day, "tvbox_search", zsetToTopItems(tvboxSearchCmd.Val()))...)
+	tops = append(tops, topItemsToRows(stats.Day, "tvbox_classify", filterNumericClassifyTops(zsetToTopItems(tvboxClassifyCmd.Val())))...)
 	tops = append(tops, topItemsToRows(stats.Day, "classify", filterNumericClassifyTops(zsetToTopItems(classifyCmd.Val())))...)
 
 	has := stats.PV > 0 || stats.UV > 0 || stats.WebPV > 0 || stats.AppPV > 0 ||

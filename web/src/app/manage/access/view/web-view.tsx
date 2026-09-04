@@ -88,7 +88,7 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=web&kind=path&limit=10`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=web&kind=play&limit=10`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=web&kind=search&limit=10`),
-        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
+        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=web&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=web&limit=100`),
       ]);
       if (seq !== reqSeqRef.current) {

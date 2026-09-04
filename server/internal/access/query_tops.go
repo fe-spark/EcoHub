@@ -23,7 +23,7 @@ func scopedTopKind(kind, module, platform string) string {
 		kind = "page"
 	}
 	switch kind {
-	case "page", "play", "search":
+	case "page", "play", "search", "classify":
 		switch module {
 		case "web":
 			return "web_" + kind
@@ -37,8 +37,6 @@ func scopedTopKind(kind, module, platform string) string {
 		default:
 			return kind
 		}
-	case "classify":
-		return "classify"
 	default:
 		return kind
 	}
@@ -128,7 +126,19 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 			key = topPlayKey(dayKey)
 		}
 	case "classify":
-		key = topClassifyKey(dayKey)
+		if module == "web" {
+			key = webTopClassifyKey(dayKey)
+		} else if module == "app" {
+			if platform != "" && platform != "all" {
+				key = appTopClassifyKey(platform, dayKey)
+			} else {
+				key = appAllTopClassifyKey(dayKey)
+			}
+		} else if module == "tvbox" {
+			key = tvboxTopClassifyKey(dayKey)
+		} else {
+			key = topClassifyKey(dayKey)
+		}
 	default:
 		if module == "web" {
 			key = webTopPageKey(dayKey)

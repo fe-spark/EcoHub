@@ -40,7 +40,7 @@ export default function ResourceCell({ record }: ResourceCellProps) {
   // 2. 寻片搜索动作：展示搜索关键词
   if (action === "search" && resource) {
     return (
-      <Link href={`/search?keyword=${encodeURIComponent(resource)}`} target="_blank">
+      <Link href={`/search?search=${encodeURIComponent(resource)}`} target="_blank">
         <Tag
           icon={<SearchOutlined />}
           color="orange"
@@ -55,7 +55,7 @@ export default function ResourceCell({ record }: ResourceCellProps) {
   // 3. 影视点播动作：才展示具体影片详情（片名、海报封面、分类与跳转播放）
   if (action === "play" || Boolean(resourceTitle)) {
     const displayName = resourceTitle || (isNumericId ? `影片 #${rawId}` : resource);
-    const playUrl = isNumericId ? `/play?id=${rawId}` : `/search?keyword=${encodeURIComponent(resource || "")}`;
+    const playUrl = isNumericId ? `/play?id=${rawId}` : `/search?search=${encodeURIComponent(resource || "")}`;
 
     return (
       <Space size={8} align="center">

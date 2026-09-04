@@ -186,6 +186,10 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 				delete(filmMetaCache, k)
 			}
 		}
+		// 若过期清理后依然超出上限（突发高频并发请求场景），硬顶重置防无界内存泄漏
+		if len(filmMetaCache) > 5000 {
+			filmMetaCache = make(map[int64]filmMetaCacheItem, 2000)
+		}
 	}
 
 	return result

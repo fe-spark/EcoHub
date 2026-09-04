@@ -146,6 +146,12 @@ func runBatchFlushWorker(ctx context.Context) {
 		if err != nil {
 			batchRetryCount++
 			syslog.Errorf("[ApiLogWorker] 批量落库失败 (第 %d 次重试): %v", batchRetryCount, err)
+			// 重置切片中可能已被 GORM 回填主键的元素，防止重试时携带脏主键引发 Duplicate Key 冲突
+			for _, it := range batch {
+				if it != nil {
+					it.ID = 0
+				}
+			}
 			if batchRetryCount >= 3 {
 				syslog.Errorf("[ApiLogWorker] 批次连续重试 %d 次失败，强制丢弃毒丸批次 (%d 条) 以恢复全局写队列", batchRetryCount, len(batch))
 				batch = batch[:0]

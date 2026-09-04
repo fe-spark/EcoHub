@@ -59,7 +59,7 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=app&kind=page${pParam}&limit=10`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=app&kind=play${pParam}&limit=10`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=app&kind=search${pParam}&limit=10`),
-        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
+        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=app${pParam}&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=app${pParam}&limit=100`),
       ]);
       if (seq !== reqSeqRef.current) {

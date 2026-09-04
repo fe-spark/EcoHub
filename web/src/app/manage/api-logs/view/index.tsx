@@ -270,7 +270,7 @@ export default function ApiLogsPageView({ embedded = false }: ApiLogsPageViewPro
               {data?.errorToday?.toLocaleString() ?? 0}
             </span>
             <span className={styles.metricSubText}>
-              ({data?.totalToday ? ((data.errorToday / data.totalToday) * 100).toFixed(1) : "0.0"}%)
+              ({data?.totalToday ? (((data?.errorToday ?? 0) / data.totalToday) * 100).toFixed(1) : "0.0"}%)
             </span>
           </div>
 

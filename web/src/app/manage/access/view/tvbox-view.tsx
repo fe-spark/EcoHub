@@ -66,7 +66,7 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
         ApiGet<Overview>(`/manage/access/overview?day=${dayStr}&module=tvbox`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=tvbox&kind=play&limit=10`),
         ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=tvbox&kind=search&limit=10`),
-        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&kind=classify&limit=10`),
+        ApiGet<{ items: TopItem[] }>(`/manage/access/tops?day=${dayStr}&module=tvbox&kind=classify&limit=10`),
         ApiGet<{ list: LogRow[] }>(`/manage/access/logs?day=${dayStr}&module=tvbox&limit=100`),
       ]);
       if (seq !== reqSeqRef.current) {
@@ -199,11 +199,24 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
     },
   ];
 
-  // TVBox 接口调用分布（零值类别不渲染，避免无流量时伪造扇区）
-  const detailCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "影视点播").length;
-  const searchCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "寻片搜索").length;
-  const configCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "配置同步").length;
-  const listCount = Math.max(0, logs.length - detailCount - searchCount - configCount);
+  // TVBox 接口调用分布（优先读取全天概览 action 真实汇总，无概览时以最近 logs 采样作为兜底）
+  const hasActionOverview = Boolean(overview?.action && Object.keys(overview.action).length > 0);
+  let detailCount = 0;
+  let searchCount = 0;
+  let configCount = 0;
+  let listCount = 0;
+
+  if (hasActionOverview) {
+    detailCount = overview?.action?.play ?? 0;
+    searchCount = overview?.action?.search ?? 0;
+    configCount = overview?.action?.config ?? 0;
+    listCount = (overview?.action?.classify ?? 0) + (overview?.action?.browse ?? 0);
+  } else {
+    detailCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "影视点播").length;
+    searchCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "寻片搜索").length;
+    configCount = logs.filter((l) => formatTvboxAction(l.action, l.path, l.query).label === "配置同步").length;
+    listCount = Math.max(0, logs.length - detailCount - searchCount - configCount);
+  }
 
   const tvboxSlices: DonutSlice[] = [
     {
@@ -273,7 +286,10 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
             <div className={styles.statBody}>
               <span className={styles.statLabel}>影视点播量</span>
               <div className={styles.statValue}>
-                {playTops.reduce((acc, cur) => acc + cur.count, 0).toLocaleString()}
+                {((overview?.action?.play ?? 0) > 0
+                  ? overview!.action.play
+                  : playTops.reduce((acc, cur) => acc + cur.count, 0)
+                ).toLocaleString()}
               </div>
             </div>
             <div className={`${styles.statIconWrap} ${styles.iconPlay}`}>
@@ -285,7 +301,10 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
             <div className={styles.statBody}>
               <span className={styles.statLabel}>寻片搜索量</span>
               <div className={styles.statValue}>
-                {searchTops.reduce((acc, cur) => acc + cur.count, 0).toLocaleString()}
+                {((overview?.action?.search ?? 0) > 0
+                  ? overview!.action.search
+                  : searchTops.reduce((acc, cur) => acc + cur.count, 0)
+                ).toLocaleString()}
               </div>
             </div>
             <div className={`${styles.statIconWrap} ${styles.iconSearch}`}>
