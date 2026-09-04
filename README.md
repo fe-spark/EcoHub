@@ -123,7 +123,7 @@ npm run dev
 
 ## 交流社区
 
-- Telegram 交流群：[https://t.me/+6O6MiUdVSOplNjQ0](https://t.me/+6O6MiUdVSOplNjQ0)
+- Telegram 交流群：[https://t.me/ecohub_club](https://t.me/ecohub_club)
 
 ---
 
