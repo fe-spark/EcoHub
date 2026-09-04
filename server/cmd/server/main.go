@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -103,12 +104,16 @@ func start() {
 		Addr:    fmt.Sprintf(":%s", config.ListenerPort),
 		Handler: r,
 	}
+	ln, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		log.Fatalf("[Init] HTTP 监听失败: %v", err)
+	}
+	log.Printf("[Init] EcoHub HTTP server listening on :%s", config.ListenerPort)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[Shutdown] HTTP 服务异常退出: %v", err)
+		if err := srv.Serve(ln); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("[Shutdown] HTTP 服务异常退出: %v", err)
 		}
 	}()
-	log.Printf("[Init] EcoHub HTTP server listening on :%s", config.ListenerPort)
 
 	// 优雅停机：停止接收新请求 → 排空接口审计队列并最终刷盘
 	stopCh := make(chan os.Signal, 1)

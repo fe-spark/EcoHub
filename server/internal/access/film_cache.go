@@ -294,6 +294,40 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 	return result
 }
 
+// enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤非数字 ID 的脏数据（如历史遗留的 list/config 等）
+func enrichClassifyTopItems(items []TopItem) []TopItem {
+	ids := make([]int64, 0, len(items))
+	for _, it := range items {
+		if id, ok := parseFilmID(it.Key); ok {
+			ids = append(ids, id)
+		}
+	}
+
+	catMap := resolveCategoryNames(ids)
+	validItems := make([]TopItem, 0, len(items))
+	for _, it := range items {
+		id, ok := parseFilmID(it.Key)
+		if !ok {
+			// 直接丢弃非数字 member（如历史遗留的 "list", "config" 等脏数据）
+			continue
+		}
+		it.Key = strconv.FormatInt(id, 10)
+		if name, ok := catMap[id]; ok && name != "" {
+			it.Title = name
+			it.Category = name
+		}
+		if it.Title == "" {
+			it.Title = fmt.Sprintf("分类 #%d", id)
+		}
+		validItems = append(validItems, it)
+	}
+	return validItems
+}
+
+func takeClassifyTops(items []TopItem, limit int) []TopItem {
+	return limitTopItems(enrichClassifyTopItems(items), limit)
+}
+
 func isTvboxPlay(path, query string) bool {
 	if strings.HasPrefix(path, "/api/provide/vod") {
 		return strings.Contains(query, "ac=detail") || strings.Contains(query, "ac=videolist")

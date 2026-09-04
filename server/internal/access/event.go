@@ -124,7 +124,9 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 		} else if ac == "search" || strings.TrimSpace(query.Get("wd")) != "" {
 			action = ActionSearch
 		} else if ac == "list" {
-			action = ActionClassify
+			if provideClassifyID(query) != "" {
+				action = ActionClassify
+			}
 		} else if ac == "" && len(query) == 0 {
 			action = "config"
 		}
@@ -275,6 +277,17 @@ func pagePlayRankMember(action, resource string) string {
 	return canonicalFilmID(resource)
 }
 
+func provideClassifyID(query url.Values) string {
+	if query == nil {
+		return ""
+	}
+	t := strings.TrimSpace(query.Get("t"))
+	if t == "" {
+		t = strings.TrimSpace(query.Get("tid"))
+	}
+	return canonicalFilmID(t)
+}
+
 func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/provide/vod") {
 		ac := strings.TrimSpace(query.Get("ac"))
@@ -285,10 +298,10 @@ func httpResource(path string, query url.Values) string {
 		if wd := strings.TrimSpace(query.Get("wd")); wd != "" {
 			return TruncateRunes(wd, maxResourceLen)
 		}
-		if ac != "" {
-			return TruncateRunes(ac, maxResourceLen)
+		if ac == "list" {
+			return provideClassifyID(query)
 		}
-		return "list"
+		return ""
 	}
 	if strings.HasPrefix(path, "/api/provide/config") {
 		return "config"
