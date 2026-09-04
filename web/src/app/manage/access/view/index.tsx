@@ -6,6 +6,7 @@ import type { MenuProps } from "antd";
 import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
 import AppAnalyticsView from "./app-view";
 import TvboxAnalyticsView from "./tvbox-view";
@@ -198,6 +199,11 @@ export default function AccessPageView() {
             )}
           </Space>
         }
+      />
+
+      <GlobalOverviewBar
+        dayStr={dayStr}
+        refreshKey={refreshKey}
       />
 
       <div className={styles.moduleNavWrapper} role="tablist" aria-label="数据分析客户端分类">
