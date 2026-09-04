@@ -93,21 +93,24 @@ func foldMinuteSlots(slots []minSlot) ([]SeriesPoint, minuteTotals) {
 		hmpv := vals["app_pv_harmony"]
 		iospv := vals["app_pv_ios"]
 
-		tot.pv += pv
-		tot.err4 += err4
-		tot.err5 += err5
+		perr4 := vals["provide_err4"]
+		perr5 := vals["provide_err5"]
+
+		tot.pv += pv + ppv
+		tot.err4 += err4 + perr4
+		tot.err5 += err5 + perr5
 		tot.providePV += ppv
-		tot.provideErr4 += vals["provide_err4"]
-		tot.provideErr5 += vals["provide_err5"]
+		tot.provideErr4 += perr4
+		tot.provideErr5 += perr5
 
 		label := slot.t.Truncate(15 * time.Minute).Format(time.RFC3339)
 		if fold == nil || fold.T != label {
 			flush()
 			fold = &SeriesPoint{T: label}
 		}
-		fold.PV += pv
-		fold.Err4 += err4
-		fold.Err5 += err5
+		fold.PV += pv + ppv
+		fold.Err4 += err4 + perr4
+		fold.Err5 += err5 + perr5
 		fold.ProvidePV += ppv
 		fold.WebPV += wpv
 		fold.AppPV += apv

@@ -932,6 +932,11 @@ func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
 	if len(ov.Series) != 1 || ov.Series[0].PV != 25 {
 		t.Fatalf("expected TVBox Series[0].PV=25, got %+v", ov.Series)
 	}
+
+	globalOv := overviewFromDailyScope(row, "", "")
+	if globalOv.PV != 125 || globalOv.UV != 80 {
+		t.Fatalf("expected Global PV=125, UV=80, got PV=%d, UV=%d", globalOv.PV, globalOv.UV)
+	}
 }
 
 func TestTVBox_FromContextActionAndQuery(t *testing.T) {

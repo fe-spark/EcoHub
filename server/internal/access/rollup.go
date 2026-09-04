@@ -343,14 +343,14 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 
 	stats := model.AccessDailyStats{
 		Day:            day.Format("2006-01-02"),
-		PV:             dayVals["pv"],
+		PV:             dayVals["pv"] + dayVals["provide_pv"],
 		UV:             uvCmd.Val(),
 		WebPV:          webPV,
 		WebUV:          webUVCmd.Val(),
 		AppPV:          appPV,
 		AppUV:          appUVCmd.Val(),
-		Err4:           dayVals["err4"],
-		Err5:           dayVals["err5"],
+		Err4:           dayVals["err4"] + dayVals["provide_err4"],
+		Err5:           dayVals["err5"] + dayVals["provide_err5"],
 		P95Ms:          EstimateP95(histVals),
 		Dropped:        droppedCount,
 		ProvidePV:      dayVals["provide_pv"],

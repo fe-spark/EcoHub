@@ -231,9 +231,9 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 			}
 		}
 		dayVals := parseIntMap(dayCmd.Val())
-		out.PV = dayVals["pv"]
-		out.Err4 = dayVals["err4"]
-		out.Err5 = dayVals["err5"]
+		out.PV = dayVals["pv"] + dayVals["provide_pv"]
+		out.Err4 = dayVals["err4"] + dayVals["provide_err4"]
+		out.Err5 = dayVals["err5"] + dayVals["provide_err5"]
 		out.Provide.PV = dayVals["provide_pv"]
 		out.Provide.Err4 = dayVals["provide_err4"]
 		out.Provide.Err5 = dayVals["provide_err5"]

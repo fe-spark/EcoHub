@@ -150,6 +150,10 @@ func writeEvent(evt *AccessEvent) {
 			tuk := tvboxUVKey(day)
 			pipe.PFAdd(ctx, tuk, uvIdentity)
 			pipe.ExpireNX(ctx, tuk, ttlDay)
+
+			uk := uvKey(day)
+			pipe.PFAdd(ctx, uk, uvIdentity)
+			pipe.ExpireNX(ctx, uk, ttlDay)
 		}
 
 		if evt.Status >= 500 {
@@ -164,6 +168,9 @@ func writeEvent(evt *AccessEvent) {
 		pipe.ExpireNX(ctx, ck, ttlDay)
 		ak := actionKey(day)
 		pipe.HIncrBy(ctx, ak, "provide", 1)
+		if evt.Action != "" && evt.Action != "provide" {
+			pipe.HIncrBy(ctx, ak, evt.Action, 1)
+		}
 		pipe.ExpireNX(ctx, ak, ttlDay)
 		tvak := tvboxActionKey(day)
 		pipe.HIncrBy(ctx, tvak, evt.Action, 1)
