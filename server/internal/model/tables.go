@@ -10,6 +10,7 @@ const (
 	TableFilterIndex        = "film_filter_index_snapshot"
 	TableMovieDetail        = "movie_detail_info"
 	TableMoviePlaylist      = "movie_playlist"
+	TableSlaveMoviePlaylist = "slave_movie_playlists"
 	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
@@ -17,6 +18,7 @@ const (
 	TableCategory           = "film_category"
 	TableCategoryMapping    = "category_mappings"
 	TableSourceCategory     = "source_categories"
+	TableMappingRule        = "mapping_rules"
 	TableVirtualPicture     = "virtual_picture_queue"
 	TableSearchTag          = "search_tag_item"
 	TableFilmSource         = "film_sources"
@@ -46,6 +48,7 @@ var AllModels = []any{
 	&MovieDetailInfo{},
 	&Category{},
 	&MoviePlaylist{},
+	&SlaveMoviePlaylist{},
 	&MoviePoster{},
 	&MovieMatchKey{},
 	&VirtualPictureQueue{},

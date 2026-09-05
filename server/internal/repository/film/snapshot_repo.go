@@ -40,9 +40,11 @@ var (
 const activeSnapshotFallbackTTL = 30 * time.Second
 
 func GetActiveSnapshotVersion() string {
-	version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
-	if err == nil && strings.TrimSpace(version) != "" {
-		return strings.TrimSpace(version)
+	if db.Rdb != nil {
+		version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
+		if err == nil && strings.TrimSpace(version) != "" {
+			return strings.TrimSpace(version)
+		}
 	}
 
 	activeSnapshotFallbackMu.Lock()
@@ -51,15 +53,6 @@ func GetActiveSnapshotVersion() string {
 		return activeSnapshotFallbackVersion
 	}
 
-	var latest model.FilmListSnapshot
-	if err := db.Mdb.Select("snapshot_version").Order("id DESC").First(&latest).Error; err == nil && latest.SnapshotVersion != "" {
-		activeSnapshotFallbackVersion = latest.SnapshotVersion
-		activeSnapshotFallbackAt = time.Now()
-		if err := SetActiveSnapshotVersion(latest.SnapshotVersion); err != nil {
-			log.Printf("SetActiveSnapshotVersion Error: %v", err)
-		}
-		return latest.SnapshotVersion
-	}
 	return ""
 }
 
@@ -68,7 +61,21 @@ func SetActiveSnapshotVersion(version string) error {
 	if version == "" {
 		return nil
 	}
+	activeSnapshotFallbackMu.Lock()
+	activeSnapshotFallbackVersion = version
+	activeSnapshotFallbackAt = time.Now()
+	activeSnapshotFallbackMu.Unlock()
+	if db.Rdb == nil {
+		return nil
+	}
 	return db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err()
+}
+
+func ResetActiveSnapshotFallbackForTest() {
+	activeSnapshotFallbackMu.Lock()
+	activeSnapshotFallbackVersion = ""
+	activeSnapshotFallbackAt = time.Time{}
+	activeSnapshotFallbackMu.Unlock()
 }
 
 func GetActiveReadModelVersion() string {
@@ -336,8 +343,10 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 		return err
 	}
 	IncrSnapshotRevision()
-	if err := db.Rdb.Set(db.Cxt, config.SnapshotBuildVersionKey, version, 0).Err(); err != nil {
-		log.Printf("Set SnapshotBuildVersion Error: %v", err)
+	if db.Rdb != nil {
+		if err := db.Rdb.Set(db.Cxt, config.SnapshotBuildVersionKey, version, 0).Err(); err != nil {
+			log.Printf("Set SnapshotBuildVersion Error: %v", err)
+		}
 	}
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
@@ -347,26 +356,61 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 }
 
 func EnsureActiveFilmListSnapshot() error {
-	if GetActiveSnapshotVersion() != "" {
-		return nil
-	}
-
-	var count int64
+	var dbCount int64
 	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Joins("JOIN " + model.TableMovieDetail + " ON " + model.TableMovieDetail + ".mid = film_index.mid AND " + model.TableMovieDetail + ".deleted_at IS NULL").
-		Count(&count).Error; err != nil {
+		Count(&dbCount).Error; err != nil {
 		return err
 	}
-	if count == 0 {
+	if dbCount == 0 {
 		return nil
 	}
 
-	version := NewSnapshotVersion()
-	if err := ActivateRebuiltFilmListSnapshot(version); err != nil {
-		return err
+	activeVer := strings.TrimSpace(GetActiveSnapshotVersion())
+	var snapCount int64
+	if activeVer != "" {
+		_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+			Where("snapshot_version = ?", activeVer).
+			Count(&snapCount).Error
 	}
-	log.Printf("[Snapshot] 已基于现有影片数据构建首个前台快照, version=%s, film_count=%d", version, count)
+
+	// 退出时清空了版本号（activeVer == ""），或异常强杀导致快照记录数与库内影片数不一致
+	if activeVer == "" || snapCount != dbCount {
+		refreshMissingPlayFromSummaries()
+		version := NewSnapshotVersion()
+		if err := ActivateRebuiltFilmListSnapshot(version); err != nil {
+			return err
+		}
+		log.Printf("[Snapshot] 已基于现有影片数据构建并激活前台快照, version=%s, film_count=%d (原快照=%d)", version, dbCount, snapCount)
+		return nil
+	}
+
 	return nil
+}
+
+func refreshMissingPlayFromSummaries() {
+	_, _ = FlushPendingPlaySummaryRefresh()
+
+	var missingMIDs []int64
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Joins("JOIN " + model.TableMovieDetail + " ON " + model.TableMovieDetail + ".mid = film_index.mid AND " + model.TableMovieDetail + ".deleted_at IS NULL").
+		Where("film_index.play_from_summary = ? OR film_index.play_from_summary IS NULL", "").
+		Pluck("film_index.mid", &missingMIDs).Error; err != nil {
+		log.Printf("[Snapshot] 查询缺失播放源影片失败: %v", err)
+		return
+	}
+	if len(missingMIDs) == 0 {
+		return
+	}
+	midSet := make(map[int64]struct{}, len(missingMIDs))
+	for _, mid := range missingMIDs {
+		if mid > 0 {
+			midSet[mid] = struct{}{}
+		}
+	}
+	if err := flushPlaySummaryRefreshMids(midSet); err != nil {
+		log.Printf("[Snapshot] 刷新缺失播放源摘要失败: %v", err)
+	}
 }
 
 func pruneOldFilmListSnapshots(retain int) {
@@ -935,14 +979,16 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 }
 
 func RefreshAccessDataCaches() {
-	db.Rdb.Del(
-		db.Cxt,
-		config.ActiveCategoryTreeKey,
-		config.CategoryTreeKey,
-		config.TVBoxConfigCacheKey,
-		config.BannersKey,
-		config.IndexDailyUpdatesCacheKey,
-	)
+	if db.Rdb != nil {
+		db.Rdb.Del(
+			db.Cxt,
+			config.ActiveCategoryTreeKey,
+			config.CategoryTreeKey,
+			config.TVBoxConfigCacheKey,
+			config.BannersKey,
+			config.IndexDailyUpdatesCacheKey,
+		)
+	}
 	bumpSearchTagsCacheVersion()
 	clearCachePatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
@@ -958,6 +1004,9 @@ func RefreshAccessDataCaches() {
 // 严禁调用 ClearActiveFilmReadModel：防止 Version 被置空导致全站播放详情失败。
 func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 	support.ClearIndexPageCache()
+	if db.Rdb != nil {
+		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	}
 	ClearProvideListCache()
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -1008,7 +1057,13 @@ func ClearAllSnapshotDynamicCaches() {
 
 func ClearSnapshotState() {
 	ClearActiveFilmReadModel()
-	db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey, config.SnapshotBuildVersionKey)
+	activeSnapshotFallbackMu.Lock()
+	activeSnapshotFallbackVersion = ""
+	activeSnapshotFallbackAt = time.Time{}
+	activeSnapshotFallbackMu.Unlock()
+	if db.Rdb != nil {
+		db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey, config.SnapshotBuildVersionKey)
+	}
 	RefreshAccessDataCaches()
 }
 

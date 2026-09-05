@@ -63,6 +63,11 @@ func EnsureBotPoller() {
 	ensureBotPoller(resolvePollerToken(GetConfig()), runBotPoller)
 }
 
+// StopBotPoller 停止当前正在运行的 Telegram Bot 轮询并释放所有资源（供优雅停机或关闭开关调用）。
+func StopBotPoller() {
+	ensureBotPoller("", runBotPoller)
+}
+
 func resolvePollerToken(cfg model.NotifyConfig) string {
 	if !cfg.Enabled {
 		return ""
@@ -108,7 +113,15 @@ func ensureBotPoller(token string, runner func(ctx context.Context, token string
 		pollerToken = token
 		pollerMu.Unlock()
 		go func(tok string, gen *pollerGeneration) {
-			defer close(gen.done)
+			defer func() {
+				pollerMu.Lock()
+				if pollerGen == gen {
+					pollerGen = nil
+					pollerToken = ""
+				}
+				pollerMu.Unlock()
+				close(gen.done)
+			}()
 			runner(ctx, tok)
 		}(token, gen)
 		log.Printf("[Notify] Telegram Bot 轮询已启动（/search + 列表翻页）")
@@ -133,7 +146,11 @@ func waitStopped(gen *pollerGeneration) {
 		return
 	}
 	gen.cancel()
-	<-gen.done
+	select {
+	case <-gen.done:
+	case <-time.After(3 * time.Second):
+		log.Printf("[Notify] 等待旧轮询代退出超时(3s)，强制继续")
+	}
 }
 
 func runBotPoller(ctx context.Context, token string) {
@@ -141,7 +158,7 @@ func runBotPoller(ctx context.Context, token string) {
 	defer releaseBotPollerLock(owner)
 
 	var offset int64
-	backoff := time.Second
+	backoff := 3 * time.Second
 	commandsOK := false
 	isLeader := false
 	loggedStandby := false
@@ -152,6 +169,17 @@ func runBotPoller(ctx context.Context, token string) {
 		case <-ctx.Done():
 			return
 		default:
+		}
+
+		// 循环内实时自检开关状态：开关已关闭或 Token 变更时主动停止，不盲目死循环轮询
+		currentTok := resolvePollerToken(GetConfig())
+		if currentTok == "" {
+			log.Printf("[Notify] 检测到 Telegram 消息推送开关已关闭或未配置 Token，主动退出 Bot 轮询")
+			return
+		}
+		if currentTok != token {
+			log.Printf("[Notify] 检测到 Telegram Bot Token 已变更，主动退出旧轮询代")
+			return
 		}
 
 		if !holdBotPollerLock(ctx, owner) {
@@ -165,6 +193,11 @@ func runBotPoller(ctx context.Context, token string) {
 				loggedStandby = true
 			}
 			if !sleepCtx(ctx, botPollerStandbyWait) {
+				return
+			}
+			// 待命节点唤醒后核查配置，若开关已关闭则退出待命，避免主节点关停后盲目抢锁接管
+			if tok := resolvePollerToken(GetConfig()); tok == "" || tok != token {
+				log.Printf("[Notify] 待命期间检测到 Telegram 开关关闭或 Token 变更，主动退出待命")
 				return
 			}
 			continue
@@ -200,6 +233,11 @@ func runBotPoller(ctx context.Context, token string) {
 			if ctx.Err() != nil {
 				return
 			}
+			// 致命凭证错误：401 Unauthorized / 404 Not Found 主动熔断退出，杜绝无限死循环重试
+			if isTelegramFatalAuthError(err) {
+				syslog.Errorf("[Notify] Telegram Bot Token 鉴权失败或 Bot 不存在 (%v)，主动终止轮询，请在后台核对配置", err)
+				return
+			}
 			if isTelegramGetUpdatesConflict(err) {
 				log.Printf("[Notify] getUpdates 冲突：同一 Bot Token 另有 getUpdates 在跑（其它进程/环境/未退出旧实例）。释放领导权并 %s 后重试", botPollerConflictWait)
 				releaseBotPollerLock(owner)
@@ -208,7 +246,7 @@ func runBotPoller(ctx context.Context, token string) {
 				if !sleepCtx(ctx, botPollerConflictWait) {
 					return
 				}
-				backoff = time.Second
+				backoff = 3 * time.Second
 				continue
 			}
 			if isTelegramWebhookActiveError(err) {
@@ -226,10 +264,13 @@ func runBotPoller(ctx context.Context, token string) {
 			}
 			if backoff < botPollerMaxBackoff {
 				backoff *= 2
+				if backoff < 3*time.Second {
+					backoff = 3 * time.Second
+				}
 			}
 			continue
 		}
-		backoff = time.Second
+		backoff = 3 * time.Second
 
 		for _, u := range updates {
 			if u.UpdateID >= offset {
@@ -314,6 +355,18 @@ func isTelegramWebhookActiveError(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "can't use getupdates method while webhook is active")
+}
+
+// isTelegramFatalAuthError 识别 401 Unauthorized 或 404 Not Found 等致命凭证错误
+func isTelegramFatalAuthError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unauthorized") ||
+		strings.Contains(msg, "not found") ||
+		strings.Contains(msg, "http 401") ||
+		strings.Contains(msg, "http 404")
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) bool {

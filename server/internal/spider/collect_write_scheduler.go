@@ -79,6 +79,22 @@ func (s *collectWriteScheduler) snapshot() collectWriteSnapshot {
 	return s.lane.snapshot()
 }
 
+func (s *collectWriteScheduler) waitPending(ctx context.Context) error {
+	return s.lane.waitPending(ctx)
+}
+
+// WaitPendingWrites 等待在途采集写调度队列全部落盘（供优雅停机排空在途写入）
+func WaitPendingWrites(ctx context.Context) error {
+	if collectWrites == nil || collectWrites.lane == nil {
+		return nil
+	}
+	return collectWrites.waitPending(ctx)
+}
+
+func (s *collectWriteScheduler) cancelAll() {
+	s.lane.cancelAll()
+}
+
 type collectWriteLane struct {
 	name     string
 	mu       sync.Mutex

@@ -17,6 +17,7 @@ type collectLifecycleState struct {
 	cond          *sync.Cond
 	activeSources map[string]struct{}
 	activeCount   int
+	publishing    int
 }
 
 func newCollectLifecycle() *collectLifecycleState {
@@ -91,11 +92,34 @@ func (s *collectLifecycleState) waitIdleLocked() {
 	}
 }
 
+func (s *collectLifecycleState) isBusy() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.activeCount > 0 || s.publishing > 0
+}
+
+func (s *collectLifecycleState) beginPublish() {
+	s.mu.Lock()
+	s.publishing++
+	s.mu.Unlock()
+}
+
+func (s *collectLifecycleState) endPublish() {
+	s.mu.Lock()
+	if s.publishing > 0 {
+		s.publishing--
+	}
+	s.cond.Broadcast()
+	s.mu.Unlock()
+}
+
 func (s *collectLifecycleState) runExclusive(action func() error) error {
 	s.mu.Lock()
 	s.waitIdleLocked()
 	s.mu.Unlock()
 
+	s.beginPublish()
+	defer s.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
@@ -122,6 +146,46 @@ func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
 		case <-ticker.C:
 		}
 	}
+}
+
+func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.activeCount == 0 && s.publishing == 0 {
+		return nil
+	}
+	if timeout <= 0 {
+		return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-timer.C:
+			s.mu.Lock()
+			s.cond.Broadcast()
+			s.mu.Unlock()
+		case <-done:
+		}
+	}()
+
+	for s.activeCount > 0 || s.publishing > 0 {
+		s.cond.Wait()
+		select {
+		case <-timer.C:
+			if s.activeCount == 0 && s.publishing == 0 {
+				return nil
+			}
+			return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
+		default:
+		}
+	}
+	return nil
 }
 
 func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {

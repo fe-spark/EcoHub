@@ -49,7 +49,9 @@ func ExistFilmIndex(mid int64) bool {
 }
 
 func refreshCategoryCaches() {
-	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	if db.Rdb != nil {
+		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+	}
 	ClearAllSearchTagsCache()
 	support.RefreshCategoryCache()
 }

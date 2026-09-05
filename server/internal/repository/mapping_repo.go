@@ -28,7 +28,7 @@ func ReloadMappingRules() {
 }
 
 func ResetMappingRules() error {
-	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.MappingRule{}.TableName())).Error; err != nil {
+	if err := support.TruncateTable(db.Mdb, model.MappingRule{}.TableName()); err != nil {
 		return err
 	}
 	TouchRuleVersion()
@@ -54,6 +54,17 @@ func EnsureMappingRuleIndexes() error {
 	if err := db.Mdb.Exec("UPDATE mapping_rules SET match_type = 'exact' WHERE match_type = '' OR match_type IS NULL").Error; err != nil {
 		return err
 	}
+
+	isSQLite := db.Mdb.Dialector != nil && db.Mdb.Dialector.Name() == "sqlite"
+	if isSQLite {
+		_ = db.Mdb.Exec(fmt.Sprintf("DROP INDEX IF EXISTS %s", mappingRuleLegacyUniqueIndex)).Error
+		createIndexSQL := fmt.Sprintf("CREATE UNIQUE INDEX IF NOT EXISTS %s ON %s (`group`, raw, match_type)", mappingRuleEffectUniqueIndex, model.MappingRule{}.TableName())
+		if err := db.Mdb.Exec(createIndexSQL).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
+			return err
+		}
+		return nil
+	}
+
 	if err := db.Mdb.Exec(fmt.Sprintf("ALTER TABLE %s DROP INDEX %s", model.MappingRule{}.TableName(), mappingRuleLegacyUniqueIndex)).Error; err != nil && !isIgnorableMappingRuleIndexError(err) {
 		return err
 	}
@@ -69,7 +80,10 @@ func isIgnorableMappingRuleIndexError(err error) bool {
 		return false
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "check that column/key exists") || strings.Contains(message, "duplicate key name")
+	return strings.Contains(message, "check that column/key exists") ||
+		strings.Contains(message, "duplicate key name") ||
+		strings.Contains(message, "already exists") ||
+		strings.Contains(message, "no such index")
 }
 
 type MappingRuleQuery struct {

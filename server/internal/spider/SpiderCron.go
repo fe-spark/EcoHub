@@ -263,29 +263,45 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	defer orphanCleanTaskLock.Unlock()
 
 	startedAt := time.Now()
-	var cleanDetail string
-	if err := collectLifecycle.runExclusive(func() error {
-		n, err := filmrepo.CleanOrphanPlaylists()
-		if err != nil {
-			return fmt.Errorf("清理孤儿播放列表失败: %w", err)
-		}
-		m := filmrepo.CleanEmptyFilms()
-		x := filmrepo.CleanSearchWithoutDetail()
-		// 附属站孤儿播放列表是匹配不到主站框架的冗余数据；只有主站索引清理才需要刷新读模型。
-		if m > 0 || x > 0 {
-			if err := filmrepo.RefreshAfterDataClean(); err != nil {
-				return fmt.Errorf("刷新清理后的前台读模型失败: %w", err)
-			}
-		}
-		cleanDetail = fmt.Sprintf("删除孤儿 %d、空记录 %d、缺失详情 %d", n, m, x)
-		log.Printf("执行一次数据清理任务，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录\n", n, m, x)
-		return nil
-	}); err != nil {
-		syslog.Errorf("[CleanOrphan] 数据清理任务执行失败: %v", err)
+
+	// 1. 附属站孤儿治理：两阶段观察期状态机，零锁并发，直接作为后台闲时 GC 执行
+	n, err := filmrepo.CleanOrphanPlaylists()
+	if err != nil {
+		syslog.Errorf("[CleanOrphan] 附属站孤儿治理执行失败: %v", err)
 		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
 		return
 	}
-	log.Printf("[CleanOrphan] 数据清理任务执行完成，cost=%s", time.Since(startedAt))
+
+	// 2. 主站骨架空记录与缺失详情清理：受 publishMu 保护，若遇采集正忙则跳过以优先保证核心采集
+	if collectLifecycle.isBusy() {
+		detail := fmt.Sprintf("回收孤儿 %d；采集发布正忙，空记录与缺失详情留待下轮", n)
+		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
+		notify.PublishCronDone(ft.Id, ft.Remark, detail)
+		return
+	}
+
+	var m, x int64
+	err = func() error {
+		collectLifecycle.beginPublish()
+		defer collectLifecycle.endPublish()
+		publishMu.Lock()
+		defer publishMu.Unlock()
+
+		m = filmrepo.CleanEmptyFilms()
+		x = filmrepo.CleanSearchWithoutDetail()
+		if m > 0 || x > 0 {
+			return filmrepo.RefreshAfterDataClean()
+		}
+		return nil
+	}()
+	if err != nil {
+		syslog.Errorf("[CleanOrphan] 数据清理后刷新读模型失败: %v", err)
+		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
+		return
+	}
+
+	cleanDetail := fmt.Sprintf("回收孤儿 %d、空记录 %d、缺失详情 %d", n, m, x)
+	log.Printf("[CleanOrphan] 数据清理任务执行完成，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录，cost=%s", n, m, x, time.Since(startedAt))
 	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
 }
 

@@ -24,6 +24,9 @@ type CollectService struct{}
 var CollectSvc = new(CollectService)
 
 func clearProvideNetworkConfigCache() {
+	if db.Rdb == nil {
+		return
+	}
 	pattern := config.TVBoxNetworkConfigCacheKey + ":*"
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
@@ -122,6 +125,25 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
 				syslog.Errorf("[Collect] 自动降级旧主站失败: %v", err)
 				return errors.New("主站自动降级失败，请重试")
+			}
+			// 附属站升级为主站：硬物理删除该站点在附属播放列表中的历史残留，避免自挂接重复及软删除墓碑唯一键冲突
+			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+				syslog.Errorf("[Collect] 清理历史附属播放列表失败: %v", err)
+				return errors.New("清理历史附属播放列表失败，请重试")
+			}
+			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.MoviePlaylist{}).Error; err != nil {
+				syslog.Errorf("[Collect] 清理历史播放列表失败: %v", err)
+				return errors.New("清理历史播放列表失败，请重试")
+			}
+			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
+				syslog.Errorf("[Collect] 清理关联失败记录失败: %v", err)
+				return errors.New("清理关联失败记录失败，请重试")
+			}
+		}
+		if masterDowngrade {
+			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, old.Id); err != nil {
+				syslog.Errorf("[Collect] 清理降级主站关联失败记录失败: %v", err)
+				return errors.New("清理降级主站关联失败记录失败，请重试")
 			}
 		}
 
@@ -291,6 +313,15 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 		log.Printf("[Collect] 新增站点 %s 为主采集站，自动降级现有主站...", source.Name)
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			if err := repository.DemoteExistingMasterTx(tx); err != nil {
+				return err
+			}
+			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+				return err
+			}
+			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.MoviePlaylist{}).Error; err != nil {
+				return err
+			}
+			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
 				return err
 			}
 			return repository.AddCollectSourceTx(tx, source)

@@ -2,7 +2,6 @@ package repository
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -11,6 +10,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -167,6 +167,9 @@ func ExistTask() bool {
 
 // GetCollectSourceList 获取采集站 API 列表
 func GetCollectSourceList() []model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
 	var list []model.FilmSource
 	if err := db.Mdb.Order("grade ASC").Find(&list).Error; err != nil {
 		log.Println("GetCollectSourceList Error:", err)
@@ -334,6 +337,9 @@ func DelCollectResource(id string) error {
 			return err
 		}
 		// 2. 删除附属站播放列表
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePlaylist{}).Error; err != nil {
 			return err
 		}
@@ -497,8 +503,8 @@ func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
 
 // ClearAllCollectSource 删除所有采集站信息
 func ClearAllCollectSource() {
-	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.TableFilmSource)).Error; err != nil {
-		log.Println("TRUNCATE table film_sources Error:", err)
+	if err := support.TruncateTable(db.Mdb, model.TableFilmSource); err != nil {
+		log.Println("Truncate table film_sources Error:", err)
 	}
 }
 
@@ -737,7 +743,7 @@ func NormalizeFailureRecordsRetryCount() {
 
 // TruncateRecordTable  截断 record table
 func TruncateRecordTable() {
-	err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE Table %s", model.TableFailureRecord)).Error
+	err := support.TruncateTable(db.Mdb, model.TableFailureRecord)
 	if err != nil {
 		log.Println("TRUNCATE TABLE Error: ", err)
 	}

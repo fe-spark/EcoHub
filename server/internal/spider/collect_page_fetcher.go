@@ -358,11 +358,7 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 	}
 	go func() {
 		requestWG.Wait()
-		if ctx.Err() != nil {
-			collectWrites.cancelSource(s.Grade, s.Id)
-		} else {
-			collectWrites.finishSource(s.Grade, s.Id)
-		}
+		collectWrites.finishSource(s.Grade, s.Id)
 		writeWG.Wait()
 		close(writeCompletions)
 	}()

@@ -48,6 +48,11 @@ func (s *InitService) DefaultDataInit() {
 		db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 	}
 
+	// 历史数据平滑割接：将老表 movie_playlist 附属站数据迁移至 slave_movie_playlists
+	if err := filmrepo.MigrateLegacyMoviePlaylistsTx(db.Mdb); err != nil {
+		syslog.Errorf("[Init] 附属站播放列表割接迁移失败: %v", err)
+	}
+
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
 	repository.InitBuiltinAccounts()
@@ -107,6 +112,9 @@ func shouldRetainStartupRedisKey(key string) bool {
 }
 
 func clearStartupCaches() {
+	if db.Rdb == nil {
+		return
+	}
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, config.RedisProjectKeyPattern, config.MaxScanCount).Iterator()
 	for iter.Next(ctx) {
@@ -244,9 +252,27 @@ func (s *InitService) CollectCrontabInit() {
 	spider.CronCollect.Start()
 }
 
+const legacyOrphanSpec = "0 0 0 * * *" // 与当前 EveryDaySpec 相同
+
+func shouldMigrateOrphanCleanSpec(id string, spec string) bool {
+	return id == "sys_cron_orphan_clean" && strings.TrimSpace(spec) == legacyOrphanSpec
+}
+
 // ensureDefaultTasks 幂等检查并补齐默认任务（已存在跳过，缺失则自动持久化并返回）
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 	existing := repository.GetAllFilmTask()
+	for i, t := range existing {
+		if shouldMigrateOrphanCleanSpec(t.Id, t.Spec) {
+			t.Spec = config.OrphanCleanSpec
+			if err := repository.UpdateFilmTask(t); err != nil {
+				syslog.Errorf("[Cron] 迁移孤儿清理 spec 失败 id=%s: %v", t.Id, err)
+				continue
+			}
+			existing[i] = t
+			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", legacyOrphanSpec, config.OrphanCleanSpec)
+		}
+	}
+
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
@@ -313,7 +339,7 @@ func defaultFilmTasks() []model.FilmCollectTask {
 	}
 
 	orphanTask := model.FilmCollectTask{
-		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.EveryDaySpec,
+		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.OrphanCleanSpec,
 		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
 

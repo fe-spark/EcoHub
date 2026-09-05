@@ -13,6 +13,29 @@ import (
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
 var publishMu sync.Mutex
 
+var (
+	activeBatchesMu sync.Mutex
+	activeBatches   = make(map[*collectBatchContext]struct{})
+)
+
+func registerActiveBatch(b *collectBatchContext) {
+	if b == nil {
+		return
+	}
+	activeBatchesMu.Lock()
+	defer activeBatchesMu.Unlock()
+	activeBatches[b] = struct{}{}
+}
+
+func unregisterActiveBatch(b *collectBatchContext) {
+	if b == nil {
+		return
+	}
+	activeBatchesMu.Lock()
+	defer activeBatchesMu.Unlock()
+	delete(activeBatches, b)
+}
+
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
 type collectBatchContext struct {
 	mu                 sync.Mutex
@@ -39,7 +62,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 	if len(isStandalone) > 0 {
 		standalone = isStandalone[0]
 	}
-	return &collectBatchContext{
+	b := &collectBatchContext{
 		trigger:            trigger,
 		tag:                tag,
 		sources:            sources,
@@ -51,6 +74,8 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 		pendingMasterMIDs:  make(map[string]map[int64]struct{}),
 		finishedSources:    make(map[string]model.FilmSource),
 	}
+	registerActiveBatch(b)
+	return b
 }
 
 func (b *collectBatchContext) beginMasterRebuild(sourceID string) {
@@ -187,6 +212,8 @@ func (b *collectBatchContext) flushAndFinalize() error {
 
 	markSourcesFinalizing(finishedMap)
 
+	collectLifecycle.beginPublish()
+	defer collectLifecycle.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
@@ -203,5 +230,6 @@ func (b *collectBatchContext) emitSummary(finalizeErr error) {
 	if b == nil {
 		return
 	}
+	defer unregisterActiveBatch(b)
 	emitBatchSummaryForSources(b.batch, b.trigger, b.sources, b.startedAt, finalizeErr)
 }

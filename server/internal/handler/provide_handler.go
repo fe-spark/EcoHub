@@ -235,11 +235,13 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		return
 	}
 	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
-	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-		var cached gin.H
-		if json.Unmarshal([]byte(data), &cached) == nil {
-			c.JSON(200, cached)
-			return
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached gin.H
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				c.JSON(200, cached)
+				return
+			}
 		}
 	}
 
@@ -278,8 +280,10 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		"logo":      "",
 		"sites":     sites,
 	}
-	if data, err := json.Marshal(configJson); err == nil {
-		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
+	if db.Rdb != nil {
+		if data, err := json.Marshal(configJson); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
+		}
 	}
 
 	c.JSON(200, configJson)

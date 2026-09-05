@@ -1,7 +1,14 @@
 package handler
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
+
+	"server/internal/infra/db"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -68,5 +75,33 @@ func TestNormalizeMediaURL(t *testing.T) {
 				t.Errorf("normalizeMediaURL(%q, %q) = %q, want %q", tt.raw, tt.baseURL, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestHandleProvideConfig_RedisNilSafety(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/config", nil)
+	c.Request.Host = "127.0.0.1:8080"
+
+	ProvideHd.HandleProvideConfig(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w.Code)
+	}
+
+	var res map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if _, ok := res["sites"]; !ok {
+		t.Fatalf("expected sites in response")
 	}
 }

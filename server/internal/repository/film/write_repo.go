@@ -12,7 +12,6 @@ import (
 	"time"
 	"unicode"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
@@ -507,7 +506,6 @@ func saveMovieDetailInfosTx(tx *gorm.DB, detailInfos []model.MovieDetailInfo) er
 
 func clearDetailCaches(pid int64) {
 	ClearSearchTagsCache(pid)
-	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 }
 
 func clearFilmIndexCachesByPids(list []model.FilmIndex) {
@@ -525,8 +523,6 @@ func clearFilmIndexCachesByPidSet(pidSet map[int64]struct{}) {
 		}
 		ClearSearchTagsCache(pid)
 	}
-	db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
-	support.ClearIndexPageCache()
 	ClearProvideListCache()
 }
 
@@ -591,6 +587,7 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 	var changedDetails []model.MovieDetail
 	var oldDetailsByMid map[int64]model.MovieDetail
 	var preWriteCounts map[int64][]int
+	var matchKeyMappings map[int64][]string
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		unchangedKeys, oldDetails, counts, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailsByKey, false)
 		if err != nil {
@@ -622,7 +619,8 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, changedDetails, infoByKey, keyToMid)); err != nil {
 			return err
 		}
-		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(changedDetails, infoByKey, keyToMid)); err != nil {
+		matchKeyMappings = buildMovieMatchKeyMappings(changedDetails, infoByKey, keyToMid)
+		if err := saveMovieMatchKeysByMidTx(tx, matchKeyMappings); err != nil {
 			return err
 		}
 
@@ -636,6 +634,20 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (C
 	}); err != nil {
 		return CollectWriteResult{}, err
 	}
+
+	// 解耦主站写入长事务与附属表复活：在核心写事务提交后独立触发，结合其内部 Fast-path 探针，彻底规避跨表死锁
+	if len(matchKeyMappings) > 0 {
+		revivedKeys := make([]string, 0, len(matchKeyMappings)*4)
+		for _, keys := range matchKeyMappings {
+			revivedKeys = append(revivedKeys, keys...)
+		}
+		if len(revivedKeys) > 0 {
+			if err := ReviveSlavePlaylistsTx(db.Mdb, revivedKeys); err != nil {
+				log.Printf("[Collect] 批量复活附属站播放列表异常: %v", err)
+			}
+		}
+	}
+
 	if len(changedInfos) == 0 {
 		return out, nil
 	}
@@ -894,6 +906,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 
 	changed := false
 	var savedMid int64
+	var matchKeyMappings map[int64][]string
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		infoList := []model.FilmIndex{snapshot}
 		unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(tx, infoList, detailMapByContentKey([]model.MovieDetail{detail}), true) //nolint:dogsled // 第 2/3 返回值此处不需要
@@ -924,7 +937,8 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		if err := saveMovieDetailInfosTx(tx, buildMovieDetailInfos(id, writeDetails, infoByKey, keyToMid)); err != nil {
 			return err
 		}
-		if err := saveMovieMatchKeysByMidTx(tx, buildMovieMatchKeyMappings(writeDetails, infoByKey, keyToMid)); err != nil {
+		matchKeyMappings = buildMovieMatchKeyMappings(writeDetails, infoByKey, keyToMid)
+		if err := saveMovieMatchKeysByMidTx(tx, matchKeyMappings); err != nil {
 			return err
 		}
 
@@ -940,6 +954,19 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	}
 	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
 		log.Printf("TouchCollectSourceStats Error: %v", err)
+	}
+
+	// 解耦主站长事务与附属表复活：在核心写事务提交后独立触发，结合其内部 Fast-path 探针，彻底规避跨表死锁
+	if changed && len(matchKeyMappings) > 0 {
+		revivedKeys := make([]string, 0, len(matchKeyMappings)*4)
+		for _, keys := range matchKeyMappings {
+			revivedKeys = append(revivedKeys, keys...)
+		}
+		if len(revivedKeys) > 0 {
+			if err := ReviveSlavePlaylistsTx(db.Mdb, revivedKeys); err != nil {
+				log.Printf("[Collect] 复活附属站播放列表异常: %v", err)
+			}
+		}
 	}
 	if !changed {
 		return nil

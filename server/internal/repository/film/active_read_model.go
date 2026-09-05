@@ -151,6 +151,13 @@ func buildFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	return newIdx
 }
 
+var searchIndexBuildWg sync.WaitGroup
+
+// WaitActiveFilmSearchIndexBuilt 等待正在异步构建的内存搜索索引协程执行完毕。
+func WaitActiveFilmSearchIndexBuilt() {
+	searchIndexBuildWg.Wait()
+}
+
 func LoadActiveFilmReadModel(version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -159,7 +166,9 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModelMu.Lock()
 	defer activeFilmReadModelMu.Unlock()
 	activeFilmReadModel.Store(&FilmReadModel{Version: version})
+	searchIndexBuildWg.Add(1)
 	go func(ver string) {
+		defer searchIndexBuildWg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[ActiveReadModel] 异步构建内存搜索索引发生异常: %v", r)

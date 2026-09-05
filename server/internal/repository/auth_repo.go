@@ -13,12 +13,18 @@ import (
 
 // SaveUserToken 将用户登录成功后的token字符串存放到redis中
 func SaveUserToken(token string, userId uint) error {
+	if db.Rdb == nil {
+		return nil
+	}
 	// 设置redis中token的过期时间为 token过期时间后的7天
 	return db.Rdb.Set(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId), token, (config.AuthTokenExpires+7*24)*time.Hour).Err()
 }
 
 // GetUserTokenById 从redis中获取指定userId对应的token
 func GetUserTokenById(userId uint) string {
+	if db.Rdb == nil {
+		return ""
+	}
 	token, err := db.Rdb.Get(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId)).Result()
 	if err != nil {
 		if !errors.Is(err, redis.Nil) {
@@ -31,5 +37,8 @@ func GetUserTokenById(userId uint) string {
 
 // ClearUserToken 清除指定id的用户的登录信息
 func ClearUserToken(userId uint) error {
+	if db.Rdb == nil {
+		return nil
+	}
 	return db.Rdb.Del(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId)).Err()
 }

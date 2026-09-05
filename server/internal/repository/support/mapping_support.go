@@ -88,10 +88,16 @@ func ReloadMappingRules() {
 }
 
 func TouchRuleVersion() {
+	if db.Rdb == nil {
+		return
+	}
 	db.Rdb.Set(db.Cxt, config.RuleVersionKey, time.Now().UnixNano(), 0)
 }
 
 func GetRuleVersion() string {
+	if db.Rdb == nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 	version, err := db.Rdb.Get(db.Cxt, config.RuleVersionKey).Result()
 	if err == nil && version != "" {
 		return version

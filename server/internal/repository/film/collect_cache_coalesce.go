@@ -8,8 +8,7 @@ import (
 	"server/internal/model"
 )
 
-// collectCacheCoalescer 合并采集热路径中的 Redis 缓存清理。
-// 每页 clear 会反复 DEL 分类树/首页缓存；改为攒 pid，按间隔或站点结束统一清理。
+// collectCacheCoalescer 合并采集写库后的搜索标签 / provide 列表缓存失效。
 type collectCacheCoalescer struct {
 	mu          sync.Mutex
 	pendingPids map[int64]struct{}

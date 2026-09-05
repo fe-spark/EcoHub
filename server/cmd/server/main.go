@@ -18,6 +18,7 @@ import (
 	"server/internal/notify"
 	"server/internal/router"
 	"server/internal/service"
+	"server/internal/spider"
 
 	"github.com/gin-gonic/gin"
 )
@@ -115,18 +116,40 @@ func start() {
 		}
 	}()
 
-	// 优雅停机：停止接收新请求 → 排空接口审计队列并最终刷盘
+	// 退出信号
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 	<-stopCh
-	log.Printf("[Shutdown] 收到退出信号，开始优雅停机")
+	log.Printf("[Shutdown] 收到退出信号，开始退出")
 
+	// 1. 关闭 HTTP 服务接收通道，确保在途请求能安全读取现有快照（严禁清理快照状态，保护滚动更新与在途请求）
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := srv.Shutdown(ctx); err != nil {
 		log.Printf("[Shutdown] HTTP 优雅停机超时: %v", err)
 	}
 
+	// 2. 快速停止采集任务（非阻塞通知）
+	spider.StopAllTasks()
+
+	// 3. 优雅停止 Telegram Bot 轮询并释放 Redis 领导锁
+	notify.StopBotPoller()
+
+	// 4. 等待在途采集写调度队列优雅排空落盘
+	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer writeCancel()
+	if err := spider.WaitPendingWrites(writeCtx); err != nil {
+		log.Printf("[Shutdown] 等待采集写队列排空超时或失败: %v", err)
+	}
+
+	// 5. 等待在途异步通知发送协程排空
+	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer notifyCancel()
+	if err := notify.WaitPendingPublishes(notifyCtx); err != nil {
+		log.Printf("[Shutdown] 等待在途通知排空超时或失败: %v", err)
+	}
+
+	// 6. 排空接口访问日志落盘
 	access.StopApiLogWorker()
 	select {
 	case <-access.ApiLogWorkerDone():

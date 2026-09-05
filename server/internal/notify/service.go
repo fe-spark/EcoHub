@@ -193,7 +193,7 @@ func IsEventEnabled(event string) bool {
 // PublishBatchSummary 异步发送采集批次摘要（不走 MinInterval）。
 // 批次由 BuildBatchPayload 在同步阶段写入 payload.ChangeBatchID，异步发送不再读全局状态。
 func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCollectBatchSummary) {
 			return
@@ -249,7 +249,6 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 			}
 			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, markup)
 		}
-		EnsureBotPoller()
 		return
 	}
 
@@ -260,7 +259,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 
 // PublishSourceFailed 单源失败即时告警。
 func PublishSourceFailed(sourceID, sourceName, reason string) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCollectSourceFailed) {
 			return
@@ -276,7 +275,7 @@ func PublishSourceFailed(sourceID, sourceName, reason string) {
 
 // PublishProgressStale 进度超时告警。
 func PublishProgressStale(sourceID, sourceName, oldStatus string, age time.Duration) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCollectProgressStale) {
 			return
@@ -293,7 +292,7 @@ func PublishProgressStale(sourceID, sourceName, oldStatus string, age time.Durat
 
 // PublishFinalizeFailed 收尾失败告警。
 func PublishFinalizeFailed(sourceCount int, reason string) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCollectFinalizeFailed) {
 			return
@@ -309,7 +308,7 @@ func PublishFinalizeFailed(sourceCount int, reason string) {
 
 // PublishCronFailed 定时任务失败。
 func PublishCronFailed(taskID, remark, reason string) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCronTaskFailed) {
 			return
@@ -325,7 +324,7 @@ func PublishCronFailed(taskID, remark, reason string) {
 
 // PublishCronDone 定时任务成功（默关）。
 func PublishCronDone(taskID, remark, detail string) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventCronTaskDone) {
 			return
@@ -342,7 +341,7 @@ func PublishCronDone(taskID, remark, detail string) {
 // PublishSourceConfigChanged 采集源配置变更通知（新增/删除/主站切换/启用停用等）。
 // changes 为变更描述列表（如「启用状态: 已启用 → 已停用」），按源限流。
 func PublishSourceConfigChanged(sourceName, sourceID string, changes []string) {
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventSourceConfigChanged) {
 			return
@@ -362,7 +361,7 @@ func PublishSourceConfigsChanged(items []SourceConfigChangeItem) {
 	if len(items) == 0 {
 		return
 	}
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !eventEnabled(cfg, model.NotifyEventSourceConfigChanged) {
 			return
@@ -615,7 +614,7 @@ func routeTargets(cfg model.NotifyConfig, severity model.Severity, category stri
 // Dispatch 派发统一事件，根据 Severity、Category、QuietHours、Targets 订阅矩阵进行精准路由分发。
 func Dispatch(ctx context.Context, evt model.NotifyEvent) {
 	_ = ctx
-	go safePublish(func() {
+	safePublish(func() {
 		cfg := GetConfig()
 		if !cfg.Enabled {
 			return
@@ -648,6 +647,36 @@ func Dispatch(ctx context.Context, evt model.NotifyEvent) {
 		htmlText := formatEventHTML(siteName(), evt)
 		sendMessagesWithMarkup(cfg, evt.Severity, evt.Category, htmlText, nil)
 	})
+}
+
+var publishWg sync.WaitGroup
+
+func safePublish(fn func()) {
+	publishWg.Add(1)
+	go func() {
+		defer publishWg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Notify] 发送协程 panic: %v", r)
+			}
+		}()
+		fn()
+	}()
+}
+
+// WaitPendingPublishes 等待在途的异步通知协程完成，支持 context 超时控制。
+func WaitPendingPublishes(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		publishWg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func sendMessagesWithMarkup(cfg model.NotifyConfig, severity model.Severity, category, text string, markup *InlineKeyboardMarkup) {
@@ -696,14 +725,6 @@ func sendMessagesToTargets(cfg model.NotifyConfig, targets []model.NotifyTarget,
 	}
 }
 
-func safePublish(fn func()) {
-	defer func() {
-		if r := recover(); r != nil {
-			syslog.Errorf("[Notify] 发送协程 panic: %v", r)
-		}
-	}()
-	fn()
-}
 
 // BuildSourceResult 从进度与 Acc 计数组装 SourceNotifyResult。
 // FilmsTotal=本源变更次数；明细 mid 在 MySQL 变更批次（跨源去重）。

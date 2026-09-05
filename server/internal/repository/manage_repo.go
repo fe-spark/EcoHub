@@ -91,9 +91,11 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	}
 
 	data, _ := json.Marshal(c)
-	if err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err(); err != nil {
-		log.Println("SaveSiteBasic Redis Error:", err)
-		_ = db.Rdb.Del(db.Cxt, config.SiteConfigBasic).Err()
+	if db.Rdb != nil {
+		if err := db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err(); err != nil {
+			log.Println("SaveSiteBasic Redis Error:", err)
+			_ = db.Rdb.Del(db.Cxt, config.SiteConfigBasic).Err()
+		}
 	}
 	ClearIndexPageCache()
 	return nil
@@ -103,15 +105,17 @@ func SaveSiteBasic(c model.BasicConfig) error {
 func GetSiteBasic() model.BasicConfig {
 	c := model.BasicConfig{}
 	// 1. Redis 缓存
-	if data := db.Rdb.Get(db.Cxt, config.SiteConfigBasic).Val(); data != "" {
-		if err := json.Unmarshal([]byte(data), &c); err == nil {
-			c.SiteURL = NormalizeSiteURL(c.SiteURL)
-			c.Tip = model.NormalizeTipConfig(c.Tip)
-			c.Notice = model.NormalizeNoticeConfig(c.Notice)
-			return c
+	if db.Rdb != nil {
+		if data := db.Rdb.Get(db.Cxt, config.SiteConfigBasic).Val(); data != "" {
+			if err := json.Unmarshal([]byte(data), &c); err == nil {
+				c.SiteURL = NormalizeSiteURL(c.SiteURL)
+				c.Tip = model.NormalizeTipConfig(c.Tip)
+				c.Notice = model.NormalizeNoticeConfig(c.Notice)
+				return c
+			}
+			log.Println("GetSiteBasic Redis Unmarshal Error")
+			db.Rdb.Del(db.Cxt, config.SiteConfigBasic)
 		}
-		log.Println("GetSiteBasic Redis Unmarshal Error")
-		db.Rdb.Del(db.Cxt, config.SiteConfigBasic)
 	}
 	// 2. MySQL 兜底
 	var rec model.SiteConfigRecord
@@ -128,8 +132,10 @@ func GetSiteBasic() model.BasicConfig {
 		Notice: model.DecodeNoticeJSON(rec.NoticeJSON),
 	}
 	// 回填缓存
-	data, _ := json.Marshal(c)
-	_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err()
+	if db.Rdb != nil {
+		data, _ := json.Marshal(c)
+		_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, config.ConfigCacheTTL).Err()
+	}
 	return c
 }
 
@@ -137,12 +143,14 @@ func GetSiteBasic() model.BasicConfig {
 func GetBanners() model.Banners {
 	bl := make(model.Banners, 0)
 	// 1. Redis 缓存
-	data := db.Rdb.Get(db.Cxt, config.BannersKey).Val()
-	if data != "" && data != "null" {
-		if err := json.Unmarshal([]byte(data), &bl); err == nil && len(bl) > 0 {
-			bl = normalizeBannerImageFields(bl)
-			sort.Sort(bl)
-			return bl
+	if db.Rdb != nil {
+		data := db.Rdb.Get(db.Cxt, config.BannersKey).Val()
+		if data != "" && data != "null" {
+			if err := json.Unmarshal([]byte(data), &bl); err == nil && len(bl) > 0 {
+				bl = normalizeBannerImageFields(bl)
+				sort.Sort(bl)
+				return bl
+			}
 		}
 	}
 	// 2. MySQL 兜底
@@ -155,8 +163,10 @@ func GetBanners() model.Banners {
 		bl = normalizeBannerImageFields(bl)
 		sort.Sort(bl)
 		// 回填缓存
-		data, _ := json.Marshal(bl)
-		_ = db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err()
+		if db.Rdb != nil {
+			data, _ := json.Marshal(bl)
+			_ = db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err()
+		}
 	}
 	return bl
 }
@@ -180,9 +190,11 @@ func SaveBanners(bl model.Banners) error {
 		return err
 	}
 
-	data, _ := json.Marshal(bl)
-	if err := db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err(); err != nil {
-		log.Println("SaveBanners Redis Error:", err)
+	if db.Rdb != nil {
+		data, _ := json.Marshal(bl)
+		if err := db.Rdb.Set(db.Cxt, config.BannersKey, data, config.ConfigCacheTTL).Err(); err != nil {
+			log.Println("SaveBanners Redis Error:", err)
+		}
 	}
 	ClearIndexPageCache()
 	return nil
