@@ -25,7 +25,11 @@ const (
 	homeDailyUpdateCacheTTL = 5 * time.Minute
 )
 
-var dailyUpdateSfGroup singleflight.Group
+var (
+	dailyUpdateSfGroup singleflight.Group
+	filmDetailSfGroup  singleflight.Group
+	relateMovieSfGroup singleflight.Group
+)
 
 type IndexService struct{}
 
@@ -38,8 +42,14 @@ func normalizeIndexPage(page *dto.Page) *dto.Page {
 	if page.Current <= 0 {
 		page.Current = 1
 	}
+	if page.Current > 50 {
+		page.Current = 50
+	}
 	if page.PageSize <= 0 {
 		page.PageSize = 20
+	}
+	if page.PageSize > 48 {
+		page.PageSize = 48
 	}
 	return page
 }
@@ -522,29 +532,115 @@ func storeHomeDailyUpdatesCache(cacheKey string, list []model.MovieBasicInfo) {
 	}
 }
 
+func cloneMovieDetailVo(v model.MovieDetailVo) model.MovieDetailVo {
+	cp := v
+	if v.List != nil {
+		cp.List = make([]model.PlayLinkVo, len(v.List))
+		for i, source := range v.List {
+			cp.List[i] = source
+			if source.LinkList != nil {
+				cp.List[i].LinkList = make([]model.MovieUrlInfo, len(source.LinkList))
+				copy(cp.List[i].LinkList, source.LinkList)
+			}
+		}
+	}
+	if v.PlayFrom != nil {
+		cp.PlayFrom = make([]string, len(v.PlayFrom))
+		copy(cp.PlayFrom, v.PlayFrom)
+	}
+	if v.PlayList != nil {
+		cp.PlayList = make([][]model.MovieUrlInfo, len(v.PlayList))
+		for i, group := range v.PlayList {
+			cp.PlayList[i] = make([]model.MovieUrlInfo, len(group))
+			copy(cp.PlayList[i], group)
+		}
+	}
+	if v.DownloadList != nil {
+		cp.DownloadList = make([][]model.MovieUrlInfo, len(v.DownloadList))
+		for i, group := range v.DownloadList {
+			cp.DownloadList[i] = make([]model.MovieUrlInfo, len(group))
+			copy(cp.DownloadList[i], group)
+		}
+	}
+	return cp
+}
+
 // GetFilmDetail 影片详情信息页面处理
 func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
-	startedAt := time.Now()
-	version := filmrepo.GetActiveReadModelVersion()
-	snapshotStartedAt := time.Now()
-	snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
-	logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
-	if snapshot == nil {
+	if id <= 0 {
 		return model.MovieDetailVo{}, nil
 	}
-	detailStartedAt := time.Now()
-	movieDetail, localUpdateTime := filmrepo.GetMovieDetailBySnapshot(*snapshot)
-	logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
-	if movieDetail == nil {
-		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+
+	cacheKey := fmt.Sprintf("EcoHub:filmPlayInfo:%d", id)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			if data == "{}" {
+				return model.MovieDetailVo{}, nil
+			}
+			var cached model.MovieDetailVo
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+
+	val, err, _ := filmDetailSfGroup.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				if data == "{}" {
+					return model.MovieDetailVo{}, nil
+				}
+				var cached model.MovieDetailVo
+				if json.Unmarshal([]byte(data), &cached) == nil {
+					return cached, nil
+				}
+			}
+		}
+
+		startedAt := time.Now()
+		version := filmrepo.GetActiveReadModelVersion()
+		snapshotStartedAt := time.Now()
+		snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
+		logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
+		if snapshot == nil {
+			if db.Rdb != nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "{}", 60*time.Second).Err()
+			}
+			return model.MovieDetailVo{}, nil
+		}
+		detailStartedAt := time.Now()
+		movieDetail, localUpdateTime := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+		logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
+		if movieDetail == nil {
+			filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+			if db.Rdb != nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "{}", 60*time.Second).Err()
+			}
+			return model.MovieDetailVo{}, nil
+		}
+		res := model.MovieDetailVo{MovieDetail: *movieDetail, LocalUpdateTime: localUpdateTime}
+		multipleStartedAt := time.Now()
+		res.List = multipleSource(snapshot, movieDetail)
+		logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
+		logSlowIndexServiceStep("GetFilmDetail.total", startedAt, "id", id)
+
+		if db.Rdb != nil {
+			if raw, err := json.Marshal(res); err == nil {
+				jitter := time.Duration(rand.Intn(1800)) * time.Second
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 12*time.Hour+jitter).Err()
+			}
+		}
+		return res, nil
+	})
+
+	if err != nil || val == nil {
+		return model.MovieDetailVo{}, err
+	}
+	res, ok := val.(model.MovieDetailVo)
+	if !ok {
 		return model.MovieDetailVo{}, nil
 	}
-	res := model.MovieDetailVo{MovieDetail: *movieDetail, LocalUpdateTime: localUpdateTime}
-	multipleStartedAt := time.Now()
-	res.List = multipleSource(snapshot, movieDetail)
-	logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
-	logSlowIndexServiceStep("GetFilmDetail.total", startedAt, "id", id)
-	return res, nil
+	return cloneMovieDetailVo(res), nil
 }
 
 // GetFilmDetailOnly 读取影片详情主体，不聚合附属站播放源。
@@ -648,27 +744,95 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // RelateMovie 根据当前影片快照匹配相关的影片
 func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasicInfo {
+	if mid <= 0 {
+		return []model.MovieBasicInfo{}
+	}
 	startedAt := time.Now()
 	page = normalizeIndexPage(page)
 	version := filmrepo.GetActiveReadModelVersion()
-	snapshotStartedAt := time.Now()
-	snapshot := filmrepo.GetSnapshotByMid(version, mid)
-	logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
-	if snapshot == nil {
+	if version == "" {
+		version = filmrepo.GetActiveSnapshotVersion()
+	}
+	if version == "" {
 		return []model.MovieBasicInfo{}
 	}
-	if !filmrepo.HasMovieDetail(snapshot.Mid) {
-		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+
+	cacheKey := fmt.Sprintf("EcoHub:relate:vo:v%s:%d:p%d:s%d", version, mid, page.Current, page.PageSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			if data == "[]" {
+				return []model.MovieBasicInfo{}
+			}
+			var cached []model.MovieBasicInfo
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached
+			}
+		}
+	}
+
+	val, err, _ := relateMovieSfGroup.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				if data == "[]" {
+					return []model.MovieBasicInfo{}, nil
+				}
+				var cached []model.MovieBasicInfo
+				if json.Unmarshal([]byte(data), &cached) == nil {
+					return cached, nil
+				}
+			}
+		}
+
+		snapshotStartedAt := time.Now()
+		snapshot := filmrepo.GetSnapshotByMid(version, mid)
+		logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
+		if snapshot == nil {
+			if db.Rdb != nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
+			}
+			return []model.MovieBasicInfo{}, nil
+		}
+		if !filmrepo.HasMovieDetail(snapshot.Mid) {
+			filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+			if db.Rdb != nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
+			}
+			return []model.MovieBasicInfo{}, nil
+		}
+		listStartedAt := time.Now()
+		list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
+		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
+		buildStartedAt := time.Now()
+		result := filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
+		logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
+		logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
+
+		if result == nil {
+			result = []model.MovieBasicInfo{}
+		}
+
+		if db.Rdb != nil {
+			if len(result) == 0 {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
+			} else {
+				if raw, err := json.Marshal(result); err == nil {
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), time.Hour).Err()
+				}
+			}
+		}
+		return result, nil
+	})
+
+	if err != nil || val == nil {
 		return []model.MovieBasicInfo{}
 	}
-	listStartedAt := time.Now()
-	list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
-	logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
-	buildStartedAt := time.Now()
-	result := filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
-	logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
-	logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
-	return result
+	result, ok := val.([]model.MovieBasicInfo)
+	if !ok {
+		return []model.MovieBasicInfo{}
+	}
+	res := make([]model.MovieBasicInfo, len(result))
+	copy(res, result)
+	return res
 }
 
 // SearchTags 整合对应分类的搜索tag
@@ -786,6 +950,16 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
 	version := filmrepo.GetActiveReadModelVersion()
+	if version == "" {
+		version = filmrepo.GetActiveSnapshotVersion()
+	}
+	if version == "" {
+		return map[string]any{
+			"news":   []model.MovieBasicInfo{},
+			"top":    []model.MovieBasicInfo{},
+			"recent": []model.MovieBasicInfo{},
+		}
+	}
 	cacheKey := filmrepo.SnapshotClassifyCacheKey(version, pid, page)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
@@ -796,10 +970,47 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any
 		}
 	}
 
-	res := make(map[string]any)
-	res["news"] = filmrepo.GetSnapshotMovieListBySort(version, 0, pid, page)
-	res["top"] = filmrepo.GetSnapshotMovieListBySort(version, 1, pid, page)
-	res["recent"] = filmrepo.GetSnapshotMovieListBySort(version, 2, pid, page)
+	limit := 21
+	if page != nil && page.PageSize > 0 {
+		limit = page.PageSize
+	}
+
+	var (
+		newsMovies   []model.MovieBasicInfo
+		topMovies    []model.MovieBasicInfo
+		recentMovies []model.MovieBasicInfo
+		wg           sync.WaitGroup
+	)
+
+	wg.Add(3)
+	go func() {
+		defer wg.Done()
+		newsMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 0, pid, limit)
+	}()
+	go func() {
+		defer wg.Done()
+		topMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 1, pid, limit)
+	}()
+	go func() {
+		defer wg.Done()
+		recentMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 2, pid, limit)
+	}()
+	wg.Wait()
+
+	if newsMovies == nil {
+		newsMovies = []model.MovieBasicInfo{}
+	}
+	if topMovies == nil {
+		topMovies = []model.MovieBasicInfo{}
+	}
+	if recentMovies == nil {
+		recentMovies = []model.MovieBasicInfo{}
+	}
+
+	res := make(map[string]any, 3)
+	res["news"] = newsMovies
+	res["top"] = topMovies
+	res["recent"] = recentMovies
 	if db.Rdb != nil {
 		if data, err := json.Marshal(res); err == nil {
 			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
