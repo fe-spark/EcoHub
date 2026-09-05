@@ -73,6 +73,7 @@ func MigrateLegacyMoviePlaylistsTx(tx *gorm.DB) error {
 
 	const batchSize = 2000
 	var migratedTotal int64
+	var lastLogCount int64
 
 	for {
 		var rows []model.MoviePlaylist
@@ -144,8 +145,13 @@ func MigrateLegacyMoviePlaylistsTx(tx *gorm.DB) error {
 		}
 
 		migratedTotal += int64(len(items))
+		if migratedTotal-lastLogCount >= 20000 {
+			lastLogCount = migratedTotal
+			log.Printf("[Migration] 附属站播放列表割接进度: 已迁移=%d/%d (%.1f%%), 耗时=%s",
+				migratedTotal, legacyCount, float64(migratedTotal)/float64(legacyCount)*100, time.Since(startedAt))
+		}
 	}
 
-	log.Printf("[Migration] 附属站播放列表平滑割接完成: 迁移并清理记录=%d cost=%s", migratedTotal, time.Since(startedAt))
+	log.Printf("[Migration] 附属站播放列表平滑割接完成: 迁移并清理记录=%d, 总耗时=%s", migratedTotal, time.Since(startedAt))
 	return nil
 }

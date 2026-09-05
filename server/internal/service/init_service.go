@@ -48,10 +48,12 @@ func (s *InitService) DefaultDataInit() {
 		db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 	}
 
-	// 历史数据平滑割接：将老表 movie_playlist 附属站数据迁移至 slave_movie_playlists
-	if err := filmrepo.MigrateLegacyMoviePlaylistsTx(db.Mdb); err != nil {
-		syslog.Errorf("[Init] 附属站播放列表割接迁移失败: %v", err)
-	}
+	// 历史数据平滑割接：后台异步执行，避免百万级存量数据迁移阻塞 HTTP 服务启动引发 Web 容器 ECONNREFUSED
+	go func() {
+		if err := filmrepo.MigrateLegacyMoviePlaylistsTx(db.Mdb); err != nil {
+			syslog.Errorf("[Init] 附属站播放列表割接迁移失败: %v", err)
+		}
+	}()
 
 	repository.InitMappingEngine()
 	repository.InitMainCategories()

@@ -826,6 +826,23 @@ func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []
 		return nil
 	}
 	if len(playlists) == 0 {
+		var legacy []model.MoviePlaylist
+		if err := tx.Where("source_id = ? AND movie_key IN ?", siteID, orderedKeys).
+			Order("movie_key ASC").
+			Order("group_index ASC").
+			Find(&legacy).Error; err == nil && len(legacy) > 0 {
+			for _, lp := range legacy {
+				playlists = append(playlists, model.SlaveMoviePlaylist{
+					SourceId:   lp.SourceId,
+					MovieKey:   lp.MovieKey,
+					GroupIndex: lp.GroupIndex,
+					GroupName:  lp.GroupName,
+					Content:    lp.Content,
+				})
+			}
+		}
+	}
+	if len(playlists) == 0 {
 		return nil
 	}
 
@@ -930,6 +947,24 @@ func loadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []stri
 		Order("group_index ASC").
 		Find(&playlists).Error; err != nil {
 		return nil, err
+	}
+	if len(playlists) == 0 {
+		var legacy []model.MoviePlaylist
+		if err := tx.Where("source_id IN ? AND movie_key IN ?", sourceIDs, keys).
+			Order("source_id ASC").
+			Order("movie_key ASC").
+			Order("group_index ASC").
+			Find(&legacy).Error; err == nil && len(legacy) > 0 {
+			for _, lp := range legacy {
+				playlists = append(playlists, model.SlaveMoviePlaylist{
+					SourceId:   lp.SourceId,
+					MovieKey:   lp.MovieKey,
+					GroupIndex: lp.GroupIndex,
+					GroupName:  lp.GroupName,
+					Content:    lp.Content,
+				})
+			}
+		}
 	}
 
 	result := make(map[string]map[string][]model.SlaveMoviePlaylist)
