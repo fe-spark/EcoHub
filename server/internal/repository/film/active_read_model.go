@@ -6,7 +6,7 @@ import (
 	"log"
 	"runtime"
 	"runtime/debug"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -38,23 +38,20 @@ type filmSearchIndexRow struct {
 }
 
 type filmSearchMemoryItem struct {
-	Mid              int64
-	Pid              int64
-	Cid              int64
-	Hits             int64
-	Score            float64
-	Year             int64
-	UpdateStamp      int64
-	NameOffset       uint32
-	NameLen          uint16
-	CleanNameOffset  uint32
-	CleanNameLen     uint16
-	PinyinFullOffset uint32
-	PinyinFullLen    uint16
-	PinyinInitOffset uint32
-	PinyinInitLen    uint16
-	PinyinAltOffset  uint32
-	PinyinAltLen     uint16
+	Mid         int64
+	Hits        int32
+	UpdateStamp int32
+	PoolOffset  uint32
+	Pid         int32
+	Cid         int32
+	Year        int32
+	Score       float32
+	NameLen     uint16
+	CleanLen    uint16
+	PyFullLen   uint16
+	PyInitLen   uint16
+	PyAltLen    uint16
+	_           uint16
 }
 
 type scoredSearchHit struct {
@@ -97,13 +94,11 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	}
 
 	// 双缓冲保护：如果新版本索引正在构建，但当前内存中已有有效索引（哪怕是已标记过期的上一版本），
-	// 异步触发新版本构建，同时立即返回当前可用索引，避免将在线 HTTP 请求阻塞 5 秒！
+	// 非阻塞加入或触发构建，同时立即返回当前可用索引，避免将在线 HTTP 请求阻塞 5 秒！
 	if cur := activeFilmSearchIndex.Load(); cur != nil && len(cur.Items) > 0 {
-		go func(ver string) {
-			_, _, _ = searchIndexBuild.Do(ver, func() (any, error) {
-				return buildAndStoreSearchIndex(ver)
-			})
-		}(version)
+		_ = searchIndexBuild.DoChan(version, func() (any, error) {
+			return buildAndStoreSearchIndex(version)
+		})
 		return cur
 	}
 
@@ -132,6 +127,8 @@ func buildAndStoreSearchIndex(version string) (*filmSearchMemoryIndex, error) {
 		return built, nil
 	}
 	activeFilmSearchIndex.Store(built)
+	runtime.GC()
+	debug.FreeOSMemory()
 	return built, nil
 }
 
@@ -161,6 +158,7 @@ func buildFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	log.Printf("[ActiveReadModel] 开始构建内存搜索索引 version=%s rows=%d scan=%s", version, len(rows), scanCost)
 
 	newIdx := buildSearchIndexFromRows(version, rows)
+	rows = nil // 立即解除对临时切片引用，协助 GC 释放
 	log.Printf("[ActiveReadModel] 内存搜索索引已构建 version=%s count=%d poolSize=%d scan=%s total=%s",
 		version, len(newIdx.Items), len(newIdx.StringPool), scanCost, time.Since(buildStarted))
 	return newIdx
@@ -189,7 +187,9 @@ func LoadActiveFilmReadModel(version string) error {
 				log.Printf("[ActiveReadModel] 异步构建内存搜索索引发生异常: %v", r)
 			}
 		}()
-		getOrLoadFilmSearchMemoryIndex(ver)
+		_, _, _ = searchIndexBuild.Do(ver, func() (any, error) {
+			return buildAndStoreSearchIndex(ver)
+		})
 		runtime.GC()
 		debug.FreeOSMemory()
 	}(version)
@@ -229,11 +229,6 @@ func InvalidateActiveFilmSearchIndex(version string) {
 		if err := LoadActiveFilmReadModel(version); err != nil {
 			log.Printf("[ActiveReadModel] 重载读模型失败 version=%s: %v", version, err)
 		}
-		go func(ver string) {
-			_, _, _ = searchIndexBuild.Do(ver, func() (any, error) {
-				return buildAndStoreSearchIndex(ver)
-			})
-		}(version)
 	} else {
 		ClearActiveFilmReadModel()
 	}
@@ -290,10 +285,10 @@ func (idx *filmSearchMemoryIndex) scoreOneItem(itemIndex int, q utils.QueryConte
 		return scoredSearchHit{}
 	}
 	item := &idx.Items[itemIndex]
-	if pid > 0 && item.Pid != pid {
+	if pid > 0 && int64(item.Pid) != pid {
 		return scoredSearchHit{}
 	}
-	if cid > 0 && item.Cid != cid {
+	if cid > 0 && int64(item.Cid) != cid {
 		return scoredSearchHit{}
 	}
 	s := utils.ScoreFilmMatch(idx.asSearchItem(itemIndex), q)
@@ -303,10 +298,10 @@ func (idx *filmSearchMemoryIndex) scoreOneItem(itemIndex int, q utils.QueryConte
 	return scoredSearchHit{
 		mid:         item.Mid,
 		matchScore:  s,
-		hits:        item.Hits,
-		score:       item.Score,
-		year:        item.Year,
-		updateStamp: item.UpdateStamp,
+		hits:        int64(item.Hits),
+		score:       float64(item.Score),
+		year:        int64(item.Year),
+		updateStamp: int64(item.UpdateStamp),
 	}
 }
 
@@ -338,8 +333,11 @@ func scoreMemoryIndex(idx *filmSearchMemoryIndex, keyword string, sortField stri
 		}
 	}
 
-	sort.SliceStable(matched, func(i, j int) bool {
-		return compareScoredHits(matched[i], matched[j], sortField)
+	slices.SortFunc(matched, func(a, b scoredSearchHit) int {
+		if compareScoredHits(a, b, sortField) {
+			return -1
+		}
+		return 1
 	})
 	return matched
 }
@@ -685,6 +683,17 @@ type searchCacheItem struct {
 	Snapshots []model.FilmListSnapshot `json:"snapshots"`
 }
 
+func cloneFilmListSnapshots(src []model.FilmListSnapshot) []model.FilmListSnapshot {
+	if src == nil {
+		return nil
+	}
+	out := make([]model.FilmListSnapshot, len(src))
+	copy(out, src)
+	return out
+}
+
+var searchSnapshotsSf singleflight.Group
+
 func SearchSnapshotsByKeywordReadModel(version string, keyword string, page *dto.Page) []model.FilmListSnapshot {
 	return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
 }
@@ -699,6 +708,8 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 		version = GetActiveSnapshotVersion()
 	}
 	if version == "" || keyword == "" {
+		page.Total = 0
+		page.PageCount = 1
 		return []model.FilmListSnapshot{}
 	}
 
@@ -724,24 +735,78 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 		}
 	}
 
-	// 2. 优先使用内存倒排索引模糊搜索
-	idx := getOrLoadFilmSearchMemoryIndex(version)
-	if idx != nil && len(idx.Items) > 0 {
-		matched := scoreMemoryIndex(idx, keyword, sortField, 0, 0)
-		var snapshots []model.FilmListSnapshot
-		if pageMids := pageMidsFromHits(matched, page); len(pageMids) > 0 {
-			snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
-		}
-		if snapshots == nil {
-			snapshots = []model.FilmListSnapshot{}
+	// 2. 并发防击穿：相同关键词搜索合并执行
+	sfKey := fmt.Sprintf("v%s:%s:%s:p%d:s%d", version, keyword, sortField, page.Current, page.PageSize)
+	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
+		// 二次双检 Redis 缓存
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var item searchCacheItem
+				if json.Unmarshal([]byte(data), &item) == nil {
+					return item, nil
+				}
+			}
 		}
 
-		if db.Rdb != nil {
+		// 优先使用内存倒排索引模糊搜索
+		idx := getOrLoadFilmSearchMemoryIndex(version)
+		if idx != nil && len(idx.Items) > 0 {
+			matched := scoreMemoryIndex(idx, keyword, sortField, 0, 0)
+			var snapshots []model.FilmListSnapshot
+			if pageMids := pageMidsFromHits(matched, page); len(pageMids) > 0 {
+				snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+			}
+			if snapshots == nil {
+				snapshots = []model.FilmListSnapshot{}
+			}
+
 			item := searchCacheItem{
 				Total:     page.Total,
 				PageCount: page.PageCount,
 				Snapshots: snapshots,
 			}
+			if db.Rdb != nil {
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute // 空结果防穿透短缓存
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				}
+			}
+
+			log.Printf("[SearchFilm] 内存模糊搜索完成 keyword=%q sort=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
+				keyword, sortField, page.Total, page.Current, len(snapshots), time.Since(startedAt))
+			return item, nil
+		}
+
+		// 降级：仅查 name，避免扫描 sub_title / actor / director 的 TEXT 字段
+		query := applyNameLikeFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version), keyword)
+
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+		page.Total = int(total)
+		page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+		if page.PageCount <= 0 {
+			page.PageCount = 1
+		}
+
+		orderClause := snapshotSortOrderClause(sortField, true)
+
+		var snapshots []model.FilmListSnapshot
+		offset := getPageOffset(page)
+		if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+
+		item := searchCacheItem{
+			Total:     page.Total,
+			PageCount: page.PageCount,
+			Snapshots: snapshots,
+		}
+		if db.Rdb != nil {
 			if raw, err := json.Marshal(item); err == nil {
 				ttl := 3 * time.Minute
 				if len(snapshots) == 0 {
@@ -751,50 +816,25 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 			}
 		}
 
-		log.Printf("[SearchFilm] 内存模糊搜索完成 keyword=%q sort=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
+		log.Printf("[SearchFilm] DB搜索完成 keyword=%q sort=%q cache=MISS total=%d page=%d size=%d cost=%s",
 			keyword, sortField, page.Total, page.Current, len(snapshots), time.Since(startedAt))
-		return snapshots
-	}
+		return item, nil
+	})
 
-	// 降级：仅查 name，避免扫描 sub_title / actor / director 的 TEXT 字段
-	query := applyNameLikeFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version), keyword)
-
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return []model.FilmListSnapshot{}
-	}
-	page.Total = int(total)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
+	if err != nil || val == nil {
+		page.Total = 0
 		page.PageCount = 1
-	}
-
-	orderClause := snapshotSortOrderClause(sortField, true)
-
-	var snapshots []model.FilmListSnapshot
-	offset := getPageOffset(page)
-	if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
 		return []model.FilmListSnapshot{}
 	}
-
-	if db.Rdb != nil {
-		item := searchCacheItem{
-			Total:     page.Total,
-			PageCount: page.PageCount,
-			Snapshots: snapshots,
-		}
-		if raw, err := json.Marshal(item); err == nil {
-			ttl := 3 * time.Minute
-			if len(snapshots) == 0 {
-				ttl = 1 * time.Minute // 空结果防穿透短缓存
-			}
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-		}
+	cachedItem, ok := val.(searchCacheItem)
+	if !ok {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
 	}
-
-	log.Printf("[SearchFilm] DB搜索完成 keyword=%q sort=%q cache=MISS total=%d page=%d size=%d cost=%s",
-		keyword, sortField, page.Total, page.Current, len(snapshots), time.Since(startedAt))
-	return snapshots
+	page.Total = cachedItem.Total
+	page.PageCount = cachedItem.PageCount
+	return cloneFilmListSnapshots(cachedItem.Snapshots)
 }
 
 func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
@@ -802,9 +842,18 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 	page := ensurePage(s.Paging)
 	name := strings.TrimSpace(s.Name)
 	version := strings.TrimSpace(GetActiveSnapshotVersion())
+	if version == "" {
+		if m := GetActiveFilmReadModel(); m != nil && m.Version != "" {
+			version = m.Version
+		}
+	}
 
-	// 1. 如果有搜索词，优先走内存倒排搜索索引与极速过滤 (毫秒级响应)
-	if name != "" && version != "" {
+	// 当包含剧情(class_tag/plot)、地区(area)、语言(language)等复合条件时，
+	// 因内存紧凑索引未收录这些字段，直接透传快照表查询，保证多维筛选结果准确
+	hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != ""
+
+	// 1. 如果有搜索词且无复合文本/地区/语言过滤，优先走内存倒排搜索索引与极速过滤 (毫秒级响应)
+	if name != "" && version != "" && !hasComplexFilter {
 		idx := getOrLoadFilmSearchMemoryIndex(version)
 		if idx != nil && len(idx.Items) > 0 {
 			matched := scoreMemoryIndex(idx, name, "latest", s.Pid, s.Cid)
@@ -837,9 +886,12 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 		}
 	}
 
-	// 2. 无搜索词时，优先走轻量只读快照表 FilmListSnapshot 投影查询
+	// 2. 快照表 FilmListSnapshot 投影查询（含复合筛选、无搜索词或冷启动降级）
 	if version != "" {
 		query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
+		if name != "" {
+			query = applyNameLikeFilter(query, name)
+		}
 		if s.Pid > 0 {
 			query = query.Where("pid = ?", s.Pid)
 		}
