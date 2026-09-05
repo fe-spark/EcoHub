@@ -18,17 +18,7 @@ func buildMovieMatchKeyRecords(mid int64, keys []string) []model.MovieMatchKey {
 }
 
 func saveMovieMatchKeysByMid(midToKeys map[int64][]string) error {
-	if err := saveMovieMatchKeysByMidTx(db.Mdb, midToKeys); err != nil {
-		return err
-	}
-	var allKeys []string
-	for _, keys := range midToKeys {
-		allKeys = append(allKeys, keys...)
-	}
-	if len(allKeys) > 0 {
-		return ReviveSlavePlaylistsTx(db.Mdb, allKeys)
-	}
-	return nil
+	return saveMovieMatchKeysByMidTx(db.Mdb, midToKeys)
 }
 
 func saveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error {
@@ -58,47 +48,8 @@ func saveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error 
 	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error
 }
 
-// ReviveSlavePlaylistsTx 主站写入或重试恢复生成匹配键时，即时批量复活可能处于观察期的附属站播放列表。
-// 内部包含 Fast-path 探针：先检测是否存在处于观察期的记录，无记录时直接跳过，杜绝无意义的排他写锁。
+// ReviveSlavePlaylistsTx 保持接口向后兼容（单阶段极简治理模式下已无须维护观察期状态机打标）。
 func ReviveSlavePlaylistsTx(tx *gorm.DB, matchKeys []string) error {
-	matchKeys = UniqueKeys(matchKeys)
-	if len(matchKeys) == 0 {
-		return nil
-	}
-	if tx == nil {
-		tx = db.Mdb
-	}
-	if tx == nil {
-		return nil
-	}
-	const batchSize = 500
-	for i := 0; i < len(matchKeys); i += batchSize {
-		end := i + batchSize
-		if end > len(matchKeys) {
-			end = len(matchKeys)
-		}
-		chunk := matchKeys[i:end]
-
-		// Fast-path 探针：先查是否有处于观察期的行，避免无意义的排他锁与死锁
-		var dummy uint
-		res := tx.Model(&model.SlaveMoviePlaylist{}).
-			Select("id").
-			Where("movie_key IN ? AND orphan_marked_at IS NOT NULL", chunk).
-			Limit(1).
-			Scan(&dummy)
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			continue
-		}
-
-		if err := tx.Model(&model.SlaveMoviePlaylist{}).
-			Where("movie_key IN ? AND orphan_marked_at IS NOT NULL", chunk).
-			Update("orphan_marked_at", gorm.Expr("NULL")).Error; err != nil {
-			return err
-		}
-	}
 	return nil
 }
 

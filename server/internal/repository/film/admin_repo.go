@@ -198,12 +198,6 @@ func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
 		return err
 	}
-	// 主站切换后，重置附属站播放源的观察期时钟，赋予新主站完整的 48 小时采集挂接缓冲期
-	if err := conn.Model(&model.SlaveMoviePlaylist{}).
-		Where("orphan_marked_at IS NOT NULL").
-		Update("orphan_marked_at", gorm.Expr("NULL")).Error; err != nil {
-		log.Printf("[Collect] 主站切换重置附属站观察期标记失败: %v", err)
-	}
 	ClearOrphanCleanCursor()
 	SetMasterSwitchProtection(MasterSwitchColdStartDuration)
 	return nil
