@@ -473,7 +473,7 @@ func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist,
 		if len(changedPlaylists) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "orphan_marked_at"}),
+				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
 			}).CreateInBatches(&changedPlaylists, 500).Error; err != nil {
 				return err
 			}

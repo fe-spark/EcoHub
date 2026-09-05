@@ -70,7 +70,7 @@ func TestCleanOrphanPlaylists_Gates(t *testing.T) {
 	}
 }
 
-func TestCleanOrphanPlaylists_MarkAndRevive(t *testing.T) {
+func TestCleanOrphanPlaylists_GracePeriodSafety(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 
 	// 快照与匹配键
@@ -78,45 +78,54 @@ func TestCleanOrphanPlaylists_MarkAndRevive(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "slave_1", Name: "附属站1", Grade: model.SlaveCollect, State: true})
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "valid_key"})
 
-	// 1. 正常匹配的记录
-	p1 := model.SlaveMoviePlaylist{ID: 1, SourceId: "slave_1", MovieKey: "valid_key"}
-	// 2. 附属站抓到但主站暂时没有的记录（待定孤儿）
-	p2 := model.SlaveMoviePlaylist{ID: 2, SourceId: "slave_1", MovieKey: "pending_key"}
+	now := time.Now()
+	// 1. 正常匹配的记录（1 小时前入库）
+	p1 := model.SlaveMoviePlaylist{ID: 1, SourceId: "slave_1", MovieKey: "valid_key", CreatedAt: now.Add(-1 * time.Hour)}
+	// 2. 附属站刚抓到、但主站暂时没有的记录（1 小时前入库，处于 24h 安全沉淀期内）
+	p2 := model.SlaveMoviePlaylist{ID: 2, SourceId: "slave_1", MovieKey: "pending_key", CreatedAt: now.Add(-1 * time.Hour)}
 	gdb.Create(&p1)
 	gdb.Create(&p2)
 
-	// 首次扫描：未匹配的 p2 应被打上待定孤儿标记（进入观察期），但不物理删除
+	// 执行清理：虽然 p2 主站暂无，但处于 24h 安全沉淀期内，严禁删除
 	purged, err := CleanOrphanPlaylists()
 	if err != nil {
 		t.Fatalf("CleanOrphanPlaylists failed: %v", err)
 	}
 	if purged != 0 {
-		t.Fatalf("expected 0 purged during observation period, got %d", purged)
+		t.Fatalf("expected 0 purged during 24h grace period, got %d", purged)
 	}
 
-	var row1, row2 model.SlaveMoviePlaylist
-	gdb.First(&row1, 1)
-	gdb.First(&row2, 2)
-
-	if row1.OrphanMarkedAt != nil {
-		t.Fatalf("expected valid row1 OrphanMarkedAt to be nil, got %v", row1.OrphanMarkedAt)
-	}
-	if row2.OrphanMarkedAt == nil {
-		t.Fatalf("expected orphan row2 OrphanMarkedAt to be marked, got nil")
+	var count int64
+	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&count)
+	if count != 2 {
+		t.Fatalf("expected both records intact during grace period, got count %d", count)
 	}
 
-	// 模拟随后主站采集到了 pending_key，触发 ReviveSlavePlaylistsTx
-	if err := ReviveSlavePlaylistsTx(gdb, []string{"pending_key"}); err != nil {
-		t.Fatalf("ReviveSlavePlaylistsTx failed: %v", err)
+	// 3. 模拟历史附属站数据（入库已 48h），随后主站采集到了该影片
+	markedPast48h := now.Add(-48 * time.Hour)
+	p3 := model.SlaveMoviePlaylist{
+		ID:        3,
+		SourceId:  "slave_1",
+		MovieKey:  "legacy_orphan_now_collected",
+		CreatedAt: markedPast48h,
+	}
+	gdb.Create(&p3)
+
+	// 此时主站采集到了 legacy_orphan_now_collected
+	gdb.Create(&model.MovieMatchKey{Mid: 103, MatchKey: "legacy_orphan_now_collected"})
+
+	// 执行孤儿治理：主站已收录的影片无论何时入库、无论历史是否被打标，绝对不删！
+	purged, err = CleanOrphanPlaylists()
+	if err != nil {
+		t.Fatalf("CleanOrphanPlaylists failed: %v", err)
+	}
+	if purged != 0 {
+		t.Fatalf("expected 0 purged for legacy orphan now collected by master, got %d", purged)
 	}
 
-	// 验证 row2 已成功复活（OrphanMarkedAt 被清空）
-	var revived model.SlaveMoviePlaylist
-	if err := gdb.First(&revived, 2).Error; err != nil {
-		t.Fatalf("query revived row2 failed: %v", err)
-	}
-	if revived.OrphanMarkedAt != nil {
-		t.Fatalf("expected revived row2 OrphanMarkedAt to be nil, got %v", revived.OrphanMarkedAt)
+	var row3 model.SlaveMoviePlaylist
+	if err := gdb.First(&row3, 3).Error; err != nil {
+		t.Fatalf("expected row3 intact and not deleted: %v", err)
 	}
 }
 
@@ -128,15 +137,15 @@ func TestCleanOrphanPlaylists_PurgeExpired(t *testing.T) {
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "valid_key"})
 
 	now := time.Now()
-	markedPast50h := now.Add(-50 * time.Hour)
-	markedPast10h := now.Add(-10 * time.Hour)
+	createdPast30h := now.Add(-30 * time.Hour) // 超出 24h 沉淀期
+	createdPast10h := now.Add(-10 * time.Hour) // 在 24h 沉淀期内
 
-	// 1. 超期 48 小时的真孤儿 -> 必须被物理回收
-	p1 := model.SlaveMoviePlaylist{ID: 1, SourceId: "slave_1", MovieKey: "expired_orphan", OrphanMarkedAt: &markedPast50h}
-	// 2. 刚刚标记 10 小时的待定孤儿 -> 在 48h 观察期内，安全保留
-	p2 := model.SlaveMoviePlaylist{ID: 2, SourceId: "slave_1", MovieKey: "recent_orphan", OrphanMarkedAt: &markedPast10h}
-	// 3. 正常匹配记录 -> 保留
-	p3 := model.SlaveMoviePlaylist{ID: 3, SourceId: "slave_1", MovieKey: "valid_key"}
+	// 1. 超期 24 小时且主站无匹配的真孤儿 -> 必须被物理回收
+	p1 := model.SlaveMoviePlaylist{ID: 1, SourceId: "slave_1", MovieKey: "expired_orphan", CreatedAt: createdPast30h}
+	// 2. 刚刚入库 10 小时的待定记录 -> 在 24h 沉淀期内，安全保留
+	p2 := model.SlaveMoviePlaylist{ID: 2, SourceId: "slave_1", MovieKey: "recent_orphan", CreatedAt: createdPast10h}
+	// 3. 正常匹配记录（即使入库超过 30h） -> 安全保留
+	p3 := model.SlaveMoviePlaylist{ID: 3, SourceId: "slave_1", MovieKey: "valid_key", CreatedAt: createdPast30h}
 
 	gdb.Create(&p1)
 	gdb.Create(&p2)
@@ -297,12 +306,14 @@ func TestCleanOrphanPlaylists_CursorResume(t *testing.T) {
 	gdb.Create(&model.FilmListSnapshot{SnapshotVersion: "v1", Mid: 1, Pid: 1})
 	gdb.Create(&model.MovieMatchKey{Mid: 1, MatchKey: "key_matched"})
 
-	// 插入 6 条附属站记录（ID 1..6）
+	// 插入 6 条超出 24h 沉淀期的真孤儿记录（ID 1..6）
+	past := time.Now().Add(-30 * time.Hour)
 	for i := uint(1); i <= 6; i++ {
 		gdb.Create(&model.SlaveMoviePlaylist{
-			ID:       i,
-			SourceId: "slave_1",
-			MovieKey: fmt.Sprintf("orphan_key_%d", i),
+			ID:        i,
+			SourceId:  "slave_1",
+			MovieKey:  fmt.Sprintf("orphan_key_%d", i),
+			CreatedAt: past,
 		})
 	}
 
@@ -321,9 +332,12 @@ func TestCleanOrphanPlaylists_CursorResume(t *testing.T) {
 		return LoadOrphanCleanCursor() >= 2
 	}
 
-	_, err := markCandidateOrphans(time.Now().Add(time.Minute), stopAfterOneBatch)
+	purged, err := CleanOrphanPlaylistsUntil(stopAfterOneBatch)
 	if err != nil {
 		t.Fatalf("partial scan failed: %v", err)
+	}
+	if purged != 2 {
+		t.Fatalf("expected 2 purged in first batch, got %d", purged)
 	}
 
 	cur := LoadOrphanCleanCursor()
@@ -332,9 +346,12 @@ func TestCleanOrphanPlaylists_CursorResume(t *testing.T) {
 	}
 
 	// 第二次执行：从游标 2 继续向后扫描直至扫完整张表
-	_, err = markCandidateOrphans(time.Now().Add(time.Minute), nil)
+	purged2, err := CleanOrphanPlaylistsUntil(nil)
 	if err != nil {
 		t.Fatalf("resumed scan failed: %v", err)
+	}
+	if purged2 != 4 {
+		t.Fatalf("expected remaining 4 purged in second run, got %d", purged2)
 	}
 
 	// 扫描到表尾后，游标应被复位为 0
@@ -343,11 +360,11 @@ func TestCleanOrphanPlaylists_CursorResume(t *testing.T) {
 		t.Fatalf("expected cursor to reset to 0 after full scan, got %d", finalCur)
 	}
 
-	// 所有 6 条记录都应被成功打标（因为它们都不是 key_matched）
-	var markedCount int64
-	gdb.Model(&model.SlaveMoviePlaylist{}).Where("orphan_marked_at IS NOT NULL").Count(&markedCount)
-	if markedCount != 6 {
-		t.Fatalf("expected all 6 records marked as orphan candidates, got %d", markedCount)
+	// 所有 6 条真孤儿都应被成功物理删除
+	var remainingCount int64
+	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&remainingCount)
+	if remainingCount != 0 {
+		t.Fatalf("expected all 6 records purged, got remaining %d", remainingCount)
 	}
 }
 
@@ -415,8 +432,8 @@ func TestSlaveMoviePlaylist_HardDeleteNoTombstone(t *testing.T) {
 }
 
 
-// TestCleanOrphanPlaylists_SecondChanceVerification 验证“临刑复核”机制：
-// 在物理删除已超期的待定孤儿时，若发现主站 match_key 已经存在，则原地复活（清空 orphan_marked_at），不予删除。
+// TestCleanOrphanPlaylists_SecondChanceVerification 验证主站收录判定：
+// 超期 24 小时的记录中，若主站 match_key 存在，则安全保留；只有确认主站依然不存在的真孤儿才被物理删除。
 func TestCleanOrphanPlaylists_SecondChanceVerification(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 
@@ -426,25 +443,25 @@ func TestCleanOrphanPlaylists_SecondChanceVerification(t *testing.T) {
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "valid_resurrect_key"})
 
 	now := time.Now()
-	expiredMark := now.Add(-50 * time.Hour) // 超过 48 小时观察期
+	expiredCreate := now.Add(-30 * time.Hour) // 超过 24 小时沉淀期
 
-	// 1. 待定孤儿 1：超期 50h，但其 movie_key 在主站 match_key 中已存在 -> 临刑复核必须原地复活！
+	// 1. 记录 1：超期 30h，但其 movie_key 在主站 match_key 中存在 -> 必须安全保留！
 	p1 := model.SlaveMoviePlaylist{
-		ID:             10,
-		SourceId:       "slave_1",
-		MovieKey:       "valid_resurrect_key",
-		GroupName:      "线路1",
-		Content:        `[{"episode":"01","link":"http://a"}]`,
-		OrphanMarkedAt: &expiredMark,
+		ID:        10,
+		SourceId:  "slave_1",
+		MovieKey:  "valid_resurrect_key",
+		GroupName: "线路1",
+		Content:   `[{"episode":"01","link":"http://a"}]`,
+		CreatedAt: expiredCreate,
 	}
-	// 2. 待定孤儿 2：超期 50h，主站确实无此 key -> 必须被物理删除
+	// 2. 记录 2：超期 30h，主站确实无此 key -> 必须被物理删除
 	p2 := model.SlaveMoviePlaylist{
-		ID:             20,
-		SourceId:       "slave_1",
-		MovieKey:       "real_orphan_key",
-		GroupName:      "线路1",
-		Content:        `[{"episode":"01","link":"http://b"}]`,
-		OrphanMarkedAt: &expiredMark,
+		ID:        20,
+		SourceId:  "slave_1",
+		MovieKey:  "real_orphan_key",
+		GroupName: "线路1",
+		Content:   `[{"episode":"01","link":"http://b"}]`,
+		CreatedAt: expiredCreate,
 	}
 	gdb.Create(&p1)
 	gdb.Create(&p2)
@@ -457,13 +474,13 @@ func TestCleanOrphanPlaylists_SecondChanceVerification(t *testing.T) {
 		t.Fatalf("expected exactly 1 real orphan purged, got %d", purged)
 	}
 
-	// 验证 p1 原地复活
-	var resurrected model.SlaveMoviePlaylist
-	if err := gdb.First(&resurrected, 10).Error; err != nil {
-		t.Fatalf("query resurrected record failed: %v", err)
+	// 验证 p1 安全保留
+	var preserved model.SlaveMoviePlaylist
+	if err := gdb.First(&preserved, 10).Error; err != nil {
+		t.Fatalf("query preserved record failed: %v", err)
 	}
-	if resurrected.OrphanMarkedAt != nil {
-		t.Fatalf("expected OrphanMarkedAt to be nil after second-chance revive, got %v", resurrected.OrphanMarkedAt)
+	if preserved.MovieKey != "valid_resurrect_key" {
+		t.Fatalf("expected valid_resurrect_key preserved, got %s", preserved.MovieKey)
 	}
 
 	// 验证 p2 被物理删除
@@ -474,7 +491,7 @@ func TestCleanOrphanPlaylists_SecondChanceVerification(t *testing.T) {
 }
 
 // TestCleanOrphanPlaylists_ColdStartProtection 验证主站切换冷启动保护期：
-// 在保护期内，孤儿清理门禁自动跳过打标与回收，防止新主站抓取期间误删存量附属资源。
+// 在保护期内，孤儿清理门禁自动跳过，防止新主站抓取期间误删存量附属资源。
 func TestCleanOrphanPlaylists_ColdStartProtection(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 
@@ -482,12 +499,12 @@ func TestCleanOrphanPlaylists_ColdStartProtection(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "slave_1", Name: "附属站1", Grade: model.SlaveCollect, State: true})
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "valid_key"})
 
-	expiredMark := time.Now().Add(-50 * time.Hour)
+	expiredCreate := time.Now().Add(-30 * time.Hour)
 	p := model.SlaveMoviePlaylist{
-		ID:             99,
-		SourceId:       "slave_1",
-		MovieKey:       "orphan_during_cold_start",
-		OrphanMarkedAt: &expiredMark,
+		ID:        99,
+		SourceId:  "slave_1",
+		MovieKey:  "orphan_during_cold_start",
+		CreatedAt: expiredCreate,
 	}
 	gdb.Create(&p)
 
@@ -527,19 +544,17 @@ func TestCleanOrphanPlaylists_ColdStartProtection(t *testing.T) {
 	}
 }
 
-// TestDisplayPlaylists_NotFilteredByOrphanMark 验证前台线路展示不得因处于观察期（orphan_marked_at != nil）而隐藏线路。
+// TestDisplayPlaylists_NotFilteredByOrphanMark 验证前台线路展示正常。
 func TestDisplayPlaylists_NotFilteredByOrphanMark(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 
-	markedTime := time.Now().Add(-1 * time.Hour)
 	p := model.SlaveMoviePlaylist{
-		ID:             100,
-		SourceId:       "slave_1",
-		MovieKey:       "key_in_observation",
-		GroupIndex:     0,
-		GroupName:      "高清线路",
-		Content:        `[{"episode":"01","link":"http://play/1"}]`,
-		OrphanMarkedAt: &markedTime,
+		ID:         100,
+		SourceId:   "slave_1",
+		MovieKey:   "key_in_observation",
+		GroupIndex: 0,
+		GroupName:  "高清线路",
+		Content:    `[{"episode":"01","link":"http://play/1"}]`,
 	}
 	gdb.Create(&p)
 
@@ -562,109 +577,117 @@ func TestDisplayPlaylists_NotFilteredByOrphanMark(t *testing.T) {
 	}
 }
 
-// TestCleanOrphanPlaylists_IndependentBudgets 验证 Mark 与 Purge 各自享有独立的超时预算，且 Purge 优先于 Mark 执行。
-func TestCleanOrphanPlaylists_IndependentBudgets(t *testing.T) {
+// TestCleanOrphanPlaylists_QuotaLimit 验证单次任务配额限流（Quota）：
+// 当超期孤儿数量达到单次最大删除配额时，任务安全退出并保存断点游标，下次继续。
+func TestCleanOrphanPlaylists_QuotaLimit(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
+
+	ClearOrphanCleanCursor()
+	defer ClearOrphanCleanCursor()
 
 	gdb.Create(&model.FilmListSnapshot{SnapshotVersion: "v1", Mid: 101, Pid: 1})
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "key_matched"})
 
-	now := time.Now()
-	expiredMark := now.Add(-50 * time.Hour)
+	past := time.Now().Add(-30 * time.Hour)
+	// 插入 10 条真孤儿
+	for i := uint(1); i <= 10; i++ {
+		gdb.Create(&model.SlaveMoviePlaylist{
+			ID:        i,
+			SourceId:  "slave_1",
+			MovieKey:  fmt.Sprintf("orphan_quota_%d", i),
+			CreatedAt: past,
+		})
+	}
 
-	// 插入 1 条超期待清理项，以及 1 条未打标项
-	gdb.Create(&model.SlaveMoviePlaylist{
-		ID:             1,
-		SourceId:       "slave_1",
-		MovieKey:       "expired_orphan_item",
-		OrphanMarkedAt: &expiredMark,
-	})
-	gdb.Create(&model.SlaveMoviePlaylist{
-		ID:       2,
-		SourceId: "slave_1",
-		MovieKey: "unmarked_orphan_item",
-	})
-
-	origPurgeBudget := orphanPlaylistPurgeBudget
-	origMarkBudget := orphanPlaylistMarkBudget
-	orphanPlaylistPurgeBudget = 2 * time.Second
-	orphanPlaylistMarkBudget = 2 * time.Second
+	// 设置单次最大删除配额为 4，批次大小为 2
+	origQuota := orphanPlaylistMaxPurgePerRun
+	origScanBatchSize := orphanPlaylistScanBatchSize
+	origDeleteBatchSize := orphanPlaylistDeleteBatchSize
+	origCooldown := orphanPlaylistBatchCooldown
+	orphanPlaylistMaxPurgePerRun = 4
+	orphanPlaylistScanBatchSize = 2
+	orphanPlaylistDeleteBatchSize = 2
+	orphanPlaylistBatchCooldown = 0
 	defer func() {
-		orphanPlaylistPurgeBudget = origPurgeBudget
-		orphanPlaylistMarkBudget = origMarkBudget
+		orphanPlaylistMaxPurgePerRun = origQuota
+		orphanPlaylistScanBatchSize = origScanBatchSize
+		orphanPlaylistDeleteBatchSize = origDeleteBatchSize
+		orphanPlaylistBatchCooldown = origCooldown
 	}()
 
-	marked, purged, err := runOrphanLifecycleClean(nil)
+	// 第一次运行：触达配额 4 退出
+	purged, err := CleanOrphanPlaylists()
 	if err != nil {
-		t.Fatalf("runOrphanLifecycleClean failed: %v", err)
+		t.Fatalf("CleanOrphanPlaylists failed: %v", err)
 	}
-	if purged != 1 {
-		t.Fatalf("expected 1 purged in purge phase, got %d", purged)
-	}
-	if marked != 1 {
-		t.Fatalf("expected 1 marked in mark phase, got %d", marked)
+	if purged != 4 {
+		t.Fatalf("expected exactly 4 purged under quota limit, got %d", purged)
 	}
 
-	// 验证 ID 1 已删除，ID 2 已打标
-	var p1 model.SlaveMoviePlaylist
-	if err := gdb.Unscoped().First(&p1, 1).Error; err == nil {
-		t.Fatalf("expected p1 to be purged")
+	cur := LoadOrphanCleanCursor()
+	if cur != 4 {
+		t.Fatalf("expected cursor saved at 4, got %d", cur)
 	}
-	var p2 model.SlaveMoviePlaylist
-	if err := gdb.First(&p2, 2).Error; err != nil || p2.OrphanMarkedAt == nil {
-		t.Fatalf("expected p2 to be marked as orphan")
+
+	// 第二次运行：再删除 4 条 (ID 5..8)
+	purged2, err := CleanOrphanPlaylists()
+	if err != nil {
+		t.Fatalf("second CleanOrphanPlaylists failed: %v", err)
+	}
+	if purged2 != 4 {
+		t.Fatalf("expected 4 purged in second run, got %d", purged2)
+	}
+	if cur2 := LoadOrphanCleanCursor(); cur2 != 8 {
+		t.Fatalf("expected cursor saved at 8, got %d", cur2)
+	}
+
+	// 第三次运行：删除剩余 2 条 (ID 9..10)，达到表尾游标归零
+	purged3, err := CleanOrphanPlaylists()
+	if err != nil {
+		t.Fatalf("third CleanOrphanPlaylists failed: %v", err)
+	}
+	if purged3 != 2 {
+		t.Fatalf("expected 2 purged in third run, got %d", purged3)
+	}
+	if cur3 := LoadOrphanCleanCursor(); cur3 != 0 {
+		t.Fatalf("expected cursor reset to 0 after full table scan, got %d", cur3)
 	}
 }
 
-// TestCleanOrphanPlaylists_PurgeTimeoutDoesNotStarveMark 验证当 Purge 预算耗尽时，Mark 依然享有独立预算正常执行，绝不饿死。
-func TestCleanOrphanPlaylists_PurgeTimeoutDoesNotStarveMark(t *testing.T) {
+// TestCleanOrphanPlaylists_TimeoutSafety 验证单次任务运行时间预算防卡死机制。
+func TestCleanOrphanPlaylists_TimeoutSafety(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
+
+	ClearOrphanCleanCursor()
+	defer ClearOrphanCleanCursor()
 
 	gdb.Create(&model.FilmListSnapshot{SnapshotVersion: "v1", Mid: 101, Pid: 1})
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "key_matched"})
 
-	now := time.Now()
-	expiredMark := now.Add(-50 * time.Hour)
+	past := time.Now().Add(-30 * time.Hour)
+	for i := uint(1); i <= 5; i++ {
+		gdb.Create(&model.SlaveMoviePlaylist{
+			ID:        i,
+			SourceId:  "slave_1",
+			MovieKey:  fmt.Sprintf("orphan_timeout_%d", i),
+			CreatedAt: past,
+		})
+	}
 
-	// 插入 1 条超期项（ID 10），以及 1 条待打标项（ID 20）
-	gdb.Create(&model.SlaveMoviePlaylist{
-		ID:             10,
-		SourceId:       "slave_1",
-		MovieKey:       "expired_orphan_item",
-		OrphanMarkedAt: &expiredMark,
-	})
-	gdb.Create(&model.SlaveMoviePlaylist{
-		ID:       20,
-		SourceId: "slave_1",
-		MovieKey: "unmarked_orphan_item",
-	})
-
-	origPurgeBudget := orphanPlaylistPurgeBudget
-	origMarkBudget := orphanPlaylistMarkBudget
-	// 模拟 Purge 预算耗尽 (0 预算)，而 Mark 享有独立 2 秒预算
-	orphanPlaylistPurgeBudget = -1 * time.Second
-	orphanPlaylistMarkBudget = 2 * time.Second
+	origDuration := orphanPlaylistMaxRunDuration
+	// 设置已超时预算
+	orphanPlaylistMaxRunDuration = -1 * time.Second
 	defer func() {
-		orphanPlaylistPurgeBudget = origPurgeBudget
-		orphanPlaylistMarkBudget = origMarkBudget
+		orphanPlaylistMaxRunDuration = origDuration
 	}()
 
-	marked, purged, err := runOrphanLifecycleClean(nil)
+	purged, err := CleanOrphanPlaylists()
 	if err != nil {
-		t.Fatalf("runOrphanLifecycleClean failed: %v", err)
+		t.Fatalf("CleanOrphanPlaylists failed: %v", err)
 	}
-	// Purge 因预算超时跳过，回收 0
+	// 超时直接退出，未执行删除
 	if purged != 0 {
-		t.Fatalf("expected 0 purged due to purge timeout, got %d", purged)
-	}
-	// Mark 独立预算正常执行，成功打标 1
-	if marked != 1 {
-		t.Fatalf("expected 1 marked in independent mark budget, got %d", marked)
-	}
-
-	var p2 model.SlaveMoviePlaylist
-	if err := gdb.First(&p2, 20).Error; err != nil || p2.OrphanMarkedAt == nil {
-		t.Fatalf("expected p2 to be marked even though purge timed out")
+		t.Fatalf("expected 0 purged due to immediate timeout, got %d", purged)
 	}
 }
 
@@ -855,7 +878,7 @@ func TestInMasterSwitchProtection_FailSafe(t *testing.T) {
 	}
 }
 
-func TestPurgeExpiredOrphans_TOCTOUGuard(t *testing.T) {
+func TestCleanOrphanPlaylists_TOCTOUGuard(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 
 	// 快照与匹配键
@@ -863,33 +886,33 @@ func TestPurgeExpiredOrphans_TOCTOUGuard(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "slave_toctou", Name: "附属站TOCTOU", Grade: model.SlaveCollect, State: true})
 	gdb.Create(&model.MovieMatchKey{Mid: 201, MatchKey: "valid_key"})
 
-	// 插入超期孤儿：已标记超过 48 小时
-	past := time.Now().Add(-50 * time.Hour)
+	// 插入超期孤儿：已入库超过 24 小时
+	past := time.Now().Add(-30 * time.Hour)
 	orphan1 := model.SlaveMoviePlaylist{
-		ID:             1001,
-		SourceId:       "slave_toctou",
-		MovieKey:       "key_to_be_revived",
-		OrphanMarkedAt: &past,
+		ID:        1001,
+		SourceId:  "slave_toctou",
+		MovieKey:  "key_concurrent_touched",
+		CreatedAt: past,
 	}
 	orphan2 := model.SlaveMoviePlaylist{
-		ID:             1002,
-		SourceId:       "slave_toctou",
-		MovieKey:       "key_true_orphan",
-		OrphanMarkedAt: &past,
+		ID:        1002,
+		SourceId:  "slave_toctou",
+		MovieKey:  "key_true_orphan",
+		CreatedAt: past,
 	}
 	gdb.Create(&orphan1)
 	gdb.Create(&orphan2)
 
-	// 模拟在临刑复核与物理删除之间的极窄毫秒窗口内，主站爬虫抓取完成并将 1001 复活（orphan_marked_at 置为 NULL）
-	gdb.Model(&model.SlaveMoviePlaylist{}).Where("id = ?", 1001).Update("orphan_marked_at", nil)
+	// 模拟在批次读取后与物理删除之间的并发窗口内，1001 被重新更新或重新录入（created_at 更新为当前时间）
+	gdb.Model(&model.SlaveMoviePlaylist{}).Where("id = ?", 1001).Update("created_at", time.Now())
 
-	// 调用 purgeExpiredOrphans 执行清理流程
-	purged, err := purgeExpiredOrphans(time.Now().Add(time.Minute), nil)
+	// 调用 CleanOrphanPlaylists 执行清理流程
+	purged, err := CleanOrphanPlaylists()
 	if err != nil {
-		t.Fatalf("purgeExpiredOrphans failed: %v", err)
+		t.Fatalf("CleanOrphanPlaylists failed: %v", err)
 	}
 
-	// 1002 真实超期被物理删除，1001 因原子守卫 orphan_marked_at IS NOT NULL 而得以保全
+	// 1002 真实超期被物理删除，1001 因原子守卫 created_at < cutoff 而得以保全
 	if purged != 1 {
 		t.Fatalf("expected 1 purged row (only 1002), got %d", purged)
 	}
@@ -898,7 +921,7 @@ func TestPurgeExpiredOrphans_TOCTOUGuard(t *testing.T) {
 	var count1001 int64
 	gdb.Model(&model.SlaveMoviePlaylist{}).Where("id = ?", 1001).Count(&count1001)
 	if count1001 != 1 {
-		t.Fatalf("expected revived playlist 1001 to survive, count=%d", count1001)
+		t.Fatalf("expected concurrent updated playlist 1001 to survive, count=%d", count1001)
 	}
 
 	// 验证 1002 已被物理删除

@@ -12,7 +12,6 @@ import (
 	"server/internal/model"
 
 	"github.com/redis/go-redis/v9"
-	"gorm.io/gorm"
 )
 
 var (
@@ -78,7 +77,6 @@ func LoadOrphanCleanCursor() uint {
 		if errors.Is(err, redis.Nil) {
 			return 0
 		}
-		// Redis 异常时降级使用本机内存
 	}
 	memoryOrphanMu.Lock()
 	defer memoryOrphanMu.Unlock()
@@ -105,97 +103,68 @@ func ClearOrphanCleanCursor() {
 	memoryOrphanMu.Unlock()
 }
 
-const orphanPlaylistDeleteBatchSize = 200
-const inMatchKeyBatchSize = 500
-
 var (
-	orphanPlaylistScanBatchSize = 5000
-	orphanPlaylistBatchCooldown = 50 * time.Millisecond
-	orphanPlaylistPurgeBudget   = 1 * time.Minute
-	orphanPlaylistMarkBudget    = 1 * time.Minute
-	orphanPlaylistRunBudget     = 2 * time.Minute
-	orphanPlaylistGracePeriod   = 48 * time.Hour
+	orphanPlaylistScanBatchSize   = 1000
+	orphanPlaylistDeleteBatchSize = 100
+	orphanPlaylistBatchCooldown   = 20 * time.Millisecond
+	orphanPlaylistMaxPurgePerRun  = int64(5000)
+	orphanPlaylistMaxRunDuration  = 10 * time.Second
+	orphanPlaylistGracePeriod     = 24 * time.Hour
 )
+
+const inMatchKeyBatchSize = 500
 
 type orphanPlaylistRow struct {
 	ID uint
 }
 
 type playlistScanRow struct {
-	ID             uint
-	MovieKey       string
-	SourceId       string
-	OrphanMarkedAt *time.Time
+	ID        uint
+	MovieKey  string
+	SourceId  string
+	CreatedAt time.Time
 }
 
 type matchKeyRow struct {
 	MatchKey string
 }
 
-// CleanOrphanPlaylists 两阶段状态机清理附属站孤儿：
-// 1. Mark: 未见主站 match_key 的行打上 orphan_marked_at（进入 48h 观察期）；
-// 2. Purge: 已被标记且超期 48h 的真孤儿执行物理回收。
+// CleanOrphanPlaylists 极简单阶段微批物理回收附属站真孤儿。
 func CleanOrphanPlaylists() (int64, error) {
 	return CleanOrphanPlaylistsUntil(nil)
 }
 
-// CleanOrphanPlaylistsUntil 兼容旧签名接口，内部执行状态机标记与超期回收。
+// CleanOrphanPlaylistsUntil Keyset 分页断点续扫 + 24 小时安全沉淀期 + 微批直接物理清理。
+// 彻底废除两阶段状态机与 19 万次打标写放大，遵守工业级高可用四大铁律：
+// 1. Keyset Pagination：WHERE id > lastID ORDER BY id ASC LIMIT 1000 恒定走主键聚集索引；
+// 2. 24 小时安全沉淀：仅 created_at < NOW() - 24h 的记录进入判定，24h 内新建记录天然跳过防误删；
+// 3. 安全配额限流：单次最大删除 5000 条或耗时超限即停，未完成保留断点游标，杜绝集中到期拖垮数据库；
+// 4. 微批微休眠：每次删除最多 100 条并按 ID 升序排序防死锁，批间休眠 20ms 防 I/O 尖刺。
 func CleanOrphanPlaylistsUntil(shouldStop func() bool) (int64, error) {
-	marked, purged, err := runOrphanLifecycleClean(shouldStop)
-	if err != nil {
-		return purged, err
-	}
-	if marked > 0 || purged > 0 {
-		log.Printf("[CleanOrphan] 孤儿治理完成: 新增待定标记=%d, 物理回收真孤儿=%d", marked, purged)
-	}
-	return purged, nil
-}
-
-func runOrphanLifecycleClean(shouldStop func() bool) (int64, int64, error) {
-	if db.Mdb == nil {
-		return 0, 0, nil
-	}
-	if InMasterSwitchProtection() {
-		log.Println("[CleanOrphan] 处于主站切换冷启动保护期，跳过孤儿标记与清理")
-		return 0, 0, nil
-	}
-	if hasSnapshot, err := HasPublishedFilmListSnapshot(); err != nil {
-		return 0, 0, err
-	} else if !hasSnapshot {
-		log.Println("[CleanOrphan] 主站快照未发布，跳过孤儿标记与清理")
-		return 0, 0, nil
-	}
-	if hasKeys, err := hasMovieMatchKeys(); err != nil {
-		return 0, 0, err
-	} else if !hasKeys {
-		log.Println("[CleanOrphan] movie_match_key 为空，跳过孤儿标记与清理")
-		return 0, 0, nil
-	}
-
-	// 第一阶段：物理回收超期 48 小时真孤儿 (Purge Phase，优先执行，享有独立 1 分钟预算)
-	purgeDeadline := time.Now().Add(orphanPlaylistPurgeBudget)
-	purged, err := purgeExpiredOrphans(purgeDeadline, shouldStop)
-	if err != nil {
-		return 0, purged, err
-	}
-
-	// 第二阶段：标记待定孤儿 (Mark Phase，享有独立 1 分钟预算)
-	markDeadline := time.Now().Add(orphanPlaylistMarkBudget)
-	marked, err := markCandidateOrphans(markDeadline, shouldStop)
-	if err != nil {
-		return marked, purged, err
-	}
-
-	return marked, purged, nil
-}
-
-// markCandidateOrphans 扫描未打标的附属站记录，未匹配主站 match_key 者打上当前时间戳。
-// 引入 Redis/内存游标断点续扫，避免大表在运行预算超时退出后下次永远从头扫描造成饥饿。
-func markCandidateOrphans(deadline time.Time, shouldStop func() bool) (int64, error) {
 	if db.Mdb == nil {
 		return 0, nil
 	}
-	var markedTotal int64
+	if InMasterSwitchProtection() {
+		log.Println("[CleanOrphan] 处于主站切换冷启动保护期，跳过孤儿清理")
+		return 0, nil
+	}
+	if hasSnapshot, err := HasPublishedFilmListSnapshot(); err != nil {
+		return 0, err
+	} else if !hasSnapshot {
+		log.Println("[CleanOrphan] 主站快照未发布，跳过孤儿清理")
+		return 0, nil
+	}
+	if hasKeys, err := hasMovieMatchKeys(); err != nil {
+		return 0, err
+	} else if !hasKeys {
+		log.Println("[CleanOrphan] movie_match_key 为空，跳过孤儿清理")
+		return 0, nil
+	}
+
+	startedAt := time.Now()
+	deadline := startedAt.Add(orphanPlaylistMaxRunDuration)
+	cutoff := startedAt.Add(-orphanPlaylistGracePeriod)
+	var purgedTotal int64
 	lastID := LoadOrphanCleanCursor()
 
 	for {
@@ -207,17 +176,21 @@ func markCandidateOrphans(deadline time.Time, shouldStop func() bool) (int64, er
 			SaveOrphanCleanCursor(lastID)
 			break
 		}
+		if purgedTotal >= orphanPlaylistMaxPurgePerRun {
+			SaveOrphanCleanCursor(lastID)
+			break
+		}
 
 		var rows []playlistScanRow
 		err := db.Mdb.Model(&model.SlaveMoviePlaylist{}).
-			Select("id, movie_key, source_id").
-			Where("id > ? AND orphan_marked_at IS NULL", lastID).
+			Select("id, movie_key, source_id, created_at").
+			Where("id > ?", lastID).
 			Order("id ASC").
 			Limit(orphanPlaylistScanBatchSize).
 			Scan(&rows).Error
 		if err != nil {
 			SaveOrphanCleanCursor(lastID)
-			return markedTotal, err
+			return purgedTotal, err
 		}
 		if len(rows) == 0 {
 			// 当前轮次扫描完成，游标归零
@@ -227,148 +200,75 @@ func markCandidateOrphans(deadline time.Time, shouldStop func() bool) (int64, er
 
 		lastID = rows[len(rows)-1].ID
 
+		// 筛选已满足 24 小时安全沉淀期的候选记录
 		seenKeys := make(map[string]struct{}, len(rows))
-		keys := make([]string, 0, len(rows))
+		candidateKeys := make([]string, 0, len(rows))
+		candidateRows := make([]playlistScanRow, 0, len(rows))
+
 		for _, r := range rows {
-			if r.MovieKey == "" {
+			// 未满 24 小时的记录天然受保护跳过，主站可能有采集延迟
+			if !r.CreatedAt.Before(cutoff) {
 				continue
 			}
-			if _, ok := seenKeys[r.MovieKey]; !ok {
-				seenKeys[r.MovieKey] = struct{}{}
-				keys = append(keys, r.MovieKey)
-			}
-		}
-
-		existingKeys, err := loadExistingMatchKeySet(keys)
-		if err != nil {
-			SaveOrphanCleanCursor(lastID)
-			return markedTotal, err
-		}
-
-		orphanIDs := make([]uint, 0, len(rows))
-		for _, r := range rows {
-			if r.MovieKey == "" {
-				orphanIDs = append(orphanIDs, r.ID)
-				continue
-			}
-			if _, ok := existingKeys[r.MovieKey]; !ok {
-				orphanIDs = append(orphanIDs, r.ID)
-			}
-		}
-
-		if len(orphanIDs) > 0 {
-			now := time.Now()
-			for i := 0; i < len(orphanIDs); i += orphanPlaylistDeleteBatchSize {
-				end := i + orphanPlaylistDeleteBatchSize
-				if end > len(orphanIDs) {
-					end = len(orphanIDs)
+			candidateRows = append(candidateRows, r)
+			if r.MovieKey != "" {
+				if _, ok := seenKeys[r.MovieKey]; !ok {
+					seenKeys[r.MovieKey] = struct{}{}
+					candidateKeys = append(candidateKeys, r.MovieKey)
 				}
-				sub := orphanIDs[i:end]
-				if err := db.Mdb.Model(&model.SlaveMoviePlaylist{}).
-					Where("id IN ? AND orphan_marked_at IS NULL", sub).
-					Update("orphan_marked_at", now).Error; err != nil {
-					SaveOrphanCleanCursor(lastID)
-					return markedTotal, err
+			}
+		}
+
+		if len(candidateRows) > 0 {
+			existingKeys, err := loadExistingMatchKeySet(candidateKeys)
+			if err != nil {
+				SaveOrphanCleanCursor(lastID)
+				return purgedTotal, err
+			}
+
+			orphanIDs := make([]uint, 0, len(candidateRows))
+			for _, r := range candidateRows {
+				if r.MovieKey == "" {
+					orphanIDs = append(orphanIDs, r.ID)
+					continue
 				}
-				markedTotal += int64(len(sub))
+				if _, ok := existingKeys[r.MovieKey]; !ok {
+					orphanIDs = append(orphanIDs, r.ID)
+				}
+			}
+
+			if len(orphanIDs) > 0 {
+				sort.Slice(orphanIDs, func(i, j int) bool { return orphanIDs[i] < orphanIDs[j] })
+				for i := 0; i < len(orphanIDs); i += orphanPlaylistDeleteBatchSize {
+					end := i + orphanPlaylistDeleteBatchSize
+					if end > len(orphanIDs) {
+						end = len(orphanIDs)
+					}
+					sub := orphanIDs[i:end]
+					res := db.Mdb.Unscoped().
+						Where("id IN ? AND created_at < ?", sub, cutoff).
+						Delete(&model.SlaveMoviePlaylist{})
+					if res.Error != nil {
+						SaveOrphanCleanCursor(lastID)
+						return purgedTotal, res.Error
+					}
+					purgedTotal += res.RowsAffected
+					if purgedTotal >= orphanPlaylistMaxPurgePerRun {
+						break
+					}
+				}
 			}
 		}
 
 		SaveOrphanCleanCursor(lastID)
-		time.Sleep(orphanPlaylistBatchCooldown)
+		if orphanPlaylistBatchCooldown > 0 {
+			time.Sleep(orphanPlaylistBatchCooldown)
+		}
 	}
 
-	return markedTotal, nil
-}
-
-// purgeExpiredOrphans 物理删除已标记且超出 orphanPlaylistGracePeriod 的真孤儿。
-// 在物理删除 candidate IDs 之前，先获取其对应的 movie_key 并分批调用 loadExistingMatchKeySet 执行“临刑复核”：
-// 若发现当前主站已存在该 movie_key，立即原地复活（orphan_marked_at = NULL），严禁删除；
-// 只有确认主站依然不存在的记录才执行 Unscoped().Delete()。物理删除前对 IDs 升序排序以规避死锁。
-func purgeExpiredOrphans(deadline time.Time, shouldStop func() bool) (int64, error) {
-	if db.Mdb == nil {
-		return 0, nil
+	if purgedTotal > 0 {
+		log.Printf("[CleanOrphan] 孤儿治理完成: 物理回收真孤儿=%d, cost=%s", purgedTotal, time.Since(startedAt))
 	}
-	var purgedTotal int64
-	cutoff := time.Now().Add(-orphanPlaylistGracePeriod)
-
-	for {
-		if shouldStop != nil && shouldStop() {
-			break
-		}
-		if time.Now().After(deadline) {
-			break
-		}
-
-		type orphanCandidateRow struct {
-			ID       uint   `gorm:"column:id"`
-			MovieKey string `gorm:"column:movie_key"`
-		}
-		var candidates []orphanCandidateRow
-		err := db.Mdb.Model(&model.SlaveMoviePlaylist{}).
-			Select("id, movie_key").
-			Where("orphan_marked_at IS NOT NULL AND orphan_marked_at < ?", cutoff).
-			Limit(orphanPlaylistDeleteBatchSize).
-			Scan(&candidates).Error
-		if err != nil {
-			return purgedTotal, err
-		}
-		if len(candidates) == 0 {
-			break
-		}
-
-		candidateKeys := make([]string, 0, len(candidates))
-		seenKeys := make(map[string]struct{}, len(candidates))
-		for _, c := range candidates {
-			if c.MovieKey != "" {
-				if _, ok := seenKeys[c.MovieKey]; !ok {
-					seenKeys[c.MovieKey] = struct{}{}
-					candidateKeys = append(candidateKeys, c.MovieKey)
-				}
-			}
-		}
-
-		existingKeys, err := loadExistingMatchKeySet(candidateKeys)
-		if err != nil {
-			return purgedTotal, err
-		}
-
-		var reviveIDs []uint
-		var deleteIDs []uint
-		for _, c := range candidates {
-			if c.MovieKey != "" {
-				if _, ok := existingKeys[c.MovieKey]; ok {
-					reviveIDs = append(reviveIDs, c.ID)
-					continue
-				}
-			}
-			deleteIDs = append(deleteIDs, c.ID)
-		}
-
-		if len(reviveIDs) > 0 {
-			sort.Slice(reviveIDs, func(i, j int) bool { return reviveIDs[i] < reviveIDs[j] })
-			if err := db.Mdb.Model(&model.SlaveMoviePlaylist{}).
-				Where("id IN ?", reviveIDs).
-				Update("orphan_marked_at", gorm.Expr("NULL")).Error; err != nil {
-				return purgedTotal, err
-			}
-		}
-
-		if len(deleteIDs) > 0 {
-			sort.Slice(deleteIDs, func(i, j int) bool { return deleteIDs[i] < deleteIDs[j] })
-			res := db.Mdb.Unscoped().Where("id IN ? AND orphan_marked_at IS NOT NULL AND orphan_marked_at < ?", deleteIDs, cutoff).Delete(&model.SlaveMoviePlaylist{})
-			if res.Error != nil {
-				return purgedTotal, res.Error
-			}
-			purgedTotal += res.RowsAffected
-		}
-
-		if len(candidates) < orphanPlaylistDeleteBatchSize {
-			break
-		}
-		time.Sleep(orphanPlaylistBatchCooldown)
-	}
-
 	return purgedTotal, nil
 }
 
