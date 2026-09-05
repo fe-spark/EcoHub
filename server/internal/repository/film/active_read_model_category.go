@@ -17,12 +17,12 @@ import (
 const (
 	snapshotListCacheTTL = 10 * time.Minute
 	snapshotPageCacheTTL = 5 * time.Minute
-	basicSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
+	basicSelectFields    = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
 )
 
 type categoryPageCacheItem struct {
-	Total     int                   `json:"total"`
-	PageCount int                   `json:"page_count"`
+	Total     int                    `json:"total"`
+	PageCount int                    `json:"page_count"`
 	Movies    []model.MovieBasicInfo `json:"movies"`
 }
 
@@ -329,5 +329,43 @@ func GetSnapshotMovieListBySortReadModel(version string, sortType int, pid int64
 	return result
 }
 
+// GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，彻底消除 COUNT
+func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
+	startedAt := time.Now()
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	pid = support.ResolveCategoryID(pid)
+	if version == "" || pid <= 0 || limit <= 0 {
+		return []model.MovieBasicInfo{}
+	}
+	if db.Mdb == nil {
+		return []model.MovieBasicInfo{}
+	}
 
+	orderClause := "update_stamp DESC"
+	switch sortType {
+	case 0:
+		orderClause = "year DESC, update_stamp DESC"
+	case 1:
+		orderClause = "hits DESC"
+	case 2:
+		orderClause = "update_stamp DESC"
+	}
 
+	var snapshots []model.FilmListSnapshot
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+		Select(basicSelectFields).
+		Where("snapshot_version = ? AND pid = ?", version, pid).
+		Order(orderClause).
+		Limit(limit)
+
+	if err := query.Find(&snapshots).Error; err != nil {
+		return []model.MovieBasicInfo{}
+	}
+	result := BuildMovieBasicInfosFromSnapshots(snapshots...)
+	log.Printf("[FilmSortListFast] 获取分类排序Top列表 pid=%d sortType=%d count=%d cost=%s",
+		pid, sortType, len(result), time.Since(startedAt))
+	return result
+}

@@ -95,29 +95,44 @@ func getOrLoadFilmSearchMemoryIndex(version string) *filmSearchMemoryIndex {
 	if idx := loadedFilmSearchIndex(version); idx != nil {
 		return idx
 	}
+
+	// 双缓冲保护：如果新版本索引正在构建，但当前内存中已有有效索引（哪怕是已标记过期的上一版本），
+	// 异步触发新版本构建，同时立即返回当前可用索引，避免将在线 HTTP 请求阻塞 5 秒！
+	if cur := activeFilmSearchIndex.Load(); cur != nil && len(cur.Items) > 0 {
+		go func(ver string) {
+			_, _, _ = searchIndexBuild.Do(ver, func() (any, error) {
+				return buildAndStoreSearchIndex(ver)
+			})
+		}(version)
+		return cur
+	}
+
+	// 冷启动无任何索引时，同步构建首个索引
 	v, _, _ := searchIndexBuild.Do(version, func() (any, error) {
-		if idx := loadedFilmSearchIndex(version); idx != nil {
-			return idx, nil
-		}
-		built := buildFilmSearchMemoryIndex(version)
-		if built == nil {
-			return (*filmSearchMemoryIndex)(nil), nil
-		}
-		activeFilmSearchIndexMu.Lock()
-		defer activeFilmSearchIndexMu.Unlock()
-		if cur := loadedFilmSearchIndex(version); cur != nil {
-			return cur, nil
-		}
-		if cur := activeFilmSearchIndex.Load(); cur != nil && cur.Version != version && len(cur.Items) > 0 {
-			if m := activeFilmReadModel.Load(); m != nil && m.Version != "" && m.Version != version {
-				return built, nil
-			}
-		}
-		activeFilmSearchIndex.Store(built)
-		return built, nil
+		return buildAndStoreSearchIndex(version)
 	})
 	idx, _ := v.(*filmSearchMemoryIndex)
 	return idx
+}
+
+func buildAndStoreSearchIndex(version string) (*filmSearchMemoryIndex, error) {
+	if idx := loadedFilmSearchIndex(version); idx != nil {
+		return idx, nil
+	}
+	built := buildFilmSearchMemoryIndex(version)
+	if built == nil {
+		return (*filmSearchMemoryIndex)(nil), nil
+	}
+	activeFilmSearchIndexMu.Lock()
+	defer activeFilmSearchIndexMu.Unlock()
+	if cur := loadedFilmSearchIndex(version); cur != nil {
+		return cur, nil
+	}
+	if m := activeFilmReadModel.Load(); m != nil && m.Version != "" && m.Version != version {
+		return built, nil
+	}
+	activeFilmSearchIndex.Store(built)
+	return built, nil
 }
 
 func loadedFilmSearchIndex(version string) *filmSearchMemoryIndex {
@@ -204,10 +219,21 @@ func InvalidateActiveFilmSearchIndex(version string) {
 		version = GetActiveSnapshotVersion()
 	}
 	if version != "" {
-		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
+		if cur := activeFilmSearchIndex.Load(); cur != nil && len(cur.Items) > 0 {
+			staleCopy := *cur
+			staleCopy.Version = ""
+			activeFilmSearchIndex.Store(&staleCopy)
+		} else {
+			activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
+		}
 		if err := LoadActiveFilmReadModel(version); err != nil {
 			log.Printf("[ActiveReadModel] 重载读模型失败 version=%s: %v", version, err)
 		}
+		go func(ver string) {
+			_, _, _ = searchIndexBuild.Do(ver, func() (any, error) {
+				return buildAndStoreSearchIndex(ver)
+			})
+		}(version)
 	} else {
 		ClearActiveFilmReadModel()
 	}
@@ -379,6 +405,8 @@ type tagSearchCacheItem struct {
 	Snapshots []model.FilmListSnapshot `json:"snapshots"`
 }
 
+var tagSearchSfGroup singleflight.Group
+
 func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, page *dto.Page) []model.FilmListSnapshot {
 	startedAt := time.Now()
 	page = ensurePage(page)
@@ -408,64 +436,94 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
-	if st.Pid > 0 {
-		query = query.Where("pid = ?", st.Pid)
-	}
-	if st.Cid > 0 {
-		query = query.Where("cid = ?", st.Cid)
-	}
-	if st.Plot != "" && st.Plot != "全部" && st.Plot != model.TagOthersValue && st.Plot != model.TagUnknownValue {
-		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
-	}
-	if st.Area != "" && st.Area != "全部" && st.Area != model.TagOthersValue && st.Area != model.TagUnknownValue {
-		query = query.Where("area = ?", st.Area)
-	}
-	if st.Language != "" && st.Language != "全部" && st.Language != model.TagOthersValue && st.Language != model.TagUnknownValue {
-		query = query.Where("language = ?", st.Language)
-	}
-	if st.Year != "" && st.Year != "全部" && st.Year != model.TagOthersValue && st.Year != model.TagUnknownValue {
-		if yearInt, err := strconv.ParseInt(st.Year, 10, 64); err == nil && yearInt > 0 {
-			query = query.Where("year = ?", yearInt)
+	val, err, _ := tagSearchSfGroup.Do(cacheKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var item tagSearchCacheItem
+				if json.Unmarshal([]byte(data), &item) == nil {
+					return item, nil
+				}
+			}
 		}
-	}
 
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return []model.FilmListSnapshot{}
-	}
-	page.Total = int(total)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
-		page.PageCount = 1
-	}
+		query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
+		if st.Pid > 0 {
+			query = query.Where("pid = ?", st.Pid)
+		}
+		if st.Cid > 0 {
+			query = query.Where("cid = ?", st.Cid)
+		}
+		if st.Plot != "" && st.Plot != "全部" && st.Plot != model.TagOthersValue && st.Plot != model.TagUnknownValue {
+			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
+		}
+		if st.Area != "" && st.Area != "全部" && st.Area != model.TagOthersValue && st.Area != model.TagUnknownValue {
+			query = query.Where("area = ?", st.Area)
+		}
+		if st.Language != "" && st.Language != "全部" && st.Language != model.TagOthersValue && st.Language != model.TagUnknownValue {
+			query = query.Where("language = ?", st.Language)
+		}
+		if st.Year != "" && st.Year != "全部" && st.Year != model.TagOthersValue && st.Year != model.TagUnknownValue {
+			if yearInt, err := strconv.ParseInt(st.Year, 10, 64); err == nil && yearInt > 0 {
+				query = query.Where("year = ?", yearInt)
+			}
+		}
 
-	orderClause := "update_stamp DESC, id DESC"
-	switch st.Sort {
-	case "hits":
-		orderClause = "hits DESC, id DESC"
-	case "score":
-		orderClause = "score DESC, id DESC"
-	case "year":
-		orderClause = "year DESC, update_stamp DESC, id DESC"
-	}
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return tagSearchCacheItem{}, err
+		}
+		calcTotal := int(total)
+		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
+		if calcPageCount <= 0 {
+			calcPageCount = 1
+		}
 
-	var snapshots []model.FilmListSnapshot
-	offset := getPageOffset(page)
-	if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
-		return []model.FilmListSnapshot{}
-	}
+		orderClause := "update_stamp DESC, id DESC"
+		switch st.Sort {
+		case "hits":
+			orderClause = "hits DESC, id DESC"
+		case "score":
+			orderClause = "score DESC, id DESC"
+		case "year":
+			orderClause = "year DESC, update_stamp DESC, id DESC"
+		}
 
-	if db.Rdb != nil && len(snapshots) > 0 {
+		var snapshots []model.FilmListSnapshot
+		offset := getPageOffset(page)
+		if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
+			return tagSearchCacheItem{}, err
+		}
+
 		item := tagSearchCacheItem{
-			Total:     page.Total,
-			PageCount: page.PageCount,
+			Total:     calcTotal,
+			PageCount: calcPageCount,
 			Snapshots: snapshots,
 		}
-		if raw, err := json.Marshal(item); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), tagSearchCacheTTL).Err()
+
+		if db.Rdb != nil {
+			ttl := tagSearchCacheTTL
+			if len(snapshots) == 0 {
+				ttl = 60 * time.Second
+			}
+			if raw, err := json.Marshal(item); err == nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+			}
 		}
+		return item, nil
+	})
+
+	if err != nil || val == nil {
+		return []model.FilmListSnapshot{}
 	}
+	item, ok := val.(tagSearchCacheItem)
+	if !ok {
+		return []model.FilmListSnapshot{}
+	}
+	page.Total = item.Total
+	page.PageCount = item.PageCount
+
+	res := make([]model.FilmListSnapshot, len(item.Snapshots))
+	copy(res, item.Snapshots)
 
 	log.Printf(
 		"[FilmClassifySearch] 筛选完成 pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
@@ -478,10 +536,10 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		st.Sort,
 		page.Total,
 		page.Current,
-		page.PageSize,
+		len(res),
 		time.Since(startedAt),
 	)
-	return snapshots
+	return res
 }
 
 func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) []model.FilmListSnapshot {
@@ -963,4 +1021,3 @@ func escapeLikePattern(s string) string {
 	s = strings.ReplaceAll(s, "_", "\\_")
 	return s
 }
-

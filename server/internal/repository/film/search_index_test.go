@@ -3,6 +3,7 @@ package film
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/utils"
 )
@@ -155,3 +156,38 @@ func TestScoreMemoryIndexPinyinAndPhrase(t *testing.T) {
 	assertTop("qyn", 101)
 	assertTop("qingyunian", 101)
 }
+
+func TestSearchIndex_DoubleBuffering_NonBlocking(t *testing.T) {
+	origIdx := activeFilmSearchIndex.Load()
+	defer func() {
+		if origIdx != nil {
+			activeFilmSearchIndex.Store(origIdx)
+		}
+	}()
+
+	initialIdx := testSearchIndex([]filmSearchIndexRow{
+		{Mid: 888, Name: "糯糯下山", Hits: 100},
+	})
+	initialIdx.Version = "v_old"
+	activeFilmSearchIndex.Store(initialIdx)
+
+	// 模拟增量入库或快照刷新使当前索引失效
+	InvalidateActiveFilmSearchIndex("v_new")
+
+	// 验证：调用 getOrLoadFilmSearchMemoryIndex 时，即便新版本正在构建中，
+	// 也能瞬间返回保留的旧索引（<20ms），绝不阻塞在线请求 5 秒！
+	start := time.Now()
+	idx := getOrLoadFilmSearchMemoryIndex("v_new")
+	elapsed := time.Since(start)
+
+	if elapsed > 20*time.Millisecond {
+		t.Fatalf("getOrLoadFilmSearchMemoryIndex took too long: %s, expected immediate return via double buffering", elapsed)
+	}
+	if idx == nil || len(idx.Items) == 0 {
+		t.Fatalf("getOrLoadFilmSearchMemoryIndex returned empty index, expected stale buffer items")
+	}
+	if idx.Items[0].Mid != 888 {
+		t.Fatalf("expected mid=888 from stale buffer, got %d", idx.Items[0].Mid)
+	}
+}
+

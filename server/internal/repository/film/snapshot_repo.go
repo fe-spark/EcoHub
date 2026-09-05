@@ -119,9 +119,9 @@ const (
 )
 
 var (
-	clusterWatcherMu       sync.Mutex
-	clusterWatcherStop     context.CancelFunc
-	clusterWatcherState    *clusterSnapshotSyncState
+	clusterWatcherMu    sync.Mutex
+	clusterWatcherStop  context.CancelFunc
+	clusterWatcherState *clusterSnapshotSyncState
 	// clusterWatcherRunCount watcher 协程实际启动次数，供幂等性单测断言
 	clusterWatcherRunCount atomic.Int32
 )
@@ -393,7 +393,7 @@ func refreshMissingPlayFromSummaries() {
 
 	var missingMIDs []int64
 	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Joins("JOIN " + model.TableMovieDetail + " ON " + model.TableMovieDetail + ".mid = film_index.mid AND " + model.TableMovieDetail + ".deleted_at IS NULL").
+		Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
 		Where("film_index.play_from_summary = ? OR film_index.play_from_summary IS NULL", "").
 		Pluck("film_index.mid", &missingMIDs).Error; err != nil {
 		log.Printf("[Snapshot] 查询缺失播放源影片失败: %v", err)
@@ -496,30 +496,30 @@ func pruneOldFilterIndexSnapshots(retain int) {
 
 func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmListSnapshot {
 	return model.FilmListSnapshot{
-		SnapshotVersion:  version,
-		Mid:              index.Mid,
-		ContentKey:       index.ContentKey,
-		SourceId:         index.SourceId,
-		DbId:             index.DbId,
-		Cid:              index.Cid,
-		Pid:              index.Pid,
-		RootCategoryKey:  index.RootCategoryKey,
-		CategoryKey:      index.CategoryKey,
-		OriginalCategory: index.OriginalCategory,
-		CName:            index.CName,
-		SeriesKey:        index.SeriesKey,
-		Name:             index.Name,
-		SubTitle:         index.SubTitle,
-		ClassTag:         index.ClassTag,
-		Area:             index.Area,
-		Language:         index.Language,
-		Year:             index.Year,
-		Initial:          index.Initial,
-		Score:            index.Score,
-		UpdateStamp:      index.UpdateStamp,
-		Hits:             index.Hits,
-		State:            index.State,
-		Remarks:          index.Remarks,
+		SnapshotVersion:    version,
+		Mid:                index.Mid,
+		ContentKey:         index.ContentKey,
+		SourceId:           index.SourceId,
+		DbId:               index.DbId,
+		Cid:                index.Cid,
+		Pid:                index.Pid,
+		RootCategoryKey:    index.RootCategoryKey,
+		CategoryKey:        index.CategoryKey,
+		OriginalCategory:   index.OriginalCategory,
+		CName:              index.CName,
+		SeriesKey:          index.SeriesKey,
+		Name:               index.Name,
+		SubTitle:           index.SubTitle,
+		ClassTag:           index.ClassTag,
+		Area:               index.Area,
+		Language:           index.Language,
+		Year:               index.Year,
+		Initial:            index.Initial,
+		Score:              index.Score,
+		UpdateStamp:        index.UpdateStamp,
+		Hits:               index.Hits,
+		State:              index.State,
+		Remarks:            index.Remarks,
 		Picture:            index.Picture,
 		PictureSlide:       index.PictureSlide,
 		CustomPicture:      index.CustomPicture,
@@ -1035,6 +1035,8 @@ func ClearAllSnapshotDynamicCaches() {
 	support.ClearIndexPageCache()
 	ClearActiveFilmReadModel()
 	clearCachePatterns(
+		"EcoHub:filmPlayInfo:*",
+		"EcoHub:hotKeywords:*",
 		"EcoHub:snap_cat:*",
 		"EcoHub:snap_cat_page:*",
 		"EcoHub:snap_hot:*",
