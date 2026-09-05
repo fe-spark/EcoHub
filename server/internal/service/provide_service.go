@@ -86,13 +86,15 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
 	categoryVersion := repository.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
-	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-		var res struct {
-			ClassList []model.FilmClass
-			Filters   map[string][]map[string]any
-		}
-		if json.Unmarshal([]byte(data), &res) == nil {
-			return res.ClassList, res.Filters
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var res struct {
+				ClassList []model.FilmClass
+				Filters   map[string][]map[string]any
+			}
+			if json.Unmarshal([]byte(data), &res) == nil {
+				return res.ClassList, res.Filters
+			}
 		}
 	}
 
@@ -226,12 +228,14 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	}
 
 	// 写入 Redis 缓存 (5 分钟)
-	res := struct {
-		ClassList []model.FilmClass
-		Filters   map[string][]map[string]any
-	}{classList, filters}
-	if data, err := json.Marshal(res); err == nil {
-		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*5)
+	if db.Rdb != nil {
+		res := struct {
+			ClassList []model.FilmClass
+			Filters   map[string][]map[string]any
+		}{classList, filters}
+		if data, err := json.Marshal(res); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*5)
+		}
 	}
 
 	return classList, filters
@@ -257,15 +261,17 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
 		cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var res struct {
-				Current   int
-				PageCount int
-				Total     int
-				VodList   []model.FilmList
-			}
-			if json.Unmarshal([]byte(data), &res) == nil {
-				return res.Current, res.PageCount, res.Total, res.VodList, nil
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var res struct {
+					Current   int
+					PageCount int
+					Total     int
+					VodList   []model.FilmList
+				}
+				if json.Unmarshal([]byte(data), &res) == nil {
+					return res.Current, res.PageCount, res.Total, res.VodList, nil
+				}
 			}
 		}
 	}
@@ -315,7 +321,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	}
 
 	// 2. 写入 Redis 缓存
-	if cacheKey != "" {
+	if cacheKey != "" && db.Rdb != nil {
 		res := struct {
 			Current   int
 			PageCount int

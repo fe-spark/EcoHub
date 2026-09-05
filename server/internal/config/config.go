@@ -119,6 +119,14 @@ const (
 	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
 	// ActiveCategoryTreeKey 活跃分类树缓存 key
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
+	// ActiveCategoryIDsKey 活跃分类 ID 集合缓存 key
+	ActiveCategoryIDsKey = RedisKeyPrefix + ":Category:ActiveIDs"
+	// OrphanCleanCursorKey 附属站孤儿清理游标 key
+	OrphanCleanCursorKey = RedisKeyPrefix + ":CleanOrphan:Cursor"
+	// MasterSwitchProtectKey 主站切换冷启动保护期 key
+	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
+	// MigrateLegacyPlaylistsLockKey 割接老表分布式排他锁 key
+	MigrateLegacyPlaylistsLockKey = RedisKeyPrefix + ":Lock:MigrateLegacyPlaylists"
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
 	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
@@ -189,6 +197,8 @@ const (
 	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
+	// OrphanCleanSpec 每天 04:35，错开 DefaultUpdateSpec 的 30 分钟整点（含 04:30）。
+	OrphanCleanSpec = "0 35 4 * * *"
 	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片
 	DefaultUpdateTime = 3
 	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用

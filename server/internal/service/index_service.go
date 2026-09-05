@@ -787,10 +787,12 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
 	version := filmrepo.GetActiveReadModelVersion()
 	cacheKey := filmrepo.SnapshotClassifyCacheKey(version, pid, page)
-	if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-		var cached map[string]any
-		if json.Unmarshal([]byte(data), &cached) == nil {
-			return cached
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached
+			}
 		}
 	}
 
@@ -798,8 +800,10 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any
 	res["news"] = filmrepo.GetSnapshotMovieListBySort(version, 0, pid, page)
 	res["top"] = filmrepo.GetSnapshotMovieListBySort(version, 1, pid, page)
 	res["recent"] = filmrepo.GetSnapshotMovieListBySort(version, 2, pid, page)
-	if data, err := json.Marshal(res); err == nil {
-		db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
+	if db.Rdb != nil {
+		if data, err := json.Marshal(res); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
+		}
 	}
 	return res
 }

@@ -343,7 +343,7 @@ func TestFilterPlayStructureNotifyMIDsMiddleInsertSameLastLabel(t *testing.T) {
 // TestDedupePlaylistRowsKeepsLastPerKeyGroup 同一 (movie_key, group_index) 多行（同片多条目
 // 共享匹配键）只保留最后一行，与落库唯一键后写覆盖语义一致。
 func TestDedupePlaylistRowsKeepsLastPerKeyGroup(t *testing.T) {
-	rows := []model.MoviePlaylist{
+	rows := []model.SlaveMoviePlaylist{
 		{MovieKey: "K", GroupIndex: 0, GroupName: "a", Content: `[{"episode":"01","link":"http://a/1.m3u8"}]`},
 		{MovieKey: "K", GroupIndex: 0, GroupName: "a", Content: `[{"episode":"01","link":"http://b/2.m3u8"}]`},
 		{MovieKey: "K", GroupIndex: 1, GroupName: "b", Content: `[{"episode":"01","link":"http://c/3.m3u8"}]`},
@@ -389,8 +389,8 @@ func TestDiffPlaylistMovieKeysEmptyIncomingNotNotify(t *testing.T) {
 // 共享豆瓣匹配键）：页面列表拼接后经排序去重，签名应与库内一致，不再把「多条目并存」
 // 误判为剧集结构变化 → 不通知。
 func TestSharedKeyMultiEntryNoFalseNotify(t *testing.T) {
-	build := func(link string) []model.MoviePlaylist {
-		return []model.MoviePlaylist{
+	build := func(link string) []model.SlaveMoviePlaylist {
+		return []model.SlaveMoviePlaylist{
 			{MovieKey: "douban", GroupIndex: 0, GroupName: "feifan",
 				Content: `[{"episode":"第01集","link":"` + link + `"}]`},
 			{MovieKey: "title", GroupIndex: 0, GroupName: "feifan",
@@ -398,7 +398,7 @@ func TestSharedKeyMultiEntryNoFalseNotify(t *testing.T) {
 		}
 	}
 	// 同一页同时返回英语/国语两个条目，共享 douban 匹配键
-	var page []model.MoviePlaylist
+	var page []model.SlaveMoviePlaylist
 	page = append(page, build("http://a/1.m3u8")...)
 	page = append(page, build("http://b/2.m3u8")...)
 	sort.Slice(page, func(i, j int) bool {
@@ -410,7 +410,7 @@ func TestSharedKeyMultiEntryNoFalseNotify(t *testing.T) {
 	incoming := buildPlaylistSignatures(dedupePlaylistRows(page))
 
 	// 库内：上次后写覆盖保留的「国语」内容（一行）
-	existing := buildPlaylistSignatures([]model.MoviePlaylist{
+	existing := buildPlaylistSignatures([]model.SlaveMoviePlaylist{
 		{MovieKey: "douban", GroupIndex: 0, GroupName: "feifan",
 			Content: `[{"episode":"第01集","link":"http://b/2.m3u8"}]`},
 		{MovieKey: "title", GroupIndex: 0, GroupName: "feifan",
@@ -580,5 +580,87 @@ func TestLastEpisodeLabel(t *testing.T) {
 	// 空列表
 	if got := lastEpisodeLabel(nil); got != "" {
 		t.Fatalf("空列表 want 空, got %q", got)
+	}
+}
+
+// TestSaveGroupedPlaylists_NoOpShortCircuitAndPartialUpdate 验证无变更短路与局部更新机制：
+// 1. 无变更时直接短路返回，不开启写事务、不变更自增 ID；
+// 2. 有局部变更时，仅针对变更 key 开启事务执行局部重写，未变更的 key 保持原样不动。
+func TestSaveGroupedPlaylists_NoOpShortCircuitAndPartialUpdate(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+
+	keysMap := map[string]struct{}{
+		"k1": {},
+		"k2": {},
+		"k3": {},
+	}
+	playlists := []model.SlaveMoviePlaylist{
+		{SourceId: "slave_test", MovieKey: "k1", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k1/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k2", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k2/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k3", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k3/1"}]`},
+	}
+
+	// 1. 首次全量写入
+	changes, err := saveGroupedPlaylists("slave_test", playlists, keysMap)
+	if err != nil {
+		t.Fatalf("first save failed: %v", err)
+	}
+	if len(changes) != 3 {
+		t.Fatalf("expected 3 changes on first insert, got %d", len(changes))
+	}
+
+	var rowsBefore []model.SlaveMoviePlaylist
+	if err := gdb.Where("source_id = ?", "slave_test").Order("movie_key ASC").Find(&rowsBefore).Error; err != nil {
+		t.Fatalf("query rows before: %v", err)
+	}
+	if len(rowsBefore) != 3 {
+		t.Fatalf("expected 3 rows in db, got %d", len(rowsBefore))
+	}
+	id1 := rowsBefore[0].ID
+	id2 := rowsBefore[1].ID
+	id3 := rowsBefore[2].ID
+
+	// 2. 无变更再次调用 -> 无变更短路 (No-op short-circuit)
+	changes2, err := saveGroupedPlaylists("slave_test", playlists, keysMap)
+	if err != nil {
+		t.Fatalf("second save failed: %v", err)
+	}
+	if len(changes2) != 0 {
+		t.Fatalf("expected 0 changes on no-op save, got %d", len(changes2))
+	}
+
+	var rowsAfterNoop []model.SlaveMoviePlaylist
+	if err := gdb.Where("source_id = ?", "slave_test").Order("movie_key ASC").Find(&rowsAfterNoop).Error; err != nil {
+		t.Fatalf("query rows after noop: %v", err)
+	}
+	if rowsAfterNoop[0].ID != id1 || rowsAfterNoop[1].ID != id2 || rowsAfterNoop[2].ID != id3 {
+		t.Fatalf("expected row IDs [%d, %d, %d] to remain completely untouched, got [%d, %d, %d]",
+			id1, id2, id3, rowsAfterNoop[0].ID, rowsAfterNoop[1].ID, rowsAfterNoop[2].ID)
+	}
+
+	// 3. 仅修改 k2 的集数 -> 局部更新 (Partial update)
+	playlistsWithChange := []model.SlaveMoviePlaylist{
+		{SourceId: "slave_test", MovieKey: "k1", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k1/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k2", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k2/1"},{"episode":"02","link":"http://k2/2"}]`},
+		{SourceId: "slave_test", MovieKey: "k3", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k3/1"}]`},
+	}
+	changes3, err := saveGroupedPlaylists("slave_test", playlistsWithChange, keysMap)
+	if err != nil {
+		t.Fatalf("partial save failed: %v", err)
+	}
+	if len(changes3) != 1 || changes3[0].MovieKey != "k2" {
+		t.Fatalf("expected exactly 1 change for k2, got %+v", changes3)
+	}
+
+	var rowsAfterPartial []model.SlaveMoviePlaylist
+	if err := gdb.Where("source_id = ?", "slave_test").Order("movie_key ASC").Find(&rowsAfterPartial).Error; err != nil {
+		t.Fatalf("query rows after partial: %v", err)
+	}
+	// k1 与 k3 的 ID 绝不得发生变化；只有 k2 被局部更新重写
+	if rowsAfterPartial[0].ID != id1 {
+		t.Fatalf("expected k1 ID to remain %d, got %d", id1, rowsAfterPartial[0].ID)
+	}
+	if rowsAfterPartial[2].ID != id3 {
+		t.Fatalf("expected k3 ID to remain %d, got %d", id3, rowsAfterPartial[2].ID)
 	}
 }

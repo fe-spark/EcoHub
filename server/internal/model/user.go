@@ -55,6 +55,10 @@ type User struct {
 	Reserve3 string `json:"reserve3"` // 预留字段 1
 }
 
+func (User) TableName() string {
+	return TableUser
+}
+
 type UserUpdatePayload struct {
 	ID       uint    `json:"id"`
 	Password *string `json:"password"`

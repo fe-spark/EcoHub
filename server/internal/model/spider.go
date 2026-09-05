@@ -32,6 +32,10 @@ type CrontabRecord struct {
 	Remark    string `gorm:"size:256"`
 }
 
+func (CrontabRecord) TableName() string {
+	return TableCrontabRecord
+}
+
 // CronSourceRel 定时任务与资源站关联表
 type CronSourceRel struct {
 	TaskId   string `gorm:"primaryKey;index;size:64"`

@@ -369,3 +369,108 @@ func TestWriteLaneReserveCancelDoesNotStarve(t *testing.T) {
 		t.Fatalf("reserve cancel likely broken: 8 pages took %s", elapsed)
 	}
 }
+
+func TestWriteLaneWaitPending(t *testing.T) {
+	lane := newCollectWriteLane("test-wait-pending")
+	lane.limiter.SetLimit(100)
+	lane.limiter.SetBurst(10)
+	lane.workers = 2
+	lane.start()
+
+	var executed atomic.Int32
+	const total = 5
+	for i := 1; i <= total; i++ {
+		p := i
+		if err := lane.submit(context.Background(), collectWriteJob{
+			sourceID:   "src_wait",
+			sourceName: "src_wait",
+			page:       p,
+			write: func() (collectWriteMids, error) {
+				time.Sleep(10 * time.Millisecond)
+				executed.Add(1)
+				return collectWriteMids{}, nil
+			},
+			complete: func(collectWriteCompletion) {},
+		}); err != nil {
+			t.Fatalf("submit: %v", err)
+		}
+	}
+	lane.finishSource("src_wait")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := lane.waitPending(ctx); err != nil {
+		t.Fatalf("waitPending failed: %v", err)
+	}
+
+	if executed.Load() != total {
+		t.Fatalf("expected all %d jobs to be executed before waitPending returns, got %d", total, executed.Load())
+	}
+}
+
+func TestWaitPendingWrites_Idle(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	if err := WaitPendingWrites(ctx); err != nil {
+		t.Fatalf("WaitPendingWrites on idle scheduler failed: %v", err)
+	}
+}
+
+func TestWriteLaneWaitPending_Timeout(t *testing.T) {
+	lane := newCollectWriteLane("test_timeout")
+	lane.start()
+
+	// 提交一个耗时任务
+	if err := lane.submit(context.Background(), collectWriteJob{
+		sourceID:   "src_slow",
+		sourceName: "src_slow",
+		page:       1,
+		write: func() (collectWriteMids, error) {
+			time.Sleep(200 * time.Millisecond)
+			return collectWriteMids{}, nil
+		},
+		complete: func(collectWriteCompletion) {},
+	}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+
+	// 等待超时时间极短（20ms），应返回 context.DeadlineExceeded
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := lane.waitPending(ctx)
+	if err != context.DeadlineExceeded {
+		t.Fatalf("expected context.DeadlineExceeded, got: %v", err)
+	}
+}
+
+func TestWriteLaneWaitPending_WorkerPanic(t *testing.T) {
+	lane := newCollectWriteLane("test_panic")
+	lane.start()
+
+	// 提交一个会 panic 的任务
+	if err := lane.submit(context.Background(), collectWriteJob{
+		sourceID:   "src_panic",
+		sourceName: "src_panic",
+		page:       1,
+		write: func() (collectWriteMids, error) {
+			panic("simulated panic in write")
+		},
+		complete: func(collectWriteCompletion) {},
+	}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	lane.finishSource("src_panic")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// panic 被 recover 后 finishWriting 仍应被正常执行，waitPending 不能被卡死
+	if err := lane.waitPending(ctx); err != nil {
+		t.Fatalf("waitPending failed despite panic recovery: %v", err)
+	}
+}
+
+

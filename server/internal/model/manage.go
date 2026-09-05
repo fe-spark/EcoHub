@@ -108,6 +108,10 @@ type SiteConfigRecord struct {
 	NoticeJSON string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
 }
 
+func (SiteConfigRecord) TableName() string {
+	return TableSiteConfig
+}
+
 // MappingRule 定义从采集源到标准系统的转换规则 (地区/语言/标签黑名单)
 type MappingRule struct {
 	gorm.Model
@@ -119,5 +123,5 @@ type MappingRule struct {
 }
 
 func (MappingRule) TableName() string {
-	return "mapping_rules"
+	return TableMappingRule
 }

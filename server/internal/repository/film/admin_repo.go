@@ -18,10 +18,16 @@ import (
 )
 
 func bumpSearchTagsCacheVersion() {
+	if db.Rdb == nil {
+		return
+	}
 	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, time.Now().UnixNano(), 0)
 }
 
 func getSearchTagsCacheVersion() string {
+	if db.Rdb == nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 	version, err := db.Rdb.Get(db.Cxt, config.SearchTagsVersionKey).Result()
 	if err == nil && version != "" {
 		return version
@@ -192,6 +198,14 @@ func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
 		return err
 	}
+	// 主站切换后，重置附属站播放源的观察期时钟，赋予新主站完整的 48 小时采集挂接缓冲期
+	if err := conn.Model(&model.SlaveMoviePlaylist{}).
+		Where("orphan_marked_at IS NOT NULL").
+		Update("orphan_marked_at", gorm.Expr("NULL")).Error; err != nil {
+		log.Printf("[Collect] 主站切换重置附属站观察期标记失败: %v", err)
+	}
+	ClearOrphanCleanCursor()
+	SetMasterSwitchProtection(MasterSwitchColdStartDuration)
 	return nil
 }
 
@@ -214,14 +228,14 @@ func masterDataResetTables() []string {
 }
 
 func truncateTable(conn *gorm.DB, table string) error {
-	if err := conn.Exec(fmt.Sprintf("TRUNCATE table %s", table)).Error; err != nil {
-		return fmt.Errorf("truncate %s failed: %w", table, err)
-	}
-	return nil
+	return support.TruncateTable(conn, table)
 }
 
 // ClearSearchTagsCache 清除特定分类的所有复合搜索标签缓存
 func ClearSearchTagsCache(pid int64) {
+	if db.Rdb == nil {
+		return
+	}
 	pattern := fmt.Sprintf("%s:*", config.SearchTags)
 	ctx := db.Cxt
 	iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
@@ -233,6 +247,9 @@ func ClearSearchTagsCache(pid int64) {
 
 // ClearTVBoxConfigCache 清除 TVBox 配置缓存
 func ClearTVBoxConfigCache() {
+	if db.Rdb == nil {
+		return
+	}
 	db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)
 	pattern := config.TVBoxConfigCacheKey + ":*"
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
@@ -242,6 +259,9 @@ func ClearTVBoxConfigCache() {
 }
 
 func ClearTVBoxListCache() {
+	if db.Rdb == nil {
+		return
+	}
 	pattern := config.TVBoxList + ":*"
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
@@ -251,6 +271,9 @@ func ClearTVBoxListCache() {
 
 // ClearAllSearchTagsCache 清除所有分类的搜索标签缓存 (扫描清理)
 func ClearAllSearchTagsCache() {
+	if db.Rdb == nil {
+		return
+	}
 	pattern := config.SearchTags + ":*"
 	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
@@ -262,8 +285,10 @@ func ClearAllSearchTagsCache() {
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() error {
-	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key。
+	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key 与孤儿治理游标。
 	defer ClearLegacyContentKeyNotices()
+	ClearOrphanCleanCursor()
+	SetMasterSwitchProtection(MasterSwitchColdStartDuration)
 
 	// 关键节点：清空影视库存
 	ReportResetProgress(20, "正在清空影视库存")
@@ -271,9 +296,11 @@ func FilmZero() error {
 		model.TableMovieDetail,
 		model.TableFilmIndex,
 		model.TableMoviePlaylist,
+		model.TableSlaveMoviePlaylist,
 		model.TableMovieMatchKey,
+		model.TableMoviePoster,
 	} {
-		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
+		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
 		}
 	}
@@ -289,31 +316,29 @@ func FilmZero() error {
 		model.TableSearchTag,
 		model.TableFailureRecord,
 	} {
-		if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", t)).Error; err != nil {
+		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
 		}
 	}
 	// 图库元数据与本地文件一并清理，避免重置后 DB 有记录、磁盘无文件导致素材中心黑块
-	if err := db.Mdb.Exec("TRUNCATE table files").Error; err != nil {
+	if err := truncateTable(db.Mdb, model.TableFileInfo); err != nil {
 		return fmt.Errorf("truncate files failed: %w", err)
 	}
 	if err := utils.ClearGalleryDir(); err != nil {
 		return fmt.Errorf("clear gallery dir failed: %w", err)
 	}
 
-	// 关键节点：清空分类与映射
+	// 关键节点：清空分类与映射（统一使用 truncateTable 物理清空，规避软删除残留引发唯一键冲突）
 	ReportResetProgress(70, "正在清空分类与映射")
-	if err := db.Mdb.Exec(fmt.Sprintf("TRUNCATE table %s", model.TableCategory)).Error; err != nil {
-		return fmt.Errorf("truncate %s failed: %w", model.TableCategory, err)
-	}
-	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-		return fmt.Errorf("clear movie source mappings failed: %w", err)
-	}
-	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CategoryMapping{}).Error; err != nil {
-		return fmt.Errorf("clear category mappings failed: %w", err)
-	}
-	if err := db.Mdb.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SourceCategory{}).Error; err != nil {
-		return fmt.Errorf("clear source categories failed: %w", err)
+	for _, t := range []string{
+		model.TableCategory,
+		model.TableMovieSourceMapping,
+		model.TableCategoryMapping,
+		model.TableSourceCategory,
+	} {
+		if err := truncateTable(db.Mdb, t); err != nil {
+			return fmt.Errorf("truncate %s failed: %w", t, err)
+		}
 	}
 	time.Sleep(100 * time.Millisecond)
 
@@ -334,8 +359,10 @@ func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
 
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
-	db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
-	db.Rdb.Del(db.Cxt, config.BannersKey)
+	if db.Rdb != nil {
+		db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
+		db.Rdb.Del(db.Cxt, config.BannersKey)
+	}
 	ClearTVBoxListCache()
 	ClearTVBoxConfigCache()
 }
@@ -345,17 +372,18 @@ func InvalidateMasterSwitchCaches() {
 	support.RefreshCategoryCache()
 	support.InitMappingEngine()
 	support.TouchCategoryVersion()
-	bumpSearchTagsCacheVersion()
-	db.Rdb.Del(
-		db.Cxt,
-		config.SnapshotActiveVersionKey,
-		config.SnapshotBuildVersionKey,
-		config.ActiveCategoryTreeKey,
-		config.CategoryTreeKey,
-		config.TVBoxConfigCacheKey,
-		config.VirtualPictureKey,
-		config.BannersKey,
-	)
+	if db.Rdb != nil {
+		db.Rdb.Del(
+			db.Cxt,
+			config.SnapshotActiveVersionKey,
+			config.SnapshotBuildVersionKey,
+			config.ActiveCategoryTreeKey,
+			config.CategoryTreeKey,
+			config.TVBoxConfigCacheKey,
+			config.VirtualPictureKey,
+			config.BannersKey,
+		)
+	}
 }
 
 // CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录

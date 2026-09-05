@@ -40,7 +40,7 @@ type SlavePlaylistDiff struct {
 // （同一影片多条目共享匹配键时，落库后写覆盖，仅最后一行生效），再对比。
 // 可能进 stamp 路径：首次写入、最后一集标签变化、或自己集数变多。
 // 生产最终还要过全库最大集数；仅链接变化不进。
-func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePlaylist) SlavePlaylistDiff {
+func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.SlaveMoviePlaylist) SlavePlaylistDiff {
 	left := playlistsToSignatures(sortDedupePlaylists(existing))
 	right := playlistsToSignatures(sortDedupePlaylists(incoming))
 	diff := SlavePlaylistDiff{
@@ -78,7 +78,7 @@ func DiffSlavePlaylistGroups(movieKey string, existing, incoming []model.MoviePl
 }
 
 // sortDedupePlaylists 排序并按 (movie_key, group_index) 去重（保留最后一行）。
-func sortDedupePlaylists(rows []model.MoviePlaylist) []model.MoviePlaylist {
+func sortDedupePlaylists(rows []model.SlaveMoviePlaylist) []model.SlaveMoviePlaylist {
 	if len(rows) < 2 {
 		return rows
 	}
@@ -161,7 +161,7 @@ func FormatPlayStructureHuman(detail model.MovieDetail) string {
 	return b.String()
 }
 
-func playlistsToSignatures(rows []model.MoviePlaylist) []playlistSignature {
+func playlistsToSignatures(rows []model.SlaveMoviePlaylist) []playlistSignature {
 	out := make([]playlistSignature, 0, len(rows))
 	for _, r := range rows {
 		out = append(out, playlistSignature{
@@ -193,12 +193,12 @@ func formatPlaylistStructure(sigs []playlistSignature) string {
 	return string(data)
 }
 
-// BuildIncomingSlavePlaylists 用 API 详情构造将写入的 MoviePlaylist 行（对齐 SaveSitePlayList）。
-func BuildIncomingSlavePlaylists(sourceID string, detail model.MovieDetail) []model.MoviePlaylist {
+// BuildIncomingSlavePlaylists 用 API 详情构造将写入的 SlaveMoviePlaylist 行（对齐 SaveSitePlayList）。
+func BuildIncomingSlavePlaylists(sourceID string, detail model.MovieDetail) []model.SlaveMoviePlaylist {
 	if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
 		return nil
 	}
-	var playlists []model.MoviePlaylist
+	var playlists []model.SlaveMoviePlaylist
 	for _, movieKey := range BuildPlaylistMovieKeys(detail) {
 		for index, links := range detail.PlayList {
 			if len(links) == 0 {
@@ -209,7 +209,7 @@ func BuildIncomingSlavePlaylists(sourceID string, detail model.MovieDetail) []mo
 			if index < len(detail.PlayFrom) {
 				rawName = strings.TrimSpace(detail.PlayFrom[index])
 			}
-			playlists = append(playlists, model.MoviePlaylist{
+			playlists = append(playlists, model.SlaveMoviePlaylist{
 				SourceId:   sourceID,
 				MovieKey:   movieKey,
 				GroupIndex: index,

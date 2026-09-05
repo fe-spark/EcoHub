@@ -126,3 +126,76 @@ func TestResolvePollerToken(t *testing.T) {
 		})
 	}
 }
+
+func TestStopBotPoller_CleanShutdown(t *testing.T) {
+	var stopped atomic.Int32
+	runner := func(ctx context.Context, token string) {
+		<-ctx.Done()
+		stopped.Add(1)
+	}
+	defer stopAllPollers()
+
+	ensureBotPoller("test-stop-token", runner)
+	pollerMu.Lock()
+	if pollerGen == nil || pollerToken != "test-stop-token" {
+		pollerMu.Unlock()
+		t.Fatalf("poller should be running before StopBotPoller")
+	}
+	pollerMu.Unlock()
+
+	StopBotPoller()
+
+	pollerMu.Lock()
+	genAfter := pollerGen
+	tokAfter := pollerToken
+	pollerMu.Unlock()
+
+	if genAfter != nil || tokAfter != "" {
+		t.Fatalf("pollerGen and pollerToken should be cleared after StopBotPoller, got gen=%v tok=%q", genAfter, tokAfter)
+	}
+	if stopped.Load() != 1 {
+		t.Fatalf("runner should have received stop signal, got %d", stopped.Load())
+	}
+}
+
+func TestBotPoller_SelfExitCleansPollerGen(t *testing.T) {
+	// 验证 runner 自发退出（如检测到开关关闭或致命错误）时，pollerGen 能够被 defer 自动清空
+	runner := func(ctx context.Context, token string) {
+		// 模拟直接 return 退出
+		return
+	}
+	defer stopAllPollers()
+
+	ensureBotPoller("self-exit-token", runner)
+	// 等待 runner 协程退出并执行 defer 清理
+	waitCond(t, func() bool {
+		pollerMu.Lock()
+		defer pollerMu.Unlock()
+		return pollerGen == nil && pollerToken == ""
+	})
+}
+
+func TestBotPoller_FatalAuthError(t *testing.T) {
+	cases := []struct {
+		name     string
+		err      error
+		expected bool
+	}{
+		{"nil error", nil, false},
+		{"unauthorized lower", fmt.Errorf("telegram api: unauthorized"), true},
+		{"unauthorized upper", fmt.Errorf("HTTP 401 Unauthorized"), true},
+		{"not found", fmt.Errorf("telegram api: not found"), true},
+		{"http 404", fmt.Errorf("telegram http 404: Not Found"), true},
+		{"network timeout", fmt.Errorf("dial tcp: i/o timeout"), false},
+		{"rate limit", fmt.Errorf("telegram rate limited: retry later"), false},
+		{"conflict", fmt.Errorf("terminated by other getUpdates request"), false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTelegramFatalAuthError(tc.err); got != tc.expected {
+				t.Fatalf("isTelegramFatalAuthError(%v) = %v, want %v", tc.err, got, tc.expected)
+			}
+		})
+	}
+}

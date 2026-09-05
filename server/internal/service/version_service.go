@@ -73,18 +73,22 @@ func (s *VersionService) loadLatestRelease(includePre bool) (githubReleaseCache,
 	if includePre {
 		key = config.LatestReleasePreCacheKey
 	}
-	if raw, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && raw != "" {
-		var cached githubReleaseCache
-		if json.Unmarshal([]byte(raw), &cached) == nil && cached.TagName != "" {
-			return cached, nil
+	if db.Rdb != nil {
+		if raw, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && raw != "" {
+			var cached githubReleaseCache
+			if json.Unmarshal([]byte(raw), &cached) == nil && cached.TagName != "" {
+				return cached, nil
+			}
 		}
 	}
 	rel, err := fetchGithubLatestRelease(includePre)
 	if err != nil {
 		return githubReleaseCache{}, err
 	}
-	if b, err := json.Marshal(rel); err == nil {
-		_ = db.Rdb.Set(db.Cxt, key, b, config.LatestReleaseCacheTTL).Err()
+	if db.Rdb != nil {
+		if b, err := json.Marshal(rel); err == nil {
+			_ = db.Rdb.Set(db.Cxt, key, b, config.LatestReleaseCacheTTL).Err()
+		}
 	}
 	return rel, nil
 }

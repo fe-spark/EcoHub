@@ -101,38 +101,50 @@ func loadExistingEpisodeCountsByMIDs(tx *gorm.DB, mids []int64, excludeSourceID 
 
 	keysByMid := loadMovieMatchKeysByMidsTx(tx, mids)
 	allKeys := make([]string, 0)
-	keyToMid := make(map[string]int64)
+	midsByKey := make(map[string][]int64)
 	for mid, keys := range keysByMid {
 		for _, k := range keys {
 			if k != "" {
-				allKeys = append(allKeys, k)
-				keyToMid[k] = mid
+				if len(midsByKey[k]) == 0 {
+					allKeys = append(allKeys, k)
+				}
+				midsByKey[k] = append(midsByKey[k], mid)
 			}
 		}
 	}
 	if len(allKeys) > 0 {
-		q := tx.Where("movie_key IN ?", allKeys)
-		if excludeSourceID != "" {
-			q = q.Where("source_id <> ?", excludeSourceID)
-		}
-		var playlistRows []model.MoviePlaylist
-		if err := q.Find(&playlistRows).Error; err != nil {
-			return nil, err
-		}
-		for _, row := range playlistRows {
-			if strings.TrimSpace(row.Content) == "" {
-				continue
+		const batchSize = 500
+		for i := 0; i < len(allKeys); i += batchSize {
+			end := i + batchSize
+			if end > len(allKeys) {
+				end = len(allKeys)
 			}
-			mid := keyToMid[row.MovieKey]
-			if mid <= 0 {
-				continue
+			chunk := allKeys[i:end]
+			q := tx.Model(&model.SlaveMoviePlaylist{}).Where("movie_key IN ?", chunk)
+			if excludeSourceID != "" {
+				q = q.Where("source_id <> ?", excludeSourceID)
 			}
-			var links []model.MovieUrlInfo
-			if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
-				continue
+			var playlistRows []model.SlaveMoviePlaylist
+			if err := q.Find(&playlistRows).Error; err != nil {
+				return nil, err
 			}
-			if n := episodeCount(links); n > 0 {
-				out[mid] = append(out[mid], n)
+			for _, row := range playlistRows {
+				if strings.TrimSpace(row.Content) == "" {
+					continue
+				}
+				targetMids := midsByKey[row.MovieKey]
+				if len(targetMids) == 0 {
+					continue
+				}
+				var links []model.MovieUrlInfo
+				if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
+					continue
+				}
+				if n := episodeCount(links); n > 0 {
+					for _, mid := range targetMids {
+						out[mid] = append(out[mid], n)
+					}
+				}
 			}
 		}
 	}

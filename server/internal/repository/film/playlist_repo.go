@@ -22,7 +22,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 		return nil, nil
 	}
 
-	var playlists []model.MoviePlaylist
+	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
 	for _, detail := range list {
@@ -47,7 +47,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 					rawName = strings.TrimSpace(detail.PlayFrom[index])
 				}
 
-				playlists = append(playlists, model.MoviePlaylist{
+				playlists = append(playlists, model.SlaveMoviePlaylist{
 					SourceId:   sourceID,
 					MovieKey:   movieKey,
 					GroupIndex: index,
@@ -399,7 +399,7 @@ func pickBestMidForMatchKey(mids []int64) int64 {
 	return best.Mid
 }
 
-func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keysByMovieKey map[string]struct{}) ([]playlistChange, error) {
+func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist, keysByMovieKey map[string]struct{}) ([]playlistChange, error) {
 	movieKeys := make([]string, 0, len(keysByMovieKey))
 	for movieKey := range keysByMovieKey {
 		if strings.TrimSpace(movieKey) == "" {
@@ -423,28 +423,58 @@ func saveGroupedPlaylists(sourceID string, playlists []model.MoviePlaylist, keys
 		playlists = dedupePlaylistRows(playlists)
 	}
 
-	var changes []playlistChange
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		existing, err := loadPlaylistSignaturesTx(tx, sourceID, movieKeys)
-		if err != nil {
-			return err
-		}
-		incoming := buildPlaylistSignatures(playlists)
-		changes = diffPlaylistMovieKeys(existing, incoming, movieKeys)
+	// 1. 无事务只读比对签名与变更
+	existing, err := loadPlaylistSignaturesTx(db.Mdb, sourceID, movieKeys)
+	if err != nil {
+		return nil, err
+	}
+	incoming := buildPlaylistSignatures(playlists)
+	changes := diffPlaylistMovieKeys(existing, incoming, movieKeys)
 
-		if len(movieKeys) > 0 {
+	// 2. 无变更短路（No-op Short-circuit）：无任何改动直接返回，避免无意义开启事务
+	if len(changes) == 0 {
+		return changes, nil
+	}
+
+	// 3. 仅针对 changes 涉及的 movie_key 执行局部事务更新，避免整页全量 DELETE + INSERT 导致的自增 ID 暴涨与死锁
+	changedKeysMap := make(map[string]struct{}, len(changes))
+	changedKeys := make([]string, 0, len(changes))
+	for _, c := range changes {
+		if c.MovieKey != "" {
+			if _, ok := changedKeysMap[c.MovieKey]; !ok {
+				changedKeysMap[c.MovieKey] = struct{}{}
+				changedKeys = append(changedKeys, c.MovieKey)
+			}
+		}
+	}
+	sort.Strings(changedKeys)
+
+	changedPlaylists := make([]model.SlaveMoviePlaylist, 0, len(playlists))
+	for _, p := range playlists {
+		if _, ok := changedKeysMap[p.MovieKey]; ok {
+			changedPlaylists = append(changedPlaylists, p)
+		}
+	}
+
+	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for i := 0; i < len(changedKeys); i += 500 {
+			end := i + 500
+			if end > len(changedKeys) {
+				end = len(changedKeys)
+			}
+			chunk := changedKeys[i:end]
 			if err := tx.Unscoped().
-				Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
-				Delete(&model.MoviePlaylist{}).Error; err != nil {
+				Where("source_id = ? AND movie_key IN ?", sourceID, chunk).
+				Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
 				return err
 			}
 		}
 
-		if len(playlists) > 0 {
+		if len(changedPlaylists) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
-				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "deleted_at"}),
-			}).Create(&playlists).Error; err != nil {
+				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at", "orphan_marked_at"}),
+			}).CreateInBatches(&changedPlaylists, 500).Error; err != nil {
 				return err
 			}
 		}
@@ -476,7 +506,7 @@ func loadPlaylistSignaturesTx(tx *gorm.DB, sourceID string, movieKeys []string) 
 	if len(movieKeys) == 0 {
 		return result, nil
 	}
-	var rows []model.MoviePlaylist
+	var rows []model.SlaveMoviePlaylist
 	if err := tx.Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
 		Order("movie_key ASC, group_index ASC").
 		Find(&rows).Error; err != nil {
@@ -492,7 +522,7 @@ func loadPlaylistSignaturesTx(tx *gorm.DB, sourceID string, movieKeys []string) 
 	return result, nil
 }
 
-func buildPlaylistSignatures(playlists []model.MoviePlaylist) map[string][]playlistSignature {
+func buildPlaylistSignatures(playlists []model.SlaveMoviePlaylist) map[string][]playlistSignature {
 	result := make(map[string][]playlistSignature, len(playlists))
 	for _, playlist := range playlists {
 		result[playlist.MovieKey] = append(result[playlist.MovieKey], playlistSignature{
@@ -597,7 +627,7 @@ func playlistLastEpisodeChanged(left, right []playlistSignature) bool {
 
 // dedupePlaylistRows 按 (movie_key, group_index) 去重，保留最后一行。
 // 入参需已按 movie_key ASC, group_index ASC 排序；与落库 OnConflict 后写覆盖语义一致。
-func dedupePlaylistRows(rows []model.MoviePlaylist) []model.MoviePlaylist {
+func dedupePlaylistRows(rows []model.SlaveMoviePlaylist) []model.SlaveMoviePlaylist {
 	if len(rows) < 2 {
 		return rows
 	}
@@ -674,7 +704,10 @@ func DeletePlaylistBySourceId(sourceID string) error {
 }
 
 func DeletePlaylistBySourceIdTx(tx *gorm.DB, sourceID string) error {
-	return tx.Where("source_id = ?", sourceID).Delete(&model.MoviePlaylist{}).Error
+	if err := tx.Unscoped().Where("source_id = ?", sourceID).Delete(&model.MoviePlaylist{}).Error; err != nil {
+		return err
+	}
+	return tx.Unscoped().Where("source_id = ?", sourceID).Delete(&model.SlaveMoviePlaylist{}).Error
 }
 
 // saveSlaveSourceMappings 为附属站播放列表补充 source_mid -> global_mid 映射，
@@ -785,7 +818,7 @@ func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []
 		return nil
 	}
 
-	var playlists []model.MoviePlaylist
+	var playlists []model.SlaveMoviePlaylist
 	if err := tx.Where("source_id = ? AND movie_key IN ?", siteID, orderedKeys).
 		Order("movie_key ASC").
 		Order("group_index ASC").
@@ -796,7 +829,7 @@ func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []
 		return nil
 	}
 
-	playlistByKey := make(map[string][]model.MoviePlaylist, len(playlists))
+	playlistByKey := make(map[string][]model.SlaveMoviePlaylist, len(playlists))
 	for _, playlist := range playlists {
 		playlistByKey[playlist.MovieKey] = append(playlistByKey[playlist.MovieKey], playlist)
 	}
@@ -885,12 +918,12 @@ func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 	return result, nil
 }
 
-func loadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []string) (map[string]map[string][]model.MoviePlaylist, error) {
+func loadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []string) (map[string]map[string][]model.SlaveMoviePlaylist, error) {
 	if len(sourceIDs) == 0 || len(keys) == 0 {
 		return nil, nil
 	}
 
-	var playlists []model.MoviePlaylist
+	var playlists []model.SlaveMoviePlaylist
 	if err := tx.Where("source_id IN ? AND movie_key IN ?", sourceIDs, keys).
 		Order("source_id ASC").
 		Order("movie_key ASC").
@@ -899,11 +932,11 @@ func loadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []stri
 		return nil, err
 	}
 
-	result := make(map[string]map[string][]model.MoviePlaylist)
+	result := make(map[string]map[string][]model.SlaveMoviePlaylist)
 	for _, playlist := range playlists {
 		byKey := result[playlist.SourceId]
 		if byKey == nil {
-			byKey = make(map[string][]model.MoviePlaylist)
+			byKey = make(map[string][]model.SlaveMoviePlaylist)
 			result[playlist.SourceId] = byKey
 		}
 		byKey[playlist.MovieKey] = append(byKey[playlist.MovieKey], playlist)
@@ -915,7 +948,7 @@ func buildPlayGroupsFromLoadedPlaylists(
 	siteID string,
 	siteName string,
 	keys []string,
-	playlistsBySourceKey map[string]map[string][]model.MoviePlaylist,
+	playlistsBySourceKey map[string]map[string][]model.SlaveMoviePlaylist,
 ) []model.PlayLinkVo {
 	byKey := playlistsBySourceKey[siteID]
 	if len(byKey) == 0 {

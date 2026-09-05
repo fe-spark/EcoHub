@@ -112,6 +112,10 @@ type MovieDetailInfo struct {
 	Content         string `gorm:"type:longtext"` // 存储序列化后的完整 MovieDetail JSON
 }
 
+func (MovieDetailInfo) TableName() string {
+	return TableMovieDetail
+}
+
 // MovieSourceMapping 影片源站 ID 与全局影片 ID 的最小映射。
 // 主站详情写入和附属站播放列表采集匹配后都会维护该表。
 // 当前仅用于后台“单片更新全部站点”时，把全局 mid 翻译回各站 source_mid。
@@ -120,6 +124,10 @@ type MovieSourceMapping struct {
 	SourceId  string `gorm:"uniqueIndex:uidx_source_mid"`
 	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid"`
 	GlobalMid int64  `gorm:"index"`
+}
+
+func (MovieSourceMapping) TableName() string {
+	return TableMovieSourceMapping
 }
 
 // MoviePlaylist 附属站播放列表持久化模型。
@@ -131,6 +139,10 @@ type MoviePlaylist struct {
 	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"`
 	GroupName  string `gorm:"type:varchar(255)"`
 	Content    string `gorm:"type:longtext"`
+}
+
+func (MoviePlaylist) TableName() string {
+	return TableMoviePlaylist
 }
 
 // MoviePoster 附属站海报图源持久化模型。
@@ -351,6 +363,10 @@ type SearchTagItem struct {
 	Name    string `gorm:"size:128;not null"`                                                // 展示名称
 	Value   string `gorm:"uniqueIndex:uidx_search_tag;size:128;not null"`                    // 筛选值
 	Score   int64  `gorm:"index:idx_tag_score;default:0"`                                    // 热度权重，用于排序
+}
+
+func (SearchTagItem) TableName() string {
+	return TableSearchTag
 }
 
 // Tag 影片分类标签结构体

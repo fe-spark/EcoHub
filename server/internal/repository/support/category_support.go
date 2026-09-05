@@ -59,14 +59,23 @@ func ResolveCategoryID(id int64) int64 {
 }
 
 func TouchCategoryVersion() {
+	if db.Rdb == nil {
+		return
+	}
 	db.Rdb.Set(db.Cxt, config.CategoryVersionKey, time.Now().UnixNano(), 0)
 }
 
 func TouchSearchTagsVersion() {
+	if db.Rdb == nil {
+		return
+	}
 	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, time.Now().UnixNano(), 0)
 }
 
 func GetCategoryVersion() string {
+	if db.Rdb == nil {
+		return fmt.Sprintf("%d", time.Now().UnixNano())
+	}
 	version, err := db.Rdb.Get(db.Cxt, config.CategoryVersionKey).Result()
 	if err == nil && version != "" {
 		return version
@@ -81,6 +90,9 @@ func GetVersionedIndexPageCacheKey() string {
 }
 
 func ClearIndexPageCache() {
+	if db.Rdb == nil {
+		return
+	}
 	iter := db.Rdb.Scan(db.Cxt, 0, config.IndexPageCacheKey+"*", config.MaxScanCount).Iterator()
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
@@ -89,6 +101,9 @@ func ClearIndexPageCache() {
 }
 
 func RefreshCategoryCache() {
+	if db.Mdb == nil {
+		return
+	}
 	var all []model.Category
 	db.Mdb.Find(&all)
 

@@ -56,14 +56,16 @@ func applyMissingOnlyNotifyOnUpdateDefault(raw []byte, cfg *model.NotifyConfig) 
 // GetNotifyConfig 读取通知配置（Redis 优先，MySQL 兜底）。
 func GetNotifyConfig() model.NotifyConfig {
 	cfg := DefaultNotifyConfig()
-	if data := db.Rdb.Get(db.Cxt, config.NotifyConfigKey).Val(); data != "" {
-		raw := []byte(data)
-		if err := json.Unmarshal(raw, &cfg); err == nil {
-			applyMissingOnlyNotifyOnUpdateDefault(raw, &cfg)
-			return normalizeNotifyConfig(cfg)
+	if db.Rdb != nil {
+		if data := db.Rdb.Get(db.Cxt, config.NotifyConfigKey).Val(); data != "" {
+			raw := []byte(data)
+			if err := json.Unmarshal(raw, &cfg); err == nil {
+				applyMissingOnlyNotifyOnUpdateDefault(raw, &cfg)
+				return normalizeNotifyConfig(cfg)
+			}
+			log.Println("GetNotifyConfig Redis Unmarshal Error")
+			db.Rdb.Del(db.Cxt, config.NotifyConfigKey)
 		}
-		log.Println("GetNotifyConfig Redis Unmarshal Error")
-		db.Rdb.Del(db.Cxt, config.NotifyConfigKey)
 	}
 	var rec model.NotifyConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
@@ -104,6 +106,9 @@ func SaveNotifyConfig(cfg model.NotifyConfig) error {
 }
 
 func cacheNotifyConfig(cfg model.NotifyConfig) {
+	if db.Rdb == nil {
+		return
+	}
 	data, err := json.Marshal(cfg)
 	if err != nil {
 		return

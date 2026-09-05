@@ -269,7 +269,7 @@ func shouldWrapUpAfterFetchAbort(success int, skipPublish bool) bool {
 
 func StopTask(sourceID string) {
 	markProgressStopped(sourceID)
-	collectWrites.cancelSource(model.SlaveCollect, sourceID)
+	collectWrites.finishSource(model.SlaveCollect, sourceID)
 	if val, ok := activeTasks.Load(sourceID); ok {
 		val.(collectTask).cancel()
 	}
@@ -409,7 +409,7 @@ func StopAllTasks() {
 		}
 		if id, ok := key.(string); ok {
 			markProgressStopped(id)
-			collectWrites.cancelSource(model.SlaveCollect, id)
+			collectWrites.finishSource(model.SlaveCollect, id)
 		}
 		return true
 	})

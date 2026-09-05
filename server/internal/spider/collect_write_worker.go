@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"context"
 	"log"
 	"sort"
 	"time"
@@ -151,6 +152,70 @@ func (l *collectWriteLane) nextJob() (collectWriteJob, collectWriteJobMeta, func
 		job, meta, finish, ok := l.tryTakeOne()
 		if ok {
 			return job, meta, finish
+		}
+	}
+}
+
+func (l *collectWriteLane) isIdleLocked() bool {
+	if l.totalPending > 0 {
+		return false
+	}
+	for _, q := range l.queues {
+		if q.writing || len(q.pending) > 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func (l *collectWriteLane) waitPending(ctx context.Context) error {
+	stopCancelWake := context.AfterFunc(ctx, func() {
+		l.mu.Lock()
+		l.cond.Broadcast()
+		l.mu.Unlock()
+	})
+	defer stopCancelWake()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for {
+		if l.isIdleLocked() {
+			return nil
+		}
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		l.cond.Wait()
+	}
+}
+
+func (l *collectWriteLane) cancelAll() {
+	l.mu.Lock()
+	var allDiscarded []collectWriteJob
+	for id, queue := range l.queues {
+		discarded := queue.pending
+		queue.pending = nil
+		l.totalPending -= len(discarded)
+		queue.done = true
+		if !queue.writing {
+			l.removeQueueLocked(id)
+		}
+		allDiscarded = append(allDiscarded, discarded...)
+	}
+	if l.totalPending < 0 {
+		l.totalPending = 0
+	}
+	l.cond.Broadcast()
+	l.mu.Unlock()
+
+	for _, job := range allDiscarded {
+		if job.complete != nil {
+			job.complete(collectWriteCompletion{
+				page:  job.page,
+				err:   context.Canceled,
+				stage: "canceled",
+			})
 		}
 	}
 }
