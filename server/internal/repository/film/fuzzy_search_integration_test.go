@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 	"time"
+	"unsafe"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -156,13 +157,20 @@ func setupTestDBForFuzzySearch(t *testing.T) (*gorm.DB, string) {
 
 	oldDB := db.Mdb
 	oldIdx := activeFilmSearchIndex.Load()
+	oldModel := activeFilmReadModel.Load()
 	db.Mdb = gdb
+	activeFilmReadModel.Store(&FilmReadModel{Version: version})
 	t.Cleanup(func() {
 		db.Mdb = oldDB
 		if oldIdx != nil {
 			activeFilmSearchIndex.Store(oldIdx)
 		} else {
 			activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: ""})
+		}
+		if oldModel != nil {
+			activeFilmReadModel.Store(oldModel)
+		} else {
+			activeFilmReadModel.Store(&FilmReadModel{Version: ""})
 		}
 	})
 
@@ -254,6 +262,93 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 		if res[0].Mid != 106 {
 			t.Errorf("expected '凡人修仙传' (Mid=106), got Mid=%d (%s)", res[0].Mid, res[0].Name)
+		}
+	})
+
+	// 8. 内存索引就绪下不存在片名直接返回空结果，不穿透查库
+	t.Run("NonExistent_Film_Returns_Empty", func(t *testing.T) {
+		page := &dto.Page{Current: 1, PageSize: 10}
+		res := SearchSnapshotsByKeywordAndSortReadModel(version, "绝对不可能存在的片名XYZ12345", "", page)
+		if len(res) != 0 {
+			t.Fatalf("expected 0 results, got %d", len(res))
+		}
+		if page.Total != 0 {
+			t.Fatalf("expected page.Total=0, got %d", page.Total)
+		}
+		if page.PageCount != 1 {
+			t.Fatalf("expected page.PageCount=1, got %d", page.PageCount)
+		}
+	})
+
+	// 9. ProvideVod 关键词搜索走内存索引，未命中直接返回空
+	t.Run("ProvideVod_Search_And_Empty", func(t *testing.T) {
+		page := &dto.Page{Current: 1, PageSize: 10}
+		hitRes := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "庆余年", 0, page)
+		if len(hitRes) == 0 {
+			t.Fatalf("expected results for '庆余年' in provide vod, got 0")
+		}
+
+		pageEmpty := &dto.Page{Current: 1, PageSize: 10}
+		missRes := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "不存在的片名ABC999", 0, pageEmpty)
+		if len(missRes) != 0 {
+			t.Fatalf("expected 0 results for non-existent film in provide vod, got %d", len(missRes))
+		}
+		if pageEmpty.Total != 0 {
+			t.Fatalf("expected page.Total=0, got %d", pageEmpty.Total)
+		}
+	})
+
+	// 10. 管理端搜索：走内存索引与复合条件直接透传
+	t.Run("GetSearchPageReadModel_Scenarios", func(t *testing.T) {
+		// 纯片名走内存索引
+		page := &dto.Page{Current: 1, PageSize: 10}
+		res := GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Paging: page})
+		if len(res) == 0 {
+			t.Fatalf("expected results for '庆余年', got 0")
+		}
+
+		// 不存在的片名直接返回空
+		pageEmpty := &dto.Page{Current: 1, PageSize: 10}
+		missRes := GetSearchPageReadModel(model.SearchVo{Name: "不存在的片名ZZZ000", Paging: pageEmpty})
+		if len(missRes) != 0 {
+			t.Fatalf("expected 0 results for non-existent film, got %d", len(missRes))
+		}
+
+		// 复合条件（例如 plot）透传快照表查询
+		pagePlot := &dto.Page{Current: 1, PageSize: 10}
+		plotRes := GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Plot: "古装", Paging: pagePlot})
+		_ = plotRes // 校验不报错即可
+	})
+
+	// 11. 相关推荐候选集倒排词条召回
+	t.Run("RelatedCandidates_InvertedIndex", func(t *testing.T) {
+		curr := model.FilmListSnapshot{
+			Mid:  101,
+			Name: "庆余年 第二季",
+			Pid:  1,
+			Cid:  1,
+		}
+		cands := loadRelatedSnapshotCandidates(version, curr, 10)
+		if len(cands) == 0 {
+			t.Fatalf("expected related candidates for 庆余年 第二季, got 0")
+		}
+		foundRelated := false
+		for _, c := range cands {
+			if c.Mid == 102 || c.Mid == 103 {
+				foundRelated = true
+				break
+			}
+		}
+		if !foundRelated {
+			t.Errorf("expected related candidate to contain Mid 102 or 103")
+		}
+	})
+
+	// 12. 校验紧凑内存索引结构体为 48 字节，杜绝内存膨胀
+	t.Run("StructSize_48Bytes", func(t *testing.T) {
+		sz := unsafe.Sizeof(filmSearchMemoryItem{})
+		if sz != 48 {
+			t.Errorf("expected unsafe.Sizeof(filmSearchMemoryItem{}) to be 48 bytes, got %d", sz)
 		}
 	})
 }

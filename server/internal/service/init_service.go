@@ -164,6 +164,7 @@ func ensureSnapshotPerformanceIndexes() {
 		"CREATE INDEX idx_snap_cid_hits ON film_list_snapshot(snapshot_version, cid, hits)",
 		"CREATE INDEX idx_snap_pid_year ON film_list_snapshot(snapshot_version, pid, year, update_stamp)",
 		"CREATE INDEX idx_snap_ver_hits_pid ON film_list_snapshot(snapshot_version, hits, pid)",
+		"CREATE INDEX idx_snap_ver_series ON film_list_snapshot(snapshot_version, series_key, update_stamp)",
 		"CREATE INDEX idx_notify_change_mid_created_mid ON notify_change_mid(created_at, mid)",
 	}
 	for _, sql := range queries {

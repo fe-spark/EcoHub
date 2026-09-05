@@ -4,13 +4,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"sort"
+	"slices"
 	"strings"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
+
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -26,6 +29,8 @@ type relatedCacheItem struct {
 	PageCount int                     `json:"page_count"`
 	Snapshots []model.FilmListSnapshot `json:"snapshots"`
 }
+
+var relatedSnapshotsSf singleflight.Group
 
 func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page) []model.FilmListSnapshot {
 	startedAt := time.Now()
@@ -53,57 +58,91 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 		}
 	}
 
-	// 2. 漏斗召回最相关的候选集（最多 50 个候选）
-	candidates := loadRelatedSnapshotCandidates(version, snapshot, 50)
-	context := buildRelatedSnapshotContext(snapshot)
-
-	scoredList := make([]relatedSnapshotScore, 0, len(candidates))
-	for _, candidate := range candidates {
-		if candidate.Mid == snapshot.Mid {
-			continue
+	// 2. 并发防击穿：同 mid 详情页并发打开时合并计算
+	sfKey := fmt.Sprintf("v%s:%d:p%d:s%d", version, snapshot.Mid, page.Current, page.PageSize)
+	val, err, _ := relatedSnapshotsSf.Do(sfKey, func() (any, error) {
+		// 二次双检 Redis 缓存
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var item relatedCacheItem
+				if json.Unmarshal([]byte(data), &item) == nil {
+					return item, nil
+				}
+			}
 		}
-		score := scoreRelatedSnapshot(context, candidate)
-		if score < relatedSnapshotMinScore {
-			continue
+
+		// 漏斗召回最相关的候选集（最多 50 个候选）
+		candidates := loadRelatedSnapshotCandidates(version, snapshot, 50)
+		context := buildRelatedSnapshotContext(snapshot)
+
+		scoredList := make([]relatedSnapshotScore, 0, len(candidates))
+		for _, candidate := range candidates {
+			if candidate.Mid == snapshot.Mid {
+				continue
+			}
+			score := scoreRelatedSnapshot(context, candidate)
+			if score < relatedSnapshotMinScore {
+				continue
+			}
+			scoredList = append(scoredList, relatedSnapshotScore{snapshot: candidate, score: score})
 		}
-		scoredList = append(scoredList, relatedSnapshotScore{snapshot: candidate, score: score})
-	}
-	sortRelatedSnapshots(scoredList)
-	snapshots := relatedScoresToSnapshots(scoredList)
+		sortRelatedSnapshots(scoredList)
+		snapshots := relatedScoresToSnapshots(scoredList)
 
-	// 限制最高相关度结果数量
-	if len(snapshots) > maxRelatedRecommendCount {
-		snapshots = snapshots[:maxRelatedRecommendCount]
-	}
+		// 限制最高相关度结果数量
+		if len(snapshots) > maxRelatedRecommendCount {
+			snapshots = snapshots[:maxRelatedRecommendCount]
+		}
 
-	// 3. 兜底补齐（若相关推荐不足 maxRelatedRecommendCount 条，补齐到 maxRelatedRecommendCount）
-	if len(snapshots) < maxRelatedRecommendCount {
-		snapshots = appendCategoryFallbacks(version, snapshot, snapshots, maxRelatedRecommendCount)
-	}
+		// 3. 兜底补齐（若相关推荐不足 maxRelatedRecommendCount 条，补齐到 maxRelatedRecommendCount）
+		if len(snapshots) < maxRelatedRecommendCount {
+			snapshots = appendCategoryFallbacks(version, snapshot, snapshots, maxRelatedRecommendCount)
+		}
 
-	page.Total = len(snapshots)
-	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
-	if page.PageCount <= 0 {
-		page.PageCount = 1
-	}
+		curTotal := len(snapshots)
+		curPageCount := (curTotal + page.PageSize - 1) / page.PageSize
+		if curPageCount <= 0 {
+			curPageCount = 1
+		}
 
-	result := pageSnapshots(snapshots, page)
+		result := pageSnapshots(snapshots, page)
 
-	// 4. 写入 Redis 缓存
-	if db.Rdb != nil && len(result) > 0 {
-		cachePayload := relatedCacheItem{
-			Total:     page.Total,
-			PageCount: page.PageCount,
+		// 4. 写入 Redis 缓存
+		if db.Rdb != nil && len(result) > 0 {
+			cachePayload := relatedCacheItem{
+				Total:     curTotal,
+				PageCount: curPageCount,
+				Snapshots: result,
+			}
+			if raw, err := json.Marshal(cachePayload); err == nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), relatedCacheTTL).Err()
+			}
+		}
+
+		log.Printf("[FilmRelate] 相关推荐计算完成 mid=%d name=%q cache=MISS candidates=%d scored=%d total=%d page=%d size=%d cost=%s",
+			snapshot.Mid, snapshot.Name, len(candidates), len(scoredList), curTotal, page.Current, len(result), time.Since(startedAt))
+
+		return relatedCacheItem{
+			Total:     curTotal,
+			PageCount: curPageCount,
 			Snapshots: result,
-		}
-		if raw, err := json.Marshal(cachePayload); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), relatedCacheTTL).Err()
-		}
-	}
+		}, nil
+	})
 
-	log.Printf("[FilmRelate] 相关推荐计算完成 mid=%d name=%q cache=MISS candidates=%d scored=%d total=%d page=%d size=%d cost=%s",
-		snapshot.Mid, snapshot.Name, len(candidates), len(scoredList), page.Total, page.Current, len(result), time.Since(startedAt))
-	return result
+	if err != nil || val == nil {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+	cachedItem, ok := val.(relatedCacheItem)
+	if !ok {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+	page.Total = cachedItem.Total
+	page.PageCount = cachedItem.PageCount
+	return cloneFilmListSnapshots(cachedItem.Snapshots)
 }
 
 func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapshot, maxCandidates int) []model.FilmListSnapshot {
@@ -132,24 +171,31 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		appendUnique(seriesRows)
 	}
 
-	// 候选 2：核心片名匹配（优先内存索引快速召回）
+	// 候选 2：核心片名匹配（优先内存倒排索引纳秒级快速召回）
 	coreToken := extractCoreSearchToken(current.Name)
 	if coreToken != "" && len(list) < maxCandidates {
 		idx := getOrLoadFilmSearchMemoryIndex(version)
 		if idx != nil && len(idx.Items) > 0 {
-			lowerKey := strings.ToLower(coreToken)
 			var matchedMids []int64
-			for i := range idx.Items {
-				item := &idx.Items[i]
+			token := utils.CleanCompactText(coreToken)
+			if token == "" {
+				token = strings.ToLower(strings.TrimSpace(coreToken))
+			}
+			candidateIndexes := idx.tokenNameCandidates(token)
+			for _, itemIdx := range candidateIndexes {
+				if int(itemIdx) >= len(idx.Items) {
+					continue
+				}
+				item := &idx.Items[itemIdx]
 				if item.Mid == current.Mid {
 					continue
 				}
-				name := idx.ItemName(item)
-				if strings.Contains(strings.ToLower(name), lowerKey) {
-					matchedMids = append(matchedMids, item.Mid)
-					if len(matchedMids) >= 20 {
-						break
-					}
+				if _, ok := seen[item.Mid]; ok {
+					continue
+				}
+				matchedMids = append(matchedMids, item.Mid)
+				if len(matchedMids) >= 20 {
+					break
 				}
 			}
 			if len(matchedMids) > 0 {
@@ -159,8 +205,11 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		} else {
 			var titleRows []model.FilmListSnapshot
 			like := "%" + escapeLikePattern(coreToken) + "%"
-			db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND name LIKE ?", version, like).
-				Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
+			q := db.Mdb.Select(relatedSnapshotSelectFields).Where("snapshot_version = ? AND mid <> ? AND name LIKE ?", version, current.Mid, like)
+			if current.Pid > 0 {
+				q = q.Where("pid = ?", current.Pid)
+			}
+			q.Order("update_stamp DESC, id DESC").Limit(20).Find(&titleRows)
 			appendUnique(titleRows)
 		}
 	}
@@ -319,11 +368,6 @@ func peopleRelatedScore(currentSet map[string]struct{}, candidate string, maxSco
 	return score
 }
 
-func pageEnd(page *dto.Page) int {
-	page = ensurePage(page)
-	return getPageOffset(page) + page.PageSize
-}
-
 func splitPeopleSet(raw string) map[string]struct{} {
 	people := splitPeople(raw)
 	set := make(map[string]struct{}, len(people))
@@ -334,24 +378,13 @@ func splitPeopleSet(raw string) map[string]struct{} {
 }
 
 func splitPeople(raw string) []string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return nil
-	}
-	parts := []string{raw}
-	for _, sep := range []string{",", "，", "/", "|", "、", " "} {
-		next := make([]string, 0, len(parts))
-		for _, part := range parts {
-			for item := range strings.SplitSeq(part, sep) {
-				item = strings.TrimSpace(item)
-				if item != "" {
-					next = append(next, item)
-				}
-			}
+	return strings.FieldsFunc(strings.TrimSpace(raw), func(r rune) bool {
+		switch r {
+		case ',', '，', '/', '|', '、', ' ':
+			return true
 		}
-		parts = next
-	}
-	return parts
+		return false
+	})
 }
 
 func snapshotMetaRelatedScore(current model.FilmListSnapshot, candidate model.FilmListSnapshot) int {
@@ -377,16 +410,23 @@ func snapshotMetaRelatedScore(current model.FilmListSnapshot, candidate model.Fi
 }
 
 func sortRelatedSnapshots(scores []relatedSnapshotScore) {
-	sort.SliceStable(scores, func(i, j int) bool {
-		left := scores[i]
-		right := scores[j]
+	slices.SortFunc(scores, func(left, right relatedSnapshotScore) int {
 		if left.score != right.score {
-			return left.score > right.score
+			if left.score > right.score {
+				return -1
+			}
+			return 1
 		}
 		if left.snapshot.UpdateStamp != right.snapshot.UpdateStamp {
-			return left.snapshot.UpdateStamp > right.snapshot.UpdateStamp
+			if left.snapshot.UpdateStamp > right.snapshot.UpdateStamp {
+				return -1
+			}
+			return 1
 		}
-		return left.snapshot.Mid > right.snapshot.Mid
+		if left.snapshot.Mid > right.snapshot.Mid {
+			return -1
+		}
+		return 1
 	})
 }
 

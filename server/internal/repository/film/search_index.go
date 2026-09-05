@@ -2,6 +2,7 @@ package film
 
 import (
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"unsafe"
@@ -172,18 +173,34 @@ func intersectUnigrams(m map[rune][]int32, text string) []int32 {
 	return intersectSortedLists(lists)
 }
 
-func (idx *filmSearchMemoryIndex) getString(offset uint32, length uint16) string {
-	if length == 0 || int(offset)+int(length) > len(idx.StringPool) {
-		return ""
-	}
-	return unsafe.String(&idx.StringPool[offset], length)
-}
-
-func (idx *filmSearchMemoryIndex) ItemName(item *filmSearchMemoryItem) string {
+func (idx *filmSearchMemoryIndex) getItemStrings(item *filmSearchMemoryItem) (name, clean, pyFull, pyInit, pyAlt string) {
 	if item == nil {
-		return ""
+		return "", "", "", "", ""
 	}
-	return idx.getString(item.NameOffset, item.NameLen)
+	poolLen := len(idx.StringPool)
+	offset := int(item.PoolOffset)
+	if offset >= poolLen {
+		return "", "", "", "", ""
+	}
+
+	getStr := func(off, l int) string {
+		if l == 0 || off+l > poolLen {
+			return ""
+		}
+		return unsafe.String(&idx.StringPool[off], l)
+	}
+
+	o := offset
+	name = getStr(o, int(item.NameLen))
+	o += int(item.NameLen)
+	clean = getStr(o, int(item.CleanLen))
+	o += int(item.CleanLen)
+	pyFull = getStr(o, int(item.PyFullLen))
+	o += int(item.PyFullLen)
+	pyInit = getStr(o, int(item.PyInitLen))
+	o += int(item.PyInitLen)
+	pyAlt = getStr(o, int(item.PyAltLen))
+	return
 }
 
 func (idx *filmSearchMemoryIndex) asSearchItem(itemIndex int) utils.FilmSearchItem {
@@ -191,17 +208,18 @@ func (idx *filmSearchMemoryIndex) asSearchItem(itemIndex int) utils.FilmSearchIt
 		return utils.FilmSearchItem{}
 	}
 	item := &idx.Items[itemIndex]
+	name, clean, pyFull, pyInit, pyAlt := idx.getItemStrings(item)
 	return utils.FilmSearchItem{
 		Mid:               item.Mid,
-		Name:              idx.getString(item.NameOffset, item.NameLen),
-		CleanName:         idx.getString(item.CleanNameOffset, item.CleanNameLen),
-		PinyinFull:        idx.getString(item.PinyinFullOffset, item.PinyinFullLen),
-		PinyinInitials:    idx.getString(item.PinyinInitOffset, item.PinyinInitLen),
-		PinyinInitialAlts: idx.getString(item.PinyinAltOffset, item.PinyinAltLen),
-		Hits:              item.Hits,
-		Score:             item.Score,
-		Year:              item.Year,
-		UpdateStamp:       item.UpdateStamp,
+		Name:              name,
+		CleanName:         clean,
+		PinyinFull:        pyFull,
+		PinyinInitials:    pyInit,
+		PinyinInitialAlts: pyAlt,
+		Hits:              int64(item.Hits),
+		Score:             float64(item.Score),
+		Year:              int64(item.Year),
+		UpdateStamp:       int64(item.UpdateStamp),
 	}
 }
 
@@ -220,10 +238,7 @@ func (idx *filmSearchMemoryIndex) buildInverted() {
 	for i := range idx.Items {
 		id := int32(i)
 		item := &idx.Items[i]
-		cleanName := idx.getString(item.CleanNameOffset, item.CleanNameLen)
-		pinyinFull := idx.getString(item.PinyinFullOffset, item.PinyinFullLen)
-		pinyinInit := idx.getString(item.PinyinInitOffset, item.PinyinInitLen)
-		pinyinAlt := idx.getString(item.PinyinAltOffset, item.PinyinAltLen)
+		_, cleanName, pinyinFull, pinyinInit, pinyinAlt := idx.getItemStrings(item)
 
 		addBigrams(idx.nameBigrams, cleanName, id)
 		addUnigrams(idx.nameUnigrams, cleanName, id)
@@ -235,6 +250,21 @@ func (idx *filmSearchMemoryIndex) buildInverted() {
 			}
 		}
 	}
+
+	for k, v := range idx.nameBigrams {
+		idx.nameBigrams[k] = slices.Clip(v)
+	}
+	for k, v := range idx.nameUnigrams {
+		idx.nameUnigrams[k] = slices.Clip(v)
+	}
+	for k, v := range idx.pinyinFullBigrams {
+		idx.pinyinFullBigrams[k] = slices.Clip(v)
+	}
+	for k, v := range idx.pinyinInitialBigrams {
+		idx.pinyinInitialBigrams[k] = slices.Clip(v)
+	}
+	idx.Items = slices.Clip(idx.Items)
+	idx.StringPool = slices.Clip(idx.StringPool)
 }
 
 func (idx *filmSearchMemoryIndex) tokenNameCandidates(tok string) []int32 {
@@ -367,13 +397,12 @@ func buildSearchIndexFromRows(version string, rows []filmSearchIndexRow) *filmSe
 			localPool := make([]byte, 0, (end-start)*64)
 			localItems := make([]filmSearchMemoryItem, 0, end-start)
 
-			appendStr := func(s string) (uint32, uint16) {
+			appendStr := func(s string) uint16 {
 				if s == "" {
-					return 0, 0
+					return 0
 				}
-				offset := uint32(len(localPool))
 				localPool = append(localPool, s...)
-				return offset, uint16(len(s))
+				return uint16(len(s))
 			}
 
 			for i := start; i < end; i++ {
@@ -384,30 +413,27 @@ func buildSearchIndexFromRows(version string, rows []filmSearchIndexRow) *filmSe
 				derived := utils.FilmSearchItem{Name: r.Name}
 				utils.FillSearchDerivedFields(&derived)
 
-				nameOff, nameLen := appendStr(r.Name)
-				cleanOff, cleanLen := appendStr(derived.CleanName)
-				pyFullOff, pyFullLen := appendStr(derived.PinyinFull)
-				pyInitOff, pyInitLen := appendStr(derived.PinyinInitials)
-				pyAltOff, pyAltLen := appendStr(derived.PinyinInitialAlts)
+				poolOffset := uint32(len(localPool))
+				nameLen := appendStr(r.Name)
+				cleanLen := appendStr(derived.CleanName)
+				pyFullLen := appendStr(derived.PinyinFull)
+				pyInitLen := appendStr(derived.PinyinInitials)
+				pyAltLen := appendStr(derived.PinyinInitialAlts)
 
 				localItems = append(localItems, filmSearchMemoryItem{
-					Mid:              r.Mid,
-					Pid:              r.Pid,
-					Cid:              r.Cid,
-					Hits:             r.Hits,
-					Score:            r.Score,
-					Year:             r.Year,
-					UpdateStamp:      r.UpdateStamp,
-					NameOffset:       nameOff,
-					NameLen:          nameLen,
-					CleanNameOffset:  cleanOff,
-					CleanNameLen:     cleanLen,
-					PinyinFullOffset: pyFullOff,
-					PinyinFullLen:    pyFullLen,
-					PinyinInitOffset: pyInitOff,
-					PinyinInitLen:    pyInitLen,
-					PinyinAltOffset:  pyAltOff,
-					PinyinAltLen:     pyAltLen,
+					Mid:         r.Mid,
+					Hits:        int32(r.Hits),
+					UpdateStamp: int32(r.UpdateStamp),
+					PoolOffset:  poolOffset,
+					Pid:         int32(r.Pid),
+					Cid:         int32(r.Cid),
+					Year:        int32(r.Year),
+					Score:       float32(r.Score),
+					NameLen:     nameLen,
+					CleanLen:    cleanLen,
+					PyFullLen:   pyFullLen,
+					PyInitLen:   pyInitLen,
+					PyAltLen:    pyAltLen,
 				})
 			}
 			results[workerIdx] = workerBuildResult{pool: localPool, items: localItems}
@@ -429,19 +455,7 @@ func buildSearchIndexFromRows(version string, rows []filmSearchIndexRow) *filmSe
 		baseOffset := uint32(len(finalPool))
 		finalPool = append(finalPool, res.pool...)
 		for _, it := range res.items {
-			it.NameOffset += baseOffset
-			if it.CleanNameLen > 0 {
-				it.CleanNameOffset += baseOffset
-			}
-			if it.PinyinFullLen > 0 {
-				it.PinyinFullOffset += baseOffset
-			}
-			if it.PinyinInitLen > 0 {
-				it.PinyinInitOffset += baseOffset
-			}
-			if it.PinyinAltLen > 0 {
-				it.PinyinAltOffset += baseOffset
-			}
+			it.PoolOffset += baseOffset
 			finalItems = append(finalItems, it)
 		}
 	}
