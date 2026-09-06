@@ -332,3 +332,153 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 	})
 }
+
+// 10. 快速增量发布后内存读模型实时刷新验证（P1修复保障）
+func TestIncrementalPublishReadModelFreshness(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s_freshness?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmListSnapshot{}); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	origMdb := db.Mdb
+	origRdb := db.Rdb
+	db.Mdb = gdb
+	db.Rdb = nil
+	t.Cleanup(func() {
+		WaitActiveFilmSearchIndexBuilt()
+		db.Mdb = origMdb
+		db.Rdb = origRdb
+		ClearActiveFilmReadModel()
+	})
+
+	version := "v_freshness_test"
+	_ = SetActiveSnapshotVersion(version)
+	_ = LoadActiveFilmReadModel(version)
+	WaitActiveFilmSearchIndexBuilt()
+
+	// 初始状态：快照表只有 1 部影片
+	snap1 := model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             9001,
+		Name:            "流浪地球",
+		Pid:             1,
+		Cid:             10,
+		UpdateStamp:     time.Now().Unix(),
+	}
+	if err := gdb.Create(&snap1).Error; err != nil {
+		t.Fatalf("create snap1: %v", err)
+	}
+	_ = ApplyActiveFilmReadModelSnapshots(version, nil, nil)
+	WaitActiveFilmSearchIndexBuilt()
+
+	// 验证能搜到 流浪地球
+	p1 := &dto.Page{Current: 1, PageSize: 10}
+	res1 := SearchSnapshotsByKeywordAndSortReadModel(version, "流浪", "", p1)
+	if len(res1) == 0 || res1[0].Mid != 9001 {
+		t.Fatalf("expected to find snap1 (9001), got %+v", res1)
+	}
+
+	// 模拟爬虫快速增量发布新影片（同版本号）：入库新片 9002 "黑客帝国"
+	snap2 := model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             9002,
+		Name:            "黑客帝国",
+		Pid:             1,
+		Cid:             10,
+		UpdateStamp:     time.Now().Unix(),
+	}
+	if err := gdb.Create(&snap2).Error; err != nil {
+		t.Fatalf("create snap2: %v", err)
+	}
+
+	// 触发增量读模型应用
+	if err := ApplyActiveFilmReadModelSnapshots(version, nil, nil); err != nil {
+		t.Fatalf("ApplyActiveFilmReadModelSnapshots failed: %v", err)
+	}
+	WaitActiveFilmSearchIndexBuilt()
+
+	// 验证同版本下无需重启立即搜出新影片
+	p2 := &dto.Page{Current: 1, PageSize: 10}
+	res2 := SearchSnapshotsByKeywordAndSortReadModel(version, "黑客", "", p2)
+	if len(res2) == 0 || res2[0].Mid != 9002 {
+		t.Fatalf("expected to find freshly published snap2 (9002), got %+v", res2)
+	}
+}
+
+// 11. 增量标签刷新幂等性验证（P1修复保障：防止连载影视反复采集导致标签 score 持续累加虚增）
+func TestRefreshSearchTagsByMidsIdempotency(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s_idempotency?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmIndex{}, &model.SearchTagItem{}); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	origMdb := db.Mdb
+	origRdb := db.Rdb
+	db.Mdb = gdb
+	db.Rdb = nil
+	t.Cleanup(func() {
+		db.Mdb = origMdb
+		db.Rdb = origRdb
+	})
+
+	film := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid: 8888,
+		},
+		FilmIndexCategory: model.FilmIndexCategory{
+			Pid: 1,
+			Cid: 10,
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:     "凡人修仙传",
+			ClassTag: "玄幻,动作",
+			Year:     2024,
+		},
+	}
+	if err := gdb.Create(&film).Error; err != nil {
+		t.Fatalf("create test film: %v", err)
+	}
+
+	// 第一次刷新标签
+	if err := RefreshSearchTagsByMids(8888); err != nil {
+		t.Fatalf("first RefreshSearchTagsByMids failed: %v", err)
+	}
+
+	var firstTag model.SearchTagItem
+	if err := gdb.Where("pid = ? AND tag_type = ? AND value = ?", 1, "Plot", "玄幻").First(&firstTag).Error; err != nil {
+		t.Fatalf("find first tag failed: %v", err)
+	}
+	initialScore := firstTag.Score
+	if initialScore <= 0 {
+		t.Fatalf("expected positive initialScore, got %d", initialScore)
+	}
+
+	// 模拟爬虫多次更新该部连载影视（再次触发 RefreshSearchTagsByMids 2次）
+	for i := 0; i < 2; i++ {
+		if err := RefreshSearchTagsByMids(8888); err != nil {
+			t.Fatalf("repeated RefreshSearchTagsByMids failed: %v", err)
+		}
+	}
+
+	// 验证分值保持幂等，未发生虚增累加
+	var repeatedTag model.SearchTagItem
+	if err := gdb.Where("pid = ? AND tag_type = ? AND value = ?", 1, "Plot", "玄幻").First(&repeatedTag).Error; err != nil {
+		t.Fatalf("find repeated tag failed: %v", err)
+	}
+	if repeatedTag.Score != initialScore {
+		t.Fatalf("RefreshSearchTagsByMids broken idempotency: initialScore=%d, after repeats=%d", initialScore, repeatedTag.Score)
+	}
+}
+

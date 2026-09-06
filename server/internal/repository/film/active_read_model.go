@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -23,15 +24,189 @@ type FilmReadModel struct {
 	Version string
 }
 
+type FilmSearchMeta struct {
+	Mid  int64
+	Pid  int64
+	Cid  int64
+	Item utils.FilmSearchItem
+}
+
+type filmSearchMetaIndex struct {
+	Version string
+	Items   []FilmSearchMeta
+}
+
 var activeFilmReadModel atomic.Pointer[FilmReadModel]
 var activeFilmReadModelMu sync.Mutex
+
+var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
+var searchMetaBuildSf singleflight.Group
+var searchMetaBuildWg sync.WaitGroup
 
 func init() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
 }
 
-// WaitActiveFilmSearchIndexBuilt 兼容桩函数
-func WaitActiveFilmSearchIndexBuilt() {}
+func WaitActiveFilmSearchIndexBuilt() {
+	searchMetaBuildWg.Wait()
+}
+
+func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
+	version = strings.TrimSpace(version)
+	if version == "" || db.Mdb == nil {
+		return nil
+	}
+	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version && len(cur.Items) > 0 {
+		return cur
+	}
+	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
+		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version && len(cur.Items) > 0 {
+			return cur, nil
+		}
+		type dbMetaRow struct {
+			Mid         int64
+			Pid         int64
+			Cid         int64
+			Name        string
+			Hits        int64
+			Score       float64
+			Year        int64
+			UpdateStamp int64
+		}
+		var rows []dbMetaRow
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+			Select("mid, pid, cid, name, hits, score, year, update_stamp").
+			Where("snapshot_version = ?", version).
+			Find(&rows).Error; err != nil {
+			return nil, err
+		}
+		items := make([]FilmSearchMeta, len(rows))
+		for i, r := range rows {
+			item := utils.FilmSearchItem{
+				Mid:         r.Mid,
+				Name:        r.Name,
+				Hits:        r.Hits,
+				Score:       r.Score,
+				Year:        r.Year,
+				UpdateStamp: r.UpdateStamp,
+			}
+			utils.FillSearchDerivedFields(&item)
+			items[i] = FilmSearchMeta{
+				Mid:  r.Mid,
+				Pid:  r.Pid,
+				Cid:  r.Cid,
+				Item: item,
+			}
+		}
+		idx := &filmSearchMetaIndex{
+			Version: version,
+			Items:   items,
+		}
+		activeFilmSearchMetas.Store(idx)
+		return idx, nil
+	})
+	if err != nil || val == nil {
+		return nil
+	}
+	return val.(*filmSearchMetaIndex)
+}
+
+type scoredMetaHit struct {
+	mid         int64
+	matchScore  int
+	hits        int64
+	score       float64
+	year        int64
+	updateStamp int64
+}
+
+func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, cid int64) []scoredMetaHit {
+	if idx == nil || len(idx.Items) == 0 {
+		return nil
+	}
+	q := utils.BuildQueryContext(keyword)
+	matches := make([]scoredMetaHit, 0, 64)
+	for i := range idx.Items {
+		meta := &idx.Items[i]
+		if pid > 0 && meta.Pid != pid {
+			continue
+		}
+		if cid > 0 && meta.Cid != cid {
+			continue
+		}
+		score := utils.ScoreFilmMatch(meta.Item, q)
+		if score <= 0 {
+			continue
+		}
+		matches = append(matches, scoredMetaHit{
+			mid:         meta.Mid,
+			matchScore:  score,
+			hits:        meta.Item.Hits,
+			score:       meta.Item.Score,
+			year:        meta.Item.Year,
+			updateStamp: meta.Item.UpdateStamp,
+		})
+	}
+	if len(matches) == 0 {
+		return matches
+	}
+	sort.SliceStable(matches, func(i, j int) bool {
+		a, b := matches[i], matches[j]
+		switch sortField {
+		case "hits":
+			if a.hits != b.hits {
+				return a.hits > b.hits
+			}
+		case "latest":
+			if a.updateStamp != b.updateStamp {
+				return a.updateStamp > b.updateStamp
+			}
+		case "year":
+			if a.year != b.year {
+				return a.year > b.year
+			}
+		case "score":
+			if a.score != b.score {
+				return a.score > b.score
+			}
+		}
+		if a.matchScore != b.matchScore {
+			return a.matchScore > b.matchScore
+		}
+		if a.hits != b.hits {
+			return a.hits > b.hits
+		}
+		if a.year != b.year {
+			return a.year > b.year
+		}
+		if a.updateStamp != b.updateStamp {
+			return a.updateStamp > b.updateStamp
+		}
+		return a.mid > b.mid
+	})
+	return matches
+}
+
+func pageMidsFromMetaHits(hits []scoredMetaHit, page *dto.Page) []int64 {
+	page.Total = len(hits)
+	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+	if page.PageCount <= 0 {
+		page.PageCount = 1
+	}
+	offset := getPageOffset(page)
+	if offset >= len(hits) {
+		return nil
+	}
+	end := offset + page.PageSize
+	if end > len(hits) {
+		end = len(hits)
+	}
+	mids := make([]int64, 0, end-offset)
+	for _, h := range hits[offset:end] {
+		mids = append(mids, h.mid)
+	}
+	return mids
+}
 
 func LoadActiveFilmReadModel(version string) error {
 	version = strings.TrimSpace(version)
@@ -41,6 +216,14 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModelMu.Lock()
 	defer activeFilmReadModelMu.Unlock()
 	activeFilmReadModel.Store(&FilmReadModel{Version: version})
+	activeFilmSearchMetas.Store(nil)
+	if version != "" {
+		searchMetaBuildWg.Add(1)
+		go func(ver string) {
+			defer searchMetaBuildWg.Done()
+			_ = loadFilmSearchMetaIndex(ver)
+		}(version)
+	}
 	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
 	return nil
 }
@@ -51,12 +234,25 @@ func RefreshActiveProjectedReadModel() error {
 }
 
 func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmListSnapshot, deletedMIDs []int64) error {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	activeFilmSearchMetas.Store(nil)
+	if version != "" {
+		searchMetaBuildWg.Add(1)
+		go func(ver string) {
+			defer searchMetaBuildWg.Done()
+			_ = loadFilmSearchMetaIndex(ver)
+		}(version)
+	}
 	RefreshAccessDataCaches()
 	return nil
 }
 
 func ClearActiveFilmReadModel() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
+	activeFilmSearchMetas.Store(nil)
 }
 
 // InvalidateActiveFilmSearchIndex 增量发布后重载活跃读模型版本
@@ -322,6 +518,47 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			}
 		}
 
+		// A. 若有搜索词且无时间限制和复合分类筛选，优先走内存元数据检索
+		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" {
+			idx := loadFilmSearchMetaIndex(version)
+			if idx != nil && len(idx.Items) > 0 {
+				hits := searchFilmMetas(idx, keyword, st.Sort, st.Pid, st.Cid)
+				pageMids := pageMidsFromMetaHits(hits, page)
+				var snapshots []model.FilmListSnapshot
+				if len(pageMids) > 0 {
+					snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+				}
+				if snapshots == nil {
+					snapshots = []model.FilmListSnapshot{}
+				}
+				item := searchCacheItem{
+					Total:     page.Total,
+					PageCount: page.PageCount,
+					Snapshots: snapshots,
+				}
+				if db.Rdb != nil {
+					if raw, err := json.Marshal(item); err == nil {
+						ttl := 3 * time.Minute
+						if len(snapshots) == 0 {
+							ttl = 1 * time.Minute
+						}
+						_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+					}
+				}
+				log.Printf(
+					"[ProvideVod] 内存筛选完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
+					st.Pid,
+					st.Cid,
+					keyword,
+					page.Total,
+					page.Current,
+					len(snapshots),
+					time.Since(startedAt),
+				)
+				return item, nil
+			}
+		}
+
 		if db.Mdb == nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
@@ -352,11 +589,22 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		orderClause := snapshotSortOrderClause(st.Sort, keyword != "")
+		offset := getPageOffset(page)
+
+		// 延迟关联：先取 id，再取宽字段，避免大宽表参与文件排序
+		var ids []uint
+		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
 
 		var snapshots []model.FilmListSnapshot
-		offset := getPageOffset(page)
-		if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		if len(ids) > 0 {
+			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
+				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			}
+		}
+		if snapshots == nil {
+			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := searchCacheItem{
@@ -471,10 +719,42 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 			}
 		}
 
+		// A. 优先内存元数据检索
+		idx := loadFilmSearchMetaIndex(version)
+		if idx != nil && len(idx.Items) > 0 {
+			hits := searchFilmMetas(idx, keyword, sortField, 0, 0)
+			pageMids := pageMidsFromMetaHits(hits, page)
+			var snapshots []model.FilmListSnapshot
+			if len(pageMids) > 0 {
+				snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+			}
+			if snapshots == nil {
+				snapshots = []model.FilmListSnapshot{}
+			}
+			item := searchCacheItem{
+				Total:     page.Total,
+				PageCount: page.PageCount,
+				Snapshots: snapshots,
+			}
+			if db.Rdb != nil {
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				}
+			}
+			log.Printf("[SearchFilm] 内存检索完成 keyword=%q sort=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
+				keyword, sortField, page.Total, page.Current, len(snapshots), time.Since(startedAt))
+			return item, nil
+		}
+
 		if db.Mdb == nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
+		// B. 数据库兜底查询（采用延迟关联避免全字段参与 filesort）
 		query := applyNameLikeFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version), keyword)
 
 		var total int64
@@ -488,11 +768,21 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 		}
 
 		orderClause := snapshotSortOrderClause(sortField, true)
+		offset := getPageOffset(page)
+
+		var ids []uint
+		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
 
 		var snapshots []model.FilmListSnapshot
-		offset := getPageOffset(page)
-		if err := query.Select(snapshotSelectFields).Order(orderClause).Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		if len(ids) > 0 {
+			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
+				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			}
+		}
+		if snapshots == nil {
+			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := searchCacheItem{
@@ -544,6 +834,43 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 
 	// 1. 快照表 FilmListSnapshot 投影查询
 	if version != "" && db.Mdb != nil {
+		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != ""
+		if name != "" && !hasComplexFilter {
+			idx := loadFilmSearchMetaIndex(version)
+			if idx != nil && len(idx.Items) > 0 {
+				hits := searchFilmMetas(idx, name, "latest", s.Pid, s.Cid)
+				filteredHits := make([]scoredMetaHit, 0, len(hits))
+				for _, h := range hits {
+					if s.Year > 0 && h.year != s.Year {
+						continue
+					}
+					if s.BeginTime > 0 && h.updateStamp < s.BeginTime {
+						continue
+					}
+					if s.EndTime > 0 && h.updateStamp > s.EndTime {
+						continue
+					}
+					filteredHits = append(filteredHits, h)
+				}
+				pageMids := pageMidsFromMetaHits(filteredHits, page)
+				var snapshots []model.FilmListSnapshot
+				if len(pageMids) > 0 {
+					snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+				}
+				log.Printf(
+					"[ManageFilmSearch] 内存检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
+					s.Name,
+					s.Pid,
+					s.Cid,
+					page.Total,
+					page.Current,
+					len(snapshots),
+					time.Since(startedAt),
+				)
+				return convertSnapshotsToFilmIndexes(snapshots)
+			}
+		}
+
 		query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
 		if name != "" {
 			query = applyNameLikeFilter(query, name)
@@ -583,10 +910,17 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 			page.PageCount = 1
 		}
 
-		var snapshots []model.FilmListSnapshot
 		offset := getPageOffset(page)
-		if err := query.Select(snapshotSelectFields).Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
+		var ids []uint
+		if err := query.Select("id").Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
 			return []model.FilmIndex{}
+		}
+
+		var snapshots []model.FilmListSnapshot
+		if len(ids) > 0 {
+			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select(snapshotSelectFields).Where("id IN ?", ids).Order("update_stamp DESC, id DESC").Find(&snapshots).Error; err != nil {
+				return []model.FilmIndex{}
+			}
 		}
 
 		log.Printf(
