@@ -2,10 +2,14 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 	"strconv"
 
+	"server/internal/config"
 	"server/internal/infra/syslog"
+	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +19,17 @@ type SystemLogHandler struct{}
 var SystemLogHd = new(SystemLogHandler)
 
 func (h *SystemLogHandler) Delta(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看系统日志", c)
+		return
+	}
+
 	after, _ := strconv.ParseInt(c.DefaultQuery("after", "0"), 10, 64)
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10000"))
 	if after <= 0 {

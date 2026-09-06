@@ -45,11 +45,11 @@ export default function CollectProgressView({
   const progressText = !progress
     ? "未开始"
     : total > 0
-      ? `${done}/${total}`
+      ? `${done}/${total} 页`
       : zeroPageFinished
         ? "无新内容"
         : done > 0
-          ? `${done}`
+          ? `${done} 页`
           : progress.status === "starting"
             ? "排队中"
             : "即将开始采集";
@@ -65,7 +65,7 @@ export default function CollectProgressView({
           : "normal";
   const progressStrokeColor = failed > 0 && !isFullFail ? "#faad14" : undefined;
 
-  const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed}` : ""}`;
+  const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed} 页` : ""}`;
   // 收尾阶段：状态优先；计数作补充，避免只剩 9/9 看不出在发布
   const metaLine = inPostPagePhase
     ? `${statusText}${total > 0 || zeroPageFinished ? ` · ${countLine}` : ""}`

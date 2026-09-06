@@ -151,7 +151,7 @@ export default function CollectSourceCard({
               canStop ? (
                 <Popconfirm
                   title="停止当前采集任务？"
-                  description="仅停止采集任务，采集站保持启用；已请求数据会继续入库。"
+                  description="仅停止采集任务，采集站保持启用；已抓取数据会继续处理完成。"
                   onConfirm={() => onTerminateTask(record.id)}
                   disabled={!record.state}
                   okText="停止采集"

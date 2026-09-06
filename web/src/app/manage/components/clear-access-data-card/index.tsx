@@ -25,16 +25,6 @@ interface AccessStatus {
   totalRows?: number;
 }
 
-interface AccessDataStats {
-  dailyStatsCount: number;
-  dailyTopCount: number;
-  redisKeyCount: number;
-  earliestDay?: string;
-  latestDay?: string;
-  totalPv: number;
-  totalUv: number;
-}
-
 interface ClearAccessDataCardProps {
   onCleanComplete?: () => void;
 }
@@ -44,9 +34,6 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
   const { canWrite, isAdmin } = useManagePermission();
 
   const [status, setStatus] = useState<AccessStatus | null>(null);
-  const [stats, setStats] = useState<AccessDataStats | null>(null);
-  const [loadingStats, setLoadingStats] = useState(false);
-
   const [modalOpen, setModalOpen] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [password, setPassword] = useState("");
@@ -63,21 +50,6 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
     }
   }, []);
 
-  const fetchStats = useCallback(async () => {
-    if (!isAdmin) return;
-    setLoadingStats(true);
-    try {
-      const resp = await ApiGet<AccessDataStats>("/manage/access/stats");
-      if (resp.code === 0 && resp.data) {
-        setStats(resp.data);
-      }
-    } catch {
-      // ignore
-    } finally {
-      setLoadingStats(false);
-    }
-  }, [isAdmin]);
-
   useEffect(() => {
     void fetchStatus();
   }, [fetchStatus]);
@@ -90,12 +62,6 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
     if (!status) return false;
     return status.enabled || status.hasData || (status.totalRows ?? 0) > 0;
   }, [status]);
-
-  useEffect(() => {
-    if (shouldShow && isAdmin) {
-      void fetchStats();
-    }
-  }, [shouldShow, isAdmin, fetchStats]);
 
   if (!shouldShow) {
     return null;
@@ -133,9 +99,6 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
         setModalOpen(false);
         setPassword("");
         await fetchStatus();
-        if (isAdmin) {
-          await fetchStats();
-        }
         onCleanComplete?.();
         return;
       }
@@ -154,95 +117,40 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
         title={
           <Space size={8} align="center">
             <LineChartOutlined style={{ color: "var(--ant-color-primary)" }} />
-            <span>数据分析数据清理</span>
+            <span>数据分析清理</span>
           </Space>
         }
         extra={
           <Space size={8}>
             {status?.enabled ? (
-              <Tag color="processing">数据分析已开启</Tag>
+              <Tag color="processing">已开启</Tag>
             ) : (
-              <Tag color="default">数据分析未开启</Tag>
+              <Tag color="default">未开启</Tag>
             )}
             {!isAdmin && <Tag color="default">仅超级管理员可操作</Tag>}
           </Space>
         }
       >
-        <Flex vertical gap={16}>
-          <div className={styles.sectionHead}>
-            <div className={styles.sectionText}>
-              <Typography.Text strong>清理历史积累数据</Typography.Text>
-              <Typography.Text type="secondary">
-                清理数据分析积累的按日汇总记录（MySQL 表 access_daily_stats）、Top 榜单（access_daily_top）以及 Redis 访问分析相关临时统计。支持全部清空或按保留天数清理。
-              </Typography.Text>
-            </div>
-            <Button
-              danger
-              icon={<ClearOutlined />}
-              disabled={!canWrite || !isAdmin}
-              onClick={openModal}
-            >
-              清理数据
-            </Button>
+        <div className={styles.sectionHead}>
+          <div className={styles.sectionText}>
+            <Typography.Text strong>清理历史分析数据</Typography.Text>
+            <Typography.Text type="secondary">
+              清空站点访问流量与统计数据，支持全部清空或按天数保留。
+            </Typography.Text>
           </div>
-
-          <div className={styles.statsGrid}>
-            <div className={styles.statsItem}>
-              <span className={styles.statsLabel}>汇总天数</span>
-              <span className={styles.statsValue}>
-                {stats != null
-                  ? `${stats.dailyStatsCount} 天`
-                  : loadingStats
-                    ? "加载中..."
-                    : "-"}
-              </span>
-            </div>
-            <div className={styles.statsItem}>
-              <span className={styles.statsLabel}>日期跨度</span>
-              <span className={styles.statsValue}>
-                {stats?.earliestDay && stats?.latestDay
-                  ? stats.earliestDay === stats.latestDay
-                    ? stats.earliestDay
-                    : `${stats.earliestDay} ~ ${stats.latestDay}`
-                  : "-"}
-              </span>
-            </div>
-            <div className={styles.statsItem}>
-              <span className={styles.statsLabel}>榜单明细</span>
-              <span className={styles.statsValue}>
-                {stats?.dailyTopCount != null
-                  ? `${stats.dailyTopCount} 条`
-                  : loadingStats
-                    ? "加载中..."
-                    : "-"}
-              </span>
-            </div>
-            <div className={styles.statsItem}>
-              <span className={styles.statsLabel}>累计流量</span>
-              <span className={styles.statsValue}>
-                {stats
-                  ? `${stats.totalPv.toLocaleString()} PV · ${stats.totalUv.toLocaleString()} UV`
-                  : loadingStats
-                    ? "加载中..."
-                    : "-"}
-              </span>
-            </div>
-            <div className={styles.statsItem}>
-              <span className={styles.statsLabel}>Redis 临时缓存</span>
-              <span className={styles.statsValue}>
-                {stats?.redisKeyCount != null
-                  ? `${stats.redisKeyCount} 个键`
-                  : loadingStats
-                    ? "加载中..."
-                    : "-"}
-              </span>
-            </div>
-          </div>
-        </Flex>
+          <Button
+            danger
+            icon={<ClearOutlined />}
+            disabled={!canWrite || !isAdmin}
+            onClick={openModal}
+          >
+            清理数据
+          </Button>
+        </div>
       </Card>
 
       <Modal
-        title="清理数据分析数据"
+        title="清理数据分析"
         open={modalOpen}
         onCancel={closeModal}
         onOk={() => void handleClean()}
@@ -250,14 +158,14 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
         confirmLoading={cleaning}
         okButtonProps={{ danger: true }}
         destroyOnHidden
-        width={500}
+        width={480}
       >
         <Flex vertical gap={16}>
           <Alert
             type="warning"
             showIcon
             title="该操作不可逆"
-            description="清理后将永久删除所选范围内的数据分析按日汇总记录与临时缓存。若数据分析功能未开启且数据全部清空，此清理入口将自动隐藏。"
+            description="清理后将永久删除所选时间范围内的访问与统计数据，无法恢复。"
           />
           <div>
             <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>
@@ -268,10 +176,10 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
               onChange={(e) => setRetentionDays(e.target.value as number)}
               style={{ display: "flex", flexDirection: "column", gap: 10 }}
             >
-              <Radio value={0}>全部清空（删除所有历史落库记录与 Redis 临时缓存）</Radio>
-              <Radio value={7}>保留最近 7 天（清理 7 天前的历史数据与缓存）</Radio>
-              <Radio value={14}>保留最近 14 天（清理 14 天前的历史数据与缓存）</Radio>
-              <Radio value={30}>保留最近 30 天（清理 30 天前的历史数据与缓存）</Radio>
+              <Radio value={0}>全部清空（删除全部历史分析数据）</Radio>
+              <Radio value={7}>保留最近 7 天</Radio>
+              <Radio value={14}>保留最近 14 天</Radio>
+              <Radio value={30}>保留最近 30 天</Radio>
             </Radio.Group>
           </div>
           <div>

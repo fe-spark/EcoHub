@@ -12,6 +12,7 @@ import {
   VideoCameraOutlined,
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
+import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
 import styles from "./index.module.less";
@@ -61,6 +62,7 @@ const quickEntries = [
 ];
 
 export default function ManagePageView() {
+  const { isAdmin } = useManagePermission();
   const [stats, setStats] = useState<FilmInventoryStats | null>(null);
 
   useEffect(() => {
@@ -90,9 +92,11 @@ export default function ManagePageView() {
         className={styles.panelCard}
         title="当前影视数据规模"
         extra={
-          <Link href="/manage/system?tab=security" className={styles.statsLink}>
-            数据安全
-          </Link>
+          isAdmin ? (
+            <Link href="/manage/system?tab=security" className={styles.statsLink}>
+              数据安全
+            </Link>
+          ) : null
         }
       >
         <div className={styles.statsGrid}>
@@ -127,9 +131,11 @@ export default function ManagePageView() {
             );
           })}
         </div>
-        <Typography.Text className={styles.statsNote}>
-          反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
-        </Typography.Text>
+        {isAdmin && (
+          <Typography.Text className={styles.statsNote}>
+            反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
+          </Typography.Text>
+        )}
       </Card>
 
       <Card className={styles.panelCard} title="快捷入口">

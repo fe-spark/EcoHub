@@ -291,13 +291,47 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 		// 附属站已先追到 120 时，主站后补 120 只写详情，不重进列表。
 		existingCounts := existingCountsMap[existing.Mid]
 		existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
-		if isEpisodeCountHigher(extractEpisodeCountsFromDetail(newDetail), existingCounts) {
+		if masterShouldBumpStamp(newDetail, oldDetail, true, existingCounts) {
 			infos[index].UpdateStamp = changedAt
 		} else {
 			infos[index].UpdateStamp = existing.UpdateStamp
 		}
 	}
 	return unchangedKeys, oldDetailsByMid, existingCountsMap, nil
+}
+
+// masterShouldBumpStamp 判定主站写入是否应刷新 update_stamp 并推入更新通知：
+// 1. 集数严格大于全库已有最大集数（全新分集上线）；
+// 2. vod_remarks 备注变化（如从“第156集”变到“第157集”、“更新至xx”变“完结”、“TC”变“HD”等）；
+// 3. 集数未变（如原先有预告占位）但最后一集标签发生实质变更（如预告转正片），且集数达到最高。
+func masterShouldBumpStamp(newDetail, oldDetail model.MovieDetail, hasOld bool, existingCounts []int) bool {
+	newCounts := extractEpisodeCountsFromDetail(newDetail)
+	if isEpisodeCountHigher(newCounts, existingCounts) {
+		return true
+	}
+	if !hasOld {
+		return false
+	}
+	existMax := maxEpisodeCount(existingCounts)
+	newCount := maxEpisodeCount(newCounts)
+	// 若新数据有分集且最大集数落后于库内已有最高集数，纯属后补爬取，严禁顶更新戳与推通知
+	if newCount > 0 && newCount < existMax {
+		return false
+	}
+	oldRemarks := strings.TrimSpace(oldDetail.Remarks)
+	newRemarks := strings.TrimSpace(newDetail.Remarks)
+	oldCount := maxEpisodeCount(extractEpisodeCountsFromDetail(oldDetail))
+	if newRemarks != "" && oldRemarks != newRemarks {
+		// 电影/单片（newCount <= 1）备注变动（如 TC->HD）算有效更新；
+		// 剧集类（newCount > 1）仅当集数未落后且不属于附属站已达到该集数的后补时才允许通过
+		if newCount <= 1 || (newCount >= existMax && (oldCount == 0 || newCount == oldCount)) {
+			return true
+		}
+	}
+	if newCount > 0 && newCount == oldCount && masterLastEpisodeChanged(oldDetail, newDetail) && newCount >= existMax {
+		return true
+	}
+	return false
 }
 
 func loadMovieDetailsByMidsTx(tx *gorm.DB, mids []int64) (map[int64]model.MovieDetail, error) {
@@ -696,10 +730,11 @@ func filterPlayStructureNotifyMIDs(changed []model.FilmIndex, detailsByKey map[s
 		if existingCountsMap != nil {
 			existingCounts = append(existingCounts, existingCountsMap[mid]...)
 		}
-		if oldDetail, hasOld := oldByMid[mid]; hasOld {
+		oldDetail, hasOld := oldByMid[mid]
+		if hasOld {
 			existingCounts = append(existingCounts, extractEpisodeCountsFromDetail(oldDetail)...)
 		}
-		if isEpisodeCountHigher(extractEpisodeCountsFromDetail(newDetail), existingCounts) {
+		if masterShouldBumpStamp(newDetail, oldDetail, hasOld, existingCounts) {
 			seen[mid] = struct{}{}
 			out = append(out, mid)
 		}
