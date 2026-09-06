@@ -20,6 +20,9 @@ func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent,
 
 func QueryLogsScope(day, source, status, client, q, module, platform string, limit int) ([]AccessEvent, error) {
 	if db.Rdb == nil {
+		if !config.AccessLogEnabled {
+			return []AccessEvent{}, nil
+		}
 		return nil, fmt.Errorf("redis unavailable")
 	}
 	now := time.Now().In(time.Local)

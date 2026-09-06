@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Alert, Badge, Button, DatePicker, Dropdown, Space, Switch, message } from "antd";
+import { useRouter } from "next/navigation";
+import { Alert, Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
 import type { MenuProps } from "antd";
-import { CloudUploadOutlined, DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
@@ -46,6 +47,7 @@ const MODULE_OPTIONS: { key: "web" | "app" | "tvbox"; label: string; icon: React
 ];
 
 export default function AccessPageView() {
+  const router = useRouter();
   const [activeModule, setActiveModule] = useState<"web" | "app" | "tvbox">("web");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
@@ -53,16 +55,19 @@ export default function AccessPageView() {
   const [analyticsEnabled, setAnalyticsEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
-    ApiGet<{ enabled: boolean }>("/manage/access/status")
+    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
       .then((res) => {
         if (res.code === 0 && res.data) {
           setAnalyticsEnabled(res.data.enabled);
+          if (!res.data.enabled && !res.data.hasData) {
+            router.replace("/manage");
+          }
         }
       })
       .catch(() => {
         setAnalyticsEnabled(false);
       });
-  }, []);
+  }, [router]);
 
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
@@ -114,25 +119,6 @@ export default function AccessPageView() {
     setTimeout(() => {
       setIsRefreshing(false);
     }, 600);
-  };
-
-  const [isRollingUp, setIsRollingUp] = useState(false);
-
-  const handleManualRollup = async () => {
-    setIsRollingUp(true);
-    try {
-      const res = await ApiPost("/manage/access/rollup");
-      if (res.code === 0) {
-        message.success(res.msg || "数据已成功入库");
-        handleManualRefresh();
-      } else {
-        message.error(res.msg || "数据入库失败");
-      }
-    } catch {
-      message.error("数据入库请求异常");
-    } finally {
-      setIsRollingUp(false);
-    }
   };
 
   const handleManualRefresh = () => {
@@ -233,16 +219,6 @@ export default function AccessPageView() {
               </Button>
             )}
 
-            {/* 手动入库按钮 */}
-            {analyticsEnabled && (
-              <Button
-                icon={<CloudUploadOutlined />}
-                loading={isRollingUp}
-                onClick={handleManualRollup}
-              >
-                手动入库
-              </Button>
-            )}
           </Space>
         }
       />

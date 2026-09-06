@@ -10,16 +10,22 @@ import {
   Input,
   Modal,
   Space,
+  Tag,
   Typography,
   Upload,
 } from "antd";
-import { DownloadOutlined, UploadOutlined, CloudSyncOutlined } from "@ant-design/icons";
+import {
+  DownloadOutlined,
+  UploadOutlined,
+  CloudSyncOutlined,
+} from "@ant-design/icons";
 import type { UploadProps } from "antd";
 import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ResetSiteDataCard from "@/app/manage/components/reset-site-data-card";
+import ClearAccessDataCard from "@/app/manage/components/clear-access-data-card";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
 
@@ -109,7 +115,7 @@ interface DataSecurityPageViewProps {
 /** 数据安全：配置备份导入/导出 + 影视数据重置 */
 export default function DataSecurityPageView({ embedded = false }: DataSecurityPageViewProps) {
   const { message } = useAppMessage();
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
   const [exporting, setExporting] = useState(false);
 
   const [importOpen, setImportOpen] = useState(false);
@@ -209,7 +215,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
       {embedded ? null : (
         <ManagePageHeader
           title="数据安全"
-          description="管理站点配置备份导入与导出，以及影视库存与采集派生数据重置。"
+          description="管理站点配置备份导入与导出，数据分析积累数据清理，以及影视库存与采集派生数据重置。"
         />
       )}
 
@@ -229,6 +235,14 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         />
       )}
 
+      {!isAdmin && (
+        <Alert
+          type="warning"
+          showIcon
+          title="权限受限"
+          description="数据安全相关操作（配置备份/恢复、数据分析数据清理、影视数据重置）包含高危与敏感配置，仅超级管理员可操作。"
+        />
+      )}
 
       <Card
         className={styles.card}
@@ -238,8 +252,12 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             <span>数据备份与恢复</span>
           </Space>
         }
+        extra={
+          !isAdmin ? (
+            <Tag color="default">仅超级管理员可操作</Tag>
+          ) : null
+        }
       >
-
         <Flex vertical gap={16}>
           <div className={styles.sectionHead}>
             <div className={styles.sectionText}>
@@ -252,7 +270,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
               type="primary"
               icon={<DownloadOutlined />}
               loading={exporting}
-              disabled={!canWrite}
+              disabled={!canWrite || !isAdmin}
               onClick={() => void handleExport()}
             >
               导出配置
@@ -271,13 +289,13 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
                 accept=".json,application/json"
                 showUploadList={false}
                 beforeUpload={beforeUpload}
-                disabled={!canWrite}
+                disabled={!canWrite || !isAdmin}
               >
-                <Button icon={<UploadOutlined />} disabled={!canWrite}>
+                <Button icon={<UploadOutlined />} disabled={!canWrite || !isAdmin}>
                   选择备份文件
                 </Button>
               </Upload>
-              <Button type="primary" disabled={!canWrite || !backup} onClick={openImport}>
+              <Button type="primary" disabled={!canWrite || !isAdmin || !backup} onClick={openImport}>
                 导入配置
               </Button>
             </Space>
@@ -290,6 +308,8 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
           ) : null}
         </Flex>
       </Card>
+
+      <ClearAccessDataCard />
 
       <ResetSiteDataCard />
 

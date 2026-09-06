@@ -320,3 +320,31 @@ func TestPersistDailyWithDropped(t *testing.T) {
 		t.Fatalf("ov.Dropped=%d want 15", ov.Dropped)
 	}
 }
+
+func TestHasPersistedData(t *testing.T) {
+	setupAccessDailyTestDB(t)
+
+	hasData, count := HasPersistedData()
+	if hasData || count != 0 {
+		t.Fatalf("expected false and 0, got %v and %d", hasData, count)
+	}
+
+	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
+	day := yesterday.Format("2006-01-02")
+	if err := persistDaily(model.AccessDailyStats{
+		Day:        day,
+		PV:         10,
+		UV:         5,
+		ClientJSON: `{"web":10}`,
+		ActionJSON: `{"play":1}`,
+		HistJSON:   `{}`,
+		RolledAt:   time.Now(),
+	}, nil); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+
+	hasData, count = HasPersistedData()
+	if !hasData || count != 1 {
+		t.Fatalf("expected true and 1, got %v and %d", hasData, count)
+	}
+}

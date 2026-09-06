@@ -69,22 +69,23 @@ func SetupRouter() *gin.Engine {
 			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)
 			sysConfig.POST(`/notify/test`, handler.NotifyHd.TestNotify)
 
-			// 配置备份：导出/导入（不含影视库存与账号）
-			sysConfig.GET(`/backup/export`, handler.ManageHd.ExportConfigBackup)
-			sysConfig.POST(`/backup/import`, handler.ManageHd.ImportConfigBackup)
+			// 配置备份：导出/导入（不含影视库存与账号，仅超级管理员）
+			sysConfig.GET(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
+			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), handler.ManageHd.ImportConfigBackup)
 		}
 		systemLog := manageRoute.Group(`/system/logs`)
 		{
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}
 
-		accessRoute := manageRoute.Group(`/access`, middleware.AdminAccess())
+		accessRoute := manageRoute.Group(`/access`)
 		{
 			accessRoute.GET(`/status`, handler.AccessHd.Status)
-			accessRoute.GET(`/overview`, handler.AccessHd.Overview)
-			accessRoute.GET(`/tops`, handler.AccessHd.Tops)
-			accessRoute.GET(`/logs`, handler.AccessHd.Logs)
-			accessRoute.POST(`/rollup`, handler.AccessHd.ManualRollup)
+			accessRoute.GET(`/overview`, middleware.AdminAccess(), handler.AccessHd.Overview)
+			accessRoute.GET(`/tops`, middleware.AdminAccess(), handler.AccessHd.Tops)
+			accessRoute.GET(`/logs`, middleware.AdminAccess(), handler.AccessHd.Logs)
+			accessRoute.GET(`/stats`, middleware.AdminAccess(), handler.AccessHd.DataStats)
+			accessRoute.POST(`/clean`, middleware.AdminAccess(), handler.AccessHd.CleanData)
 		}
 
 		// 轮播相关
@@ -156,8 +157,8 @@ func SetupRouter() *gin.Engine {
 		{
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
-			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
-			spiderRoute.GET(`/clear/progress`, handler.SpiderHd.ResetProgress)
+			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
+			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgress)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.ResetImpactStats)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)

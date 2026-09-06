@@ -208,6 +208,81 @@ func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 		}
 	}
 
+	// 平滑兼容历史 sys_cron_api_log_clean 或 Model == 4 任务为 sys_cron_log_clean
+	var canonicalTask *model.FilmCollectTask
+	var legacyIndices []int
+
+	for i := range existing {
+		t := &existing[i]
+		if t.Id == "sys_cron_log_clean" {
+			if canonicalTask == nil {
+				canonicalTask = t
+			} else {
+				legacyIndices = append(legacyIndices, i)
+			}
+		} else if t.Id == "sys_cron_api_log_clean" || t.Model == 4 {
+			legacyIndices = append(legacyIndices, i)
+		}
+	}
+
+	if canonicalTask != nil {
+		canonicalTask.Model = 4
+		canonicalTask.Remark = "自动清理过期运行日志"
+		canonicalTask.Time = 0
+		if strings.TrimSpace(canonicalTask.Spec) == "" {
+			canonicalTask.Spec = "0 0 3 * * *"
+		}
+		if err := repository.SaveFilmTask(*canonicalTask); err != nil {
+			syslog.Errorf("[Cron] 保存日志清理任务失败: %v", err)
+		}
+		for _, idx := range legacyIndices {
+			repository.DelFilmTask(existing[idx].Id)
+		}
+	} else if len(legacyIndices) > 0 {
+		firstLegacy := &existing[legacyIndices[0]]
+		repository.DelFilmTask(firstLegacy.Id)
+		firstLegacy.Id = "sys_cron_log_clean"
+		firstLegacy.Model = 4
+		firstLegacy.Remark = "自动清理过期运行日志"
+		firstLegacy.Time = 0
+		if strings.TrimSpace(firstLegacy.Spec) == "" {
+			firstLegacy.Spec = "0 0 3 * * *"
+		}
+		if err := repository.SaveFilmTask(*firstLegacy); err != nil {
+			syslog.Errorf("[Cron] 平滑迁移日志清理任务失败: %v", err)
+		}
+		canonicalTask = firstLegacy
+
+		for _, idx := range legacyIndices[1:] {
+			repository.DelFilmTask(existing[idx].Id)
+		}
+	}
+
+	legacySet := make(map[int]bool, len(legacyIndices))
+	for _, idx := range legacyIndices {
+		legacySet[idx] = true
+	}
+
+	var cleanedExisting []model.FilmCollectTask
+	hasCanonicalInCleaned := false
+	for i, t := range existing {
+		if legacySet[i] {
+			continue
+		}
+		if t.Id == "sys_cron_log_clean" {
+			if !hasCanonicalInCleaned && canonicalTask != nil {
+				cleanedExisting = append(cleanedExisting, *canonicalTask)
+				hasCanonicalInCleaned = true
+			}
+			continue
+		}
+		cleanedExisting = append(cleanedExisting, t)
+	}
+	if canonicalTask != nil && !hasCanonicalInCleaned {
+		cleanedExisting = append(cleanedExisting, *canonicalTask)
+	}
+	existing = cleanedExisting
+
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
@@ -242,6 +317,8 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
 	case 3:
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
+	case 4:
+		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
 	default:
 		return
 	}
@@ -274,5 +351,10 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask}
+	logCleanTask := model.FilmCollectTask{
+		Id: "sys_cron_log_clean", Time: 0, Spec: "0 0 3 * * *",
+		Model: 4, State: true, Remark: "自动清理过期运行日志",
+	}
+
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask}
 }

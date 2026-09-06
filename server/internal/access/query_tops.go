@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
@@ -89,6 +90,9 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		}
 	}
 	if db.Rdb == nil {
+		if !config.AccessLogEnabled {
+			return []TopItem{}, nil
+		}
 		return nil, fmt.Errorf("redis unavailable")
 	}
 	dayKey := target.Format("20060102")

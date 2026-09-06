@@ -183,7 +183,7 @@ export default function ManageLayoutView({
 
 
 
-  const [accessEnabled, setAccessEnabled] = useState(false);
+  const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
   useEffect(() => {
     ApiGet("/manage/user/info").then((resp) => {
@@ -191,26 +191,26 @@ export default function ManageLayoutView({
         setUserInfo(resp.data);
       }
     });
-    ApiGet<{ enabled: boolean }>("/manage/access/status")
+    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
       .then((resp) => {
-        if (resp.code === 0 && resp.data?.enabled) {
-          setAccessEnabled(true);
+        if (resp.code === 0 && (resp.data?.enabled || resp.data?.hasData)) {
+          setAccessVisible(true);
         } else {
-          setAccessEnabled(false);
+          setAccessVisible(false);
         }
       })
       .catch(() => {
-        setAccessEnabled(false);
+        setAccessVisible(false);
       });
   }, []);
 
   useEffect(() => {
     if (pathname.startsWith("/manage/access")) {
-      if (userInfo && (!userInfo.isAdmin || !accessEnabled)) {
+      if (userInfo && (!userInfo.isAdmin || accessVisible === false)) {
         router.replace("/manage");
       }
     }
-  }, [userInfo, accessEnabled, pathname, router]);
+  }, [userInfo, accessVisible, pathname, router]);
 
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
@@ -251,11 +251,11 @@ export default function ManageLayoutView({
   const visibleMenuItems = useMemo(() => {
     return menuItems.filter((item) => {
       if (item?.key === "/manage/access") {
-        return Boolean(userInfo?.isAdmin && accessEnabled);
+        return Boolean(userInfo?.isAdmin && accessVisible);
       }
       return true;
     });
-  }, [userInfo?.isAdmin, accessEnabled]);
+  }, [userInfo?.isAdmin, accessVisible]);
   const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
@@ -455,7 +455,10 @@ export default function ManageLayoutView({
               ))}
             </div>
           )}
-          <ManagePermissionProvider canWrite={userInfo?.canWrite !== false}>
+          <ManagePermissionProvider
+            canWrite={userInfo?.canWrite !== false}
+            isAdmin={Boolean(userInfo?.isAdmin)}
+          >
             {children}
           </ManagePermissionProvider>
         </Content>

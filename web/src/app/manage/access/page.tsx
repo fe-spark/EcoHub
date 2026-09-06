@@ -18,10 +18,14 @@ export default async function AccessPage() {
     redirect("/manage");
   }
   try {
-    const statusResp = await serverGet<{ enabled?: boolean }>("/manage/access/status", undefined, {
-      Cookie: cookieStore.toString(),
-    });
-    if (statusResp.code !== 0 || !statusResp.data?.enabled) {
+    const statusResp = await serverGet<{ enabled?: boolean; hasData?: boolean; totalRows?: number }>(
+      "/manage/access/status",
+      undefined,
+      {
+        Cookie: cookieStore.toString(),
+      }
+    );
+    if (statusResp.code !== 0 || (!statusResp.data?.enabled && !statusResp.data?.hasData)) {
       redirect("/manage");
     }
   } catch {
