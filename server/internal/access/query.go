@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/redis/go-redis/v9"
@@ -133,6 +134,9 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 		}
 	}
 	if db.Rdb == nil {
+		if !config.AccessLogEnabled {
+			return emptyOverview(target), nil
+		}
 		return nil, fmt.Errorf("redis unavailable")
 	}
 	dayKey := target.Format("20060102")

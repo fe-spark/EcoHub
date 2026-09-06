@@ -116,3 +116,33 @@ func TestAppVersionSkipsUpdateCheckForNonAdmin(t *testing.T) {
 		t.Fatalf("non-admin must not receive upgrade state: phase=%q err=%q", info.UpgradePhase, info.UpgradeError)
 	}
 }
+
+func TestVerifyManagePassword_SafeNoSideEffects(t *testing.T) {
+	cases := []struct {
+		name   string
+		claims any
+		set    bool
+	}{
+		{name: "missing claims", set: false},
+		{name: "nil value", set: true, claims: nil},
+		{name: "wrong type", set: true, claims: "invalid-type"},
+		{name: "typed nil pointer", set: true, claims: (*utils.UserClaims)(nil)},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, w := testContext(http.MethodPost, "/api/manage/spider/clear")
+			if tc.set {
+				c.Set(config.AuthUserClaims, tc.claims)
+			}
+			ok := verifyManagePassword(c, "some-password")
+			if ok {
+				t.Fatalf("expected false, got true")
+			}
+			if w.Body.Len() != 0 {
+				t.Fatalf("expected no side effects on context recorder, got body=%s", w.Body.String())
+			}
+		})
+	}
+}
+

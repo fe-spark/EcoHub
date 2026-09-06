@@ -2,7 +2,6 @@ package access
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -23,6 +22,35 @@ const (
 	accessTopKeep = 10
 	rollupLockTTL = 10 * time.Minute
 )
+
+var rollupLockReleaseScript = redis.NewScript(`
+if redis.call("get", KEYS[1]) == ARGV[1] then
+	return redis.call("del", KEYS[1])
+else
+	return 0
+end
+`)
+
+// acquireRollupClusterLock 在已持有 rollupMu 的前提下抢 Redis 集群锁。
+// db.Rdb == nil 时无需集群锁，acquired=true。
+func acquireRollupClusterLock() (token string, acquired bool, err error) {
+	if db.Rdb == nil {
+		return "", true, nil
+	}
+	token = fmt.Sprintf("%s-%d", CurrentNodeName(), time.Now().UnixNano())
+	locked, lockErr := db.Rdb.SetNX(db.Cxt, rollupLockKey(), token, rollupLockTTL).Result()
+	if lockErr != nil {
+		return "", false, lockErr
+	}
+	return token, locked, nil
+}
+
+func releaseRollupClusterLock(token string) {
+	if db.Rdb == nil || token == "" {
+		return
+	}
+	_ = rollupLockReleaseScript.Run(db.Cxt, db.Rdb, []string{rollupLockKey()}, token).Err()
+}
 
 func rolledDayKey() string {
 	return config.AccessKeyPrefix + "meta:rolled_day"
@@ -152,30 +180,15 @@ func RunDailyRollup() {
 	rollupMu.Lock()
 	defer rollupMu.Unlock()
 
-	if db.Rdb != nil {
-		ctx := db.Cxt
-		lockKey := rollupLockKey()
-		lockToken := fmt.Sprintf("%s-%d", CurrentNodeName(), time.Now().UnixNano())
-		locked, lockErr := db.Rdb.SetNX(ctx, lockKey, lockToken, rollupLockTTL).Result()
-		if lockErr != nil {
-			syslog.Errorf("[Access] 获取集群滚动分布式锁失败: %v", lockErr)
-			return
-		}
-		if !locked {
-			// 集群中已有其它主实例正在执行滚动落库，避免重复执行与 MySQL 死锁
-			return
-		}
-		defer func() {
-			releaseScript := redis.NewScript(`
-				if redis.call("get", KEYS[1]) == ARGV[1] then
-					return redis.call("del", KEYS[1])
-				else
-					return 0
-				end
-			`)
-			_ = releaseScript.Run(ctx, db.Rdb, []string{lockKey}, lockToken).Err()
-		}()
+	lockToken, locked, lockErr := acquireRollupClusterLock()
+	if lockErr != nil {
+		syslog.Errorf("[Access] 获取集群滚动分布式锁失败: %v", lockErr)
+		return
 	}
+	if !locked {
+		return
+	}
+	defer releaseRollupClusterLock(lockToken)
 
 	now := time.Now().In(time.Local)
 	yesterday := startOfLocalDay(now).AddDate(0, 0, -1)
@@ -206,34 +219,6 @@ func RunDailyRollup() {
 			return
 		}
 	}
-}
-
-// ManualRollup 手动触发分析数据持久化入库：
-// 1. 回溯落库所有未落库的历史闭合日（无时间与天数限制）；
-// 2. 额外将今天当前实时统计快照 UPSERT 写入 MySQL，实现即时全量数据入库。
-func ManualRollup() error {
-	if !config.AccessLogEnabled {
-		return errors.New("数据分析功能未开启")
-	}
-	if db.Rdb == nil || db.Mdb == nil {
-		return errors.New("数据库或缓存未就绪")
-	}
-
-	RunDailyRollup()
-
-	// 额外将当天的最新实时数据同步持久化一份到 MySQL
-	now := time.Now().In(time.Local)
-	today := startOfLocalDay(now)
-	stats, tops, has, err := snapshotDayFromRedis(today)
-	if err != nil {
-		return err
-	}
-	if has {
-		if err := persistDaily(stats, tops); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func loadRolledDay() (time.Time, error) {
@@ -509,7 +494,6 @@ func persistDaily(stats model.AccessDailyStats, tops []model.AccessDailyTop) err
 	})
 }
 
-
 func loadDailyStats(day string) (model.AccessDailyStats, bool) {
 	var row model.AccessDailyStats
 	if db.Mdb == nil {
@@ -520,6 +504,25 @@ func loadDailyStats(day string) (model.AccessDailyStats, bool) {
 		return row, false
 	}
 	return row, true
+}
+
+// HasPersistedData 检查数据库中是否存在历史分析落库数据及总行数
+func HasPersistedData() (bool, int64) {
+	if db.Mdb == nil {
+		return false, 0
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.AccessDailyStats{}).Count(&count).Error; err != nil {
+		return false, 0
+	}
+	if count > 0 {
+		return true, count
+	}
+	var topCount int64
+	if err := db.Mdb.Model(&model.AccessDailyTop{}).Limit(1).Count(&topCount).Error; err == nil && topCount > 0 {
+		return true, topCount
+	}
+	return false, 0
 }
 
 func loadDailyTops(day, kind string, limit int) []TopItem {

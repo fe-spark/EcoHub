@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -144,6 +145,21 @@ func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
+// AddLogCleanCron 添加系统运行日志清理定时任务
+func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
+	if err := ValidSpec(spec); err != nil {
+		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
+	}
+	return CronCollect.AddFunc(spec, func() {
+		ft, err := repository.GetFilmTaskById(id)
+		if err != nil {
+			log.Println("LogCleanCron Exec Failed: ", err)
+			return
+		}
+		executeTask(ft)
+	})
+}
+
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
 	// 1. 获取最新配置
@@ -169,6 +185,8 @@ func ReloadCronTask(id string) error {
 		cid, err = AddFilmRecoverCron(ft.Id, ft.Spec)
 	case 3:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
+	case 4:
+		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -219,6 +237,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 		log.Println("执行一次失败采集恢复任务")
 	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
+		return
+	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）
+		executeLogCleanTask(ft)
 		return
 	default:
 		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -281,6 +302,24 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	cleanDetail := fmt.Sprintf("回收孤儿 %d、空记录 %d、缺失详情 %d", n, m, x)
 	log.Printf("[CleanOrphan] 数据清理任务执行完成，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录，cost=%s", n, m, x, time.Since(startedAt))
 	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
+}
+
+func executeLogCleanTask(ft model.FilmCollectTask) {
+	startedAt := time.Now()
+	n, err := syslog.PruneExpiredLogs(7 * 24 * time.Hour)
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "自动清理过期运行日志"
+	}
+	if err != nil {
+		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
+		notify.PublishCronFailed(ft.Id, remark, err.Error())
+		return
+	}
+
+	cleanDetail := fmt.Sprintf("清理过期日志文件 %d 个", n)
+	log.Printf("[LogClean] 清理过期运行日志完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
 // RunTaskOnce 立即手动执行一次任务

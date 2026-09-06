@@ -2,9 +2,12 @@ package syslog
 
 import (
 	"bytes"
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNormalizeLevel(t *testing.T) {
@@ -144,5 +147,94 @@ func TestWriteWithLevelMirrorOriginal(t *testing.T) {
 	// 缓冲区条目级别按写入时级别
 	if len(l.entries) == 0 || l.entries[0].Level != LevelError {
 		t.Fatalf("entry level want error, got %+v", l.entries)
+	}
+}
+
+func TestIsRotatedLogFile(t *testing.T) {
+	cases := []struct {
+		name string
+		want bool
+	}{
+		{"ecohub.log", false},
+		{"ecohub.log.", false},
+		{"ecohub.log.20260906-150405.000000000", true},
+		{"ecohub.log.1", true},
+		{"ecohub.1.log", false},
+		{"other.log", false},
+		{"", false},
+	}
+	for _, tc := range cases {
+		if got := isRotatedLogFile(tc.name); got != tc.want {
+			t.Errorf("isRotatedLogFile(%q) = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+}
+
+func useTempLogDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	prev := logDir
+	logDir = dir
+	t.Cleanup(func() { logDir = prev })
+	return dir
+}
+
+func TestPruneExpiredLogs(t *testing.T) {
+	dir := useTempLogDir(t)
+
+	activeFile := filepath.Join(dir, logFileName)
+	oldRotated := filepath.Join(dir, "ecohub.log.20260801-120000.000000000")
+	recentRotated := filepath.Join(dir, "ecohub.log.20260906-120000.000000000")
+	unrelated := filepath.Join(dir, "other.log")
+
+	_ = os.WriteFile(activeFile, []byte("active-content"), 0644)
+	_ = os.WriteFile(oldRotated, []byte("old-content"), 0644)
+	_ = os.WriteFile(recentRotated, []byte("recent-content"), 0644)
+	_ = os.WriteFile(unrelated, []byte("unrelated-content"), 0644)
+
+	oldTime := time.Now().Add(-10 * 24 * time.Hour)
+	_ = os.Chtimes(oldRotated, oldTime, oldTime)
+	_ = os.Chtimes(activeFile, oldTime, oldTime)
+	_ = os.Chtimes(unrelated, oldTime, oldTime)
+
+	pruned, err := PruneExpiredLogs(7 * 24 * time.Hour)
+	if err != nil {
+		t.Fatalf("PruneExpiredLogs error: %v", err)
+	}
+	if pruned != 1 {
+		t.Fatalf("expected 1 pruned file, got %d", pruned)
+	}
+
+	if _, err := os.Stat(oldRotated); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected oldRotated to be deleted, err=%v", err)
+	}
+	if _, err := os.Stat(recentRotated); err != nil {
+		t.Errorf("expected recentRotated to exist, err=%v", err)
+	}
+	if _, err := os.Stat(activeFile); err != nil {
+		t.Errorf("expected activeFile to exist, err=%v", err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Errorf("expected unrelated to exist, err=%v", err)
+	}
+
+	prunedZero, err := PruneExpiredLogs(0)
+	if err != nil || prunedZero != 0 {
+		t.Fatalf("expected 0, nil for non-positive retention, got %d, %v", prunedZero, err)
+	}
+}
+
+func TestPruneExpiredLogs_EmptyOrNoOp(t *testing.T) {
+	dir := t.TempDir()
+	prev := logDir
+	logDir = filepath.Join(dir, "missing")
+	t.Cleanup(func() { logDir = prev })
+
+	pruned, err := PruneExpiredLogs(24 * time.Hour)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pruned != 0 {
+		t.Fatalf("expected 0 pruned files in missing dir, got %d", pruned)
 	}
 }

@@ -5,7 +5,6 @@ import { Suspense, useCallback, useEffect } from "react";
 import {
   BellOutlined,
   SafetyCertificateOutlined,
-  FileSearchOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -77,7 +76,7 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="通知配置、数据安全（备份 / 重置）、接口访问记录与运行日志。"
+        description="通知配置、数据安全（配置备份 / 分析数据清理 / 数据重置）与运行日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {MAIN_TABS.map((tab) => {

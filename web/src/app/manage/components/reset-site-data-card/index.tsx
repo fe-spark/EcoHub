@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Flex, Input, Modal, Progress, Space, Typography } from "antd";
+import { Alert, Button, Card, Flex, Input, Modal, Progress, Space, Tag, Typography } from "antd";
 import { DeleteOutlined, WarningOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -28,7 +28,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
   const pollTimerRef = useRef<number | null>(null);
   const hideTimerRef = useRef<number | null>(null);
   const { message } = useAppMessage();
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
 
   const stopPolling = useCallback(() => {
     if (pollTimerRef.current !== null) {
@@ -102,6 +102,11 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <span>危险操作</span>
           </Space>
         }
+        extra={
+          !isAdmin ? (
+            <Tag color="default">仅超级管理员可操作</Tag>
+          ) : null
+        }
         className={styles.dangerCard}
       >
 
@@ -116,7 +121,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={!canWrite}
+              disabled={!canWrite || !isAdmin}
               onClick={() => setResetOpen(true)}
             >
               数据重置
