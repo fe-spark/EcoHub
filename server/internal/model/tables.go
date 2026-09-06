@@ -6,10 +6,7 @@ const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
 	TableFilmListSnapshot   = "film_list_snapshot"
-	TableFilterOption       = "film_filter_option_snapshot"
-	TableFilterIndex        = "film_filter_index_snapshot"
 	TableMovieDetail        = "movie_detail_info"
-	TableMoviePlaylist      = "movie_playlist"
 	TableSlaveMoviePlaylist = "slave_movie_playlists"
 	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
@@ -19,21 +16,17 @@ const (
 	TableCategoryMapping    = "category_mappings"
 	TableSourceCategory     = "source_categories"
 	TableMappingRule        = "mapping_rules"
-	TableVirtualPicture     = "virtual_picture_queue"
 	TableSearchTag          = "search_tag_item"
 	TableFilmSource         = "film_sources"
-	TableFailureRecord      = "failure_records"
 	TableCrontabRecord      = "crontab_record"
 	TableCronSourceRel      = "cron_source_rel"
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
 	TableFileInfo           = "files"
 	TableNotifyConfig       = "notify_config"
-	TableNotifyChangeBatch  = "notify_change_batch"
-	TableNotifyChangeMid    = "notify_change_mid"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
-	TableApiAccessLog       = "api_access_logs"
+	TableFailureRecord      = "failure_records"
 )
 
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
@@ -41,17 +34,12 @@ var AllModels = []any{
 	&User{},
 	&FilmIndex{},
 	&FilmListSnapshot{},
-	&FilmFilterOptionSnapshot{},
-	&FilmFilterIndexSnapshot{},
 	&FileInfo{},
-	&FailureRecord{},
 	&MovieDetailInfo{},
 	&Category{},
-	&MoviePlaylist{},
 	&SlaveMoviePlaylist{},
 	&MoviePoster{},
 	&MovieMatchKey{},
-	&VirtualPictureQueue{},
 	&FilmSource{},
 	&CollectSourceStats{},
 	&SearchTagItem{},
@@ -64,9 +52,8 @@ var AllModels = []any{
 	&CategoryMapping{},
 	&SourceCategory{},
 	&NotifyConfigRecord{},
-	&NotifyChangeBatch{},
-	&NotifyChangeMid{},
 	&AccessDailyStats{},
 	&AccessDailyTop{},
-	&ApiAccessLog{},
+	&FailureRecord{},
 }
+

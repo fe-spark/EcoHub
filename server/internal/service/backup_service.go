@@ -7,7 +7,6 @@ import (
 
 	"server/internal/config"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	"server/internal/spider"
 )
@@ -142,7 +141,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveNotifyConfig(*backup.Notify); err != nil {
 			return fmt.Errorf("导入通知配置失败: %w", err)
 		}
-		notify.EnsureBotPoller()
 	}
 
 	if req.Modules.MappingRules {

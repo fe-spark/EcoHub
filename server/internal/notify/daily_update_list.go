@@ -63,11 +63,8 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 }
 
 func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64) *gorm.DB {
-	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Where("c.created_at >= ? AND c.created_at <= ?", from, to)
-	if pid != DailyPidAll {
-		q = q.Joins("LEFT JOIN " + model.TableFilmIndex + " AS f ON f.mid = c.mid")
-	}
+	q := db.Mdb.Table(model.TableFilmIndex).
+		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix())
 	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs)
 }
 
@@ -75,7 +72,7 @@ func applyDailyUpdateExclude(q *gorm.DB, random bool, exclude []int64) *gorm.DB 
 	if !random || len(exclude) == 0 {
 		return q
 	}
-	return q.Where("c.mid NOT IN ?", exclude)
+	return q.Where("mid NOT IN ?", exclude)
 }
 
 func clampDailyUpdatePage(current, pageSize int) (int, int) {
@@ -108,7 +105,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 
 	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
 	var n int64
-	if err = base.Select("COUNT(DISTINCT c.mid)").Scan(&n).Error; err != nil {
+	if err = base.Select("COUNT(mid)").Scan(&n).Error; err != nil {
 		return nil, 0, err
 	}
 	total = int(n)
@@ -117,18 +114,18 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	}
 
 	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
-	listQ = listQ.Select("c.mid AS mid, MAX(c.created_at) AS latest_time").Group("c.mid")
+	listQ = listQ.Select("mid, update_stamp")
 
 	var rows []dailyUpdateMidRow
 	if q.Random {
 		var pool []dailyUpdateMidRow
-		if err = listQ.Order("latest_time DESC, c.mid DESC").Limit(dailyRandomPoolCap).Scan(&pool).Error; err != nil {
+		if err = listQ.Order("update_stamp DESC, mid DESC").Limit(dailyRandomPoolCap).Scan(&pool).Error; err != nil {
 			return nil, total, err
 		}
 		rows = pickRandomDailyUpdateRows(pool, pageSize)
 	} else {
 		offset := (current - 1) * pageSize
-		if err = listQ.Order("latest_time DESC, c.mid DESC").Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
+		if err = listQ.Order("update_stamp DESC, mid DESC").Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
 			return nil, total, err
 		}
 	}
@@ -172,11 +169,10 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 	}
 
 	var rows []dailyPidCountRow
-	q := db.Mdb.Table(model.TableNotifyChangeMid+" AS c").
-		Select("f.pid AS pid, COUNT(DISTINCT c.mid) AS cnt").
-		Joins("LEFT JOIN "+model.TableFilmIndex+" AS f ON f.mid = c.mid").
-		Where("c.created_at >= ? AND c.created_at <= ?", from, to).
-		Group("f.pid")
+	q := db.Mdb.Table(model.TableFilmIndex).
+		Select("pid AS pid, COUNT(mid) AS cnt").
+		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()).
+		Group("pid")
 	if err = q.Scan(&rows).Error; err != nil {
 		return countByPid, 0, 0, err
 	}

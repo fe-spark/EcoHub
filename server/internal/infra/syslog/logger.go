@@ -255,29 +255,7 @@ func (l *rollingLogger) rotateLocked() error {
 }
 
 func pruneExpiredLogsLocked(now time.Time) error {
-	entries, err := os.ReadDir(logDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	deadline := now.Add(-maxLogRetention)
-	for _, entry := range entries {
-		if entry.IsDir() || !isRotatedLogFile(entry.Name()) {
-			continue
-		}
-		path := filepath.Join(logDir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.ModTime().Before(deadline) {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-	}
+	// 不设强制过期删除天数限制，日志永久保留，由用户按需手动清理
 	return nil
 }
 

@@ -47,34 +47,6 @@ func TestShouldSkip(t *testing.T) {
 	}
 }
 
-func TestShouldRecordApiLog(t *testing.T) {
-	cases := []struct {
-		method, path string
-		status       int
-		want         bool
-	}{
-		{"GET", "/api/index", 200, true},
-		{"GET", "/api/provide/vod", 200, false},
-		{"GET", "/api/provide/vod", 404, true},
-		{"GET", "/api/provide/vod", 500, true},
-		{"GET", "/api/config/basic", 500, true},
-		{"GET", "/api/health", 200, false},
-		{"GET", "/api/config/basic", 200, false},
-		{"POST", "/api/stat/view", 200, false},
-		{"GET", "/api/upload/pic/poster/a.jpg", 200, false},
-		{"GET", "/api/manage/access/overview", 200, false},
-		{"GET", "/manage/system", 200, false},
-		{"OPTIONS", "/api/index", 204, false},
-		{"GET", "", 200, false},
-	}
-	for _, c := range cases {
-		got := ShouldRecordApiLog(c.method, c.path, c.status)
-		if got != c.want {
-			t.Fatalf("%s %s %d record=%v want %v", c.method, c.path, c.status, got, c.want)
-		}
-	}
-}
-
 func TestHTTPKindAndClient(t *testing.T) {
 	if httpKind("/api/index") != "http" {
 		t.Fatal("index is http not browse")

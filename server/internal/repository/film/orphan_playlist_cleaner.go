@@ -1,7 +1,6 @@
 package film
 
 import (
-	"errors"
 	"log"
 	"sort"
 	"sync"
@@ -10,16 +9,11 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-
-	"github.com/redis/go-redis/v9"
 )
 
 var (
-	memoryOrphanCursor uint
-	memoryOrphanMu     sync.Mutex
-
-	memoryMasterProtectUntil time.Time
-	memoryMasterProtectMu    sync.RWMutex
+	masterSwitchProtectUntil time.Time
+	masterSwitchMu           sync.RWMutex
 )
 
 // MasterSwitchColdStartDuration 主站切换冷启动保护期默认时长：7 天
@@ -30,52 +24,35 @@ func SetMasterSwitchProtection(duration time.Duration) {
 	if duration <= 0 {
 		duration = MasterSwitchColdStartDuration
 	}
-	until := time.Now().Add(duration)
-	if db.Rdb != nil {
-		_ = db.Rdb.Set(db.Cxt, config.MasterSwitchProtectKey, until.Unix(), duration).Err()
-	}
-	memoryMasterProtectMu.Lock()
-	memoryMasterProtectUntil = until
-	memoryMasterProtectMu.Unlock()
+	masterSwitchMu.Lock()
+	masterSwitchProtectUntil = time.Now().Add(duration)
+	masterSwitchMu.Unlock()
 }
 
 // InMasterSwitchProtection 判断是否处于主站切换冷启动保护期
 func InMasterSwitchProtection() bool {
-	if db.Rdb != nil {
-		val, err := db.Rdb.Get(db.Cxt, config.MasterSwitchProtectKey).Int64()
-		if err == nil {
-			return val > time.Now().Unix()
-		}
-		if errors.Is(err, redis.Nil) {
-			return false
-		}
-		log.Printf("[InMasterSwitchProtection] 查询 Redis 保护期异常，启用 Fail-Safe 保守安全策略: %v", err)
-		return true
-	}
-	memoryMasterProtectMu.RLock()
-	defer memoryMasterProtectMu.RUnlock()
-	return time.Now().Before(memoryMasterProtectUntil)
+	masterSwitchMu.RLock()
+	defer masterSwitchMu.RUnlock()
+	return time.Now().Before(masterSwitchProtectUntil)
 }
 
-// ClearMasterSwitchProtection 清除主站切换冷启动保护期（供测试重置或手动提前解除）
+// ClearMasterSwitchProtection 清除主站切换冷启动保护期
 func ClearMasterSwitchProtection() {
-	if db.Rdb != nil {
-		_ = db.Rdb.Del(db.Cxt, config.MasterSwitchProtectKey).Err()
-	}
-	memoryMasterProtectMu.Lock()
-	memoryMasterProtectUntil = time.Time{}
-	memoryMasterProtectMu.Unlock()
+	masterSwitchMu.Lock()
+	masterSwitchProtectUntil = time.Time{}
+	masterSwitchMu.Unlock()
 }
 
-// LoadOrphanCleanCursor 获取附属站孤儿治理断点游标（优先读取 Redis，降级使用内存）
+var (
+	memoryOrphanCursor uint
+	memoryOrphanMu     sync.Mutex
+)
+
+// LoadOrphanCleanCursor 获取附属站孤儿治理断点游标（优先读取 Redis，避免服务重启归零）
 func LoadOrphanCleanCursor() uint {
 	if db.Rdb != nil {
-		val, err := db.Rdb.Get(db.Cxt, config.OrphanCleanCursorKey).Uint64()
-		if err == nil {
+		if val, err := db.Rdb.Get(db.Cxt, config.OrphanCleanCursorKey).Uint64(); err == nil {
 			return uint(val)
-		}
-		if errors.Is(err, redis.Nil) {
-			return 0
 		}
 	}
 	memoryOrphanMu.Lock()
@@ -86,14 +63,14 @@ func LoadOrphanCleanCursor() uint {
 // SaveOrphanCleanCursor 保存附属站孤儿治理断点游标
 func SaveOrphanCleanCursor(id uint) {
 	if db.Rdb != nil {
-		_ = db.Rdb.Set(db.Cxt, config.OrphanCleanCursorKey, id, 7*24*time.Hour).Err()
+		_ = db.Rdb.Set(db.Cxt, config.OrphanCleanCursorKey, id, 0).Err()
 	}
 	memoryOrphanMu.Lock()
 	memoryOrphanCursor = id
 	memoryOrphanMu.Unlock()
 }
 
-// ClearOrphanCleanCursor 清除附属站孤儿治理游标（全量轮次结束或数据重置时复位）
+// ClearOrphanCleanCursor 清除附属站孤儿治理断点游标
 func ClearOrphanCleanCursor() {
 	if db.Rdb != nil {
 		_ = db.Rdb.Del(db.Cxt, config.OrphanCleanCursorKey).Err()
@@ -104,9 +81,9 @@ func ClearOrphanCleanCursor() {
 }
 
 var (
-	orphanPlaylistScanBatchSize   = 1000
+	orphanPlaylistScanBatchSize   = 500
 	orphanPlaylistDeleteBatchSize = 100
-	orphanPlaylistBatchCooldown   = 20 * time.Millisecond
+	orphanPlaylistBatchCooldown   = 15 * time.Millisecond
 	orphanPlaylistMaxPurgePerRun  = int64(5000)
 	orphanPlaylistMaxRunDuration  = 10 * time.Second
 	orphanPlaylistGracePeriod     = 24 * time.Hour
@@ -129,17 +106,13 @@ type matchKeyRow struct {
 	MatchKey string
 }
 
-// CleanOrphanPlaylists 极简单阶段微批物理回收附属站真孤儿。
+// CleanOrphanPlaylists 极简单阶段分批物理回收附属站真孤儿。
 func CleanOrphanPlaylists() (int64, error) {
 	return CleanOrphanPlaylistsUntil(nil)
 }
 
-// CleanOrphanPlaylistsUntil Keyset 分页断点续扫 + 24 小时安全沉淀期 + 微批直接物理清理。
-// 彻底废除两阶段状态机与 19 万次打标写放大，遵守工业级高可用四大铁律：
-// 1. Keyset Pagination：WHERE id > lastID ORDER BY id ASC LIMIT 1000 恒定走主键聚集索引；
-// 2. 24 小时安全沉淀：仅 created_at < NOW() - 24h 的记录进入判定，24h 内新建记录天然跳过防误删；
-// 3. 安全配额限流：单次最大删除 5000 条或耗时超限即停，未完成保留断点游标，杜绝集中到期拖垮数据库；
-// 4. 微批微休眠：每次删除最多 100 条并按 ID 升序排序防死锁，批间休眠 20ms 防 I/O 尖刺。
+// CleanOrphanPlaylistsUntil 24 小时安全沉淀期 + 普通分批 SQL 清理。
+// 仅清理 created_at < NOW() - 24h 的孤儿记录，24h 内新建记录天然跳过防误删。
 func CleanOrphanPlaylistsUntil(shouldStop func() bool) (int64, error) {
 	if db.Mdb == nil {
 		return 0, nil
@@ -193,20 +166,16 @@ func CleanOrphanPlaylistsUntil(shouldStop func() bool) (int64, error) {
 			return purgedTotal, err
 		}
 		if len(rows) == 0 {
-			// 当前轮次扫描完成，游标归零
 			ClearOrphanCleanCursor()
 			break
 		}
 
 		lastID = rows[len(rows)-1].ID
 
-		// 筛选已满足 24 小时安全沉淀期的候选记录
 		seenKeys := make(map[string]struct{}, len(rows))
 		candidateKeys := make([]string, 0, len(rows))
 		candidateRows := make([]playlistScanRow, 0, len(rows))
-
 		for _, r := range rows {
-			// 未满 24 小时的记录天然受保护跳过，主站可能有采集延迟
 			if !r.CreatedAt.Before(cutoff) {
 				continue
 			}

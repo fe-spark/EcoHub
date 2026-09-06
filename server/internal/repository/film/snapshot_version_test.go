@@ -1,9 +1,7 @@
 package film
 
 import (
-	"context"
 	"testing"
-	"time"
 )
 
 func TestActiveReadModelVersionFallsBackWhenEmpty(t *testing.T) {
@@ -60,13 +58,9 @@ func TestActiveReadModelVersionFallsBackWhenEmpty(t *testing.T) {
 
 func TestClearActiveFilmReadModelLeavesEmptyNonNilPointer(t *testing.T) {
 	origRm := GetActiveFilmReadModel()
-	origIdx := activeFilmSearchIndex.Load()
 	defer func() {
 		if origRm != nil {
 			activeFilmReadModel.Store(origRm)
-		}
-		if origIdx != nil {
-			activeFilmSearchIndex.Store(origIdx)
 		}
 	}()
 
@@ -82,13 +76,9 @@ func TestClearActiveFilmReadModelLeavesEmptyNonNilPointer(t *testing.T) {
 
 func TestInvalidateActiveFilmSearchIndexPreservesReadModelVersion(t *testing.T) {
 	origRm := GetActiveFilmReadModel()
-	origIdx := activeFilmSearchIndex.Load()
 	defer func() {
 		if origRm != nil {
 			activeFilmReadModel.Store(origRm)
-		}
-		if origIdx != nil {
-			activeFilmSearchIndex.Store(origIdx)
 		}
 	}()
 
@@ -101,52 +91,17 @@ func TestInvalidateActiveFilmSearchIndexPreservesReadModelVersion(t *testing.T) 
 	if rm == nil || rm.Version != testVer {
 		t.Fatalf("InvalidateActiveFilmSearchIndex cleared version, got %+v, want version=%q", rm, testVer)
 	}
-
-	searchIdx := activeFilmSearchIndex.Load()
-	if searchIdx != nil && searchIdx.Version != "" && len(searchIdx.Items) > 0 {
-		t.Fatalf("InvalidateActiveFilmSearchIndex failed to mark memory search index stale, got %+v", searchIdx)
-	}
-}
-
-func TestStartClusterSnapshotWatcherIdempotent(t *testing.T) {
-	before := clusterWatcherRunCount.Load()
-	StartClusterSnapshotWatcher()
-	StartClusterSnapshotWatcher()
-	StartClusterSnapshotWatcher()
-	if got := clusterWatcherRunCount.Load(); got != before+1 {
-		t.Fatalf("watcher goroutine started %d times, want once (before=%d)", got, before)
-	}
-	StopClusterSnapshotWatcher()
-}
-
-func TestRunClusterSnapshotWatcherStopsOnCancel(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		runClusterSnapshotWatcher(ctx, new(clusterSnapshotSyncState))
-		close(done)
-	}()
-	cancel()
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("runClusterSnapshotWatcher did not stop after context cancel")
-	}
 }
 
 func TestResolveActiveReadModelVersion(t *testing.T) {
 	origRm := GetActiveFilmReadModel()
-	origIdx := activeFilmSearchIndex.Load()
 	defer func() {
 		if origRm != nil {
 			activeFilmReadModel.Store(origRm)
 		}
-		if origIdx != nil {
-			activeFilmSearchIndex.Store(origIdx)
-		}
 	}()
 
-	t.Run("in sync uses memory version", func(t *testing.T) {
+	t.Run("in sync uses snapshot version", func(t *testing.T) {
 		if got := resolveActiveReadModelVersion("v1", "v1"); got != "v1" {
 			t.Fatalf("got %q, want v1", got)
 		}
@@ -166,16 +121,9 @@ func TestResolveActiveReadModelVersion(t *testing.T) {
 			t.Fatalf("got %q, want empty", got)
 		}
 	})
-	t.Run("version mismatch with stale index keeps memory version", func(t *testing.T) {
-		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: "v1"})
-		if got := resolveActiveReadModelVersion("v1", "v2"); got != "v1" {
-			t.Fatalf("got %q, want v1 (index not ready)", got)
-		}
-	})
-	t.Run("version mismatch with ready index switches to snapshot", func(t *testing.T) {
-		activeFilmSearchIndex.Store(&filmSearchMemoryIndex{Version: "v2", Items: make([]filmSearchMemoryItem, 1)})
+	t.Run("version mismatch switches to snapshot", func(t *testing.T) {
 		if got := resolveActiveReadModelVersion("v1", "v2"); got != "v2" {
-			t.Fatalf("got %q, want v2 (index ready)", got)
+			t.Fatalf("got %q, want v2", got)
 		}
 	})
 }

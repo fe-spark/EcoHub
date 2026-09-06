@@ -91,7 +91,7 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。发布版后台可点「立即升级并重启」（compose 需挂载 `/var/run/docker.sock`，新 compose 已包含）。挂载 socket 等于容器内进程可操作宿主机 Docker，仅超级管理员能触发升级；不需要在线升级可去掉该卷。
+固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。升级请使用 `docker compose pull` 或拉取新镜像。
 
 ---
 
@@ -167,11 +167,13 @@ services:
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
+      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PORT:-18080}:8080
     volumes:
       - ./data/uploads:/app/static/upload
+      # 后台「立即升级」通过 socket 拉 latest 并重建本容器
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - Eco-network
@@ -321,55 +323,51 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 ---
 
-## 集群部署与多节点（CLUSTER_ROLE）
+## 多节点部署与负载均衡
 
-多台 VPS 搭建集群以分流抗高并发时，可通过环境变量指定节点角色：
-- `CLUSTER_ROLE=master`（默认）：主控节点，同时运行 Next.js Web 与 Go 后端，负责后台管理、写库及定时采集任务；
-- `CLUSTER_ROLE=worker`：从属读节点，专为 TVBox、影视仓、MacCMS 与前台 API 提供海量高并发读服务（自动禁用定时采集调度器，不清理公共 Redis 缓存，并通过 Redis Pub/Sub 毫秒级同步快照数据；同时运行 Next.js Web 进程，天然具备双活分流与平滑容灾能力）；
+多台 VPS 部署以分流抗高并发时，各节点共享同一套 MySQL 与 Redis 实例：
+- **无状态对等节点**：系统已回归纯粹的云原生无状态架构，各节点对等运行，无需配置任何复杂的集群角色环境变量；
 - **反向代理（Nginx）最佳实践**：
-  - **前台网页浏览（`/`）**：推荐**双活负载均衡模式**（Master 与 Worker 共同分流网页渲染与前台搜索并发，按权重分配），配合 `proxy_next_upstream`，Master 升级重启时全量流量秒级无缝漂移到 Worker，兼具**算力倍增与零宕机容灾**；若只想将 Worker 用作备用，可标记为 `backup`；
-  - **管理后台前端与写接口（`/manage`、`/api/manage/*`）**：固定路由至 Master 节点（后台素材上传已收敛在 `/api/manage/file/upload`，被该规则自然保护）；
-  - **用户自定义上传素材（`/api/upload/`）**：固定路由至 Master 节点（Logo、轮播海报等落盘在 Master 磁盘，这样 **Worker 节点无需配置复杂的跨机 NFS 存储，实现 100% 纯无状态化**）；
-  - **高并发只读 API（`/api/`）**：分流到集群负载均衡（由 Master 与多个 Worker 共同抗压，如 TVBox / 影视仓 / 播放器轮询）；
-  - **Nginx 配置示例（推荐双活全分流 + 零宕机容灾）**：
+  - **前台网页浏览（`/`）与 API 接口（`/api/`）**：由 Nginx 配置 `upstream` 进行多节点负载均衡（按权重分配并发，配合 `proxy_next_upstream`，某节点重启时流量自动无缝漂移到其他健康节点，实现**多倍算力与零宕机容灾**）；
+  - **管理后台与素材上传（`/manage`、`/api/manage/*`、`/api/upload/`）**：若未挂载跨机共享存储（如 NFS），建议将后台及上传请求固定路由至拥有持久化 uploads 磁盘的主节点；
+  - **Nginx 配置示例**：
     ```nginx
-    # 1. API 接口集群（Master 与 Worker 共同分流）
+    # 1. API 接口集群负载均衡
     upstream eco_cluster_api {
-        server 192.168.1.10:8080 weight=1 max_fails=2 fail_timeout=5s; # Master 节点 API
-        server 192.168.1.11:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 1 节点 API
-        server 192.168.1.12:8080 weight=2 max_fails=2 fail_timeout=5s; # Worker 2 节点 API
+        server 192.168.1.10:8080 weight=1 max_fails=2 fail_timeout=5s; # 节点 1 API
+        server 192.168.1.11:8080 weight=2 max_fails=2 fail_timeout=5s; # 节点 2 API
     }
 
-    # 2. 前台网页集群（双活负载均衡模式；若仅需冷备容灾可将 Worker 标记为 backup）
+    # 2. 前台网页集群负载均衡
     upstream eco_web_cluster {
-        server 192.168.1.10:3000 weight=1 max_fails=2 fail_timeout=5s; # Master Web 页面
-        server 192.168.1.11:3000 weight=2 max_fails=2 fail_timeout=5s; # Worker 1 Web 页面
+        server 192.168.1.10:3000 weight=1 max_fails=2 fail_timeout=5s; # 节点 1 Web
+        server 192.168.1.11:3000 weight=2 max_fails=2 fail_timeout=5s; # 节点 2 Web
     }
 
     upstream eco_master_api {
-        server 192.168.1.10:8080;                                      # Master API（写操作、管理后台与本地素材）
+        server 192.168.1.10:8080;                                      # 存储 uploads 目录的主节点 API
     }
 
     server {
         listen 80;
         server_name your-domain.com;
 
-        # 管理后台前端页面固定路由至 Master
+        # 管理后台前端页面
         location /manage {
             proxy_pass http://192.168.1.10:3000;
         }
 
-        # 管理后台写/改/配置/上传接口固定路由至 Master
+        # 管理后台接口
         location /api/manage/ {
             proxy_pass http://eco_master_api;
         }
 
-        # 用户自定义上传静态素材（Logo、轮播图等，文件在 Master 磁盘，固定走 Master）
+        # 用户自定义上传静态素材（Logo、轮播图等，文件在主节点磁盘）
         location /api/upload/ {
             proxy_pass http://eco_master_api;
         }
 
-        # 高并发前台只读 API（TVBox / 影视仓 / 分类 / 搜索）由 Master 与 Worker 集群共同分流负载
+        # 高并发前台 API（TVBox / 影视仓 / 分类 / 搜索）多节点分流
         location /api/ {
             proxy_pass http://eco_cluster_api;
             proxy_next_upstream error timeout http_502 http_503 http_504;
@@ -379,7 +377,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         }
 
-        # 默认网页浏览请求走网页集群（双活分流，Master 重启时自动由 Worker 临时接管，全站不挂）
+        # 默认网页浏览请求走网页集群负载均衡
         location / {
             proxy_pass http://eco_web_cluster;
             proxy_next_upstream error timeout http_502 http_503 http_504;
@@ -391,10 +389,6 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
         }
     }
     ```
-- **部署顺序与数据同步注意事项**：
-  - **先启动 Master，再扩容 Worker**：Worker 启动后每 3s 轮询 Redis 中的快照版本/修订号自动对齐 Master 的读模型与搜索索引；若 Master 尚未完成首次快照发布，Worker 会在首个快照发布后自动装载，无需重启。
-  - **Worker 100% 纯无状态部署**：快照表与数据统一存放在 Master 的 MySQL 与 Redis 中（通过网络直连与 Pub/Sub 同步），静态素材由 Nginx `/api/upload/` 走 Master，因此 **Worker 机器无需配置跨机 NFS 共享存储，也无需挂载任何本地数据卷**，开箱即用，可随时秒级横向扩容。
-  - **Worker 为应用层只读节点**：Worker 上 `/api/manage/*`（含上传）等写接口会被后端直接拒绝（HTTP 403），反向代理路由仅是第一层约束，双重防护避免误写。
 
 ---
 

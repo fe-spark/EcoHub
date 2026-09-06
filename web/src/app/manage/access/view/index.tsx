@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
+import { Alert, Badge, Button, DatePicker, Dropdown, Space, Switch, message } from "antd";
 import type { MenuProps } from "antd";
-import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
+import { CloudUploadOutlined, DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
@@ -13,7 +14,8 @@ import TvboxAnalyticsView from "./tvbox-view";
 import styles from "./index.module.less";
 
 function disabledAccessDay(d: Dayjs) {
-  return d.isAfter(dayjs(), "day") || d.isBefore(dayjs().subtract(13, "day"), "day");
+  // 不设历史天数限制，仅禁止选择未来日期
+  return d.isAfter(dayjs(), "day");
 }
 
 const REFRESH_INTERVAL_STORAGE_KEY = "eh_access_refresh_interval";
@@ -48,6 +50,20 @@ export default function AccessPageView() {
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [analyticsEnabled, setAnalyticsEnabled] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    ApiGet<{ enabled: boolean }>("/manage/access/status")
+      .then((res) => {
+        if (res.code === 0 && res.data) {
+          setAnalyticsEnabled(res.data.enabled);
+        }
+      })
+      .catch(() => {
+        setAnalyticsEnabled(false);
+      });
+  }, []);
+
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
       const saved = Number(localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY));
@@ -98,6 +114,25 @@ export default function AccessPageView() {
     setTimeout(() => {
       setIsRefreshing(false);
     }, 600);
+  };
+
+  const [isRollingUp, setIsRollingUp] = useState(false);
+
+  const handleManualRollup = async () => {
+    setIsRollingUp(true);
+    try {
+      const res = await ApiPost("/manage/access/rollup");
+      if (res.code === 0) {
+        message.success(res.msg || "数据已成功入库");
+        handleManualRefresh();
+      } else {
+        message.error(res.msg || "数据入库失败");
+      }
+    } catch {
+      message.error("数据入库请求异常");
+    } finally {
+      setIsRollingUp(false);
+    }
   };
 
   const handleManualRefresh = () => {
@@ -197,9 +232,30 @@ export default function AccessPageView() {
                 刷新
               </Button>
             )}
+
+            {/* 手动入库按钮 */}
+            {analyticsEnabled && (
+              <Button
+                icon={<CloudUploadOutlined />}
+                loading={isRollingUp}
+                onClick={handleManualRollup}
+              >
+                手动入库
+              </Button>
+            )}
           </Space>
         }
       />
+
+      {analyticsEnabled === false && (
+        <Alert
+          type="info"
+          showIcon
+          message="数据分析功能当前未开启"
+          description="系统默认不开启数据分析以保持最低资源消耗与最高性能。如需启用全站访问、播放热度与客户端统计，请在环境配置中设置 ACCESS_ANALYTICS_ENABLED=true 并重启服务。"
+          style={{ marginBottom: 16 }}
+        />
+      )}
 
       <GlobalOverviewBar
         dayStr={dayStr}

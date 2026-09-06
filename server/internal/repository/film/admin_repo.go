@@ -208,12 +208,9 @@ func masterDataResetTables() []string {
 		model.TableMovieDetail,
 		model.TableFilmIndex,
 		model.TableFilmListSnapshot,
-		model.TableFilterOption,
-		model.TableFilterIndex,
 		model.TableMovieMatchKey,
 		model.TableMovieSourceMapping,
 		model.TableSearchTag,
-		model.TableVirtualPicture,
 		model.TableCategory,
 		model.TableCategoryMapping,
 		model.TableSourceCategory,
@@ -289,7 +286,6 @@ func FilmZero() error {
 	for _, t := range []string{
 		model.TableMovieDetail,
 		model.TableFilmIndex,
-		model.TableMoviePlaylist,
 		model.TableSlaveMoviePlaylist,
 		model.TableMovieMatchKey,
 		model.TableMoviePoster,
@@ -299,16 +295,12 @@ func FilmZero() error {
 		}
 	}
 
-	// 关键节点：清空采集派生数据（快照/筛选/搜索标签/统计/虚拟图/失败记录）
+	// 关键节点：清空采集派生数据（快照/筛选/搜索标签/统计）
 	ReportResetProgress(45, "正在清空派生数据")
 	for _, t := range []string{
 		model.TableFilmListSnapshot,
-		model.TableFilterOption,
-		model.TableFilterIndex,
 		model.TableCollectSourceStats,
-		model.TableVirtualPicture,
 		model.TableSearchTag,
-		model.TableFailureRecord,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)

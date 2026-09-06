@@ -151,6 +151,12 @@ TG_PROXY=socks5://127.0.0.1:7891
 
 国内直连 `api.telegram.org` 常超时，建议至少配置 `TG_PROXY`。`HTTPS_PROXY` 等也会影响其它依赖系统代理的出站（若业务侧使用）；Telegram 客户端明确按上表解析。
 
+### 数据分析（可选）
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 数据分析总开关：开启全站访问量、播放热度与客户端统计（默认关闭以保持最高性能与零开销） |
+
 ### Docker 根目录变量对照（非 server 进程直接读取）
 
 发布版 / 源码版 compose 还使用下列变量，**注入或映射**到容器，与 `server` 进程内变量对应关系：
@@ -160,8 +166,7 @@ TG_PROXY=socks5://127.0.0.1:7891
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `CLUSTER_ROLE` | 集群角色：`master`（默认，负责后台与定时任务）或 `worker`（从属读节点，禁用定时任务） |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 

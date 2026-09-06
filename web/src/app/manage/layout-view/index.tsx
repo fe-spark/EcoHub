@@ -122,9 +122,8 @@ const menuItems: MenuItem[] = [
 ];
 
 function resolveMenuKey(pathname: string) {
-  // 旧数据重置与接口访问记录入口并入系统设置
+  // 旧数据重置入口并入系统设置
   if (pathname.startsWith("/manage/reset")) return "/manage/system";
-  if (pathname.startsWith("/manage/api-logs")) return "/manage/system";
   if (pathname.startsWith("/manage/banners")) return "/manage/banners";
   if (pathname.startsWith("/manage/film/add")) return "/manage/film";
   if (pathname.startsWith("/manage/collect/category/rules")) return "/manage/collect/category/rules";
@@ -136,7 +135,6 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/system/users")) return "/manage/system/users";
   if (pathname.startsWith("/manage/system/website")) return "/manage/system/website";
   if (pathname.startsWith("/manage/access")) return "/manage/access";
-  if (pathname.startsWith("/manage/api-logs")) return "/manage/api-logs";
   if (pathname.startsWith("/manage/system")) return "/manage/system";
   if (pathname.startsWith("/manage/file")) return "/manage/file";
   return "/manage";
@@ -185,22 +183,34 @@ export default function ManageLayoutView({
 
 
 
+  const [accessEnabled, setAccessEnabled] = useState(false);
+
   useEffect(() => {
     ApiGet("/manage/user/info").then((resp) => {
       if (resp.code === 0) {
         setUserInfo(resp.data);
       }
     });
+    ApiGet<{ enabled: boolean }>("/manage/access/status")
+      .then((resp) => {
+        if (resp.code === 0 && resp.data?.enabled) {
+          setAccessEnabled(true);
+        } else {
+          setAccessEnabled(false);
+        }
+      })
+      .catch(() => {
+        setAccessEnabled(false);
+      });
   }, []);
 
   useEffect(() => {
-    if (!userInfo || userInfo.isAdmin) {
-      return;
-    }
     if (pathname.startsWith("/manage/access")) {
-      router.replace("/manage");
+      if (userInfo && (!userInfo.isAdmin || !accessEnabled)) {
+        router.replace("/manage");
+      }
     }
-  }, [userInfo, pathname, router]);
+  }, [userInfo, accessEnabled, pathname, router]);
 
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
@@ -239,11 +249,13 @@ export default function ManageLayoutView({
 
 
   const visibleMenuItems = useMemo(() => {
-    if (userInfo?.isAdmin) {
-      return menuItems;
-    }
-    return menuItems.filter((item) => item?.key !== "/manage/access");
-  }, [userInfo?.isAdmin]);
+    return menuItems.filter((item) => {
+      if (item?.key === "/manage/access") {
+        return Boolean(userInfo?.isAdmin && accessEnabled);
+      }
+      return true;
+    });
+  }, [userInfo?.isAdmin, accessEnabled]);
   const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [
     {

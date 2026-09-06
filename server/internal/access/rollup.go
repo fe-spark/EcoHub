@@ -2,6 +2,7 @@ package access
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -19,9 +20,8 @@ import (
 )
 
 const (
-	accessRetainDays = 14
-	accessTopKeep    = 10
-	rollupLockTTL    = 10 * time.Minute
+	accessTopKeep = 10
+	rollupLockTTL = 10 * time.Minute
 )
 
 func rolledDayKey() string {
@@ -33,24 +33,17 @@ func startOfLocalDay(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
 }
 
-func retentionCutoff(now time.Time) time.Time {
-	return startOfLocalDay(now).AddDate(0, 0, -(accessRetainDays - 1))
-}
-
 func isLocalToday(target, now time.Time) bool {
 	return startOfLocalDay(target).Equal(startOfLocalDay(now))
 }
 
-// daysToRoll 返回 lastRolled 之后、yesterday 为止、且不早于 cutoff 的闭合日。
-func daysToRoll(lastRolled, yesterday, cutoff time.Time) []time.Time {
+// daysToRoll 返回 lastRolled 之后、yesterday 为止的所有闭合自然日（不设任何天数截断）。
+func daysToRoll(lastRolled, yesterday time.Time) []time.Time {
 	start := lastRolled.AddDate(0, 0, 1)
-	if start.Before(cutoff) {
-		start = cutoff
-	}
 	if start.After(yesterday) {
 		return nil
 	}
-	days := make([]time.Time, 0, accessRetainDays)
+	var days []time.Time
 	for d := start; !d.After(yesterday); d = d.AddDate(0, 0, 1) {
 		days = append(days, d)
 	}
@@ -140,6 +133,9 @@ func startDailyRollup() {
 }
 
 func safeDailyRollup() {
+	if !config.AccessLogEnabled {
+		return
+	}
 	defer func() {
 		if rec := recover(); rec != nil {
 			syslog.Errorf("[Access] rollup panic: %v", rec)
@@ -150,7 +146,7 @@ func safeDailyRollup() {
 
 // RunDailyRollup 把已闭合的 Redis 日桶 UPSERT 进 MySQL，并裁剪 14 天外的行。
 func RunDailyRollup() {
-	if db.Rdb == nil || db.Mdb == nil {
+	if !config.AccessLogEnabled || db.Rdb == nil || db.Mdb == nil {
 		return
 	}
 	rollupMu.Lock()
@@ -183,14 +179,13 @@ func RunDailyRollup() {
 
 	now := time.Now().In(time.Local)
 	yesterday := startOfLocalDay(now).AddDate(0, 0, -1)
-	cutoff := retentionCutoff(now)
-	last, err := loadRolledDay(cutoff)
+	last, err := loadRolledDay()
 	if err != nil {
 		syslog.Errorf("[Access] 读取滚动水位失败: %v", err)
 		return
 	}
-	days := daysToRoll(last, yesterday, cutoff)
-	// 若已对齐至昨天但在凌晨窗口（0点-3点），支持对昨天再次刷新快照，容纳 Worker 跨天缓冲队列中滞后写入的数据
+	days := daysToRoll(last, yesterday)
+	// 若已对齐至昨天但在凌晨窗口（0点-3点），支持对昨天再次刷新快照，容纳跨天缓冲队列中滞后写入的数据
 	if len(days) == 0 && last.Equal(yesterday) && now.Hour() < 3 {
 		days = []time.Time{yesterday}
 	}
@@ -211,26 +206,73 @@ func RunDailyRollup() {
 			return
 		}
 	}
-	if err := pruneDaily(cutoff); err != nil {
-		syslog.Errorf("[Access] 裁剪日汇总失败: %v", err)
+}
+
+// ManualRollup 手动触发分析数据持久化入库：
+// 1. 回溯落库所有未落库的历史闭合日（无时间与天数限制）；
+// 2. 额外将今天当前实时统计快照 UPSERT 写入 MySQL，实现即时全量数据入库。
+func ManualRollup() error {
+	if !config.AccessLogEnabled {
+		return errors.New("数据分析功能未开启")
 	}
+	if db.Rdb == nil || db.Mdb == nil {
+		return errors.New("数据库或缓存未就绪")
+	}
+
+	RunDailyRollup()
+
+	// 额外将当天的最新实时数据同步持久化一份到 MySQL
+	now := time.Now().In(time.Local)
+	today := startOfLocalDay(now)
+	stats, tops, has, err := snapshotDayFromRedis(today)
+	if err != nil {
+		return err
+	}
+	if has {
+		if err := persistDaily(stats, tops); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
-func loadRolledDay(cutoff time.Time) (time.Time, error) {
-	raw, err := db.Rdb.Get(db.Cxt, rolledDayKey()).Result()
-	return parseRolledDay(raw, err, cutoff)
+func loadRolledDay() (time.Time, error) {
+	if db.Rdb != nil {
+		raw, err := db.Rdb.Get(db.Cxt, rolledDayKey()).Result()
+		if err == nil && strings.TrimSpace(raw) != "" {
+			if t, parseErr := time.ParseInLocation("2006-01-02", strings.TrimSpace(raw), time.Local); parseErr == nil {
+				return startOfLocalDay(t), nil
+			}
+		}
+	}
+
+	// Redis 未命中或解析失败，从 MySQL 查询已落库的最大日期
+	if db.Mdb != nil {
+		var maxDay string
+		if err := db.Mdb.Model(&model.AccessDailyStats{}).Select("MAX(day)").Scan(&maxDay).Error; err == nil && maxDay != "" {
+			if t, parseErr := time.ParseInLocation("2006-01-02", maxDay, time.Local); parseErr == nil {
+				return startOfLocalDay(t), nil
+			}
+		}
+	}
+
+	// 首次运行或无任何历史记录：默认从昨日前一天开始检测
+	now := time.Now().In(time.Local)
+	return startOfLocalDay(now).AddDate(0, 0, -2), nil
 }
 
-func parseRolledDay(raw string, err error, cutoff time.Time) (time.Time, error) {
+func parseRolledDay(raw string, err error) (time.Time, error) {
 	if err == redis.Nil || (err == nil && raw == "") {
-		return cutoff.AddDate(0, 0, -1), nil
+		now := time.Now().In(time.Local)
+		return startOfLocalDay(now).AddDate(0, 0, -2), nil
 	}
 	if err != nil {
 		return time.Time{}, err
 	}
 	t, parseErr := time.ParseInLocation("2006-01-02", raw, time.Local)
 	if parseErr != nil {
-		return cutoff.AddDate(0, 0, -1), nil
+		now := time.Now().In(time.Local)
+		return startOfLocalDay(now).AddDate(0, 0, -2), nil
 	}
 	return startOfLocalDay(t), nil
 }
@@ -467,16 +509,6 @@ func persistDaily(stats model.AccessDailyStats, tops []model.AccessDailyTop) err
 	})
 }
 
-func pruneDaily(cutoff time.Time) error {
-	if db.Mdb == nil {
-		return nil
-	}
-	day := cutoff.Format("2006-01-02")
-	if err := db.Mdb.Where("day < ?", day).Delete(&model.AccessDailyStats{}).Error; err != nil {
-		return err
-	}
-	return db.Mdb.Where("day < ?", day).Delete(&model.AccessDailyTop{}).Error
-}
 
 func loadDailyStats(day string) (model.AccessDailyStats, bool) {
 	var row model.AccessDailyStats

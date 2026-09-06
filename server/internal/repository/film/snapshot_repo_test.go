@@ -28,7 +28,6 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 		&model.FilmIndex{},
 		&model.MovieDetailInfo{},
 		&model.FilmListSnapshot{},
-		&model.FilmFilterOptionSnapshot{},
 		&model.Category{},
 		&model.SlaveMoviePlaylist{},
 		&model.MovieMatchKey{},
