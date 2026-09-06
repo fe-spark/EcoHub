@@ -245,7 +245,7 @@ func (FilmIndex) TableName() string {
 // 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
 type FilmListSnapshot struct {
 	gorm.Model
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:1"`
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:1;index:idx_snap_ver_name,priority:1"`
 	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
 	ContentKey      string `json:"contentKey" gorm:"size:128;index"`
 	SourceId        string `json:"sourceId" gorm:"index"`
@@ -259,7 +259,7 @@ type FilmListSnapshot struct {
 	CName            string `json:"cName"`
 
 	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`
-	Name               string  `json:"name" gorm:"index:idx_snap_search_name"`
+	Name               string  `json:"name" gorm:"size:255;index:idx_snap_search_name;index:idx_snap_ver_name,priority:2"`
 	SubTitle           string  `json:"subTitle" gorm:"type:text"`
 	ClassTag           string  `json:"classTag" gorm:"type:text"`
 	Area               string  `json:"area" gorm:"index"`
