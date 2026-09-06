@@ -2,7 +2,6 @@ package router
 
 import (
 	"mime"
-	"net/http"
 	"server/internal/config"
 	"server/internal/handler"
 	"server/internal/infra/syslog"
@@ -48,14 +47,7 @@ func SetupRouter() *gin.Engine {
 	api.POST(`/logout`, middleware.AuthToken(), handler.UserHd.Logout)
 
 	manageRoute := api.Group(`/manage`)
-	if config.IsClusterWorker() {
-		// 集群 Worker 纯读节点纵深防御：即便反向代理误路由，管理/上传/升级等写接口一律首位拒绝，避免触发鉴权与 Token 续期写操作
-		manageRoute.Use(func(c *gin.Context) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "message": "worker 只读节点，拒绝管理请求"})
-		})
-	} else {
-		manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
-	}
+	manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
 	{
 		manageRoute.GET(`/index`, handler.ManageHd.ManageIndex)
 		manageRoute.GET(`/version`, handler.ManageHd.AppVersion)
@@ -88,15 +80,11 @@ func SetupRouter() *gin.Engine {
 
 		accessRoute := manageRoute.Group(`/access`, middleware.AdminAccess())
 		{
+			accessRoute.GET(`/status`, handler.AccessHd.Status)
 			accessRoute.GET(`/overview`, handler.AccessHd.Overview)
 			accessRoute.GET(`/tops`, handler.AccessHd.Tops)
 			accessRoute.GET(`/logs`, handler.AccessHd.Logs)
-		}
-
-		apiLogsRoute := manageRoute.Group(`/api-logs`, middleware.AdminAccess())
-		{
-			apiLogsRoute.GET(`/list`, handler.ApiLogHd.List)
-			apiLogsRoute.POST(`/prune`, handler.ApiLogHd.Prune)
+			accessRoute.POST(`/rollup`, handler.AccessHd.ManualRollup)
 		}
 
 		// 轮播相关

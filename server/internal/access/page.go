@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/config"
+
 	"github.com/gin-gonic/gin"
 )
 
@@ -35,6 +37,9 @@ type TrackViewPayload struct {
 }
 
 func TrackPage(c *gin.Context, action, resource, source, path string) {
+	if !config.AccessLogEnabled {
+		return
+	}
 	Collect(buildPageEventPayload(c, TrackViewPayload{
 		Action:   action,
 		Resource: resource,
@@ -44,6 +49,9 @@ func TrackPage(c *gin.Context, action, resource, source, path string) {
 }
 
 func TrackPagePayload(c *gin.Context, p TrackViewPayload) {
+	if !config.AccessLogEnabled {
+		return
+	}
 	Collect(buildPageEventPayload(c, p))
 }
 

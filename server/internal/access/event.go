@@ -39,11 +39,11 @@ var (
 	nodeOnce        sync.Once
 )
 
-// CurrentNodeName 获取当前集群节点标识（优先 NODE_NAME -> CLUSTER_ROLE-hostname -> 主机名）
+// CurrentNodeName 获取当前服务节点标识（优先 NODE_NAME -> 主机名）
 func CurrentNodeName() string {
 	nodeOnce.Do(func() {
 		hostname, _ := os.Hostname()
-		currentNodeName = formatNodeName(config.ClusterRole, hostname, os.Getenv("NODE_NAME"))
+		currentNodeName = formatNodeName("", hostname, os.Getenv("NODE_NAME"))
 	})
 	return currentNodeName
 }

@@ -163,7 +163,7 @@ func parseRecentLogEvents(raw []string) []AccessEvent {
 func matchLogSource(source string, evt AccessEvent) bool {
 	switch source {
 	case "slow":
-		return evt.LatencyMs >= config.AccessSlowMs
+		return evt.LatencyMs >= 1000
 	case "error":
 		return evt.Status >= 400
 	default:

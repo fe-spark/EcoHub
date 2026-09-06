@@ -121,9 +121,6 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 		return nil, err
 	}
 	if !isLocalToday(target, now) {
-		if target.Before(retentionCutoff(now)) {
-			return emptyOverview(target), nil
-		}
 		if row, ok := loadDailyStats(target.Format("2006-01-02")); ok {
 			out := overviewFromDailyScope(row, module, platform)
 			if len(out.Series) == 0 {

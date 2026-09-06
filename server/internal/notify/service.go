@@ -147,13 +147,14 @@ func GetConfig() model.NotifyConfig {
 
 // SaveConfig 保存配置。
 func SaveConfig(cfg model.NotifyConfig) error {
-	if err := repository.SaveNotifyConfig(cfg); err != nil {
-		return err
-	}
-	// Token 变更后刷新 Telegram 回调轮询
-	EnsureBotPoller()
-	return nil
+	return repository.SaveNotifyConfig(cfg)
 }
+
+// EnsureBotPoller 已废弃长轮询（单向通知无须常驻轮询）
+func EnsureBotPoller() {}
+
+// StopBotPoller 已废弃长轮询
+func StopBotPoller() {}
 
 // siteName 读取站点名用于消息前缀。
 func siteName() string {
@@ -207,15 +208,10 @@ func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
 	})
 }
 
-// sendBatchSummary 发概要；变更 mid 在 MySQL 批次表，按钮带 batch_id。
+// sendBatchSummary 发送采集批次摘要。
 func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPayload) {
 	pageSize := clampPageSize(cfg.MaxFilmsInMessage)
-
-	batchID := strings.TrimSpace(payload.ChangeBatchID)
-	listN := 0
-	if batchID != "" {
-		listN = CountChangeMids(batchID)
-	}
+	listN := payload.TotalFilms
 
 	// 判定是否有真正更新的影片或故障报错
 	hasChanges := listN > 0
@@ -228,32 +224,7 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 	if hasFailures {
 		severity = model.SeverityError
 	}
-	// 无活跃批次时，payload 仍可能有统计；列表依赖 MySQL
-	if payload.IncludeFilmDetails && listN > 0 {
-		// 头行变更与列表一致
-		if payload.TotalFilms < listN {
-			payload.TotalFilms = listN
-		}
-		overview := formatBatchOverview(payload, listN, pageSize)
-		parts := splitTelegramMessages(overview)
-		buttonPart := parts[len(parts)-1]
-		if err := SaveChangeBatchMeta(batchID, payload.SiteName, buttonPart, pageSize, listN); err != nil {
-			syslog.Errorf("[Notify] 保存变更批次元数据失败: %v", err)
-			sendMessages(cfg, severity, model.CategoryCollect, parts)
-			return
-		}
-		for i, part := range parts {
-			var markup *InlineKeyboardMarkup
-			if i == len(parts)-1 {
-				markup = buildOverviewKeyboard(batchID)
-			}
-			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, markup)
-		}
-		return
-	}
-
-	// 无列表：仍结束可能残留的空批次
-	overview := formatBatchOverview(payload, 0, pageSize)
+	overview := formatBatchOverview(payload, listN, pageSize)
 	sendMessages(cfg, severity, model.CategoryCollect, splitTelegramMessages(overview))
 }
 

@@ -12,22 +12,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
-import ApiLogsPageView from "@/app/manage/api-logs/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "security" | "api-logs" | "logs";
+type MainTab = "notify" | "security" | "logs";
 
 const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
   { key: "notify", label: "通知配置", icon: <BellOutlined /> },
   { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
-  { key: "api-logs", label: "接口访问记录", icon: <FileSearchOutlined /> },
   { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
   if (raw === "security") return "security";
-  if (raw === "api-logs") return "api-logs";
   if (raw === "logs") return "logs";
   return "notify";
 }
@@ -61,12 +58,6 @@ function SystemSettingsBody() {
         return (
           <div className={styles.tabPaneScrollable}>
             <DataSecurityPageView embedded />
-          </div>
-        );
-      case "api-logs":
-        return (
-          <div className={styles.tabPaneScrollable}>
-            <ApiLogsPageView embedded />
           </div>
         );
       case "logs":

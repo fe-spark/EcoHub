@@ -17,5 +17,15 @@ export default async function AccessPage() {
   if (!isAdmin) {
     redirect("/manage");
   }
+  try {
+    const statusResp = await serverGet<{ enabled?: boolean }>("/manage/access/status", undefined, {
+      Cookie: cookieStore.toString(),
+    });
+    if (statusResp.code !== 0 || !statusResp.data?.enabled) {
+      redirect("/manage");
+    }
+  } catch {
+    redirect("/manage");
+  }
   return <AccessPageView />;
 }

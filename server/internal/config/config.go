@@ -41,14 +41,6 @@ var (
 	// FilmPictureUploadDir 用户上传素材落地目录。
 	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
 	FilmPictureUploadDir = filmPictureUploadDirLocal
-
-	// ClusterRole 当前节点在集群中的角色：master（默认，负责写与定时任务）或 worker（纯读节点）
-	ClusterRole = ClusterRoleMaster
-)
-
-const (
-	ClusterRoleMaster = "master"
-	ClusterRoleWorker = "worker"
 )
 
 const (
@@ -121,12 +113,7 @@ const (
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ActiveCategoryIDsKey 活跃分类 ID 集合缓存 key
 	ActiveCategoryIDsKey = RedisKeyPrefix + ":Category:ActiveIDs"
-	// OrphanCleanCursorKey 附属站孤儿清理游标 key
-	OrphanCleanCursorKey = RedisKeyPrefix + ":CleanOrphan:Cursor"
-	// MasterSwitchProtectKey 主站切换冷启动保护期 key
-	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
-	// MigrateLegacyPlaylistsLockKey 割接老表分布式排他锁 key
-	MigrateLegacyPlaylistsLockKey = RedisKeyPrefix + ":Lock:MigrateLegacyPlaylists"
+
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
 	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
@@ -160,6 +147,8 @@ const (
 	SnapshotBuildVersionKey = RedisKeyPrefix + ":Snapshot:BuildVersion"
 	// SnapshotRevisionKey 快照修订版本号（增量或全量快照变动时自增，供多节点同步读模型与搜索索引）
 	SnapshotRevisionKey = RedisKeyPrefix + ":Snapshot:Revision"
+	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标持久化 key
+	OrphanCleanCursorKey = RedisKeyPrefix + ":Film:Orphan:Cursor"
 	// FilmClassifyCacheKey 分类首页快照缓存前缀
 	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
 	// FilmClassifySearchKey 分类筛选快照缓存前缀
@@ -224,19 +213,6 @@ const (
 	UserTokenKey     = RedisKeyPrefix + ":User:Token:%d"
 )
 
-// init func for loading from env
-func IsUpgradeHelper() bool {
-	if os.Getenv("ECOHUB_UPGRADE_HELPER") == "1" {
-		return true
-	}
-	for _, a := range os.Args[1:] {
-		if a == "upgrade-helper" {
-			return true
-		}
-	}
-	return false
-}
-
 func isTestEnv() bool {
 	if flag.Lookup("test.v") != nil {
 		return true
@@ -253,7 +229,7 @@ func isTestEnv() bool {
 }
 
 func init() {
-	if IsUpgradeHelper() || isTestEnv() {
+	if isTestEnv() {
 		return
 	}
 	// 本地直接运行服务端时，优先从当前目录 .env 加载环境变量。
@@ -329,25 +305,6 @@ func InitConfig() {
 	loadCollectRuntimeConfig()
 	loadAccessRuntimeConfig()
 
-	ClusterRole = parseClusterRole()
-	fmt.Printf("[Config] 集群角色: %s (CronEnabled: %v)\n", ClusterRole, IsCronEnabled())
-}
-
-func parseClusterRole() string {
-	if strings.ToLower(strings.TrimSpace(os.Getenv("CLUSTER_ROLE"))) == ClusterRoleWorker {
-		return ClusterRoleWorker
-	}
-	return ClusterRoleMaster
-}
-
-// IsClusterWorker 是否为集群 Worker 纯读节点
-func IsClusterWorker() bool {
-	return ClusterRole == ClusterRoleWorker
-}
-
-// IsCronEnabled 检查当前节点是否应启动定时采集任务调度器（Worker 节点自动禁用）
-func IsCronEnabled() bool {
-	return ClusterRole != ClusterRoleWorker
 }
 
 // resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。

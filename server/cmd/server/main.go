@@ -24,9 +24,6 @@ import (
 )
 
 func init() {
-	if config.IsUpgradeHelper() {
-		return
-	}
 	setupLogging()
 	if err := waitForRedis(30, 2*time.Second); err != nil {
 		panic(err)
@@ -79,13 +76,6 @@ func waitForMySQL(maxRetries int, interval time.Duration) error {
 }
 
 func main() {
-	if config.IsUpgradeHelper() {
-		if err := service.RunUpgradeHelper(os.Args[1:]); err != nil {
-			log.SetOutput(os.Stderr)
-			log.Fatal(err)
-		}
-		return
-	}
 	start()
 }
 
@@ -96,8 +86,6 @@ func start() {
 	db.StartMysqlHealthCheck()
 
 	service.InitSvc.DefaultDataInit()
-	// Telegram：/search 指令 + 更新列表翻页（需已配置 Bot Token；Worker 纯读节点由 EnsureBotPoller 内部跳过）
-	notify.EnsureBotPoller()
 	access.StartCollector()
 
 	r := router.SetupRouter()
@@ -132,10 +120,7 @@ func start() {
 	// 2. 快速停止采集任务（非阻塞通知）
 	spider.StopAllTasks()
 
-	// 3. 优雅停止 Telegram Bot 轮询并释放 Redis 领导锁
-	notify.StopBotPoller()
-
-	// 4. 等待在途采集写调度队列优雅排空落盘
+	// 3. 等待在途采集写调度队列优雅排空落盘
 	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer writeCancel()
 	if err := spider.WaitPendingWrites(writeCtx); err != nil {
@@ -149,13 +134,5 @@ func start() {
 		log.Printf("[Shutdown] 等待在途通知排空超时或失败: %v", err)
 	}
 
-	// 6. 排空接口访问日志落盘
-	access.StopApiLogWorker()
-	select {
-	case <-access.ApiLogWorkerDone():
-		log.Printf("[Shutdown] 接口访问日志已排空落盘")
-	case <-time.After(3 * time.Second):
-		log.Printf("[Shutdown] 等待接口日志落盘超时，强制退出")
-	}
 	log.Printf("[Shutdown] 退出完成")
 }

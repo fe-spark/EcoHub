@@ -17,25 +17,19 @@ import (
 
 func TestDaysToRoll(t *testing.T) {
 	loc := time.Local
-	cutoff := time.Date(2026, 8, 16, 0, 0, 0, 0, loc)
 	yesterday := time.Date(2026, 8, 28, 0, 0, 0, 0, loc)
 
-	none := daysToRoll(yesterday, yesterday, cutoff)
+	none := daysToRoll(yesterday, yesterday)
 	if len(none) != 0 {
 		t.Fatalf("already rolled through yesterday: %v", none)
 	}
 
-	fromZero := daysToRoll(cutoff.AddDate(0, 0, -1), yesterday, cutoff)
-	if len(fromZero) != 13 {
-		t.Fatalf("want 13 closed days in 14-day window, got %d", len(fromZero))
+	days := daysToRoll(time.Date(2026, 8, 20, 0, 0, 0, 0, loc), yesterday)
+	if len(days) != 8 {
+		t.Fatalf("want 8 closed days, got %d", len(days))
 	}
-	if !fromZero[0].Equal(cutoff) || !fromZero[len(fromZero)-1].Equal(yesterday) {
-		t.Fatalf("range %v .. %v", fromZero[0], fromZero[len(fromZero)-1])
-	}
-
-	stale := daysToRoll(time.Date(2026, 1, 1, 0, 0, 0, 0, loc), yesterday, cutoff)
-	if !stale[0].Equal(cutoff) {
-		t.Fatalf("stale watermark should clamp to cutoff, got %v", stale[0])
+	if !days[0].Equal(time.Date(2026, 8, 21, 0, 0, 0, 0, loc)) || !days[len(days)-1].Equal(yesterday) {
+		t.Fatalf("range %v .. %v", days[0], days[len(days)-1])
 	}
 }
 
@@ -58,20 +52,19 @@ func setupAccessDailyTestDB(t *testing.T) *gorm.DB {
 }
 
 func TestParseRolledDay(t *testing.T) {
-	cutoff := time.Date(2026, 8, 16, 0, 0, 0, 0, time.Local)
-	missing, err := parseRolledDay("", redis.Nil, cutoff)
-	if err != nil || !missing.Equal(cutoff.AddDate(0, 0, -1)) {
+	missing, err := parseRolledDay("", redis.Nil)
+	if err != nil || missing.IsZero() {
 		t.Fatalf("missing watermark: %v %v", missing, err)
 	}
-	if _, err := parseRolledDay("", errors.New("timeout"), cutoff); err == nil {
+	if _, err := parseRolledDay("", errors.New("timeout")); err == nil {
 		t.Fatal("redis errors must abort rollup, not skip watermark")
 	}
-	got, err := parseRolledDay("2026-08-20", nil, cutoff)
+	got, err := parseRolledDay("2026-08-20", nil)
 	if err != nil || got.Format("2006-01-02") != "2026-08-20" {
 		t.Fatalf("parsed watermark: %v %v", got, err)
 	}
-	bad, err := parseRolledDay("not-a-day", nil, cutoff)
-	if err != nil || !bad.Equal(cutoff.AddDate(0, 0, -1)) {
+	bad, err := parseRolledDay("not-a-day", nil)
+	if err != nil || bad.IsZero() {
 		t.Fatalf("corrupt watermark: %v %v", bad, err)
 	}
 }
@@ -110,12 +103,8 @@ func TestPersistDailyUpsertAndPrune(t *testing.T) {
 	if err := persistDaily(old, nil); err != nil {
 		t.Fatalf("old: %v", err)
 	}
-	cutoff := time.Date(2026, 8, 16, 0, 0, 0, 0, time.Local)
-	if err := pruneDaily(cutoff); err != nil {
-		t.Fatalf("prune: %v", err)
-	}
-	if _, ok := loadDailyStats("2026-07-01"); ok {
-		t.Fatal("pruned day still present")
+	if _, ok := loadDailyStats("2026-07-01"); !ok {
+		t.Fatal("historical day should remain without auto prune")
 	}
 	if _, ok := loadDailyStats("2026-08-20"); !ok {
 		t.Fatal("in-window day should remain")

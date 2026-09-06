@@ -81,7 +81,7 @@ func (CollectSourceStats) TableName() string {
 	return TableCollectSourceStats
 }
 
-// FailureRecord 失败采集记录信息机构体
+// FailureRecord 失败采集记录信息结构体
 type FailureRecord struct {
 	gorm.Model
 	OriginId   string `json:"originId"`   // 采集站唯一ID
@@ -99,15 +99,14 @@ const (
 	FailureRecordStatusPending = 1
 	// FailureRecordStatusSuccess 本次重试已成功，不再进入后续定时队列。
 	FailureRecordStatusSuccess = 0
-	// FailureRecordStatusFailed 已达到最大自动重试次数，不再进入后续定时队列。
+	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
 	FailureRecordStatusFailed = 2
 
-	// MaxFailureRetryCount 失败采集记录最大重试次数
 	MaxFailureRetryCount = 5
 )
 
-func (fr FailureRecord) TableName() string {
-	return "failure_records"
+func (FailureRecord) TableName() string {
+	return TableFailureRecord
 }
 
 type RecordRequestVo struct {

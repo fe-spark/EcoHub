@@ -61,9 +61,6 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 	module = strings.ToLower(strings.TrimSpace(module))
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	if !isLocalToday(target, now) {
-		if target.Before(retentionCutoff(now)) {
-			return []TopItem{}, nil
-		}
 		dayStr := target.Format("2006-01-02")
 		if _, ok := loadDailyStats(dayStr); ok {
 			queryKind := scopedTopKind(kind, module, platform)
