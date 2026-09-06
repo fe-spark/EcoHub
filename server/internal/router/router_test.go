@@ -127,5 +127,37 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if wAdminAccessStats.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/access/stats should allow admin, got %d", wAdminAccessStats.Code)
 	}
+
+	// 8. System settings routes: Notify and system logs MUST forbid non-admin
+	wNormalNotify := performReq(http.MethodGet, "/api/manage/config/notify", normalToken)
+	if wNormalNotify.Code != http.StatusForbidden {
+		t.Errorf("GET /api/manage/config/notify should forbid normal user, got %d", wNormalNotify.Code)
+	}
+
+	wNormalNotifyUpdate := performReq(http.MethodPost, "/api/manage/config/notify/update", normalToken)
+	if wNormalNotifyUpdate.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/config/notify/update should forbid normal user, got %d", wNormalNotifyUpdate.Code)
+	}
+
+	wNormalNotifyTest := performReq(http.MethodPost, "/api/manage/config/notify/test", normalToken)
+	if wNormalNotifyTest.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/config/notify/test should forbid normal user, got %d", wNormalNotifyTest.Code)
+	}
+
+	wNormalLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", normalToken)
+	if wNormalLogsDelta.Code != http.StatusForbidden {
+		t.Errorf("GET /api/manage/system/logs/delta should forbid normal user, got %d", wNormalLogsDelta.Code)
+	}
+
+	// 9. Admin user allowed through to notify and system logs
+	wAdminNotify := performReq(http.MethodGet, "/api/manage/config/notify", adminToken)
+	if wAdminNotify.Code == http.StatusForbidden {
+		t.Errorf("GET /api/manage/config/notify should allow admin, got %d", wAdminNotify.Code)
+	}
+
+	wAdminLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", adminToken)
+	if wAdminLogsDelta.Code == http.StatusForbidden {
+		t.Errorf("GET /api/manage/system/logs/delta should allow admin, got %d", wAdminLogsDelta.Code)
+	}
 }
 

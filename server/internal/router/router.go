@@ -65,15 +65,16 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
 			sysConfig.POST(`/notice/update`, handler.ManageHd.UpdateSiteNotice)
 
-			sysConfig.GET(`/notify`, handler.NotifyHd.GetNotifyConfig)
-			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)
-			sysConfig.POST(`/notify/test`, handler.NotifyHd.TestNotify)
+			// 通知配置（仅超级管理员）
+			sysConfig.GET(`/notify`, middleware.AdminAccess(), handler.NotifyHd.GetNotifyConfig)
+			sysConfig.POST(`/notify/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateNotifyConfig)
+			sysConfig.POST(`/notify/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
 
 			// 配置备份：导出/导入（不含影视库存与账号，仅超级管理员）
 			sysConfig.GET(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
 			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), handler.ManageHd.ImportConfigBackup)
 		}
-		systemLog := manageRoute.Group(`/system/logs`)
+		systemLog := manageRoute.Group(`/system/logs`, middleware.AdminAccess())
 		{
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}

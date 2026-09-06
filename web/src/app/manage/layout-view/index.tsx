@@ -122,8 +122,6 @@ const menuItems: MenuItem[] = [
 ];
 
 function resolveMenuKey(pathname: string) {
-  // 旧数据重置入口并入系统设置
-  if (pathname.startsWith("/manage/reset")) return "/manage/system";
   if (pathname.startsWith("/manage/banners")) return "/manage/banners";
   if (pathname.startsWith("/manage/film/add")) return "/manage/film";
   if (pathname.startsWith("/manage/collect/category/rules")) return "/manage/collect/category/rules";
@@ -210,6 +208,15 @@ export default function ManageLayoutView({
         router.replace("/manage");
       }
     }
+    if (
+      pathname.startsWith("/manage/system") &&
+      !pathname.startsWith("/manage/system/users") &&
+      !pathname.startsWith("/manage/system/website")
+    ) {
+      if (userInfo && !userInfo.isAdmin) {
+        router.replace("/manage");
+      }
+    }
   }, [userInfo, accessVisible, pathname, router]);
 
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
@@ -252,6 +259,9 @@ export default function ManageLayoutView({
     return menuItems.filter((item) => {
       if (item?.key === "/manage/access") {
         return Boolean(userInfo?.isAdmin && accessVisible);
+      }
+      if (item?.key === "/manage/system") {
+        return Boolean(userInfo?.isAdmin);
       }
       return true;
     });

@@ -19,33 +19,3 @@
   flex-direction: column;
   gap: 4px;
 }
-
-.statsGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 12px;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--ant-color-fill-quaternary) 50%, transparent);
-  border: 1px solid var(--ant-color-border-secondary);
-}
-
-.statsItem {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.statsLabel {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-}
-
-.statsValue {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}

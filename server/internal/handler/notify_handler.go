@@ -2,10 +2,13 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 
+	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,14 +17,34 @@ type NotifyHandler struct{}
 
 var NotifyHd = new(NotifyHandler)
 
-// GetNotifyConfig 获取通知配置（Token 脱敏）。
+// GetNotifyConfig 获取通知配置（Token 脱敏，仅超级管理员）。
 func (h *NotifyHandler) GetNotifyConfig(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看通知配置", c)
+		return
+	}
 	cfg := notify.PublicConfig(notify.GetConfig())
 	dto.Success(cfg, "通知配置获取成功", c)
 }
 
-// UpdateNotifyConfig 更新通知配置。
+// UpdateNotifyConfig 更新通知配置（仅超级管理员）。
 func (h *NotifyHandler) UpdateNotifyConfig(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可修改通知配置", c)
+		return
+	}
 	var incoming model.NotifyConfig
 	if err := c.ShouldBindJSON(&incoming); err != nil {
 		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
@@ -46,8 +69,18 @@ type notifyTestReq struct {
 	ChatIDs  []string `json:"chatIds"`
 }
 
-// TestNotify 发送测试消息。可带表单草稿 Token/Chat，无需先保存。
+// TestNotify 发送测试消息（仅超级管理员）。可带表单草稿 Token/Chat，无需先保存。
 func (h *NotifyHandler) TestNotify(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可测试发送通知", c)
+		return
+	}
 	var req notifyTestReq
 	_ = c.ShouldBindJSON(&req)
 

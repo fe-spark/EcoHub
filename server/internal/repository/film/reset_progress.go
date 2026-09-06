@@ -32,7 +32,7 @@ func GetResetImpactStats() ResetImpactStats {
 	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Films).Error
 	_ = db.Mdb.Model(&model.FilmListSnapshot{}).Count(&stats.Snapshots).Error
 	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Categories).Error
-	stats.Failures = 0
+	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Failures).Error
 	return stats
 }
 

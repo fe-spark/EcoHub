@@ -77,9 +77,9 @@ func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
 	}
 	seedDetail(t, gdb, 200, old)
 
-	// 仅备注变化：写库但不刷 stamp
+	// 备注变化：写库且刷 stamp（如从第156集变到第157集、或连载转完结）
 	remarksOnly := old
-	remarksOnly.Remarks = "更新至01（修正）"
+	remarksOnly.Remarks = "更新至02"
 	infos := []model.FilmIndex{{
 		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 200, ContentKey: "vod_200", SourceId: "master"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "连载片", UpdateStamp: time.Now().Unix()},
@@ -87,8 +87,8 @@ func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
 	if _, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_200": remarksOnly}, false); err != nil {
 		t.Fatal(err)
 	}
-	if infos[0].UpdateStamp != oldStamp {
-		t.Fatalf("remarks-only should keep stamp %d, got %d", oldStamp, infos[0].UpdateStamp)
+	if infos[0].UpdateStamp <= oldStamp {
+		t.Fatalf("remarks change should bump stamp, got %d <= %d", infos[0].UpdateStamp, oldStamp)
 	}
 
 	// 集数增加：与概要 NotifyMIDs 一致，刷 stamp
@@ -664,3 +664,186 @@ func TestSaveGroupedPlaylists_NoOpShortCircuitAndPartialUpdate(t *testing.T) {
 		t.Fatalf("expected k3 ID to remain %d, got %d", id3, rowsAfterPartial[2].ID)
 	}
 }
+
+// TestVodRemarksChangeBumpsUpdateStampAndNotifies 验证：
+// 当集数未增加（如已提前占位到 157 集），但 vod_remarks 发生更新（如从“第156集”变到“第157集”）时，
+// 必须刷新 update_stamp 并推入今日更新（NotifyMIDs）。
+func TestVodRemarksChangeBumpsUpdateStampAndNotifies(t *testing.T) {
+	const oldStamp int64 = 1_700_000_000
+	const changedAt int64 = 1_750_000_000
+	gdb := openContentKeyTestDB(t)
+
+	// 旧数据：157集，备注为“第156集”
+	eps157 := make([]model.MovieUrlInfo, 157)
+	for i := 0; i < 157; i++ {
+		eps157[i] = model.MovieUrlInfo{Episode: fmt.Sprintf("第%d集", i+1), Link: fmt.Sprintf("http://x/%d", i+1)}
+	}
+	old := model.MovieDetail{
+		Id: 47014, Name: "仙逆",
+		PlayFrom: []string{"jinyingyun"},
+		PlayList: [][]model.MovieUrlInfo{eps157},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "第156集"},
+	}
+	row := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 47014, ContentKey: "vod_47014", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Remarks: "第156集", UpdateStamp: oldStamp},
+	}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedDetail(t, gdb, 47014, old)
+
+	// 新数据：集数仍为 157（未增加），但 vod_remarks 更新为“第157集”
+	newDetail := old
+	newDetail.Remarks = "第157集"
+
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 47014, ContentKey: "vod_47014", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Remarks: "第157集", UpdateStamp: changedAt},
+	}}
+
+	// 1. 验证 applyMasterBusinessUpdateStampsTx 刷新了 update_stamp
+	_, oldDetailsByMid, preCounts, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_47014": newDetail}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infos[0].UpdateStamp <= oldStamp {
+		t.Fatalf("vod_remarks 更新必须将 update_stamp 刷到最新, 实际仍为 %d <= %d", infos[0].UpdateStamp, oldStamp)
+	}
+
+	// 2. 验证 filterPlayStructureNotifyMIDs 将 mid 加入更新列表（进入今日更新）
+	notifyMIDs := filterPlayStructureNotifyMIDs(infos, map[string]model.MovieDetail{"vod_47014": newDetail}, oldDetailsByMid, preCounts)
+	if len(notifyMIDs) != 1 || notifyMIDs[0] != 47014 {
+		t.Fatalf("vod_remarks 更新必须推入 NotifyMIDs, 实际为 %v", notifyMIDs)
+	}
+}
+
+// TestLastEpisodePreviewToFormalBumpsUpdateStamp 验证：
+// 当 vod_remarks 相同，但最后一集从预告转为正式集（如“第157集预告”变“第157集”），
+// 也必须刷新 update_stamp 并推入今日更新。
+func TestLastEpisodePreviewToFormalBumpsUpdateStamp(t *testing.T) {
+	const oldStamp int64 = 1_700_000_000
+	const changedAt int64 = 1_750_000_000
+	gdb := openContentKeyTestDB(t)
+
+	epsOld := []model.MovieUrlInfo{
+		{Episode: "第156集", Link: "http://x/156"},
+		{Episode: "第157集预告", Link: "http://x/157_preview"},
+	}
+	old := model.MovieDetail{
+		Id: 47014, Name: "仙逆",
+		PlayFrom: []string{"jinyingyun"},
+		PlayList: [][]model.MovieUrlInfo{epsOld},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "第157集"},
+	}
+	row := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 47014, ContentKey: "vod_47014", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Remarks: "第157集", UpdateStamp: oldStamp},
+	}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedDetail(t, gdb, 47014, old)
+
+	epsNew := []model.MovieUrlInfo{
+		{Episode: "第156集", Link: "http://x/156"},
+		{Episode: "第157集", Link: "http://x/157_formal"},
+	}
+	newDetail := old
+	newDetail.PlayList = [][]model.MovieUrlInfo{epsNew}
+
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 47014, ContentKey: "vod_47014", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Remarks: "第157集", UpdateStamp: changedAt},
+	}}
+
+	_, oldDetailsByMid, preCounts, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_47014": newDetail}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infos[0].UpdateStamp <= oldStamp {
+		t.Fatalf("最后一集预告转正片必须将 update_stamp 刷到最新, 实际仍为 %d <= %d", infos[0].UpdateStamp, oldStamp)
+	}
+
+	notifyMIDs := filterPlayStructureNotifyMIDs(infos, map[string]model.MovieDetail{"vod_47014": newDetail}, oldDetailsByMid, preCounts)
+	if len(notifyMIDs) != 1 || notifyMIDs[0] != 47014 {
+		t.Fatalf("最后一集预告转正片必须推入 NotifyMIDs, 实际为 %v", notifyMIDs)
+	}
+}
+
+// TestMasterLaggingUpdateRemarksChangeDoesNotBumpStamp 验证：
+// 当附属站已领先到达第120集，主站从落后的第100集后补至第101集，且 remarks 发生变化时，
+// 严禁刷新 update_stamp，且严禁推入 notifyMIDs，避免消息轰炸与破坏排序。
+func TestMasterLaggingUpdateRemarksChangeDoesNotBumpStamp(t *testing.T) {
+	const oldStamp int64 = 1_700_000_000
+	const changedAt int64 = 1_750_000_000
+	gdb := openContentKeyTestDB(t)
+	if err := gdb.AutoMigrate(&model.MovieMatchKey{}, &model.SlaveMoviePlaylist{}); err != nil {
+		t.Fatal(err)
+	}
+
+	epsOld := make([]model.MovieUrlInfo, 100)
+	for i := 0; i < 100; i++ {
+		epsOld[i] = model.MovieUrlInfo{Episode: fmt.Sprintf("第%d集", i+1), Link: fmt.Sprintf("http://x/%d", i+1)}
+	}
+	old := model.MovieDetail{
+		Id: 50001, Name: "长剧",
+		PlayFrom: []string{"线路1"},
+		PlayList: [][]model.MovieUrlInfo{epsOld},
+		MovieDescriptor: model.MovieDescriptor{Remarks: "更新至100集"},
+	}
+	row := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 50001, ContentKey: "vod_50001", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "长剧", Remarks: "更新至100集", UpdateStamp: oldStamp},
+	}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	seedDetail(t, gdb, 50001, old)
+
+	// 模拟附属源已提前追到 120 集落库
+	matchKey := model.MovieMatchKey{Mid: 50001, MatchKey: "vod_50001"}
+	if err := gdb.Create(&matchKey).Error; err != nil {
+		t.Fatal(err)
+	}
+	slaveUrls := make([]model.MovieUrlInfo, 120)
+	for i := 0; i < 120; i++ {
+		slaveUrls[i] = model.MovieUrlInfo{Episode: fmt.Sprintf("第%d集", i+1), Link: fmt.Sprintf("http://x/%d", i+1)}
+	}
+	slaveContent, _ := json.Marshal(slaveUrls)
+	slavePlaylist := model.SlaveMoviePlaylist{
+		MovieKey: "vod_50001", SourceId: "slave_fast", GroupIndex: 0, GroupName: "fast",
+		Content: string(slaveContent),
+	}
+	if err := gdb.Create(&slavePlaylist).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 主站落后采集：从 100 增到 101，remarks 也从 100 变 101
+	epsNew := make([]model.MovieUrlInfo, 101)
+	copy(epsNew, epsOld)
+	epsNew[100] = model.MovieUrlInfo{Episode: "第101集", Link: "http://x/101"}
+	newDetail := old
+	newDetail.PlayList = [][]model.MovieUrlInfo{epsNew}
+	newDetail.Remarks = "更新至101集"
+
+	infos := []model.FilmIndex{{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 50001, ContentKey: "vod_50001", SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "长剧", Remarks: "更新至101集", UpdateStamp: changedAt},
+	}}
+
+	_, oldDetailsByMid, preCounts, err := applyMasterBusinessUpdateStampsTx(gdb, infos, map[string]model.MovieDetail{"vod_50001": newDetail}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if infos[0].UpdateStamp != oldStamp {
+		t.Fatalf("主站集数落后于附属站时，后补抓取不得刷新 update_stamp, 期望=%d 实际=%d", oldStamp, infos[0].UpdateStamp)
+	}
+
+	notifyMIDs := filterPlayStructureNotifyMIDs(infos, map[string]model.MovieDetail{"vod_50001": newDetail}, oldDetailsByMid, preCounts)
+	if len(notifyMIDs) != 0 {
+		t.Fatalf("主站集数落后于附属站时，后补抓取不得推入 NotifyMIDs, 实际推入了: %v", notifyMIDs)
+	}
+}
+
+
