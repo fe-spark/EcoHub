@@ -133,7 +133,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
       >
         <div className={styles.sectionHead}>
           <div className={styles.sectionText}>
-            <Typography.Text strong>清理历史分析数据</Typography.Text>
+            <Typography.Text strong>清理历史统计数据</Typography.Text>
             <Typography.Text type="secondary">
               清空站点访问流量与统计数据，支持全部清空或按天数保留。
             </Typography.Text>
@@ -176,7 +176,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
               onChange={(e) => setRetentionDays(e.target.value as number)}
               style={{ display: "flex", flexDirection: "column", gap: 10 }}
             >
-              <Radio value={0}>全部清空（删除全部历史分析数据）</Radio>
+              <Radio value={0}>全部清空（删除全部历史统计数据）</Radio>
               <Radio value={7}>保留最近 7 天</Radio>
               <Radio value={14}>保留最近 14 天</Radio>
               <Radio value={30}>保留最近 30 天</Radio>

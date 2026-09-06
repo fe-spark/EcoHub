@@ -1,67 +1,42 @@
-正式版 **v2.5.7**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.5.7` 与 `ghcr.io/fe-spark/ecohub:latest`。
+测试版 **v2.6.0-beta.0**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.0-beta.0`。
 
 ### 升级指引
 
 - **从已有版本升级**：
   - **1Panel / Compose**：执行 `docker compose pull ecohub && docker compose up -d ecohub` 即可（或后台「检查更新」一键平滑升级）。
   - **数据结构与兼容性**：完全向下兼容现有 MySQL 与 Redis 数据结构，无破坏性变更。
-  - **索引自动就绪**：服务启动时将自动检测并补齐高性能覆盖索引（包括 `idx_snap_ver_series` 关联系列覆盖索引与 `idx_snap_ver_hits_pid` 热门索引），无需手动执行数据库脚本。
 
 ---
 
-### v2.5.7 核心变更
+### v2.6.0-beta.0 核心变更
 
-#### 1. 搜索与相关推荐“彻底去分档”与化简过度设计
-- **彻底去除分档模式**：移除 `SearchIndexMode`（`auto` / `topk` / `full` / `db`）及相关环境变量，统一采用全量连续评分体系（按匹配度、热度、年份、时间严格决胜）；
-- **全量内存倒排索引作为唯一权威信源**：内存索引覆盖全量快照，未命中时直接在内存阻断（耗时仅 39µs）并写入 1 分钟 Redis 短缓存防击穿，**彻底根除全表扫描**（杜绝穿透 MySQL 触发持续 2~5 秒的 `LIKE %keyword%` 慢查询）；
-- **管理端多维复合筛选精准透传**：对带有剧情、地区、语言等非紧凑索引维度的搜索，直接透传快照表查询，保证多维筛选准确。
+#### 1. 系统设置统一整合与超级管理员权限收敛
+- **系统设置标签页整合**：将分散的页面（通知配置、数据安全、运行日志）收归统一的「系统设置」二级 Tab 视图，清理历史遗留冗余路由，界面结构更为紧凑有序；
+- **全链路超级管理员鉴权加固**：
+  - 通知配置查询/保存/测试（`/api/manage/config/notify*`）、运行日志流式查询（`/api/manage/system/logs/delta`）全面接入 `middleware.AdminAccess()` 路由拦截器；
+  - 各 Handler 内部增加 `model.IsAdmin` 防御性二次校验（Defense-in-depth）；
+  - Next.js 服务端页面（`/manage/system/page.tsx`）与客户端菜单布局联动校验，未授权账号自动重定向，彻底杜绝越权访问与信息泄露。
 
-#### 2. 全站核心查询接口百万级毫秒/微秒化性能加固
-- **相关推荐（候选 2）倒排词条秒级召回**：
-  - 彻底废除 120 万数据的 `strings.Contains` 线性全扫描（单次耗时约 300ms），重构为内存倒排词条精准召回，时间复杂度由 $O(N)$ 降至 $O(1)$，**耗时降至 0.01ms (10 微秒)**；
-  - 倒排召回候选阶段前置增加 `seen` 过滤，避免同系列候选抢占 20 条配额并消除冗余数据库点查。
-- **相关推荐（候选 1）系列覆盖索引**：
-  - 在启动初始化中自动建立复合索引 `idx_snap_ver_series (snapshot_version, series_key, update_stamp)`，使同系列影片关联查询完全走索引覆盖，消除 filesort。
-- **`GET /api/hotKeywords` 覆盖索引与消除 filesort**：
-  - 建立 `idx_snap_ver_hits_pid (snapshot_version, hits, pid)` 覆盖复合索引，直接走 B-Tree 索引逆序直出，消除百万级全表 filesort；版本粒度全局缓存 Top 20 至 Redis（TTL 30m）并由 SingleFlight 防击穿，耗时降至 0.2ms。
-- **`GET /api/filmPlayInfo` 详情聚合缓存补全与切片隔离**：
-  - 补齐 Redis 详情缓存，引入全层级嵌套切片深度克隆（`cloneMovieDetailVo`），彻底阻断多协程就地修改播放源引发的数据竞争（Data Race），耗时降至 0.5ms。
-- **`GET /api/provide/vod` (TVBox) 批量快照查询与 Pipeline MGet**：
-  - 批量化重构 `GetVodDetail`，单次批量获取快照并通过 Pipeline MGet 批量读取 100 条详情缓存，消除 20 次详情串行循环与 80 次 SQL 交互风暴，耗时由 800ms 降至 2ms。
-- **`GET /api/filmClassify` 剥离无意义 COUNT 与 3 路并发**：
-  - 新增 `GetSnapshotTopMoviesBySortFast` 剔除百万行耗时 `COUNT(*)`，未命中时 3 路并发拉取，耗时降至 1ms。
-- **`GET /api/filmClassifySearch` 深分页硬截断与 SingleFlight 回填**：
-  - 最大 Offset 限制在 2352 以内，消除深度翻页拖垮数据库隐患。
-- **演职员多重切分与排序重构**：
-  - 演职员切分重构为单次线性扫描 `strings.FieldsFunc`，零额外切片分配；结合严格全序比对升级为标准库泛型 `slices.SortFunc`，显著提升排序吞吐。
+#### 2. 多源采集判更精准化与通知防抖加固
+- **主站写入集数屏障保护**：
+  - 优化主站判更逻辑（`masterShouldBumpStamp`），引入全库最高集数屏障（`newCount > 0 && newCount < existMax` 直接阻断）；
+  - 严格捍卫核心原则：“附属站已先追到最新集数时，主站后补只写详情，不重进最近更新列表”；
+  - 彻底杜绝在多源采集场景下，主站落后补录旧集数时仅因备注变化（如“100集” $\to$ “101集”）导致错误刷新 `update_stamp` 霸占首页榜首、并向外部 Telegram/Webhook 重复轰炸虚假更新通知的问题；
+- **品质升级与预告转正片精准感知**：
+  - 针对电影/单片备注变更（如“TC枪版”变“HD高清”）、最后一集预告转正片等真实实质内容变化，精准触发更新感知与通知推送；
+  - 补齐自动化回归测试用例（`TestMasterLaggingUpdateRemarksChangeDoesNotBumpStamp`）。
 
-#### 3. 内存搜索索引原子双缓冲（根除 5.4 秒级长耗时毛刺）
-- **原子双缓冲（Double-Buffering）与无锁热返回**：彻底解决 120 万数据下增量入库或快照切换时，因全量内存倒排索引扫描重建而同步挂起在线 `/api/searchFilm` HTTP 线程的生产毛刺；
-- **平滑过渡与后台静默异步构建**：索引过期时不置空内存索引项，在线请求直接复用当前可用索引毫秒级极速响应，新版本索引在后台静默构建完成后原子无缝切换，实现 0 感知、恒定低延迟。
+#### 3. 数据安全模块极简体验重构
+- **极简数据清理交互**：
+  - 数据安全中的「数据分析清理」彻底移除繁冗的技术指标与数据描述面板，结构对齐「数据重置」卡片，保持极致简洁；
+  - 彻底剔除底层开发术语（如 `MySQL 表 access_daily_stats`、`Redis 临时缓存`、`历史落库` 等），全面换用面向用户的直白语言；
+  - 支持按天数保留（7/14/30天）或全部清空，校验管理密码安全执行。
 
-#### 4. 极致精简且安全的内存布局（内存占用减半）
-- **紧凑 48 字节结构体**：
-  - `filmSearchMemoryItem` 严格按 8 字节对齐，单条目从 96~128 字节减半至 **48 字节**，单库 120 万影片条目仅占约 57MB；
-  - 采用标准 `int32`/`float32` 原生精度，无损对齐且杜绝截断与非标压缩；
-- **单偏移量连续字符串池 (`StringPool`)**：
-  - 单条目仅保存 1 个起始 `PoolOffset`，片名及拼音派生等 5 项字符串在 `StringPool` 中连续紧凑存储，指针切片零拷贝解析；
-- **切片空闲容量彻底回收 (`slices.Clip`)**：
-  - 索引构建完成后，对所有 Posting Lists、条目列表与字符串池执行 `slices.Clip`，彻底回收临时扩容切片的未用堆空间。
+#### 4. 架构化简与高可用加固
+- 剥离无用高开销操作与慢扫描逻辑，避免长时间阻塞 Redis 单线程事件循环；
+- 完善数据重置影响面统计，精准覆盖失败记录（`failure_records`）清理计数；
+- 优化采集进度与任务操作文案提示，明确“已抓取数据将继续处理完成”。
 
-#### 5. 协程生命周期闭环与高并发防御加固
-- **修复 `LoadActiveFilmReadModel` 协程假就绪缺陷**：
-  - 消除异步构建协程误中双缓冲秒返分支问题，确保索引真正构建完成后才触发 WaitGroup `Done()` 与 GC，生命周期严格受控；
-- **消除在线读流量并发协程堆积隐患**：
-  - `getOrLoadFilmSearchMemoryIndex` 改用 SingleFlight 原生的 `DoChan(...)` 非阻塞通道复用，消除读流量触发的 Goroutine 膨胀与惊群震荡；
-- **移除冗余孤儿协程**：
-  - 移除 `InvalidateActiveFilmSearchIndex` 中的重复并发协程，重建入口由 `LoadActiveFilmReadModel` 统一管控；
-- **全链路切片隔离**：
-  - SingleFlight 结果切片统一通过深拷贝隔离，彻底消除高并发分页修改引发的 Data Race，并在失败分支重置分页元数据保证状态一致；
-- **废弃死代码清理**：
-  - 彻底拔除历史废弃的 `matchesAdminSearch`、`matchesAdminSearchCategory`、`ItemName` 与 `pageEnd`。
-
-#### 6. 质量与回归验证
-- **静态检查**：`go vet ./...` 0 错误、0 警告；
-- **并发竞态**：`go test -v -race ./internal/repository/film/...` 100% 通过，0 Data Race；
-- **全仓测试**：`go test -count=1 ./...` 全库 18 个模块全部测试通过。
-
+#### 5. 质量与回归验证
+- **全仓测试**：`go test ./...` 后端全模块测试 100% 通过；
+- **前端构建**：Next.js 生产编译与页面优化 `npm run build` 0 错误顺利通过。
