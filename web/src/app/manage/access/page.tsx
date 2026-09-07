@@ -25,7 +25,7 @@ export default async function AccessPage() {
         Cookie: cookieStore.toString(),
       }
     );
-    if (statusResp.code !== 0 || (!statusResp.data?.enabled && !statusResp.data?.hasData)) {
+    if (statusResp.code !== 0 || !statusResp.data?.enabled) {
       redirect("/manage");
     }
   } catch {
