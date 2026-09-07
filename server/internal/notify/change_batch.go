@@ -371,6 +371,7 @@ func loadFilmSortMeta(mids []int64) (map[int64]filmSortMeta, error) {
 }
 
 // BuildCategoryPlanForMids 针对变更项按首页大类聚合分类（支持其他），并按最新更新顺序（update_stamp DESC, mid DESC）对齐每日更新列表。
+// 注意：本函数会原地重排入参 all 切片；调用后 all 元素将按最新更新时间及 mid 降序排列。
 func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, catMids [][]int64, err error) {
 	if len(all) == 0 {
 		return nil, nil, nil
