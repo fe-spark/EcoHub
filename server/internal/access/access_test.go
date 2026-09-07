@@ -716,37 +716,36 @@ func TestScopedTopKind(t *testing.T) {
 func TestDroppedKeys(t *testing.T) {
 	globalKey := droppedKey()
 	dayKey := droppedDayKey("20260902")
-	lockKey := rollupLockKey()
 	if !strings.Contains(globalKey, "meta:dropped") {
 		t.Fatalf("unexpected globalKey: %s", globalKey)
 	}
 	if !strings.Contains(dayKey, "meta:dropped:20260902") {
 		t.Fatalf("unexpected dayKey: %s", dayKey)
 	}
-	if !strings.Contains(lockKey, "lock:daily_rollup") {
-		t.Fatalf("unexpected lockKey: %s", lockKey)
-	}
 }
 
 func TestFormatNodeName(t *testing.T) {
-	if got := formatNodeName("master", "myhost", "custom-node-1"); got != "custom-node-1" {
-		t.Fatalf("want custom-node-1, got %q", got)
+	if got := formatNodeName("myhost", "custom-1"); got != "custom-1" {
+		t.Fatalf("want custom-1, got %q", got)
 	}
-	if got := formatNodeName("worker", "myhost", ""); got != "worker-myhost" {
-		t.Fatalf("want worker-myhost, got %q", got)
+	if got := formatNodeName("myhost", ""); got != "myhost" {
+		t.Fatalf("want myhost, got %q", got)
 	}
 	// >12 字符截取后 6 个字符
-	if got := formatNodeName("node", "ecohub-cluster-node-99", ""); got != "node-ode-99" {
-		t.Fatalf("want node-ode-99, got %q", got)
+	if got := formatNodeName("ecohub-prod-host-99", ""); got != "ost-99" {
+		t.Fatalf("want ost-99, got %q", got)
 	}
 	// UTF-8 非 ASCII 字符不截断乱码
-	utf8Host := "中文开发环境-测试节点-01"
-	got := formatNodeName("master", utf8Host, "")
+	utf8Host := "中文开发环境-测试主机-01"
+	got := formatNodeName(utf8Host, "")
 	if !utf8.ValidString(got) {
 		t.Fatalf("formatNodeName produced invalid UTF-8: %q", got)
 	}
-	if got != "master-试节点-01" {
-		t.Fatalf("want master-试节点-01, got %q", got)
+	if got != "试主机-01" {
+		t.Fatalf("want 试主机-01, got %q", got)
+	}
+	if got := formatNodeName("", ""); got != "ecohub" {
+		t.Fatalf("want ecohub, got %q", got)
 	}
 }
 

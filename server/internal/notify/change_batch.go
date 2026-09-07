@@ -231,7 +231,7 @@ func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, erro
 	return out, nil
 }
 
-// FilmBatchSession 变更批次会话（保存于 Redis，TTL 48h；亦支持内存 fallback）
+// FilmBatchSession 变更批次会话（内存权威，Redis 备忘 TTL 48h）
 type FilmBatchSession struct {
 	BatchID      string              `json:"batchId"`
 	SiteName     string              `json:"siteName"`
@@ -263,38 +263,12 @@ func batchRedisKey(id string) string {
 	return "EcoHub:NotifyBatch:" + id
 }
 
-// SaveChangeBatchSession 保存变更批次会话（Redis + 本地内存备份）
+// SaveChangeBatchSession 保存变更批次会话。运行时只认内存；Redis 仅作进程重启备忘。
 func SaveChangeBatchSession(sess FilmBatchSession) error {
 	if sess.BatchID == "" {
 		return fmt.Errorf("empty batch id")
 	}
-	now := time.Now()
-	memSessionMu.Lock()
-	// 清理已过期或已失效条目
-	for len(memOrder) > 0 {
-		oldestID := memOrder[0]
-		entry, ok := memSessions[oldestID]
-		if !ok || now.After(entry.expiresAt) {
-			delete(memSessions, oldestID)
-			memOrder = memOrder[1:]
-			continue
-		}
-		break
-	}
-	// 超出容量上限淘汰最早会话
-	for len(memOrder) >= maxMemBatchSessions {
-		oldestID := memOrder[0]
-		delete(memSessions, oldestID)
-		memOrder = memOrder[1:]
-	}
-	if _, exists := memSessions[sess.BatchID]; !exists {
-		memOrder = append(memOrder, sess.BatchID)
-	}
-	memSessions[sess.BatchID] = memSessionEntry{
-		sess:      sess,
-		expiresAt: now.Add(batchSessionTTL),
-	}
-	memSessionMu.Unlock()
+	rememberFilmBatchSession(sess, time.Now().Add(batchSessionTTL))
 
 	if db.Rdb != nil {
 		raw, err := json.Marshal(sess)
@@ -305,25 +279,59 @@ func SaveChangeBatchSession(sess FilmBatchSession) error {
 	return nil
 }
 
+func rememberFilmBatchSession(sess FilmBatchSession, expiresAt time.Time) {
+	now := time.Now()
+	memSessionMu.Lock()
+	defer memSessionMu.Unlock()
+	for len(memOrder) > 0 {
+		oldestID := memOrder[0]
+		entry, ok := memSessions[oldestID]
+		if !ok || now.After(entry.expiresAt) {
+			delete(memSessions, oldestID)
+			memOrder = memOrder[1:]
+			continue
+		}
+		break
+	}
+	for len(memOrder) >= maxMemBatchSessions {
+		oldestID := memOrder[0]
+		delete(memSessions, oldestID)
+		memOrder = memOrder[1:]
+	}
+	if _, exists := memSessions[sess.BatchID]; !exists {
+		memOrder = append(memOrder, sess.BatchID)
+	}
+	memSessions[sess.BatchID] = memSessionEntry{
+		sess:      sess,
+		expiresAt: expiresAt,
+	}
+}
+
 func loadFilmBatchSession(batchID string) (FilmBatchSession, error) {
 	batchID = strings.TrimSpace(batchID)
 	if batchID == "" {
 		return FilmBatchSession{}, fmt.Errorf("empty batch id")
-	}
-	if db.Rdb != nil {
-		data, err := db.Rdb.Get(db.Cxt, batchRedisKey(batchID)).Result()
-		if err == nil {
-			var sess FilmBatchSession
-			if json.Unmarshal([]byte(data), &sess) == nil {
-				return sess, nil
-			}
-		}
 	}
 	memSessionMu.RLock()
 	entry, ok := memSessions[batchID]
 	memSessionMu.RUnlock()
 	if ok && time.Now().Before(entry.expiresAt) {
 		return entry.sess, nil
+	}
+	if db.Rdb != nil {
+		key := batchRedisKey(batchID)
+		data, err := db.Rdb.Get(db.Cxt, key).Result()
+		if err == nil {
+			var sess FilmBatchSession
+			if json.Unmarshal([]byte(data), &sess) == nil {
+				expiresAt := time.Now().Add(batchSessionTTL)
+				if ttl, ttlErr := db.Rdb.TTL(db.Cxt, key).Result(); ttlErr == nil && ttl > 0 {
+					expiresAt = time.Now().Add(ttl)
+				}
+				rememberFilmBatchSession(sess, expiresAt)
+				return sess, nil
+			}
+		}
 	}
 	return FilmBatchSession{}, fmt.Errorf("session not found")
 }
@@ -459,4 +467,3 @@ func categoryCountsFromPidMap(countByPid map[int64]int, otherCount int) []Catego
 	}
 	return out
 }
-

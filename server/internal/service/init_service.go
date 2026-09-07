@@ -49,6 +49,10 @@ func (s *InitService) DefaultDataInit() {
 	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
+	// 定时任务启动前，从 Redis 备忘恢复保护期、孤儿游标与活跃快照版本到内存。
+	filmrepo.RestoreMasterSwitchProtection()
+	filmrepo.RestoreOrphanCleanCursor()
+	filmrepo.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
@@ -65,8 +69,6 @@ func (s *InitService) loadActiveFilmReadModel() {
 		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
 	}
 }
-
-
 
 func (s *InitService) TableInit() {
 	err := db.Mdb.AutoMigrate(model.AllModels...)

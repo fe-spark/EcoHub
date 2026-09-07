@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 
@@ -166,8 +167,6 @@ func TestCleanOrphanPlaylists_PurgeExpired(t *testing.T) {
 		t.Fatalf("expected IDs [2, 3] remaining, got [%d, %d]", remaining[0].ID, remaining[1].ID)
 	}
 }
-
-
 
 func TestLoadExistingMatchKeySet_Chunking(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
@@ -342,7 +341,6 @@ func TestSlaveMoviePlaylist_HardDeleteNoTombstone(t *testing.T) {
 		t.Fatalf("re-create after delete failed with duplicate key: %v", err)
 	}
 }
-
 
 // TestCleanOrphanPlaylists_SecondChanceVerification 验证主站收录判定：
 // 超期 24 小时的记录中，若主站 match_key 存在，则安全保留；只有确认主站依然不存在的真孤儿才被物理删除。
@@ -603,9 +601,8 @@ func TestCleanOrphanPlaylists_TimeoutSafety(t *testing.T) {
 	}
 }
 
-// TestMasterSwitchProtection_RedisIntegration 验证通过 Redis 进行主站切换冷启动保护时，
-// 键删除与过期严格通过 redis.Nil authoritative 识别，防止多 Pod 进程内存脱节。
-func TestMasterSwitchProtection_RedisIntegration(t *testing.T) {
+// TestMasterSwitchProtection_RedisBackup 验证 Redis 只是重启备忘：写入带 TTL，运行时以内存为准。
+func TestMasterSwitchProtection_RedisBackup(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("miniredis: %v", err)
@@ -621,22 +618,87 @@ func TestMasterSwitchProtection_RedisIntegration(t *testing.T) {
 		ClearMasterSwitchProtection()
 	})
 
-	// 1. 设置保护期
 	SetMasterSwitchProtection(1 * time.Hour)
 	if !InMasterSwitchProtection() {
-		t.Fatal("expected InMasterSwitchProtection to be true with Redis")
+		t.Fatal("expected InMasterSwitchProtection to be true after set")
+	}
+	ttl, err := client.TTL(db.Cxt, config.MasterSwitchProtectKey).Result()
+	if err != nil {
+		t.Fatalf("TTL: %v", err)
+	}
+	if ttl <= 50*time.Minute || ttl > time.Hour {
+		t.Fatalf("expected redis TTL around 1h, got %s", ttl)
 	}
 
-	// 2. 清除保护期（模拟在其它 Pod 执行了清除）
+	// 运行时只认内存：外部删掉 Redis 备忘不得解除保护
+	if err := client.Del(db.Cxt, config.MasterSwitchProtectKey).Err(); err != nil {
+		t.Fatalf("del redis backup: %v", err)
+	}
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected memory protection to remain after redis backup was deleted")
+	}
+
 	ClearMasterSwitchProtection()
-	// 关键验证：Redis 键已删，InMasterSwitchProtection 必须返回 false，不得因内存残留变量误判为 true
 	if InMasterSwitchProtection() {
-		t.Fatal("expected InMasterSwitchProtection to be false immediately after ClearMasterSwitchProtection with Redis")
+		t.Fatal("expected InMasterSwitchProtection to be false after clear")
 	}
 }
 
-// TestOrphanCleanCursor_RedisIntegration 验证游标在 Redis 中的同步与 redis.Nil 权威识别。
-func TestOrphanCleanCursor_RedisIntegration(t *testing.T) {
+// TestMasterSwitchProtection_RestoreFromRedisAfterRestart 模拟进程重启：内存归零后从 Redis 恢复一次。
+func TestMasterSwitchProtection_RestoreFromRedisAfterRestart(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		ClearMasterSwitchProtection()
+	})
+
+	SetMasterSwitchProtection(7 * 24 * time.Hour)
+
+	setMasterSwitchProtectUntil(time.Time{})
+	if InMasterSwitchProtection() {
+		t.Fatal("expected protection to be cleared before restore")
+	}
+
+	RestoreMasterSwitchProtection()
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected RestoreMasterSwitchProtection to refill memory from Redis")
+	}
+}
+
+func TestRestoreMasterSwitchProtection_RedisErrorFailClosed(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		ClearMasterSwitchProtection()
+	})
+
+	ClearMasterSwitchProtection()
+	mr.Close()
+	RestoreMasterSwitchProtection()
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected default protection when redis restore fails")
+	}
+}
+
+// TestOrphanCleanCursor_RedisBackup 验证游标运行时只认内存，Redis 仅作重启备忘。
+func TestOrphanCleanCursor_RedisBackup(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("miniredis: %v", err)
@@ -655,6 +717,30 @@ func TestOrphanCleanCursor_RedisIntegration(t *testing.T) {
 	SaveOrphanCleanCursor(12345)
 	if cur := LoadOrphanCleanCursor(); cur != 12345 {
 		t.Fatalf("expected cursor 12345, got %d", cur)
+	}
+
+	if err := client.Del(db.Cxt, config.OrphanCleanCursorKey).Err(); err != nil {
+		t.Fatalf("del redis backup: %v", err)
+	}
+	if cur := LoadOrphanCleanCursor(); cur != 12345 {
+		t.Fatalf("expected memory cursor to remain after redis backup deleted, got %d", cur)
+	}
+
+	memoryOrphanMu.Lock()
+	memoryOrphanCursor = 0
+	memoryOrphanMu.Unlock()
+	RestoreOrphanCleanCursor()
+	if cur := LoadOrphanCleanCursor(); cur != 0 {
+		t.Fatalf("expected restore to stay 0 when redis backup is gone, got %d", cur)
+	}
+
+	SaveOrphanCleanCursor(99)
+	memoryOrphanMu.Lock()
+	memoryOrphanCursor = 0
+	memoryOrphanMu.Unlock()
+	RestoreOrphanCleanCursor()
+	if cur := LoadOrphanCleanCursor(); cur != 99 {
+		t.Fatalf("expected restore from redis to 99, got %d", cur)
 	}
 
 	ClearOrphanCleanCursor()
@@ -791,4 +877,3 @@ func TestRefreshAfterDataClean(t *testing.T) {
 		t.Fatal("expected PlayFromSummary to be refreshed")
 	}
 }
-

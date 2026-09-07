@@ -68,18 +68,13 @@ func GetAccessDataStats() AccessDataStats {
 
 	if db.Rdb != nil {
 		ctx := db.Cxt
-		lockKey := rollupLockKey()
 		var cursor uint64
 		for {
 			keys, nextCursor, err := db.Rdb.Scan(ctx, cursor, config.AccessKeyPrefix+"*", 500).Result()
 			if err != nil {
 				break
 			}
-			for _, k := range keys {
-				if k != lockKey {
-					stats.RedisKeyCount++
-				}
-			}
+			stats.RedisKeyCount += int64(len(keys))
 			cursor = nextCursor
 			if cursor == 0 {
 				break
@@ -93,7 +88,6 @@ func GetAccessDataStats() AccessDataStats {
 // ClearAccessData 清理数据分析积累的数据。
 // retentionDays <= 0 表示全量清理；
 // retentionDays > 0 表示保留最近 retentionDays 天，删除更早的数据。
-// 先拿进程内 rollupMu 再拿 Redis 集群锁，避免其它节点边滚边写把已清数据写回。
 func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 	var res ClearAccessResult
 	if retentionDays < 0 {
@@ -103,14 +97,11 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 	rollupMu.Lock()
 	defer rollupMu.Unlock()
 
-	lockToken, locked, lockErr := acquireRollupClusterLock()
-	if lockErr != nil {
-		return res, fmt.Errorf("获取集群滚动锁失败: %w", lockErr)
+	if db.Rdb != nil {
+		if err := db.Rdb.Ping(db.Cxt).Err(); err != nil {
+			return res, fmt.Errorf("Redis 不可用，取消清理: %w", err)
+		}
 	}
-	if !locked {
-		return res, fmt.Errorf("数据分析正在滚动落库，请稍后再试")
-	}
-	defer releaseRollupClusterLock(lockToken)
 
 	if db.Mdb != nil {
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -157,7 +148,7 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 			cutoff := startOfLocalDay(now).AddDate(0, 0, -retentionDays)
 			cutoffRedisDay = cutoff.Format("20060102")
 		}
-		deleted, err := deleteMatchingAccessRedisKeys(retentionDays, cutoffRedisDay, rollupLockKey())
+		deleted, err := deleteMatchingAccessRedisKeys(retentionDays, cutoffRedisDay)
 		res.DeletedRedisKeys = deleted
 		if err != nil {
 			return res, fmt.Errorf("清理 Redis 访问分析缓存失败: %w", err)
@@ -167,7 +158,7 @@ func ClearAccessData(retentionDays int) (ClearAccessResult, error) {
 	return res, nil
 }
 
-func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay, skipKey string) (int64, error) {
+func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay string) (int64, error) {
 	ctx := db.Cxt
 	var toDelete []string
 	var cursor uint64
@@ -177,9 +168,6 @@ func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay, skipKey st
 			return 0, err
 		}
 		for _, k := range keys {
-			if k == skipKey {
-				continue
-			}
 			if retentionDays <= 0 || isAccessKeyOlderThan(k, cutoffRedisDay) {
 				toDelete = append(toDelete, k)
 			}
@@ -208,9 +196,6 @@ func deleteMatchingAccessRedisKeys(retentionDays int, cutoffRedisDay, skipKey st
 
 // isAccessKeyOlderThan 判断 Redis 访问分析 Key 是否早于指定日期（YYYYMMDD）
 func isAccessKeyOlderThan(key string, cutoffRedisDay string) bool {
-	if key == rollupLockKey() {
-		return false
-	}
 	suffix := strings.TrimPrefix(key, config.AccessKeyPrefix)
 	if strings.HasPrefix(suffix, "min:") {
 		minStr := strings.TrimPrefix(suffix, "min:")

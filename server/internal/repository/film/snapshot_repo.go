@@ -26,31 +26,14 @@ const (
 
 var (
 	activeSnapshotUpsertMu sync.Mutex
-	// activeSnapshotFallbackVersion/activeSnapshotFallbackAt 缓存 DB 兜底查询结果，
-	// 避免 Redis 活跃版本键缺失/不可用时 Worker 每 3s 轮询重复查库并触发失败的写操作。
-	activeSnapshotFallbackMu      sync.Mutex
-	activeSnapshotFallbackVersion string
-	activeSnapshotFallbackAt      time.Time
+	activeSnapshotMu       sync.Mutex
+	activeSnapshotVersion  string
 )
 
-// activeSnapshotFallbackTTL DB 兜底结果本地缓存有效期
-const activeSnapshotFallbackTTL = 30 * time.Second
-
 func GetActiveSnapshotVersion() string {
-	if db.Rdb != nil {
-		version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
-		if err == nil && strings.TrimSpace(version) != "" {
-			return strings.TrimSpace(version)
-		}
-	}
-
-	activeSnapshotFallbackMu.Lock()
-	defer activeSnapshotFallbackMu.Unlock()
-	if activeSnapshotFallbackVersion != "" && time.Since(activeSnapshotFallbackAt) < activeSnapshotFallbackTTL {
-		return activeSnapshotFallbackVersion
-	}
-
-	return ""
+	activeSnapshotMu.Lock()
+	defer activeSnapshotMu.Unlock()
+	return strings.TrimSpace(activeSnapshotVersion)
 }
 
 func SetActiveSnapshotVersion(version string) error {
@@ -58,21 +41,40 @@ func SetActiveSnapshotVersion(version string) error {
 	if version == "" {
 		return nil
 	}
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = version
-	activeSnapshotFallbackAt = time.Now()
-	activeSnapshotFallbackMu.Unlock()
-	if db.Rdb == nil {
-		return nil
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = version
+	activeSnapshotMu.Unlock()
+	if db.Rdb != nil {
+		if err := db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err(); err != nil {
+			log.Printf("[SetActiveSnapshotVersion] 写入 Redis 备忘失败: %v", err)
+		}
 	}
-	return db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err()
+	return nil
+}
+
+func clearActiveSnapshotVersion() {
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = ""
+	activeSnapshotMu.Unlock()
+}
+
+// RestoreActiveSnapshotVersion 启动时从 Redis 读一次填回内存。
+func RestoreActiveSnapshotVersion() {
+	if db.Rdb == nil {
+		return
+	}
+	version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
+	version = strings.TrimSpace(version)
+	if err != nil || version == "" {
+		return
+	}
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = version
+	activeSnapshotMu.Unlock()
 }
 
 func ResetActiveSnapshotFallbackForTest() {
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = ""
-	activeSnapshotFallbackAt = time.Time{}
-	activeSnapshotFallbackMu.Unlock()
+	clearActiveSnapshotVersion()
 }
 
 func GetActiveReadModelVersion() string {
@@ -103,17 +105,6 @@ func activeReadModelVersion(readModel *FilmReadModel, snapshotVersion string) st
 	}
 	return snapshotVersion
 }
-
-// IncrSnapshotRevision 快照有变动时递增 Redis 修订版本号
-func IncrSnapshotRevision() {
-	if db.Rdb != nil {
-		_ = db.Rdb.Incr(db.Cxt, config.SnapshotRevisionKey).Err()
-	}
-}
-
-func SeedClusterSnapshotBaseline() {}
-func StartClusterSnapshotWatcher() {}
-func StopClusterSnapshotWatcher() {}
 
 func NewSnapshotVersion() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
@@ -182,12 +173,6 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	}
 	if err := SetActiveSnapshotVersion(version); err != nil {
 		return err
-	}
-	IncrSnapshotRevision()
-	if db.Rdb != nil {
-		if err := db.Rdb.Set(db.Cxt, config.SnapshotBuildVersionKey, version, 0).Err(); err != nil {
-			log.Printf("Set SnapshotBuildVersion Error: %v", err)
-		}
 	}
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
@@ -802,7 +787,6 @@ func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 		version = GetActiveSnapshotVersion()
 	}
 	InvalidateActiveFilmSearchIndex(version)
-	IncrSnapshotRevision()
 	if db.Rdb != nil && len(mids) > 0 {
 		// 精准批量删除被修改影片的详情与播放页缓存（按 1000 条分批下发，避免过大 Pipeline 占用缓冲区）
 		const pipeBatchSize = 1000
@@ -848,12 +832,9 @@ func ClearAllSnapshotDynamicCaches() {
 
 func ClearSnapshotState() {
 	ClearActiveFilmReadModel()
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = ""
-	activeSnapshotFallbackAt = time.Time{}
-	activeSnapshotFallbackMu.Unlock()
+	clearActiveSnapshotVersion()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey, config.SnapshotBuildVersionKey)
+		db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey)
 	}
 	RefreshAccessDataCaches()
 }
