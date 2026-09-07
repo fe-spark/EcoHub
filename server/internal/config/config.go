@@ -149,6 +149,8 @@ const (
 	SnapshotRevisionKey = RedisKeyPrefix + ":Snapshot:Revision"
 	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标持久化 key
 	OrphanCleanCursorKey = RedisKeyPrefix + ":Film:Orphan:Cursor"
+	// MasterSwitchProtectKey 主站切换冷启动保护期持久化 key
+	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
 	// FilmClassifyCacheKey 分类首页快照缓存前缀
 	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
 	// FilmClassifySearchKey 分类筛选快照缓存前缀

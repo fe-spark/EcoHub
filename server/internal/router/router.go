@@ -17,7 +17,7 @@ func SetupRouter() *gin.Engine {
 
 	r := gin.New()
 	if err := r.SetTrustedProxies(config.TrustedProxies); err != nil {
-		syslog.Warnf("[HTTP] TRUSTED_PROXIES 解析失败，回退 %s: %v", config.DefaultTrustedProxies, err)
+		syslog.Warnf("[HTTP] 设置 TrustedProxies 失败，回退本地环回: %v", err)
 		_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	}
 	r.Use(middleware.AccessLog())

@@ -1,6 +1,7 @@
 package film
 
 import (
+	"errors"
 	"log"
 	"sort"
 	"sync"
@@ -9,6 +10,8 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+
+	"github.com/redis/go-redis/v9"
 )
 
 var (
@@ -24,13 +27,28 @@ func SetMasterSwitchProtection(duration time.Duration) {
 	if duration <= 0 {
 		duration = MasterSwitchColdStartDuration
 	}
+	until := time.Now().Add(duration)
+	if db.Rdb != nil {
+		_ = db.Rdb.Set(db.Cxt, config.MasterSwitchProtectKey, until.Unix(), duration).Err()
+	}
 	masterSwitchMu.Lock()
-	masterSwitchProtectUntil = time.Now().Add(duration)
+	masterSwitchProtectUntil = until
 	masterSwitchMu.Unlock()
 }
 
 // InMasterSwitchProtection 判断是否处于主站切换冷启动保护期
 func InMasterSwitchProtection() bool {
+	if db.Rdb != nil {
+		val, err := db.Rdb.Get(db.Cxt, config.MasterSwitchProtectKey).Int64()
+		if err == nil {
+			return val > time.Now().Unix()
+		}
+		if errors.Is(err, redis.Nil) {
+			return false
+		}
+		log.Printf("[InMasterSwitchProtection] 查询 Redis 保护期异常，启用 Fail-Safe 保守安全策略: %v", err)
+		return true
+	}
 	masterSwitchMu.RLock()
 	defer masterSwitchMu.RUnlock()
 	return time.Now().Before(masterSwitchProtectUntil)
@@ -38,6 +56,9 @@ func InMasterSwitchProtection() bool {
 
 // ClearMasterSwitchProtection 清除主站切换冷启动保护期
 func ClearMasterSwitchProtection() {
+	if db.Rdb != nil {
+		_ = db.Rdb.Del(db.Cxt, config.MasterSwitchProtectKey).Err()
+	}
 	masterSwitchMu.Lock()
 	masterSwitchProtectUntil = time.Time{}
 	masterSwitchMu.Unlock()

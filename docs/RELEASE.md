@@ -1,4 +1,4 @@
-测试版 **v2.6.0-beta.1**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.0-beta.1`。
+测试版 **v2.6.0-beta.2**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.0-beta.2`。
 
 ### 升级指引
 
@@ -8,32 +8,24 @@
 
 ---
 
-### v2.6.0-beta.1 核心变更
+### v2.6.0-beta.2 核心变更
 
-#### 1. 判更机制彻底回归主分支纯粹基准
-- **移除 Remarks 文本判更与过度设计**：
-  - 彻底移除 `masterShouldBumpStamp` 及其引发线上存量老片更新时间戳冲高的隐患；
-  - 坚决杜绝任何基于备注文案（Remarks）的字符串猜测（无 `Contains("完结")` / `Contains("HD")` 等脆弱启发式规则）；
-  - 判定标准 100% 严格回归主分支最纯粹法则：**有且仅当真实分集数严格增长（`isEpisodeCountHigher`）** 时才允许刷新 `update_stamp`，其余情况（包括纯备注文案更迭、老片全量重爬）一律完整继承库内历史 `update_stamp`；
-  - 彻底解决线上因历史数据缺乏备注字段导致全量老片霸榜 `/filmClassifySearch`（最近更新）的排序错乱问题。
+#### 1. 主站切换冷启动保护期 Redis 持久化与安全兜底
+- 将主站切换冷启动保护期由单机内存持久化至 Redis（Key: `EcoHub:CleanOrphan:MasterSwitchProtect`，TTL 7天）；
+- 杜绝容器重启或多实例部署导致保护期提前失效引发孤儿扫描误删主站播放列表；
+- 增加 Redis 异常时的 Fail-Safe 保守安全策略与单机内存读写锁平滑回退。
 
-#### 2. 系统设置统一整合与超级管理员权限收敛
-- **系统设置标签页整合**：将分散的页面（通知配置、数据安全、运行日志）收归统一的「系统设置」二级 Tab 视图，清理历史遗留冗余路由，界面结构更为紧凑有序；
-- **全链路超级管理员鉴权加固**：
-  - 通知配置查询/保存/测试（`/api/manage/config/notify*`）、运行日志流式查询（`/api/manage/system/logs/delta`）全面接入 `middleware.AdminAccess()` 路由拦截器；
-  - 各 Handler 内部增加 `model.IsAdmin` 防御性二次校验（Defense-in-depth）；
-  - Next.js 服务端页面（`/manage/system/page.tsx`）与客户端菜单布局联动校验，未授权账号自动重定向，彻底杜绝越权访问与信息泄露。
+#### 2. 采集源变更与删除数据治理全链路闭环
+- 恢复采集源变更（换源 `isUriChanged`、主站升降级）时的旧失败记录清理，防止使用新接口拉取旧页码产生脏数据；
+- 在采集站点物理删除事务中统一调用 `DeleteFailureRecordsByOriginIdTx` 清理关联失败记录；
+- 恢复单片影视删除（`DelFilmSearch`）时在同一事务中查出所有 `match_key` 并物理级联清理 `slave_movie_playlists`，杜绝孤儿播放列表残留；
+- 修复管理端影片列表删除操作使用的 mid 主键传参（`record.mid || record.ID`）。
 
-#### 3. 数据安全模块极简体验重构
-- **极简数据清理交互**：
-  - 数据安全中的「数据分析清理」彻底移除繁冗的技术指标与数据描述面板，结构对齐「数据重置」卡片，保持极致简洁；
-  - 彻底剔除底层开发术语，全面换用面向用户的直白语言；
-  - 支持按天数保留（7/14/30天）或全部清空，校验管理密码安全执行。
+#### 3. 冗余死代码清理与滚动水位解析复用
+- 移除未被生产引用的 `DefaultTrustedProxies` 与 `ParseTrustedProxies` 死代码，测试覆盖 `parseEnvBool`；
+- 在 `loadRolledDay` 中复用 `parseRolledDay` 统一水位解析与 Redis 异常向上传播；
+- 校正 PR 说明，移除已收敛按天清理后的虚假手动落库描述。
 
-#### 4. 读模型与数据库跨方言高可用加固
-- **分类与读模型性能优化**：延迟关联（Deferred Join）与快照直查优化，快照搜索索引字段长度对齐；
-- **跨数据库方言完全兼容**：将标签聚合保存调整为标准 `clause.AssignmentColumns`，使代码在 MySQL 与 SQLite 测试环境下均能无缝兼容。
-
-#### 5. 质量与回归验证
-- **全仓测试**：`go test -count=1 ./...` 后端全模块所有 16 个包 100% PASS 通过；
-- **前端构建**：Next.js 生产编译与页面优化 `npm run build` 0 错误顺利通过。
+#### 4. 质量与回归验证
+- **全仓测试**：`go test -count=1 ./...` 后端全模块所有 17 个包 100% PASS 通过；
+- **前端检查**：Next.js `npm run lint` 与 `npx tsc --noEmit` 均为 0 错误。

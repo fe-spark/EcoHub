@@ -2,17 +2,23 @@ package config
 
 import "testing"
 
-func TestParseTrustedProxies(t *testing.T) {
-	got := ParseTrustedProxies("")
-	if len(got) != 5 || got[0] != "127.0.0.1" || got[1] != "::1" {
-		t.Fatalf("default: %v", got)
+func TestParseEnvBool(t *testing.T) {
+	t.Setenv("TEST_BOOL_VAR", "true")
+	if !parseEnvBool("TEST_BOOL_VAR", false) {
+		t.Fatal("expected true for 'true'")
 	}
-	got = ParseTrustedProxies(" 172.17.0.1 , 10.0.0.1 ")
-	if len(got) != 2 || got[0] != "172.17.0.1" || got[1] != "10.0.0.1" {
-		t.Fatalf("custom: %v", got)
+
+	t.Setenv("TEST_BOOL_VAR", "0")
+	if parseEnvBool("TEST_BOOL_VAR", true) {
+		t.Fatal("expected false for '0'")
 	}
-	got = ParseTrustedProxies(" , ")
-	if len(got) != 5 {
-		t.Fatalf("blank fallback: %v", got)
+
+	t.Setenv("TEST_BOOL_VAR", "invalid")
+	if !parseEnvBool("TEST_BOOL_VAR", true) {
+		t.Fatal("expected fallback true for 'invalid'")
+	}
+
+	if parseEnvBool("UNSET_BOOL_VAR", false) {
+		t.Fatal("expected fallback false for unset var")
 	}
 }
