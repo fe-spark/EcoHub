@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -8,6 +9,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -157,5 +160,107 @@ func TestBuildCategoryPlanForMids_NilDBFallback(t *testing.T) {
 		if items[i].Mid != want {
 			t.Errorf("fallback items[%d] want %d, got %d", i, want, items[i].Mid)
 		}
+	}
+}
+
+func TestLoadFilmBatchSession_MemoryFirst(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		memSessionMu.Lock()
+		memSessions = make(map[string]memSessionEntry)
+		memOrder = nil
+		memSessionMu.Unlock()
+	})
+
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+
+	if err := SaveChangeBatchSession(FilmBatchSession{BatchID: "b1", SiteName: "mem"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	raw, err := json.Marshal(FilmBatchSession{BatchID: "b1", SiteName: "redis"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := client.Set(db.Cxt, batchRedisKey("b1"), raw, time.Hour).Err(); err != nil {
+		t.Fatalf("overwrite redis: %v", err)
+	}
+
+	got, err := loadFilmBatchSession("b1")
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got.SiteName != "mem" {
+		t.Fatalf("expected memory session, got %+v", got)
+	}
+
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+	got, err = loadFilmBatchSession("b1")
+	if err != nil {
+		t.Fatalf("load after memory miss: %v", err)
+	}
+	if got.SiteName != "redis" {
+		t.Fatalf("expected redis backup after memory miss, got %+v", got)
+	}
+}
+
+func TestLoadFilmBatchSession_DoesNotRefreshRedisTTL(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		memSessionMu.Lock()
+		memSessions = make(map[string]memSessionEntry)
+		memOrder = nil
+		memSessionMu.Unlock()
+	})
+
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+
+	if err := SaveChangeBatchSession(FilmBatchSession{BatchID: "b-ttl", SiteName: "site"}); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	mr.FastForward(time.Hour)
+
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+
+	if _, err := loadFilmBatchSession("b-ttl"); err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	ttl, err := client.TTL(db.Cxt, batchRedisKey("b-ttl")).Result()
+	if err != nil {
+		t.Fatalf("ttl: %v", err)
+	}
+	if ttl > 47*time.Hour+time.Minute {
+		t.Fatalf("redis ttl should keep remaining lifetime, got %s", ttl)
 	}
 }

@@ -102,10 +102,8 @@ var (
 
 // -------------------------redis key-----------------------------------
 const (
-	// RedisKeyPrefix 项目 Redis 统一前缀，便于启动时整批清理。
+	// RedisKeyPrefix 项目 Redis 统一前缀。
 	RedisKeyPrefix = "EcoHub"
-	// RedisProjectKeyPattern 项目 Redis 键全量扫描模式。
-	RedisProjectKeyPattern = RedisKeyPrefix + ":*"
 
 	// CategoryTreeKey 分类树 key
 	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
@@ -141,15 +139,11 @@ const (
 	RuleVersionKey = RedisKeyPrefix + ":Rule:Version"
 	// TVBoxList TVBox 列表页缓存前缀
 	TVBoxList = RedisKeyPrefix + ":TVBox:List"
-	// SnapshotActiveVersionKey 前台只读影片列表快照当前生效版本
+	// SnapshotActiveVersionKey 前台只读影片列表快照当前生效版本（重启备忘）
 	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
-	// SnapshotBuildVersionKey 最近一次快照构建版本
-	SnapshotBuildVersionKey = RedisKeyPrefix + ":Snapshot:BuildVersion"
-	// SnapshotRevisionKey 快照修订版本号（增量或全量快照变动时自增，供多节点同步读模型与搜索索引）
-	SnapshotRevisionKey = RedisKeyPrefix + ":Snapshot:Revision"
-	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标持久化 key
+	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key
 	OrphanCleanCursorKey = RedisKeyPrefix + ":Film:Orphan:Cursor"
-	// MasterSwitchProtectKey 主站切换冷启动保护期持久化 key
+	// MasterSwitchProtectKey 主站切换冷启动保护期重启备忘 key
 	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
 	// FilmClassifyCacheKey 分类首页快照缓存前缀
 	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
@@ -177,8 +171,6 @@ const (
 	SiteConfigBasic = RedisKeyPrefix + ":Config:Site:Basic"
 	// NotifyConfigKey Telegram 通知配置缓存
 	NotifyConfigKey = RedisKeyPrefix + ":Config:Notify"
-	// NotifyBotPollerLockKey Telegram getUpdates 跨实例领导锁（启动清缓存时须保留）
-	NotifyBotPollerLockKey = RedisKeyPrefix + ":Notify:BotPoller:Lock"
 	// BannersKey 轮播组件key
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
 

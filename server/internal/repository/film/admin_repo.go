@@ -365,6 +365,7 @@ func RefreshMasterDataCaches() {
 
 func InvalidateMasterSwitchCaches() {
 	ClearActiveFilmReadModel()
+	clearActiveSnapshotVersion()
 	support.RefreshCategoryCache()
 	support.InitMappingEngine()
 	support.TouchCategoryVersion()
@@ -372,7 +373,6 @@ func InvalidateMasterSwitchCaches() {
 		db.Rdb.Del(
 			db.Cxt,
 			config.SnapshotActiveVersionKey,
-			config.SnapshotBuildVersionKey,
 			config.ActiveCategoryTreeKey,
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,

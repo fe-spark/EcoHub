@@ -2,7 +2,6 @@ package access
 
 import (
 	"encoding/json"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,39 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const (
-	accessTopKeep = 10
-	rollupLockTTL = 10 * time.Minute
-)
-
-var rollupLockReleaseScript = redis.NewScript(`
-if redis.call("get", KEYS[1]) == ARGV[1] then
-	return redis.call("del", KEYS[1])
-else
-	return 0
-end
-`)
-
-// acquireRollupClusterLock 在已持有 rollupMu 的前提下抢 Redis 集群锁。
-// db.Rdb == nil 时无需集群锁，acquired=true。
-func acquireRollupClusterLock() (token string, acquired bool, err error) {
-	if db.Rdb == nil {
-		return "", true, nil
-	}
-	token = fmt.Sprintf("%s-%d", CurrentNodeName(), time.Now().UnixNano())
-	locked, lockErr := db.Rdb.SetNX(db.Cxt, rollupLockKey(), token, rollupLockTTL).Result()
-	if lockErr != nil {
-		return "", false, lockErr
-	}
-	return token, locked, nil
-}
-
-func releaseRollupClusterLock(token string) {
-	if db.Rdb == nil || token == "" {
-		return
-	}
-	_ = rollupLockReleaseScript.Run(db.Cxt, db.Rdb, []string{rollupLockKey()}, token).Err()
-}
+const accessTopKeep = 10
 
 func rolledDayKey() string {
 	return config.AccessKeyPrefix + "meta:rolled_day"
@@ -179,16 +146,6 @@ func RunDailyRollup() {
 	}
 	rollupMu.Lock()
 	defer rollupMu.Unlock()
-
-	lockToken, locked, lockErr := acquireRollupClusterLock()
-	if lockErr != nil {
-		syslog.Errorf("[Access] 获取集群滚动分布式锁失败: %v", lockErr)
-		return
-	}
-	if !locked {
-		return
-	}
-	defer releaseRollupClusterLock(lockToken)
 
 	now := time.Now().In(time.Local)
 	yesterday := startOfLocalDay(now).AddDate(0, 0, -1)

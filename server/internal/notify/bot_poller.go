@@ -2,27 +2,17 @@ package notify
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-
-	"github.com/redis/go-redis/v9"
 )
 
 const (
-	botPollerLockTTL      = 90 * time.Second
-	botPollerStandbyWait  = 10 * time.Second
 	botPollerConflictWait = 60 * time.Second
 	botPollerMaxBackoff   = 30 * time.Second
 )
@@ -133,55 +123,23 @@ func waitStopped(g *pollerGeneration) {
 }
 
 func runBotPoller(ctx context.Context, token string) {
-	owner := newPollerOwnerID()
-	defer releaseBotPollerLock(owner)
-
 	var (
 		offset         int64
 		backoff        = 3 * time.Second
-		isLeader       = false
-		loggedStandby  = false
 		webhookCleared = false
 	)
 
-	log.Printf("[Notify] 启动 Telegram Bot 轮询 owner=%s", owner)
-	defer log.Printf("[Notify] Telegram Bot 轮询已退出 owner=%s", owner)
+	log.Printf("[Notify] 启动 Telegram Bot 轮询")
+	defer log.Printf("[Notify] Telegram Bot 轮询已退出")
 
 	for {
 		if ctx.Err() != nil {
 			return
 		}
 
-		// 检查通知总开关与 Token 是否仍有效：若已关闭或 Token 变更，主动释放领导权并退出
 		if tok := resolvePollerToken(GetConfig()); tok == "" || tok != token {
 			log.Printf("[Notify] 检测到 Telegram 开关已关闭或 Token 变更，主动退出轮询")
 			return
-		}
-
-		if !holdBotPollerLock(ctx, owner) {
-			if isLeader {
-				log.Printf("[Notify] 失去 Bot 轮询领导权，转为待命")
-				isLeader = false
-			}
-			if !loggedStandby {
-				log.Printf("[Notify] 已有其它 EcoHub 实例负责 Telegram Bot 轮询，本实例待命")
-				loggedStandby = true
-			}
-			if !sleepCtx(ctx, botPollerStandbyWait) {
-				return
-			}
-			if tok := resolvePollerToken(GetConfig()); tok == "" || tok != token {
-				log.Printf("[Notify] 待命期间检测到 Telegram 开关关闭或 Token 变更，主动退出待命")
-				return
-			}
-			continue
-		}
-
-		if !isLeader {
-			log.Printf("[Notify] 本实例取得 Bot 轮询领导权 owner=%s", owner)
-			isLeader = true
-			loggedStandby = false
-			webhookCleared = false
 		}
 
 		if !webhookCleared {
@@ -206,9 +164,7 @@ func runBotPoller(ctx context.Context, token string) {
 				return
 			}
 			if isTelegramGetUpdatesConflict(err) {
-				log.Printf("[Notify] getUpdates 冲突：同一 Bot Token 另有实例在跑。释放领导权并 %s 后重试", botPollerConflictWait)
-				releaseBotPollerLock(owner)
-				isLeader = false
+				log.Printf("[Notify] getUpdates 冲突：同一 Bot Token 另有进程在跑，%s 后重试", botPollerConflictWait)
 				if !sleepCtx(ctx, botPollerConflictWait) {
 					return
 				}
@@ -354,69 +310,4 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 	case <-t.C:
 		return true
 	}
-}
-
-func newPollerOwnerID() string {
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "unknown"
-	}
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), hex.EncodeToString(b[:]))
-}
-
-func holdBotPollerLock(ctx context.Context, owner string) bool {
-	if db.Rdb == nil {
-		return true
-	}
-	key := config.NotifyBotPollerLockKey
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	ok, err := db.Rdb.SetNX(cctx, key, owner, botPollerLockTTL).Result()
-	if err != nil {
-		log.Printf("[Notify] Bot 轮询锁 SetNX 失败: %v", err)
-		return false
-	}
-	if ok {
-		return true
-	}
-
-	cur, err := db.Rdb.Get(cctx, key).Result()
-	if err == redis.Nil {
-		ok2, err2 := db.Rdb.SetNX(cctx, key, owner, botPollerLockTTL).Result()
-		if err2 != nil {
-			log.Printf("[Notify] Bot 轮询锁重试 SetNX 失败: %v", err2)
-			return false
-		}
-		return ok2
-	}
-	if err != nil {
-		log.Printf("[Notify] Bot 轮询锁 Get 失败: %v", err)
-		return false
-	}
-	if cur != owner {
-		return false
-	}
-	if err := db.Rdb.Expire(cctx, key, botPollerLockTTL).Err(); err != nil {
-		log.Printf("[Notify] Bot 轮询锁续期失败: %v", err)
-		return false
-	}
-	return true
-}
-
-func releaseBotPollerLock(owner string) {
-	if db.Rdb == nil || owner == "" {
-		return
-	}
-	cctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	const script = `
-if redis.call("get", KEYS[1]) == ARGV[1] then
-  return redis.call("del", KEYS[1])
-end
-return 0
-`
-	_ = db.Rdb.Eval(cctx, script, []string{config.NotifyBotPollerLockKey}, owner).Err()
 }

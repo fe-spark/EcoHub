@@ -22,46 +22,63 @@ var (
 // MasterSwitchColdStartDuration 主站切换冷启动保护期默认时长：7 天
 const MasterSwitchColdStartDuration = 7 * 24 * time.Hour
 
-// SetMasterSwitchProtection 设置主站切换冷启动保护期
+func setMasterSwitchProtectUntil(until time.Time) {
+	masterSwitchMu.Lock()
+	masterSwitchProtectUntil = until
+	masterSwitchMu.Unlock()
+}
+
+// SetMasterSwitchProtection 设置主站切换冷启动保护期。运行时只认内存；Redis 仅作进程重启备忘（TTL 与保护期一致，默认 7 天）。
 func SetMasterSwitchProtection(duration time.Duration) {
 	if duration <= 0 {
 		duration = MasterSwitchColdStartDuration
 	}
 	until := time.Now().Add(duration)
 	if db.Rdb != nil {
-		_ = db.Rdb.Set(db.Cxt, config.MasterSwitchProtectKey, until.Unix(), duration).Err()
+		if err := db.Rdb.Set(db.Cxt, config.MasterSwitchProtectKey, until.Unix(), duration).Err(); err != nil {
+			log.Printf("[SetMasterSwitchProtection] 写入 Redis 保护期失败: %v", err)
+		}
 	}
-	masterSwitchMu.Lock()
-	masterSwitchProtectUntil = until
-	masterSwitchMu.Unlock()
+	setMasterSwitchProtectUntil(until)
 }
 
-// InMasterSwitchProtection 判断是否处于主站切换冷启动保护期
-func InMasterSwitchProtection() bool {
-	if db.Rdb != nil {
-		val, err := db.Rdb.Get(db.Cxt, config.MasterSwitchProtectKey).Int64()
-		if err == nil {
-			return val > time.Now().Unix()
-		}
-		if errors.Is(err, redis.Nil) {
-			return false
-		}
-		log.Printf("[InMasterSwitchProtection] 查询 Redis 保护期异常，启用 Fail-Safe 保守安全策略: %v", err)
-		return true
+// RestoreMasterSwitchProtection 启动时从 Redis 读一次填回内存。之后不再查 Redis。
+func RestoreMasterSwitchProtection() {
+	if db.Rdb == nil {
+		return
 	}
+	val, err := db.Rdb.Get(db.Cxt, config.MasterSwitchProtectKey).Int64()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return
+		}
+		log.Printf("[RestoreMasterSwitchProtection] 从 Redis 恢复保护期失败，启用默认 %s 保护: %v", MasterSwitchColdStartDuration, err)
+		setMasterSwitchProtectUntil(time.Now().Add(MasterSwitchColdStartDuration))
+		return
+	}
+	until := time.Unix(val, 0)
+	if !until.After(time.Now()) {
+		return
+	}
+	setMasterSwitchProtectUntil(until)
+	log.Printf("[RestoreMasterSwitchProtection] 已从 Redis 恢复主站切换保护期 until=%s", until.Format(time.RFC3339))
+}
+
+// InMasterSwitchProtection 判断是否处于主站切换冷启动保护期（只读内存）。
+func InMasterSwitchProtection() bool {
 	masterSwitchMu.RLock()
 	defer masterSwitchMu.RUnlock()
 	return time.Now().Before(masterSwitchProtectUntil)
 }
 
-// ClearMasterSwitchProtection 清除主站切换冷启动保护期
+// ClearMasterSwitchProtection 清除内存保护期，并删掉 Redis 备忘。
 func ClearMasterSwitchProtection() {
 	if db.Rdb != nil {
-		_ = db.Rdb.Del(db.Cxt, config.MasterSwitchProtectKey).Err()
+		if err := db.Rdb.Del(db.Cxt, config.MasterSwitchProtectKey).Err(); err != nil {
+			log.Printf("[ClearMasterSwitchProtection] 删除 Redis 保护期失败: %v", err)
+		}
 	}
-	masterSwitchMu.Lock()
-	masterSwitchProtectUntil = time.Time{}
-	masterSwitchMu.Unlock()
+	setMasterSwitchProtectUntil(time.Time{})
 }
 
 var (
@@ -69,29 +86,40 @@ var (
 	memoryOrphanMu     sync.Mutex
 )
 
-// LoadOrphanCleanCursor 获取附属站孤儿治理断点游标（优先读取 Redis，避免服务重启归零）
+// LoadOrphanCleanCursor 读取孤儿治理断点游标（只认内存）。
 func LoadOrphanCleanCursor() uint {
-	if db.Rdb != nil {
-		if val, err := db.Rdb.Get(db.Cxt, config.OrphanCleanCursorKey).Uint64(); err == nil {
-			return uint(val)
-		}
-	}
 	memoryOrphanMu.Lock()
 	defer memoryOrphanMu.Unlock()
 	return memoryOrphanCursor
 }
 
-// SaveOrphanCleanCursor 保存附属站孤儿治理断点游标
+// SaveOrphanCleanCursor 保存断点游标。运行时只认内存；Redis 仅作进程重启备忘。
 func SaveOrphanCleanCursor(id uint) {
 	if db.Rdb != nil {
-		_ = db.Rdb.Set(db.Cxt, config.OrphanCleanCursorKey, id, 0).Err()
+		if err := db.Rdb.Set(db.Cxt, config.OrphanCleanCursorKey, id, 0).Err(); err != nil {
+			log.Printf("[SaveOrphanCleanCursor] 写入 Redis 失败: %v", err)
+		}
 	}
 	memoryOrphanMu.Lock()
 	memoryOrphanCursor = id
 	memoryOrphanMu.Unlock()
 }
 
-// ClearOrphanCleanCursor 清除附属站孤儿治理断点游标
+// RestoreOrphanCleanCursor 启动时从 Redis 读一次填回内存。
+func RestoreOrphanCleanCursor() {
+	if db.Rdb == nil {
+		return
+	}
+	val, err := db.Rdb.Get(db.Cxt, config.OrphanCleanCursorKey).Uint64()
+	if err != nil {
+		return
+	}
+	memoryOrphanMu.Lock()
+	memoryOrphanCursor = uint(val)
+	memoryOrphanMu.Unlock()
+}
+
+// ClearOrphanCleanCursor 清除内存游标，并删掉 Redis 备忘。
 func ClearOrphanCleanCursor() {
 	if db.Rdb != nil {
 		_ = db.Rdb.Del(db.Cxt, config.OrphanCleanCursorKey).Err()

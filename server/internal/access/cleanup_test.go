@@ -30,13 +30,7 @@ func TestIsDigits(t *testing.T) {
 }
 
 func TestIsAccessKeyOlderThan(t *testing.T) {
-	lockKey := rollupLockKey()
 	cutoff := "20260905"
-
-	// Lock key must never be treated as older
-	if isAccessKeyOlderThan(lockKey, cutoff) {
-		t.Errorf("lock key should never be considered older")
-	}
 
 	// Meta keys without dates should not be considered older
 	if isAccessKeyOlderThan(rolledDayKey(), cutoff) {
@@ -141,8 +135,6 @@ func TestGetAccessDataStats_Populated(t *testing.T) {
 	// Add Redis keys
 	_ = db.Rdb.Set(db.Cxt, uvKey("20260901"), "val", 0)
 	_ = db.Rdb.Set(db.Cxt, uvKey("20260902"), "val", 0)
-	// Add lock key - should NOT be counted in RedisKeyCount
-	_ = db.Rdb.Set(db.Cxt, rollupLockKey(), "token", 0)
 
 	stats := GetAccessDataStats()
 	if stats.DailyStatsCount != 2 {
@@ -152,7 +144,7 @@ func TestGetAccessDataStats_Populated(t *testing.T) {
 		t.Errorf("want DailyTopCount=1, got %d", stats.DailyTopCount)
 	}
 	if stats.RedisKeyCount != 2 {
-		t.Errorf("want RedisKeyCount=2 (excluding lock key), got %d", stats.RedisKeyCount)
+		t.Errorf("want RedisKeyCount=2, got %d", stats.RedisKeyCount)
 	}
 	if stats.EarliestDay != day1 || stats.LatestDay != day2 {
 		t.Errorf("want %s~%s, got %s~%s", day1, day2, stats.EarliestDay, stats.LatestDay)
@@ -218,8 +210,6 @@ func TestClearAccessData_All(t *testing.T) {
 	if res.DeletedRedisKeys != 3 {
 		t.Errorf("expected 3 deleted redis keys, got %d", res.DeletedRedisKeys)
 	}
-
-	assertRollupLockReleased(t)
 
 	// Verify DB is empty
 	stats := GetAccessDataStats()
@@ -291,7 +281,6 @@ func TestClearAccessData_Retention(t *testing.T) {
 	if _, err := db.Rdb.Get(db.Cxt, uvKey(oldDayKey)).Result(); err == nil {
 		t.Errorf("old redis key should have been deleted")
 	}
-	assertRollupLockReleased(t)
 }
 
 func TestClearAccessData_NegativeRetention(t *testing.T) {
@@ -330,36 +319,9 @@ func TestClearAccessData_LargeKeySetBatching(t *testing.T) {
 		t.Fatalf("want DeletedRedisKeys=%d, got %d", totalKeys, res.DeletedRedisKeys)
 	}
 
-	assertRollupLockReleased(t)
-
 	statsAfter := GetAccessDataStats()
 	if statsAfter.RedisKeyCount != 0 {
 		t.Fatalf("expected 0 redis keys after clear, got %d", statsAfter.RedisKeyCount)
-	}
-}
-
-func TestClearAccessData_ClusterLockHeld(t *testing.T) {
-	_, cleanup := setupTestRedisAndDB(t)
-	defer cleanup()
-
-	_ = db.Mdb.Create(&model.AccessDailyStats{Day: "2026-09-01", PV: 10, RolledAt: time.Now()})
-	_ = db.Rdb.Set(db.Cxt, uvKey("20260901"), "1", 0)
-	_ = db.Rdb.Set(db.Cxt, rollupLockKey(), "other-node", 0)
-
-	_, err := ClearAccessData(0)
-	if err == nil {
-		t.Fatal("expected error when cluster rollup lock is held")
-	}
-
-	var remaining model.AccessDailyStats
-	if err := db.Mdb.Where("day = ?", "2026-09-01").First(&remaining).Error; err != nil {
-		t.Fatalf("mysql row should remain when lock is held: %v", err)
-	}
-	if _, err := db.Rdb.Get(db.Cxt, uvKey("20260901")).Result(); err != nil {
-		t.Fatalf("redis key should remain when lock is held: %v", err)
-	}
-	if val, err := db.Rdb.Get(db.Cxt, rollupLockKey()).Result(); err != nil || val != "other-node" {
-		t.Fatalf("foreign lock token must remain, val=%s err=%v", val, err)
 	}
 }
 
@@ -377,7 +339,7 @@ func TestClearAccessData_RedisUnavailable(t *testing.T) {
 
 	var remaining model.AccessDailyStats
 	if err := db.Mdb.Where("day = ?", "2026-09-01").First(&remaining).Error; err != nil {
-		t.Fatalf("mysql row should remain when redis lock cannot be acquired: %v", err)
+		t.Fatalf("mysql row should remain when redis is unavailable: %v", err)
 	}
 }
 
@@ -388,19 +350,11 @@ func TestDeleteMatchingAccessRedisKeys_ScanError(t *testing.T) {
 	_ = db.Rdb.Set(db.Cxt, uvKey("20260901"), "1", 0)
 	mr.SetError("scan-fail")
 
-	deleted, err := deleteMatchingAccessRedisKeys(0, "", rollupLockKey())
+	deleted, err := deleteMatchingAccessRedisKeys(0, "")
 	if err == nil {
 		t.Fatal("expected scan error")
 	}
 	if deleted != 0 {
 		t.Fatalf("expected 0 deleted keys on scan error, got %d", deleted)
-	}
-}
-
-func assertRollupLockReleased(t *testing.T) {
-	t.Helper()
-	_, err := db.Rdb.Get(db.Cxt, rollupLockKey()).Result()
-	if err != redis.Nil {
-		t.Fatalf("rollup lock should be released after cleanup, err=%v", err)
 	}
 }
