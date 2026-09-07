@@ -234,6 +234,12 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 		if err != nil {
 			syslog.Errorf("[Notify] 计算批次分类计划失败: %v", err)
 		}
+		for i, it := range items {
+			payload.Films[i] = model.FilmNotifyItem{
+				Mid:        it.Mid,
+				SourceName: it.SourceName,
+			}
+		}
 		sess := FilmBatchSession{
 			BatchID:      payload.ChangeBatchID,
 			SiteName:     payload.SiteName,

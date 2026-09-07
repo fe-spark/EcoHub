@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -138,6 +139,9 @@ type CategoryCountItem struct {
 // navTopCategories 与 IndexService.GetNavCategory / 前端首页顶栏同源：
 // GetCategoryTree().Children 中 Show=true 的顶级大类。
 func navTopCategories() []model.Category {
+	if db.Mdb == nil {
+		return nil
+	}
 	tree := repository.GetCategoryTree()
 	out := make([]model.Category, 0, len(tree.Children))
 	for _, c := range tree.Children {
@@ -324,8 +328,13 @@ func loadFilmBatchSession(batchID string) (FilmBatchSession, error) {
 	return FilmBatchSession{}, fmt.Errorf("session not found")
 }
 
-func loadFilmPids(mids []int64) (map[int64]int64, error) {
-	out := make(map[int64]int64, len(mids))
+type filmSortMeta struct {
+	pid         int64
+	updateStamp int64
+}
+
+func loadFilmSortMeta(mids []int64) (map[int64]filmSortMeta, error) {
+	out := make(map[int64]filmSortMeta, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return out, nil
 	}
@@ -336,26 +345,32 @@ func loadFilmPids(mids []int64) (map[int64]int64, error) {
 			end = len(mids)
 		}
 		var rows []struct {
-			Mid int64         `gorm:"column:mid"`
-			Pid sql.NullInt64 `gorm:"column:pid"`
+			Mid         int64         `gorm:"column:mid"`
+			Pid         sql.NullInt64 `gorm:"column:pid"`
+			UpdateStamp int64         `gorm:"column:update_stamp"`
 		}
 		err := db.Mdb.Table(model.TableFilmIndex).
-			Select("mid, pid").
+			Select("mid, pid, update_stamp").
 			Where("mid IN ?", mids[start:end]).
 			Scan(&rows).Error
 		if err != nil {
 			return nil, err
 		}
 		for _, r := range rows {
+			var pid int64
 			if r.Pid.Valid {
-				out[r.Mid] = r.Pid.Int64
+				pid = r.Pid.Int64
+			}
+			out[r.Mid] = filmSortMeta{
+				pid:         pid,
+				updateStamp: r.UpdateStamp,
 			}
 		}
 	}
 	return out, nil
 }
 
-// BuildCategoryPlanForMids 针对变更项按首页大类聚合分类（支持其他）
+// BuildCategoryPlanForMids 针对变更项按首页大类聚合分类（支持其他），并按最新更新顺序（update_stamp DESC, mid DESC）对齐每日更新列表。
 func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, catMids [][]int64, err error) {
 	if len(all) == 0 {
 		return nil, nil, nil
@@ -364,10 +379,21 @@ func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, ca
 	for _, it := range all {
 		mids = append(mids, it.Mid)
 	}
-	pidByMid, err := loadFilmPids(mids)
+	metaByMid, err := loadFilmSortMeta(mids)
 	if err != nil {
 		return nil, nil, err
 	}
+
+	// 统一按最新更新顺序排序：update_stamp 降序；相同时 mid 降序（与 /api/dailyUpdates 排序规则完全一致）
+	sort.SliceStable(all, func(i, j int) bool {
+		metaI := metaByMid[all[i].Mid]
+		metaJ := metaByMid[all[j].Mid]
+		if metaI.updateStamp != metaJ.updateStamp {
+			return metaI.updateStamp > metaJ.updateStamp
+		}
+		return all[i].Mid > all[j].Mid
+	})
+
 	nav := navTopCategories()
 	navIDs := navTopCategoryIDs(nav)
 	navSet := make(map[int64]struct{}, len(navIDs))
@@ -378,7 +404,7 @@ func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, ca
 	buckets := make(map[int64][]ChangeMidItem, len(nav)+1)
 	var other []ChangeMidItem
 	for _, it := range all {
-		pid := pidByMid[it.Mid]
+		pid := metaByMid[it.Mid].pid
 		if pid > 0 {
 			if _, ok := navSet[pid]; ok {
 				buckets[pid] = append(buckets[pid], it)
