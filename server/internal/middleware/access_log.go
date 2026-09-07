@@ -8,7 +8,6 @@ import (
 	"server/internal/access"
 	"server/internal/config"
 	"server/internal/infra/syslog"
-	"server/internal/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -19,7 +18,6 @@ func AccessLog() gin.HandlerFunc {
 		c.Next()
 
 		clientIP := realClientIP(c)
-		path := c.Request.URL.Path
 		elapsed := time.Since(start)
 		status := c.Writer.Status()
 
@@ -30,31 +28,14 @@ func AccessLog() gin.HandlerFunc {
 			}
 		}
 
-		// 接口访问记录：排除后台与分析侧噪声（海报、探活、埋点），其余业务 API 入库
-		if config.ApiLogEnabled && access.ShouldRecordApiLog(c.Request.Method, path, status) {
-			ua := c.Request.UserAgent()
-			clientType := access.ClassifyHTTPClient(path, ua)
-			access.EnqueueApiAccessLog(&model.ApiAccessLog{
-				CreatedAt:  start,
-				Method:     access.TruncateRunes(c.Request.Method, 8),
-				Path:       access.TruncateRunes(path, 191),
-				Query:      access.TruncateRunes(c.Request.URL.RawQuery, 500),
-				Status:     status,
-				DurationMs: elapsed.Milliseconds(),
-				IP:         access.TruncateRunes(clientIP, 45),
-				ClientType: access.TruncateRunes(clientType, 16),
-				DeviceId:   access.ResolveDeviceID(c, clientType, clientIP, ua),
-				UA:         access.TruncateRunes(ua, 255),
-			})
-		}
-
-		if access.ShouldSkip(c.Request.Method, path, status) {
+		if access.ShouldSkip(c.Request.Method, c.Request.URL.Path, status) {
 			return
 		}
+
 		uri := sanitizeAccessLogURI(c.Request.URL.RequestURI())
 		latMs := elapsed.Milliseconds()
 		ipLog := access.IPPreview(clientIP)
-		if status >= 400 || latMs >= config.AccessSlowMs {
+		if status >= 400 {
 			syslog.Warnf("[HTTP] %d | %dms | %s | %s %s",
 				status, latMs, ipLog, c.Request.Method, uri)
 		} else {

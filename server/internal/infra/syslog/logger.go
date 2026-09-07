@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	logDir            = "logs"
 	logFileName       = "ecohub.log"
 	maxLogFileSize    = 10 * 1024 * 1024
 	maxLogRetention   = 7 * 24 * time.Hour
@@ -32,12 +31,15 @@ const (
 	readChunkSize     = 32 * 1024
 	entryBufferSize   = 10000
 	rotatedTimeFormat = "20060102-150405.000000000"
+	defaultLogDir     = "logs"
 
 	// 日志级别：打印时确定，随 Entry 下发前端，禁止前端按正文猜。
 	LevelInfo  = "info"
 	LevelWarn  = "warn"
 	LevelError = "error"
 )
+
+var logDir = defaultLogDir
 
 // 仅识别写入时打上的结构化级别标签（时间戳后），用于从文件恢复缓冲。
 // 不扫描正文关键词。
@@ -255,29 +257,7 @@ func (l *rollingLogger) rotateLocked() error {
 }
 
 func pruneExpiredLogsLocked(now time.Time) error {
-	entries, err := os.ReadDir(logDir)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	if err != nil {
-		return err
-	}
-	deadline := now.Add(-maxLogRetention)
-	for _, entry := range entries {
-		if entry.IsDir() || !isRotatedLogFile(entry.Name()) {
-			continue
-		}
-		path := filepath.Join(logDir, entry.Name())
-		info, err := entry.Info()
-		if err != nil {
-			return err
-		}
-		if info.ModTime().Before(deadline) {
-			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-				return err
-			}
-		}
-	}
+	// 不设强制过期删除天数限制，日志永久保留，由用户按需手动清理
 	return nil
 }
 
@@ -389,7 +369,7 @@ func rotatedLogPath(now time.Time) string {
 }
 
 func isRotatedLogFile(name string) bool {
-	return strings.HasPrefix(name, logFileName+".")
+	return strings.HasPrefix(name, logFileName+".") && len(name) > len(logFileName)+1
 }
 
 func readLastLines(path string, limit int) ([]string, error) {
@@ -526,4 +506,53 @@ func stampLevelOnLine(level, line string) string {
 		return line[:timeEnd] + " " + tag + " " + rest
 	}
 	return line
+}
+
+// PruneExpiredLogs 安全遍历 logDir，删除修改时间早于 now - retention 的历史轮转日志文件（isRotatedLogFile）。
+// 返回删除的文件数量。该方法不加锁，不阻塞正在写入的主日志。
+func PruneExpiredLogs(retention time.Duration) (int, error) {
+	if retention <= 0 {
+		return 0, nil
+	}
+	cutoff := time.Now().Add(-retention)
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+
+	var pruned int
+	var errs []error
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !isRotatedLogFile(name) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				errs = append(errs, err)
+			}
+			continue
+		}
+		if info.ModTime().Before(cutoff) {
+			targetPath := filepath.Join(logDir, name)
+			if err := os.Remove(targetPath); err != nil {
+				if !errors.Is(err, os.ErrNotExist) {
+					errs = append(errs, err)
+				}
+			} else {
+				pruned++
+			}
+		}
+	}
+	if len(errs) > 0 {
+		return pruned, errors.Join(errs...)
+	}
+	return pruned, nil
 }

@@ -5,14 +5,9 @@ import (
 	"server/internal/model"
 )
 
-type filmMeta struct {
-	Name        string
-	UpdateStamp int64
-}
-
-// ResolveFilmMeta 批量查询 mid → 片名与 update_stamp。
-func ResolveFilmMeta(mids []int64) map[int64]filmMeta {
-	out := make(map[int64]filmMeta, len(mids))
+// resolveFilmNames 批量查询 mid 对应片名（走 film_index 主键索引）。
+func resolveFilmNames(mids []int64) map[int64]string {
+	out := make(map[int64]string, len(mids))
 	if len(mids) == 0 || db.Mdb == nil {
 		return out
 	}
@@ -34,13 +29,16 @@ func ResolveFilmMeta(mids []int64) map[int64]filmMeta {
 		if end > len(uniq) {
 			end = len(uniq)
 		}
-		var rows []model.FilmIndex
-		if err := db.Mdb.Select("mid", "name", "update_stamp").Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
+		var rows []struct {
+			Mid  int64  `gorm:"column:mid"`
+			Name string `gorm:"column:name"`
+		}
+		if err := db.Mdb.Table(model.TableFilmIndex).Select("mid, name").Where("mid IN ?", uniq[start:end]).Scan(&rows).Error; err != nil {
 			continue
 		}
-		for _, row := range rows {
-			if row.Mid > 0 {
-				out[row.Mid] = filmMeta{Name: row.Name, UpdateStamp: row.UpdateStamp}
+		for _, r := range rows {
+			if r.Mid > 0 {
+				out[r.Mid] = r.Name
 			}
 		}
 	}

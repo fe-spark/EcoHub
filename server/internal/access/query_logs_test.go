@@ -4,8 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"server/internal/config"
 )
 
 func TestRecentKeysForModule(t *testing.T) {
@@ -29,11 +27,7 @@ func TestRecentKeysForModule(t *testing.T) {
 }
 
 func TestMatchLogSource(t *testing.T) {
-	orig := config.AccessSlowMs
-	config.AccessSlowMs = 500
-	t.Cleanup(func() { config.AccessSlowMs = orig })
-
-	slow := AccessEvent{LatencyMs: 800, Status: 200}
+	slow := AccessEvent{LatencyMs: 1200, Status: 200}
 	fast := AccessEvent{LatencyMs: 20, Status: 200}
 	err4 := AccessEvent{LatencyMs: 20, Status: 404}
 	ok := AccessEvent{LatencyMs: 20, Status: 200}

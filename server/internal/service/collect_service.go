@@ -131,10 +131,6 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 				syslog.Errorf("[Collect] 清理历史附属播放列表失败: %v", err)
 				return errors.New("清理历史附属播放列表失败，请重试")
 			}
-			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.MoviePlaylist{}).Error; err != nil {
-				syslog.Errorf("[Collect] 清理历史播放列表失败: %v", err)
-				return errors.New("清理历史播放列表失败，请重试")
-			}
 			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
 				syslog.Errorf("[Collect] 清理关联失败记录失败: %v", err)
 				return errors.New("清理关联失败记录失败，请重试")
@@ -316,9 +312,6 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 				return err
 			}
 			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Unscoped().Where("source_id = ?", source.Id).Delete(&model.MoviePlaylist{}).Error; err != nil {
 				return err
 			}
 			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {

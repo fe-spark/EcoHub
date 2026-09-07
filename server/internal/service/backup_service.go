@@ -139,10 +139,9 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if backup.Notify == nil {
 			return errors.New("备份中缺少通知配置数据")
 		}
-		if err := repository.SaveNotifyConfig(*backup.Notify); err != nil {
+		if err := notify.SaveConfig(*backup.Notify); err != nil {
 			return fmt.Errorf("导入通知配置失败: %w", err)
 		}
-		notify.EnsureBotPoller()
 	}
 
 	if req.Modules.MappingRules {

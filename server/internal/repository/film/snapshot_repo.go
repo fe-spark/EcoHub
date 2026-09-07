@@ -1,14 +1,12 @@
 package film
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"server/internal/config"
@@ -17,7 +15,6 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository/support"
 
-	"github.com/redis/go-redis/v9"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -29,31 +26,14 @@ const (
 
 var (
 	activeSnapshotUpsertMu sync.Mutex
-	// activeSnapshotFallbackVersion/activeSnapshotFallbackAt 缓存 DB 兜底查询结果，
-	// 避免 Redis 活跃版本键缺失/不可用时 Worker 每 3s 轮询重复查库并触发失败的写操作。
-	activeSnapshotFallbackMu      sync.Mutex
-	activeSnapshotFallbackVersion string
-	activeSnapshotFallbackAt      time.Time
+	activeSnapshotMu       sync.Mutex
+	activeSnapshotVersion  string
 )
 
-// activeSnapshotFallbackTTL DB 兜底结果本地缓存有效期
-const activeSnapshotFallbackTTL = 30 * time.Second
-
 func GetActiveSnapshotVersion() string {
-	if db.Rdb != nil {
-		version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
-		if err == nil && strings.TrimSpace(version) != "" {
-			return strings.TrimSpace(version)
-		}
-	}
-
-	activeSnapshotFallbackMu.Lock()
-	defer activeSnapshotFallbackMu.Unlock()
-	if activeSnapshotFallbackVersion != "" && time.Since(activeSnapshotFallbackAt) < activeSnapshotFallbackTTL {
-		return activeSnapshotFallbackVersion
-	}
-
-	return ""
+	activeSnapshotMu.Lock()
+	defer activeSnapshotMu.Unlock()
+	return strings.TrimSpace(activeSnapshotVersion)
 }
 
 func SetActiveSnapshotVersion(version string) error {
@@ -61,21 +41,40 @@ func SetActiveSnapshotVersion(version string) error {
 	if version == "" {
 		return nil
 	}
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = version
-	activeSnapshotFallbackAt = time.Now()
-	activeSnapshotFallbackMu.Unlock()
-	if db.Rdb == nil {
-		return nil
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = version
+	activeSnapshotMu.Unlock()
+	if db.Rdb != nil {
+		if err := db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err(); err != nil {
+			log.Printf("[SetActiveSnapshotVersion] 写入 Redis 备忘失败: %v", err)
+		}
 	}
-	return db.Rdb.Set(db.Cxt, config.SnapshotActiveVersionKey, version, 0).Err()
+	return nil
+}
+
+func clearActiveSnapshotVersion() {
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = ""
+	activeSnapshotMu.Unlock()
+}
+
+// RestoreActiveSnapshotVersion 启动时从 Redis 读一次填回内存。
+func RestoreActiveSnapshotVersion() {
+	if db.Rdb == nil {
+		return
+	}
+	version, err := db.Rdb.Get(db.Cxt, config.SnapshotActiveVersionKey).Result()
+	version = strings.TrimSpace(version)
+	if err != nil || version == "" {
+		return
+	}
+	activeSnapshotMu.Lock()
+	activeSnapshotVersion = version
+	activeSnapshotMu.Unlock()
 }
 
 func ResetActiveSnapshotFallbackForTest() {
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = ""
-	activeSnapshotFallbackAt = time.Time{}
-	activeSnapshotFallbackMu.Unlock()
+	clearActiveSnapshotVersion()
 }
 
 func GetActiveReadModelVersion() string {
@@ -89,17 +88,11 @@ func GetActiveReadModelVersion() string {
 }
 
 // resolveActiveReadModelVersion 决定对外公布的读模型版本。
-// 集群中其它节点（Master）发布了新快照时，本地内存读模型可能滞后：
-// 仅当新版本的搜索索引已就绪时才切集群权威版本；否则继续使用内存版本，
-// 重载统一交给后台 watcher，避免高并发热路径触发全量重建与 runtime.GC 造成停顿。
 func resolveActiveReadModelVersion(rmVersion, snapshotVer string) string {
-	if snapshotVer != "" && rmVersion != "" && rmVersion != snapshotVer {
-		if loadedFilmSearchIndex(snapshotVer) != nil {
-			return snapshotVer
-		}
-		return rmVersion
+	if snapshotVer != "" {
+		return snapshotVer
 	}
-	return activeReadModelVersion(&FilmReadModel{Version: rmVersion}, snapshotVer)
+	return rmVersion
 }
 
 // activeReadModelVersion 取内存读模型版本；空指针或 Version 为空时回退到活跃快照版本。
@@ -111,164 +104,6 @@ func activeReadModelVersion(readModel *FilmReadModel, snapshotVersion string) st
 		}
 	}
 	return snapshotVersion
-}
-
-const (
-	// clusterSnapshotWatchInterval Worker 快照同步轮询间隔
-	clusterSnapshotWatchInterval = 3 * time.Second
-)
-
-var (
-	clusterWatcherMu    sync.Mutex
-	clusterWatcherStop  context.CancelFunc
-	clusterWatcherState *clusterSnapshotSyncState
-	// clusterWatcherRunCount watcher 协程实际启动次数，供幂等性单测断言
-	clusterWatcherRunCount atomic.Int32
-)
-
-type clusterSnapshotSyncState struct {
-	// lastRevision 上一次已同步的快照修订号水位；读取成功后才更新。
-	lastRevision string
-}
-
-// IncrSnapshotRevision 快照有变动（增量或全量）时递增 Redis 修订版本号，供集群节点刷新搜索缓存
-func IncrSnapshotRevision() {
-	if db.Rdb != nil {
-		if err := db.Rdb.Incr(db.Cxt, config.SnapshotRevisionKey).Err(); err != nil {
-			log.Printf("[Cluster] 快照修订号递增失败: %v", err)
-		}
-	}
-}
-
-// SeedClusterSnapshotBaseline 记录启动时刻的快照修订号作为基准水位。
-// 必须在装载读模型之前调用：读模型装载期间 Master 若完成一次增量发布，
-// watcher 首轮即可通过修订号差异识别并刷新索引，避免启动窗口内的增量被静默丢弃。
-func SeedClusterSnapshotBaseline() {
-	rev, ok := currentSnapshotRevision()
-	if !ok {
-		return
-	}
-	clusterWatcherMu.Lock()
-	defer clusterWatcherMu.Unlock()
-	if clusterWatcherState == nil {
-		clusterWatcherState = new(clusterSnapshotSyncState)
-	}
-	clusterWatcherState.lastRevision = rev
-}
-
-// currentSnapshotRevision 读取 Redis 快照修订号；成功时 ok=true，键缺失视为空串成功，
-// 网络或服务端异常时 ok=false（调用方保留原水位，避免异常时丢失已同步进度）。
-func currentSnapshotRevision() (rev string, ok bool) {
-	if db.Rdb == nil {
-		return "", false
-	}
-	rev, err := db.Rdb.Get(db.Cxt, config.SnapshotRevisionKey).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		return "", false
-	}
-	if errors.Is(err, redis.Nil) {
-		return "", true
-	}
-	return rev, true
-}
-
-// StartClusterSnapshotWatcher 启动集群快照版本与修订监听协程，保证 Worker 读节点自动对齐 Master 的最新快照与内存搜索索引。
-// 仅 Worker（从属读节点）需要调用；Master 作为唯一写方，发布时本地已同步，无需监听。
-func StartClusterSnapshotWatcher() {
-	clusterWatcherMu.Lock()
-	defer clusterWatcherMu.Unlock()
-	if clusterWatcherStop != nil {
-		return
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	clusterWatcherStop = cancel
-	if clusterWatcherState == nil {
-		clusterWatcherState = new(clusterSnapshotSyncState)
-	}
-	clusterWatcherRunCount.Add(1)
-	go runClusterSnapshotWatcher(ctx, clusterWatcherState)
-}
-
-// StopClusterSnapshotWatcher 停止 watcher 协程（仅测试使用；正常运行常驻）。
-func StopClusterSnapshotWatcher() {
-	clusterWatcherMu.Lock()
-	defer clusterWatcherMu.Unlock()
-	if clusterWatcherStop != nil {
-		clusterWatcherStop()
-		clusterWatcherStop = nil
-	}
-}
-
-func runClusterSnapshotWatcher(ctx context.Context, state *clusterSnapshotSyncState) {
-	ticker := time.NewTicker(clusterSnapshotWatchInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			syncClusterSnapshotState(state)
-		case <-ctx.Done():
-			return
-		}
-	}
-}
-
-type clusterSnapshotSyncAction int
-
-const (
-	clusterSnapshotSyncNone clusterSnapshotSyncAction = iota
-	// clusterSnapshotSyncReload 快照版本变更：重载读模型与内存搜索索引
-	clusterSnapshotSyncReload
-	// clusterSnapshotSyncRefreshIndex 快照增量修订：刷新内存搜索索引
-	clusterSnapshotSyncRefreshIndex
-)
-
-// decideClusterSnapshotSync 纯函数：根据本地读模型版本、集群活跃快照版本与修订号决定同步动作，便于单测。
-func decideClusterSnapshotSync(rmVersion, activeVer, curRev, lastRevision string) clusterSnapshotSyncAction {
-	if activeVer != "" && rmVersion != "" && rmVersion != activeVer {
-		return clusterSnapshotSyncReload
-	}
-	// 集群已有活跃快照但本地读模型为空（如 Worker 先于首个快照启动），立即装载
-	if activeVer != "" && rmVersion == "" {
-		return clusterSnapshotSyncReload
-	}
-	// 基线未就绪（lastRevision 为空，如未调用 SeedClusterSnapshotBaseline）仅记录修订号，
-	// 避免启动时重复重建索引；正常启动由 SeedClusterSnapshotBaseline 在装载读模型前预置基准。
-	if curRev != "" && curRev != lastRevision && lastRevision != "" && activeVer != "" {
-		return clusterSnapshotSyncRefreshIndex
-	}
-	return clusterSnapshotSyncNone
-}
-
-// syncClusterSnapshotState 以修订号水位驱动同步：版本变更走 Reload 重载读模型与索引，
-// 同版本修订递增走 RefreshIndex 刷新索引。不做额外时间窗口合并——全量发布 SetActiveSnapshotVersion
-// 与 IncrSnapshotRevision 两步之间的修订尾巴可能在 µs 级窗口触发一次冗余重建，
-// 但任何时间窗口都无法与「窗口内的真实增量发布」区分，宁可冗余也不吞增量。
-func syncClusterSnapshotState(state *clusterSnapshotSyncState) {
-	if db.Rdb == nil {
-		return
-	}
-	activeVer := GetActiveSnapshotVersion()
-	curRev, ok := currentSnapshotRevision()
-	if !ok {
-		// 仅在 Redis 网络或服务端异常时保留 lastRevision 水位并提前返回
-		return
-	}
-
-	rm := GetActiveFilmReadModel()
-	rmVersion := ""
-	if rm != nil {
-		rmVersion = rm.Version
-	}
-
-	switch decideClusterSnapshotSync(rmVersion, activeVer, curRev, state.lastRevision) {
-	case clusterSnapshotSyncReload:
-		log.Printf("[Cluster] 检测到快照版本变更 (本地: %s -> 集群: %s)，正在重载读模型与搜索索引...", rmVersion, activeVer)
-		InvalidateActiveFilmSearchIndex(activeVer)
-	case clusterSnapshotSyncRefreshIndex:
-		log.Printf("[Cluster] 检测到快照修订变更 (rev: %s -> %s)，正在刷新内存搜索索引...", state.lastRevision, curRev)
-		InvalidateActiveFilmSearchIndex(activeVer)
-	}
-	state.lastRevision = curRev
 }
 
 func NewSnapshotVersion() string {
@@ -333,25 +168,15 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 	if err := RebuildFilmListSnapshot(version); err != nil {
 		return err
 	}
-	if err := RebuildFilterOptionSnapshot(version); err != nil {
-		log.Printf("RebuildFilterOptionSnapshot Error: %v", err)
-	}
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
 	if err := SetActiveSnapshotVersion(version); err != nil {
 		return err
 	}
-	IncrSnapshotRevision()
-	if db.Rdb != nil {
-		if err := db.Rdb.Set(db.Cxt, config.SnapshotBuildVersionKey, version, 0).Err(); err != nil {
-			log.Printf("Set SnapshotBuildVersion Error: %v", err)
-		}
-	}
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
 	pruneOldFilmListSnapshots(snapshotRetainVersions)
-	pruneOldFilterOptionSnapshots(snapshotRetainVersions)
 	return nil
 }
 
@@ -443,54 +268,6 @@ func pruneOldFilmListSnapshots(retain int) {
 		if res.RowsAffected == 0 {
 			break
 		}
-	}
-}
-
-func pruneOldFilterOptionSnapshots(retain int) {
-	if retain <= 0 {
-		retain = 1
-	}
-
-	var versions []string
-	if err := db.Mdb.Model(&model.FilmFilterOptionSnapshot{}).
-		Select("snapshot_version").
-		Group("snapshot_version").
-		Order("MAX(id) DESC").
-		Limit(retain).
-		Pluck("snapshot_version", &versions).Error; err != nil {
-		log.Printf("pruneOldFilterOptionSnapshots Versions Error: %v", err)
-		return
-	}
-	if len(versions) == 0 {
-		return
-	}
-
-	if err := db.Mdb.Where("snapshot_version NOT IN ?", versions).Unscoped().Delete(&model.FilmFilterOptionSnapshot{}).Error; err != nil {
-		log.Printf("pruneOldFilterOptionSnapshots Delete Error: %v", err)
-	}
-}
-
-func pruneOldFilterIndexSnapshots(retain int) {
-	if retain <= 0 {
-		retain = 1
-	}
-
-	var versions []string
-	if err := db.Mdb.Model(&model.FilmFilterIndexSnapshot{}).
-		Select("snapshot_version").
-		Group("snapshot_version").
-		Order("MAX(id) DESC").
-		Limit(retain).
-		Pluck("snapshot_version", &versions).Error; err != nil {
-		log.Printf("pruneOldFilterIndexSnapshots Versions Error: %v", err)
-		return
-	}
-	if len(versions) == 0 {
-		return
-	}
-
-	if err := db.Mdb.Where("snapshot_version NOT IN ?", versions).Unscoped().Delete(&model.FilmFilterIndexSnapshot{}).Error; err != nil {
-		log.Printf("pruneOldFilterIndexSnapshots Delete Error: %v", err)
 	}
 }
 
@@ -718,9 +495,6 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batchSnapshots, snapshotBuildBatchSize).Error; err != nil {
 					return err
 				}
-			}
-			if err := ReplaceFilterIndexSnapshotsTx(tx, version, batchSnapshots, batchIDs); err != nil {
-				return err
 			}
 			writeCost := time.Since(writeStartedAt)
 
@@ -1013,7 +787,6 @@ func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 		version = GetActiveSnapshotVersion()
 	}
 	InvalidateActiveFilmSearchIndex(version)
-	IncrSnapshotRevision()
 	if db.Rdb != nil && len(mids) > 0 {
 		// 精准批量删除被修改影片的详情与播放页缓存（按 1000 条分批下发，避免过大 Pipeline 占用缓冲区）
 		const pipeBatchSize = 1000
@@ -1059,12 +832,9 @@ func ClearAllSnapshotDynamicCaches() {
 
 func ClearSnapshotState() {
 	ClearActiveFilmReadModel()
-	activeSnapshotFallbackMu.Lock()
-	activeSnapshotFallbackVersion = ""
-	activeSnapshotFallbackAt = time.Time{}
-	activeSnapshotFallbackMu.Unlock()
+	clearActiveSnapshotVersion()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey, config.SnapshotBuildVersionKey)
+		db.Rdb.Del(db.Cxt, config.SnapshotActiveVersionKey)
 	}
 	RefreshAccessDataCaches()
 }

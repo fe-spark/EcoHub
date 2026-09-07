@@ -22,38 +22,14 @@ type InitService struct{}
 var InitSvc = new(InitService)
 
 func (s *InitService) DefaultDataInit() {
-	if config.IsClusterWorker() {
-		log.Println("[Cluster] 当前节点为 Worker 纯读节点: 跳过公共 Redis 缓存清理、数据库迁移与后台写任务")
-		repository.InitMappingEngine()
-		if err := utils.CreateBaseDir(); err != nil {
-			syslog.Errorf("[Init] 素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err)
-		}
-		if err := config.EnsureContainerUploadVolume(); err != nil {
-			syslog.Warnf("[Init] %v", err)
-		}
-		filmrepo.SeedClusterSnapshotBaseline()
-		s.loadActiveFilmReadModel()
-		filmrepo.StartClusterSnapshotWatcher()
-		return
-	}
-
-	clearStartupCaches()
-
 	isNewDatabase := !repository.ExistUserTable()
 
-	// 无论新库初始化还是已有库版本升级，统一执行单一事实来源 AllModels 的幂等迁移
+	// 统一执行单一事实来源 AllModels 的幂等迁移
 	s.TableInit()
 
 	if isNewDatabase {
 		db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 	}
-
-	// 历史数据平滑割接：后台异步执行，避免百万级存量数据迁移阻塞 HTTP 服务启动引发 Web 容器 ECONNREFUSED
-	go func() {
-		if err := filmrepo.MigrateLegacyMoviePlaylistsTx(db.Mdb); err != nil {
-			syslog.Errorf("[Init] 附属站播放列表割接迁移失败: %v", err)
-		}
-	}()
 
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
@@ -67,14 +43,16 @@ func (s *InitService) DefaultDataInit() {
 	}
 	// 一次性清理历史采集同步图库（素材中心仅保留用户上传）
 	repository.PurgeSyncedGallery()
-	// 纠正历史超出上限的失败记录重试次数与状态
-	repository.NormalizeFailureRecordsRetryCount()
 
 	// 网站基本信息初始化（首页轮播已移入内容管理）
 	s.SiteWebConfigInit()
 	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
+	// 定时任务启动前，从 Redis 备忘恢复保护期、孤儿游标与活跃快照版本到内存。
+	filmrepo.RestoreMasterSwitchProtection()
+	filmrepo.RestoreOrphanCleanCursor()
+	filmrepo.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
@@ -84,55 +62,12 @@ func (s *InitService) ensureFilmListSnapshot() {
 	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
 		syslog.Errorf("[Init] 前台影片列表快照引导失败: %v", err)
 	}
-	if err := filmrepo.EnsureActiveFilterOptionSnapshot(); err != nil {
-		syslog.Errorf("[Init] 前台影片筛选标签快照引导失败: %v", err)
-	}
 }
 
 func (s *InitService) loadActiveFilmReadModel() {
 	if err := filmrepo.LoadActiveFilmReadModel(""); err != nil {
 		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
 	}
-}
-
-func shouldRetainStartupRedisKey(key string) bool {
-	if strings.HasPrefix(key, config.RedisKeyPrefix+":User:Token:") {
-		return true
-	}
-	if key == config.NotifyBotPollerLockKey {
-		return true
-	}
-	// 访问分析有独立 TTL / 列表裁剪，重启不清，避免概览归零。
-	if strings.HasPrefix(key, config.AccessKeyPrefix) {
-		return true
-	}
-	// 快照版本号与修订号重启保留，避免版本丢失触发兜底重算与启动耗时突增
-	if key == config.SnapshotActiveVersionKey || key == config.SnapshotBuildVersionKey || key == config.SnapshotRevisionKey {
-		return true
-	}
-	return false
-}
-
-func clearStartupCaches() {
-	if db.Rdb == nil {
-		return
-	}
-	ctx := db.Cxt
-	iter := db.Rdb.Scan(ctx, 0, config.RedisProjectKeyPattern, config.MaxScanCount).Iterator()
-	for iter.Next(ctx) {
-		key := iter.Val()
-		if shouldRetainStartupRedisKey(key) {
-			continue
-		}
-		if err := db.Rdb.Del(ctx, key).Err(); err != nil {
-			syslog.Errorf("[Init] Redis 键删除失败 %s: %v", key, err)
-		}
-	}
-	if err := iter.Err(); err != nil {
-		syslog.Errorf("[Init] Redis 模式清理失败 %s: %v", config.RedisProjectKeyPattern, err)
-	}
-
-	log.Printf("[Init] Redis 业务临时缓存已清理 (用户登录态与访问分析已保留)")
 }
 
 func (s *InitService) TableInit() {
@@ -165,7 +100,6 @@ func ensureSnapshotPerformanceIndexes() {
 		"CREATE INDEX idx_snap_pid_year ON film_list_snapshot(snapshot_version, pid, year, update_stamp)",
 		"CREATE INDEX idx_snap_ver_hits_pid ON film_list_snapshot(snapshot_version, hits, pid)",
 		"CREATE INDEX idx_snap_ver_series ON film_list_snapshot(snapshot_version, series_key, update_stamp)",
-		"CREATE INDEX idx_notify_change_mid_created_mid ON notify_change_mid(created_at, mid)",
 	}
 	for _, sql := range queries {
 		if err := db.Mdb.Exec(sql).Error; err != nil {
@@ -245,10 +179,6 @@ func defaultFilmSources() []model.FilmSource {
 }
 
 func (s *InitService) CollectCrontabInit() {
-	if !config.IsCronEnabled() {
-		log.Printf("[Cluster] 当前节点已禁用定时采集调度器 (CLUSTER_ROLE=%s), 作为纯读 Worker 节点运行", config.ClusterRole)
-		return
-	}
 
 	// 幂等对齐系统默认任务并注册（新老数据库统一逻辑，自动补齐缺失任务，零兼容分支）
 	tasks := s.ensureDefaultTasks()
@@ -279,6 +209,81 @@ func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", legacyOrphanSpec, config.OrphanCleanSpec)
 		}
 	}
+
+	// 平滑兼容历史 sys_cron_api_log_clean 或 Model == 4 任务为 sys_cron_log_clean
+	var canonicalTask *model.FilmCollectTask
+	var legacyIndices []int
+
+	for i := range existing {
+		t := &existing[i]
+		if t.Id == "sys_cron_log_clean" {
+			if canonicalTask == nil {
+				canonicalTask = t
+			} else {
+				legacyIndices = append(legacyIndices, i)
+			}
+		} else if t.Id == "sys_cron_api_log_clean" || t.Model == 4 {
+			legacyIndices = append(legacyIndices, i)
+		}
+	}
+
+	if canonicalTask != nil {
+		canonicalTask.Model = 4
+		canonicalTask.Remark = "自动清理过期运行日志"
+		canonicalTask.Time = 0
+		if strings.TrimSpace(canonicalTask.Spec) == "" {
+			canonicalTask.Spec = "0 0 3 * * *"
+		}
+		if err := repository.SaveFilmTask(*canonicalTask); err != nil {
+			syslog.Errorf("[Cron] 保存日志清理任务失败: %v", err)
+		}
+		for _, idx := range legacyIndices {
+			repository.DelFilmTask(existing[idx].Id)
+		}
+	} else if len(legacyIndices) > 0 {
+		firstLegacy := &existing[legacyIndices[0]]
+		repository.DelFilmTask(firstLegacy.Id)
+		firstLegacy.Id = "sys_cron_log_clean"
+		firstLegacy.Model = 4
+		firstLegacy.Remark = "自动清理过期运行日志"
+		firstLegacy.Time = 0
+		if strings.TrimSpace(firstLegacy.Spec) == "" {
+			firstLegacy.Spec = "0 0 3 * * *"
+		}
+		if err := repository.SaveFilmTask(*firstLegacy); err != nil {
+			syslog.Errorf("[Cron] 平滑迁移日志清理任务失败: %v", err)
+		}
+		canonicalTask = firstLegacy
+
+		for _, idx := range legacyIndices[1:] {
+			repository.DelFilmTask(existing[idx].Id)
+		}
+	}
+
+	legacySet := make(map[int]bool, len(legacyIndices))
+	for _, idx := range legacyIndices {
+		legacySet[idx] = true
+	}
+
+	var cleanedExisting []model.FilmCollectTask
+	hasCanonicalInCleaned := false
+	for i, t := range existing {
+		if legacySet[i] {
+			continue
+		}
+		if t.Id == "sys_cron_log_clean" {
+			if !hasCanonicalInCleaned && canonicalTask != nil {
+				cleanedExisting = append(cleanedExisting, *canonicalTask)
+				hasCanonicalInCleaned = true
+			}
+			continue
+		}
+		cleanedExisting = append(cleanedExisting, t)
+	}
+	if canonicalTask != nil && !hasCanonicalInCleaned {
+		cleanedExisting = append(cleanedExisting, *canonicalTask)
+	}
+	existing = cleanedExisting
 
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
@@ -315,14 +320,12 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 	case 3:
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
 	case 4:
-		cid, err = spider.AddApiLogCleanCron(task.Id, task.Spec)
+		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
+	default:
+		return
 	}
 	if err == nil {
-		task.Cid = cid
-		spider.RegisterTaskCid(task.Id, task.Cid)
-		if err := repository.UpdateFilmTask(task); err != nil {
-			syslog.Errorf("UpdateFilmTask Error: %v", err)
-		}
+		spider.RegisterTaskCid(task.Id, cid)
 	} else {
 		syslog.Errorf("Task [%s, model=%d] Add Cron Error: %v", task.Id, task.Model, err)
 	}
@@ -341,8 +344,8 @@ func defaultFilmTasks() []model.FilmCollectTask {
 	}
 
 	recoverTask := model.FilmCollectTask{
-		Id: "sys_cron_recover_collect", Time: 0, Spec: config.EveryWeekSpec,
-		Model: 2, State: false, Remark: "清理采集失败记录",
+		Id: "sys_cron_recover_collect", Time: 0, Spec: config.EveryDaySpec,
+		Model: 2, State: false, Remark: "定时重试采集失败的记录",
 	}
 
 	orphanTask := model.FilmCollectTask{
@@ -350,10 +353,10 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
 	}
 
-	apiLogTask := model.FilmCollectTask{
-		Id: "sys_cron_api_log_clean", Time: 0, Spec: "0 0 3 * * *",
-		Model: 4, State: true, Remark: "自动清理7天前的接口访问记录",
+	logCleanTask := model.FilmCollectTask{
+		Id: "sys_cron_log_clean", Time: 0, Spec: "0 0 3 * * *",
+		Model: 4, State: true, Remark: "自动清理过期运行日志",
 	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask, apiLogTask}
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask}
 }

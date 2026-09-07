@@ -39,7 +39,6 @@ func slowDayKey(day string) string     { return config.AccessKeyPrefix + "slow:"
 func errorDayKey(day string) string    { return config.AccessKeyPrefix + "error:" + day }
 func droppedKey() string               { return config.AccessKeyPrefix + "meta:dropped" }
 func droppedDayKey(day string) string  { return config.AccessKeyPrefix + "meta:dropped:" + day }
-func rollupLockKey() string            { return config.AccessKeyPrefix + "lock:daily_rollup" }
 
 // Web 专属 Key
 func webPVKey(day string) string          { return config.AccessKeyPrefix + "web:pv:" + day }
@@ -75,13 +74,17 @@ func appTopClassifyKey(platform, day string) string {
 func appVersionKey(platform, day string) string {
 	return config.AccessKeyPrefix + "app:" + platform + ":versions:" + day
 }
-func appAllPVKey(day string) string          { return config.AccessKeyPrefix + "app:all:pv:" + day }
-func appAllUVKey(day string) string          { return config.AccessKeyPrefix + "app:all:uv:" + day }
-func appAllTopPageKey(day string) string     { return config.AccessKeyPrefix + "app:all:top:page:" + day }
-func appAllTopPlayKey(day string) string     { return config.AccessKeyPrefix + "app:all:top:play:" + day }
-func appAllTopSearchKey(day string) string   { return config.AccessKeyPrefix + "app:all:top:search:" + day }
-func appAllTopClassifyKey(day string) string { return config.AccessKeyPrefix + "app:all:top:classify:" + day }
-func appActionKey(day string) string         { return config.AccessKeyPrefix + "app:action:" + day }
+func appAllPVKey(day string) string      { return config.AccessKeyPrefix + "app:all:pv:" + day }
+func appAllUVKey(day string) string      { return config.AccessKeyPrefix + "app:all:uv:" + day }
+func appAllTopPageKey(day string) string { return config.AccessKeyPrefix + "app:all:top:page:" + day }
+func appAllTopPlayKey(day string) string { return config.AccessKeyPrefix + "app:all:top:play:" + day }
+func appAllTopSearchKey(day string) string {
+	return config.AccessKeyPrefix + "app:all:top:search:" + day
+}
+func appAllTopClassifyKey(day string) string {
+	return config.AccessKeyPrefix + "app:all:top:classify:" + day
+}
+func appActionKey(day string) string { return config.AccessKeyPrefix + "app:action:" + day }
 func appPlatformActionKey(platform, day string) string {
 	return config.AccessKeyPrefix + "app:" + platform + ":action:" + day
 }
@@ -90,13 +93,15 @@ func appModelsKey(day string) string    { return config.AccessKeyPrefix + "app:m
 func appRecentDayKey(day string) string { return config.AccessKeyPrefix + "app:recent:" + day }
 
 // TVBox 专属 Key
-func tvboxPVKey(day string) string          { return config.AccessKeyPrefix + "tvbox:pv:" + day }
-func tvboxUVKey(day string) string          { return config.AccessKeyPrefix + "tvbox:uv:" + day }
-func tvboxTopPlayKey(day string) string     { return config.AccessKeyPrefix + "tvbox:top:play:" + day }
-func tvboxTopSearchKey(day string) string   { return config.AccessKeyPrefix + "tvbox:top:search:" + day }
-func tvboxTopClassifyKey(day string) string { return config.AccessKeyPrefix + "tvbox:top:classify:" + day }
-func tvboxActionKey(day string) string      { return config.AccessKeyPrefix + "tvbox:action:" + day }
-func tvboxRecentDayKey(day string) string   { return config.AccessKeyPrefix + "tvbox:recent:" + day }
+func tvboxPVKey(day string) string        { return config.AccessKeyPrefix + "tvbox:pv:" + day }
+func tvboxUVKey(day string) string        { return config.AccessKeyPrefix + "tvbox:uv:" + day }
+func tvboxTopPlayKey(day string) string   { return config.AccessKeyPrefix + "tvbox:top:play:" + day }
+func tvboxTopSearchKey(day string) string { return config.AccessKeyPrefix + "tvbox:top:search:" + day }
+func tvboxTopClassifyKey(day string) string {
+	return config.AccessKeyPrefix + "tvbox:top:classify:" + day
+}
+func tvboxActionKey(day string) string    { return config.AccessKeyPrefix + "tvbox:action:" + day }
+func tvboxRecentDayKey(day string) string { return config.AccessKeyPrefix + "tvbox:recent:" + day }
 
 func histBucket(ms int64) string {
 	switch {

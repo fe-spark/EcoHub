@@ -2,7 +2,6 @@ package router
 
 import (
 	"mime"
-	"net/http"
 	"server/internal/config"
 	"server/internal/handler"
 	"server/internal/infra/syslog"
@@ -18,7 +17,7 @@ func SetupRouter() *gin.Engine {
 
 	r := gin.New()
 	if err := r.SetTrustedProxies(config.TrustedProxies); err != nil {
-		syslog.Warnf("[HTTP] TRUSTED_PROXIES 解析失败，回退 %s: %v", config.DefaultTrustedProxies, err)
+		syslog.Warnf("[HTTP] 设置 TrustedProxies 失败，回退本地环回: %v", err)
 		_ = r.SetTrustedProxies([]string{"127.0.0.1", "::1"})
 	}
 	r.Use(middleware.AccessLog())
@@ -48,14 +47,7 @@ func SetupRouter() *gin.Engine {
 	api.POST(`/logout`, middleware.AuthToken(), handler.UserHd.Logout)
 
 	manageRoute := api.Group(`/manage`)
-	if config.IsClusterWorker() {
-		// 集群 Worker 纯读节点纵深防御：即便反向代理误路由，管理/上传/升级等写接口一律首位拒绝，避免触发鉴权与 Token 续期写操作
-		manageRoute.Use(func(c *gin.Context) {
-			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": 403, "message": "worker 只读节点，拒绝管理请求"})
-		})
-	} else {
-		manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
-	}
+	manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
 	{
 		manageRoute.GET(`/index`, handler.ManageHd.ManageIndex)
 		manageRoute.GET(`/version`, handler.ManageHd.AppVersion)
@@ -73,30 +65,28 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
 			sysConfig.POST(`/notice/update`, handler.ManageHd.UpdateSiteNotice)
 
-			sysConfig.GET(`/notify`, handler.NotifyHd.GetNotifyConfig)
-			sysConfig.POST(`/notify/update`, handler.NotifyHd.UpdateNotifyConfig)
-			sysConfig.POST(`/notify/test`, handler.NotifyHd.TestNotify)
+			// 通知配置（仅超级管理员）
+			sysConfig.GET(`/notify`, middleware.AdminAccess(), handler.NotifyHd.GetNotifyConfig)
+			sysConfig.POST(`/notify/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateNotifyConfig)
+			sysConfig.POST(`/notify/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
 
-			// 配置备份：导出/导入（不含影视库存与账号）
-			sysConfig.GET(`/backup/export`, handler.ManageHd.ExportConfigBackup)
-			sysConfig.POST(`/backup/import`, handler.ManageHd.ImportConfigBackup)
+			// 配置备份：导出/导入（不含影视库存与账号，仅超级管理员）
+			sysConfig.GET(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
+			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), handler.ManageHd.ImportConfigBackup)
 		}
-		systemLog := manageRoute.Group(`/system/logs`)
+		systemLog := manageRoute.Group(`/system/logs`, middleware.AdminAccess())
 		{
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}
 
-		accessRoute := manageRoute.Group(`/access`, middleware.AdminAccess())
+		accessRoute := manageRoute.Group(`/access`)
 		{
-			accessRoute.GET(`/overview`, handler.AccessHd.Overview)
-			accessRoute.GET(`/tops`, handler.AccessHd.Tops)
-			accessRoute.GET(`/logs`, handler.AccessHd.Logs)
-		}
-
-		apiLogsRoute := manageRoute.Group(`/api-logs`, middleware.AdminAccess())
-		{
-			apiLogsRoute.GET(`/list`, handler.ApiLogHd.List)
-			apiLogsRoute.POST(`/prune`, handler.ApiLogHd.Prune)
+			accessRoute.GET(`/status`, handler.AccessHd.Status)
+			accessRoute.GET(`/overview`, middleware.AdminAccess(), handler.AccessHd.Overview)
+			accessRoute.GET(`/tops`, middleware.AdminAccess(), handler.AccessHd.Tops)
+			accessRoute.GET(`/logs`, middleware.AdminAccess(), handler.AccessHd.Logs)
+			accessRoute.GET(`/stats`, middleware.AdminAccess(), handler.AccessHd.DataStats)
+			accessRoute.POST(`/clean`, middleware.AdminAccess(), handler.AccessHd.CleanData)
 		}
 
 		// 轮播相关
@@ -168,8 +158,8 @@ func SetupRouter() *gin.Engine {
 		{
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
-			spiderRoute.POST(`/clear`, handler.SpiderHd.ClearAllFilm)
-			spiderRoute.GET(`/clear/progress`, handler.SpiderHd.ResetProgress)
+			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
+			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgress)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.ResetImpactStats)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)

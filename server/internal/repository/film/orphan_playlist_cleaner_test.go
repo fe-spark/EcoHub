@@ -33,7 +33,6 @@ func setupOrphanCleanerTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.FilmListSnapshot{},
 		&model.MovieMatchKey{},
-		&model.MoviePlaylist{},
 		&model.SlaveMoviePlaylist{},
 		&model.MovieDetailInfo{},
 		&model.FilmIndex{},
@@ -166,94 +165,6 @@ func TestCleanOrphanPlaylists_PurgeExpired(t *testing.T) {
 	}
 	if remaining[0].ID != 2 || remaining[1].ID != 3 {
 		t.Fatalf("expected IDs [2, 3] remaining, got [%d, %d]", remaining[0].ID, remaining[1].ID)
-	}
-}
-
-func TestSlavePlaylistMigration_Idempotency(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
-
-	// 在老表中插入数据
-	for i := uint(1); i <= 5; i++ {
-		gdb.Create(&model.MoviePlaylist{
-			Model:      gorm.Model{ID: i},
-			SourceId:   "slave_1",
-			MovieKey:   fmt.Sprintf("key_%d", i),
-			GroupIndex: 0,
-			GroupName:  "线路1",
-			Content:    "[]",
-		})
-	}
-
-	// 首次割接迁移
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("first migration failed: %v", err)
-	}
-
-	var count, legacyCount int64
-	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&count)
-	if count != 5 {
-		t.Fatalf("expected 5 rows in slave_movie_playlists, got %d", count)
-	}
-	gdb.Model(&model.MoviePlaylist{}).Count(&legacyCount)
-	if legacyCount != 0 {
-		t.Fatalf("expected 0 rows in legacy movie_playlist after cutover, got %d", legacyCount)
-	}
-
-	// 第二次执行迁移，老表为空，应幂等跳过
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("second migration failed: %v", err)
-	}
-	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&count)
-	if count != 5 {
-		t.Fatalf("expected count still 5 after second migration, got %d", count)
-	}
-}
-
-func TestSlavePlaylistMigration_ResumeInterrupted(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
-
-	// 模拟割接中断或爬虫已提前写入 2 条数据到新表
-	gdb.Create(&model.SlaveMoviePlaylist{
-		SourceId:   "slave_1",
-		MovieKey:   "key_1",
-		GroupIndex: 0,
-		GroupName:  "线路1_新",
-		Content:    "[]",
-	})
-	gdb.Create(&model.SlaveMoviePlaylist{
-		SourceId:   "slave_1",
-		MovieKey:   "key_2",
-		GroupIndex: 0,
-		GroupName:  "线路1_新",
-		Content:    "[]",
-	})
-
-	// 老表中仍有 5 条数据等待迁移（包含 key_1~key_5）
-	for i := uint(1); i <= 5; i++ {
-		gdb.Create(&model.MoviePlaylist{
-			Model:      gorm.Model{ID: i},
-			SourceId:   "slave_1",
-			MovieKey:   fmt.Sprintf("key_%d", i),
-			GroupIndex: 0,
-			GroupName:  fmt.Sprintf("线路1_老_%d", i),
-			Content:    "[]",
-		})
-	}
-
-	// 执行割接迁移：即使新表已有数据，也必须把老表剩余数据全部迁移并排空
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("resume migration failed: %v", err)
-	}
-
-	var legacyCount, slaveCount int64
-	gdb.Model(&model.MoviePlaylist{}).Count(&legacyCount)
-	if legacyCount != 0 {
-		t.Fatalf("expected legacy movie_playlist to be 0 after resumed migration, got %d", legacyCount)
-	}
-
-	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&slaveCount)
-	if slaveCount != 5 {
-		t.Fatalf("expected 5 total records in slave_movie_playlists, got %d", slaveCount)
 	}
 }
 
@@ -430,7 +341,6 @@ func TestSlaveMoviePlaylist_HardDeleteNoTombstone(t *testing.T) {
 		t.Fatalf("re-create after delete failed with duplicate key: %v", err)
 	}
 }
-
 
 // TestCleanOrphanPlaylists_SecondChanceVerification 验证主站收录判定：
 // 超期 24 小时的记录中，若主站 match_key 存在，则安全保留；只有确认主站依然不存在的真孤儿才被物理删除。
@@ -691,9 +601,8 @@ func TestCleanOrphanPlaylists_TimeoutSafety(t *testing.T) {
 	}
 }
 
-// TestMasterSwitchProtection_RedisIntegration 验证通过 Redis 进行主站切换冷启动保护时，
-// 键删除与过期严格通过 redis.Nil authoritative 识别，防止多 Pod 进程内存脱节。
-func TestMasterSwitchProtection_RedisIntegration(t *testing.T) {
+// TestMasterSwitchProtection_RedisBackup 验证 Redis 只是重启备忘：写入带 TTL，运行时以内存为准。
+func TestMasterSwitchProtection_RedisBackup(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("miniredis: %v", err)
@@ -709,22 +618,87 @@ func TestMasterSwitchProtection_RedisIntegration(t *testing.T) {
 		ClearMasterSwitchProtection()
 	})
 
-	// 1. 设置保护期
 	SetMasterSwitchProtection(1 * time.Hour)
 	if !InMasterSwitchProtection() {
-		t.Fatal("expected InMasterSwitchProtection to be true with Redis")
+		t.Fatal("expected InMasterSwitchProtection to be true after set")
+	}
+	ttl, err := client.TTL(db.Cxt, config.MasterSwitchProtectKey).Result()
+	if err != nil {
+		t.Fatalf("TTL: %v", err)
+	}
+	if ttl <= 50*time.Minute || ttl > time.Hour {
+		t.Fatalf("expected redis TTL around 1h, got %s", ttl)
 	}
 
-	// 2. 清除保护期（模拟在其它 Pod 执行了清除）
+	// 运行时只认内存：外部删掉 Redis 备忘不得解除保护
+	if err := client.Del(db.Cxt, config.MasterSwitchProtectKey).Err(); err != nil {
+		t.Fatalf("del redis backup: %v", err)
+	}
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected memory protection to remain after redis backup was deleted")
+	}
+
 	ClearMasterSwitchProtection()
-	// 关键验证：Redis 键已删，InMasterSwitchProtection 必须返回 false，不得因内存残留变量误判为 true
 	if InMasterSwitchProtection() {
-		t.Fatal("expected InMasterSwitchProtection to be false immediately after ClearMasterSwitchProtection with Redis")
+		t.Fatal("expected InMasterSwitchProtection to be false after clear")
 	}
 }
 
-// TestOrphanCleanCursor_RedisIntegration 验证游标在 Redis 中的同步与 redis.Nil 权威识别。
-func TestOrphanCleanCursor_RedisIntegration(t *testing.T) {
+// TestMasterSwitchProtection_RestoreFromRedisAfterRestart 模拟进程重启：内存归零后从 Redis 恢复一次。
+func TestMasterSwitchProtection_RestoreFromRedisAfterRestart(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	t.Cleanup(mr.Close)
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		ClearMasterSwitchProtection()
+	})
+
+	SetMasterSwitchProtection(7 * 24 * time.Hour)
+
+	setMasterSwitchProtectUntil(time.Time{})
+	if InMasterSwitchProtection() {
+		t.Fatal("expected protection to be cleared before restore")
+	}
+
+	RestoreMasterSwitchProtection()
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected RestoreMasterSwitchProtection to refill memory from Redis")
+	}
+}
+
+func TestRestoreMasterSwitchProtection_RedisErrorFailClosed(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		ClearMasterSwitchProtection()
+	})
+
+	ClearMasterSwitchProtection()
+	mr.Close()
+	RestoreMasterSwitchProtection()
+	if !InMasterSwitchProtection() {
+		t.Fatal("expected default protection when redis restore fails")
+	}
+}
+
+// TestOrphanCleanCursor_RedisBackup 验证游标运行时只认内存，Redis 仅作重启备忘。
+func TestOrphanCleanCursor_RedisBackup(t *testing.T) {
 	mr, err := miniredis.Run()
 	if err != nil {
 		t.Fatalf("miniredis: %v", err)
@@ -745,136 +719,50 @@ func TestOrphanCleanCursor_RedisIntegration(t *testing.T) {
 		t.Fatalf("expected cursor 12345, got %d", cur)
 	}
 
+	if err := client.Del(db.Cxt, config.OrphanCleanCursorKey).Err(); err != nil {
+		t.Fatalf("del redis backup: %v", err)
+	}
+	if cur := LoadOrphanCleanCursor(); cur != 12345 {
+		t.Fatalf("expected memory cursor to remain after redis backup deleted, got %d", cur)
+	}
+
+	memoryOrphanMu.Lock()
+	memoryOrphanCursor = 0
+	memoryOrphanMu.Unlock()
+	RestoreOrphanCleanCursor()
+	if cur := LoadOrphanCleanCursor(); cur != 0 {
+		t.Fatalf("expected restore to stay 0 when redis backup is gone, got %d", cur)
+	}
+
+	SaveOrphanCleanCursor(99)
+	memoryOrphanMu.Lock()
+	memoryOrphanCursor = 0
+	memoryOrphanMu.Unlock()
+	RestoreOrphanCleanCursor()
+	if cur := LoadOrphanCleanCursor(); cur != 99 {
+		t.Fatalf("expected restore from redis to 99, got %d", cur)
+	}
+
 	ClearOrphanCleanCursor()
 	if cur := LoadOrphanCleanCursor(); cur != 0 {
 		t.Fatalf("expected cursor 0 after clear, got %d", cur)
 	}
 }
 
-// TestSlavePlaylistMigration_DuplicateItemsAndDistributedLock 验证割接迁移中：
-// 1. 脏历史数据存在相同 (source_id, movie_key, group_index) 时批次去重，杜绝 MySQL 1062 报错；
-// 2. Redis 分布式排他锁在多节点竞争时，并发节点安全跳过割接。
-func TestSlavePlaylistMigration_DuplicateItemsAndDistributedLock(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
-
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("miniredis: %v", err)
-	}
-	t.Cleanup(mr.Close)
-
-	origRdb := db.Rdb
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	db.Rdb = client
-	t.Cleanup(func() {
-		_ = client.Close()
-		db.Rdb = origRdb
-	})
-
-	// 模拟老表无唯一索引或历史脏数据中存在重复键
-	gdb.Exec("DROP INDEX IF EXISTS uidx_source_key_group")
-
-	// 插入老表数据，其中包含同一 unique key 的重复项
-	if err := gdb.Create(&model.MoviePlaylist{
-		Model:      gorm.Model{ID: 1},
-		SourceId:   "src_dup",
-		MovieKey:   "key_dup",
-		GroupIndex: 0,
-		GroupName:  "旧版",
-		Content:    `[{"episode":"01","link":"http://old"}]`,
-	}).Error; err != nil {
-		t.Fatalf("create dup 1: %v", err)
-	}
-	if err := gdb.Create(&model.MoviePlaylist{
-		Model:      gorm.Model{ID: 2},
-		SourceId:   "src_dup",
-		MovieKey:   "key_dup",
-		GroupIndex: 0,
-		GroupName:  "新版",
-		Content:    `[{"episode":"01","link":"http://new"}]`,
-	}).Error; err != nil {
-		t.Fatalf("create dup 2: %v", err)
-	}
-
-	// 执行迁移 -> 批次内自动去重，确保无 1062 异常且成功割接
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("MigrateLegacyMoviePlaylistsTx failed with duplicates: %v", err)
-	}
-
-	var newRows []model.SlaveMoviePlaylist
-	if err := gdb.Where("source_id = ?", "src_dup").Find(&newRows).Error; err != nil {
-		t.Fatalf("query new rows: %v", err)
-	}
-	if len(newRows) != 1 {
-		t.Fatalf("expected 1 deduped row in SlaveMoviePlaylist, got %d", len(newRows))
-	}
-	if newRows[0].GroupName != "新版" {
-		t.Fatalf("expected latest version '新版', got %q", newRows[0].GroupName)
-	}
-
-	// 验证分布式排他锁行为：模拟另一节点正在割接中（持有锁）
-	mr.Set(config.MigrateLegacyPlaylistsLockKey, "other-node-token")
-
-	// 插入一条待迁移数据
-	gdb.Create(&model.MoviePlaylist{
-		Model:      gorm.Model{ID: 3},
-		SourceId:   "src_dup",
-		MovieKey:   "key_locked",
-		GroupIndex: 0,
-	})
-
-	// 尝试割接 -> 竞争失败，安全跳过，返回 nil
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("expected nil when lock held by other node, got %v", err)
-	}
-
-	// 释放分布式锁后，再次割接 -> 成功迁移该记录
-	mr.Del(config.MigrateLegacyPlaylistsLockKey)
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("MigrateLegacyMoviePlaylistsTx failed after lock released: %v", err)
-	}
-}
-
-func TestInMasterSwitchProtection_FailSafe(t *testing.T) {
-	origRdb := db.Rdb
-	defer func() {
-		db.Rdb = origRdb
-		ClearMasterSwitchProtection()
-	}()
-
-	// 1. Redis 为 nil，内存无保护 -> 返回 false
-	db.Rdb = nil
+func TestInMasterSwitchProtection(t *testing.T) {
 	ClearMasterSwitchProtection()
 	if InMasterSwitchProtection() {
-		t.Fatalf("expected false when db.Rdb is nil and memory is cleared")
+		t.Fatalf("expected false initially")
 	}
-
-	// 2. 正常 Redis 存在 key 未过期 -> 返回 true
-	mr, err := miniredis.Run()
-	if err != nil {
-		t.Fatalf("miniredis: %v", err)
-	}
-	defer mr.Close()
-
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	defer client.Close()
-	db.Rdb = client
 
 	SetMasterSwitchProtection(time.Hour)
 	if !InMasterSwitchProtection() {
-		t.Fatalf("expected true when protected key exists in Redis")
+		t.Fatalf("expected true after set")
 	}
 
-	// 3. 正常 Redis key 不存在 (redis.Nil) -> 返回 false
 	ClearMasterSwitchProtection()
 	if InMasterSwitchProtection() {
-		t.Fatalf("expected false when key does not exist (redis.Nil)")
-	}
-
-	// 4. Redis 物理宕机/网络故障 (非 redis.Nil 错误) -> Fail-Safe 保守安全返回 true
-	mr.Close() // 强制关闭后端，模拟 Redis 宕机
-	if !InMasterSwitchProtection() {
-		t.Fatalf("expected true under Fail-Safe mode when Redis query returns network error")
+		t.Fatalf("expected false after clear")
 	}
 }
 
@@ -929,60 +817,6 @@ func TestCleanOrphanPlaylists_TOCTOUGuard(t *testing.T) {
 	gdb.Model(&model.SlaveMoviePlaylist{}).Where("id = ?", 1002).Count(&count1002)
 	if count1002 != 0 {
 		t.Fatalf("expected expired orphan 1002 to be deleted, count=%d", count1002)
-	}
-}
-
-func TestMigrateLegacyMoviePlaylistsTx_LargeBatchChunking(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
-
-	// 插入 1,200 条老表数据（突破单批 500 条分块限制）
-	const totalItems = 1200
-	legacyItems := make([]model.MoviePlaylist, 0, totalItems)
-	for i := 1; i <= totalItems; i++ {
-		legacyItems = append(legacyItems, model.MoviePlaylist{
-			Model:      gorm.Model{ID: uint(i)},
-			SourceId:   fmt.Sprintf("source_%d", i%10),
-			MovieKey:   fmt.Sprintf("key_%d", i),
-			GroupIndex: 0,
-			GroupName:  "默认线路",
-			Content:    "第01集$http://example.com/play/1.m3u8",
-		})
-	}
-
-	// 在 SQLite 中分块插入 1200 条
-	for i := 0; i < len(legacyItems); i += 400 {
-		end := i + 400
-		if end > len(legacyItems) {
-			end = len(legacyItems)
-		}
-		if err := gdb.Create(legacyItems[i:end]).Error; err != nil {
-			t.Fatalf("seed legacy items failed: %v", err)
-		}
-	}
-
-	var legacyBefore int64
-	gdb.Model(&model.MoviePlaylist{}).Count(&legacyBefore)
-	if legacyBefore != totalItems {
-		t.Fatalf("expected %d legacy items before migration, got %d", totalItems, legacyBefore)
-	}
-
-	// 执行割接迁移
-	if err := MigrateLegacyMoviePlaylistsTx(gdb); err != nil {
-		t.Fatalf("MigrateLegacyMoviePlaylistsTx failed: %v", err)
-	}
-
-	// 验证老表全部清空
-	var legacyAfter int64
-	gdb.Model(&model.MoviePlaylist{}).Count(&legacyAfter)
-	if legacyAfter != 0 {
-		t.Fatalf("expected 0 legacy items after migration, got %d", legacyAfter)
-	}
-
-	// 验证新表完整包含 1,200 条记录
-	var slaveCount int64
-	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&slaveCount)
-	if slaveCount != totalItems {
-		t.Fatalf("expected %d slave movie playlists after migration, got %d", totalItems, slaveCount)
 	}
 }
 
@@ -1043,4 +877,3 @@ func TestRefreshAfterDataClean(t *testing.T) {
 		t.Fatal("expected PlayFromSummary to be refreshed")
 	}
 }
-

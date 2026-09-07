@@ -80,7 +80,8 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
   const [serverData, setServerData] = useState<NotifyConfigValues>(DEFAULT_CONFIG);
 
   const { message } = useAppMessage();
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
+  const canOperate = canWrite && isAdmin;
 
   const watchedBotToken = Form.useWatch("botToken", form);
   const watchedChatIds = Form.useWatch("chatIds", form);
@@ -119,7 +120,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
   };
 
   const handleSave = async () => {
-    if (!canWrite) return;
+    if (!canOperate) return;
     try {
       const values = await form.validateFields();
       setSaving(true);
@@ -160,6 +161,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
   };
 
   const handleTest = async () => {
+    if (!canOperate) return;
     const values = form.getFieldsValue(true) as NotifyConfigValues;
     const botToken = String(values.botToken ?? "").trim();
     const chatIds = (values.chatIds || []).map(String).map((s) => s.trim()).filter(Boolean);
@@ -215,6 +217,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
         }
         extra={
           <Space size={8} align="center">
+            {!isAdmin && <Tag color="default">仅超级管理员可操作</Tag>}
             {isEditing ? (
               <>
                 <Button size="small" disabled={saving} onClick={handleCancel}>
@@ -225,7 +228,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                   type="primary"
                   icon={<SaveOutlined />}
                   loading={saving}
-                  disabled={!canWrite}
+                  disabled={!canOperate}
                   onClick={() => void handleSave()}
                 >
                   保存配置
@@ -236,7 +239,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                 size="small"
                 type="primary"
                 icon={<EditOutlined />}
-                disabled={!canWrite}
+                disabled={!canOperate}
                 onClick={() => setIsEditing(true)}
               >
                 编辑
@@ -251,7 +254,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
             layout="vertical"
             className={styles.form}
             initialValues={DEFAULT_CONFIG}
-            disabled={!isEditing || !canWrite}
+            disabled={!isEditing || !canOperate}
           >
             <Flex vertical gap={0} className={styles.contentStack}>
               {/* 最上层：启用/禁用消息推送总开关卡片 */}
@@ -313,7 +316,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                       <Button
                         icon={<SendOutlined />}
                         loading={testing}
-                        disabled={!canTest}
+                        disabled={!canTest || !canOperate}
                         onClick={() => void handleTest()}
                       >
                         发送测试
@@ -422,7 +425,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                                 placeholder="23:00"
                                 allowClear={false}
                                 style={{ width: "100%" }}
-                                disabled={!isEditing || !canWrite || !watchedQuietHoursEnabled}
+                                disabled={!isEditing || !canOperate || !watchedQuietHoursEnabled}
                               />
                             </Form.Item>
                           </Col>
@@ -452,7 +455,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                                 placeholder="07:00"
                                 allowClear={false}
                                 style={{ width: "100%" }}
-                                disabled={!isEditing || !canWrite || !watchedQuietHoursEnabled}
+                                disabled={!isEditing || !canOperate || !watchedQuietHoursEnabled}
                               />
                             </Form.Item>
                           </Col>
@@ -508,7 +511,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                               <Flex vertical gap={10}>
                                 {groupEvents.map((event) => {
                                   const checked = Boolean(watchedEvents?.[event.field]);
-                                  const disabled = !isEditing || !canWrite;
+                                  const disabled = !isEditing || !canOperate;
                                   return (
                                     <div
                                       key={event.field}

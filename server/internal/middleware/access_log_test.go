@@ -14,13 +14,10 @@ import (
 func TestAccessLogMiddleware(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	origEnabled := config.AccessLogEnabled
-	origSlowMs := config.AccessSlowMs
 	t.Cleanup(func() {
 		config.AccessLogEnabled = origEnabled
-		config.AccessSlowMs = origSlowMs
 	})
 	config.AccessLogEnabled = true
-	config.AccessSlowMs = 500
 
 	r := gin.New()
 	r.Use(AccessLog())
@@ -61,9 +58,8 @@ func TestAccessLogMiddleware(t *testing.T) {
 		}
 	})
 
-	t.Run("access log disabled but api log enabled", func(t *testing.T) {
+	t.Run("access log disabled", func(t *testing.T) {
 		config.AccessLogEnabled = false
-		config.ApiLogEnabled = true
 		req := httptest.NewRequest(http.MethodGet, "/api/test-ok", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

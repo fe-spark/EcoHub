@@ -17,13 +17,11 @@ var (
 )
 
 func StartCollector() {
-	if !config.IsClusterWorker() {
-		startDailyRollup()
-	}
 	if !config.AccessLogEnabled {
 		syslog.Infof("[Access] 访问分析已关闭")
 		return
 	}
+	startDailyRollup()
 	if !started.CompareAndSwap(false, true) {
 		return
 	}
@@ -33,7 +31,7 @@ func StartCollector() {
 }
 
 func Collect(evt *AccessEvent) {
-	if evt == nil || eventCh == nil {
+	if !config.AccessLogEnabled || evt == nil || eventCh == nil {
 		return
 	}
 	select {

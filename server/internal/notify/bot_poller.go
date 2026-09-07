@@ -2,46 +2,21 @@ package notify
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
-	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-
-	"github.com/redis/go-redis/v9"
 )
 
-// Telegram long-polling：内联键盘回调 + /search 文本指令。
-//
-// 同一 Bot Token 全局只允许一个 getUpdates 消费者。本进程用：
-//  1. 进程内单例（按代句柄 cancel + done，停旧再起新）
-//  2. Redis 领导锁（多 EcoHub 实例共享 Redis 时仅 leader 轮询）
-//  3. Conflict 退避（外部进程也在 poll 时拉长间隔并释放领导权）
-
 const (
-	// botPollerLockTTL 领导锁 TTL：必须大于单次循环的最坏耗时。
-	// 锁只在每轮 getUpdates 之前续期一次，而 getUpdates 最长阻塞 40s，
-	// 加上 Redis 请求（≤3s）与 webhook/命令注册等，单轮最坏约 60s；
-	// TTL 过短会在长轮询中途过期，第二实例抢锁 → 双 getUpdates → Conflict 抖动。
-	// 放宽后：领导实例硬崩溃时，备用实例最长等待 TTL 才接管（正常退出会经 defer 主动释放）。
-	botPollerLockTTL      = 90 * time.Second
-	botPollerStandbyWait  = 10 * time.Second
 	botPollerConflictWait = 60 * time.Second
 	botPollerMaxBackoff   = 30 * time.Second
 )
 
-// pollerGeneration 一代 Bot 轮询的生命周期句柄：cancel 停止该代，done 在该代协程退出后关闭。
-// 以「按代句柄」取代共享 WaitGroup：Wait 与 Add 永不重叠，避免
-// sync: WaitGroup misuse: Add called concurrently with Wait 竞态 panic。
 type pollerGeneration struct {
 	cancel context.CancelFunc
 	done   chan struct{}
@@ -49,21 +24,16 @@ type pollerGeneration struct {
 
 var (
 	pollerMu    sync.Mutex
-	pollerGen   *pollerGeneration // 当前已注册的轮询代；nil 表示未注册
-	pollerToken string            // 与 pollerGen 配套的 Bot Token
+	pollerGen   *pollerGeneration
+	pollerToken string
 )
 
-// EnsureBotPoller 按已保存通知配置启停轮询。未启用通知或无 Token 时停止；Token 变化则重启。
-// cancel + Wait 在锁外执行，避免长轮询退出时阻塞其它 Ensure 调用方。
-// Worker 纯读节点禁止启动 Telegram 轮询。
+// EnsureBotPoller 按已保存配置启停轮询。未启用通知或无 Token 时停止；Token 变化则重启。
 func EnsureBotPoller() {
-	if config.IsClusterWorker() {
-		return
-	}
 	ensureBotPoller(resolvePollerToken(GetConfig()), runBotPoller)
 }
 
-// StopBotPoller 停止当前正在运行的 Telegram Bot 轮询并释放所有资源（供优雅停机或关闭开关调用）。
+// StopBotPoller 停止当前正在运行的 Telegram Bot 轮询。
 func StopBotPoller() {
 	ensureBotPoller("", runBotPoller)
 }
@@ -75,139 +45,101 @@ func resolvePollerToken(cfg model.NotifyConfig) string {
 	return strings.TrimSpace(cfg.BotToken)
 }
 
-// ensureBotPoller 是 EnsureBotPoller 的纯逻辑版本，runner 可注入以便并发回归测试。
 func ensureBotPoller(token string, runner func(ctx context.Context, token string)) {
 	for {
 		pollerMu.Lock()
-		if token == "" {
-			old := takeStopLocked()
-			pollerMu.Unlock()
-			waitStopped(old)
-			return
+		if pollerGen != nil {
+			select {
+			case <-pollerGen.done:
+				// 协程已退出，回收陈旧句柄
+				pollerGen = nil
+				pollerToken = ""
+			default:
+				if pollerToken == token {
+					pollerMu.Unlock()
+					return
+				}
+			}
 		}
-		if pollerGen != nil && pollerToken == token {
-			pollerMu.Unlock()
-			return
-		}
+
 		old := takeStopLocked()
 		pollerMu.Unlock()
 		waitStopped(old)
 
+		if token == "" {
+			return
+		}
+
 		pollerMu.Lock()
-		// 等待期间其它调用可能已拉起同 token
 		if pollerGen != nil && pollerToken == token {
 			pollerMu.Unlock()
 			return
 		}
-		// 他人已拉起不同 token：后写者胜 —— 必须停掉该代再注册自己，
-		// 否则两代协程同时存活会双 getUpdates。单实例全局只有一个配置 token，
-		// 出现不同 token 只可能是并发调用读到新旧配置的瞬时竞态。
-		if pollerGen != nil {
-			log.Printf("[Notify] 检测到其它 token 的轮询代，将停止并替换为当前配置 token（后写者胜）")
-			pollerMu.Unlock()
-			continue
-		}
 		ctx, cancel := context.WithCancel(context.Background())
-		gen := &pollerGeneration{cancel: cancel, done: make(chan struct{})}
+		gen := &pollerGeneration{
+			cancel: cancel,
+			done:   make(chan struct{}),
+		}
 		pollerGen = gen
 		pollerToken = token
 		pollerMu.Unlock()
-		go func(tok string, gen *pollerGeneration) {
+
+		go func(g *pollerGeneration, tok string) {
+			defer close(g.done)
 			defer func() {
 				pollerMu.Lock()
-				if pollerGen == gen {
+				if pollerGen == g {
 					pollerGen = nil
 					pollerToken = ""
 				}
 				pollerMu.Unlock()
-				close(gen.done)
 			}()
 			runner(ctx, tok)
-		}(token, gen)
-		log.Printf("[Notify] Telegram Bot 轮询已启动（/search + 列表翻页）")
+		}(gen, token)
 		return
 	}
 }
 
-// takeStopLocked 取出并清空当前轮询代（须持 pollerMu）；不等待退出。
 func takeStopLocked() *pollerGeneration {
+	if pollerGen == nil {
+		return nil
+	}
 	g := pollerGen
 	pollerGen = nil
 	pollerToken = ""
+	g.cancel()
 	return g
 }
 
-// waitStopped 取消旧轮询并等待其协程退出（须在 pollerMu 外调用）。
-// getUpdates 使用带父 ctx 的超时请求，cancel 后 HTTP 会中断。
-// 等待的是该代协程关闭的 done channel：即便协程尚未启动，done 也一定会在
-// 该代协程退出时关闭，因此不会漏等，也不会与「启动新代」产生竞态。
-func waitStopped(gen *pollerGeneration) {
-	if gen == nil {
+func waitStopped(g *pollerGeneration) {
+	if g == nil {
 		return
 	}
-	gen.cancel()
 	select {
-	case <-gen.done:
-	case <-time.After(3 * time.Second):
-		log.Printf("[Notify] 等待旧轮询代退出超时(3s)，强制继续")
+	case <-g.done:
+	case <-time.After(5 * time.Second):
+		log.Printf("[Notify] 等待旧 Telegram Bot 轮询退出超时")
 	}
 }
 
 func runBotPoller(ctx context.Context, token string) {
-	owner := newPollerOwnerID()
-	defer releaseBotPollerLock(owner)
+	var (
+		offset         int64
+		backoff        = 3 * time.Second
+		webhookCleared = false
+	)
 
-	var offset int64
-	backoff := 3 * time.Second
-	commandsOK := false
-	isLeader := false
-	loggedStandby := false
-	webhookCleared := false
+	log.Printf("[Notify] 启动 Telegram Bot 轮询")
+	defer log.Printf("[Notify] Telegram Bot 轮询已退出")
 
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// 循环内实时自检开关状态：开关已关闭或 Token 变更时主动停止，不盲目死循环轮询
-		currentTok := resolvePollerToken(GetConfig())
-		if currentTok == "" {
-			log.Printf("[Notify] 检测到 Telegram 消息推送开关已关闭或未配置 Token，主动退出 Bot 轮询")
-			return
-		}
-		if currentTok != token {
-			log.Printf("[Notify] 检测到 Telegram Bot Token 已变更，主动退出旧轮询代")
+		if ctx.Err() != nil {
 			return
 		}
 
-		if !holdBotPollerLock(ctx, owner) {
-			if isLeader {
-				log.Printf("[Notify] Bot 轮询领导权已丢失，进入待命")
-				isLeader = false
-				commandsOK = false
-			}
-			if !loggedStandby {
-				log.Printf("[Notify] 已有其它 EcoHub 实例负责 Telegram Bot 轮询，本实例待命")
-				loggedStandby = true
-			}
-			if !sleepCtx(ctx, botPollerStandbyWait) {
-				return
-			}
-			// 待命节点唤醒后核查配置，若开关已关闭则退出待命，避免主节点关停后盲目抢锁接管
-			if tok := resolvePollerToken(GetConfig()); tok == "" || tok != token {
-				log.Printf("[Notify] 待命期间检测到 Telegram 开关关闭或 Token 变更，主动退出待命")
-				return
-			}
-			continue
-		}
-
-		if !isLeader {
-			log.Printf("[Notify] 本实例取得 Bot 轮询领导权 owner=%s", owner)
-			isLeader = true
-			loggedStandby = false
-			webhookCleared = false
+		if tok := resolvePollerToken(GetConfig()); tok == "" || tok != token {
+			log.Printf("[Notify] 检测到 Telegram 开关已关闭或 Token 变更，主动退出轮询")
+			return
 		}
 
 		if !webhookCleared {
@@ -220,12 +152,6 @@ func runBotPoller(ctx context.Context, token string) {
 			cancel()
 		}
 
-		if !commandsOK {
-			if registerBotCommands(ctx, token) {
-				commandsOK = true
-			}
-		}
-
 		reqCtx, cancel := context.WithTimeout(ctx, 40*time.Second)
 		updates, err := client.getUpdates(reqCtx, token, offset, 25)
 		cancel()
@@ -233,16 +159,12 @@ func runBotPoller(ctx context.Context, token string) {
 			if ctx.Err() != nil {
 				return
 			}
-			// 致命凭证错误：401 Unauthorized / 404 Not Found 主动熔断退出，杜绝无限死循环重试
 			if isTelegramFatalAuthError(err) {
-				syslog.Errorf("[Notify] Telegram Bot Token 鉴权失败或 Bot 不存在 (%v)，主动终止轮询，请在后台核对配置", err)
+				syslog.Errorf("[Notify] Telegram Bot Token 鉴权失败或 Bot 不存在 (%v)，主动终止轮询", err)
 				return
 			}
 			if isTelegramGetUpdatesConflict(err) {
-				log.Printf("[Notify] getUpdates 冲突：同一 Bot Token 另有 getUpdates 在跑（其它进程/环境/未退出旧实例）。释放领导权并 %s 后重试", botPollerConflictWait)
-				releaseBotPollerLock(owner)
-				isLeader = false
-				commandsOK = false
+				log.Printf("[Notify] getUpdates 冲突：同一 Bot Token 另有进程在跑，%s 后重试", botPollerConflictWait)
 				if !sleepCtx(ctx, botPollerConflictWait) {
 					return
 				}
@@ -250,8 +172,7 @@ func runBotPoller(ctx context.Context, token string) {
 				continue
 			}
 			if isTelegramWebhookActiveError(err) {
-				// webhook 被外部重新设置（或清除失败）：保持领导权，下一轮重新清除
-				log.Printf("[Notify] getUpdates 被拒：webhook 仍处于激活状态，将重新清除后重试")
+				log.Printf("[Notify] getUpdates 被拒：webhook 激活，重新清除后重试")
 				webhookCleared = false
 				if !sleepCtx(ctx, time.Second) {
 					return
@@ -277,37 +198,22 @@ func runBotPoller(ctx context.Context, token string) {
 				offset = u.UpdateID + 1
 			}
 			if u.CallbackQuery != nil {
-				dispatchCallback(token, u.CallbackQuery)
-			}
-			if u.Message != nil {
-				handleBotMessage(token, u.Message)
+				cb := u.CallbackQuery
+				go dispatchCallback(token, cb)
 			}
 		}
 	}
-}
-
-func registerBotCommands(ctx context.Context, token string) bool {
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
-	defer cancel()
-	err := client.setMyCommands(cctx, token, []botCommand{
-		{Command: "start", Description: "开始"},
-		{Command: "daily", Description: "每日更新"},
-		{Command: "search", Description: "搜索"},
-		{Command: "help", Description: "帮助"},
-	})
-	if err != nil {
-		syslog.Warnf("[Notify] setMyCommands 失败（将重试）: %v", err)
-		return false
-	}
-	log.Printf("[Notify] 已注册 Bot 指令: /start /daily /search /help")
-	return true
 }
 
 func dispatchCallback(token string, cb *telegramCallback) {
 	if cb == nil {
 		return
 	}
-	// Message/Chat 缺失时拒绝，避免绕过白名单进入翻页/搜索处理
+	defer func() {
+		if r := recover(); r != nil {
+			syslog.Errorf("[Notify] 处理 Telegram 回调 panic: %v", r)
+		}
+	}()
 	if cb.Message == nil || cb.Message.Chat == nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "无法定位消息", true)
@@ -322,23 +228,49 @@ func dispatchCallback(token string, cb *telegramCallback) {
 		return
 	}
 	data := strings.TrimSpace(cb.Data)
-	switch {
-	case strings.HasPrefix(data, callbackPrefix+":"):
+	if strings.HasPrefix(data, callbackPrefix+":") {
 		handleFilmPageCallback(token, cb)
-	case strings.HasPrefix(data, dailyCallbackPrefix+":"):
-		handleDailyPageCallback(token, cb)
-	case strings.HasPrefix(data, searchCallbackPrefix+":"):
-		handleSearchPageCallback(token, cb)
-	default:
+	} else {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "未知操作", false)
 		cancel()
 	}
 }
 
-// isTelegramGetUpdatesConflict 识别 Telegram 多实例 getUpdates 冲突
-// （另一实例/进程正在对该 Bot Token 长轮询）。仅匹配 Telegram 官方
-// "terminated by other getUpdates request" 文案，避免误伤 webhook 类错误。
+func isAllowedChat(chatID, username string) bool {
+	cfg := GetConfig()
+	if !cfg.Enabled {
+		return false
+	}
+	chatID = strings.TrimSpace(chatID)
+	username = strings.TrimSpace(strings.TrimPrefix(username, "@"))
+	for _, id := range cfg.ChatIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if id == chatID {
+			return true
+		}
+		if username != "" && strings.EqualFold(strings.TrimPrefix(id, "@"), username) {
+			return true
+		}
+	}
+	for _, t := range cfg.Targets {
+		if !t.Enabled {
+			continue
+		}
+		tChat := strings.TrimSpace(t.ChatID)
+		if tChat == chatID {
+			return true
+		}
+		if username != "" && strings.EqualFold(strings.TrimPrefix(tChat, "@"), username) {
+			return true
+		}
+	}
+	return false
+}
+
 func isTelegramGetUpdatesConflict(err error) bool {
 	if err == nil {
 		return false
@@ -347,8 +279,6 @@ func isTelegramGetUpdatesConflict(err error) bool {
 	return strings.Contains(msg, "terminated by other getupdates")
 }
 
-// isTelegramWebhookActiveError 识别「webhook 未清除导致 getUpdates 被拒」。
-// 与多实例冲突不同：应保持领导权并重新清除 webhook，而非释放领导权退避。
 func isTelegramWebhookActiveError(err error) bool {
 	if err == nil {
 		return false
@@ -357,7 +287,6 @@ func isTelegramWebhookActiveError(err error) bool {
 	return strings.Contains(msg, "can't use getupdates method while webhook is active")
 }
 
-// isTelegramFatalAuthError 识别 401 Unauthorized 或 404 Not Found 等致命凭证错误
 func isTelegramFatalAuthError(err error) bool {
 	if err == nil {
 		return false
@@ -380,77 +309,5 @@ func sleepCtx(ctx context.Context, d time.Duration) bool {
 		return false
 	case <-t.C:
 		return true
-	}
-}
-
-func newPollerOwnerID() string {
-	host, _ := os.Hostname()
-	if host == "" {
-		host = "unknown"
-	}
-	var b [8]byte
-	_, _ = rand.Read(b[:])
-	return fmt.Sprintf("%s-%d-%s", host, os.Getpid(), hex.EncodeToString(b[:]))
-}
-
-// holdBotPollerLock 尝试取得或续期领导锁。
-// Redis 不可用时退化为本机单例轮询（进程内仍靠 pollerGen 单例句柄保证单消费者）；
-// 多实例同时遇 Redis 故障时仍可能双 poll，依赖 Conflict 退避收敛。
-func holdBotPollerLock(ctx context.Context, owner string) bool {
-	if db.Rdb == nil {
-		return true
-	}
-	key := config.NotifyBotPollerLockKey
-	cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-	defer cancel()
-
-	ok, err := db.Rdb.SetNX(cctx, key, owner, botPollerLockTTL).Result()
-	if err != nil {
-		log.Printf("[Notify] Bot 轮询锁 SetNX 失败，退化为本机轮询（多实例时可能 Conflict）: %v", err)
-		return true
-	}
-	if ok {
-		return true
-	}
-
-	cur, err := db.Rdb.Get(cctx, key).Result()
-	if err == redis.Nil {
-		// 竞态空窗：再试一次
-		ok2, err2 := db.Rdb.SetNX(cctx, key, owner, botPollerLockTTL).Result()
-		if err2 != nil {
-			log.Printf("[Notify] Bot 轮询锁重试 SetNX 失败，退化为本机轮询: %v", err2)
-			return true
-		}
-		return ok2
-	}
-	if err != nil {
-		log.Printf("[Notify] Bot 轮询锁 Get 失败，退化为本机轮询: %v", err)
-		return true
-	}
-	if cur != owner {
-		return false
-	}
-	if err := db.Rdb.Expire(cctx, key, botPollerLockTTL).Err(); err != nil {
-		log.Printf("[Notify] Bot 轮询锁续期失败: %v", err)
-		return false
-	}
-	return true
-}
-
-func releaseBotPollerLock(owner string) {
-	if db.Rdb == nil || owner == "" {
-		return
-	}
-	cctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	// 仅释放自己持有的锁
-	const script = `
-if redis.call("get", KEYS[1]) == ARGV[1] then
-  return redis.call("del", KEYS[1])
-end
-return 0
-`
-	if err := db.Rdb.Eval(cctx, script, []string{config.NotifyBotPollerLockKey}, owner).Err(); err != nil {
-		log.Printf("[Notify] 释放 Bot 轮询锁失败: %v", err)
 	}
 }

@@ -368,7 +368,7 @@ export default function FilmListPageView() {
             </Tooltip>
             <Popconfirm
               title="确认删除此影片？"
-              onConfirm={() => handleDelFilm(record.ID)}
+              onConfirm={() => handleDelFilm(record.mid || record.ID)}
             >
               <Tooltip title="删除">
                 <Button

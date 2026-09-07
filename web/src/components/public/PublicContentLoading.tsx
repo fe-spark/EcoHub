@@ -30,27 +30,27 @@ type PublicContentLoadingContextValue = {
 const PublicContentLoadingContext =
   createContext<PublicContentLoadingContextValue | null>(null);
 
-/** 统一成 pathname + search（无 hash、无 origin），便于同链比较 */
+/** 统一成 pathname + 规范化 search（无 hash、无 origin、参数按标准 key 排序并统一编码），便于同链精确比较 */
 export function normalizeAppHref(href: string): string {
   const raw = (href || "").trim();
   if (!raw) {
     return "/";
   }
   try {
-    if (/^https?:\/\//i.test(raw)) {
-      const u = new URL(raw);
-      return `${u.pathname}${u.search}` || "/";
-    }
+    const u = new URL(raw, "http://localhost");
+    u.hash = "";
+    u.searchParams.sort();
+    const search = u.searchParams.toString();
+    return search ? `${u.pathname}?${search}` : u.pathname;
   } catch {
-    // fall through
+    const noHash = raw.split("#")[0] || "/";
+    return noHash.startsWith("/") ? noHash : `/${noHash}`;
   }
-  const noHash = raw.split("#")[0] || "/";
-  return noHash.startsWith("/") ? noHash : `/${noHash}`;
 }
 
 function locationKey(pathname: string, search: string): string {
   const q = search.startsWith("?") ? search.slice(1) : search;
-  return q ? `${pathname}?${q}` : pathname;
+  return normalizeAppHref(q ? `${pathname}?${q}` : pathname);
 }
 
 export function usePublicContentLoading() {

@@ -1259,12 +1259,8 @@ func bulkUpsertSearchTagItemsTx(tx *gorm.DB, items []model.SearchTagItem) error 
 		return nil
 	}
 	return tx.Clauses(clause.OnConflict{
-		Columns: []clause.Column{{Name: "pid"}, {Name: "tag_type"}, {Name: "value"}},
-		DoUpdates: clause.Assignments(map[string]any{
-			"score":      gorm.Expr("score + VALUES(score)"),
-			"name":       gorm.Expr("VALUES(name)"),
-			"deleted_at": nil,
-		}),
+		Columns:   []clause.Column{{Name: "pid"}, {Name: "tag_type"}, {Name: "value"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "score", "deleted_at"}),
 	}).CreateInBatches(items, upsertBatchSize).Error
 }
 

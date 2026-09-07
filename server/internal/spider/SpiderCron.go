@@ -4,10 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
-	"server/internal/access"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
@@ -145,15 +145,15 @@ func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
-// AddApiLogCleanCron 添加清理过期接口访问记录的定时任务
-func AddApiLogCleanCron(id, spec string) (cron.EntryID, error) {
+// AddLogCleanCron 添加系统运行日志清理定时任务
+func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))
+		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
 	}
 	return CronCollect.AddFunc(spec, func() {
 		ft, err := repository.GetFilmTaskById(id)
 		if err != nil {
-			log.Println("ApiLogCleanCron Exec Failed: ", err)
+			log.Println("LogCleanCron Exec Failed: ", err)
 			return
 		}
 		executeTask(ft)
@@ -186,7 +186,7 @@ func ReloadCronTask(id string) error {
 	case 3:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
 	case 4:
-		cid, err = AddApiLogCleanCron(ft.Id, ft.Spec)
+		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -231,16 +231,15 @@ func runTaskBody(ft model.FilmCollectTask) {
 			break
 		}
 		BatchCollectTriggered(model.NotifyTriggerCron, ft.Time, ft.Ids...)
-		doneDetail = fmt.Sprintf("更新指定资源站 %d 个", len(ft.Ids))
-	case 2: // 失败采集恢复
+	case 2: // 失败采集记录重试
 		FullRecoverSpider()
-		doneDetail = "失败采集恢复"
+		doneDetail = "执行失败采集恢复"
 		log.Println("执行一次失败采集恢复任务")
 	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
 		return
-	case 4: // 接口访问记录定期修剪（保留近 7 天）
-		executeApiLogCleanTask(ft)
+	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）
+		executeLogCleanTask(ft)
 		return
 	default:
 		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -305,17 +304,22 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
 }
 
-func executeApiLogCleanTask(ft model.FilmCollectTask) {
+func executeLogCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
-	deleted, err := access.PruneExpiredApiLogs(7)
+	n, err := syslog.PruneExpiredLogs(7 * 24 * time.Hour)
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "自动清理过期运行日志"
+	}
 	if err != nil {
-		syslog.Errorf("[ApiLogClean] 清理过期接口访问记录失败: %v", err)
-		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
+		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
+		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
-	cleanDetail := fmt.Sprintf("已成功清理 7 天前过期接口访问记录共 %d 条", deleted)
-	log.Printf("[ApiLogClean] %s，耗时=%s", cleanDetail, time.Since(startedAt))
-	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
+
+	cleanDetail := fmt.Sprintf("清理过期日志文件 %d 个", n)
+	log.Printf("[LogClean] 清理过期运行日志完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
 // RunTaskOnce 立即手动执行一次任务

@@ -2,7 +2,6 @@ package notify
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"html"
 	"log"
@@ -16,99 +15,11 @@ import (
 
 const callbackPrefix = "nfp"
 
-// FilmPageSession 更新列表视图状态（数据在 MySQL 批次，不在 Redis）。
-type FilmPageSession struct {
-	BatchID      string
-	SiteName     string
-	PageSize     int
-	Total        int
-	OverviewText string
-}
-
-func (s FilmPageSession) totalPages() int {
-	if s.Total <= 0 {
-		return 0
-	}
-	ps := s.PageSize
-	if ps <= 0 {
-		ps = 15
-	}
-	return (s.Total + ps - 1) / ps
-}
-
-func loadFilmPageSession(batchID string) (FilmPageSession, error) {
-	rec, err := LoadChangeBatch(batchID)
-	if err != nil {
-		return FilmPageSession{}, err
-	}
-	total := rec.Total
-	if total <= 0 {
-		total = CountChangeMids(batchID)
-	}
-	return FilmPageSession{
-		BatchID:      rec.ID,
-		SiteName:     rec.SiteName,
-		PageSize:     rec.PageSize,
-		Total:        total,
-		OverviewText: rec.Overview,
-	}, nil
-}
-
 func siteURLConfigured() bool {
 	return strings.TrimSpace(sitePlayBaseURLFn()) != ""
 }
 
-func getCategoryIcon(name string) string {
-	switch {
-	case strings.Contains(name, "动漫") || strings.Contains(name, "动画"):
-		return "🎨"
-	case strings.Contains(name, "短剧"):
-		return "📱"
-	case strings.Contains(name, "电影") || strings.Contains(name, "影"):
-		return "🎬"
-	case strings.Contains(name, "剧"):
-		return "📺"
-	case strings.Contains(name, "综艺"):
-		return "📹"
-	case strings.Contains(name, "纪录"):
-		return "🎞️"
-	default:
-		return "📦"
-	}
-}
-
-// formatCategoryPickFallback 无批次概要文案时，返回与「每日更新」一致的分类引导。
-func formatCategoryPickFallback(sess FilmPageSession) string {
-	total := sess.Total
-	if total <= 0 {
-		total = CountChangeMids(sess.BatchID)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "<b>%s 更新列表</b>\n", formatTitlePrefix(sess.SiteName))
-	fmt.Fprintf(&b, "📋 共 <b>%d</b> 部有更新\n", total)
-	cats := GetChangeBatchCategoryCounts(sess.BatchID)
-	if len(cats) == 0 {
-		fmt.Fprintf(&b, "\n<i>点下方按钮查看更新列表</i>")
-		return b.String()
-	}
-	fmt.Fprintf(&b, "\n<b>有更新的分类</b>：\n")
-	for _, c := range cats {
-		icon := getCategoryIcon(c.CategoryName)
-		fmt.Fprintf(&b, "· %s %s <b>%d</b>\n", icon, html.EscapeString(c.CategoryName), c.Count)
-	}
-	fmt.Fprintf(&b, "\n<i>请点下方分类查看影片列表</i>")
-	return b.String()
-}
-
-func buildOverviewKeyboard(batchID string) *InlineKeyboardMarkup {
-	batchID = strings.TrimSpace(batchID)
-	if batchID == "" {
-		return nil
-	}
-	return buildCategoryKeyboard(callbackPrefix, batchID, GetChangeBatchCategoryCounts(batchID))
-}
-
-// buildCategoryKeyboard 分类入口键盘（采集概要 / 每日更新共用布局）。
+// buildCategoryKeyboard 分类入口键盘（2列排列，尾部带全部）
 func buildCategoryKeyboard(prefix, sessionID string, cats []CategoryCountItem) *InlineKeyboardMarkup {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -131,10 +42,8 @@ func buildCategoryKeyboard(prefix, sessionID string, cats []CategoryCountItem) *
 
 	for i, c := range cats {
 		totalSum += c.Count
-		icon := getCategoryIcon(c.CategoryName)
-		// 按钮文案可含完整分类名；callback 只用短下标，规避 64 字节限制
 		btn := InlineKeyboardButton{
-			Text:         fmt.Sprintf("%s %s (%d)", icon, c.CategoryName, c.Count),
+			Text:         fmt.Sprintf("%s (%d)", c.CategoryName, c.Count),
 			CallbackData: formatOpenCallback(prefix, sessionID, i),
 		}
 		currentRow = append(currentRow, btn)
@@ -159,17 +68,78 @@ func buildCategoryKeyboard(prefix, sessionID string, cats []CategoryCountItem) *
 	return &InlineKeyboardMarkup{InlineKeyboard: rows}
 }
 
-func formatFilmListPageWithChunk(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int) string {
-	return formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, "", "")
+func batchCatName(sess FilmBatchSession, catIdx int) string {
+	if catIdx < 0 || catIdx >= len(sess.Cats) {
+		return ""
+	}
+	return sess.Cats[catIdx].CategoryName
 }
 
-func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk []ChangeMidItem, total, start, end int, category, listTitle string) string {
-	if strings.TrimSpace(listTitle) == "" {
+func batchPageChunk(sess FilmBatchSession, catIdx, page int) (chunk []ChangeMidItem, total, start, end, pageOut int) {
+	var targetMids []int64
+	var allMode bool
+	if catIdx < 0 {
+		allMode = true
+		total = len(sess.AllItems)
+	} else if catIdx < len(sess.CatMids) {
+		targetMids = sess.CatMids[catIdx]
+		total = len(targetMids)
+	}
+
+	ps := sess.PageSize
+	if ps <= 0 {
+		ps = model.DefaultMaxFilmsInMessage
+	}
+	if total == 0 {
+		return nil, 0, 0, 0, 1
+	}
+	totalPages := (total + ps - 1) / ps
+	if page < 1 {
+		page = 1
+	}
+	if page > totalPages {
+		page = totalPages
+	}
+	start = (page - 1) * ps
+	end = start + ps
+	if end > total {
+		end = total
+	}
+
+	if allMode {
+		chunk = sess.AllItems[start:end]
+		return chunk, total, start, end, page
+	}
+
+	subMids := targetMids[start:end]
+	midSet := make(map[int64]struct{}, len(subMids))
+	for _, m := range subMids {
+		midSet[m] = struct{}{}
+	}
+	sourceMap := make(map[int64]string, len(subMids))
+	for _, it := range sess.AllItems {
+		if _, ok := midSet[it.Mid]; ok {
+			sourceMap[it.Mid] = it.SourceName
+			if len(sourceMap) == len(subMids) {
+				break
+			}
+		}
+	}
+	chunk = make([]ChangeMidItem, 0, len(subMids))
+	for _, mid := range subMids {
+		chunk = append(chunk, ChangeMidItem{Mid: mid, SourceName: sourceMap[mid]})
+	}
+	return chunk, total, start, end, page
+}
+
+func formatFilmListPageWithChunkCategory(sess FilmBatchSession, page int, chunk []ChangeMidItem, total, start, end int, category, listTitle string) string {
+	listTitle = html.EscapeString(strings.TrimSpace(listTitle))
+	if listTitle == "" {
 		listTitle = "本次更新列表"
 	}
 	categoryTitle := ""
 	if category != "" && category != "全部" {
-		categoryTitle = fmt.Sprintf(" · %s%s", getCategoryIcon(category), category)
+		categoryTitle = fmt.Sprintf(" · %s", html.EscapeString(category))
 	}
 	if total <= 0 && len(chunk) == 0 {
 		return fmt.Sprintf("<b>%s %s%s</b>\n<i>本分类暂无变更内容</i>\n", formatTitlePrefix(sess.SiteName), listTitle, categoryTitle)
@@ -178,7 +148,7 @@ func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk [
 	for _, item := range chunk {
 		mids = append(mids, item.Mid)
 	}
-	meta := ResolveFilmMeta(mids)
+	names := resolveFilmNames(mids)
 
 	totalPages := 1
 	if sess.PageSize > 0 {
@@ -198,15 +168,14 @@ func formatFilmListPageWithChunkCategory(sess FilmPageSession, page int, chunk [
 	}
 	b.WriteByte('\n')
 	for i, item := range chunk {
-		name := meta[item.Mid].Name
+		name := names[item.Mid]
 		if utf8.RuneCountInString(name) > 40 {
 			r := []rune(name)
 			name = string(r[:40]) + "…"
 		}
 		line := formatFilmLine(model.FilmNotifyItem{Mid: item.Mid, Name: name, SourceName: item.SourceName})
 		line = strings.TrimPrefix(line, "· ")
-		next := fmt.Sprintf("%d. %s\n", start+i+1, line)
-		// Telegram 消息上限 4096；预留尾部截断提示空间
+		next := fmt.Sprintf("%d. %s", start+i+1, line)
 		if utf8.RuneCountInString(b.String())+utf8.RuneCountInString(next) > telegramMaxMessageLen-80 {
 			fmt.Fprintf(&b, "\n<i>…本页已截断</i>")
 			break
@@ -223,36 +192,25 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	batchID, page, catIdx, legacyCat, kind, ok := parsePagedCallback(callbackPrefix, cb.Data)
+	batchID, page, catIdx, _, kind, ok := parsePagedCallback(callbackPrefix, cb.Data)
 	if !ok {
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "无效操作", false)
 		return
 	}
 
-	sess, err := loadFilmPageSession(batchID)
+	sess, err := loadFilmBatchSession(batchID)
 	if err != nil {
 		log.Printf("[Notify] 更新列表回调批次不可用 batch=%s err=%v", batchID, err)
-		switch {
-		case errors.Is(err, ErrChangeBatchNotFound):
-			_ = client.answerCallbackQuery(ctx, token, cb.ID, "批次不存在（可能由另一实例发送）", true)
-		case errors.Is(err, ErrChangeBatchExpired):
-			_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表已过期，请重新采集", true)
-		case errors.Is(err, ErrChangeBatchEmpty):
-			_ = client.answerCallbackQuery(ctx, token, cb.ID, "批次为空", false)
-		default:
-			_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表加载失败，请稍后重试", true)
-		}
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, "列表已过期或不存在", true)
 		return
 	}
-
-	category := resolveCallbackCategory(batchID, catIdx, legacyCat)
 
 	switch kind {
 	case "noop":
 		_ = client.answerCallbackQuery(ctx, token, cb.ID, "没有更多页了", false)
 		return
 	case "info":
-		_ = client.answerCallbackQuery(ctx, token, cb.ID, fmt.Sprintf("共 %d 条", sess.Total), false)
+		_ = client.answerCallbackQuery(ctx, token, cb.ID, fmt.Sprintf("共 %d 部影片", sess.Total), false)
 		return
 	case "back":
 		if cb.Message == nil || cb.Message.Chat == nil {
@@ -260,13 +218,13 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 			return
 		}
 		chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
-		// 返回分类选择：优先批次概要（采集推送同源）；无概要时回退为分类引导文案
-		// 键盘始终与采集概要一致（buildOverviewKeyboard）
 		text := strings.TrimSpace(sess.OverviewText)
 		if text == "" {
-			text = formatCategoryPickFallback(sess)
+			text = fmt.Sprintf("<b>%s 采集概要</b>\n📋 共 <b>%d</b> 部有更新", formatTitlePrefix(sess.SiteName), sess.Total)
+		} else if utf8.RuneCountInString(text) > 4000 {
+			text = truncateRunes(text, 4000)
 		}
-		markup := buildOverviewKeyboard(batchID)
+		markup := buildCategoryKeyboard(callbackPrefix, batchID, sess.Cats)
 		if err := client.editMessageText(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil {
 			if !strings.Contains(err.Error(), "message is not modified") {
 				log.Printf("[Notify] editMessageText 返回概要失败: %v", err)
@@ -287,12 +245,7 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 		return
 	}
 	chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
-	chunk, total, start, end, page, err := LoadChangeMidPageCategory(batchID, category, page, sess.PageSize)
-	if err != nil {
-		_ = client.answerCallbackQuery(ctx, token, cb.ID, "加载失败", true)
-		return
-	}
-
+	chunk, total, start, end, page := batchPageChunk(sess, catIdx, page)
 	ps := sess.PageSize
 	if ps <= 0 {
 		ps = 15
@@ -301,21 +254,10 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 	if total > 0 {
 		totalPages = (total + ps - 1) / ps
 	}
-	// 键盘仍用 catIdx；遗留名称回调无法回写短编码时降级为全部翻页
-	kbCatIdx := catIdx
-	if kbCatIdx < 0 && category != "" {
-		// 旧消息带分类名：翻页时仍按名称筛选，键盘 callback 无法稳定编码名称则保持全部键+名称解析路径
-		// 为兼容翻页，尝试在当前统计列表中定位下标
-		cats := GetChangeBatchCategoryCounts(batchID)
-		for i, c := range cats {
-			if c.CategoryName == category {
-				kbCatIdx = i
-				break
-			}
-		}
-	}
-	text := formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, category, "")
-	markup := buildPagedKeyboardCategory(callbackPrefix, batchID, kbCatIdx, page, totalPages, true)
+
+	catName := batchCatName(sess, catIdx)
+	text := formatFilmListPageWithChunkCategory(sess, page, chunk, total, start, end, catName, "")
+	markup := buildPagedKeyboardCategory(callbackPrefix, batchID, catIdx, page, totalPages, true)
 	if err := client.editMessageText(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil {
 		if !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] editMessageText 失败: %v", err)
@@ -324,8 +266,8 @@ func handleFilmPageCallback(token string, cb *telegramCallback) {
 		}
 	}
 	hint := "更新列表"
-	if category != "" {
-		hint = fmt.Sprintf("%s · 第 %d/%d 页", category, page, totalPages)
+	if catName != "" {
+		hint = fmt.Sprintf("%s · 第 %d/%d 页", catName, page, totalPages)
 	} else if kind == "page" {
 		hint = fmt.Sprintf("第 %d/%d 页", page, totalPages)
 	}

@@ -71,6 +71,9 @@ func GetUserByNameOrEmail(userName string) *model.User {
 // GetUserById 通过id获取对应的用户信息
 func GetUserById(id uint) model.User {
 	var user = model.User{Model: gorm.Model{ID: id}}
+	if db.Mdb == nil {
+		return user
+	}
 	db.Mdb.First(&user)
 	return user
 }

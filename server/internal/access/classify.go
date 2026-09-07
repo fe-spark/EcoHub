@@ -7,38 +7,16 @@ import (
 	"server/internal/config"
 )
 
-// ShouldRecordApiLog 接口审计写入过滤：
-// - 后台与分析侧噪声路径（海报、探活、埋点）一律排除；
-// - TVBox provide 成功流量已由访问分析 Redis 统计，不再重复入库，仅保留 4xx/5xx 错误审计。
-func ShouldRecordApiLog(method, path string, status int) bool {
-	if path == "" {
-		return false
-	}
-	if strings.HasPrefix(path, "/manage") || strings.HasPrefix(path, "/api/manage") {
-		return false
-	}
-	if isProvidePath(path) && status < 400 {
-		return false
-	}
-	return !ShouldSkip(method, path, status)
-}
-
-// ShouldSkip 仅过滤日志噪声与自采样，不参与 PV。
+// ShouldSkip 仅过滤纯基础设施噪声（健康探活成功请求、海报静态资源、OPTIONS 预检），
+// 所有业务接口（如 /api/manage、/api/dailyUpdates 等）一律保留正常打印。
 func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {
 		return true
 	}
-	if strings.HasPrefix(path, "/api/manage") {
+	if path == "/api/config/basic" && status < 400 {
 		return true
 	}
-	switch path {
-	case "/api/health":
-		return method == http.MethodGet || method == http.MethodHead
-	case "/api/config/basic":
-		return status < 400
-	case "/api/stat/view":
-		return true
-	case "/api/index/dailyUpdates", "/api/dailyUpdates":
+	if path == "/api/health" && (method == http.MethodGet || method == http.MethodHead) {
 		return true
 	}
 	return strings.HasPrefix(path, config.FilmPictureAccess)

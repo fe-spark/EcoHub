@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
 import type { MenuProps } from "antd";
 import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
+import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
@@ -13,7 +15,8 @@ import TvboxAnalyticsView from "./tvbox-view";
 import styles from "./index.module.less";
 
 function disabledAccessDay(d: Dayjs) {
-  return d.isAfter(dayjs(), "day") || d.isBefore(dayjs().subtract(13, "day"), "day");
+  // 不设历史天数限制，仅禁止选择未来日期
+  return d.isAfter(dayjs(), "day");
 }
 
 const REFRESH_INTERVAL_STORAGE_KEY = "eh_access_refresh_interval";
@@ -44,10 +47,26 @@ const MODULE_OPTIONS: { key: "web" | "app" | "tvbox"; label: string; icon: React
 ];
 
 export default function AccessPageView() {
+  const router = useRouter();
   const [activeModule, setActiveModule] = useState<"web" | "app" | "tvbox">("web");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
+
+  useEffect(() => {
+    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
+      .then((res) => {
+        if (res.code === 0 && res.data) {
+          if (!res.data.enabled) {
+            router.replace("/manage");
+          }
+        }
+      })
+      .catch(() => {
+        router.replace("/manage");
+      });
+  }, [router]);
+
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
       const saved = Number(localStorage.getItem(REFRESH_INTERVAL_STORAGE_KEY));
@@ -197,6 +216,7 @@ export default function AccessPageView() {
                 刷新
               </Button>
             )}
+
           </Space>
         }
       />

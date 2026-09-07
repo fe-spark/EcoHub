@@ -9,6 +9,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -28,7 +30,6 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 		&model.FilmIndex{},
 		&model.MovieDetailInfo{},
 		&model.FilmListSnapshot{},
-		&model.FilmFilterOptionSnapshot{},
 		&model.Category{},
 		&model.SlaveMoviePlaylist{},
 		&model.MovieMatchKey{},
@@ -312,5 +313,29 @@ func TestEnsureActiveFilmListSnapshot_PlayFromSummaryHealed(t *testing.T) {
 	_ = gdb.Where("snapshot_version = ? AND mid = ?", ver, 201).First(&healedSnap)
 	if healedSnap.PlayFromSummary == "" {
 		t.Fatal("expected film_list_snapshot play_from_summary to be refreshed during self-healing")
+	}
+}
+
+func TestSetActiveSnapshotVersion_RedisBackupFailureStillActivates(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+		ResetActiveSnapshotFallbackForTest()
+	})
+
+	mr.Close()
+	if err := SetActiveSnapshotVersion("v_mem_only"); err != nil {
+		t.Fatalf("memory activation should succeed when redis backup fails, err=%v", err)
+	}
+	if got := GetActiveSnapshotVersion(); got != "v_mem_only" {
+		t.Fatalf("expected memory version v_mem_only, got %q", got)
 	}
 }

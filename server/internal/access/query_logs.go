@@ -20,6 +20,9 @@ func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent,
 
 func QueryLogsScope(day, source, status, client, q, module, platform string, limit int) ([]AccessEvent, error) {
 	if db.Rdb == nil {
+		if !config.AccessLogEnabled {
+			return []AccessEvent{}, nil
+		}
 		return nil, fmt.Errorf("redis unavailable")
 	}
 	now := time.Now().In(time.Local)
@@ -163,7 +166,7 @@ func parseRecentLogEvents(raw []string) []AccessEvent {
 func matchLogSource(source string, evt AccessEvent) bool {
 	switch source {
 	case "slow":
-		return evt.LatencyMs >= config.AccessSlowMs
+		return evt.LatencyMs >= 1000
 	case "error":
 		return evt.Status >= 400
 	default:

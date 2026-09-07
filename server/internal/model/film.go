@@ -130,21 +130,6 @@ func (MovieSourceMapping) TableName() string {
 	return TableMovieSourceMapping
 }
 
-// MoviePlaylist 附属站播放列表持久化模型。
-// 主站不写该表，附属站采集后按匹配键写入，供详情页和播放页直接聚合读取。
-type MoviePlaylist struct {
-	gorm.Model
-	SourceId   string `gorm:"uniqueIndex:uidx_source_key_group"`
-	MovieKey   string `gorm:"uniqueIndex:uidx_source_key_group;index:idx_movie_playlist_movie_key"`
-	GroupIndex int    `gorm:"uniqueIndex:uidx_source_key_group"`
-	GroupName  string `gorm:"type:varchar(255)"`
-	Content    string `gorm:"type:longtext"`
-}
-
-func (MoviePlaylist) TableName() string {
-	return TableMoviePlaylist
-}
-
 // MoviePoster 附属站海报图源持久化模型。
 // 当站点设为 IsPosterSource 时，采集时将海报按 match_key 写入该表。
 // 主站入库和附属站采集双向反查该表，彻底解耦时序依赖。
@@ -260,7 +245,7 @@ func (FilmIndex) TableName() string {
 // 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
 type FilmListSnapshot struct {
 	gorm.Model
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:1"`
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:1;index:idx_snap_ver_name,priority:1"`
 	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
 	ContentKey      string `json:"contentKey" gorm:"size:128;index"`
 	SourceId        string `json:"sourceId" gorm:"index"`
@@ -274,7 +259,7 @@ type FilmListSnapshot struct {
 	CName            string `json:"cName"`
 
 	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`
-	Name               string  `json:"name" gorm:"index:idx_snap_search_name"`
+	Name               string  `json:"name" gorm:"size:255;index:idx_snap_search_name;index:idx_snap_ver_name,priority:2"`
 	SubTitle           string  `json:"subTitle" gorm:"type:text"`
 	ClassTag           string  `json:"classTag" gorm:"type:text"`
 	Area               string  `json:"area" gorm:"index"`
@@ -316,43 +301,6 @@ func (s FilmListSnapshot) DisplayPictureSlide() string {
 
 func (FilmListSnapshot) TableName() string {
 	return TableFilmListSnapshot
-}
-
-// FilmFilterOptionSnapshot 是当前前台快照版本下的筛选项读模型。
-// 它在快照发布阶段生成，前台、后台和 TVBox 配置只读取该表，不在请求链路实时聚合标签。
-type FilmFilterOptionSnapshot struct {
-	gorm.Model
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup"`
-	Pid             int64  `json:"pid" gorm:"uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup;not null"`
-	TagType         string `json:"tagType" gorm:"size:32;uniqueIndex:uidx_filter_option;index:idx_filter_option_lookup;not null"`
-	Name            string `json:"name" gorm:"size:128;not null"`
-	Value           string `json:"value" gorm:"size:128;uniqueIndex:uidx_filter_option;not null"`
-	Score           int64  `json:"score" gorm:"index;default:0"`
-	Sort            int    `json:"sort" gorm:"index;default:0"`
-}
-
-func (FilmFilterOptionSnapshot) TableName() string {
-	return TableFilterOption
-}
-
-// FilmFilterIndexSnapshot 是当前前台快照版本下的筛选倒排索引。
-// 它把 Category/Plot/Area/Language/Year 映射到影片 mid，避免请求时扫描 class_tag 或全量快照。
-type FilmFilterIndexSnapshot struct {
-	gorm.Model
-	SnapshotVersion string  `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup"`
-	Pid             int64   `json:"pid" gorm:"uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
-	Cid             int64   `json:"cid" gorm:"index"`
-	TagType         string  `json:"tagType" gorm:"size:32;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
-	TagValue        string  `json:"tagValue" gorm:"size:128;uniqueIndex:uidx_filter_index;index:idx_filter_index_lookup;not null"`
-	Mid             int64   `json:"mid" gorm:"uniqueIndex:uidx_filter_index;index;not null"`
-	Year            int64   `json:"year" gorm:"index"`
-	UpdateStamp     int64   `json:"updateStamp" gorm:"index"`
-	Hits            int64   `json:"hits" gorm:"index"`
-	Score           float64 `json:"score" gorm:"index"`
-}
-
-func (FilmFilterIndexSnapshot) TableName() string {
-	return TableFilterIndex
 }
 
 // SearchTagItem 影片检索标签持久化模型 (MySQL)
