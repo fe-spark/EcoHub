@@ -424,8 +424,8 @@ func TestFormatFilmLine(t *testing.T) {
 	if !strings.Contains(linked, ">测试片<") {
 		t.Fatalf("name should be link text: %s", linked)
 	}
-	if !strings.Contains(linked, "[红牛资源]") {
-		t.Fatalf("expected source name suffix: %s", linked)
+	if strings.Contains(linked, "[红牛资源]") {
+		t.Fatalf("should not contain source name suffix: %s", linked)
 	}
 }
 

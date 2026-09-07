@@ -717,14 +717,17 @@ func flattenSourceCategoryPlacements(nodes []*model.CategoryTree, parentId int64
 
 // buildTreeHelper 内部辅助函数：直接从列表构建树形结构内存模型
 func buildTreeHelper() model.CategoryTree {
-	var allList []model.Category
-	db.Mdb.Order("pid ASC, sort ASC, id ASC").Find(&allList)
-
-	nodes := make(map[int64]*model.CategoryTree)
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
 		Children: make([]*model.CategoryTree, 0),
 	}
+	if db.Mdb == nil {
+		return root
+	}
+	var allList []model.Category
+	db.Mdb.Order("pid ASC, sort ASC, id ASC").Find(&allList)
+
+	nodes := make(map[int64]*model.CategoryTree)
 
 	for _, c := range allList {
 		item := c
