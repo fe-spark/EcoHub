@@ -191,7 +191,7 @@ export default function ManageLayoutView({
     });
     ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
       .then((resp) => {
-        if (resp.code === 0 && (resp.data?.enabled || resp.data?.hasData)) {
+        if (resp.code === 0 && resp.data?.enabled) {
           setAccessVisible(true);
         } else {
           setAccessVisible(false);

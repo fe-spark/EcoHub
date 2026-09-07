@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Alert, Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
+import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
 import type { MenuProps } from "antd";
 import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
@@ -52,20 +52,18 @@ export default function AccessPageView() {
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [analyticsEnabled, setAnalyticsEnabled] = useState<boolean | null>(null);
 
   useEffect(() => {
     ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
       .then((res) => {
         if (res.code === 0 && res.data) {
-          setAnalyticsEnabled(res.data.enabled);
-          if (!res.data.enabled && !res.data.hasData) {
+          if (!res.data.enabled) {
             router.replace("/manage");
           }
         }
       })
       .catch(() => {
-        setAnalyticsEnabled(false);
+        router.replace("/manage");
       });
   }, [router]);
 
@@ -222,16 +220,6 @@ export default function AccessPageView() {
           </Space>
         }
       />
-
-      {analyticsEnabled === false && (
-        <Alert
-          type="info"
-          showIcon
-          message="数据分析功能当前未开启"
-          description="系统默认不开启数据分析以保持最低资源消耗与最高性能。如需启用全站访问、播放热度与客户端统计，请在环境配置中设置 ACCESS_ANALYTICS_ENABLED=true 并重启服务。"
-          style={{ marginBottom: 16 }}
-        />
-      )}
 
       <GlobalOverviewBar
         dayStr={dayStr}
