@@ -345,7 +345,7 @@ func DelCollectResource(id string) error {
 			return err
 		}
 		// 4. 删除采集失败记录
-		if err := tx.Where("origin_id = ?", id).Delete(&model.FailureRecord{}).Error; err != nil {
+		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
 		// 5. 删除采集站本身

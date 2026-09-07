@@ -225,9 +225,9 @@ func loadRolledDay() (time.Time, error) {
 	if db.Rdb != nil {
 		raw, err := db.Rdb.Get(db.Cxt, rolledDayKey()).Result()
 		if err == nil && strings.TrimSpace(raw) != "" {
-			if t, parseErr := time.ParseInLocation("2006-01-02", strings.TrimSpace(raw), time.Local); parseErr == nil {
-				return startOfLocalDay(t), nil
-			}
+			return parseRolledDay(strings.TrimSpace(raw), nil)
+		} else if err != nil && err != redis.Nil {
+			return time.Time{}, err
 		}
 	}
 
@@ -235,9 +235,7 @@ func loadRolledDay() (time.Time, error) {
 	if db.Mdb != nil {
 		var maxDay string
 		if err := db.Mdb.Model(&model.AccessDailyStats{}).Select("MAX(day)").Scan(&maxDay).Error; err == nil && maxDay != "" {
-			if t, parseErr := time.ParseInLocation("2006-01-02", maxDay, time.Local); parseErr == nil {
-				return startOfLocalDay(t), nil
-			}
+			return parseRolledDay(maxDay, nil)
 		}
 	}
 

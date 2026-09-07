@@ -40,6 +40,16 @@ func getSearchTagsCacheVersion() string {
 func DelFilmSearch(id int64) error {
 	info := GetFilmIndexById(id)
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		// 查出该 mid 关联的所有 match_key，在事务内级联物理删除附属站关联播放列表
+		var matchKeys []string
+		if err := tx.Model(&model.MovieMatchKey{}).Where("mid = ?", id).Pluck("match_key", &matchKeys).Error; err != nil {
+			return err
+		}
+		if len(matchKeys) > 0 {
+			if err := tx.Unscoped().Where("movie_key IN ?", matchKeys).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+				return err
+			}
+		}
 		if err := tx.Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
