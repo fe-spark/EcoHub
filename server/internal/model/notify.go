@@ -136,6 +136,7 @@ type CollectBatchNotifyPayload struct {
 	TotalFilms         int                  `json:"totalFilms"`
 	IncludeFilmDetails bool                 `json:"includeFilmDetails"`
 	FinalizeError      string               `json:"finalizeError,omitempty"`
+	Films              []FilmNotifyItem     `json:"films,omitempty"`
 	// ChangeBatchID 批次标识，由 BuildBatchPayload 在同步阶段写入；异步发送只读此值。
 	ChangeBatchID string `json:"-"`
 }

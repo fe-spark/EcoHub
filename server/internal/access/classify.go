@@ -7,22 +7,16 @@ import (
 	"server/internal/config"
 )
 
-// ShouldSkip 仅过滤日志噪声与自采样，不参与 PV。
+// ShouldSkip 仅过滤纯基础设施噪声（健康探活成功请求、海报静态资源、OPTIONS 预检），
+// 所有业务接口（如 /api/manage、/api/dailyUpdates 等）一律保留正常打印。
 func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {
 		return true
 	}
-	if strings.HasPrefix(path, "/api/manage") {
+	if path == "/api/config/basic" && status < 400 {
 		return true
 	}
-	switch path {
-	case "/api/health":
-		return method == http.MethodGet || method == http.MethodHead
-	case "/api/config/basic":
-		return status < 400
-	case "/api/stat/view":
-		return true
-	case "/api/index/dailyUpdates", "/api/dailyUpdates":
+	if path == "/api/health" && (method == http.MethodGet || method == http.MethodHead) {
 		return true
 	}
 	return strings.HasPrefix(path, config.FilmPictureAccess)

@@ -253,6 +253,138 @@ func TestFormatBatchOverview(t *testing.T) {
 	}
 }
 
+func TestFormatBatchOverviewWithFilms(t *testing.T) {
+	payload := model.CollectBatchNotifyPayload{
+		Trigger:            model.NotifyTriggerCron,
+		SiteName:           "测试站",
+		DurationSec:        10,
+		SuccessSources:     1,
+		TotalFilms:         3,
+		IncludeFilmDetails: true,
+	}
+	rendered := formatBatchOverview(payload, 3, 15)
+	if !strings.Contains(rendered, "更新列表 <b>3</b> 部 · <b>1</b> 页") {
+		t.Fatalf("expected overview list line, got: %s", rendered)
+	}
+
+	sess := FilmBatchSession{
+		BatchID:  "test_batch",
+		SiteName: "测试站",
+		PageSize: 15,
+		Total:    3,
+	}
+	chunk := []ChangeMidItem{
+		{Mid: 1, SourceName: "速博"},
+		{Mid: 2, SourceName: "极速"},
+	}
+	listPage := formatFilmListPageWithChunkCategory(sess, 1, chunk, 3, 0, 2, "电视剧", "本次更新列表")
+	if !strings.Contains(listPage, "本次更新列表 · 电视剧") {
+		t.Fatalf("expected category title, got: %s", listPage)
+	}
+	if !strings.Contains(listPage, "第 <b>1/1</b> 页") {
+		t.Fatalf("expected page line, got: %s", listPage)
+	}
+}
+
+func TestFormatFilmListPageWithChunkCategory_HTMLEscape(t *testing.T) {
+	sess := FilmBatchSession{
+		BatchID:  "test_batch",
+		SiteName: "测试站",
+		PageSize: 15,
+		Total:    2,
+	}
+	chunk := []ChangeMidItem{
+		{Mid: 1, SourceName: "源&1"},
+	}
+	// 分类名与标题包含 HTML 特殊字符
+	rendered := formatFilmListPageWithChunkCategory(sess, 1, chunk, 1, 0, 1, "科幻&魔幻", "更新<列表>")
+	if !strings.Contains(rendered, "更新&lt;列表&gt; · 科幻&amp;魔幻") {
+		t.Fatalf("expected escaped title, got: %s", rendered)
+	}
+}
+
+func TestBatchPageChunk_Slicing(t *testing.T) {
+	items := []ChangeMidItem{
+		{Mid: 1, SourceName: "A"},
+		{Mid: 2, SourceName: "B"},
+		{Mid: 3, SourceName: "C"},
+		{Mid: 4, SourceName: "D"},
+		{Mid: 5, SourceName: "E"},
+	}
+	sess := FilmBatchSession{
+		BatchID:  "test_sess",
+		PageSize: 2,
+		AllItems: items,
+		Cats: []CategoryCountItem{
+			{CategoryID: 10, CategoryName: "电影", Count: 3},
+		},
+		CatMids: [][]int64{
+			{2, 4, 5},
+		},
+	}
+
+	// 1. 全部分类模式 (catIdx = -1)
+	chunk, total, start, end, page := batchPageChunk(sess, -1, 2)
+	if total != 5 || page != 2 || start != 2 || end != 4 || len(chunk) != 2 {
+		t.Fatalf("unexpected allMode paging: total=%d page=%d start=%d end=%d len=%d", total, page, start, end, len(chunk))
+	}
+	if chunk[0].Mid != 3 || chunk[1].Mid != 4 {
+		t.Fatalf("unexpected chunk items: %+v", chunk)
+	}
+
+	// 2. 指定分类模式 (catIdx = 0)
+	chunkCat, totalCat, startCat, endCat, pageCat := batchPageChunk(sess, 0, 2)
+	if totalCat != 3 || pageCat != 2 || startCat != 2 || endCat != 3 || len(chunkCat) != 1 {
+		t.Fatalf("unexpected catMode paging: total=%d page=%d start=%d end=%d len=%d", totalCat, pageCat, startCat, endCat, len(chunkCat))
+	}
+	if chunkCat[0].Mid != 5 || chunkCat[0].SourceName != "E" {
+		t.Fatalf("unexpected chunkCat item: %+v", chunkCat)
+	}
+}
+
+func TestSaveChangeBatchSession_EvictionRobustness(t *testing.T) {
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+
+	// 1. 保存 session
+	sess1 := FilmBatchSession{BatchID: "batch_1"}
+	if err := SaveChangeBatchSession(sess1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 2. 重复保存相同 session 不制造重复 memOrder
+	if err := SaveChangeBatchSession(sess1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	memSessionMu.RLock()
+	orderLen := len(memOrder)
+	memSessionMu.RUnlock()
+	if orderLen != 1 {
+		t.Fatalf("expected memOrder len=1, got %d", orderLen)
+	}
+
+	// 3. 模拟队首条目已被提前清理（如 ok 为 false），后续插入仍能正常处理并不死锁或卡死
+	memSessionMu.Lock()
+	delete(memSessions, "batch_1")
+	memSessionMu.Unlock()
+
+	sess2 := FilmBatchSession{BatchID: "batch_2"}
+	if err := SaveChangeBatchSession(sess2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	memSessionMu.RLock()
+	defer memSessionMu.RUnlock()
+	if len(memSessions) != 1 || memSessions["batch_2"].sess.BatchID != "batch_2" {
+		t.Fatalf("expected batch_2 in memSessions")
+	}
+	if len(memOrder) != 1 || memOrder[0] != "batch_2" {
+		t.Fatalf("expected dead batch_1 to be evicted, memOrder=%v", memOrder)
+	}
+}
+
 func TestRolling24hWindow(t *testing.T) {
 	loc := notifyCST()
 	now := time.Date(2026, 8, 13, 10, 0, 0, 0, loc)
