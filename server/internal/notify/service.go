@@ -147,14 +147,12 @@ func GetConfig() model.NotifyConfig {
 
 // SaveConfig 保存配置。
 func SaveConfig(cfg model.NotifyConfig) error {
-	return repository.SaveNotifyConfig(cfg)
+	if err := repository.SaveNotifyConfig(cfg); err != nil {
+		return err
+	}
+	EnsureBotPoller()
+	return nil
 }
-
-// EnsureBotPoller 已废弃长轮询（单向通知无须常驻轮询）
-func EnsureBotPoller() {}
-
-// StopBotPoller 已废弃长轮询
-func StopBotPoller() {}
 
 // siteName 读取站点名用于消息前缀。
 func siteName() string {
@@ -225,6 +223,43 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 		severity = model.SeverityError
 	}
 	overview := formatBatchOverview(payload, listN, pageSize)
+
+	// 若开启影片明细且有更新影片，生成分类会话并在消息尾部挂载分类入口键盘
+	if payload.IncludeFilmDetails && listN > 0 && len(payload.Films) > 0 {
+		items := make([]ChangeMidItem, 0, len(payload.Films))
+		for _, f := range payload.Films {
+			items = append(items, ChangeMidItem{Mid: f.Mid, SourceName: f.SourceName})
+		}
+		cats, catMids, err := BuildCategoryPlanForMids(items)
+		if err != nil {
+			syslog.Errorf("[Notify] 计算批次分类计划失败: %v", err)
+		}
+		sess := FilmBatchSession{
+			BatchID:      payload.ChangeBatchID,
+			SiteName:     payload.SiteName,
+			PageSize:     pageSize,
+			OverviewText: overview,
+			Total:        listN,
+			AllItems:     items,
+			Cats:         cats,
+			CatMids:      catMids,
+		}
+		if err := SaveChangeBatchSession(sess); err != nil {
+			syslog.Errorf("[Notify] 保存变更批次会话失败: %v", err)
+		}
+
+		parts := splitTelegramMessages(overview)
+		markup := buildCategoryKeyboard(callbackPrefix, payload.ChangeBatchID, cats)
+		for i, part := range parts {
+			var btnMarkup *InlineKeyboardMarkup
+			if i == len(parts)-1 {
+				btnMarkup = markup
+			}
+			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, btnMarkup)
+		}
+		return
+	}
+
 	sendMessages(cfg, severity, model.CategoryCollect, splitTelegramMessages(overview))
 }
 
@@ -771,10 +806,23 @@ func BuildBatchPayload(batch *ChangeBatch, trigger string, sources []model.Sourc
 		sumSource += s.FilmsTotal
 	}
 	filmTotal := sumSource
+	var films []model.FilmNotifyItem
+	batchID := ""
 	if batch != nil {
 		if n := batch.Count(); n > 0 {
 			filmTotal = n
 		}
+		items := batch.Items()
+		if len(items) > 0 {
+			films = make([]model.FilmNotifyItem, 0, len(items))
+			for _, it := range items {
+				films = append(films, model.FilmNotifyItem{
+					Mid:        it.Mid,
+					SourceName: it.SourceName,
+				})
+			}
+		}
+		batchID = batch.ID()
 	}
 	return model.CollectBatchNotifyPayload{
 		Trigger:            trigger,
@@ -788,6 +836,7 @@ func BuildBatchPayload(batch *ChangeBatch, trigger string, sources []model.Sourc
 		TotalFilms:         filmTotal,
 		IncludeFilmDetails: true,
 		FinalizeError:      finalizeErr,
-		ChangeBatchID:      batch.ID(),
+		Films:              films,
+		ChangeBatchID:      batchID,
 	}
 }

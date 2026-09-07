@@ -2,7 +2,9 @@ package notify
 
 import (
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -23,10 +25,11 @@ type ChangeMidItem struct {
 
 // ChangeBatch 一次采集的变更批次（纯内存追踪，无需 DB 临时表与全表轮询清理）。
 type ChangeBatch struct {
-	mu   sync.Mutex
-	id   string
-	mids []int64
-	seen map[int64]struct{}
+	mu    sync.Mutex
+	id    string
+	mids  []int64
+	items []ChangeMidItem
+	seen  map[int64]struct{}
 }
 
 // StartChangeBatch 开启新批次。
@@ -63,6 +66,7 @@ func (b *ChangeBatch) AppendMids(sourceName string, mids ...int64) {
 		}
 		b.seen[mid] = struct{}{}
 		b.mids = append(b.mids, mid)
+		b.items = append(b.items, ChangeMidItem{Mid: mid, SourceName: sourceName})
 	}
 }
 
@@ -85,6 +89,18 @@ func (b *ChangeBatch) Mids() []int64 {
 	defer b.mu.Unlock()
 	out := make([]int64, len(b.mids))
 	copy(out, b.mids)
+	return out
+}
+
+// Items 复制批次内去重变更项（含 mid 与触发更新的源名称）。
+func (b *ChangeBatch) Items() []ChangeMidItem {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	out := make([]ChangeMidItem, len(b.items))
+	copy(out, b.items)
 	return out
 }
 
@@ -210,3 +226,210 @@ func LoadChangeMidsBetween(from, to time.Time, limit int) ([]ChangeMidItem, erro
 	}
 	return out, nil
 }
+
+// FilmBatchSession 变更批次会话（保存于 Redis，TTL 48h；亦支持内存 fallback）
+type FilmBatchSession struct {
+	BatchID      string              `json:"batchId"`
+	SiteName     string              `json:"siteName"`
+	PageSize     int                 `json:"pageSize"`
+	OverviewText string              `json:"overviewText"`
+	Total        int                 `json:"total"`
+	AllItems     []ChangeMidItem     `json:"allItems"`
+	Cats         []CategoryCountItem `json:"cats"`
+	CatMids      [][]int64           `json:"catMids"`
+}
+
+const (
+	batchSessionTTL     = 48 * time.Hour
+	maxMemBatchSessions = 50
+)
+
+type memSessionEntry struct {
+	sess      FilmBatchSession
+	expiresAt time.Time
+}
+
+var (
+	memSessionMu sync.RWMutex
+	memSessions  = make(map[string]memSessionEntry)
+	memOrder     []string
+)
+
+func batchRedisKey(id string) string {
+	return "EcoHub:NotifyBatch:" + id
+}
+
+// SaveChangeBatchSession 保存变更批次会话（Redis + 本地内存备份）
+func SaveChangeBatchSession(sess FilmBatchSession) error {
+	if sess.BatchID == "" {
+		return fmt.Errorf("empty batch id")
+	}
+	now := time.Now()
+	memSessionMu.Lock()
+	// 清理已过期或已失效条目
+	for len(memOrder) > 0 {
+		oldestID := memOrder[0]
+		entry, ok := memSessions[oldestID]
+		if !ok || now.After(entry.expiresAt) {
+			delete(memSessions, oldestID)
+			memOrder = memOrder[1:]
+			continue
+		}
+		break
+	}
+	// 超出容量上限淘汰最早会话
+	for len(memOrder) >= maxMemBatchSessions {
+		oldestID := memOrder[0]
+		delete(memSessions, oldestID)
+		memOrder = memOrder[1:]
+	}
+	if _, exists := memSessions[sess.BatchID]; !exists {
+		memOrder = append(memOrder, sess.BatchID)
+	}
+	memSessions[sess.BatchID] = memSessionEntry{
+		sess:      sess,
+		expiresAt: now.Add(batchSessionTTL),
+	}
+	memSessionMu.Unlock()
+
+	if db.Rdb != nil {
+		raw, err := json.Marshal(sess)
+		if err == nil {
+			_ = db.Rdb.Set(db.Cxt, batchRedisKey(sess.BatchID), raw, batchSessionTTL).Err()
+		}
+	}
+	return nil
+}
+
+func loadFilmBatchSession(batchID string) (FilmBatchSession, error) {
+	batchID = strings.TrimSpace(batchID)
+	if batchID == "" {
+		return FilmBatchSession{}, fmt.Errorf("empty batch id")
+	}
+	if db.Rdb != nil {
+		data, err := db.Rdb.Get(db.Cxt, batchRedisKey(batchID)).Result()
+		if err == nil {
+			var sess FilmBatchSession
+			if json.Unmarshal([]byte(data), &sess) == nil {
+				return sess, nil
+			}
+		}
+	}
+	memSessionMu.RLock()
+	entry, ok := memSessions[batchID]
+	memSessionMu.RUnlock()
+	if ok && time.Now().Before(entry.expiresAt) {
+		return entry.sess, nil
+	}
+	return FilmBatchSession{}, fmt.Errorf("session not found")
+}
+
+func loadFilmPids(mids []int64) (map[int64]int64, error) {
+	out := make(map[int64]int64, len(mids))
+	if len(mids) == 0 || db.Mdb == nil {
+		return out, nil
+	}
+	const chunk = 500
+	for start := 0; start < len(mids); start += chunk {
+		end := start + chunk
+		if end > len(mids) {
+			end = len(mids)
+		}
+		var rows []struct {
+			Mid int64         `gorm:"column:mid"`
+			Pid sql.NullInt64 `gorm:"column:pid"`
+		}
+		err := db.Mdb.Table(model.TableFilmIndex).
+			Select("mid, pid").
+			Where("mid IN ?", mids[start:end]).
+			Scan(&rows).Error
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			if r.Pid.Valid {
+				out[r.Mid] = r.Pid.Int64
+			}
+		}
+	}
+	return out, nil
+}
+
+// BuildCategoryPlanForMids 针对变更项按首页大类聚合分类（支持其他）
+func BuildCategoryPlanForMids(all []ChangeMidItem) (cats []CategoryCountItem, catMids [][]int64, err error) {
+	if len(all) == 0 {
+		return nil, nil, nil
+	}
+	mids := make([]int64, 0, len(all))
+	for _, it := range all {
+		mids = append(mids, it.Mid)
+	}
+	pidByMid, err := loadFilmPids(mids)
+	if err != nil {
+		return nil, nil, err
+	}
+	nav := navTopCategories()
+	navIDs := navTopCategoryIDs(nav)
+	navSet := make(map[int64]struct{}, len(navIDs))
+	for _, id := range navIDs {
+		navSet[id] = struct{}{}
+	}
+
+	buckets := make(map[int64][]ChangeMidItem, len(nav)+1)
+	var other []ChangeMidItem
+	for _, it := range all {
+		pid := pidByMid[it.Mid]
+		if pid > 0 {
+			if _, ok := navSet[pid]; ok {
+				buckets[pid] = append(buckets[pid], it)
+				continue
+			}
+		}
+		other = append(other, it)
+	}
+
+	countByPid := make(map[int64]int, len(buckets))
+	for pid, list := range buckets {
+		countByPid[pid] = len(list)
+	}
+	cats = categoryCountsFromPidMap(countByPid, len(other))
+	catMids = make([][]int64, len(cats))
+	for i, c := range cats {
+		var items []ChangeMidItem
+		if c.CategoryName == "其他" {
+			items = other
+		} else {
+			items = buckets[c.CategoryID]
+		}
+		ids := make([]int64, 0, len(items))
+		for _, it := range items {
+			ids = append(ids, it.Mid)
+		}
+		catMids[i] = ids
+	}
+	return cats, catMids, nil
+}
+
+func categoryCountsFromPidMap(countByPid map[int64]int, otherCount int) []CategoryCountItem {
+	nav := navTopCategories()
+	out := make([]CategoryCountItem, 0, len(nav)+1)
+	for _, c := range nav {
+		cnt := countByPid[c.Id]
+		if cnt > 0 {
+			out = append(out, CategoryCountItem{
+				CategoryID:   c.Id,
+				CategoryName: c.Name,
+				Count:        cnt,
+			})
+		}
+	}
+	if otherCount > 0 {
+		out = append(out, CategoryCountItem{
+			CategoryID:   0,
+			CategoryName: "其他",
+			Count:        otherCount,
+		})
+	}
+	return out
+}
+

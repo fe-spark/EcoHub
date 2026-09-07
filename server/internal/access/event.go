@@ -101,9 +101,6 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	path := SanitizePath(c.Request.URL.Path)
 	method := c.Request.Method
 	status := c.Writer.Status()
-	if ShouldSkip(method, path, status) {
-		return nil
-	}
 	// HTTP 采集只保留 TVBox provide；页面埋点走 TrackPagePayload，避免普通 API 占满采集队列。
 	if !isProvidePath(path) {
 		return nil

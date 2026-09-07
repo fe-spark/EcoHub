@@ -18,7 +18,6 @@ func AccessLog() gin.HandlerFunc {
 		c.Next()
 
 		clientIP := realClientIP(c)
-		path := c.Request.URL.Path
 		elapsed := time.Since(start)
 		status := c.Writer.Status()
 
@@ -29,9 +28,10 @@ func AccessLog() gin.HandlerFunc {
 			}
 		}
 
-		if access.ShouldSkip(c.Request.Method, path, status) {
+		if access.ShouldSkip(c.Request.Method, c.Request.URL.Path, status) {
 			return
 		}
+
 		uri := sanitizeAccessLogURI(c.Request.URL.RequestURI())
 		latMs := elapsed.Milliseconds()
 		ipLog := access.IPPreview(clientIP)

@@ -21,22 +21,22 @@ func TestShouldSkip(t *testing.T) {
 		status       int
 		skip         bool
 	}{
-		{"GET", "/api/health", 200, true},
-		{"HEAD", "/api/health", 200, true},
-		{"GET", "/api/index/dailyUpdates", 200, true},
-		{"GET", "/api/dailyUpdates", 200, true},
-		{"GET", "/api/manage", 200, true},
-		{"GET", "/api/manage/system/logs/delta", 200, true},
-		{"GET", "/api/manage/collect/list", 200, true},
-		{"GET", "/api/manage/collect/list", 500, true},
-		{"GET", "/api/manage/access/overview", 200, true},
-		{"POST", "/api/manage/film/add", 200, true},
-		{"POST", "/api/stat/view", 200, true},
-		{"GET", "/api/upload/pic/poster/a.jpg", 200, true},
 		{"OPTIONS", "/api/index", 204, true},
-		{"GET", "/api/index", 200, false},
 		{"GET", "/api/config/basic", 200, true},
 		{"GET", "/api/config/basic", 500, false},
+		{"GET", "/api/health", 200, true},
+		{"HEAD", "/api/health", 200, true},
+		{"POST", "/api/health", 200, false},
+		{"GET", "/api/upload/pic/poster/a.jpg", 200, true},
+		// 业务管理与前台接口均不应被跳过（必须正常打印日志）
+		{"GET", "/api/manage", 200, false},
+		{"GET", "/api/manage/system/logs/delta", 200, false},
+		{"GET", "/api/manage/collect/list", 200, false},
+		{"POST", "/api/manage/film/add", 200, false},
+		{"GET", "/api/dailyUpdates", 200, false},
+		{"GET", "/api/index/dailyUpdates", 200, false},
+		{"POST", "/api/stat/view", 200, false},
+		{"GET", "/api/index", 200, false},
 		{"GET", "/api/provide/vod", 200, false},
 	}
 	for _, c := range cases {
@@ -408,12 +408,6 @@ func TestBuildPageEvent(t *testing.T) {
 	}
 	if buildPageEvent(testPageCtx("Mozilla/5.0", "203.0.113.10"), "search", "庆余年", "web", "/search") != nil {
 		t.Fatal("debounced")
-	}
-}
-
-func TestShouldSkipHealthOnlyGet(t *testing.T) {
-	if !ShouldSkip(http.MethodGet, "/api/health", 200) {
-		t.Fatal("get health")
 	}
 }
 

@@ -87,6 +87,7 @@ func start() {
 
 	service.InitSvc.DefaultDataInit()
 	access.StartCollector()
+	notify.EnsureBotPoller()
 
 	r := router.SetupRouter()
 	srv := &http.Server{
@@ -126,6 +127,9 @@ func start() {
 	if err := spider.WaitPendingWrites(writeCtx); err != nil {
 		log.Printf("[Shutdown] 等待采集写队列排空超时或失败: %v", err)
 	}
+
+	// 4. 停止 Telegram Bot 轮询
+	notify.StopBotPoller()
 
 	// 5. 等待在途异步通知发送协程排空
 	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)

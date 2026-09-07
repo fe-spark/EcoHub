@@ -118,6 +118,11 @@ func GetSiteBasic() model.BasicConfig {
 		}
 	}
 	// 2. MySQL 兜底
+	if db.Mdb == nil {
+		c.Tip = model.DefaultTipConfig()
+		c.Notice = model.DefaultNoticeConfig()
+		return c
+	}
 	var rec model.SiteConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
 		log.Println("GetSiteBasic MySQL Error:", err)
