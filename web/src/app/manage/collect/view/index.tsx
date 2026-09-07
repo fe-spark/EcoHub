@@ -322,10 +322,10 @@ export default function CollectManagePageView() {
       }
     }
     if (success > 0 || failed > 0) {
-      phaseParts.push(`入库 ${success}`);
+      phaseParts.push(`已采集 ${success} 页`);
     }
     if (failed > 0) {
-      phaseParts.push(`失败 ${failed}`);
+      phaseParts.push(`失败 ${failed} 页`);
     }
 
     return {
@@ -765,7 +765,7 @@ export default function CollectManagePageView() {
   const stopTask = async (id: string) => {
     const resp = await ApiPost("/manage/spider/stop", { id });
     if (resp.code === 0) {
-      message.success("已停止该采集任务，已请求数据将继续入库");
+      message.success("已停止该采集任务，已抓取数据将继续处理完成");
       await getCollectList();
       return;
     }
@@ -1026,7 +1026,7 @@ export default function CollectManagePageView() {
               </Button>
               <Popconfirm
                 title="批量禁用采集站？"
-                description="禁用后会停止选中采集站的后续请求，已请求数据会继续入库，并阻止后续批量/自动采集调度。"
+                description="禁用后会停止选中采集站的后续请求，已抓取数据会继续处理完成，并阻止后续批量/自动采集调度。"
                 okText="确认禁用"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
@@ -1083,7 +1083,7 @@ export default function CollectManagePageView() {
                   {overallSession.running ? (
                     <Popconfirm
                       title="终止当前采集任务？"
-                      description="将强制停止当前所有进行中的采集；已请求数据会继续入库。"
+                      description="将强制停止当前所有进行中的采集；已抓取数据会继续处理完成。"
                       onConfirm={() => void submitStopAllTasks()}
                       okText="确认终止"
                       cancelText="取消"

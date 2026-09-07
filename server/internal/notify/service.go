@@ -150,7 +150,6 @@ func SaveConfig(cfg model.NotifyConfig) error {
 	if err := repository.SaveNotifyConfig(cfg); err != nil {
 		return err
 	}
-	// Token 变更后刷新 Telegram 回调轮询
 	EnsureBotPoller()
 	return nil
 }
@@ -207,15 +206,10 @@ func PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
 	})
 }
 
-// sendBatchSummary 发概要；变更 mid 在 MySQL 批次表，按钮带 batch_id。
+// sendBatchSummary 发送采集批次摘要。
 func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPayload) {
 	pageSize := clampPageSize(cfg.MaxFilmsInMessage)
-
-	batchID := strings.TrimSpace(payload.ChangeBatchID)
-	listN := 0
-	if batchID != "" {
-		listN = CountChangeMids(batchID)
-	}
+	listN := payload.TotalFilms
 
 	// 判定是否有真正更新的影片或故障报错
 	hasChanges := listN > 0
@@ -228,32 +222,44 @@ func sendBatchSummary(cfg model.NotifyConfig, payload model.CollectBatchNotifyPa
 	if hasFailures {
 		severity = model.SeverityError
 	}
-	// 无活跃批次时，payload 仍可能有统计；列表依赖 MySQL
-	if payload.IncludeFilmDetails && listN > 0 {
-		// 头行变更与列表一致
-		if payload.TotalFilms < listN {
-			payload.TotalFilms = listN
+	overview := formatBatchOverview(payload, listN, pageSize)
+
+	// 若开启影片明细且有更新影片，生成分类会话并在消息尾部挂载分类入口键盘
+	if payload.IncludeFilmDetails && listN > 0 && len(payload.Films) > 0 {
+		items := make([]ChangeMidItem, 0, len(payload.Films))
+		for _, f := range payload.Films {
+			items = append(items, ChangeMidItem{Mid: f.Mid, SourceName: f.SourceName})
 		}
-		overview := formatBatchOverview(payload, listN, pageSize)
+		cats, catMids, err := BuildCategoryPlanForMids(items)
+		if err != nil {
+			syslog.Errorf("[Notify] 计算批次分类计划失败: %v", err)
+		}
+		sess := FilmBatchSession{
+			BatchID:      payload.ChangeBatchID,
+			SiteName:     payload.SiteName,
+			PageSize:     pageSize,
+			OverviewText: overview,
+			Total:        listN,
+			AllItems:     items,
+			Cats:         cats,
+			CatMids:      catMids,
+		}
+		if err := SaveChangeBatchSession(sess); err != nil {
+			syslog.Errorf("[Notify] 保存变更批次会话失败: %v", err)
+		}
+
 		parts := splitTelegramMessages(overview)
-		buttonPart := parts[len(parts)-1]
-		if err := SaveChangeBatchMeta(batchID, payload.SiteName, buttonPart, pageSize, listN); err != nil {
-			syslog.Errorf("[Notify] 保存变更批次元数据失败: %v", err)
-			sendMessages(cfg, severity, model.CategoryCollect, parts)
-			return
-		}
+		markup := buildCategoryKeyboard(callbackPrefix, payload.ChangeBatchID, cats)
 		for i, part := range parts {
-			var markup *InlineKeyboardMarkup
+			var btnMarkup *InlineKeyboardMarkup
 			if i == len(parts)-1 {
-				markup = buildOverviewKeyboard(batchID)
+				btnMarkup = markup
 			}
-			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, markup)
+			sendMessagesWithMarkup(cfg, severity, model.CategoryCollect, part, btnMarkup)
 		}
 		return
 	}
 
-	// 无列表：仍结束可能残留的空批次
-	overview := formatBatchOverview(payload, 0, pageSize)
 	sendMessages(cfg, severity, model.CategoryCollect, splitTelegramMessages(overview))
 }
 
@@ -800,10 +806,23 @@ func BuildBatchPayload(batch *ChangeBatch, trigger string, sources []model.Sourc
 		sumSource += s.FilmsTotal
 	}
 	filmTotal := sumSource
+	var films []model.FilmNotifyItem
+	batchID := ""
 	if batch != nil {
 		if n := batch.Count(); n > 0 {
 			filmTotal = n
 		}
+		items := batch.Items()
+		if len(items) > 0 {
+			films = make([]model.FilmNotifyItem, 0, len(items))
+			for _, it := range items {
+				films = append(films, model.FilmNotifyItem{
+					Mid:        it.Mid,
+					SourceName: it.SourceName,
+				})
+			}
+		}
+		batchID = batch.ID()
 	}
 	return model.CollectBatchNotifyPayload{
 		Trigger:            trigger,
@@ -817,6 +836,7 @@ func BuildBatchPayload(batch *ChangeBatch, trigger string, sources []model.Sourc
 		TotalFilms:         filmTotal,
 		IncludeFilmDetails: true,
 		FinalizeError:      finalizeErr,
-		ChangeBatchID:      batch.ID(),
+		Films:              films,
+		ChangeBatchID:      batchID,
 	}
 }

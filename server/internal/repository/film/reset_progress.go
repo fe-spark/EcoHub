@@ -26,10 +26,13 @@ type ResetImpactStats struct {
 // GetResetImpactStats 统计将被数据重置清空的数据量，用于重置前展示影响面
 func GetResetImpactStats() ResetImpactStats {
 	var stats ResetImpactStats
-	db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Films)
-	db.Mdb.Model(&model.FilmListSnapshot{}).Count(&stats.Snapshots)
-	db.Mdb.Model(&model.Category{}).Count(&stats.Categories)
-	db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Failures)
+	if db.Mdb == nil {
+		return stats
+	}
+	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Films).Error
+	_ = db.Mdb.Model(&model.FilmListSnapshot{}).Count(&stats.Snapshots).Error
+	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Categories).Error
+	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Failures).Error
 	return stats
 }
 

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -129,13 +130,33 @@ func (h *ManageHandler) UpdateSiteNotice(c *gin.Context) {
 
 // ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------
 
-// ExportConfigBackup 导出站点配置备份（不含影视库存与账号）
+// ExportConfigBackup 导出站点配置备份（不含影视库存与账号，仅超级管理员）
 func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
+		return
+	}
 	dto.Success(service.BackupSvc.ExportConfig(), "配置备份导出成功", c)
 }
 
-// ImportConfigBackup 导入站点配置备份（需管理密码）
+// ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导入配置备份", c)
+		return
+	}
 	var req model.ConfigBackupImportRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
@@ -154,11 +175,16 @@ func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
 
 func verifyManagePassword(c *gin.Context, password string) bool {
 	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.Failed("操作失败,登录信息异常!!!", c)
+	if !ok || v == nil {
 		return false
 	}
-	uc := v.(*utils.UserClaims)
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		return false
+	}
+	if db.Mdb == nil {
+		return false
+	}
 	return service.UserSvc.VerifyUserPassword(uc.UserID, password)
 }
 

@@ -39,16 +39,16 @@ var (
 	nodeOnce        sync.Once
 )
 
-// CurrentNodeName 获取当前集群节点标识（优先 NODE_NAME -> CLUSTER_ROLE-hostname -> 主机名）
+// CurrentNodeName 获取当前服务标识（优先 NODE_NAME，否则主机名）。
 func CurrentNodeName() string {
 	nodeOnce.Do(func() {
 		hostname, _ := os.Hostname()
-		currentNodeName = formatNodeName(config.ClusterRole, hostname, os.Getenv("NODE_NAME"))
+		currentNodeName = formatNodeName(hostname, os.Getenv("NODE_NAME"))
 	})
 	return currentNodeName
 }
 
-func formatNodeName(role, hostname, envName string) string {
+func formatNodeName(hostname, envName string) string {
 	if name := strings.TrimSpace(envName); name != "" {
 		return name
 	}
@@ -56,13 +56,10 @@ func formatNodeName(role, hostname, envName string) string {
 	if len(runes) > 12 {
 		hostname = string(runes[len(runes)-6:])
 	}
-	if role == "" {
-		role = "node"
-	}
 	if hostname != "" {
-		return role + "-" + hostname
+		return hostname
 	}
-	return role
+	return "ecohub"
 }
 
 type AccessEvent struct {
@@ -101,9 +98,6 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	path := SanitizePath(c.Request.URL.Path)
 	method := c.Request.Method
 	status := c.Writer.Status()
-	if ShouldSkip(method, path, status) {
-		return nil
-	}
 	// HTTP 采集只保留 TVBox provide；页面埋点走 TrackPagePayload，避免普通 API 占满采集队列。
 	if !isProvidePath(path) {
 		return nil

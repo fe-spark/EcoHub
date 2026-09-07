@@ -132,3 +132,22 @@ func TestSnapshotAndShared_RedisNilSafety(t *testing.T) {
 	ClearSnapshotState()
 	refreshCategoryCaches()
 }
+
+func TestInvalidateMasterSwitchCaches_ClearsActiveSnapshotVersion(t *testing.T) {
+	_ = setupFilmZeroTestDB(t)
+	origRdb := db.Rdb
+	db.Rdb = nil
+	t.Cleanup(func() { db.Rdb = origRdb })
+
+	if err := SetActiveSnapshotVersion("ghost_after_switch"); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+	if GetActiveSnapshotVersion() != "ghost_after_switch" {
+		t.Fatal("expected version to be set in memory")
+	}
+
+	InvalidateMasterSwitchCaches()
+	if got := GetActiveSnapshotVersion(); got != "" {
+		t.Fatalf("expected memory snapshot version cleared on master switch, got %q", got)
+	}
+}

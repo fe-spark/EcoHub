@@ -152,19 +152,6 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	return ""
 }
 
-func ClearSpider() error {
-	filmrepo.ReportResetProgress(5, "正在停止采集任务")
-	StopAllTasks()
-	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
-		return err
-	}
-	filmrepo.ReportResetProgress(15, "正在清空数据")
-	return collectLifecycle.runExclusive(func() error {
-		repository.ResetCollectStatsCoalescer()
-		return filmrepo.FilmZero()
-	})
-}
-
 func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.FailureRecord, batchCtx *collectBatchContext) {
 	if s == nil || fr == nil {
 		return
@@ -248,6 +235,9 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 
 func FullRecoverSpider() {
 	list := repository.PendingRecord()
+	if len(list) == 0 {
+		return
+	}
 	sourcesToFlush := make([]model.FilmSource, 0, len(list))
 	seen := make(map[string]struct{}, len(list))
 	recordsBySource := make(map[string][]model.FailureRecord, len(list))
@@ -308,6 +298,19 @@ func FullRecoverSpider() {
 		finalizeErr = err
 	}
 	batchCtx.emitSummary(finalizeErr)
+}
+
+func ClearSpider() error {
+	filmrepo.ReportResetProgress(5, "正在停止采集任务")
+	StopAllTasks()
+	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
+		return err
+	}
+	filmrepo.ReportResetProgress(15, "正在清空数据")
+	return collectLifecycle.runExclusive(func() error {
+		repository.ResetCollectStatsCoalescer()
+		return filmrepo.FilmZero()
+	})
 }
 
 func CollectApiTest(s model.FilmSource) error {

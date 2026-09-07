@@ -41,9 +41,3 @@ func TruncateTable(conn *gorm.DB, table string) error {
 	}
 	return nil
 }
-
-func TruncateRecordTable() {
-	if err := TruncateTable(db.Mdb, model.TableFailureRecord); err != nil {
-		log.Println("TRUNCATE TABLE Error: ", err)
-	}
-}

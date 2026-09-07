@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"sync/atomic"
 
@@ -76,8 +77,18 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 // resetSiteDataRunning 防止并发重复触发站点数据重置（重置为长耗时异步任务）
 var resetSiteDataRunning atomic.Bool
 
-// ClearAllFilm 删除所有film信息：密钥校验通过后立即返回成功，重置在后台异步执行。
+// ClearAllFilm 删除所有film信息：密钥校验通过后立即返回成功，重置在后台异步执行（仅超级管理员）。
 func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "鉴权失败,请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
+		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可执行数据重置", c)
+		return
+	}
 	var req struct {
 		Password string `json:"password"`
 	}
@@ -85,7 +96,7 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	if !verifyPassword(c, req.Password) {
+	if !verifyManagePassword(c, req.Password) {
 		dto.Failed("重置失败, 密钥校验失败!!!", c)
 		return
 	}
@@ -136,14 +147,4 @@ func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
 func (h *SpiderHandler) StopAllTasks(c *gin.Context) {
 	service.SpiderSvc.StopAllTasks()
 	dto.SuccessOnlyMsg("已发送终止指令，所有采集任务正在停止", c)
-}
-
-func verifyPassword(c *gin.Context, password string) bool {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.Failed("操作失败,登录信息异常!!!", c)
-		return false
-	}
-	uc := v.(*utils.UserClaims)
-	return service.UserSvc.VerifyUserPassword(uc.UserID, password)
 }

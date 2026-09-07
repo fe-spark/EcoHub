@@ -18,14 +18,3 @@ type FileInfo struct {
 func (f *FileInfo) TableName() string {
 	return TableFileInfo
 }
-
-// VirtualPictureQueue 历史采集图片同步队列表（功能已移除，仅保留表结构兼容与重置清空）
-type VirtualPictureQueue struct {
-	gorm.Model
-	Mid  int64  `gorm:"uniqueIndex"`
-	Link string `gorm:"type:text"`
-}
-
-func (VirtualPictureQueue) TableName() string {
-	return TableVirtualPicture
-}

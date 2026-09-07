@@ -11,45 +11,6 @@ import (
 	"server/internal/repository"
 )
 
-func TestIsTelegramGetUpdatesConflict(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{fmt.Errorf("telegram api: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"), true},
-		{fmt.Errorf("CONFLICT: terminated by other getUpdates request"), true},
-		// webhook 未清除属另一类错误，不应误判为多实例冲突
-		{fmt.Errorf("Conflict: can't use getUpdates method while webhook is active"), false},
-		{fmt.Errorf("telegram api: Unauthorized"), false},
-		{fmt.Errorf("connection timeout"), false},
-	}
-	for _, tc := range cases {
-		if got := isTelegramGetUpdatesConflict(tc.err); got != tc.want {
-			t.Fatalf("err=%v got=%v want=%v", tc.err, got, tc.want)
-		}
-	}
-}
-
-func TestIsTelegramWebhookActiveError(t *testing.T) {
-	cases := []struct {
-		err  error
-		want bool
-	}{
-		{nil, false},
-		{fmt.Errorf("Conflict: can't use getUpdates method while webhook is active"), true},
-		{fmt.Errorf("CONFLICT: CAN'T USE GETUPDATES METHOD WHILE WEBHOOK IS ACTIVE"), true},
-		// 多实例冲突不应误判为 webhook 错误
-		{fmt.Errorf("telegram api: Conflict: terminated by other getUpdates request; make sure that only one bot instance is running"), false},
-		{fmt.Errorf("telegram api: Unauthorized"), false},
-	}
-	for _, tc := range cases {
-		if got := isTelegramWebhookActiveError(tc.err); got != tc.want {
-			t.Fatalf("err=%v got=%v want=%v", tc.err, got, tc.want)
-		}
-	}
-}
-
 func TestMaskBotToken(t *testing.T) {
 	if MaskBotToken("") != "" {
 		t.Fatal("empty token")
@@ -162,30 +123,6 @@ func TestValidateAndMergeUpdateSyncsTargetsWithChatIDs(t *testing.T) {
 	}
 	if len(merged2.Targets) != 1 || merged2.Targets[0].ThreadID != "10" || merged2.Targets[0].MinLevel != model.SeverityError {
 		t.Fatalf("should preserve thread meta for A: %+v", merged2.Targets)
-	}
-}
-
-func TestChatAllowedUsesEffectiveTargets(t *testing.T) {
-	cfg := model.NotifyConfig{
-		// ChatIDs 与 Targets 故意不一致：发送/鉴权应以 Targets 为准（effectiveTargets）
-		ChatIDs: []string{"-100111"},
-		Targets: []model.NotifyTarget{
-			{ChatID: "-100999", Enabled: true},
-			{ChatID: "@mychannel", Enabled: true},
-			{ChatID: "-100000", Enabled: false},
-		},
-	}
-	if !chatAllowed(cfg, "-100999", "") {
-		t.Fatal("enabled target chat should allow")
-	}
-	if !chatAllowed(cfg, "-100456", "mychannel") {
-		t.Fatal("username should match target")
-	}
-	if chatAllowed(cfg, "-100111", "") {
-		t.Fatal("chat only in ChatIDs but not in Targets should not allow when Targets set")
-	}
-	if chatAllowed(cfg, "-100000", "") {
-		t.Fatal("disabled target should not allow")
 	}
 }
 
@@ -316,119 +253,135 @@ func TestFormatBatchOverview(t *testing.T) {
 	}
 }
 
-func TestParsePageCallback(t *testing.T) {
-	prev := sitePlayBaseURLFn
-	sitePlayBaseURLFn = func() string { return "" }
-	t.Cleanup(func() { sitePlayBaseURLFn = prev })
+func TestFormatBatchOverviewWithFilms(t *testing.T) {
+	payload := model.CollectBatchNotifyPayload{
+		Trigger:            model.NotifyTriggerCron,
+		SiteName:           "测试站",
+		DurationSec:        10,
+		SuccessSources:     1,
+		TotalFilms:         3,
+		IncludeFilmDetails: true,
+	}
+	rendered := formatBatchOverview(payload, 3, 15)
+	if !strings.Contains(rendered, "更新列表 <b>3</b> 部 · <b>1</b> 页") {
+		t.Fatalf("expected overview list line, got: %s", rendered)
+	}
 
-	sid, page, catIdx, cat, kind, ok := parsePagedCallback(callbackPrefix, "nfp:abc123:2")
-	if !ok || sid != "abc123" || page != 2 || kind != "page" || cat != "" || catIdx != catIdxAll {
-		t.Fatalf("parse page: %v %v %v %v %v %v", sid, page, catIdx, cat, kind, ok)
+	sess := FilmBatchSession{
+		BatchID:  "test_batch",
+		SiteName: "测试站",
+		PageSize: 15,
+		Total:    3,
 	}
-	_, _, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open")
-	if !ok || kind != "open" || catIdx != catIdxAll {
-		t.Fatalf("parse open: %v %v %v", kind, catIdx, ok)
+	chunk := []ChangeMidItem{
+		{Mid: 1, SourceName: "速博"},
+		{Mid: 2, SourceName: "极速"},
 	}
-	// 新格式：分类用下标，避免 callback_data 超长
-	_, _, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:openc1")
-	if !ok || kind != "open" || catIdx != 1 {
-		t.Fatalf("parse openc1: kind=%v catIdx=%v ok=%v", kind, catIdx, ok)
+	listPage := formatFilmListPageWithChunkCategory(sess, 1, chunk, 3, 0, 2, "电视剧", "本次更新列表")
+	if !strings.Contains(listPage, "本次更新列表 · 电视剧") {
+		t.Fatalf("expected category title, got: %s", listPage)
 	}
-	_, page, catIdx, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:3c0")
-	if !ok || kind != "page" || page != 3 || catIdx != 0 {
-		t.Fatalf("parse 3c0: page=%v catIdx=%v kind=%v ok=%v", page, catIdx, kind, ok)
-	}
-	// 兼容旧消息：open_{名称}
-	_, _, catIdx, cat, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:open_动漫")
-	if !ok || kind != "open" || cat != "动漫" || catIdx != catIdxAll {
-		t.Fatalf("parse open_动漫: kind=%v cat=%v catIdx=%v ok=%v", kind, cat, catIdx, ok)
-	}
-	_, _, _, _, kind, ok = parsePagedCallback(callbackPrefix, "nfp:abc123:back")
-	if !ok || kind != "back" {
-		t.Fatalf("parse back: %v %v", kind, ok)
-	}
-	if got := formatOpenCallback(callbackPrefix, "abc123", 2); got != "nfp:abc123:openc2" {
-		t.Fatalf("formatOpenCallback: %s", got)
-	}
-	if got := formatPageCallback(callbackPrefix, "abc123", 4, 1); got != "nfp:abc123:4c1" {
-		t.Fatalf("formatPageCallback: %s", got)
-	}
-	ov := buildOverviewKeyboard("abc123")
-	if ov == nil || len(ov.InlineKeyboard) != 1 || !strings.Contains(ov.InlineKeyboard[0][0].Text, "更新列表") {
-		t.Fatalf("overview keyboard: %+v", ov)
-	}
-	kb := buildPagedKeyboard(callbackPrefix, "abc123", 2, 3, true)
-	if kb == nil || len(kb.InlineKeyboard) < 2 {
-		t.Fatalf("keyboard: %+v", kb)
+	if !strings.Contains(listPage, "第 <b>1/1</b> 页") {
+		t.Fatalf("expected page line, got: %s", listPage)
 	}
 }
 
-func TestIsAllowedChatUsernameMatch(t *testing.T) {
-	// 无 Targets 时 effectiveTargets 由 ChatIDs 包装
-	cfg := model.NotifyConfig{ChatIDs: []string{"-100123", "@mychannel"}}
-	if !chatAllowed(cfg, "-100123", "") {
-		t.Fatal("numeric chat id should match")
+func TestFormatFilmListPageWithChunkCategory_HTMLEscape(t *testing.T) {
+	sess := FilmBatchSession{
+		BatchID:  "test_batch",
+		SiteName: "测试站",
+		PageSize: 15,
+		Total:    2,
 	}
-	if !chatAllowed(cfg, "-100456", "mychannel") {
-		t.Fatal("@username should match via chat username")
+	chunk := []ChangeMidItem{
+		{Mid: 1, SourceName: "源&1"},
 	}
-	if !chatAllowed(cfg, "-100456", "@mychannel") {
-		t.Fatal("@username with @ prefix should match")
-	}
-	if chatAllowed(cfg, "-100789", "") {
-		t.Fatal("unknown chat should be rejected")
-	}
-	if chatAllowed(cfg, "-100789", "other") {
-		t.Fatal("unknown username should be rejected")
+	// 分类名与标题包含 HTML 特殊字符
+	rendered := formatFilmListPageWithChunkCategory(sess, 1, chunk, 1, 0, 1, "科幻&魔幻", "更新<列表>")
+	if !strings.Contains(rendered, "更新&lt;列表&gt; · 科幻&amp;魔幻") {
+		t.Fatalf("expected escaped title, got: %s", rendered)
 	}
 }
 
-func TestParseBotCommand(t *testing.T) {
-	cmd, args := parseBotCommand("/search 流浪地球")
-	if cmd != "search" || args != "流浪地球" {
-		t.Fatalf("got %q %q", cmd, args)
+func TestBatchPageChunk_Slicing(t *testing.T) {
+	items := []ChangeMidItem{
+		{Mid: 1, SourceName: "A"},
+		{Mid: 2, SourceName: "B"},
+		{Mid: 3, SourceName: "C"},
+		{Mid: 4, SourceName: "D"},
+		{Mid: 5, SourceName: "E"},
 	}
-	cmd, args = parseBotCommand("/search@MyBot 关键词")
-	if cmd != "search" || args != "关键词" {
-		t.Fatalf("got %q %q", cmd, args)
-	}
-	cmd, args = parseBotCommand("hello")
-	if cmd != "" || args != "" {
-		t.Fatalf("non-cmd: %q %q", cmd, args)
-	}
-	cmd, args = parseBotCommand("/daily")
-	if cmd != "daily" || args != "" {
-		t.Fatalf("daily: %q %q", cmd, args)
-	}
-	cmd, args = parseBotCommand("/updates")
-	if cmd != "updates" || args != "" {
-		t.Fatalf("updates: %q %q", cmd, args)
+	sess := FilmBatchSession{
+		BatchID:  "test_sess",
+		PageSize: 2,
+		AllItems: items,
+		Cats: []CategoryCountItem{
+			{CategoryID: 10, CategoryName: "电影", Count: 3},
+		},
+		CatMids: [][]int64{
+			{2, 4, 5},
+		},
 	}
 
-	// 群聊客户端常把 @bot 追加在关键词后，或插在指令与关键词之间
-	cmd, args = parseBotCommand("/search 仙逆 @fe_spark_eco_server_bot")
-	if cmd != "search" || args != "仙逆" {
-		t.Fatalf("trailing mention: %q %q", cmd, args)
+	// 1. 全部分类模式 (catIdx = -1)
+	chunk, total, start, end, page := batchPageChunk(sess, -1, 2)
+	if total != 5 || page != 2 || start != 2 || end != 4 || len(chunk) != 2 {
+		t.Fatalf("unexpected allMode paging: total=%d page=%d start=%d end=%d len=%d", total, page, start, end, len(chunk))
 	}
-	cmd, args = parseBotCommand("/search @fe_spark_eco_server_bot 仙逆")
-	if cmd != "search" || args != "仙逆" {
-		t.Fatalf("leading mention: %q %q", cmd, args)
+	if chunk[0].Mid != 3 || chunk[1].Mid != 4 {
+		t.Fatalf("unexpected chunk items: %+v", chunk)
 	}
-	cmd, args = parseBotCommand("/search 仙逆@fe_spark_eco_server_bot")
-	if cmd != "search" || args != "仙逆" {
-		t.Fatalf("glued mention: %q %q", cmd, args)
+
+	// 2. 指定分类模式 (catIdx = 0)
+	chunkCat, totalCat, startCat, endCat, pageCat := batchPageChunk(sess, 0, 2)
+	if totalCat != 3 || pageCat != 2 || startCat != 2 || endCat != 3 || len(chunkCat) != 1 {
+		t.Fatalf("unexpected catMode paging: total=%d page=%d start=%d end=%d len=%d", totalCat, pageCat, startCat, endCat, len(chunkCat))
 	}
-	cmd, args = parseBotCommand("/search@fe_spark_eco_server_bot 仙逆 @fe_spark_eco_server_bot")
-	if cmd != "search" || args != "仙逆" {
-		t.Fatalf("head+tail mention: %q %q", cmd, args)
+	if chunkCat[0].Mid != 5 || chunkCat[0].SourceName != "E" {
+		t.Fatalf("unexpected chunkCat item: %+v", chunkCat)
 	}
-	cmd, args = parseBotCommand("/daily @fe_spark_eco_server_bot")
-	if cmd != "daily" || args != "" {
-		t.Fatalf("daily mention-only args: %q %q", cmd, args)
+}
+
+func TestSaveChangeBatchSession_EvictionRobustness(t *testing.T) {
+	memSessionMu.Lock()
+	memSessions = make(map[string]memSessionEntry)
+	memOrder = nil
+	memSessionMu.Unlock()
+
+	// 1. 保存 session
+	sess1 := FilmBatchSession{BatchID: "batch_1"}
+	if err := SaveChangeBatchSession(sess1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	cmd, args = parseBotCommand("/search 仙逆 第一季")
-	if cmd != "search" || args != "仙逆 第一季" {
-		t.Fatalf("multi-word keyword: %q %q", cmd, args)
+
+	// 2. 重复保存相同 session 不制造重复 memOrder
+	if err := SaveChangeBatchSession(sess1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	memSessionMu.RLock()
+	orderLen := len(memOrder)
+	memSessionMu.RUnlock()
+	if orderLen != 1 {
+		t.Fatalf("expected memOrder len=1, got %d", orderLen)
+	}
+
+	// 3. 模拟队首条目已被提前清理（如 ok 为 false），后续插入仍能正常处理并不死锁或卡死
+	memSessionMu.Lock()
+	delete(memSessions, "batch_1")
+	memSessionMu.Unlock()
+
+	sess2 := FilmBatchSession{BatchID: "batch_2"}
+	if err := SaveChangeBatchSession(sess2); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	memSessionMu.RLock()
+	defer memSessionMu.RUnlock()
+	if len(memSessions) != 1 || memSessions["batch_2"].sess.BatchID != "batch_2" {
+		t.Fatalf("expected batch_2 in memSessions")
+	}
+	if len(memOrder) != 1 || memOrder[0] != "batch_2" {
+		t.Fatalf("expected dead batch_1 to be evicted, memOrder=%v", memOrder)
 	}
 }
 
@@ -447,89 +400,6 @@ func TestRolling24hWindow(t *testing.T) {
 	at2359 := time.Date(2026, 8, 12, 23, 59, 0, 0, loc)
 	if at2359.Before(from) || at2359.After(to) {
 		t.Fatalf("23:59 yesterday should be inside window [%v, %v]", from, to)
-	}
-}
-
-func TestMenuButtonAndReplyKeyboard(t *testing.T) {
-	if !isMenuButtonText(btnDailyUpdate) || !isMenuButtonText(btnSearchQuery) || !isMenuButtonText(btnHelp) {
-		t.Fatal("menu buttons should be recognized")
-	}
-	if isMenuButtonText("随便说") || isMenuButtonText("/search") {
-		t.Fatal("non-menu text should not match")
-	}
-	kb := mainReplyKeyboard()
-	if kb == nil || len(kb.Keyboard) != 2 {
-		t.Fatalf("keyboard rows: %+v", kb)
-	}
-	if kb.Keyboard[0][0].Text != btnDailyUpdate || kb.Keyboard[0][1].Text != btnSearchQuery {
-		t.Fatalf("row0: %+v", kb.Keyboard[0])
-	}
-	if kb.Keyboard[1][0].Text != btnHelp {
-		t.Fatalf("row1: %+v", kb.Keyboard[1])
-	}
-	if !kb.ResizeKeyboard || !kb.IsPersistent {
-		t.Fatalf("keyboard flags: resize=%v persistent=%v", kb.ResizeKeyboard, kb.IsPersistent)
-	}
-	if replyMarkupPayload(kb) == nil {
-		t.Fatal("reply keyboard payload should be non-nil")
-	}
-	if replyMarkupPayload((*InlineKeyboardMarkup)(nil)) != nil {
-		t.Fatal("nil inline markup should yield nil payload")
-	}
-	if replyMarkupPayload(&InlineKeyboardMarkup{}) != nil {
-		t.Fatal("empty inline markup should yield nil payload")
-	}
-	if !isPrivateChat("private") || !isPrivateChat("PRIVATE") {
-		t.Fatal("private chat should match")
-	}
-	if isPrivateChat("group") || isPrivateChat("supergroup") || isPrivateChat("") {
-		t.Fatal("non-private should not get reply keyboard")
-	}
-	if menuKeyboardForChat("private") == nil {
-		t.Fatal("private chat should receive reply keyboard")
-	}
-	if menuKeyboardForChat("supergroup") != nil || menuKeyboardForChat("group") != nil {
-		t.Fatal("group chats should not receive reply keyboard")
-	}
-}
-
-func TestSetSearchAwaitRequiresRedis(t *testing.T) {
-	if err := setSearchAwait("123", 1); err == nil {
-		t.Fatal("expected error when redis is unavailable")
-	}
-}
-
-func TestFormatDailyCategoryPrompt(t *testing.T) {
-	got := formatDailyCategoryPrompt(dailySession{
-		SiteName:   "测试站",
-		AllMids:    []int64{1, 2, 3},
-		FromLabel:  "08-13 10:00",
-		UntilLabel: "08-14 10:00",
-		Cats: []CategoryCountItem{{
-			CategoryName: "电影",
-			Count:        2,
-		}},
-	})
-	if !strings.Contains(got, "每日更新") || !strings.Contains(got, "08-13 10:00") {
-		t.Fatalf("prompt: %s", got)
-	}
-	if strings.Contains(got, "电影") || strings.Contains(got, "部") {
-		t.Fatalf("prompt should not list category or count: %s", got)
-	}
-}
-
-func TestFormatDailyListPageTitle(t *testing.T) {
-	sess := dailySession{SiteName: "测试站", PageSize: 10}
-	got := formatDailyListPage(sess, catIdxAll, 1, nil, 0, 0, 0)
-	if !strings.Contains(got, "每日更新列表") {
-		t.Fatalf("want 每日更新列表, got %s", got)
-	}
-	if strings.Contains(got, "本次更新列表") {
-		t.Fatalf("should not use collect-batch title: %s", got)
-	}
-	collect := formatFilmListPageWithChunkCategory(FilmPageSession{SiteName: "测试站"}, 1, nil, 0, 0, 0, "", "")
-	if !strings.Contains(collect, "本次更新列表") {
-		t.Fatalf("collect list should keep default title: %s", collect)
 	}
 }
 
@@ -554,8 +424,8 @@ func TestFormatFilmLine(t *testing.T) {
 	if !strings.Contains(linked, ">测试片<") {
 		t.Fatalf("name should be link text: %s", linked)
 	}
-	if !strings.Contains(linked, "[红牛资源]") {
-		t.Fatalf("expected source name suffix: %s", linked)
+	if strings.Contains(linked, "[红牛资源]") {
+		t.Fatalf("should not contain source name suffix: %s", linked)
 	}
 }
 
@@ -588,32 +458,6 @@ func TestRateLimiter(t *testing.T) {
 	}
 	if !r.allow("other", time.Minute) {
 		t.Fatal("other key should allow")
-	}
-}
-
-func TestFormatSearchListPage(t *testing.T) {
-	prev := sitePlayBaseURLFn
-	sitePlayBaseURLFn = func() string { return "" }
-	t.Cleanup(func() { sitePlayBaseURLFn = prev })
-
-	mids := make([]int64, 0, 15)
-	for i := 1; i <= 15; i++ {
-		mids = append(mids, int64(i))
-	}
-	sess := searchSession{
-		SiteName: "搜站",
-		PageSize: 10,
-		Mids:     mids,
-		Keyword:  "片",
-		HitTotal: 15,
-	}
-	p1 := formatSearchListPage(sess, 1)
-	if !strings.Contains(p1, "1/2") || !strings.Contains(p1, "#1") {
-		t.Fatalf("page1: %s", p1)
-	}
-	kb := buildPagedKeyboard(searchCallbackPrefix, "sid", 1, 2, false)
-	if kb == nil || len(kb.InlineKeyboard) != 1 || !strings.Contains(kb.InlineKeyboard[0][2].Text, "下一页") {
-		t.Fatalf("search kb: %+v", kb)
 	}
 }
 

@@ -136,6 +136,7 @@ type CollectBatchNotifyPayload struct {
 	TotalFilms         int                  `json:"totalFilms"`
 	IncludeFilmDetails bool                 `json:"includeFilmDetails"`
 	FinalizeError      string               `json:"finalizeError,omitempty"`
+	Films              []FilmNotifyItem     `json:"films,omitempty"`
 	// ChangeBatchID 批次标识，由 BuildBatchPayload 在同步阶段写入；异步发送只读此值。
 	ChangeBatchID string `json:"-"`
 }
@@ -173,29 +174,3 @@ type NotifyChatError struct {
 	Error  string `json:"error"`
 }
 
-// NotifyChangeBatch 采集更新列表批次（MySQL，替代 Redis 会话，mid 无上限）。
-type NotifyChangeBatch struct {
-	ID        string    `gorm:"primaryKey;size:16"`
-	SiteName  string    `gorm:"size:128"`
-	PageSize  int       `gorm:"not null;default:15"`
-	Total     int       `gorm:"not null;default:0"`
-	Overview  string    `gorm:"type:text"` // 带按钮那一段概要，返回时 edit 用
-	CreatedAt time.Time `gorm:"index"`
-	ExpireAt  time.Time `gorm:"index"`
-}
-
-func (NotifyChangeBatch) TableName() string {
-	return TableNotifyChangeBatch
-}
-
-// NotifyChangeMid 批次内变更影片 mid（全局去重）。
-type NotifyChangeMid struct {
-	BatchID    string    `gorm:"primaryKey;size:16;index"`
-	Mid        int64     `gorm:"primaryKey;index"`
-	SourceName string    `gorm:"size:1024"`
-	CreatedAt  time.Time `gorm:"index"` // 写入时间；每日更新按此列切 24h 窗
-}
-
-func (NotifyChangeMid) TableName() string {
-	return TableNotifyChangeMid
-}

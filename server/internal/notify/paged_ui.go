@@ -87,8 +87,7 @@ func formatOpenCallback(prefix, sessionID string, catIdx int) string {
 
 // parsePagedCallback 解析分页回调。
 // 新格式: open | openc{idx} | {page} | {page}c{idx} | noop | info | back
-// 兼容旧格式: open_{分类名} | {page}_{分类名}（仍可能超长，仅服务历史消息）
-// 返回 catIdx；旧格式按名称解析时 catIdx=catIdxAll 且 category 为名称。
+// 兼容旧格式: open_{分类名} | {page}_{分类名}
 func parsePagedCallback(prefix, data string) (id string, page int, catIdx int, category string, kind string, ok bool) {
 	data = strings.TrimSpace(data)
 	parts := strings.Split(data, ":")
@@ -153,12 +152,4 @@ func parsePagedCallback(prefix, data string) (id string, page int, catIdx int, c
 		return "", 0, catIdxAll, "", "", false
 	}
 	return id, p, catIdxAll, "", "page", true
-}
-
-// resolveCallbackCategory 将 callback 中的 catIdx / 遗留分类名解析为真实分类名。
-func resolveCallbackCategory(batchID string, catIdx int, legacyName string) string {
-	if catIdx >= 0 {
-		return ResolveCategoryByIndex(batchID, catIdx)
-	}
-	return strings.TrimSpace(legacyName)
 }

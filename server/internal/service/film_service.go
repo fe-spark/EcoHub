@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"server/internal/access"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -69,7 +68,6 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	if err := filmrepo.SaveDetail(sourceId, detail); err != nil {
 		return err
 	}
-	access.InvalidateFilmMetaCache(int64(fd.Id))
 	return nil
 }
 
@@ -82,7 +80,6 @@ func (s *FilmService) DelFilm(id int64) error {
 	if err := filmrepo.DelFilmSearch(id); err != nil {
 		return err
 	}
-	access.InvalidateFilmMetaCache(id)
 	return nil
 }
 

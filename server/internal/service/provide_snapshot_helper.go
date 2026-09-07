@@ -74,21 +74,21 @@ func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnap
 
 func resolveProvideTypeFromSnapshot(snapshot model.FilmListSnapshot) (int64, string) {
 	if categoryID := resolveProvideCurrentCategoryIDFromSnapshot(snapshot); categoryID > 0 {
-		if name := repository.GetCategoryNameById(categoryID); name != "" {
+		if name := support.GetCategoryNameById(categoryID); name != "" {
 			return categoryID, name
 		}
-		if name := repository.GetMainCategoryName(categoryID); name != "" {
+		if name := support.GetMainCategoryName(categoryID); name != "" {
 			return categoryID, name
 		}
 	}
 	if snapshot.Cid > 0 {
-		if name := repository.GetCategoryNameById(snapshot.Cid); name != "" {
+		if name := support.GetCategoryNameById(snapshot.Cid); name != "" {
 			return snapshot.Cid, name
 		}
 		return snapshot.Cid, snapshot.CName
 	}
 	if snapshot.Pid > 0 {
-		if name := repository.GetMainCategoryName(snapshot.Pid); name != "" {
+		if name := support.GetMainCategoryName(snapshot.Pid); name != "" {
 			return snapshot.Pid, name
 		}
 		return snapshot.Pid, snapshot.CName

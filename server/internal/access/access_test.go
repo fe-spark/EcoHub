@@ -21,56 +21,28 @@ func TestShouldSkip(t *testing.T) {
 		status       int
 		skip         bool
 	}{
-		{"GET", "/api/health", 200, true},
-		{"HEAD", "/api/health", 200, true},
-		{"GET", "/api/index/dailyUpdates", 200, true},
-		{"GET", "/api/dailyUpdates", 200, true},
-		{"GET", "/api/manage", 200, true},
-		{"GET", "/api/manage/system/logs/delta", 200, true},
-		{"GET", "/api/manage/collect/list", 200, true},
-		{"GET", "/api/manage/collect/list", 500, true},
-		{"GET", "/api/manage/access/overview", 200, true},
-		{"POST", "/api/manage/film/add", 200, true},
-		{"POST", "/api/stat/view", 200, true},
-		{"GET", "/api/upload/pic/poster/a.jpg", 200, true},
 		{"OPTIONS", "/api/index", 204, true},
-		{"GET", "/api/index", 200, false},
 		{"GET", "/api/config/basic", 200, true},
 		{"GET", "/api/config/basic", 500, false},
+		{"GET", "/api/health", 200, true},
+		{"HEAD", "/api/health", 200, true},
+		{"POST", "/api/health", 200, false},
+		{"GET", "/api/upload/pic/poster/a.jpg", 200, true},
+		// 业务管理与前台接口均不应被跳过（必须正常打印日志）
+		{"GET", "/api/manage", 200, false},
+		{"GET", "/api/manage/system/logs/delta", 200, false},
+		{"GET", "/api/manage/collect/list", 200, false},
+		{"POST", "/api/manage/film/add", 200, false},
+		{"GET", "/api/dailyUpdates", 200, false},
+		{"GET", "/api/index/dailyUpdates", 200, false},
+		{"POST", "/api/stat/view", 200, false},
+		{"GET", "/api/index", 200, false},
 		{"GET", "/api/provide/vod", 200, false},
 	}
 	for _, c := range cases {
 		got := ShouldSkip(c.method, c.path, c.status)
 		if got != c.skip {
 			t.Fatalf("%s %s %d skip=%v want %v", c.method, c.path, c.status, got, c.skip)
-		}
-	}
-}
-
-func TestShouldRecordApiLog(t *testing.T) {
-	cases := []struct {
-		method, path string
-		status       int
-		want         bool
-	}{
-		{"GET", "/api/index", 200, true},
-		{"GET", "/api/provide/vod", 200, false},
-		{"GET", "/api/provide/vod", 404, true},
-		{"GET", "/api/provide/vod", 500, true},
-		{"GET", "/api/config/basic", 500, true},
-		{"GET", "/api/health", 200, false},
-		{"GET", "/api/config/basic", 200, false},
-		{"POST", "/api/stat/view", 200, false},
-		{"GET", "/api/upload/pic/poster/a.jpg", 200, false},
-		{"GET", "/api/manage/access/overview", 200, false},
-		{"GET", "/manage/system", 200, false},
-		{"OPTIONS", "/api/index", 204, false},
-		{"GET", "", 200, false},
-	}
-	for _, c := range cases {
-		got := ShouldRecordApiLog(c.method, c.path, c.status)
-		if got != c.want {
-			t.Fatalf("%s %s %d record=%v want %v", c.method, c.path, c.status, got, c.want)
 		}
 	}
 }
@@ -439,12 +411,6 @@ func TestBuildPageEvent(t *testing.T) {
 	}
 }
 
-func TestShouldSkipHealthOnlyGet(t *testing.T) {
-	if !ShouldSkip(http.MethodGet, "/api/health", 200) {
-		t.Fatal("get health")
-	}
-}
-
 func TestFromContextSSR(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
@@ -750,37 +716,36 @@ func TestScopedTopKind(t *testing.T) {
 func TestDroppedKeys(t *testing.T) {
 	globalKey := droppedKey()
 	dayKey := droppedDayKey("20260902")
-	lockKey := rollupLockKey()
 	if !strings.Contains(globalKey, "meta:dropped") {
 		t.Fatalf("unexpected globalKey: %s", globalKey)
 	}
 	if !strings.Contains(dayKey, "meta:dropped:20260902") {
 		t.Fatalf("unexpected dayKey: %s", dayKey)
 	}
-	if !strings.Contains(lockKey, "lock:daily_rollup") {
-		t.Fatalf("unexpected lockKey: %s", lockKey)
-	}
 }
 
 func TestFormatNodeName(t *testing.T) {
-	if got := formatNodeName("master", "myhost", "custom-node-1"); got != "custom-node-1" {
-		t.Fatalf("want custom-node-1, got %q", got)
+	if got := formatNodeName("myhost", "custom-1"); got != "custom-1" {
+		t.Fatalf("want custom-1, got %q", got)
 	}
-	if got := formatNodeName("worker", "myhost", ""); got != "worker-myhost" {
-		t.Fatalf("want worker-myhost, got %q", got)
+	if got := formatNodeName("myhost", ""); got != "myhost" {
+		t.Fatalf("want myhost, got %q", got)
 	}
 	// >12 字符截取后 6 个字符
-	if got := formatNodeName("node", "ecohub-cluster-node-99", ""); got != "node-ode-99" {
-		t.Fatalf("want node-ode-99, got %q", got)
+	if got := formatNodeName("ecohub-prod-host-99", ""); got != "ost-99" {
+		t.Fatalf("want ost-99, got %q", got)
 	}
 	// UTF-8 非 ASCII 字符不截断乱码
-	utf8Host := "中文开发环境-测试节点-01"
-	got := formatNodeName("master", utf8Host, "")
+	utf8Host := "中文开发环境-测试主机-01"
+	got := formatNodeName(utf8Host, "")
 	if !utf8.ValidString(got) {
 		t.Fatalf("formatNodeName produced invalid UTF-8: %q", got)
 	}
-	if got != "master-试节点-01" {
-		t.Fatalf("want master-试节点-01, got %q", got)
+	if got != "试主机-01" {
+		t.Fatalf("want 试主机-01, got %q", got)
+	}
+	if got := formatNodeName("", ""); got != "ecohub" {
+		t.Fatalf("want ecohub, got %q", got)
 	}
 }
 

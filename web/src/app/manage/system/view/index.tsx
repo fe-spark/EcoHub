@@ -5,29 +5,25 @@ import { Suspense, useCallback, useEffect } from "react";
 import {
   BellOutlined,
   SafetyCertificateOutlined,
-  FileSearchOutlined,
   FileTextOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
-import ApiLogsPageView from "@/app/manage/api-logs/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "security" | "api-logs" | "logs";
+type MainTab = "notify" | "security" | "logs";
 
 const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
   { key: "notify", label: "通知配置", icon: <BellOutlined /> },
   { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
-  { key: "api-logs", label: "接口访问记录", icon: <FileSearchOutlined /> },
   { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
   if (raw === "security") return "security";
-  if (raw === "api-logs") return "api-logs";
   if (raw === "logs") return "logs";
   return "notify";
 }
@@ -63,12 +59,6 @@ function SystemSettingsBody() {
             <DataSecurityPageView embedded />
           </div>
         );
-      case "api-logs":
-        return (
-          <div className={styles.tabPaneScrollable}>
-            <ApiLogsPageView embedded />
-          </div>
-        );
       case "logs":
         return <SystemLogsPageView embedded />;
       case "notify":
@@ -86,7 +76,7 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="通知配置、数据安全（备份 / 重置）、接口访问记录与运行日志。"
+        description="通知配置、数据安全（配置备份 / 分析数据清理 / 数据重置）与运行日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {MAIN_TABS.map((tab) => {
