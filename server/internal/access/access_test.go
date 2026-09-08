@@ -1,1 +1,1 @@
-__LOAD_FROM__/workspace/access_test.go
+file:///workspace/access_test.go
