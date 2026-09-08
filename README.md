@@ -53,8 +53,8 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 
 | 服务商 | 特点 / 价格 | 链接 |
 | --- | --- | --- |
-| 良心云 | 1. 2 元/月 100G，6 元 1000G（1T）<br>2. 直连 AWS 与 Oracle，协议支持 VLESS Reality 与 Hysteria2<br>3. 解锁 Netflix、Disney+、TikTok、ChatGPT，1 倍率无审计<br>4. 覆盖新疆、河南、福建等地区，高峰时段可流畅播放 4K<br>5. 新用户注册即获体验流量 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| 赔钱机场 | 1. 低至 1.5 元/月，超低价大流量与高性价比<br>2. 支持 VLESS、Hysteria 2、Shadowsocks 等多协议直连<br>3. 节点覆盖香港、日本、台湾、新加坡、美国等地区<br>4. 提供超低倍率大流量下载节点，适合高流量与备用需求 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| 良心云 | 1. 2 元/月 <br>新用户注册即获体验流量 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| 赔钱机场 | 1. 低至 1.5 元/月 <br>适合高流量与备用需求 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
 
 ## 快速开始
 
