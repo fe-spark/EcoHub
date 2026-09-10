@@ -1,15 +1,22 @@
-正式版 **v2.6.0**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.0` 与 `ghcr.io/fe-spark/ecohub:latest`。
+正式版 **v2.6.1**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.1` 与 `ghcr.io/fe-spark/ecohub:latest`。
 
 ### 升级指引
 
 - **从已有版本升级**：
   - **1Panel / Compose**：执行 `docker compose pull ecohub && docker compose up -d ecohub` 即可（或后台「检查更新」一键平滑升级）。
   - **数据结构与兼容性**：完全向下兼容现有 MySQL 与 Redis 数据结构，无破坏性变更。
-  - **访问分析**：明细 API 访问日志已移除，改为按天聚合；由单一开关 `ACCESS_ANALYTICS_ENABLED` 控制（默认关闭）。
 
 ---
 
-### v2.6.0 核心变更
+### v2.6.1 核心变更
+
+#### 1. 修复运行日志自轮询刷屏
+- 管理后台「系统设置 → 运行日志」轮询 `GET /api/manage/system/logs/delta` 时，不再写入访问/运行日志，避免日志页读回自己产生的请求造成持续刷屏；
+- 其余 `/api/manage/...` 访问日志仍正常打印。
+
+---
+
+### v2.6.0 历史核心变更
 
 #### 1. 架构精简：单实例内存权威
 - 影片列表活跃快照版本、主站切换保护期、孤儿播放列表游标改为进程内存读写，Redis 仅在启动时恢复、写入时备忘；
