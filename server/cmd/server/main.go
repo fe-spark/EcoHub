@@ -24,6 +24,9 @@ import (
 )
 
 func init() {
+	if config.IsUpgradeHelper() {
+		return
+	}
 	setupLogging()
 	if err := waitForRedis(30, 2*time.Second); err != nil {
 		panic(err)
@@ -76,6 +79,13 @@ func waitForMySQL(maxRetries int, interval time.Duration) error {
 }
 
 func main() {
+	if config.IsUpgradeHelper() {
+		if err := service.RunUpgradeHelper(os.Args[1:]); err != nil {
+			log.SetOutput(os.Stderr)
+			log.Fatal(err)
+		}
+		return
+	}
 	start()
 }
 

@@ -33,6 +33,8 @@ func RunUpgradeHelper(args []string) error {
 		return fmt.Errorf("旧容器仍在运行，放弃启动新容器以免端口冲突")
 	}
 	if err := engine.start(ctx, newID); err != nil {
+		log.Printf("[UpgradeHelper] 启动新容器失败: %v，尝试回滚启动旧容器", err)
+		_ = engine.start(ctx, oldID)
 		return fmt.Errorf("启动新容器失败: %w", err)
 	}
 	if err := engine.remove(ctx, oldID); err != nil {
