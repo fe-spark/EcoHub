@@ -222,8 +222,21 @@ func isTestEnv() bool {
 	return false
 }
 
+// IsUpgradeHelper 判断当前进程是否为版本升级助手容器
+func IsUpgradeHelper() bool {
+	if os.Getenv("ECOHUB_UPGRADE_HELPER") == "1" {
+		return true
+	}
+	for _, a := range os.Args[1:] {
+		if a == "upgrade-helper" {
+			return true
+		}
+	}
+	return false
+}
+
 func init() {
-	if isTestEnv() {
+	if IsUpgradeHelper() || isTestEnv() {
 		return
 	}
 	// 本地直接运行服务端时，优先从当前目录 .env 加载环境变量。

@@ -187,6 +187,10 @@ func buildReplacementBody(old containerInspect, image string) (map[string]any, e
 		delete(ep, "IPPrefixLen")
 		delete(ep, "Gateway")
 		delete(ep, "MacAddress")
+		delete(ep, "IPv6Gateway")
+		delete(ep, "GlobalIPv6Address")
+		delete(ep, "GlobalIPv6PrefixLen")
+		delete(ep, "DNSNames")
 		endpoints[netName] = ep
 	}
 
@@ -203,7 +207,11 @@ func startUpgradeHelper(ctx context.Context, engine *dockerEngine, image, helper
 		"Image":      image,
 		"Entrypoint": []string{"/app/server/main"},
 		"Cmd":        []string{"upgrade-helper", "--old", oldID, "--new", newID},
-		"Env":        []string{"ECOHUB_UPGRADE_HELPER=1"},
+		"Env": []string{
+			"ECOHUB_UPGRADE_HELPER=1",
+			"ECOHUB_UPGRADE_OLD=" + oldID,
+			"ECOHUB_UPGRADE_NEW=" + newID,
+		},
 		"HostConfig": map[string]any{
 			"Binds":         []string{dockerSock + ":" + dockerSock},
 			"AutoRemove":    true,
