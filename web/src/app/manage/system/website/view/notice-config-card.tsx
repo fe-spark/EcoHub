@@ -111,61 +111,63 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
           </Space>
         }
         extra={
-          <Space size={8} align="center">
-            {isEditing ? (
-              <>
-                <Button size="small" disabled={saving} onClick={handleCancel}>
-                  取消
-                </Button>
-                <Button
-                  size="small"
-                  icon={<EyeOutlined />}
-                  onClick={() => setPreviewOpen(true)}
-                >
-                  预览
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  disabled={!canWrite || !hasDirty}
-                  loading={saving}
-                  onClick={handleSave}
-                >
-                  保存公告
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button
-                  size="small"
-                  icon={<EyeOutlined />}
-                  onClick={() => setPreviewOpen(true)}
-                >
-                  预览
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<EditOutlined />}
-                  disabled={!canWrite}
-                  onClick={() => {
-                    setDraft(data);
-                    setIsEditing(true);
-                  }}
-                >
-                  编辑
-                </Button>
-              </>
-            )}
-          </Space>
+          <div className={styles.extraActions}>
+            <Space size={8} align="center" wrap>
+              {isEditing ? (
+                <>
+                  <Button size="small" disabled={saving} onClick={handleCancel}>
+                    取消
+                  </Button>
+                  <Button
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    预览
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<SaveOutlined />}
+                    disabled={!canWrite || !hasDirty}
+                    loading={saving}
+                    onClick={handleSave}
+                  >
+                    保存公告
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    size="small"
+                    icon={<EyeOutlined />}
+                    onClick={() => setPreviewOpen(true)}
+                  >
+                    预览
+                  </Button>
+                  <Button
+                    size="small"
+                    type="primary"
+                    icon={<EditOutlined />}
+                    disabled={!canWrite}
+                    onClick={() => {
+                      setDraft(data);
+                      setIsEditing(true);
+                    }}
+                  >
+                    编辑
+                  </Button>
+                </>
+              )}
+            </Space>
+          </div>
         }
       >
         <Spin spinning={fetching} description="正在加载公告配置...">
           <Flex vertical gap={16}>
             {/* 总开关 */}
-            <Flex align="center" justify="space-between">
-              <Flex vertical gap={4}>
+            <Flex align="center" justify="space-between" wrap="wrap" gap={12}>
+              <Flex vertical gap={4} style={{ flex: 1, minWidth: 180 }}>
                 <Typography.Text strong>启用站点公告</Typography.Text>
                 <Typography.Text type="secondary">
                   开启后向访问用户弹窗提示；关闭后任何终端均不弹出
@@ -185,7 +187,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
             {/* 展示终端 */}
             <div className={styles.field}>
               <Typography.Text strong>生效展示终端</Typography.Text>
-              <Space size={24} style={{ marginTop: 4 }}>
+              <Space size={16} wrap style={{ marginTop: 4 }}>
                 <Checkbox
                   disabled={!isEditing || !canWrite}
                   checked={currentValues.showInWeb}

@@ -1,8 +1,21 @@
 .modal {
-  :global(.ant-modal-content) {
-    padding: 24px 24px 20px;
-    border-radius: 16px;
-    box-shadow: 0 12px 32px -4px rgba(0, 0, 0, 0.12), 0 4px 12px 0 rgba(0, 0, 0, 0.08);
+  max-width: calc(100vw - 32px);
+}
+
+.modalContainer {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.modalBody {
+  padding: 0;
+}
+
+.wrapper {
+  padding: 24px 24px 20px;
+
+  @media (max-width: 576px) {
+    padding: 16px 14px 14px;
   }
 }
 
@@ -11,6 +24,11 @@
   align-items: center;
   gap: 12px;
   margin-bottom: 16px;
+
+  @media (max-width: 576px) {
+    gap: 10px;
+    margin-bottom: 12px;
+  }
 }
 
 .iconBadge {
@@ -24,6 +42,13 @@
   color: var(--ant-color-primary, #fa8c16);
   font-size: 18px;
   flex-shrink: 0;
+
+  @media (max-width: 576px) {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    font-size: 16px;
+  }
 }
 
 .title {
@@ -34,16 +59,31 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+
+  @media (max-width: 576px) {
+    font-size: 15px;
+    white-space: normal;
+    word-break: break-word;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
 }
 
 .body {
   margin-bottom: 20px;
   padding: 14px 16px;
-  max-height: 320px;
+  max-height: min(320px, 50vh);
   overflow-y: auto;
   border-radius: 10px;
   background-color: var(--ant-color-fill-quaternary);
   border: 1px solid var(--ant-color-border-secondary);
+
+  @media (max-width: 576px) {
+    margin-bottom: 14px;
+    padding: 12px;
+    border-radius: 8px;
+  }
 }
 
 .content {
@@ -53,6 +93,11 @@
   color: var(--ant-color-text);
   white-space: pre-wrap;
   word-break: break-word;
+
+  @media (max-width: 576px) {
+    font-size: 13px;
+    line-height: 1.65;
+  }
 }
 
 .footer {
@@ -65,4 +110,9 @@
   height: 36px;
   border-radius: 8px;
   font-weight: 500;
+
+  @media (max-width: 576px) {
+    width: 100%;
+    height: 38px;
+  }
 }

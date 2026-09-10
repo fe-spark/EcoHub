@@ -172,6 +172,25 @@ html[data-theme="dark"] .content :global(.ant-card) {
   border-radius: 8px;
 }
 
+.noticeMessage {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.noticeAction {
+  font-weight: 500;
+  white-space: nowrap;
+  color: var(--ant-color-primary, #fa8c16);
+  text-decoration: underline;
+
+  &:hover {
+    color: var(--ant-color-primary-hover, #ffc069);
+  }
+}
+
 .contentFixed {
   overflow: hidden;
 }
