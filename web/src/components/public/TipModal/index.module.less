@@ -1,6 +1,22 @@
-.modal :global(.ant-modal-content) {
-  padding: 24px 24px 20px;
+.modal {
+  max-width: calc(100vw - 32px);
+}
+
+.modalContainer {
   border-radius: 16px;
+  overflow: hidden;
+}
+
+.modalBody {
+  padding: 0;
+}
+
+.wrapper {
+  padding: 24px 24px 20px;
+
+  @media (max-width: 576px) {
+    padding: 16px 14px 14px;
+  }
 }
 
 .head {
@@ -14,6 +30,10 @@
 .heart {
   color: #eb2f96;
   font-size: 22px;
+
+  @media (max-width: 576px) {
+    font-size: 18px;
+  }
 }
 
 .title {
@@ -21,6 +41,10 @@
   font-size: 18px;
   font-weight: 700;
   color: var(--public-text-1, var(--ant-color-text));
+
+  @media (max-width: 576px) {
+    font-size: 16px;
+  }
 }
 
 .message {
@@ -29,6 +53,10 @@
   font-size: 13px;
   line-height: 1.6;
   color: var(--public-text-5, var(--ant-color-text-secondary));
+
+  @media (max-width: 576px) {
+    font-size: 12px;
+  }
 }
 
 .empty {
@@ -44,6 +72,12 @@
   grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 16px;
   margin-top: 20px;
+
+  @media (max-width: 576px) {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    margin-top: 14px;
+  }
 }
 
 .channel {
@@ -64,6 +98,11 @@
   background: #fff;
   border-radius: 12px;
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+
+  @media (max-width: 576px) {
+    width: 160px;
+    height: 160px;
+  }
 }
 
 .qr {
@@ -86,11 +125,5 @@
 
 .linkBtn {
   width: 100%;
-}
-
-@media (max-width: 768px) {
-  .qrWrap {
-    width: 200px;
-    height: 200px;
-  }
+  max-width: 200px;
 }

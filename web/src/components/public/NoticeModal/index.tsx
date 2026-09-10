@@ -76,29 +76,35 @@ export default function NoticeModal({ notice, open: controlledOpen, onClose }: N
       onCancel={handleClose}
       footer={null}
       centered
-      width={480}
+      width="min(480px, calc(100vw - 32px))"
+      classNames={{
+        container: styles.modalContainer,
+        body: styles.modalBody,
+      }}
       className={styles.modal}
       destroyOnHidden
     >
-      <div className={styles.head}>
-        <div className={styles.iconBadge}>
-          <BellOutlined />
+      <div className={styles.wrapper}>
+        <div className={styles.head}>
+          <div className={styles.iconBadge}>
+            <BellOutlined />
+          </div>
+          <h3 className={styles.title}>{title}</h3>
         </div>
-        <h3 className={styles.title}>{title}</h3>
-      </div>
-      <div className={styles.body}>
-        <p className={styles.content}>
-          {content || "（暂无公告正文内容）"}
-        </p>
-      </div>
-      <div className={styles.footer}>
-        <Button
-          type="primary"
-          className={styles.confirmBtn}
-          onClick={handleClose}
-        >
-          我知道了
-        </Button>
+        <div className={styles.body}>
+          <p className={styles.content}>
+            {content || "（暂无公告正文内容）"}
+          </p>
+        </div>
+        <div className={styles.footer}>
+          <Button
+            type="primary"
+            className={styles.confirmBtn}
+            onClick={handleClose}
+          >
+            我知道了
+          </Button>
+        </div>
       </div>
     </Modal>
   );

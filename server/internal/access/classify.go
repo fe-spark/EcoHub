@@ -7,8 +7,8 @@ import (
 	"server/internal/config"
 )
 
-// ShouldSkip 仅过滤纯基础设施噪声（健康探活成功请求、海报静态资源、OPTIONS 预检），
-// 所有业务接口（如 /api/manage、/api/dailyUpdates 等）一律保留正常打印。
+// ShouldSkip 过滤纯基础设施噪声（健康探活成功请求、海报静态资源、OPTIONS 预检、
+// 以及运行日志增量自轮询），其余业务接口一律保留正常打印。
 func ShouldSkip(method, path string, status int) bool {
 	if strings.EqualFold(method, http.MethodOptions) {
 		return true
@@ -17,6 +17,10 @@ func ShouldSkip(method, path string, status int) bool {
 		return true
 	}
 	if path == "/api/health" && (method == http.MethodGet || method == http.MethodHead) {
+		return true
+	}
+	// 管理后台运行日志页会轮询该接口；若写入访问日志会形成自刷屏反馈环。
+	if path == "/api/manage/system/logs/delta" && method == http.MethodGet {
 		return true
 	}
 	return strings.HasPrefix(path, config.FilmPictureAccess)
