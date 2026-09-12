@@ -173,6 +173,7 @@ button,
 
 html,
 body {
+  overflow-x: hidden;
   background: var(--public-page-bg);
   background-image: var(--public-page-bg-mesh);
   color: var(--public-text-1);
@@ -190,6 +191,13 @@ body {
     sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+@supports (overflow-x: clip) {
+  html,
+  body {
+    overflow-x: clip;
+  }
 }
 
 /* Premium Slim Scrollbar */

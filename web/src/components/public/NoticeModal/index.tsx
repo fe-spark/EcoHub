@@ -78,6 +78,7 @@ export default function NoticeModal({ notice, open: controlledOpen, onClose }: N
       centered
       width="min(480px, calc(100vw - 32px))"
       classNames={{
+        wrapper: styles.modalWrapper,
         container: styles.modalContainer,
         body: styles.modalBody,
       }}

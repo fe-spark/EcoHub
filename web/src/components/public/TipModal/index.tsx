@@ -30,6 +30,7 @@ export default function TipModal({ open, tip, onClose }: TipModalProps) {
       centered
       width={channels.length > 1 ? "min(520px, calc(100vw - 32px))" : "min(360px, calc(100vw - 32px))"}
       classNames={{
+        wrapper: styles.modalWrapper,
         container: styles.modalContainer,
         body: styles.modalBody,
       }}

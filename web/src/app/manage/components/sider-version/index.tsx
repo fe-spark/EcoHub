@@ -46,7 +46,16 @@ export default function SiderVersion({
     ApiGet("/manage/version")
       .then((resp) => {
         if (resp.code === 0 && resp.data) {
-          setInfo(resp.data as AppVersionInfo);
+          const v = resp.data as AppVersionInfo;
+          setInfo(v);
+          if (v.upgradePhase === "pulling" || v.upgradePhase === "recreating") {
+            setUpgrading(true);
+            waitUntilBack(v.latest).catch((err) => {
+              message.error(err instanceof Error ? err.message : "升级检测异常");
+              setUpgrading(false);
+              setUpgradeHint("");
+            });
+          }
         }
       })
       .catch(() => {});
@@ -59,10 +68,12 @@ export default function SiderVersion({
   const hasUpdate = Boolean(info?.hasUpdate) && isAdmin;
   const label = current ? `v${current.replace(/^v/i, "")}` : "—";
 
-  const waitUntilBack = async () => {
-    setUpgradeHint("正在拉取 latest…");
+  const waitUntilBack = async (targetVersion?: string) => {
+    const versionLabel = targetVersion ? ` ${targetVersion}` : "";
+    setUpgradeHint(`正在拉取${versionLabel}镜像…`);
     let disconnected = false;
-    for (let i = 0; i < 90 && !abortRef.current; i += 1) {
+    // 轮询拉取阶段：与后端 12 分钟超时对齐（360 次 * 2s = 12分钟）
+    for (let i = 0; i < 360 && !abortRef.current; i += 1) {
       await sleep(2000);
       try {
         const resp = await fetch("/api/manage/version", {
@@ -132,7 +143,7 @@ export default function SiderVersion({
         throw new Error(resp.msg || "升级请求失败");
       }
       message.success(resp.msg || "已开始升级");
-      await waitUntilBack();
+      await waitUntilBack(info.latest);
     } catch (err) {
       const text = err instanceof Error ? err.message : "升级失败";
       message.error(text);
@@ -176,7 +187,9 @@ export default function SiderVersion({
                 onClick={() => {
                   modal.confirm({
                     title: "立即升级并重启？",
-                    content: "将拉取 latest 并重建当前容器，页面会短暂断开。",
+                    content: info?.latest
+                      ? `将拉取 ${info.latest} 并重建当前容器，页面会短暂断开。`
+                      : "将拉取新版本并重建当前容器，页面会短暂断开。",
                     okText: "升级",
                     cancelText: "取消",
                     onOk: () => startUpgrade(),
