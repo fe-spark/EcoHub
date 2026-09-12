@@ -14,7 +14,7 @@ import (
 )
 
 const dockerSock = "/var/run/docker.sock"
-const dockerAPI = "http://docker/v1.43"
+const dockerAPI = "http://docker"
 
 type dockerEngine struct {
 	http *http.Client
@@ -113,7 +113,17 @@ func (d *dockerEngine) start(ctx context.Context, id string) error {
 }
 
 func (d *dockerEngine) stop(ctx context.Context, id string) error {
-	return d.post(ctx, "/containers/"+url.PathEscape(id)+"/stop?t=15", nil, nil)
+	return d.post(ctx, "/containers/"+url.PathEscape(id)+"/stop?t=30", nil, nil)
+}
+
+func (d *dockerEngine) connectNetwork(ctx context.Context, netName, containerID string, ep any) error {
+	payload := map[string]any{
+		"Container": containerID,
+	}
+	if ep != nil {
+		payload["EndpointConfig"] = ep
+	}
+	return d.post(ctx, "/networks/"+url.PathEscape(netName)+"/connect", payload, nil)
 }
 
 func (d *dockerEngine) isRunning(ctx context.Context, id string) (bool, error) {

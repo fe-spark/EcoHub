@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -17,6 +18,7 @@ const defaultAllInOneImage = "ghcr.io/fe-spark/ecohub:latest"
 var (
 	reContainerPath = regexp.MustCompile(`/containers/([0-9a-f]{64})(?:/|\b)`)
 	reDockerScope   = regexp.MustCompile(`docker-([0-9a-f]{64})\.scope`)
+	reDockerCgroup  = regexp.MustCompile(`/docker/([0-9a-f]{64})(?:/|\b)`)
 	upgrading       atomic.Bool
 	upgradePhase    atomic.Value // string
 	upgradeErr      atomic.Value // string
@@ -133,7 +135,7 @@ func runContainerUpgrade(engine *dockerEngine, old containerInspect, image strin
 }
 
 func handoffContainer(ctx context.Context, engine *dockerEngine, old containerInspect, name, backup, image string) error {
-	body, err := buildReplacementBody(old, image)
+	body, extraNets, err := buildReplacementBody(old, image)
 	if err != nil {
 		return err
 	}
@@ -145,23 +147,44 @@ func handoffContainer(ctx context.Context, engine *dockerEngine, old containerIn
 		_ = engine.rename(ctx, old.ID, name)
 		return fmt.Errorf("创建新容器失败: %w", err)
 	}
+	for netName, ep := range extraNets {
+		if netErr := engine.connectNetwork(ctx, netName, newID, ep); netErr != nil {
+			log.Printf("[Upgrade] 连接附加网络 %s 失败: %v", netName, netErr)
+		}
+	}
+	sockBind := dockerSockBind(old.HostConfig)
 	helperName := name + "-upg-helper"
-	if err := startUpgradeHelper(ctx, engine, image, helperName, old.ID, newID); err != nil {
+	if err := startUpgradeHelper(ctx, engine, image, helperName, old.ID, newID, name, sockBind); err != nil {
 		_ = engine.remove(ctx, newID)
 		_ = engine.rename(ctx, old.ID, name)
 		return fmt.Errorf("启动升级助手失败: %w", err)
 	}
 	// 助手在本容器退出后再 start 新容器，避免端口冲突
 	if err := engine.stop(ctx, old.ID); err != nil {
-		log.Printf("[Upgrade] 停止本容器失败（助手将超时）: %v", err)
+		log.Printf("[Upgrade] 停止本容器请求返回: %v（助手将兜底确保旧容器退出）", err)
 	}
 	return nil
 }
 
-func buildReplacementBody(old containerInspect, image string) (map[string]any, error) {
+func dockerSockBind(rawHostConfig json.RawMessage) string {
+	var hc struct {
+		Binds []string `json:"Binds"`
+	}
+	if json.Unmarshal(rawHostConfig, &hc) == nil {
+		for _, b := range hc.Binds {
+			parts := strings.Split(b, ":")
+			if len(parts) >= 2 && (parts[1] == dockerSock || parts[1] == "/run/docker.sock") {
+				return b
+			}
+		}
+	}
+	return dockerSock + ":" + dockerSock
+}
+
+func buildReplacementBody(old containerInspect, image string) (map[string]any, map[string]any, error) {
 	var cfg map[string]any
 	if err := json.Unmarshal(old.Config, &cfg); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cfg["Image"] = image
 	delete(cfg, "Hostname")
@@ -175,8 +198,30 @@ func buildReplacementBody(old containerInspect, image string) (map[string]any, e
 		hostConfig = hc
 	}
 
+	var primaryNet string
+	if netMode, ok := hc["NetworkMode"].(string); ok && netMode != "" {
+		if _, exists := old.NetworkSettings.Networks[netMode]; exists {
+			primaryNet = netMode
+		}
+	}
+	netNames := make([]string, 0, len(old.NetworkSettings.Networks))
+	for netName := range old.NetworkSettings.Networks {
+		netNames = append(netNames, netName)
+	}
+	sort.Strings(netNames)
+	if primaryNet != "" {
+		for i, name := range netNames {
+			if name == primaryNet {
+				netNames = append([]string{primaryNet}, append(netNames[:i], netNames[i+1:]...)...)
+				break
+			}
+		}
+	}
+
 	endpoints := map[string]any{}
-	for netName, raw := range old.NetworkSettings.Networks {
+	extraEndpoints := map[string]any{}
+	for _, netName := range netNames {
+		raw := old.NetworkSettings.Networks[netName]
 		var ep map[string]any
 		if json.Unmarshal(raw, &ep) != nil {
 			continue
@@ -191,29 +236,37 @@ func buildReplacementBody(old containerInspect, image string) (map[string]any, e
 		delete(ep, "GlobalIPv6Address")
 		delete(ep, "GlobalIPv6PrefixLen")
 		delete(ep, "DNSNames")
-		endpoints[netName] = ep
+		if len(endpoints) == 0 {
+			endpoints[netName] = ep
+		} else {
+			extraEndpoints[netName] = ep
+		}
 	}
 
 	cfg["HostConfig"] = hostConfig
 	cfg["NetworkingConfig"] = map[string]any{
 		"EndpointsConfig": endpoints,
 	}
-	return cfg, nil
+	return cfg, extraEndpoints, nil
 }
 
-func startUpgradeHelper(ctx context.Context, engine *dockerEngine, image, helperName, oldID, newID string) error {
+func startUpgradeHelper(ctx context.Context, engine *dockerEngine, image, helperName, oldID, newID, originalName, sockBind string) error {
 	_ = engine.remove(ctx, helperName)
+	if sockBind == "" {
+		sockBind = dockerSock + ":" + dockerSock
+	}
 	body := map[string]any{
 		"Image":      image,
 		"Entrypoint": []string{"/app/server/main"},
-		"Cmd":        []string{"upgrade-helper", "--old", oldID, "--new", newID},
+		"Cmd":        []string{"upgrade-helper", "--old", oldID, "--new", newID, "--name", originalName},
 		"Env": []string{
 			"ECOHUB_UPGRADE_HELPER=1",
 			"ECOHUB_UPGRADE_OLD=" + oldID,
 			"ECOHUB_UPGRADE_NEW=" + newID,
+			"ECOHUB_UPGRADE_NAME=" + originalName,
 		},
 		"HostConfig": map[string]any{
-			"Binds":         []string{dockerSock + ":" + dockerSock},
+			"Binds":         []string{sockBind},
 			"AutoRemove":    true,
 			"NetworkMode":   "none",
 			"RestartPolicy": map[string]any{"Name": "no"},
@@ -241,6 +294,7 @@ func resolveSelfContainer(engine *dockerEngine) (containerInspect, error) {
 	if host, err := os.Hostname(); err == nil && host != "" {
 		candidates = append(candidates, host)
 	}
+	candidates = append(candidates, "Eco-hub")
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
 	seen := map[string]bool{}
@@ -271,6 +325,9 @@ func parseContainerIDCandidates(raw string) []string {
 		add(m[1])
 	}
 	for _, m := range reDockerScope.FindAllStringSubmatch(raw, -1) {
+		add(m[1])
+	}
+	for _, m := range reDockerCgroup.FindAllStringSubmatch(raw, -1) {
 		add(m[1])
 	}
 	return out

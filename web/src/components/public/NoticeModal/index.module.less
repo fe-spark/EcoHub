@@ -1,5 +1,19 @@
+.modalWrapper {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 16px;
+  box-sizing: border-box;
+
+  &::before {
+    display: none !important;
+  }
+}
+
 .modal {
-  max-width: calc(100vw - 32px);
+  margin: auto !important;
+  max-width: min(480px, calc(100vw - 32px)) !important;
+  width: 100% !important;
 }
 
 .modalContainer {

@@ -5,6 +5,12 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  max-width: 100vw;
+  overflow-x: hidden;
+
+  @supports (overflow-x: clip) {
+    overflow-x: clip;
+  }
 }
 
 .publicMain {

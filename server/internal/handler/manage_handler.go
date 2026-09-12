@@ -60,7 +60,7 @@ func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("已开始拉取 latest，容器即将重启", c)
+	dto.SuccessOnlyMsg("已开始拉取新镜像，容器即将重启", c)
 }
 
 // ------------------------------------------------------ 站点基本配置 ------------------------------------------------------
