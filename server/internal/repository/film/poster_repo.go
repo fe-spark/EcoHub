@@ -33,14 +33,11 @@ func SyncSlavePostersIfConfiguredTx(tx *gorm.DB, sourceID string, details []mode
 		if pic == "" {
 			continue
 		}
-		keys := BuildPlaylistMovieKeys(detail)
-		for _, key := range keys {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			postersMap[key] = model.MoviePoster{
+		primaryKey := BuildPlaylistPrimaryMovieKey(detail)
+		if primaryKey != "" {
+			postersMap[primaryKey] = model.MoviePoster{
 				SourceId:     sourceID,
-				MovieKey:     key,
+				MovieKey:     primaryKey,
 				Picture:      pic,
 				PictureSlide: slide,
 			}
