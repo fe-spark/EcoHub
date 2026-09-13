@@ -17,7 +17,9 @@ COPY server/go.mod server/go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
 
 COPY server/ .
-RUN --mount=type=cache,target=/root/.cache/go-build GOARCH=$TARGETARCH go build -o /out/main ./cmd/server/...
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    GOARCH=$TARGETARCH go build -o /out/main ./cmd/server/... && \
+    GOARCH=$TARGETARCH go build -o /out/migrate_match_keys ./cmd/tool/migrate_match_keys/...
 
 # ==========================================
 # 2. 编译 Next.js 前端应用 (web)
@@ -58,8 +60,12 @@ RUN apk add --no-cache ca-certificates tzdata supervisor
 
 WORKDIR /app
 
-# 拷贝 Go 服务二进制文件
+# 拷贝 Go 服务二进制文件及迁移工具
 COPY --from=server-builder /out/main /app/server/main
+COPY --from=server-builder /out/migrate_match_keys /usr/local/bin/migrate_match_keys
+RUN chmod +x /usr/local/bin/migrate_match_keys && \
+    ln -s /usr/local/bin/migrate_match_keys /app/migrate_match_keys && \
+    ln -s /usr/local/bin/migrate_match_keys /app/server/migrate_match_keys
 
 # 拷贝 Next.js 产物
 COPY --from=web-builder /app/public /app/web/public

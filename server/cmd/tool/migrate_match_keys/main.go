@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -30,8 +31,14 @@ func resolveMasterRootPid(pid, cid int64, cName string) int64 {
 }
 
 func main() {
+	defaultPort := 3306
+	if p := os.Getenv("MYSQL_PORT"); p != "" {
+		if v, err := strconv.Atoi(p); err == nil && v > 0 {
+			defaultPort = v
+		}
+	}
 	host := flag.String("host", os.Getenv("MYSQL_HOST"), "MySQL Host")
-	port := flag.Int("port", 3306, "MySQL Port")
+	port := flag.Int("port", defaultPort, "MySQL Port")
 	user := flag.String("user", os.Getenv("MYSQL_USER"), "MySQL User")
 	pass := flag.String("pass", os.Getenv("MYSQL_PASSWORD"), "MySQL Password")
 	dbname := flag.String("dbname", os.Getenv("MYSQL_DBNAME"), "MySQL Database Name")
