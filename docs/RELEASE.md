@@ -3,7 +3,32 @@
 ### 升级指引
 
 - **平滑升级**：支持后台「检查更新」一键平滑升级，或通过 `docker compose pull ecohub && docker compose up -d ecohub` 快速更新。
-- **数据兼容**：完全向下兼容现有 MySQL 与 Redis 数据结构，无破坏性变更。提供离线迁移工具（`go run ./cmd/tool/migrate_match_keys`）按需升级存量影片的大类匹配键。
+- **数据兼容**：完全向下兼容现有 MySQL 与 Redis 数据结构，无破坏性变更。
+
+---
+
+### 📦 存量匹配键迁移工具（按需执行）
+
+> **提示**：v2.6.5 升级后，所有**新采集/新抓取**的数据会自动按新规范生成带大类的物理唯一匹配键，**日常运行无需强制执行迁移**。  
+> 仅当你需要对**存量历史采集的老影片**彻底刷新为全新大类隔离匹配键（防止历史遗留的跨分类同名串台）时，可在升级容器后按需执行一次。
+
+#### 方案一：Docker 生产环境（推荐，一键执行）
+本 Release 附件已提供编译好的独立可执行文件（`migrate_match_keys_linux_amd64` 与 `migrate_match_keys_linux_arm64`）。在宿主机终端复制执行以下命令即可，**自动继承容器内数据库配置，无需手动输密码**：
+
+```bash
+ARCH=$(uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/') && \
+curl -fsSL "https://github.com/fe-spark/EcoHub/releases/download/v2.6.5/migrate_match_keys_linux_${ARCH}" -o /tmp/migrate_match_keys && \
+docker cp /tmp/migrate_match_keys Eco-hub:/app/migrate_match_keys && \
+docker exec -it Eco-hub chmod +x /app/migrate_match_keys && \
+docker exec -it Eco-hub /app/migrate_match_keys
+```
+
+*(迁移完成后清理临时文件：`docker exec Eco-hub rm -f /app/migrate_match_keys && rm -f /tmp/migrate_match_keys`)*
+
+#### 方案二：源码/本地环境
+```bash
+go run ./cmd/tool/migrate_match_keys
+```
 
 ---
 
@@ -23,4 +48,3 @@
 
 #### 4. 千万级数据迁移工具加固
 - **流式游标分页**：`migrate_match_keys` 脚本全面改用基于主键的 Keyset Pagination 游标分页（`WHERE id > ? ORDER BY id ASC LIMIT ?`），单批次内存恒定保持 O(1)，杜绝大表全表扫描 OOM 崩溃。
-
