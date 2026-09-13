@@ -25,6 +25,9 @@ export function getOrCreateDeviceId(): string {
 export interface TrackPageViewOptions {
   action?: "browse" | "search" | "play" | "classify" | string;
   resource?: string;
+  resource_title?: string;
+  resource_poster?: string;
+  resource_cat?: string;
   source?: "web" | "android" | "harmony" | "ios" | string;
   path?: string;
   page?: string;
@@ -39,6 +42,9 @@ export function trackPageView(
   resource?: string,
   source: string = "web",
   path?: string,
+  resourceTitle?: string,
+  resourcePoster?: string,
+  resourceCat?: string,
 ) {
   if (typeof window === "undefined") {
     return;
@@ -46,6 +52,9 @@ export function trackPageView(
 
   let action = "browse";
   let finalResource = resource || "";
+  let finalResourceTitle = resourceTitle || "";
+  let finalResourcePoster = resourcePoster || "";
+  let finalResourceCat = resourceCat || "";
   let finalSource = source || "web";
   let finalPath = path || (window.location.pathname + window.location.search);
   let finalPage = finalPath;
@@ -55,6 +64,9 @@ export function trackPageView(
   if (typeof actionOrOptions === "object" && actionOrOptions !== null) {
     action = actionOrOptions.action || "browse";
     finalResource = actionOrOptions.resource || "";
+    finalResourceTitle = actionOrOptions.resource_title || finalResourceTitle;
+    finalResourcePoster = actionOrOptions.resource_poster || finalResourcePoster;
+    finalResourceCat = actionOrOptions.resource_cat || finalResourceCat;
     finalSource = actionOrOptions.source || "web";
     finalPath = actionOrOptions.path || (window.location.pathname + window.location.search);
     finalPage = actionOrOptions.page || finalPath;
@@ -83,6 +95,9 @@ export function trackPageView(
   const body = JSON.stringify({
     action,
     resource: finalResource,
+    resource_title: finalResourceTitle,
+    resource_poster: finalResourcePoster,
+    resource_cat: finalResourceCat,
     source: finalSource,
     path: finalPath,
     page: finalPage,

@@ -115,23 +115,33 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	baseURL, _ := resolveProvideBaseURL(c)
 
 	normalizeVodListPic := func(list []model.FilmList) []model.FilmList {
-		if baseURL == "" {
+		if len(list) == 0 {
 			return list
 		}
-		for i := range list {
-			list[i].VodPic = normalizeMediaURL(list[i].VodPic, baseURL)
+		cloned := make([]model.FilmList, len(list))
+		copy(cloned, list)
+		if baseURL == "" {
+			return cloned
 		}
-		return list
+		for i := range cloned {
+			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+		}
+		return cloned
 	}
 
 	normalizeDetailListPic := func(list []model.FilmDetail) []model.FilmDetail {
-		if baseURL == "" {
+		if len(list) == 0 {
 			return list
 		}
-		for i := range list {
-			list[i].VodPic = normalizeMediaURL(list[i].VodPic, baseURL)
+		cloned := make([]model.FilmDetail, len(list))
+		copy(cloned, list)
+		if baseURL == "" {
+			return cloned
 		}
-		return list
+		for i := range cloned {
+			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+		}
+		return cloned
 	}
 
 	switch ac {

@@ -7,6 +7,7 @@ export interface FilmSource {
   isPosterSource?: boolean;
   interval: number;
   cd?: number;
+  domainReplaceRules?: string;
   lastCollectTime?: string;
   progress?: CollectProgress | null;
 }
@@ -138,6 +139,7 @@ export interface SourceFormValues {
   isPosterSource: boolean;
   interval: number;
   cd: number;
+  domainReplaceRules?: string;
 }
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
@@ -148,6 +150,7 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   isPosterSource: false,
   interval: 0,
   cd: 24,
+  domainReplaceRules: "",
 };
 
 export const collectDuration = [

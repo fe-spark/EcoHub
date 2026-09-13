@@ -1047,3 +1047,80 @@ func TestModuleIsolationKeys(t *testing.T) {
 		t.Fatalf("action keys must be isolated: w=%s a=%s tv=%s", wak, aak, tvak)
 	}
 }
+
+func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
+	events := []AccessEvent{
+		{
+			Action:         ActionPlay,
+			Resource:       "1024",
+			ResourceTitle:  "原主站-流浪地球",
+			ResourcePoster: "https://example.com/wandering_earth.jpg",
+			ResourceCat:    "科幻",
+		},
+		{
+			Action:   ActionPlay,
+			Resource: "2048",
+			// 没有预先固化快照
+		},
+		{
+			Action:      ActionClassify,
+			Resource:    "1",
+			ResourceCat: "电影",
+		},
+	}
+
+	res := enrichLogEvents(events)
+	if len(res) != 3 {
+		t.Fatalf("expected 3 events, got %d", len(res))
+	}
+
+	// 验证已固化快照的事件不会被修改覆盖（即使当前库中查不到 1024）
+	if res[0].ResourceTitle != "原主站-流浪地球" {
+		t.Fatalf("expected ResourceTitle to be preserved as '原主站-流浪地球', got %q", res[0].ResourceTitle)
+	}
+	if res[0].ResourcePoster != "https://example.com/wandering_earth.jpg" {
+		t.Fatalf("expected ResourcePoster to be preserved, got %q", res[0].ResourcePoster)
+	}
+	if res[0].ResourceCat != "科幻" {
+		t.Fatalf("expected ResourceCat to be preserved as '科幻', got %q", res[0].ResourceCat)
+	}
+
+	// 验证未固化快照的事件仍会兜底处理
+	if res[1].ResourceTitle == "" {
+		t.Fatalf("expected res[1] to have fallback title, got empty")
+	}
+
+	// 验证分类快照保留
+	if res[2].ResourceCat != "电影" {
+		t.Fatalf("expected ResourceCat to be preserved as '电影', got %q", res[2].ResourceCat)
+	}
+}
+
+func TestEnrichPlayTopItems_PreservesHistoricalTitle(t *testing.T) {
+	items := []TopItem{
+		{
+			Key:      "1024",
+			Count:    50,
+			Title:    "历史归档-阿凡达",
+			Category: "科幻",
+			Poster:   "https://example.com/avatar.jpg",
+		},
+		{
+			Key:   "2048",
+			Count: 30,
+			Title: "", // 无历史快照
+		},
+	}
+
+	res := enrichPlayTopItems(items)
+	if len(res) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(res))
+	}
+	if res[0].Title != "历史归档-阿凡达" {
+		t.Fatalf("expected Title to be preserved as '历史归档-阿凡达', got %q", res[0].Title)
+	}
+	if res[1].Title != "影片 #2048" {
+		t.Fatalf("expected Title fallback '影片 #2048', got %q", res[1].Title)
+	}
+}
+

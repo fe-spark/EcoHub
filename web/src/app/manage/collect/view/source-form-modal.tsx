@@ -125,6 +125,45 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           />
         </Form.Item>
         <Form.Item
+          label="视频域名替换"
+          name="domainReplaceRules"
+          tooltip="播放和下载链接的域名替换。每行一条，格式：旧域名 => 新域名"
+          rules={[
+            {
+              validator: async (_, value: string) => {
+                if (!value || !String(value).trim()) {
+                  return;
+                }
+                const bad: string[] = [];
+                for (const line of String(value).split("\n")) {
+                  const t = line.trim();
+                  if (!t || t.startsWith("#") || t.startsWith("//") || t.startsWith(";")) {
+                    continue;
+                  }
+                  const ok =
+                    t.includes("=>") ||
+                    t.includes("->") ||
+                    t.includes(",") ||
+                    t.split(/\s+/).length === 2;
+                  if (!ok) {
+                    bad.push(t);
+                  }
+                }
+                if (bad.length > 0) {
+                  return Promise.reject(
+                    new Error(`无法解析: ${bad.join("；")}。请使用 旧域名 => 新域名`),
+                  );
+                }
+              },
+            },
+          ]}
+        >
+          <Input.TextArea
+            rows={3}
+            placeholder={`每行一条，例如：\nhd.ijycnd.com => hd.kuktxu.com`}
+          />
+        </Form.Item>
+        <Form.Item
           label="海报图源"
           name="isPosterSource"
           valuePropName="checked"

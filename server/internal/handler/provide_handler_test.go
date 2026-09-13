@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,8 +17,10 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 )
 
@@ -509,4 +512,150 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected proxy normalized pic %q, got %q", expectedPicPrefix, res.List[0].VodPic)
 		}
 	})
+}
+
+func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
+	_, mr := setupProvideTestDB(t)
+	const version = "v_tvbox_jitter"
+
+	snap := model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             301,
+		Name:            "黑客帝国",
+		Pid:             1,
+		Cid:             10,
+		Hits:            100,
+	}
+	_ = db.Mdb.Create(&snap).Error
+	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmrepo.LoadActiveFilmReadModel(version)
+	filmrepo.WaitActiveFilmSearchIndexBuilt()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1&pg=1", nil)
+	ProvideHd.HandleProvide(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	// 检查 Redis 是否缓存了该分页，且 TTL 带有 >= 12h 的随机 Jitter
+	ruleVersion := repository.GetRuleVersion()
+	categoryVersion := repository.GetCategoryVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:T1:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion)
+
+	ttl := mr.TTL(cacheKey)
+	if ttl < 12*time.Hour {
+		t.Fatalf("expected TVBox list cache TTL >= 12h, got %v", ttl)
+	}
+	if ttl > 12*time.Hour+15*time.Minute {
+		t.Fatalf("expected TVBox list cache TTL <= 12h15m, got %v", ttl)
+	}
+}
+
+func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
+	_, mr := setupProvideTestDB(t)
+	const version = "v_tvbox_empty"
+
+	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmrepo.LoadActiveFilmReadModel(version)
+	filmrepo.WaitActiveFilmSearchIndexBuilt()
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	// 请求无数据的分类 t=999
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=999&pg=1", nil)
+	ProvideHd.HandleProvide(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+
+	ruleVersion := repository.GetRuleVersion()
+	categoryVersion := repository.GetCategoryVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:r%s:c%s:T999:C0:P1:S:L20", config.TVBoxList, version, ruleVersion, categoryVersion)
+
+	ttl := mr.TTL(cacheKey)
+	if ttl <= 0 || ttl > 65*time.Second {
+		t.Fatalf("expected empty TVBox list cache TTL around 60s, got %v", ttl)
+	}
+}
+
+func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
+	_, _ = setupProvideTestDB(t)
+	const version = "v_tvbox_race_test"
+
+	snap := model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             501,
+		Name:            "并发竞态电影",
+		Pid:             1,
+		Cid:             10,
+		Picture:         "/static/poster.jpg", // 相对路径，依赖 baseURL 归一化
+		Hits:            500,
+	}
+	_ = db.Mdb.Create(&snap).Error
+	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmrepo.LoadActiveFilmReadModel(version)
+	filmrepo.WaitActiveFilmSearchIndexBuilt()
+
+	const concurrency = 30
+	var wg sync.WaitGroup
+	wg.Add(concurrency)
+
+	errCh := make(chan error, concurrency)
+
+	for i := 0; i < concurrency; i++ {
+		go func(idx int) {
+			defer wg.Done()
+
+			host := "192.168.1.88:8080"
+			expectedPrefix := "http://192.168.1.88:8080"
+			if idx%2 == 0 {
+				host = "tv.public-domain.com"
+				expectedPrefix = "http://tv.public-domain.com"
+			}
+
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			req, _ := http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1&pg=1", nil)
+			req.Host = host
+			c.Request = req
+
+			ProvideHd.HandleProvide(c)
+
+			if w.Code != http.StatusOK {
+				errCh <- fmt.Errorf("idx %d: expected 200, got %d", idx, w.Code)
+				return
+			}
+
+			var body struct {
+				List []struct {
+					VodPic string `json:"vod_pic"`
+				} `json:"list"`
+			}
+			if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+				errCh <- fmt.Errorf("idx %d: unmarshal failed: %v", idx, err)
+				return
+			}
+
+			if len(body.List) == 0 {
+				errCh <- fmt.Errorf("idx %d: expected non-empty list", idx)
+				return
+			}
+
+			actualPic := body.List[0].VodPic
+			expectedPic := expectedPrefix + "/static/poster.jpg"
+			if actualPic != expectedPic {
+				errCh <- fmt.Errorf("idx %d: host %s expected pic %s, got %s (cross-host pollution)", idx, host, expectedPic, actualPic)
+				return
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Fatal(err)
+	}
 }

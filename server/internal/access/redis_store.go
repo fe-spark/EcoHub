@@ -124,6 +124,7 @@ func writeEvent(evt *AccessEvent) {
 	if evt == nil || db.Rdb == nil {
 		return
 	}
+	snapshotAccessEvent(evt)
 	if evt.Method == "PAGE" {
 		writePageView(evt)
 		return

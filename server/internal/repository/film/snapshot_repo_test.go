@@ -339,3 +339,89 @@ func TestSetActiveSnapshotVersion_RedisBackupFailureStillActivates(t *testing.T)
 		t.Fatalf("expected memory version v_mem_only, got %q", got)
 	}
 }
+
+func TestClearDynamicPlayCaches_SafeScoping(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+	})
+
+	// 模拟写入目标缓存与无关业务缓存
+	_ = client.Set(db.Cxt, "EcoHub:filmPlayInfo:101", "play101", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:TVBox:List:v1", "tvbox_v1", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:UserToken:999", "token", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:search:v1/test", "search_res", 0).Err()
+
+	ClearDynamicPlayCaches()
+
+	// 目标缓存应被清理
+	if client.Exists(db.Cxt, "EcoHub:filmPlayInfo:101").Val() != 0 {
+		t.Error("expected EcoHub:filmPlayInfo:101 to be deleted")
+	}
+	if client.Exists(db.Cxt, "EcoHub:TVBox:List:v1").Val() != 0 {
+		t.Error("expected EcoHub:TVBox:List:v1 to be deleted")
+	}
+
+	// 无关业务缓存绝不能被误删
+	if client.Exists(db.Cxt, "EcoHub:UserToken:999").Val() != 1 {
+		t.Error("expected EcoHub:UserToken:999 to be preserved")
+	}
+	if client.Exists(db.Cxt, "EcoHub:search:v1/test").Val() != 1 {
+		t.Error("expected EcoHub:search:v1/test to be preserved")
+	}
+}
+
+func TestClearCachePatterns_ConsolidatedScan(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+	})
+
+	_ = client.Set(db.Cxt, "EcoHub:snap_cat:1", "v", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:snap_hot:2", "v", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:tags_search:3", "v", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:FilmClassify:4", "v", 0).Err()
+	_ = client.Set(db.Cxt, "EcoHub:preserve_me:999", "v", 0).Err()
+
+	// 一次传入 4 组不同 Pattern
+	clearCachePatterns(
+		"EcoHub:snap_cat:*",
+		"EcoHub:snap_hot:*",
+		"EcoHub:tags_search:*",
+		"EcoHub:FilmClassify:*",
+	)
+
+	if client.Exists(db.Cxt, "EcoHub:snap_cat:1").Val() != 0 {
+		t.Error("snap_cat should be deleted")
+	}
+	if client.Exists(db.Cxt, "EcoHub:snap_hot:2").Val() != 0 {
+		t.Error("snap_hot should be deleted")
+	}
+	if client.Exists(db.Cxt, "EcoHub:tags_search:3").Val() != 0 {
+		t.Error("tags_search should be deleted")
+	}
+	if client.Exists(db.Cxt, "EcoHub:FilmClassify:4").Val() != 0 {
+		t.Error("FilmClassify should be deleted")
+	}
+	if client.Exists(db.Cxt, "EcoHub:preserve_me:999").Val() != 1 {
+		t.Error("preserve_me should be preserved")
+	}
+}

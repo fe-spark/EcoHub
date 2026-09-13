@@ -40,7 +40,12 @@ export default async function FilmClassifyPage({
 
   return (
     <>
-      <TrackPageView action="classify" resource={pid} />
+      <TrackPageView
+        action="classify"
+        resource={pid}
+        resourceCat={data.title}
+        resourceTitle={data.title}
+      />
       <FilmClassifyPageView data={data} pid={pid} />
     </>
   );

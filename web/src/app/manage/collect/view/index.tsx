@@ -807,6 +807,7 @@ export default function CollectManagePageView() {
         isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
+        domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
       });
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);

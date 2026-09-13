@@ -17,6 +17,8 @@ interface ResourceCellProps {
 
 export default function ResourceCell({ record }: ResourceCellProps) {
   const { resource, resourceTitle, resourcePoster, resourceCat, action } = record;
+  const safePoster =
+    resourcePoster && /^https?:\/\//i.test(resourcePoster) ? resourcePoster : "";
 
   if (!resource && !resourceTitle && !resourceCat) {
     return <span style={{ color: "#bbb" }}>-</span>;
@@ -59,14 +61,14 @@ export default function ResourceCell({ record }: ResourceCellProps) {
 
     return (
       <Space size={8} align="center">
-        {resourcePoster ? (
+        {safePoster ? (
           <Popover
             placement="right"
             content={
               <div style={{ width: 150, textAlign: "center" }}>
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={resourcePoster}
+                  src={safePoster}
                   alt={displayName}
                   style={{
                     width: "100%",
@@ -97,7 +99,7 @@ export default function ResourceCell({ record }: ResourceCellProps) {
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={resourcePoster}
+              src={safePoster}
               alt={displayName}
               style={{
                 width: 24,
