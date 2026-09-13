@@ -3,6 +3,7 @@ package support
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/config"
@@ -118,6 +119,8 @@ func RefreshCategoryCache() {
 	catMu.Lock()
 	idToPid = newPidMap
 	catMu.Unlock()
+
+	ClearRootCategoryCNameCache()
 }
 
 func GetRootId(id int64) int64 {
@@ -176,3 +179,68 @@ func GetParentId(id int64) int64 {
 
 	return idToPid[id]
 }
+
+// SetCategoryTreeForTest 供单元测试快速注入内存模拟分类树
+func SetCategoryTreeForTest(pidMap map[int64]int64, nameMap map[int64]string) {
+	catMu.Lock()
+	idToPid = pidMap
+	catMu.Unlock()
+	ResetCategoryNameCache()
+	for id, name := range nameMap {
+		SetCategoryNameCache(id, name)
+	}
+	ClearRootCategoryCNameCache()
+}
+
+var (
+	rootCategoryCNameCache sync.Map // cName (string) -> rootPid (int64)
+)
+
+// ClearRootCategoryCNameCache 清空分类名称推断缓存。
+func ClearRootCategoryCNameCache() {
+	rootCategoryCNameCache.Clear()
+}
+
+// ResolveRootCategoryIDByCName 根据分类名称在系统已有分类中匹配归属的一级大类 ID (Pid)。
+// 仅按主站/本地系统已有分类做精准匹配，不进行任何猜测；未匹配则返回 0。
+func ResolveRootCategoryIDByCName(cName string) int64 {
+	cName = strings.TrimSpace(cName)
+	if cName == "" {
+		return 0
+	}
+
+	// 1. 快速读取内存缓存（0ns / 0 SQL 开销）
+	if cached, ok := rootCategoryCNameCache.Load(cName); ok {
+		return cached.(int64)
+	}
+
+	// 2. 确保本地分类表内存缓存就绪，优先匹配全库已有已知分类（精确匹配）
+	catMu.RLock()
+	isEmpty := len(idToPid) == 0
+	catMu.RUnlock()
+	if isEmpty {
+		RefreshCategoryCache()
+	}
+
+	var matchedId int64
+	// sync.Map 自带并发安全，遍历无需持有 catMu 锁，彻底杜绝与写锁并发时的重入死锁
+	categoryNameCache.Range(func(key, val any) bool {
+		id, ok1 := key.(int64)
+		name, ok2 := val.(string)
+		if ok1 && ok2 && strings.EqualFold(name, cName) {
+			matchedId = id
+			return false
+		}
+		return true
+	})
+
+	var rootId int64
+	if matchedId > 0 {
+		rootId = GetRootId(matchedId)
+	}
+
+	// 内存遍历未命中即代表库内无此正规分类，不进行盲猜，直接记录 0
+	rootCategoryCNameCache.Store(cName, rootId)
+	return rootId
+}
+

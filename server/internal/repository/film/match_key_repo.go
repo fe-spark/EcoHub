@@ -3,6 +3,7 @@ package film
 import (
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -108,7 +109,19 @@ func LoadMovieMatchKeys(filmIndex *model.FilmIndex, detail *model.MovieDetail) [
 	if detail == nil {
 		return nil
 	}
-	return BuildMovieMatchKeys(detail.DbId, detail.Name)
+	pid := int64(0)
+	if filmIndex != nil {
+		if filmIndex.Pid > 0 {
+			pid = support.GetRootId(filmIndex.Pid)
+		}
+		if pid <= 0 && filmIndex.Cid > 0 {
+			pid = support.GetRootId(filmIndex.Cid)
+		}
+	}
+	if pid <= 0 {
+		pid = ResolveMovieDetailRootPid(*detail)
+	}
+	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 }
 
 func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []string {
@@ -120,5 +133,17 @@ func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *mode
 	if detail == nil {
 		return nil
 	}
-	return BuildMovieMatchKeys(detail.DbId, detail.Name)
+	pid := int64(0)
+	if snapshot != nil {
+		if snapshot.Pid > 0 {
+			pid = support.GetRootId(snapshot.Pid)
+		}
+		if pid <= 0 && snapshot.Cid > 0 {
+			pid = support.GetRootId(snapshot.Cid)
+		}
+	}
+	if pid <= 0 {
+		pid = ResolveMovieDetailRootPid(*detail)
+	}
+	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 }
