@@ -59,9 +59,23 @@ export default async function PlayPage({
     );
   }
 
+  const filmDetail = playPageData?.detail;
+  const filmName = filmDetail?.name || "";
+  const filmPoster =
+    filmDetail?.isCustomPicture && filmDetail?.customPicture
+      ? filmDetail.customPicture
+      : filmDetail?.picture || "";
+  const filmCat = filmDetail?.descriptor?.cName || "";
+
   return (
     <>
-      <TrackPageView action="play" resource={filmId} />
+      <TrackPageView
+        action="play"
+        resource={filmId}
+        resourceTitle={filmName}
+        resourcePoster={filmPoster}
+        resourceCat={filmCat}
+      />
       <PlayPageView
         key={filmId}
         data={playPageData}

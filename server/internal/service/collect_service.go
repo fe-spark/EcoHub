@@ -184,6 +184,9 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		}
 	}
 	clearProvideNetworkConfigCache()
+	if old.DomainReplaceRules != source.DomainReplaceRules {
+		filmrepo.ClearDynamicPlayCaches()
+	}
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
 		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
 	}
@@ -239,6 +242,9 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 		} else {
 			changes = append(changes, "海报图源: 取消优先海报图源")
 		}
+	}
+	if old.DomainReplaceRules != next.DomainReplaceRules {
+		changes = append(changes, "播放链接域名替换规则已更新")
 	}
 	return changes
 }

@@ -18,6 +18,7 @@ import (
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	"server/internal/utils"
 )
 
 const (
@@ -624,6 +625,15 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
 		logSlowIndexServiceStep("GetFilmDetail.total", startedAt, "id", id)
 
+		if snapshot.SourceId != "" {
+			if source := repository.FindCollectSourceById(snapshot.SourceId); source != nil && source.DomainReplaceRules != "" {
+				if rules := utils.ParseDomainReplaceRules(source.DomainReplaceRules); len(rules) > 0 {
+					res.PlayList = rewriteURLGroups(res.PlayList, rules)
+					res.DownloadList = rewriteURLGroups(res.DownloadList, rules)
+				}
+			}
+		}
+
 		if db.Rdb != nil {
 			if raw, err := json.Marshal(res); err == nil {
 				jitter := time.Duration(rand.Intn(1800)) * time.Second
@@ -884,6 +894,16 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 	for _, source := range querySources {
 		groups := groupsBySource[source.Id]
 		if len(groups) > 0 {
+			if source.DomainReplaceRules != "" {
+				rules := utils.ParseDomainReplaceRules(source.DomainReplaceRules)
+				if len(rules) > 0 {
+					for gi := range groups {
+						for li := range groups[gi].LinkList {
+							groups[gi].LinkList[li].Link = utils.ApplyDomainReplaceRules(groups[gi].LinkList[li].Link, rules)
+						}
+					}
+				}
+			}
 			playList = append(playList, groups...)
 		}
 	}
@@ -898,17 +918,19 @@ func buildPrimaryPlaySources(snapshot *model.FilmListSnapshot, detail *model.Mov
 	}
 
 	siteName := ""
+	var rules []utils.DomainReplaceRule
+	sourceID := ""
 	if snapshot != nil && snapshot.SourceId != "" {
+		sourceID = snapshot.SourceId
 		if source := repository.FindCollectSourceById(snapshot.SourceId); source != nil {
 			siteName = source.Name
+			if source.DomainReplaceRules != "" {
+				rules = utils.ParseDomainReplaceRules(source.DomainReplaceRules)
+			}
 		}
 	}
 
 	playList := make([]model.PlayLinkVo, 0, len(detail.PlayList))
-	sourceID := ""
-	if snapshot != nil {
-		sourceID = snapshot.SourceId
-	}
 	for index, links := range detail.PlayList {
 		if len(links) == 0 {
 			continue
@@ -918,15 +940,42 @@ func buildPrimaryPlaySources(snapshot *model.FilmListSnapshot, detail *model.Mov
 		sourceName := filmrepo.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
 		groupID := filmrepo.BuildPlayGroupID(sourceID, rawName, index, len(detail.PlayList))
 
+		adaptedLinks := rewriteURLGroup(links, rules)
+
 		playList = append(playList, model.PlayLinkVo{
 			Id:       groupID,
 			SourceId: sourceID,
 			Name:     sourceName,
-			LinkList: links,
+			LinkList: adaptedLinks,
 		})
 	}
 
 	return playList
+}
+
+func rewriteURLGroups(groups [][]model.MovieUrlInfo, rules []utils.DomainReplaceRule) [][]model.MovieUrlInfo {
+	if len(rules) == 0 || groups == nil {
+		return groups
+	}
+	out := make([][]model.MovieUrlInfo, len(groups))
+	for i, links := range groups {
+		out[i] = rewriteURLGroup(links, rules)
+	}
+	return out
+}
+
+func rewriteURLGroup(links []model.MovieUrlInfo, rules []utils.DomainReplaceRule) []model.MovieUrlInfo {
+	if len(rules) == 0 || links == nil {
+		return links
+	}
+	out := make([]model.MovieUrlInfo, len(links))
+	for i, link := range links {
+		out[i] = model.MovieUrlInfo{
+			Episode: link.Episode,
+			Link:    utils.ApplyDomainReplaceRules(link.Link, rules),
+		}
+	}
+	return out
 }
 
 func resolvePrimarySourceName(playFrom []string, index int) string {

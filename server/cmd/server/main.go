@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"net"
@@ -119,34 +118,16 @@ func start() {
 	stopCh := make(chan os.Signal, 1)
 	signal.Notify(stopCh, os.Interrupt, syscall.SIGTERM)
 	<-stopCh
-	log.Printf("[Shutdown] 收到退出信号，开始退出")
+	log.Printf("[Shutdown] 收到退出信号，开始快速退出")
 
-	// 1. 关闭 HTTP 服务接收通道，确保在途请求能安全读取现有快照（严禁清理快照状态，保护滚动更新与在途请求）
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("[Shutdown] HTTP 优雅停机超时: %v", err)
-	}
+	// 1. 立即关闭 HTTP 端口监听（断开连接，避免新请求进入与端口占用）
+	_ = srv.Close()
 
-	// 2. 快速停止采集任务（非阻塞通知）
+	// 2. 快速停止采集任务（非阻塞通知协程退出）
 	spider.StopAllTasks()
 
-	// 3. 等待在途采集写调度队列优雅排空落盘
-	writeCtx, writeCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer writeCancel()
-	if err := spider.WaitPendingWrites(writeCtx); err != nil {
-		log.Printf("[Shutdown] 等待采集写队列排空超时或失败: %v", err)
-	}
-
-	// 4. 停止 Telegram Bot 轮询
+	// 3. 停止 Telegram Bot 轮询
 	notify.StopBotPoller()
-
-	// 5. 等待在途异步通知发送协程排空
-	notifyCtx, notifyCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer notifyCancel()
-	if err := notify.WaitPendingPublishes(notifyCtx); err != nil {
-		log.Printf("[Shutdown] 等待在途通知排空超时或失败: %v", err)
-	}
 
 	log.Printf("[Shutdown] 退出完成")
 }

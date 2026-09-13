@@ -65,6 +65,7 @@ type FilmSource struct {
 	IsPosterSource bool        `json:"isPosterSource" gorm:"default:false"` // 是否为海报/封面图源（全局单选）
 	Interval       int         `json:"interval"`                        // 采集时间间隔 单位/ms
 	Cd           int         `json:"cd"`                              // 采集时长 单位/小时
+	DomainReplaceRules string `json:"domainReplaceRules" gorm:"type:text"` // 播放链接域名替换规则 (每行一条: old.com => new.com)
 }
 
 func (f *FilmSource) TableName() string {

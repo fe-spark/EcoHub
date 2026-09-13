@@ -25,15 +25,18 @@ var (
 )
 
 type TrackViewPayload struct {
-	Action      string `json:"action"`
-	Resource    string `json:"resource"`
-	Source      string `json:"source"`
-	Path        string `json:"path"`
-	Page        string `json:"page"`
-	PageTitle   string `json:"page_title"`
-	AppVersion  string `json:"app_version"`
-	DeviceModel string `json:"device_model"`
-	DeviceId    string `json:"device_id"`
+	Action         string `json:"action"`
+	Resource       string `json:"resource"`
+	ResourceTitle  string `json:"resource_title"`
+	ResourcePoster string `json:"resource_poster"`
+	ResourceCat    string `json:"resource_cat"`
+	Source         string `json:"source"`
+	Path           string `json:"path"`
+	Page           string `json:"page"`
+	PageTitle      string `json:"page_title"`
+	AppVersion     string `json:"app_version"`
+	DeviceModel    string `json:"device_model"`
+	DeviceId       string `json:"device_id"`
 }
 
 func TrackPage(c *gin.Context, action, resource, source, path string) {
@@ -170,27 +173,35 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 		did = strings.TrimSpace(c.GetHeader("Device-Id"))
 	}
 
+	resource := TruncateRunes(p.Resource, maxResourceLen)
+	resourceTitle := TruncateRunes(p.ResourceTitle, 128)
+	resourcePoster := sanitizePosterURL(TruncateRunes(p.ResourcePoster, 512))
+	resourceCat := TruncateRunes(p.ResourceCat, 64)
+
 	return &AccessEvent{
-		Ts:          time.Now(),
-		Node:        CurrentNodeName(),
-		Method:      "PAGE",
-		Path:        routePath,
-		Page:        page,
-		PageTitle:   TruncateRunes(p.PageTitle, 64),
-		Route:       "page",
-		Action:      action,
-		Status:      200,
-		ClientType:  clientType,
-		AppVersion:  TruncateRunes(p.AppVersion, 32),
-		DeviceModel: TruncateRunes(p.DeviceModel, 64),
-		DeviceId:    TruncateRunes(did, 64),
-		IPHash:      HashIP(ip),
-		IPPreview:   IPPreview(ip),
-		UAFamily:    uaFamily("", ua),
-		OS:          detectOS(ua),
-		Resource:    TruncateRunes(p.Resource, maxResourceLen),
-		playMember:  pagePlayRankMember(action, p.Resource),
-		uvMember:    HashIP(ip + "|" + ua),
+		Ts:             time.Now(),
+		Node:           CurrentNodeName(),
+		Method:         "PAGE",
+		Path:           routePath,
+		Page:           page,
+		PageTitle:      TruncateRunes(p.PageTitle, 64),
+		Route:          "page",
+		Action:         action,
+		Status:         200,
+		ClientType:     clientType,
+		AppVersion:     TruncateRunes(p.AppVersion, 32),
+		DeviceModel:    TruncateRunes(p.DeviceModel, 64),
+		DeviceId:       TruncateRunes(did, 64),
+		IPHash:         HashIP(ip),
+		IPPreview:      IPPreview(ip),
+		UAFamily:       uaFamily("", ua),
+		OS:             detectOS(ua),
+		Resource:       resource,
+		ResourceTitle:  resourceTitle,
+		ResourcePoster: resourcePoster,
+		ResourceCat:    resourceCat,
+		playMember:     pagePlayRankMember(action, p.Resource),
+		uvMember:       HashIP(ip + "|" + ua),
 	}
 }
 

@@ -135,6 +135,7 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	clientType := ClassifyHTTPClient(path, ua)
 	clientIP := strings.TrimSpace(c.ClientIP())
 	did := ResolveDeviceID(c, clientType, clientIP, ua)
+	res := httpResource(path, query)
 
 	return &AccessEvent{
 		Ts:         time.Now(),
@@ -151,7 +152,7 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 		IPPreview:  IPPreview(clientIP),
 		UAFamily:   uaFamily(path, ua),
 		OS:         detectOS(ua),
-		Resource:   httpResource(path, query),
+		Resource:   res,
 		DeviceId:   TruncateRunes(did, 64),
 		Query:      TruncateRunes(c.Request.URL.RawQuery, 500),
 		playMember: playRankMember(path, query),

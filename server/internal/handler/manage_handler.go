@@ -385,5 +385,8 @@ func validFilmSource(fs model.FilmSource) error {
 	if !utils.ValidURL(fs.Uri) {
 		return errors.New("资源链接格式异常, 请输入规范的URL链接")
 	}
+	if err := utils.ValidateDomainReplaceRules(fs.DomainReplaceRules); err != nil {
+		return err
+	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/url"
 	"sort"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -24,7 +26,10 @@ import (
 
 type ProvideService struct{}
 
-var ProvideSvc = new(ProvideService)
+var (
+	ProvideSvc        = new(ProvideService)
+	tvboxListSfGroup singleflight.Group
+)
 
 // GetVodDirectBySource 获取指定采集站直连原始数据(MacCMS 兼容)
 func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int, wd string, h int, ids string, year int, area, lang, plot, sort string) ([]byte, error) {
@@ -259,18 +264,21 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	version := filmrepo.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
+
+	type tvboxListResult struct {
+		Current   int
+		PageCount int
+		Total     int
+		VodList   []model.FilmList
+	}
+
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
 		cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				var res struct {
-					Current   int
-					PageCount int
-					Total     int
-					VodList   []model.FilmList
-				}
+				var res tvboxListResult
 				if json.Unmarshal([]byte(data), &res) == nil {
 					return res.Current, res.PageCount, res.Total, res.VodList, nil
 				}
@@ -278,64 +286,95 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		}
 	}
 
-	page := dto.Page{PageSize: limit, Current: pg}
-	if page.Current <= 0 {
-		page.Current = 1
-	}
-
-	pid := int64(t)
-	pid = repository.ResolveCategoryID(pid)
-	if cid > 0 {
-		cid = repository.ResolveCategoryID(cid)
-	}
-	if cid == model.TagUncategorizedValue && pid <= 0 {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
-
-	searchTags := model.SearchTagsVO{
-		Pid:      pid,
-		Cid:      cid,
-		Area:     strings.TrimSpace(area),
-		Language: strings.TrimSpace(lang),
-		Plot:     strings.TrimSpace(plot),
-		Year:     strings.TrimSpace(year),
-		Sort:     strings.TrimSpace(sort),
-	}
-	if err := validateReadModelSearchTags(searchTags); err != nil {
-		return page.Current, 1, 0, []model.FilmList{}, err
-	}
-	sl := filmrepo.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
-
-	var vodList []model.FilmList
-	for _, s := range sl {
-		typeID, typeName := resolveProvideTypeFromSnapshot(s)
-		vodList = append(vodList, model.FilmList{
-			VodID:       s.Mid,
-			VodName:     s.Name,
-			TypeID:      typeID,
-			TypeName:    typeName,
-			VodEn:       s.Initial,
-			VodTime:     resolveProvideSnapshotVodTime(s),
-			VodRemarks:  s.Remarks,
-			VodPlayFrom: resolveProvideSnapshotPlayFromSummary(s),
-			VodPic:      s.Picture,
-		})
-	}
-
-	// 2. 写入 Redis 缓存
-	if cacheKey != "" && db.Rdb != nil {
-		res := struct {
-			Current   int
-			PageCount int
-			Total     int
-			VodList   []model.FilmList
-		}{page.Current, page.PageCount, page.Total, vodList}
-		if data, err := json.Marshal(res); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
+	fetchList := func() (tvboxListResult, error) {
+		page := dto.Page{PageSize: limit, Current: pg}
+		if page.Current <= 0 {
+			page.Current = 1
 		}
+
+		pid := int64(t)
+		pid = repository.ResolveCategoryID(pid)
+		if cid > 0 {
+			cid = repository.ResolveCategoryID(cid)
+		}
+		if cid == model.TagUncategorizedValue && pid <= 0 {
+			return tvboxListResult{Current: 1, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, nil
+		}
+
+		searchTags := model.SearchTagsVO{
+			Pid:      pid,
+			Cid:      cid,
+			Area:     strings.TrimSpace(area),
+			Language: strings.TrimSpace(lang),
+			Plot:     strings.TrimSpace(plot),
+			Year:     strings.TrimSpace(year),
+			Sort:     strings.TrimSpace(sort),
+		}
+		if err := validateReadModelSearchTags(searchTags); err != nil {
+			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err
+		}
+		sl := filmrepo.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+
+		var vodList []model.FilmList
+		for _, s := range sl {
+			typeID, typeName := resolveProvideTypeFromSnapshot(s)
+			vodList = append(vodList, model.FilmList{
+				VodID:       s.Mid,
+				VodName:     s.Name,
+				TypeID:      typeID,
+				TypeName:    typeName,
+				VodEn:       s.Initial,
+				VodTime:     resolveProvideSnapshotVodTime(s),
+				VodRemarks:  s.Remarks,
+				VodPlayFrom: resolveProvideSnapshotPlayFromSummary(s),
+				VodPic:      s.Picture,
+			})
+		}
+
+		res := tvboxListResult{
+			Current:   page.Current,
+			PageCount: page.PageCount,
+			Total:     page.Total,
+			VodList:   vodList,
+		}
+
+		// 2. 写入 Redis 缓存 (加随机打散防雪崩，针对空列表使用短 TTL 防长期穿透)
+		if cacheKey != "" && db.Rdb != nil {
+			if data, err := json.Marshal(res); err == nil {
+				jitter := time.Duration(rand.Intn(900)) * time.Second
+				ttl := time.Hour*12 + jitter
+				if res.Total == 0 || len(res.VodList) == 0 {
+					ttl = time.Minute
+				}
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), ttl).Err()
+			}
+		}
+
+		return res, nil
 	}
 
-	return page.Current, page.PageCount, page.Total, vodList, nil
+	if cacheKey != "" {
+		val, err, _ := tvboxListSfGroup.Do(cacheKey, func() (any, error) {
+			// Double check 缓存
+			if db.Rdb != nil {
+				if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+					var res tvboxListResult
+					if json.Unmarshal([]byte(data), &res) == nil {
+						return res, nil
+					}
+				}
+			}
+			return fetchList()
+		})
+		if err != nil {
+			return pg, 1, 0, []model.FilmList{}, err
+		}
+		res := val.(tvboxListResult)
+		return res.Current, res.PageCount, res.Total, res.VodList, nil
+	}
+
+	res, err := fetchList()
+	return res.Current, res.PageCount, res.Total, res.VodList, err
 }
 
 const maxProvideVodDetailBatch = 100

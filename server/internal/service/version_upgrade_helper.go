@@ -30,7 +30,7 @@ func RunUpgradeHelper(args []string) error {
 		if err != nil || !running {
 			break
 		}
-		time.Sleep(time.Second)
+		time.Sleep(500 * time.Millisecond)
 	}
 	if running, err := engine.isRunning(ctx, oldID); err == nil && running {
 		log.Printf("[UpgradeHelper] 旧容器仍在运行，清理新容器并恢复旧容器名")
