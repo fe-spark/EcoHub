@@ -30,31 +30,30 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 			continue
 		}
 
-		keys := BuildPlaylistMovieKeys(detail)
-		for _, movieKey := range keys {
-			keysByMovieKey[movieKey] = struct{}{}
+		primaryKey := BuildPlaylistPrimaryMovieKey(detail)
+		if primaryKey == "" {
+			continue
 		}
+		keysByMovieKey[primaryKey] = struct{}{}
 
-		for _, movieKey := range keys {
-			for index, links := range detail.PlayList {
-				if len(links) == 0 {
-					continue
-				}
-
-				data, _ := json.Marshal(links)
-				rawName := ""
-				if index < len(detail.PlayFrom) {
-					rawName = strings.TrimSpace(detail.PlayFrom[index])
-				}
-
-				playlists = append(playlists, model.SlaveMoviePlaylist{
-					SourceId:   sourceID,
-					MovieKey:   movieKey,
-					GroupIndex: index,
-					GroupName:  rawName,
-					Content:    string(data),
-				})
+		for index, links := range detail.PlayList {
+			if len(links) == 0 {
+				continue
 			}
+
+			data, _ := json.Marshal(links)
+			rawName := ""
+			if index < len(detail.PlayFrom) {
+				rawName = strings.TrimSpace(detail.PlayFrom[index])
+			}
+
+			playlists = append(playlists, model.SlaveMoviePlaylist{
+				SourceId:   sourceID,
+				MovieKey:   primaryKey,
+				GroupIndex: index,
+				GroupName:  rawName,
+				Content:    string(data),
+			})
 		}
 	}
 
@@ -205,6 +204,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 	ordered := make([]model.FilmIndex, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
+		detailPid := ResolveMovieDetailRootPid(item.detail)
 		matched := make(map[int64]struct{}, 2)
 		for _, key := range item.keys {
 			candidateMids := midsByLookupKey[key]
@@ -212,12 +212,34 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 				continue
 			}
 			for _, mid := range candidateMids {
+				info, ok := infoByMid[mid]
+				if !ok {
+					continue
+				}
+				// 若当前详情与候选主站影片均有明确大类，大类不一致则拒绝匹配
+				infoPid := support.GetRootId(info.Pid)
+				if infoPid <= 0 && info.Cid > 0 {
+					infoPid = support.GetRootId(info.Cid)
+				}
+				if detailPid > 0 && infoPid > 0 && infoPid != detailPid {
+					continue
+				}
 				matched[mid] = struct{}{}
 			}
-			break
+			if len(matched) > 0 {
+				break
+			}
 		}
 
+		sortedMids := make([]int64, 0, len(matched))
 		for mid := range matched {
+			sortedMids = append(sortedMids, mid)
+		}
+		sort.Slice(sortedMids, func(i, j int) bool {
+			return sortedMids[i] < sortedMids[j]
+		})
+
+		for _, mid := range sortedMids {
 			if _, ok := seenMid[mid]; ok {
 				continue
 			}
@@ -379,24 +401,15 @@ func pickBestMidForMatchKey(mids []int64) int64 {
 	if len(uniq) == 1 {
 		return uniq[0]
 	}
+	sort.Slice(uniq, func(i, j int) bool { return uniq[i] > uniq[j] })
+	if db.Mdb == nil {
+		return uniq[0]
+	}
 	var rows []model.FilmIndex
-	if err := db.Mdb.Select("mid", "update_stamp").Where("mid IN ?", uniq).Find(&rows).Error; err != nil || len(rows) == 0 {
-		// 回退：取最大 mid（通常更新）
-		best := uniq[0]
-		for _, mid := range uniq[1:] {
-			if mid > best {
-				best = mid
-			}
-		}
-		return best
+	if err := db.Mdb.Select("mid", "update_stamp").Where("mid IN ?", uniq).Order("update_stamp DESC, mid DESC").Find(&rows).Error; err != nil || len(rows) == 0 {
+		return uniq[0]
 	}
-	best := rows[0]
-	for _, row := range rows[1:] {
-		if row.UpdateStamp > best.UpdateStamp || (row.UpdateStamp == best.UpdateStamp && row.Mid > best.Mid) {
-			best = row
-		}
-	}
-	return best.Mid
+	return rows[0].Mid
 }
 
 func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist, keysByMovieKey map[string]struct{}) ([]playlistChange, error) {
@@ -730,12 +743,21 @@ func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos
 
 	globalMidByKey := make(map[string]int64, len(mids)*2)
 	keysByMid := loadMovieMatchKeysByMids(mids)
-	for mid, keys := range keysByMid {
-		for _, key := range keys {
+	sortedMids := make([]int64, 0, len(keysByMid))
+	for mid := range keysByMid {
+		sortedMids = append(sortedMids, mid)
+	}
+	sort.Slice(sortedMids, func(i, j int) bool {
+		return sortedMids[i] > sortedMids[j]
+	})
+	for _, mid := range sortedMids {
+		for _, key := range keysByMid[mid] {
 			if strings.TrimSpace(key) == "" {
 				continue
 			}
-			globalMidByKey[key] = mid
+			if _, exists := globalMidByKey[key]; !exists {
+				globalMidByKey[key] = mid
+			}
 		}
 	}
 	if len(globalMidByKey) == 0 {

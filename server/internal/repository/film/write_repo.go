@@ -488,7 +488,14 @@ func buildMovieMatchKeyMappings(details []model.MovieDetail, infoByKey map[strin
 		if !ok || globalMid <= 0 {
 			continue
 		}
-		midToKeys[globalMid] = BuildMovieMatchKeys(detail.DbId, detail.Name)
+		pid := support.GetRootId(info.Pid)
+		if pid <= 0 && info.Cid > 0 {
+			pid = support.GetRootId(info.Cid)
+		}
+		if pid <= 0 {
+			pid = ResolveMovieDetailRootPid(detail)
+		}
+		midToKeys[globalMid] = BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 	}
 	return midToKeys
 }

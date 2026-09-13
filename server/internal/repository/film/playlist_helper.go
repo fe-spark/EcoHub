@@ -5,21 +5,70 @@ import (
 	"strings"
 
 	"server/internal/model"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
+// ResolveMovieDetailRootPid 解析详情归属的系统根分类 ID (Pid)。
+// 遵循“主站权威”原则：优先认主站自带的真实 Pid/Cid；若未携带，仅当 CName 与本地正规分类完全重合时采纳，绝不盲猜。
+func ResolveMovieDetailRootPid(detail model.MovieDetail) int64 {
+	// 1. 本地已有合法大类 (主站详情自带的真实大类，以主站为准)
+	if detail.Pid > 0 {
+		if rootId := support.GetRootId(detail.Pid); rootId > 0 && support.IsRootCategory(rootId) {
+			return rootId
+		}
+	}
+	if detail.Cid > 0 {
+		if rootId := support.GetRootId(detail.Cid); rootId > 0 && support.IsRootCategory(rootId) {
+			return rootId
+		}
+	}
+	// 2. 本地系统已有正规分类精确匹配 (不进行任何模糊词猜测)
+	if strings.TrimSpace(detail.CName) != "" {
+		if pid := support.ResolveRootCategoryIDByCName(detail.CName); pid > 0 {
+			return pid
+		}
+	}
+	return 0
+}
+
 func BuildPlaylistMovieKeys(detail model.MovieDetail) []string {
-	return BuildMovieMatchKeys(detail.DbId, detail.Name)
+	pid := ResolveMovieDetailRootPid(detail)
+	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
+}
+
+// BuildPlaylistPrimaryMovieKey 提取详情最精准的首选唯一主键：
+// 1. 若有豆瓣 ID，返回 dbid_{id}；
+// 2. 若有明确大类 (pid > 0)，返回片名#大类后缀哈希；
+// 3. 未知大类时降级返回纯片名哈希。
+// 专用于播放列表 (slave_movie_playlist) 与海报 (movie_poster) 的物理实体存储，彻底杜绝数据翻倍与跨类串台。
+func BuildPlaylistPrimaryMovieKey(detail model.MovieDetail) string {
+	keys := BuildPlaylistMovieKeys(detail)
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
 }
 
 func BuildMovieMatchKeys(dbID int64, name string) []string {
-	keys := make([]string, 0, 2)
+	return BuildMovieMatchKeysWithCategory(dbID, name, 0)
+}
+
+// BuildMovieMatchKeysWithCategory 构造支持大类隔离与向后兼容的双轨匹配键：
+// 1. 若有豆瓣 ID，生成 dbid_{id} 精准匹配键；
+// 2. 当 pid > 0 时，优先生成带大类后缀的哈希键（如 hash("片名#cat_20")），精准隔离同名不同类剧集；
+// 3. 始终保留纯片名哈希键，确保按主站为准与存量影片全向平滑兼容。
+func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []string {
+	keys := make([]string, 0, 3)
 	if dbIdentity := utils.BuildCollectionDbIdentity(dbID, name); dbIdentity != "" {
 		keys = append(keys, utils.GenerateHashKey(dbIdentity))
 	}
 
 	normalizedTitle := utils.NormalizeCollectionTitle(name)
 	if normalizedTitle != "" {
+		if pid > 0 {
+			keys = append(keys, utils.GenerateHashKey(fmt.Sprintf("%s#cat_%d", normalizedTitle, pid)))
+		}
 		keys = append(keys, utils.GenerateHashKey(normalizedTitle))
 	}
 	return UniqueKeys(keys)
