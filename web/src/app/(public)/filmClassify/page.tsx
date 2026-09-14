@@ -43,8 +43,8 @@ export default async function FilmClassifyPage({
       <TrackPageView
         action="classify"
         resource={pid}
-        resourceCat={data.title}
-        resourceTitle={data.title}
+        resourceCat={data.title.name}
+        resourceTitle={data.title.name}
       />
       <FilmClassifyPageView data={data} pid={pid} />
     </>
