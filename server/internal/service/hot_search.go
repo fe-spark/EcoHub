@@ -8,6 +8,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -73,7 +74,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		return []string{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:hotKeywords:v%s", version)
+	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []string

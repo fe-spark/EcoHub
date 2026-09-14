@@ -982,12 +982,6 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 	BatchHandleSearchTag(snapshot)
 	clearDetailCaches(snapshot.Pid)
 	ClearProvideListCache()
-	if db.Rdb != nil && strings.TrimSpace(detail.Name) != "" {
-		version := GetActiveSnapshotVersion()
-		if version != "" {
-			clearCachePatterns(fmt.Sprintf("EcoHub:search:v%s:%s:*", version, strings.TrimSpace(detail.Name)))
-		}
-	}
 	if err := UpsertActiveSnapshotByMid(savedMid); err != nil {
 		return err
 	}

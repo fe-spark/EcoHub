@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
@@ -260,7 +261,7 @@ var (
 )
 
 func batchRedisKey(id string) string {
-	return "EcoHub:NotifyBatch:" + id
+	return config.NotifyBatchCachePrefix + ":" + id
 }
 
 // SaveChangeBatchSession 保存变更批次会话。运行时只认内存；Redis 仅作进程重启备忘。

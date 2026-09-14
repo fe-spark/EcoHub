@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -40,6 +41,7 @@ var activeFilmReadModel atomic.Pointer[FilmReadModel]
 var activeFilmReadModelMu sync.Mutex
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
+var activeFilmSearchMetasMu sync.Mutex
 var searchMetaBuildSf singleflight.Group
 var searchMetaBuildWg sync.WaitGroup
 
@@ -56,11 +58,11 @@ func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
 	if version == "" || db.Mdb == nil {
 		return nil
 	}
-	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version && len(cur.Items) > 0 {
+	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 		return cur
 	}
 	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
-		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version && len(cur.Items) > 0 {
+		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 			return cur, nil
 		}
 		type dbMetaRow struct {
@@ -102,7 +104,9 @@ func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
 			Version: version,
 			Items:   items,
 		}
+		activeFilmSearchMetasMu.Lock()
 		activeFilmSearchMetas.Store(idx)
+		activeFilmSearchMetasMu.Unlock()
 		return idx, nil
 	})
 	if err != nil || val == nil {
@@ -216,7 +220,9 @@ func LoadActiveFilmReadModel(version string) error {
 	activeFilmReadModelMu.Lock()
 	defer activeFilmReadModelMu.Unlock()
 	activeFilmReadModel.Store(&FilmReadModel{Version: version})
+	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)
+	activeFilmSearchMetasMu.Unlock()
 	if version != "" {
 		searchMetaBuildWg.Add(1)
 		go func(ver string) {
@@ -238,7 +244,9 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
+	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)
+	activeFilmSearchMetasMu.Unlock()
 	if version != "" {
 		searchMetaBuildWg.Add(1)
 		go func(ver string) {
@@ -252,7 +260,9 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 
 func ClearActiveFilmReadModel() {
 	activeFilmReadModel.Store(&FilmReadModel{Version: ""})
+	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(nil)
+	activeFilmSearchMetasMu.Unlock()
 }
 
 // InvalidateActiveFilmSearchIndex 增量发布后重载活跃读模型版本
@@ -268,6 +278,236 @@ func InvalidateActiveFilmSearchIndex(version string) {
 	} else {
 		ClearActiveFilmReadModel()
 	}
+}
+
+// RemoveMidsFromActiveFilmSearchIndex 增量从内存搜索元数据索引中剔除指定 mid，避免全量重建耗时
+func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || len(mids) == 0 {
+		return
+	}
+
+	delSet := make(map[int64]struct{}, len(mids))
+	for _, id := range mids {
+		if id > 0 {
+			delSet[id] = struct{}{}
+		}
+	}
+	if len(delSet) == 0 {
+		return
+	}
+
+	activeFilmSearchMetasMu.Lock()
+	cur := activeFilmSearchMetas.Load()
+	if cur == nil || cur.Version != version {
+		activeFilmSearchMetasMu.Unlock()
+		loadFilmSearchMetaIndex(version)
+		activeFilmSearchMetasMu.Lock()
+		cur = activeFilmSearchMetas.Load()
+	}
+	defer activeFilmSearchMetasMu.Unlock()
+
+	if cur == nil || cur.Version != version || len(cur.Items) == 0 {
+		return
+	}
+
+	newItems := make([]FilmSearchMeta, 0, len(cur.Items))
+	removed := 0
+	for _, item := range cur.Items {
+		if _, exists := delSet[item.Mid]; exists {
+			removed++
+			continue
+		}
+		newItems = append(newItems, item)
+	}
+	if removed > 0 {
+		activeFilmSearchMetas.Store(&filmSearchMetaIndex{
+			Version: version,
+			Items:   newItems,
+		})
+		log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
+	}
+}
+
+// UpsertMidsToActiveFilmSearchIndex 增量更新或新增指定 mid 的搜索元数据索引，避免全量重建
+func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || len(mids) == 0 || db.Mdb == nil {
+		return
+	}
+
+	midSet := make(map[int64]struct{}, len(mids))
+	cleanMids := make([]int64, 0, len(mids))
+	for _, id := range mids {
+		if id > 0 {
+			if _, exists := midSet[id]; !exists {
+				midSet[id] = struct{}{}
+				cleanMids = append(cleanMids, id)
+			}
+		}
+	}
+	if len(cleanMids) == 0 {
+		return
+	}
+
+	type dbMetaRow struct {
+		Mid         int64
+		Pid         int64
+		Cid         int64
+		Name        string
+		Hits        int64
+		Score       float64
+		Year        int64
+		UpdateStamp int64
+	}
+	const batchSize = 500
+	var allRows []dbMetaRow
+	for i := 0; i < len(cleanMids); i += batchSize {
+		end := i + batchSize
+		if end > len(cleanMids) {
+			end = len(cleanMids)
+		}
+		var batchRows []dbMetaRow
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+			Select("mid, pid, cid, name, hits, score, year, update_stamp").
+			Where("snapshot_version = ? AND mid IN ?", version, cleanMids[i:end]).
+			Find(&batchRows).Error; err != nil {
+			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询快照失败 version=%s: %v", version, err)
+			return
+		}
+		allRows = append(allRows, batchRows...)
+	}
+
+	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
+	for _, r := range allRows {
+		item := utils.FilmSearchItem{
+			Mid:         r.Mid,
+			Name:        r.Name,
+			Hits:        r.Hits,
+			Score:       r.Score,
+			Year:        r.Year,
+			UpdateStamp: r.UpdateStamp,
+		}
+		utils.FillSearchDerivedFields(&item)
+		upsertMap[r.Mid] = FilmSearchMeta{
+			Mid:  r.Mid,
+			Pid:  r.Pid,
+			Cid:  r.Cid,
+			Item: item,
+		}
+	}
+
+	activeFilmSearchMetasMu.Lock()
+	cur := activeFilmSearchMetas.Load()
+	if cur == nil || cur.Version != version {
+		activeFilmSearchMetasMu.Unlock()
+		loadFilmSearchMetaIndex(version)
+		activeFilmSearchMetasMu.Lock()
+		cur = activeFilmSearchMetas.Load()
+	}
+	defer activeFilmSearchMetasMu.Unlock()
+
+	if cur == nil || cur.Version != version {
+		return
+	}
+
+	newItems := make([]FilmSearchMeta, 0, len(cur.Items)+len(upsertMap))
+	seenMids := make(map[int64]struct{}, len(upsertMap))
+	for _, it := range cur.Items {
+		if updated, exists := upsertMap[it.Mid]; exists {
+			newItems = append(newItems, updated)
+			seenMids[it.Mid] = struct{}{}
+		} else if _, isDeleted := midSet[it.Mid]; isDeleted {
+			// 在传入的 mids 中但快照中已不存在（已删除/失效），从内存索引中剔除，防止幽灵数据残留
+			continue
+		} else {
+			newItems = append(newItems, it)
+		}
+	}
+	for mid, it := range upsertMap {
+		if _, seen := seenMids[mid]; !seen {
+			newItems = append(newItems, it)
+		}
+	}
+
+	activeFilmSearchMetas.Store(&filmSearchMetaIndex{
+		Version: version,
+		Items:   newItems,
+	})
+	log.Printf("[ActiveReadModel] 内存索引增量更新/剔除 mids=%d snapshot_found=%d total=%d", len(cleanMids), len(upsertMap), len(newItems))
+}
+
+type searchCacheVerState struct {
+	version   string
+	updatedAt time.Time
+}
+
+var searchCacheVer atomic.Pointer[searchCacheVerState]
+var searchVerSeq uint64
+
+const searchVerCacheTTL = 1 * time.Second
+
+func BumpSearchCacheVersion() {
+	seq := atomic.AddUint64(&searchVerSeq, 1)
+	newVer := fmt.Sprintf("%d_%d", time.Now().UnixNano(), seq)
+	if db.Rdb != nil {
+		db.Rdb.Set(db.Cxt, config.SearchCacheVersionKey, newVer, 0)
+	}
+	searchCacheVer.Store(&searchCacheVerState{
+		version:   newVer,
+		updatedAt: time.Now(),
+	})
+}
+
+func GetSearchCacheVersion() string {
+	cur := searchCacheVer.Load()
+	if cur != nil && cur.version != "" && time.Since(cur.updatedAt) < searchVerCacheTTL {
+		return cur.version
+	}
+
+	if db.Rdb == nil {
+		if cur != nil && cur.version != "" {
+			return cur.version
+		}
+		newVer := fmt.Sprintf("%d", time.Now().UnixNano())
+		searchCacheVer.Store(&searchCacheVerState{
+			version:   newVer,
+			updatedAt: time.Now(),
+		})
+		return newVer
+	}
+
+	version, err := db.Rdb.Get(db.Cxt, config.SearchCacheVersionKey).Result()
+	if err == nil && version != "" {
+		searchCacheVer.Store(&searchCacheVerState{
+			version:   version,
+			updatedAt: time.Now(),
+		})
+		return version
+	}
+
+	version = fmt.Sprintf("%d", time.Now().UnixNano())
+	if set, _ := db.Rdb.SetNX(db.Cxt, config.SearchCacheVersionKey, version, 0).Result(); !set {
+		if curVer, err := db.Rdb.Get(db.Cxt, config.SearchCacheVersionKey).Result(); err == nil && curVer != "" {
+			version = curVer
+		}
+	}
+	searchCacheVer.Store(&searchCacheVerState{
+		version:   version,
+		updatedAt: time.Now(),
+	})
+	return version
+}
+
+// ResetSearchCacheVersionForTest 重置内存缓存版本（仅供测试隔离使用）
+func ResetSearchCacheVersionForTest() {
+	searchCacheVer.Store(nil)
 }
 
 func GetActiveFilmReadModel() *FilmReadModel {
@@ -338,8 +578,8 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		return []model.FilmListSnapshot{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:tags_search:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
-		version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
+		config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item tagSearchCacheItem
@@ -487,8 +727,8 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 
 	// 1. 尝试从 Redis 读 Provide 缓存
-	cacheKey := fmt.Sprintf("EcoHub:provide:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
-		version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+		config.ProvideListKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item searchCacheItem
@@ -692,7 +932,8 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 	}
 
 	// 1. 尝试从 Redis 读搜索缓存
-	cacheKey := fmt.Sprintf("EcoHub:search:v%s:%s:%s:p%d:s%d", version, keyword, sortField, page.Current, page.PageSize)
+	searchVer := GetSearchCacheVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:sv%s:%s:%s:p%d:s%d", config.FilmSearchCachePrefix, version, searchVer, keyword, sortField, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item searchCacheItem
@@ -707,7 +948,7 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 	}
 
 	// 2. 并发防击穿：相同关键词搜索合并执行
-	sfKey := fmt.Sprintf("v%s:%s:%s:p%d:s%d", version, keyword, sortField, page.Current, page.PageSize)
+	sfKey := fmt.Sprintf("v%s:sv%s:%s:%s:p%d:s%d", version, searchVer, keyword, sortField, page.Current, page.PageSize)
 	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
 		// 二次双检 Redis 缓存
 		if db.Rdb != nil {
@@ -737,12 +978,15 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 				Snapshots: snapshots,
 			}
 			if db.Rdb != nil {
-				if raw, err := json.Marshal(item); err == nil {
-					ttl := 3 * time.Minute
-					if len(snapshots) == 0 {
-						ttl = 1 * time.Minute
+				// 仅在当前检索版本与全局版本一致时回写缓存，防止已过期的旧检索结果污染新版本
+				if GetSearchCacheVersion() == searchVer {
+					if raw, err := json.Marshal(item); err == nil {
+						ttl := 3 * time.Minute
+						if len(snapshots) == 0 {
+							ttl = 1 * time.Minute
+						}
+						_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
 					}
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
 				}
 			}
 			log.Printf("[SearchFilm] 内存检索完成 keyword=%q sort=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
@@ -791,12 +1035,15 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 			Snapshots: snapshots,
 		}
 		if db.Rdb != nil {
-			if raw, err := json.Marshal(item); err == nil {
-				ttl := 3 * time.Minute
-				if len(snapshots) == 0 {
-					ttl = 1 * time.Minute // 空结果防穿透短缓存
+			// 仅在当前检索版本与全局版本一致时回写缓存，防止已过期的旧检索结果污染新版本
+			if GetSearchCacheVersion() == searchVer {
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute // 空结果防穿透短缓存
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
 				}
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
 			}
 		}
 

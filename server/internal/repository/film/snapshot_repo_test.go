@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 
@@ -356,27 +357,32 @@ func TestClearDynamicPlayCaches_SafeScoping(t *testing.T) {
 	})
 
 	// 模拟写入目标缓存与无关业务缓存
-	_ = client.Set(db.Cxt, "EcoHub:filmPlayInfo:101", "play101", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:TVBox:List:v1", "tvbox_v1", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:UserToken:999", "token", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:search:v1/test", "search_res", 0).Err()
+	playKey := fmt.Sprintf("%s:101", config.FilmPlayInfoKey)
+	tvboxKey := fmt.Sprintf("%s:v1", config.TVBoxList)
+	tokenKey := fmt.Sprintf(config.UserTokenKey, 999)
+	searchKey := fmt.Sprintf("%s:v1/test", config.FilmSearchCachePrefix)
+
+	_ = client.Set(db.Cxt, playKey, "play101", 0).Err()
+	_ = client.Set(db.Cxt, tvboxKey, "tvbox_v1", 0).Err()
+	_ = client.Set(db.Cxt, tokenKey, "token", 0).Err()
+	_ = client.Set(db.Cxt, searchKey, "search_res", 0).Err()
 
 	ClearDynamicPlayCaches()
 
 	// 目标缓存应被清理
-	if client.Exists(db.Cxt, "EcoHub:filmPlayInfo:101").Val() != 0 {
-		t.Error("expected EcoHub:filmPlayInfo:101 to be deleted")
+	if client.Exists(db.Cxt, playKey).Val() != 0 {
+		t.Errorf("expected %s to be deleted", playKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:TVBox:List:v1").Val() != 0 {
-		t.Error("expected EcoHub:TVBox:List:v1 to be deleted")
+	if client.Exists(db.Cxt, tvboxKey).Val() != 0 {
+		t.Errorf("expected %s to be deleted", tvboxKey)
 	}
 
 	// 无关业务缓存绝不能被误删
-	if client.Exists(db.Cxt, "EcoHub:UserToken:999").Val() != 1 {
-		t.Error("expected EcoHub:UserToken:999 to be preserved")
+	if client.Exists(db.Cxt, tokenKey).Val() != 1 {
+		t.Errorf("expected %s to be preserved", tokenKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:search:v1/test").Val() != 1 {
-		t.Error("expected EcoHub:search:v1/test to be preserved")
+	if client.Exists(db.Cxt, searchKey).Val() != 1 {
+		t.Errorf("expected %s to be preserved", searchKey)
 	}
 }
 
@@ -395,33 +401,39 @@ func TestClearCachePatterns_ConsolidatedScan(t *testing.T) {
 		db.Rdb = origRdb
 	})
 
-	_ = client.Set(db.Cxt, "EcoHub:snap_cat:1", "v", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:snap_hot:2", "v", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:tags_search:3", "v", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:FilmClassify:4", "v", 0).Err()
-	_ = client.Set(db.Cxt, "EcoHub:preserve_me:999", "v", 0).Err()
+	catKey := fmt.Sprintf("%s:1", config.FilmCategoryCachePrefix)
+	hotKey := fmt.Sprintf("%s:2", config.FilmHotCachePrefix)
+	tagKey := fmt.Sprintf("%s:3", config.FilmSearchTagsKey)
+	clsKey := fmt.Sprintf("%s:4", config.FilmClassifyCacheKey)
+	preserveKey := "EcoHub:preserve_me:999"
+
+	_ = client.Set(db.Cxt, catKey, "v", 0).Err()
+	_ = client.Set(db.Cxt, hotKey, "v", 0).Err()
+	_ = client.Set(db.Cxt, tagKey, "v", 0).Err()
+	_ = client.Set(db.Cxt, clsKey, "v", 0).Err()
+	_ = client.Set(db.Cxt, preserveKey, "v", 0).Err()
 
 	// 一次传入 4 组不同 Pattern
 	clearCachePatterns(
-		"EcoHub:snap_cat:*",
-		"EcoHub:snap_hot:*",
-		"EcoHub:tags_search:*",
-		"EcoHub:FilmClassify:*",
+		config.FilmCategoryCachePrefix+":*",
+		config.FilmHotCachePrefix+":*",
+		config.FilmSearchTagsKey+":*",
+		config.FilmClassifyCacheKey+":*",
 	)
 
-	if client.Exists(db.Cxt, "EcoHub:snap_cat:1").Val() != 0 {
-		t.Error("snap_cat should be deleted")
+	if client.Exists(db.Cxt, catKey).Val() != 0 {
+		t.Errorf("%s should be deleted", catKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:snap_hot:2").Val() != 0 {
-		t.Error("snap_hot should be deleted")
+	if client.Exists(db.Cxt, hotKey).Val() != 0 {
+		t.Errorf("%s should be deleted", hotKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:tags_search:3").Val() != 0 {
-		t.Error("tags_search should be deleted")
+	if client.Exists(db.Cxt, tagKey).Val() != 0 {
+		t.Errorf("%s should be deleted", tagKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:FilmClassify:4").Val() != 0 {
-		t.Error("FilmClassify should be deleted")
+	if client.Exists(db.Cxt, clsKey).Val() != 0 {
+		t.Errorf("%s should be deleted", clsKey)
 	}
-	if client.Exists(db.Cxt, "EcoHub:preserve_me:999").Val() != 1 {
-		t.Error("preserve_me should be preserved")
+	if client.Exists(db.Cxt, preserveKey).Val() != 1 {
+		t.Errorf("%s should be preserved", preserveKey)
 	}
 }
