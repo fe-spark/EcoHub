@@ -416,7 +416,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 				continue
 			}
 			seenPiped[s.Mid] = struct{}{}
-			cmds[s.Mid] = pipe.Get(db.Cxt, fmt.Sprintf("EcoHub:filmPlayInfo:%d", s.Mid))
+			cmds[s.Mid] = pipe.Get(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, s.Mid))
 		}
 		_, _ = pipe.Exec(db.Cxt)
 

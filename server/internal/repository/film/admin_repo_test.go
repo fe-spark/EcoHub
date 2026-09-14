@@ -93,6 +93,7 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 }
 
 func TestAdminRepo_RedisNilSafety(t *testing.T) {
+	_ = setupFilmZeroTestDB(t)
 	origRdb := db.Rdb
 	db.Rdb = nil
 	defer func() {

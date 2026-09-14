@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -91,7 +92,7 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 	}
 
 	// 2. 验证 Redis 缓存已写入
-	cacheKey := fmt.Sprintf("EcoHub:hotKeywords:v%s", version)
+	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
 	val, err := mr.Get(cacheKey)
 	if err != nil || val == "" {
 		t.Fatalf("expected redis key %s to exist, err: %v", cacheKey, err)
@@ -138,7 +139,7 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		t.Fatalf("expected empty detail for non-existent film, got %d", res.Id)
 	}
 
-	sentinelKey := fmt.Sprintf("EcoHub:filmPlayInfo:%d", nonExistentMid)
+	sentinelKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, nonExistentMid)
 	sentinelVal, err := mr.Get(sentinelKey)
 	if err != nil || sentinelVal != "{}" {
 		t.Fatalf("expected sentinel '{}' in redis, got %q, err: %v", sentinelVal, err)
@@ -187,7 +188,7 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		t.Fatalf("failed to get film detail: %v, detail: %+v", err, detailVo)
 	}
 
-	validKey := fmt.Sprintf("EcoHub:filmPlayInfo:%d", validMid)
+	validKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, validMid)
 	cachedVal, err := mr.Get(validKey)
 	if err != nil || cachedVal == "" {
 		t.Fatalf("expected redis key %s to exist", validKey)
@@ -268,10 +269,10 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		},
 	}
 	raw201, _ := json.Marshal(vo201)
-	_ = mr.Set(fmt.Sprintf("EcoHub:filmPlayInfo:%d", 201), string(raw201))
+	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 201), string(raw201))
 
 	// 将 9999 写入哨兵 "{}"
-	_ = mr.Set(fmt.Sprintf("EcoHub:filmPlayInfo:%d", 9999), "{}")
+	_ = mr.Set(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 9999), "{}")
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
@@ -286,7 +287,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 	// 验证未命中的 202 与 203 是否在 GetVodDetail 后被补齐写入了 Redis
 	for _, mid := range []int64{202, 203} {
-		val, err := mr.Get(fmt.Sprintf("EcoHub:filmPlayInfo:%d", mid))
+		val, err := mr.Get(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
 		if err != nil || val == "" || val == "{}" {
 			t.Fatalf("expected film %d to be cached after call, got %q, err: %v", mid, val, err)
 		}
@@ -479,7 +480,7 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 		t.Fatalf("expected empty relate for non-existent film, got %d", len(resEmpty))
 	}
 
-	sentinelKey := fmt.Sprintf("EcoHub:relate:vo:v%s:%d:p%d:s%d", version, nonExistentMid, 1, 10)
+	sentinelKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, nonExistentMid, 1, 10)
 	val, err := mr.Get(sentinelKey)
 	if err != nil || val != "[]" {
 		t.Fatalf("expected '[]' sentinel in redis, got %q, err: %v", val, err)
@@ -497,7 +498,7 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 
 	// 3. 请求相关推荐
 	relList := IndexSvc.RelateMovie(validMid, page)
-	relCacheKey := fmt.Sprintf("EcoHub:relate:vo:v%s:%d:p%d:s%d", version, validMid, 1, 10)
+	relCacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, validMid, 1, 10)
 	cachedVal, err := mr.Get(relCacheKey)
 	if err != nil || cachedVal == "" {
 		t.Fatalf("expected relate cache key %s to exist", relCacheKey)
@@ -516,13 +517,13 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	}
 }
 
-// 缓存清理测试：验证 ClearAllSnapshotDynamicCaches 清理 EcoHub:filmPlayInfo:* 与 EcoHub:hotKeywords:*
+// 缓存清理测试：验证 ClearAllSnapshotDynamicCaches 清理 FilmPlayInfoKey 与 FilmHotKeywordsKey
 func TestPlan2_ClearAllSnapshotDynamicCaches_Invalidation(t *testing.T) {
 	_, mr := setupTestDBAndRedis(t)
 
-	key1 := "EcoHub:filmPlayInfo:123"
-	key2 := "EcoHub:hotKeywords:v999"
-	key3 := "EcoHub:relate:vo:v999:123:p1:s10"
+	key1 := fmt.Sprintf("%s:123", config.FilmPlayInfoKey)
+	key2 := fmt.Sprintf("%s:v999", config.FilmHotKeywordsKey)
+	key3 := fmt.Sprintf("%s:v999:123:p1:s10", config.FilmRelateVOCachePrefix)
 
 	_ = mr.Set(key1, `{"id":123}`)
 	_ = mr.Set(key2, `["片名"]`)
@@ -558,7 +559,7 @@ func TestPlan1_EmptyHotKeywords_Sentinel(t *testing.T) {
 		t.Fatalf("expected 0 keywords, got %d", len(kw))
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:hotKeywords:v%s", version)
+	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
 	val, err := mr.Get(cacheKey)
 	if err != nil || val != "[]" {
 		t.Fatalf("expected '[]' in redis, got %q, err: %v", val, err)
@@ -657,8 +658,8 @@ func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:tags_search:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
-		version, st.Pid, st.Cid, "", "", "", "", "", 1, 10)
+	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
+		config.FilmSearchTagsKey, version, st.Pid, st.Cid, "", "", "", "", "", 1, 10)
 	val, err := mr.Get(cacheKey)
 	if err != nil || val == "" {
 		t.Fatalf("expected empty search cache key %s to exist", cacheKey)

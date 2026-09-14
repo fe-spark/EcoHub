@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
@@ -34,7 +35,7 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 		return emptyFilterOptionResponse()
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:filter_option:v%s:%d", version, pid)
+	cacheKey := fmt.Sprintf("%s:v%s:%d", config.FilmFilterOptionKey, version, pid)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
@@ -116,7 +117,7 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 
 func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 	version := GetActiveSnapshotVersion()
-	cacheKey := fmt.Sprintf("EcoHub:filter_option:admin:v%s", version)
+	cacheKey := fmt.Sprintf("%s:Admin:v%s", config.FilmFilterOptionKey, version)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[int64]map[string]any

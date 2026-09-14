@@ -68,16 +68,13 @@ func DelFilmSearch(id int64) error {
 		return nil
 	})
 
-	if err == nil && info != nil {
-		if rebuildErr := RefreshSearchTagsByPids(info.Pid); rebuildErr != nil {
-			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
-			return rebuildErr
-		}
+	if err == nil {
 		DeleteActiveSnapshotsByMids(id)
 		ClearAdminFilmSearchCache()
-		ClearSearchTagsCache(info.Pid)
 		ClearTVBoxListCache()
-		support.ClearIndexPageCache()
+		if info != nil {
+			ClearSearchTagsCache(info.Pid)
+		}
 	}
 	return err
 }

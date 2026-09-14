@@ -572,7 +572,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		return model.MovieDetailVo{}, nil
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:filmPlayInfo:%d", id)
+	cacheKey := fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, id)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if data == "{}" {
@@ -767,7 +767,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:relate:vo:v%s:%d:p%d:s%d", version, mid, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, mid, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if data == "[]" {

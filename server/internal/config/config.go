@@ -102,18 +102,88 @@ var (
 
 // -------------------------redis key-----------------------------------
 const (
-	// RedisKeyPrefix 项目 Redis 统一前缀。
+	// RedisKeyPrefix 项目 Redis 统一顶层前缀。
 	RedisKeyPrefix = "EcoHub"
 
+	// --- 1. 分类与规则 (Category & Rule) ---
 	// CategoryTreeKey 分类树 key
 	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
 	// ActiveCategoryTreeKey 活跃分类树缓存 key
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
 	// ActiveCategoryIDsKey 活跃分类 ID 集合缓存 key
 	ActiveCategoryIDsKey = RedisKeyPrefix + ":Category:ActiveIDs"
+	// CategoryVersionKey 分类版本号缓存 key
+	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
+	// RuleVersionKey 分类规则版本号缓存 key
+	RuleVersionKey = RedisKeyPrefix + ":Rule:Version"
 
-	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
-	ConfigCacheTTL = time.Hour * 24
+	// --- 2. 搜索模块 (Search) ---
+	// SearchTags 搜索分类标签缓存 key (前缀)
+	SearchTags = RedisKeyPrefix + ":Search:Tags"
+	// FilmSearchTagsKey 复合搜索标签缓存 key 前缀 (与 SearchTags 保持一致)
+	FilmSearchTagsKey = SearchTags
+	// SearchTagsVersionKey 搜索分类标签缓存版本号 key
+	SearchTagsVersionKey = RedisKeyPrefix + ":Search:Tags:Version"
+	// SearchCacheVersionKey 前台搜索缓存版本号 key
+	SearchCacheVersionKey = RedisKeyPrefix + ":Search:Version"
+	// FilmSearchCachePrefix 前台搜索缓存 key 前缀
+	FilmSearchCachePrefix = RedisKeyPrefix + ":Search:Result"
+
+	// --- 3. 影片动态数据与只读快照 (Film & Snapshot) ---
+	// SnapshotActiveVersionKey 前台只读影片列表快照当前生效版本（重启备忘）
+	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
+	// FilmPlayInfoKey 影片播放详情缓存 key 前缀 (后接 :mid)
+	FilmPlayInfoKey = RedisKeyPrefix + ":Film:PlayInfo"
+	// FilmHotKeywordsKey 搜索热词缓存 key 前缀 (后接 :v%s)
+	FilmHotKeywordsKey = RedisKeyPrefix + ":Film:HotKeywords"
+	// FilmCategoryCachePrefix 分类影片列表缓存前缀
+	FilmCategoryCachePrefix = RedisKeyPrefix + ":Film:Category"
+	// FilmCategoryPageCachePrefix 分类分页列表缓存前缀
+	FilmCategoryPageCachePrefix = RedisKeyPrefix + ":Film:CategoryPage"
+	// FilmHotCachePrefix 分类热门列表缓存前缀
+	FilmHotCachePrefix = RedisKeyPrefix + ":Film:Hot"
+	// FilmHotPoolCachePrefix 分类热门候选池缓存前缀
+	FilmHotPoolCachePrefix = RedisKeyPrefix + ":Film:HotPool"
+	// FilmSortCachePrefix 分类排序列表缓存前缀
+	FilmSortCachePrefix = RedisKeyPrefix + ":Film:Sort"
+	// FilmClassifyCacheKey 分类首页快照缓存前缀
+	FilmClassifyCacheKey = RedisKeyPrefix + ":Film:Classify"
+	// FilmFilterOptionKey 筛选选项缓存 key 前缀
+	FilmFilterOptionKey = RedisKeyPrefix + ":Film:FilterOption"
+	// FilmRelatePrefix 影片相关推荐缓存根前缀 (用于统一清理)
+	FilmRelatePrefix = RedisKeyPrefix + ":Film:Relate"
+	// FilmRelateCandCachePrefix 相关推荐候选集缓存前缀
+	FilmRelateCandCachePrefix = RedisKeyPrefix + ":Film:Relate:Cand"
+	// FilmRelateVOCachePrefix 相关推荐视图对象缓存前缀
+	FilmRelateVOCachePrefix = RedisKeyPrefix + ":Film:Relate:VO"
+
+	// --- 4. TVBox 与外部提供接口 (TVBox & Provide) ---
+	// TVBoxConfigCacheKey TVBox 分类及筛选配置缓存 key
+	TVBoxConfigCacheKey = RedisKeyPrefix + ":TVBox:Config"
+	// TVBoxNetworkConfigCacheKey TVBox/影视仓一键网络配置缓存 key 前缀
+	TVBoxNetworkConfigCacheKey = RedisKeyPrefix + ":TVBox:NetworkConfig"
+	// TVBoxList TVBox 列表页缓存前缀
+	TVBoxList = RedisKeyPrefix + ":TVBox:List"
+	// ProvideListKey Provide 接口列表缓存前缀
+	ProvideListKey = RedisKeyPrefix + ":Provide:List"
+
+	// --- 5. 首页聚合 (Index) ---
+	// IndexPageCacheKey 首页数据缓存 key
+	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
+	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
+	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
+
+	// --- 6. 运维治理与通知 (Maintenance & Notice) ---
+	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key
+	OrphanCleanCursorKey = RedisKeyPrefix + ":Film:Orphan:Cursor"
+	// MasterSwitchProtectKey 主站切换冷启动保护期重启备忘 key
+	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
+	// NotifyBatchCachePrefix 变更通知批次缓存前缀
+	NotifyBatchCachePrefix = RedisKeyPrefix + ":Notify:Batch"
+	// VirtualPictureKey 待同步图片临时存储 key
+	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"
+
+	// --- 7. 版本检查缓存 (Version) ---
 	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
 	LatestReleaseCacheKey = RedisKeyPrefix + ":Version:LatestRelease"
 	// LatestReleasePreCacheKey 当前为测试版时，含 pre-release 的最新缓存
@@ -121,37 +191,8 @@ const (
 	// LatestReleaseCacheTTL 版本检查缓存，避免打满 GitHub 匿名限额
 	LatestReleaseCacheTTL = time.Hour
 
-	// SearchTags 搜索分类标签缓存 key (前缀)
-	SearchTags = RedisKeyPrefix + ":Search:Tags"
-	// SearchTagsVersionKey 搜索分类标签缓存版本号 key
-	SearchTagsVersionKey = RedisKeyPrefix + ":Search:Tags:Version"
-	// TVBoxConfigCacheKey TVBox 分类及筛选配置缓存 key
-	TVBoxConfigCacheKey = RedisKeyPrefix + ":TVBox:Config"
-	// TVBoxNetworkConfigCacheKey TVBox/影视仓一键网络配置缓存 key 前缀
-	TVBoxNetworkConfigCacheKey = RedisKeyPrefix + ":TVBox:NetworkConfig"
-	// IndexPageCacheKey 首页数据缓存 key
-	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
-	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
-	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
-	// CategoryVersionKey 分类版本号缓存 key
-	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
-	// RuleVersionKey 分类规则版本号缓存 key
-	RuleVersionKey = RedisKeyPrefix + ":Rule:Version"
-	// TVBoxList TVBox 列表页缓存前缀
-	TVBoxList = RedisKeyPrefix + ":TVBox:List"
-	// SnapshotActiveVersionKey 前台只读影片列表快照当前生效版本（重启备忘）
-	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
-	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key
-	OrphanCleanCursorKey = RedisKeyPrefix + ":Film:Orphan:Cursor"
-	// MasterSwitchProtectKey 主站切换冷启动保护期重启备忘 key
-	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
-	// FilmClassifyCacheKey 分类首页快照缓存前缀
-	FilmClassifyCacheKey = RedisKeyPrefix + ":FilmClassify"
-	// FilmClassifySearchKey 分类筛选快照缓存前缀
-	FilmClassifySearchKey = RedisKeyPrefix + ":FilmClassifySearch"
-
-	// VirtualPictureKey 待同步图片临时存储 key
-	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"
+	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
+	ConfigCacheTTL = time.Hour * 24
 	// MaxScanCount redis Scan 操作每次扫描的数据量, 每次最多扫描300条数据
 	MaxScanCount = 300
 )

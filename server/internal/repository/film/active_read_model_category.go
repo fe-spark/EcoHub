@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -40,7 +41,7 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:snap_cat:v%s:%s:%d:%d:%d", version, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d:%d", config.FilmCategoryCachePrefix, version, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -88,7 +89,7 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:snap_cat_page:v%s:%s:%d:p%d:s%d", version, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:p%d:s%d", config.FilmCategoryPageCachePrefix, version, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -154,7 +155,7 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:snap_hot:v%s:%s:%d:%d:%d", version, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d:%d", config.FilmHotCachePrefix, version, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -191,6 +192,7 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 }
 
 func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) []model.MovieBasicInfo {
+	startedAt := time.Now()
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -200,7 +202,7 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:snap_hot_pool:v%s:%s:%d:%d", version, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d", config.FilmHotPoolCachePrefix, version, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -220,7 +222,9 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 	}
 
 	var snapshots []model.FilmListSnapshot
-	_ = query.Order("hits DESC, id DESC").Limit(poolSize).Find(&snapshots).Error
+	if err := query.Order("hits DESC, id DESC").Limit(poolSize).Find(&snapshots).Error; err != nil {
+		return []model.MovieBasicInfo{}
+	}
 	result := BuildMovieBasicInfosFromSnapshots(snapshots...)
 
 	if db.Rdb != nil && len(result) > 0 {
@@ -228,6 +232,9 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
 		}
 	}
+
+	log.Printf("[FilmHotPool] 获取分类热门候选池 field=%s id=%d count=%d poolSize=%d cost=%s",
+		field, id, len(result), poolSize, time.Since(startedAt))
 	return result
 }
 
@@ -272,7 +279,7 @@ func GetSnapshotMovieListBySortReadModel(version string, sortType int, pid int64
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:snap_sort:v%s:%d:%d:p%d:s%d", version, pid, sortType, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:p%d:s%d", config.FilmSortCachePrefix, version, pid, sortType, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem

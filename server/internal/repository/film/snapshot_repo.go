@@ -338,9 +338,9 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 		log.Printf("DeleteActiveSnapshotsByMids Error: %v", result.Error)
 		return
 	}
-	if result.RowsAffected > 0 {
-		InvalidateIncrementalSnapshotCaches(version, ids)
-	}
+	RemoveMidsFromActiveFilmSearchIndex(version, ids)
+	invalidateDeletedSnapshotCaches(version, ids)
+	RefreshAccessDataCaches()
 }
 
 func DeleteActiveSnapshotsByCategory(field string, id int64) {
@@ -355,6 +355,7 @@ func DeleteActiveSnapshotsByCategory(field string, id int64) {
 		return
 	}
 	if result.RowsAffected > 0 {
+		BumpSearchCacheVersion()
 		RefreshAccessDataCaches()
 		rebuildActiveFilterOptions(version)
 	}
@@ -373,6 +374,7 @@ func DeleteActiveRootSnapshots(pid int64) {
 		return
 	}
 	if result.RowsAffected > 0 {
+		BumpSearchCacheVersion()
 		RefreshAccessDataCaches()
 		rebuildActiveFilterOptions(version)
 	}
@@ -407,6 +409,7 @@ func RestoreActiveSnapshotsByCategory(cid int64) {
 		log.Printf("RestoreActiveSnapshotsByCategory Error: %v", err)
 		return
 	}
+	BumpSearchCacheVersion()
 	RefreshAccessDataCaches()
 	rebuildActiveFilterOptions(version)
 }
@@ -462,6 +465,8 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	updatedCount := 0
 	deletedCount := 0
 	processed := 0
+	allKeptMIDs := make([]int64, 0, len(ids))
+	allDeletedMIDs := make([]int64, 0)
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		for _, batchIDs := range chunkSnapshotMIDs(ids, snapshotBuildBatchSize) {
 			batchStartedAt := time.Now()
@@ -502,6 +507,8 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 			updatedCount += len(batchSnapshots)
 			deletedCount += len(deletedMIDs)
 			processed += len(batchIDs)
+			allKeptMIDs = append(allKeptMIDs, keptMIDs...)
+			allDeletedMIDs = append(allDeletedMIDs, deletedMIDs...)
 			log.Printf(
 				"[Snapshot] 快速增量发布进度 version=%s mid=%d/%d batch=%d updated=%d deleted=%d query=%s build=%s write=%s cost=%s total_cost=%s",
 				version,
@@ -523,10 +530,13 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	}
 
 	applyStartedAt := time.Now()
-	if err := ApplyActiveFilmReadModelSnapshots(version, nil, nil); err != nil {
-		return "", 0, err
+	if len(allDeletedMIDs) > 0 {
+		RemoveMidsFromActiveFilmSearchIndex(version, allDeletedMIDs)
 	}
-	InvalidateIncrementalSnapshotCaches(version, ids)
+	if len(allKeptMIDs) > 0 {
+		UpsertMidsToActiveFilmSearchIndex(version, allKeptMIDs)
+	}
+	invalidateSnapshotDataCaches(version, ids)
 	applyCost := time.Since(applyStartedAt)
 	RefreshAccessDataCaches()
 	ClearAdminFilmSearchCache()
@@ -770,24 +780,58 @@ func RefreshAccessDataCaches() {
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
-		fmt.Sprintf("%s:*", config.SearchTags),
-		"EcoHub:filter_option:*",
+		fmt.Sprintf("%s:*", config.FilmSearchTagsKey),
+		fmt.Sprintf("%s:*", config.FilmFilterOptionKey),
 	)
+}
+
+var asyncClearSearchWg sync.WaitGroup
+
+// ClearSearchCache 清除所有前台搜索缓存
+func ClearSearchCache() {
+	clearCachePatterns(config.FilmSearchCachePrefix + ":*")
+}
+
+func dispatchAsyncClearSearchCache() {
+	asyncClearSearchWg.Add(1)
+	go func() {
+		defer asyncClearSearchWg.Done()
+		ClearSearchCache()
+	}()
+}
+
+// WaitAsyncClearSearchCacheDone 等待所有异步搜索缓存清理任务完成（供测试隔离与生命周期管理使用）
+func WaitAsyncClearSearchCacheDone() {
+	asyncClearSearchWg.Wait()
 }
 
 // InvalidateIncrementalSnapshotCaches 增量快照发布后精准淘汰列表/播放缓存，并重置内存搜索索引。
 // 严禁调用 ClearActiveFilmReadModel：防止 Version 被置空导致全站播放详情失败。
 func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	// 增量从内存搜索索引中更新/新增 mids，避免粗暴清空导致下一次检索全库重算 19 秒
+	if len(mids) > 0 {
+		UpsertMidsToActiveFilmSearchIndex(version, mids)
+	} else {
+		InvalidateActiveFilmSearchIndex(version)
+	}
+	invalidateSnapshotDataCaches(version, mids)
+}
+
+func invalidateDeletedSnapshotCaches(version string, mids []int64) {
+	invalidateSnapshotDataCaches(version, mids)
+}
+
+func invalidateSnapshotDataCaches(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
 	}
 	ClearProvideListCache()
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	InvalidateActiveFilmSearchIndex(version)
+	BumpSearchCacheVersion()
 	if db.Rdb != nil && len(mids) > 0 {
 		// 精准批量删除被修改影片的详情与播放页缓存（按 1000 条分批下发，避免过大 Pipeline 占用缓冲区）
 		const pipeBatchSize = 1000
@@ -798,7 +842,7 @@ func InvalidateIncrementalSnapshotCaches(version string, mids []int64) {
 			}
 			pipe := db.Rdb.Pipeline()
 			for _, mid := range mids[i:end] {
-				pipe.Del(db.Cxt, fmt.Sprintf("EcoHub:filmPlayInfo:%d", mid))
+				pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
 			}
 			_, _ = pipe.Exec(db.Cxt)
 		}
@@ -809,33 +853,30 @@ func ClearAllSnapshotDynamicCaches() {
 	support.ClearIndexPageCache()
 	ClearActiveFilmReadModel()
 	clearCachePatterns(
-		"EcoHub:filmPlayInfo:*",
-		"EcoHub:hotKeywords:*",
-		"EcoHub:snap_cat:*",
-		"EcoHub:snap_cat_page:*",
-		"EcoHub:snap_hot:*",
-		"EcoHub:snap_hot_pool:*",
-		"EcoHub:snap_sort:*",
-		"EcoHub:tags_search:*",
-		"EcoHub:provide:*",
-		"EcoHub:search:*",
-		"EcoHub:related:*",
-		"EcoHub:relate:*",
-		"EcoHub:Index:Page:*",
-		fmt.Sprintf("%s*", config.IndexPageCacheKey),
-		fmt.Sprintf("%s:*", config.TVBoxList),
-		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
-		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
-		fmt.Sprintf("%s:*", config.SearchTags),
-		"EcoHub:filter_option:*",
+		config.FilmPlayInfoKey+":*",
+		config.FilmHotKeywordsKey+":*",
+		config.FilmCategoryCachePrefix+":*",
+		config.FilmCategoryPageCachePrefix+":*",
+		config.FilmHotCachePrefix+":*",
+		config.FilmHotPoolCachePrefix+":*",
+		config.FilmSortCachePrefix+":*",
+		config.FilmSearchTagsKey+":*",
+		config.ProvideListKey+":*",
+		config.FilmSearchCachePrefix+":*",
+		config.FilmRelatePrefix+":*",
+		config.FilmClassifyCacheKey+":*",
+		config.FilmFilterOptionKey+":*",
+		config.TVBoxList+":*",
+		config.TVBoxNetworkConfigCacheKey+":*",
+		config.IndexPageCacheKey+"*",
 	)
 }
 
 // ClearDynamicPlayCaches 清除播放详情缓存与TVBox播放列表缓存
 func ClearDynamicPlayCaches() {
 	clearCachePatterns(
-		"EcoHub:filmPlayInfo:*",
-		fmt.Sprintf("%s:*", config.TVBoxList),
+		config.FilmPlayInfoKey+":*",
+		config.TVBoxList+":*",
 	)
 }
 

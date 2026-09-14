@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -47,7 +48,7 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 		return []model.FilmListSnapshot{}
 	}
 
-	cacheKey := fmt.Sprintf("EcoHub:relate:cand:v%s:%d", version, snapshot.Mid)
+	cacheKey := fmt.Sprintf("%s:v%s:%d", config.FilmRelateCandCachePrefix, version, snapshot.Mid)
 	var candidates []model.FilmListSnapshot
 	hitCache := false
 

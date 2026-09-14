@@ -188,12 +188,5 @@ func batchUpdatePlayFromSummariesTx(tx *gorm.DB, summaries map[int64]string) err
 }
 
 func ClearProvideListCache() {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := config.TVBoxList + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
+	clearCachePatterns(config.TVBoxList+":*", config.ProvideListKey+":*")
 }

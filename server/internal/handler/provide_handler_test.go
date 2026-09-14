@@ -378,7 +378,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		}
 
 		// 验证缓存命中：执行完毕后 Redis 中应有缓存
-		cachedVal, err := mr.Get(fmt.Sprintf("EcoHub:filmPlayInfo:%d", 201))
+		cachedVal, err := mr.Get(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, 201))
 		if err != nil || cachedVal == "" {
 			t.Fatalf("expected Redis cache to be populated for film 201")
 		}
