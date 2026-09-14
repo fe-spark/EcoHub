@@ -40,6 +40,8 @@ Client apps live in separate repos, not this repo's server or web UI:
 
 Read-only demo account: `guest` / `guest`. This account cannot save settings. For a real deployment, use your own accounts and change the default passwords.
 
+> **Network Note**: The official demo site does not support China Mobile networks due to overseas hosting providers. Please use China Unicom, China Telecom, or other networks to access.
+
 ## Recommendations
 
 ### Server
@@ -76,7 +78,6 @@ docker compose up -d
 | `http://<host>:3000/manage` | Administration panel |
 | `http://<host>:3000/api/provide/config` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
-| `http://<host>:18080/api/*` | Direct API access (optional, for LAN or direct player access) |
 
 Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only). Default passwords must be changed before any public deployment.
 

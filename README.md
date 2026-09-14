@@ -41,6 +41,8 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 
 只读演示账号：`guest` / `guest`。该账号不可保存配置，正式部署请使用自有账号并修改默认密码。
 
+> **网络提示**：官方网站因海外服务商不支持移动线路，请使用联通/电信等网络访问。
+
 ## 推荐
 
 ### 服务器
@@ -78,7 +80,6 @@ docker compose up -d
 | `http://<主机>:3000/api` | 客户端（[EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) / [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)）服务接入地址 |
 | `http://<主机>:3000/api/provide/config` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
-| `http://<主机>:18080/api/*` | API 直连（可选，仅供内网或特定播放器直连） |
 
 默认账号：`admin` / `admin`（读写）、`guest` / `guest`（只读）。对外部署前须立即修改默认密码。
 
