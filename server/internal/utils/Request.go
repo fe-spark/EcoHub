@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/flate"
 	"compress/gzip"
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io"
@@ -40,11 +41,12 @@ var Client = CreateClient()
 
 // RequestInfo 请求参数结构体
 type RequestInfo struct {
-	Uri    string      `json:"uri"`    // 请求url地址
-	Params url.Values  `json:"param"`  // 请求参数
-	Header http.Header `json:"header"` // 请求头数据
-	Resp   []byte      `json:"resp"`   // 响应结果数据
-	Err    string      `json:"err"`    // 错误信息
+	Uri    string          `json:"uri"`    // 请求url地址
+	Params url.Values      `json:"param"`  // 请求参数
+	Header http.Header     `json:"header"` // 请求头数据
+	Resp   []byte          `json:"resp"`   // 响应结果数据
+	Err    string          `json:"err"`    // 错误信息
+	Ctx    context.Context `json:"-"`      // 可选，停止采集时取消在途 HTTP
 }
 
 // userAgents 现代主流浏览器 UA 池（Chrome / Firefox / Edge）
@@ -135,7 +137,11 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 // ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
 func ApiGet(r *RequestInfo) {
 	targetUrl := buildUrl(r.Uri, r.Params)
-	req, err := http.NewRequest("GET", targetUrl, nil)
+	ctx := context.Background()
+	if r != nil && r.Ctx != nil {
+		ctx = r.Ctx
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", targetUrl, nil)
 	if err != nil {
 		r.Resp = nil
 		r.Err = fmt.Sprintf("create request failed: %v, url=%s", err, targetUrl)

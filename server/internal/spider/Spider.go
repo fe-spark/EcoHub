@@ -186,10 +186,16 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			defer collectWrites.finishSource(fs.Grade, fs.Id)
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
+				if batchCtx != nil {
+					batchCtx.markSourceFinished(fs)
+				}
 				return
 			}
 			if isCollectProgressStopped(fs.Id) {
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
+				if batchCtx != nil {
+					batchCtx.markSourceFinished(fs)
+				}
 				return
 			}
 			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batchCtx); err != nil {

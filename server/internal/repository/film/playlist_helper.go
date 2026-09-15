@@ -37,11 +37,7 @@ func BuildPlaylistMovieKeys(detail model.MovieDetail) []string {
 	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 }
 
-// BuildPlaylistPrimaryMovieKey 提取详情最精准的首选唯一主键：
-// 1. 若有豆瓣 ID，返回 dbid_{id}；
-// 2. 若有明确大类 (pid > 0)，返回片名#大类后缀哈希；
-// 3. 未知大类时降级返回纯片名哈希。
-// 专用于播放列表 (slave_movie_playlist) 与海报 (movie_poster) 的物理实体存储，彻底杜绝数据翻倍与跨类串台。
+// BuildPlaylistPrimaryMovieKey 播放列表 / 海报主键（豆瓣，否则片名#大类，否则纯片名）。
 func BuildPlaylistPrimaryMovieKey(detail model.MovieDetail) string {
 	keys := BuildPlaylistMovieKeys(detail)
 	if len(keys) == 0 {
@@ -50,20 +46,38 @@ func BuildPlaylistPrimaryMovieKey(detail model.MovieDetail) string {
 	return keys[0]
 }
 
+// BuildPlaylistCandidateKeys 尚未唯一命中主站影片时的落库键；有大类时不含纯片名，避免同名跨类共用槽。
+func BuildPlaylistCandidateKeys(detail model.MovieDetail) []string {
+	pid := ResolveMovieDetailRootPid(detail)
+	keys := BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
+	if pid <= 0 || len(keys) == 0 {
+		return keys
+	}
+	plainTitle := utils.NormalizeCollectionTitle(detail.Name)
+	if plainTitle == "" {
+		return keys
+	}
+	plainKey := utils.GenerateHashKey(plainTitle)
+	candidates := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if key == plainKey {
+			continue
+		}
+		candidates = append(candidates, key)
+	}
+	return candidates
+}
+
 func BuildMovieMatchKeys(dbID int64, name string) []string {
 	return BuildMovieMatchKeysWithCategory(dbID, name, 0)
 }
 
-// BuildMovieMatchKeysWithCategory 构造支持大类隔离与向后兼容的双轨匹配键：
-// 1. 若有豆瓣 ID，生成 dbid_{id} 精准匹配键；
-// 2. 当 pid > 0 时，优先生成带大类后缀的哈希键（如 hash("片名#cat_20")），精准隔离同名不同类剧集；
-// 3. 始终保留纯片名哈希键，确保按主站为准与存量影片全向平滑兼容。
+// BuildMovieMatchKeysWithCategory 跨站匹配键：豆瓣、片名#大类、纯片名回退。同名跨类不能共用播放列表槽。
 func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []string {
 	keys := make([]string, 0, 3)
 	if dbIdentity := utils.BuildCollectionDbIdentity(dbID, name); dbIdentity != "" {
 		keys = append(keys, utils.GenerateHashKey(dbIdentity))
 	}
-
 	normalizedTitle := utils.NormalizeCollectionTitle(name)
 	if normalizedTitle != "" {
 		if pid > 0 {
@@ -74,9 +88,7 @@ func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []strin
 	return UniqueKeys(keys)
 }
 
-
-// inheritPrimaryMovieKeyIfUnique 副站未识别大类时，仅当片名只命中一部主站影片，才沿用该片已有主键。
-// 命中 0 部或同名多部（跨类）时返回空，继续用纯片名键，避免串台。
+// inheritPrimaryMovieKeyIfUnique 未识别大类时，仅当片名只命中一部主站影片才沿用该片主键。
 func inheritPrimaryMovieKeyIfUnique(candidateMids []int64, keysByMid map[int64][]string) string {
 	seen := make(map[int64]struct{}, len(candidateMids))
 	uniq := make([]int64, 0, 1)

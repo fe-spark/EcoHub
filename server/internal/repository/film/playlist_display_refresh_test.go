@@ -39,8 +39,8 @@ func TestGetMultiplePlayGroupsBySourcesAndKeysUsesNewestSlaveList(t *testing.T) 
 	gdb := setupOrphanCleanerTestDB(t)
 	support.SetCategoryTreeForTest(map[int64]int64{20: 0}, map[int64]string{20: model.BigCategoryAnimation})
 
-	primary := BuildMovieMatchKeysWithCategory(0, "测试剧", 20)[0]
-	legacy := BuildMovieMatchKeys(0, "测试剧")[0]
+	primary := "legacy_cat_key"
+	legacy := "title_key"
 	eight, _ := json.Marshal([]model.MovieUrlInfo{
 		{Episode: "第1集", Link: "http://old/1.m3u8"},
 		{Episode: "第8集", Link: "http://old/8.m3u8"},

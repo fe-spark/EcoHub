@@ -473,4 +473,41 @@ func TestWriteLaneWaitPending_WorkerPanic(t *testing.T) {
 	}
 }
 
+func TestWriteLaneCancelSourceCompletesPending(t *testing.T) {
+	lane := newCollectWriteLane("test-cancel-source")
+	lane.limiter.SetLimit(1e6)
+	lane.limiter.SetBurst(1000)
+	lane.workers = 0
+
+	var completed atomic.Int32
+	for i := 1; i <= 3; i++ {
+		p := i
+		if err := lane.submit(context.Background(), collectWriteJob{
+			sourceID:   "S",
+			sourceName: "S",
+			page:       p,
+			write: func() (collectWriteMids, error) {
+				t.Fatal("canceled pending jobs must not run write")
+				return collectWriteMids{}, nil
+			},
+			complete: func(c collectWriteCompletion) {
+				if c.err != context.Canceled {
+					t.Errorf("page %d: expected canceled, got %v", p, c.err)
+				}
+				completed.Add(1)
+			},
+		}); err != nil {
+			t.Fatalf("submit %d: %v", p, err)
+		}
+	}
+
+	lane.cancelSource("S")
+	if got := completed.Load(); got != 3 {
+		t.Fatalf("expected 3 canceled completions, got %d", got)
+	}
+	if snap := lane.snapshot(); snap.PendingTotal != 0 || snap.PendingSources != 0 {
+		t.Fatalf("queue should be gone after cancel, got pending=%d sources=%d", snap.PendingTotal, snap.PendingSources)
+	}
+}
+
 

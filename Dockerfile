@@ -19,7 +19,8 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY server/ .
 RUN --mount=type=cache,target=/root/.cache/go-build \
     GOARCH=$TARGETARCH go build -o /out/main ./cmd/server/... && \
-    GOARCH=$TARGETARCH go build -o /out/migrate_match_keys ./cmd/tool/migrate_match_keys/...
+    GOARCH=$TARGETARCH go build -o /out/migrate_match_keys ./cmd/tool/migrate_match_keys/... && \
+    GOARCH=$TARGETARCH go build -o /out/migrate_slave_playlist_keys ./cmd/tool/migrate_slave_playlist_keys/...
 
 # ==========================================
 # 2. 编译 Next.js 前端应用 (web)
@@ -63,9 +64,12 @@ WORKDIR /app
 # 拷贝 Go 服务二进制文件及迁移工具
 COPY --from=server-builder /out/main /app/server/main
 COPY --from=server-builder /out/migrate_match_keys /usr/local/bin/migrate_match_keys
-RUN chmod +x /usr/local/bin/migrate_match_keys && \
+COPY --from=server-builder /out/migrate_slave_playlist_keys /usr/local/bin/migrate_slave_playlist_keys
+RUN chmod +x /usr/local/bin/migrate_match_keys /usr/local/bin/migrate_slave_playlist_keys && \
     ln -s /usr/local/bin/migrate_match_keys /app/migrate_match_keys && \
-    ln -s /usr/local/bin/migrate_match_keys /app/server/migrate_match_keys
+    ln -s /usr/local/bin/migrate_match_keys /app/server/migrate_match_keys && \
+    ln -s /usr/local/bin/migrate_slave_playlist_keys /app/migrate_slave_playlist_keys && \
+    ln -s /usr/local/bin/migrate_slave_playlist_keys /app/server/migrate_slave_playlist_keys
 
 # 拷贝 Next.js 产物
 COPY --from=web-builder /app/public /app/web/public

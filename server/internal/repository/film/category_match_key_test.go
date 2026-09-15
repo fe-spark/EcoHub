@@ -1,8 +1,10 @@
 package film
 
 import (
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository/support"
@@ -10,8 +12,8 @@ import (
 
 func TestBuildPlaylistMovieKeys_DualKeyFallback(t *testing.T) {
 	support.SetCategoryTreeForTest(map[int64]int64{
-		20: 0, // 动漫
-		34: 0, // 短剧
+		20: 0,
+		34: 0,
 	}, map[int64]string{
 		20: model.BigCategoryAnimation,
 		34: model.BigCategoryShortFilm,
@@ -48,20 +50,18 @@ func TestCategoryAwareMatchKeys_PrimaryKeysDoNotCollide(t *testing.T) {
 	if len(animeKeys) == 0 || len(shortDramaKeys) == 0 {
 		t.Fatalf("Keys should not be empty")
 	}
-	// 首选大类精准隔离键不可碰撞
 	if animeKeys[0] == shortDramaKeys[0] {
 		t.Fatalf("Category-aware primary keys collided: %s", animeKeys[0])
 	}
 }
 
 func TestResolveMovieDetailRootPid(t *testing.T) {
-	// 动态注入模拟大类 ID（例如在某个生产环境中电视剧=1, 电影=9, 动漫=20, 短剧=34, 国产剧子类 101->1）
 	support.SetCategoryTreeForTest(map[int64]int64{
 		1:   0,
 		9:   0,
 		20:  0,
 		34:  0,
-		101: 1, // 子分类国产剧，父类为 1 (电视剧)
+		101: 1,
 	}, map[int64]string{
 		1:   model.BigCategoryTV,
 		9:   model.BigCategoryMovie,
@@ -128,7 +128,6 @@ func TestResolveMovieDetailRootPid(t *testing.T) {
 }
 
 func TestPickBestMidForMatchKey_Deterministic(t *testing.T) {
-	// 测试无论输入顺序如何，返回的 mid 均保持一致
 	midsA := []int64{47014, 126574}
 	midsB := []int64{126574, 47014}
 
@@ -142,14 +141,13 @@ func TestPickBestMidForMatchKey_Deterministic(t *testing.T) {
 
 func TestBuildPlaylistPrimaryMovieKey(t *testing.T) {
 	support.SetCategoryTreeForTest(map[int64]int64{
-		20: 0, // 动漫
-		34: 0, // 短剧
+		20: 0,
+		34: 0,
 	}, map[int64]string{
 		20: model.BigCategoryAnimation,
 		34: model.BigCategoryShortFilm,
 	})
 
-	// 1. 明确带大类时，主键必须为 hash("片名#cat_pid")，不可为裸片名
 	detailWithCat := model.MovieDetail{
 		Pid:  20,
 		Name: "仙逆",
@@ -163,7 +161,6 @@ func TestBuildPlaylistPrimaryMovieKey(t *testing.T) {
 		t.Errorf("BuildPlaylistPrimaryMovieKey() = %s, expected %s", keyWithCat, expectedCatKey)
 	}
 
-	// 2. 带豆瓣 ID 时，优先使用豆瓣 ID 主键
 	detailWithDb := model.MovieDetail{
 		Pid:  20,
 		Name: "仙逆",
@@ -177,7 +174,6 @@ func TestBuildPlaylistPrimaryMovieKey(t *testing.T) {
 		t.Errorf("BuildPlaylistPrimaryMovieKey() with DbId = %s, expected %s", keyWithDb, expectedDbKey)
 	}
 
-	// 3. 未知大类时，降级使用裸片名主键
 	detailUnmapped := model.MovieDetail{
 		Name: "仙逆",
 		MovieDescriptor: model.MovieDescriptor{
@@ -194,14 +190,13 @@ func TestBuildPlaylistPrimaryMovieKey(t *testing.T) {
 func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 	support.SetCategoryTreeForTest(map[int64]int64{
-		20: 0, // 动漫
-		34: 0, // 短剧
+		20: 0,
+		34: 0,
 	}, map[int64]string{
 		20: model.BigCategoryAnimation,
 		34: model.BigCategoryShortFilm,
 	})
 
-	// 1. 采集写入副站短剧《仙逆》 (pid=34)
 	shortDramaDetail := model.MovieDetail{
 		Name: "仙逆",
 		MovieDescriptor: model.MovieDescriptor{
@@ -215,7 +210,6 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 		t.Fatalf("SaveSitePlayList slave_short failed: %v", err)
 	}
 
-	// 2. 采集写入副站动漫《仙逆》 (pid=20)
 	animeDetail := model.MovieDetail{
 		Name: "仙逆",
 		MovieDescriptor: model.MovieDescriptor{
@@ -229,7 +223,6 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 		t.Fatalf("SaveSitePlayList slave_anime failed: %v", err)
 	}
 
-	// 3. 采集写入未映射副站《仙逆》 (pid=0)
 	unmappedDetail := model.MovieDetail{
 		Name: "仙逆",
 		MovieDescriptor: model.MovieDescriptor{
@@ -243,8 +236,6 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 		t.Fatalf("SaveSitePlayList slave_unmapped failed: %v", err)
 	}
 
-	// 4. 验证数据库中 slave_movie_playlist 的实际记录数：
-	// slave_short 只能存 1 条 (pid=34 key)，绝不可存裸片名
 	var shortRows []model.SlaveMoviePlaylist
 	gdb.Where("source_id = ?", "slave_short").Find(&shortRows)
 	if len(shortRows) != 1 {
@@ -255,8 +246,7 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 		t.Fatalf("slave_short movie_key expected %s, got %s", cat34Key, shortRows[0].MovieKey)
 	}
 
-	// 5. 模拟主站访问动漫《仙逆》 (pid=20)
-	animeMasterKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 20) // [cat_20, legacy_title]
+	animeMasterKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 20)
 	sources := []model.FilmSource{
 		{Id: "slave_short", Name: "短剧专线"},
 		{Id: "slave_anime", Name: "动漫专线"},
@@ -274,8 +264,7 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 		t.Fatalf("Expected unmapped playlist fallback for anime from slave_unmapped")
 	}
 
-	// 6. 模拟主站访问短剧《仙逆》 (pid=34)
-	shortMasterKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 34) // [cat_34, legacy_title]
+	shortMasterKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 34)
 	shortPlayGroups := GetMultiplePlayGroupsBySourcesAndKeys(sources, shortMasterKeys)
 	if _, hasAnime := shortPlayGroups["slave_anime"]; hasAnime {
 		t.Fatalf("CRITICAL BUG: short drama requested play groups but got anime playlist from slave_anime!")
@@ -355,7 +344,6 @@ func TestUnmappedSlavePlaylist_InheritsUniqueMainPrimaryKey(t *testing.T) {
 		t.Fatalf("unmapped unique title should inherit main primary %s, got %s", primary, rows[0].MovieKey)
 	}
 
-	// 二次采集新一集必须打在同一主键上，播放时才能读到最新集。
 	unmapped.PlayList = [][]model.MovieUrlInfo{
 		{
 			{Episode: "第1集", Link: "https://slave.com/1.m3u8"},
@@ -380,6 +368,59 @@ func TestUnmappedSlavePlaylist_InheritsUniqueMainPrimaryKey(t *testing.T) {
 	groups := GetMultiplePlayGroupsBySourcesAndKeys(sources, []string{primary, legacy})
 	if _, ok := groups["slave_generic"]; !ok {
 		t.Fatalf("playback lookup by main dual keys should hit inherited primary")
+	}
+}
+
+func TestSaveSitePlayList_WritesOntoMasterPrimaryWhenUniqueMatch(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{20: 0}, map[int64]string{20: model.BigCategoryAnimation})
+
+	dbidKey := BuildMovieMatchKeysWithCategory(12345, "仙逆", 20)[0]
+	catKey := BuildMovieMatchKeysWithCategory(0, "仙逆", 20)[0]
+	legacy := BuildMovieMatchKeys(0, "仙逆")[0]
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 801, ContentKey: "vod_801", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{dbidKey, catKey, legacy} {
+		if err := gdb.Create(&model.MovieMatchKey{Mid: 801, MatchKey: key}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	slave := model.MovieDetail{
+		Name:            "仙逆",
+		MovieDescriptor: model.MovieDescriptor{CName: "动漫"},
+		PlayList: [][]model.MovieUrlInfo{
+			{
+				{Episode: "第1集", Link: "https://subo/1.m3u8"},
+				{Episode: "第9集", Link: "https://subo/9.m3u8"},
+			},
+		},
+	}
+	if _, err := SaveSitePlayList("subo", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "subo").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != dbidKey {
+		t.Fatalf("unique same-category match must write master primary %s, got %s", dbidKey, rows[0].MovieKey)
+	}
+
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "subo", Name: "速博"}},
+		[]string{dbidKey, catKey, legacy},
+	)
+	got := groups["subo"]
+	if len(got) != 1 || len(got[0].LinkList) != 2 {
+		t.Fatalf("detail lookup must see latest slave episodes, got %+v", got)
 	}
 }
 
@@ -421,5 +462,92 @@ func TestUnmappedSlavePlaylist_DoesNotInheritWhenTitleCollides(t *testing.T) {
 	}
 	if rows[0].MovieKey != legacy {
 		t.Fatalf("colliding titles must keep plain-title key, expected %s got %s", legacy, rows[0].MovieKey)
+	}
+}
+
+func TestSameTitleCrossCategory_AnimeUpdateNotMaskedByFinishedShort(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+		34: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+		34: model.BigCategoryShortFilm,
+	})
+
+	animeKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 20)
+	shortKeys := BuildMovieMatchKeysWithCategory(0, "仙逆", 34)
+	oldStamp := time.Now().Add(-48 * time.Hour).Unix()
+
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 701, ContentKey: "vod_701", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", UpdateStamp: oldStamp},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 702, ContentKey: "vod_702", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 34, CName: "短剧"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", UpdateStamp: oldStamp},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range animeKeys {
+		if err := gdb.Create(&model.MovieMatchKey{Mid: 701, MatchKey: key}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, key := range shortKeys {
+		if err := gdb.Create(&model.MovieMatchKey{Mid: 702, MatchKey: key}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	shortLinks := make([]model.MovieUrlInfo, 0, 80)
+	for i := 1; i <= 80; i++ {
+		shortLinks = append(shortLinks, model.MovieUrlInfo{Episode: "第" + strconv.Itoa(i) + "集", Link: "https://short/" + strconv.Itoa(i) + ".m3u8"})
+	}
+	if _, err := SaveSitePlayList("slave_short", []model.MovieDetail{{
+		Name:            "仙逆",
+		MovieDescriptor: model.MovieDescriptor{CName: "短剧"},
+		PlayList:        [][]model.MovieUrlInfo{shortLinks},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	anime21 := make([]model.MovieUrlInfo, 0, 21)
+	for i := 1; i <= 21; i++ {
+		anime21 = append(anime21, model.MovieUrlInfo{Episode: "第" + strconv.Itoa(i) + "集", Link: "https://anime/" + strconv.Itoa(i) + ".m3u8"})
+	}
+	if _, err := SaveSitePlayList("slave_anime", []model.MovieDetail{{
+		Name:            "仙逆",
+		MovieDescriptor: model.MovieDescriptor{CName: "动漫"},
+		PlayList:        [][]model.MovieUrlInfo{anime21},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	anime22 := append(append([]model.MovieUrlInfo{}, anime21...), model.MovieUrlInfo{Episode: "第22集", Link: "https://anime/22.m3u8"})
+	result, err := SaveSitePlayList("slave_anime", []model.MovieDetail{{
+		Name:            "仙逆",
+		MovieDescriptor: model.MovieDescriptor{CName: "动漫"},
+		PlayList:        [][]model.MovieUrlInfo{anime22},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	foundAnime := false
+	for _, mid := range result.NotifyMIDs {
+		if mid == 701 {
+			foundAnime = true
+		}
+		if mid == 702 {
+			t.Fatalf("finished short drama must not enter daily updates when the cartoon adds an episode")
+		}
+	}
+	if !foundAnime {
+		t.Fatalf("cartoon 仙逆 must enter daily updates on episode 22, got NotifyMIDs=%v", result.NotifyMIDs)
 	}
 }

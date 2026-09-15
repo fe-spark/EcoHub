@@ -41,6 +41,7 @@ func getPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		default:
 		}
 
+		r.Ctx = ctx
 		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("页数请求 attempt=%d ", attempt))
 		if err != nil {
 			return 0, err
@@ -78,6 +79,7 @@ func getFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
+		r.Ctx = ctx
 		release, err := waitSourceRequestTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
 		if err != nil {
 			return nil, err
@@ -365,6 +367,9 @@ func collectFilmPages(parentCtx context.Context, pageCount int, requestWorkerLim
 
 	for completion := range writeCompletions {
 		if completion.err != nil {
+			if ctx.Err() != nil || errors.Is(completion.err, context.Canceled) {
+				continue
+			}
 			recordPageFailure(completion.page, completion.stage, completion.err)
 			continue
 		}
