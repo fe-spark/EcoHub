@@ -74,6 +74,32 @@ func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []strin
 	return UniqueKeys(keys)
 }
 
+
+// inheritPrimaryMovieKeyIfUnique 副站未识别大类时，仅当片名只命中一部主站影片，才沿用该片已有主键。
+// 命中 0 部或同名多部（跨类）时返回空，继续用纯片名键，避免串台。
+func inheritPrimaryMovieKeyIfUnique(candidateMids []int64, keysByMid map[int64][]string) string {
+	seen := make(map[int64]struct{}, len(candidateMids))
+	uniq := make([]int64, 0, 1)
+	for _, mid := range candidateMids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		uniq = append(uniq, mid)
+	}
+	if len(uniq) != 1 {
+		return ""
+	}
+	keys := keysByMid[uniq[0]]
+	if len(keys) == 0 {
+		return ""
+	}
+	return keys[0]
+}
+
 func UniqueKeys(keys []string) []string {
 	orderedKeys := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))

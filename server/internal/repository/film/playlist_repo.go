@@ -25,6 +25,30 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
+	uncategorizedKeys := make([]string, 0)
+	for _, detail := range list {
+		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
+			continue
+		}
+		if ResolveMovieDetailRootPid(detail) == 0 {
+			uncategorizedKeys = append(uncategorizedKeys, BuildPlaylistMovieKeys(detail)...)
+		}
+	}
+	inheritedKeyByLookup := map[string]string{}
+	if len(uncategorizedKeys) > 0 {
+		midsByLookupKey := loadMidCandidatesByMatchKeys(uncategorizedKeys)
+		candidateMids := make([]int64, 0)
+		for _, mids := range midsByLookupKey {
+			candidateMids = append(candidateMids, mids...)
+		}
+		keysByMid := loadMovieMatchKeysByMids(candidateMids)
+		for lookupKey, mids := range midsByLookupKey {
+			if inherited := inheritPrimaryMovieKeyIfUnique(mids, keysByMid); inherited != "" {
+				inheritedKeyByLookup[lookupKey] = inherited
+			}
+		}
+	}
+
 	for _, detail := range list {
 		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
 			continue
@@ -33,6 +57,14 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 		primaryKey := BuildPlaylistPrimaryMovieKey(detail)
 		if primaryKey == "" {
 			continue
+		}
+		if ResolveMovieDetailRootPid(detail) == 0 {
+			for _, lookupKey := range BuildPlaylistMovieKeys(detail) {
+				if inherited := inheritedKeyByLookup[lookupKey]; inherited != "" {
+					primaryKey = inherited
+					break
+				}
+			}
 		}
 		keysByMovieKey[primaryKey] = struct{}{}
 

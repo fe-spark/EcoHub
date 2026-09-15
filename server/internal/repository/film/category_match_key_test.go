@@ -1,6 +1,7 @@
 package film
 
 import (
+	"strings"
 	"testing"
 
 	"server/internal/model"
@@ -287,3 +288,138 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 	}
 }
 
+func TestInheritPrimaryMovieKeyIfUnique(t *testing.T) {
+	primary := "cat_key_20"
+	legacy := "title_key"
+	keysByMid := map[int64][]string{
+		101: {primary, legacy},
+		202: {"cat_key_34", legacy},
+	}
+
+	if got := inheritPrimaryMovieKeyIfUnique([]int64{101}, keysByMid); got != primary {
+		t.Fatalf("unique mid should inherit primary, got %q", got)
+	}
+	if got := inheritPrimaryMovieKeyIfUnique([]int64{101, 101}, keysByMid); got != primary {
+		t.Fatalf("duplicate mid ids should still count as unique, got %q", got)
+	}
+	if got := inheritPrimaryMovieKeyIfUnique([]int64{101, 202}, keysByMid); got != "" {
+		t.Fatalf("cross-category same title must not inherit, got %q", got)
+	}
+	if got := inheritPrimaryMovieKeyIfUnique(nil, keysByMid); got != "" {
+		t.Fatalf("no candidates should not inherit, got %q", got)
+	}
+	if got := inheritPrimaryMovieKeyIfUnique([]int64{0, -1}, keysByMid); got != "" {
+		t.Fatalf("invalid mids should not inherit, got %q", got)
+	}
+	if got := inheritPrimaryMovieKeyIfUnique([]int64{303}, keysByMid); got != "" {
+		t.Fatalf("unique mid without stored keys should not inherit, got %q", got)
+	}
+}
+
+func TestUnmappedSlavePlaylist_InheritsUniqueMainPrimaryKey(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+	})
+
+	primary := BuildMovieMatchKeysWithCategory(0, "独行月球", 20)[0]
+	legacy := BuildMovieMatchKeys(0, "独行月球")[0]
+	if err := gdb.Create(&model.MovieMatchKey{Mid: 501, MatchKey: primary}).Error; err != nil {
+		t.Fatalf("create primary match key: %v", err)
+	}
+	if err := gdb.Create(&model.MovieMatchKey{Mid: 501, MatchKey: legacy}).Error; err != nil {
+		t.Fatalf("create legacy match key: %v", err)
+	}
+
+	unmapped := model.MovieDetail{
+		Name: "独行月球",
+		MovieDescriptor: model.MovieDescriptor{
+			CName: "通用线路",
+		},
+		PlayList: [][]model.MovieUrlInfo{
+			{{Episode: "第1集", Link: "https://slave.com/1.m3u8"}},
+		},
+	}
+	if _, err := SaveSitePlayList("slave_generic", []model.MovieDetail{unmapped}); err != nil {
+		t.Fatalf("SaveSitePlayList: %v", err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "slave_generic").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 slave row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != primary {
+		t.Fatalf("unmapped unique title should inherit main primary %s, got %s", primary, rows[0].MovieKey)
+	}
+
+	// 二次采集新一集必须打在同一主键上，播放时才能读到最新集。
+	unmapped.PlayList = [][]model.MovieUrlInfo{
+		{
+			{Episode: "第1集", Link: "https://slave.com/1.m3u8"},
+			{Episode: "第2集", Link: "https://slave.com/2.m3u8"},
+		},
+	}
+	if _, err := SaveSitePlayList("slave_generic", []model.MovieDetail{unmapped}); err != nil {
+		t.Fatalf("SaveSitePlayList update: %v", err)
+	}
+	gdb.Where("source_id = ?", "slave_generic").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("update should keep a single row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != primary {
+		t.Fatalf("updated episodes should stay on inherited primary, got %s", rows[0].MovieKey)
+	}
+	if !strings.Contains(rows[0].Content, "第2集") {
+		t.Fatalf("expected episode 2 in playlist content, got %s", rows[0].Content)
+	}
+
+	sources := []model.FilmSource{{Id: "slave_generic", Name: "通用专线"}}
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(sources, []string{primary, legacy})
+	if _, ok := groups["slave_generic"]; !ok {
+		t.Fatalf("playback lookup by main dual keys should hit inherited primary")
+	}
+}
+
+func TestUnmappedSlavePlaylist_DoesNotInheritWhenTitleCollides(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+		34: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+		34: model.BigCategoryShortFilm,
+	})
+
+	animePrimary := BuildMovieMatchKeysWithCategory(0, "仙逆", 20)[0]
+	shortPrimary := BuildMovieMatchKeysWithCategory(0, "仙逆", 34)[0]
+	legacy := BuildMovieMatchKeys(0, "仙逆")[0]
+	gdb.Create(&model.MovieMatchKey{Mid: 601, MatchKey: animePrimary})
+	gdb.Create(&model.MovieMatchKey{Mid: 601, MatchKey: legacy})
+	gdb.Create(&model.MovieMatchKey{Mid: 602, MatchKey: shortPrimary})
+	gdb.Create(&model.MovieMatchKey{Mid: 602, MatchKey: legacy})
+
+	unmapped := model.MovieDetail{
+		Name: "仙逆",
+		MovieDescriptor: model.MovieDescriptor{
+			CName: "通用线路",
+		},
+		PlayList: [][]model.MovieUrlInfo{
+			{{Episode: "第1集", Link: "https://unmapped.com/1.m3u8"}},
+		},
+	}
+	if _, err := SaveSitePlayList("slave_unmapped", []model.MovieDetail{unmapped}); err != nil {
+		t.Fatalf("SaveSitePlayList: %v", err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "slave_unmapped").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 slave row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != legacy {
+		t.Fatalf("colliding titles must keep plain-title key, expected %s got %s", legacy, rows[0].MovieKey)
+	}
+}
