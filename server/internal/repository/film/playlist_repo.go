@@ -16,6 +16,27 @@ import (
 	"gorm.io/gorm/clause"
 )
 
+
+func purgeSlavePlaylistMovieKeys(sourceID string, keys map[string]struct{}) error {
+	if strings.TrimSpace(sourceID) == "" || len(keys) == 0 {
+		return nil
+	}
+	movieKeys := make([]string, 0, len(keys))
+	for key := range keys {
+		key = strings.TrimSpace(key)
+		if key == "" {
+			continue
+		}
+		movieKeys = append(movieKeys, key)
+	}
+	if len(movieKeys) == 0 {
+		return nil
+	}
+	return db.Mdb.Unscoped().
+		Where("source_id = ? AND movie_key IN ?", sourceID, movieKeys).
+		Delete(&model.SlaveMoviePlaylist{}).Error
+}
+
 // SaveSitePlayList 写入附属站播放列表，返回「播放源实质变更」对应的全局 mid。
 func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error) {
 	if len(list) == 0 {
@@ -25,29 +46,20 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
-	uncategorizedKeys := make([]string, 0)
+	lookupKeys := make([]string, 0)
 	for _, detail := range list {
 		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
 			continue
 		}
-		if ResolveMovieDetailRootPid(detail) == 0 {
-			uncategorizedKeys = append(uncategorizedKeys, BuildPlaylistMovieKeys(detail)...)
-		}
+		lookupKeys = append(lookupKeys, BuildPlaylistMovieKeys(detail)...)
 	}
-	inheritedKeyByLookup := map[string]string{}
-	if len(uncategorizedKeys) > 0 {
-		midsByLookupKey := loadMidCandidatesByMatchKeys(uncategorizedKeys)
-		candidateMids := make([]int64, 0)
-		for _, mids := range midsByLookupKey {
-			candidateMids = append(candidateMids, mids...)
-		}
-		keysByMid := loadMovieMatchKeysByMids(candidateMids)
-		for lookupKey, mids := range midsByLookupKey {
-			if inherited := inheritPrimaryMovieKeyIfUnique(mids, keysByMid); inherited != "" {
-				inheritedKeyByLookup[lookupKey] = inherited
-			}
-		}
+	midsByLookupKey := loadMidCandidatesByMatchKeys(lookupKeys)
+	candidateMids := make([]int64, 0)
+	for _, mids := range midsByLookupKey {
+		candidateMids = append(candidateMids, mids...)
 	}
+	keysByMid := loadMovieMatchKeysByMids(candidateMids)
+	staleKeys := make(map[string]struct{})
 
 	for _, detail := range list {
 		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
@@ -58,13 +70,22 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 		if primaryKey == "" {
 			continue
 		}
-		if ResolveMovieDetailRootPid(detail) == 0 {
-			for _, lookupKey := range BuildPlaylistMovieKeys(detail) {
-				if inherited := inheritedKeyByLookup[lookupKey]; inherited != "" {
-					primaryKey = inherited
-					break
+		for _, lookupKey := range BuildPlaylistMovieKeys(detail) {
+			mid := uniqueMidFromCandidates(midsByLookupKey[lookupKey])
+			if mid <= 0 {
+				continue
+			}
+			keys := keysByMid[mid]
+			if len(keys) == 0 {
+				continue
+			}
+			primaryKey = keys[0]
+			for _, key := range keys {
+				if key != "" && key != primaryKey {
+					staleKeys[key] = struct{}{}
 				}
 			}
+			break
 		}
 		keysByMovieKey[primaryKey] = struct{}{}
 
@@ -96,6 +117,13 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 	changes, err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey)
 	if err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
+		return nil, err
+	}
+	for key := range keysByMovieKey {
+		delete(staleKeys, key)
+	}
+	if err := purgeSlavePlaylistMovieKeys(sourceID, staleKeys); err != nil {
+		log.Printf("purgeSlavePlaylistMovieKeys Error: %v", err)
 		return nil, err
 	}
 	changedMids, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
