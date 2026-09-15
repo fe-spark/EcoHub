@@ -31,7 +31,7 @@ import CollectSourceCard from "./collect-source-card";
 import SourceFormModal from "./source-form-modal";
 import {
   isActiveCollectStatus,
-  MAX_COLLECT_SOURCES,
+  COLLECT_SOURCE_WARN_COUNT,
   stationProgressPercent,
   type BatchOption,
   type CheckAllResult,
@@ -118,7 +118,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
 }
 
 export default function CollectManagePageView() {
-  const { message } = useAppMessage();
+  const { message, modal } = useAppMessage();
   const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
@@ -208,7 +208,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const canAddSource = siteList.length < MAX_COLLECT_SOURCES;
+  const canAddSource = canWrite;
 
   /**
    * 总进度条覆盖的任务 ID：
@@ -782,16 +782,26 @@ export default function CollectManagePageView() {
     message.error(resp.msg || "删除采集站失败");
   };
 
-  const openAddDialog = () => {
-    if (siteList.length >= MAX_COLLECT_SOURCES) {
-      message.warning(`采集站数量已达上限（${MAX_COLLECT_SOURCES} 个）`);
-      return;
-    }
+  const openAddForm = () => {
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
     setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
+  };
+
+  const openAddDialog = () => {
+    if (siteList.length >= COLLECT_SOURCE_WARN_COUNT) {
+      modal.confirm({
+        title: "采集站数量过多",
+        content: `当前已有 ${siteList.length} 个采集站。采集站越多，排队越长，写库、快照和内存占用都会上升，低配机器更容易打满。确认继续添加？`,
+        okText: "继续添加",
+        cancelText: "取消",
+        onOk: openAddForm,
+      });
+      return;
+    }
+    openAddForm();
   };
 
   const openEditDialog = async (id: string) => {
@@ -975,7 +985,7 @@ export default function CollectManagePageView() {
           <>
             统一管理采集站与采集任务
             <span className={styles.headerMeta}>
-              · {siteList.length}/{MAX_COLLECT_SOURCES}
+              · {siteList.length} 个
             </span>
           </>
         }
@@ -996,7 +1006,7 @@ export default function CollectManagePageView() {
           <div className={styles.toolbar}>
             <Space size={[8, 8]} wrap>
               <span className={styles.toolbarHint}>
-                共 {siteList.length}/{MAX_COLLECT_SOURCES} 个
+                共 {siteList.length} 个
               </span>
               <Button size="small" data-tour="collect-select-all" onClick={selectAllSources}>
                 全选
@@ -1171,7 +1181,9 @@ export default function CollectManagePageView() {
                   <PlusOutlined className={styles.addSourceIcon} />
                   <span className={styles.addSourceLabel}>新增采集站</span>
                   <span className={styles.addSourceHint}>
-                    还可添加 {MAX_COLLECT_SOURCES - siteList.length} 个
+                    {siteList.length >= COLLECT_SOURCE_WARN_COUNT
+                      ? `已超过建议数量（${COLLECT_SOURCE_WARN_COUNT}）`
+                      : "添加新的采集源"}
                   </span>
                 </button>
               ) : null}
@@ -1180,13 +1192,7 @@ export default function CollectManagePageView() {
         ) : (
           <div className={styles.emptyCard}>
             <Empty
-              description={
-                loading
-                  ? "采集站加载中…"
-                  : canAddSource && canWrite
-                    ? "暂无采集站"
-                    : `暂无采集站（上限 ${MAX_COLLECT_SOURCES}）`
-              }
+              description={loading ? "采集站加载中…" : "暂无采集站"}
             >
               {!loading && canAddSource && canWrite ? (
                 <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>

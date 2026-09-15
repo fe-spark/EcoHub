@@ -89,9 +89,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if list == nil {
 			list = []model.FilmSource{}
 		}
-		if len(list) > MaxCollectSources {
-			return fmt.Errorf("备份中采集站数量超过上限（%d）", MaxCollectSources)
-		}
 		// 导入前清理旧站限流器
 		for _, src := range repository.GetCollectSourceList() {
 			spider.ClearLimiter(src.Id)

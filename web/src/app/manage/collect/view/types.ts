@@ -164,8 +164,8 @@ export const collectDuration = [
   { label: "全量采集", time: -1 },
 ];
 
-/** 采集站数量上限（前后端一致） */
-export const MAX_COLLECT_SOURCES = 12;
+/** 超过该数量时弹窗提醒：排队、写库、快照和内存占用都会上升 */
+export const COLLECT_SOURCE_WARN_COUNT = 12;
 
 /**
  * 单站进度百分比。
