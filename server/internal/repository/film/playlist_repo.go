@@ -27,67 +27,40 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (CollectWriteRe
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
-	uncategorizedKeys := make([]string, 0)
-	for _, detail := range list {
-		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
-			continue
-		}
-		if ResolveMovieDetailRootPid(detail) == 0 {
-			uncategorizedKeys = append(uncategorizedKeys, BuildPlaylistMovieKeys(detail)...)
-		}
+	detailMids, primaryKeyByMid, err := matchSlaveDetailMids(list)
+	if err != nil {
+		return CollectWriteResult{}, err
 	}
-	inheritedKeyByLookup := map[string]string{}
-	if len(uncategorizedKeys) > 0 {
-		midsByLookupKey := loadMidCandidatesByMatchKeys(uncategorizedKeys)
-		candidateMids := make([]int64, 0)
-		for _, mids := range midsByLookupKey {
-			candidateMids = append(candidateMids, mids...)
-		}
-		keysByMid := loadMovieMatchKeysByMids(candidateMids)
-		for lookupKey, mids := range midsByLookupKey {
-			if inherited := inheritPrimaryMovieKeyIfUnique(mids, keysByMid); inherited != "" {
-				inheritedKeyByLookup[lookupKey] = inherited
-			}
-		}
-	}
+	inheritedKeyByLookup := loadInheritedKeysForUnmatchedDetails(list, detailMids)
 
-	for _, detail := range list {
-		if len(detail.PlayList) == 0 || strings.Contains(detail.CName, "解说") {
+	for index, detail := range list {
+		if !isPlaylistWritableDetail(detail) {
 			continue
 		}
 
-		primaryKey := BuildPlaylistPrimaryMovieKey(detail)
-		if primaryKey == "" {
-			continue
-		}
-		if ResolveMovieDetailRootPid(detail) == 0 {
-			for _, lookupKey := range BuildPlaylistMovieKeys(detail) {
-				if inherited := inheritedKeyByLookup[lookupKey]; inherited != "" {
-					primaryKey = inherited
-					break
+		writeKeys := playlistWriteKeys(detail, detailMids[index], primaryKeyByMid, inheritedKeyByLookup)
+		for _, movieKey := range writeKeys {
+			keysByMovieKey[movieKey] = struct{}{}
+
+			for groupIndex, links := range detail.PlayList {
+				if len(links) == 0 {
+					continue
 				}
-			}
-		}
-		keysByMovieKey[primaryKey] = struct{}{}
 
-		for index, links := range detail.PlayList {
-			if len(links) == 0 {
-				continue
-			}
+				data, _ := json.Marshal(links)
+				rawName := ""
+				if groupIndex < len(detail.PlayFrom) {
+					rawName = strings.TrimSpace(detail.PlayFrom[groupIndex])
+				}
 
-			data, _ := json.Marshal(links)
-			rawName := ""
-			if index < len(detail.PlayFrom) {
-				rawName = strings.TrimSpace(detail.PlayFrom[index])
+				playlists = append(playlists, model.SlaveMoviePlaylist{
+					SourceId:   sourceID,
+					MovieKey:   movieKey,
+					GroupIndex: groupIndex,
+					GroupName:  rawName,
+					Content:    string(data),
+				})
 			}
-
-			playlists = append(playlists, model.SlaveMoviePlaylist{
-				SourceId:   sourceID,
-				MovieKey:   primaryKey,
-				GroupIndex: index,
-				GroupName:  rawName,
-				Content:    string(data),
-			})
 		}
 	}
 
@@ -111,6 +84,166 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (CollectWriteRe
 	}
 
 	return result, nil
+}
+
+func isPlaylistWritableDetail(detail model.MovieDetail) bool {
+	return len(detail.PlayList) > 0 && !strings.Contains(detail.CName, "解说")
+}
+
+// playlistWriteKeys 一条附属站详情落到哪些 movie_key。唯一命中写该片主键；否则写候选键（有大类则不含纯片名）。
+func playlistWriteKeys(
+	detail model.MovieDetail,
+	mid int64,
+	primaryKeyByMid map[int64]string,
+	inheritedKeyByLookup map[string]string,
+) []string {
+	if mid > 0 && primaryKeyByMid[mid] != "" {
+		return []string{primaryKeyByMid[mid]}
+	}
+	if ResolveMovieDetailRootPid(detail) == 0 {
+		for _, lookupKey := range BuildPlaylistMovieKeys(detail) {
+			if inherited := inheritedKeyByLookup[lookupKey]; inherited != "" {
+				return []string{inherited}
+			}
+		}
+	}
+	return BuildPlaylistCandidateKeys(detail)
+}
+
+func filmIndexRootPid(info model.FilmIndex) int64 {
+	if info.Pid > 0 {
+		if root := support.GetRootId(info.Pid); root > 0 {
+			return root
+		}
+	}
+	if info.Cid > 0 {
+		if root := support.GetRootId(info.Cid); root > 0 {
+			return root
+		}
+	}
+	// 兜底与写入侧 buildMovieMatchKeyMappings 一致：pid/cid 未落到根分类时按分类名解析，
+	// 否则这些影片的「片名#大类」键会被当成非规范键删掉。
+	return support.ResolveRootCategoryIDByCName(info.CName)
+}
+
+func slaveDetailMatchesFilm(detailPid int64, info model.FilmIndex) bool {
+	infoPid := filmIndexRootPid(info)
+	if detailPid > 0 && infoPid > 0 && infoPid != detailPid {
+		return false
+	}
+	return true
+}
+
+// matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid；双方都有大类时必须同类。
+func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, error) {
+	detailMids := make([]int64, len(list))
+	if len(list) == 0 {
+		return detailMids, nil, nil
+	}
+
+	keysPerDetail := make([][]string, len(list))
+	allKeys := make([]string, 0, len(list)*3)
+	for i, detail := range list {
+		if !isPlaylistWritableDetail(detail) {
+			continue
+		}
+		keys := BuildPlaylistMovieKeys(detail)
+		keysPerDetail[i] = keys
+		allKeys = append(allKeys, keys...)
+	}
+	midsByLookupKey := loadMidCandidatesByMatchKeys(allKeys)
+	midSet := make(map[int64]struct{})
+	for _, mids := range midsByLookupKey {
+		for _, mid := range mids {
+			if mid > 0 {
+				midSet[mid] = struct{}{}
+			}
+		}
+	}
+	if len(midSet) == 0 {
+		return detailMids, nil, nil
+	}
+	matchedMids := make([]int64, 0, len(midSet))
+	for mid := range midSet {
+		matchedMids = append(matchedMids, mid)
+	}
+
+	var candidates []model.FilmIndex
+	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
+		return nil, nil, err
+	}
+	infoByMid := make(map[int64]model.FilmIndex, len(candidates))
+	for _, info := range candidates {
+		infoByMid[info.Mid] = info
+	}
+	keysByMid := loadMovieMatchKeysByMids(matchedMids)
+	primaryKeyByMid := make(map[int64]string, len(keysByMid))
+	for mid, keys := range keysByMid {
+		if len(keys) > 0 {
+			primaryKeyByMid[mid] = keys[0]
+		}
+	}
+
+	for i, detail := range list {
+		if !isPlaylistWritableDetail(detail) {
+			continue
+		}
+		detailPid := ResolveMovieDetailRootPid(detail)
+		seen := make(map[int64]struct{})
+		matched := make([]int64, 0, 2)
+		for _, key := range keysPerDetail[i] {
+			for _, mid := range midsByLookupKey[key] {
+				info, ok := infoByMid[mid]
+				if !ok || !slaveDetailMatchesFilm(detailPid, info) {
+					continue
+				}
+				if _, dup := seen[mid]; dup {
+					continue
+				}
+				seen[mid] = struct{}{}
+				matched = append(matched, mid)
+			}
+			if len(matched) > 0 {
+				break
+			}
+		}
+		if len(matched) == 1 && primaryKeyByMid[matched[0]] != "" {
+			detailMids[i] = matched[0]
+		}
+	}
+	return detailMids, primaryKeyByMid, nil
+}
+
+func loadInheritedKeysForUnmatchedDetails(list []model.MovieDetail, detailMids []int64) map[string]string {
+	uncategorizedKeys := make([]string, 0)
+	for i, detail := range list {
+		if i < len(detailMids) && detailMids[i] > 0 {
+			continue
+		}
+		if !isPlaylistWritableDetail(detail) {
+			continue
+		}
+		if ResolveMovieDetailRootPid(detail) != 0 {
+			continue
+		}
+		uncategorizedKeys = append(uncategorizedKeys, BuildPlaylistMovieKeys(detail)...)
+	}
+	if len(uncategorizedKeys) == 0 {
+		return nil
+	}
+	midsByLookupKey := loadMidCandidatesByMatchKeys(uncategorizedKeys)
+	candidateMids := make([]int64, 0)
+	for _, mids := range midsByLookupKey {
+		candidateMids = append(candidateMids, mids...)
+	}
+	keysByMid := loadMovieMatchKeysByMids(candidateMids)
+	inheritedKeyByLookup := make(map[string]string)
+	for lookupKey, mids := range midsByLookupKey {
+		if inherited := inheritPrimaryMovieKeyIfUnique(mids, keysByMid); inherited != "" {
+			inheritedKeyByLookup[lookupKey] = inherited
+		}
+	}
+	return inheritedKeyByLookup
 }
 
 // scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳。

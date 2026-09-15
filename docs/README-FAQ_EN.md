@@ -25,7 +25,18 @@ The master owns film basics, categories, and search. Switching the master, chang
 Two keys, not “always merge by Douban ID”:
 
 - **Master identity** (`film_index.content_key`): `vod_{id}` when the source `vod_id` exists, otherwise a title hash. Different `vod_id`s on the master stay as two rows even if the title or Douban ID matches.
-- **Cross-site match** (`movie_match_key`): how slaves attach to a master film. Douban identity first (including season/segment in the title), then a normalized title. If one key hits several mids, the newer `update_stamp` wins.
+- **Cross-site match** (`movie_match_key` / slave playlist `movie_key`): Douban identity first, then normalized title#category, plus a bare-title fallback. Category stays on `film_index.pid` / `cid` and is **not** baked into `mid`; the category suffix on the match key keeps same-title films in different categories apart (a finished short drama vs a still-updating cartoon that share a title). If one key hits several mids, the newer `update_stamp` wins.
+
+**Why same-title films must stay isolated**: the daily-update list is driven by `update_stamp`, which only bumps when this source’s episode count is strictly higher than the film’s current global max. If two same-title films share a bare title key, the finished short drama’s episode count is counted against the cartoon, so a new cartoon episode never makes the daily list.
+
+**Collection order is not restricted**: when a slave uniquely matches one master film, playlists are written onto that film’s stored primary key; otherwise they use the slave’s own candidate keys (Douban / title#category). Categorized slaves do not write the bare title key.
+
+**Aligning existing data**: for rows written to the wrong key before the upgrade, run the one-off migration script (preview first; not part of startup or collect finalize). Same-title cross-category rows and unmatched rows are skipped — the two “仙逆” films are not merged onto one key:
+
+```bash
+docker exec -it ecohub /app/migrate_slave_playlist_keys --dry-run
+docker exec -it ecohub /app/migrate_slave_playlist_keys
+```
 
 ### What happens if a collect is stopped manually?
 

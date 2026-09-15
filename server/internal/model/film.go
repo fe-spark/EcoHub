@@ -145,8 +145,7 @@ func (MoviePoster) TableName() string {
 	return TableMoviePoster
 }
 
-// MovieMatchKey 主站影片匹配键索引。
-// 主站详情会写入多个匹配键：优先豆瓣ID，同时保留规范化片名，供详情页实时补附属站播放源。
+// MovieMatchKey 主站影片匹配键索引（豆瓣 / 片名#大类 / 纯片名回退）。
 type MovieMatchKey struct {
 	gorm.Model
 	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match;index:idx_match_key"`
