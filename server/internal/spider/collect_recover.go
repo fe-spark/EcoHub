@@ -31,33 +31,45 @@ func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchCont
 	}
 	defer collectLifecycle.endSource(s.Id)
 
-	release, err := waitSourceRequestTurn(context.Background(), s, fmt.Sprintf("单片请求 ids=%s ", ids))
+	written, err := collectFilmIDs(context.Background(), ids, s, batchCtx)
 	if err != nil {
 		return nil, err
 	}
+	return written.Notify, nil
+}
+
+func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (collectWriteMids, error) {
+	if s == nil {
+		return collectWriteMids{}, errors.New("采集站信息不存在")
+	}
+	ids = strings.TrimSpace(ids)
+	if ids == "" {
+		return collectWriteMids{}, nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
-	list, err := spiderCore.GetFilmDetail(r)
+	list, err := getFilmDetailWithRetry(ctx, s, r)
 	if err != nil {
-		release(err)
-		return nil, fmt.Errorf("get movie detail failed: %w", err)
+		return collectWriteMids{}, fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
-		release(errors.New("response list is empty"))
-		return nil, errors.New("get movie detail failed: response list is empty")
+		return collectWriteMids{}, errors.New("get movie detail failed: response list is empty")
 	}
-	release(nil)
 
-	written, err := saveCollectedFilmForCollect(context.Background(), s, 1, list)
+	written, err := saveCollectedFilmForCollect(ctx, s, 1, list)
 	if err != nil {
-		return nil, err
+		return collectWriteMids{}, err
 	}
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
 		batchCtx.addAffectedMIDs(s, 1, written.Affected)
 	}
-	return written.Notify, nil
+	return written, nil
 }
 
 func CollectSingleFilm(ids string) {

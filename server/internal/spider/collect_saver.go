@@ -53,23 +53,23 @@ func isRetryableDBWriteErr(err error) bool {
 	return strings.Contains(message, "deadlock found") || strings.Contains(message, "lock wait timeout")
 }
 
-func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) ([]int64, error) {
+func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	lock := getSourceWriteLock(s.Id)
 	lock.Lock()
 	defer lock.Unlock()
-	var changedMids []int64
+	var result collectWriteMids
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
-		mids, err := filmrepo.SaveSitePlayList(s.Id, list)
+		written, err := filmrepo.SaveSitePlayList(s.Id, list)
 		if err != nil {
 			return err
 		}
-		changedMids = mids
+		result = collectWriteMids{Notify: written.NotifyMIDs, Affected: written.AffectedMIDs}
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("save slave playlists failed: %w", err)
+		return collectWriteMids{}, fmt.Errorf("save slave playlists failed: %w", err)
 	}
-	return changedMids, nil
+	return result, nil
 }
 
 func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) error {
@@ -96,11 +96,7 @@ type collectWriteMids struct {
 
 func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
 	if s.Grade != model.MasterCollect {
-		mids, err := saveSlavePlaylists(ctx, s, page, list)
-		if err != nil {
-			return collectWriteMids{}, err
-		}
-		return collectWriteMids{Notify: mids, Affected: mids}, nil
+		return saveSlavePlaylists(ctx, s, page, list)
 	}
 
 	var result filmrepo.CollectWriteResult

@@ -16,10 +16,12 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// SaveSitePlayList 写入附属站播放列表，返回「播放源实质变更」对应的全局 mid。
-func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error) {
+// SaveSitePlayList 写入附属站播放列表。
+// NotifyMIDs：本源追集且集数超过全库其它源（进最近更新）。
+// AffectedMIDs：任意 playlist 实质写入（含追平主站、仅链接刷新），详情缓存必须失效并展示最新集。
+func SaveSitePlayList(sourceID string, list []model.MovieDetail) (CollectWriteResult, error) {
 	if len(list) == 0 {
-		return nil, nil
+		return CollectWriteResult{}, nil
 	}
 
 	var playlists []model.SlaveMoviePlaylist
@@ -90,35 +92,37 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) ([]int64, error
 	}
 
 	if len(keysByMovieKey) == 0 {
-		return nil, nil
+		return CollectWriteResult{}, nil
 	}
 
 	changes, err := saveGroupedPlaylists(sourceID, playlists, keysByMovieKey)
 	if err != nil {
 		log.Printf("SaveSitePlayList Error: %v", err)
-		return nil, err
+		return CollectWriteResult{}, err
 	}
-	changedMids, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
+	result, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
 	if err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
-		return nil, err
+		return CollectWriteResult{}, err
 	}
 	// 仅在有播放源实质变更时更新 last_collect_time。
 	if len(changes) > 0 {
 		repository.NoteCollectSourceStats(sourceID)
 	}
 
-	return changedMids, nil
+	return result, nil
 }
 
-// scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳，并返回有变更的全局 mid。
-func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) ([]int64, error) {
+// scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳。
+// NotifyMIDs 仅 stamp 资格；AffectedMIDs 含所有 playlist 写入，供详情页展示最新集。
+func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) (CollectWriteResult, error) {
+	var out CollectWriteResult
 	infos, err := loadMatchedSearchInfosByDetails(details)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
 	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
-		return nil, err
+		return out, err
 	}
 	// 附属站海报同步：若当前源开启了 IsPosterSource，将高清海报同步写入主站影片并加入刷新列表
 	posterUpdatedMids, err := SyncSlavePostersIfConfiguredTx(db.Mdb, sourceID, details, infos)
@@ -127,31 +131,36 @@ func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.Movie
 	}
 
 	// 更新列表：本源追集且集数超过全库其它源（后到的同集数源不重进）
-	changedMids, err := touchSlavePlaylistUpdateStamps(sourceID, changes)
+	notifyMids, err := touchSlavePlaylistUpdateStamps(sourceID, changes)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	// 播放源摘要/海报刷新：对本批有 playlist 写入或海报更新的 mid 刷新，刷进 finalizer 增量发布快照
+	out.NotifyMIDs = notifyMids
 	refreshMIDs := slavePlaylistAffectedMIDs(changes)
 	if len(posterUpdatedMids) > 0 {
 		refreshMIDs = append(refreshMIDs, posterUpdatedMids...)
 	}
-	if len(refreshMIDs) > 0 {
-		seen := make(map[int64]struct{}, len(refreshMIDs))
-		refreshInfos := make([]model.FilmIndex, 0, len(refreshMIDs))
-		for _, mid := range refreshMIDs {
-			if mid > 0 {
-				if _, ok := seen[mid]; !ok {
-					seen[mid] = struct{}{}
-					refreshInfos = append(refreshInfos, model.FilmIndex{
-						FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid},
-					})
-				}
-			}
+	seen := make(map[int64]struct{}, len(refreshMIDs))
+	affected := make([]int64, 0, len(refreshMIDs))
+	refreshInfos := make([]model.FilmIndex, 0, len(refreshMIDs))
+	for _, mid := range refreshMIDs {
+		if mid <= 0 {
+			continue
 		}
+		if _, ok := seen[mid]; ok {
+			continue
+		}
+		seen[mid] = struct{}{}
+		affected = append(affected, mid)
+		refreshInfos = append(refreshInfos, model.FilmIndex{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: mid},
+		})
+	}
+	if len(refreshInfos) > 0 {
 		SchedulePlaySummaryRefresh(refreshInfos...)
 	}
-	return changedMids, nil
+	out.AffectedMIDs = affected
+	return out, nil
 }
 
 // slavePlaylistAffectedMIDs 任意 playlist 写入（含仅链接刷新）涉及的 mid，每个 movie_key 只取一个最优 mid。
@@ -885,34 +894,7 @@ func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []
 		playlistByKey[playlist.MovieKey] = append(playlistByKey[playlist.MovieKey], playlist)
 	}
 
-	for _, key := range orderedKeys {
-		matched, ok := playlistByKey[key]
-		if !ok {
-			continue
-		}
-
-		groups := make([]model.PlayLinkVo, 0, len(matched))
-		for _, playlist := range matched {
-			var links []model.MovieUrlInfo
-			if err := json.Unmarshal([]byte(playlist.Content), &links); err != nil || len(links) == 0 {
-				continue
-			}
-
-			displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
-			groupID := BuildPlayGroupID(siteID, playlist.GroupName, playlist.GroupIndex, len(matched))
-			groups = append(groups, model.PlayLinkVo{
-				Id:       groupID,
-				SourceId: siteID,
-				Name:     displayName,
-				LinkList: links,
-			})
-		}
-		if len(groups) > 0 {
-			return groups
-		}
-	}
-
-	return nil
+	return selectBestPlayGroups(siteID, siteName, orderedKeys, playlistByKey)
 }
 
 func loadPlaylistGroupsByInfos(infos []model.FilmIndex) (map[int64]map[string][]model.PlayLinkVo, error) {
@@ -1005,33 +987,51 @@ func buildPlayGroupsFromLoadedPlaylists(
 	if len(byKey) == 0 {
 		return nil
 	}
+	return selectBestPlayGroups(siteID, siteName, keys, byKey)
+}
+
+func selectBestPlayGroups(siteID, siteName string, keys []string, byKey map[string][]model.SlaveMoviePlaylist) []model.PlayLinkVo {
+	var best []model.PlayLinkVo
+	bestCount := -1
 	for _, key := range UniqueKeys(keys) {
-		matched := byKey[key]
-		if len(matched) == 0 {
+		groups := playGroupsFromPlaylistRows(siteID, siteName, byKey[key])
+		if len(groups) == 0 {
 			continue
 		}
-
-		groups := make([]model.PlayLinkVo, 0, len(matched))
-		for _, playlist := range matched {
-			var links []model.MovieUrlInfo
-			if err := json.Unmarshal([]byte(playlist.Content), &links); err != nil || len(links) == 0 {
-				continue
+		count := 0
+		for _, group := range groups {
+			if n := episodeCount(group.LinkList); n > count {
+				count = n
 			}
-
-			displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
-			groupID := BuildPlayGroupID(siteID, playlist.GroupName, playlist.GroupIndex, len(matched))
-			groups = append(groups, model.PlayLinkVo{
-				Id:       groupID,
-				SourceId: siteID,
-				Name:     displayName,
-				LinkList: links,
-			})
 		}
-		if len(groups) > 0 {
-			return groups
+		if count > bestCount {
+			best = groups
+			bestCount = count
 		}
 	}
-	return nil
+	return best
+}
+
+func playGroupsFromPlaylistRows(siteID, siteName string, matched []model.SlaveMoviePlaylist) []model.PlayLinkVo {
+	if len(matched) == 0 {
+		return nil
+	}
+	groups := make([]model.PlayLinkVo, 0, len(matched))
+	for _, playlist := range matched {
+		var links []model.MovieUrlInfo
+		if err := json.Unmarshal([]byte(playlist.Content), &links); err != nil || len(links) == 0 {
+			continue
+		}
+		displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
+		groupID := BuildPlayGroupID(siteID, playlist.GroupName, playlist.GroupIndex, len(matched))
+		groups = append(groups, model.PlayLinkVo{
+			Id:       groupID,
+			SourceId: siteID,
+			Name:     displayName,
+			LinkList: links,
+		})
+	}
+	return groups
 }
 
 // LoadSourceMidByGlobalMid 通过全局影片 ID 获取指定站点的原始影片 ID。
