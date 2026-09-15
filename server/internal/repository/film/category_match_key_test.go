@@ -423,3 +423,75 @@ func TestUnmappedSlavePlaylist_DoesNotInheritWhenTitleCollides(t *testing.T) {
 		t.Fatalf("colliding titles must keep plain-title key, expected %s got %s", legacy, rows[0].MovieKey)
 	}
 }
+
+func TestCategorizedSlavePlaylist_ReplacesLeftoverPrimaryKey(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+	})
+
+	keys := BuildMovieMatchKeysWithCategory(8888, "独行月球", 20)
+	if len(keys) < 2 {
+		t.Fatalf("expected dbid + category keys, got %v", keys)
+	}
+	primary, catKey, titleKey := keys[0], keys[1], keys[len(keys)-1]
+	if err := gdb.Create(&model.MovieMatchKey{Mid: 801, MatchKey: primary}).Error; err != nil {
+		t.Fatalf("create primary key: %v", err)
+	}
+	if err := gdb.Create(&model.MovieMatchKey{Mid: 801, MatchKey: catKey}).Error; err != nil {
+		t.Fatalf("create cat key: %v", err)
+	}
+	if err := gdb.Create(&model.MovieMatchKey{Mid: 801, MatchKey: titleKey}).Error; err != nil {
+		t.Fatalf("create title key: %v", err)
+	}
+
+	// 旧数据占在主键上（豆瓣键），模拟 PR#29 之后分类键写入无法被播放读到的现场。
+	stale := `[{"Episode":"第1集","Link":"https://slave.com/old.m3u8"}]`
+	if err := gdb.Create(&model.SlaveMoviePlaylist{
+		SourceId: "slave_generic",
+		MovieKey: primary,
+		Content:  stale,
+	}).Error; err != nil {
+		t.Fatalf("create leftover playlist: %v", err)
+	}
+
+	detail := model.MovieDetail{
+		Name: "独行月球",
+		MovieDescriptor: model.MovieDescriptor{
+			CName: "动漫",
+		},
+		PlayList: [][]model.MovieUrlInfo{
+			{
+				{Episode: "第1集", Link: "https://slave.com/1.m3u8"},
+				{Episode: "第2集", Link: "https://slave.com/2.m3u8"},
+			},
+		},
+	}
+	if _, err := SaveSitePlayList("slave_generic", []model.MovieDetail{detail}); err != nil {
+		t.Fatalf("SaveSitePlayList: %v", err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "slave_generic").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected leftover sibling keys purged, got %d rows", len(rows))
+	}
+	if rows[0].MovieKey != primary {
+		t.Fatalf("categorized unique title should write main primary %s, got %s", primary, rows[0].MovieKey)
+	}
+	if !strings.Contains(rows[0].Content, "第2集") {
+		t.Fatalf("expected episode 2 on primary key, got %s", rows[0].Content)
+	}
+
+	sources := []model.FilmSource{{Id: "slave_generic", Name: "通用专线"}}
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(sources, keys)
+	got := groups["slave_generic"]
+	if len(got) == 0 {
+		t.Fatalf("playback should hit inherited primary")
+	}
+	if len(got[0].LinkList) != 2 {
+		t.Fatalf("playback should see 2 episodes, got %d", len(got[0].LinkList))
+	}
+}
