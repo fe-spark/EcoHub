@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"strings"
@@ -194,6 +195,20 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 			if list[i].Id == "" && list[i].Uri != "" {
 				list[i].Id = utils.GenerateHashKey(list[i].Uri)
 			}
+			// WebDAV 导入安全防护：禁止将 WebDAV 设为主采集站（强制降级为附属站）
+			if list[i].SourceType == model.SourceTypeWebDAV && list[i].Grade == model.MasterCollect {
+				log.Printf("[Backup] 导入采集站 %s 包含非法 WebDAV 主站配置，强制自动降级为附属采集站", list[i].Name)
+				list[i].Grade = model.SlaveCollect
+			}
+			// 若 WebDAV 配置内未设置密码（脱敏备份），默认置为禁用状态提示补填
+			if list[i].SourceType == model.SourceTypeWebDAV && list[i].WebdavConfig != "" {
+				var wCfg model.WebdavConfig
+				if err := json.Unmarshal([]byte(list[i].WebdavConfig), &wCfg); err == nil {
+					if wCfg.Password == "" {
+						list[i].State = false
+					}
+				}
+			}
 			normalizeCollectSourceDefaults(&list[i])
 		}
 		return tx.Create(&list).Error
@@ -348,11 +363,21 @@ func DelCollectResource(id string) error {
 		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
-		// 5. 删除采集站本身
+		// 5. 级联删除 WebDAV 媒体组、扫描项与扫描报告
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.WebdavMediaGroup{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.WebdavScanItem{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.WebdavScanReport{}).Error; err != nil {
+			return err
+		}
+		// 6. 删除采集站本身
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
-		// 6. 若删除的站点是当前海报源，自动兜底将主站恢复为海报源
+		// 7. 若删除的站点是当前海报源，自动兜底将主站恢复为海报源
 		return EnsureDefaultPosterSourceTx(tx)
 	})
 }

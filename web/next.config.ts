@@ -19,7 +19,12 @@ const nextConfig: NextConfig = {
   },
   async rewrites() {
     // 浏览器 /api/* → 后端 /api/*（API_URL 带不带 /api 都正确）
+    // 阻断 /api/media/stream 经 Next.js 反代，杜绝大文件视频流打进 Node.js 内存导致崩盘
     return [
+      {
+        source: "/api/media/stream",
+        destination: "/api/media/stream-blocked",
+      },
       {
         source: "/api/:path*",
         destination: `${apiBase}/api/:path*`,

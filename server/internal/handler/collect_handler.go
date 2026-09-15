@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/spider"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -20,7 +22,7 @@ type CollectHandler struct{}
 var CollectHd = new(CollectHandler)
 
 func (h *CollectHandler) FilmSourceList(c *gin.Context) {
-	dto.Success(service.CollectSvc.GetFilmSourceList(), "影视源站点信息获取成功", c)
+	dto.Success(service.CollectSvc.GetFilmSourceListPublic(), "影视源站点信息获取成功", c)
 }
 
 func (h *CollectHandler) FindFilmSource(c *gin.Context) {
@@ -29,7 +31,7 @@ func (h *CollectHandler) FindFilmSource(c *gin.Context) {
 		dto.Failed("参数异常, 资源站标识不能为空", c)
 		return
 	}
-	fs := service.CollectSvc.GetFilmSource(id)
+	fs := service.CollectSvc.GetFilmSourcePublic(id)
 	if fs == nil {
 		dto.Failed("数据异常,资源站信息不存在", c)
 		return
@@ -38,19 +40,72 @@ func (h *CollectHandler) FindFilmSource(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
-		dto.Failed("请求参数异常", c)
+	req := model.FilmSourceUpsertRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常: "+err.Error(), c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
+	if req.SourceType == "" {
+		req.SourceType = model.SourceTypeMacCMS
+	}
+	if err := validFilmSourceUpsert(req); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := spider.CollectApiTest(s); err != nil {
-		dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
-		return
+
+	s := model.FilmSource{
+		Id:                 req.Id,
+		Name:               strings.TrimSpace(req.Name),
+		Uri:                strings.TrimSpace(req.Uri),
+		Grade:              req.Grade,
+		State:              req.State,
+		IsPosterSource:     req.IsPosterSource,
+		Interval:           req.Interval,
+		Cd:                 req.Cd,
+		DomainReplaceRules: req.DomainReplaceRules,
+		SourceType:         req.SourceType,
 	}
+
+	if req.SourceType == model.SourceTypeWebDAV {
+		if req.Grade == model.MasterCollect {
+			dto.Failed("暂不支持将 WebDAV 设为主站", c)
+			return
+		}
+		synthUri, err := service.NormalizeWebDAVUri(req.Webdav.ServerURL, req.Webdav.RootPath)
+		if err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		s.Uri = synthUri
+		wCfg := model.WebdavConfig{
+			ServerURL:       strings.TrimSpace(req.Webdav.ServerURL),
+			Username:        strings.TrimSpace(req.Webdav.Username),
+			Password:        req.Webdav.Password,
+			RootPath:        strings.TrimSpace(req.Webdav.RootPath),
+			MediaType:       strings.ToLower(strings.TrimSpace(req.Webdav.MediaType)),
+			TmdbApiKey:      strings.TrimSpace(req.Webdav.TmdbApiKey),
+			TmdbBaseURL:     strings.TrimSpace(req.Webdav.TmdbBaseURL),
+			ScanIntervalMin: req.Webdav.ScanIntervalMin,
+			MinFileBytes:    req.Webdav.MinFileBytes,
+			PlayFromName:    strings.TrimSpace(req.Webdav.PlayFromName),
+		}
+		if err := service.TestWebDAVConnection(wCfg); err != nil {
+			dto.Failed(fmt.Sprint("WebDAV 连通测试失败: ", err.Error()), c)
+			return
+		}
+		rawCfg, err := json.Marshal(wCfg)
+		if err != nil {
+			dto.Failed("WebDAV 配置序列化失败", c)
+			return
+		}
+		s.WebdavConfig = string(rawCfg)
+	} else {
+		if err := spider.CollectApiTest(s); err != nil {
+			dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
+			return
+		}
+	}
+
 	if err := service.CollectSvc.SaveFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
@@ -59,34 +114,102 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
-		dto.Failed("请求参数异常", c)
+	req := model.FilmSourceUpsertRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常: "+err.Error(), c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	if s.Id == "" {
+	if req.Id == "" {
 		dto.Failed("参数异常, 资源站标识不能为空", c)
 		return
 	}
-	fs := service.CollectSvc.GetFilmSource(s.Id)
+	fs := service.CollectSvc.GetFilmSource(req.Id)
 	if fs == nil {
 		dto.Failed("数据异常,资源站信息不存在", c)
 		return
 	}
-	if spider.IsTaskRunning(s.Id) {
+	if req.SourceType == "" {
+		req.SourceType = fs.SourceType
+	}
+	if req.SourceType != fs.SourceType {
+		dto.Failed("禁止修改采集源类型", c)
+		return
+	}
+	if err := validFilmSourceUpsert(req); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	if spider.IsTaskRunning(req.Id) {
 		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
 		return
 	}
-	if fs.Uri != s.Uri {
-		if err := spider.CollectApiTest(s); err != nil {
-			dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
+
+	s := *fs
+	s.Name = strings.TrimSpace(req.Name)
+	s.Grade = req.Grade
+	s.State = req.State
+	s.IsPosterSource = req.IsPosterSource
+	s.Interval = req.Interval
+	s.Cd = req.Cd
+	s.DomainReplaceRules = req.DomainReplaceRules
+
+	if s.SourceType == model.SourceTypeWebDAV {
+		if req.Grade == model.MasterCollect {
+			dto.Failed("暂不支持将 WebDAV 设为主站", c)
 			return
 		}
+		var oldCfg model.WebdavConfig
+		if fs.WebdavConfig != "" {
+			_ = json.Unmarshal([]byte(fs.WebdavConfig), &oldCfg)
+		}
+		newPassword := req.Webdav.Password
+		if newPassword == "" {
+			newPassword = oldCfg.Password
+		}
+		newApiKey := strings.TrimSpace(req.Webdav.TmdbApiKey)
+		if newApiKey == "" && req.Webdav.TmdbApiKey == "" {
+			newApiKey = oldCfg.TmdbApiKey
+		}
+		wCfg := model.WebdavConfig{
+			ServerURL:       strings.TrimSpace(req.Webdav.ServerURL),
+			Username:        strings.TrimSpace(req.Webdav.Username),
+			Password:        newPassword,
+			RootPath:        strings.TrimSpace(req.Webdav.RootPath),
+			MediaType:       strings.ToLower(strings.TrimSpace(req.Webdav.MediaType)),
+			TmdbApiKey:      newApiKey,
+			TmdbBaseURL:     strings.TrimSpace(req.Webdav.TmdbBaseURL),
+			ScanIntervalMin: req.Webdav.ScanIntervalMin,
+			MinFileBytes:    req.Webdav.MinFileBytes,
+			PlayFromName:    strings.TrimSpace(req.Webdav.PlayFromName),
+		}
+		synthUri, err := service.NormalizeWebDAVUri(wCfg.ServerURL, wCfg.RootPath)
+		if err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		s.Uri = synthUri
+		if fs.Uri != s.Uri || oldCfg.Password != wCfg.Password || oldCfg.Username != wCfg.Username {
+			if err := service.TestWebDAVConnection(wCfg); err != nil {
+				dto.Failed(fmt.Sprint("WebDAV 连通测试失败: ", err.Error()), c)
+				return
+			}
+		}
+		rawCfg, err := json.Marshal(wCfg)
+		if err != nil {
+			dto.Failed("WebDAV 配置序列化失败", c)
+			return
+		}
+		s.WebdavConfig = string(rawCfg)
+	} else {
+		s.Uri = strings.TrimSpace(req.Uri)
+		if fs.Uri != s.Uri {
+			if err := spider.CollectApiTest(s); err != nil {
+				dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
+				return
+			}
+		}
 	}
+
 	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
@@ -218,12 +341,26 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				mu.Unlock()
 				return
 			}
-			if err := spider.CollectApiTest(src.FilmSource); err != nil {
-				item.Reason = err.Error()
-				mu.Lock()
-				failed = append(failed, item)
-				mu.Unlock()
-				return
+			if src.SourceType == model.SourceTypeWebDAV {
+				var wCfg model.WebdavConfig
+				if src.WebdavConfig != "" {
+					_ = json.Unmarshal([]byte(src.WebdavConfig), &wCfg)
+				}
+				if err := service.TestWebDAVConnection(wCfg); err != nil {
+					item.Reason = err.Error()
+					mu.Lock()
+					failed = append(failed, item)
+					mu.Unlock()
+					return
+				}
+			} else {
+				if err := spider.CollectApiTest(src.FilmSource); err != nil {
+					item.Reason = err.Error()
+					mu.Lock()
+					failed = append(failed, item)
+					mu.Unlock()
+					return
+				}
 			}
 			mu.Lock()
 			okCount++
@@ -294,13 +431,86 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
-		dto.Failed("请求参数异常", c)
+	req := model.FilmSourceTestRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常: "+err.Error(), c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
-		dto.Failed(err.Error(), c)
+
+	// 1. 若传了 id，读取现有库内站点进行测试
+	if req.Id != "" {
+		fs := service.CollectSvc.GetFilmSource(req.Id)
+		if fs == nil {
+			dto.Failed("资源站不存在", c)
+			return
+		}
+		if fs.SourceType == model.SourceTypeWebDAV {
+			var wCfg model.WebdavConfig
+			if fs.WebdavConfig != "" {
+				_ = json.Unmarshal([]byte(fs.WebdavConfig), &wCfg)
+			}
+			// 若请求体携带了草稿参数，合并后测试
+			if req.Webdav != nil {
+				if req.Webdav.ServerURL != "" {
+					wCfg.ServerURL = req.Webdav.ServerURL
+				}
+				if req.Webdav.Username != "" {
+					wCfg.Username = req.Webdav.Username
+				}
+				if req.Webdav.Password != "" {
+					wCfg.Password = req.Webdav.Password
+				}
+				if req.Webdav.RootPath != "" {
+					wCfg.RootPath = req.Webdav.RootPath
+				}
+			}
+			if err := service.TestWebDAVConnection(wCfg); err != nil {
+				dto.Failed(err.Error(), c)
+				return
+			}
+			dto.SuccessOnlyMsg("WebDAV 连通测试成功!", c)
+			return
+		}
+		// MacCMS 已存源
+		if err := spider.CollectApiTest(*fs); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("测试成功!!!", c)
+		return
+	}
+
+	// 2. 草稿测试（新增表单中的测试接口按钮）
+	if req.SourceType == model.SourceTypeWebDAV {
+		if req.Webdav == nil {
+			dto.Failed("WebDAV 配置不能为空", c)
+			return
+		}
+		if !utils.ValidURL(req.Webdav.ServerURL) {
+			dto.Failed("WebDAV 地址格式异常，请输入规范的 URL", c)
+			return
+		}
+		wCfg := model.WebdavConfig{
+			ServerURL: strings.TrimSpace(req.Webdav.ServerURL),
+			Username:  strings.TrimSpace(req.Webdav.Username),
+			Password:  req.Webdav.Password,
+			RootPath:  strings.TrimSpace(req.Webdav.RootPath),
+		}
+		if err := service.TestWebDAVConnection(wCfg); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("WebDAV 连通测试成功!", c)
+		return
+	}
+
+	// MacCMS 草稿测试
+	s := model.FilmSource{
+		Name: req.Name,
+		Uri:  req.Uri,
+	}
+	if !utils.ValidURL(s.Uri) {
+		dto.Failed("资源链接格式异常, 请输入规范的URL链接", c)
 		return
 	}
 	if err := spider.CollectApiTest(s); err != nil {

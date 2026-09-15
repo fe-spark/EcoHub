@@ -65,6 +65,28 @@ func DelFilmSearch(id int64) error {
 		if err := tx.Where("mid = ?", id).Delete(&model.Banner{}).Error; err != nil {
 			return err
 		}
+		// 级联处理 WebDAV 媒体分组与扫描条目，防止幽灵 mid
+		var webdavGroups []model.WebdavMediaGroup
+		if err := tx.Where("global_mid = ?", id).Find(&webdavGroups).Error; err != nil {
+			return err
+		}
+		if len(webdavGroups) > 0 {
+			var groupKeys []string
+			for _, g := range webdavGroups {
+				groupKeys = append(groupKeys, g.GroupKey)
+			}
+			if err := tx.Model(&model.WebdavScanItem{}).
+				Where("group_key IN ?", groupKeys).
+				Updates(map[string]any{
+					"status":     "unmatched",
+					"last_error": "关联的主站影片已删除",
+				}).Error; err != nil {
+				return err
+			}
+			if err := tx.Unscoped().Where("global_mid = ?", id).Delete(&model.WebdavMediaGroup{}).Error; err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 

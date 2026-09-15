@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"net"
+	"net/url"
 	"strings"
 	"time"
 
@@ -79,9 +80,24 @@ func normalizeIP(raw string, parsed net.IP) string {
 func sanitizeAccessLogURI(uri string) string {
 	uri = strings.ReplaceAll(uri, "\n", "")
 	uri = strings.ReplaceAll(uri, "\r", "")
+	if strings.Contains(uri, "/api/media/stream") {
+		uri = sanitizeMediaStreamURI(uri)
+	}
 	runes := []rune(uri)
 	if len(runes) > 512 {
 		return string(runes[:512]) + "..."
 	}
 	return uri
+}
+
+func sanitizeMediaStreamURI(rawURI string) string {
+	u, err := url.Parse(rawURI)
+	if err != nil {
+		return rawURI
+	}
+	q := u.Query()
+	q.Del("sign")
+	q.Del("p")
+	u.RawQuery = q.Encode()
+	return u.String()
 }

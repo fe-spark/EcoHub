@@ -13,6 +13,7 @@
 | [常见问题](./README-FAQ.md) | 空站、采集、缓存、登录 |
 | [FAQ](./README-FAQ_EN.md) | FAQ (English) |
 | [版本说明](./RELEASE.md) | 变更记录、镜像 tag、升级注意 |
+| [WebDAV + TMDB 媒体库接入](./WEBDAV_TMDB_DESIGN.md) | 私人媒体库与自动刮削闭环设计方案 |
 | [服务端说明](../server/README.md) | 环境变量、接口、鉴权 |
 | [Telegram 通知](../server/notify.md) | 通知行为 |
 | [前端说明](../web/README.md) | 页面结构与本地启动 |

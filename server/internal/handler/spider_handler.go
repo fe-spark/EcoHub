@@ -10,6 +10,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -48,8 +49,17 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 		return
 	}
 	if cp.Time == 0 {
-		dto.Failed("采集开启失败,采集时长不能为0", c)
-		return
+		isWebdav := false
+		if !cp.Batch && cp.Id != "" {
+			if src := repository.FindCollectSourceById(cp.Id); src != nil && src.SourceType == model.SourceTypeWebdav {
+				isWebdav = true
+				cp.Time = 24
+			}
+		}
+		if !isWebdav {
+			dto.Failed("采集开启失败,采集时长不能为0", c)
+			return
+		}
 	}
 
 	if cp.Batch {

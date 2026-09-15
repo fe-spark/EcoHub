@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -22,6 +24,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	"server/internal/service"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -657,5 +660,91 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 
 	for err := range errCh {
 		t.Fatal(err)
+	}
+}
+
+func TestProvideVodDetail_WebDAVSignAndTVBoxUrl(t *testing.T) {
+	_, mr := setupProvideTestDB(t)
+	const version = "v_webdav_provide_test"
+
+	os.Setenv("MEDIA_STREAM_PUBLIC_BASE", "http://192.168.1.100:18080")
+	defer os.Unsetenv("MEDIA_STREAM_PUBLIC_BASE")
+
+	snap := model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             999,
+		Name:            "星际穿越",
+		Pid:             1,
+		Cid:             10,
+	}
+	_ = db.Mdb.Create(&snap).Error
+	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmrepo.LoadActiveFilmReadModel(version)
+	filmrepo.WaitActiveFilmSearchIndexBuilt()
+
+	relPath := "Interstellar (2014)/movie.mkv"
+	encodedRel := base64.RawURLEncoding.EncodeToString([]byte(relPath))
+	wdvLink := service.WdvSchemePrefix + "77/" + encodedRel
+	m3u8Link := "https://maccms.example.com/live.m3u8"
+
+	detailVo := model.MovieDetailVo{
+		MovieDetail: model.MovieDetail{
+			Id:   999,
+			Name: "星际穿越",
+		},
+		List: []model.PlayLinkVo{
+			{
+				Id:       "webdav_source",
+				SourceId: "77",
+				Name:     "WebDAV 4K 原盘",
+				LinkList: []model.MovieUrlInfo{
+					{Episode: "正片", Link: wdvLink},
+				},
+			},
+			{
+				Id:       "maccms_source",
+				SourceId: "1",
+				Name:     "官方切片",
+				LinkList: []model.MovieUrlInfo{
+					{Episode: "正片", Link: m3u8Link},
+				},
+			},
+		},
+	}
+	cachedJSON, _ := json.Marshal(detailVo)
+	mr.Set(config.FilmPlayInfoKey+":999", string(cachedJSON))
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=detail&ids=999", nil)
+	ProvideHd.HandleProvide(c)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Code int                `json:"code"`
+		List []model.FilmDetail `json:"list"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal failed: %v", err)
+	}
+	if len(resp.List) == 0 {
+		t.Fatalf("expected 1 item, got 0")
+	}
+
+	playUrl := resp.List[0].VodPlayURL
+	// 验证绝对不能出现 wdv://
+	if strings.Contains(playUrl, "wdv://") {
+		t.Fatalf("vod_play_url must NOT contain wdv://, got: %s", playUrl)
+	}
+	// 验证包含绝对网关地址
+	if !strings.Contains(playUrl, "http://192.168.1.100:18080/api/media/stream?ext=mkv") {
+		t.Errorf("vod_play_url missing expected signed gateway base, got: %s", playUrl)
+	}
+	// 验证公网 m3u8 保留
+	if !strings.Contains(playUrl, m3u8Link) {
+		t.Errorf("vod_play_url should retain m3u8 link, got: %s", playUrl)
 	}
 }

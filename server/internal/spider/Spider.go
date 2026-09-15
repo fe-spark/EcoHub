@@ -319,6 +319,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 						progress.Status = progressStatusFailed
 						return
 					}
+					if isStandalone && isActiveCollectStatus(progress.Status) {
+						progress.Status = progressStatusDone
+					}
 				})
 				if retErr != nil {
 					noteSourceError(id, retErr.Error())
@@ -330,6 +333,24 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
 	ensureCollectProgress(id, s.Name)
+
+	if s.SourceType == model.SourceTypeWebdav {
+		updateCollectProgress(id, func(progress *model.CollectProgress) {
+			progress.Kind = "webdav"
+			progress.Status = progressStatusRunning
+			progress.Phase = "scanning"
+		})
+		mids, err := RunWebDAVScan(collectCtx, s)
+		if len(mids) > 0 {
+			hadWrites = true
+			if batchCtx != nil {
+				batchCtx.addAffectedMIDs(s, 24, mids)
+			}
+		}
+		_ = repository.TouchCollectSourceStatsTx(db.Mdb, s.Id, time.Now())
+		retErr = err
+		return err
+	}
 
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	if h == 0 {
@@ -361,7 +382,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			progress.Success = 0
 			progress.Failed = 0
 			if isStandalone {
-				progress.Status = progressStatusPageDone
+				progress.Status = progressStatusDone
 			} else {
 				progress.Status = progressStatusWaitingPublish
 			}

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/json"
+	"errors"
 	"time"
 
 	"server/internal/model/dto"
@@ -53,6 +55,14 @@ const (
 	SlaveCollect
 )
 
+type SourceType string
+
+const (
+	SourceTypeMacCMS SourceType = "maccms"
+	SourceTypeWebDAV SourceType = "webdav"
+	SourceTypeWebdav SourceType = "webdav"
+)
+
 // FilmSource 影视站点信息保存结构体
 type FilmSource struct {
 	Id           string      `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
@@ -66,6 +76,33 @@ type FilmSource struct {
 	Interval       int         `json:"interval"`                        // 采集时间间隔 单位/ms
 	Cd           int         `json:"cd"`                              // 采集时长 单位/小时
 	DomainReplaceRules string `json:"domainReplaceRules" gorm:"type:text"` // 播放链接域名替换规则 (每行一条: old.com => new.com)
+	SourceType   SourceType  `json:"sourceType" gorm:"size:32;default:maccms"` // 采集源类型：maccms (默认) | webdav
+	WebdavConfig string      `json:"webdavConfig" gorm:"type:text"`           // WebDAV 原始 JSON 配置（用于系统备份与还原）
+}
+
+func (f FilmSource) GetWebdavConfig() (WebdavConfig, error) {
+	if f.WebdavConfig == "" {
+		return WebdavConfig{}, errors.New("webdavConfig 为空")
+	}
+	var cfg WebdavConfig
+	if err := json.Unmarshal([]byte(f.WebdavConfig), &cfg); err != nil {
+		return WebdavConfig{}, err
+	}
+	return cfg, nil
+}
+
+// WebdavConfig WebDAV 采集源专有配置
+type WebdavConfig struct {
+	ServerURL       string `json:"serverUrl"`
+	Username        string `json:"username"`
+	Password        string `json:"password"`
+	RootPath        string `json:"rootPath"`
+	MediaType       string `json:"mediaType"` // 媒体类型：仅 "movie" | "tv"
+	TmdbApiKey      string `json:"tmdbApiKey"`
+	TmdbBaseURL     string `json:"tmdbBaseUrl"`
+	ScanIntervalMin int    `json:"scanIntervalMin"`
+	MinFileBytes    int64  `json:"minFileBytes"`
+	PlayFromName    string `json:"playFromName"`
 }
 
 func (f *FilmSource) TableName() string {
@@ -161,6 +198,16 @@ type CollectProgress struct {
 	Success int    `json:"success"`
 	Failed  int    `json:"failed"`
 	Status  string `json:"status"`
+
+	// WebDAV 扩展进度字段
+	Kind      string `json:"kind,omitempty"`      // "maccms" | "webdav"
+	Phase     string `json:"phase,omitempty"`     // "listing" | "parsing" | "matching" | "saving" | "done"
+	Found     int    `json:"found,omitempty"`     // 发现文件数
+	Parsed    int    `json:"parsed,omitempty"`    // 解析成功数
+	TmdbHit   int    `json:"tmdbHit,omitempty"`   // TMDB命中数
+	Unmatched int    `json:"unmatched,omitempty"` // 未匹配主站数
+	Skipped   int    `json:"skipped,omitempty"`   // 未变更跳过数
+	Error     string `json:"error,omitempty"`     // 失败原因，扫描失败时给前端展示
 }
 
 type FilmSourceListItem struct {

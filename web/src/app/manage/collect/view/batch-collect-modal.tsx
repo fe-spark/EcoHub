@@ -30,24 +30,38 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedRunningNames = useMemo(
-    () => options.filter((item) => selectedSet.has(item.id) && activeCollectIds.includes(item.id)).map((item) => item.name),
+    () =>
+      options
+        .filter((item) => selectedSet.has(item.id) && activeCollectIds.includes(item.id))
+        .map((item) => item.name),
     [activeCollectIds, options, selectedSet],
+  );
+
+  const hasSelectedWebdav = useMemo(
+    () => options.some((item) => selectedSet.has(item.id) && item.sourceType === "webdav"),
+    [options, selectedSet],
   );
 
   const columns: ColumnsType<BatchOption> = [
     {
-      title: "采集站",
+      title: "采集站 / 媒体库",
       dataIndex: "name",
       render: (value: string, record) => (
         <Flex vertical gap={4}>
           <Space size={[8, 4]} wrap>
             <Typography.Text strong>{value}</Typography.Text>
-            <Tag color={record.grade === 0 ? "gold" : "default"} variant="filled">
-              {record.grade === 0 ? "主采集站" : "附属采集站"}
-            </Tag>
+            {record.sourceType === "webdav" ? (
+              <Tag color="blue" variant="filled">
+                WebDAV
+              </Tag>
+            ) : (
+              <Tag color={record.grade === 0 ? "gold" : "default"} variant="filled">
+                {record.grade === 0 ? "主采集站" : "附属采集站"}
+              </Tag>
+            )}
             {activeCollectIds.includes(record.id) ? (
               <Tag icon={<LoadingOutlined />} color="processing" variant="filled">
-                采集中
+                {record.sourceType === "webdav" ? "扫描中" : "采集中"}
               </Tag>
             ) : null}
           </Space>
@@ -59,11 +73,11 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
 
   return (
     <Modal
-      title="批量采集"
+      title="批量采集与扫描"
       open={open}
       onCancel={onCancel}
       onOk={onSubmit}
-      okText="开始采集"
+      okText="开始执行"
       okButtonProps={{ "data-tour": "collect-batch-submit" }}
       width={960}
       destroyOnHidden
@@ -73,13 +87,22 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
           <Alert
             showIcon
             type="warning"
-            title="已选择的部分采集站正在运行"
-            description={`${selectedRunningNames.join("、")} 正在采集中，重复启动会被后端自动跳过。`}
+            title="已选择的部分站点正在运行"
+            description={`${selectedRunningNames.join("、")} 正在运行中，重复启动会被后端自动跳过。`}
+          />
+        ) : null}
+
+        {hasSelectedWebdav ? (
+          <Alert
+            showIcon
+            type="info"
+            title="增量扫描说明"
+            description="选中的 WebDAV 媒体库将执行增量扫描，不受下方采集时长限制。"
           />
         ) : null}
 
         <Space size={[8, 8]} wrap>
-          <Tag variant="filled">将采集 {selectedIds.length} 个采集站</Tag>
+          <Tag variant="filled">将处理 {selectedIds.length} 个站点/媒体库</Tag>
           <Tag variant="filled">运行中 {activeCollectIds.length}</Tag>
         </Space>
 
@@ -93,7 +116,10 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
         />
 
         <Form layout="vertical">
-          <Form.Item label="采集时长" style={{ marginBottom: 0 }}>
+          <Form.Item
+            label="采集时长（仅适用于 MacCMS 采集站）"
+            style={{ marginBottom: 0 }}
+          >
             <Select
               value={batchTime}
               onChange={onBatchTimeChange}

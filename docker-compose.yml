@@ -89,6 +89,12 @@ services:
       ALL_PROXY: ${ALL_PROXY:-}
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
+      # 流媒体公网可达基地址（宿主机可达 IP 或域名，例如 http://192.168.1.10:18080）
+      # Web 端与 TVBox 直接拉取该地址播放，流媒体禁止经由 Next.js 3000 端口代理
+      # 留空时会把请求 Host 的 :3000 改写为 :18080；跨网段/域名部署请显式填写
+      MEDIA_STREAM_PUBLIC_BASE: ${MEDIA_STREAM_PUBLIC_BASE:-}
+      # 流媒体独立签名密钥（可选；留空则自动根据 JWT_SECRET 派生独立密钥）
+      MEDIA_STREAM_SECRET: ${MEDIA_STREAM_SECRET:-}
     ports:
       - 0.0.0.0:${SERVER_PORT:-18080}:${PORT:-8080}
     volumes:

@@ -380,7 +380,11 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
+func (p *ProvideService) GetVodDetail(ids []string, streamBase ...string) []model.FilmDetail {
+	base := ""
+	if len(streamBase) > 0 {
+		base = streamBase[0]
+	}
 	if len(ids) == 0 {
 		return []model.FilmDetail{}
 	}
@@ -453,6 +457,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			continue
 		}
 
+		vo.List = SignWdvLinks(base, vo.List)
 		detailList = append(detailList, formatProvideFilmDetail(s, vo))
 	}
 

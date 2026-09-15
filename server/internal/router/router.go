@@ -37,6 +37,8 @@ func SetupRouter() *gin.Engine {
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
+	api.GET(`/media/stream`, handler.MediaHd.Stream)
+	api.HEAD(`/media/stream`, handler.MediaHd.Stream)
 	api.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
 	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
 	api.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
@@ -141,6 +143,10 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/record/retry/all`, handler.CollectHd.CollectRecoverAll)
 			collect.POST(`/record/clear/result`, handler.CollectHd.ClearRetriedRecords)
 			collect.POST(`/record/clear/all`, handler.CollectHd.ClearAllRecord)
+
+			collect.GET(`/webdav/report`, handler.CollectHd.WebdavReport)
+			collect.POST(`/webdav/bind`, handler.CollectHd.WebdavBind)
+			collect.POST(`/webdav/rescrape`, handler.CollectHd.WebdavRescrape)
 		}
 
 		// 定时任务相关

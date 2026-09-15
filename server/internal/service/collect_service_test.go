@@ -12,6 +12,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
+	"server/internal/spider"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -36,6 +37,9 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
+		&model.WebdavScanItem{},
+		&model.WebdavMediaGroup{},
+		&model.WebdavScanReport{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -160,6 +164,110 @@ func TestCollectService_UpdateFilmSource_MasterDowngrade(t *testing.T) {
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer drainCancel()
 	_ = notify.WaitPendingPublishes(drainCtx)
+}
+
+func TestCollectService_UpdateSlaveUriWhileOtherTaskRunning(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+	t.Cleanup(spider.InjectCollectTaskForTest("other_running"))
+
+	slave := model.FilmSource{
+		Id:    "slave_idle",
+		Name:  "空闲附属站",
+		Uri:   "http://slave.old/json",
+		Grade: model.SlaveCollect,
+		State: true,
+	}
+	if err := gdb.Create(&slave).Error; err != nil {
+		t.Fatalf("create slave: %v", err)
+	}
+	updated := slave
+	updated.Uri = "http://slave.new/json"
+	if err := srv.UpdateFilmSource(updated); err != nil {
+		t.Fatalf("idle slave URI change should succeed while other source is collecting: %v", err)
+	}
+}
+
+func TestCollectService_UpdateMasterUriBlockedWhileAnyTaskRunning(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+	t.Cleanup(spider.InjectCollectTaskForTest("other_running"))
+
+	master := model.FilmSource{
+		Id:    "master_1",
+		Name:  "主站",
+		Uri:   "http://master.old/json",
+		Grade: model.MasterCollect,
+		State: true,
+	}
+	if err := gdb.Create(&master).Error; err != nil {
+		t.Fatalf("create master: %v", err)
+	}
+	updated := master
+	updated.Uri = "http://master.new/json"
+	err := srv.UpdateFilmSource(updated)
+	if err == nil {
+		t.Fatal("expected master URI change to be blocked while any collect task is running")
+	}
+}
+
+func TestCollectService_UpdateSelfBlockedWhenQueued(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+	t.Cleanup(spider.InjectCollectTaskForTest("slave_busy"))
+
+	slave := model.FilmSource{
+		Id:    "slave_busy",
+		Name:  "采集中的附属站",
+		Uri:   "http://slave.busy/json",
+		Grade: model.SlaveCollect,
+		State: true,
+	}
+	if err := gdb.Create(&slave).Error; err != nil {
+		t.Fatalf("create slave: %v", err)
+	}
+	updated := slave
+	updated.Name = "改名"
+	err := srv.UpdateFilmSource(updated)
+	if err == nil {
+		t.Fatal("expected edit to be blocked while this source is in the collect queue")
+	}
+}
+
+func TestCollectService_UpdateWebDAVUriClearsScanState(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+
+	source := model.FilmSource{
+		Id:         "wdv_uri",
+		Name:       "WebDAV 源",
+		Uri:        "webdav|http://nas/old|/media",
+		Grade:      model.SlaveCollect,
+		State:      true,
+		SourceType: model.SourceTypeWebDAV,
+	}
+	if err := gdb.Create(&source).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	gdb.Create(&model.WebdavScanItem{SourceId: source.Id, PathHash: "h1", RelPath: "old.mkv", Status: "scraped"})
+	gdb.Create(&model.WebdavMediaGroup{SourceId: source.Id, GroupKey: "g1", GlobalMid: 1})
+	gdb.Create(&model.SlaveMoviePlaylist{SourceId: source.Id, MovieKey: "mk1", Content: "wdv://wdv_uri/old"})
+	gdb.Create(&model.WebdavScanReport{SourceId: source.Id, Status: "done"})
+
+	updated := source
+	updated.Uri = "webdav|http://nas/new|/other"
+	if err := srv.UpdateFilmSource(updated); err != nil {
+		t.Fatalf("UpdateFilmSource: %v", err)
+	}
+
+	var itemCount, groupCount, plCount, reportCount int64
+	gdb.Model(&model.WebdavScanItem{}).Where("source_id = ?", source.Id).Count(&itemCount)
+	gdb.Model(&model.WebdavMediaGroup{}).Where("source_id = ?", source.Id).Count(&groupCount)
+	gdb.Model(&model.SlaveMoviePlaylist{}).Where("source_id = ?", source.Id).Count(&plCount)
+	gdb.Model(&model.WebdavScanReport{}).Where("source_id = ?", source.Id).Count(&reportCount)
+	if itemCount != 0 || groupCount != 0 || plCount != 0 || reportCount != 0 {
+		t.Fatalf("uri change must clear webdav state, items=%d groups=%d playlists=%d reports=%d", itemCount, groupCount, plCount, reportCount)
+	}
 }
 
 func TestCollectService_FailureRecords(t *testing.T) {

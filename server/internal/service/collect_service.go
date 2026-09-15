@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -32,6 +33,93 @@ func clearProvideNetworkConfigCache() {
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
+}
+
+func toFilmSourcePublic(source model.FilmSource, lastCollectTime *time.Time, progress *model.CollectProgress) model.FilmSourceListItemPublic {
+	item := model.FilmSourceListItemPublic{
+		Id:                 source.Id,
+		Name:               source.Name,
+		Uri:                source.Uri,
+		Grade:              source.Grade,
+		State:              source.State,
+		IsPosterSource:     source.IsPosterSource,
+		Interval:           source.Interval,
+		Cd:                 source.Cd,
+		DomainReplaceRules: source.DomainReplaceRules,
+		SourceType:         source.SourceType,
+		LastCollectTime:    lastCollectTime,
+		Progress:           progress,
+	}
+	if source.SourceType == model.SourceTypeWebDAV && source.WebdavConfig != "" {
+		var wCfg model.WebdavConfig
+		if err := json.Unmarshal([]byte(source.WebdavConfig), &wCfg); err == nil {
+			item.Webdav = &model.WebdavConfigPublic{
+				ServerURL:       wCfg.ServerURL,
+				Username:        wCfg.Username,
+				RootPath:        wCfg.RootPath,
+				MediaType:       wCfg.MediaType,
+				TmdbBaseURL:     wCfg.TmdbBaseURL,
+				PlayFromName:    wCfg.PlayFromName,
+				PasswordSet:     wCfg.Password != "",
+				TmdbApiKeySet:   wCfg.TmdbApiKey != "",
+				ScanIntervalMin: wCfg.ScanIntervalMin,
+				MinFileBytes:    wCfg.MinFileBytes,
+			}
+		}
+		var latestReport model.WebdavScanReport
+		if db.Mdb != nil {
+			if err := db.Mdb.Where("source_id = ?", source.Id).Order("id desc").First(&latestReport).Error; err == nil {
+				summary := &model.WebdavScanSummary{
+					Found:        latestReport.Found,
+					TmdbHit:      latestReport.TmdbHit,
+					Unmatched:    latestReport.Unmatched,
+					Skipped:      latestReport.Skipped,
+					Status:       latestReport.Status,
+					ErrorSummary: latestReport.ErrorSummary,
+				}
+				if !latestReport.FinishedAt.IsZero() {
+					summary.LastScan = &latestReport.FinishedAt
+				}
+				item.ScanSummary = summary
+			}
+		}
+	}
+	return item
+}
+
+func (s *CollectService) GetFilmSourceListPublic() []model.FilmSourceListItemPublic {
+	sources := repository.GetCollectSourceList()
+	list := make([]model.FilmSourceListItemPublic, 0, len(sources))
+	progressByID := make(map[string]model.CollectProgress)
+	for _, progress := range spider.GetActiveTaskProgress() {
+		progressByID[progress.Id] = progress
+	}
+	lastCollectTimeByID := getLastCollectTimeBySource(sources)
+	for _, source := range sources {
+		var p *model.CollectProgress
+		if progress, ok := progressByID[source.Id]; ok {
+			p = &progress
+		}
+		list = append(list, toFilmSourcePublic(source, lastCollectTimeByID[source.Id], p))
+	}
+	return list
+}
+
+func (s *CollectService) GetFilmSourcePublic(id string) *model.FilmSourceListItemPublic {
+	source := repository.FindCollectSourceById(id)
+	if source == nil {
+		return nil
+	}
+	stats := repository.GetCollectSourceStats([]string{id})
+	var p *model.CollectProgress
+	for _, progress := range spider.GetActiveTaskProgress() {
+		if progress.Id == id {
+			p = &progress
+			break
+		}
+	}
+	item := toFilmSourcePublic(*source, stats[id], p)
+	return &item
 }
 
 func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
@@ -85,27 +173,36 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 	masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
 
-	// 1. 安全校验：如果有任何采集任务正在运行，禁止修改等级或 URI，防止引发元数据清空冲突
-	isGradeChanged := old.Grade != source.Grade
-	isUriChanged := old.Uri != source.Uri
-	if (isGradeChanged || isUriChanged) && spider.IsAnyTaskRunning() {
-		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行等级或地址变更操作")
+	// 0. WebDAV 规则约束：暂不支持将 WebDAV 设为主站
+	if source.SourceType == model.SourceTypeWebDAV && source.Grade == model.MasterCollect {
+		return errors.New("暂不支持将 WebDAV 设为主站")
 	}
 
-	// 2. 强制单主站机制：如果新等级设为主站，则自动将旧主站降级
-	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
-		log.Printf("[Collect] 站点 %s 提升为主采集站，保留附属站播放列表并降级现有主站...", source.Name)
-	}
-
-	// 3. 检测主站切换并清理数据
+	// 1. 检测主站切换或核心地址变更（将触发元数据重置/级联清理）
 	// 情况A: 原来是附属站、现在升级为主站
 	masterLookup := old.Grade == model.SlaveCollect && source.Grade == model.MasterCollect
 	// 情况B: 依然是主站，但 URI 发生变更
 	masterUriChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && old.Uri != source.Uri
 	// 情况C: 原来是主站，现在降级为附属站
 	masterDowngrade := old.Grade == model.MasterCollect && source.Grade != model.MasterCollect
+	isMasterImpacted := masterLookup || masterUriChanged || masterDowngrade
 
-	if masterLookup || masterUriChanged || masterDowngrade {
+	// 2. 安全校验：
+	// 主站切换/主站地址变更会清空核心元数据，必须等全部采集任务结束。
+	// 附属站或主站的普通配置变更，只拦当前这一站在不在采集队列里。
+	if isMasterImpacted && spider.IsAnyTaskRunning() {
+		return errors.New("切换主站或修改主站地址会重置核心数据，请先停止全部采集任务后再操作")
+	}
+	if spider.IsTaskRunning(source.Id) {
+		return fmt.Errorf("采集站「%s」当前正在采集中，请先停止该站点后再编辑", source.Name)
+	}
+
+	// 3. 强制单主站机制：如果新等级设为主站，则自动将旧主站降级
+	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
+		log.Printf("[Collect] 站点 %s 提升为主采集站，保留附属站播放列表并降级现有主站...", source.Name)
+	}
+
+	if isMasterImpacted {
 		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v, downgrade=%v)，进行数据重置...", masterLookup, masterUriChanged, masterDowngrade)
 		// 强制中断所有任务（双重保险）
 		spider.StopAllTasks()
@@ -144,10 +241,28 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		}
 
 		// 接口地址变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
-		if isUriChanged {
+		if old.Uri != source.Uri {
 			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
 				syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
 				return errors.New("清理原失败记录失败，请重试")
+			}
+			if source.SourceType == model.SourceTypeWebDAV {
+				if err := tx.Where("source_id = ?", source.Id).Unscoped().Delete(&model.WebdavScanItem{}).Error; err != nil {
+					syslog.Errorf("[Collect] 清理 WebDAV 扫描项失败: %v", err)
+					return errors.New("清理 WebDAV 扫描记录失败，请重试")
+				}
+				if err := tx.Where("source_id = ?", source.Id).Unscoped().Delete(&model.WebdavMediaGroup{}).Error; err != nil {
+					syslog.Errorf("[Collect] 清理 WebDAV 媒体分组失败: %v", err)
+					return errors.New("清理 WebDAV 媒体分组失败，请重试")
+				}
+				if err := tx.Where("source_id = ?", source.Id).Unscoped().Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+					syslog.Errorf("[Collect] 清理 WebDAV 播放列表失败: %v", err)
+					return errors.New("清理 WebDAV 播放列表失败，请重试")
+				}
+				if err := tx.Where("source_id = ?", source.Id).Unscoped().Delete(&model.WebdavScanReport{}).Error; err != nil {
+					syslog.Errorf("[Collect] 清理 WebDAV 扫描报告失败: %v", err)
+					return errors.New("清理 WebDAV 扫描报告失败，请重试")
+				}
 			}
 		}
 
@@ -263,7 +378,6 @@ func sourceGradeLabel(g model.SourceGrade) string {
 	return "附属站"
 }
 
-
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
 	var collector []notify.SourceConfigChangeItem
 	var firstErr error
@@ -290,14 +404,14 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 	return firstErr
 }
 
-// MaxCollectSources 采集站数量上限（与前端 MAX_COLLECT_SOURCES 一致）
-const MaxCollectSources = 12
+// RecommendedMaxCollectSources 建议的采集站数量。超出不阻断，由前端警示性能影响。
+const RecommendedMaxCollectSources = 12
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
-	// 新增时校验总数上限（更新走 Update 不经过此路径）
-	existing := repository.GetCollectSourceList()
-	if len(existing) >= MaxCollectSources {
-		return fmt.Errorf("采集站数量已达上限（%d 个），请先删除不用的采集站", MaxCollectSources)
+
+	// WebDAV 规则约束：暂不支持将 WebDAV 设为主站
+	if source.SourceType == model.SourceTypeWebDAV && source.Grade == model.MasterCollect {
+		return errors.New("暂不支持将 WebDAV 设为主站")
 	}
 
 	// 强制单主站机制：如果新增站点为主站，自动降级现有主站
@@ -372,51 +486,4 @@ func (s *CollectService) DelFilmSource(id string) error {
 	clearProvideNetworkConfigCache()
 	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
 	return nil
-}
-
-func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.FailureRecord {
-	repository.NormalizeFailureRecordsRetryCount()
-	return repository.FailureRecordList(params)
-}
-
-func (s *CollectService) GetRecordOptions() model.OptionGroup {
-	options := make(model.OptionGroup)
-	options["status"] = []model.Option{
-		{Name: "全部", Value: -1},
-		{Name: "待重试", Value: model.FailureRecordStatusPending},
-		{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
-		{Name: "重试失败", Value: model.FailureRecordStatusFailed},
-	}
-
-	originOptions := []model.Option{{Name: "全部", Value: ""}}
-	for _, v := range repository.GetCollectSourceList() {
-		originOptions = append(originOptions, model.Option{Name: v.Name, Value: v.Id})
-	}
-	options["origin"] = originOptions
-	return options
-}
-
-func (s *CollectService) CollectRecover(id int) error {
-	fr := repository.FindRecordById(uint(id))
-	if fr == nil {
-		return errors.New("采集重试执行失败: 失败记录信息获取异常")
-	}
-	if fr.Status == model.FailureRecordStatusFailed {
-		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)
-		fr.Status = model.FailureRecordStatusPending
-	}
-	go spider.SingleRecoverSpider(fr)
-	return nil
-}
-
-func (s *CollectService) RecoverAll() {
-	go spider.FullRecoverSpider()
-}
-
-func (s *CollectService) ClearRetriedRecords() {
-	repository.DeleteRetriedRecords()
-}
-
-func (s *CollectService) ClearAllRecord() {
-	repository.TruncateRecordTable()
 }

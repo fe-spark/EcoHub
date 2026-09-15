@@ -17,6 +17,31 @@ interface VideoPlayerProps {
   onError?: (error: any) => void;
 }
 
+const resolveErrorSubTitle = (url: string, error?: any): string => {
+  if (error?.status === 403 || error?.response?.status === 403) {
+    return "播放地址无效，请刷新页面。";
+  }
+
+  let ext = "";
+  try {
+    const parsed = new URL(url, typeof window !== "undefined" ? window.location.href : undefined);
+    ext = (parsed.searchParams.get("ext") || "").toLowerCase();
+    if (!ext) {
+      const pathname = parsed.pathname;
+      const dotIdx = pathname.lastIndexOf(".");
+      if (dotIdx !== -1) {
+        ext = pathname.slice(dotIdx + 1).toLowerCase();
+      }
+    }
+  } catch {}
+
+  if (["mkv", "iso", "m2ts"].includes(ext)) {
+    return "当前客户端可能无法播放此封装（MKV/ISO 在浏览器里常见失败）。请改用 App、TVBox，或切换其它线路。";
+  }
+
+  return "该视频源可能已失效或受到环境策略限制，请尝试切换播放源或重新加载。";
+};
+
 /**
  * 极简播放器组件：
  * 采用 "src as key" 策略。
@@ -35,6 +60,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const playerRef = useRef<Artplayer | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [hasError, setHasError] = useState(false);
+  const [errorInfo, setErrorInfo] = useState<any>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   // 回调保护
@@ -99,6 +125,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                   hls.recoverMediaError();
                 } else {
                   setHasError(true);
+                  setErrorInfo(data);
                   callbacks.current.onError?.(data);
                 }
               }
@@ -188,10 +215,14 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
     art.on("error", (err) => {
       console.error("Artplayer Error:", err);
       setHasError(true);
+      setErrorInfo(err);
       callbacks.current.onError?.(err);
     });
 
-    art.on("video:playing", () => setHasError(false));
+    art.on("video:playing", () => {
+      setHasError(false);
+      setErrorInfo(null);
+    });
 
     // 移动端全屏事件接管：针对 iOS 等不支持标准全屏 API 的设备，调用原生 video.webkitEnterFullscreen
     art.on("fullscreen", (state) => {
@@ -242,7 +273,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
           <Result
             status="error"
             title="视频加载失败"
-            subTitle="该视频源可能已失效或受到环境策略限制，请尝试切换播放源或重新加载。"
+            subTitle={resolveErrorSubTitle(src, errorInfo)}
             extra={[
               <Button
                 type="primary"
@@ -251,6 +282,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 className={styles.retryBtn}
                 onClick={() => {
                   setHasError(false);
+                  setErrorInfo(null);
                   setRetryCount((p) => p + 1);
                 }}
               >

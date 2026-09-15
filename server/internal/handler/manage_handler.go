@@ -378,9 +378,49 @@ func (h *ManageHandler) MappingRuleDel(c *gin.Context) {
 }
 
 // ------------------------------------------------------ 参数校验 ------------------------------------------------------
+func validFilmSourceUpsert(req model.FilmSourceUpsertRequest) error {
+	if len(strings.TrimSpace(req.Name)) <= 0 || len(req.Name) > 20 {
+		return errors.New("资源名称不能为空且长度不能超过20")
+	}
+	if req.SourceType == model.SourceTypeWebDAV {
+		if req.Grade == model.MasterCollect {
+			return errors.New("暂不支持将 WebDAV 设为主站")
+		}
+		if req.Webdav == nil {
+			return errors.New("WebDAV 配置信息不能为空")
+		}
+		if !utils.ValidURL(req.Webdav.ServerURL) {
+			return errors.New("WebDAV 地址格式异常，请输入包含 http:// 或 https:// 的规范地址")
+		}
+		mediaType := strings.ToLower(strings.TrimSpace(req.Webdav.MediaType))
+		if mediaType != "movie" && mediaType != "tv" {
+			return errors.New("请选择媒体类型（电影或剧集）")
+		}
+		if _, err := service.NormalizeWebDAVUri(req.Webdav.ServerURL, req.Webdav.RootPath); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	// MacCMS 源
+	if !utils.ValidURL(req.Uri) {
+		return errors.New("资源链接格式异常, 请输入规范的URL链接")
+	}
+	if err := utils.ValidateDomainReplaceRules(req.DomainReplaceRules); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validFilmSource(fs model.FilmSource) error {
 	if len(fs.Name) <= 0 || len(fs.Name) > 20 {
 		return errors.New("资源名称不能为空且长度不能超过20")
+	}
+	if fs.SourceType == model.SourceTypeWebDAV {
+		if fs.Grade == model.MasterCollect {
+			return errors.New("暂不支持将 WebDAV 设为主站")
+		}
+		return nil
 	}
 	if !utils.ValidURL(fs.Uri) {
 		return errors.New("资源链接格式异常, 请输入规范的URL链接")

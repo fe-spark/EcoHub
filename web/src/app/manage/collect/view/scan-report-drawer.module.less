@@ -1,0 +1,72 @@
+.drawerContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.reportSummary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 12px;
+  background-color: var(--ant-color-fill-quaternary, #f9fafb);
+  border: 1px solid var(--ant-color-border-secondary, #f0f0f0);
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.summaryItem {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.summaryLabel {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #6b7280);
+}
+
+.summaryValue {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--ant-color-text, #111827);
+}
+
+.filterBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.filterActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tableWrapper {
+  flex: 1;
+}
+
+.pathCell {
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.errorText {
+  color: var(--ant-color-error, #ff4d4f);
+  font-size: 12px;
+}
+
+.liveHint {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary, #6b7280);
+}
+
+.bindModalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}

@@ -908,6 +908,25 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 		}
 	}
 
+	// WebDAV 线路稳定置顶：无用户偏好时优先起播私有云线路
+	webdavGroups := make([]model.PlayLinkVo, 0)
+	otherGroups := make([]model.PlayLinkVo, 0, len(playList))
+	for _, group := range playList {
+		isWebdav := false
+		for _, ep := range group.LinkList {
+			if strings.HasPrefix(ep.Link, WdvSchemePrefix) {
+				isWebdav = true
+				break
+			}
+		}
+		if isWebdav {
+			webdavGroups = append(webdavGroups, group)
+		} else {
+			otherGroups = append(otherGroups, group)
+		}
+	}
+	playList = append(webdavGroups, otherGroups...)
+
 	logSlowIndexServiceStep("multipleSource.total", startedAt, "id", snapshot.Mid, "sources", len(querySources), "keys", len(names))
 	return playList
 }

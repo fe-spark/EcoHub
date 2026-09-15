@@ -82,6 +82,13 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) s
 		}
 	}
 
+	// 无用户偏好时，优先起播 WebDAV 线路
+	for _, source := range playSources {
+		if len(source.LinkList) > 0 && isWebdavPlaySource(source) {
+			return source.Id
+		}
+	}
+
 	for _, source := range playSources {
 		if len(source.LinkList) > 0 {
 			return source.Id
@@ -93,6 +100,15 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) s
 	}
 
 	return ""
+}
+
+func isWebdavPlaySource(source model.PlayLinkVo) bool {
+	for _, ep := range source.LinkList {
+		if strings.Contains(ep.Link, "/api/media/stream") || strings.HasPrefix(ep.Link, service.WdvSchemePrefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
@@ -277,6 +293,11 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		}
 		detail.List[i].LinkList = valid
 	}
+
+	// 出口签名：将内部 wdv:// 转换为携带 HMAC 签名的流媒体网关地址
+	streamBase := ResolveStreamBase(c, false)
+	detail.List = service.SignWdvLinks(streamBase, detail.List)
+
 	if len(detail.List) > 0 {
 		playFrom = resolvePlayableSourceID(detail.List, playFrom)
 	}

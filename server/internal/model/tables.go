@@ -27,6 +27,9 @@ const (
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
 	TableFailureRecord      = "failure_records"
+	TableWebdavMediaGroup   = "webdav_media_groups"
+	TableWebdavScanItem     = "webdav_scan_items"
+	TableWebdavScanReport   = "webdav_scan_reports"
 )
 
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
@@ -55,5 +58,8 @@ var AllModels = []any{
 	&AccessDailyStats{},
 	&AccessDailyTop{},
 	&FailureRecord{},
+	&WebdavMediaGroup{},
+	&WebdavScanItem{},
+	&WebdavScanReport{},
 }
 

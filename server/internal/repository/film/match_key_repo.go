@@ -82,7 +82,7 @@ func loadMovieMatchKeysByMidsTx(tx *gorm.DB, mids []int64) map[int64][]string {
 	return result
 }
 
-func loadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
+func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 	keys = UniqueKeys(keys)
 	if len(keys) == 0 {
 		return nil
@@ -98,6 +98,10 @@ func loadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 		result[record.MatchKey] = append(result[record.MatchKey], record.Mid)
 	}
 	return result
+}
+
+func loadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
+	return LoadMidCandidatesByMatchKeys(keys)
 }
 
 func LoadMovieMatchKeys(filmIndex *model.FilmIndex, detail *model.MovieDetail) []string {

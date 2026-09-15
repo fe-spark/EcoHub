@@ -99,6 +99,7 @@ func TestSanitizeAccessLogURI(t *testing.T) {
 		expected string
 	}{
 		{"/api/index", "/api/index"},
+		{"/api/media/stream?sid=10&p=bW92aWUubWt2&ext=mkv&sign=deadbeef", "/api/media/stream?ext=mkv&sid=10"},
 		{"/api/test\n\r?foo=bar", "/api/test?foo=bar"},
 		{strings.Repeat("a", 600), strings.Repeat("a", 512) + "..."},
 		{strings.Repeat("中", 600), strings.Repeat("中", 512) + "..."},

@@ -11,8 +11,10 @@ import {
   Button,
   Card,
   Empty,
+  Modal,
   Popconfirm,
   Progress,
+  Radio,
   Space,
   Typography,
 } from "antd";
@@ -28,10 +30,12 @@ import {
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectSourceCard from "./collect-source-card";
+import ScanReportDrawer from "./scan-report-drawer";
 import SourceFormModal from "./source-form-modal";
 import {
+  COLLECT_SOURCE_OVERLOAD_HINT,
   isActiveCollectStatus,
-  MAX_COLLECT_SOURCES,
+  RECOMMENDED_MAX_COLLECT_SOURCES,
   stationProgressPercent,
   type BatchOption,
   type CheckAllResult,
@@ -112,15 +116,20 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     isPosterSource: Boolean(item.isPosterSource),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
+    domainReplaceRules: item.domainReplaceRules ?? "",
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
+    sourceType: item.sourceType ?? "maccms",
+    webdav: item.webdav,
+    scanSummary: item.scanSummary ?? null,
   };
 }
 
 export default function CollectManagePageView() {
-  const { message } = useAppMessage();
+  const { message, modal } = useAppMessage();
   const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<"all" | "maccms" | "webdav">("all");
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
   const [batchStateUpdating, setBatchStateUpdating] = useState(false);
   const [batchDeleting, setBatchDeleting] = useState(false);
@@ -155,6 +164,23 @@ export default function CollectManagePageView() {
   /** 本页发起的批量采集会话 ID；用于展示总进度条，全部结束后自动收起 */
   const [batchRunIds, setBatchRunIds] = useState<string[]>([]);
   const [stoppingAll, setStoppingAll] = useState(false);
+
+  // WebDAV 扫描报告抽屉
+  const [reportDrawerOpen, setReportDrawerOpen] = useState(false);
+  const [reportDrawerSource, setReportDrawerSource] = useState<FilmSource | null>(null);
+
+  const handleOpenReport = useCallback((sourceId: string) => {
+    const s = siteList.find((item) => item.id === sourceId) || null;
+    setReportDrawerSource(s);
+    setReportDrawerOpen(true);
+  }, [siteList]);
+  const liveReportSource = useMemo(
+    () =>
+      reportDrawerSource
+        ? siteList.find((item) => item.id === reportDrawerSource.id) ?? reportDrawerSource
+        : null,
+    [siteList, reportDrawerSource],
+  );
   /** 顶部总进度：进行中或结束倒计时内的最近一次会话快照 */
   const [overallSession, setOverallSession] = useState<OverallProgressView | null>(null);
   const overallDoneTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -196,19 +222,35 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
+  const filteredSites = useMemo(() => {
+    if (sourceTypeFilter === "all") {
+      return siteList;
+    }
+    return siteList.filter((item) => (item.sourceType ?? "maccms") === sourceTypeFilter);
+  }, [siteList, sourceTypeFilter]);
+
   /** 主站优先，其余保持列表顺序，同一网格展示 */
   const displaySites = useMemo(() => {
-    const masters = siteList.filter((item) => item.grade === 0);
-    const others = siteList.filter((item) => item.grade !== 0);
+    const masters = filteredSites.filter((item) => item.grade === 0);
+    const others = filteredSites.filter((item) => item.grade !== 0);
     return [...masters, ...others];
-  }, [siteList]);
+  }, [filteredSites]);
+
+  const hiddenSelectedCount = useMemo(() => {
+    if (sourceTypeFilter === "all") {
+      return 0;
+    }
+    const visibleSet = new Set(filteredSites.map((item) => item.id));
+    return selectedSourceIds.filter((id) => !visibleSet.has(String(id))).length;
+  }, [filteredSites, selectedSourceIds, sourceTypeFilter]);
 
   const masterCount = useMemo(
     () => siteList.filter((item) => item.grade === 0).length,
     [siteList],
   );
 
-  const canAddSource = siteList.length < MAX_COLLECT_SOURCES;
+  const sourceCountOverRecommended =
+    siteList.length >= RECOMMENDED_MAX_COLLECT_SOURCES;
 
   /**
    * 总进度条覆盖的任务 ID：
@@ -570,14 +612,23 @@ export default function CollectManagePageView() {
   }, []);
 
   const selectAllSources = useCallback(() => {
-    setSelectedSourceIds(siteList.map((item) => item.id));
-  }, [siteList]);
+    setSelectedSourceIds((current) => {
+      const set = new Set(current);
+      filteredSites.forEach((item) => set.add(item.id));
+      return Array.from(set);
+    });
+  }, [filteredSites]);
 
   const invertSelection = useCallback(() => {
-    setSelectedSourceIds((current) =>
-      siteList.filter((item) => !current.includes(item.id)).map((item) => item.id),
-    );
-  }, [siteList]);
+    const visibleIds = new Set(filteredSites.map((item) => item.id));
+    setSelectedSourceIds((current) => {
+      const hiddenIds = current.filter((id) => !visibleIds.has(String(id)));
+      const invertedVisible = filteredSites
+        .filter((item) => !current.includes(item.id))
+        .map((item) => item.id);
+      return [...hiddenIds, ...invertedVisible];
+    });
+  }, [filteredSites]);
 
   const clearSelection = useCallback(() => {
     setSelectedSourceIds([]);
@@ -734,12 +785,13 @@ export default function CollectManagePageView() {
   };
 
   const startTask = async (record: FilmSource) => {
+    const isWebdav = record.sourceType === "webdav";
     if (!record.state) {
-      message.warning("该采集站已被禁用，无法发起采集");
+      message.warning(isWebdav ? "该媒体库已被禁用，无法发起扫描" : "该采集站已被禁用，无法发起采集");
       return;
     }
     if (isActiveCollectStatus(record.progress?.status)) {
-      message.warning("该采集站已在采集中");
+      message.warning(isWebdav ? "该媒体库已在扫描中" : "该采集站已在采集中");
       return;
     }
     // 点击后立即展示 0% 进度条，再等接口与列表校准
@@ -747,7 +799,7 @@ export default function CollectManagePageView() {
       ...item,
       progress: makeStartingProgress(record.id, record.name),
     }));
-    const collectTime = record.cd ?? 24;
+    const collectTime = record.cd && record.cd > 0 ? record.cd : 24;
     const resp = await ApiPost("/manage/spider/start", {
       id: record.id,
       time: collectTime,
@@ -758,7 +810,7 @@ export default function CollectManagePageView() {
       void getCollectList(true);
       return;
     }
-    message.error(resp.msg || "启动采集失败");
+    message.error(resp.msg || (isWebdav ? "启动扫描失败" : "启动采集失败"));
     await getCollectList();
   };
 
@@ -783,15 +835,24 @@ export default function CollectManagePageView() {
   };
 
   const openAddDialog = () => {
-    if (siteList.length >= MAX_COLLECT_SOURCES) {
-      message.warning(`采集站数量已达上限（${MAX_COLLECT_SOURCES} 个）`);
+    const open = () => {
+      setSourceModalMode("add");
+      setEditingId(null);
+      setSourceInitialValues(SOURCE_FORM_DEFAULTS);
+      setSourceFormNonce((n) => n + 1);
+      setSourceModalOpen(true);
+    };
+    if (sourceCountOverRecommended) {
+      modal.confirm({
+        title: "采集站数量较多",
+        content: COLLECT_SOURCE_OVERLOAD_HINT,
+        okText: "仍要添加",
+        cancelText: "取消",
+        onOk: open,
+      });
       return;
     }
-    setSourceModalMode("add");
-    setEditingId(null);
-    setSourceInitialValues(SOURCE_FORM_DEFAULTS);
-    setSourceFormNonce((n) => n + 1);
-    setSourceModalOpen(true);
+    open();
   };
 
   const openEditDialog = async (id: string) => {
@@ -799,7 +860,9 @@ export default function CollectManagePageView() {
     setEditingId(id);
     const resp = await ApiGet("/manage/collect/find", { id });
     if (resp.code === 0 && resp.data) {
+      const isWebdav = resp.data.sourceType === "webdav";
       setSourceInitialValues({
+        sourceType: resp.data.sourceType ?? "maccms",
         name: String(resp.data.name ?? ""),
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
@@ -808,6 +871,20 @@ export default function CollectManagePageView() {
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
+        webdav: isWebdav && resp.data.webdav ? {
+          serverUrl: String(resp.data.webdav.serverUrl ?? ""),
+          username: String(resp.data.webdav.username ?? ""),
+          password: "",
+          passwordSet: Boolean(resp.data.webdav.passwordSet),
+          rootPath: String(resp.data.webdav.rootPath ?? "/"),
+          mediaType: resp.data.webdav.mediaType ?? "movie",
+          playFromName: String(resp.data.webdav.playFromName ?? ""),
+          scanIntervalMin: Number(resp.data.webdav.scanIntervalMin ?? 0),
+          minFileBytes: Number(resp.data.webdav.minFileBytes ?? 52428800),
+          tmdbApiKey: "",
+          tmdbApiKeySet: Boolean(resp.data.webdav.tmdbApiKeySet),
+          tmdbBaseUrl: String(resp.data.webdav.tmdbBaseUrl ?? ""),
+        } : undefined,
       });
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
@@ -816,7 +893,7 @@ export default function CollectManagePageView() {
     message.error(resp.msg || "获取采集站信息失败");
   };
 
-  const handleSubmitSource = async (values: SourceFormValues) => {
+  const doSubmitSource = async (values: SourceFormValues) => {
     setSubmitting(true);
     try {
       const resp = await ApiPost(
@@ -837,26 +914,69 @@ export default function CollectManagePageView() {
     }
   };
 
+  const handleSubmitSource = async (values: SourceFormValues) => {
+    // 升为主站确认（WebDAV 无法选择主站，仅 MacCMS 升主生效）
+    const isPromotingMaster =
+      values.grade === 0 &&
+      (sourceModalMode === "add" || sourceInitialValues.grade !== 0);
+
+    if (isPromotingMaster) {
+      modal.confirm({
+        title: "确认将该采集站设为主站？",
+        content: "设置为主站将变更全站核心数据索引，原主站将自动降为附属采集站。是否继续？",
+        okText: "确认设为主站",
+        okButtonProps: { danger: true },
+        cancelText: "取消",
+        onOk: () => doSubmitSource(values),
+      });
+      return;
+    }
+
+    await doSubmitSource(values);
+  };
+
   const testApi = async (values: SourceFormValues) => {
     try {
       setTesting(true);
+      const isWebdav = values.sourceType === "webdav";
       message.loading({
         key: "collect-test",
-        content: "正在测试接口，请稍候...",
+        content: isWebdav ? "正在测试 WebDAV 连通性，请稍候..." : "正在测试接口，请稍候...",
       });
-      const resp = await ApiPost("/manage/collect/test", values);
+      const payload = sourceModalMode === "edit" ? { ...values, id: editingId } : values;
+      const resp = await ApiPost("/manage/collect/test", payload);
       if (resp.code === 0) {
         message.success({ key: "collect-test", content: resp.msg });
         return;
       }
       message.error({
         key: "collect-test",
-        content: resp.msg || "接口测试失败",
+        content: resp.msg || (isWebdav ? "WebDAV 连通测试失败" : "接口测试失败"),
       });
     } catch {
-      message.error({ key: "collect-test", content: "接口测试失败，请稍后重试" });
+      message.error({ key: "collect-test", content: "连通测试失败，请稍后重试" });
     } finally {
       setTesting(false);
+    }
+  };
+
+  const testSourceDirectly = async (record: FilmSource) => {
+    try {
+      message.loading({
+        key: "collect-test-direct",
+        content: `正在测试「${record.name}」连通性，请稍候...`,
+      });
+      const resp = await ApiPost("/manage/collect/test", { id: record.id });
+      if (resp.code === 0) {
+        message.success({ key: "collect-test-direct", content: resp.msg });
+        return;
+      }
+      message.error({
+        key: "collect-test-direct",
+        content: resp.msg || "连通测试失败",
+      });
+    } catch {
+      message.error({ key: "collect-test-direct", content: "连通测试失败，请稍后重试" });
     }
   };
 
@@ -868,6 +988,7 @@ export default function CollectManagePageView() {
             ...item,
             grade: siteList.find((site) => site.id === item.id)?.grade ?? 1,
             state: siteList.find((site) => site.id === item.id)?.state ?? false,
+            sourceType: siteList.find((site) => site.id === item.id)?.sourceType ?? "maccms",
           }))
         : [];
       const enabledIds = new Set(allOptions.map((item) => item.id));
@@ -975,7 +1096,12 @@ export default function CollectManagePageView() {
           <>
             统一管理采集站与采集任务
             <span className={styles.headerMeta}>
-              · {siteList.length}/{MAX_COLLECT_SOURCES}
+              · {siteList.length} 个采集站
+              {sourceCountOverRecommended ? (
+                <span className={styles.headerWarn}>
+                  （建议不超过 {RECOMMENDED_MAX_COLLECT_SOURCES} 个）
+                </span>
+              ) : null}
             </span>
           </>
         }
@@ -995,9 +1121,26 @@ export default function CollectManagePageView() {
         <Card size="small" className={styles.toolbarCard} styles={{ body: { padding: 12 } }}>
           <div className={styles.toolbar}>
             <Space size={[8, 8]} wrap>
+              <Radio.Group
+                size="small"
+                optionType="button"
+                buttonStyle="solid"
+                value={sourceTypeFilter}
+                onChange={(e) => setSourceTypeFilter(e.target.value)}
+                options={[
+                  { label: "全部", value: "all" },
+                  { label: "MacCMS", value: "maccms" },
+                  { label: "WebDAV", value: "webdav" },
+                ]}
+              />
               <span className={styles.toolbarHint}>
-                共 {siteList.length}/{MAX_COLLECT_SOURCES} 个
+                共 {filteredSites.length}/{siteList.length} 个
               </span>
+              {hiddenSelectedCount > 0 ? (
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  （含 {hiddenSelectedCount} 个筛选隐藏的选中）
+                </Typography.Text>
+              ) : null}
               <Button size="small" data-tour="collect-select-all" onClick={selectAllSources}>
                 全选
               </Button>
@@ -1126,12 +1269,12 @@ export default function CollectManagePageView() {
           <div className={styles.sourceGroups}>
             {masterCount === 0 ? (
               <div className={styles.masterTip}>
-                尚未配置主采集站
-                {canAddSource && canWrite ? (
+                尚未配置主采集站（WebDAV 仅作为附属高清线路，须配合 MacCMS 主站）
+                {canWrite ? (
                   <>
                     ，
                     <Typography.Link onClick={openAddDialog}>新增</Typography.Link>
-                    时将类型设为「主采集站」
+                    时将类型设为「MacCMS 主采集站」
                   </>
                 ) : null}
               </div>
@@ -1159,10 +1302,12 @@ export default function CollectManagePageView() {
                     onTerminateTask={(id) => void stopTask(id)}
                     onEditSource={(id) => void openEditDialog(id)}
                     onDeleteSource={(id) => void delSource(id)}
+                    onTestSource={(record) => void testSourceDirectly(record)}
+                    onOpenReport={handleOpenReport}
                   />
                 );
               })}
-              {canAddSource && canWrite ? (
+              {canWrite ? (
                 <button
                   type="button"
                   className={styles.addSourceTile}
@@ -1171,7 +1316,9 @@ export default function CollectManagePageView() {
                   <PlusOutlined className={styles.addSourceIcon} />
                   <span className={styles.addSourceLabel}>新增采集站</span>
                   <span className={styles.addSourceHint}>
-                    还可添加 {MAX_COLLECT_SOURCES - siteList.length} 个
+                    {sourceCountOverRecommended
+                      ? `建议不超过 ${RECOMMENDED_MAX_COLLECT_SOURCES} 个`
+                      : "添加 MacCMS 或 WebDAV"}
                   </span>
                 </button>
               ) : null}
@@ -1183,12 +1330,10 @@ export default function CollectManagePageView() {
               description={
                 loading
                   ? "采集站加载中…"
-                  : canAddSource && canWrite
-                    ? "暂无采集站"
-                    : `暂无采集站（上限 ${MAX_COLLECT_SOURCES}）`
+                  : "暂无采集站"
               }
             >
-              {!loading && canAddSource && canWrite ? (
+              {!loading && canWrite ? (
                 <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>
                   新增采集站
                 </Button>
@@ -1230,6 +1375,13 @@ export default function CollectManagePageView() {
         skipped={cleanupSkipped}
         onCancel={cancelCleanup}
         onConfirm={() => void confirmCleanup()}
+      />
+
+      <ScanReportDrawer
+        open={reportDrawerOpen}
+        source={liveReportSource}
+        onClose={() => setReportDrawerOpen(false)}
+        onRefreshSource={() => void getCollectList(true)}
       />
     </div>
   );

@@ -346,7 +346,6 @@ export default function PlayPageView({
                 onTimeUpdate={handleTimeUpdate}
                 onError={() => {
                   setPlayerError(true);
-                  message.error("该视频源加载失败，请尝试切换播放源。");
                 }}
               />
             )}

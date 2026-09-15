@@ -46,6 +46,15 @@ func updateCollectProgress(sourceID string, update func(*model.CollectProgress))
 	}
 }
 
+// SnapshotCollectProgress 供管理接口读取当前扫描/采集进度。
+func SnapshotCollectProgress(sourceID string) *model.CollectProgress {
+	if progress, ok := collectProgressSnapshot(sourceID); ok {
+		cp := progress
+		return &cp
+	}
+	return nil
+}
+
 func collectProgressSnapshot(sourceID string) (model.CollectProgress, bool) {
 	if val, ok := collectProgress.Load(sourceID); ok {
 		state := val.(*collectProgressState)
@@ -165,6 +174,7 @@ func refreshAndIsBlockingSourceProgress(sourceID string) bool {
 	_, live := activeTasks.Load(sourceID)
 	age := now.Sub(state.updated)
 	if isPostFetchCollectStatus(state.data.Status) {
+		// 批量收尾会长时间停在 waiting_publish，不能当超时失败，否则会误放行改源
 		state.mu.Unlock()
 		return true
 	}
@@ -422,10 +432,15 @@ func IsTaskRunning(id string) bool {
 	if _, ok := activeTasks.Load(id); ok {
 		return true
 	}
-	if progress, ok := collectProgressSnapshot(id); ok {
-		return isActiveCollectStatus(progress.Status)
+	return isCollectAlreadyQueuedOrRunning(id)
+}
+
+// InjectCollectTaskForTest 仅单测注入采集队列，生产路径勿用。
+func InjectCollectTaskForTest(id string) func() {
+	activeTasks.Store(id, collectTask{cancel: func() {}, reqId: "test-inject"})
+	return func() {
+		activeTasks.Delete(id)
 	}
-	return false
 }
 
 func IsAnyTaskRunning() bool {
@@ -439,11 +454,11 @@ func IsAnyTaskRunning() bool {
 	}
 	hasActive := false
 	collectProgress.Range(func(key, value any) bool {
-		state := value.(*collectProgressState)
-		state.mu.RLock()
-		active := isActiveCollectStatus(state.data.Status)
-		state.mu.RUnlock()
-		if active {
+		id, ok := key.(string)
+		if !ok {
+			return true
+		}
+		if isCollectAlreadyQueuedOrRunning(id) {
 			hasActive = true
 			return false
 		}

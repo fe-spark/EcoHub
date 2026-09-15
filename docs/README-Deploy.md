@@ -70,8 +70,14 @@ docker compose up -d
 | `http://服务器:3000` | 前台 |
 | `http://服务器:3000/manage` | 管理后台 |
 | `http://服务器:3000/api/*` | 经站点转发的 API |
-| `http://服务器:18080/api/*` | 后端直连（生产勿公网暴露） |
+| `http://服务器:18080/api/*` | 后端直连（生产勿公网暴露，可作为媒体流端口） |
 | `http://服务器:3000/api/provide/config` | TVBox / 影视仓 |
+
+> **WebDAV 流媒体网络拓扑与配置说明**：
+> WebDAV 挂载的原盘与视频文件通过后端 Go 媒体网关（`/api/media/stream`）进行 Range 分片代理。**媒体流严禁经由 Next.js（:3000）反代**，以杜绝大文件打满 Node.js 内存导致崩盘。
+> - **默认 Docker Compose**：请在 `.env` 或 compose 文件中设置 `MEDIA_STREAM_PUBLIC_BASE=http://<宿主机IP或域名>:18080`，前端与 TVBox 直接拉取 `:18080` 媒体端口，完全绕过 Node.js。
+> - **生产 Nginx 反代**：Nginx 配置中将 `/` 代理至 `:3000`（Web），将 `/api/` 代理至 `:8080`（Go 后端）。此时 `MEDIA_STREAM_PUBLIC_BASE` 可设为公共域名（如 `https://your-domain.com`），直接由 Nginx 直通 Go 后端。
+> - **签名安全**：网关链路采用独立 HMAC-SHA256 签名，可通过 `MEDIA_STREAM_SECRET` 单独指定签名密钥（留空则基于 `JWT_SECRET` 自动派生），轮换系统登录密钥不会使正在播放的媒体链接失效。
 
 默认账号（**立刻改密**）：`admin` / `admin`，`guest` / `guest`。
 

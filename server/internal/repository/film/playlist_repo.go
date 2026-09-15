@@ -380,6 +380,10 @@ func slaveShouldBumpStamp(change playlistChange, otherCounts []int) bool {
 	return isEpisodeCountHigher(extractEpisodeCountsFromPlaylistSignatures(change.Signatures), global)
 }
 
+func PickBestMidForMatchKey(mids []int64) int64 {
+	return pickBestMidForMatchKey(mids)
+}
+
 // pickBestMidForMatchKey 同一 match_key 命中多个 mid 时只保留一个（update_stamp 新者优先，其次 mid 大）。
 // 源站常并存「烬九州：第二季」与「烬九州第二季」两个 vod_id，归一化后共享 match_key。
 func pickBestMidForMatchKey(mids []int64) int64 {
@@ -797,6 +801,15 @@ func GetMultiplePlayGroupsByKeys(siteID, siteName string, keys []string) []model
 	return getMultiplePlayGroupsByKeysTx(db.Mdb, siteID, siteName, keys)
 }
 
+func resolveSourceDisplayName(source model.FilmSource) string {
+	if source.SourceType == model.SourceTypeWebdav {
+		if cfg, err := source.GetWebdavConfig(); err == nil && strings.TrimSpace(cfg.PlayFromName) != "" {
+			return strings.TrimSpace(cfg.PlayFromName)
+		}
+	}
+	return source.Name
+}
+
 func GetMultiplePlayGroupsBySourcesAndKeys(sources []model.FilmSource, keys []string) map[string][]model.PlayLinkVo {
 	orderedKeys := UniqueKeys(keys)
 	if len(sources) == 0 || len(orderedKeys) == 0 {
@@ -823,7 +836,8 @@ func GetMultiplePlayGroupsBySourcesAndKeys(sources []model.FilmSource, keys []st
 
 	result := make(map[string][]model.PlayLinkVo, len(sources))
 	for _, source := range sources {
-		groups := buildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, orderedKeys, playlistsBySourceKey)
+		siteName := resolveSourceDisplayName(source)
+		groups := buildPlayGroupsFromLoadedPlaylists(source.Id, siteName, orderedKeys, playlistsBySourceKey)
 		if len(groups) > 0 {
 			result[source.Id] = groups
 		}
@@ -926,7 +940,8 @@ func loadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 		}
 
 		for _, source := range sources {
-			groups := buildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, lookupKeys, playlistsBySourceKey)
+			siteName := resolveSourceDisplayName(source)
+			groups := buildPlayGroupsFromLoadedPlaylists(source.Id, siteName, lookupKeys, playlistsBySourceKey)
 			if len(groups) == 0 {
 				continue
 			}

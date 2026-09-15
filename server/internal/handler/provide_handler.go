@@ -94,6 +94,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 
 	// 选中采集站时，优先直连该采集站返回原始数据
 	if sourceId != "" {
+		src := service.CollectSvc.GetFilmSource(sourceId)
+		if src != nil && src.SourceType == model.SourceTypeWebDAV {
+			c.JSON(400, gin.H{"code": 0, "msg": "该源不支持直连，请使用站点聚合接口"})
+			return
+		}
 		directYear, _ := strconv.Atoi(year)
 		raw, err := service.ProvideSvc.GetVodDirectBySource(sourceId, ac, t, pg, wd, h_param, ids, directYear, area, lang, plot, sort)
 		if err != nil {
@@ -168,9 +173,10 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		})
 	case "videolist", "detail":
 		var idsArr []string
+		streamBase := ResolveStreamBase(c, true)
 		if ids != "" {
 			idsArr = strings.Split(ids, ",")
-			vodList := service.ProvideSvc.GetVodDetail(idsArr)
+			vodList := service.ProvideSvc.GetVodDetail(idsArr, streamBase)
 			if vodList == nil {
 				vodList = []model.FilmDetail{}
 			}
@@ -195,7 +201,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			for _, v := range vodListSimple {
 				_idsArr = append(_idsArr, strconv.FormatInt(v.VodID, 10))
 			}
-			detailList := service.ProvideSvc.GetVodDetail(_idsArr)
+			detailList := service.ProvideSvc.GetVodDetail(_idsArr, streamBase)
 			if detailList == nil {
 				detailList = []model.FilmDetail{}
 			}
