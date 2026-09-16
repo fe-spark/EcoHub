@@ -27,7 +27,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (CollectWriteRe
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
-	detailMids, primaryKeyByMid, err := matchSlaveDetailMids(list)
+	detailMids, primaryKeyByMid, matchedInfos, keysByMid, err := matchSlaveDetailMids(list)
 	if err != nil {
 		return CollectWriteResult{}, err
 	}
@@ -73,17 +73,29 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (CollectWriteRe
 		log.Printf("SaveSitePlayList Error: %v", err)
 		return CollectWriteResult{}, err
 	}
-	result, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes)
-	if err != nil {
-		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
-		return CollectWriteResult{}, err
-	}
 	// 仅在有播放源实质变更时更新 last_collect_time。
 	if len(changes) > 0 {
 		repository.NoteCollectSourceStats(sourceID)
 	}
 
+	// 无变更短路：若本批次没有任何播放列表实质变更，且非海报同步源，
+	// 说明所有数据已处于最新同步状态，跳过后续所有映射与刷新，耗时降至 0。
+	if len(changes) == 0 && !isSourcePosterSyncConfigured(sourceID) {
+		return CollectWriteResult{}, nil
+	}
+
+	result, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes, matchedInfos, keysByMid)
+	if err != nil {
+		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
+		return CollectWriteResult{}, err
+	}
+
 	return result, nil
+}
+
+func isSourcePosterSyncConfigured(sourceID string) bool {
+	src := repository.FindCollectSourceById(sourceID)
+	return src != nil && src.IsPosterSource && src.State
 }
 
 func isPlaylistWritableDetail(detail model.MovieDetail) bool {
@@ -166,11 +178,11 @@ func pickUniqueSlaveMid(
 	return 0
 }
 
-// matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid。
-func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, error) {
+// matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid，并顺带输出匹配到的主站影片与键映射。
+func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, []model.FilmIndex, map[int64][]string, error) {
 	detailMids := make([]int64, len(list))
 	if len(list) == 0 {
-		return detailMids, nil, nil
+		return detailMids, nil, nil, nil, nil
 	}
 
 	keysPerDetail := make([][]string, len(list))
@@ -193,7 +205,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		}
 	}
 	if len(midSet) == 0 {
-		return detailMids, nil, nil
+		return detailMids, nil, nil, nil, nil
 	}
 	matchedMids := make([]int64, 0, len(midSet))
 	for mid := range midSet {
@@ -202,7 +214,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 
 	var candidates []model.FilmIndex
 	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
-		return nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	infoByMid := make(map[int64]model.FilmIndex, len(candidates))
 	for _, info := range candidates {
@@ -216,6 +228,8 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		}
 	}
 
+	matchedInfos := make([]model.FilmIndex, 0, len(candidates))
+	seenMid := make(map[int64]struct{}, len(candidates))
 	for i, detail := range list {
 		if !isPlaylistWritableDetail(detail) {
 			continue
@@ -223,9 +237,15 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		mid := pickUniqueSlaveMid(keysPerDetail[i], ResolveMovieDetailRootPid(detail), midsByLookupKey, infoByMid)
 		if mid > 0 && primaryKeyByMid[mid] != "" {
 			detailMids[i] = mid
+			if _, seen := seenMid[mid]; !seen {
+				seenMid[mid] = struct{}{}
+				if info, ok := infoByMid[mid]; ok {
+					matchedInfos = append(matchedInfos, info)
+				}
+			}
 		}
 	}
-	return detailMids, primaryKeyByMid, nil
+	return detailMids, primaryKeyByMid, matchedInfos, keysByMid, nil
 }
 
 func loadInheritedKeysForUnmatchedDetails(list []model.MovieDetail, detailMids []int64) map[string]string {
@@ -262,13 +282,22 @@ func loadInheritedKeysForUnmatchedDetails(list []model.MovieDetail, detailMids [
 
 // scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳。
 // NotifyMIDs 仅 stamp 资格；AffectedMIDs 含所有 playlist 写入，供详情页展示最新集。
-func scheduleSearchInfoRefreshByPlaylists(sourceID string, details []model.MovieDetail, changes []playlistChange) (CollectWriteResult, error) {
+func scheduleSearchInfoRefreshByPlaylists(
+	sourceID string,
+	details []model.MovieDetail,
+	changes []playlistChange,
+	infos []model.FilmIndex,
+	keysByMid map[int64][]string,
+) (CollectWriteResult, error) {
 	var out CollectWriteResult
-	infos, err := loadMatchedSearchInfosByDetails(details)
-	if err != nil {
-		return out, err
+	if len(infos) == 0 {
+		var err error
+		infos, err = loadMatchedSearchInfosByDetails(details)
+		if err != nil {
+			return out, err
+		}
 	}
-	if err := saveSlaveSourceMappings(sourceID, details, infos); err != nil {
+	if err := saveSlaveSourceMappingsWithKeys(sourceID, details, infos, keysByMid); err != nil {
 		return out, err
 	}
 	// 附属站海报同步：若当前源开启了 IsPosterSource，将高清海报同步写入主站影片并加入刷新列表
@@ -947,6 +976,10 @@ func DeletePlaylistBySourceIdTx(tx *gorm.DB, sourceID string) error {
 // saveSlaveSourceMappings 为附属站播放列表补充 source_mid -> global_mid 映射，
 // 让后台单片更新时能够按全局 mid 精确找到每个附属站自己的原始影片 ID。
 func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos []model.FilmIndex) error {
+	return saveSlaveSourceMappingsWithKeys(sourceID, details, infos, nil)
+}
+
+func saveSlaveSourceMappingsWithKeys(sourceID string, details []model.MovieDetail, infos []model.FilmIndex, keysByMid map[int64][]string) error {
 	if len(details) == 0 || len(infos) == 0 {
 		return nil
 	}
@@ -966,7 +999,9 @@ func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos
 	}
 
 	globalMidByKey := make(map[string]int64, len(mids)*2)
-	keysByMid := loadMovieMatchKeysByMids(mids)
+	if keysByMid == nil {
+		keysByMid = loadMovieMatchKeysByMids(mids)
+	}
 	sortedMids := make([]int64, 0, len(keysByMid))
 	for mid := range keysByMid {
 		sortedMids = append(sortedMids, mid)
@@ -1002,6 +1037,9 @@ func saveSlaveSourceMappings(sourceID string, details []model.MovieDetail, infos
 			SourceMid: detail.Id,
 			GlobalMid: globalMid,
 		})
+	}
+	if len(mappings) == 0 {
+		return nil
 	}
 
 	return saveMovieSourceMappingsTxE(db.Mdb, mappings)
