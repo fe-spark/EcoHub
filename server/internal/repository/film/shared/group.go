@@ -148,11 +148,20 @@ func BuildPlayGroupsFromLoadedPlaylists(
 func SelectBestPlayGroups(siteID, siteName string, keys []string, byKey map[string][]model.SlaveMoviePlaylist) []model.PlayLinkVo {
 	var best []model.PlayLinkVo
 	bestCount := -1
-	for _, key := range UniqueKeys(keys) {
+	uniqueKeys := UniqueKeys(keys)
+	hasStrongMatched := false
+
+	for i, key := range uniqueKeys {
+		// 若前序强特征 key（带大类或外部ID）已命中播放源，低优先级的末位纯片名兜底 key 不得反向覆盖冲刷
+		if hasStrongMatched && i == len(uniqueKeys)-1 && len(uniqueKeys) > 1 {
+			continue
+		}
+
 		groups := playGroupsFromPlaylistRows(siteID, siteName, byKey[key])
 		if len(groups) == 0 {
 			continue
 		}
+		hasStrongMatched = true
 		count := 0
 		for _, group := range groups {
 			if n := EpisodeCount(group.LinkList); n > count {

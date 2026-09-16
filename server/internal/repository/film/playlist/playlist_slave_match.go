@@ -32,20 +32,26 @@ func slaveDetailMatchesFilm(detailPid int64, info model.FilmIndex) bool {
 }
 
 // pickUniqueSlaveMid 按键优先级（豆瓣、片名#大类、纯片名）找唯一主站 mid。
-// 某键只命中一部就采用，不管副站大类是否和主站一致（源站常把动漫标成电视剧）。
-// 某键命中多部时才用大类消歧（两个仙逆）；消歧后仍不唯一则看下一把键。
+// 单候选直接短路返回（0 额外开销）。
+// 多候选冲突时（如两个同名仙逆），先尝试大类初筛，再通过多维元数据评分（演员、导演、年份、分类词根）精准消歧。
 func pickUniqueSlaveMid(
+	detail model.MovieDetail,
 	keys []string,
-	detailPid int64,
 	midsByLookupKey map[string][]int64,
 	infoByMid map[int64]model.FilmIndex,
 ) int64 {
+	detailPid := shared.ResolveMovieDetailRootPid(detail)
 	for _, key := range keys {
 		cands := uniquePositiveMIDs(midsByLookupKey[key])
 		if len(cands) == 0 {
 			continue
 		}
 		if len(cands) == 1 {
+			if info, ok := infoByMid[cands[0]]; ok {
+				if ScoreSlaveCandidate(detail, info) < -20 {
+					continue
+				}
+			}
 			return cands[0]
 		}
 		filtered := make([]int64, 0, len(cands))
@@ -57,7 +63,20 @@ func pickUniqueSlaveMid(
 			filtered = append(filtered, mid)
 		}
 		if len(filtered) == 1 {
+			if info, ok := infoByMid[filtered[0]]; ok {
+				if ScoreSlaveCandidate(detail, info) < -20 {
+					continue
+				}
+			}
 			return filtered[0]
+		}
+
+		targetCands := filtered
+		if len(targetCands) == 0 {
+			targetCands = cands
+		}
+		if bestMid := pickBestMidByScore(detail, targetCands, infoByMid); bestMid > 0 {
+			return bestMid
 		}
 	}
 	return 0
@@ -119,7 +138,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		if !isPlaylistWritableDetail(detail) {
 			continue
 		}
-		mid := pickUniqueSlaveMid(keysPerDetail[i], shared.ResolveMovieDetailRootPid(detail), midsByLookupKey, infoByMid)
+		mid := pickUniqueSlaveMid(detail, keysPerDetail[i], midsByLookupKey, infoByMid)
 		if mid > 0 && primaryKeyByMid[mid] != "" {
 			detailMids[i] = mid
 			if _, seen := seenMid[mid]; !seen {
@@ -219,7 +238,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 	ordered := make([]model.FilmIndex, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
-		mid := pickUniqueSlaveMid(item.keys, shared.ResolveMovieDetailRootPid(item.detail), midsByLookupKey, infoByMid)
+		mid := pickUniqueSlaveMid(item.detail, item.keys, midsByLookupKey, infoByMid)
 		if mid <= 0 {
 			continue
 		}
