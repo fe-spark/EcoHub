@@ -27,6 +27,7 @@ const (
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
 	TableFailureRecord      = "failure_records"
+	TableSchemaMigration    = "schema_migrations"
 )
 
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
@@ -55,5 +56,6 @@ var AllModels = []any{
 	&AccessDailyStats{},
 	&AccessDailyTop{},
 	&FailureRecord{},
+	&SchemaMigration{},
 }
 

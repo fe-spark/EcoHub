@@ -8,6 +8,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
+	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -41,8 +42,6 @@ func (s *InitService) DefaultDataInit() {
 	if err := config.EnsureContainerUploadVolume(); err != nil {
 		syslog.Warnf("[Init] %v", err)
 	}
-	// 一次性清理历史采集同步图库（素材中心仅保留用户上传）
-	repository.PurgeSyncedGallery()
 
 	// 网站基本信息初始化（首页轮播已移入内容管理）
 	s.SiteWebConfigInit()
@@ -76,79 +75,13 @@ func (s *InitService) TableInit() {
 		syslog.Errorf("Database AutoMigrate Failed: %v", err)
 		return
 	}
-	ensureMappingRuleIndexes()
-	ensureSnapshotPerformanceIndexes()
-	ensureMovieMatchKeyIndexes()
+
+	// 运行版本化自动迁移（只执行一次并记录在 schema_migrations 表中）
+	if err := migration.RunAutoMigrations(db.Mdb); err != nil {
+		syslog.Errorf("Database RunAutoMigrations Failed: %v", err)
+	}
 
 	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
-}
-
-func ensureMappingRuleIndexes() {
-	if err := repository.EnsureMappingRuleIndexes(); err != nil {
-		syslog.Errorf("Ensure mapping rule indexes failed: %v", err)
-	}
-}
-
-func ensureSnapshotPerformanceIndexes() {
-	if db.Mdb == nil {
-		return
-	}
-	queries := []string{
-		"CREATE INDEX idx_snap_pid_update ON film_list_snapshot(snapshot_version, pid, update_stamp)",
-		"CREATE INDEX idx_snap_cid_update ON film_list_snapshot(snapshot_version, cid, update_stamp)",
-		"CREATE INDEX idx_snap_pid_hits ON film_list_snapshot(snapshot_version, pid, hits)",
-		"CREATE INDEX idx_snap_cid_hits ON film_list_snapshot(snapshot_version, cid, hits)",
-		"CREATE INDEX idx_snap_pid_year ON film_list_snapshot(snapshot_version, pid, year, update_stamp)",
-		"CREATE INDEX idx_snap_ver_hits_pid ON film_list_snapshot(snapshot_version, hits, pid)",
-		"CREATE INDEX idx_snap_ver_series ON film_list_snapshot(snapshot_version, series_key, update_stamp)",
-	}
-	for _, sql := range queries {
-		if err := db.Mdb.Exec(sql).Error; err != nil {
-			msg := strings.ToLower(err.Error())
-			if !strings.Contains(msg, "duplicate key name") && !strings.Contains(msg, "already exists") {
-				syslog.Errorf("ensureSnapshotPerformanceIndexes failed: %v", err)
-			}
-		}
-	}
-}
-
-func ensureMovieMatchKeyIndexes() {
-	if db.Mdb == nil {
-		return
-	}
-	migrator := db.Mdb.Migrator()
-	if !migrator.HasTable(&model.MovieMatchKey{}) {
-		return
-	}
-	// 旧索引 idx_match_key 曾因 struct tag 语法被误建成了 (mid, match_key) 复合索引，
-	// 导致 match_key IN (...) 查询完全无法走索引而沦为数十万行全表扫描。
-	// 这里检查并确保重建为以 match_key 为单列的普通索引。
-	rebuild := false
-	if migrator.HasIndex(&model.MovieMatchKey{}, "idx_match_key") {
-		var colName string
-		err := db.Mdb.Raw(`
-			SELECT COLUMN_NAME 
-			FROM INFORMATION_SCHEMA.STATISTICS 
-			WHERE TABLE_SCHEMA = DATABASE() 
-			  AND TABLE_NAME = ? 
-			  AND INDEX_NAME = 'idx_match_key' 
-			ORDER BY SEQ_IN_INDEX ASC 
-			LIMIT 1
-		`, model.TableMovieMatchKey).Scan(&colName).Error
-		if err == nil && colName != "" && !strings.EqualFold(colName, "match_key") {
-			rebuild = true
-		}
-	} else {
-		rebuild = true
-	}
-	if rebuild {
-		_ = migrator.DropIndex(&model.MovieMatchKey{}, "idx_match_key")
-		if err := migrator.CreateIndex(&model.MovieMatchKey{}, "idx_match_key"); err != nil {
-			syslog.Errorf("ensureMovieMatchKeyIndexes CreateIndex failed: %v", err)
-		} else {
-			log.Printf("[Init] 成功重建 movie_match_key 单列索引 idx_match_key(match_key)")
-		}
-	}
 }
 
 // SiteWebConfigInit 初始化网站基本信息（首页轮播已移入内容管理，不再由初始化维护）
