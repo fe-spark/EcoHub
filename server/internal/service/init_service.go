@@ -11,7 +11,8 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmplaylist "server/internal/repository/film/playlist"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -49,22 +50,22 @@ func (s *InitService) DefaultDataInit() {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
 	// 定时任务启动前，从 Redis 备忘恢复保护期、孤儿游标与活跃快照版本到内存。
-	filmrepo.RestoreMasterSwitchProtection()
-	filmrepo.RestoreOrphanCleanCursor()
-	filmrepo.RestoreActiveSnapshotVersion()
+	filmplaylist.RestoreMasterSwitchProtection()
+	filmplaylist.RestoreOrphanCleanCursor()
+	filmsnapshot.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
 }
 
 func (s *InitService) ensureFilmListSnapshot() {
-	if err := filmrepo.EnsureActiveFilmListSnapshot(); err != nil {
+	if err := filmsnapshot.EnsureActiveFilmListSnapshot(); err != nil {
 		syslog.Errorf("[Init] 前台影片列表快照引导失败: %v", err)
 	}
 }
 
 func (s *InitService) loadActiveFilmReadModel() {
-	if err := filmrepo.LoadActiveFilmReadModel(""); err != nil {
+	if err := filmsnapshot.LoadActiveFilmReadModel(""); err != nil {
 		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
 	}
 }

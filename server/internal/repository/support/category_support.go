@@ -243,4 +243,3 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 	rootCategoryCNameCache.Store(cName, rootId)
 	return rootId
 }
-

@@ -10,32 +10,15 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/repository/film/cache"
+	"server/internal/repository/film/playlist"
+	"server/internal/repository/film/snapshot"
+	"server/internal/repository/film/writer"
 	"server/internal/repository/support"
+	"server/internal/utils"
 
 	"gorm.io/gorm"
-
-	"server/internal/utils"
 )
-
-func bumpSearchTagsCacheVersion() {
-	if db.Rdb == nil {
-		return
-	}
-	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, time.Now().UnixNano(), 0)
-}
-
-func getSearchTagsCacheVersion() string {
-	if db.Rdb == nil {
-		return fmt.Sprintf("%d", time.Now().UnixNano())
-	}
-	version, err := db.Rdb.Get(db.Cxt, config.SearchTagsVersionKey).Result()
-	if err == nil && version != "" {
-		return version
-	}
-	version = fmt.Sprintf("%d", time.Now().UnixNano())
-	db.Rdb.Set(db.Cxt, config.SearchTagsVersionKey, version, 0)
-	return version
-}
 
 func DelFilmSearch(id int64) error {
 	info := GetFilmIndexById(id)
@@ -69,90 +52,13 @@ func DelFilmSearch(id int64) error {
 	})
 
 	if err == nil {
-		DeleteActiveSnapshotsByMids(id)
-		ClearAdminFilmSearchCache()
-		ClearTVBoxListCache()
+		snapshot.DeleteActiveSnapshotsByMids(id)
+		cache.ClearTVBoxListCache()
 		if info != nil {
-			ClearSearchTagsCache(info.Pid)
+			cache.ClearSearchTagsCache(info.Pid)
 		}
 	}
 	return err
-}
-
-func ShieldFilmSearch(cid int64) error {
-	pID := support.GetParentId(cid)
-
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("cid = ?", cid).Delete(&model.FilmIndex{}).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("ShieldFilmSearch Error: %v", err)
-		return err
-	}
-
-	if pID > 0 {
-		if rebuildErr := RefreshSearchTagsByPids(pID); rebuildErr != nil {
-			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
-			return rebuildErr
-		}
-		DeleteActiveSnapshotsByCategory("cid", cid)
-		ClearAdminFilmSearchCache()
-		ClearSearchTagsCache(pID)
-	}
-	ClearTVBoxListCache()
-	support.ClearIndexPageCache()
-	return nil
-}
-
-func ShieldRootFilmSearch(pid int64) error {
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return tx.Where("cid = ? OR (pid = ? AND cid = 0)", pid, pid).Delete(&model.FilmIndex{}).Error
-	})
-	if err != nil {
-		log.Printf("ShieldRootFilmSearch Error: %v", err)
-		return err
-	}
-
-	if rebuildErr := RefreshSearchTagsByPids(pid); rebuildErr != nil {
-		log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
-		return rebuildErr
-	}
-	DeleteActiveRootSnapshots(pid)
-	ClearAdminFilmSearchCache()
-	ClearSearchTagsCache(pid)
-	ClearTVBoxListCache()
-	support.ClearIndexPageCache()
-	return nil
-}
-
-func RecoverFilmSearch(cid int64) error {
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Model(&model.FilmIndex{}).Unscoped().Where("cid = ?", cid).Update("deleted_at", nil).Error; err != nil {
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Printf("RecoverFilmSearch Error: %v", err)
-		return err
-	}
-
-	pID := support.GetParentId(cid)
-	if pID > 0 {
-		if rebuildErr := RefreshSearchTagsByPids(pID); rebuildErr != nil {
-			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
-			return rebuildErr
-		}
-		RestoreActiveSnapshotsByCategory(cid)
-		ClearAdminFilmSearchCache()
-		ClearSearchTagsCache(pID)
-	}
-	ClearTVBoxListCache()
-	support.ClearIndexPageCache()
-	return nil
 }
 
 func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
@@ -168,7 +74,6 @@ func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {
 	clearCost := time.Since(startedAt)
 
 	cacheStartedAt := time.Now()
-	ClearAdminFilmSearchCache()
 	InvalidateMasterSwitchCaches()
 	log.Printf("[Collect] 主站切换数据重置完成 sources=%d clear=%s cache=%s total=%s", len(ids), clearCost, time.Since(cacheStartedAt), time.Since(startedAt))
 	return nil
@@ -205,8 +110,8 @@ func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
 	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
 		return err
 	}
-	ClearOrphanCleanCursor()
-	SetMasterSwitchProtection(MasterSwitchColdStartDuration)
+	playlist.ClearOrphanCleanCursor()
+	playlist.SetMasterSwitchProtection(playlist.MasterSwitchColdStartDuration)
 	return nil
 }
 
@@ -229,64 +134,12 @@ func truncateTable(conn *gorm.DB, table string) error {
 	return support.TruncateTable(conn, table)
 }
 
-// ClearSearchTagsCache 清除特定分类的所有复合搜索标签缓存
-func ClearSearchTagsCache(pid int64) {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := fmt.Sprintf("%s:*", config.SearchTags)
-	ctx := db.Cxt
-	iter := db.Rdb.Scan(ctx, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(ctx) {
-		db.Rdb.Del(ctx, iter.Val())
-	}
-	bumpSearchTagsCacheVersion()
-}
-
-// ClearTVBoxConfigCache 清除 TVBox 配置缓存
-func ClearTVBoxConfigCache() {
-	if db.Rdb == nil {
-		return
-	}
-	db.Rdb.Del(db.Cxt, config.TVBoxConfigCacheKey)
-	pattern := config.TVBoxConfigCacheKey + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
-}
-
-func ClearTVBoxListCache() {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := config.TVBoxList + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
-}
-
-// ClearAllSearchTagsCache 清除所有分类的搜索标签缓存 (扫描清理)
-func ClearAllSearchTagsCache() {
-	if db.Rdb == nil {
-		return
-	}
-	pattern := config.SearchTags + ":*"
-	iter := db.Rdb.Scan(db.Cxt, 0, pattern, config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
-	}
-	bumpSearchTagsCacheVersion()
-	ClearTVBoxConfigCache()
-}
-
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() error {
 	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key 与孤儿治理游标。
 	defer ClearLegacyContentKeyNotices()
-	ClearOrphanCleanCursor()
-	SetMasterSwitchProtection(MasterSwitchColdStartDuration)
+	playlist.ClearOrphanCleanCursor()
+	playlist.SetMasterSwitchProtection(playlist.MasterSwitchColdStartDuration)
 
 	// 关键节点：清空影视库存
 	ReportResetProgress(20, "正在清空影视库存")
@@ -337,32 +190,24 @@ func FilmZero() error {
 
 	// 关键节点：清理缓存
 	ReportResetProgress(90, "正在清理缓存")
-	ClearSnapshotState()
-	ClearAdminFilmSearchCache()
+	snapshot.ClearSnapshotState()
 	RefreshMasterDataCaches()
 	ReportResetProgress(95, "数据清空完成")
 	return nil
 }
 
-// ClearMasterDataBySourceIDs 清理主站切换时必须重建的影片骨架和派生读模型。
-// 附属站播放列表是影视补充信息，保留原始 movie_key，等待新主站全量采集后重新聚合。
-func ClearMasterDataBySourceIDs(sourceIDs ...string) error {
-	return ClearMasterDataBySourceIDsFast(sourceIDs...)
-}
-
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.VirtualPictureKey)
 		db.Rdb.Del(db.Cxt, config.BannersKey)
 	}
-	ClearTVBoxListCache()
-	ClearTVBoxConfigCache()
+	cache.ClearTVBoxListCache()
+	cache.ClearTVBoxConfigCache()
 }
 
 func InvalidateMasterSwitchCaches() {
-	ClearActiveFilmReadModel()
-	clearActiveSnapshotVersion()
+	snapshot.ClearActiveFilmReadModel()
+	snapshot.ClearActiveSnapshotVersion()
 	support.RefreshCategoryCache()
 	support.InitMappingEngine()
 	support.TouchCategoryVersion()
@@ -373,7 +218,6 @@ func InvalidateMasterSwitchCaches() {
 			config.ActiveCategoryTreeKey,
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
-			config.VirtualPictureKey,
 			config.BannersKey,
 		)
 	}
@@ -388,7 +232,7 @@ func CleanEmptyFilms() int64 {
 	}
 	for _, info := range infos {
 		_ = DelFilmSearch(info.Mid)
-		ClearSearchTagsCache(info.Pid)
+		cache.ClearSearchTagsCache(info.Pid)
 	}
 	return int64(len(infos))
 }
@@ -457,12 +301,12 @@ func CleanSearchWithoutDetail() int64 {
 		for pid := range pidSet {
 			pids = append(pids, pid)
 		}
-		if rebuildErr := RefreshSearchTagsByPids(pids...); rebuildErr != nil {
+		if rebuildErr := writer.RefreshSearchTagsByPids(pids...); rebuildErr != nil {
 			log.Printf("RebuildSearchTagsByPids Error: %v", rebuildErr)
 		}
 	}
-	clearFilmIndexCachesByPidSet(pidSet)
-	DeleteActiveSnapshotsByMids(mids...)
-	ClearTVBoxListCache()
+	writer.ClearFilmIndexCachesByPidSet(pidSet)
+	snapshot.DeleteActiveSnapshotsByMids(mids...)
+	cache.ClearTVBoxListCache()
 	return int64(len(mids))
 }

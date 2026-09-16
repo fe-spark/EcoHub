@@ -9,23 +9,6 @@ import (
 	"server/internal/infra/syslog"
 )
 
-func histBucket(ms int64) string {
-	switch {
-	case ms <= 50:
-		return "b50"
-	case ms <= 100:
-		return "b100"
-	case ms <= 200:
-		return "b200"
-	case ms <= 500:
-		return "b500"
-	case ms <= 1000:
-		return "b1000"
-	default:
-		return "bInf"
-	}
-}
-
 func writeEvent(evt *AccessEvent) {
 	if evt == nil || db.Rdb == nil {
 		return

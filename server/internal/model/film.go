@@ -6,18 +6,6 @@ import (
 	"gorm.io/gorm"
 )
 
-// Movie 影片基本信息
-type Movie struct {
-	Id       int64  `json:"id"`       // 影片ID
-	Name     string `json:"name"`     // 影片名
-	Cid      int64  `json:"cid"`      // 所属分类ID
-	CName    string `json:"CName"`    // 所属分类名称
-	EnName   string `json:"enName"`   // 英文片名
-	Time     string `json:"time"`     // 更新时间
-	Remarks  string `json:"remarks"`  // 备注 | 清晰度
-	PlayFrom string `json:"playFrom"` // 播放来源
-}
-
 // MovieDescriptor 影片详情介绍信息
 type MovieDescriptor struct {
 	SubTitle    string `json:"subTitle"`    // 子标题
@@ -314,12 +302,6 @@ type SearchTagItem struct {
 
 func (SearchTagItem) TableName() string {
 	return TableSearchTag
-}
-
-// Tag 影片分类标签结构体
-type Tag struct {
-	Name  string `json:"name"`
-	Value any    `json:"value"`
 }
 
 // SearchTagsVO 搜索标签请求参数

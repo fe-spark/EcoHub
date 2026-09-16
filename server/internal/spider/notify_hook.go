@@ -7,6 +7,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/notify"
+	"server/internal/spider/progress"
 )
 
 // sourceLastErrors 记录本批单源失败原因，供批次摘要填充 Error 行。
@@ -44,26 +45,26 @@ func emitBatchSummaryForSources(batch *notify.ChangeBatch, trigger string, sourc
 	results := make([]model.SourceNotifyResult, 0, len(sources))
 	for _, src := range sources {
 		sourceIDs = append(sourceIDs, src.Id)
-		progress, ok := collectProgressSnapshot(src.Id)
+		snapshot, ok := progress.Snapshot(src.Id)
 		if !ok {
 			// 无进度时不默认 done，避免误报成功；由调用方保证有进度，或改用 Direct 结果。
-			progress = model.CollectProgress{
+			snapshot = model.CollectProgress{
 				Id:     src.Id,
 				Name:   src.Name,
-				Status: progressStatusFailed,
+				Status: progress.StatusFailed,
 			}
 		}
 		errMsg := takeSourceError(src.Id)
-		if errMsg == "" && progress.Status == progressStatusFailed && finalizeErr != nil {
+		if errMsg == "" && snapshot.Status == progress.StatusFailed && finalizeErr != nil {
 			errMsg = finalizeErr.Error()
 		}
-		results = append(results, notify.BuildSourceResult(src, progress, errMsg))
+		results = append(results, notify.BuildSourceResult(src, snapshot, errMsg))
 	}
 	// 若收尾失败，把仍处于 finalizing 的源标为 failed
 	if finalizeErr != nil {
 		for i := range results {
-			if results[i].Status == progressStatusFinalizing || results[i].Status == progressStatusWaitingPublish {
-				results[i].Status = progressStatusFailed
+			if results[i].Status == progress.StatusFinalizing || results[i].Status == progress.StatusWaitingPublish {
+				results[i].Status = progress.StatusFailed
 				if results[i].Error == "" {
 					results[i].Error = finalizeErr.Error()
 				}
@@ -87,7 +88,7 @@ func emitBatchSummaryForSources(batch *notify.ChangeBatch, trigger string, sourc
 	}
 }
 
-// emitBatchSummaryDirect 使用调用方给出的源结果发摘要（不依赖 collectProgress）。
+// emitBatchSummaryDirect 使用调用方给出的源结果发摘要（不依赖进度快照）。
 func emitBatchSummaryDirect(batch *notify.ChangeBatch, trigger string, results []model.SourceNotifyResult, startedAt time.Time, finalizeErr error) {
 	if len(results) == 0 {
 		return

@@ -145,4 +145,3 @@ func TestVerifyManagePassword_SafeNoSideEffects(t *testing.T) {
 		})
 	}
 }
-

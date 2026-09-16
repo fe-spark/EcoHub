@@ -10,7 +10,8 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmshared "server/internal/repository/film/shared"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
@@ -58,13 +59,13 @@ func (i *IndexService) GetNavCategory() []*model.Category {
 // GetFilmCategory 根据Pid或Cid获取指定的分页数据
 func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) []model.MovieBasicInfo {
 	var basicList []model.MovieBasicInfo
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	page = normalizeIndexPage(page)
 	switch idType {
 	case "pid":
-		basicList = filmrepo.GetSnapshotMovieListByCategoryPage(version, "pid", id, page)
+		basicList = filmsnapshot.GetSnapshotMovieListByCategoryPage(version, "pid", id, page)
 	case "cid":
-		basicList = filmrepo.GetSnapshotMovieListByCategoryPage(version, "cid", id, page)
+		basicList = filmsnapshot.GetSnapshotMovieListByCategoryPage(version, "cid", id, page)
 	}
 	return basicList
 }
@@ -93,7 +94,7 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // SearchTags 整合对应分类的搜索tag
 func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
-	return filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveReadModelVersion(), st.Pid)
+	return filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), st.Pid)
 }
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
@@ -102,16 +103,16 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 	if err := validateReadModelSearchTags(st); err != nil {
 		return nil, err
 	}
-	version := filmrepo.GetActiveReadModelVersion()
-	sl := filmrepo.ListFilmSnapshotsByTagsFast(version, st, page)
-	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...), nil
+	version := filmsnapshot.GetActiveReadModelVersion()
+	sl := filmsnapshot.ListFilmSnapshotsByTagsFast(version, st, page)
+	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...), nil
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
-		version = filmrepo.GetActiveSnapshotVersion()
+		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
 		return map[string]any{
@@ -120,7 +121,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any
 			"recent": []model.MovieBasicInfo{},
 		}
 	}
-	cacheKey := filmrepo.SnapshotClassifyCacheKey(version, pid, page)
+	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
@@ -145,15 +146,15 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		newsMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 0, pid, limit)
+		newsMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, limit)
 	}()
 	go func() {
 		defer wg.Done()
-		topMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 1, pid, limit)
+		topMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, limit)
 	}()
 	go func() {
 		defer wg.Done()
-		recentMovies = filmrepo.GetSnapshotTopMoviesBySortFast(version, 2, pid, limit)
+		recentMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, limit)
 	}()
 	wg.Wait()
 

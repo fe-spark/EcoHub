@@ -170,4 +170,3 @@ func (h *AccessHandler) CleanData(c *gin.Context) {
 		uc.UserID, res.DeletedDailyStats, res.DeletedDailyTop, res.DeletedRedisKeys, req.RetentionDays)
 	dto.Success(res, "数据分析数据清理成功", c)
 }
-

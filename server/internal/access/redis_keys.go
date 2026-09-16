@@ -10,7 +10,6 @@ const (
 	ttlMinute = 48 * time.Hour
 	ttlDay    = 14 * 24 * time.Hour
 	slowKeep  = 200
-	errorKeep = 200
 	zsetKeep  = 5000
 )
 
@@ -31,8 +30,6 @@ func topSearchKey(day string) string {
 func topPlayKey(day string) string     { return config.AccessKeyPrefix + "top:play:" + day }
 func topClassifyKey(day string) string { return config.AccessKeyPrefix + "top:classify:" + day }
 func recentDayKey(day string) string   { return config.AccessKeyPrefix + "recent:" + day }
-func slowDayKey(day string) string     { return config.AccessKeyPrefix + "slow:" + day }
-func errorDayKey(day string) string    { return config.AccessKeyPrefix + "error:" + day }
 func droppedKey() string               { return config.AccessKeyPrefix + "meta:dropped" }
 func droppedDayKey(day string) string  { return config.AccessKeyPrefix + "meta:dropped:" + day }
 

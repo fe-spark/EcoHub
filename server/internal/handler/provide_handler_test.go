@@ -21,7 +21,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -144,15 +144,15 @@ func setupProvideTestDB(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 	origRdb := db.Rdb
 	db.Mdb = gdb
 	db.Rdb = client
-	filmrepo.ClearActiveFilmReadModel()
+	filmsnapshot.ClearActiveFilmReadModel()
 
 	t.Cleanup(func() {
-		filmrepo.WaitActiveFilmSearchIndexBuilt()
+		filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 		_ = client.Close()
 		mr.Close()
 		db.Mdb = origMdb
 		db.Rdb = origRdb
-		filmrepo.ClearActiveFilmReadModel()
+		filmsnapshot.ClearActiveFilmReadModel()
 	})
 
 	return gdb, mr
@@ -254,9 +254,9 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		t.Fatalf("create detail202: %v", err)
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	gin.SetMode(gin.TestMode)
 
@@ -527,9 +527,9 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 		Hits:            100,
 	}
 	_ = db.Mdb.Create(&snap).Error
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -557,9 +557,9 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 	_, mr := setupProvideTestDB(t)
 	const version = "v_tvbox_empty"
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -594,9 +594,9 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 		Hits:            500,
 	}
 	_ = db.Mdb.Create(&snap).Error
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	const concurrency = 30
 	var wg sync.WaitGroup

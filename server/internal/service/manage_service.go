@@ -8,14 +8,10 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 type ManageService struct{}
-
-// NewManageService 创建管理服务实例
-func NewManageService() *ManageService {
-	return &ManageService{}
-}
 
 var ManageSvc = new(ManageService)
 
@@ -214,7 +210,7 @@ func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
 			if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 				return err
 			}
-			return filmrepo.RefreshActiveProjectedReadModel()
+			return filmsnapshot.RefreshActiveProjectedReadModel()
 		}
 	}
 	return nil

@@ -14,10 +14,6 @@ func CreateBaseDir() error {
 	return os.MkdirAll(config.FilmPictureUploadDir, os.ModePerm)
 }
 
-func RemoveFile(path string) error {
-	return os.Remove(path)
-}
-
 // ClearGalleryDir 清空图库目录下的文件（保留目录）
 func ClearGalleryDir() error {
 	dir := config.FilmPictureUploadDir

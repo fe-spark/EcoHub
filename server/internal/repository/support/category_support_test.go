@@ -161,4 +161,3 @@ func TestResolveRootCategoryIDByCName_ConcurrencyDeadlockFree(t *testing.T) {
 	wg.Wait()
 	close(done)
 }
-

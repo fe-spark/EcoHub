@@ -85,10 +85,6 @@ func loadDailyTops(day, kind string, limit int) []TopItem {
 	return items
 }
 
-func overviewFromDaily(row model.AccessDailyStats) *Overview {
-	return overviewFromDailyScope(row, "", "")
-}
-
 func overviewFromDailyScope(row model.AccessDailyStats, module, platform string) *Overview {
 	module = strings.ToLower(strings.TrimSpace(module))
 	platform = strings.ToLower(strings.TrimSpace(platform))

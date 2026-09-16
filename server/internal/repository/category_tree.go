@@ -2,10 +2,8 @@ package repository
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 	"sort"
-	"strings"
 	"time"
 
 	"server/internal/config"
@@ -13,57 +11,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository/support"
 )
-
-func GetSourceCategoryTree(sourceId string) (*model.CategoryTree, error) {
-	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" {
-		return nil, fmt.Errorf("source id 不能为空")
-	}
-	var rows []model.SourceCategory
-	if err := db.Mdb.Where("source_id = ?", sourceId).Order("depth ASC, parent_source_type_id ASC, sort ASC, id ASC").Find(&rows).Error; err != nil {
-		return nil, err
-	}
-	if len(rows) == 0 {
-		return nil, nil
-	}
-	return buildCategoryTreeFromSourceRows(rows)
-}
-
-func buildCategoryTreeFromSourceRows(rows []model.SourceCategory) (*model.CategoryTree, error) {
-	root := &model.CategoryTree{Id: 0, Pid: -1, Name: "分类信息", Show: true, Children: make([]*model.CategoryTree, 0)}
-	nodes := make(map[int64]*model.CategoryTree, len(rows))
-	for _, row := range rows {
-		name := strings.TrimSpace(row.RawName)
-		if name == "" {
-			return nil, fmt.Errorf("来源分类名称不能为空: %d", row.SourceTypeId)
-		}
-		nodes[row.SourceTypeId] = &model.CategoryTree{
-			Id:       row.SourceTypeId,
-			Pid:      row.ParentSourceTypeId,
-			Name:     name,
-			Sort:     row.Sort,
-			Show:     true,
-			Children: make([]*model.CategoryTree, 0),
-		}
-	}
-	for _, row := range rows {
-		node, ok := nodes[row.SourceTypeId]
-		if !ok {
-			return nil, fmt.Errorf("来源分类节点不存在: %d", row.SourceTypeId)
-		}
-		if row.ParentSourceTypeId == 0 {
-			root.Children = append(root.Children, node)
-			continue
-		}
-		parent, ok := nodes[row.ParentSourceTypeId]
-		if !ok {
-			return nil, fmt.Errorf("来源父分类不存在: %d", row.ParentSourceTypeId)
-		}
-		parent.Children = append(parent.Children, node)
-	}
-	sortCategoryTreeNodes(root.Children)
-	return root, nil
-}
 
 func sortCategoryTreeNodes(nodes []*model.CategoryTree) {
 	sort.SliceStable(nodes, func(i, j int) bool {
@@ -254,22 +201,6 @@ func GetActiveCategoryTree() model.CategoryTree {
 func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
 	active := make(map[int64]bool)
 
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, config.ActiveCategoryIDsKey).Result(); err == nil && data != "" {
-			var ids []int64
-			if json.Unmarshal([]byte(data), &ids) == nil && len(ids) > 0 {
-				for _, id := range ids {
-					if id > 0 {
-						active[id] = true
-					}
-				}
-				if len(active) > 0 {
-					return active
-				}
-			}
-		}
-	}
-
 	if db.Mdb != nil {
 		var categoryIDs []int64
 		if err := db.Mdb.Model(&model.CategoryMapping{}).
@@ -317,19 +248,4 @@ func sortRootCategories(children []*model.CategoryTree) {
 		}
 		return children[i].Id < children[j].Id
 	})
-}
-
-// GetChildrenTree 获取对应主分类下的子分类列表 (实时查库)
-func GetChildrenTree(pid int64) []*model.CategoryTree {
-	tree := buildTreeHelper()
-
-	if pid == 0 {
-		return tree.Children
-	}
-	for _, c := range tree.Children {
-		if c.Id == pid {
-			return c.Children
-		}
-	}
-	return nil
 }

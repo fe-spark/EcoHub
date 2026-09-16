@@ -45,13 +45,6 @@ func ExistSiteConfig() bool {
 	return count > 0
 }
 
-// ExistBannersConfig 判断 MySQL 中是否已有轮播配置
-func ExistBannersConfig() bool {
-	var count int64
-	db.Mdb.Model(&model.Banner{}).Count(&count)
-	return count > 0
-}
-
 // NormalizeSiteURL 规范化网站访问地址：trim、去尾斜杠；非法 scheme 返回空。
 func NormalizeSiteURL(raw string) string {
 	raw = strings.TrimSpace(raw)

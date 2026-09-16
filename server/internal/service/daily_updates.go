@@ -2,18 +2,18 @@ package service
 
 import (
 	"encoding/json"
+	"golang.org/x/sync/singleflight"
 	"log"
 	"math/rand"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
-	filmrepo "server/internal/repository/film"
+	filmshared "server/internal/repository/film/shared"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 const (
@@ -149,9 +149,9 @@ func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {
 	if len(mids) == 0 {
 		return []model.MovieBasicInfo{}
 	}
-	version := filmrepo.GetActiveReadModelVersion()
-	snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
-	list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+	version := filmsnapshot.GetActiveReadModelVersion()
+	snaps := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	list := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
 	if list == nil {
 		return []model.MovieBasicInfo{}
 	}
@@ -210,7 +210,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			}
 		}
 
-		version := filmrepo.GetActiveReadModelVersion()
+		version := filmsnapshot.GetActiveReadModelVersion()
 		if version == "" {
 			return empty, nil
 		}
@@ -253,8 +253,8 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			return empty, nil
 		}
 
-		snaps := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
-		list := filmrepo.BuildMovieBasicInfosFromSnapshots(snaps...)
+		snaps := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+		list := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
 		if list == nil {
 			list = empty
 		}
@@ -316,4 +316,3 @@ func storeHomeDailyUpdatesCache(cacheKey string, list []model.MovieBasicInfo) {
 		_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), homeDailyUpdateCacheTTL).Err()
 	}
 }
-

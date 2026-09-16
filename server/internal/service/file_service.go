@@ -14,10 +14,6 @@ import (
 
 type FileService struct{}
 
-func NewFileService() *FileService {
-	return &FileService{}
-}
-
 var FileSvc = new(FileService)
 
 func (s *FileService) SingleFileUpload(fileName string, name string, uid int) string {

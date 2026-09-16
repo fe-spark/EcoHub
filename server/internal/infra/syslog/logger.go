@@ -24,7 +24,6 @@ import (
 const (
 	logFileName       = "ecohub.log"
 	maxLogFileSize    = 10 * 1024 * 1024
-	maxLogRetention   = 7 * 24 * time.Hour
 	maxRecentLines    = 2000
 	readChunkSize     = 32 * 1024
 	entryBufferSize   = 10000
@@ -41,6 +40,8 @@ const (
 	LevelError = "error"
 )
 
+// logDir 默认在包初始化时解析一次；Init 会在 config 加载 .env 之后重新解析，
+// 因此运行期不依赖包初始化顺序（详见 Init）。
 var logDir = resolveDefaultLogDir()
 
 // resolveDefaultLogDir 解析日志根目录，优先级：
@@ -120,14 +121,10 @@ func newRollingLogger() *rollingLogger {
 }
 
 func Init() error {
+	// config 的 .env 已在包初始化阶段加载完成，此处重新解析可确保 ECOHUB_LOG_DIR 生效，
+	// 不必依赖 syslog 与 config 的包初始化顺序。
+	logDir = resolveDefaultLogDir()
 	return defaultLogger.open()
-}
-
-// SetMirror 设置文件以外的镜像输出（默认 os.Stdout）；传 nil 关闭镜像。
-func SetMirror(w io.Writer) {
-	defaultLogger.mu.Lock()
-	defer defaultLogger.mu.Unlock()
-	defaultLogger.mirror = w
 }
 
 // Writer 默认 INFO 级别的 io.Writer（兼容 log.SetOutput / gin.DefaultWriter）。
@@ -157,7 +154,6 @@ func Warnf(format string, v ...any)  { emit(LevelWarn, format, v...) }
 func Errorf(format string, v ...any) { emit(LevelError, format, v...) }
 
 func Info(v ...any)  { emit(LevelInfo, "%s", fmt.Sprint(v...)) }
-func Warn(v ...any)  { emit(LevelWarn, "%s", fmt.Sprint(v...)) }
 func Error(v ...any) { emit(LevelError, "%s", fmt.Sprint(v...)) }
 
 func emit(level, format string, v ...any) {

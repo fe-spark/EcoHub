@@ -7,6 +7,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmcache "server/internal/repository/film/cache"
 	"server/internal/spider"
 )
 
@@ -16,8 +17,8 @@ var SpiderSvc = new(SpiderService)
 
 func clearCategorySyncRedisCaches() {
 	repository.ClearCategoryCache()
-	filmrepo.ClearAllSearchTagsCache()
-	filmrepo.ClearTVBoxListCache()
+	filmcache.ClearAllSearchTagsCache()
+	filmcache.ClearTVBoxListCache()
 	repository.ClearIndexPageCache()
 }
 

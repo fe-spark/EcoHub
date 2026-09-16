@@ -9,7 +9,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -37,8 +37,8 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		mids = mids[:maxProvideVodDetailBatch]
 	}
 
-	version := filmrepo.GetActiveReadModelVersion()
-	snapshots := filmrepo.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	version := filmsnapshot.GetActiveReadModelVersion()
+	snapshots := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
 	if len(snapshots) == 0 {
 		return []model.FilmDetail{}
 	}

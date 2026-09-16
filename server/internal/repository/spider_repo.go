@@ -9,7 +9,6 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -165,10 +164,6 @@ func DeleteCollectSourceStatsTx(tx *gorm.DB, sourceIDs ...string) error {
 	return tx.Where("source_id IN ?", ids).Unscoped().Delete(&model.CollectSourceStats{}).Error
 }
 
-func ClearCollectSourceStatsTx(tx *gorm.DB) error {
-	return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CollectSourceStats{}).Error
-}
-
 // FindCollectSourceById 通过 Id 标识获取对应的资源站信息
 func FindCollectSourceById(id string) *model.FilmSource {
 	if db.Mdb == nil {
@@ -262,11 +257,6 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 	return db.Mdb.Create(list).Error
 }
 
-// UpdateCollectSource 更新采集站信息
-func UpdateCollectSource(s model.FilmSource) error {
-	return UpdateCollectSourceTx(db.Mdb, s)
-}
-
 func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if tx == nil {
 		return errors.New("database transaction is nil")
@@ -288,11 +278,6 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
-}
-
-// DemoteExistingMaster 将现有的主站降级为附属站，确保全局仅一个主站
-func DemoteExistingMaster() error {
-	return DemoteExistingMasterTx(db.Mdb)
 }
 
 func DemoteExistingMasterTx(tx *gorm.DB) error {
@@ -349,34 +334,6 @@ func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
 		query = query.Where("id <> ?", exceptID)
 	}
 	return query.Update("is_poster_source", false).Error
-}
-
-// ClearAllCollectSource 删除所有采集站信息
-func ClearAllCollectSource() {
-	if err := support.TruncateTable(db.Mdb, model.TableFilmSource); err != nil {
-		log.Println("Truncate table film_sources Error:", err)
-	}
-}
-
-func ResetCollectSources(list []model.FilmSource) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
-			return err
-		}
-		if err := ClearCollectSourceStatsTx(tx); err != nil {
-			return err
-		}
-		for i := range list {
-			if list[i].Id == "" {
-				list[i].Id = utils.GenerateHashKey(list[i].Uri)
-			}
-			normalizeCollectSourceDefaults(&list[i])
-		}
-		if len(list) == 0 {
-			return nil
-		}
-		return tx.Create(&list).Error
-	})
 }
 
 func normalizeCollectSourceDefaults(source *model.FilmSource) {

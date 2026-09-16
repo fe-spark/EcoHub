@@ -9,11 +9,6 @@ import (
 // catIdxAll 表示不按分类筛选（全部）。
 const catIdxAll = -1
 
-// buildPagedKeyboard 分页内联键盘：上一页/页码/下一页；withBack 时追加「返回分类」
-func buildPagedKeyboard(prefix, sessionID string, page, totalPages int, withBack bool) *InlineKeyboardMarkup {
-	return buildPagedKeyboardCategory(prefix, sessionID, catIdxAll, page, totalPages, withBack)
-}
-
 // buildPagedKeyboardCategory 带分类下标的分页内联键盘。
 // catIdx < 0 表示全部；callback 使用稳定短编码（page / pagec{idx}），避免分类名撑爆 64 字节限制。
 func buildPagedKeyboardCategory(prefix, sessionID string, catIdx, page, totalPages int, withBack bool) *InlineKeyboardMarkup {

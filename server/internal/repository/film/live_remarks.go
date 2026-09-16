@@ -7,6 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film/snapshot"
 )
 
 type liveProgress struct {
@@ -50,9 +51,6 @@ func formatLiveRemark(last string, n int) string {
 	return "更新至" + last
 }
 
-// maxLiveRemarksBatchSize 单次分批查询详情与播放列表的大小，防止单次 SQL 携带过多参数和产生大内存占用
-const maxLiveRemarksBatchSize = 100
-
 // LiveBannerSnapshot 轮播实时关联的影片动态信息
 type LiveBannerSnapshot struct {
 	Mid                int64
@@ -92,7 +90,7 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		return out
 	}
 
-	version := GetActiveSnapshotVersion()
+	version := snapshot.GetActiveSnapshotVersion()
 	if version == "" {
 		return out
 	}

@@ -18,8 +18,15 @@ import (
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmplaylist "server/internal/repository/film/playlist"
+	"server/internal/spider/fetcher"
+	"server/internal/spider/progress"
+	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
+
+// recoverMaxRetryCount 失败页重试的最大轮次。
+const recoverMaxRetryCount = 5
 
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
@@ -38,13 +45,13 @@ func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchCont
 	return written.Notify, nil
 }
 
-func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (collectWriteMids, error) {
+func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchCtx *collectBatchContext) (scheduler.Mids, error) {
 	if s == nil {
-		return collectWriteMids{}, errors.New("采集站信息不存在")
+		return scheduler.Mids{}, errors.New("采集站信息不存在")
 	}
 	ids = strings.TrimSpace(ids)
 	if ids == "" {
-		return collectWriteMids{}, nil
+		return scheduler.Mids{}, nil
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -53,17 +60,17 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
-	list, err := getFilmDetailWithRetry(ctx, s, r)
+	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
 	if err != nil {
-		return collectWriteMids{}, fmt.Errorf("get movie detail failed: %w", err)
+		return scheduler.Mids{}, fmt.Errorf("get movie detail failed: %w", err)
 	}
 	if len(list) <= 0 {
-		return collectWriteMids{}, errors.New("get movie detail failed: response list is empty")
+		return scheduler.Mids{}, errors.New("get movie detail failed: response list is empty")
 	}
 
 	written, err := saveCollectedFilmForCollect(ctx, s, 1, list)
 	if err != nil {
-		return collectWriteMids{}, err
+		return scheduler.Mids{}, err
 	}
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
@@ -128,13 +135,13 @@ func CollectSingleFilm(ids string) {
 
 	notifyResults := make([]model.SourceNotifyResult, 0, len(results))
 	for _, r := range results {
-		status := progressStatusDone
+		status := progress.StatusDone
 		errMsg := ""
 		if r.err != nil {
-			status = progressStatusFailed
+			status = progress.StatusFailed
 			errMsg = r.err.Error()
 		} else if finalizeErr != nil {
-			status = progressStatusFailed
+			status = progress.StatusFailed
 			errMsg = finalizeErr.Error()
 		}
 		notifyResults = append(notifyResults, notify.BuildSourceResultDirect(r.source, status, errMsg))
@@ -142,7 +149,7 @@ func CollectSingleFilm(ids string) {
 	if len(notifyResults) == 0 {
 		notifyResults = append(notifyResults, model.SourceNotifyResult{
 			SourceName: "单片更新",
-			Status:     progressStatusFailed,
+			Status:     progress.StatusFailed,
 			Error:      fmt.Sprintf("影片 #%d 未匹配到任何启用站点的 source_mid", globalMid),
 			FailedCnt:  1,
 		})
@@ -154,7 +161,7 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	if globalMid <= 0 {
 		return ""
 	}
-	sourceMid := filmrepo.LoadSourceMidByGlobalMid(globalMid, source.Id)
+	sourceMid := filmplaylist.LoadSourceMidByGlobalMid(globalMid, source.Id)
 	if sourceMid > 0 {
 		return strconv.FormatInt(sourceMid, 10)
 	}
@@ -179,7 +186,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
 	}
 
-	list, err := getFilmDetailWithRetry(ctx, s, r)
+	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
 		markRecoverFailure(s, fr, "recover_fetch", err)
 		log.Println("Recover GetMovieDetail Error: ", err)
@@ -227,7 +234,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", s.Id, err)
 		if notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
 			emitBatchSummaryDirect(batch, model.NotifyTriggerRecover, []model.SourceNotifyResult{
-				notify.BuildSourceResultDirect(*s, progressStatusFailed, err.Error()),
+				notify.BuildSourceResultDirect(*s, progress.StatusFailed, err.Error()),
 			}, startedAt, err)
 		} else {
 			emitSourceFailedNotify(s.Id, s.Name, err.Error())
@@ -345,13 +352,4 @@ func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
 		return nil
 	}
 	return errors.New(fmt.Sprint("测试失败, 请求响应异常 : ", err.Error()))
-}
-
-func GetActiveTasks() []string {
-	ids := make([]string, 0)
-	activeTasks.Range(func(key, value any) bool {
-		ids = append(ids, key.(string))
-		return true
-	})
-	return ids
 }

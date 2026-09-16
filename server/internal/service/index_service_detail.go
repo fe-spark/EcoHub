@@ -7,15 +7,17 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmplaylist "server/internal/repository/film/playlist"
+	filmshared "server/internal/repository/film/shared"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
+
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -89,9 +91,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		}
 
 		startedAt := time.Now()
-		version := filmrepo.GetActiveReadModelVersion()
+		version := filmsnapshot.GetActiveReadModelVersion()
 		snapshotStartedAt := time.Now()
-		snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
+		snapshot := filmsnapshot.GetSnapshotByMid(version, int64(id))
 		logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
 		if snapshot == nil {
 			if db.Rdb != nil {
@@ -100,10 +102,10 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			return model.MovieDetailVo{}, nil
 		}
 		detailStartedAt := time.Now()
-		movieDetail, localUpdateTime := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+		movieDetail, localUpdateTime := filmsnapshot.GetMovieDetailBySnapshot(*snapshot)
 		logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 		if movieDetail == nil {
-			filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
 			if db.Rdb != nil {
 				_ = db.Rdb.Set(db.Cxt, cacheKey, "{}", 60*time.Second).Err()
 			}
@@ -146,18 +148,18 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 // GetFilmDetailOnly 读取影片详情主体，不聚合附属站播放源。
 func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 	startedAt := time.Now()
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	snapshotStartedAt := time.Now()
-	snapshot := filmrepo.GetSnapshotByMid(version, int64(id))
+	snapshot := filmsnapshot.GetSnapshotByMid(version, int64(id))
 	logSlowIndexServiceStep("GetFilmDetailOnly.snapshot", snapshotStartedAt, "id", id)
 	if snapshot == nil {
 		return model.MovieDetail{}, nil
 	}
 	detailStartedAt := time.Now()
-	movieDetail, _ := filmrepo.GetMovieDetailBySnapshot(*snapshot)
+	movieDetail, _ := filmsnapshot.GetMovieDetailBySnapshot(*snapshot)
 	logSlowIndexServiceStep("GetFilmDetailOnly.detail", detailStartedAt, "id", id)
 	if movieDetail == nil {
-		filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+		filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
 		return model.MovieDetail{}, nil
 	}
 	logSlowIndexServiceStep("GetFilmDetailOnly.total", startedAt, "id", id)
@@ -171,9 +173,9 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 	}
 	startedAt := time.Now()
 	page = normalizeIndexPage(page)
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
-		version = filmrepo.GetActiveSnapshotVersion()
+		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
 		return []model.MovieBasicInfo{}
@@ -206,7 +208,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 		}
 
 		snapshotStartedAt := time.Now()
-		snapshot := filmrepo.GetSnapshotByMid(version, mid)
+		snapshot := filmsnapshot.GetSnapshotByMid(version, mid)
 		logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
 		if snapshot == nil {
 			if db.Rdb != nil {
@@ -214,18 +216,18 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 			}
 			return []model.MovieBasicInfo{}, nil
 		}
-		if !filmrepo.HasMovieDetail(snapshot.Mid) {
-			filmrepo.DeleteActiveSnapshotsByMids(snapshot.Mid)
+		if !filmsnapshot.HasMovieDetail(snapshot.Mid) {
+			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
 			if db.Rdb != nil {
 				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
 			}
 			return []model.MovieBasicInfo{}, nil
 		}
 		listStartedAt := time.Now()
-		list := filmrepo.ListRelatedSnapshotsReadModel(version, *snapshot, page)
+		list := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page)
 		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
 		buildStartedAt := time.Now()
-		result := filmrepo.BuildMovieBasicInfosFromSnapshots(list...)
+		result := filmshared.BuildMovieBasicInfosFromSnapshots(list...)
 		logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
 		logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
 
@@ -263,7 +265,7 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 	playList := buildPrimaryPlaySources(snapshot, detail)
 	logSlowIndexServiceStep("multipleSource.primary", primaryStartedAt, "id", snapshot.Mid)
 	keysStartedAt := time.Now()
-	names := filmrepo.LoadMovieMatchKeysBySnapshot(snapshot, detail)
+	names := filmshared.LoadMovieMatchKeysBySnapshot(snapshot, detail)
 	logSlowIndexServiceStep("multipleSource.matchKeys", keysStartedAt, "id", snapshot.Mid)
 	if len(names) == 0 {
 		return playList
@@ -296,7 +298,7 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 	}
 
 	groupsStartedAt := time.Now()
-	groupsBySource := filmrepo.GetMultiplePlayGroupsBySourcesAndKeys(querySources, names)
+	groupsBySource := filmplaylist.GetMultiplePlayGroupsBySourcesAndKeys(querySources, names)
 	logSlowIndexServiceStep("multipleSource.playlists", groupsStartedAt, "id", snapshot.Mid, "sources", len(querySources), "keys", len(names))
 	for _, source := range querySources {
 		groups := groupsBySource[source.Id]
@@ -344,8 +346,8 @@ func buildPrimaryPlaySources(snapshot *model.FilmListSnapshot, detail *model.Mov
 		}
 
 		rawName := strings.TrimSpace(resolvePrimarySourceName(detail.PlayFrom, index))
-		sourceName := filmrepo.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
-		groupID := filmrepo.BuildPlayGroupID(sourceID, rawName, index, len(detail.PlayList))
+		sourceName := filmshared.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList))
+		groupID := filmshared.BuildPlayGroupID(sourceID, rawName, index, len(detail.PlayList))
 
 		adaptedLinks := rewriteURLGroup(links, rules)
 

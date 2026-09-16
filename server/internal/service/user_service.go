@@ -11,10 +11,6 @@ import (
 
 type UserService struct{}
 
-func NewUserService() *UserService {
-	return &UserService{}
-}
-
 var UserSvc = new(UserService)
 
 // UserLogin 用户登录

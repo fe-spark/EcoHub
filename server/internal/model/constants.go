@@ -5,12 +5,10 @@ const (
 	TagOthersValue  = "__others__"
 	TagOthersName   = "其他"
 	TagUnknownValue = "__unknown__"
-	TagUnknownName  = "未知"
 )
 
 const (
 	TagUncategorizedValue int64 = -1
-	TagUncategorizedName        = "未细分"
 )
 
 // Standard Big Categories (顶级大类)
@@ -21,5 +19,4 @@ const (
 	BigCategoryAnimation   = "动漫"
 	BigCategoryDocumentary = "纪录片"
 	BigCategoryShortFilm   = "短剧"
-	BigCategoryOther       = "其他"
 )

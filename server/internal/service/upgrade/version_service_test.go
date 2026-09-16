@@ -69,4 +69,3 @@ func TestGetAppVersionNoCheck(t *testing.T) {
 		t.Fatalf("expected UpgradeError empty for non-admin check, got %q", info.UpgradeError)
 	}
 }
-

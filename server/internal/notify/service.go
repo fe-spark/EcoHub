@@ -250,11 +250,6 @@ func sourceConfigBatchRateKey(items []SourceConfigChangeItem) string {
 	return model.NotifyEventSourceConfigChanged + ":batch:" + hex.EncodeToString(sum[:8])
 }
 
-// SendTest 使用已保存配置发送测试消息。
-func SendTest() (model.NotifyTestResult, error) {
-	return SendTestWith("", nil)
-}
-
 // 测试发送最小间隔，避免管理端被当作 Telegram 代发代理刷接口。
 const testSendMinInterval = 3 * time.Second
 
@@ -324,44 +319,6 @@ func sendMessages(cfg model.NotifyConfig, severity model.Severity, category stri
 	for _, msg := range messages {
 		sendMessagesWithMarkup(cfg, severity, category, msg, nil)
 	}
-}
-
-// Dispatch 派发统一事件，根据 Severity、Category、QuietHours、Targets 订阅矩阵进行精准路由分发。
-func Dispatch(ctx context.Context, evt model.NotifyEvent) {
-	_ = ctx
-	safePublish(func() {
-		cfg := GetConfig()
-		if !cfg.Enabled {
-			return
-		}
-		// 事件特定开关校验
-		if evt.Key != "" && !eventEnabled(cfg, evt.Key) {
-			return
-		}
-
-		// 限流控制
-		if evt.Key != "" {
-			interval := time.Duration(cfg.MinIntervalSec) * time.Second
-			if evt.Key == model.NotifyEventCollectBatchSummary {
-				interval = 0 // 摘要按批次自然频率
-			}
-			entityID := ""
-			if id, ok := evt.Data["entity_id"].(string); ok {
-				entityID = id
-			}
-			limitKey := evt.Key
-			if entityID != "" {
-				limitKey = evt.Key + ":" + entityID
-			}
-			if interval > 0 && !allowOrLog(limitKey, interval) {
-				return
-			}
-		}
-
-		// 格式化 HTML 内容
-		htmlText := formatEventHTML(siteName(), evt)
-		sendMessagesWithMarkup(cfg, evt.Severity, evt.Category, htmlText, nil)
-	})
 }
 
 var publishWg sync.WaitGroup

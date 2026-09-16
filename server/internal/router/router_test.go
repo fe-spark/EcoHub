@@ -160,4 +160,3 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/system/logs/delta should allow admin, got %d", wAdminLogsDelta.Code)
 	}
 }
-

@@ -24,15 +24,6 @@ const (
 	Spider 数据 爬取 & 处理 & 转换
 */
 
-type FilmCollect interface {
-	// GetCategoryTree 获取影视分类数据
-	GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, error)
-	// GetPageCount 获取API接口的分页页数
-	GetPageCount(r utils.RequestInfo) (count int, err error)
-	// GetFilmDetail 获取影片详情信息,返回影片详情列表
-	GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error)
-}
-
 // ------------------------------------------------- JSON Collect -------------------------------------------------
 
 // JsonCollect 处理返回值为JSON格式的采集数据

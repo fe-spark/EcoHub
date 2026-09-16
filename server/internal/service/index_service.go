@@ -8,13 +8,14 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/singleflight"
-
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type IndexService struct{}
@@ -53,7 +54,7 @@ var indexPageSfGroup singleflight.Group
 
 // IndexPage 首页数据处理
 func (i *IndexService) IndexPage() map[string]any {
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	cacheKey := fmt.Sprintf("%s:s%s:r%s", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
 
@@ -97,11 +98,11 @@ func (i *IndexService) IndexPage() map[string]any {
 				var movies []model.MovieBasicInfo
 				var hotMovies []model.MovieBasicInfo
 				if cat.Children != nil {
-					movies = filmrepo.GetSnapshotMovieListByCategory(version, "pid", cat.Id, 14, 0)
-					hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "pid", cat.Id, 14, 0)
+					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "pid", cat.Id, 14, 0)
+					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "pid", cat.Id, 14, 0)
 				} else {
-					movies = filmrepo.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
-					hotMovies = filmrepo.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
 				}
 				if movies == nil {
 					movies = make([]model.MovieBasicInfo, 0)
@@ -197,7 +198,7 @@ func processDynamicRecommendSection(secMap map[string]any, version string) map[s
 		if isPid {
 			field = "pid"
 		}
-		dynamicMovies := filmrepo.GetSnapshotDynamicHotMovieListByCategory(version, field, catID, 14, 50)
+		dynamicMovies := filmsnapshot.GetSnapshotDynamicHotMovieListByCategory(version, field, catID, 14, 50)
 		if len(dynamicMovies) > 0 {
 			itemCopy["movies"] = dynamicMovies
 		}
@@ -357,4 +358,3 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 	}
 	return out
 }
-

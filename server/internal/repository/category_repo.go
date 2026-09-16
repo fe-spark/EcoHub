@@ -1,8 +1,6 @@
 package repository
 
 import (
-	"strings"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -15,29 +13,6 @@ func BuildCategoryStableKey(pid int64, name string) string {
 
 func GetCategoryStableKeyByID(id int64) string {
 	return support.GetCategoryStableKeyByID(id)
-}
-
-func GetCategoryByID(id int64) *model.Category {
-	if id <= 0 {
-		return nil
-	}
-	var category model.Category
-	if err := db.Mdb.Where("id = ?", id).First(&category).Error; err != nil {
-		return nil
-	}
-	return &category
-}
-
-func GetCategoryByStableKey(stableKey string) *model.Category {
-	stableKey = strings.TrimSpace(stableKey)
-	if stableKey == "" {
-		return nil
-	}
-	var category model.Category
-	if err := db.Mdb.Where("stable_key = ?", stableKey).First(&category).Error; err != nil {
-		return nil
-	}
-	return &category
 }
 
 func ResolveCategoryID(id int64) int64 {

@@ -6,6 +6,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film/cache"
+	"server/internal/repository/film/snapshot"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -101,9 +103,9 @@ func TestAdminRepo_RedisNilSafety(t *testing.T) {
 	}()
 
 	// 验证在 Redis 为空时均不 panic
-	bumpSearchTagsCacheVersion()
+	cache.BumpSearchTagsVersion()
 
-	v := getSearchTagsCacheVersion()
+	v := cache.GetSearchTagsVersion()
 	if v == "" {
 		t.Fatalf("expected non-empty version fallback when Redis is nil")
 	}
@@ -119,18 +121,18 @@ func TestSnapshotAndShared_RedisNilSafety(t *testing.T) {
 	}()
 
 	// 1. 无 DB 也无 Redis 环境
-	_ = GetActiveSnapshotVersion()
-	_ = SetActiveSnapshotVersion("v_nil_redis")
-	RefreshAccessDataCaches()
-	ClearSnapshotState()
+	_ = snapshot.GetActiveSnapshotVersion()
+	_ = snapshot.SetActiveSnapshotVersion("v_nil_redis")
+	snapshot.RefreshAccessDataCaches()
+	snapshot.ClearSnapshotState()
 	refreshCategoryCaches()
 
 	// 2. 有 DB 但无 Redis 环境
 	_ = setupFilmZeroTestDB(t)
-	_ = GetActiveSnapshotVersion()
-	_ = SetActiveSnapshotVersion("v_nil_redis")
-	RefreshAccessDataCaches()
-	ClearSnapshotState()
+	_ = snapshot.GetActiveSnapshotVersion()
+	_ = snapshot.SetActiveSnapshotVersion("v_nil_redis")
+	snapshot.RefreshAccessDataCaches()
+	snapshot.ClearSnapshotState()
 	refreshCategoryCaches()
 }
 
@@ -140,15 +142,15 @@ func TestInvalidateMasterSwitchCaches_ClearsActiveSnapshotVersion(t *testing.T) 
 	db.Rdb = nil
 	t.Cleanup(func() { db.Rdb = origRdb })
 
-	if err := SetActiveSnapshotVersion("ghost_after_switch"); err != nil {
+	if err := snapshot.SetActiveSnapshotVersion("ghost_after_switch"); err != nil {
 		t.Fatalf("set version: %v", err)
 	}
-	if GetActiveSnapshotVersion() != "ghost_after_switch" {
+	if snapshot.GetActiveSnapshotVersion() != "ghost_after_switch" {
 		t.Fatal("expected version to be set in memory")
 	}
 
 	InvalidateMasterSwitchCaches()
-	if got := GetActiveSnapshotVersion(); got != "" {
+	if got := snapshot.GetActiveSnapshotVersion(); got != "" {
 		t.Fatalf("expected memory snapshot version cleared on master switch, got %q", got)
 	}
 }

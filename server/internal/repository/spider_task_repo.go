@@ -147,10 +147,3 @@ func ResetFilmTasks(tasks []model.FilmCollectTask) error {
 		return nil
 	})
 }
-
-// ExistTask 是否存在定时任务相关信息
-func ExistTask() bool {
-	var count int64
-	db.Mdb.Model(&model.CrontabRecord{}).Count(&count)
-	return count > 0
-}

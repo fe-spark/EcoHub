@@ -43,8 +43,6 @@ var (
 )
 
 const (
-	// MAXGoroutine 历史常量：单站分页 worker 默认值（优先用 CollectPageWorkers）。
-	MAXGoroutine = 6
 
 	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发），
 	// 同时作为运行时参数为 0 时的兜底默认值。实际档位按 CPU 核数自动选
@@ -107,8 +105,6 @@ const (
 	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
 	// ActiveCategoryTreeKey 活跃分类树缓存 key
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
-	// ActiveCategoryIDsKey 活跃分类 ID 集合缓存 key
-	ActiveCategoryIDsKey = RedisKeyPrefix + ":Category:ActiveIDs"
 	// CategoryVersionKey 分类版本号缓存 key
 	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
 	// RuleVersionKey 分类规则版本号缓存 key
@@ -177,8 +173,6 @@ const (
 	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
 	// NotifyBatchCachePrefix 变更通知批次缓存前缀
 	NotifyBatchCachePrefix = RedisKeyPrefix + ":Notify:Batch"
-	// VirtualPictureKey 待同步图片临时存储 key
-	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"
 
 	// --- 7. 版本检查缓存 (Version) ---
 	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
@@ -214,8 +208,6 @@ const (
 
 	// DefaultUpdateSpec 每30分钟执行一次
 	DefaultUpdateSpec = "0 */30 * * * ?"
-	// EveryWeekSpec 每天凌晨4点执行一次
-	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
 	// OrphanCleanSpec 每天 04:35，错开 DefaultUpdateSpec 的 30 分钟整点（含 04:30）。
@@ -229,14 +221,6 @@ const (
 // -------------------------Database Connection Params-----------------------------------
 const (
 	UserIdInitialVal = 10000
-)
-
-// -------------------------Provide Config-----------------------------------
-const (
-	PlayForm      = "bkm3u8"
-	PlayFormCloud = "ecohub"
-	PlayFormAll   = "ecohub$$$bkm3u8"
-	RssVersion    = "5.1"
 )
 
 const (
