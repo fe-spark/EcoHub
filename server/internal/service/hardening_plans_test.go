@@ -15,6 +15,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmrepo "server/internal/repository/film"
@@ -538,14 +539,18 @@ func TestPlan2_ClearAllSnapshotDynamicCaches_Invalidation(t *testing.T) {
 	}
 }
 
-// 方案 1 边缘测试：验证 ensureSnapshotPerformanceIndexes 执行正常且幂等
+// 方案 1 边缘测试：验证 RunAutoMigrations 执行正常且幂等
 func TestPlan1_EnsureSnapshotPerformanceIndexes(t *testing.T) {
-	_, _ = setupTestDBAndRedis(t)
+	gdb, _ := setupTestDBAndRedis(t)
 
-	// 首次调用执行 DDL
-	ensureSnapshotPerformanceIndexes()
+	// 首次调用执行迁移
+	if err := migration.RunAutoMigrations(gdb); err != nil {
+		t.Fatalf("first RunAutoMigrations failed: %v", err)
+	}
 	// 二次调用验证幂等性
-	ensureSnapshotPerformanceIndexes()
+	if err := migration.RunAutoMigrations(gdb); err != nil {
+		t.Fatalf("second RunAutoMigrations failed: %v", err)
+	}
 }
 
 // 方案 1 边缘测试：无数据时写入 60s 空值缓存防穿透
