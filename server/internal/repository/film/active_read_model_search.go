@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -78,20 +77,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		if st.Cid > 0 {
 			query = query.Where("cid = ?", st.Cid)
 		}
-		if st.Plot != "" && st.Plot != "全部" && st.Plot != model.TagOthersValue && st.Plot != model.TagUnknownValue {
-			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
-		}
-		if st.Area != "" && st.Area != "全部" && st.Area != model.TagOthersValue && st.Area != model.TagUnknownValue {
-			query = query.Where("area = ?", st.Area)
-		}
-		if st.Language != "" && st.Language != "全部" && st.Language != model.TagOthersValue && st.Language != model.TagUnknownValue {
-			query = query.Where("language = ?", st.Language)
-		}
-		if st.Year != "" && st.Year != "全部" && st.Year != model.TagOthersValue && st.Year != model.TagUnknownValue {
-			if yearInt, err := strconv.ParseInt(st.Year, 10, 64); err == nil && yearInt > 0 {
-				query = query.Where("year = ?", yearInt)
-			}
-		}
+		query = applyTagSearchFilter(query, version, st)
 
 		var total int64
 		if err := query.Count(&total).Error; err != nil {

@@ -181,8 +181,8 @@ func isAbnormalTextTagValue(value string, minLen int, maxLen int) bool {
 }
 
 func isOthersSearchTagValue(value string) bool {
-	switch strings.TrimSpace(value) {
-	case model.TagOthersValue, model.TagOthersName, "其它":
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case model.TagOthersValue, model.TagOthersName, "其它", "others", "other":
 		return true
 	default:
 		return false
