@@ -43,20 +43,6 @@ func resolveDefaultLogDir() string {
 	if env := os.Getenv("ECOHUB_LOG_DIR"); env != "" {
 		return env
 	}
-	cwd, err := os.Getwd()
-	if err == nil {
-		dir := cwd
-		for {
-			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-				return filepath.Join(dir, defaultLogDir)
-			}
-			parent := filepath.Dir(dir)
-			if parent == dir {
-				break
-			}
-			dir = parent
-		}
-	}
 	return defaultLogDir
 }
 

@@ -113,7 +113,7 @@ func applySameCurrentRootCategoryFilter(query *gorm.DB, search model.FilmIndex) 
 func applySameCurrentCategoryFilter(query *gorm.DB, search model.FilmIndex) *gorm.DB {
 	categoryIDs := currentCategoryIDsForSearch(search)
 	if len(categoryIDs) == 0 {
-		return applySameCurrentRootCategoryFilter(query, search)
+		return query.Where("1 = 0")
 	}
 	categoryQuery := db.Mdb.Where("1 = 0")
 	for _, categoryID := range categoryIDs {
