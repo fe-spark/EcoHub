@@ -9,7 +9,7 @@ import (
 	"strconv"
 
 	"server/internal/model"
-	"server/internal/spider/conver"
+	"server/internal/spider/converter"
 	"server/internal/utils"
 )
 
@@ -65,7 +65,7 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 	}
 	parentHints := jc.inferCategoryParents(r, cl)
 	// 组装分类数据信息树形结构
-	tree := conver.GenCategoryTreeWithParentHints(cl, parentHints)
+	tree := converter.GenCategoryTreeWithParentHints(cl, parentHints)
 
 	return tree, nil
 }
@@ -243,6 +243,6 @@ func (jc *JsonCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDet
 	}
 
 	// 处理details信息
-	list = conver.ConvertFilmDetails(detailPage.List)
+	list = converter.ConvertFilmDetails(detailPage.List)
 	return
 }

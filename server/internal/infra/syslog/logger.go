@@ -39,7 +39,28 @@ const (
 	LevelError = "error"
 )
 
-var logDir = defaultLogDir
+var logDir = resolveDefaultLogDir()
+
+func resolveDefaultLogDir() string {
+	if env := os.Getenv("ECOHUB_LOG_DIR"); env != "" {
+		return env
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		dir := cwd
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return filepath.Join(dir, defaultLogDir)
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
+	}
+	return defaultLogDir
+}
 
 // 仅识别写入时打上的结构化级别标签（时间戳后），用于从文件恢复缓冲。
 // 不扫描正文关键词。
