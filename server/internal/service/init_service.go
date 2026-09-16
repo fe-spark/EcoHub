@@ -78,6 +78,7 @@ func (s *InitService) TableInit() {
 	}
 	ensureMappingRuleIndexes()
 	ensureSnapshotPerformanceIndexes()
+	ensureMovieMatchKeyIndexes()
 
 	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
 }
@@ -107,6 +108,45 @@ func ensureSnapshotPerformanceIndexes() {
 			if !strings.Contains(msg, "duplicate key name") && !strings.Contains(msg, "already exists") {
 				syslog.Errorf("ensureSnapshotPerformanceIndexes failed: %v", err)
 			}
+		}
+	}
+}
+
+func ensureMovieMatchKeyIndexes() {
+	if db.Mdb == nil {
+		return
+	}
+	migrator := db.Mdb.Migrator()
+	if !migrator.HasTable(&model.MovieMatchKey{}) {
+		return
+	}
+	// 旧索引 idx_match_key 曾因 struct tag 语法被误建成了 (mid, match_key) 复合索引，
+	// 导致 match_key IN (...) 查询完全无法走索引而沦为数十万行全表扫描。
+	// 这里检查并确保重建为以 match_key 为单列的普通索引。
+	rebuild := false
+	if migrator.HasIndex(&model.MovieMatchKey{}, "idx_match_key") {
+		var colName string
+		err := db.Mdb.Raw(`
+			SELECT COLUMN_NAME 
+			FROM INFORMATION_SCHEMA.STATISTICS 
+			WHERE TABLE_SCHEMA = DATABASE() 
+			  AND TABLE_NAME = ? 
+			  AND INDEX_NAME = 'idx_match_key' 
+			ORDER BY SEQ_IN_INDEX ASC 
+			LIMIT 1
+		`, model.TableMovieMatchKey).Scan(&colName).Error
+		if err == nil && colName != "" && !strings.EqualFold(colName, "match_key") {
+			rebuild = true
+		}
+	} else {
+		rebuild = true
+	}
+	if rebuild {
+		_ = migrator.DropIndex(&model.MovieMatchKey{}, "idx_match_key")
+		if err := migrator.CreateIndex(&model.MovieMatchKey{}, "idx_match_key"); err != nil {
+			syslog.Errorf("ensureMovieMatchKeyIndexes CreateIndex failed: %v", err)
+		} else {
+			log.Printf("[Init] 成功重建 movie_match_key 单列索引 idx_match_key(match_key)")
 		}
 	}
 }

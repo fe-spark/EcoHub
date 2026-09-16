@@ -148,7 +148,7 @@ func (MoviePoster) TableName() string {
 // MovieMatchKey 主站影片匹配键索引（豆瓣 / 片名#大类 / 纯片名回退）。
 type MovieMatchKey struct {
 	gorm.Model
-	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match;index:idx_match_key"`
+	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match"`
 	MatchKey string `gorm:"size:64;uniqueIndex:uidx_mid_match;index:idx_match_key"`
 }
 
