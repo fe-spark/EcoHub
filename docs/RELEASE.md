@@ -1,3 +1,22 @@
+预发布 **v2.7.0-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v2.7.0-beta.2`。
+
+### 升级指引
+
+- 后台检查更新，或 `docker compose pull ecohub && docker compose up -d ecohub`。
+- 升级后对附属站再采一轮，同名串源才会重绑。
+
+---
+
+### v2.7.0-beta.2
+
+- 同名跨类按豆瓣/名称/类别/标签/年份/备注形态打分绑定播放源。
+- 错槽只清同一部写到别人独占键上的旧行。
+- 快照发布、重置、主站切换会清详情与列表缓存。
+- 单站采集失败不再重复释放占用。
+- 管理端按队列展示采集进度。
+
+---
+
 正式版 **v2.6.8**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.6.8` 与 `ghcr.io/fe-spark/ecohub:latest`。
 
 ### 升级指引
