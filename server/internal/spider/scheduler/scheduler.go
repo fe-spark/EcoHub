@@ -430,6 +430,12 @@ func (l *writeLane) run(workerID int) {
 
 		func() {
 			defer finish()
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("[Spider][WriteScheduler] %s lane worker=%d complete panic source=%s page=%d: %v",
+						l.name, workerID, job.SourceName, job.Page, rec)
+				}
+			}()
 
 			start := time.Now()
 			var mids Mids
@@ -444,13 +450,15 @@ func (l *writeLane) run(workerID int) {
 				}()
 				mids, err = job.Write()
 			}()
-			job.Complete(Completion{
-				Page:         job.Page,
-				NotifyMIDs:   mids.Notify,
-				AffectedMIDs: mids.Affected,
-				Err:          err,
-				Stage:        "save",
-			})
+			if job.Complete != nil {
+				job.Complete(Completion{
+					Page:         job.Page,
+					NotifyMIDs:   mids.Notify,
+					AffectedMIDs: mids.Affected,
+					Err:          err,
+					Stage:        "save",
+				})
+			}
 
 			if shouldLogWrite(job.Page) || err != nil || meta.tail {
 				status := "ok"

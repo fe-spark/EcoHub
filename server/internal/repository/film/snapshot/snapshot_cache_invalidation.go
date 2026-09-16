@@ -23,6 +23,7 @@ func RefreshAccessDataCaches() {
 	cache.BumpSearchTagsVersion()
 	cache.ClearPatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
+		fmt.Sprintf("%s:*", config.TVBoxConfigCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
@@ -61,6 +62,9 @@ func invalidateSnapshotDataCaches(version string, mids []int64) {
 				pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
 				if version != "" {
 					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d", config.FilmRelateCandCachePrefix, version, mid))
+					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s10", config.FilmRelateVOCachePrefix, version, mid))
+					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s12", config.FilmRelateVOCachePrefix, version, mid))
+					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s20", config.FilmRelateVOCachePrefix, version, mid))
 				}
 			}
 			_, _ = pipe.Exec(db.Cxt)
@@ -85,6 +89,7 @@ func ClearAllSnapshotDynamicCaches() {
 		config.FilmRelatePrefix+":*",
 		config.FilmClassifyCacheKey+":*",
 		config.FilmFilterOptionKey+":*",
+		config.TVBoxConfigCacheKey+":*",
 		config.TVBoxList+":*",
 		config.TVBoxNetworkConfigCacheKey+":*",
 		config.IndexPageCacheKey+"*",

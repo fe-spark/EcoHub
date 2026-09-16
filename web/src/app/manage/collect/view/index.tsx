@@ -906,6 +906,7 @@ export default function CollectManagePageView() {
       message.warning("请至少选择一个采集站");
       return;
     }
+    setBatchOpen(false);
     const idSet = new Set(batchIds);
     // 批量启动：先本地全部置为 starting 0%，关闭弹窗即可看到进度
     setSiteList((current) =>
@@ -940,7 +941,6 @@ export default function CollectManagePageView() {
     });
     if (resp.code === 0) {
       message.success(resp.msg);
-      setBatchOpen(false);
       void getCollectList(true);
       return;
     }
@@ -953,7 +953,6 @@ export default function CollectManagePageView() {
       ),
     );
     setBatchRunIds([]);
-    setBatchOpen(false);
     setOverallSession(null);
     hasSeenRunningRef.current = false;
     window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
