@@ -254,7 +254,6 @@ export default function FilmClassifySearchPageView({
           tagsMap={tagsMap}
           activeParams={currentParams}
           activeChips={activeChips}
-          total={safePage.total}
           isPending={isPending}
           onTagClick={handleTagClick}
           onRemoveChip={handleRemoveChip}
@@ -271,7 +270,6 @@ export default function FilmClassifySearchPageView({
           tagsMap={tagsMap}
           activeParams={currentParams}
           activeChips={activeChips}
-          total={safePage.total}
           isPending={isPending}
           onApplyFilters={handleApplyFilters}
           onQuickSelect={handleTagClick}
@@ -308,4 +306,3 @@ export default function FilmClassifySearchPageView({
     </div>
   );
 }
-
