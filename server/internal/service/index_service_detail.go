@@ -90,15 +90,14 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			}
 		}
 
+		playGen := filmsnapshot.PlayInfoGeneration()
 		startedAt := time.Now()
 		version := filmsnapshot.GetActiveReadModelVersion()
 		snapshotStartedAt := time.Now()
 		snapshot := filmsnapshot.GetSnapshotByMid(version, int64(id))
 		logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
 		if snapshot == nil {
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, "{}", 60*time.Second).Err()
-			}
+			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 		detailStartedAt := time.Now()
@@ -106,9 +105,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		logSlowIndexServiceStep("GetFilmDetail.detail", detailStartedAt, "id", id)
 		if movieDetail == nil {
 			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, "{}", 60*time.Second).Err()
-			}
+			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
 		}
 		res := model.MovieDetailVo{MovieDetail: *movieDetail, LocalUpdateTime: localUpdateTime}
@@ -126,11 +123,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			}
 		}
 
-		if db.Rdb != nil {
-			if raw, err := json.Marshal(res); err == nil {
-				jitter := time.Duration(rand.Intn(1800)) * time.Second
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 12*time.Hour+jitter).Err()
-			}
+		if raw, err := json.Marshal(res); err == nil {
+			jitter := time.Duration(rand.Intn(1800)) * time.Second
+			storeFilmPlayInfoCache(cacheKey, string(raw), 12*time.Hour+jitter, playGen)
 		}
 		return res, nil
 	})
@@ -143,6 +138,19 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		return model.MovieDetailVo{}, nil
 	}
 	return cloneMovieDetailVo(res), nil
+}
+
+func storeFilmPlayInfoCache(cacheKey, payload string, ttl time.Duration, gen int64) {
+	if db.Rdb == nil {
+		return
+	}
+	if filmsnapshot.PlayInfoGeneration() != gen {
+		return
+	}
+	_ = db.Rdb.Set(db.Cxt, cacheKey, payload, ttl).Err()
+	if filmsnapshot.PlayInfoGeneration() != gen {
+		_ = db.Rdb.Del(db.Cxt, cacheKey).Err()
+	}
 }
 
 // GetFilmDetailOnly 读取影片详情主体，不聚合附属站播放源。

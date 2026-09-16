@@ -27,7 +27,7 @@ func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, master
 	if err := flushMasterSideEffects(sources, masterMIDs); err != nil {
 		return affectedMIDs, masterMIDs, err
 	}
-	playSummaryMIDs, err := flushPlaySummaryRefresh()
+	playSummaryMIDs, err := flushPlaySummaryRefresh(affectedMIDs)
 	affectedMIDs = append(affectedMIDs, playSummaryMIDs...)
 	if err != nil {
 		return affectedMIDs, masterMIDs, err
@@ -71,9 +71,9 @@ func scheduleMasterSearchTagsRefresh(masterMIDs []int64) {
 	}()
 }
 
-func flushPlaySummaryRefresh() ([]int64, error) {
+func flushPlaySummaryRefresh(affectedMIDs []int64) ([]int64, error) {
 	start := time.Now()
-	mids, err := filmsnapshot.FlushPendingPlaySummaryRefresh()
+	mids, err := filmsnapshot.FlushPlaySummaryRefreshByMids(affectedMIDs)
 	if err != nil {
 		return mids, fmt.Errorf("flush play summary refresh failed: %w", err)
 	}

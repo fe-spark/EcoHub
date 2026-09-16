@@ -188,9 +188,12 @@ func FilmZero() error {
 	}
 	time.Sleep(100 * time.Millisecond)
 
-	// 关键节点：清理缓存
+	// 关键节点：清理缓存。ClearSnapshotState 只丢掉内存快照版本和首页/TVBox 等入口缓存；
+	// 详情 PlayInfo、分类列表、搜索、相关推荐仍按 TTL 活着，必须再扫一遍动态缓存前缀。
 	ReportResetProgress(90, "正在清理缓存")
 	snapshot.ClearSnapshotState()
+	snapshot.ClearAllSnapshotDynamicCaches()
+	snapshot.BumpSearchCacheVersion()
 	RefreshMasterDataCaches()
 	ReportResetProgress(95, "数据清空完成")
 	return nil
@@ -208,6 +211,8 @@ func RefreshMasterDataCaches() {
 func InvalidateMasterSwitchCaches() {
 	snapshot.ClearActiveFilmReadModel()
 	snapshot.ClearActiveSnapshotVersion()
+	snapshot.ClearAllSnapshotDynamicCaches()
+	snapshot.BumpSearchCacheVersion()
 	support.RefreshCategoryCache()
 	support.InitMappingEngine()
 	support.TouchCategoryVersion()

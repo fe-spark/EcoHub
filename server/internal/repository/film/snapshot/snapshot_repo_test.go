@@ -438,3 +438,42 @@ func TestClearCachePatterns_ConsolidatedScan(t *testing.T) {
 		t.Errorf("%s should be preserved", preserveKey)
 	}
 }
+
+func TestInvalidateSnapshotDataCaches_ClearsDerivedListCaches(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatalf("miniredis: %v", err)
+	}
+	defer mr.Close()
+
+	origRdb := db.Rdb
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	db.Rdb = client
+	t.Cleanup(func() {
+		_ = client.Close()
+		db.Rdb = origRdb
+	})
+
+	catKey := fmt.Sprintf("%s:v1:pid:20:14:0", config.FilmCategoryCachePrefix)
+	hotKey := fmt.Sprintf("%s:v1:pid:20:14:0", config.FilmHotCachePrefix)
+	relateKey := fmt.Sprintf("%s:v1:47014:p1:s99", config.FilmRelateVOCachePrefix)
+	playKey := fmt.Sprintf("%s:47014", config.FilmPlayInfoKey)
+	tokenKey := "EcoHub:Auth:Token:1"
+
+	_ = client.Set(db.Cxt, catKey, "old-list", 0).Err()
+	_ = client.Set(db.Cxt, hotKey, "old-hot", 0).Err()
+	_ = client.Set(db.Cxt, relateKey, "old-relate", 0).Err()
+	_ = client.Set(db.Cxt, playKey, "old-play", 0).Err()
+	_ = client.Set(db.Cxt, tokenKey, "keep", 0).Err()
+
+	invalidateSnapshotDataCaches("v1", []int64{47014})
+
+	for _, key := range []string{catKey, hotKey, relateKey, playKey} {
+		if client.Exists(db.Cxt, key).Val() != 0 {
+			t.Errorf("expected %s to be deleted after snapshot invalidate", key)
+		}
+	}
+	if client.Exists(db.Cxt, tokenKey).Val() != 1 {
+		t.Errorf("expected %s to be preserved", tokenKey)
+	}
+}

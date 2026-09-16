@@ -11,7 +11,7 @@ import (
 )
 
 func GetMultiplePlayGroupsBySourcesAndKeys(sources []model.FilmSource, keys []string) map[string][]model.PlayLinkVo {
-	orderedKeys := shared.UniqueKeys(keys)
+	orderedKeys := shared.DropSharedMatchKeys(shared.UniqueKeys(keys))
 	if len(sources) == 0 || len(orderedKeys) == 0 {
 		return nil
 	}
@@ -45,7 +45,7 @@ func GetMultiplePlayGroupsBySourcesAndKeys(sources []model.FilmSource, keys []st
 }
 
 func getMultiplePlayGroupsByKeysTx(tx *gorm.DB, siteID, siteName string, keys []string) []model.PlayLinkVo {
-	orderedKeys := shared.UniqueKeys(keys)
+	orderedKeys := shared.DropSharedMatchKeys(shared.UniqueKeys(keys))
 	if siteID == "" || len(orderedKeys) == 0 {
 		return nil
 	}

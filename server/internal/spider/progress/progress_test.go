@@ -68,7 +68,7 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 	store.Delete(sourceID)
 }
 
-func TestGetActiveTaskProgressKeepsTerminalWhileAnyActive(t *testing.T) {
+func TestGetActiveTaskProgressPurgesTerminalPerSource(t *testing.T) {
 	const (
 		failedID = "progress-failed-early"
 		activeID = "progress-active-still"
@@ -77,8 +77,13 @@ func TestGetActiveTaskProgressKeepsTerminalWhileAnyActive(t *testing.T) {
 		store.Delete(id)
 		tasks.Delete(id)
 	}
+	t.Cleanup(func() {
+		for _, id := range []string{failedID, activeID} {
+			store.Delete(id)
+			tasks.Delete(id)
+		}
+	})
 
-	// 很早就失败的进度：有活跃采集时仍须保留（不能先消失）
 	s1 := ensure(failedID, "FailedEarly")
 	s1.mu.Lock()
 	s1.data.Status = StatusFailed
@@ -100,18 +105,14 @@ func TestGetActiveTaskProgressKeepsTerminalWhileAnyActive(t *testing.T) {
 	for _, p := range list {
 		byID[p.Id] = p
 	}
-	if p, ok := byID[failedID]; !ok || p.Status != StatusFailed {
-		t.Fatalf("expected early failed retained while active exists, got ok=%v status=%q", ok, p.Status)
+	if _, ok := byID[failedID]; ok {
+		t.Fatal("expired terminal progress must not wait for other queues")
 	}
-	if _, ok := store.Load(failedID); !ok {
-		t.Fatal("expected early failed entry kept in map while active exists")
+	if _, ok := store.Load(failedID); ok {
+		t.Fatal("expected early failed purged on its own retain window")
 	}
 	if p, ok := byID[activeID]; !ok || p.Status != StatusWaitingPublish {
 		t.Fatalf("expected active waiting_publish, got ok=%v status=%q", ok, p.Status)
-	}
-
-	for _, id := range []string{failedID, activeID} {
-		store.Delete(id)
 	}
 }
 
@@ -212,7 +213,7 @@ func TestMarkSourcePagesFinishedAfterAbortEntersWrapUp(t *testing.T) {
 	}
 }
 
-func TestGetActiveTaskProgressClearsAllTerminalTogether(t *testing.T) {
+func TestGetActiveTaskProgressClearsTerminalPerSourceRetain(t *testing.T) {
 	const (
 		oldFailedID = "progress-old-failed"
 		newDoneID   = "progress-new-done"
@@ -221,8 +222,13 @@ func TestGetActiveTaskProgressClearsAllTerminalTogether(t *testing.T) {
 		store.Delete(id)
 		tasks.Delete(id)
 	}
+	t.Cleanup(func() {
+		for _, id := range []string{oldFailedID, newDoneID} {
+			store.Delete(id)
+			tasks.Delete(id)
+		}
+	})
 
-	// 早失败 + 晚完成：在「最晚终态 + retain」之前两者都在；之后一起消失
 	s1 := ensure(oldFailedID, "OldFailed")
 	s1.mu.Lock()
 	s1.data.Status = StatusFailed
@@ -240,27 +246,23 @@ func TestGetActiveTaskProgressClearsAllTerminalTogether(t *testing.T) {
 	for _, p := range list {
 		byID[p.Id] = p
 	}
-	if _, ok := byID[oldFailedID]; !ok {
-		t.Fatal("expected old failed kept until batch retain based on latest terminal")
+	if _, ok := byID[oldFailedID]; ok {
+		t.Fatal("old failed should already be purged on its own retain window")
 	}
 	if _, ok := byID[newDoneID]; !ok {
 		t.Fatal("expected new done kept within retain window")
 	}
 
-	// 把最晚终态也推过保留窗口 → 应统一清空
 	s2.mu.Lock()
 	s2.updated = time.Now().Add(-retainDuration() - time.Second)
 	s2.mu.Unlock()
 
 	list = GetActiveTaskProgress()
 	if len(list) != 0 {
-		t.Fatalf("expected all terminal progress cleared together, got %d items", len(list))
-	}
-	if _, ok := store.Load(oldFailedID); ok {
-		t.Fatal("expected old failed deleted in unified purge")
+		t.Fatalf("expected expired terminal progress cleared, got %d items", len(list))
 	}
 	if _, ok := store.Load(newDoneID); ok {
-		t.Fatal("expected new done deleted in unified purge")
+		t.Fatal("expected new done deleted after its retain window")
 	}
 }
 
@@ -403,5 +405,40 @@ func TestZeroPageProgressStatusMatchesLifecycle(t *testing.T) {
 
 	for _, id := range []string{batchID, singleID} {
 		store.Delete(id)
+	}
+}
+
+func TestMarkSourcesCollectStartingSetsQueueId(t *testing.T) {
+	const (
+		sourceA = "queue-mark-a"
+		sourceB = "queue-mark-b"
+		queueID = "q-test-queue"
+	)
+	for _, id := range []string{sourceA, sourceB} {
+		store.Delete(id)
+		tasks.Delete(id)
+	}
+	t.Cleanup(func() {
+		for _, id := range []string{sourceA, sourceB} {
+			store.Delete(id)
+			tasks.Delete(id)
+		}
+	})
+
+	MarkSourcesCollectStarting([]model.FilmSource{
+		{Id: sourceA, Name: "A"},
+		{Id: sourceB, Name: "B"},
+	}, queueID)
+
+	snapA, okA := Snapshot(sourceA)
+	snapB, okB := Snapshot(sourceB)
+	if !okA || !okB {
+		t.Fatal("expected starting progress for both sources")
+	}
+	if snapA.QueueId != queueID || snapB.QueueId != queueID {
+		t.Fatalf("queueId = %q / %q; want %q", snapA.QueueId, snapB.QueueId, queueID)
+	}
+	if snapA.Status != StatusStarting || snapB.Status != StatusStarting {
+		t.Fatalf("status = %q / %q; want starting", snapA.Status, snapB.Status)
 	}
 }

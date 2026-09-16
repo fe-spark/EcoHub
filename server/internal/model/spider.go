@@ -161,6 +161,7 @@ type CollectProgress struct {
 	Success int    `json:"success"`
 	Failed  int    `json:"failed"`
 	Status  string `json:"status"`
+	QueueId string `json:"queueId,omitempty"`
 }
 
 type FilmSourceListItem struct {

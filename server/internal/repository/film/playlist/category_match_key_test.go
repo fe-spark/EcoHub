@@ -9,6 +9,8 @@ import (
 	"server/internal/model"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
+
+	"gorm.io/gorm"
 )
 
 func TestBuildPlaylistMovieKeys_DualKeyFallback(t *testing.T) {
@@ -559,6 +561,210 @@ func TestSaveSitePlayList_MismatchedCategoryDoesNotMergeCollidingTitles(t *testi
 	)
 	if _, ok := groups["subo"]; ok {
 		t.Fatalf("anime 仙逆 must not display the 电视剧-tagged colliding title")
+	}
+}
+
+func seedXianNiPair(t *testing.T, gdb *gorm.DB) (animePrimary, shortPrimary, legacy string) {
+	t.Helper()
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+		34: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+		34: model.BigCategoryShortFilm,
+	})
+	animePrimary = shared.BuildMovieMatchKeysWithCategory(0, "仙逆", 20)[0]
+	shortPrimary = shared.BuildMovieMatchKeysWithCategory(0, "仙逆", 34)[0]
+	legacy = shared.BuildMovieMatchKeys(0, "仙逆")[0]
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 47014, ContentKey: "vod_47014", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "中国动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Year: 2023, Remarks: "第158集"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 126574, ContentKey: "vod_126574", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 34, CName: "古装仙侠"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "仙逆", Remarks: "全集完结"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range []model.MovieMatchKey{
+		{Mid: 47014, MatchKey: animePrimary},
+		{Mid: 47014, MatchKey: legacy},
+		{Mid: 126574, MatchKey: shortPrimary},
+		{Mid: 126574, MatchKey: legacy},
+	} {
+		if err := gdb.Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	return animePrimary, shortPrimary, legacy
+}
+
+func TestSaveSitePlayList_CrossCategoryScoresSerialToAnime(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	animePrimary, shortPrimary, _ := seedXianNiPair(t, gdb)
+
+	slave := model.MovieDetail{
+		Name: "仙逆",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:   "短剧",
+			Year:    "2023",
+			Remarks: "第158集",
+		},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "第01集", Link: "https://bf/1.m3u8"},
+			{Episode: "第158集", Link: "https://bf/158.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("bf", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "bf").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != animePrimary {
+		t.Fatalf("158-ep 仙逆 labeled 短剧 should bind 动漫 primary %s, got %s", animePrimary, rows[0].MovieKey)
+	}
+	if rows[0].MovieKey == shortPrimary {
+		t.Fatalf("must not write the short-drama exclusive key")
+	}
+
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "bf", Name: "HD(BF)"}},
+		[]string{animePrimary, shortPrimary},
+	)
+	if _, ok := groups["bf"]; !ok {
+		t.Fatal("动漫仙逆 should show the rebound slave playlist")
+	}
+	shortGroups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "bf", Name: "HD(BF)"}},
+		[]string{shortPrimary},
+	)
+	if _, ok := shortGroups["bf"]; ok {
+		t.Fatal("短剧仙逆 must not show the 158-ep anime playlist")
+	}
+}
+
+func TestSaveSitePlayList_CrossCategoryScoresCompleteToShort(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	animePrimary, shortPrimary, _ := seedXianNiPair(t, gdb)
+
+	slave := model.MovieDetail{
+		Name: "仙逆",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:   "动漫",
+			Year:    "2023",
+			Remarks: "全集完结",
+		},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "合全集", Link: "https://ly/all.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("ly", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "ly").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != shortPrimary {
+		t.Fatalf("合全集 labeled 动漫 should bind 短剧 primary %s, got %s", shortPrimary, rows[0].MovieKey)
+	}
+	if rows[0].MovieKey == animePrimary {
+		t.Fatalf("must not write the anime exclusive key")
+	}
+}
+
+func TestSaveSitePlayList_CrossCategoryCleansSiblingExclusiveKey(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	animePrimary, shortPrimary, _ := seedXianNiPair(t, gdb)
+
+	if err := gdb.Create(&model.SlaveMoviePlaylist{
+		SourceId:   "bf",
+		MovieKey:   shortPrimary,
+		GroupIndex: 0,
+		GroupName:  "bfzym3u8",
+		Content:    `[{"episode":"第01集","link":"https://bf/1.m3u8"},{"episode":"第158集","link":"https://bf/158.m3u8"}]`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	slave := model.MovieDetail{
+		Name: "仙逆",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:   "短剧",
+			Year:    "2023",
+			Remarks: "第158集",
+		},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "第01集", Link: "https://bf/1.m3u8"},
+			{Episode: "第158集", Link: "https://bf/158.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("bf", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "bf").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected only the rebound row, got %d %+v", len(rows), rows)
+	}
+	if rows[0].MovieKey != animePrimary {
+		t.Fatalf("rebound row should be anime primary %s, got %s", animePrimary, rows[0].MovieKey)
+	}
+	if rows[0].MovieKey == shortPrimary {
+		t.Fatal("stale short-drama exclusive row must be deleted")
+	}
+}
+
+func TestSaveSitePlayList_DoesNotDeleteSiblingFilmPlaylist(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	animePrimary, shortPrimary, _ := seedXianNiPair(t, gdb)
+
+	if err := gdb.Create(&model.SlaveMoviePlaylist{
+		SourceId:   "bf",
+		MovieKey:   shortPrimary,
+		GroupIndex: 0,
+		GroupName:  "bfzym3u8",
+		Content:    `[{"episode":"合全集","link":"https://bf/all.m3u8"}]`,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	slave := model.MovieDetail{
+		Name: "仙逆",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:   "动漫",
+			Year:    "2023",
+			Remarks: "第158集",
+		},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "第01集", Link: "https://bf/1.m3u8"},
+			{Episode: "第158集", Link: "https://bf/158.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("bf", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var shortRows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ? AND movie_key = ?", "bf", shortPrimary).Find(&shortRows)
+	if len(shortRows) != 1 {
+		t.Fatalf("real short-drama playlist on the same source must stay, got %d", len(shortRows))
+	}
+	var animeRows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ? AND movie_key = ?", "bf", animePrimary).Find(&animeRows)
+	if len(animeRows) != 1 {
+		t.Fatalf("anime playlist should be written, got %d", len(animeRows))
 	}
 }
 

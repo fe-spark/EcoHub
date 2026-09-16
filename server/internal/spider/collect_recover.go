@@ -92,9 +92,26 @@ func CollectSingleFilm(ids string) {
 		return
 	}
 
+	targets := make([]model.FilmSource, 0, len(enabled))
+	sourceMids := make(map[string]string, len(enabled))
+	for _, source := range enabled {
+		requestID := resolveSingleCollectSourceMid(globalMid, source)
+		if requestID == "" {
+			continue
+		}
+		targets = append(targets, source)
+		sourceMids[source.Id] = requestID
+	}
+	targets = filterCollectableSources(targets, "单片更新")
+	if len(targets) == 0 {
+		log.Println("[Spider] CollectSingleFilm: 匹配站点均已在正采集队列中，跳过")
+		return
+	}
+
 	startedAt := time.Now()
 	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerSingleUpdate, "单片更新", enabled, batch, startedAt)
+	batchCtx := newCollectBatchContext(model.NotifyTriggerSingleUpdate, "单片更新", targets, batch, startedAt)
+	defer batchCtx.close()
 
 	type singleResult struct {
 		source model.FilmSource
@@ -105,8 +122,8 @@ func CollectSingleFilm(ids string) {
 		results []singleResult
 	)
 	var wg sync.WaitGroup
-	for _, source := range enabled {
-		requestID := resolveSingleCollectSourceMid(globalMid, source)
+	for _, source := range targets {
+		requestID := sourceMids[source.Id]
 		if requestID == "" {
 			continue
 		}
@@ -227,11 +244,17 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
 		return
 	}
+	claimed := filterCollectableSources([]model.FilmSource{*s}, "失败恢复")
+	if len(claimed) == 0 {
+		log.Printf("[Spider] 站点 %s 已在正采集队列中，跳过失败页重试", s.Id)
+		return
+	}
 	startedAt := time.Now()
 	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "失败恢复", []model.FilmSource{*s}, batch, startedAt, true)
-	if err := collectLifecycle.waitAndBeginSource(s.Id); err != nil {
+	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "失败恢复", claimed, batch, startedAt, true)
+	if err := collectLifecycle.beginSource(s.Id); err != nil {
 		syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", s.Id, err)
+		batchCtx.close()
 		if notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
 			emitBatchSummaryDirect(batch, model.NotifyTriggerRecover, []model.SourceNotifyResult{
 				notify.BuildSourceResultDirect(*s, progress.StatusFailed, err.Error()),
@@ -286,10 +309,22 @@ func FullRecoverSpider() {
 		}
 		recordsBySource[s.Id] = append(recordsBySource[s.Id], fr)
 	}
+	sourcesToFlush = filterCollectableSources(sourcesToFlush, "FullRecoverSpider")
+	if len(sourcesToFlush) == 0 {
+		log.Println("[Spider] FullRecoverSpider: 待恢复站点均已在正采集队列中，跳过")
+		return
+	}
+	claimed := make(map[string]struct{}, len(sourcesToFlush))
+	for _, source := range sourcesToFlush {
+		claimed[source.Id] = struct{}{}
+	}
 	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "FullRecoverSpider", sourcesToFlush, batch, startedAt)
 	for sourceID, records := range recordsBySource {
 		src, ok := sourceByID[sourceID]
 		if !ok {
+			continue
+		}
+		if _, ok := claimed[sourceID]; !ok {
 			continue
 		}
 		recordsCopy := append([]model.FailureRecord(nil), records...)
@@ -298,7 +333,7 @@ func FullRecoverSpider() {
 		go func(source model.FilmSource, pending []model.FailureRecord) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			if err := collectLifecycle.waitAndBeginSource(source.Id); err != nil {
+			if err := collectLifecycle.beginSource(source.Id); err != nil {
 				syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", source.Id, err)
 				return
 			}

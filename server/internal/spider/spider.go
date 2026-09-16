@@ -86,34 +86,33 @@ func filterEnabledSources(sources []model.FilmSource) []model.FilmSource {
 	return enabled
 }
 
-// filterCollectableSources 过滤重复站点与已在队列/运行中的站点。
+// filterCollectableSources 占用尚未在采的源；正采集队列已包含的源直接跳过。
+// 全量 / 定时 / 手动 / 恢复均走同一套占用逻辑，两条队列互不等待。
 func filterCollectableSources(sources []model.FilmSource, tag string) []model.FilmSource {
-	filtered := make([]model.FilmSource, 0, len(sources))
-	seen := make(map[string]struct{}, len(sources))
-	for _, source := range sources {
-		if _, ok := seen[source.Id]; ok {
-			log.Printf("[%s] 站点 %s 在本轮采集列表中重复，跳过", tag, source.Name)
-			continue
-		}
-		seen[source.Id] = struct{}{}
-		if progress.IsAlreadyQueuedOrRunning(source.Id) {
-			log.Printf("[%s] 站点 %s 已在采集队列或正在运行，跳过", tag, source.Name)
-			continue
-		}
-		filtered = append(filtered, source)
+	return occupyCollectSources(sources, tag)
+}
+
+func newCollectQueueID() string {
+	return "q-" + utils.GenerateSalt()
+}
+
+func occupyAndMarkCollectSources(sources []model.FilmSource, tag string) []model.FilmSource {
+	occupied := filterCollectableSources(sources, tag)
+	if len(occupied) == 0 {
+		return occupied
 	}
-	return filtered
+	progress.MarkSourcesCollectStarting(occupied, newCollectQueueID())
+	return occupied
 }
 
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string) {
 	if len(sources) == 0 {
 		return
 	}
-	sources = filterCollectableSources(sources, tag)
+	sources = occupyAndMarkCollectSources(sources, tag)
 	if len(sources) == 0 {
 		return
 	}
-	progress.MarkSourcesCollectStarting(sources)
 	runSourcesWithLimitCore(sources, h, tag, trigger)
 }
 
@@ -147,6 +146,7 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	runVersion := stopAllVersion.Load()
 
 	batchCtx := newCollectBatchContext(trigger, tag, sources, batch, startedAt)
+	defer batchCtx.close()
 
 	sourceLimit := config.CollectSourceConcurrency
 	if sourceLimit < 0 {
@@ -233,6 +233,12 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	hadWrites := false
 	var collectCtx context.Context
 	statsOwned := false
+	releasedPreparedOccupy := false
+	defer func() {
+		if isStandalone && !releasedPreparedOccupy && retErr != nil {
+			releaseCollectSourceIDs(id)
+		}
+	}()
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
@@ -282,6 +288,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			if isStandalone && batchCtx != nil {
 				noteSourceError(s.Id, originalErr.Error())
 				batchCtx.emitSummary(originalErr)
+				releasedPreparedOccupy = true
 			}
 			return
 		}
@@ -297,6 +304,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 				retErr = flushErr
 			}
 			batchCtx.emitSummary(flushErr)
+			releasedPreparedOccupy = true
 			return
 		}
 		if !progress.IsStopped(s.Id) {
@@ -414,11 +422,10 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, error) {
 			sources = append(sources, *fs)
 		}
 	}
-	sources = filterCollectableSources(sources, "Batch-Collect")
+	sources = occupyAndMarkCollectSources(sources, "Batch-Collect")
 	if len(sources) == 0 {
 		return nil, fmt.Errorf("没有可启动的采集站（均未启用或已在采集中）")
 	}
-	progress.MarkSourcesCollectStarting(sources)
 	return sources, nil
 }
 

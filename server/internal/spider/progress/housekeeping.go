@@ -26,74 +26,20 @@ func staleDuration() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-func hasAnyLiveOrActive() bool {
-	has := false
-	tasks.Range(func(key, value any) bool {
-		has = true
-		return false
-	})
-	if has {
-		return true
-	}
-	store.Range(func(key, value any) bool {
-		state := value.(*progressState)
-		state.mu.RLock()
-		active := isActiveStatus(state.data.Status)
-		state.mu.RUnlock()
-		if active {
-			has = true
-			return false
-		}
-		return true
-	})
-	return has
-}
-
-func latestTerminalTime() (latest time.Time, ok bool) {
-	store.Range(func(key, value any) bool {
-		state := value.(*progressState)
-		state.mu.RLock()
-		status := state.data.Status
-		updated := state.updated
-		state.mu.RUnlock()
-		if !IsTerminalStatus(status) {
-			return true
-		}
-		if !ok || updated.After(latest) {
-			latest = updated
-			ok = true
-		}
-		return true
-	})
-	return latest, ok
-}
-
-func purgeAllTerminal() {
+func maybePurgeTerminal(now time.Time) {
+	retain := retainDuration()
 	store.Range(func(key, value any) bool {
 		id, _ := key.(string)
 		state := value.(*progressState)
 		state.mu.RLock()
 		terminal := IsTerminalStatus(state.data.Status)
+		updated := state.updated
 		state.mu.RUnlock()
-		if terminal {
+		if terminal && now.Sub(updated) >= retain {
 			store.Delete(id)
 		}
 		return true
 	})
-}
-
-func maybePurgeTerminal(now time.Time) {
-	if hasAnyLiveOrActive() {
-		return
-	}
-	latest, ok := latestTerminalTime()
-	if !ok {
-		return
-	}
-	if now.Sub(latest) < retainDuration() {
-		return
-	}
-	purgeAllTerminal()
 }
 
 func pruneStale() {
