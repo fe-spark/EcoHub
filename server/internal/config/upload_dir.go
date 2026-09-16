@@ -12,7 +12,7 @@ const (
 	filmPictureUploadDirLocal     = "./static/upload/gallery"
 )
 
-// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用项目根目录下的相对/绝对路径。
+// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用项目根目录下的绝对路径。
 func resolveFilmPictureUploadDir() string {
 	if runningInContainer() {
 		return filmPictureUploadDirContainer

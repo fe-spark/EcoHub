@@ -85,7 +85,7 @@ Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only).
 
 An empty public site after installation is expected. Films appear only after a full collect has completed and been published in **Collect**. For 1Panel, an external database, or a reverse proxy, see the [Deploy guide](./README-Deploy_EN.md).
 
-Telegram notifications are configured under **System settings → Notify**. Hosts in mainland China frequently time out when reaching Telegram; set `TG_PROXY=http://host.docker.internal:7890` in `.env`. See [server/notify.md](../server/notify.md).
+Telegram notifications are configured under **System settings → Notify**. Hosts in mainland China frequently time out when reaching Telegram; set `TG_PROXY=http://host.docker.internal:7890` in `.env`. See [server/docs/notify.md](../server/docs/notify.md).
 
 ## Local development
 

@@ -157,6 +157,12 @@ TG_PROXY=socks5://127.0.0.1:7891
 | --- | --- | --- | --- |
 | `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 数据分析总开关：开启全站访问量、播放热度与客户端统计（默认关闭以保持最高性能与零开销） |
 
+### 日志存储（可选）
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `ECOHUB_LOG_DIR` | 否 | `logs` | 系统日志输出目录；支持相对或绝对路径，未设置时默认写入进程工作目录下的 `logs/` |
+
 ### Docker 根目录变量对照（非 server 进程直接读取）
 
 发布版 / 源码版 compose 还使用下列变量，**注入或映射**到容器，与 `server` 进程内变量对应关系：
@@ -337,4 +343,4 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 - [部署指南](../docs/README-Deploy.md)
 - [FAQ 与排障](../docs/README-FAQ.md)
 - [版本变更](../docs/RELEASE.md)
-- [Telegram 通知行为](./notify.md)
+- [Telegram 通知行为](./docs/notify.md)

@@ -38,7 +38,7 @@ var (
 	JwtSecret = ""
 
 	// FilmPictureUploadDir 用户上传素材落地目录。
-	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
+	// 容器固定走发布卷；非容器环境动态向上查找项目根路径，生产不得回退。
 	FilmPictureUploadDir = resolveFilmPictureUploadDir()
 )
 
