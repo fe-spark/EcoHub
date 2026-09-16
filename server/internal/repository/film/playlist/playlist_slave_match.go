@@ -18,49 +18,46 @@ func filmIndexRootPid(info model.FilmIndex) int64 {
 			return root
 		}
 	}
-	// 兜底与写入侧 buildMovieMatchKeyMappings 一致：pid/cid 未落到根分类时按分类名解析，
-	// 否则这些影片的「片名#大类」键会被当成非规范键删掉。
 	return support.ResolveRootCategoryIDByCName(info.CName)
 }
 
-func slaveDetailMatchesFilm(detailPid int64, info model.FilmIndex) bool {
-	infoPid := filmIndexRootPid(info)
-	if detailPid > 0 && infoPid > 0 && infoPid != detailPid {
-		return false
+func collectUniqueMidsFromKeys(keys []string, midsByLookupKey map[string][]int64) []int64 {
+	out := make([]int64, 0)
+	seen := make(map[int64]struct{})
+	for _, key := range keys {
+		for _, mid := range uniquePositiveMIDs(midsByLookupKey[key]) {
+			if _, ok := seen[mid]; ok {
+				continue
+			}
+			seen[mid] = struct{}{}
+			out = append(out, mid)
+		}
 	}
-	return true
+	return out
 }
 
-// pickUniqueSlaveMid 按键优先级（豆瓣、片名#大类、纯片名）找唯一主站 mid。
-// 某键只命中一部就采用，不管副站大类是否和主站一致（源站常把动漫标成电视剧）。
-// 某键命中多部时才用大类消歧（两个仙逆）；消歧后仍不唯一则看下一把键。
+// pickUniqueSlaveMid 用匹配键召回候选，再用身份打分决定绑定哪部主站影片。
+// 只有一部时保持宽松绑定（副站分类标错也能挂上）。
+// 同名多部时按豆瓣/名称/类别/标签/年份/备注形态打分，分差不够则不绑定。
 func pickUniqueSlaveMid(
+	detail model.MovieDetail,
 	keys []string,
-	detailPid int64,
 	midsByLookupKey map[string][]int64,
 	infoByMid map[int64]model.FilmIndex,
 ) int64 {
-	for _, key := range keys {
-		cands := uniquePositiveMIDs(midsByLookupKey[key])
-		if len(cands) == 0 {
+	cands := collectUniqueMidsFromKeys(keys, midsByLookupKey)
+	if len(cands) == 0 {
+		return 0
+	}
+	profiles := make(map[int64]shared.IdentityProfile, len(cands))
+	for _, mid := range cands {
+		info, ok := infoByMid[mid]
+		if !ok {
 			continue
 		}
-		if len(cands) == 1 {
-			return cands[0]
-		}
-		filtered := make([]int64, 0, len(cands))
-		for _, mid := range cands {
-			info, ok := infoByMid[mid]
-			if !ok || !slaveDetailMatchesFilm(detailPid, info) {
-				continue
-			}
-			filtered = append(filtered, mid)
-		}
-		if len(filtered) == 1 {
-			return filtered[0]
-		}
+		profiles[mid] = shared.IdentityFromFilmIndex(info)
 	}
-	return 0
+	return shared.PickUniqueIdentityMid(shared.IdentityFromMovieDetail(detail), profiles)
 }
 
 // matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid，并顺带输出匹配到的主站影片与键映射。
@@ -119,7 +116,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		if !isPlaylistWritableDetail(detail) {
 			continue
 		}
-		mid := pickUniqueSlaveMid(keysPerDetail[i], shared.ResolveMovieDetailRootPid(detail), midsByLookupKey, infoByMid)
+		mid := pickUniqueSlaveMid(detail, keysPerDetail[i], midsByLookupKey, infoByMid)
 		if mid > 0 && primaryKeyByMid[mid] != "" {
 			detailMids[i] = mid
 			if _, seen := seenMid[mid]; !seen {
@@ -219,7 +216,7 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 	ordered := make([]model.FilmIndex, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
-		mid := pickUniqueSlaveMid(item.keys, shared.ResolveMovieDetailRootPid(item.detail), midsByLookupKey, infoByMid)
+		mid := pickUniqueSlaveMid(item.detail, item.keys, midsByLookupKey, infoByMid)
 		if mid <= 0 {
 			continue
 		}

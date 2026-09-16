@@ -5,6 +5,7 @@ import (
 	"log"
 	"strings"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/film/shared"
@@ -28,13 +29,23 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (shared.Collect
 		return shared.CollectWriteResult{}, err
 	}
 	inheritedKeyByLookup := loadInheritedKeysForUnmatchedDetails(list, detailMids)
+	exclusiveOwnerByKey := exclusiveMatchKeyOwners(keysByMid)
 
 	for index, detail := range list {
 		if !isPlaylistWritableDetail(detail) {
 			continue
 		}
 
-		writeKeys := playlistWriteKeys(detail, detailMids[index], primaryKeyByMid, inheritedKeyByLookup)
+		if mid := detailMids[index]; mid > 0 {
+			incoming := shared.IdentityFromMovieDetail(detail)
+			for _, siblingKey := range exclusiveKeysOfTitleSiblings(mid, keysByMid) {
+				if siblingPlaylistLooksLikeIncoming(sourceID, siblingKey, incoming) {
+					keysByMovieKey[siblingKey] = struct{}{}
+				}
+			}
+		}
+
+		writeKeys := playlistWriteKeys(detail, detailMids[index], primaryKeyByMid, inheritedKeyByLookup, exclusiveOwnerByKey)
 		for _, movieKey := range writeKeys {
 			keysByMovieKey[movieKey] = struct{}{}
 
@@ -99,11 +110,13 @@ func isPlaylistWritableDetail(detail model.MovieDetail) bool {
 }
 
 // playlistWriteKeys 一条附属站详情落到哪些 movie_key。唯一命中写该片主键；否则写候选键（有大类则不含纯片名）。
+// 未绑定时空过已被另一部独占的键，避免同名跨类把线路写进别人的主键槽。
 func playlistWriteKeys(
 	detail model.MovieDetail,
 	mid int64,
 	primaryKeyByMid map[int64]string,
 	inheritedKeyByLookup map[string]string,
+	exclusiveOwnerByKey map[string]int64,
 ) []string {
 	if mid > 0 && primaryKeyByMid[mid] != "" {
 		return []string{primaryKeyByMid[mid]}
@@ -115,7 +128,104 @@ func playlistWriteKeys(
 			}
 		}
 	}
-	return BuildPlaylistCandidateKeys(detail)
+	return dropKeysOwnedBySingleFilm(BuildPlaylistCandidateKeys(detail), exclusiveOwnerByKey)
+}
+
+func exclusiveMatchKeyOwners(keysByMid map[int64][]string) map[string]int64 {
+	owners := make(map[string]int64, len(keysByMid)*2)
+	for mid, keys := range keysByMid {
+		if mid <= 0 {
+			continue
+		}
+		for _, key := range keys {
+			if key == "" {
+				continue
+			}
+			if prev, ok := owners[key]; ok && prev != mid {
+				owners[key] = 0
+				continue
+			}
+			owners[key] = mid
+		}
+	}
+	return owners
+}
+
+func dropKeysOwnedBySingleFilm(keys []string, exclusiveOwnerByKey map[string]int64) []string {
+	if len(keys) == 0 || len(exclusiveOwnerByKey) == 0 {
+		return keys
+	}
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if exclusiveOwnerByKey[key] > 0 {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
+
+func exclusiveKeysOfTitleSiblings(matchedMid int64, keysByMid map[int64][]string) []string {
+	matchedKeys := make(map[string]struct{}, len(keysByMid[matchedMid]))
+	for _, key := range keysByMid[matchedMid] {
+		if key != "" {
+			matchedKeys[key] = struct{}{}
+		}
+	}
+	if len(matchedKeys) == 0 {
+		return nil
+	}
+	drop := make([]string, 0)
+	seen := make(map[string]struct{})
+	for mid, keys := range keysByMid {
+		if mid == matchedMid {
+			continue
+		}
+		sharesTitle := false
+		for _, key := range keys {
+			if _, ok := matchedKeys[key]; ok {
+				sharesTitle = true
+				break
+			}
+		}
+		if !sharesTitle {
+			continue
+		}
+		for _, key := range keys {
+			if key == "" {
+				continue
+			}
+			if _, shared := matchedKeys[key]; shared {
+				continue
+			}
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			drop = append(drop, key)
+		}
+	}
+	return drop
+}
+
+func siblingPlaylistLooksLikeIncoming(sourceID, movieKey string, incoming shared.IdentityProfile) bool {
+	if db.Mdb == nil || strings.TrimSpace(movieKey) == "" {
+		return false
+	}
+	var rows []model.SlaveMoviePlaylist
+	if err := db.Mdb.Where("source_id = ? AND movie_key = ?", sourceID, movieKey).Find(&rows).Error; err != nil || len(rows) == 0 {
+		return false
+	}
+	for _, row := range rows {
+		var links []model.MovieUrlInfo
+		if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
+			continue
+		}
+		if shared.SameWorkPlaylist(links, incoming) {
+			return true
+		}
+	}
+	return false
 }
 
 // ReviveSlavePlaylistsTx 保持接口向后兼容（单阶段极简治理模式下已无须维护观察期状态机打标）。

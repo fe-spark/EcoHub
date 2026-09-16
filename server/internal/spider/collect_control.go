@@ -33,12 +33,12 @@ func StopAllTasks() {
 	}
 }
 
-// PrepareSingleCollectStart 单站采集启动前校验重复并预置起始进度。
+// PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
 func PrepareSingleCollectStart(source model.FilmSource) error {
-	if progress.IsAlreadyQueuedOrRunning(source.Id) {
+	claimed := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
+	if len(claimed) == 0 {
 		return fmt.Errorf("站点 %s 已在采集队列或正在运行，已跳过本次采集", source.Name)
 	}
-	progress.MarkSourcesCollectStarting([]model.FilmSource{source})
 	return nil
 }
 

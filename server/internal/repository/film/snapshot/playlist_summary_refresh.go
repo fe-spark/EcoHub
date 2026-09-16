@@ -48,6 +48,39 @@ func FlushPendingPlaySummaryRefresh() ([]int64, error) {
 	return playSummaryRefresh.flush()
 }
 
+// FlushPlaySummaryRefreshByMids 只刷新本批 affected mids，不排空其它采集队列积压的 pending。
+func FlushPlaySummaryRefreshByMids(mids []int64) ([]int64, error) {
+	selected := takePendingPlaySummaryMids(mids)
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	err := flushPlaySummaryRefreshMids(selected)
+	return sortedMIDsFromSet(selected), err
+}
+
+func takePendingPlaySummaryMids(mids []int64) map[int64]struct{} {
+	if len(mids) == 0 {
+		return nil
+	}
+	playSummaryRefresh.mu.Lock()
+	defer playSummaryRefresh.mu.Unlock()
+	selected := make(map[int64]struct{}, len(mids))
+	for _, mid := range mids {
+		if mid <= 0 {
+			continue
+		}
+		if _, ok := playSummaryRefresh.pending[mid]; !ok {
+			continue
+		}
+		selected[mid] = struct{}{}
+		delete(playSummaryRefresh.pending, mid)
+	}
+	if len(selected) == 0 {
+		return nil
+	}
+	return selected
+}
+
 func (s *playSummaryRefreshScheduler) flush() ([]int64, error) {
 	flushedMIDs := make([]int64, 0)
 	for {

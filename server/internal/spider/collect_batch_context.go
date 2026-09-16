@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,11 @@ var publishMu sync.Mutex
 var (
 	activeBatchesMu sync.Mutex
 	activeBatches   = make(map[*collectBatchContext]struct{})
+
+	// collectingSources 正采集队列：任意触发方式占用过的采集源。
+	// 新队列出发前先看这里，已在采的源直接跳过，两条队列互不等待。
+	collectingSourcesMu sync.Mutex
+	collectingSources   = make(map[string]struct{})
 )
 
 func registerActiveBatch(b *collectBatchContext) {
@@ -35,6 +41,97 @@ func unregisterActiveBatch(b *collectBatchContext) {
 	activeBatchesMu.Lock()
 	defer activeBatchesMu.Unlock()
 	delete(activeBatches, b)
+}
+
+func collectSourceID(id string) string {
+	return strings.TrimSpace(id)
+}
+
+func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSource {
+	if len(sources) == 0 {
+		return sources
+	}
+	occupied := make([]model.FilmSource, 0, len(sources))
+	seen := make(map[string]struct{}, len(sources))
+	candidates := make([]model.FilmSource, 0, len(sources))
+
+	collectingSourcesMu.Lock()
+	for _, source := range sources {
+		id := collectSourceID(source.Id)
+		if id == "" {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			log.Printf("[%s] 站点 %s 在本轮采集列表中重复，跳过", tag, source.Name)
+			continue
+		}
+		seen[id] = struct{}{}
+		if _, busy := collectingSources[id]; busy {
+			log.Printf("[%s] 站点 %s 已在正采集队列中，跳过", tag, source.Name)
+			continue
+		}
+		candidates = append(candidates, source)
+	}
+	collectingSourcesMu.Unlock()
+
+	for _, source := range candidates {
+		id := collectSourceID(source.Id)
+		if progress.IsAlreadyQueuedOrRunning(id) {
+			log.Printf("[%s] 站点 %s 已在采集队列或正在运行，跳过", tag, source.Name)
+			continue
+		}
+		collectingSourcesMu.Lock()
+		if _, busy := collectingSources[id]; busy {
+			collectingSourcesMu.Unlock()
+			log.Printf("[%s] 站点 %s 已在正采集队列中，跳过", tag, source.Name)
+			continue
+		}
+		collectingSources[id] = struct{}{}
+		collectingSourcesMu.Unlock()
+		occupied = append(occupied, source)
+	}
+	return occupied
+}
+
+func releaseCollectSources(sources []model.FilmSource) {
+	if len(sources) == 0 {
+		return
+	}
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for _, source := range sources {
+		id := collectSourceID(source.Id)
+		if id == "" {
+			continue
+		}
+		delete(collectingSources, id)
+	}
+}
+
+func releaseCollectSourceIDs(ids ...string) {
+	if len(ids) == 0 {
+		return
+	}
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for _, id := range ids {
+		id = collectSourceID(id)
+		if id == "" {
+			continue
+		}
+		delete(collectingSources, id)
+	}
+}
+
+func isOccupiedCollectSource(sourceID string) bool {
+	sourceID = collectSourceID(sourceID)
+	if sourceID == "" {
+		return false
+	}
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	_, ok := collectingSources[sourceID]
+	return ok
 }
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
@@ -245,10 +342,18 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	return nil
 }
 
+func (b *collectBatchContext) close() {
+	if b == nil {
+		return
+	}
+	unregisterActiveBatch(b)
+	releaseCollectSources(b.sources)
+}
+
 func (b *collectBatchContext) emitSummary(finalizeErr error) {
 	if b == nil {
 		return
 	}
-	defer unregisterActiveBatch(b)
+	defer b.close()
 	emitBatchSummaryForSources(b.batch, b.trigger, b.sources, b.startedAt, finalizeErr)
 }

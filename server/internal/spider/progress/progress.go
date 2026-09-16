@@ -2,6 +2,7 @@ package progress
 
 import (
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -228,7 +229,8 @@ func FlushHotpathSideEffects(sourceIDs ...string) {
 	writer.FlushCollectCacheInvalidations()
 }
 
-func MarkSourcesCollectStarting(sources []model.FilmSource) {
+func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
+	queueID = strings.TrimSpace(queueID)
 	for _, source := range sources {
 		state := ensure(source.Id, source.Name)
 		state.mu.Lock()
@@ -237,6 +239,7 @@ func MarkSourcesCollectStarting(sources []model.FilmSource) {
 		state.data.Success = 0
 		state.data.Failed = 0
 		state.data.Status = StatusStarting
+		state.data.QueueId = queueID
 		state.updated = time.Now()
 		state.mu.Unlock()
 	}

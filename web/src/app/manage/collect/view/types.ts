@@ -31,6 +31,8 @@ export interface CollectProgress {
   success: number;
   failed: number;
   status: CollectProgressStatus;
+  /** 同一次采集队列的标识；不同队列各自一条总进度 */
+  queueId?: string;
 }
 
 /** 仍处于采集生命周期、列表应展示进度的状态 */

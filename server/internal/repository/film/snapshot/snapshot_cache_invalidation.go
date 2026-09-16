@@ -32,11 +32,24 @@ func RefreshAccessDataCaches() {
 	)
 }
 
+// filmListDerivedCachePatterns 快照派生的列表类缓存。增量发布不换快照版本，
+// key 里的 v{version} 不会变，必须在写库后主动删掉，否则列表上的播放源摘要/备注会脏到 TTL。
+func filmListDerivedCachePatterns() []string {
+	return []string{
+		config.FilmCategoryCachePrefix + ":*",
+		config.FilmCategoryPageCachePrefix + ":*",
+		config.FilmHotCachePrefix + ":*",
+		config.FilmHotPoolCachePrefix + ":*",
+		config.FilmSortCachePrefix + ":*",
+		config.FilmHotKeywordsKey + ":*",
+		config.FilmRelatePrefix + ":*",
+	}
+}
+
 // ClearSearchCache 清除所有前台搜索缓存
 func ClearSearchCache() {
 	cache.ClearPatterns(config.FilmSearchCachePrefix + ":*")
 }
-
 
 func invalidateDeletedSnapshotCaches(version string, mids []int64) {
 	invalidateSnapshotDataCaches(version, mids)
@@ -49,8 +62,8 @@ func invalidateSnapshotDataCaches(version string, mids []int64) {
 	}
 	cache.ClearProvideListCache()
 	BumpSearchCacheVersion()
+	cache.ClearPatterns(filmListDerivedCachePatterns()...)
 	if db.Rdb != nil && len(mids) > 0 {
-		// 精准批量删除被修改影片的详情与播放页缓存（按 1000 条分批下发，避免过大 Pipeline 占用缓冲区）
 		const pipeBatchSize = 1000
 		for i := 0; i < len(mids); i += pipeBatchSize {
 			end := i + pipeBatchSize
@@ -60,15 +73,10 @@ func invalidateSnapshotDataCaches(version string, mids []int64) {
 			pipe := db.Rdb.Pipeline()
 			for _, mid := range mids[i:end] {
 				pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
-				if version != "" {
-					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d", config.FilmRelateCandCachePrefix, version, mid))
-					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s10", config.FilmRelateVOCachePrefix, version, mid))
-					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s12", config.FilmRelateVOCachePrefix, version, mid))
-					pipe.Del(db.Cxt, fmt.Sprintf("%s:v%s:%d:p1:s20", config.FilmRelateVOCachePrefix, version, mid))
-				}
 			}
 			_, _ = pipe.Exec(db.Cxt)
 		}
+		BumpPlayInfoGeneration()
 	}
 }
 
@@ -94,6 +102,7 @@ func ClearAllSnapshotDynamicCaches() {
 		config.TVBoxNetworkConfigCacheKey+":*",
 		config.IndexPageCacheKey+"*",
 	)
+	BumpPlayInfoGeneration()
 }
 
 // ClearDynamicPlayCaches 清除播放详情缓存与TVBox播放列表缓存
@@ -102,6 +111,7 @@ func ClearDynamicPlayCaches() {
 		config.FilmPlayInfoKey+":*",
 		config.TVBoxList+":*",
 	)
+	BumpPlayInfoGeneration()
 }
 
 func ClearSnapshotState() {

@@ -31,6 +31,32 @@ func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []strin
 func BuildMovieMatchKeys(dbID int64, name string) []string {
 	return BuildMovieMatchKeysWithCategory(dbID, name, 0)
 }
+
+// DropSharedMatchKeys 丢掉被多部影片共用的匹配键（同名跨类的纯片名回退键）。
+// 详情查找只用一部片子独占的键，避免两条「仙逆」互相看见对方线路。
+func DropSharedMatchKeys(keys []string) []string {
+	keys = UniqueKeys(keys)
+	if len(keys) == 0 || db.Mdb == nil {
+		return keys
+	}
+	owners := LoadMidCandidatesByMatchKeys(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		seen := make(map[int64]struct{})
+		for _, mid := range owners[key] {
+			if mid <= 0 {
+				continue
+			}
+			seen[mid] = struct{}{}
+		}
+		if len(seen) > 1 {
+			continue
+		}
+		out = append(out, key)
+	}
+	return out
+}
+
 func UniqueKeys(keys []string) []string {
 	orderedKeys := make([]string, 0, len(keys))
 	seen := make(map[string]struct{}, len(keys))
@@ -131,7 +157,7 @@ func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *model.MovieDetail) []string {
 	if snapshot != nil && snapshot.Mid > 0 {
 		if keys := LoadMovieMatchKeysByMids([]int64{snapshot.Mid})[snapshot.Mid]; len(keys) > 0 {
-			return keys
+			return DropSharedMatchKeys(keys)
 		}
 	}
 	if detail == nil {

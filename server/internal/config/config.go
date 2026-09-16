@@ -127,6 +127,8 @@ const (
 	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
 	// FilmPlayInfoKey 影片播放详情缓存 key 前缀 (后接 :mid)
 	FilmPlayInfoKey = RedisKeyPrefix + ":Film:PlayInfo"
+	// FilmPlayInfoGenKey 播放详情缓存世代。收尾失效时 INCR，避免并发 GetFilmDetail 把旧结果再 SET 回去。
+	FilmPlayInfoGenKey = RedisKeyPrefix + ":Film:PlayInfoGen"
 	// FilmHotKeywordsKey 搜索热词缓存 key 前缀 (后接 :v%s)
 	FilmHotKeywordsKey = RedisKeyPrefix + ":Film:HotKeywords"
 	// FilmCategoryCachePrefix 分类影片列表缓存前缀

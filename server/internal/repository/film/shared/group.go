@@ -66,6 +66,9 @@ func LoadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 	}
 
 	keysByMid := LoadMovieMatchKeysByMidsTx(tx, mids)
+	for mid, keys := range keysByMid {
+		keysByMid[mid] = DropSharedMatchKeys(keys)
+	}
 	allKeys := make([]string, 0, len(infos)*4)
 	for _, keys := range keysByMid {
 		allKeys = append(allKeys, keys...)
