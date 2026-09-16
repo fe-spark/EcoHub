@@ -134,7 +134,39 @@ func slaveDetailMatchesFilm(detailPid int64, info model.FilmIndex) bool {
 	return true
 }
 
-// matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid；双方都有大类时必须同类。
+// pickUniqueSlaveMid 按键优先级（豆瓣、片名#大类、纯片名）找唯一主站 mid。
+// 某键只命中一部就采用，不管副站大类是否和主站一致（源站常把动漫标成电视剧）。
+// 某键命中多部时才用大类消歧（两个仙逆）；消歧后仍不唯一则看下一把键。
+func pickUniqueSlaveMid(
+	keys []string,
+	detailPid int64,
+	midsByLookupKey map[string][]int64,
+	infoByMid map[int64]model.FilmIndex,
+) int64 {
+	for _, key := range keys {
+		cands := uniquePositiveMIDs(midsByLookupKey[key])
+		if len(cands) == 0 {
+			continue
+		}
+		if len(cands) == 1 {
+			return cands[0]
+		}
+		filtered := make([]int64, 0, len(cands))
+		for _, mid := range cands {
+			info, ok := infoByMid[mid]
+			if !ok || !slaveDetailMatchesFilm(detailPid, info) {
+				continue
+			}
+			filtered = append(filtered, mid)
+		}
+		if len(filtered) == 1 {
+			return filtered[0]
+		}
+	}
+	return 0
+}
+
+// matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid。
 func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, error) {
 	detailMids := make([]int64, len(list))
 	if len(list) == 0 {
@@ -188,27 +220,9 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		if !isPlaylistWritableDetail(detail) {
 			continue
 		}
-		detailPid := ResolveMovieDetailRootPid(detail)
-		seen := make(map[int64]struct{})
-		matched := make([]int64, 0, 2)
-		for _, key := range keysPerDetail[i] {
-			for _, mid := range midsByLookupKey[key] {
-				info, ok := infoByMid[mid]
-				if !ok || !slaveDetailMatchesFilm(detailPid, info) {
-					continue
-				}
-				if _, dup := seen[mid]; dup {
-					continue
-				}
-				seen[mid] = struct{}{}
-				matched = append(matched, mid)
-			}
-			if len(matched) > 0 {
-				break
-			}
-		}
-		if len(matched) == 1 && primaryKeyByMid[matched[0]] != "" {
-			detailMids[i] = matched[0]
+		mid := pickUniqueSlaveMid(keysPerDetail[i], ResolveMovieDetailRootPid(detail), midsByLookupKey, infoByMid)
+		if mid > 0 && primaryKeyByMid[mid] != "" {
+			detailMids[i] = mid
 		}
 	}
 	return detailMids, primaryKeyByMid, nil
@@ -308,10 +322,11 @@ func slavePlaylistAffectedMIDs(changes []playlistChange) []int64 {
 		}
 	}
 	midsByKey := loadMidCandidatesByMatchKeys(keys)
+	bestByKey := pickBestMidsByKey(midsByKey)
 	seen := make(map[int64]struct{})
 	out := make([]int64, 0, len(changes))
 	for _, c := range changes {
-		mid := pickBestMidForMatchKey(midsByKey[c.MovieKey])
+		mid := bestByKey[c.MovieKey]
 		if mid <= 0 {
 			continue
 		}
@@ -378,48 +393,19 @@ func loadMatchedSearchInfosByDetails(details []model.MovieDetail) ([]model.FilmI
 	ordered := make([]model.FilmIndex, 0, len(candidates))
 	seenMid := make(map[int64]struct{}, len(candidates))
 	for _, item := range lookups {
-		detailPid := ResolveMovieDetailRootPid(item.detail)
-		matched := make(map[int64]struct{}, 2)
-		for _, key := range item.keys {
-			candidateMids := midsByLookupKey[key]
-			if len(candidateMids) == 0 {
-				continue
-			}
-			for _, mid := range candidateMids {
-				info, ok := infoByMid[mid]
-				if !ok {
-					continue
-				}
-				// 若当前详情与候选主站影片均有明确大类，大类不一致则拒绝匹配
-				infoPid := support.GetRootId(info.Pid)
-				if infoPid <= 0 && info.Cid > 0 {
-					infoPid = support.GetRootId(info.Cid)
-				}
-				if detailPid > 0 && infoPid > 0 && infoPid != detailPid {
-					continue
-				}
-				matched[mid] = struct{}{}
-			}
-			if len(matched) > 0 {
-				break
-			}
+		mid := pickUniqueSlaveMid(item.keys, ResolveMovieDetailRootPid(item.detail), midsByLookupKey, infoByMid)
+		if mid <= 0 {
+			continue
 		}
-
-		sortedMids := make([]int64, 0, len(matched))
-		for mid := range matched {
-			sortedMids = append(sortedMids, mid)
+		info, ok := infoByMid[mid]
+		if !ok {
+			continue
 		}
-		sort.Slice(sortedMids, func(i, j int) bool {
-			return sortedMids[i] < sortedMids[j]
-		})
-
-		for _, mid := range sortedMids {
-			if _, ok := seenMid[mid]; ok {
-				continue
-			}
-			seenMid[mid] = struct{}{}
-			ordered = append(ordered, infoByMid[mid])
+		if _, seen := seenMid[mid]; seen {
+			continue
 		}
+		seenMid[mid] = struct{}{}
+		ordered = append(ordered, info)
 	}
 
 	return ordered, nil
@@ -504,14 +490,7 @@ func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 	}
 
 	// 每个 movie_key 只绑定一个最优 mid，避免标点重复片（烬九州：第二季 / 烬九州第二季）共享 key 时双双进更新列表
-	midByKey := make(map[string]int64, len(midsByLookupKey))
-	for key, mids := range midsByLookupKey {
-		mid := pickBestMidForMatchKey(mids)
-		if mid <= 0 {
-			continue
-		}
-		midByKey[key] = mid
-	}
+	midByKey := pickBestMidsByKey(midsByLookupKey)
 	if len(midByKey) == 0 {
 		return nil, nil
 	}
@@ -557,6 +536,10 @@ func slaveShouldBumpStamp(change playlistChange, otherCounts []int) bool {
 // pickBestMidForMatchKey 同一 match_key 命中多个 mid 时只保留一个（update_stamp 新者优先，其次 mid 大）。
 // 源站常并存「烬九州：第二季」与「烬九州第二季」两个 vod_id，归一化后共享 match_key。
 func pickBestMidForMatchKey(mids []int64) int64 {
+	return pickBestMidsByKey(map[string][]int64{"_": mids})["_"]
+}
+
+func uniquePositiveMIDs(mids []int64) []int64 {
 	uniq := make([]int64, 0, len(mids))
 	seen := make(map[int64]struct{}, len(mids))
 	for _, mid := range mids {
@@ -569,21 +552,66 @@ func pickBestMidForMatchKey(mids []int64) int64 {
 		seen[mid] = struct{}{}
 		uniq = append(uniq, mid)
 	}
-	if len(uniq) == 0 {
-		return 0
+	return uniq
+}
+
+func pickBestMidsByKey(midsByKey map[string][]int64) map[string]int64 {
+	out := make(map[string]int64, len(midsByKey))
+	if len(midsByKey) == 0 {
+		return out
 	}
-	if len(uniq) == 1 {
-		return uniq[0]
+	needQuery := make([]int64, 0)
+	seenQuery := make(map[int64]struct{})
+	multiKeys := make([]string, 0)
+	for key, mids := range midsByKey {
+		uniq := uniquePositiveMIDs(mids)
+		if len(uniq) == 0 {
+			continue
+		}
+		if len(uniq) == 1 {
+			out[key] = uniq[0]
+			continue
+		}
+		multiKeys = append(multiKeys, key)
+		for _, mid := range uniq {
+			if _, ok := seenQuery[mid]; ok {
+				continue
+			}
+			seenQuery[mid] = struct{}{}
+			needQuery = append(needQuery, mid)
+		}
 	}
-	sort.Slice(uniq, func(i, j int) bool { return uniq[i] > uniq[j] })
-	if db.Mdb == nil {
-		return uniq[0]
+	if len(multiKeys) == 0 {
+		return out
 	}
-	var rows []model.FilmIndex
-	if err := db.Mdb.Select("mid", "update_stamp").Where("mid IN ?", uniq).Order("update_stamp DESC, mid DESC").Find(&rows).Error; err != nil || len(rows) == 0 {
-		return uniq[0]
+	rank := make(map[int64]int, len(needQuery))
+	if db.Mdb != nil && len(needQuery) > 0 {
+		var rows []model.FilmIndex
+		if err := db.Mdb.Select("mid", "update_stamp").Where("mid IN ?", needQuery).Order("update_stamp DESC, mid DESC").Find(&rows).Error; err == nil {
+			for i, row := range rows {
+				rank[row.Mid] = i
+			}
+		}
 	}
-	return rows[0].Mid
+	fallbackRank := len(needQuery) + 1
+	for _, key := range multiKeys {
+		best := int64(0)
+		bestRank := fallbackRank + 1
+		for _, mid := range uniquePositiveMIDs(midsByKey[key]) {
+			r, ok := rank[mid]
+			if !ok {
+				r = fallbackRank
+			}
+			if best == 0 || r < bestRank || (r == bestRank && mid > best) {
+				best = mid
+				bestRank = r
+			}
+		}
+		if best > 0 {
+			out[key] = best
+		}
+	}
+	return out
 }
 
 func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist, keysByMovieKey map[string]struct{}) ([]playlistChange, error) {
@@ -623,7 +651,8 @@ func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist,
 		return changes, nil
 	}
 
-	// 3. 仅针对 changes 涉及的 movie_key 执行局部事务更新，避免整页全量 DELETE + INSERT 导致的自增 ID 暴涨与死锁
+	// 3. 变更行原地 upsert；只按 (source_id, movie_key, group_index) 删除消失的线路。
+	// 禁止按 movie_key 整组 DELETE：多源同时写同一主键时会打到 idx_slave_movie_key 上互相堵住。
 	changedKeysMap := make(map[string]struct{}, len(changes))
 	changedKeys := make([]string, 0, len(changes))
 	for _, c := range changes {
@@ -642,26 +671,21 @@ func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist,
 			changedPlaylists = append(changedPlaylists, p)
 		}
 	}
+	vanished := vanishedPlaylistSlots(sourceID, existing, incoming, changedKeys)
 
 	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		for i := 0; i < len(changedKeys); i += 500 {
-			end := i + 500
-			if end > len(changedKeys) {
-				end = len(changedKeys)
-			}
-			chunk := changedKeys[i:end]
-			if err := tx.Unscoped().
-				Where("source_id = ? AND movie_key IN ?", sourceID, chunk).
-				Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
-				return err
-			}
-		}
-
 		if len(changedPlaylists) > 0 {
 			if err := tx.Clauses(clause.OnConflict{
 				Columns:   []clause.Column{{Name: "source_id"}, {Name: "movie_key"}, {Name: "group_index"}},
 				DoUpdates: clause.AssignmentColumns([]string{"group_name", "content", "updated_at"}),
 			}).CreateInBatches(&changedPlaylists, 500).Error; err != nil {
+				return err
+			}
+		}
+		for _, slot := range vanished {
+			if err := tx.Unscoped().
+				Where("source_id = ? AND movie_key = ? AND group_index = ?", slot.sourceID, slot.movieKey, slot.groupIndex).
+				Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
 				return err
 			}
 		}
@@ -671,6 +695,32 @@ func saveGroupedPlaylists(sourceID string, playlists []model.SlaveMoviePlaylist,
 		return nil, err
 	}
 	return changes, nil
+}
+
+type playlistSlot struct {
+	sourceID   string
+	movieKey   string
+	groupIndex int
+}
+
+func vanishedPlaylistSlots(sourceID string, existing, incoming map[string][]playlistSignature, changedKeys []string) []playlistSlot {
+	if len(changedKeys) == 0 {
+		return nil
+	}
+	out := make([]playlistSlot, 0)
+	for _, movieKey := range changedKeys {
+		keep := make(map[int]struct{}, len(incoming[movieKey]))
+		for _, sig := range incoming[movieKey] {
+			keep[sig.GroupIndex] = struct{}{}
+		}
+		for _, sig := range existing[movieKey] {
+			if _, ok := keep[sig.GroupIndex]; ok {
+				continue
+			}
+			out = append(out, playlistSlot{sourceID: sourceID, movieKey: movieKey, groupIndex: sig.GroupIndex})
+		}
+	}
+	return out
 }
 
 type playlistChange struct {

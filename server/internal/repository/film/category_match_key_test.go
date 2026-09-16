@@ -424,6 +424,143 @@ func TestSaveSitePlayList_WritesOntoMasterPrimaryWhenUniqueMatch(t *testing.T) {
 	}
 }
 
+func TestSaveSitePlayList_MismatchedCategoryUniqueTitleWritesMasterPrimary(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		1:  0,
+		20: 0,
+	}, map[int64]string{
+		1:  model.BigCategoryTV,
+		20: model.BigCategoryAnimation,
+	})
+
+	cat20 := BuildMovieMatchKeysWithCategory(0, "一斩苍穹", 20)[0]
+	legacy := BuildMovieMatchKeys(0, "一斩苍穹")[0]
+	cat1 := BuildMovieMatchKeysWithCategory(0, "一斩苍穹", 1)[0]
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 116429, ContentKey: "vod_116429", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "中国动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "一斩苍穹"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{cat20, legacy} {
+		if err := gdb.Create(&model.MovieMatchKey{Mid: 116429, MatchKey: key}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	slave := model.MovieDetail{
+		Name:            "一斩苍穹",
+		MovieDescriptor: model.MovieDescriptor{CName: "电视剧"},
+		PlayList: [][]model.MovieUrlInfo{
+			{
+				{Episode: "第1集", Link: "https://subo/1.m3u8"},
+				{Episode: "第9集", Link: "https://subo/9.m3u8"},
+			},
+		},
+	}
+	if _, err := SaveSitePlayList("subo", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "subo").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != cat20 {
+		t.Fatalf("unique title must write master primary %s even when slave category differs, got %s", cat20, rows[0].MovieKey)
+	}
+	if rows[0].MovieKey == cat1 {
+		t.Fatalf("must not write the slave's own 电视剧 key %s", cat1)
+	}
+
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "subo", Name: "速博"}},
+		[]string{cat20, legacy},
+	)
+	got := groups["subo"]
+	if len(got) != 1 || len(got[0].LinkList) != 2 {
+		t.Fatalf("detail lookup must see 9th episode on master keys, got %+v", got)
+	}
+	if last := got[0].LinkList[1].Episode; last != "第9集" {
+		t.Fatalf("expected 第9集, got %s", last)
+	}
+}
+
+func TestSaveSitePlayList_MismatchedCategoryDoesNotMergeCollidingTitles(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		1:  0,
+		20: 0,
+		34: 0,
+	}, map[int64]string{
+		1:  model.BigCategoryTV,
+		20: model.BigCategoryAnimation,
+		34: model.BigCategoryShortFilm,
+	})
+
+	animePrimary := BuildMovieMatchKeysWithCategory(0, "仙逆", 20)[0]
+	shortPrimary := BuildMovieMatchKeysWithCategory(0, "仙逆", 34)[0]
+	legacy := BuildMovieMatchKeys(0, "仙逆")[0]
+	cat1 := BuildMovieMatchKeysWithCategory(0, "仙逆", 1)[0]
+	for _, row := range []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 701, ContentKey: "vod_701", SourceId: "master"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "动漫"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 702, ContentKey: "vod_702", SourceId: "master"},
+			FilmIndexCategory: model.FilmIndexCategory{Pid: 34, CName: "短剧"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "仙逆"},
+		},
+	} {
+		if err := gdb.Create(&row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, rec := range []model.MovieMatchKey{
+		{Mid: 701, MatchKey: animePrimary},
+		{Mid: 701, MatchKey: legacy},
+		{Mid: 702, MatchKey: shortPrimary},
+		{Mid: 702, MatchKey: legacy},
+	} {
+		if err := gdb.Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	slave := model.MovieDetail{
+		Name:            "仙逆",
+		MovieDescriptor: model.MovieDescriptor{CName: "电视剧"},
+		PlayList: [][]model.MovieUrlInfo{
+			{{Episode: "第1集", Link: "https://subo/1.m3u8"}},
+		},
+	}
+	if _, err := SaveSitePlayList("subo", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "subo").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey != cat1 {
+		t.Fatalf("colliding titles with wrong slave category must stay on %s, got %s", cat1, rows[0].MovieKey)
+	}
+
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "subo", Name: "速博"}},
+		[]string{animePrimary, legacy},
+	)
+	if _, ok := groups["subo"]; ok {
+		t.Fatalf("anime 仙逆 must not display the 电视剧-tagged colliding title")
+	}
+}
+
 func TestUnmappedSlavePlaylist_DoesNotInheritWhenTitleCollides(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 	support.SetCategoryTreeForTest(map[int64]int64{

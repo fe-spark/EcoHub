@@ -64,8 +64,8 @@ func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
 	gdb := openContentKeyTestDB(t)
 	old := model.MovieDetail{
 		Id: 200, Name: "连载片",
-		PlayFrom: []string{"线路1"},
-		PlayList: [][]model.MovieUrlInfo{{{Episode: "01", Link: "http://x/1"}}},
+		PlayFrom:        []string{"线路1"},
+		PlayList:        [][]model.MovieUrlInfo{{{Episode: "01", Link: "http://x/1"}}},
 		MovieDescriptor: model.MovieDescriptor{Remarks: "更新至01", State: "连载"},
 	}
 	row := model.FilmIndex{
@@ -656,11 +656,43 @@ func TestSaveGroupedPlaylists_NoOpShortCircuitAndPartialUpdate(t *testing.T) {
 	if err := gdb.Where("source_id = ?", "slave_test").Order("movie_key ASC").Find(&rowsAfterPartial).Error; err != nil {
 		t.Fatalf("query rows after partial: %v", err)
 	}
-	// k1 与 k3 的 ID 绝不得发生变化；只有 k2 被局部更新重写
+	// k1 / k3 不得动；k2 原地 upsert，ID 保持不变。
 	if rowsAfterPartial[0].ID != id1 {
 		t.Fatalf("expected k1 ID to remain %d, got %d", id1, rowsAfterPartial[0].ID)
 	}
+	if rowsAfterPartial[1].ID != id2 {
+		t.Fatalf("expected k2 ID to remain %d after in-place upsert, got %d", id2, rowsAfterPartial[1].ID)
+	}
 	if rowsAfterPartial[2].ID != id3 {
 		t.Fatalf("expected k3 ID to remain %d, got %d", id3, rowsAfterPartial[2].ID)
+	}
+
+	// 4. 减少线路时只删消失的 group，保留仍在的行
+	playlistsDropGroup := []model.SlaveMoviePlaylist{
+		{SourceId: "slave_test", MovieKey: "k1", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k1/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k2", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k2/1"},{"episode":"02","link":"http://k2/2"}]`},
+		{SourceId: "slave_test", MovieKey: "k2", GroupIndex: 1, GroupName: "备用", Content: `[{"episode":"01","link":"http://k2b/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k3", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k3/1"}]`},
+	}
+	if _, err := saveGroupedPlaylists("slave_test", playlistsDropGroup, keysMap); err != nil {
+		t.Fatalf("add group save failed: %v", err)
+	}
+	playlistsDropGroup = []model.SlaveMoviePlaylist{
+		{SourceId: "slave_test", MovieKey: "k1", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k1/1"}]`},
+		{SourceId: "slave_test", MovieKey: "k2", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k2/1"},{"episode":"02","link":"http://k2/2"}]`},
+		{SourceId: "slave_test", MovieKey: "k3", GroupIndex: 0, GroupName: "默认", Content: `[{"episode":"01","link":"http://k3/1"}]`},
+	}
+	if _, err := saveGroupedPlaylists("slave_test", playlistsDropGroup, keysMap); err != nil {
+		t.Fatalf("drop group save failed: %v", err)
+	}
+	var rowsAfterDrop []model.SlaveMoviePlaylist
+	if err := gdb.Where("source_id = ?", "slave_test").Order("movie_key ASC, group_index ASC").Find(&rowsAfterDrop).Error; err != nil {
+		t.Fatalf("query rows after drop: %v", err)
+	}
+	if len(rowsAfterDrop) != 3 {
+		t.Fatalf("expected vanished group deleted, got %d rows", len(rowsAfterDrop))
+	}
+	if rowsAfterDrop[1].MovieKey != "k2" || rowsAfterDrop[1].GroupIndex != 0 {
+		t.Fatalf("expected k2 group 0 kept, got %+v", rowsAfterDrop[1])
 	}
 }
