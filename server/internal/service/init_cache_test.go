@@ -81,8 +81,8 @@ func TestService_RedisNilSafety(t *testing.T) {
 		db.Rdb = origRdb
 	}()
 
-	// 2. loadLatestRelease with nil Rdb (network failure returns error, but no panic on Redis)
-	_, _ = VersionSvc.loadLatestRelease(false)
+	// 2. LoadLatestRelease with nil Rdb (network failure returns error, but no panic on Redis)
+	_, _ = VersionSvc.LoadLatestRelease(false)
 }
 
 func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {

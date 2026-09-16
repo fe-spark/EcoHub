@@ -40,7 +40,7 @@ var (
 
 	// FilmPictureUploadDir 用户上传素材落地目录。
 	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
-	FilmPictureUploadDir = filmPictureUploadDirLocal
+	FilmPictureUploadDir = resolveFilmPictureUploadDir()
 )
 
 const (
@@ -355,10 +355,24 @@ func InitConfig() {
 
 }
 
-// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。
+// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用项目根目录下的相对/绝对路径。
 func resolveFilmPictureUploadDir() string {
 	if runningInContainer() {
 		return filmPictureUploadDirContainer
+	}
+	cwd, err := os.Getwd()
+	if err == nil {
+		dir := cwd
+		for {
+			if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+				return filepath.Join(dir, "static", "upload", "gallery")
+			}
+			parent := filepath.Dir(dir)
+			if parent == dir {
+				break
+			}
+			dir = parent
+		}
 	}
 	return filmPictureUploadDirLocal
 }

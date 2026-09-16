@@ -9,7 +9,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/spider/conver"
+	"server/internal/spider/converter"
 )
 
 type FilmService struct{}
@@ -27,7 +27,7 @@ func (s *FilmService) GetSearchOptions() map[string]any {
 	options := make(map[string]any)
 	tree := repository.GetActiveCategoryTree()
 	tree.Name = "全部分类"
-	options["class"] = conver.ConvertCategoryList(&tree)
+	options["class"] = converter.ConvertCategoryList(&tree)
 	options["year"] = make([]map[string]string, 0)
 	tagGroup := filmrepo.GetAdminFilterOptionSnapshots()
 	if tree.Children != nil {
@@ -54,7 +54,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	if fd.Id == 0 {
 		fd.Id = now.Unix()
 	}
-	detail, err := conver.CovertFilmDetailVo(fd)
+	detail, err := converter.CovertFilmDetailVo(fd)
 	if err != nil || detail.PlayList == nil {
 		return errors.New("影片参数格式异常或缺少关键信息")
 	}
