@@ -29,7 +29,7 @@ Two keys, not “always merge by Douban ID”:
 
 **Why same-title films must stay isolated**: the daily-update list is driven by `update_stamp`, which only bumps when this source’s episode count is strictly higher than the film’s current global max. If two same-title films share a bare title key, the finished short drama’s episode count is counted against the cartoon, so a new cartoon episode never makes the daily list.
 
-**Collection order is not restricted**: when a slave uniquely matches one master film, playlists are written onto that film’s stored primary key; otherwise they use the slave’s own candidate keys (Douban / title#category). Categorized slaves do not write the bare title key.
+**Collection order is not restricted**: when a slave uniquely matches one master film, playlists are written onto that film’s stored primary key — including when the slave’s category is wrong (anime tagged as TV) as long as the title hits only one film. Otherwise they use the slave’s own candidate keys (Douban / title#category). Categorized slaves do not write the bare title key.
 
 **Aligning existing data**: for rows written to the wrong key before the upgrade, run the one-off migration script (preview first; not part of startup or collect finalize). Same-title cross-category rows and unmatched rows are skipped — the two “仙逆” films are not merged onto one key:
 
