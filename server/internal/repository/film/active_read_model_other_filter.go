@@ -1,11 +1,15 @@
 package film
 
 import (
+	"log"
 	"strconv"
 	"strings"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
+
+	"gorm.io/gorm"
 )
 
 func buildOtherReadModelFilters(st model.SearchTagsVO) []string {
@@ -148,4 +152,126 @@ func searchTagValueIsOther(tagType string, item model.SearchTagItem, visibleValu
 	}
 	_, ok := visibleValues[item.Value]
 	return !ok
+}
+
+// loadFilterOptionTags 取当前一级分类的筛选项 tags，与前台展示同一份数据（含 Redis 缓存）。
+// 「其他」的可见取值集合必须以此为准：展示列表之外的取值才算其他。
+func loadFilterOptionTags(version string, pid int64) map[string]any {
+	options := GetFilterOptionSnapshot(version, pid)
+	if options == nil {
+		return nil
+	}
+	tags, ok := options["tags"].(map[string]any)
+	if !ok {
+		return nil
+	}
+	return tags
+}
+
+func visibleSearchTagStrings(tags map[string]any, tagType string) []string {
+	visibleValues := getVisibleSearchTagValues(tags[tagType])
+	if len(visibleValues) == 0 {
+		return nil
+	}
+	res := make([]string, 0, len(visibleValues))
+	for v := range visibleValues {
+		res = append(res, v)
+	}
+	return res
+}
+
+func visibleSearchTagYears(tags map[string]any) []int64 {
+	strs := visibleSearchTagStrings(tags, "Year")
+	if len(strs) == 0 {
+		return nil
+	}
+	years := make([]int64, 0, len(strs))
+	for _, s := range strs {
+		if y, err := strconv.ParseInt(s, 10, 64); err == nil && y > 0 {
+			years = append(years, y)
+		}
+	}
+	return years
+}
+
+// logOthersFilterFallback 筛选项缺失时算不出可见集合，只能退化为空结果，留日志便于排查。
+func logOthersFilterFallback(version string, pid int64, tagType string) {
+	log.Printf("[FilmClassifySearch] 筛选项缺失，%s=其他 无法计算可见集合，按空结果处理 pid=%d version=%s", tagType, pid, version)
+}
+
+// applyTagSearchFilter 应用剧情/地区/语言/年份筛选。
+// 「其他」= 该维度取值不在前台展示的筛选项里（空值与异常值同样算其他），
+// 可见集合取当前分类的筛选项快照，同一次请求只取一次。
+func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO) *gorm.DB {
+	var tags map[string]any
+	if st.Plot == model.TagOthersValue || st.Area == model.TagOthersValue ||
+		st.Language == model.TagOthersValue || st.Year == model.TagOthersValue {
+		tags = loadFilterOptionTags(version, st.Pid)
+	}
+	if st.Plot != "" && st.Plot != "全部" && st.Plot != model.TagUnknownValue {
+		if st.Plot == model.TagOthersValue {
+			// AND 语义：class_tag 为空、或不含任何可见剧情标签时算其他。
+			// class_tag 是多值文本，这里用 NOT LIKE 近似判定，可见标签互为子串时可能误判。
+			visiblePlots := visibleSearchTagStrings(tags, "Plot")
+			if len(visiblePlots) > 0 {
+				cond := db.Mdb.Where("class_tag = '' OR class_tag IS NULL")
+				allNotLike := db.Mdb
+				for _, vp := range visiblePlots {
+					allNotLike = allNotLike.Where("class_tag NOT LIKE ?", "%"+escapeLikePattern(vp)+"%")
+				}
+				query = query.Where(cond.Or(allNotLike))
+			} else {
+				logOthersFilterFallback(version, st.Pid, "Plot")
+				query = query.Where("class_tag = ?", model.TagOthersValue)
+			}
+		} else {
+			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
+		}
+	}
+
+	if st.Area != "" && st.Area != "全部" && st.Area != model.TagUnknownValue {
+		if st.Area == model.TagOthersValue {
+			visibleAreas := visibleSearchTagStrings(tags, "Area")
+			if len(visibleAreas) > 0 {
+				query = query.Where("area NOT IN ? OR area = '' OR area IS NULL", visibleAreas)
+			} else {
+				logOthersFilterFallback(version, st.Pid, "Area")
+				query = query.Where("area = ?", model.TagOthersValue)
+			}
+		} else {
+			query = query.Where("area = ?", st.Area)
+		}
+	}
+
+	if st.Language != "" && st.Language != "全部" && st.Language != model.TagUnknownValue {
+		if st.Language == model.TagOthersValue {
+			visibleLangs := visibleSearchTagStrings(tags, "Language")
+			if len(visibleLangs) > 0 {
+				query = query.Where("language NOT IN ? OR language = '' OR language IS NULL", visibleLangs)
+			} else {
+				logOthersFilterFallback(version, st.Pid, "Language")
+				query = query.Where("language = ?", model.TagOthersValue)
+			}
+		} else {
+			query = query.Where("language = ?", st.Language)
+		}
+	}
+
+	if st.Year != "" && st.Year != "全部" && st.Year != model.TagUnknownValue {
+		if st.Year == model.TagOthersValue {
+			visibleYears := visibleSearchTagYears(tags)
+			if len(visibleYears) > 0 {
+				query = query.Where("year NOT IN ? OR year <= 0 OR year IS NULL", visibleYears)
+			} else {
+				logOthersFilterFallback(version, st.Pid, "Year")
+				query = query.Where("year = -1")
+			}
+		} else {
+			if yearInt, err := strconv.ParseInt(st.Year, 10, 64); err == nil && yearInt > 0 {
+				query = query.Where("year = ?", yearInt)
+			}
+		}
+	}
+
+	return query
 }

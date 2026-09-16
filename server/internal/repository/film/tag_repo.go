@@ -36,6 +36,18 @@ func normalizeSearchTagsVO(st model.SearchTagsVO) model.SearchTagsVO {
 	if st.Cid > 0 {
 		st.Cid = support.ResolveCategoryID(st.Cid)
 	}
+	if isOthersSearchTagValue(st.Plot) {
+		st.Plot = model.TagOthersValue
+	}
+	if isOthersSearchTagValue(st.Area) {
+		st.Area = model.TagOthersValue
+	}
+	if isOthersSearchTagValue(st.Language) {
+		st.Language = model.TagOthersValue
+	}
+	if isOthersSearchTagValue(st.Year) {
+		st.Year = model.TagOthersValue
+	}
 	return st
 }
 
