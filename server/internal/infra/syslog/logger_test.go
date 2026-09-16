@@ -238,3 +238,42 @@ func TestPruneExpiredLogs_EmptyOrNoOp(t *testing.T) {
 		t.Fatalf("expected 0 pruned files in missing dir, got %d", pruned)
 	}
 }
+
+func TestResolveDefaultLogDir(t *testing.T) {
+	t.Run("env override wins", func(t *testing.T) {
+		t.Setenv(logDirEnvName, "/tmp/ecohub-logs")
+		if got := resolveDefaultLogDir(); got != "/tmp/ecohub-logs" {
+			t.Fatalf("resolveDefaultLogDir()=%q want env value", got)
+		}
+	})
+
+	t.Run("walks up to module root", func(t *testing.T) {
+		t.Setenv(logDirEnvName, "")
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, moduleRootMarker), []byte("module tmp\n"), 0644); err != nil {
+			t.Fatalf("write go.mod: %v", err)
+		}
+		sub := filepath.Join(root, "internal", "middleware")
+		if err := os.MkdirAll(sub, 0755); err != nil {
+			t.Fatalf("mkdir sub: %v", err)
+		}
+		t.Chdir(sub)
+
+		got := resolveDefaultLogDir()
+		want := filepath.Join(root, defaultLogDir)
+		if got != want {
+			t.Fatalf("resolveDefaultLogDir()=%q want %q", got, want)
+		}
+		if !filepath.IsAbs(got) {
+			t.Fatalf("resolveDefaultLogDir()=%q must be absolute", got)
+		}
+	})
+
+	t.Run("falls back to relative when no module root", func(t *testing.T) {
+		t.Setenv(logDirEnvName, "")
+		t.Chdir(t.TempDir())
+		if got := resolveDefaultLogDir(); got != defaultLogDir {
+			t.Fatalf("resolveDefaultLogDir()=%q want %q", got, defaultLogDir)
+		}
+	})
+}

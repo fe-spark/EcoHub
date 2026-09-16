@@ -30,6 +30,10 @@ const (
 	entryBufferSize   = 10000
 	rotatedTimeFormat = "20060102-150405.000000000"
 	defaultLogDir     = "logs"
+	// logDirEnvName 显式指定日志根目录，优先级最高。
+	logDirEnvName = "ECOHUB_LOG_DIR"
+	// moduleRootMarker 用于向上定位服务端模块根，避免单测在子包 cwd 下生成局部 logs/。
+	moduleRootMarker = "go.mod"
 
 	// 日志级别：打印时确定，随 Entry 下发前端，禁止前端按正文猜。
 	LevelInfo  = "info"
@@ -39,11 +43,38 @@ const (
 
 var logDir = resolveDefaultLogDir()
 
+// resolveDefaultLogDir 解析日志根目录，优先级：
+//  1. ECOHUB_LOG_DIR 显式指定；
+//  2. 自 cwd 向上找到的模块根下的 logs（绝对路径）；
+//  3. 兜底相对路径 logs（部署环境无 go.mod 时保持旧行为）。
+//
+// 单测执行时 cwd 为被测子包目录，若无向上解析会在各子包下就地生成 logs/。
 func resolveDefaultLogDir() string {
-	if env := os.Getenv("ECOHUB_LOG_DIR"); env != "" {
+	if env := strings.TrimSpace(os.Getenv(logDirEnvName)); env != "" {
 		return env
 	}
+	if root := findModuleRoot(); root != "" {
+		return filepath.Join(root, defaultLogDir)
+	}
 	return defaultLogDir
+}
+
+// findModuleRoot 自 cwd 逐级上溯，返回首个含 go.mod 的目录；找不到返回空串。
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, moduleRootMarker)); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
 }
 
 // 仅识别写入时打上的结构化级别标签（时间戳后），用于从文件恢复缓冲。
