@@ -15,6 +15,7 @@ import (
 	filmrepo "server/internal/repository/film"
 
 	"github.com/robfig/cron/v3"
+	filmplaylist "server/internal/repository/film/playlist"
 )
 
 var CronCollect *cron.Cron = CreateCron()
@@ -110,17 +111,6 @@ func AddFilmRecoverCron(id, spec string) (cron.EntryID, error) {
 		}
 		executeTask(ft)
 	})
-}
-
-// RemoveCron 删除定时任务
-func RemoveCron(id cron.EntryID) {
-	// 通过定时任务EntryID移出对应的定时任务
-	CronCollect.Remove(id)
-}
-
-// GetEntryById 返回定时任务的相关时间信息
-func GetEntryById(id cron.EntryID) cron.Entry {
-	return CronCollect.Entry(id)
 }
 
 // ValidSpec 校验cron表达式是否有效
@@ -264,7 +254,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
 
 	// 1. 附属站孤儿治理：两阶段观察期状态机，零锁并发，直接作为后台闲时 GC 执行
-	n, err := filmrepo.CleanOrphanPlaylists()
+	n, err := filmplaylist.CleanOrphanPlaylists()
 	if err != nil {
 		syslog.Errorf("[CleanOrphan] 附属站孤儿治理执行失败: %v", err)
 		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
@@ -289,7 +279,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		m = filmrepo.CleanEmptyFilms()
 		x = filmrepo.CleanSearchWithoutDetail()
 		if m > 0 || x > 0 {
-			return filmrepo.RefreshAfterDataClean()
+			return filmplaylist.RefreshAfterDataClean()
 		}
 		return nil
 	}()

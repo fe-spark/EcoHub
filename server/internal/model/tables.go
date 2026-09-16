@@ -17,7 +17,6 @@ const (
 	TableSourceCategory     = "source_categories"
 	TableMappingRule        = "mapping_rules"
 	TableSearchTag          = "search_tag_item"
-	TableFilmSource         = "film_sources"
 	TableCrontabRecord      = "crontab_record"
 	TableCronSourceRel      = "cron_source_rel"
 	TableSiteConfig         = "site_config_record"
@@ -58,4 +57,3 @@ var AllModels = []any{
 	&FailureRecord{},
 	&SchemaMigration{},
 }
-

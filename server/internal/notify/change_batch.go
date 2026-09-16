@@ -114,11 +114,6 @@ func newChangeBatchID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// CountChangeMids 兼容接口。
-func CountChangeMids(batchID string) int {
-	return 0
-}
-
 // clampPageSize 限制翻页 size 到合法范围。
 func clampPageSize(pageSize int) int {
 	if pageSize <= 0 {

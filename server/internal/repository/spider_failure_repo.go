@@ -108,14 +108,6 @@ func PendingRecord() []model.FailureRecord {
 	return list
 }
 
-// UpdateFailureRecordStatus 修改失败记录的重试结果状态。
-func UpdateFailureRecordStatus(fr *model.FailureRecord, status int) {
-	if fr == nil || fr.ID == 0 {
-		return
-	}
-	db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status)
-}
-
 // MarkFailureRecordRetryFailed 更新当前失败记录的失败原因，并用数据库当前重试次数判断是否最终失败。
 func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetryCount int) (bool, int, error) {
 	if fr == nil || fr.ID == 0 {

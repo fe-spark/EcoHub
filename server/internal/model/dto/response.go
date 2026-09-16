@@ -24,12 +24,6 @@ type Response struct {
 	Msg  string `json:"msg"`  // 提示信息
 }
 
-// PagingData 分页基本数据通用格式
-type PagingData struct {
-	List   []any `json:"list"`
-	Paging Page  `json:"paging"`
-}
-
 // Page 分页信息结构体
 type Page struct {
 	PageSize  int `json:"pageSize"`  // 每页大小
@@ -74,11 +68,6 @@ func CustomResult(statusCode int, code int, data any, msg string, c *gin.Context
 		Data: data,
 		Msg:  msg,
 	})
-}
-
-// ExceptionResult 异常状态返回
-func ExceptionResult(statusCode int, message string, c *gin.Context) {
-	CustomResult(statusCode, SUCCESS, nil, message, c)
 }
 
 // GetPage 获取分页相关数据 (带 Redis 缓存优化，避免大表 COUNT(*) 性能危机)

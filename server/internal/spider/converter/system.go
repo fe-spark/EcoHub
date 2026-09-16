@@ -17,16 +17,16 @@ func CovertFilmDetailVo(fd model.FilmDetailVo) (model.MovieDetail, error) {
 	}
 	t, err := time.ParseInLocation(time.DateTime, fd.AddTime, time.Local)
 	md := model.MovieDetail{
-		Id:       fd.Id,
-		Cid:      fd.Cid,
-		Pid:      fd.Pid,
+		Id:                 fd.Id,
+		Cid:                fd.Cid,
+		Pid:                fd.Pid,
 		Name:               fd.Name,
 		Picture:            fd.Picture,
 		PictureSlide:       fd.PictureSlide,
 		CustomPicture:      fd.CustomPicture,
 		CustomPictureSlide: fd.CustomPictureSlide,
 		IsCustomPicture:    fd.IsCustomPicture,
-		DownFrom:        fd.DownFrom,
+		DownFrom:           fd.DownFrom,
 		MovieDescriptor: model.MovieDescriptor{
 			SubTitle:    fd.SubTitle,
 			CName:       fd.CName,

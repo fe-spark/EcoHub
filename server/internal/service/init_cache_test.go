@@ -13,8 +13,6 @@ import (
 	"server/internal/spider"
 )
 
-
-
 func TestDefaultFilmTasks_SpecValid(t *testing.T) {
 	for _, task := range defaultFilmTasks() {
 		if err := spider.ValidSpec(task.Spec); err != nil {

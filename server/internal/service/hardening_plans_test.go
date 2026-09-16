@@ -18,7 +18,7 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
@@ -46,15 +46,15 @@ func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 	origRdb := db.Rdb
 	db.Mdb = gdb
 	db.Rdb = client
-	filmrepo.ClearActiveFilmReadModel()
+	filmsnapshot.ClearActiveFilmReadModel()
 
 	t.Cleanup(func() {
-		filmrepo.WaitActiveFilmSearchIndexBuilt()
+		filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 		_ = client.Close()
 		mr.Close()
 		db.Mdb = origMdb
 		db.Rdb = origRdb
-		filmrepo.ClearActiveFilmReadModel()
+		filmsnapshot.ClearActiveFilmReadModel()
 	})
 
 	return gdb, mr
@@ -79,9 +79,9 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 		}
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 1. 请求 limit = 3
 	kw := IndexSvc.GetHotSearchKeywords(3)
@@ -179,9 +179,9 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		t.Fatalf("create detail: %v", err)
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 3. 读取正常详情并验证缓存写入与 Jitter 防雪崩
 	detailVo, err := IndexSvc.GetFilmDetail(validMid)
@@ -258,9 +258,9 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		}
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 预先将 201 写入 Redis 模拟缓存命中
 	vo201 := model.MovieDetailVo{
@@ -313,25 +313,25 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 		}
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 测试 GetSnapshotTopMoviesBySortFast:
 	// sortType 0 (news: year DESC, update_stamp DESC) -> 应最先是 303 (2023)
-	news := filmrepo.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
+	news := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
 	if len(news) != 3 || news[0].Id != 303 {
 		t.Fatalf("sortType 0 unexpected top: %+v", news)
 	}
 
 	// sortType 1 (top: hits DESC) -> 应最先是 302 (hits 900)
-	top := filmrepo.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
+	top := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
 	if len(top) != 3 || top[0].Id != 302 {
 		t.Fatalf("sortType 1 unexpected top: %+v", top)
 	}
 
 	// sortType 2 (recent: update_stamp DESC) -> 应最先是 302 (update_stamp 2000)
-	recent := filmrepo.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
+	recent := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
 	if len(recent) != 3 || recent[0].Id != 302 {
 		t.Fatalf("sortType 2 unexpected top: %+v", recent)
 	}
@@ -353,7 +353,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	}
 
 	// 确认顶层分类缓存已生成
-	cacheKey := filmrepo.SnapshotClassifyCacheKey(version, pid, page)
+	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
 	if val, err := mr.Get(cacheKey); err != nil || val == "" {
 		t.Fatalf("expected classify cache key %s to be set", cacheKey)
 	}
@@ -395,9 +395,9 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 		}
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	st := model.SearchTagsVO{Pid: 1, Cid: 10}
 
@@ -415,7 +415,7 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = filmrepo.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
+			results[idx] = filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
 		}(i)
 	}
 	wg.Wait()
@@ -468,9 +468,9 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 		t.Fatalf("create d2: %v", err)
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	page := &dto.Page{Current: 1, PageSize: 10}
 
@@ -530,7 +530,7 @@ func TestPlan2_ClearAllSnapshotDynamicCaches_Invalidation(t *testing.T) {
 	_ = mr.Set(key2, `["片名"]`)
 	_ = mr.Set(key3, `[]`)
 
-	filmrepo.ClearAllSnapshotDynamicCaches()
+	filmsnapshot.ClearAllSnapshotDynamicCaches()
 
 	for _, k := range []string{key1, key2, key3} {
 		if mr.Exists(k) {
@@ -557,7 +557,7 @@ func TestPlan1_EnsureSnapshotPerformanceIndexes(t *testing.T) {
 func TestPlan1_EmptyHotKeywords_Sentinel(t *testing.T) {
 	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan1_empty"
-	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
 	kw := IndexSvc.GetHotSearchKeywords(10)
 	if len(kw) != 0 {
@@ -598,7 +598,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 		t.Fatalf("create detail: %v", err)
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
 	// 1. 模拟超过 100 个 ID 请求，测试 batch clamping
 	manyIDs := make([]string, 150)
@@ -625,7 +625,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	gdb, _ := setupTestDBAndRedis(t)
 	const version = "v_plan4_fallback"
-	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
 	s := model.FilmListSnapshot{
 		SnapshotVersion: version,
@@ -654,11 +654,11 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan5_empty"
-	_ = filmrepo.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
 	st := model.SearchTagsVO{Pid: 999, Cid: 888}
 	page := &dto.Page{Current: 1, PageSize: 10}
-	snaps := filmrepo.ListFilmSnapshotsByTagsReadModel(version, st, page)
+	snaps := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, page)
 	if len(snaps) != 0 {
 		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
 	}
@@ -687,9 +687,9 @@ func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
 	_ = gdb.Create(&model.MovieDetailInfo{Mid: 801, Content: `{"id":801,"name":"电影A"}`})
 	_ = gdb.Create(&model.MovieDetailInfo{Mid: 802, Content: `{"id":802,"name":"电影B"}`})
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	page := &dto.Page{Current: 1, PageSize: 10}
 	list1 := IndexSvc.RelateMovie(801, page)

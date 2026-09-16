@@ -10,7 +10,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 type filmMetaCacheItem struct {
@@ -44,19 +44,6 @@ func parseYearInt(s string) int64 {
 	return v
 }
 
-// InvalidateFilmMetaCache 淘汰指定影片或全部热播元数据缓存
-func InvalidateFilmMetaCache(mids ...int64) {
-	filmMetaCacheMu.Lock()
-	defer filmMetaCacheMu.Unlock()
-	if len(mids) == 0 {
-		filmMetaCache = map[int64]filmMetaCacheItem{}
-		return
-	}
-	for _, id := range mids {
-		delete(filmMetaCache, id)
-	}
-}
-
 // resolveFilmMetas 批量反查影片片名、分类与海报（优先从活跃只读快照与详情反查最新海报，带内存短缓存）
 func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	if len(filmIDs) == 0 {
@@ -85,7 +72,7 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	unresolved := make([]int64, 0, len(missing))
 
 	// 1. 优先从当前活跃快照表 FilmListSnapshot 中查询（包含自定义封面和最新海报源封面）
-	activeVersion := filmrepo.GetActiveSnapshotVersion()
+	activeVersion := filmsnapshot.GetActiveSnapshotVersion()
 	if activeVersion != "" {
 		var snapshots []model.FilmListSnapshot
 		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
@@ -354,4 +341,3 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 func takeClassifyTops(items []TopItem, limit int) []TopItem {
 	return limitTopItems(enrichClassifyTopItems(items), limit)
 }
-

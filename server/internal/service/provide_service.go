@@ -19,14 +19,14 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
 )
 
 type ProvideService struct{}
 
 var (
-	ProvideSvc        = new(ProvideService)
+	ProvideSvc       = new(ProvideService)
 	tvboxListSfGroup singleflight.Group
 )
 
@@ -126,7 +126,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmrepo.GetFilterOptionSnapshot(filmrepo.GetActiveReadModelVersion(), category.Id)
+			searchTags := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id)
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -260,7 +260,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
 
@@ -312,7 +312,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 		if err := validateReadModelSearchTags(searchTags); err != nil {
 			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err
 		}
-		sl := filmrepo.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+		sl := filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
 
 		var vodList []model.FilmList
 		for _, s := range sl {
@@ -375,4 +375,3 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	res, err := fetchList()
 	return res.Current, res.PageCount, res.Total, res.VodList, err
 }
-

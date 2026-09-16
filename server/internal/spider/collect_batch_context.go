@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/notify"
+	"server/internal/spider/progress"
 )
 
 // publishMu 全局快照发布互斥锁，确保向 MySQL 发布快照时单次只有一个线程在执行
@@ -155,6 +156,24 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 	}
 }
 
+// IsStandalone 实现 fetcher.Batch：单站采集，不与其他站点合并发布。
+func (b *collectBatchContext) IsStandalone() bool {
+	return b != nil && b.isStandalone
+}
+
+// AddAffectedMIDs 实现 fetcher.Batch：记录影响到的全局 mid。
+func (b *collectBatchContext) AddAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
+	b.addAffectedMIDs(s, h, mids)
+}
+
+// NoteCollectedMIDs 实现 fetcher.Batch：累计本源应进更新列表的 mid。
+func (b *collectBatchContext) NoteCollectedMIDs(sourceID, sourceName string, mids []int64) {
+	if b == nil {
+		return
+	}
+	noteCollectedMIDs(b.batch, sourceID, sourceName, mids)
+}
+
 func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
 	if b == nil {
 		return
@@ -210,7 +229,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	b.masterAffectedMIDs = make(map[int64]struct{})
 	b.mu.Unlock()
 
-	markSourcesFinalizing(finishedMap)
+	progress.MarkSourcesFinalizing(finishedMap)
 
 	collectLifecycle.beginPublish()
 	defer collectLifecycle.endPublish()
@@ -219,10 +238,10 @@ func (b *collectBatchContext) flushAndFinalize() error {
 
 	_, _, err := finalizeCollectRun(sources, affectedMIDs, masterMIDs)
 	if err != nil {
-		markSourcesFinalizeFailed(finishedMap)
+		progress.MarkSourcesFinalizeFailed(finishedMap)
 		return err
 	}
-	markSourcesPublished(finishedMap)
+	progress.MarkSourcesPublished(finishedMap)
 	return nil
 }
 

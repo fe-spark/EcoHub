@@ -5,14 +5,14 @@ const ConfigBackupVersion = 1
 
 // ConfigBackup 站点配置备份包（不含影视库存与账号密码）
 type ConfigBackup struct {
-	Version    int                `json:"version"`
-	ExportedAt string             `json:"exportedAt"`
-	AppVersion string             `json:"appVersion,omitempty"`
-	Site       *BasicConfig       `json:"site,omitempty"`
-	FilmSources []FilmSource      `json:"filmSources,omitempty"`
-	CronTasks  []FilmCollectTask  `json:"cronTasks,omitempty"`
-	Banners    Banners            `json:"banners,omitempty"`
-	Notify     *NotifyConfig      `json:"notify,omitempty"`
+	Version      int                 `json:"version"`
+	ExportedAt   string              `json:"exportedAt"`
+	AppVersion   string              `json:"appVersion,omitempty"`
+	Site         *BasicConfig        `json:"site,omitempty"`
+	FilmSources  []FilmSource        `json:"filmSources,omitempty"`
+	CronTasks    []FilmCollectTask   `json:"cronTasks,omitempty"`
+	Banners      Banners             `json:"banners,omitempty"`
+	Notify       *NotifyConfig       `json:"notify,omitempty"`
 	MappingRules []MappingRuleExport `json:"mappingRules,omitempty"`
 }
 

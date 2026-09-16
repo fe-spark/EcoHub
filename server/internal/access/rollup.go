@@ -2,7 +2,6 @@ package access
 
 import (
 	"encoding/json"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -385,17 +384,6 @@ func snapshotDayFromRedis(day time.Time) (model.AccessDailyStats, []model.Access
 	return stats, tops, has, nil
 }
 
-func filterNumericClassifyTops(items []TopItem) []TopItem {
-	valid := make([]TopItem, 0, len(items))
-	for _, it := range items {
-		if id, ok := parseFilmID(it.Key); ok {
-			it.Key = strconv.FormatInt(id, 10)
-			valid = append(valid, it)
-		}
-	}
-	return valid
-}
-
 func zsetToTopItems(pairs []redis.Z) []TopItem {
 	items := make([]TopItem, 0, len(pairs))
 	for _, p := range pairs {
@@ -428,4 +416,3 @@ func topItemsToRows(day, kind string, items []TopItem) []model.AccessDailyTop {
 	}
 	return rows
 }
-

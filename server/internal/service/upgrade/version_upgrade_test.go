@@ -187,5 +187,3 @@ func TestDockerEngineLiveSocket(t *testing.T) {
 	t.Logf("真实 Docker 连通性验证成功: 宿主机 Docker 响应正常，成功检出容器 %s (ID: %s, 主网络数: %d, 附加网络数: %d)",
 		insp.Name, insp.ID[:12], len(endpoints), len(extraNets))
 }
-
-

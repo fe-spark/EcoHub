@@ -15,11 +15,6 @@ const macCMSGroupSeparator = "$$$"
 	统一转化为内部结构体
 */
 
-// GenCategoryTree 将采集站分类列表直接构建为两层树形结构。
-func GenCategoryTree(list []model.FilmClass) *model.CategoryTree {
-	return GenCategoryTreeWithParentHints(list, nil)
-}
-
 // GenCategoryTreeWithParentHints 在原始 type_pid 缺失时，允许调用方补充父级推断结果。
 // 第一层（pid=0）直接作为顶级大类，第二层作为对应大类的子类。
 // 忽略资讯/明星等噪音分类。
@@ -249,4 +244,3 @@ func ConvertPlayUrl(playUrl string) []model.MovieUrlInfo {
 	}
 	return result
 }
-

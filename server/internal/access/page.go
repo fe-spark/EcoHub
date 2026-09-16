@@ -39,18 +39,6 @@ type TrackViewPayload struct {
 	DeviceId       string `json:"device_id"`
 }
 
-func TrackPage(c *gin.Context, action, resource, source, path string) {
-	if !config.AccessLogEnabled {
-		return
-	}
-	Collect(buildPageEventPayload(c, TrackViewPayload{
-		Action:   action,
-		Resource: resource,
-		Source:   source,
-		Path:     path,
-	}))
-}
-
 func TrackPagePayload(c *gin.Context, p TrackViewPayload) {
 	if !config.AccessLogEnabled {
 		return

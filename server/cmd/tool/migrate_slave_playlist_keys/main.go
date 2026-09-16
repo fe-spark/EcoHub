@@ -10,7 +10,7 @@ import (
 	"time"
 
 	infradb "server/internal/infra/db"
-	"server/internal/repository/film"
+	filmplaylist "server/internal/repository/film/playlist"
 
 	_ "github.com/go-sql-driver/mysql"
 	gormmysql "gorm.io/driver/mysql"
@@ -62,7 +62,7 @@ func main() {
 	startTime := time.Now()
 	fmt.Printf("Starting slave playlist key migration (batch-size=%d, dry-run=%v)...\n", *batchSize, *dryRun)
 
-	result, err := film.MigrateSlavePlaylistKeys(*dryRun, *batchSize, log.Printf)
+	result, err := filmplaylist.MigrateSlavePlaylistKeys(*dryRun, *batchSize, log.Printf)
 	if err != nil {
 		log.Fatalf("Migration failed after scanned=%d migrated=%d skipped=%d: %v",
 			result.Scanned, result.Migrated, result.Skipped, err)

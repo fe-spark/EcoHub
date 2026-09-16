@@ -25,11 +25,6 @@ func StoragePath(f *model.FileInfo) string {
 	return storage
 }
 
-// ExistFileTable 是否存在Picture表
-func ExistFileTable() bool {
-	return db.Mdb.Migrator().HasTable(&model.FileInfo{})
-}
-
 // SaveGallery 保存图片关联信息
 func SaveGallery(f model.FileInfo) {
 	db.Mdb.Create(&f)

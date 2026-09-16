@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/infra/syslog"
 
 	"gorm.io/gorm"
 )

@@ -226,11 +226,6 @@ func isNewerVersion(latest, current string) bool {
 	return comparePreRelease(lpre, cpre) > 0
 }
 
-func parseSemver(raw string) (major, minor, patch int, ok bool) {
-	major, minor, patch, _, ok = parseSemverFull(raw)
-	return major, minor, patch, ok
-}
-
 func parseSemverFull(raw string) (major, minor, patch int, pre string, ok bool) {
 	s := normalizeVer(raw)
 	if i := strings.IndexByte(s, '+'); i >= 0 {
