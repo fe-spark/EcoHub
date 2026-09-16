@@ -124,8 +124,11 @@ func clearProvideListCache() {
 	if db.Rdb == nil {
 		return
 	}
-	iter := db.Rdb.Scan(db.Cxt, 0, config.TVBoxList+":*", config.MaxScanCount).Iterator()
-	for iter.Next(db.Cxt) {
-		db.Rdb.Del(db.Cxt, iter.Val())
+	patterns := []string{config.TVBoxList + ":*", config.TVBoxConfigCacheKey + ":*"}
+	for _, p := range patterns {
+		iter := db.Rdb.Scan(db.Cxt, 0, p, config.MaxScanCount).Iterator()
+		for iter.Next(db.Cxt) {
+			db.Rdb.Del(db.Cxt, iter.Val())
+		}
 	}
 }

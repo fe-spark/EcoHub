@@ -91,20 +91,24 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 		return 0, err
 	}
 
-	var infos []model.FilmIndex
-	if err := db.Mdb.Where("pid = ?", pid).Find(&infos).Error; err != nil {
-		return 0, err
-	}
-	if len(infos) == 0 {
-		return 0, nil
-	}
-
-	for offset := 0; offset < len(infos); offset += searchTagsRebuildFilmBatchSize {
-		end := offset + searchTagsRebuildFilmBatchSize
-		if end > len(infos) {
-			end = len(infos)
+	totalFilms := 0
+	var lastID uint
+	for {
+		var batch []model.FilmIndex
+		if err := db.Mdb.Model(&model.FilmIndex{}).
+			Select("id, pid, cid, c_name, class_tag, area, language, year").
+			Where("pid = ? AND id > ?", pid, lastID).
+			Order("id ASC").
+			Limit(searchTagsRebuildFilmBatchSize).
+			Find(&batch).Error; err != nil {
+			return totalFilms, err
 		}
-		batch := infos[offset:end]
+		if len(batch) == 0 {
+			break
+		}
+		totalFilms += len(batch)
+		lastID = batch[len(batch)-1].ID
+
 		items := aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(batch))
 		if len(items) == 0 {
 			continue
@@ -112,10 +116,10 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			return bulkUpsertSearchTagItemsTx(tx, items)
 		}); err != nil {
-			return 0, err
+			return totalFilms, err
 		}
 	}
-	return len(infos), nil
+	return totalFilms, nil
 }
 
 func collectDynamicSearchTagItemsBatch(infos []model.FilmIndex) []model.SearchTagItem {

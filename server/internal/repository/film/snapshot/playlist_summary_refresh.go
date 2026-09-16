@@ -12,7 +12,7 @@ import (
 
 var playSummaryRefresh = newPlaySummaryRefreshScheduler()
 
-const playSummaryRefreshMIDChunkSize = 500
+const playSummaryRefreshMIDChunkSize = 200
 
 type playSummaryRefreshScheduler struct {
 	mu       sync.Mutex
