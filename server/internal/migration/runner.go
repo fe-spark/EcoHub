@@ -2,7 +2,6 @@ package migration
 
 import (
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -66,14 +65,15 @@ func RunAutoMigrations(db *gorm.DB) error {
 		appliedSet[v] = true
 	}
 
+	newApplied := 0
 	for _, m := range migrations {
 		if appliedSet[m.Version] {
 			continue
 		}
 
-		log.Printf("[Migration] Applying %s (%s)...", m.Version, m.Name)
+		syslog.Infof("[Migration] 正在执行版本迁移 %s (%s)...", m.Version, m.Name)
 		if err := m.Run(db); err != nil {
-			syslog.Errorf("[Migration] %s failed: %v", m.Version, err)
+			syslog.Errorf("[Migration] %s 执行失败: %v", m.Version, err)
 			return fmt.Errorf("migration %s failed: %w", m.Version, err)
 		}
 
@@ -85,7 +85,14 @@ func RunAutoMigrations(db *gorm.DB) error {
 		if err := db.Create(&record).Error; err != nil {
 			return fmt.Errorf("record migration %s failed: %w", m.Version, err)
 		}
-		log.Printf("[Migration] Successfully applied %s", m.Version)
+		syslog.Infof("[Migration] 成功完成版本迁移 %s", m.Version)
+		newApplied++
+	}
+
+	if newApplied > 0 {
+		syslog.Infof("[Migration] 本次成功执行 %d 项版本迁移，数据库当前已就绪 (累计 %d 项)", newApplied, len(appliedSet)+newApplied)
+	} else {
+		syslog.Infof("[Migration] 数据库版本化迁移已是最新 (已应用 %d 项历史迁移，无需执行)", len(appliedSet))
 	}
 
 	return nil
