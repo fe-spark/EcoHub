@@ -1,11 +1,13 @@
 package service
 
 import (
+	"encoding/json"
 	"errors"
 	"log"
 	"strings"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -58,8 +60,32 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		fd.Id = now.Unix()
 	}
 	detail, err := converter.CovertFilmDetailVo(fd)
-	if err != nil || detail.PlayList == nil {
+	if err != nil {
 		return errors.New("影片参数格式异常或缺少关键信息")
+	}
+
+	// 若更新既有影片且未传入播放资源，保留已有的播放资源和线路（绝不覆盖更新播放资源）
+	if fd.Id > 0 && len(detail.PlayList) == 0 {
+		var existingDetailRec model.MovieDetailInfo
+		if db.Mdb.Where("mid = ?", fd.Id).First(&existingDetailRec).Error == nil && existingDetailRec.Content != "" {
+			var oldDetail model.MovieDetail
+			if json.Unmarshal([]byte(existingDetailRec.Content), &oldDetail) == nil {
+				detail.PlayList = oldDetail.PlayList
+				if len(detail.PlayFrom) == 0 {
+					detail.PlayFrom = oldDetail.PlayFrom
+				}
+				if len(detail.DownloadList) == 0 {
+					detail.DownloadList = oldDetail.DownloadList
+				}
+				if detail.DownFrom == "" {
+					detail.DownFrom = oldDetail.DownFrom
+				}
+			}
+		}
+	}
+
+	if detail.PlayList == nil {
+		detail.PlayList = [][]model.MovieUrlInfo{}
 	}
 
 	// 手动上传的影片，尝试归属于当前主站 ID，如果没有主站则标记为 "manual"

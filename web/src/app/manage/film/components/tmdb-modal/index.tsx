@@ -174,7 +174,7 @@ export default function TmdbModal({
       if (onPrefill) {
         if (previewDetail) {
           onPrefill(previewDetail, selectedFields);
-          message.success("TMDB 元数据已成功填充至表单！");
+          message.success("TMDB 元数据已成功填充至表单！如需恢复可在页面中随时一键撤销");
           onClose();
           return;
         }
@@ -184,7 +184,7 @@ export default function TmdbModal({
         });
         if (resp.code === 0 && resp.data) {
           onPrefill(resp.data, selectedFields);
-          message.success("TMDB 元数据已成功填充至表单！");
+          message.success("TMDB 元数据已成功填充至表单！如需恢复可在页面中随时一键撤销");
           onClose();
         } else {
           message.error(resp.msg || "获取 TMDB 预填数据失败");
