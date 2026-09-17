@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Button,
   Input,
@@ -13,6 +13,7 @@ import {
   CopyOutlined,
   LinkOutlined,
 } from "@ant-design/icons";
+import { ApiGet } from "@/lib/client-api";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import { useAppMessage } from "@/lib/useAppMessage";
 import styles from "./index.module.less";
@@ -32,26 +33,52 @@ export interface SubscribeModalProps {
 
 export default function SubscribeModal(props: SubscribeModalProps) {
   const { open, onClose } = props;
-  const { config } = useSiteConfig();
+  const { config: publicConfig } = useSiteConfig();
   const { message } = useAppMessage();
+  const [adminConfig, setAdminConfig] = useState<{
+    siteUrl?: string;
+    provideKey?: string;
+    privateAccess?: boolean;
+  } | null>(null);
+
+  // 后台工作台弹窗拉取具备管理员鉴权的 /manage/config/basic，以获取完整 provideKey
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    ApiGet("/manage/config/basic")
+      .then((resp) => {
+        if (active && resp.code === 0 && resp.data) {
+          setAdminConfig(resp.data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [open]);
+
+  const activeSiteUrl = adminConfig?.siteUrl || publicConfig?.siteUrl;
+  const currentKey = (adminConfig?.provideKey || publicConfig?.provideKey)?.trim();
+  const isPrivate = Boolean(
+    adminConfig ? adminConfig.privateAccess : publicConfig?.privateAccess,
+  );
 
   // 基础 Origin：优先使用配置的 siteUrl，兜底使用当前浏览器 location.origin
   const origin = useMemo(() => {
-    if (config?.siteUrl && config.siteUrl.trim()) {
-      return config.siteUrl.trim().replace(/\/+$/, "");
+    if (activeSiteUrl && activeSiteUrl.trim()) {
+      return activeSiteUrl.trim().replace(/\/+$/, "");
     }
     if (typeof window !== "undefined") {
       return window.location.origin;
     }
     return "";
-  }, [config?.siteUrl]);
+  }, [activeSiteUrl]);
 
   const getUrl = (item: SubscribeItem) => {
     if (!origin) return item.path;
-    const key = config?.provideKey?.trim();
-    if (item.withKey && key) {
+    if (item.withKey && isPrivate && currentKey) {
       const delimiter = item.path.includes("?") ? "&" : "?";
-      return `${origin}${item.path}${delimiter}key=${encodeURIComponent(key)}`;
+      return `${origin}${item.path}${delimiter}key=${encodeURIComponent(currentKey)}`;
     }
     return `${origin}${item.path}`;
   };

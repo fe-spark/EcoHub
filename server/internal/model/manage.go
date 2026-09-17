@@ -61,6 +61,14 @@ type BasicConfig struct {
 	Notice        NoticeConfig `json:"notice"`        // 开屏公告
 }
 
+// AccessConfig 网站访问控制配置（运行状态/维护提示/私有化/订阅密钥）
+type AccessConfig struct {
+	State         bool   `json:"state"`         // 网站状态 开启 || 关闭
+	Hint          string `json:"hint"`          // 网站关闭提示
+	PrivateAccess bool   `json:"privateAccess"` // 私有化访问控制（仅登录可用）
+	ProvideKey    string `json:"provideKey"`    // TVBox/订阅专属访问密钥
+}
+
 // Banner 首页横幅信息
 type Banner struct {
 	Id            string  `gorm:"primaryKey;size:64" json:"id"`     // 唯一标识

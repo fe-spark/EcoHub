@@ -9,13 +9,11 @@ import {
   Input,
   Space,
   Spin,
-  Switch,
   Typography,
 } from "antd";
 import {
   EditOutlined,
   PictureOutlined,
-  ReloadOutlined,
   SaveOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -25,33 +23,12 @@ import { useSiteConfig } from "@/components/common/SiteGuard";
 import ImagePicker from "@/app/manage/components/image-picker";
 import styles from "./basic-config-card.module.less";
 
-function generateRandomKey(length: number = 16): string {
-  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
-  let res = "";
-  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
-    const bytes = new Uint8Array(length);
-    crypto.getRandomValues(bytes);
-    for (let i = 0; i < length; i++) {
-      res += chars[bytes[i] % chars.length];
-    }
-  } else {
-    for (let i = 0; i < length; i++) {
-      res += chars[Math.floor(Math.random() * chars.length)];
-    }
-  }
-  return res;
-}
-
 export interface BasicInfoPayload {
   siteName: string;
   siteUrl: string;
   keyword: string;
   logo: string;
-  state: boolean;
   describe: string;
-  hint: string;
-  privateAccess: boolean;
-  provideKey: string;
 }
 
 const DEFAULT_BASIC_INFO: BasicInfoPayload = {
@@ -59,18 +36,12 @@ const DEFAULT_BASIC_INFO: BasicInfoPayload = {
   siteUrl: "",
   keyword: "",
   logo: "",
-  state: true,
   describe: "",
-  hint: "网站升级中, 暂时无法访问 !!!",
-  privateAccess: false,
-  provideKey: "",
 };
 
 const MAX_SITE_NAME_LEN = 64;
 const MAX_KEYWORD_LEN = 128;
 const MAX_DESCRIBE_LEN = 512;
-const MAX_HINT_LEN = 256;
-const MAX_PROVIDE_KEY_LEN = 64;
 
 function normalizeBasicInfo(
   raw?: Partial<BasicInfoPayload> | null,
@@ -80,11 +51,7 @@ function normalizeBasicInfo(
     siteUrl: String(raw?.siteUrl ?? "").trim(),
     keyword: String(raw?.keyword ?? "").trim(),
     logo: String(raw?.logo ?? "").trim(),
-    state: raw?.state === undefined ? true : Boolean(raw.state),
     describe: String(raw?.describe ?? "").trim(),
-    hint: String(raw?.hint ?? "").trim() || DEFAULT_BASIC_INFO.hint,
-    privateAccess: Boolean(raw?.privateAccess),
-    provideKey: String(raw?.provideKey ?? "").trim(),
   };
 }
 
@@ -136,10 +103,6 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
       message.error("网站名称不能为空");
       return;
     }
-    if (draft.privateAccess && !draft.provideKey.trim()) {
-      message.error("开启私有化访问时，TVBox / 影视仓订阅密钥不能为空");
-      return;
-    }
     setSaving(true);
     try {
       const normalized = normalizeBasicInfo(draft);
@@ -166,7 +129,7 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
       title={
         <Space size={8} align="center">
           <SettingOutlined style={{ color: "var(--ant-color-primary)" }} />
-          <span>基本信息配置</span>
+          <span>网站基本信息</span>
         </Space>
       }
       extra={
@@ -206,98 +169,6 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
     >
       <Spin spinning={fetching} description="正在加载基本信息...">
         <Flex vertical gap={16}>
-          {/* 网站运行状态 */}
-          <Flex align="center" justify="space-between">
-            <Flex vertical gap={4}>
-              <Typography.Text strong>网站运行状态</Typography.Text>
-              <Typography.Text type="secondary">
-                开启后网站正常对外开放；关闭后前台将显示维护提示页面
-              </Typography.Text>
-            </Flex>
-            <Switch
-              disabled={!isEditing || !canWrite}
-              checked={currentValues.state}
-              checkedChildren="开启"
-              unCheckedChildren="关闭"
-              onChange={(state) => setDraft((prev) => ({ ...prev, state }))}
-            />
-          </Flex>
-
-          {/* 私有化访问控制 */}
-          <Flex align="center" justify="space-between">
-            <Flex vertical gap={4}>
-              <Typography.Text strong>私有化访问</Typography.Text>
-              <Typography.Text type="secondary">
-                开启后，未登录访客将强制重定向至登录页
-              </Typography.Text>
-            </Flex>
-            <Switch
-              disabled={!isEditing || !canWrite}
-              checked={currentValues.privateAccess}
-              checkedChildren="开启"
-              unCheckedChildren="关闭"
-              onChange={(privateAccess) =>
-                setDraft((prev) => {
-                  let provideKey = prev.provideKey;
-                  if (privateAccess && !provideKey.trim()) {
-                    provideKey = generateRandomKey(16);
-                  }
-                  return { ...prev, privateAccess, provideKey };
-                })
-              }
-            />
-          </Flex>
-
-          {/* TVBox 订阅密钥 */}
-          {currentValues.privateAccess && (
-            <div className={styles.field}>
-              <Flex justify="space-between" align="baseline">
-                <Typography.Text strong>
-                  TVBox / 影视仓订阅密钥{" "}
-                  <span style={{ color: "var(--ant-color-error)" }}>*</span>
-                </Typography.Text>
-                <Typography.Text type="secondary">
-                  {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
-                </Typography.Text>
-              </Flex>
-              <Space.Compact style={{ width: "100%" }}>
-                <Input
-                  disabled={!isEditing || !canWrite}
-                  maxLength={MAX_PROVIDE_KEY_LEN}
-                  placeholder="必填，请输入订阅密钥，例如 mysecret888"
-                  status={
-                    isEditing && !currentValues.provideKey.trim()
-                      ? "error"
-                      : undefined
-                  }
-                  value={currentValues.provideKey}
-                  onChange={(e) =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      provideKey: e.target.value,
-                    }))
-                  }
-                />
-                <Button
-                  icon={<ReloadOutlined />}
-                  disabled={!isEditing || !canWrite}
-                  onClick={() =>
-                    setDraft((prev) => ({
-                      ...prev,
-                      provideKey: generateRandomKey(16),
-                    }))
-                  }
-                >
-                  随机生成
-                </Button>
-              </Space.Compact>
-              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                开启私有化后必须设置订阅密钥，客户端或 TVBox
-                订阅地址需追加参数：/api/provide/app?key=您的密钥
-              </Typography.Text>
-            </div>
-          )}
-
           {/* 网站名称 */}
           <div className={styles.field}>
             <Flex justify="space-between" align="baseline">
@@ -411,29 +282,6 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
                 setDraft((prev) => ({ ...prev, describe: e.target.value }))
               }
             />
-          </div>
-
-          {/* 维护提示 */}
-          <div className={styles.field}>
-            <Flex justify="space-between" align="baseline">
-              <Typography.Text strong>系统维护提示</Typography.Text>
-              <Typography.Text type="secondary">
-                {currentValues.hint.length}/{MAX_HINT_LEN}
-              </Typography.Text>
-            </Flex>
-            <Input.TextArea
-              disabled={!isEditing || !canWrite}
-              maxLength={MAX_HINT_LEN}
-              rows={2}
-              placeholder="网站维护中，请稍后再试..."
-              value={currentValues.hint}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, hint: e.target.value }))
-              }
-            />
-            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-              网站处于关闭维护状态时，向前台访问用户呈现的友好提示语
-            </Typography.Text>
           </div>
         </Flex>
       </Spin>

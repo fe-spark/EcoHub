@@ -21,7 +21,7 @@ func (s *ManageService) GetSiteBasicConfig() model.BasicConfig {
 	return repository.GetSiteBasic()
 }
 
-// UpdateSiteBasic 更新网站基本信息（保留已存的 Tip 和 Notice，除非显式传入）
+// UpdateSiteBasic 更新网站基本信息（仅更新站点品牌与描述信息，保留已存的访问控制、Tip 和 Notice，除非显式传入）
 func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr := repository.GetSiteBasic()
 	curr.SiteName = bc.SiteName
@@ -29,23 +29,40 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr.Logo = bc.Logo
 	curr.Keyword = bc.Keyword
 	curr.Describe = bc.Describe
-	curr.State = bc.State
-	curr.Hint = bc.Hint
-	curr.PrivateAccess = bc.PrivateAccess
-	if curr.PrivateAccess {
-		if strings.TrimSpace(bc.ProvideKey) == "" {
-			curr.ProvideKey = utils.RandomString(8)
-		} else {
-			curr.ProvideKey = strings.TrimSpace(bc.ProvideKey)
-		}
-	} else {
-		curr.ProvideKey = bc.ProvideKey
-	}
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}
 	if bc.Notice.Title != "" || bc.Notice.Content != "" {
 		curr.Notice = bc.Notice
+	}
+	return repository.SaveSiteBasic(curr)
+}
+
+// GetSiteAccessConfig 获取网站访问控制配置
+func (s *ManageService) GetSiteAccessConfig() model.AccessConfig {
+	b := repository.GetSiteBasic()
+	return model.AccessConfig{
+		State:         b.State,
+		Hint:          b.Hint,
+		PrivateAccess: b.PrivateAccess,
+		ProvideKey:    b.ProvideKey,
+	}
+}
+
+// UpdateSiteAccessConfig 更新网站访问控制配置
+func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
+	curr := repository.GetSiteBasic()
+	curr.State = ac.State
+	curr.Hint = ac.Hint
+	curr.PrivateAccess = ac.PrivateAccess
+	if curr.PrivateAccess {
+		if strings.TrimSpace(ac.ProvideKey) == "" {
+			curr.ProvideKey = utils.RandomString(8)
+		} else {
+			curr.ProvideKey = strings.TrimSpace(ac.ProvideKey)
+		}
+	} else {
+		curr.ProvideKey = ac.ProvideKey
 	}
 	return repository.SaveSiteBasic(curr)
 }
