@@ -37,8 +37,8 @@ func collectUniqueMidsFromKeys(keys []string, midsByLookupKey map[string][]int64
 }
 
 // pickUniqueSlaveMid 用匹配键召回候选，再用身份打分决定绑定哪部主站影片。
-// 只有一部时保持宽松绑定（副站分类标错也能挂上）。
-// 同名多部时按豆瓣/名称/类别/标签/年份/备注形态打分，分差不够则不绑定。
+// 线路结构对不上的候选先丢掉；剩下一部时保持宽松绑定（副站分类标错也能挂上）。
+// 同名多部时按豆瓣/名称/类别/年份/备注形态打分，分差不够则不绑定。
 func pickUniqueSlaveMid(
 	detail model.MovieDetail,
 	keys []string,
@@ -61,10 +61,10 @@ func pickUniqueSlaveMid(
 }
 
 // matchSlaveDetailMids 按同一套键给附属站详情找唯一主站 mid，并顺带输出匹配到的主站影片与键映射。
-func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, []model.FilmIndex, map[int64][]string, error) {
+func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, []model.FilmIndex, map[int64][]string, map[int64]model.FilmIndex, error) {
 	detailMids := make([]int64, len(list))
 	if len(list) == 0 {
-		return detailMids, nil, nil, nil, nil
+		return detailMids, nil, nil, nil, nil, nil
 	}
 
 	keysPerDetail := make([][]string, len(list))
@@ -87,7 +87,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 		}
 	}
 	if len(midSet) == 0 {
-		return detailMids, nil, nil, nil, nil
+		return detailMids, nil, nil, nil, nil, nil
 	}
 	matchedMids := make([]int64, 0, len(midSet))
 	for mid := range midSet {
@@ -96,7 +96,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 
 	var candidates []model.FilmIndex
 	if err := db.Mdb.Where("mid IN ?", matchedMids).Find(&candidates).Error; err != nil {
-		return nil, nil, nil, nil, err
+		return nil, nil, nil, nil, nil, err
 	}
 	infoByMid := make(map[int64]model.FilmIndex, len(candidates))
 	for _, info := range candidates {
@@ -127,7 +127,7 @@ func matchSlaveDetailMids(list []model.MovieDetail) ([]int64, map[int64]string, 
 			}
 		}
 	}
-	return detailMids, primaryKeyByMid, matchedInfos, keysByMid, nil
+	return detailMids, primaryKeyByMid, matchedInfos, keysByMid, infoByMid, nil
 }
 
 func loadInheritedKeysForUnmatchedDetails(list []model.MovieDetail, detailMids []int64) map[string]string {

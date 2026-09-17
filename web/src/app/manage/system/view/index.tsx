@@ -6,23 +6,27 @@ import {
   BellOutlined,
   SafetyCertificateOutlined,
   FileTextOutlined,
+  CompassOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
+import TMDBConfigPageView from "@/app/manage/system/tmdb/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "security" | "logs";
+type MainTab = "notify" | "tmdb" | "security" | "logs";
 
 const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
   { key: "notify", label: "通知配置", icon: <BellOutlined /> },
+  { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
   { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
   { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
+  if (raw === "tmdb") return "tmdb";
   if (raw === "security") return "security";
   if (raw === "logs") return "logs";
   return "notify";
@@ -53,6 +57,12 @@ function SystemSettingsBody() {
 
   const renderPane = () => {
     switch (mainTab) {
+      case "tmdb":
+        return (
+          <div className={styles.tabPaneScrollable}>
+            <TMDBConfigPageView embedded />
+          </div>
+        );
       case "security":
         return (
           <div className={styles.tabPaneScrollable}>

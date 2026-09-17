@@ -9,11 +9,16 @@ import {
   Button,
   Segmented,
   Tooltip,
+  Input,
+  Space,
+  Tag,
 } from "antd";
+import type { InputRef } from "antd";
 import {
   CheckOutlined,
   SearchOutlined,
-  CloseCircleFilled,
+  ReloadOutlined,
+  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
@@ -43,7 +48,7 @@ export default function FilmPicker({
   const [sortField, setSortField] = useState<string>("");
   const [page, setPage] = useState({ current: 1, pageSize: 15, total: 0 });
 
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<InputRef>(null);
 
   const fetchList = useCallback(
     async (current = 1, query = "", sort = "") => {
@@ -77,6 +82,7 @@ export default function FilmPicker({
         }
       } catch {
         setList([]);
+        setPage((p) => ({ ...p, total: 0 }));
       } finally {
         setLoading(false);
       }
@@ -90,6 +96,7 @@ export default function FilmPicker({
       setInputValue("");
       setKeyword("");
       setSortField("");
+      setList([]);
       fetchList(1, "", "");
       setTimeout(() => {
         inputRef.current?.focus();
@@ -111,7 +118,16 @@ export default function FilmPicker({
     const kw = value.trim();
     setKeyword(kw);
     setInputValue(value);
+    setList([]);
     fetchList(1, kw, sortField);
+  };
+
+  const handleResetSearch = () => {
+    setInputValue("");
+    setKeyword("");
+    setList([]);
+    fetchList(1, "", sortField);
+    inputRef.current?.focus();
   };
 
   const handleSortChange = (newSort: string) => {
@@ -133,10 +149,21 @@ export default function FilmPicker({
   return (
     <Modal
       open={open}
-      title={title}
+      title={
+        <div className={styles.modalTitleWrap}>
+          <VideoCameraOutlined style={{ color: "var(--ant-color-primary)", fontSize: 18 }} />
+          <span>{title}</span>
+        </div>
+      }
       onCancel={onCancel}
       width={960}
-      styles={{ body: { paddingTop: 8, paddingBottom: 6 } }}
+      centered
+      styles={{
+        body: {
+          paddingTop: 12,
+          paddingBottom: 12,
+        },
+      }}
       footer={[
         <Button key="cancel" onClick={onCancel}>
           取消
@@ -152,51 +179,38 @@ export default function FilmPicker({
       ]}
     >
       <div className={styles.pickerContainer}>
-        {/* 顶部居中胶囊搜索区域 */}
-        <div className={styles.searchSection}>
-          <div className={styles.searchBarWrapper}>
-            <SearchOutlined style={{ fontSize: 18, color: "var(--ant-color-text-tertiary)", marginRight: 4 }} />
-            <input
-              ref={inputRef}
-              className={styles.searchInput}
-              placeholder="输入片名、主演或关键词检索全站片库..."
-              value={inputValue}
-              onChange={(e) => {
-                const val = e.target.value;
-                setInputValue(val);
-                if (!val.trim()) {
-                  handleSearch("");
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  handleSearch(inputValue);
-                }
-              }}
-            />
-            {inputValue && (
-              <CloseCircleFilled
-                style={{ color: "var(--ant-color-text-tertiary)", cursor: "pointer", marginRight: 8, fontSize: 14 }}
-                onClick={() => {
-                  setInputValue("");
-                  handleSearch("");
-                  inputRef.current?.focus();
+        {/* 顶部综合检索工具栏 */}
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarLeft}>
+            <Space.Compact style={{ width: 360 }}>
+              <Input
+                ref={inputRef}
+                placeholder="输入片名、主演或关键词检索全站片库..."
+                prefix={<SearchOutlined style={{ color: "var(--ant-color-text-tertiary)" }} />}
+                allowClear
+                value={inputValue}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setInputValue(val);
+                  if (!val.trim() && keyword) {
+                    handleResetSearch();
+                  }
                 }}
+                onPressEnter={() => handleSearch(inputValue)}
               />
-            )}
-            <Button
-              type="primary"
-              className={styles.searchBtn}
-              onClick={() => handleSearch(inputValue)}
-            >
-              搜索
-            </Button>
+              <Button
+                type="primary"
+                onClick={() => handleSearch(inputValue)}
+                loading={loading}
+              >
+                搜索
+              </Button>
+            </Space.Compact>
           </div>
 
-          {/* 居中排序与检索统计 */}
-          <div className={styles.filterRow}>
+          <div className={styles.toolbarRight}>
+            <span className={styles.sortLabel}>排序：</span>
             <Segmented
-              size="small"
               value={sortField}
               onChange={(val) => handleSortChange(String(val))}
               options={[
@@ -207,18 +221,35 @@ export default function FilmPicker({
                 { label: "上映年份", value: "year" },
               ]}
             />
-            {page.total > 0 && keyword && (
-              <span className={styles.searchStats}>
-                找到关于「<b>{keyword}</b>」的 <b>{page.total}</b> 部影片
-              </span>
-            )}
           </div>
         </div>
 
+        {/* 搜索提示/结果统计条（仅在有搜索词时显示） */}
+        {keyword && (
+          <div className={styles.searchSummaryBar}>
+            <span>
+              检索到关于「<b>{keyword}</b>」的影片共 <b>{page.total}</b> 部
+            </span>
+            <Button
+              type="link"
+              size="small"
+              icon={<ReloadOutlined />}
+              onClick={handleResetSearch}
+              className={styles.resetBtn}
+            >
+              重置并显示全库
+            </Button>
+          </div>
+        )}
+
         {/* 影视卡片流展示区 */}
         <div className={styles.listScrollArea}>
-          <Spin spinning={loading}>
-            {list.length > 0 ? (
+          {loading && list.length === 0 ? (
+            <div className={styles.loadingContainer}>
+              <Spin size="large" tip="正在从片库检索影片..." />
+            </div>
+          ) : list.length > 0 ? (
+            <Spin spinning={loading} tip="更新列表中...">
               <div className={styles.grid}>
                 {list.map((item) => {
                   const isSelected =
@@ -231,9 +262,10 @@ export default function FilmPicker({
                       className={`${styles.filmCard} ${isSelected ? styles.cardActive : ""}`}
                       onClick={() => setSelectedFilm(item)}
                       onDoubleClick={() => handleItemDoubleClick(item)}
-                      title="双击直接选定此影片"
+                      title="单击单选，双击直接确定选定"
                     >
                       <div className={styles.posterContainer}>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={item.picture || FALLBACK_IMG}
                           alt={item.name || ""}
@@ -281,57 +313,84 @@ export default function FilmPicker({
                   );
                 })}
               </div>
-            ) : (
-              !loading && (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  style={{ margin: "48px 0" }}
-                  description={
-                    keyword ? (
-                      <span>未找到与「{keyword}」相关的影片，请尝试更换关键词</span>
-                    ) : (
-                      <span>请输入影片名称开始搜索</span>
-                    )
-                  }
-                />
-              )
-            )}
-          </Spin>
+            </Spin>
+          ) : (
+            <div className={styles.emptyContainer}>
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={
+                  keyword ? (
+                    <div>
+                      <div>
+                        未找到与「<span className={styles.highlightText}>{keyword}</span>」相关的影片
+                      </div>
+                      <div className={styles.emptyTip}>
+                        请检查片名拼写，或尝试更简短的关键词检索
+                      </div>
+                    </div>
+                  ) : (
+                    <span>片库暂无影片数据</span>
+                  )
+                }
+              >
+                {keyword && (
+                  <Button size="small" onClick={handleResetSearch}>
+                    清除搜索条件
+                  </Button>
+                )}
+              </Empty>
+            </div>
+          )}
         </div>
 
         {/* 底部摘要与分页栏 */}
         <div className={styles.footerWrap}>
-          {selectedFilm ? (
-            <div className={styles.selectedChip}>
-              <img
-                src={selectedFilm.picture || FALLBACK_IMG}
-                alt=""
-                className={styles.chipThumb}
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = FALLBACK_IMG;
-                }}
-              />
-              <span className={styles.chipTitle}>{selectedFilm.name}</span>
-              <span className={styles.chipMeta}>
-                {[selectedFilm.cName, selectedFilm.year].filter(Boolean).join(" · ")}
+          <div className={styles.footerLeft}>
+            {selectedFilm ? (
+              <div className={styles.selectedChip}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={selectedFilm.picture || FALLBACK_IMG}
+                  alt=""
+                  className={styles.chipThumb}
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src = FALLBACK_IMG;
+                  }}
+                />
+                <div className={styles.chipInfo}>
+                  <div className={styles.chipTitle} title={selectedFilm.name}>
+                    {selectedFilm.name}
+                  </div>
+                  <div className={styles.chipMeta}>
+                    {[selectedFilm.cName, selectedFilm.year, selectedFilm.area]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </div>
+                </div>
+                <Tag color="orange" style={{ margin: "0 0 0 4px", fontSize: 11 }}>
+                  已选定
+                </Tag>
+              </div>
+            ) : (
+              <span className={styles.footerPlaceholder}>
+                💡 点击卡片单选 / 双击卡片直接确认
               </span>
-            </div>
-          ) : (
-            <span className={styles.footerPlaceholder}>
-              点击卡片单选 / 双击卡片直接确认
-            </span>
-          )}
+            )}
+          </div>
 
-          {page.total > page.pageSize && (
-            <Pagination
-              current={page.current}
-              pageSize={page.pageSize}
-              total={page.total}
-              onChange={(p) => fetchList(p, keyword, sortField)}
-              showSizeChanger={false}
-              size="small"
-            />
-          )}
+          <div className={styles.footerRight}>
+            {page.total > 0 && (
+              <Pagination
+                current={page.current}
+                pageSize={page.pageSize}
+                total={page.total}
+                onChange={(p) => fetchList(p, keyword, sortField)}
+                showSizeChanger={false}
+                size="small"
+                showTotal={(total) => `共 ${total} 部`}
+              />
+            )}
+          </div>
         </div>
       </div>
     </Modal>
