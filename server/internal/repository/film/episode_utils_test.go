@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/repository/film/shared"
 )
 
 func TestEpisodeCount(t *testing.T) {
@@ -14,43 +15,43 @@ func TestEpisodeCount(t *testing.T) {
 		{Episode: ""},
 		{Episode: "03"},
 	}
-	if got := episodeCount(links); got != 3 {
+	if got := shared.EpisodeCount(links); got != 3 {
 		t.Fatalf("episodeCount = %d, want 3", got)
 	}
-	if got := episodeCount(nil); got != 0 {
-		t.Fatalf("episodeCount(nil) = %d, want 0", got)
+	if got := shared.EpisodeCount(nil); got != 0 {
+		t.Fatalf("shared.EpisodeCount(nil) = %d, want 0", got)
 	}
 }
 
 func TestIsEpisodeCountHigher(t *testing.T) {
 	// 新片：历史为空，新有 1 集
-	if !isEpisodeCountHigher([]int{1}, nil) {
+	if !shared.IsEpisodeCountHigher([]int{1}, nil) {
 		t.Errorf("expected true for empty existing")
 	}
 	// 14 -> 15
-	if !isEpisodeCountHigher([]int{15}, []int{14}) {
+	if !shared.IsEpisodeCountHigher([]int{15}, []int{14}) {
 		t.Errorf("expected true when 15 > 14")
 	}
 	// 已有 15，后续源也是 15
-	if isEpisodeCountHigher([]int{15}, []int{15}) {
+	if shared.IsEpisodeCountHigher([]int{15}, []int{15}) {
 		t.Errorf("expected false when 15 <= 15")
 	}
 	// 回退 14 < 15
-	if isEpisodeCountHigher([]int{14}, []int{15}) {
+	if shared.IsEpisodeCountHigher([]int{14}, []int{15}) {
 		t.Errorf("expected false when 14 < 15")
 	}
 	// 多线路：取最大；新最大 16 > 旧最大 15
-	if !isEpisodeCountHigher([]int{10, 16}, []int{15, 12}) {
+	if !shared.IsEpisodeCountHigher([]int{10, 16}, []int{15, 12}) {
 		t.Errorf("expected true when max 16 > max 15")
 	}
 	// 新无分集
-	if isEpisodeCountHigher(nil, []int{1}) {
+	if shared.IsEpisodeCountHigher(nil, []int{1}) {
 		t.Errorf("expected false for empty new")
 	}
 }
 
 func TestLoadExistingEpisodeCountsByMIDs_SlaveMoviePlaylist_Chunking(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
+	gdb := setupFilmZeroTestDB(t)
 
 	// 为 mid 101 插入 600 个 match keys（超过 500 分块大小）
 	const keyCount = 600
@@ -84,7 +85,7 @@ func TestLoadExistingEpisodeCountsByMIDs_SlaveMoviePlaylist_Chunking(t *testing.
 	}
 
 	// 1. 无排除源：应统计出 2 集与 3 集
-	countsMap, err := loadExistingEpisodeCountsByMIDs(gdb, []int64{101}, "")
+	countsMap, err := shared.LoadExistingEpisodeCountsByMIDs(gdb, []int64{101}, "")
 	if err != nil {
 		t.Fatalf("loadExistingEpisodeCountsByMIDs failed: %v", err)
 	}
@@ -92,12 +93,12 @@ func TestLoadExistingEpisodeCountsByMIDs_SlaveMoviePlaylist_Chunking(t *testing.
 	if len(counts) != 2 {
 		t.Fatalf("expected 2 counts returned across chunks, got %d (%v)", len(counts), counts)
 	}
-	if maxEpisodeCount(counts) != 3 {
-		t.Fatalf("expected max episode count 3, got %d", maxEpisodeCount(counts))
+	if shared.MaxEpisodeCount(counts) != 3 {
+		t.Fatalf("expected max episode count 3, got %d", shared.MaxEpisodeCount(counts))
 	}
 
 	// 2. 排除 slave_2：应仅剩 slave_1 的 2 集
-	countsMapExcluded, err := loadExistingEpisodeCountsByMIDs(gdb, []int64{101}, "slave_2")
+	countsMapExcluded, err := shared.LoadExistingEpisodeCountsByMIDs(gdb, []int64{101}, "slave_2")
 	if err != nil {
 		t.Fatalf("loadExistingEpisodeCountsByMIDs with excludeSourceID failed: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestLoadExistingEpisodeCountsByMIDs_SlaveMoviePlaylist_Chunking(t *testing.
 }
 
 func TestLoadExistingEpisodeCountsByMIDs_MultiMidSharedKey(t *testing.T) {
-	gdb := setupOrphanCleanerTestDB(t)
+	gdb := setupFilmZeroTestDB(t)
 
 	// mid 201 与 mid 202 共享同一个 matchKey "shared_key"
 	gdb.Create(&model.MovieMatchKey{Mid: 201, MatchKey: "shared_key"})
@@ -127,7 +128,7 @@ func TestLoadExistingEpisodeCountsByMIDs_MultiMidSharedKey(t *testing.T) {
 		Content:  `[{"episode":"01","link":"http://u/1"}]`,
 	})
 
-	countsMap, err := loadExistingEpisodeCountsByMIDs(gdb, []int64{201, 202}, "")
+	countsMap, err := shared.LoadExistingEpisodeCountsByMIDs(gdb, []int64{201, 202}, "")
 	if err != nil {
 		t.Fatalf("loadExistingEpisodeCountsByMIDs failed: %v", err)
 	}
@@ -136,10 +137,10 @@ func TestLoadExistingEpisodeCountsByMIDs_MultiMidSharedKey(t *testing.T) {
 	c201 := countsMap[201]
 	c202 := countsMap[202]
 
-	if maxEpisodeCount(c201) != 5 {
-		t.Fatalf("expected mid 201 max count 5, got %d (%v)", maxEpisodeCount(c201), c201)
+	if shared.MaxEpisodeCount(c201) != 5 {
+		t.Fatalf("expected mid 201 max count 5, got %d (%v)", shared.MaxEpisodeCount(c201), c201)
 	}
-	if maxEpisodeCount(c202) != 5 {
-		t.Fatalf("expected mid 202 max count 5, got %d (%v)", maxEpisodeCount(c202), c202)
+	if shared.MaxEpisodeCount(c202) != 5 {
+		t.Fatalf("expected mid 202 max count 5, got %d (%v)", shared.MaxEpisodeCount(c202), c202)
 	}
 }

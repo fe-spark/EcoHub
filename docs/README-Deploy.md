@@ -18,7 +18,7 @@
 | 1Panel 图形化 | [1Panel](#方式-21panel) |
 | 直接运行镜像 | [手动部署](#方式-3手动部署) |
 
-自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。变量含义见 `.env.example`。
+自备 MySQL / Redis 时：在默认 compose 中去掉 `mysql` / `redis` 服务及 `depends_on`，把 `.env` 的 `MYSQL_*` / `REDIS_*` 指到你的实例（容器内勿用 `127.0.0.1`，宿主机库可用 `host.docker.internal`）。完整变量字典见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -37,7 +37,7 @@
 openssl rand -hex 32
 ```
 
-可选：`TG_PROXY`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）。详见 `.env.example`。
+可选：`TG_PROXY`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -69,9 +69,8 @@ docker compose up -d
 | --- | --- |
 | `http://服务器:3000` | 前台 |
 | `http://服务器:3000/manage` | 管理后台 |
-| `http://服务器:3000/api/*` | 经站点转发的 API |
-| `http://服务器:18080/api/*` | 后端直连（生产勿公网暴露） |
-| `http://服务器:3000/api/provide/config` | TVBox / 影视仓 |
+| `http://服务器:3000/api/provide/app` | 客户端软件源 |
+| `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓 |
 
 默认账号（**立刻改密**）：`admin` / `admin`，`guest` / `guest`。
 
@@ -312,14 +311,57 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 ---
 
-## 端口
+## 环境变量速查
 
-| 变量 | 默认 | 说明 |
-| --- | --- | --- |
-| `WEB_PORT` | `3000` | 宿主机 Web 访问入口端口 |
-| `SERVER_PORT` | `18080` | 宿主机后端直连映射端口（可选） |
+支持在 `.env` 或 Docker Compose / 容器运行命令中注入的环境变量完整字典如下：
 
-生产建议只暴露 Web 端口（或反代后的 80/443）。如需**完全禁止外部直连裸端口**，请在 `compose.yml` 中将端口映射写为 `127.0.0.1:${WEB_PORT:-3000}:3000`，使端口仅限本机及 1Panel / Nginx 反向代理访问。
+### 1. 服务与端口映射
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | :---: | --- | --- |
+| `WEB_PORT` | 否 | `3000` | 宿主机 Web 访问入口端口（包含前台页面与 `/manage` 管理后台）。 |
+| `SERVER_PORT` | 否 | `18080` | 宿主机后端 API 直连端口（供 TVBox 或外部播放器直连；生产环境建议不映射或绑定 `127.0.0.1`）。 |
+
+> **安全提示**：Docker 默认规则会绕过系统防火墙（如 UFW）。若要**禁止公网直接访问裸端口**，请在 `compose.yml` 中将端口映射写为 `127.0.0.1:${WEB_PORT:-3000}:3000`，仅允许本机反向代理（如 Nginx / 1Panel）访问。
+
+### 2. 安全与核心密钥
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | :---: | --- | --- |
+| `JWT_SECRET` | **是** | - | 用户与管理员登录态 JWT 签名密钥，同时作为访问分析数据脱敏的 Salt 派生源。生产部署**必须**修改为长随机字符串（可通过 `openssl rand -hex 32` 生成）。 |
+
+### 3. 数据存储（MySQL & Redis）
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | :---: | --- | --- |
+| `MYSQL_HOST` | **是** | `mysql` | MySQL 数据库连接地址。自带 Compose 填服务名 `mysql`；自备外部数据库填对应 IP 或域名（宿主机上的库可用 `host.docker.internal`，容器内请勿填写 `127.0.0.1`）。 |
+| `MYSQL_PORT` | 否 | `3306` | MySQL 服务端口。 |
+| `MYSQL_USER` | **是** | `eco` | MySQL 业务数据库连接用户名。 |
+| `MYSQL_PASSWORD` | **是** | `ecohub` | MySQL 业务数据库连接密码（必须修改为强密码）。 |
+| `MYSQL_DBNAME` | 否 | `eco` | MySQL 业务数据库名称。 |
+| `MYSQL_ROOT_PASSWORD` | 否 | `ecohub` | 内置 `Eco-mysql` 容器初始化所需 root 密码（仅自带 MySQL 容器初始化使用；自备外部数据库时无需配置）。 |
+| `REDIS_HOST` | **是** | `redis` | Redis 服务连接地址。自带 Compose 填服务名 `redis`；自备外部 Redis 填对应 IP 或域名。 |
+| `REDIS_PORT` | 否 | `6379` | Redis 服务端口。 |
+| `REDIS_PASSWORD` | **是** | `ecohub` | Redis 认证密码（必须修改为强密码）。 |
+| `REDIS_DB` | 否 | `0` | Redis 数据库索引号（默认使用 0 号数据库）。 |
+
+### 4. 网络代理（可选）
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | :---: | --- | --- |
+| `TG_PROXY` | 否 | 空 | Telegram Bot 出网专用代理（支持 `http://`、`socks5://`、`socks5h://`，如 `http://host.docker.internal:7890`）。优先级高于通用出网代理。 |
+| `HTTPS_PROXY` | 否 | 空 | 容器全局 HTTPS 出网代理（用于采集外部源、解析影片元数据等，防止直连外部站点超时）。 |
+| `HTTP_PROXY` | 否 | 空 | 容器全局 HTTP 出网代理。 |
+| `ALL_PROXY` | 否 | 空 | 容器全局出网代理（通常用于 SOCKS 协议代理）。 |
+
+### 5. 采集调优与扩展功能（可选）
+
+| 环境变量 | 必填 | 默认值 | 说明 |
+| --- | :---: | --- | --- |
+| `COLLECT_PROFILE` | 否 | `auto` | 采集并发与写库性能档位。可选值：<br>• `auto`: 根据服务器 CPU 核心数自动调优（推荐）；<br>• `light`: 低配单机（≤2 核），写库稳态 24 页/秒，事务并发 3；<br>• `standard`: 主流机型（3-7 核）；<br>• `high`: 高配机型（≥8 核），大幅提升写阀与分页抓取并发。 |
+| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 全站访问量、播放热度与客户端设备类型数据分析总开关。默认 `false` 保持系统零额外开销与完全无痕；设为 `true` 或 `1` 开启后台统计报表。 |
+| `NODE_NAME` | 否 | 主机名 | 多节点分布式部署时当前节点的标识名称（单机部署无需配置）。 |
+| `ECOHUB_LOG_DIR` | 否 | 容器内 `logs/` | 自定义日志落盘目录（容器部署默认挂载或保留即可，无需修改）。 |
 
 ---
 

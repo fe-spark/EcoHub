@@ -9,7 +9,10 @@ import (
 
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	filmrepo "server/internal/repository/film"
+	filmcache "server/internal/repository/film/cache"
+	filmplaylist "server/internal/repository/film/playlist"
+	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/film/writer"
 )
 
 var asyncMasterSearchTagsMu sync.Mutex
@@ -24,7 +27,7 @@ func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, master
 	if err := flushMasterSideEffects(sources, masterMIDs); err != nil {
 		return affectedMIDs, masterMIDs, err
 	}
-	playSummaryMIDs, err := flushPlaySummaryRefresh()
+	playSummaryMIDs, err := flushPlaySummaryRefresh(affectedMIDs)
 	affectedMIDs = append(affectedMIDs, playSummaryMIDs...)
 	if err != nil {
 		return affectedMIDs, masterMIDs, err
@@ -41,7 +44,7 @@ func flushMasterSideEffects(sources []model.FilmSource, masterMIDs []int64) erro
 	for _, source := range sources {
 		if source.Grade == model.MasterCollect {
 			scheduleMasterSearchTagsRefresh(masterMIDs)
-			filmrepo.ClearTVBoxConfigCache()
+			filmcache.ClearTVBoxConfigCache()
 			return nil
 		}
 	}
@@ -59,19 +62,18 @@ func scheduleMasterSearchTagsRefresh(masterMIDs []int64) {
 
 		start := time.Now()
 		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新开始 mid_count=%d", len(mids))
-		if err := filmrepo.RefreshSearchTagsByMids(mids...); err != nil {
+		if err := writer.RefreshSearchTagsByMids(mids...); err != nil {
 			syslog.Errorf("[Spider][Finalizer] 主站搜索标签异步刷新失败 mid_count=%d err=%v", len(mids), err)
 			return
 		}
-		filmrepo.ClearAllSearchTagsCache()
-		filmrepo.ClearAdminFilmSearchCache()
+		filmcache.ClearAllSearchTagsCache()
 		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
 	}()
 }
 
-func flushPlaySummaryRefresh() ([]int64, error) {
+func flushPlaySummaryRefresh(affectedMIDs []int64) ([]int64, error) {
 	start := time.Now()
-	mids, err := filmrepo.FlushPendingPlaySummaryRefresh()
+	mids, err := filmsnapshot.FlushPlaySummaryRefreshByMids(affectedMIDs)
 	if err != nil {
 		return mids, fmt.Errorf("flush play summary refresh failed: %w", err)
 	}
@@ -83,14 +85,14 @@ func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()
 	mids := normalizeAffectedMIDs(affectedMIDs)
 	if len(mids) == 0 {
-		if hasSnapshot, err := filmrepo.HasPublishedFilmListSnapshot(); err != nil {
+		if hasSnapshot, err := filmplaylist.HasPublishedFilmListSnapshot(); err != nil {
 			return "", err
 		} else if !hasSnapshot {
 			log.Printf("[Spider][Finalizer] 主站快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
 			return "", nil
 		}
 	}
-	version, updated, err := filmrepo.UpsertActiveSnapshotsByMids(mids...)
+	version, updated, err := filmsnapshot.UpsertActiveSnapshotsByMids(mids...)
 	if err != nil {
 		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
 	}

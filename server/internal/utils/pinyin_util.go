@@ -2,9 +2,9 @@ package utils
 
 import (
 	"strings"
-	"unicode"
 
 	"github.com/mozillazg/go-pinyin"
+	"unicode"
 )
 
 const maxPinyinInitialVariants = 8
@@ -69,12 +69,6 @@ func pinyinFullNormalized(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// ToPinyinSyllables 将中文字符串转换为单个音节列表（保留英数小写）
-// 例如："流浪地球 2" -> ["liu", "lang", "di", "qiu", "2"]，"小夜测试" -> ["xiao", "ye", "ce", "shi"]
-func ToPinyinSyllables(s string) []string {
-	return pinyinSyllablesNormalized(TraditionalToSimplified(s))
 }
 
 func pinyinSyllablesNormalized(s string) []string {

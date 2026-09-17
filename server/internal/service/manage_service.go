@@ -8,14 +8,11 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/utils"
 )
 
 type ManageService struct{}
-
-// NewManageService 创建管理服务实例
-func NewManageService() *ManageService {
-	return &ManageService{}
-}
 
 var ManageSvc = new(ManageService)
 
@@ -34,6 +31,16 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr.Describe = bc.Describe
 	curr.State = bc.State
 	curr.Hint = bc.Hint
+	curr.PrivateAccess = bc.PrivateAccess
+	if curr.PrivateAccess {
+		if strings.TrimSpace(bc.ProvideKey) == "" {
+			curr.ProvideKey = utils.RandomString(8)
+		} else {
+			curr.ProvideKey = strings.TrimSpace(bc.ProvideKey)
+		}
+	} else {
+		curr.ProvideKey = bc.ProvideKey
+	}
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}
@@ -214,7 +221,7 @@ func refreshProjectedReadModelAfterMappingRuleChange(groups ...string) error {
 			if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
 				return err
 			}
-			return filmrepo.RefreshActiveProjectedReadModel()
+			return filmsnapshot.RefreshActiveProjectedReadModel()
 		}
 	}
 	return nil

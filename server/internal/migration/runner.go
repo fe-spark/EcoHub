@@ -5,9 +5,9 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/infra/syslog"
 
 	"gorm.io/gorm"
 )
@@ -40,6 +40,11 @@ var migrations = []Migration{
 		Version: "20260916_fix_movie_match_key_indexes",
 		Name:    "rebuild idx_match_key on movie_match_key to single column index",
 		Run:     migrateMovieMatchKeyIndexes,
+	},
+	{
+		Version: "20260917_daily_update_performance_indexes",
+		Name:    "create composite performance indexes for film_index update_stamp and mid",
+		Run:     migrateDailyUpdatePerformanceIndexes,
 	},
 }
 
@@ -160,6 +165,25 @@ func migrateMovieMatchKeyIndexes(db *gorm.DB) error {
 		_ = migrator.DropIndex(&model.MovieMatchKey{}, "idx_match_key")
 		if err := migrator.CreateIndex(&model.MovieMatchKey{}, "idx_match_key"); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func migrateDailyUpdatePerformanceIndexes(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.FilmIndex{}) {
+		return nil
+	}
+	queries := []string{
+		"CREATE INDEX idx_film_index_update_mid ON film_index(update_stamp, mid)",
+		"CREATE INDEX idx_film_index_pid_update_mid ON film_index(pid, update_stamp, mid)",
+	}
+	for _, sql := range queries {
+		if err := db.Exec(sql).Error; err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate key name") && !strings.Contains(msg, "already exists") {
+				return err
+			}
 		}
 	}
 	return nil

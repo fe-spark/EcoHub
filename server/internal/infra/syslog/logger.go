@@ -10,8 +10,6 @@
 package syslog
 
 import (
-	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -26,12 +24,15 @@ import (
 const (
 	logFileName       = "ecohub.log"
 	maxLogFileSize    = 10 * 1024 * 1024
-	maxLogRetention   = 7 * 24 * time.Hour
 	maxRecentLines    = 2000
 	readChunkSize     = 32 * 1024
 	entryBufferSize   = 10000
 	rotatedTimeFormat = "20060102-150405.000000000"
 	defaultLogDir     = "logs"
+	// logDirEnvName 显式指定日志根目录，优先级最高。
+	logDirEnvName = "ECOHUB_LOG_DIR"
+	// moduleRootMarker 用于向上定位服务端模块根，避免单测在子包 cwd 下生成局部 logs/。
+	moduleRootMarker = "go.mod"
 
 	// 日志级别：打印时确定，随 Entry 下发前端，禁止前端按正文猜。
 	LevelInfo  = "info"
@@ -39,7 +40,43 @@ const (
 	LevelError = "error"
 )
 
-var logDir = defaultLogDir
+// logDir 默认在包初始化时解析一次；Init 会在 config 加载 .env 之后重新解析，
+// 因此运行期不依赖包初始化顺序（详见 Init）。
+var logDir = resolveDefaultLogDir()
+
+// resolveDefaultLogDir 解析日志根目录，优先级：
+//  1. ECOHUB_LOG_DIR 显式指定；
+//  2. 自 cwd 向上找到的模块根下的 logs（绝对路径）；
+//  3. 兜底相对路径 logs（部署环境无 go.mod 时保持旧行为）。
+//
+// 单测执行时 cwd 为被测子包目录，若无向上解析会在各子包下就地生成 logs/。
+func resolveDefaultLogDir() string {
+	if env := strings.TrimSpace(os.Getenv(logDirEnvName)); env != "" {
+		return env
+	}
+	if root := findModuleRoot(); root != "" {
+		return filepath.Join(root, defaultLogDir)
+	}
+	return defaultLogDir
+}
+
+// findModuleRoot 自 cwd 逐级上溯，返回首个含 go.mod 的目录；找不到返回空串。
+func findModuleRoot() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, moduleRootMarker)); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return ""
+		}
+		dir = parent
+	}
+}
 
 // 仅识别写入时打上的结构化级别标签（时间戳后），用于从文件恢复缓冲。
 // 不扫描正文关键词。
@@ -84,14 +121,10 @@ func newRollingLogger() *rollingLogger {
 }
 
 func Init() error {
+	// config 的 .env 已在包初始化阶段加载完成，此处重新解析可确保 ECOHUB_LOG_DIR 生效，
+	// 不必依赖 syslog 与 config 的包初始化顺序。
+	logDir = resolveDefaultLogDir()
 	return defaultLogger.open()
-}
-
-// SetMirror 设置文件以外的镜像输出（默认 os.Stdout）；传 nil 关闭镜像。
-func SetMirror(w io.Writer) {
-	defaultLogger.mu.Lock()
-	defer defaultLogger.mu.Unlock()
-	defaultLogger.mirror = w
 }
 
 // Writer 默认 INFO 级别的 io.Writer（兼容 log.SetOutput / gin.DefaultWriter）。
@@ -121,7 +154,6 @@ func Warnf(format string, v ...any)  { emit(LevelWarn, format, v...) }
 func Errorf(format string, v ...any) { emit(LevelError, format, v...) }
 
 func Info(v ...any)  { emit(LevelInfo, "%s", fmt.Sprint(v...)) }
-func Warn(v ...any)  { emit(LevelWarn, "%s", fmt.Sprint(v...)) }
 func Error(v ...any) { emit(LevelError, "%s", fmt.Sprint(v...)) }
 
 func emit(level, format string, v ...any) {
@@ -358,154 +390,6 @@ func splitLogLines(raw string) []string {
 		}
 	}
 	return lines
-}
-
-func activeLogPath() string {
-	return filepath.Join(logDir, logFileName)
-}
-
-func rotatedLogPath(now time.Time) string {
-	return filepath.Join(logDir, fmt.Sprintf("%s.%s", logFileName, now.Format(rotatedTimeFormat)))
-}
-
-func isRotatedLogFile(name string) bool {
-	return strings.HasPrefix(name, logFileName+".") && len(name) > len(logFileName)+1
-}
-
-func readLastLines(path string, limit int) ([]string, error) {
-	file, err := os.Open(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return []string{}, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	info, err := file.Stat()
-	if err != nil {
-		return nil, err
-	}
-	if info.Size() == 0 {
-		return []string{}, nil
-	}
-
-	var data []byte
-	buffer := make([]byte, readChunkSize)
-	for offset := info.Size(); offset > 0 && countLines(data) <= limit; {
-		readSize := int64(readChunkSize)
-		if offset < readSize {
-			readSize = offset
-		}
-		offset -= readSize
-		if _, err := file.ReadAt(buffer[:readSize], offset); err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
-		}
-		data = append(append([]byte(nil), buffer[:readSize]...), data...)
-	}
-
-	return lastNonEmptyLines(data, limit), nil
-}
-
-func countLines(data []byte) int {
-	count := 0
-	for _, b := range data {
-		if b == '\n' {
-			count++
-		}
-	}
-	return count
-}
-
-func lastNonEmptyLines(data []byte, limit int) []string {
-	scanner := bufio.NewScanner(strings.NewReader(string(data)))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lines := make([]string, 0, limit)
-	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
-		if line == "" {
-			continue
-		}
-		lines = append(lines, line)
-		if len(lines) > limit {
-			lines = lines[len(lines)-limit:]
-		}
-	}
-	return lines
-}
-
-func normalizeLevel(level string) string {
-	switch strings.ToLower(strings.TrimSpace(level)) {
-	case LevelWarn, "warning":
-		return LevelWarn
-	case LevelError, "err", "fatal", "panic":
-		return LevelError
-	default:
-		return LevelInfo
-	}
-}
-
-// levelFromStructuredLine 只认「时间戳 [LEVEL] 」前缀（写入时打上），不扫正文。
-func levelFromStructuredLine(line string) (string, bool) {
-	m := structuredLevelPrefix.FindStringSubmatch(line)
-	if len(m) != 3 {
-		return "", false
-	}
-	return normalizeLevel(m[2]), true
-}
-
-// stampLevelPayload 为 payload 中每一行注入结构化级别标签（已有则跳过）。
-// 保留原始是否以 \n 结尾的形态。
-func stampLevelPayload(level string, p []byte) []byte {
-	if len(p) == 0 {
-		return p
-	}
-	level = normalizeLevel(level)
-	endsWithNL := p[len(p)-1] == '\n'
-	// 按行处理；最后一段若无换行也是一行
-	raw := string(p)
-	if endsWithNL {
-		raw = raw[:len(raw)-1]
-	}
-	if raw == "" {
-		return p
-	}
-	parts := strings.Split(raw, "\n")
-	var b bytes.Buffer
-	for i, part := range parts {
-		part = strings.TrimRight(part, "\r")
-		if part != "" {
-			b.WriteString(stampLevelOnLine(level, part))
-		}
-		if i < len(parts)-1 {
-			b.WriteByte('\n')
-		}
-	}
-	if endsWithNL {
-		b.WriteByte('\n')
-	}
-	return b.Bytes()
-}
-
-// stampLevelOnLine 在标准时间戳后插入 [LEVEL]；已有标签保持原样。
-// 非标准时间前缀的行（gin 访问日志、多行消息的续行等）保持原样，不注入合成时间戳
-// 以免篡改正文；这类行从文件恢复时按写入级别默认（通常为 info）。
-func stampLevelOnLine(level, line string) string {
-	if line == "" {
-		return line
-	}
-	if _, ok := levelFromStructuredLine(line); ok {
-		return line
-	}
-	tag := "[" + strings.ToUpper(normalizeLevel(level)) + "]"
-	if loc := stdLogTimePrefix.FindStringSubmatchIndex(line); loc != nil {
-		// line = <time> + " " + rest  →  <time> + " [LEVEL] " + rest
-		// loc[0]:loc[1] 全匹配；loc[2]:loc[3] 为 time 捕获组
-		timeEnd := loc[3]
-		rest := line[loc[1]:]
-		return line[:timeEnd] + " " + tag + " " + rest
-	}
-	return line
 }
 
 // PruneExpiredLogs 安全遍历 logDir，删除修改时间早于 now - retention 的历史轮转日志文件（isRotatedLogFile）。

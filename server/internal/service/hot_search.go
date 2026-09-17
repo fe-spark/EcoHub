@@ -3,16 +3,16 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"golang.org/x/sync/singleflight"
 	"strings"
 	"time"
-
-	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	filmrepo "server/internal/repository/film"
+	filmshared "server/internal/repository/film/shared"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 const (
@@ -57,18 +57,18 @@ func (i *IndexService) SearchFilmInfoWithSort(key string, sortField string, page
 	if page == nil {
 		page = &dto.Page{Current: 1, PageSize: 12}
 	}
-	version := filmrepo.GetActiveReadModelVersion()
-	sl := filmrepo.SearchSnapshotsByKeywordAndSortFast(version, trimmed, sortField, page)
-	return filmrepo.BuildMovieBasicInfosFromSnapshots(sl...)
+	version := filmsnapshot.GetActiveReadModelVersion()
+	sl := filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, trimmed, sortField, page)
+	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...)
 }
 
 // GetHotSearchKeywords 全站热门推荐：按当前快照播放热度取片名，与个人搜索历史无关。
 func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 	limit = clampHotSearchLimit(limit)
 
-	version := filmrepo.GetActiveReadModelVersion()
+	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
-		version = filmrepo.GetActiveSnapshotVersion()
+		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
 		return []string{}

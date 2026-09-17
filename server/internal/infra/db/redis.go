@@ -2,12 +2,11 @@ package db
 
 import (
 	"context"
+	"github.com/redis/go-redis/v9"
 	"log"
 	"server/internal/config"
 	"sync"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 /*
@@ -50,16 +49,6 @@ func InitRedisConn() error {
 		_ = old.Close()
 	}
 
-	return nil
-}
-
-// CloseRedis 关闭redis连接
-func CloseRedis() error {
-	redisMu.Lock()
-	defer redisMu.Unlock()
-	if Rdb != nil {
-		return Rdb.Close()
-	}
 	return nil
 }
 

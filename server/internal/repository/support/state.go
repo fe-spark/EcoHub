@@ -25,7 +25,7 @@ type MappingSnapshot struct {
 }
 
 var (
-	mappingState atomic.Pointer[MappingSnapshot]
+	mappingState      atomic.Pointer[MappingSnapshot]
 	categoryNameCache sync.Map
 
 	idToPid = make(map[int64]int64)

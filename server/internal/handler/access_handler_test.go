@@ -347,4 +347,3 @@ func TestCleanData_AuthAndValidation(t *testing.T) {
 		t.Fatalf("expected empty password failure, got code=%d msg=%q", resp.Code, resp.Msg)
 	}
 }
-

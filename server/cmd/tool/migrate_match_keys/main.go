@@ -4,6 +4,9 @@ import (
 	"database/sql"
 	"flag"
 	"fmt"
+	_ "github.com/go-sql-driver/mysql"
+	gormmysql "gorm.io/driver/mysql"
+	"gorm.io/gorm"
 	"log"
 	"os"
 	"strconv"
@@ -11,12 +14,8 @@ import (
 	"time"
 
 	infradb "server/internal/infra/db"
-	"server/internal/repository/film"
+	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
-
-	_ "github.com/go-sql-driver/mysql"
-	gormmysql "gorm.io/driver/mysql"
-	"gorm.io/gorm"
 )
 
 func resolveMasterRootPid(pid, cid int64, cName string) int64 {
@@ -124,7 +123,7 @@ func main() {
 					break
 				}
 				pid := resolveMasterRootPid(f.Pid, f.Cid, f.CName)
-				keys := film.BuildMovieMatchKeysWithCategory(f.DbId, f.Name, pid)
+				keys := shared.BuildMovieMatchKeysWithCategory(f.DbId, f.Name, pid)
 				fmt.Printf("MID=%d Name='%s' Pid=%d Keys=%v\n", f.Mid, f.Name, pid, keys)
 			}
 			return
@@ -140,7 +139,7 @@ func main() {
 		for _, f := range chunk {
 			mids = append(mids, f.Mid)
 			pid := resolveMasterRootPid(f.Pid, f.Cid, f.CName)
-			keys := film.BuildMovieMatchKeysWithCategory(f.DbId, f.Name, pid)
+			keys := shared.BuildMovieMatchKeysWithCategory(f.DbId, f.Name, pid)
 			for _, k := range keys {
 				newRecords = append(newRecords, matchRecord{Mid: f.Mid, MatchKey: k})
 			}

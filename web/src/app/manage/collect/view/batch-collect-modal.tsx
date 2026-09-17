@@ -1,5 +1,5 @@
 import { Alert, Flex, Form, Modal, Select, Space, Table, Tag, Typography } from "antd";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { LoadingOutlined } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import type { BatchOption } from "./types";
@@ -28,10 +28,22 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
     onBatchTimeChange,
   } = props;
 
+  // 保持弹窗内的运行态稳定：仅在弹窗打开状态下同步，避免关闭及退场动画期间因外部乐观置为 starting 而闪烁 Alert
+  const [stableActiveIds, setStableActiveIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      setStableActiveIds(activeCollectIds);
+    }
+  }, [open, activeCollectIds]);
+
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const selectedRunningNames = useMemo(
-    () => options.filter((item) => selectedSet.has(item.id) && activeCollectIds.includes(item.id)).map((item) => item.name),
-    [activeCollectIds, options, selectedSet],
+    () =>
+      options
+        .filter((item) => selectedSet.has(item.id) && stableActiveIds.includes(item.id))
+        .map((item) => item.name),
+    [options, selectedSet, stableActiveIds],
   );
 
   const columns: ColumnsType<BatchOption> = [
@@ -45,7 +57,7 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
             <Tag color={record.grade === 0 ? "gold" : "default"} variant="filled">
               {record.grade === 0 ? "主采集站" : "附属采集站"}
             </Tag>
-            {activeCollectIds.includes(record.id) ? (
+            {stableActiveIds.includes(record.id) ? (
               <Tag icon={<LoadingOutlined />} color="processing" variant="filled">
                 采集中
               </Tag>
@@ -80,7 +92,7 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
 
         <Space size={[8, 8]} wrap>
           <Tag variant="filled">将采集 {selectedIds.length} 个采集站</Tag>
-          <Tag variant="filled">运行中 {activeCollectIds.length}</Tag>
+          <Tag variant="filled">运行中 {stableActiveIds.length}</Tag>
         </Space>
 
         <Table<BatchOption>

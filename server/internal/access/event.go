@@ -391,10 +391,6 @@ func httpHealthSample(evt *AccessEvent) bool {
 	return evt.Action != "manage" && !isManagePath(evt.Path)
 }
 
-func isSSR(evt *AccessEvent) bool {
-	return evt != nil && (evt.Internal == "ssr" || evt.UAFamily == "ecohub-ssr")
-}
-
 func RecordRecent(evt *AccessEvent) bool {
 	// 普通 HTTP 接口绝不推入 recent 业务访问流水，彻底隔离接口运维日志与业务访问分析
 	return false

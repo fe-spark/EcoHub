@@ -37,7 +37,10 @@ export default function LoginPageView() {
       const resp = await ApiPost("/login", { userName, password });
       if (resp.code === 0) {
         message.success("登录成功");
-        router.push("/manage");
+        const searchParams = typeof window !== "undefined" ? new URLSearchParams(window.location.search) : null;
+        const redirect = searchParams?.get("redirect");
+        const targetUrl = redirect && redirect.startsWith("/") && !redirect.startsWith("//") ? redirect : "/manage";
+        window.location.href = targetUrl;
       } else {
         message.error(resp.msg || "登录失败");
       }

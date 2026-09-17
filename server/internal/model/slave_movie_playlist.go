@@ -7,7 +7,7 @@ import (
 // SlaveMoviePlaylist 附属站播放列表专属持久化模型（与主站骨架物理隔离）。
 // 显式声明主键与时间戳，不包含 deleted_at，彻底硬删除规避软删除与唯一索引冲突。
 type SlaveMoviePlaylist struct {
-	ID         uint      `gorm:"primaryKey"`
+	ID         uint `gorm:"primaryKey"`
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
 	SourceId   string `gorm:"type:varchar(64);uniqueIndex:uidx_slave_source_key_group"`

@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -39,13 +38,11 @@ var (
 	JwtSecret = ""
 
 	// FilmPictureUploadDir 用户上传素材落地目录。
-	// 容器固定走发布卷；相对路径仅本地 go run 使用，生产不得回退。
-	FilmPictureUploadDir = filmPictureUploadDirLocal
+	// 容器固定走发布卷；非容器环境动态向上查找项目根路径，生产不得回退。
+	FilmPictureUploadDir = resolveFilmPictureUploadDir()
 )
 
 const (
-	// MAXGoroutine 历史常量：单站分页 worker 默认值（优先用 CollectPageWorkers）。
-	MAXGoroutine = 6
 
 	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发），
 	// 同时作为运行时参数为 0 时的兜底默认值。实际档位按 CPU 核数自动选
@@ -67,9 +64,7 @@ const (
 	// 不含 waiting_publish / finalizing / page_done（整批收尾等待，不按单站超时）。
 	DefaultCollectProgressStaleSec = 30 * 60
 
-	filmPictureUploadDirContainer = "/app/static/upload/gallery"
-	filmPictureUploadDirLocal     = "./static/upload/gallery"
-	FilmPictureAccess             = "/api/upload/pic/poster/"
+	FilmPictureAccess = "/api/upload/pic/poster/"
 )
 
 // 采集写阀 / 并发 运行时参数（InitConfig 按 CPU 核数自动选档，见 resolveCollectProfile）。
@@ -110,8 +105,6 @@ const (
 	CategoryTreeKey = RedisKeyPrefix + ":Category:Tree"
 	// ActiveCategoryTreeKey 活跃分类树缓存 key
 	ActiveCategoryTreeKey = RedisKeyPrefix + ":Category:ActiveTree"
-	// ActiveCategoryIDsKey 活跃分类 ID 集合缓存 key
-	ActiveCategoryIDsKey = RedisKeyPrefix + ":Category:ActiveIDs"
 	// CategoryVersionKey 分类版本号缓存 key
 	CategoryVersionKey = RedisKeyPrefix + ":Category:Version"
 	// RuleVersionKey 分类规则版本号缓存 key
@@ -134,6 +127,8 @@ const (
 	SnapshotActiveVersionKey = RedisKeyPrefix + ":Snapshot:ActiveVersion"
 	// FilmPlayInfoKey 影片播放详情缓存 key 前缀 (后接 :mid)
 	FilmPlayInfoKey = RedisKeyPrefix + ":Film:PlayInfo"
+	// FilmPlayInfoGenKey 播放详情缓存世代。收尾失效时 INCR，避免并发 GetFilmDetail 把旧结果再 SET 回去。
+	FilmPlayInfoGenKey = RedisKeyPrefix + ":Film:PlayInfoGen"
 	// FilmHotKeywordsKey 搜索热词缓存 key 前缀 (后接 :v%s)
 	FilmHotKeywordsKey = RedisKeyPrefix + ":Film:HotKeywords"
 	// FilmCategoryCachePrefix 分类影片列表缓存前缀
@@ -172,6 +167,10 @@ const (
 	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
 	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
 	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
+	// DailyUpdatesV2CachePrefix 每日更新 V2 分页短缓存前缀
+	DailyUpdatesV2CachePrefix = RedisKeyPrefix + ":DailyUpdates:V2"
+	// DailyUpdatesV2CatCacheKey 每日更新 V2 分类统计短缓存
+	DailyUpdatesV2CatCacheKey = RedisKeyPrefix + ":DailyUpdates:Categories"
 
 	// --- 6. 运维治理与通知 (Maintenance & Notice) ---
 	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key
@@ -180,8 +179,6 @@ const (
 	MasterSwitchProtectKey = RedisKeyPrefix + ":CleanOrphan:MasterSwitchProtect"
 	// NotifyBatchCachePrefix 变更通知批次缓存前缀
 	NotifyBatchCachePrefix = RedisKeyPrefix + ":Notify:Batch"
-	// VirtualPictureKey 待同步图片临时存储 key
-	VirtualPictureKey = RedisKeyPrefix + ":Gallery:VirtualPicture"
 
 	// --- 7. 版本检查缓存 (Version) ---
 	// LatestReleaseCacheKey GitHub 最新正式版 Release 缓存
@@ -217,8 +214,6 @@ const (
 
 	// DefaultUpdateSpec 每30分钟执行一次
 	DefaultUpdateSpec = "0 */30 * * * ?"
-	// EveryWeekSpec 每天凌晨4点执行一次
-	EveryWeekSpec = "0 0 4 * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
 	// OrphanCleanSpec 每天 04:35，错开 DefaultUpdateSpec 的 30 分钟整点（含 04:30）。
@@ -232,14 +227,6 @@ const (
 // -------------------------Database Connection Params-----------------------------------
 const (
 	UserIdInitialVal = 10000
-)
-
-// -------------------------Provide Config-----------------------------------
-const (
-	PlayForm      = "bkm3u8"
-	PlayFormCloud = "ecohub"
-	PlayFormAll   = "ecohub$$$bkm3u8"
-	RssVersion    = "5.1"
 )
 
 const (
@@ -353,64 +340,6 @@ func InitConfig() {
 	loadCollectRuntimeConfig()
 	loadAccessRuntimeConfig()
 
-}
-
-// resolveFilmPictureUploadDir 容器内写死发布卷路径；仅非容器（本地 go run）用相对路径。
-func resolveFilmPictureUploadDir() string {
-	if runningInContainer() {
-		return filmPictureUploadDirContainer
-	}
-	return filmPictureUploadDirLocal
-}
-
-func runningInContainer() bool {
-	if _, err := os.Stat("/.dockerenv"); err == nil {
-		return true
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return false
-	}
-	switch filepath.Dir(exe) {
-	case "/app", "/app/server":
-		return true
-	default:
-		return false
-	}
-}
-
-// ContainerUploadVolumeOK 非容器或已挂 /app/static/upload 为 true。
-func ContainerUploadVolumeOK() bool {
-	if !runningInContainer() {
-		return true
-	}
-	return uploadPathIsMounted()
-}
-
-// EnsureContainerUploadVolume 未挂卷时返回错误供启动日志，不阻断启动。
-func EnsureContainerUploadVolume() error {
-	if ContainerUploadVolumeOK() {
-		return nil
-	}
-	return fmt.Errorf("素材目录 %s 未挂载发布卷 /app/static/upload", FilmPictureUploadDir)
-}
-
-func uploadPathIsMounted() bool {
-	data, err := os.ReadFile("/proc/self/mountinfo")
-	if err != nil {
-		return false
-	}
-	for _, line := range strings.Split(string(data), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) < 5 {
-			continue
-		}
-		switch fields[4] {
-		case "/app/static/upload", "/app/static/upload/gallery":
-			return true
-		}
-	}
-	return false
 }
 
 // collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。

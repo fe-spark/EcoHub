@@ -14,10 +14,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func QueryLogs(day, source, status, client, q string, limit int) ([]AccessEvent, error) {
-	return QueryLogsScope(day, source, status, client, q, "", "", limit)
-}
-
 func QueryLogsScope(day, source, status, client, q, module, platform string, limit int) ([]AccessEvent, error) {
 	if db.Rdb == nil {
 		if !config.AccessLogEnabled {
