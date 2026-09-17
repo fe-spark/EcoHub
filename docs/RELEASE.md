@@ -1,3 +1,21 @@
+预发布 **v2.7.0-beta.3**，镜像 `ghcr.io/fe-spark/ecohub:v2.7.0-beta.3`。
+
+### 升级指引
+
+- 后台检查更新，或 `docker compose pull ecohub && docker compose up -d ecohub`。
+- 启动时自动执行数据库性能索引迁移，无需手动干预。
+
+---
+
+### v2.7.0-beta.3
+
+- 重置站点数据闭环：重置时连带清空强依赖影片的轮播图与采集失败记录，彻底杜绝首页 404 死链与孤儿数据。
+- 每日更新接口提速：新增 `(update_stamp, mid)` 与 `(pid, update_stamp, mid)` 覆被复合索引，消除全量 Filesort 文件排序。
+- 每日更新缓存与并发收敛：分类统计与前 5 页分页接入短缓存与 Singleflight，拦截高频穿透，保持实时集数覆盖。
+- 读模型快照与数据重置时闭环淘汰每日更新缓存。
+
+---
+
 预发布 **v2.7.0-beta.2**，镜像 `ghcr.io/fe-spark/ecohub:v2.7.0-beta.2`。
 
 ### 升级指引
