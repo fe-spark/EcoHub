@@ -14,7 +14,7 @@ import (
 var defaultAuthToken = AuthToken()
 
 // PrivateAccessGuard 动态私有化守卫
-// 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态
+// 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态或有效的订阅密钥（X-Provide-Key / ?key=）
 func PrivateAccessGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		cfg := repository.GetSiteBasic()
@@ -22,6 +22,19 @@ func PrivateAccessGuard() gin.HandlerFunc {
 			c.Next()
 			return
 		}
+
+		// 若携带了有效的 ProvideKey（原生客户端/播放器订阅软件源），予以放行
+		if expectedKey := strings.TrimSpace(cfg.ProvideKey); expectedKey != "" {
+			key := strings.TrimSpace(c.Query("key"))
+			if key == "" {
+				key = strings.TrimSpace(c.GetHeader("X-Provide-Key"))
+			}
+			if key != "" && subtle.ConstantTimeCompare([]byte(key), []byte(expectedKey)) == 1 {
+				c.Next()
+				return
+			}
+		}
+
 		defaultAuthToken(c)
 	}
 }

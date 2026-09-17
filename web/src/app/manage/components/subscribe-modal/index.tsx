@@ -83,7 +83,7 @@ export default function SubscribeModal(props: SubscribeModalProps) {
       key: "tvbox",
       title: "TVBox / 影视仓配置",
       tag: "推荐",
-      path: "/api/provide/config",
+      path: "/api/provide/tvbox",
       withKey: true,
     },
     {
@@ -95,9 +95,10 @@ export default function SubscribeModal(props: SubscribeModalProps) {
     },
     {
       key: "client",
-      title: "移动原生客户端",
+      title: "EcoHub 客户端软件源",
       tag: "App",
-      path: "/api",
+      path: "/api/provide/app",
+      withKey: true,
     },
   ];
 
