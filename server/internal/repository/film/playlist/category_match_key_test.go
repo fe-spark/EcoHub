@@ -895,3 +895,135 @@ func TestSameTitleCrossCategory_AnimeUpdateNotMaskedByFinishedShort(t *testing.T
 		t.Fatalf("cartoon 仙逆 must enter daily updates on episode 22, got NotifyMIDs=%v", result.NotifyMIDs)
 	}
 }
+
+func TestSaveSitePlayList_UnnumberedSingleDoesNotWriteSerialPrimary(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		9:  0,
+		20: 0,
+	}, map[int64]string{
+		9:  model.BigCategoryMovie,
+		20: model.BigCategoryAnimation,
+	})
+
+	cat20 := shared.BuildMovieMatchKeysWithCategory(0, "完美世界", 20)[0]
+	legacy := shared.BuildMovieMatchKeys(0, "完美世界")[0]
+	cat9 := shared.BuildMovieMatchKeysWithCategory(0, "完美世界", 9)[0]
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 32115, ContentKey: "vod_32115", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "中国动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "完美世界", Year: 2021, Remarks: "第287集"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{cat20, legacy} {
+		if err := gdb.Create(&model.MovieMatchKey{Mid: 32115, MatchKey: key}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	slave := model.MovieDetail{
+		Name: "完美世界",
+		MovieDescriptor: model.MovieDescriptor{CName: "电影"},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "正片", Link: "https://ly/movie.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("ly", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "ly").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0].MovieKey == cat20 || rows[0].MovieKey == legacy {
+		t.Fatalf("single-file title must not write the serial primary, got %s", rows[0].MovieKey)
+	}
+	if rows[0].MovieKey != cat9 {
+		t.Fatalf("movie-labeled source should stay on its own category key %s, got %s", cat9, rows[0].MovieKey)
+	}
+
+	groups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "ly", Name: "HD(LY)"}},
+		[]string{cat20, legacy},
+	)
+	if _, ok := groups["ly"]; ok {
+		t.Fatal("serial 完美世界 must not display the single-file playlist")
+	}
+}
+
+func TestSaveSitePlayList_PackedShortDoesNotWriteAnimePrimary(t *testing.T) {
+	gdb := setupOrphanCleanerTestDB(t)
+	support.SetCategoryTreeForTest(map[int64]int64{
+		20: 0,
+		34: 0,
+	}, map[int64]string{
+		20: model.BigCategoryAnimation,
+		34: model.BigCategoryShortFilm,
+	})
+
+	animePrimary := shared.BuildMovieMatchKeysWithCategory(0, "牧神记", 20)[0]
+	shortPrimary := shared.BuildMovieMatchKeysWithCategory(0, "牧神记", 34)[0]
+	legacy := shared.BuildMovieMatchKeys(0, "牧神记")[0]
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 67651, ContentKey: "vod_67651", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 20, CName: "中国动漫"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "牧神记", ClassTag: "玄幻,热血,战斗", Remarks: "第100集"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 144250, ContentKey: "vod_144250", SourceId: "master"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 34, CName: "反转爽剧"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "牧神记", Remarks: "第81-106集完结"},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range []model.MovieMatchKey{
+		{Mid: 67651, MatchKey: animePrimary},
+		{Mid: 67651, MatchKey: legacy},
+		{Mid: 144250, MatchKey: shortPrimary},
+		{Mid: 144250, MatchKey: legacy},
+	} {
+		if err := gdb.Create(&rec).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	slave := model.MovieDetail{
+		Name: "牧神记",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:    "动漫",
+			ClassTag: "玄幻,热血,战斗",
+		},
+		PlayList: [][]model.MovieUrlInfo{{
+			{Episode: "第1-20集", Link: "https://hn/1.m3u8"},
+			{Episode: "第21-40集", Link: "https://hn/2.m3u8"},
+			{Episode: "第41-60集", Link: "https://hn/3.m3u8"},
+			{Episode: "第61-80集", Link: "https://hn/4.m3u8"},
+			{Episode: "第81-106集完结", Link: "https://hn/5.m3u8"},
+		}},
+	}
+	if _, err := SaveSitePlayList("hn", []model.MovieDetail{slave}); err != nil {
+		t.Fatal(err)
+	}
+
+	var rows []model.SlaveMoviePlaylist
+	gdb.Where("source_id = ?", "hn").Find(&rows)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d %+v", len(rows), rows)
+	}
+	if rows[0].MovieKey != shortPrimary {
+		t.Fatalf("packed short must write 短剧 primary %s, got %s", shortPrimary, rows[0].MovieKey)
+	}
+
+	animeGroups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "hn", Name: "红牛(HN)"}},
+		[]string{animePrimary, legacy},
+	)
+	if _, ok := animeGroups["hn"]; ok {
+		t.Fatal("动漫牧神记 must not display the packed short playlist")
+	}
+}
