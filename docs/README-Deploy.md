@@ -72,8 +72,7 @@ docker compose up -d
 | `http://服务器:3000/api/*` | 经站点转发的 API |
 | `http://服务器:18080/api/*` | 后端直连（生产勿公网暴露） |
 | `http://服务器:3000/api/provide/app` | 客户端软件源 |
-| `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓（推荐） |
-| `http://服务器:3000/api/provide/config` | TVBox / 影视仓（即将废弃，请使用 `/api/provide/tvbox`） |
+| `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓 |
 
 默认账号（**立刻改密**）：`admin` / `admin`，`guest` / `guest`。
 
