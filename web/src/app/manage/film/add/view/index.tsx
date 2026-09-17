@@ -33,6 +33,7 @@ import {
   PlayCircleOutlined,
   ContainerOutlined,
   PictureOutlined,
+  CompassOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -40,6 +41,7 @@ import { useManagePermission } from "@/lib/manage-permission";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ImagePicker from "@/app/manage/components/image-picker";
+import TmdbModal from "../../components/tmdb-modal";
 import {
   IMAGE_UPLOAD_ACCEPT,
   isAllowedImageFile,
@@ -55,11 +57,57 @@ function FilmAddForm() {
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get("id");
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
+
+  const handleTmdbPrefill = (data: any, fields?: string[]) => {
+    const shouldFill = (name: string, ...aliases: string[]) => {
+      if (!fields || fields.length === 0) return true;
+      return [name, ...aliases].some((key) => fields.includes(key));
+    };
+
+    const updates: Record<string, any> = {};
+    if (!form.getFieldValue("name") && data.name) {
+      updates.name = data.name;
+    }
+    if (shouldFill("poster", "picture") && data.picture) {
+      updates.picture = data.picture;
+      updates.followPosterSource = false;
+    }
+    if (shouldFill("backdrop", "pictureSlide") && data.pictureSlide) {
+      updates.pictureSlide = data.pictureSlide;
+    }
+    if (shouldFill("overview", "content") && data.content) {
+      updates.content = data.content;
+    }
+    if (shouldFill("subTitle") && data.subTitle) {
+      updates.subTitle = data.subTitle;
+    }
+    if (shouldFill("actor") && data.actor) {
+      updates.actor = data.actor;
+    }
+    if (shouldFill("director") && data.director) {
+      updates.director = data.director;
+    }
+    if (shouldFill("year", "releaseDate")) {
+      if (data.year) updates.year = data.year;
+      if (data.releaseDate) updates.releaseDate = data.releaseDate;
+    }
+    if (shouldFill("score") && data.dbScore) {
+      updates.dbScore = data.dbScore;
+    }
+    if (shouldFill("tag") && data.classTag) {
+      updates.classTag = data.classTag;
+    }
+
+    if (Object.keys(updates).length > 0) {
+      form.setFieldsValue(updates);
+    }
+  };
 
   const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
   const watchedPicture = Form.useWatch("picture", form);
@@ -246,6 +294,16 @@ function FilmAddForm() {
                   />
                   基础信息
                 </Space>
+              }
+              extra={
+                <Button
+                  icon={<CompassOutlined />}
+                  style={{ color: "#722ed1", borderColor: "#722ed1" }}
+                  onClick={() => setTmdbModalOpen(true)}
+                  disabled={!canWrite}
+                >
+                  TMDB 智能识别
+                </Button>
               }
               className={styles.sectionCard}
               styles={{
@@ -613,6 +671,13 @@ function FilmAddForm() {
           form.setFieldValue("picture", link);
           setPickerOpen(false);
         }}
+      />
+
+      <TmdbModal
+        open={tmdbModalOpen}
+        initialName={form.getFieldValue("name")}
+        onClose={() => setTmdbModalOpen(false)}
+        onPrefill={handleTmdbPrefill}
       />
     </div>
   );

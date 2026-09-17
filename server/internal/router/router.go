@@ -192,6 +192,17 @@ func SetupRouter() *gin.Engine {
 			filmRoute.POST(`/class/update`, handler.FilmHd.UpdateFilmClass)
 		}
 
+		// TMDB 刮削相关
+		tmdbRoute := manageRoute.Group(`/tmdb`)
+		{
+			tmdbRoute.GET(`/config`, handler.TMDBHd.GetConfig)
+			tmdbRoute.POST(`/config/update`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
+			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
+			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
+			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
+			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
+		}
+
 		// 文件管理
 		fileRoute := manageRoute.Group(`/file`)
 		{

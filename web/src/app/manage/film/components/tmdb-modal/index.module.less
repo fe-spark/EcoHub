@@ -1,0 +1,214 @@
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 260px;
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.searchBar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.spinPlaceholder {
+  min-height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+}
+
+/* 候选搜索结果列表 */
+.candidateList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.candidateCard {
+  border-radius: 8px;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+  padding: 12px;
+  display: flex;
+  gap: 16px;
+  transition: all 0.2s ease;
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  }
+}
+
+.candidatePoster {
+  width: 72px;
+  height: 104px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.candidatePosterImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.cardContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.cardHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.titleWrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mainTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.subTitle {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+}
+
+.metaRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  margin-bottom: 6px;
+}
+
+.overview {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.cardFooter {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* 详情确认预览卡片 */
+.previewCard {
+  border-radius: 8px;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-bg-container);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.previewHeader {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.previewPoster {
+  width: 140px;
+  height: 210px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  border: 1px solid var(--ant-color-border-secondary);
+}
+
+.previewInfo {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.metaLine {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.metaLabel {
+  color: var(--ant-color-text-tertiary);
+  flex-shrink: 0;
+  font-size: 12px;
+}
+
+.metaValue {
+  color: var(--ant-color-text-secondary);
+  word-break: break-word;
+  font-size: 12px;
+}
+
+.backdropThumbWrapper {
+  width: 128px;
+  height: 72px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.04));
+}
+
+.previewOverview {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  line-height: 1.6;
+  margin-top: 4px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.fieldsSection {
+  padding-top: 14px;
+  border-top: 1px solid var(--ant-color-border-secondary);
+}
+
+.fieldsTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  margin-bottom: 10px;
+}
