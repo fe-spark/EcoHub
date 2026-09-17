@@ -43,6 +43,7 @@ interface UseFilmColumnsProps {
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
   handleScrapeFilm: (record: FilmItem) => void;
+  tmdbEnabled?: boolean;
 }
 
 export function useFilmColumns({
@@ -53,6 +54,7 @@ export function useFilmColumns({
   handleUpdateSingle,
   handleDelFilm,
   handleScrapeFilm,
+  tmdbEnabled = false,
 }: UseFilmColumnsProps) {
   return useMemo<ColumnsType<FilmItem>>(
     () => [
@@ -160,17 +162,19 @@ export function useFilmColumns({
                 }
               />
             </Tooltip>
-            <Tooltip title="TMDB 刮削">
-              <Button
-                type="primary"
-                shape="circle"
-                size="small"
-                style={{ background: "#722ed1", borderColor: "#722ed1" }}
-                icon={<CompassOutlined />}
-                disabled={!canWrite}
-                onClick={() => handleScrapeFilm(record)}
-              />
-            </Tooltip>
+            {tmdbEnabled && (
+              <Tooltip title="TMDB 刮削">
+                <Button
+                  type="primary"
+                  shape="circle"
+                  size="small"
+                  style={{ background: "#722ed1", borderColor: "#722ed1" }}
+                  icon={<CompassOutlined />}
+                  disabled={!canWrite}
+                  onClick={() => handleScrapeFilm(record)}
+                />
+              </Tooltip>
+            )}
             <Tooltip title="同步更新">
               <Button
                 type="primary"
@@ -216,6 +220,6 @@ export function useFilmColumns({
         ),
       },
     ],
-    [syncingIds, router, handleDelFilm, handleUpdateSingle, handleScrapeFilm, canWrite, styles],
+    [syncingIds, router, handleDelFilm, handleUpdateSingle, handleScrapeFilm, canWrite, styles, tmdbEnabled],
   );
 }

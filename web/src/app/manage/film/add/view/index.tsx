@@ -42,6 +42,7 @@ import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import ImagePicker from "@/app/manage/components/image-picker";
 import TmdbModal from "../../components/tmdb-modal";
+import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import {
   IMAGE_UPLOAD_ACCEPT,
   isAllowedImageFile,
@@ -53,6 +54,7 @@ const { Text } = Typography;
 
 function FilmAddForm() {
   const [form] = Form.useForm();
+  const tmdbEnabled = useTmdbEnabled();
   const [categories, setCategories] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
@@ -296,14 +298,16 @@ function FilmAddForm() {
                 </Space>
               }
               extra={
-                <Button
-                  icon={<CompassOutlined />}
-                  style={{ color: "#722ed1", borderColor: "#722ed1" }}
-                  onClick={() => setTmdbModalOpen(true)}
-                  disabled={!canWrite}
-                >
-                  TMDB 智能识别
-                </Button>
+                tmdbEnabled ? (
+                  <Button
+                    icon={<CompassOutlined />}
+                    style={{ color: "#722ed1", borderColor: "#722ed1" }}
+                    onClick={() => setTmdbModalOpen(true)}
+                    disabled={!canWrite}
+                  >
+                    TMDB 智能识别
+                  </Button>
+                ) : null
               }
               className={styles.sectionCard}
               styles={{
