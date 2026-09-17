@@ -31,20 +31,25 @@ func SetupRouter() *gin.Engine {
 	// Deprecated: 后续废弃，探活统一使用 /api/config/basic
 	api.GET(`/health`, handler.Health)
 	api.HEAD(`/health`, handler.Health)
-	api.GET(`/index`, handler.IndexHd.Index)
-	api.GET(`/index/dailyUpdates`, handler.IndexHd.DailyUpdates)
-	api.GET(`/dailyUpdates`, handler.IndexHd.DailyUpdatesV2)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
-	api.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
-	api.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
-	api.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
-	api.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
-	api.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
-	api.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
-	api.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
-	api.POST(`/stat/view`, handler.AccessHd.TrackView)
 	api.POST(`/login`, handler.UserHd.Login)
 	api.POST(`/logout`, middleware.AuthToken(), handler.UserHd.Logout)
+
+	// 前台业务接口，开启私有化模式时需携带有效登录态
+	frontApi := api.Group("/", middleware.PrivateAccessGuard())
+	{
+		frontApi.GET(`/index`, handler.IndexHd.Index)
+		frontApi.GET(`/index/dailyUpdates`, handler.IndexHd.DailyUpdates)
+		frontApi.GET(`/dailyUpdates`, handler.IndexHd.DailyUpdatesV2)
+		frontApi.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
+		frontApi.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
+		frontApi.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
+		frontApi.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
+		frontApi.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
+		frontApi.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
+		frontApi.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
+		frontApi.POST(`/stat/view`, handler.AccessHd.TrackView)
+	}
 
 	manageRoute := api.Group(`/manage`)
 	manageRoute.Use(middleware.AuthToken(), middleware.WriteAccess())
@@ -190,7 +195,7 @@ func SetupRouter() *gin.Engine {
 		}
 	}
 
-	provideRoute := api.Group(`/provide`)
+	provideRoute := api.Group(`/provide`, middleware.ProvideKeyGuard())
 	{
 		provideRoute.GET(`/vod`, handler.ProvideHd.HandleProvide)
 		provideRoute.GET(`/config`, handler.ProvideHd.HandleProvideConfig)

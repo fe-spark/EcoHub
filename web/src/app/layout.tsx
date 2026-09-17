@@ -65,8 +65,9 @@ export default async function RootLayout({
 }>) {
   const siteConfig = await getSiteConfig();
 
-  // SSR 直接输出正确主题：手动选择（cookie）优先，未选择时默认暗色
-  const savedMode = (await cookies()).get(THEME_COOKIE_KEY)?.value;
+  const cookieStore = await cookies();
+  const savedMode = cookieStore.get(THEME_COOKIE_KEY)?.value;
+  const initialHasAuth = cookieStore.has("ecohub_auth_token");
   const initialMode = isThemeMode(savedMode) ? savedMode : "dark";
   let initialEffective: "dark" | "light";
   if (initialMode !== "system") {
@@ -82,7 +83,7 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <AntdRegistry>
           <GlobalThemeProvider fontFamily={APP_FONT_FAMILY} initialMode={initialMode} initialEffective={initialEffective}>
-            <SiteGuard initialConfig={siteConfig}>
+            <SiteGuard initialConfig={siteConfig} initialHasAuth={initialHasAuth}>
               {children}
             </SiteGuard>
           </GlobalThemeProvider>

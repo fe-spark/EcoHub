@@ -67,7 +67,14 @@ func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 
 // SiteBasicConfig 网站基本配置
 func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetSiteBasicConfig(), "网站基本信息获取成功", c)
+	cfg := service.ManageSvc.GetSiteBasicConfig()
+	// 若非超级管理员（如公开未登录接口或访客），清空 ProvideKey 防止敏感密钥泄露
+	v, ok := c.Get(config.AuthUserClaims)
+	uc, isUser := v.(*utils.UserClaims)
+	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+		cfg.ProvideKey = ""
+	}
+	dto.Success(cfg, "网站基本信息获取成功", c)
 }
 
 // UpdateSiteBasic 更新网站配置信息
@@ -76,6 +83,10 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 	if err := c.ShouldBindJSON(&bc); err == nil {
 		if len(bc.SiteName) <= 0 {
 			dto.Failed("网站名称不能为空", c)
+			return
+		}
+		if bc.PrivateAccess && len(strings.TrimSpace(bc.ProvideKey)) <= 0 {
+			dto.Failed("开启私有化访问时，必须配置 TVBox / 影视仓订阅密钥", c)
 			return
 		}
 	} else {

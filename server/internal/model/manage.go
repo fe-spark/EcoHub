@@ -53,10 +53,12 @@ type BasicConfig struct {
 	Logo     string       `json:"logo"`     // 网站logo
 	Keyword  string       `json:"keyword"`  // seo关键字
 	Describe string       `json:"describe"` // 网站描述信息
-	State    bool         `json:"state"`    // 网站状态 开启 || 关闭
-	Hint     string       `json:"hint"`     // 网站关闭提示
-	Tip      TipConfig    `json:"tip"`      // 前台赞赏
-	Notice   NoticeConfig `json:"notice"`   // 开屏公告
+	State         bool         `json:"state"`         // 网站状态 开启 || 关闭
+	Hint          string       `json:"hint"`          // 网站关闭提示
+	PrivateAccess bool         `json:"privateAccess"` // 私有化访问控制（仅登录可用）
+	ProvideKey    string       `json:"provideKey"`    // TVBox/订阅专属访问密钥
+	Tip           TipConfig    `json:"tip"`           // 前台赞赏
+	Notice        NoticeConfig `json:"notice"`        // 开屏公告
 }
 
 // Banner 首页横幅信息
@@ -102,10 +104,12 @@ type SiteConfigRecord struct {
 	Logo       string `gorm:"size:512"`
 	Keyword    string `gorm:"size:256"`
 	Describe   string `gorm:"size:512"`
-	State      bool
-	Hint       string `gorm:"size:512"`
-	TipJSON    string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
-	NoticeJSON string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
+	State         bool
+	Hint          string `gorm:"size:512"`
+	PrivateAccess bool   `gorm:"default:false;column:private_access"`
+	ProvideKey    string `gorm:"size:64;column:provide_key"`
+	TipJSON       string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
+	NoticeJSON    string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
 }
 
 func (SiteConfigRecord) TableName() string {
