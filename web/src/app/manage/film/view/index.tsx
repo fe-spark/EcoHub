@@ -33,6 +33,7 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useFilmColumns, type FilmItem } from "./film-columns";
 import TmdbModal from "../components/tmdb-modal";
+import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -41,6 +42,7 @@ const { Text } = Typography;
 export default function FilmListPageView() {
   const router = useRouter();
   const { canWrite } = useManagePermission();
+  const tmdbEnabled = useTmdbEnabled();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
@@ -238,6 +240,7 @@ export default function FilmListPageView() {
     handleUpdateSingle,
     handleDelFilm,
     handleScrapeFilm,
+    tmdbEnabled,
   });
 
   return (
