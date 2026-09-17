@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -35,6 +36,17 @@ func clearAuthCookie(c *gin.Context) {
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authToken, _ := c.Cookie(config.AuthCookieName)
+		if authToken == "" {
+			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+				authToken = strings.TrimSpace(authHeader[7:])
+			} else if authHeader != "" {
+				authToken = authHeader
+			}
+			if authToken == "" {
+				authToken = strings.TrimSpace(c.GetHeader("Token"))
+			}
+		}
 		// 如果没有登录信息则直接清退
 		if authToken == "" {
 			clearAuthCookie(c)

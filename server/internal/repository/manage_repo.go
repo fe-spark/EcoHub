@@ -71,6 +71,7 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	rec := model.SiteConfigRecord{
 		SiteName: c.SiteName, SiteURL: c.SiteURL, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
+		PrivateAccess: c.PrivateAccess, ProvideKey: strings.TrimSpace(c.ProvideKey),
 		TipJSON:    model.EncodeTipJSON(c.Tip),
 		NoticeJSON: model.EncodeNoticeJSON(c.Notice),
 	}
@@ -126,6 +127,7 @@ func GetSiteBasic() model.BasicConfig {
 	c = model.BasicConfig{
 		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
+		PrivateAccess: rec.PrivateAccess, ProvideKey: rec.ProvideKey,
 		Tip:    model.DecodeTipJSON(rec.TipJSON),
 		Notice: model.DecodeNoticeJSON(rec.NoticeJSON),
 	}

@@ -32,6 +32,8 @@ export interface BasicInfoPayload {
   state: boolean;
   describe: string;
   hint: string;
+  privateAccess: boolean;
+  provideKey: string;
 }
 
 const DEFAULT_BASIC_INFO: BasicInfoPayload = {
@@ -42,12 +44,15 @@ const DEFAULT_BASIC_INFO: BasicInfoPayload = {
   state: true,
   describe: "",
   hint: "网站升级中, 暂时无法访问 !!!",
+  privateAccess: false,
+  provideKey: "",
 };
 
 const MAX_SITE_NAME_LEN = 64;
 const MAX_KEYWORD_LEN = 128;
 const MAX_DESCRIBE_LEN = 512;
 const MAX_HINT_LEN = 256;
+const MAX_PROVIDE_KEY_LEN = 64;
 
 function normalizeBasicInfo(raw?: Partial<BasicInfoPayload> | null): BasicInfoPayload {
   return {
@@ -58,6 +63,8 @@ function normalizeBasicInfo(raw?: Partial<BasicInfoPayload> | null): BasicInfoPa
     state: raw?.state === undefined ? true : Boolean(raw.state),
     describe: String(raw?.describe ?? "").trim(),
     hint: String(raw?.hint ?? "").trim() || DEFAULT_BASIC_INFO.hint,
+    privateAccess: Boolean(raw?.privateAccess),
+    provideKey: String(raw?.provideKey ?? "").trim(),
   };
 }
 
@@ -107,6 +114,10 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
     if (!canWrite) return;
     if (!draft.siteName.trim()) {
       message.error("网站名称不能为空");
+      return;
+    }
+    if (draft.privateAccess && !draft.provideKey.trim()) {
+      message.error("开启私有化访问时，TVBox / 影视仓订阅密钥不能为空");
       return;
     }
     setSaving(true);
@@ -191,6 +202,52 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               onChange={(state) => setDraft((prev) => ({ ...prev, state }))}
             />
           </Flex>
+
+          {/* 私有化访问控制 */}
+          <Flex align="center" justify="space-between">
+            <Flex vertical gap={4}>
+              <Typography.Text strong>私有化访问（仅登录使用）</Typography.Text>
+              <Typography.Text type="secondary">
+                开启后，前台影视与搜索功能仅对已登录账号开放，未登录访客将强制重定向至登录页
+              </Typography.Text>
+            </Flex>
+            <Switch
+              disabled={!isEditing || !canWrite}
+              checked={currentValues.privateAccess}
+              checkedChildren="开启"
+              unCheckedChildren="关闭"
+              onChange={(privateAccess) =>
+                setDraft((prev) => ({ ...prev, privateAccess }))
+              }
+            />
+          </Flex>
+
+          {/* TVBox 订阅密钥 */}
+          {currentValues.privateAccess && (
+            <div className={styles.field}>
+              <Flex justify="space-between" align="baseline">
+                <Typography.Text strong>
+                  TVBox / 影视仓订阅密钥 <span style={{ color: "var(--ant-color-error)" }}>*</span>
+                </Typography.Text>
+                <Typography.Text type="secondary">
+                  {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
+                </Typography.Text>
+              </Flex>
+              <Input
+                disabled={!isEditing || !canWrite}
+                maxLength={MAX_PROVIDE_KEY_LEN}
+                placeholder="必填，请输入订阅密钥，例如 mysecret888"
+                status={isEditing && !currentValues.provideKey.trim() ? "error" : undefined}
+                value={currentValues.provideKey}
+                onChange={(e) =>
+                  setDraft((prev) => ({ ...prev, provideKey: e.target.value }))
+                }
+              />
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                开启私有化后必须设置订阅密钥，TVBox 订阅地址需追加参数：/api/provide/config?key=您的密钥
+              </Typography.Text>
+            </div>
+          )}
 
           {/* 网站名称 */}
           <div className={styles.field}>

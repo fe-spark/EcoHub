@@ -244,7 +244,11 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
+	key := strings.TrimSpace(c.Query("key"))
 	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	if key != "" {
+		cacheKey += ":" + url.QueryEscape(key)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached gin.H
@@ -256,13 +260,17 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 	}
 
 	apiPath := baseURL + "/api/provide/vod"
+	baseVodApi := apiPath
+	if key != "" {
+		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
+	}
 
 	sites := []gin.H{
 		{
 			"key":         "EcoHub",
 			"name":        "🌟 EcoHub 私人影视库全量",
 			"type":        1,
-			"api":         apiPath,
+			"api":         baseVodApi,
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,
@@ -273,11 +281,15 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		if !source.State {
 			continue
 		}
+		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
+		if key != "" {
+			sourceApi += "&key=" + url.QueryEscape(key)
+		}
 		sites = append(sites, gin.H{
 			"key":         "source_" + source.Id,
 			"name":        "📡 " + source.Name,
 			"type":        1,
-			"api":         apiPath + "?source=" + url.QueryEscape(source.Id),
+			"api":         sourceApi,
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,

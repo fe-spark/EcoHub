@@ -47,6 +47,10 @@ export async function serverGet<T = any>(
     if (ua) {
       merged["X-Original-User-Agent"] = ua;
     }
+    const cookie = reqHeaders.get("cookie");
+    if (cookie) {
+      merged["Cookie"] = cookie;
+    }
   } catch {
     // 无请求上下文时（如静态构建或后台生成）忽略
   }

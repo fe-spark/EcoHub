@@ -1,13 +1,14 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Card, Typography } from "antd";
+import { Button, Card, Typography } from "antd";
 import Link from "next/link";
 import {
   AppstoreOutlined,
   DatabaseOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
+  LinkOutlined,
   PictureOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
@@ -15,6 +16,7 @@ import { ApiGet } from "@/lib/client-api";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
+import SubscribeModal from "@/app/manage/components/subscribe-modal";
 import styles from "./index.module.less";
 
 interface FilmInventoryStats {
@@ -23,7 +25,16 @@ interface FilmInventoryStats {
   failures: number;
 }
 
-const quickEntries = [
+interface QuickEntryItem {
+  key: string;
+  icon: React.ComponentType;
+  title: string;
+  description: string;
+  href?: string;
+  isAction?: boolean;
+}
+
+const quickEntries: QuickEntryItem[] = [
   {
     key: "film",
     icon: VideoCameraOutlined,
@@ -59,11 +70,19 @@ const quickEntries = [
     description: "上传、预览和整理站内会用到的封面图与素材图。",
     href: "/manage/file",
   },
+  {
+    key: "subscribe",
+    icon: LinkOutlined,
+    title: "订阅地址",
+    description: "TVBox 订阅与播放器 API 接口。",
+    isAction: true,
+  },
 ];
 
 export default function ManagePageView() {
   const { isAdmin } = useManagePermission();
   const [stats, setStats] = useState<FilmInventoryStats | null>(null);
+  const [subscribeModalOpen, setSubscribeModalOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -84,6 +103,14 @@ export default function ManagePageView() {
       <ManagePageHeader
         title="工作台"
         description="采集运行概况、影视数据规模与常用入口。"
+        actions={
+          <Button
+            icon={<LinkOutlined />}
+            onClick={() => setSubscribeModalOpen(true)}
+          >
+            订阅地址
+          </Button>
+        }
       />
 
       <CollectOverview />
@@ -142,10 +169,30 @@ export default function ManagePageView() {
         <div className={styles.entryGrid}>
           {quickEntries.map((entry) => {
             const Icon = entry.icon;
+            if (entry.isAction) {
+              return (
+                <div
+                  key={entry.key}
+                  className={styles.entryCard}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSubscribeModalOpen(true)}
+                  style={{ cursor: "pointer" }}
+                >
+                  <div className={styles.entryCardHead}>
+                    <div className={styles.entryIconWrap}>
+                      <Icon />
+                    </div>
+                    <div className={styles.entryTitle}>{entry.title}</div>
+                  </div>
+                  <div className={styles.stepDesc}>{entry.description}</div>
+                </div>
+              );
+            }
             return (
               <Link
                 key={entry.key}
-                href={entry.href}
+                href={entry.href || "#"}
                 className={styles.entryCard}
               >
                 <div className={styles.entryCardHead}>
@@ -160,6 +207,11 @@ export default function ManagePageView() {
           })}
         </div>
       </Card>
+
+      <SubscribeModal
+        open={subscribeModalOpen}
+        onClose={() => setSubscribeModalOpen(false)}
+      />
     </div>
   );
 }

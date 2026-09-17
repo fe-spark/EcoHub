@@ -30,6 +30,8 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr.Describe = bc.Describe
 	curr.State = bc.State
 	curr.Hint = bc.Hint
+	curr.PrivateAccess = bc.PrivateAccess
+	curr.ProvideKey = bc.ProvideKey
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}
