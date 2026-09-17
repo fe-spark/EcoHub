@@ -69,6 +69,9 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
 			sysConfig.POST(`/basic/update`, handler.ManageHd.UpdateSiteBasic)
 
+			sysConfig.GET(`/access`, handler.ManageHd.SiteAccessConfig)
+			sysConfig.POST(`/access/update`, handler.ManageHd.UpdateSiteAccess)
+
 			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
 			sysConfig.POST(`/tip/update`, handler.ManageHd.UpdateSiteTip)
 

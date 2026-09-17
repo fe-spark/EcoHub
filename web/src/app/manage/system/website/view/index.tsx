@@ -10,6 +10,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BasicConfigCard from "./basic-config-card";
+import AccessConfigCard from "./access-config-card";
 import TipConfigCard from "./tip-config-card";
 import NoticeConfigCard from "./notice-config-card";
 import styles from "./index.module.less";
@@ -68,6 +69,7 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
         return (
           <div className={styles.tabPaneScrollable}>
             <BasicConfigCard canWrite={canWrite} />
+            <AccessConfigCard canWrite={canWrite} />
           </div>
         );
     }
@@ -79,7 +81,7 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
         <ManagePageHeader
           className={styles.pageHeader}
           title="网站配置"
-          description="维护站点基本信息"
+          description="维护站点基本信息及运行访问策略"
         />
       )}
 

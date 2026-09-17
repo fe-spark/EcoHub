@@ -81,12 +81,8 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 	bc := model.BasicConfig{}
 	if err := c.ShouldBindJSON(&bc); err == nil {
-		if len(bc.SiteName) <= 0 {
+		if len(strings.TrimSpace(bc.SiteName)) <= 0 {
 			dto.Failed("网站名称不能为空", c)
-			return
-		}
-		if bc.PrivateAccess && len(strings.TrimSpace(bc.ProvideKey)) <= 0 {
-			dto.Failed("开启私有化访问时，必须配置 TVBox / 影视仓订阅密钥", c)
 			return
 		}
 	} else {
@@ -96,6 +92,36 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 
 	if err := service.ManageSvc.UpdateSiteBasic(bc); err != nil {
 		dto.Failed(fmt.Sprint("网站配置更新失败:  ", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("更新成功", c)
+}
+
+// SiteAccessConfig 网站访问控制配置
+func (h *ManageHandler) SiteAccessConfig(c *gin.Context) {
+	cfg := service.ManageSvc.GetSiteAccessConfig()
+	// 若非超级管理员（如只读访客账号），清空 ProvideKey 防止敏感密钥泄露
+	v, ok := c.Get(config.AuthUserClaims)
+	uc, isUser := v.(*utils.UserClaims)
+	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+		cfg.ProvideKey = ""
+	}
+	dto.Success(cfg, "访问控制配置获取成功", c)
+}
+
+// UpdateSiteAccess 更新网站访问控制配置
+func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
+	var ac model.AccessConfig
+	if err := c.ShouldBindJSON(&ac); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	if ac.PrivateAccess && len(strings.TrimSpace(ac.ProvideKey)) <= 0 {
+		dto.Failed("开启私有化访问时，必须配置订阅密钥", c)
+		return
+	}
+	if err := service.ManageSvc.UpdateSiteAccessConfig(ac); err != nil {
+		dto.Failed(fmt.Sprint("访问控制配置更新失败: ", err), c)
 		return
 	}
 	dto.SuccessOnlyMsg("更新成功", c)

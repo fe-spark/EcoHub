@@ -145,3 +145,57 @@ func TestVerifyManagePassword_SafeNoSideEffects(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdateSiteAccess_Validation(t *testing.T) {
+	h := &ManageHandler{}
+
+	t.Run("PrivateAccess true requires ProvideKey", func(t *testing.T) {
+		c, w := testContext(http.MethodPost, "/api/manage/config/access/update")
+		c.Request.Header.Set("Content-Type", "application/json")
+		c.Request.Body = http.NoBody
+		h.UpdateSiteAccess(c)
+		resp := decodeResponse(t, w)
+		if resp.Code != dto.FAILED {
+			t.Fatalf("code=%d want %d", resp.Code, dto.FAILED)
+		}
+	})
+}
+
+func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
+	h := &ManageHandler{}
+	cases := []struct {
+		name   string
+		claims any
+	}{
+		{name: "no claims", claims: nil},
+		{
+			name:   "visitor",
+			claims: &utils.UserClaims{UserID: 10002, UserName: "guest", Role: model.UserRoleVisitor},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c, w := testContext(http.MethodGet, "/api/manage/config/access")
+			if tc.claims != nil {
+				c.Set(config.AuthUserClaims, tc.claims)
+			}
+			h.SiteAccessConfig(c)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d want 200", w.Code)
+			}
+			resp := decodeResponse(t, w)
+			if resp.Code != dto.SUCCESS {
+				t.Fatalf("code=%d want %d", resp.Code, dto.SUCCESS)
+			}
+			raw, _ := json.Marshal(resp.Data)
+			var cfg model.AccessConfig
+			if err := json.Unmarshal(raw, &cfg); err != nil {
+				t.Fatalf("unmarshal error: %v", err)
+			}
+			if cfg.ProvideKey != "" {
+				t.Fatalf("expected empty provideKey for non-admin, got %q", cfg.ProvideKey)
+			}
+		})
+	}
+}
+
