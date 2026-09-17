@@ -18,6 +18,7 @@ func RefreshAccessDataCaches() {
 			config.TVBoxConfigCacheKey,
 			config.BannersKey,
 			config.IndexDailyUpdatesCacheKey,
+			config.DailyUpdatesV2CatCacheKey,
 		)
 	}
 	cache.BumpSearchTagsVersion()
@@ -29,6 +30,7 @@ func RefreshAccessDataCaches() {
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
 		fmt.Sprintf("%s:*", config.FilmSearchTagsKey),
 		fmt.Sprintf("%s:*", config.FilmFilterOptionKey),
+		fmt.Sprintf("%s:*", config.DailyUpdatesV2CachePrefix),
 	)
 }
 

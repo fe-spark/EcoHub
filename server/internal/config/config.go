@@ -167,6 +167,10 @@ const (
 	IndexPageCacheKey = RedisKeyPrefix + ":Index:Page"
 	// IndexDailyUpdatesCacheKey 首页「每日更新」候选池短缓存；接口每次从池中随机抽取
 	IndexDailyUpdatesCacheKey = RedisKeyPrefix + ":Index:DailyUpdates:v4"
+	// DailyUpdatesV2CachePrefix 每日更新 V2 分页短缓存前缀
+	DailyUpdatesV2CachePrefix = RedisKeyPrefix + ":DailyUpdates:V2"
+	// DailyUpdatesV2CatCacheKey 每日更新 V2 分类统计短缓存
+	DailyUpdatesV2CatCacheKey = RedisKeyPrefix + ":DailyUpdates:Categories"
 
 	// --- 6. 运维治理与通知 (Maintenance & Notice) ---
 	// OrphanCleanCursorKey 附属站孤儿播放列表治理断点游标重启备忘 key

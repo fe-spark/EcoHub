@@ -60,6 +60,8 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "动作"})
 	gdb.Create(&model.FilmListSnapshot{SnapshotVersion: "v_old", Mid: 200, Pid: 1})
 	gdb.Create(&fileDummy{Id: 1})
+	gdb.Create(&model.Banner{Id: "b1", Mid: 200, Name: "测试轮播"})
+	gdb.Create(&model.FailureRecord{OriginId: "src1", Uri: "http://test", Cause: "err"})
 
 	// 确认数据已存在
 	var posterCount int64
@@ -79,7 +81,7 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 		t.Fatalf("expected 0 posters after FilmZero, got %d", posterCount)
 	}
 
-	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, snapCount int64
+	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, snapCount, bannerCount, failureCount int64
 	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&playlistCount)
 	gdb.Model(&model.Category{}).Count(&catCount)
 	gdb.Model(&fileDummy{}).Count(&fileCount)
@@ -87,10 +89,12 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 	gdb.Unscoped().Model(&model.CategoryMapping{}).Count(&catMapCount)
 	gdb.Unscoped().Model(&model.SourceCategory{}).Count(&srcCatCount)
 	gdb.Model(&model.FilmListSnapshot{}).Count(&snapCount)
+	gdb.Model(&model.Banner{}).Count(&bannerCount)
+	gdb.Model(&model.FailureRecord{}).Count(&failureCount)
 
-	if playlistCount != 0 || catCount != 0 || fileCount != 0 || mappingCount != 0 || catMapCount != 0 || srcCatCount != 0 || snapCount != 0 {
-		t.Fatalf("expected all tables physically cleared, got playlists=%d cats=%d files=%d mapping=%d catMap=%d srcCat=%d snap=%d",
-			playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, snapCount)
+	if playlistCount != 0 || catCount != 0 || fileCount != 0 || mappingCount != 0 || catMapCount != 0 || srcCatCount != 0 || snapCount != 0 || bannerCount != 0 || failureCount != 0 {
+		t.Fatalf("expected all tables physically cleared, got playlists=%d cats=%d files=%d mapping=%d catMap=%d srcCat=%d snap=%d banners=%d failures=%d",
+			playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, snapCount, bannerCount, failureCount)
 	}
 }
 

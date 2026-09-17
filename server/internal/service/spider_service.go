@@ -65,7 +65,7 @@ func (s *SpiderService) AutoCollect(time int) {
 
 // ClearFilms 重置站点业务数据：清空影视/采集派生数据。
 // 清空完成后自动同步主站分类，避免后续增量采集因分类映射缺失导致影片“已入库但列表不可见”。
-// 注意：不重置任何账号与密码，也不恢复任何配置类数据（网站配置、轮播、映射规则、采集源、定时任务均保留）。
+// 注意：不重置任何账号与密码，也不恢复任何配置类数据（网站配置、映射规则、采集源、定时任务均保留；轮播图因强绑定影片 mid 一并清空）。
 // 全程按关键节点上报真实进度，供前端轮询展示。
 func (s *SpiderService) ClearFilms() (retErr error) {
 	filmrepo.StartResetProgress()
