@@ -158,11 +158,6 @@ export default function ManagePageView() {
             );
           })}
         </div>
-        {isAdmin && (
-          <Typography.Text className={styles.statsNote}>
-            反映当前库内影视相关体量。清空影视与采集派生数据请前往「系统设置 · 数据安全」。
-          </Typography.Text>
-        )}
       </Card>
 
       <Card className={styles.panelCard} title="快捷入口">
