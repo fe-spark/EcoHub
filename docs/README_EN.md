@@ -77,8 +77,7 @@ docker compose up -d
 | `http://<host>:3000` | Public site |
 | `http://<host>:3000/manage` | Administration panel |
 | `http://<host>:3000/api/provide/app` | EcoHub native client software source URL |
-| `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL (Recommended) |
-| `http://<host>:3000/api/provide/config` | TVBox subscription URL (Deprecated soon, use `/api/provide/tvbox`) |
+| `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
 
 Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only). Default passwords must be changed before any public deployment.
