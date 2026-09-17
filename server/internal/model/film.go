@@ -146,7 +146,7 @@ func (MovieMatchKey) TableName() string {
 
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
-	Mid        int64  `json:"mid" gorm:"uniqueIndex:idx_mid"`            // 影片ID (全局唯一)
+	Mid        int64  `json:"mid" gorm:"uniqueIndex:idx_mid;index:idx_film_index_update_mid,priority:2;index:idx_film_index_pid_update_mid,priority:3"`            // 影片ID (全局唯一)
 	ContentKey string `json:"contentKey" gorm:"uniqueIndex:idx_content"` // 主站内容指纹：优先 vod_{源站vod_id}，无 ID 时 name_{hash}
 	SourceId   string `json:"sourceId" gorm:"index"`                     // 来源站点ID
 	DbId       int64  `json:"dbId" gorm:"index"`                         // 豆瓣ID (用于精准去重)
@@ -155,7 +155,7 @@ type FilmIndexIdentity struct {
 // FilmIndexCategory 分类层：RootCategoryKey/CategoryKey 是来源分类身份；Pid/Cid/CName 仅作写入快照和兼容展示。
 type FilmIndexCategory struct {
 	Cid              int64  `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
-	Pid              int64  `json:"pid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
+	Pid              int64  `json:"pid" gorm:"index;index:idx_film_index_pid_update_mid,priority:1;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
 	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index;index:idx_root_key_update;index:idx_root_key_hits;index:idx_filter_root_score;index:idx_filter_root_update;index:idx_filter_root_hits"`
 	CategoryKey      string `json:"categoryKey" gorm:"size:128;index;index:idx_category_key_update;index:idx_category_key_hits;index:idx_category_key_latest"`
 	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"` // 采集时固化的来源主类名
@@ -173,7 +173,7 @@ type FilmIndexContent struct {
 	Year               int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 年份
 	Initial            string  `json:"initial"`                                                                                    // 首字母
 	Score              float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                  // 评分
-	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
+	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_film_index_update_mid,priority:1;index:idx_film_index_pid_update_mid,priority:2;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
 	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
 	State              string  `json:"state"`                                                                                      // 状态 正片|预告
 	Remarks            string  `json:"remarks"`                                                                                    // 完结 | 更新至x集

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"golang.org/x/sync/singleflight"
 	"log"
 	"math/rand"
@@ -111,38 +112,110 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	nav := notify.NavTopCategories()
 	navIDs := notify.NavTopCategoryIDs(nav)
 
-	mids, total, err := notify.ListDailyUpdateMids(notify.DailyUpdateListQuery{
-		From:     from,
-		To:       to,
-		Pid:      req.Pid,
-		Current:  req.Page.Current,
-		PageSize: req.Page.PageSize,
-		Random:   req.Random,
-		Exclude:  req.Exclude,
-		NavIDs:   navIDs,
+	// 非随机且前 5 页支持短缓存（1 分钟）与 Singleflight，避免全量采集后高频刷新冲击数据库
+	usePageCache := !req.Random && req.Page.Current <= 5
+	pageCacheKey := fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+
+	if usePageCache && db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, pageCacheKey).Result(); err == nil && data != "" {
+			var cachedRes DailyUpdateResult
+			if json.Unmarshal([]byte(data), &cachedRes) == nil && len(cachedRes.List) > 0 {
+				cachedRes.Categories = i.getDailyUpdateCategories(nav, navIDs, from, to, cachedRes.Page.Total)
+				applyLiveRemarksToMovies(cachedRes.List)
+				return &cachedRes, nil
+			}
+		}
+	}
+
+	execQuery := func() (*DailyUpdateResult, error) {
+		mids, total, err := notify.ListDailyUpdateMids(notify.DailyUpdateListQuery{
+			From:     from,
+			To:       to,
+			Pid:      req.Pid,
+			Current:  req.Page.Current,
+			PageSize: req.Page.PageSize,
+			Random:   req.Random,
+			Exclude:  req.Exclude,
+			NavIDs:   navIDs,
+		})
+		if err != nil {
+			log.Printf("[IndexService] DailyUpdatesV2 list mids: %v", err)
+			return nil, err
+		}
+
+		page := fillDailyUpdatePage(req.Page, total)
+		list := hydrateDailyUpdateMids(mids)
+		if list == nil {
+			list = []model.MovieBasicInfo{}
+		}
+
+		cats := i.getDailyUpdateCategories(nav, navIDs, from, to, total)
+		res := &DailyUpdateResult{List: list, Page: page, Categories: cats}
+
+		if usePageCache && db.Rdb != nil && len(list) > 0 {
+			if data, err := json.Marshal(res); err == nil {
+				_ = db.Rdb.Set(db.Cxt, pageCacheKey, string(data), 1*time.Minute).Err()
+			}
+		}
+		return res, nil
+	}
+
+	if usePageCache {
+		val, err, _ := dailyUpdateSfGroup.Do(pageCacheKey, func() (any, error) {
+			return execQuery()
+		})
+		if err != nil {
+			return nil, err
+		}
+		if res, ok := val.(*DailyUpdateResult); ok {
+			return res, nil
+		}
+	}
+
+	return execQuery()
+}
+
+func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []int64, from, to time.Time, fallbackTotal int) []DailyUpdateCategory {
+	cacheKey := config.DailyUpdatesV2CatCacheKey
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cats []DailyUpdateCategory
+			if json.Unmarshal([]byte(data), &cats) == nil && len(cats) > 0 {
+				return cats
+			}
+		}
+	}
+
+	val, err, _ := dailyUpdateSfGroup.Do("DailyUpdateCategories", func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var cats []DailyUpdateCategory
+				if json.Unmarshal([]byte(data), &cats) == nil && len(cats) > 0 {
+					return cats, nil
+				}
+			}
+		}
+
+		countByPid, otherCount, catTotal, catErr := notify.DailyUpdatePidCounts(from, to, navIDs)
+		if catErr != nil {
+			log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
+			return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
+		}
+		cats := AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
+		if db.Rdb != nil && len(cats) > 0 {
+			if data, err := json.Marshal(cats); err == nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), 2*time.Minute).Err()
+			}
+		}
+		return cats, nil
 	})
-	if err != nil {
-		log.Printf("[IndexService] DailyUpdatesV2 list mids: %v", err)
-		return nil, err
-	}
 
-	page := fillDailyUpdatePage(req.Page, total)
-	list := hydrateDailyUpdateMids(mids)
-	if list == nil {
-		list = []model.MovieBasicInfo{}
+	if err == nil && val != nil {
+		if cats, ok := val.([]DailyUpdateCategory); ok {
+			return cats
+		}
 	}
-
-	countByPid, otherCount, catTotal, catErr := notify.DailyUpdatePidCounts(from, to, navIDs)
-	cats := []DailyUpdateCategory{}
-	if catErr != nil {
-		log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
-		cats = []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: total}}
-	} else {
-		// 「全部」角标始终用全窗 catTotal；当前 tab 数量只放在 page.total。
-		cats = AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
-	}
-
-	return &DailyUpdateResult{List: list, Page: page, Categories: cats}, nil
+	return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}
 }
 
 func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {

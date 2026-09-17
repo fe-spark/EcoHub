@@ -1,11 +1,15 @@
 package service
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
+	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 func TestNormalizeDailyUpdateReqDefaults(t *testing.T) {
@@ -93,5 +97,63 @@ func TestAssembleDailyUpdateCategoriesEmpty(t *testing.T) {
 	got := AssembleDailyUpdateCategories(nil, nil, 0, 0)
 	if len(got) != 1 || got[0].Pid != 0 || got[0].Count != 0 {
 		t.Fatalf("want only 全部 0, got %+v", got)
+	}
+}
+
+func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
+	gdb, mr := setupTestDBAndRedis(t)
+	_ = mr
+
+	now := time.Now()
+	version := "v_test_daily"
+	// 插入测试影片索引与快照
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001, ContentKey: "vod_1"},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
+		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
+	})
+	gdb.Create(&model.FilmListSnapshot{
+		SnapshotVersion: version,
+		Mid:             1001,
+		Name:            "测试电影1",
+		Pid:             1,
+		Cid:             11,
+		UpdateStamp:     now.Unix(),
+	})
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
+
+	req := DailyUpdateListReq{
+		Pid: 0,
+		Page: &dto.Page{Current: 1, PageSize: 21},
+		Random: false,
+	}
+
+	// 1. 首次调用
+	res1, err := IndexSvc.DailyUpdatesV2(req)
+	if err != nil {
+		t.Fatalf("first DailyUpdatesV2 call failed: %v", err)
+	}
+	if len(res1.Categories) == 0 {
+		t.Fatalf("expected categories not empty")
+	}
+
+	// 2. 验证缓存已写入 Redis
+	catKey := config.DailyUpdatesV2CatCacheKey
+	if !mr.Exists(catKey) {
+		t.Fatalf("expected category cache key %s to exist in redis", catKey)
+	}
+	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesV2CachePrefix)
+	if !mr.Exists(pageKey) {
+		t.Fatalf("expected page cache key %s to exist in redis", pageKey)
+	}
+
+	// 3. 再次调用验证直接走缓存
+	res2, err := IndexSvc.DailyUpdatesV2(req)
+	if err != nil {
+		t.Fatalf("second DailyUpdatesV2 call failed: %v", err)
+	}
+	if res2.Page.Total != res1.Page.Total {
+		t.Fatalf("want total %d, got %d", res1.Page.Total, res2.Page.Total)
 	}
 }

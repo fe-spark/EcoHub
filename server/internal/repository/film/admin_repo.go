@@ -155,12 +155,14 @@ func FilmZero() error {
 		}
 	}
 
-	// 关键节点：清空采集派生数据（快照/筛选/搜索标签/统计）
+	// 关键节点：清空采集派生与依赖运营数据（快照/筛选/搜索标签/统计/失败记录/轮播图）
 	ReportResetProgress(45, "正在清空派生数据")
 	for _, t := range []string{
 		model.TableFilmListSnapshot,
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
+		model.TableFailureRecord,
+		model.TableBanners,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
@@ -202,8 +204,9 @@ func FilmZero() error {
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.BannersKey)
+		db.Rdb.Del(db.Cxt, config.BannersKey, config.DailyUpdatesV2CatCacheKey)
 	}
+	cache.ClearPatterns(fmt.Sprintf("%s:*", config.DailyUpdatesV2CachePrefix))
 	cache.ClearTVBoxListCache()
 	cache.ClearTVBoxConfigCache()
 }
