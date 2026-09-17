@@ -72,7 +72,9 @@ const MAX_DESCRIBE_LEN = 512;
 const MAX_HINT_LEN = 256;
 const MAX_PROVIDE_KEY_LEN = 64;
 
-function normalizeBasicInfo(raw?: Partial<BasicInfoPayload> | null): BasicInfoPayload {
+function normalizeBasicInfo(
+  raw?: Partial<BasicInfoPayload> | null,
+): BasicInfoPayload {
   return {
     siteName: String(raw?.siteName ?? "").trim() || DEFAULT_BASIC_INFO.siteName,
     siteUrl: String(raw?.siteUrl ?? "").trim(),
@@ -224,9 +226,9 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
           {/* 私有化访问控制 */}
           <Flex align="center" justify="space-between">
             <Flex vertical gap={4}>
-              <Typography.Text strong>私有化访问（仅登录使用）</Typography.Text>
+              <Typography.Text strong>私有化访问</Typography.Text>
               <Typography.Text type="secondary">
-                开启后，前台影视与搜索功能仅对已登录账号开放，未登录访客将强制重定向至登录页
+                开启后，未登录访客将强制重定向至登录页
               </Typography.Text>
             </Flex>
             <Switch
@@ -251,7 +253,8 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
             <div className={styles.field}>
               <Flex justify="space-between" align="baseline">
                 <Typography.Text strong>
-                  TVBox / 影视仓订阅密钥 <span style={{ color: "var(--ant-color-error)" }}>*</span>
+                  TVBox / 影视仓订阅密钥{" "}
+                  <span style={{ color: "var(--ant-color-error)" }}>*</span>
                 </Typography.Text>
                 <Typography.Text type="secondary">
                   {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
@@ -262,24 +265,35 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
                   disabled={!isEditing || !canWrite}
                   maxLength={MAX_PROVIDE_KEY_LEN}
                   placeholder="必填，请输入订阅密钥，例如 mysecret888"
-                  status={isEditing && !currentValues.provideKey.trim() ? "error" : undefined}
+                  status={
+                    isEditing && !currentValues.provideKey.trim()
+                      ? "error"
+                      : undefined
+                  }
                   value={currentValues.provideKey}
                   onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, provideKey: e.target.value }))
+                    setDraft((prev) => ({
+                      ...prev,
+                      provideKey: e.target.value,
+                    }))
                   }
                 />
                 <Button
                   icon={<ReloadOutlined />}
                   disabled={!isEditing || !canWrite}
                   onClick={() =>
-                    setDraft((prev) => ({ ...prev, provideKey: generateRandomKey(16) }))
+                    setDraft((prev) => ({
+                      ...prev,
+                      provideKey: generateRandomKey(16),
+                    }))
                   }
                 >
                   随机生成
                 </Button>
               </Space.Compact>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                开启私有化后必须设置订阅密钥，客户端或 TVBox 订阅地址需追加参数：/api/provide/app?key=您的密钥
+                开启私有化后必须设置订阅密钥，客户端或 TVBox
+                订阅地址需追加参数：/api/provide/app?key=您的密钥
               </Typography.Text>
             </div>
           )}
