@@ -286,6 +286,47 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		}
 	})
 
+	// A1. 验证 GET /api/provide/tvbox (别名)
+	t.Run("ProvideTVBoxAlias", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/tvbox", nil)
+		c.Request.Host = "127.0.0.1:8080"
+
+		ProvideHd.HandleProvideConfig(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	// A2. 验证 GET /api/provide/app (原生客户端软件源配置)
+	t.Run("ProvideAppConfig", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/app", nil)
+		c.Request.Host = "127.0.0.1:8080"
+
+		ProvideHd.HandleProvideApp(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+
+		var res map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if res["code"] != float64(1) {
+			t.Fatalf("expected code 1, got %v", res["code"])
+		}
+		data, ok := res["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data object, got %v", res["data"])
+		}
+		if data["api_base"] != "http://127.0.0.1:8080/api" {
+			t.Fatalf("expected api_base http://127.0.0.1:8080/api, got %v", data["api_base"])
+		}
+	})
+
 	// B. 验证 GET /api/provide/vod?ac=list
 	t.Run("ProvideVodList", func(t *testing.T) {
 		w := httptest.NewRecorder()

@@ -310,3 +310,31 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 
 	c.JSON(200, configJson)
 }
+
+// HandleProvideApp 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
+func (h *ProvideHandler) HandleProvideApp(c *gin.Context) {
+	baseURL, err := resolveProvideBaseURL(c)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
+	}
+	basic := repository.GetSiteBasic()
+	siteName := strings.TrimSpace(basic.SiteName)
+	if siteName == "" {
+		siteName = "EcoHub"
+	}
+
+	c.JSON(200, gin.H{
+		"code": 1,
+		"msg":  "EcoHub 客户端软件源在线",
+		"data": gin.H{
+			"site_name":      siteName,
+			"site_url":       baseURL,
+			"api_base":       baseURL + "/api",
+			"version":        config.Version,
+			"private_access": basic.PrivateAccess,
+			"status":         "online",
+		},
+	})
+}
+

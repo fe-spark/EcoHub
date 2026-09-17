@@ -199,6 +199,8 @@ func SetupRouter() *gin.Engine {
 	{
 		provideRoute.GET(`/vod`, handler.ProvideHd.HandleProvide)
 		provideRoute.GET(`/config`, handler.ProvideHd.HandleProvideConfig)
+		provideRoute.GET(`/tvbox`, handler.ProvideHd.HandleProvideConfig)
+		provideRoute.GET(`/app`, handler.ProvideHd.HandleProvideApp)
 	}
 
 	return r
