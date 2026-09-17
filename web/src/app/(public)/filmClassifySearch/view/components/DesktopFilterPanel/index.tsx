@@ -23,7 +23,6 @@ interface DesktopFilterPanelProps {
   tagsMap: Record<string, TagItem[]>;
   activeParams: Record<string, string>;
   activeChips: ActiveChipItem[];
-  total?: number;
   isPending: boolean;
   onTagClick: (key: string, value: string) => void;
   onRemoveChip: (key: string) => void;
@@ -39,7 +38,6 @@ export default function DesktopFilterPanel({
   tagsMap,
   activeParams,
   activeChips,
-  total,
   isPending,
   onTagClick,
   onRemoveChip,
@@ -80,9 +78,6 @@ export default function DesktopFilterPanel({
         <div className={styles.activeBar}>
           <div className={styles.activeLabel}>
             <span>已选:</span>
-            {typeof total === "number" && (
-              <span className={styles.totalBadge}>({total}部)</span>
-            )}
           </div>
 
           <div className={styles.chipsWrap}>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useEffect, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Result } from "antd";
 import { ApiGet } from "@/lib/client-api";
 import AppLoading from "@/components/public/Loading";
@@ -17,6 +17,8 @@ export interface SiteConfig {
   describe: string;
   state: boolean;
   hint: string;
+  privateAccess?: boolean;
+  provideKey?: string;
   tip?: TipConfig;
   notice?: NoticeConfig;
 }
@@ -38,13 +40,21 @@ export const useSiteConfig = () => useContext(SiteConfigContext);
 export default function SiteGuard({
   children,
   initialConfig,
+  initialHasAuth = false,
 }: {
   children: React.ReactNode;
   initialConfig: SiteConfig | null;
+  initialHasAuth?: boolean;
 }) {
   const pathname = usePathname();
+  const router = useRouter();
   const [config, setConfig] = useState<SiteConfig | null>(initialConfig);
   const [loading, setLoading] = useState(!initialConfig);
+  const [hasAuth, setHasAuth] = useState(initialHasAuth);
+
+  useEffect(() => {
+    setHasAuth(initialHasAuth);
+  }, [initialHasAuth]);
 
   const fetchConfig = async () => {
     try {
@@ -63,7 +73,22 @@ export default function SiteGuard({
     }
   }, [initialConfig]);
 
-  if (loading) {
+  // 页面类型判断
+  const isManagePage = pathname.startsWith("/manage");
+  const isLoginPage = pathname === "/login";
+
+  // 私有化模式拦截检测
+  const isPrivateRequired = Boolean(config?.privateAccess);
+
+  useEffect(() => {
+    if (!loading && isPrivateRequired && !hasAuth && !isManagePage && !isLoginPage) {
+      const query = typeof window !== "undefined" ? window.location.search : "";
+      const target = encodeURIComponent(pathname + query);
+      router.replace(`/login?redirect=${target}`);
+    }
+  }, [loading, isPrivateRequired, hasAuth, isManagePage, isLoginPage, pathname, router]);
+
+  if (loading || (isPrivateRequired && !hasAuth && !isManagePage && !isLoginPage)) {
     return (
       <div
         style={{
@@ -71,15 +96,12 @@ export default function SiteGuard({
           position: "relative",
         }}
       >
-        <AppLoading text="正在加载站点配置..." />
+        <AppLoading text={loading ? "正在加载站点配置..." : "正在验证身份..."} />
       </div>
     );
   }
 
   // 维护模式拦截 (非管理后台页面)
-  const isManagePage = pathname.startsWith("/manage");
-  const isLoginPage = pathname === "/login";
-
   if (config && !config.state && !isManagePage && !isLoginPage) {
     return (
       <div style={{ height: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>

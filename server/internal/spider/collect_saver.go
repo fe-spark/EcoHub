@@ -8,13 +8,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/go-sql-driver/mysql"
-
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmplaylist "server/internal/repository/film/playlist"
+	filmshared "server/internal/repository/film/shared"
+	"server/internal/repository/film/writer"
+	"server/internal/spider/scheduler"
+
+	"github.com/go-sql-driver/mysql"
 )
+
+// collectDBWriteRetries 单页落库失败重试次数。
+const collectDBWriteRetries = 3
 
 var sourceWriteLocks sync.Map
 
@@ -53,58 +59,36 @@ func isRetryableDBWriteErr(err error) bool {
 	return strings.Contains(message, "deadlock found") || strings.Contains(message, "lock wait timeout")
 }
 
-func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
+func saveSlavePlaylists(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error) {
 	lock := getSourceWriteLock(s.Id)
 	lock.Lock()
 	defer lock.Unlock()
-	var result collectWriteMids
+	var result scheduler.Mids
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
-		written, err := filmrepo.SaveSitePlayList(s.Id, list)
+		written, err := filmplaylist.SaveSitePlayList(s.Id, list)
 		if err != nil {
 			return err
 		}
-		result = collectWriteMids{Notify: written.NotifyMIDs, Affected: written.AffectedMIDs}
+		result = scheduler.Mids{Notify: written.NotifyMIDs, Affected: written.AffectedMIDs}
 		return nil
 	})
 	if err != nil {
-		return collectWriteMids{}, fmt.Errorf("save slave playlists failed: %w", err)
+		return scheduler.Mids{}, fmt.Errorf("save slave playlists failed: %w", err)
 	}
 	return result, nil
 }
 
-func saveCollectedFilm(s *model.FilmSource, list []model.MovieDetail, saveMaster func(string, []model.MovieDetail) error) error {
-	switch s.Grade {
-	case model.MasterCollect:
-		lock := getSourceWriteLock(s.Id)
-		lock.Lock()
-		defer lock.Unlock()
-		if err := saveMaster(s.Id, list); err != nil {
-			return fmt.Errorf("save master details failed: %w", err)
-		}
-		return nil
-	case model.SlaveCollect:
-		_, err := saveSlavePlaylists(context.Background(), s, 0, list)
-		return err
-	}
-	return nil
-}
-
-type collectWriteMids struct {
-	Notify   []int64
-	Affected []int64
-}
-
-func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (collectWriteMids, error) {
+func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page int, list []model.MovieDetail) (scheduler.Mids, error) {
 	if s.Grade != model.MasterCollect {
 		return saveSlavePlaylists(ctx, s, page, list)
 	}
 
-	var result filmrepo.CollectWriteResult
+	var result filmshared.CollectWriteResult
 	lock := getSourceWriteLock(s.Id)
 	lock.Lock()
 	defer lock.Unlock()
 	err := runCollectDBWriteWithRetry(ctx, s.Name, page, func() error {
-		r, err := filmrepo.SaveDetailsForCollect(s.Id, list)
+		r, err := writer.SaveDetailsForCollect(s.Id, list)
 		if err != nil {
 			return err
 		}
@@ -112,9 +96,9 @@ func saveCollectedFilmForCollect(ctx context.Context, s *model.FilmSource, page 
 		return nil
 	})
 	if err != nil {
-		return collectWriteMids{}, fmt.Errorf("save master details failed: %w", err)
+		return scheduler.Mids{}, fmt.Errorf("save master details failed: %w", err)
 	}
-	return collectWriteMids{Notify: result.NotifyMIDs, Affected: result.AffectedMIDs}, nil
+	return scheduler.Mids{Notify: result.NotifyMIDs, Affected: result.AffectedMIDs}, nil
 }
 
 func saveFilmPageFailure(s *model.FilmSource, h, pg int, phase string, err error) {

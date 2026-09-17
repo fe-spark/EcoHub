@@ -28,7 +28,6 @@ interface MobileFilterDrawerProps {
   tagsMap: Record<string, TagItem[]>;
   activeParams: Record<string, string>;
   activeChips: ActiveChipItem[];
-  total?: number;
   isPending: boolean;
   onApplyFilters: (nextParams: Record<string, string>) => void;
   onQuickSelect?: (key: string, value: string) => void;
@@ -43,7 +42,6 @@ export default function MobileFilterDrawer({
   tagsMap,
   activeParams,
   activeChips,
-  total,
   isPending,
   onApplyFilters,
   onQuickSelect,
@@ -262,7 +260,7 @@ export default function MobileFilterDrawer({
               onClick={handleApplyDraft}
             >
               <CheckOutlined />
-              <span>确定 {typeof total === "number" ? `(${total}部)` : ""}</span>
+              <span>确定</span>
             </button>
           </div>
         </div>

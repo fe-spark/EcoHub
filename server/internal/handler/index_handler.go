@@ -19,7 +19,9 @@ type IndexHandler struct{}
 var IndexHd = new(IndexHandler)
 
 // Health 健康检查接口
-// Deprecated: 后续废弃，探活统一使用 /api/config/basic
+// Deprecated: 后续主版本计划移除。
+// 该接口仅返回静态健康状态，无法校验私有化密钥安全与站点核心依赖。
+// 探活与站点公开基础信息请统一使用 /api/config/basic；EcoHub 客户端软件源鉴权测通统一使用 /api/provide/app。
 func Health(c *gin.Context) {
 	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
 }
@@ -110,7 +112,9 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 近 24h 更新（保持 beta.3 原始接口契约：不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次）。
+// DailyUpdates 近 24h 更新。
+// Deprecated: 保持早期版本（beta.3）原始接口契约（不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次）。
+// 后续主版本计划移除，请迁移至 /api/dailyUpdates (DailyUpdatesV2)，支持 pid 大类分类、标准分页、排除已出现项与随机抽样。
 func (h *IndexHandler) DailyUpdates(c *gin.Context) {
 	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
 	if data == nil {

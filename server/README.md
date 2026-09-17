@@ -157,6 +157,12 @@ TG_PROXY=socks5://127.0.0.1:7891
 | --- | --- | --- | --- |
 | `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 数据分析总开关：开启全站访问量、播放热度与客户端统计（默认关闭以保持最高性能与零开销） |
 
+### 日志存储（可选）
+
+| 变量 | 必填 | 默认 | 说明 |
+| --- | --- | --- | --- |
+| `ECOHUB_LOG_DIR` | 否 | 模块根 `logs/` | 系统日志输出目录，支持相对或绝对路径。未设置时写入自当前工作目录上溯找到的模块根下 `logs/` 绝对路径（在任意子包内执行测试/命令都落到同一目录）；找不到 `go.mod` 时才回退进程工作目录下的相对 `logs/` |
+
 ### Docker 根目录变量对照（非 server 进程直接读取）
 
 发布版 / 源码版 compose 还使用下列变量，**注入或映射**到容器，与 `server` 进程内变量对应关系：
@@ -244,16 +250,18 @@ flowchart TD
 公共接口：
 
 - `/api/index`
+- `/api/dailyUpdates`
 - `/api/navCategory`
-- `/api/filmDetail`
 - `/api/filmPlayInfo`
+- `/api/filmRelate`
 - `/api/searchFilm`
+- `/api/hotKeywords`
 - `/api/filmClassify`
 - `/api/filmClassifySearch`
-- `/api/proxy/video`
-- `/api/config/basic`
-- `/api/provide/vod`
-- `/api/provide/config`
+- `/api/config/basic` (站点基础信息 / 探活)
+- `/api/provide/app` (EcoHub 客户端软件源)
+- `/api/provide/tvbox` (TVBox / 影视仓配置)
+- `/api/provide/vod` (MacCMS 兼容接口)
 
 登录接口：
 
@@ -309,10 +317,30 @@ server/
 ├── internal/handler/       # HTTP 处理层
 ├── internal/service/       # 业务逻辑
 ├── internal/repository/    # 数据访问层
+│   └── film/               # 影片领域仓储（根包为统一门面）
+│       ├── shared/         # 跨域共享原语（匹配键读写与派生 / 实体投影 / 分页 / 分类根解析）
+│       ├── cache/          # 影片缓存键与失效（检索标签 / TVBox / 提供列表）
+│       ├── query/          # 分类维度过滤与相关性排序
+│       ├── snapshot/       # 前台快照生命周期、活跃读模型与筛选快照
+│       ├── playlist/       # 附属站播放列表：比对去重、优先级排序、孤儿扫描、键迁移
+│       ├── poster/         # 海报来源同步与最优匹配
+│       └── writer/         # 采集入库写路径：分类树推导、主从指纹比对、标签聚合与缓存合并失效
 ├── internal/model/         # 数据模型与 DTO
-├── internal/spider/        # 采集与转换
+├── internal/spider/        # 采集编排与对外 API
+│   ├── converter/          # 三方接口数据转换
+│   ├── fetcher/            # 分页取数：页数探测、限流退避重试、页并发与连续失败停抓
+│   ├── progress/           # 采集进度状态机、超时清理与活跃任务注册表
+│   └── scheduler/          # 采集写库调度（限速 / 反压 / 跨站轮转）
 ├── internal/infra/db/      # MySQL / Redis 初始化
-└── internal/utils/         # 工具函数
+├── internal/utils/         # 工具函数
+└── test/                   # 独立测试工程（集成 / 压测）
+```
+
+`internal/` 只保留高内聚、轻量级的纯单元测试；跨模块全链路集成测试统一放在独立的 `test/` 测试工程（压测目录 `test/benchmark/` 待有实际基准用例时再建，当前尚未创建）：
+
+```text
+test/
+└── integration/            # 跨模块 / 全链路集成测试（自包含 DB、Redis 初始化与销毁）
 ```
 
 ## 常用命令
@@ -320,7 +348,10 @@ server/
 ```bash
 cd server
 go run ./cmd/server
-go test ./...
+
+go test ./internal/...      # 业务包纯单测
+go test ./test/...          # 集成测试与压测
+go test ./...               # 全量
 ```
 
 如果本地 Go 缓存目录受限：
@@ -337,4 +368,4 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 - [部署指南](../docs/README-Deploy.md)
 - [FAQ 与排障](../docs/README-FAQ.md)
 - [版本变更](../docs/RELEASE.md)
-- [Telegram 通知行为](./notify.md)
+- [Telegram 通知行为](./docs/notify.md)

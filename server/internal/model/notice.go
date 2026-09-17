@@ -14,13 +14,13 @@ const (
 
 // NoticeConfig 站点公告配置（支持 Web 端与 App 移动端独立控制）
 type NoticeConfig struct {
-	Enabled    bool   `json:"enabled"`              // 公告总开关
-	Title      string `json:"title"`                // 公告标题
-	Content    string `json:"content"`              // 公告正文
-	ShowInWeb  bool   `json:"showInWeb"`            // 是否在 Web 端展示
-	ShowInApp  bool   `json:"showInApp"`            // 是否在 App 移动端展示
-	AppVersion string `json:"appVersion"`           // App 目标版本（留空所有版本都弹；多个版本逗号分隔，如 "1.0.2, 1.0.3"）
-	Version    string `json:"version,omitempty"`   // 兼容旧字段（等同于 AppVersion）
+	Enabled    bool   `json:"enabled"`           // 公告总开关
+	Title      string `json:"title"`             // 公告标题
+	Content    string `json:"content"`           // 公告正文
+	ShowInWeb  bool   `json:"showInWeb"`         // 是否在 Web 端展示
+	ShowInApp  bool   `json:"showInApp"`         // 是否在 App 移动端展示
+	AppVersion string `json:"appVersion"`        // App 目标版本（留空所有版本都弹；多个版本逗号分隔，如 "1.0.2, 1.0.3"）
+	Version    string `json:"version,omitempty"` // 兼容旧字段（等同于 AppVersion）
 }
 
 type noticeConfigDTO struct {

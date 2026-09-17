@@ -13,6 +13,7 @@ import (
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/utils"
 
@@ -185,7 +186,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 	clearProvideNetworkConfigCache()
 	if old.DomainReplaceRules != source.DomainReplaceRules {
-		filmrepo.ClearDynamicPlayCaches()
+		filmsnapshot.ClearDynamicPlayCaches()
 	}
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
 		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
@@ -262,7 +263,6 @@ func sourceGradeLabel(g model.SourceGrade) string {
 	}
 	return "附属站"
 }
-
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
 	var collector []notify.SourceConfigChangeItem

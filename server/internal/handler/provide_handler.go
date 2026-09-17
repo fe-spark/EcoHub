@@ -237,14 +237,23 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	}
 }
 
-// HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)
+// HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)。
+// 对应路由：
+//   - GET /api/provide/tvbox (推荐：语义明确的标准端点)
+//   - GET /api/provide/config (Deprecated: 早期路径别名，后续主版本计划移除)
+//
+// 注意：EcoHub 官方原生客户端（OHOS / Android）请走专属软件源端点 HandleProvideApp (/api/provide/app)。
 func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 	baseURL, err := resolveProvideBaseURL(c)
 	if err != nil {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
+	key := strings.TrimSpace(c.Query("key"))
 	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	if key != "" {
+		cacheKey += ":" + url.QueryEscape(key)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached gin.H
@@ -256,13 +265,17 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 	}
 
 	apiPath := baseURL + "/api/provide/vod"
+	baseVodApi := apiPath
+	if key != "" {
+		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
+	}
 
 	sites := []gin.H{
 		{
 			"key":         "EcoHub",
 			"name":        "🌟 EcoHub 私人影视库全量",
 			"type":        1,
-			"api":         apiPath,
+			"api":         baseVodApi,
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,
@@ -273,11 +286,15 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		if !source.State {
 			continue
 		}
+		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
+		if key != "" {
+			sourceApi += "&key=" + url.QueryEscape(key)
+		}
 		sites = append(sites, gin.H{
 			"key":         "source_" + source.Id,
 			"name":        "📡 " + source.Name,
 			"type":        1,
-			"api":         apiPath + "?source=" + url.QueryEscape(source.Id),
+			"api":         sourceApi,
 			"searchable":  1,
 			"quickSearch": 1,
 			"filterable":  1,
@@ -298,3 +315,31 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 
 	c.JSON(200, configJson)
 }
+
+// HandleProvideApp 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
+func (h *ProvideHandler) HandleProvideApp(c *gin.Context) {
+	baseURL, err := resolveProvideBaseURL(c)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
+	}
+	basic := repository.GetSiteBasic()
+	siteName := strings.TrimSpace(basic.SiteName)
+	if siteName == "" {
+		siteName = "EcoHub"
+	}
+
+	c.JSON(200, gin.H{
+		"code": 1,
+		"msg":  "EcoHub 客户端软件源在线",
+		"data": gin.H{
+			"site_name":      siteName,
+			"site_url":       baseURL,
+			"api_base":       baseURL + "/api",
+			"version":        config.Version,
+			"private_access": basic.PrivateAccess,
+			"status":         "online",
+		},
+	})
+}
+

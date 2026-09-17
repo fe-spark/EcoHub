@@ -9,7 +9,10 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	"server/internal/spider/conver"
+	filmcache "server/internal/repository/film/cache"
+	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/film/writer"
+	"server/internal/spider/converter"
 )
 
 type FilmService struct{}
@@ -18,7 +21,7 @@ var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
 func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
-	return filmrepo.GetSearchPageFast(vo)
+	return filmsnapshot.GetSearchPageReadModel(vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
@@ -27,9 +30,9 @@ func (s *FilmService) GetSearchOptions() map[string]any {
 	options := make(map[string]any)
 	tree := repository.GetActiveCategoryTree()
 	tree.Name = "全部分类"
-	options["class"] = conver.ConvertCategoryList(&tree)
+	options["class"] = converter.ConvertCategoryList(&tree)
 	options["year"] = make([]map[string]string, 0)
-	tagGroup := filmrepo.GetAdminFilterOptionSnapshots()
+	tagGroup := filmsnapshot.GetAdminFilterOptionSnapshots()
 	if tree.Children != nil {
 		for _, t := range tree.Children {
 			option := tagGroup[t.Id]
@@ -54,7 +57,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	if fd.Id == 0 {
 		fd.Id = now.Unix()
 	}
-	detail, err := conver.CovertFilmDetailVo(fd)
+	detail, err := converter.CovertFilmDetailVo(fd)
 	if err != nil || detail.PlayList == nil {
 		return errors.New("影片参数格式异常或缺少关键信息")
 	}
@@ -65,7 +68,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		sourceId = master[0].Id
 	}
 
-	if err := filmrepo.SaveDetail(sourceId, detail); err != nil {
+	if err := writer.SaveDetail(sourceId, detail); err != nil {
 		return err
 	}
 	return nil
@@ -105,11 +108,11 @@ func (s *FilmService) UpdateClass(class model.CategoryTree) error {
 	if err := repository.UpdateCategoryStatus(class.Id, updates); err != nil {
 		return err
 	}
-	if err := filmrepo.RefreshActiveProjectedReadModel(); err != nil {
+	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
 		return err
 	}
-	filmrepo.ClearTVBoxConfigCache()
-	filmrepo.ClearTVBoxListCache()
+	filmcache.ClearTVBoxConfigCache()
+	filmcache.ClearTVBoxListCache()
 	return nil
 }
 
@@ -139,10 +142,10 @@ func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {
 	if err := repository.SaveCategoryTreeStructure(cleanNodes); err != nil {
 		return err
 	}
-	if err := filmrepo.RefreshActiveProjectedReadModel(); err != nil {
+	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
 		return err
 	}
-	filmrepo.ClearTVBoxConfigCache()
-	filmrepo.ClearTVBoxListCache()
+	filmcache.ClearTVBoxConfigCache()
+	filmcache.ClearTVBoxListCache()
 	return nil
 }

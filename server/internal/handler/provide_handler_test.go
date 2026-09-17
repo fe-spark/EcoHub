@@ -21,7 +21,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -144,15 +144,15 @@ func setupProvideTestDB(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 	origRdb := db.Rdb
 	db.Mdb = gdb
 	db.Rdb = client
-	filmrepo.ClearActiveFilmReadModel()
+	filmsnapshot.ClearActiveFilmReadModel()
 
 	t.Cleanup(func() {
-		filmrepo.WaitActiveFilmSearchIndexBuilt()
+		filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 		_ = client.Close()
 		mr.Close()
 		db.Mdb = origMdb
 		db.Rdb = origRdb
-		filmrepo.ClearActiveFilmReadModel()
+		filmsnapshot.ClearActiveFilmReadModel()
 	})
 
 	return gdb, mr
@@ -254,9 +254,9 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		t.Fatalf("create detail202: %v", err)
 	}
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	gin.SetMode(gin.TestMode)
 
@@ -283,6 +283,47 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		firstSite := sites[0].(map[string]any)
 		if firstSite["key"] != "EcoHub" {
 			t.Fatalf("expected EcoHub site key, got %v", firstSite["key"])
+		}
+	})
+
+	// A1. 验证 GET /api/provide/tvbox (别名)
+	t.Run("ProvideTVBoxAlias", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/tvbox", nil)
+		c.Request.Host = "127.0.0.1:8080"
+
+		ProvideHd.HandleProvideConfig(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+	})
+
+	// A2. 验证 GET /api/provide/app (原生客户端软件源配置)
+	t.Run("ProvideAppConfig", func(t *testing.T) {
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/app", nil)
+		c.Request.Host = "127.0.0.1:8080"
+
+		ProvideHd.HandleProvideApp(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+
+		var res map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if res["code"] != float64(1) {
+			t.Fatalf("expected code 1, got %v", res["code"])
+		}
+		data, ok := res["data"].(map[string]any)
+		if !ok {
+			t.Fatalf("expected data object, got %v", res["data"])
+		}
+		if data["api_base"] != "http://127.0.0.1:8080/api" {
+			t.Fatalf("expected api_base http://127.0.0.1:8080/api, got %v", data["api_base"])
 		}
 	})
 
@@ -527,9 +568,9 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 		Hits:            100,
 	}
 	_ = db.Mdb.Create(&snap).Error
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -557,9 +598,9 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 	_, mr := setupProvideTestDB(t)
 	const version = "v_tvbox_empty"
 
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -594,9 +635,9 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 		Hits:            500,
 	}
 	_ = db.Mdb.Create(&snap).Error
-	_ = filmrepo.SetActiveSnapshotVersion(version)
-	_ = filmrepo.LoadActiveFilmReadModel(version)
-	filmrepo.WaitActiveFilmSearchIndexBuilt()
+	_ = filmsnapshot.SetActiveSnapshotVersion(version)
+	_ = filmsnapshot.LoadActiveFilmReadModel(version)
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	const concurrency = 30
 	var wg sync.WaitGroup

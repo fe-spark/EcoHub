@@ -13,8 +13,6 @@ import (
 	"server/internal/spider"
 )
 
-
-
 func TestDefaultFilmTasks_SpecValid(t *testing.T) {
 	for _, task := range defaultFilmTasks() {
 		if err := spider.ValidSpec(task.Spec); err != nil {
@@ -81,8 +79,8 @@ func TestService_RedisNilSafety(t *testing.T) {
 		db.Rdb = origRdb
 	}()
 
-	// 2. loadLatestRelease with nil Rdb (network failure returns error, but no panic on Redis)
-	_, _ = VersionSvc.loadLatestRelease(false)
+	// 2. LoadLatestRelease with nil Rdb (network failure returns error, but no panic on Redis)
+	_, _ = VersionSvc.LoadLatestRelease(false)
 }
 
 func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {

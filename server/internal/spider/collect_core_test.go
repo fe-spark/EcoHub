@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"sort"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +137,101 @@ func TestCollectLifecycleState_BeginAndEndSource(t *testing.T) {
 		t.Fatalf("unexpected beginSource error after endSource: %v", err)
 	}
 	lc.endSource(sourceID)
+}
+
+func TestHandlePreparedCollect_MissingSourceReleasesOccupy(t *testing.T) {
+	id := "prepared-missing-source"
+	occupied := occupyCollectSources([]model.FilmSource{{Id: id, Name: "gone"}}, "prepared")
+	if len(occupied) != 1 {
+		t.Fatalf("expected occupy, got %d", len(occupied))
+	}
+	defer releaseCollectSourceIDs(id)
+
+	if err := HandlePreparedCollect(id, 24); err == nil {
+		t.Fatal("expected missing source error")
+	}
+	if isOccupiedCollectSource(id) {
+		t.Fatal("prepare occupy must be released when collect never created a batch")
+	}
+}
+
+func TestStandaloneCloseDoesNotLeaveOccupyForSecondRelease(t *testing.T) {
+	source := model.FilmSource{Id: "prepared-double-release", Name: "A"}
+	if len(occupyCollectSources([]model.FilmSource{source}, "first")) != 1 {
+		t.Fatal("first occupy failed")
+	}
+	batch := newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{source}, nil, time.Now(), true)
+	batch.close()
+	if isOccupiedCollectSource(source.Id) {
+		t.Fatal("close should release occupy")
+	}
+
+	if len(occupyCollectSources([]model.FilmSource{source}, "second")) != 1 {
+		t.Fatal("second queue should occupy after first closed")
+	}
+	defer releaseCollectSourceIDs(source.Id)
+	if !isOccupiedCollectSource(source.Id) {
+		t.Fatal("second occupy should hold")
+	}
+}
+
+func TestOccupyCollectSources_SkipAlreadyCollecting(t *testing.T) {
+	sourceA := model.FilmSource{Id: "occupy-source-a", Name: "A"}
+	sourceB := model.FilmSource{Id: "occupy-source-b", Name: "B"}
+	sourceC := model.FilmSource{Id: "occupy-source-c", Name: "C"}
+	defer releaseCollectSources([]model.FilmSource{sourceA, sourceB, sourceC})
+
+	first := occupyCollectSources([]model.FilmSource{sourceA, sourceB}, "Queue-1")
+	if len(first) != 2 {
+		t.Fatalf("first queue should occupy A and B, got %d", len(first))
+	}
+	if !isOccupiedCollectSource(sourceA.Id) || !isOccupiedCollectSource(sourceB.Id) {
+		t.Fatal("A and B should be in the collecting queue")
+	}
+
+	second := occupyCollectSources([]model.FilmSource{sourceA, sourceC}, "Queue-2")
+	if len(second) != 1 || second[0].Id != sourceC.Id {
+		t.Fatalf("second queue should skip A and occupy C, got %+v", second)
+	}
+	if !isOccupiedCollectSource(sourceA.Id) {
+		t.Fatal("A should remain in the first collecting queue")
+	}
+
+	releaseCollectSources(first)
+	if isOccupiedCollectSource(sourceA.Id) || isOccupiedCollectSource(sourceB.Id) {
+		t.Fatal("released first queue should no longer occupy A/B")
+	}
+	if !isOccupiedCollectSource(sourceC.Id) {
+		t.Fatal("C should still belong to the second queue")
+	}
+}
+
+func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
+	source := model.FilmSource{Id: "occupy-source-race", Name: "Race"}
+	defer releaseCollectSourceIDs(source.Id)
+
+	const n = 16
+	results := make(chan []model.FilmSource, n)
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			results <- occupyCollectSources([]model.FilmSource{source}, "Race")
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	won := 0
+	for claimed := range results {
+		if len(claimed) == 1 {
+			won++
+		}
+	}
+	if won != 1 {
+		t.Fatalf("expected exactly one occupier, got %d", won)
+	}
 }
 
 func TestCollectBatchContext_Isolation(t *testing.T) {

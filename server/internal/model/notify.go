@@ -61,18 +61,6 @@ const (
 	DefaultMaxFilmsInMessage = 15
 )
 
-// NotifyEvent 统一事件模型 Envelope
-type NotifyEvent struct {
-	ID        string                 `json:"id"`
-	Key       string                 `json:"key"`      // e.g. "collect_batch_summary"
-	Category  string                 `json:"category"` // e.g. "collect", "cron", "audit"
-	Severity  Severity               `json:"severity"` // e.g. "INFO", "WARN", "ERROR"
-	Title     string                 `json:"title"`
-	Summary   string                 `json:"summary"`
-	Data      map[string]interface{} `json:"data,omitempty"`
-	Timestamp time.Time              `json:"timestamp"`
-}
-
 // NotifyEventSwitches 各事件开关。
 type NotifyEventSwitches struct {
 	CollectBatchSummary   bool `json:"collectBatchSummary"`
@@ -173,4 +161,3 @@ type NotifyChatError struct {
 	ChatID string `json:"chatId"`
 	Error  string `json:"error"`
 }
-

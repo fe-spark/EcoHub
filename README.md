@@ -77,8 +77,8 @@ docker compose up -d
 | --- | --- |
 | `http://<主机>:3000` | 前台 |
 | `http://<主机>:3000/manage` | 管理后台 |
-| `http://<主机>:3000/api` | 客户端（[EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) / [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)）服务接入地址 |
-| `http://<主机>:3000/api/provide/config` | TVBox / 影视仓 订阅地址 |
+| `http://<主机>:3000/api/provide/app` | 客户端（[EcoHub for OHOS](https://github.com/fe-spark/EcoHub-for-OHOS) / [EcoHub for Android](https://github.com/fe-spark/EcoHub-for-Android)）软件源地址 |
+| `http://<主机>:3000/api/provide/tvbox` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 
 默认账号：`admin` / `admin`（读写）、`guest` / `guest`（只读）。对外部署前须立即修改默认密码。
@@ -87,7 +87,7 @@ docker compose up -d
 
 安装完成后前台无数据，属预期行为。须在管理后台 **采集中心** 完成全量采集并发布后，前台才会展示影片。1Panel、外部数据库与反向代理见 [部署指南](./docs/README-Deploy.md)。
 
-Telegram 通知在管理后台 **系统设置 → 通知配置** 中填写。境内服务器访问 Telegram 时经常出现超时，可在 `.env` 中设置 `TG_PROXY=http://host.docker.internal:7890`。详见 [server/notify.md](./server/notify.md)。
+Telegram 通知在管理后台 **系统设置 → 通知配置** 中填写。境内服务器访问 Telegram 时经常出现超时，可在 `.env` 中设置 `TG_PROXY=http://host.docker.internal:7890`。详见 [server/docs/notify.md](./server/docs/notify.md)。
 
 ## 本地开发
 

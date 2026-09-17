@@ -44,24 +44,6 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 	return nil
 }
 
-func (s *collectLifecycleState) waitAndBeginSource(sourceID string) error {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return errors.New("采集站点不存在")
-	}
-
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for {
-		if _, ok := s.activeSources[sourceID]; !ok {
-			s.activeSources[sourceID] = struct{}{}
-			s.activeCount++
-			return nil
-		}
-		s.cond.Wait()
-	}
-}
-
 func (s *collectLifecycleState) endSource(sourceID string) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {

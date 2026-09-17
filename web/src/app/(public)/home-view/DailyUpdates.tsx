@@ -58,6 +58,8 @@ async function fetchDailyUpdates(exclude: string): Promise<DailyFilm[]> {
   if (exclude) {
     params.set("exclude", exclude);
   }
+  // 注意：/api/index/dailyUpdates 属于服务端兼容早期版本的旧接口，计划在未来大版本中废弃。
+  // 建议后续迁移使用新版带分类与标准分页的 /api/dailyUpdates。
   const res = await fetch(`/api/index/dailyUpdates?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(String(res.status));

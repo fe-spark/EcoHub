@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/spider/progress"
 )
 
 // shouldNoteCronCollectSuccess 仅整次定时跑完才记 last_collect_time。
@@ -16,7 +17,7 @@ func shouldNoteCronCollectSuccess(runErr error, ctx context.Context, sourceID st
 	if ctx != nil && ctx.Err() != nil {
 		return false
 	}
-	return !isCollectProgressStopped(sourceID)
+	return !progress.IsStopped(sourceID)
 }
 
 const (

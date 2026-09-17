@@ -12,7 +12,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 func TestIsSafePagePath(t *testing.T) {
@@ -245,7 +245,7 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	t.Cleanup(func() { db.Mdb = prev })
 
 	const testVersion = "v_nosql_test"
-	_ = filmrepo.SetActiveSnapshotVersion(testVersion)
+	_ = filmsnapshot.SetActiveSnapshotVersion(testVersion)
 
 	// 库中存在影片 8888888 与分类 555
 	_ = gdb.Create(&model.FilmListSnapshot{

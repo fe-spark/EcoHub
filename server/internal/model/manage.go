@@ -49,28 +49,30 @@ func DefaultTipConfig() TipConfig {
 type BasicConfig struct {
 	SiteName string `json:"siteName"` // 网站名称
 	// SiteURL 网站访问地址（公网根地址，如 https://example.com），用于 Logo 跳转与 Telegram 播放链接等
-	SiteURL  string    `json:"siteUrl"`
-	Logo     string    `json:"logo"`     // 网站logo
-	Keyword  string    `json:"keyword"`  // seo关键字
-	Describe string    `json:"describe"` // 网站描述信息
-	State    bool         `json:"state"`    // 网站状态 开启 || 关闭
-	Hint     string       `json:"hint"`     // 网站关闭提示
-	Tip      TipConfig    `json:"tip"`      // 前台赞赏
-	Notice   NoticeConfig `json:"notice"`   // 开屏公告
+	SiteURL  string       `json:"siteUrl"`
+	Logo     string       `json:"logo"`     // 网站logo
+	Keyword  string       `json:"keyword"`  // seo关键字
+	Describe string       `json:"describe"` // 网站描述信息
+	State         bool         `json:"state"`         // 网站状态 开启 || 关闭
+	Hint          string       `json:"hint"`          // 网站关闭提示
+	PrivateAccess bool         `json:"privateAccess"` // 私有化访问控制（仅登录可用）
+	ProvideKey    string       `json:"provideKey"`    // TVBox/订阅专属访问密钥
+	Tip           TipConfig    `json:"tip"`           // 前台赞赏
+	Notice        NoticeConfig `json:"notice"`        // 开屏公告
 }
 
 // Banner 首页横幅信息
 type Banner struct {
-	Id           string `gorm:"primaryKey;size:64" json:"id"` // 唯一标识
-	Mid          int64  `gorm:"index" json:"mid"`             // 绑定所属影片Id
-	Name         string `gorm:"size:128" json:"name"`         // 影片名称
-	Year         int64  `json:"year"`                         // 上映年份
-	CName        string `gorm:"size:64" json:"cName"`         // 分类名称
-	Poster        string `gorm:"size:512" json:"poster"`        // 竖版海报图（最终展示）
-	Picture       string `gorm:"size:512" json:"picture"`       // 竖版封面图（片库/海报源原图）
-	PictureSlide  string `gorm:"size:512" json:"pictureSlide"`  // 横版幻灯图（片库/海报源原图）
-	CustomPicture string `gorm:"size:512" json:"customPicture"` // 自定义封面图（独立存储）
-	Remark        string `gorm:"size:128" json:"remark"`        // 更新状态描述信息
+	Id            string  `gorm:"primaryKey;size:64" json:"id"`     // 唯一标识
+	Mid           int64   `gorm:"index" json:"mid"`                 // 绑定所属影片Id
+	Name          string  `gorm:"size:128" json:"name"`             // 影片名称
+	Year          int64   `json:"year"`                             // 上映年份
+	CName         string  `gorm:"size:64" json:"cName"`             // 分类名称
+	Poster        string  `gorm:"size:512" json:"poster"`           // 竖版海报图（最终展示）
+	Picture       string  `gorm:"size:512" json:"picture"`          // 竖版封面图（片库/海报源原图）
+	PictureSlide  string  `gorm:"size:512" json:"pictureSlide"`     // 横版幻灯图（片库/海报源原图）
+	CustomPicture string  `gorm:"size:512" json:"customPicture"`    // 自定义封面图（独立存储）
+	Remark        string  `gorm:"size:128" json:"remark"`           // 更新状态描述信息
 	Sort          int64   `json:"sort"`                             // 排序分値
 	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"` // 是否为人工自定义图片（锁定不被海报源覆盖）
 	Area          string  `gorm:"-" json:"area,omitempty"`          // 地区（由快照动态覆盖）
@@ -102,10 +104,12 @@ type SiteConfigRecord struct {
 	Logo       string `gorm:"size:512"`
 	Keyword    string `gorm:"size:256"`
 	Describe   string `gorm:"size:512"`
-	State      bool
-	Hint       string `gorm:"size:512"`
-	TipJSON    string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
-	NoticeJSON string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
+	State         bool
+	Hint          string `gorm:"size:512"`
+	PrivateAccess bool   `gorm:"default:false;column:private_access"`
+	ProvideKey    string `gorm:"size:64;column:provide_key"`
+	TipJSON       string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
+	NoticeJSON    string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
 }
 
 func (SiteConfigRecord) TableName() string {

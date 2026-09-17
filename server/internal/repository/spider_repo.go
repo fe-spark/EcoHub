@@ -9,159 +9,11 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/model/dto"
-	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
-
-// --------- Crontab Tasks -----------
-
-// SaveFilmTask 保存影视采集任务信息
-func SaveFilmTask(t model.FilmCollectTask) error {
-	rec := model.CrontabRecord{
-		TaskId:    t.Id,
-		Time:      t.Time,
-		Spec:      t.Spec,
-		TaskModel: t.Model,
-		State:     t.State,
-		Remark:    t.Remark,
-	}
-
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "task_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"time", "spec", "task_model", "state", "remark", "updated_at"}),
-		}).Create(&rec).Error; err != nil {
-			return err
-		}
-
-		// 更新关联站点
-		if err := tx.Where("task_id = ?", t.Id).Delete(&model.CronSourceRel{}).Error; err != nil {
-			return err
-		}
-		if len(t.Ids) > 0 {
-			rels := make([]model.CronSourceRel, 0, len(t.Ids))
-			for _, sid := range t.Ids {
-				rels = append(rels, model.CronSourceRel{TaskId: t.Id, SourceId: sid})
-			}
-			if err := tx.Create(&rels).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Println("SaveFilmTask Error:", err)
-	}
-	return err
-}
-
-// GetAllFilmTask 获取所有的任务信息
-func GetAllFilmTask() []model.FilmCollectTask {
-	var records []model.CrontabRecord
-	if err := db.Mdb.Find(&records).Error; err != nil {
-		log.Println("GetAllFilmTask Error:", err)
-		return nil
-	}
-
-	var tl []model.FilmCollectTask
-	for _, r := range records {
-		var ids []string
-		db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids)
-		tl = append(tl, model.FilmCollectTask{
-			Id:     r.TaskId,
-			Ids:    ids,
-			Time:   r.Time,
-			Spec:   r.Spec,
-			Model:  r.TaskModel,
-			State:  r.State,
-			Remark: r.Remark,
-		})
-	}
-	return tl
-}
-
-// GetFilmTaskById 通过 Id 获取当前任务信息
-func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
-	var r model.CrontabRecord
-	if err := db.Mdb.Where("task_id = ?", id).First(&r).Error; err != nil {
-		return model.FilmCollectTask{}, errors.New(" The task does not exist ")
-	}
-
-	var ids []string
-	db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids)
-
-	return model.FilmCollectTask{
-		Id:     r.TaskId,
-		Ids:    ids,
-		Time:   r.Time,
-		Spec:   r.Spec,
-		Model:  r.TaskModel,
-		State:  r.State,
-		Remark: r.Remark,
-	}, nil
-}
-
-// UpdateFilmTask 更新定时任务信息 (直接覆盖 Id 对应的定时任务信息)
-func UpdateFilmTask(t model.FilmCollectTask) error {
-	return SaveFilmTask(t)
-}
-
-// DelFilmTask 通过 Id 删除对应的定时任务信息
-func DelFilmTask(id string) {
-	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("task_id = ?", id).Delete(&model.CrontabRecord{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("task_id = ?", id).Delete(&model.CronSourceRel{}).Error
-	})
-}
-
-func ResetFilmTasks(tasks []model.FilmCollectTask) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CronSourceRel{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CrontabRecord{}).Error; err != nil {
-			return err
-		}
-		for _, task := range tasks {
-			rec := model.CrontabRecord{
-				TaskId:    task.Id,
-				Time:      task.Time,
-				Spec:      task.Spec,
-				TaskModel: task.Model,
-				State:     task.State,
-				Remark:    task.Remark,
-			}
-			if err := tx.Create(&rec).Error; err != nil {
-				return err
-			}
-			if len(task.Ids) == 0 {
-				continue
-			}
-			rels := make([]model.CronSourceRel, 0, len(task.Ids))
-			for _, sid := range task.Ids {
-				rels = append(rels, model.CronSourceRel{TaskId: task.Id, SourceId: sid})
-			}
-			if err := tx.Create(&rels).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-// ExistTask 是否存在定时任务相关信息
-func ExistTask() bool {
-	var count int64
-	db.Mdb.Model(&model.CrontabRecord{}).Count(&count)
-	return count > 0
-}
 
 // --------- Collect Source -----------
 
@@ -312,10 +164,6 @@ func DeleteCollectSourceStatsTx(tx *gorm.DB, sourceIDs ...string) error {
 	return tx.Where("source_id IN ?", ids).Unscoped().Delete(&model.CollectSourceStats{}).Error
 }
 
-func ClearCollectSourceStatsTx(tx *gorm.DB) error {
-	return tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CollectSourceStats{}).Error
-}
-
 // FindCollectSourceById 通过 Id 标识获取对应的资源站信息
 func FindCollectSourceById(id string) *model.FilmSource {
 	if db.Mdb == nil {
@@ -409,11 +257,6 @@ func BatchAddCollectSource(list []model.FilmSource) error {
 	return db.Mdb.Create(list).Error
 }
 
-// UpdateCollectSource 更新采集站信息
-func UpdateCollectSource(s model.FilmSource) error {
-	return UpdateCollectSourceTx(db.Mdb, s)
-}
-
 func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if tx == nil {
 		return errors.New("database transaction is nil")
@@ -435,11 +278,6 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
-}
-
-// DemoteExistingMaster 将现有的主站降级为附属站，确保全局仅一个主站
-func DemoteExistingMaster() error {
-	return DemoteExistingMasterTx(db.Mdb)
 }
 
 func DemoteExistingMasterTx(tx *gorm.DB) error {
@@ -498,34 +336,6 @@ func DemoteExistingPosterSourceTx(tx *gorm.DB, exceptID string) error {
 	return query.Update("is_poster_source", false).Error
 }
 
-// ClearAllCollectSource 删除所有采集站信息
-func ClearAllCollectSource() {
-	if err := support.TruncateTable(db.Mdb, model.TableFilmSource); err != nil {
-		log.Println("Truncate table film_sources Error:", err)
-	}
-}
-
-func ResetCollectSources(list []model.FilmSource) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.FilmSource{}).Error; err != nil {
-			return err
-		}
-		if err := ClearCollectSourceStatsTx(tx); err != nil {
-			return err
-		}
-		for i := range list {
-			if list[i].Id == "" {
-				list[i].Id = utils.GenerateHashKey(list[i].Uri)
-			}
-			normalizeCollectSourceDefaults(&list[i])
-		}
-		if len(list) == 0 {
-			return nil
-		}
-		return tx.Create(&list).Error
-	})
-}
-
 func normalizeCollectSourceDefaults(source *model.FilmSource) {
 	if source.Interval <= 0 {
 		source.Interval = config.DefaultSpiderInterval
@@ -546,195 +356,3 @@ func ExistCollectSourceList() bool {
 	db.Mdb.Model(&model.FilmSource{}).Count(&count)
 	return count > 0
 }
-
-// --------- Failure Record -----------
-
-func pendingFailureScope(tx *gorm.DB, fl model.FailureRecord) *gorm.DB {
-	return tx.Where("origin_id = ? AND page_number = ? AND hour = ? AND status = ?",
-		fl.OriginId, fl.PageNumber, fl.Hour,
-		model.FailureRecordStatusPending,
-	)
-}
-
-func findPendingFailure(tx *gorm.DB, fl model.FailureRecord) (*model.FailureRecord, error) {
-	var current model.FailureRecord
-	err := pendingFailureScope(tx, fl).First(&current).Error
-	if err != nil {
-		return nil, err
-	}
-	return &current, nil
-}
-
-// SaveFailureRecord 添加采集失效记录
-func SaveFailureRecord(fl model.FailureRecord) error {
-	if fl.Status <= 0 {
-		fl.Status = model.FailureRecordStatusPending
-	}
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		current, err := findPendingFailure(tx, fl)
-		if err == nil {
-			updates := map[string]any{
-				"origin_name": fl.OriginName,
-				"uri":         fl.Uri,
-				"cause":       fl.Cause,
-			}
-			if err = tx.Model(&model.FailureRecord{}).Where("id = ?", current.ID).Updates(updates).Error; err != nil {
-				log.Println("Update failure record failed:", err)
-				return err
-			}
-			return nil
-		}
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Println("Query failure record failed:", err)
-			return err
-		}
-
-		if err = tx.Create(&fl).Error; err != nil {
-			log.Println("Add failure record failed:", err)
-			return err
-		}
-		return nil
-	})
-	if err != nil {
-		log.Println("Save failure record affairs failed:", err)
-	}
-	return err
-}
-
-// FailureRecordList 获取所有的采集失效记录
-func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
-	qw := db.Mdb.Model(&model.FailureRecord{})
-	if vo.OriginId != "" {
-		qw = qw.Where("origin_id = ?", vo.OriginId)
-	}
-	if !vo.BeginTime.IsZero() && !vo.EndTime.IsZero() {
-		qw = qw.Where("created_at BETWEEN ? AND ? ", vo.BeginTime, vo.EndTime)
-	}
-	if vo.Status >= 0 {
-		qw = qw.Where("status = ?", vo.Status)
-	}
-
-	dto.GetPage(qw, vo.Paging)
-	var list []model.FailureRecord
-	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("created_at DESC, id DESC").Find(&list).Error; err != nil {
-		log.Println(err)
-		return nil
-	}
-	return list
-}
-
-// FindRecordById 获取 id 对应的失效记录
-func FindRecordById(id uint) *model.FailureRecord {
-	var fr model.FailureRecord
-	if err := db.Mdb.First(&fr, id).Error; err != nil {
-		return nil
-	}
-	return &fr
-}
-
-// PendingRecord 查询所有待处理的记录信息
-func PendingRecord() []model.FailureRecord {
-	var list []model.FailureRecord
-	if err := db.Mdb.
-		Where("status = ?", model.FailureRecordStatusPending).
-		Order("created_at ASC, id ASC").
-		Find(&list).Error; err != nil {
-		log.Println("Query pending failure records failed:", err)
-		return nil
-	}
-	return list
-}
-
-// UpdateFailureRecordStatus 修改失败记录的重试结果状态。
-func UpdateFailureRecordStatus(fr *model.FailureRecord, status int) {
-	if fr == nil || fr.ID == 0 {
-		return
-	}
-	db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status)
-}
-
-// MarkFailureRecordRetryFailed 更新当前失败记录的失败原因，并用数据库当前重试次数判断是否最终失败。
-func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetryCount int) (bool, int, error) {
-	if fr == nil || fr.ID == 0 {
-		return false, 0, errors.New("failure record not found")
-	}
-	if maxRetryCount <= 0 {
-		maxRetryCount = model.MaxFailureRetryCount
-	}
-	updates := map[string]any{
-		"cause":       cause,
-		"retry_count": gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
-		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE ? END", maxRetryCount, model.FailureRecordStatusFailed, model.FailureRecordStatusPending),
-	}
-	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
-		return false, 0, err
-	}
-	var current model.FailureRecord
-	if err := db.Mdb.Select("status", "retry_count").First(&current, fr.ID).Error; err != nil {
-		return false, 0, err
-	}
-	return current.Status == model.FailureRecordStatusFailed, current.RetryCount, nil
-}
-
-// UpdateFailureRecordStatusByID 按 ID 修改失败记录的重试结果状态。
-func UpdateFailureRecordStatusByID(id uint, status int) error {
-	fr := FindRecordById(id)
-	if fr == nil {
-		return errors.New("failure record not found")
-	}
-	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
-}
-
-// DeleteFailureRecord 按记录 ID 删除单个失败记录。
-func DeleteFailureRecord(fr *model.FailureRecord) {
-	if fr == nil || fr.ID == 0 {
-		return
-	}
-	if err := db.Mdb.Delete(&model.FailureRecord{}, fr.ID).Error; err != nil {
-		log.Printf("[Spider] 删除重试成功记录失败 id=%d: %v\n", fr.ID, err)
-	}
-}
-
-// DeleteRetriedRecords 删除已有重试结果的记录信息
-func DeleteRetriedRecords() {
-	if err := db.Mdb.Where("status IN ?", []int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}).Delete(&model.FailureRecord{}).Error; err != nil {
-		log.Println("Delete failure record failed:", err)
-	}
-}
-
-// DeleteFailureRecordsByOriginIdTx 按源站 ID 物理清除对应的采集失败记录
-func DeleteFailureRecordsByOriginIdTx(tx *gorm.DB, originId string) error {
-	if tx == nil || originId == "" {
-		return nil
-	}
-	return tx.Where("origin_id = ?", originId).Delete(&model.FailureRecord{}).Error
-}
-
-// NormalizeFailureRecordsRetryCount 纠正历史数据中状态与重试次数不一致的记录
-func NormalizeFailureRecordsRetryCount() {
-	if db.Mdb == nil {
-		return
-	}
-	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("retry_count >= ?", model.MaxFailureRetryCount).
-		Updates(map[string]any{
-			"retry_count": model.MaxFailureRetryCount,
-			"status":      model.FailureRecordStatusFailed,
-		}).Error
-
-	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("retry_count < ? AND status = ?", model.MaxFailureRetryCount, model.FailureRecordStatusFailed).
-		Updates(map[string]any{
-			"status": model.FailureRecordStatusPending,
-		}).Error
-}
-
-// TruncateRecordTable 截断 record table
-func TruncateRecordTable() {
-	err := support.TruncateTable(db.Mdb, model.TableFailureRecord)
-	if err != nil {
-		log.Println("TRUNCATE TABLE Error: ", err)
-	}
-}
-
-

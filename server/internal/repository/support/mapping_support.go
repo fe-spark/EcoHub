@@ -162,24 +162,6 @@ func GetPlotMapping() map[string]string {
 	return res
 }
 
-func GetCategoryRootMapping() map[string]string {
-	snap := getMappingSnapshot()
-	res := make(map[string]string, len(snap.CategoryRoot))
-	for k, v := range snap.CategoryRoot {
-		res[k] = v
-	}
-	return res
-}
-
-func GetCategorySubMapping() map[string]string {
-	snap := getMappingSnapshot()
-	res := make(map[string]string, len(snap.CategorySub))
-	for k, v := range snap.CategorySub {
-		res[k] = v
-	}
-	return res
-}
-
 func NormalizeRootCategoryName(name string) string {
 	name = strings.TrimSpace(name)
 	if name == "" {
