@@ -97,8 +97,9 @@ func LoadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 			continue
 		}
 
+		master := IdentityFromFilmIndex(info)
 		for _, source := range sources {
-			groups := BuildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, lookupKeys, playlistsBySourceKey)
+			groups := FilterPlayGroupsByWorkShape(master, BuildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, lookupKeys, playlistsBySourceKey))
 			if len(groups) == 0 {
 				continue
 			}
@@ -146,6 +147,25 @@ func BuildPlayGroupsFromLoadedPlaylists(
 		return nil
 	}
 	return SelectBestPlayGroups(siteID, siteName, keys, byKey)
+}
+
+func FilterPlayGroupsByWorkShape(master IdentityProfile, groups []model.PlayLinkVo) []model.PlayLinkVo {
+	if len(groups) == 0 {
+		return groups
+	}
+	masterItems := identityItemCount(master)
+	masterNum, masterPacked := identityEpisodeMeta(master)
+	masterScale := maxInt64(masterNum, int64(masterItems))
+	masterSingle := unnumberedSingle(masterItems, masterNum)
+
+	out := make([]model.PlayLinkVo, 0, len(groups))
+	for _, group := range groups {
+		slave := IdentityProfile{Episodes: group.LinkList}
+		if CompatibleWorkShapePrecomputed(masterNum, masterPacked, masterScale, masterSingle, slave) {
+			out = append(out, group)
+		}
+	}
+	return out
 }
 
 func SelectBestPlayGroups(siteID, siteName string, keys []string, byKey map[string][]model.SlaveMoviePlaylist) []model.PlayLinkVo {
