@@ -18,7 +18,7 @@ The old `ecohub-web` / `ecohub-server` two-image setup is retired (v2.0+).
 | 1Panel GUI | [1Panel](#method-2-1panel) |
 | Run the images yourself | [Manual deploy](#method-3-manual-deploy) |
 
-Using your own MySQL / Redis: drop the `mysql` / `redis` services and `depends_on` from the default compose, then point `.env` `MYSQL_*` / `REDIS_*` at your instances (do **not** use `127.0.0.1` from inside a container; the host DB is often `host.docker.internal`). Variable meanings: `.env.example`.
+Using your own MySQL / Redis: drop the `mysql` / `redis` services and `depends_on` from the default compose, then point `.env` `MYSQL_*` / `REDIS_*` at your instances (do **not** use `127.0.0.1` from inside a container; the host DB is often `host.docker.internal`). Full variable reference: [Environment Variables](#environment-variables).
 
 ---
 
@@ -37,7 +37,7 @@ Before going live, change at least `JWT_SECRET` and MySQL/Redis passwords.
 openssl rand -hex 32
 ```
 
-Optional: `TG_PROXY`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `COLLECT_PROFILE` (`auto|light|standard|high`). See `.env.example`.
+Optional: `TG_PROXY`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `COLLECT_PROFILE` (`auto|light|standard|high`), `ACCESS_ANALYTICS_ENABLED`. See [Environment Variables](#environment-variables).
 
 ---
 
@@ -311,14 +311,57 @@ Logs: `docker logs -f Eco-hub`. To update: `docker pull ghcr.io/fe-spark/ecohub:
 
 ---
 
-## Ports
+## Environment Variables
 
-| Variable | Default | Notes |
-| --- | --- | --- |
-| `WEB_PORT` | `3000` | Host Web access port |
-| `SERVER_PORT` | `18080` | Host direct API access port (optional) |
+All environment variables supported via `.env`, Docker Compose, or container runtime flags:
 
-In production, expose only the Web port (or 80/443 behind a reverse proxy). To **completely prevent direct public access to raw ports**, set the port mapping in `compose.yml` to `127.0.0.1:${WEB_PORT:-3000}:3000`, making it accessible only via the local host and reverse proxy.
+### 1. Services & Port Mapping
+
+| Variable | Required | Default | Description |
+| --- | :---: | --- | --- |
+| `WEB_PORT` | No | `3000` | Host Web access entrance port (serves both web frontend and `/manage` admin panel). |
+| `SERVER_PORT` | No | `18080` | Host backend API direct access port (optional, for TVBox or external players; recommended unmapped or bound to `127.0.0.1` in production). |
+
+> **Security Note**: Docker default iptables rules bypass system firewalls (like UFW). To **prevent direct public access to exposed ports**, bind to localhost in `compose.yml`: `127.0.0.1:${WEB_PORT:-3000}:3000`, allowing access only through the local host and reverse proxies (e.g., Nginx / 1Panel).
+
+### 2. Security & Core Secrets
+
+| Variable | Required | Default | Description |
+| --- | :---: | --- | --- |
+| `JWT_SECRET` | **Yes** | - | Secret key used for signing JWT tokens and deriving IP masking salt. **Must** be changed to a strong random string in production (generate via `openssl rand -hex 32`). |
+
+### 3. Data Storage (MySQL & Redis)
+
+| Variable | Required | Default | Description |
+| --- | :---: | --- | --- |
+| `MYSQL_HOST` | **Yes** | `mysql` | MySQL host address. Use Compose service name `mysql` when using bundled database; use IP or domain for external MySQL (use `host.docker.internal` for host machine DB, do not use `127.0.0.1` inside containers). |
+| `MYSQL_PORT` | No | `3306` | MySQL port. |
+| `MYSQL_USER` | **Yes** | `eco` | MySQL database username. |
+| `MYSQL_PASSWORD` | **Yes** | `ecohub` | MySQL database password (must change to a strong password). |
+| `MYSQL_DBNAME` | No | `eco` | MySQL database name. |
+| `MYSQL_ROOT_PASSWORD` | No | `ecohub` | Root password for initializing the bundled `Eco-mysql` container (only needed for bundled container). |
+| `REDIS_HOST` | **Yes** | `redis` | Redis host address. Use Compose service name `redis` when using bundled Redis; use IP or domain for external Redis. |
+| `REDIS_PORT` | No | `6379` | Redis port. |
+| `REDIS_PASSWORD` | **Yes** | `ecohub` | Redis authentication password (must change to a strong password). |
+| `REDIS_DB` | No | `0` | Redis database index (default 0). |
+
+### 4. Network Proxies (Optional)
+
+| Variable | Required | Default | Description |
+| --- | :---: | --- | --- |
+| `TG_PROXY` | No | Empty | Dedicated proxy for Telegram Bot (supports `http://`, `socks5://`, `socks5h://`, e.g., `http://host.docker.internal:7890`). Takes precedence over global proxies. |
+| `HTTPS_PROXY` | No | Empty | Container global HTTPS outbound proxy (for scraping external sources, fetching metadata, etc., avoiding timeouts). |
+| `HTTP_PROXY` | No | Empty | Container global HTTP outbound proxy. |
+| `ALL_PROXY` | No | Empty | Container global outbound proxy (typically for SOCKS protocols). |
+
+### 5. Collection Tuning & Features (Optional)
+
+| Variable | Required | Default | Description |
+| --- | :---: | --- | --- |
+| `COLLECT_PROFILE` | No | `auto` | Collect concurrency and DB write throttle profile. Options:<br>• `auto`: Auto-tuned based on server CPU core count (recommended);<br>• `light`: Low-spec machines (≤2 cores), write throttle 24 pages/s, tx concurrency 3;<br>• `standard`: Mainstream machines (3-7 cores);<br>• `high`: High-performance machines (≥8 cores), significantly boosts write limits and pagination concurrency. |
+| `ACCESS_ANALYTICS_ENABLED` | No | `false` | Master toggle for access metrics, playback analytics, and client device tracking. Set to `false` for zero overhead and complete privacy; set to `true` or `1` to enable admin analytics reports. |
+| `NODE_NAME` | No | Hostname | Current node identifier in distributed multi-node setups (leave empty for single-node deployments). |
+| `ECOHUB_LOG_DIR` | No | Container `logs/` | Custom log directory (defaults to container internal logs directory; usually left unchanged). |
 
 ---
 
