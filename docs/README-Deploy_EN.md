@@ -69,8 +69,6 @@ With the bundled databases keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis` (Compo
 | --- | --- |
 | `http://SERVER:3000` | Site |
 | `http://SERVER:3000/manage` | Admin |
-| `http://SERVER:3000/api/*` | API via the site |
-| `http://SERVER:18080/api/*` | Direct API (do not expose this on the public internet) |
 | `http://SERVER:3000/api/provide/app` | EcoHub native client software source |
 | `http://SERVER:3000/api/provide/tvbox` | TVBox / YingShiCang |
 

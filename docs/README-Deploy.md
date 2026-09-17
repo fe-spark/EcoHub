@@ -69,8 +69,6 @@ docker compose up -d
 | --- | --- |
 | `http://服务器:3000` | 前台 |
 | `http://服务器:3000/manage` | 管理后台 |
-| `http://服务器:3000/api/*` | 经站点转发的 API |
-| `http://服务器:18080/api/*` | 后端直连（生产勿公网暴露） |
 | `http://服务器:3000/api/provide/app` | 客户端软件源 |
 | `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓 |
 
