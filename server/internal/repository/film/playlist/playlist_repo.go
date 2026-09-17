@@ -24,7 +24,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (shared.Collect
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
-	detailMids, primaryKeyByMid, matchedInfos, keysByMid, err := matchSlaveDetailMids(list)
+	detailMids, primaryKeyByMid, matchedInfos, keysByMid, infoByMid, err := matchSlaveDetailMids(list)
 	if err != nil {
 		return shared.CollectWriteResult{}, err
 	}
@@ -45,7 +45,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (shared.Collect
 			}
 		}
 
-		writeKeys := playlistWriteKeys(detail, detailMids[index], primaryKeyByMid, inheritedKeyByLookup, exclusiveOwnerByKey)
+		writeKeys := playlistWriteKeys(detail, detailMids[index], primaryKeyByMid, inheritedKeyByLookup, exclusiveOwnerByKey, infoByMid)
 		for _, movieKey := range writeKeys {
 			keysByMovieKey[movieKey] = struct{}{}
 
@@ -117,18 +117,43 @@ func playlistWriteKeys(
 	primaryKeyByMid map[int64]string,
 	inheritedKeyByLookup map[string]string,
 	exclusiveOwnerByKey map[string]int64,
+	infoByMid map[int64]model.FilmIndex,
 ) []string {
 	if mid > 0 && primaryKeyByMid[mid] != "" {
 		return []string{primaryKeyByMid[mid]}
 	}
 	if shared.ResolveMovieDetailRootPid(detail) == 0 {
+		incoming := shared.IdentityFromMovieDetail(detail)
 		for _, lookupKey := range shared.BuildPlaylistMovieKeys(detail) {
-			if inherited := inheritedKeyByLookup[lookupKey]; inherited != "" {
-				return []string{inherited}
+			inherited := inheritedKeyByLookup[lookupKey]
+			if inherited == "" {
+				continue
 			}
+			if !inheritedKeyCompatible(inherited, incoming, exclusiveOwnerByKey, infoByMid) {
+				continue
+			}
+			return []string{inherited}
 		}
 	}
 	return dropKeysOwnedBySingleFilm(BuildPlaylistCandidateKeys(detail), exclusiveOwnerByKey)
+}
+
+func inheritedKeyCompatible(
+	inherited string,
+	incoming shared.IdentityProfile,
+	exclusiveOwnerByKey map[string]int64,
+	infoByMid map[int64]model.FilmIndex,
+) bool {
+	owner := exclusiveOwnerByKey[inherited]
+	if owner <= 0 {
+		return true
+	}
+	info, ok := infoByMid[owner]
+	if !ok {
+		return true
+	}
+	master := shared.IdentityFromFilmIndex(info)
+	return shared.CompatibleIdentity(master, incoming) && shared.CompatibleWorkShape(master, incoming)
 }
 
 func exclusiveMatchKeyOwners(keysByMid map[int64][]string) map[string]int64 {

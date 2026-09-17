@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -159,6 +160,26 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		hasExisting = true
 	}
 
+	// 若更新既有影片且未指定播放资源，绝不覆盖/清空既有播放资源和线路
+	if hasExisting && len(detail.PlayList) == 0 {
+		var existingDetailRec model.MovieDetailInfo
+		if db.Mdb.Where("mid = ?", detail.Id).First(&existingDetailRec).Error == nil && existingDetailRec.Content != "" {
+			var oldDetail model.MovieDetail
+			if json.Unmarshal([]byte(existingDetailRec.Content), &oldDetail) == nil {
+				detail.PlayList = oldDetail.PlayList
+				if len(detail.PlayFrom) == 0 {
+					detail.PlayFrom = oldDetail.PlayFrom
+				}
+				if len(detail.DownloadList) == 0 {
+					detail.DownloadList = oldDetail.DownloadList
+				}
+				if detail.DownFrom == "" {
+					detail.DownFrom = oldDetail.DownFrom
+				}
+			}
+		}
+	}
+
 	if detail.IsCustomPicture {
 		// 管理员设置了自定义封面：存入 CustomPicture 独立字段，确保绝不破坏 Picture（源站/海报源原图）
 		if strings.TrimSpace(detail.CustomPicture) == "" && strings.TrimSpace(detail.Picture) != "" {
@@ -267,7 +288,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		return nil
 	}
 
-	BatchHandleSearchTag(filmIndex)
+	go BatchHandleSearchTag(filmIndex)
 	clearDetailCaches(filmIndex.Pid)
 	cache.ClearProvideListCache()
 	if err := snapshot.UpsertActiveSnapshotByMid(savedMid); err != nil {

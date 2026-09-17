@@ -25,36 +25,29 @@ import {
   FireOutlined,
   PlusOutlined,
 } from "@ant-design/icons";
-import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import dayjs from "dayjs";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import { useFilmColumns, type FilmItem } from "./film-columns";
+import TmdbModal from "../components/tmdb-modal";
+import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
-interface FilmItem {
-  mid: number;
-  ID: number;
-  name: string;
-  cName: string;
-  year: string | number;
-  score: string | number;
-  hits: number;
-  remarks: string;
-  updateStamp: number;
-}
-
 export default function FilmListPageView() {
   const router = useRouter();
   const { canWrite } = useManagePermission();
+  const tmdbEnabled = useTmdbEnabled();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
+  const [scrapeModalOpen, setScrapeModalOpen] = useState(false);
+  const [currentScrapeFilm, setCurrentScrapeFilm] = useState<FilmItem | null>(null);
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState<any>({
     name: "",
@@ -234,159 +227,21 @@ export default function FilmListPageView() {
     [getFilmPage, message],
   );
 
-  const columns = useMemo<ColumnsType<FilmItem>>(
-    () => [
-      {
-        title: "ID",
-        dataIndex: "mid",
-        key: "mid",
-        width: 80,
-        fixed: "left",
-        align: "center",
-        render: (v) => (
-          <Tag color="#8b40ff" style={{ borderRadius: 4 }}>
-            #{v}
-          </Tag>
-        ),
-      },
-      {
-        title: "影片信息",
-        key: "info",
-        align: "left",
-        render: (_, record) => (
-          <Space size={6} wrap={false}>
-            <Text
-              className={styles.filmName}
-              style={{ whiteSpace: "nowrap" }}
-              onClick={() =>
-                window.open(resolvePlayEntryPath(record.mid), "_blank")
-              }
-            >
-              {record.name}
-            </Text>
-            <Tag color="orange" style={{ borderRadius: 4, flexShrink: 0 }}>
-              {record.cName}
-            </Tag>
-          </Space>
-        ),
-      },
-      {
-        title: "评分",
-        dataIndex: "score",
-        key: "score",
-        align: "center",
-        render: (v) => (
-          <Text strong style={{ color: "var(--ant-color-primary)" }}>
-            {v}
-          </Text>
-        ),
-      },
-      {
-        title: "年份",
-        dataIndex: "year",
-        key: "year",
-        align: "center",
-        render: (v) => <Text>{v}</Text>,
-      },
-      {
-        title: "热度",
-        dataIndex: "hits",
-        key: "hits",
-        align: "center",
-        render: (v) => (
-          <Text type="danger">
-            <FireOutlined /> {v}
-          </Text>
-        ),
-      },
-      {
-        title: "更新状态",
-        key: "status",
-        align: "center",
-        render: (_, record) => (
-          <Tag
-            color={record.remarks.includes("更新") ? "warning" : "success"}
-            style={{ borderRadius: 6, padding: "2px 8px" }}
-          >
-            {record.remarks}
-          </Tag>
-        ),
-      },
-      {
-        title: "更新时间",
-        dataIndex: "updateStamp",
-        align: "center",
-        render: (v) => (
-          <Text type="secondary" style={{ fontSize: 13 }}>
-            {dayjs(v * 1000).format("YYYY-MM-DD HH:ss")}
-          </Text>
-        ),
-      },
-      {
-        title: "操作",
-        key: "action",
-        align: "center",
-        fixed: "right",
-        render: (_, record) => (
-          <Space size={8}>
-            <Tooltip title="打开播放页">
-              <Button
-                type="primary"
-                shape="circle"
-                size="small"
-                icon={<AimOutlined />}
-                onClick={() =>
-                  window.open(resolvePlayEntryPath(record.mid), "_blank")
-                }
-              />
-            </Tooltip>
-            <Tooltip title="同步更新">
-              <Button
-                type="primary"
-                shape="circle"
-                size="small"
-                style={{ background: "#52c41a", borderColor: "#52c41a" }}
-                icon={
-                  <ReloadOutlined
-                    className={`${styles.syncIcon} ${syncingIds.includes(record.mid) ? styles.syncing : ""}`}
-                  />
-                }
-                disabled={!canWrite}
-                onClick={() => handleUpdateSingle(record.mid)}
-              />
-            </Tooltip>
-            <Tooltip title="修改影视">
-              <Button
-                type="primary"
-                shape="circle"
-                size="small"
-                style={{ background: "#1890ff", borderColor: "#1890ff" }}
-                icon={<EditOutlined />}
-                disabled={!canWrite}
-                onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
-              />
-            </Tooltip>
-            <Popconfirm
-              title="确认删除此影片？"
-              onConfirm={() => handleDelFilm(record.mid || record.ID)}
-            >
-              <Tooltip title="删除">
-                <Button
-                  type="primary"
-                  danger
-                  shape="circle"
-                  size="small"
-                  icon={<DeleteOutlined />}
-                  disabled={!canWrite}
-                />
-              </Tooltip>
-            </Popconfirm>
-          </Space>
-        ),
-      },
-    ],
-    [syncingIds, router, handleDelFilm, handleUpdateSingle, canWrite],
-  );
+  const handleScrapeFilm = useCallback((record: FilmItem) => {
+    setCurrentScrapeFilm(record);
+    setScrapeModalOpen(true);
+  }, []);
+
+  const columns = useFilmColumns({
+    syncingIds,
+    canWrite,
+    router,
+    styles,
+    handleUpdateSingle,
+    handleDelFilm,
+    handleScrapeFilm,
+    tmdbEnabled,
+  });
 
   return (
     <div className={styles.pageStack}>
@@ -494,6 +349,16 @@ export default function FilmListPageView() {
         )}
       />
 
+      <TmdbModal
+        open={scrapeModalOpen}
+        mid={currentScrapeFilm ? (currentScrapeFilm.mid || currentScrapeFilm.ID) : undefined}
+        initialName={currentScrapeFilm?.name}
+        onClose={() => {
+          setScrapeModalOpen(false);
+          setCurrentScrapeFilm(null);
+        }}
+        onSuccess={() => getFilmPage()}
+      />
     </div>
   );
 }
