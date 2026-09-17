@@ -53,12 +53,12 @@ func TestProvideKeyGuard(t *testing.T) {
 
 		_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, 0).Err()
 
-		// 1. 无 key -> 403
+		// 1. 无 key -> 401
 		w1 := httptest.NewRecorder()
 		req1, _ := http.NewRequest(http.MethodGet, "/api/provide/config", nil)
 		r.ServeHTTP(w1, req1)
-		if w1.Code != http.StatusForbidden {
-			t.Errorf("expected status 403, got %d", w1.Code)
+		if w1.Code != http.StatusUnauthorized {
+			t.Errorf("expected status 401, got %d", w1.Code)
 		}
 
 		// 2. 错误 key -> 403

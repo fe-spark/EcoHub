@@ -71,7 +71,9 @@ With the bundled databases keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis` (Compo
 | `http://SERVER:3000/manage` | Admin |
 | `http://SERVER:3000/api/*` | API via the site |
 | `http://SERVER:18080/api/*` | Direct API (do not expose this on the public internet) |
-| `http://SERVER:3000/api/provide/config` | TVBox / YingShiCang |
+| `http://SERVER:3000/api/provide/app` | EcoHub native client software source |
+| `http://SERVER:3000/api/provide/tvbox` | TVBox / YingShiCang (Recommended) |
+| `http://SERVER:3000/api/provide/config` | TVBox / YingShiCang (Deprecated soon, use `/api/provide/tvbox`) |
 
 Default accounts (**change passwords immediately**): `admin` / `admin`, `guest` / `guest`.
 

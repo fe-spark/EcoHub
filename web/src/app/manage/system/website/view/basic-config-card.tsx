@@ -15,6 +15,7 @@ import {
 import {
   EditOutlined,
   PictureOutlined,
+  ReloadOutlined,
   SaveOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -23,6 +24,23 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import ImagePicker from "@/app/manage/components/image-picker";
 import styles from "./basic-config-card.module.less";
+
+function generateRandomKey(length: number = 16): string {
+  const chars = "abcdefghijklmnopqrstuvwxyz0123456789";
+  let res = "";
+  if (typeof crypto !== "undefined" && crypto.getRandomValues) {
+    const bytes = new Uint8Array(length);
+    crypto.getRandomValues(bytes);
+    for (let i = 0; i < length; i++) {
+      res += chars[bytes[i] % chars.length];
+    }
+  } else {
+    for (let i = 0; i < length; i++) {
+      res += chars[Math.floor(Math.random() * chars.length)];
+    }
+  }
+  return res;
+}
 
 export interface BasicInfoPayload {
   siteName: string;
@@ -217,7 +235,13 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               checkedChildren="开启"
               unCheckedChildren="关闭"
               onChange={(privateAccess) =>
-                setDraft((prev) => ({ ...prev, privateAccess }))
+                setDraft((prev) => {
+                  let provideKey = prev.provideKey;
+                  if (privateAccess && !provideKey.trim()) {
+                    provideKey = generateRandomKey(16);
+                  }
+                  return { ...prev, privateAccess, provideKey };
+                })
               }
             />
           </Flex>
@@ -233,18 +257,29 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
                   {currentValues.provideKey.length}/{MAX_PROVIDE_KEY_LEN}
                 </Typography.Text>
               </Flex>
-              <Input
-                disabled={!isEditing || !canWrite}
-                maxLength={MAX_PROVIDE_KEY_LEN}
-                placeholder="必填，请输入订阅密钥，例如 mysecret888"
-                status={isEditing && !currentValues.provideKey.trim() ? "error" : undefined}
-                value={currentValues.provideKey}
-                onChange={(e) =>
-                  setDraft((prev) => ({ ...prev, provideKey: e.target.value }))
-                }
-              />
+              <Space.Compact style={{ width: "100%" }}>
+                <Input
+                  disabled={!isEditing || !canWrite}
+                  maxLength={MAX_PROVIDE_KEY_LEN}
+                  placeholder="必填，请输入订阅密钥，例如 mysecret888"
+                  status={isEditing && !currentValues.provideKey.trim() ? "error" : undefined}
+                  value={currentValues.provideKey}
+                  onChange={(e) =>
+                    setDraft((prev) => ({ ...prev, provideKey: e.target.value }))
+                  }
+                />
+                <Button
+                  icon={<ReloadOutlined />}
+                  disabled={!isEditing || !canWrite}
+                  onClick={() =>
+                    setDraft((prev) => ({ ...prev, provideKey: generateRandomKey(16) }))
+                  }
+                >
+                  随机生成
+                </Button>
+              </Space.Compact>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                开启私有化后必须设置订阅密钥，TVBox 订阅地址需追加参数：/api/provide/config?key=您的密钥
+                开启私有化后必须设置订阅密钥，客户端或 TVBox 订阅地址需追加参数：/api/provide/app?key=您的密钥
               </Typography.Text>
             </div>
           )}

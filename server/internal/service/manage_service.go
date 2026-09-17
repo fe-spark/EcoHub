@@ -9,6 +9,7 @@ import (
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/utils"
 )
 
 type ManageService struct{}
@@ -31,7 +32,15 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr.State = bc.State
 	curr.Hint = bc.Hint
 	curr.PrivateAccess = bc.PrivateAccess
-	curr.ProvideKey = bc.ProvideKey
+	if curr.PrivateAccess {
+		if strings.TrimSpace(bc.ProvideKey) == "" {
+			curr.ProvideKey = utils.RandomString(8)
+		} else {
+			curr.ProvideKey = strings.TrimSpace(bc.ProvideKey)
+		}
+	} else {
+		curr.ProvideKey = bc.ProvideKey
+	}
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}

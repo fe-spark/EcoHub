@@ -250,16 +250,21 @@ flowchart TD
 公共接口：
 
 - `/api/index`
+- `/api/dailyUpdates` (每日更新)
+- `/api/index/dailyUpdates` (每日更新旧端点，即将废弃，请使用 `/api/dailyUpdates`)
 - `/api/navCategory`
-- `/api/filmDetail`
 - `/api/filmPlayInfo`
+- `/api/filmRelate`
 - `/api/searchFilm`
+- `/api/hotKeywords`
 - `/api/filmClassify`
 - `/api/filmClassifySearch`
-- `/api/proxy/video`
-- `/api/config/basic`
-- `/api/provide/vod`
-- `/api/provide/config`
+- `/api/config/basic` (站点公开基础信息/轻量探活)
+- `/api/health` (探活旧端点，即将废弃，请使用 `/api/config/basic` 或 `/api/provide/app`)
+- `/api/provide/app` (EcoHub 客户端软件源)
+- `/api/provide/tvbox` (TVBox / 影视仓配置推荐端点)
+- `/api/provide/config` (TVBox 早期配置路径，即将废弃，请使用 `/api/provide/tvbox`)
+- `/api/provide/vod` (MacCMS 兼容接口)
 
 登录接口：
 
