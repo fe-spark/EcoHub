@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import {
   Form,
@@ -20,6 +20,7 @@ import {
   Radio,
   Image as AntImage,
   Typography,
+  Popconfirm,
 } from "antd";
 import {
   UploadOutlined,
@@ -30,10 +31,11 @@ import {
   UserOutlined,
   GlobalOutlined,
   DatabaseOutlined,
-  PlayCircleOutlined,
   ContainerOutlined,
   PictureOutlined,
   CompassOutlined,
+  UndoOutlined,
+  ReloadOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -60,13 +62,60 @@ function FilmAddForm() {
   const [fetching, setFetching] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
+  const [tmdbSnapshot, setTmdbSnapshot] = useState<Record<string, any> | null>(null);
   const searchParams = useSearchParams();
   const router = useRouter();
   const id = searchParams.get("id");
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
+  const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
+  const watchedPicture = Form.useWatch("picture", form);
+
+  const loadedDetailRef = useRef<any>(null);
+  const [loadedDetail, setLoadedDetail] = useState<any>(null);
+
+  const populateForm = useCallback((filmData: any) => {
+    if (!filmData) return;
+    const filmDescriptor = filmData.descriptor || {};
+
+    const isCustom = filmData.isCustomPicture === true;
+    const customPic = filmData.customPicture || (isCustom ? filmData.picture : "");
+    const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
+
+    form.setFieldsValue({
+      id: filmData.id,
+      cid: filmData.cid,
+      pid: filmData.pid,
+      cName: filmData.cName || "",
+      name: filmData.name,
+      followPosterSource: !isCustom,
+      picture: customPic,
+      pictureSlide: slidePic,
+      subTitle: filmDescriptor.subTitle || "",
+      initial: filmDescriptor.initial || "",
+      classTag: filmDescriptor.classTag || "",
+      director: filmDescriptor.director || "",
+      actor: filmDescriptor.actor || "",
+      writer: filmDescriptor.writer || "",
+      remarks: filmDescriptor.remarks || "",
+      releaseDate: filmDescriptor.releaseDate || "",
+      area: filmDescriptor.area || "",
+      lang: filmDescriptor.language || "",
+      year: filmDescriptor.year || "",
+      state: filmDescriptor.state || "",
+      dbId: filmDescriptor.dbId ?? 0,
+      dbScore: filmDescriptor.dbScore || "",
+      hits: filmDescriptor.hits ?? 0,
+      content: filmDescriptor.content || "",
+    });
+  }, [form]);
+
   const handleTmdbPrefill = (data: any, fields?: string[]) => {
+    // 记录填充前的表单快照（优先保留最初未被 TMDB 覆盖的表单状态，避免连续预填后丢失原数据）
+    const currentValues = form.getFieldsValue();
+    setTmdbSnapshot((prev) => prev || currentValues);
+
     const shouldFill = (name: string, ...aliases: string[]) => {
       if (!fields || fields.length === 0) return true;
       return [name, ...aliases].some((key) => fields.includes(key));
@@ -111,11 +160,27 @@ function FilmAddForm() {
     }
   };
 
-  const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
-  const watchedPicture = Form.useWatch("picture", form);
+  const handleUndoTmdb = () => {
+    if (!tmdbSnapshot) return;
+    form.setFieldsValue(tmdbSnapshot);
+    setTmdbSnapshot(null);
+    message.info("已撤销 TMDB 填充，表单已恢复填充前状态");
+  };
 
-  const loadedDetailRef = useRef<any>(null);
-  const [loadedDetail, setLoadedDetail] = useState<any>(null);
+  const handleResetToOriginal = () => {
+    if (loadedDetailRef.current) {
+      populateForm(loadedDetailRef.current);
+      setTmdbSnapshot(null);
+      message.success("已还原为影片初始数据");
+    }
+  };
+
+  const handleClearForm = () => {
+    form.resetFields();
+    form.setFieldsValue({ followPosterSource: false });
+    setTmdbSnapshot(null);
+    message.info("已清空表单");
+  };
 
   useEffect(() => {
     ApiGet("/manage/film/class/tree").then((resp: any) => {
@@ -138,51 +203,14 @@ function FilmAddForm() {
             const filmData = resp.data.detail;
             loadedDetailRef.current = filmData;
             setLoadedDetail(filmData);
-            const filmDescriptor = filmData.descriptor || {};
-
-            let playLinkStr = "";
-            if (filmData.playList && filmData.playList.length > 0) {
-              const mainList = filmData.playList[0];
-              playLinkStr = mainList
-                .map((item: any) => `${item.episode}$${item.link}`)
-                .join("#");
-            }
-
-            const isCustom = filmData.isCustomPicture === true;
-            const customPic = filmData.customPicture || (isCustom ? filmData.picture : "");
-            form.setFieldsValue({
-              id: filmData.id,
-              cid: filmData.cid,
-              pid: filmData.pid,
-              name: filmData.name,
-              followPosterSource: !isCustom,
-              picture: customPic,
-              subTitle: filmDescriptor.subTitle,
-              initial: filmDescriptor.initial,
-              classTag: filmDescriptor.classTag,
-              director: filmDescriptor.director,
-              actor: filmDescriptor.actor,
-              writer: filmDescriptor.writer,
-              remarks: filmDescriptor.remarks,
-              releaseDate: filmDescriptor.releaseDate,
-              area: filmDescriptor.area,
-              lang: filmDescriptor.language,
-              year: filmDescriptor.year,
-              state: filmDescriptor.state,
-              dbId: filmDescriptor.dbId,
-              dbScore: filmDescriptor.dbScore,
-              hits: filmDescriptor.hits,
-              playForm: filmData.playFrom?.join(",") || "",
-              content: filmDescriptor.content,
-              playLink: playLinkStr,
-            });
+            populateForm(filmData);
           } else {
             message.error("获取影片详情失败");
           }
         })
         .finally(() => setFetching(false));
     }
-  }, [id, form, message]);
+  }, [id, form, message, populateForm]);
 
   const handleClassChange = (value: number) => {
     const selected = categories.find((c) => c.id === value);
@@ -201,22 +229,37 @@ function FilmAddForm() {
       const isCustom = !values.followPosterSource;
       const customPic = isCustom ? (values.picture || "").trim() : "";
       const sourcePic = loadedDetailRef.current?.picture || "";
+      const customSlide = isCustom
+        ? (values.pictureSlide || loadedDetailRef.current?.customPictureSlide || "").trim()
+        : "";
+      // 明确剔除剧集播放资源字段，不向后端传递 playLink，绝不更新剧集数据
+      const { playLink, playForm, ...restValues } = values;
       const payload = {
-        ...values,
+        ...restValues,
+        language: restValues.lang || restValues.language || "",
         id: id ? Number(id) : 0,
-        dbId: Number(values.dbId) || 0,
-        hits: Number(values.hits) || 0,
+        dbId: Number(restValues.dbId) || 0,
+        hits: Number(restValues.hits) || 0,
         isCustomPicture: isCustom,
         customPicture: customPic,
         picture: isCustom ? (sourcePic || customPic) : "",
+        customPictureSlide: customSlide,
       };
 
       const resp = await ApiPost("/manage/film/add", payload);
       if (resp.code === 0) {
         message.success(id ? "影视更新成功" : "影片添加成功");
+        setTmdbSnapshot(null);
         if (!id) {
           form.resetFields();
           form.setFieldsValue({ followPosterSource: false });
+        } else {
+          ApiGet(`/filmPlayInfo`, { id }).then((fresh: any) => {
+            if (fresh.code === 0 && fresh.data?.detail) {
+              loadedDetailRef.current = fresh.data.detail;
+              setLoadedDetail(fresh.data.detail);
+            }
+          });
         }
       } else {
         message.error(resp.msg);
@@ -288,17 +331,26 @@ function FilmAddForm() {
         requiredMark="optional"
       >
         <Space direction="vertical" size={16} className={styles.formSections}>
-            <Card
-              title={
-                <Space>
-                  <InfoCircleOutlined
-                    style={{ color: "var(--ant-color-primary)" }}
-                  />
-                  基础信息
-                </Space>
-              }
-              extra={
-                tmdbEnabled ? (
+          <Card
+            title={
+              <Space>
+                <InfoCircleOutlined
+                  style={{ color: "var(--ant-color-primary)" }}
+                />
+                基础信息
+              </Space>
+            }
+            extra={
+              <Space>
+                {tmdbSnapshot && (
+                  <Button
+                    icon={<UndoOutlined />}
+                    onClick={handleUndoTmdb}
+                  >
+                    撤销 TMDB 填充
+                  </Button>
+                )}
+                {tmdbEnabled ? (
                   <Button
                     icon={<CompassOutlined />}
                     style={{ color: "#722ed1", borderColor: "#722ed1" }}
@@ -307,145 +359,155 @@ function FilmAddForm() {
                   >
                     TMDB 智能识别
                   </Button>
-                ) : null
-              }
-              className={styles.sectionCard}
-              styles={{
-                header: {
-                  background: "rgba(255, 255, 255, 0.02)",
-                  borderBottom: "1px solid var(--ant-color-border-secondary)",
-                },
-              }}
-            >
-              <Row gutter={[40, 0]} className={styles.formRow}>
-                <Col xs={24} lg={12} xl={8}>
-                  <Form.Item
-                    label="影片名称"
-                    name="name"
-                    rules={[{ required: true, message: "请输入名称" }]}
-                  >
-                    <Input placeholder="请输入影片名称" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} lg={12} xl={8}>
-                  <Form.Item label="影片别名" name="subTitle">
-                    <Input placeholder="如: 英文名、又名" />
-                  </Form.Item>
-                </Col>
-                <Col xs={24} lg={12} xl={8}>
-                  <Form.Item
-                    label="所属分类"
-                    name="cid"
-                    rules={[{ required: true, message: "请选择分类" }]}
-                  >
-                    <Select
-                      placeholder="请选择"
-                      onChange={handleClassChange}
-                      options={categories.map((c: any) => ({
-                        label: c.name,
-                        value: c.id,
-                      }))}
-                    />
-                  </Form.Item>
-                </Col>
+                ) : null}
+              </Space>
+            }
+            className={styles.sectionCard}
+            styles={{
+              header: {
+                background: "rgba(255, 255, 255, 0.02)",
+                borderBottom: "1px solid var(--ant-color-border-secondary)",
+              },
+            }}
+          >
+            <div className={styles.basicInfoLayout}>
+              {/* 左侧：封面图展示与快捷操作 */}
+              <div className={styles.posterColumn}>
+                <div className={styles.posterWrapper}>
+                  <AntImage
+                    src={watchedPicture || loadedDetail?.picture || FALLBACK_IMG}
+                    fallback={FALLBACK_IMG}
+                    alt="影片封面"
+                    preview={{ mask: "查看封面" }}
+                  />
+                  <div className={styles.posterTagBadge}>
+                    <Tag color={watchedFollowPosterSource ? "blue" : "orange"} style={{ margin: 0 }}>
+                      {watchedFollowPosterSource ? "跟随海报源" : "自定义封面"}
+                    </Tag>
+                  </div>
+                </div>
+              </div>
 
-                <Form.Item name="pid" hidden>
-                  <Input />
-                </Form.Item>
-                <Form.Item name="cName" hidden>
-                  <Input />
-                </Form.Item>
-
-                <Col xs={24} lg={10} xl={8}>
-                  <Form.Item
-                    label="是否跟随海报源"
-                    name="followPosterSource"
-                    tooltip="开启自动同步海报源；关闭可自定义并锁定封面。"
-                    initialValue={Boolean(id)}
-                  >
-                    <Radio.Group
-                      buttonStyle="solid"
-                      options={[
-                        { label: "是（跟随海报源）", value: true },
-                        { label: "否（自定义封面）", value: false },
-                      ]}
-                    />
-                  </Form.Item>
-                </Col>
-
-                {watchedFollowPosterSource ? (
-                  <Col xs={24} lg={14} xl={16}>
-                    <Form.Item label="影片封面">
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          background: "rgba(255, 255, 255, 0.04)",
-                          borderRadius: 6,
-                          border: "1px dashed var(--ant-color-border)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "space-between",
-                          minHeight: 32,
-                        }}
-                      >
-                        <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
-                          已开启跟随海报源，将自动匹配最新封面与幻灯图。
-                        </Text>
-                        {(watchedPicture || loadedDetail?.picture) && (
-                          <AntImage
-                            src={watchedPicture || loadedDetail?.picture}
-                            height={32}
-                            style={{ borderRadius: 4, objectFit: "cover" }}
-                            fallback={FALLBACK_IMG}
-                          />
-                        )}
-                      </div>
+              {/* 右侧：基础字段表单 */}
+              <div className={styles.formColumn}>
+                <Row gutter={[24, 0]}>
+                  <Col xs={24} sm={12}>
+                    <Form.Item
+                      label="影片名称"
+                      name="name"
+                      rules={[{ required: true, message: "请输入名称" }]}
+                    >
+                      <Input placeholder="请输入影片名称" />
                     </Form.Item>
                   </Col>
-                ) : (
-                  <Col xs={24} lg={14} xl={16}>
+                  <Col xs={24} sm={12}>
+                    <Form.Item label="影片别名" name="subTitle">
+                      <Input placeholder="如: 英文名、又名" />
+                    </Form.Item>
+                  </Col>
+                  <Col xs={24} sm={12}>
                     <Form.Item
-                      label="封面图片地址"
-                      name="picture"
-                      rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
-                      tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
+                      label="所属分类"
+                      name="cid"
+                      rules={[{ required: true, message: "请选择分类" }]}
                     >
-                      <Input
-                        className={styles.posterInput}
-                        placeholder="输入图片URL或上传"
-                        addonAfter={
-                          <Space size={4}>
-                            <Upload
-                              customRequest={customUpload}
-                              showUploadList={false}
-                              accept={IMAGE_UPLOAD_ACCEPT}
-                              disabled={!canWrite}
-                            >
-                              <Button
-                                icon={<UploadOutlined />}
-                                type="text"
-                                size="small"
-                              >
-                                上传封面
-                              </Button>
-                            </Upload>
-                            <Button
-                              icon={<PictureOutlined />}
-                              type="text"
-                              size="small"
-                              disabled={!canWrite}
-                              onClick={() => setPickerOpen(true)}
-                            >
-                              选图
-                            </Button>
-                          </Space>
-                        }
+                      <Select
+                        placeholder="请选择"
+                        onChange={handleClassChange}
+                        options={categories.map((c: any) => ({
+                          label: c.name,
+                          value: c.id,
+                        }))}
                       />
                     </Form.Item>
                   </Col>
-                )}
-              </Row>
-            </Card>
+
+                  <Form.Item name="pid" hidden>
+                    <Input />
+                  </Form.Item>
+                  <Form.Item name="cName" hidden>
+                    <Input />
+                  </Form.Item>
+
+                  <Col xs={24} sm={12}>
+                    <Form.Item
+                      label="是否跟随海报源"
+                      name="followPosterSource"
+                      tooltip="开启自动同步海报源；关闭可自定义并锁定封面。"
+                      initialValue={Boolean(id)}
+                    >
+                      <Radio.Group
+                        buttonStyle="solid"
+                        options={[
+                          { label: "是（跟随海报源）", value: true },
+                          { label: "否（自定义封面）", value: false },
+                        ]}
+                      />
+                    </Form.Item>
+                  </Col>
+
+                  {!watchedFollowPosterSource ? (
+                    <Col xs={24}>
+                      <Form.Item
+                        label="封面图片地址"
+                        name="picture"
+                        rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
+                        tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
+                      >
+                        <Input
+                          className={styles.posterInput}
+                          placeholder="输入图片URL或点击右侧上传/选图"
+                          addonAfter={
+                            <Space size={4}>
+                              <Upload
+                                customRequest={customUpload}
+                                showUploadList={false}
+                                accept={IMAGE_UPLOAD_ACCEPT}
+                                disabled={!canWrite}
+                              >
+                                <Button
+                                  icon={<UploadOutlined />}
+                                  type="text"
+                                  size="small"
+                                >
+                                  上传封面
+                                </Button>
+                              </Upload>
+                              <Button
+                                icon={<PictureOutlined />}
+                                type="text"
+                                size="small"
+                                disabled={!canWrite}
+                                onClick={() => setPickerOpen(true)}
+                              >
+                                选图
+                              </Button>
+                            </Space>
+                          }
+                        />
+                      </Form.Item>
+                    </Col>
+                  ) : (
+                    <Col xs={24}>
+                      <div
+                        style={{
+                          padding: "8px 12px",
+                          background: "rgba(255, 255, 255, 0.03)",
+                          borderRadius: 6,
+                          border: "1px dashed var(--ant-color-border)",
+                          marginBottom: 20,
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
+                          已开启跟随海报源，左侧将自动展示并同步最新匹配封面；如需独立上传请切换为「否（自定义封面）」。
+                        </Text>
+                      </div>
+                    </Col>
+                  )}
+                </Row>
+              </div>
+            </div>
+          </Card>
 
             <Card
               title={
@@ -603,35 +665,6 @@ function FilmAddForm() {
             </Form.Item>
           </Card>
 
-          <Card
-            title={
-              <Space>
-                <PlayCircleOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                播放资源
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-              <Form.Item
-                name="playLink"
-                noStyle
-                extra="格式: 章节$链接 (多个以 # 分隔)"
-              >
-              <TextArea
-                rows={8}
-                placeholder="示例: &#10;第01集$https://url/1.m3u8#第02集$https://url/2.m3u8"
-              />
-            </Form.Item>
-          </Card>
-
           <Divider className={styles.formDivider} />
           <Flex
             justify="space-between"
@@ -649,11 +682,23 @@ function FilmAddForm() {
               返回影片列表
             </Button>
             <Space wrap className={styles.submitActions}>
-              {!id ? (
-                <Button icon={<ClearOutlined />} onClick={() => form.resetFields()}>
+              {id ? (
+                <Popconfirm
+                  title="确定还原为初始数据？"
+                  description="将放弃当前所有未保存修改（包括 TMDB 填充与手动编辑），恢复为影片初始数据。"
+                  onConfirm={handleResetToOriginal}
+                  okText="确定还原"
+                  cancelText="取消"
+                >
+                  <Button icon={<ReloadOutlined />}>
+                    还原初始数据
+                  </Button>
+                </Popconfirm>
+              ) : (
+                <Button icon={<ClearOutlined />} onClick={handleClearForm}>
                   清空重填
                 </Button>
-              ) : null}
+              )}
               <Button
                 type="primary"
                 icon={<SaveOutlined />}
