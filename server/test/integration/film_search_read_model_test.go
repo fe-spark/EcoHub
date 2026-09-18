@@ -218,8 +218,8 @@ func TestUpsertMidsToActiveFilmSearchIndex_RemovesGhostItems(t *testing.T) {
 	)
 	activateVersion(t, version)
 
-	// 让 102 从库中消失，此时内存索引仍残留 102，构成幽灵条目
-	gdb.Where("snapshot_version = ? AND mid = ?", version, 102).Delete(&model.FilmListSnapshot{})
+	// 让 102 从库中消失（快照链路硬删），此时内存索引仍残留 102，构成幽灵条目
+	gdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, 102).Delete(&model.FilmListSnapshot{})
 	gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ? AND mid = ?", version, 101).Update("name", "存活影片101")
 
 	filmsnapshot.UpsertMidsToActiveFilmSearchIndex(version, []int64{101, 102})
@@ -237,7 +237,7 @@ func TestUpsertMidsToActiveFilmSearchIndex_RemovesGhostItems(t *testing.T) {
 	assertHit(t, "增量更新后", "无关影片103", rows, page, 103)
 
 	// 边界：DB 查询 0 行时，对应 mid 必须从索引中剔除
-	gdb.Where("snapshot_version = ? AND mid = ?", version, 101).Delete(&model.FilmListSnapshot{})
+	gdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, 101).Delete(&model.FilmListSnapshot{})
 	filmsnapshot.UpsertMidsToActiveFilmSearchIndex(version, []int64{101})
 
 	rows, page = searchFilms(version, "存活影片101", 10)

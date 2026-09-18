@@ -24,7 +24,7 @@ func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 		return nil
 	}
 	var snapshot model.FilmListSnapshot
-	if err := db.Mdb.Where("snapshot_version = ? AND mid = ?", version, mid).First(&snapshot).Error; err != nil {
+	if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, mid).First(&snapshot).Error; err != nil {
 		return nil
 	}
 	return &snapshot
@@ -62,7 +62,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 			end = len(uniq)
 		}
 		var rows []model.FilmListSnapshot
-		if err := db.Mdb.Where("snapshot_version = ? AND mid IN ?", version, uniq[start:end]).Find(&rows).Error; err != nil {
+		if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, uniq[start:end]).Find(&rows).Error; err != nil {
 			continue
 		}
 		for _, row := range rows {

@@ -99,7 +99,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		}
 
 		var snapshots []model.FilmListSnapshot
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).
+		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 			Select("name").
 			Where("snapshot_version = ? AND pid > 0", version).
 			Order("hits DESC").

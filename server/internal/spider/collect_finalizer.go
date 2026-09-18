@@ -37,6 +37,9 @@ func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, master
 		return affectedMIDs, masterMIDs, err
 	}
 	log.Printf("[Spider][Finalizer] 收尾发布完成 version=%s source_count=%d cost=%s", version, len(sources), time.Since(start))
+	if version != "" {
+		filmsnapshot.NotifySnapshotPublished(version)
+	}
 	return affectedMIDs, masterMIDs, nil
 }
 

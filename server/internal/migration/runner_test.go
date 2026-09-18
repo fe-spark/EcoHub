@@ -58,3 +58,45 @@ func TestRunAutoMigrations(t *testing.T) {
 		t.Fatalf("expected count to remain %d, got %d", count, countAfter)
 	}
 }
+
+func TestDropSnapDeletedAtIndex_AlwaysDroppedAfterAutoMigrate(t *testing.T) {
+	testDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("failed to open test sqlite: %v", err)
+	}
+
+	origMdb := db.Mdb
+	db.Mdb = testDB
+	defer func() {
+		db.Mdb = origMdb
+	}()
+
+	if err := testDB.AutoMigrate(model.AllModels...); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+	if testDB.Migrator().HasIndex(&model.FilmListSnapshot{}, "idx_film_list_snapshot_deleted_at") {
+		t.Fatal("AutoMigrate must not create idx_film_list_snapshot_deleted_at")
+	}
+	if err := RunAutoMigrations(testDB); err != nil {
+		t.Fatalf("RunAutoMigrations failed: %v", err)
+	}
+
+	if err := testDB.Exec("CREATE INDEX idx_film_list_snapshot_deleted_at ON film_list_snapshot(deleted_at)").Error; err != nil {
+		t.Fatalf("create leftover index: %v", err)
+	}
+	if !testDB.Migrator().HasIndex(&model.FilmListSnapshot{}, "idx_film_list_snapshot_deleted_at") {
+		t.Fatal("expected leftover deleted_at index")
+	}
+
+	if err := testDB.AutoMigrate(&model.FilmListSnapshot{}); err != nil {
+		t.Fatalf("second AutoMigrate failed: %v", err)
+	}
+	if err := RunAutoMigrations(testDB); err != nil {
+		t.Fatalf("RunAutoMigrations second run failed: %v", err)
+	}
+	if testDB.Migrator().HasIndex(&model.FilmListSnapshot{}, "idx_film_list_snapshot_deleted_at") {
+		t.Fatal("leftover deleted_at index should be dropped on every RunAutoMigrations")
+	}
+}

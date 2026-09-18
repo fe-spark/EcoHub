@@ -188,7 +188,7 @@ func EnsureActiveFilmListSnapshot() error {
 	activeVer := strings.TrimSpace(GetActiveSnapshotVersion())
 	var snapCount int64
 	if activeVer != "" {
-		_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+		_ = db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 			Where("snapshot_version = ?", activeVer).
 			Count(&snapCount).Error
 	}
@@ -238,7 +238,7 @@ func pruneOldFilmListSnapshots(retain int) {
 	}
 
 	var versions []string
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select("snapshot_version").
 		Group("snapshot_version").
 		Order("MAX(id) DESC").

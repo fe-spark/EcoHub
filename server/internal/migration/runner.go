@@ -46,6 +46,21 @@ var migrations = []Migration{
 		Name:    "create composite performance indexes for film_index update_stamp and mid",
 		Run:     migrateDailyUpdatePerformanceIndexes,
 	},
+	{
+		Version: "20260918_snapshot_global_update_index",
+		Name:    "create composite performance index idx_snap_ver_update for film_list_snapshot",
+		Run:     migrateSnapshotGlobalUpdateIndex,
+	},
+	{
+		Version: "20260918_drop_snap_ver_hits_pid_index",
+		Name:    "drop redundant composite index idx_snap_ver_hits_pid from film_list_snapshot",
+		Run:     migrateDropSnapVerHitsPidIndex,
+	},
+	{
+		Version: "20260918_drop_snap_deleted_at_index",
+		Name:    "drop redundant soft-delete index idx_film_list_snapshot_deleted_at from film_list_snapshot",
+		Run:     migrateDropSnapDeletedAtIndex,
+	},
 }
 
 // RunAutoMigrations 顺序执行尚未执行的历史版本迁移，并持久化到 schema_migrations 表
@@ -98,6 +113,11 @@ func RunAutoMigrations(db *gorm.DB) error {
 		syslog.Infof("[Migration] 本次成功执行 %d 项版本迁移，数据库当前已就绪 (累计 %d 项)", newApplied, len(appliedSet)+newApplied)
 	} else {
 		syslog.Infof("[Migration] 数据库版本化迁移已是最新 (已应用 %d 项历史迁移，无需执行)", len(appliedSet))
+	}
+
+	// AutoMigrate 可能在版本化 Drop 之后再次建回该索引；每次启动都幂等删除。
+	if err := migrateDropSnapDeletedAtIndex(db); err != nil {
+		return fmt.Errorf("drop snapshot deleted_at index failed: %w", err)
 	}
 
 	return nil
@@ -185,6 +205,46 @@ func migrateDailyUpdatePerformanceIndexes(db *gorm.DB) error {
 				return err
 			}
 		}
+	}
+	return nil
+}
+
+func migrateSnapshotGlobalUpdateIndex(db *gorm.DB) error {
+	if !db.Migrator().HasTable(&model.FilmListSnapshot{}) {
+		return nil
+	}
+	queries := []string{
+		"CREATE INDEX idx_snap_ver_update ON film_list_snapshot(snapshot_version, update_stamp, id)",
+	}
+	for _, sql := range queries {
+		if err := db.Exec(sql).Error; err != nil {
+			msg := strings.ToLower(err.Error())
+			if !strings.Contains(msg, "duplicate key name") && !strings.Contains(msg, "already exists") {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func migrateDropSnapVerHitsPidIndex(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if !migrator.HasTable(&model.FilmListSnapshot{}) {
+		return nil
+	}
+	if migrator.HasIndex(&model.FilmListSnapshot{}, "idx_snap_ver_hits_pid") {
+		return migrator.DropIndex(&model.FilmListSnapshot{}, "idx_snap_ver_hits_pid")
+	}
+	return nil
+}
+
+func migrateDropSnapDeletedAtIndex(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if !migrator.HasTable(&model.FilmListSnapshot{}) {
+		return nil
+	}
+	if migrator.HasIndex(&model.FilmListSnapshot{}, "idx_film_list_snapshot_deleted_at") {
+		return migrator.DropIndex(&model.FilmListSnapshot{}, "idx_film_list_snapshot_deleted_at")
 	}
 	return nil
 }

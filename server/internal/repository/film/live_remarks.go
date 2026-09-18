@@ -112,7 +112,7 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		IsCustomPicture    bool
 	}
 	var rows []row
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select("mid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("snapshot_version = ? AND mid IN ?", version, mids).
 		Scan(&rows).Error; err != nil {

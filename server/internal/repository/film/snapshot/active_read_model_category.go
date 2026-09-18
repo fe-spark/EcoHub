@@ -14,6 +14,9 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 const (
@@ -52,7 +55,7 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
 	if field == "pid" {
@@ -102,7 +105,7 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -142,6 +145,44 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 	return result
 }
 
+// mysqlUseIndexHint 把 USE INDEX 挂到 FROM 子句之后，避免 Table("t USE INDEX ...")
+// 被驱动整段加反引号后变成非法表名。
+type mysqlUseIndexHint struct {
+	index string
+}
+
+func (h mysqlUseIndexHint) ModifyStatement(stmt *gorm.Statement) {
+	if stmt == nil || strings.TrimSpace(h.index) == "" {
+		return
+	}
+	c := stmt.Clauses["FROM"]
+	c.AfterExpression = h
+	stmt.Clauses["FROM"] = c
+}
+
+func (h mysqlUseIndexHint) Build(builder clause.Builder) {
+	builder.WriteString("USE INDEX (")
+	builder.WriteQuoted(h.index)
+	builder.WriteByte(')')
+}
+
+func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
+	if query == nil || query.Dialector == nil {
+		return query
+	}
+	if query.Dialector.Name() != "mysql" {
+		return query
+	}
+	switch field {
+	case "pid":
+		return query.Clauses(mysqlUseIndexHint{index: "idx_snap_pid_hits"})
+	case "cid":
+		return query.Clauses(mysqlUseIndexHint{index: "idx_snap_cid_hits"})
+	default:
+		return query
+	}
+}
+
 func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
@@ -166,9 +207,10 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
+	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -213,9 +255,10 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
+	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -294,7 +337,7 @@ func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, lim
 	}
 
 	var snapshots []model.FilmListSnapshot
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).
+	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ? AND pid = ?", version, pid).
 		Order(orderClause).

@@ -75,7 +75,7 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	activeVersion := filmsnapshot.GetActiveSnapshotVersion()
 	if activeVersion != "" {
 		var snapshots []model.FilmListSnapshot
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 			Select("mid, name, c_name, picture, year").
 			Where("snapshot_version = ? AND mid IN ?", activeVersion, missing).
 			Find(&snapshots).Error; err == nil {

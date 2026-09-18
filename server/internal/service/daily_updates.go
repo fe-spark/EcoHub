@@ -307,7 +307,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			var fallbackRows []struct {
 				Mid int64
 			}
-			query := db.Mdb.Model(&model.FilmListSnapshot{}).
+			query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 				Select("mid").
 				Where("snapshot_version = ?", version)
 			if len(mids) > 0 {
