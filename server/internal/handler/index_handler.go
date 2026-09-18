@@ -69,33 +69,6 @@ func hasRealSearchTagList(value any) bool {
 	return false
 }
 
-func resolvePlayableSourceID(playSources []model.PlayLinkVo, preferred string) string {
-	if preferred != "" {
-		for _, source := range playSources {
-			if source.Id == preferred && len(source.LinkList) > 0 {
-				return source.Id
-			}
-		}
-
-		for _, source := range playSources {
-			if source.SourceId == preferred && len(source.LinkList) > 0 {
-				return source.Id
-			}
-		}
-	}
-
-	for _, source := range playSources {
-		if len(source.LinkList) > 0 {
-			return source.Id
-		}
-	}
-
-	if len(playSources) > 0 {
-		return playSources[0].Id
-	}
-
-	return ""
-}
 
 func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 	cost := time.Since(startedAt)
@@ -247,82 +220,6 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 	dto.Success(data, "分类信息获取成功", c)
 }
 
-// FilmPlayInfo 影视播放页数据
-func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
-	totalStartedAt := time.Now()
-	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
-	if err != nil {
-		dto.Failed("请求异常,暂无影片信息!!!", c)
-		return
-	}
-	playFrom := c.DefaultQuery("playFrom", "")
-	episode, err := strconv.Atoi(c.DefaultQuery("episode", "0"))
-	if err != nil {
-		dto.Failed("请求异常,暂无影片信息!!!", c)
-		return
-	}
-	detailStartedAt := time.Now()
-	detail, err := service.IndexSvc.GetFilmDetail(id)
-	logSlowIndexStep("FilmPlayInfo.GetFilmDetail", detailStartedAt, "id", id)
-	if err != nil {
-		dto.Failed("影片详情数据异常", c)
-		return
-	}
-	if detail.Id == 0 {
-		dto.Failed("暂无影片信息", c)
-		return
-	}
-	for i := range detail.List {
-		var valid []model.MovieUrlInfo
-		for _, ep := range detail.List[i].LinkList {
-			if ep.Link != "" {
-				valid = append(valid, ep)
-			}
-		}
-		detail.List[i].LinkList = valid
-	}
-	if len(detail.List) > 0 {
-		playFrom = resolvePlayableSourceID(detail.List, playFrom)
-	}
-	var currentPlay model.MovieUrlInfo
-	for _, v := range detail.List {
-		if v.Id == playFrom {
-			if len(v.LinkList) > 0 {
-				if episode < len(v.LinkList) {
-					currentPlay = v.LinkList[episode]
-				} else {
-					currentPlay = v.LinkList[0]
-					episode = 0
-				}
-			}
-			break
-		}
-	}
-
-	logSlowIndexStep("FilmPlayInfo.total", totalStartedAt, "id", id)
-	dto.Success(gin.H{
-		"detail":          detail,
-		"current":         currentPlay,
-		"currentPlayFrom": playFrom,
-		"currentEpisode":  episode,
-		"relate":          []model.MovieBasicInfo{},
-	}, "影片播放信息获取成功", c)
-}
-
-// FilmRelate 影视播放页相关推荐数据
-func (h *IndexHandler) FilmRelate(c *gin.Context) {
-	startedAt := time.Now()
-	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))
-	if err != nil || id <= 0 {
-		dto.Failed("请求异常,暂无影片信息!!!", c)
-		return
-	}
-
-	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(int64(id), &page)
-	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
-	dto.Success(relateMovie, "相关推荐获取成功", c)
-}
 
 const (
 	searchFilmDefaultPageSize = 12
@@ -351,13 +248,16 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	page := dto.GetPageParams(c)
 	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
-	bl := service.IndexSvc.SearchFilmInfoWithSort(trimmed, sortField, page)
-	if page.Total <= 0 {
-		dto.Failed("暂无相关影片信息", c)
-		return
+	sourceID := strings.TrimSpace(c.Query("source"))
+	result := service.IndexSvc.SearchFilm(trimmed, sourceID, sortField, page)
+	if result.List == nil {
+		result.List = []model.MovieBasicInfo{}
+	}
+	if result.Sources == nil {
+		result.Sources = []model.SearchSourceTab{}
 	}
 
-	dto.Success(gin.H{"list": bl, "page": page, "sort": sortField}, "影片搜索成功", c)
+	dto.Success(gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词

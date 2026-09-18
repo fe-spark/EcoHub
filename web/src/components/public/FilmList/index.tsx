@@ -21,6 +21,8 @@ interface FilmItem {
   classTag?: string;
   remarks?: string;
   blurb?: string;
+  sourceId?: string;
+  sourceMid?: string | number;
 }
 
 function normalizeMetaValue(value?: string | number | null) {
@@ -69,12 +71,12 @@ function FilmCard({
   colProps: any;
   colClassName: string;
   highlightQuery?: string;
-  handleOpenPlayPage: (id: string) => void;
+  handleOpenPlayPage: (id: string, item?: FilmItem) => void;
 }) {
   const [imgLoaded, setImgLoaded] = React.useState(false);
   const [imgError, setImgError] = React.useState(false);
   const imgRef = React.useRef<HTMLImageElement | null>(null);
-  const id = item.mid || item.id;
+  const id = Number(item.id) > 0 ? String(item.id) : "";
   const metaTags = buildFilmMetaTags(item);
   const metaText = metaTags.join(" · ") || item.remarks;
 
@@ -96,11 +98,11 @@ function FilmCard({
     return () => window.cancelAnimationFrame(frame);
   }, [item.picture]);
 
-  if (id === "-99") return null;
+  if (String(item.id) === "-99") return null;
 
   return (
     <Col key={id} {...colProps} className={colClassName}>
-      <div className={styles.item} onClick={() => handleOpenPlayPage(id)}>
+      <div className={styles.item} onClick={() => handleOpenPlayPage(id, item)}>
         <div className={`${styles.posterWrapper} ${!imgLoaded && !imgError ? styles.loadingBg : ""}`}>
           {!imgError && item.picture && (
             /* 影片卡片图片全部来自后端动态地址，这里维持原生 img 与懒加载策略 */
@@ -110,6 +112,7 @@ function FilmCard({
               src={item.picture}
               className={`${styles.poster} ${imgLoaded ? styles.posterLoaded : ""}`}
               alt={item.name}
+              referrerPolicy="no-referrer"
               onLoad={() => setImgLoaded(true)}
               onError={() => {
                 setImgError(true);
@@ -235,8 +238,11 @@ export default function FilmList({
     );
   }
 
-  const handleOpenPlayPage = (id: string) => {
-    const href = resolvePlayEntryPath(id);
+  const handleOpenPlayPage = (id: string, item?: FilmItem) => {
+    const href = resolvePlayEntryPath(id, {
+      sourceId: item?.sourceId,
+      sourceMid: item?.sourceMid,
+    });
     if (onOpenPlayPage) {
       onOpenPlayPage(id, href);
       return;
@@ -249,7 +255,7 @@ export default function FilmList({
       <Row gutter={[12, 12]}>
         {list.map((item) => (
           <FilmCard
-            key={item.mid || item.id}
+            key={`${item.sourceId || ""}:${item.id || 0}:${item.sourceMid || item.mid || ""}`}
             item={item}
             colProps={colProps}
             colClassName={colClassName}

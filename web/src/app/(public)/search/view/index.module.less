@@ -101,6 +101,12 @@
   }
 }
 
+.sourceBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 /* 搜索结果头部信息栏 */
 .resultHeader {
   display: flex;
@@ -108,7 +114,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 12px;
-  padding-bottom: 16px;
+  padding-bottom: 12px;
   border-bottom: 1px solid var(--public-border-1);
 }
 
@@ -139,13 +145,21 @@
 .sortBar {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 8px;
   margin-top: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .sortChip {
   display: inline-flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
   padding: 5px 12px;
@@ -156,6 +170,7 @@
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+  white-space: nowrap;
   transition: all 0.2s ease;
 
   &:hover:not(.active) {
@@ -241,6 +256,16 @@
   .fireIcon {
     color: #ff4d4f;
   }
+}
+
+.listLoading {
+  position: relative;
+  width: 100%;
+  min-height: 280px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
 }
 
 .searchRes {
@@ -619,6 +644,20 @@
 }
 
 @media (max-width: 768px) {
+  .resultHeader {
+    align-items: flex-start;
+    padding-bottom: 12px;
+    gap: 8px;
+  }
+
+  .resultTitle {
+    font-size: 18px;
+  }
+
+  .totalBadge {
+    font-size: 12px;
+  }
+
   .searchItem {
     padding: 12px;
     gap: 12px;

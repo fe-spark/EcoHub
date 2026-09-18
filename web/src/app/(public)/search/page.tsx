@@ -2,7 +2,7 @@ import SearchPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 
-async function getSearchData(keyword: string, current: string, sort?: string) {
+async function getSearchData(keyword: string, current: string, sort?: string, source?: string) {
   if (!keyword) {
     return null;
   }
@@ -12,7 +12,8 @@ async function getSearchData(keyword: string, current: string, sort?: string) {
       keyword,
       current,
       pageSize: 12,
-      sort: sort || "",
+      sort: source ? "" : sort || "",
+      source: source || "",
     });
 
     if (response.code === 0) {
@@ -46,12 +47,14 @@ export default async function SearchPage({
   const search = resolvedSearchParams.search;
   const current = resolvedSearchParams.current;
   const sortParam = resolvedSearchParams.sort;
+  const sourceParam = resolvedSearchParams.source;
   const keyword = Array.isArray(search) ? search[0] : (search ?? "");
   const currentPage = Array.isArray(current) ? current[0] : (current ?? "1");
   const currentSort = Array.isArray(sortParam) ? sortParam[0] : (sortParam ?? "");
+  const currentSource = Array.isArray(sourceParam) ? sourceParam[0] : (sourceParam ?? "");
 
   const [data, hotKeywords] = await Promise.all([
-    getSearchData(keyword, currentPage, currentSort),
+    getSearchData(keyword, currentPage, currentSort, currentSource),
     getHotKeywordsData(),
   ]);
 
@@ -63,6 +66,7 @@ export default async function SearchPage({
         keyword={keyword}
         current={currentPage}
         sort={currentSort}
+        source={currentSource}
         hotKeywords={hotKeywords}
       />
     </>

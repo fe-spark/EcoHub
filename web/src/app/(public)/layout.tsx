@@ -41,8 +41,8 @@ async function getNavList(): Promise<NavItem[]> {
     if (response.code === 0 && Array.isArray(response.data)) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch nav category error:", error);
+  } catch {
+    // 导航失败时用空列表，避免把可恢复错误打到客户端 overlay
   }
 
   return [];

@@ -1,12 +1,14 @@
+import { redirect } from "next/navigation";
 import PlayPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
+import { buildLivePlayPath } from "@/lib/playNavigation";
 import { serverGet } from "@/lib/server-api";
 
-async function getPlayData(
-  filmId: string,
-  sourceId?: string,
-  episodeIdx?: string,
-) {
+function firstParam(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+async function getPlayData(filmId: string, sourceId?: string, episodeIdx?: string) {
   const playPageResponse = await serverGet<any>("/filmPlayInfo", {
     id: filmId,
     playFrom: sourceId,
@@ -25,20 +27,19 @@ export default async function PlayPage({
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const resolvedSearchParams = await searchParams;
-  const idValue = resolvedSearchParams.id;
-  const sourceValue = resolvedSearchParams.source;
-  const episodeValue = resolvedSearchParams.episode;
-  const currentTimeValue = resolvedSearchParams.currentTime;
+  const resolved = await searchParams;
+  const filmId = String(firstParam(resolved.id) || "").trim();
+  const sourceId = firstParam(resolved.source);
+  const episodeIdx = firstParam(resolved.episode);
+  const initialTime = firstParam(resolved.currentTime);
+  const sid = String(firstParam(resolved.sid) || "").trim();
+  const numericId = Number(filmId);
 
-  const filmId = Array.isArray(idValue) ? idValue[0] : idValue;
-  const sourceId = Array.isArray(sourceValue) ? sourceValue[0] : sourceValue;
-  const episodeIdx = Array.isArray(episodeValue) ? episodeValue[0] : episodeValue;
-  const initialTime = Array.isArray(currentTimeValue)
-    ? currentTimeValue[0]
-    : currentTimeValue;
-
-  if (!filmId) {
+  if (!(Number.isFinite(numericId) && numericId > 0)) {
+    const liveSource = String(sourceId || "").trim();
+    if (liveSource && sid) {
+      redirect(buildLivePlayPath(liveSource, sid, episodeIdx ? Number(episodeIdx) : 0));
+    }
     return <PlayPageView data={null} filmId="" emptyMessage="未找到影片参数，请返回列表重新进入播放页。" />;
   }
 
@@ -60,28 +61,21 @@ export default async function PlayPage({
   }
 
   const filmDetail = playPageData?.detail;
-  const filmName = filmDetail?.name || "";
   const filmPoster =
     filmDetail?.isCustomPicture && filmDetail?.customPicture
       ? filmDetail.customPicture
       : filmDetail?.picture || "";
-  const filmCat = filmDetail?.descriptor?.cName || "";
 
   return (
     <>
       <TrackPageView
         action="play"
         resource={filmId}
-        resourceTitle={filmName}
+        resourceTitle={filmDetail?.name || ""}
         resourcePoster={filmPoster}
-        resourceCat={filmCat}
+        resourceCat={filmDetail?.descriptor?.cName || ""}
       />
-      <PlayPageView
-        key={filmId}
-        data={playPageData}
-        filmId={filmId}
-        initialTime={initialTime}
-      />
+      <PlayPageView key={filmId} data={playPageData} filmId={filmId} initialTime={initialTime} />
     </>
   );
 }
