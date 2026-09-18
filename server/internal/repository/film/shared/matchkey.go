@@ -13,13 +13,14 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-// BuildMovieMatchKeysWithCategory 跨站匹配键：豆瓣、片名#大类、纯片名回退。同名跨类不能共用播放列表槽。
+// BuildMovieMatchKeysWithCategory 跨站匹配键：豆瓣+片名、片名#大类、纯片名回退。
+// 豆瓣 ID 相同但片名不同不算同一部，不能共用播放列表槽。
 func BuildMovieMatchKeysWithCategory(dbID int64, name string, pid int64) []string {
 	keys := make([]string, 0, 3)
 	if dbIdentity := utils.BuildCollectionDbIdentity(dbID, name); dbIdentity != "" {
 		keys = append(keys, utils.GenerateHashKey(dbIdentity))
 	}
-	normalizedTitle := utils.NormalizeCollectionTitle(name)
+	normalizedTitle := utils.NormalizeIdentityTitle(name)
 	if normalizedTitle != "" {
 		if pid > 0 {
 			keys = append(keys, utils.GenerateHashKey(fmt.Sprintf("%s#cat_%d", normalizedTitle, pid)))

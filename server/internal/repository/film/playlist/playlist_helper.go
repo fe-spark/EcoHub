@@ -13,7 +13,7 @@ func BuildPlaylistCandidateKeys(detail model.MovieDetail) []string {
 	if pid <= 0 || len(keys) == 0 {
 		return keys
 	}
-	plainTitle := utils.NormalizeCollectionTitle(detail.Name)
+	plainTitle := utils.NormalizeIdentityTitle(detail.Name)
 	if plainTitle == "" {
 		return keys
 	}
