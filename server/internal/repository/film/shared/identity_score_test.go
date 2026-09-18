@@ -357,6 +357,67 @@ func TestCompatibleWorkShape_SerialWithTotalEpisodesStaysCompatible(t *testing.T
 	}
 }
 
+func TestCompatibleIdentity_SameDoubanDifferentNameRejects(t *testing.T) {
+	if CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
+		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", Year: 2023},
+	) {
+		t.Fatal("same douban with different titles must not count as the same film")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2020},
+	) {
+		t.Fatal("same douban and same title must still bind even if year drifts")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图动态漫画"},
+	) {
+		t.Fatal("same douban with space-only title difference must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版更新至95集"},
+	) {
+		t.Fatal("same douban with 更新至 suffix must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版第95集"},
+	) {
+		t.Fatal("same douban with trailing 第N集 must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版国语"},
+	) {
+		t.Fatal("same douban with language suffix must still match")
+	}
+}
+
+func TestPickUniqueIdentityMid_SameDoubanDifferentNameBindsByTitle(t *testing.T) {
+	threeD := IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集"}
+	donghua := IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结"}
+	cands := map[int64]IdentityProfile{44885: threeD, 45520: donghua}
+
+	got := PickUniqueIdentityMid(IdentityProfile{
+		DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集",
+		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第95集"}},
+	}, cands)
+	if got != 44885 {
+		t.Fatalf("slave titled 3D must bind the 3D master, not the same-douban 动态漫画, got %d", got)
+	}
+
+	got = PickUniqueIdentityMid(IdentityProfile{
+		DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结",
+		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第52集完结"}},
+	}, cands)
+	if got != 45520 {
+		t.Fatalf("slave titled 动态漫画 must bind that master, got %d", got)
+	}
+}
+
 func TestCompatibleIdentity_DirectorFormatTolerance(t *testing.T) {
 	masterDot := IdentityProfile{Director: "詹姆斯·卡梅隆"}
 	slaveNoDot := IdentityProfile{Director: "詹姆斯卡梅隆"}

@@ -123,15 +123,51 @@ func NormalizeCollectionTitle(title string) string {
 	return base + "#" + segment
 }
 
+// 认片时剥掉的片尾噪音：进度、清晰度、语种。不剥剧场版/OVA/3D/动态漫画等版本身份。
+var identityTitleNoisePatterns = []*regexp.Regexp{
+	regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:19|20)\d{2}(?:\)|）|\]|】)?\s*$`),
+	regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:4k|8k|2160p|1080p|720p|480p|bd|bdrip|blu\s*ray|bluray|web\s*-?dl|webrip|hdtv|\bhd\b|uhd|高清|超清|蓝光)(?:版)?(?:\)|）|\]|】)?\s*$`),
+	regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:国语|普通话|中文|国配|粤配|国粤双语|粤语|英语|日语|韩语|中字|中英字幕|中英双字|双字|双语|原声|english|japanese|korean|mandarin|cantonese|dubbed|subbed)(?:版)?(?:\)|）|\]|】)?\s*$`),
+	regexp.MustCompile(`(?i)[\s·\-_/：:．。、,，]*(?:\(|（|\[|【)?(?:更新至.*|更新到.*|更至.*|第[0-9一二三四五六七八九十百千万]+[集期话回]|全[0-9一二三四五六七八九十百千万]+[集期话回]|共[0-9]+[集期话回]|完结|已完结|连载中|连载|上映版|抢先版)(?:\)|）|\]|】)?\s*$`),
+}
+
+func NormalizeIdentityTitle(title string) string {
+	title = TraditionalToSimplified(strings.ToLower(strings.TrimSpace(title)))
+	title = stripIdentityTitleNoise(title)
+	title = NormalizeCollectionTitle(title)
+	if title == "" {
+		return ""
+	}
+	return strings.ReplaceAll(title, " ", "")
+}
+
+func stripIdentityTitleNoise(title string) string {
+	for {
+		next := title
+		for _, pattern := range identityTitleNoisePatterns {
+			candidate := strings.TrimSpace(pattern.ReplaceAllString(next, ""))
+			candidate = strings.TrimSpace(baseTrimPattern.ReplaceAllString(candidate, ""))
+			if candidate == "" {
+				continue
+			}
+			next = candidate
+		}
+		if next == title {
+			return title
+		}
+		title = next
+	}
+}
+
 func BuildCollectionDbIdentity(dbID int64, title string) string {
 	if dbID == 0 {
 		return ""
 	}
-	_, segment := splitTrailingSegment(title)
-	if segment == "" {
+	normalizedTitle := NormalizeIdentityTitle(title)
+	if normalizedTitle == "" {
 		return fmt.Sprintf("dbid_%d", dbID)
 	}
-	return fmt.Sprintf("dbid_%d#%s", dbID, segment)
+	return fmt.Sprintf("dbid_%d#%s", dbID, normalizedTitle)
 }
 
 func BuildSeriesKey(title string, subTitle string) string {

@@ -41,7 +41,7 @@ type IdentityProfile struct {
 	Episodes  []model.MovieUrlInfo
 }
 
-// IdentityScore 各信号得分。Confirm = 豆瓣+年份+备注形态，不含片名、分类和通用标签（玄幻/热血会同时出现在动漫和短剧上）。
+// IdentityScore 各信号得分。Confirm = 豆瓣+年份+备注形态，不含片名、分类和通用标签。
 type IdentityScore struct {
 	Total    int
 	Douban   int
@@ -66,12 +66,12 @@ const (
 
 var (
 	yearTokenRe      = regexp.MustCompile(`(?:19|20)\d{2}`)
-	serialRemarkRe   = regexp.MustCompile(`第\s*[0-9一二三四五六七八九十百千万]+\s*集|更新至`)
-	completeRemarkRe = regexp.MustCompile(`全集|完结|合全集`)
+	serialRemarkRe   = regexp.MustCompile(`第\s*[0-9一二三四五六七八九十百千万]+\s*[集期话回]|更新至|更新到|更至|连载`)
+	completeRemarkRe = regexp.MustCompile(`全集|完结|合全集|已完结|全[0-9一二三四五六七八九十百千万]+[集期话回]|合集完结`)
 	digitRunRe       = regexp.MustCompile(`\d+`)
 	techNoiseRe      = regexp.MustCompile(`(?i)(?:1080[pi]?|720[pi]?|2160[pi]?|4k|\d+帧|\d+fps|5\.1声道?)`)
 	packedRangeRe    = regexp.MustCompile(`(\d+)\s*[-~至到]\s*(\d+)`)
-	serialProgressRe = regexp.MustCompile(`(?:更新至|更新到|第)\s*(\d+)\s*集?`)
+	serialProgressRe = regexp.MustCompile(`(?:更新至|更新到|更至|第)\s*(\d+)\s*[集期话回]?`)
 )
 
 func IdentityFromFilmIndex(info model.FilmIndex) IdentityProfile {
@@ -141,12 +141,11 @@ func ParseIdentityYear(raw string) int64 {
 
 func ScoreIdentity(slave, master IdentityProfile) IdentityScore {
 	var score IdentityScore
-	if slave.DbID > 0 && master.DbID > 0 && slave.DbID == master.DbID {
+	namesMatch := identityNamesMatch(slave.Name, master.Name)
+	if slave.DbID > 0 && master.DbID > 0 && slave.DbID == master.DbID && namesMatch {
 		score.Douban = identityScoreDouban
 	}
-	slaveName := utils.NormalizeCollectionTitle(slave.Name)
-	masterName := utils.NormalizeCollectionTitle(master.Name)
-	if slaveName != "" && slaveName == masterName {
+	if namesMatch {
 		score.Name = identityScoreNameExact
 	}
 	if slave.RootPid > 0 && master.RootPid > 0 && slave.RootPid == master.RootPid {
@@ -199,10 +198,19 @@ func CompatibleWorkShapePrecomputed(masterNum int64, masterPacked bool, masterSc
 }
 
 // CompatibleIdentity 只在两边都有值时才比；主站或副站为空就跳过，不当冲突。
-// 豆瓣两边都有：相同则认同一部，不同则拒。缺一边则再看年份、导演。标签太乱，不参与否决。
+// 豆瓣两边都有：不同则拒；相同仍要求片名一致，对不上就不是同一部。缺一边则再看年份、导演。标签太乱，不参与否决。
 func CompatibleIdentity(master, slave IdentityProfile) bool {
+	namesMatch := identityNamesMatch(master.Name, slave.Name)
 	if master.DbID > 0 && slave.DbID > 0 {
-		return master.DbID == slave.DbID
+		if master.DbID != slave.DbID {
+			return false
+		}
+		if identityNamePresent(master.Name) && identityNamePresent(slave.Name) && !namesMatch {
+			return false
+		}
+		if namesMatch {
+			return true
+		}
 	}
 	if master.Year > 0 && slave.Year > 0 {
 		diff := master.Year - slave.Year
@@ -252,6 +260,40 @@ func splitPersonNames(raw string) map[string]struct{} {
 		}
 	}
 	return out
+}
+
+func identityNamesMatch(left, right string) bool {
+	a := utils.NormalizeIdentityTitle(left)
+	b := utils.NormalizeIdentityTitle(right)
+	return a != "" && a == b
+}
+
+func identityNamePresent(name string) bool {
+	return utils.NormalizeIdentityTitle(name) != ""
+}
+
+func uniqueLeadingScore(scores map[int64]IdentityScore, value func(IdentityScore) int) int64 {
+	bestMid := int64(0)
+	best := -1
+	second := -1
+	for mid, score := range scores {
+		v := value(score)
+		switch {
+		case v > best:
+			second = best
+			best = v
+			bestMid = mid
+		case v == best:
+			bestMid = 0
+			second = v
+		case v > second:
+			second = v
+		}
+	}
+	if bestMid > 0 && best >= identityConfirmMin && best-maxInt(second, 0) >= identityConfirmMargin {
+		return bestMid
+	}
+	return 0
 }
 
 func identityItemCount(profile IdentityProfile) int {
@@ -327,8 +369,8 @@ func parseLabelNumbers(label string) []int64 {
 
 // PickUniqueIdentityMid 在召回候选里按身份分选择唯一主站 mid。
 // 两边都有值且对不上的候选先丢掉（空值跳过）；剩下一部才宽松绑定（副站分类标错也能挂上）。
-// 同名多部时：豆瓣唯一命中优先；否则确认信号（豆瓣/年份/备注形态）拉开差距才绑定；
-// 确认信号打平则允许唯一大类命中，但确认信号指向另一部时不绑。单靠分类、又无确认信号时仍可按大类绑定正确标注的源。
+// 同名多部时：豆瓣+片名唯一命中优先；否则确认信号（豆瓣/年份/备注形态）拉开差距才绑定；
+// 确认打平则允许唯一大类命中。
 func PickUniqueIdentityMid(slave IdentityProfile, candidates map[int64]IdentityProfile) int64 {
 	if len(candidates) == 0 {
 		return 0
@@ -364,25 +406,8 @@ func PickUniqueIdentityMid(slave IdentityProfile, candidates map[int64]IdentityP
 		return dbHits[0]
 	}
 
-	bestConfirmMid := int64(0)
-	bestConfirm := -1
-	secondConfirm := -1
-	for mid, score := range scores {
-		c := score.Confirm()
-		switch {
-		case c > bestConfirm:
-			secondConfirm = bestConfirm
-			bestConfirm = c
-			bestConfirmMid = mid
-		case c == bestConfirm:
-			bestConfirmMid = 0
-			secondConfirm = c
-		case c > secondConfirm:
-			secondConfirm = c
-		}
-	}
-	if bestConfirmMid > 0 && bestConfirm >= identityConfirmMin && bestConfirm-maxInt(secondConfirm, 0) >= identityConfirmMargin {
-		return bestConfirmMid
+	if mid := uniqueLeadingScore(scores, func(s IdentityScore) int { return s.Confirm() }); mid > 0 {
+		return mid
 	}
 
 	catHits := make([]int64, 0, 1)
