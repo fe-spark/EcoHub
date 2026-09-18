@@ -119,13 +119,14 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version)
+		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
 		if st.Pid > 0 {
 			query = query.Where("pid = ?", st.Pid)
 		}
 		if st.Cid > 0 {
 			query = query.Where("cid = ?", st.Cid)
 		}
+		query = applyTagSearchFilter(query, version, st)
 		if keyword != "" {
 			query = applyNameLikeFilter(query, keyword)
 		}
@@ -155,7 +156,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 
 		var snapshots []model.FilmListSnapshot
 		if len(ids) > 0 {
-			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
+			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
 				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 			}
 		}

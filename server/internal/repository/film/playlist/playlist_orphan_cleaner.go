@@ -296,7 +296,7 @@ func HasPublishedFilmListSnapshot() (bool, error) {
 		return false, nil
 	}
 	var row orphanPlaylistRow
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Select("id").Limit(1).Scan(&row).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select("id").Limit(1).Scan(&row).Error; err != nil {
 		return false, err
 	}
 	return row.ID > 0, nil

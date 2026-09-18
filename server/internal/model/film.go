@@ -1,6 +1,8 @@
 package model
 
 import (
+	"time"
+
 	"server/internal/model/dto"
 
 	"gorm.io/gorm"
@@ -146,15 +148,15 @@ func (MovieMatchKey) TableName() string {
 
 // FilmIndexIdentity 索引标识层：只负责来源与主键归属。
 type FilmIndexIdentity struct {
-	Mid        int64  `json:"mid" gorm:"uniqueIndex:idx_mid;index:idx_film_index_update_mid,priority:2;index:idx_film_index_pid_update_mid,priority:3"`            // 影片ID (全局唯一)
-	ContentKey string `json:"contentKey" gorm:"uniqueIndex:idx_content"` // 主站内容指纹：优先 vod_{源站vod_id}，无 ID 时 name_{hash}
-	SourceId   string `json:"sourceId" gorm:"index"`                     // 来源站点ID
-	DbId       int64  `json:"dbId" gorm:"index"`                         // 豆瓣ID (用于精准去重)
+	Mid        int64  `json:"mid" gorm:"uniqueIndex:idx_mid;index:idx_film_index_update_mid,priority:2;index:idx_film_index_pid_update_mid,priority:3"` // 影片ID (全局唯一)
+	ContentKey string `json:"contentKey" gorm:"uniqueIndex:idx_content"`                                                                                // 主站内容指纹：优先 vod_{源站vod_id}，无 ID 时 name_{hash}
+	SourceId   string `json:"sourceId" gorm:"index"`                                                                                                    // 来源站点ID
+	DbId       int64  `json:"dbId" gorm:"index"`                                                                                                        // 豆瓣ID (用于精准去重)
 }
 
 // FilmIndexCategory 分类层：RootCategoryKey/CategoryKey 是来源分类身份；Pid/Cid/CName 仅作写入快照和兼容展示。
 type FilmIndexCategory struct {
-	Cid              int64  `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                             // 分类ID
+	Cid              int64  `json:"cid" gorm:"index;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                            // 分类ID
 	Pid              int64  `json:"pid" gorm:"index;index:idx_film_index_pid_update_mid,priority:1;index:idx_pid_update;index:idx_cid_update;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits;constraint:OnDelete:CASCADE"` // 上级分类ID
 	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index;index:idx_root_key_update;index:idx_root_key_hits;index:idx_filter_root_score;index:idx_filter_root_update;index:idx_filter_root_hits"`
 	CategoryKey      string `json:"categoryKey" gorm:"size:128;index;index:idx_category_key_update;index:idx_category_key_hits;index:idx_category_key_latest"`
@@ -164,27 +166,27 @@ type FilmIndexCategory struct {
 
 // FilmIndexContent 展示内容层：列表与详情入口直接消费的字段。
 type FilmIndexContent struct {
-	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`                                                            // 系列标识，用于相关推荐召回与排序
-	Name               string  `json:"name"`                                                                                       // 片名
-	SubTitle           string  `json:"subTitle" gorm:"type:text"`                                                                  // 影片子标题
-	ClassTag           string  `json:"classTag" gorm:"type:text"`                                                                  // 类型标签
-	Area               string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 地区
-	Language           string  `json:"language" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"` // 语言
-	Year               int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`     // 年份
-	Initial            string  `json:"initial"`                                                                                    // 首字母
-	Score              float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                  // 评分
+	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`                                                                                                                                                      // 系列标识，用于相关推荐召回与排序
+	Name               string  `json:"name"`                                                                                                                                                                                 // 片名
+	SubTitle           string  `json:"subTitle" gorm:"type:text"`                                                                                                                                                            // 影片子标题
+	ClassTag           string  `json:"classTag" gorm:"type:text"`                                                                                                                                                            // 类型标签
+	Area               string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                               // 地区
+	Language           string  `json:"language" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                           // 语言
+	Year               int64   `json:"year" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                               // 年份
+	Initial            string  `json:"initial"`                                                                                                                                                                              // 首字母
+	Score              float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                                                                                                            // 评分
 	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_film_index_update_mid,priority:1;index:idx_film_index_pid_update_mid,priority:2;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
-	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`              // 热度排行
-	State              string  `json:"state"`                                                                                      // 状态 正片|预告
-	Remarks            string  `json:"remarks"`                                                                                    // 完结 | 更新至x集
-	Picture            string  `json:"picture" gorm:"type:text"`                                                                   // 竖版封面图（源站/海报源原图）
-	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`                                                              // 横版幻灯图（源站/海报源原图）
-	CustomPicture      string  `json:"customPicture" gorm:"type:text"`                                                             // 自定义竖版封面图（独立存储）
-	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`                                                        // 自定义横版幻灯图（独立存储）
-	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`                                                       // 是否人工自定义海报（锁定保护）
-	Actor              string  `json:"actor" gorm:"type:text"`                                                                     // 主演
-	Director           string  `json:"director" gorm:"type:text"`                                                                  // 导演
-	Blurb              string  `json:"blurb" gorm:"type:text"`                                                                     // 简介, 不完整
+	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`                                                                                                        // 热度排行
+	State              string  `json:"state"`                                                                                                                                                                                // 状态 正片|预告
+	Remarks            string  `json:"remarks"`                                                                                                                                                                              // 完结 | 更新至x集
+	Picture            string  `json:"picture" gorm:"type:text"`                                                                                                                                                             // 竖版封面图（源站/海报源原图）
+	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`                                                                                                                                                        // 横版幻灯图（源站/海报源原图）
+	CustomPicture      string  `json:"customPicture" gorm:"type:text"`                                                                                                                                                       // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`                                                                                                                                                  // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`                                                                                                                                                 // 是否人工自定义海报（锁定保护）
+	Actor              string  `json:"actor" gorm:"type:text"`                                                                                                                                                               // 主演
+	Director           string  `json:"director" gorm:"type:text"`                                                                                                                                                            // 导演
+	Blurb              string  `json:"blurb" gorm:"type:text"`                                                                                                                                                               // 简介, 不完整
 }
 
 func (c FilmIndexContent) DisplayPicture() string {
@@ -230,16 +232,21 @@ func (FilmIndex) TableName() string {
 
 // FilmListSnapshot 是前台列表与 TVBox 列表的只读快照。
 // 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
+// 不嵌入 gorm.Model：其 DeletedAt 默认带 index，AutoMigrate 会反复建回
+// idx_film_list_snapshot_deleted_at，触发 MySQL Index Merge Intersect。
 type FilmListSnapshot struct {
-	gorm.Model
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:1;index:idx_snap_ver_name,priority:1"`
+	ID              uint `gorm:"primarykey"`
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	DeletedAt       gorm.DeletedAt
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_name,priority:1;index:idx_snap_ver_update,priority:1"`
 	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
 	ContentKey      string `json:"contentKey" gorm:"size:128;index"`
 	SourceId        string `json:"sourceId" gorm:"index"`
 	DbId            int64  `json:"dbId" gorm:"index"`
 
 	Cid              int64  `json:"cid" gorm:"index;index:idx_snap_cid_update;index:idx_snap_cid_hits"`
-	Pid              int64  `json:"pid" gorm:"index;index:idx_snap_pid_update;index:idx_snap_pid_hits;index:idx_snap_pid_year;index:idx_snap_ver_hits_pid,priority:3"`
+	Pid              int64  `json:"pid" gorm:"index;index:idx_snap_pid_update;index:idx_snap_pid_hits;index:idx_snap_pid_year"`
 	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index"`
 	CategoryKey      string `json:"categoryKey" gorm:"size:128;index"`
 	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"`
@@ -254,8 +261,8 @@ type FilmListSnapshot struct {
 	Year               int64   `json:"year" gorm:"index;index:idx_snap_pid_year"`
 	Initial            string  `json:"initial"`
 	Score              float64 `json:"score" gorm:"index"`
-	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year"`
-	Hits               int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_ver_hits_pid,priority:2"`
+	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year;index:idx_snap_ver_update,priority:2"`
+	Hits               int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
 	State              string  `json:"state"`
 	Remarks            string  `json:"remarks"`
 	Picture            string  `json:"picture" gorm:"type:text"`

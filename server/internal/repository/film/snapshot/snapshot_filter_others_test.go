@@ -262,3 +262,65 @@ func TestListFilmSnapshotsByTags_OthersFilter_OverDisplayLimit(t *testing.T) {
 		t.Fatalf("Area=others: expected total=2, got %d", page.Total)
 	}
 }
+
+func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
+	gdb := setupOthersFilterTestDB(t)
+	version := "test_pagination_v1"
+	const targetPid int64 = 1
+
+	if err := gdb.Create(&model.Category{Id: targetPid, Pid: 0, Name: "电影", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+
+	// 插入 5 条数据，update_stamp 递增
+	for i := 1; i <= 5; i++ {
+		s := model.FilmListSnapshot{
+			ID:              uint(i),
+			SnapshotVersion: version,
+			Mid:             int64(i),
+			Pid:             targetPid,
+			Name:            fmt.Sprintf("电影_%d", i),
+			UpdateStamp:     int64(1000 + i),
+		}
+		if err := gdb.Create(&s).Error; err != nil {
+			t.Fatalf("create snapshot %d: %v", i, err)
+		}
+	}
+
+	// 第 1 页: 每页 2 条，预期返回 Mid 5, 4 (默认 update_stamp DESC)
+	p1 := &dto.Page{Current: 1, PageSize: 2}
+	res1 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p1)
+	if len(res1) != 2 || p1.Total != 5 || p1.PageCount != 3 {
+		t.Fatalf("Page 1 error: got len=%d total=%d pageCount=%d, expected len=2 total=5 pageCount=3", len(res1), p1.Total, p1.PageCount)
+	}
+	if res1[0].Mid != 5 || res1[1].Mid != 4 {
+		t.Fatalf("Page 1 items order error: expected [5, 4], got [%d, %d]", res1[0].Mid, res1[1].Mid)
+	}
+
+	// 第 2 页: 每页 2 条，预期返回 Mid 3, 2
+	p2 := &dto.Page{Current: 2, PageSize: 2}
+	res2 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p2)
+	if len(res2) != 2 || p2.Total != 5 || p2.PageCount != 3 {
+		t.Fatalf("Page 2 error: got len=%d total=%d pageCount=%d, expected len=2 total=5 pageCount=3", len(res2), p2.Total, p2.PageCount)
+	}
+	if res2[0].Mid != 3 || res2[1].Mid != 2 {
+		t.Fatalf("Page 2 items order error: expected [3, 2], got [%d, %d]", res2[0].Mid, res2[1].Mid)
+	}
+
+	// 第 3 页: 每页 2 条，最后一页预期返回 Mid 1
+	p3 := &dto.Page{Current: 3, PageSize: 2}
+	res3 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p3)
+	if len(res3) != 1 || p3.Total != 5 || p3.PageCount != 3 {
+		t.Fatalf("Page 3 error: got len=%d total=%d pageCount=%d, expected len=1 total=5 pageCount=3", len(res3), p3.Total, p3.PageCount)
+	}
+	if res3[0].Mid != 1 {
+		t.Fatalf("Page 3 items order error: expected [1], got [%d]", res3[0].Mid)
+	}
+
+	// 第 4 页: 超出范围，预期返回空列表，但 Total 与 PageCount 仍正确
+	p4 := &dto.Page{Current: 4, PageSize: 2}
+	res4 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p4)
+	if len(res4) != 0 || p4.Total != 5 || p4.PageCount != 3 {
+		t.Fatalf("Page 4 error: got len=%d total=%d pageCount=%d, expected len=0 total=5 pageCount=3", len(res4), p4.Total, p4.PageCount)
+	}
+}

@@ -59,7 +59,7 @@ func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
 			UpdateStamp int64
 		}
 		var rows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 			Select("mid, pid, cid, name, hits, score, year, update_stamp").
 			Where("snapshot_version = ?", version).
 			Find(&rows).Error; err != nil {
@@ -304,7 +304,7 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 			end = len(cleanMids)
 		}
 		var batchRows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).
+		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 			Select("mid, pid, cid, name, hits, score, year, update_stamp").
 			Where("snapshot_version = ? AND mid IN ?", version, cleanMids[i:end]).
 			Find(&batchRows).Error; err != nil {

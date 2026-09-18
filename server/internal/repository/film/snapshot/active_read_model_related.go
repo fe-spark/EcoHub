@@ -134,7 +134,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	// 1. 同系列优先（精确匹配，应用层 seen 去重）
 	if current.SeriesKey != "" && db.Mdb != nil {
 		var seriesRows []model.FilmListSnapshot
-		db.Mdb.Select(relatedSnapshotSelectFields).
+		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
 			Where("snapshot_version = ? AND series_key = ? AND mid <> ?", version, current.SeriesKey, current.Mid).
 			Order("hits DESC, id DESC").Limit(maxCandidates).Find(&seriesRows)
 		appendUnique(seriesRows)
@@ -143,7 +143,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	// 2. 同细分类 (Cid) 候选兜底
 	if len(list) < maxCandidates && current.Cid > 0 && db.Mdb != nil {
 		var cidRows []model.FilmListSnapshot
-		db.Mdb.Select(relatedSnapshotSelectFields).
+		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
 			Where("snapshot_version = ? AND cid = ? AND mid <> ?", version, current.Cid, current.Mid).
 			Order("hits DESC, id DESC").Limit(maxCandidates - len(list)).Find(&cidRows)
 		appendUnique(cidRows)
@@ -152,7 +152,7 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 	// 3. 同大分类 (Pid) 高热度候选兜底
 	if len(list) < maxCandidates && current.Pid > 0 && db.Mdb != nil {
 		var pidRows []model.FilmListSnapshot
-		db.Mdb.Select(relatedSnapshotSelectFields).
+		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
 			Where("snapshot_version = ? AND pid = ? AND mid <> ?", version, current.Pid, current.Mid).
 			Order("hits DESC, id DESC").Limit(maxCandidates - len(list)).Find(&pidRows)
 		appendUnique(pidRows)

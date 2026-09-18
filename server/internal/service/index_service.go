@@ -22,6 +22,14 @@ type IndexService struct{}
 
 var IndexSvc = new(IndexService)
 
+func init() {
+	filmsnapshot.RegisterSnapshotPublishedHook(func(version string) {
+		startedAt := time.Now()
+		_ = IndexSvc.IndexPage()
+		log.Printf("[IndexService][Warmup] 快照发布后首页缓存预热完成 version=%s cost=%s", version, time.Since(startedAt))
+	})
+}
+
 func normalizeIndexPage(page *dto.Page) *dto.Page {
 	if page == nil {
 		return &dto.Page{Current: 1, PageSize: 20}
