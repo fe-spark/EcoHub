@@ -35,21 +35,30 @@ type MovieDescriptor struct {
 
 // MovieBasicInfo 影片基本信息
 type MovieBasicInfo struct {
-	Id           int64  `json:"id"`           // 影片Id
-	Cid          int64  `json:"cid"`          // 分类ID
-	Pid          int64  `json:"pid"`          // 一级分类ID
-	Name         string `json:"name"`         // 片名
-	SubTitle     string `json:"subTitle"`     // 子标题
-	CName        string `json:"cName"`        // 分类名称
-	State        string `json:"state"`        // 影片状态 正片|预告...
-	Picture      string `json:"picture"`      // 竖版封面图
-	PictureSlide string `json:"pictureSlide"` // 横版幻灯图
-	Actor        string `json:"actor"`        // 主演
-	Director     string `json:"director"`     // 导演
-	Blurb        string `json:"blurb"`        // 简介, 不完整
-	Remarks      string `json:"remarks"`      // 更新情况
-	Area         string `json:"area"`         // 地区
-	Year         string `json:"year"`         // 年份
+	Id           int64  `json:"id"`                  // 影片Id
+	Cid          int64  `json:"cid"`                 // 分类ID
+	Pid          int64  `json:"pid"`                 // 一级分类ID
+	Name         string `json:"name"`                // 片名
+	SubTitle     string `json:"subTitle"`            // 子标题
+	CName        string `json:"cName"`               // 分类名称
+	State        string `json:"state"`               // 影片状态 正片|预告...
+	Picture      string `json:"picture"`             // 竖版封面图
+	PictureSlide string `json:"pictureSlide"`        // 横版幻灯图
+	Actor        string `json:"actor"`               // 主演
+	Director     string `json:"director"`            // 导演
+	Blurb        string `json:"blurb"`               // 简介, 不完整
+	Remarks      string `json:"remarks"`             // 更新情况
+	Area         string `json:"area"`                // 地区
+	Year         string `json:"year"`                // 年份
+	SourceId     string `json:"sourceId,omitempty"`  // 当前结果所属采集源
+	SourceMid    int64  `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
+}
+
+// SearchSourceTab 搜索页按采集源分组的 Tab。
+type SearchSourceTab struct {
+	Id    string `json:"id"`
+	Name  string `json:"name"`
+	Count int    `json:"count,omitempty"`
 }
 
 // MovieUrlInfo 影视资源url信息

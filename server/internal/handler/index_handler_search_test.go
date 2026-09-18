@@ -1,6 +1,16 @@
 package handler
 
-import "testing"
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"server/internal/model"
+	"server/internal/model/dto"
+
+	"github.com/gin-gonic/gin"
+)
 
 func TestClampSearchFilmPageSize(t *testing.T) {
 	if got := clampSearchFilmPageSize(20, false); got != 12 {
@@ -63,5 +73,102 @@ func TestHasSearchOptions(t *testing.T) {
 		},
 	}) {
 		t.Fatal("真实 Plot 标签应展示筛选面板")
+	}
+}
+
+func TestParseOptionalQueryInt(t *testing.T) {
+	if v, ok := parseOptionalQueryInt(""); !ok || v != 0 {
+		t.Fatalf("empty should be 0, got %d ok=%v", v, ok)
+	}
+	if v, ok := parseOptionalQueryInt("12"); !ok || v != 12 {
+		t.Fatalf("12 should parse, got %d ok=%v", v, ok)
+	}
+	if _, ok := parseOptionalQueryInt("abc"); ok {
+		t.Fatal("invalid should fail")
+	}
+}
+
+func TestHasPlayableFilmDetail(t *testing.T) {
+	if hasPlayableFilmDetail(8, model.MovieDetailVo{}) {
+		t.Fatal("local missing mid should fail")
+	}
+	if !hasPlayableFilmDetail(8, model.MovieDetailVo{MovieDetail: model.MovieDetail{Id: 8}}) {
+		t.Fatal("local mid should pass")
+	}
+	live := model.MovieDetailVo{
+		MovieDetail: model.MovieDetail{Name: "仙逆"},
+		List:        []model.PlayLinkVo{{Id: "src", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://x"}}}},
+	}
+	if !hasPlayableFilmDetail(0, live) {
+		t.Fatal("live detail should pass")
+	}
+	if hasPlayableFilmDetail(0, model.MovieDetailVo{MovieDetail: model.MovieDetail{Name: "仙逆"}}) {
+		t.Fatal("live without playlist should fail")
+	}
+}
+
+func TestParseOptionalQueryInt64(t *testing.T) {
+	if v, ok := parseOptionalQueryInt64(""); !ok || v != 0 {
+		t.Fatalf("empty should be 0, got %d ok=%v", v, ok)
+	}
+	if v, ok := parseOptionalQueryInt64("1002"); !ok || v != 1002 {
+		t.Fatalf("1002 should parse, got %d ok=%v", v, ok)
+	}
+	if _, ok := parseOptionalQueryInt64("xyz"); ok {
+		t.Fatal("invalid should fail")
+	}
+}
+
+func TestResolvePlayableSourceID(t *testing.T) {
+	sources := []model.PlayLinkVo{
+		{Id: "group1", SourceId: "s1", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://1"}}},
+		{Id: "group2", SourceId: "s2", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://2"}}},
+	}
+	if got := resolvePlayableSourceID(sources, "group2"); got != "group2" {
+		t.Fatalf("preferred id failed: %s", got)
+	}
+	if got := resolvePlayableSourceID(sources, "s2"); got != "group2" {
+		t.Fatalf("preferred sourceId failed: %s", got)
+	}
+	if got := resolvePlayableSourceID(sources, "unknown"); got != "group1" {
+		t.Fatalf("fallback first failed: %s", got)
+	}
+}
+
+func TestFilmPlayInfo_ZeroIDsFailFast(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=0&sid=0", nil)
+	c.Request = req
+
+	IndexHd.FilmPlayInfo(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 wrapper, got %d", w.Code)
+	}
+	var resp dto.Response
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.Code != dto.FAILED || resp.Msg != "请求异常,暂无影片信息!!!" {
+		t.Fatalf("unexpected response: %+v", resp)
+	}
+}
+
+func TestFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=0&sid=100&source=src1&playFrom=&episode=-1", nil)
+	c.Request = req
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("FilmPlayInfo panicked with negative episode: %v", r)
+		}
+	}()
+	IndexHd.FilmPlayInfo(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 wrapper, got %d", w.Code)
 	}
 }

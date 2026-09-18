@@ -30,7 +30,10 @@ export async function serverGet<T = any>(
   }
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), serverFetchTimeoutMs);
-  const merged: Record<string, string> = { "User-Agent": "EcoHub-SSR" };
+  const merged: Record<string, string> = {
+    "User-Agent": "EcoHub-SSR",
+    Connection: "close",
+  };
   try {
     const reqHeaders = await nextHeaders();
     const forwardedFor = reqHeaders.get("x-forwarded-for");
@@ -60,13 +63,20 @@ export async function serverGet<T = any>(
     });
   }
 
-  let response: Response;
+  let response: Response | undefined;
+  let body = "";
   try {
-    response = await fetch(apiUrl, {
-      cache: "no-store",
-      headers: merged,
-      signal: controller.signal,
-    });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      response = await fetch(apiUrl, {
+        cache: "no-store",
+        headers: merged,
+        signal: controller.signal,
+      });
+      body = await response.text();
+      if (body.trim() || !response.ok) {
+        break;
+      }
+    }
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`服务端请求超时: ${apiUrl}`);
@@ -76,7 +86,9 @@ export async function serverGet<T = any>(
     clearTimeout(timeout);
   }
 
-  const body = await response.text();
+  if (!response) {
+    throw new Error(`服务端请求失败: ${apiUrl}`);
+  }
   if (!response.ok) {
     throw new Error(
       `服务端请求失败: ${response.status} ${response.statusText} ${body.slice(0, 200)}`.trim(),

@@ -86,6 +86,9 @@ func PickMasterSourceForCategory() *model.FilmSource {
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。
 func GetEnabledCollectSourceList() []model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
 	var list []model.FilmSource
 	if err := db.Mdb.Where("state = ?", true).Order("grade ASC").Find(&list).Error; err != nil {
 		log.Println("GetEnabledCollectSourceList Error:", err)

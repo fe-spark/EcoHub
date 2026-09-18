@@ -1,10 +1,9 @@
 "use client";
 
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Button, Pagination } from "antd";
+import { Button } from "antd";
 import {
   AppstoreOutlined,
-  CaretRightOutlined,
   ClearOutlined,
   ClockCircleOutlined,
   CloseCircleFilled,
@@ -12,14 +11,13 @@ import {
   FireOutlined,
   SearchOutlined,
   UnorderedListOutlined,
-  VideoCameraOutlined,
 } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
-import FilmList from "@/components/public/FilmList";
-import HighlightMatchedText from "@/components/public/HighlightMatchedText";
+import SourceTabs from "./SourceTabs";
+import SearchResultPanel from "./SearchResultPanel";
+import useSearchSources from "./useSearchSources";
 import styles from "./index.module.less";
 
 const HOT_KEYWORDS = [
@@ -47,23 +45,6 @@ function focusVisibleSearchInput(el: HTMLInputElement | null) {
   }
   el.focus();
   return document.activeElement === el;
-}
-
-function normalizeMetaValue(value?: string | number | null) {
-  const text = String(value ?? "").trim();
-  if (!text || text === "0") {
-    return "";
-  }
-  return text;
-}
-
-function getPrimaryPlotTag(classTag?: string) {
-  return (
-    normalizeMetaValue(classTag)
-      .split(/[,，/|、\s]+/)
-      .map((tag) => tag.trim())
-      .find(Boolean) || ""
-  );
 }
 
 const EMPTY_HISTORY_LIST: string[] = [];
@@ -121,27 +102,43 @@ const SORT_OPTIONS = [
   { key: "year", label: "上映年份" },
 ];
 
+function buildSearchPath(keyword: string, current: string, sort: string, source: string) {
+  const params = new URLSearchParams({
+    search: keyword,
+    current,
+  });
+  if (!source && sort) {
+    params.set("sort", sort);
+  }
+  if (source) {
+    params.set("source", source);
+  }
+  return `/search?${params.toString()}`;
+}
+
 export default function SearchPageView({
   data,
   keyword,
   current,
   sort = "",
+  source = "",
   hotKeywords = [],
 }: {
   data: any;
   keyword: string;
   current: string;
   sort?: string;
+  source?: string;
   hotKeywords?: string[];
 }) {
   const { navigate, isNavigating } = useContentNavigate();
   const { message } = useAppMessage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}`);
+  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}:${source}`);
 
-  if (prevParamsKey !== `${keyword}:${current}:${sort}`) {
-    setPrevParamsKey(`${keyword}:${current}:${sort}`);
+  if (prevParamsKey !== `${keyword}:${current}:${sort}:${source}`) {
+    setPrevParamsKey(`${keyword}:${current}:${sort}:${source}`);
     setSearchKeyword(keyword);
   }
 
@@ -155,7 +152,16 @@ export default function SearchPageView({
     }
   }, [rawHistory]);
 
-  const viewMode = useSyncExternalStore(subscribeViewMode, getViewModeSnapshot, () => "grid");
+  const viewMode = useSyncExternalStore<"grid" | "detail">(subscribeViewMode, getViewModeSnapshot, () => "grid");
+  const {
+    sources,
+    activeId,
+    list,
+    page,
+    listLoading,
+    changeSource,
+    changePage,
+  } = useSearchSources({ keyword, sort, source, current, data });
 
   useEffect(() => {
     const onFocusSearch = () => {
@@ -242,32 +248,33 @@ export default function SearchPageView({
     }
     setSearchKeyword(trimmed);
     saveHistory(trimmed);
-    navigate(
-      `/search?search=${encodeURIComponent(trimmed)}&sort=${encodeURIComponent(sort)}&current=1`,
-      "搜索加载中...",
-    );
+    navigate(buildSearchPath(trimmed, "1", sort, ""), "搜索加载中...");
   };
 
   const handleSortChange = (newSort: string) => {
-    if (newSort === sort) return;
+    if (newSort === sort && !source) return;
     setSearchKeyword(keyword);
-    navigate(
-      `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(newSort)}&current=1`,
-      "排序切换中...",
-    );
+    navigate(buildSearchPath(keyword, "1", newSort, ""), "排序切换中...");
   };
 
-  const handlePageChange = (page: number) => {
+  const handlePageChange = (nextPage: number) => {
     setSearchKeyword(keyword);
-    navigate(
-      `/search?search=${encodeURIComponent(keyword)}&sort=${encodeURIComponent(sort)}&current=${page}`,
-      "页面加载中...",
-    );
+    void changePage(nextPage);
   };
 
-  const handlePlay = (id: string) => {
+  const handleSourceChange = (nextSource: string) => {
+    setSearchKeyword(keyword);
+    changeSource(nextSource);
+  };
+
+  const handlePlay = (movie: { id?: string | number; sourceId?: string; sourceMid?: string | number }) => {
+    const localId = Number(movie?.id) > 0 ? String(movie.id) : "";
     navigate(
-      resolvePlayEntryPath(id, { sourceId: "0", episodeIndex: 0 }),
+      resolvePlayEntryPath(localId, {
+        sourceId: movie?.sourceId,
+        sourceMid: movie?.sourceMid,
+        episodeIndex: 0,
+      }),
       "进入播放页...",
     );
   };
@@ -279,8 +286,8 @@ export default function SearchPageView({
     } catch {}
   };
 
-  const totalCount = data?.page?.total ?? data?.list?.length ?? 0;
-  const hasResults = Array.isArray(data?.list) && data.list.length > 0;
+  const totalCount = page?.total ?? list.length ?? 0;
+  const hasResults = Array.isArray(list) && list.length > 0;
   const displayHotList =
     Array.isArray(hotKeywords) && hotKeywords.length > 0
       ? hotKeywords
@@ -321,49 +328,60 @@ export default function SearchPageView({
         </Button>
       </div>
 
-      {/* 搜索结果头部信息条 */}
-      <header className={styles.resultHeader}>
-        <div className={styles.resultSummary}>
-          {keyword ? (
-            <>
-              <h1 className={styles.resultTitle}>
-                &ldquo;<span className={styles.keywordHighlight}>{keyword}</span>&rdquo; 的搜索结果
-              </h1>
-              <span className={styles.totalBadge}>共 {totalCount} 部作品</span>
-            </>
-          ) : (
-            <h1 className={styles.resultTitle}>影视搜索</h1>
-          )}
-        </div>
-
-        {hasResults && (
-          <div className={styles.viewModeSwitcher}>
-            <button
-              type="button"
-              className={`${styles.modeBtn} ${viewMode === "grid" ? styles.active : ""}`}
-              onClick={() => toggleViewMode("grid")}
-              title="海报网格视图"
-              aria-label="海报网格视图"
-            >
-              <AppstoreOutlined />
-              <span>海报</span>
-            </button>
-            <button
-              type="button"
-              className={`${styles.modeBtn} ${viewMode === "detail" ? styles.active : ""}`}
-              onClick={() => toggleViewMode("detail")}
-              title="图文详情视图"
-              aria-label="图文详情视图"
-            >
-              <UnorderedListOutlined />
-              <span>详情</span>
-            </button>
+      <div className={styles.sourceBlock}>
+        <header className={styles.resultHeader}>
+          <div className={styles.resultSummary}>
+            {keyword ? (
+              <>
+                <h1 className={styles.resultTitle}>
+                  &ldquo;<span className={styles.keywordHighlight}>{keyword}</span>&rdquo; 的搜索结果
+                </h1>
+                <span className={styles.totalBadge}>
+                  {listLoading ? "正在搜索..." : `共 ${totalCount} 部作品`}
+                </span>
+              </>
+            ) : (
+              <h1 className={styles.resultTitle}>影视搜索</h1>
+            )}
           </div>
+
+          {hasResults && (
+            <div className={styles.viewModeSwitcher}>
+              <button
+                type="button"
+                className={`${styles.modeBtn} ${viewMode === "grid" ? styles.active : ""}`}
+                onClick={() => toggleViewMode("grid")}
+                title="海报网格视图"
+                aria-label="海报网格视图"
+              >
+                <AppstoreOutlined />
+                <span>海报</span>
+              </button>
+              <button
+                type="button"
+                className={`${styles.modeBtn} ${viewMode === "detail" ? styles.active : ""}`}
+                onClick={() => toggleViewMode("detail")}
+                title="图文详情视图"
+                aria-label="图文详情视图"
+              >
+                <UnorderedListOutlined />
+                <span>详情</span>
+              </button>
+            </div>
+          )}
+        </header>
+
+        {keyword && (
+          <SourceTabs
+            sources={sources}
+            activeId={activeId}
+            onChange={handleSourceChange}
+          />
         )}
-      </header>
+      </div>
 
       {/* YouTube 风格排序筛选栏 */}
-      {keyword && (
+      {keyword && !activeId && (
         <div className={styles.sortBar} aria-label="排序方式">
           {SORT_OPTIONS.map((opt) => {
             const isActive = (opt.key === "" && (!sort || sort === "relevance")) || opt.key === sort;
@@ -447,157 +465,18 @@ export default function SearchPageView({
         )}
       </section>
 
-      {/* 搜索结果呈现 */}
-      {hasResults ? (
-        <section className={styles.searchRes} aria-label="搜索结果列表">
-          {/* 模式 A：海报瀑布流网格 */}
-          {viewMode === "grid" ? (
-            <div className={styles.gridContainer}>
-              <FilmList list={data.list} col={6} highlightQuery={keyword} />
-            </div>
-          ) : (
-            /* 模式 B：图文详情卡片 */
-            <div className={styles.resultList}>
-              {data.list.map((movie: any) => (
-                <article key={movie.id} className={styles.searchItem}>
-                  <div
-                    className={styles.posterWrapper}
-                    onClick={() => handlePlay(movie.id)}
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={movie.picture || FALLBACK_IMG}
-                      className={styles.poster}
-                      alt={movie.name}
-                      loading="lazy"
-                    />
-                    {movie.remarks && (
-                      <span className={styles.posterRemark}>{movie.remarks}</span>
-                    )}
-                  </div>
-
-                  <div className={styles.intro}>
-                    <h3
-                      className={styles.filmName}
-                      onClick={() => handlePlay(movie.id)}
-                    >
-                      <HighlightMatchedText
-                        text={movie.name}
-                        query={keyword}
-                        className={styles.highlightMatched}
-                      />
-                    </h3>
-
-                    <div className={styles.tags}>
-                      {movie.cName && (
-                        <span className={`${styles.tag} ${styles.category}`}>
-                          {movie.cName}
-                        </span>
-                      )}
-                      {normalizeMetaValue(movie.year) && (
-                        <span className={styles.tag}>
-                          {normalizeMetaValue(movie.year)}
-                        </span>
-                      )}
-                      {normalizeMetaValue(movie.area) && (
-                        <span className={styles.tag}>
-                          {normalizeMetaValue(movie.area)}
-                        </span>
-                      )}
-                      {normalizeMetaValue(movie.language) && (
-                        <span className={styles.tag}>
-                          {normalizeMetaValue(movie.language)}
-                        </span>
-                      )}
-                      {getPrimaryPlotTag(movie.classTag) && (
-                        <span className={styles.tag}>
-                          {getPrimaryPlotTag(movie.classTag)}
-                        </span>
-                      )}
-                    </div>
-
-                    <div className={styles.metaRow}>
-                      <span className={styles.metaLabel}>导演</span>
-                      <span className={styles.metaValue}>
-                        {movie.director ? (
-                          <HighlightMatchedText
-                            text={movie.director}
-                            query={keyword}
-                            className={styles.highlightMatched}
-                          />
-                        ) : (
-                          "暂无导演信息"
-                        )}
-                      </span>
-                    </div>
-
-                    <div className={styles.metaRow}>
-                      <span className={styles.metaLabel}>主演</span>
-                      <span className={styles.metaValue}>
-                        {movie.actor ? (
-                          <HighlightMatchedText
-                            text={movie.actor}
-                            query={keyword}
-                            className={styles.highlightMatched}
-                          />
-                        ) : (
-                          "暂无主演信息"
-                        )}
-                      </span>
-                    </div>
-
-                    <p className={styles.blurb}>
-                      {movie.blurb?.replace(/[\s　]+/g, " ").trim() ||
-                        "暂无剧情简介，点击立即进入播放页体验高清流畅观影。"}
-                    </p>
-
-                    <div className={styles.actionRow}>
-                      <Button
-                        type="primary"
-                        icon={<CaretRightOutlined />}
-                        className={styles.playBtn}
-                        onClick={() => handlePlay(movie.id)}
-                      >
-                        立即播放
-                      </Button>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-
-          <div className={styles.pagination}>
-            <Pagination
-              current={parseInt(current || "1", 10)}
-              total={data.page?.total ?? totalCount}
-              pageSize={data.page?.pageSize || 12}
-              onChange={handlePageChange}
-              showSizeChanger={false}
-              hideOnSinglePage
-            />
-          </div>
-        </section>
-      ) : (
-        /* 无搜索结果 / 初始态统一探索面板 */
-        <section className={styles.emptyContainer}>
-          <div className={styles.emptyHeader}>
-            <div className={styles.emptyIconCircle}>
-              <VideoCameraOutlined />
-            </div>
-            <h2 className={styles.emptyTitle}>
-              {keyword ? (
-                <>未找到与 &ldquo;<span className={styles.keywordHighlight}>{keyword}</span>&rdquo; 相关的影视</>
-              ) : (
-                "探索全网热门影视"
-              )}
-            </h2>
-            <p className={styles.emptyDesc}>
-              建议缩短或更换搜索词，也可以直接尝试上方的热门搜索推荐
-            </p>
-          </div>
-        </section>
-      )}
+      <SearchResultPanel
+        keyword={keyword}
+        current={current}
+        list={list}
+        page={page}
+        totalCount={totalCount}
+        listLoading={listLoading}
+        hasResults={hasResults}
+        viewMode={viewMode}
+        onPlay={handlePlay}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }
