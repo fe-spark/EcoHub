@@ -32,6 +32,7 @@ import SourceFormModal from "./source-form-modal";
 import {
   computeCollectQueueProgress,
   groupCollectQueues,
+  matchPrevCollectQueueBar,
   newClientCollectQueueId,
 } from "./collect-queue";
 import {
@@ -181,26 +182,11 @@ export default function CollectManagePageView() {
     const expiredSourceIds: string[] = [];
 
     setQueueBars((prev) => {
-      const prevById = new Map(prev.map((bar) => [bar.queueId, bar]));
       const usedPrev = new Set<string>();
       const next: QueueBarState[] = [];
 
-      const matchPrev = (group: { queueId: string; sourceIds: string[] }) => {
-        const exact = prevById.get(group.queueId);
-        if (exact && !usedPrev.has(exact.queueId)) {
-          return exact;
-        }
-        const groupSet = new Set(group.sourceIds);
-        for (const bar of prev) {
-          if (usedPrev.has(bar.queueId)) {
-            continue;
-          }
-          if (bar.sourceIds.some((id) => groupSet.has(id))) {
-            return bar;
-          }
-        }
-        return undefined;
-      };
+      const matchPrev = (group: { queueId: string; sourceIds: string[] }) =>
+        matchPrevCollectQueueBar(group, prev, usedPrev);
 
       for (const group of liveQueueGroups) {
         const view = computeCollectQueueProgress(group.sourceIds, siteList, activeCollectIds);

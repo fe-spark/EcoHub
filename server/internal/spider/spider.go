@@ -35,6 +35,7 @@ var stopAllVersion atomic.Uint64
 // init 把采集编排层的进度超时通知与取数能力注入子包（子包不反向依赖本包）。
 func init() {
 	progress.SetStaleNotifier(emitProgressStaleNotify)
+	progress.SetOccupyChecker(isOccupiedCollectSource)
 	fetcher.Configure(fetcher.Deps{
 		GetPageCount:        func(r utils.RequestInfo) (int, error) { return spiderCore.GetPageCount(r) },
 		GetFilmDetail:       func(r utils.RequestInfo) ([]model.MovieDetail, error) { return spiderCore.GetFilmDetail(r) },
@@ -183,12 +184,14 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			log.Printf("[%s] 检测到一键终止，停止派发剩余站点任务", tag)
 			for _, skipped := range sources[idx:] {
 				scheduler.FinishSource(skipped.Grade, skipped.Id)
+				abandonQueuedCollectSource(skipped, batchCtx)
 			}
 			break
 		}
 		if progress.IsStopped(src.Id) {
 			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
 			scheduler.FinishSource(src.Grade, src.Id)
+			abandonQueuedCollectSource(src, batchCtx)
 			continue
 		}
 		wg.Add(1)
@@ -205,16 +208,12 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			defer scheduler.FinishSource(fs.Grade, fs.Id)
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
-				if batchCtx != nil {
-					batchCtx.markSourceFinished(fs)
-				}
+				abandonQueuedCollectSource(fs, batchCtx)
 				return
 			}
 			if progress.IsStopped(fs.Id) {
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
-				if batchCtx != nil {
-					batchCtx.markSourceFinished(fs)
-				}
+				abandonQueuedCollectSource(fs, batchCtx)
 				return
 			}
 			if err := handleCollectWithStopVersion(fs.Id, h, &runVersion, false, false, batchCtx); err != nil {
@@ -235,8 +234,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	statsOwned := false
 	releasedPreparedOccupy := false
 	defer func() {
-		if isStandalone && !releasedPreparedOccupy && retErr != nil {
-			releaseCollectSourceIDs(id)
+		// 失败必须立刻放占用并把 starting 标 failed，否则 UI 仍显示采集中、重试被挡住。
+		if !releasedPreparedOccupy && retErr != nil {
+			abortUnstartedCollect(id, batchCtx)
 		}
 	}()
 	if runVersion != nil && isDispatchStopped(*runVersion) {

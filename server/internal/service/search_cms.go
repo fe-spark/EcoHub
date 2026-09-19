@@ -1,6 +1,8 @@
 package service
 
 import (
+	"errors"
+	"log"
 	"net/url"
 	"strconv"
 	"strings"
@@ -13,10 +15,16 @@ import (
 	"server/internal/spider"
 )
 
+var (
+	findCollectSourceById = repository.FindCollectSourceById
+	searchSourceList      = spider.SearchSourceList
+)
+
 // SearchFilmResult 搜索接口业务结果。
 type SearchFilmResult struct {
 	List    []model.MovieBasicInfo
 	Sources []model.SearchSourceTab
+	Error   string
 }
 
 // SearchFilm 聚合走本地快照；指定 source 时只打该采集源 CMS 搜索，不写库。
@@ -44,9 +52,10 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 		setSearchSourceCount(out.Sources, "", page.Total)
 		return out
 	}
-	list, cmsPage := searchCollectSourceCMS(sourceID, keyword, page.Current)
+	list, cmsPage, errMsg := searchCollectSourceCMS(sourceID, keyword, page.Current)
 	applyCMSPage(page, cmsPage, len(list))
 	out.List = list
+	out.Error = errMsg
 	setSearchSourceCount(out.Sources, sourceID, page.Total)
 	return out
 }
@@ -98,14 +107,43 @@ func attachSearchSource(list []model.MovieBasicInfo, sourceID string, fallbackSo
 	}
 }
 
-func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.MovieBasicInfo, model.FilmListPage) {
-	source := repository.FindCollectSourceById(sourceID)
-	if source == nil || !source.State || strings.TrimSpace(source.Uri) == "" {
-		return []model.MovieBasicInfo{}, model.FilmListPage{}
+func formatCMSSearchError(err error) string {
+	if err == nil {
+		return ""
 	}
-	pageData, err := spider.SearchSourceList(source.Uri, keyword, current)
+	if errors.Is(err, spider.ErrCMSSearchUnsupported) {
+		detail := strings.TrimSpace(strings.TrimPrefix(err.Error(), spider.ErrCMSSearchUnsupported.Error()))
+		detail = strings.TrimLeft(detail, ": ")
+		if detail != "" {
+			return detail
+		}
+		return "暂不支持搜索"
+	}
+	lower := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(lower, "timeout") || strings.Contains(lower, "deadline exceeded"):
+		return "源站超时"
+	case strings.Contains(lower, "too many requests") || strings.Contains(lower, "status=429"):
+		return "源站限流"
+	case strings.Contains(lower, "response is empty"):
+		return "源站无响应"
+	case strings.Contains(lower, "invalid character") || strings.Contains(lower, "unmarshal"):
+		return "源站返回异常"
+	default:
+		return "源站搜索失败"
+	}
+}
+
+func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.MovieBasicInfo, model.FilmListPage, string) {
+	source := findCollectSourceById(sourceID)
+	if source == nil || !source.State || strings.TrimSpace(source.Uri) == "" {
+		return []model.MovieBasicInfo{}, model.FilmListPage{}, "源站不可用"
+	}
+	pageData, err := searchSourceList(source.Uri, keyword, current)
 	if err != nil {
-		return []model.MovieBasicInfo{}, model.FilmListPage{}
+		msg := formatCMSSearchError(err)
+		log.Printf("[SearchFilm] 源站搜索失败 source=%s(%s) keyword=%q err=%v", source.Name, source.Id, keyword, err)
+		return []model.MovieBasicInfo{}, model.FilmListPage{}, msg
 	}
 	sourceMids := make([]int64, 0, len(pageData.List))
 	for _, item := range pageData.List {
@@ -135,7 +173,7 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 		}
 		list = append(list, card)
 	}
-	return list, pageData
+	return list, pageData, ""
 }
 
 func fillMissingCMSSearchPictures(uri string, list []model.FilmList, localBySourceMid map[int64]int64, snapByMid map[int64]model.FilmListSnapshot) {

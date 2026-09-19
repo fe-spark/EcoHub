@@ -65,6 +65,35 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 		t.Fatal("expected blocking while live tasks running")
 	}
 	tasks.Delete(sourceID)
+
+	// 6) 占用中的 starting 即使很久仍是排队
+	SetOccupyChecker(func(id string) bool { return id == sourceID })
+	state.mu.Lock()
+	state.data.Status = StatusStarting
+	state.data.QueueId = "q-queued"
+	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.mu.Unlock()
+	if !IsAlreadyQueuedOrRunning(sourceID) {
+		t.Fatal("expected blocking on occupied long starting")
+	}
+	snap, ok = Snapshot(sourceID)
+	if !ok || snap.Status != StatusStarting {
+		t.Fatalf("occupied starting must not stale-fail, got ok=%v status=%q", ok, snap.Status)
+	}
+	SetOccupyChecker(nil)
+
+	// 7) 无占用、无 live 的 starting 超时 → failed，不阻挡
+	state.mu.Lock()
+	state.data.Status = StatusStarting
+	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.mu.Unlock()
+	if IsAlreadyQueuedOrRunning(sourceID) {
+		t.Fatal("abandoned starting should not block after stale")
+	}
+	snap, ok = Snapshot(sourceID)
+	if !ok || snap.Status != StatusFailed {
+		t.Fatalf("abandoned starting should stale-fail, got ok=%v status=%q", ok, snap.Status)
+	}
 	store.Delete(sourceID)
 }
 
@@ -330,6 +359,88 @@ func TestGetActiveTaskProgressMarksStaleRunningWithoutLive(t *testing.T) {
 	store.Delete(sourceID)
 }
 
+func TestGetActiveTaskProgressDoesNotStaleQueuedStarting(t *testing.T) {
+	const sourceID = "progress-queued-starting"
+	const queueID = "q-batch-12"
+	store.Delete(sourceID)
+	tasks.Delete(sourceID)
+	SetOccupyChecker(func(id string) bool { return id == sourceID })
+	t.Cleanup(func() {
+		SetOccupyChecker(nil)
+		store.Delete(sourceID)
+		tasks.Delete(sourceID)
+	})
+
+	state := ensure(sourceID, "HD(BF)")
+	state.mu.Lock()
+	state.data.Status = StatusStarting
+	state.data.QueueId = queueID
+	state.updated = time.Now().Add(-staleDuration() - time.Minute)
+	state.mu.Unlock()
+
+	list := GetActiveTaskProgress()
+	found := false
+	for _, p := range list {
+		if p.Id == sourceID {
+			found = true
+			if p.Status != StatusStarting {
+				t.Fatalf("queued starting must stay starting, got %q", p.Status)
+			}
+			if p.QueueId != queueID {
+				t.Fatalf("queued starting must keep queueId, got %q", p.QueueId)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected long queued starting still listed")
+	}
+
+	snap, ok := Snapshot(sourceID)
+	if !ok || snap.Status != StatusStarting {
+		t.Fatalf("map status should remain starting, ok=%v status=%q", ok, snap.Status)
+	}
+	if snap.QueueId != queueID {
+		t.Fatalf("map queueId should remain %q, got %q", queueID, snap.QueueId)
+	}
+
+	pruneStale()
+	snap, ok = Snapshot(sourceID)
+	if !ok || snap.Status != StatusStarting || snap.QueueId != queueID {
+		t.Fatalf("housekeeping must not stale-fail queued starting, ok=%v status=%q queueId=%q",
+			ok, snap.Status, snap.QueueId)
+	}
+}
+
+func TestGetActiveTaskProgressMarksStaleAbandonedStarting(t *testing.T) {
+	const sourceID = "progress-abandoned-starting"
+	store.Delete(sourceID)
+	tasks.Delete(sourceID)
+	t.Cleanup(func() {
+		store.Delete(sourceID)
+		tasks.Delete(sourceID)
+	})
+
+	state := ensure(sourceID, "Gone")
+	state.mu.Lock()
+	state.data.Status = StatusStarting
+	state.updated = time.Now().Add(-staleDuration() - time.Second)
+	state.mu.Unlock()
+
+	list := GetActiveTaskProgress()
+	found := false
+	for _, p := range list {
+		if p.Id == sourceID {
+			found = true
+			if p.Status != StatusFailed {
+				t.Fatalf("abandoned starting should stale-fail, got %q", p.Status)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected abandoned starting to appear as failed within retain window")
+	}
+}
+
 func TestMarkSourcePagesFinishedStatuses(t *testing.T) {
 	const singleID = "pages-finished-single"
 	const batchID = "pages-finished-batch"
@@ -440,5 +551,32 @@ func TestMarkSourcesCollectStartingSetsQueueId(t *testing.T) {
 	}
 	if snapA.Status != StatusStarting || snapB.Status != StatusStarting {
 		t.Fatalf("status = %q / %q; want starting", snapA.Status, snapB.Status)
+	}
+}
+
+func TestMarkSourcesCollectStarting_RetryOverwritesQueueId(t *testing.T) {
+	const sourceID = "queue-retry-ik"
+	store.Delete(sourceID)
+	tasks.Delete(sourceID)
+	t.Cleanup(func() {
+		store.Delete(sourceID)
+		tasks.Delete(sourceID)
+	})
+
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: sourceID, Name: "HD(IK)"}}, "q-batch-12")
+	Update(sourceID, func(p *model.CollectProgress) {
+		p.Status = StatusFailed
+	})
+	MarkSourcesCollectStarting([]model.FilmSource{{Id: sourceID, Name: "HD(IK)"}}, "q-single-retry")
+
+	snap, ok := Snapshot(sourceID)
+	if !ok {
+		t.Fatal("expected progress after retry mark")
+	}
+	if snap.QueueId != "q-single-retry" {
+		t.Fatalf("retry queueId = %q, want q-single-retry", snap.QueueId)
+	}
+	if snap.Status != StatusStarting {
+		t.Fatalf("retry status = %q, want starting", snap.Status)
 	}
 }

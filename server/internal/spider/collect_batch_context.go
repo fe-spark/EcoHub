@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"server/internal/model"
@@ -19,10 +20,11 @@ var (
 	activeBatchesMu sync.Mutex
 	activeBatches   = make(map[*collectBatchContext]struct{})
 
-	// collectingSources 正采集队列：任意触发方式占用过的采集源。
+	// collectingSources 正采集队列：sourceID -> occupy token。
 	// 新队列出发前先看这里，已在采的源直接跳过，两条队列互不等待。
 	collectingSourcesMu sync.Mutex
-	collectingSources   = make(map[string]struct{})
+	collectingSources   = make(map[string]uint64)
+	occupySeq           atomic.Uint64
 )
 
 func registerActiveBatch(b *collectBatchContext) {
@@ -86,7 +88,7 @@ func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSo
 			log.Printf("[%s] 站点 %s 已在正采集队列中，跳过", tag, source.Name)
 			continue
 		}
-		collectingSources[id] = struct{}{}
+		collectingSources[id] = occupySeq.Add(1)
 		collectingSourcesMu.Unlock()
 		occupied = append(occupied, source)
 	}
@@ -123,6 +125,39 @@ func releaseCollectSourceIDs(ids ...string) {
 	}
 }
 
+func snapshotOccupyTokens(sources []model.FilmSource) map[string]uint64 {
+	tokens := make(map[string]uint64, len(sources))
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for _, source := range sources {
+		id := collectSourceID(source.Id)
+		if id == "" {
+			continue
+		}
+		if tok, ok := collectingSources[id]; ok {
+			tokens[id] = tok
+		}
+	}
+	return tokens
+}
+
+func releaseCollectTokens(tokens map[string]uint64) {
+	if len(tokens) == 0 {
+		return
+	}
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for id, tok := range tokens {
+		id = collectSourceID(id)
+		if id == "" {
+			continue
+		}
+		if collectingSources[id] == tok {
+			delete(collectingSources, id)
+		}
+	}
+}
+
 func isOccupiedCollectSource(sourceID string) bool {
 	sourceID = collectSourceID(sourceID)
 	if sourceID == "" {
@@ -147,6 +182,7 @@ type collectBatchContext struct {
 	masterAffectedMIDs map[int64]struct{}
 	pendingMasterMIDs  map[string]map[int64]struct{}
 	finishedSources    map[string]model.FilmSource
+	occupyTokens       map[string]uint64
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, batch *notify.ChangeBatch, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -171,6 +207,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 		masterAffectedMIDs: make(map[int64]struct{}),
 		pendingMasterMIDs:  make(map[string]map[int64]struct{}),
 		finishedSources:    make(map[string]model.FilmSource),
+		occupyTokens:       snapshotOccupyTokens(sources),
 	}
 	registerActiveBatch(b)
 	return b
@@ -271,6 +308,42 @@ func (b *collectBatchContext) NoteCollectedMIDs(sourceID, sourceName string, mid
 	noteCollectedMIDs(b.batch, sourceID, sourceName, mids)
 }
 
+func (b *collectBatchContext) dropOccupyToken(id string) {
+	if b == nil {
+		return
+	}
+	id = collectSourceID(id)
+	if id == "" {
+		return
+	}
+	b.mu.Lock()
+	delete(b.occupyTokens, id)
+	b.mu.Unlock()
+}
+
+func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
+	progress.Update(id, func(cur *model.CollectProgress) {
+		switch cur.Status {
+		case progress.StatusStarting, progress.StatusRunning:
+			cur.Status = progress.StatusFailed
+		}
+	})
+	if batchCtx != nil {
+		batchCtx.dropOccupyToken(id)
+	}
+	releaseCollectSourceIDs(id)
+}
+
+// abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：记完成并立刻放占用，允许单独重试。
+func abandonQueuedCollectSource(source model.FilmSource, batchCtx *collectBatchContext) {
+	progress.MarkStopped(source.Id)
+	if batchCtx != nil {
+		batchCtx.markSourceFinished(source)
+		batchCtx.dropOccupyToken(source.Id)
+	}
+	releaseCollectSourceIDs(source.Id)
+}
+
 func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
 	if b == nil {
 		return
@@ -347,7 +420,11 @@ func (b *collectBatchContext) close() {
 		return
 	}
 	unregisterActiveBatch(b)
-	releaseCollectSources(b.sources)
+	b.mu.Lock()
+	tokens := b.occupyTokens
+	b.occupyTokens = nil
+	b.mu.Unlock()
+	releaseCollectTokens(tokens)
 }
 
 func (b *collectBatchContext) emitSummary(finalizeErr error) {

@@ -49,6 +49,8 @@ func SetupRouter() *gin.Engine {
 		frontApi.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 		frontApi.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
 		frontApi.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
+		frontApi.GET(`/liveFilmPlayInfo`, handler.IndexHd.LiveFilmPlayInfo)
+		frontApi.GET(`/liveFilmRelate`, handler.IndexHd.LiveFilmRelate)
 		frontApi.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
 		frontApi.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
 		frontApi.GET(`/filmClassify`, handler.IndexHd.FilmClassify)

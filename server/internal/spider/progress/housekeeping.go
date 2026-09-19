@@ -54,7 +54,7 @@ func pruneStale() {
 		age := now.Sub(updated)
 		if isActiveStatus(status) {
 			_, live := tasks.Load(id)
-			if shouldMarkStale(status, live, age, staleAfter) {
+			if shouldMarkStale(id, status, live, age, staleAfter) {
 				name := state.data.Name
 				state.data.Status = StatusFailed
 				state.updated = now

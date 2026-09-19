@@ -33,6 +33,7 @@ export default function SearchResultPanel({
   totalCount,
   listLoading,
   hasResults,
+  sourceError,
   viewMode,
   onPlay,
   onPageChange,
@@ -44,6 +45,7 @@ export default function SearchResultPanel({
   totalCount: number;
   listLoading: boolean;
   hasResults: boolean;
+  sourceError?: string;
   viewMode: "grid" | "detail";
   onPlay: (movie: { id?: string | number; sourceId?: string; sourceMid?: string | number }) => void;
   onPageChange: (page: number) => void;
@@ -64,14 +66,18 @@ export default function SearchResultPanel({
             <VideoCameraOutlined />
           </div>
           <h2 className={styles.emptyTitle}>
-            {keyword ? (
+            {sourceError ? (
+              "该采集源搜索失败"
+            ) : keyword ? (
               <>未找到与 &ldquo;<span className={styles.keywordHighlight}>{keyword}</span>&rdquo; 相关的影视</>
             ) : (
               "探索全网热门影视"
             )}
           </h2>
           <p className={styles.emptyDesc}>
-            建议缩短或更换搜索词，也可以直接尝试上方的热门搜索推荐
+            {sourceError
+              ? sourceError
+              : "建议缩短或更换搜索词，也可以直接尝试上方的热门搜索推荐"}
           </p>
         </div>
       </section>
