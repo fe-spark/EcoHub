@@ -50,6 +50,7 @@ type MovieBasicInfo struct {
 	Remarks      string `json:"remarks"`             // 更新情况
 	Area         string `json:"area"`                // 地区
 	Year         string `json:"year"`                // 年份
+	ClassTag     string `json:"classTag,omitempty"`  // 源站分类/类型标签
 	SourceId     string `json:"sourceId,omitempty"`  // 当前结果所属采集源
 	SourceMid    int64  `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
 }

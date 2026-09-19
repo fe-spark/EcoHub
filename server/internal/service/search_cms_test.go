@@ -43,11 +43,78 @@ func TestResolveCMSMediaURL(t *testing.T) {
 	}
 }
 
-func TestApplyLocalSnapshotToCMSCard(t *testing.T) {
-	card := model.MovieBasicInfo{Name: "仙逆", Picture: ""}
-	applyLocalSnapshotToCMSCard(&card, model.FilmListSnapshot{Mid: 9, Picture: "https://local/p.jpg", Year: 2024})
-	if card.Picture != "https://local/p.jpg" || card.Year != "2024" {
-		t.Fatalf("snapshot overlay failed: %+v", card)
+func TestApplyCMSDetailToCardJoinsByVodID(t *testing.T) {
+	card := model.MovieBasicInfo{
+		Name:      "仙逆",
+		CName:     "国产剧",
+		Remarks:   "第158集",
+		SourceMid: 101,
+	}
+	applyCMSDetailToCard(&card, model.MovieDetail{
+		Id:      101,
+		Picture: "https://cdn.example.com/tv.jpg",
+		MovieDescriptor: model.MovieDescriptor{
+			CName:    "电视剧",
+			ClassTag: "玄幻,热血",
+			Year:     "2024",
+			Actor:    "张三",
+			Blurb:    "连载版简介",
+			Remarks:  "全集完结",
+		},
+	}, "https://api.example.com/api.php/provide/vod/")
+	if card.Picture != "https://cdn.example.com/tv.jpg" {
+		t.Fatalf("picture from detail: %s", card.Picture)
+	}
+	if card.CName != "国产剧" {
+		t.Fatalf("list type_name must win, got %q", card.CName)
+	}
+	if card.ClassTag != "玄幻,热血" {
+		t.Fatalf("plot tag from detail vod_class, got %q", card.ClassTag)
+	}
+	if card.Remarks != "第158集" {
+		t.Fatalf("list remarks must win, got %q", card.Remarks)
+	}
+	if card.Year != "2024" || card.Actor != "张三" {
+		t.Fatalf("year/actor from detail: %+v", card)
+	}
+}
+
+func TestMovieBasicInfoFromCMSListLeavesClassTagEmpty(t *testing.T) {
+	card := movieBasicInfoFromCMSList(
+		&model.FilmSource{Id: "jy", Uri: "https://jy.example.com/api.php/provide/vod/"},
+		model.FilmList{VodID: 101, VodName: "仙逆", TypeID: 12, TypeName: "国产剧", VodRemarks: "第158集"},
+	)
+	if card.CName != "国产剧" {
+		t.Fatalf("cName from list type_name, got %q", card.CName)
+	}
+	if card.ClassTag != "" {
+		t.Fatalf("classTag must wait for detail vod_class, got %q", card.ClassTag)
+	}
+}
+
+func TestApplyCMSDetailToCardDoesNotCopyCNameToClassTag(t *testing.T) {
+	card := model.MovieBasicInfo{Name: "仙逆", CName: "国产剧", SourceMid: 101}
+	applyCMSDetailToCard(&card, model.MovieDetail{
+		Id: 101,
+		MovieDescriptor: model.MovieDescriptor{CName: "电视剧"},
+	}, "https://api.example.com/")
+	if card.ClassTag != "" {
+		t.Fatalf("empty vod_class must not copy 大类 into classTag, got %q", card.ClassTag)
+	}
+	if card.CName != "国产剧" {
+		t.Fatalf("list type_name must stay, got %q", card.CName)
+	}
+}
+
+func TestApplyCMSDetailToCardRejectsMismatchedID(t *testing.T) {
+	card := model.MovieBasicInfo{Name: "仙逆", SourceMid: 101, Picture: ""}
+	applyCMSDetailToCard(&card, model.MovieDetail{
+		Id:              202,
+		Picture:         "https://cdn.example.com/other.jpg",
+		MovieDescriptor: model.MovieDescriptor{Year: "2016"},
+	}, "https://api.example.com/")
+	if card.Picture != "" || card.Year != "" {
+		t.Fatalf("must not attach another vod_id: %+v", card)
 	}
 }
 
@@ -63,18 +130,75 @@ func TestSetSearchSourceCount(t *testing.T) {
 	}
 }
 
-func TestFillMissingCMSSearchPicturesSkipsSnapshots(t *testing.T) {
-	list := []model.FilmList{
-		{VodID: 10, VodName: "仙逆", VodPic: ""},
+func TestFetchCMSSearchDetailsKeepsRequestedIDsOnly(t *testing.T) {
+	orig := fetchSourceDetails
+	t.Cleanup(func() { fetchSourceDetails = orig })
+	fetchSourceDetails = func(uri, ids string) ([]model.MovieDetail, error) {
+		if ids != "101,202" {
+			t.Fatalf("ids=%q", ids)
+		}
+		return []model.MovieDetail{
+			{Id: 101, Picture: "https://cdn.example.com/a.jpg", MovieDescriptor: model.MovieDescriptor{CName: "国产剧"}},
+			{Id: 202, Picture: "https://cdn.example.com/b.jpg", MovieDescriptor: model.MovieDescriptor{CName: "电影"}},
+			{Id: 999, Picture: "https://cdn.example.com/stray.jpg"},
+		}, nil
 	}
-	localBySourceMid := map[int64]int64{10: 99}
-	snapByMid := map[int64]model.FilmListSnapshot{
-		99: {Mid: 99, Picture: "http://local/pic.jpg"},
+	got := fetchCMSSearchDetails("https://api.example.com/", []int64{101, 202})
+	if len(got) != 2 || got[101].Picture == "" || got[202].Picture == "" {
+		t.Fatalf("got %+v", got)
 	}
-	// uri 指向无效地址，若触发详情拉取会报错或失败；命中本地快照则应直接跳过，保留空 VodPic 由后续 snapshot 覆盖
-	fillMissingCMSSearchPictures("http://invalid.local.domain", list, localBySourceMid, snapByMid)
-	if list[0].VodPic != "" {
-		t.Fatalf("expected untouched VodPic, got %s", list[0].VodPic)
+	if _, ok := got[999]; ok {
+		t.Fatalf("stray detail must be dropped")
+	}
+}
+
+func TestSearchCollectSourceCMSJoinsDetailByVodIDNotName(t *testing.T) {
+	origFind := findCollectSourceById
+	origList := searchSourceList
+	origDetail := fetchSourceDetails
+	t.Cleanup(func() {
+		findCollectSourceById = origFind
+		searchSourceList = origList
+		fetchSourceDetails = origDetail
+	})
+
+	findCollectSourceById = func(id string) *model.FilmSource {
+		return &model.FilmSource{Id: id, Name: "金鹰2(JY)", Uri: "https://jy.example.com/api.php/provide/vod/", State: true}
+	}
+	searchSourceList = func(uri, keyword string, page int) (model.FilmListPage, error) {
+		return model.FilmListPage{
+			Code: 1, Page: 1, PageCount: 1, Limit: 20, Total: 2,
+			List: []model.FilmList{
+				{VodID: 101, VodName: "仙逆", TypeID: 12, TypeName: "国产剧", VodRemarks: "第158集"},
+				{VodID: 202, VodName: "仙逆", TypeID: 1, TypeName: "电影", VodRemarks: "全集完结"},
+			},
+		}, nil
+	}
+	fetchSourceDetails = func(uri, ids string) ([]model.MovieDetail, error) {
+		return []model.MovieDetail{
+			{
+				Id: 101, Picture: "https://cdn.example.com/tv.jpg",
+				MovieDescriptor: model.MovieDescriptor{CName: "电视剧", ClassTag: "玄幻,热血", Year: "2024", Actor: "连载主演"},
+			},
+			{
+				Id: 202, Picture: "https://cdn.example.com/movie.jpg",
+				MovieDescriptor: model.MovieDescriptor{CName: "剧情片", ClassTag: "奇幻", Year: "2023", Actor: "电影主演"},
+			},
+		}, nil
+	}
+
+	list, page, errMsg := searchCollectSourceCMS("jy", "仙逆", 1)
+	if errMsg != "" || page.Total != 2 || len(list) != 2 {
+		t.Fatalf("err=%q page=%+v list=%+v", errMsg, page, list)
+	}
+	if list[0].SourceMid != 101 || list[0].Picture != "https://cdn.example.com/tv.jpg" || list[0].CName != "国产剧" || list[0].ClassTag != "玄幻,热血" || list[0].Remarks != "第158集" || list[0].Year != "2024" {
+		t.Fatalf("tv card: %+v", list[0])
+	}
+	if list[1].SourceMid != 202 || list[1].Picture != "https://cdn.example.com/movie.jpg" || list[1].CName != "电影" || list[1].ClassTag != "奇幻" || list[1].Remarks != "全集完结" || list[1].Year != "2023" {
+		t.Fatalf("movie card: %+v", list[1])
+	}
+	if list[0].Picture == list[1].Picture {
+		t.Fatalf("same-name cards must not share a poster")
 	}
 }
 
@@ -148,9 +272,11 @@ func TestSearchCollectSourceCMSKeepsValidEmpty(t *testing.T) {
 func TestSearchCollectSourceCMSUsesRemoteHits(t *testing.T) {
 	origFind := findCollectSourceById
 	origList := searchSourceList
+	origDetail := fetchSourceDetails
 	t.Cleanup(func() {
 		findCollectSourceById = origFind
 		searchSourceList = origList
+		fetchSourceDetails = origDetail
 	})
 
 	findCollectSourceById = func(id string) *model.FilmSource {
@@ -165,6 +291,9 @@ func TestSearchCollectSourceCMSUsesRemoteHits(t *testing.T) {
 			Total:     2,
 			List:      []model.FilmList{{VodID: 11, VodName: "源站片"}},
 		}, nil
+	}
+	fetchSourceDetails = func(uri, ids string) ([]model.MovieDetail, error) {
+		return nil, nil
 	}
 
 	list, page, errMsg := searchCollectSourceCMS("subo", "2", 1)

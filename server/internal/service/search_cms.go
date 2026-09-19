@@ -18,6 +18,7 @@ import (
 var (
 	findCollectSourceById = repository.FindCollectSourceById
 	searchSourceList      = spider.SearchSourceList
+	fetchSourceDetails    = spider.FetchSourceDetails
 )
 
 // SearchFilmResult 搜索接口业务结果。
@@ -151,95 +152,112 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 			sourceMids = append(sourceMids, item.VodID)
 		}
 	}
-	localBySourceMid, snapByMid := resolveCMSLocalCards(source, sourceMids)
-	fillMissingCMSSearchPictures(source.Uri, pageData.List, localBySourceMid, snapByMid)
+	localBySourceMid, _ := resolveCMSLocalCards(source, sourceMids)
+	detailsByID := fetchCMSSearchDetails(source.Uri, sourceMids)
 	list := make([]model.MovieBasicInfo, 0, len(pageData.List))
 	for _, item := range pageData.List {
 		if strings.TrimSpace(item.VodName) == "" {
 			continue
 		}
-		mid := localBySourceMid[item.VodID]
-		card := model.MovieBasicInfo{
-			Id:        mid,
-			Name:      item.VodName,
-			CName:     item.TypeName,
-			Picture:   resolveCMSMediaURL(item.VodPic, source.Uri),
-			Remarks:   item.VodRemarks,
-			SourceId:  source.Id,
-			SourceMid: item.VodID,
+		card := movieBasicInfoFromCMSList(source, item)
+		if detail, ok := detailsByID[item.VodID]; ok {
+			applyCMSDetailToCard(&card, detail, source.Uri)
 		}
-		if snap, ok := snapByMid[mid]; ok {
-			applyLocalSnapshotToCMSCard(&card, snap)
-		}
+		card.Id = localBySourceMid[item.VodID]
 		list = append(list, card)
 	}
 	return list, pageData, ""
 }
 
-func fillMissingCMSSearchPictures(uri string, list []model.FilmList, localBySourceMid map[int64]int64, snapByMid map[int64]model.FilmListSnapshot) {
-	if len(list) == 0 || strings.TrimSpace(uri) == "" {
-		return
-	}
-	ids := make([]string, 0, len(list))
-	seen := make(map[int64]struct{}, len(list))
-	for _, item := range list {
-		if item.VodID <= 0 || strings.TrimSpace(item.VodPic) != "" {
-			continue
-		}
-		if mid, ok := localBySourceMid[item.VodID]; ok {
-			if snap, exists := snapByMid[mid]; exists && strings.TrimSpace(snap.DisplayPicture()) != "" {
-				continue
-			}
-		}
-		if _, ok := seen[item.VodID]; ok {
-			continue
-		}
-		seen[item.VodID] = struct{}{}
-		ids = append(ids, strconv.FormatInt(item.VodID, 10))
-	}
-	if len(ids) == 0 {
-		return
-	}
-	details, err := spider.FetchSourceDetails(uri, strings.Join(ids, ","))
-	if err != nil || len(details) == 0 {
-		return
-	}
-	picByID := make(map[int64]string, len(details))
-	for _, detail := range details {
-		pic := strings.TrimSpace(detail.DisplayPicture())
-		if detail.Id <= 0 || pic == "" {
-			continue
-		}
-		picByID[detail.Id] = pic
-	}
-	for i := range list {
-		if strings.TrimSpace(list[i].VodPic) != "" {
-			continue
-		}
-		if pic := picByID[list[i].VodID]; pic != "" {
-			list[i].VodPic = pic
-		}
+func movieBasicInfoFromCMSList(source *model.FilmSource, item model.FilmList) model.MovieBasicInfo {
+	return model.MovieBasicInfo{
+		Cid:       item.TypeID,
+		Name:      item.VodName,
+		CName:     strings.TrimSpace(item.TypeName),
+		Picture:   resolveCMSMediaURL(item.VodPic, source.Uri),
+		Remarks:   item.VodRemarks,
+		SourceId:  source.Id,
+		SourceMid: item.VodID,
 	}
 }
 
-func applyLocalSnapshotToCMSCard(card *model.MovieBasicInfo, snap model.FilmListSnapshot) {
-	if card == nil || snap.Mid <= 0 {
+func fetchCMSSearchDetails(uri string, ids []int64) map[int64]model.MovieDetail {
+	out := make(map[int64]model.MovieDetail, len(ids))
+	uri = strings.TrimSpace(uri)
+	if uri == "" || len(ids) == 0 {
+		return out
+	}
+	requested := make(map[int64]struct{}, len(ids))
+	idStrs := make([]string, 0, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := requested[id]; ok {
+			continue
+		}
+		requested[id] = struct{}{}
+		idStrs = append(idStrs, strconv.FormatInt(id, 10))
+	}
+	if len(idStrs) == 0 {
+		return out
+	}
+	details, err := fetchSourceDetails(uri, strings.Join(idStrs, ","))
+	if err != nil || len(details) == 0 {
+		return out
+	}
+	for _, detail := range details {
+		if detail.Id <= 0 {
+			continue
+		}
+		if _, ok := requested[detail.Id]; !ok {
+			continue
+		}
+		out[detail.Id] = detail
+	}
+	return out
+}
+
+func applyCMSDetailToCard(card *model.MovieBasicInfo, detail model.MovieDetail, sourceURI string) {
+	if card == nil || detail.Id <= 0 || detail.Id != card.SourceMid {
 		return
 	}
-	if pic := strings.TrimSpace(snap.DisplayPicture()); pic != "" {
-		card.Picture = pic
+	if pic := strings.TrimSpace(detail.DisplayPicture()); pic != "" {
+		card.Picture = resolveCMSMediaURL(pic, sourceURI)
 	}
 	if strings.TrimSpace(card.CName) == "" {
-		card.CName = snap.CName
+		card.CName = strings.TrimSpace(detail.CName)
+	}
+	if strings.TrimSpace(card.ClassTag) == "" {
+		card.ClassTag = strings.TrimSpace(detail.ClassTag)
+	}
+	if card.Cid <= 0 {
+		if detail.RawCid > 0 {
+			card.Cid = detail.RawCid
+		} else {
+			card.Cid = detail.Cid
+		}
 	}
 	if strings.TrimSpace(card.Remarks) == "" {
-		card.Remarks = snap.Remarks
+		card.Remarks = strings.TrimSpace(detail.Remarks)
 	}
 	if strings.TrimSpace(card.Actor) == "" {
-		card.Actor = snap.Actor
+		card.Actor = strings.TrimSpace(detail.Actor)
 	}
-	if strings.TrimSpace(card.Year) == "" && snap.Year > 0 {
-		card.Year = strconv.FormatInt(snap.Year, 10)
+	if strings.TrimSpace(card.Director) == "" {
+		card.Director = strings.TrimSpace(detail.Director)
+	}
+	if strings.TrimSpace(card.Blurb) == "" {
+		card.Blurb = strings.TrimSpace(detail.Blurb)
+	}
+	if strings.TrimSpace(card.Area) == "" {
+		card.Area = strings.TrimSpace(detail.Area)
+	}
+	if strings.TrimSpace(card.Year) == "" {
+		card.Year = strings.TrimSpace(detail.Year)
+	}
+	if strings.TrimSpace(card.State) == "" {
+		card.State = strings.TrimSpace(detail.State)
 	}
 }
 
