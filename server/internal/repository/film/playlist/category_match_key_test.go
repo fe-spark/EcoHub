@@ -603,7 +603,7 @@ func seedXianNiPair(t *testing.T, gdb *gorm.DB) (animePrimary, shortPrimary, leg
 	return animePrimary, shortPrimary, legacy
 }
 
-func TestSaveSitePlayList_CrossCategoryScoresSerialToAnime(t *testing.T) {
+func TestSaveSitePlayList_CrossCategoryBindsLabeledShortToShort(t *testing.T) {
 	gdb := setupOrphanCleanerTestDB(t)
 	animePrimary, shortPrimary, _ := seedXianNiPair(t, gdb)
 
@@ -628,26 +628,26 @@ func TestSaveSitePlayList_CrossCategoryScoresSerialToAnime(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("expected 1 row, got %d", len(rows))
 	}
-	if rows[0].MovieKey != animePrimary {
-		t.Fatalf("158-ep 仙逆 labeled 短剧 should bind 动漫 primary %s, got %s", animePrimary, rows[0].MovieKey)
+	if rows[0].MovieKey != shortPrimary {
+		t.Fatalf("仙逆 labeled 短剧 should bind 短剧 primary %s, got %s", shortPrimary, rows[0].MovieKey)
 	}
-	if rows[0].MovieKey == shortPrimary {
-		t.Fatalf("must not write the short-drama exclusive key")
+	if rows[0].MovieKey == animePrimary {
+		t.Fatalf("must not write the anime exclusive key")
 	}
 
 	groups := GetMultiplePlayGroupsBySourcesAndKeys(
 		[]model.FilmSource{{Id: "bf", Name: "HD(BF)"}},
-		[]string{animePrimary, shortPrimary},
-	)
-	if _, ok := groups["bf"]; !ok {
-		t.Fatal("动漫仙逆 should show the rebound slave playlist")
-	}
-	shortGroups := GetMultiplePlayGroupsBySourcesAndKeys(
-		[]model.FilmSource{{Id: "bf", Name: "HD(BF)"}},
 		[]string{shortPrimary},
 	)
-	if _, ok := shortGroups["bf"]; ok {
-		t.Fatal("短剧仙逆 must not show the 158-ep anime playlist")
+	if _, ok := groups["bf"]; !ok {
+		t.Fatal("短剧仙逆 should show the bound slave playlist")
+	}
+	animeGroups := GetMultiplePlayGroupsBySourcesAndKeys(
+		[]model.FilmSource{{Id: "bf", Name: "HD(BF)"}},
+		[]string{animePrimary},
+	)
+	if _, ok := animeGroups["bf"]; ok {
+		t.Fatal("动漫仙逆 must not show the 短剧-labeled playlist")
 	}
 }
 
@@ -700,7 +700,7 @@ func TestSaveSitePlayList_CrossCategoryCleansSiblingExclusiveKey(t *testing.T) {
 	slave := model.MovieDetail{
 		Name: "仙逆",
 		MovieDescriptor: model.MovieDescriptor{
-			CName:   "短剧",
+			CName:   "动漫",
 			Year:    "2023",
 			Remarks: "第158集",
 		},
@@ -923,7 +923,7 @@ func TestSaveSitePlayList_UnnumberedSingleDoesNotWriteSerialPrimary(t *testing.T
 	}
 
 	slave := model.MovieDetail{
-		Name: "完美世界",
+		Name:            "完美世界",
 		MovieDescriptor: model.MovieDescriptor{CName: "电影"},
 		PlayList: [][]model.MovieUrlInfo{{
 			{Episode: "正片", Link: "https://ly/movie.m3u8"},

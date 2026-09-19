@@ -308,15 +308,8 @@ func multipleSource(snapshot *model.FilmListSnapshot, detail *model.MovieDetail)
 	groupsStartedAt := time.Now()
 	groupsBySource := filmplaylist.GetMultiplePlayGroupsBySourcesAndKeys(querySources, names)
 	logSlowIndexServiceStep("multipleSource.playlists", groupsStartedAt, "id", snapshot.Mid, "sources", len(querySources), "keys", len(names))
-	master := filmshared.IdentityFromFilmListSnapshot(*snapshot)
-	if detail != nil {
-		incoming := filmshared.IdentityFromMovieDetail(*detail)
-		if len(incoming.Episodes) > 0 {
-			master.Episodes = incoming.Episodes
-		}
-	}
 	for _, source := range querySources {
-		groups := filmshared.FilterPlayGroupsByWorkShape(master, groupsBySource[source.Id])
+		groups := groupsBySource[source.Id]
 		if len(groups) > 0 {
 			if source.DomainReplaceRules != "" {
 				rules := utils.ParseDomainReplaceRules(source.DomainReplaceRules)

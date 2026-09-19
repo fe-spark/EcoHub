@@ -6,21 +6,113 @@ import (
 	"server/internal/model"
 )
 
-func TestScoreIdentity_DoubanOutweighsCategory(t *testing.T) {
-	slave := IdentityProfile{DbID: 123, Name: "仙逆", RootPid: 34, Year: 2023}
-	anime := IdentityProfile{DbID: 123, Name: "仙逆", RootPid: 20, Year: 2023}
-	short := IdentityProfile{Name: "仙逆", RootPid: 34}
-
-	if ScoreIdentity(slave, anime).Douban <= ScoreIdentity(slave, short).Category {
-		t.Fatalf("douban match must outrank category-only")
-	}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
-	if got != 47014 {
-		t.Fatalf("douban unique hit should bind anime, got %d", got)
+func TestPickUniqueIdentityMid_UniqueNameBinds(t *testing.T) {
+	slave := IdentityProfile{Name: "一斩苍穹", RootPid: 1, CName: "电视剧"}
+	anime := IdentityProfile{Name: "一斩苍穹", RootPid: 20, CName: "中国动漫"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{116429: anime})
+	if got != 116429 {
+		t.Fatalf("unique title must bind even when slave category differs, got %d", got)
 	}
 }
 
-func TestPickUniqueIdentityMid_SerialRemarksOverridesWrongCategory(t *testing.T) {
+func TestPickUniqueIdentityMid_EmptyFieldsDoNotVeto(t *testing.T) {
+	master := IdentityProfile{
+		Name:     "完美世界",
+		RootPid:  20,
+		CName:    "中国动漫",
+		Year:     2021,
+		Director: "袁洁",
+		Remarks:  "第287集",
+	}
+	cases := []struct {
+		name  string
+		slave IdentityProfile
+	}{
+		{name: "empty year", slave: IdentityProfile{Name: "完美世界", Director: "袁洁"}},
+		{name: "empty director", slave: IdentityProfile{Name: "完美世界", Year: 2021}},
+		{name: "empty episodes", slave: IdentityProfile{Name: "完美世界", Year: 2021, Director: "袁洁"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := PickUniqueIdentityMid(tc.slave, map[int64]IdentityProfile{32115: master})
+			if got != 32115 {
+				t.Fatalf("empty %s must not veto a unique title, got %d", tc.name, got)
+			}
+		})
+	}
+}
+
+func TestPickUniqueIdentityMid_YearMismatchVetoesWhenBothFilled(t *testing.T) {
+	slave := IdentityProfile{Name: "完美世界", Year: 2018}
+	anime := IdentityProfile{Name: "完美世界", RootPid: 20, Year: 2021, Remarks: "第287集"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
+	if got != 0 {
+		t.Fatalf("year 2018 vs 2021 must veto, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_YearNearDoesNotVeto(t *testing.T) {
+	slave := IdentityProfile{Name: "完美世界", DbID: 35312003, Year: 2020}
+	anime := IdentityProfile{Name: "完美世界", DbID: 35312003, RootPid: 20, Year: 2021, Remarks: "第287集"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
+	if got != 32115 {
+		t.Fatalf("year off by 1 must still bind, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_DirectorMismatchVetoesWhenBothFilled(t *testing.T) {
+	slave := IdentityProfile{Name: "完美世界", Director: "柴山健次"}
+	anime := IdentityProfile{Name: "完美世界", Director: "袁洁,自在天", Remarks: "第287集"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
+	if got != 0 {
+		t.Fatalf("different directors must veto, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_DoubanMismatchVetoesWhenBothFilled(t *testing.T) {
+	slave := IdentityProfile{DbID: 27056187, Name: "完美世界", Year: 2021, Remarks: "第287集"}
+	anime := IdentityProfile{DbID: 35312003, Name: "完美世界", RootPid: 20, Year: 2021, Remarks: "第287集"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
+	if got != 0 {
+		t.Fatalf("different douban ids must veto, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_UnnumberedSingleVetoesSerial(t *testing.T) {
+	slave := IdentityProfile{
+		Name:     "完美世界",
+		RootPid:  9,
+		CName:    "电影",
+		Episodes: []model.MovieUrlInfo{{Episode: "正片", Link: "https://ly/movie.m3u8"}},
+	}
+	anime := IdentityProfile{Name: "完美世界", RootPid: 20, CName: "中国动漫", Remarks: "第287集"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
+	if got != 0 {
+		t.Fatalf("single-file title must veto the 287-ep serial, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_DoubanOutweighsCategory(t *testing.T) {
+	slave := IdentityProfile{DbID: 123, Name: "仙逆", RootPid: 34, Year: 2023}
+	anime := IdentityProfile{DbID: 123, Name: "仙逆", RootPid: 20, Year: 2023}
+	short := IdentityProfile{Name: "仙逆", RootPid: 34}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
+	if got != 47014 {
+		t.Fatalf("same-title collision must bind unique douban hit, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_CategoryBindsSameTitle(t *testing.T) {
+	slave := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "动漫"}
+	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫"}
+	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
+	if got != 47014 {
+		t.Fatalf("same-title collision must bind unique category, got %d", got)
+	}
+}
+
+func TestPickUniqueIdentityMid_WrongCategoryStillUsesCategory(t *testing.T) {
 	slave := IdentityProfile{
 		Name:     "仙逆",
 		RootPid:  34,
@@ -31,38 +123,9 @@ func TestPickUniqueIdentityMid_SerialRemarksOverridesWrongCategory(t *testing.T)
 	}
 	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫", Year: 2023, Remarks: "第158集"}
 	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠", Remarks: "全集完结"}
-
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
-	if got != 47014 {
-		t.Fatalf("year+serial remarks should bind 动漫仙逆 even when slave is labeled 短剧, got %d", got)
-	}
-}
-
-func TestPickUniqueIdentityMid_CompleteRemarksBindsShortDrama(t *testing.T) {
-	slave := IdentityProfile{
-		Name:     "仙逆",
-		RootPid:  20,
-		CName:    "动漫",
-		Year:     2023,
-		Episodes: []model.MovieUrlInfo{{Episode: "合全集"}},
-	}
-	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫", Year: 2023, Remarks: "第158集"}
-	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠", Remarks: "全集完结"}
-
 	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
 	if got != 126574 {
-		t.Fatalf("complete-collection label should bind 短剧仙逆 even when slave is labeled 动漫, got %d", got)
-	}
-}
-
-func TestPickUniqueIdentityMid_CategoryBindsWhenConfirmTied(t *testing.T) {
-	slave := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "动漫"}
-	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫"}
-	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠"}
-
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
-	if got != 47014 {
-		t.Fatalf("correct 动漫 label with no extra confirm should still bind anime, got %d", got)
+		t.Fatalf("same-title collision with 短剧 label must bind short, got %d", got)
 	}
 }
 
@@ -76,10 +139,9 @@ func TestPickUniqueIdentityMid_FirstEpisodeShortDramaStaysShort(t *testing.T) {
 	}
 	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫", Year: 2023, Remarks: "第158集"}
 	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠", Remarks: "全集完结"}
-
 	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
 	if got != 126574 {
-		t.Fatalf("第1集 short drama must not bind 158-ep anime just because both look serial, got %d", got)
+		t.Fatalf("第1集 short drama must bind short by category, got %d", got)
 	}
 }
 
@@ -92,75 +154,140 @@ func TestPickUniqueIdentityMid_NoBindWhenTVCategoryAndNoConfirm(t *testing.T) {
 	}
 	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫"}
 	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠"}
-
 	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{47014: anime, 126574: short})
 	if got != 0 {
-		t.Fatalf("colliding titles with unrelated category and no confirm must not bind, got %d", got)
+		t.Fatalf("colliding titles with unrelated category must not bind, got %d", got)
 	}
 }
 
-func TestPickUniqueIdentityMid_SingleCandidateKeepsMislabeledBind(t *testing.T) {
-	slave := IdentityProfile{Name: "一斩苍穹", RootPid: 1, CName: "电视剧"}
-	anime := IdentityProfile{Name: "一斩苍穹", RootPid: 20, CName: "中国动漫"}
-
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{116429: anime})
-	if got != 116429 {
-		t.Fatalf("single candidate must still bind when slave category differs, got %d", got)
+func TestPickUniqueIdentityMid_PackedShortVetoesAnimeSerial(t *testing.T) {
+	slave := IdentityProfile{
+		Name:     "牧神记",
+		RootPid:  20,
+		CName:    "动漫",
+		ClassTag: "玄幻,热血,战斗",
+		Episodes: []model.MovieUrlInfo{
+			{Episode: "第1-20集"},
+			{Episode: "第21-40集"},
+			{Episode: "第41-60集"},
+			{Episode: "第61-80集"},
+			{Episode: "第81-106集完结"},
+		},
+	}
+	anime := IdentityProfile{Name: "牧神记", RootPid: 20, CName: "中国动漫", ClassTag: "玄幻,热血,战斗", Remarks: "第100集"}
+	short := IdentityProfile{Name: "牧神记", RootPid: 34, CName: "反转爽剧", Remarks: "第81-106集完结"}
+	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{67651: anime, 144250: short})
+	if got != 144250 {
+		t.Fatalf("packed 106-ep short must veto 100-ep serial and bind 短剧, got %d", got)
 	}
 }
 
-func TestPickUniqueIdentityMid_ProductionXianNiReplay(t *testing.T) {
-	anime := IdentityProfile{Name: "仙逆", RootPid: 20, CName: "中国动漫", Year: 2023, Remarks: "第158集"}
-	short := IdentityProfile{Name: "仙逆", RootPid: 34, CName: "古装仙侠", Remarks: "全集完结"}
-	cands := map[int64]IdentityProfile{47014: anime, 126574: short}
+func TestPickUniqueIdentityMid_SameDoubanDifferentNameBindsByTitle(t *testing.T) {
+	threeD := IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集"}
+	donghua := IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结"}
+	cands := map[int64]IdentityProfile{44885: threeD, 45520: donghua}
 
-	cases := []struct {
-		name   string
-		slave  IdentityProfile
-		want   int64
-		reason string
-	}{
-		{
-			name: "HD(BF) 158集标成短剧",
-			slave: IdentityProfile{
-				Name: "仙逆", RootPid: 34, CName: "短剧", Year: 2023, Remarks: "第158集",
-				Episodes: []model.MovieUrlInfo{{Episode: "第01集"}, {Episode: "第158集"}},
-			},
-			want:   47014,
-			reason: "年份+连载备注应绑动漫",
-		},
-		{
-			name: "HD(LY) 合全集标成动漫",
-			slave: IdentityProfile{
-				Name: "仙逆", RootPid: 20, CName: "动漫", Year: 2023,
-				Episodes: []model.MovieUrlInfo{{Episode: "合全集"}},
-			},
-			want:   126574,
-			reason: "完结形态应绑短剧",
-		},
-		{
-			name: "速博等正确动漫158集",
-			slave: IdentityProfile{
-				Name: "仙逆", RootPid: 20, CName: "动漫", Year: 2023, Remarks: "第158集",
-				Episodes: []model.MovieUrlInfo{{Episode: "第01集"}, {Episode: "第158集"}},
-			},
-			want:   47014,
-			reason: "分类+年份+连载都应绑动漫",
-		},
+	got := PickUniqueIdentityMid(IdentityProfile{
+		DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集",
+		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第95集"}},
+	}, cands)
+	if got != 44885 {
+		t.Fatalf("slave titled 3D must bind the 3D master, not the same-douban 动态漫画, got %d", got)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := PickUniqueIdentityMid(tc.slave, cands)
-			sa := ScoreIdentity(tc.slave, anime)
-			ss := ScoreIdentity(tc.slave, short)
-			t.Logf("动漫47014 total=%d confirm=%d (db=%d name=%d cat=%d tag=%d year=%d remarks=%d)",
-				sa.Total, sa.Confirm(), sa.Douban, sa.Name, sa.Category, sa.Tag, sa.Year, sa.Remarks)
-			t.Logf("短剧126574 total=%d confirm=%d (db=%d name=%d cat=%d tag=%d year=%d remarks=%d)",
-				ss.Total, ss.Confirm(), ss.Douban, ss.Name, ss.Category, ss.Tag, ss.Year, ss.Remarks)
-			if got != tc.want {
-				t.Fatalf("%s: got mid=%d want %d", tc.reason, got, tc.want)
-			}
-		})
+
+	got = PickUniqueIdentityMid(IdentityProfile{
+		DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结",
+		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第52集完结"}},
+	}, cands)
+	if got != 45520 {
+		t.Fatalf("slave titled 动态漫画 must bind that master, got %d", got)
+	}
+}
+
+func TestCompatibleIdentity_EmptyMasterFieldsAreSkipped(t *testing.T) {
+	slave := IdentityProfile{DbID: 27056187, Year: 2021, Director: "柴山健次"}
+	master := IdentityProfile{Name: "完美世界", RootPid: 20, Remarks: "第287集"}
+	if !CompatibleIdentity(master, slave) {
+		t.Fatal("empty master douban/year/director must not count as a conflict")
+	}
+}
+
+func TestCompatibleIdentity_DirectorMismatchRejectsWhenBothFilled(t *testing.T) {
+	slave := IdentityProfile{Name: "完美世界", Director: "柴山健次"}
+	master := IdentityProfile{Name: "完美世界", Director: "袁洁,自在天", Remarks: "第287集"}
+	if CompatibleIdentity(master, slave) {
+		t.Fatal("both sides have directors and they do not overlap, must reject")
+	}
+	if !CompatibleIdentity(IdentityProfile{Director: ""}, slave) {
+		t.Fatal("empty master director must skip")
+	}
+	if !CompatibleIdentity(master, IdentityProfile{Director: "袁洁"}) {
+		t.Fatal("overlapping director token must pass")
+	}
+}
+
+func TestCompatibleIdentity_TagsDoNotReject(t *testing.T) {
+	if !CompatibleIdentity(IdentityProfile{ClassTag: "动画,奇幻"}, IdentityProfile{ClassTag: "爱情"}) {
+		t.Fatal("tags are too noisy to veto a bind")
+	}
+}
+
+func TestCompatibleIdentity_SameDoubanDifferentNameRejects(t *testing.T) {
+	if CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
+		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", Year: 2023},
+	) {
+		t.Fatal("same douban with different titles must not count as the same film")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2022},
+	) {
+		t.Fatal("same title with year off by 1 must still match")
+	}
+	if CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2020},
+	) {
+		t.Fatal("same title with year off by 3 must veto")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图动态漫画"},
+	) {
+		t.Fatal("same douban with space-only title difference must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版更新至95集"},
+	) {
+		t.Fatal("same douban with 更新至 suffix must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版第95集"},
+	) {
+		t.Fatal("same douban with trailing 第N集 must still match")
+	}
+	if !CompatibleIdentity(
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
+		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版国语"},
+	) {
+		t.Fatal("same douban with language suffix must still match")
+	}
+}
+
+func TestCompatibleIdentity_DirectorFormatTolerance(t *testing.T) {
+	masterDot := IdentityProfile{Director: "詹姆斯·卡梅隆"}
+	slaveNoDot := IdentityProfile{Director: "詹姆斯卡梅隆"}
+	if !CompatibleIdentity(masterDot, slaveNoDot) {
+		t.Fatal("director with middot should match director without middot")
+	}
+
+	masterPrefix := IdentityProfile{Director: "导演：张艺谋"}
+	slavePlain := IdentityProfile{Director: "张艺谋"}
+	if !CompatibleIdentity(masterPrefix, slavePlain) {
+		t.Fatal("director with prefix should match plain director name")
 	}
 }
 
@@ -199,129 +326,8 @@ func TestCompatibleWorkShape_StructuralSignals(t *testing.T) {
 	if !CompatibleWorkShape(complete, firstEp) {
 		t.Fatal("第1集 must remain compatible with a finished short so category can still bind")
 	}
-}
-
-func TestPickUniqueIdentityMid_DoubanMismatchDoesNotBindSingle(t *testing.T) {
-	slave := IdentityProfile{
-		DbID: 27056187, Name: "完美世界", RootPid: 9, CName: "剧情片", Year: 2021,
-		Episodes: []model.MovieUrlInfo{{Episode: "正片", Link: "https://ly/movie.m3u8"}},
-	}
-	anime := IdentityProfile{DbID: 35312003, Name: "完美世界", RootPid: 20, CName: "中国动漫", Year: 2021, Remarks: "第287集"}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
-	if got != 0 {
-		t.Fatalf("different douban ids must not bind even when the title is unique, got %d", got)
-	}
-}
-
-func TestPickUniqueIdentityMid_YearMismatchDoesNotBindWhenNoDouban(t *testing.T) {
-	slave := IdentityProfile{Name: "完美世界", RootPid: 9, CName: "爱情片", Year: 2018}
-	anime := IdentityProfile{Name: "完美世界", RootPid: 20, CName: "中国动漫", Year: 2021, Remarks: "第287集"}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
-	if got != 0 {
-		t.Fatalf("year 2018 vs 2021 with no douban must not bind the unique title, got %d", got)
-	}
-}
-
-func TestPickUniqueIdentityMid_DoubanMatchIgnoresYearDrift(t *testing.T) {
-	slave := IdentityProfile{DbID: 35312003, Name: "完美世界", RootPid: 20, CName: "动漫", Year: 2020}
-	anime := IdentityProfile{DbID: 35312003, Name: "完美世界", RootPid: 20, CName: "中国动漫", Year: 2021, Remarks: "第287集"}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
-	if got != 32115 {
-		t.Fatalf("same douban must still bind when year is off by 1+, got %d", got)
-	}
-}
-
-func TestCompatibleIdentity_EmptyMasterFieldsAreSkipped(t *testing.T) {
-	slave := IdentityProfile{DbID: 27056187, Year: 2021, Director: "柴山健次"}
-	master := IdentityProfile{Name: "完美世界", RootPid: 20, Remarks: "第287集"}
-	if !CompatibleIdentity(master, slave) {
-		t.Fatal("empty master douban/year/director must not count as a conflict")
-	}
-}
-
-func TestCompatibleIdentity_DirectorMismatchRejectsWhenBothFilled(t *testing.T) {
-	slave := IdentityProfile{Name: "完美世界", Director: "柴山健次"}
-	master := IdentityProfile{Name: "完美世界", Director: "袁洁,自在天", Remarks: "第287集"}
-	if CompatibleIdentity(master, slave) {
-		t.Fatal("both sides have directors and they do not overlap, must reject")
-	}
-	if !CompatibleIdentity(IdentityProfile{Director: ""}, slave) {
-		t.Fatal("empty master director must skip")
-	}
-	if !CompatibleIdentity(master, IdentityProfile{Director: "袁洁"}) {
-		t.Fatal("overlapping director token must pass")
-	}
-}
-
-func TestCompatibleIdentity_TagsDoNotReject(t *testing.T) {
-	if !CompatibleIdentity(IdentityProfile{ClassTag: "动画,奇幻"}, IdentityProfile{ClassTag: "爱情"}) {
-		t.Fatal("tags are too noisy to veto a bind")
-	}
-}
-
-func TestPickUniqueIdentityMid_UnnumberedSingleDoesNotBindSerial(t *testing.T) {
-	slave := IdentityProfile{
-		Name:     "完美世界",
-		RootPid:  9,
-		CName:    "电影",
-		Episodes: []model.MovieUrlInfo{{Episode: "正片", Link: "https://ly/movie.m3u8"}},
-	}
-	anime := IdentityProfile{Name: "完美世界", RootPid: 20, CName: "中国动漫", Year: 2021, Remarks: "第287集"}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{32115: anime})
-	if got != 0 {
-		t.Fatalf("single-file title must not bind the 287-ep serial just because it is the only name hit, got %d", got)
-	}
-}
-
-func TestPickUniqueIdentityMid_PackedShortBindsEvenWithAnimeTags(t *testing.T) {
-	slave := IdentityProfile{
-		Name:     "牧神记",
-		RootPid:  20,
-		CName:    "动漫",
-		ClassTag: "玄幻,热血,战斗",
-		Episodes: []model.MovieUrlInfo{
-			{Episode: "第1-20集"},
-			{Episode: "第21-40集"},
-			{Episode: "第41-60集"},
-			{Episode: "第61-80集"},
-			{Episode: "第81-106集完结"},
-		},
-	}
-	anime := IdentityProfile{Name: "牧神记", RootPid: 20, CName: "中国动漫", ClassTag: "玄幻,热血,战斗", Remarks: "第100集"}
-	short := IdentityProfile{Name: "牧神记", RootPid: 34, CName: "反转爽剧", Remarks: "第81-106集完结"}
-	got := PickUniqueIdentityMid(slave, map[int64]IdentityProfile{67651: anime, 144250: short})
-	if got != 144250 {
-		t.Fatalf("packed 106-ep short must bind 短剧 even when labeled 动漫 with overlapping tags, got %d", got)
-	}
-}
-
-func TestFilterPlayGroupsByWorkShape(t *testing.T) {
-	master := IdentityProfile{Remarks: "第100集"}
-	groups := []model.PlayLinkVo{
-		{Name: "逐集", LinkList: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第100集"}}},
-		{Name: "打包", LinkList: []model.MovieUrlInfo{{Episode: "第1-20集"}, {Episode: "第81-106集完结"}}},
-		{Name: "单条", LinkList: []model.MovieUrlInfo{{Episode: "正片"}}},
-	}
-	got := FilterPlayGroupsByWorkShape(master, groups)
-	if len(got) != 1 || got[0].Name != "逐集" {
-		t.Fatalf("serial film must keep episode-by-episode sources only, got %+v", got)
-	}
-}
-
-func TestClassifyRemarkKind(t *testing.T) {
-	serial := classifyRemarkKind(IdentityProfile{Remarks: "第158集"})
-	if serial != remarkSerial {
-		t.Fatalf("第158集 should be serial, got %d", serial)
-	}
-	complete := classifyRemarkKind(IdentityProfile{Episodes: []model.MovieUrlInfo{{Episode: "合全集"}}})
-	if complete != remarkComplete {
-		t.Fatalf("合全集 should be complete, got %d", complete)
-	}
-	if classifyRemarkKind(IdentityProfile{Episodes: []model.MovieUrlInfo{{Episode: "HD合集"}}}) != remarkUnknown {
-		t.Fatalf("bare 合集 in a line name must not count as complete")
-	}
-	if ParseIdentityYear("2023") != 2023 || ParseIdentityYear("年份:2024年") != 2024 {
-		t.Fatalf("ParseIdentityYear failed")
+	if !CompatibleWorkShape(serial, IdentityProfile{Name: "完美世界"}) {
+		t.Fatal("empty slave episodes must not veto a serial master")
 	}
 }
 
@@ -357,78 +363,19 @@ func TestCompatibleWorkShape_SerialWithTotalEpisodesStaysCompatible(t *testing.T
 	}
 }
 
-func TestCompatibleIdentity_SameDoubanDifferentNameRejects(t *testing.T) {
-	if CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
-		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", Year: 2023},
-	) {
-		t.Fatal("same douban with different titles must not count as the same film")
+func TestClassifyRemarkKind(t *testing.T) {
+	serial := classifyRemarkKind(IdentityProfile{Remarks: "第158集"})
+	if serial != remarkSerial {
+		t.Fatalf("第158集 should be serial, got %d", serial)
 	}
-	if !CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2023},
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", Year: 2020},
-	) {
-		t.Fatal("same douban and same title must still bind even if year drifts")
+	complete := classifyRemarkKind(IdentityProfile{Episodes: []model.MovieUrlInfo{{Episode: "合全集"}}})
+	if complete != remarkComplete {
+		t.Fatalf("合全集 should be complete, got %d", complete)
 	}
-	if !CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画"},
-		IdentityProfile{DbID: 36117912, Name: "沧元图动态漫画"},
-	) {
-		t.Fatal("same douban with space-only title difference must still match")
+	if classifyRemarkKind(IdentityProfile{Episodes: []model.MovieUrlInfo{{Episode: "HD合集"}}}) != remarkUnknown {
+		t.Fatalf("bare 合集 in a line name must not count as complete")
 	}
-	if !CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版更新至95集"},
-	) {
-		t.Fatal("same douban with 更新至 suffix must still match")
-	}
-	if !CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版第95集"},
-	) {
-		t.Fatal("same douban with trailing 第N集 must still match")
-	}
-	if !CompatibleIdentity(
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版"},
-		IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版国语"},
-	) {
-		t.Fatal("same douban with language suffix must still match")
+	if ParseIdentityYear("2023") != 2023 || ParseIdentityYear("年份:2024年") != 2024 {
+		t.Fatalf("ParseIdentityYear failed")
 	}
 }
-
-func TestPickUniqueIdentityMid_SameDoubanDifferentNameBindsByTitle(t *testing.T) {
-	threeD := IdentityProfile{DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集"}
-	donghua := IdentityProfile{DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结"}
-	cands := map[int64]IdentityProfile{44885: threeD, 45520: donghua}
-
-	got := PickUniqueIdentityMid(IdentityProfile{
-		DbID: 36117912, Name: "沧元图3D动漫版", RootPid: 20, Year: 2023, Remarks: "第95集",
-		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第95集"}},
-	}, cands)
-	if got != 44885 {
-		t.Fatalf("slave titled 3D must bind the 3D master, not the same-douban 动态漫画, got %d", got)
-	}
-
-	got = PickUniqueIdentityMid(IdentityProfile{
-		DbID: 36117912, Name: "沧元图 动态漫画", RootPid: 20, Year: 2023, Remarks: "第52集完结",
-		Episodes: []model.MovieUrlInfo{{Episode: "第1集"}, {Episode: "第52集完结"}},
-	}, cands)
-	if got != 45520 {
-		t.Fatalf("slave titled 动态漫画 must bind that master, got %d", got)
-	}
-}
-
-func TestCompatibleIdentity_DirectorFormatTolerance(t *testing.T) {
-	masterDot := IdentityProfile{Director: "詹姆斯·卡梅隆"}
-	slaveNoDot := IdentityProfile{Director: "詹姆斯卡梅隆"}
-	if !CompatibleIdentity(masterDot, slaveNoDot) {
-		t.Fatal("director with middot should match director without middot")
-	}
-
-	masterPrefix := IdentityProfile{Director: "导演：张艺谋"}
-	slavePlain := IdentityProfile{Director: "张艺谋"}
-	if !CompatibleIdentity(masterPrefix, slavePlain) {
-		t.Fatal("director with prefix should match plain director name")
-	}
-}
-
