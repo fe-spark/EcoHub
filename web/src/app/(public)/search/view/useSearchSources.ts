@@ -12,6 +12,7 @@ export type SearchSourceTab = {
 type SourceCache = {
   list: any[];
   page: any;
+  error: string;
 };
 
 function sid(id?: string) {
@@ -79,10 +80,18 @@ async function fetchSearchFilm(keyword: string, source: string, current: number,
   }
 }
 
+function emptySourceCache(error = ""): SourceCache {
+  return {
+    list: [],
+    page: { current: 1, pageSize: 12, total: 0, pageCount: 0 },
+    error,
+  };
+}
+
 function cacheFromResult(result: any, fallbackList: any[] = []): SourceCache {
   const list = Array.isArray(result?.list) ? result.list : fallbackList;
   const page = result?.page || { current: 1, pageSize: 12, total: list.length, pageCount: list.length ? 1 : 0 };
-  return { list, page };
+  return { list, page, error: String(result?.error || "").trim() };
 }
 
 export default function useSearchSources({
@@ -103,6 +112,7 @@ export default function useSearchSources({
   const [tabs, setTabs] = useState<SearchSourceTab[]>(() => seedTabs(data?.sources || [], loadedId));
   const [list, setList] = useState<any[]>(() => (Array.isArray(data?.list) ? data.list : []));
   const [page, setPage] = useState<any>(() => data?.page || {});
+  const [sourceError, setSourceError] = useState(() => String(data?.error || "").trim());
   const [listLoading, setListLoading] = useState(false);
   const cacheRef = useRef<Record<string, SourceCache>>({});
   const activeRef = useRef(loadedId);
@@ -113,11 +123,13 @@ export default function useSearchSources({
     if (hit) {
       setList(hit.list);
       setPage(hit.page);
+      setSourceError(hit.error || "");
       setListLoading(false);
       return true;
     }
     setList([]);
     setPage({ current: 1, pageSize: 12, total: 0, pageCount: 0 });
+    setSourceError("");
     setListLoading(true);
     return false;
   };
@@ -140,6 +152,7 @@ export default function useSearchSources({
     setTabs(seedTabs(sources, seedId));
     setList(seeded.list);
     setPage(seeded.page);
+    setSourceError(seeded.error || "");
     setListLoading(false);
 
     const trimmed = keyword.trim();
@@ -156,13 +169,14 @@ export default function useSearchSources({
         if (gen !== genRef.current) {
           return;
         }
-        const cached = cacheFromResult(result);
+        const cached = result ? cacheFromResult(result) : emptySourceCache("搜索失败");
         cacheRef.current[id] = cached;
         const total = Number(cached.page?.total);
         patchTab(id, Number.isFinite(total) ? total : cached.list.length);
         if (activeRef.current === id) {
           setList(cached.list);
           setPage(cached.page);
+          setSourceError(cached.error || "");
           setListLoading(false);
         }
       })();
@@ -200,12 +214,13 @@ export default function useSearchSources({
       if (gen !== genRef.current || activeRef.current !== id) {
         return;
       }
-      const cached = cacheFromResult(result);
+      const cached = result ? cacheFromResult(result) : emptySourceCache("搜索失败");
       cacheRef.current[id] = cached;
       const total = Number(cached.page?.total);
       patchTab(id, Number.isFinite(total) ? total : cached.list.length);
       setList(cached.list);
       setPage(cached.page);
+      setSourceError(cached.error || "");
       setListLoading(false);
       syncSearchUrl(keyword, String(pageNum), sort, id);
     },
@@ -217,6 +232,7 @@ export default function useSearchSources({
     activeId,
     list,
     page,
+    sourceError,
     listLoading,
     changeSource,
     changePage,

@@ -23,6 +23,21 @@ func SetStaleNotifier(fn func(sourceID, sourceName, oldStatus string, age time.D
 	staleNotifier = fn
 }
 
+// occupyChecker 由编排层注入：排队占用中的 starting 不是僵尸。
+var occupyChecker func(string) bool
+
+// SetOccupyChecker 注册占用查询。传 nil 清除（测试用）。
+func SetOccupyChecker(fn func(string) bool) {
+	occupyChecker = fn
+}
+
+func sourceOccupied(id string) bool {
+	if occupyChecker == nil {
+		return false
+	}
+	return occupyChecker(id)
+}
+
 var store sync.Map
 
 type progressState struct {
@@ -118,17 +133,21 @@ func isPostFetchStatus(status string) bool {
 	}
 }
 
-func shouldMarkStale(status string, live bool, age, staleAfter time.Duration) bool {
+func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Duration) bool {
 	if age < staleAfter {
 		return false
 	}
 	if isPostFetchStatus(status) {
 		return false
 	}
-	if live && (status == StatusRunning || status == StatusStarting) {
+	// 占用中的 starting = 排队等并发槽；无占用且无 live 才是遗弃进度。
+	if status == StatusStarting {
+		return !live && !sourceOccupied(sourceID)
+	}
+	if live && status == StatusRunning {
 		return false
 	}
-	return status == StatusStarting || status == StatusRunning
+	return status == StatusRunning
 }
 
 // canEnterFinalizing 不含 stopped：用户停止后仍可 flush，但终态保持「已停止」，避免单站收尾写成采集完成。
@@ -190,7 +209,7 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 		state.mu.Unlock()
 		return true
 	}
-	if shouldMarkStale(state.data.Status, live, age, staleAfter) {
+	if shouldMarkStale(sourceID, state.data.Status, live, age, staleAfter) {
 		old := state.data.Status
 		name := state.data.Name
 		state.data.Status = StatusFailed
@@ -327,7 +346,7 @@ func GetActiveTaskProgress() []model.CollectProgress {
 
 		if isActiveStatus(progress.Status) {
 			_, live := tasks.Load(id)
-			if shouldMarkStale(progress.Status, live, age, staleAfter) {
+			if shouldMarkStale(id, progress.Status, live, age, staleAfter) {
 				old := progress.Status
 				name := progress.Name
 				progress.Status = StatusFailed

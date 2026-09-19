@@ -314,6 +314,17 @@ func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/filmPlayInfo") {
 		return TruncateRunes(query.Get("id"), maxResourceLen)
 	}
+	if strings.HasPrefix(path, "/api/liveFilmPlayInfo") {
+		source := strings.TrimSpace(query.Get("source"))
+		if source == "" {
+			source = strings.TrimSpace(query.Get("playFrom"))
+		}
+		sid := strings.TrimSpace(query.Get("sid"))
+		if source != "" && sid != "" {
+			return TruncateRunes(source+":"+sid, maxResourceLen)
+		}
+		return TruncateRunes(sid, maxResourceLen)
+	}
 	if strings.HasPrefix(path, "/api/searchFilm") {
 		return TruncateRunes(query.Get("keyword"), maxResourceLen)
 	}

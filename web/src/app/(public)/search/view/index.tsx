@@ -158,6 +158,7 @@ export default function SearchPageView({
     activeId,
     list,
     page,
+    sourceError,
     listLoading,
     changeSource,
     changePage,
@@ -473,6 +474,7 @@ export default function SearchPageView({
         totalCount={totalCount}
         listLoading={listLoading}
         hasResults={hasResults}
+        sourceError={sourceError}
         viewMode={viewMode}
         onPlay={handlePlay}
         onPageChange={handlePageChange}

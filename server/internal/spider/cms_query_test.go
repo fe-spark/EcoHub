@@ -2,8 +2,10 @@ package spider
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"server/internal/model"
@@ -68,5 +70,67 @@ func TestSearchSourceListAndFetchDetails(t *testing.T) {
 func TestSearchSourceListEmptyKeyword(t *testing.T) {
 	if _, err := SearchSourceList("http://example", "  ", 1); err == nil {
 		t.Fatal("empty keyword should fail")
+	}
+}
+
+func TestIsCMSSearchUnsupportedBody(t *testing.T) {
+	cases := []struct {
+		body string
+		want bool
+	}{
+		{"暂不支持搜索", true},
+		{"  暂不支持搜索  ", true},
+		{`{"code":1,"list":[]}`, false},
+		{"", false},
+		{"源站维护中", false},
+		{`<html><body>` + string(make([]byte, 200)) + `</body></html>`, false},
+	}
+	for _, tc := range cases {
+		if got := isCMSSearchUnsupportedBody(tc.body); got != tc.want {
+			t.Fatalf("body=%q got=%v want=%v", tc.body, got, tc.want)
+		}
+	}
+}
+
+func TestSearchSourceListUnsupported(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "text/html;charset=utf-8")
+		_, _ = w.Write([]byte("暂不支持搜索"))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := SearchSourceList(srv.URL, "2", 1)
+	if !errors.Is(err, ErrCMSSearchUnsupported) {
+		t.Fatalf("first call err=%v", err)
+	}
+	_, err = SearchSourceList(srv.URL, "2", 1)
+	if !errors.Is(err, ErrCMSSearchUnsupported) {
+		t.Fatalf("cached call err=%v", err)
+	}
+	if hits.Load() != 1 {
+		t.Fatalf("expected 1 upstream hit, got %d", hits.Load())
+	}
+}
+
+func TestSearchSourceListDoesNotCacheGenericShortBody(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		_, _ = w.Write([]byte("源站维护中"))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := SearchSourceList(srv.URL, "2", 1)
+	if errors.Is(err, ErrCMSSearchUnsupported) {
+		t.Fatal("generic short body must not be treated as unsupported")
+	}
+	_, err = SearchSourceList(srv.URL, "2", 1)
+	if errors.Is(err, ErrCMSSearchUnsupported) {
+		t.Fatal("generic short body must not be cached as unsupported")
+	}
+	if hits.Load() != 2 {
+		t.Fatalf("expected 2 upstream hits, got %d", hits.Load())
 	}
 }

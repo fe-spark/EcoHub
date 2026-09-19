@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/spider/progress"
 )
 
 func TestFilterEnabledSources(t *testing.T) {
@@ -137,6 +138,118 @@ func TestCollectLifecycleState_BeginAndEndSource(t *testing.T) {
 		t.Fatalf("unexpected beginSource error after endSource: %v", err)
 	}
 	lc.endSource(sourceID)
+}
+
+func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
+	ik := model.FilmSource{Id: "retry-queue-ik", Name: "HD(IK)"}
+	wrap := model.FilmSource{Id: "retry-queue-wrap", Name: "默认"}
+	defer releaseCollectSources([]model.FilmSource{ik, wrap})
+
+	batch := occupyAndMarkCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	if len(batch) != 2 {
+		t.Fatalf("batch occupy got %d, want 2", len(batch))
+	}
+	ikSnap, ok := progress.Snapshot(ik.Id)
+	wrapSnap, wrapOK := progress.Snapshot(wrap.Id)
+	if !ok || !wrapOK || ikSnap.QueueId == "" {
+		t.Fatal("batch must tag both sources with queueId")
+	}
+	if wrapSnap.QueueId != ikSnap.QueueId {
+		t.Fatalf("batch queueId mismatch ik=%q wrap=%q", ikSnap.QueueId, wrapSnap.QueueId)
+	}
+	batchQueue := ikSnap.QueueId
+
+	releaseCollectSourceIDs(ik.Id)
+	progress.Update(ik.Id, func(p *model.CollectProgress) {
+		p.Status = progress.StatusFailed
+	})
+
+	retry := occupyAndMarkCollectSources([]model.FilmSource{ik}, "Single-Collect")
+	if len(retry) != 1 {
+		t.Fatalf("retry occupy got %d, want 1", len(retry))
+	}
+	retrySnap, ok := progress.Snapshot(ik.Id)
+	if !ok {
+		t.Fatal("expected retry progress")
+	}
+	if retrySnap.QueueId == "" || retrySnap.QueueId == batchQueue {
+		t.Fatalf("IK retry must be a new queue, got %q (batch %q)", retrySnap.QueueId, batchQueue)
+	}
+	if retrySnap.Status != progress.StatusStarting {
+		t.Fatalf("retry status = %q, want starting", retrySnap.Status)
+	}
+	wrapSnap, _ = progress.Snapshot(wrap.Id)
+	if wrapSnap.QueueId != batchQueue {
+		t.Fatalf("wrapping source must keep batch queueId %q, got %q", batchQueue, wrapSnap.QueueId)
+	}
+}
+
+func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
+	id := "batch-fail-release-occupy"
+	source := model.FilmSource{Id: id, Name: "HD(IK)"}
+	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
+		t.Fatal("occupy failed")
+	}
+	defer releaseCollectSourceIDs(id)
+
+	ver := uint64(0)
+	if err := handleCollectWithStopVersion(id, -1, &ver, false, false, nil); err == nil {
+		t.Fatal("expected missing source error")
+	}
+	if isOccupiedCollectSource(id) {
+		t.Fatal("batch occupy must be released on collect failure so retry can start")
+	}
+	snap, ok := progress.Snapshot(id)
+	if !ok || snap.Status != progress.StatusFailed {
+		t.Fatalf("early fail must not leave starting, ok=%v status=%q", ok, snap.Status)
+	}
+	if progress.IsAlreadyQueuedOrRunning(id) {
+		t.Fatal("failed leftover must not block retry")
+	}
+
+	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")) != 1 {
+		t.Fatal("retry should occupy after failed batch source released")
+	}
+}
+
+func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
+	ik := model.FilmSource{Id: "batch-close-retry-ik", Name: "HD(IK)"}
+	wrap := model.FilmSource{Id: "batch-close-retry-wrap", Name: "默认"}
+	claimed := occupyCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	if len(claimed) != 2 {
+		t.Fatalf("batch occupy got %d", len(claimed))
+	}
+	defer releaseCollectSources([]model.FilmSource{ik, wrap})
+
+	batch := newCollectBatchContext(model.NotifyTriggerManual, "Batch-Collect", claimed, nil, time.Now())
+	abortUnstartedCollect(ik.Id, batch)
+
+	if len(occupyCollectSources([]model.FilmSource{ik}, "Single-Collect")) != 1 {
+		t.Fatal("retry occupy failed")
+	}
+	batch.close()
+	if !isOccupiedCollectSource(ik.Id) {
+		t.Fatal("retry occupy must survive parent batch close")
+	}
+	if isOccupiedCollectSource(wrap.Id) {
+		t.Fatal("original batch close should still release remaining occupy")
+	}
+}
+
+func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
+	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Grade: 1}
+	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
+		t.Fatal("occupy failed")
+	}
+	defer releaseCollectSourceIDs(source.Id)
+
+	progress.Ensure(source.Id, source.Name)
+	progress.MarkStopped(source.Id)
+
+	runSourcesGroupWithLimit([]model.FilmSource{source}, 24, "Batch-Collect", 0, 0, nil)
+	if isOccupiedCollectSource(source.Id) {
+		t.Fatal("stopped queued source must release occupy so retry can start")
+	}
 }
 
 func TestHandlePreparedCollect_MissingSourceReleasesOccupy(t *testing.T) {

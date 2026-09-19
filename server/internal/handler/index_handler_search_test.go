@@ -159,7 +159,7 @@ func TestFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=0&sid=100&source=src1&playFrom=&episode=-1", nil)
+	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=100&source=src1&playFrom=&episode=-1", nil)
 	c.Request = req
 
 	defer func() {
@@ -168,6 +168,24 @@ func TestFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
 		}
 	}()
 	IndexHd.FilmPlayInfo(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 wrapper, got %d", w.Code)
+	}
+}
+
+func TestLiveFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	req, _ := http.NewRequest("GET", "/liveFilmPlayInfo?sid=100&source=src1&episode=-1", nil)
+	c.Request = req
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("LiveFilmPlayInfo panicked with negative episode: %v", r)
+		}
+	}()
+	IndexHd.LiveFilmPlayInfo(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 wrapper, got %d", w.Code)
 	}

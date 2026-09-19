@@ -257,7 +257,11 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 		result.Sources = []model.SearchSourceTab{}
 	}
 
-	dto.Success(gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
+	payload := gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}
+	if strings.TrimSpace(result.Error) != "" {
+		payload["error"] = result.Error
+	}
+	dto.Success(payload, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词

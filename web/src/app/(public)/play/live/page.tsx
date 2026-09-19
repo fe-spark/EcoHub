@@ -3,11 +3,10 @@ import { serverGet } from "@/lib/server-api";
 import LivePlayView from "./view";
 
 async function getLivePlayData(sourceId: string, sid: string, episodeIdx?: string) {
-  const response = await serverGet<any>("/filmPlayInfo", {
-    id: "0",
-    playFrom: sourceId,
-    episode: episodeIdx || 0,
+  const response = await serverGet<any>("/liveFilmPlayInfo", {
+    source: sourceId,
     sid,
+    episode: episodeIdx || 0,
   });
   if (response.code !== 0 || !response.data?.detail) {
     return null;

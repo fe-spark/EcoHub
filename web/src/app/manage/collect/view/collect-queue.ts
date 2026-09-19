@@ -182,6 +182,32 @@ export function newClientCollectQueueId(): string {
   return `q-local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+export function isClientCollectQueueId(queueId: string): boolean {
+  return queueId.startsWith("q-local-");
+}
+
+/** 进度条对齐：同 queueId 原条；仅 q-local 乐观条可按站点接到服务端 id。单站重采不得并回旧批次。 */
+export function matchPrevCollectQueueBar<T extends { queueId: string; sourceIds: string[] }>(
+  group: { queueId: string; sourceIds: string[] },
+  prev: T[],
+  usedPrev: Set<string>,
+): T | undefined {
+  const exact = prev.find((bar) => bar.queueId === group.queueId);
+  if (exact && !usedPrev.has(exact.queueId)) {
+    return exact;
+  }
+  const groupSet = new Set(group.sourceIds);
+  for (const bar of prev) {
+    if (usedPrev.has(bar.queueId) || !isClientCollectQueueId(bar.queueId)) {
+      continue;
+    }
+    if (bar.sourceIds.some((id) => groupSet.has(id))) {
+      return bar;
+    }
+  }
+  return undefined;
+}
+
 export function tourProgressPhase(
   session: CollectQueueProgressView,
 ): "running" | "done" | "failed" | "stopped" {

@@ -254,6 +254,8 @@ flowchart TD
 - `/api/navCategory`
 - `/api/filmPlayInfo`
 - `/api/filmRelate`
+- `/api/liveFilmPlayInfo`
+- `/api/liveFilmRelate`
 - `/api/searchFilm`
 - `/api/hotKeywords`
 - `/api/filmClassify`
