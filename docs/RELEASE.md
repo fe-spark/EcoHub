@@ -1,10 +1,16 @@
-预发布版 **v2.7.3-beta.5**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.7.3-beta.5`。
+预发布版 **v2.7.3-beta.6**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v2.7.3-beta.6`。
 
 ### 升级指引
 
 - **平滑升级**：支持后台「检查更新」一键平滑升级，或通过 `docker compose pull ecohub && docker compose up -d ecohub` 快速拉取新镜像。
 - **配置持久化**：系统配置、TMDB 刮削凭据与影片元数据持久化存储，平滑升级无需重新初始化。
 - **存量播放源对齐**：升到本版后再跑 `docker exec -it Eco-hub /app/migrate_slave_playlist_keys --dry-run`，确认后去掉 `--dry-run`。上一轮迁到一半可直接重跑，已归并的行会跳过。同一豆瓣号、两部不同片名（如「沧元图3D动漫版」与「沧元图 动态漫画」）需在后台对该片执行「更新全部站点」，不必全量重采所有附属站。
+
+---
+
+### v2.7.3-beta.6 核心变更
+
+- **附属站搜索进播**：源站卡片不再只凭映射进主站播放页。同名片名、剧集形态或大类对不上，或两个 `vod_id` 落到同一个本地 mid，改为 `/play/live` 播该源自己的片子。
 
 ---
 
