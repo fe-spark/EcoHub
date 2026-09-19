@@ -36,9 +36,7 @@ func collectUniqueMidsFromKeys(keys []string, midsByLookupKey map[string][]int64
 	return out
 }
 
-// pickUniqueSlaveMid 用匹配键召回候选，再用身份打分决定绑定哪部主站影片。
-// 线路结构对不上的候选先丢掉；剩下一部时保持宽松绑定（副站分类标错也能挂上）。
-// 同名多部时按豆瓣/名称/类别/年份/备注形态打分，分差不够则不绑定。
+// pickUniqueSlaveMid 用匹配键召回候选，再交给 PickUniqueIdentityMid 选出唯一主站 mid。
 func pickUniqueSlaveMid(
 	detail model.MovieDetail,
 	keys []string,

@@ -153,7 +153,7 @@ func inheritedKeyCompatible(
 		return true
 	}
 	master := shared.IdentityFromFilmIndex(info)
-	return shared.CompatibleIdentity(master, incoming) && shared.CompatibleWorkShape(master, incoming)
+	return shared.PickUniqueIdentityMid(incoming, map[int64]shared.IdentityProfile{owner: master}) == owner
 }
 
 func exclusiveMatchKeyOwners(keysByMid map[int64][]string) map[string]int64 {

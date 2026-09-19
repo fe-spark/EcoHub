@@ -12,48 +12,21 @@ import (
 )
 
 const (
-	identityScoreDouban        = 100
-	identityScoreNameExact     = 16
-	identityScoreCategoryRoot  = 18
-	identityScoreCategoryCName = 8
-	identityScoreTagMax        = 24
-	identityScoreYearExact     = 30
-	identityScoreYearNear      = 12
-	identityScoreRemarksKind   = 20
-
-	identityConfirmMin    = 20
-	identityConfirmMargin = 12
-
 	// 无集号的单条线路对上这个规模以上的连载，视为不同作品（电影/合集 vs 长剧）。
 	identitySingleVsSerialMin = 8
 )
 
 // IdentityProfile 跨站身份比对用的轻量字段，全部来自 film_index / 采集详情，不另查库。
 type IdentityProfile struct {
-	DbID      int64
-	Name      string
-	RootPid   int64
-	CName     string
-	ClassTag  string
-	Year      int64
-	Director  string
-	Remarks   string
-	Episodes  []model.MovieUrlInfo
-}
-
-// IdentityScore 各信号得分。Confirm = 豆瓣+年份+备注形态，不含片名、分类和通用标签。
-type IdentityScore struct {
-	Total    int
-	Douban   int
-	Name     int
-	Category int
-	Tag      int
-	Year     int
-	Remarks  int
-}
-
-func (s IdentityScore) Confirm() int {
-	return s.Douban + s.Year + s.Remarks
+	DbID     int64
+	Name     string
+	RootPid  int64
+	CName    string
+	ClassTag string
+	Year     int64
+	Director string
+	Remarks  string
+	Episodes []model.MovieUrlInfo
 }
 
 type remarkKind int
@@ -119,14 +92,6 @@ func IdentityFromMovieDetail(detail model.MovieDetail) IdentityProfile {
 	}
 }
 
-func IdentityFromFilmListSnapshot(s model.FilmListSnapshot) IdentityProfile {
-	return IdentityFromFilmIndex(model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: s.Mid, DbId: s.DbId},
-		FilmIndexCategory: model.FilmIndexCategory{Pid: s.Pid, Cid: s.Cid, CName: s.CName},
-		FilmIndexContent:  model.FilmIndexContent{Name: s.Name, ClassTag: s.ClassTag, Year: s.Year, Director: s.Director, Remarks: s.Remarks},
-	})
-}
-
 func ParseIdentityYear(raw string) int64 {
 	token := yearTokenRe.FindString(strings.TrimSpace(raw))
 	if token == "" {
@@ -139,30 +104,9 @@ func ParseIdentityYear(raw string) int64 {
 	return year
 }
 
-func ScoreIdentity(slave, master IdentityProfile) IdentityScore {
-	var score IdentityScore
-	namesMatch := identityNamesMatch(slave.Name, master.Name)
-	if slave.DbID > 0 && master.DbID > 0 && slave.DbID == master.DbID && namesMatch {
-		score.Douban = identityScoreDouban
-	}
-	if namesMatch {
-		score.Name = identityScoreNameExact
-	}
-	if slave.RootPid > 0 && master.RootPid > 0 && slave.RootPid == master.RootPid {
-		score.Category += identityScoreCategoryRoot
-	}
-	if categoryNameRelated(slave.CName, master.CName) {
-		score.Category += identityScoreCategoryCName
-	}
-	score.Tag = tagOverlapScore(slave.ClassTag, master.ClassTag)
-	score.Year = yearIdentityScore(slave, master)
-	score.Remarks = remarksIdentityScore(slave, master)
-	score.Total = score.Douban + score.Name + score.Category + score.Tag + score.Year + score.Remarks
-	return score
-}
-
-// CompatibleWorkShape 用线路结构判断是否像同一部，不靠站点自定义文案。
+// CompatibleWorkShape 剧集结构一票否决：两边都有可识别结构且对不上才拒。
 // 无集号的单条线路对不上长连载；末项带两段数字（打包）对不上单段数字且规模差开的逐集。
+// 任一边空（无线路、无备注数字）不否决。
 func CompatibleWorkShape(master, slave IdentityProfile) bool {
 	masterItems := identityItemCount(master)
 	masterNum, masterPacked := identityEpisodeMeta(master)
@@ -197,20 +141,14 @@ func CompatibleWorkShapePrecomputed(masterNum int64, masterPacked bool, masterSc
 	return true
 }
 
-// CompatibleIdentity 只在两边都有值时才比；主站或副站为空就跳过，不当冲突。
-// 豆瓣两边都有：不同则拒；相同仍要求片名一致，对不上就不是同一部。缺一边则再看年份、导演。标签太乱，不参与否决。
+// CompatibleIdentity 豆瓣 / 年份 / 导演一票否决：只在两边都有值时才比，空或未知跳过。
+// 片名两边都能折出身份名却对不上，也否决。标签太乱，不参与否决。
 func CompatibleIdentity(master, slave IdentityProfile) bool {
-	namesMatch := identityNamesMatch(master.Name, slave.Name)
-	if master.DbID > 0 && slave.DbID > 0 {
-		if master.DbID != slave.DbID {
-			return false
-		}
-		if identityNamePresent(master.Name) && identityNamePresent(slave.Name) && !namesMatch {
-			return false
-		}
-		if namesMatch {
-			return true
-		}
+	if identityNamePresent(master.Name) && identityNamePresent(slave.Name) && !identityNamesMatch(master.Name, slave.Name) {
+		return false
+	}
+	if master.DbID > 0 && slave.DbID > 0 && master.DbID != slave.DbID {
+		return false
 	}
 	if master.Year > 0 && slave.Year > 0 {
 		diff := master.Year - slave.Year
@@ -270,30 +208,6 @@ func identityNamesMatch(left, right string) bool {
 
 func identityNamePresent(name string) bool {
 	return utils.NormalizeIdentityTitle(name) != ""
-}
-
-func uniqueLeadingScore(scores map[int64]IdentityScore, value func(IdentityScore) int) int64 {
-	bestMid := int64(0)
-	best := -1
-	second := -1
-	for mid, score := range scores {
-		v := value(score)
-		switch {
-		case v > best:
-			second = best
-			best = v
-			bestMid = mid
-		case v == best:
-			bestMid = 0
-			second = v
-		case v > second:
-			second = v
-		}
-	}
-	if bestMid > 0 && best >= identityConfirmMin && best-maxInt(second, 0) >= identityConfirmMargin {
-		return bestMid
-	}
-	return 0
 }
 
 func identityItemCount(profile IdentityProfile) int {
@@ -367,77 +281,78 @@ func parseLabelNumbers(label string) []int64 {
 	return out
 }
 
-// PickUniqueIdentityMid 在召回候选里按身份分选择唯一主站 mid。
-// 两边都有值且对不上的候选先丢掉（空值跳过）；剩下一部才宽松绑定（副站分类标错也能挂上）。
-// 同名多部时：豆瓣+片名唯一命中优先；否则确认信号（豆瓣/年份/备注形态）拉开差距才绑定；
-// 确认打平则允许唯一大类命中。
+// PickUniqueIdentityMid 规范化片名必须一致；豆瓣/年份/导演/剧集空值不否决，两边有值且冲突才拒。
+// 否决后只剩一部就绑；同名多部按豆瓣 → 大类 → 年份选出唯一一部，选不出就不绑。
 func PickUniqueIdentityMid(slave IdentityProfile, candidates map[int64]IdentityProfile) int64 {
 	if len(candidates) == 0 {
 		return 0
 	}
-	compatible := make(map[int64]IdentityProfile, len(candidates))
+	named := make(map[int64]IdentityProfile, len(candidates))
 	for mid, master := range candidates {
+		if !identityNamesMatch(slave.Name, master.Name) {
+			continue
+		}
 		if CompatibleIdentity(master, slave) && CompatibleWorkShape(master, slave) {
-			compatible[mid] = master
+			named[mid] = master
 		}
 	}
-	if len(compatible) == 0 {
+	if len(named) == 0 {
 		return 0
 	}
-	candidates = compatible
-	if len(candidates) == 1 {
-		for mid := range candidates {
+	if len(named) == 1 {
+		for mid := range named {
 			return mid
 		}
 	}
 
-	scores := make(map[int64]IdentityScore, len(candidates))
-	for mid, master := range candidates {
-		scores[mid] = ScoreIdentity(slave, master)
-	}
-
-	dbHits := make([]int64, 0, 1)
-	for mid, score := range scores {
-		if score.Douban > 0 {
-			dbHits = append(dbHits, mid)
+	if slave.DbID > 0 {
+		if mid := uniqueProfileHit(named, func(master IdentityProfile) bool {
+			return master.DbID > 0 && master.DbID == slave.DbID
+		}); mid > 0 {
+			return mid
 		}
 	}
-	if len(dbHits) == 1 {
-		return dbHits[0]
-	}
-
-	if mid := uniqueLeadingScore(scores, func(s IdentityScore) int { return s.Confirm() }); mid > 0 {
-		return mid
-	}
-
-	catHits := make([]int64, 0, 1)
-	for mid, master := range candidates {
-		if slave.RootPid > 0 && master.RootPid > 0 && slave.RootPid == master.RootPid {
-			catHits = append(catHits, mid)
+	if slave.RootPid > 0 {
+		if mid := uniqueProfileHit(named, func(master IdentityProfile) bool {
+			return master.RootPid > 0 && master.RootPid == slave.RootPid
+		}); mid > 0 {
+			return mid
 		}
 	}
-	if len(catHits) == 1 {
-		mid := catHits[0]
-		for other, score := range scores {
-			if other != mid && score.Confirm() > scores[mid].Confirm() {
-				return 0
+	if slave.Year > 0 {
+		if mid := uniqueProfileHit(named, func(master IdentityProfile) bool {
+			return master.Year > 0 && master.Year == slave.Year
+		}); mid > 0 {
+			return mid
+		}
+		if mid := uniqueProfileHit(named, func(master IdentityProfile) bool {
+			if master.Year <= 0 {
+				return false
 			}
+			diff := master.Year - slave.Year
+			if diff < 0 {
+				diff = -diff
+			}
+			return diff <= 1
+		}); mid > 0 {
+			return mid
 		}
-		return mid
 	}
 	return 0
 }
 
-func categoryNameRelated(left, right string) bool {
-	a := strings.TrimSpace(left)
-	b := strings.TrimSpace(right)
-	if a == "" || b == "" {
-		return false
+func uniqueProfileHit(candidates map[int64]IdentityProfile, match func(IdentityProfile) bool) int64 {
+	hit := int64(0)
+	for mid, master := range candidates {
+		if !match(master) {
+			continue
+		}
+		if hit > 0 {
+			return 0
+		}
+		hit = mid
 	}
-	if a == b {
-		return true
-	}
-	return strings.Contains(a, b) || strings.Contains(b, a)
+	return hit
 }
 
 func lastIdentityLabel(profile IdentityProfile) string {
@@ -453,46 +368,6 @@ func lastIdentityLabel(profile IdentityProfile) string {
 	return strings.TrimSpace(profile.Remarks)
 }
 
-func yearIdentityScore(slave, master IdentityProfile) int {
-	if slave.Year <= 0 || master.Year <= 0 {
-		return 0
-	}
-	sk, mk := classifyRemarkKind(slave), classifyRemarkKind(master)
-	if sk != remarkUnknown && mk != remarkUnknown && sk != mk {
-		return 0
-	}
-	if sk == remarkSerial && mk == remarkSerial {
-		slaveLast, masterLast := lastIdentityLabel(slave), lastIdentityLabel(master)
-		if slaveLast != "" && masterLast != "" && slaveLast != masterLast {
-			return 0
-		}
-	}
-	diff := slave.Year - master.Year
-	if diff < 0 {
-		diff = -diff
-	}
-	switch diff {
-	case 0:
-		return identityScoreYearExact
-	case 1:
-		return identityScoreYearNear
-	default:
-		return 0
-	}
-}
-
-func remarksIdentityScore(slave, master IdentityProfile) int {
-	slaveLast := lastIdentityLabel(slave)
-	masterLast := lastIdentityLabel(master)
-	if slaveLast != "" && masterLast != "" && slaveLast == masterLast {
-		return identityScoreRemarksKind
-	}
-	if classifyRemarkKind(slave) == remarkComplete && classifyRemarkKind(master) == remarkComplete {
-		return identityScoreRemarksKind
-	}
-	return 0
-}
-
 // SameWorkPlaylist 已有线路和本次采集是否像同一部（末集标签相同，或都是全集/合全集）。
 func SameWorkPlaylist(existing []model.MovieUrlInfo, incoming IdentityProfile) bool {
 	got := IdentityProfile{Episodes: existing}
@@ -501,46 +376,6 @@ func SameWorkPlaylist(existing []model.MovieUrlInfo, incoming IdentityProfile) b
 		return true
 	}
 	return classifyRemarkKind(got) == remarkComplete && classifyRemarkKind(incoming) == remarkComplete
-}
-
-func tagOverlapScore(left, right string) int {
-	a := splitIdentityTags(left)
-	b := splitIdentityTags(right)
-	if len(a) == 0 || len(b) == 0 {
-		return 0
-	}
-	inter := 0
-	for tag := range a {
-		if _, ok := b[tag]; ok {
-			inter++
-		}
-	}
-	if inter == 0 {
-		return 0
-	}
-	union := len(a)
-	for tag := range b {
-		if _, ok := a[tag]; !ok {
-			union++
-		}
-	}
-	if union <= 0 {
-		return 0
-	}
-	return identityScoreTagMax * inter / union
-}
-
-func splitIdentityTags(raw string) map[string]struct{} {
-	raw = strings.NewReplacer(",", " ", "，", " ", "、", " ", "/", " ", "|", " ", ";", " ", "；", " ").Replace(raw)
-	out := make(map[string]struct{})
-	for _, part := range strings.Fields(raw) {
-		part = strings.ToLower(strings.TrimSpace(part))
-		if part == "" {
-			continue
-		}
-		out[part] = struct{}{}
-	}
-	return out
 }
 
 func classifyRemarkKind(profile IdentityProfile) remarkKind {
@@ -596,13 +431,6 @@ func lastRuneWord(text string) string {
 		start--
 	}
 	return string(runes[start:end])
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }
 
 func maxInt64(a, b int64) int64 {
