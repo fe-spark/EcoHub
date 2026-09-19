@@ -74,6 +74,20 @@ func IdentityFromFilmIndex(info model.FilmIndex) IdentityProfile {
 	}
 }
 
+func IdentityFromSnapshot(snap model.FilmListSnapshot) IdentityProfile {
+	return IdentityFromFilmIndex(model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: snap.Mid, DbId: snap.DbId},
+		FilmIndexCategory: model.FilmIndexCategory{Cid: snap.Cid, Pid: snap.Pid, CName: snap.CName},
+		FilmIndexContent: model.FilmIndexContent{
+			Name:     snap.Name,
+			ClassTag: snap.ClassTag,
+			Year:     snap.Year,
+			Director: snap.Director,
+			Remarks:  snap.Remarks,
+		},
+	})
+}
+
 func IdentityFromMovieDetail(detail model.MovieDetail) IdentityProfile {
 	episodes := make([]model.MovieUrlInfo, 0)
 	for _, group := range detail.PlayList {

@@ -202,6 +202,65 @@ func TestSearchCollectSourceCMSJoinsDetailByVodIDNotName(t *testing.T) {
 	}
 }
 
+func TestAssignCMSSearchLocalIDsKeepsOnlyMatchingSerial(t *testing.T) {
+	animeSnap := model.FilmListSnapshot{
+		Mid: 9, Name: "牧神记", CName: "中国动漫", Year: 2024, Remarks: "第100集",
+	}
+	cards := []model.MovieBasicInfo{
+		{Name: "牧神记", CName: "国产动漫", Remarks: "第100集", Year: "2024", SourceId: "subo", SourceMid: 101},
+		{Name: "牧神记", CName: "反转爽剧", Remarks: "第81-106集完结", Year: "2024", SourceId: "subo", SourceMid: 202},
+	}
+	assignCMSSearchLocalIDs(
+		cards,
+		map[int64]int64{101: 9, 202: 9},
+		map[int64]model.FilmListSnapshot{9: animeSnap},
+		nil,
+	)
+	if cards[0].Id != 9 {
+		t.Fatalf("serial 牧神记 should keep local mid, got %d", cards[0].Id)
+	}
+	if cards[1].Id != 0 {
+		t.Fatalf("packed 牧神记 must play live, got %d", cards[1].Id)
+	}
+}
+
+func TestAssignCMSSearchLocalIDsDropsAmbiguousSharedMid(t *testing.T) {
+	snap := model.FilmListSnapshot{Mid: 9, Name: "牧神记", Year: 2024, Remarks: "第100集"}
+	cards := []model.MovieBasicInfo{
+		{Name: "牧神记", Remarks: "第100集", Year: "2024", SourceMid: 101},
+		{Name: "牧神记", Remarks: "第100集", Year: "2024", SourceMid: 202},
+	}
+	assignCMSSearchLocalIDs(
+		cards,
+		map[int64]int64{101: 9, 202: 9},
+		map[int64]model.FilmListSnapshot{9: snap},
+		nil,
+	)
+	if cards[0].Id != 0 || cards[1].Id != 0 {
+		t.Fatalf("two vod_ids mapped to one mid must both go live, got %+v", cards)
+	}
+}
+
+func TestAssignCMSSearchLocalIDsKeepsUniqueMatch(t *testing.T) {
+	snap := model.FilmListSnapshot{Mid: 9, Name: "牧神记", Year: 2024, Remarks: "第100集"}
+	cards := []model.MovieBasicInfo{
+		{Name: "牧神记", Remarks: "第100集", Year: "2024", SourceMid: 101},
+		{Name: "牧神记之延康变法", Remarks: "第41-61集完结", Year: "2025", SourceMid: 303},
+	}
+	assignCMSSearchLocalIDs(
+		cards,
+		map[int64]int64{101: 9},
+		map[int64]model.FilmListSnapshot{9: snap},
+		nil,
+	)
+	if cards[0].Id != 9 {
+		t.Fatalf("unique mapping should keep mid, got %d", cards[0].Id)
+	}
+	if cards[1].Id != 0 {
+		t.Fatalf("unmapped title must stay live, got %d", cards[1].Id)
+	}
+}
+
 func TestSearchFilmResult_SingleSourcePreservesSources(t *testing.T) {
 	svc := &IndexService{}
 	page := &dto.Page{Current: 1, PageSize: 12}
