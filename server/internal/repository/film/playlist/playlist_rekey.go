@@ -15,9 +15,12 @@ import (
 )
 
 const (
-	rekeyKeyChunkSize   = 500
-	rekeyMidChunkSize   = 500
-	rekeyWriteBatchSize = 200
+	rekeyKeyChunkSize     = 500
+	rekeyMidChunkSize     = 500
+	rekeyWriteBatchSize   = 200
+	rekeyDefaultBatchSize = 2000
+	rekeyLogEveryN        = 20000
+	playlistScanColumns   = "id, source_id, movie_key, group_index, group_name, updated_at"
 )
 
 type rekeySlot struct {
@@ -144,12 +147,53 @@ func loadSlavePlaylistsBySlots(slots []rekeySlot) (map[rekeySlot]model.SlaveMovi
 	return out, nil
 }
 
+func attachPlaylistContent(rows []model.SlaveMoviePlaylist) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]uint, 0, len(rows))
+	index := make(map[uint]int, len(rows))
+	for i, row := range rows {
+		if row.ID == 0 {
+			continue
+		}
+		ids = append(ids, row.ID)
+		index[row.ID] = i
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	type contentRow struct {
+		ID      uint
+		Content string
+	}
+	for start := 0; start < len(ids); start += rekeyKeyChunkSize {
+		end := start + rekeyKeyChunkSize
+		if end > len(ids) {
+			end = len(ids)
+		}
+		var parts []contentRow
+		if err := db.Mdb.Model(&model.SlaveMoviePlaylist{}).
+			Select("id", "content").
+			Where("id IN ?", ids[start:end]).
+			Find(&parts).Error; err != nil {
+			return err
+		}
+		for _, part := range parts {
+			if i, ok := index[part.ID]; ok {
+				rows[i].Content = part.Content
+			}
+		}
+	}
+	return nil
+}
+
 func rekeySlavePlaylistRows(rows []model.SlaveMoviePlaylist, targetByKey map[string]string, dryRun bool) (int64, error) {
 	if len(rows) == 0 || len(targetByKey) == 0 {
 		return 0, nil
 	}
 
-	deletes := make([]rekeySlot, 0, len(rows))
+	deleteIDs := make([]uint, 0, len(rows))
 	upsertBySlot := make(map[rekeySlot]model.SlaveMoviePlaylist, len(rows))
 	upsertOrder := make([]rekeySlot, 0, len(rows))
 	for _, row := range rows {
@@ -157,7 +201,9 @@ func rekeySlavePlaylistRows(rows []model.SlaveMoviePlaylist, targetByKey map[str
 		if target == "" {
 			continue
 		}
-		deletes = append(deletes, rekeySlot{sourceID: row.SourceId, movieKey: row.MovieKey, groupIndex: row.GroupIndex})
+		if row.ID > 0 {
+			deleteIDs = append(deleteIDs, row.ID)
+		}
 
 		moved := row
 		moved.ID = 0
@@ -172,11 +218,11 @@ func rekeySlavePlaylistRows(rows []model.SlaveMoviePlaylist, targetByKey map[str
 		}
 		upsertBySlot[slot] = moved
 	}
-	if len(deletes) == 0 {
+	if len(deleteIDs) == 0 {
 		return 0, nil
 	}
 	if dryRun {
-		return int64(len(deletes)), nil
+		return int64(len(deleteIDs)), nil
 	}
 
 	existingTargets, err := loadSlavePlaylistsBySlots(upsertOrder)
@@ -210,10 +256,12 @@ func rekeySlavePlaylistRows(rows []model.SlaveMoviePlaylist, targetByKey map[str
 	})
 
 	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		for _, slot := range deletes {
-			if err := tx.Unscoped().
-				Where("source_id = ? AND movie_key = ? AND group_index = ?", slot.sourceID, slot.movieKey, slot.groupIndex).
-				Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
+		for start := 0; start < len(deleteIDs); start += rekeyWriteBatchSize {
+			end := start + rekeyWriteBatchSize
+			if end > len(deleteIDs) {
+				end = len(deleteIDs)
+			}
+			if err := tx.Unscoped().Where("id IN ?", deleteIDs[start:end]).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
 				return err
 			}
 		}
@@ -228,7 +276,7 @@ func rekeySlavePlaylistRows(rows []model.SlaveMoviePlaylist, targetByKey map[str
 	if err != nil {
 		return 0, err
 	}
-	return int64(len(deletes)), nil
+	return int64(len(deleteIDs)), nil
 }
 
 func matchKeysEqual(left, right []string) bool {
@@ -358,7 +406,7 @@ type SlavePlaylistKeyMigrationResult struct {
 func MigrateSlavePlaylistKeys(dryRun bool, batchSize int, logf func(format string, v ...any)) (SlavePlaylistKeyMigrationResult, error) {
 	var result SlavePlaylistKeyMigrationResult
 	if batchSize <= 0 {
-		batchSize = 500
+		batchSize = rekeyDefaultBatchSize
 	}
 	if logf == nil {
 		logf = func(string, ...any) {}
@@ -387,7 +435,11 @@ func MigrateSlavePlaylistKeys(dryRun bool, batchSize int, logf func(format strin
 	lastPlaylistID := uint(0)
 	for {
 		var rows []model.SlaveMoviePlaylist
-		if err := db.Mdb.Where("id > ?", lastPlaylistID).Order("id ASC").Limit(batchSize).Find(&rows).Error; err != nil {
+		if err := db.Mdb.Select(playlistScanColumns).
+			Where("id > ?", lastPlaylistID).
+			Order("id ASC").
+			Limit(batchSize).
+			Find(&rows).Error; err != nil {
 			return result, err
 		}
 		if len(rows) == 0 {
@@ -404,13 +456,25 @@ func MigrateSlavePlaylistKeys(dryRun bool, batchSize int, logf func(format strin
 		if err != nil {
 			return result, err
 		}
-		moved, err := rekeySlavePlaylistRows(rows, targets, dryRun)
+		moving := make([]model.SlaveMoviePlaylist, 0, len(rows))
+		for _, row := range rows {
+			if _, ok := targets[strings.TrimSpace(row.MovieKey)]; ok {
+				moving = append(moving, row)
+			}
+		}
+		if !dryRun && len(moving) > 0 {
+			if err := attachPlaylistContent(moving); err != nil {
+				return result, err
+			}
+		}
+		moved, err := rekeySlavePlaylistRows(moving, targets, dryRun)
 		if err != nil {
 			return result, err
 		}
 		result.Migrated += moved
 		result.Skipped += int64(len(rows)) - moved
-		if moved > 0 {
+		prev := result.Scanned - int64(len(rows))
+		if moved > 0 || result.Scanned/rekeyLogEveryN != prev/rekeyLogEveryN {
 			logf("[Migrate] 播放列表 扫描=%d 归并=%d 跳过=%d（cursor id=%d）", result.Scanned, result.Migrated, result.Skipped, lastPlaylistID)
 		}
 	}

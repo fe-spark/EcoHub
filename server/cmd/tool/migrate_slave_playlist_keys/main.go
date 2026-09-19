@@ -31,7 +31,7 @@ func main() {
 	user := flag.String("user", os.Getenv("MYSQL_USER"), "MySQL User")
 	pass := flag.String("pass", os.Getenv("MYSQL_PASSWORD"), "MySQL Password")
 	dbname := flag.String("dbname", os.Getenv("MYSQL_DBNAME"), "MySQL Database Name")
-	batchSize := flag.Int("batch-size", 500, "Pagination batch size")
+	batchSize := flag.Int("batch-size", 2000, "Pagination batch size")
 	dryRun := flag.Bool("dry-run", false, "Dry run mode (do not commit changes)")
 	flag.Parse()
 
