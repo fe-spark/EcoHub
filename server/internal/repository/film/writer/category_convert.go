@@ -112,12 +112,13 @@ func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) 
 }
 
 type normalizedSearchMeta struct {
-	Score       float64
-	UpdateStamp int64
-	Year        int64
-	Area        string
-	Language    string
-	ClassTag    string
+	Score        float64
+	UpdateStamp  int64
+	UpdateReason string
+	Year         int64
+	Area         string
+	Language     string
+	ClassTag     string
 }
 
 func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSearchCategory {
@@ -166,7 +167,7 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	return result
 }
 
-func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCategory) (normalizedSearchMeta, error) {
+func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category resolvedSearchCategory) (normalizedSearchMeta, error) {
 	score, _ := strconv.ParseFloat(detail.DbScore, 64)
 	year, err := strconv.ParseInt(regexp.MustCompile(`[1-9][0-9]{3}`).FindString(detail.ReleaseDate), 10, 64)
 	if err != nil {
@@ -181,17 +182,23 @@ func normalizeSearchMetadata(detail model.MovieDetail, category resolvedSearchCa
 		updateStamp = time.Now().Unix()
 	}
 
+	updateReason := "新片入库"
+	if strings.TrimSpace(sourceId) == "manual" {
+		updateReason = "后台修改"
+	}
+
 	finalArea := support.NormalizeArea(detail.Area)
 	finalLang := support.NormalizeLanguage(detail.Language)
 	mainCategoryName := support.GetMainCategoryName(category.Pid)
 
 	return normalizedSearchMeta{
-		Score:       score,
-		UpdateStamp: updateStamp,
-		Year:        year,
-		Area:        finalArea,
-		Language:    finalLang,
-		ClassTag:    support.CleanPlotTags(detail.ClassTag, finalArea, mainCategoryName, category.CName),
+		Score:        score,
+		UpdateStamp:  updateStamp,
+		UpdateReason: updateReason,
+		Year:         year,
+		Area:         finalArea,
+		Language:     finalLang,
+		ClassTag:     support.CleanPlotTags(detail.ClassTag, finalArea, mainCategoryName, category.CName),
 	}, nil
 }
 
@@ -222,6 +229,7 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 			Initial:            detail.Initial,
 			Score:              meta.Score,
 			UpdateStamp:        meta.UpdateStamp,
+			UpdateReason:       meta.UpdateReason,
 			Hits:               detail.Hits,
 			State:              detail.State,
 			Remarks:            detail.Remarks,
@@ -244,7 +252,7 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
-	meta, err := normalizeSearchMetadata(detail, category)
+	meta, err := normalizeSearchMetadata(sourceId, detail, category)
 	if err != nil {
 		return model.FilmIndex{}, err
 	}

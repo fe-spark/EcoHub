@@ -17,7 +17,7 @@ import (
 var filmIndexUpsertUpdateColumns = []string{
 	"content_key", "source_id", "cid", "pid", "root_category_key", "category_key", "original_category", "name", "sub_title", "c_name", "class_tag",
 	"series_key", "area", "language", "year", "initial", "score",
-	"update_stamp", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp", "category_version", "rule_version",
+	"update_stamp", "update_reason", "hits", "state", "remarks", "play_from_summary", "db_id", "collect_stamp", "category_version", "rule_version",
 	"picture", "picture_slide", "custom_picture", "custom_picture_slide", "is_custom_picture", "actor", "director", "blurb", "updated_at", "deleted_at",
 }
 

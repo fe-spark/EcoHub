@@ -1,6 +1,7 @@
 package playlist
 
 import (
+	"fmt"
 	"log"
 	"sort"
 	"strings"
@@ -14,6 +15,11 @@ import (
 
 	"gorm.io/gorm/clause"
 )
+
+type slavePlaylistUpdateInfo struct {
+	Stamp  int64
+	Reason string
+}
 
 // scheduleSearchInfoRefreshByPlaylists 刷新附属站映射/时间戳。
 // NotifyMIDs 仅 stamp 资格；AffectedMIDs 含所有 playlist 写入，供详情页展示最新集。
@@ -112,31 +118,40 @@ func touchSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 			notifyChanges = append(notifyChanges, c)
 		}
 	}
-	updateStampByMid, err := buildSlavePlaylistUpdateStamps(sourceID, notifyChanges)
+	updateInfoByMid, err := buildSlavePlaylistUpdateStamps(sourceID, notifyChanges)
 	if err != nil {
 		return nil, err
 	}
-	if len(updateStampByMid) == 0 {
+	if len(updateInfoByMid) == 0 {
 		return nil, nil
 	}
-	caseExpr := "CASE mid"
-	mids := make([]int64, 0, len(updateStampByMid))
-	args := make([]any, 0, len(updateStampByMid)*2)
-	for mid, updateStamp := range updateStampByMid {
-		caseExpr += " WHEN ? THEN ?"
-		args = append(args, mid, updateStamp)
+	stampCaseExpr := "CASE mid"
+	reasonCaseExpr := "CASE mid"
+	mids := make([]int64, 0, len(updateInfoByMid))
+	stampArgs := make([]any, 0, len(updateInfoByMid)*2)
+	reasonArgs := make([]any, 0, len(updateInfoByMid)*2)
+	for mid, info := range updateInfoByMid {
+		stampCaseExpr += " WHEN ? THEN ?"
+		stampArgs = append(stampArgs, mid, info.Stamp)
+		reasonCaseExpr += " WHEN ? THEN ?"
+		reasonArgs = append(reasonArgs, mid, info.Reason)
 		mids = append(mids, mid)
 	}
-	caseExpr += " ELSE update_stamp END"
+	stampCaseExpr += " ELSE update_stamp END"
+	reasonCaseExpr += " ELSE update_reason END"
+	updates := map[string]any{
+		"update_stamp":  clause.Expr{SQL: stampCaseExpr, Vars: stampArgs},
+		"update_reason": clause.Expr{SQL: reasonCaseExpr, Vars: reasonArgs},
+	}
 	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Where("mid IN ?", mids).
-		Update("update_stamp", clause.Expr{SQL: caseExpr, Vars: args}).Error; err != nil {
+		Updates(updates).Error; err != nil {
 		return nil, err
 	}
 	return mids, nil
 }
 
-func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (map[int64]int64, error) {
+func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (map[int64]slavePlaylistUpdateInfo, error) {
 	movieKeys := make([]string, 0, len(changes))
 	changeByKey := make(map[string]playlistChange, len(changes))
 	for _, change := range changes {
@@ -167,14 +182,23 @@ func buildSlavePlaylistUpdateStamps(sourceID string, changes []playlistChange) (
 	}
 
 	now := time.Now().Unix()
-	result := make(map[int64]int64, len(midByKey))
+	result := make(map[int64]slavePlaylistUpdateInfo, len(midByKey))
 	for movieKey, mid := range midByKey {
 		change := changeByKey[movieKey]
 		if !slaveShouldBumpStamp(change, existingCountsMap[mid]) {
 			continue
 		}
-		if existing, ok := result[mid]; !ok || now > existing {
-			result[mid] = now
+		counts := shared.ExtractEpisodeCountsFromContents(PlaylistSignatureContents(change.Signatures))
+		maxEp := shared.MaxEpisodeCount(counts)
+		reason := "剧集更新"
+		if maxEp > 0 {
+			reason = fmt.Sprintf("更新至第%d集", maxEp)
+		}
+		if existing, ok := result[mid]; !ok || now > existing.Stamp {
+			result[mid] = slavePlaylistUpdateInfo{
+				Stamp:  now,
+				Reason: reason,
+			}
 		}
 	}
 	return result, nil

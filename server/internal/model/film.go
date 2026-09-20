@@ -186,7 +186,8 @@ type FilmIndexContent struct {
 	Initial            string  `json:"initial"`                                                                                                                                                                              // 首字母
 	Score              float64 `json:"score" gorm:"index;index:idx_filter_score"`                                                                                                                                            // 评分
 	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_film_index_update_mid,priority:1;index:idx_film_index_pid_update_mid,priority:2;index:idx_pid_update;index:idx_cid_update;index:idx_filter_update"` // 更新时间
-	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`                                                                                                        // 热度排行
+	UpdateReason       string  `json:"updateReason" gorm:"type:varchar(64)"`                                                                                                                 // 更新原因
+	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_filter_hits"`                                                                         // 热度排行
 	State              string  `json:"state"`                                                                                                                                                                                // 状态 正片|预告
 	Remarks            string  `json:"remarks"`                                                                                                                                                                              // 完结 | 更新至x集
 	Picture            string  `json:"picture" gorm:"type:text"`                                                                                                                                                             // 竖版封面图（源站/海报源原图）
@@ -272,6 +273,7 @@ type FilmListSnapshot struct {
 	Initial            string  `json:"initial"`
 	Score              float64 `json:"score" gorm:"index"`
 	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year;index:idx_snap_ver_update,priority:2"`
+	UpdateReason       string  `json:"updateReason" gorm:"type:varchar(64)"`
 	Hits               int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
 	State              string  `json:"state"`
 	Remarks            string  `json:"remarks"`
@@ -397,4 +399,5 @@ type MovieDetailVo struct {
 	MovieDetail
 	List            []PlayLinkVo `json:"list"`
 	LocalUpdateTime int64        `json:"localUpdateTime"` // 本地详情更新时间戳
+	UpdateReason    string       `json:"updateReason"`    // 更新原因
 }

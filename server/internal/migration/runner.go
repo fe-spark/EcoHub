@@ -61,6 +61,11 @@ var migrations = []Migration{
 		Name:    "drop redundant soft-delete index idx_film_list_snapshot_deleted_at from film_list_snapshot",
 		Run:     migrateDropSnapDeletedAtIndex,
 	},
+	{
+		Version: "20260920_add_update_reason_column",
+		Name:    "add update_reason column to film_index and film_list_snapshot",
+		Run:     migrateAddUpdateReasonColumn,
+	},
 }
 
 // RunAutoMigrations 顺序执行尚未执行的历史版本迁移，并持久化到 schema_migrations 表
@@ -248,3 +253,19 @@ func migrateDropSnapDeletedAtIndex(db *gorm.DB) error {
 	}
 	return nil
 }
+
+func migrateAddUpdateReasonColumn(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&model.FilmIndex{}) && !migrator.HasColumn(&model.FilmIndex{}, "update_reason") {
+		if err := migrator.AddColumn(&model.FilmIndex{}, "update_reason"); err != nil {
+			return err
+		}
+	}
+	if migrator.HasTable(&model.FilmListSnapshot{}) && !migrator.HasColumn(&model.FilmListSnapshot{}, "update_reason") {
+		if err := migrator.AddColumn(&model.FilmListSnapshot{}, "update_reason"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
