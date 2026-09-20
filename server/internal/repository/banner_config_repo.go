@@ -68,6 +68,19 @@ func NormalizeBannerConfig(cfg model.BannerConfig) model.BannerConfig {
 	}
 	if cfg.Categories == nil {
 		cfg.Categories = []int64{}
+	} else {
+		validCats := make([]int64, 0, len(cfg.Categories))
+		seenCat := make(map[int64]struct{}, len(cfg.Categories))
+		for _, cat := range cfg.Categories {
+			if cat > 0 {
+				if _, ok := seenCat[cat]; !ok {
+					seenCat[cat] = struct{}{}
+					validCats = append(validCats, cat)
+				}
+			}
+		}
+		// 动态过滤已在分类管理中设置为不显示的分类：哪怕之前选中的时候显示，后面分类设置为不显示，依旧过滤
+		cfg.Categories = FilterShownCategoryIDs(validCats)
 	}
 	return cfg
 }

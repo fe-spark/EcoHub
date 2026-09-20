@@ -163,3 +163,74 @@ func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
 		t.Fatalf("expected 0 rules after ResetMappingRules, got %d", ruleCount)
 	}
 }
+
+func TestFilterShownCategoryIDs_DynamicHidden(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 模拟分类管理：电影(1, 显示), 电视剧(2, 显示), 体育(4, 隐藏)
+	if err := gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "movie", Show: true}).Error; err != nil {
+		t.Fatalf("create cat 1: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 2, Pid: 0, Name: "电视剧", StableKey: "tv", Show: true}).Error; err != nil {
+		t.Fatalf("create cat 2: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 4, Pid: 0, Name: "体育", StableKey: "sports"}).Error; err != nil {
+		t.Fatalf("create cat 4: %v", err)
+	}
+	// 模拟在分类管理中将分类 4 设置为不显示
+	if err := gdb.Model(&model.Category{}).Where("id = ?", 4).Update("show", false).Error; err != nil {
+		t.Fatalf("update cat 4 to show=false: %v", err)
+	}
+
+	shownIDs := GetShownRootCategoryIDs()
+	if len(shownIDs) != 2 || shownIDs[0] != 1 || shownIDs[1] != 2 {
+		t.Fatalf("expected shown IDs [1, 2], got %v", shownIDs)
+	}
+
+	// 哪怕之前选中的时候显示 [1, 2, 4]，后面分类 4 设置为不显示，依旧严格过滤出 [1, 2]
+	filtered := FilterShownCategoryIDs([]int64{1, 2, 4})
+	if len(filtered) != 2 || filtered[0] != 1 || filtered[1] != 2 {
+		t.Fatalf("expected filtered IDs [1, 2], got %v", filtered)
+	}
+
+	// 如果只选了被隐藏的分类 4，过滤后应为空
+	onlyHidden := FilterShownCategoryIDs([]int64{4})
+	if len(onlyHidden) != 0 {
+		t.Fatalf("expected empty slice for only hidden categories, got %v", onlyHidden)
+	}
+
+	// 验证 NormalizeBannerConfig 也会自动过滤掉被隐藏的分类 4
+	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{1, 2, 4}})
+	if len(cfg.Categories) != 2 || cfg.Categories[0] != 1 || cfg.Categories[1] != 2 {
+		t.Fatalf("expected NormalizeBannerConfig to filter out hidden category 4, got %v", cfg.Categories)
+	}
+}
+
+func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 插入分类且全部置为隐藏 (Show=false)
+	gdb.Create(&model.Category{Id: 10, Pid: 0, Name: "分类A", StableKey: "a"})
+	gdb.Create(&model.Category{Id: 20, Pid: 0, Name: "分类B", StableKey: "b"})
+	if err := gdb.Model(&model.Category{}).Where("id IN ?", []int64{10, 20}).Update("show", false).Error; err != nil {
+		t.Fatalf("update to show=false: %v", err)
+	}
+
+	shownIDs := GetShownRootCategoryIDs()
+	if len(shownIDs) != 0 {
+		t.Fatalf("expected 0 shown IDs when all categories are hidden, got %v", shownIDs)
+	}
+
+	// 验证当全部分类都隐藏时，输入任何分类 ID 都必须严格被过滤为 0 个，绝不能短路放行
+	filtered := FilterShownCategoryIDs([]int64{10, 20})
+	if len(filtered) != 0 {
+		t.Fatalf("expected empty slice when all categories hidden, got %v", filtered)
+	}
+
+	// 验证 NormalizeBannerConfig 在全隐藏状态下 Categories 被彻底清空
+	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{10, 20}})
+	if len(cfg.Categories) != 0 {
+		t.Fatalf("expected empty categories in NormalizeBannerConfig when all hidden, got %v", cfg.Categories)
+	}
+}
+

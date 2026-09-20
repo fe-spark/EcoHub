@@ -199,3 +199,28 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 	}
 }
 
+func TestBannerGenerateAndProgressHandlers(t *testing.T) {
+	h := &ManageHandler{}
+
+	c, w := testContext(http.MethodPost, "/api/manage/banner/generate")
+	h.BannerGenerate(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
+	}
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("code=%d want 0", resp.Code)
+	}
+
+	cProg, wProg := testContext(http.MethodGet, "/api/manage/banner/generate/progress")
+	h.BannerGenerateProgress(cProg)
+	if wProg.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", wProg.Code, wProg.Body.String())
+	}
+	respProg := decodeResponse(t, wProg)
+	if respProg.Code != dto.SUCCESS {
+		t.Fatalf("code=%d want 0", respProg.Code)
+	}
+}
+
+

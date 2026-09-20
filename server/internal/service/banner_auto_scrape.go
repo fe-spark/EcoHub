@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -17,6 +18,7 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 	needCount int,
 	freshCandidates []model.FilmListSnapshot,
 	existingCandidates []model.FilmListSnapshot,
+	categoryPids []int64,
 	version string,
 ) ([]model.FilmListSnapshot, int, int, int) {
 	pool := make([]model.FilmListSnapshot, 0, len(freshCandidates)+len(existingCandidates))
@@ -24,6 +26,7 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 	pool = append(pool, existingCandidates...)
 
 	validSnaps := make([]model.FilmListSnapshot, 0, needCount)
+	scrapedMids := make([]int64, 0, needCount)
 	usedMids := make(map[int64]struct{}, len(pool))
 	fallbackCandidates := make([]model.FilmListSnapshot, 0, len(pool))
 	cursor := 0
@@ -31,14 +34,30 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 	attemptCount := 0
 	successCount := 0
 
+	maxAttempts := needCount * 12
+	if maxAttempts < 36 {
+		maxAttempts = 36
+	}
+	if maxAttempts > 100 {
+		maxAttempts = 100
+	}
+	if maxAttempts > len(pool) {
+		maxAttempts = len(pool)
+	}
+
 	for len(validSnaps) < needCount && cursor < len(pool) {
 		select {
 		case <-ctx.Done():
-			log.Printf("[BannerAutoScrape] 刮削达到超时上限(5分钟)或被中止，当前已收集 %d/%d 部有效高清影片", len(validSnaps), needCount)
+			log.Printf("[BannerAutoScrape] 刮削达到超时预算上限或被中止，当前已收集 %d/%d 部有效高清影片，启动快速兜底补齐", len(validSnaps), needCount)
 			break
 		default:
 		}
 		if ctx.Err() != nil {
+			break
+		}
+		if attemptCount >= maxAttempts {
+			log.Printf("[BannerAutoScrape] 达到候选尝试上限(尝试=%d部, 有效=%d/%d)，停止继续检索外部接口，转入快速兜底补齐",
+				attemptCount, len(validSnaps), needCount)
 			break
 		}
 
@@ -66,9 +85,9 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 
 		var toScrape []model.FilmListSnapshot
 		for _, item := range batch {
-			if item.IsCustomPicture && strings.TrimSpace(item.DisplayPicture()) != "" {
+			if (item.IsCustomPicture || strings.TrimSpace(item.DisplayPictureSlide()) != "") && strings.TrimSpace(item.DisplayPicture()) != "" {
 				validSnaps = append(validSnaps, item)
-				log.Printf("[BannerAutoScrape] 影片已有自定义高清封面 mid=%d 片名=%q，直接纳入有效排片 (当前有效=%d/%d)",
+				log.Printf("[BannerAutoScrape] 影片已有高清素材/横屏大图 mid=%d 片名=%q，直接纳入有效排片 (当前有效=%d/%d)",
 					item.Mid, item.Name, len(validSnaps), needCount)
 				if len(validSnaps) >= needCount {
 					break
@@ -81,6 +100,22 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 		if len(validSnaps) >= needCount || len(toScrape) == 0 {
 			continue
 		}
+
+		calcProgress := func(currAttempts int) int {
+			pctByValid := float64(len(validSnaps)) / float64(needCount)
+			pctByAttempts := float64(currAttempts) / float64(maxAttempts)
+			ratio := pctByValid
+			if pctByAttempts > ratio {
+				ratio = pctByAttempts
+			}
+			p := 20 + int(ratio*65)
+			if p > 85 {
+				p = 85
+			}
+			return p
+		}
+
+		ReportBannerGenerateProgress(calcProgress(attemptCount), fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
 
 		type scrapeJobResult struct {
 			original model.FilmListSnapshot
@@ -129,23 +164,43 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 			if res.err != nil {
 				log.Printf("[BannerAutoScrape] 影片刮削记录异常 (已优雅降级): %v", res.err)
 			}
+			curPct := calcProgress(attemptCount)
 			if res.ok && res.updated != nil {
 				successCount++
+				scrapedMids = append(scrapedMids, res.updated.Mid)
 				if len(validSnaps) < needCount {
 					validSnaps = append(validSnaps, *res.updated)
 					log.Printf("[BannerAutoScrape] 成功获取有效高清影片 mid=%d 片名=%q (当前有效=%d/%d)",
 						res.updated.Mid, res.updated.Name, len(validSnaps), needCount)
 				}
+				ReportBannerGenerateProgress(curPct, fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
 			} else {
 				fallbackCandidates = append(fallbackCandidates, res.original)
+				ReportBannerGenerateProgress(curPct, fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
 			}
 		}
 	}
 
-	// 若片库耗尽或超时仍不足目标数量，用未命中的候选安全兜底补齐
+	// 若片库耗尽或超时仍不足目标数量，优先从片库中已有高清横图/海报的优质影片兜底补足，绝不直接使用未匹配的低清小图
 	if len(validSnaps) < needCount {
-		log.Printf("[BannerAutoScrape] 有效高清影片未满目标数量 (有效=%d, 目标=%d)，使用备选池补足差额",
+		ReportBannerGenerateProgress(85, fmt.Sprintf("正在从片库优选已有高清素材影片补足 %d 部轮播...", needCount))
+		log.Printf("[BannerAutoScrape] 有效高清影片未满目标数量 (有效=%d, 目标=%d)，从片库优选已有高清大图的影片补足差额",
 			len(validSnaps), needCount)
+
+		// 1. 优先从全局快照中寻找已有高清横屏壁纸或自定义海报的影片 (严格遵循指定分类)
+		hdSnaps := filmsnapshot.GetSnapshotHDBackdropCandidates(version, categoryPids, 50)
+		for _, hd := range hdSnaps {
+			if len(validSnaps) >= needCount {
+				break
+			}
+			if _, used := usedMids[hd.Mid]; !used && hd.Mid > 0 {
+				usedMids[hd.Mid] = struct{}{}
+				validSnaps = append(validSnaps, hd)
+				log.Printf("[BannerAutoScrape] 使用已有高清素材影片兜底 mid=%d 片名=%q", hd.Mid, hd.Name)
+			}
+		}
+
+		// 2. 极端情况（全站片库无任何高清影片）：才使用普通候选保底
 		for _, fb := range fallbackCandidates {
 			if len(validSnaps) >= needCount {
 				break
@@ -156,6 +211,15 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 			cand := pool[cursor]
 			cursor++
 			validSnaps = append(validSnaps, cand)
+		}
+	}
+
+	// 轮播刮削凑额完成(或候选池耗尽)，一次性统一批量发布快照与重建常驻搜索索引
+	if len(scrapedMids) > 0 {
+		ReportBannerGenerateProgress(88, fmt.Sprintf("正在批量更新并发布 %d 部影视快照...", len(scrapedMids)))
+		log.Printf("[BannerAutoScrape] 轮播刮削凑额完成(或候选池耗尽)，统一批量重建发布快照 mid_count=%d", len(scrapedMids))
+		if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(scrapedMids...); err != nil {
+			log.Printf("[BannerAutoScrape] 批量发布快照失败: %v", err)
 		}
 	}
 
@@ -332,18 +396,24 @@ func (s *BannerAutoService) tryTMDBAutoScrape(ctx context.Context, snap model.Fi
 		MediaType: matched.MediaType,
 		Fields:    fields,
 	}
-	if err := TMDBSvc.ApplyDetail(applyReq); err != nil {
+	// 刮削阶段暂缓单片立即重建发布快照，落库后直接构造最新内存快照，待凑满目标数量后统一批量发布
+	if _, err := TMDBSvc.ApplyDetailWithOptions(applyReq, false); err != nil {
 		log.Printf("[BannerAutoScrape] TMDB 应用详情失败 mid=%d tmdbId=%d: %v", snap.Mid, matched.ID, err)
 		return nil, false, err
 	}
 
-	// 重新读取写回后的快照
-	updated := filmsnapshot.GetSnapshotByMid(version, snap.Mid)
-	if updated != nil {
-		log.Printf("[BannerAutoScrape] 影片 TMDB 高清数据写回快照成功 mid=%d 片名=%q (封面=%s, 横图=%s)",
-			snap.Mid, snap.Name, updated.DisplayPicture(), updated.DisplayPictureSlide())
-		return updated, true, nil
+	updatedSnap := snap
+	if strings.TrimSpace(matched.Poster) != "" {
+		updatedSnap.Picture = strings.TrimSpace(matched.Poster)
+		updatedSnap.CustomPicture = strings.TrimSpace(matched.Poster)
+		updatedSnap.IsCustomPicture = true
 	}
-	log.Printf("[BannerAutoScrape] 快照写回后未能重新读取 mid=%d 片名=%q", snap.Mid, snap.Name)
-	return nil, false, nil
+	if strings.TrimSpace(matched.Backdrop) != "" {
+		updatedSnap.PictureSlide = strings.TrimSpace(matched.Backdrop)
+		updatedSnap.CustomPictureSlide = strings.TrimSpace(matched.Backdrop)
+	}
+
+	log.Printf("[BannerAutoScrape] 影片 TMDB 高清数据已保存并就绪(待批量发布) mid=%d 片名=%q (封面=%s, 横图=%s)",
+		snap.Mid, snap.Name, updatedSnap.DisplayPicture(), updatedSnap.DisplayPictureSlide())
+	return &updatedSnap, true, nil
 }

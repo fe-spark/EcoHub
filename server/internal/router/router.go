@@ -115,6 +115,7 @@ func SetupRouter() *gin.Engine {
 			banner.GET(`/config`, handler.ManageHd.BannerConfigGet)
 			banner.POST(`/config/update`, handler.ManageHd.BannerConfigUpdate)
 			banner.POST(`/generate`, handler.ManageHd.BannerGenerate)
+			banner.GET(`/generate/progress`, handler.ManageHd.BannerGenerateProgress)
 		}
 
 		// 映射规则管理

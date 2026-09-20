@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import {
   Card,
   Table,
@@ -24,7 +24,7 @@ import {
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 
-import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
@@ -45,7 +45,8 @@ export default function BannersPageView() {
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
 
-  // 换一批刮削进度展示状态
+  // 轮播异步刮削与排片进度状态
+  const pollTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [progressVisible, setProgressVisible] = useState(false);
   const [progressTitle, setProgressTitle] = useState("智能排片与 TMDB 刮削");
   const [progressPercent, setProgressPercent] = useState(0);
@@ -54,6 +55,8 @@ export default function BannersPageView() {
   const [progressError, setProgressError] = useState("");
 
   const { message } = useAppMessage();
+  const messageRef = useRef(message);
+  messageRef.current = message;
   const { canWrite } = useManagePermission();
 
   const [editorVisible, setEditorVisible] = useState(false);
@@ -67,12 +70,12 @@ export default function BannersPageView() {
       if (resp.code === 0) {
         setBanners((resp.data || []) as BannerRecord[]);
       } else {
-        message.error(resp.msg);
+        messageRef.current.error(resp.msg);
       }
     } finally {
       setLoading(false);
     }
-  }, [message]);
+  }, []);
 
   const fetchConfig = useCallback(async () => {
     setConfigLoading(true);
@@ -86,12 +89,93 @@ export default function BannersPageView() {
     }
   }, []);
 
+  const stopPolling = useCallback(() => {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+  }, []);
+
+  // 仅在组件真实卸载时注销轮询定时器，杜绝因状态更新触发 effect 重复 cleanup
+  useEffect(() => {
+    return () => {
+      stopPolling();
+    };
+  }, [stopPolling]);
+
+  const startPollingProgress = useCallback(() => {
+    stopPolling();
+    setProgressVisible(true);
+    setProgressStatus("active");
+    setProgressError("");
+
+    const pollInterval = 1000;
+    const maxPollDuration = 330000; // 5.5 分钟安全保护上限
+    const startTime = Date.now();
+
+    const checkProgress = async () => {
+      if (Date.now() - startTime > maxPollDuration) {
+        stopPolling();
+        setProgressStatus("exception");
+        setProgressError("排片任务超时，请检查后端运行日志");
+        setProgressText("任务超时");
+        setGenerating(false);
+        return;
+      }
+
+      try {
+        const progResp = await ApiGet("/manage/banner/generate/progress");
+        if (progResp.code !== 0) {
+          return;
+        }
+
+        const prog = progResp.data;
+        if (prog.running) {
+          setProgressStatus("active");
+          setProgressPercent(Math.max(prog.percent || 5, 5));
+          if (prog.stage) {
+            setProgressText(prog.stage);
+          }
+        } else {
+          stopPolling();
+          setGenerating(false);
+
+          if (prog.error) {
+            setProgressStatus("exception");
+            setProgressError(prog.error);
+            setProgressText(prog.stage || "排片生成失败");
+          } else {
+            setProgressPercent(100);
+            setProgressStatus("success");
+            setProgressText(prog.stage || "排片完成，实时生效");
+            await fetchBanners();
+            setTimeout(() => {
+              setProgressVisible(false);
+            }, 800);
+          }
+        }
+      } catch (err: any) {
+        console.warn("轮询排片进度异常:", err);
+      }
+    };
+
+    void checkProgress();
+    pollTimerRef.current = setInterval(checkProgress, pollInterval);
+  }, [fetchBanners, stopPolling]);
+
+  // 页面加载初次拉取数据；若后台已有排片任务在跑，自动恢复弹窗与轮询
   useEffect(() => {
     void fetchBanners();
     void fetchConfig();
-  }, [fetchBanners, fetchConfig]);
 
-  // 统一智能排片与 TMDB 刮削生成（支持换一批与修改策略联动）
+    void ApiGet("/manage/banner/generate/progress").then((resp) => {
+      if (resp.code === 0 && resp.data?.running) {
+        startPollingProgress();
+      }
+    }).catch(() => {});
+  }, [fetchBanners, fetchConfig, startPollingProgress]);
+
+  // 统一智能排片与 TMDB 刮削生成（异步启动任务 + 实时轮询进度，彻底消除 504 网关超时）
   const handleGenerateNow = useCallback(
     async (title?: string) => {
       const isScraping = Boolean(config.autoTMDB && config.tmdbReady);
@@ -99,54 +183,31 @@ export default function BannersPageView() {
       setGenerating(true);
       setProgressVisible(true);
       setProgressStatus("active");
-      setProgressPercent(15);
-      setProgressText("检索候选影片...");
+      setProgressPercent(5);
+      setProgressText("正在启动排片任务...");
       setProgressError("");
 
-      const t1 = setTimeout(() => {
-        setProgressPercent(40);
-        setProgressText(isScraping ? "TMDB 刮削中..." : "优选候选影片...");
-      }, 500);
-      const t2 = setTimeout(() => {
-        setProgressPercent(75);
-        setProgressText("校验封面大图...");
-      }, 1200);
-      const t3 = setTimeout(() => {
-        setProgressPercent(90);
-        setProgressText("更新排片数据...");
-      }, 2200);
-
       try {
-        const resp = await ApiPostLong("/manage/banner/generate", {}, 120000);
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
-
-        if (resp.code === 0) {
-          setProgressPercent(100);
-          setProgressStatus("success");
-          setProgressText("排片完成，实时生效");
-          await fetchBanners();
-          setTimeout(() => {
-            setProgressVisible(false);
-          }, 800);
-        } else {
+        // 1. 触发异步排片任务（后端毫秒级立即返回，杜绝 504 网关超时）
+        const resp = await ApiPost("/manage/banner/generate", {});
+        if (resp.code !== 0) {
           setProgressStatus("exception");
-          setProgressError(resp.msg || "未能生成轮播项");
-          setProgressText("排片生成失败");
+          setProgressError(resp.msg || "未能启动轮播生成任务");
+          setProgressText("排片启动失败");
+          setGenerating(false);
+          return;
         }
+
+        // 2. 轮询获取后端真实执行进度与步骤
+        startPollingProgress();
       } catch (err: any) {
-        clearTimeout(t1);
-        clearTimeout(t2);
-        clearTimeout(t3);
         setProgressStatus("exception");
         setProgressError(err?.response?.data?.msg || err?.message || "网络异常或请求超时");
         setProgressText("网络异常");
-      } finally {
         setGenerating(false);
       }
     },
-    [config.autoTMDB, config.tmdbReady, fetchBanners],
+    [config.autoTMDB, config.tmdbReady, startPollingProgress],
   );
 
   // 统一保存排片设置：自动模式下立即联动刮削新轮播
@@ -171,7 +232,7 @@ export default function BannersPageView() {
         setSaving(false);
       }
     },
-    [message, fetchConfig, handleGenerateNow],
+    [message, fetchConfig, handleGenerateNow, config.tmdbReady],
   );
 
   // 删除某一项轮播

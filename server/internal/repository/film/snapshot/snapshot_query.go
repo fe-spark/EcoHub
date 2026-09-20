@@ -223,3 +223,24 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 	}
 	return results
 }
+
+// GetSnapshotHDBackdropCandidates 获取片库中已拥有高清横屏壁纸或自定义高清海报的优质影片快照（用于轮播优选与兜底）
+func GetSnapshotHDBackdropCandidates(version string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || limit <= 0 || db.Mdb == nil {
+		return []model.FilmListSnapshot{}
+	}
+	var results []model.FilmListSnapshot
+	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
+		Where("snapshot_version = ? AND (picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1)", version)
+	if len(categoryPids) > 0 {
+		query = query.Where("pid IN ?", categoryPids)
+	}
+	_ = query.Order("hits DESC, update_stamp DESC").
+		Limit(limit).
+		Find(&results).Error
+	return results
+}

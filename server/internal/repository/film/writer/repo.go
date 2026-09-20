@@ -153,7 +153,16 @@ func saveDetails(id string, list []model.MovieDetail, refreshSearchTags bool) (s
 	return out, nil
 }
 
+type SaveDetailOptions struct {
+	PublishSnapshot bool
+}
+
 func SaveDetail(id string, detail model.MovieDetail) error {
+	_, err := SaveDetailWithOptions(id, detail, SaveDetailOptions{PublishSnapshot: true})
+	return err
+}
+
+func SaveDetailWithOptions(id string, detail model.MovieDetail, opts SaveDetailOptions) (int64, error) {
 	var existing model.FilmIndex
 	hasExisting := false
 	if detail.Id > 0 && db.Mdb.Where("mid = ?", detail.Id).First(&existing).Error == nil {
@@ -226,10 +235,10 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 
 	filmIndex, err := ConvertFilmIndex(id, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if strings.TrimSpace(filmIndex.Name) == "" {
-		return nil
+		return 0, nil
 	}
 
 	changed := false
@@ -278,31 +287,32 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		savedMid = mid
 		return snapshot.RefreshPlayFromSummaryByIndexesTx(tx, []model.FilmIndex{filmIndex})
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	if err := repository.TouchCollectSourceStatsTx(db.Mdb, id, time.Now()); err != nil {
 		log.Printf("TouchCollectSourceStats Error: %v", err)
 	}
 
 	if !changed {
-		return nil
+		return savedMid, nil
 	}
 
-	// 仅在新增影片或检索标签维度属性发生实质变更时，增量轻量 Upsert 标签，绝不全量删除重跑大分类
+	// 仅在新增影片或检索标签维度属性发生实质变更时，增量轻量 Upsert 标签，绝不全量删除重跑大分类。
+	// 同步执行避免派生无界协程引发连接池耗尽与死锁竞态。
 	if !hasExisting || isFilmSearchTagFieldsChanged(existing, filmIndex) {
-		go func(info model.FilmIndex) {
-			if err := UpsertDynamicSearchTags(info); err != nil {
-				log.Printf("UpsertDynamicSearchTags Error: %v", err)
-			}
-		}(filmIndex)
+		if err := UpsertDynamicSearchTags(filmIndex); err != nil {
+			log.Printf("[SaveDetail] UpsertDynamicSearchTags Warning: %v", err)
+		}
 	}
 
 	clearDetailCaches(filmIndex.Pid)
 	cache.ClearProvideListCache()
-	if err := snapshot.UpsertActiveSnapshotByMid(savedMid); err != nil {
-		return err
+	if opts.PublishSnapshot && savedMid > 0 {
+		if err := snapshot.UpsertActiveSnapshotByMid(savedMid); err != nil {
+			return savedMid, err
+		}
 	}
-	return nil
+	return savedMid, nil
 }
 
 func isFilmSearchTagFieldsChanged(oldInfo, newInfo model.FilmIndex) bool {
