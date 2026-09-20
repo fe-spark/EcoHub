@@ -288,14 +288,28 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		return nil
 	}
 
-	go BatchHandleSearchTag(filmIndex)
+	// 仅在新增影片或检索标签维度属性发生实质变更时，增量轻量 Upsert 标签，绝不全量删除重跑大分类
+	if !hasExisting || isFilmSearchTagFieldsChanged(existing, filmIndex) {
+		go func(info model.FilmIndex) {
+			if err := UpsertDynamicSearchTags(info); err != nil {
+				log.Printf("UpsertDynamicSearchTags Error: %v", err)
+			}
+		}(filmIndex)
+	}
+
 	clearDetailCaches(filmIndex.Pid)
 	cache.ClearProvideListCache()
 	if err := snapshot.UpsertActiveSnapshotByMid(savedMid); err != nil {
 		return err
 	}
-	if err := snapshot.RefreshActiveReadModelArtifacts(); err != nil {
-		return err
-	}
 	return nil
+}
+
+func isFilmSearchTagFieldsChanged(oldInfo, newInfo model.FilmIndex) bool {
+	return oldInfo.Pid != newInfo.Pid ||
+		oldInfo.Cid != newInfo.Cid ||
+		oldInfo.ClassTag != newInfo.ClassTag ||
+		oldInfo.Area != newInfo.Area ||
+		oldInfo.Language != newInfo.Language ||
+		oldInfo.Year != newInfo.Year
 }

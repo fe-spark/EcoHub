@@ -3,6 +3,7 @@ package snapshot
 import (
 	"golang.org/x/sync/singleflight"
 	"log"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -66,23 +67,51 @@ func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
 			return nil, err
 		}
 		items := make([]FilmSearchMeta, len(rows))
-		for i, r := range rows {
-			item := utils.FilmSearchItem{
-				Mid:         r.Mid,
-				Name:        r.Name,
-				Hits:        r.Hits,
-				Score:       r.Score,
-				Year:        r.Year,
-				UpdateStamp: r.UpdateStamp,
-			}
-			utils.FillSearchDerivedFields(&item)
-			items[i] = FilmSearchMeta{
-				Mid:  r.Mid,
-				Pid:  r.Pid,
-				Cid:  r.Cid,
-				Item: item,
-			}
+		numWorkers := runtime.GOMAXPROCS(0)
+		if numWorkers < 1 {
+			numWorkers = 1
 		}
+		if numWorkers > 8 {
+			numWorkers = 8
+		}
+		if len(rows) < 200 {
+			numWorkers = 1
+		}
+		chunkSize := (len(rows) + numWorkers - 1) / numWorkers
+		var wg sync.WaitGroup
+		for w := 0; w < numWorkers; w++ {
+			startIdx := w * chunkSize
+			endIdx := startIdx + chunkSize
+			if startIdx >= len(rows) {
+				break
+			}
+			if endIdx > len(rows) {
+				endIdx = len(rows)
+			}
+			wg.Add(1)
+			go func(s, e int) {
+				defer wg.Done()
+				for i := s; i < e; i++ {
+					r := rows[i]
+					item := utils.FilmSearchItem{
+						Mid:         r.Mid,
+						Name:        r.Name,
+						Hits:        r.Hits,
+						Score:       r.Score,
+						Year:        r.Year,
+						UpdateStamp: r.UpdateStamp,
+					}
+					utils.FillSearchDerivedFields(&item)
+					items[i] = FilmSearchMeta{
+						Mid:  r.Mid,
+						Pid:  r.Pid,
+						Cid:  r.Cid,
+						Item: item,
+					}
+				}
+			}(startIdx, endIdx)
+		}
+		wg.Wait()
 		idx := &filmSearchMetaIndex{
 			Version: version,
 			Items:   items,
