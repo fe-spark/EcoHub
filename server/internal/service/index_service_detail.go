@@ -108,7 +108,11 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
 		}
-		res := model.MovieDetailVo{MovieDetail: *movieDetail, LocalUpdateTime: localUpdateTime}
+		res := model.MovieDetailVo{
+			MovieDetail:     *movieDetail,
+			LocalUpdateTime: localUpdateTime,
+			UpdateReason:    resolveUpdateReason(snapshot.UpdateReason, *snapshot, *movieDetail),
+		}
 		multipleStartedAt := time.Now()
 		res.List = multipleSource(snapshot, movieDetail)
 		logSlowIndexServiceStep("GetFilmDetail.multipleSource", multipleStartedAt, "id", id)
@@ -401,3 +405,8 @@ func resolvePrimarySourceName(playFrom []string, index int) string {
 	}
 	return playFrom[index]
 }
+
+func resolveUpdateReason(reason string, snapshot model.FilmListSnapshot, detail model.MovieDetail) string {
+	return strings.TrimSpace(reason)
+}
+

@@ -82,10 +82,22 @@ func applyMasterBusinessUpdateStampsTx(tx *gorm.DB, infos []model.FilmIndex, det
 		// 附属站已先追到 120 时，主站后补 120 只写详情，不重进列表。
 		existingCounts := existingCountsMap[existing.Mid]
 		existingCounts = append(existingCounts, shared.ExtractEpisodeCountsFromDetail(oldDetail)...)
-		if shared.IsEpisodeCountHigher(shared.ExtractEpisodeCountsFromDetail(newDetail), existingCounts) {
+		newCounts := shared.ExtractEpisodeCountsFromDetail(newDetail)
+		if shared.IsEpisodeCountHigher(newCounts, existingCounts) {
 			infos[index].UpdateStamp = changedAt
+			maxCount := shared.MaxEpisodeCount(newCounts)
+			if maxCount > 0 {
+				infos[index].UpdateReason = fmt.Sprintf("更新至第%d集", maxCount)
+			} else {
+				infos[index].UpdateReason = "剧集更新"
+			}
 		} else {
 			infos[index].UpdateStamp = existing.UpdateStamp
+			if isManual {
+				infos[index].UpdateReason = "后台修改"
+			} else {
+				infos[index].UpdateReason = existing.UpdateReason
+			}
 		}
 	}
 	return unchangedKeys, oldDetailsByMid, existingCountsMap, nil

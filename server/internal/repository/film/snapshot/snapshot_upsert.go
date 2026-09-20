@@ -35,6 +35,7 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 		Initial:            index.Initial,
 		Score:              index.Score,
 		UpdateStamp:        index.UpdateStamp,
+		UpdateReason:       index.UpdateReason,
 		Hits:               index.Hits,
 		State:              index.State,
 		Remarks:            index.Remarks,

@@ -8,6 +8,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
 import RelatedFilmsSection from "./RelatedFilmsSection";
+import PlayHeaderCard from "./PlayHeaderCard";
 import styles from "./index.module.less";
 
 function parseInitialTimeParam(value?: string): number {
@@ -282,12 +283,6 @@ export default function PlayPageView({
   const filmScore = resolveFilmScore(currentFilm.descriptor);
   const actorText = formatActorNames(currentFilm.descriptor.actor);
   const remarks = String(currentFilm.descriptor.remarks || "").trim();
-  const metaChips = [
-    localUpdateTime ? `${localUpdateTime} 更新` : "",
-    currentFilm.descriptor.cName,
-    currentFilm.descriptor.year,
-    currentFilm.descriptor.area,
-  ].filter(Boolean);
 
   return (
     <div className={styles.container}>
@@ -306,34 +301,17 @@ export default function PlayPageView({
 
       <div className={styles.mainContent}>
         <div className={styles.leftColumn}>
-            <div className={styles.topInfoCard}>
-              <div className={styles.titleRow}>
-                <div className={styles.titleMain}>
-                  <h1 className={styles.filmTitle}>{currentFilm.name}</h1>
-                  {remarks ? <span className={styles.statusTag}>{remarks}</span> : null}
-                </div>
-                <div className={styles.scoreBadge} aria-label={`综合评分 ${filmScore} 分`}>
-                  <span className={styles.scoreCaption}>综合评分</span>
-                  <span className={styles.scoreNum}>
-                    {filmScore}
-                    <span className={styles.scoreUnit}>分</span>
-                  </span>
-                </div>
-              </div>
-              {metaChips.length > 0 && (
-                <div className={styles.metaChips}>
-                  {metaChips.map((chip) => (
-                    <span key={chip} className={styles.metaChip}>
-                      {chip}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <div className={styles.actorRow}>
-                <span className={styles.actorLabel}>主演</span>
-                <span className={styles.actorValue}>{actorText}</span>
-              </div>
-            </div>
+          <PlayHeaderCard
+            name={currentFilm.name}
+            remarks={remarks}
+            filmScore={filmScore}
+            localUpdateTime={localUpdateTime}
+            updateReason={currentFilm.updateReason}
+            cName={currentFilm.descriptor.cName}
+            year={currentFilm.descriptor.year}
+            area={currentFilm.descriptor.area}
+            actorText={actorText}
+          />
 
           <div className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}>
             {current?.link && (
