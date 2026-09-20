@@ -24,6 +24,7 @@ import {
   WarningOutlined,
 } from "@ant-design/icons";
 
+import { ApiGet } from "@/lib/client-api";
 import { BannerConfig } from "./types";
 import styles from "./banner-config-card.module.less";
 
@@ -53,20 +54,99 @@ export default function BannerConfigCard({
 }: BannerConfigCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [draftConfig, setDraftConfig] = useState<BannerConfig>(config);
+  const [categoryOptions, setCategoryOptions] = useState<{ label: string; value: number }[]>([]);
 
   useEffect(() => {
-    setDraftConfig(config);
-  }, [config]);
+    if (categoryOptions.length > 0) {
+      const validIds = new Set(categoryOptions.map((c) => c.value));
+      setDraftConfig({
+        ...config,
+        categories: (config.categories || []).filter((id) => validIds.has(id)),
+      });
+    } else {
+      setDraftConfig(config);
+    }
+  }, [config, categoryOptions]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadCategories = async () => {
+      try {
+        const resp = await ApiGet("/manage/film/class/tree");
+        if (resp.code === 0 && resp.data?.children && Array.isArray(resp.data.children)) {
+          if (isMounted) {
+            // 分类管理中设置不显示的，不可选：仅保留 show !== false 且有效开启的分类
+            const shownCategories = resp.data.children.filter((c: any) => c.show !== false && Boolean(c.show));
+            const shownIds = new Set(shownCategories.map((c: any) => Number(c.id)));
+            setCategoryOptions(
+              shownCategories.map((c: any) => ({
+                label: c.name,
+                value: Number(c.id),
+              }))
+            );
+            // 哪怕之前选中的时候显示，后面分类设置为不显示，依旧过滤
+            setDraftConfig((prev) => ({
+              ...prev,
+              categories: (prev.categories || []).filter((id) => shownIds.has(id)),
+            }));
+            return;
+          }
+        }
+      } catch {
+        // fallback
+      }
+      try {
+        const navResp = await ApiGet("/navCategory");
+        if (navResp.code === 0 && Array.isArray(navResp.data)) {
+          if (isMounted) {
+            const shownIds = new Set(navResp.data.map((c: any) => Number(c.id)));
+            setCategoryOptions(
+              navResp.data.map((c: any) => ({
+                label: c.name,
+                value: Number(c.id),
+              }))
+            );
+            setDraftConfig((prev) => ({
+              ...prev,
+              categories: (prev.categories || []).filter((id) => shownIds.has(id)),
+            }));
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void loadCategories();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const selectedCategoryLabels = useMemo(() => {
+    const validIds = new Set(categoryOptions.map((c) => c.value));
+    // 哪怕之前选中的时候显示，后面分类设置为不显示，展示时依旧严格过滤已隐藏的分类
+    const cats = (config.categories || []).filter((id) => validIds.has(id));
+    if (cats.length === 0) return [];
+    const catMap = new Map<number, string>(categoryOptions.map((c) => [c.value, c.label]));
+    return cats.map((id) => catMap.get(id) || `分类#${id}`);
+  }, [config.categories, categoryOptions]);
 
   // 对比草稿与服务端配置，检测变更
   const hasDirty = useMemo(() => {
+    const validIds = new Set(categoryOptions.map((c) => c.value));
+    const a = (draftConfig.categories || []).filter((id) => validIds.has(id));
+    const b = (config.categories || []).filter((id) => validIds.has(id));
+    const categoriesChanged =
+      a.length !== b.length || a.some((val) => !b.includes(val));
+
     return (
       draftConfig.mode !== config.mode ||
       draftConfig.strategy !== config.strategy ||
       draftConfig.count !== config.count ||
-      draftConfig.autoTMDB !== config.autoTMDB
+      draftConfig.autoTMDB !== config.autoTMDB ||
+      categoriesChanged
     );
-  }, [draftConfig, config]);
+  }, [draftConfig, config, categoryOptions]);
 
   const currentStrategyLabel = useMemo(() => {
     const matched = STRATEGY_OPTIONS.find((s) => s.value === config.strategy);
@@ -92,13 +172,26 @@ export default function BannerConfigCard({
     setDraftConfig((prev) => ({ ...prev, autoTMDB: checked }));
   };
 
+  const handleCategoriesChange = (vals: number[]) => {
+    const validIds = new Set(categoryOptions.map((c) => c.value));
+    setDraftConfig((prev) => ({
+      ...prev,
+      categories: vals.filter((id) => validIds.has(id)),
+    }));
+  };
+
   const handleCancel = () => {
     setDraftConfig(config);
     setIsEditing(false);
   };
 
   const handleSave = async () => {
-    const success = await onSaveConfig(draftConfig);
+    const validIds = new Set(categoryOptions.map((c) => c.value));
+    const cleanConfig: BannerConfig = {
+      ...draftConfig,
+      categories: (draftConfig.categories || []).filter((id) => validIds.has(id)),
+    };
+    const success = await onSaveConfig(cleanConfig);
     if (success) {
       setIsEditing(false);
     }
@@ -189,6 +282,18 @@ export default function BannerConfigCard({
                   <Text strong>{config.count || 6} 部影片</Text>
                 </div>
                 <div className={styles.metaItem}>
+                  <span className={styles.viewLabel}>排片分类:</span>
+                  {selectedCategoryLabels.length > 0 ? (
+                    <Space size={4} wrap>
+                      {selectedCategoryLabels.map((lbl) => (
+                        <Tag key={lbl} color="blue">{lbl}</Tag>
+                      ))}
+                    </Space>
+                  ) : (
+                    <Tag>全部分类</Tag>
+                  )}
+                </div>
+                <div className={styles.metaItem}>
                   <span className={styles.viewLabel}>影片是否刮削:</span>
                   <Tag color={config.autoTMDB && config.tmdbReady ? "processing" : config.autoTMDB && !config.tmdbReady ? "warning" : "default"}>
                     {config.autoTMDB && config.tmdbReady
@@ -262,6 +367,28 @@ export default function BannerConfigCard({
                     onChange={handleCountChange}
                     style={{ width: 95 }}
                     addonAfter="部"
+                  />
+                </div>
+
+                <div className={styles.fieldItem}>
+                  <span className={styles.fieldLabel}>
+                    排片分类:
+                    <Tooltip title="仅在分类管理中设置显示的一级分类可选；若分类后续被设为不显示，排片时将自动严格过滤。留空则在全部显示分类中随机。">
+                      <InfoCircleOutlined
+                        style={{ marginLeft: 4, cursor: "pointer", color: "#8c8c8c" }}
+                      />
+                    </Tooltip>
+                  </span>
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    disabled={!canWrite}
+                    placeholder="全部分类 (留空不限)"
+                    value={draftConfig.categories || []}
+                    onChange={handleCategoriesChange}
+                    options={categoryOptions}
+                    maxTagCount="responsive"
+                    style={{ minWidth: 180, maxWidth: 320 }}
                   />
                 </div>
 

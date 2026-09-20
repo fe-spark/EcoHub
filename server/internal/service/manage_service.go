@@ -143,12 +143,22 @@ func (s *ManageService) UpdateBannerConfig(cfg model.BannerConfig) error {
 	return BannerAutoSvc.UpdateConfig(cfg)
 }
 
-// GenerateAutoBanners 手动或定时触发自动生成轮播
+// GenerateAutoBanners 手动或定时触发自动生成轮播（同步执行）
 func (s *ManageService) GenerateAutoBanners(ctx context.Context, triggerSource string) (model.Banners, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	return BannerAutoSvc.GenerateAutoBanners(ctx, triggerSource)
+}
+
+// StartBannerGenerateTask 异步启动自动生成轮播任务（供前台触发后轮询）
+func (s *ManageService) StartBannerGenerateTask(triggerSource string) (BannerGenerateProgress, error) {
+	return BannerAutoSvc.StartBannerGenerateTask(triggerSource)
+}
+
+// GetBannerGenerateProgress 获取轮播生成任务实时进度
+func (s *ManageService) GetBannerGenerateProgress() BannerGenerateProgress {
+	return BannerAutoSvc.GetBannerGenerateProgress()
 }
 
 type MappingRuleListResult struct {

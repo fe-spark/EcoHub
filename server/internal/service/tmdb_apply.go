@@ -14,23 +14,29 @@ import (
 
 // ApplyDetail 将 TMDB 刮削出的元数据应用到指定影片并落库刷新
 func (s *TMDBService) ApplyDetail(req model.TMDBApplyReq) error {
+	_, err := s.ApplyDetailWithOptions(req, true)
+	return err
+}
+
+// ApplyDetailWithOptions 将 TMDB 刮削出的元数据应用到指定影片并落库，支持按需控制是否立即增量发布快照
+func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnapshot bool) (int64, error) {
 	if req.Mid <= 0 || req.TmdbID <= 0 {
-		return errors.New("影片ID或 TMDB ID 参数非法")
+		return 0, errors.New("影片ID或 TMDB ID 参数非法")
 	}
 
 	tmdbData, err := s.FetchDetail(req.TmdbID, req.MediaType)
 	if err != nil {
-		return fmt.Errorf("获取 TMDB 详情失败: %w", err)
+		return 0, fmt.Errorf("获取 TMDB 详情失败: %w", err)
 	}
 
 	var detailRec model.MovieDetailInfo
 	if err := db.Mdb.Where("mid = ?", req.Mid).First(&detailRec).Error; err != nil {
-		return fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
+		return 0, fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
 	}
 
 	var detail model.MovieDetail
 	if err := json.Unmarshal([]byte(detailRec.Content), &detail); err != nil {
-		return fmt.Errorf("解析既有影片数据失败: %w", err)
+		return 0, fmt.Errorf("解析既有影片数据失败: %w", err)
 	}
 	detail.Id = req.Mid
 
@@ -106,7 +112,7 @@ func (s *TMDBService) ApplyDetail(req model.TMDBApplyReq) error {
 		sourceID = "manual"
 	}
 
-	return writer.SaveDetail(sourceID, detail)
+	return writer.SaveDetailWithOptions(sourceID, detail, writer.SaveDetailOptions{PublishSnapshot: publishSnapshot})
 }
 
 // FetchFormPrefill 拉取用于前端表单自动填充的元数据

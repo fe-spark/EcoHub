@@ -338,14 +338,19 @@ func (h *ManageHandler) BannerConfigUpdate(c *gin.Context) {
 	dto.SuccessOnlyMsg("轮播配置更新成功", c)
 }
 
-// BannerGenerate 依据当前策略手动立即生成/刷新轮播
+// BannerGenerate 依据当前策略手动立即异步启动轮播生成任务（避免 Nginx 504 超时，前台通过轮询获取真实进度）
 func (h *ManageHandler) BannerGenerate(c *gin.Context) {
-	banners, err := service.ManageSvc.GenerateAutoBanners(c.Request.Context(), "manual_trigger")
+	progress, err := service.ManageSvc.StartBannerGenerateTask("manual_trigger")
 	if err != nil {
-		dto.Failed(fmt.Sprintf("自动生成轮播失败: %v", err), c)
+		dto.Failed(fmt.Sprintf("启动自动生成轮播失败: %v", err), c)
 		return
 	}
-	dto.Success(banners, "轮播自动生成成功", c)
+	dto.Success(progress, "排片任务已启动", c)
+}
+
+// BannerGenerateProgress 查询首页轮播自动生成任务的实时进度
+func (h *ManageHandler) BannerGenerateProgress(c *gin.Context) {
+	dto.Success(service.ManageSvc.GetBannerGenerateProgress(), "获取排片进度成功", c)
 }
 
 // ------------------------------------------------------ 映射规则管理 ------------------------------------------------------

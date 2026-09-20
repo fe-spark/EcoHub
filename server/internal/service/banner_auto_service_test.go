@@ -2,8 +2,10 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
@@ -229,7 +231,7 @@ func TestScrapeUntilTargetCountWithCustomPosters(t *testing.T) {
 		{Mid: 103, Name: "已有高清C", IsCustomPicture: true, CustomPicture: "https://example.com/posterC.jpg"},
 	}
 	ctx := context.Background()
-	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 3, fresh, nil, "v_test")
+	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 3, fresh, nil, nil, "v_test")
 	if len(picked) != 3 {
 		t.Fatalf("expected 3 valid picked, got %d", len(picked))
 	}
@@ -246,9 +248,136 @@ func TestScrapeUntilTargetCountTimeoutExit(t *testing.T) {
 		{Mid: 201, Name: "影片1"},
 		{Mid: 202, Name: "影片2"},
 	}
-	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, pool, nil, "v_test")
+	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, pool, nil, nil, "v_test")
 	if len(picked) != 2 {
 		t.Fatalf("expected 2 picked fallback items after timeout, got %d", len(picked))
 	}
 }
+
+func TestNormalizeBannerConfigCategories(t *testing.T) {
+	cfg := repository.NormalizeBannerConfig(model.BannerConfig{
+		Categories: []int64{1, 2, 1, 0, -5, 3, 2},
+	})
+	if len(cfg.Categories) != 3 {
+		t.Fatalf("expected 3 deduplicated positive categories, got %d: %v", len(cfg.Categories), cfg.Categories)
+	}
+	expected := []int64{1, 2, 3}
+	for i, v := range expected {
+		if cfg.Categories[i] != v {
+			t.Fatalf("category index %d expected %d, got %d", i, v, cfg.Categories[i])
+		}
+	}
+}
+
+func TestBannerGenerateProgressLifecycle(t *testing.T) {
+	// 1. 确保初始/重置后可以启动
+	FinishBannerGenerateProgress(nil)
+	if !StartBannerGenerateProgress() {
+		t.Fatalf("expected StartBannerGenerateProgress to succeed")
+	}
+
+	// 2. 运行时重复启动应被互斥阻断
+	if StartBannerGenerateProgress() {
+		t.Fatalf("expected second StartBannerGenerateProgress to return false while running")
+	}
+
+	// 3. 上报进度
+	ReportBannerGenerateProgress(45, "正在刮削中...")
+	prog := BannerAutoSvc.GetBannerGenerateProgress()
+	if !prog.Running {
+		t.Fatalf("expected Running=true, got false")
+	}
+	if prog.Percent != 45 {
+		t.Fatalf("expected Percent=45, got %d", prog.Percent)
+	}
+	if prog.Stage != "正在刮削中..." {
+		t.Fatalf("expected Stage='正在刮削中...', got %q", prog.Stage)
+	}
+
+	// 4. 结束并报告成功
+	FinishBannerGenerateProgress(nil)
+	prog = BannerAutoSvc.GetBannerGenerateProgress()
+	if prog.Running {
+		t.Fatalf("expected Running=false after FinishBannerGenerateProgress")
+	}
+	if prog.Percent != 100 {
+		t.Fatalf("expected Percent=100, got %d", prog.Percent)
+	}
+	if prog.Error != "" {
+		t.Fatalf("expected Error='', got %q", prog.Error)
+	}
+
+	// 5. 结束并报告错误
+	if !StartBannerGenerateProgress() {
+		t.Fatalf("expected StartBannerGenerateProgress to succeed after finish")
+	}
+	FinishBannerGenerateProgress(fmt.Errorf("TMDB 密钥失效"))
+	prog = BannerAutoSvc.GetBannerGenerateProgress()
+	if prog.Running {
+		t.Fatalf("expected Running=false")
+	}
+	if prog.Error != "TMDB 密钥失效" {
+		t.Fatalf("expected Error='TMDB 密钥失效', got %q", prog.Error)
+	}
+}
+
+func TestStartBannerGenerateTask(t *testing.T) {
+	FinishBannerGenerateProgress(nil)
+	prog, err := BannerAutoSvc.StartBannerGenerateTask("test_trigger")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !prog.Running {
+		t.Fatalf("expected prog.Running=true right after start")
+	}
+
+	// 第二次调用应返回正在运行状态，不发生重复启动冲突
+	prog2, err2 := BannerAutoSvc.StartBannerGenerateTask("test_trigger")
+	if err2 != nil {
+		t.Fatalf("unexpected error on second call: %v", err2)
+	}
+	if !prog2.Running {
+		t.Fatalf("expected prog2.Running=true")
+	}
+
+	// 等待任务协程结束
+	for i := 0; i < 50; i++ {
+		time.Sleep(20 * time.Millisecond)
+		p := BannerAutoSvc.GetBannerGenerateProgress()
+		if !p.Running {
+			break
+		}
+	}
+	progFinal := BannerAutoSvc.GetBannerGenerateProgress()
+	if progFinal.Running {
+		t.Fatalf("expected task to finish")
+	}
+}
+
+func TestGenerateAutoBannersConcurrentGuard(t *testing.T) {
+	FinishBannerGenerateProgress(nil)
+
+	// 1. 模拟已有排片任务正在运行
+	if !StartBannerGenerateProgress() {
+		t.Fatalf("expected StartBannerGenerateProgress to succeed")
+	}
+
+	// 2. 此时调用同步排片 GenerateAutoBanners，必须被并发守卫直接阻断并返回明确错误
+	banners, err := BannerAutoSvc.GenerateAutoBanners(context.Background(), "concurrent_test")
+	if err == nil {
+		t.Fatalf("expected error due to concurrent execution guard, got nil")
+	}
+	if banners != nil {
+		t.Fatalf("expected banners to be nil, got %v", banners)
+	}
+
+	// 3. 结束后状态恢复正常
+	FinishBannerGenerateProgress(nil)
+	prog := BannerAutoSvc.GetBannerGenerateProgress()
+	if prog.Running {
+		t.Fatalf("expected Running=false after Finish")
+	}
+}
+
+
 

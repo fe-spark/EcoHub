@@ -3,6 +3,7 @@ package writer
 import (
 	"fmt"
 	"log"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -27,7 +28,8 @@ const (
 	searchTagsRebuildFilmBatchSize = 200
 )
 
-// UpsertDynamicSearchTags 增量更新指定影片的检索标签，仅做轻量 Upsert，绝不全量删除重跑
+// UpsertDynamicSearchTags 增量更新指定影片的检索标签，仅做轻量 Upsert，绝不全量删除重跑。
+// 增量模式下冲突时不覆盖既有标签的 score 热度权重，只更新 name 并恢复软删。
 func UpsertDynamicSearchTags(infos ...model.FilmIndex) error {
 	if len(infos) == 0 {
 		return nil
@@ -37,7 +39,7 @@ func UpsertDynamicSearchTags(infos ...model.FilmIndex) error {
 		return nil
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return bulkUpsertSearchTagItemsTx(tx, items)
+		return bulkUpsertDynamicSearchTagItemsTx(tx, items)
 	}); err != nil {
 		return err
 	}
@@ -245,7 +247,27 @@ func aggregateSearchTagItems(items []model.SearchTagItem) []model.SearchTagItem 
 		row.Score = int64(count)
 		out = append(out, row)
 	}
+	// 严格按 (Pid, TagType, Value) 确定性升序排序，杜绝 Go Map 随机遍历引发不同事务并发加锁逆序导致的 MySQL 1213 死锁
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Pid != out[j].Pid {
+			return out[i].Pid < out[j].Pid
+		}
+		if out[i].TagType != out[j].TagType {
+			return out[i].TagType < out[j].TagType
+		}
+		return out[i].Value < out[j].Value
+	})
 	return out
+}
+
+func bulkUpsertDynamicSearchTagItemsTx(tx *gorm.DB, items []model.SearchTagItem) error {
+	if len(items) == 0 {
+		return nil
+	}
+	return tx.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "pid"}, {Name: "tag_type"}, {Name: "value"}},
+		DoUpdates: clause.AssignmentColumns([]string{"name", "deleted_at"}),
+	}).CreateInBatches(items, shared.UpsertBatchSize).Error
 }
 
 func bulkUpsertSearchTagItemsTx(tx *gorm.DB, items []model.SearchTagItem) error {

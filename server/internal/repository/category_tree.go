@@ -249,3 +249,44 @@ func sortRootCategories(children []*model.CategoryTree) {
 		return children[i].Id < children[j].Id
 	})
 }
+
+// GetShownRootCategoryIDs 返回当前所有在分类管理中设置显示（Show=true 且 Pid=0）的一级分类 ID
+func GetShownRootCategoryIDs() []int64 {
+	if db.Mdb == nil {
+		return nil
+	}
+	tree := GetCategoryTree()
+	var ids []int64
+	for _, c := range tree.Children {
+		if c != nil && c.Show && c.Id > 0 {
+			ids = append(ids, c.Id)
+		}
+	}
+	return ids
+}
+
+// FilterShownCategoryIDs 过滤出当前分类管理中处于显示状态（Show=true）的分类 ID 列表
+func FilterShownCategoryIDs(categoryPids []int64) []int64 {
+	if len(categoryPids) == 0 {
+		return []int64{}
+	}
+	// 仅在未连接 DB 的离线单测环境下放行，生产连库状态下必须严密根据库内可见性白名单过滤
+	if db.Mdb == nil {
+		return categoryPids
+	}
+	shownIDs := GetShownRootCategoryIDs()
+	if len(shownIDs) == 0 {
+		return []int64{}
+	}
+	shownMap := make(map[int64]struct{}, len(shownIDs))
+	for _, id := range shownIDs {
+		shownMap[id] = struct{}{}
+	}
+	var out []int64
+	for _, pid := range categoryPids {
+		if _, ok := shownMap[pid]; ok {
+			out = append(out, pid)
+		}
+	}
+	return out
+}
