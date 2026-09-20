@@ -141,35 +141,39 @@ func applyPersistedMasterCategory(newInfo *model.FilmIndex, existing model.FilmI
 // 不应视为内容更新；片名实质变化（改名）仍会触发。
 func masterBusinessSignature(detail model.MovieDetail) string {
 	payload := struct {
-		Name            string                 `json:"name"`
-		SubTitle        string                 `json:"subTitle"`
-		Picture         string                 `json:"picture"`
-		CustomPicture   string                 `json:"customPicture"`
-		IsCustomPicture bool                   `json:"isCustomPicture"`
-		PlayFrom        []string               `json:"playFrom"`
-		PlayList        [][]model.MovieUrlInfo `json:"playList"`
-		Remarks         string                 `json:"remarks"`
-		State           string                 `json:"state"`
-		Actor           string                 `json:"actor"`
-		Director        string                 `json:"director"`
-		Year            string                 `json:"year"`
-		Area            string                 `json:"area"`
-		ClassTag        string                 `json:"classTag"`
+		Name               string                 `json:"name"`
+		SubTitle           string                 `json:"subTitle"`
+		Picture            string                 `json:"picture"`
+		PictureSlide       string                 `json:"pictureSlide"`
+		CustomPicture      string                 `json:"customPicture"`
+		CustomPictureSlide string                 `json:"customPictureSlide"`
+		IsCustomPicture    bool                   `json:"isCustomPicture"`
+		PlayFrom           []string               `json:"playFrom"`
+		PlayList           [][]model.MovieUrlInfo `json:"playList"`
+		Remarks            string                 `json:"remarks"`
+		State              string                 `json:"state"`
+		Actor              string                 `json:"actor"`
+		Director           string                 `json:"director"`
+		Year               string                 `json:"year"`
+		Area               string                 `json:"area"`
+		ClassTag           string                 `json:"classTag"`
 	}{
-		Name:            normalizeNameForCompare(detail.Name),
-		SubTitle:        strings.TrimSpace(detail.SubTitle),
-		Picture:         shared.StripURLQuery(detail.Picture),
-		CustomPicture:   shared.StripURLQuery(detail.CustomPicture),
-		IsCustomPicture: detail.IsCustomPicture,
-		PlayFrom:        normalizeStringSlice(detail.PlayFrom),
-		PlayList:        normalizePlayList(detail.PlayList),
-		Remarks:         strings.TrimSpace(detail.Remarks),
-		State:           strings.TrimSpace(detail.State),
-		Actor:           strings.TrimSpace(detail.Actor),
-		Director:        strings.TrimSpace(detail.Director),
-		Year:            strings.TrimSpace(detail.Year),
-		Area:            strings.TrimSpace(detail.Area),
-		ClassTag:        strings.TrimSpace(detail.ClassTag),
+		Name:               normalizeNameForCompare(detail.Name),
+		SubTitle:           strings.TrimSpace(detail.SubTitle),
+		Picture:            shared.StripURLQuery(detail.Picture),
+		PictureSlide:       shared.StripURLQuery(detail.PictureSlide),
+		CustomPicture:      shared.StripURLQuery(detail.CustomPicture),
+		CustomPictureSlide: shared.StripURLQuery(detail.CustomPictureSlide),
+		IsCustomPicture:    detail.IsCustomPicture,
+		PlayFrom:           normalizeStringSlice(detail.PlayFrom),
+		PlayList:           normalizePlayList(detail.PlayList),
+		Remarks:            strings.TrimSpace(detail.Remarks),
+		State:              strings.TrimSpace(detail.State),
+		Actor:              strings.TrimSpace(detail.Actor),
+		Director:           strings.TrimSpace(detail.Director),
+		Year:               strings.TrimSpace(detail.Year),
+		Area:               strings.TrimSpace(detail.Area),
+		ClassTag:           strings.TrimSpace(detail.ClassTag),
 	}
 	data, _ := json.Marshal(payload)
 	return string(data)

@@ -189,7 +189,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		if strings.TrimSpace(detail.Picture) == "" || detail.Picture == detail.CustomPicture {
 			if hasExisting && strings.TrimSpace(existing.Picture) != "" {
 				detail.Picture = existing.Picture
-				if strings.TrimSpace(existing.PictureSlide) != "" {
+				if strings.TrimSpace(detail.PictureSlide) == "" && strings.TrimSpace(existing.PictureSlide) != "" {
 					detail.PictureSlide = existing.PictureSlide
 				}
 			} else if strings.TrimSpace(detail.Picture) == "" {
@@ -218,7 +218,7 @@ func SaveDetail(id string, detail model.MovieDetail) error {
 		// 若外部海报源未命中且存在已有库存，强制恢复库存中的底层采集原图（避免前端传入的旧自定义图污染底层 Picture）
 		if !matchedPoster && hasExisting && strings.TrimSpace(existing.Picture) != "" {
 			detail.Picture = existing.Picture
-			if strings.TrimSpace(existing.PictureSlide) != "" {
+			if strings.TrimSpace(detail.PictureSlide) == "" && strings.TrimSpace(existing.PictureSlide) != "" {
 				detail.PictureSlide = existing.PictureSlide
 			}
 		}
