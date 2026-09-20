@@ -9,6 +9,19 @@ import (
 	"gorm.io/gorm"
 )
 
+const (
+	TaskModelAutoCollect   = 0 // 自动更新已启用主站
+	TaskModelCustomCollect = 1 // 更新Ids中的指定站点数据
+	TaskModelRetryCollect  = 2 // 定期清理失败采集记录并重试
+	TaskModelOrphanClean   = 3 // 附属站播放列表孤儿治理
+	TaskModelLogClean      = 4 // 自动清理过期运行日志
+	TaskModelBannerAuto    = 5 // 首页轮播自动智能排片
+)
+
+const (
+	TaskIDBannerAuto = "sys_cron_banner_auto"
+)
+
 // FilmCollectTask 影视采集任务
 type FilmCollectTask struct {
 	Id     string       `json:"id"`     // 唯一标识uid
@@ -16,7 +29,7 @@ type FilmCollectTask struct {
 	Cid    cron.EntryID `json:"cid"`    // 定时任务Id (运行时字段，不持久化)
 	Time   int          `json:"time"`   // 采集时长, 最新x小时更新的内容
 	Spec   string       `json:"spec"`   // 执行周期 cron表达式
-	Model  int          `json:"model"`  // 任务类型, 0 - 自动更新已启用主站 || 1 - 更新Ids中的主站数据 || 2 - 定期清理失败采集记录
+	Model  int          `json:"model"`  // 任务类型 (见 TaskModel 常量)
 	State  bool         `json:"state"`  // 状态 开启 | 禁用
 	Remark string       `json:"remark"` // 任务备注信息
 }
@@ -122,9 +135,10 @@ type RecordRequestVo struct {
 // CronTaskVo 定时任务数据response
 type CronTaskVo struct {
 	FilmCollectTask
-	PreV    string `json:"preV"`    // 上次执行时间
-	Next    string `json:"next"`    // 下次执行时间
-	Running bool   `json:"running"` // 当前是否正在执行
+	PreV           string `json:"preV"`                     // 上次执行时间
+	Next           string `json:"next"`                     // 下次执行时间
+	Running        bool   `json:"running"`                  // 当前是否正在执行
+	DisabledReason string `json:"disabledReason,omitempty"` // 业务锁定禁用的原因提示
 }
 
 // FilmTaskOptions 影视采集任务添加时需要的options

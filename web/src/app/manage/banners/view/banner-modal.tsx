@@ -17,22 +17,14 @@ import {
   Flex,
   Button,
 } from "antd";
-import {
-  UploadOutlined,
-  PictureOutlined,
-  VideoCameraAddOutlined,
-  SwapOutlined,
-} from "@ant-design/icons";
+import { UploadOutlined, PictureOutlined, VideoCameraAddOutlined, SwapOutlined } from "@ant-design/icons";
 
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ImagePicker from "@/app/manage/components/image-picker";
 import FilmPicker from "@/app/manage/components/film-picker";
-import {
-  IMAGE_UPLOAD_ACCEPT,
-  isAllowedImageFile,
-} from "@/lib/imageUpload";
+import { IMAGE_UPLOAD_ACCEPT, isAllowedImageFile } from "@/lib/imageUpload";
 import {
   BannerRecord,
   BannerFormValues,
@@ -50,6 +42,7 @@ interface BannerModalProps {
   open: boolean;
   mode: EditorMode;
   currentRow: BannerRecord | null;
+  isAuto?: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -58,6 +51,7 @@ export default function BannerModal({
   open,
   mode,
   currentRow,
+  isAuto,
   onClose,
   onSuccess,
 }: BannerModalProps) {
@@ -66,6 +60,7 @@ export default function BannerModal({
 
   const [selectedFilm, setSelectedFilm] = useState<FilmOption | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerTarget, setPickerTarget] = useState<UploadFieldName>("picture");
   const [filmPickerOpen, setFilmPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -103,7 +98,7 @@ export default function BannerModal({
   useEffect(() => {
     if (open) {
       if (mode === "edit" && currentRow) {
-        const isCustom = currentRow.isCustomPic === true;
+        const isCustom = currentRow.isCustomPic === true || Boolean(currentRow.customPicture?.trim()) || Boolean(isAuto);
         form.setFieldsValue({
           mid: currentRow.mid,
           name: currentRow.name,
@@ -111,37 +106,24 @@ export default function BannerModal({
           year: currentRow.year,
           followPosterSource: !isCustom,
           picture: isCustom ? resolveEditablePicture(currentRow) : "",
+          pictureSlide: isCustom ? (currentRow.pictureSlide || "") : "",
           sort: currentRow.sort ?? 0,
         });
         if (currentRow.mid) {
           ApiGet("/filmPlayInfo", { id: currentRow.mid }).then((resp: any) => {
-            if (resp.code === 0 && resp.data?.detail) {
-              const detail = resp.data.detail;
+            const d = resp?.data?.detail;
+            if (resp?.code === 0 && d) {
               setSelectedFilm({
-                id: detail.id || currentRow.mid,
-                name: detail.name || currentRow.name,
-                cName: detail.cName || currentRow.cName,
-                year: detail.year || currentRow.year,
-                remarks: detail.remarks || currentRow.remark,
-                picture: detail.picture || currentRow.picture,
-                area: detail.area,
-                director: detail.director,
-                actor: detail.actor,
-                label: detail.name || currentRow.name,
-                value: detail.id || currentRow.mid,
+                id: d.id || currentRow.mid, name: d.name || currentRow.name,
+                cName: d.cName || currentRow.cName, year: d.year || currentRow.year,
+                remarks: d.remarks || currentRow.remark, picture: d.picture || currentRow.picture,
+                area: d.area, director: d.director, actor: d.actor,
+                label: d.name || currentRow.name, value: d.id || currentRow.mid,
               });
             } else if (currentRow.name) {
               ApiGet("/searchFilm", { keyword: currentRow.name, current: 1 }).then((sResp: any) => {
-                if (sResp.code === 0 && sResp.data?.list) {
-                  const match = sResp.data.list.find((f: any) => String(f.id) === String(currentRow.mid));
-                  if (match) {
-                    setSelectedFilm({
-                      ...match,
-                      label: match.name,
-                      value: match.id,
-                    });
-                  }
-                }
+                const match = sResp?.data?.list?.find((f: any) => String(f.id) === String(currentRow.mid));
+                if (match) setSelectedFilm({ ...match, label: match.name, value: match.id });
               });
             }
           });
@@ -153,12 +135,9 @@ export default function BannerModal({
         });
       }
     }
-  }, [open, mode, currentRow, form]);
+  }, [open, mode, currentRow, isAuto, form]);
 
-  const handleCustomUpload = async (
-    options: any,
-    fieldName: UploadFieldName,
-  ) => {
+  const handleCustomUpload = async (options: any, fieldName: UploadFieldName) => {
     const { file, onSuccess, onError } = options;
     if (!isAllowedImageFile(file)) {
       message.error("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片");
@@ -170,10 +149,9 @@ export default function BannerModal({
     try {
       const resp = await ApiPost("/manage/file/upload", formData);
       if (resp.code === 0) {
-        const fullUrl =
-          typeof window !== "undefined" && String(resp.data).startsWith("/")
-            ? `${window.location.origin}${resp.data}`
-            : resp.data;
+        const fullUrl = typeof window !== "undefined" && String(resp.data).startsWith("/")
+          ? `${window.location.origin}${resp.data}`
+          : resp.data;
         form.setFieldValue(fieldName, fullUrl);
         message.success(resp.msg);
         onSuccess?.(fullUrl);
@@ -189,6 +167,7 @@ export default function BannerModal({
   const buildBannerPayload = (values: BannerFormValues): BannerRecord => {
     const isCustom = values.followPosterSource === false;
     const customPic = isCustom ? (values.picture || "").trim() : "";
+    const customSlide = isCustom ? (values.pictureSlide || "").trim() : "";
     const livePic =
       selectedFilm?.picture ||
       (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") ||
@@ -203,7 +182,7 @@ export default function BannerModal({
       poster: isCustom ? customPic : livePic,
       picture: isCustom ? customPic : livePic,
       pictureSlide: isCustom
-        ? customPic
+        ? (customSlide || currentRow?.pictureSlide || customPic)
         : currentRow?.pictureSlide || selectedFilm?.picture || livePic,
       customPicture: customPic,
       sort: values.sort ?? 0,
@@ -222,12 +201,8 @@ export default function BannerModal({
         return;
       }
       setSubmitting(true);
-      const requestPath =
-        mode === "create"
-          ? "/manage/banner/add"
-          : "/manage/banner/update";
-      const requestPayload =
-        mode === "create" ? payload : { ...currentRow, ...payload };
+      const requestPath = mode === "create" ? "/manage/banner/add" : "/manage/banner/update";
+      const requestPayload = mode === "create" ? payload : { ...currentRow, ...payload };
       const resp = await ApiPost(requestPath, requestPayload);
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -250,15 +225,11 @@ export default function BannerModal({
   const previewName = watchedName || previewFilm?.name || "未选择影片";
   const previewCategory = watchedCName || previewFilm?.cName || "未分类";
   const previewYear = watchedYear || previewFilm?.year || "未知年份";
-  const previewRemark =
-    selectedFilm?.remarks || currentRow?.remark || "前台按片库实时状态展示";
+  const previewRemark = selectedFilm?.remarks || currentRow?.remark || "前台按片库实时状态展示";
   const previewArea = selectedFilm?.area || "未知地区";
   const previewDirector = selectedFilm?.director || "暂无";
   const previewActor = selectedFilm?.actor || "暂无";
-  const liveFilmPic =
-    selectedFilm?.picture ||
-    (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") ||
-    "";
+  const liveFilmPic = selectedFilm?.picture || (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") || "";
   const previewPicture = watchedFollowPosterSource
     ? liveFilmPic
     : (watchedPicture || liveFilmPic || resolvePreviewPicture(previewFilm));
@@ -270,6 +241,8 @@ export default function BannerModal({
       onOk={handleSubmit}
       onCancel={onClose}
       confirmLoading={submitting}
+      okButtonProps={{ size: "middle" }}
+      cancelButtonProps={{ size: "middle" }}
       width={720}
       styles={{ body: { paddingBottom: 12 } }}
       destroyOnHidden
@@ -312,6 +285,7 @@ export default function BannerModal({
                     </Space>
                   </Flex>
                   <Button
+                    size="middle"
                     icon={<SwapOutlined />}
                     onClick={() => setFilmPickerOpen(true)}
                   >
@@ -418,35 +392,71 @@ export default function BannerModal({
               </div>
             </Form.Item>
           ) : (
-            <Form.Item
-              label="封面图片地址"
-              tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
-            >
-              <Space.Compact style={{ width: "100%" }}>
-                <Form.Item
-                  name="picture"
-                  noStyle
-                  rules={[{ required: true, message: "请输入自定义封面图片地址或上传/选图" }]}
-                >
-                  <Input placeholder="输入封面访问 URL" />
-                </Form.Item>
-                <Upload
-                  showUploadList={false}
-                  accept={IMAGE_UPLOAD_ACCEPT}
-                  customRequest={(o) => handleCustomUpload(o, "picture")}
-                >
-                  <Button icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
-                    上传
+            <>
+              <Form.Item
+                label="竖版封面地址"
+                tooltip="自定义竖屏封面，锁定后不被海报源或采集覆盖。"
+              >
+                <Space.Compact style={{ width: "100%" }}>
+                  <Form.Item
+                    name="picture"
+                    noStyle
+                    rules={[{ required: true, message: "请输入自定义封面图片地址或上传/选图" }]}
+                  >
+                    <Input placeholder="输入封面访问 URL" />
+                  </Form.Item>
+                  <Upload
+                    showUploadList={false}
+                    accept={IMAGE_UPLOAD_ACCEPT}
+                    customRequest={(o) => handleCustomUpload(o, "picture")}
+                  >
+                    <Button size="middle" icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
+                      上传
+                    </Button>
+                  </Upload>
+                  <Button
+                    size="middle"
+                    icon={<PictureOutlined />}
+                    onClick={() => {
+                      setPickerTarget("picture");
+                      setPickerOpen(true);
+                    }}
+                  >
+                    选图
                   </Button>
-                </Upload>
-                <Button
-                  icon={<PictureOutlined />}
-                  onClick={() => setPickerOpen(true)}
-                >
-                  选图
-                </Button>
-              </Space.Compact>
-            </Form.Item>
+                </Space.Compact>
+              </Form.Item>
+
+              <Form.Item
+                label="横屏大图地址"
+                tooltip="前台大屏 16:9 横版背景大图 (Backdrop)，选填；未填则回退使用竖图。"
+              >
+                <Space.Compact style={{ width: "100%" }}>
+                  <Form.Item name="pictureSlide" noStyle>
+                    <Input placeholder="输入 16:9 横屏大图 URL (选填)" />
+                  </Form.Item>
+                  <Upload
+                    showUploadList={false}
+                    accept={IMAGE_UPLOAD_ACCEPT}
+                    customRequest={(o) => handleCustomUpload(o, "pictureSlide")}
+                  >
+                    <Button size="middle" icon={<UploadOutlined />} style={{ marginLeft: 8 }}>
+                      上传
+                    </Button>
+                  </Upload>
+                  <Button
+                    size="middle"
+                    icon={<PictureOutlined />}
+                    onClick={() => {
+                      setPickerTarget("pictureSlide");
+                      setPickerOpen(true);
+                    }}
+                  >
+                    选图
+                  </Button>
+                </Space.Compact>
+              </Form.Item>
+            </>
           )}
 
           {previewPicture && (
@@ -475,7 +485,7 @@ export default function BannerModal({
         open={pickerOpen}
         onCancel={() => setPickerOpen(false)}
         onSelect={(link) => {
-          form.setFieldValue("picture", link);
+          form.setFieldValue(pickerTarget, link);
           setPickerOpen(false);
         }}
       />

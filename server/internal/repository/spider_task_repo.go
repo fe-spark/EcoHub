@@ -79,6 +79,9 @@ func GetAllFilmTask() []model.FilmCollectTask {
 
 // GetFilmTaskById 通过 Id 获取当前任务信息
 func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
+	if db.Mdb == nil {
+		return model.FilmCollectTask{}, errors.New("database not initialized")
+	}
 	var r model.CrontabRecord
 	if err := db.Mdb.Where("task_id = ?", id).First(&r).Error; err != nil {
 		return model.FilmCollectTask{}, errors.New(" The task does not exist ")

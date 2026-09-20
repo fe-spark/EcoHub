@@ -213,6 +213,8 @@ const (
 	TMDBConfigKey = RedisKeyPrefix + ":Config:TMDB"
 	// BannersKey 轮播组件key
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
+	// BannerConfigKey 轮播自动排片配置key
+	BannerConfigKey = RedisKeyPrefix + ":Config:BannerConfig"
 
 	// DefaultUpdateSpec 每30分钟执行一次
 	DefaultUpdateSpec = "0 */30 * * * ?"

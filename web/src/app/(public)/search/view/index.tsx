@@ -329,6 +329,73 @@ export default function SearchPageView({
         </Button>
       </div>
 
+      {/* 输入框下方的快捷推荐与历史栏 */}
+      {(history.length > 0 || displayHotList.length > 0) && (
+        <section className={styles.quickBar} aria-label="快捷搜索建议">
+          {history.length > 0 && (
+            <div className={styles.quickRow}>
+              <span className={styles.quickRowLabel}>
+                <ClockCircleOutlined /> 搜索历史:
+              </span>
+              <div className={styles.chipRow}>
+                {history.map((item) => (
+                  <span key={item} className={styles.historyChip}>
+                    <button
+                      type="button"
+                      className={styles.chipText}
+                      onClick={() => executeSearch(item)}
+                    >
+                      {item}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.chipDeleteBtn}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeHistoryItem(item);
+                      }}
+                      title="删除记录"
+                      aria-label={`删除 ${item} 搜索记录`}
+                    >
+                      <CloseOutlined />
+                    </button>
+                  </span>
+                ))}
+                <button
+                  type="button"
+                  className={styles.clearHistoryLink}
+                  onClick={clearHistory}
+                  title="清空所有历史"
+                >
+                  <ClearOutlined /> 清空
+                </button>
+              </div>
+            </div>
+          )}
+
+          {displayHotList.length > 0 && (
+            <div className={styles.quickRow}>
+              <span className={styles.quickRowLabel}>
+                <FireOutlined className={styles.fireIcon} /> 热门推荐:
+              </span>
+              <div className={styles.chipRow}>
+                {displayHotList.map((item, idx) => (
+                  <button
+                    type="button"
+                    key={item}
+                    className={`${styles.chip} ${styles.hotChip}`}
+                    onClick={() => executeSearch(item)}
+                  >
+                    <span className={styles.rankNum}>{idx + 1}</span>
+                    {item}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
       <div className={styles.sourceBlock}>
         <header className={styles.resultHeader}>
           <div className={styles.resultSummary}>
@@ -400,71 +467,6 @@ export default function SearchPageView({
           })}
         </div>
       )}
-
-      {/* 快捷推荐与历史栏（常驻展示） */}
-      <section className={styles.quickBar}>
-        {history.length > 0 && (
-          <div className={styles.quickRow}>
-            <span className={styles.quickRowLabel}>
-              <ClockCircleOutlined /> 搜索历史:
-            </span>
-            <div className={styles.chipRow}>
-              {history.map((item) => (
-                <span key={item} className={styles.historyChip}>
-                  <button
-                    type="button"
-                    className={styles.chipText}
-                    onClick={() => executeSearch(item)}
-                  >
-                    {item}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.chipDeleteBtn}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      removeHistoryItem(item);
-                    }}
-                    title="删除记录"
-                    aria-label={`删除 ${item} 搜索记录`}
-                  >
-                    <CloseOutlined />
-                  </button>
-                </span>
-              ))}
-              <button
-                type="button"
-                className={styles.clearHistoryLink}
-                onClick={clearHistory}
-                title="清空所有历史"
-              >
-                <ClearOutlined /> 清空
-              </button>
-            </div>
-          </div>
-        )}
-
-        {displayHotList.length > 0 && (
-          <div className={styles.quickRow}>
-            <span className={styles.quickRowLabel}>
-              <FireOutlined className={styles.fireIcon} /> 热门推荐:
-            </span>
-            <div className={styles.chipRow}>
-              {displayHotList.map((item, idx) => (
-                <button
-                  type="button"
-                  key={item}
-                  className={`${styles.chip} ${styles.hotChip}`}
-                  onClick={() => executeSearch(item)}
-                >
-                  <span className={styles.rankNum}>{idx + 1}</span>
-                  {item}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>
 
       <SearchResultPanel
         keyword={keyword}

@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"regexp"
 	"strings"
 
@@ -130,6 +131,24 @@ func (s *ManageService) SaveBanners(bl model.Banners) error {
 		}
 	}
 	return repository.SaveBanners(bl)
+}
+
+// GetBannerConfig 获取轮播自动排片配置
+func (s *ManageService) GetBannerConfig() model.BannerConfig {
+	return BannerAutoSvc.GetConfig()
+}
+
+// UpdateBannerConfig 更新轮播自动排片配置
+func (s *ManageService) UpdateBannerConfig(cfg model.BannerConfig) error {
+	return BannerAutoSvc.UpdateConfig(cfg)
+}
+
+// GenerateAutoBanners 手动或定时触发自动生成轮播
+func (s *ManageService) GenerateAutoBanners(ctx context.Context, triggerSource string) (model.Banners, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return BannerAutoSvc.GenerateAutoBanners(ctx, triggerSource)
 }
 
 type MappingRuleListResult struct {

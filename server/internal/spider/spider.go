@@ -167,6 +167,7 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		finalizeErr = err
 	}
 	batchCtx.emitSummary(finalizeErr)
+	triggerCollectDoneHooks()
 }
 
 func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {

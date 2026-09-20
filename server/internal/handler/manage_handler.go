@@ -259,8 +259,8 @@ func (h *ManageHandler) BannerAdd(c *gin.Context) {
 	}
 	b.Id = utils.GenerateSalt()
 	bl := service.ManageSvc.GetBanners()
-	if len(bl) >= 6 {
-		dto.Failed("首页轮播最多支持 6 条，无法继续添加", c)
+	if len(bl) >= model.MaxBannerCount {
+		dto.Failed(fmt.Sprintf("已达上限（%d部）", model.MaxBannerCount), c)
 		return
 	}
 	bl = append(bl, b)
@@ -317,6 +317,35 @@ func (h *ManageHandler) BannerDel(c *gin.Context) {
 		}
 	}
 	dto.Failed("海报信息删除失败", c)
+}
+
+// BannerConfigGet 获取首页轮播自动排片配置
+func (h *ManageHandler) BannerConfigGet(c *gin.Context) {
+	dto.Success(service.ManageSvc.GetBannerConfig(), "轮播配置获取成功", c)
+}
+
+// BannerConfigUpdate 更新首页轮播自动排片配置
+func (h *ManageHandler) BannerConfigUpdate(c *gin.Context) {
+	var cfg model.BannerConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		dto.Failed(fmt.Sprintf("轮播配置解析失败: %v", err), c)
+		return
+	}
+	if err := service.ManageSvc.UpdateBannerConfig(cfg); err != nil {
+		dto.Failed(fmt.Sprintf("轮播配置更新失败: %v", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("轮播配置更新成功", c)
+}
+
+// BannerGenerate 依据当前策略手动立即生成/刷新轮播
+func (h *ManageHandler) BannerGenerate(c *gin.Context) {
+	banners, err := service.ManageSvc.GenerateAutoBanners(c.Request.Context(), "manual_trigger")
+	if err != nil {
+		dto.Failed(fmt.Sprintf("自动生成轮播失败: %v", err), c)
+		return
+	}
+	dto.Success(banners, "轮播自动生成成功", c)
 }
 
 // ------------------------------------------------------ 映射规则管理 ------------------------------------------------------

@@ -93,6 +93,10 @@ func GetTMDBConfig() model.TMDBConfig {
 		}
 	}
 
+	if db.Mdb == nil {
+		return cfg
+	}
+
 	var rec model.TMDBConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
 		return cfg

@@ -49,10 +49,10 @@ func DefaultTipConfig() TipConfig {
 type BasicConfig struct {
 	SiteName string `json:"siteName"` // 网站名称
 	// SiteURL 网站访问地址（公网根地址，如 https://example.com），用于 Logo 跳转与 Telegram 播放链接等
-	SiteURL  string       `json:"siteUrl"`
-	Logo     string       `json:"logo"`     // 网站logo
-	Keyword  string       `json:"keyword"`  // seo关键字
-	Describe string       `json:"describe"` // 网站描述信息
+	SiteURL       string       `json:"siteUrl"`
+	Logo          string       `json:"logo"`          // 网站logo
+	Keyword       string       `json:"keyword"`       // seo关键字
+	Describe      string       `json:"describe"`      // 网站描述信息
 	State         bool         `json:"state"`         // 网站状态 开启 || 关闭
 	Hint          string       `json:"hint"`          // 网站关闭提示
 	PrivateAccess bool         `json:"privateAccess"` // 私有化访问控制（仅登录可用）
@@ -107,11 +107,11 @@ func (bl Banners) Swap(i, j int)      { bl[i], bl[j] = bl[j], bl[i] }
 // SiteConfigRecord 网站基础配置持久化 (MySQL单行表)
 type SiteConfigRecord struct {
 	gorm.Model
-	SiteName   string `gorm:"size:128"`
-	SiteURL    string `gorm:"size:512;column:site_url"` // 网站访问地址
-	Logo       string `gorm:"size:512"`
-	Keyword    string `gorm:"size:256"`
-	Describe   string `gorm:"size:512"`
+	SiteName      string `gorm:"size:128"`
+	SiteURL       string `gorm:"size:512;column:site_url"` // 网站访问地址
+	Logo          string `gorm:"size:512"`
+	Keyword       string `gorm:"size:256"`
+	Describe      string `gorm:"size:512"`
 	State         bool
 	Hint          string `gorm:"size:512"`
 	PrivateAccess bool   `gorm:"default:false;column:private_access"`
@@ -136,4 +136,31 @@ type MappingRule struct {
 
 func (MappingRule) TableName() string {
 	return TableMappingRule
+}
+
+const (
+	DefaultBannerCount = 6
+	MaxBannerCount     = 12
+)
+
+// BannerConfig 首页轮播排片与自动刮削配置
+type BannerConfig struct {
+	Mode        string  `json:"mode"`        // "manual" (手动维护) | "auto" (自动生成)
+	Strategy    string  `json:"strategy"`    // "hot_random" | "score_random" | "latest_random" | "smart_mix"
+	Count       int     `json:"count"`       // 轮播数量 (默认 6, 范围 1-12)
+	AutoTMDB    bool    `json:"autoTMDB"`    // 是否启用 TMDB 自动刮削补全横版幻灯背景图
+	RefreshCron string  `json:"refreshCron"` // 定时刷新 Cron 表达式 (如 "0 0 */12 * * *")
+	PinnedMids  []int64 `json:"pinnedMids"`  // 人工置顶锁定的影片 ID 列表
+	Categories  []int64 `json:"categories"`  // 限制参与轮播的分类 PID 列表 (为空则全库)
+	TMDBReady   bool    `json:"tmdbReady"`   // 系统全局 TMDB 是否已开启且配置了 API Key
+}
+
+// BannerConfigRecord 轮播配置持久化模型 (MySQL单行表)
+type BannerConfigRecord struct {
+	gorm.Model
+	Payload string `gorm:"type:text"`
+}
+
+func (BannerConfigRecord) TableName() string {
+	return TableBannerConfig
 }

@@ -13,12 +13,26 @@ export type BannerRecord = {
   isCustomPic?: boolean;
 };
 
+export const MAX_BANNER_COUNT = 12;
+
+export type BannerConfig = {
+  mode: "manual" | "auto";
+  strategy: "hot_random" | "score_random" | "latest_random" | "smart_mix";
+  count: number;
+  autoTMDB: boolean;
+  refreshCron: string;
+  pinnedMids?: number[];
+  categories?: number[];
+  tmdbReady?: boolean;
+};
+
 export type BannerFormValues = {
   mid?: number;
   name: string;
   cName: string;
   year?: number;
   picture?: string;
+  pictureSlide?: string;
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
@@ -32,6 +46,7 @@ export type FilmOption = {
   year?: string | number;
   remarks?: string;
   picture?: string;
+  pictureSlide?: string;
   area?: string;
   director?: string;
   actor?: string;
@@ -40,7 +55,7 @@ export type FilmOption = {
 };
 
 export type EditorMode = "create" | "edit";
-export type UploadFieldName = "picture";
+export type UploadFieldName = "picture" | "pictureSlide";
 
 export function resolveEditablePicture(record?: Partial<BannerRecord> | null): string {
   if (!record) {

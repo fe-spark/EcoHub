@@ -170,3 +170,56 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 	page = shared.EnsurePage(page)
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
 }
+
+// GetSnapshotBannerCandidates 按排片策略与分类条件获取用于轮播的候选影片快照
+func GetSnapshotBannerCandidates(version string, strategy string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || limit <= 0 || db.Mdb == nil {
+		return []model.FilmListSnapshot{}
+	}
+
+	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
+		Where("snapshot_version = ?", version)
+
+	if len(categoryPids) > 0 {
+		query = query.Where("pid IN ?", categoryPids)
+	}
+
+	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
+		switch strategy {
+		case "hot_random":
+			return q.Order("hits DESC")
+		case "score_random":
+			if withScoreFilter {
+				q = q.Where("score >= ?", 6.0)
+			}
+			return q.Order("score DESC, hits DESC")
+		case "latest_random":
+			return q.Order("update_stamp DESC")
+		default:
+			return q.Order("hits DESC, update_stamp DESC")
+		}
+	}
+
+	var results []model.FilmListSnapshot
+	if err := applyStrategy(query, true).Limit(limit).Find(&results).Error; err != nil {
+		log.Println("[Snapshot] 获取轮播候选集异常:", err)
+		return []model.FilmListSnapshot{}
+	}
+	if len(results) == 0 && strategy == "score_random" {
+		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
+		fallback := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
+			Where("snapshot_version = ?", version)
+		if len(categoryPids) > 0 {
+			fallback = fallback.Where("pid IN ?", categoryPids)
+		}
+		if err := applyStrategy(fallback, false).Limit(limit).Find(&results).Error; err != nil {
+			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
+			return []model.FilmListSnapshot{}
+		}
+	}
+	return results
+}
