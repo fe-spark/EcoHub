@@ -4,21 +4,8 @@
   gap: 16px;
 }
 
-.tableHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.tableTitle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 24px;
+.tableCard {
+  border-radius: 8px;
 }
 
 .countBadge {
@@ -30,27 +17,75 @@
   border-radius: 10px;
 }
 
-.tableActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-/* 列表表格影片信息单元格 */
+/* 竖屏海报单元格 */
 .filmCell {
   display: flex;
   align-items: center;
   gap: 14px;
 }
 
-.posterThumb {
-  width: 52px;
-  height: 72px;
-  border-radius: 6px;
-  object-fit: cover;
+.posterThumbWrapper {
+  width: 52px !important;
+  height: 72px !important;
   flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
   background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
-  border: 1px solid var(--ant-color-border-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.posterThumb {
+  width: 52px !important;
+  height: 72px !important;
+  object-fit: cover !important;
+  border-radius: 6px;
+  display: block;
+}
+
+/* 横屏海报独立列单元格 (16:9) */
+.slideCell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slideThumbWrapper {
+  width: 96px !important;
+  height: 54px !important;
+  flex-shrink: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
+  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slideThumb {
+  width: 96px !important;
+  height: 54px !important;
+  object-fit: cover !important;
+  border-radius: 6px;
+  display: block;
+}
+
+.emptySlideBox {
+  width: 96px;
+  height: 54px;
+  border-radius: 6px;
+  border: 1px dashed var(--ant-color-border-secondary, rgba(255, 255, 255, 0.12));
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--ant-color-text-tertiary);
 }
 
 .filmInfo {

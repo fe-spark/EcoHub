@@ -150,6 +150,33 @@ func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
+var (
+	bannerAutoExecutorMu sync.RWMutex
+	bannerAutoExecutor   func() error
+)
+
+// RegisterBannerAutoExecutor 注册首页轮播自动排片执行回调
+func RegisterBannerAutoExecutor(fn func() error) {
+	bannerAutoExecutorMu.Lock()
+	defer bannerAutoExecutorMu.Unlock()
+	bannerAutoExecutor = fn
+}
+
+// AddBannerAutoCron 添加首页轮播自动排片定时任务 (Model 5)
+func AddBannerAutoCron(id, spec string) (cron.EntryID, error) {
+	if err := ValidSpec(spec); err != nil {
+		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
+	}
+	return CronCollect.AddFunc(spec, func() {
+		ft, err := repository.GetFilmTaskById(id)
+		if err != nil {
+			log.Println("BannerAutoCron Exec Failed: ", err)
+			return
+		}
+		executeTask(ft)
+	})
+}
+
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
 	// 1. 获取最新配置
@@ -177,6 +204,8 @@ func ReloadCronTask(id string) error {
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
 	case 4:
 		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
+	case 5:
+		cid, err = AddBannerAutoCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -230,6 +259,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 		return
 	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）
 		executeLogCleanTask(ft)
+		return
+	case 5: // 首页轮播自动智能排片（executeBannerAutoTask 内部已发 done/failed 通知）
+		executeBannerAutoTask(ft)
 		return
 	default:
 		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -312,6 +344,35 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
+func executeBannerAutoTask(ft model.FilmCollectTask) {
+	startedAt := time.Now()
+	bannerAutoExecutorMu.RLock()
+	fn := bannerAutoExecutor
+	bannerAutoExecutorMu.RUnlock()
+
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "首页轮播自动智能排片"
+	}
+
+	if fn == nil {
+		err := errors.New("轮播排片执行器未初始化")
+		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
+		notify.PublishCronFailed(ft.Id, remark, err.Error())
+		return
+	}
+
+	if err := fn(); err != nil {
+		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
+		notify.PublishCronFailed(ft.Id, remark, err.Error())
+		return
+	}
+
+	detail := "首页轮播智能排片完成"
+	log.Printf("[BannerAuto] 定时排片执行完成: cost=%s", time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, remark, detail)
+}
+
 // RunTaskOnce 立即手动执行一次任务
 func RunTaskOnce(id string) error {
 	ft, err := repository.GetFilmTaskById(id)
@@ -341,3 +402,4 @@ func IsCronTaskRunning(id string) bool {
 	_, ok := runningCronTasks.Load(id)
 	return ok
 }
+

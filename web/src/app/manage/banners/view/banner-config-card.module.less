@@ -1,0 +1,117 @@
+.card {
+  border-radius: 8px;
+}
+
+/* 只读模式样式 */
+.viewMode {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.viewInfoBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.viewRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.viewLabel {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+}
+
+.viewDesc {
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.viewMetaGrid {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.metaItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.viewNotice {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  margin-top: 4px;
+}
+
+/* 编辑模式样式 */
+.editMode {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.editRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.manualNotice {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.06));
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+
+  .noticeIcon {
+    color: var(--ant-color-primary);
+    font-size: 16px;
+    margin-top: 2px;
+    flex-shrink: 0;
+  }
+}
+
+.autoFormStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.formControls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.fieldItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fieldLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+}
+
+.hintText {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}

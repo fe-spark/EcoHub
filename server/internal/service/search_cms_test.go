@@ -119,10 +119,10 @@ func TestApplyCMSDetailToCardRejectsMismatchedID(t *testing.T) {
 }
 
 func TestSetSearchSourceCount(t *testing.T) {
-	tabs := []model.SearchSourceTab{{Id: "", Name: "聚合"}, {Id: "s1", Name: "源1"}}
+	tabs := []model.SearchSourceTab{{Id: "", Name: "综合"}, {Id: "s1", Name: "源1"}}
 	setSearchSourceCount(tabs, "", 9)
 	if tabs[0].Count != 9 {
-		t.Fatalf("聚合 count=%d", tabs[0].Count)
+		t.Fatalf("综合 count=%d", tabs[0].Count)
 	}
 	setSearchSourceCount(tabs, "s1", 4)
 	if tabs[1].Count != 4 {

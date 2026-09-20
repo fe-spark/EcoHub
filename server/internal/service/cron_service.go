@@ -18,6 +18,9 @@ func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
 	cst := time.FixedZone("UTC", 8*3600)
 	var l []model.CronTaskVo
 	tl := repository.GetAllFilmTask()
+	bannerCfg := repository.GetBannerConfig()
+	isBannerManual := bannerCfg.Mode == repository.BannerModeManual
+
 	for _, t := range tl {
 		e := spider.GetEntryByTaskId(t.Id)
 		var preV, nextV string
@@ -35,6 +38,14 @@ func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
 			Next:            nextV,
 			Running:         spider.IsCronTaskRunning(t.Id),
 		}
+
+		// 若首页轮播处于手动精选排片模式，对 sys_cron_banner_auto 任务锁定并置灰
+		if t.Id == model.TaskIDBannerAuto && isBannerManual {
+			taskVo.State = false
+			taskVo.Next = ""
+			taskVo.DisabledReason = "当前首页轮播为手动精选模式，定时排片已停用。如需启用请前往 [内容管理 > 首页轮播] 切换为自动智能排片"
+		}
+
 		l = append(l, taskVo)
 	}
 	return l
@@ -48,6 +59,13 @@ func (s *CronService) GetFilmCrontabById(id string) (model.FilmCollectTask, erro
 
 // ChangeFilmCrontab 改变定时任务的状态 开启 | 停止
 func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
+	if id == model.TaskIDBannerAuto && state {
+		bannerCfg := repository.GetBannerConfig()
+		if bannerCfg.Mode == repository.BannerModeManual {
+			return fmt.Errorf("当前首页轮播为手动精选模式，定时任务已被锁定；如需启用请前往 [内容管理 > 首页轮播] 切换为自动排片")
+		}
+	}
+
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
@@ -77,5 +95,11 @@ func (s *CronService) UpdateFilmCron(t model.FilmCollectTask) error {
 
 // RunFilmCronTaskOnce 立即手动执行一次定时任务
 func (s *CronService) RunFilmCronTaskOnce(id string) error {
+	if id == model.TaskIDBannerAuto {
+		bannerCfg := repository.GetBannerConfig()
+		if bannerCfg.Mode == repository.BannerModeManual {
+			return fmt.Errorf("当前首页轮播为手动精选模式，已被锁定；如需执行请前往 [内容管理 > 首页轮播] 切换为自动排片")
+		}
+	}
 	return spider.RunTaskOnce(id)
 }

@@ -99,7 +99,16 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
-	return repository.SaveTMDBConfig(cfg)
+	if err := repository.SaveTMDBConfig(cfg); err != nil {
+		return err
+	}
+
+	// 级联处理：关闭 TMDB 或清空 API Key 时仅暂停在线刮削，不强制切换手动模式，保留当前排片
+	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
+		BannerAutoSvc.HandleTMDBDisabled()
+	}
+
+	return nil
 }
 
 // TestConnection 验证 API Key 与网络代理连通性
@@ -480,10 +489,10 @@ func (s *TMDBService) ApplyDetail(req model.TMDBApplyReq) error {
 		detail.CustomPicture = tmdbData.Poster
 		detail.IsCustomPicture = true
 	}
+	// 仅写横图，不设置 IsCustomPicture，避免排片刮削把片库封面锁死
 	if shouldApply("backdrop", "pictureslide") && tmdbData.Backdrop != "" {
 		detail.PictureSlide = tmdbData.Backdrop
 		detail.CustomPictureSlide = tmdbData.Backdrop
-		detail.IsCustomPicture = true
 	}
 	if shouldApply("overview", "content") && tmdbData.Overview != "" {
 		detail.MovieDescriptor.Content = tmdbData.Overview

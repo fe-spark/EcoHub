@@ -165,15 +165,24 @@ export default function CronManagePageView() {
             </Tag>
           );
         }
-        return (
+        const isDisabled = !canWrite || !!record.disabledReason;
+        const switchNode = (
           <Switch
-            checked={v}
-            disabled={!canWrite}
+            checked={record.disabledReason ? false : v}
+            disabled={isDisabled}
             onChange={(checked) => changeTaskState(record.id, checked)}
             checkedChildren="启用"
             unCheckedChildren="禁用"
           />
         );
+        if (record.disabledReason) {
+          return (
+            <Tooltip title={record.disabledReason}>
+              <span>{switchNode}</span>
+            </Tooltip>
+          );
+        }
+        return switchNode;
       },
     },
     {
@@ -217,15 +226,21 @@ export default function CronManagePageView() {
           );
         }
         const isRunning = runningId === record.id;
-        const runDisabled = !record.state || isRunning;
+        const runDisabled = !record.state || isRunning || !!record.disabledReason;
+        const runTooltip = record.disabledReason
+          ? record.disabledReason
+          : record.state
+          ? "立即执行一次"
+          : "请先启用任务";
         return (
           <Space size={8}>
-            <Tooltip title={record.state ? "立即执行一次" : "请先启用任务"}>
+            <Tooltip title={runTooltip}>
               <span>
                 <Popconfirm
                   title="立即执行该定时任务？"
                   description="将立即触发一次执行，结果请查看运行日志。"
                   onConfirm={() => runTaskOnce(record.id)}
+                  disabled={runDisabled}
                   okText="执行"
                   cancelText="取消"
                 >

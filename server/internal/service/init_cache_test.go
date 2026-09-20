@@ -87,8 +87,8 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	setupTestDBAndRedis(t)
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 default tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
 	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {
@@ -114,8 +114,8 @@ func TestEnsureDefaultTasks_MigrateLegacyApiLogClean(t *testing.T) {
 
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 tasks, got %d", len(tasks))
 	}
 
 	if _, err := repository.GetFilmTaskById("sys_cron_api_log_clean"); err == nil {
@@ -165,8 +165,8 @@ func TestEnsureDefaultTasks_BothLegacyAndCanonical(t *testing.T) {
 
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 tasks, got %d", len(tasks))
 	}
 
 	if _, err := repository.GetFilmTaskById("sys_cron_api_log_clean"); err == nil {
@@ -182,8 +182,8 @@ func TestEnsureDefaultTasks_BothLegacyAndCanonical(t *testing.T) {
 	}
 
 	tasks2 := svc.ensureDefaultTasks()
-	if len(tasks2) != 4 {
-		t.Fatalf("expected 4 tasks on second run, got %d", len(tasks2))
+	if len(tasks2) != 5 {
+		t.Fatalf("expected 5 tasks on second run, got %d", len(tasks2))
 	}
 	if _, err := repository.GetFilmTaskById("sys_cron_log_clean"); err != nil {
 		t.Fatalf("sys_cron_log_clean must still exist after second run: %v", err)
@@ -201,8 +201,8 @@ func TestEnsureDefaultTasks_MultipleModel4Deduplication(t *testing.T) {
 
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 tasks, got %d", len(tasks))
 	}
 
 	if _, err := repository.GetFilmTaskById("extra_clean_1"); err == nil {

@@ -65,7 +65,7 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 func buildSearchSourceTabs() ([]model.SearchSourceTab, string) {
 	sources := repository.GetEnabledCollectSourceList()
 	tabs := make([]model.SearchSourceTab, 0, len(sources)+1)
-	tabs = append(tabs, model.SearchSourceTab{Id: "", Name: "聚合"})
+	tabs = append(tabs, model.SearchSourceTab{Id: "", Name: "综合"})
 	masterID := ""
 	for _, source := range sources {
 		name := strings.TrimSpace(source.Name)

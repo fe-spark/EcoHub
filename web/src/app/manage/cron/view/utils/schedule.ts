@@ -10,6 +10,7 @@ export interface CronTask {
   preV?: string;
   next?: string;
   running?: boolean;
+  disabledReason?: string;
 }
 
 export type ScheduleMode = "interval" | "daily" | "weekly" | "monthly" | "advanced";
@@ -41,6 +42,8 @@ export function getTaskActionText(model: number) {
       return "定时孤儿清理";
     case 4:
       return "定时日志清理";
+    case 5:
+      return "轮播排片";
     default:
       return "计划任务";
   }
@@ -58,6 +61,8 @@ export function getTaskTypeText(model: number) {
       return "孤儿清理";
     case 4:
       return "日志清理";
+    case 5:
+      return "自动排片";
     default:
       return "计划任务";
   }
@@ -155,6 +160,10 @@ export function getTaskScheduleText(task: CronTask) {
   if (mode === "interval") {
     const interval = parsed.cronMinute.match(/^\*\/(\d+)$/)?.[1] || "30";
     return `每隔 ${interval} 分钟运行一次`;
+  }
+  const hourStep = parsed.cronHour.match(/^\*\/(\d+)$/);
+  if (hourStep && (parsed.cronMinute === "0" || parsed.cronMinute === "00")) {
+    return `每隔 ${hourStep[1]} 小时运行一次`;
   }
   if (mode === "daily") {
     return `每天 ${formatTime(parsed.cronHour, parsed.cronMinute)} 运行`;

@@ -28,6 +28,7 @@ const (
 	TableFailureRecord      = "failure_records"
 	TableSchemaMigration    = "schema_migrations"
 	TableTMDBConfig         = "tmdb_config"
+	TableBannerConfig       = "banner_config"
 )
 
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
@@ -58,4 +59,5 @@ var AllModels = []any{
 	&FailureRecord{},
 	&SchemaMigration{},
 	&TMDBConfigRecord{},
+	&BannerConfigRecord{},
 }
