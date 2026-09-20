@@ -32,8 +32,8 @@ const { Text } = Typography;
 const STRATEGY_OPTIONS = [
   { label: "热门优先", value: "hot_random", title: "按播放热度与点击量优先排片" },
   { label: "高分精选", value: "score_random", title: "按影片优质评分优先排片" },
-  { label: "最新上架", value: "latest_random", title: "按新片更新时间优先排片" },
-  { label: "智能综合", value: "smart_mix", title: "热门、高分与最新影片混合排片" },
+  { label: "最近更新", value: "latest_random", title: "按影片最近更新时间优先排片" },
+  { label: "智能综合", value: "smart_mix", title: "热门、高分与最近更新影片混合排片" },
 ];
 
 interface BannerConfigCardProps {
