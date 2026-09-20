@@ -56,6 +56,20 @@ func TestSameStoredMasterDetailIgnoresVolatileFields(t *testing.T) {
 	if sameStoredMasterDetail(base, nameChanged) {
 		t.Fatal("片名变化应视为内容更新")
 	}
+
+	// 横图 PictureSlide 变化 → 算更新
+	slideChanged := base
+	slideChanged.PictureSlide = "http://image.tmdb.org/t/p/w1280/backdrop.jpg"
+	if sameStoredMasterDetail(base, slideChanged) {
+		t.Fatal("横图 PictureSlide 变化应视为内容更新")
+	}
+
+	// 自定义横图 CustomPictureSlide 变化 → 算更新
+	customSlideChanged := base
+	customSlideChanged.CustomPictureSlide = "http://image.tmdb.org/t/p/w1280/custom_slide.jpg"
+	if sameStoredMasterDetail(base, customSlideChanged) {
+		t.Fatal("自定义横图 CustomPictureSlide 变化应视为内容更新")
+	}
 }
 
 func TestStampOnlyRefreshedWhenNotifyWorthy(t *testing.T) {
@@ -350,3 +364,58 @@ func TestBuildMovieDetailInfosPreservesPosterFromInfo(t *testing.T) {
 		t.Fatalf("PictureSlide 未从 info 同步保留: got %q, want %q", parsed.PictureSlide, info.PictureSlide)
 	}
 }
+
+func TestPictureSlideUpdateTriggersMasterWrite(t *testing.T) {
+	gdb := openContentKeyTestDB(t)
+	const testMid int64 = 88888
+	contentKey := "vod_88888"
+
+	oldDetail := model.MovieDetail{
+		Id:           testMid,
+		Name:         "无间道测试",
+		Picture:      "http://example.com/poster.jpg",
+		PictureSlide: "",
+		PlayFrom:     []string{"线路1"},
+		PlayList:     [][]model.MovieUrlInfo{{{Episode: "正片", Link: "http://x/play"}}},
+	}
+	seedDetail(t, gdb, testMid, oldDetail)
+
+	row := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: testMid, ContentKey: contentKey, SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: oldDetail.Name, Picture: oldDetail.Picture, PictureSlide: "", UpdateStamp: 1700000000},
+	}
+	if err := gdb.Create(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	// 模拟 TMDB 刮削仅补充了横图 PictureSlide
+	newDetail := oldDetail
+	newDetail.PictureSlide = "https://image.tmdb.org/t/p/w1280/daAqY9PoVIadukn7p7hdNJ9gTPb.jpg"
+
+	newInfo := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: testMid, ContentKey: contentKey, SourceId: "master"},
+		FilmIndexContent:  model.FilmIndexContent{Name: newDetail.Name, Picture: newDetail.Picture, PictureSlide: newDetail.PictureSlide, UpdateStamp: 1700000000},
+	}
+
+	infos := []model.FilmIndex{newInfo}
+	detailsByKey := map[string]model.MovieDetail{contentKey: newDetail}
+
+	unchangedKeys, _, _, err := applyMasterBusinessUpdateStampsTx(gdb, infos, detailsByKey, true)
+	if err != nil {
+		t.Fatalf("applyMasterBusinessUpdateStampsTx 出错: %v", err)
+	}
+
+	if _, unchanged := unchangedKeys[contentKey]; unchanged {
+		t.Fatalf("横图补充后不应被判定为无变更 (unchangedKeys 包含了 %s)", contentKey)
+	}
+
+	writeInfos, _, writeDetails := filterChangedMasterWrites(infos, []model.MovieDetail{newDetail}, unchangedKeys)
+	if len(writeInfos) != 1 || len(writeDetails) != 1 {
+		t.Fatalf("filterChangedMasterWrites 应产出 1 条待写记录，实际: infos=%d, details=%d", len(writeInfos), len(writeDetails))
+	}
+
+	if writeDetails[0].PictureSlide != newDetail.PictureSlide {
+		t.Fatalf("writeDetails 中的 PictureSlide 未保留: got %q, want %q", writeDetails[0].PictureSlide, newDetail.PictureSlide)
+	}
+}
+

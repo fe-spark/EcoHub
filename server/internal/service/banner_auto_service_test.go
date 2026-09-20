@@ -221,3 +221,34 @@ func TestReplaceMissingSlidesKeepsExistingReuseCount(t *testing.T) {
 		t.Fatalf("expected replacement mid=4, got %+v", got)
 	}
 }
+
+func TestScrapeUntilTargetCountWithCustomPosters(t *testing.T) {
+	fresh := []model.FilmListSnapshot{
+		{Mid: 101, Name: "已有高清A", IsCustomPicture: true, CustomPicture: "https://example.com/posterA.jpg"},
+		{Mid: 102, Name: "已有高清B", IsCustomPicture: true, CustomPicture: "https://example.com/posterB.jpg"},
+		{Mid: 103, Name: "已有高清C", IsCustomPicture: true, CustomPicture: "https://example.com/posterC.jpg"},
+	}
+	ctx := context.Background()
+	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 3, fresh, nil, "v_test")
+	if len(picked) != 3 {
+		t.Fatalf("expected 3 valid picked, got %d", len(picked))
+	}
+	if attempts != 0 || successes != 0 {
+		t.Fatalf("expected 0 scrape attempts since all have custom posters, got %d", attempts)
+	}
+}
+
+func TestScrapeUntilTargetCountTimeoutExit(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 模拟已超时上下文
+
+	pool := []model.FilmListSnapshot{
+		{Mid: 201, Name: "影片1"},
+		{Mid: 202, Name: "影片2"},
+	}
+	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, pool, nil, "v_test")
+	if len(picked) != 2 {
+		t.Fatalf("expected 2 picked fallback items after timeout, got %d", len(picked))
+	}
+}
+
