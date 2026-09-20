@@ -13,15 +13,39 @@ import (
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 
+	"golang.org/x/sync/singleflight"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-var initializedPids sync.Map
+var (
+	initializedPids sync.Map
+	rebuildPidSf    singleflight.Group
+)
 
 const (
 	searchTagsRebuildFilmBatchSize = 200
 )
+
+// UpsertDynamicSearchTags 增量更新指定影片的检索标签，仅做轻量 Upsert，绝不全量删除重跑
+func UpsertDynamicSearchTags(infos ...model.FilmIndex) error {
+	if len(infos) == 0 {
+		return nil
+	}
+	items := aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(infos))
+	if len(items) == 0 {
+		return nil
+	}
+	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		return bulkUpsertSearchTagItemsTx(tx, items)
+	}); err != nil {
+		return err
+	}
+	for _, pid := range collectSearchTagPidList(infos) {
+		cache.ClearSearchTagsCache(pid)
+	}
+	return nil
+}
 
 func BatchHandleSearchTag(infos ...model.FilmIndex) {
 	if len(infos) == 0 {
@@ -63,10 +87,13 @@ func RefreshSearchTagsByPids(pids ...int64) error {
 	totalFilms := 0
 	for idx, pid := range orderedPids {
 		pidStart := time.Now()
-		films, err := rebuildSearchTagsForPid(pid)
+		v, err, _ := rebuildPidSf.Do(strconv.FormatInt(pid, 10), func() (any, error) {
+			return rebuildSearchTagsForPid(pid)
+		})
 		if err != nil {
 			return err
 		}
+		films := v.(int)
 		totalFilms += films
 		log.Printf("[SearchTags] 标签重建进度 pid=%d (%d/%d) films=%d cost=%s total=%s",
 			pid, idx+1, len(orderedPids), films, time.Since(pidStart), time.Since(start))
