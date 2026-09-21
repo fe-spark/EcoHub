@@ -21,6 +21,12 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (shared.Collect
 		return shared.CollectWriteResult{}, nil
 	}
 
+	// 附属站自带的 Pid/Cid 为源站私有分类体系 ID，不能直接用于本地分类查询（杜绝暴风等源站私有 ID 撞车本地分类自增主键）
+	for i := range list {
+		list[i].Pid = 0
+		list[i].Cid = 0
+	}
+
 	var playlists []model.SlaveMoviePlaylist
 	keysByMovieKey := make(map[string]struct{}, len(list)*2)
 
