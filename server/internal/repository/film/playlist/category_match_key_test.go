@@ -215,6 +215,7 @@ func TestCrossCategoryPlaylist_NoLeak(t *testing.T) {
 
 	animeDetail := model.MovieDetail{
 		Name: "仙逆",
+		Pid:  34, // 模拟暴风源站私有 ID 撞车本地短剧分类 ID 34
 		MovieDescriptor: model.MovieDescriptor{
 			CName: "动漫",
 		},

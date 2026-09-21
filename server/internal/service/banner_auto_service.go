@@ -204,16 +204,23 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		}
 	}
 
-	// 2.1 提取候选影片大池 (扩大至 300 部，确保片源丰富多样)
-	candidates := filmsnapshot.GetSnapshotBannerCandidates(version, cfg.Strategy, effectiveCategories, 300)
-	if len(candidates) == 0 {
-		if len(cfg.Categories) > 0 {
-			return nil, fmt.Errorf("所选分类下暂无候选影片，请调整排片分类或先采集影视数据")
+	// 元素去重，防止重复分类输入导致配额失真及多次处理同一分类
+	uniqueCats := make([]int64, 0, len(effectiveCategories))
+	seenCatID := make(map[int64]struct{}, len(effectiveCategories))
+	for _, cid := range effectiveCategories {
+		if cid > 0 {
+			if _, exists := seenCatID[cid]; !exists {
+				seenCatID[cid] = struct{}{}
+				uniqueCats = append(uniqueCats, cid)
+			}
 		}
-		return nil, fmt.Errorf("片库中无候选影片，请先采集影视数据")
 	}
+	effectiveCategories = uniqueCats
 
-	// 2.1 收集当前已有轮播的影片 Mid，用于轮换去重（避免换来换去老是同一批）
+	// 2.1 针对所选分类按轮播需求总数计算配额，确保各分类均分（如10个轮播选2类，每类各5部）
+	quotas := CalculateCategoryQuotas(effectiveCategories, needCount)
+
+	// 2.2 收集当前已有轮播的影片 Mid，用于轮换去重（避免换来换去老是同一批）
 	currentBanners := repository.GetBanners()
 	currentMids := make(map[int64]struct{}, len(currentBanners))
 	for _, b := range currentBanners {
@@ -222,31 +229,57 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		}
 	}
 
-	// 2.2 全局随机打散候选池 (Fisher-Yates Shuffle)，打破固定前排顺序
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	r.Shuffle(len(candidates), func(i, j int) {
-		candidates[i], candidates[j] = candidates[j], candidates[i]
-	})
+	freshByCat := make(map[int64][]model.FilmListSnapshot, len(effectiveCategories))
+	existingByCat := make(map[int64][]model.FilmListSnapshot, len(effectiveCategories))
+	var allFreshCandidates []model.FilmListSnapshot
+	var allExistingCandidates []model.FilmListSnapshot
+	totalCandidateCount := 0
 
-	// 2.3 轮换去重分流：分离出全新候选影片与当前在展影片
-	freshCandidates := make([]model.FilmListSnapshot, 0, len(candidates))
-	existingCandidates := make([]model.FilmListSnapshot, 0, len(currentMids))
-	for _, snap := range candidates {
-		if snap.Mid <= 0 || strings.TrimSpace(snap.Name) == "" {
-			continue
-		}
-		if _, isPinned := pinnedMap[snap.Mid]; isPinned {
-			continue
-		}
-		if _, exists := currentMids[snap.Mid]; exists {
-			existingCandidates = append(existingCandidates, snap)
-		} else {
-			freshCandidates = append(freshCandidates, snap)
-		}
+	// 2.3 分别提取每个有效分类的候选影片池并随机打散与分流，杜绝某优势分类垄断候选
+	// 刮削模式下池子扩大至 500 部，确保片库候选充足，避免因单次取样少而早早耗尽
+	fetchPerCat := 150
+	if canAutoTMDB {
+		fetchPerCat = 500
 	}
-	log.Printf("[BannerAuto] 开始排片(策略=%s, 目标=%d部, 触发源=%s): 从片库筛选出 %d 个候选影片 (全新候选: %d 个, 轮换排除当前已展: %d 个)",
-		cfg.Strategy, targetCount, triggerSource, len(candidates), len(freshCandidates), len(existingCandidates))
-	ReportBannerGenerateProgress(20, fmt.Sprintf("已筛选 %d 部候选影片，开始排片...", len(candidates)))
+	for _, catPid := range effectiveCategories {
+		catCands := filmsnapshot.GetSnapshotBannerCandidates(version, cfg.Strategy, []int64{catPid}, fetchPerCat)
+		r.Shuffle(len(catCands), func(i, j int) {
+			catCands[i], catCands[j] = catCands[j], catCands[i]
+		})
+
+		var fresh []model.FilmListSnapshot
+		var existing []model.FilmListSnapshot
+		for _, snap := range catCands {
+			if snap.Mid <= 0 || strings.TrimSpace(snap.Name) == "" {
+				continue
+			}
+			if _, isPinned := pinnedMap[snap.Mid]; isPinned {
+				continue
+			}
+			if _, exists := currentMids[snap.Mid]; exists {
+				existing = append(existing, snap)
+			} else {
+				fresh = append(fresh, snap)
+			}
+		}
+		freshByCat[catPid] = fresh
+		existingByCat[catPid] = existing
+		allFreshCandidates = append(allFreshCandidates, fresh...)
+		allExistingCandidates = append(allExistingCandidates, existing...)
+		totalCandidateCount += len(fresh) + len(existing)
+	}
+
+	if totalCandidateCount == 0 {
+		if len(cfg.Categories) > 0 {
+			return nil, fmt.Errorf("所选分类下暂无候选影片，请调整排片分类或先采集影视数据")
+		}
+		return nil, fmt.Errorf("片库中无候选影片，请先采集影视数据")
+	}
+
+	log.Printf("[BannerAuto] 开始排片(策略=%s, 目标=%d部, 分类配额=%+v, 触发源=%s): 筛选出 %d 个候选影片 (全新候选: %d 个, 轮换已展: %d 个)",
+		cfg.Strategy, targetCount, quotas, triggerSource, totalCandidateCount, len(allFreshCandidates), len(allExistingCandidates))
+	ReportBannerGenerateProgress(20, fmt.Sprintf("已按分类筛选 %d 部候选影片，开始排片...", totalCandidateCount))
 
 	var (
 		pickedSnaps         []model.FilmListSnapshot
@@ -256,54 +289,102 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 	)
 
 	if canAutoTMDB {
-		// 3.1 开启 TMDB 自动刮削：从候选池持续并发刮削，直到有效影片达到目标数量或超时 5 分钟
-		pickedSnaps, scrapedAttemptCount, scrapedSuccessCount, reusedCount = s.scrapeUntilTargetCount(
-			scrapeCtx, needCount, freshCandidates, existingCandidates, effectiveCategories, version,
+		// 3.1 开启 TMDB 自动刮削：针对各分类按配额持续并发刮削，严格保证每个类别的刮削与展示数量
+		var scrapeErr error
+		pickedSnaps, scrapedAttemptCount, scrapedSuccessCount, reusedCount, scrapeErr = s.scrapeUntilTargetCount(
+			scrapeCtx, needCount, effectiveCategories, quotas, freshByCat, existingByCat, version,
 		)
+		if scrapeErr != nil {
+			return nil, fmt.Errorf("TMDB 刮削排片失败: %w", scrapeErr)
+		}
 	} else {
-		// 3.2 未开启 TMDB 刮削：优先全新候选全量随机抽取，差额回退在展影片
-		ReportBannerGenerateProgress(50, "未开启 TMDB 刮削，正在优选并抽取可用影片...")
-		pickedSnaps = make([]model.FilmListSnapshot, 0, needCount)
-		if len(freshCandidates) > 0 {
-			pickFromFresh := needCount
-			if len(freshCandidates) < pickFromFresh {
-				pickFromFresh = len(freshCandidates)
+		// 3.2 未开启 TMDB 刮削：针对各分类按配额抽取可用影片，优先全新候选
+		ReportBannerGenerateProgress(50, "未开启 TMDB 刮削，正在优选并均衡抽取各分类影片...")
+		catPickedSnaps := make(map[int64][]model.FilmListSnapshot, len(effectiveCategories))
+		totalPicked := 0
+
+		for _, catPid := range effectiveCategories {
+			catQuota := quotas[catPid]
+			if catQuota <= 0 {
+				continue
 			}
-			indices := r.Perm(len(freshCandidates))
-			for i := 0; i < pickFromFresh; i++ {
-				pickedSnaps = append(pickedSnaps, freshCandidates[indices[i]])
+			fresh := freshByCat[catPid]
+			existing := existingByCat[catPid]
+			var catPicks []model.FilmListSnapshot
+
+			if len(fresh) > 0 {
+				pickCount := catQuota
+				if len(fresh) < pickCount {
+					pickCount = len(fresh)
+				}
+				indices := r.Perm(len(fresh))
+				for i := 0; i < pickCount; i++ {
+					catPicks = append(catPicks, fresh[indices[i]])
+				}
+			}
+
+			if len(catPicks) < catQuota && len(existing) > 0 {
+				stillNeed := catQuota - len(catPicks)
+				reusedIndices := r.Perm(len(existing))
+				for i := 0; i < stillNeed && i < len(existing); i++ {
+					catPicks = append(catPicks, existing[reusedIndices[i]])
+					reusedCount++
+				}
+			}
+			catPickedSnaps[catPid] = catPicks
+			totalPicked += len(catPicks)
+		}
+
+		// 若个别分类片库候选不足配额导致总数不够，由其他分类有富余候选的补充
+		if totalPicked < needCount {
+			usedMidMap := make(map[int64]struct{})
+			for _, picks := range catPickedSnaps {
+				for _, p := range picks {
+					usedMidMap[p.Mid] = struct{}{}
+				}
+			}
+			for _, catPid := range effectiveCategories {
+				if totalPicked >= needCount {
+					break
+				}
+				for _, c := range append(freshByCat[catPid], existingByCat[catPid]...) {
+					if totalPicked >= needCount {
+						break
+					}
+					if _, used := usedMidMap[c.Mid]; !used && c.Mid > 0 {
+						usedMidMap[c.Mid] = struct{}{}
+						catPickedSnaps[catPid] = append(catPickedSnaps[catPid], c)
+						totalPicked++
+					}
+				}
 			}
 		}
 
-		if len(pickedSnaps) < needCount && len(existingCandidates) > 0 {
-			stillNeed := needCount - len(pickedSnaps)
-			reusedIndices := r.Perm(len(existingCandidates))
-			for i := 0; i < stillNeed && i < len(existingCandidates); i++ {
-				pickedSnaps = append(pickedSnaps, existingCandidates[reusedIndices[i]])
-				reusedCount++
-			}
-		}
+		// 交错交织各分类影片，保证首页大轮播分类均衡呈现
+		pickedSnaps = InterleaveCategorySnapshots(effectiveCategories, catPickedSnaps)
 	}
 
 	// 3.3 兜底约束：候选库中必须至少有可用影片
 	if len(pickedSnaps) == 0 && len(pinnedBanners) == 0 {
-		return nil, fmt.Errorf("候选库中无有效影片数据，请先采集影视数据")
+		return nil, fmt.Errorf("未能生成有效排片影片，请调整排片分类或先采集影视数据")
 	}
 
-	// 3.4 横屏大图智能替换：检查选出的影片中是否有缺失横屏大图的条目，优先用片库中已有高清横图的优质影片替换，杜绝封面模糊
-	missingSlideCount := 0
-	for _, snap := range pickedSnaps {
-		if strings.TrimSpace(snap.DisplayPictureSlide()) == "" {
-			missingSlideCount++
+	// 3.4 仅在未开启 TMDB 刮削的离线模式下，才对缺失横图的条目尝试用本地片库已有横图影片替换；开启刮削时完全以刮削结果为准，禁止回填替换破坏分类数量
+	if !canAutoTMDB {
+		missingSlideCount := 0
+		for _, snap := range pickedSnaps {
+			if strings.TrimSpace(snap.DisplayPictureSlide()) == "" {
+				missingSlideCount++
+			}
 		}
-	}
-	if missingSlideCount > 0 {
-		var extraReused int
-		pickedSnaps, extraReused = replaceMissingSlides(pickedSnaps, freshCandidates, existingCandidates, currentMids, r)
-		reusedCount += extraReused
+		if missingSlideCount > 0 {
+			var extraReused int
+			pickedSnaps, extraReused = replaceMissingSlides(pickedSnaps, allFreshCandidates, allExistingCandidates, currentMids, r)
+			reusedCount += extraReused
 
-		// 如果普通候选池还不够，从全局快照表中查找拥有高清横图的影片做最终替换兜底 (严格限定在有效显示分类)
-		pickedSnaps = replaceMissingSlidesWithGlobalHD(pickedSnaps, effectiveCategories, version)
+			// 如果普通候选池还不够，从全局快照表中查找拥有高清横图的影片做最终替换兜底 (严格限定在有效显示分类)
+			pickedSnaps = replaceMissingSlidesWithGlobalHD(pickedSnaps, effectiveCategories, version)
+		}
 	}
 
 	localSlideCount := 0
@@ -336,7 +417,7 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		scrapeInfo = fmt.Sprintf("刮削: %d 个 [有效成功: %d 个]", scrapedAttemptCount, scrapedSuccessCount)
 	}
 	log.Printf("[BannerAuto] 自动排片完成: 从 %d 个候选影片里面获取 %d 个轮播 (全新: %d 个, 本地已有横图: %d 个, %s, 复用旧轮播: %d 个, 置顶项: %d 个, 策略: %s, 原始配置分类: %v, 生效显示分类: %v, 触发源: %s)",
-		len(candidates), len(finalBanners), len(pickedSnaps)-reusedCount, localSlideCount, scrapeInfo, reusedCount, len(pinnedBanners), cfg.Strategy, cfg.Categories, effectiveCategories, triggerSource)
+		totalCandidateCount, len(finalBanners), len(pickedSnaps)-reusedCount, localSlideCount, scrapeInfo, reusedCount, len(pinnedBanners), cfg.Strategy, cfg.Categories, effectiveCategories, triggerSource)
 	return finalBanners, nil
 }
 

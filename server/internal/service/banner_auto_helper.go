@@ -22,6 +22,47 @@ func normalizeBannerTargetCount(count int) int {
 	return count
 }
 
+// CalculateCategoryQuotas 计算各分类应分配的排片配额，确保总配额严格等于 needCount
+// 例如 10 个轮播选 2 类，每类各 5 部；10 个轮播选 3 类，按 4、3、3 部均衡分配
+func CalculateCategoryQuotas(categoryPids []int64, needCount int) map[int64]int {
+	quotas := make(map[int64]int, len(categoryPids))
+	numCats := len(categoryPids)
+	if numCats == 0 || needCount <= 0 {
+		return quotas
+	}
+	base := needCount / numCats
+	remainder := needCount % numCats
+	for i, pid := range categoryPids {
+		q := base
+		if i < remainder {
+			q++
+		}
+		quotas[pid] = q
+	}
+	return quotas
+}
+
+// InterleaveCategorySnapshots 将各分类挑选出的影片按交替轮流(Round-Robin)交织合并
+// 避免首页大轮播同一类别的影片连续堆叠，保证展示均衡
+func InterleaveCategorySnapshots(categoryPids []int64, catSnaps map[int64][]model.FilmListSnapshot) []model.FilmListSnapshot {
+	var result []model.FilmListSnapshot
+	maxLen := 0
+	for _, snaps := range catSnaps {
+		if len(snaps) > maxLen {
+			maxLen = len(snaps)
+		}
+	}
+	for i := 0; i < maxLen; i++ {
+		for _, pid := range categoryPids {
+			snaps := catSnaps[pid]
+			if i < len(snaps) {
+				result = append(result, snaps[i])
+			}
+		}
+	}
+	return result
+}
+
 // extractMainTitle 提取主片名，去除尾部或内部的副标题/外文原名括号，例如 "杀手妈咪（유부녀 킬러）" -> "杀手妈咪"
 func extractMainTitle(s string) string {
 	s = strings.TrimSpace(s)
