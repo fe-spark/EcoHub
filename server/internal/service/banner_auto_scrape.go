@@ -22,10 +22,36 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 	freshByCat map[int64][]model.FilmListSnapshot,
 	existingByCat map[int64][]model.FilmListSnapshot,
 	version string,
-) ([]model.FilmListSnapshot, int, int, int) {
+) ([]model.FilmListSnapshot, int, int, int, error) {
 	totalCandidateCount := 0
 	for _, pid := range effectiveCategories {
 		totalCandidateCount += len(freshByCat[pid]) + len(existingByCat[pid])
+	}
+
+	type catScrapeState struct {
+		pid       int64
+		quota     int
+		pool      []model.FilmListSnapshot
+		cursor    int
+		attempts  int
+		validList []model.FilmListSnapshot
+	}
+
+	states := make([]*catScrapeState, 0, len(effectiveCategories))
+	for _, pid := range effectiveCategories {
+		catQuota := quotas[pid]
+		if catQuota <= 0 {
+			continue
+		}
+		pool := make([]model.FilmListSnapshot, 0, len(freshByCat[pid])+len(existingByCat[pid]))
+		pool = append(pool, freshByCat[pid]...)
+		pool = append(pool, existingByCat[pid]...)
+		states = append(states, &catScrapeState{
+			pid:       pid,
+			quota:     catQuota,
+			pool:      pool,
+			validList: make([]model.FilmListSnapshot, 0, catQuota),
+		})
 	}
 
 	catValidSnaps := make(map[int64][]model.FilmListSnapshot, len(effectiveCategories))
@@ -34,11 +60,13 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 	concurrency := 3
 	attemptCount := 0
 	successCount := 0
+	consecutiveSysErrors := 0
+	var fatalErr error
 
 	calcTotalValid := func() int {
 		total := 0
-		for _, snaps := range catValidSnaps {
-			total += len(snaps)
+		for _, cs := range states {
+			total += len(cs.validList)
 		}
 		return total
 	}
@@ -52,61 +80,56 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 		return p
 	}
 
-	// 依次为各分类按照专属配额进行刮削，严格保证每个类别的有效数量
-	for _, catPid := range effectiveCategories {
-		if ctx.Err() != nil {
+	// 多分类轮询调度 (Round-Robin Fair Scheduling)：各分类轮流推进小批次刮削，杜绝某冷门分类独占超时导致后置分类饥饿
+	for {
+		if ctx.Err() != nil || fatalErr != nil {
 			break
 		}
-		catQuota := quotas[catPid]
-		if catQuota <= 0 {
-			continue
-		}
 
-		catPool := make([]model.FilmListSnapshot, 0, len(freshByCat[catPid])+len(existingByCat[catPid]))
-		catPool = append(catPool, freshByCat[catPid]...)
-		catPool = append(catPool, existingByCat[catPid]...)
-
-		cursor := 0
-		validForThisCat := make([]model.FilmListSnapshot, 0, catQuota)
-
-		// 数量不够就一直执行刮削，直到达到配额、候选池遍历完毕或 context 超时
-		for len(validForThisCat) < catQuota && cursor < len(catPool) {
-			select {
-			case <-ctx.Done():
-				log.Printf("[BannerAutoScrape] 刮削达到超时预算上限或被中止，分类(pid=%d)已收集 %d/%d 部",
-					catPid, len(validForThisCat), catQuota)
-				break
-			default:
-			}
-			if ctx.Err() != nil {
+		activeCategories := 0
+		for _, cs := range states {
+			if ctx.Err() != nil || fatalErr != nil {
 				break
 			}
 
-			shortfall := catQuota - len(validForThisCat)
-			batchSize := shortfall
-			if batchSize < 3 {
+			// 单分类尝试上限：配额的 6 倍，且至少尝试 20 部，最多 40 部（避免冷门分类死磕耗尽超时）
+			maxAttemptsPerCat := cs.quota * 6
+			if maxAttemptsPerCat < 20 {
+				maxAttemptsPerCat = 20
+			}
+			if maxAttemptsPerCat > 40 {
+				maxAttemptsPerCat = 40
+			}
+
+			// 分类已达标、片库候选耗尽或已达单类最大尝试预算
+			if len(cs.validList) >= cs.quota || cs.cursor >= len(cs.pool) || cs.attempts >= maxAttemptsPerCat {
+				continue
+			}
+			activeCategories++
+
+			// 本轮针对该分类取一个小批次 (至多 3 部，小步快跑公平交错)
+			batchSize := cs.quota - len(cs.validList)
+			if batchSize > 3 {
 				batchSize = 3
-			}
-			if batchSize > 6 {
-				batchSize = 6
 			}
 
 			var toScrape []model.FilmListSnapshot
-			for cursor < len(catPool) && len(toScrape) < batchSize {
-				cand := catPool[cursor]
-				cursor++
+			for cs.cursor < len(cs.pool) && len(toScrape) < batchSize {
+				cand := cs.pool[cs.cursor]
+				cs.cursor++
 				if _, used := usedMids[cand.Mid]; !used && cand.Mid > 0 {
 					usedMids[cand.Mid] = struct{}{}
 					toScrape = append(toScrape, cand)
 				}
 			}
 			if len(toScrape) == 0 {
-				break
+				continue
 			}
 
-			curTotalValid := calcTotalValid() + len(validForThisCat)
-			ReportBannerGenerateProgress(calcProgress(curTotalValid),
-				fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, curTotalValid, needCount))
+			cs.attempts += len(toScrape)
+
+			ReportBannerGenerateProgress(calcProgress(calcTotalValid()),
+				fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, calcTotalValid(), needCount))
 
 			type scrapeJobResult struct {
 				original model.FilmListSnapshot
@@ -153,32 +176,48 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 			for res := range results {
 				attemptCount++
 				if res.err != nil {
-					log.Printf("[BannerAutoScrape] 影片刮削记录异常 (已优雅降级): %v", res.err)
-				}
-				if res.ok && res.updated != nil {
-					successCount++
-					scrapedMids = append(scrapedMids, res.updated.Mid)
-					if len(validForThisCat) < catQuota {
-						validForThisCat = append(validForThisCat, *res.updated)
-						log.Printf("[BannerAutoScrape] 分类(pid=%d) 成功获取有效高清影片 mid=%d 片名=%q (当前类有效=%d/%d, 总就绪=%d/%d)",
-							catPid, res.updated.Mid, res.updated.Name, len(validForThisCat), catQuota, calcTotalValid()+len(validForThisCat), needCount)
+					log.Printf("[BannerAutoScrape] 影片刮削异常 (mid=%d): %v", res.original.Mid, res.err)
+					errStr := res.err.Error()
+					if strings.Contains(errStr, "401") || strings.Contains(errStr, "429") {
+						fatalErr = res.err
+					} else {
+						consecutiveSysErrors++
+						if consecutiveSysErrors >= 5 {
+							fatalErr = fmt.Errorf("TMDB 外部服务连续多次请求失败 (网络不可达或代理故障): %w", res.err)
+						}
+					}
+				} else {
+					consecutiveSysErrors = 0
+					if res.ok && res.updated != nil {
+						successCount++
+						scrapedMids = append(scrapedMids, res.updated.Mid)
+						if len(cs.validList) < cs.quota {
+							cs.validList = append(cs.validList, *res.updated)
+							log.Printf("[BannerAutoScrape] 分类(pid=%d) 成功获取有效高清影片 mid=%d 片名=%q (当前类有效=%d/%d, 总就绪=%d/%d)",
+								cs.pid, res.updated.Mid, res.updated.Name, len(cs.validList), cs.quota, calcTotalValid(), needCount)
+						}
 					}
 				}
-				curTotal := calcTotalValid() + len(validForThisCat)
-				ReportBannerGenerateProgress(calcProgress(curTotal),
-					fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, curTotal, needCount))
+				ReportBannerGenerateProgress(calcProgress(calcTotalValid()),
+					fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, calcTotalValid(), needCount))
 			}
 		}
 
-		catValidSnaps[catPid] = validForThisCat
-		log.Printf("[BannerAutoScrape] 分类(pid=%d) 配额刮削完毕: 目标配额=%d, 实际刮削获取=%d 部",
-			catPid, catQuota, len(validForThisCat))
+		if activeCategories == 0 {
+			break
+		}
+	}
+
+	for _, cs := range states {
+		catValidSnaps[cs.pid] = cs.validList
+		log.Printf("[BannerAutoScrape] 分类(pid=%d) 刮削结束: 目标配额=%d, 探测尝试=%d, 实际获取=%d 部",
+			cs.pid, cs.quota, cs.attempts, len(cs.validList))
 	}
 
 	// 轮播刮削凑额完成(或候选池耗尽/超时)，一次性统一批量发布快照与重建常驻搜索索引
 	if len(scrapedMids) > 0 {
 		ReportBannerGenerateProgress(88, fmt.Sprintf("正在批量更新并发布 %d 部影视快照...", len(scrapedMids)))
-		log.Printf("[BannerAutoScrape] 轮播刮削凑额完成，统一批量重建发布快照 mid_count=%d", len(scrapedMids))
+		log.Printf("[BannerAutoScrape] 轮播刮削完成，统一批量重建发布快照 mid_count=%d", len(scrapedMids))
 		if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(scrapedMids...); err != nil {
 			log.Printf("[BannerAutoScrape] 批量发布快照失败: %v", err)
 		}
@@ -201,10 +240,14 @@ func (s *BannerAutoService) scrapeUntilTargetCount(
 		}
 	}
 
-	return pickedSnaps, attemptCount, successCount, reusedCount
+	if fatalErr != nil {
+		return pickedSnaps, attemptCount, successCount, reusedCount, fatalErr
+	}
+
+	return pickedSnaps, attemptCount, successCount, reusedCount, nil
 }
 
-// tryTMDBAutoScrape 先使用未经去噪的原始片名严格搜索匹配；若未命中，再使用去噪清洗后的名称二次检索匹配
+// tryTMDBAutoScrape 直接获取去噪后的片名进行 TMDB 检索匹配，避免原始带杂质片名浪费额外的网络请求
 func (s *BannerAutoService) tryTMDBAutoScrape(ctx context.Context, snap model.FilmListSnapshot, version string) (*model.FilmListSnapshot, bool, error) {
 	select {
 	case <-ctx.Done():
@@ -214,6 +257,9 @@ func (s *BannerAutoService) tryTMDBAutoScrape(ctx context.Context, snap model.Fi
 
 	rawName := strings.TrimSpace(snap.Name)
 	cleanedTarget, extractedYear := CleanKeywordForSearch(rawName)
+	if cleanedTarget == "" {
+		cleanedTarget = rawName
+	}
 	snapYear := snap.Year
 	if snapYear == 0 && extractedYear != "" {
 		if y, err := strconv.ParseInt(extractedYear, 10, 64); err == nil {
@@ -224,130 +270,97 @@ func (s *BannerAutoService) tryTMDBAutoScrape(ctx context.Context, snap model.Fi
 	isTVCategory := strings.Contains(snap.CName, "剧") || strings.Contains(snap.CName, "动漫")
 	isMovieCategory := strings.Contains(snap.CName, "影") || strings.Contains(snap.CName, "片")
 
-	searchAndMatch := func(query string, targetName string, isRawPhase bool) (*model.TMDBCandidate, error) {
-		query = strings.TrimSpace(query)
-		if query == "" {
-			return nil, nil
-		}
+	log.Printf("[BannerAutoScrape] 发起去噪检索 mid=%d 关键词=%q (原名=%q)", snap.Mid, cleanedTarget, rawName)
 
-		phaseLabel := "第一阶段:原始名称"
-		if !isRawPhase {
-			phaseLabel = "第二阶段:去噪名称"
-		}
-
-		log.Printf("[BannerAutoScrape] [%s] 发起检索 mid=%d 关键词=%q", phaseLabel, snap.Mid, query)
-
-		var candidates []model.TMDBCandidate
-		var err error
-		if isRawPhase {
-			candidates, err = TMDBSvc.SearchRaw(query, "", "")
-		} else {
-			candidates, err = TMDBSvc.Search(query, "", "")
-		}
-		if err != nil {
-			log.Printf("[BannerAutoScrape] [%s] TMDB 请求异常 mid=%d 关键词=%q: %v", phaseLabel, snap.Mid, query, err)
-			return nil, err
-		}
-
-		if len(candidates) == 0 {
-			log.Printf("[BannerAutoScrape] [%s] TMDB 未检索到任何候选条目 mid=%d 关键词=%q", phaseLabel, snap.Mid, query)
-			return nil, nil
-		}
-
-		var bestCandidate *model.TMDBCandidate
-		bestScore := -1
-
-		for i := range candidates {
-			c := &candidates[i]
-			hasPoster := strings.TrimSpace(c.Poster) != ""
-			hasBackdrop := strings.TrimSpace(c.Backdrop) != ""
-			if !hasPoster && !hasBackdrop {
-				log.Printf("[BannerAutoScrape] [%s] 候选跳过(既无海报也无横图) id=%d 标题=%q",
-					phaseLabel, c.ID, c.Title)
-				continue
-			}
-
-			cleanedCand, _ := CleanKeywordForSearch(c.Title)
-			candTitle := strings.TrimSpace(c.Title)
-			candOrig := strings.TrimSpace(c.OriginalTitle)
-			exactTarget := strings.TrimSpace(targetName)
-
-			mainCandTitle := extractMainTitle(candTitle)
-			mainExactTarget := extractMainTitle(exactTarget)
-
-			// 严格限制：只取名称一模一样的条目（支持去除原名括号后的主片名完全匹配）
-			nameExact := strings.EqualFold(candTitle, exactTarget) ||
-				strings.EqualFold(candOrig, exactTarget) ||
-				(cleanedCand != "" && strings.EqualFold(cleanedCand, exactTarget)) ||
-				strings.EqualFold(mainCandTitle, mainExactTarget)
-
-			if !nameExact {
-				log.Printf("[BannerAutoScrape] [%s] 候选跳过(名称未完全一致) id=%d 候选标题=%q 原名=%q 期望目标=%q",
-					phaseLabel, c.ID, c.Title, c.OriginalTitle, exactTarget)
-				continue
-			}
-
-			score := 100
-			if isTVCategory && c.MediaType == "tv" {
-				score += 30
-			} else if isMovieCategory && c.MediaType == "movie" {
-				score += 30
-			}
-
-			// 年份非强制比对：采集无年份正常匹配；有年份相符(+0~1年)仅作为优选加分项，绝不强行过滤
-			if snapYear > 0 && c.Year != "" {
-				candY, _ := strconv.Atoi(c.Year)
-				if candY > 0 {
-					diff := int(snapYear) - candY
-					if diff == 0 {
-						score += 30
-					} else if diff == 1 || diff == -1 {
-						score += 15
-					}
-				}
-			}
-
-			if hasPoster {
-				score += 20 // 高清封面
-			}
-			if hasBackdrop {
-				score += 15 // 横屏海报（有更好，没有也可以）
-			}
-
-			score += int(c.VoteAverage * 2)
-
-			log.Printf("[BannerAutoScrape] [%s] 候选同名匹配命中(得分=%d) id=%d 标题=%q 年份=%s 类型=%s (海报=%t, 横图=%t, 当前最高=%d)",
-				phaseLabel, score, c.ID, c.Title, c.Year, c.MediaType, hasPoster, hasBackdrop, bestScore)
-
-			if score > bestScore {
-				bestScore = score
-				bestCandidate = c
-			}
-		}
-
-		return bestCandidate, nil
-	}
-
-	// 1. 第一阶段：先使用未经去噪的原始片名严格搜索匹配
-	matched, err := searchAndMatch(rawName, rawName, true)
+	candidates, err := TMDBSvc.Search(cleanedTarget, "", "")
 	if err != nil {
+		log.Printf("[BannerAutoScrape] TMDB 请求异常 mid=%d 关键词=%q: %v", snap.Mid, cleanedTarget, err)
 		return nil, false, err
 	}
 
-	// 2. 第二阶段：若原始名称未匹配到，且去噪后片名与原名不同，再使用去噪后片名二次检索匹配
-	if matched == nil && cleanedTarget != "" && cleanedTarget != rawName {
-		log.Printf("[BannerAutoScrape] 原始名称未匹配到条目，启动去噪后名称二次刮削 mid=%d 原名=%q 去噪后=%q",
-			snap.Mid, rawName, cleanedTarget)
-		matched, err = searchAndMatch(cleanedTarget, cleanedTarget, false)
-		if err != nil {
-			return nil, false, err
+	if len(candidates) == 0 {
+		log.Printf("[BannerAutoScrape] TMDB 未检索到任何候选条目 mid=%d 关键词=%q", snap.Mid, cleanedTarget)
+		return nil, false, nil
+	}
+
+	var bestCandidate *model.TMDBCandidate
+	bestScore := -1
+
+	for i := range candidates {
+		c := &candidates[i]
+		hasPoster := strings.TrimSpace(c.Poster) != ""
+		hasBackdrop := strings.TrimSpace(c.Backdrop) != ""
+		if !hasPoster && !hasBackdrop {
+			log.Printf("[BannerAutoScrape] 候选跳过(既无海报也无横图) id=%d 标题=%q", c.ID, c.Title)
+			continue
+		}
+
+		cleanedCand, _ := CleanKeywordForSearch(c.Title)
+		candTitle := strings.TrimSpace(c.Title)
+		candOrig := strings.TrimSpace(c.OriginalTitle)
+		exactTarget := strings.TrimSpace(cleanedTarget)
+
+		mainCandTitle := extractMainTitle(candTitle)
+		mainExactTarget := extractMainTitle(exactTarget)
+
+		// 严格限制：只取名称一模一样的条目（支持去除原名括号后的主片名完全匹配）
+		nameExact := strings.EqualFold(candTitle, exactTarget) ||
+			strings.EqualFold(candOrig, exactTarget) ||
+			(cleanedCand != "" && strings.EqualFold(cleanedCand, exactTarget)) ||
+			strings.EqualFold(mainCandTitle, mainExactTarget) ||
+			strings.EqualFold(candTitle, rawName) ||
+			strings.EqualFold(candOrig, rawName)
+
+		if !nameExact {
+			log.Printf("[BannerAutoScrape] 候选跳过(名称未完全一致) id=%d 候选标题=%q 原名=%q 期望目标=%q",
+				c.ID, c.Title, c.OriginalTitle, exactTarget)
+			continue
+		}
+
+		score := 100
+		if isTVCategory && c.MediaType == "tv" {
+			score += 30
+		} else if isMovieCategory && c.MediaType == "movie" {
+			score += 30
+		}
+
+		// 年份非强制比对：采集无年份正常匹配；有年份相符(+0~1年)仅作为优选加分项，绝不强行过滤
+		if snapYear > 0 && c.Year != "" {
+			candY, _ := strconv.Atoi(c.Year)
+			if candY > 0 {
+				diff := int(snapYear) - candY
+				if diff == 0 {
+					score += 30
+				} else if diff == 1 || diff == -1 {
+					score += 15
+				}
+			}
+		}
+
+		if hasPoster {
+			score += 20 // 高清封面
+		}
+		if hasBackdrop {
+			score += 15 // 横屏海报（有更好，没有也可以）
+		}
+
+		score += int(c.VoteAverage * 2)
+
+		log.Printf("[BannerAutoScrape] 候选同名匹配命中(得分=%d) id=%d 标题=%q 年份=%s 类型=%s (海报=%t, 横图=%t, 当前最高=%d)",
+			score, c.ID, c.Title, c.Year, c.MediaType, hasPoster, hasBackdrop, bestScore)
+
+		if score > bestScore {
+			bestScore = score
+			bestCandidate = c
 		}
 	}
 
-	if matched == nil {
-		log.Printf("[BannerAutoScrape] 影片两阶段刮削均未匹配到有效 TMDB 条目 mid=%d 片名=%q", snap.Mid, snap.Name)
+	if bestCandidate == nil {
+		log.Printf("[BannerAutoScrape] 影片去噪刮削未匹配到有效 TMDB 条目 mid=%d 片名=%q 去噪片名=%q", snap.Mid, snap.Name, cleanedTarget)
 		return nil, false, nil
 	}
+
+	matched := bestCandidate
 
 	fields := []string{"poster"}
 	if strings.TrimSpace(matched.Backdrop) != "" {

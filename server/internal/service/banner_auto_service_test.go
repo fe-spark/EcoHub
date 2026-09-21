@@ -238,7 +238,10 @@ func TestScrapeUntilTargetCountWithCustomPosters(t *testing.T) {
 	freshByCat := map[int64][]model.FilmListSnapshot{1: fresh}
 	existingByCat := map[int64][]model.FilmListSnapshot{1: nil}
 
-	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	picked, attempts, successes, _, err := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	if err != nil {
+		t.Fatalf("unexpected error on cancelled ctx: %v", err)
+	}
 	if len(picked) != 0 {
 		t.Fatalf("expected 0 picked items when context cancelled without fallback, got %d", len(picked))
 	}
@@ -260,10 +263,41 @@ func TestScrapeUntilTargetCountTimeoutExit(t *testing.T) {
 	freshByCat := map[int64][]model.FilmListSnapshot{1: pool}
 	existingByCat := map[int64][]model.FilmListSnapshot{1: nil}
 
-	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	picked, _, _, _, err := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	if err != nil {
+		t.Fatalf("unexpected error on timeout ctx: %v", err)
+	}
 	// 移除回填已有历史数据后，超时即停止，不强制用低质数据或历史数据补齐，只返回已成功刮削到的数量
 	if len(picked) != 0 {
 		t.Fatalf("expected 0 picked items after immediate timeout with no fallback, got %d", len(picked))
+	}
+}
+
+func TestScrapeUntilTargetCountCircuitBreaker(t *testing.T) {
+	// 当外部服务（TMDB）连续发生系统级错误时，应快速熔断退出，杜绝空转尝试所有候选
+	var pool []model.FilmListSnapshot
+	for i := int64(1); i <= 30; i++ {
+		pool = append(pool, model.FilmListSnapshot{
+			Mid:  300 + i,
+			Name: fmt.Sprintf("测试异常片%d", i),
+			Pid:  1,
+		})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	cats := []int64{1}
+	quotas := map[int64]int{1: 5}
+	freshByCat := map[int64][]model.FilmListSnapshot{1: pool}
+	existingByCat := map[int64][]model.FilmListSnapshot{1: nil}
+
+	_, attempts, _, _, err := BannerAutoSvc.scrapeUntilTargetCount(ctx, 5, cats, quotas, freshByCat, existingByCat, "v_test")
+	// 未配置 TMDB 时，连续请求触发系统级熔断，应返回错误且探测次数远小于候选池总量 (<= 6)
+	if err == nil {
+		t.Fatalf("expected circuit breaker error when TMDB calls fail continuously, got nil")
+	}
+	if attempts > 10 {
+		t.Fatalf("circuit breaker failed to fast-fail early, attempted %d items out of %d", attempts, len(pool))
 	}
 }
 
@@ -433,6 +467,30 @@ func TestCategoryQuotasAndInterleave(t *testing.T) {
 	}
 }
 
+func TestScrapeMultiCategoryRoundRobinScheduling(t *testing.T) {
+	// 验证在多分类场景下，调度器采用 Round-Robin 交替为各分类推进探测，
+	// 而非串行阻塞导致后面的分类在超时前完全得不到执行机会
+	var pool1, pool2 []model.FilmListSnapshot
+	for i := int64(1); i <= 10; i++ {
+		pool1 = append(pool1, model.FilmListSnapshot{Mid: 100 + i, Name: fmt.Sprintf("类1片%d", i), Pid: 1})
+		pool2 = append(pool2, model.FilmListSnapshot{Mid: 200 + i, Name: fmt.Sprintf("类2片%d", i), Pid: 2})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
+	cats := []int64{1, 2}
+	quotas := map[int64]int{1: 2, 2: 2}
+	freshByCat := map[int64][]model.FilmListSnapshot{1: pool1, 2: pool2}
+	existingByCat := map[int64][]model.FilmListSnapshot{1: nil, 2: nil}
 
-
+	_, attempts, _, _, err := BannerAutoSvc.scrapeUntilTargetCount(ctx, 4, cats, quotas, freshByCat, existingByCat, "v_test")
+	// 应该发生熔断退出（由于测试环境未配置 TMDB）
+	if err == nil {
+		t.Fatalf("expected error due to TMDB disabled, got nil")
+	}
+	// 在 Round-Robin 调度下，首轮分类 1 取至多 2 部（配额 2），随后分类 2 同样获得探测机会
+	// 连续错误熔断（consecutiveSysErrors >= 5）时，已跨分类探测（attempts > 2）
+	if attempts <= 2 {
+		t.Fatalf("expected both categories to be scheduled, but attempts was only %d", attempts)
+	}
+}

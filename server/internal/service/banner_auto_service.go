@@ -290,9 +290,13 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 
 	if canAutoTMDB {
 		// 3.1 开启 TMDB 自动刮削：针对各分类按配额持续并发刮削，严格保证每个类别的刮削与展示数量
-		pickedSnaps, scrapedAttemptCount, scrapedSuccessCount, reusedCount = s.scrapeUntilTargetCount(
+		var scrapeErr error
+		pickedSnaps, scrapedAttemptCount, scrapedSuccessCount, reusedCount, scrapeErr = s.scrapeUntilTargetCount(
 			scrapeCtx, needCount, effectiveCategories, quotas, freshByCat, existingByCat, version,
 		)
+		if scrapeErr != nil {
+			return nil, fmt.Errorf("TMDB 刮削排片失败: %w", scrapeErr)
+		}
 	} else {
 		// 3.2 未开启 TMDB 刮削：针对各分类按配额抽取可用影片，优先全新候选
 		ReportBannerGenerateProgress(50, "未开启 TMDB 刮削，正在优选并均衡抽取各分类影片...")
