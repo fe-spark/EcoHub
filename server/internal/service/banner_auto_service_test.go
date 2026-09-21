@@ -225,18 +225,25 @@ func TestReplaceMissingSlidesKeepsExistingReuseCount(t *testing.T) {
 }
 
 func TestScrapeUntilTargetCountWithCustomPosters(t *testing.T) {
+	// 用户明确要求：开启刮削时移除拿之前刮削的数据回填逻辑，纯粹依赖本次实时刮削，数量不够就一直执行直到超时
+	// 因此未经过 TMDB 刮削验证的条目不再直接免刮削入选
 	fresh := []model.FilmListSnapshot{
-		{Mid: 101, Name: "已有高清A", IsCustomPicture: true, CustomPicture: "https://example.com/posterA.jpg"},
-		{Mid: 102, Name: "已有高清B", IsCustomPicture: true, CustomPicture: "https://example.com/posterB.jpg"},
-		{Mid: 103, Name: "已有高清C", IsCustomPicture: true, CustomPicture: "https://example.com/posterC.jpg"},
+		{Mid: 101, Name: "测试片A", Pid: 1},
+		{Mid: 102, Name: "测试片B", Pid: 1},
 	}
-	ctx := context.Background()
-	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 3, fresh, nil, nil, "v_test")
-	if len(picked) != 3 {
-		t.Fatalf("expected 3 valid picked, got %d", len(picked))
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // 模拟已取消/超时上下文
+	cats := []int64{1}
+	quotas := map[int64]int{1: 2}
+	freshByCat := map[int64][]model.FilmListSnapshot{1: fresh}
+	existingByCat := map[int64][]model.FilmListSnapshot{1: nil}
+
+	picked, attempts, successes, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	if len(picked) != 0 {
+		t.Fatalf("expected 0 picked items when context cancelled without fallback, got %d", len(picked))
 	}
 	if attempts != 0 || successes != 0 {
-		t.Fatalf("expected 0 scrape attempts since all have custom posters, got %d", attempts)
+		t.Fatalf("expected 0 attempts/successes, got %d/%d", attempts, successes)
 	}
 }
 
@@ -245,12 +252,18 @@ func TestScrapeUntilTargetCountTimeoutExit(t *testing.T) {
 	cancel() // 模拟已超时上下文
 
 	pool := []model.FilmListSnapshot{
-		{Mid: 201, Name: "影片1"},
-		{Mid: 202, Name: "影片2"},
+		{Mid: 201, Name: "影片1", Pid: 1},
+		{Mid: 202, Name: "影片2", Pid: 1},
 	}
-	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, pool, nil, nil, "v_test")
-	if len(picked) != 2 {
-		t.Fatalf("expected 2 picked fallback items after timeout, got %d", len(picked))
+	cats := []int64{1}
+	quotas := map[int64]int{1: 2}
+	freshByCat := map[int64][]model.FilmListSnapshot{1: pool}
+	existingByCat := map[int64][]model.FilmListSnapshot{1: nil}
+
+	picked, _, _, _ := BannerAutoSvc.scrapeUntilTargetCount(ctx, 2, cats, quotas, freshByCat, existingByCat, "v_test")
+	// 移除回填已有历史数据后，超时即停止，不强制用低质数据或历史数据补齐，只返回已成功刮削到的数量
+	if len(picked) != 0 {
+		t.Fatalf("expected 0 picked items after immediate timeout with no fallback, got %d", len(picked))
 	}
 }
 
@@ -378,6 +391,48 @@ func TestGenerateAutoBannersConcurrentGuard(t *testing.T) {
 		t.Fatalf("expected Running=false after Finish")
 	}
 }
+
+func TestCategoryQuotasAndInterleave(t *testing.T) {
+	// 1. 测试 10 个轮播选 2 类：严格保证每类 5 张
+	cats2 := []int64{1, 2}
+	q2 := CalculateCategoryQuotas(cats2, 10)
+	if q2[1] != 5 || q2[2] != 5 {
+		t.Fatalf("expected each category to get 5, got %+v", q2)
+	}
+
+	// 2. 测试 10 个轮播选 3 类：应为 4, 3, 3，总和为 10
+	cats3 := []int64{10, 20, 30}
+	q3 := CalculateCategoryQuotas(cats3, 10)
+	if q3[10] != 4 || q3[20] != 3 || q3[30] != 3 {
+		t.Fatalf("expected 4, 3, 3, got %+v", q3)
+	}
+	sum3 := q3[10] + q3[20] + q3[30]
+	if sum3 != 10 {
+		t.Fatalf("expected sum 10, got %d", sum3)
+	}
+
+	// 3. 测试交替合并
+	snaps1 := []model.FilmListSnapshot{
+		{Mid: 101, Name: "电影1", Pid: 1},
+		{Mid: 102, Name: "电影2", Pid: 1},
+	}
+	snaps2 := []model.FilmListSnapshot{
+		{Mid: 201, Name: "剧集1", Pid: 2},
+		{Mid: 202, Name: "剧集2", Pid: 2},
+	}
+	catSnaps := map[int64][]model.FilmListSnapshot{
+		1: snaps1,
+		2: snaps2,
+	}
+	interleaved := InterleaveCategorySnapshots(cats2, catSnaps)
+	if len(interleaved) != 4 {
+		t.Fatalf("expected 4 items, got %d", len(interleaved))
+	}
+	if interleaved[0].Mid != 101 || interleaved[1].Mid != 201 || interleaved[2].Mid != 102 || interleaved[3].Mid != 202 {
+		t.Fatalf("unexpected order: %+v", interleaved)
+	}
+}
+
 
 
 

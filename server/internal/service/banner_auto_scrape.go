@@ -12,229 +12,196 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// scrapeUntilTargetCount 持续从候选池中并发刮削，直到达到目标数量 needCount 或 context 超时（最大5分钟）
+// scrapeUntilTargetCount 持续针对各分类按配额并发刮削，保证每个所选分类刮削展示的数量均衡，直到达到总额或 context 超时（最大5分钟）
+// 不回填之前片库已有的历史刮削数据兜底，纯粹依赖本次实时刮削，数量不够就一直按批次尝试刮削，直至达标或超时
 func (s *BannerAutoService) scrapeUntilTargetCount(
 	ctx context.Context,
 	needCount int,
-	freshCandidates []model.FilmListSnapshot,
-	existingCandidates []model.FilmListSnapshot,
-	categoryPids []int64,
+	effectiveCategories []int64,
+	quotas map[int64]int,
+	freshByCat map[int64][]model.FilmListSnapshot,
+	existingByCat map[int64][]model.FilmListSnapshot,
 	version string,
 ) ([]model.FilmListSnapshot, int, int, int) {
-	pool := make([]model.FilmListSnapshot, 0, len(freshCandidates)+len(existingCandidates))
-	pool = append(pool, freshCandidates...)
-	pool = append(pool, existingCandidates...)
+	totalCandidateCount := 0
+	for _, pid := range effectiveCategories {
+		totalCandidateCount += len(freshByCat[pid]) + len(existingByCat[pid])
+	}
 
-	validSnaps := make([]model.FilmListSnapshot, 0, needCount)
+	catValidSnaps := make(map[int64][]model.FilmListSnapshot, len(effectiveCategories))
 	scrapedMids := make([]int64, 0, needCount)
-	usedMids := make(map[int64]struct{}, len(pool))
-	fallbackCandidates := make([]model.FilmListSnapshot, 0, len(pool))
-	cursor := 0
+	usedMids := make(map[int64]struct{}, totalCandidateCount)
 	concurrency := 3
 	attemptCount := 0
 	successCount := 0
 
-	maxAttempts := needCount * 12
-	if maxAttempts < 36 {
-		maxAttempts = 36
-	}
-	if maxAttempts > 100 {
-		maxAttempts = 100
-	}
-	if maxAttempts > len(pool) {
-		maxAttempts = len(pool)
+	calcTotalValid := func() int {
+		total := 0
+		for _, snaps := range catValidSnaps {
+			total += len(snaps)
+		}
+		return total
 	}
 
-	for len(validSnaps) < needCount && cursor < len(pool) {
-		select {
-		case <-ctx.Done():
-			log.Printf("[BannerAutoScrape] 刮削达到超时预算上限或被中止，当前已收集 %d/%d 部有效高清影片，启动快速兜底补齐", len(validSnaps), needCount)
-			break
-		default:
+	calcProgress := func(currValid int) int {
+		pctByValid := float64(currValid) / float64(needCount)
+		p := 20 + int(pctByValid*65)
+		if p > 85 {
+			p = 85
 		}
+		return p
+	}
+
+	// 依次为各分类按照专属配额进行刮削，严格保证每个类别的有效数量
+	for _, catPid := range effectiveCategories {
 		if ctx.Err() != nil {
 			break
 		}
-		if attemptCount >= maxAttempts {
-			log.Printf("[BannerAutoScrape] 达到候选尝试上限(尝试=%d部, 有效=%d/%d)，停止继续检索外部接口，转入快速兜底补齐",
-				attemptCount, len(validSnaps), needCount)
-			break
-		}
-
-		shortfall := needCount - len(validSnaps)
-		batchSize := shortfall
-		if batchSize < 3 {
-			batchSize = 3
-		}
-		if batchSize > 6 {
-			batchSize = 6
-		}
-
-		var batch []model.FilmListSnapshot
-		for cursor < len(pool) && len(batch) < batchSize {
-			cand := pool[cursor]
-			cursor++
-			if _, used := usedMids[cand.Mid]; !used && cand.Mid > 0 {
-				usedMids[cand.Mid] = struct{}{}
-				batch = append(batch, cand)
-			}
-		}
-		if len(batch) == 0 {
-			break
-		}
-
-		var toScrape []model.FilmListSnapshot
-		for _, item := range batch {
-			if (item.IsCustomPicture || strings.TrimSpace(item.DisplayPictureSlide()) != "") && strings.TrimSpace(item.DisplayPicture()) != "" {
-				validSnaps = append(validSnaps, item)
-				log.Printf("[BannerAutoScrape] 影片已有高清素材/横屏大图 mid=%d 片名=%q，直接纳入有效排片 (当前有效=%d/%d)",
-					item.Mid, item.Name, len(validSnaps), needCount)
-				if len(validSnaps) >= needCount {
-					break
-				}
-			} else {
-				toScrape = append(toScrape, item)
-			}
-		}
-
-		if len(validSnaps) >= needCount || len(toScrape) == 0 {
+		catQuota := quotas[catPid]
+		if catQuota <= 0 {
 			continue
 		}
 
-		calcProgress := func(currAttempts int) int {
-			pctByValid := float64(len(validSnaps)) / float64(needCount)
-			pctByAttempts := float64(currAttempts) / float64(maxAttempts)
-			ratio := pctByValid
-			if pctByAttempts > ratio {
-				ratio = pctByAttempts
+		catPool := make([]model.FilmListSnapshot, 0, len(freshByCat[catPid])+len(existingByCat[catPid]))
+		catPool = append(catPool, freshByCat[catPid]...)
+		catPool = append(catPool, existingByCat[catPid]...)
+
+		cursor := 0
+		validForThisCat := make([]model.FilmListSnapshot, 0, catQuota)
+
+		// 数量不够就一直执行刮削，直到达到配额、候选池遍历完毕或 context 超时
+		for len(validForThisCat) < catQuota && cursor < len(catPool) {
+			select {
+			case <-ctx.Done():
+				log.Printf("[BannerAutoScrape] 刮削达到超时预算上限或被中止，分类(pid=%d)已收集 %d/%d 部",
+					catPid, len(validForThisCat), catQuota)
+				break
+			default:
 			}
-			p := 20 + int(ratio*65)
-			if p > 85 {
-				p = 85
+			if ctx.Err() != nil {
+				break
 			}
-			return p
-		}
 
-		ReportBannerGenerateProgress(calcProgress(attemptCount), fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
+			shortfall := catQuota - len(validForThisCat)
+			batchSize := shortfall
+			if batchSize < 3 {
+				batchSize = 3
+			}
+			if batchSize > 6 {
+				batchSize = 6
+			}
 
-		type scrapeJobResult struct {
-			original model.FilmListSnapshot
-			updated  *model.FilmListSnapshot
-			ok       bool
-			err      error
-		}
+			var toScrape []model.FilmListSnapshot
+			for cursor < len(catPool) && len(toScrape) < batchSize {
+				cand := catPool[cursor]
+				cursor++
+				if _, used := usedMids[cand.Mid]; !used && cand.Mid > 0 {
+					usedMids[cand.Mid] = struct{}{}
+					toScrape = append(toScrape, cand)
+				}
+			}
+			if len(toScrape) == 0 {
+				break
+			}
 
-		jobs := make(chan model.FilmListSnapshot, len(toScrape))
-		for _, item := range toScrape {
-			jobs <- item
-		}
-		close(jobs)
+			curTotalValid := calcTotalValid() + len(validForThisCat)
+			ReportBannerGenerateProgress(calcProgress(curTotalValid),
+				fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, curTotalValid, needCount))
 
-		numWorkers := concurrency
-		if len(toScrape) < numWorkers {
-			numWorkers = len(toScrape)
-		}
+			type scrapeJobResult struct {
+				original model.FilmListSnapshot
+				updated  *model.FilmListSnapshot
+				ok       bool
+				err      error
+			}
 
-		results := make(chan scrapeJobResult, len(toScrape))
-		var wg sync.WaitGroup
+			jobs := make(chan model.FilmListSnapshot, len(toScrape))
+			for _, item := range toScrape {
+				jobs <- item
+			}
+			close(jobs)
 
-		for w := 0; w < numWorkers; w++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for item := range jobs {
-					select {
-					case <-ctx.Done():
-						return
-					default:
+			numWorkers := concurrency
+			if len(toScrape) < numWorkers {
+				numWorkers = len(toScrape)
+			}
+
+			results := make(chan scrapeJobResult, len(toScrape))
+			var wg sync.WaitGroup
+
+			for w := 0; w < numWorkers; w++ {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					for item := range jobs {
+						select {
+						case <-ctx.Done():
+							return
+						default:
+						}
+						updated, ok, err := s.tryTMDBAutoScrape(ctx, item, version)
+						results <- scrapeJobResult{original: item, updated: updated, ok: ok, err: err}
 					}
-					updated, ok, err := s.tryTMDBAutoScrape(ctx, item, version)
-					results <- scrapeJobResult{original: item, updated: updated, ok: ok, err: err}
-				}
+				}()
+			}
+
+			go func() {
+				wg.Wait()
+				close(results)
 			}()
-		}
 
-		go func() {
-			wg.Wait()
-			close(results)
-		}()
-
-		for res := range results {
-			attemptCount++
-			if res.err != nil {
-				log.Printf("[BannerAutoScrape] 影片刮削记录异常 (已优雅降级): %v", res.err)
-			}
-			curPct := calcProgress(attemptCount)
-			if res.ok && res.updated != nil {
-				successCount++
-				scrapedMids = append(scrapedMids, res.updated.Mid)
-				if len(validSnaps) < needCount {
-					validSnaps = append(validSnaps, *res.updated)
-					log.Printf("[BannerAutoScrape] 成功获取有效高清影片 mid=%d 片名=%q (当前有效=%d/%d)",
-						res.updated.Mid, res.updated.Name, len(validSnaps), needCount)
+			for res := range results {
+				attemptCount++
+				if res.err != nil {
+					log.Printf("[BannerAutoScrape] 影片刮削记录异常 (已优雅降级): %v", res.err)
 				}
-				ReportBannerGenerateProgress(curPct, fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
-			} else {
-				fallbackCandidates = append(fallbackCandidates, res.original)
-				ReportBannerGenerateProgress(curPct, fmt.Sprintf("正在从 TMDB 检索（已探测 %d/%d, 已就绪 %d/%d 部)...", attemptCount, maxAttempts, len(validSnaps), needCount))
+				if res.ok && res.updated != nil {
+					successCount++
+					scrapedMids = append(scrapedMids, res.updated.Mid)
+					if len(validForThisCat) < catQuota {
+						validForThisCat = append(validForThisCat, *res.updated)
+						log.Printf("[BannerAutoScrape] 分类(pid=%d) 成功获取有效高清影片 mid=%d 片名=%q (当前类有效=%d/%d, 总就绪=%d/%d)",
+							catPid, res.updated.Mid, res.updated.Name, len(validForThisCat), catQuota, calcTotalValid()+len(validForThisCat), needCount)
+					}
+				}
+				curTotal := calcTotalValid() + len(validForThisCat)
+				ReportBannerGenerateProgress(calcProgress(curTotal),
+					fmt.Sprintf("正在从 TMDB 刮削各分类（已探测 %d, 已就绪 %d/%d 部)...", attemptCount, curTotal, needCount))
 			}
 		}
+
+		catValidSnaps[catPid] = validForThisCat
+		log.Printf("[BannerAutoScrape] 分类(pid=%d) 配额刮削完毕: 目标配额=%d, 实际刮削获取=%d 部",
+			catPid, catQuota, len(validForThisCat))
 	}
 
-	// 若片库耗尽或超时仍不足目标数量，优先从片库中已有高清横图/海报的优质影片兜底补足，绝不直接使用未匹配的低清小图
-	if len(validSnaps) < needCount {
-		ReportBannerGenerateProgress(85, fmt.Sprintf("正在从片库优选已有高清素材影片补足 %d 部轮播...", needCount))
-		log.Printf("[BannerAutoScrape] 有效高清影片未满目标数量 (有效=%d, 目标=%d)，从片库优选已有高清大图的影片补足差额",
-			len(validSnaps), needCount)
-
-		// 1. 优先从全局快照中寻找已有高清横屏壁纸或自定义海报的影片 (严格遵循指定分类)
-		hdSnaps := filmsnapshot.GetSnapshotHDBackdropCandidates(version, categoryPids, 50)
-		for _, hd := range hdSnaps {
-			if len(validSnaps) >= needCount {
-				break
-			}
-			if _, used := usedMids[hd.Mid]; !used && hd.Mid > 0 {
-				usedMids[hd.Mid] = struct{}{}
-				validSnaps = append(validSnaps, hd)
-				log.Printf("[BannerAutoScrape] 使用已有高清素材影片兜底 mid=%d 片名=%q", hd.Mid, hd.Name)
-			}
-		}
-
-		// 2. 极端情况（全站片库无任何高清影片）：才使用普通候选保底
-		for _, fb := range fallbackCandidates {
-			if len(validSnaps) >= needCount {
-				break
-			}
-			validSnaps = append(validSnaps, fb)
-		}
-		for cursor < len(pool) && len(validSnaps) < needCount {
-			cand := pool[cursor]
-			cursor++
-			validSnaps = append(validSnaps, cand)
-		}
-	}
-
-	// 轮播刮削凑额完成(或候选池耗尽)，一次性统一批量发布快照与重建常驻搜索索引
+	// 轮播刮削凑额完成(或候选池耗尽/超时)，一次性统一批量发布快照与重建常驻搜索索引
 	if len(scrapedMids) > 0 {
 		ReportBannerGenerateProgress(88, fmt.Sprintf("正在批量更新并发布 %d 部影视快照...", len(scrapedMids)))
-		log.Printf("[BannerAutoScrape] 轮播刮削凑额完成(或候选池耗尽)，统一批量重建发布快照 mid_count=%d", len(scrapedMids))
+		log.Printf("[BannerAutoScrape] 轮播刮削凑额完成，统一批量重建发布快照 mid_count=%d", len(scrapedMids))
 		if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(scrapedMids...); err != nil {
 			log.Printf("[BannerAutoScrape] 批量发布快照失败: %v", err)
 		}
 	}
 
+	// 各分类按 Round-Robin 交错排列合并，保证首页展示均衡多样
+	pickedSnaps := InterleaveCategorySnapshots(effectiveCategories, catValidSnaps)
+
+	// 统计复用的旧轮播影片数量
 	reusedCount := 0
-	existingMidMap := make(map[int64]struct{}, len(existingCandidates))
-	for _, ec := range existingCandidates {
-		existingMidMap[ec.Mid] = struct{}{}
+	existingMidMap := make(map[int64]struct{})
+	for _, pid := range effectiveCategories {
+		for _, ec := range existingByCat[pid] {
+			existingMidMap[ec.Mid] = struct{}{}
+		}
 	}
-	for _, vs := range validSnaps {
+	for _, vs := range pickedSnaps {
 		if _, exists := existingMidMap[vs.Mid]; exists {
 			reusedCount++
 		}
 	}
 
-	return validSnaps, attemptCount, successCount, reusedCount
+	return pickedSnaps, attemptCount, successCount, reusedCount
 }
 
 // tryTMDBAutoScrape 先使用未经去噪的原始片名严格搜索匹配；若未命中，再使用去噪清洗后的名称二次检索匹配
