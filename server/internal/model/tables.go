@@ -29,6 +29,7 @@ const (
 	TableSchemaMigration    = "schema_migrations"
 	TableTMDBConfig         = "tmdb_config"
 	TableBannerConfig       = "banner_config"
+	TableProxyConfig        = "proxy_config"
 )
 
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
@@ -60,4 +61,5 @@ var AllModels = []any{
 	&SchemaMigration{},
 	&TMDBConfigRecord{},
 	&BannerConfigRecord{},
+	&ProxyConfigRecord{},
 }

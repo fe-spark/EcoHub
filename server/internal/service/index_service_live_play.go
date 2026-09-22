@@ -24,7 +24,7 @@ func (i *IndexService) GetLiveFilmDetail(sourceID string, sourceMid int64) (mode
 	if source == nil || !source.State || strings.TrimSpace(source.Uri) == "" {
 		return model.MovieDetailVo{}, nil
 	}
-	details, err := spider.FetchSourceDetails(source.Uri, strconv.FormatInt(sourceMid, 10))
+	details, err := spider.FetchSourceDetailsWithProxy(source.Uri, strconv.FormatInt(sourceMid, 10), sourceProxyURL(source.Id))
 	if err != nil {
 		return model.MovieDetailVo{}, err
 	}
@@ -57,6 +57,7 @@ func (i *IndexService) GetLiveFilmDetail(sourceID string, sourceMid int64) (mode
 	}
 	return res, nil
 }
+
 type LiveRelateFilmVO struct {
 	Id        string `json:"id"`
 	SourceId  string `json:"sourceId"`
@@ -92,9 +93,10 @@ func (i *IndexService) GetLiveRelateFilms(sourceID string, cid int64, excludeSid
 	}
 
 	// 优先拉取同分类详情，若无结果且 cid > 0 则回退拉取最新推荐
-	details, err := spider.FetchSourceCategoryDetails(source.Uri, cid, 1)
+	proxyURL := sourceProxyURL(source.Id)
+	details, err := spider.FetchSourceCategoryDetailsWithProxy(source.Uri, cid, 1, proxyURL)
 	if (err != nil || len(details) == 0) && cid > 0 {
-		details, err = spider.FetchSourceCategoryDetails(source.Uri, 0, 1)
+		details, err = spider.FetchSourceCategoryDetailsWithProxy(source.Uri, 0, 1, proxyURL)
 	}
 	if err != nil {
 		return []LiveRelateFilmVO{}, err
@@ -147,4 +149,3 @@ func filterExcludeSid(list []LiveRelateFilmVO, excludeSid int64) []LiveRelateFil
 	}
 	return filtered
 }
-

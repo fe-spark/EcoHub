@@ -7,25 +7,29 @@ import {
   SafetyCertificateOutlined,
   FileTextOutlined,
   CompassOutlined,
+  ApiOutlined,
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import NotifyConfigPageView from "@/app/manage/system/notify/view";
+import ProxyConfigPageView from "@/app/manage/system/proxy/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
 import TMDBConfigPageView from "@/app/manage/system/tmdb/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "tmdb" | "security" | "logs";
+type MainTab = "notify" | "proxy" | "tmdb" | "security" | "logs";
 
 const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
   { key: "notify", label: "通知配置", icon: <BellOutlined /> },
+  { key: "proxy", label: "网络代理", icon: <ApiOutlined /> },
   { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
   { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
   { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
+  if (raw === "proxy") return "proxy";
   if (raw === "tmdb") return "tmdb";
   if (raw === "security") return "security";
   if (raw === "logs") return "logs";
@@ -57,6 +61,12 @@ function SystemSettingsBody() {
 
   const renderPane = () => {
     switch (mainTab) {
+      case "proxy":
+        return (
+          <div className={styles.tabPaneScrollable}>
+            <ProxyConfigPageView embedded />
+          </div>
+        );
       case "tmdb":
         return (
           <div className={styles.tabPaneScrollable}>
@@ -86,7 +96,7 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="通知配置、数据安全（配置备份 / 分析数据清理 / 数据重置）与运行日志。"
+        description="通知配置、网络代理、刮削配置、数据安全与运行日志。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {MAIN_TABS.map((tab) => {

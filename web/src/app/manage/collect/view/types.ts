@@ -10,6 +10,7 @@ export interface FilmSource {
   domainReplaceRules?: string;
   lastCollectTime?: string;
   progress?: CollectProgress | null;
+  proxyEnabled?: boolean;
 }
 
 export type CollectProgressStatus =

@@ -152,7 +152,13 @@ func (jc *JsonCollect) fetchFilmDetailsPage(r utils.RequestInfo, page int) ([]mo
 	params.Set("ac", "detail")
 	params.Set("pg", strconv.Itoa(page))
 
-	request := utils.RequestInfo{Uri: r.Uri, Params: params, Header: r.Header}
+	request := utils.RequestInfo{
+		Uri:      r.Uri,
+		Params:   params,
+		Header:   r.Header,
+		ProxyURL: r.ProxyURL,
+		Ctx:      r.Ctx,
+	}
 	utils.ApiGet(&request)
 	if len(request.Resp) == 0 {
 		if request.Err == "" {

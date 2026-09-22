@@ -11,6 +11,7 @@ import (
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/spider"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -38,32 +39,43 @@ func (h *CollectHandler) FindFilmSource(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
+	body, err := bindFilmSourceBody(c)
+	if err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
+	if err := validFilmSource(body.FilmSource); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := spider.CollectApiTest(s); err != nil {
+	if err := testFilmSourceAPI(body.FilmSource, body.UseProxy); err != nil {
 		dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
 		return
 	}
-	if err := service.CollectSvc.SaveFilmSource(s); err != nil {
+	if err := service.CollectSvc.SaveFilmSource(body.FilmSource); err != nil {
 		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
+	}
+	if body.UseProxy != nil && *body.UseProxy {
+		id := body.Id
+		if id == "" {
+			id = utils.GenerateHashKey(body.Uri)
+		}
+		if err := service.ProxySvc.RememberCustomProxySource(id); err != nil {
+			dto.Failed(fmt.Sprint("资源站已添加，但加入代理名单失败: ", err.Error()), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("添加成功", c)
 }
 
 func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
+	body, err := bindFilmSourceBody(c)
+	if err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
+	s := body.FilmSource
 	if err := validFilmSource(s); err != nil {
 		dto.Failed(err.Error(), c)
 		return
@@ -82,7 +94,7 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		return
 	}
 	if fs.Uri != s.Uri {
-		if err := spider.CollectApiTest(s); err != nil {
+		if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
 			dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
 			return
 		}
@@ -90,6 +102,12 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
+	}
+	if body.UseProxy != nil && *body.UseProxy {
+		if err := service.ProxySvc.RememberCustomProxySource(s.Id); err != nil {
+			dto.Failed(fmt.Sprint("资源站已更新，但加入代理名单失败: ", err.Error()), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
 }
@@ -294,16 +312,25 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
+	var body struct {
+		model.FilmSource
+		UseProxy *bool `json:"useProxy"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
+	if err := validFilmSource(body.FilmSource); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := spider.CollectApiTest(s); err != nil {
+	var err error
+	if body.UseProxy != nil {
+		err = spider.CollectApiTestChoosingProxy(body.FilmSource, *body.UseProxy)
+	} else {
+		err = spider.CollectApiTest(body.FilmSource)
+	}
+	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
@@ -311,11 +338,39 @@ func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 }
 
 func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
-	var l []model.FilmTaskOptions
-	for _, v := range service.CollectSvc.GetEnabledFilmSources() {
-		l = append(l, model.FilmTaskOptions{Id: v.Id, Name: v.Name})
+	sources := service.CollectSvc.GetEnabledFilmSources()
+	includeDisabled := c.Query("all") == "1"
+	if includeDisabled {
+		sources = service.CollectSvc.GetAllFilmSources()
+	}
+	l := make([]model.FilmTaskOptions, 0, len(sources))
+	for _, v := range sources {
+		item := model.FilmTaskOptions{Id: v.Id, Name: v.Name}
+		if includeDisabled {
+			state := v.State
+			item.State = &state
+		}
+		l = append(l, item)
 	}
 	dto.Success(l, "影视源信息获取成功", c)
+}
+
+type filmSourceBody struct {
+	model.FilmSource
+	UseProxy *bool `json:"useProxy"`
+}
+
+func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
+	var body filmSourceBody
+	err := c.ShouldBindJSON(&body)
+	return body, err
+}
+
+func testFilmSourceAPI(s model.FilmSource, useProxy *bool) error {
+	if useProxy != nil {
+		return spider.CollectApiTestChoosingProxy(s, *useProxy)
+	}
+	return spider.CollectApiTest(s)
 }
 
 // ------------------------------------------------------ 失败采集记录 ------------------------------------------------------

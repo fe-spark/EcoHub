@@ -3,6 +3,31 @@ import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import { collectDuration, type SourceFormValues } from "./types";
 
+function isDomainReplaceRuleLine(line: string): boolean {
+  let from = "";
+  let to = "";
+  if (line.includes("=>")) {
+    const i = line.indexOf("=>");
+    from = line.slice(0, i);
+    to = line.slice(i + 2);
+  } else if (line.includes("->")) {
+    const i = line.indexOf("->");
+    from = line.slice(0, i);
+    to = line.slice(i + 2);
+  } else if (line.includes(",")) {
+    const i = line.indexOf(",");
+    from = line.slice(0, i);
+    to = line.slice(i + 1);
+  } else {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length === 2) {
+      from = fields[0];
+      to = fields[1];
+    }
+  }
+  return Boolean(from.trim() && to.trim());
+}
+
 interface SourceFormModalProps {
   open: boolean;
   mode: "add" | "edit";
@@ -16,7 +41,7 @@ interface SourceFormModalProps {
 }
 
 export default function SourceFormModal(props: SourceFormModalProps) {
-  const { open, mode, loading, testing, initialValues, formNonce, onCancel, onSubmit, onTest } =
+  const { open, mode, loading, testing, initialValues, onCancel, onSubmit, onTest } =
     props;
   const [form] = Form.useForm<SourceFormValues>();
   const { canWrite } = useManagePermission();
@@ -68,84 +93,82 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           loading={loading}
           disabled={!canWrite}
         >
-          {mode === "add" ? "添加采集站" : "保存修改"}
+          确定
         </Button>,
       ]}
     >
       <Form<SourceFormValues>
-        key={formNonce}
         form={form}
         layout="vertical"
-        disabled={loading}
-        preserve={false}
         initialValues={initialValues}
         onFinish={onSubmit}
+        disabled={loading}
       >
         <Form.Item
           label="采集站名称"
           name="name"
           rules={[{ required: true, message: "请输入采集站名称" }]}
         >
-          <Input placeholder="例如：某采集站" />
+          <Input placeholder="请输入采集站名称" />
         </Form.Item>
-        <Form.Item label="接口地址" name="uri" rules={[{ required: true, message: "请输入接口地址" }]}>
+        <Form.Item
+          label="接口地址"
+          name="uri"
+          rules={[{ required: true, message: "请输入采集站接口地址" }]}
+        >
           <Input placeholder="请输入采集站接口地址" />
         </Form.Item>
-        <Form.Item label="采集站类型" name="grade">
-          <Radio.Group
-            optionType="button"
-            buttonStyle="solid"
-            options={[
-              { label: "主采集站", value: 0 },
-              { label: "附属采集站", value: 1 },
-            ]}
-            onChange={(e) => {
-              if (e.target.value === 0) {
-                form.setFieldValue("isPosterSource", true);
-              }
-            }}
-          />
-        </Form.Item>
         <Form.Item
-          label="请求间隔"
-          tooltip="单次请求的额外间隔时间，单位毫秒；0 代表不限制。"
+          label="采集站类型"
+          name="grade"
+          tooltip="系统只能有一个主采集站。若将当前站点设为主站，原主站会自动降级为附属采集站，并会清空主站数据重新初始化。"
         >
-          <Space.Compact block>
-            <Form.Item name="interval" noStyle>
-              <InputNumber min={0} step={100} style={{ width: "100%" }} />
-            </Form.Item>
-            <Button disabled tabIndex={-1}>
-              ms
-            </Button>
-          </Space.Compact>
+          <Radio.Group>
+            <Radio value={0}>主采集站</Radio>
+            <Radio value={1}>附属采集站</Radio>
+          </Radio.Group>
         </Form.Item>
-        <Form.Item label="采集时长" name="cd" tooltip="单次采集的时间范围，保存后作为该采集站的默认采集时长。">
-          <Select
-            options={collectDuration.map((item) => ({ label: item.label, value: item.time }))}
-          />
-        </Form.Item>
+        <Space style={{ display: "flex" }} align="start">
+          <Form.Item
+            label="采集时间间隔 (毫秒)"
+            name="interval"
+            tooltip="每次分页抓取之间的等待时间，单位为毫秒。默认为 0，表示不等待立即抓取下一页；若采集站有防爬频控或返回限流错误，建议设置为 500 ~ 2000 毫秒。"
+          >
+            <InputNumber min={0} step={100} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item
+            label="采集时长"
+            name="cd"
+            tooltip="定时自动采集与单站采集时，默认抓取多长时间内更新的数据。单位为小时。"
+          >
+            <Select style={{ width: 140 }}>
+              {collectDuration.map((item) => (
+                <Select.Option key={item.time} value={item.time}>
+                  {item.label}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+        </Space>
         <Form.Item
-          label="视频域名替换"
+          label="播放链接域名替换规则"
           name="domainReplaceRules"
-          tooltip="播放和下载链接的域名替换。每行一条，格式：旧域名 => 新域名"
+          tooltip={
+            "将采集到的播放链接中匹配的域名替换为新域名。例如源站提供防盗链失效链接时，可替换为镜像或有效访问地址。每行一条，格式：old.com => new.com"
+          }
           rules={[
             {
               validator: async (_, value: string) => {
-                if (!value || !String(value).trim()) {
+                if (!value || !value.trim()) {
                   return;
                 }
                 const bad: string[] = [];
-                for (const line of String(value).split("\n")) {
+                for (const line of value.split("\n")) {
                   const t = line.trim();
                   if (!t || t.startsWith("#") || t.startsWith("//") || t.startsWith(";")) {
                     continue;
                   }
-                  const ok =
-                    t.includes("=>") ||
-                    t.includes("->") ||
-                    t.includes(",") ||
-                    t.split(/\s+/).length === 2;
-                  if (!ok) {
+                  if (!isDomainReplaceRuleLine(t)) {
                     bad.push(t);
                   }
                 }

@@ -215,6 +215,8 @@ const (
 	BannersKey = RedisKeyPrefix + ":Config:Banners"
 	// BannerConfigKey 轮播自动排片配置key
 	BannerConfigKey = RedisKeyPrefix + ":Config:BannerConfig"
+	// ProxyConfigKey 采集网络代理配置缓存
+	ProxyConfigKey = RedisKeyPrefix + ":Config:Proxy"
 
 	// DefaultUpdateSpec 每30分钟执行一次
 	DefaultUpdateSpec = "0 */30 * * * ?"

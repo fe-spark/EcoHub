@@ -47,7 +47,11 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 		return fmt.Errorf("分类树只能从主采集站同步，当前站 grade=%d name=%s", s.Grade, s.Name)
 	}
 	// 获取分类树形数据
-	categoryTree, err := spiderCore.GetCategoryTree(utils.RequestInfo{Uri: s.Uri, Params: url.Values{}})
+	req := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+		req.ProxyURL = proxy
+	}
+	categoryTree, err := spiderCore.GetCategoryTree(req)
 	if err != nil {
 		return fmt.Errorf("获取主站分类树失败: %w", err)
 	}

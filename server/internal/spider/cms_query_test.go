@@ -80,6 +80,8 @@ func TestIsCMSSearchUnsupportedBody(t *testing.T) {
 	}{
 		{"暂不支持搜索", true},
 		{"  暂不支持搜索  ", true},
+		{"err not serarch", true},
+		{"ERR NOT SEARCH", true},
 		{`{"code":1,"list":[]}`, false},
 		{"", false},
 		{"源站维护中", false},
@@ -111,6 +113,22 @@ func TestSearchSourceListUnsupported(t *testing.T) {
 	}
 	if hits.Load() != 1 {
 		t.Fatalf("expected 1 upstream hit, got %d", hits.Load())
+	}
+}
+
+func TestSearchSourceListErrNotSearch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html;charset=utf-8")
+		_, _ = w.Write([]byte("err not serarch"))
+	}))
+	t.Cleanup(srv.Close)
+
+	_, err := SearchSourceList(srv.URL, "处女", 1)
+	if !errors.Is(err, ErrCMSSearchUnsupported) {
+		t.Fatalf("err=%v", err)
+	}
+	if err.Error() != ErrCMSSearchUnsupported.Error() {
+		t.Fatalf("user-facing detail leaked: %v", err)
 	}
 }
 
