@@ -97,3 +97,10 @@ func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
 func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
 	return repository.ResolveSourceProxy(sourceID)
 }
+
+func sourceProxyURL(sourceID string) string {
+	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {
+		return proxy
+	}
+	return ""
+}

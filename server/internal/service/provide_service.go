@@ -40,7 +40,7 @@ func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int
 		return nil, errors.New("collect source not found or disabled")
 	}
 
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, ProxyURL: sourceProxyURL(s.Id)}
 	if ac == "" {
 		ac = "list"
 	}

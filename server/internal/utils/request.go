@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	"github.com/gocolly/colly/v2"
+	xproxy "golang.org/x/net/proxy"
 )
 
 /*
@@ -35,35 +37,81 @@ var sharedTransport = &http.Transport{
 // 代理 Transport 缓存池 (proxyURL -> *http.Transport)，避免高并发下频繁建连
 var proxyTransports sync.Map
 
-// GetOrCreateProxyTransport 根据代理地址复用或创建长连接池
+// GetOrCreateProxyTransport 根据代理地址复用或创建长连接池。
+// http/https 走 CONNECT；socks5/socks5h 走 SOCKS5 拨号。地址无效时请求失败，避免静默改回直连。
 func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
-	proxyStr = strings.TrimSpace(proxyStr)
+	proxyStr = normalizeProxyURL(proxyStr)
 	if proxyStr == "" {
 		return sharedTransport
-	}
-	if !strings.HasPrefix(proxyStr, "http://") &&
-		!strings.HasPrefix(proxyStr, "https://") &&
-		!strings.HasPrefix(proxyStr, "socks5://") {
-		proxyStr = "http://" + proxyStr
 	}
 	if val, ok := proxyTransports.Load(proxyStr); ok {
 		if t, ok := val.(*http.Transport); ok {
 			return t
 		}
 	}
-	u, err := url.Parse(proxyStr)
+	t, err := newProxyTransport(proxyStr)
 	if err != nil {
-		return sharedTransport
+		log.Printf("创建代理传输失败: %v", err)
+		t = &http.Transport{
+			DialContext: func(context.Context, string, string) (net.Conn, error) {
+				return nil, err
+			},
+		}
 	}
-	t := &http.Transport{
-		Proxy:               http.ProxyURL(u),
+	actual, _ := proxyTransports.LoadOrStore(proxyStr, t)
+	return actual.(*http.Transport)
+}
+
+func normalizeProxyURL(proxyStr string) string {
+	proxyStr = strings.TrimSpace(proxyStr)
+	if proxyStr == "" {
+		return ""
+	}
+	if !strings.Contains(proxyStr, "://") {
+		proxyStr = "http://" + proxyStr
+	}
+	return proxyStr
+}
+
+func newProxyTransport(proxyStr string) (*http.Transport, error) {
+	u, err := url.Parse(proxyStr)
+	if err != nil || u.Host == "" {
+		return nil, fmt.Errorf("代理地址无效: %s", proxyStr)
+	}
+	base := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
 		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 	}
-	actual, _ := proxyTransports.LoadOrStore(proxyStr, t)
-	return actual.(*http.Transport)
+	switch strings.ToLower(u.Scheme) {
+	case "http", "https":
+		base.Proxy = http.ProxyURL(u)
+		return base, nil
+	case "socks5", "socks5h":
+		var auth *xproxy.Auth
+		if u.User != nil {
+			pass, _ := u.User.Password()
+			auth = &xproxy.Auth{User: u.User.Username(), Password: pass}
+		}
+		dialer, err := xproxy.SOCKS5("tcp", u.Host, auth, &net.Dialer{
+			Timeout:   20 * time.Second,
+			KeepAlive: 30 * time.Second,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("创建 SOCKS5 代理失败: %w", err)
+		}
+		if cd, ok := dialer.(xproxy.ContextDialer); ok {
+			base.DialContext = cd.DialContext
+		} else {
+			base.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+				return dialer.Dial(network, addr)
+			}
+		}
+		return base, nil
+	default:
+		return nil, fmt.Errorf("不支持的代理协议 %q", u.Scheme)
+	}
 }
 
 // 共享单例 HTTP 客户端

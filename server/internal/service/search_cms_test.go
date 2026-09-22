@@ -22,6 +22,18 @@ func TestCoerceCMSInt(t *testing.T) {
 	}
 }
 
+func TestCMSSearchMissingListMessage(t *testing.T) {
+	if got := cmsSearchMissingListMessage(193, 0); got != "源站统计到 193 部，但没有返回影片列表" {
+		t.Fatalf("got %q", got)
+	}
+	if got := cmsSearchMissingListMessage(193, 6); got != "" {
+		t.Fatalf("shown rows should not warn, got %q", got)
+	}
+	if got := cmsSearchMissingListMessage(0, 0); got != "" {
+		t.Fatalf("real empty search should stay empty, got %q", got)
+	}
+}
+
 func TestApplyCMSPage(t *testing.T) {
 	page := &dto.Page{Current: 1, PageSize: 12}
 	applyCMSPage(page, model.FilmListPage{Page: "2", PageCount: 5, Limit: "20", Total: 80}, 20)
@@ -95,7 +107,7 @@ func TestMovieBasicInfoFromCMSListLeavesClassTagEmpty(t *testing.T) {
 func TestApplyCMSDetailToCardDoesNotCopyCNameToClassTag(t *testing.T) {
 	card := model.MovieBasicInfo{Name: "仙逆", CName: "国产剧", SourceMid: 101}
 	applyCMSDetailToCard(&card, model.MovieDetail{
-		Id: 101,
+		Id:              101,
 		MovieDescriptor: model.MovieDescriptor{CName: "电视剧"},
 	}, "https://api.example.com/")
 	if card.ClassTag != "" {
@@ -389,4 +401,3 @@ func TestFetchCMSSearchDetailsWithProxy(t *testing.T) {
 		t.Fatalf("unexpected detail: %+v", got)
 	}
 }
-

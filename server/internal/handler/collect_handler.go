@@ -294,16 +294,25 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
-	s := model.FilmSource{}
-	if err := c.ShouldBindJSON(&s); err != nil {
+	var body struct {
+		model.FilmSource
+		UseProxy *bool `json:"useProxy"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	if err := validFilmSource(s); err != nil {
+	if err := validFilmSource(body.FilmSource); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := spider.CollectApiTest(s); err != nil {
+	var err error
+	if body.UseProxy != nil {
+		err = spider.CollectApiTestChoosingProxy(body.FilmSource, *body.UseProxy)
+	} else {
+		err = spider.CollectApiTest(body.FilmSource)
+	}
+	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

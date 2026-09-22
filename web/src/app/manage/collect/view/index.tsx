@@ -712,14 +712,18 @@ export default function CollectManagePageView() {
     }
   };
 
-  const testApi = async (values: SourceFormValues) => {
+  const runSourceTest = async (values: SourceFormValues, useProxy: boolean) => {
     try {
       setTesting(true);
       message.loading({
         key: "collect-test",
-        content: "正在测试接口，请稍候...",
+        content: useProxy ? "正在通过代理测试接口..." : "正在直接测试接口...",
       });
-      const resp = await ApiPost("/manage/collect/test", values);
+      const resp = await ApiPost("/manage/collect/test", {
+        ...values,
+        ...(editingId ? { id: editingId } : {}),
+        useProxy,
+      });
       if (resp.code === 0) {
         message.success({ key: "collect-test", content: resp.msg });
         return;
@@ -733,6 +737,36 @@ export default function CollectManagePageView() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const testApi = async (values: SourceFormValues) => {
+    let enabled = false;
+    let proxyUrl = "";
+    try {
+      const cfg = await ApiGet("/manage/proxy/config");
+      if (cfg.code !== 0) {
+        message.error(cfg.msg || "获取代理配置失败");
+        return;
+      }
+      enabled = Boolean(cfg.data?.enabled);
+      proxyUrl = String(cfg.data?.proxyUrl || "").trim();
+    } catch {
+      message.error("获取代理配置失败");
+      return;
+    }
+    if (!enabled || !proxyUrl) {
+      await runSourceTest(values, false);
+      return;
+    }
+    modal.confirm({
+      title: "是否使用代理测试？",
+      content: `系统已开启网络代理（${proxyUrl}）。本次接口测试可以选择走代理，或直接连接采集站。`,
+      okText: "使用代理",
+      cancelText: "直接测试",
+      zIndex: 2000,
+      onOk: () => runSourceTest(values, true),
+      onCancel: () => runSourceTest(values, false),
+    });
   };
 
   const openBatchCollect = async () => {

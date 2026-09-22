@@ -57,7 +57,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		ctx = context.Background()
 	}
 
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	r := requestForSource(s.Uri, s.Id)
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
@@ -197,7 +197,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	default:
 	}
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	r := requestForSource(s.Uri, s.Id)
 	r.Params.Set("pg", fmt.Sprint(fr.PageNumber))
 	if fr.Hour > 0 {
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
@@ -371,14 +371,31 @@ func CollectApiTest(s model.FilmSource) error {
 	return CollectApiTestWithTimeout(s, 0)
 }
 
+// CollectApiTestChoosingProxy 按本次选择测试采集站。useProxy 为真时走系统里已保存的代理地址，为假时直连。
+func CollectApiTestChoosingProxy(s model.FilmSource, useProxy bool) error {
+	return collectApiTest(s, 0, useProxy, true)
+}
+
 func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
+	return collectApiTest(s, timeoutSeconds, false, false)
+}
+
+func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("ac", "list")
 	r.Params.Set("pg", "1")
 	if timeoutSeconds > 0 {
 		r.Header = map[string][]string{"timeout": {strconv.Itoa(timeoutSeconds)}}
 	}
-	if s.Id != "" {
+	if proxyChosen {
+		if useProxy {
+			cfg := repository.GetProxyConfig()
+			if !cfg.Enabled || strings.TrimSpace(cfg.ProxyURL) == "" {
+				return errors.New("测试失败, 代理未开启或地址为空")
+			}
+			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
+		}
+	} else if s.Id != "" {
 		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
 			r.ProxyURL = proxy
 		}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net/url"
 	"strconv"
@@ -17,10 +18,10 @@ import (
 )
 
 var (
-	findCollectSourceById     = repository.FindCollectSourceById
-	searchSourceList          = spider.SearchSourceList
-	searchSourceListWithProxy = spider.SearchSourceListWithProxy
-	fetchSourceDetails        = spider.FetchSourceDetails
+	findCollectSourceById       = repository.FindCollectSourceById
+	searchSourceList            = spider.SearchSourceList
+	searchSourceListWithProxy   = spider.SearchSourceListWithProxy
+	fetchSourceDetails          = spider.FetchSourceDetails
 	fetchSourceDetailsWithProxy = spider.FetchSourceDetailsWithProxy
 )
 
@@ -179,7 +180,18 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 		list = append(list, card)
 	}
 	assignCMSSearchLocalIDs(list, localBySourceMid, snaps, detailsByID)
+	if msg := cmsSearchMissingListMessage(pageData.Total, len(list)); msg != "" {
+		return list, pageData, msg
+	}
 	return list, pageData, ""
+}
+
+// cmsSearchMissingListMessage 源站给出了命中数，但本页没有可展示的影片。
+func cmsSearchMissingListMessage(total, shown int) string {
+	if shown > 0 || total <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("源站统计到 %d 部，但没有返回影片列表", total)
 }
 
 func movieBasicInfoFromCMSList(source *model.FilmSource, item model.FilmList) model.MovieBasicInfo {

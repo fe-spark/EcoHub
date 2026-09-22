@@ -50,7 +50,13 @@ func isCMSSearchUnsupportedCached(uri string) bool {
 }
 
 func isCMSSearchUnsupportedBody(body string) bool {
-	return strings.Contains(strings.TrimSpace(body), "暂不支持搜索")
+	trimmed := strings.TrimSpace(body)
+	if strings.Contains(trimmed, "暂不支持搜索") {
+		return true
+	}
+	// 部分 MacCMS 关闭 wd 搜索时返回纯文本，原文带拼写错误 serarch。
+	lower := strings.ToLower(trimmed)
+	return strings.Contains(lower, "err not serarch") || strings.Contains(lower, "err not search")
 }
 
 func truncateCMSBody(body string, maxRunes int) string {
@@ -113,7 +119,7 @@ func SearchSourceListWithProxy(uri, keyword string, page int, proxyURL string) (
 
 func fmtCMSSearchUnsupported(body string) error {
 	detail := truncateCMSBody(body, 40)
-	if detail == "" {
+	if detail == "" || !strings.Contains(detail, "暂不支持搜索") {
 		return ErrCMSSearchUnsupported
 	}
 	return fmt.Errorf("%w: %s", ErrCMSSearchUnsupported, detail)
@@ -144,6 +150,11 @@ func FetchSourceDetailsWithProxy(uri, ids string, proxyURL string) ([]model.Movi
 
 // FetchSourceCategoryDetails 按源站分类 ID (t=) 或最新页码拉取明细（ac=detail）。不写库。
 func FetchSourceCategoryDetails(uri string, cid int64, page int) ([]model.MovieDetail, error) {
+	return FetchSourceCategoryDetailsWithProxy(uri, cid, page, "")
+}
+
+// FetchSourceCategoryDetailsWithProxy 支持携带网络代理的分类明细拉取。不写库。
+func FetchSourceCategoryDetailsWithProxy(uri string, cid int64, page int, proxyURL string) ([]model.MovieDetail, error) {
 	uri = strings.TrimSpace(uri)
 	if uri == "" {
 		return nil, errors.New("source uri is required")
@@ -152,9 +163,10 @@ func FetchSourceCategoryDetails(uri string, cid int64, page int) ([]model.MovieD
 		page = 1
 	}
 	r := utils.RequestInfo{
-		Uri:    uri,
-		Params: url.Values{},
-		Header: http.Header{},
+		Uri:      uri,
+		Params:   url.Values{},
+		Header:   http.Header{},
+		ProxyURL: proxyURL,
 	}
 	r.Header.Set("timeout", strconv.Itoa(cmsQueryTimeoutSec))
 	r.Params.Set("ac", "detail")
@@ -164,4 +176,3 @@ func FetchSourceCategoryDetails(uri string, cid int64, page int) ([]model.MovieD
 	r.Params.Set("pg", strconv.Itoa(page))
 	return spiderCore.GetFilmDetail(r)
 }
-

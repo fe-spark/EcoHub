@@ -28,6 +28,15 @@ import (
 
 var spiderCore = &JsonCollect{}
 
+// requestForSource 构造发往采集站的请求，并按站点代理配置写入 ProxyURL。
+func requestForSource(uri, sourceID string) utils.RequestInfo {
+	r := utils.RequestInfo{Uri: uri, Params: url.Values{}}
+	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {
+		r.ProxyURL = proxy
+	}
+	return r
+}
+
 // stopAllVersion 用于打断批量/自动采集的外层派发循环。
 // 每次执行一键终止都会递增版本号，旧版本调度器检测到版本变化后不再继续启动新站点任务。
 var stopAllVersion atomic.Uint64
@@ -357,7 +366,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
 	progress.Ensure(id, s.Name)
 
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	r := requestForSource(s.Uri, s.Id)
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}
