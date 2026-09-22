@@ -14,27 +14,26 @@ type ProxyHandler struct{}
 
 var ProxyHd = new(ProxyHandler)
 
-// GetConfig 获取代理配置
 func (h *ProxyHandler) GetConfig(c *gin.Context) {
-	cfg := service.ProxySvc.GetConfig()
-	dto.Success(cfg, "获取代理配置成功", c)
+	dto.Success(service.ProxySvc.PublicConfig(), "获取代理配置成功", c)
 }
 
-// UpdateConfig 更新代理配置
 func (h *ProxyHandler) UpdateConfig(c *gin.Context) {
-	var cfg model.ProxyConfig
-	if err := c.ShouldBindJSON(&cfg); err != nil {
+	var body struct {
+		model.ProxyConfig
+		PreserveAuth bool `json:"preserveAuth"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
 		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	if err := service.ProxySvc.UpdateConfig(cfg); err != nil {
+	if err := service.ProxySvc.UpdateConfig(body.ProxyConfig, body.PreserveAuth); err != nil {
 		dto.Failed("保存失败: "+err.Error(), c)
 		return
 	}
 	dto.SuccessOnlyMsg("代理配置保存成功", c)
 }
 
-// TestProxy 测试代理连通性
 func (h *ProxyHandler) TestProxy(c *gin.Context) {
 	var req model.ProxyTestReq
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -122,6 +122,7 @@ export default function CollectManagePageView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
+  const proxyChoiceRef = useRef<boolean | null>(null);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -651,6 +652,7 @@ export default function CollectManagePageView() {
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
+    proxyChoiceRef.current = null;
     setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
   };
@@ -684,6 +686,7 @@ export default function CollectManagePageView() {
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
       });
+      proxyChoiceRef.current = null;
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
       return;
@@ -692,13 +695,19 @@ export default function CollectManagePageView() {
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
+    const useProxy = await askProxyChoice();
+    if (useProxy === null) {
+      return;
+    }
     setSubmitting(true);
     try {
       const resp = await ApiPost(
         sourceModalMode === "add"
           ? "/manage/collect/add"
           : "/manage/collect/update",
-        sourceModalMode === "add" ? values : { ...values, id: editingId },
+        sourceModalMode === "add"
+          ? { ...values, useProxy }
+          : { ...values, id: editingId, useProxy },
       );
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -739,34 +748,66 @@ export default function CollectManagePageView() {
     }
   };
 
-  const testApi = async (values: SourceFormValues) => {
-    let enabled = false;
-    let proxyUrl = "";
-    try {
-      const cfg = await ApiGet("/manage/proxy/config");
-      if (cfg.code !== 0) {
-        message.error(cfg.msg || "获取代理配置失败");
-        return;
-      }
-      enabled = Boolean(cfg.data?.enabled);
-      proxyUrl = String(cfg.data?.proxyUrl || "").trim();
-    } catch {
-      message.error("获取代理配置失败");
-      return;
+  const askProxyChoice = (): Promise<boolean | null> => {
+    if (proxyChoiceRef.current !== null) {
+      return Promise.resolve(proxyChoiceRef.current);
     }
-    if (!enabled || !proxyUrl) {
-      await runSourceTest(values, false);
-      return;
-    }
-    modal.confirm({
-      title: "是否使用代理测试？",
-      content: `系统已开启网络代理（${proxyUrl}）。本次接口测试可以选择走代理，或直接连接采集站。`,
-      okText: "使用代理",
-      cancelText: "直接测试",
-      zIndex: 2000,
-      onOk: () => runSourceTest(values, true),
-      onCancel: () => runSourceTest(values, false),
+    return new Promise((resolve) => {
+      void (async () => {
+        let enabled = false;
+        let proxyUrl = "";
+        try {
+          const cfg = await ApiGet("/manage/proxy/config");
+          if (cfg.code !== 0) {
+            message.error(cfg.msg || "获取代理配置失败");
+            resolve(null);
+            return;
+          }
+          enabled = Boolean(cfg.data?.enabled);
+          proxyUrl = String(cfg.data?.proxyUrl || "").trim();
+        } catch {
+          message.error("获取代理配置失败");
+          resolve(null);
+          return;
+        }
+        if (!enabled || !proxyUrl) {
+          proxyChoiceRef.current = false;
+          resolve(false);
+          return;
+        }
+        let dialog: { destroy: () => void } | undefined;
+        let settled = false;
+        const finish = (choice: boolean | null) => {
+          if (settled) return;
+          settled = true;
+          if (choice !== null) {
+            proxyChoiceRef.current = choice;
+          }
+          dialog?.destroy();
+          resolve(choice);
+        };
+        dialog = modal.confirm({
+          title: "是否使用代理测试？",
+          content: `系统已开启网络代理（${proxyUrl}）。本次可以选择走代理，或直接连接采集站。`,
+          okText: "使用代理",
+          cancelText: "直接测试",
+          zIndex: 2000,
+          onOk: () => finish(true),
+          onCancel: () => finish(null),
+          cancelButtonProps: {
+            onClick: () => finish(false),
+          },
+        });
+      })();
     });
+  };
+
+  const testApi = async (values: SourceFormValues) => {
+    const useProxy = await askProxyChoice();
+    if (useProxy === null) {
+      return;
+    }
+    await runSourceTest(values, useProxy);
   };
 
   const openBatchCollect = async () => {

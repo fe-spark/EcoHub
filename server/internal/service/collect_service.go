@@ -74,6 +74,10 @@ func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
 	return repository.GetEnabledCollectSourceList()
 }
 
+func (s *CollectService) GetAllFilmSources() []model.FilmSource {
+	return repository.GetCollectSourceList()
+}
+
 // UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	return s.updateFilmSource(source, nil)

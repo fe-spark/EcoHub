@@ -371,7 +371,6 @@ func CollectApiTest(s model.FilmSource) error {
 	return CollectApiTestWithTimeout(s, 0)
 }
 
-// CollectApiTestChoosingProxy 按本次选择测试采集站。useProxy 为真时走系统里已保存的代理地址，为假时直连。
 func CollectApiTestChoosingProxy(s model.FilmSource, useProxy bool) error {
 	return collectApiTest(s, 0, useProxy, true)
 }

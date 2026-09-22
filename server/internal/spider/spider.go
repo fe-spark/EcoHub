@@ -28,7 +28,6 @@ import (
 
 var spiderCore = &JsonCollect{}
 
-// requestForSource 构造发往采集站的请求，并按站点代理配置写入 ProxyURL。
 func requestForSource(uri, sourceID string) utils.RequestInfo {
 	r := utils.RequestInfo{Uri: uri, Params: url.Values{}}
 	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {

@@ -3,6 +3,31 @@ import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import { collectDuration, type SourceFormValues } from "./types";
 
+function isDomainReplaceRuleLine(line: string): boolean {
+  let from = "";
+  let to = "";
+  if (line.includes("=>")) {
+    const i = line.indexOf("=>");
+    from = line.slice(0, i);
+    to = line.slice(i + 2);
+  } else if (line.includes("->")) {
+    const i = line.indexOf("->");
+    from = line.slice(0, i);
+    to = line.slice(i + 2);
+  } else if (line.includes(",")) {
+    const i = line.indexOf(",");
+    from = line.slice(0, i);
+    to = line.slice(i + 1);
+  } else {
+    const fields = line.trim().split(/\s+/);
+    if (fields.length === 2) {
+      from = fields[0];
+      to = fields[1];
+    }
+  }
+  return Boolean(from.trim() && to.trim());
+}
+
 interface SourceFormModalProps {
   open: boolean;
   mode: "add" | "edit";
@@ -137,18 +162,13 @@ export default function SourceFormModal(props: SourceFormModalProps) {
                 if (!value || !value.trim()) {
                   return;
                 }
-                const lines = value
-                  .split("\n")
-                  .map((l) => l.trim())
-                  .filter(Boolean);
                 const bad: string[] = [];
-                for (const line of lines) {
+                for (const line of value.split("\n")) {
                   const t = line.trim();
-                  if (!t) {
+                  if (!t || t.startsWith("#") || t.startsWith("//") || t.startsWith(";")) {
                     continue;
                   }
-                  const parts = t.split("=>");
-                  if (parts.length !== 2 || !parts[0].trim() || !parts[1].trim()) {
+                  if (!isDomainReplaceRuleLine(t)) {
                     bad.push(t);
                   }
                 }

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState, useCallback, useMemo } from "react";
+import React, { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import {
   Card,
   Form,
@@ -52,6 +52,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
   const [testResult, setTestResult] = useState<string | null>(null);
   const [serverData, setServerData] = useState<ProxyConfigValues>(DEFAULT_CONFIG);
   const [sources, setSources] = useState<CollectSourceOption[]>([]);
+  const proxyUrlTouched = useRef(false);
 
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
@@ -61,7 +62,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
 
   const fetchSources = useCallback(async () => {
     try {
-      const resp = await ApiGet("/manage/collect/options");
+      const resp = await ApiGet("/manage/collect/options?all=1");
       if (resp.code === 0 && Array.isArray(resp.data)) {
         setSources(resp.data);
       }
@@ -81,6 +82,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
           scope: resp.data.scope === "custom" ? "custom" : "all",
           sourceIds: Array.isArray(resp.data.sourceIds) ? resp.data.sourceIds : [],
         };
+        proxyUrlTouched.current = false;
         setServerData(normalized);
         form.setFieldsValue(normalized);
       }
@@ -104,7 +106,10 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const resp = await ApiPost("/manage/proxy/config/update", values);
+      const resp = await ApiPost("/manage/proxy/config/update", {
+        ...values,
+        preserveAuth: !proxyUrlTouched.current,
+      });
       if (resp.code === 0) {
         message.success(resp.msg || "代理配置保存成功");
         setServerData(values);
@@ -154,7 +159,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
 
   const sourceSelectOptions = useMemo(() => {
     return sources.map((s) => ({
-      label: s.name,
+      label: s.state === false ? `${s.name}（未启用）` : s.name,
       value: s.id,
       key: s.id,
     }));
@@ -237,6 +242,11 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
             layout="vertical"
             initialValues={DEFAULT_CONFIG}
             disabled={!isEditing || !canOperate}
+            onValuesChange={(changed) => {
+              if (Object.prototype.hasOwnProperty.call(changed, "proxyUrl")) {
+                proxyUrlTouched.current = true;
+              }
+            }}
           >
             <Flex vertical gap={0} className={styles.contentStack}>
               {/* 最上层：启用/禁用网络代理总开关 */}

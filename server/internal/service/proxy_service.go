@@ -20,14 +20,25 @@ var ProxySvc = new(ProxyService)
 
 const defaultProxyTestTarget = "https://cloudflare.com/cdn-cgi/trace"
 
-// GetConfig 获取当前代理配置
 func (s *ProxyService) GetConfig() model.ProxyConfig {
 	return repository.GetProxyConfig()
 }
 
-// UpdateConfig 更新代理配置
-func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig) error {
+// PublicConfig 去掉代理地址里的账号密码，供管理端读取。
+func (s *ProxyService) PublicConfig() model.ProxyConfig {
+	cfg := s.GetConfig()
+	cfg.ProxyURL = RedactProxyURL(cfg.ProxyURL)
+	return cfg
+}
+
+func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) error {
 	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
+	if preserveAuth {
+		stored := s.GetConfig()
+		if RedactProxyURL(cfg.ProxyURL) == RedactProxyURL(stored.ProxyURL) && !proxyURLHasUser(cfg.ProxyURL) {
+			cfg.ProxyURL = stored.ProxyURL
+		}
+	}
 	if cfg.Enabled {
 		if cfg.ProxyURL == "" {
 			return errors.New("启用代理时代理服务器地址不能为空")
@@ -46,7 +57,6 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig) error {
 	return repository.SaveProxyConfig(cfg)
 }
 
-// TestProxy 测试代理连通性
 func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
@@ -93,9 +103,56 @@ func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
 	return duration, nil
 }
 
-// ResolveSourceProxy 查询指定采集站是否启用代理
 func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
 	return repository.ResolveSourceProxy(sourceID)
+}
+
+// RememberCustomProxySource 把站点加入「指定站点」名单，便于新建站点沿用本次走代理的选择。
+func (s *ProxyService) RememberCustomProxySource(sourceID string) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil
+	}
+	cfg := s.GetConfig()
+	if !cfg.Enabled || cfg.Scope != model.ProxyScopeCustom {
+		return nil
+	}
+	for _, id := range cfg.SourceIds {
+		if id == sourceID {
+			return nil
+		}
+	}
+	cfg.SourceIds = append(cfg.SourceIds, sourceID)
+	return repository.SaveProxyConfig(cfg)
+}
+
+func RedactProxyURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	proxyStr := raw
+	if !strings.Contains(proxyStr, "://") {
+		proxyStr = "http://" + proxyStr
+	}
+	u, err := url.Parse(proxyStr)
+	if err != nil || u.Host == "" {
+		return raw
+	}
+	u.User = nil
+	return u.String()
+}
+
+func proxyURLHasUser(raw string) bool {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return false
+	}
+	if !strings.Contains(raw, "://") {
+		raw = "http://" + raw
+	}
+	u, err := url.Parse(raw)
+	return err == nil && u.User != nil
 }
 
 func sourceProxyURL(sourceID string) string {

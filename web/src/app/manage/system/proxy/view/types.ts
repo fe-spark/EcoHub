@@ -8,5 +8,6 @@ export interface ProxyConfigValues {
 export interface CollectSourceOption {
   id: string;
   name: string;
-  grade: number;
+  grade?: number;
+  state?: boolean;
 }

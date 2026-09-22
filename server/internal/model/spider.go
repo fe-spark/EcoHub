@@ -143,8 +143,9 @@ type CronTaskVo struct {
 
 // FilmTaskOptions 影视采集任务添加时需要的options
 type FilmTaskOptions struct {
-	Id   string `json:"id"`
-	Name string `json:"name"`
+	Id    string `json:"id"`
+	Name  string `json:"name"`
+	State *bool  `json:"state,omitempty"`
 }
 
 type FilmSourceStateBatchRequest struct {
