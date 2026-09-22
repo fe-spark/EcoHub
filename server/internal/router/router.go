@@ -209,6 +209,15 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
 		}
 
+		// 采集网络代理相关
+		proxyRoute := manageRoute.Group(`/proxy`)
+		{
+			proxyRoute.GET(``, handler.ProxyHd.GetConfig)
+			proxyRoute.GET(`/config`, handler.ProxyHd.GetConfig)
+			proxyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.ProxyHd.UpdateConfig)
+			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.ProxyHd.TestProxy)
+		}
+
 		// 文件管理
 		fileRoute := manageRoute.Group(`/file`)
 		{

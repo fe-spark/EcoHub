@@ -49,6 +49,8 @@ type Deps struct {
 	NotifySourceFailed func(sourceID, sourceName, reason string)
 	// BatchSummaryEnabled 批次摘要事件是否开启（决定失败是否单独通知）。
 	BatchSummaryEnabled func() bool
+	// ResolveSourceProxy 查询站点是否启用代理并获取代理地址。
+	ResolveSourceProxy func(sourceID string) (bool, string)
 }
 
 var deps Deps
@@ -185,6 +187,11 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
+	}
+	if s != nil && deps.ResolveSourceProxy != nil {
+		if ok, proxy := deps.ResolveSourceProxy(s.Id); ok {
+			r.ProxyURL = proxy
+		}
 	}
 	return r
 }

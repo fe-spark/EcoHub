@@ -143,8 +143,9 @@ type CronTaskVo struct {
 
 // FilmTaskOptions 影视采集任务添加时需要的options
 type FilmTaskOptions struct {
-	Id   string `json:"id"`
-	Name string `json:"name"`
+	Id    string `json:"id"`
+	Name  string `json:"name"`
+	State *bool  `json:"state,omitempty"`
 }
 
 type FilmSourceStateBatchRequest struct {
@@ -182,6 +183,7 @@ type FilmSourceListItem struct {
 	FilmSource
 	LastCollectTime *time.Time       `json:"lastCollectTime,omitempty"`
 	Progress        *CollectProgress `json:"progress,omitempty"`
+	ProxyEnabled    bool             `json:"proxyEnabled"` // 是否启用了网络代理
 }
 
 type Option struct {

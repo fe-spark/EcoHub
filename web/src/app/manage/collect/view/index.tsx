@@ -15,7 +15,8 @@ import {
   Space,
   Typography,
 } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined, ApiOutlined } from "@ant-design/icons";
+import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -95,10 +96,12 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
+    proxyEnabled: Boolean(item.proxyEnabled),
   };
 }
 
 export default function CollectManagePageView() {
+  const router = useRouter();
   const { message, modal } = useAppMessage();
   const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
@@ -119,6 +122,7 @@ export default function CollectManagePageView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
+  const proxyChoiceRef = useRef<boolean | null>(null);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -648,6 +652,7 @@ export default function CollectManagePageView() {
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
+    proxyChoiceRef.current = null;
     setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
   };
@@ -681,6 +686,7 @@ export default function CollectManagePageView() {
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
       });
+      proxyChoiceRef.current = null;
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
       return;
@@ -689,13 +695,19 @@ export default function CollectManagePageView() {
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
+    const useProxy = await askProxyChoice();
+    if (useProxy === null) {
+      return;
+    }
     setSubmitting(true);
     try {
       const resp = await ApiPost(
         sourceModalMode === "add"
           ? "/manage/collect/add"
           : "/manage/collect/update",
-        sourceModalMode === "add" ? values : { ...values, id: editingId },
+        sourceModalMode === "add"
+          ? { ...values, useProxy }
+          : { ...values, id: editingId, useProxy },
       );
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -709,14 +721,18 @@ export default function CollectManagePageView() {
     }
   };
 
-  const testApi = async (values: SourceFormValues) => {
+  const runSourceTest = async (values: SourceFormValues, useProxy: boolean) => {
     try {
       setTesting(true);
       message.loading({
         key: "collect-test",
-        content: "正在测试接口，请稍候...",
+        content: useProxy ? "正在通过代理测试接口..." : "正在直接测试接口...",
       });
-      const resp = await ApiPost("/manage/collect/test", values);
+      const resp = await ApiPost("/manage/collect/test", {
+        ...values,
+        ...(editingId ? { id: editingId } : {}),
+        useProxy,
+      });
       if (resp.code === 0) {
         message.success({ key: "collect-test", content: resp.msg });
         return;
@@ -730,6 +746,68 @@ export default function CollectManagePageView() {
     } finally {
       setTesting(false);
     }
+  };
+
+  const askProxyChoice = (): Promise<boolean | null> => {
+    if (proxyChoiceRef.current !== null) {
+      return Promise.resolve(proxyChoiceRef.current);
+    }
+    return new Promise((resolve) => {
+      void (async () => {
+        let enabled = false;
+        let proxyUrl = "";
+        try {
+          const cfg = await ApiGet("/manage/proxy/config");
+          if (cfg.code !== 0) {
+            message.error(cfg.msg || "获取代理配置失败");
+            resolve(null);
+            return;
+          }
+          enabled = Boolean(cfg.data?.enabled);
+          proxyUrl = String(cfg.data?.proxyUrl || "").trim();
+        } catch {
+          message.error("获取代理配置失败");
+          resolve(null);
+          return;
+        }
+        if (!enabled || !proxyUrl) {
+          proxyChoiceRef.current = false;
+          resolve(false);
+          return;
+        }
+        let dialog: { destroy: () => void } | undefined;
+        let settled = false;
+        const finish = (choice: boolean | null) => {
+          if (settled) return;
+          settled = true;
+          if (choice !== null) {
+            proxyChoiceRef.current = choice;
+          }
+          dialog?.destroy();
+          resolve(choice);
+        };
+        dialog = modal.confirm({
+          title: "是否使用代理测试？",
+          content: `系统已开启网络代理（${proxyUrl}）。本次可以选择走代理，或直接连接采集站。`,
+          okText: "使用代理",
+          cancelText: "直接测试",
+          zIndex: 2000,
+          onOk: () => finish(true),
+          onCancel: () => finish(null),
+          cancelButtonProps: {
+            onClick: () => finish(false),
+          },
+        });
+      })();
+    });
+  };
+
+  const testApi = async (values: SourceFormValues) => {
+    const useProxy = await askProxyChoice();
+    if (useProxy === null) {
+      return;
+    }
+    await runSourceTest(values, useProxy);
   };
 
   const openBatchCollect = async () => {
@@ -848,14 +926,22 @@ export default function CollectManagePageView() {
           </>
         }
         actions={
-          <Button
-            danger
-            loading={cleanupScanning}
-            disabled={!canWrite || siteList.length === 0}
-            onClick={() => void startCleanupScan()}
-          >
-            清理失效源
-          </Button>
+          <Space size={8}>
+            <Button
+              icon={<ApiOutlined />}
+              onClick={() => router.push("/manage/system?tab=proxy")}
+            >
+              网络代理
+            </Button>
+            <Button
+              danger
+              loading={cleanupScanning}
+              disabled={!canWrite || siteList.length === 0}
+              onClick={() => void startCleanupScan()}
+            >
+              清理失效源
+            </Button>
+          </Space>
         }
       />
 

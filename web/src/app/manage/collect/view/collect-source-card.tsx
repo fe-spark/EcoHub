@@ -1,4 +1,4 @@
-import { Button, Checkbox, Popconfirm, Select, Tooltip } from "antd";
+import { Button, Checkbox, Popconfirm, Select, Tag, Tooltip } from "antd";
 import { DeleteOutlined, EditOutlined, PoweroffOutlined, StopOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { collectDuration, type FilmSource } from "./types";
@@ -87,6 +87,11 @@ export default function CollectSourceCard({
               <span className={styles.posterSourceTag} title="全局优先海报图源">
                 海报源
               </span>
+            ) : null}
+            {record.proxyEnabled ? (
+              <Tag color="cyan" bordered={false} style={{ marginInlineEnd: 0 }}>
+                代理
+              </Tag>
             ) : null}
           </div>
           <Tooltip title={record.uri}>

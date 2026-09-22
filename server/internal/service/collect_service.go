@@ -48,6 +48,9 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
+		if ok, _ := repository.ResolveSourceProxy(source.Id); ok {
+			item.ProxyEnabled = true
+		}
 		list = append(list, item)
 	}
 	return list
@@ -69,6 +72,10 @@ func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
 
 func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
 	return repository.GetEnabledCollectSourceList()
+}
+
+func (s *CollectService) GetAllFilmSources() []model.FilmSource {
+	return repository.GetCollectSourceList()
 }
 
 // UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
@@ -362,6 +369,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 	spider.ClearLimiter(id)
 	clearProvideNetworkConfigCache()
 	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
+	removeSourceFromProxyConfig(id)
 	return nil
 }
 
@@ -410,4 +418,24 @@ func (s *CollectService) ClearRetriedRecords() {
 
 func (s *CollectService) ClearAllRecord() {
 	repository.TruncateRecordTable()
+}
+
+func removeSourceFromProxyConfig(sourceID string) {
+	if sourceID == "" {
+		return
+	}
+	cfg := repository.GetProxyConfig()
+	var newIds []string
+	changed := false
+	for _, id := range cfg.SourceIds {
+		if id == sourceID {
+			changed = true
+		} else {
+			newIds = append(newIds, id)
+		}
+	}
+	if changed {
+		cfg.SourceIds = newIds
+		_ = repository.SaveProxyConfig(cfg)
+	}
 }
