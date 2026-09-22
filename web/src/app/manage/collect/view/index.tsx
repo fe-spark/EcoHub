@@ -15,7 +15,8 @@ import {
   Space,
   Typography,
 } from "antd";
-import { PlusOutlined } from "@ant-design/icons";
+import { PlusOutlined, ApiOutlined } from "@ant-design/icons";
+import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -95,10 +96,12 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
+    proxyEnabled: Boolean(item.proxyEnabled),
   };
 }
 
 export default function CollectManagePageView() {
+  const router = useRouter();
   const { message, modal } = useAppMessage();
   const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
@@ -848,14 +851,22 @@ export default function CollectManagePageView() {
           </>
         }
         actions={
-          <Button
-            danger
-            loading={cleanupScanning}
-            disabled={!canWrite || siteList.length === 0}
-            onClick={() => void startCleanupScan()}
-          >
-            清理失效源
-          </Button>
+          <Space size={8}>
+            <Button
+              icon={<ApiOutlined />}
+              onClick={() => router.push("/manage/system?tab=proxy")}
+            >
+              网络代理
+            </Button>
+            <Button
+              danger
+              loading={cleanupScanning}
+              disabled={!canWrite || siteList.length === 0}
+              onClick={() => void startCleanupScan()}
+            >
+              清理失效源
+            </Button>
+          </Space>
         }
       />
 

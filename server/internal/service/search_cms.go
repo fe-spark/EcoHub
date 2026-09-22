@@ -17,9 +17,11 @@ import (
 )
 
 var (
-	findCollectSourceById = repository.FindCollectSourceById
-	searchSourceList      = spider.SearchSourceList
-	fetchSourceDetails    = spider.FetchSourceDetails
+	findCollectSourceById     = repository.FindCollectSourceById
+	searchSourceList          = spider.SearchSourceList
+	searchSourceListWithProxy = spider.SearchSourceListWithProxy
+	fetchSourceDetails        = spider.FetchSourceDetails
+	fetchSourceDetailsWithProxy = spider.FetchSourceDetailsWithProxy
 )
 
 // SearchFilmResult 搜索接口业务结果。
@@ -141,7 +143,17 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 	if source == nil || !source.State || strings.TrimSpace(source.Uri) == "" {
 		return []model.MovieBasicInfo{}, model.FilmListPage{}, "源站不可用"
 	}
-	pageData, err := searchSourceList(source.Uri, keyword, current)
+	var proxyURL string
+	if ok, p := repository.ResolveSourceProxy(source.Id); ok {
+		proxyURL = p
+	}
+	var pageData model.FilmListPage
+	var err error
+	if proxyURL != "" {
+		pageData, err = searchSourceListWithProxy(source.Uri, keyword, current, proxyURL)
+	} else {
+		pageData, err = searchSourceList(source.Uri, keyword, current)
+	}
 	if err != nil {
 		msg := formatCMSSearchError(err)
 		log.Printf("[SearchFilm] 源站搜索失败 source=%s(%s) keyword=%q err=%v", source.Name, source.Id, keyword, err)
@@ -154,7 +166,7 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 		}
 	}
 	localBySourceMid, snaps := resolveCMSLocalCards(source, sourceMids)
-	detailsByID := fetchCMSSearchDetails(source.Uri, sourceMids)
+	detailsByID := fetchCMSSearchDetails(source.Uri, sourceMids, proxyURL)
 	list := make([]model.MovieBasicInfo, 0, len(pageData.List))
 	for _, item := range pageData.List {
 		if strings.TrimSpace(item.VodName) == "" {
@@ -182,7 +194,7 @@ func movieBasicInfoFromCMSList(source *model.FilmSource, item model.FilmList) mo
 	}
 }
 
-func fetchCMSSearchDetails(uri string, ids []int64) map[int64]model.MovieDetail {
+func fetchCMSSearchDetails(uri string, ids []int64, proxyURLs ...string) map[int64]model.MovieDetail {
 	out := make(map[int64]model.MovieDetail, len(ids))
 	uri = strings.TrimSpace(uri)
 	if uri == "" || len(ids) == 0 {
@@ -203,7 +215,17 @@ func fetchCMSSearchDetails(uri string, ids []int64) map[int64]model.MovieDetail 
 	if len(idStrs) == 0 {
 		return out
 	}
-	details, err := fetchSourceDetails(uri, strings.Join(idStrs, ","))
+	proxyURL := ""
+	if len(proxyURLs) > 0 {
+		proxyURL = strings.TrimSpace(proxyURLs[0])
+	}
+	var details []model.MovieDetail
+	var err error
+	if proxyURL != "" {
+		details, err = fetchSourceDetailsWithProxy(uri, strings.Join(idStrs, ","), proxyURL)
+	} else {
+		details, err = fetchSourceDetails(uri, strings.Join(idStrs, ","))
+	}
 	if err != nil || len(details) == 0 {
 		return out
 	}

@@ -182,6 +182,7 @@ type FilmSourceListItem struct {
 	FilmSource
 	LastCollectTime *time.Time       `json:"lastCollectTime,omitempty"`
 	Progress        *CollectProgress `json:"progress,omitempty"`
+	ProxyEnabled    bool             `json:"proxyEnabled"` // 是否启用了网络代理
 }
 
 type Option struct {

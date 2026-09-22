@@ -366,3 +366,27 @@ func TestSearchCollectSourceCMSUsesRemoteHits(t *testing.T) {
 		t.Fatalf("cms total: %+v", page)
 	}
 }
+
+func TestFetchCMSSearchDetailsWithProxy(t *testing.T) {
+	origProxyDetail := fetchSourceDetailsWithProxy
+	t.Cleanup(func() {
+		fetchSourceDetailsWithProxy = origProxyDetail
+	})
+
+	calledProxy := ""
+	fetchSourceDetailsWithProxy = func(uri, ids, proxyURL string) ([]model.MovieDetail, error) {
+		calledProxy = proxyURL
+		return []model.MovieDetail{
+			{Id: 101, Picture: "https://cdn.example.com/proxy.jpg"},
+		}, nil
+	}
+
+	got := fetchCMSSearchDetails("https://api.example.com/", []int64{101}, "http://127.0.0.1:7890")
+	if calledProxy != "http://127.0.0.1:7890" {
+		t.Fatalf("expected proxyURL passed, got %q", calledProxy)
+	}
+	if len(got) != 1 || got[101].Picture != "https://cdn.example.com/proxy.jpg" {
+		t.Fatalf("unexpected detail: %+v", got)
+	}
+}
+

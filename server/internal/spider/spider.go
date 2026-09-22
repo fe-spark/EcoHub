@@ -47,6 +47,7 @@ func init() {
 		NoteSourceError:     noteSourceError,
 		NotifySourceFailed:  emitSourceFailedNotify,
 		BatchSummaryEnabled: func() bool { return notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) },
+		ResolveSourceProxy:  repository.ResolveSourceProxy,
 	})
 }
 

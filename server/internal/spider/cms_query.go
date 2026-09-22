@@ -64,6 +64,11 @@ func truncateCMSBody(body string, maxRunes int) string {
 
 // SearchSourceList 按关键词请求采集源 MacCMS 列表搜索（ac=list&wd=）。不写库。
 func SearchSourceList(uri, keyword string, page int) (model.FilmListPage, error) {
+	return SearchSourceListWithProxy(uri, keyword, page, "")
+}
+
+// SearchSourceListWithProxy 支持携带网络代理的 MacCMS 列表搜索。不写库。
+func SearchSourceListWithProxy(uri, keyword string, page int, proxyURL string) (model.FilmListPage, error) {
 	var empty model.FilmListPage
 	uri = strings.TrimSpace(uri)
 	keyword = strings.TrimSpace(keyword)
@@ -77,9 +82,10 @@ func SearchSourceList(uri, keyword string, page int) (model.FilmListPage, error)
 		page = 1
 	}
 	r := utils.RequestInfo{
-		Uri:    uri,
-		Params: url.Values{},
-		Header: http.Header{},
+		Uri:      uri,
+		Params:   url.Values{},
+		Header:   http.Header{},
+		ProxyURL: proxyURL,
 	}
 	r.Header.Set("timeout", strconv.Itoa(cmsQueryTimeoutSec))
 	r.Params.Set("ac", "list")
@@ -115,15 +121,21 @@ func fmtCMSSearchUnsupported(body string) error {
 
 // FetchSourceDetails 按源站 vod_id 拉详情（ac=detail&ids=）。不写库。
 func FetchSourceDetails(uri, ids string) ([]model.MovieDetail, error) {
+	return FetchSourceDetailsWithProxy(uri, ids, "")
+}
+
+// FetchSourceDetailsWithProxy 支持携带网络代理的源站详情拉取。不写库。
+func FetchSourceDetailsWithProxy(uri, ids string, proxyURL string) ([]model.MovieDetail, error) {
 	uri = strings.TrimSpace(uri)
 	ids = strings.TrimSpace(ids)
 	if uri == "" || ids == "" {
 		return nil, errors.New("source uri and ids are required")
 	}
 	r := utils.RequestInfo{
-		Uri:    uri,
-		Params: url.Values{},
-		Header: http.Header{},
+		Uri:      uri,
+		Params:   url.Values{},
+		Header:   http.Header{},
+		ProxyURL: proxyURL,
 	}
 	r.Header.Set("timeout", strconv.Itoa(cmsQueryTimeoutSec))
 	r.Params.Set("ids", ids)

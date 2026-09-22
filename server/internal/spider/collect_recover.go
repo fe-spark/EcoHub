@@ -378,6 +378,16 @@ func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
 	if timeoutSeconds > 0 {
 		r.Header = map[string][]string{"timeout": {strconv.Itoa(timeoutSeconds)}}
 	}
+	if s.Id != "" {
+		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+			r.ProxyURL = proxy
+		}
+	} else {
+		cfg := repository.GetProxyConfig()
+		if cfg.Enabled && cfg.Scope == model.ProxyScopeAll && cfg.ProxyURL != "" {
+			r.ProxyURL = cfg.ProxyURL
+		}
+	}
 	err := utils.ApiTest(&r)
 	if err == nil {
 		lp := model.FilmListPage{}
