@@ -94,6 +94,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     isPosterSource: Boolean(item.isPosterSource),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
+    format: (item.format as "json" | "xml") || "json",
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
     proxyEnabled: Boolean(item.proxyEnabled),
@@ -684,6 +685,7 @@ export default function CollectManagePageView() {
         isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
+        format: (resp.data.format as "json" | "xml") || "json",
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
       });
       proxyChoiceRef.current = null;
@@ -695,10 +697,7 @@ export default function CollectManagePageView() {
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
-    const useProxy = await askProxyChoice();
-    if (useProxy === null) {
-      return;
-    }
+    const useProxy = proxyChoiceRef.current ?? undefined;
     setSubmitting(true);
     try {
       const resp = await ApiPost(
@@ -706,8 +705,8 @@ export default function CollectManagePageView() {
           ? "/manage/collect/add"
           : "/manage/collect/update",
         sourceModalMode === "add"
-          ? { ...values, useProxy }
-          : { ...values, id: editingId, useProxy },
+          ? { ...values, ...(useProxy !== undefined ? { useProxy } : {}) }
+          : { ...values, id: editingId, ...(useProxy !== undefined ? { useProxy } : {}) },
       );
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -749,9 +748,6 @@ export default function CollectManagePageView() {
   };
 
   const askProxyChoice = (): Promise<boolean | null> => {
-    if (proxyChoiceRef.current !== null) {
-      return Promise.resolve(proxyChoiceRef.current);
-    }
     return new Promise((resolve) => {
       void (async () => {
         let enabled = false;
@@ -775,7 +771,7 @@ export default function CollectManagePageView() {
           resolve(false);
           return;
         }
-        let dialog: { destroy: () => void } | undefined;
+        const dialogRef: { current?: { destroy: () => void } } = {};
         let settled = false;
         const finish = (choice: boolean | null) => {
           if (settled) return;
@@ -783,10 +779,10 @@ export default function CollectManagePageView() {
           if (choice !== null) {
             proxyChoiceRef.current = choice;
           }
-          dialog?.destroy();
+          dialogRef.current?.destroy();
           resolve(choice);
         };
-        dialog = modal.confirm({
+        dialogRef.current = modal.confirm({
           title: "是否使用代理测试？",
           content: `系统已开启网络代理（${proxyUrl}）。本次可以选择走代理，或直接连接采集站。`,
           okText: "使用代理",

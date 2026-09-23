@@ -45,8 +45,12 @@ func init() {
 	progress.SetStaleNotifier(emitProgressStaleNotify)
 	progress.SetOccupyChecker(isOccupiedCollectSource)
 	fetcher.Configure(fetcher.Deps{
-		GetPageCount:        func(r utils.RequestInfo) (int, error) { return spiderCore.GetPageCount(r) },
-		GetFilmDetail:       func(r utils.RequestInfo) ([]model.MovieDetail, error) { return spiderCore.GetFilmDetail(r) },
+		GetPageCount: func(s *model.FilmSource, r utils.RequestInfo) (int, error) {
+			return ResolveCollector(s.ResolveFormat()).GetPageCount(r)
+		},
+		GetFilmDetail: func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
+			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
+		},
 		WaitTurn:            waitSourceRequestTurn,
 		LiveTaskCount:       countLiveCollectTasks,
 		SavePage:            saveCollectedFilmForCollect,
@@ -382,6 +386,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	}
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
+	}
+	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
+		r.Params.Set("ac", "videolist")
 	}
 
 	pageCount, err := fetcher.GetPageCountWithRetry(ctx, s, r)

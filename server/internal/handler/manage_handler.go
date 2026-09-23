@@ -459,5 +459,8 @@ func validFilmSource(fs model.FilmSource) error {
 	if err := utils.ValidateDomainReplaceRules(fs.DomainReplaceRules); err != nil {
 		return err
 	}
+	if fs.Format != "" && fs.Format != model.SourceFormatJSON && fs.Format != model.SourceFormatXML {
+		return errors.New("不支持的采集数据格式，仅支持 JSON 或 XML")
+	}
 	return nil
 }

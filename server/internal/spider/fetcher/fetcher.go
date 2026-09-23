@@ -30,9 +30,9 @@ const (
 // Deps 采集编排层注入的外部能力；全部为必需项，缺项会在调用处 panic。
 type Deps struct {
 	// GetPageCount 探测站点总页数。
-	GetPageCount func(r utils.RequestInfo) (int, error)
+	GetPageCount func(s *model.FilmSource, r utils.RequestInfo) (int, error)
 	// GetFilmDetail 拉取单页影片明细。
-	GetFilmDetail func(r utils.RequestInfo) ([]model.MovieDetail, error)
+	GetFilmDetail func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error)
 	// WaitTurn 站点级请求闸门，返回 release(err) 回调用于更新自适应限速。
 	WaitTurn func(ctx context.Context, s *model.FilmSource, tag string) (func(error), error)
 	// LiveTaskCount 当前活跃采集任务数，用于在单站/多站并发之间切换页并发。
@@ -75,7 +75,7 @@ func GetPageCountWithRetry(ctx context.Context, s *model.FilmSource, r utils.Req
 		if err != nil {
 			return 0, err
 		}
-		pageCount, err := deps.GetPageCount(r)
+		pageCount, err := deps.GetPageCount(s, r)
 		if err == nil {
 			release(nil)
 			return pageCount, nil
@@ -113,7 +113,7 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		if err != nil {
 			return nil, err
 		}
-		list, err := deps.GetFilmDetail(r)
+		list, err := deps.GetFilmDetail(s, r)
 		if err == nil && len(list) > 0 {
 			release(nil)
 			return list, nil
@@ -187,6 +187,9 @@ func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
+	}
+	if s != nil && s.ResolveFormat() == model.SourceFormatXML {
+		r.Params.Set("ac", "videolist")
 	}
 	if s != nil && deps.ResolveSourceProxy != nil {
 		if ok, proxy := deps.ResolveSourceProxy(s.Id); ok {

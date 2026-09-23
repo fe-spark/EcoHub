@@ -344,6 +344,9 @@ func normalizeCollectSourceDefaults(source *model.FilmSource) {
 		source.Interval = config.DefaultSpiderInterval
 	}
 	normalizeCollectCd(source)
+	if source.Format == "" {
+		source.Format = model.SourceFormatJSON
+	}
 }
 
 // normalizeCollectCd 读取路径兜底：历史数据 cd 列可能为 0，统一按默认 24 小时处理。

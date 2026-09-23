@@ -66,6 +66,11 @@ var migrations = []Migration{
 		Name:    "add update_reason column to film_index and film_list_snapshot",
 		Run:     migrateAddUpdateReasonColumn,
 	},
+	{
+		Version: "20260924_add_film_source_format_column",
+		Name:    "add format column to film_sources and fill defaults",
+		Run:     migrateAddFilmSourceFormatColumn,
+	},
 }
 
 // RunAutoMigrations 顺序执行尚未执行的历史版本迁移，并持久化到 schema_migrations 表
@@ -265,6 +270,21 @@ func migrateAddUpdateReasonColumn(db *gorm.DB) error {
 		if err := migrator.AddColumn(&model.FilmListSnapshot{}, "update_reason"); err != nil {
 			return err
 		}
+	}
+	return nil
+}
+
+func migrateAddFilmSourceFormatColumn(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&model.FilmSource{}) {
+		if !migrator.HasColumn(&model.FilmSource{}, "format") {
+			if err := migrator.AddColumn(&model.FilmSource{}, "format"); err != nil {
+				return err
+			}
+		}
+		return db.Model(&model.FilmSource{}).
+			Where("format IS NULL OR format = ''").
+			Update("format", model.SourceFormatJSON).Error
 	}
 	return nil
 }
