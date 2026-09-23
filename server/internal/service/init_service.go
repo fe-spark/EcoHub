@@ -137,8 +137,9 @@ func (s *InitService) FilmSourceInit() {
 }
 
 func defaultFilmSources() []model.FilmSource {
-	// 使用 URI 哈希作为 ID，确保重置后顺序一致且支持主从切换。
-	return []model.FilmSource{
+	// 使用 URI 哈希作为 ID，设置递增初始创建时间以保证默认采集站顺序稳定
+	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	list := []model.FilmSource{
 		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Grade: model.MasterCollect, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
 		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
 		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
@@ -152,6 +153,10 @@ func defaultFilmSources() []model.FilmSource {
 		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
 		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
 	}
+	for i := range list {
+		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
+	}
+	return list
 }
 
 func (s *InitService) CollectCrontabInit() {

@@ -23,7 +23,7 @@ func GetCollectSourceList() []model.FilmSource {
 		return nil
 	}
 	var list []model.FilmSource
-	if err := db.Mdb.Order("grade ASC").Find(&list).Error; err != nil {
+	if err := db.Mdb.Order("grade ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetCollectSourceList Error:", err)
 		return nil
 	}
@@ -42,9 +42,13 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 		if len(list) == 0 {
 			return nil
 		}
+		now := time.Now()
 		for i := range list {
 			if list[i].Id == "" && list[i].Uri != "" {
 				list[i].Id = utils.GenerateHashKey(list[i].Uri)
+			}
+			if list[i].CreatedAt.IsZero() {
+				list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
 			}
 			normalizeCollectSourceDefaults(&list[i])
 		}
@@ -55,7 +59,7 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 // GetCollectSourceListByGrade 返回指定类型的采集 Api 信息 Master | Slave
 func GetCollectSourceListByGrade(grade model.SourceGrade) []model.FilmSource {
 	var list []model.FilmSource
-	if err := db.Mdb.Where("grade = ?", grade).Find(&list).Error; err != nil {
+	if err := db.Mdb.Where("grade = ?", grade).Order("created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetCollectSourceListByGrade Error:", err)
 		return nil
 	}
@@ -90,7 +94,7 @@ func GetEnabledCollectSourceList() []model.FilmSource {
 		return nil
 	}
 	var list []model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("grade ASC").Find(&list).Error; err != nil {
+	if err := db.Mdb.Where("state = ?", true).Order("grade ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetEnabledCollectSourceList Error:", err)
 		return nil
 	}
@@ -228,6 +232,9 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	if s.Id == "" {
 		s.Id = utils.GenerateHashKey(s.Uri)
 	}
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now()
+	}
 	// 主站若无外部指定且无活跃海报源，默认作为海报源
 	if s.Grade == model.MasterCollect && !s.IsPosterSource {
 		var activePosterCount int64
@@ -250,10 +257,14 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 
 // BatchAddCollectSource 批量添加采集站信息
 func BatchAddCollectSource(list []model.FilmSource) error {
+	now := time.Now()
 	// 为没有 ID 的采集源生成稳定的哈希 ID
 	for i := range list {
 		if list[i].Id == "" {
 			list[i].Id = utils.GenerateHashKey(list[i].Uri)
+		}
+		if list[i].CreatedAt.IsZero() {
+			list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
 		}
 		normalizeCollectSourceDefaults(&list[i])
 	}
@@ -270,6 +281,12 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 	}
 	if count > 0 {
 		return errors.New("当前采集站链接已存在其他站点中，请勿重复添加")
+	}
+	if s.CreatedAt.IsZero() {
+		var existing model.FilmSource
+		if err := tx.Select("created_at").Where("id = ?", s.Id).First(&existing).Error; err == nil && !existing.CreatedAt.IsZero() {
+			s.CreatedAt = existing.CreatedAt
+		}
 	}
 	normalizeCollectSourceDefaults(&s)
 	if s.IsPosterSource {

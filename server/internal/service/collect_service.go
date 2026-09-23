@@ -92,6 +92,9 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	if old == nil {
 		return errors.New("采集站信息不存在")
 	}
+	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
+		source.CreatedAt = old.CreatedAt
+	}
 	masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
 
 	// 0. 主站保护规则：系统必须保留一个主站，主站不可直接降级为附属站

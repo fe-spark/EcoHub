@@ -15,7 +15,7 @@ func GetCollectSourceList() []model.FilmSource {
 		return nil
 	}
 	var list []model.FilmSource
-	if err := db.Mdb.Order("grade ASC").Find(&list).Error; err != nil {
+	if err := db.Mdb.Order("grade ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetCollectSourceList Error:", err)
 		return nil
 	}

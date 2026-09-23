@@ -89,6 +89,9 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed("数据异常,资源站信息不存在", c)
 		return
 	}
+	if !fs.CreatedAt.IsZero() && s.CreatedAt.IsZero() {
+		s.CreatedAt = fs.CreatedAt
+	}
 	if spider.IsTaskRunning(s.Id) {
 		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
 		return

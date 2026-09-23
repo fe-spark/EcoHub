@@ -13,6 +13,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
+	"server/internal/repository"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -288,4 +289,129 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 		t.Fatalf("expected failure records to be cleaned after format change, got %d", remainingFrCount)
 	}
 }
+
+func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+
+	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
+	// 插入一个主站和两个附属站
+	master := model.FilmSource{
+		Id:        "master_site",
+		Name:      "主站",
+		Uri:       "https://master.example.com/api",
+		Grade:     model.MasterCollect,
+		State:     true,
+		CreatedAt: baseTime,
+	}
+	slave1 := model.FilmSource{
+		Id:        "slave_1_zz", // 故意使用字典序较大的 id
+		Name:      "附属站1",
+		Uri:       "https://slave1.example.com/api",
+		Grade:     model.SlaveCollect,
+		State:     true,
+		CreatedAt: baseTime.Add(1 * time.Minute),
+	}
+	slave2 := model.FilmSource{
+		Id:        "slave_2_mm",
+		Name:      "附属站2",
+		Uri:       "https://slave2.example.com/api",
+		Grade:     model.SlaveCollect,
+		State:     true,
+		CreatedAt: baseTime.Add(2 * time.Minute),
+	}
+	if err := gdb.Create(&master).Error; err != nil {
+		t.Fatalf("create master: %v", err)
+	}
+	if err := gdb.Create(&slave1).Error; err != nil {
+		t.Fatalf("create slave1: %v", err)
+	}
+	if err := gdb.Create(&slave2).Error; err != nil {
+		t.Fatalf("create slave2: %v", err)
+	}
+
+	// 新增一个附属站（id 字典序可能极小，如 "000_new_slave"）
+	newSlave := model.FilmSource{
+		Id:        "000_new_slave",
+		Name:      "新增附属站",
+		Uri:       "https://newslave.example.com/api",
+		Grade:     model.SlaveCollect,
+		State:     true,
+		CreatedAt: baseTime.Add(3 * time.Minute),
+	}
+	if err := srv.SaveFilmSource(newSlave); err != nil {
+		t.Fatalf("SaveFilmSource failed: %v", err)
+	}
+
+	list := srv.GetFilmSourceList()
+	if len(list) != 4 {
+		t.Fatalf("expected 4 sources, got %d", len(list))
+	}
+
+	// 验证顺序：主站第一，附属站按创建时间排序，新增采集站排在最后一个
+	if list[0].Id != "master_site" {
+		t.Errorf("expected list[0] to be master_site, got %s", list[0].Id)
+	}
+	if list[1].Id != "slave_1_zz" {
+		t.Errorf("expected list[1] to be slave_1_zz, got %s", list[1].Id)
+	}
+	if list[2].Id != "slave_2_mm" {
+		t.Errorf("expected list[2] to be slave_2_mm, got %s", list[2].Id)
+	}
+	if list[3].Id != "000_new_slave" {
+		t.Errorf("expected list[3] (last item) to be 000_new_slave, got %s", list[3].Id)
+	}
+
+	// 更新 slave1 配置，验证其位置没有发生变化且 CreatedAt 保持不变
+	updateSlave1 := slave1
+	updateSlave1.Name = "附属站1重命名"
+	updateSlave1.CreatedAt = time.Time{} // 前端提交通常无 CreatedAt
+	if err := srv.UpdateFilmSource(updateSlave1); err != nil {
+		t.Fatalf("UpdateFilmSource failed: %v", err)
+	}
+
+	listAfterUpdate := srv.GetFilmSourceList()
+	if listAfterUpdate[1].Id != "slave_1_zz" || listAfterUpdate[1].Name != "附属站1重命名" {
+		t.Errorf("expected list[1] to remain slave_1_zz after update, got %+v", listAfterUpdate[1])
+	}
+	if listAfterUpdate[3].Id != "000_new_slave" {
+		t.Errorf("expected list[3] to remain 000_new_slave, got %s", listAfterUpdate[3].Id)
+	}
+	if listAfterUpdate[1].CreatedAt.Unix() != slave1.CreatedAt.Unix() {
+		t.Errorf("expected slave1 CreatedAt to be preserved (%v), got %v", slave1.CreatedAt, listAfterUpdate[1].CreatedAt)
+	}
+}
+
+func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *testing.T) {
+	setupCollectServiceTestDB(t)
+
+	// 模拟从不含 createdAt 的旧备份恢复，id 使用逆序字典序测试是否严格按列表顺序保存
+	sources := []model.FilmSource{
+		{Id: "zzz_source", Name: "站点Z", Uri: "https://z.com/api", Grade: model.SlaveCollect, State: true},
+		{Id: "mmm_source", Name: "站点M", Uri: "https://m.com/api", Grade: model.SlaveCollect, State: true},
+		{Id: "aaa_source", Name: "站点A", Uri: "https://a.com/api", Grade: model.SlaveCollect, State: true},
+	}
+
+	if err := repository.ReplaceCollectSources(sources); err != nil {
+		t.Fatalf("ReplaceCollectSources failed: %v", err)
+	}
+
+	list := repository.GetCollectSourceList()
+	if len(list) != 3 {
+		t.Fatalf("expected 3 sources, got %d", len(list))
+	}
+
+	// 验证列表严格按输入顺序恢复，不会退化回 id ASC 字典序
+	expectedIDs := []string{"zzz_source", "mmm_source", "aaa_source"}
+	for i, expectedID := range expectedIDs {
+		if list[i].Id != expectedID {
+			t.Errorf("expected list[%d].Id == %s, got %s", i, expectedID, list[i].Id)
+		}
+		if i > 0 && !list[i].CreatedAt.After(list[i-1].CreatedAt) {
+			t.Errorf("expected list[%d] CreatedAt (%v) to be strictly after list[%d] CreatedAt (%v)", i, list[i].CreatedAt, i-1, list[i-1].CreatedAt)
+		}
+	}
+}
+
+
 

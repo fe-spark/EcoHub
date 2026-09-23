@@ -265,6 +265,49 @@ func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
 	}
 }
 
+func TestEnrichClassifyTopItems_PreservesValidCategoryNames(t *testing.T) {
+	input := []TopItem{
+		{Key: "list", Count: 10},
+		{Key: "伦理片", Count: 6},
+		{Key: "24", Count: 5},
+	}
+	res := enrichClassifyTopItems(input)
+	if len(res) != 2 {
+		t.Fatalf("expected 2 valid items (list filtered out), got len=%d", len(res))
+	}
+	// "伦理片" 应当保留且 Title 正常为 "伦理片"
+	var foundName bool
+	for _, it := range res {
+		if it.Title == "伦理片" {
+			foundName = true
+		}
+	}
+	if !foundName {
+		t.Fatalf("expected '伦理片' to be preserved, got %+v", res)
+	}
+}
+
+func TestResolveClassifyMember(t *testing.T) {
+	// 1. 点播事件自带分类
+	evtPlay := &AccessEvent{
+		Action:      ActionPlay,
+		playMember:  "205142",
+		ResourceCat: "伦理片",
+	}
+	if m := resolveClassifyMember(evtPlay); m != "伦理片" {
+		t.Fatalf("expected '伦理片', got '%s'", m)
+	}
+
+	// 2. 显式分类浏览
+	evtClassify := &AccessEvent{
+		Action:   ActionClassify,
+		Resource: "24",
+	}
+	if m := resolveClassifyMember(evtClassify); m != "24" {
+		t.Fatalf("expected '24', got '%s'", m)
+	}
+}
+
 func TestIPPreviewAndHash(t *testing.T) {
 	config.AccessIPSalt = []byte("test-salt")
 	if IPPreview("203.0.113.45") != "203.0.113.x" {

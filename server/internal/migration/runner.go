@@ -71,6 +71,11 @@ var migrations = []Migration{
 		Name:    "add format column to film_sources and fill defaults",
 		Run:     migrateAddFilmSourceFormatColumn,
 	},
+	{
+		Version: "20260924_add_film_source_created_at_column",
+		Name:    "add created_at column to film_sources and fill sequential timestamps",
+		Run:     migrateAddFilmSourceCreatedAtColumn,
+	},
 }
 
 // RunAutoMigrations 顺序执行尚未执行的历史版本迁移，并持久化到 schema_migrations 表
@@ -289,3 +294,27 @@ func migrateAddFilmSourceFormatColumn(db *gorm.DB) error {
 	return nil
 }
 
+func migrateAddFilmSourceCreatedAtColumn(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&model.FilmSource{}) {
+		if !migrator.HasColumn(&model.FilmSource{}, "created_at") {
+			if err := migrator.AddColumn(&model.FilmSource{}, "created_at"); err != nil {
+				return err
+			}
+		}
+		var list []model.FilmSource
+		if err := db.Order("grade ASC, id ASC").Find(&list).Error; err != nil {
+			return err
+		}
+		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		for i, s := range list {
+			if s.CreatedAt.IsZero() {
+				t := base.Add(time.Duration(i+1) * time.Second)
+				if err := db.Table(model.TableFilmSource).Where("id = ?", s.Id).Update("created_at", t).Error; err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
