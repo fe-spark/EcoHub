@@ -12,6 +12,7 @@ export interface FilmSource {
   lastCollectTime?: string;
   progress?: CollectProgress | null;
   proxyEnabled?: boolean;
+  createdAt?: string;
 }
 
 export type CollectProgressStatus =

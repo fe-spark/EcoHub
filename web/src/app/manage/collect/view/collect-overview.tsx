@@ -24,6 +24,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
+    createdAt: item.createdAt,
   };
 }
 

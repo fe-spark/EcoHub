@@ -100,3 +100,45 @@ func TestDropSnapDeletedAtIndex_AlwaysDroppedAfterAutoMigrate(t *testing.T) {
 		t.Fatal("leftover deleted_at index should be dropped on every RunAutoMigrations")
 	}
 }
+
+func TestMigrateAddFilmSourceCreatedAtColumn_BackfillExisting(t *testing.T) {
+	testDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("failed to open test sqlite: %v", err)
+	}
+
+	// 模拟升级前已创建表，且插入没有 created_at 时间的历史采集站数据
+	if err := testDB.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatalf("AutoMigrate failed: %v", err)
+	}
+
+	if err := testDB.Exec("INSERT INTO film_sources (id, name, uri, grade, state) VALUES ('s1', 'Master', 'https://m.com', 1, 1), ('s2', 'Slave1', 'https://s1.com', 2, 1), ('s3', 'Slave2', 'https://s2.com', 2, 1)").Error; err != nil {
+		t.Fatalf("insert existing sources failed: %v", err)
+	}
+
+	// 执行回填迁移
+	if err := migrateAddFilmSourceCreatedAtColumn(testDB); err != nil {
+		t.Fatalf("migrateAddFilmSourceCreatedAtColumn failed: %v", err)
+	}
+
+	var list []model.FilmSource
+	if err := testDB.Order("grade ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+		t.Fatalf("query list failed: %v", err)
+	}
+
+	if len(list) != 3 {
+		t.Fatalf("expected 3 sources, got %d", len(list))
+	}
+
+	for i, s := range list {
+		if s.CreatedAt.IsZero() {
+			t.Fatalf("expected source %s CreatedAt to be non-zero, got zero", s.Id)
+		}
+		if i > 0 && !s.CreatedAt.After(list[i-1].CreatedAt) {
+			t.Fatalf("expected source %d CreatedAt (%v) to be strictly after previous source (%v)", i, s.CreatedAt, list[i-1].CreatedAt)
+		}
+	}
+}
+

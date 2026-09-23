@@ -2,12 +2,59 @@ package access
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 )
+
+func resolveClassifyMember(evt *AccessEvent) string {
+	if evt == nil {
+		return ""
+	}
+	// 1. 分类浏览 / 筛选行为
+	if evt.Action == ActionClassify {
+		res := strings.TrimSpace(evt.Resource)
+		if res != "" && res != "list" && res != "config" {
+			if _, ok := parseFilmID(res); ok {
+				return res
+			}
+			if catId, found := resolveCategoryIDByName(res); found {
+				return strconv.FormatInt(catId, 10)
+			}
+			return res
+		}
+		if evt.ResourceCat != "" {
+			trimmedCat := strings.TrimSpace(evt.ResourceCat)
+			if catId, found := resolveCategoryIDByName(trimmedCat); found {
+				return strconv.FormatInt(catId, 10)
+			}
+			return trimmedCat
+		}
+		return ""
+	}
+
+	// 2. 影视点播行为：根据影片分类反哺分类热度
+	if evt.Action == ActionPlay || evt.playMember != "" {
+		cat := strings.TrimSpace(evt.ResourceCat)
+		if cat == "" && evt.playMember != "" {
+			if id, ok := parseFilmID(evt.playMember); ok {
+				if meta, found := getFilmMetaFromMemory(id); found && meta.Category != "" {
+					cat = strings.TrimSpace(meta.Category)
+				}
+			}
+		}
+		if cat != "" {
+			if catId, found := resolveCategoryIDByName(cat); found {
+				return strconv.FormatInt(catId, 10)
+			}
+			return cat
+		}
+	}
+	return ""
+}
 
 func writeEvent(evt *AccessEvent) {
 	if evt == nil || db.Rdb == nil {
@@ -104,14 +151,15 @@ func writeEvent(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, tvplk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, tvplk, ttlDay)
 		}
-		if evt.Action == ActionClassify && evt.Resource != "" {
+		tvboxClassifyMember := resolveClassifyMember(evt)
+		if tvboxClassifyMember != "" {
 			tck := topClassifyKey(day)
-			pipe.ZIncrBy(ctx, tck, 1, evt.Resource)
+			pipe.ZIncrBy(ctx, tck, 1, tvboxClassifyMember)
 			pipe.ZRemRangeByRank(ctx, tck, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, tck, ttlDay)
 
 			tvck := tvboxTopClassifyKey(day)
-			pipe.ZIncrBy(ctx, tvck, 1, evt.Resource)
+			pipe.ZIncrBy(ctx, tvck, 1, tvboxClassifyMember)
 			pipe.ZRemRangeByRank(ctx, tvck, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, tvck, ttlDay)
 		}
@@ -227,9 +275,10 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, wplk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, wplk, ttlDay)
 		}
-		if evt.Action == ActionClassify && evt.Resource != "" {
+		classifyMember := resolveClassifyMember(evt)
+		if classifyMember != "" {
 			wck := webTopClassifyKey(day)
-			pipe.ZIncrBy(ctx, wck, 1, evt.Resource)
+			pipe.ZIncrBy(ctx, wck, 1, classifyMember)
 			pipe.ZRemRangeByRank(ctx, wck, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, wck, ttlDay)
 		}
@@ -319,14 +368,15 @@ func writePageView(evt *AccessEvent) {
 			pipe.ZRemRangeByRank(ctx, applk, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, applk, ttlDay)
 		}
-		if evt.Action == ActionClassify && evt.Resource != "" {
+		classifyMember := resolveClassifyMember(evt)
+		if classifyMember != "" {
 			ack := appAllTopClassifyKey(day)
-			pipe.ZIncrBy(ctx, ack, 1, evt.Resource)
+			pipe.ZIncrBy(ctx, ack, 1, classifyMember)
 			pipe.ZRemRangeByRank(ctx, ack, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, ack, ttlDay)
 
 			apck := appTopClassifyKey(platform, day)
-			pipe.ZIncrBy(ctx, apck, 1, evt.Resource)
+			pipe.ZIncrBy(ctx, apck, 1, classifyMember)
 			pipe.ZRemRangeByRank(ctx, apck, 0, int64(-zsetKeep-1))
 			pipe.ExpireNX(ctx, apck, ttlDay)
 		}
@@ -344,9 +394,10 @@ func writePageView(evt *AccessEvent) {
 		pipe.ZRemRangeByRank(ctx, plk, 0, int64(-zsetKeep-1))
 		pipe.ExpireNX(ctx, plk, ttlDay)
 	}
-	if evt.Action == ActionClassify && evt.Resource != "" {
+	globalClassifyMember := resolveClassifyMember(evt)
+	if globalClassifyMember != "" {
 		tck := topClassifyKey(day)
-		pipe.ZIncrBy(ctx, tck, 1, evt.Resource)
+		pipe.ZIncrBy(ctx, tck, 1, globalClassifyMember)
 		pipe.ZRemRangeByRank(ctx, tck, 0, int64(-zsetKeep-1))
 		pipe.ExpireNX(ctx, tck, ttlDay)
 	}

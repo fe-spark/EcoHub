@@ -98,6 +98,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
     proxyEnabled: Boolean(item.proxyEnabled),
+    createdAt: item.createdAt,
   };
 }
 

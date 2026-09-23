@@ -3,6 +3,7 @@ package access
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -242,10 +243,43 @@ func takePlayTops(items []TopItem, limit int) []TopItem {
 }
 
 var (
-	catNameCacheMu sync.RWMutex
-	catNameCache   = map[int64]string{}
-	catNameCacheAt time.Time
+	catNameCacheMu   sync.RWMutex
+	catNameCache     = map[int64]string{}
+	catIdByNameCache = map[string]int64{}
+	catNameCacheAt   time.Time
 )
+
+func resolveCategoryIDByName(name string) (int64, bool) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return 0, false
+	}
+	catNameCacheMu.RLock()
+	if time.Since(catNameCacheAt) < 5*time.Minute {
+		if id, ok := catIdByNameCache[name]; ok && id > 0 {
+			catNameCacheMu.RUnlock()
+			return id, true
+		}
+	}
+	catNameCacheMu.RUnlock()
+
+	if db.Mdb == nil {
+		return 0, false
+	}
+
+	var cat model.Category
+	if err := db.Mdb.Model(&model.Category{}).
+		Select("id, name").
+		Where("name = ?", name).
+		First(&cat).Error; err == nil && cat.Id > 0 {
+		catNameCacheMu.Lock()
+		catNameCache[cat.Id] = cat.Name
+		catIdByNameCache[cat.Name] = cat.Id
+		catNameCacheMu.Unlock()
+		return cat.Id, true
+	}
+	return 0, false
+}
 
 func resolveCategoryNames(ids []int64) map[int64]string {
 	if len(ids) == 0 {
@@ -280,10 +314,12 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 		catNameCacheMu.Lock()
 		if time.Since(catNameCacheAt) >= 5*time.Minute {
 			catNameCache = map[int64]string{}
+			catIdByNameCache = map[string]int64{}
 			catNameCacheAt = time.Now()
 		}
 		for _, c := range cats {
 			catNameCache[c.Id] = c.Name
+			catIdByNameCache[c.Name] = c.Id
 			result[c.Id] = c.Name
 		}
 		// 缓存占位防穿透：库中未查到的 ID 记录占位符，防止无效/已删除 ID 高频打库
@@ -300,7 +336,7 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 	return result
 }
 
-// enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤非数字 ID 的脏数据（如历史遗留的 list/config 等）
+// enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤噪声数据，同时兼容纯数字 ID 与真实分类名称
 func enrichClassifyTopItems(items []TopItem) []TopItem {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
@@ -315,22 +351,43 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 	catMap := resolveCategoryNames(ids)
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
-		id, ok := parseFilmID(it.Key)
-		if !ok {
-			// 直接丢弃非数字 member（如历史遗留的 "list", "config" 等脏数据）
+		trimmedKey := strings.TrimSpace(it.Key)
+		if trimmedKey == "" || trimmedKey == "list" || trimmedKey == "config" {
+			// 直接丢弃历史遗留的 "list", "config" 等无意义噪声
 			continue
 		}
-		it.Key = strconv.FormatInt(id, 10)
-		if it.Category == "" || strings.HasPrefix(it.Category, "分类 #") {
-			if name, ok := catMap[id]; ok && name != "" {
-				it.Category = name
+
+		id, ok := parseFilmID(trimmedKey)
+		if ok {
+			it.Key = strconv.FormatInt(id, 10)
+			if it.Category == "" || strings.HasPrefix(it.Category, "分类 #") {
+				if name, ok := catMap[id]; ok && name != "" {
+					it.Category = name
+				}
 			}
-		}
-		if it.Title == "" || strings.HasPrefix(it.Title, "分类 #") {
-			if it.Category != "" {
-				it.Title = it.Category
+			if it.Title == "" || strings.HasPrefix(it.Title, "分类 #") {
+				if it.Category != "" {
+					it.Title = it.Category
+				} else {
+					it.Title = fmt.Sprintf("分类 #%d", id)
+				}
+			}
+		} else {
+			// 非数字 member（例如分类名 "伦理片"、"电影"）
+			// 尝试反查其分类 ID（若在 Category 表中存在则标准化绑定）
+			if catId, found := resolveCategoryIDByName(trimmedKey); found {
+				it.Key = strconv.FormatInt(catId, 10)
+				it.Category = trimmedKey
+				it.Title = trimmedKey
 			} else {
-				it.Title = fmt.Sprintf("分类 #%d", id)
+				// 若不是已知 ID，但为非噪声分类名，予以保留并正常展示
+				it.Key = trimmedKey
+				if it.Category == "" {
+					it.Category = trimmedKey
+				}
+				if it.Title == "" {
+					it.Title = trimmedKey
+				}
 			}
 		}
 		validItems = append(validItems, it)
@@ -338,6 +395,30 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 	return validItems
 }
 
+func mergeClassifyItems(items []TopItem) []TopItem {
+	if len(items) <= 1 {
+		return items
+	}
+	merged := make([]TopItem, 0, len(items))
+	idxMap := make(map[string]int, len(items))
+	for _, it := range items {
+		lookupKey := it.Key
+		if it.Title != "" {
+			lookupKey = it.Title
+		}
+		if idx, exists := idxMap[lookupKey]; exists {
+			merged[idx].Count += it.Count
+		} else {
+			idxMap[lookupKey] = len(merged)
+			merged = append(merged, it)
+		}
+	}
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Count > merged[j].Count
+	})
+	return merged
+}
+
 func takeClassifyTops(items []TopItem, limit int) []TopItem {
-	return limitTopItems(enrichClassifyTopItems(items), limit)
+	return limitTopItems(mergeClassifyItems(enrichClassifyTopItems(items)), limit)
 }

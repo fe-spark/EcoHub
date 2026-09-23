@@ -129,24 +129,29 @@ func snapshotAccessEvent(evt *AccessEvent) {
 	}
 
 	if evt.Action == ActionPlay || strings.HasPrefix(evt.Path, "/api/filmPlayInfo") || isTvboxPlay(evt.Path, evt.Query) {
-		// 若已有合法片名快照（如客户端/上游已提供），直接复用，杜绝重复查库
-		if evt.ResourceTitle != "" && !strings.HasPrefix(evt.ResourceTitle, "影片 #") {
-			return
-		}
 		id, ok := parseFilmID(res)
 		if !ok {
 			return
 		}
-		// 写入链路严禁同步查库阻断采集协程，仅从纯内存缓存中尝试获取，未命中则保留空值待查询端批量懒补齐
-		m, found := getFilmMetaFromMemory(id)
-		if !found || strings.HasPrefix(m.Title, "影片 #") {
+		// 若片名、海报、分类均已完整提供，直接复用
+		if evt.ResourceTitle != "" && !strings.HasPrefix(evt.ResourceTitle, "影片 #") &&
+			evt.ResourceCat != "" && evt.ResourcePoster != "" {
 			return
 		}
-		evt.ResourceTitle = m.Title
-		if p := sanitizePosterURL(m.Poster); p != "" {
-			evt.ResourcePoster = p
+		// 写入链路严禁同步查库阻断采集协程，仅从纯内存缓存中尝试获取，未命中则保留空值待查询端批量懒补齐
+		m, found := getFilmMetaFromMemory(id)
+		if !found {
+			return
 		}
-		if m.Category != "" {
+		if evt.ResourceTitle == "" || strings.HasPrefix(evt.ResourceTitle, "影片 #") {
+			if !strings.HasPrefix(m.Title, "影片 #") {
+				evt.ResourceTitle = m.Title
+			}
+		}
+		if evt.ResourcePoster == "" && m.Poster != "" {
+			evt.ResourcePoster = sanitizePosterURL(m.Poster)
+		}
+		if evt.ResourceCat == "" && m.Category != "" {
 			evt.ResourceCat = m.Category
 		}
 		return
