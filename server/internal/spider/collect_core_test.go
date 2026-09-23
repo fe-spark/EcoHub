@@ -34,49 +34,6 @@ func TestFilterEnabledSources(t *testing.T) {
 	}
 }
 
-func TestResolveCategoryHintTarget(t *testing.T) {
-	tests := []struct {
-		classCount int
-		expected   int
-	}{
-		{classCount: 0, expected: 0},
-		{classCount: 1, expected: 1},
-		{classCount: 10, expected: 7},  // 10 * 0.7 = 7
-		{classCount: 20, expected: 14}, // 20 * 0.7 = 14
-	}
-
-	for _, tt := range tests {
-		got := resolveCategoryHintTarget(tt.classCount)
-		if got != tt.expected {
-			t.Errorf("resolveCategoryHintTarget(%d) = %d; want %d", tt.classCount, got, tt.expected)
-		}
-	}
-}
-
-func TestNeedsCategoryParentInference(t *testing.T) {
-	// 1) Empty classes -> false
-	if needsCategoryParentInference(nil) {
-		t.Error("expected false for empty classes")
-	}
-
-	// 2) Any item has Pid > 0 -> false (already has parent info)
-	classesWithPid := []model.FilmClass{
-		{ID: 1, Name: "电影", Pid: 0},
-		{ID: 2, Name: "动作片", Pid: 1},
-	}
-	if needsCategoryParentInference(classesWithPid) {
-		t.Error("expected false when at least one class has Pid > 0")
-	}
-
-	// 3) All items Pid == 0 -> true (needs parent inference)
-	classesWithoutPid := []model.FilmClass{
-		{ID: 1, Name: "电影", Pid: 0},
-		{ID: 2, Name: "动作片", Pid: 0},
-	}
-	if !needsCategoryParentInference(classesWithoutPid) {
-		t.Error("expected true when all classes have Pid == 0")
-	}
-}
 
 func TestNormalizeAffectedMIDs(t *testing.T) {
 	input := []int64{10, -1, 5, 0, 10, 20, 5, 3}

@@ -7,6 +7,7 @@ export interface FilmSource {
   isPosterSource?: boolean;
   interval: number;
   cd?: number;
+  format?: "json" | "xml";
   domainReplaceRules?: string;
   lastCollectTime?: string;
   progress?: CollectProgress | null;
@@ -139,6 +140,7 @@ export interface SourceFormValues {
   uri: string;
   state: boolean;
   grade: number;
+  format: "json" | "xml";
   isPosterSource: boolean;
   interval: number;
   cd: number;
@@ -150,6 +152,7 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   uri: "",
   state: false,
   grade: 1,
+  format: "json",
   isPosterSource: false,
   interval: 0,
   cd: 24,

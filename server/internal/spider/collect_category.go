@@ -51,7 +51,7 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 	if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
 		req.ProxyURL = proxy
 	}
-	categoryTree, err := spiderCore.GetCategoryTree(req)
+	categoryTree, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {
 		return fmt.Errorf("获取主站分类树失败: %w", err)
 	}

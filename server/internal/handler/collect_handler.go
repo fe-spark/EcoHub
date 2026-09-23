@@ -49,7 +49,7 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		return
 	}
 	if err := testFilmSourceAPI(body.FilmSource, body.UseProxy); err != nil {
-		dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	if err := service.CollectSvc.SaveFilmSource(body.FilmSource); err != nil {
@@ -93,11 +93,9 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
 		return
 	}
-	if fs.Uri != s.Uri {
-		if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
-			dto.Failed(fmt.Sprint("资源接口测试失败: ", err.Error()), c)
-			return
-		}
+	if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
 	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
