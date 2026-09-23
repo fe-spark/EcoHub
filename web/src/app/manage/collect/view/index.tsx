@@ -748,9 +748,6 @@ export default function CollectManagePageView() {
   };
 
   const askProxyChoice = (): Promise<boolean | null> => {
-    if (proxyChoiceRef.current !== null) {
-      return Promise.resolve(proxyChoiceRef.current);
-    }
     return new Promise((resolve) => {
       void (async () => {
         let enabled = false;
