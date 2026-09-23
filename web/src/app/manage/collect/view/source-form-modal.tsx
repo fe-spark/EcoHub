@@ -1,7 +1,7 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch } from "antd";
+import { Button, Form, Input, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
-import { collectDuration, type SourceFormValues } from "./types";
+import type { SourceFormValues } from "./types";
 
 function isDomainReplaceRuleLine(line: string): boolean {
   let from = "";
@@ -49,6 +49,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
   );
+  const isMasterEdit = mode === "edit" && initialValues.grade === 0;
 
   useEffect(() => {
     if (!open) {
@@ -121,35 +122,29 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         <Form.Item
           label="采集站类型"
           name="grade"
-          tooltip="系统只能有一个主采集站。若将当前站点设为主站，原主站会自动降级为附属采集站，并会清空主站数据重新初始化。"
+          tooltip={
+            isMasterEdit
+              ? "系统必须保留一个主站，主站不可直接降级；如需更换主站，请将其他附属站设为主站。"
+              : "系统只能有一个主采集站。若将当前站点设为主站，原主站会自动降级为附属采集站，并会重新同步分类树。"
+          }
         >
           <Radio.Group>
             <Radio value={0}>主采集站</Radio>
-            <Radio value={1}>附属采集站</Radio>
+            <Radio value={1} disabled={isMasterEdit}>
+              附属采集站
+            </Radio>
           </Radio.Group>
         </Form.Item>
-        <Space style={{ display: "flex" }} align="start">
-          <Form.Item
-            label="采集时间间隔 (毫秒)"
-            name="interval"
-            tooltip="每次分页抓取之间的等待时间，单位为毫秒。默认为 0，表示不等待立即抓取下一页；若采集站有防爬频控或返回限流错误，建议设置为 500 ~ 2000 毫秒。"
-          >
-            <InputNumber min={0} step={100} style={{ width: "100%" }} />
-          </Form.Item>
-          <Form.Item
-            label="采集时长"
-            name="cd"
-            tooltip="定时自动采集与单站采集时，默认抓取多长时间内更新的数据。单位为小时。"
-          >
-            <Select style={{ width: 140 }}>
-              {collectDuration.map((item) => (
-                <Select.Option key={item.time} value={item.time}>
-                  {item.label}
-                </Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-        </Space>
+        <Form.Item
+          label="接口格式"
+          name="format"
+          tooltip="采集源返回的数据协议。大部分苹果 CMS 资源站支持 JSON 格式；部分特定或早期站点仅支持 XML 格式。"
+        >
+          <Radio.Group>
+            <Radio value="json">JSON 格式</Radio>
+            <Radio value="xml">XML 格式</Radio>
+          </Radio.Group>
+        </Form.Item>
         <Form.Item
           label="播放链接域名替换规则"
           name="domainReplaceRules"

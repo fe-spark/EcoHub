@@ -93,6 +93,11 @@ export default function CollectSourceCard({
                 代理
               </Tag>
             ) : null}
+            {record.format === "xml" ? (
+              <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>
+                XML
+              </Tag>
+            ) : null}
           </div>
           <Tooltip title={record.uri}>
             <a
@@ -210,7 +215,7 @@ export default function CollectSourceCard({
               />
             </Tooltip>
             {isMaster ? (
-              <Tooltip title="主站不可直接删除，请先改为附属站">
+              <Tooltip title="主站不可删除，请先将其他附属站设为主站">
                 <Button danger icon={<DeleteOutlined />} disabled />
               </Tooltip>
             ) : isRunning ? (

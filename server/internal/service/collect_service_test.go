@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -134,7 +135,7 @@ func TestCollectService_UpdateFilmSource_MasterDowngrade(t *testing.T) {
 	ts := mockCollectServer()
 	defer ts.Close()
 
-	// 将 master_old 降级为附属站（触发 masterDowngrade=true）
+	// 试图将 master_old 直接降级为附属站，应当被拦截并拒绝
 	demoted := model.FilmSource{
 		Id:    "master_old",
 		Name:  "旧主站降级",
@@ -144,16 +145,19 @@ func TestCollectService_UpdateFilmSource_MasterDowngrade(t *testing.T) {
 	}
 
 	err := srv.UpdateFilmSource(demoted)
-	if err != nil {
-		t.Fatalf("UpdateFilmSource failed: %v", err)
+	if err == nil {
+		t.Fatal("expected error when downgrading master source directly, got nil")
+	}
+	if !strings.Contains(err.Error(), "系统必须保留一个主站，主站不可直接降级为附属站") {
+		t.Fatalf("unexpected error message: %v", err)
 	}
 
 	var updated model.FilmSource
 	if err := gdb.First(&updated, "id = ?", "master_old").Error; err != nil {
 		t.Fatalf("query updated master_old: %v", err)
 	}
-	if updated.Grade != model.SlaveCollect {
-		t.Fatalf("expected master_old grade to be SlaveCollect, got %v", updated.Grade)
+	if updated.Grade != model.MasterCollect {
+		t.Fatalf("expected master_old grade to remain MasterCollect, got %v", updated.Grade)
 	}
 
 	// 排空在途异步通知协程，确保测试结束前完全执行完毕
@@ -234,3 +238,54 @@ func TestCollectService_FailureRecords(t *testing.T) {
 		t.Fatalf("expected 0 records after ClearAllRecord, got %d", len(listAfterTruncate))
 	}
 }
+
+func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	srv := &CollectService{}
+
+	s := model.FilmSource{
+		Id:     "src_format_test",
+		Name:   "格式测试源",
+		Uri:    "https://example.com/api",
+		State:  true,
+		Grade:  model.SlaveCollect,
+		Format: model.SourceFormatJSON,
+	}
+	gdb.Create(&s)
+
+	// 添加一条该源的失败记录
+	fr := model.FailureRecord{
+		OriginId:   s.Id,
+		OriginName: s.Name,
+		PageNumber: 1,
+		Status:     model.FailureRecordStatusPending,
+	}
+	gdb.Create(&fr)
+
+	// 更新为 XML 格式
+	sUpdate := s
+	sUpdate.Format = model.SourceFormatXML
+	labels := sourceChangeLabels(s, sUpdate)
+	foundFormatLabel := false
+	for _, l := range labels {
+		if l == "接口格式: JSON → XML" {
+			foundFormatLabel = true
+			break
+		}
+	}
+	if !foundFormatLabel {
+		t.Fatalf("expected format change label '接口格式: JSON → XML', got: %v", labels)
+	}
+
+	if err := srv.UpdateFilmSource(sUpdate); err != nil {
+		t.Fatalf("UpdateFilmSource failed: %v", err)
+	}
+
+	// 验证失败记录已被清空
+	var remainingFrCount int64
+	gdb.Model(&model.FailureRecord{}).Where("origin_id = ?", s.Id).Count(&remainingFrCount)
+	if remainingFrCount != 0 {
+		t.Fatalf("expected failure records to be cleaned after format change, got %d", remainingFrCount)
+	}
+}
+

@@ -66,6 +66,11 @@ const (
 	SlaveCollect
 )
 
+const (
+	SourceFormatJSON = "json"
+	SourceFormatXML  = "xml"
+)
+
 // FilmSource 影视站点信息保存结构体
 type FilmSource struct {
 	Id    string      `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
@@ -78,7 +83,15 @@ type FilmSource struct {
 	IsPosterSource     bool   `json:"isPosterSource" gorm:"default:false"` // 是否为海报/封面图源（全局单选）
 	Interval           int    `json:"interval"`                            // 采集时间间隔 单位/ms
 	Cd                 int    `json:"cd"`                                  // 采集时长 单位/小时
+	Format             string `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
 	DomainReplaceRules string `json:"domainReplaceRules" gorm:"type:text"` // 播放链接域名替换规则 (每行一条: old.com => new.com)
+}
+
+func (f *FilmSource) ResolveFormat() string {
+	if f != nil && f.Format == SourceFormatXML {
+		return SourceFormatXML
+	}
+	return SourceFormatJSON
 }
 
 func (f *FilmSource) TableName() string {

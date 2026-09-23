@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"server/internal/config"
@@ -93,14 +94,20 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 	masters := repository.GetCollectSourceListByGrade(model.MasterCollect)
 
-	// 1. 安全校验：如果有任何采集任务正在运行，禁止修改等级或 URI，防止引发元数据清空冲突
-	isGradeChanged := old.Grade != source.Grade
-	isUriChanged := old.Uri != source.Uri
-	if (isGradeChanged || isUriChanged) && spider.IsAnyTaskRunning() {
-		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行等级或地址变更操作")
+	// 0. 主站保护规则：系统必须保留一个主站，主站不可直接降级为附属站
+	if old.Grade == model.MasterCollect && source.Grade != model.MasterCollect {
+		return errors.New("系统必须保留一个主站，主站不可直接降级为附属站")
 	}
 
-	// 2. 强制单主站机制：如果新等级设为主站，则自动将旧主站降级
+	// 1. 安全校验：如果有任何采集任务正在运行，禁止修改等级、URI 或数据协议，防止引发元数据清空或解析错乱
+	isGradeChanged := old.Grade != source.Grade
+	isUriChanged := old.Uri != source.Uri
+	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
+	if (isGradeChanged || isUriChanged || isFormatChanged) && spider.IsAnyTaskRunning() {
+		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行等级、地址或协议变更操作")
+	}
+
+	// 2. 强制单主站机制：附属站提升为主站时，自动将旧主站降级为附属站
 	if source.Grade == model.MasterCollect && old.Grade != model.MasterCollect {
 		log.Printf("[Collect] 站点 %s 提升为主采集站，保留附属站播放列表并降级现有主站...", source.Name)
 	}
@@ -110,11 +117,11 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	masterLookup := old.Grade == model.SlaveCollect && source.Grade == model.MasterCollect
 	// 情况B: 依然是主站，但 URI 发生变更
 	masterUriChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && old.Uri != source.Uri
-	// 情况C: 原来是主站，现在降级为附属站
-	masterDowngrade := old.Grade == model.MasterCollect && source.Grade != model.MasterCollect
+	// 情况C: 依然是主站，但数据格式发生变更
+	masterFormatChanged := old.Grade == model.MasterCollect && source.Grade == model.MasterCollect && isFormatChanged
 
-	if masterLookup || masterUriChanged || masterDowngrade {
-		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v, downgrade=%v)，进行数据重置...", masterLookup, masterUriChanged, masterDowngrade)
+	if masterLookup || masterUriChanged || masterFormatChanged {
+		log.Printf("[Collect] 检测到主站变更 (lookup=%v, uriChanged=%v, formatChanged=%v)，进行数据重置...", masterLookup, masterUriChanged, masterFormatChanged)
 		// 强制中断所有任务（双重保险）
 		spider.StopAllTasks()
 	}
@@ -124,9 +131,6 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		affectedSourceIDs = append(affectedSourceIDs, master.Id)
 	}
 	affectedSourceIDs = append(affectedSourceIDs, source.Id)
-	if masterDowngrade {
-		affectedSourceIDs = append(affectedSourceIDs, old.Id)
-	}
 
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if masterLookup {
@@ -144,15 +148,9 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 				return errors.New("清理关联失败记录失败，请重试")
 			}
 		}
-		if masterDowngrade {
-			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, old.Id); err != nil {
-				syslog.Errorf("[Collect] 清理降级主站关联失败记录失败: %v", err)
-				return errors.New("清理降级主站关联失败记录失败，请重试")
-			}
-		}
 
-		// 接口地址变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
-		if isUriChanged {
+		// 接口地址或数据格式变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
+		if isUriChanged || isFormatChanged {
 			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
 				syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
 				return errors.New("清理原失败记录失败，请重试")
@@ -165,7 +163,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		return err
 	}
 
-	if masterLookup || masterUriChanged || masterDowngrade {
+	if masterLookup || masterUriChanged || masterFormatChanged {
 		if err := filmrepo.ClearMasterDataBySourceIDsFast(affectedSourceIDs...); err != nil {
 			syslog.Errorf("[Collect] 主站切换数据清理失败: %v", err)
 			return errors.New("主站切换数据清理失败，请重试")
@@ -178,15 +176,14 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 
 	// 分类树只跟主站走（主站未启用也可同步）；无主站则不同步、不从附属站构建
-	if masterLookup || masterUriChanged {
+	if masterLookup || masterUriChanged || masterFormatChanged {
 		if source.Grade == model.MasterCollect {
 			if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 				return syncErr
 			}
 		}
-	}
-	// 主站启用/停用变更：停用后仍可用该主站 URI 同步分类；降级后若无主站则 Sync 会失败（符合「无主站无分类树」）
-	if source.Grade == model.MasterCollect && old.State != source.State {
+	} else if source.Grade == model.MasterCollect && old.State != source.State {
+		// 主站启用/停用变更：停用后仍可用该主站 URI 同步分类；降级后若无主站则 Sync 会失败（符合「无主站无分类树」）
 		if syncErr := SpiderSvc.SyncMasterCategoryTree(); syncErr != nil {
 			return syncErr
 		}
@@ -231,6 +228,9 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	}
 	if old.Grade != next.Grade {
 		changes = append(changes, fmt.Sprintf("站点类型: %s → %s", sourceGradeLabel(old.Grade), sourceGradeLabel(next.Grade)))
+	}
+	if old.ResolveFormat() != next.ResolveFormat() {
+		changes = append(changes, fmt.Sprintf("接口格式: %s → %s", strings.ToUpper(old.ResolveFormat()), strings.ToUpper(next.ResolveFormat())))
 	}
 	if old.Uri != next.Uri {
 		changes = append(changes, "接口地址已变更")
@@ -361,7 +361,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
 	if src.Grade == model.MasterCollect {
-		return errors.New("主站点无法直接删除, 请先降级为附属站点再进行删除")
+		return errors.New("主站点无法直接删除，请先将其他附属站设为主站后再删除")
 	}
 	if err := repository.DelCollectResource(id); err != nil {
 		return err
