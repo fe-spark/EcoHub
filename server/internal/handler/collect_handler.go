@@ -93,9 +93,13 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed("站点正在采集, 请先停止采集后再尝试编辑操作", c)
 		return
 	}
-	if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
-		dto.Failed(err.Error(), c)
-		return
+	isUriChanged := fs.Uri != s.Uri
+	isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
+	if isUriChanged || isFormatChanged {
+		if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
 	}
 	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)

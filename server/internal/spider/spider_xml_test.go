@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"golang.org/x/text/encoding/simplifiedchinese"
 	"server/internal/model"
 	"server/internal/utils"
 )
@@ -248,6 +249,140 @@ func TestXmlCollect_EmptyDDAndMultipleDL(t *testing.T) {
 	}
 	if movie.PlayFrom[0] != "m3u8" || movie.PlayFrom[1] != "yun" {
 		t.Errorf("expected [m3u8, yun], got %v", movie.PlayFrom)
+	}
+}
+
+func TestXmlCollect_MixedShareAndVideoLink(t *testing.T) {
+	xmlWithShare := `<?xml version="1.0" encoding="utf-8"?>
+<rss version="5.1">
+    <list page="1" pagecount="1" pagesize="20" recordcount="1">
+        <video>
+            <id>3001</id>
+            <name>测试网盘与直链混合</name>
+            <dl>
+                <dd flag="quark"><![CDATA[https://pan.quark.cn/s/abcdef123456]]></dd>
+                <dd flag="m3u8"><![CDATA[正片$https://example.com/play.m3u8]]></dd>
+            </dl>
+        </video>
+    </list>
+</rss>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=utf-8")
+		_, _ = w.Write([]byte(xmlWithShare))
+	}))
+	defer server.Close()
+
+	xc := &XmlCollect{}
+	r := utils.RequestInfo{Uri: server.URL}
+	details, err := xc.GetFilmDetail(r)
+	if err != nil {
+		t.Fatalf("GetFilmDetail failed: %v", err)
+	}
+	if len(details) != 1 {
+		t.Fatalf("expected 1 detail, got %d", len(details))
+	}
+	movie := details[0]
+	// 网盘非直链必须被过滤，PlayFrom 与 PlayList 必须严格对应且长度均为 1
+	if len(movie.PlayFrom) != 1 {
+		t.Fatalf("expected 1 playFrom source (share skipped), got %d (%v)", len(movie.PlayFrom), movie.PlayFrom)
+	}
+	if len(movie.PlayList) != 1 {
+		t.Fatalf("expected 1 playList group, got %d", len(movie.PlayList))
+	}
+	if movie.PlayFrom[0] != "m3u8" {
+		t.Errorf("expected playFrom to be [m3u8], got %v", movie.PlayFrom)
+	}
+}
+
+func TestXmlCollect_GBKEncoding(t *testing.T) {
+	gbkXMLText := `<?xml version="1.0" encoding="gb2312"?>
+<rss version="5.1">
+    <class>
+        <ty id="1">电影</ty>
+        <ty id="2">连续剧</ty>
+    </class>
+    <list page="1" pagecount="5" pagesize="20" recordcount="100">
+        <video>
+            <id>5001</id>
+            <name>测试GBK中文影片</name>
+            <dl>
+                <dd flag="m3u8"><![CDATA[第01集$https://example.com/gbk.m3u8]]></dd>
+            </dl>
+        </video>
+    </list>
+</rss>`
+
+	gbkBytes, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(gbkXMLText))
+	if err != nil {
+		t.Fatalf("encode GBK failed: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml; charset=gb2312")
+		_, _ = w.Write(gbkBytes)
+	}))
+	defer server.Close()
+
+	xc := &XmlCollect{}
+	r := utils.RequestInfo{Uri: server.URL}
+
+	// 1. GetCategoryTree
+	tree, err := xc.GetCategoryTree(r)
+	if err != nil {
+		t.Fatalf("GetCategoryTree with GBK failed: %v", err)
+	}
+	if tree == nil || len(tree.Children) == 0 {
+		t.Fatal("expected non-empty category tree for GBK source")
+	}
+
+	// 2. GetPageCount
+	pageCount, err := xc.GetPageCount(r)
+	if err != nil {
+		t.Fatalf("GetPageCount with GBK failed: %v", err)
+	}
+	if pageCount != 5 {
+		t.Fatalf("expected pagecount 5, got %d", pageCount)
+	}
+
+	// 3. GetFilmDetail
+	details, err := xc.GetFilmDetail(r)
+	if err != nil {
+		t.Fatalf("GetFilmDetail with GBK failed: %v", err)
+	}
+	if len(details) != 1 {
+		t.Fatalf("expected 1 detail, got %d", len(details))
+	}
+	if details[0].Name != "测试GBK中文影片" {
+		t.Fatalf("expected decoded name '测试GBK中文影片', got '%s'", details[0].Name)
+	}
+}
+
+func TestXmlCollect_HTMLResponseDetection(t *testing.T) {
+	htmlResp := `<!DOCTYPE html>
+<html>
+<head><title>502 Bad Gateway</title></head>
+<body><h1>502 Bad Gateway</h1><p>Cloudflare protection</p></body>
+</html>`
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(htmlResp))
+	}))
+	defer server.Close()
+
+	source := model.FilmSource{
+		Name:   "测试站",
+		Uri:    server.URL,
+		Format: model.SourceFormatJSON,
+	}
+
+	err := CollectApiTest(source)
+	if err == nil {
+		t.Fatal("expected test against HTML error response to fail")
+	}
+	if !strings.Contains(err.Error(), "接口返回了 HTML 网页内容") {
+		t.Fatalf("expected HTML warning message, got: %v", err)
 	}
 }
 

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"log"
@@ -416,10 +415,18 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 		return errors.New("测试失败, 接口返回数据为空")
 	}
 
-	expectedFormat := s.ResolveFormat()
-	isXML := resp[0] == '<'
+	lowerResp := bytes.ToLower(resp)
+	isHTML := bytes.HasPrefix(lowerResp, []byte("<!doctype html")) ||
+		bytes.HasPrefix(lowerResp, []byte("<html"))
+	isXML := (bytes.HasPrefix(lowerResp, []byte("<?xml")) ||
+		bytes.HasPrefix(lowerResp, []byte("<rss"))) && !isHTML
 	isJSON := resp[0] == '{' || resp[0] == '['
 
+	if isHTML {
+		return errors.New("接口返回了 HTML 网页内容，而非 API 数据（可能受 WAF 防火墙拦截或站点配置了人机验证）")
+	}
+
+	expectedFormat := s.ResolveFormat()
 	if expectedFormat == model.SourceFormatJSON {
 		if isXML {
 			return errors.New("接口返回为 XML 格式，与所选的 JSON 格式不一致，请切换为 XML 格式")
@@ -441,7 +448,7 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 		return errors.New("接口返回数据格式异常，无法解析为 XML 数据")
 	}
 	rss := XMLRSS{}
-	if err = xml.Unmarshal(resp, &rss); err != nil {
+	if err = unmarshalXMLWithCharset(resp, &rss); err != nil {
 		return errors.New(fmt.Sprint("接口返回 XML 结构异常，解析失败: ", err.Error()))
 	}
 	return nil

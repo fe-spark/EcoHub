@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"bytes"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"golang.org/x/net/html/charset"
 	"server/internal/model"
 	"server/internal/spider/converter"
 	"server/internal/utils"
@@ -81,6 +83,13 @@ type XMLDD struct {
 	URL  string `xml:",chardata"`
 }
 
+// unmarshalXMLWithCharset 使用支持字符集自动探测与转换的解码器解析 XML（支持 GBK/GB2312/UTF-8 等）
+func unmarshalXMLWithCharset(data []byte, v any) error {
+	decoder := xml.NewDecoder(bytes.NewReader(data))
+	decoder.CharsetReader = charset.NewReaderLabel
+	return decoder.Decode(v)
+}
+
 // XmlCollect 处理返回值为 XML 格式的苹果 CMS (MacCMS) 采集数据
 type XmlCollect struct{}
 
@@ -104,7 +113,7 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 	}
 
 	var rss XMLRSS
-	if err := xml.Unmarshal(r.Resp, &rss); err != nil {
+	if err := unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
 		return nil, fmt.Errorf("XML unmarshal error: %w", err)
 	}
 
@@ -147,17 +156,18 @@ func (xc *XmlCollect) GetPageCount(r utils.RequestInfo) (int, error) {
 	}
 
 	var rss XMLRSS
-	if err := xml.Unmarshal(r.Resp, &rss); err != nil {
+	if err := unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
 		return 0, fmt.Errorf("XML 反序列化失败: %w", err)
 	}
 	return rss.List.PageCount, nil
 }
 
 // GetFilmDetail 获取 XML 源单页影片明细
-func (xc *XmlCollect) GetFilmDetail(r utils.RequestInfo) ([]model.MovieDetail, error) {
+func (xc *XmlCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error) {
 	defer func() {
 		if e := recover(); e != nil {
-			log.Println("[Spider-XML] GetFilmDetail 异常恢复: ", e)
+			log.Printf("[Spider-XML] GetFilmDetail 异常恢复: %v", e)
+			err = fmt.Errorf("XML GetFilmDetail panic recovered: %v", e)
 		}
 	}()
 
@@ -176,12 +186,13 @@ func (xc *XmlCollect) GetFilmDetail(r utils.RequestInfo) ([]model.MovieDetail, e
 	}
 
 	var rss XMLRSS
-	if err := xml.Unmarshal(r.Resp, &rss); err != nil {
+	if err = unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
 		return nil, fmt.Errorf("XML 反序列化失败: %w", err)
 	}
 
 	filmDetails := convertXMLVideosToFilmDetails(rss.List.Videos)
-	return converter.ConvertFilmDetails(filmDetails), nil
+	list = converter.ConvertFilmDetails(filmDetails)
+	return list, nil
 }
 
 // convertXMLVideosToFilmDetails 将 XMLVideo 列表转化为中间模型 FilmDetail
@@ -199,6 +210,10 @@ func convertXMLVideosToFilmDetails(videos []XMLVideo) []model.FilmDetail {
 			for _, dd := range dl.DDs {
 				rawURL := strings.TrimSpace(dd.URL)
 				if rawURL == "" {
+					continue
+				}
+				// 过滤非视频直链（如网盘链接、纯网页链接等），防止与下游 PlayList 长度不一致导致播放源下标错位
+				if len(converter.ConvertPlayUrl(rawURL)) == 0 {
 					continue
 				}
 				from := strings.TrimSpace(dd.Flag)
