@@ -142,15 +142,15 @@ export interface SourceFormValues {
   grade: number;
   format: "json" | "xml";
   isPosterSource: boolean;
-  interval: number;
-  cd: number;
+  interval?: number;
+  cd?: number;
   domainReplaceRules?: string;
 }
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
   uri: "",
-  state: false,
+  state: true,
   grade: 1,
   format: "json",
   isPosterSource: false,

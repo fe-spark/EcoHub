@@ -1,7 +1,7 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Select, Switch } from "antd";
+import { Button, Form, Input, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
-import { collectDuration, type SourceFormValues } from "./types";
+import type { SourceFormValues } from "./types";
 
 function isDomainReplaceRuleLine(line: string): boolean {
   let from = "";
@@ -144,26 +144,6 @@ export default function SourceFormModal(props: SourceFormModalProps) {
             <Radio value="json">JSON 格式</Radio>
             <Radio value="xml">XML 格式</Radio>
           </Radio.Group>
-        </Form.Item>
-        <Form.Item
-          label="采集时间间隔 (毫秒)"
-          name="interval"
-          tooltip="每次分页抓取之间的等待时间，单位为毫秒。默认为 0，表示不等待立即抓取下一页；若采集站有防爬频控或返回限流错误，建议设置为 500 ~ 2000 毫秒。"
-        >
-          <InputNumber min={0} step={100} style={{ width: "100%" }} />
-        </Form.Item>
-        <Form.Item
-          label="采集时长"
-          name="cd"
-          tooltip="定时自动采集与单站采集时，默认抓取多长时间内更新的数据。单位为小时。"
-        >
-          <Select style={{ width: "100%" }}>
-            {collectDuration.map((item) => (
-              <Select.Option key={item.time} value={item.time}>
-                {item.label}
-              </Select.Option>
-            ))}
-          </Select>
         </Form.Item>
         <Form.Item
           label="播放链接域名替换规则"
