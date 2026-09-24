@@ -139,7 +139,7 @@ func LoadMovieMatchKeysByMids(mids []int64) map[int64][]string {
 
 func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 	keys = UniqueKeys(keys)
-	if len(keys) == 0 {
+	if len(keys) == 0 || db.Mdb == nil {
 		return nil
 	}
 

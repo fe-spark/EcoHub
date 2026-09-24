@@ -97,7 +97,7 @@ func SaveSitePlayList(sourceID string, list []model.MovieDetail) (shared.Collect
 		return shared.CollectWriteResult{}, nil
 	}
 
-	result, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes, matchedInfos, keysByMid)
+	result, err := scheduleSearchInfoRefreshByPlaylists(sourceID, list, changes, matchedInfos, keysByMid, detailMids)
 	if err != nil {
 		log.Printf("scheduleSearchInfoRefreshByPlaylists Error: %v", err)
 		return shared.CollectWriteResult{}, err
