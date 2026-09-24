@@ -3,7 +3,6 @@ package playlist
 import (
 	"fmt"
 	"log"
-	"sort"
 	"strings"
 	"time"
 
@@ -29,16 +28,27 @@ func scheduleSearchInfoRefreshByPlaylists(
 	changes []playlistChange,
 	infos []model.FilmIndex,
 	keysByMid map[int64][]string,
+	detailMids []int64,
 ) (shared.CollectWriteResult, error) {
 	var out shared.CollectWriteResult
-	if len(infos) == 0 {
+	if len(detailMids) != len(details) {
+		var err error
+		var matched []model.FilmIndex
+		detailMids, _, matched, keysByMid, _, err = matchSlaveDetailMids(details)
+		if err != nil {
+			return out, err
+		}
+		if len(infos) == 0 {
+			infos = matched
+		}
+	} else if len(infos) == 0 {
 		var err error
 		infos, err = loadMatchedSearchInfosByDetails(details)
 		if err != nil {
 			return out, err
 		}
 	}
-	if err := saveSlaveSourceMappingsWithKeys(sourceID, details, infos, keysByMid); err != nil {
+	if err := saveSlaveSourceMappingsWithKeys(sourceID, details, detailMids); err != nil {
 		return out, err
 	}
 	// 附属站海报同步：若当前源开启了 IsPosterSource，将高清海报同步写入主站影片并加入刷新列表
@@ -300,68 +310,38 @@ func pickBestMidsByKey(midsByKey map[string][]int64) map[string]int64 {
 	return out
 }
 
-func saveSlaveSourceMappingsWithKeys(sourceID string, details []model.MovieDetail, infos []model.FilmIndex, keysByMid map[int64][]string) error {
-	if len(details) == 0 || len(infos) == 0 {
-		return nil
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil
-	}
-
-	mids := make([]int64, 0, len(infos))
-	for _, info := range infos {
-		if info.Mid > 0 {
-			mids = append(mids, info.Mid)
-		}
-	}
-	if len(mids) == 0 {
-		return nil
-	}
-
-	globalMidByKey := make(map[string]int64, len(mids)*2)
-	if keysByMid == nil {
-		keysByMid = shared.LoadMovieMatchKeysByMids(mids)
-	}
-	sortedMids := make([]int64, 0, len(keysByMid))
-	for mid := range keysByMid {
-		sortedMids = append(sortedMids, mid)
-	}
-	sort.Slice(sortedMids, func(i, j int) bool {
-		return sortedMids[i] > sortedMids[j]
-	})
-	for _, mid := range sortedMids {
-		for _, key := range keysByMid[mid] {
-			if strings.TrimSpace(key) == "" {
-				continue
-			}
-			if _, exists := globalMidByKey[key]; !exists {
-				globalMidByKey[key] = mid
-			}
-		}
-	}
-	if len(globalMidByKey) == 0 {
-		return nil
-	}
-
-	mappings := make([]model.MovieSourceMapping, 0, len(details))
-	for _, detail := range details {
-		if detail.Id <= 0 {
-			continue
-		}
-		globalMid, ok := shared.ResolveSlaveGlobalMid(detail, globalMidByKey)
-		if !ok || globalMid <= 0 {
-			continue
-		}
-		mappings = append(mappings, model.MovieSourceMapping{
-			SourceId:  sourceID,
-			SourceMid: detail.Id,
-			GlobalMid: globalMid,
-		})
-	}
+func saveSlaveSourceMappingsWithKeys(sourceID string, details []model.MovieDetail, detailMids []int64) error {
+	mappings := buildSlaveSourceMappings(sourceID, details, detailMids)
 	if len(mappings) == 0 {
 		return nil
 	}
-
 	return shared.SaveMovieSourceMappingsTxE(db.Mdb, mappings)
+}
+
+// buildSlaveSourceMappings 只写挂上线路的详情：detailMids[i] 与 details[i] 对齐，没挂上就跳过。
+func buildSlaveSourceMappings(sourceID string, details []model.MovieDetail, detailMids []int64) []model.MovieSourceMapping {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(details) == 0 {
+		return nil
+	}
+	out := make([]model.MovieSourceMapping, 0, len(details))
+	seenSid := make(map[int64]struct{}, len(details))
+	for i, detail := range details {
+		if detail.Id <= 0 {
+			continue
+		}
+		if _, ok := seenSid[detail.Id]; ok {
+			continue
+		}
+		if i >= len(detailMids) || detailMids[i] <= 0 {
+			continue
+		}
+		seenSid[detail.Id] = struct{}{}
+		out = append(out, model.MovieSourceMapping{
+			SourceId:  sourceID,
+			SourceMid: detail.Id,
+			GlobalMid: detailMids[i],
+		})
+	}
+	return out
 }

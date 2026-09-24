@@ -227,6 +227,7 @@ func TestAssignCMSSearchLocalIDsKeepsOnlyMatchingSerial(t *testing.T) {
 		map[int64]int64{101: 9, 202: 9},
 		map[int64]model.FilmListSnapshot{9: animeSnap},
 		nil,
+		nil,
 	)
 	if cards[0].Id != 9 {
 		t.Fatalf("serial 牧神记 should keep local mid, got %d", cards[0].Id)
@@ -247,6 +248,7 @@ func TestAssignCMSSearchLocalIDsDropsAmbiguousSharedMid(t *testing.T) {
 		map[int64]int64{101: 9, 202: 9},
 		map[int64]model.FilmListSnapshot{9: snap},
 		nil,
+		nil,
 	)
 	if cards[0].Id != 0 || cards[1].Id != 0 {
 		t.Fatalf("two vod_ids mapped to one mid must both go live, got %+v", cards)
@@ -264,12 +266,41 @@ func TestAssignCMSSearchLocalIDsKeepsUniqueMatch(t *testing.T) {
 		map[int64]int64{101: 9},
 		map[int64]model.FilmListSnapshot{9: snap},
 		nil,
+		nil,
 	)
 	if cards[0].Id != 9 {
 		t.Fatalf("unique mapping should keep mid, got %d", cards[0].Id)
 	}
 	if cards[1].Id != 0 {
 		t.Fatalf("unmapped title must stay live, got %d", cards[1].Id)
+	}
+}
+
+func TestAssignCMSSearchLocalIDsBindsUnmappedSameTitleByYear(t *testing.T) {
+	anime := model.FilmListSnapshot{Mid: 47014, Name: "仙逆", CName: "中国动漫", Year: 2023, Remarks: "第159集", Director: "石头熊,冯毅"}
+	drama := model.FilmListSnapshot{Mid: 126574, Name: "仙逆", CName: "古装仙侠", Year: 2025, Remarks: "全集完结"}
+	cards := []model.MovieBasicInfo{
+		{Name: "仙逆", CName: "中国动漫", Year: "2023", Remarks: "第159集", Director: "石头熊,冯毅", SourceId: "subo", SourceMid: 101},
+		{Name: "仙逆", CName: "古装仙侠", Year: "2025", Remarks: "全集完结", SourceId: "subo", SourceMid: 202},
+	}
+	identitySnaps := map[int64]model.FilmListSnapshot{47014: anime, 126574: drama}
+	assignCMSSearchLocalIDs(cards, map[int64]int64{202: 126574}, map[int64]model.FilmListSnapshot{126574: drama}, nil, identitySnaps)
+	if cards[0].Id != 47014 {
+		t.Fatalf("unmapped 2023 仙逆 should bind local anime, got %d", cards[0].Id)
+	}
+	if cards[1].Id != 126574 {
+		t.Fatalf("mapped 2025 仙逆 should keep local drama, got %d", cards[1].Id)
+	}
+}
+
+func TestAssignCMSSearchLocalIDsDoesNotBindTheaterToSerial(t *testing.T) {
+	anime := model.FilmListSnapshot{Mid: 47014, Name: "仙逆", CName: "中国动漫", Year: 2023, Remarks: "第159集"}
+	cards := []model.MovieBasicInfo{
+		{Name: "仙逆剧场版-弑仙之战", CName: "中国动漫", Year: "2026", Remarks: "预告片", SourceMid: 303},
+	}
+	assignCMSSearchLocalIDs(cards, nil, nil, nil, map[int64]model.FilmListSnapshot{47014: anime})
+	if cards[0].Id != 0 {
+		t.Fatalf("theater title must not bind serial 仙逆, got %d", cards[0].Id)
 	}
 }
 

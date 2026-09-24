@@ -11,9 +11,6 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
-	filmshared "server/internal/repository/film/shared"
-	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/support"
 	"server/internal/spider"
 )
 
@@ -179,7 +176,7 @@ func searchCollectSourceCMS(sourceID, keyword string, current int) ([]model.Movi
 		}
 		list = append(list, card)
 	}
-	assignCMSSearchLocalIDs(list, localBySourceMid, snaps, detailsByID)
+	assignCMSSearchLocalIDs(list, localBySourceMid, snaps, detailsByID, loadCMSSearchIdentitySnaps(list, detailsByID))
 	if msg := cmsSearchMissingListMessage(pageData.Total, len(list)); msg != "" {
 		return list, pageData, msg
 	}
@@ -320,110 +317,6 @@ func resolveCMSMediaURL(raw, sourceURI string) string {
 		return base + raw
 	}
 	return base + "/" + raw
-}
-
-func resolveCMSLocalCards(source *model.FilmSource, sourceMids []int64) (map[int64]int64, map[int64]model.FilmListSnapshot) {
-	out := make(map[int64]int64, len(sourceMids))
-	snaps := make(map[int64]model.FilmListSnapshot, len(sourceMids))
-	if source == nil || len(sourceMids) == 0 {
-		return out, snaps
-	}
-	version := filmsnapshot.GetActiveReadModelVersion()
-	lookup := sourceMids
-	mapped := map[int64]int64{}
-	if source.Grade == model.MasterCollect {
-		for _, id := range sourceMids {
-			if id > 0 {
-				mapped[id] = id
-			}
-		}
-	} else {
-		mapped = filmshared.LoadGlobalMidsBySourceMids(source.Id, sourceMids)
-		lookup = make([]int64, 0, len(mapped))
-		for _, mid := range mapped {
-			lookup = append(lookup, mid)
-		}
-	}
-	if len(lookup) == 0 {
-		return out, snaps
-	}
-	for _, snap := range filmsnapshot.GetSnapshotsByMidsOrdered(version, lookup) {
-		if snap.Mid > 0 {
-			snaps[snap.Mid] = snap
-		}
-	}
-	for sourceMid, mid := range mapped {
-		if _, ok := snaps[mid]; ok {
-			out[sourceMid] = mid
-		}
-	}
-	return out, snaps
-}
-
-func assignCMSSearchLocalIDs(cards []model.MovieBasicInfo, localBySourceMid map[int64]int64, snaps map[int64]model.FilmListSnapshot, detailsByID map[int64]model.MovieDetail) {
-	if len(cards) == 0 {
-		return
-	}
-	hits := make([]int64, len(cards))
-	claimed := make(map[int64]int, len(cards))
-	for i := range cards {
-		mid := localBySourceMid[cards[i].SourceMid]
-		snap, ok := snaps[mid]
-		if mid <= 0 || !ok {
-			continue
-		}
-		if !cmsSearchCardMatchesLocal(cards[i], detailsByID[cards[i].SourceMid], snap) {
-			continue
-		}
-		hits[i] = mid
-		claimed[mid]++
-	}
-	for i := range cards {
-		mid := hits[i]
-		if mid <= 0 || claimed[mid] != 1 {
-			cards[i].Id = 0
-			continue
-		}
-		cards[i].Id = mid
-	}
-}
-
-func cmsSearchCardMatchesLocal(card model.MovieBasicInfo, detail model.MovieDetail, snap model.FilmListSnapshot) bool {
-	slave := identityFromCMSSearchCard(card, detail)
-	master := filmshared.IdentityFromSnapshot(snap)
-	if !filmshared.CompatibleIdentity(master, slave) || !filmshared.CompatibleWorkShape(master, slave) {
-		return false
-	}
-	if slave.RootPid > 0 && master.RootPid > 0 && slave.RootPid != master.RootPid {
-		return false
-	}
-	return true
-}
-
-func identityFromCMSSearchCard(card model.MovieBasicInfo, detail model.MovieDetail) filmshared.IdentityProfile {
-	slave := filmshared.IdentityFromMovieDetail(detail)
-	if name := strings.TrimSpace(card.Name); name != "" {
-		slave.Name = name
-	}
-	if cname := strings.TrimSpace(card.CName); cname != "" {
-		slave.CName = cname
-		if root := support.ResolveRootCategoryIDByCName(cname); root > 0 {
-			slave.RootPid = root
-		}
-	}
-	if remarks := strings.TrimSpace(card.Remarks); remarks != "" {
-		slave.Remarks = remarks
-	}
-	if year := filmshared.ParseIdentityYear(card.Year); year > 0 {
-		slave.Year = year
-	}
-	if director := strings.TrimSpace(card.Director); director != "" {
-		slave.Director = director
-	}
-	if classTag := strings.TrimSpace(card.ClassTag); classTag != "" {
-		slave.ClassTag = classTag
-	}
-	return slave
 }
 
 func applyCMSPage(page *dto.Page, cms model.FilmListPage, listLen int) {
