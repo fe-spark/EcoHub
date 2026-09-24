@@ -1,3 +1,9 @@
+.modalMask {
+  background-color: rgba(0, 0, 0, 0.65) !important;
+  backdrop-filter: blur(4px) !important;
+  -webkit-backdrop-filter: blur(4px) !important;
+}
+
 .modalWrapper {
   display: flex !important;
   align-items: center !important;
@@ -12,13 +18,16 @@
 
 .modal {
   margin: auto !important;
-  max-width: min(480px, calc(100vw - 32px)) !important;
+  max-width: min(520px, calc(100vw - 32px)) !important;
   width: 100% !important;
 }
 
 .modalContainer {
   border-radius: 16px;
   overflow: hidden;
+  background: var(--ant-color-bg-elevated) !important;
+  border: 1px solid var(--public-border-2, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--public-shadow-lg, 0 30px 60px rgba(0, 0, 0, 0.6));
 }
 
 .modalBody {
@@ -26,7 +35,7 @@
 }
 
 .wrapper {
-  padding: 24px 24px 20px;
+  padding: 20px 22px 18px;
 
   @media (max-width: 576px) {
     padding: 16px 14px 14px;
@@ -36,12 +45,15 @@
 .head {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--public-border-2, var(--ant-color-border-secondary));
 
   @media (max-width: 576px) {
-    gap: 10px;
-    margin-bottom: 12px;
+    gap: 8px;
+    margin-bottom: 10px;
+    padding-bottom: 10px;
   }
 }
 
@@ -49,19 +61,19 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
-  background-color: color-mix(in srgb, var(--ant-color-primary) 12%, transparent);
-  color: var(--ant-color-primary, #fa8c16);
+  background: color-mix(in srgb, var(--primary-color, #fa8c16) 14%, transparent);
+  color: var(--primary-color, #fa8c16);
   font-size: 18px;
   flex-shrink: 0;
 
   @media (max-width: 576px) {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     border-radius: 8px;
-    font-size: 16px;
+    font-size: 15px;
   }
 }
 
@@ -69,7 +81,7 @@
   margin: 0;
   font-size: 17px;
   font-weight: 600;
-  color: var(--ant-color-text);
+  color: var(--public-text-1, var(--ant-color-text));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -85,38 +97,171 @@
 }
 
 .body {
-  margin-bottom: 20px;
-  padding: 14px 16px;
-  max-height: min(320px, 50vh);
+  margin-bottom: 14px;
+  padding: 0 4px 0 0;
+  max-height: min(440px, 60vh);
   overflow-y: auto;
-  border-radius: 10px;
-  background-color: var(--ant-color-fill-quaternary);
-  border: 1px solid var(--ant-color-border-secondary);
+  border: none;
+  background: transparent;
+
+  &::-webkit-scrollbar {
+    width: 5px;
+  }
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  &::-webkit-scrollbar-thumb {
+    background: var(--public-border-3, rgba(255, 255, 255, 0.12));
+    border-radius: 4px;
+    &:hover {
+      background: var(--primary-color, #fa8c16);
+    }
+  }
 
   @media (max-width: 576px) {
-    margin-bottom: 14px;
-    padding: 12px;
-    border-radius: 8px;
+    margin-bottom: 12px;
+    max-height: min(380px, 55vh);
   }
 }
 
-.content {
+.emptyTip {
   margin: 0;
   font-size: 14px;
+  color: var(--public-text-5, var(--ant-color-text-quaternary));
+  text-align: center;
+  padding: 24px 0;
+}
+
+.markdownBody {
+  font-size: 14px;
   line-height: 1.75;
-  color: var(--ant-color-text);
-  white-space: pre-wrap;
+  color: var(--public-text-2, var(--ant-color-text));
   word-break: break-word;
+
+  p {
+    margin: 0 0 10px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  img {
+    max-width: 100%;
+    height: auto;
+    vertical-align: middle;
+    display: inline-block;
+    margin: 2px 6px 4px 0;
+    border-radius: 4px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    margin: 14px 0 6px;
+    font-weight: 600;
+    line-height: 1.4;
+    color: var(--public-text-1, var(--ant-color-text));
+
+    &:first-child {
+      margin-top: 0;
+    }
+  }
+
+  h1 { font-size: 18px; }
+  h2 { font-size: 16px; }
+  h3 { font-size: 15px; }
+  h4, h5, h6 { font-size: 14px; }
+
+  ul, ol {
+    margin: 0 0 10px;
+    padding-left: 20px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  li {
+    margin-bottom: 4px;
+    line-height: 1.6;
+    color: var(--public-text-2, var(--ant-color-text));
+
+    &::marker {
+      color: var(--primary-color, #fa8c16);
+    }
+  }
+
+  blockquote {
+    margin: 10px 0;
+    padding: 10px 14px;
+    border-left: 3px solid var(--primary-color, #fa8c16);
+    background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+    border-radius: 0 8px 8px 0;
+    color: var(--public-text-3, var(--ant-color-text-secondary));
+    font-size: 13px;
+    line-height: 1.6;
+
+    p {
+      margin: 0 0 4px;
+      &:last-child { margin-bottom: 0; }
+    }
+  }
+
+  code {
+    padding: 2px 6px;
+    font-size: 12px;
+    font-family: monospace;
+    border-radius: 4px;
+    background-color: var(--public-surface-hover, rgba(255, 255, 255, 0.08));
+    color: var(--primary-color, #fa8c16);
+  }
+
+  pre {
+    margin: 0 0 10px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    background-color: var(--public-surface-2, rgba(255, 255, 255, 0.03));
+    border: 1px solid var(--public-border-2, rgba(255, 255, 255, 0.08));
+    overflow-x: auto;
+
+    code {
+      padding: 0;
+      background: none;
+      color: var(--public-text-2, var(--ant-color-text));
+    }
+  }
+
+  a {
+    color: var(--primary-color, #fa8c16);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    transition: opacity 0.2s;
+
+    &:hover {
+      opacity: 0.8;
+    }
+  }
+
+  hr {
+    margin: 12px 0;
+    border: none;
+    border-top: 1px solid var(--public-border-2, var(--ant-color-border-secondary));
+  }
 
   @media (max-width: 576px) {
     font-size: 13px;
-    line-height: 1.65;
+    line-height: 1.6;
+
+    h1 { font-size: 16px; }
+    h2 { font-size: 15px; }
+    h3 { font-size: 14px; }
   }
 }
 
 .footer {
   display: flex;
   justify-content: flex-end;
+  padding-top: 12px;
+  border-top: 1px solid var(--public-border-2, var(--ant-color-border-secondary));
 }
 
 .confirmBtn {
@@ -130,3 +275,4 @@
     height: 38px;
   }
 }
+

@@ -1,26 +1,36 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Card,
   Checkbox,
   Flex,
   Input,
+  Segmented,
   Space,
   Spin,
   Switch,
+  Tooltip,
   Typography,
 } from "antd";
+import type { GetRef } from "antd";
 import {
   BellOutlined,
+  BoldOutlined,
+  CodeOutlined,
   EditOutlined,
   EyeOutlined,
+  FontSizeOutlined,
+  ItalicOutlined,
+  LinkOutlined,
   SaveOutlined,
+  UnorderedListOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import NoticeMarkdown from "@/components/public/NoticeMarkdown";
 import NoticeModal from "@/components/public/NoticeModal";
 import {
   DEFAULT_NOTICE_TITLE,
@@ -30,6 +40,12 @@ import {
   normalizeNoticeConfig,
   type NoticeConfig,
 } from "@/lib/notice";
+import {
+  type MarkdownActionResult,
+  toggleLinePrefix,
+  toggleMarkdownLink,
+  toggleMarkdownWrap,
+} from "@/lib/markdown-helper";
 import styles from "./notice-config-card.module.less";
 
 interface NoticeConfigCardProps {
@@ -43,9 +59,74 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
-
+  const [editorTab, setEditorTab] = useState<"write" | "preview">("write");
+  const textareaRef = useRef<GetRef<typeof Input.TextArea>>(null);
   const { message } = useAppMessage();
   const { refresh: refreshSiteConfig } = useSiteConfig();
+
+  const applyToolbarResult = (
+    res: MarkdownActionResult,
+    textarea: HTMLTextAreaElement
+  ) => {
+    if (res.newContent.length > MAX_NOTICE_CONTENT_LEN) {
+      message.warning(`公告正文不能超过 ${MAX_NOTICE_CONTENT_LEN} 字`);
+      return;
+    }
+    setDraft((prev) => ({ ...prev, content: res.newContent }));
+    setTimeout(() => {
+      textarea.focus();
+      textarea.setSelectionRange(res.selectionStart, res.selectionEnd);
+    }, 0);
+  };
+
+  const handleToggleWrap = (tag: string, placeholder: string = "文本") => {
+    if (!isEditing || !canWrite) return;
+    const textarea = textareaRef.current?.resizableTextArea?.textArea;
+    if (!textarea) return;
+
+    applyToolbarResult(
+      toggleMarkdownWrap(
+        draft.content || "",
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        tag,
+        placeholder
+      ),
+      textarea
+    );
+  };
+
+  const handleTogglePrefix = (prefix: string, placeholder: string = "内容") => {
+    if (!isEditing || !canWrite) return;
+    const textarea = textareaRef.current?.resizableTextArea?.textArea;
+    if (!textarea) return;
+
+    applyToolbarResult(
+      toggleLinePrefix(
+        draft.content || "",
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        prefix,
+        placeholder
+      ),
+      textarea
+    );
+  };
+
+  const handleToggleLink = () => {
+    if (!isEditing || !canWrite) return;
+    const textarea = textareaRef.current?.resizableTextArea?.textArea;
+    if (!textarea) return;
+
+    applyToolbarResult(
+      toggleMarkdownLink(
+        draft.content || "",
+        textarea.selectionStart,
+        textarea.selectionEnd
+      ),
+      textarea
+    );
+  };
 
   const loadData = useCallback(async () => {
     setFetching(true);
@@ -239,16 +320,121 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                   {currentValues.content.length}/{MAX_NOTICE_CONTENT_LEN}
                 </Typography.Text>
               </Flex>
-              <Input.TextArea
-                disabled={!isEditing || !canWrite}
-                maxLength={MAX_NOTICE_CONTENT_LEN}
-                rows={4}
-                placeholder="请输入公告内容，支持换行..."
-                value={currentValues.content}
-                onChange={(e) =>
-                  setDraft((prev) => ({ ...prev, content: e.target.value }))
-                }
-              />
+
+              <div className={styles.editorContainer}>
+                {/* 顶部工具栏与编写/预览 Tab 切换 */}
+                <div className={styles.editorHeader}>
+                  <Segmented
+                    size="small"
+                    value={editorTab}
+                    onChange={(val) => setEditorTab(val as "write" | "preview")}
+                    options={[
+                      { label: "编写", value: "write", icon: <EditOutlined /> },
+                      { label: "预览", value: "preview", icon: <EyeOutlined /> },
+                    ]}
+                  />
+
+                  {editorTab === "write" && (
+                    <div className={styles.editorToolbar}>
+                      <Tooltip title="标题 (### )">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<FontSizeOutlined />}
+                          className={styles.toolBtn}
+                          onClick={() => handleTogglePrefix("### ", "标题内容")}
+                        />
+                      </Tooltip>
+                      <Tooltip title="加粗 (**text**)">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<BoldOutlined />}
+                          className={styles.toolBtn}
+                          onClick={() => handleToggleWrap("**", "粗体内容")}
+                        />
+                      </Tooltip>
+                      <Tooltip title="斜体 (*text*)">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<ItalicOutlined />}
+                          className={styles.toolBtn}
+                          onClick={() => handleToggleWrap("*", "斜体内容")}
+                        />
+                      </Tooltip>
+                      <Tooltip title="无序列表 (- text)">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<UnorderedListOutlined />}
+                          className={styles.toolBtn}
+                          onClick={() => handleTogglePrefix("- ", "列表条目")}
+                        />
+                      </Tooltip>
+                      <Tooltip title="超链接 [text](url)">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<LinkOutlined />}
+                          className={styles.toolBtn}
+                          onClick={handleToggleLink}
+                        />
+                      </Tooltip>
+                      <Tooltip title="行内代码 (`code`)">
+                        <Button
+                          type="text"
+                          size="small"
+                          disabled={!isEditing || !canWrite}
+                          icon={<CodeOutlined />}
+                          className={styles.toolBtn}
+                          onClick={() => handleToggleWrap("`", "代码")}
+                        />
+                      </Tooltip>
+                    </div>
+                  )}
+                </div>
+
+                {/* 编辑/预览主区域 */}
+                {editorTab === "write" ? (
+                  <Input.TextArea
+                    ref={textareaRef}
+                    className={styles.editorTextarea}
+                    disabled={!isEditing || !canWrite}
+                    maxLength={MAX_NOTICE_CONTENT_LEN}
+                    rows={6}
+                    placeholder={`支持 Markdown 排版，例如：\n### 维护通知\n- 站点优化升级完成\n- 支持 [访问帮助文档](https://...)\n**重要提示**：请按需刷新页面`}
+                    value={currentValues.content}
+                    onChange={(e) =>
+                      setDraft((prev) => ({ ...prev, content: e.target.value }))
+                    }
+                  />
+                ) : (
+                  <div className={styles.previewPanel}>
+                    {currentValues.content ? (
+                      <div className={styles.markdownBody}>
+                        <NoticeMarkdown content={currentValues.content} />
+                      </div>
+                    ) : (
+                      <p className={styles.previewEmpty}>暂无可预览的 Markdown 内容</p>
+                    )}
+                  </div>
+                )}
+
+                <div className={styles.editorFooter}>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    Markdown
+                  </Typography.Text>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    {currentValues.content.length} / {MAX_NOTICE_CONTENT_LEN}
+                  </Typography.Text>
+                </div>
+              </div>
             </div>
           </Flex>
         </Spin>

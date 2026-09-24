@@ -4,6 +4,7 @@ import React, { useMemo, useState, useSyncExternalStore } from "react";
 import { Button, Modal } from "antd";
 import { BellOutlined } from "@ant-design/icons";
 import { DEFAULT_NOTICE_TITLE, type NoticeConfig } from "@/lib/notice";
+import NoticeMarkdown from "@/components/public/NoticeMarkdown";
 import styles from "./index.module.less";
 
 interface NoticeModalProps {
@@ -76,11 +77,12 @@ export default function NoticeModal({ notice, open: controlledOpen, onClose }: N
       onCancel={handleClose}
       footer={null}
       centered
-      width="min(480px, calc(100vw - 32px))"
+      width="min(520px, calc(100vw - 32px))"
       classNames={{
         wrapper: styles.modalWrapper,
         container: styles.modalContainer,
         body: styles.modalBody,
+        mask: styles.modalMask,
       }}
       className={styles.modal}
       destroyOnHidden
@@ -93,9 +95,13 @@ export default function NoticeModal({ notice, open: controlledOpen, onClose }: N
           <h3 className={styles.title}>{title}</h3>
         </div>
         <div className={styles.body}>
-          <p className={styles.content}>
-            {content || "（暂无公告正文内容）"}
-          </p>
+          {content ? (
+            <div className={styles.markdownBody}>
+              <NoticeMarkdown content={content} />
+            </div>
+          ) : (
+            <p className={styles.emptyTip}>（暂无公告正文内容）</p>
+          )}
         </div>
         <div className={styles.footer}>
           <Button
