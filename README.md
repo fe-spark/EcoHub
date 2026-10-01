@@ -57,6 +57,7 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 | --- | --- | --- |
 | 良心云 | 低至 2 元/月 <br>新用户注册即获体验流量 | [前往注册](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | 赔钱机场 | 低至 1.5 元/月 <br>适合高流量与备用需求 | [前往注册](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| iKuuu | 老牌稳定机场 <br>新用户注册即获体验流量 | [前往注册](https://ikuuu.top/auth/register?code=Uubm) |
 
 ## 快速开始
 
