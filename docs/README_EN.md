@@ -54,8 +54,9 @@ Read-only demo account: `guest` / `guest`. This account cannot save settings. Fo
 
 | Provider | Features / Price | Link |
 | --- | --- | --- |
-| LiangXinYun | 1. ¥2/mo for 100G, ¥6 for 1000G (1T)<br>2. Direct AWS/Oracle (VLESS Reality & Hysteria2)<br>3. Unblock Netflix, Disney+, TikTok, ChatGPT; 1× multiplier<br>4. 4K smooth playback during peak hours<br>5. Free trial traffic for new users | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
-| PeiQian Airport | 1. As low as ¥1.5/mo, ultra-low price with huge traffic quota<br>2. Direct multi-protocol (VLESS, Hysteria 2, Shadowsocks)<br>3. Nodes in Hong Kong, Japan, Taiwan, Singapore, US, etc.<br>4. Low-multiplier download nodes for backup & heavy traffic | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| LiangXinYun | As low as ¥2/mo <br>New users receive trial traffic | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
+| PeiQian Airport | As low as ¥1.5/mo <br>Suitable for high traffic and backup use | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
+| iKuuu | Long-running stable airport <br>New users receive trial traffic | [Register](https://ikuuu.top/auth/register?code=Uubm) |
 
 ## Quick start
 
