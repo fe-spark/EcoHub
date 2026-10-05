@@ -88,8 +88,8 @@ func TestInferCategoryParentsBySemantic(t *testing.T) {
 	if hints[37] != 27 {
 		t.Errorf("expected 古装仙侠 -> 短剧 (27), got %d", hints[37])
 	}
-	if hints[38] != 27 {
-		t.Errorf("expected 现代都市 -> 短剧 (27), got %d", hints[38])
+	if _, ok := hints[38]; ok {
+		t.Errorf("expected 现代都市 to stay unhinted, got parent %d", hints[38])
 	}
 	if hints[42] != 27 {
 		t.Errorf("expected 反转爽剧 -> 短剧 (27), got %d", hints[42])
@@ -147,5 +147,80 @@ func TestGenCategoryTreeWithParentHints_UnifiedFallback(t *testing.T) {
 	}
 	if len(tvNode.Children) != 1 || tvNode.Children[0].Id != 14 {
 		t.Fatalf("expected 大陆剧 under 电视剧, got children count: %d", len(tvNode.Children))
+	}
+}
+
+func TestGenCategoryTreeWithParentHints_KeepSourceHierarchy(t *testing.T) {
+	// 源站已给出两层 type_pid。根类名称不在旧白名单里时，也不能被「片」结尾规则改挂到电影下。
+	classes := []model.FilmClass{
+		{ID: 1, Pid: 0, Name: "电影片"},
+		{ID: 2, Pid: 0, Name: "连续剧"},
+		{ID: 3, Pid: 0, Name: "综艺片"},
+		{ID: 4, Pid: 0, Name: "动漫片"},
+		{ID: 6, Pid: 1, Name: "动作片"},
+		{ID: 25, Pid: 3, Name: "大陆综艺"},
+		{ID: 29, Pid: 4, Name: "国产动漫"},
+		{ID: 37, Pid: 1, Name: "动画片"},
+	}
+
+	tree := GenCategoryTreeWithParentHints(classes, nil)
+	if tree == nil {
+		t.Fatal("expected non-nil tree")
+	}
+	if len(tree.Children) != 4 {
+		t.Fatalf("expected 4 root categories, got %d", len(tree.Children))
+	}
+
+	childrenByID := map[int64][]int64{}
+	for _, node := range tree.Children {
+		if node.Pid != 0 {
+			t.Errorf("root %s pid = %d, want 0", node.Name, node.Pid)
+		}
+		ids := make([]int64, 0, len(node.Children))
+		for _, child := range node.Children {
+			ids = append(ids, child.Id)
+			if len(child.Children) != 0 {
+				t.Errorf("category %s produced a third level", child.Name)
+			}
+		}
+		childrenByID[node.Id] = ids
+	}
+
+	if got := childrenByID[1]; len(got) != 2 || got[0] != 6 || got[1] != 37 {
+		t.Fatalf("电影片 children = %v, want [6 37]", got)
+	}
+	if got := childrenByID[3]; len(got) != 1 || got[0] != 25 {
+		t.Fatalf("综艺片 children = %v, want [25]", got)
+	}
+	if got := childrenByID[4]; len(got) != 1 || got[0] != 29 {
+		t.Fatalf("动漫片 children = %v, want [29]", got)
+	}
+}
+
+func TestInferCategoryParentsBySemantic_RootAliases(t *testing.T) {
+	classes := []model.FilmClass{
+		{ID: 1, Name: "电影片"},
+		{ID: 3, Name: "综艺片"},
+		{ID: 4, Name: "动漫片"},
+		{ID: 25, Name: "大陆综艺"},
+		{ID: 29, Name: "国产动漫"},
+		{ID: 46, Name: "悬疑"},
+	}
+
+	hints := InferCategoryParentsBySemantic(classes)
+	if hints[25] != 3 {
+		t.Fatalf("expected 大陆综艺 -> 综艺片 (3), got %d", hints[25])
+	}
+	if hints[29] != 4 {
+		t.Fatalf("expected 国产动漫 -> 动漫片 (4), got %d", hints[29])
+	}
+	if _, ok := hints[3]; ok {
+		t.Errorf("综艺片 should stay a root, hinted parent %d", hints[3])
+	}
+	if _, ok := hints[4]; ok {
+		t.Errorf("动漫片 should stay a root, hinted parent %d", hints[4])
+	}
+	if _, ok := hints[46]; ok {
+		t.Errorf("expected 悬疑 to stay unhinted, got parent %d", hints[46])
 	}
 }
