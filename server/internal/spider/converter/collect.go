@@ -17,6 +17,7 @@ const macCMSGroupSeparator = "$$$"
 
 // GenCategoryTreeWithParentHints 在原始 type_pid 缺失时，允许调用方补充父级推断结果。
 // 第一层（pid=0）直接作为顶级大类，第二层作为对应大类的子类。
+// 源站只要给出任意 type_pid，就保持原层级；仅全平列表才用语义规则兜底。
 // 当 parentHints 未覆盖时，自动启用统一语义化规则进行智能兜底。
 // 忽略资讯/明星等噪音分类。
 func GenCategoryTreeWithParentHints(list []model.FilmClass, parentHints map[int64]int64) *model.CategoryTree {
@@ -30,8 +31,12 @@ func GenCategoryTreeWithParentHints(list []model.FilmClass, parentHints map[int6
 	// 噪音分类过滤词
 	noiseWords := []string{"资讯", "明星", "新闻", "解说", "站长", "教程"}
 
-	// 统一语义化兜底推断（当源站未自带 pid 且动态探测未命中时使用）
-	semanticHints := InferCategoryParentsBySemantic(list)
+	// 源站已给出任意父子关系时，保持 type_pid，不再用名称推断覆盖根类。
+	// 推断只服务全平列表（全部 pid=0），且仅在 parentHints 未命中时兜底。
+	var semanticHints map[int64]int64
+	if !sourceProvidesCategoryHierarchy(list) {
+		semanticHints = InferCategoryParentsBySemantic(list)
+	}
 
 	// 第一遍：初始化所有节点
 	for _, c := range list {
@@ -67,6 +72,17 @@ func GenCategoryTreeWithParentHints(list []model.FilmClass, parentHints map[int6
 	return root
 }
 
+// sourceProvidesCategoryHierarchy 判断采集源是否已经给出分类层级。
+// 只要存在 type_pid > 0，就视为源站自带父子关系，调用方不应再改写根类归属。
+func sourceProvidesCategoryHierarchy(list []model.FilmClass) bool {
+	for _, c := range list {
+		if c.Pid > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // InferCategoryParentsBySemantic 当采集源（无论是 JSON 还是 XML）未提供分类层级或详情缺少父级字段时，
 // 依据影视行业常见分类命名规范自动推断主类与子类关系，保证分类树结构的完整性。
 func InferCategoryParentsBySemantic(classes []model.FilmClass) map[int64]int64 {
@@ -96,11 +112,11 @@ func InferCategoryParentsBySemantic(classes []model.FilmClass) map[int64]int64 {
 			if rootTvID == 0 {
 				rootTvID = c.ID
 			}
-		case "动漫", "动画":
+		case "动漫", "动画", "动漫片", "动画片":
 			if rootAnimeID == 0 {
 				rootAnimeID = c.ID
 			}
-		case "综艺", "综艺娱乐", "综艺节目":
+		case "综艺", "综艺娱乐", "综艺节目", "综艺片":
 			if rootVarietyID == 0 {
 				rootVarietyID = c.ID
 			}
@@ -133,9 +149,10 @@ func InferCategoryParentsBySemantic(classes []model.FilmClass) map[int64]int64 {
 	hints := make(map[int64]int64)
 
 	// 常见短剧题材特征词
+	// 只保留短剧站点特有题材。悬疑、都市、恋爱、年代也是电影/剧集常用词，不能在这里兜底。
 	shortGenres := []string{
-		"仙侠", "都市", "年代", "总裁", "民国", "反转", "爽剧", "悬疑", "脑洞",
-		"战神", "赘婿", "神豪", "甜宠", "虐恋", "逆袭", "恋爱", "言情", "短剧",
+		"仙侠", "总裁", "民国", "反转", "爽剧", "脑洞",
+		"战神", "赘婿", "神豪", "甜宠", "虐恋", "逆袭", "言情", "短剧",
 	}
 
 	// 常见球类/赛事
