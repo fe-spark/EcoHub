@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Table,
   Button,
@@ -59,6 +59,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
+  const editingUserRef = useRef<any>(null);
   const [form] = Form.useForm();
   const { message } = useAppMessage();
 
@@ -134,19 +135,31 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
     }
   };
 
+  const fillAccountForm = (record: any) => {
+    if (!record) {
+      form.resetFields();
+      return;
+    }
+    form.setFieldsValue({
+      userName: record.userName ?? "",
+      nickName: record.nickName ?? "",
+      email: record.email ?? "",
+      gender: record.gender ?? 0,
+      status: record.status ?? 0,
+      password: "",
+      role: record.role ?? (record.isAdmin ? 1 : record.isVisitor ? 2 : 0),
+    });
+  };
+
   const handleAdd = () => {
+    editingUserRef.current = null;
     setEditingUser(null);
-    form.resetFields();
     setIsModalOpen(true);
   };
 
   const handleEdit = (record: any) => {
+    editingUserRef.current = record;
     setEditingUser(record);
-    form.setFieldsValue({
-      ...record,
-      password: "",
-      role: record.role ?? (record.isAdmin ? 1 : record.isVisitor ? 2 : 0),
-    });
     setIsModalOpen(true);
   };
 
@@ -227,14 +240,14 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         if (record.isAdmin) {
           return (
             <Tag color="gold" icon={<CrownOutlined />}>
-              超级管理员
+              超级用户
             </Tag>
           );
         }
         if (record.isVisitor) {
           return (
             <Tag color="blue" icon={<EyeOutlined />}>
-              访客只读
+              访客
             </Tag>
           );
         }
@@ -262,7 +275,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
           color={status === 0 ? "success" : "error"}
           icon={status === 0 ? <CheckCircleOutlined /> : <StopOutlined />}
         >
-          {status === 0 ? "正常" : "禁用"}
+          {status === 0 ? "启用" : "禁用"}
         </Tag>
       ),
     },
@@ -277,8 +290,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
             title={
               !currentUser?.canWrite
                 ? "访客账号仅允许查看"
-                : record.isAdmin && !currentUser?.isAdmin
-                  ? "权限不足，仅超级管理员可修改超级管理员信息"
+                : !currentUser?.isAdmin && record.id !== currentUser?.id
+                  ? "仅可修改本人账号信息"
                   : "编辑账号"
             }
           >
@@ -288,14 +301,14 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
               icon={<EditOutlined />}
               disabled={
                 !currentUser?.canWrite ||
-                (record.isAdmin && !currentUser?.isAdmin)
+                (!currentUser?.isAdmin && record.id !== currentUser?.id)
               }
               onClick={() => handleEdit(record)}
             >
               编辑
             </Button>
           </Tooltip>
-          {currentUser?.canWrite && currentUser?.isAdmin && !record.isAdmin && !record.isVisitor && (
+          {currentUser?.isAdmin && !record.builtin && record.id !== currentUser?.id && (
             <Popconfirm
               title="确定要删除该用户账号吗？"
               description="删除后无法撤销，该账号将失去所有后台访问权限。"
@@ -334,8 +347,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
               onChange={(value) => setRoleFilter(value)}
               options={[
                 { value: -1, label: "全部角色" },
+                { value: 1, label: "超级用户" },
                 { value: 0, label: "普通用户" },
-                { value: 1, label: "超级管理员" },
                 { value: 2, label: "访客" },
               ]}
               style={{ width: 130 }}
@@ -346,7 +359,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
               onChange={(value) => setStatusFilter(value)}
               options={[
                 { value: -1, label: "全部状态" },
-                { value: 0, label: "正常" },
+                { value: 0, label: "启用" },
                 { value: 1, label: "禁用" },
               ]}
               style={{ width: 120 }}
@@ -429,6 +442,9 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         open={isModalOpen}
         onOk={handleModalOk}
         onCancel={() => setIsModalOpen(false)}
+        afterOpenChange={(open) => {
+          if (open) fillAccountForm(editingUserRef.current);
+        }}
         confirmLoading={loading}
         destroyOnHidden
         width={540}
@@ -465,9 +481,20 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
           <Form.Item
             name="email"
             label="电子邮箱"
-            rules={[{ type: "email", message: "请输入有效的电子邮箱地址" }]}
+            initialValue=""
+            rules={[
+              {
+                validator: (_, value) => {
+                  const text = String(value ?? "").trim();
+                  if (!text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("请输入有效的电子邮箱地址"));
+                },
+              },
+            ]}
           >
-            <Input prefix={<MailOutlined />} placeholder="例如 user@example.com" />
+            <Input prefix={<MailOutlined />} placeholder="选填" />
           </Form.Item>
 
           <Form.Item name="gender" label="性别" initialValue={0}>
@@ -478,24 +505,42 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
             </Select>
           </Form.Item>
 
-          <Form.Item name="role" label="身份角色" initialValue={0}>
-            <Select
-              disabled={
-                editingUser?.id === 1 ||
-                editingUser?.userName === "visitor" ||
-                !currentUser?.isAdmin
-              }
-            >
+          <Form.Item
+            name="role"
+            label="身份角色"
+            initialValue={0}
+            extra={
+              editingUser?.builtin
+                ? "默认超级用户不可修改角色"
+                : currentUser?.isAdmin
+                  ? "可指定超级用户、普通用户或访客"
+                  : "仅超级用户可指定角色"
+            }
+          >
+            <Select disabled={Boolean(editingUser?.builtin) || !currentUser?.isAdmin}>
+              <Option value={1}>超级用户</Option>
               <Option value={0}>普通用户</Option>
-              <Option value={1}>超级管理员</Option>
-              <Option value={2}>访客只读</Option>
+              <Option value={2}>访客</Option>
             </Select>
           </Form.Item>
 
-          <Form.Item name="status" label="账号状态" initialValue={0}>
-            <Select disabled={editingUser?.isAdmin || editingUser?.isVisitor}>
-              <Option value={0}>正常 (允许登录和访问)</Option>
-              <Option value={1}>禁用 (禁止登录并拉黑)</Option>
+          <Form.Item
+            name="status"
+            label="账号状态"
+            initialValue={0}
+            extra={
+              !currentUser?.isAdmin
+                ? "仅超级用户可修改账号状态"
+                : editingUser?.id === currentUser?.id
+                  ? "不能禁用当前登录账号"
+                  : undefined
+            }
+          >
+            <Select disabled={!currentUser?.isAdmin}>
+              <Option value={0}>启用</Option>
+              <Option value={1} disabled={editingUser?.id === currentUser?.id}>
+                禁用
+              </Option>
             </Select>
           </Form.Item>
         </Form>

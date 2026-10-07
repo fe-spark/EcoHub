@@ -77,4 +77,4 @@ docker exec -it ecohub /app/migrate_slave_playlist_keys
 
 ### 访客账号与默认账号如何使用？
 
-内置账号：`admin` / `admin`（可读写），`guest` / `guest`（访客）。访客可调用管理端 GET；POST / PUT / PATCH / DELETE 会被 `WriteAccess` 拒绝。默认账号仅用于初始化与演示，对外部署后须立即修改密码。
+初始化只创建超级管理员 `admin` / `admin`。普通用户和访客在账号管理中新建。访客可调用管理端 GET；POST / PUT / PATCH / DELETE 会被 `WriteAccess` 拒绝。对外部署后须立即修改默认密码。

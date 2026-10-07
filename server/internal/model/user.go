@@ -15,7 +15,7 @@ const (
 func GetUserRoleName(role int) string {
 	switch role {
 	case UserRoleAdmin:
-		return "超级管理员"
+		return "超级用户"
 	case UserRoleVisitor:
 		return "访客"
 	default:
@@ -37,6 +37,80 @@ func UserCanWrite(role int) bool {
 
 func IsAdmin(userID uint, role int) bool {
 	return userID == config.UserIdInitialVal || IsAdminRole(role)
+}
+
+// IsBuiltinAccount 仅默认超级管理员锁定角色且不可删除。
+func IsBuiltinAccount(id uint, _ string) bool {
+	return id == config.UserIdInitialVal
+}
+
+// ClampNewUser 非超级管理员只能创建启用中的普通用户。
+func ClampNewUser(operatorIsAdmin bool, role, status int) (int, int) {
+	if !operatorIsAdmin {
+		return UserRoleNormal, 0
+	}
+	if role != UserRoleAdmin && role != UserRoleVisitor && role != UserRoleNormal {
+		role = UserRoleNormal
+	}
+	if status != 0 && status != 1 {
+		status = 0
+	}
+	return role, status
+}
+
+// CheckUserUpdate 校验账号更新。nextRole、nextStatus 为空表示本次不修改。返回空字符串表示允许。
+func CheckUserUpdate(operatorID uint, operatorRole int, targetID uint, targetName string, targetRole, targetStatus int, nextRole, nextStatus *int) string {
+	if targetID == 0 {
+		return "用户不存在"
+	}
+	operatorIsAdmin := IsAdmin(operatorID, operatorRole)
+	if !operatorIsAdmin && operatorID != targetID {
+		return "权限不足，仅可修改本人账号信息"
+	}
+	roleChanged := nextRole != nil && *nextRole != targetRole
+	statusChanged := nextStatus != nil && *nextStatus != targetStatus
+	if !operatorIsAdmin {
+		if roleChanged {
+			return "权限不足，仅超级管理员可修改用户角色"
+		}
+		if statusChanged {
+			return "权限不足，仅超级管理员可修改账号状态"
+		}
+	}
+	if roleChanged {
+		if *nextRole != UserRoleAdmin && *nextRole != UserRoleVisitor && *nextRole != UserRoleNormal {
+			return "无效的用户角色"
+		}
+		if IsBuiltinAccount(targetID, targetName) {
+			return "内置账号不可修改角色"
+		}
+	}
+	if statusChanged {
+		if *nextStatus != 0 && *nextStatus != 1 {
+			return "无效的账号状态"
+		}
+		if *nextStatus == 1 && operatorID == targetID {
+			return "不能禁用当前登录账号"
+		}
+	}
+	return ""
+}
+
+// CheckUserDelete 校验账号删除。返回空字符串表示允许。
+func CheckUserDelete(operatorID uint, operatorRole int, targetID uint, _ string) string {
+	if !IsAdmin(operatorID, operatorRole) {
+		return "权限不足，仅超级管理员可删除用户"
+	}
+	if targetID == 0 {
+		return "用户不存在"
+	}
+	if operatorID == targetID {
+		return "不能删除当前登录账号"
+	}
+	if targetID == config.UserIdInitialVal {
+		return "默认超级管理员不可删除"
+	}
+	return ""
 }
 
 type User struct {
@@ -82,6 +156,7 @@ type UserInfoVo struct {
 	IsAdmin   bool   `json:"isAdmin"`   // 是否为超级管理员
 	IsVisitor bool   `json:"isVisitor"` // 是否为访客只读用户
 	CanWrite  bool   `json:"canWrite"`  // 是否允许写操作
+	Builtin   bool   `json:"builtin"`   // 内置账号，不可改角色、状态，也不可删除
 	Role      int    `json:"role"`      // 角色值
 	RoleName  string `json:"roleName"`  // 角色名称
 }

@@ -72,7 +72,7 @@ With the bundled databases keep `MYSQL_HOST=mysql` and `REDIS_HOST=redis` (Compo
 | `http://SERVER:3000/api/provide/app` | EcoHub native client software source |
 | `http://SERVER:3000/api/provide/tvbox` | TVBox / YingShiCang |
 
-Default accounts (**change passwords immediately**): `admin` / `admin`, `guest` / `guest`.
+Default account (**change the password immediately**): `admin` / `admin`. Create other roles in account management.
 
 First run: configure **collect sources** in admin and run a collect, or the site has no titles. The first full collect **can take several hours**. **Data shows only after collect finishes and publishes.**
 
