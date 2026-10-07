@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Table,
   Button,
@@ -59,6 +59,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
+  const editingUserRef = useRef<any>(null);
   const [form] = Form.useForm();
   const { message } = useAppMessage();
 
@@ -134,19 +135,31 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
     }
   };
 
+  const fillAccountForm = (record: any) => {
+    if (!record) {
+      form.resetFields();
+      return;
+    }
+    form.setFieldsValue({
+      userName: record.userName ?? "",
+      nickName: record.nickName ?? "",
+      email: record.email ?? "",
+      gender: record.gender ?? 0,
+      status: record.status ?? 0,
+      password: "",
+      role: record.role ?? (record.isAdmin ? 1 : record.isVisitor ? 2 : 0),
+    });
+  };
+
   const handleAdd = () => {
+    editingUserRef.current = null;
     setEditingUser(null);
-    form.resetFields();
     setIsModalOpen(true);
   };
 
   const handleEdit = (record: any) => {
+    editingUserRef.current = record;
     setEditingUser(record);
-    form.setFieldsValue({
-      ...record,
-      password: "",
-      role: record.role ?? (record.isAdmin ? 1 : record.isVisitor ? 2 : 0),
-    });
     setIsModalOpen(true);
   };
 
@@ -429,6 +442,9 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         open={isModalOpen}
         onOk={handleModalOk}
         onCancel={() => setIsModalOpen(false)}
+        afterOpenChange={(open) => {
+          if (open) fillAccountForm(editingUserRef.current);
+        }}
         confirmLoading={loading}
         destroyOnHidden
         width={540}
@@ -466,7 +482,17 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
             name="email"
             label="电子邮箱"
             initialValue=""
-            rules={[{ type: "email", message: "请输入有效的电子邮箱地址" }]}
+            rules={[
+              {
+                validator: (_, value) => {
+                  const text = String(value ?? "").trim();
+                  if (!text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
+                    return Promise.resolve();
+                  }
+                  return Promise.reject(new Error("请输入有效的电子邮箱地址"));
+                },
+              },
+            ]}
           >
             <Input prefix={<MailOutlined />} placeholder="选填" />
           </Form.Item>
