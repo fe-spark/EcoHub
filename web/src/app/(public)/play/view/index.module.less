@@ -358,11 +358,40 @@
 
 .sourcePickerOptionMeta {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 12px;
   color: var(--public-text-4);
 
   .active & {
     color: color-mix(in srgb, #fa8c16 78%, white);
+  }
+}
+
+.preferredTag {
+  padding: 1px 5px;
+  font-size: 10px;
+  border-radius: 4px;
+  background: rgba(250, 140, 22, 0.15);
+  color: #fa8c16;
+  font-weight: 600;
+}
+
+.preferBtn {
+  padding: 2px 6px;
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--public-border-2);
+  background: transparent;
+  color: var(--public-text-3);
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    color: #fa8c16;
+    border-color: #fa8c16;
+    background: rgba(250, 140, 22, 0.08);
   }
 }
 
@@ -449,6 +478,26 @@
       color: var(--public-on-accent);
       border-color: #fa8c16;
       box-shadow: 0 4px 12px rgba(250, 140, 22, 0.4);
+
+      .fallbackBadge {
+        background: rgba(255, 255, 255, 0.25);
+        color: #fff;
+        border-color: rgba(255, 255, 255, 0.4);
+      }
+    }
+
+    .fallbackBadge {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 0 4px;
+      font-size: 10px;
+      line-height: 16px;
+      border-radius: 4px;
+      background: rgba(250, 140, 22, 0.15);
+      color: #fa8c16;
+      border: 1px solid rgba(250, 140, 22, 0.3);
+      vertical-align: middle;
+      font-weight: 500;
     }
   }
 }

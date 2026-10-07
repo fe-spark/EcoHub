@@ -237,7 +237,7 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.FilmListSnapshot{}, &model.MovieDetailInfo{}, &model.Category{}); err != nil {
+	if err := gdb.AutoMigrate(&model.FilmListSnapshot{}, &model.FilmIndex{}, &model.Category{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb

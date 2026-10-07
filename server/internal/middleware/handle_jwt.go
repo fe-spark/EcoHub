@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	"server/internal/utils"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"

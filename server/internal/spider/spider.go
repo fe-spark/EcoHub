@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,17 +77,14 @@ func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
 	if len(sources) <= 1 {
 		return sources
 	}
-	out := make([]model.FilmSource, 0, len(sources))
-	for _, s := range sources {
-		if s.Grade == model.MasterCollect {
-			out = append(out, s)
+	out := make([]model.FilmSource, len(sources))
+	copy(out, sources)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Weight != out[j].Weight {
+			return out[i].Weight > out[j].Weight
 		}
-	}
-	for _, s := range sources {
-		if s.Grade != model.MasterCollect {
-			out = append(out, s)
-		}
-	}
+		return out[i].Id < out[j].Id
+	})
 	return out
 }
 
@@ -197,14 +195,14 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 		if isDispatchStopped(runVersion) {
 			log.Printf("[%s] 检测到一键终止，停止派发剩余站点任务", tag)
 			for _, skipped := range sources[idx:] {
-				scheduler.FinishSource(skipped.Grade, skipped.Id)
+				scheduler.FinishSource(skipped.Id)
 				abandonQueuedCollectSource(skipped, batchCtx)
 			}
 			break
 		}
 		if progress.IsStopped(src.Id) {
 			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
-			scheduler.FinishSource(src.Grade, src.Id)
+			scheduler.FinishSource(src.Id)
 			abandonQueuedCollectSource(src, batchCtx)
 			continue
 		}
@@ -219,7 +217,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 					<-sem
 				}
 			}()
-			defer scheduler.FinishSource(fs.Grade, fs.Id)
+			defer scheduler.FinishSource(fs.Id)
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
 				abandonQueuedCollectSource(fs, batchCtx)
@@ -282,7 +280,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if isStandalone {
 		batchCtx = newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{*s}, nil, time.Now(), true)
 	}
-	isMasterFullCollect := s.Grade == model.MasterCollect && h < 0
+	isMasterFullCollect := h < 0
 	if isMasterFullCollect && batchCtx != nil {
 		batchCtx.beginMasterRebuild(s.Id)
 	}

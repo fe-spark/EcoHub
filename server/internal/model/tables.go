@@ -6,8 +6,8 @@ const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
 	TableFilmListSnapshot   = "film_list_snapshot"
-	TableMovieDetail        = "movie_detail_info"
-	TableSlaveMoviePlaylist = "slave_movie_playlists"
+	TableFilmSourcePlaylist = "film_source_playlists"
+	TableFilmSnapshotSource = "film_snapshot_source"
 	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
@@ -39,9 +39,9 @@ var AllModels = []any{
 	&FilmIndex{},
 	&FilmListSnapshot{},
 	&FileInfo{},
-	&MovieDetailInfo{},
+	&FilmSourcePlaylist{},
+	&FilmSnapshotSource{},
 	&Category{},
-	&SlaveMoviePlaylist{},
 	&MoviePoster{},
 	&MovieMatchKey{},
 	&FilmSource{},

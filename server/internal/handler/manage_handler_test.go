@@ -222,5 +222,3 @@ func TestBannerGenerateAndProgressHandlers(t *testing.T) {
 		t.Fatalf("code=%d want 0", respProg.Code)
 	}
 }
-
-

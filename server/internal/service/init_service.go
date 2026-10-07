@@ -13,7 +13,6 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
-	filmplaylist "server/internal/repository/film/playlist"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/utils"
@@ -51,9 +50,7 @@ func (s *InitService) DefaultDataInit() {
 	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
-	// 定时任务启动前，从 Redis 备忘恢复保护期、孤儿游标与活跃快照版本到内存。
-	filmplaylist.RestoreMasterSwitchProtection()
-	filmplaylist.RestoreOrphanCleanCursor()
+	// 定时任务启动前，从 Redis 备忘恢复活跃快照版本到内存。
 	filmsnapshot.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
@@ -140,18 +137,18 @@ func defaultFilmSources() []model.FilmSource {
 	// 使用 URI 哈希作为 ID，设置递增初始创建时间以保证默认采集站顺序稳定
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	list := []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Grade: model.MasterCollect, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
-		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Weight: 100, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
+		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Weight: 90, State: true, Interval: 200, Cd: 24},
+		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Weight: 80, State: true, Interval: 200, Cd: 24},
+		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Weight: 70, State: true, Interval: 200, Cd: 24},
+		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Weight: 60, State: true, Interval: 200, Cd: 24},
+		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Weight: 50, State: true, Interval: 200, Cd: 24},
+		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Weight: 40, State: true, Interval: 200, Cd: 24},
+		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Weight: 30, State: true, Interval: 200, Cd: 24},
+		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Weight: 20, State: true, Interval: 200, Cd: 24},
+		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Weight: 10, State: true, Interval: 200, Cd: 24},
+		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Weight: 0, State: true, Interval: 200, Cd: 24},
+		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Weight: 0, State: true, Interval: 200, Cd: 24},
 	}
 	for i := range list {
 		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)

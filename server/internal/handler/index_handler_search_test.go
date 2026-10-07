@@ -76,49 +76,6 @@ func TestHasSearchOptions(t *testing.T) {
 	}
 }
 
-func TestParseOptionalQueryInt(t *testing.T) {
-	if v, ok := parseOptionalQueryInt(""); !ok || v != 0 {
-		t.Fatalf("empty should be 0, got %d ok=%v", v, ok)
-	}
-	if v, ok := parseOptionalQueryInt("12"); !ok || v != 12 {
-		t.Fatalf("12 should parse, got %d ok=%v", v, ok)
-	}
-	if _, ok := parseOptionalQueryInt("abc"); ok {
-		t.Fatal("invalid should fail")
-	}
-}
-
-func TestHasPlayableFilmDetail(t *testing.T) {
-	if hasPlayableFilmDetail(8, model.MovieDetailVo{}) {
-		t.Fatal("local missing mid should fail")
-	}
-	if !hasPlayableFilmDetail(8, model.MovieDetailVo{MovieDetail: model.MovieDetail{Id: 8}}) {
-		t.Fatal("local mid should pass")
-	}
-	live := model.MovieDetailVo{
-		MovieDetail: model.MovieDetail{Name: "仙逆"},
-		List:        []model.PlayLinkVo{{Id: "src", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://x"}}}},
-	}
-	if !hasPlayableFilmDetail(0, live) {
-		t.Fatal("live detail should pass")
-	}
-	if hasPlayableFilmDetail(0, model.MovieDetailVo{MovieDetail: model.MovieDetail{Name: "仙逆"}}) {
-		t.Fatal("live without playlist should fail")
-	}
-}
-
-func TestParseOptionalQueryInt64(t *testing.T) {
-	if v, ok := parseOptionalQueryInt64(""); !ok || v != 0 {
-		t.Fatalf("empty should be 0, got %d ok=%v", v, ok)
-	}
-	if v, ok := parseOptionalQueryInt64("1002"); !ok || v != 1002 {
-		t.Fatalf("1002 should parse, got %d ok=%v", v, ok)
-	}
-	if _, ok := parseOptionalQueryInt64("xyz"); ok {
-		t.Fatal("invalid should fail")
-	}
-}
-
 func TestResolvePlayableSourceID(t *testing.T) {
 	sources := []model.PlayLinkVo{
 		{Id: "group1", SourceId: "s1", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://1"}}},
@@ -139,7 +96,7 @@ func TestFilmPlayInfo_ZeroIDsFailFast(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=0&sid=0", nil)
+	req, _ := http.NewRequest("GET", "/filmPlayInfo?id=0", nil)
 	c.Request = req
 
 	IndexHd.FilmPlayInfo(c)
@@ -168,24 +125,6 @@ func TestFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
 		}
 	}()
 	IndexHd.FilmPlayInfo(c)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 wrapper, got %d", w.Code)
-	}
-}
-
-func TestLiveFilmPlayInfo_NegativeEpisodeAndPlayFromEmpty(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	req, _ := http.NewRequest("GET", "/liveFilmPlayInfo?sid=100&source=src1&episode=-1", nil)
-	c.Request = req
-
-	defer func() {
-		if r := recover(); r != nil {
-			t.Fatalf("LiveFilmPlayInfo panicked with negative episode: %v", r)
-		}
-	}()
-	IndexHd.LiveFilmPlayInfo(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 wrapper, got %d", w.Code)
 	}

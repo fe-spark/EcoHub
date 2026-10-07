@@ -108,7 +108,7 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 	version := "v_test_daily"
 	// 插入测试影片索引与快照
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001, ContentKey: "vod_1"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
 		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
 	})
@@ -124,8 +124,8 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
 
 	req := DailyUpdateListReq{
-		Pid: 0,
-		Page: &dto.Page{Current: 1, PageSize: 21},
+		Pid:    0,
+		Page:   &dto.Page{Current: 1, PageSize: 21},
 		Random: false,
 	}
 

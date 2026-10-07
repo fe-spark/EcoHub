@@ -61,7 +61,7 @@ func TestPickBestMatchedPoster(t *testing.T) {
 func TestApplyExternalPosterSourceRespectsManualOverride(t *testing.T) {
 	existing := map[int64]model.FilmIndex{
 		100: {
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100, ContentKey: "vod_100"},
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100},
 			FilmIndexContent: model.FilmIndexContent{
 				Picture:         "https://original.source/poster.jpg",
 				CustomPicture:   "https://my.custom/poster.jpg",
@@ -71,12 +71,12 @@ func TestApplyExternalPosterSourceRespectsManualOverride(t *testing.T) {
 	}
 	infos := []model.FilmIndex{
 		{
-			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100, ContentKey: "vod_100"},
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 100},
 			FilmIndexContent:  model.FilmIndexContent{Picture: "https://new.crawled/poster.jpg", IsCustomPicture: false},
 		},
 	}
-	detailsByKey := map[string]model.MovieDetail{
-		"vod_100": {
+	details := []model.MovieDetail{
+		{
 			Id:              100,
 			Name:            "测试片",
 			Picture:         "https://new.crawled/poster.jpg",
@@ -85,7 +85,7 @@ func TestApplyExternalPosterSourceRespectsManualOverride(t *testing.T) {
 	}
 
 	// 1. 爬虫模式 (isManual = false) -> 保留 CustomPicture，且不会丢失底层 Picture
-	_ = ApplyExternalPosterSourceToMasterWritesTx(nil, "master", infos, detailsByKey, existing, false)
+	_ = ApplyExternalPosterSourceToMasterWritesTx(nil, "master", infos, details, existing, false)
 	if !infos[0].IsCustomPicture || infos[0].CustomPicture != "https://my.custom/poster.jpg" {
 		t.Fatalf("爬虫模式下已有自定义海报应被保护: %+v", infos[0])
 	}
@@ -97,8 +97,8 @@ func TestApplyExternalPosterSourceRespectsManualOverride(t *testing.T) {
 	infos[0].IsCustomPicture = false
 	infos[0].CustomPicture = ""
 	infos[0].Picture = "https://hd.poster/poster.jpg"
-	detailsByKey["vod_100"] = model.MovieDetail{Id: 100, Name: "测试片", Picture: "https://hd.poster/poster.jpg", IsCustomPicture: false}
-	_ = ApplyExternalPosterSourceToMasterWritesTx(nil, "master", infos, detailsByKey, existing, true)
+	details[0] = model.MovieDetail{Id: 100, Name: "测试片", Picture: "https://hd.poster/poster.jpg", IsCustomPicture: false}
+	_ = ApplyExternalPosterSourceToMasterWritesTx(nil, "master", infos, details, existing, true)
 	if infos[0].IsCustomPicture {
 		t.Fatalf("人工保存模式下应允许将 IsCustomPicture 设为 false: %+v", infos[0])
 	}
@@ -111,7 +111,7 @@ func TestCustomPictureToggleRestoresRawPicture(t *testing.T) {
 	// 验证：当影片设置了自定义海报，在解除自定义后（IsCustomPicture = false），
 	// 若外部海报源未命中，系统应能够正确从 existing 恢复原始采集图片。
 	existing := model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 300, ContentKey: "vod_300"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 300},
 		FilmIndexContent: model.FilmIndexContent{
 			Name:            "原始电影",
 			Picture:         "https://spider.raw/poster.jpg",

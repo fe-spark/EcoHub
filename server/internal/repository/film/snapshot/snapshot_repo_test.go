@@ -30,12 +30,12 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 
 	if err := gdb.AutoMigrate(
 		&model.FilmIndex{},
-		&model.MovieDetailInfo{},
+		&model.FilmSourcePlaylist{},
 		&model.FilmListSnapshot{},
 		&model.Category{},
-		&model.SlaveMoviePlaylist{},
 		&model.MovieMatchKey{},
 		&model.FilmSource{},
+		&model.FilmSnapshotSource{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -66,23 +66,27 @@ func createTestFilm(t *testing.T, gdb *gorm.DB, mid int64, name string, updateSt
 		PlayList: [][]model.MovieUrlInfo{{{Episode: "第1集", Link: "https://test.com/1.m3u8"}}},
 		PlayFrom: []string{"默认主源"},
 	}
-	contentJSON, err := json.Marshal(detail)
+	urlsJSON, err := json.Marshal(detail.PlayList[0])
 	if err != nil {
 		t.Fatalf("marshal detail: %v", err)
 	}
-	detailInfo := model.MovieDetailInfo{
-		Mid:     mid,
-		Content: string(contentJSON),
+	playlist := model.FilmSourcePlaylist{
+		Mid:          mid,
+		SourceId:     "source_master",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail.PlayList[0]),
+		Content:      string(urlsJSON),
 	}
-	if err := gdb.Create(&detailInfo).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	if err := gdb.Create(&playlist).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	index := model.FilmIndex{
 		FilmIndexIdentity: model.FilmIndexIdentity{
-			Mid:        mid,
-			ContentKey: fmt.Sprintf("key_%d", mid),
-			SourceId:   "source_master",
+			Mid:           mid,
+			FirstSourceId: "source_master",
 		},
 		FilmIndexCategory: model.FilmIndexCategory{
 			Pid:   1,

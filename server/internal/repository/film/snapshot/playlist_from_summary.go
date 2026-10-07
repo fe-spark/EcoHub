@@ -1,8 +1,8 @@
 package snapshot
 
 import (
-	"encoding/json"
 	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,60 +14,64 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-func buildPlayFromSummaryWithSources(
-	filmIndex model.FilmIndex,
-	detail *model.MovieDetail,
-	groupsBySource map[string][]model.PlayLinkVo,
-	sources []model.FilmSource,
-) string {
-	playNames := make([]string, 0)
-	seen := make(map[string]struct{})
-	sourceNameByID := make(map[string]string, len(sources))
-	for _, source := range sources {
-		sourceNameByID[source.Id] = source.Name
-	}
-	appendName := func(name string) {
-		name = strings.TrimSpace(name)
-		if name == "" {
-			return
-		}
-		if _, ok := seen[name]; ok {
-			return
-		}
-		seen[name] = struct{}{}
-		playNames = append(playNames, name)
-	}
-
-	if detail != nil {
-		siteName := sourceNameByID[filmIndex.SourceId]
-		for index, links := range detail.PlayList {
-			if len(links) == 0 {
-				continue
-			}
-			rawName := ""
-			if index >= 0 && index < len(detail.PlayFrom) {
-				rawName = detail.PlayFrom[index]
-			}
-			appendName(shared.BuildDisplaySourceName(siteName, rawName, index, len(detail.PlayList)))
-		}
-	}
-
-	if len(groupsBySource) > 0 {
-		for _, source := range sources {
-			if source.Grade != model.SlaveCollect || !source.State {
-				continue
-			}
-			groups := groupsBySource[source.Id]
-			for _, group := range groups {
-				appendName(group.Name)
-			}
-		}
-	}
-
-	if len(playNames) == 0 {
+// BuildPlayFromSummaryFromPlaylists 从影片的多源播放列表中构建播放源摘要。
+// 每条播放线路一个展示名，按站点权重降序、group_index 升序拼接。
+func BuildPlayFromSummaryFromPlaylists(playlists []model.FilmSourcePlaylist, sources []model.FilmSource) string {
+	if len(playlists) == 0 {
 		return ""
 	}
-	return strings.Join(playNames, "$$$")
+	weightByID := make(map[string]int, len(sources))
+	nameByID := make(map[string]string, len(sources))
+	for _, s := range sources {
+		weightByID[s.Id] = s.Weight
+		nameByID[s.Id] = s.Name
+	}
+
+	// 统计各源播放线路数量
+	countBySource := make(map[string]int)
+	playLines := make([]model.FilmSourcePlaylist, 0, len(playlists))
+	for _, p := range playlists {
+		if p.LineKind == "play" {
+			countBySource[p.SourceId]++
+			playLines = append(playLines, p)
+		}
+	}
+	if len(playLines) == 0 {
+		return ""
+	}
+
+	// 按站点权重降序、站点ID升序、group_index 升序排序
+	sort.SliceStable(playLines, func(i, j int) bool {
+		wi, wj := weightByID[playLines[i].SourceId], weightByID[playLines[j].SourceId]
+		if wi != wj {
+			return wi > wj
+		}
+		if playLines[i].SourceId != playLines[j].SourceId {
+			return playLines[i].SourceId < playLines[j].SourceId
+		}
+		return playLines[i].GroupIndex < playLines[j].GroupIndex
+	})
+
+	var names []string
+	seen := make(map[string]struct{}, len(playLines))
+	for _, line := range playLines {
+		sName := nameByID[line.SourceId]
+		if sName == "" {
+			sName = line.SourceId
+		}
+		displayName := shared.BuildDisplaySourceName(sName, line.GroupName, line.GroupIndex, countBySource[line.SourceId])
+		displayName = strings.TrimSpace(displayName)
+		if displayName == "" {
+			continue
+		}
+		if _, ok := seen[displayName]; ok {
+			continue
+		}
+		seen[displayName] = struct{}{}
+		names = append(names, displayName)
+	}
+
+	return strings.Join(names, "$$$")
 }
 
 func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) error {
@@ -75,7 +79,7 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 		return nil
 	}
 
-	orderedInfos := make([]model.FilmIndex, 0, len(infos))
+	mids := make([]int64, 0, len(infos))
 	seenMid := make(map[int64]struct{}, len(infos))
 	for _, info := range infos {
 		if info.Mid <= 0 {
@@ -85,66 +89,33 @@ func RefreshPlayFromSummaryByIndexesTx(tx *gorm.DB, infos []model.FilmIndex) err
 			continue
 		}
 		seenMid[info.Mid] = struct{}{}
-		orderedInfos = append(orderedInfos, info)
+		mids = append(mids, info.Mid)
 	}
-	if len(orderedInfos) == 0 {
+	if len(mids) == 0 {
 		return nil
 	}
 
-	mids := make([]int64, 0, len(orderedInfos))
-	for _, info := range orderedInfos {
-		mids = append(mids, info.Mid)
-	}
-
 	startedAt := time.Now()
-	var detailInfos []model.MovieDetailInfo
-	if err := tx.Where("mid IN ?", mids).Find(&detailInfos).Error; err != nil {
+	var playlists []model.FilmSourcePlaylist
+	if err := tx.Where("mid IN ? AND line_kind = ?", mids, "play").Find(&playlists).Error; err != nil {
 		return err
 	}
-	detailCost := time.Since(startedAt)
-	parseStartedAt := time.Now()
-	detailByMid := make(map[int64]model.MovieDetail, len(detailInfos))
-	for _, item := range detailInfos {
-		var detail model.MovieDetail
-		if err := json.Unmarshal([]byte(item.Content), &detail); err != nil {
-			continue
-		}
-		detailByMid[item.Mid] = detail
-	}
-	parseCost := time.Since(parseStartedAt)
 
-	playlistStartedAt := time.Now()
-	playlistGroups, err := shared.LoadPlaylistGroupsByInfosTx(tx, orderedInfos)
-	if err != nil {
-		return err
+	playlistsByMid := make(map[int64][]model.FilmSourcePlaylist, len(mids))
+	for _, pl := range playlists {
+		playlistsByMid[pl.Mid] = append(playlistsByMid[pl.Mid], pl)
 	}
-	playlistCost := time.Since(playlistStartedAt)
-	buildStartedAt := time.Now()
+
 	sources := support.GetCollectSourceList()
-
-	summaries := make(map[int64]string, len(orderedInfos))
-	for _, info := range orderedInfos {
-		var detailPtr *model.MovieDetail
-		if detail, ok := detailByMid[info.Mid]; ok {
-			detailPtr = &detail
-		}
-		summaries[info.Mid] = buildPlayFromSummaryWithSources(info, detailPtr, playlistGroups[info.Mid], sources)
+	summaries := make(map[int64]string, len(mids))
+	for _, mid := range mids {
+		summaries[mid] = BuildPlayFromSummaryFromPlaylists(playlistsByMid[mid], sources)
 	}
-	buildCost := time.Since(buildStartedAt)
-	updateStartedAt := time.Now()
+
 	if err := batchUpdatePlayFromSummariesTx(tx, summaries); err != nil {
 		return err
 	}
-	log.Printf(
-		"[PlaySummaryRefresh] chunk明细 mid_count=%d detail=%s parse=%s playlist=%s build=%s update=%s total=%s",
-		len(orderedInfos),
-		detailCost,
-		parseCost,
-		playlistCost,
-		buildCost,
-		time.Since(updateStartedAt),
-		time.Since(startedAt),
-	)
+	log.Printf("[PlaySummaryRefresh] mid_count=%d cost=%s", len(mids), time.Since(startedAt))
 	return nil
 }
 

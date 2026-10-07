@@ -214,7 +214,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 					submitErr := scheduler.Submit(ctx, scheduler.Job{
 						SourceID:   s.Id,
 						SourceName: s.Name,
-						Grade:      s.Grade,
 						Page:       page,
 						Write: func() (scheduler.Mids, error) {
 							return deps.SavePage(context.Background(), s, page, items)
@@ -239,7 +238,7 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 	}
 	go func() {
 		requestWG.Wait()
-		scheduler.FinishSource(s.Grade, s.Id)
+		scheduler.FinishSource(s.Id)
 		writeWG.Wait()
 		close(writeCompletions)
 	}()
@@ -276,8 +275,8 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		deps.NoteSourceError(s.Id, stopErr.Error())
 		return stats.success > 0, stopErr
 	}
-	if s.Grade == model.MasterCollect && h < 0 && stats.failed > 0 {
-		return stats.success > 0, fmt.Errorf("主站全量采集存在失败页 failed=%d，跳过本次框架发布", stats.failed)
+	if h < 0 && stats.failed > 0 {
+		return stats.success > 0, fmt.Errorf("全量采集存在失败页 failed=%d，跳过本次框架发布", stats.failed)
 	}
 	if ctx.Err() != nil {
 		return stats.success > 0, nil

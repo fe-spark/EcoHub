@@ -114,7 +114,7 @@ func TestMigrateAddFilmSourceCreatedAtColumn_BackfillExisting(t *testing.T) {
 		t.Fatalf("AutoMigrate failed: %v", err)
 	}
 
-	if err := testDB.Exec("INSERT INTO film_sources (id, name, uri, grade, state) VALUES ('s1', 'Master', 'https://m.com', 1, 1), ('s2', 'Slave1', 'https://s1.com', 2, 1), ('s3', 'Slave2', 'https://s2.com', 2, 1)").Error; err != nil {
+	if err := testDB.Exec("INSERT INTO film_sources (id, name, uri, weight, state) VALUES ('s1', 'Master', 'https://m.com', 100, 1), ('s2', 'Slave1', 'https://s1.com', 50, 1), ('s3', 'Slave2', 'https://s2.com', 10, 1)").Error; err != nil {
 		t.Fatalf("insert existing sources failed: %v", err)
 	}
 
@@ -124,7 +124,7 @@ func TestMigrateAddFilmSourceCreatedAtColumn_BackfillExisting(t *testing.T) {
 	}
 
 	var list []model.FilmSource
-	if err := testDB.Order("grade ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := testDB.Order("weight DESC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		t.Fatalf("query list failed: %v", err)
 	}
 
@@ -141,4 +141,3 @@ func TestMigrateAddFilmSourceCreatedAtColumn_BackfillExisting(t *testing.T) {
 		}
 	}
 }
-

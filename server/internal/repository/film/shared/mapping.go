@@ -31,21 +31,14 @@ func movieSourceMappingUpsert() clause.OnConflict {
 	}
 }
 
-// BuildMovieSourceMappings 由 content_key→mid 映射生成主从站来源映射行。
-func BuildMovieSourceMappings(list []model.FilmIndex, keyToMid map[string]int64) []model.MovieSourceMapping {
-	mappings := make([]model.MovieSourceMapping, 0, len(list))
-	for _, item := range list {
-		globalMid, ok := keyToMid[item.ContentKey]
-		if !ok {
-			continue
-		}
-		mappings = append(mappings, model.MovieSourceMapping{
-			SourceId:  item.SourceId,
-			SourceMid: item.Mid,
-			GlobalMid: globalMid,
-		})
+// SaveMovieSourceMappingTx 保存单条源站影片 ID 与全局 Mid 映射
+func SaveMovieSourceMappingTx(tx *gorm.DB, sourceID string, sourceMid, globalMid int64) error {
+	mapping := model.MovieSourceMapping{
+		SourceId:  sourceID,
+		SourceMid: sourceMid,
+		GlobalMid: globalMid,
 	}
-	return mappings
+	return tx.Clauses(movieSourceMappingUpsert()).Create(&mapping).Error
 }
 
 // SaveMovieSourceMappingsTxE 按 (source_id, source_mid) 冲突 upsert 来源映射。

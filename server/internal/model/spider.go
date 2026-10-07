@@ -59,13 +59,6 @@ func (CronSourceRel) TableName() string {
 	return TableCronSourceRel
 }
 
-type SourceGrade int
-
-const (
-	MasterCollect SourceGrade = iota
-	SlaveCollect
-)
-
 const (
 	SourceFormatJSON = "json"
 	SourceFormatXML  = "xml"
@@ -73,18 +66,16 @@ const (
 
 // FilmSource 影视站点信息保存结构体
 type FilmSource struct {
-	Id    string      `json:"id" gorm:"primaryKey;size:32"`    // 唯一ID
-	Name  string      `json:"name" gorm:"size:64"`             // 采集站点备注名
-	Uri   string      `json:"uri" gorm:"uniqueIndex;size:255"` // 采集链接
-	Grade SourceGrade `json:"grade"`                           // 采集站等级 主站点 || 附属站
-	// SyncPictures 已废弃：采集不再下载封面到素材中心，字段仅兼容旧库列
-	SyncPictures       bool   `json:"-"`
-	State              bool   `json:"state"`                               // 是否启用
-	IsPosterSource     bool   `json:"isPosterSource" gorm:"default:false"` // 是否为海报/封面图源（全局单选）
-	Interval           int    `json:"interval"`                            // 采集时间间隔 单位/ms
-	Cd                 int    `json:"cd"`                                  // 采集时长 单位/小时
+	Id                 string    `json:"id" gorm:"primaryKey;size:32"`         // 唯一ID
+	Name               string    `json:"name" gorm:"size:64"`                  // 采集站点备注名
+	Uri                string    `json:"uri" gorm:"uniqueIndex;size:255"`      // 采集链接
+	State              bool      `json:"state"`                                // 是否启用
+	Weight             int       `json:"weight" gorm:"default:0"`              // 线路排序默认权重，越大越靠前
+	IsPosterSource     bool      `json:"isPosterSource" gorm:"default:false"`  // 是否为海报/封面图源（全局单选）
+	Interval           int       `json:"interval"`                             // 采集时间间隔 单位/ms
+	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
-	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"` // 播放链接域名替换规则 (每行一条: old.com => new.com)
+	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)
 	CreatedAt          time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
 
@@ -169,12 +160,12 @@ type FilmSourceStateBatchRequest struct {
 
 // SourceHealthItem 失效源检测结果项（连通性测试未通过或无法参与检测的站点）
 type SourceHealthItem struct {
-	Id     string      `json:"id"`
-	Name   string      `json:"name"`
-	Uri    string      `json:"uri"`
-	Grade  SourceGrade `json:"grade"`
-	State  bool        `json:"state"`
-	Reason string      `json:"reason"`
+	Id     string `json:"id"`
+	Name   string `json:"name"`
+	Uri    string `json:"uri"`
+	State  bool   `json:"state"`
+	Weight int    `json:"weight"`
+	Reason string `json:"reason"`
 }
 
 // FilmSourceDelBatchRequest 批量删除采集站请求

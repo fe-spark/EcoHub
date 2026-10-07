@@ -303,7 +303,7 @@ func migrateAddFilmSourceCreatedAtColumn(db *gorm.DB) error {
 			}
 		}
 		var list []model.FilmSource
-		if err := db.Order("grade ASC, id ASC").Find(&list).Error; err != nil {
+		if err := db.Order("weight DESC, id ASC").Find(&list).Error; err != nil {
 			return err
 		}
 		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)

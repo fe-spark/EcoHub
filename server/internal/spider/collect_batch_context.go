@@ -266,26 +266,10 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	if s.Grade == model.MasterCollect && h < 0 {
-		pending := b.pendingMasterMIDs[s.Id]
-		if pending == nil {
-			pending = make(map[int64]struct{})
-			b.pendingMasterMIDs[s.Id] = pending
-		}
-		for _, mid := range mids {
-			if mid > 0 {
-				pending[mid] = struct{}{}
-			}
-		}
-		return
-	}
-
 	for _, mid := range mids {
 		if mid > 0 {
 			b.affectedMIDs[mid] = struct{}{}
-			if s.Grade == model.MasterCollect {
-				b.masterAffectedMIDs[mid] = struct{}{}
-			}
+			b.masterAffectedMIDs[mid] = struct{}{}
 		}
 	}
 }
@@ -372,10 +356,10 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		sources = append(sources, s)
 	}
 	sort.Slice(sources, func(i, j int) bool {
-		if sources[i].Grade == sources[j].Grade {
+		if sources[i].Weight == sources[j].Weight {
 			return sources[i].Id < sources[j].Id
 		}
-		return sources[i].Grade == model.MasterCollect
+		return sources[i].Weight > sources[j].Weight
 	})
 
 	affectedMIDs := make([]int64, 0, len(b.affectedMIDs))

@@ -462,4 +462,3 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		Actors:        actors,
 	}, nil
 }
-

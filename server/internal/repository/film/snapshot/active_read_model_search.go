@@ -356,3 +356,127 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 	page.PageCount = cachedItem.PageCount
 	return cloneFilmListSnapshots(cachedItem.Snapshots)
 }
+
+func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID string, keyword string, sortField string, page *dto.Page) []model.FilmListSnapshot {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, sortField, page)
+	}
+
+	startedAt := time.Now()
+	page = shared.EnsurePage(page)
+	keyword = strings.TrimSpace(keyword)
+	sortField = utils.NormalizeSearchSortField(sortField)
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || keyword == "" {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+
+	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+
+	searchVer := GetSearchCacheVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:sv%s:src_%s:%s:%s:p%d:s%d", config.FilmSearchCachePrefix, version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var item searchCacheItem
+			if json.Unmarshal([]byte(data), &item) == nil {
+				page.Total = item.Total
+				page.PageCount = item.PageCount
+				return item.Snapshots
+			}
+		}
+	}
+
+	sfKey := fmt.Sprintf("v%s:sv%s:src_%s:%s:%s:p%d:s%d", version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
+	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var item searchCacheItem
+				if json.Unmarshal([]byte(data), &item) == nil {
+					return item, nil
+				}
+			}
+		}
+
+		if db.Mdb == nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+
+		query := applyNameLikeFilter(db.Mdb.Table("film_list_snapshots as s").
+			Joins("JOIN film_snapshot_sources as ss ON s.snapshot_version = ss.snapshot_version AND s.mid = ss.mid").
+			Where("s.snapshot_version = ? AND ss.source_id = ?", version, sourceID), keyword)
+
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+		calcTotal := int(total)
+		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
+		if calcPageCount <= 0 {
+			calcPageCount = 1
+		}
+
+		orderClause := snapshotSortOrderClause(sortField, true)
+		offset := shared.PageOffset(page)
+
+		var ids []uint
+		if err := query.Select("s.id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("s.id", &ids).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+
+		var snapshots []model.FilmListSnapshot
+		if len(ids) > 0 {
+			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
+				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			}
+		}
+		if snapshots == nil {
+			snapshots = []model.FilmListSnapshot{}
+		}
+
+		item := searchCacheItem{
+			Total:     calcTotal,
+			PageCount: calcPageCount,
+			Snapshots: snapshots,
+		}
+		if db.Rdb != nil {
+			if GetSearchCacheVersion() == searchVer {
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				}
+			}
+		}
+
+		log.Printf("[SearchFilm] Source过滤搜索完成 keyword=%q source=%q sort=%q total=%d page=%d size=%d cost=%s",
+			keyword, sourceID, sortField, calcTotal, page.Current, len(snapshots), time.Since(startedAt))
+		return item, nil
+	})
+
+	if err != nil || val == nil {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+	cachedItem, ok := val.(searchCacheItem)
+	if !ok {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+	page.Total = cachedItem.Total
+	page.PageCount = cachedItem.PageCount
+	return cloneFilmListSnapshots(cachedItem.Snapshots)
+}

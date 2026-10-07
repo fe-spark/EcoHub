@@ -17,7 +17,7 @@ function site(
     name: id,
     uri: "",
     state: true,
-    grade: 1,
+    weight: 10,
     interval: 0,
     progress: progress ?? null,
   };

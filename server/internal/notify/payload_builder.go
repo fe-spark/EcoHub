@@ -16,7 +16,7 @@ func BuildSourceResult(source model.FilmSource, progress model.CollectProgress, 
 	return model.SourceNotifyResult{
 		SourceID:    source.Id,
 		SourceName:  source.Name,
-		Grade:       int(source.Grade),
+		Weight:      source.Weight,
 		Status:      status,
 		Error:       errMsg,
 		PageTotal:   progress.Total,
@@ -42,7 +42,7 @@ func BuildSourceResultDirect(source model.FilmSource, status, errMsg string) mod
 	return model.SourceNotifyResult{
 		SourceID:   source.Id,
 		SourceName: source.Name,
-		Grade:      int(source.Grade),
+		Weight:     source.Weight,
 		Status:     status,
 		Error:      errMsg,
 		SuccessCnt: successCnt,

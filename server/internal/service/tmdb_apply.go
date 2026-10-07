@@ -1,9 +1,9 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,19 +29,42 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 		return 0, fmt.Errorf("获取 TMDB 详情失败: %w", err)
 	}
 
-	var detailRec model.MovieDetailInfo
-	if err := db.Mdb.Where("mid = ?", req.Mid).First(&detailRec).Error; err != nil {
+	var indexRec model.FilmIndex
+	if err := db.Mdb.Where("mid = ?", req.Mid).First(&indexRec).Error; err != nil {
 		return 0, fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
 	}
 
-	var detail model.MovieDetail
-	if err := json.Unmarshal([]byte(detailRec.Content), &detail); err != nil {
-		return 0, fmt.Errorf("解析既有影片数据失败: %w", err)
+	detail := model.MovieDetail{
+		Id:                 indexRec.Mid,
+		Cid:                indexRec.Cid,
+		Pid:                indexRec.Pid,
+		Name:               indexRec.Name,
+		Picture:            indexRec.Picture,
+		PictureSlide:       indexRec.PictureSlide,
+		CustomPicture:      indexRec.CustomPicture,
+		CustomPictureSlide: indexRec.CustomPictureSlide,
+		IsCustomPicture:    indexRec.IsCustomPicture,
+		MovieDescriptor: model.MovieDescriptor{
+			SubTitle:    indexRec.SubTitle,
+			CName:       indexRec.CName,
+			Initial:     indexRec.Initial,
+			ClassTag:    indexRec.ClassTag,
+			Actor:       indexRec.Actor,
+			Director:    indexRec.Director,
+			Writer:      indexRec.Writer,
+			Remarks:     indexRec.Remarks,
+			ReleaseDate: indexRec.ReleaseDate,
+			Area:        indexRec.Area,
+			Language:    indexRec.Language,
+			Year:        strconv.FormatInt(indexRec.Year, 10),
+			State:       indexRec.State,
+			DbId:        indexRec.DbId,
+			DbScore:     strconv.FormatFloat(indexRec.Score, 'f', 1, 64),
+			Hits:        indexRec.Hits,
+			Blurb:       indexRec.Blurb,
+			Content:     indexRec.Content,
+		},
 	}
-	detail.Id = req.Mid
-
-	var indexRec model.FilmIndex
-	_ = db.Mdb.Where("mid = ?", req.Mid).First(&indexRec).Error
 
 	fieldSet := make(map[string]struct{}, len(req.Fields))
 	for _, f := range req.Fields {
@@ -104,10 +127,7 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 
 	detail.MovieDescriptor.UpdateTime = time.Now().Format(time.DateTime)
 
-	sourceID := indexRec.SourceId
-	if sourceID == "" {
-		sourceID = detailRec.SourceId
-	}
+	sourceID := indexRec.FirstSourceId
 	if sourceID == "" {
 		sourceID = "manual"
 	}

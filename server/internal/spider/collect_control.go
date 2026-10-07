@@ -12,7 +12,7 @@ import (
 // StopTask 停止单个站点：先置进度为已停止，再打断其写队列与运行中的任务上下文。
 func StopTask(sourceID string) {
 	progress.MarkStopped(sourceID)
-	scheduler.CancelSource(model.SlaveCollect, sourceID)
+	scheduler.CancelSource(sourceID)
 	progress.CancelTask(sourceID)
 }
 
@@ -24,7 +24,7 @@ func StopAllTasks() {
 	progress.RangeTasks(func(id, _ string) bool {
 		count++
 		progress.MarkStopped(id)
-		scheduler.CancelSource(model.SlaveCollect, id)
+		scheduler.CancelSource(id)
 		return true
 	})
 	progress.CancelAllTasks()

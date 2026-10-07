@@ -29,7 +29,7 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 
 	if err := gdb.AutoMigrate(
 		&model.FilmSource{},
-		&model.SlaveMoviePlaylist{},
+		&model.FilmSourcePlaylist{},
 		&model.CollectSourceStats{},
 		&model.Category{},
 		&model.SourceCategory{},
@@ -52,7 +52,7 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		Id:     "src_unreachable",
 		Name:   "原始站点",
 		Uri:    unreachableURI,
-		Grade:  model.SlaveCollect,
+		Weight: 10,
 		Format: model.SourceFormatJSON,
 		State:  true,
 	}
@@ -69,7 +69,7 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 			Id:     "src_unreachable",
 			Name:   "新站点",
 			Uri:    unreachableURI,
-			Grade:  model.SlaveCollect,
+			Weight: 10,
 			Format: model.SourceFormatJSON,
 			State:  true,
 		},
@@ -101,7 +101,7 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 			Id:     "src_unreachable",
 			Name:   "修改地址",
 			Uri:    newUnreachableURI,
-			Grade:  model.SlaveCollect,
+			Weight: 10,
 			Format: model.SourceFormatJSON,
 			State:  true,
 		},
