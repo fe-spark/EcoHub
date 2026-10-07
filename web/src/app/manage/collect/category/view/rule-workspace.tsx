@@ -3,6 +3,7 @@ import { Button, Form, Input, Pagination, Popconfirm, Select, Space, Table, Tag,
 import type { ColumnsType } from "antd/es/table";
 import { PlusOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
+import { useManagePermission } from "@/lib/manage-permission";
 import {
   checkCategoryRuleConflict,
   deleteCategoryRule,
@@ -31,6 +32,7 @@ interface RuleWorkspaceProps {
 
 export default function RuleWorkspace(props: RuleWorkspaceProps) {
   const { ruleTotals, onRuleTotalsChange } = props;
+  const { canWrite } = useManagePermission();
   const { message } = useAppMessage();
   const [ruleGroup, setRuleGroup] = useState<string>(ROOT_GROUP);
   const [keyword, setKeyword] = useState("");
@@ -269,11 +271,11 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       align: "center",
       render: (_, record) => (
         <Space size={8}>
-          <Button type="link" size="small" onClick={() => openEditRuleModal(record)}>
+          <Button type="link" size="small" disabled={!canWrite} onClick={() => openEditRuleModal(record)}>
             编辑
           </Button>
           <Popconfirm title="确认删除该规则？" okText="删除" cancelText="取消" onConfirm={() => void handleDeleteRule(record.id)}>
-            <Button type="link" size="small" danger>
+            <Button type="link" size="small" danger disabled={!canWrite}>
               删除
             </Button>
           </Popconfirm>
@@ -332,7 +334,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
               <Button icon={<ReloadOutlined />} onClick={() => void Promise.all([fetchRules(1, paging.pageSize, keyword, ruleGroup), fetchRuleTotals()])}>
                 刷新规则
               </Button>
-              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateModal}>
+              <Button type="primary" icon={<PlusOutlined />} disabled={!canWrite} onClick={openCreateModal}>
                 新增规则
               </Button>
             </Space>
@@ -362,7 +364,10 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         checkingConflict={checkingConflict}
         watchedMatchType={watchedMatchType}
         regexPreview={regexPreview}
-        onSubmit={() => void handleRuleSubmit()}
+        onSubmit={() => {
+          if (!canWrite) return;
+          void handleRuleSubmit();
+        }}
         onCancel={closeRuleEditor}
         onAfterOpenChange={applyEditorValues}
       />

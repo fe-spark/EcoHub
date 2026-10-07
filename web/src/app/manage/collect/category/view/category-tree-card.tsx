@@ -22,6 +22,7 @@ import {
 import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { FilmClassNode } from "./types";
+import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
 
 interface CategoryTreeCardProps {
@@ -88,6 +89,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     onMove,
     onShowChange,
   } = props;
+  const { canWrite } = useManagePermission();
   const treePanelRef = useRef<HTMLDivElement>(null);
   const tableBodyRectRef = useRef<DOMRect | null>(null);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
@@ -128,6 +130,9 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
+    if (!canWrite) {
+      return;
+    }
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
@@ -141,7 +146,13 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       key: "drag",
       width: 60,
       align: "center",
-      render: () => <HolderOutlined className={styles.dragHandle} title="按住拖拽排序" />,
+      render: () => (
+        <HolderOutlined
+          className={styles.dragHandle}
+          title={canWrite ? "按住拖拽排序" : "访客仅可查看"}
+          style={canWrite ? undefined : { opacity: 0.35 }}
+        />
+      ),
     },
     {
       title: "ID",
@@ -227,6 +238,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
         <Switch
           size="small"
           checked={value}
+          disabled={!canWrite}
           loading={updatingShowIds.includes(record.id)}
           onChange={(checked) => onShowChange(record.id, checked)}
         />
@@ -294,10 +306,10 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                   <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
                     刷新分类
                   </Button>
-                  <Button onClick={onReset} loading={resettingTree}>
+                  <Button onClick={onReset} loading={resettingTree} disabled={!canWrite}>
                     重置分类
                   </Button>
-                  <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!hasPendingChanges}>
+                  <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!canWrite || !hasPendingChanges}>
                     保存变更
                   </Button>
                 </Space>

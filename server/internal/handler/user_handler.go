@@ -110,18 +110,13 @@ func (h *UserHandler) UserAdd(c *gin.Context) {
 		dto.Failed("用户名和密码必填!!!", c)
 		return
 	}
-	// 如果非超级管理员尝试创建非普通用户角色，强制重置为普通用户
-	if u.Role != model.UserRoleNormal {
-		v, ok := c.Get(config.AuthUserClaims)
-		if !ok {
-			u.Role = model.UserRoleNormal
-		} else {
-			uc, _ := v.(*utils.UserClaims)
-			if !model.IsAdmin(uc.UserID, uc.Role) {
-				u.Role = model.UserRoleNormal
-			}
+	operatorIsAdmin := false
+	if v, ok := c.Get(config.AuthUserClaims); ok {
+		if uc, ok := v.(*utils.UserClaims); ok && uc != nil {
+			operatorIsAdmin = model.IsAdmin(uc.UserID, uc.Role)
 		}
 	}
+	u.Role, u.Status = model.ClampNewUser(operatorIsAdmin, u.Role, u.Status)
 
 	if err := service.UserSvc.AddUser(u); err != nil {
 		dto.Failed(err.Error(), c)
@@ -146,26 +141,13 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
-	uc, _ := v.(*utils.UserClaims)
-	isOperatorAdmin := model.IsAdmin(uc.UserID, uc.Role)
-
-	// 非管理员只能更新自己的账号，防止横向越权
-	if !isOperatorAdmin && uc.UserID != uint(req.ID) {
-		dto.Failed("权限不足，仅可修改本人账号信息", c)
-		return
-	}
-	// 非超级管理员不可修改默认超级管理员信息
-	if req.ID == config.UserIdInitialVal && !isOperatorAdmin {
-		dto.Failed("权限不足，仅超级管理员可修改默认超级管理员信息", c)
-		return
-	}
-	// 变更角色需要超级管理员权限
-	if req.Role != nil && !isOperatorAdmin {
-		dto.Failed("权限不足，仅超级管理员可修改用户角色", c)
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
 
-	if err := service.UserSvc.UpdateUser(req); err != nil {
+	if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
@@ -179,10 +161,9 @@ func (h *UserHandler) UserDelete(c *gin.Context) {
 		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
-	uc, _ := v.(*utils.UserClaims)
-	isOperatorAdmin := model.IsAdmin(uc.UserID, uc.Role)
-	if !isOperatorAdmin {
-		dto.Failed("权限不足，仅超级管理员可删除用户", c)
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("鉴权失败，请重新登录", c)
 		return
 	}
 
@@ -198,12 +179,12 @@ func (h *UserHandler) UserDelete(c *gin.Context) {
 		dto.Failed("用户ID缺失!!!", c)
 		return
 	}
-	id, _ := strconv.Atoi(idStr)
-	if uint(id) == config.UserIdInitialVal {
-		dto.Failed("默认超级管理员账号不允许删除!!!", c)
+	id, err := strconv.Atoi(idStr)
+	if err != nil || id <= 0 {
+		dto.Failed("用户ID缺失!!!", c)
 		return
 	}
-	if err := service.UserSvc.DeleteUser(uint(id)); err != nil {
+	if err := service.UserSvc.DeleteUser(uc.UserID, uc.Role, uint(id)); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
