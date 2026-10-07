@@ -22,7 +22,7 @@ import (
 const (
 	snapshotListCacheTTL = 10 * time.Minute
 	snapshotPageCacheTTL = 5 * time.Minute
-	basicSelectFields    = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
+	basicSelectFields    = "id, snapshot_version, mid, source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
 )
 
 type categoryPageCacheItem struct {
@@ -31,9 +31,10 @@ type categoryPageCacheItem struct {
 	Movies    []model.MovieBasicInfo `json:"movies"`
 }
 
-func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
+	sourceID = strings.TrimSpace(sourceID)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
@@ -45,7 +46,7 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d:%d", config.FilmCategoryCachePrefix, version, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -58,6 +59,9 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
+	if sourceID != "" {
+		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
+	}
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -76,15 +80,20 @@ func GetSnapshotMovieListByCategoryReadModel(version string, field string, id in
 		}
 	}
 
-	log.Printf("[FilmCategoryList] 获取分类列表 field=%s id=%d count=%d offset=%d limit=%d cost=%s",
-		field, id, len(result), offset, limit, time.Since(startedAt))
+	log.Printf("[FilmCategoryList] 获取分类列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
+		sourceID, field, id, len(result), offset, limit, time.Since(startedAt))
 	return result
 }
 
-func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
+func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+	return GetSnapshotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
+}
+
+func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourceID string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	page = shared.EnsurePage(page)
 	version = strings.TrimSpace(version)
+	sourceID = strings.TrimSpace(sourceID)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
@@ -93,7 +102,7 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:p%d:s%d", config.FilmCategoryPageCachePrefix, version, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -106,6 +115,9 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 	}
 
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+	if sourceID != "" {
+		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
+	}
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -140,9 +152,13 @@ func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, i
 		}
 	}
 
-	log.Printf("[FilmCategoryList] 获取分类分页列表 field=%s id=%d total=%d page=%d size=%d cost=%s",
-		field, id, page.Total, page.Current, len(result), time.Since(startedAt))
+	log.Printf("[FilmCategoryList] 获取分类分页列表 source=%s field=%s id=%d total=%d page=%d size=%d cost=%s",
+		sourceID, field, id, page.Total, page.Current, len(result), time.Since(startedAt))
 	return result
+}
+
+func GetSnapshotMovieListByCategoryPageReadModel(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
+	return GetSnapshotMovieListByCategoryPageWithSourceReadModel(version, "", field, id, page)
 }
 
 // mysqlUseIndexHint 把 USE INDEX 挂到 FROM 子句之后，避免 Table("t USE INDEX ...")
@@ -183,9 +199,10 @@ func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
 	}
 }
 
-func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
+	sourceID = strings.TrimSpace(sourceID)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
@@ -197,7 +214,7 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d:%d", config.FilmHotCachePrefix, version, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -210,6 +227,9 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
+	if sourceID != "" {
+		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
+	}
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -229,14 +249,19 @@ func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id
 		}
 	}
 
-	log.Printf("[FilmHotList] 获取分类热播列表 field=%s id=%d count=%d offset=%d limit=%d cost=%s",
-		field, id, len(result), offset, limit, time.Since(startedAt))
+	log.Printf("[FilmHotList] 获取分类热播列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
+		sourceID, field, id, len(result), offset, limit, time.Since(startedAt))
 	return result
 }
 
-func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
+}
+
+func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, poolSize int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
+	sourceID = strings.TrimSpace(sourceID)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
@@ -245,7 +270,7 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%s:%d:%d", config.FilmHotPoolCachePrefix, version, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -258,6 +283,9 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
+	if sourceID != "" {
+		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
+	}
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -277,19 +305,23 @@ func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int6
 		}
 	}
 
-	log.Printf("[FilmHotPool] 获取分类热门候选池 field=%s id=%d count=%d poolSize=%d cost=%s",
-		field, id, len(result), poolSize, time.Since(startedAt))
+	log.Printf("[FilmHotPool] 获取分类热门候选池 source=%s field=%s id=%d count=%d poolSize=%d cost=%s",
+		sourceID, field, id, len(result), poolSize, time.Since(startedAt))
 	return result
 }
 
-func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) []model.MovieBasicInfo {
+	return GetSnapshotHotPoolByCategoryWithSourceReadModel(version, "", field, id, poolSize)
+}
+
+func GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
 	if limit <= 0 {
 		return []model.MovieBasicInfo{}
 	}
 	if poolSize <= 0 {
 		poolSize = 50
 	}
-	pool := GetSnapshotHotPoolByCategoryReadModel(version, field, id, poolSize)
+	pool := GetSnapshotHotPoolByCategoryWithSourceReadModel(version, sourceID, field, id, poolSize)
 	if len(pool) <= limit {
 		res := make([]model.MovieBasicInfo, len(pool))
 		copy(res, pool)
@@ -311,10 +343,15 @@ func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field str
 	return result
 }
 
-// GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，彻底消除 COUNT
-func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
+func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, poolSize)
+}
+
+// GetSnapshotTopMoviesBySortFastWithSource 快速获取指定采集站分类排序 Top 影片
+func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
+	sourceID = strings.TrimSpace(sourceID)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
@@ -339,15 +376,22 @@ func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, lim
 	var snapshots []model.FilmListSnapshot
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
-		Where("snapshot_version = ? AND pid = ?", version, pid).
-		Order(orderClause).
-		Limit(limit)
+		Where("snapshot_version = ? AND pid = ?", version, pid)
+	if sourceID != "" {
+		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
+	}
+	query = query.Order(orderClause).Limit(limit)
 
 	if err := query.Find(&snapshots).Error; err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
-	log.Printf("[FilmSortListFast] 获取分类排序Top列表 pid=%d sortType=%d count=%d cost=%s",
-		pid, sortType, len(result), time.Since(startedAt))
+	log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
+		sourceID, pid, sortType, len(result), time.Since(startedAt))
 	return result
+}
+
+// GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，消除 COUNT 扫描开销
+func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
+	return GetSnapshotTopMoviesBySortFastWithSource(version, "", sortType, pid, limit)
 }

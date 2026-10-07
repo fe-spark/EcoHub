@@ -42,7 +42,17 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		progressByID[progress.Id] = progress
 	}
 	lastCollectTimeByID := getLastCollectTimeBySource(sources)
+	primarySource := repository.GetActiveCollectSource()
+	primaryID := ""
+	if primarySource != nil {
+		primaryID = primarySource.Id
+	}
 	for _, source := range sources {
+		if source.Id == primaryID {
+			source.IsPrimary = true
+		} else {
+			source.IsPrimary = false
+		}
 		item := model.FilmSourceListItem{FilmSource: source, LastCollectTime: lastCollectTimeByID[source.Id]}
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
@@ -53,6 +63,25 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		list = append(list, item)
 	}
 	return list
+}
+
+func (s *CollectService) SetPrimaryFilmSource(id string) error {
+	src := repository.FindCollectSourceById(id)
+	if src == nil {
+		return errors.New("采集源不存在")
+	}
+	if err := repository.SetPrimaryCollectSource(id); err != nil {
+		return err
+	}
+
+	// 切换主站时获取对应采集源的分类
+	if err := spider.CollectCategory(src); err != nil {
+		syslog.Warnf("[CollectService] 切换主站时获取对应采集源分类失败 name=%s uri=%s: %v", src.Name, src.Uri, err)
+	}
+
+	repository.MarkCategoryChanged()
+	filmsnapshot.ClearAllSnapshotDynamicCaches()
+	return nil
 }
 
 func getLastCollectTimeBySource(sources []model.FilmSource) map[string]*time.Time {

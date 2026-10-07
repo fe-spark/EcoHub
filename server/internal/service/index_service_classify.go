@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -35,9 +36,18 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 	return nav
 }
 
-// GetNavCategory 获取导航分类信息
-func (i *IndexService) GetNavCategory() []*model.Category {
-	tree := repository.GetCategoryTree()
+// GetNavCategory 获取导航分类信息 (按当前生效站点隔离)
+func (i *IndexService) GetNavCategory(sourceIdOpt ...string) []*model.Category {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
+	tree := repository.GetActiveCategoryTree(sourceId)
 	cl := make([]*model.Category, 0)
 	for _, c := range tree.Children {
 		if c.Show {
@@ -71,8 +81,37 @@ func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) 
 }
 
 // GetPidCategory 获取pid对应的分类信息
-func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
+func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.CategoryTree {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
 	pid = repository.ResolveCategoryID(pid)
+
+	if sourceId != "" {
+		activeTree := repository.GetActiveCategoryTree(sourceId)
+		for _, t := range activeTree.Children {
+			if t.Id == pid {
+				return &model.CategoryTree{
+					Id:        t.Id,
+					Pid:       t.Pid,
+					Name:      t.Name,
+					Alias:     t.Alias,
+					Show:      t.Show,
+					Sort:      t.Sort,
+					CreatedAt: t.CreatedAt,
+					UpdatedAt: t.UpdatedAt,
+					Children:  t.Children,
+				}
+			}
+		}
+	}
+
 	tree := repository.GetCategoryTree()
 	for _, t := range tree.Children {
 		if t.Id == pid {
@@ -94,7 +133,13 @@ func (i *IndexService) GetPidCategory(pid int64) *model.CategoryTree {
 
 // SearchTags 整合对应分类的搜索tag
 func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
-	return filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), st.Pid)
+	sourceId := strings.TrimSpace(st.SourceId)
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
+	return filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), st.Pid, sourceId)
 }
 
 // GetFilmsByTags 通过searchTag 返回满足条件的分页影片信息
@@ -109,7 +154,16 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
-func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any {
+func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) map[string]any {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
 	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
 		version = filmsnapshot.GetActiveSnapshotVersion()
@@ -122,6 +176,9 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page) map[string]any
 		}
 	}
 	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
+	if sourceId != "" {
+		cacheKey = fmt.Sprintf("%s:src_%s", cacheKey, sourceId)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any

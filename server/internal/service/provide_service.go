@@ -88,10 +88,22 @@ func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int
 }
 
 // GetClassList 获取格式化的分类列表和筛选条件
-func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[string]any) {
+func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any) {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
 	categoryVersion := repository.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
+	if sourceId != "" {
+		cacheKey = fmt.Sprintf("%s:src_%s:v%s", config.TVBoxConfigCacheKey, sourceId, categoryVersion)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var res struct {
@@ -107,7 +119,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	var classList []model.FilmClass
 	filters := make(map[string][]map[string]any)
 
-	tree := repository.GetActiveCategoryTree()
+	tree := repository.GetActiveCategoryTree(sourceId)
 
 	type categoryResult struct {
 		index   int
@@ -126,7 +138,7 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id)
+			searchTags := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id, sourceId)
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -247,13 +259,19 @@ func (p *ProvideService) GetClassList() ([]model.FilmClass, map[string][]map[str
 	return classList, filters
 }
 
-// GetVodList 获取视频列表 (支持多维度筛选)
-func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
+// GetVodList 获取视频列表 (支持多维度筛选与采集源隔离)
+func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, wd string, h int, year string, area, lang, plot, sort string, limit int) (int, int, int, []model.FilmList, error) {
 	if limit <= 0 {
 		limit = 20
 	}
 	wd = strings.TrimSpace(wd)
-	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
+	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" && sourceId == "" {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
 	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
@@ -274,7 +292,11 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 	// 1. 常规列表页尝试 Redis 缓存，采集写库期间避免 TVBox 翻页反复压 MySQL。
 	cacheKey := ""
 	if wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" {
-		cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
+		if sourceId != "" {
+			cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:src_%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, sourceId, t, cid, pg, sort, limit)
+		} else {
+			cacheKey = fmt.Sprintf("%s:v%s:r%s:c%s:T%d:C%d:P%d:S%s:L%d", config.TVBoxList, version, ruleVersion, categoryVersion, t, cid, pg, sort, limit)
+		}
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var res tvboxListResult
@@ -308,6 +330,7 @@ func (p *ProvideService) GetVodList(t int, cid int64, pg int, wd string, h int, 
 			Plot:     strings.TrimSpace(plot),
 			Year:     strings.TrimSpace(year),
 			Sort:     strings.TrimSpace(sort),
+			SourceId: strings.TrimSpace(sourceId),
 		}
 		if err := validateReadModelSearchTags(searchTags); err != nil {
 			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err

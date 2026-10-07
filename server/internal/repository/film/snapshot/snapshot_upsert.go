@@ -16,6 +16,7 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 	return model.FilmListSnapshot{
 		SnapshotVersion:    version,
 		Mid:                index.Mid,
+		SourceId:           index.FirstSourceId,
 		DbId:               index.DbId,
 		Cid:                index.Cid,
 		Pid:                index.Pid,

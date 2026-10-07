@@ -71,6 +71,7 @@ type FilmSource struct {
 	Uri                string    `json:"uri" gorm:"uniqueIndex;size:255"`      // 采集链接
 	State              bool      `json:"state"`                                // 是否启用
 	Weight             int       `json:"weight" gorm:"default:0"`              // 线路排序默认权重，越大越靠前
+	IsPrimary          bool      `json:"isPrimary" gorm:"default:false"`       // 是否为当前生效主站（全局单选）
 	IsPosterSource     bool      `json:"isPosterSource" gorm:"default:false"`  // 是否为海报/封面图源（全局单选）
 	Interval           int       `json:"interval"`                             // 采集时间间隔 单位/ms
 	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时

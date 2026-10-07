@@ -59,6 +59,9 @@ func GetParentId(id int64) int64 {
 func ClearCategoryCache() {
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+		if keys, err := db.Rdb.Keys(db.Cxt, config.ActiveCategoryTreeKey+":src_*").Result(); err == nil && len(keys) > 0 {
+			db.Rdb.Del(db.Cxt, keys...)
+		}
 	}
 	RefreshCategoryCache()
 }

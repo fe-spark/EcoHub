@@ -13,6 +13,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/notify"
+	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -30,10 +31,11 @@ var dailyUpdateSfGroup singleflight.Group
 
 // DailyUpdateListReq V2 每日更新：分类 + 标准分页 + 随机。
 type DailyUpdateListReq struct {
-	Pid     int64
-	Page    *dto.Page
-	Random  bool
-	Exclude []int64
+	Pid      int64
+	Page     *dto.Page
+	Random   bool
+	Exclude  []int64
+	SourceId string
 }
 
 // DailyUpdateCategory 近 24h 分类统计。Pid: 0 全部，-1 其他，>0 导航大类。
@@ -106,6 +108,11 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 // DailyUpdatesV2 近 24h 更新。破坏性契约：无流式、不走首页 120 池。
 func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResult, error) {
 	req = normalizeDailyUpdateReq(req)
+	if req.SourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			req.SourceId = active.Id
+		}
+	}
 	from, to := notify.Rolling24hWindow(time.Now())
 
 	// 分类树每请求只取一次，复用给列表筛选、分类计数与组装，避免多次全表扫描。
@@ -114,7 +121,12 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 
 	// 非随机且前 5 页支持短缓存（1 分钟）与 Singleflight，避免全量采集后高频刷新冲击数据库
 	usePageCache := !req.Random && req.Page.Current <= 5
-	pageCacheKey := fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+	var pageCacheKey string
+	if req.SourceId != "" {
+		pageCacheKey = fmt.Sprintf("%s:src_%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.SourceId, req.Pid, req.Page.Current, req.Page.PageSize)
+	} else {
+		pageCacheKey = fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+	}
 
 	if usePageCache && db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, pageCacheKey).Result(); err == nil && data != "" {

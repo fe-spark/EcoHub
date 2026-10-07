@@ -56,13 +56,22 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	})
 }
 
-// PickPrimarySourceForCategory 选取用于分类树同步的首选站点。
-// 规则：优先已启用的最高权重站点；无启用时用最高权重站点（含未启用）；
-// 没有任何站点时返回 nil。
+// PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前生效主站）。
+// 规则：
+// 1. 优先 is_primary = true 且 state = true 的站点；
+// 2. 其次优先已启用的最高权重站点；
+// 3. 再次优先最高权重站点（含未启用）；
+// 4. 没有任何站点时返回 nil。
 func PickPrimarySourceForCategory() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
+	var primary model.FilmSource
+	if err := db.Mdb.Where("is_primary = ? AND state = ?", true, true).First(&primary).Error; err == nil && primary.Id != "" {
+		normalizeCollectCd(&primary)
+		return &primary
+	}
+
 	var list []model.FilmSource
 	if err := db.Mdb.Order("weight DESC, created_at ASC, id ASC").Find(&list).Error; err != nil || len(list) == 0 {
 		return nil
@@ -79,8 +88,39 @@ func PickPrimarySourceForCategory() *model.FilmSource {
 	return &m
 }
 
+func GetActiveCollectSource() *model.FilmSource {
+	return PickPrimarySourceForCategory()
+}
+
 func PickMasterSourceForCategory() *model.FilmSource {
 	return PickPrimarySourceForCategory()
+}
+
+// SetPrimaryCollectSource 将指定采集站设为当前生效主站，并重置其他站点
+func SetPrimaryCollectSource(sourceId string) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" {
+		return errors.New("采集源ID不能为空")
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var src model.FilmSource
+		if err := tx.Where("id = ?", sourceId).First(&src).Error; err != nil {
+			return errors.New("采集源不存在")
+		}
+		if err := tx.Model(&model.FilmSource{}).Where("1 = 1").Update("is_primary", false).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&model.FilmSource{}).Where("id = ?", sourceId).Updates(map[string]any{
+			"is_primary": true,
+			"state":      true,
+		}).Error; err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。

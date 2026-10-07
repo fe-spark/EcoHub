@@ -233,3 +233,56 @@ func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
 		t.Fatalf("expected empty categories in NormalizeBannerConfig when all hidden, got %v", cfg.Categories)
 	}
 }
+
+func TestGetActiveCategoryTree_SourceScoped(t *testing.T) {
+	origRdb := db.Rdb
+	db.Rdb = nil
+	defer func() {
+		db.Rdb = origRdb
+	}()
+
+	gdb := setupCategoryActiveTreeTestDB(t)
+
+	// 创建大类与子分类 (必须指定唯一的 StableKey)
+	if err := gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", StableKey: "test_movie", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create cat 1: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 10, Pid: 1, Name: "动作片", StableKey: "test_action", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create cat 10: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 2, Pid: 0, Name: "电视剧", StableKey: "test_tv", Show: true, Sort: 2}).Error; err != nil {
+		t.Fatalf("create cat 2: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 20, Pid: 2, Name: "国产剧", StableKey: "test_domestic", Show: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create cat 20: %v", err)
+	}
+	support.RefreshCategoryCache()
+
+	// src1 仅映射电影分类
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 101, CategoryId: 10}).Error; err != nil {
+		t.Fatalf("create mapping src1: %v", err)
+	}
+	// src2 仅映射电视剧分类
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "src2", SourceTypeId: 201, CategoryId: 20}).Error; err != nil {
+		t.Fatalf("create mapping src2: %v", err)
+	}
+
+	// 查 src1 的分类树
+	tree1 := GetActiveCategoryTree("src1")
+	if len(tree1.Children) != 1 || tree1.Children[0].Id != 1 {
+		t.Fatalf("expected src1 to only have category 1 (电影), got: %+v", tree1.Children)
+	}
+	if len(tree1.Children[0].Children) != 1 || tree1.Children[0].Children[0].Id != 10 {
+		t.Fatalf("expected src1 to only have child category 10 (动作片), got: %+v", tree1.Children[0].Children)
+	}
+
+	// 查 src2 的分类树
+	tree2 := GetActiveCategoryTree("src2")
+	if len(tree2.Children) != 1 || tree2.Children[0].Id != 2 {
+		t.Fatalf("expected src2 to only have category 2 (电视剧), got: %+v", tree2.Children)
+	}
+	if len(tree2.Children[0].Children) != 1 || tree2.Children[0].Children[0].Id != 20 {
+		t.Fatalf("expected src2 to only have child category 20 (国产剧), got: %+v", tree2.Children[0].Children)
+	}
+}
+

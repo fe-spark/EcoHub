@@ -20,7 +20,7 @@ import (
 
 const (
 	tagSearchCacheTTL    = 2 * time.Hour
-	snapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
+	snapshotSelectFields = "id, snapshot_version, mid, source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
 )
 
 type tagSearchCacheItem struct {
@@ -45,8 +45,14 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		return []model.FilmListSnapshot{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
-		config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	var cacheKey string
+	if st.SourceId != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
+			config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
+			config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item tagSearchCacheItem
@@ -54,8 +60,8 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 				page.Total = item.Total
 				page.PageCount = item.PageCount
 				log.Printf(
-					"[FilmClassifySearch] 命中缓存 pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
-					st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
+					"[FilmClassifySearch] 命中缓存 source=%q pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
+					st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
 				)
 				return item.Snapshots
 			}
@@ -73,6 +79,9 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		}
 
 		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+		if strings.TrimSpace(st.SourceId) != "" {
+			query = query.Where("(source_id = ? OR source_id = '')", strings.TrimSpace(st.SourceId))
+		}
 		if st.Pid > 0 {
 			query = query.Where("pid = ?", st.Pid)
 		}
@@ -82,8 +91,14 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		query = applyTagSearchFilter(query, version, st)
 
 		var total int64 = -1
-		countKey := fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",
-			config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		var countKey string
+		if st.SourceId != "" {
+			countKey = fmt.Sprintf("%s:count:v%s:src_%s:%d:%d:%s:%s:%s:%s",
+				config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		} else {
+			countKey = fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",
+				config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		}
 		if db.Rdb != nil {
 			if countStr, err := db.Rdb.Get(db.Cxt, countKey).Result(); err == nil && countStr != "" {
 				if parsedTotal, err := strconv.ParseInt(countStr, 10, 64); err == nil && parsedTotal >= 0 {
@@ -412,11 +427,11 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 		}
 
 		query := applyNameLikeFilter(db.Mdb.Table("film_list_snapshots as s").
-			Joins("JOIN film_snapshot_sources as ss ON s.snapshot_version = ss.snapshot_version AND s.mid = ss.mid").
-			Where("s.snapshot_version = ? AND ss.source_id = ?", version, sourceID), keyword)
+			Joins("LEFT JOIN film_snapshot_sources as ss ON s.snapshot_version = ss.snapshot_version AND s.mid = ss.mid").
+			Where("s.snapshot_version = ? AND (ss.source_id = ? OR s.source_id = ? OR s.source_id = '')", version, sourceID, sourceID), keyword)
 
 		var total int64
-		if err := query.Count(&total).Error; err != nil {
+		if err := query.Distinct("s.id").Count(&total).Error; err != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 		calcTotal := int(total)
@@ -429,7 +444,7 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 		offset := shared.PageOffset(page)
 
 		var ids []uint
-		if err := query.Select("s.id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("s.id", &ids).Error; err != nil {
+		if err := query.Select("DISTINCT s.id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("s.id", &ids).Error; err != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 

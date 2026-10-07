@@ -43,8 +43,18 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 
 	// 1. 尝试从 Redis 读 Provide 缓存
-	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
-		config.ProvideListKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	var cacheKey, sfKey string
+	if st.SourceId != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			config.ProvideListKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+		sfKey = fmt.Sprintf("v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			config.ProvideListKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+		sfKey = fmt.Sprintf("v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item searchCacheItem
@@ -61,8 +71,6 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 
 	// 2. 并发防击穿：相同参数的 ProvideVod 请求合并执行
-	sfKey := fmt.Sprintf("v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
-		version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
 	val, err, _ := provideSnapshotsSf.Do(sfKey, func() (any, error) {
 		// 二次双检 Redis 缓存
 		if db.Rdb != nil {
@@ -74,8 +82,8 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			}
 		}
 
-		// A. 若有搜索词且无时间限制和复合分类筛选，优先走内存元数据检索
-		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" {
+		// A. 若有搜索词且无时间限制、复合分类筛选和特定采集站限制，优先走内存元数据检索
+		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == "" {
 			idx := loadFilmSearchMetaIndex(version)
 			if idx != nil && len(idx.Items) > 0 {
 				hits := searchFilmMetas(idx, keyword, st.Sort, st.Pid, st.Cid)
@@ -120,6 +128,9 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+		if strings.TrimSpace(st.SourceId) != "" {
+			query = query.Where("(source_id = ? OR source_id = '')", strings.TrimSpace(st.SourceId))
+		}
 		if st.Pid > 0 {
 			query = query.Where("pid = ?", st.Pid)
 		}
