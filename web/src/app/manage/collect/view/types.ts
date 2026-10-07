@@ -5,6 +5,7 @@ export interface FilmSource {
   state: boolean;
   weight: number;
   isPosterSource?: boolean;
+  isPrimary?: boolean;
   interval: number;
   cd?: number;
   format?: "json" | "xml";

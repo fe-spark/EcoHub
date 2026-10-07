@@ -92,6 +92,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     state: Boolean(item.state),
     weight: Number(item.weight ?? 0),
     isPosterSource: Boolean(item.isPosterSource),
+    isPrimary: Boolean(item.isPrimary),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     format: (item.format as "json" | "xml") || "json",
@@ -640,6 +641,16 @@ export default function CollectManagePageView() {
     message.error(resp.msg || "删除采集站失败");
   };
 
+  const handleSetPrimary = async (id: string) => {
+    const resp = await ApiPost("/manage/collect/set-primary", { id });
+    if (resp.code === 0) {
+      message.success(resp.msg || "已成功设为主站");
+      await getCollectList();
+      return;
+    }
+    message.error(resp.msg || "设为主站失败");
+  };
+
   const openAddForm = () => {
     setSourceModalMode("add");
     setEditingId(null);
@@ -1032,6 +1043,7 @@ export default function CollectManagePageView() {
                     onTerminateTask={(id) => void stopTask(id)}
                     onEditSource={(id) => void openEditDialog(id)}
                     onDeleteSource={(id) => void delSource(id)}
+                    onSetPrimary={(id) => void handleSetPrimary(id)}
                   />
                 );
               })}

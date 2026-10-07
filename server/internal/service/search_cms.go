@@ -27,6 +27,11 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 	if page.Current <= 0 {
 		page.Current = 1
 	}
+	if sourceID == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceID = active.Id
+		}
+	}
 	sources := buildSearchSourceTabs()
 	out := SearchFilmResult{
 		List:    []model.MovieBasicInfo{},

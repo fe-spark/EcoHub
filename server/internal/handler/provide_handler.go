@@ -92,19 +92,8 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	// 选中采集站时，优先直连该采集站返回原始数据
-	if sourceId != "" {
-		directYear, _ := strconv.Atoi(year)
-		raw, err := service.ProvideSvc.GetVodDirectBySource(sourceId, ac, t, pg, wd, h_param, ids, directYear, area, lang, plot, sort)
-		if err != nil {
-			c.JSON(200, gin.H{"code": 0, "msg": "采集站直连失败: " + err.Error()})
-			return
-		}
-		c.Data(200, "application/json; charset=utf-8", raw)
-		return
-	}
 
-	classList, filters := service.ProvideSvc.GetClassList()
+	classList, filters := service.ProvideSvc.GetClassList(sourceId)
 	if classList == nil {
 		classList = []model.FilmClass{}
 	}
@@ -146,7 +135,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 
 	switch ac {
 	case "list":
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
@@ -186,7 +175,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 				"filters":   filters,
 			})
 		} else {
-			page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+			page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 			if err != nil {
 				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 				return
@@ -214,7 +203,7 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		}
 
 	default:
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return

@@ -141,16 +141,32 @@ func GetSnapshotMovieListByCategory(version string, field string, id int64, limi
 	return GetSnapshotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
+func GetSnapshotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+	return GetSnapshotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
+}
+
 func GetSnapshotMovieListByCategoryPage(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
 	return GetSnapshotMovieListByCategoryPageReadModel(version, field, id, page)
+}
+
+func GetSnapshotMovieListByCategoryPageWithSource(version string, sourceId string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
+	return GetSnapshotMovieListByCategoryPageWithSourceReadModel(version, sourceId, field, id, page)
 }
 
 func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
+func GetSnapshotHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
+}
+
 func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
 	return GetSnapshotDynamicHotMovieListByCategoryReadModel(version, field, id, limit, poolSize)
+}
+
+func GetSnapshotDynamicHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, poolSize)
 }
 
 func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string {

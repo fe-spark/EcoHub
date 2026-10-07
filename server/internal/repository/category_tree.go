@@ -2,8 +2,10 @@ package repository
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"time"
 
 	"server/internal/config"
@@ -122,26 +124,46 @@ func GetCategoryTreeByID(id int64) *model.CategoryTree {
 	return node
 }
 
-// GetActiveCategoryTree 获取前台导航分类树。优先 Redis；未命中时用物化 ID 或分类映射构建。
-func GetActiveCategoryTree() model.CategoryTree {
+// GetActiveCategoryTree 获取前台导航分类树。支持可选 sourceId 按采集站独立隔离。优先 Redis；未命中时用分类映射构建。
+func GetActiveCategoryTree(sourceIdOpt ...string) model.CategoryTree {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceId == "" {
+		if activeSrc := GetActiveCollectSource(); activeSrc != nil {
+			sourceId = activeSrc.Id
+		}
+	}
+
+	cacheKey := config.ActiveCategoryTreeKey
+	if sourceId != "" {
+		cacheKey = fmt.Sprintf("%s:src_%s", config.ActiveCategoryTreeKey, sourceId)
+	}
+
 	// 1. 尝试从 Redis 获取
 	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, config.ActiveCategoryTreeKey).Result(); err == nil && data != "" {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var tree model.CategoryTree
 			if json.Unmarshal([]byte(data), &tree) == nil && isValidActiveCategoryTree(tree) {
 				return tree
 			}
-			log.Printf("[Category] 活跃分类树缓存失效或非法，清除缓存并重新构建")
-			db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+			log.Printf("[Category] 活跃分类树缓存失效或非法，清除缓存并重新构建 key=%s", cacheKey)
+			db.Rdb.Del(db.Cxt, cacheKey)
 		}
 	}
 
-	activeCategoryMap := loadActiveCategoryIDsFromCurrentMappings()
+	activeCategoryMap := loadActiveCategoryIDs(sourceId)
+	if len(activeCategoryMap) == 0 && sourceId != "" {
+		activeCategoryMap = loadActiveCategoryIDs("")
+	}
 	activeVisibleMap := buildActiveCategoryAncestorMap(activeCategoryMap)
 
 	// 3. 构建树
 	var allList []model.Category
-	db.Mdb.Where("`show` = ?", true).Order("pid ASC, sort ASC, id ASC").Find(&allList)
+	if db.Mdb != nil {
+		db.Mdb.Where("`show` = ?", true).Order("pid ASC, sort ASC, id ASC").Find(&allList)
+	}
 
 	nodes := make(map[int64]*model.CategoryTree)
 	root := model.CategoryTree{
@@ -191,30 +213,65 @@ func GetActiveCategoryTree() model.CategoryTree {
 	// 7. 写入 Redis 缓存 (1小时)
 	if db.Rdb != nil {
 		if data, err := json.Marshal(root); err == nil {
-			db.Rdb.Set(db.Cxt, config.ActiveCategoryTreeKey, string(data), time.Hour)
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour)
 		}
 	}
 
 	return root
 }
 
-func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
+func loadActiveCategoryIDs(sourceId string) map[int64]bool {
 	active := make(map[int64]bool)
 
 	if db.Mdb != nil {
 		var categoryIDs []int64
-		if err := db.Mdb.Model(&model.CategoryMapping{}).
-			Where("category_id > 0").
-			Pluck("category_id", &categoryIDs).Error; err == nil {
+		query := db.Mdb.Model(&model.CategoryMapping{}).Where("category_id > 0")
+		if sourceId != "" {
+			query = query.Where("source_id = ?", sourceId)
+		}
+		if err := query.Pluck("category_id", &categoryIDs).Error; err == nil {
 			for _, id := range categoryIDs {
 				if id > 0 {
 					active[id] = true
 				}
 			}
 		}
+
+		if len(active) == 0 && sourceId != "" {
+			var pids []int64
+			_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+				Where("(source_id = ? OR source_id = '') AND pid > 0", sourceId).
+				Distinct("pid").
+				Pluck("pid", &pids).Error
+			for _, id := range pids {
+				if id > 0 {
+					active[id] = true
+				}
+			}
+
+			var cids []int64
+			_ = db.Mdb.Model(&model.FilmListSnapshot{}).
+				Where("(source_id = ? OR source_id = '') AND cid > 0", sourceId).
+				Distinct("cid").
+				Pluck("cid", &cids).Error
+			for _, id := range cids {
+				if id > 0 {
+					active[id] = true
+				}
+			}
+
+			// 若该源既无独立分类映射也无快照数据，平滑兜底回退至全量活跃分类，避免前台导航栏白屏
+			if len(active) == 0 {
+				return loadActiveCategoryIDs("")
+			}
+		}
 	}
 
 	return active
+}
+
+func loadActiveCategoryIDsFromCurrentMappings() map[int64]bool {
+	return loadActiveCategoryIDs("")
 }
 
 func buildActiveCategoryAncestorMap(activeCategoryMap map[int64]bool) map[int64]bool {

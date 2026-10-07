@@ -25,7 +25,11 @@ func emptyFilterOptionResponse() map[string]any {
 	}
 }
 
-func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
+func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) map[string]any {
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -35,7 +39,12 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 		return emptyFilterOptionResponse()
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%d", config.FilmFilterOptionKey, version, pid)
+	var cacheKey string
+	if sourceId != "" {
+		cacheKey = fmt.Sprintf("%s:src_%s:v%s:%d", config.FilmFilterOptionKey, sourceId, version, pid)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d", config.FilmFilterOptionKey, version, pid)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
@@ -51,7 +60,19 @@ func GetFilterOptionSnapshot(version string, pid int64) map[string]any {
 
 	// 1. 获取子分类
 	var subCats []model.Category
-	_ = db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&subCats).Error
+	if sourceId != "" {
+		var mappedCategoryIDs []int64
+		_ = db.Mdb.Model(&model.CategoryMapping{}).
+			Where("source_id = ? AND category_id > 0", sourceId).
+			Pluck("category_id", &mappedCategoryIDs).Error
+		if len(mappedCategoryIDs) > 0 {
+			_ = db.Mdb.Where("pid = ? AND id IN ? AND `show` = ?", pid, mappedCategoryIDs, true).
+				Order("sort ASC, id ASC").Find(&subCats).Error
+		}
+	}
+	if len(subCats) == 0 {
+		_ = db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&subCats).Error
+	}
 	catItems := []map[string]string{{"Name": "全部", "Value": ""}}
 	for _, c := range subCats {
 		catItems = append(catItems, map[string]string{

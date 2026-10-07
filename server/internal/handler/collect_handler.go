@@ -143,6 +143,21 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
+func (h *CollectHandler) FilmSourceSetPrimary(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Id) == "" {
+		dto.Failed("参数异常，站点标识不能为空", c)
+		return
+	}
+	if err := service.CollectSvc.SetPrimaryFilmSource(strings.TrimSpace(req.Id)); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("主站切换成功", c)
+}
+
 func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
 	req := model.FilmSourceStateBatchRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {

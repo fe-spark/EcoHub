@@ -34,6 +34,7 @@ interface CollectSourceCardProps {
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
+  onSetPrimary?: (id: string) => void;
 }
 
 /** 采集站卡片（主站 / 附属站统一形态，主站用徽章区分） */
@@ -47,6 +48,7 @@ export default function CollectSourceCard({
   onTerminateTask,
   onEditSource,
   onDeleteSource,
+  onSetPrimary,
 }: CollectSourceCardProps) {
   const isRunning = active;
   const { canWrite } = useManagePermission();
@@ -76,6 +78,11 @@ export default function CollectSourceCard({
         <div className={styles.cardHeadMain}>
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
+            {record.isPrimary ? (
+              <Tag color="gold" bordered={false} style={{ marginInlineEnd: 0 }}>
+                当前主站
+              </Tag>
+            ) : null}
             <Tag color="blue" bordered={false} style={{ marginInlineEnd: 0 }}>
               权重 {record.weight ?? 0}
             </Tag>
@@ -203,6 +210,20 @@ export default function CollectSourceCard({
                 </span>
               </Tooltip>
             )}
+            {!record.isPrimary ? (
+              <Popconfirm
+                title="设为前台生效主站？"
+                description="切换后，前台分类导航及默认片库将展示此站内容。"
+                onConfirm={() => onSetPrimary?.(record.id)}
+                disabled={!canWrite}
+                okText="设为主站"
+                cancelText="取消"
+              >
+                <Button size="middle" disabled={!canWrite}>
+                  设为主站
+                </Button>
+              </Popconfirm>
+            ) : null}
             <Tooltip title={isRunning ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}

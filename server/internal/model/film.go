@@ -271,8 +271,9 @@ type FilmListSnapshot struct {
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 	DeletedAt       gorm.DeletedAt
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_name,priority:1;index:idx_snap_ver_update,priority:1"`
+	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_name,priority:1;index:idx_snap_ver_update,priority:1;index:idx_snap_list_ver_src,priority:1"`
 	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
+	SourceId        string `json:"sourceId" gorm:"size:32;index;index:idx_snap_list_ver_src,priority:2"`
 	DbId            int64  `json:"dbId" gorm:"index"`
 
 	Cid              int64  `json:"cid" gorm:"index;index:idx_snap_cid_update;index:idx_snap_cid_hits"`
@@ -355,6 +356,7 @@ type SearchTagsVO struct {
 	Language         string `json:"language"`
 	Year             string `json:"year"`
 	Sort             string `json:"sort"`
+	SourceId         string `json:"sourceId"`
 }
 
 // SearchVo 影片信息搜索参数

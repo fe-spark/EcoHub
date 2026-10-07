@@ -282,7 +282,21 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		}
 	}
 
+	primarySource := repository.GetActiveCollectSource()
+	primaryID := ""
+	if primarySource != nil {
+		primaryID = primarySource.Id
+	}
+
 	sort.SliceStable(playList, func(i, j int) bool {
+		if primaryID != "" {
+			if playList[i].SourceId == primaryID && playList[j].SourceId != primaryID {
+				return true
+			}
+			if playList[j].SourceId == primaryID && playList[i].SourceId != primaryID {
+				return false
+			}
+		}
 		wI := sourcesByID[playList[i].SourceId].Weight
 		wJ := sourcesByID[playList[j].SourceId].Weight
 		if wI != wJ {
@@ -351,9 +365,23 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 		})
 	}
 
+	primarySource := repository.GetActiveCollectSource()
+	primaryID := ""
+	if primarySource != nil {
+		primaryID = primarySource.Id
+	}
+
 	for mid := range result {
 		lines := result[mid]
 		sort.SliceStable(lines, func(i, j int) bool {
+			if primaryID != "" {
+				if lines[i].SourceId == primaryID && lines[j].SourceId != primaryID {
+					return true
+				}
+				if lines[j].SourceId == primaryID && lines[i].SourceId != primaryID {
+					return false
+				}
+			}
 			wI := sourcesByID[lines[i].SourceId].Weight
 			wJ := sourcesByID[lines[j].SourceId].Weight
 			if wI != wJ {

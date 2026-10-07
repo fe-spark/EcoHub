@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -209,122 +208,6 @@ func buildPlaylistsFromDetail(mid int64, sourceID string, detail model.MovieDeta
 	return lines
 }
 
-func matchCandidateFilm(tx *gorm.DB, detail model.MovieDetail) (*model.FilmIndex, error) {
-	normalizedTitle := utils.NormalizeIdentityTitle(detail.Name)
-	if normalizedTitle == "" {
-		normalizedTitle = strings.TrimSpace(detail.Name)
-	}
-
-	var matchKeys []string
-	if detail.DbId > 0 && normalizedTitle != "" {
-		dbIdentity := utils.BuildCollectionDbIdentity(detail.DbId, detail.Name)
-		if dbIdentity != "" && !strings.HasPrefix(dbIdentity, "dbid_") {
-			matchKeys = append(matchKeys, utils.GenerateHashKey(dbIdentity))
-		} else if strings.Count(dbIdentity, "_") >= 2 {
-			matchKeys = append(matchKeys, utils.GenerateHashKey(dbIdentity))
-		}
-	}
-
-	pid := detail.Pid
-	if pid <= 0 {
-		pid = detail.RawPid
-	}
-	if normalizedTitle != "" && pid > 0 {
-		matchKeys = append(matchKeys, utils.GenerateHashKey(fmt.Sprintf("%s#cat_%d", normalizedTitle, pid)))
-	}
-
-	if len(matchKeys) == 0 {
-		return nil, nil
-	}
-
-	type midKey struct {
-		Mid      int64
-		MatchKey string
-	}
-	var pairs []midKey
-	if err := tx.Model(&model.MovieMatchKey{}).
-		Select("mid", "match_key").
-		Where("match_key IN ?", matchKeys).
-		Find(&pairs).Error; err != nil {
-		return nil, err
-	}
-	if len(pairs) == 0 {
-		return nil, nil
-	}
-
-	midsByKey := make(map[string]map[int64]struct{})
-	for _, p := range pairs {
-		if midsByKey[p.MatchKey] == nil {
-			midsByKey[p.MatchKey] = make(map[int64]struct{})
-		}
-		midsByKey[p.MatchKey][p.Mid] = struct{}{}
-	}
-
-	candidateMids := make(map[int64]struct{})
-	for _, m := range midsByKey {
-		if len(m) == 1 {
-			for mid := range m {
-				candidateMids[mid] = struct{}{}
-			}
-		}
-	}
-
-	if len(candidateMids) != 1 {
-		return nil, nil
-	}
-
-	var chosenMid int64
-	for mid := range candidateMids {
-		chosenMid = mid
-	}
-
-	var candidate model.FilmIndex
-	if err := tx.Where("mid = ?", chosenMid).First(&candidate).Error; err != nil {
-		return nil, nil
-	}
-
-	detailYear := parseYear(detail.Year)
-	if candidate.Year > 0 && detailYear > 0 && candidate.Year != detailYear {
-		return nil, nil
-	}
-
-	candHasCast := strings.TrimSpace(candidate.Actor) != "" || strings.TrimSpace(candidate.Director) != ""
-	detailHasCast := strings.TrimSpace(detail.Actor) != "" || strings.TrimSpace(detail.Director) != ""
-	if candHasCast && detailHasCast {
-		candCast := normalizeCastSet(candidate.Actor, candidate.Director)
-		detailCast := normalizeCastSet(detail.Actor, detail.Director)
-		intersect := false
-		for c := range candCast {
-			if _, ok := detailCast[c]; ok {
-				intersect = true
-				break
-			}
-		}
-		if !intersect {
-			return nil, nil
-		}
-	}
-
-	return &candidate, nil
-}
-
-func normalizeCastSet(actor, director string) map[string]struct{} {
-	set := make(map[string]struct{})
-	add := func(raw string) {
-		for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
-			return r == ',' || r == '/' || r == ' ' || r == '|' || r == '，' || r == '、'
-		}) {
-			p := strings.TrimSpace(part)
-			if p != "" {
-				set[p] = struct{}{}
-			}
-		}
-	}
-	add(actor)
-	add(director)
-	return set
-}
-
 func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail) (*model.FilmIndex, error) {
 	categoryVersion := support.GetCategoryVersion()
 	ruleVersion := support.GetRuleVersion()
@@ -485,22 +368,36 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		}
 
 		if filmIndex == nil {
-			candidate, err := matchCandidateFilm(tx, detail)
+			pid := detail.RawPid
+			if source != nil {
+				if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.Cid)); local > 0 {
+					pid = local
+				} else if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.RawPid)); local > 0 {
+					pid = local
+				}
+			}
+			allKeys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
+			if len(allKeys) > 0 {
+				var matchKey model.MovieMatchKey
+				if err := tx.Where("match_key IN ?", allKeys).Order("id ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
+					var fi model.FilmIndex
+					if err := tx.Where("mid = ?", matchKey.Mid).First(&fi).Error; err == nil && fi.Mid > 0 {
+						mid = fi.Mid
+						filmIndex = &fi
+						_ = shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid)
+					}
+				}
+			}
+		}
+
+		if filmIndex == nil {
+			fi, err := createNewFilmIndexTx(tx, source.Id, detail)
 			if err != nil {
 				return err
 			}
-			if candidate != nil {
-				mid = candidate.Mid
-				filmIndex = candidate
-			} else {
-				fi, err := createNewFilmIndexTx(tx, source.Id, detail)
-				if err != nil {
-					return err
-				}
-				mid = fi.Mid
-				filmIndex = fi
-				isNew = true
-			}
+			mid = fi.Mid
+			filmIndex = fi
+			isNew = true
 
 			if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
 				return err
