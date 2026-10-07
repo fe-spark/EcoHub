@@ -72,7 +72,7 @@ docker compose up -d
 | `http://服务器:3000/api/provide/app` | 客户端软件源 |
 | `http://服务器:3000/api/provide/tvbox` | TVBox / 影视仓 |
 
-默认账号（**立刻改密**）：`admin` / `admin`，`guest` / `guest`。
+默认账号（**立刻改密**）：`admin` / `admin`。其它角色在账号管理中新建。
 
 首次需在后台配置 **采集源** 并执行采集，否则前台无影片。第一次全量采集**可能要数个小时**，**采集完成并发布后数据才会展示**。
 

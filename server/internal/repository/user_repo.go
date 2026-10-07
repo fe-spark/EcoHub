@@ -16,10 +16,9 @@ func ExistUserTable() bool {
 	return db.Mdb.Migrator().HasTable(&model.User{})
 }
 
-// InitBuiltinAccounts 初始化内置账号
+// InitBuiltinAccounts 初始化内置账号。默认只有超级管理员，其它角色由管理员自行创建。
 func InitBuiltinAccounts() {
-	ensureBuiltinUser(config.DefaultAdminUser, config.DefaultAdminPass, "administrator@gmail.com", "Spark", model.UserRoleAdmin)
-	ensureBuiltinUser(config.DefaultVisitorUser, config.DefaultVisitorPass, "guest@example.com", "访客", model.UserRoleVisitor)
+	ensureBuiltinUser(config.DefaultAdminUser, config.DefaultAdminPass, "", "Spark", model.UserRoleAdmin)
 }
 
 func ensureBuiltinUser(userName, password, email, nickName string, role int) {
@@ -28,9 +27,6 @@ func ensureBuiltinUser(userName, password, email, nickName string, role int) {
 		updates := map[string]any{}
 		if user.Role != role {
 			updates["role"] = role
-		}
-		if user.Status != 0 {
-			updates["status"] = 0
 		}
 		if len(updates) > 0 {
 			db.Mdb.Model(&model.User{}).Where("id = ?", user.ID).Updates(updates)

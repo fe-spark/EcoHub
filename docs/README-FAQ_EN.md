@@ -77,4 +77,4 @@ The edge middleware only checks that the `ecohub_auth_token` cookie exists. Open
 
 ### How do guest and default accounts work?
 
-Built-in accounts: `admin` / `admin` (read/write), `guest` / `guest` (visitor). Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Default accounts are for first boot and demos. Change the passwords before any public deployment.
+First boot creates only the super admin `admin` / `admin`. Create normal users and visitors in account management. Visitors may call admin GET; POST / PUT / PATCH / DELETE are rejected by `WriteAccess`. Change the default password before any public deployment.
