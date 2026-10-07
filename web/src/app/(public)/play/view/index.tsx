@@ -93,6 +93,21 @@ export default function PlayPageView({
   const [autoplay, setAutoplay] = useState(true);
   const [playerError, setPlayerError] = useState(false);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
+  const [preferredSourceState, setPreferredSourceState] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("preferred_source") || "";
+    }
+    return "";
+  });
+
+  const handleSetPreferredSource = useCallback((sourceId: string) => {
+    if (!sourceId) return;
+    localStorage.setItem("preferred_source", sourceId);
+    document.cookie = `preferred_source=${encodeURIComponent(sourceId)}; path=/; max-age=31536000; SameSite=Lax`;
+    setPreferredSourceState(sourceId);
+    message.success("已设为首选站点，播放时将优先使用该站点线路");
+  }, [message]);
+
   const [openingRelatedId, setOpeningRelatedId] = useState("");
 
   const activeEpRef = useRef<HTMLDivElement>(null);
@@ -362,27 +377,40 @@ export default function PlayPageView({
                     const isViewing = viewingSourceId === item.id;
                     const isPlaying = playingSourceId === item.id;
                     const episodeCount = item.linkList?.length ?? 0;
+                    const isPreferred = item.isPreferred || (item.sourceId && item.sourceId === preferredSourceState);
 
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
                         className={`${styles.sourcePickerOption} ${isViewing ? styles.active : ""}`}
                         onClick={() => {
-                          if (viewingSourceId === item.id) {
-                            setIsSourceMenuOpen(false);
-                            return;
+                          if (viewingSourceId !== item.id) {
+                            setViewingSourceId(item.id);
                           }
-
-                          setViewingSourceId(item.id);
                           setIsSourceMenuOpen(false);
                         }}
                       >
-                        <span className={styles.sourcePickerOptionMain}>{item.name}</span>
-                        <span className={styles.sourcePickerOptionMeta}>
-                          {isPlaying ? "当前播放" : `${episodeCount} 集`}
+                        <span className={styles.sourcePickerOptionMain}>
+                          {item.name}
+                          {isPreferred && <span className={styles.preferredTag}>首选</span>}
                         </span>
-                      </button>
+                        <div className={styles.sourcePickerOptionMeta}>
+                          <span>{isPlaying ? "当前播放" : `${episodeCount} 集`}</span>
+                          {!isPreferred && item.sourceId && (
+                            <button
+                              type="button"
+                              className={styles.preferBtn}
+                              title="设为首选站点（优先使用该站点线路）"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSetPreferredSource(item.sourceId);
+                              }}
+                            >
+                              设为首选
+                            </button>
+                          )}
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
@@ -413,12 +441,15 @@ export default function PlayPageView({
               {viewingSource?.linkList?.map((item: any, index: number) => {
                 const episodeKey = makeEpisodeKey(viewingSourceId, index);
                 const isActive = visibleActiveEpisodeKey === episodeKey;
+                const fallbackTitle = item.isFallback
+                  ? `${item.episode} (来自 ${item.sourceName || "其它站点"} 补齐)`
+                  : item.episode;
                 return (
                   <div
                     key={index}
                     ref={isActive ? activeEpRef : undefined}
                     className={`${styles.epItem} ${isActive ? styles.active : ""}`}
-                    title={item.episode}
+                    title={fallbackTitle}
                     onClick={() => {
                       if (currentEpisodeKey === episodeKey) return;
 
@@ -451,6 +482,11 @@ export default function PlayPageView({
                     }}
                   >
                     <span className={styles.epText}>{item.episode}</span>
+                    {item.isFallback && (
+                      <span className={styles.fallbackBadge} title={`来自 ${item.sourceName || "其它站点"} 补齐`}>
+                        补
+                      </span>
+                    )}
                   </div>
                 );
               })}

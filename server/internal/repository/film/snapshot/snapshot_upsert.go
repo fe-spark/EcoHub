@@ -16,8 +16,6 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 	return model.FilmListSnapshot{
 		SnapshotVersion:    version,
 		Mid:                index.Mid,
-		ContentKey:         index.ContentKey,
-		SourceId:           index.SourceId,
 		DbId:               index.DbId,
 		Cid:                index.Cid,
 		Pid:                index.Pid,
@@ -46,7 +44,10 @@ func buildFilmListSnapshot(version string, index model.FilmIndex) model.FilmList
 		IsCustomPicture:    index.IsCustomPicture,
 		Actor:              index.Actor,
 		Director:           index.Director,
+		Writer:             index.Writer,
 		Blurb:              index.Blurb,
+		Content:            index.Content,
+		ReleaseDate:        index.ReleaseDate,
 		CollectStamp:       index.CollectStamp,
 		CategoryVersion:    index.CategoryVersion,
 		RuleVersion:        index.RuleVersion,
@@ -79,6 +80,7 @@ func DeleteActiveSnapshotsByMids(mids ...int64) {
 		log.Printf("DeleteActiveSnapshotsByMids Error: %v", result.Error)
 		return
 	}
+	_ = db.Mdb.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, ids).Delete(&model.FilmSnapshotSource{}).Error
 	RemoveMidsFromActiveFilmSearchIndex(version, ids)
 	invalidateDeletedSnapshotCaches(version, ids)
 	RefreshAccessDataCaches()
@@ -95,6 +97,7 @@ func DeleteActiveSnapshotsByCategory(field string, id int64) {
 		log.Printf("DeleteActiveSnapshotsByCategory Error: %v", result.Error)
 		return
 	}
+	_ = db.Mdb.Unscoped().Where("snapshot_version = ? AND mid NOT IN (?)", version, db.Mdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", version).Select("mid")).Delete(&model.FilmSnapshotSource{}).Error
 	if result.RowsAffected > 0 {
 		BumpSearchCacheVersion()
 		RefreshAccessDataCaches()
@@ -157,9 +160,7 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 
 			var indexes []model.FilmIndex
 			queryStartedAt := time.Now()
-			if err := tx.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
-				Where("film_index.mid IN ?", batchIDs).
-				Find(&indexes).Error; err != nil {
+			if err := tx.Where("mid IN ?", batchIDs).Find(&indexes).Error; err != nil {
 				return err
 			}
 			queryCost := time.Since(queryStartedAt)
@@ -181,9 +182,35 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 			if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmListSnapshot{}).Error; err != nil {
 				return err
 			}
+			if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+				return err
+			}
 			if len(batchSnapshots) > 0 {
 				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batchSnapshots, snapshotBuildBatchSize).Error; err != nil {
 					return err
+				}
+			}
+			if len(keptMIDs) > 0 {
+				type midSource struct {
+					Mid      int64
+					SourceId string
+				}
+				var sourcePairs []midSource
+				if err := tx.Model(&model.FilmSourcePlaylist{}).
+					Distinct("mid", "source_id").
+					Where("mid IN ? AND line_kind = ?", keptMIDs, "play").
+					Find(&sourcePairs).Error; err == nil && len(sourcePairs) > 0 {
+					snapSources := make([]model.FilmSnapshotSource, 0, len(sourcePairs))
+					for _, pair := range sourcePairs {
+						snapSources = append(snapSources, model.FilmSnapshotSource{
+							SnapshotVersion: version,
+							Mid:             pair.Mid,
+							SourceId:        pair.SourceId,
+						})
+					}
+					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapSources, snapshotBuildBatchSize).Error; err != nil {
+						return err
+					}
 				}
 			}
 			writeCost := time.Since(writeStartedAt)

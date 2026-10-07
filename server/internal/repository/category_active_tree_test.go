@@ -233,4 +233,3 @@ func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
 		t.Fatalf("expected empty categories in NormalizeBannerConfig when all hidden, got %v", cfg.Categories)
 	}
 }
-

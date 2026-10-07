@@ -90,7 +90,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    grade: Number(item.grade ?? 1),
+    weight: Number(item.weight ?? 0),
     isPosterSource: Boolean(item.isPosterSource),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
@@ -157,17 +157,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  /** 主站优先，其余保持列表顺序，同一网格展示 */
-  const displaySites = useMemo(() => {
-    const masters = siteList.filter((item) => item.grade === 0);
-    const others = siteList.filter((item) => item.grade !== 0);
-    return [...masters, ...others];
-  }, [siteList]);
-
-  const masterCount = useMemo(
-    () => siteList.filter((item) => item.grade === 0).length,
-    [siteList],
-  );
+  const displaySites = siteList;
 
   const canAddSource = canWrite;
 
@@ -682,7 +672,7 @@ export default function CollectManagePageView() {
         name: String(resp.data.name ?? ""),
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
-        grade: Number(resp.data.grade ?? 1),
+        weight: Number(resp.data.weight ?? 0),
         isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
@@ -813,7 +803,7 @@ export default function CollectManagePageView() {
       const allOptions = Array.isArray(resp.data)
         ? resp.data.map((item: BatchOption) => ({
             ...item,
-            grade: siteList.find((site) => site.id === item.id)?.grade ?? 1,
+            weight: siteList.find((site) => site.id === item.id)?.weight ?? 0,
             state: siteList.find((site) => site.id === item.id)?.state ?? false,
           }))
         : [];
@@ -1024,23 +1014,6 @@ export default function CollectManagePageView() {
 
         {siteList.length > 0 ? (
           <div className={styles.sourceGroups}>
-            {masterCount === 0 ? (
-              <div className={styles.masterTip}>
-                尚未配置主采集站
-                {canAddSource && canWrite ? (
-                  <>
-                    ，
-                    <Typography.Link onClick={openAddDialog}>新增</Typography.Link>
-                    时将类型设为「主采集站」
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-            {masterCount > 1 ? (
-              <div className={styles.masterTipWarn}>
-                当前有 {masterCount} 个主采集站，业务上应只保留一个
-              </div>
-            ) : null}
             <div className={styles.cardGrid}>
               {displaySites.map((site) => {
                 const hiddenDone =

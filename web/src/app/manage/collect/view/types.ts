@@ -3,7 +3,7 @@ export interface FilmSource {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
+  weight: number;
   isPosterSource?: boolean;
   interval: number;
   cd?: number;
@@ -103,7 +103,7 @@ export function resolveCollectProgressStatusText(progress?: CollectProgress | nu
 export interface BatchOption {
   id: string;
   name: string;
-  grade?: number;
+  weight?: number;
   state?: boolean;
 }
 
@@ -112,7 +112,7 @@ export interface InvalidSourceItem {
   id: string;
   name: string;
   uri: string;
-  grade: number;
+  weight?: number;
   state: boolean;
   reason: string;
 }
@@ -140,7 +140,7 @@ export interface SourceFormValues {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
+  weight: number;
   format: "json" | "xml";
   isPosterSource: boolean;
   interval?: number;
@@ -152,7 +152,7 @@ export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
   uri: "",
   state: true,
-  grade: 1,
+  weight: 10,
   format: "json",
   isPosterSource: false,
   interval: 0,

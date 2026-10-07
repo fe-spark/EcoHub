@@ -257,16 +257,11 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 	result := make([]model.FilmIndex, len(snapshots))
 	for i, snap := range snapshots {
 		result[i] = model.FilmIndex{
-			Model: gorm.Model{
-				ID:        snap.ID,
-				CreatedAt: snap.CreatedAt,
-				UpdatedAt: snap.UpdatedAt,
-			},
+			CreatedAt: snap.CreatedAt,
+			UpdatedAt: snap.UpdatedAt,
 			FilmIndexIdentity: model.FilmIndexIdentity{
-				Mid:        snap.Mid,
-				ContentKey: snap.ContentKey,
-				SourceId:   snap.SourceId,
-				DbId:       snap.DbId,
+				Mid:  snap.Mid,
+				DbId: snap.DbId,
 			},
 			FilmIndexCategory: model.FilmIndexCategory{
 				Cid:              snap.Cid,
@@ -297,7 +292,10 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 				IsCustomPicture:    snap.IsCustomPicture,
 				Actor:              snap.Actor,
 				Director:           snap.Director,
+				Writer:             snap.Writer,
 				Blurb:              snap.Blurb,
+				Content:            snap.Content,
+				ReleaseDate:        snap.ReleaseDate,
 			},
 			FilmIndexVersion: model.FilmIndexVersion{
 				CollectStamp:    snap.CollectStamp,

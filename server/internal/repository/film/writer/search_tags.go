@@ -121,13 +121,13 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 	}
 
 	totalFilms := 0
-	var lastID uint
+	var lastMid int64
 	for {
 		var batch []model.FilmIndex
 		if err := db.Mdb.Model(&model.FilmIndex{}).
-			Select("id, pid, cid, c_name, class_tag, area, language, year").
-			Where("pid = ? AND id > ?", pid, lastID).
-			Order("id ASC").
+			Select("mid, pid, cid, c_name, class_tag, area, language, year").
+			Where("pid = ? AND mid > ?", pid, lastMid).
+			Order("mid ASC").
 			Limit(searchTagsRebuildFilmBatchSize).
 			Find(&batch).Error; err != nil {
 			return totalFilms, err
@@ -136,7 +136,7 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 			break
 		}
 		totalFilms += len(batch)
-		lastID = batch[len(batch)-1].ID
+		lastMid = batch[len(batch)-1].Mid
 
 		items := aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(batch))
 		if len(items) == 0 {

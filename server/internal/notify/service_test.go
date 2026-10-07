@@ -215,14 +215,14 @@ func TestFormatBatchOverview(t *testing.T) {
 		Sources: []model.SourceNotifyResult{
 			{
 				SourceName: "主站A",
-				Grade:      0,
+				Weight:     50,
 				Status:     "done",
 				SuccessCnt: 2,
 				FilmsTotal: 2,
 			},
 			{
 				SourceName: "附属B",
-				Grade:      1,
+				Weight:     10,
 				Status:     "failed",
 				Error:      "timeout <script>",
 				FailedCnt:  3,

@@ -57,7 +57,10 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 	detail.IsCustomPicture = info.IsCustomPicture
 	detail.Actor = info.Actor
 	detail.Director = info.Director
+	detail.Writer = info.Writer
 	detail.Blurb = info.Blurb
+	detail.Content = info.Content
+	detail.ReleaseDate = info.ReleaseDate
 	if info.Year > 0 {
 		detail.Year = fmt.Sprint(info.Year)
 	}

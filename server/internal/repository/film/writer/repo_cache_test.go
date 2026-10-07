@@ -38,8 +38,6 @@ func TestClearFilmIndexCachesKeepsFrontKeys(t *testing.T) {
 		t.Fatalf("seed daily: %v", err)
 	}
 
-	clearDetailCaches(1)
-	clearDetailCaches(0)
 	ClearFilmIndexCachesByPidSet(map[int64]struct{}{
 		1:  {},
 		0:  {},

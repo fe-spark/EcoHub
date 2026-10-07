@@ -11,7 +11,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/film/cache"
-	"server/internal/repository/film/playlist"
 	"server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
 	"server/internal/repository/support"
@@ -23,20 +22,13 @@ import (
 func DelFilmSearch(id int64) error {
 	info := GetFilmIndexById(id)
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		// 查出该 mid 关联的所有 match_key，在事务内级联物理删除附属站关联播放列表
-		var matchKeys []string
-		if err := tx.Model(&model.MovieMatchKey{}).Where("mid = ?", id).Pluck("match_key", &matchKeys).Error; err != nil {
+		if err := tx.Where("mid = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if len(matchKeys) > 0 {
-			if err := tx.Unscoped().Where("movie_key IN ?", matchKeys).Delete(&model.SlaveMoviePlaylist{}).Error; err != nil {
-				return err
-			}
+		if err := tx.Where("mid = ?", id).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+			return err
 		}
 		if err := tx.Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid = ?", id).Delete(&model.MovieDetailInfo{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid = ?", id).Delete(&model.MovieMatchKey{}).Error; err != nil {
@@ -97,29 +89,24 @@ func normalizeSourceIDs(sourceIDs ...string) []string {
 }
 
 func clearMasterDataBySourceIDs(conn *gorm.DB, sourceIDs []string) error {
-	// 主站切换只重建影片骨架和派生读模型；附属站播放列表是补充信息，继续保留等待新主站匹配键重新挂接。
 	for _, table := range masterDataResetTables() {
 		startedAt := time.Now()
 		if err := truncateTable(conn, table); err != nil {
 			return err
 		}
 		if cost := time.Since(startedAt); cost > time.Second {
-			log.Printf("[Collect] 主站切换清表较慢 table=%s cost=%s", table, cost)
+			log.Printf("[Collect] 源重置清表较慢 table=%s cost=%s", table, cost)
 		}
 	}
-	if err := repository.DeleteCollectSourceStatsTx(conn, sourceIDs...); err != nil {
-		return err
-	}
-	playlist.ClearOrphanCleanCursor()
-	playlist.SetMasterSwitchProtection(playlist.MasterSwitchColdStartDuration)
-	return nil
+	return repository.DeleteCollectSourceStatsTx(conn, sourceIDs...)
 }
 
 func masterDataResetTables() []string {
 	return []string{
-		model.TableMovieDetail,
 		model.TableFilmIndex,
+		model.TableFilmSourcePlaylist,
 		model.TableFilmListSnapshot,
+		model.TableFilmSnapshotSource,
 		model.TableMovieMatchKey,
 		model.TableMovieSourceMapping,
 		model.TableSearchTag,
@@ -136,17 +123,15 @@ func truncateTable(conn *gorm.DB, table string) error {
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() error {
-	// 清库时顺带去掉旧 bulk 迁移遗留的 Redis 公告 key 与孤儿治理游标。
+	// 清库时顺带去掉旧 Redis 公告 key。
 	defer ClearLegacyContentKeyNotices()
-	playlist.ClearOrphanCleanCursor()
-	playlist.SetMasterSwitchProtection(playlist.MasterSwitchColdStartDuration)
 
 	// 关键节点：清空影视库存
 	ReportResetProgress(20, "正在清空影视库存")
 	for _, t := range []string{
-		model.TableMovieDetail,
 		model.TableFilmIndex,
-		model.TableSlaveMoviePlaylist,
+		model.TableFilmSourcePlaylist,
+		model.TableMovieSourceMapping,
 		model.TableMovieMatchKey,
 		model.TableMoviePoster,
 	} {
@@ -159,6 +144,7 @@ func FilmZero() error {
 	ReportResetProgress(45, "正在清空派生数据")
 	for _, t := range []string{
 		model.TableFilmListSnapshot,
+		model.TableFilmSnapshotSource,
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
 		model.TableFailureRecord,
@@ -282,10 +268,13 @@ func CleanSearchWithoutDetail() int64 {
 	}
 
 	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieDetailInfo{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {

@@ -420,4 +420,3 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		totalCandidateCount, len(finalBanners), len(pickedSnaps)-reusedCount, localSlideCount, scrapeInfo, reusedCount, len(pinnedBanners), cfg.Strategy, cfg.Categories, effectiveCategories, triggerSource)
 	return finalBanners, nil
 }
-

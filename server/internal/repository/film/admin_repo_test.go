@@ -53,7 +53,7 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 
 	// 注入数据
 	gdb.Create(&model.MoviePoster{SourceId: "src1", MovieKey: "k1", Picture: "http://poster1"})
-	gdb.Create(&model.SlaveMoviePlaylist{SourceId: "src1", MovieKey: "k1", Content: "playlist"})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 200, SourceId: "src1", LineKind: "play", Content: "playlist"})
 	gdb.Create(&model.Category{Name: "动作片"})
 	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 100, GlobalMid: 200})
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 10})
@@ -82,7 +82,7 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 	}
 
 	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, snapCount, bannerCount, failureCount int64
-	gdb.Model(&model.SlaveMoviePlaylist{}).Count(&playlistCount)
+	gdb.Model(&model.FilmSourcePlaylist{}).Count(&playlistCount)
 	gdb.Model(&model.Category{}).Count(&catCount)
 	gdb.Model(&fileDummy{}).Count(&fileCount)
 	gdb.Unscoped().Model(&model.MovieSourceMapping{}).Count(&mappingCount)

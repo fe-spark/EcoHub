@@ -221,21 +221,14 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 			defer func() { <-sem }()
 
 			item := model.SourceHealthItem{
-				Id:    src.Id,
-				Name:  src.Name,
-				Uri:   src.Uri,
-				Grade: src.Grade,
-				State: src.State,
+				Id:     src.Id,
+				Name:   src.Name,
+				Uri:    src.Uri,
+				Weight: src.Weight,
+				State:  src.State,
 			}
 			if spider.IsTaskRunning(src.Id) {
 				item.Reason = "站点正在采集，已跳过检测"
-				mu.Lock()
-				skipped = append(skipped, item)
-				mu.Unlock()
-				return
-			}
-			if src.Grade == model.MasterCollect {
-				item.Reason = "主站无法直接删除，请先降级为附属站"
 				mu.Lock()
 				skipped = append(skipped, item)
 				mu.Unlock()

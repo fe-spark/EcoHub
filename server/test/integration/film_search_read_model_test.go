@@ -113,7 +113,6 @@ func TestDelFilmSearch_EndToEndWithSnapshotAndCache(t *testing.T) {
 	newFilmIndex.Cid = 10
 	newFilmIndex.Name = "仙逆"
 	gdb.Create(newFilmIndex)
-	gdb.Create(&model.MovieDetailInfo{Mid: targetMid, Content: "{}"})
 	gdb.Create(&model.MovieMatchKey{Mid: targetMid, MatchKey: "key_xianni"})
 	gdb.Create(&model.MovieSourceMapping{GlobalMid: targetMid, SourceMid: 999, SourceId: "src1"})
 	activateVersion(t, version)
@@ -179,7 +178,6 @@ func TestFilmCRUD_FullLifecycle(t *testing.T) {
 	newFilmIndex.Cid = 10
 	newFilmIndex.Name = "大话西游之月光宝盒"
 	gdb.Create(newFilmIndex)
-	gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: "{}"})
 	gdb.Create(&model.MovieMatchKey{Mid: mid, MatchKey: "key_dhxy"})
 	if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(mid); err != nil {
 		t.Fatalf("新增影片后更新快照失败: %v", err)

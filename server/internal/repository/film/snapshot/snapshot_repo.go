@@ -115,15 +115,18 @@ func RebuildFilmListSnapshot(version string) error {
 	if err := db.Mdb.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
 		return err
 	}
+	if err := db.Mdb.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+		return err
+	}
 
-	var lastID uint
+	var lastMid int64
 	total := 0
 	for {
 		batchStartedAt := time.Now()
 		var indexes []model.FilmIndex
-		if err := db.Mdb.Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
-			Where("film_index.id > ?", lastID).
-			Order("film_index.id ASC").
+		if err := db.Mdb.
+			Where("film_index.mid > ?", lastMid).
+			Order("film_index.mid ASC").
 			Limit(snapshotBuildBatchSize).
 			Find(&indexes).Error; err != nil {
 			return err
@@ -132,21 +135,44 @@ func RebuildFilmListSnapshot(version string) error {
 			break
 		}
 
+		mids := make([]int64, 0, len(indexes))
 		snapshots := make([]model.FilmListSnapshot, 0, len(indexes))
 		for _, index := range indexes {
 			snapshots = append(snapshots, buildFilmListSnapshot(version, index))
-			lastID = index.ID
+			mids = append(mids, index.Mid)
+			lastMid = index.Mid
 		}
 		if err := db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapshots, snapshotBuildBatchSize).Error; err != nil {
 			return err
 		}
+
+		type midSource struct {
+			Mid      int64
+			SourceId string
+		}
+		var sourcePairs []midSource
+		if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+			Distinct("mid", "source_id").
+			Where("mid IN ? AND line_kind = ?", mids, "play").
+			Find(&sourcePairs).Error; err == nil && len(sourcePairs) > 0 {
+			snapSources := make([]model.FilmSnapshotSource, 0, len(sourcePairs))
+			for _, pair := range sourcePairs {
+				snapSources = append(snapSources, model.FilmSnapshotSource{
+					SnapshotVersion: version,
+					Mid:             pair.Mid,
+					SourceId:        pair.SourceId,
+				})
+			}
+			_ = db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapSources, snapshotBuildBatchSize).Error
+		}
+
 		total += len(snapshots)
 		log.Printf(
-			"[Snapshot] 构建进度 version=%s total=%d batch=%d last_id=%d cost=%s total_cost=%s",
+			"[Snapshot] 构建进度 version=%s total=%d batch=%d last_mid=%d cost=%s total_cost=%s",
 			version,
 			total,
 			len(snapshots),
-			lastID,
+			lastMid,
 			time.Since(batchStartedAt),
 			time.Since(startedAt),
 		)
@@ -176,9 +202,7 @@ func ActivateRebuiltFilmListSnapshot(version string) error {
 
 func EnsureActiveFilmListSnapshot() error {
 	var dbCount int64
-	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Joins("JOIN " + model.TableMovieDetail + " ON " + model.TableMovieDetail + ".mid = film_index.mid AND " + model.TableMovieDetail + ".deleted_at IS NULL").
-		Count(&dbCount).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmIndex{}).Count(&dbCount).Error; err != nil {
 		return err
 	}
 	if dbCount == 0 {
@@ -212,7 +236,6 @@ func RefreshMissingPlayFromSummaries() {
 
 	var missingMIDs []int64
 	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Joins("JOIN "+model.TableMovieDetail+" ON "+model.TableMovieDetail+".mid = film_index.mid AND "+model.TableMovieDetail+".deleted_at IS NULL").
 		Where("film_index.play_from_summary = ? OR film_index.play_from_summary IS NULL", "").
 		Pluck("film_index.mid", &missingMIDs).Error; err != nil {
 		log.Printf("[Snapshot] 查询缺失播放源影片失败: %v", err)
@@ -263,4 +286,26 @@ func pruneOldFilmListSnapshots(retain int) {
 			break
 		}
 	}
+	// 同步级联分批删除旧快照成员关系
+	for {
+		res := db.Mdb.Where("snapshot_version NOT IN ?", versions).Limit(pruneChunkSize).Unscoped().Delete(&model.FilmSnapshotSource{})
+		if res.Error != nil {
+			log.Printf("pruneOldFilmListSnapshots SnapshotSource Delete Error: %v", res.Error)
+			break
+		}
+		if res.RowsAffected == 0 {
+			break
+		}
+	}
+}
+
+func HasPublishedFilmListSnapshot() (bool, error) {
+	if db.Mdb == nil {
+		return false, nil
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

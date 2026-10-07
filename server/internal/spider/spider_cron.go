@@ -8,14 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"github.com/robfig/cron/v3"
-	filmplaylist "server/internal/repository/film/playlist"
 )
 
 var CronCollect *cron.Cron = CreateCron()
@@ -285,15 +286,17 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 
 	startedAt := time.Now()
 
-	// 1. 附属站孤儿治理：两阶段观察期状态机，零锁并发，直接作为后台闲时 GC 执行
-	n, err := filmplaylist.CleanOrphanPlaylists()
-	if err != nil {
-		syslog.Errorf("[CleanOrphan] 附属站孤儿治理执行失败: %v", err)
-		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
+	// 1. 多源播放列表孤儿清理
+	var n int64
+	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
+		syslog.Errorf("[CleanOrphan] 孤儿播放列表清理失败: %v", res.Error)
+		notify.PublishCronFailed(ft.Id, ft.Remark, res.Error.Error())
 		return
+	} else {
+		n = res.RowsAffected
 	}
 
-	// 2. 主站骨架空记录与缺失详情清理：受 publishMu 保护，若遇采集正忙则跳过以优先保证核心采集
+	// 2. 空记录与缺失详情清理：受 publishMu 保护，若遇采集正忙则跳过以优先保证核心采集
 	if collectLifecycle.isBusy() {
 		detail := fmt.Sprintf("回收孤儿 %d；采集发布正忙，空记录与缺失详情留待下轮", n)
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
@@ -302,7 +305,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	}
 
 	var m, x int64
-	err = func() error {
+	err := func() error {
 		collectLifecycle.beginPublish()
 		defer collectLifecycle.endPublish()
 		publishMu.Lock()
@@ -311,7 +314,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		m = filmrepo.CleanEmptyFilms()
 		x = filmrepo.CleanSearchWithoutDetail()
 		if m > 0 || x > 0 {
-			return filmplaylist.RefreshAfterDataClean()
+			return filmsnapshot.ActivateRebuiltFilmListSnapshot("")
 		}
 		return nil
 	}()
@@ -402,4 +405,3 @@ func IsCronTaskRunning(id string) bool {
 	_, ok := runningCronTasks.Load(id)
 	return ok
 }
-

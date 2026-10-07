@@ -10,7 +10,6 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	filmcache "server/internal/repository/film/cache"
-	filmplaylist "server/internal/repository/film/playlist"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
 )
@@ -44,13 +43,8 @@ func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, master
 }
 
 func flushMasterSideEffects(sources []model.FilmSource, masterMIDs []int64) error {
-	for _, source := range sources {
-		if source.Grade == model.MasterCollect {
-			scheduleMasterSearchTagsRefresh(masterMIDs)
-			filmcache.ClearTVBoxConfigCache()
-			return nil
-		}
-	}
+	scheduleMasterSearchTagsRefresh(masterMIDs)
+	filmcache.ClearTVBoxConfigCache()
 	return nil
 }
 
@@ -88,10 +82,10 @@ func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()
 	mids := normalizeAffectedMIDs(affectedMIDs)
 	if len(mids) == 0 {
-		if hasSnapshot, err := filmplaylist.HasPublishedFilmListSnapshot(); err != nil {
+		if hasSnapshot, err := filmsnapshot.HasPublishedFilmListSnapshot(); err != nil {
 			return "", err
 		} else if !hasSnapshot {
-			log.Printf("[Spider][Finalizer] 主站快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
+			log.Printf("[Spider][Finalizer] 快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
 			return "", nil
 		}
 	}

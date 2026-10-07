@@ -49,7 +49,6 @@ export default function CollectSourceCard({
   onDeleteSource,
 }: CollectSourceCardProps) {
   const isRunning = active;
-  const isMaster = record.grade === 0;
   const { canWrite } = useManagePermission();
   const { label: statusLabel, tone: statusTone } = resolveSourceStatus(record, active);
   const phase = record.progress?.status;
@@ -57,7 +56,6 @@ export default function CollectSourceCard({
 
   const cardClassNames = [
     styles.sourceCard,
-    isMaster ? styles.sourceCardMaster : "",
     toneClassMap[statusTone],
     selected ? styles.sourceCardSelected : "",
   ]
@@ -69,11 +67,6 @@ export default function CollectSourceCard({
       className={cardClassNames}
       onClick={() => onSelect(record.id, !selected)}
     >
-      {isMaster ? (
-        <span className={styles.masterRibbon} title="全局唯一数据源" aria-label="主站">
-          <span className={styles.masterRibbonText}>主站</span>
-        </span>
-      ) : null}
       <div className={styles.cardHead}>
         <Checkbox
           checked={selected}
@@ -83,6 +76,9 @@ export default function CollectSourceCard({
         <div className={styles.cardHeadMain}>
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
+            <Tag color="blue" bordered={false} style={{ marginInlineEnd: 0 }}>
+              权重 {record.weight ?? 0}
+            </Tag>
             {record.isPosterSource ? (
               <span className={styles.posterSourceTag} title="全局优先海报图源">
                 海报源
@@ -214,11 +210,7 @@ export default function CollectSourceCard({
                 onClick={() => onEditSource(record.id)}
               />
             </Tooltip>
-            {isMaster ? (
-              <Tooltip title="主站不可删除，请先将其他附属站设为主站">
-                <Button danger icon={<DeleteOutlined />} disabled />
-              </Tooltip>
-            ) : isRunning ? (
+            {isRunning ? (
               <Tooltip title="采集进行中，禁止删除">
                 <Button danger icon={<DeleteOutlined />} disabled />
               </Tooltip>

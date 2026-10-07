@@ -172,6 +172,15 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		t.Fatalf("create catSub: %v", err)
 	}
 
+	if err := gdb.Create(&model.FilmSource{
+		Id:     "src_default",
+		Name:   "默认主源",
+		State:  true,
+		Weight: 10,
+	}).Error; err != nil {
+		t.Fatalf("create default film source: %v", err)
+	}
+
 	// 2. 初始化影片快照与详情
 	// 影片 201: 两集，相对路径海报
 	snap201 := model.FilmListSnapshot{
@@ -209,9 +218,25 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			Remarks:  "HD中字",
 		},
 	}
-	raw201, _ := json.Marshal(detail201)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: 201, Content: string(raw201)}).Error; err != nil {
-		t.Fatalf("create detail201: %v", err)
+	rawUrls201, _ := json.Marshal(detail201.PlayList[0])
+	f201 := model.FilmIndex{}
+	f201.Mid = 201
+	f201.Name = detail201.Name
+	f201.Picture = detail201.Picture
+	f201.Content = "流浪地球内容简介"
+	if err := gdb.Create(&f201).Error; err != nil {
+		t.Fatalf("create film index 201: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          201,
+		SourceId:     "src_default",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail201.PlayList[0]),
+		Content:      string(rawUrls201),
+	}).Error; err != nil {
+		t.Fatalf("create playlist 201: %v", err)
 	}
 
 	// 影片 202: 绝对路径海报
@@ -249,9 +274,25 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			Remarks:  "超清",
 		},
 	}
-	raw202, _ := json.Marshal(detail202)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: 202, Content: string(raw202)}).Error; err != nil {
-		t.Fatalf("create detail202: %v", err)
+	rawUrls202, _ := json.Marshal(detail202.PlayList[0])
+	f202 := model.FilmIndex{}
+	f202.Mid = 202
+	f202.Name = detail202.Name
+	f202.Picture = detail202.Picture
+	f202.Content = "星际穿越内容简介"
+	if err := gdb.Create(&f202).Error; err != nil {
+		t.Fatalf("create film index 202: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          202,
+		SourceId:     "src_default",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail202.PlayList[0]),
+		Content:      string(rawUrls202),
+	}).Error; err != nil {
+		t.Fatalf("create playlist 202: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)

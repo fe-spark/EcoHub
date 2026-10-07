@@ -14,14 +14,14 @@ import (
 )
 
 const (
-	BannerModeManual        = "manual"
-	BannerModeAuto          = "auto"
-	BannerStrategyHot       = "hot_random"
-	BannerStrategyScore     = "score_random"
-	BannerStrategyLatest    = "latest_random"
-	BannerStrategySmartMix  = "smart_mix"
-	DefaultBannerCount      = model.DefaultBannerCount
-	MaxBannerCount          = model.MaxBannerCount
+	BannerModeManual         = "manual"
+	BannerModeAuto           = "auto"
+	BannerStrategyHot        = "hot_random"
+	BannerStrategyScore      = "score_random"
+	BannerStrategyLatest     = "latest_random"
+	BannerStrategySmartMix   = "smart_mix"
+	DefaultBannerCount       = model.DefaultBannerCount
+	MaxBannerCount           = model.MaxBannerCount
 	DefaultBannerRefreshCron = "0 0 */12 * * *"
 )
 

@@ -34,7 +34,6 @@ func TestFilterEnabledSources(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeAffectedMIDs(t *testing.T) {
 	input := []int64{10, -1, 5, 0, 10, 20, 5, 3}
 	expected := []int64{3, 5, 10, 20}
@@ -54,22 +53,16 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 }
 
 func TestShouldSkipCollectPublishOnError(t *testing.T) {
-	masterSource := model.FilmSource{Grade: model.MasterCollect}
-	slaveSource := model.FilmSource{Grade: model.SlaveCollect}
+	src := model.FilmSource{Weight: 10}
 
-	// 主站全量采集 (h < 0) -> 跳过发布
-	if !shouldSkipCollectPublishOnError(masterSource, -1) {
-		t.Error("expected true for MasterCollect with h < 0")
+	// 全量采集 (h < 0) -> 跳过发布
+	if !shouldSkipCollectPublishOnError(src, -1) {
+		t.Error("expected true for h < 0")
 	}
 
-	// 主站增量采集 (h > 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(masterSource, 3) {
-		t.Error("expected false for MasterCollect with h > 0")
-	}
-
-	// 附属站全量采集 (h < 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(slaveSource, -1) {
-		t.Error("expected false for SlaveCollect with h < 0")
+	// 增量采集 (h > 0) -> 不跳过
+	if shouldSkipCollectPublishOnError(src, 3) {
+		t.Error("expected false for h > 0")
 	}
 }
 
@@ -194,7 +187,7 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 }
 
 func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
-	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Grade: 1}
+	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Weight: 1}
 	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
 		t.Fatal("occupy failed")
 	}
@@ -306,8 +299,8 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
 	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
-	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Grade: model.SlaveCollect}
-	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Grade: model.SlaveCollect}
+	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Weight: 10}
+	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Weight: 10}
 
 	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
 	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)

@@ -1,8 +1,6 @@
 package snapshot
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
 	"gorm.io/gorm"
 	"log"
@@ -94,18 +92,7 @@ func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDeta
 	if snapshot.Mid <= 0 {
 		return nil, 0
 	}
-	var movieDetailInfo model.MovieDetailInfo
-	if err := db.Mdb.Where("mid = ?", snapshot.Mid).First(&movieDetailInfo).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			log.Printf("GetMovieDetailBySnapshot Error: %v", err)
-		}
-		return nil, 0
-	}
 	var detail model.MovieDetail
-	if err := json.Unmarshal([]byte(movieDetailInfo.Content), &detail); err != nil {
-		log.Printf("Unmarshal Snapshot MovieDetail Error: %v", err)
-		return nil, 0
-	}
 	shared.ApplyFilmListSnapshot(&detail, snapshot)
 	normalizeMovieDetailLists(&detail)
 	return &detail, snapshot.UpdateStamp
@@ -116,7 +103,7 @@ func HasMovieDetail(mid int64) bool {
 		return false
 	}
 	var count int64
-	if err := db.Mdb.Model(&model.MovieDetailInfo{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
 		log.Printf("HasMovieDetail Error: %v", err)
 		return false
 	}

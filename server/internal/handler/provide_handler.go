@@ -342,4 +342,3 @@ func (h *ProvideHandler) HandleProvideApp(c *gin.Context) {
 		},
 	})
 }
-

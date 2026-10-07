@@ -54,21 +54,21 @@ type XMLVideoList struct {
 
 // XMLVideo 单部影片基础与明细字段
 type XMLVideo struct {
-	ID       int64  `xml:"id"`
-	Tid      int64  `xml:"tid"`
-	Name     string `xml:"name"`
-	Type     string `xml:"type"`
-	Pic      string `xml:"pic"`
-	Lang     string `xml:"lang"`
-	Area     string `xml:"area"`
-	Year     string `xml:"year"`
-	State    string `xml:"state"`
-	Note     string `xml:"note"`
-	Actor    string `xml:"actor"`
-	Director string `xml:"director"`
-	Des      string `xml:"des"`
-	Last     string   `xml:"last"`
-	DLs      []XMLDL  `xml:"dl"`
+	ID       int64   `xml:"id"`
+	Tid      int64   `xml:"tid"`
+	Name     string  `xml:"name"`
+	Type     string  `xml:"type"`
+	Pic      string  `xml:"pic"`
+	Lang     string  `xml:"lang"`
+	Area     string  `xml:"area"`
+	Year     string  `xml:"year"`
+	State    string  `xml:"state"`
+	Note     string  `xml:"note"`
+	Actor    string  `xml:"actor"`
+	Director string  `xml:"director"`
+	Des      string  `xml:"des"`
+	Last     string  `xml:"last"`
+	DLs      []XMLDL `xml:"dl"`
 }
 
 // XMLDL 播放来源集合
@@ -232,25 +232,24 @@ func convertXMLVideosToFilmDetails(videos []XMLVideo) []model.FilmDetail {
 		playURLStr := strings.Join(playURLs, "$$$")
 
 		details = append(details, model.FilmDetail{
-			VodID:         v.ID,
-			TypeID:        v.Tid,
-			VodName:       name,
-			TypeName:      strings.TrimSpace(v.Type),
-			VodPic:        strings.TrimSpace(v.Pic),
-			VodLang:       strings.TrimSpace(v.Lang),
-			VodArea:       strings.TrimSpace(v.Area),
-			VodYear:       strings.TrimSpace(v.Year),
-			VodState:      strings.TrimSpace(v.State),
-			VodRemarks:    strings.TrimSpace(v.Note),
-			VodActor:      strings.TrimSpace(v.Actor),
-			VodDirector:   strings.TrimSpace(v.Director),
-			VodContent:    strings.TrimSpace(v.Des),
-			VodTime:       strings.TrimSpace(v.Last),
-			VodPlayFrom:   playFromStr,
-			VodPlayURL:    playURLStr,
-			VodPlayNote:   "$$$",
+			VodID:       v.ID,
+			TypeID:      v.Tid,
+			VodName:     name,
+			TypeName:    strings.TrimSpace(v.Type),
+			VodPic:      strings.TrimSpace(v.Pic),
+			VodLang:     strings.TrimSpace(v.Lang),
+			VodArea:     strings.TrimSpace(v.Area),
+			VodYear:     strings.TrimSpace(v.Year),
+			VodState:    strings.TrimSpace(v.State),
+			VodRemarks:  strings.TrimSpace(v.Note),
+			VodActor:    strings.TrimSpace(v.Actor),
+			VodDirector: strings.TrimSpace(v.Director),
+			VodContent:  strings.TrimSpace(v.Des),
+			VodTime:     strings.TrimSpace(v.Last),
+			VodPlayFrom: playFromStr,
+			VodPlayURL:  playURLStr,
+			VodPlayNote: "$$$",
 		})
 	}
 	return details
 }
-

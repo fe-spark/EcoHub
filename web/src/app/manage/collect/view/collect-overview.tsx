@@ -19,7 +19,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    grade: Number(item.grade ?? 1),
+    weight: Number(item.weight ?? 0),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
@@ -28,7 +28,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
   };
 }
 
-/** 工作台：运行概览 + 当前主采集站（进入页面拉取一次） */
+/** 工作台：运行概览 + 优先采集站（进入页面拉取一次） */
 export default function CollectOverview() {
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -65,25 +65,15 @@ export default function CollectOverview() {
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      masters: siteList.filter((item) => item.grade === 0).length,
+      disabled: siteList.filter((item) => !item.state).length,
     }),
     [siteList],
   );
 
-  const masterSite = useMemo(
-    () => siteList.find((item) => item.grade === 0) ?? null,
+  const topSite = useMemo(
+    () => siteList.find((item) => item.state) ?? siteList[0] ?? null,
     [siteList],
   );
-
-  const masterStatus = useMemo(() => {
-    if (stats.masters === 1) {
-      return { text: "正常", color: "success" as const };
-    }
-    if (stats.masters === 0) {
-      return { text: "缺少主采集站", color: "warning" as const };
-    }
-    return { text: `${stats.masters} 个主采集站`, color: "error" as const };
-  }, [stats.masters]);
 
   return (
     <div className={styles.overviewGrid}>
@@ -110,38 +100,34 @@ export default function CollectOverview() {
           </div>
           <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic
-                title="主采集站"
-                value={stats.masters}
-                suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
-              />
+              <Statistic title="已停用" value={stats.disabled} />
             </div>
           </div>
         </div>
       </Card>
 
       <Card
-        title="当前主采集站"
+        title="默认优先站点"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
-        extra={masterSite ? <Tag color="gold">已生效</Tag> : <Tag color="error">未配置</Tag>}
+        extra={topSite ? <Tag color="blue">权重 {topSite.weight}</Tag> : <Tag color="warning">未配置</Tag>}
       >
-        {masterSite ? (
+        {topSite ? (
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>
-            <Descriptions.Item label="名称">{masterSite.name}</Descriptions.Item>
+            <Descriptions.Item label="名称">{topSite.name}</Descriptions.Item>
             <Descriptions.Item label="接口地址">
               <Typography.Link
-                href={masterSite.uri}
+                href={topSite.uri}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.masterLink}
               >
-                {masterSite.uri}
+                {topSite.uri}
               </Typography.Link>
             </Descriptions.Item>
             <Descriptions.Item label="启用状态">
-              <Tag color={masterSite.state ? "success" : "default"} variant="filled">
-                {masterSite.state ? "启用中" : "已停用"}
+              <Tag color={topSite.state ? "success" : "default"} variant="filled">
+                {topSite.state ? "启用中" : "已停用"}
               </Tag>
             </Descriptions.Item>
           </Descriptions>
@@ -152,7 +138,7 @@ export default function CollectOverview() {
             </Descriptions.Item>
             <Descriptions.Item label="说明">
               需要先{" "}
-              <Link href="/manage/collect">配置主采集站</Link>
+              <Link href="/manage/collect">添加采集站</Link>
             </Descriptions.Item>
           </Descriptions>
         )}

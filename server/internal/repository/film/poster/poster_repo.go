@@ -1,7 +1,6 @@
 package poster
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -148,36 +147,6 @@ func SyncSlavePostersIfConfiguredTx(tx *gorm.DB, sourceID string, details []mode
 		if err := batchUpdateFilmIndexPostersTx(dtx, toUpdate); err != nil {
 			return fmt.Errorf("batch update film_index poster failed: %w", err)
 		}
-
-		var detailInfos []model.MovieDetailInfo
-		if err := dtx.Where("mid IN ?", updatedMids).Order("mid ASC").Find(&detailInfos).Error; err != nil {
-			return fmt.Errorf("find movie_detail_info failed: %w", err)
-		}
-		newContents := make(map[int64]string, len(detailInfos))
-		for _, info := range detailInfos {
-			if info.Content == "" {
-				continue
-			}
-			itemDetail := midToDetail[info.Mid]
-			pic := strings.TrimSpace(itemDetail.Picture)
-			slide := strings.TrimSpace(itemDetail.PictureSlide)
-			var md model.MovieDetail
-			if err := json.Unmarshal([]byte(info.Content), &md); err != nil {
-				continue
-			}
-			md.Picture = pic
-			if slide != "" {
-				md.PictureSlide = slide
-			}
-			newData, err := json.Marshal(md)
-			if err != nil {
-				continue
-			}
-			newContents[info.Mid] = string(newData)
-		}
-		if err := batchUpdateMovieDetailInfoContentsTx(dtx, newContents); err != nil {
-			return fmt.Errorf("batch update movie_detail_info failed: %w", err)
-		}
 		return nil
 	})
 	if err != nil {
@@ -242,41 +211,6 @@ func batchUpdateFilmIndexPostersTx(tx *gorm.DB, updates []pendingPosterUpdate) e
 	return nil
 }
 
-func batchUpdateMovieDetailInfoContentsTx(tx *gorm.DB, contents map[int64]string) error {
-	if len(contents) == 0 {
-		return nil
-	}
-	sortedMids := make([]int64, 0, len(contents))
-	for mid := range contents {
-		if mid > 0 {
-			sortedMids = append(sortedMids, mid)
-		}
-	}
-	sort.Slice(sortedMids, func(i, j int) bool {
-		return sortedMids[i] < sortedMids[j]
-	})
-
-	const batchChunkSize = 200
-	for start := 0; start < len(sortedMids); start += batchChunkSize {
-		end := start + batchChunkSize
-		if end > len(sortedMids) {
-			end = len(sortedMids)
-		}
-		chunkMids := sortedMids[start:end]
-		caseExpr := "CASE mid"
-		args := make([]any, 0, len(chunkMids)*2)
-		for _, mid := range chunkMids {
-			caseExpr += " WHEN ? THEN ?"
-			args = append(args, mid, contents[mid])
-		}
-		caseExpr += " ELSE content END"
-		if err := tx.Model(&model.MovieDetailInfo{}).Where("mid IN ?", chunkMids).Update("content", clause.Expr{SQL: caseExpr, Vars: args}).Error; err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // saveMoviePostersTx 批量保存海报源海报数据
 func saveMoviePostersTx(tx *gorm.DB, list []model.MoviePoster) error {
 	if len(list) == 0 {
@@ -317,15 +251,15 @@ func LoadPostersBySourceAndKeysTx(tx *gorm.DB, sourceID string, movieKeys []stri
 	return result, nil
 }
 
-// ApplyExternalPosterSourceToMasterWritesTx 主站写入时应用海报三层优先级：
+// ApplyExternalPosterSourceToMasterWritesTx 写入时应用海报三层优先级：
 // 1. 若已有库存且被人工自定义锁定 (existing.IsCustomPicture == true)，保持原自定义海报，坚决不覆盖；
 // 2. 若当前启用了有效海报源且 movie_poster 命中该片高清图，应用海报源的高清海报与幻灯图；
-// 3. 否则保持主站自身采集到的封面海报。
+// 3. 否则保持自身采集到的封面海报。
 func ApplyExternalPosterSourceToMasterWritesTx(
 	tx *gorm.DB,
 	masterSourceID string,
 	infos []model.FilmIndex,
-	detailsByKey map[string]model.MovieDetail,
+	details []model.MovieDetail,
 	existingByMid map[int64]model.FilmIndex,
 	isManual bool,
 ) error {
@@ -336,11 +270,10 @@ func ApplyExternalPosterSourceToMasterWritesTx(
 				infos[index].IsCustomPicture = true
 				infos[index].CustomPicture = existing.CustomPicture
 				infos[index].CustomPictureSlide = existing.CustomPictureSlide
-				if newDetail, ok := detailsByKey[infos[index].ContentKey]; ok {
-					newDetail.IsCustomPicture = true
-					newDetail.CustomPicture = existing.CustomPicture
-					newDetail.CustomPictureSlide = existing.CustomPictureSlide
-					detailsByKey[infos[index].ContentKey] = newDetail
+				if index < len(details) {
+					details[index].IsCustomPicture = true
+					details[index].CustomPicture = existing.CustomPicture
+					details[index].CustomPictureSlide = existing.CustomPictureSlide
 				}
 			}
 		}
@@ -352,8 +285,8 @@ func ApplyExternalPosterSourceToMasterWritesTx(
 	}
 
 	// 收集本批详情的所有 match_keys（跳过已自定义锁定的项）
-	allKeys := make([]string, 0, len(detailsByKey)*2)
-	for _, detail := range detailsByKey {
+	allKeys := make([]string, 0, len(details)*2)
+	for _, detail := range details {
 		if detail.IsCustomPicture {
 			continue
 		}
@@ -367,27 +300,23 @@ func ApplyExternalPosterSourceToMasterWritesTx(
 	}
 
 	for index := range infos {
-		if infos[index].IsCustomPicture {
+		if infos[index].IsCustomPicture || index >= len(details) {
 			continue
 		}
-		contentKey := infos[index].ContentKey
-		newDetail, ok := detailsByKey[contentKey]
-		if !ok || newDetail.IsCustomPicture {
+		if details[index].IsCustomPicture {
 			continue
 		}
 
-		matchedPoster := PickBestMatchedPoster(newDetail, postersByKey)
+		matchedPoster := PickBestMatchedPoster(details[index], postersByKey)
 		if matchedPoster != nil && strings.TrimSpace(matchedPoster.Picture) != "" {
-			// 海报源已采集并命中匹配 -> 直接应用海报源的高清海报与幻灯图
 			infos[index].Picture = strings.TrimSpace(matchedPoster.Picture)
 			if strings.TrimSpace(matchedPoster.PictureSlide) != "" {
 				infos[index].PictureSlide = strings.TrimSpace(matchedPoster.PictureSlide)
 			}
-			newDetail.Picture = infos[index].Picture
+			details[index].Picture = infos[index].Picture
 			if infos[index].PictureSlide != "" {
-				newDetail.PictureSlide = infos[index].PictureSlide
+				details[index].PictureSlide = infos[index].PictureSlide
 			}
-			detailsByKey[contentKey] = newDetail
 		}
 	}
 	return nil

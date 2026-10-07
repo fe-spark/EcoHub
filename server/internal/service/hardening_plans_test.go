@@ -174,9 +174,17 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		PlayList: [][]model.MovieUrlInfo{{{Episode: "正片", Link: "https://test.com/play.m3u8"}}},
 		PlayFrom: []string{"默认主源"},
 	}
-	rawDetail, _ := json.Marshal(detail)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: validMid, Content: string(rawDetail)}).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	urlsJSON, _ := json.Marshal(detail.PlayList[0])
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          validMid,
+		SourceId:     "src_1",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(detail.PlayList[0]),
+		Content:      string(urlsJSON),
+	}).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -252,9 +260,17 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 			PlayList: [][]model.MovieUrlInfo{{{Episode: "HD", Link: fmt.Sprintf("http://video/%d.m3u8", mid)}}},
 			PlayFrom: []string{"默认主源"},
 		}
-		raw, _ := json.Marshal(d)
-		if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: string(raw)}).Error; err != nil {
-			t.Fatalf("create detail: %v", err)
+		urlsJSON, _ := json.Marshal(d.PlayList[0])
+		if err := gdb.Create(&model.FilmSourcePlaylist{
+			Mid:          mid,
+			SourceId:     "src_1",
+			LineKind:     "play",
+			GroupIndex:   0,
+			GroupName:    "默认主源",
+			EpisodeCount: len(d.PlayList[0]),
+			Content:      string(urlsJSON),
+		}).Error; err != nil {
+			t.Fatalf("create playlist: %v", err)
 		}
 	}
 
@@ -461,12 +477,6 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	if err := gdb.Create(&s2).Error; err != nil {
 		t.Fatalf("create s2: %v", err)
 	}
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: validMid, Content: `{"id":501,"name":"流浪地球1"}`}).Error; err != nil {
-		t.Fatalf("create d1: %v", err)
-	}
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: relMid, Content: `{"id":502,"name":"流浪地球2"}`}).Error; err != nil {
-		t.Fatalf("create d2: %v", err)
-	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -593,9 +603,17 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 		t.Fatalf("create snap: %v", err)
 	}
 	d := model.MovieDetail{Id: mid, Name: "降级测试影片", PlayList: [][]model.MovieUrlInfo{{{Episode: "1", Link: "url"}}}}
-	raw, _ := json.Marshal(d)
-	if err := gdb.Create(&model.MovieDetailInfo{Mid: mid, Content: string(raw)}).Error; err != nil {
-		t.Fatalf("create detail: %v", err)
+	urlsJSON, _ := json.Marshal(d.PlayList[0])
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid:          mid,
+		SourceId:     "src_1",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认主源",
+		EpisodeCount: len(d.PlayList[0]),
+		Content:      string(urlsJSON),
+	}).Error; err != nil {
+		t.Fatalf("create playlist: %v", err)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -684,8 +702,6 @@ func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
 	s2 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 802, Name: "电影B", Pid: 1, Cid: 10}
 	_ = gdb.Create(&s1)
 	_ = gdb.Create(&s2)
-	_ = gdb.Create(&model.MovieDetailInfo{Mid: 801, Content: `{"id":801,"name":"电影A"}`})
-	_ = gdb.Create(&model.MovieDetailInfo{Mid: 802, Content: `{"id":802,"name":"电影B"}`})
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)

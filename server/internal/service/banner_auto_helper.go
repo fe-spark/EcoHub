@@ -208,4 +208,3 @@ func replaceMissingSlidesWithGlobalHD(picked []model.FilmListSnapshot, categoryP
 	}
 	return picked
 }
-

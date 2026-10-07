@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -72,25 +73,53 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 		}
 	}
 
+	var uncachedMids []int64
+	for _, s := range snapshots {
+		if _, ok := cachedVos[s.Mid]; !ok {
+			uncachedMids = append(uncachedMids, s.Mid)
+		}
+	}
+
+	var batchPlaylists map[int64][]model.PlayLinkVo
+	if len(uncachedMids) > 0 {
+		batchPlaylists = BatchGetPlayPlaylistsByMids(uncachedMids)
+	}
+
 	detailList := make([]model.FilmDetail, 0, len(snapshots))
+	var toCacheVo map[int64]model.MovieDetailVo
+	if db.Rdb != nil && len(uncachedMids) > 0 {
+		toCacheVo = make(map[int64]model.MovieDetailVo, len(uncachedMids))
+	}
 	for _, s := range snapshots {
 		voPtr, ok := cachedVos[s.Mid]
 		var vo model.MovieDetailVo
 		if ok && voPtr != nil {
 			vo = *voPtr
 		} else {
-			fetchedVo, err := IndexSvc.GetFilmDetail(int(s.Mid))
-			if err != nil {
-				continue
+			movieDetail, _ := filmsnapshot.GetMovieDetailBySnapshot(s)
+			if movieDetail != nil {
+				vo.MovieDetail = *movieDetail
 			}
-			vo = fetchedVo
+			vo.List = batchPlaylists[s.Mid]
+			if toCacheVo != nil {
+				toCacheVo[s.Mid] = vo
+			}
 		}
 
-		if vo.Id == 0 && vo.Name == "" {
+		if len(vo.List) == 0 && s.Name == "" {
 			continue
 		}
 
 		detailList = append(detailList, formatProvideFilmDetail(s, vo))
+	}
+
+	if len(toCacheVo) > 0 && db.Rdb != nil {
+		gen := filmsnapshot.PlayInfoGeneration()
+		for mid, v := range toCacheVo {
+			if b, err := json.Marshal(v); err == nil {
+				storeFilmPlayInfoCache(fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid), string(b), 12*time.Hour, gen)
+			}
+		}
 	}
 
 	return detailList

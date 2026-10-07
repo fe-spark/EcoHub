@@ -69,7 +69,6 @@ func hasRealSearchTagList(value any) bool {
 	return false
 }
 
-
 func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 	cost := time.Since(startedAt)
 	if cost < 500*time.Millisecond {
@@ -219,7 +218,6 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 	}
 	dto.Success(data, "分类信息获取成功", c)
 }
-
 
 const (
 	searchFilmDefaultPageSize = 12

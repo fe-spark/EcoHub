@@ -9,7 +9,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 	"server/internal/utils"
 )
@@ -204,11 +203,11 @@ func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category
 
 func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta, categoryVersion string, ruleVersion string) model.FilmIndex {
 	return model.FilmIndex{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 		FilmIndexIdentity: model.FilmIndexIdentity{
-			Mid:        detail.Id,
-			ContentKey: shared.BuildContentKey(detail),
-			SourceId:   sourceId,
-			DbId:       detail.DbId,
+			FirstSourceId: sourceId,
+			DbId:          detail.DbId,
 		},
 		FilmIndexCategory: model.FilmIndexCategory{
 			Cid:              category.Cid,
@@ -240,7 +239,10 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 			IsCustomPicture:    detail.IsCustomPicture,
 			Actor:              detail.Actor,
 			Director:           detail.Director,
+			Writer:             detail.Writer,
 			Blurb:              detail.Blurb,
+			Content:            detail.Content,
+			ReleaseDate:        detail.ReleaseDate,
 		},
 		FilmIndexVersion: model.FilmIndexVersion{
 			CollectStamp:    detail.AddTime,

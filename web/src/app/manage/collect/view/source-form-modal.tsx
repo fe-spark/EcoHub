@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Radio, Switch } from "antd";
+import { Button, Form, Input, InputNumber, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -49,7 +49,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
   );
-  const isMasterEdit = mode === "edit" && initialValues.grade === 0;
+
 
   useEffect(() => {
     if (!open) {
@@ -120,20 +120,11 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           <Input placeholder="请输入采集站接口地址" />
         </Form.Item>
         <Form.Item
-          label="采集站类型"
-          name="grade"
-          tooltip={
-            isMasterEdit
-              ? "系统必须保留一个主站，主站不可直接降级；如需更换主站，请将其他附属站设为主站。"
-              : "系统只能有一个主采集站。若将当前站点设为主站，原主站会自动降级为附属采集站，并会重新同步分类树。"
-          }
+          label="播放权重"
+          name="weight"
+          tooltip="采集站均贡献同一片库，多源线路自动补齐。播放时权重越高（数值越大）的站点线路越优先展示与播放。"
         >
-          <Radio.Group>
-            <Radio value={0}>主采集站</Radio>
-            <Radio value={1} disabled={isMasterEdit}>
-              附属采集站
-            </Radio>
-          </Radio.Group>
+          <InputNumber min={0} max={9999} placeholder="例如 10" style={{ width: "100%" }} />
         </Form.Item>
         <Form.Item
           label="接口格式"
