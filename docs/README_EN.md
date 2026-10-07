@@ -38,7 +38,7 @@ Client apps live in separate repos, not this repo's server or web UI:
 | Site | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | Admin | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
-Read-only demo account: `guest` / `guest`. This account cannot save settings. For a real deployment, use your own accounts and change the default passwords.
+Visitors log in with `guest` / `guest`. This account is read-only and cannot save settings. For a real deployment, use your own accounts and change the default passwords.
 
 > **Network Note**: The official demo site does not support China Mobile networks due to overseas hosting providers. Please use China Unicom, China Telecom, or other networks to access.
 
@@ -81,7 +81,7 @@ docker compose up -d
 | `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
 
-Default accounts: `admin` / `admin` (read/write), `guest` / `guest` (read-only). Default passwords must be changed before any public deployment.
+Default account: `admin` / `admin`. Create other roles in account management. Change the default password before any public deployment.
 
 > **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
 

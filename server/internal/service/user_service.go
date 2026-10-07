@@ -80,21 +80,21 @@ func (s *UserService) AddUser(u model.User) error {
 			return errors.New("邮箱已被其它账号使用")
 		}
 	}
-	// 校验角色，若非有效角色则默认设置为普通用户
-	if u.Role != model.UserRoleAdmin && u.Role != model.UserRoleVisitor && u.Role != model.UserRoleNormal {
-		u.Role = model.UserRoleNormal
-	}
+	u.Role, u.Status = model.ClampNewUser(true, u.Role, u.Status)
 	// 密码加密
 	u.Salt = utils.GenerateSalt()
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
 	return repository.AddUser(&u)
 }
 
-// UpdateUser 更新用户
-func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
+// UpdateUser 更新用户。operatorID、operatorRole 为当前登录人。
+func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.UserUpdatePayload) error {
 	oldUser := repository.GetUserById(req.ID)
 	if oldUser.ID == 0 {
 		return errors.New("用户不存在")
+	}
+	if msg := model.CheckUserUpdate(operatorID, operatorRole, oldUser.ID, oldUser.UserName, oldUser.Role, oldUser.Status, req.Role, req.Status); msg != "" {
+		return errors.New(msg)
 	}
 	u := oldUser
 
@@ -125,15 +125,9 @@ func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
 		}
 		u.Role = *req.Role
 	}
-	// 内置账号保护：禁止禁用或修改默认超管和访客用户的角色
+	// 默认超级管理员只锁定角色，状态可以改。
 	if oldUser.ID == config.UserIdInitialVal {
-		u.Status = 0
 		u.Role = model.UserRoleAdmin
-		roleChanged = false
-	}
-	if oldUser.UserName == config.DefaultVisitorUser {
-		u.Status = 0
-		u.Role = model.UserRoleVisitor
 		roleChanged = false
 	}
 	// 如果修改了密码，需要重新加密
@@ -149,15 +143,11 @@ func (s *UserService) UpdateUser(req model.UserUpdatePayload) error {
 	return nil
 }
 
-// DeleteUser 删除用户
-func (s *UserService) DeleteUser(id uint) error {
-	// 超级管理员保护：禁止删除默认用户
-	if id == config.UserIdInitialVal {
-		return errors.New("默认超级管理员不可删除")
-	}
+// DeleteUser 删除用户。operatorID、operatorRole 为当前登录人。
+func (s *UserService) DeleteUser(operatorID uint, operatorRole int, id uint) error {
 	user := repository.GetUserById(id)
-	if user.UserName == config.DefaultVisitorUser {
-		return errors.New("默认访客账号不可删除")
+	if msg := model.CheckUserDelete(operatorID, operatorRole, id, user.UserName); msg != "" {
+		return errors.New(msg)
 	}
 	err := repository.DeleteUser(id)
 	if err == nil {
@@ -181,6 +171,7 @@ func buildUserInfoVo(u model.User) model.UserInfoVo {
 		IsAdmin:   isAdmin,
 		IsVisitor: isVisitor,
 		CanWrite:  model.UserCanWrite(u.Role),
+		Builtin:   model.IsBuiltinAccount(u.ID, u.UserName),
 		Role:      u.Role,
 		RoleName:  model.GetUserRoleName(u.Role),
 	}

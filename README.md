@@ -39,7 +39,7 @@ EcoHub 是一款高性能、现代化的全栈多源影视聚合系统。它不�
 | 前台 | [https://eco.fe-spark.cn](https://eco.fe-spark.cn) |
 | 管理后台 | [https://eco.fe-spark.cn/manage](https://eco.fe-spark.cn/manage) |
 
-只读演示账号：`guest` / `guest`。该账号不可保存配置，正式部署请使用自有账号并修改默认密码。
+访客登录使用 `guest` / `guest`。该账号只读，不能保存配置。正式部署请使用自有账号并修改默认密码。
 
 > **网络提示**：官方网站因海外服务商不支持移动线路，请使用联通/电信等网络访问。
 
@@ -82,7 +82,7 @@ docker compose up -d
 | `http://<主机>:3000/api/provide/tvbox` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 
-默认账号：`admin` / `admin`（读写）、`guest` / `guest`（只读）。对外部署前须立即修改默认密码。
+默认账号：`admin` / `admin`。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
 
 > **安全与网络建议**：生产环境建议通过 Nginx / 1Panel 配置反向代理与 HTTPS（80/443）。如需**不对公网暴露裸端口**，请在 `compose.yml` 的 `ports` 中显式绑定 `127.0.0.1:`（如 `127.0.0.1:3000:3000`），避免 Docker 默认规则绕过系统防火墙直接暴露端口；若无播放器直连需求，可直接注释 `18080` 端口映射。
 
