@@ -70,8 +70,8 @@ type FilmSource struct {
 	Name               string    `json:"name" gorm:"size:64"`                  // 采集站点备注名
 	Uri                string    `json:"uri" gorm:"uniqueIndex;size:255"`      // 采集链接
 	State              bool      `json:"state"`                                // 是否启用
-	Weight             int       `json:"weight" gorm:"default:0"`              // 线路排序默认权重，越大越靠前
-	IsPrimary          bool      `json:"isPrimary" gorm:"default:false"`       // 是否为当前生效主站（全局单选）
+	Sort               int       `json:"sort" gorm:"default:0;index"`          // 站点排序序号，越小越靠前
+	IsPrimary          bool      `json:"isPrimary" gorm:"-"`                   // 运行时动态标记是否为首位基准站（首位生效站点）
 	IsPosterSource     bool      `json:"isPosterSource" gorm:"default:false"`  // 是否为海报/封面图源（全局单选）
 	Interval           int       `json:"interval"`                             // 采集时间间隔 单位/ms
 	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
@@ -165,7 +165,7 @@ type SourceHealthItem struct {
 	Name   string `json:"name"`
 	Uri    string `json:"uri"`
 	State  bool   `json:"state"`
-	Weight int    `json:"weight"`
+	Sort   int    `json:"sort"`
 	Reason string `json:"reason"`
 }
 

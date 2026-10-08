@@ -1,4 +1,3 @@
-import { cookies } from "next/headers";
 import PlayPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
@@ -7,12 +6,11 @@ function firstParam(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
 
-async function getPlayData(filmId: string, sourceId?: string, episodeIdx?: string, preferredSource?: string) {
+async function getPlayData(filmId: string, sourceId?: string, episodeIdx?: string) {
   const playPageResponse = await serverGet<any>("/filmPlayInfo", {
     id: filmId,
     source: sourceId,
     playFrom: sourceId,
-    preferredSource: preferredSource,
     episode: episodeIdx || 0,
   });
 
@@ -35,17 +33,13 @@ export default async function PlayPage({
   const initialTime = firstParam(resolved.currentTime);
   const numericId = Number(filmId);
 
-  const cookieStore = await cookies();
-  const cookiePreferred = cookieStore.get("preferred_source")?.value;
-  const preferredSource = firstParam(resolved.preferredSource) || cookiePreferred || undefined;
-
   if (!(Number.isFinite(numericId) && numericId > 0)) {
     return <PlayPageView data={null} filmId="" emptyMessage="未找到影片参数，请返回列表重新进入播放页。" />;
   }
 
   let playPageData: any = null;
   try {
-    playPageData = await getPlayData(filmId, sourceId, episodeIdx, preferredSource);
+    playPageData = await getPlayData(filmId, sourceId, episodeIdx);
   } catch (error) {
     console.error("fetch play data error:", error);
   }

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -303,9 +304,9 @@ func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
 	}
 
 	sources := support.GetCollectSourceList()
-	weightByID := make(map[string]int, len(sources))
-	for _, s := range sources {
-		weightByID[s.Id] = s.Weight
+	orderByID := make(map[string]int, len(sources))
+	for idx, s := range sources {
+		orderByID[s.Id] = idx
 	}
 
 	remarks := ""
@@ -316,10 +317,17 @@ func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
 			if curr.EpisodeCount > bestLine.EpisodeCount {
 				bestLine = curr
 			} else if curr.EpisodeCount == bestLine.EpisodeCount {
-				wCurr, wBest := weightByID[curr.SourceId], weightByID[bestLine.SourceId]
-				if wCurr > wBest {
+				oCurr := math.MaxInt
+				if idx, ok := orderByID[curr.SourceId]; ok {
+					oCurr = idx
+				}
+				oBest := math.MaxInt
+				if idx, ok := orderByID[bestLine.SourceId]; ok {
+					oBest = idx
+				}
+				if oCurr < oBest {
 					bestLine = curr
-				} else if wCurr == wBest && curr.GroupIndex < bestLine.GroupIndex {
+				} else if oCurr == oBest && curr.GroupIndex < bestLine.GroupIndex {
 					bestLine = curr
 				}
 			}

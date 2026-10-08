@@ -156,12 +156,14 @@ export default function SearchPageView({
   const {
     sources,
     activeId,
+    activeSort,
     list,
     page,
     sourceError,
     listLoading,
     changeSource,
     changePage,
+    changeSort,
   } = useSearchSources({ keyword, sort, source, current, data });
 
   useEffect(() => {
@@ -249,13 +251,7 @@ export default function SearchPageView({
     }
     setSearchKeyword(trimmed);
     saveHistory(trimmed);
-    navigate(buildSearchPath(trimmed, "1", sort, ""), "搜索加载中...");
-  };
-
-  const handleSortChange = (newSort: string) => {
-    if (newSort === sort && !source) return;
-    setSearchKeyword(keyword);
-    navigate(buildSearchPath(keyword, "1", newSort, ""), "排序切换中...");
+    navigate(buildSearchPath(trimmed, "1", activeSort || sort, activeId || source), "搜索加载中...");
   };
 
   const handlePageChange = (nextPage: number) => {
@@ -448,18 +444,18 @@ export default function SearchPageView({
         )}
       </div>
 
-      {/* YouTube 风格排序筛选栏 */}
-      {keyword && !activeId && (
+      {/* 排序筛选栏 */}
+      {keyword && (
         <div className={styles.sortBar} aria-label="排序方式">
           {SORT_OPTIONS.map((opt) => {
-            const isActive = (opt.key === "" && (!sort || sort === "relevance")) || opt.key === sort;
+            const isActive = (opt.key === "" && (!activeSort || activeSort === "relevance")) || opt.key === activeSort;
             return (
               <button
                 type="button"
                 key={opt.key}
                 className={`${styles.sortChip} ${isActive ? styles.active : ""}`}
                 aria-pressed={isActive}
-                onClick={() => handleSortChange(opt.key)}
+                onClick={() => changeSort(opt.key)}
               >
                 {opt.label}
               </button>

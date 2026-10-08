@@ -133,7 +133,7 @@ type CollectBatchNotifyPayload struct {
 type SourceNotifyResult struct {
 	SourceID    string `json:"sourceId"`
 	SourceName  string `json:"sourceName"`
-	Weight      int    `json:"weight"`
+	Sort        int    `json:"sort"`
 	Status      string `json:"status"`
 	Error       string `json:"error,omitempty"`
 	PageTotal   int    `json:"pageTotal"`

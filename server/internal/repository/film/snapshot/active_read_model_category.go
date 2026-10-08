@@ -31,6 +31,17 @@ type categoryPageCacheItem struct {
 	Movies    []model.MovieBasicInfo `json:"movies"`
 }
 
+func applyCategorySnapshotSourceFilter(query *gorm.DB, version string, sourceID string) *gorm.DB {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return query
+	}
+	sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
+		Select("mid").
+		Where("snapshot_version = ? AND source_id = ?", version, sourceID)
+	return query.Where("(source_id = ? OR mid IN (?))", sourceID, sourceMidSubQuery)
+}
+
 func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
@@ -59,9 +70,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
-	if sourceID != "" {
-		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
-	}
+	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -115,9 +124,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 	}
 
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
-	if sourceID != "" {
-		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
-	}
+	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -227,9 +234,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
-	if sourceID != "" {
-		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
-	}
+	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -283,9 +288,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ?", version)
-	if sourceID != "" {
-		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
-	}
+	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -377,9 +380,7 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
 		Select(basicSelectFields).
 		Where("snapshot_version = ? AND pid = ?", version, pid)
-	if sourceID != "" {
-		query = query.Where("(source_id = ? OR source_id = '')", sourceID)
-	}
+	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
 	query = query.Order(orderClause).Limit(limit)
 
 	if err := query.Find(&snapshots).Error; err != nil {

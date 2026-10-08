@@ -173,10 +173,10 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 	}
 
 	if err := gdb.Create(&model.FilmSource{
-		Id:     "src_default",
-		Name:   "默认主源",
-		State:  true,
-		Weight: 10,
+		Id:    "src_default",
+		Name:  "默认主源",
+		State: true,
+		Sort:  0,
 	}).Error; err != nil {
 		t.Fatalf("create default film source: %v", err)
 	}

@@ -361,6 +361,7 @@ type SearchTagsVO struct {
 
 // SearchVo 影片信息搜索参数
 type SearchVo struct {
+	SourceId  string    `json:"sourceId"`  // 采集源ID
 	Name      string    `json:"name"`      // 影片名
 	Pid       int64     `json:"pid"`       // 一级分类ID
 	Cid       int64     `json:"cid"`       // 二级分类ID

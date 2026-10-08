@@ -104,7 +104,8 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 			return
 		}
 	}
-	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
+	cleanOldData := body.CleanOldData != nil && *body.CleanOldData
+	if err := service.CollectSvc.UpdateFilmSourceWithClean(s, cleanOldData); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
 	}
@@ -156,6 +157,21 @@ func (h *CollectHandler) FilmSourceSetPrimary(c *gin.Context) {
 		return
 	}
 	dto.SuccessOnlyMsg("主站切换成功", c)
+}
+
+func (h *CollectHandler) FilmSourceSort(c *gin.Context) {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.CollectSvc.SortFilmSources(req.Ids); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("排序保存成功", c)
 }
 
 func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
@@ -239,7 +255,7 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				Id:     src.Id,
 				Name:   src.Name,
 				Uri:    src.Uri,
-				Weight: src.Weight,
+				Sort:   src.Sort,
 				State:  src.State,
 			}
 			if spider.IsTaskRunning(src.Id) {
@@ -370,7 +386,8 @@ func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 
 type filmSourceBody struct {
 	model.FilmSource
-	UseProxy *bool `json:"useProxy"`
+	UseProxy     *bool `json:"useProxy"`
+	CleanOldData *bool `json:"cleanOldData"`
 }
 
 func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {

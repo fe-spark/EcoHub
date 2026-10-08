@@ -28,7 +28,7 @@ import {
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectQueueBars, { type CollectQueueBarItem } from "./collect-queue-bars";
-import CollectSourceCard from "./collect-source-card";
+import CollectSourceGrid from "./collect-source-grid";
 import SourceFormModal from "./source-form-modal";
 import {
   computeCollectQueueProgress,
@@ -90,7 +90,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    weight: Number(item.weight ?? 0),
+    sort: Number(item.sort ?? 0),
     isPosterSource: Boolean(item.isPosterSource),
     isPrimary: Boolean(item.isPrimary),
     interval: Number(item.interval ?? 0),
@@ -157,8 +157,6 @@ export default function CollectManagePageView() {
         .map((item) => item.id),
     [siteList],
   );
-
-  const displaySites = siteList;
 
   const canAddSource = canWrite;
 
@@ -641,16 +639,6 @@ export default function CollectManagePageView() {
     message.error(resp.msg || "删除采集站失败");
   };
 
-  const handleSetPrimary = async (id: string) => {
-    const resp = await ApiPost("/manage/collect/set-primary", { id });
-    if (resp.code === 0) {
-      message.success(resp.msg || "已成功设为主站");
-      await getCollectList();
-      return;
-    }
-    message.error(resp.msg || "设为主站失败");
-  };
-
   const openAddForm = () => {
     setSourceModalMode("add");
     setEditingId(null);
@@ -674,6 +662,59 @@ export default function CollectManagePageView() {
     openAddForm();
   };
 
+  const handleSortList = async (nextList: FilmSource[]) => {
+    const prevPrimary = siteList.find((s) => s.state) ?? siteList[0];
+
+    // 首位即基准：即时为首个启用站点标记 isPrimary，给予即时视觉回馈
+    let assignedPrimary = false;
+    const optimisticList = nextList.map((item) => {
+      if (item.state && !assignedPrimary) {
+        assignedPrimary = true;
+        return { ...item, isPrimary: true };
+      }
+      return { ...item, isPrimary: false };
+    });
+    if (!assignedPrimary && optimisticList.length > 0) {
+      optimisticList[0].isPrimary = true;
+    }
+    setSiteList(optimisticList);
+
+    const nextPrimary = optimisticList.find((s) => s.isPrimary);
+    const isPrimaryChanged = Boolean(
+      prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id,
+    );
+
+    try {
+      const ids = nextList.map((item) => item.id);
+      const resp = await ApiPost("/manage/collect/sort", { ids });
+      if (resp.code === 0) {
+        if (isPrimaryChanged && nextPrimary) {
+          message.success({
+            content: `排序已更新，基准源：${nextPrimary.name}`,
+            key: "collect-sort",
+          });
+        } else {
+          message.success({
+            content: "采集站顺序已更新",
+            key: "collect-sort",
+          });
+        }
+      } else {
+        message.error({
+          content: resp.msg || "保存排序失败",
+          key: "collect-sort",
+        });
+        void requestRef.current?.(true);
+      }
+    } catch (e: any) {
+      message.error({
+        content: e?.message || "保存排序失败",
+        key: "collect-sort",
+      });
+      void requestRef.current?.(true);
+    }
+  };
+
   const openEditDialog = async (id: string) => {
     setSourceModalMode("edit");
     setEditingId(id);
@@ -683,7 +724,6 @@ export default function CollectManagePageView() {
         name: String(resp.data.name ?? ""),
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
-        weight: Number(resp.data.weight ?? 0),
         isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
@@ -814,7 +854,7 @@ export default function CollectManagePageView() {
       const allOptions = Array.isArray(resp.data)
         ? resp.data.map((item: BatchOption) => ({
             ...item,
-            weight: siteList.find((site) => site.id === item.id)?.weight ?? 0,
+            sort: siteList.find((site) => site.id === item.id)?.sort ?? 0,
             state: siteList.find((site) => site.id === item.id)?.state ?? false,
           }))
         : [];
@@ -1025,44 +1065,22 @@ export default function CollectManagePageView() {
 
         {siteList.length > 0 ? (
           <div className={styles.sourceGroups}>
-            <div className={styles.cardGrid}>
-              {displaySites.map((site) => {
-                const hiddenDone =
-                  hiddenDoneIds.includes(site.id) &&
-                  site.progress != null &&
-                  !isActiveCollectStatus(site.progress.status);
-                return (
-                  <CollectSourceCard
-                    key={site.id}
-                    record={hiddenDone ? { ...site, progress: null } : site}
-                    selected={selectedSourceIds.includes(site.id)}
-                    active={activeCollectIds.includes(site.id)}
-                    onSelect={handleSelectSource}
-                    onChangeCollectDuration={changeCollectDuration}
-                    onStartTask={(record) => void startTask(record)}
-                    onTerminateTask={(id) => void stopTask(id)}
-                    onEditSource={(id) => void openEditDialog(id)}
-                    onDeleteSource={(id) => void delSource(id)}
-                    onSetPrimary={(id) => void handleSetPrimary(id)}
-                  />
-                );
-              })}
-              {canAddSource && canWrite ? (
-                <button
-                  type="button"
-                  className={styles.addSourceTile}
-                  onClick={openAddDialog}
-                >
-                  <PlusOutlined className={styles.addSourceIcon} />
-                  <span className={styles.addSourceLabel}>新增采集站</span>
-                  <span className={styles.addSourceHint}>
-                    {siteList.length >= COLLECT_SOURCE_WARN_COUNT
-                      ? `已超过建议数量（${COLLECT_SOURCE_WARN_COUNT}）`
-                      : "添加新的采集源"}
-                  </span>
-                </button>
-              ) : null}
-            </div>
+            <CollectSourceGrid
+              siteList={siteList}
+              selectedSourceIds={selectedSourceIds.map(String)}
+              activeCollectIds={activeCollectIds}
+              hiddenDoneIds={hiddenDoneIds}
+              canWrite={canWrite}
+              canAddSource={canAddSource}
+              onSelect={handleSelectSource}
+              onChangeCollectDuration={changeCollectDuration}
+              onStartTask={(record) => void startTask(record)}
+              onTerminateTask={(id) => void stopTask(id)}
+              onEditSource={(id) => void openEditDialog(id)}
+              onDeleteSource={(id) => void delSource(id)}
+              onOpenAddDialog={openAddDialog}
+              onSortList={handleSortList}
+            />
           </div>
         ) : (
           <div className={styles.emptyCard}>

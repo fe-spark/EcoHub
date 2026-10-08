@@ -17,13 +17,13 @@ import (
 
 // --------- Collect Source -----------
 
-// GetCollectSourceList 获取采集站 API 列表（按权重降序）
+// GetCollectSourceList 获取采集站 API 列表（按排序序号升序）
 func GetCollectSourceList() []model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
 	var list []model.FilmSource
-	if err := db.Mdb.Order("weight DESC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetCollectSourceList Error:", err)
 		return nil
 	}
@@ -57,35 +57,25 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 }
 
 // PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前生效主站）。
-// 规则：
-// 1. 优先 is_primary = true 且 state = true 的站点；
-// 2. 其次优先已启用的最高权重站点；
-// 3. 再次优先最高权重站点（含未启用）；
-// 4. 没有任何站点时返回 nil。
+// PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前基准源）。
+// 统一原则：首位即基准（Sort-as-Master）。
+// 1. 优先取当前排在首位且已启用的站点（sort ASC, created_at ASC）；
+// 2. 兜底：若所有站点均停用，取排在首位的站点；
+// 3. 没有任何站点时返回 nil。
 func PickPrimarySourceForCategory() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
 	var primary model.FilmSource
-	if err := db.Mdb.Where("is_primary = ? AND state = ?", true, true).First(&primary).Error; err == nil && primary.Id != "" {
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
 		normalizeCollectCd(&primary)
 		return &primary
 	}
-
-	var list []model.FilmSource
-	if err := db.Mdb.Order("weight DESC, created_at ASC, id ASC").Find(&list).Error; err != nil || len(list) == 0 {
-		return nil
+	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
+		normalizeCollectCd(&primary)
+		return &primary
 	}
-	for i := range list {
-		if list[i].State {
-			normalizeCollectCd(&list[i])
-			m := list[i]
-			return &m
-		}
-	}
-	normalizeCollectCd(&list[0])
-	m := list[0]
-	return &m
+	return nil
 }
 
 func GetActiveCollectSource() *model.FilmSource {
@@ -96,31 +86,9 @@ func PickMasterSourceForCategory() *model.FilmSource {
 	return PickPrimarySourceForCategory()
 }
 
-// SetPrimaryCollectSource 将指定采集站设为当前生效主站，并重置其他站点
+// SetPrimaryCollectSource 全链路首位即基准原则下已废除，保留空实现兼容
 func SetPrimaryCollectSource(sourceId string) error {
-	if db.Mdb == nil {
-		return errors.New("database not available")
-	}
-	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" {
-		return errors.New("采集源ID不能为空")
-	}
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		var src model.FilmSource
-		if err := tx.Where("id = ?", sourceId).First(&src).Error; err != nil {
-			return errors.New("采集源不存在")
-		}
-		if err := tx.Model(&model.FilmSource{}).Where("1 = 1").Update("is_primary", false).Error; err != nil {
-			return err
-		}
-		if err := tx.Model(&model.FilmSource{}).Where("id = ?", sourceId).Updates(map[string]any{
-			"is_primary": true,
-			"state":      true,
-		}).Error; err != nil {
-			return err
-		}
-		return nil
-	})
+	return nil
 }
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。
@@ -129,7 +97,7 @@ func GetEnabledCollectSourceList() []model.FilmSource {
 		return nil
 	}
 	var list []model.FilmSource
-	if err := db.Mdb.Where("state = ?", true).Order("weight DESC, created_at ASC, id ASC").Find(&list).Error; err != nil {
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		log.Println("GetEnabledCollectSourceList Error:", err)
 		return nil
 	}
@@ -219,40 +187,99 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	return &fs
 }
 
-// DelCollectResource 通过 Id 删除对应的采集站点信息及其附属采集数据
-func DelCollectResource(id string) error {
-	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+// CascadeCleanSourceDataTx 在事务中清理指定采集站点的附属数据，并同步清理该源独占的孤儿影片实体。
+// 返回被级联清理的独占影片 mid 列表。
+func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
+	var affectedMids []int64
+	_ = tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", id).Pluck("DISTINCT mid", &affectedMids).Error
+
+	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePoster{}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		return nil, err
+	}
+	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+		return nil, err
+	}
+
+	var orphanMids []int64
+	if len(affectedMids) > 0 {
+		_ = tx.Model(&model.FilmIndex{}).
+			Where("mid IN (?) AND mid NOT IN (?)",
+				affectedMids,
+				tx.Model(&model.FilmSourcePlaylist{}).Where("line_kind = 'play'").Select("mid"),
+			).
+			Pluck("mid", &orphanMids).Error
+	}
+
+	if len(orphanMids) > 0 {
+		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.FilmIndex{}).Error; err != nil {
+			return nil, err
+		}
+		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.MovieMatchKey{}).Error; err != nil {
+			return nil, err
+		}
+		if err := tx.Where("global_mid IN ?", orphanMids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+			return nil, err
+		}
+		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.Banner{}).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	return orphanMids, nil
+}
+
+// DelCollectResource 通过 Id 删除对应的采集站点信息及其附属采集数据，并级联清理独占孤儿影片
+func DelCollectResource(id string) ([]int64, error) {
+	var orphanMids []int64
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		// 1. 删除关联的定时任务关系
 		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
 			return err
 		}
-		// 2. 删除多源播放列表
-		if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+		// 2. 清理源采集数据及独占孤儿影片
+		orphans, err := CascadeCleanSourceDataTx(tx, id)
+		if err != nil {
 			return err
 		}
-		// 3. 删除海报图源数据
-		if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePoster{}).Error; err != nil {
-			return err
-		}
-		// 4. 删除来源映射
-		if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-			return err
-		}
-		// 5. 删除快照关联记录
-		if err := tx.Where("source_id = ?", id).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-			return err
-		}
-		// 6. 删除采集失败记录
+		orphanMids = orphans
+		// 3. 删除采集失败记录
 		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
-		// 7. 删除采集站本身
+		// 4. 删除采集站本身
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
-		// 8. 若删除的站点是当前海报源，自动兜底将可用站点设为海报源
+		// 5. 若删除的站点是当前海报源，自动兜底将可用站点设为海报源
 		return EnsureDefaultPosterSourceTx(tx)
 	})
+	if err != nil {
+		return nil, err
+	}
+	return orphanMids, nil
+}
+
+// CleanCollectSourceData 清空指定采集源的历史采集数据并级联清理独占孤儿影片（保留采集站点配置本身）
+func CleanCollectSourceData(id string) ([]int64, error) {
+	var orphanMids []int64
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		orphans, err := CascadeCleanSourceDataTx(tx, id)
+		if err != nil {
+			return err
+		}
+		orphanMids = orphans
+		return DeleteFailureRecordsByOriginIdTx(tx, id)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return orphanMids, nil
 }
 
 // AddCollectSource 添加采集站信息
@@ -286,6 +313,10 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 			log.Printf("[Spider] 无活跃海报源，自动设为默认海报图源: id=%s name=%s", s.Id, s.Name)
 		}
 	}
+	// 新增采集站默认排在末尾
+	if s.Sort <= 0 {
+		s.Sort = GetCollectSourceMaxSortTx(tx) + 1
+	}
 	normalizeCollectSourceDefaults(&s)
 	if s.IsPosterSource {
 		if err := DemoteExistingPosterSourceTx(tx, s.Id); err != nil {
@@ -296,6 +327,36 @@ func AddCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
+}
+
+// GetCollectSourceMaxSortTx 获取当前采集站的最大排序序号
+func GetCollectSourceMaxSortTx(tx *gorm.DB) int {
+	if tx == nil {
+		return -1
+	}
+	var maxSort int
+	row := tx.Model(&model.FilmSource{}).Select("COALESCE(MAX(sort), -1)").Row()
+	_ = row.Scan(&maxSort)
+	return maxSort
+}
+
+// SortCollectSources 批量按传入的 ID 顺序更新采集站排序序号 (0, 1, 2, ...)
+func SortCollectSources(ids []string) error {
+	if db.Mdb == nil {
+		return errors.New("database not available")
+	}
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for index, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			if err := tx.Model(&model.FilmSource{}).Where("id = ?", id).Update("sort", index).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // BatchAddCollectSource 批量添加采集站信息
@@ -360,15 +421,15 @@ func GetPosterSource() *model.FilmSource {
 		normalizeCollectCd(&fs)
 		return &fs
 	}
-	// 兜底：取活跃最高权重站点
-	if err := db.Mdb.Where("state = ?", true).Order("weight DESC, created_at ASC, id ASC").First(&fs).Error; err == nil {
+	// 兜底：取活跃首位站点
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&fs).Error; err == nil {
 		normalizeCollectCd(&fs)
 		return &fs
 	}
 	return nil
 }
 
-// EnsureDefaultPosterSourceTx 确保全局至少有一个活跃海报图源（无外部海报源时将最高权重活跃站点设为海报源）
+// EnsureDefaultPosterSourceTx 确保全局至少有一个活跃海报图源（无外部海报源时将活跃首位站点设为海报源）
 func EnsureDefaultPosterSourceTx(tx *gorm.DB) error {
 	if tx == nil {
 		return nil
@@ -379,7 +440,7 @@ func EnsureDefaultPosterSourceTx(tx *gorm.DB) error {
 	}
 	if count == 0 {
 		var topSource model.FilmSource
-		if err := tx.Model(&model.FilmSource{}).Where("state = ?", true).Order("weight DESC, created_at ASC, id ASC").First(&topSource).Error; err == nil && topSource.Id != "" {
+		if err := tx.Model(&model.FilmSource{}).Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&topSource).Error; err == nil && topSource.Id != "" {
 			return tx.Model(&model.FilmSource{}).Where("id = ?", topSource.Id).Update("is_poster_source", true).Error
 		}
 	}

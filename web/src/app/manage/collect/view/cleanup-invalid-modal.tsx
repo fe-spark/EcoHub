@@ -51,9 +51,6 @@ export default function CleanupInvalidModal({
                   <Typography.Text strong ellipsis className={styles.cleanupItemName}>
                     {item.name}
                   </Typography.Text>
-                  <Tag color="blue" variant="filled">
-                    权重 {item.weight ?? 0}
-                  </Tag>
                   {!item.state ? (
                     <Tag color="default" variant="filled">
                       已禁用

@@ -289,8 +289,12 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
 	params.Year = yStr
-	params.Sort = c.DefaultQuery("Sort", "update_stamp")
 	params.SourceId = strings.TrimSpace(c.Query("source"))
+	if params.SourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			params.SourceId = active.Id
+		}
+	}
 
 	page := dto.GetPageParams(c)
 	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
@@ -353,6 +357,11 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	}
 	pid, _ := strconv.ParseInt(pidStr, 10, 64)
 	sourceId := strings.TrimSpace(c.Query("source"))
+	if sourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		}
+	}
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
 	page.PageSize = 21
@@ -363,9 +372,9 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 }
 
 type CollectSourceOption struct {
-	Id     string `json:"id"`
-	Name   string `json:"name"`
-	Weight int    `json:"weight"`
+	Id   string `json:"id"`
+	Name string `json:"name"`
+	Sort int    `json:"sort"`
 }
 
 // PublicSources 获取所有已启用的采集站选项列表（用于站点切换器）
@@ -374,9 +383,9 @@ func (h *IndexHandler) PublicSources(c *gin.Context) {
 	res := make([]CollectSourceOption, 0, len(sources))
 	for _, s := range sources {
 		res = append(res, CollectSourceOption{
-			Id:     s.Id,
-			Name:   s.Name,
-			Weight: s.Weight,
+			Id:   s.Id,
+			Name: s.Name,
+			Sort: s.Sort,
 		})
 	}
 	dto.Success(res, "获取可用采集源成功", c)

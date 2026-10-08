@@ -7,6 +7,7 @@ import {
   Button,
   Space,
   Select,
+  TreeSelect,
   Input,
   DatePicker,
   Popconfirm,
@@ -51,22 +52,18 @@ export default function FilmListPageView() {
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState<any>({
     name: "",
+    sourceId: "",
     pid: 0,
     cid: 0,
-    plot: "",
-    area: "",
-    language: "",
-    year: "",
     beginTime: "",
     endTime: "",
   });
   const [options, setOptions] = useState<any>({
+    sources: [],
+    defaultSourceId: "",
+    currentSourceId: "",
     class: [],
-    Plot: [],
-    Area: [],
-    Language: [],
-    year: [],
-    tags: {},
+    categoryTree: [],
   });
   const [classId, setClassId] = useState<number>(0);
   const [dateRange, setDateRange] = useState<any>(null);
@@ -93,10 +90,15 @@ export default function FilmListPageView() {
           setPage(resp.data.params.paging);
 
           if (resp.data.options) {
-            setOptions((prev: any) => ({
-              ...prev,
-              ...resp.data.options,
-            }));
+            setOptions(resp.data.options);
+            const activeSource =
+              reqParams.sourceId ||
+              resp.data.params?.sourceId ||
+              resp.data.options.currentSourceId ||
+              resp.data.options.defaultSourceId;
+            if (activeSource && !reqParams.sourceId) {
+              setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
+            }
           }
         }
       } finally {
@@ -111,19 +113,29 @@ export default function FilmListPageView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleClassChange = (value: number) => {
-    setClassId(value);
-    const selectedClass = options.class?.find((c: any) => c.id === value);
+  const handleSourceChange = (value?: string) => {
+    const nextSourceId = value || "";
+    const newParams = {
+      ...params,
+      sourceId: nextSourceId,
+      pid: 0,
+      cid: 0,
+    };
+    setParams(newParams);
+    setClassId(0);
+    const newPage = { ...page, current: 1 };
+    setPage(newPage);
+    void getFilmPage(newPage, newParams);
+  };
+
+  const handleClassChange = (value?: number) => {
+    const val = value || 0;
+    setClassId(val);
+    const selectedClass = options.class?.find((c: any) => c.id === val);
     const newParams = { ...params };
-    if (!selectedClass) {
+    if (!selectedClass || val === 0) {
       newParams.pid = 0;
       newParams.cid = 0;
-      setOptions((prev: any) => ({
-        ...prev,
-        Plot: [],
-        Area: [],
-        Language: [],
-      }));
     } else {
       if (selectedClass.pid <= 0) {
         newParams.pid = selectedClass.id;
@@ -132,23 +144,11 @@ export default function FilmListPageView() {
         newParams.pid = selectedClass.pid;
         newParams.cid = selectedClass.id;
       }
-
-      const t =
-        selectedClass.pid === 0
-          ? options.tags[selectedClass.id]
-          : options.tags[selectedClass.pid];
-      setOptions((prev: any) => ({
-        ...prev,
-        Plot: t?.Plot || [],
-        Area: t?.Area || [],
-        Language: t?.Language || [],
-      }));
     }
-
-    newParams.plot = "";
-    newParams.area = "";
-    newParams.language = "";
     setParams(newParams);
+    const newPage = { ...page, current: 1 };
+    setPage(newPage);
+    void getFilmPage(newPage, newParams);
   };
 
   const onSearch = () => {
@@ -167,26 +167,21 @@ export default function FilmListPageView() {
   };
 
   const onReset = () => {
+    const defaultSrc =
+      options.defaultSourceId ||
+      options.sources?.[0]?.id ||
+      "";
     const emptyParams = {
       name: "",
+      sourceId: defaultSrc,
       pid: 0,
       cid: 0,
-      plot: "",
-      area: "",
-      language: "",
-      year: "",
       beginTime: "",
       endTime: "",
     };
     setParams(emptyParams);
     setClassId(0);
     setDateRange(null);
-    setOptions((prev: any) => ({
-      ...prev,
-      Plot: [],
-      Area: [],
-      Language: [],
-    }));
     const newPage = { ...page, current: 1 };
     setPage(newPage);
     void getFilmPage(newPage, emptyParams);
@@ -243,11 +238,30 @@ export default function FilmListPageView() {
     tmdbEnabled,
   });
 
+  const categoryTreeData = useMemo(() => {
+    const formatNodes = (nodes: any[]): any[] => {
+      if (!nodes || nodes.length === 0) return [];
+      return nodes.map((node) => {
+        const hasChildren = node.children && node.children.length > 0;
+        const item: any = {
+          title: node.name,
+          value: node.id,
+          key: String(node.id),
+        };
+        if (hasChildren) {
+          item.children = formatNodes(node.children);
+        }
+        return item;
+      });
+    };
+    return formatNodes(options.categoryTree || []);
+  }, [options.categoryTree]);
+
   return (
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="影片列表"
-        description="管理当前主库存影片，支持分类、剧情、地区和时间范围筛选。"
+        description="管理影片库存，支持片名、采集源、分类及更新日期筛选。"
       />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
@@ -260,36 +274,26 @@ export default function FilmListPageView() {
           onPressEnter={onSearch}
         />
         <Select
+          placeholder="选择采集源"
+          className={styles.filterItem}
+          value={params.sourceId || undefined}
+          onChange={handleSourceChange}
+          options={options.sources?.map((s: any) => ({
+            label: s.name,
+            value: s.id,
+          }))}
+        />
+        <TreeSelect
           placeholder="选择分类"
           className={styles.filterItem}
           value={classId || undefined}
           onChange={handleClassChange}
-          options={options.class?.map((c: any) => ({
-            label: c.name,
-            value: c.id,
-          }))}
-          allowClear
-        />
-        <Select
-          placeholder="剧情标签"
-          className={styles.filterItem}
-          value={params.plot || undefined}
-          onChange={(v) => setParams({ ...params, plot: v })}
-          options={options.Plot?.map((i: any) => ({
-            label: i.Name,
-            value: i.Value,
-          }))}
-          allowClear
-        />
-        <Select
-          placeholder="地区"
-          className={styles.filterItem}
-          value={params.area || undefined}
-          onChange={(v) => setParams({ ...params, area: v })}
-          options={options.Area?.map((i: any) => ({
-            label: i.Name,
-            value: i.Value,
-          }))}
+          treeData={categoryTreeData}
+          treeDefaultExpandAll
+          treeLine={{ showLeafIcon: false }}
+          popupMatchSelectWidth={false}
+          dropdownStyle={{ minWidth: 240, maxHeight: 380, overflow: "auto" }}
+          virtual={false}
           allowClear
         />
         <RangePicker

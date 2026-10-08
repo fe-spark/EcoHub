@@ -70,17 +70,35 @@ func (s *CollectService) SetPrimaryFilmSource(id string) error {
 	if src == nil {
 		return errors.New("采集源不存在")
 	}
-	if err := repository.SetPrimaryCollectSource(id); err != nil {
+	all := repository.GetCollectSourceList()
+	newIds := []string{id}
+	for _, item := range all {
+		if item.Id != id {
+			newIds = append(newIds, item.Id)
+		}
+	}
+	return s.SortFilmSources(newIds)
+}
+
+func (s *CollectService) SortFilmSources(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	oldPrimary := repository.PickPrimarySourceForCategory()
+	if err := repository.SortCollectSources(ids); err != nil {
 		return err
 	}
+	filmsnapshot.ClearDynamicPlayCaches()
+	clearProvideNetworkConfigCache()
 
-	// 切换主站时获取对应采集源的分类
-	if err := spider.CollectCategory(src); err != nil {
-		syslog.Warnf("[CollectService] 切换主站时获取对应采集源分类失败 name=%s uri=%s: %v", src.Name, src.Uri, err)
+	newPrimary := repository.PickPrimarySourceForCategory()
+	if newPrimary != nil && (oldPrimary == nil || oldPrimary.Id != newPrimary.Id) {
+		if err := spider.CollectCategory(newPrimary); err != nil {
+			syslog.Warnf("[CollectService] 拖拽切换首位基准站同步分类失败 name=%s: %v", newPrimary.Name, err)
+		}
+		repository.MarkCategoryChanged()
+		filmsnapshot.ClearAllSnapshotDynamicCaches()
 	}
-
-	repository.MarkCategoryChanged()
-	filmsnapshot.ClearAllSnapshotDynamicCaches()
 	return nil
 }
 
@@ -108,13 +126,18 @@ func (s *CollectService) GetAllFilmSources() []model.FilmSource {
 
 // UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	return s.updateFilmSource(source, nil)
+	return s.updateFilmSource(source, false, nil)
+}
+
+// UpdateFilmSourceWithClean 编辑采集源配置（支持选择是否在换地址时清空旧数据）
+func (s *CollectService) UpdateFilmSourceWithClean(source model.FilmSource, cleanOldData bool) error {
+	return s.updateFilmSource(source, cleanOldData, nil)
 }
 
 // updateFilmSource 编辑采集源配置核心逻辑。
 // collector 非 nil 时（批量操作）不直接发送通知，而是把各源变更追加到收集器，
 // 由调用方统一发送聚合通知，避免批量操作逐源轰炸。
-func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]notify.SourceConfigChangeItem) error {
+func (s *CollectService) updateFilmSource(source model.FilmSource, cleanOldData bool, collector *[]notify.SourceConfigChangeItem) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -130,6 +153,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行地址或协议变更操作")
 	}
 
+	var orphanMids []int64
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		// 接口地址或数据格式变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
 		if isUriChanged || isFormatChanged {
@@ -139,10 +163,25 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 			}
 		}
 
+		// 若更换接口地址且用户选择清空旧数据：级联清理旧站历史线路与独占孤儿影片
+		if isUriChanged && cleanOldData {
+			orphans, err := repository.CascadeCleanSourceDataTx(tx, source.Id)
+			if err != nil {
+				syslog.Errorf("[Collect] 更换源地址清空历史数据失败: %v", err)
+				return errors.New("清空历史数据失败，请重试")
+			}
+			orphanMids = orphans
+		}
+
 		return repository.UpdateCollectSourceTx(tx, source)
 	})
 	if err != nil {
 		return err
+	}
+
+	if len(orphanMids) > 0 {
+		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址并清空旧数据，级联清理独占孤儿影片 %d 部", source.Name, source.Id, len(orphanMids))
 	}
 
 	spider.ClearLimiter(source.Id)
@@ -151,7 +190,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 
 	clearProvideNetworkConfigCache()
-	if old.DomainReplaceRules != source.DomainReplaceRules {
+	if old.DomainReplaceRules != source.DomainReplaceRules || (isUriChanged && cleanOldData) {
 		filmsnapshot.ClearDynamicPlayCaches()
 	}
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
@@ -178,9 +217,6 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	var changes []string
 	if old.State != next.State {
 		changes = append(changes, fmt.Sprintf("启用状态: %s → %s", sourceStateLabel(old.State), sourceStateLabel(next.State)))
-	}
-	if old.Weight != next.Weight {
-		changes = append(changes, fmt.Sprintf("播放权重: %d → %d", old.Weight, next.Weight))
 	}
 	if old.ResolveFormat() != next.ResolveFormat() {
 		changes = append(changes, fmt.Sprintf("接口格式: %s → %s", strings.ToUpper(old.ResolveFormat()), strings.ToUpper(next.ResolveFormat())))
@@ -231,7 +267,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 		}
 		next := *source
 		next.State = state
-		if err := s.updateFilmSource(next, &collector); err != nil {
+		if err := s.updateFilmSource(next, false, &collector); err != nil {
 			firstErr = err
 			break
 		}
@@ -260,8 +296,13 @@ func (s *CollectService) DelFilmSource(id string) error {
 	if src == nil {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
-	if err := repository.DelCollectResource(id); err != nil {
+	orphanMids, err := repository.DelCollectResource(id)
+	if err != nil {
 		return err
+	}
+	if len(orphanMids) > 0 {
+		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+		syslog.Infof("[Collect] 删除采集源 %s(%s) 级联清理独占孤儿影片 %d 部", src.Name, id, len(orphanMids))
 	}
 	spider.ClearLimiter(id)
 	clearProvideNetworkConfigCache()

@@ -19,7 +19,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    weight: Number(item.weight ?? 0),
+    sort: Number(item.sort ?? 0),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
@@ -107,10 +107,20 @@ export default function CollectOverview() {
       </Card>
 
       <Card
-        title="默认优先站点"
+        title="默认首选站点"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
-        extra={topSite ? <Tag color="blue">权重 {topSite.weight}</Tag> : <Tag color="warning">未配置</Tag>}
+        extra={
+          topSite ? (
+            topSite.isPrimary ? (
+              <Tag color="gold">当前主站</Tag>
+            ) : (
+              <Tag color="blue">首选源</Tag>
+            )
+          ) : (
+            <Tag color="warning">未配置</Tag>
+          )
+        }
       >
         {topSite ? (
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>

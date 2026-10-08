@@ -20,10 +20,10 @@ func BuildPlayFromSummaryFromPlaylists(playlists []model.FilmSourcePlaylist, sou
 	if len(playlists) == 0 {
 		return ""
 	}
-	weightByID := make(map[string]int, len(sources))
+	orderByID := make(map[string]int, len(sources))
 	nameByID := make(map[string]string, len(sources))
-	for _, s := range sources {
-		weightByID[s.Id] = s.Weight
+	for idx, s := range sources {
+		orderByID[s.Id] = idx
 		nameByID[s.Id] = s.Name
 	}
 
@@ -40,11 +40,18 @@ func BuildPlayFromSummaryFromPlaylists(playlists []model.FilmSourcePlaylist, sou
 		return ""
 	}
 
-	// 按站点权重降序、站点ID升序、group_index 升序排序
+	// 按站点列表顺序升序、站点ID升序、group_index 升序排序
 	sort.SliceStable(playLines, func(i, j int) bool {
-		wi, wj := weightByID[playLines[i].SourceId], weightByID[playLines[j].SourceId]
-		if wi != wj {
-			return wi > wj
+		oi, okI := orderByID[playLines[i].SourceId]
+		if !okI {
+			oi = 999999
+		}
+		oj, okJ := orderByID[playLines[j].SourceId]
+		if !okJ {
+			oj = 999999
+		}
+		if oi != oj {
+			return oi < oj
 		}
 		if playLines[i].SourceId != playLines[j].SourceId {
 			return playLines[i].SourceId < playLines[j].SourceId

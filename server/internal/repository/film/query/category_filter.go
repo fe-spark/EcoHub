@@ -190,3 +190,27 @@ func ApplyCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
 	}
 	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
 }
+
+// ApplyManageCategoryFieldFilter 专供管理后台多维检索分类过滤（不校验前台 show 状态，兼容聚合映射与物理 pid/cid）
+func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
+	resolvedID := support.ResolveCategoryID(id)
+	if resolvedID <= 0 {
+		return emptyFilmIndexQuery(query)
+	}
+	if keys := categorySourceKeys(field, resolvedID); len(keys) > 0 {
+		if field == "pid" {
+			rootKeys, visibleKeys := rootCategorySourceKeyGroups(resolvedID)
+			cond := db.Mdb.Where("category_key IN ? OR pid = ?", visibleKeys, resolvedID)
+			if len(rootKeys) > 0 {
+				cond = cond.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
+			}
+			return query.Where(cond)
+		}
+		return query.Where("(category_key IN ? OR cid = ?)", keys, resolvedID)
+	}
+	if stableKey := categoryStableKey(resolvedID); stableKey != "" {
+		return query.Where(fmt.Sprintf("(%s = ? OR %s = ?)", categoryKeyColumn(field), categoryIDColumn(field)), stableKey, resolvedID)
+	}
+	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
+}
+

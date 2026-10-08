@@ -10,6 +10,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -20,6 +21,25 @@ func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	}
 	for _, tok := range tokens {
 		query = query.Where("name LIKE ?", "%"+escapeLikePattern(tok)+"%")
+	}
+	return query
+}
+
+func applyCategorySearchFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
+	cid = support.ResolveCategoryID(cid)
+	pid = support.ResolveCategoryID(pid)
+	if cid > 0 {
+		return query.Where("cid = ?", cid)
+	}
+	if pid > 0 {
+		var subIDs []int64
+		if db.Mdb != nil {
+			_ = db.Mdb.Model(&model.Category{}).Where("pid = ?", pid).Pluck("id", &subIDs).Error
+		}
+		if len(subIDs) > 0 {
+			return query.Where("(pid = ? OR cid IN (?))", pid, subIDs)
+		}
+		return query.Where("pid = ?", pid)
 	}
 	return query
 }
@@ -55,15 +75,15 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 
 	// 1. 优先尝试走快照表只读模型
 	if version != "" && db.Mdb != nil {
-		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != ""
-		// 模式 A: 纯片名模糊打分搜索（无剧情/地区/语言等复杂关系型过滤），优先复用内存元数据打分索引
+		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != "" || strings.TrimSpace(s.SourceId) != "" || s.Pid > 0 || s.Cid > 0
+		// 模式 A: 纯片名模糊打分搜索（无剧情/地区/语言/采集源等复杂关系型过滤），优先复用内存元数据打分索引
 		if name != "" && !hasComplexFilter {
 			if res, ok := searchManageFilmsByMetaIndex(version, s, page, startedAt); ok {
 				return res
 			}
 		}
 
-		// 模式 B: 多维结构化快照筛选（分类、年份、时间范围、复杂标签或无条件全量浏览）
+		// 模式 B: 多维结构化快照筛选（分类、年份、时间范围、复杂标签、采集源或无条件全量浏览）
 		return queryManageFilmsBySnapshotDB(version, s, page, name, startedAt)
 	}
 
@@ -115,12 +135,17 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
+	sourceId := strings.TrimSpace(s.SourceId)
+	if sourceId != "" {
+		sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
+			Select("mid").
+			Where("snapshot_version = ? AND source_id = ?", version, sourceId)
+		playlistMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+			Select("mid").
+			Where("source_id = ? AND line_kind = 'play'", sourceId)
+		query = query.Where("(source_id = ? OR mid IN (?) OR mid IN (?))", sourceId, sourceMidSubQuery, playlistMidSubQuery)
 	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
+	query = applyCategorySearchFilter(query, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}
@@ -140,7 +165,7 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 		query = query.Where("update_stamp <= ?", s.EndTime)
 	}
 
-	noFilter := name == "" && s.Pid == 0 && s.Cid == 0 &&
+	noFilter := name == "" && sourceId == "" && s.Pid == 0 && s.Cid == 0 &&
 		strings.TrimSpace(s.Plot) == "" && strings.TrimSpace(s.Area) == "" && strings.TrimSpace(s.Language) == "" &&
 		s.Year == 0 && s.BeginTime == 0 && s.EndTime == 0
 
@@ -196,12 +221,14 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
+	sourceId := strings.TrimSpace(s.SourceId)
+	if sourceId != "" {
+		sourceMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+			Select("mid").
+			Where("source_id = ? AND line_kind = 'play'", sourceId)
+		query = query.Where("(first_source_id = ? OR mid IN (?))", sourceId, sourceMidSubQuery)
 	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
+	query = applyCategorySearchFilter(query, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}
@@ -233,7 +260,7 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 
 	var indexes []model.FilmIndex
 	offset := shared.PageOffset(page)
-	if err := query.Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&indexes).Error; err != nil {
+	if err := query.Order("update_stamp DESC, mid DESC").Offset(offset).Limit(page.PageSize).Find(&indexes).Error; err != nil {
 		return []model.FilmIndex{}
 	}
 

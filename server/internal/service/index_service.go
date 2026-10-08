@@ -124,17 +124,17 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 				var movies []model.MovieBasicInfo
 				var hotMovies []model.MovieBasicInfo
 				if cat.Children != nil {
-					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "pid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "pid", cat.Id, 14, 0)
+					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
+					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
 				} else {
-					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
+					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
 				}
 				if len(movies) == 0 {
-					movies = filmsnapshot.GetSnapshotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
 				}
 				if len(hotMovies) == 0 {
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategory(version, "cid", cat.Id, 14, 0)
+					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
 				}
 				if movies == nil {
 					movies = make([]model.MovieBasicInfo, 0)
@@ -232,9 +232,9 @@ func processDynamicRecommendSection(secMap map[string]any, version string, sourc
 		if isPid {
 			field = "pid"
 		}
-		dynamicMovies := filmsnapshot.GetSnapshotDynamicHotMovieListByCategory(version, field, catID, 14, 50)
+		dynamicMovies := filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, field, catID, 14, 50)
 		if len(dynamicMovies) == 0 && field == "pid" {
-			dynamicMovies = filmsnapshot.GetSnapshotDynamicHotMovieListByCategory(version, "cid", catID, 14, 50)
+			dynamicMovies = filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, "cid", catID, 14, 50)
 		}
 		if len(dynamicMovies) > 0 {
 			itemCopy["movies"] = dynamicMovies

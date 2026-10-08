@@ -51,30 +51,29 @@ func mockCollectServer() *httptest.Server {
 	}))
 }
 
-func TestCollectService_SaveFilmSource_WeightOrdering(t *testing.T) {
+func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 
 	ts := mockCollectServer()
 	defer ts.Close()
 
 	gdb.Create(&model.FilmSource{
-		Id:     "src_low",
-		Name:   "低权重站",
-		Uri:    ts.URL + "/low",
-		Weight: 10,
-		State:  true,
+		Id:    "src_1",
+		Name:  "站1",
+		Uri:   ts.URL + "/1",
+		Sort:  0,
+		State: true,
 	})
 
 	srv := &CollectService{}
-	newHigh := model.FilmSource{
-		Id:     "src_high",
-		Name:   "高权重站",
-		Uri:    ts.URL + "/high",
-		Weight: 50,
-		State:  true,
+	newSrc := model.FilmSource{
+		Id:    "src_2",
+		Name:  "站2",
+		Uri:   ts.URL + "/2",
+		State: true,
 	}
 
-	err := srv.SaveFilmSource(newHigh)
+	err := srv.SaveFilmSource(newSrc)
 	if err != nil {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
@@ -83,39 +82,48 @@ func TestCollectService_SaveFilmSource_WeightOrdering(t *testing.T) {
 	if len(list) < 2 {
 		t.Fatalf("expected at least 2 sources, got %d", len(list))
 	}
-	if list[0].Id != "src_high" {
-		t.Fatalf("expected src_high with weight 50 to be first, got %s", list[0].Id)
+	if list[0].Id != "src_1" {
+		t.Fatalf("expected src_1 to be first, got %s", list[0].Id)
 	}
-	if list[1].Id != "src_low" {
-		t.Fatalf("expected src_low with weight 10 to be second, got %s", list[1].Id)
+	if list[1].Id != "src_2" {
+		t.Fatalf("expected src_2 (added at end) to be second, got %s", list[1].Id)
+	}
+
+	// 测试拖拽排序
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+		t.Fatalf("SortFilmSources failed: %v", err)
+	}
+	sortedList := srv.GetFilmSourceList()
+	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
+		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
 	}
 }
 
-func TestCollectService_UpdateFilmSource_WeightChange(t *testing.T) {
+func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 
 	s := model.FilmSource{
-		Id:     "src_weight_test",
-		Name:   "权重测试源",
-		Uri:    "https://example.com/api",
-		State:  true,
-		Weight: 10,
+		Id:    "src_name_test",
+		Name:  "测试源",
+		Uri:   "https://example.com/api",
+		State: true,
+		Sort:  0,
 	}
 	gdb.Create(&s)
 
 	srv := &CollectService{}
 	sUpdate := s
-	sUpdate.Weight = 80
+	sUpdate.Name = "新名称"
 	labels := sourceChangeLabels(s, sUpdate)
-	foundWeightLabel := false
+	foundNameLabel := false
 	for _, l := range labels {
-		if l == "播放权重: 10 → 80" {
-			foundWeightLabel = true
+		if l == "站点名称: 测试源 → 新名称" {
+			foundNameLabel = true
 			break
 		}
 	}
-	if !foundWeightLabel {
-		t.Fatalf("expected weight change label, got: %v", labels)
+	if !foundNameLabel {
+		t.Fatalf("expected name change label, got: %v", labels)
 	}
 
 	if err := srv.UpdateFilmSource(sUpdate); err != nil {
@@ -123,11 +131,11 @@ func TestCollectService_UpdateFilmSource_WeightChange(t *testing.T) {
 	}
 
 	var updated model.FilmSource
-	if err := gdb.First(&updated, "id = ?", "src_weight_test").Error; err != nil {
+	if err := gdb.First(&updated, "id = ?", "src_name_test").Error; err != nil {
 		t.Fatalf("query updated: %v", err)
 	}
-	if updated.Weight != 80 {
-		t.Fatalf("expected weight 80, got %d", updated.Weight)
+	if updated.Name != "新名称" {
+		t.Fatalf("expected name 新名称, got %s", updated.Name)
 	}
 
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -217,7 +225,7 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 		Name:   "格式测试源",
 		Uri:    "https://example.com/api",
 		State:  true,
-		Weight: 10,
+		Sort:   0,
 		Format: model.SourceFormatJSON,
 	}
 	gdb.Create(&s)
@@ -263,12 +271,12 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 	srv := &CollectService{}
 
 	baseTime := time.Date(2025, 1, 1, 10, 0, 0, 0, time.UTC)
-	// 插入一个高权重站和两个普通权重站
+	// 插入三个按顺序的站
 	master := model.FilmSource{
 		Id:        "master_site",
 		Name:      "主站",
 		Uri:       "https://master.example.com/api",
-		Weight:    100,
+		Sort:      0,
 		State:     true,
 		CreatedAt: baseTime,
 	}
@@ -276,7 +284,7 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		Id:        "slave_1_zz", // 故意使用字典序较大的 id
 		Name:      "附属站1",
 		Uri:       "https://slave1.example.com/api",
-		Weight:    10,
+		Sort:      1,
 		State:     true,
 		CreatedAt: baseTime.Add(1 * time.Minute),
 	}
@@ -284,7 +292,7 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		Id:        "slave_2_mm",
 		Name:      "附属站2",
 		Uri:       "https://slave2.example.com/api",
-		Weight:    10,
+		Sort:      2,
 		State:     true,
 		CreatedAt: baseTime.Add(2 * time.Minute),
 	}
@@ -303,7 +311,6 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		Id:        "000_new_slave",
 		Name:      "新增附属站",
 		Uri:       "https://newslave.example.com/api",
-		Weight:    10,
 		State:     true,
 		CreatedAt: baseTime.Add(3 * time.Minute),
 	}
@@ -355,9 +362,9 @@ func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *test
 
 	// 模拟从不含 createdAt 的旧备份恢复，id 使用逆序字典序测试是否严格按列表顺序保存
 	sources := []model.FilmSource{
-		{Id: "zzz_source", Name: "站点Z", Uri: "https://z.com/api", Weight: 10, State: true},
-		{Id: "mmm_source", Name: "站点M", Uri: "https://m.com/api", Weight: 10, State: true},
-		{Id: "aaa_source", Name: "站点A", Uri: "https://a.com/api", Weight: 10, State: true},
+		{Id: "zzz_source", Name: "站点Z", Uri: "https://z.com/api", Sort: 0, State: true},
+		{Id: "mmm_source", Name: "站点M", Uri: "https://m.com/api", Sort: 1, State: true},
+		{Id: "aaa_source", Name: "站点A", Uri: "https://a.com/api", Sort: 2, State: true},
 	}
 
 	if err := repository.ReplaceCollectSources(sources); err != nil {

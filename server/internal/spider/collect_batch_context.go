@@ -356,10 +356,10 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		sources = append(sources, s)
 	}
 	sort.Slice(sources, func(i, j int) bool {
-		if sources[i].Weight == sources[j].Weight {
+		if sources[i].Sort == sources[j].Sort {
 			return sources[i].Id < sources[j].Id
 		}
-		return sources[i].Weight > sources[j].Weight
+		return sources[i].Sort < sources[j].Sort
 	})
 
 	affectedMIDs := make([]int64, 0, len(b.affectedMIDs))

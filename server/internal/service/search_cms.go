@@ -17,7 +17,7 @@ type SearchFilmResult struct {
 	Error   string
 }
 
-// SearchFilm 搜索统一走本地只读快照；指定 source 时通过快照来源关系过滤，秒级响应，零外部网络 I/O。
+// SearchFilm 搜索统一走本地只读快照；支持各采集源快速过滤检索，秒级响应，零外部网络 I/O。
 func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto.Page) SearchFilmResult {
 	keyword = strings.TrimSpace(keyword)
 	sourceID = strings.TrimSpace(sourceID)
@@ -27,12 +27,14 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 	if page.Current <= 0 {
 		page.Current = 1
 	}
+	sources := buildSearchSourceTabs()
 	if sourceID == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
+		if active := repository.GetActiveCollectSource(); active != nil && active.Id != "" {
 			sourceID = active.Id
+		} else if len(sources) > 0 {
+			sourceID = sources[0].Id
 		}
 	}
-	sources := buildSearchSourceTabs()
 	out := SearchFilmResult{
 		List:    []model.MovieBasicInfo{},
 		Sources: sources,
@@ -43,10 +45,10 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 
 	version := filmsnapshot.GetActiveReadModelVersion()
 	var sl []model.FilmListSnapshot
-	if sourceID == "" {
-		sl = filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, keyword, sortField, page)
-	} else {
+	if sourceID != "" {
 		sl = filmsnapshot.SearchSnapshotsByKeywordSourceAndSortFast(version, sourceID, keyword, sortField, page)
+	} else {
+		sl = filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, keyword, sortField, page)
 	}
 
 	out.List = filmshared.BuildMovieBasicInfosFromSnapshots(sl...)
@@ -56,8 +58,7 @@ func (i *IndexService) SearchFilm(keyword, sourceID, sortField string, page *dto
 
 func buildSearchSourceTabs() []model.SearchSourceTab {
 	sources := repository.GetEnabledCollectSourceList()
-	tabs := make([]model.SearchSourceTab, 0, len(sources)+1)
-	tabs = append(tabs, model.SearchSourceTab{Id: "", Name: "综合"})
+	tabs := make([]model.SearchSourceTab, 0, len(sources))
 	for _, source := range sources {
 		name := strings.TrimSpace(source.Name)
 		if name == "" {

@@ -53,7 +53,7 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 }
 
 func TestShouldSkipCollectPublishOnError(t *testing.T) {
-	src := model.FilmSource{Weight: 10}
+	src := model.FilmSource{Sort: 0}
 
 	// 全量采集 (h < 0) -> 跳过发布
 	if !shouldSkipCollectPublishOnError(src, -1) {
@@ -187,7 +187,7 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 }
 
 func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
-	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Weight: 1}
+	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Sort: 1}
 	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
 		t.Fatal("occupy failed")
 	}
@@ -299,8 +299,8 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
 	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
-	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Weight: 10}
-	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Weight: 10}
+	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
+	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
 
 	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
 	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)

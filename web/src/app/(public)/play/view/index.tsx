@@ -9,6 +9,7 @@ import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
+import { formatLocalUpdateTime, formatActorNames, resolveFilmScore } from "./formatters";
 import styles from "./index.module.less";
 
 function parseInitialTimeParam(value?: string): number {
@@ -42,27 +43,6 @@ function buildInitialPlaybackState(data: any, initialTime?: string) {
   };
 }
 
-function formatLocalUpdateTime(value?: string | number | null) {
-  const stamp = Number(value);
-  if (!Number.isFinite(stamp) || stamp <= 0) return "";
-
-  const date = new Date(stamp * 1000);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function formatActorNames(value?: string) {
-  const raw = String(value || "").trim();
-  if (!raw) return "暂无";
-  return raw.replace(/\s*[，,、]\s*/g, " / ");
-}
-
-function resolveFilmScore(descriptor?: { score?: string; dbScore?: string }) {
-  return String(descriptor?.score || descriptor?.dbScore || "").trim() || "9.0";
-}
-
 interface PlayPageViewProps {
   data: any;
   filmId: string;
@@ -93,21 +73,6 @@ export default function PlayPageView({
   const [autoplay, setAutoplay] = useState(true);
   const [playerError, setPlayerError] = useState(false);
   const [isSourceMenuOpen, setIsSourceMenuOpen] = useState(false);
-  const [preferredSourceState, setPreferredSourceState] = useState<string>(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("preferred_source") || "";
-    }
-    return "";
-  });
-
-  const handleSetPreferredSource = useCallback((sourceId: string) => {
-    if (!sourceId) return;
-    localStorage.setItem("preferred_source", sourceId);
-    document.cookie = `preferred_source=${encodeURIComponent(sourceId)}; path=/; max-age=31536000; SameSite=Lax`;
-    setPreferredSourceState(sourceId);
-    message.success("已设为首选站点，播放时将优先使用该站点线路");
-  }, [message]);
-
   const [openingRelatedId, setOpeningRelatedId] = useState("");
 
   const activeEpRef = useRef<HTMLDivElement>(null);
@@ -377,7 +342,6 @@ export default function PlayPageView({
                     const isViewing = viewingSourceId === item.id;
                     const isPlaying = playingSourceId === item.id;
                     const episodeCount = item.linkList?.length ?? 0;
-                    const isPreferred = item.isPreferred || (item.sourceId && item.sourceId === preferredSourceState);
 
                     return (
                       <div
@@ -392,23 +356,10 @@ export default function PlayPageView({
                       >
                         <span className={styles.sourcePickerOptionMain}>
                           {item.name}
-                          {isPreferred && <span className={styles.preferredTag}>首选</span>}
                         </span>
                         <div className={styles.sourcePickerOptionMeta}>
-                          <span>{isPlaying ? "当前播放" : `${episodeCount} 集`}</span>
-                          {!isPreferred && item.sourceId && (
-                            <button
-                              type="button"
-                              className={styles.preferBtn}
-                              title="设为首选站点（优先使用该站点线路）"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSetPreferredSource(item.sourceId);
-                              }}
-                            >
-                              设为首选
-                            </button>
-                          )}
+                          {isPlaying && <span className={styles.playingBadge}>正在播放</span>}
+                          <span>{episodeCount} 集</span>
                         </div>
                       </div>
                     );
@@ -416,6 +367,7 @@ export default function PlayPageView({
                 </div>
               )}
             </div>
+            <div className={styles.sourcePickerDivider} />
 
             <div className={styles.sourceTabs} ref={sourceTabsRef}>
               {currentFilm?.list?.map((item: any) => {
@@ -441,15 +393,12 @@ export default function PlayPageView({
               {viewingSource?.linkList?.map((item: any, index: number) => {
                 const episodeKey = makeEpisodeKey(viewingSourceId, index);
                 const isActive = visibleActiveEpisodeKey === episodeKey;
-                const fallbackTitle = item.isFallback
-                  ? `${item.episode} (来自 ${item.sourceName || "其它站点"} 补齐)`
-                  : item.episode;
                 return (
                   <div
                     key={index}
                     ref={isActive ? activeEpRef : undefined}
                     className={`${styles.epItem} ${isActive ? styles.active : ""}`}
-                    title={fallbackTitle}
+                    title={item.episode}
                     onClick={() => {
                       if (currentEpisodeKey === episodeKey) return;
 
@@ -482,11 +431,6 @@ export default function PlayPageView({
                     }}
                   >
                     <span className={styles.epText}>{item.episode}</span>
-                    {item.isFallback && (
-                      <span className={styles.fallbackBadge} title={`来自 ${item.sourceName || "其它站点"} 补齐`}>
-                        补
-                      </span>
-                    )}
                   </div>
                 );
               })}

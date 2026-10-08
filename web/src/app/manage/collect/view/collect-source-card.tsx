@@ -1,5 +1,12 @@
 import { Button, Checkbox, Popconfirm, Select, Tag, Tooltip } from "antd";
-import { DeleteOutlined, EditOutlined, PoweroffOutlined, StopOutlined } from "@ant-design/icons";
+import {
+  DeleteOutlined,
+  EditOutlined,
+  PoweroffOutlined,
+  StopOutlined,
+} from "@ant-design/icons";
+import { useSortable } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import dayjs from "dayjs";
 import { collectDuration, type FilmSource } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
@@ -28,27 +35,27 @@ interface CollectSourceCardProps {
   selected: boolean;
   /** 任务仍处于采集生命周期（starting/running/page_done/waiting_publish/finalizing） */
   active: boolean;
+  headerDragProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect: (id: string, checked: boolean) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
   onStartTask: (record: FilmSource) => void;
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
-  onSetPrimary?: (id: string) => void;
 }
 
-/** 采集站卡片（主站 / 附属站统一形态，主站用徽章区分） */
+/** 采集站卡片（仅顶部 Header 可拖拽，首位生效站点自动展现基准源徽章） */
 export default function CollectSourceCard({
   record,
   selected,
   active,
+  headerDragProps,
   onSelect,
   onChangeCollectDuration,
   onStartTask,
   onTerminateTask,
   onEditSource,
   onDeleteSource,
-  onSetPrimary,
 }: CollectSourceCardProps) {
   const isRunning = active;
   const { canWrite } = useManagePermission();
@@ -65,27 +72,25 @@ export default function CollectSourceCard({
     .join(" ");
 
   return (
-    <div
-      className={cardClassNames}
-      onClick={() => onSelect(record.id, !selected)}
-    >
-      <div className={styles.cardHead}>
-        <Checkbox
-          checked={selected}
-          onClick={(event) => event.stopPropagation()}
-          onChange={(event) => onSelect(record.id, event.target.checked)}
-        />
+    <div className={cardClassNames}>
+      <div className={styles.cardHead} {...headerDragProps}>
+        <span
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ display: "inline-flex", lineHeight: 1 }}
+        >
+          <Checkbox
+            checked={selected}
+            onChange={(event) => onSelect(record.id, event.target.checked)}
+          />
+        </span>
         <div className={styles.cardHeadMain}>
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
             {record.isPrimary ? (
               <Tag color="gold" bordered={false} style={{ marginInlineEnd: 0 }}>
-                当前主站
+                基准源
               </Tag>
             ) : null}
-            <Tag color="blue" bordered={false} style={{ marginInlineEnd: 0 }}>
-              权重 {record.weight ?? 0}
-            </Tag>
             {record.isPosterSource ? (
               <span className={styles.posterSourceTag} title="全局优先海报图源">
                 海报源
@@ -114,7 +119,10 @@ export default function CollectSourceCard({
             </a>
           </Tooltip>
         </div>
-        <span className={`${styles.statusPill} ${statusClassMap[statusTone]}`}>
+        <span
+          className={`${styles.statusPill} ${statusClassMap[statusTone]}`}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
           <span className={styles.statusDot} />
           {statusLabel}
         </span>
@@ -122,7 +130,11 @@ export default function CollectSourceCard({
 
       {/* 底部信息/操作沉底：进度改为环形固定占位，卡片高度恒定 */}
       <div className={styles.cardFoot}>
-        <div className={styles.cardMeta} onClick={(event) => event.stopPropagation()}>
+        <div
+          className={styles.cardMeta}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className={styles.metaItem}>
             <dt className={styles.metaLabel}>上次采集：</dt>
             <dd
@@ -158,7 +170,11 @@ export default function CollectSourceCard({
           </div>
         </div>
 
-        <div className={styles.cardActions} onClick={(event) => event.stopPropagation()}>
+        <div
+          className={styles.cardActions}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
           <div className={styles.actionGroup}>
             {isRunning ? (
               canStop ? (
@@ -210,20 +226,6 @@ export default function CollectSourceCard({
                 </span>
               </Tooltip>
             )}
-            {!record.isPrimary ? (
-              <Popconfirm
-                title="设为前台生效主站？"
-                description="切换后，前台分类导航及默认片库将展示此站内容。"
-                onConfirm={() => onSetPrimary?.(record.id)}
-                disabled={!canWrite}
-                okText="设为主站"
-                cancelText="取消"
-              >
-                <Button size="middle" disabled={!canWrite}>
-                  设为主站
-                </Button>
-              </Popconfirm>
-            ) : null}
             <Tooltip title={isRunning ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}
@@ -247,6 +249,36 @@ export default function CollectSourceCard({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function SortableCollectSourceCard(props: CollectSourceCardProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.record.id });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 1 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={isDragging ? styles.dragSourcePlaceholder : undefined}
+    >
+      <CollectSourceCard
+        {...props}
+        headerDragProps={{ ...attributes, ...listeners }}
+      />
     </div>
   );
 }

@@ -140,7 +140,7 @@ export function useFilmColumns({
         align: "center",
         render: (v) => (
           <Text type="secondary" style={{ fontSize: 13 }}>
-            {dayjs(v * 1000).format("YYYY-MM-DD HH:ss")}
+            {dayjs(v * 1000).format("YYYY-MM-DD HH:mm:ss")}
           </Text>
         ),
       },

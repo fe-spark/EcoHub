@@ -11,7 +11,6 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/model/dto"
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -21,8 +20,7 @@ import (
 )
 
 var (
-	filmDetailSfGroup  singleflight.Group
-	relateMovieSfGroup singleflight.Group
+	filmDetailSfGroup singleflight.Group
 )
 
 func cloneMovieDetailVo(v model.MovieDetailVo) model.MovieDetailVo {
@@ -151,7 +149,7 @@ func (i *IndexService) GetFilmDetailWithPreferred(id int, preferredSource string
 	return detail, nil
 }
 
-// OrganizePlaySources 根据偏好站重排播放线路并做缺集降级补齐。
+// OrganizePlaySources 根据偏好站重排播放线路。
 func OrganizePlaySources(playSources []model.PlayLinkVo, preferredSource string) []model.PlayLinkVo {
 	preferredSource = strings.TrimSpace(preferredSource)
 	if preferredSource == "" || len(playSources) == 0 {
@@ -178,34 +176,6 @@ func OrganizePlaySources(playSources []model.PlayLinkVo, preferredSource string)
 
 	if len(preferredLines) == 0 {
 		return playSources
-	}
-
-	// 缺集降级补齐：若首选站第一条线路缺少某集，从其它站线路对应补齐
-	if len(preferredLines) > 0 && len(otherLines) > 0 {
-		existingEps := make(map[string]struct{})
-		for _, ep := range preferredLines[0].LinkList {
-			existingEps[strings.TrimSpace(ep.Episode)] = struct{}{}
-		}
-
-		for _, other := range otherLines {
-			for _, ep := range other.LinkList {
-				epName := strings.TrimSpace(ep.Episode)
-				if epName == "" {
-					continue
-				}
-				if _, ok := existingEps[epName]; !ok {
-					existingEps[epName] = struct{}{}
-					fallbackEp := model.MovieUrlInfo{
-						Episode:    ep.Episode,
-						Link:       ep.Link,
-						IsFallback: true,
-						SourceId:   other.SourceId,
-						SourceName: other.Name,
-					}
-					preferredLines[0].LinkList = append(preferredLines[0].LinkList, fallbackEp)
-				}
-			}
-		}
 	}
 
 	result := make([]model.PlayLinkVo, 0, len(preferredLines)+len(otherLines))
@@ -235,8 +205,10 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 
 	sources := repository.GetEnabledCollectSourceList()
 	sourcesByID := make(map[string]model.FilmSource, len(sources))
-	for _, s := range sources {
+	sourceOrderMap := make(map[string]int, len(sources))
+	for idx, s := range sources {
 		sourcesByID[s.Id] = s
+		sourceOrderMap[s.Id] = idx
 	}
 
 	sourcePlayGroupCounts := make(map[string]int)
@@ -282,25 +254,17 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		}
 	}
 
-	primarySource := repository.GetActiveCollectSource()
-	primaryID := ""
-	if primarySource != nil {
-		primaryID = primarySource.Id
-	}
-
 	sort.SliceStable(playList, func(i, j int) bool {
-		if primaryID != "" {
-			if playList[i].SourceId == primaryID && playList[j].SourceId != primaryID {
-				return true
-			}
-			if playList[j].SourceId == primaryID && playList[i].SourceId != primaryID {
-				return false
-			}
+		orderI, okI := sourceOrderMap[playList[i].SourceId]
+		if !okI {
+			orderI = 999999
 		}
-		wI := sourcesByID[playList[i].SourceId].Weight
-		wJ := sourcesByID[playList[j].SourceId].Weight
-		if wI != wJ {
-			return wI > wJ
+		orderJ, okJ := sourceOrderMap[playList[j].SourceId]
+		if !okJ {
+			orderJ = 999999
+		}
+		if orderI != orderJ {
+			return orderI < orderJ
 		}
 		return playList[i].Id < playList[j].Id
 	})
@@ -324,8 +288,10 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 
 	sources := repository.GetEnabledCollectSourceList()
 	sourcesByID := make(map[string]model.FilmSource, len(sources))
-	for _, s := range sources {
+	sourceOrderMap := make(map[string]int, len(sources))
+	for idx, s := range sources {
 		sourcesByID[s.Id] = s
+		sourceOrderMap[s.Id] = idx
 	}
 
 	sourcePlayGroupCounts := make(map[string]int)
@@ -365,27 +331,19 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 		})
 	}
 
-	primarySource := repository.GetActiveCollectSource()
-	primaryID := ""
-	if primarySource != nil {
-		primaryID = primarySource.Id
-	}
-
 	for mid := range result {
 		lines := result[mid]
 		sort.SliceStable(lines, func(i, j int) bool {
-			if primaryID != "" {
-				if lines[i].SourceId == primaryID && lines[j].SourceId != primaryID {
-					return true
-				}
-				if lines[j].SourceId == primaryID && lines[i].SourceId != primaryID {
-					return false
-				}
+			orderI, okI := sourceOrderMap[lines[i].SourceId]
+			if !okI {
+				orderI = 999999
 			}
-			wI := sourcesByID[lines[i].SourceId].Weight
-			wJ := sourcesByID[lines[j].SourceId].Weight
-			if wI != wJ {
-				return wI > wJ
+			orderJ, okJ := sourceOrderMap[lines[j].SourceId]
+			if !okJ {
+				orderJ = 999999
+			}
+			if orderI != orderJ {
+				return orderI < orderJ
 			}
 			return lines[i].Id < lines[j].Id
 		})
@@ -429,98 +387,7 @@ func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 	return *movieDetail, nil
 }
 
-// RelateMovie 根据当前影片快照匹配相关的影片
-func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasicInfo {
-	if mid <= 0 {
-		return []model.MovieBasicInfo{}
-	}
-	startedAt := time.Now()
-	page = normalizeIndexPage(page)
-	version := filmsnapshot.GetActiveReadModelVersion()
-	if version == "" {
-		version = filmsnapshot.GetActiveSnapshotVersion()
-	}
-	if version == "" {
-		return []model.MovieBasicInfo{}
-	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, mid, page.Current, page.PageSize)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			if data == "[]" {
-				return []model.MovieBasicInfo{}
-			}
-			var cached []model.MovieBasicInfo
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
-			}
-		}
-	}
-
-	val, err, _ := relateMovieSfGroup.Do(cacheKey, func() (any, error) {
-		if db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				if data == "[]" {
-					return []model.MovieBasicInfo{}, nil
-				}
-				var cached []model.MovieBasicInfo
-				if json.Unmarshal([]byte(data), &cached) == nil {
-					return cached, nil
-				}
-			}
-		}
-
-		snapshotStartedAt := time.Now()
-		snapshot := filmsnapshot.GetSnapshotByMid(version, mid)
-		logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
-		if snapshot == nil {
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
-			}
-			return []model.MovieBasicInfo{}, nil
-		}
-		if !filmsnapshot.HasMovieDetail(snapshot.Mid) {
-			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
-			}
-			return []model.MovieBasicInfo{}, nil
-		}
-		listStartedAt := time.Now()
-		list := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page)
-		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
-		buildStartedAt := time.Now()
-		result := filmshared.BuildMovieBasicInfosFromSnapshots(list...)
-		logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
-		logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
-
-		if result == nil {
-			result = []model.MovieBasicInfo{}
-		}
-
-		if db.Rdb != nil {
-			if len(result) == 0 {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
-			} else {
-				if raw, err := json.Marshal(result); err == nil {
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), time.Hour).Err()
-				}
-			}
-		}
-		return result, nil
-	})
-
-	if err != nil || val == nil {
-		return []model.MovieBasicInfo{}
-	}
-	result, ok := val.([]model.MovieBasicInfo)
-	if !ok {
-		return []model.MovieBasicInfo{}
-	}
-	res := make([]model.MovieBasicInfo, len(result))
-	copy(res, result)
-	return res
-}
 
 func rewriteURLGroup(links []model.MovieUrlInfo, rules []utils.DomainReplaceRule) []model.MovieUrlInfo {
 	if len(rules) == 0 || links == nil {
