@@ -23,6 +23,8 @@ interface FilmInventoryStats {
   films: number;
   categories: number;
   failures: number;
+  sourceId?: string;
+  sourceName?: string;
 }
 
 interface QuickEntryItem {
@@ -39,21 +41,21 @@ const quickEntries: QuickEntryItem[] = [
     key: "film",
     icon: VideoCameraOutlined,
     title: "影片列表",
-    description: "快速查看、更新和编辑主库存影片。",
+    description: "按采集源查看、更新和编辑入库影片。",
     href: "/manage/film",
   },
   {
     key: "collect",
     icon: DatabaseOutlined,
     title: "采集中心",
-    description: "配置主站、附属站与批量采集任务。",
+    description: "配置采集站顺序、首选站与批量采集任务。",
     href: "/manage/collect",
   },
   {
     key: "category",
     icon: AppstoreOutlined,
     title: "分类管理",
-    description: "维护当前主站分类框架、显示状态与排序。",
+    description: "维护当前首选站分类框架、显示状态与排序。",
     href: "/manage/collect/category",
   },
   {
@@ -117,7 +119,16 @@ export default function ManagePageView() {
 
       <Card
         className={styles.panelCard}
-        title="当前影视数据规模"
+        title={
+          <span>
+            当前影视数据规模
+            {stats?.sourceName ? (
+              <Typography.Text type="secondary" className={styles.statsSource}>
+                首选站 · {stats.sourceName}
+              </Typography.Text>
+            ) : null}
+          </span>
+        }
         extra={
           isAdmin ? (
             <Link href="/manage/system?tab=security" className={styles.statsLink}>

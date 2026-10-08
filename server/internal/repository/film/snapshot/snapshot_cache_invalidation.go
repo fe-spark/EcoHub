@@ -24,6 +24,8 @@ func RefreshAccessDataCaches() {
 	cache.BumpSearchTagsVersion()
 	cache.ClearPatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
+		fmt.Sprintf("%s*", config.IndexDailyUpdatesCacheKey),
+		fmt.Sprintf("%s*", config.DailyUpdatesV2CatCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxConfigCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),

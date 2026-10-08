@@ -188,8 +188,8 @@ export default function SiderVersion({
                   modal.confirm({
                     title: "立即升级并重启？",
                     content: info?.latest
-                      ? `将拉取 ${info.latest} 并重建当前容器，页面会短暂断开。`
-                      : "将拉取新版本并重建当前容器，页面会短暂断开。",
+                      ? `拉取 ${info.latest} 并重启，页面会短暂断开。`
+                      : "拉取新版本并重启，页面会短暂断开。",
                     okText: "升级",
                     cancelText: "取消",
                     onOk: () => startUpgrade(),

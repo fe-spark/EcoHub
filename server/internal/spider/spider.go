@@ -137,16 +137,16 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		var categoryCount int64
 		_ = db.Mdb.Model(&model.Category{}).Count(&categoryCount).Error
 		if categoryCount == 0 {
-			syslog.Warnf("[Spider] 检测到本地分类树为空(0 个分类)，尝试从主站同步分类树...")
+			syslog.Warnf("[Spider] 检测到本地分类树为空(0 个分类)，尝试从基准源同步分类树...")
 			target := repository.PickMasterSourceForCategory()
 			if target == nil {
-				syslog.Warnf("[Spider] 无主采集站，跳过分类树同步（没有主站就不能有分类树）")
+				syslog.Warnf("[Spider] 无基准采集站，跳过分类树同步")
 			} else if err := CollectCategory(target); err != nil {
-				syslog.Errorf("[Spider] 采集前自动同步主站分类失败 name=%s state=%v: %v",
+				syslog.Errorf("[Spider] 采集前自动同步基准源分类失败 name=%s state=%v: %v",
 					target.Name, target.State, err)
 			} else {
 				repository.RefreshCategoryCache()
-				syslog.Infof("[Spider] 采集前自动同步主站分类成功 name=%s state=%v",
+				syslog.Infof("[Spider] 采集前自动同步基准源分类成功 name=%s state=%v",
 					target.Name, target.State)
 			}
 		}
@@ -207,7 +207,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			continue
 		}
 		if idx > 0 {
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(collectDispatchDelay(batchCtx))
 		}
 		wg.Add(1)
 		if sem != nil {
@@ -476,20 +476,4 @@ func BatchCollectTriggered(trigger string, h int, ids ...string) {
 		trigger = model.NotifyTriggerManual
 	}
 	runSourcesWithLimit(sources, h, "Batch-Collect", trigger)
-}
-
-func AutoCollect(h int) {
-	AutoCollectTriggered(model.NotifyTriggerManual, h)
-}
-
-func AutoCollectTriggered(trigger string, h int) {
-	enabled := filterEnabledSources(repository.GetCollectSourceList())
-	if len(enabled) == 0 {
-		log.Println("[Spider] 自动采集：未找到任何启用的站点")
-		return
-	}
-	if trigger == "" {
-		trigger = model.NotifyTriggerManual
-	}
-	runSourcesWithLimit(enabled, h, "Auto-Collect", trigger)
 }

@@ -274,7 +274,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
           <Button type="link" size="small" disabled={!canWrite} onClick={() => openEditRuleModal(record)}>
             编辑
           </Button>
-          <Popconfirm title="确认删除该规则？" okText="删除" cancelText="取消" onConfirm={() => void handleDeleteRule(record.id)}>
+          <Popconfirm title="删除该规则？" okText="删除" cancelText="取消" onConfirm={() => void handleDeleteRule(record.id)}>
             <Button type="link" size="small" danger disabled={!canWrite}>
               删除
             </Button>

@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
 
 	"server/internal/infra/db"
@@ -50,6 +51,7 @@ type DailyUpdateListQuery struct {
 	Random   bool
 	Exclude  []int64
 	NavIDs   []int64
+	SourceId string
 }
 
 func dailyPidFilter(pid int64) *CategoryCountItem {
@@ -62,10 +64,21 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 	return &CategoryCountItem{CategoryID: pid, CategoryName: "_"}
 }
 
-func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64) *gorm.DB {
+func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64, sourceID string) *gorm.DB {
 	q := db.Mdb.Table(model.TableFilmIndex).
 		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix())
+	q = applyDailySourceMembership(q, sourceID)
 	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs)
+}
+
+func applyDailySourceMembership(q *gorm.DB, sourceID string) *gorm.DB {
+	if strings.TrimSpace(sourceID) == "" {
+		return q
+	}
+	sub := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+		Select("DISTINCT mid").
+		Where("source_id = ? AND line_kind = ?", sourceID, "play")
+	return q.Where("mid IN (?)", sub)
 }
 
 func applyDailyUpdateExclude(q *gorm.DB, random bool, exclude []int64) *gorm.DB {
@@ -103,7 +116,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 		navIDs = navTopCategoryIDs(navTopCategories())
 	}
 
-	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
+	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
 	var n int64
 	if err = base.Select("COUNT(mid)").Scan(&n).Error; err != nil {
 		return nil, 0, err
@@ -113,7 +126,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 		return []int64{}, 0, nil
 	}
 
-	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs), q.Random, q.Exclude)
+	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
 	listQ = listQ.Select("mid, update_stamp")
 
 	var rows []dailyUpdateMidRow
@@ -154,7 +167,7 @@ func pickRandomDailyUpdateRows(rows []dailyUpdateMidRow, pageSize int) []dailyUp
 
 // DailyUpdatePidCounts 近 24h 按导航大类聚合数量。navIDs 由调用方预取，避免重复全表扫描分类树。
 // 孤儿 mid（film_index 缺失 / f.pid NULL）计入 total 与 otherCount，与「其他」列表口径一致。
-func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[int64]int, otherCount int, total int, err error) {
+func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (countByPid map[int64]int, otherCount int, total int, err error) {
 	countByPid = map[int64]int{}
 	if db.Mdb == nil {
 		return countByPid, 0, 0, fmt.Errorf("数据库未就绪")
@@ -169,9 +182,9 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64) (countByPid map[in
 	}
 
 	var rows []dailyPidCountRow
-	q := db.Mdb.Table(model.TableFilmIndex).
+	q := applyDailySourceMembership(db.Mdb.Table(model.TableFilmIndex).
 		Select("pid AS pid, COUNT(mid) AS cnt").
-		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()).
+		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()), sourceID).
 		Group("pid")
 	if err = q.Scan(&rows).Error; err != nil {
 		return countByPid, 0, 0, err

@@ -202,7 +202,7 @@ export function useFilmColumns({
               />
             </Tooltip>
             <Popconfirm
-              title="确认删除此影片？"
+              title="删除此影片？"
               onConfirm={() => handleDelFilm(record.mid || record.ID)}
             >
               <Tooltip title="删除">

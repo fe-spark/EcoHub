@@ -116,6 +116,8 @@ export default function CollectManagePageView() {
   const mountedRef = useRef(false);
   const pollFailuresRef = useRef(0);
   const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  const pendingSortRef = useRef<{ prev: FilmSource[]; next: FilmSource[] } | null>(null);
+  const sortConfirmRef = useRef<{ destroy: () => void } | null>(null);
 
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
@@ -359,12 +361,24 @@ export default function CollectManagePageView() {
         const rawData = Array.isArray(resp.data) ? resp.data : [];
         setSiteList((current) => {
           const cdMap = new Map(current.map((item) => [item.id, item.cd]));
-          return rawData.map((item: CollectListItemResponse) => {
+          const normalizedList = rawData.map((item: CollectListItemResponse) => {
             const normalized = normalizeSource(item);
             if (cdMap.has(item.id) && cdMap.get(item.id)) {
               normalized.cd = cdMap.get(item.id);
             }
             return normalized;
+          });
+          const pending = pendingSortRef.current;
+          if (!pending) {
+            return normalizedList;
+          }
+          const freshMap = new Map(normalizedList.map((item) => [item.id, item]));
+          return current.map((item) => {
+            const fresh = freshMap.get(item.id);
+            if (!fresh) {
+              return item;
+            }
+            return { ...fresh, isPrimary: item.isPrimary };
           });
         });
         setSelectedSourceIds((current) =>
@@ -400,6 +414,9 @@ export default function CollectManagePageView() {
     return () => {
       mountedRef.current = false;
       clearPollTimer();
+      sortConfirmRef.current?.destroy();
+      sortConfirmRef.current = null;
+      pendingSortRef.current = null;
     };
   }, [clearPollTimer, getCollectList]);
 
@@ -460,7 +477,7 @@ export default function CollectManagePageView() {
                   .map((item) => item.name || item.id)
                   .join("、")}）`
               : "";
-          message.success(`检测完成：全部 ${data.checked ?? 0} 个采集站接口正常，无需清理${skipText}`);
+          message.success(`接口正常：${data.checked ?? 0} 个${skipText}`);
           return;
         }
         if (!cleanupScanCanceledRef.current) {
@@ -549,7 +566,7 @@ export default function CollectManagePageView() {
     }
   };
 
-  /** 批量删除选中采集站（主站/采集中的会被后端跳过并提示） */
+  /** 批量删除选中采集站（采集中的会被后端跳过并提示） */
   const batchDeleteSources = async () => {
     const ids = selectedSourceIds.map(String).filter(Boolean);
     if (ids.length === 0) {
@@ -622,7 +639,7 @@ export default function CollectManagePageView() {
   const stopTask = async (id: string) => {
     const resp = await ApiPost("/manage/spider/stop", { id });
     if (resp.code === 0) {
-      message.success("已停止该采集任务，已抓取数据将继续处理完成");
+      message.success("已停止采集");
       await getCollectList();
       return;
     }
@@ -651,9 +668,9 @@ export default function CollectManagePageView() {
   const openAddDialog = () => {
     if (siteList.length >= COLLECT_SOURCE_WARN_COUNT) {
       modal.confirm({
-        title: "采集站数量过多",
-        content: `当前已有 ${siteList.length} 个采集站。采集站越多，排队越长，写库、快照和内存占用都会上升，低配机器更容易打满。确认继续添加？`,
-        okText: "继续添加",
+        title: "采集站过多",
+        content: `已有 ${siteList.length} 个，继续添加？`,
+        okText: "继续",
         cancelText: "取消",
         onOk: openAddForm,
       });
@@ -662,10 +679,8 @@ export default function CollectManagePageView() {
     openAddForm();
   };
 
-  const handleSortList = async (nextList: FilmSource[]) => {
-    const prevPrimary = siteList.find((s) => s.state) ?? siteList[0];
-
-    // 首位即基准：即时为首个启用站点标记 isPrimary，给予即时视觉回馈
+  const handleSortList = (nextList: FilmSource[]) => {
+    const prevList = pendingSortRef.current?.prev ?? siteList;
     let assignedPrimary = false;
     const optimisticList = nextList.map((item) => {
       if (item.state && !assignedPrimary) {
@@ -675,44 +690,71 @@ export default function CollectManagePageView() {
       return { ...item, isPrimary: false };
     });
     if (!assignedPrimary && optimisticList.length > 0) {
-      optimisticList[0].isPrimary = true;
+      optimisticList[0] = { ...optimisticList[0], isPrimary: true };
     }
     setSiteList(optimisticList);
+    pendingSortRef.current = { prev: prevList, next: optimisticList };
 
+    const prevPrimary = prevList.find((s) => s.state) ?? prevList[0];
     const nextPrimary = optimisticList.find((s) => s.isPrimary);
     const isPrimaryChanged = Boolean(
       prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id,
     );
 
-    try {
-      const ids = nextList.map((item) => item.id);
-      const resp = await ApiPost("/manage/collect/sort", { ids });
-      if (resp.code === 0) {
-        if (isPrimaryChanged && nextPrimary) {
-          message.success({
-            content: `排序已更新，基准源：${nextPrimary.name}`,
-            key: "collect-sort",
-          });
-        } else {
-          message.success({
-            content: "采集站顺序已更新",
-            key: "collect-sort",
-          });
+    sortConfirmRef.current?.destroy();
+    sortConfirmRef.current = modal.confirm({
+      title: "保存顺序？",
+      content: isPrimaryChanged && nextPrimary ? `首选站改为「${nextPrimary.name}」` : undefined,
+      okText: "保存",
+      cancelText: "取消",
+      centered: true,
+      onOk: async () => {
+        const pending = pendingSortRef.current;
+        if (!pending) {
+          return;
         }
-      } else {
-        message.error({
-          content: resp.msg || "保存排序失败",
-          key: "collect-sort",
-        });
-        void requestRef.current?.(true);
-      }
-    } catch (e: any) {
-      message.error({
-        content: e?.message || "保存排序失败",
-        key: "collect-sort",
-      });
-      void requestRef.current?.(true);
-    }
+        try {
+          const resp = await ApiPost("/manage/collect/sort", {
+            ids: pending.next.map((item) => item.id),
+          });
+          if (resp.code === 0) {
+            pendingSortRef.current = null;
+            if (isPrimaryChanged && nextPrimary) {
+              message.success({
+                content: `首选站：${nextPrimary.name}`,
+                key: "collect-sort",
+              });
+            } else {
+              message.success({
+                content: "顺序已保存",
+                key: "collect-sort",
+              });
+            }
+            return;
+          }
+          message.error({
+            content: resp.msg || "保存排序失败",
+            key: "collect-sort",
+          });
+          pendingSortRef.current = null;
+          setSiteList(pending.prev);
+        } catch (e: any) {
+          message.error({
+            content: e?.message || "保存排序失败",
+            key: "collect-sort",
+          });
+          pendingSortRef.current = null;
+          setSiteList(pending.prev);
+        }
+      },
+      onCancel: () => {
+        const pending = pendingSortRef.current;
+        pendingSortRef.current = null;
+        if (pending) {
+          setSiteList(pending.prev);
+        }
+      },
+    });
   };
 
   const openEditDialog = async (id: string) => {
@@ -825,10 +867,10 @@ export default function CollectManagePageView() {
           resolve(choice);
         };
         dialogRef.current = modal.confirm({
-          title: "是否使用代理测试？",
-          content: `系统已开启网络代理（${proxyUrl}）。本次可以选择走代理，或直接连接采集站。`,
-          okText: "使用代理",
-          cancelText: "直接测试",
+          title: "使用代理测试？",
+          content: proxyUrl,
+          okText: "走代理",
+          cancelText: "直连",
           zIndex: 2000,
           onOk: () => finish(true),
           onCancel: () => finish(null),
@@ -939,7 +981,7 @@ export default function CollectManagePageView() {
         stoppable.map((id) => ApiPost("/manage/spider/stop", { id })),
       );
       if (results.some((resp) => resp.code === 0)) {
-        message.success("已停止该采集队列中仍在抓取的任务，已抓取数据将继续处理完成");
+        message.success("已停止采集");
       } else {
         message.error(results[0]?.msg || "终止任务失败");
       }
@@ -1018,9 +1060,8 @@ export default function CollectManagePageView() {
                 批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
               </Button>
               <Popconfirm
-                title="批量禁用采集站？"
-                description="禁用后会停止选中采集站的后续请求，已抓取数据会继续处理完成，并阻止后续批量/自动采集调度。"
-                okText="确认禁用"
+                title="禁用选中采集站？"
+                okText="禁用"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
                 disabled={selectedCount === 0}
@@ -1035,9 +1076,9 @@ export default function CollectManagePageView() {
                 </Button>
               </Popconfirm>
               <Popconfirm
-                title={`批量删除 ${selectedCount} 个采集站？`}
-                description="删除后不可恢复。主采集站与正在采集的站点会自动跳过。"
-                okText="确认删除"
+                title={`删除 ${selectedCount} 个采集站？`}
+                description="不可恢复"
+                okText="删除"
                 cancelText="取消"
                 okButtonProps={{ danger: true, loading: batchDeleting }}
                 disabled={selectedCount === 0}

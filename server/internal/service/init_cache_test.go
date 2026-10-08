@@ -54,6 +54,7 @@ func TestShouldMigrateOrphanCleanSpec(t *testing.T) {
 	}{
 		{"sys_cron_orphan_clean", "0 0 0 * * *", true},
 		{"sys_cron_orphan_clean", " 0 0 0 * * * ", true},
+		{"sys_cron_orphan_clean", "0 35 4 * * *", true},
 		{"sys_cron_orphan_clean", config.OrphanCleanSpec, false},
 		{"sys_cron_orphan_clean", "0 */30 * * * ?", false},
 		{"other_task", "0 0 0 * * *", false},
@@ -64,6 +65,18 @@ func TestShouldMigrateOrphanCleanSpec(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("shouldMigrateOrphanCleanSpec(%q, %q) = %v, want %v", tt.id, tt.spec, got, tt.expected)
 		}
+	}
+}
+
+func TestShouldMigrateAutoCollectSpec(t *testing.T) {
+	if !shouldMigrateAutoCollectSpec("sys_cron_auto_collect", "0 */30 * * * ?") {
+		t.Fatal("expected 30-minute auto collect spec to migrate")
+	}
+	if shouldMigrateAutoCollectSpec("sys_cron_auto_collect", config.DefaultUpdateSpec) {
+		t.Fatal("current hourly spec should not migrate")
+	}
+	if shouldMigrateAutoCollectSpec("sys_cron_orphan_clean", "0 */30 * * * ?") {
+		t.Fatal("orphan task should not use auto collect migrator")
 	}
 }
 

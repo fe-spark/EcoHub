@@ -191,7 +191,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           label="海报图源"
           name="isPosterSource"
           valuePropName="checked"
-          tooltip="采集时用其高清海报填充主站对应影片（全局唯一，关闭自动回退主站）。"
+          tooltip="采集时用其高清海报填充对应影片（全局唯一，关闭后自动回退其它海报）。"
         >
           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
         </Form.Item>

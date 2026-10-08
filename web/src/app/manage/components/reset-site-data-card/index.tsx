@@ -164,7 +164,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             title="该操作不可逆"
-            description="将清空影视库存、播放源映射、失败记录、关联轮播与分类等数据，且无法恢复。清空完成后会自动同步主站分类，便于立即重新采集。网站配置、采集站、账号等不受影响。"
+            description="清空影视库存与分类，采集站和账号保留。"
           />
           <Input.Password
             placeholder="请输入管理密码"

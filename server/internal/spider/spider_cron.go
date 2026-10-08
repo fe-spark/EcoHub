@@ -255,7 +255,7 @@ func runTaskBody(ft model.FilmCollectTask) {
 		FullRecoverSpider()
 		doneDetail = "执行失败采集恢复"
 		log.Println("执行一次失败采集恢复任务")
-	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
+	case 3: // 片库冗余数据与孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
 		return
 	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）

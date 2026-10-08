@@ -99,6 +99,10 @@ func ClearIndexPageCache() {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
 	db.Rdb.Del(db.Cxt, config.IndexDailyUpdatesCacheKey)
+	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.IndexDailyUpdatesCacheKey+"*", config.MaxScanCount).Iterator()
+	for dailyIter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, dailyIter.Val())
+	}
 }
 
 func RefreshCategoryCache() {

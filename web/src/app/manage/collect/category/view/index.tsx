@@ -62,16 +62,16 @@ export default function CategoryWorkspacePageView() {
       </div>
 
       <Modal
-        title="确认重置分类？"
+        title="重置分类？"
         open={resetConfirmOpen}
         width={560}
-        okText="确认重置"
+        okText="重置"
         cancelText="取消"
         confirmLoading={treeState.resettingTree}
         onOk={() => void handleResetConfirm()}
         onCancel={() => setResetConfirmOpen(false)}
       >
-        该操作会清空当前分类框架，并重新获取主采集站原始分类；分类规则会重新生成展示分类与来源映射，不会重写历史影片。
+        将清空分类并重新拉取首选站分类。
       </Modal>
     </div>
   );

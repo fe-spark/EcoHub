@@ -44,7 +44,7 @@ interface CollectSourceCardProps {
   onDeleteSource: (id: string) => void;
 }
 
-/** 采集站卡片（仅顶部 Header 可拖拽，首位生效站点自动展现基准源徽章） */
+/** 采集站卡片（仅顶部 Header 可拖拽，首位启用站点自动展现首选站徽章） */
 export default function CollectSourceCard({
   record,
   selected,
@@ -88,7 +88,7 @@ export default function CollectSourceCard({
             <span className={styles.cardName}>{record.name}</span>
             {record.isPrimary ? (
               <Tag color="gold" bordered={false} style={{ marginInlineEnd: 0 }}>
-                基准源
+                首选站
               </Tag>
             ) : null}
             {record.isPosterSource ? (
@@ -179,11 +179,10 @@ export default function CollectSourceCard({
             {isRunning ? (
               canStop ? (
                 <Popconfirm
-                  title="停止当前采集任务？"
-                  description="仅停止采集任务，采集站保持启用；已抓取数据会继续处理完成。"
+                  title="停止采集？"
                   onConfirm={() => onTerminateTask(record.id)}
                   disabled={!record.state}
-                  okText="停止采集"
+                  okText="停止"
                   cancelText="取消"
                   okButtonProps={{ danger: true }}
                 >
@@ -238,7 +237,7 @@ export default function CollectSourceCard({
                 <Button danger icon={<DeleteOutlined />} disabled />
               </Tooltip>
             ) : (
-              <Popconfirm title="确认删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
+              <Popconfirm title="删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
                 <Button danger icon={<DeleteOutlined />} disabled={!canWrite} />
               </Popconfirm>
             )}

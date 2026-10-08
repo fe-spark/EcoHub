@@ -15,7 +15,6 @@ import {
 import { useAppMessage } from "@/lib/useAppMessage";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
-import SourceTabs from "./SourceTabs";
 import SearchResultPanel from "./SearchResultPanel";
 import useSearchSources from "./useSearchSources";
 import styles from "./index.module.less";
@@ -102,16 +101,13 @@ const SORT_OPTIONS = [
   { key: "year", label: "上映年份" },
 ];
 
-function buildSearchPath(keyword: string, current: string, sort: string, source: string) {
+function buildSearchPath(keyword: string, current: string, sort: string) {
   const params = new URLSearchParams({
     search: keyword,
     current,
   });
-  if (!source && sort) {
+  if (sort) {
     params.set("sort", sort);
-  }
-  if (source) {
-    params.set("source", source);
   }
   return `/search?${params.toString()}`;
 }
@@ -121,24 +117,22 @@ export default function SearchPageView({
   keyword,
   current,
   sort = "",
-  source = "",
   hotKeywords = [],
 }: {
   data: any;
   keyword: string;
   current: string;
   sort?: string;
-  source?: string;
   hotKeywords?: string[];
 }) {
   const { navigate, isNavigating } = useContentNavigate();
   const { message } = useAppMessage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}:${source}`);
+  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}`);
 
-  if (prevParamsKey !== `${keyword}:${current}:${sort}:${source}`) {
-    setPrevParamsKey(`${keyword}:${current}:${sort}:${source}`);
+  if (prevParamsKey !== `${keyword}:${current}:${sort}`) {
+    setPrevParamsKey(`${keyword}:${current}:${sort}`);
     setSearchKeyword(keyword);
   }
 
@@ -154,17 +148,14 @@ export default function SearchPageView({
 
   const viewMode = useSyncExternalStore<"grid" | "detail">(subscribeViewMode, getViewModeSnapshot, () => "grid");
   const {
-    sources,
-    activeId,
     activeSort,
     list,
     page,
     sourceError,
     listLoading,
-    changeSource,
     changePage,
     changeSort,
-  } = useSearchSources({ keyword, sort, source, current, data });
+  } = useSearchSources({ keyword, sort, current, data });
 
   useEffect(() => {
     const onFocusSearch = () => {
@@ -251,17 +242,12 @@ export default function SearchPageView({
     }
     setSearchKeyword(trimmed);
     saveHistory(trimmed);
-    navigate(buildSearchPath(trimmed, "1", activeSort || sort, activeId || source), "搜索加载中...");
+    navigate(buildSearchPath(trimmed, "1", activeSort || sort), "搜索加载中...");
   };
 
   const handlePageChange = (nextPage: number) => {
     setSearchKeyword(keyword);
     void changePage(nextPage);
-  };
-
-  const handleSourceChange = (nextSource: string) => {
-    setSearchKeyword(keyword);
-    changeSource(nextSource);
   };
 
   const handlePlay = (movie: { id?: string | number; sourceId?: string; sourceMid?: string | number }) => {
@@ -435,13 +421,6 @@ export default function SearchPageView({
           )}
         </header>
 
-        {keyword && (
-          <SourceTabs
-            sources={sources}
-            activeId={activeId}
-            onChange={handleSourceChange}
-          />
-        )}
       </div>
 
       {/* 排序筛选栏 */}

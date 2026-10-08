@@ -485,7 +485,7 @@ export default function FileUploadPageView() {
                             ) : (
                               <Tooltip title="彻底删除">
                                 <Popconfirm
-                                  title="确定要从服务器删除这张图片吗？"
+                                  title="删除这张图片？"
                                   onConfirm={() => delImage(item)}
                                   okText="确定"
                                   cancelText="取消"

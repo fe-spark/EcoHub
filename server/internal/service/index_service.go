@@ -22,6 +22,13 @@ type IndexService struct{}
 
 var IndexSvc = new(IndexService)
 
+func (i *IndexService) BaselineSourceID() string {
+	if active := repository.GetActiveCollectSource(); active != nil {
+		return strings.TrimSpace(active.Id)
+	}
+	return ""
+}
+
 func init() {
 	filmsnapshot.RegisterSnapshotPublishedHook(func(version string) {
 		startedAt := time.Now()

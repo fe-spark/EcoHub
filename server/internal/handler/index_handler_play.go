@@ -40,7 +40,7 @@ func resolvePlayableSourceID(playSources []model.PlayLinkVo, playFrom string) st
 	return ""
 }
 
-// FilmPlayInfo 影视播放页数据（统一聚合片库，支持首选源与缺集降级）
+// FilmPlayInfo 影视播放页数据（统一聚合片库，按采集站顺序呈现独立线路）
 func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	totalStartedAt := time.Now()
 	id, err := strconv.Atoi(c.DefaultQuery("id", "0"))

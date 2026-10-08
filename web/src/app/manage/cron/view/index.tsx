@@ -207,7 +207,6 @@ export default function CronManagePageView() {
           return (
             <Popconfirm
               title="终止调度？"
-              description="将停止未来定时调度，当前正在执行的任务会继续跑完。"
               onConfirm={() => terminateTask(record.id)}
               disabled={!record.state}
               okText="终止"
@@ -237,8 +236,7 @@ export default function CronManagePageView() {
             <Tooltip title={runTooltip}>
               <span>
                 <Popconfirm
-                  title="立即执行该定时任务？"
-                  description="将立即触发一次执行，结果请查看运行日志。"
+                  title="立即执行？"
                   onConfirm={() => runTaskOnce(record.id)}
                   disabled={runDisabled}
                   okText="执行"
