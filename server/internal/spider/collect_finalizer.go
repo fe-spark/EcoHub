@@ -4,36 +4,10 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"sync"
 	"time"
 
-	"server/internal/infra/syslog"
-	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/film/writer"
 )
-
-var asyncMasterSearchTagsMu sync.Mutex
-
-func scheduleMasterSearchTagsRefresh(masterMIDs []int64) {
-	mids := normalizeAffectedMIDs(masterMIDs)
-	if len(mids) == 0 {
-		return
-	}
-	go func() {
-		asyncMasterSearchTagsMu.Lock()
-		defer asyncMasterSearchTagsMu.Unlock()
-
-		start := time.Now()
-		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新开始 mid_count=%d", len(mids))
-		if err := writer.RefreshSearchTagsByMids(mids...); err != nil {
-			syslog.Errorf("[Spider][Finalizer] 主站搜索标签异步刷新失败 mid_count=%d err=%v", len(mids), err)
-			return
-		}
-		filmcache.ClearAllSearchTagsCache()
-		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
-	}()
-}
 
 func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()

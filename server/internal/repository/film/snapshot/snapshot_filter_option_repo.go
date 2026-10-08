@@ -3,6 +3,7 @@ package snapshot
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -12,6 +13,13 @@ import (
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 )
+
+// searchTagBackfill 从已入库影片补齐剧情、地区、语言、年份。由 writer 注册，避免 snapshot 反向依赖 writer。
+var searchTagBackfill func(pid int64) error
+
+func SetSearchTagBackfill(fn func(pid int64) error) {
+	searchTagBackfill = fn
+}
 
 var filterOptionTagTypes = []string{"Plot", "Area", "Language", "Year"}
 
@@ -48,7 +56,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
-			if json.Unmarshal([]byte(data), &cached) == nil {
+			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
 				return cached
 			}
 		}
@@ -81,9 +89,17 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 		})
 	}
 
-	// 2. 获取标签 (Plot, Area, Language, Year)
+	// 2. 获取标签 (Plot, Area, Language, Year)。没有这些行时，从已经入库的影片补齐。
 	var tagRows []model.SearchTagItem
 	_ = db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error
+	if !rawFilterHasDynamicTags(tagRows) && searchTagBackfill != nil {
+		if err := searchTagBackfill(pid); err != nil {
+			log.Printf("[SearchTags] 按入库影片补齐筛选标签失败 pid=%d err=%v", pid, err)
+		} else {
+			tagRows = nil
+			_ = db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error
+		}
+	}
 	itemsByType := make(map[string][]model.SearchTagItem)
 	for _, item := range tagRows {
 		itemsByType[item.TagType] = append(itemsByType[item.TagType], item)
@@ -134,6 +150,47 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 		}
 	}
 	return res
+}
+
+func rawFilterHasDynamicTags(rows []model.SearchTagItem) bool {
+	for _, row := range rows {
+		if isDynamicFilterType(row.TagType) {
+			return true
+		}
+	}
+	return false
+}
+
+func cachedFilterHasDynamicTags(cached map[string]any) bool {
+	raw, ok := cached["sortList"]
+	if !ok {
+		return false
+	}
+	switch list := raw.(type) {
+	case []string:
+		for _, item := range list {
+			if isDynamicFilterType(item) {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range list {
+			name, _ := item.(string)
+			if isDynamicFilterType(name) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isDynamicFilterType(tagType string) bool {
+	switch tagType {
+	case "Plot", "Area", "Language", "Year":
+		return true
+	default:
+		return false
+	}
 }
 
 func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
