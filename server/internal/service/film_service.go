@@ -20,16 +20,40 @@ var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
 func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
+	if strings.TrimSpace(vo.SourceId) == "" {
+		if activeSrc := repository.GetActiveCollectSource(); activeSrc != nil {
+			vo.SourceId = activeSrc.Id
+		}
+	}
 	return filmsnapshot.GetSearchPageReadModel(vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
-func (s *FilmService) GetSearchOptions() map[string]any {
+func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
 	startedAt := time.Now()
 	options := make(map[string]any)
-	tree := repository.GetActiveCategoryTree()
+
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+
+	sources := repository.GetEnabledCollectSourceList()
+	defaultSourceId := ""
+	if len(sources) > 0 {
+		defaultSourceId = sources[0].Id
+	}
+	if sourceId == "" {
+		sourceId = defaultSourceId
+	}
+
+	tree := repository.GetActiveCategoryTree(sourceId)
 	tree.Name = "全部分类"
+	options["sources"] = sources
+	options["defaultSourceId"] = defaultSourceId
+	options["currentSourceId"] = sourceId
 	options["class"] = converter.ConvertCategoryList(&tree)
+	options["categoryTree"] = tree.Children
 	options["year"] = make([]map[string]string, 0)
 	tagGroup := filmsnapshot.GetAdminFilterOptionSnapshots()
 	if tree.Children != nil {
@@ -44,7 +68,7 @@ func (s *FilmService) GetSearchOptions() map[string]any {
 		}
 	}
 	options["tags"] = tagGroup
-	log.Printf("[ManageFilmSearch] 筛选选项快照读取 cost=%s", time.Since(startedAt))
+	log.Printf("[ManageFilmSearch] 筛选选项快照读取 sourceId=%s cost=%s", sourceId, time.Since(startedAt))
 	return options
 }
 

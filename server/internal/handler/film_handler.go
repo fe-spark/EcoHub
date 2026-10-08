@@ -22,6 +22,7 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	var s = model.SearchVo{Paging: &dto.Page{}}
 	var err error
 
+	s.SourceId = strings.TrimSpace(c.DefaultQuery("sourceId", ""))
 	s.Name = c.DefaultQuery("name", "")
 	s.Pid, err = strconv.ParseInt(c.DefaultQuery("pid", "0"), 10, 64)
 	if err != nil {
@@ -72,7 +73,12 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 
 	s.Paging = dto.GetPageParams(c)
 	sl := service.FilmSvc.GetFilmPage(s)
-	options := service.FilmSvc.GetSearchOptions()
+	options := service.FilmSvc.GetSearchOptions(s.SourceId)
+	if s.SourceId == "" {
+		if curr, ok := options["currentSourceId"].(string); ok && curr != "" {
+			s.SourceId = curr
+		}
+	}
 	dto.Success(gin.H{
 		"params":  s,
 		"list":    sl,

@@ -53,7 +53,7 @@ export default function SearchResultPanel({
   if (listLoading) {
     return (
       <div className={styles.listLoading} role="status" aria-live="polite">
-        <AppLoading text="正在搜索该采集源" padding="64px 0" size="default" showHints={false} />
+        <AppLoading text="正在搜索片库..." padding="64px 0" size="default" showHints={false} />
       </div>
     );
   }
@@ -67,7 +67,7 @@ export default function SearchResultPanel({
           </div>
           <h2 className={styles.emptyTitle}>
             {sourceError ? (
-              "该采集源搜索失败"
+              sourceError
             ) : keyword ? (
               <>未找到与 &ldquo;<span className={styles.keywordHighlight}>{keyword}</span>&rdquo; 相关的影视</>
             ) : (
@@ -76,7 +76,7 @@ export default function SearchResultPanel({
           </h2>
           <p className={styles.emptyDesc}>
             {sourceError
-              ? sourceError
+              ? "建议稍后重试或尝试其他关键词"
               : "建议缩短或更换搜索词，也可以直接尝试上方的热门搜索推荐"}
           </p>
         </div>

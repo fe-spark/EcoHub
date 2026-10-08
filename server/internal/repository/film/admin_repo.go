@@ -267,7 +267,78 @@ func CleanSearchWithoutDetail() int64 {
 		return 0
 	}
 
-	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
+	err = deleteFilmCascadeBatch(mids, pidSet)
+	if err != nil {
+		log.Printf("CleanSearchWithoutDetail Delete Error: %v", err)
+		return 0
+	}
+	return int64(len(mids))
+}
+
+// CleanPlaylessFilms 清理无任何播放线路且超过宽限期的幽灵影片（例如源站全部删除后残留的影片）
+func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
+	if gracePeriod <= 0 {
+		gracePeriod = 7 * 24 * time.Hour
+	}
+	cutoff := time.Now().Add(-gracePeriod)
+
+	type ghostRecord struct {
+		Mid int64
+		Pid int64
+	}
+
+	var records []ghostRecord
+	err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("film_index.mid, film_index.pid").
+		Joins("LEFT JOIN film_source_playlists ON film_source_playlists.mid = film_index.mid AND film_source_playlists.line_kind = 'play'").
+		Where("film_source_playlists.id IS NULL AND film_index.updated_at < ? AND film_index.created_at < ?", cutoff, cutoff).
+		Scan(&records).Error
+	if err != nil {
+		log.Printf("CleanPlaylessFilms Error: %v", err)
+		return 0
+	}
+	if len(records) == 0 {
+		return 0
+	}
+
+	mids := make([]int64, 0, len(records))
+	pidSet := make(map[int64]struct{}, len(records))
+	for _, record := range records {
+		if record.Mid <= 0 {
+			continue
+		}
+		mids = append(mids, record.Mid)
+		if record.Pid > 0 {
+			pidSet[record.Pid] = struct{}{}
+		}
+	}
+
+	if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
+		log.Printf("CleanPlaylessFilms Delete Error: %v", err)
+		return 0
+	}
+	return int64(len(mids))
+}
+
+// CleanOrphanMatchKeysAndMappings 清理关联影片已被删除的悬空匹配键与源映射
+func CleanOrphanMatchKeysAndMappings() int64 {
+	var cleaned int64
+	res1 := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.MovieMatchKey{})
+	if res1.Error == nil {
+		cleaned += res1.RowsAffected
+	}
+	res2 := db.Mdb.Where("global_mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.MovieSourceMapping{})
+	if res2.Error == nil {
+		cleaned += res2.RowsAffected
+	}
+	return cleaned
+}
+
+func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
+	if len(mids) == 0 {
+		return nil
+	}
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
@@ -289,8 +360,7 @@ func CleanSearchWithoutDetail() int64 {
 		return nil
 	})
 	if err != nil {
-		log.Printf("CleanSearchWithoutDetail Delete Error: %v", err)
-		return 0
+		return err
 	}
 
 	if len(pidSet) > 0 {
@@ -305,5 +375,5 @@ func CleanSearchWithoutDetail() int64 {
 	writer.ClearFilmIndexCachesByPidSet(pidSet)
 	snapshot.DeleteActiveSnapshotsByMids(mids...)
 	cache.ClearTVBoxListCache()
-	return int64(len(mids))
+	return nil
 }

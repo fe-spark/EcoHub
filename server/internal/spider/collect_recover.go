@@ -303,6 +303,9 @@ func FullRecoverSpider() {
 			syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
 			continue
 		}
+		if !s.State {
+			continue
+		}
 		if _, ok := seen[s.Id]; !ok {
 			seen[s.Id] = struct{}{}
 			sourcesToFlush = append(sourcesToFlush, *s)

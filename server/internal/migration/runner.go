@@ -76,6 +76,11 @@ var migrations = []Migration{
 		Name:    "add created_at column to film_sources and fill sequential timestamps",
 		Run:     migrateAddFilmSourceCreatedAtColumn,
 	},
+	{
+		Version: "20261008_migrate_film_source_sort_column",
+		Name:    "add sort column to film_sources and initialize from existing sources",
+		Run:     migrateAddFilmSourceSortColumn,
+	},
 }
 
 // RunAutoMigrations 顺序执行尚未执行的历史版本迁移，并持久化到 schema_migrations 表
@@ -303,7 +308,13 @@ func migrateAddFilmSourceCreatedAtColumn(db *gorm.DB) error {
 			}
 		}
 		var list []model.FilmSource
-		if err := db.Order("weight DESC, id ASC").Find(&list).Error; err != nil {
+		orderClause := "id ASC"
+		if migrator.HasColumn(&model.FilmSource{}, "sort") {
+			orderClause = "sort ASC, id ASC"
+		} else if migrator.HasColumn(&model.FilmSource{}, "weight") {
+			orderClause = "weight DESC, id ASC"
+		}
+		if err := db.Order(orderClause).Find(&list).Error; err != nil {
 			return err
 		}
 		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -312,6 +323,39 @@ func migrateAddFilmSourceCreatedAtColumn(db *gorm.DB) error {
 				t := base.Add(time.Duration(i+1) * time.Second)
 				if err := db.Table(model.TableFilmSource).Where("id = ?", s.Id).Update("created_at", t).Error; err != nil {
 					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
+func migrateAddFilmSourceSortColumn(db *gorm.DB) error {
+	migrator := db.Migrator()
+	if migrator.HasTable(&model.FilmSource{}) {
+		if !migrator.HasColumn(&model.FilmSource{}, "sort") {
+			if err := migrator.AddColumn(&model.FilmSource{}, "sort"); err != nil {
+				return err
+			}
+		}
+		// 若历史表中存在 weight 字段，按原规则 (weight DESC, created_at ASC, id ASC) 初始化顺序
+		if migrator.HasColumn(&model.FilmSource{}, "weight") {
+			type OldSource struct {
+				Id        string
+				Weight    int
+				CreatedAt time.Time
+			}
+			var oldList []OldSource
+			if err := db.Table(model.TableFilmSource).Order("weight DESC, created_at ASC, id ASC").Find(&oldList).Error; err == nil {
+				for i, s := range oldList {
+					_ = db.Table(model.TableFilmSource).Where("id = ?", s.Id).Update("sort", i).Error
+				}
+			}
+		} else {
+			var list []model.FilmSource
+			if err := db.Order("created_at ASC, id ASC").Find(&list).Error; err == nil {
+				for i, s := range list {
+					_ = db.Table(model.TableFilmSource).Where("id = ?", s.Id).Update("sort", i).Error
 				}
 			}
 		}

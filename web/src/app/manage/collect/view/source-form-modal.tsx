@@ -1,4 +1,4 @@
-import { Button, Form, Input, InputNumber, Modal, Radio, Switch } from "antd";
+import { Button, Form, Input, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -51,12 +51,24 @@ export default function SourceFormModal(props: SourceFormModalProps) {
   );
 
 
+  const currentUri = Form.useWatch("uri", form);
+  const isUriChanged =
+    mode === "edit" &&
+    Boolean(
+      currentUri &&
+        initialValues.uri &&
+        currentUri.trim() !== initialValues.uri.trim(),
+    );
+
   useEffect(() => {
     if (!open) {
       return;
     }
     form.resetFields();
-    form.setFieldsValue(initialValues);
+    form.setFieldsValue({
+      ...initialValues,
+      cleanOldData: false,
+    });
   }, [open, form, initialValues]);
 
   return (
@@ -119,13 +131,16 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         >
           <Input placeholder="请输入采集站接口地址" />
         </Form.Item>
-        <Form.Item
-          label="播放权重"
-          name="weight"
-          tooltip="采集站均贡献同一片库，多源线路自动补齐。播放时权重越高（数值越大）的站点线路越优先展示与播放。"
-        >
-          <InputNumber min={0} max={9999} placeholder="例如 10" style={{ width: "100%" }} />
-        </Form.Item>
+        {isUriChanged && (
+          <Form.Item
+            label="清空历史采集数据"
+            name="cleanOldData"
+            valuePropName="checked"
+            tooltip="检测到接口地址已变更。若更换为全新资源站，建议开启以清空旧站线路并剔除独占孤儿影片；若仅为同站换备用/镜像域名，请保持关闭。"
+          >
+            <Switch checkedChildren="清空旧数据" unCheckedChildren="保留旧数据" />
+          </Form.Item>
+        )}
         <Form.Item
           label="接口格式"
           name="format"

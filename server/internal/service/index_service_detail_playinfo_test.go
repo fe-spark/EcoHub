@@ -6,6 +6,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"github.com/alicebob/miniredis/v2"
@@ -41,3 +42,34 @@ func TestStoreFilmPlayInfoCache_DropsStaleWrite(t *testing.T) {
 		t.Fatal("current generation should still be able to write")
 	}
 }
+
+func TestOrganizePlaySources_KeepsSourcesIndependent(t *testing.T) {
+	lines := []model.PlayLinkVo{
+		{
+			Id:       "srcA#0",
+			SourceId: "srcA",
+			Name:     "金鹰源",
+			LinkList: []model.MovieUrlInfo{
+				{Episode: "第01集", Link: "http://a.com/1.m3u8"},
+			},
+		},
+		{
+			Id:       "srcB#0",
+			SourceId: "srcB",
+			Name:     "速博源",
+			LinkList: []model.MovieUrlInfo{
+				{Episode: "第1集", Link: "http://b.com/1.m3u8"},
+				{Episode: "第2集", Link: "http://b.com/2.m3u8"},
+			},
+		},
+	}
+
+	res := OrganizePlaySources(lines, "srcA")
+	if len(res[0].LinkList) != 1 {
+		t.Fatalf("expected exactly 1 episode in first line (no cross-source fallback), got %d", len(res[0].LinkList))
+	}
+	if len(res[1].LinkList) != 2 {
+		t.Fatalf("expected exactly 2 episodes in second line, got %d", len(res[1].LinkList))
+	}
+}
+

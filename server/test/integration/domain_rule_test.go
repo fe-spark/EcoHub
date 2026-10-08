@@ -17,7 +17,7 @@ func seedDetailFilm(t *testing.T, version string, mid int64, sourceID string, ru
 		Id:                 sourceID,
 		Name:               "主站测试源",
 		Uri:                "http://test-source.com/api",
-		Weight:             100,
+		Sort:               100,
 		State:              true,
 		DomainReplaceRules: rules,
 	})

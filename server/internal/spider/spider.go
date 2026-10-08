@@ -72,7 +72,7 @@ func countLiveCollectTasks() int {
 	return progress.TaskCount()
 }
 
-// prioritizeCollectSources 主采集站优先派发，便于有限站并发时先跑主站。
+// prioritizeCollectSources 采集站排序（按后台设置的 Sort 升序优先派发）。
 func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
 	if len(sources) <= 1 {
 		return sources
@@ -80,8 +80,8 @@ func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
 	out := make([]model.FilmSource, len(sources))
 	copy(out, sources)
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Weight != out[j].Weight {
-			return out[i].Weight > out[j].Weight
+		if out[i].Sort != out[j].Sort {
+			return out[i].Sort < out[j].Sort
 		}
 		return out[i].Id < out[j].Id
 	})
@@ -205,6 +205,9 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			scheduler.FinishSource(src.Id)
 			abandonQueuedCollectSource(src, batchCtx)
 			continue
+		}
+		if idx > 0 {
+			time.Sleep(200 * time.Millisecond)
 		}
 		wg.Add(1)
 		if sem != nil {

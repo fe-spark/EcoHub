@@ -137,20 +137,21 @@ func defaultFilmSources() []model.FilmSource {
 	// 使用 URI 哈希作为 ID，设置递增初始创建时间以保证默认采集站顺序稳定
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	list := []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Weight: 100, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
-		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Weight: 90, State: true, Interval: 200, Cd: 24},
-		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Weight: 80, State: true, Interval: 200, Cd: 24},
-		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Weight: 70, State: true, Interval: 200, Cd: 24},
-		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Weight: 60, State: true, Interval: 200, Cd: 24},
-		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Weight: 50, State: true, Interval: 200, Cd: 24},
-		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Weight: 40, State: true, Interval: 200, Cd: 24},
-		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Weight: 30, State: true, Interval: 200, Cd: 24},
-		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Weight: 20, State: true, Interval: 200, Cd: 24},
-		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Weight: 10, State: true, Interval: 200, Cd: 24},
-		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Weight: 0, State: true, Interval: 200, Cd: 24},
-		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Weight: 0, State: true, Interval: 200, Cd: 24},
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Sort: 0, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
+		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Sort: 1, State: true, Interval: 200, Cd: 24},
+		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Sort: 2, State: true, Interval: 200, Cd: 24},
+		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Sort: 3, State: true, Interval: 200, Cd: 24},
+		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Sort: 4, State: true, Interval: 200, Cd: 24},
+		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Sort: 5, State: true, Interval: 200, Cd: 24},
+		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Sort: 6, State: true, Interval: 200, Cd: 24},
+		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Sort: 7, State: true, Interval: 200, Cd: 24},
+		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Sort: 8, State: true, Interval: 200, Cd: 24},
+		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Sort: 9, State: true, Interval: 200, Cd: 24},
+		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Sort: 10, State: true, Interval: 200, Cd: 24},
+		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Sort: 11, State: true, Interval: 200, Cd: 24},
 	}
 	for i := range list {
+		list[i].Sort = i
 		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
 	}
 	return list
@@ -196,6 +197,15 @@ func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 			}
 			existing[i] = t
 			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", legacyOrphanSpec, config.OrphanCleanSpec)
+		}
+		if t.Id == "sys_cron_orphan_clean" && (t.Remark == "清理无主影片的孤儿播放列表" || strings.TrimSpace(t.Remark) == "") {
+			t.Remark = "片库冗余数据与孤儿清理"
+			if err := repository.UpdateFilmTask(t); err != nil {
+				syslog.Errorf("[Cron] 迁移孤儿清理 remark 失败 id=%s: %v", t.Id, err)
+				continue
+			}
+			existing[i] = t
+			log.Printf("[Cron] 已将 sys_cron_orphan_clean remark 更新为 片库冗余数据与孤儿清理")
 		}
 	}
 
@@ -341,7 +351,7 @@ func defaultFilmTasks() []model.FilmCollectTask {
 
 	orphanTask := model.FilmCollectTask{
 		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.OrphanCleanSpec,
-		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
+		Model: 3, State: false, Remark: "片库冗余数据与孤儿清理",
 	}
 
 	logCleanTask := model.FilmCollectTask{

@@ -54,9 +54,6 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
         <Flex vertical gap={4}>
           <Space size={[8, 4]} wrap>
             <Typography.Text strong>{value}</Typography.Text>
-            <Tag color="blue" variant="filled">
-              权重 {record.weight ?? 0}
-            </Tag>
             {stableActiveIds.includes(record.id) ? (
               <Tag icon={<LoadingOutlined />} color="processing" variant="filled">
                 采集中

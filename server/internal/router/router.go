@@ -155,6 +155,7 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
 			collect.POST(`/set-primary`, handler.CollectHd.FilmSourceSetPrimary)
+			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)

@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"log"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -190,4 +191,20 @@ func TruncateRecordTable() {
 	if err != nil {
 		log.Println("TRUNCATE TABLE Error: ", err)
 	}
+}
+
+// PruneExpiredFailureRecords 物理修剪超过保留期的终态失败记录（status 为 success 或 failed 且创建超过 retention）
+func PruneExpiredFailureRecords(retention time.Duration) int64 {
+	if db.Mdb == nil {
+		return 0
+	}
+	cutoff := time.Now().Add(-retention)
+	res := db.Mdb.Where("status IN ? AND created_at < ?",
+		[]int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}, cutoff).
+		Delete(&model.FailureRecord{})
+	if res.Error != nil {
+		log.Printf("[FailureRecord] 修剪历史失败流水失败: %v", res.Error)
+		return 0
+	}
+	return res.RowsAffected
 }

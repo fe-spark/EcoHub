@@ -80,13 +80,16 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 
 		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
 		if strings.TrimSpace(st.SourceId) != "" {
-			query = query.Where("(source_id = ? OR source_id = '')", strings.TrimSpace(st.SourceId))
-		}
-		if st.Pid > 0 {
-			query = query.Where("pid = ?", st.Pid)
+			src := strings.TrimSpace(st.SourceId)
+			sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
+				Select("mid").
+				Where("snapshot_version = ? AND source_id = ?", version, src)
+			query = query.Where("(source_id = ? OR mid IN (?))", src, sourceMidSubQuery)
 		}
 		if st.Cid > 0 {
 			query = query.Where("cid = ?", st.Cid)
+		} else if st.Pid > 0 {
+			query = query.Where("pid = ?", st.Pid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 
@@ -386,13 +389,7 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version == "" || keyword == "" {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
-	}
-
-	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+	if version == "" || keyword == "" || len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
 		page.Total = 0
 		page.PageCount = 1
 		return []model.FilmListSnapshot{}
@@ -426,12 +423,19 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
-		query := applyNameLikeFilter(db.Mdb.Table("film_list_snapshots as s").
-			Joins("LEFT JOIN film_snapshot_sources as ss ON s.snapshot_version = ss.snapshot_version AND s.mid = ss.mid").
-			Where("s.snapshot_version = ? AND (ss.source_id = ? OR s.source_id = ? OR s.source_id = '')", version, sourceID, sourceID), keyword)
+		sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
+			Select("mid").
+			Where("snapshot_version = ? AND source_id = ?", version, sourceID)
+
+		query := applyNameLikeFilter(
+			db.Mdb.Model(&model.FilmListSnapshot{}).
+				Unscoped().
+				Where("snapshot_version = ? AND (source_id = ? OR mid IN (?))", version, sourceID, sourceMidSubQuery),
+			keyword,
+		)
 
 		var total int64
-		if err := query.Distinct("s.id").Count(&total).Error; err != nil {
+		if err := query.Count(&total).Error; err != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 		calcTotal := int(total)
@@ -444,7 +448,7 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 		offset := shared.PageOffset(page)
 
 		var ids []uint
-		if err := query.Select("DISTINCT s.id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("s.id", &ids).Error; err != nil {
+		if err := query.Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
@@ -480,13 +484,8 @@ func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID str
 		return item, nil
 	})
 
-	if err != nil || val == nil {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
-	}
 	cachedItem, ok := val.(searchCacheItem)
-	if !ok {
+	if err != nil || val == nil || !ok {
 		page.Total = 0
 		page.PageCount = 1
 		return []model.FilmListSnapshot{}

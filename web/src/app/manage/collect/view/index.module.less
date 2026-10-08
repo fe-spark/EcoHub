@@ -237,7 +237,7 @@
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 10px;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.2s ease;
 }
 
@@ -250,6 +250,7 @@
   width: 3px;
   border-radius: 0 3px 3px 0;
   background: var(--card-accent);
+  z-index: 2;
   transition: background 0.2s ease, opacity 0.2s ease;
 }
 
@@ -318,12 +319,51 @@
   --card-accent: #ff4d4f;
 }
 
-/* 头部 */
+/* 头部：可拖拽区域，增加背景色标识 */
 .cardHead {
   display: flex;
   align-items: flex-start;
   gap: 10px;
   min-width: 0;
+  margin: -16px -16px 14px -16px;
+  padding: 12px 14px;
+  background: var(--ant-color-fill-quaternary);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  border-radius: 9px 9px 0 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--ant-color-fill-tertiary);
+  }
+
+  &:active {
+    cursor: grabbing;
+    background: var(--ant-color-fill-secondary);
+  }
+}
+
+/* 拖拽原位占位符：虚线边框与半透明度，视觉指示明确 */
+.dragSourcePlaceholder {
+  opacity: 0.35;
+  border-radius: 10px;
+  outline: 2px dashed var(--ant-color-primary, #fa8c16);
+  outline-offset: -2px;
+  filter: grayscale(0.4);
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+/* 拖拽悬浮抓取预览卡片：深立体投影与微仰角，随光标移动 */
+.dragOverlayCard {
+  cursor: grabbing;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.18), 0 4px 12px rgba(0, 0, 0, 0.12);
+  transform: scale(1.02);
+  border-radius: 10px;
+  pointer-events: none;
+  background: var(--ant-color-bg-container);
 }
 
 .cardHeadMain {
@@ -591,6 +631,7 @@
   gap: 8px;
   margin: 12px 0 0;
   padding: 0;
+  cursor: default;
 }
 
 .metaCol {
@@ -653,6 +694,7 @@
   margin-top: 12px;
   padding-top: 12px;
   border-top: 1px solid var(--ant-color-border-secondary);
+  cursor: default;
 }
 
 .actionGroup {

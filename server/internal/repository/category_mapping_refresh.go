@@ -47,7 +47,7 @@ func RefreshFutureCategoryMappingsFromSourceCategories() error {
 	// 这里只刷新 categories/category_mappings/cacheSourceMap，不回写资源数据。
 	// 已采集影片在查询时通过最新来源映射自然归入当前展示分组。
 	var sourceIDs []string
-	if err := db.Mdb.Model(&model.FilmSource{}).Where("state = ?", true).Order("weight DESC, created_at ASC").Pluck("id", &sourceIDs).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmSource{}).Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Pluck("id", &sourceIDs).Error; err != nil {
 		return err
 	}
 	plansBySource, err := loadSourceCategoryPlacementsBySourceIDs(sourceIDs)

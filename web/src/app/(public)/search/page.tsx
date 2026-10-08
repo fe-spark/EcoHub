@@ -12,7 +12,7 @@ async function getSearchData(keyword: string, current: string, sort?: string, so
       keyword,
       current,
       pageSize: 12,
-      sort: source ? "" : sort || "",
+      sort: sort || "",
       source: source || "",
     });
 

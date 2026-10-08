@@ -203,15 +203,15 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		newsMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, limit)
+		newsMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 0, pid, limit)
 	}()
 	go func() {
 		defer wg.Done()
-		topMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, limit)
+		topMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 1, pid, limit)
 	}()
 	go func() {
 		defer wg.Done()
-		recentMovies = filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, limit)
+		recentMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 2, pid, limit)
 	}()
 	wg.Wait()
 
