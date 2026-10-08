@@ -12,6 +12,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/film/shared"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 
 	"golang.org/x/sync/singleflight"
@@ -20,9 +21,14 @@ import (
 )
 
 var (
-	initializedPids sync.Map
-	rebuildPidSf    singleflight.Group
+	initializedPids     sync.Map
+	filledSearchTagPids sync.Map
+	rebuildPidSf        singleflight.Group
 )
+
+func init() {
+	filmsnapshot.SetSearchTagBackfill(fillSearchTagsForPid)
+}
 
 const (
 	searchTagsRebuildFilmBatchSize = 200
@@ -110,17 +116,32 @@ func RefreshSearchTagsByPids(pids ...int64) error {
 }
 
 func rebuildSearchTagsForPid(pid int64) (int, error) {
+	// 先写入新标签，再删掉这次扫描没再出现的值。筛选行在重建过程中保持可读。
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Unscoped().Where("pid = ?", pid).Delete(&model.SearchTagItem{}).Error; err != nil {
-			return err
-		}
 		initializedPids.Delete(pid)
 		return ensureStaticTagsForPidTx(tx, pid)
 	}); err != nil {
 		return 0, err
 	}
+	total, seen, err := upsertSearchTagsFromPidFilms(pid)
+	if err != nil {
+		return total, err
+	}
+	if err := deleteUnseenDynamicSearchTags(pid, seen); err != nil {
+		return total, err
+	}
+	return total, nil
+}
 
+type searchTagKey struct {
+	tagType string
+	value   string
+}
+
+// upsertSearchTagsFromPidFilms 按已入库影片补齐该分类的剧情、地区、语言、年份。不删除已有标签。
+func upsertSearchTagsFromPidFilms(pid int64) (int, map[searchTagKey]struct{}, error) {
 	totalFilms := 0
+	seen := make(map[searchTagKey]struct{})
 	var lastMid int64
 	for {
 		var batch []model.FilmIndex
@@ -130,7 +151,7 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 			Order("mid ASC").
 			Limit(searchTagsRebuildFilmBatchSize).
 			Find(&batch).Error; err != nil {
-			return totalFilms, err
+			return totalFilms, seen, err
 		}
 		if len(batch) == 0 {
 			break
@@ -139,16 +160,80 @@ func rebuildSearchTagsForPid(pid int64) (int, error) {
 		lastMid = batch[len(batch)-1].Mid
 
 		items := aggregateSearchTagItems(collectDynamicSearchTagItemsBatch(batch))
+		for _, item := range items {
+			seen[searchTagKey{item.TagType, item.Value}] = struct{}{}
+		}
 		if len(items) == 0 {
 			continue
 		}
 		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			return bulkUpsertSearchTagItemsTx(tx, items)
 		}); err != nil {
-			return totalFilms, err
+			return totalFilms, seen, err
 		}
 	}
-	return totalFilms, nil
+	return totalFilms, seen, nil
+}
+
+func deleteUnseenDynamicSearchTags(pid int64, seen map[searchTagKey]struct{}) error {
+	var rows []model.SearchTagItem
+	if err := db.Mdb.Where("pid = ?", pid).Find(&rows).Error; err != nil {
+		return err
+	}
+	ids := make([]uint, 0)
+	for _, row := range rows {
+		if row.TagType == "Initial" {
+			continue
+		}
+		if _, ok := seen[searchTagKey{row.TagType, row.Value}]; ok {
+			continue
+		}
+		ids = append(ids, row.ID)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return db.Mdb.Unscoped().Where("id IN ?", ids).Delete(&model.SearchTagItem{}).Error
+}
+
+// UpsertSearchTagsByMids 把本窗已入库影片的剧情、地区、语言、年份增量写入搜索标签。
+func UpsertSearchTagsByMids(mids ...int64) error {
+	if len(mids) == 0 || db.Mdb == nil {
+		return nil
+	}
+	var infos []model.FilmIndex
+	if err := db.Mdb.Select("mid, pid, cid, c_name, class_tag, area, language, year").
+		Where("mid IN ?", mids).
+		Find(&infos).Error; err != nil {
+		return err
+	}
+	return UpsertDynamicSearchTags(infos...)
+}
+
+// fillSearchTagsForPid 在筛选行还没生成时，从已经入库的影片补齐。已有标签不删。
+func fillSearchTagsForPid(pid int64) error {
+	if pid <= 0 || db.Mdb == nil {
+		return nil
+	}
+	if _, ok := filledSearchTagPids.Load(pid); ok {
+		return nil
+	}
+	_, err, _ := rebuildPidSf.Do("fill:"+strconv.FormatInt(pid, 10), func() (any, error) {
+		if _, ok := filledSearchTagPids.Load(pid); ok {
+			return nil, nil
+		}
+		start := time.Now()
+		total, _, scanErr := upsertSearchTagsFromPidFilms(pid)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		if total > 0 {
+			filledSearchTagPids.Store(pid, true)
+			log.Printf("[SearchTags] 已按入库影片补齐筛选标签 pid=%d films=%d cost=%s", pid, total, time.Since(start))
+		}
+		return nil, nil
+	})
+	return err
 }
 
 func collectDynamicSearchTagItemsBatch(infos []model.FilmIndex) []model.SearchTagItem {

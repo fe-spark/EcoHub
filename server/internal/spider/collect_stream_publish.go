@@ -9,6 +9,7 @@ import (
 	"server/internal/repository"
 	filmcache "server/internal/repository/film/cache"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/film/writer"
 )
 
 const (
@@ -260,6 +261,10 @@ func publishStreamWindowReal(mids []int64) error {
 	if len(mids) == 0 {
 		return nil
 	}
+	// 标签跟着本窗已入库影片走。失败只记日志，不挡住列表可见。
+	if err := writer.UpsertSearchTagsByMids(mids...); err != nil {
+		log.Printf("[Spider][StreamPublish] 搜索标签增量失败 mids=%d err=%v", len(mids), err)
+	}
 	version, err := publishFilmSnapshot(mids)
 	if err != nil {
 		return err
@@ -270,11 +275,10 @@ func publishStreamWindowReal(mids []int64) error {
 	return nil
 }
 
-func finalizeStreamPublish(masterMIDs []int64) error {
+func finalizeStreamPublish() error {
 	if err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
-	scheduleMasterSearchTagsRefresh(masterMIDs)
 	filmcache.ClearTVBoxConfigCache()
 	filmsnapshot.FlushSnapshotCacheInvalidation()
 	filmsnapshot.FlushSnapshotPublishedNotify()

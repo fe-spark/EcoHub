@@ -2,7 +2,6 @@ package spider
 
 import (
 	"log"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -303,13 +302,6 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		return nil
 	}
 
-	masterMIDs := make([]int64, 0, len(b.masterAffectedMIDs))
-	for mid := range b.masterAffectedMIDs {
-		if mid > 0 {
-			masterMIDs = append(masterMIDs, mid)
-		}
-	}
-	sort.Slice(masterMIDs, func(i, j int) bool { return masterMIDs[i] < masterMIDs[j] })
 	finishedMap := b.finishedSources
 	b.finishedSources = make(map[string]model.FilmSource)
 	b.masterAffectedMIDs = make(map[int64]struct{})
@@ -322,7 +314,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	if err := finalizeStreamPublish(masterMIDs); err != nil {
+	if err := finalizeStreamPublish(); err != nil {
 		progress.MarkSourcesFinalizeFailed(finishedMap)
 		return err
 	}
