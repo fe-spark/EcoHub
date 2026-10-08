@@ -5,7 +5,6 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"log"
 	"math"
 	"strconv"
@@ -24,7 +23,6 @@ import (
 	"server/internal/spider/scheduler"
 	"server/internal/utils"
 
-	"github.com/go-sql-driver/mysql"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -346,18 +344,6 @@ func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
 	return tx.Model(&model.FilmIndex{}).Where("mid = ?", mid).Updates(updates).Error
 }
 
-func isRetryableDBErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	var mysqlErr *mysql.MySQLError
-	if errors.As(err, &mysqlErr) {
-		return mysqlErr.Number == 1213 || mysqlErr.Number == 1205
-	}
-	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "deadlock") || strings.Contains(msg, "lock wait timeout")
-}
-
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, err error) {
 	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
 		var existingMapping model.MovieSourceMapping
@@ -370,7 +356,11 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		var filmIndex *model.FilmIndex
 		if hasMapping {
 			var fi model.FilmIndex
-			if err := tx.Where("mid = ?", mid).First(&fi).Error; err == nil {
+			q := tx.Where("mid = ?", mid)
+			if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+				q = q.Clauses(clause.Locking{Strength: "UPDATE"})
+			}
+			if err := q.First(&fi).Error; err == nil {
 				filmIndex = &fi
 			}
 		}
@@ -385,11 +375,18 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 				}
 			}
 			allKeys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
+			if err := lockMatchKeysTx(tx, allKeys); err != nil {
+				return err
+			}
 			if len(allKeys) > 0 {
 				var matchKey model.MovieMatchKey
 				if err := tx.Where("match_key IN ?", allKeys).Order("id ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
 					var fi model.FilmIndex
-					if err := tx.Where("mid = ?", matchKey.Mid).First(&fi).Error; err == nil && fi.Mid > 0 {
+					fiQ := tx.Where("mid = ?", matchKey.Mid)
+					if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
+						fiQ = fiQ.Clauses(clause.Locking{Strength: "UPDATE"})
+					}
+					if err := fiQ.First(&fi).Error; err == nil && fi.Mid > 0 {
 						mid = fi.Mid
 						filmIndex = &fi
 						_ = shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid)
@@ -435,17 +432,6 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 	return mid, isNew, playLinesChanged, err
 }
 
-func saveSinglePeerDetailWithRetry(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, err error) {
-	for attempt := 1; attempt <= 3; attempt++ {
-		mid, isNew, playLinesChanged, err = saveSinglePeerDetailTx(source, detail)
-		if err == nil || !isRetryableDBErr(err) || attempt == 3 {
-			break
-		}
-		time.Sleep(time.Duration(attempt*100) * time.Millisecond)
-	}
-	return mid, isNew, playLinesChanged, err
-}
-
 // SaveCollectedPeerDetails 全站平权影片采集入库入口。
 // 每部片独立事务落库，自动识别或新建影片档案，增量挂接多源播放线路。
 func SaveCollectedPeerDetails(
@@ -462,16 +448,9 @@ func SaveCollectedPeerDetails(
 			continue
 		}
 
-		identLock := getFilmIdentityLock(detail.Name)
-		identLock.Lock()
-
-		sourceLock := getSourceWriteLock(source.Id)
-		sourceLock.Lock()
-
+		unlock := lockPeerCollect(source, detail)
 		mid, isNew, playLinesChanged, err := saveSinglePeerDetailWithRetry(source, detail)
-
-		sourceLock.Unlock()
-		identLock.Unlock()
+		unlock()
 
 		if err != nil {
 			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod_id=%d name=%s err=%v",

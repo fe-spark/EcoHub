@@ -44,15 +44,13 @@ docker exec -it ecohub /app/migrate_slave_playlist_keys
 
 Stop interrupts tasks that are still fetching pages and cancels their context. Sources already in `page_done` / `waiting_publish` still finish and publish.
 
-A **master full** collect that errors or is stopped does **not** publish the pending mids from that run (they are discarded). The database may already contain partial writes, but the public read model stays on the previous snapshot. A master increment or a slave collect that already wrote rows still finalizes and publishes that increment.
+Successful pages are streamed into the snapshot in small windows while collect runs. Stopping or failing later pages leaves already published films visible; failed pages go to the retry queue.
 
 ## Snapshots and cache
 
 ### Why publish a snapshot after collect? Why can an incremental publish still take time?
 
-Tables keep changing during collect. Finalize refreshes play summaries, publishes the list snapshot, and swaps the in-memory read model. Public lists, filters, the admin film list, and TVBox / MacCMS all read that result.
-
-An incremental publish still processes affected mids: snapshot rows, filter indexes, and the read model. A large catalog costs database time and memory. The read model stays in memory for the whole library; it is not only a short spike during publish.
+Tables keep changing during collect. Each publish window refreshes play summaries for those mids, upserts snapshot rows, and updates the search index incrementally. Public lists, filters, the admin film list, and TVBox / MacCMS read that snapshot. List caches debounce about 5 seconds so a million-title full collect does not flush Redis on every page.
 
 ### Why didn’t the public site change after a config edit?
 

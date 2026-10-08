@@ -27,6 +27,8 @@ func setupOthersFilterTestDB(t *testing.T) *gorm.DB {
 		&model.Category{},
 		&model.SearchTagItem{},
 		&model.FilmListSnapshot{},
+		&model.FilmIndex{},
+		&model.FilmSourcePlaylist{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -99,6 +101,9 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 		if err := gdb.Create(&s).Error; err != nil {
 			t.Fatalf("create snapshot: %v", err)
 		}
+	}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
 	}
 
 	// 验证 1: 常规筛选 Area=中国大陆 -> 仅命中 Mid=1
@@ -242,6 +247,9 @@ func TestListFilmSnapshotsByTags_OthersFilter_OverDisplayLimit(t *testing.T) {
 			t.Fatalf("create snapshot: %v", err)
 		}
 	}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
+	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
 	res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: model.TagOthersValue}, page)
@@ -284,6 +292,9 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 		}
 		if err := gdb.Create(&s).Error; err != nil {
 			t.Fatalf("create snapshot %d: %v", i, err)
+		}
+		if err := WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{s}); err != nil {
+			t.Fatalf("seed live film %d: %v", i, err)
 		}
 	}
 

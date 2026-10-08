@@ -10,7 +10,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 type filmMetaCacheItem struct {
@@ -71,22 +70,18 @@ func resolveFilmMetas(filmIDs []int64) map[int64]filmMetaCacheItem {
 	foundMap := make(map[int64]filmMetaCacheItem, len(missing))
 	unresolved := make([]int64, 0, len(missing))
 
-	// 1. 优先从当前活跃快照表 FilmListSnapshot 中查询（包含自定义封面和最新海报源封面）
-	activeVersion := filmsnapshot.GetActiveSnapshotVersion()
-	if activeVersion != "" {
-		var snapshots []model.FilmListSnapshot
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("mid, name, c_name, picture, year").
-			Where("snapshot_version = ? AND mid IN ?", activeVersion, missing).
-			Find(&snapshots).Error; err == nil {
-			for _, s := range snapshots {
-				foundMap[s.Mid] = filmMetaCacheItem{
-					Title:    s.Name,
-					Category: s.CName,
-					Poster:   s.Picture,
-					Year:     s.Year,
-					CachedAt: now,
-				}
+	var snapshots []model.FilmIndex
+	if err := db.Mdb.Model(&model.FilmIndex{}).
+		Select("mid, name, c_name, picture, year").
+		Where("mid IN ?", missing).
+		Find(&snapshots).Error; err == nil {
+		for _, s := range snapshots {
+			foundMap[s.Mid] = filmMetaCacheItem{
+				Title:    s.Name,
+				Category: s.CName,
+				Poster:   s.Picture,
+				Year:     s.Year,
+				CachedAt: now,
 			}
 		}
 	}

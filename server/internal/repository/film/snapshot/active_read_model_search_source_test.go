@@ -26,6 +26,8 @@ func setupSearchSourceTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&model.FilmListSnapshot{},
 		&model.FilmSnapshotSource{},
+		&model.FilmIndex{},
+		&model.FilmSourcePlaylist{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -62,6 +64,12 @@ func TestSearchSnapshotsByKeywordSourceAndSort(t *testing.T) {
 		if err := gdb.Create(&s).Error; err != nil {
 			t.Fatalf("create snapshot source: %v", err)
 		}
+		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: s.Mid, SourceId: s.SourceId, LineKind: "play"}).Error; err != nil {
+			t.Fatalf("create playlist: %v", err)
+		}
+	}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
 	}
 
 	// 1. 搜索 "斗破", 源 "uku" -> 应该命中 Mid 1

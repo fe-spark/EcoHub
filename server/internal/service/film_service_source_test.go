@@ -141,6 +141,12 @@ func TestFilmService_GetFilmPage_SnapshotMode_FilterBySource(t *testing.T) {
 	})
 	gdb.Create(&model.FilmSnapshotSource{SnapshotVersion: snapVer, Mid: 201, SourceId: "src1"})
 	gdb.Create(&model.FilmSnapshotSource{SnapshotVersion: snapVer, Mid: 202, SourceId: "src2"})
+	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{
+		{Mid: 201, SourceId: "src1", Name: "快照影片1"},
+		{Mid: 202, SourceId: "src2", Name: "快照影片2"},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 201, SourceId: "src1", LineKind: "play"})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 202, SourceId: "src2", LineKind: "play"})
 
 	srv := new(FilmService)
 

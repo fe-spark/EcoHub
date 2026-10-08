@@ -22,7 +22,7 @@ import (
 const (
 	snapshotListCacheTTL = 10 * time.Minute
 	snapshotPageCacheTTL = 5 * time.Minute
-	basicSelectFields    = "id, snapshot_version, mid, source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
+	basicSelectFields    = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
 )
 
 type categoryPageCacheItem struct {
@@ -32,14 +32,7 @@ type categoryPageCacheItem struct {
 }
 
 func applyCategorySnapshotSourceFilter(query *gorm.DB, version string, sourceID string) *gorm.DB {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return query
-	}
-	sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
-		Select("mid").
-		Where("snapshot_version = ? AND source_id = ?", version, sourceID)
-	return query.Where("(source_id = ? OR mid IN (?))", sourceID, sourceMidSubQuery)
+	return applySourceMembership(query, sourceID)
 }
 
 func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
@@ -67,18 +60,15 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select(basicSelectFields).
-		Where("snapshot_version = ?", version)
-	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
+	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
 		query = query.Where("cid = ?", id)
 	}
 
-	var snapshots []model.FilmListSnapshot
-	if err := query.Order("update_stamp DESC, id DESC").Offset(offset).Limit(limit).Find(&snapshots).Error; err != nil {
+	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(limit))
+	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
@@ -123,8 +113,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
-	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
+	query := applyCategorySnapshotSourceFilter(liveFilmQuery(), version, sourceID)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -141,9 +130,9 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		page.PageCount = 1
 	}
 
-	var snapshots []model.FilmListSnapshot
 	offset := shared.PageOffset(page)
-	if err := query.Select(basicSelectFields).Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&snapshots).Error; err != nil {
+	snapshots, err := scanListSnapshots(query.Select(basicSelectFields).Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(page.PageSize))
+	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
@@ -198,9 +187,9 @@ func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
 	}
 	switch field {
 	case "pid":
-		return query.Clauses(mysqlUseIndexHint{index: "idx_snap_pid_hits"})
+		return query.Clauses(mysqlUseIndexHint{index: "idx_pid_hits"})
 	case "cid":
-		return query.Clauses(mysqlUseIndexHint{index: "idx_snap_cid_hits"})
+		return query.Clauses(mysqlUseIndexHint{index: "idx_cid_hits"})
 	default:
 		return query
 	}
@@ -231,10 +220,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select(basicSelectFields).
-		Where("snapshot_version = ?", version)
-	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
+	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -242,8 +228,8 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		query = query.Where("cid = ?", id)
 	}
 
-	var snapshots []model.FilmListSnapshot
-	if err := query.Order("hits DESC, id DESC").Offset(offset).Limit(limit).Find(&snapshots).Error; err != nil {
+	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Offset(offset).Limit(limit))
+	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
@@ -285,10 +271,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		}
 	}
 
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select(basicSelectFields).
-		Where("snapshot_version = ?", version)
-	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
+	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
 	query = applyCategoryHotIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
@@ -296,8 +279,8 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		query = query.Where("cid = ?", id)
 	}
 
-	var snapshots []model.FilmListSnapshot
-	if err := query.Order("hits DESC, id DESC").Limit(poolSize).Find(&snapshots).Error; err != nil {
+	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Limit(poolSize))
+	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
@@ -376,14 +359,9 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 		orderClause = "update_stamp DESC"
 	}
 
-	var snapshots []model.FilmListSnapshot
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select(basicSelectFields).
-		Where("snapshot_version = ? AND pid = ?", version, pid)
-	query = applyCategorySnapshotSourceFilter(query, version, sourceID)
-	query = query.Order(orderClause).Limit(limit)
-
-	if err := query.Find(&snapshots).Error; err != nil {
+	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields).Where("pid = ?", pid), version, sourceID)
+	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
+	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)

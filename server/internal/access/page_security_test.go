@@ -248,12 +248,10 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	_ = filmsnapshot.SetActiveSnapshotVersion(testVersion)
 
 	// 库中存在影片 8888888 与分类 555
-	_ = gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: testVersion,
-		Mid:             8888888,
-		Name:            "库中影片-流浪地球2",
-		CName:           "科幻",
-		Picture:         "https://cdn.example.com/earth2.jpg",
+	_ = gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 8888888},
+		FilmIndexCategory: model.FilmIndexCategory{CName: "科幻"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "库中影片-流浪地球2", Picture: "https://cdn.example.com/earth2.jpg"},
 	}).Error
 	_ = gdb.Create(&model.Category{
 		Id:   555,

@@ -329,19 +329,17 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			var fallbackRows []struct {
 				Mid int64
 			}
-			query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-				Select("mid").
-				Where("snapshot_version = ?", version)
+			query := db.Mdb.Model(&model.FilmIndex{}).Select("mid")
 			if sourceID != "" {
-				sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
-					Select("mid").
-					Where("snapshot_version = ? AND source_id = ?", version, sourceID)
-				query = query.Where("(source_id = ? OR mid IN (?))", sourceID, sourceMidSubQuery)
+				sourceMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+					Select("DISTINCT mid").
+					Where("source_id = ? AND line_kind = ?", sourceID, "play")
+				query = query.Where("mid IN (?)", sourceMidSubQuery)
 			}
 			if len(mids) > 0 {
 				query = query.Where("mid NOT IN ?", mids)
 			}
-			_ = query.Order("update_stamp DESC, id DESC").Limit(needed).Scan(&fallbackRows).Error
+			_ = query.Order("update_stamp DESC, mid DESC").Limit(needed).Scan(&fallbackRows).Error
 			for _, r := range fallbackRows {
 				if r.Mid > 0 {
 					mids = append(mids, r.Mid)

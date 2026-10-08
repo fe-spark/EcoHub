@@ -98,10 +98,10 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 			return []string{}, nil
 		}
 
-		var snapshots []model.FilmListSnapshot
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
+		var snapshots []model.FilmIndex
+		query := db.Mdb.Model(&model.FilmIndex{}).
 			Select("name").
-			Where("snapshot_version = ? AND pid > 0", version).
+			Where("pid > 0").
 			Order("hits DESC").
 			Limit(hotSearchMaxLimit * 3)
 		if err := query.Find(&snapshots).Error; err != nil {

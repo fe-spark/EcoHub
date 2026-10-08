@@ -171,5 +171,5 @@ func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
 }
 
 func shouldSkipCollectPublishOnError(source model.FilmSource, h int) bool {
-	return h < 0
+	return false
 }

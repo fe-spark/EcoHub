@@ -63,6 +63,6 @@ func TestApplyCategoryHotIndexHint_MySQLQuotedSeparately(t *testing.T) {
 		}
 	}
 
-	assertHint("pid", "idx_snap_pid_hits")
-	assertHint("cid", "idx_snap_cid_hits")
+	assertHint("pid", "idx_pid_hits")
+	assertHint("cid", "idx_cid_hits")
 }

@@ -7,7 +7,6 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/snapshot"
 )
 
 type liveProgress struct {
@@ -90,11 +89,6 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		return out
 	}
 
-	version := snapshot.GetActiveSnapshotVersion()
-	if version == "" {
-		return out
-	}
-
 	type row struct {
 		Mid                int64
 		Remarks            string
@@ -112,9 +106,9 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		IsCustomPicture    bool
 	}
 	var rows []row
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
+	if err := db.Mdb.Model(&model.FilmIndex{}).
 		Select("mid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
-		Where("snapshot_version = ? AND mid IN ?", version, mids).
+		Where("mid IN ?", mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
 		return out

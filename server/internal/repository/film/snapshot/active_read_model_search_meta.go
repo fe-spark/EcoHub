@@ -3,7 +3,6 @@ package snapshot
 import (
 	"golang.org/x/sync/singleflight"
 	"log"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -35,96 +34,6 @@ var searchMetaBuildWg sync.WaitGroup
 
 func WaitActiveFilmSearchIndexBuilt() {
 	searchMetaBuildWg.Wait()
-}
-
-func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
-	version = strings.TrimSpace(version)
-	if version == "" || db.Mdb == nil {
-		return nil
-	}
-	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-		return cur
-	}
-	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
-		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-			return cur, nil
-		}
-		type dbMetaRow struct {
-			Mid         int64
-			Pid         int64
-			Cid         int64
-			Name        string
-			Hits        int64
-			Score       float64
-			Year        int64
-			UpdateStamp int64
-		}
-		var rows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Select("mid, pid, cid, name, hits, score, year, update_stamp").
-			Where("snapshot_version = ?", version).
-			Find(&rows).Error; err != nil {
-			return nil, err
-		}
-		items := make([]FilmSearchMeta, len(rows))
-		numWorkers := runtime.GOMAXPROCS(0)
-		if numWorkers < 1 {
-			numWorkers = 1
-		}
-		if numWorkers > 8 {
-			numWorkers = 8
-		}
-		if len(rows) < 200 {
-			numWorkers = 1
-		}
-		chunkSize := (len(rows) + numWorkers - 1) / numWorkers
-		var wg sync.WaitGroup
-		for w := 0; w < numWorkers; w++ {
-			startIdx := w * chunkSize
-			endIdx := startIdx + chunkSize
-			if startIdx >= len(rows) {
-				break
-			}
-			if endIdx > len(rows) {
-				endIdx = len(rows)
-			}
-			wg.Add(1)
-			go func(s, e int) {
-				defer wg.Done()
-				for i := s; i < e; i++ {
-					r := rows[i]
-					item := utils.FilmSearchItem{
-						Mid:         r.Mid,
-						Name:        r.Name,
-						Hits:        r.Hits,
-						Score:       r.Score,
-						Year:        r.Year,
-						UpdateStamp: r.UpdateStamp,
-					}
-					utils.FillSearchDerivedFields(&item)
-					items[i] = FilmSearchMeta{
-						Mid:  r.Mid,
-						Pid:  r.Pid,
-						Cid:  r.Cid,
-						Item: item,
-					}
-				}
-			}(startIdx, endIdx)
-		}
-		wg.Wait()
-		idx := &filmSearchMetaIndex{
-			Version: version,
-			Items:   items,
-		}
-		activeFilmSearchMetasMu.Lock()
-		activeFilmSearchMetas.Store(idx)
-		activeFilmSearchMetasMu.Unlock()
-		return idx, nil
-	})
-	if err != nil || val == nil {
-		return nil
-	}
-	return val.(*filmSearchMetaIndex)
 }
 
 type scoredMetaHit struct {
@@ -333,11 +242,11 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 			end = len(cleanMids)
 		}
 		var batchRows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
+		if err := db.Mdb.Model(&model.FilmIndex{}).
 			Select("mid, pid, cid, name, hits, score, year, update_stamp").
-			Where("snapshot_version = ? AND mid IN ?", version, cleanMids[i:end]).
+			Where("mid IN ?", cleanMids[i:end]).
 			Find(&batchRows).Error; err != nil {
-			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询快照失败 version=%s: %v", version, err)
+			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询 film_index 失败: %v", err)
 			return
 		}
 		allRows = append(allRows, batchRows...)

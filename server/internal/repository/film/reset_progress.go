@@ -7,7 +7,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/repository/film/snapshot"
 )
 
 // ResetProgress 数据重置实时进度（前端轮询展示真实进度）
@@ -47,12 +46,7 @@ func GetResetImpactStats() ResetImpactStats {
 		Select("COUNT(DISTINCT mid)").
 		Scan(&stats.Films).Error
 
-	version := snapshot.GetActiveSnapshotVersion()
-	if version != "" {
-		_ = db.Mdb.Model(&model.FilmSnapshotSource{}).
-			Where("snapshot_version = ? AND source_id = ?", version, sourceID).
-			Count(&stats.Snapshots).Error
-	}
+	stats.Snapshots = stats.Films
 
 	stats.Categories = countCategoryTreeNodes(repository.GetActiveCategoryTree(sourceID).Children)
 

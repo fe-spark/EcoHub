@@ -54,13 +54,9 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 
 func TestShouldSkipCollectPublishOnError(t *testing.T) {
 	src := model.FilmSource{Sort: 0}
-
-	// 全量采集 (h < 0) -> 跳过发布
-	if !shouldSkipCollectPublishOnError(src, -1) {
-		t.Error("expected true for h < 0")
+	if shouldSkipCollectPublishOnError(src, -1) {
+		t.Error("流式可见下全量失败页不再跳过已刷快照")
 	}
-
-	// 增量采集 (h > 0) -> 不跳过
 	if shouldSkipCollectPublishOnError(src, 3) {
 		t.Error("expected false for h > 0")
 	}
@@ -298,6 +294,14 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 }
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
+	resetStreamPublishBufferForTest()
+	origPub := publishStreamWindowFn
+	publishStreamWindowFn = func(mids []int64) error { return nil }
+	t.Cleanup(func() {
+		resetStreamPublishBufferForTest()
+		publishStreamWindowFn = origPub
+	})
+
 	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
 	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
 	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
@@ -318,18 +322,18 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	// Batch B 产生 MIDs: 300, 400
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
-	// 验证两批次各自独立持有自身 MIDs，互不泄露
+	// 验证两批次各自独立持有自身标签刷新 MIDs，互不泄露
 	batchA.mu.Lock()
-	midsA := make([]int64, 0, len(batchA.affectedMIDs))
-	for mid := range batchA.affectedMIDs {
+	midsA := make([]int64, 0, len(batchA.masterAffectedMIDs))
+	for mid := range batchA.masterAffectedMIDs {
 		midsA = append(midsA, mid)
 	}
 	sort.Slice(midsA, func(i, j int) bool { return midsA[i] < midsA[j] })
 	batchA.mu.Unlock()
 
 	batchB.mu.Lock()
-	midsB := make([]int64, 0, len(batchB.affectedMIDs))
-	for mid := range batchB.affectedMIDs {
+	midsB := make([]int64, 0, len(batchB.masterAffectedMIDs))
+	for mid := range batchB.masterAffectedMIDs {
 		midsB = append(midsB, mid)
 	}
 	sort.Slice(midsB, func(i, j int) bool { return midsB[i] < midsB[j] })

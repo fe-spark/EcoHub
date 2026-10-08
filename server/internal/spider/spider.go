@@ -283,10 +283,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if isStandalone {
 		batchCtx = newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{*s}, nil, time.Now(), true)
 	}
-	isMasterFullCollect := h < 0
-	if isMasterFullCollect && batchCtx != nil {
-		batchCtx.beginMasterRebuild(s.Id)
-	}
 	defer func() {
 		originalErr := retErr
 		if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron && statsOwned {
@@ -296,19 +292,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			}
 		}
 		progress.FlushHotpathSideEffects(s.Id)
-		if originalErr != nil && (!hadWrites || shouldSkipCollectPublishOnError(*s, h)) {
-			if isMasterFullCollect && batchCtx != nil {
-				batchCtx.discardPendingMasterMIDs(s.Id)
-			}
+		if originalErr != nil && !hadWrites {
 			if isStandalone && batchCtx != nil {
 				noteSourceError(s.Id, originalErr.Error())
 				batchCtx.emitSummary(originalErr)
 				releasedPreparedOccupy = true
 			}
 			return
-		}
-		if isMasterFullCollect && batchCtx != nil {
-			batchCtx.publishPendingMasterMIDs(s.Id)
 		}
 		if batchCtx != nil {
 			batchCtx.markSourceFinished(*s)

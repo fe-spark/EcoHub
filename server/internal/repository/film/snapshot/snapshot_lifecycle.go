@@ -4,13 +4,20 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 )
+
+const snapshotPublishedNotifyDebounce = 5 * time.Second
 
 type SnapshotPublishedHook func(version string)
 
 var (
 	snapshotHooksMu sync.RWMutex
 	snapshotHooks   []SnapshotPublishedHook
+
+	notifyDebounceMu      sync.Mutex
+	notifyDebounceTimer   *time.Timer
+	notifyDebounceVersion string
 )
 
 // RegisterSnapshotPublishedHook 注册快照发布完成后的监听回调（如异步预热缓存等）
@@ -45,5 +52,45 @@ func NotifySnapshotPublished(version string) {
 				h(version)
 			}(hook)
 		}
+	}
+}
+
+func ScheduleSnapshotPublishedNotify(version string) {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		return
+	}
+	notifyDebounceMu.Lock()
+	defer notifyDebounceMu.Unlock()
+	notifyDebounceVersion = version
+	if notifyDebounceTimer == nil {
+		notifyDebounceTimer = time.AfterFunc(snapshotPublishedNotifyDebounce, fireDebouncedSnapshotPublishedNotify)
+		return
+	}
+	notifyDebounceTimer.Reset(snapshotPublishedNotifyDebounce)
+}
+
+func FlushSnapshotPublishedNotify() {
+	notifyDebounceMu.Lock()
+	version := notifyDebounceVersion
+	if notifyDebounceTimer != nil {
+		notifyDebounceTimer.Stop()
+		notifyDebounceTimer = nil
+	}
+	notifyDebounceVersion = ""
+	notifyDebounceMu.Unlock()
+	if version != "" {
+		NotifySnapshotPublished(version)
+	}
+}
+
+func fireDebouncedSnapshotPublishedNotify() {
+	notifyDebounceMu.Lock()
+	version := notifyDebounceVersion
+	notifyDebounceTimer = nil
+	notifyDebounceVersion = ""
+	notifyDebounceMu.Unlock()
+	if version != "" {
+		NotifySnapshotPublished(version)
 	}
 }

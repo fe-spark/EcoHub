@@ -184,19 +184,14 @@ func RebuildFilmListSnapshot(version string) error {
 func ActivateRebuiltFilmListSnapshot(version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
-		version = NewSnapshotVersion()
-	}
-	if err := RebuildFilmListSnapshot(version); err != nil {
+		version = EnsureLiveReadVersion()
+	} else if err := SetActiveSnapshotVersion(version); err != nil {
 		return err
 	}
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
-	if err := SetActiveSnapshotVersion(version); err != nil {
-		return err
-	}
 	RefreshAccessDataCaches()
-	pruneOldFilmListSnapshots(snapshotRetainVersions)
 	return nil
 }
 
@@ -209,25 +204,11 @@ func EnsureActiveFilmListSnapshot() error {
 		return nil
 	}
 
-	activeVer := strings.TrimSpace(GetActiveSnapshotVersion())
-	var snapCount int64
-	if activeVer != "" {
-		_ = db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-			Where("snapshot_version = ?", activeVer).
-			Count(&snapCount).Error
+	version := EnsureLiveReadVersion()
+	if err := LoadActiveFilmReadModel(version); err != nil {
+		return err
 	}
-
-	// 退出时清空了版本号（activeVer == ""），或异常强杀导致快照记录数与库内影片数不一致
-	if activeVer == "" || snapCount != dbCount {
-		RefreshMissingPlayFromSummaries()
-		version := NewSnapshotVersion()
-		if err := ActivateRebuiltFilmListSnapshot(version); err != nil {
-			return err
-		}
-		log.Printf("[Snapshot] 已基于现有影片数据构建并激活前台快照, version=%s, film_count=%d (原快照=%d)", version, dbCount, snapCount)
-		return nil
-	}
-
+	log.Printf("[Snapshot] 列表直读 film_index 已就绪 version=%s film_count=%d", version, dbCount)
 	return nil
 }
 
@@ -304,7 +285,7 @@ func HasPublishedFilmListSnapshot() (bool, error) {
 		return false, nil
 	}
 	var count int64
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Count(&count).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmIndex{}).Limit(1).Count(&count).Error; err != nil {
 		return false, err
 	}
 	return count > 0, nil

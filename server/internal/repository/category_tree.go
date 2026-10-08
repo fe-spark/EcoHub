@@ -238,9 +238,12 @@ func loadActiveCategoryIDs(sourceId string) map[int64]bool {
 		}
 
 		if len(active) == 0 && sourceId != "" {
+			sourceMids := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+				Select("DISTINCT mid").
+				Where("source_id = ? AND line_kind = ?", sourceId, "play")
 			var pids []int64
-			_ = db.Mdb.Model(&model.FilmListSnapshot{}).
-				Where("(source_id = ? OR source_id = '') AND pid > 0", sourceId).
+			_ = db.Mdb.Model(&model.FilmIndex{}).
+				Where("mid IN (?) AND pid > 0", sourceMids).
 				Distinct("pid").
 				Pluck("pid", &pids).Error
 			for _, id := range pids {
@@ -250,8 +253,8 @@ func loadActiveCategoryIDs(sourceId string) map[int64]bool {
 			}
 
 			var cids []int64
-			_ = db.Mdb.Model(&model.FilmListSnapshot{}).
-				Where("(source_id = ? OR source_id = '') AND cid > 0", sourceId).
+			_ = db.Mdb.Model(&model.FilmIndex{}).
+				Where("mid IN (?) AND cid > 0", sourceMids).
 				Distinct("cid").
 				Pluck("cid", &cids).Error
 			for _, id := range cids {
