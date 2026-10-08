@@ -136,7 +136,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 	return cloneMovieDetailVo(res), nil
 }
 
-// GetFilmDetailWithPreferred 根据指定偏好站点组织播放线路与缺集降级。
+// GetFilmDetailWithPreferred 按采集站顺序组织播放线路；preferredSource 仅重排，不混拼剧集。
 func (i *IndexService) GetFilmDetailWithPreferred(id int, preferredSource string) (model.MovieDetailVo, error) {
 	detail, err := i.GetFilmDetail(id)
 	if err != nil {
@@ -236,6 +236,9 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 			links = rewriteURLGroup(links, rules)
 		}
 
+		if !hasSource {
+			continue
+		}
 		if r.LineKind == "play" {
 			siteName := source.Name
 			if siteName == "" {
@@ -315,6 +318,9 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 			links = rewriteURLGroup(links, rules)
 		}
 
+		if !hasSource {
+			continue
+		}
 		siteName := source.Name
 		if siteName == "" {
 			siteName = r.SourceId
@@ -386,8 +392,6 @@ func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 	logSlowIndexServiceStep("GetFilmDetailOnly.total", startedAt, "id", id)
 	return *movieDetail, nil
 }
-
-
 
 func rewriteURLGroup(links []model.MovieUrlInfo, rules []utils.DomainReplaceRule) []model.MovieUrlInfo {
 	if len(rules) == 0 || links == nil {

@@ -218,14 +218,14 @@ const (
 	// ProxyConfigKey 采集网络代理配置缓存
 	ProxyConfigKey = RedisKeyPrefix + ":Config:Proxy"
 
-	// DefaultUpdateSpec 每30分钟执行一次
-	DefaultUpdateSpec = "0 */30 * * * ?"
+	// DefaultUpdateSpec 每小时整点执行一次
+	DefaultUpdateSpec = "0 0 * * * *"
 	// EveryDaySpec 每天凌晨0点执行一次
 	EveryDaySpec = "0 0 0 * * *"
-	// OrphanCleanSpec 每天 04:35，错开 DefaultUpdateSpec 的 30 分钟整点（含 04:30）。
-	OrphanCleanSpec = "0 35 4 * * *"
-	// DefaultUpdateTime 每次采集最近 3 小时内更新的影片
-	DefaultUpdateTime = 3
+	// OrphanCleanSpec 每天 02:00，错开整点增量采集。
+	OrphanCleanSpec = "0 0 2 * * *"
+	// DefaultUpdateTime 每次采集最近 24 小时内更新的影片
+	DefaultUpdateTime = 24
 	// DefaultSpiderInterval 默认采集间隔 (ms)，当站点未配置时使用
 	DefaultSpiderInterval = 100
 )

@@ -362,17 +362,23 @@ func SortCollectSources(ids []string) error {
 // BatchAddCollectSource 批量添加采集站信息
 func BatchAddCollectSource(list []model.FilmSource) error {
 	now := time.Now()
-	// 为没有 ID 的采集源生成稳定的哈希 ID
-	for i := range list {
-		if list[i].Id == "" {
-			list[i].Id = utils.GenerateHashKey(list[i].Uri)
+	return db.Mdb.Transaction(func(tx *gorm.DB) error {
+		nextSort := GetCollectSourceMaxSortTx(tx) + 1
+		for i := range list {
+			if list[i].Id == "" {
+				list[i].Id = utils.GenerateHashKey(list[i].Uri)
+			}
+			if list[i].CreatedAt.IsZero() {
+				list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
+			}
+			if list[i].Sort <= 0 {
+				list[i].Sort = nextSort
+				nextSort++
+			}
+			normalizeCollectSourceDefaults(&list[i])
 		}
-		if list[i].CreatedAt.IsZero() {
-			list[i].CreatedAt = now.Add(time.Duration(i) * time.Second)
-		}
-		normalizeCollectSourceDefaults(&list[i])
-	}
-	return db.Mdb.Create(list).Error
+		return tx.Create(&list).Error
+	})
 }
 
 func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {

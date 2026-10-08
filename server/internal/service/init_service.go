@@ -179,10 +179,19 @@ func (s *InitService) CollectCrontabInit() {
 	})
 }
 
-const legacyOrphanSpec = "0 0 0 * * *" // 与当前 EveryDaySpec 相同
+const (
+	legacyOrphanSpec      = "0 0 0 * * *"
+	legacyOrphanSpec0435  = "0 35 4 * * *"
+	legacyAutoCollectSpec = "0 */30 * * * ?"
+)
 
 func shouldMigrateOrphanCleanSpec(id string, spec string) bool {
-	return id == "sys_cron_orphan_clean" && strings.TrimSpace(spec) == legacyOrphanSpec
+	s := strings.TrimSpace(spec)
+	return id == "sys_cron_orphan_clean" && (s == legacyOrphanSpec || s == legacyOrphanSpec0435)
+}
+
+func shouldMigrateAutoCollectSpec(id string, spec string) bool {
+	return id == "sys_cron_auto_collect" && strings.TrimSpace(spec) == legacyAutoCollectSpec
 }
 
 // ensureDefaultTasks 幂等检查并补齐默认任务（已存在跳过，缺失则自动持久化并返回）
@@ -190,13 +199,24 @@ func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 	existing := repository.GetAllFilmTask()
 	for i, t := range existing {
 		if shouldMigrateOrphanCleanSpec(t.Id, t.Spec) {
+			oldSpec := t.Spec
 			t.Spec = config.OrphanCleanSpec
 			if err := repository.UpdateFilmTask(t); err != nil {
 				syslog.Errorf("[Cron] 迁移孤儿清理 spec 失败 id=%s: %v", t.Id, err)
 				continue
 			}
 			existing[i] = t
-			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", legacyOrphanSpec, config.OrphanCleanSpec)
+			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", oldSpec, config.OrphanCleanSpec)
+		}
+		if shouldMigrateAutoCollectSpec(t.Id, t.Spec) {
+			oldSpec := t.Spec
+			t.Spec = config.DefaultUpdateSpec
+			if err := repository.UpdateFilmTask(t); err != nil {
+				syslog.Errorf("[Cron] 迁移自动采集 spec 失败 id=%s: %v", t.Id, err)
+				continue
+			}
+			existing[i] = t
+			log.Printf("[Cron] 已将 sys_cron_auto_collect spec 从 %s 迁移为 %s", oldSpec, config.DefaultUpdateSpec)
 		}
 		if t.Id == "sys_cron_orphan_clean" && (t.Remark == "清理无主影片的孤儿播放列表" || strings.TrimSpace(t.Remark) == "") {
 			t.Remark = "片库冗余数据与孤儿清理"

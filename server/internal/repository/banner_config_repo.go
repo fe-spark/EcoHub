@@ -22,7 +22,7 @@ const (
 	BannerStrategySmartMix   = "smart_mix"
 	DefaultBannerCount       = model.DefaultBannerCount
 	MaxBannerCount           = model.MaxBannerCount
-	DefaultBannerRefreshCron = "0 0 */12 * * *"
+	DefaultBannerRefreshCron = "0 0 4 * * *"
 )
 
 // DefaultBannerConfig 返回默认轮播配置

@@ -94,7 +94,7 @@ func (s *SpiderService) ResetProgress() filmrepo.ResetProgress {
 	return filmrepo.GetResetProgress()
 }
 
-// ResetImpactStats 返回数据重置影响面统计（将清空的数据量）
+// ResetImpactStats 返回工作台影视数据规模（当前基准源）。
 func (s *SpiderService) ResetImpactStats() filmrepo.ResetImpactStats {
 	return filmrepo.GetResetImpactStats()
 }
@@ -118,18 +118,17 @@ func (s *SpiderService) FilmClassCollect() error {
 	return nil
 }
 
-// SyncMasterCategoryTree 从主站同步分类树。
-// 必须使用主站（优先已启用，否则用未启用主站）；没有任何主站时失败，不从附属站拉分类。
+// SyncMasterCategoryTree 从基准源同步分类树。
 func (s *SpiderService) SyncMasterCategoryTree() error {
 	targetSource := repository.PickMasterSourceForCategory()
 	if targetSource == nil {
-		return errors.New("未获取到主采集站信息，没有主站不能有分类树")
+		return errors.New("未获取到首选采集站，没有首选站不能同步分类")
 	}
 
-	log.Printf("[SpiderService] 启动同步主站分类: name=%s id=%s uri=%s state=%v",
+	log.Printf("[SpiderService] 启动同步基准源分类: name=%s id=%s uri=%s state=%v",
 		targetSource.Name, targetSource.Id, targetSource.Uri, targetSource.State)
 	if err := spider.CollectCategory(targetSource); err != nil {
-		log.Printf("[SpiderService] 主站分类同步失败: name=%s id=%s err=%v", targetSource.Name, targetSource.Id, err)
+		log.Printf("[SpiderService] 基准源分类同步失败: name=%s id=%s err=%v", targetSource.Name, targetSource.Id, err)
 		return err
 	}
 	finalizeCategorySync()

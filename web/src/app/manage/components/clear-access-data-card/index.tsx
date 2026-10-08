@@ -165,7 +165,7 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
             type="warning"
             showIcon
             title="该操作不可逆"
-            description="清理后将永久删除所选时间范围内的访问与统计数据，无法恢复。"
+            description="删除所选时段的访问统计，不可恢复。"
           />
           <div>
             <Typography.Text strong style={{ display: "block", marginBottom: 8 }}>

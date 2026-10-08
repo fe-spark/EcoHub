@@ -76,7 +76,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "分类规则",
     description:
-      "把源站原始分类合并到前台展示分类。主站分类乱、重名或过细时在这里映射。",
+      "把源站原始分类合并到前台展示分类。首选站分类乱、重名或过细时在这里映射。",
     route: "/manage/collect/category/rules",
     target: "[data-tour='menu-rules']",
     placement: "right",
@@ -100,7 +100,7 @@ const GUIDE_STEPS: GuideStep[] = [
   {
     title: "核对影片列表",
     description:
-      "采集完成后到这里查看主站影片。没有数据通常是采集未完成或正在收尾入库。",
+      "采集完成后到这里查看首选站影片。没有数据通常是采集未完成或正在收尾入库。",
     route: "/manage/film",
     target: "[data-tour='menu-film']",
     placement: "right",

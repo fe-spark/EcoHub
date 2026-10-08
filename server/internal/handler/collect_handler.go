@@ -144,21 +144,6 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 	dto.SuccessOnlyMsg("更新成功", c)
 }
 
-func (h *CollectHandler) FilmSourceSetPrimary(c *gin.Context) {
-	var req struct {
-		Id string `json:"id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Id) == "" {
-		dto.Failed("参数异常，站点标识不能为空", c)
-		return
-	}
-	if err := service.CollectSvc.SetPrimaryFilmSource(strings.TrimSpace(req.Id)); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("主站切换成功", c)
-}
-
 func (h *CollectHandler) FilmSourceSort(c *gin.Context) {
 	var req struct {
 		Ids []string `json:"ids"`
@@ -252,11 +237,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 			defer func() { <-sem }()
 
 			item := model.SourceHealthItem{
-				Id:     src.Id,
-				Name:   src.Name,
-				Uri:    src.Uri,
-				Sort:   src.Sort,
-				State:  src.State,
+				Id:    src.Id,
+				Name:  src.Name,
+				Uri:   src.Uri,
+				Sort:  src.Sort,
+				State: src.State,
 			}
 			if spider.IsTaskRunning(src.Id) {
 				item.Reason = "站点正在采集，已跳过检测"

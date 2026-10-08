@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Descriptions, Statistic, Tag, Typography } from "antd";
+import { Button, Card, Descriptions, Space, Statistic, Tag, Typography } from "antd";
 import Link from "next/link";
 import { ApiGet } from "@/lib/client-api";
 import type { FilmSource } from "./types";
@@ -20,6 +20,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     uri: item.uri,
     state: Boolean(item.state),
     sort: Number(item.sort ?? 0),
+    isPrimary: Boolean(item.isPrimary),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
@@ -107,19 +108,20 @@ export default function CollectOverview() {
       </Card>
 
       <Card
-        title="默认首选站点"
+        title="当前首选站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
         extra={
-          topSite ? (
-            topSite.isPrimary ? (
-              <Tag color="gold">当前主站</Tag>
+          <Space size={8}>
+            {topSite ? (
+              <Tag color="gold">首选站</Tag>
             ) : (
-              <Tag color="blue">首选源</Tag>
-            )
-          ) : (
-            <Tag color="warning">未配置</Tag>
-          )
+              <Tag color="warning">未配置</Tag>
+            )}
+            <Link href="/manage/collect">
+              <Button size="small">切换</Button>
+            </Link>
+          </Space>
         }
       >
         {topSite ? (

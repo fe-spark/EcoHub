@@ -120,7 +120,7 @@ func (h *SpiderHandler) ResetProgress(c *gin.Context) {
 	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
 }
 
-// ResetImpactStats 返回数据重置影响面统计（将清空的数据量）
+// ResetImpactStats 返回工作台影视数据规模（当前基准源）。
 func (h *SpiderHandler) ResetImpactStats(c *gin.Context) {
 	dto.Success(service.SpiderSvc.ResetImpactStats(), "获取成功", c)
 }

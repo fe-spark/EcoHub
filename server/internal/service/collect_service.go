@@ -65,21 +65,6 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 	return list
 }
 
-func (s *CollectService) SetPrimaryFilmSource(id string) error {
-	src := repository.FindCollectSourceById(id)
-	if src == nil {
-		return errors.New("采集源不存在")
-	}
-	all := repository.GetCollectSourceList()
-	newIds := []string{id}
-	for _, item := range all {
-		if item.Id != id {
-			newIds = append(newIds, item.Id)
-		}
-	}
-	return s.SortFilmSources(newIds)
-}
-
 func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil

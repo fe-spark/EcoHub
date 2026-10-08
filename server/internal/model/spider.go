@@ -10,10 +10,10 @@ import (
 )
 
 const (
-	TaskModelAutoCollect   = 0 // 自动更新已启用主站
+	TaskModelAutoCollect   = 0 // 自动更新已启用站点
 	TaskModelCustomCollect = 1 // 更新Ids中的指定站点数据
 	TaskModelRetryCollect  = 2 // 定期清理失败采集记录并重试
-	TaskModelOrphanClean   = 3 // 附属站播放列表孤儿治理
+	TaskModelOrphanClean   = 3 // 片库冗余数据与孤儿清理
 	TaskModelLogClean      = 4 // 自动清理过期运行日志
 	TaskModelBannerAuto    = 5 // 首页轮播自动智能排片
 )
@@ -122,7 +122,7 @@ const (
 	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
 	FailureRecordStatusFailed = 2
 
-	MaxFailureRetryCount = 5
+	MaxFailureRetryCount = 3
 )
 
 func (FailureRecord) TableName() string {

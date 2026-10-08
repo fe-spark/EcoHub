@@ -353,8 +353,7 @@ export default function FailureRecordPageView() {
 
               <Tooltip title="并发拉取所有状态为「待自动重试」的页面进行重试采集">
                 <Popconfirm
-                  title="确认重试所有待处理记录？"
-                  description="系统将并发拉取所有待自动重试状态的页面，已成功和已超限失败的记录不受影响。"
+                  title="重试全部待处理记录？"
                   icon={<QuestionCircleOutlined style={{ color: "#1677ff" }} />}
                   onConfirm={handleRetryAll}
                   disabled={!canWrite}
@@ -367,8 +366,7 @@ export default function FailureRecordPageView() {
 
               <Tooltip title="安全清理：删除数据库中所有「重试成功」与「最终失败」的历史记录，保留待重试项">
                 <Popconfirm
-                  title="确认清理所有已完结记录？"
-                  description="将删除所有已成功和最终失败的历史归档，待自动重试的记录将继续保留。"
+                  title="清理已完结记录？"
                   icon={<QuestionCircleOutlined style={{ color: "var(--ant-color-warning)" }} />}
                   onConfirm={handleCleanResult}
                   disabled={!canWrite}
@@ -388,10 +386,10 @@ export default function FailureRecordPageView() {
 
               <Tooltip title="高危操作：清空失败记录全表数据（包括所有待重试项）">
                 <Popconfirm
-                  title="确认清空全部失败记录？"
-                  description="警告：此操作将永久清空表中所有记录（包括待处理项），不可恢复！"
+                  title="清空全部失败记录？"
+                  description="不可恢复"
                   okType="danger"
-                  okText="确定清空"
+                  okText="清空"
                   cancelText="取消"
                   onConfirm={handleCleanAll}
                   disabled={!canWrite}

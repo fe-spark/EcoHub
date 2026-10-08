@@ -53,8 +53,6 @@ func SetupRouter() *gin.Engine {
 		frontApi.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
 		frontApi.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
 		frontApi.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
-		frontApi.GET(`/sources`, handler.IndexHd.PublicSources)
-		frontApi.GET(`/public/sources`, handler.IndexHd.PublicSources)
 		frontApi.POST(`/stat/view`, handler.AccessHd.TrackView)
 	}
 
@@ -154,7 +152,6 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/del/batch`, handler.CollectHd.FilmSourceDelBatch)
 			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
-			collect.POST(`/set-primary`, handler.CollectHd.FilmSourceSetPrimary)
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)

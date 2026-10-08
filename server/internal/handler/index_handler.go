@@ -8,7 +8,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -81,8 +80,7 @@ func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 
 // Index 首页数据
 func (h *IndexHandler) Index(c *gin.Context) {
-	sourceId := strings.TrimSpace(c.Query("source"))
-	data := service.IndexSvc.IndexPage(sourceId)
+	data := service.IndexSvc.IndexPage()
 	dto.Success(data, "首页数据获取成功", c)
 }
 
@@ -109,9 +107,8 @@ func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
 			Current:  parseQueryInt(queryFirst(c, "page", "current"), 1),
 			PageSize: parseQueryInt(queryFirst(c, "pageSize", "size"), 21),
 		},
-		Random:   parseQueryBool(c.Query("random")),
-		Exclude:  parseDailyUpdateExclude(c.Query("exclude")),
-		SourceId: strings.TrimSpace(c.Query("source")),
+		Random:  parseQueryBool(c.Query("random")),
+		Exclude: parseDailyUpdateExclude(c.Query("exclude")),
 	})
 	if err != nil {
 		dto.Failed("获取每日更新失败", c)
@@ -214,8 +211,7 @@ func parseDailyUpdateExclude(raw string) []int64 {
 
 // CategoriesInfo 分类信息获取
 func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
-	sourceId := strings.TrimSpace(c.Query("source"))
-	data := service.IndexSvc.GetNavCategory(sourceId)
+	data := service.IndexSvc.GetNavCategory()
 	if len(data) <= 0 {
 		dto.Failed("暂无分类信息", c)
 		return
@@ -250,8 +246,7 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	page := dto.GetPageParams(c)
 	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
-	sourceID := strings.TrimSpace(c.Query("source"))
-	result := service.IndexSvc.SearchFilm(trimmed, sourceID, sortField, page)
+	result := service.IndexSvc.SearchFilm(trimmed, "", sortField, page)
 	if result.List == nil {
 		result.List = []model.MovieBasicInfo{}
 	}
@@ -289,12 +284,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
 	params.Year = yStr
-	params.SourceId = strings.TrimSpace(c.Query("source"))
-	if params.SourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			params.SourceId = active.Id
-		}
-	}
+	params.SourceId = service.IndexSvc.BaselineSourceID()
 
 	page := dto.GetPageParams(c)
 	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
@@ -338,7 +328,6 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 			"Language": params.Language,
 			"Year":     yStr,
 			"Sort":     params.Sort,
-			"Source":   params.SourceId,
 		},
 		"page": page,
 	}
@@ -356,12 +345,7 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 		return
 	}
 	pid, _ := strconv.ParseInt(pidStr, 10, 64)
-	sourceId := strings.TrimSpace(c.Query("source"))
-	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			sourceId = active.Id
-		}
-	}
+	sourceId := service.IndexSvc.BaselineSourceID()
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
 	page.PageSize = 21
@@ -369,24 +353,4 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 		"title":   title,
 		"content": service.IndexSvc.GetFilmClassify(pid, page, sourceId),
 	}, "分类影片信息获取成功", c)
-}
-
-type CollectSourceOption struct {
-	Id   string `json:"id"`
-	Name string `json:"name"`
-	Sort int    `json:"sort"`
-}
-
-// PublicSources 获取所有已启用的采集站选项列表（用于站点切换器）
-func (h *IndexHandler) PublicSources(c *gin.Context) {
-	sources := repository.GetEnabledCollectSourceList()
-	res := make([]CollectSourceOption, 0, len(sources))
-	for _, s := range sources {
-		res = append(res, CollectSourceOption{
-			Id:   s.Id,
-			Name: s.Name,
-			Sort: s.Sort,
-		})
-	}
-	dto.Success(res, "获取可用采集源成功", c)
 }

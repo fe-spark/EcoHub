@@ -27,7 +27,7 @@ import (
 )
 
 // recoverMaxRetryCount 失败页重试的最大轮次。
-const recoverMaxRetryCount = 5
+const recoverMaxRetryCount = 3
 
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
@@ -245,6 +245,10 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
 		return
 	}
+	if !s.State {
+		syslog.Warnf("[Spider] 站点已禁用，跳过失败页重试 source_id=%s name=%s page=%d", s.Id, s.Name, fr.PageNumber)
+		return
+	}
 	claimed := filterCollectableSources([]model.FilmSource{*s}, "失败恢复")
 	if len(claimed) == 0 {
 		log.Printf("[Spider] 站点 %s 已在正采集队列中，跳过失败页重试", s.Id)
@@ -304,6 +308,7 @@ func FullRecoverSpider() {
 			continue
 		}
 		if !s.State {
+			syslog.Warnf("[Spider] FullRecoverSpider: 站点已禁用，跳过重试 source_id=%s name=%s page=%d", s.Id, s.Name, fr.PageNumber)
 			continue
 		}
 		if _, ok := seen[s.Id]; !ok {

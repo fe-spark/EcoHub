@@ -55,10 +55,9 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 </span>
                 {item.view.running && item.canStop ? (
                   <Popconfirm
-                    title="终止该采集队列？"
-                    description="将停止该队列中仍在抓取的采集站；已抓取数据会继续处理完成。其它队列不受影响。"
+                    title="终止该队列？"
                     onConfirm={() => onStopQueue(item.queueId, item.sourceIds)}
-                    okText="确认终止"
+                    okText="终止"
                     cancelText="取消"
                     okButtonProps={{
                       danger: true,
