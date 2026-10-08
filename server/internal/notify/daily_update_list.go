@@ -75,10 +75,7 @@ func applyDailySourceMembership(q *gorm.DB, sourceID string) *gorm.DB {
 	if strings.TrimSpace(sourceID) == "" {
 		return q
 	}
-	sub := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Select("DISTINCT mid").
-		Where("source_id = ? AND line_kind = ?", sourceID, "play")
-	return q.Where("mid IN (?)", sub)
+	return q.Where(model.FilmHasPlaySourceSQL(), strings.TrimSpace(sourceID), "play")
 }
 
 func applyDailyUpdateExclude(q *gorm.DB, random bool, exclude []int64) *gorm.DB {

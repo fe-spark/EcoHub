@@ -106,11 +106,12 @@ func (d MovieDetail) DisplayPictureSlide() string {
 }
 
 // MovieSourceMapping 影片源站 ID 与全局影片 ID 的最小映射。
-// 各站点详情写入和播放列表采集匹配后都会维护该表。
+// 主键就是 (source_id, source_mid)，不再使用自增 id 加第二把唯一索引。
 type MovieSourceMapping struct {
-	gorm.Model
-	SourceId  string `gorm:"size:32;uniqueIndex:uidx_source_mid,priority:1;index:idx_global_source,priority:2"`
-	SourceMid int64  `gorm:"uniqueIndex:uidx_source_mid,priority:2"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	SourceId  string `gorm:"primaryKey;size:32;index:idx_global_source,priority:2"`
+	SourceMid int64  `gorm:"primaryKey;autoIncrement:false"`
 	GlobalMid int64  `gorm:"index:idx_global_source,priority:1"`
 }
 
@@ -134,10 +135,12 @@ func (MoviePoster) TableName() string {
 }
 
 // MovieMatchKey 主站影片匹配键索引（豆瓣 / 片名#大类 / 纯片名回退）。
+// 主键就是 (mid, match_key)。match_key 只保留普通索引，供跨站反查。
 type MovieMatchKey struct {
-	gorm.Model
-	Mid      int64  `gorm:"uniqueIndex:uidx_mid_match"`
-	MatchKey string `gorm:"size:64;uniqueIndex:uidx_mid_match;index:idx_match_key"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Mid       int64  `gorm:"primaryKey;autoIncrement:false"`
+	MatchKey  string `gorm:"primaryKey;size:64;index:idx_match_key"`
 }
 
 func (MovieMatchKey) TableName() string {
@@ -233,14 +236,14 @@ func (FilmIndex) TableName() string {
 }
 
 // FilmSourcePlaylist 统一多源播放列表持久化模型。
+// 主键就是线路身份。group_index 从 0 开始，必须允许 0 值写入。
 type FilmSourcePlaylist struct {
-	ID           uint `gorm:"primaryKey"`
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	Mid          int64  `gorm:"uniqueIndex:uidx_mid_source_kind_group,priority:1;index:idx_playlist_mid;index:idx_playlist_source_mid,priority:2"`
-	SourceId     string `gorm:"size:32;uniqueIndex:uidx_mid_source_kind_group,priority:2;index:idx_playlist_source_mid,priority:1"`
-	LineKind     string `gorm:"size:16;uniqueIndex:uidx_mid_source_kind_group,priority:3"` // play 或 download
-	GroupIndex   int    `gorm:"uniqueIndex:uidx_mid_source_kind_group,priority:4"`
+	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2"`
+	SourceId     string `gorm:"primaryKey;size:32;index:idx_playlist_source_mid,priority:1"`
+	LineKind     string `gorm:"primaryKey;size:16"` // play 或 download
+	GroupIndex   int    `gorm:"primaryKey;autoIncrement:false"`
 	GroupName    string `gorm:"type:varchar(255)"`
 	EpisodeCount int    `gorm:"default:0"`
 	LastEpisode  string `gorm:"size:64"`

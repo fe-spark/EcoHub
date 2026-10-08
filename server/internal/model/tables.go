@@ -33,6 +33,13 @@ const (
 	TableFilmSource         = "film_sources"
 )
 
+// FilmHasPlaySourceSQL 判断 film_index 当前行是否有指定采集源的播放线路。
+// 探测走 film_source_playlists 主键 (mid, source_id, line_kind)。
+// 占位符依次是 source_id、line_kind。不要改成 DISTINCT mid 子查询，那会先扫完整站线路。
+func FilmHasPlaySourceSQL() string {
+	return "EXISTS (SELECT 1 FROM " + TableFilmSourcePlaylist + " AS p WHERE p.mid = " + TableFilmIndex + ".mid AND p.source_id = ? AND p.line_kind = ?)"
+}
+
 // AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
 var AllModels = []any{
 	&User{},

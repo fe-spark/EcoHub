@@ -331,10 +331,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			}
 			query := db.Mdb.Model(&model.FilmIndex{}).Select("mid")
 			if sourceID != "" {
-				sourceMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-					Select("DISTINCT mid").
-					Where("source_id = ? AND line_kind = ?", sourceID, "play")
-				query = query.Where("mid IN (?)", sourceMidSubQuery)
+				query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
 			}
 			if len(mids) > 0 {
 				query = query.Where("mid NOT IN ?", mids)
@@ -422,7 +419,7 @@ func filterMidsByPlaySource(mids []int64, sourceID string) []int64 {
 	}
 	var keep []int64
 	_ = db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Where("source_id = ? AND line_kind = ? AND mid IN ?", sourceID, "play", mids).
+		Where("mid IN ? AND source_id = ? AND line_kind = ?", mids, sourceID, "play").
 		Distinct("mid").
 		Pluck("mid", &keep).Error
 	return keep

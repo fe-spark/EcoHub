@@ -3,16 +3,19 @@ package writer
 import (
 	"context"
 	"crypto/md5"
+	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log"
 	"math"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"regexp"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
@@ -26,6 +29,8 @@ import (
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+var errNilCollectSource = errors.New("采集源为空")
 
 var yearRegex = regexp.MustCompile(`[1-9][0-9]{3}`)
 
@@ -107,47 +112,108 @@ func isPlaylistSignatureIdentical(oldLines, newLines []model.FilmSourcePlaylist)
 	return true
 }
 
+func playlistMetaQuery(tx *gorm.DB) *gorm.DB {
+	return tx.Select("mid", "source_id", "line_kind", "group_index", "group_name", "episode_count", "last_episode", "content_hash")
+}
+
+func playlistUpsertClause() clause.OnConflict {
+	return clause.OnConflict{
+		Columns: []clause.Column{
+			{Name: "mid"},
+			{Name: "source_id"},
+			{Name: "line_kind"},
+			{Name: "group_index"},
+		},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"group_name", "episode_count", "last_episode", "content_hash", "content", "updated_at",
+		}),
+	}
+}
+
+func playHashesChanged(oldLines, newLines []model.FilmSourcePlaylist) bool {
+	oldPlayMap := make(map[int]string)
+	for _, line := range oldLines {
+		if line.LineKind == "play" {
+			oldPlayMap[line.GroupIndex] = line.ContentHash
+		}
+	}
+	newPlayMap := make(map[int]string)
+	for _, line := range newLines {
+		if line.LineKind == "play" {
+			newPlayMap[line.GroupIndex] = line.ContentHash
+		}
+	}
+	if len(oldPlayMap) != len(newPlayMap) {
+		return true
+	}
+	for idx, hash := range newPlayMap {
+		if oldPlayMap[idx] != hash {
+			return true
+		}
+	}
+	return false
+}
+
+func vanishedPlaylists(oldLines, newLines []model.FilmSourcePlaylist) []model.FilmSourcePlaylist {
+	newByKey := make(map[string]struct{}, len(newLines))
+	for _, line := range newLines {
+		newByKey[playlistIdentity(line)] = struct{}{}
+	}
+	vanished := make([]model.FilmSourcePlaylist, 0)
+	for _, old := range oldLines {
+		if _, ok := newByKey[playlistIdentity(old)]; ok {
+			continue
+		}
+		vanished = append(vanished, old)
+	}
+	sortPlaylists(vanished)
+	return vanished
+}
+
+func sortPlaylists(lines []model.FilmSourcePlaylist) {
+	sort.Slice(lines, func(i, j int) bool {
+		if lines[i].Mid != lines[j].Mid {
+			return lines[i].Mid < lines[j].Mid
+		}
+		if lines[i].SourceId != lines[j].SourceId {
+			return lines[i].SourceId < lines[j].SourceId
+		}
+		if lines[i].LineKind != lines[j].LineKind {
+			return lines[i].LineKind < lines[j].LineKind
+		}
+		return lines[i].GroupIndex < lines[j].GroupIndex
+	})
+}
+
+func deletePlaylistTx(tx *gorm.DB, line model.FilmSourcePlaylist) error {
+	return tx.Where(
+		"mid = ? AND source_id = ? AND line_kind = ? AND group_index = ?",
+		line.Mid, line.SourceId, line.LineKind, line.GroupIndex,
+	).Delete(&model.FilmSourcePlaylist{}).Error
+}
+
 func saveStationPlaylistsTx(tx *gorm.DB, mid int64, sourceId string, newLines []model.FilmSourcePlaylist) (bool, bool, error) {
 	var oldLines []model.FilmSourcePlaylist
-	if err := tx.Where("mid = ? AND source_id = ?", mid, sourceId).Find(&oldLines).Error; err != nil {
+	if err := playlistMetaQuery(tx).Where("mid = ? AND source_id = ?", mid, sourceId).Find(&oldLines).Error; err != nil {
 		return false, false, err
 	}
 	if isPlaylistSignatureIdentical(oldLines, newLines) {
 		return false, false, nil
 	}
-
-	// 检查是否有播放线路实质发生变更（非下载线路）
-	playChanged := false
-	oldPlayMap := make(map[int]string)
-	for _, l := range oldLines {
-		if l.LineKind == "play" {
-			oldPlayMap[l.GroupIndex] = l.ContentHash
+	playChanged := playHashesChanged(oldLines, newLines)
+	// 只删本站消失的线路，按主键等值删除。范围删除会挡住其它片子插入。
+	for _, old := range vanishedPlaylists(oldLines, newLines) {
+		if err := deletePlaylistTx(tx, old); err != nil {
+			return false, false, err
 		}
-	}
-	newPlayMap := make(map[int]string)
-	for _, l := range newLines {
-		if l.LineKind == "play" {
-			newPlayMap[l.GroupIndex] = l.ContentHash
-		}
-	}
-	if len(oldPlayMap) != len(newPlayMap) {
-		playChanged = true
-	} else {
-		for idx, h := range newPlayMap {
-			if oldPlayMap[idx] != h {
-				playChanged = true
-				break
-			}
-		}
-	}
-
-	if err := tx.Where("mid = ? AND source_id = ?", mid, sourceId).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-		return false, false, err
 	}
 	if len(newLines) == 0 {
 		return true, playChanged, nil
 	}
-	return true, playChanged, tx.Create(&newLines).Error
+	lines := append([]model.FilmSourcePlaylist(nil), newLines...)
+	sortPlaylists(lines)
+	err := tx.Clauses(playlistUpsertClause()).Create(&lines).Error
+	return true, playChanged, err
 }
 
 func buildPlaylistsFromDetail(mid int64, sourceID string, detail model.MovieDetail) []model.FilmSourcePlaylist {
@@ -226,6 +292,7 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 		pid = detail.RawPid
 	}
 	allKeys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
+	sort.Strings(allKeys)
 	if len(allKeys) > 0 {
 		matchKeys := make([]model.MovieMatchKey, 0, len(allKeys))
 		for _, k := range allKeys {
@@ -234,7 +301,9 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 				MatchKey: k,
 			})
 		}
-		_ = tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&matchKeys).Error
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&matchKeys).Error; err != nil {
+			return nil, err
+		}
 	}
 
 	return &fi, nil
@@ -296,68 +365,92 @@ func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *mode
 }
 
 func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
+	if mid <= 0 {
+		return nil
+	}
+	return refreshRemarksAndPlaySummaryMidsTx(tx, []int64{mid}, support.GetCollectSourceList())
+}
+
+func pickPlaylistRemarks(playLines []model.FilmSourcePlaylist, sources []model.FilmSource) string {
+	if len(playLines) == 0 {
+		return ""
+	}
+	orderByID := make(map[string]int, len(sources))
+	for idx, source := range sources {
+		orderByID[source.Id] = idx
+	}
+	bestLine := playLines[0]
+	for i := 1; i < len(playLines); i++ {
+		curr := playLines[i]
+		if curr.EpisodeCount > bestLine.EpisodeCount {
+			bestLine = curr
+			continue
+		}
+		if curr.EpisodeCount != bestLine.EpisodeCount {
+			continue
+		}
+		oCurr := math.MaxInt
+		if idx, ok := orderByID[curr.SourceId]; ok {
+			oCurr = idx
+		}
+		oBest := math.MaxInt
+		if idx, ok := orderByID[bestLine.SourceId]; ok {
+			oBest = idx
+		}
+		if oCurr < oBest || (oCurr == oBest && curr.GroupIndex < bestLine.GroupIndex) {
+			bestLine = curr
+		}
+	}
+	return bestLine.LastEpisode
+}
+
+func refreshRemarksAndPlaySummaryMidsTx(tx *gorm.DB, mids []int64, sources []model.FilmSource) error {
+	ordered := uniqueMIDs(mids)
+	if len(ordered) == 0 {
+		return nil
+	}
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i] < ordered[j] })
+
 	var playLines []model.FilmSourcePlaylist
-	if err := tx.Where("mid = ? AND line_kind = ?", mid, "play").Find(&playLines).Error; err != nil {
+	if err := tx.Select("mid", "source_id", "line_kind", "group_index", "group_name", "episode_count", "last_episode").
+		Where("mid IN ? AND line_kind = ?", ordered, "play").
+		Find(&playLines).Error; err != nil {
 		return err
 	}
-
-	sources := support.GetCollectSourceList()
-	orderByID := make(map[string]int, len(sources))
-	for idx, s := range sources {
-		orderByID[s.Id] = idx
+	byMid := make(map[int64][]model.FilmSourcePlaylist, len(ordered))
+	for _, line := range playLines {
+		byMid[line.Mid] = append(byMid[line.Mid], line)
 	}
-
-	remarks := ""
-	if len(playLines) > 0 {
-		bestLine := playLines[0]
-		for i := 1; i < len(playLines); i++ {
-			curr := playLines[i]
-			if curr.EpisodeCount > bestLine.EpisodeCount {
-				bestLine = curr
-			} else if curr.EpisodeCount == bestLine.EpisodeCount {
-				oCurr := math.MaxInt
-				if idx, ok := orderByID[curr.SourceId]; ok {
-					oCurr = idx
-				}
-				oBest := math.MaxInt
-				if idx, ok := orderByID[bestLine.SourceId]; ok {
-					oBest = idx
-				}
-				if oCurr < oBest {
-					bestLine = curr
-				} else if oCurr == oBest && curr.GroupIndex < bestLine.GroupIndex {
-					bestLine = curr
-				}
-			}
+	now := time.Now()
+	stamp := now.Unix()
+	for _, mid := range ordered {
+		if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", mid).Updates(map[string]any{
+			"remarks":           pickPlaylistRemarks(byMid[mid], sources),
+			"play_from_summary": snapshot.BuildPlayFromSummaryFromPlaylists(byMid[mid], sources),
+			"update_stamp":      stamp,
+			"updated_at":        now,
+		}).Error; err != nil {
+			return err
 		}
-		remarks = bestLine.LastEpisode
 	}
+	return nil
+}
 
-	summary := snapshot.BuildPlayFromSummaryFromPlaylists(playLines, sources)
-
-	updates := map[string]any{
-		"remarks":           remarks,
-		"play_from_summary": summary,
-		"update_stamp":      time.Now().Unix(),
-		"updated_at":        time.Now(),
+func runPeerCollectTx(fn func(tx *gorm.DB) error) error {
+	if db.Mdb != nil && db.Mdb.Dialector != nil && db.Mdb.Dialector.Name() == "mysql" {
+		return db.Mdb.Transaction(fn, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
 	}
-	return tx.Model(&model.FilmIndex{}).Where("mid = ?", mid).Updates(updates).Error
+	return db.Mdb.Transaction(fn)
 }
 
 func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) (mid int64, isNew bool, playLinesChanged bool, err error) {
-	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
+	err = runPeerCollectTx(func(tx *gorm.DB) error {
 		var existingMapping model.MovieSourceMapping
 		hasMapping := false
 		if err := tx.Where("source_id = ? AND source_mid = ?", source.Id, detail.Id).First(&existingMapping).Error; err == nil && existingMapping.GlobalMid > 0 {
 			hasMapping = true
 			mid = existingMapping.GlobalMid
 		}
-
-		lockNames := sqlFilmLockNames(source, detail, mid)
-		if err := acquireSQLFilmLocks(tx, lockNames); err != nil {
-			return err
-		}
-		defer releaseSQLFilmLocks(tx, lockNames)
 
 		var filmIndex *model.FilmIndex
 		if hasMapping {
@@ -371,12 +464,14 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			allKeys := peerMatchKeys(source, detail)
 			if len(allKeys) > 0 {
 				var matchKey model.MovieMatchKey
-				if err := tx.Where("match_key IN ?", allKeys).Order("id ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
+				if err := tx.Where("match_key IN ?", allKeys).Order("mid ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
 					var fi model.FilmIndex
 					if err := tx.Where("mid = ?", matchKey.Mid).First(&fi).Error; err == nil && fi.Mid > 0 {
 						mid = fi.Mid
 						filmIndex = &fi
-						_ = shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid)
+						if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -420,40 +515,40 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 }
 
 // SaveCollectedPeerDetails 全站平权影片采集入库入口。
-// 每部片独立事务落库，自动识别或新建影片档案，增量挂接多源播放线路。
+// 一页一个事务。失败则整页回滚，调用方把这一页记为失败。
 func SaveCollectedPeerDetails(
 	ctx context.Context,
 	source *model.FilmSource,
 	page int,
 	list []model.MovieDetail,
 ) (scheduler.Mids, error) {
-	var affectedMIDs []int64
-	var notifyMIDs []int64
-
-	for _, detail := range list {
-		if detail.Id <= 0 || strings.TrimSpace(detail.Name) == "" {
-			continue
-		}
-
-		mid, isNew, playLinesChanged, err := saveSinglePeerDetailSynced(source, detail)
-
-		if err != nil {
-			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod_id=%d name=%s err=%v",
-				source.Id, page, detail.Id, detail.Name, err)
-			continue
-		}
-
-		if mid > 0 {
-			affectedMIDs = append(affectedMIDs, mid)
-			if isNew || playLinesChanged {
-				notifyMIDs = append(notifyMIDs, mid)
-			}
-		}
+	_ = ctx
+	details := filterPeerPageDetails(list)
+	if len(details) == 0 {
+		return scheduler.Mids{}, nil
 	}
+	if source == nil {
+		return scheduler.Mids{}, errNilCollectSource
+	}
+	sources := support.GetCollectSourceList()
+	unlock := lockPeerCollectPage(source, details)
+	defer unlock()
 
+	var affected []int64
+	var notify []int64
+	err := runPeerCollectTx(func(tx *gorm.DB) error {
+		var writeErr error
+		affected, notify, writeErr = writePeerPageTx(tx, source, details, sources)
+		return writeErr
+	})
+	if err != nil {
+		log.Printf("[Spider][PeerCollect] 整页入库失败 source=%s page=%d vods=%d err=%v",
+			source.Id, page, len(details), err)
+		return scheduler.Mids{}, err
+	}
 	return scheduler.Mids{
-		Affected: uniqueMIDs(affectedMIDs),
-		Notify:   uniqueMIDs(notifyMIDs),
+		Affected: uniqueMIDs(affected),
+		Notify:   uniqueMIDs(notify),
 	}, nil
 }
 

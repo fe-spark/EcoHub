@@ -291,7 +291,7 @@ func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
 	err := db.Mdb.Model(&model.FilmIndex{}).
 		Select("film_index.mid, film_index.pid").
 		Joins("LEFT JOIN film_source_playlists ON film_source_playlists.mid = film_index.mid AND film_source_playlists.line_kind = 'play'").
-		Where("film_source_playlists.id IS NULL AND film_index.updated_at < ? AND film_index.created_at < ?", cutoff, cutoff).
+		Where("film_source_playlists.mid IS NULL AND film_index.updated_at < ? AND film_index.created_at < ?", cutoff, cutoff).
 		Scan(&records).Error
 	if err != nil {
 		log.Printf("CleanPlaylessFilms Error: %v", err)

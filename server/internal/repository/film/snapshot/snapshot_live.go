@@ -17,13 +17,10 @@ func liveFilmQuery() *gorm.DB {
 
 func applySourceMembership(query *gorm.DB, sourceID string) *gorm.DB {
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
+	if sourceID == "" || query == nil {
 		return query
 	}
-	sub := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Select("DISTINCT mid").
-		Where("source_id = ? AND line_kind = ?", sourceID, "play")
-	return query.Where("mid IN (?)", sub)
+	return query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
 }
 
 func resolveListVersion(version string) string {

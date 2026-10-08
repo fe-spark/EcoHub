@@ -27,7 +27,7 @@ var movieSourceMappingWriteMu sync.Mutex
 func movieSourceMappingUpsert() clause.OnConflict {
 	return clause.OnConflict{
 		Columns:   []clause.Column{{Name: "source_id"}, {Name: "source_mid"}},
-		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at", "deleted_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"global_mid", "updated_at"}),
 	}
 }
 
