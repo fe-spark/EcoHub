@@ -127,10 +127,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
-		if strings.TrimSpace(st.SourceId) != "" {
-			query = query.Where("(source_id = ? OR source_id = '')", strings.TrimSpace(st.SourceId))
-		}
+		query := applySourceMembership(liveFilmQuery(), st.SourceId)
 		if st.Pid > 0 {
 			query = query.Where("pid = ?", st.Pid)
 		}
@@ -156,23 +153,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			calcPageCount = 1
 		}
 
-		orderClause := snapshotSortOrderClause(st.Sort, keyword != "")
+		orderClause := liveTieOrder(snapshotSortOrderClause(st.Sort, keyword != ""))
 		offset := shared.PageOffset(page)
 
-		// 延迟关联：先取 id，再取宽字段，避免大宽表参与文件排序
-		var ids []uint
-		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
+		if findErr != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		var snapshots []model.FilmListSnapshot
-		if len(ids) > 0 {
-			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
-				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-			}
-		}
-		if snapshots == nil {
-			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := searchCacheItem{

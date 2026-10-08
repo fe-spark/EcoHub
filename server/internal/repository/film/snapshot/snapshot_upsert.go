@@ -133,16 +133,12 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 	defer activeSnapshotUpsertMu.Unlock()
 	startedAt := time.Now()
 
-	version := GetActiveReadModelVersion()
-	if strings.TrimSpace(version) == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	if strings.TrimSpace(version) == "" {
-		version = NewSnapshotVersion()
-		if err := ActivateRebuiltFilmListSnapshot(version); err != nil {
+	version := strings.TrimSpace(GetActiveReadModelVersion())
+	if version == "" {
+		version = EnsureLiveReadVersion()
+		if err := LoadActiveFilmReadModel(version); err != nil {
 			return "", 0, err
 		}
-		return version, 0, nil
 	}
 
 	ids := NormalizeSnapshotMIDs(mids)
@@ -150,109 +146,84 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 		return version, 0, nil
 	}
 
-	updatedCount := 0
-	deletedCount := 0
-	processed := 0
-	allKeptMIDs := make([]int64, 0, len(ids))
-	allDeletedMIDs := make([]int64, 0)
-	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		for _, batchIDs := range ChunkSnapshotMIDs(ids, snapshotBuildBatchSize) {
-			batchStartedAt := time.Now()
-
-			var indexes []model.FilmIndex
-			queryStartedAt := time.Now()
-			if err := tx.Where("mid IN ?", batchIDs).Find(&indexes).Error; err != nil {
-				return err
-			}
-			queryCost := time.Since(queryStartedAt)
-
-			buildStartedAt := time.Now()
-			batchSnapshots := make([]model.FilmListSnapshot, 0, len(indexes))
-			keptMIDs := make([]int64, 0, len(indexes))
-			for _, index := range indexes {
-				if index.Mid <= 0 {
-					continue
-				}
-				batchSnapshots = append(batchSnapshots, buildFilmListSnapshot(version, index))
-				keptMIDs = append(keptMIDs, index.Mid)
-			}
-			deletedMIDs := diffMIDs(batchIDs, keptMIDs)
-			buildCost := time.Since(buildStartedAt)
-
-			writeStartedAt := time.Now()
-			if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmListSnapshot{}).Error; err != nil {
-				return err
-			}
-			if err := tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-				return err
-			}
-			if len(batchSnapshots) > 0 {
-				if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batchSnapshots, snapshotBuildBatchSize).Error; err != nil {
-					return err
-				}
-			}
-			if len(keptMIDs) > 0 {
-				type midSource struct {
-					Mid      int64
-					SourceId string
-				}
-				var sourcePairs []midSource
-				if err := tx.Model(&model.FilmSourcePlaylist{}).
-					Distinct("mid", "source_id").
-					Where("mid IN ? AND line_kind = ?", keptMIDs, "play").
-					Find(&sourcePairs).Error; err == nil && len(sourcePairs) > 0 {
-					snapSources := make([]model.FilmSnapshotSource, 0, len(sourcePairs))
-					for _, pair := range sourcePairs {
-						snapSources = append(snapSources, model.FilmSnapshotSource{
-							SnapshotVersion: version,
-							Mid:             pair.Mid,
-							SourceId:        pair.SourceId,
-						})
-					}
-					if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapSources, snapshotBuildBatchSize).Error; err != nil {
-						return err
-					}
-				}
-			}
-			writeCost := time.Since(writeStartedAt)
-
-			updatedCount += len(batchSnapshots)
-			deletedCount += len(deletedMIDs)
-			processed += len(batchIDs)
-			allKeptMIDs = append(allKeptMIDs, keptMIDs...)
-			allDeletedMIDs = append(allDeletedMIDs, deletedMIDs...)
-			log.Printf(
-				"[Snapshot] 快速增量发布进度 version=%s mid=%d/%d batch=%d updated=%d deleted=%d query=%s build=%s write=%s cost=%s total_cost=%s",
-				version,
-				processed,
-				len(ids),
-				len(batchIDs),
-				len(batchSnapshots),
-				len(deletedMIDs),
-				queryCost,
-				buildCost,
-				writeCost,
-				time.Since(batchStartedAt),
-				time.Since(startedAt),
-			)
-		}
-		return nil
-	}); err != nil {
+	var existing []int64
+	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid IN ?", ids).Pluck("mid", &existing).Error; err != nil {
 		return "", 0, err
 	}
+	deletedMIDs := diffMIDs(ids, existing)
+	if len(deletedMIDs) > 0 {
+		RemoveMidsFromActiveFilmSearchIndex(version, deletedMIDs)
+	}
+	if len(existing) > 0 {
+		UpsertMidsToActiveFilmSearchIndex(version, existing)
+	}
+	scheduleSnapshotCacheInvalidation(version, ids)
+	log.Printf("[Snapshot] 列表可见性已跟随 film_index version=%s input=%d kept=%d deleted=%d cost=%s", version, len(ids), len(existing), len(deletedMIDs), time.Since(startedAt))
+	return version, len(existing), nil
+}
 
-	applyStartedAt := time.Now()
-	if len(allDeletedMIDs) > 0 {
-		RemoveMidsFromActiveFilmSearchIndex(version, allDeletedMIDs)
+func upsertSnapshotChunkTx(tx *gorm.DB, version string, batchIDs []int64) (keptMIDs, deletedMIDs []int64, updated int, queryCost, buildCost, writeCost time.Duration, err error) {
+	var indexes []model.FilmIndex
+	queryStartedAt := time.Now()
+	if err = tx.Where("mid IN ?", batchIDs).Find(&indexes).Error; err != nil {
+		return
 	}
-	if len(allKeptMIDs) > 0 {
-		UpsertMidsToActiveFilmSearchIndex(version, allKeptMIDs)
+	queryCost = time.Since(queryStartedAt)
+
+	buildStartedAt := time.Now()
+	batchSnapshots := make([]model.FilmListSnapshot, 0, len(indexes))
+	keptMIDs = make([]int64, 0, len(indexes))
+	for _, index := range indexes {
+		if index.Mid <= 0 {
+			continue
+		}
+		batchSnapshots = append(batchSnapshots, buildFilmListSnapshot(version, index))
+		keptMIDs = append(keptMIDs, index.Mid)
 	}
-	invalidateSnapshotDataCaches(version, ids)
-	applyCost := time.Since(applyStartedAt)
-	RefreshAccessDataCaches()
-	log.Printf("[Snapshot] 快速增量发布完成 version=%s input=%d updated=%d deleted=%d apply=%s total_cost=%s", version, len(ids), updatedCount, deletedCount, applyCost, time.Since(startedAt))
-	return version, updatedCount, nil
+	deletedMIDs = diffMIDs(batchIDs, keptMIDs)
+	buildCost = time.Since(buildStartedAt)
+
+	writeStartedAt := time.Now()
+	if err = tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmListSnapshot{}).Error; err != nil {
+		return
+	}
+	if err = tx.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, batchIDs).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
+		return
+	}
+	if len(batchSnapshots) > 0 {
+		if err = tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(batchSnapshots, snapshotBuildBatchSize).Error; err != nil {
+			return
+		}
+	}
+	if len(keptMIDs) > 0 {
+		type midSource struct {
+			Mid      int64
+			SourceId string
+		}
+		var sourcePairs []midSource
+		if err = tx.Model(&model.FilmSourcePlaylist{}).
+			Distinct("mid", "source_id").
+			Where("mid IN ? AND line_kind = ?", keptMIDs, "play").
+			Find(&sourcePairs).Error; err != nil {
+			return
+		}
+		if len(sourcePairs) > 0 {
+			snapSources := make([]model.FilmSnapshotSource, 0, len(sourcePairs))
+			for _, pair := range sourcePairs {
+				snapSources = append(snapSources, model.FilmSnapshotSource{
+					SnapshotVersion: version,
+					Mid:             pair.Mid,
+					SourceId:        pair.SourceId,
+				})
+			}
+			if err = tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapSources, snapshotBuildBatchSize).Error; err != nil {
+				return
+			}
+		}
+	}
+	writeCost = time.Since(writeStartedAt)
+	updated = len(batchSnapshots)
+	return
 }
 
 func ChunkSnapshotMIDs(ids []int64, size int) [][]int64 {

@@ -131,19 +131,13 @@ func searchManageFilmsByMetaIndex(version string, s model.SearchVo, page *dto.Pa
 
 // queryManageFilmsBySnapshotDB 专职处理管理后台多维结构化快照筛选与无条件全量分页
 func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Page, name string, startedAt time.Time) []model.FilmIndex {
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+	query := liveFilmQuery()
 	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
 	sourceId := strings.TrimSpace(s.SourceId)
 	if sourceId != "" {
-		sourceMidSubQuery := db.Mdb.Model(&model.FilmSnapshotSource{}).
-			Select("mid").
-			Where("snapshot_version = ? AND source_id = ?", version, sourceId)
-		playlistMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-			Select("mid").
-			Where("source_id = ? AND line_kind = 'play'", sourceId)
-		query = query.Where("(source_id = ? OR mid IN (?) OR mid IN (?))", sourceId, sourceMidSubQuery, playlistMidSubQuery)
+		query = applySourceMembership(query, sourceId)
 	}
 	query = applyCategorySearchFilter(query, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
@@ -187,16 +181,9 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 	}
 
 	offset := shared.PageOffset(page)
-	var ids []uint
-	if err := query.Select("id").Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+	snapshots, err := findListPage(query, "update_stamp DESC, mid DESC", offset, page.PageSize)
+	if err != nil {
 		return []model.FilmIndex{}
-	}
-
-	var snapshots []model.FilmListSnapshot
-	if len(ids) > 0 {
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order("update_stamp DESC, id DESC").Find(&snapshots).Error; err != nil {
-			return []model.FilmIndex{}
-		}
 	}
 
 	log.Printf(

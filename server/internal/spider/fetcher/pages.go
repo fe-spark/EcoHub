@@ -275,9 +275,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		deps.NoteSourceError(s.Id, stopErr.Error())
 		return stats.success > 0, stopErr
 	}
-	if h < 0 && stats.failed > 0 {
-		return stats.success > 0, fmt.Errorf("全量采集存在失败页 failed=%d，跳过本次框架发布", stats.failed)
-	}
 	if ctx.Err() != nil {
 		return stats.success > 0, nil
 	}

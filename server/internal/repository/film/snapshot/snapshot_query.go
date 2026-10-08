@@ -14,27 +14,20 @@ import (
 )
 
 func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	if version == "" || mid <= 0 || db.Mdb == nil {
+	if mid <= 0 || db.Mdb == nil {
 		return nil
 	}
-	var snapshot model.FilmListSnapshot
-	if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, mid).First(&snapshot).Error; err != nil {
+	var index model.FilmIndex
+	if err := liveFilmQuery().Where("mid = ?", mid).First(&index).Error; err != nil {
 		return nil
 	}
-	return &snapshot
+	snap := buildFilmListSnapshot(resolveListVersion(version), index)
+	return &snap
 }
 
 // GetSnapshotsByMidsOrdered 按 mid 列表顺序取当前版本快照；无快照的 mid 跳过。
 func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	if version == "" || len(mids) == 0 || db.Mdb == nil {
+	if len(mids) == 0 || db.Mdb == nil {
 		return nil
 	}
 	uniq := make([]int64, 0, len(mids))
@@ -59,13 +52,13 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		if end > len(uniq) {
 			end = len(uniq)
 		}
-		var rows []model.FilmListSnapshot
-		if err := db.Mdb.Unscoped().Where("snapshot_version = ? AND mid IN ?", version, uniq[start:end]).Find(&rows).Error; err != nil {
+		var rows []model.FilmIndex
+		if err := liveFilmQuery().Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
 			continue
 		}
 		for _, row := range rows {
 			if row.Mid > 0 {
-				byMid[row.Mid] = row
+				byMid[row.Mid] = buildFilmListSnapshot(resolveListVersion(version), row)
 			}
 		}
 	}
@@ -180,12 +173,11 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version == "" || limit <= 0 || db.Mdb == nil {
+	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
 	}
 
-	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-		Where("snapshot_version = ?", version)
+	query := liveFilmQuery()
 
 	if len(categoryPids) > 0 {
 		query = query.Where("pid IN ?", categoryPids)
@@ -207,19 +199,19 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 		}
 	}
 
-	var results []model.FilmListSnapshot
-	if err := applyStrategy(query, true).Limit(limit).Find(&results).Error; err != nil {
+	results, err := scanListSnapshots(applyStrategy(query, true).Limit(limit))
+	if err != nil {
 		log.Println("[Snapshot] 获取轮播候选集异常:", err)
 		return []model.FilmListSnapshot{}
 	}
 	if len(results) == 0 && strategy == "score_random" {
 		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
-		fallback := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-			Where("snapshot_version = ?", version)
+		fallback := liveFilmQuery()
 		if len(categoryPids) > 0 {
 			fallback = fallback.Where("pid IN ?", categoryPids)
 		}
-		if err := applyStrategy(fallback, false).Limit(limit).Find(&results).Error; err != nil {
+		results, err = scanListSnapshots(applyStrategy(fallback, false).Limit(limit))
+		if err != nil {
 			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
 			return []model.FilmListSnapshot{}
 		}
@@ -233,17 +225,14 @@ func GetSnapshotHDBackdropCandidates(version string, categoryPids []int64, limit
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	if version == "" || limit <= 0 || db.Mdb == nil {
+	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
 	}
-	var results []model.FilmListSnapshot
-	query := db.Mdb.Unscoped().Model(&model.FilmListSnapshot{}).
-		Where("snapshot_version = ? AND (picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1)", version)
+	query := liveFilmQuery().
+		Where("picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1")
 	if len(categoryPids) > 0 {
 		query = query.Where("pid IN ?", categoryPids)
 	}
-	_ = query.Order("hits DESC, update_stamp DESC").
-		Limit(limit).
-		Find(&results).Error
+	results, _ := scanListSnapshots(query.Order("hits DESC, update_stamp DESC").Limit(limit))
 	return results
 }

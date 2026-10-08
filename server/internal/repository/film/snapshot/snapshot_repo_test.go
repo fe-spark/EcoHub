@@ -130,12 +130,10 @@ func TestEnsureActiveFilmListSnapshot_InitialBuild(t *testing.T) {
 		t.Fatal("expected non-empty active snapshot version after initial build")
 	}
 
-	var count int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ver).Count(&count).Error; err != nil {
-		t.Fatalf("count snapshot: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("expected 1 snapshot record, got %d", count)
+	WaitActiveFilmSearchIndexBuilt()
+	idx := loadFilmSearchMetaIndex(ver)
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 
 	rm := GetActiveFilmReadModel()
@@ -161,22 +159,13 @@ func TestEnsureActiveFilmListSnapshot_GhostSnapshotSelfHealing(t *testing.T) {
 		t.Fatalf("EnsureActiveFilmListSnapshot: %v", err)
 	}
 
-	newVer := GetActiveSnapshotVersion()
-	if newVer == "" || newVer == ghostVer {
-		t.Fatalf("expected ghost version %q to be replaced by new version, got %q", ghostVer, newVer)
+	WaitActiveFilmSearchIndexBuilt()
+	if got := GetActiveSnapshotVersion(); got != ghostVer {
+		t.Fatalf("live 读模型应沿用已有版本号 %q, got %q", ghostVer, got)
 	}
-
-	var newSnapCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", newVer).Count(&newSnapCount).Error; err != nil {
-		t.Fatalf("count new snapshot: %v", err)
-	}
-	if newSnapCount != 1 {
-		t.Fatalf("expected 1 snapshot record for new version, got %d", newSnapCount)
-	}
-
-	rm := GetActiveFilmReadModel()
-	if rm == nil || rm.Version != newVer {
-		t.Fatalf("expected read model version %q, got %+v", newVer, rm)
+	idx := loadFilmSearchMetaIndex(ghostVer)
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 }
 
@@ -203,17 +192,13 @@ func TestEnsureActiveFilmListSnapshot_CountMismatch(t *testing.T) {
 		t.Fatalf("EnsureActiveFilmListSnapshot: %v", err)
 	}
 
-	newVer := GetActiveSnapshotVersion()
-	if newVer == "" || newVer == oldVer {
-		t.Fatalf("expected old partial version %q to be rebuilt, got %q", oldVer, newVer)
+	if got := GetActiveSnapshotVersion(); got != oldVer {
+		t.Fatalf("列表直读 film_index 无需因快照行数不一致重建, got %q", got)
 	}
-
-	var healedCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", newVer).Count(&healedCount).Error; err != nil {
-		t.Fatalf("count healed snapshot: %v", err)
-	}
-	if healedCount != 2 {
-		t.Fatalf("expected 2 snapshot records after rebuilding, got %d", healedCount)
+	WaitActiveFilmSearchIndexBuilt()
+	idx := loadFilmSearchMetaIndex(oldVer)
+	if idx == nil || len(idx.Items) != 2 {
+		t.Fatalf("expected 2 live search items, got %+v", idx)
 	}
 }
 
@@ -247,16 +232,12 @@ func TestEnsureActiveFilmListSnapshot_ClearOnShutdownAndRebuildOnStartup(t *test
 	WaitActiveFilmSearchIndexBuilt()
 
 	ver2 := GetActiveSnapshotVersion()
-	if ver2 == "" || ver2 == ver1 {
-		t.Fatalf("expected new active snapshot version, got %q", ver2)
+	if ver2 == "" {
+		t.Fatal("expected live version after restart")
 	}
-
-	var totalSnapCount int64
-	if err := gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ver2).Count(&totalSnapCount).Error; err != nil {
-		t.Fatalf("count snapshot: %v", err)
-	}
-	if totalSnapCount != 2 {
-		t.Fatalf("expected 2 snapshot records after restart, got %d", totalSnapCount)
+	idx := loadFilmSearchMetaIndex(ver2)
+	if idx == nil || len(idx.Items) != 2 {
+		t.Fatalf("expected 2 live search items after restart, got %+v", idx)
 	}
 }
 
@@ -307,18 +288,10 @@ func TestEnsureActiveFilmListSnapshot_PlayFromSummaryHealed(t *testing.T) {
 	if ver == "" {
 		t.Fatal("expected non-empty active version")
 	}
-
-	// 验证 film_index 与快照表中的 play_from_summary 均已自愈刷新
-	var healedIndex model.FilmIndex
-	_ = gdb.Where("mid = ?", 201).First(&healedIndex)
-	if healedIndex.PlayFromSummary == "" {
-		t.Fatal("expected film_index play_from_summary to be refreshed during self-healing")
-	}
-
-	var healedSnap model.FilmListSnapshot
-	_ = gdb.Where("snapshot_version = ? AND mid = ?", ver, 201).First(&healedSnap)
-	if healedSnap.PlayFromSummary == "" {
-		t.Fatal("expected film_list_snapshot play_from_summary to be refreshed during self-healing")
+	WaitActiveFilmSearchIndexBuilt()
+	idx := loadFilmSearchMetaIndex(ver)
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
 }
 

@@ -60,6 +60,13 @@ func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
 	return gdb, mr
 }
 
+func seedLiveSnaps(t *testing.T, snaps ...model.FilmListSnapshot) {
+	t.Helper()
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(snaps); err != nil {
+		t.Fatalf("seed live films: %v", err)
+	}
+}
+
 // 方案 1 测试：hotKeywords 性能加固
 func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 	gdb, mr := setupTestDBAndRedis(t)
@@ -78,6 +85,7 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 			t.Fatalf("create snapshot: %v", err)
 		}
 	}
+	seedLiveSnaps(t, snaps...)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -168,6 +176,7 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 	if err := gdb.Create(&snap).Error; err != nil {
 		t.Fatalf("create snapshot: %v", err)
 	}
+	seedLiveSnaps(t, snap)
 	detail := model.MovieDetail{
 		Id:       validMid,
 		Name:     "盗梦空间",
@@ -253,6 +262,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 		if err := gdb.Create(&snap).Error; err != nil {
 			t.Fatalf("create snapshot: %v", err)
 		}
+		seedLiveSnaps(t, snap)
 
 		d := model.MovieDetail{
 			Id:       mid,
@@ -328,6 +338,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 			t.Fatalf("create item: %v", err)
 		}
 	}
+	seedLiveSnaps(t, items...)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -409,6 +420,7 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 		if err := gdb.Create(&s).Error; err != nil {
 			t.Fatalf("create test film: %v", err)
 		}
+		seedLiveSnaps(t, s)
 	}
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
@@ -477,6 +489,7 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	if err := gdb.Create(&s2).Error; err != nil {
 		t.Fatalf("create s2: %v", err)
 	}
+	seedLiveSnaps(t, s1, s2)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
@@ -602,6 +615,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	if err := gdb.Create(&s).Error; err != nil {
 		t.Fatalf("create snap: %v", err)
 	}
+	seedLiveSnaps(t, s)
 	d := model.MovieDetail{Id: mid, Name: "降级测试影片", PlayList: [][]model.MovieUrlInfo{{{Episode: "1", Link: "url"}}}}
 	urlsJSON, _ := json.Marshal(d.PlayList[0])
 	if err := gdb.Create(&model.FilmSourcePlaylist{
@@ -657,6 +671,7 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	if err := gdb.Create(&s).Error; err != nil {
 		t.Fatalf("create s: %v", err)
 	}
+	seedLiveSnaps(t, s)
 
 	res := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
 	if res == nil {
@@ -702,6 +717,7 @@ func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
 	s2 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 802, Name: "电影B", Pid: 1, Cid: 10}
 	_ = gdb.Create(&s1)
 	_ = gdb.Create(&s2)
+	seedLiveSnaps(t, s1, s2)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)

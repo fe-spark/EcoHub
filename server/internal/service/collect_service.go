@@ -82,7 +82,8 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 			syslog.Warnf("[CollectService] 拖拽切换首位基准站同步分类失败 name=%s: %v", newPrimary.Name, err)
 		}
 		repository.MarkCategoryChanged()
-		filmsnapshot.ClearAllSnapshotDynamicCaches()
+		filmsnapshot.RefreshAccessDataCaches()
+		filmsnapshot.ClearSearchCache()
 	}
 	return nil
 }

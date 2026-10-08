@@ -2,11 +2,22 @@ package snapshot
 
 import (
 	"fmt"
+	"sync"
+	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/support"
+)
+
+const snapshotCacheDebounce = 5 * time.Second
+
+var (
+	cacheDebounceMu    sync.Mutex
+	cacheDebounceTimer *time.Timer
+	cacheDebounceMids  = make(map[int64]struct{})
+	cacheDebounceVer   string
 )
 
 func RefreshAccessDataCaches() {
@@ -57,9 +68,71 @@ func ClearSearchCache() {
 
 func invalidateDeletedSnapshotCaches(version string, mids []int64) {
 	invalidateSnapshotDataCaches(version, mids)
+	RefreshAccessDataCaches()
+}
+
+func scheduleSnapshotCacheInvalidation(version string, mids []int64) {
+	BumpSearchCacheVersion()
+	deletePlayInfoCacheKeys(mids)
+	cacheDebounceMu.Lock()
+	defer cacheDebounceMu.Unlock()
+	cacheDebounceVer = version
+	for _, mid := range mids {
+		if mid > 0 {
+			cacheDebounceMids[mid] = struct{}{}
+		}
+	}
+	if cacheDebounceTimer == nil {
+		cacheDebounceTimer = time.AfterFunc(snapshotCacheDebounce, fireDebouncedSnapshotCacheInvalidation)
+		return
+	}
+	cacheDebounceTimer.Reset(snapshotCacheDebounce)
+}
+
+func FlushSnapshotCacheInvalidation() {
+	cacheDebounceMu.Lock()
+	version := cacheDebounceVer
+	mids := drainCacheDebounceMidsLocked()
+	if cacheDebounceTimer != nil {
+		cacheDebounceTimer.Stop()
+		cacheDebounceTimer = nil
+	}
+	cacheDebounceVer = ""
+	cacheDebounceMu.Unlock()
+	if version == "" && len(mids) == 0 {
+		RefreshAccessDataCaches()
+		return
+	}
+	applyBroadSnapshotCacheInvalidation(version, mids)
+}
+
+func fireDebouncedSnapshotCacheInvalidation() {
+	cacheDebounceMu.Lock()
+	version := cacheDebounceVer
+	mids := drainCacheDebounceMidsLocked()
+	cacheDebounceTimer = nil
+	cacheDebounceVer = ""
+	cacheDebounceMu.Unlock()
+	applyBroadSnapshotCacheInvalidation(version, mids)
+}
+
+func drainCacheDebounceMidsLocked() []int64 {
+	if len(cacheDebounceMids) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(cacheDebounceMids))
+	for mid := range cacheDebounceMids {
+		mids = append(mids, mid)
+	}
+	cacheDebounceMids = make(map[int64]struct{})
+	return mids
 }
 
 func invalidateSnapshotDataCaches(version string, mids []int64) {
+	applyBroadSnapshotCacheInvalidation(version, mids)
+}
+
+func applyBroadSnapshotCacheInvalidation(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	if db.Rdb != nil {
 		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
@@ -67,21 +140,27 @@ func invalidateSnapshotDataCaches(version string, mids []int64) {
 	cache.ClearProvideListCache()
 	BumpSearchCacheVersion()
 	cache.ClearPatterns(filmListDerivedCachePatterns()...)
-	if db.Rdb != nil && len(mids) > 0 {
-		const pipeBatchSize = 1000
-		for i := 0; i < len(mids); i += pipeBatchSize {
-			end := i + pipeBatchSize
-			if end > len(mids) {
-				end = len(mids)
-			}
-			pipe := db.Rdb.Pipeline()
-			for _, mid := range mids[i:end] {
-				pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
-			}
-			_, _ = pipe.Exec(db.Cxt)
-		}
-		BumpPlayInfoGeneration()
+	deletePlayInfoCacheKeys(mids)
+	RefreshAccessDataCaches()
+}
+
+func deletePlayInfoCacheKeys(mids []int64) {
+	if db.Rdb == nil || len(mids) == 0 {
+		return
 	}
+	const pipeBatchSize = 1000
+	for i := 0; i < len(mids); i += pipeBatchSize {
+		end := i + pipeBatchSize
+		if end > len(mids) {
+			end = len(mids)
+		}
+		pipe := db.Rdb.Pipeline()
+		for _, mid := range mids[i:end] {
+			pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
+		}
+		_, _ = pipe.Exec(db.Cxt)
+	}
+	BumpPlayInfoGeneration()
 }
 
 func ClearAllSnapshotDynamicCaches() {
