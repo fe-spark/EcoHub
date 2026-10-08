@@ -34,7 +34,8 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
     <div className={styles.batchProgressList}>
       {items.map((item, index) => (
         <div
-          key={item.queueId}
+          // seq 在乐观队列号换成服务端队列号时不变，进度条保持同一节点
+          key={item.seq}
           className={styles.batchProgressBar}
           data-tour={index === tourTarget ? "collect-progress" : undefined}
           data-tour-progress={

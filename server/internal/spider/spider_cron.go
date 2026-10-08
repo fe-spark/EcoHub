@@ -290,6 +290,13 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		remark = "片库冗余数据与孤儿清理"
 	}
 
+	if collectLifecycle.isBusy() {
+		detail := "采集正在入库，跳过本轮片库清理"
+		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
+		notify.PublishCronDone(ft.Id, remark, detail)
+		return
+	}
+
 	// 1. 多源播放列表孤儿清理（film_source_playlists 中 mid 不在 film_index 的残余）
 	var n int64
 	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {

@@ -61,6 +61,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	}
 
 	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
+	query = applyCategoryUpdateIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -114,6 +115,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 	}
 
 	query := applyCategorySnapshotSourceFilter(liveFilmQuery(), version, sourceID)
+	query = applyCategoryUpdateIndexHint(query, field)
 	if field == "pid" {
 		query = query.Where("pid = ?", id)
 	} else {
@@ -179,6 +181,14 @@ func (h mysqlUseIndexHint) Build(builder clause.Builder) {
 }
 
 func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
+	return applyCategoryIndexHint(query, field, "idx_pid_hits", "idx_cid_hits")
+}
+
+func applyCategoryUpdateIndexHint(query *gorm.DB, field string) *gorm.DB {
+	return applyCategoryIndexHint(query, field, "idx_film_index_pid_update_mid", "idx_cid_update")
+}
+
+func applyCategoryIndexHint(query *gorm.DB, field, pidIndex, cidIndex string) *gorm.DB {
 	if query == nil || query.Dialector == nil {
 		return query
 	}
@@ -187,9 +197,9 @@ func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
 	}
 	switch field {
 	case "pid":
-		return query.Clauses(mysqlUseIndexHint{index: "idx_pid_hits"})
+		return query.Clauses(mysqlUseIndexHint{index: pidIndex})
 	case "cid":
-		return query.Clauses(mysqlUseIndexHint{index: "idx_cid_hits"})
+		return query.Clauses(mysqlUseIndexHint{index: cidIndex})
 	default:
 		return query
 	}
@@ -360,6 +370,11 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	}
 
 	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields).Where("pid = ?", pid), version, sourceID)
+	if sortType == 1 {
+		query = applyCategoryHotIndexHint(query, "pid")
+	} else {
+		query = applyCategoryUpdateIndexHint(query, "pid")
+	}
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}

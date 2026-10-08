@@ -75,14 +75,14 @@ func UniqueKeys(keys []string) []string {
 	return orderedKeys
 }
 
-// LoadMovieMatchKeysByMidsTx 按 mid 批量读取匹配键（按 id 升序，保持写入顺序）。
+// LoadMovieMatchKeysByMidsTx 按 mid 批量读取匹配键（按主键升序）。
 func LoadMovieMatchKeysByMidsTx(tx *gorm.DB, mids []int64) map[int64][]string {
 	if len(mids) == 0 {
 		return nil
 	}
 
 	var records []model.MovieMatchKey
-	if err := tx.Where("mid IN ?", mids).Order("id ASC").Find(&records).Error; err != nil {
+	if err := tx.Where("mid IN ?", mids).Order("mid ASC, match_key ASC").Find(&records).Error; err != nil {
 		return nil
 	}
 
@@ -144,7 +144,7 @@ func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 	}
 
 	var records []model.MovieMatchKey
-	if err := db.Mdb.Where("match_key IN ?", keys).Order("id ASC").Find(&records).Error; err != nil {
+	if err := db.Mdb.Where("match_key IN ?", keys).Order("mid ASC, match_key ASC").Find(&records).Error; err != nil {
 		return nil
 	}
 
