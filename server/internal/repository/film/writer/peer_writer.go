@@ -353,40 +353,27 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			mid = existingMapping.GlobalMid
 		}
 
+		lockNames := sqlFilmLockNames(source, detail, mid)
+		if err := acquireSQLFilmLocks(tx, lockNames); err != nil {
+			return err
+		}
+		defer releaseSQLFilmLocks(tx, lockNames)
+
 		var filmIndex *model.FilmIndex
 		if hasMapping {
 			var fi model.FilmIndex
-			q := tx.Where("mid = ?", mid)
-			if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
-				q = q.Clauses(clause.Locking{Strength: "UPDATE"})
-			}
-			if err := q.First(&fi).Error; err == nil {
+			if err := tx.Where("mid = ?", mid).First(&fi).Error; err == nil {
 				filmIndex = &fi
 			}
 		}
 
 		if filmIndex == nil {
-			pid := detail.RawPid
-			if source != nil {
-				if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.Cid)); local > 0 {
-					pid = local
-				} else if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.RawPid)); local > 0 {
-					pid = local
-				}
-			}
-			allKeys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
-			if err := lockMatchKeysTx(tx, allKeys); err != nil {
-				return err
-			}
+			allKeys := peerMatchKeys(source, detail)
 			if len(allKeys) > 0 {
 				var matchKey model.MovieMatchKey
 				if err := tx.Where("match_key IN ?", allKeys).Order("id ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
 					var fi model.FilmIndex
-					fiQ := tx.Where("mid = ?", matchKey.Mid)
-					if tx.Dialector != nil && tx.Dialector.Name() == "mysql" {
-						fiQ = fiQ.Clauses(clause.Locking{Strength: "UPDATE"})
-					}
-					if err := fiQ.First(&fi).Error; err == nil && fi.Mid > 0 {
+					if err := tx.Where("mid = ?", matchKey.Mid).First(&fi).Error; err == nil && fi.Mid > 0 {
 						mid = fi.Mid
 						filmIndex = &fi
 						_ = shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid)
@@ -448,9 +435,7 @@ func SaveCollectedPeerDetails(
 			continue
 		}
 
-		unlock := lockPeerCollect(source, detail)
-		mid, isNew, playLinesChanged, err := saveSinglePeerDetailWithRetry(source, detail)
-		unlock()
+		mid, isNew, playLinesChanged, err := saveSinglePeerDetailSynced(source, detail)
 
 		if err != nil {
 			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod_id=%d name=%s err=%v",
@@ -646,7 +631,7 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		ClearFilmIndexCachesByPidSet(map[int64]struct{}{existingFilm.Pid: {}})
 	} else {
 		var err error
-		mid, _, _, err = saveSinglePeerDetailWithRetry(source, detail)
+		mid, _, _, err = saveSinglePeerDetailSynced(source, detail)
 		if err != nil {
 			return 0, err
 		}
