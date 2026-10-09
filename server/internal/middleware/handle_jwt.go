@@ -69,7 +69,7 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 
-		// 处理 token 刷新逻辑（针对过期但 Redis 中有效的 token）
+		// JWT 已过期时，只有 Redis 里仍是同一把 token 才刷新。Redis 有效期与 JWT 相同，这里只覆盖到期瞬间的时差。
 		if err != nil && errors.Is(err, jwt.ErrTokenExpired) {
 			// 使用 singleflight 防止并发刷新
 			key := fmt.Sprintf("refresh:%d", uc.UserID)

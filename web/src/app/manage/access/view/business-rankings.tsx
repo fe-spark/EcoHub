@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Button, Card, Empty, Space, Tag } from "antd";
+import { Button, Card, Space, Tag } from "antd";
 import { AppstoreOutlined, FireOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import type { TopItem } from "./types";
 import AllRankingsModal from "./all-rankings-modal";
+import CardEmpty, { fillCardStyles } from "./card-empty";
 import styles from "./index.module.less";
 
 interface BusinessRankingsProps {
@@ -44,6 +45,7 @@ export default function BusinessRankings({
       {/* 热门点播 TOP 10 */}
       <Card
         className={styles.halfCard}
+        styles={fillCardStyles}
         title={
           <Space>
             <VideoCameraOutlined style={{ color: "var(--ant-color-primary, #fa8c16)" }} />
@@ -62,7 +64,7 @@ export default function BusinessRankings({
         loading={loading}
       >
         {playTops.length === 0 ? (
-          <Empty description="暂无点播数据" />
+          <CardEmpty description="暂无点播数据" />
         ) : (
           <div className={styles.hotPlayList}>
             {playTops.map((item, idx) => {
@@ -134,6 +136,7 @@ export default function BusinessRankings({
       {/* 热门搜索 TOP 10 */}
       <Card
         className={styles.halfCard}
+        styles={fillCardStyles}
         title={
           <Space>
             <FireOutlined style={{ color: "#fa541c" }} />
@@ -152,7 +155,7 @@ export default function BusinessRankings({
         loading={loading}
       >
         {searchTops.length === 0 ? (
-          <Empty description="暂无搜索记录" />
+          <CardEmpty description="暂无搜索记录" />
         ) : (
           <div className={styles.hotPlayList}>
             {searchTops.map((item, idx) => {
@@ -203,6 +206,7 @@ export default function BusinessRankings({
 
       <Card
         className={styles.halfCard}
+        styles={fillCardStyles}
         title={
           <Space>
             <AppstoreOutlined style={{ color: "var(--ant-color-success, #52c41a)" }} />
@@ -217,7 +221,7 @@ export default function BusinessRankings({
         loading={loading}
       >
         {classifyTops.length === 0 ? (
-          <Empty description="暂无分类记录" />
+          <CardEmpty description="暂无分类记录" />
         ) : (
           <div className={styles.hotPlayList}>
             {classifyTops.map((item, idx) => {

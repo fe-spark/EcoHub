@@ -96,6 +96,7 @@ func SetupRouter() *gin.Engine {
 		{
 			accessRoute.GET(`/status`, handler.AccessHd.Status)
 			accessRoute.GET(`/overview`, middleware.AdminAccess(), handler.AccessHd.Overview)
+			accessRoute.GET(`/sources`, middleware.AdminAccess(), handler.AccessHd.SourceCalls)
 			accessRoute.GET(`/tops`, middleware.AdminAccess(), handler.AccessHd.Tops)
 			accessRoute.GET(`/logs`, middleware.AdminAccess(), handler.AccessHd.Logs)
 			accessRoute.GET(`/stats`, middleware.AdminAccess(), handler.AccessHd.DataStats)
@@ -178,7 +179,7 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
 			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
 			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgress)
-			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.ResetImpactStats)
+			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
 			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)
 		}

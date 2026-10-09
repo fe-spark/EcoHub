@@ -1,13 +1,6 @@
 package film
 
-import (
-	"strings"
-	"sync"
-
-	"server/internal/infra/db"
-	"server/internal/model"
-	"server/internal/repository"
-)
+import "sync"
 
 // ResetProgress 数据重置实时进度（前端轮询展示真实进度）
 type ResetProgress struct {
@@ -15,57 +8,6 @@ type ResetProgress struct {
 	Percent int    `json:"percent"` // 0-100 真实完成百分比
 	Stage   string `json:"stage"`   // 当前阶段描述
 	Error   string `json:"error"`   // 失败原因（失败时非空）
-}
-
-// ResetImpactStats 工作台影视数据规模（按当前基准源隔离，不含其它采集站）
-type ResetImpactStats struct {
-	Films      int64  `json:"films"`
-	Snapshots  int64  `json:"snapshots"`
-	Categories int64  `json:"categories"`
-	Failures   int64  `json:"failures"`
-	SourceId   string `json:"sourceId,omitempty"`
-	SourceName string `json:"sourceName,omitempty"`
-}
-
-// GetResetImpactStats 统计当前基准源的影片、分类与失败记录规模。
-func GetResetImpactStats() ResetImpactStats {
-	var stats ResetImpactStats
-	if db.Mdb == nil {
-		return stats
-	}
-	primary := repository.GetActiveCollectSource()
-	if primary == nil || strings.TrimSpace(primary.Id) == "" {
-		return stats
-	}
-	sourceID := primary.Id
-	stats.SourceId = sourceID
-	stats.SourceName = primary.Name
-
-	_ = db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Where("source_id = ? AND line_kind = ?", sourceID, "play").
-		Select("COUNT(DISTINCT mid)").
-		Scan(&stats.Films).Error
-
-	stats.Snapshots = stats.Films
-
-	stats.Categories = countCategoryTreeNodes(repository.GetActiveCategoryTree(sourceID).Children)
-
-	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("origin_id = ?", sourceID).
-		Count(&stats.Failures).Error
-	return stats
-}
-
-func countCategoryTreeNodes(nodes []*model.CategoryTree) int64 {
-	var n int64
-	for _, node := range nodes {
-		if node == nil {
-			continue
-		}
-		n++
-		n += countCategoryTreeNodes(node.Children)
-	}
-	return n
 }
 
 var resetProg = struct {

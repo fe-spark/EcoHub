@@ -197,7 +197,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Picture:         "/upload/pic/201.jpg",
 		UpdateStamp:     time.Now().Unix(),
 	}
-	if err := gdb.Create(&snap201).Error; err != nil {
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap201}); err != nil {
 		t.Fatalf("create snap201: %v", err)
 	}
 	detail201 := model.MovieDetail{
@@ -219,13 +219,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		},
 	}
 	rawUrls201, _ := json.Marshal(detail201.PlayList[0])
-	f201 := model.FilmIndex{}
-	f201.Mid = 201
-	f201.Name = detail201.Name
-	f201.Picture = detail201.Picture
-	f201.Content = "流浪地球内容简介"
-	if err := gdb.Create(&f201).Error; err != nil {
-		t.Fatalf("create film index 201: %v", err)
+	if err := gdb.Model(&model.FilmIndex{}).Where("mid = ?", 201).Update("content", "流浪地球内容简介").Error; err != nil {
+		t.Fatalf("update film index 201: %v", err)
 	}
 	if err := gdb.Create(&model.FilmSourcePlaylist{
 		Mid:          201,
@@ -254,7 +249,7 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Picture:         "https://img.test.com/202.jpg",
 		UpdateStamp:     time.Now().Unix(),
 	}
-	if err := gdb.Create(&snap202).Error; err != nil {
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap202}); err != nil {
 		t.Fatalf("create snap202: %v", err)
 	}
 	detail202 := model.MovieDetail{
@@ -275,13 +270,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		},
 	}
 	rawUrls202, _ := json.Marshal(detail202.PlayList[0])
-	f202 := model.FilmIndex{}
-	f202.Mid = 202
-	f202.Name = detail202.Name
-	f202.Picture = detail202.Picture
-	f202.Content = "星际穿越内容简介"
-	if err := gdb.Create(&f202).Error; err != nil {
-		t.Fatalf("create film index 202: %v", err)
+	if err := gdb.Model(&model.FilmIndex{}).Where("mid = ?", 202).Update("content", "星际穿越内容简介").Error; err != nil {
+		t.Fatalf("update film index 202: %v", err)
 	}
 	if err := gdb.Create(&model.FilmSourcePlaylist{
 		Mid:          202,
@@ -608,7 +598,7 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 		Cid:             10,
 		Hits:            100,
 	}
-	_ = db.Mdb.Create(&snap).Error
+	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
@@ -675,7 +665,7 @@ func TestHandleProvide_SingleFlight_ConcurrentDataRace(t *testing.T) {
 		Picture:         "/static/poster.jpg", // 相对路径，依赖 baseURL 归一化
 		Hits:            500,
 	}
-	_ = db.Mdb.Create(&snap).Error
+	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{snap})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	_ = filmsnapshot.LoadActiveFilmReadModel(version)
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()

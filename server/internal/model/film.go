@@ -66,7 +66,6 @@ type SearchSourceTab struct {
 type MovieUrlInfo struct {
 	Episode    string `json:"episode"`              // 集数
 	Link       string `json:"link"`                 // 播放地址
-	IsFallback bool   `json:"isFallback,omitempty"` // 是否跨站降级/补齐集数
 	SourceId   string `json:"sourceId,omitempty"`   // 来源站ID
 	SourceName string `json:"sourceName,omitempty"` // 来源站名称
 }
@@ -255,65 +254,50 @@ func (FilmSourcePlaylist) TableName() string {
 	return TableFilmSourcePlaylist
 }
 
-// FilmSnapshotSource 快照版本成员关系表。
-type FilmSnapshotSource struct {
-	ID              uint   `gorm:"primaryKey"`
-	SnapshotVersion string `gorm:"size:64;uniqueIndex:uidx_snap_source_mid,priority:1;index:idx_snap_ver_source,priority:1"`
-	Mid             int64  `gorm:"uniqueIndex:uidx_snap_source_mid,priority:2;index:idx_snap_ver_source,priority:3"`
-	SourceId        string `gorm:"size:32;uniqueIndex:uidx_snap_source_mid,priority:3;index:idx_snap_ver_source,priority:2"`
-}
-
-func (FilmSnapshotSource) TableName() string {
-	return TableFilmSnapshotSource
-}
-
-// FilmListSnapshot 是前台列表与 TVBox 列表的只读快照。
-// 采集写入仍落 film_index，采集收尾成功后重建新版本快照并原子切换 active version。
+// FilmListSnapshot 是列表接口的内存结构，由 film_index 现场组装，不落库。
 type FilmListSnapshot struct {
-	ID              uint `gorm:"primarykey"`
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
-	DeletedAt       gorm.DeletedAt
-	SnapshotVersion string `json:"snapshotVersion" gorm:"size:64;uniqueIndex:uidx_snapshot_mid;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_hits;index:idx_snap_cid_hits;index:idx_snap_pid_year;index:idx_snap_ver_name,priority:1;index:idx_snap_ver_update,priority:1;index:idx_snap_list_ver_src,priority:1"`
-	Mid             int64  `json:"mid" gorm:"uniqueIndex:uidx_snapshot_mid;index"`
-	SourceId        string `json:"sourceId" gorm:"size:32;index;index:idx_snap_list_ver_src,priority:2"`
-	DbId            int64  `json:"dbId" gorm:"index"`
+	SnapshotVersion string `json:"snapshotVersion"`
+	Mid             int64  `json:"mid"`
+	SourceId        string `json:"sourceId"`
+	DbId            int64  `json:"dbId"`
 
-	Cid              int64  `json:"cid" gorm:"index;index:idx_snap_cid_update;index:idx_snap_cid_hits"`
-	Pid              int64  `json:"pid" gorm:"index;index:idx_snap_pid_update;index:idx_snap_pid_hits;index:idx_snap_pid_year"`
-	RootCategoryKey  string `json:"rootCategoryKey" gorm:"size:128;index"`
-	CategoryKey      string `json:"categoryKey" gorm:"size:128;index"`
-	OriginalCategory string `json:"originalCategory" gorm:"size:128;index"`
+	Cid              int64  `json:"cid"`
+	Pid              int64  `json:"pid"`
+	RootCategoryKey  string `json:"rootCategoryKey"`
+	CategoryKey      string `json:"categoryKey"`
+	OriginalCategory string `json:"originalCategory"`
 	CName            string `json:"cName"`
 
-	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`
-	Name               string  `json:"name" gorm:"size:255;index:idx_snap_search_name;index:idx_snap_ver_name,priority:2"`
-	SubTitle           string  `json:"subTitle" gorm:"type:text"`
-	ClassTag           string  `json:"classTag" gorm:"type:text"`
-	Area               string  `json:"area" gorm:"index"`
-	Language           string  `json:"language" gorm:"index"`
-	Year               int64   `json:"year" gorm:"index;index:idx_snap_pid_year"`
+	SeriesKey          string  `json:"seriesKey"`
+	Name               string  `json:"name"`
+	SubTitle           string  `json:"subTitle"`
+	ClassTag           string  `json:"classTag"`
+	Area               string  `json:"area"`
+	Language           string  `json:"language"`
+	Year               int64   `json:"year"`
 	Initial            string  `json:"initial"`
-	Score              float64 `json:"score" gorm:"index"`
-	UpdateStamp        int64   `json:"updateStamp" gorm:"index;index:idx_snap_pid_update;index:idx_snap_cid_update;index:idx_snap_pid_year;index:idx_snap_ver_update,priority:2"`
-	UpdateReason       string  `json:"updateReason" gorm:"type:varchar(64)"`
-	Hits               int64   `json:"hits" gorm:"index;index:idx_snap_pid_hits;index:idx_snap_cid_hits"`
+	Score              float64 `json:"score"`
+	UpdateStamp        int64   `json:"updateStamp"`
+	UpdateReason       string  `json:"updateReason"`
+	Hits               int64   `json:"hits"`
 	State              string  `json:"state"`
 	Remarks            string  `json:"remarks"`
-	Picture            string  `json:"picture" gorm:"type:text"`
-	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`
-	CustomPicture      string  `json:"customPicture" gorm:"type:text"`
-	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`
-	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`
-	Actor              string  `json:"actor" gorm:"type:text"`
-	Director           string  `json:"director" gorm:"type:text"`
-	Writer             string  `json:"writer" gorm:"type:text"`
-	Blurb              string  `json:"blurb" gorm:"type:text"`
-	Content            string  `json:"content" gorm:"type:longtext"`
-	ReleaseDate        string  `json:"releaseDate" gorm:"size:64"`
-	CollectStamp       int64   `json:"collectStamp" gorm:"column:collect_stamp;index"`
-	CategoryVersion    string  `json:"categoryVersion" gorm:"size:64;index"`
-	RuleVersion        string  `json:"ruleVersion" gorm:"size:64;index"`
+	Picture            string  `json:"picture"`
+	PictureSlide       string  `json:"pictureSlide"`
+	CustomPicture      string  `json:"customPicture"`
+	CustomPictureSlide string  `json:"customPictureSlide"`
+	IsCustomPicture    bool    `json:"isCustomPicture"`
+	Actor              string  `json:"actor"`
+	Director           string  `json:"director"`
+	Writer             string  `json:"writer"`
+	Blurb              string  `json:"blurb"`
+	Content            string  `json:"content"`
+	ReleaseDate        string  `json:"releaseDate"`
+	CollectStamp       int64   `json:"collectStamp"`
+	CategoryVersion    string  `json:"categoryVersion"`
+	RuleVersion        string  `json:"ruleVersion"`
 	PlayFromSummary    string  `json:"playFromSummary"`
 }
 
@@ -329,10 +313,6 @@ func (s FilmListSnapshot) DisplayPictureSlide() string {
 		return s.CustomPictureSlide
 	}
 	return s.PictureSlide
-}
-
-func (FilmListSnapshot) TableName() string {
-	return TableFilmListSnapshot
 }
 
 // SearchTagItem 影片检索标签持久化模型 (MySQL)

@@ -202,9 +202,6 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return nil, err
 	}
-	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-		return nil, err
-	}
 
 	var orphanMids []int64
 	if len(affectedMids) > 0 {
@@ -217,7 +214,7 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	}
 
 	if len(orphanMids) > 0 {
-		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.FilmIndex{}).Error; err != nil {
+		if err := tx.Unscoped().Where("mid IN ?", orphanMids).Delete(&model.FilmIndex{}).Error; err != nil {
 			return nil, err
 		}
 		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.MovieMatchKey{}).Error; err != nil {
@@ -252,11 +249,15 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}
-		// 4. 删除采集站本身
+		// 4. 删除该站自己的分类副本，不影响其他站
+		if err := ClearSourceCategoryDataTx(tx, id); err != nil {
+			return err
+		}
+		// 5. 删除采集站本身
 		if err := tx.Where("id = ?", id).Delete(&model.FilmSource{}).Error; err != nil {
 			return err
 		}
-		// 5. 若删除的站点是当前海报源，自动兜底将可用站点设为海报源
+		// 6. 若删除的站点是当前海报源，自动兜底将可用站点设为海报源
 		return EnsureDefaultPosterSourceTx(tx)
 	})
 	if err != nil {

@@ -1,8 +1,11 @@
 package repository
 
 import (
+	"fmt"
 	"testing"
+	"time"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 
 	"github.com/alicebob/miniredis/v2"
@@ -55,6 +58,11 @@ func TestAuthRepo_WithRedis(t *testing.T) {
 	token := GetUserTokenById(42)
 	if token != "token-123" {
 		t.Fatalf("expected token-123, got %q", token)
+	}
+	ttl := mr.TTL(fmt.Sprintf(config.UserTokenKey, 42))
+	want := config.AuthTokenExpires * time.Hour
+	if ttl <= 0 || ttl > want || want-ttl > time.Minute {
+		t.Fatalf("token ttl=%s, want about %s", ttl, want)
 	}
 
 	if err := ClearUserToken(42); err != nil {

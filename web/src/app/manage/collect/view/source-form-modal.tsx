@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Radio, Switch } from "antd";
+import { Alert, Button, Form, Input, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -65,10 +65,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
       return;
     }
     form.resetFields();
-    form.setFieldsValue({
-      ...initialValues,
-      cleanOldData: false,
-    });
+    form.setFieldsValue(initialValues);
   }, [open, form, initialValues]);
 
   return (
@@ -131,16 +128,14 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         >
           <Input placeholder="请输入采集站接口地址" />
         </Form.Item>
-        {isUriChanged && (
-          <Form.Item
-            label="清空历史采集数据"
-            name="cleanOldData"
-            valuePropName="checked"
-            tooltip="检测到接口地址已变更。若更换为全新资源站，建议开启以清空旧站线路并剔除独占孤儿影片；若仅为同站换备用/镜像域名，请保持关闭。"
-          >
-            <Switch checkedChildren="清空旧数据" unCheckedChildren="保留旧数据" />
-          </Form.Item>
-        )}
+        {isUriChanged ? (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 16 }}
+            title="更换接口地址会清空该站已采集的线路、失败记录和分类，并按新地址重新获取分类。"
+          />
+        ) : null}
         <Form.Item
           label="接口格式"
           name="format"

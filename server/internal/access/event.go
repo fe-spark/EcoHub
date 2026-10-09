@@ -63,32 +63,33 @@ func formatNodeName(hostname, envName string) string {
 }
 
 type AccessEvent struct {
-	Ts             time.Time `json:"ts"`
-	Node           string    `json:"node,omitempty"`
-	Method         string    `json:"method"`
-	Path           string    `json:"path"`
-	Route          string    `json:"route"`
-	Action         string    `json:"action"`
-	Status         int       `json:"status"`
-	LatencyMs      int64     `json:"latencyMs"`
-	ClientType     string    `json:"clientType"`
-	Internal       string    `json:"internal,omitempty"`
-	IPHash         string    `json:"-"`
-	IPPreview      string    `json:"ipPreview"`
-	UAFamily       string    `json:"uaFamily"`
-	Resource       string    `json:"resource"`
-	ResourceTitle  string    `json:"resourceTitle,omitempty"`
-	ResourcePoster string    `json:"resourcePoster,omitempty"`
-	ResourceCat    string    `json:"resourceCat,omitempty"`
-	Page           string    `json:"page,omitempty"`
-	PageTitle      string    `json:"pageTitle,omitempty"`
-	AppVersion     string    `json:"appVersion,omitempty"`
-	DeviceModel    string    `json:"deviceModel,omitempty"`
-	DeviceId       string    `json:"deviceId,omitempty"`
-	OS             string    `json:"os,omitempty"`
-	Query          string    `json:"query,omitempty"`
-	playMember     string
-	uvMember       string
+	Ts              time.Time `json:"ts"`
+	Node            string    `json:"node,omitempty"`
+	Method          string    `json:"method"`
+	Path            string    `json:"path"`
+	Route           string    `json:"route"`
+	Action          string    `json:"action"`
+	Status          int       `json:"status"`
+	LatencyMs       int64     `json:"latencyMs"`
+	ClientType      string    `json:"clientType"`
+	Internal        string    `json:"internal,omitempty"`
+	IPHash          string    `json:"-"`
+	IPPreview       string    `json:"ipPreview"`
+	UAFamily        string    `json:"uaFamily"`
+	Resource        string    `json:"resource"`
+	ResourceTitle   string    `json:"resourceTitle,omitempty"`
+	ResourcePoster  string    `json:"resourcePoster,omitempty"`
+	ResourceCat     string    `json:"resourceCat,omitempty"`
+	Page            string    `json:"page,omitempty"`
+	PageTitle       string    `json:"pageTitle,omitempty"`
+	AppVersion      string    `json:"appVersion,omitempty"`
+	DeviceModel     string    `json:"deviceModel,omitempty"`
+	DeviceId        string    `json:"deviceId,omitempty"`
+	OS              string    `json:"os,omitempty"`
+	Query           string    `json:"query,omitempty"`
+	CollectSourceId string    `json:"collectSourceId,omitempty"`
+	playMember      string
+	uvMember        string
 }
 
 func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
@@ -138,25 +139,26 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 	res := httpResource(path, query)
 
 	return &AccessEvent{
-		Ts:         time.Now(),
-		Node:       CurrentNodeName(),
-		Method:     method,
-		Path:       path,
-		Route:      kind,
-		Action:     action,
-		Status:     status,
-		LatencyMs:  elapsed.Milliseconds(),
-		ClientType: clientType,
-		Internal:   internal,
-		IPHash:     HashIP(clientIP),
-		IPPreview:  IPPreview(clientIP),
-		UAFamily:   uaFamily(path, ua),
-		OS:         detectOS(ua),
-		Resource:   res,
-		DeviceId:   TruncateRunes(did, 64),
-		Query:      TruncateRunes(c.Request.URL.RawQuery, 500),
-		playMember: playRankMember(path, query),
-		uvMember:   HashIP(clientIP + "|" + ua),
+		Ts:              time.Now(),
+		Node:            CurrentNodeName(),
+		Method:          method,
+		Path:            path,
+		Route:           kind,
+		Action:          action,
+		Status:          status,
+		LatencyMs:       elapsed.Milliseconds(),
+		ClientType:      clientType,
+		Internal:        internal,
+		IPHash:          HashIP(clientIP),
+		IPPreview:       IPPreview(clientIP),
+		UAFamily:        uaFamily(path, ua),
+		OS:              detectOS(ua),
+		Resource:        res,
+		DeviceId:        TruncateRunes(did, 64),
+		Query:           TruncateRunes(c.Request.URL.RawQuery, 500),
+		CollectSourceId: provideCollectSource(path, query),
+		playMember:      playRankMember(path, query),
+		uvMember:        HashIP(clientIP + "|" + ua),
 	}
 }
 

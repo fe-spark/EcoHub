@@ -106,6 +106,11 @@ export default function CollectSourceCard({
                 XML
               </Tag>
             ) : null}
+            {record.categoryReady === false ? (
+              <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
+                缺分类
+              </Tag>
+            ) : null}
           </div>
           <Tooltip title={record.uri}>
             <a
@@ -212,13 +217,21 @@ export default function CollectSourceCard({
                 </Tooltip>
               )
             ) : (
-              <Tooltip title={!record.state ? "该采集站已被禁用，无法发起采集" : undefined}>
+              <Tooltip
+                title={
+                  record.categoryReady === false
+                    ? "该采集站还没有分类，请重新保存后再采集"
+                    : !record.state
+                      ? "该采集站已被禁用，无法发起采集"
+                      : undefined
+                }
+              >
                 <span>
                   <Button
                     type="primary"
                     icon={<PoweroffOutlined />}
                     onClick={() => onStartTask(record)}
-                    disabled={!canWrite || !record.state}
+                    disabled={!canWrite || !record.state || record.categoryReady === false}
                   >
                     开始采集
                   </Button>

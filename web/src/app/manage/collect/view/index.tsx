@@ -611,6 +611,10 @@ export default function CollectManagePageView() {
       message.warning("该采集站已被禁用，无法发起采集");
       return;
     }
+    if (record.categoryReady === false) {
+      message.warning("该采集站还没有分类，请重新保存后再采集");
+      return;
+    }
     if (isActiveCollectStatus(record.progress?.status)) {
       message.warning("该采集站已在采集中");
       return;
@@ -912,9 +916,22 @@ export default function CollectManagePageView() {
         message.warning("选中的采集站均未启用，无法批量采集");
         return;
       }
-      const options = allOptions.filter((item) => selectedEnabledIds.includes(item.id));
+      const readyIds = selectedEnabledIds.filter((id) => {
+        const site = siteList.find((item) => item.id === id);
+        return site?.categoryReady !== false;
+      });
+      if (readyIds.length === 0) {
+        message.warning("选中的采集站还没有分类，请重新保存后再采集");
+        return;
+      }
+      if (readyIds.length < selectedEnabledIds.length) {
+        message.warning(
+          `${selectedEnabledIds.length - readyIds.length} 个采集站还没有分类，已从本次采集中排除`,
+        );
+      }
+      const options = allOptions.filter((item) => readyIds.includes(item.id));
       setBatchOptions(options);
-      setBatchIds(selectedEnabledIds);
+      setBatchIds(readyIds);
       setBatchOpen(true);
       return;
     }

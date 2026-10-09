@@ -24,14 +24,10 @@ func seedDetailFilm(t *testing.T, version string, mid int64, sourceID string, ru
 	seedSnapshots(t, gdb, version, model.FilmListSnapshot{
 		SnapshotVersion: version,
 		Mid:             mid,
+		SourceId:        sourceID,
 		Name:            detail.Name,
 		Pid:             1,
 		Cid:             10,
-	})
-	gdb.Create(&model.FilmSnapshotSource{
-		SnapshotVersion: version,
-		Mid:             mid,
-		SourceId:        sourceID,
 	})
 
 	for idx, group := range detail.PlayList {

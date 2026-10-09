@@ -24,8 +24,6 @@ func setupSearchSourceTestDB(t *testing.T) *gorm.DB {
 	}
 
 	if err := gdb.AutoMigrate(
-		&model.FilmListSnapshot{},
-		&model.FilmSnapshotSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
 	); err != nil {
@@ -40,31 +38,21 @@ func TestSearchSnapshotsByKeywordSourceAndSort(t *testing.T) {
 	gdb := setupSearchSourceTestDB(t)
 	version := "test_search_source_v1"
 
-	// 准备快照数据
 	snapshots := []model.FilmListSnapshot{
 		{SnapshotVersion: version, Mid: 1, Name: "斗破苍穹第一季", SourceId: "uku", Hits: 100},
 		{SnapshotVersion: version, Mid: 2, Name: "斗破苍穹第二季", SourceId: "hd", Hits: 200},
 		{SnapshotVersion: version, Mid: 3, Name: "斗罗大陆", SourceId: "subo", Hits: 300},
 	}
-	for _, s := range snapshots {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
+	// Mid 1 在 uku 和 hd 都有；Mid 2 在 hd；Mid 3 在 subo 和 uku。
+	playlists := []model.FilmSourcePlaylist{
+		{Mid: 1, SourceId: "uku", LineKind: "play"},
+		{Mid: 1, SourceId: "hd", LineKind: "play"},
+		{Mid: 2, SourceId: "hd", LineKind: "play"},
+		{Mid: 3, SourceId: "subo", LineKind: "play"},
+		{Mid: 3, SourceId: "uku", LineKind: "play"},
 	}
-
-	// 准备源关联关系 (Mid 1 在 uku 和 hd 都有; Mid 2 在 hd; Mid 3 在 subo 和 uku 都有)
-	sources := []model.FilmSnapshotSource{
-		{SnapshotVersion: version, Mid: 1, SourceId: "uku"},
-		{SnapshotVersion: version, Mid: 1, SourceId: "hd"},
-		{SnapshotVersion: version, Mid: 2, SourceId: "hd"},
-		{SnapshotVersion: version, Mid: 3, SourceId: "subo"},
-		{SnapshotVersion: version, Mid: 3, SourceId: "uku"},
-	}
-	for _, s := range sources {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot source: %v", err)
-		}
-		if err := gdb.Create(&model.FilmSourcePlaylist{Mid: s.Mid, SourceId: s.SourceId, LineKind: "play"}).Error; err != nil {
+	for _, line := range playlists {
+		if err := gdb.Create(&line).Error; err != nil {
 			t.Fatalf("create playlist: %v", err)
 		}
 	}

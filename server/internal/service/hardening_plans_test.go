@@ -15,7 +15,6 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
-	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -69,7 +68,7 @@ func seedLiveSnaps(t *testing.T, snaps ...model.FilmListSnapshot) {
 
 // 方案 1 测试：hotKeywords 性能加固
 func TestPlan1_HotKeywords_Hardening(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan1"
 
 	snaps := []model.FilmListSnapshot{
@@ -79,11 +78,6 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 		{SnapshotVersion: version, Mid: 4, Name: "流浪地球", Hits: 200, Pid: 1},
 		{SnapshotVersion: version, Mid: 5, Name: "泰坦尼克号", Hits: 100, Pid: 1},
 		{SnapshotVersion: version, Mid: 6, Name: "无效分类影片", Hits: 999, Pid: 0}, // pid=0 应被过滤
-	}
-	for _, s := range snaps {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
 	}
 	seedLiveSnaps(t, snaps...)
 
@@ -173,9 +167,6 @@ func TestPlan2_FilmPlayInfo_Hardening(t *testing.T) {
 		Pid:             1,
 		Cid:             10,
 	}
-	if err := gdb.Create(&snap).Error; err != nil {
-		t.Fatalf("create snapshot: %v", err)
-	}
 	seedLiveSnaps(t, snap)
 	detail := model.MovieDetail{
 		Id:       validMid,
@@ -259,9 +250,6 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 			Cid:             10,
 			Hits:            mid * 10,
 		}
-		if err := gdb.Create(&snap).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
 		seedLiveSnaps(t, snap)
 
 		d := model.MovieDetail{
@@ -323,7 +311,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 // 方案 4 测试：filmClassify 剔除 COUNT 并实现 3 路并行
 func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan4"
 
 	const pid = int64(1)
@@ -332,11 +320,6 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000},
 		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000},
 		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500},
-	}
-	for _, it := range items {
-		if err := gdb.Create(&it).Error; err != nil {
-			t.Fatalf("create item: %v", err)
-		}
 	}
 	seedLiveSnaps(t, items...)
 
@@ -388,7 +371,7 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 
 // 方案 5 测试：filmClassifySearch 深分页截断与 SingleFlight 并发安全返回
 func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan5"
 
 	// 1. 验证 normalizeIndexPage 边界截断
@@ -416,9 +399,6 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 			Cid:             10,
 			Name:            fmt.Sprintf("测试片%d", i),
 			Hits:            i * 10,
-		}
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create test film: %v", err)
 		}
 		seedLiveSnaps(t, s)
 	}
@@ -463,7 +443,7 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 
 // 方案 6 测试：filmRelate 缓存前置与空值哨兵
 func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
-	gdb, mr := setupTestDBAndRedis(t)
+	_, mr := setupTestDBAndRedis(t)
 	const version = "v_plan6"
 
 	// 1. 插入存在影片与相关候选集
@@ -482,12 +462,6 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 		Name:            "流浪地球2",
 		Pid:             1,
 		Cid:             10,
-	}
-	if err := gdb.Create(&s1).Error; err != nil {
-		t.Fatalf("create s1: %v", err)
-	}
-	if err := gdb.Create(&s2).Error; err != nil {
-		t.Fatalf("create s2: %v", err)
 	}
 	seedLiveSnaps(t, s1, s2)
 
@@ -562,20 +536,6 @@ func TestPlan2_ClearAllSnapshotDynamicCaches_Invalidation(t *testing.T) {
 	}
 }
 
-// 方案 1 边缘测试：验证 RunAutoMigrations 执行正常且幂等
-func TestPlan1_EnsureSnapshotPerformanceIndexes(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
-
-	// 首次调用执行迁移
-	if err := migration.RunAutoMigrations(gdb); err != nil {
-		t.Fatalf("first RunAutoMigrations failed: %v", err)
-	}
-	// 二次调用验证幂等性
-	if err := migration.RunAutoMigrations(gdb); err != nil {
-		t.Fatalf("second RunAutoMigrations failed: %v", err)
-	}
-}
-
 // 方案 1 边缘测试：无数据时写入 60s 空值缓存防穿透
 func TestPlan1_EmptyHotKeywords_Sentinel(t *testing.T) {
 	_, mr := setupTestDBAndRedis(t)
@@ -611,9 +571,6 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 		Name:            "降级测试影片",
 		Pid:             1,
 		Cid:             10,
-	}
-	if err := gdb.Create(&s).Error; err != nil {
-		t.Fatalf("create snap: %v", err)
 	}
 	seedLiveSnaps(t, s)
 	d := model.MovieDetail{Id: mid, Name: "降级测试影片", PlayList: [][]model.MovieUrlInfo{{{Episode: "1", Link: "url"}}}}
@@ -655,7 +612,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 
 // 方案 4 边缘测试：read model version 为空时自动回退 active snapshot version
 func TestPlan4_EmptyReadModelFallback(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan4_fallback"
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
@@ -667,9 +624,6 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 		Hits:            888,
 		Year:            2025,
 		UpdateStamp:     100,
-	}
-	if err := gdb.Create(&s).Error; err != nil {
-		t.Fatalf("create s: %v", err)
 	}
 	seedLiveSnaps(t, s)
 
@@ -710,13 +664,11 @@ func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 
 // 方案 6 边缘测试：相关推荐切片返回隔离性验证
 func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
-	gdb, _ := setupTestDBAndRedis(t)
+	setupTestDBAndRedis(t)
 	const version = "v_plan6_iso"
 
 	s1 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 801, Name: "电影A", Pid: 1, Cid: 10}
 	s2 := model.FilmListSnapshot{SnapshotVersion: version, Mid: 802, Name: "电影B", Pid: 1, Cid: 10}
-	_ = gdb.Create(&s1)
-	_ = gdb.Create(&s2)
 	seedLiveSnaps(t, s1, s2)
 
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)

@@ -76,6 +76,7 @@ func writeEvent(evt *AccessEvent) {
 	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
+	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 
 	mk := minKey(ts)
 	dk := dayAggKey(day)
@@ -191,6 +192,7 @@ func writePageView(evt *AccessEvent) {
 	ts = ts.In(time.Local)
 	day := ts.Format("20060102")
 	pipe := db.Rdb.Pipeline()
+	countCollectSource(pipe, ctx, day, evt.CollectSourceId)
 	mk := minKey(ts)
 	dk := dayAggKey(day)
 	pipe.HIncrBy(ctx, mk, "pv", 1)

@@ -93,10 +93,6 @@ type TopItem struct {
 	Year     int64  `json:"year,omitempty"`
 }
 
-func QueryOverview(day string) (*Overview, error) {
-	return QueryOverviewScope(day, "", "")
-}
-
 func QueryOverviewScope(day, module, platform string) (*Overview, error) {
 	now := time.Now().In(time.Local)
 	target, err := parseDay(day, now)

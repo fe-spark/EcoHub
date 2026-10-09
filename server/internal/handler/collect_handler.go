@@ -56,15 +56,23 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
 	}
+	id := body.Id
+	if id == "" {
+		id = utils.GenerateHashKey(body.Uri)
+	}
 	if body.UseProxy != nil && *body.UseProxy {
-		id := body.Id
-		if id == "" {
-			id = utils.GenerateHashKey(body.Uri)
-		}
 		if err := service.ProxySvc.RememberCustomProxySource(id); err != nil {
 			dto.Failed(fmt.Sprint("资源站已添加，但加入代理名单失败: ", err.Error()), c)
 			return
 		}
+	}
+	if err := service.SpiderSvc.SyncSourceCategories(id); err != nil {
+		if delErr := service.CollectSvc.DelFilmSource(id); delErr != nil {
+			dto.Failed(fmt.Sprintf("分类获取失败，且采集站未能撤回: %s", err.Error()), c)
+			return
+		}
+		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
+		return
 	}
 	dto.SuccessOnlyMsg("添加成功", c)
 }
@@ -104,8 +112,7 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 			return
 		}
 	}
-	cleanOldData := body.CleanOldData != nil && *body.CleanOldData
-	if err := service.CollectSvc.UpdateFilmSourceWithClean(s, cleanOldData); err != nil {
+	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
 	}
@@ -114,6 +121,10 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 			dto.Failed(fmt.Sprint("资源站已更新，但加入代理名单失败: ", err.Error()), c)
 			return
 		}
+	}
+	if err := service.SpiderSvc.SyncSourceCategories(s.Id); err != nil {
+		dto.Failed(fmt.Sprint("资源站已更新，但分类获取失败: ", err.Error()), c)
+		return
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
 }
@@ -371,8 +382,7 @@ func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 
 type filmSourceBody struct {
 	model.FilmSource
-	UseProxy     *bool `json:"useProxy"`
-	CleanOldData *bool `json:"cleanOldData"`
+	UseProxy *bool `json:"useProxy"`
 }
 
 func bindFilmSourceBody(c *gin.Context) (filmSourceBody, error) {
@@ -416,6 +426,7 @@ func (h *CollectHandler) FailureRecordList(c *gin.Context) {
 	}
 
 	params.Paging = dto.GetPageParams(c)
+	params = service.CollectSvc.PrepareRecordQuery(params)
 
 	options := service.CollectSvc.GetRecordOptions()
 	list := service.CollectSvc.GetRecordList(params)

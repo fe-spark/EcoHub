@@ -120,9 +120,9 @@ func (h *SpiderHandler) ResetProgress(c *gin.Context) {
 	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
 }
 
-// ResetImpactStats 返回工作台影视数据规模（当前基准源）。
-func (h *SpiderHandler) ResetImpactStats(c *gin.Context) {
-	dto.Success(service.SpiderSvc.ResetImpactStats(), "获取成功", c)
+// InventoryStats 返回工作台片库规模（整库合计，并按采集站拆开）。
+func (h *SpiderHandler) InventoryStats(c *gin.Context) {
+	dto.Success(service.SpiderSvc.InventoryStats(), "获取成功", c)
 }
 
 // SingleUpdateSpider 单一影片主站更新采集

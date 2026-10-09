@@ -51,6 +51,31 @@ func mockCollectServer() *httptest.Server {
 	}))
 }
 
+func TestGetFilmSourceList_MarksMissingCategory(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "ready", Name: "有分类", Uri: "http://ready", State: true, Sort: 0}).Error; err != nil {
+		t.Fatalf("create ready: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "missing", Name: "缺分类", Uri: "http://missing", State: true, Sort: 1}).Error; err != nil {
+		t.Fatalf("create missing: %v", err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: "ready", SourceTypeId: 1, CategoryId: 9}).Error; err != nil {
+		t.Fatalf("create mapping: %v", err)
+	}
+
+	list := (&CollectService{}).GetFilmSourceList()
+	byID := make(map[string]model.FilmSourceListItem, len(list))
+	for _, item := range list {
+		byID[item.Id] = item
+	}
+	if !byID["ready"].CategoryReady {
+		t.Fatal("source with category mapping should be collectable")
+	}
+	if byID["missing"].CategoryReady {
+		t.Fatal("source without category should be marked")
+	}
+}
+
 func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 
@@ -96,6 +121,32 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	sortedList := srv.GetFilmSourceList()
 	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
 		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
+	}
+	var categoryCount int64
+	gdb.Model(&model.CategoryMapping{}).Count(&categoryCount)
+	if categoryCount != 0 {
+		t.Fatalf("switching preferred source must not fetch categories, got %d mappings", categoryCount)
+	}
+}
+
+func TestSyncSourceCategories_StoresCopyForThatSource(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	ts := mockCollectServer()
+	defer ts.Close()
+
+	if err := gdb.Create(&model.FilmSource{Id: "src_sync", Name: "同步站", Uri: ts.URL, State: true}).Error; err != nil {
+		t.Fatalf("create source: %v", err)
+	}
+	if err := SpiderSvc.SyncSourceCategories("src_sync"); err != nil {
+		t.Fatalf("SyncSourceCategories: %v", err)
+	}
+
+	var rawCount int64
+	var mapCount int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src_sync").Count(&rawCount)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src_sync").Count(&mapCount)
+	if rawCount == 0 || mapCount == 0 {
+		t.Fatalf("expected a stored category copy, raw=%d map=%d", rawCount, mapCount)
 	}
 }
 
@@ -194,7 +245,8 @@ func TestCollectService_FailureRecords(t *testing.T) {
 
 	// 3. 测试 GetRecordOptions
 	opts := srv.GetRecordOptions()
-	if len(opts["status"]) == 0 {
+	status, _ := opts["status"].([]model.Option)
+	if len(status) == 0 {
 		t.Fatalf("expected non-empty status options")
 	}
 
@@ -213,6 +265,54 @@ func TestCollectService_FailureRecords(t *testing.T) {
 	listAfterTruncate := srv.GetRecordList(params)
 	if len(listAfterTruncate) != 0 {
 		t.Fatalf("expected 0 records after ClearAllRecord, got %d", len(listAfterTruncate))
+	}
+}
+
+func TestGetRecordList_DefaultsToPrimarySource(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 2}).Error; err != nil {
+		t.Fatalf("create src_b: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0}).Error; err != nil {
+		t.Fatalf("create src_a: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "http://off", State: false, Sort: 1}).Error; err != nil {
+		t.Fatalf("create src_off: %v", err)
+	}
+	gdb.Create(&model.FailureRecord{OriginId: "src_a", OriginName: "站点A", PageNumber: 1, Status: model.FailureRecordStatusPending})
+	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "站点B", PageNumber: 2, Status: model.FailureRecordStatusPending})
+
+	srv := &CollectService{}
+	params := srv.PrepareRecordQuery(model.RecordRequestVo{
+		Paging: &dto.Page{Current: 1, PageSize: 10},
+		Status: -1,
+	})
+	if params.OriginId != "src_a" {
+		t.Fatalf("empty origin should fall back to primary src_a, got %q", params.OriginId)
+	}
+	list := srv.GetRecordList(params)
+	if len(list) != 1 || list[0].OriginId != "src_a" {
+		t.Fatalf("expected only primary source records, got %+v", list)
+	}
+
+	opts := srv.GetRecordOptions()
+	if opts["defaultSourceId"] != "src_a" {
+		t.Fatalf("defaultSourceId = %v, want src_a", opts["defaultSourceId"])
+	}
+	origins, ok := opts["origin"].([]model.Option)
+	if !ok {
+		t.Fatalf("origin options type %T", opts["origin"])
+	}
+	if len(origins) != 2 {
+		t.Fatalf("expected 2 enabled sources, got %d", len(origins))
+	}
+	for _, item := range origins {
+		if item.Name == "全部" || item.Value == "" {
+			t.Fatalf("origin options must not include 全部: %+v", item)
+		}
+	}
+	if origins[0].Value != "src_a" {
+		t.Fatalf("first origin should be primary src_a, got %v", origins[0].Value)
 	}
 }
 

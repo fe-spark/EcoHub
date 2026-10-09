@@ -201,34 +201,27 @@ TG_PROXY=socks5://127.0.0.1:7891
 ```mermaid
 flowchart TD
     Trigger["定时任务 / 手动触发"] --> Spider["Spider"]
-    Spider --> Level{"站点等级"}
-    Level -->|主站| Master["写入影片主数据"]
-    Level -->|附属站| Slave["写入播放列表"]
-    Master --> Snapshot["发布列表快照 / 筛选索引"]
-    Slave --> Aggregate["详情页补充播放源"]
-    Snapshot --> PublicAPI["前台 / 后台 / Provide 接口"]
-    Aggregate --> PublicAPI
+    Spider --> Write["写入 film_index / 线路 / 匹配键"]
+    Write --> Index["增量更新内存检索索引"]
+    Index --> PublicAPI["前台 / 后台 / Provide 接口"]
 ```
 
 核心约束：
 
-- 任意时刻只允许一个主站。
-- 主站负责影片主数据和检索入口。
-- 附属站只补充播放列表。
-- **主站身份键**（`film_index.content_key`）：优先 `vod_{源站vod_id}`，无 ID 时回退 `name_{hash}`。
-- **跨站匹配**（`movie_match_key`）：豆瓣 ID+片名 / 片名#大类 / 纯片名回退，用于附属站播放源对齐。豆瓣相同但片名不同不算同一部；片名去掉更新至/完结/语种/清晰度片尾，保留剧场版、3D、动态漫画。规范化片名全等才绑；豆瓣/年份/导演/剧集两边都有值且冲突则否决，空值跳过。主站同名多部时按豆瓣 → 大类 → 年份选一部。分类是 `film_index` 字段，不编进 mid；匹配键带大类以隔离同名跨类。
+- 启用站里 `sort` 最小的是首选站。前台列表只展示该站采过的影片。
+- 各站线路按 `(mid, source_id)` 独立存放。
+- **站内身份**：`film_index.mid`。源站 `vod_id` 记在 `movie_source_mapping`。
+- **跨站匹配**（`movie_match_key`）：豆瓣 ID+片名 / 片名#大类 / 纯片名回退。豆瓣相同但片名不同不算同一部。分类是 `film_index` 字段，不编进 mid；匹配键带大类以隔离同名跨类。
 - 主站切换或主站 URI 变更会停止采集并重建主数据。
 - 后台支持对单部影片触发全部站点更新。
 
 ## 快照与缓存
 
-前台列表不直接扫描采集中的临时状态，而是读取发布后的快照和读模型：
+前台列表直接读 `film_index`，成员关系看 `film_source_playlists`：
 
-- `film_index` 保存影片检索入口。
-- `film_list_snapshot` 保存前台列表快照。
-- `film_filter_index_snapshot` 保存筛选倒排索引。
-- 活跃快照版本记录在 Redis。
-- 增量发布按 affected mids 分批处理数据库 SQL，事务成功后一次性刷新内存读模型。
+- `film_index` 保存影片档案与播放摘要。
+- 活跃读版本记录在 Redis，当前固定为 `live`。
+- 采集提交后按 mid 增量更新内存检索索引，并刷新 Redis 列表缓存。
 
 缓存策略：
 

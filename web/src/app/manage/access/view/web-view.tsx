@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Card, Empty, Input, Space, Table, Tag, Typography } from "antd";
+import { Card, Input, Space, Table, Tag, Typography } from "antd";
 import {
   CompassOutlined,
   DesktopOutlined,
@@ -17,10 +17,11 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { ApiGet } from "@/lib/client-api";
 import TrendChart from "./trend-chart";
-import DonutChart, { type DonutSlice } from "./donut-chart";
+import ShareColumn from "./share-column";
 import BusinessRankings from "./business-rankings";
-import type { Overview, TopItem, LogRow } from "./types";
+import type { ChartSlice, Overview, TopItem, LogRow } from "./types";
 import ResourceCell from "./resource-cell";
+import CardEmpty, { fillCardStyles } from "./card-empty";
 import styles from "./index.module.less";
 
 const ACTION_MAP: Record<string, { label: string; icon: React.ReactNode; color: string }> = {
@@ -164,7 +165,7 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
     }
   }
 
-  const browserSlices: DonutSlice[] = Object.entries(effectiveBrowsers)
+  const browserSlices: ChartSlice[] = Object.entries(effectiveBrowsers)
     .filter(([_, count]) => count > 0)
     .map(([key, count]) => {
       const lower = key.toLowerCase();
@@ -180,7 +181,7 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
       };
     });
 
-  const osSlices: DonutSlice[] = Object.entries(overview?.os || {})
+  const osSlices: ChartSlice[] = Object.entries(overview?.os || {})
     .filter(([_, count]) => count > 0)
     .map(([key, count]) => {
       const lower = key.toLowerCase();
@@ -345,11 +346,16 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         </div>
 
         {/* 24 小时流量走势全宽卡片 */}
-        <Card title="24 小时流量走势" className={styles.chartCard} loading={loading}>
+        <Card
+          title="24 小时流量走势"
+          className={styles.chartCard}
+          styles={fillCardStyles}
+          loading={loading}
+        >
           {overview?.series && overview.series.length > 0 ? (
             <TrendChart series={overview.series} activeTab="all" />
           ) : (
-            <Empty description="暂无流量趋势数据" />
+            <CardEmpty description="暂无流量趋势数据" />
           )}
         </Card>
       </div>
@@ -391,10 +397,11 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
+            styles={fillCardStyles}
             loading={loading}
           >
             {tops.length === 0 ? (
-              <Empty description="暂无访问数据" />
+              <CardEmpty description="暂无访问数据" />
             ) : (
               <div className={styles.topList}>
                 {tops.map((item, idx) => {
@@ -435,13 +442,13 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
-            classNames={{ body: styles.centeredCardBody }}
+            styles={fillCardStyles}
             loading={loading}
           >
             {browserSlices.length === 0 ? (
-              <Empty description="暂无分布数据" />
+              <CardEmpty description="暂无分布数据" />
             ) : (
-              <DonutChart slices={browserSlices} centerLabel="浏览器" />
+              <ShareColumn slices={browserSlices} />
             )}
           </Card>
 
@@ -453,13 +460,13 @@ export default function WebAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
-            classNames={{ body: styles.centeredCardBody }}
+            styles={fillCardStyles}
             loading={loading}
           >
             {osSlices.length === 0 ? (
-              <Empty description="暂无系统分布" />
+              <CardEmpty description="暂无系统分布" />
             ) : (
-              <DonutChart slices={osSlices} centerLabel="操作系统" />
+              <ShareColumn slices={osSlices} />
             )}
           </Card>
         </div>

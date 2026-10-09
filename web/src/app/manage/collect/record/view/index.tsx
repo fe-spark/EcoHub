@@ -45,6 +45,7 @@ export default function FailureRecordPageView() {
   const [options, setOptions] = useState<any>({
     origin: [],
     status: [],
+    defaultSourceId: "",
   });
 
   const pageRef = useRef(page);
@@ -80,6 +81,14 @@ export default function FailureRecordPageView() {
           }
           if (resp.data.options) {
             setOptions(resp.data.options);
+          }
+          const resolved =
+            reqParams.originId ||
+            resp.data.params?.originId ||
+            resp.data.options?.defaultSourceId ||
+            "";
+          if (resolved && reqParams.originId !== resolved) {
+            setParams((prev) => ({ ...prev, originId: resolved }));
           }
         }
       } finally {
@@ -220,6 +229,14 @@ export default function FailureRecordPageView() {
     }
   };
 
+  const handleSourceChange = (value: string) => {
+    const next = { ...paramsRef.current, originId: value };
+    setParams(next);
+    const newPage = { ...pageRef.current, current: 1 };
+    setPage(newPage);
+    void getRecords(newPage, next);
+  };
+
   const columns = useMemo(
     () =>
       getRecordColumns({
@@ -239,15 +256,16 @@ export default function FailureRecordPageView() {
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
         <Select
-          placeholder="采集源"
+          placeholder="选择采集源"
           value={params.originId || undefined}
-          onChange={(v) => setParams({ ...params, originId: v })}
-          options={options.origin?.map((o: any) => ({
-            label: o.name,
-            value: o.value,
-          }))}
+          onChange={handleSourceChange}
+          options={(options.origin || [])
+            .filter((o: any) => o.value !== "" && o.name !== "全部")
+            .map((o: any) => ({
+              label: o.name,
+              value: o.value,
+            }))}
           className={styles.filterSelect}
-          allowClear
         />
         <Select
           placeholder="记录状态"
@@ -292,7 +310,7 @@ export default function FailureRecordPageView() {
           icon={<ReloadOutlined />}
           onClick={() => {
             const defaultParams = {
-              originId: "",
+              originId: options.defaultSourceId || "",
               status: -1,
               beginTime: "",
               endTime: "",

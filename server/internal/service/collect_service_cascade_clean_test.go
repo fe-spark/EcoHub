@@ -26,14 +26,15 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
-		&model.FilmSnapshotSource{},
-		&model.FilmListSnapshot{},
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
 		&model.MoviePoster{},
 		&model.Banner{},
 		&model.FailureRecord{},
 		&model.CronSourceRel{},
+		&model.SourceCategory{},
+		&model.CategoryMapping{},
+		&model.Category{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -64,6 +65,10 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 1, SourceId: "src1", LineKind: "play", Content: "[]"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src1", LineKind: "play", Content: "[]"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src2", LineKind: "play", Content: "[]"})
+	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "电影"})
+	gdb.Create(&model.SourceCategory{SourceId: "src2", SourceTypeId: 1, RawName: "电影"})
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.CategoryMapping{SourceId: "src2", SourceTypeId: 1, CategoryId: 9})
 
 	// 删除 src1
 	srv := new(CollectService)
@@ -90,7 +95,21 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	var lineCount int64
 	gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ? AND source_id = ?", 2, "src2").Count(&lineCount)
 	if lineCount != 1 {
-		t.Fatalf("expected film 2 line from src2 to be kept, got count=%d", lineCount)
+		t.Fatalf("expected src2 playlist to remain, got %d", lineCount)
+	}
+	var src1Raw int64
+	var src1Map int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src1").Count(&src1Raw)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src1").Count(&src1Map)
+	if src1Raw != 0 || src1Map != 0 {
+		t.Fatalf("expected src1 categories to be deleted, raw=%d map=%d", src1Raw, src1Map)
+	}
+	var src2Raw int64
+	var src2Map int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src2").Count(&src2Raw)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src2").Count(&src2Map)
+	if src2Raw != 1 || src2Map != 1 {
+		t.Fatalf("expected src2 category copy to remain, raw=%d map=%d", src2Raw, src2Map)
 	}
 }
 
@@ -104,17 +123,23 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 		FilmIndexContent:  model.FilmIndexContent{Name: "旧源独占影片"},
 	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 10, SourceId: "src1", LineKind: "play", Content: "[]"})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "其他站", Uri: "http://other-src.com", State: true})
+	gdb.Create(&model.Category{Id: 8, Pid: 0, Name: "旧分类", StableKey: "display:root:旧分类", Show: true})
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "共用分类", StableKey: "display:root:共用分类", Show: true})
+	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "旧分类"})
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 8})
+	gdb.Create(&model.CategoryMapping{SourceId: "src2", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.FailureRecord{OriginId: "src1", OriginName: "旧源", PageNumber: 3, Status: model.FailureRecordStatusPending})
 
 	srv := new(CollectService)
-	// 更换地址为新地址并选择 cleanOldData = true
 	updateReq := model.FilmSource{
 		Id:    "src1",
 		Name:  "新源",
 		Uri:   "http://new-src.com",
 		State: true,
 	}
-	if err := srv.UpdateFilmSourceWithClean(updateReq, true); err != nil {
-		t.Fatalf("UpdateFilmSourceWithClean failed: %v", err)
+	if err := srv.UpdateFilmSource(updateReq); err != nil {
+		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
 	// 验证: 旧独占影片应该被清理，旧线路被清空
@@ -129,5 +154,23 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	gdb.Where("id = ?", "src1").First(&updatedSrc)
 	if updatedSrc.Uri != "http://new-src.com" {
 		t.Fatalf("expected uri http://new-src.com, got %s", updatedSrc.Uri)
+	}
+
+	var src1Raw int64
+	var src1Map int64
+	var failures int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src1").Count(&src1Raw)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src1").Count(&src1Map)
+	gdb.Model(&model.FailureRecord{}).Where("origin_id = ?", "src1").Count(&failures)
+	if src1Raw != 0 || src1Map != 0 || failures != 0 {
+		t.Fatalf("expected source data cleared, raw=%d map=%d failures=%d", src1Raw, src1Map, failures)
+	}
+	var exclusive model.Category
+	if err := gdb.First(&exclusive, 8).Error; err == nil {
+		t.Fatalf("category only used by the changed source should be removed")
+	}
+	var shared model.Category
+	if err := gdb.First(&shared, 9).Error; err != nil {
+		t.Fatalf("category used by another source was deleted: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { getFilmClassTree, resetFilmClassTree, saveFilmClassTree, updateFilmClassShow } from "./api";
 import {
@@ -20,6 +20,9 @@ export function useCategoryTreeState() {
   const [savingTree, setSavingTree] = useState(false);
   const [resettingTree, setResettingTree] = useState(false);
   const [updatingShowIds, setUpdatingShowIds] = useState<number[]>([]);
+  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [sourceId, setSourceId] = useState("");
+  const sourceIdRef = useRef("");
 
   const stats = useMemo(() => collectStats(classTree), [classTree]);
   const hasPendingChanges = useMemo(
@@ -27,14 +30,20 @@ export function useCategoryTreeState() {
     [classTree, originalTree],
   );
 
-  const fetchFilmClassTree = useCallback(async () => {
+  const fetchFilmClassTree = useCallback(async (nextSourceId?: string) => {
     setLoadingTree(true);
     try {
-      const { resp, tree } = await getFilmClassTree();
+      const requested = nextSourceId ?? sourceIdRef.current;
+      const { resp, tree, sources: nextSources, defaultSourceId: nextDefault, currentSourceId } =
+        await getFilmClassTree(requested);
       if (resp.code !== 0) {
         message.error(resp.msg || "分类数据加载失败");
         return;
       }
+      const activeSourceId = currentSourceId || nextDefault || requested;
+      sourceIdRef.current = activeSourceId;
+      setSourceId(activeSourceId);
+      setSources(nextSources);
       setClassTree(tree);
       setOriginalTree(cloneTree(tree));
       setExpandedKeys([]);
@@ -62,13 +71,13 @@ export function useCategoryTreeState() {
   const saveTree = useCallback(async () => {
     setSavingTree(true);
     try {
-      const resp = await saveFilmClassTree(classTree);
+      const resp = await saveFilmClassTree(classTree, sourceIdRef.current);
       if (resp.code !== 0) {
         message.error(resp.msg || "保存分类变更失败");
         return;
       }
       message.success(resp.msg || "分类变更已保存");
-      await fetchFilmClassTree();
+      await fetchFilmClassTree(sourceIdRef.current);
     } finally {
       setSavingTree(false);
     }
@@ -106,6 +115,8 @@ export function useCategoryTreeState() {
     updatingShowIds,
     stats,
     hasPendingChanges,
+    sources,
+    sourceId,
     fetchFilmClassTree,
     resetTree,
     saveTree,

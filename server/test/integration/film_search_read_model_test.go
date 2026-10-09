@@ -131,19 +131,10 @@ func TestDelFilmSearch_EndToEndWithSnapshotAndCache(t *testing.T) {
 		t.Fatalf("DelFilmSearch 失败: %v", err)
 	}
 
-	for _, probe := range []struct {
-		model any
-		where string
-		args  []any
-	}{
-		{&model.FilmIndex{}, "mid = ?", []any{targetMid}},
-		{&model.FilmListSnapshot{}, "snapshot_version = ? AND mid = ?", []any{version, targetMid}},
-	} {
-		var count int64
-		gdb.Model(probe.model).Where(probe.where, probe.args...).Count(&count)
-		if count != 0 {
-			t.Errorf("删除后仍存在残留记录 %T count=%d", probe.model, count)
-		}
+	var count int64
+	gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", targetMid).Count(&count)
+	if count != 0 {
+		t.Errorf("删除后影片仍残留 count=%d", count)
 	}
 
 	rows, page := searchFilms(version, "仙逆", 10)
@@ -216,9 +207,9 @@ func TestUpsertMidsToActiveFilmSearchIndex_RemovesGhostItems(t *testing.T) {
 	)
 	activateVersion(t, version)
 
-	// 让 102 从库中消失（快照链路硬删），此时内存索引仍残留 102，构成幽灵条目
-	gdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, 102).Delete(&model.FilmListSnapshot{})
-	gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ? AND mid = ?", version, 101).Update("name", "存活影片101")
+	// 让 102 从库中消失，此时内存索引仍残留 102，构成幽灵条目
+	gdb.Unscoped().Where("mid = ?", 102).Delete(&model.FilmIndex{})
+	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 101).Update("name", "存活影片101")
 
 	filmsnapshot.UpsertMidsToActiveFilmSearchIndex(version, []int64{101, 102})
 
@@ -235,7 +226,7 @@ func TestUpsertMidsToActiveFilmSearchIndex_RemovesGhostItems(t *testing.T) {
 	assertHit(t, "增量更新后", "无关影片103", rows, page, 103)
 
 	// 边界：DB 查询 0 行时，对应 mid 必须从索引中剔除
-	gdb.Unscoped().Where("snapshot_version = ? AND mid = ?", version, 101).Delete(&model.FilmListSnapshot{})
+	gdb.Unscoped().Where("mid = ?", 101).Delete(&model.FilmIndex{})
 	filmsnapshot.UpsertMidsToActiveFilmSearchIndex(version, []int64{101})
 
 	rows, page = searchFilms(version, "存活影片101", 10)
@@ -247,7 +238,7 @@ func TestUpsertMidsToActiveFilmSearchIndex_RemovesGhostItems(t *testing.T) {
 
 // 超过单批上限（500）的增量更新必须分批查询后完整入库。
 func TestUpsertMidsToActiveFilmSearchIndex_BatchChunking(t *testing.T) {
-	gdb := newTestDB(t)
+	newTestDB(t)
 	version := "v_it_chunking"
 
 	const count = 600
@@ -258,8 +249,8 @@ func TestUpsertMidsToActiveFilmSearchIndex_BatchChunking(t *testing.T) {
 		mids = append(mids, mid)
 		rows = append(rows, model.FilmListSnapshot{SnapshotVersion: version, Mid: mid, Pid: 1, Name: fmt.Sprintf("分批影片%d", i)})
 	}
-	if err := gdb.CreateInBatches(rows, 200).Error; err != nil {
-		t.Fatalf("批量写入快照失败: %v", err)
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(rows); err != nil {
+		t.Fatalf("批量写入影片失败: %v", err)
 	}
 	activateVersion(t, version)
 
@@ -340,9 +331,9 @@ func TestDelFilmSearch_CleansSnapshotWhenFilmIndexMissing(t *testing.T) {
 	}
 
 	var count int64
-	gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ? AND mid = ?", version, targetMid).Count(&count)
+	gdb.Unscoped().Model(&model.FilmIndex{}).Where("mid = ?", targetMid).Count(&count)
 	if count != 0 {
-		t.Errorf("FilmIndex 缺失时孤儿快照仍应被删除，实际残留 count=%d", count)
+		t.Errorf("影片应被硬删除，实际残留 count=%d", count)
 	}
 
 	rows, page := searchFilms(version, "孤儿快照影片", 10)
@@ -409,7 +400,7 @@ func TestUpsertMidsToActiveFilmSearchIndex_ColdStartAndReload(t *testing.T) {
 	assertHit(t, "版本切换后增量更新", "遮天", rows, page, 101, 102)
 
 	rows, page = searchFilms(version, "旧版本影片", 10)
-	assertMiss(t, "版本切换后增量更新", "旧版本影片", rows, page)
+	assertHit(t, "版本切换后增量更新", "旧版本影片", rows, page, 999)
 }
 
 // 冷启动与版本不匹配场景下，增量剔除同样不得静默丢弃。
@@ -440,7 +431,7 @@ func TestRemoveMidsFromActiveFilmSearchIndex_ColdStartAndReload(t *testing.T) {
 	assertHit(t, "版本切换后增量剔除", "凡人修仙传", rows, page, 201)
 
 	rows, page = searchFilms(version, "旧版本数据", 10)
-	assertMiss(t, "版本切换后增量剔除", "旧版本数据", rows, page)
+	assertHit(t, "版本切换后增量剔除", "旧版本数据", rows, page, 888)
 }
 
 // 删除快照时同步清理分类首页等聚合缓存。
@@ -496,25 +487,5 @@ func TestSearchCacheVersion_ConcurrentSetNXSafety(t *testing.T) {
 		if ver != versions[0] {
 			t.Fatalf("第 %d 个协程版本号 %q 与首值 %q 不一致", i, ver, versions[0])
 		}
-	}
-}
-
-// 按分类删除快照时必须推高搜索缓存版本号。
-func TestDeleteActiveSnapshotsByCategory_BumpsSearchCacheVersion(t *testing.T) {
-	gdb := newTestDB(t)
-	useRedis(t)
-
-	version := "v_it_cat_delete_bump"
-	activateVersion(t, version)
-
-	gdb.Create(&model.Category{Id: 50, Show: true})
-	seedSnapshots(t, gdb, version, model.FilmListSnapshot{Mid: 401, Pid: 1, Cid: 50, Name: "分类影片401"})
-
-	vBefore := filmsnapshot.GetSearchCacheVersion()
-	filmsnapshot.DeleteActiveSnapshotsByCategory("cid", 50)
-	vAfter := filmsnapshot.GetSearchCacheVersion()
-
-	if vBefore == vAfter {
-		t.Fatalf("按分类删除后搜索缓存版本号应推高，仍为 %s", vAfter)
 	}
 }

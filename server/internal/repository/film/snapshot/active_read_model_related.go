@@ -77,15 +77,14 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 				}
 			}
 
+			listGen := GetSearchCacheVersion()
 			cands := loadRelatedSnapshotCandidates(version, snapshot, maxRelatedRecommendCount)
-			if db.Rdb != nil {
-				ttl := relatedCacheTTL
-				if len(cands) == 0 {
-					ttl = 1 * time.Minute // 空候选集防穿透短缓存
-				}
-				if raw, err := json.Marshal(cands); err == nil {
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-				}
+			ttl := relatedCacheTTL
+			if len(cands) == 0 {
+				ttl = emptyListCacheTTL
+			}
+			if raw, err := json.Marshal(cands); err == nil {
+				writeListCache(cacheKey, raw, ttl, listGen)
 			}
 
 			log.Printf("[FilmRelate] 相关推荐候选集计算完成 mid=%d name=%q cache=MISS candidates=%d cost=%s",

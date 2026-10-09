@@ -112,25 +112,3 @@ func CountMissingUserGallery() int {
 	missingGalleryAt = time.Now()
 	return n
 }
-
-// PurgeSyncedGallery 清理历史采集同步产生的图库记录及本地文件（素材中心仅保留用户上传）
-func PurgeSyncedGallery() {
-	var list []model.FileInfo
-	if err := db.Mdb.Where("relevance_id > 0").Find(&list).Error; err != nil {
-		log.Printf("[Gallery] list synced files failed: %v", err)
-		return
-	}
-	if len(list) == 0 {
-		return
-	}
-	for _, f := range list {
-		if path := StoragePath(&f); path != "" {
-			_ = os.Remove(path)
-		}
-	}
-	if err := db.Mdb.Unscoped().Where("relevance_id > 0").Delete(&model.FileInfo{}).Error; err != nil {
-		log.Printf("[Gallery] purge synced files failed: %v", err)
-		return
-	}
-	log.Printf("[Gallery] purged %d synced picture records", len(list))
-}

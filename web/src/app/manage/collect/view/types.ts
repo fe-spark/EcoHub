@@ -13,6 +13,8 @@ export interface FilmSource {
   lastCollectTime?: string;
   progress?: CollectProgress | null;
   proxyEnabled?: boolean;
+  /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
+  categoryReady?: boolean;
   createdAt?: string;
 }
 
@@ -146,7 +148,6 @@ export interface SourceFormValues {
   interval?: number;
   cd?: number;
   domainReplaceRules?: string;
-  cleanOldData?: boolean;
 }
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {

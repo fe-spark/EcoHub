@@ -45,8 +45,12 @@ func InitRedisConn() error {
 
 	old := Rdb
 	Rdb = client
-	if old != nil {
-		_ = old.Close()
+	if old != nil && old != client {
+		// 正在执行的命令还拿着旧客户端。立刻 Close 会打断 SCAN/SET。
+		go func(prev *redis.Client) {
+			time.Sleep(30 * time.Second)
+			_ = prev.Close()
+		}(old)
 	}
 
 	return nil

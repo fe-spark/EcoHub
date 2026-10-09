@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
@@ -131,25 +130,6 @@ func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string)
 func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger string) {
 	if len(sources) == 0 {
 		return
-	}
-
-	if db.Mdb != nil {
-		var categoryCount int64
-		_ = db.Mdb.Model(&model.Category{}).Count(&categoryCount).Error
-		if categoryCount == 0 {
-			syslog.Warnf("[Spider] 检测到本地分类树为空(0 个分类)，尝试从基准源同步分类树...")
-			target := repository.PickMasterSourceForCategory()
-			if target == nil {
-				syslog.Warnf("[Spider] 无基准采集站，跳过分类树同步")
-			} else if err := CollectCategory(target); err != nil {
-				syslog.Errorf("[Spider] 采集前自动同步基准源分类失败 name=%s state=%v: %v",
-					target.Name, target.State, err)
-			} else {
-				repository.RefreshCategoryCache()
-				syslog.Infof("[Spider] 采集前自动同步基准源分类成功 name=%s state=%v",
-					target.Name, target.State)
-			}
-		}
 	}
 
 	sources = prioritizeCollectSources(sources)
@@ -430,11 +410,34 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, error) {
 			sources = append(sources, *fs)
 		}
 	}
+	sources = filterSourcesReadyForCollect(sources)
 	sources = occupyAndMarkCollectSources(sources, "Batch-Collect")
 	if len(sources) == 0 {
-		return nil, fmt.Errorf("没有可启动的采集站（均未启用或已在采集中）")
+		return nil, fmt.Errorf("没有可启动的采集站（还没有分类、未启用或已在采集中）")
 	}
 	return sources, nil
+}
+
+func filterSourcesReadyForCollect(sources []model.FilmSource) []model.FilmSource {
+	if len(sources) == 0 {
+		return sources
+	}
+	ids := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			ids = append(ids, source.Id)
+		}
+	}
+	ready := repository.SourceIDsWithCategory(ids)
+	out := make([]model.FilmSource, 0, len(sources))
+	for _, source := range sources {
+		if _, ok := ready[source.Id]; !ok {
+			log.Printf("[Spider] 采集站还没有分类，跳过采集: name=%s id=%s", source.Name, source.Id)
+			continue
+		}
+		out = append(out, source)
+	}
+	return out
 }
 
 func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {

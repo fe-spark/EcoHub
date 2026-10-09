@@ -31,11 +31,9 @@ func setupSnapshotRepoTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
-		&model.FilmListSnapshot{},
 		&model.Category{},
 		&model.MovieMatchKey{},
 		&model.FilmSource{},
-		&model.FilmSnapshotSource{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -149,12 +147,6 @@ func TestEnsureActiveFilmListSnapshot_GhostSnapshotSelfHealing(t *testing.T) {
 	const ghostVer = "ghost_ver_999"
 	_ = SetActiveSnapshotVersion(ghostVer)
 
-	var snapCount int64
-	_ = gdb.Model(&model.FilmListSnapshot{}).Where("snapshot_version = ?", ghostVer).Count(&snapCount)
-	if snapCount != 0 {
-		t.Fatalf("expected 0 snapshots for ghost version, got %d", snapCount)
-	}
-
 	if err := EnsureActiveFilmListSnapshot(); err != nil {
 		t.Fatalf("EnsureActiveFilmListSnapshot: %v", err)
 	}
@@ -174,17 +166,7 @@ func TestEnsureActiveFilmListSnapshot_CountMismatch(t *testing.T) {
 	createTestFilm(t, gdb, 101, "测试影片1", 1000, "默认主源")
 	createTestFilm(t, gdb, 102, "测试影片2", 1000, "默认主源")
 
-	// 模拟上次停机前快照只包含 1 部影片（异常强杀导致快照数量落后）
 	const oldVer = "old_ver_partial"
-	snap1 := model.FilmListSnapshot{
-		SnapshotVersion: oldVer,
-		Mid:             101,
-		Name:            "测试影片1",
-		UpdateStamp:     1000,
-	}
-	if err := gdb.Create(&snap1).Error; err != nil {
-		t.Fatalf("create partial snapshot: %v", err)
-	}
 	_ = SetActiveSnapshotVersion(oldVer)
 
 	// 验证触发前 dbCount(2) != snapshotCount(1)
