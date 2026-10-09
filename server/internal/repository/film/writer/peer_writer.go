@@ -80,12 +80,17 @@ func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *mode
 		updates["content"] = detail.Content
 		existing.Content = detail.Content
 	}
-	if existing.ReleaseDate == "" && detail.ReleaseDate != "" {
-		updates["release_date"] = detail.ReleaseDate
-		existing.ReleaseDate = detail.ReleaseDate
+	if existing.ReleaseDate == "" {
+		if clipped := firstISOReleaseDate(detail.ReleaseDate); clipped != "" {
+			updates["release_date"] = clipped
+			existing.ReleaseDate = clipped
+		}
 	}
 	if existing.Year == 0 {
-		y := parseYear(detail.Year)
+		y := parseYear(detail.ReleaseDate)
+		if y == 0 {
+			y = parseYear(detail.Year)
+		}
 		if y > 0 {
 			updates["year"] = y
 			existing.Year = y
@@ -263,8 +268,23 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 	return mid, isNew, playLinesChanged, err
 }
 
+// writePeerPage 和 savePeerFilm 默认走批量事务和单片事务。测试可替换它们。
+var (
+	writePeerPage = writePeerPageTx
+	savePeerFilm  = saveSinglePeerDetailTx
+)
+
+func isDeterministicRowError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Data too long") || strings.Contains(msg, "Error 1406")
+}
+
 // SaveCollectedPeerDetails 全站平权影片采集入库入口。
-// 一页一个事务。失败则整页回滚，调用方把这一页记为失败。
+// 正常仍是一页一个事务。字段超长导致整页回滚时，改为逐片提交，只丢掉超长的那一部。
+// 这类错误不返回给调用方，因此不会进入页级重试。连接失败等瞬时错误仍让整页重试。
 func SaveCollectedPeerDetails(
 	ctx context.Context,
 	source *model.FilmSource,
@@ -287,13 +307,47 @@ func SaveCollectedPeerDetails(
 	var notify []int64
 	err := runPeerCollectTx(func(tx *gorm.DB) error {
 		var writeErr error
-		affected, notify, writeErr = writePeerPageTx(tx, source, details, sources)
+		affected, notify, writeErr = writePeerPage(tx, source, details, sources)
 		return writeErr
 	})
-	if err != nil {
-		log.Printf("[Spider][PeerCollect] 整页入库失败 source=%s page=%d vods=%d err=%v",
+	if err == nil {
+		return scheduler.Mids{
+			Affected: uniqueMIDs(affected),
+			Notify:   uniqueMIDs(notify),
+		}, nil
+	}
+	if isDeterministicRowError(err) {
+		log.Printf("[Spider][PeerCollect] 整页因字段超长回滚，改为逐片入库 source=%s page=%d vods=%d err=%v",
 			source.Id, page, len(details), err)
-		return scheduler.Mids{}, err
+		return savePeerFilmsIsolated(source, page, details)
+	}
+	log.Printf("[Spider][PeerCollect] 整页入库失败 source=%s page=%d vods=%d err=%v",
+		source.Id, page, len(details), err)
+	return scheduler.Mids{}, err
+}
+
+func savePeerFilmsIsolated(source *model.FilmSource, page int, details []model.MovieDetail) (scheduler.Mids, error) {
+	affected := make([]int64, 0, len(details))
+	notify := make([]int64, 0, len(details))
+	for _, detail := range details {
+		mid, isNew, playChanged, err := savePeerFilm(source, detail)
+		if err != nil {
+			if isDeterministicRowError(err) {
+				log.Printf("[Spider][PeerCollect] 单片入库跳过 source=%s page=%d vod=%d name=%s err=%v",
+					source.Id, page, detail.Id, detail.Name, err)
+				continue
+			}
+			log.Printf("[Spider][PeerCollect] 单片入库失败 source=%s page=%d vod=%d err=%v",
+				source.Id, page, detail.Id, err)
+			return scheduler.Mids{}, err
+		}
+		if mid <= 0 {
+			continue
+		}
+		affected = append(affected, mid)
+		if isNew || playChanged {
+			notify = append(notify, mid)
+		}
 	}
 	return scheduler.Mids{
 		Affected: uniqueMIDs(affected),
@@ -432,7 +486,7 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				"writer":               fi.Writer,
 				"blurb":                fi.Blurb,
 				"content":              fi.Content,
-				"release_date":         fi.ReleaseDate,
+				"release_date":         firstISOReleaseDate(fi.ReleaseDate),
 				"update_reason":        "后台修改",
 				"update_stamp":         time.Now().Unix(),
 			}

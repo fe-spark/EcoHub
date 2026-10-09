@@ -170,7 +170,13 @@ func GetSourcePageConcurrency(_ *model.FilmSource) int {
 	if solo < base {
 		solo = base
 	}
-	if deps.LiveTaskCount() <= 1 {
+	live := 1
+	if deps.LiveTaskCount != nil {
+		if n := deps.LiveTaskCount(); n > 1 {
+			live = n
+		}
+	}
+	if live <= 1 {
 		if solo <= 0 {
 			return 1
 		}
@@ -179,7 +185,18 @@ func GetSourcePageConcurrency(_ *model.FilmSource) int {
 	if base <= 0 {
 		return 1
 	}
-	return base
+	budget := config.CollectFetchInFlight
+	if budget <= 0 {
+		budget = base * 2
+	}
+	perSource := budget / live
+	if perSource < 2 {
+		perSource = 2
+	}
+	if perSource > base {
+		perSource = base
+	}
+	return perSource
 }
 
 func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {

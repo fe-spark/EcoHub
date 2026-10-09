@@ -10,6 +10,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 )
@@ -41,6 +42,9 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
+	}
+	if sourceId != "" {
+		return sourceTypeFilterOptions(version, sourceId, pid)
 	}
 	pid = support.ResolveCategoryID(pid)
 	if pid <= 0 {
@@ -149,6 +153,143 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
 	}
 	return res
+}
+
+func sourceTypeFilterKeys(sourceID string, typeID int64) []string {
+	ids := repository.PublicSourceTypeIDs(sourceID, "pid", typeID)
+	keys := make([]string, 0, len(ids))
+	for _, id := range ids {
+		key := support.BuildSourceCategoryKey(sourceID, id)
+		if key != "" {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return []string{""}
+	}
+	return keys
+}
+
+// sourceTypeFilterOptions 筛选项跟当前站的 type_id 走。子类是该站自己的下级 type_id，剧情地区从这些片子上统计。
+func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]any {
+	key := support.BuildSourceCategoryKey(sourceId, typeID)
+	if key == "" {
+		return emptyFilterOptionResponse()
+	}
+	cacheKey := fmt.Sprintf("%s:stvis:src_%s:v%s:r%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), typeID)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
+				return cached
+			}
+		}
+	}
+	if db.Mdb == nil {
+		return emptyFilterOptionResponse()
+	}
+	listGen := GetSearchCacheVersion()
+
+	catItems := []map[string]string{{"Name": "全部", "Value": ""}}
+	for _, child := range repository.PublicSourceChildNodes(sourceId, typeID) {
+		if child == nil || child.Id <= 0 || strings.TrimSpace(child.Name) == "" {
+			continue
+		}
+		catItems = append(catItems, map[string]string{
+			"Name":  child.Name,
+			"Value": fmt.Sprint(child.Id),
+		})
+	}
+
+	type filmFilterRow struct {
+		ClassTag string
+		Area     string
+		Language string
+		Year     int64
+	}
+	filterKeys := sourceTypeFilterKeys(sourceId, typeID)
+	var films []filmFilterRow
+	_ = db.Mdb.Model(&model.FilmIndex{}).
+		Select("class_tag, area, language, year").
+		Where("root_category_key IN ? OR category_key IN ?", filterKeys, filterKeys).
+		Find(&films).Error
+
+	counts := map[string]map[string]int{
+		"Plot":     {},
+		"Area":     {},
+		"Language": {},
+		"Year":     {},
+	}
+	for _, film := range films {
+		for _, part := range shared.SplitRawSearchTags(film.ClassTag) {
+			addSourceTypeTagCount(counts["Plot"], shared.NormalizeSearchTagValue("Plot", part))
+		}
+		addSourceTypeTagCount(counts["Area"], shared.NormalizeSearchTagValue("Area", film.Area))
+		addSourceTypeTagCount(counts["Language"], shared.NormalizeSearchTagValue("Language", film.Language))
+		if film.Year > 0 {
+			addSourceTypeTagCount(counts["Year"], fmt.Sprint(film.Year))
+		}
+	}
+
+	tags := make(map[string]any)
+	titles := make(map[string]string)
+	sortList := make([]string, 0)
+	titleNames := map[string]string{
+		"Category": "类型",
+		"Plot":     "剧情",
+		"Area":     "地区",
+		"Language": "语言",
+		"Year":     "年份",
+		"Sort":     "排序",
+	}
+	if len(catItems) > 1 {
+		tags["Category"] = catItems
+		titles["Category"] = titleNames["Category"]
+		sortList = append(sortList, "Category")
+	}
+	for _, tagType := range filterOptionTagTypes {
+		items := shared.FormatSearchTagItems(tagType, sourceTypeTagItems(tagType, counts[tagType]), "", false)
+		if len(items) > 1 {
+			tags[tagType] = items
+			titles[tagType] = titleNames[tagType]
+			sortList = append(sortList, tagType)
+		}
+	}
+	sortItems := shared.HandleTagStr("Sort", false, shared.DefaultSortTagStrings...)
+	tags["Sort"] = sortItems
+	titles["Sort"] = titleNames["Sort"]
+	sortList = append(sortList, "Sort")
+
+	res := map[string]any{
+		"titles":   titles,
+		"sortList": sortList,
+		"tags":     tags,
+	}
+	if raw, err := json.Marshal(res); err == nil {
+		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
+	}
+	return res
+}
+
+func addSourceTypeTagCount(counts map[string]int, value string) {
+	value = strings.TrimSpace(value)
+	if value == "" || value == model.TagOthersValue || value == "其他" || value == "其它" || value == "全部" {
+		return
+	}
+	counts[value]++
+}
+
+func sourceTypeTagItems(tagType string, counts map[string]int) []model.SearchTagItem {
+	items := make([]model.SearchTagItem, 0, len(counts))
+	for value, score := range counts {
+		items = append(items, model.SearchTagItem{
+			TagType: tagType,
+			Name:    value,
+			Value:   value,
+			Score:   int64(score),
+		})
+	}
+	return items
 }
 
 func rawFilterHasDynamicTags(rows []model.SearchTagItem) bool {

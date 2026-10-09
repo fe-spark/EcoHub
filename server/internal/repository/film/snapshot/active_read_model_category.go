@@ -12,6 +12,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
@@ -43,7 +44,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	id = support.ResolveCategoryID(id)
+	id = listedCategoryID(sourceID, id)
 	if version == "" || id <= 0 || limit <= 0 {
 		return []model.MovieBasicInfo{}
 	}
@@ -51,7 +52,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:st2", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -99,12 +100,12 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	id = support.ResolveCategoryID(id)
+	id = listedCategoryID(sourceID, id)
 	if version == "" || id <= 0 {
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck2", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -194,7 +195,7 @@ func hotCategoryQuery(conn *gorm.DB, sourceID, field string, categoryID int64) *
 	if sourceID == "" {
 		return applyCategoryHotIndexHint(q.Where(col+" = ?", categoryID), field)
 	}
-	memberSQL, args := query.LiveCategoryMemberSQL(dialectName(conn), sourceID, field, categoryID)
+	memberSQL, args := query.LiveCategoryMemberSQLIDs(dialectName(conn), sourceID, field, repository.PublicSourceTypeIDs(sourceID, field, categoryID))
 	return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS hot_members)", args...)
 }
 
@@ -226,7 +227,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	id = support.ResolveCategoryID(id)
+	id = listedCategoryID(sourceID, id)
 	if version == "" || id <= 0 || limit <= 0 {
 		return []model.MovieBasicInfo{}
 	}
@@ -234,7 +235,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck2", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -281,12 +282,12 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	id = support.ResolveCategoryID(id)
+	id = listedCategoryID(sourceID, id)
 	if version == "" || id <= 0 || poolSize <= 0 {
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck2", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -367,7 +368,7 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
-	pid = support.ResolveCategoryID(pid)
+	pid = listedCategoryID(sourceID, pid)
 	if version == "" || pid <= 0 || limit <= 0 {
 		return []model.MovieBasicInfo{}
 	}
@@ -426,7 +427,7 @@ func categorySortFastQuery(conn *gorm.DB, sourceID string, sortType int, pid int
 	return categoryFilmQuery(conn, sourceID, "pid", pid, basicSelectFields)
 }
 
-// categoryFilmQuery 分类列表。有来源映射时从该站播放线路取片，并认 category_key，避免 pid 仍为 0 的影片被丢掉。
+// categoryFilmQuery 分类列表。指定采集站时只认该站自己的分类键。
 func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, selectFields string) *gorm.DB {
 	if conn == nil {
 		return nil
@@ -436,8 +437,8 @@ func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, 
 		q = q.Select(selectFields)
 	}
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID != "" && query.HasLiveCategoryKeys(field, categoryID) {
-		memberSQL, args := query.LiveCategoryMemberSQL(dialectName(conn), sourceID, field, categoryID)
+	if sourceID != "" {
+		memberSQL, args := query.LiveCategoryMemberSQLIDs(dialectName(conn), sourceID, field, repository.PublicSourceTypeIDs(sourceID, field, categoryID))
 		return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS cat_members)", args...)
 	}
 	q = applyCategorySnapshotSourceFilter(q, "", sourceID)
@@ -446,6 +447,14 @@ func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, 
 		return q.Where("pid = ?", categoryID)
 	}
 	return q.Where("cid = ?", categoryID)
+}
+
+// listedCategoryID 有采集站时，传入的 id 就是该站 type_id，不再改写成本地 film_category.id。
+func listedCategoryID(sourceID string, id int64) int64 {
+	if strings.TrimSpace(sourceID) != "" {
+		return id
+	}
+	return support.ResolveCategoryID(id)
 }
 
 func dialectName(conn *gorm.DB) string {

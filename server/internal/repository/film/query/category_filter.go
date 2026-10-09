@@ -239,13 +239,78 @@ func ApplyLiveCategoryMatch(query *gorm.DB, field string, categoryID int64) *gor
 	return query.Where(cond, args...)
 }
 
-// LiveCategoryMemberSQL 从指定采集站的播放线路取出属于该展示分类的 mid。
-func LiveCategoryMemberSQL(dialectName, sourceID, field string, categoryID int64) (string, []any) {
+func sourceTypeKeys(sourceID string, typeIDs []int64) []string {
+	keys := make([]string, 0, len(typeIDs))
+	seen := make(map[string]struct{}, len(typeIDs))
+	for _, typeID := range typeIDs {
+		key := support.BuildSourceCategoryKey(sourceID, typeID)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// sourceTypeMatchCond 当前站这些 type_id 的影片条件。
+// 一级分类同时认 root_category_key 和 category_key。二级分类只认 category_key。
+func sourceTypeMatchCond(columnPrefix, field string, keys []string) (string, []any) {
+	if len(keys) == 0 {
+		return "1 = 0", nil
+	}
+	col := func(name string) string {
+		if columnPrefix == "" {
+			return name
+		}
+		return columnPrefix + name
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
+	args := make([]any, 0, len(keys)*2)
+	if field == "cid" {
+		for _, key := range keys {
+			args = append(args, key)
+		}
+		return col("category_key") + " IN (" + placeholders + ")", args
+	}
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	return "(" + col("root_category_key") + " IN (" + placeholders + ") OR " + col("category_key") + " IN (" + placeholders + "))", args
+}
+
+// ApplySourceTypeMatch 只匹配当前采集站自己的分类键。不把其他站的同名分类并进来。
+func ApplySourceTypeMatch(query *gorm.DB, sourceID, field string, typeID int64) *gorm.DB {
+	return ApplySourceTypeMatchIDs(query, sourceID, field, []int64{typeID})
+}
+
+// ApplySourceTypeMatchIDs 匹配该站这一组 type_id。规则合并后的前台分类把成员一起带上。
+func ApplySourceTypeMatchIDs(query *gorm.DB, sourceID, field string, typeIDs []int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
+	cond, args := sourceTypeMatchCond("", field, sourceTypeKeys(sourceID, typeIDs))
+	return query.Where(cond, args...)
+}
+
+// LiveCategoryMemberSQL 从指定采集站的播放线路取出属于该站这个 type_id 的 mid。
+func LiveCategoryMemberSQL(dialectName, sourceID, field string, typeID int64) (string, []any) {
+	return LiveCategoryMemberSQLIDs(dialectName, sourceID, field, []int64{typeID})
+}
+
+// LiveCategoryMemberSQLIDs 从该站播放线路取出这一组 type_id 的 mid。
+func LiveCategoryMemberSQLIDs(dialectName, sourceID, field string, typeIDs []int64) (string, []any) {
 	hint := ""
 	if dialectName == "mysql" {
 		hint = " USE INDEX (`idx_playlist_source_mid`)"
 	}
-	cond, condArgs := LiveCategoryMatchSQL("i", field, categoryID)
+	cond, condArgs := sourceTypeMatchCond("i.", field, sourceTypeKeys(sourceID, typeIDs))
 	memberSQL := "SELECT DISTINCT p.mid FROM " + model.TableFilmSourcePlaylist + " AS p" + hint +
 		" INNER JOIN " + model.TableFilmIndex + " AS i ON i.mid = p.mid AND i.deleted_at IS NULL" +
 		" WHERE p.source_id = ? AND p.line_kind = ? AND " + cond

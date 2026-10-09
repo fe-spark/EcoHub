@@ -13,6 +13,12 @@ import (
 var errNilCollectSource = errors.New("采集源为空")
 
 var yearRegex = regexp.MustCompile(`[1-9][0-9]{3}`)
+var isoReleaseDateRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+
+// firstISOReleaseDate 只保留第一段 YYYY-MM-DD，避免电影节拼串写爆 release_date。
+func firstISOReleaseDate(raw string) string {
+	return isoReleaseDateRegex.FindString(strings.TrimSpace(raw))
+}
 
 func parseYear(raw string) int64 {
 	m := yearRegex.FindString(raw)

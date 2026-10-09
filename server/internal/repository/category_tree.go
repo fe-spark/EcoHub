@@ -135,6 +135,9 @@ func GetActiveCategoryTree(sourceIdOpt ...string) model.CategoryTree {
 			sourceId = activeSrc.Id
 		}
 	}
+	if sourceId != "" {
+		return sourceTypeCategoryTree(sourceId)
+	}
 
 	cacheKey := config.ActiveCategoryTreeKey
 	if sourceId != "" {
