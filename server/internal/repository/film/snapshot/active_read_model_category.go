@@ -62,17 +62,26 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	}
 
 	listGen := GetSearchCacheVersion()
+	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "update", offset, limit); used {
+		if err != nil {
+			log.Printf("[FilmCategoryList] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
+		} else {
+			return finishCategoryList(cacheKey, listGen, snaps, sourceID, field, id, offset, limit, startedAt)
+		}
+	}
 	query := categoryFilmQuery(db.Mdb, sourceID, field, id, basicSelectFields)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return finishCategoryList(cacheKey, listGen, snapshots, sourceID, field, id, offset, limit, startedAt)
+}
 
+func finishCategoryList(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, offset, limit int, startedAt time.Time) []model.MovieBasicInfo {
+	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 	if raw, err := json.Marshal(result); err == nil {
 		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
-
 	log.Printf("[FilmCategoryList] 获取分类列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
 		sourceID, field, id, len(result), offset, limit, time.Since(startedAt))
 	return result
@@ -170,8 +179,8 @@ func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
 	return applyCategoryIndexHint(query, field, "idx_pid_hits", "idx_cid_hits")
 }
 
-// hotCategoryQuery 热播按该站播放线路取 mid，再按 hits 截断。
-// 禁止从 idx_pid_hits 扫整类再 EXISTS：新首选站在这个分类没有线路时，会把该分类全部热度行探完。
+// hotCategoryQuery 热播深分页仍从该站线路取成员。
+// 首页这种小结果集不走这里，改由分类键索引点查播放线路主键。
 func hotCategoryQuery(conn *gorm.DB, sourceID, field string, categoryID int64) *gorm.DB {
 	if conn == nil {
 		return nil
@@ -236,17 +245,26 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 	}
 
 	listGen := GetSearchCacheVersion()
+	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "hits", offset, limit); used {
+		if err != nil {
+			log.Printf("[FilmHotList] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
+		} else {
+			return finishHotList(cacheKey, listGen, snaps, sourceID, field, id, offset, limit, startedAt)
+		}
+	}
 	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Offset(offset).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return finishHotList(cacheKey, listGen, snapshots, sourceID, field, id, offset, limit, startedAt)
+}
 
+func finishHotList(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, offset, limit int, startedAt time.Time) []model.MovieBasicInfo {
+	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 	if raw, err := json.Marshal(result); err == nil {
 		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
-
 	log.Printf("[FilmHotList] 获取分类热播列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
 		sourceID, field, id, len(result), offset, limit, time.Since(startedAt))
 	return result
@@ -279,17 +297,26 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 	}
 
 	listGen := GetSearchCacheVersion()
+	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "hits", 0, poolSize); used {
+		if err != nil {
+			log.Printf("[FilmHotPool] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
+		} else {
+			return finishHotPool(cacheKey, listGen, snaps, sourceID, field, id, poolSize, startedAt)
+		}
+	}
 	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Limit(poolSize))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
+	return finishHotPool(cacheKey, listGen, snapshots, sourceID, field, id, poolSize, startedAt)
+}
 
+func finishHotPool(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, poolSize int, startedAt time.Time) []model.MovieBasicInfo {
+	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 	if raw, err := json.Marshal(result); err == nil {
 		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
-
 	log.Printf("[FilmHotPool] 获取分类热门候选池 source=%s field=%s id=%d count=%d poolSize=%d cost=%s",
 		sourceID, field, id, len(result), poolSize, time.Since(startedAt))
 	return result
@@ -358,7 +385,22 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 		orderClause = "update_stamp DESC"
 	}
 
-	// 热度 Top 与首页热播同一条 SQL。有采集站时从线路索引取成员，禁止扫 idx_pid_hits 再 EXISTS。
+	if sortType == 1 || sortType == 2 {
+		orderKind := "update"
+		if sortType == 1 {
+			orderKind = "hits"
+		}
+		if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, "pid", pid, orderKind, 0, limit); used {
+			if err != nil {
+				log.Printf("[FilmSortListFast] 分类索引点查失败，回退原查询 source=%s pid=%d sortType=%d err=%v", sourceID, pid, sortType, err)
+			} else {
+				result := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
+				log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
+					sourceID, pid, sortType, len(result), time.Since(startedAt))
+				return result
+			}
+		}
+	}
 	query := categorySortFastQuery(db.Mdb, sourceID, sortType, pid)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
 	if err != nil {
@@ -375,7 +417,8 @@ func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, lim
 	return GetSnapshotTopMoviesBySortFastWithSource(version, "", sortType, pid, limit)
 }
 
-// categorySortFastQuery 分类页三路排序。sortType 1 走热播成员查询，其余走更新时间索引加线路主键点查。
+// categorySortFastQuery 分类页三路排序的深分页回退。
+// 热播和最新的小结果集先走分类键索引点查，这里只在点查不适用时使用。
 func categorySortFastQuery(conn *gorm.DB, sourceID string, sortType int, pid int64) *gorm.DB {
 	if sortType == 1 {
 		return hotCategoryQuery(conn, sourceID, "pid", pid)

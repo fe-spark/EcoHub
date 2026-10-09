@@ -49,9 +49,11 @@ func GetInventoryStats() InventoryStats {
 	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Library.Films).Error
 	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Library.Categories).Error
 	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Library.Failures).Error
-	stats.Library.Playable = countPlayableFilms()
+	// 没有软删除影片时，播放线路上的片子都还在片库里，不必再连表。
+	// 连表会让优化器从全表出发，线路一百多万行时要十几秒。
+	accurate := hasSoftDeletedFilms()
+	stats.Library.Playable = countPlayMids("", accurate)
 
-	filmCounts := indexCounts(countFilmsBySource())
 	categoryCounts := indexCounts(countCategoriesBySource())
 	failureCounts := indexCounts(countFailuresBySource())
 
@@ -69,7 +71,7 @@ func GetInventoryStats() InventoryStats {
 			Name:       source.Name,
 			Enabled:    source.State,
 			IsPrimary:  id == primaryID,
-			Films:      filmCounts[id],
+			Films:      countPlayMids(id, accurate),
 			Categories: categoryCounts[id],
 			Failures:   failureCounts[id],
 		})
@@ -77,25 +79,25 @@ func GetInventoryStats() InventoryStats {
 	return stats
 }
 
-func countPlayableFilms() int64 {
+func hasSoftDeletedFilms() bool {
 	var n int64
-	_ = db.Mdb.Table(model.TableFilmSourcePlaylist+" AS p").
-		Joins("INNER JOIN "+model.TableFilmIndex+" AS f ON f.mid = p.mid AND f.deleted_at IS NULL").
-		Where("p.line_kind = ?", "play").
-		Distinct("p.mid").
-		Count(&n).Error
-	return n
+	err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).Where("deleted_at IS NOT NULL").Count(&n).Error
+	return err != nil || n > 0
 }
 
-func countFilmsBySource() []sourceCount {
-	var rows []sourceCount
-	_ = db.Mdb.Table(model.TableFilmSourcePlaylist+" AS p").
-		Select("p.source_id AS source_id, COUNT(DISTINCT p.mid) AS n").
-		Joins("INNER JOIN "+model.TableFilmIndex+" AS f ON f.mid = p.mid AND f.deleted_at IS NULL").
-		Where("p.line_kind = ?", "play").
-		Group("p.source_id").
-		Scan(&rows).Error
-	return rows
+// countPlayMids 统计有播放线路的影片。sourceID 为空时统计整库。
+// accurate 为真时只保留未删除、且仍在片库中的影片。
+func countPlayMids(sourceID string, accurate bool) int64 {
+	query := db.Mdb.Table(model.TableFilmSourcePlaylist+" AS p").Where("p.line_kind = ?", "play")
+	if sourceID != "" {
+		query = query.Where("p.source_id = ?", sourceID)
+	}
+	if accurate {
+		query = query.Joins("INNER JOIN " + model.TableFilmIndex + " AS f ON f.mid = p.mid AND f.deleted_at IS NULL")
+	}
+	var n int64
+	_ = query.Distinct("p.mid").Count(&n).Error
+	return n
 }
 
 func countCategoriesBySource() []sourceCount {

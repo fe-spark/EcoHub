@@ -5,12 +5,16 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
+	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmcache "server/internal/repository/film/cache"
 	"server/internal/spider"
+
+	"golang.org/x/sync/singleflight"
 )
 
 type SpiderService struct{}
@@ -98,9 +102,50 @@ func (s *SpiderService) ResetProgress() filmrepo.ResetProgress {
 	return filmrepo.GetResetProgress()
 }
 
+var (
+	inventoryStatsFlight singleflight.Group
+	inventoryStatsMu     sync.Mutex
+	inventoryStatsCached filmrepo.InventoryStats
+	inventoryStatsAt     time.Time
+)
+
+const inventoryStatsTTL = 20 * time.Second
+
+// InvalidateInventoryStatsCache 首选站变化后丢掉片库规模缓存，避免刷新仍看到旧顺序。
+func InvalidateInventoryStatsCache() {
+	inventoryStatsMu.Lock()
+	inventoryStatsAt = time.Time{}
+	inventoryStatsMu.Unlock()
+}
+
 // InventoryStats 返回工作台片库规模（整库合计，并按采集站拆开）。
+// 同一次打开页面会连打这个接口，20 秒内复用上一次结果。
 func (s *SpiderService) InventoryStats() filmrepo.InventoryStats {
-	return filmrepo.GetInventoryStats()
+	inventoryStatsMu.Lock()
+	if !inventoryStatsAt.IsZero() && time.Since(inventoryStatsAt) < inventoryStatsTTL {
+		cached := inventoryStatsCached
+		inventoryStatsMu.Unlock()
+		return cached
+	}
+	inventoryStatsMu.Unlock()
+
+	value, _, _ := inventoryStatsFlight.Do("inventory", func() (any, error) {
+		inventoryStatsMu.Lock()
+		if !inventoryStatsAt.IsZero() && time.Since(inventoryStatsAt) < inventoryStatsTTL {
+			cached := inventoryStatsCached
+			inventoryStatsMu.Unlock()
+			return cached, nil
+		}
+		inventoryStatsMu.Unlock()
+		stats := filmrepo.GetInventoryStats()
+		inventoryStatsMu.Lock()
+		inventoryStatsCached = stats
+		inventoryStatsAt = time.Now()
+		inventoryStatsMu.Unlock()
+		return stats, nil
+	})
+	stats, _ := value.(filmrepo.InventoryStats)
+	return stats
 }
 
 // SyncCollect 同步主站单片采集

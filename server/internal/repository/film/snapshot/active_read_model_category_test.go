@@ -245,6 +245,76 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	}
 }
 
+func TestProbeBranchSQL_MySQLUsesCategoryKeyIndex(t *testing.T) {
+	branch := probeBranch{column: "root_category_key", value: "source:src:1", index: probeIndexRootHits}
+	sql := probeBranchSQL("mysql", branch, "hits")
+	if !strings.Contains(sql, "USE INDEX (`idx_root_key_hits_val`)") {
+		t.Fatalf("mysql probe must walk the category hits index, got: %s", sql)
+	}
+	if !strings.Contains(sql, "EXISTS") || strings.Contains(sql, "hot_members") || strings.Contains(sql, "idx_playlist_source_mid") {
+		t.Fatalf("probe must point-check playlist primary key, got: %s", sql)
+	}
+	sqliteSQL := probeBranchSQL("sqlite", branch, "update")
+	if strings.Contains(strings.ToUpper(sqliteSQL), "USE INDEX") {
+		t.Fatalf("sqlite probe must not inject USE INDEX, got: %s", sqliteSQL)
+	}
+}
+
+func TestProbeCategorySourceList_MergesRootKeysByUpdate(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	if err := gdb.AutoMigrate(&model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate mapping: %v", err)
+	}
+	if err := gdb.Create(&model.Category{Id: 90, Name: "连续剧", Show: true}).Error; err != nil {
+		t.Fatalf("create category: %v", err)
+	}
+	mappings := []model.CategoryMapping{
+		{SourceId: "src_a", SourceTypeId: 2, CategoryId: 90},
+		{SourceId: "src_b", SourceTypeId: 2, CategoryId: 90},
+	}
+	if err := gdb.Create(&mappings).Error; err != nil {
+		t.Fatalf("create mappings: %v", err)
+	}
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"},
+			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_a:2"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "较旧", UpdateStamp: 10, Hits: 100},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_b"},
+			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_b:2"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "较新", UpdateStamp: 50, Hits: 1},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src_b"},
+			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_b:2"},
+			FilmIndexContent:  model.FilmIndexContent{Name: "无线路", UpdateStamp: 80, Hits: 9},
+		},
+	}
+	if err := gdb.Create(&films).Error; err != nil {
+		t.Fatalf("create films: %v", err)
+	}
+	for _, mid := range []int64{1, 2} {
+		line := model.FilmSourcePlaylist{Mid: mid, SourceId: "src_new", LineKind: "play", GroupIndex: 0}
+		if err := gdb.Create(&line).Error; err != nil {
+			t.Fatalf("create playlist: %v", err)
+		}
+	}
+	if err := SetActiveSnapshotVersion("vtest"); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+
+	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 90, 14, 0)
+	if len(got) != 2 || got[0].Id != 2 || got[1].Id != 1 {
+		t.Fatalf("merged latest = %+v, want mid 2 then 1", got)
+	}
+	hot := GetSnapshotHotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 90, 14, 0)
+	if len(hot) != 2 || hot[0].Id != 1 || hot[1].Id != 2 {
+		t.Fatalf("merged hot = %+v, want mid 1 then 2", hot)
+	}
+}
+
 func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
 	createTestFilm(t, gdb, 11, "有线路", 100, "")

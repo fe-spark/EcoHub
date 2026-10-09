@@ -255,6 +255,12 @@ func LiveCategoryMemberSQL(dialectName, sourceID, field string, categoryID int64
 	return memberSQL, args
 }
 
+// LiveCategoryProbeKeys 返回展示分类的 id 列、id、子分类键和大类根键。
+// 片库里多数影片 pid 为 0，列表要同时认这些来源分类键。
+func LiveCategoryProbeKeys(field string, categoryID int64) (idColumn string, id int64, categoryKeys, rootKeys []string) {
+	return liveCategoryKeySets(field, categoryID)
+}
+
 func liveCategoryKeySets(field string, categoryID int64) (col string, id int64, visible []string, roots []string) {
 	col = "pid"
 	if field == "cid" {

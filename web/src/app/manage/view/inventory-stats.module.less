@@ -5,6 +5,21 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
+.header {
+  min-height: 52px;
+  padding: 0 18px;
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.body {
+  padding: 16px 18px 14px;
+}
+
 .securityLink {
   font-size: 13px;
   color: #fa8c16;
@@ -16,28 +31,43 @@
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
+  grid-template-columns: minmax(0, 1.35fr) repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .metric {
   min-width: 0;
-  padding: 14px 16px 12px;
+  padding: 16px 16px 14px;
   border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
+  border-radius: 12px;
   background: var(--ant-color-fill-quaternary);
 }
 
+.metricLead {
+  background:
+    linear-gradient(180deg, rgba(250, 140, 22, 0.14), rgba(250, 140, 22, 0.03) 62%),
+    var(--ant-color-fill-quaternary);
+  border-color: rgba(250, 140, 22, 0.32);
+}
+
 .metricValue {
-  font-size: 22px;
+  font-size: 28px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
   font-variant-numeric: tabular-nums;
   color: var(--ant-color-text);
 }
 
+.loading {
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .metricLabel {
-  margin-top: 6px;
+  margin-top: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--ant-color-text);
@@ -50,35 +80,47 @@
   color: var(--ant-color-text-tertiary);
 }
 
-.sectionHead {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 18px 0 10px;
+.stations {
+  margin-top: 16px;
 }
 
-.sectionTitle {
-  flex: 0 0 auto;
+.stationTitle {
+  margin-bottom: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--ant-color-text);
 }
 
-.sectionHint {
-  min-width: 0;
-  font-size: 12px;
-  line-height: 1.4;
-  text-align: right;
-  color: var(--ant-color-text-tertiary);
+.stationGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
-.nameCell {
-  display: inline-flex;
+.stationCard {
+  min-width: 0;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-fill-quaternary);
+}
+
+.stationPrimary {
+  background:
+    linear-gradient(180deg, rgba(250, 173, 20, 0.16), rgba(250, 173, 20, 0.04)),
+    var(--ant-color-fill-quaternary);
+  border-color: rgba(250, 173, 20, 0.4);
+}
+
+.stationOff .sourceName {
+  color: var(--ant-color-text-secondary);
+}
+
+.identity {
+  display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
-  max-width: 100%;
 }
 
 .sourceName {
@@ -86,40 +128,72 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 600;
+  color: var(--ant-color-text);
 }
 
-.categoryCell {
-  display: inline-flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+.stationStats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
 }
 
-.note {
-  display: block;
-  margin-top: 12px;
+.stationStat {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.stationStatLabel {
   font-size: 12px;
-  line-height: 1.6;
+  color: var(--ant-color-text-tertiary);
 }
 
-@media (max-width: 900px) {
+.stationStatValue {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.figureQuiet {
+  font-weight: 500;
+  color: var(--ant-color-text-tertiary);
+}
+
+.figureWarn {
+  color: #d48806;
+}
+
+.stationEmpty {
+  padding: 28px 14px;
+  text-align: center;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+@media (max-width: 960px) {
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .sectionHead {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 4px;
-  }
-
-  .sectionHint {
-    text-align: left;
+  .metricLead {
+    grid-column: 1 / -1;
   }
 }
 
-@media (max-width: 640px) {
+@media (max-width: 720px) {
+  .body {
+    padding: 14px;
+  }
+
   .metricValue {
-    font-size: 20px;
+    font-size: 24px;
+  }
+
+  .stationGrid {
+    grid-template-columns: 1fr;
   }
 }

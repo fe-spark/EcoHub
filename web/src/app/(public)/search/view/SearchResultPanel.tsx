@@ -27,7 +27,6 @@ function getPrimaryPlotTag(classTag?: string) {
 
 export default function SearchResultPanel({
   keyword,
-  current,
   list,
   page,
   totalCount,
@@ -39,7 +38,6 @@ export default function SearchResultPanel({
   onPageChange,
 }: {
   keyword: string;
-  current: string;
   list: any[];
   page: any;
   totalCount: number;
@@ -204,7 +202,7 @@ export default function SearchResultPanel({
 
       <div className={styles.pagination}>
         <Pagination
-          current={Number(page?.current) || parseInt(current || "1", 10)}
+          current={Number(page?.current) || 1}
           total={page?.total ?? totalCount}
           pageSize={page?.pageSize || 12}
           onChange={onPageChange}
