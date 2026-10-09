@@ -12,6 +12,7 @@ import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
 import AppAnalyticsView from "./app-view";
 import TvboxAnalyticsView from "./tvbox-view";
+import SourceCalls from "./source-calls";
 import styles from "./index.module.less";
 
 function disabledAccessDay(d: Dayjs) {
@@ -225,6 +226,8 @@ export default function AccessPageView() {
         dayStr={dayStr}
         refreshKey={refreshKey}
       />
+
+      <SourceCalls dayStr={dayStr} refreshKey={refreshKey} />
 
       <div className={styles.moduleNavWrapper} role="tablist" aria-label="数据分析客户端分类">
         {MODULE_OPTIONS.map((item) => {

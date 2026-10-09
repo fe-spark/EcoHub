@@ -16,8 +16,8 @@ func SaveUserToken(token string, userId uint) error {
 	if db.Rdb == nil {
 		return nil
 	}
-	// 设置redis中token的过期时间为 token过期时间后的7天
-	return db.Rdb.Set(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId), token, (config.AuthTokenExpires+7*24)*time.Hour).Err()
+	// 与 JWT 有效期一致。过期后必须重新登录，不再额外延长 7 天。
+	return db.Rdb.Set(db.Cxt, fmt.Sprintf(config.UserTokenKey, userId), token, config.AuthTokenExpires*time.Hour).Err()
 }
 
 // GetUserTokenById 从redis中获取指定userId对应的token

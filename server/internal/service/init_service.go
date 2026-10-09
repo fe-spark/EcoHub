@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
-	"strings"
 	"time"
 
 	"server/internal/config"
@@ -75,8 +73,6 @@ func (s *InitService) TableInit() {
 		syslog.Errorf("Database AutoMigrate Failed: %v", err)
 		return
 	}
-
-	// 运行版本化自动迁移（只执行一次并记录在 schema_migrations 表中）
 	if err := migration.RunAutoMigrations(db.Mdb); err != nil {
 		syslog.Errorf("Database RunAutoMigrations Failed: %v", err)
 	}
@@ -116,11 +112,7 @@ func defaultBasicConfig() model.BasicConfig {
 
 func (s *InitService) SpiderInit() {
 	s.FilmSourceInit()
-	go func() {
-		if err := SpiderSvc.SyncMasterCategoryTree(); err != nil {
-			log.Printf("[Init] 主站分类同步跳过: %v", err)
-		}
-	}()
+	go SpiderSvc.SyncMissingSourceCategories()
 	s.CollectCrontabInit()
 }
 
@@ -159,7 +151,7 @@ func defaultFilmSources() []model.FilmSource {
 
 func (s *InitService) CollectCrontabInit() {
 
-	// 幂等对齐系统默认任务并注册（新老数据库统一逻辑，自动补齐缺失任务，零兼容分支）
+	// 已有任务保持原样，缺的任务类型补默认任务。
 	tasks := s.ensureDefaultTasks()
 	for _, task := range tasks {
 		s.registerTask(task)
@@ -179,142 +171,24 @@ func (s *InitService) CollectCrontabInit() {
 	})
 }
 
-const (
-	legacyOrphanSpec      = "0 0 0 * * *"
-	legacyOrphanSpec0435  = "0 35 4 * * *"
-	legacyAutoCollectSpec = "0 */30 * * * ?"
-)
-
-func shouldMigrateOrphanCleanSpec(id string, spec string) bool {
-	s := strings.TrimSpace(spec)
-	return id == "sys_cron_orphan_clean" && (s == legacyOrphanSpec || s == legacyOrphanSpec0435)
-}
-
-func shouldMigrateAutoCollectSpec(id string, spec string) bool {
-	return id == "sys_cron_auto_collect" && strings.TrimSpace(spec) == legacyAutoCollectSpec
-}
-
-// ensureDefaultTasks 幂等检查并补齐默认任务（已存在跳过，缺失则自动持久化并返回）
+// ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 	existing := repository.GetAllFilmTask()
-	for i, t := range existing {
-		if shouldMigrateOrphanCleanSpec(t.Id, t.Spec) {
-			oldSpec := t.Spec
-			t.Spec = config.OrphanCleanSpec
-			if err := repository.UpdateFilmTask(t); err != nil {
-				syslog.Errorf("[Cron] 迁移孤儿清理 spec 失败 id=%s: %v", t.Id, err)
-				continue
-			}
-			existing[i] = t
-			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", oldSpec, config.OrphanCleanSpec)
-		}
-		if shouldMigrateAutoCollectSpec(t.Id, t.Spec) {
-			oldSpec := t.Spec
-			t.Spec = config.DefaultUpdateSpec
-			if err := repository.UpdateFilmTask(t); err != nil {
-				syslog.Errorf("[Cron] 迁移自动采集 spec 失败 id=%s: %v", t.Id, err)
-				continue
-			}
-			existing[i] = t
-			log.Printf("[Cron] 已将 sys_cron_auto_collect spec 从 %s 迁移为 %s", oldSpec, config.DefaultUpdateSpec)
-		}
-		if t.Id == "sys_cron_orphan_clean" && (t.Remark == "清理无主影片的孤儿播放列表" || strings.TrimSpace(t.Remark) == "") {
-			t.Remark = "片库冗余数据与孤儿清理"
-			if err := repository.UpdateFilmTask(t); err != nil {
-				syslog.Errorf("[Cron] 迁移孤儿清理 remark 失败 id=%s: %v", t.Id, err)
-				continue
-			}
-			existing[i] = t
-			log.Printf("[Cron] 已将 sys_cron_orphan_clean remark 更新为 片库冗余数据与孤儿清理")
-		}
-	}
-
-	// 平滑兼容历史 sys_cron_api_log_clean 或 Model == 4 任务为 sys_cron_log_clean
-	var canonicalTask *model.FilmCollectTask
-	var legacyIndices []int
-
-	for i := range existing {
-		t := &existing[i]
-		if t.Id == "sys_cron_log_clean" {
-			if canonicalTask == nil {
-				canonicalTask = t
-			} else {
-				legacyIndices = append(legacyIndices, i)
-			}
-		} else if t.Id == "sys_cron_api_log_clean" || t.Model == 4 {
-			legacyIndices = append(legacyIndices, i)
-		}
-	}
-
-	if canonicalTask != nil {
-		canonicalTask.Model = 4
-		canonicalTask.Remark = "自动清理过期运行日志"
-		canonicalTask.Time = 0
-		if strings.TrimSpace(canonicalTask.Spec) == "" {
-			canonicalTask.Spec = "0 0 3 * * *"
-		}
-		if err := repository.SaveFilmTask(*canonicalTask); err != nil {
-			syslog.Errorf("[Cron] 保存日志清理任务失败: %v", err)
-		}
-		for _, idx := range legacyIndices {
-			repository.DelFilmTask(existing[idx].Id)
-		}
-	} else if len(legacyIndices) > 0 {
-		firstLegacy := &existing[legacyIndices[0]]
-		repository.DelFilmTask(firstLegacy.Id)
-		firstLegacy.Id = "sys_cron_log_clean"
-		firstLegacy.Model = 4
-		firstLegacy.Remark = "自动清理过期运行日志"
-		firstLegacy.Time = 0
-		if strings.TrimSpace(firstLegacy.Spec) == "" {
-			firstLegacy.Spec = "0 0 3 * * *"
-		}
-		if err := repository.SaveFilmTask(*firstLegacy); err != nil {
-			syslog.Errorf("[Cron] 平滑迁移日志清理任务失败: %v", err)
-		}
-		canonicalTask = firstLegacy
-
-		for _, idx := range legacyIndices[1:] {
-			repository.DelFilmTask(existing[idx].Id)
-		}
-	}
-
-	legacySet := make(map[int]bool, len(legacyIndices))
-	for _, idx := range legacyIndices {
-		legacySet[idx] = true
-	}
-
-	var cleanedExisting []model.FilmCollectTask
-	hasCanonicalInCleaned := false
-	for i, t := range existing {
-		if legacySet[i] {
-			continue
-		}
-		if t.Id == "sys_cron_log_clean" {
-			if !hasCanonicalInCleaned && canonicalTask != nil {
-				cleanedExisting = append(cleanedExisting, *canonicalTask)
-				hasCanonicalInCleaned = true
-			}
-			continue
-		}
-		cleanedExisting = append(cleanedExisting, t)
-	}
-	if canonicalTask != nil && !hasCanonicalInCleaned {
-		cleanedExisting = append(cleanedExisting, *canonicalTask)
-	}
-	existing = cleanedExisting
-
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
 	}
 
 	for _, dt := range defaultFilmTasks() {
-		if !existingModels[dt.Model] {
-			if err := repository.SaveFilmTask(dt); err == nil {
-				existing = append(existing, dt)
-			}
+		if existingModels[dt.Model] {
+			continue
 		}
+		if err := repository.SaveFilmTask(dt); err != nil {
+			syslog.Errorf("[Cron] 补齐默认任务失败 id=%s: %v", dt.Id, err)
+			continue
+		}
+		existing = append(existing, dt)
+		existingModels[dt.Model] = true
 	}
 	return existing
 }

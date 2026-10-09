@@ -265,14 +265,6 @@ export default function FilmListPageView() {
       />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
-        <Input
-          placeholder="搜索片名..."
-          value={params.name}
-          onChange={(e) => setParams({ ...params, name: e.target.value })}
-          className={styles.searchInput}
-          allowClear
-          onPressEnter={onSearch}
-        />
         <Select
           placeholder="选择采集源"
           className={styles.filterItem}
@@ -282,6 +274,14 @@ export default function FilmListPageView() {
             label: s.name,
             value: s.id,
           }))}
+        />
+        <Input
+          placeholder="搜索片名..."
+          value={params.name}
+          onChange={(e) => setParams({ ...params, name: e.target.value })}
+          className={styles.searchInput}
+          allowClear
+          onPressEnter={onSearch}
         />
         <TreeSelect
           placeholder="选择分类"

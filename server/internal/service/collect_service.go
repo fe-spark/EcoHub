@@ -42,6 +42,13 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		progressByID[progress.Id] = progress
 	}
 	lastCollectTimeByID := getLastCollectTimeBySource(sources)
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	categoryReady := repository.SourceIDsWithCategory(sourceIDs)
 	primarySource := repository.GetActiveCollectSource()
 	primaryID := ""
 	if primarySource != nil {
@@ -59,6 +66,9 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		}
 		if ok, _ := repository.ResolveSourceProxy(source.Id); ok {
 			item.ProxyEnabled = true
+		}
+		if _, ok := categoryReady[source.Id]; ok {
+			item.CategoryReady = true
 		}
 		list = append(list, item)
 	}
@@ -78,9 +88,7 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 
 	newPrimary := repository.PickPrimarySourceForCategory()
 	if newPrimary != nil && (oldPrimary == nil || oldPrimary.Id != newPrimary.Id) {
-		if err := spider.CollectCategory(newPrimary); err != nil {
-			syslog.Warnf("[CollectService] 拖拽切换首位基准站同步分类失败 name=%s: %v", newPrimary.Name, err)
-		}
+		// 分类在添加或编辑采集站时已经按站保存。切换首选站只换前台读取的那一份。
 		repository.MarkCategoryChanged()
 		filmsnapshot.RefreshAccessDataCaches()
 		filmsnapshot.ClearSearchCache()
@@ -111,19 +119,15 @@ func (s *CollectService) GetAllFilmSources() []model.FilmSource {
 }
 
 // UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
+// 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	return s.updateFilmSource(source, false, nil)
-}
-
-// UpdateFilmSourceWithClean 编辑采集源配置（支持选择是否在换地址时清空旧数据）
-func (s *CollectService) UpdateFilmSourceWithClean(source model.FilmSource, cleanOldData bool) error {
-	return s.updateFilmSource(source, cleanOldData, nil)
+	return s.updateFilmSource(source, nil)
 }
 
 // updateFilmSource 编辑采集源配置核心逻辑。
 // collector 非 nil 时（批量操作）不直接发送通知，而是把各源变更追加到收集器，
 // 由调用方统一发送聚合通知，避免批量操作逐源轰炸。
-func (s *CollectService) updateFilmSource(source model.FilmSource, cleanOldData bool, collector *[]notify.SourceConfigChangeItem) error {
+func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]notify.SourceConfigChangeItem) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -149,14 +153,18 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, cleanOldData 
 			}
 		}
 
-		// 若更换接口地址且用户选择清空旧数据：级联清理旧站历史线路与独占孤儿影片
-		if isUriChanged && cleanOldData {
+		// 更换接口地址时直接清空该站已采集数据和分类副本。
+		if isUriChanged {
 			orphans, err := repository.CascadeCleanSourceDataTx(tx, source.Id)
 			if err != nil {
 				syslog.Errorf("[Collect] 更换源地址清空历史数据失败: %v", err)
 				return errors.New("清空历史数据失败，请重试")
 			}
 			orphanMids = orphans
+			if err := repository.ClearSourceCategoryDataTx(tx, source.Id); err != nil {
+				syslog.Errorf("[Collect] 更换源地址清空分类失败: %v", err)
+				return errors.New("清空分类失败，请重试")
+			}
 		}
 
 		return repository.UpdateCollectSourceTx(tx, source)
@@ -165,9 +173,12 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, cleanOldData 
 		return err
 	}
 
+	if isUriChanged {
+		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据、失败记录和分类，独占孤儿影片 %d 部", source.Name, source.Id, len(orphanMids))
+		repository.MarkCategoryChanged()
+	}
 	if len(orphanMids) > 0 {
 		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址并清空旧数据，级联清理独占孤儿影片 %d 部", source.Name, source.Id, len(orphanMids))
 	}
 
 	spider.ClearLimiter(source.Id)
@@ -176,7 +187,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, cleanOldData 
 	}
 
 	clearProvideNetworkConfigCache()
-	if old.DomainReplaceRules != source.DomainReplaceRules || (isUriChanged && cleanOldData) {
+	if old.DomainReplaceRules != source.DomainReplaceRules || isUriChanged {
 		filmsnapshot.ClearDynamicPlayCaches()
 	}
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
@@ -253,7 +264,7 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 		}
 		next := *source
 		next.State = state
-		if err := s.updateFilmSource(next, false, &collector); err != nil {
+		if err := s.updateFilmSource(next, &collector); err != nil {
 			firstErr = err
 			break
 		}
@@ -292,31 +303,49 @@ func (s *CollectService) DelFilmSource(id string) error {
 	}
 	spider.ClearLimiter(id)
 	clearProvideNetworkConfigCache()
+	repository.MarkCategoryChanged()
 	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
 	removeSourceFromProxyConfig(id)
 	return nil
 }
 
+// PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。
+func (s *CollectService) PrepareRecordQuery(params model.RecordRequestVo) model.RecordRequestVo {
+	params.OriginId = strings.TrimSpace(params.OriginId)
+	if params.OriginId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			params.OriginId = active.Id
+		}
+	}
+	return params
+}
+
 func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.FailureRecord {
+	params = s.PrepareRecordQuery(params)
 	repository.NormalizeFailureRecordsRetryCount()
 	return repository.FailureRecordList(params)
 }
 
-func (s *CollectService) GetRecordOptions() model.OptionGroup {
-	options := make(model.OptionGroup)
-	options["status"] = []model.Option{
-		{Name: "全部", Value: -1},
-		{Name: "待重试", Value: model.FailureRecordStatusPending},
-		{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
-		{Name: "重试失败", Value: model.FailureRecordStatusFailed},
+func (s *CollectService) GetRecordOptions() map[string]any {
+	sources := repository.GetEnabledCollectSourceList()
+	defaultSourceId := ""
+	if len(sources) > 0 {
+		defaultSourceId = sources[0].Id
 	}
-
-	originOptions := []model.Option{{Name: "全部", Value: ""}}
-	for _, v := range repository.GetCollectSourceList() {
+	originOptions := make([]model.Option, 0, len(sources))
+	for _, v := range sources {
 		originOptions = append(originOptions, model.Option{Name: v.Name, Value: v.Id})
 	}
-	options["origin"] = originOptions
-	return options
+	return map[string]any{
+		"status": []model.Option{
+			{Name: "全部", Value: -1},
+			{Name: "待重试", Value: model.FailureRecordStatusPending},
+			{Name: "重试成功", Value: model.FailureRecordStatusSuccess},
+			{Name: "重试失败", Value: model.FailureRecordStatusFailed},
+		},
+		"origin":          originOptions,
+		"defaultSourceId": defaultSourceId,
+	}
 }
 
 func (s *CollectService) CollectRecover(id int) error {

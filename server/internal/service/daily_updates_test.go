@@ -112,14 +112,6 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
 	})
-	gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: version,
-		Mid:             1001,
-		Name:            "测试电影1",
-		Pid:             1,
-		Cid:             11,
-		UpdateStamp:     now.Unix(),
-	})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
 

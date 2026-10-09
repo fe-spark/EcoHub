@@ -65,6 +65,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	if db.Mdb == nil {
 		return emptyFilterOptionResponse()
 	}
+	listGen := GetSearchCacheVersion()
 
 	// 1. 获取子分类
 	var subCats []model.Category
@@ -144,10 +145,8 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 		"tags":     tags,
 	}
 
-	if db.Rdb != nil {
-		if raw, err := json.Marshal(res); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
-		}
+	if raw, err := json.Marshal(res); err == nil {
+		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
 	}
 	return res
 }
@@ -208,6 +207,7 @@ func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 	if db.Mdb == nil {
 		return map[int64]map[string]any{}
 	}
+	listGen := GetSearchCacheVersion()
 
 	var roots []model.Category
 	_ = db.Mdb.Where("pid = ? AND `show` = ?", 0, true).Order("sort ASC, id ASC").Find(&roots).Error
@@ -223,10 +223,8 @@ func GetAdminFilterOptionSnapshots() map[int64]map[string]any {
 		}
 	}
 
-	if db.Rdb != nil && len(result) > 0 {
-		if raw, err := json.Marshal(result); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), 10*time.Minute).Err()
-		}
+	if raw, err := json.Marshal(result); err == nil {
+		writeListCache(cacheKey, raw, listCacheTTL(len(result), 10*time.Minute), listGen)
 	}
 	return result
 }

@@ -12,10 +12,6 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-func QueryTops(day, kind string, limit int) ([]TopItem, error) {
-	return QueryTopsScope(day, kind, "", "", limit)
-}
-
 func scopedTopKind(kind, module, platform string) string {
 	kind = strings.ToLower(strings.TrimSpace(kind))
 	module = strings.ToLower(strings.TrimSpace(module))

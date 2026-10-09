@@ -53,6 +53,11 @@ func AutoCollectTriggered(trigger string, h int) {
 			return
 		}
 	}
+	enabled = filterSourcesReadyForCollect(enabled)
+	if len(enabled) == 0 {
+		log.Println("[Spider] 自动采集：采集站都还没有分类")
+		return
+	}
 	runSourcesWithLimit(enabled, h, "Auto-Collect", trigger)
 }
 

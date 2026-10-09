@@ -31,7 +31,6 @@ type AdminNotice struct {
 }
 
 func (h *ManageHandler) ManageIndex(c *gin.Context) {
-	// notices 预留后台顶部公告；ContentKey 已改为写路径懒兼容，不再在启动时 bulk 迁移。
 	dto.Success(gin.H{"notices": []AdminNotice{}}, "后台管理中心", c)
 }
 

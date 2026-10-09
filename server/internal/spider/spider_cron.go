@@ -310,7 +310,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	// 2. 悬空匹配键与源映射清理
 	k := filmrepo.CleanOrphanMatchKeysAndMappings()
 
-	// 3. 空记录、缺失详情与零线路幽灵影片清理：受 publishMu 保护，若遇采集正忙则跳过以优先保证核心采集
+	// 3. 空记录与零线路幽灵影片清理：采集正忙则跳过，优先保证入库。
 	if collectLifecycle.isBusy() {
 		detail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d；采集发布正忙，片库幽灵清理留待下轮", n, k)
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
@@ -318,7 +318,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		return
 	}
 
-	var m, x, p int64
+	var m, p int64
 	err := func() error {
 		collectLifecycle.beginPublish()
 		defer collectLifecycle.endPublish()
@@ -326,9 +326,8 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		defer publishMu.Unlock()
 
 		m = filmrepo.CleanEmptyFilms()
-		x = filmrepo.CleanSearchWithoutDetail()
 		p = filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
-		if m > 0 || x > 0 || p > 0 {
+		if m > 0 || p > 0 {
 			return filmsnapshot.ActivateRebuiltFilmListSnapshot("")
 		}
 		return nil
@@ -339,7 +338,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		return
 	}
 
-	cleanDetail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d、无线路幽灵 %d、空记录 %d、缺失详情 %d", n, k, p, m, x)
+	cleanDetail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d、无线路幽灵 %d、空记录 %d", n, k, p, m)
 	log.Printf("[CleanOrphan] 片库冗余数据与孤儿清理完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
 	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }

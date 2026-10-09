@@ -118,6 +118,37 @@ func (s *FilmService) GetFilmClassTree() model.CategoryTree {
 	return repository.GetCategoryTree()
 }
 
+// ClassTreeScope 分类管理按采集站查看时的树和站点选项。
+type ClassTreeScope struct {
+	Tree            model.CategoryTree
+	Sources         []model.FilmSource
+	DefaultSourceId string
+	CurrentSourceId string
+}
+
+// GetScopedClassTree 按采集站返回该站分类。未指定站点时用首选站。
+func (s *FilmService) GetScopedClassTree(sourceID string) ClassTreeScope {
+	sources := repository.GetCollectSourceList()
+	defaultSourceID := ""
+	if active := repository.GetActiveCollectSource(); active != nil {
+		defaultSourceID = active.Id
+	}
+	if defaultSourceID == "" && len(sources) > 0 {
+		defaultSourceID = sources[0].Id
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		sourceID = defaultSourceID
+	}
+	tree := repository.GetSourceBoundCategoryTree(sourceID)
+	return ClassTreeScope{
+		Tree:            tree,
+		Sources:         sources,
+		DefaultSourceId: defaultSourceID,
+		CurrentSourceId: sourceID,
+	}
+}
+
 // GetFilmClassById 通过ID获取影片分类信息
 func (s *FilmService) GetFilmClassById(id int64) *model.CategoryTree {
 	return repository.GetCategoryTreeByID(id)
@@ -159,6 +190,21 @@ func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTre
 		})
 	}
 	return res
+}
+
+func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.CategoryTree) error {
+	if len(nodes) == 0 {
+		return errors.New("分类结构不能为空")
+	}
+	if err := repository.SaveSourceCategoryOrder(sourceID, nodes); err != nil {
+		return err
+	}
+	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+		return err
+	}
+	filmcache.ClearTVBoxConfigCache()
+	filmcache.ClearTVBoxListCache()
+	return nil
 }
 
 func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {

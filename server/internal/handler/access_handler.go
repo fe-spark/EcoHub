@@ -52,6 +52,19 @@ func (h *AccessHandler) Overview(c *gin.Context) {
 	dto.Success(data, "数据分析概览获取成功", c)
 }
 
+func (h *AccessHandler) SourceCalls(c *gin.Context) {
+	if !h.isAccessible() {
+		dto.Failed("数据分析功能未开启", c)
+		return
+	}
+	list, err := access.QuerySourceCalls(c.Query("day"))
+	if err != nil {
+		dto.Failed("采集站调用次数暂不可用", c)
+		return
+	}
+	dto.Success(gin.H{"list": list}, "采集站调用次数获取成功", c)
+}
+
 func (h *AccessHandler) Tops(c *gin.Context) {
 	if !h.isAccessible() {
 		dto.Failed("数据分析功能未开启", c)

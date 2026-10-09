@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Card, Empty, Input, Space, Table, Tag, Typography } from "antd";
+import { Button, Card, Input, Space, Table, Tag, Typography } from "antd";
 import {
   DesktopOutlined,
   PlayCircleOutlined,
@@ -14,10 +14,10 @@ import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
 import { ApiGet } from "@/lib/client-api";
 import TrendChart from "./trend-chart";
-import { type DonutSlice } from "./donut-chart";
 import DistBarChart from "./dist-bar-chart";
 import BusinessRankings from "./business-rankings";
-import type { Overview, TopItem, LogRow } from "./types";
+import type { ChartSlice, Overview, TopItem, LogRow } from "./types";
+import CardEmpty, { fillCardStyles } from "./card-empty";
 import ResourceCell from "./resource-cell";
 import styles from "./index.module.less";
 
@@ -218,7 +218,7 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
     listCount = Math.max(0, logs.length - detailCount - searchCount - configCount);
   }
 
-  const tvboxSlices: DonutSlice[] = [
+  const tvboxSlices: ChartSlice[] = [
     {
       name: "寻片搜索",
       value: searchCount,
@@ -314,11 +314,16 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
         </div>
 
         {/* 24 小时流量走势全宽卡片 */}
-        <Card title="24 小时调用走势" className={styles.chartCard} loading={loading}>
+        <Card
+          title="24 小时调用走势"
+          className={styles.chartCard}
+          styles={fillCardStyles}
+          loading={loading}
+        >
           {overview?.series && overview.series.length > 0 ? (
             <TrendChart series={overview.series} activeTab="all" />
           ) : (
-            <Empty description="暂无 TVBox 流量趋势数据" />
+            <CardEmpty description="暂无 TVBox 流量趋势数据" />
           )}
         </Card>
       </div>
@@ -354,10 +359,11 @@ export default function TvboxAnalyticsView({ dayStr, refreshKey }: { dayStr: str
         <Card
           className={styles.chartCard}
           classNames={{ body: styles.centeredCardBody }}
+          styles={fillCardStyles}
           loading={loading}
         >
           {tvboxSlices.length === 0 ? (
-            <Empty description="暂无接口调用分布数据" />
+            <CardEmpty description="暂无接口调用分布数据" />
           ) : (
             <DistBarChart slices={tvboxSlices} unit="次" />
           )}

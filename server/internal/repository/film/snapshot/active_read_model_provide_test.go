@@ -20,11 +20,6 @@ func TestListProvideSnapshots_TagFilter(t *testing.T) {
 		{SnapshotVersion: version, Mid: 2, Pid: targetPid, Name: "美国动作片", Area: "美国", Year: 2023, ClassTag: "动作"},
 		{SnapshotVersion: version, Mid: 3, Pid: targetPid, Name: "大陆喜剧片", Area: "中国大陆", Year: 2024, ClassTag: "喜剧"},
 	}
-	for _, s := range snapshots {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
-	}
 	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
 		t.Fatalf("seed live films: %v", err)
 	}

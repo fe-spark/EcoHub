@@ -56,7 +56,6 @@ const (
 	DefaultCollectPageWorkersSolo               = 10  // 仅 1 站在跑时提高页并发，吃满写阀
 	DefaultCollectSourceConcurrency             = 6   // 批量同时跑的站点数；0=不限制
 	DefaultCollectStatsFlushIntervalSec         = 5
-	DefaultCollectCacheFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
 	// 仅保留足够前端完成结束态展示的窗口（轮询 + 倒计时），过后查询不到，避免残留到下次进入。
 	DefaultCollectProgressRetainSec = 10
@@ -87,8 +86,6 @@ var (
 	CollectSourceConcurrency = DefaultCollectSourceConcurrency
 	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
-	// CollectCacheFlushIntervalSec 采集 Redis 缓存合并清理最小间隔（秒）。
-	CollectCacheFlushIntervalSec = DefaultCollectCacheFlushIntervalSec
 	// CollectProgressRetainSec done/failed 进度保留秒数。
 	CollectProgressRetainSec = DefaultCollectProgressRetainSec
 	// CollectProgressStaleSec 活跃进度超时秒数。
@@ -190,8 +187,8 @@ const (
 
 	// ConfigCacheTTL 管理员写入控制的配置类 key 有效期 (以长 TTL 最大化命中率)
 	ConfigCacheTTL = time.Hour * 24
-	// MaxScanCount redis Scan 操作每次扫描的数据量, 每次最多扫描300条数据
-	MaxScanCount = 300
+	// MaxScanCount redis Scan 每次建议条数。实际删除按批 pipeline。
+	MaxScanCount = 1000
 )
 
 const (

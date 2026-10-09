@@ -47,18 +47,18 @@ func applyCategorySearchFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
 func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 	switch sortField {
 	case "hits":
-		return "hits DESC, id DESC"
+		return "hits DESC, mid DESC"
 	case "latest":
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	case "year":
-		return "year DESC, id DESC"
+		return "year DESC, mid DESC"
 	case "score":
-		return "score DESC, id DESC"
+		return "score DESC, mid DESC"
 	default:
 		if keywordSearch {
-			return "hits DESC, year DESC, update_stamp DESC, id DESC"
+			return "hits DESC, year DESC, update_stamp DESC, mid DESC"
 		}
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	}
 }
 

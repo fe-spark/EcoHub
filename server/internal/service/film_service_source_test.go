@@ -28,8 +28,6 @@ func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSource{},
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
-		&model.FilmSnapshotSource{},
-		&model.FilmListSnapshot{},
 		&model.Category{},
 		&model.CategoryMapping{},
 	); err != nil {
@@ -74,6 +72,31 @@ func TestFilmService_GetSearchOptions_DefaultSource(t *testing.T) {
 	}
 	if sources[0].Id != "src_a" {
 		t.Fatalf("expected first source in list to be src_a (sort=1), got %s", sources[0].Id)
+	}
+}
+
+func TestFilmService_GetScopedClassTree_DefaultsToPrimary(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "站点B", Uri: "http://b", State: true, Sort: 2})
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a", State: true, Sort: 0})
+	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "电影", StableKey: "a-movie", Show: true, Sort: 1})
+	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电视剧", StableKey: "b-tv", Show: true, Sort: 1})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9})
+	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 2, CategoryId: 1})
+
+	view := new(FilmService).GetScopedClassTree("")
+	if view.DefaultSourceId != "src_a" || view.CurrentSourceId != "src_a" {
+		t.Fatalf("default source = %s current = %s", view.DefaultSourceId, view.CurrentSourceId)
+	}
+	if len(view.Sources) != 2 {
+		t.Fatalf("sources = %d", len(view.Sources))
+	}
+	if len(view.Tree.Children) != 1 || view.Tree.Children[0].Name != "电影" {
+		t.Fatalf("default tree = %+v", view.Tree.Children)
+	}
+	picked := new(FilmService).GetScopedClassTree("src_b")
+	if len(picked.Tree.Children) != 1 || picked.Tree.Children[0].Name != "电视剧" {
+		t.Fatalf("src_b tree = %+v", picked.Tree.Children)
 	}
 }
 
@@ -126,21 +149,6 @@ func TestFilmService_GetFilmPage_SnapshotMode_FilterBySource(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", State: true, Sort: 1})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", State: true, Sort: 2})
 
-	// 写入快照数据
-	gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: snapVer,
-		Mid:             201,
-		SourceId:        "src1",
-		Name:            "快照影片1",
-	})
-	gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: snapVer,
-		Mid:             202,
-		SourceId:        "src2",
-		Name:            "快照影片2",
-	})
-	gdb.Create(&model.FilmSnapshotSource{SnapshotVersion: snapVer, Mid: 201, SourceId: "src1"})
-	gdb.Create(&model.FilmSnapshotSource{SnapshotVersion: snapVer, Mid: 202, SourceId: "src2"})
 	_ = filmsnapshot.WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{
 		{Mid: 201, SourceId: "src1", Name: "快照影片1"},
 		{Mid: 202, SourceId: "src2", Name: "快照影片2"},

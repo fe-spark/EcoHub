@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Card, Empty, Input, Space, Table } from "antd";
+import { Card, Input, Space, Table } from "antd";
 import {
   AndroidOutlined,
   AppleOutlined,
@@ -14,10 +14,11 @@ import {
 } from "@ant-design/icons";
 import { ApiGet } from "@/lib/client-api";
 import TrendChart from "./trend-chart";
-import DonutChart, { type DonutSlice } from "./donut-chart";
+import ShareColumn from "./share-column";
 import BusinessRankings from "./business-rankings";
-import type { Overview, TopItem, LogRow } from "./types";
+import type { ChartSlice, Overview, TopItem, LogRow } from "./types";
 import { PLATFORM_MAP, buildAppLogColumns } from "./app-log-columns";
+import CardEmpty, { fillCardStyles } from "./card-empty";
 import styles from "./index.module.less";
 
 const PLATFORMS: { label: string; value: string; icon: React.ReactNode }[] = [
@@ -124,14 +125,11 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
     );
   });
 
-  // 饼图：若是全部 App 显示平台占比；若是单平台显示版本占比
-  let donutSlices: DonutSlice[] = [];
-  let donutCenterLabel = "平台占比";
+  let shareSlices: ChartSlice[] = [];
 
   if (platform === "all") {
-    donutCenterLabel = "全端分布";
     const platforms = overview?.platforms || {};
-    donutSlices = Object.entries(platforms)
+    shareSlices = Object.entries(platforms)
       .filter(([_, count]) => count > 0)
       .map(([plat, count]) => {
         const info = PLATFORM_MAP[plat] || { label: plat, color: "#8c8c8c" };
@@ -142,7 +140,6 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         };
       });
   } else {
-    donutCenterLabel = "版本分布";
     const versions = overview?.versions || {};
     const colors = [
       "var(--ant-color-info, #1677ff)",
@@ -151,7 +148,7 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
       "var(--ant-color-purple, #722ed1)",
       "var(--ant-color-cyan, #13c2c2)",
     ];
-    donutSlices = Object.entries(versions)
+    shareSlices = Object.entries(versions)
       .filter(([_, count]) => count > 0)
       .map(([ver, count], idx) => ({
         name: ver.startsWith("v") ? ver : `v${ver}`,
@@ -251,12 +248,13 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
         <Card
           title="24 小时流转走势"
           className={styles.chartCard}
+          styles={fillCardStyles}
           loading={loading}
         >
           {overview?.series && overview.series.length > 0 ? (
             <TrendChart series={overview.series} activeTab="all" />
           ) : (
-            <Empty description="暂无流量趋势数据" />
+            <CardEmpty description="暂无流量趋势数据" />
           )}
         </Card>
       </div>
@@ -299,10 +297,11 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
+            styles={fillCardStyles}
             loading={loading}
           >
             {tops.length === 0 ? (
-              <Empty description="暂无页面访问数据" />
+              <CardEmpty description="暂无页面访问数据" />
             ) : (
               <div className={styles.topList}>
                 {tops.map((item, idx) => {
@@ -337,16 +336,13 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
-            classNames={{ body: styles.centeredCardBody }}
+            styles={fillCardStyles}
             loading={loading}
           >
-            {donutSlices.length === 0 ? (
-              <Empty description="暂无分布数据" />
+            {shareSlices.length === 0 ? (
+              <CardEmpty description="暂无分布数据" />
             ) : (
-              <DonutChart
-                slices={donutSlices}
-                centerLabel={platform === "all" ? "移动端" : "版本分布"}
-              />
+              <ShareColumn slices={shareSlices} />
             )}
           </Card>
 
@@ -358,10 +354,11 @@ export default function AppAnalyticsView({ dayStr, refreshKey }: { dayStr: strin
               </Space>
             }
             className={styles.halfCard}
+            styles={fillCardStyles}
             loading={loading}
           >
             {modelTops.length === 0 ? (
-              <Empty description="暂无机型数据" />
+              <CardEmpty description="暂无机型数据" />
             ) : (
               <div className={styles.topList}>
                 {modelTops.map(([name, count], idx) => {

@@ -5,9 +5,7 @@ package model
 const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
-	TableFilmListSnapshot   = "film_list_snapshot"
 	TableFilmSourcePlaylist = "film_source_playlists"
-	TableFilmSnapshotSource = "film_snapshot_source"
 	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
@@ -40,14 +38,12 @@ func FilmHasPlaySourceSQL() string {
 	return "EXISTS (SELECT 1 FROM " + TableFilmSourcePlaylist + " AS p WHERE p.mid = " + TableFilmIndex + ".mid AND p.source_id = ? AND p.line_kind = ?)"
 }
 
-// AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 全局幂等初始化与升级）
+// AllModels 系统所有持久化数据模型（单一事实来源，供 AutoMigrate 按当前模型建表）
 var AllModels = []any{
 	&User{},
 	&FilmIndex{},
-	&FilmListSnapshot{},
 	&FileInfo{},
 	&FilmSourcePlaylist{},
-	&FilmSnapshotSource{},
 	&Category{},
 	&MoviePoster{},
 	&MovieMatchKey{},

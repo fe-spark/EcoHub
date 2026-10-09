@@ -402,7 +402,6 @@ func rewriteURLGroup(links []model.MovieUrlInfo, rules []utils.DomainReplaceRule
 		out[i] = model.MovieUrlInfo{
 			Episode:    link.Episode,
 			Link:       utils.ApplyDomainReplaceRules(link.Link, rules),
-			IsFallback: link.IsFallback,
 			SourceId:   link.SourceId,
 			SourceName: link.SourceName,
 		}

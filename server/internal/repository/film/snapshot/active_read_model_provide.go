@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
 
@@ -82,6 +83,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			}
 		}
 
+		listGen := GetSearchCacheVersion()
 		// A. 若有搜索词且无时间限制、复合分类筛选和特定采集站限制，优先走内存元数据检索
 		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == "" {
 			idx := loadFilmSearchMetaIndex(version)
@@ -100,14 +102,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 					PageCount: page.PageCount,
 					Snapshots: snapshots,
 				}
-				if db.Rdb != nil {
-					if raw, err := json.Marshal(item); err == nil {
-						ttl := 3 * time.Minute
-						if len(snapshots) == 0 {
-							ttl = 1 * time.Minute
-						}
-						_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = emptyListCacheTTL
 					}
+					writeListCache(cacheKey, raw, ttl, listGen)
 				}
 				log.Printf(
 					"[ProvideVod] 内存筛选完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
@@ -129,10 +129,10 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
 		if st.Pid > 0 {
-			query = query.Where("pid = ?", st.Pid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
 		if st.Cid > 0 {
-			query = query.Where("cid = ?", st.Cid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 		if keyword != "" {
@@ -167,15 +167,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			Snapshots: snapshots,
 		}
 
-		// 写入 Redis 缓存
-		if db.Rdb != nil {
-			if raw, err := json.Marshal(item); err == nil {
-				ttl := 3 * time.Minute
-				if len(snapshots) == 0 {
-					ttl = 1 * time.Minute
-				}
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+		if raw, err := json.Marshal(item); err == nil {
+			ttl := 3 * time.Minute
+			if len(snapshots) == 0 {
+				ttl = emptyListCacheTTL
 			}
+			writeListCache(cacheKey, raw, ttl, listGen)
 		}
 
 		log.Printf(

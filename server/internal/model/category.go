@@ -29,7 +29,7 @@ type CategoryMapping struct {
 }
 
 func (CategoryMapping) TableName() string {
-	return "category_mappings"
+	return TableCategoryMapping
 }
 
 // SourceCategory 当前主站原始分类树

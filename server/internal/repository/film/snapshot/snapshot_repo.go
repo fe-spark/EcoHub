@@ -1,22 +1,13 @@
 package snapshot
 
 import (
-	"fmt"
 	"log"
 	"strings"
 	"sync"
-	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-
-	"gorm.io/gorm/clause"
-)
-
-const (
-	snapshotBuildBatchSize = 1000
-	snapshotRetainVersions = 2
 )
 
 var (
@@ -101,86 +92,6 @@ func activeReadModelVersion(readModel *FilmReadModel, snapshotVersion string) st
 	return snapshotVersion
 }
 
-func NewSnapshotVersion() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
-}
-
-func RebuildFilmListSnapshot(version string) error {
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = NewSnapshotVersion()
-	}
-
-	startedAt := time.Now()
-	if err := db.Mdb.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmListSnapshot{}).Error; err != nil {
-		return err
-	}
-	if err := db.Mdb.Where("snapshot_version = ?", version).Unscoped().Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-		return err
-	}
-
-	var lastMid int64
-	total := 0
-	for {
-		batchStartedAt := time.Now()
-		var indexes []model.FilmIndex
-		if err := db.Mdb.
-			Where("film_index.mid > ?", lastMid).
-			Order("film_index.mid ASC").
-			Limit(snapshotBuildBatchSize).
-			Find(&indexes).Error; err != nil {
-			return err
-		}
-		if len(indexes) == 0 {
-			break
-		}
-
-		mids := make([]int64, 0, len(indexes))
-		snapshots := make([]model.FilmListSnapshot, 0, len(indexes))
-		for _, index := range indexes {
-			snapshots = append(snapshots, buildFilmListSnapshot(version, index))
-			mids = append(mids, index.Mid)
-			lastMid = index.Mid
-		}
-		if err := db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapshots, snapshotBuildBatchSize).Error; err != nil {
-			return err
-		}
-
-		type midSource struct {
-			Mid      int64
-			SourceId string
-		}
-		var sourcePairs []midSource
-		if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-			Distinct("mid", "source_id").
-			Where("mid IN ? AND line_kind = ?", mids, "play").
-			Find(&sourcePairs).Error; err == nil && len(sourcePairs) > 0 {
-			snapSources := make([]model.FilmSnapshotSource, 0, len(sourcePairs))
-			for _, pair := range sourcePairs {
-				snapSources = append(snapSources, model.FilmSnapshotSource{
-					SnapshotVersion: version,
-					Mid:             pair.Mid,
-					SourceId:        pair.SourceId,
-				})
-			}
-			_ = db.Mdb.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(snapSources, snapshotBuildBatchSize).Error
-		}
-
-		total += len(snapshots)
-		log.Printf(
-			"[Snapshot] 构建进度 version=%s total=%d batch=%d last_mid=%d cost=%s total_cost=%s",
-			version,
-			total,
-			len(snapshots),
-			lastMid,
-			time.Since(batchStartedAt),
-			time.Since(startedAt),
-		)
-	}
-
-	return nil
-}
-
 func ActivateRebuiltFilmListSnapshot(version string) error {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -233,50 +144,6 @@ func RefreshMissingPlayFromSummaries() {
 	}
 	if err := flushPlaySummaryRefreshMids(midSet); err != nil {
 		log.Printf("[Snapshot] 刷新缺失播放源摘要失败: %v", err)
-	}
-}
-
-func pruneOldFilmListSnapshots(retain int) {
-	if retain <= 0 {
-		retain = 1
-	}
-
-	var versions []string
-	if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-		Select("snapshot_version").
-		Group("snapshot_version").
-		Order("MAX(id) DESC").
-		Limit(retain).
-		Pluck("snapshot_version", &versions).Error; err != nil {
-		log.Printf("pruneOldFilmListSnapshots Versions Error: %v", err)
-		return
-	}
-	if len(versions) == 0 {
-		return
-	}
-
-	// 20w+ 数据量下分批删除旧快照数据，避免单次 DELETE 锁住全表与撑爆 Undo Log
-	const pruneChunkSize = 5000
-	for {
-		res := db.Mdb.Where("snapshot_version NOT IN ?", versions).Limit(pruneChunkSize).Unscoped().Delete(&model.FilmListSnapshot{})
-		if res.Error != nil {
-			log.Printf("pruneOldFilmListSnapshots Delete Error: %v", res.Error)
-			break
-		}
-		if res.RowsAffected == 0 {
-			break
-		}
-	}
-	// 同步级联分批删除旧快照成员关系
-	for {
-		res := db.Mdb.Where("snapshot_version NOT IN ?", versions).Limit(pruneChunkSize).Unscoped().Delete(&model.FilmSnapshotSource{})
-		if res.Error != nil {
-			log.Printf("pruneOldFilmListSnapshots SnapshotSource Delete Error: %v", res.Error)
-			break
-		}
-		if res.RowsAffected == 0 {
-			break
-		}
 	}
 }
 

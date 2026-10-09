@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
 	"strconv"
@@ -78,11 +79,12 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			}
 		}
 
+		listGen := GetSearchCacheVersion()
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
 		if st.Cid > 0 {
-			query = query.Where("cid = ?", st.Cid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
 		} else if st.Pid > 0 {
-			query = query.Where("pid = ?", st.Pid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 
@@ -107,9 +109,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			if err := query.Count(&total).Error; err != nil {
 				return tagSearchCacheItem{}, err
 			}
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, countKey, strconv.FormatInt(total, 10), tagSearchCacheTTL).Err()
-			}
+			writeListCache(countKey, []byte(strconv.FormatInt(total, 10)), 10*time.Minute, listGen)
 		}
 
 		calcTotal := int(total)
@@ -140,14 +140,8 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			Snapshots: snapshots,
 		}
 
-		if db.Rdb != nil {
-			ttl := tagSearchCacheTTL
-			if len(snapshots) == 0 {
-				ttl = 60 * time.Second
-			}
-			if raw, err := json.Marshal(item); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-			}
+		if raw, err := json.Marshal(item); err == nil {
+			writeListCache(cacheKey, raw, listCacheTTL(len(snapshots), tagSearchCacheTTL), listGen)
 		}
 		return item, nil
 	})

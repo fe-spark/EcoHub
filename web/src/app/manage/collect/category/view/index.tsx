@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Card, Descriptions, Modal, Tag, Typography } from "antd";
+import { Modal } from "antd";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CategoryTreeCard from "./category-tree-card";
 import { useCategoryTreeState } from "./use-category-tree-state";
@@ -23,43 +23,47 @@ export default function CategoryWorkspacePageView() {
     }
   };
 
+  const handleSourceChange = (value: string) => {
+    if (treeState.hasPendingChanges) {
+      Modal.confirm({
+        title: "切换采集源？",
+        content: "当前排序还没保存，切换后会丢掉这次调整。",
+        okText: "切换",
+        cancelText: "留下",
+        onOk: () => treeState.fetchFilmClassTree(value),
+      });
+      return;
+    }
+    void treeState.fetchFilmClassTree(value);
+  };
+
   return (
     <div className={styles.pageBody}>
-      <ManagePageHeader title="分类管理" description="维护当前主采集站分类框架、排序与显示状态；分类不允许删除，只能隐藏或显示。" />
+      <ManagePageHeader
+        className={styles.pageHeader}
+        title="分类管理"
+        description="按采集源查看该站分类，调整排序和显示。分类不能删除，只能隐藏或显示。"
+      />
 
-      <Card className={styles.panelCard} styles={{ body: { padding: "14px 16px" } }}>
-        <Descriptions size="small" column={{ xs: 1, sm: 3, md: 3 }}>
-          <Descriptions.Item label="分类节点总数">
-            <Typography.Text strong>{treeState.stats.total}</Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="主类 / 子类结构">
-            <Typography.Text strong>{treeState.stats.roots}</Typography.Text> 主类 / <Typography.Text type="secondary">{treeState.stats.children} 子类</Typography.Text>
-          </Descriptions.Item>
-          <Descriptions.Item label="隐藏分类状态">
-            <Tag color={treeState.stats.hidden === 0 ? "success" : "warning"} variant="filled">
-              {treeState.stats.hidden === 0 ? "全部显示 (正常)" : `已隐藏 ${treeState.stats.hidden} 个`}
-            </Tag>
-          </Descriptions.Item>
-        </Descriptions>
-      </Card>
-
-      <div className={styles.workspace}>
-        <CategoryTreeCard
-          classTree={treeState.classTree}
-          expandedKeys={treeState.expandedKeys}
-          loadingTree={treeState.loadingTree}
-          savingTree={treeState.savingTree}
-          resettingTree={treeState.resettingTree}
-          updatingShowIds={treeState.updatingShowIds}
-          hasPendingChanges={treeState.hasPendingChanges}
-          onRefresh={() => void treeState.fetchFilmClassTree()}
-          onReset={() => setResetConfirmOpen(true)}
-          onSave={() => void treeState.saveTree()}
-          onExpand={(keys) => treeState.setExpandedKeys(keys)}
-          onMove={treeState.moveClassWithinSameParent}
-          onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
-        />
-      </div>
+      <CategoryTreeCard
+        classTree={treeState.classTree}
+        expandedKeys={treeState.expandedKeys}
+        loadingTree={treeState.loadingTree}
+        savingTree={treeState.savingTree}
+        resettingTree={treeState.resettingTree}
+        updatingShowIds={treeState.updatingShowIds}
+        hasPendingChanges={treeState.hasPendingChanges}
+        sources={treeState.sources}
+        sourceId={treeState.sourceId}
+        stats={treeState.stats}
+        onSourceChange={handleSourceChange}
+        onRefresh={() => void treeState.fetchFilmClassTree(treeState.sourceId)}
+        onReset={() => setResetConfirmOpen(true)}
+        onSave={() => void treeState.saveTree()}
+        onExpand={(keys) => treeState.setExpandedKeys(keys)}
+        onMove={treeState.moveClassWithinSameParent}
+        onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
+      />
 
       <Modal
         title="重置分类？"
@@ -71,7 +75,7 @@ export default function CategoryWorkspacePageView() {
         onOk={() => void handleResetConfirm()}
         onCancel={() => setResetConfirmOpen(false)}
       >
-        将清空分类并重新拉取首选站分类。
+        将重新拉取每个采集站的分类。各站分类按站覆盖，已调整的显示和排序会保留。
       </Modal>
     </div>
   );

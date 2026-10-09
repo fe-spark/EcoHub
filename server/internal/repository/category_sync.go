@@ -309,13 +309,8 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 				}
 				staleCategoryIDs = append(staleCategoryIDs, categoryId)
 			}
-			if len(staleCategoryIDs) > 0 {
-				if err := tx.Where("id IN ?", staleCategoryIDs).Delete(&model.Category{}).Error; err != nil {
-					return err
-				}
-				for _, categoryId := range staleCategoryIDs {
-					delete(currentMap, categoryId)
-				}
+			if err := dropStaleCategoriesTx(tx, sourceId, staleCategoryIDs, currentMap); err != nil {
+				return err
 			}
 		}
 		return nil
@@ -326,6 +321,42 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 
 	if !skipRebuild {
 		MarkCategoryChanged()
+	}
+	return nil
+}
+
+// dropStaleCategoriesTx 删掉只属于当前站、且这次同步不再使用的展示分类。
+// 其他站的映射还指着的分类留着。
+func dropStaleCategoriesTx(tx *gorm.DB, sourceId string, staleCategoryIDs []int64, currentMap map[int64]model.Category) error {
+	if len(staleCategoryIDs) == 0 {
+		return nil
+	}
+	var stillUsed []int64
+	if err := tx.Model(&model.CategoryMapping{}).
+		Where("source_id <> ? AND category_id IN ?", sourceId, staleCategoryIDs).
+		Distinct("category_id").
+		Pluck("category_id", &stillUsed).Error; err != nil {
+		return err
+	}
+	used := make(map[int64]struct{}, len(stillUsed))
+	for _, id := range stillUsed {
+		used[id] = struct{}{}
+	}
+	removable := make([]int64, 0, len(staleCategoryIDs))
+	for _, id := range staleCategoryIDs {
+		if _, ok := used[id]; ok {
+			continue
+		}
+		removable = append(removable, id)
+	}
+	if len(removable) == 0 {
+		return nil
+	}
+	if err := tx.Where("id IN ?", removable).Delete(&model.Category{}).Error; err != nil {
+		return err
+	}
+	for _, id := range removable {
+		delete(currentMap, id)
 	}
 	return nil
 }

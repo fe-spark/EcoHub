@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useRef } from "react";
-import { Button, Empty, Space, Switch, Table, Tag, Typography, Card } from "antd";
+import { Button, Empty, Select, Space, Switch, Table, Tag, Typography } from "antd";
 import type { TableProps } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import {
@@ -33,6 +33,10 @@ interface CategoryTreeCardProps {
   resettingTree: boolean;
   updatingShowIds: number[];
   hasPendingChanges: boolean;
+  sources: { id: string; name: string }[];
+  sourceId: string;
+  stats: { total: number; roots: number; children: number; hidden: number };
+  onSourceChange: (sourceId: string) => void;
   onRefresh: () => void;
   onReset: () => void;
   onSave: () => void;
@@ -82,6 +86,10 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     resettingTree,
     updatingShowIds,
     hasPendingChanges,
+    sources,
+    sourceId,
+    stats,
+    onSourceChange,
     onRefresh,
     onReset,
     onSave,
@@ -271,7 +279,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
             pagination={false}
             size="middle"
             scroll={{ x: "max-content" }}
-            locale={{ emptyText: <Empty description="暂无分类数据" /> }}
+            locale={{ emptyText: <Empty description="该采集站还没有分类" /> }}
             rowClassName={(record) => {
               const isExpandable = (record.children?.length || 0) > 0;
               const levelClass = record.pid === 0 ? styles.level1Row : styles.level2Row;
@@ -301,7 +309,43 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
             })}
             title={() => (
               <div className={styles.tableHeader}>
-                <div className={styles.tableTitle}>分类管理</div>
+                <div className={styles.toolbarLead}>
+                  <div className={styles.sourceField}>
+                    <span className={styles.sourceLabel}>采集源</span>
+                    <Select
+                      placeholder="选择采集源"
+                      className={styles.sourceSelect}
+                      value={sourceId || undefined}
+                      onChange={onSourceChange}
+                      options={sources.map((source) => ({
+                        label: source.name,
+                        value: source.id,
+                      }))}
+                      showSearch
+                      optionFilterProp="label"
+                      popupMatchSelectWidth={false}
+                    />
+                  </div>
+                  <div className={styles.stats}>
+                    <span>
+                      <span className={styles.statValue}>{stats.total}</span> 个分类
+                    </span>
+                    <span className={styles.statSep} />
+                    <span>
+                      <span className={styles.statValue}>{stats.roots}</span> 主类
+                    </span>
+                    <span className={styles.statSep} />
+                    <span>
+                      <span className={styles.statValue}>{stats.children}</span> 子类
+                    </span>
+                    {stats.hidden > 0 ? (
+                      <>
+                        <span className={styles.statSep} />
+                        <span className={styles.statWarn}>隐藏 {stats.hidden}</span>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
                 <Space wrap className={styles.tableActions}>
                   <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
                     刷新分类

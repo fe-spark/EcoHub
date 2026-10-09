@@ -3,7 +3,6 @@ package spider
 import (
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
 
 	"server/internal/model"
@@ -11,21 +10,16 @@ import (
 	"server/internal/utils"
 )
 
-// ensureMasterCategoriesReady 在影片采集前确保本地分类与映射可用。
-// 仅在分类表为空时触发，避免覆盖用户已调整的业务分类属性。
+// ensureMasterCategoriesReady 采集前确认该站已经有自己的分类副本。
+// 分类在添加或编辑采集站时拉取。采集过程中不再临时请求分类。
 func ensureMasterCategoriesReady(s *model.FilmSource) error {
 	if s == nil {
 		return nil
 	}
-	if repository.ExistsCategoryTree() {
+	if repository.SourceHasCategoryMapping(s.Id) {
 		return nil
 	}
-	log.Printf("[Spider] 分类为空，采集前自动同步站点分类: name=%s id=%s uri=%s", s.Name, s.Id, s.Uri)
-	if err := CollectCategory(s); err != nil {
-		return fmt.Errorf("采集前同步站点分类失败: %w", err)
-	}
-	log.Printf("[Spider] 采集前站点分类同步完成: name=%s id=%s", s.Name, s.Id)
-	return nil
+	return fmt.Errorf("采集站 %s 还没有分类，请在采集中心重新保存该站后再采集", s.Name)
 }
 
 // CollectCategory 影视分类采集
@@ -49,7 +43,7 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 	}
 	categoryTree, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {
-		return fmt.Errorf("获取主站分类树失败: %w", err)
+		return fmt.Errorf("获取采集站分类树失败: %w", err)
 	}
 	// 保存 tree 到 MySQL
 	if preserveBusinessFields {
@@ -58,7 +52,7 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 		err = repository.ResetCategoryTree(s.Id, categoryTree)
 	}
 	if err != nil {
-		return fmt.Errorf("保存主站分类树失败: %w", err)
+		return fmt.Errorf("保存采集站分类失败: %w", err)
 	}
 	return nil
 }

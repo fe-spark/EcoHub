@@ -65,6 +65,7 @@ export default async function PlayPage({
       <TrackPageView
         action="play"
         resource={filmId}
+        collectSource={sourceId || ""}
         resourceTitle={filmDetail?.name || ""}
         resourcePoster={filmPoster}
         resourceCat={filmDetail?.descriptor?.cName || ""}

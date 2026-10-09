@@ -25,10 +25,7 @@ func DelFilmSearch(id int64) error {
 		if err := tx.Where("mid = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid = ?", id).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
+		if err := tx.Unscoped().Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid = ?", id).Delete(&model.MovieMatchKey{}).Error; err != nil {
@@ -105,8 +102,6 @@ func masterDataResetTables() []string {
 	return []string{
 		model.TableFilmIndex,
 		model.TableFilmSourcePlaylist,
-		model.TableFilmListSnapshot,
-		model.TableFilmSnapshotSource,
 		model.TableMovieMatchKey,
 		model.TableMovieSourceMapping,
 		model.TableSearchTag,
@@ -123,9 +118,6 @@ func truncateTable(conn *gorm.DB, table string) error {
 
 // FilmZero 删除所有库存数据 (包含 MySQL 持久化表)
 func FilmZero() error {
-	// 清库时顺带去掉旧 Redis 公告 key。
-	defer ClearLegacyContentKeyNotices()
-
 	// 关键节点：清空影视库存
 	ReportResetProgress(20, "正在清空影视库存")
 	for _, t := range []string{
@@ -143,8 +135,6 @@ func FilmZero() error {
 	// 关键节点：清空采集派生与依赖运营数据（快照/筛选/搜索标签/统计/失败记录/轮播图）
 	ReportResetProgress(45, "正在清空派生数据")
 	for _, t := range []string{
-		model.TableFilmListSnapshot,
-		model.TableFilmSnapshotSource,
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
 		model.TableFailureRecord,
@@ -217,62 +207,18 @@ func InvalidateMasterSwitchCaches() {
 	}
 }
 
-// CleanEmptyFilms 清理所有片名为空或无法识别大类(Pid=0)的垃圾记录
-func CleanEmptyFilms() int64 {
-	var infos []model.FilmIndex
-	db.Mdb.Where("name = ? OR name IS NULL OR pid = 0", "").Find(&infos)
-	if len(infos) == 0 {
-		return 0
-	}
-	for _, info := range infos {
-		_ = DelFilmSearch(info.Mid)
-		cache.ClearSearchTagsCache(info.Pid)
-	}
-	return int64(len(infos))
+const filmCleanBatchSize = 500
+
+type filmCleanRow struct {
+	Mid int64
+	Pid int64
 }
 
-// CleanSearchWithoutDetail 清理影片索引存在但 movie_detail_info 缺失的脏记录。
-func CleanSearchWithoutDetail() int64 {
-	type orphanRecord struct {
-		Mid int64
-		Pid int64
-	}
-
-	var records []orphanRecord
-	err := db.Mdb.Model(&model.FilmIndex{}).
-		Select("film_index.mid, film_index.pid").
-		Joins("LEFT JOIN movie_detail_info ON movie_detail_info.mid = film_index.mid AND movie_detail_info.deleted_at IS NULL").
-		Where("movie_detail_info.id IS NULL").
-		Scan(&records).Error
-	if err != nil {
-		log.Printf("CleanSearchWithoutDetail Error: %v", err)
-		return 0
-	}
-	if len(records) == 0 {
-		return 0
-	}
-
-	mids := make([]int64, 0, len(records))
-	pidSet := make(map[int64]struct{}, len(records))
-	for _, record := range records {
-		if record.Mid <= 0 {
-			continue
-		}
-		mids = append(mids, record.Mid)
-		if record.Pid > 0 {
-			pidSet[record.Pid] = struct{}{}
-		}
-	}
-	if len(mids) == 0 {
-		return 0
-	}
-
-	err = deleteFilmCascadeBatch(mids, pidSet)
-	if err != nil {
-		log.Printf("CleanSearchWithoutDetail Delete Error: %v", err)
-		return 0
-	}
-	return int64(len(mids))
+// CleanEmptyFilms 分批硬删片名为空或无法识别大类（pid=0）的档案。
+func CleanEmptyFilms() int64 {
+	return cleanFilmBatches("CleanEmptyFilms", func(q *gorm.DB) *gorm.DB {
+		return q.Where("name = ? OR name IS NULL OR pid = 0", "")
+	})
 }
 
 // CleanPlaylessFilms 清理无任何播放线路且超过宽限期的幽灵影片（例如源站全部删除后残留的影片）
@@ -282,42 +228,51 @@ func CleanPlaylessFilms(gracePeriod time.Duration) int64 {
 	}
 	cutoff := time.Now().Add(-gracePeriod)
 
-	type ghostRecord struct {
-		Mid int64
-		Pid int64
-	}
+	return cleanFilmBatches("CleanPlaylessFilms", func(q *gorm.DB) *gorm.DB {
+		return q.Joins("LEFT JOIN film_source_playlists ON film_source_playlists.mid = film_index.mid AND film_source_playlists.line_kind = 'play'").
+			Where("film_source_playlists.mid IS NULL AND film_index.updated_at < ? AND film_index.created_at < ?", cutoff, cutoff)
+	})
+}
 
-	var records []ghostRecord
-	err := db.Mdb.Model(&model.FilmIndex{}).
-		Select("film_index.mid, film_index.pid").
-		Joins("LEFT JOIN film_source_playlists ON film_source_playlists.mid = film_index.mid AND film_source_playlists.line_kind = 'play'").
-		Where("film_source_playlists.mid IS NULL AND film_index.updated_at < ? AND film_index.created_at < ?", cutoff, cutoff).
-		Scan(&records).Error
-	if err != nil {
-		log.Printf("CleanPlaylessFilms Error: %v", err)
+func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
+	if db.Mdb == nil {
 		return 0
 	}
-	if len(records) == 0 {
-		return 0
-	}
-
-	mids := make([]int64, 0, len(records))
-	pidSet := make(map[int64]struct{}, len(records))
-	for _, record := range records {
-		if record.Mid <= 0 {
-			continue
+	var cleaned int64
+	for {
+		var rows []filmCleanRow
+		q := scope(db.Mdb.Model(&model.FilmIndex{}).Select("film_index.mid, film_index.pid")).Limit(filmCleanBatchSize)
+		if err := q.Scan(&rows).Error; err != nil {
+			log.Printf("%s Error: %v", logName, err)
+			return cleaned
 		}
-		mids = append(mids, record.Mid)
-		if record.Pid > 0 {
-			pidSet[record.Pid] = struct{}{}
+		if len(rows) == 0 {
+			return cleaned
+		}
+		mids := make([]int64, 0, len(rows))
+		pidSet := make(map[int64]struct{}, len(rows))
+		for _, row := range rows {
+			if row.Mid <= 0 {
+				continue
+			}
+			mids = append(mids, row.Mid)
+			if row.Pid > 0 {
+				pidSet[row.Pid] = struct{}{}
+			}
+		}
+		if len(mids) == 0 {
+			log.Printf("%s 跳过无效 mid，停止本轮", logName)
+			return cleaned
+		}
+		if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
+			log.Printf("%s Delete Error: %v", logName, err)
+			return cleaned
+		}
+		cleaned += int64(len(mids))
+		if len(rows) < filmCleanBatchSize {
+			return cleaned
 		}
 	}
-
-	if err := deleteFilmCascadeBatch(mids, pidSet); err != nil {
-		log.Printf("CleanPlaylessFilms Delete Error: %v", err)
-		return 0
-	}
-	return int64(len(mids))
 }
 
 // CleanOrphanMatchKeysAndMappings 清理关联影片已被删除的悬空匹配键与源映射
@@ -342,10 +297,7 @@ func deleteFilmCascadeBatch(mids []int64, pidSet map[int64]struct{}) error {
 		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmSnapshotSource{}).Error; err != nil {
-			return err
-		}
-		if err := tx.Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
+		if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {

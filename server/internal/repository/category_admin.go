@@ -106,6 +106,102 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 	return nil
 }
 
+// SaveSourceCategoryOrder 只改该采集站分类的排序。其它站的分类保持不动，也不改父子关系。
+func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return fmt.Errorf("采集站不能为空")
+	}
+	placements := make([]categoryPlacement, 0)
+	if err := flattenCategoryPlacements(nodes, 0, 0, &placements); err != nil {
+		return err
+	}
+
+	allowed := sourceMappedCategoryIDs(sourceID)
+	if len(allowed) == 0 {
+		return fmt.Errorf("该采集站还没有分类")
+	}
+	ids := make([]int64, 0, len(allowed))
+	for id := range allowed {
+		ids = append(ids, id)
+	}
+	var categories []model.Category
+	if err := db.Mdb.Where("id IN ?", ids).Find(&categories).Error; err != nil {
+		return err
+	}
+	oldMap := make(map[int64]model.Category, len(categories))
+	for _, item := range categories {
+		oldMap[item.Id] = item
+	}
+
+	seen := make(map[int64]struct{}, len(placements))
+	for _, placement := range placements {
+		if _, ok := allowed[placement.Id]; !ok {
+			return fmt.Errorf("分类 %d 不属于该采集站", placement.Id)
+		}
+		item, ok := oldMap[placement.Id]
+		if !ok {
+			return fmt.Errorf("分类 %d 不存在", placement.Id)
+		}
+		if _, ok := seen[placement.Id]; ok {
+			return fmt.Errorf("分类结构中存在重复节点: %d", placement.Id)
+		}
+		seen[placement.Id] = struct{}{}
+		if item.Pid != placement.Pid {
+			_, oldParentHere := allowed[item.Pid]
+			if item.Pid == 0 || oldParentHere {
+				return fmt.Errorf("分类 %s 只允许同级排序，不能移动到其他父级", item.Name)
+			}
+		}
+	}
+	for id := range allowed {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		item := oldMap[id]
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			name = fmt.Sprintf("%d", id)
+		}
+		return fmt.Errorf("分类 %s 不允许删除，请使用显示/隐藏开关", name)
+	}
+
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		for _, placement := range placements {
+			if err := tx.Model(&model.Category{}).
+				Where("id = ?", placement.Id).
+				Update("sort", placement.Sort).Error; err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	MarkCategoryChanged()
+	return nil
+}
+
+func sourceMappedCategoryIDs(sourceID string) map[int64]struct{} {
+	allowed := make(map[int64]struct{})
+	if db.Mdb == nil || sourceID == "" {
+		return allowed
+	}
+	var ids []int64
+	if err := db.Mdb.Model(&model.CategoryMapping{}).
+		Where("source_id = ? AND category_id > 0", sourceID).
+		Pluck("category_id", &ids).Error; err != nil {
+		return allowed
+	}
+	for _, id := range ids {
+		if id > 0 {
+			allowed[id] = struct{}{}
+		}
+	}
+	return allowed
+}
+
 // InitMainCategories 启动时刷新映射引擎与分类缓存
 func InitMainCategories() {
 	fmt.Println("[Init] 正在初始化分类表与缓存...")

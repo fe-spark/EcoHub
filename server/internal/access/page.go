@@ -31,6 +31,7 @@ type TrackViewPayload struct {
 	ResourcePoster string `json:"resource_poster"`
 	ResourceCat    string `json:"resource_cat"`
 	Source         string `json:"source"`
+	CollectSource  string `json:"collect_source"`
 	Path           string `json:"path"`
 	Page           string `json:"page"`
 	PageTitle      string `json:"page_title"`
@@ -87,15 +88,6 @@ func isSafePagePath(s string) bool {
 		}
 	}
 	return true // 全程无冒号（如 "HomePage" 屏名），放行
-}
-
-func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
-	return buildPageEventPayload(c, TrackViewPayload{
-		Action:   action,
-		Resource: resource,
-		Source:   source,
-		Path:     path,
-	})
 }
 
 func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
@@ -167,29 +159,30 @@ func buildPageEventPayload(c *gin.Context, p TrackViewPayload) *AccessEvent {
 	resourceCat := TruncateRunes(p.ResourceCat, 64)
 
 	return &AccessEvent{
-		Ts:             time.Now(),
-		Node:           CurrentNodeName(),
-		Method:         "PAGE",
-		Path:           routePath,
-		Page:           page,
-		PageTitle:      TruncateRunes(p.PageTitle, 64),
-		Route:          "page",
-		Action:         action,
-		Status:         200,
-		ClientType:     clientType,
-		AppVersion:     TruncateRunes(p.AppVersion, 32),
-		DeviceModel:    TruncateRunes(p.DeviceModel, 64),
-		DeviceId:       TruncateRunes(did, 64),
-		IPHash:         HashIP(ip),
-		IPPreview:      IPPreview(ip),
-		UAFamily:       uaFamily("", ua),
-		OS:             detectOS(ua),
-		Resource:       resource,
-		ResourceTitle:  resourceTitle,
-		ResourcePoster: resourcePoster,
-		ResourceCat:    resourceCat,
-		playMember:     pagePlayRankMember(action, p.Resource),
-		uvMember:       HashIP(ip + "|" + ua),
+		Ts:              time.Now(),
+		Node:            CurrentNodeName(),
+		Method:          "PAGE",
+		Path:            routePath,
+		Page:            page,
+		PageTitle:       TruncateRunes(p.PageTitle, 64),
+		Route:           "page",
+		Action:          action,
+		Status:          200,
+		ClientType:      clientType,
+		AppVersion:      TruncateRunes(p.AppVersion, 32),
+		DeviceModel:     TruncateRunes(p.DeviceModel, 64),
+		DeviceId:        TruncateRunes(did, 64),
+		IPHash:          HashIP(ip),
+		IPPreview:       IPPreview(ip),
+		UAFamily:        uaFamily("", ua),
+		OS:              detectOS(ua),
+		Resource:        resource,
+		ResourceTitle:   resourceTitle,
+		ResourcePoster:  resourcePoster,
+		ResourceCat:     resourceCat,
+		CollectSourceId: pageCollectSource(action, p.CollectSource, p.Resource),
+		playMember:      pagePlayRankMember(action, p.Resource),
+		uvMember:        HashIP(ip + "|" + ua),
 	}
 }
 

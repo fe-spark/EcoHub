@@ -12,6 +12,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 
@@ -50,7 +51,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -60,24 +61,16 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		}
 	}
 
-	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
-	query = applyCategoryUpdateIndexHint(query, field)
-	if field == "pid" {
-		query = query.Where("pid = ?", id)
-	} else {
-		query = query.Where("cid = ?", id)
-	}
-
+	listGen := GetSearchCacheVersion()
+	query := categoryFilmQuery(db.Mdb, sourceID, field, id, basicSelectFields)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 
-	if db.Rdb != nil && len(result) > 0 {
-		if raw, err := json.Marshal(result); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
-		}
+	if raw, err := json.Marshal(result); err == nil {
+		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
 
 	log.Printf("[FilmCategoryList] 获取分类列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
@@ -102,7 +95,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -114,13 +107,8 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		}
 	}
 
-	query := applyCategorySnapshotSourceFilter(liveFilmQuery(), version, sourceID)
-	query = applyCategoryUpdateIndexHint(query, field)
-	if field == "pid" {
-		query = query.Where("pid = ?", id)
-	} else {
-		query = query.Where("cid = ?", id)
-	}
+	listGen := GetSearchCacheVersion()
+	query := categoryFilmQuery(db.Mdb, sourceID, field, id, "")
 
 	var total int64
 	if err := query.Count(&total).Error; err != nil {
@@ -139,15 +127,13 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 
-	if db.Rdb != nil && len(result) > 0 {
-		item := categoryPageCacheItem{
-			Total:     page.Total,
-			PageCount: page.PageCount,
-			Movies:    result,
-		}
-		if raw, err := json.Marshal(item); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotPageCacheTTL).Err()
-		}
+	item := categoryPageCacheItem{
+		Total:     page.Total,
+		PageCount: page.PageCount,
+		Movies:    result,
+	}
+	if raw, err := json.Marshal(item); err == nil {
+		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotPageCacheTTL), listGen)
 	}
 
 	log.Printf("[FilmCategoryList] 获取分类分页列表 source=%s field=%s id=%d total=%d page=%d size=%d cost=%s",
@@ -182,6 +168,25 @@ func (h mysqlUseIndexHint) Build(builder clause.Builder) {
 
 func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
 	return applyCategoryIndexHint(query, field, "idx_pid_hits", "idx_cid_hits")
+}
+
+// hotCategoryQuery 热播按该站播放线路取 mid，再按 hits 截断。
+// 禁止从 idx_pid_hits 扫整类再 EXISTS：新首选站在这个分类没有线路时，会把该分类全部热度行探完。
+func hotCategoryQuery(conn *gorm.DB, sourceID, field string, categoryID int64) *gorm.DB {
+	if conn == nil {
+		return nil
+	}
+	col := "cid"
+	if field == "pid" {
+		col = "pid"
+	}
+	q := conn.Model(&model.FilmIndex{}).Select(basicSelectFields)
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return applyCategoryHotIndexHint(q.Where(col+" = ?", categoryID), field)
+	}
+	memberSQL, args := query.LiveCategoryMemberSQL(dialectName(conn), sourceID, field, categoryID)
+	return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS hot_members)", args...)
 }
 
 func applyCategoryUpdateIndexHint(query *gorm.DB, field string) *gorm.DB {
@@ -220,7 +225,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -230,24 +235,16 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		}
 	}
 
-	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
-	query = applyCategoryHotIndexHint(query, field)
-	if field == "pid" {
-		query = query.Where("pid = ?", id)
-	} else {
-		query = query.Where("cid = ?", id)
-	}
-
+	listGen := GetSearchCacheVersion()
+	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Offset(offset).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 
-	if db.Rdb != nil && len(result) > 0 {
-		if raw, err := json.Marshal(result); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
-		}
+	if raw, err := json.Marshal(result); err == nil {
+		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
 
 	log.Printf("[FilmHotList] 获取分类热播列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
@@ -271,7 +268,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -281,24 +278,16 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		}
 	}
 
-	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields), version, sourceID)
-	query = applyCategoryHotIndexHint(query, field)
-	if field == "pid" {
-		query = query.Where("pid = ?", id)
-	} else {
-		query = query.Where("cid = ?", id)
-	}
-
+	listGen := GetSearchCacheVersion()
+	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Limit(poolSize))
 	if err != nil {
 		return []model.MovieBasicInfo{}
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 
-	if db.Rdb != nil && len(result) > 0 {
-		if raw, err := json.Marshal(result); err == nil {
-			_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), snapshotListCacheTTL).Err()
-		}
+	if raw, err := json.Marshal(result); err == nil {
+		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
 	}
 
 	log.Printf("[FilmHotPool] 获取分类热门候选池 source=%s field=%s id=%d count=%d poolSize=%d cost=%s",
@@ -364,17 +353,13 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	case 0:
 		orderClause = "year DESC, update_stamp DESC"
 	case 1:
-		orderClause = "hits DESC"
+		orderClause = "hits DESC, mid DESC"
 	case 2:
 		orderClause = "update_stamp DESC"
 	}
 
-	query := applyCategorySnapshotSourceFilter(liveFilmQuery().Select(basicSelectFields).Where("pid = ?", pid), version, sourceID)
-	if sortType == 1 {
-		query = applyCategoryHotIndexHint(query, "pid")
-	} else {
-		query = applyCategoryUpdateIndexHint(query, "pid")
-	}
+	// 热度 Top 与首页热播同一条 SQL。有采集站时从线路索引取成员，禁止扫 idx_pid_hits 再 EXISTS。
+	query := categorySortFastQuery(db.Mdb, sourceID, sortType, pid)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
 	if err != nil {
 		return []model.MovieBasicInfo{}
@@ -388,4 +373,41 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 // GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，消除 COUNT 扫描开销
 func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
 	return GetSnapshotTopMoviesBySortFastWithSource(version, "", sortType, pid, limit)
+}
+
+// categorySortFastQuery 分类页三路排序。sortType 1 走热播成员查询，其余走更新时间索引加线路主键点查。
+func categorySortFastQuery(conn *gorm.DB, sourceID string, sortType int, pid int64) *gorm.DB {
+	if sortType == 1 {
+		return hotCategoryQuery(conn, sourceID, "pid", pid)
+	}
+	return categoryFilmQuery(conn, sourceID, "pid", pid, basicSelectFields)
+}
+
+// categoryFilmQuery 分类列表。有来源映射时从该站播放线路取片，并认 category_key，避免 pid 仍为 0 的影片被丢掉。
+func categoryFilmQuery(conn *gorm.DB, sourceID, field string, categoryID int64, selectFields string) *gorm.DB {
+	if conn == nil {
+		return nil
+	}
+	q := conn.Model(&model.FilmIndex{})
+	if selectFields != "" {
+		q = q.Select(selectFields)
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID != "" && query.HasLiveCategoryKeys(field, categoryID) {
+		memberSQL, args := query.LiveCategoryMemberSQL(dialectName(conn), sourceID, field, categoryID)
+		return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS cat_members)", args...)
+	}
+	q = applyCategorySnapshotSourceFilter(q, "", sourceID)
+	q = applyCategoryUpdateIndexHint(q, field)
+	if field == "pid" {
+		return q.Where("pid = ?", categoryID)
+	}
+	return q.Where("cid = ?", categoryID)
+}
+
+func dialectName(conn *gorm.DB) string {
+	if conn == nil || conn.Dialector == nil {
+		return ""
+	}
+	return conn.Dialector.Name()
 }
