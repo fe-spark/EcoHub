@@ -6,7 +6,9 @@ import (
 	"strings"
 
 	"server/internal/model"
+	"server/internal/repository"
 	"server/internal/repository/film/query"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 )
@@ -45,6 +47,18 @@ func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID i
 		return nil, false, nil
 	}
 	need := offset + limit
+	if sourceKeys := sourceTypeKeysForProbe(sourceID, field, categoryID); len(sourceKeys) > 0 {
+		ranks, err := scanProbeBranches(conn, sourceTypeProbeBranches(field, orderKind, sourceKeys), sourceID, orderKind, need)
+		if err != nil {
+			return nil, true, err
+		}
+		mids := pageProbeMids(ranks, orderKind, offset, limit)
+		snaps, err := listSnapshotsByMIDs(conn, mids)
+		if err != nil {
+			return nil, true, err
+		}
+		return snaps, true, nil
+	}
 	idColumn, id, categoryKeys, rootKeys := query.LiveCategoryProbeKeys(field, categoryID)
 	branches := buildProbeBranches(orderKind, idColumn, id, categoryKeys, rootKeys)
 	if len(branches) == 0 || len(branches) > categoryProbeMaxKeys {
@@ -61,6 +75,50 @@ func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID i
 		return nil, true, err
 	}
 	return snaps, true, nil
+}
+
+func sourceTypeKeysForProbe(sourceID, field string, categoryID int64) []string {
+	ids := repository.PublicSourceTypeIDs(sourceID, field, categoryID)
+	keys := make([]string, 0, len(ids))
+	seen := map[string]struct{}{}
+	for _, id := range ids {
+		key := support.BuildSourceCategoryKey(sourceID, id)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// sourceTypeProbeBranches 按当前站 type_id 点查。
+// 一级分类要同时走 root_category_key 和 category_key。合并后的分类每个成员各查一次。
+func sourceTypeProbeBranches(field, orderKind string, sourceKeys []string) []probeBranch {
+	rootIndex := probeIndexRootUpdate
+	catIndex := probeIndexCatUpdate
+	if orderKind == "hits" {
+		rootIndex = probeIndexRootHits
+		catIndex = probeIndexCatHits
+	}
+	branches := make([]probeBranch, 0, len(sourceKeys)*2)
+	for _, sourceKey := range sourceKeys {
+		if sourceKey == "" {
+			continue
+		}
+		if field == "cid" {
+			branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: catIndex})
+			continue
+		}
+		branches = append(branches,
+			probeBranch{column: "root_category_key", value: sourceKey, index: rootIndex},
+			probeBranch{column: "category_key", value: sourceKey, index: catIndex},
+		)
+	}
+	return branches
 }
 
 func buildProbeBranches(orderKind, idColumn string, id int64, categoryKeys, rootKeys []string) []probeBranch {

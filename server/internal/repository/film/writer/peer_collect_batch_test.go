@@ -2,6 +2,8 @@ package writer
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"server/internal/infra/db"
@@ -159,9 +161,106 @@ func TestSaveCollectedPeerDetails_PageCommit(t *testing.T) {
 	}
 }
 
+func TestFitLastEpisodeKeepsShortLabels(t *testing.T) {
+	if got := fitLastEpisode("第9集", 9); got != "第9集" {
+		t.Fatalf("episode=%q", got)
+	}
+	if got := fitLastEpisode("只剩一集", 1); got != "只剩一集" {
+		t.Fatalf("custom=%q", got)
+	}
+	glued := "第04集https://v2.ppqrrs.com/wjv2/202607/18/abc/video/index.m3u8"
+	if got := fitLastEpisode(glued, 4); got != "第4集" {
+		t.Fatalf("glued=%q", got)
+	}
+	if got := fitLastEpisode(strings.Repeat("集", 65), 3); got != "第3集" {
+		t.Fatalf("long=%q", got)
+	}
+}
+
+func TestSaveCollectedPeerDetails_SkipsOversizedFilm(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 单片回放会在事务里再查采集站列表，需要第二条连接。
+	sqlDB.SetMaxOpenConns(2)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	origWrite := writePeerPage
+	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, error) {
+		return nil, nil, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
+	}
+	origSave := savePeerFilm
+	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {
+		if detail.Id == 12 {
+			return 0, false, false, errors.New("Error 1406 (22001): Data too long for column 'last_episode' at row 5")
+		}
+		return origSave(source, detail)
+	}
+	t.Cleanup(func() {
+		writePeerPage = origWrite
+		savePeerFilm = origSave
+	})
+
+	source := &model.FilmSource{Id: "src-skip", Name: "甲站", State: true}
+	got, err := SaveCollectedPeerDetails(context.Background(), source, 7, []model.MovieDetail{
+		testPeerDetail(11, "电影甲", "第1集"),
+		testPeerDetail(12, "电影乙", "第04集https://cdn.example/a.m3u8"),
+	})
+	if err != nil {
+		t.Fatalf("page should succeed after skipping the bad film: %v", err)
+	}
+	if len(got.Affected) != 1 {
+		t.Fatalf("affected=%v", got.Affected)
+	}
+	if countRows(t, gdb, &model.FilmIndex{}) != 1 {
+		t.Fatal("oversized film was stored")
+	}
+}
+
+func TestSaveCollectedPeerDetails_TransientFilmErrorRetriesPage(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB.SetMaxOpenConns(2)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	origWrite := writePeerPage
+	writePeerPage = func(tx *gorm.DB, source *model.FilmSource, details []model.MovieDetail, sources []model.FilmSource) ([]int64, []int64, error) {
+		return nil, nil, errors.New("Error 1406 (22001): Data too long for column 'release_date' at row 1")
+	}
+	origSave := savePeerFilm
+	savePeerFilm = func(source *model.FilmSource, detail model.MovieDetail) (int64, bool, bool, error) {
+		if detail.Id == 12 {
+			return 0, false, false, errors.New("connection reset by peer")
+		}
+		return origSave(source, detail)
+	}
+	t.Cleanup(func() {
+		writePeerPage = origWrite
+		savePeerFilm = origSave
+	})
+
+	source := &model.FilmSource{Id: "src-retry", Name: "甲站", State: true}
+	_, err = SaveCollectedPeerDetails(context.Background(), source, 8, []model.MovieDetail{
+		testPeerDetail(11, "电影甲", "第1集"),
+		testPeerDetail(12, "电影乙", "第2集"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "connection reset") {
+		t.Fatalf("transient error=%v", err)
+	}
+}
+
 func openPeerPageDB(t *testing.T) *gorm.DB {
 	t.Helper()
-	gdb, err := gorm.Open(sqlite.Open("file:peer_page_batch?mode=memory&cache=shared"), &gorm.Config{
+	gdb, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {

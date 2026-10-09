@@ -12,6 +12,47 @@ import (
 	"gorm.io/gorm/logger"
 )
 
+func TestSaveCategoryTree_SameNameStaysPerSource(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.Category{}, &model.CategoryMapping{}, &model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	db.Rdb = nil
+
+	for _, item := range []struct {
+		source string
+		typeID int64
+	}{
+		{"src_a", 4},
+		{"src_b", 17},
+	} {
+		tree := &model.CategoryTree{Children: []*model.CategoryTree{{Id: item.typeID, Name: "动漫", Show: true}}}
+		if err := SaveCategoryTree(item.source, tree); err != nil {
+			t.Fatalf("save %s: %v", item.source, err)
+		}
+	}
+
+	var categories []model.Category
+	if err := gdb.Where("name = ?", "动漫").Find(&categories).Error; err != nil {
+		t.Fatalf("load categories: %v", err)
+	}
+	if len(categories) != 2 {
+		t.Fatalf("same name must stay two categories, got %d", len(categories))
+	}
+	var mappings []model.CategoryMapping
+	if err := gdb.Order("source_id ASC").Find(&mappings).Error; err != nil {
+		t.Fatalf("load mappings: %v", err)
+	}
+	if len(mappings) != 2 || mappings[0].CategoryId == mappings[1].CategoryId {
+		t.Fatalf("sources must not share a category id, got %+v", mappings)
+	}
+}
+
 func TestSaveCategoryTree_KeepsCategoriesUsedByOtherSources(t *testing.T) {
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})

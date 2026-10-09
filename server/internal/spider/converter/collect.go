@@ -2,11 +2,27 @@ package converter
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"server/internal/model"
 	"server/internal/utils"
 )
+
+var (
+	isoReleaseDatePattern = regexp.MustCompile(`\d{4}-\d{2}-\d{2}`)
+	collectYearPattern    = regexp.MustCompile(`[1-9][0-9]{3}`)
+)
+
+// NormalizeReleaseDate 只保留第一段 YYYY-MM-DD。采集站常把多场电影节拼进上映日期，整串会超出列宽。
+func NormalizeReleaseDate(raw string) string {
+	return isoReleaseDatePattern.FindString(strings.TrimSpace(raw))
+}
+
+// CollectYearText 从原文里取第一个四位年份，供上映日期被裁掉后仍能写入 year。
+func CollectYearText(raw string) string {
+	return collectYearPattern.FindString(strings.TrimSpace(raw))
+}
 
 const macCMSGroupSeparator = "$$$"
 
@@ -269,6 +285,11 @@ func ConvertFilmDetails(details []model.FilmDetail) []model.MovieDetail {
 
 // ConvertFilmDetail 将影片详情数据处理转化为 model.MovieDetail
 func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
+	rawPub := strings.TrimSpace(detail.VodPubDate)
+	yearText := strings.TrimSpace(detail.VodYear)
+	if yearText == "" {
+		yearText = CollectYearText(rawPub)
+	}
 	md := model.MovieDetail{
 		Id:           detail.VodID,
 		RawCid:       detail.TypeID,
@@ -290,10 +311,10 @@ func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 			Writer:      detail.VodWriter,
 			Blurb:       detail.VodBlurb,
 			Remarks:     detail.VodRemarks,
-			ReleaseDate: detail.VodPubDate,
+			ReleaseDate: NormalizeReleaseDate(rawPub),
 			Area:        detail.VodArea,
 			Language:    detail.VodLang,
-			Year:        detail.VodYear,
+			Year:        yearText,
 			State:       detail.VodState,
 			UpdateTime:  detail.VodTime,
 			AddTime:     detail.VodTimeAdd,
@@ -369,15 +390,22 @@ func GenFilmPlayList(playUrl, separator string) [][]model.MovieUrlInfo {
 
 // parseEpisode 从单个片段解析集数名和播放链接，支持以下格式：
 //
-//	"集名$URL"  → episode=集名, link=URL
-//	"URL"       → episode="",  link=URL  (无集名，调用方自动补全)
-//	"$URL"      → episode="",  link=URL  (部分采集站数据以 $ 开头)
-//	"集名$"     → ok=false              (link 缺失，无效)
+//	"集名$URL"                 → episode=集名, link=URL
+//	"URL"                      → episode="",  link=URL  (无集名，调用方自动补全)
+//	"$URL"                     → episode="",  link=URL  (部分采集站数据以 $ 开头)
+//	"集名$"                    → ok=false              (link 缺失，无效)
+//	"第04集https://a.m3u8$URL" → episode=第04集, link=URL（集名和地址粘在一起）
 func parseEpisode(seg string) (episode, link string, ok bool) {
 	ep, lk, hasDollar := strings.Cut(seg, "$")
 	ep, lk = strings.TrimSpace(ep), strings.TrimSpace(lk)
+	if name, url, glued := splitGluedEpisode(ep); glued {
+		ep = name
+		if !isVideoURL(lk) {
+			lk = url
+		}
+	}
 	switch {
-	case !hasDollar:
+	case !hasDollar && lk == "":
 		return "", ep, ep != "" // 整条是 URL
 	case lk != "":
 		return ep, lk, true // 正常 "集名$URL"
@@ -386,6 +414,27 @@ func parseEpisode(seg string) (episode, link string, ok bool) {
 	default:
 		return "", "", false // "集名$"，link 为空
 	}
+}
+
+// splitGluedEpisode 把「第04集https://cdn/index.m3u8」拆成集名和地址。
+func splitGluedEpisode(ep string) (name, url string, ok bool) {
+	lower := strings.ToLower(ep)
+	idx := strings.Index(lower, "https://")
+	if alt := strings.Index(lower, "http://"); alt >= 0 && (idx < 0 || alt < idx) {
+		idx = alt
+	}
+	if idx < 0 {
+		return "", "", false
+	}
+	name = strings.TrimSpace(ep[:idx])
+	url = strings.TrimSpace(ep[idx:])
+	if cut := strings.IndexAny(url, " \t"); cut > 0 {
+		url = url[:cut]
+	}
+	if url == "" {
+		return "", "", false
+	}
+	return name, url, true
 }
 
 // isVideoURL 判断是否为视频直链，过滤 share/ 等网页链接

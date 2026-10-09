@@ -212,7 +212,10 @@ func InitMainCategories() {
 
 func ensureCategoryIndexes() {
 	db.Mdb.AutoMigrate(&model.Category{}, &model.CategoryMapping{}, &model.SourceCategory{})
-	db.Mdb.Migrator().CreateIndex(&model.Category{}, "uidx_pid_name")
+	// 旧库用 (pid, name) 唯一索引把各站同名分类挤成一行。同名可以各自存在。
+	if db.Mdb.Migrator().HasIndex(&model.Category{}, "uidx_pid_name") {
+		db.Mdb.Migrator().DropIndex(&model.Category{}, "uidx_pid_name")
+	}
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_type")
 	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_version")
 	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_parent_sort")

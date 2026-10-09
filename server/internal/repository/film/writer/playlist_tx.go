@@ -4,15 +4,32 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"server/internal/model"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
+
+const lastEpisodeMaxRunes = 64
+
+// fitLastEpisode 短标题原样保留。网址或超长集名改成「第N集」，避免写爆 last_episode。
+func fitLastEpisode(raw string, episodeNo int) string {
+	raw = strings.TrimSpace(raw)
+	lower := strings.ToLower(raw)
+	if raw == "" || strings.Contains(lower, "http://") || strings.Contains(lower, "https://") || strings.Contains(lower, ".m3u8") || utf8.RuneCountInString(raw) > lastEpisodeMaxRunes {
+		if episodeNo <= 0 {
+			episodeNo = 1
+		}
+		return fmt.Sprintf("第%d集", episodeNo)
+	}
+	return raw
+}
 
 func computePlaylistContentHash(lineKind string, groupIndex int, groupName string, content string) string {
 	raw := lineKind + "#" + strconv.Itoa(groupIndex) + "#" + groupName + "#" + content
@@ -160,7 +177,7 @@ func buildPlaylistsFromDetail(mid int64, sourceID string, detail model.MovieDeta
 		contentStr := string(contentBytes)
 		lastEp := ""
 		if len(group) > 0 {
-			lastEp = strings.TrimSpace(group[len(group)-1].Episode)
+			lastEp = fitLastEpisode(group[len(group)-1].Episode, len(group))
 		}
 		lines = append(lines, model.FilmSourcePlaylist{
 			Mid:          mid,
@@ -184,7 +201,7 @@ func buildPlaylistsFromDetail(mid int64, sourceID string, detail model.MovieDeta
 		contentStr := string(contentBytes)
 		lastEp := ""
 		if len(group) > 0 {
-			lastEp = strings.TrimSpace(group[len(group)-1].Episode)
+			lastEp = fitLastEpisode(group[len(group)-1].Episode, len(group))
 		}
 		lines = append(lines, model.FilmSourcePlaylist{
 			Mid:          mid,

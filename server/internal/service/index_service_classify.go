@@ -91,26 +91,10 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 			sourceId = active.Id
 		}
 	}
-	pid = repository.ResolveCategoryID(pid)
-
 	if sourceId != "" {
-		activeTree := repository.GetActiveCategoryTree(sourceId)
-		for _, t := range activeTree.Children {
-			if t.Id == pid {
-				return &model.CategoryTree{
-					Id:        t.Id,
-					Pid:       t.Pid,
-					Name:      t.Name,
-					Alias:     t.Alias,
-					Show:      t.Show,
-					Sort:      t.Sort,
-					CreatedAt: t.CreatedAt,
-					UpdatedAt: t.UpdatedAt,
-					Children:  t.Children,
-				}
-			}
-		}
+		return repository.LookupRootSourceType(sourceId, pid)
 	}
+	pid = repository.ResolveCategoryID(pid)
 
 	tree := repository.GetCategoryTree()
 	for _, t := range tree.Children {
@@ -177,7 +161,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	}
 	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
 	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s", cacheKey, sourceId)
+		cacheKey = fmt.Sprintf("%s:src_%s:st2", cacheKey, sourceId)
 	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {

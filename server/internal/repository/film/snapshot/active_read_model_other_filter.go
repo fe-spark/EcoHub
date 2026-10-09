@@ -41,8 +41,8 @@ func appendVisibleSearchTagValue(values map[string]struct{}, value string) {
 
 // loadFilterOptionTags 取当前一级分类的筛选项 tags，与前台展示同一份数据（含 Redis 缓存）。
 // 「其他」的可见取值集合必须以此为准：展示列表之外的取值才算其他。
-func loadFilterOptionTags(version string, pid int64) map[string]any {
-	options := GetFilterOptionSnapshot(version, pid)
+func loadFilterOptionTags(version string, pid int64, sourceId string) map[string]any {
+	options := GetFilterOptionSnapshot(version, pid, sourceId)
 	if options == nil {
 		return nil
 	}
@@ -91,7 +91,7 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 	var tags map[string]any
 	if st.Plot == model.TagOthersValue || st.Area == model.TagOthersValue ||
 		st.Language == model.TagOthersValue || st.Year == model.TagOthersValue {
-		tags = loadFilterOptionTags(version, st.Pid)
+		tags = loadFilterOptionTags(version, st.Pid, st.SourceId)
 	}
 	if st.Plot != "" && st.Plot != "全部" && st.Plot != model.TagUnknownValue {
 		if st.Plot == model.TagOthersValue {
