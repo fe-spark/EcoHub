@@ -8,10 +8,9 @@ type ResultCache = {
   error: string;
 };
 
-function buildSearchUrl(keyword: string, current: string, sort: string) {
+function buildSearchUrl(keyword: string, sort: string) {
   const params = new URLSearchParams({
     search: keyword,
-    current,
   });
   if (sort) {
     params.set("sort", sort);
@@ -19,11 +18,11 @@ function buildSearchUrl(keyword: string, current: string, sort: string) {
   return `/search?${params.toString()}`;
 }
 
-function syncSearchUrl(keyword: string, current: string, sort: string) {
-  if (typeof window === "undefined") {
+function syncSearchUrl(keyword: string, sort: string) {
+  if (typeof window === "undefined" || !keyword) {
     return;
   }
-  const next = buildSearchUrl(keyword, current, sort);
+  const next = buildSearchUrl(keyword, sort);
   const now = `${window.location.pathname}${window.location.search}`;
   if (now !== next) {
     window.history.replaceState(window.history.state, "", next);
@@ -71,12 +70,10 @@ function cacheFromResult(result: any, fallbackList: any[] = []): ResultCache {
 export default function useSearchSources({
   keyword,
   sort: propSort = "",
-  current,
   data,
 }: {
   keyword: string;
   sort?: string;
-  current: string;
   data: any;
 }) {
   const [activeSort, setActiveSort] = useState(propSort);
@@ -99,12 +96,12 @@ export default function useSearchSources({
     setPage(seeded.page);
     setSourceError(seeded.error || "");
     setListLoading(false);
-    syncSearchUrl(keyword, current, propSort);
+    syncSearchUrl(keyword, propSort);
 
     return () => {
       genRef.current = gen + 1;
     };
-  }, [keyword, propSort, current, data]);
+  }, [keyword, propSort, data]);
 
   const changeSort = useCallback(
     async (nextSort: string) => {
@@ -119,7 +116,7 @@ export default function useSearchSources({
         setPage(hit.page);
         setSourceError(hit.error || "");
         setListLoading(false);
-        syncSearchUrl(keyword, "1", nextSort);
+        syncSearchUrl(keyword, nextSort);
         return;
       }
 
@@ -127,7 +124,7 @@ export default function useSearchSources({
       setPage({ current: 1, pageSize: 12, total: 0, pageCount: 0 });
       setSourceError("");
       setListLoading(true);
-      syncSearchUrl(keyword, "1", nextSort);
+      syncSearchUrl(keyword, nextSort);
 
       const gen = ++genRef.current;
       const trimmed = keyword.trim();
@@ -168,7 +165,6 @@ export default function useSearchSources({
       setPage(cached.page);
       setSourceError(cached.error || "");
       setListLoading(false);
-      syncSearchUrl(keyword, String(pageNum), sort);
     },
     [keyword],
   );

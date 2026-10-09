@@ -176,7 +176,7 @@ func bannerFromSnapshot(snap model.FilmListSnapshot, sortOrder int, fallbackPost
 }
 
 // replaceMissingSlidesWithGlobalHD 当轮播候选依然缺失横屏大图时，从片库中提取具备高清横图的优质影片进行终极替换，确保首页轮播绝不模糊 (严格限定在指定分类)
-func replaceMissingSlidesWithGlobalHD(picked []model.FilmListSnapshot, categoryPids []int64, version string) []model.FilmListSnapshot {
+func replaceMissingSlidesWithGlobalHD(picked []model.FilmListSnapshot, sourceID string, categoryPids []int64, version string) []model.FilmListSnapshot {
 	usedMids := make(map[int64]struct{}, len(picked))
 	missingIndices := make([]int, 0)
 	for i, p := range picked {
@@ -191,7 +191,7 @@ func replaceMissingSlidesWithGlobalHD(picked []model.FilmListSnapshot, categoryP
 		return picked
 	}
 
-	hdSnaps := filmsnapshot.GetSnapshotHDBackdropCandidates(version, categoryPids, 50)
+	hdSnaps := filmsnapshot.GetSnapshotHDBackdropCandidates(version, sourceID, categoryPids, 50)
 	hdIdx := 0
 	for _, idx := range missingIndices {
 		for hdIdx < len(hdSnaps) {

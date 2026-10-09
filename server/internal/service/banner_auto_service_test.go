@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"testing"
@@ -492,5 +493,16 @@ func TestScrapeMultiCategoryRoundRobinScheduling(t *testing.T) {
 	// 连续错误熔断（consecutiveSysErrors >= 5）时，已跨分类探测（attempts > 2）
 	if attempts <= 2 {
 		t.Fatalf("expected both categories to be scheduled, but attempts was only %d", attempts)
+	}
+}
+
+func TestAbortIfBannerEpochMoved(t *testing.T) {
+	epoch := bannerPrimaryEpochNow()
+	if err := abortIfBannerEpochMoved(epoch); err != nil {
+		t.Fatalf("same epoch should continue, got %v", err)
+	}
+	bumpBannerPrimaryEpoch()
+	if err := abortIfBannerEpochMoved(epoch); !errors.Is(err, errBannerPrimaryChanged) {
+		t.Fatalf("moved epoch should abort, got %v", err)
 	}
 }

@@ -167,8 +167,8 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
 }
 
-// GetSnapshotBannerCandidates 按排片策略与分类条件获取用于轮播的候选影片快照
-func GetSnapshotBannerCandidates(version string, strategy string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+// GetSnapshotBannerCandidates 按排片策略、分类和采集站获取轮播候选。sourceID 为空时不限站。
+func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -177,7 +177,7 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 		return []model.FilmListSnapshot{}
 	}
 
-	query := liveFilmQuery()
+	query := applySourceMembership(liveFilmQuery(), sourceID)
 
 	if len(categoryPids) > 0 {
 		query = query.Where("pid IN ?", categoryPids)
@@ -206,7 +206,7 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 	}
 	if len(results) == 0 && strategy == "score_random" {
 		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
-		fallback := liveFilmQuery()
+		fallback := applySourceMembership(liveFilmQuery(), sourceID)
 		if len(categoryPids) > 0 {
 			fallback = fallback.Where("pid IN ?", categoryPids)
 		}
@@ -219,8 +219,8 @@ func GetSnapshotBannerCandidates(version string, strategy string, categoryPids [
 	return results
 }
 
-// GetSnapshotHDBackdropCandidates 获取片库中已拥有高清横屏壁纸或自定义高清海报的优质影片快照（用于轮播优选与兜底）
-func GetSnapshotHDBackdropCandidates(version string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+// GetSnapshotHDBackdropCandidates 获取已有高清横图的候选。sourceID 为空时不限站。
+func GetSnapshotHDBackdropCandidates(version string, sourceID string, categoryPids []int64, limit int) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -228,11 +228,44 @@ func GetSnapshotHDBackdropCandidates(version string, categoryPids []int64, limit
 	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
 	}
-	query := liveFilmQuery().
+	query := applySourceMembership(liveFilmQuery(), sourceID).
 		Where("picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1")
 	if len(categoryPids) > 0 {
 		query = query.Where("pid IN ?", categoryPids)
 	}
 	results, _ := scanListSnapshots(query.Order("hits DESC, update_stamp DESC").Limit(limit))
 	return results
+}
+
+// FilterSnapshotsByPlaySource 只保留指定采集站有播放线路的影片。sourceID 为空时原样返回。
+func FilterSnapshotsByPlaySource(sourceID string, snaps []model.FilmListSnapshot) []model.FilmListSnapshot {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || len(snaps) == 0 || db.Mdb == nil {
+		return snaps
+	}
+	mids := make([]int64, 0, len(snaps))
+	for _, snap := range snaps {
+		if snap.Mid > 0 {
+			mids = append(mids, snap.Mid)
+		}
+	}
+	if len(mids) == 0 {
+		return []model.FilmListSnapshot{}
+	}
+	var owned []int64
+	if err := liveFilmQuery().Where("mid IN ?", mids).Where(model.FilmHasPlaySourceSQL(), sourceID, "play").Pluck("mid", &owned).Error; err != nil {
+		log.Println("[Snapshot] 按采集站过滤轮播影片失败:", err)
+		return []model.FilmListSnapshot{}
+	}
+	keep := make(map[int64]struct{}, len(owned))
+	for _, mid := range owned {
+		keep[mid] = struct{}{}
+	}
+	out := make([]model.FilmListSnapshot, 0, len(owned))
+	for _, snap := range snaps {
+		if _, ok := keep[snap.Mid]; ok {
+			out = append(out, snap)
+		}
+	}
+	return out
 }

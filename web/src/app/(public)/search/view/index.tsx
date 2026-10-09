@@ -101,10 +101,9 @@ const SORT_OPTIONS = [
   { key: "year", label: "上映年份" },
 ];
 
-function buildSearchPath(keyword: string, current: string, sort: string) {
+function buildSearchPath(keyword: string, sort: string) {
   const params = new URLSearchParams({
     search: keyword,
-    current,
   });
   if (sort) {
     params.set("sort", sort);
@@ -115,13 +114,11 @@ function buildSearchPath(keyword: string, current: string, sort: string) {
 export default function SearchPageView({
   data,
   keyword,
-  current,
   sort = "",
   hotKeywords = [],
 }: {
   data: any;
   keyword: string;
-  current: string;
   sort?: string;
   hotKeywords?: string[];
 }) {
@@ -129,10 +126,10 @@ export default function SearchPageView({
   const { message } = useAppMessage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}`);
+  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${sort}`);
 
-  if (prevParamsKey !== `${keyword}:${current}:${sort}`) {
-    setPrevParamsKey(`${keyword}:${current}:${sort}`);
+  if (prevParamsKey !== `${keyword}:${sort}`) {
+    setPrevParamsKey(`${keyword}:${sort}`);
     setSearchKeyword(keyword);
   }
 
@@ -155,7 +152,7 @@ export default function SearchPageView({
     listLoading,
     changePage,
     changeSort,
-  } = useSearchSources({ keyword, sort, current, data });
+  } = useSearchSources({ keyword, sort, data });
 
   useEffect(() => {
     const onFocusSearch = () => {
@@ -242,7 +239,7 @@ export default function SearchPageView({
     }
     setSearchKeyword(trimmed);
     saveHistory(trimmed);
-    navigate(buildSearchPath(trimmed, "1", activeSort || sort), "搜索加载中...");
+    navigate(buildSearchPath(trimmed, activeSort || sort), "搜索加载中...");
   };
 
   const handlePageChange = (nextPage: number) => {
@@ -445,7 +442,6 @@ export default function SearchPageView({
 
       <SearchResultPanel
         keyword={keyword}
-        current={current}
         list={list}
         page={page}
         totalCount={totalCount}

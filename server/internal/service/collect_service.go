@@ -92,6 +92,8 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 		repository.MarkCategoryChanged()
 		filmsnapshot.RefreshAccessDataCaches()
 		filmsnapshot.ClearSearchCache()
+		InvalidateInventoryStatsCache()
+		BannerAutoSvc.RefreshAfterPrimarySwitch()
 	}
 	return nil
 }

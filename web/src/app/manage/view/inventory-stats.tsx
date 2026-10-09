@@ -1,8 +1,7 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Card, Table, Tag, Typography } from "antd";
-import type { TableColumnsType } from "antd";
+import React, { useEffect, useRef, useState } from "react";
+import { Card, Spin, Tag } from "antd";
 import Link from "next/link";
 import { ApiGet } from "@/lib/client-api";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -30,8 +29,8 @@ interface InventoryStatsData {
   sources: SourceInventory[];
 }
 
-const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string }> = [
-  { key: "films", label: "片库影片", hint: "全部采集站入库" },
+const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
+  { key: "films", label: "片库影片", hint: "全部采集站入库", lead: true },
   { key: "playable", label: "有播放线路", hint: "至少一条播放线路" },
   { key: "categories", label: "展示分类", hint: "共享展示树" },
   { key: "failures", label: "失败记录", hint: "全部来源" },
@@ -44,68 +43,69 @@ function formatCount(value: number | undefined) {
   return value.toLocaleString("zh-CN");
 }
 
+function placePrimaryFirst(sources: SourceInventory[], id: string) {
+  const index = sources.findIndex((item) => item.id === id);
+  const next = sources.map((item) => ({ ...item, isPrimary: item.id === id }));
+  if (index <= 0) {
+    return next;
+  }
+  const [chosen] = next.splice(index, 1);
+  return [chosen, ...next];
+}
+
 export default function InventoryStats() {
   const { isAdmin } = useManagePermission();
   const [stats, setStats] = useState<InventoryStatsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const primaryIdRef = useRef("");
+
+  useEffect(() => {
+    const onPrimary = (event: Event) => {
+      const id = (event as CustomEvent<string>).detail;
+      if (!id) {
+        return;
+      }
+      primaryIdRef.current = id;
+      setStats((prev) => {
+        if (!prev) {
+          return prev;
+        }
+        return { ...prev, sources: placePrimaryFirst(prev.sources, id) };
+      });
+    };
+    window.addEventListener("ecohub:primary-source", onPrimary);
+    return () => window.removeEventListener("ecohub:primary-source", onPrimary);
+  }, []);
 
   useEffect(() => {
     let active = true;
     ApiGet<InventoryStatsData>("/manage/spider/clear/stats")
       .then((resp) => {
         if (active && resp.code === 0 && resp.data) {
-          setStats(resp.data);
+          const id = primaryIdRef.current;
+          setStats({
+            ...resp.data,
+            sources: id ? placePrimaryFirst(resp.data.sources, id) : resp.data.sources,
+          });
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (active) {
+          setLoading(false);
+        }
+      });
     return () => {
       active = false;
     };
   }, []);
 
-  const columns: TableColumnsType<SourceInventory> = [
-    {
-      title: "采集站",
-      dataIndex: "name",
-      ellipsis: true,
-      render: (_, row) => (
-        <span className={styles.nameCell}>
-          <span className={styles.sourceName}>{row.name}</span>
-          {row.isPrimary ? <Tag color="gold">首选站</Tag> : null}
-          {!row.enabled ? <Tag>已停用</Tag> : null}
-        </span>
-      ),
-    },
-    {
-      title: "影片",
-      dataIndex: "films",
-      width: 120,
-      align: "right",
-      render: (value: number) => formatCount(value),
-    },
-    {
-      title: "分类",
-      dataIndex: "categories",
-      width: 150,
-      align: "right",
-      render: (value: number) => (
-        <span className={styles.categoryCell}>
-          {value === 0 ? <Tag color="warning">缺分类</Tag> : null}
-          <span>{formatCount(value)}</span>
-        </span>
-      ),
-    },
-    {
-      title: "失败记录",
-      dataIndex: "failures",
-      width: 120,
-      align: "right",
-      render: (value: number) => formatCount(value),
-    },
-  ];
+  const sources = stats?.sources ?? [];
 
   return (
     <Card
       className={styles.panel}
+      classNames={{ header: styles.header, body: styles.body, title: styles.title }}
       title="片库规模"
       extra={
         isAdmin ? (
@@ -115,32 +115,63 @@ export default function InventoryStats() {
         ) : null
       }
     >
-      <div className={styles.metrics}>
-        {metricItems.map((item) => (
-          <div key={item.key} className={styles.metric}>
-            <div className={styles.metricValue}>{formatCount(stats?.library?.[item.key])}</div>
-            <div className={styles.metricLabel}>{item.label}</div>
-            <div className={styles.metricHint}>{item.hint}</div>
+      {loading ? (
+        <div className={styles.loading} role="status" aria-busy="true">
+          <Spin />
+        </div>
+      ) : (
+        <>
+          <div className={styles.metrics}>
+            {metricItems.map((item) => (
+              <div key={item.key} className={`${styles.metric} ${item.lead ? styles.metricLead : ""}`}>
+                <div className={styles.metricValue}>{formatCount(stats?.library?.[item.key])}</div>
+                <div className={styles.metricLabel}>{item.label}</div>
+                <div className={styles.metricHint}>{item.hint}</div>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div className={styles.sectionHead}>
-        <span className={styles.sectionTitle}>各采集站</span>
-        <span className={styles.sectionHint}>影片跟该站播放线路，分类跟该站已映射的展示分类</span>
-      </div>
-      <Table<SourceInventory>
-        size="small"
-        rowKey="id"
-        pagination={false}
-        columns={columns}
-        dataSource={stats?.sources ?? []}
-        locale={{ emptyText: stats ? "还没有采集站" : "—" }}
-        scroll={{ x: 640 }}
-      />
-      <Typography.Text type="secondary" className={styles.note}>
-        前台首页、分类和搜索只用首选站有播放线路的影片。同一部片子可以挂多个站的线路，各站影片相加会大于片库影片。数据重置清空的是整库。
-      </Typography.Text>
+          <section className={styles.stations} aria-label="各采集站">
+            <div className={styles.stationTitle}>各采集站</div>
+            {sources.length === 0 ? (
+              <div className={styles.stationEmpty}>{stats ? "还没有采集站" : "统计失败"}</div>
+            ) : (
+              <div className={styles.stationGrid}>
+                {sources.map((row) => (
+                  <article
+                    key={row.id}
+                    className={`${styles.stationCard} ${row.isPrimary ? styles.stationPrimary : ""} ${row.enabled ? "" : styles.stationOff}`}
+                  >
+                    <div className={styles.identity}>
+                      <span className={styles.sourceName}>{row.name}</span>
+                      {row.isPrimary ? <Tag color="gold">首选站</Tag> : null}
+                      {!row.enabled ? <Tag>已停用</Tag> : null}
+                    </div>
+                    <div className={styles.stationStats}>
+                      <div className={styles.stationStat}>
+                        <span className={styles.stationStatLabel}>影片</span>
+                        <span className={styles.stationStatValue}>{formatCount(row.films)}</span>
+                      </div>
+                      <div className={styles.stationStat}>
+                        <span className={styles.stationStatLabel}>分类</span>
+                        <span className={styles.stationStatValue}>
+                          {row.categories === 0 ? <Tag color="warning">缺分类</Tag> : formatCount(row.categories)}
+                        </span>
+                      </div>
+                      <div className={styles.stationStat}>
+                        <span className={styles.stationStatLabel}>失败</span>
+                        <span className={`${styles.stationStatValue} ${row.failures > 0 ? styles.figureWarn : styles.figureQuiet}`}>
+                          {formatCount(row.failures)}
+                        </span>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </>
+      )}
     </Card>
   );
 }
