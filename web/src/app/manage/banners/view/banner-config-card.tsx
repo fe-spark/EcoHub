@@ -72,53 +72,33 @@ export default function BannerConfigCard({
     let isMounted = true;
     const loadCategories = async () => {
       try {
-        const resp = await ApiGet("/manage/film/class/tree");
-        if (resp.code === 0 && resp.data?.children && Array.isArray(resp.data.children)) {
-          if (isMounted) {
-            // 分类管理中设置不显示的，不可选：仅保留 show !== false 且有效开启的分类
-            const shownCategories = resp.data.children.filter((c: any) => c.show !== false && Boolean(c.show));
-            const shownIds = new Set(shownCategories.map((c: any) => Number(c.id)));
-            setCategoryOptions(
-              shownCategories.map((c: any) => ({
-                label: c.name,
-                value: Number(c.id),
-              }))
-            );
-            // 哪怕之前选中的时候显示，后面分类设置为不显示，依旧过滤
-            setDraftConfig((prev) => ({
-              ...prev,
-              categories: (prev.categories || []).filter((id) => shownIds.has(id)),
-            }));
-            return;
-          }
-        }
-      } catch {
-        // fallback
-      }
-      try {
         const navResp = await ApiGet("/navCategory");
-        if (navResp.code === 0 && Array.isArray(navResp.data)) {
-          if (isMounted) {
-            const shownIds = new Set(navResp.data.map((c: any) => Number(c.id)));
-            setCategoryOptions(
-              navResp.data.map((c: any) => ({
-                label: c.name,
-                value: Number(c.id),
-              }))
-            );
-            setDraftConfig((prev) => ({
-              ...prev,
-              categories: (prev.categories || []).filter((id) => shownIds.has(id)),
-            }));
-          }
+        if (!isMounted || navResp.code !== 0 || !Array.isArray(navResp.data)) {
+          return;
         }
+        const shownIds = new Set(navResp.data.map((c: { id?: number }) => Number(c.id)));
+        setCategoryOptions(
+          navResp.data.map((c: { id?: number; name?: string }) => ({
+            label: c.name || "",
+            value: Number(c.id),
+          })),
+        );
+        setDraftConfig((prev) => ({
+          ...prev,
+          categories: (prev.categories || []).filter((id) => shownIds.has(id)),
+        }));
       } catch {
-        // ignore
+        // 首页栏目暂时取不到时，下拉留空，排片仍按首选站全部分类。
       }
     };
     void loadCategories();
+    const onPrimary = () => {
+      void loadCategories();
+    };
+    window.addEventListener("ecohub:primary-source", onPrimary);
     return () => {
       isMounted = false;
+      window.removeEventListener("ecohub:primary-source", onPrimary);
     };
   }, []);
 
@@ -189,6 +169,8 @@ export default function BannerConfigCard({
     const validIds = new Set(categoryOptions.map((c) => c.value));
     const cleanConfig: BannerConfig = {
       ...draftConfig,
+      // 刮削总开关未就绪时，开关显示为关，保存也写成关。
+      autoTMDB: config.tmdbReady ? draftConfig.autoTMDB : false,
       categories: (draftConfig.categories || []).filter((id) => validIds.has(id)),
     };
     const success = await onSaveConfig(cleanConfig);
@@ -290,7 +272,7 @@ export default function BannerConfigCard({
                       ))}
                     </Space>
                   ) : (
-                    <Tag>全部分类</Tag>
+                    <Tag>首选站全部分类</Tag>
                   )}
                 </div>
                 <div className={styles.metaItem}>
@@ -373,7 +355,7 @@ export default function BannerConfigCard({
                 <div className={styles.fieldItem}>
                   <span className={styles.fieldLabel}>
                     排片分类:
-                    <Tooltip title="仅在分类管理中设置显示的一级分类可选；若分类后续被设为不显示，排片时将自动严格过滤。留空则在全部显示分类中随机。">
+                    <Tooltip title="只列当前首选站的首页栏目。留空则在该站全部分类中排片。换首选站后，对不上的旧选项会丢掉。">
                       <InfoCircleOutlined
                         style={{ marginLeft: 4, cursor: "pointer", color: "#8c8c8c" }}
                       />
@@ -383,7 +365,7 @@ export default function BannerConfigCard({
                     mode="multiple"
                     allowClear
                     disabled={!canWrite}
-                    placeholder="全部分类 (留空不限)"
+                    placeholder="首选站全部分类（留空不限）"
                     value={draftConfig.categories || []}
                     onChange={handleCategoriesChange}
                     options={categoryOptions}

@@ -38,25 +38,36 @@ type sourceCount struct {
 	N        int64  `gorm:"column:n"`
 }
 
-// GetInventoryStats 统计整库和各采集站的影片、分类、失败记录。
-// 影片只计仍在片库里、且有该站播放线路的片子。分类只计该站映射到、且展示分类还在的节点。
+// GetInventoryStats 统计整库和各采集站。工作台首屏只取整库，各站在展开时另取。
 func GetInventoryStats() InventoryStats {
-	stats := InventoryStats{Sources: []SourceInventory{}}
-	if db.Mdb == nil {
-		return stats
-	}
+	return InventoryStats{Library: GetLibraryInventory(), Sources: GetSourceInventories()}
+}
 
-	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Library.Films).Error
-	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Library.Categories).Error
-	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Library.Failures).Error
+// GetLibraryInventory 统计整库影片、可播放、分类和失败记录。
+func GetLibraryInventory() LibraryInventory {
+	var library LibraryInventory
+	if db.Mdb == nil {
+		return library
+	}
+	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&library.Films).Error
+	_ = db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error
+	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error
 	// 没有软删除影片时，播放线路上的片子都还在片库里，不必再连表。
 	// 连表会让优化器从全表出发，线路一百多万行时要十几秒。
-	accurate := hasSoftDeletedFilms()
-	stats.Library.Playable = countPlayMids("", accurate)
+	library.Playable = countPlayMids("", hasSoftDeletedFilms())
+	return library
+}
 
+// GetSourceInventories 按采集站统计影片、分类和失败记录。
+// 影片只计仍在片库里、且有该站播放线路的片子。分类只计该站映射到、且展示分类还在的节点。
+func GetSourceInventories() []SourceInventory {
+	sources := []SourceInventory{}
+	if db.Mdb == nil {
+		return sources
+	}
+	accurate := hasSoftDeletedFilms()
 	categoryCounts := indexCounts(countCategoriesBySource())
 	failureCounts := indexCounts(countFailuresBySource())
-
 	primaryID := ""
 	if primary := repository.GetActiveCollectSource(); primary != nil {
 		primaryID = strings.TrimSpace(primary.Id)
@@ -66,7 +77,7 @@ func GetInventoryStats() InventoryStats {
 		if id == "" {
 			continue
 		}
-		stats.Sources = append(stats.Sources, SourceInventory{
+		sources = append(sources, SourceInventory{
 			Id:         id,
 			Name:       source.Name,
 			Enabled:    source.State,
@@ -76,7 +87,7 @@ func GetInventoryStats() InventoryStats {
 			Failures:   failureCounts[id],
 		})
 	}
-	return stats
+	return sources
 }
 
 func hasSoftDeletedFilms() bool {

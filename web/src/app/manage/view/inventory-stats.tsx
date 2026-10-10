@@ -2,9 +2,9 @@
 
 import React, { useEffect, useRef, useState } from "react";
 import { Card, Spin, Tag } from "antd";
+import { DownOutlined } from "@ant-design/icons";
 import Link from "next/link";
 import { ApiGet } from "@/lib/client-api";
-import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./inventory-stats.module.less";
 
 interface LibraryInventory {
@@ -54,10 +54,14 @@ function placePrimaryFirst(sources: SourceInventory[], id: string) {
 }
 
 export default function InventoryStats() {
-  const { isAdmin } = useManagePermission();
-  const [stats, setStats] = useState<InventoryStatsData | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [library, setLibrary] = useState<LibraryInventory | null>(null);
+  const [libraryLoading, setLibraryLoading] = useState(true);
+  const [sources, setSources] = useState<SourceInventory[] | null>(null);
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
+  const [sourcesFailed, setSourcesFailed] = useState(false);
   const primaryIdRef = useRef("");
+  const sourcesLoadedRef = useRef(false);
 
   useEffect(() => {
     const onPrimary = (event: Event) => {
@@ -66,12 +70,7 @@ export default function InventoryStats() {
         return;
       }
       primaryIdRef.current = id;
-      setStats((prev) => {
-        if (!prev) {
-          return prev;
-        }
-        return { ...prev, sources: placePrimaryFirst(prev.sources, id) };
-      });
+      setSources((prev) => (prev ? placePrimaryFirst(prev, id) : prev));
     };
     window.addEventListener("ecohub:primary-source", onPrimary);
     return () => window.removeEventListener("ecohub:primary-source", onPrimary);
@@ -79,20 +78,16 @@ export default function InventoryStats() {
 
   useEffect(() => {
     let active = true;
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats")
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=library")
       .then((resp) => {
-        if (active && resp.code === 0 && resp.data) {
-          const id = primaryIdRef.current;
-          setStats({
-            ...resp.data,
-            sources: id ? placePrimaryFirst(resp.data.sources, id) : resp.data.sources,
-          });
+        if (active && resp.code === 0 && resp.data?.library) {
+          setLibrary(resp.data.library);
         }
       })
       .catch(() => {})
       .finally(() => {
         if (active) {
-          setLoading(false);
+          setLibraryLoading(false);
         }
       });
     return () => {
@@ -100,7 +95,41 @@ export default function InventoryStats() {
     };
   }, []);
 
-  const sources = stats?.sources ?? [];
+  useEffect(() => {
+    if (!sourcesOpen || sourcesLoadedRef.current) {
+      return;
+    }
+    let active = true;
+    setSourcesLoading(true);
+    setSourcesFailed(false);
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=sources")
+      .then((resp) => {
+        if (!active) {
+          return;
+        }
+        if (resp.code !== 0 || !resp.data) {
+          setSourcesFailed(true);
+          return;
+        }
+        const id = primaryIdRef.current;
+        const next = resp.data.sources ?? [];
+        setSources(id ? placePrimaryFirst(next, id) : next);
+        sourcesLoadedRef.current = true;
+      })
+      .catch(() => {
+        if (active) {
+          setSourcesFailed(true);
+        }
+      })
+      .finally(() => {
+        if (active) {
+          setSourcesLoading(false);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [sourcesOpen]);
 
   return (
     <Card
@@ -108,36 +137,68 @@ export default function InventoryStats() {
       classNames={{ header: styles.header, body: styles.body, title: styles.title }}
       title="片库规模"
       extra={
-        isAdmin ? (
-          <Link href="/manage/system?tab=security" className={styles.securityLink}>
-            数据安全
-          </Link>
-        ) : null
+        <Link href="/manage/film" className={styles.filmLink}>
+          影片列表
+        </Link>
       }
     >
-      {loading ? (
+      {libraryLoading ? (
         <div className={styles.loading} role="status" aria-busy="true">
           <Spin />
         </div>
       ) : (
-        <>
-          <div className={styles.metrics}>
-            {metricItems.map((item) => (
-              <div key={item.key} className={`${styles.metric} ${item.lead ? styles.metricLead : ""}`}>
-                <div className={styles.metricValue}>{formatCount(stats?.library?.[item.key])}</div>
-                <div className={styles.metricLabel}>{item.label}</div>
-                <div className={styles.metricHint}>{item.hint}</div>
-              </div>
-            ))}
-          </div>
+        <div className={styles.metrics}>
+          {metricItems.map((item) => (
+            <div key={item.key} className={`${styles.metric} ${item.lead ? styles.metricLead : ""}`}>
+              <div className={styles.metricValue}>{formatCount(library?.[item.key])}</div>
+              <div className={styles.metricLabel}>{item.label}</div>
+              <div className={styles.metricHint}>{item.hint}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
-          <section className={styles.stations} aria-label="各采集站">
-            <div className={styles.stationTitle}>各采集站</div>
-            {sources.length === 0 ? (
-              <div className={styles.stationEmpty}>{stats ? "还没有采集站" : "统计失败"}</div>
-            ) : (
-              <div className={styles.stationGrid}>
-                {sources.map((row) => (
+      <section className={styles.stations} aria-label="各采集站">
+        <button
+          type="button"
+          className={`${styles.stationToggle} ${sourcesOpen ? styles.stationToggleOpen : ""}`}
+          aria-expanded={sourcesOpen}
+          onClick={() =>
+            setSourcesOpen((open) => {
+              const next = !open;
+              if (next && !sourcesLoadedRef.current) {
+                setSourcesLoading(true);
+                setSourcesFailed(false);
+              }
+              return next;
+            })
+          }
+        >
+          <span className={styles.stationLead}>
+            <span className={styles.chevronWrap} aria-hidden="true">
+              <DownOutlined className={`${styles.chevron} ${sourcesOpen ? styles.chevronOpen : ""}`} />
+            </span>
+            <span className={styles.stationCopy}>
+              <span className={styles.stationTitle}>各采集站</span>
+              <span className={styles.stationHint}>
+                {sourcesOpen ? "已展开各站影片、分类和失败" : "展开后查看各站影片、分类和失败"}
+              </span>
+            </span>
+          </span>
+          <span className={styles.stationAction}>{sourcesOpen ? "收起" : "展开"}</span>
+        </button>
+        {sourcesOpen ? (
+          sourcesLoading ? (
+            <div className={styles.loading} role="status" aria-busy="true">
+              <Spin />
+            </div>
+          ) : sourcesFailed || sources === null ? (
+            <div className={styles.stationEmpty}>统计失败</div>
+          ) : sources.length === 0 ? (
+            <div className={styles.stationEmpty}>还没有采集站</div>
+          ) : (
+            <div className={styles.stationGrid}>
+              {sources.map((row) => (
                   <article
                     key={row.id}
                     className={`${styles.stationCard} ${row.isPrimary ? styles.stationPrimary : ""} ${row.enabled ? "" : styles.stationOff}`}
@@ -168,10 +229,9 @@ export default function InventoryStats() {
                   </article>
                 ))}
               </div>
-            )}
-          </section>
-        </>
-      )}
+          )
+        ) : null}
+      </section>
     </Card>
   );
 }

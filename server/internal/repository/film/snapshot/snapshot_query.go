@@ -10,6 +10,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 )
 
@@ -177,11 +179,7 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 		return []model.FilmListSnapshot{}
 	}
 
-	query := applySourceMembership(liveFilmQuery(), sourceID)
-
-	if len(categoryPids) > 0 {
-		query = query.Where("pid IN ?", categoryPids)
-	}
+	query := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
 
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {
@@ -206,10 +204,7 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 	}
 	if len(results) == 0 && strategy == "score_random" {
 		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
-		fallback := applySourceMembership(liveFilmQuery(), sourceID)
-		if len(categoryPids) > 0 {
-			fallback = fallback.Where("pid IN ?", categoryPids)
-		}
+		fallback := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
 		results, err = scanListSnapshots(applyStrategy(fallback, false).Limit(limit))
 		if err != nil {
 			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
@@ -228,13 +223,39 @@ func GetSnapshotHDBackdropCandidates(version string, sourceID string, categoryPi
 	if limit <= 0 || db.Mdb == nil {
 		return []model.FilmListSnapshot{}
 	}
-	query := applySourceMembership(liveFilmQuery(), sourceID).
+	query := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids).
 		Where("picture_slide != '' OR custom_picture_slide != '' OR is_custom_picture = 1")
-	if len(categoryPids) > 0 {
-		query = query.Where("pid IN ?", categoryPids)
-	}
 	results, _ := scanListSnapshots(query.Order("hits DESC, update_stamp DESC").Limit(limit))
 	return results
+}
+
+// applyBannerCategories 有采集站时按该站 type_id 匹配分类键。没有采集站时仍按展示分类 pid。
+func applyBannerCategories(query *gorm.DB, sourceID string, categoryIDs []int64) *gorm.DB {
+	if query == nil || len(categoryIDs) == 0 {
+		return query
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return query.Where("pid IN ?", categoryIDs)
+	}
+	typeIDs := make([]int64, 0, len(categoryIDs))
+	seen := make(map[int64]struct{}, len(categoryIDs))
+	for _, id := range categoryIDs {
+		for _, typeID := range repository.PublicSourceTypeIDs(sourceID, "pid", id) {
+			if typeID <= 0 {
+				continue
+			}
+			if _, ok := seen[typeID]; ok {
+				continue
+			}
+			seen[typeID] = struct{}{}
+			typeIDs = append(typeIDs, typeID)
+		}
+	}
+	if len(typeIDs) == 0 {
+		return query.Where("1 = 0")
+	}
+	return filmquery.ApplySourceTypeMatchIDs(query, sourceID, "pid", typeIDs)
 }
 
 // FilterSnapshotsByPlaySource 只保留指定采集站有播放线路的影片。sourceID 为空时原样返回。

@@ -199,10 +199,10 @@ func TestFilterShownCategoryIDs_DynamicHidden(t *testing.T) {
 		t.Fatalf("expected empty slice for only hidden categories, got %v", onlyHidden)
 	}
 
-	// 验证 NormalizeBannerConfig 也会自动过滤掉被隐藏的分类 4
+	// 排片分类保存的是首选站 type_id，保存时不去按展示分类的显示开关删掉。
 	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{1, 2, 4}})
-	if len(cfg.Categories) != 2 || cfg.Categories[0] != 1 || cfg.Categories[1] != 2 {
-		t.Fatalf("expected NormalizeBannerConfig to filter out hidden category 4, got %v", cfg.Categories)
+	if len(cfg.Categories) != 3 || cfg.Categories[0] != 1 || cfg.Categories[1] != 2 || cfg.Categories[2] != 4 {
+		t.Fatalf("expected banner categories kept as selected type ids, got %v", cfg.Categories)
 	}
 }
 
@@ -227,10 +227,10 @@ func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
 		t.Fatalf("expected empty slice when all categories hidden, got %v", filtered)
 	}
 
-	// 验证 NormalizeBannerConfig 在全隐藏状态下 Categories 被彻底清空
+	// 展示分类全部隐藏时，已选的首选站 type_id 仍然保留，排片时再按该站分类树决定。
 	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{10, 20}})
-	if len(cfg.Categories) != 0 {
-		t.Fatalf("expected empty categories in NormalizeBannerConfig when all hidden, got %v", cfg.Categories)
+	if len(cfg.Categories) != 2 || cfg.Categories[0] != 10 || cfg.Categories[1] != 20 {
+		t.Fatalf("expected selected type ids kept, got %v", cfg.Categories)
 	}
 }
 

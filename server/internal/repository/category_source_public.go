@@ -14,6 +14,48 @@ import (
 	"server/internal/repository/support"
 )
 
+// SourceRootTypeIDs 当前采集站前台正在显示的一级分类。id 是该站 type_id，和首页栏目一致。
+func SourceRootTypeIDs(sourceID string) []int64 {
+	tree := GetActiveCategoryTree(sourceID)
+	ids := make([]int64, 0, len(tree.Children))
+	for _, child := range tree.Children {
+		if child == nil || !child.Show || child.Id <= 0 {
+			continue
+		}
+		ids = append(ids, child.Id)
+	}
+	return ids
+}
+
+// ResolveBannerSourceCategories 排片分类只认首选站自己的一级分类。
+// 没选表示不限。旧的整库展示分类编号对不上这个站时，退回该站全部一级分类。
+func ResolveBannerSourceCategories(sourceID string, selected []int64) (ids []int64, fellBack bool) {
+	roots := SourceRootTypeIDs(sourceID)
+	if len(selected) == 0 {
+		return roots, false
+	}
+	allow := make(map[int64]struct{}, len(roots))
+	for _, id := range roots {
+		allow[id] = struct{}{}
+	}
+	out := make([]int64, 0, len(selected))
+	seen := make(map[int64]struct{}, len(selected))
+	for _, id := range selected {
+		if _, ok := allow[id]; !ok {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	if len(out) == 0 {
+		return roots, true
+	}
+	return out, false
+}
+
 // sourceTypeCategoryTree 前台分类树。节点 id 是当前采集站自己的 type_id。
 // 首选站套用分类规则：命中的改名，同一父级下目标名相同的 type 合成一个节点。
 func sourceTypeCategoryTree(sourceId string) model.CategoryTree {
