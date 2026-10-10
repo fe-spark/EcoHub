@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"server/internal/model"
+	"server/internal/notify"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
 )
 
@@ -54,10 +56,17 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) er
 			return errors.New("代理地址格式无效，请输入正确的 http://、https:// 或 socks5:// 地址")
 		}
 	}
-	return repository.SaveProxyConfig(cfg)
+	if err := repository.SaveProxyConfig(cfg); err != nil {
+		return err
+	}
+	filmsnapshot.ClearDynamicPlayCaches()
+	// 代理配置变更，通知客户端与轮询重载连接
+	notify.ReloadTelegramClient()
+	return nil
 }
 
-func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
+// TestProxy 测试代理连通性（固定请求受控公网端点，杜绝 SSRF）
+func (s *ProxyService) TestProxy(proxyURL string) (int64, error) {
 	proxyURL = strings.TrimSpace(proxyURL)
 	if proxyURL == "" {
 		return 0, errors.New("代理地址不能为空")
@@ -68,10 +77,7 @@ func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
 		proxyURL = "http://" + proxyURL
 	}
 
-	target = strings.TrimSpace(target)
-	if target == "" {
-		target = defaultProxyTestTarget
-	}
+	target := defaultProxyTestTarget
 
 	transport := utils.GetOrCreateProxyTransport(proxyURL)
 	client := &http.Client{
@@ -103,27 +109,24 @@ func (s *ProxyService) TestProxy(proxyURL, target string) (int64, error) {
 	return duration, nil
 }
 
+func (s *ProxyService) ResolveSpiderProxy() (bool, string) {
+	return repository.ResolveSpiderProxy()
+}
+
 func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
 	return repository.ResolveSourceProxy(sourceID)
 }
 
-// RememberCustomProxySource 把站点加入「指定站点」名单，便于新建站点沿用本次走代理的选择。
-func (s *ProxyService) RememberCustomProxySource(sourceID string) error {
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return nil
-	}
-	cfg := s.GetConfig()
-	if !cfg.Enabled || cfg.Scope != model.ProxyScopeCustom {
-		return nil
-	}
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			return nil
-		}
-	}
-	cfg.SourceIds = append(cfg.SourceIds, sourceID)
-	return repository.SaveProxyConfig(cfg)
+func (s *ProxyService) ResolveTMDBProxy() (bool, string) {
+	return repository.ResolveTMDBProxy()
+}
+
+func (s *ProxyService) ResolveNotifyProxy() (bool, string) {
+	return repository.ResolveNotifyProxy()
+}
+
+func (s *ProxyService) ResolveUpgradeProxy() (bool, string) {
+	return repository.ResolveUpgradeProxy()
 }
 
 func RedactProxyURL(raw string) string {

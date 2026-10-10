@@ -68,7 +68,7 @@ func ExtractEpisodeCountsFromContents(contents []string) []int {
 	return counts
 }
 
-// LoadExistingEpisodeCountsByMIDs 查库获取 mids 在写库前主站与其它源的各线路分集数。
+// LoadExistingEpisodeCountsByMIDs 查库获取 mids 在写库前各源播放线路分集数。
 // excludeSourceID 非空时跳过该源自己的 playlist，避免把本源旧数据当全局基准。
 func LoadExistingEpisodeCountsByMIDs(tx *gorm.DB, mids []int64, excludeSourceID string) (map[int64][]int, error) {
 	out := make(map[int64][]int, len(mids))
@@ -83,71 +83,23 @@ func LoadExistingEpisodeCountsByMIDs(tx *gorm.DB, mids []int64, excludeSourceID 
 	}
 	excludeSourceID = strings.TrimSpace(excludeSourceID)
 
-	var detailRows []model.MovieDetailInfo
-	if err := tx.Where("mid IN ?", mids).Find(&detailRows).Error; err != nil {
+	q := tx.Model(&model.FilmSourcePlaylist{}).
+		Select("mid, episode_count").
+		Where("mid IN ? AND line_kind = ?", mids, "play")
+	if excludeSourceID != "" {
+		q = q.Where("source_id <> ?", excludeSourceID)
+	}
+
+	type playlistRow struct {
+		Mid          int64
+		EpisodeCount int
+	}
+	var rows []playlistRow
+	if err := q.Find(&rows).Error; err != nil {
 		return nil, err
 	}
-	for _, row := range detailRows {
-		if strings.TrimSpace(row.Content) == "" {
-			continue
-		}
-		var detail model.MovieDetail
-		if err := json.Unmarshal([]byte(row.Content), &detail); err != nil {
-			continue
-		}
-		counts := ExtractEpisodeCountsFromDetail(detail)
-		out[row.Mid] = append(out[row.Mid], counts...)
+	for _, r := range rows {
+		out[r.Mid] = append(out[r.Mid], r.EpisodeCount)
 	}
-
-	keysByMid := LoadMovieMatchKeysByMidsTx(tx, mids)
-	allKeys := make([]string, 0)
-	midsByKey := make(map[string][]int64)
-	for mid, keys := range keysByMid {
-		for _, k := range keys {
-			if k != "" {
-				if len(midsByKey[k]) == 0 {
-					allKeys = append(allKeys, k)
-				}
-				midsByKey[k] = append(midsByKey[k], mid)
-			}
-		}
-	}
-	if len(allKeys) > 0 {
-		const batchSize = 500
-		for i := 0; i < len(allKeys); i += batchSize {
-			end := i + batchSize
-			if end > len(allKeys) {
-				end = len(allKeys)
-			}
-			chunk := allKeys[i:end]
-			q := tx.Model(&model.SlaveMoviePlaylist{}).Where("movie_key IN ?", chunk)
-			if excludeSourceID != "" {
-				q = q.Where("source_id <> ?", excludeSourceID)
-			}
-			var playlistRows []model.SlaveMoviePlaylist
-			if err := q.Find(&playlistRows).Error; err != nil {
-				return nil, err
-			}
-			for _, row := range playlistRows {
-				if strings.TrimSpace(row.Content) == "" {
-					continue
-				}
-				targetMids := midsByKey[row.MovieKey]
-				if len(targetMids) == 0 {
-					continue
-				}
-				var links []model.MovieUrlInfo
-				if err := json.Unmarshal([]byte(row.Content), &links); err != nil {
-					continue
-				}
-				if n := EpisodeCount(links); n > 0 {
-					for _, mid := range targetMids {
-						out[mid] = append(out[mid], n)
-					}
-				}
-			}
-		}
-	}
-
 	return out, nil
 }

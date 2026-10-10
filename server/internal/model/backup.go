@@ -14,6 +14,8 @@ type ConfigBackup struct {
 	Banners      Banners             `json:"banners,omitempty"`
 	Notify       *NotifyConfig       `json:"notify,omitempty"`
 	MappingRules []MappingRuleExport `json:"mappingRules,omitempty"`
+	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
+	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`
 }
 
 // MappingRuleExport 映射规则导出结构（不带数据库 ID）
@@ -33,6 +35,8 @@ type ConfigBackupModules struct {
 	Banners      bool `json:"banners"`
 	Notify       bool `json:"notify"`
 	MappingRules bool `json:"mappingRules"`
+	Proxy        bool `json:"proxy"`
+	TMDB         bool `json:"tmdb"`
 }
 
 // ConfigBackupImportRequest 配置备份导入请求
@@ -44,5 +48,5 @@ type ConfigBackupImportRequest struct {
 
 // Any 是否至少勾选一个模块
 func (m ConfigBackupModules) Any() bool {
-	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.Notify || m.MappingRules
+	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.Notify || m.MappingRules || m.Proxy || m.TMDB
 }

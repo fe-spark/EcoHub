@@ -11,6 +11,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
 	"strconv"
@@ -20,7 +22,7 @@ import (
 
 const (
 	tagSearchCacheTTL    = 2 * time.Hour
-	snapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
+	snapshotSelectFields = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language"
 )
 
 type tagSearchCacheItem struct {
@@ -45,8 +47,14 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		return []model.FilmListSnapshot{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
-		config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	var cacheKey string
+	if st.SourceId != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d:st2",
+			config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
+			config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item tagSearchCacheItem
@@ -54,8 +62,8 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 				page.Total = item.Total
 				page.PageCount = item.PageCount
 				log.Printf(
-					"[FilmClassifySearch] 命中缓存 pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
-					st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
+					"[FilmClassifySearch] 命中缓存 source=%q pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
+					st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
 				)
 				return item.Snapshots
 			}
@@ -72,18 +80,30 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			}
 		}
 
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
-		if st.Pid > 0 {
-			query = query.Where("pid = ?", st.Pid)
-		}
-		if st.Cid > 0 {
-			query = query.Where("cid = ?", st.Cid)
+		listGen := GetSearchCacheVersion()
+		query := applySourceMembership(liveFilmQuery(), st.SourceId)
+		if st.SourceId != "" {
+			if st.Cid > 0 {
+				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "cid", repository.PublicSourceTypeIDs(st.SourceId, "cid", st.Cid))
+			} else if st.Pid > 0 {
+				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "pid", repository.PublicSourceTypeIDs(st.SourceId, "pid", st.Pid))
+			}
+		} else if st.Cid > 0 {
+			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
+		} else if st.Pid > 0 {
+			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 
 		var total int64 = -1
-		countKey := fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",
-			config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		var countKey string
+		if st.SourceId != "" {
+			countKey = fmt.Sprintf("%s:count:v%s:src_%s:%d:%d:%s:%s:%s:%s:st2",
+				config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		} else {
+			countKey = fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",
+				config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
+		}
 		if db.Rdb != nil {
 			if countStr, err := db.Rdb.Get(db.Cxt, countKey).Result(); err == nil && countStr != "" {
 				if parsedTotal, err := strconv.ParseInt(countStr, 10, 64); err == nil && parsedTotal >= 0 {
@@ -96,9 +116,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			if err := query.Count(&total).Error; err != nil {
 				return tagSearchCacheItem{}, err
 			}
-			if db.Rdb != nil {
-				_ = db.Rdb.Set(db.Cxt, countKey, strconv.FormatInt(total, 10), tagSearchCacheTTL).Err()
-			}
+			writeListCache(countKey, []byte(strconv.FormatInt(total, 10)), 10*time.Minute, listGen)
 		}
 
 		calcTotal := int(total)
@@ -107,30 +125,20 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			calcPageCount = 1
 		}
 
-		orderClause := "update_stamp DESC, id DESC"
+		orderClause := "update_stamp DESC, mid DESC"
 		switch st.Sort {
 		case "hits":
-			orderClause = "hits DESC, id DESC"
+			orderClause = "hits DESC, mid DESC"
 		case "score":
-			orderClause = "score DESC, id DESC"
+			orderClause = "score DESC, mid DESC"
 		case "year":
-			orderClause = "year DESC, update_stamp DESC, id DESC"
+			orderClause = "year DESC, update_stamp DESC, mid DESC"
 		}
 
 		offset := shared.PageOffset(page)
-		var ids []uint
-		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+		snapshots, err := findListPage(query, orderClause, offset, page.PageSize)
+		if err != nil {
 			return tagSearchCacheItem{}, err
-		}
-
-		var snapshots []model.FilmListSnapshot
-		if len(ids) > 0 {
-			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
-				return tagSearchCacheItem{}, err
-			}
-		}
-		if snapshots == nil {
-			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := tagSearchCacheItem{
@@ -139,14 +147,8 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 			Snapshots: snapshots,
 		}
 
-		if db.Rdb != nil {
-			ttl := tagSearchCacheTTL
-			if len(snapshots) == 0 {
-				ttl = 60 * time.Second
-			}
-			if raw, err := json.Marshal(item); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-			}
+		if raw, err := json.Marshal(item); err == nil {
+			writeListCache(cacheKey, raw, listCacheTTL(len(snapshots), tagSearchCacheTTL), listGen)
 		}
 		return item, nil
 	})
@@ -288,7 +290,7 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 		}
 
 		// B. 数据库兜底查询（采用延迟关联避免全字段参与 filesort）
-		query := applyNameLikeFilter(db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version), keyword)
+		query := applyNameLikeFilter(liveFilmQuery(), keyword)
 
 		var total int64
 		if err := query.Count(&total).Error; err != nil {
@@ -300,22 +302,12 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 			calcPageCount = 1
 		}
 
-		orderClause := snapshotSortOrderClause(sortField, true)
+		orderClause := liveTieOrder(snapshotSortOrderClause(sortField, true))
 		offset := shared.PageOffset(page)
 
-		var ids []uint
-		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
+		if findErr != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		var snapshots []model.FilmListSnapshot
-		if len(ids) > 0 {
-			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
-				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-			}
-		}
-		if snapshots == nil {
-			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := searchCacheItem{
@@ -348,6 +340,107 @@ func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, so
 	}
 	cachedItem, ok := val.(searchCacheItem)
 	if !ok {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+	page.Total = cachedItem.Total
+	page.PageCount = cachedItem.PageCount
+	return cloneFilmListSnapshots(cachedItem.Snapshots)
+}
+
+func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID string, keyword string, sortField string, page *dto.Page) []model.FilmListSnapshot {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, sortField, page)
+	}
+
+	startedAt := time.Now()
+	page = shared.EnsurePage(page)
+	keyword = strings.TrimSpace(keyword)
+	sortField = utils.NormalizeSearchSortField(sortField)
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = GetActiveSnapshotVersion()
+	}
+	if version == "" || keyword == "" || len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}
+	}
+
+	searchVer := GetSearchCacheVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:sv%s:src_%s:%s:%s:p%d:s%d", config.FilmSearchCachePrefix, version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var item searchCacheItem
+			if json.Unmarshal([]byte(data), &item) == nil {
+				page.Total = item.Total
+				page.PageCount = item.PageCount
+				return item.Snapshots
+			}
+		}
+	}
+
+	sfKey := fmt.Sprintf("v%s:sv%s:src_%s:%s:%s:p%d:s%d", version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
+	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
+		if db.Rdb != nil {
+			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+				var item searchCacheItem
+				if json.Unmarshal([]byte(data), &item) == nil {
+					return item, nil
+				}
+			}
+		}
+
+		if db.Mdb == nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+
+		query := applyNameLikeFilter(applySourceMembership(liveFilmQuery(), sourceID), keyword)
+
+		var total int64
+		if err := query.Count(&total).Error; err != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+		calcTotal := int(total)
+		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
+		if calcPageCount <= 0 {
+			calcPageCount = 1
+		}
+
+		orderClause := liveTieOrder(snapshotSortOrderClause(sortField, true))
+		offset := shared.PageOffset(page)
+
+		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
+		if findErr != nil {
+			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+		}
+
+		item := searchCacheItem{
+			Total:     calcTotal,
+			PageCount: calcPageCount,
+			Snapshots: snapshots,
+		}
+		if db.Rdb != nil {
+			if GetSearchCacheVersion() == searchVer {
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = 1 * time.Minute
+					}
+					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				}
+			}
+		}
+
+		log.Printf("[SearchFilm] Source过滤搜索完成 keyword=%q source=%q sort=%q total=%d page=%d size=%d cost=%s",
+			keyword, sourceID, sortField, calcTotal, page.Current, len(snapshots), time.Since(startedAt))
+		return item, nil
+	})
+
+	cachedItem, ok := val.(searchCacheItem)
+	if err != nil || val == nil || !ok {
 		page.Total = 0
 		page.PageCount = 1
 		return []model.FilmListSnapshot{}

@@ -24,8 +24,8 @@ The master owns film basics, categories, and search. Switching the master, chang
 
 Two keys, not “always merge by Douban ID”:
 
-- **Master identity** (`film_index.content_key`): `vod_{id}` when the source `vod_id` exists, otherwise a title hash. Different `vod_id`s on the master stay as two rows even if the title or Douban ID matches.
-- **Cross-site match** (`movie_match_key` / slave playlist `movie_key`): Douban ID **plus** the normalized title first — the same Douban ID with a different title is not the same film. Title matching strips trailing progress/quality/language noise but keeps version identity (theatrical, 3D, motion comic). Then normalized title#category, plus a bare-title fallback. Category stays on `film_index.pid` / `cid` and is **not** baked into `mid`; the category suffix on the match key keeps same-title films in different categories apart (a finished short drama vs a still-updating cartoon that share a title).
+- **Identity**: one film is one `film_index.mid`. A source `vod_id` is bound to that mid through `movie_source_mapping`.
+- **Cross-site match** (`movie_match_key`): Douban ID **plus** the normalized title first — the same Douban ID with a different title is not the same film. Title matching strips trailing progress/quality/language noise but keeps version identity (theatrical, 3D, motion comic). Then normalized title#category, plus a bare-title fallback. Category stays on `film_index.pid` / `cid` and is **not** baked into `mid`; the category suffix on the match key keeps same-title films in different categories apart (a finished short drama vs a still-updating cartoon that share a title).
 
 **How play sources bind**: a slave is considered only when its normalized title equals the master’s. Douban ID, year, director, and episode shape **veto** a candidate when both sides have values and they conflict; a missing or unknown value on either side does not veto. After vetoes, a unique remaining title binds immediately. If the master catalog has several films with that title, pick by unique Douban ID, then category, then year (same year, then ±1); if none is unique, do not bind. Bound sources are shown as-is — episode shape is not used again as a display filter.
 
@@ -33,32 +33,23 @@ Two keys, not “always merge by Douban ID”:
 
 **Collection order is not restricted**: when a slave’s title hits only one master film and is not vetoed, playlists are written onto that film’s stored primary key — including when the slave’s category is wrong. When several master films share the title, pick by Douban / category / year; otherwise they use the slave’s own candidate keys (Douban / title#category). Categorized slaves do not write the bare title key.
 
-**Aligning existing data**: for rows written to the wrong key before the upgrade, run the one-off migration script (preview first; not part of startup or collect finalize). Same-title cross-category rows and unmatched rows are skipped — the two “仙逆” films are not merged onto one key:
-
-```bash
-docker exec -it ecohub /app/migrate_slave_playlist_keys --dry-run
-docker exec -it ecohub /app/migrate_slave_playlist_keys
-```
-
 ### What happens if a collect is stopped manually?
 
 Stop interrupts tasks that are still fetching pages and cancels their context. Sources already in `page_done` / `waiting_publish` still finish and publish.
 
-A **master full** collect that errors or is stopped does **not** publish the pending mids from that run (they are discarded). The database may already contain partial writes, but the public read model stays on the previous snapshot. A master increment or a slave collect that already wrote rows still finalizes and publishes that increment.
+Successful pages are already in `film_index`. Stopping or failing later pages leaves those films visible; failed pages go to the retry queue.
 
 ## Snapshots and cache
 
 ### Why publish a snapshot after collect? Why can an incremental publish still take time?
 
-Tables keep changing during collect. Finalize refreshes play summaries, publishes the list snapshot, and swaps the in-memory read model. Public lists, filters, the admin film list, and TVBox / MacCMS all read that result.
-
-An incremental publish still processes affected mids: snapshot rows, filter indexes, and the read model. A large catalog costs database time and memory. The read model stays in memory for the whole library; it is not only a short spike during publish.
+Tables keep changing during collect. Each window refreshes play summaries for those mids and updates the in-memory search index. Public lists, filters, the admin film list, and TVBox / MacCMS read `film_index`. List caches debounce about 5 seconds so a full collect does not flush Redis on every page.
 
 ### Why didn’t the public site change after a config edit?
 
 Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
 
-Film lists, categories, and filters follow the snapshot / read model. Changing sources does not fill the public site until collect finishes and a snapshot is published. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared on publish. If they still differ, check the running instance and request parameters.
+Film lists, categories, and filters read `film_index` and stay locked to the preferred source. Changing sources does not fill the public site until that source is collected. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
 
 ### What does “recently updated” use? Do category pages match TVBox?
 

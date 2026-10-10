@@ -93,15 +93,15 @@ func activateVersion(t *testing.T, version string) {
 	})
 }
 
-// seedSnapshots 按指定版本写入快照数据。
+// seedSnapshots 把列表结构写入 film_index。version 只用于激活读模型，不落快照表。
 func seedSnapshots(t *testing.T, gdb *gorm.DB, version string, rows ...model.FilmListSnapshot) {
 	t.Helper()
-
-	for _, row := range rows {
-		row.SnapshotVersion = version
-		if err := gdb.Create(&row).Error; err != nil {
-			t.Fatalf("写入快照失败: %v", err)
-		}
+	_ = gdb
+	for i := range rows {
+		rows[i].SnapshotVersion = version
+	}
+	if err := filmsnapshot.WriteLiveFilmsFromSnapshots(rows); err != nil {
+		t.Fatalf("写入影片失败: %v", err)
 	}
 }
 

@@ -17,7 +17,7 @@ func InitMappingEngine() {
 
 func ReloadMappingRules() {
 	var rules []model.MappingRule
-	db.Mdb.Find(&rules)
+	db.Mdb.Order("id ASC").Find(&rules)
 
 	var catMappings []model.CategoryMapping
 	db.Mdb.Find(&catMappings)
@@ -93,6 +93,28 @@ func TouchRuleVersion() {
 		return
 	}
 	db.Rdb.Set(db.Cxt, config.RuleVersionKey, time.Now().UnixNano(), 0)
+}
+
+// CurrentMappingSnapshotForTest 取出当前规则快照，测试结束时放回去。
+func CurrentMappingSnapshotForTest() *MappingSnapshot {
+	return getMappingSnapshot()
+}
+
+// StoreMappingSnapshotForTest 换上测试用的规则快照。
+func StoreMappingSnapshotForTest(snapshot *MappingSnapshot) {
+	if snapshot == nil {
+		snapshot = &MappingSnapshot{
+			Area:         map[string]string{},
+			Lang:         map[string]string{},
+			Filter:       map[string]bool{},
+			Attribute:    map[string]string{},
+			Plot:         map[string]string{},
+			CategoryRoot: map[string]string{},
+			CategorySub:  map[string]string{},
+			Source:       map[string]int64{},
+		}
+	}
+	mappingState.Store(snapshot)
 }
 
 func GetRuleVersion() string {

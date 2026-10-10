@@ -15,7 +15,6 @@ import {
 import { useAppMessage } from "@/lib/useAppMessage";
 import { resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
-import SourceTabs from "./SourceTabs";
 import SearchResultPanel from "./SearchResultPanel";
 import useSearchSources from "./useSearchSources";
 import styles from "./index.module.less";
@@ -102,16 +101,12 @@ const SORT_OPTIONS = [
   { key: "year", label: "上映年份" },
 ];
 
-function buildSearchPath(keyword: string, current: string, sort: string, source: string) {
+function buildSearchPath(keyword: string, sort: string) {
   const params = new URLSearchParams({
     search: keyword,
-    current,
   });
-  if (!source && sort) {
+  if (sort) {
     params.set("sort", sort);
-  }
-  if (source) {
-    params.set("source", source);
   }
   return `/search?${params.toString()}`;
 }
@@ -119,26 +114,22 @@ function buildSearchPath(keyword: string, current: string, sort: string, source:
 export default function SearchPageView({
   data,
   keyword,
-  current,
   sort = "",
-  source = "",
   hotKeywords = [],
 }: {
   data: any;
   keyword: string;
-  current: string;
   sort?: string;
-  source?: string;
   hotKeywords?: string[];
 }) {
   const { navigate, isNavigating } = useContentNavigate();
   const { message } = useAppMessage();
   const inputRef = useRef<HTMLInputElement>(null);
   const [searchKeyword, setSearchKeyword] = useState(keyword);
-  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${current}:${sort}:${source}`);
+  const [prevParamsKey, setPrevParamsKey] = useState(`${keyword}:${sort}`);
 
-  if (prevParamsKey !== `${keyword}:${current}:${sort}:${source}`) {
-    setPrevParamsKey(`${keyword}:${current}:${sort}:${source}`);
+  if (prevParamsKey !== `${keyword}:${sort}`) {
+    setPrevParamsKey(`${keyword}:${sort}`);
     setSearchKeyword(keyword);
   }
 
@@ -154,15 +145,14 @@ export default function SearchPageView({
 
   const viewMode = useSyncExternalStore<"grid" | "detail">(subscribeViewMode, getViewModeSnapshot, () => "grid");
   const {
-    sources,
-    activeId,
+    activeSort,
     list,
     page,
     sourceError,
     listLoading,
-    changeSource,
     changePage,
-  } = useSearchSources({ keyword, sort, source, current, data });
+    changeSort,
+  } = useSearchSources({ keyword, sort, data });
 
   useEffect(() => {
     const onFocusSearch = () => {
@@ -249,23 +239,12 @@ export default function SearchPageView({
     }
     setSearchKeyword(trimmed);
     saveHistory(trimmed);
-    navigate(buildSearchPath(trimmed, "1", sort, ""), "搜索加载中...");
-  };
-
-  const handleSortChange = (newSort: string) => {
-    if (newSort === sort && !source) return;
-    setSearchKeyword(keyword);
-    navigate(buildSearchPath(keyword, "1", newSort, ""), "排序切换中...");
+    navigate(buildSearchPath(trimmed, activeSort || sort), "搜索加载中...");
   };
 
   const handlePageChange = (nextPage: number) => {
     setSearchKeyword(keyword);
     void changePage(nextPage);
-  };
-
-  const handleSourceChange = (nextSource: string) => {
-    setSearchKeyword(keyword);
-    changeSource(nextSource);
   };
 
   const handlePlay = (movie: { id?: string | number; sourceId?: string; sourceMid?: string | number }) => {
@@ -439,27 +418,20 @@ export default function SearchPageView({
           )}
         </header>
 
-        {keyword && (
-          <SourceTabs
-            sources={sources}
-            activeId={activeId}
-            onChange={handleSourceChange}
-          />
-        )}
       </div>
 
-      {/* YouTube 风格排序筛选栏 */}
-      {keyword && !activeId && (
+      {/* 排序筛选栏 */}
+      {keyword && (
         <div className={styles.sortBar} aria-label="排序方式">
           {SORT_OPTIONS.map((opt) => {
-            const isActive = (opt.key === "" && (!sort || sort === "relevance")) || opt.key === sort;
+            const isActive = (opt.key === "" && (!activeSort || activeSort === "relevance")) || opt.key === activeSort;
             return (
               <button
                 type="button"
                 key={opt.key}
                 className={`${styles.sortChip} ${isActive ? styles.active : ""}`}
                 aria-pressed={isActive}
-                onClick={() => handleSortChange(opt.key)}
+                onClick={() => changeSort(opt.key)}
               >
                 {opt.label}
               </button>
@@ -470,7 +442,6 @@ export default function SearchPageView({
 
       <SearchResultPanel
         keyword={keyword}
-        current={current}
         list={list}
         page={page}
         totalCount={totalCount}

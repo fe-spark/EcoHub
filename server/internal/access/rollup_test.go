@@ -128,7 +128,7 @@ func TestQueryOverviewReadsDailyForPastDay(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	ov, err := QueryOverview(day)
+	ov, err := QueryOverviewScope(day, "", "")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestQueryOverviewReadsPersistedSeries(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	ov, err := QueryOverview(day)
+	ov, err := QueryOverviewScope(day, "", "")
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestQueryPastDayWithoutRedisReturnsEmpty(t *testing.T) {
 
 	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
 	day := yesterday.Format("2006-01-02")
-	ov, err := QueryOverview(day)
+	ov, err := QueryOverviewScope(day, "", "")
 	if err != nil {
 		t.Fatalf("historical overview must not require redis: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestQueryPastDayWithoutRedisReturnsEmpty(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("persist: %v", err)
 	}
-	items, err := QueryTops(day, "search", 10)
+	items, err := QueryTopsScope(day, "search", "", "", 10)
 	if err != nil {
 		t.Fatalf("historical tops must use daily row even if empty: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestPersistDailyWithDropped(t *testing.T) {
 		t.Fatalf("persist: %v", err)
 	}
 
-	ov, err := QueryOverview(day)
+	ov, err := QueryOverviewScope(day, "", "")
 	if err != nil {
 		t.Fatalf("QueryOverview error: %v", err)
 	}

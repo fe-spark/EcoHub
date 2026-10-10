@@ -69,7 +69,6 @@ func hasRealSearchTagList(value any) bool {
 	return false
 }
 
-
 func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 	cost := time.Since(startedAt)
 	if cost < 500*time.Millisecond {
@@ -220,7 +219,6 @@ func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
 	dto.Success(data, "分类信息获取成功", c)
 }
 
-
 const (
 	searchFilmDefaultPageSize = 12
 	searchFilmMaxPageSize     = 50
@@ -248,8 +246,7 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	page := dto.GetPageParams(c)
 	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
-	sourceID := strings.TrimSpace(c.Query("source"))
-	result := service.IndexSvc.SearchFilm(trimmed, sourceID, sortField, page)
+	result := service.IndexSvc.SearchFilm(trimmed, "", sortField, page)
 	if result.List == nil {
 		result.List = []model.MovieBasicInfo{}
 	}
@@ -287,14 +284,14 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.Area = c.DefaultQuery("Area", "")
 	params.Language = c.DefaultQuery("Language", "")
 	params.Year = yStr
-	params.Sort = c.DefaultQuery("Sort", "update_stamp")
+	params.SourceId = service.IndexSvc.BaselineSourceID()
 
 	page := dto.GetPageParams(c)
 	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
 		page.PageSize = 48
 	}
 
-	cat := service.IndexSvc.GetPidCategory(params.Pid)
+	cat := service.IndexSvc.GetPidCategory(params.Pid, params.SourceId)
 
 	list, err := service.IndexSvc.GetFilmsByTags(params, page)
 	if err != nil {
@@ -348,11 +345,12 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 		return
 	}
 	pid, _ := strconv.ParseInt(pidStr, 10, 64)
-	title := service.IndexSvc.GetPidCategory(pid)
+	sourceId := service.IndexSvc.BaselineSourceID()
+	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
 	page.PageSize = 21
 	dto.Success(gin.H{
 		"title":   title,
-		"content": service.IndexSvc.GetFilmClassify(pid, page),
+		"content": service.IndexSvc.GetFilmClassify(pid, page, sourceId),
 	}, "分类影片信息获取成功", c)
 }

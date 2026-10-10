@@ -39,7 +39,7 @@ export function getTaskActionText(model: number) {
     case 2:
       return "定时采集重试";
     case 3:
-      return "定时孤儿清理";
+      return "片库健康巡检";
     case 4:
       return "定时日志清理";
     case 5:
@@ -58,7 +58,7 @@ export function getTaskTypeText(model: number) {
     case 2:
       return "采集重试";
     case 3:
-      return "孤儿清理";
+      return "健康巡检";
     case 4:
       return "日志清理";
     case 5:

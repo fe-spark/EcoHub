@@ -8,14 +8,15 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"github.com/robfig/cron/v3"
-	filmplaylist "server/internal/repository/film/playlist"
 )
 
 var CronCollect *cron.Cron = CreateCron()
@@ -120,7 +121,7 @@ func ValidSpec(spec string) error {
 	return err
 }
 
-// AddOrphanCleanCron 添加附属站播放列表孤儿清理定时任务。
+// AddOrphanCleanCron 添加片库冗余数据与孤儿清理定时任务。
 func AddOrphanCleanCron(id, spec string) (cron.EntryID, error) {
 	if err := ValidSpec(spec); err != nil {
 		return -99, errors.New(fmt.Sprint("定时任务添加失败，Cron 表达式校验失败: ", err.Error()))
@@ -254,7 +255,7 @@ func runTaskBody(ft model.FilmCollectTask) {
 		FullRecoverSpider()
 		doneDetail = "执行失败采集恢复"
 		log.Println("执行一次失败采集恢复任务")
-	case 3: // 附属站播放列表孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
+	case 3: // 片库冗余数据与孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
 		executeOrphanCleanTask(ft)
 		return
 	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）
@@ -284,46 +285,62 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	defer orphanCleanTaskLock.Unlock()
 
 	startedAt := time.Now()
-
-	// 1. 附属站孤儿治理：两阶段观察期状态机，零锁并发，直接作为后台闲时 GC 执行
-	n, err := filmplaylist.CleanOrphanPlaylists()
-	if err != nil {
-		syslog.Errorf("[CleanOrphan] 附属站孤儿治理执行失败: %v", err)
-		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
-		return
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "片库冗余数据与孤儿清理"
 	}
 
-	// 2. 主站骨架空记录与缺失详情清理：受 publishMu 保护，若遇采集正忙则跳过以优先保证核心采集
 	if collectLifecycle.isBusy() {
-		detail := fmt.Sprintf("回收孤儿 %d；采集发布正忙，空记录与缺失详情留待下轮", n)
+		detail := "采集正在入库，跳过本轮片库清理"
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
-		notify.PublishCronDone(ft.Id, ft.Remark, detail)
+		notify.PublishCronDone(ft.Id, remark, detail)
 		return
 	}
 
-	var m, x int64
-	err = func() error {
+	// 1. 多源播放列表孤儿清理（film_source_playlists 中 mid 不在 film_index 的残余）
+	var n int64
+	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
+		syslog.Errorf("[CleanOrphan] 孤儿播放列表清理失败: %v", res.Error)
+		notify.PublishCronFailed(ft.Id, remark, res.Error.Error())
+		return
+	} else {
+		n = res.RowsAffected
+	}
+
+	// 2. 悬空匹配键与源映射清理
+	k := filmrepo.CleanOrphanMatchKeysAndMappings()
+
+	// 3. 空记录与零线路幽灵影片清理：采集正忙则跳过，优先保证入库。
+	if collectLifecycle.isBusy() {
+		detail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d；采集发布正忙，片库幽灵清理留待下轮", n, k)
+		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
+		notify.PublishCronDone(ft.Id, remark, detail)
+		return
+	}
+
+	var m, p int64
+	err := func() error {
 		collectLifecycle.beginPublish()
 		defer collectLifecycle.endPublish()
 		publishMu.Lock()
 		defer publishMu.Unlock()
 
 		m = filmrepo.CleanEmptyFilms()
-		x = filmrepo.CleanSearchWithoutDetail()
-		if m > 0 || x > 0 {
-			return filmplaylist.RefreshAfterDataClean()
+		p = filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
+		if m > 0 || p > 0 {
+			return filmsnapshot.ActivateRebuiltFilmListSnapshot("")
 		}
 		return nil
 	}()
 	if err != nil {
 		syslog.Errorf("[CleanOrphan] 数据清理后刷新读模型失败: %v", err)
-		notify.PublishCronFailed(ft.Id, ft.Remark, err.Error())
+		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
 
-	cleanDetail := fmt.Sprintf("回收孤儿 %d、空记录 %d、缺失详情 %d", n, m, x)
-	log.Printf("[CleanOrphan] 数据清理任务执行完成，删除了 %d 条孤儿记录、%d 条空记录、%d 条缺失详情记录，cost=%s", n, m, x, time.Since(startedAt))
-	notify.PublishCronDone(ft.Id, ft.Remark, cleanDetail)
+	cleanDetail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d、无线路幽灵 %d、空记录 %d", n, k, p, m)
+	log.Printf("[CleanOrphan] 片库冗余数据与孤儿清理完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
+	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
@@ -339,7 +356,9 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 		return
 	}
 
-	cleanDetail := fmt.Sprintf("清理过期日志文件 %d 个", n)
+	prunedRecords := repository.PruneExpiredFailureRecords(30 * 24 * time.Hour)
+
+	cleanDetail := fmt.Sprintf("清理过期日志文件 %d 个、修剪失败流水 %d 条", n, prunedRecords)
 	log.Printf("[LogClean] 清理过期运行日志完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
 	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
@@ -402,4 +421,3 @@ func IsCronTaskRunning(id string) bool {
 	_, ok := runningCronTasks.Load(id)
 	return ok
 }
-

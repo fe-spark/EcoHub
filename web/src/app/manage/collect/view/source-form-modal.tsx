@@ -1,4 +1,4 @@
-import { Button, Form, Input, Modal, Radio, Switch } from "antd";
+import { Alert, Button, Form, Input, Modal, Radio, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -33,6 +33,7 @@ interface SourceFormModalProps {
   mode: "add" | "edit";
   loading: boolean;
   testing?: boolean;
+  globalSpiderProxyReady?: boolean;
   initialValues: SourceFormValues;
   formNonce: number;
   onCancel: () => void;
@@ -41,23 +42,44 @@ interface SourceFormModalProps {
 }
 
 export default function SourceFormModal(props: SourceFormModalProps) {
-  const { open, mode, loading, testing, initialValues, onCancel, onSubmit, onTest } =
-    props;
+  const {
+    open,
+    mode,
+    loading,
+    testing,
+    globalSpiderProxyReady = false,
+    initialValues,
+    onCancel,
+    onSubmit,
+    onTest,
+  } = props;
   const [form] = Form.useForm<SourceFormValues>();
   const { canWrite } = useManagePermission();
   const title = useMemo(
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
   );
-  const isMasterEdit = mode === "edit" && initialValues.grade === 0;
+
+  const currentUri = Form.useWatch("uri", form);
+  const isUriChanged =
+    mode === "edit" &&
+    Boolean(
+      currentUri &&
+        initialValues.uri &&
+        currentUri.trim() !== initialValues.uri.trim(),
+    );
 
   useEffect(() => {
     if (!open) {
       return;
     }
     form.resetFields();
-    form.setFieldsValue(initialValues);
-  }, [open, form, initialValues]);
+    const effectiveValues: SourceFormValues = {
+      ...initialValues,
+      proxyCollect: globalSpiderProxyReady ? Boolean(initialValues.proxyCollect) : false,
+    };
+    form.setFieldsValue(effectiveValues);
+  }, [open, form, initialValues, globalSpiderProxyReady]);
 
   return (
     <Modal
@@ -102,7 +124,12 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         form={form}
         layout="vertical"
         initialValues={initialValues}
-        onFinish={onSubmit}
+        onFinish={(values) => {
+          if (!globalSpiderProxyReady || !values.proxyCollect) {
+            values.proxyCollect = false;
+          }
+          void onSubmit(values);
+        }}
         disabled={loading}
       >
         <Form.Item
@@ -119,22 +146,14 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         >
           <Input placeholder="请输入采集站接口地址" />
         </Form.Item>
-        <Form.Item
-          label="采集站类型"
-          name="grade"
-          tooltip={
-            isMasterEdit
-              ? "系统必须保留一个主站，主站不可直接降级；如需更换主站，请将其他附属站设为主站。"
-              : "系统只能有一个主采集站。若将当前站点设为主站，原主站会自动降级为附属采集站，并会重新同步分类树。"
-          }
-        >
-          <Radio.Group>
-            <Radio value={0}>主采集站</Radio>
-            <Radio value={1} disabled={isMasterEdit}>
-              附属采集站
-            </Radio>
-          </Radio.Group>
-        </Form.Item>
+        {isUriChanged ? (
+          <Alert
+            showIcon
+            type="warning"
+            style={{ marginBottom: 16 }}
+            title="更换接口地址会清空该站已采集的线路、失败记录和分类，并按新地址重新获取分类。"
+          />
+        ) : null}
         <Form.Item
           label="接口格式"
           name="format"
@@ -185,10 +204,43 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           label="海报图源"
           name="isPosterSource"
           valuePropName="checked"
-          tooltip="采集时用其高清海报填充主站对应影片（全局唯一，关闭自动回退主站）。"
+          tooltip="采集时用其高清海报填充对应影片（全局唯一，关闭后自动回退其它海报）。"
         >
           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
         </Form.Item>
+
+        <Form.Item
+          label={
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span>采集接口代理</span>
+              {!globalSpiderProxyReady && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ant-color-text-tertiary, #8c8c8c)",
+                    fontWeight: "normal",
+                  }}
+                >
+                  （系统网络代理未开启）
+                </span>
+              )}
+            </div>
+          }
+          name="proxyCollect"
+          valuePropName="checked"
+          tooltip={
+            globalSpiderProxyReady
+              ? "源站 API 抓取与详情拉取经由全局网络代理转发"
+              : "系统全局网络代理未开启或爬虫通道未启用，无法开启代理"
+          }
+        >
+          <Switch
+            checkedChildren="开启"
+            unCheckedChildren="直连"
+            disabled={!globalSpiderProxyReady}
+          />
+        </Form.Item>
+
         <Form.Item label="是否启用" name="state" valuePropName="checked">
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>

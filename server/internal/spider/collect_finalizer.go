@@ -4,94 +4,19 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"sync"
 	"time"
 
-	"server/internal/infra/syslog"
-	"server/internal/model"
-	filmcache "server/internal/repository/film/cache"
-	filmplaylist "server/internal/repository/film/playlist"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/repository/film/writer"
 )
-
-var asyncMasterSearchTagsMu sync.Mutex
-
-func finalizeCollectRun(sources []model.FilmSource, affectedMIDs []int64, masterMIDs []int64) ([]int64, []int64, error) {
-	if len(sources) == 0 {
-		return affectedMIDs, masterMIDs, nil
-	}
-	start := time.Now()
-	log.Printf("[Spider][Finalizer] 开始收尾发布 source_count=%d", len(sources))
-
-	if err := flushMasterSideEffects(sources, masterMIDs); err != nil {
-		return affectedMIDs, masterMIDs, err
-	}
-	playSummaryMIDs, err := flushPlaySummaryRefresh(affectedMIDs)
-	affectedMIDs = append(affectedMIDs, playSummaryMIDs...)
-	if err != nil {
-		return affectedMIDs, masterMIDs, err
-	}
-	version, err := publishFilmSnapshot(affectedMIDs)
-	if err != nil {
-		return affectedMIDs, masterMIDs, err
-	}
-	log.Printf("[Spider][Finalizer] 收尾发布完成 version=%s source_count=%d cost=%s", version, len(sources), time.Since(start))
-	if version != "" {
-		filmsnapshot.NotifySnapshotPublished(version)
-	}
-	return affectedMIDs, masterMIDs, nil
-}
-
-func flushMasterSideEffects(sources []model.FilmSource, masterMIDs []int64) error {
-	for _, source := range sources {
-		if source.Grade == model.MasterCollect {
-			scheduleMasterSearchTagsRefresh(masterMIDs)
-			filmcache.ClearTVBoxConfigCache()
-			return nil
-		}
-	}
-	return nil
-}
-
-func scheduleMasterSearchTagsRefresh(masterMIDs []int64) {
-	mids := normalizeAffectedMIDs(masterMIDs)
-	if len(mids) == 0 {
-		return
-	}
-	go func() {
-		asyncMasterSearchTagsMu.Lock()
-		defer asyncMasterSearchTagsMu.Unlock()
-
-		start := time.Now()
-		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新开始 mid_count=%d", len(mids))
-		if err := writer.RefreshSearchTagsByMids(mids...); err != nil {
-			syslog.Errorf("[Spider][Finalizer] 主站搜索标签异步刷新失败 mid_count=%d err=%v", len(mids), err)
-			return
-		}
-		filmcache.ClearAllSearchTagsCache()
-		log.Printf("[Spider][Finalizer] 主站搜索标签异步刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
-	}()
-}
-
-func flushPlaySummaryRefresh(affectedMIDs []int64) ([]int64, error) {
-	start := time.Now()
-	mids, err := filmsnapshot.FlushPlaySummaryRefreshByMids(affectedMIDs)
-	if err != nil {
-		return mids, fmt.Errorf("flush play summary refresh failed: %w", err)
-	}
-	log.Printf("[Spider][Finalizer] 播放源摘要刷新完成 mid_count=%d cost=%s", len(mids), time.Since(start))
-	return mids, nil
-}
 
 func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	start := time.Now()
 	mids := normalizeAffectedMIDs(affectedMIDs)
 	if len(mids) == 0 {
-		if hasSnapshot, err := filmplaylist.HasPublishedFilmListSnapshot(); err != nil {
+		if hasSnapshot, err := filmsnapshot.HasPublishedFilmListSnapshot(); err != nil {
 			return "", err
 		} else if !hasSnapshot {
-			log.Printf("[Spider][Finalizer] 主站快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
+			log.Printf("[Spider][Finalizer] 快照未发布，跳过空增量快照发布 cost=%s", time.Since(start))
 			return "", nil
 		}
 	}
@@ -99,7 +24,7 @@ func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
 	}
-	log.Printf("[Spider][Finalizer] 前台影片列表快照已增量发布 version=%s input=%d updated=%d cost=%s", version, len(mids), updated, time.Since(start))
+	log.Printf("[Spider][Finalizer] 列表可见性已刷新 version=%s input=%d updated=%d cost=%s", version, len(mids), updated, time.Since(start))
 	return version, nil
 }
 

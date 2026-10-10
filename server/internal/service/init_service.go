@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"log"
-	"strings"
 	"time"
 
 	"server/internal/config"
@@ -13,7 +11,6 @@ import (
 	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
-	filmplaylist "server/internal/repository/film/playlist"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 	"server/internal/utils"
@@ -51,9 +48,7 @@ func (s *InitService) DefaultDataInit() {
 	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
-	// 定时任务启动前，从 Redis 备忘恢复保护期、孤儿游标与活跃快照版本到内存。
-	filmplaylist.RestoreMasterSwitchProtection()
-	filmplaylist.RestoreOrphanCleanCursor()
+	// 定时任务启动前，从 Redis 备忘恢复活跃快照版本到内存。
 	filmsnapshot.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
 	s.ensureFilmListSnapshot()
@@ -78,8 +73,6 @@ func (s *InitService) TableInit() {
 		syslog.Errorf("Database AutoMigrate Failed: %v", err)
 		return
 	}
-
-	// 运行版本化自动迁移（只执行一次并记录在 schema_migrations 表中）
 	if err := migration.RunAutoMigrations(db.Mdb); err != nil {
 		syslog.Errorf("Database RunAutoMigrations Failed: %v", err)
 	}
@@ -119,11 +112,7 @@ func defaultBasicConfig() model.BasicConfig {
 
 func (s *InitService) SpiderInit() {
 	s.FilmSourceInit()
-	go func() {
-		if err := SpiderSvc.SyncMasterCategoryTree(); err != nil {
-			log.Printf("[Init] 主站分类同步跳过: %v", err)
-		}
-	}()
+	go SpiderSvc.SyncMissingSourceCategories()
 	s.CollectCrontabInit()
 }
 
@@ -140,20 +129,21 @@ func defaultFilmSources() []model.FilmSource {
 	// 使用 URI 哈希作为 ID，设置递增初始创建时间以保证默认采集站顺序稳定
 	baseTime := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	list := []model.FilmSource{
-		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Grade: model.MasterCollect, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
-		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
-		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Grade: model.SlaveCollect, State: true, Interval: 200, Cd: 24},
+		{Id: "3706668934", Name: "金鹰1(JY)", Uri: `https://jinyingzy.com/api.php/provide/vod`, Sort: 0, State: true, Interval: 200, Cd: 24, IsPosterSource: true},
+		{Id: "1016684692", Name: "速博(SUBO)", Uri: `https://subocaiji.com/api.php/provide/vod`, Sort: 1, State: true, Interval: 200, Cd: 24},
+		{Id: "1208629981", Name: "HD(SN)", Uri: `https://suoniapi.com/api.php/provide/vod/from/snm3u8/`, Sort: 2, State: true, Interval: 200, Cd: 24},
+		{Id: "2608173413", Name: "金鹰2(JY)", Uri: `https://jyzyapi.com/api.php/provide/vod`, Sort: 3, State: true, Interval: 200, Cd: 24},
+		{Id: "2761253814", Name: "红牛(HN)", Uri: `https://www.hongniuzy2.com/api.php/provide/vod/at/json`, Sort: 4, State: true, Interval: 200, Cd: 24},
+		{Id: "2898990914", Name: "非凡(FF)", Uri: `http://cj.ffzyapi.com/api.php/provide/vod/`, Sort: 5, State: true, Interval: 200, Cd: 24},
+		{Id: "3370810636", Name: "HD(LY)", Uri: `https://360zy.com/api.php/provide/vod/at/json`, Sort: 6, State: true, Interval: 200, Cd: 24},
+		{Id: "3423682340", Name: "HD(IK)", Uri: `https://ikunzyapi.com/api.php/provide/vod/at/json`, Sort: 7, State: true, Interval: 200, Cd: 24},
+		{Id: "4194624554", Name: "U酷(UKU)", Uri: `https://api.ukuapi88.com/api.php/provide/vod`, Sort: 8, State: true, Interval: 200, Cd: 24},
+		{Id: "4247318859", Name: "光速(GS)", Uri: `https://api.guangsuapi.com/api.php/provide/vod/json`, Sort: 9, State: true, Interval: 200, Cd: 24},
+		{Id: "531717376", Name: "樱花(YH)", Uri: `https://m3u8.apiyhzy.com/api.php/provide/vod/`, Sort: 10, State: true, Interval: 200, Cd: 24},
+		{Id: "829678680", Name: "HD(BF)", Uri: `https://bfzyapi.com/api.php/provide/vod/`, Sort: 11, State: true, Interval: 200, Cd: 24},
 	}
 	for i := range list {
+		list[i].Sort = i
 		list[i].CreatedAt = baseTime.Add(time.Duration(i+1) * time.Second)
 	}
 	return list
@@ -161,7 +151,7 @@ func defaultFilmSources() []model.FilmSource {
 
 func (s *InitService) CollectCrontabInit() {
 
-	// 幂等对齐系统默认任务并注册（新老数据库统一逻辑，自动补齐缺失任务，零兼容分支）
+	// 已有任务保持原样，缺的任务类型补默认任务。
 	tasks := s.ensureDefaultTasks()
 	for _, task := range tasks {
 		s.registerTask(task)
@@ -181,113 +171,24 @@ func (s *InitService) CollectCrontabInit() {
 	})
 }
 
-const legacyOrphanSpec = "0 0 0 * * *" // 与当前 EveryDaySpec 相同
-
-func shouldMigrateOrphanCleanSpec(id string, spec string) bool {
-	return id == "sys_cron_orphan_clean" && strings.TrimSpace(spec) == legacyOrphanSpec
-}
-
-// ensureDefaultTasks 幂等检查并补齐默认任务（已存在跳过，缺失则自动持久化并返回）
+// ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 	existing := repository.GetAllFilmTask()
-	for i, t := range existing {
-		if shouldMigrateOrphanCleanSpec(t.Id, t.Spec) {
-			t.Spec = config.OrphanCleanSpec
-			if err := repository.UpdateFilmTask(t); err != nil {
-				syslog.Errorf("[Cron] 迁移孤儿清理 spec 失败 id=%s: %v", t.Id, err)
-				continue
-			}
-			existing[i] = t
-			log.Printf("[Cron] 已将 sys_cron_orphan_clean spec 从 %s 迁移为 %s", legacyOrphanSpec, config.OrphanCleanSpec)
-		}
-	}
-
-	// 平滑兼容历史 sys_cron_api_log_clean 或 Model == 4 任务为 sys_cron_log_clean
-	var canonicalTask *model.FilmCollectTask
-	var legacyIndices []int
-
-	for i := range existing {
-		t := &existing[i]
-		if t.Id == "sys_cron_log_clean" {
-			if canonicalTask == nil {
-				canonicalTask = t
-			} else {
-				legacyIndices = append(legacyIndices, i)
-			}
-		} else if t.Id == "sys_cron_api_log_clean" || t.Model == 4 {
-			legacyIndices = append(legacyIndices, i)
-		}
-	}
-
-	if canonicalTask != nil {
-		canonicalTask.Model = 4
-		canonicalTask.Remark = "自动清理过期运行日志"
-		canonicalTask.Time = 0
-		if strings.TrimSpace(canonicalTask.Spec) == "" {
-			canonicalTask.Spec = "0 0 3 * * *"
-		}
-		if err := repository.SaveFilmTask(*canonicalTask); err != nil {
-			syslog.Errorf("[Cron] 保存日志清理任务失败: %v", err)
-		}
-		for _, idx := range legacyIndices {
-			repository.DelFilmTask(existing[idx].Id)
-		}
-	} else if len(legacyIndices) > 0 {
-		firstLegacy := &existing[legacyIndices[0]]
-		repository.DelFilmTask(firstLegacy.Id)
-		firstLegacy.Id = "sys_cron_log_clean"
-		firstLegacy.Model = 4
-		firstLegacy.Remark = "自动清理过期运行日志"
-		firstLegacy.Time = 0
-		if strings.TrimSpace(firstLegacy.Spec) == "" {
-			firstLegacy.Spec = "0 0 3 * * *"
-		}
-		if err := repository.SaveFilmTask(*firstLegacy); err != nil {
-			syslog.Errorf("[Cron] 平滑迁移日志清理任务失败: %v", err)
-		}
-		canonicalTask = firstLegacy
-
-		for _, idx := range legacyIndices[1:] {
-			repository.DelFilmTask(existing[idx].Id)
-		}
-	}
-
-	legacySet := make(map[int]bool, len(legacyIndices))
-	for _, idx := range legacyIndices {
-		legacySet[idx] = true
-	}
-
-	var cleanedExisting []model.FilmCollectTask
-	hasCanonicalInCleaned := false
-	for i, t := range existing {
-		if legacySet[i] {
-			continue
-		}
-		if t.Id == "sys_cron_log_clean" {
-			if !hasCanonicalInCleaned && canonicalTask != nil {
-				cleanedExisting = append(cleanedExisting, *canonicalTask)
-				hasCanonicalInCleaned = true
-			}
-			continue
-		}
-		cleanedExisting = append(cleanedExisting, t)
-	}
-	if canonicalTask != nil && !hasCanonicalInCleaned {
-		cleanedExisting = append(cleanedExisting, *canonicalTask)
-	}
-	existing = cleanedExisting
-
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
 	}
 
 	for _, dt := range defaultFilmTasks() {
-		if !existingModels[dt.Model] {
-			if err := repository.SaveFilmTask(dt); err == nil {
-				existing = append(existing, dt)
-			}
+		if existingModels[dt.Model] {
+			continue
 		}
+		if err := repository.SaveFilmTask(dt); err != nil {
+			syslog.Errorf("[Cron] 补齐默认任务失败 id=%s: %v", dt.Id, err)
+			continue
+		}
+		existing = append(existing, dt)
+		existingModels[dt.Model] = true
 	}
 	return existing
 }
@@ -344,7 +245,7 @@ func defaultFilmTasks() []model.FilmCollectTask {
 
 	orphanTask := model.FilmCollectTask{
 		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.OrphanCleanSpec,
-		Model: 3, State: false, Remark: "清理无主影片的孤儿播放列表",
+		Model: 3, State: false, Remark: "片库冗余数据与孤儿清理",
 	}
 
 	logCleanTask := model.FilmCollectTask{

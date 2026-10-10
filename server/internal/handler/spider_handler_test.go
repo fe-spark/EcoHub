@@ -12,9 +12,9 @@ import (
 	"server/internal/utils"
 )
 
-func TestSpiderHandler_ResetImpactStats(t *testing.T) {
+func TestSpiderHandler_InventoryStats(t *testing.T) {
 	c, w := testContext(http.MethodGet, "/api/manage/spider/clear/stats")
-	SpiderHd.ResetImpactStats(c)
+	SpiderHd.InventoryStats(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}

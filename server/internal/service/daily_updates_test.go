@@ -8,7 +8,7 @@ import (
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
+	"server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -79,7 +79,7 @@ func TestAssembleDailyUpdateCategories(t *testing.T) {
 	if len(got) != 4 {
 		t.Fatalf("want 4 items (全部+电影+动漫+其他), got %+v", got)
 	}
-	if got[0].Pid != notify.DailyPidAll || got[0].Name != "全部" || got[0].Count != 17 {
+	if got[0].Pid != film.DailyPidAll || got[0].Name != "全部" || got[0].Count != 17 {
 		t.Fatalf("all: %+v", got[0])
 	}
 	if got[1].Pid != 1 || got[1].Count != 10 {
@@ -88,7 +88,7 @@ func TestAssembleDailyUpdateCategories(t *testing.T) {
 	if got[2].Pid != 3 || got[2].Name != "动漫" {
 		t.Fatalf("anime: %+v", got[2])
 	}
-	if got[3].Pid != notify.DailyPidOther || got[3].Count != 3 {
+	if got[3].Pid != film.DailyPidOther || got[3].Count != 3 {
 		t.Fatalf("other: %+v", got[3])
 	}
 }
@@ -108,24 +108,16 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 	version := "v_test_daily"
 	// 插入测试影片索引与快照
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001, ContentKey: "vod_1"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1001},
 		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, Cid: 11},
 		FilmIndexContent:  model.FilmIndexContent{Name: "测试电影1", UpdateStamp: now.Unix()},
-	})
-	gdb.Create(&model.FilmListSnapshot{
-		SnapshotVersion: version,
-		Mid:             1001,
-		Name:            "测试电影1",
-		Pid:             1,
-		Cid:             11,
-		UpdateStamp:     now.Unix(),
 	})
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 	gdb.Create(&model.Category{Id: 1, Name: "电影", Show: true})
 
 	req := DailyUpdateListReq{
-		Pid: 0,
-		Page: &dto.Page{Current: 1, PageSize: 21},
+		Pid:    0,
+		Page:   &dto.Page{Current: 1, PageSize: 21},
 		Random: false,
 	}
 

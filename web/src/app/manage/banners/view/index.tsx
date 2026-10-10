@@ -39,7 +39,7 @@ const { Text } = Typography;
 
 export default function BannersPageView() {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
-  const [config, setConfig] = useState<BannerConfig>({ mode: "manual", strategy: "hot_random", count: 6, autoTMDB: true, refreshCron: "" });
+  const [config, setConfig] = useState<BannerConfig>({ mode: "manual", strategy: "hot_random", count: 6, autoTMDB: false, refreshCron: "" });
   const [loading, setLoading] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -427,12 +427,7 @@ export default function BannersPageView() {
           </Tooltip>
 
           <Popconfirm
-            title={isAuto ? "确认从当前排片中移除？" : "确认删除该轮播图？"}
-            description={
-              isAuto
-                ? "移除后当前轮播不再展示此影片，下次自动换一批或定时排片时重新计算。"
-                : "删除后首页将不再轮播展示该影片。"
-            }
+            title={isAuto ? "从当前排片移除？" : "删除该轮播？"}
             onConfirm={() => handleDelete(record.id)}
             okText="确定"
             cancelText="取消"

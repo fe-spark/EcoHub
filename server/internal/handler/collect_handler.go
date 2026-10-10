@@ -56,15 +56,17 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
 	}
-	if body.UseProxy != nil && *body.UseProxy {
-		id := body.Id
-		if id == "" {
-			id = utils.GenerateHashKey(body.Uri)
-		}
-		if err := service.ProxySvc.RememberCustomProxySource(id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已添加，但加入代理名单失败: ", err.Error()), c)
+	id := body.Id
+	if id == "" {
+		id = utils.GenerateHashKey(body.Uri)
+	}
+	if err := service.SpiderSvc.SyncSourceCategories(id); err != nil {
+		if delErr := service.CollectSvc.DelFilmSource(id); delErr != nil {
+			dto.Failed(fmt.Sprintf("分类获取失败，且采集站未能撤回: %s", err.Error()), c)
 			return
 		}
+		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
+		return
 	}
 	dto.SuccessOnlyMsg("添加成功", c)
 }
@@ -108,9 +110,9 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
 	}
-	if body.UseProxy != nil && *body.UseProxy {
-		if err := service.ProxySvc.RememberCustomProxySource(s.Id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已更新，但加入代理名单失败: ", err.Error()), c)
+	if isUriChanged || isFormatChanged {
+		if err := service.SpiderSvc.SyncSourceCategories(s.Id); err != nil {
+			dto.Failed(fmt.Sprint("资源站已更新，但分类获取失败: ", err.Error()), c)
 			return
 		}
 	}
@@ -141,6 +143,21 @@ func (h *CollectHandler) FilmSourceChange(c *gin.Context) {
 		}
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
+}
+
+func (h *CollectHandler) FilmSourceSort(c *gin.Context) {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.CollectSvc.SortFilmSources(req.Ids); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("排序保存成功", c)
 }
 
 func (h *CollectHandler) FilmSourceBatchChange(c *gin.Context) {
@@ -224,18 +241,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				Id:    src.Id,
 				Name:  src.Name,
 				Uri:   src.Uri,
-				Grade: src.Grade,
+				Sort:  src.Sort,
 				State: src.State,
 			}
 			if spider.IsTaskRunning(src.Id) {
 				item.Reason = "站点正在采集，已跳过检测"
-				mu.Lock()
-				skipped = append(skipped, item)
-				mu.Unlock()
-				return
-			}
-			if src.Grade == model.MasterCollect {
-				item.Reason = "主站无法直接删除，请先降级为附属站"
 				mu.Lock()
 				skipped = append(skipped, item)
 				mu.Unlock()
@@ -406,6 +416,7 @@ func (h *CollectHandler) FailureRecordList(c *gin.Context) {
 	}
 
 	params.Paging = dto.GetPageParams(c)
+	params = service.CollectSvc.PrepareRecordQuery(params)
 
 	options := service.CollectSvc.GetRecordOptions()
 	list := service.CollectSvc.GetRecordList(params)

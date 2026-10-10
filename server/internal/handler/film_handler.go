@@ -22,6 +22,7 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	var s = model.SearchVo{Paging: &dto.Page{}}
 	var err error
 
+	s.SourceId = strings.TrimSpace(c.DefaultQuery("sourceId", ""))
 	s.Name = c.DefaultQuery("name", "")
 	s.Pid, err = strconv.ParseInt(c.DefaultQuery("pid", "0"), 10, 64)
 	if err != nil {
@@ -72,7 +73,12 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 
 	s.Paging = dto.GetPageParams(c)
 	sl := service.FilmSvc.GetFilmPage(s)
-	options := service.FilmSvc.GetSearchOptions()
+	options := service.FilmSvc.GetSearchOptions(s.SourceId)
+	if s.SourceId == "" {
+		if curr, ok := options["currentSourceId"].(string); ok && curr != "" {
+			s.SourceId = curr
+		}
+	}
 	dto.Success(gin.H{
 		"params":  s,
 		"list":    sl,
@@ -123,10 +129,28 @@ func (h *FilmHandler) FilmDelete(c *gin.Context) {
 
 // ----------------------------------------------------影片分类处理----------------------------------------------------
 
-// FilmClassTree 影片分类树数据
+// FilmClassTree 影片分类树数据。scoped=1 时只返回指定采集站的分类，并带上站点选项。
 func (h *FilmHandler) FilmClassTree(c *gin.Context) {
-	tree := service.FilmSvc.GetFilmClassTree()
-	dto.Success(tree, "影片分类信息获取成功", c)
+	if c.Query("scoped") != "1" {
+		tree := service.FilmSvc.GetFilmClassTree()
+		dto.Success(tree, "影片分类信息获取成功", c)
+		return
+	}
+	view := service.FilmSvc.GetScopedClassTree(c.Query("sourceId"))
+	sources := make([]gin.H, 0, len(view.Sources))
+	for _, source := range view.Sources {
+		sources = append(sources, gin.H{"id": source.Id, "name": source.Name})
+	}
+	dto.Success(gin.H{
+		"id":              view.Tree.Id,
+		"pid":             view.Tree.Pid,
+		"name":            view.Tree.Name,
+		"show":            view.Tree.Show,
+		"children":        view.Tree.Children,
+		"sources":         sources,
+		"defaultSourceId": view.DefaultSourceId,
+		"currentSourceId": view.CurrentSourceId,
+	}, "影片分类信息获取成功", c)
 }
 
 // FindFilmClass 获取指定ID对应的影片分类信息
@@ -170,6 +194,7 @@ func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
 func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 	var req struct {
 		Children []*model.CategoryTree `json:"children"`
+		SourceId string                `json:"sourceId"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("保存失败, 请求参数异常", c)
@@ -179,7 +204,13 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		dto.Failed("保存失败, 分类结构不能为空", c)
 		return
 	}
-	if err := service.FilmSvc.SaveClassTree(req.Children); err != nil {
+	var err error
+	if strings.TrimSpace(req.SourceId) != "" {
+		err = service.FilmSvc.SaveSourceClassTree(req.SourceId, req.Children)
+	} else {
+		err = service.FilmSvc.SaveClassTree(req.Children)
+	}
+	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}

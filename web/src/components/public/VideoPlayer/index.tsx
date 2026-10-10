@@ -15,6 +15,7 @@ interface VideoPlayerProps {
   onEnded?: () => void;
   onTimeUpdate?: (currentTime: number, duration: number) => void;
   onError?: (error: any) => void;
+  onPlayStart?: () => void;
 }
 
 /**
@@ -30,6 +31,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onEnded,
   onTimeUpdate,
   onError,
+  onPlayStart,
 }) => {
   const artRef = useRef<HTMLDivElement>(null);
   const playerRef = useRef<Artplayer | null>(null);
@@ -38,10 +40,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   const [retryCount, setRetryCount] = useState(0);
 
   // 回调保护
-  const callbacks = useRef({ onEnded, onTimeUpdate, onError });
+  const callbacks = useRef({ onEnded, onTimeUpdate, onError, onPlayStart });
   useEffect(() => {
-    callbacks.current = { onEnded, onTimeUpdate, onError };
-  }, [onEnded, onTimeUpdate, onError]);
+    callbacks.current = { onEnded, onTimeUpdate, onError, onPlayStart };
+  }, [onEnded, onTimeUpdate, onError, onPlayStart]);
 
   // 核心初始化 Effect
   useEffect(() => {
@@ -191,7 +193,10 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
       callbacks.current.onError?.(err);
     });
 
-    art.on("video:playing", () => setHasError(false));
+    art.on("video:playing", () => {
+      setHasError(false);
+      callbacks.current.onPlayStart?.();
+    });
 
     // 移动端全屏事件接管：针对 iOS 等不支持标准全屏 API 的设备，调用原生 video.webkitEnterFullscreen
     art.on("fullscreen", (state) => {

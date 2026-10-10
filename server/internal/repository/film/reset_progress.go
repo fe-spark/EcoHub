@@ -1,11 +1,6 @@
 package film
 
-import (
-	"sync"
-
-	"server/internal/infra/db"
-	"server/internal/model"
-)
+import "sync"
 
 // ResetProgress 数据重置实时进度（前端轮询展示真实进度）
 type ResetProgress struct {
@@ -13,27 +8,6 @@ type ResetProgress struct {
 	Percent int    `json:"percent"` // 0-100 真实完成百分比
 	Stage   string `json:"stage"`   // 当前阶段描述
 	Error   string `json:"error"`   // 失败原因（失败时非空）
-}
-
-// ResetImpactStats 数据重置影响面统计（将清空的数据量）
-type ResetImpactStats struct {
-	Films      int64 `json:"films"`      // 影视库存
-	Snapshots  int64 `json:"snapshots"`  // 列表快照
-	Categories int64 `json:"categories"` // 分类
-	Failures   int64 `json:"failures"`   // 失败记录
-}
-
-// GetResetImpactStats 统计将被数据重置清空的数据量，用于重置前展示影响面
-func GetResetImpactStats() ResetImpactStats {
-	var stats ResetImpactStats
-	if db.Mdb == nil {
-		return stats
-	}
-	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&stats.Films).Error
-	_ = db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Count(&stats.Snapshots).Error
-	_ = db.Mdb.Model(&model.Category{}).Count(&stats.Categories).Error
-	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&stats.Failures).Error
-	return stats
 }
 
 var resetProg = struct {

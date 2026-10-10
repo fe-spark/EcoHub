@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Descriptions, Statistic, Tag, Typography } from "antd";
+import { Card, Descriptions, Select, Statistic, Tag, Typography } from "antd";
 import Link from "next/link";
-import { ApiGet } from "@/lib/client-api";
+import { ApiGet, ApiPost } from "@/lib/client-api";
+import { useAppMessage } from "@/lib/useAppMessage";
 import type { FilmSource } from "./types";
 import styles from "./collect-overview.module.less";
 
@@ -19,7 +20,8 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    grade: Number(item.grade ?? 1),
+    sort: Number(item.sort ?? 0),
+    isPrimary: Boolean(item.isPrimary),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastCollectTime: item.lastCollectTime,
@@ -28,10 +30,16 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
   };
 }
 
-/** 工作台：运行概览 + 当前主采集站（进入页面拉取一次） */
+/** 工作台：运行概览 + 优先采集站（进入页面拉取一次） */
+function orderBySort(list: FilmSource[]) {
+  return [...list].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id.localeCompare(b.id));
+}
+
 export default function CollectOverview() {
+  const { message, modal } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
+  const [switching, setSwitching] = useState(false);
   const mountedRef = useRef(false);
 
   const load = useCallback(async () => {
@@ -65,25 +73,74 @@ export default function CollectOverview() {
     () => ({
       total: siteList.length,
       enabled: siteList.filter((item) => item.state).length,
-      masters: siteList.filter((item) => item.grade === 0).length,
+      disabled: siteList.filter((item) => !item.state).length,
     }),
     [siteList],
   );
 
-  const masterSite = useMemo(
-    () => siteList.find((item) => item.grade === 0) ?? null,
+  const topSite = useMemo(
+    () => orderBySort(siteList).find((item) => item.state) ?? null,
     [siteList],
   );
+  const switchCandidates = useMemo(
+    () => orderBySort(siteList).filter((item) => item.state && item.id !== topSite?.id),
+    [siteList, topSite?.id],
+  );
 
-  const masterStatus = useMemo(() => {
-    if (stats.masters === 1) {
-      return { text: "正常", color: "success" as const };
+  const askSwitchPrimary = (sourceId: string) => {
+    if (!sourceId || sourceId === topSite?.id || switching) {
+      return;
     }
-    if (stats.masters === 0) {
-      return { text: "缺少主采集站", color: "warning" as const };
+    const chosen = siteList.find((item) => item.id === sourceId && item.state);
+    if (!chosen) {
+      return;
     }
-    return { text: `${stats.masters} 个主采集站`, color: "error" as const };
-  }, [stats.masters]);
+    modal.confirm({
+      title: "切换首选站？",
+      content: `首选站改为「${chosen.name}」`,
+      okText: "切换",
+      cancelText: "取消",
+      centered: true,
+      onOk: () => switchPrimary(sourceId),
+    });
+  };
+
+  const switchPrimary = async (sourceId: string) => {
+    const chosen = siteList.find((item) => item.id === sourceId && item.state);
+    if (!chosen || switching) {
+      return;
+    }
+    const previous = siteList;
+    const next = [chosen, ...orderBySort(siteList).filter((item) => item.id !== chosen.id)].map((item, index) => ({
+      ...item,
+      sort: index,
+      isPrimary: item.id === chosen.id,
+    }));
+    setSiteList(next);
+    setSwitching(true);
+    try {
+      const resp = await ApiPost("/manage/collect/sort", { ids: next.map((item) => item.id) });
+      if (!mountedRef.current) {
+        return;
+      }
+      if (resp.code !== 0) {
+        setSiteList(previous);
+        message.error(resp.msg || "切换首选站失败");
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("ecohub:primary-source", { detail: chosen.id }));
+      message.success(`首选站：${chosen.name}`);
+    } catch {
+      if (mountedRef.current) {
+        setSiteList(previous);
+        message.error("切换首选站失败");
+      }
+    } finally {
+      if (mountedRef.current) {
+        setSwitching(false);
+      }
+    }
+  };
 
   return (
     <div className={styles.overviewGrid}>
@@ -110,38 +167,55 @@ export default function CollectOverview() {
           </div>
           <div className={styles.overviewCol}>
             <div className={styles.overviewStat}>
-              <Statistic
-                title="主采集站"
-                value={stats.masters}
-                suffix={<Tag color={masterStatus.color}>{masterStatus.text}</Tag>}
-              />
+              <Statistic title="已停用" value={stats.disabled} />
             </div>
           </div>
         </div>
       </Card>
 
       <Card
-        title="当前主采集站"
+        title="当前首选站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
-        extra={masterSite ? <Tag color="gold">已生效</Tag> : <Tag color="error">未配置</Tag>}
+        extra={
+          topSite ? <Tag color="gold">首选站</Tag> : <Tag color="warning">未配置</Tag>
+        }
       >
-        {masterSite ? (
+        {topSite ? (
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>
-            <Descriptions.Item label="名称">{masterSite.name}</Descriptions.Item>
+            <Descriptions.Item label="名称">
+              {switchCandidates.length > 0 ? (
+                <Select
+                  className={styles.sourceSelect}
+                  size="middle"
+                  value={topSite.id}
+                  loading={switching}
+                  disabled={switching}
+                  popupMatchSelectWidth={false}
+                  options={orderBySort(siteList)
+                    .filter((item) => item.state)
+                    .map((item) => ({ value: item.id, label: item.name }))}
+                  onChange={(sourceId) => {
+                    askSwitchPrimary(sourceId);
+                  }}
+                />
+              ) : (
+                topSite.name
+              )}
+            </Descriptions.Item>
             <Descriptions.Item label="接口地址">
               <Typography.Link
-                href={masterSite.uri}
+                href={topSite.uri}
                 target="_blank"
                 rel="noopener noreferrer"
                 className={styles.masterLink}
               >
-                {masterSite.uri}
+                {topSite.uri}
               </Typography.Link>
             </Descriptions.Item>
             <Descriptions.Item label="启用状态">
-              <Tag color={masterSite.state ? "success" : "default"} variant="filled">
-                {masterSite.state ? "启用中" : "已停用"}
+              <Tag color={topSite.state ? "success" : "default"} variant="filled">
+                {topSite.state ? "启用中" : "已停用"}
               </Tag>
             </Descriptions.Item>
           </Descriptions>
@@ -152,7 +226,7 @@ export default function CollectOverview() {
             </Descriptions.Item>
             <Descriptions.Item label="说明">
               需要先{" "}
-              <Link href="/manage/collect">配置主采集站</Link>
+              <Link href="/manage/collect">添加采集站</Link>
             </Descriptions.Item>
           </Descriptions>
         )}

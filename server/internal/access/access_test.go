@@ -406,6 +406,15 @@ func resetPageHit() {
 	pageHitMu.Unlock()
 }
 
+func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {
+	return buildPageEventPayload(c, TrackViewPayload{
+		Action:   action,
+		Resource: resource,
+		Source:   source,
+		Path:     path,
+	})
+}
+
 func TestBuildPageEvent(t *testing.T) {
 	config.AccessIPSalt = []byte("test-salt")
 	resetPageHit()

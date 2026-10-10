@@ -3,15 +3,18 @@ export interface FilmSource {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
+  sort?: number;
   isPosterSource?: boolean;
+  isPrimary?: boolean;
   interval: number;
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
   lastCollectTime?: string;
   progress?: CollectProgress | null;
-  proxyEnabled?: boolean;
+  proxyCollect?: boolean;
+  /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
+  categoryReady?: boolean;
   createdAt?: string;
 }
 
@@ -103,7 +106,7 @@ export function resolveCollectProgressStatusText(progress?: CollectProgress | nu
 export interface BatchOption {
   id: string;
   name: string;
-  grade?: number;
+  sort?: number;
   state?: boolean;
 }
 
@@ -112,7 +115,7 @@ export interface InvalidSourceItem {
   id: string;
   name: string;
   uri: string;
-  grade: number;
+  sort?: number;
   state: boolean;
   reason: string;
 }
@@ -140,24 +143,24 @@ export interface SourceFormValues {
   name: string;
   uri: string;
   state: boolean;
-  grade: number;
   format: "json" | "xml";
   isPosterSource: boolean;
   interval?: number;
   cd?: number;
   domainReplaceRules?: string;
+  proxyCollect?: boolean;
 }
 
 export const SOURCE_FORM_DEFAULTS: SourceFormValues = {
   name: "",
   uri: "",
   state: true,
-  grade: 1,
   format: "json",
   isPosterSource: false,
   interval: 0,
   cd: 24,
   domainReplaceRules: "",
+  proxyCollect: false,
 };
 
 export const collectDuration = [

@@ -15,6 +15,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/utils"
 )
 
 type TMDBService struct{}
@@ -22,8 +23,11 @@ type TMDBService struct{}
 var TMDBSvc = new(TMDBService)
 
 const (
+	httpTimeout = 15 * time.Second
+)
+
+var (
 	tmdbAPIBaseURL = "https://api.themoviedb.org/3"
-	httpTimeout    = 15 * time.Second
 )
 
 var (
@@ -64,24 +68,12 @@ func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
 	return s, extractedYear
 }
 
-func getHTTPClient(proxyStr string) *http.Client {
+func getHTTPClient() *http.Client {
 	var transport *http.Transport
-	if t, ok := http.DefaultTransport.(*http.Transport); ok {
-		transport = t.Clone()
+	if ok, proxyURL := repository.ResolveTMDBProxy(); ok && proxyURL != "" {
+		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	} else {
-		transport = &http.Transport{}
-	}
-
-	proxyStr = strings.TrimSpace(proxyStr)
-	if proxyStr != "" {
-		if !strings.HasPrefix(proxyStr, "http://") && !strings.HasPrefix(proxyStr, "https://") && !strings.HasPrefix(proxyStr, "socks5://") {
-			proxyStr = "http://" + proxyStr
-		}
-		if u, err := url.Parse(proxyStr); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
-	} else {
-		transport.Proxy = http.ProxyFromEnvironment
+		transport = utils.GetOrCreateProxyTransport("")
 	}
 	return &http.Client{
 		Transport: transport,
@@ -94,9 +86,14 @@ func (s *TMDBService) GetConfig() model.TMDBConfig {
 	return repository.PublicTMDBConfig(repository.GetTMDBConfig())
 }
 
+func tmdbScrapeReady(cfg model.TMDBConfig) bool {
+	return cfg.Enabled && strings.TrimSpace(cfg.ApiKey) != ""
+}
+
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 	existing := repository.GetTMDBConfig()
+	wasReady := tmdbScrapeReady(existing)
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
@@ -104,9 +101,14 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 		return err
 	}
 
-	// 级联处理：关闭 TMDB 或清空 API Key 时仅暂停在线刮削，不强制切换手动模式，保留当前排片
-	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
+	nowReady := tmdbScrapeReady(cfg)
+	// 关闭或清空密钥时只停在线刮削，不改轮播模式，也不清掉已有轮播。
+	if wasReady && !nowReady {
 		BannerAutoSvc.HandleTMDBDisabled()
+	}
+	// 从关到开，且轮播里「影片是否刮削」本来就是开，立刻换一批。
+	if !wasReady && nowReady {
+		BannerAutoSvc.RefreshAfterTMDBEnabled()
 	}
 
 	return nil
@@ -122,7 +124,7 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 		return errors.New("API Key 不能为空")
 	}
 
-	client := getHTTPClient(strings.TrimSpace(cfg.Proxy))
+	client := getHTTPClient()
 	testURL := fmt.Sprintf("%s/configuration?api_key=%s", tmdbAPIBaseURL, url.QueryEscape(apiKey))
 
 	req, err := http.NewRequest(http.MethodGet, testURL, nil)
@@ -187,7 +189,7 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 	}
 	year = strings.TrimSpace(year)
 
-	client := getHTTPClient(cfg.Proxy)
+	client := getHTTPClient()
 	var endpoint string
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
@@ -361,7 +363,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		mediaType = "movie"
 	}
 
-	client := getHTTPClient(cfg.Proxy)
+	client := getHTTPClient()
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
 	qVals.Set("language", cfg.Language)
@@ -462,4 +464,3 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		Actors:        actors,
 	}, nil
 }
-

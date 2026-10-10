@@ -26,7 +26,8 @@ func setupOthersFilterTestDB(t *testing.T) *gorm.DB {
 	if err := gdb.AutoMigrate(
 		&model.Category{},
 		&model.SearchTagItem{},
-		&model.FilmListSnapshot{},
+		&model.FilmIndex{},
+		&model.FilmSourcePlaylist{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -95,10 +96,8 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 			Name: "混合剧情片", Area: "美国", Language: "普通话", Year: 2024, ClassTag: "动作,科幻",
 		},
 	}
-	for _, s := range snapshots {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
 	}
 
 	// 验证 1: 常规筛选 Area=中国大陆 -> 仅命中 Mid=1
@@ -237,10 +236,8 @@ func TestListFilmSnapshotsByTags_OthersFilter_OverDisplayLimit(t *testing.T) {
 		{SnapshotVersion: version, Mid: 2, Pid: targetPid, Name: "展示区外影片", Area: "巴西"},
 		{SnapshotVersion: version, Mid: 3, Pid: targetPid, Name: "展示区外影片二", Area: "加拿大"},
 	}
-	for _, s := range snapshots {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
@@ -275,15 +272,14 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 	// 插入 5 条数据，update_stamp 递增
 	for i := 1; i <= 5; i++ {
 		s := model.FilmListSnapshot{
-			ID:              uint(i),
 			SnapshotVersion: version,
 			Mid:             int64(i),
 			Pid:             targetPid,
 			Name:            fmt.Sprintf("电影_%d", i),
 			UpdateStamp:     int64(1000 + i),
 		}
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot %d: %v", i, err)
+		if err := WriteLiveFilmsFromSnapshots([]model.FilmListSnapshot{s}); err != nil {
+			t.Fatalf("seed live film %d: %v", i, err)
 		}
 	}
 

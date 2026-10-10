@@ -29,6 +29,7 @@ export interface TrackPageViewOptions {
   resource_poster?: string;
   resource_cat?: string;
   source?: "web" | "android" | "harmony" | "ios" | string;
+  collect_source?: string;
   path?: string;
   page?: string;
   page_title?: string;
@@ -56,6 +57,7 @@ export function trackPageView(
   let finalResourcePoster = resourcePoster || "";
   let finalResourceCat = resourceCat || "";
   let finalSource = source || "web";
+  let collectSource = "";
   let finalPath = path || (window.location.pathname + window.location.search);
   let finalPage = finalPath;
   let pageTitle = typeof document !== "undefined" ? document.title : "";
@@ -68,6 +70,7 @@ export function trackPageView(
     finalResourcePoster = actionOrOptions.resource_poster || finalResourcePoster;
     finalResourceCat = actionOrOptions.resource_cat || finalResourceCat;
     finalSource = actionOrOptions.source || "web";
+    collectSource = actionOrOptions.collect_source || "";
     finalPath = actionOrOptions.path || (window.location.pathname + window.location.search);
     finalPage = actionOrOptions.page || finalPath;
     if (actionOrOptions.page_title) {
@@ -99,6 +102,7 @@ export function trackPageView(
     resource_poster: finalResourcePoster,
     resource_cat: finalResourceCat,
     source: finalSource,
+    ...(collectSource ? { collect_source: collectSource } : {}),
     path: finalPath,
     page: finalPage,
     page_title: pageTitle,

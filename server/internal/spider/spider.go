@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
@@ -28,10 +28,19 @@ import (
 
 var spiderCore = &JsonCollect{}
 
-func requestForSource(uri, sourceID string) utils.RequestInfo {
-	r := utils.RequestInfo{Uri: uri, Params: url.Values{}}
-	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {
-		r.ProxyURL = proxy
+func requestForSource(s *model.FilmSource) utils.RequestInfo {
+	if s == nil {
+		return utils.RequestInfo{Params: url.Values{}}
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	if s.ProxyCollect {
+		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+			r.ProxyURL = proxy
+		}
+	} else if s.Id != "" {
+		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+			r.ProxyURL = proxy
+		}
 	}
 	return r
 }
@@ -59,6 +68,7 @@ func init() {
 		NoteSourceError:     noteSourceError,
 		NotifySourceFailed:  emitSourceFailedNotify,
 		BatchSummaryEnabled: func() bool { return notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) },
+		ResolveSpiderProxy:  repository.ResolveSpiderProxy,
 		ResolveSourceProxy:  repository.ResolveSourceProxy,
 	})
 }
@@ -71,22 +81,19 @@ func countLiveCollectTasks() int {
 	return progress.TaskCount()
 }
 
-// prioritizeCollectSources 主采集站优先派发，便于有限站并发时先跑主站。
+// prioritizeCollectSources 采集站排序（按后台设置的 Sort 升序优先派发）。
 func prioritizeCollectSources(sources []model.FilmSource) []model.FilmSource {
 	if len(sources) <= 1 {
 		return sources
 	}
-	out := make([]model.FilmSource, 0, len(sources))
-	for _, s := range sources {
-		if s.Grade == model.MasterCollect {
-			out = append(out, s)
+	out := make([]model.FilmSource, len(sources))
+	copy(out, sources)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Sort != out[j].Sort {
+			return out[i].Sort < out[j].Sort
 		}
-	}
-	for _, s := range sources {
-		if s.Grade != model.MasterCollect {
-			out = append(out, s)
-		}
-	}
+		return out[i].Id < out[j].Id
+	})
 	return out
 }
 
@@ -135,25 +142,6 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		return
 	}
 
-	if db.Mdb != nil {
-		var categoryCount int64
-		_ = db.Mdb.Model(&model.Category{}).Count(&categoryCount).Error
-		if categoryCount == 0 {
-			syslog.Warnf("[Spider] 检测到本地分类树为空(0 个分类)，尝试从主站同步分类树...")
-			target := repository.PickMasterSourceForCategory()
-			if target == nil {
-				syslog.Warnf("[Spider] 无主采集站，跳过分类树同步（没有主站就不能有分类树）")
-			} else if err := CollectCategory(target); err != nil {
-				syslog.Errorf("[Spider] 采集前自动同步主站分类失败 name=%s state=%v: %v",
-					target.Name, target.State, err)
-			} else {
-				repository.RefreshCategoryCache()
-				syslog.Infof("[Spider] 采集前自动同步主站分类成功 name=%s state=%v",
-					target.Name, target.State)
-			}
-		}
-	}
-
 	sources = prioritizeCollectSources(sources)
 	batch := notify.StartChangeBatch()
 	startedAt := time.Now()
@@ -170,8 +158,8 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	if sourceLimit > 0 {
 		limitDesc = fmt.Sprintf("%d", sourceLimit)
 	}
-	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 写阀 inflight=%d pages/s=%d",
-		tag, len(sources), limitDesc, config.CollectPageWorkers,
+	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d pages/s=%d",
+		tag, len(sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
 	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
 	var finalizeErr error
@@ -197,16 +185,19 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 		if isDispatchStopped(runVersion) {
 			log.Printf("[%s] 检测到一键终止，停止派发剩余站点任务", tag)
 			for _, skipped := range sources[idx:] {
-				scheduler.FinishSource(skipped.Grade, skipped.Id)
+				scheduler.FinishSource(skipped.Id)
 				abandonQueuedCollectSource(skipped, batchCtx)
 			}
 			break
 		}
 		if progress.IsStopped(src.Id) {
 			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
-			scheduler.FinishSource(src.Grade, src.Id)
+			scheduler.FinishSource(src.Id)
 			abandonQueuedCollectSource(src, batchCtx)
 			continue
+		}
+		if idx > 0 {
+			time.Sleep(collectDispatchDelay(batchCtx))
 		}
 		wg.Add(1)
 		if sem != nil {
@@ -219,7 +210,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 					<-sem
 				}
 			}()
-			defer scheduler.FinishSource(fs.Grade, fs.Id)
+			defer scheduler.FinishSource(fs.Id)
 			if isDispatchStopped(runVersion) {
 				log.Printf("[%s] 站点 %s 在启动前被一键终止拦截", tag, fs.Name)
 				abandonQueuedCollectSource(fs, batchCtx)
@@ -282,10 +273,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if isStandalone {
 		batchCtx = newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{*s}, nil, time.Now(), true)
 	}
-	isMasterFullCollect := s.Grade == model.MasterCollect && h < 0
-	if isMasterFullCollect && batchCtx != nil {
-		batchCtx.beginMasterRebuild(s.Id)
-	}
 	defer func() {
 		originalErr := retErr
 		if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron && statsOwned {
@@ -295,19 +282,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			}
 		}
 		progress.FlushHotpathSideEffects(s.Id)
-		if originalErr != nil && (!hadWrites || shouldSkipCollectPublishOnError(*s, h)) {
-			if isMasterFullCollect && batchCtx != nil {
-				batchCtx.discardPendingMasterMIDs(s.Id)
-			}
+		if originalErr != nil && !hadWrites {
 			if isStandalone && batchCtx != nil {
 				noteSourceError(s.Id, originalErr.Error())
 				batchCtx.emitSummary(originalErr)
 				releasedPreparedOccupy = true
 			}
 			return
-		}
-		if isMasterFullCollect && batchCtx != nil {
-			batchCtx.publishPendingMasterMIDs(s.Id)
 		}
 		if batchCtx != nil {
 			batchCtx.markSourceFinished(*s)
@@ -369,7 +350,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
 	progress.Ensure(id, s.Name)
 
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}
@@ -439,11 +420,34 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, error) {
 			sources = append(sources, *fs)
 		}
 	}
+	sources = filterSourcesReadyForCollect(sources)
 	sources = occupyAndMarkCollectSources(sources, "Batch-Collect")
 	if len(sources) == 0 {
-		return nil, fmt.Errorf("没有可启动的采集站（均未启用或已在采集中）")
+		return nil, fmt.Errorf("没有可启动的采集站（还没有分类、未启用或已在采集中）")
 	}
 	return sources, nil
+}
+
+func filterSourcesReadyForCollect(sources []model.FilmSource) []model.FilmSource {
+	if len(sources) == 0 {
+		return sources
+	}
+	ids := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			ids = append(ids, source.Id)
+		}
+	}
+	ready := repository.SourceIDsWithCategory(ids)
+	out := make([]model.FilmSource, 0, len(sources))
+	for _, source := range sources {
+		if _, ok := ready[source.Id]; !ok {
+			log.Printf("[Spider] 采集站还没有分类，跳过采集: name=%s id=%s", source.Name, source.Id)
+			continue
+		}
+		out = append(out, source)
+	}
+	return out
 }
 
 func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
@@ -475,20 +479,4 @@ func BatchCollectTriggered(trigger string, h int, ids ...string) {
 		trigger = model.NotifyTriggerManual
 	}
 	runSourcesWithLimit(sources, h, "Batch-Collect", trigger)
-}
-
-func AutoCollect(h int) {
-	AutoCollectTriggered(model.NotifyTriggerManual, h)
-}
-
-func AutoCollectTriggered(trigger string, h int) {
-	enabled := filterEnabledSources(repository.GetCollectSourceList())
-	if len(enabled) == 0 {
-		log.Println("[Spider] 自动采集：未找到任何启用的站点")
-		return
-	}
-	if trigger == "" {
-		trigger = model.NotifyTriggerManual
-	}
-	runSourcesWithLimit(enabled, h, "Auto-Collect", trigger)
 }

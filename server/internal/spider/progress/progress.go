@@ -8,7 +8,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/repository/film/writer"
 )
 
 // staleNotifier 由采集编排层注入，用于在进度超时被判定失败时广播通知。
@@ -241,11 +240,9 @@ func MarkSourcePagesFinished(sourceID string, flushAtEnd bool) {
 func FlushHotpathSideEffects(sourceIDs ...string) {
 	if len(sourceIDs) == 0 {
 		repository.FlushCollectSourceStats()
-		writer.FlushCollectCacheInvalidations()
 		return
 	}
 	repository.FlushCollectSourceStats(sourceIDs...)
-	writer.FlushCollectCacheInvalidations()
 }
 
 func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {

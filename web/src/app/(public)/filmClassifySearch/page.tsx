@@ -29,7 +29,7 @@ export default async function FilmClassifySearchPage({
   // 过滤 Next 内部参数（_rsc 等），避免传给后端
   const currentParams = Object.fromEntries(
     Object.entries(resolvedSearchParams).flatMap(([key, value]) => {
-      if (key.startsWith("_")) {
+      if (key.startsWith("_") || key.toLowerCase() === "source") {
         return [];
       }
       if (Array.isArray(value)) {

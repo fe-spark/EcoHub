@@ -1,13 +1,8 @@
 package service
 
 import (
-	"encoding/json"
 	"errors"
 	"log"
-	"strings"
-	"time"
-
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -15,6 +10,8 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
 	"server/internal/spider/converter"
+	"strings"
+	"time"
 )
 
 type FilmService struct{}
@@ -23,16 +20,40 @@ var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
 func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
+	if strings.TrimSpace(vo.SourceId) == "" {
+		if activeSrc := repository.GetActiveCollectSource(); activeSrc != nil {
+			vo.SourceId = activeSrc.Id
+		}
+	}
 	return filmsnapshot.GetSearchPageReadModel(vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
-func (s *FilmService) GetSearchOptions() map[string]any {
+func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
 	startedAt := time.Now()
 	options := make(map[string]any)
-	tree := repository.GetActiveCategoryTree()
+
+	var sourceId string
+	if len(sourceIdOpt) > 0 {
+		sourceId = strings.TrimSpace(sourceIdOpt[0])
+	}
+
+	sources := repository.GetEnabledCollectSourceList()
+	defaultSourceId := ""
+	if len(sources) > 0 {
+		defaultSourceId = sources[0].Id
+	}
+	if sourceId == "" {
+		sourceId = defaultSourceId
+	}
+
+	tree := repository.GetActiveCategoryTree(sourceId)
 	tree.Name = "全部分类"
+	options["sources"] = sources
+	options["defaultSourceId"] = defaultSourceId
+	options["currentSourceId"] = sourceId
 	options["class"] = converter.ConvertCategoryList(&tree)
+	options["categoryTree"] = tree.Children
 	options["year"] = make([]map[string]string, 0)
 	tagGroup := filmsnapshot.GetAdminFilterOptionSnapshots()
 	if tree.Children != nil {
@@ -47,7 +68,7 @@ func (s *FilmService) GetSearchOptions() map[string]any {
 		}
 	}
 	options["tags"] = tagGroup
-	log.Printf("[ManageFilmSearch] 筛选选项快照读取 cost=%s", time.Since(startedAt))
+	log.Printf("[ManageFilmSearch] 筛选选项快照读取 sourceId=%s cost=%s", sourceId, time.Since(startedAt))
 	return options
 }
 
@@ -64,34 +85,14 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		return errors.New("影片参数格式异常或缺少关键信息")
 	}
 
-	// 若更新既有影片且未传入播放资源，保留已有的播放资源和线路（绝不覆盖更新播放资源）
-	if fd.Id > 0 && len(detail.PlayList) == 0 {
-		var existingDetailRec model.MovieDetailInfo
-		if db.Mdb.Where("mid = ?", fd.Id).First(&existingDetailRec).Error == nil && existingDetailRec.Content != "" {
-			var oldDetail model.MovieDetail
-			if json.Unmarshal([]byte(existingDetailRec.Content), &oldDetail) == nil {
-				detail.PlayList = oldDetail.PlayList
-				if len(detail.PlayFrom) == 0 {
-					detail.PlayFrom = oldDetail.PlayFrom
-				}
-				if len(detail.DownloadList) == 0 {
-					detail.DownloadList = oldDetail.DownloadList
-				}
-				if detail.DownFrom == "" {
-					detail.DownFrom = oldDetail.DownFrom
-				}
-			}
-		}
-	}
-
 	if detail.PlayList == nil {
 		detail.PlayList = [][]model.MovieUrlInfo{}
 	}
 
-	// 手动上传的影片，尝试归属于当前主站 ID，如果没有主站则标记为 "manual"
+	// 手动上传的影片，尝试归属于首个启用的采集站 ID，如果没有则标记为 "manual"
 	sourceId := "manual"
-	if master := repository.GetCollectSourceListByGrade(model.MasterCollect); len(master) > 0 {
-		sourceId = master[0].Id
+	if sources := repository.GetEnabledCollectSourceList(); len(sources) > 0 {
+		sourceId = sources[0].Id
 	}
 
 	if err := writer.SaveDetail(sourceId, detail); err != nil {
@@ -103,7 +104,7 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 // DelFilm 删除分类影片
 func (s *FilmService) DelFilm(id int64) error {
 	filmIndex := filmrepo.GetFilmIndexById(id)
-	if filmIndex == nil || filmIndex.ID == 0 {
+	if filmIndex == nil || filmIndex.Mid == 0 {
 		return errors.New("影片信息不存在")
 	}
 	if err := filmrepo.DelFilmSearch(id); err != nil {
@@ -115,6 +116,37 @@ func (s *FilmService) DelFilm(id int64) error {
 // GetFilmClassTree 获取影片分类信息
 func (s *FilmService) GetFilmClassTree() model.CategoryTree {
 	return repository.GetCategoryTree()
+}
+
+// ClassTreeScope 分类管理按采集站查看时的树和站点选项。
+type ClassTreeScope struct {
+	Tree            model.CategoryTree
+	Sources         []model.FilmSource
+	DefaultSourceId string
+	CurrentSourceId string
+}
+
+// GetScopedClassTree 按采集站返回该站分类。未指定站点时用首选站。
+func (s *FilmService) GetScopedClassTree(sourceID string) ClassTreeScope {
+	sources := repository.GetCollectSourceList()
+	defaultSourceID := ""
+	if active := repository.GetActiveCollectSource(); active != nil {
+		defaultSourceID = active.Id
+	}
+	if defaultSourceID == "" && len(sources) > 0 {
+		defaultSourceID = sources[0].Id
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		sourceID = defaultSourceID
+	}
+	tree := repository.GetSourceBoundCategoryTree(sourceID)
+	return ClassTreeScope{
+		Tree:            tree,
+		Sources:         sources,
+		DefaultSourceId: defaultSourceID,
+		CurrentSourceId: sourceID,
+	}
 }
 
 // GetFilmClassById 通过ID获取影片分类信息
@@ -158,6 +190,21 @@ func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTre
 		})
 	}
 	return res
+}
+
+func (s *FilmService) SaveSourceClassTree(sourceID string, nodes []*model.CategoryTree) error {
+	if len(nodes) == 0 {
+		return errors.New("分类结构不能为空")
+	}
+	if err := repository.SaveSourceCategoryOrder(sourceID, nodes); err != nil {
+		return err
+	}
+	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+		return err
+	}
+	filmcache.ClearTVBoxConfigCache()
+	filmcache.ClearTVBoxListCache()
+	return nil
 }
 
 func (s *FilmService) SaveClassTree(nodes []*model.CategoryTree) error {

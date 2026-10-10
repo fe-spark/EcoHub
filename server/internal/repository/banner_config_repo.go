@@ -14,15 +14,15 @@ import (
 )
 
 const (
-	BannerModeManual        = "manual"
-	BannerModeAuto          = "auto"
-	BannerStrategyHot       = "hot_random"
-	BannerStrategyScore     = "score_random"
-	BannerStrategyLatest    = "latest_random"
-	BannerStrategySmartMix  = "smart_mix"
-	DefaultBannerCount      = model.DefaultBannerCount
-	MaxBannerCount          = model.MaxBannerCount
-	DefaultBannerRefreshCron = "0 0 */12 * * *"
+	BannerModeManual         = "manual"
+	BannerModeAuto           = "auto"
+	BannerStrategyHot        = "hot_random"
+	BannerStrategyScore      = "score_random"
+	BannerStrategyLatest     = "latest_random"
+	BannerStrategySmartMix   = "smart_mix"
+	DefaultBannerCount       = model.DefaultBannerCount
+	MaxBannerCount           = model.MaxBannerCount
+	DefaultBannerRefreshCron = "0 0 4 * * *"
 )
 
 // DefaultBannerConfig 返回默认轮播配置
@@ -31,7 +31,7 @@ func DefaultBannerConfig() model.BannerConfig {
 		Mode:        BannerModeManual,
 		Strategy:    BannerStrategyHot,
 		Count:       DefaultBannerCount,
-		AutoTMDB:    true,
+		AutoTMDB:    false,
 		RefreshCron: DefaultBannerRefreshCron,
 		PinnedMids:  []int64{},
 		Categories:  []int64{},
@@ -79,8 +79,8 @@ func NormalizeBannerConfig(cfg model.BannerConfig) model.BannerConfig {
 				}
 			}
 		}
-		// 动态过滤已在分类管理中设置为不显示的分类：哪怕之前选中的时候显示，后面分类设置为不显示，依旧过滤
-		cfg.Categories = FilterShownCategoryIDs(validCats)
+		// 这里只去重。是不是当前首选站的分类，排片时再按该站分类树过滤。
+		cfg.Categories = validCats
 	}
 	return cfg
 }

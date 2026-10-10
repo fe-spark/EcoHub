@@ -1,29 +1,20 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
-import { Button, Card, Typography } from "antd";
+import React, { useState } from "react";
+import { Button, Card } from "antd";
 import Link from "next/link";
 import {
   AppstoreOutlined,
   DatabaseOutlined,
-  FileTextOutlined,
-  FolderOpenOutlined,
   LinkOutlined,
   PictureOutlined,
   VideoCameraOutlined,
 } from "@ant-design/icons";
-import { ApiGet } from "@/lib/client-api";
-import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
 import SubscribeModal from "@/app/manage/components/subscribe-modal";
+import InventoryStats from "./inventory-stats";
 import styles from "./index.module.less";
-
-interface FilmInventoryStats {
-  films: number;
-  categories: number;
-  failures: number;
-}
 
 interface QuickEntryItem {
   key: string;
@@ -39,21 +30,21 @@ const quickEntries: QuickEntryItem[] = [
     key: "film",
     icon: VideoCameraOutlined,
     title: "影片列表",
-    description: "快速查看、更新和编辑主库存影片。",
+    description: "按采集源查看、更新和编辑入库影片。",
     href: "/manage/film",
   },
   {
     key: "collect",
     icon: DatabaseOutlined,
     title: "采集中心",
-    description: "配置主站、附属站与批量采集任务。",
+    description: "配置采集站顺序、首选站与批量采集任务。",
     href: "/manage/collect",
   },
   {
     key: "category",
     icon: AppstoreOutlined,
     title: "分类管理",
-    description: "维护当前主站分类框架、显示状态与排序。",
+    description: "按采集站查看分类、显示状态和排序。",
     href: "/manage/collect/category",
   },
   {
@@ -80,29 +71,13 @@ const quickEntries: QuickEntryItem[] = [
 ];
 
 export default function ManagePageView() {
-  const { isAdmin } = useManagePermission();
-  const [stats, setStats] = useState<FilmInventoryStats | null>(null);
   const [subscribeModalOpen, setSubscribeModalOpen] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    ApiGet<FilmInventoryStats>("/manage/spider/clear/stats")
-      .then((resp) => {
-        if (active && resp.code === 0 && resp.data) {
-          setStats(resp.data);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      active = false;
-    };
-  }, []);
 
   return (
     <div className={styles.dashboard}>
       <ManagePageHeader
         title="工作台"
-        description="采集运行概况、影视数据规模与常用入口。"
+        description="采集运行概况、片库规模与常用入口。"
         actions={
           <Button
             icon={<LinkOutlined />}
@@ -115,50 +90,7 @@ export default function ManagePageView() {
 
       <CollectOverview />
 
-      <Card
-        className={styles.panelCard}
-        title="当前影视数据规模"
-        extra={
-          isAdmin ? (
-            <Link href="/manage/system?tab=security" className={styles.statsLink}>
-              数据安全
-            </Link>
-          ) : null
-        }
-      >
-        <div className={styles.statsGrid}>
-          {[
-            {
-              title: "影视库存",
-              value: stats?.films,
-              icon: VideoCameraOutlined,
-            },
-            {
-              title: "分类",
-              value: stats?.categories,
-              icon: FolderOpenOutlined,
-            },
-            {
-              title: "失败记录",
-              value: stats?.failures,
-              icon: FileTextOutlined,
-            },
-          ].map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.title} className={styles.statsCard}>
-                <div className={styles.statsIcon}>
-                  <Icon />
-                </div>
-                <div className={styles.statsBody}>
-                  <div className={styles.statsValue}>{item.value ?? "—"}</div>
-                  <div className={styles.statsTitle}>{item.title}</div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </Card>
+      <InventoryStats />
 
       <Card className={styles.panelCard} title="快捷入口">
         <div className={styles.entryGrid}>

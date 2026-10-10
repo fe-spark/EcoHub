@@ -6,13 +6,15 @@ import (
 	"golang.org/x/sync/singleflight"
 	"log"
 	"math/rand"
+	"strings"
 	"time"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
+	"server/internal/repository"
+	"server/internal/repository/film"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -30,10 +32,11 @@ var dailyUpdateSfGroup singleflight.Group
 
 // DailyUpdateListReq V2 每日更新：分类 + 标准分页 + 随机。
 type DailyUpdateListReq struct {
-	Pid     int64
-	Page    *dto.Page
-	Random  bool
-	Exclude []int64
+	Pid      int64
+	Page     *dto.Page
+	Random   bool
+	Exclude  []int64
+	SourceId string
 }
 
 // DailyUpdateCategory 近 24h 分类统计。Pid: 0 全部，-1 其他，>0 导航大类。
@@ -68,7 +71,7 @@ func normalizeDailyUpdateReq(req DailyUpdateListReq) DailyUpdateListReq {
 	if !req.Random {
 		req.Exclude = nil
 	} else {
-		req.Exclude = notify.ClampDailyUpdateExclude(req.Exclude, dailyUpdateMaxExclude)
+		req.Exclude = film.ClampDailyUpdateExclude(req.Exclude, dailyUpdateMaxExclude)
 	}
 	return req
 }
@@ -88,7 +91,7 @@ func fillDailyUpdatePage(page *dto.Page, total int) *dto.Page {
 // AssembleDailyUpdateCategories 导航顺序输出有片的大类；全部永远第一项。
 func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]int, otherCount, total int) []DailyUpdateCategory {
 	out := make([]DailyUpdateCategory, 0, len(nav)+2)
-	out = append(out, DailyUpdateCategory{Pid: notify.DailyPidAll, Name: "全部", Count: total})
+	out = append(out, DailyUpdateCategory{Pid: film.DailyPidAll, Name: "全部", Count: total})
 	for _, n := range nav {
 		if n.Id <= 0 {
 			continue
@@ -98,7 +101,7 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 		}
 	}
 	if otherCount > 0 {
-		out = append(out, DailyUpdateCategory{Pid: notify.DailyPidOther, Name: "其他", Count: otherCount})
+		out = append(out, DailyUpdateCategory{Pid: film.DailyPidOther, Name: "其他", Count: otherCount})
 	}
 	return out
 }
@@ -106,21 +109,31 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 // DailyUpdatesV2 近 24h 更新。破坏性契约：无流式、不走首页 120 池。
 func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResult, error) {
 	req = normalizeDailyUpdateReq(req)
-	from, to := notify.Rolling24hWindow(time.Now())
+	if req.SourceId == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			req.SourceId = active.Id
+		}
+	}
+	from, to := film.Rolling24hWindow(time.Now())
 
 	// 分类树每请求只取一次，复用给列表筛选、分类计数与组装，避免多次全表扫描。
-	nav := notify.NavTopCategories()
-	navIDs := notify.NavTopCategoryIDs(nav)
+	nav := film.NavTopCategories()
+	navIDs := film.NavTopCategoryIDs(nav)
 
 	// 非随机且前 5 页支持短缓存（1 分钟）与 Singleflight，避免全量采集后高频刷新冲击数据库
 	usePageCache := !req.Random && req.Page.Current <= 5
-	pageCacheKey := fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+	var pageCacheKey string
+	if req.SourceId != "" {
+		pageCacheKey = fmt.Sprintf("%s:src_%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.SourceId, req.Pid, req.Page.Current, req.Page.PageSize)
+	} else {
+		pageCacheKey = fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+	}
 
 	if usePageCache && db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, pageCacheKey).Result(); err == nil && data != "" {
 			var cachedRes DailyUpdateResult
 			if json.Unmarshal([]byte(data), &cachedRes) == nil && len(cachedRes.List) > 0 {
-				cachedRes.Categories = i.getDailyUpdateCategories(nav, navIDs, from, to, cachedRes.Page.Total)
+				cachedRes.Categories = i.getDailyUpdateCategories(nav, navIDs, from, to, cachedRes.Page.Total, req.SourceId)
 				applyLiveRemarksToMovies(cachedRes.List)
 				return &cachedRes, nil
 			}
@@ -128,7 +141,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	}
 
 	execQuery := func() (*DailyUpdateResult, error) {
-		mids, total, err := notify.ListDailyUpdateMids(notify.DailyUpdateListQuery{
+		mids, total, err := film.ListDailyUpdateMids(film.DailyUpdateListQuery{
 			From:     from,
 			To:       to,
 			Pid:      req.Pid,
@@ -137,6 +150,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 			Random:   req.Random,
 			Exclude:  req.Exclude,
 			NavIDs:   navIDs,
+			SourceId: req.SourceId,
 		})
 		if err != nil {
 			log.Printf("[IndexService] DailyUpdatesV2 list mids: %v", err)
@@ -149,7 +163,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 			list = []model.MovieBasicInfo{}
 		}
 
-		cats := i.getDailyUpdateCategories(nav, navIDs, from, to, total)
+		cats := i.getDailyUpdateCategories(nav, navIDs, from, to, total, req.SourceId)
 		res := &DailyUpdateResult{List: list, Page: page, Categories: cats}
 
 		if usePageCache && db.Rdb != nil && len(list) > 0 {
@@ -175,8 +189,11 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	return execQuery()
 }
 
-func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []int64, from, to time.Time, fallbackTotal int) []DailyUpdateCategory {
+func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []int64, from, to time.Time, fallbackTotal int, sourceID string) []DailyUpdateCategory {
 	cacheKey := config.DailyUpdatesV2CatCacheKey
+	if strings.TrimSpace(sourceID) != "" {
+		cacheKey = cacheKey + ":src_" + sourceID
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cats []DailyUpdateCategory
@@ -186,7 +203,7 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 		}
 	}
 
-	val, err, _ := dailyUpdateSfGroup.Do("DailyUpdateCategories", func() (any, error) {
+	val, err, _ := dailyUpdateSfGroup.Do("DailyUpdateCategories:"+sourceID, func() (any, error) {
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var cats []DailyUpdateCategory
@@ -196,10 +213,10 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 			}
 		}
 
-		countByPid, otherCount, catTotal, catErr := notify.DailyUpdatePidCounts(from, to, navIDs)
+		countByPid, otherCount, catTotal, catErr := film.DailyUpdatePidCounts(from, to, navIDs, sourceID)
 		if catErr != nil {
 			log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
-			return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
+			return []DailyUpdateCategory{{Pid: film.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
 		}
 		cats := AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
 		if db.Rdb != nil && len(cats) > 0 {
@@ -215,7 +232,7 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 			return cats
 		}
 	}
-	return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}
+	return []DailyUpdateCategory{{Pid: film.DailyPidAll, Name: "全部", Count: fallbackTotal}}
 }
 
 func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {
@@ -259,7 +276,11 @@ func (i *IndexService) WarmupHomeDailyUpdatePool() {
 
 func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	empty := make([]model.MovieBasicInfo, 0)
+	sourceID := i.BaselineSourceID()
 	cacheKey := config.IndexDailyUpdatesCacheKey
+	if sourceID != "" {
+		cacheKey = cacheKey + ":src_" + sourceID
+	}
 
 	// 1. 优先直接读取 Redis 缓存（0 数据库查询，耗时 0.2ms）
 	if db.Rdb != nil {
@@ -272,7 +293,7 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 	}
 
 	// 2. 并发合并防击穿构建
-	val, err, _ := dailyUpdateSfGroup.Do("homeDailyUpdatePool", func() (any, error) {
+	val, err, _ := dailyUpdateSfGroup.Do("homeDailyUpdatePool:"+sourceID, func() (any, error) {
 		// Double check 缓存
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
@@ -288,18 +309,19 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			return empty, nil
 		}
 
-		from, to := notify.Rolling24hWindow(time.Now())
-		items, _ := notify.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
+		from, to := film.Rolling24hWindow(time.Now())
+		rawMids, _ := film.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
 		mids := make([]int64, 0, homeDailyUpdatePoolCap)
 		seen := make(map[int64]struct{}, homeDailyUpdatePoolCap)
-		for _, it := range items {
-			if it.Mid > 0 {
-				if _, ok := seen[it.Mid]; !ok {
-					seen[it.Mid] = struct{}{}
-					mids = append(mids, it.Mid)
+		for _, m := range rawMids {
+			if m > 0 {
+				if _, ok := seen[m]; !ok {
+					seen[m] = struct{}{}
+					mids = append(mids, m)
 				}
 			}
 		}
+		mids = filterMidsByPlaySource(mids, sourceID)
 
 		// 若 24h 变更不足 120 部，从活跃快照按最新时间自动补齐至 120 部，保证候选池永远饱满
 		if len(mids) < homeDailyUpdatePoolCap && db.Mdb != nil {
@@ -307,13 +329,14 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			var fallbackRows []struct {
 				Mid int64
 			}
-			query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().
-				Select("mid").
-				Where("snapshot_version = ?", version)
+			query := db.Mdb.Model(&model.FilmIndex{}).Select("mid")
+			if sourceID != "" {
+				query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
+			}
 			if len(mids) > 0 {
 				query = query.Where("mid NOT IN ?", mids)
 			}
-			_ = query.Order("update_stamp DESC, id DESC").Limit(needed).Scan(&fallbackRows).Error
+			_ = query.Order("update_stamp DESC, mid DESC").Limit(needed).Scan(&fallbackRows).Error
 			for _, r := range fallbackRows {
 				if r.Mid > 0 {
 					mids = append(mids, r.Mid)
@@ -388,4 +411,16 @@ func storeHomeDailyUpdatesCache(cacheKey string, list []model.MovieBasicInfo) {
 	if raw, err := json.Marshal(list); err == nil {
 		_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), homeDailyUpdateCacheTTL).Err()
 	}
+}
+
+func filterMidsByPlaySource(mids []int64, sourceID string) []int64 {
+	if len(mids) == 0 || strings.TrimSpace(sourceID) == "" || db.Mdb == nil {
+		return mids
+	}
+	var keep []int64
+	_ = db.Mdb.Model(&model.FilmSourcePlaylist{}).
+		Where("mid IN ? AND source_id = ? AND line_kind = ?", mids, sourceID, "play").
+		Distinct("mid").
+		Pluck("mid", &keep).Error
+	return keep
 }

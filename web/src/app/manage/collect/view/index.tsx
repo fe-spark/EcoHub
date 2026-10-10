@@ -28,7 +28,7 @@ import {
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectQueueBars, { type CollectQueueBarItem } from "./collect-queue-bars";
-import CollectSourceCard from "./collect-source-card";
+import CollectSourceGrid from "./collect-source-grid";
 import SourceFormModal from "./source-form-modal";
 import {
   computeCollectQueueProgress,
@@ -90,14 +90,15 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     name: item.name,
     uri: item.uri,
     state: Boolean(item.state),
-    grade: Number(item.grade ?? 1),
+    sort: Number(item.sort ?? 0),
     isPosterSource: Boolean(item.isPosterSource),
+    isPrimary: Boolean(item.isPrimary),
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     format: (item.format as "json" | "xml") || "json",
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
-    proxyEnabled: Boolean(item.proxyEnabled),
+    proxyCollect: Boolean(item.proxyCollect),
     createdAt: item.createdAt,
   };
 }
@@ -115,6 +116,8 @@ export default function CollectManagePageView() {
   const mountedRef = useRef(false);
   const pollFailuresRef = useRef(0);
   const requestRef = useRef<((silent?: boolean) => Promise<void>) | null>(null);
+  const pendingSortRef = useRef<{ prev: FilmSource[]; next: FilmSource[] } | null>(null);
+  const sortConfirmRef = useRef<{ destroy: () => void } | null>(null);
 
   const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
   const [sourceModalOpen, setSourceModalOpen] = useState(false);
@@ -124,7 +127,25 @@ export default function CollectManagePageView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
-  const proxyChoiceRef = useRef<boolean | null>(null);
+  const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
+
+  const fetchProxyStatus = useCallback(async () => {
+    try {
+      const resp = await ApiGet("/manage/proxy/config");
+      if (resp.code === 0 && resp.data) {
+        const ready = Boolean(
+          resp.data.enabled &&
+            String(resp.data.proxyUrl || "").trim() &&
+            resp.data.modules?.spider,
+        );
+        setGlobalSpiderProxyReady(ready);
+      } else {
+        setGlobalSpiderProxyReady(false);
+      }
+    } catch {
+      setGlobalSpiderProxyReady(false);
+    }
+  }, []);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -154,18 +175,6 @@ export default function CollectManagePageView() {
       siteList
         .filter((item) => isActiveCollectStatus(item.progress?.status))
         .map((item) => item.id),
-    [siteList],
-  );
-
-  /** 主站优先，其余保持列表顺序，同一网格展示 */
-  const displaySites = useMemo(() => {
-    const masters = siteList.filter((item) => item.grade === 0);
-    const others = siteList.filter((item) => item.grade !== 0);
-    return [...masters, ...others];
-  }, [siteList]);
-
-  const masterCount = useMemo(
-    () => siteList.filter((item) => item.grade === 0).length,
     [siteList],
   );
 
@@ -370,12 +379,24 @@ export default function CollectManagePageView() {
         const rawData = Array.isArray(resp.data) ? resp.data : [];
         setSiteList((current) => {
           const cdMap = new Map(current.map((item) => [item.id, item.cd]));
-          return rawData.map((item: CollectListItemResponse) => {
+          const normalizedList = rawData.map((item: CollectListItemResponse) => {
             const normalized = normalizeSource(item);
             if (cdMap.has(item.id) && cdMap.get(item.id)) {
               normalized.cd = cdMap.get(item.id);
             }
             return normalized;
+          });
+          const pending = pendingSortRef.current;
+          if (!pending) {
+            return normalizedList;
+          }
+          const freshMap = new Map(normalizedList.map((item) => [item.id, item]));
+          return current.map((item) => {
+            const fresh = freshMap.get(item.id);
+            if (!fresh) {
+              return item;
+            }
+            return { ...fresh, isPrimary: item.isPrimary };
           });
         });
         setSelectedSourceIds((current) =>
@@ -408,11 +429,15 @@ export default function CollectManagePageView() {
   useEffect(() => {
     mountedRef.current = true;
     void getCollectList();
+    void fetchProxyStatus();
     return () => {
       mountedRef.current = false;
       clearPollTimer();
+      sortConfirmRef.current?.destroy();
+      sortConfirmRef.current = null;
+      pendingSortRef.current = null;
     };
-  }, [clearPollTimer, getCollectList]);
+  }, [clearPollTimer, fetchProxyStatus, getCollectList]);
 
   const updateSiteListItem = useCallback(
     (id: string, updater: (record: FilmSource) => FilmSource) => {
@@ -471,7 +496,7 @@ export default function CollectManagePageView() {
                   .map((item) => item.name || item.id)
                   .join("、")}）`
               : "";
-          message.success(`检测完成：全部 ${data.checked ?? 0} 个采集站接口正常，无需清理${skipText}`);
+          message.success(`接口正常：${data.checked ?? 0} 个${skipText}`);
           return;
         }
         if (!cleanupScanCanceledRef.current) {
@@ -560,7 +585,7 @@ export default function CollectManagePageView() {
     }
   };
 
-  /** 批量删除选中采集站（主站/采集中的会被后端跳过并提示） */
+  /** 批量删除选中采集站（采集中的会被后端跳过并提示） */
   const batchDeleteSources = async () => {
     const ids = selectedSourceIds.map(String).filter(Boolean);
     if (ids.length === 0) {
@@ -605,6 +630,10 @@ export default function CollectManagePageView() {
       message.warning("该采集站已被禁用，无法发起采集");
       return;
     }
+    if (record.categoryReady === false) {
+      message.warning("该采集站还没有分类，请重新保存后再采集");
+      return;
+    }
     if (isActiveCollectStatus(record.progress?.status)) {
       message.warning("该采集站已在采集中");
       return;
@@ -633,7 +662,7 @@ export default function CollectManagePageView() {
   const stopTask = async (id: string) => {
     const resp = await ApiPost("/manage/spider/stop", { id });
     if (resp.code === 0) {
-      message.success("已停止该采集任务，已抓取数据将继续处理完成");
+      message.success("已停止采集");
       await getCollectList();
       return;
     }
@@ -651,10 +680,10 @@ export default function CollectManagePageView() {
   };
 
   const openAddForm = () => {
+    void fetchProxyStatus();
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
-    proxyChoiceRef.current = null;
     setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
   };
@@ -662,9 +691,9 @@ export default function CollectManagePageView() {
   const openAddDialog = () => {
     if (siteList.length >= COLLECT_SOURCE_WARN_COUNT) {
       modal.confirm({
-        title: "采集站数量过多",
-        content: `当前已有 ${siteList.length} 个采集站。采集站越多，排队越长，写库、快照和内存占用都会上升，低配机器更容易打满。确认继续添加？`,
-        okText: "继续添加",
+        title: "采集站过多",
+        content: `已有 ${siteList.length} 个，继续添加？`,
+        okText: "继续",
         cancelText: "取消",
         onOk: openAddForm,
       });
@@ -673,7 +702,86 @@ export default function CollectManagePageView() {
     openAddForm();
   };
 
+  const handleSortList = (nextList: FilmSource[]) => {
+    const prevList = pendingSortRef.current?.prev ?? siteList;
+    let assignedPrimary = false;
+    const optimisticList = nextList.map((item) => {
+      if (item.state && !assignedPrimary) {
+        assignedPrimary = true;
+        return { ...item, isPrimary: true };
+      }
+      return { ...item, isPrimary: false };
+    });
+    if (!assignedPrimary && optimisticList.length > 0) {
+      optimisticList[0] = { ...optimisticList[0], isPrimary: true };
+    }
+    setSiteList(optimisticList);
+    pendingSortRef.current = { prev: prevList, next: optimisticList };
+
+    const prevPrimary = prevList.find((s) => s.state) ?? prevList[0];
+    const nextPrimary = optimisticList.find((s) => s.isPrimary);
+    const isPrimaryChanged = Boolean(
+      prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id,
+    );
+
+    sortConfirmRef.current?.destroy();
+    sortConfirmRef.current = modal.confirm({
+      title: "保存顺序？",
+      content: isPrimaryChanged && nextPrimary ? `首选站改为「${nextPrimary.name}」` : undefined,
+      okText: "保存",
+      cancelText: "取消",
+      centered: true,
+      onOk: async () => {
+        const pending = pendingSortRef.current;
+        if (!pending) {
+          return;
+        }
+        try {
+          const resp = await ApiPost("/manage/collect/sort", {
+            ids: pending.next.map((item) => item.id),
+          });
+          if (resp.code === 0) {
+            pendingSortRef.current = null;
+            if (isPrimaryChanged && nextPrimary) {
+              message.success({
+                content: `首选站：${nextPrimary.name}`,
+                key: "collect-sort",
+              });
+            } else {
+              message.success({
+                content: "顺序已保存",
+                key: "collect-sort",
+              });
+            }
+            return;
+          }
+          message.error({
+            content: resp.msg || "保存排序失败",
+            key: "collect-sort",
+          });
+          pendingSortRef.current = null;
+          setSiteList(pending.prev);
+        } catch (e: any) {
+          message.error({
+            content: e?.message || "保存排序失败",
+            key: "collect-sort",
+          });
+          pendingSortRef.current = null;
+          setSiteList(pending.prev);
+        }
+      },
+      onCancel: () => {
+        const pending = pendingSortRef.current;
+        pendingSortRef.current = null;
+        if (pending) {
+          setSiteList(pending.prev);
+        }
+      },
+    });
+  };
+
   const openEditDialog = async (id: string) => {
+    void fetchProxyStatus();
     setSourceModalMode("edit");
     setEditingId(id);
     const resp = await ApiGet("/manage/collect/find", { id });
@@ -682,14 +790,13 @@ export default function CollectManagePageView() {
         name: String(resp.data.name ?? ""),
         uri: String(resp.data.uri ?? ""),
         state: Boolean(resp.data.state),
-        grade: Number(resp.data.grade ?? 1),
         isPosterSource: Boolean(resp.data.isPosterSource),
         interval: Number(resp.data.interval ?? 0),
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         format: (resp.data.format as "json" | "xml") || "json",
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
+        proxyCollect: Boolean(resp.data.proxyCollect),
       });
-      proxyChoiceRef.current = null;
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
       return;
@@ -698,7 +805,6 @@ export default function CollectManagePageView() {
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
-    const useProxy = proxyChoiceRef.current ?? undefined;
     setSubmitting(true);
     try {
       const resp = await ApiPost(
@@ -706,8 +812,8 @@ export default function CollectManagePageView() {
           ? "/manage/collect/add"
           : "/manage/collect/update",
         sourceModalMode === "add"
-          ? { ...values, ...(useProxy !== undefined ? { useProxy } : {}) }
-          : { ...values, id: editingId, ...(useProxy !== undefined ? { useProxy } : {}) },
+          ? values
+          : { ...values, id: editingId },
       );
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -748,63 +854,9 @@ export default function CollectManagePageView() {
     }
   };
 
-  const askProxyChoice = (): Promise<boolean | null> => {
-    return new Promise((resolve) => {
-      void (async () => {
-        let enabled = false;
-        let proxyUrl = "";
-        try {
-          const cfg = await ApiGet("/manage/proxy/config");
-          if (cfg.code !== 0) {
-            message.error(cfg.msg || "获取代理配置失败");
-            resolve(null);
-            return;
-          }
-          enabled = Boolean(cfg.data?.enabled);
-          proxyUrl = String(cfg.data?.proxyUrl || "").trim();
-        } catch {
-          message.error("获取代理配置失败");
-          resolve(null);
-          return;
-        }
-        if (!enabled || !proxyUrl) {
-          proxyChoiceRef.current = false;
-          resolve(false);
-          return;
-        }
-        const dialogRef: { current?: { destroy: () => void } } = {};
-        let settled = false;
-        const finish = (choice: boolean | null) => {
-          if (settled) return;
-          settled = true;
-          if (choice !== null) {
-            proxyChoiceRef.current = choice;
-          }
-          dialogRef.current?.destroy();
-          resolve(choice);
-        };
-        dialogRef.current = modal.confirm({
-          title: "是否使用代理测试？",
-          content: `系统已开启网络代理（${proxyUrl}）。本次可以选择走代理，或直接连接采集站。`,
-          okText: "使用代理",
-          cancelText: "直接测试",
-          zIndex: 2000,
-          onOk: () => finish(true),
-          onCancel: () => finish(null),
-          cancelButtonProps: {
-            onClick: () => finish(false),
-          },
-        });
-      })();
-    });
-  };
-
   const testApi = async (values: SourceFormValues) => {
-    const useProxy = await askProxyChoice();
-    if (useProxy === null) {
-      return;
-    }
-    await runSourceTest(values, useProxy);
+    const shouldUseProxy = Boolean(globalSpiderProxyReady && values.proxyCollect);
+    await runSourceTest(values, shouldUseProxy);
   };
 
   const openBatchCollect = async () => {
@@ -813,7 +865,7 @@ export default function CollectManagePageView() {
       const allOptions = Array.isArray(resp.data)
         ? resp.data.map((item: BatchOption) => ({
             ...item,
-            grade: siteList.find((site) => site.id === item.id)?.grade ?? 1,
+            sort: siteList.find((site) => site.id === item.id)?.sort ?? 0,
             state: siteList.find((site) => site.id === item.id)?.state ?? false,
           }))
         : [];
@@ -829,9 +881,22 @@ export default function CollectManagePageView() {
         message.warning("选中的采集站均未启用，无法批量采集");
         return;
       }
-      const options = allOptions.filter((item) => selectedEnabledIds.includes(item.id));
+      const readyIds = selectedEnabledIds.filter((id) => {
+        const site = siteList.find((item) => item.id === id);
+        return site?.categoryReady !== false;
+      });
+      if (readyIds.length === 0) {
+        message.warning("选中的采集站还没有分类，请重新保存后再采集");
+        return;
+      }
+      if (readyIds.length < selectedEnabledIds.length) {
+        message.warning(
+          `${selectedEnabledIds.length - readyIds.length} 个采集站还没有分类，已从本次采集中排除`,
+        );
+      }
+      const options = allOptions.filter((item) => readyIds.includes(item.id));
       setBatchOptions(options);
-      setBatchIds(selectedEnabledIds);
+      setBatchIds(readyIds);
       setBatchOpen(true);
       return;
     }
@@ -898,7 +963,7 @@ export default function CollectManagePageView() {
         stoppable.map((id) => ApiPost("/manage/spider/stop", { id })),
       );
       if (results.some((resp) => resp.code === 0)) {
-        message.success("已停止该采集队列中仍在抓取的任务，已抓取数据将继续处理完成");
+        message.success("已停止采集");
       } else {
         message.error(results[0]?.msg || "终止任务失败");
       }
@@ -977,9 +1042,8 @@ export default function CollectManagePageView() {
                 批量启用{selectedCount > 0 ? ` (${selectedCount})` : ""}
               </Button>
               <Popconfirm
-                title="批量禁用采集站？"
-                description="禁用后会停止选中采集站的后续请求，已抓取数据会继续处理完成，并阻止后续批量/自动采集调度。"
-                okText="确认禁用"
+                title="禁用选中采集站？"
+                okText="禁用"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
                 disabled={selectedCount === 0}
@@ -994,9 +1058,9 @@ export default function CollectManagePageView() {
                 </Button>
               </Popconfirm>
               <Popconfirm
-                title={`批量删除 ${selectedCount} 个采集站？`}
-                description="删除后不可恢复。主采集站与正在采集的站点会自动跳过。"
-                okText="确认删除"
+                title={`删除 ${selectedCount} 个采集站？`}
+                description="不可恢复"
+                okText="删除"
                 cancelText="取消"
                 okButtonProps={{ danger: true, loading: batchDeleting }}
                 disabled={selectedCount === 0}
@@ -1024,60 +1088,23 @@ export default function CollectManagePageView() {
 
         {siteList.length > 0 ? (
           <div className={styles.sourceGroups}>
-            {masterCount === 0 ? (
-              <div className={styles.masterTip}>
-                尚未配置主采集站
-                {canAddSource && canWrite ? (
-                  <>
-                    ，
-                    <Typography.Link onClick={openAddDialog}>新增</Typography.Link>
-                    时将类型设为「主采集站」
-                  </>
-                ) : null}
-              </div>
-            ) : null}
-            {masterCount > 1 ? (
-              <div className={styles.masterTipWarn}>
-                当前有 {masterCount} 个主采集站，业务上应只保留一个
-              </div>
-            ) : null}
-            <div className={styles.cardGrid}>
-              {displaySites.map((site) => {
-                const hiddenDone =
-                  hiddenDoneIds.includes(site.id) &&
-                  site.progress != null &&
-                  !isActiveCollectStatus(site.progress.status);
-                return (
-                  <CollectSourceCard
-                    key={site.id}
-                    record={hiddenDone ? { ...site, progress: null } : site}
-                    selected={selectedSourceIds.includes(site.id)}
-                    active={activeCollectIds.includes(site.id)}
-                    onSelect={handleSelectSource}
-                    onChangeCollectDuration={changeCollectDuration}
-                    onStartTask={(record) => void startTask(record)}
-                    onTerminateTask={(id) => void stopTask(id)}
-                    onEditSource={(id) => void openEditDialog(id)}
-                    onDeleteSource={(id) => void delSource(id)}
-                  />
-                );
-              })}
-              {canAddSource && canWrite ? (
-                <button
-                  type="button"
-                  className={styles.addSourceTile}
-                  onClick={openAddDialog}
-                >
-                  <PlusOutlined className={styles.addSourceIcon} />
-                  <span className={styles.addSourceLabel}>新增采集站</span>
-                  <span className={styles.addSourceHint}>
-                    {siteList.length >= COLLECT_SOURCE_WARN_COUNT
-                      ? `已超过建议数量（${COLLECT_SOURCE_WARN_COUNT}）`
-                      : "添加新的采集源"}
-                  </span>
-                </button>
-              ) : null}
-            </div>
+            <CollectSourceGrid
+              siteList={siteList}
+              selectedSourceIds={selectedSourceIds.map(String)}
+              activeCollectIds={activeCollectIds}
+              hiddenDoneIds={hiddenDoneIds}
+              canWrite={canWrite}
+              canAddSource={canAddSource}
+              globalSpiderProxyReady={globalSpiderProxyReady}
+              onSelect={handleSelectSource}
+              onChangeCollectDuration={changeCollectDuration}
+              onStartTask={(record) => void startTask(record)}
+              onTerminateTask={(id) => void stopTask(id)}
+              onEditSource={(id) => void openEditDialog(id)}
+              onDeleteSource={(id) => void delSource(id)}
+              onOpenAddDialog={openAddDialog}
+              onSortList={handleSortList}
+            />
           </div>
         ) : (
           <div className={styles.emptyCard}>
@@ -1100,6 +1127,7 @@ export default function CollectManagePageView() {
         mode={sourceModalMode}
         loading={submitting}
         testing={testing}
+        globalSpiderProxyReady={globalSpiderProxyReady}
         initialValues={sourceInitialValues}
         formNonce={sourceFormNonce}
         onCancel={() => setSourceModalOpen(false)}

@@ -2,14 +2,12 @@ package writer
 
 import (
 	"log"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/shared"
 	"server/internal/repository/support"
 	"server/internal/utils"
 )
@@ -149,12 +147,6 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	if result.Pid == 0 {
 		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, sourcePid))
 	}
-	if result.Pid > 0 && result.Cid == 0 && result.CName != "" {
-		var category model.Category
-		if err := db.Mdb.Where("pid = ? AND name = ?", result.Pid, result.CName).First(&category).Error; err == nil {
-			result.Cid = category.Id
-		}
-	}
 	if result.Pid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Pid)
 	}
@@ -169,9 +161,9 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 
 func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category resolvedSearchCategory) (normalizedSearchMeta, error) {
 	score, _ := strconv.ParseFloat(detail.DbScore, 64)
-	year, err := strconv.ParseInt(regexp.MustCompile(`[1-9][0-9]{3}`).FindString(detail.ReleaseDate), 10, 64)
-	if err != nil {
-		year = 0
+	year := parseYear(detail.ReleaseDate)
+	if year == 0 {
+		year = parseYear(detail.Year)
 	}
 	updateStamp, err := utils.ParseCollectUpdateTime(detail.UpdateTime)
 	if err != nil {
@@ -204,11 +196,11 @@ func normalizeSearchMetadata(sourceId string, detail model.MovieDetail, category
 
 func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolvedSearchCategory, meta normalizedSearchMeta, categoryVersion string, ruleVersion string) model.FilmIndex {
 	return model.FilmIndex{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
 		FilmIndexIdentity: model.FilmIndexIdentity{
-			Mid:        detail.Id,
-			ContentKey: shared.BuildContentKey(detail),
-			SourceId:   sourceId,
-			DbId:       detail.DbId,
+			FirstSourceId: sourceId,
+			DbId:          detail.DbId,
 		},
 		FilmIndexCategory: model.FilmIndexCategory{
 			Cid:              category.Cid,
@@ -240,7 +232,10 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 			IsCustomPicture:    detail.IsCustomPicture,
 			Actor:              detail.Actor,
 			Director:           detail.Director,
+			Writer:             detail.Writer,
 			Blurb:              detail.Blurb,
+			Content:            detail.Content,
+			ReleaseDate:        firstISOReleaseDate(detail.ReleaseDate),
 		},
 		FilmIndexVersion: model.FilmIndexVersion{
 			CollectStamp:    detail.AddTime,

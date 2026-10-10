@@ -78,13 +78,6 @@ func triggerLabel(trigger string) string {
 	}
 }
 
-func gradeLabel(grade int) string {
-	if grade == int(model.MasterCollect) {
-		return "主站"
-	}
-	return "附属"
-}
-
 // formatBatchOverview 采集概要（普通 HTML，不用 <pre>，避免 TG 显示「复制代码」）。
 // listN=去重后列表条数（与更新列表一致）；pageSize 用于算页数。
 func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSize int) string {
@@ -130,14 +123,12 @@ func formatBatchOverview(payload model.CollectBatchNotifyPayload, listN, pageSiz
 				name = "未命名源"
 			}
 			name = truncateRunes(name, 40)
-			grade := gradeLabel(src.Grade)
 			errMsg := strings.TrimSpace(src.Error)
 			if errMsg == "" {
 				errMsg = "采集失败"
 			}
-			fmt.Fprintf(&overview, "❌ <b>%s</b>（%s）: <code>%s</code>\n",
+			fmt.Fprintf(&overview, "❌ <b>%s</b>: <code>%s</code>\n",
 				html.EscapeString(name),
-				html.EscapeString(grade),
 				html.EscapeString(truncateRunes(errMsg, 120)),
 			)
 		}

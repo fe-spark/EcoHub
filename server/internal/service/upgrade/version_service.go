@@ -12,6 +12,8 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/repository"
+	"server/internal/utils"
 )
 
 type VersionService struct{}
@@ -102,7 +104,16 @@ func fetchGithubLatestRelease(includePre bool) (githubReleaseCache, error) {
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "EcoHub/"+config.Version)
 
-	client := &http.Client{Timeout: 5 * time.Second}
+	var transport *http.Transport
+	if ok, proxyURL := repository.ResolveUpgradeProxy(); ok && proxyURL != "" {
+		transport = utils.GetOrCreateProxyTransport(proxyURL)
+	} else {
+		transport = utils.GetOrCreateProxyTransport("")
+	}
+	client := &http.Client{
+		Transport: transport,
+		Timeout:   10 * time.Second,
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return githubReleaseCache{}, err

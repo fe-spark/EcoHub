@@ -34,7 +34,6 @@ func TestFilterEnabledSources(t *testing.T) {
 	}
 }
 
-
 func TestNormalizeAffectedMIDs(t *testing.T) {
 	input := []int64{10, -1, 5, 0, 10, 20, 5, 3}
 	expected := []int64{3, 5, 10, 20}
@@ -54,22 +53,12 @@ func TestNormalizeAffectedMIDs(t *testing.T) {
 }
 
 func TestShouldSkipCollectPublishOnError(t *testing.T) {
-	masterSource := model.FilmSource{Grade: model.MasterCollect}
-	slaveSource := model.FilmSource{Grade: model.SlaveCollect}
-
-	// 主站全量采集 (h < 0) -> 跳过发布
-	if !shouldSkipCollectPublishOnError(masterSource, -1) {
-		t.Error("expected true for MasterCollect with h < 0")
+	src := model.FilmSource{Sort: 0}
+	if shouldSkipCollectPublishOnError(src, -1) {
+		t.Error("流式可见下全量失败页不再跳过已刷快照")
 	}
-
-	// 主站增量采集 (h > 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(masterSource, 3) {
-		t.Error("expected false for MasterCollect with h > 0")
-	}
-
-	// 附属站全量采集 (h < 0) -> 不跳过
-	if shouldSkipCollectPublishOnError(slaveSource, -1) {
-		t.Error("expected false for SlaveCollect with h < 0")
+	if shouldSkipCollectPublishOnError(src, 3) {
+		t.Error("expected false for h > 0")
 	}
 }
 
@@ -194,7 +183,7 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 }
 
 func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
-	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Grade: 1}
+	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Sort: 1}
 	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
 		t.Fatal("occupy failed")
 	}
@@ -305,9 +294,17 @@ func TestOccupyCollectSources_ConcurrentSameSourceOnlyOneWins(t *testing.T) {
 }
 
 func TestCollectBatchContext_Isolation(t *testing.T) {
+	resetStreamPublishBufferForTest()
+	origPub := publishStreamWindowFn
+	publishStreamWindowFn = func(mids []int64) error { return nil }
+	t.Cleanup(func() {
+		resetStreamPublishBufferForTest()
+		publishStreamWindowFn = origPub
+	})
+
 	// 模拟两个独立批次：Batch A（全量采集）与 Batch B（定时任务）
-	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Grade: model.SlaveCollect}
-	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Grade: model.SlaveCollect}
+	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
+	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
 
 	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
 	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)
@@ -325,18 +322,18 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	// Batch B 产生 MIDs: 300, 400
 	batchB.addAffectedMIDs(&sourceB, 24, []int64{300, 400})
 
-	// 验证两批次各自独立持有自身 MIDs，互不泄露
+	// 验证两批次各自独立持有自身标签刷新 MIDs，互不泄露
 	batchA.mu.Lock()
-	midsA := make([]int64, 0, len(batchA.affectedMIDs))
-	for mid := range batchA.affectedMIDs {
+	midsA := make([]int64, 0, len(batchA.masterAffectedMIDs))
+	for mid := range batchA.masterAffectedMIDs {
 		midsA = append(midsA, mid)
 	}
 	sort.Slice(midsA, func(i, j int) bool { return midsA[i] < midsA[j] })
 	batchA.mu.Unlock()
 
 	batchB.mu.Lock()
-	midsB := make([]int64, 0, len(batchB.affectedMIDs))
-	for mid := range batchB.affectedMIDs {
+	midsB := make([]int64, 0, len(batchB.masterAffectedMIDs))
+	for mid := range batchB.masterAffectedMIDs {
 		midsB = append(midsB, mid)
 	}
 	sort.Slice(midsB, func(i, j int) bool { return midsB[i] < midsB[j] })

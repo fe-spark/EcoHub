@@ -30,7 +30,7 @@ func categoryStableKey(id int64) string {
 }
 
 func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
-	if len(categoryIDs) == 0 {
+	if db.Mdb == nil || len(categoryIDs) == 0 {
 		return nil
 	}
 	var mappings []model.CategoryMapping
@@ -54,7 +54,7 @@ func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
 }
 
 func visibleDescendantCategoryIDs(categoryID int64) []int64 {
-	if categoryID <= 0 {
+	if db.Mdb == nil || categoryID <= 0 {
 		return nil
 	}
 	ids := make([]int64, 0)
@@ -121,11 +121,15 @@ func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
 }
 
 func applyRootCategorySourceFilter(query *gorm.DB, rootID int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
 	rootKeys, visibleKeys := rootCategorySourceKeyGroups(rootID)
 	if len(visibleKeys) == 0 {
 		return query
 	}
-	visibleCategoryQuery := db.Mdb.Where("category_key IN ?", visibleKeys)
+	subQuery := query.Session(&gorm.Session{NewDB: true})
+	visibleCategoryQuery := subQuery.Where("category_key IN ?", visibleKeys)
 	if len(rootKeys) > 0 {
 		visibleCategoryQuery = visibleCategoryQuery.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
 	}
@@ -133,6 +137,9 @@ func applyRootCategorySourceFilter(query *gorm.DB, rootID int64) *gorm.DB {
 }
 
 func categoryByID(id int64) (*model.Category, bool) {
+	if db.Mdb == nil {
+		return nil, false
+	}
 	resolvedID := support.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return nil, false
@@ -187,6 +194,220 @@ func ApplyCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
 	}
 	if stableKey := categoryStableKey(resolvedID); stableKey != "" {
 		return query.Where(fmt.Sprintf("%s = ?", categoryKeyColumn(field)), stableKey)
+	}
+	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
+}
+
+// HasLiveCategoryKeys 当前展示分类是否已有来源映射。没有映射时列表仍按 pid/cid 过滤。
+func HasLiveCategoryKeys(field string, categoryID int64) bool {
+	_, _, visible, roots := liveCategoryKeySets(field, categoryID)
+	return len(visible) > 0 || len(roots) > 0
+}
+
+// LiveCategoryMatchSQL 展示分类的匹配条件。
+// 新采集按该站已保存的映射写入 pid/cid。更早入库、pid 仍为 0 的片子靠 category_key 对上展示分类。
+func LiveCategoryMatchSQL(alias, field string, categoryID int64) (string, []any) {
+	col, id, visible, roots := liveCategoryKeySets(field, categoryID)
+	if alias != "" {
+		col = alias + "." + col
+	}
+	keyCol := "category_key"
+	rootCol := "root_category_key"
+	if alias != "" {
+		keyCol = alias + "." + keyCol
+		rootCol = alias + "." + rootCol
+	}
+	if len(visible) == 0 && len(roots) == 0 {
+		return col + " = ?", []any{id}
+	}
+	parts := []string{col + " = ?"}
+	args := []any{id}
+	if len(visible) > 0 {
+		parts = append(parts, keyCol+" IN ("+sqlPlaceholders(len(visible))+")")
+		for _, key := range visible {
+			args = append(args, key)
+		}
+	}
+	if field != "cid" && len(roots) > 0 {
+		parts = append(parts, rootCol+" IN ("+sqlPlaceholders(len(roots))+")")
+		for _, key := range roots {
+			args = append(args, key)
+		}
+	}
+	return "(" + strings.Join(parts, " OR ") + ")", args
+}
+
+// ApplyLiveCategoryMatch 把展示分类条件加到 film_index 查询上。
+func ApplyLiveCategoryMatch(query *gorm.DB, field string, categoryID int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
+	cond, args := LiveCategoryMatchSQL("", field, categoryID)
+	return query.Where(cond, args...)
+}
+
+func sourceTypeKeys(sourceID string, typeIDs []int64) []string {
+	keys := make([]string, 0, len(typeIDs))
+	seen := make(map[string]struct{}, len(typeIDs))
+	for _, typeID := range typeIDs {
+		key := support.BuildSourceCategoryKey(sourceID, typeID)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+// sourceTypeMatchCond 当前站这些 type_id 的影片条件。
+// 一级分类同时认 root_category_key 和 category_key。二级分类只认 category_key。
+func sourceTypeMatchCond(columnPrefix, field string, keys []string) (string, []any) {
+	if len(keys) == 0 {
+		return "1 = 0", nil
+	}
+	col := func(name string) string {
+		if columnPrefix == "" {
+			return name
+		}
+		return columnPrefix + name
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
+	args := make([]any, 0, len(keys)*2)
+	if field == "cid" {
+		for _, key := range keys {
+			args = append(args, key)
+		}
+		return col("category_key") + " IN (" + placeholders + ")", args
+	}
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	for _, key := range keys {
+		args = append(args, key)
+	}
+	return "(" + col("root_category_key") + " IN (" + placeholders + ") OR " + col("category_key") + " IN (" + placeholders + "))", args
+}
+
+// ApplySourceTypeMatch 只匹配当前采集站自己的分类键。不把其他站的同名分类并进来。
+func ApplySourceTypeMatch(query *gorm.DB, sourceID, field string, typeID int64) *gorm.DB {
+	return ApplySourceTypeMatchIDs(query, sourceID, field, []int64{typeID})
+}
+
+// ApplySourceTypeMatchIDs 匹配该站这一组 type_id。规则合并后的前台分类把成员一起带上。
+func ApplySourceTypeMatchIDs(query *gorm.DB, sourceID, field string, typeIDs []int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
+	cond, args := sourceTypeMatchCond("", field, sourceTypeKeys(sourceID, typeIDs))
+	return query.Where(cond, args...)
+}
+
+// LiveCategoryMemberSQL 从指定采集站的播放线路取出属于该站这个 type_id 的 mid。
+func LiveCategoryMemberSQL(dialectName, sourceID, field string, typeID int64) (string, []any) {
+	return LiveCategoryMemberSQLIDs(dialectName, sourceID, field, []int64{typeID})
+}
+
+// LiveCategoryMemberSQLIDs 从该站播放线路取出这一组 type_id 的 mid。
+func LiveCategoryMemberSQLIDs(dialectName, sourceID, field string, typeIDs []int64) (string, []any) {
+	hint := ""
+	if dialectName == "mysql" {
+		hint = " USE INDEX (`idx_playlist_source_mid`)"
+	}
+	cond, condArgs := sourceTypeMatchCond("i.", field, sourceTypeKeys(sourceID, typeIDs))
+	memberSQL := "SELECT DISTINCT p.mid FROM " + model.TableFilmSourcePlaylist + " AS p" + hint +
+		" INNER JOIN " + model.TableFilmIndex + " AS i ON i.mid = p.mid AND i.deleted_at IS NULL" +
+		" WHERE p.source_id = ? AND p.line_kind = ? AND " + cond
+	args := make([]any, 0, 2+len(condArgs))
+	args = append(args, strings.TrimSpace(sourceID), "play")
+	args = append(args, condArgs...)
+	return memberSQL, args
+}
+
+// LiveCategoryProbeKeys 返回展示分类的 id 列、id、子分类键和大类根键。
+// 片库里多数影片 pid 为 0，列表要同时认这些来源分类键。
+func LiveCategoryProbeKeys(field string, categoryID int64) (idColumn string, id int64, categoryKeys, rootKeys []string) {
+	return liveCategoryKeySets(field, categoryID)
+}
+
+func liveCategoryKeySets(field string, categoryID int64) (col string, id int64, visible []string, roots []string) {
+	col = "pid"
+	if field == "cid" {
+		col = "cid"
+	}
+	if db.Mdb == nil || categoryID <= 0 {
+		return col, categoryID, nil, nil
+	}
+	id = support.ResolveCategoryID(categoryID)
+	if field == "cid" {
+		return "cid", id, mappingCategoryKeys(visibleCategoryAndDescendantIDs(id)), nil
+	}
+	rootID := id
+	if category, ok := categoryByID(id); ok && category.Pid > 0 {
+		if resolved := support.GetRootId(id); resolved > 0 {
+			rootID = resolved
+		}
+	}
+	return "pid", id, mappingCategoryKeys(visibleCategoryAndDescendantIDs(rootID)), mappingCategoryKeys([]int64{rootID})
+}
+
+func mappingCategoryKeys(categoryIDs []int64) []string {
+	if db.Mdb == nil || len(categoryIDs) == 0 {
+		return nil
+	}
+	var mappings []model.CategoryMapping
+	if err := db.Mdb.Where("category_id IN ?", categoryIDs).Find(&mappings).Error; err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(mappings))
+	seen := make(map[string]struct{}, len(mappings))
+	for _, mapping := range mappings {
+		key := support.BuildSourceCategoryKey(mapping.SourceId, mapping.SourceTypeId)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func sqlPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
+}
+
+// ApplyManageCategoryFieldFilter 专供管理后台多维检索分类过滤（不校验前台 show 状态，兼容聚合映射与物理 pid/cid）
+func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
+	resolvedID := support.ResolveCategoryID(id)
+	if resolvedID <= 0 {
+		return emptyFilmIndexQuery(query)
+	}
+	if keys := categorySourceKeys(field, resolvedID); len(keys) > 0 {
+		if field == "pid" {
+			rootKeys, visibleKeys := rootCategorySourceKeyGroups(resolvedID)
+			subQuery := query.Session(&gorm.Session{NewDB: true})
+			cond := subQuery.Where("category_key IN ? OR pid = ?", visibleKeys, resolvedID)
+			if len(rootKeys) > 0 {
+				cond = cond.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
+			}
+			return query.Where(cond)
+		}
+		return query.Where("(category_key IN ? OR cid = ?)", keys, resolvedID)
+	}
+	if stableKey := categoryStableKey(resolvedID); stableKey != "" {
+		return query.Where(fmt.Sprintf("(%s = ? OR %s = ?)", categoryKeyColumn(field), categoryIDColumn(field)), stableKey, resolvedID)
 	}
 	return query.Where(fmt.Sprintf("%s = ?", categoryIDColumn(field)), resolvedID)
 }

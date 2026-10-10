@@ -385,4 +385,3 @@ func TestXmlCollect_HTMLResponseDetection(t *testing.T) {
 		t.Fatalf("expected HTML warning message, got: %v", err)
 	}
 }
-

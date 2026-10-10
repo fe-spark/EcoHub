@@ -18,7 +18,7 @@ import (
 const (
 	relatedCacheTTL             = 1 * time.Hour
 	maxRelatedRecommendCount    = 28 // 相关推荐全局最大保留数量
-	relatedSnapshotSelectFields = "id, snapshot_version, mid, pid, cid, c_name, name, sub_title, series_key, director, actor, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, blurb, year, class_tag, area, language, play_from_summary"
+	relatedSnapshotSelectFields = "mid, pid, cid, c_name, name, sub_title, series_key, director, actor, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, blurb, year, class_tag, area, language, play_from_summary"
 )
 
 var relatedSnapshotsSf singleflight.Group
@@ -77,15 +77,14 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 				}
 			}
 
+			listGen := GetSearchCacheVersion()
 			cands := loadRelatedSnapshotCandidates(version, snapshot, maxRelatedRecommendCount)
-			if db.Rdb != nil {
-				ttl := relatedCacheTTL
-				if len(cands) == 0 {
-					ttl = 1 * time.Minute // 空候选集防穿透短缓存
-				}
-				if raw, err := json.Marshal(cands); err == nil {
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-				}
+			ttl := relatedCacheTTL
+			if len(cands) == 0 {
+				ttl = emptyListCacheTTL
+			}
+			if raw, err := json.Marshal(cands); err == nil {
+				writeListCache(cacheKey, raw, ttl, listGen)
 			}
 
 			log.Printf("[FilmRelate] 相关推荐候选集计算完成 mid=%d name=%q cache=MISS candidates=%d cost=%s",
@@ -133,28 +132,25 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 
 	// 1. 同系列优先（精确匹配，应用层 seen 去重）
 	if current.SeriesKey != "" && db.Mdb != nil {
-		var seriesRows []model.FilmListSnapshot
-		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
-			Where("snapshot_version = ? AND series_key = ? AND mid <> ?", version, current.SeriesKey, current.Mid).
-			Order("hits DESC, id DESC").Limit(maxCandidates).Find(&seriesRows)
+		seriesRows, _ := scanListSnapshots(liveFilmQuery().Select(relatedSnapshotSelectFields).
+			Where("series_key = ? AND mid <> ?", current.SeriesKey, current.Mid).
+			Order("hits DESC, mid DESC").Limit(maxCandidates))
 		appendUnique(seriesRows)
 	}
 
 	// 2. 同细分类 (Cid) 候选兜底
 	if len(list) < maxCandidates && current.Cid > 0 && db.Mdb != nil {
-		var cidRows []model.FilmListSnapshot
-		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
-			Where("snapshot_version = ? AND cid = ? AND mid <> ?", version, current.Cid, current.Mid).
-			Order("hits DESC, id DESC").Limit(maxCandidates - len(list)).Find(&cidRows)
+		cidRows, _ := scanListSnapshots(liveFilmQuery().Select(relatedSnapshotSelectFields).
+			Where("cid = ? AND mid <> ?", current.Cid, current.Mid).
+			Order("hits DESC, mid DESC").Limit(maxCandidates - len(list)))
 		appendUnique(cidRows)
 	}
 
 	// 3. 同大分类 (Pid) 高热度候选兜底
 	if len(list) < maxCandidates && current.Pid > 0 && db.Mdb != nil {
-		var pidRows []model.FilmListSnapshot
-		db.Mdb.Unscoped().Select(relatedSnapshotSelectFields).
-			Where("snapshot_version = ? AND pid = ? AND mid <> ?", version, current.Pid, current.Mid).
-			Order("hits DESC, id DESC").Limit(maxCandidates - len(list)).Find(&pidRows)
+		pidRows, _ := scanListSnapshots(liveFilmQuery().Select(relatedSnapshotSelectFields).
+			Where("pid = ? AND mid <> ?", current.Pid, current.Mid).
+			Order("hits DESC, mid DESC").Limit(maxCandidates - len(list)))
 		appendUnique(pidRows)
 	}
 

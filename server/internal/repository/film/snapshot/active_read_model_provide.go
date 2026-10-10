@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
 
@@ -43,8 +44,18 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 
 	// 1. 尝试从 Redis 读 Provide 缓存
-	cacheKey := fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
-		config.ProvideListKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	var cacheKey, sfKey string
+	if st.SourceId != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			config.ProvideListKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+		sfKey = fmt.Sprintf("v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			config.ProvideListKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+		sfKey = fmt.Sprintf("v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
+			version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item searchCacheItem
@@ -61,8 +72,6 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 	}
 
 	// 2. 并发防击穿：相同参数的 ProvideVod 请求合并执行
-	sfKey := fmt.Sprintf("v%s:%d:%d:%s:%s:%s:%s:%s:k%s:h%d:p%d:s%d",
-		version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, keyword, recentHours, page.Current, page.PageSize)
 	val, err, _ := provideSnapshotsSf.Do(sfKey, func() (any, error) {
 		// 二次双检 Redis 缓存
 		if db.Rdb != nil {
@@ -74,8 +83,9 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			}
 		}
 
-		// A. 若有搜索词且无时间限制和复合分类筛选，优先走内存元数据检索
-		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" {
+		listGen := GetSearchCacheVersion()
+		// A. 若有搜索词且无时间限制、复合分类筛选和特定采集站限制，优先走内存元数据检索
+		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == "" {
 			idx := loadFilmSearchMetaIndex(version)
 			if idx != nil && len(idx.Items) > 0 {
 				hits := searchFilmMetas(idx, keyword, st.Sort, st.Pid, st.Cid)
@@ -92,14 +102,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 					PageCount: page.PageCount,
 					Snapshots: snapshots,
 				}
-				if db.Rdb != nil {
-					if raw, err := json.Marshal(item); err == nil {
-						ttl := 3 * time.Minute
-						if len(snapshots) == 0 {
-							ttl = 1 * time.Minute
-						}
-						_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+				if raw, err := json.Marshal(item); err == nil {
+					ttl := 3 * time.Minute
+					if len(snapshots) == 0 {
+						ttl = emptyListCacheTTL
 					}
+					writeListCache(cacheKey, raw, ttl, listGen)
 				}
 				log.Printf(
 					"[ProvideVod] 内存筛选完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
@@ -119,12 +127,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
 		}
 
-		query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+		query := applySourceMembership(liveFilmQuery(), st.SourceId)
 		if st.Pid > 0 {
-			query = query.Where("pid = ?", st.Pid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
 		if st.Cid > 0 {
-			query = query.Where("cid = ?", st.Cid)
+			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 		if keyword != "" {
@@ -145,23 +153,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			calcPageCount = 1
 		}
 
-		orderClause := snapshotSortOrderClause(st.Sort, keyword != "")
+		orderClause := liveTieOrder(snapshotSortOrderClause(st.Sort, keyword != ""))
 		offset := shared.PageOffset(page)
 
-		// 延迟关联：先取 id，再取宽字段，避免大宽表参与文件排序
-		var ids []uint
-		if err := query.Select("id").Order(orderClause).Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
+		if findErr != nil {
 			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		var snapshots []model.FilmListSnapshot
-		if len(ids) > 0 {
-			if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order(orderClause).Find(&snapshots).Error; err != nil {
-				return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-			}
-		}
-		if snapshots == nil {
-			snapshots = []model.FilmListSnapshot{}
 		}
 
 		item := searchCacheItem{
@@ -170,15 +167,12 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 			Snapshots: snapshots,
 		}
 
-		// 写入 Redis 缓存
-		if db.Rdb != nil {
-			if raw, err := json.Marshal(item); err == nil {
-				ttl := 3 * time.Minute
-				if len(snapshots) == 0 {
-					ttl = 1 * time.Minute
-				}
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
+		if raw, err := json.Marshal(item); err == nil {
+			ttl := 3 * time.Minute
+			if len(snapshots) == 0 {
+				ttl = emptyListCacheTTL
 			}
+			writeListCache(cacheKey, raw, ttl, listGen)
 		}
 
 		log.Printf(

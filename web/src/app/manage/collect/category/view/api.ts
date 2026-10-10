@@ -1,11 +1,18 @@
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { CATEGORY_GROUPS, normalizeRuleRecord, normalizeTree, parseRuleList, type FilmClassNode } from "./types";
 
-export async function getFilmClassTree() {
-  const resp = await ApiGet("/manage/film/class/tree");
+export async function getFilmClassTree(sourceId = "") {
+  const resp = await ApiGet("/manage/film/class/tree", {
+    scoped: 1,
+    sourceId,
+  });
+  const sources = Array.isArray(resp.data?.sources) ? resp.data.sources : [];
   return {
     resp,
     tree: normalizeTree((resp.data?.children || []) as FilmClassNode[]),
+    sources: sources as { id: string; name: string }[],
+    defaultSourceId: String(resp.data?.defaultSourceId || ""),
+    currentSourceId: String(resp.data?.currentSourceId || sourceId || ""),
   };
 }
 
@@ -13,8 +20,8 @@ export async function resetFilmClassTree() {
   return ApiPost("/manage/film/class/collect", {});
 }
 
-export async function saveFilmClassTree(children: FilmClassNode[]) {
-  return ApiPost("/manage/film/class/tree/save", { children });
+export async function saveFilmClassTree(children: FilmClassNode[], sourceId: string) {
+  return ApiPost("/manage/film/class/tree/save", { children, sourceId });
 }
 
 export async function updateFilmClassShow(id: number, show: boolean) {

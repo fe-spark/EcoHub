@@ -108,43 +108,44 @@ func (s *BannerAutoService) StartBannerGenerateTask(triggerSource string) (Banne
 	}
 
 	go func() {
+		var err error
 		defer func() {
 			if r := recover(); r != nil {
 				log.Printf("[BannerAuto] 异步排片任务发生异常: %v", r)
-				FinishBannerGenerateProgress(fmt.Errorf("排片任务异常: %v", r))
+				err = fmt.Errorf("排片任务异常: %v", r)
 			}
+			s.finishAndMaybeRetry(err)
 		}()
 
 		// 异步执行，拥有充足的 5 分钟超时预算完成 TMDB 检索与封面刮削
 		taskCtx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		_, err := s.generateAutoBannersWithConfig(taskCtx, repository.GetBannerConfig(), triggerSource)
-		FinishBannerGenerateProgress(err)
+		epoch := bannerPrimaryEpochNow()
+		_, err = s.generateAutoBannersWithConfig(taskCtx, repository.GetBannerConfig(), triggerSource, epoch)
 	}()
 
 	return s.GetBannerGenerateProgress(), nil
 }
 
 // GenerateAutoBanners 依据当前配置策略自动生成首页轮播（同步执行）
-func (s *BannerAutoService) GenerateAutoBanners(ctx context.Context, triggerSource string) (model.Banners, error) {
+func (s *BannerAutoService) GenerateAutoBanners(ctx context.Context, triggerSource string) (banners model.Banners, err error) {
 	if !StartBannerGenerateProgress() {
 		return nil, fmt.Errorf("排片任务正在执行中，已忽略本次重复调度 (触发源: %s)", triggerSource)
 	}
-	var (
-		banners model.Banners
-		err     error
-	)
 	defer func() {
-		FinishBannerGenerateProgress(err)
+		if r := recover(); r != nil {
+			err = fmt.Errorf("排片任务异常: %v", r)
+		}
+		s.finishAndMaybeRetry(err)
 	}()
-
-	banners, err = s.generateAutoBannersWithConfig(ctx, repository.GetBannerConfig(), triggerSource)
+	epoch := bannerPrimaryEpochNow()
+	banners, err = s.generateAutoBannersWithConfig(ctx, repository.GetBannerConfig(), triggerSource, epoch)
 	return banners, err
 }
 
 // generateAutoBannersWithConfig 开启刮削时缺额持续并发刮削至满额（最长不超过5分钟），关闭刮削时走常规抽取。
-func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, cfg model.BannerConfig, triggerSource string) (model.Banners, error) {
+func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, cfg model.BannerConfig, triggerSource string, epoch uint64) (model.Banners, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -163,13 +164,17 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 	tmdbCfg := repository.GetTMDBConfig()
 	canAutoTMDB := cfg.AutoTMDB && tmdbCfg.Enabled && strings.TrimSpace(tmdbCfg.ApiKey) != ""
 	fallbackPosterSlide := !canAutoTMDB
+	sourceID := ""
+	if active := repository.GetActiveCollectSource(); active != nil {
+		sourceID = strings.TrimSpace(active.Id)
+	}
 
 	pinnedMap := make(map[int64]struct{}, len(cfg.PinnedMids))
 	var pinnedBanners model.Banners
 
-	// 1. 加载管理员置顶影片
+	// 1. 加载管理员置顶影片，只保留当前首选站采过的片子
 	if len(cfg.PinnedMids) > 0 {
-		snaps := filmsnapshot.GetSnapshotsByMidsOrdered(version, cfg.PinnedMids)
+		snaps := filmsnapshot.FilterSnapshotsByPlaySource(sourceID, filmsnapshot.GetSnapshotsByMidsOrdered(version, cfg.PinnedMids))
 		for _, snap := range snaps {
 			if snap.Mid <= 0 {
 				continue
@@ -181,6 +186,9 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 
 	needCount := targetCount - len(pinnedBanners)
 	if needCount <= 0 {
+		if err := abortIfBannerEpochMoved(epoch); err != nil {
+			return nil, err
+		}
 		if err := repository.SaveBanners(pinnedBanners); err != nil {
 			return nil, err
 		}
@@ -191,16 +199,27 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 
 	ReportBannerGenerateProgress(15, "正在检索候选影片大池...")
 
-	// 2. 动态过滤已在分类管理中设为不显示的分类：哪怕之前选中的时候显示，后面分类设置为不显示，依旧严格过滤
-	effectiveCategories := repository.FilterShownCategoryIDs(cfg.Categories)
-	if len(cfg.Categories) > 0 && len(effectiveCategories) == 0 {
-		return nil, fmt.Errorf("所选分类已全部在分类管理中设置为不显示，无法排片，请重新选择排片分类")
-	}
-	if len(effectiveCategories) == 0 {
-		// 未限定分类时，候选范围亦严格限定在当前所有显示的大类中，杜绝已隐藏分类（如体育/录像）渗透进轮播
-		effectiveCategories = repository.GetShownRootCategoryIDs()
+	// 2. 排片分类用首选站自己的一级分类，和首页栏目同一套。
+	var effectiveCategories []int64
+	if sourceID != "" {
+		var fellBack bool
+		effectiveCategories, fellBack = repository.ResolveBannerSourceCategories(sourceID, cfg.Categories)
+		if fellBack {
+			log.Printf("[BannerAuto] 已保存的排片分类不属于当前首选站，改为该站全部一级分类")
+		}
 		if len(effectiveCategories) == 0 && db.Mdb != nil {
-			return nil, fmt.Errorf("当前系统无任何处于显示状态的分类，无法排片，请在分类管理中开启至少一个分类")
+			return nil, fmt.Errorf("当前首选站没有可显示的分类，无法排片")
+		}
+	} else {
+		effectiveCategories = repository.FilterShownCategoryIDs(cfg.Categories)
+		if len(cfg.Categories) > 0 && len(effectiveCategories) == 0 {
+			return nil, fmt.Errorf("所选分类已全部在分类管理中设置为不显示，无法排片，请重新选择排片分类")
+		}
+		if len(effectiveCategories) == 0 {
+			effectiveCategories = repository.GetShownRootCategoryIDs()
+			if len(effectiveCategories) == 0 && db.Mdb != nil {
+				return nil, fmt.Errorf("当前系统无任何处于显示状态的分类，无法排片，请在分类管理中开启至少一个分类")
+			}
 		}
 	}
 
@@ -243,7 +262,7 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		fetchPerCat = 500
 	}
 	for _, catPid := range effectiveCategories {
-		catCands := filmsnapshot.GetSnapshotBannerCandidates(version, cfg.Strategy, []int64{catPid}, fetchPerCat)
+		catCands := filmsnapshot.GetSnapshotBannerCandidates(version, cfg.Strategy, sourceID, []int64{catPid}, fetchPerCat)
 		r.Shuffle(len(catCands), func(i, j int) {
 			catCands[i], catCands[j] = catCands[j], catCands[i]
 		})
@@ -277,8 +296,8 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		return nil, fmt.Errorf("片库中无候选影片，请先采集影视数据")
 	}
 
-	log.Printf("[BannerAuto] 开始排片(策略=%s, 目标=%d部, 分类配额=%+v, 触发源=%s): 筛选出 %d 个候选影片 (全新候选: %d 个, 轮换已展: %d 个)",
-		cfg.Strategy, targetCount, quotas, triggerSource, totalCandidateCount, len(allFreshCandidates), len(allExistingCandidates))
+	log.Printf("[BannerAuto] 开始排片(策略=%s, 目标=%d部, 首选站=%s, 分类配额=%+v, 触发源=%s): 筛选出 %d 个候选影片 (全新候选: %d 个, 轮换已展: %d 个)",
+		cfg.Strategy, targetCount, sourceID, quotas, triggerSource, totalCandidateCount, len(allFreshCandidates), len(allExistingCandidates))
 	ReportBannerGenerateProgress(20, fmt.Sprintf("已按分类筛选 %d 部候选影片，开始排片...", totalCandidateCount))
 
 	var (
@@ -383,7 +402,7 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 			reusedCount += extraReused
 
 			// 如果普通候选池还不够，从全局快照表中查找拥有高清横图的影片做最终替换兜底 (严格限定在有效显示分类)
-			pickedSnaps = replaceMissingSlidesWithGlobalHD(pickedSnaps, effectiveCategories, version)
+			pickedSnaps = replaceMissingSlidesWithGlobalHD(pickedSnaps, sourceID, effectiveCategories, version)
 		}
 	}
 
@@ -405,8 +424,11 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 		return nil, fmt.Errorf("未能生成有效轮播项")
 	}
 
-	// 5. 持久化并刷新前台缓存
+	// 5. 持久化并刷新前台缓存。保存前再看一次首选站，切换后的旧结果直接作废。
 	ReportBannerGenerateProgress(95, "正在保存排片数据并刷新前台缓存...")
+	if err := abortIfBannerEpochMoved(epoch); err != nil {
+		return nil, err
+	}
 	if err := repository.SaveBanners(finalBanners); err != nil {
 		return nil, fmt.Errorf("保存生成轮播失败: %w", err)
 	}
@@ -416,8 +438,7 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 	if scrapedAttemptCount > 0 {
 		scrapeInfo = fmt.Sprintf("刮削: %d 个 [有效成功: %d 个]", scrapedAttemptCount, scrapedSuccessCount)
 	}
-	log.Printf("[BannerAuto] 自动排片完成: 从 %d 个候选影片里面获取 %d 个轮播 (全新: %d 个, 本地已有横图: %d 个, %s, 复用旧轮播: %d 个, 置顶项: %d 个, 策略: %s, 原始配置分类: %v, 生效显示分类: %v, 触发源: %s)",
-		totalCandidateCount, len(finalBanners), len(pickedSnaps)-reusedCount, localSlideCount, scrapeInfo, reusedCount, len(pinnedBanners), cfg.Strategy, cfg.Categories, effectiveCategories, triggerSource)
+	log.Printf("[BannerAuto] 自动排片完成: 从 %d 个候选影片里面获取 %d 个轮播 (全新: %d 个, 本地已有横图: %d 个, %s, 复用旧轮播: %d 个, 置顶项: %d 个, 策略: %s, 首选站: %s, 原始配置分类: %v, 生效显示分类: %v, 触发源: %s)",
+		totalCandidateCount, len(finalBanners), len(pickedSnaps)-reusedCount, localSlideCount, scrapeInfo, reusedCount, len(pinnedBanners), cfg.Strategy, sourceID, cfg.Categories, effectiveCategories, triggerSource)
 	return finalBanners, nil
 }
-

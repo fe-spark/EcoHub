@@ -34,6 +34,8 @@ import {
   GithubOutlined,
   QuestionCircleOutlined,
   LineChartOutlined,
+  ApiOutlined,
+  CloudServerOutlined,
 } from "@ant-design/icons";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 
@@ -68,11 +70,7 @@ const themeModeLabels: Record<ThemeMode, string> = {
 };
 
 const menuItems: MenuItem[] = [
-  {
-    key: "/manage",
-    icon: <HomeOutlined />,
-    label: "工作台",
-  },
+  { key: "/manage", icon: <HomeOutlined />, label: "工作台" },
   {
     key: "sub-collect",
     icon: <ThunderboltOutlined />,
@@ -94,30 +92,28 @@ const menuItems: MenuItem[] = [
       { key: "/manage/collect/category/rules", label: <span data-tour="menu-rules">分类规则</span> },
     ],
   },
+  { key: "/manage/file", icon: <FolderOpenOutlined />, label: "素材中心" },
+  { key: "/manage/access", icon: <LineChartOutlined />, label: "数据分析" },
+  { key: "/manage/system/proxy", icon: <ApiOutlined />, label: "网络代理" },
   {
-    key: "/manage/file",
-    icon: <FolderOpenOutlined />,
-    label: "素材中心",
+    key: "sub-integrations",
+    icon: <CloudServerOutlined />,
+    label: "服务集成",
+    children: [
+      { key: "/manage/system/tmdb", label: "TMDB 刮削" },
+      { key: "/manage/system/notify", label: "通知推送" },
+    ],
   },
   {
-    key: "/manage/system/users",
-    icon: <TeamOutlined />,
-    label: "账号管理",
-  },
-  {
-    key: "/manage/system/website",
-    icon: <GlobalOutlined />,
-    label: "网站配置",
-  },
-  {
-    key: "/manage/access",
-    icon: <LineChartOutlined />,
-    label: "数据分析",
-  },
-  {
-    key: "/manage/system",
+    key: "sub-system",
     icon: <SettingOutlined />,
-    label: "系统设置",
+    label: "系统运维",
+    children: [
+      { key: "/manage/system/website", label: "网站配置" },
+      { key: "/manage/system/users", label: "账号管理" },
+      { key: "/manage/system/security", label: "数据安全" },
+      { key: "/manage/system/logs", label: "运行日志" },
+    ],
   },
 ];
 
@@ -130,10 +126,14 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/collect/record")) return "/manage/collect/record";
   if (pathname.startsWith("/manage/collect")) return "/manage/collect";
   if (pathname.startsWith("/manage/cron")) return "/manage/cron";
+  if (pathname.startsWith("/manage/system/proxy")) return "/manage/system/proxy";
+  if (pathname.startsWith("/manage/system/tmdb")) return "/manage/system/tmdb";
+  if (pathname.startsWith("/manage/system/notify")) return "/manage/system/notify";
   if (pathname.startsWith("/manage/system/users")) return "/manage/system/users";
   if (pathname.startsWith("/manage/system/website")) return "/manage/system/website";
+  if (pathname.startsWith("/manage/system/security")) return "/manage/system/security";
+  if (pathname.startsWith("/manage/system/logs")) return "/manage/system/logs";
   if (pathname.startsWith("/manage/access")) return "/manage/access";
-  if (pathname.startsWith("/manage/system")) return "/manage/system";
   if (pathname.startsWith("/manage/file")) return "/manage/file";
   return "/manage";
 }
@@ -173,14 +173,8 @@ export default function ManageLayoutView({
 
   const router = useRouter();
   const pathname = usePathname();
-  const isFixedTabbedPage = pathname === "/manage/system" || pathname.startsWith("/manage/system/website");
+  const isFixedTabbedPage = pathname.startsWith("/manage/system/website");
   const selectedKey = resolveMenuKey(pathname);
-
-
-
-
-
-
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -254,17 +248,24 @@ export default function ManageLayoutView({
     }
   }, [isMobile]);
 
-
   const visibleMenuItems = useMemo(() => {
-    return menuItems.filter((item) => {
-      if (item?.key === "/manage/access") {
-        return Boolean(userInfo?.isAdmin && accessVisible);
-      }
-      if (item?.key === "/manage/system") {
-        return Boolean(userInfo?.isAdmin);
-      }
-      return true;
-    });
+    const isAdmin = Boolean(userInfo?.isAdmin);
+    return menuItems
+      .filter((item) => {
+        if (item?.key === "/manage/access") return Boolean(isAdmin && accessVisible);
+        if (item?.key === "/manage/system/proxy" || item?.key === "sub-integrations") return isAdmin;
+        return true;
+      })
+      .map((item) => {
+        if (!item || !("children" in item) || !item.children) return item;
+        const filteredChildren = item.children.filter((child: any) => {
+          if (child.key === "/manage/system/security" || child.key === "/manage/system/logs") {
+            return isAdmin;
+          }
+          return true;
+        });
+        return { ...item, children: filteredChildren };
+      });
   }, [userInfo?.isAdmin, accessVisible]);
   const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [

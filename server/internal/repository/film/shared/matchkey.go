@@ -75,14 +75,14 @@ func UniqueKeys(keys []string) []string {
 	return orderedKeys
 }
 
-// LoadMovieMatchKeysByMidsTx 按 mid 批量读取匹配键（按 id 升序，保持写入顺序）。
+// LoadMovieMatchKeysByMidsTx 按 mid 批量读取匹配键（按主键升序）。
 func LoadMovieMatchKeysByMidsTx(tx *gorm.DB, mids []int64) map[int64][]string {
 	if len(mids) == 0 {
 		return nil
 	}
 
 	var records []model.MovieMatchKey
-	if err := tx.Where("mid IN ?", mids).Order("id ASC").Find(&records).Error; err != nil {
+	if err := tx.Where("mid IN ?", mids).Order("mid ASC, match_key ASC").Find(&records).Error; err != nil {
 		return nil
 	}
 
@@ -124,13 +124,33 @@ func SaveMovieMatchKeysByMidTx(tx *gorm.DB, midToKeys map[int64][]string) error 
 		return nil
 	}
 
-	if err := tx.Unscoped().Where("mid IN ?", mids).Delete(&model.MovieMatchKey{}).Error; err != nil {
-		return err
+	existing := LoadMovieMatchKeysByMidsTx(tx, mids)
+	if len(records) > 0 {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error; err != nil {
+			return err
+		}
 	}
-	if len(records) == 0 {
-		return nil
+	want := make(map[int64]map[string]struct{}, len(mids))
+	for _, record := range records {
+		set := want[record.Mid]
+		if set == nil {
+			set = make(map[string]struct{})
+			want[record.Mid] = set
+		}
+		set[record.MatchKey] = struct{}{}
 	}
-	return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&records).Error
+	for mid, keys := range existing {
+		kept := want[mid]
+		for _, key := range keys {
+			if _, ok := kept[key]; ok {
+				continue
+			}
+			if err := tx.Where("mid = ? AND match_key = ?", mid, key).Delete(&model.MovieMatchKey{}).Error; err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func LoadMovieMatchKeysByMids(mids []int64) map[int64][]string {
@@ -144,7 +164,7 @@ func LoadMidCandidatesByMatchKeys(keys []string) map[string][]int64 {
 	}
 
 	var records []model.MovieMatchKey
-	if err := db.Mdb.Where("match_key IN ?", keys).Order("id ASC").Find(&records).Error; err != nil {
+	if err := db.Mdb.Where("match_key IN ?", keys).Order("mid ASC, match_key ASC").Find(&records).Error; err != nil {
 		return nil
 	}
 

@@ -1,14 +1,17 @@
 package snapshot
 
 import (
-	"gorm.io/gorm"
 	"log"
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
 )
@@ -24,21 +27,41 @@ func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	return query
 }
 
+func applyCategorySearchFilter(query *gorm.DB, sourceId string, pid int64, cid int64) *gorm.DB {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId != "" {
+		if cid > 0 {
+			return filmquery.ApplySourceTypeMatchIDs(query, sourceId, "cid", repository.PublicSourceTypeIDs(sourceId, "cid", cid))
+		}
+		if pid > 0 {
+			return filmquery.ApplySourceTypeMatchIDs(query, sourceId, "pid", repository.PublicSourceTypeIDs(sourceId, "pid", pid))
+		}
+		return query
+	}
+	if cid > 0 {
+		return filmquery.ApplyManageCategoryFieldFilter(query, "cid", cid)
+	}
+	if pid > 0 {
+		return filmquery.ApplyManageCategoryFieldFilter(query, "pid", pid)
+	}
+	return query
+}
+
 func snapshotSortOrderClause(sortField string, keywordSearch bool) string {
 	switch sortField {
 	case "hits":
-		return "hits DESC, id DESC"
+		return "hits DESC, mid DESC"
 	case "latest":
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	case "year":
-		return "year DESC, id DESC"
+		return "year DESC, mid DESC"
 	case "score":
-		return "score DESC, id DESC"
+		return "score DESC, mid DESC"
 	default:
 		if keywordSearch {
-			return "hits DESC, year DESC, update_stamp DESC, id DESC"
+			return "hits DESC, year DESC, update_stamp DESC, mid DESC"
 		}
-		return "update_stamp DESC, id DESC"
+		return "update_stamp DESC, mid DESC"
 	}
 }
 
@@ -55,15 +78,15 @@ func GetSearchPageReadModel(s model.SearchVo) []model.FilmIndex {
 
 	// 1. 优先尝试走快照表只读模型
 	if version != "" && db.Mdb != nil {
-		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != ""
-		// 模式 A: 纯片名模糊打分搜索（无剧情/地区/语言等复杂关系型过滤），优先复用内存元数据打分索引
+		hasComplexFilter := strings.TrimSpace(s.Plot) != "" || strings.TrimSpace(s.Area) != "" || strings.TrimSpace(s.Language) != "" || strings.TrimSpace(s.SourceId) != "" || s.Pid > 0 || s.Cid > 0
+		// 模式 A: 纯片名模糊打分搜索（无剧情/地区/语言/采集源等复杂关系型过滤），优先复用内存元数据打分索引
 		if name != "" && !hasComplexFilter {
 			if res, ok := searchManageFilmsByMetaIndex(version, s, page, startedAt); ok {
 				return res
 			}
 		}
 
-		// 模式 B: 多维结构化快照筛选（分类、年份、时间范围、复杂标签或无条件全量浏览）
+		// 模式 B: 多维结构化快照筛选（分类、年份、时间范围、复杂标签、采集源或无条件全量浏览）
 		return queryManageFilmsBySnapshotDB(version, s, page, name, startedAt)
 	}
 
@@ -111,16 +134,15 @@ func searchManageFilmsByMetaIndex(version string, s model.SearchVo, page *dto.Pa
 
 // queryManageFilmsBySnapshotDB 专职处理管理后台多维结构化快照筛选与无条件全量分页
 func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Page, name string, startedAt time.Time) []model.FilmIndex {
-	query := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Where("snapshot_version = ?", version)
+	query := liveFilmQuery()
 	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
+	sourceId := strings.TrimSpace(s.SourceId)
+	if sourceId != "" {
+		query = applySourceMembership(query, sourceId)
 	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
+	query = applyCategorySearchFilter(query, sourceId, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}
@@ -140,7 +162,7 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 		query = query.Where("update_stamp <= ?", s.EndTime)
 	}
 
-	noFilter := name == "" && s.Pid == 0 && s.Cid == 0 &&
+	noFilter := name == "" && sourceId == "" && s.Pid == 0 && s.Cid == 0 &&
 		strings.TrimSpace(s.Plot) == "" && strings.TrimSpace(s.Area) == "" && strings.TrimSpace(s.Language) == "" &&
 		s.Year == 0 && s.BeginTime == 0 && s.EndTime == 0
 
@@ -162,16 +184,9 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 	}
 
 	offset := shared.PageOffset(page)
-	var ids []uint
-	if err := query.Select("id").Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Pluck("id", &ids).Error; err != nil {
+	snapshots, err := findListPage(query, "update_stamp DESC, mid DESC", offset, page.PageSize)
+	if err != nil {
 		return []model.FilmIndex{}
-	}
-
-	var snapshots []model.FilmListSnapshot
-	if len(ids) > 0 {
-		if err := db.Mdb.Model(&model.FilmListSnapshot{}).Unscoped().Select(snapshotSelectFields).Where("id IN ?", ids).Order("update_stamp DESC, id DESC").Find(&snapshots).Error; err != nil {
-			return []model.FilmIndex{}
-		}
 	}
 
 	log.Printf(
@@ -196,12 +211,11 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 	if name != "" {
 		query = applyNameLikeFilter(query, name)
 	}
-	if s.Pid > 0 {
-		query = query.Where("pid = ?", s.Pid)
+	sourceId := strings.TrimSpace(s.SourceId)
+	if sourceId != "" {
+		query = applySourceMembership(query, sourceId)
 	}
-	if s.Cid > 0 {
-		query = query.Where("cid = ?", s.Cid)
-	}
+	query = applyCategorySearchFilter(query, sourceId, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}
@@ -233,7 +247,7 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 
 	var indexes []model.FilmIndex
 	offset := shared.PageOffset(page)
-	if err := query.Order("update_stamp DESC, id DESC").Offset(offset).Limit(page.PageSize).Find(&indexes).Error; err != nil {
+	if err := query.Order("update_stamp DESC, mid DESC").Offset(offset).Limit(page.PageSize).Find(&indexes).Error; err != nil {
 		return []model.FilmIndex{}
 	}
 
@@ -257,16 +271,11 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 	result := make([]model.FilmIndex, len(snapshots))
 	for i, snap := range snapshots {
 		result[i] = model.FilmIndex{
-			Model: gorm.Model{
-				ID:        snap.ID,
-				CreatedAt: snap.CreatedAt,
-				UpdatedAt: snap.UpdatedAt,
-			},
+			CreatedAt: snap.CreatedAt,
+			UpdatedAt: snap.UpdatedAt,
 			FilmIndexIdentity: model.FilmIndexIdentity{
-				Mid:        snap.Mid,
-				ContentKey: snap.ContentKey,
-				SourceId:   snap.SourceId,
-				DbId:       snap.DbId,
+				Mid:  snap.Mid,
+				DbId: snap.DbId,
 			},
 			FilmIndexCategory: model.FilmIndexCategory{
 				Cid:              snap.Cid,
@@ -297,7 +306,10 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 				IsCustomPicture:    snap.IsCustomPicture,
 				Actor:              snap.Actor,
 				Director:           snap.Director,
+				Writer:             snap.Writer,
 				Blurb:              snap.Blurb,
+				Content:            snap.Content,
+				ReleaseDate:        snap.ReleaseDate,
 			},
 			FilmIndexVersion: model.FilmIndexVersion{
 				CollectStamp:    snap.CollectStamp,

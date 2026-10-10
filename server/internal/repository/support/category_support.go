@@ -32,7 +32,7 @@ func BuildSourceCategoryKey(sourceId string, sourceTypeId int64) string {
 }
 
 func GetCategoryStableKeyByID(id int64) string {
-	if id <= 0 {
+	if id <= 0 || db.Mdb == nil {
 		return ""
 	}
 	var category model.Category
@@ -43,7 +43,7 @@ func GetCategoryStableKeyByID(id int64) string {
 }
 
 func ResolveCategoryID(id int64) int64 {
-	if id <= 0 {
+	if id <= 0 || db.Mdb == nil {
 		return id
 	}
 	var category model.Category
@@ -99,6 +99,10 @@ func ClearIndexPageCache() {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
 	db.Rdb.Del(db.Cxt, config.IndexDailyUpdatesCacheKey)
+	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.IndexDailyUpdatesCacheKey+"*", config.MaxScanCount).Iterator()
+	for dailyIter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, dailyIter.Val())
+	}
 }
 
 func RefreshCategoryCache() {

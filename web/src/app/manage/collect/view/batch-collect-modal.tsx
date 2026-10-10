@@ -54,9 +54,6 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
         <Flex vertical gap={4}>
           <Space size={[8, 4]} wrap>
             <Typography.Text strong>{value}</Typography.Text>
-            <Tag color={record.grade === 0 ? "gold" : "default"} variant="filled">
-              {record.grade === 0 ? "主采集站" : "附属采集站"}
-            </Tag>
             {stableActiveIds.includes(record.id) ? (
               <Tag icon={<LoadingOutlined />} color="processing" variant="filled">
                 采集中
@@ -85,8 +82,7 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
           <Alert
             showIcon
             type="warning"
-            title="已选择的部分采集站正在运行"
-            description={`${selectedRunningNames.join("、")} 正在采集中，重复启动会被后端自动跳过。`}
+            title={`${selectedRunningNames.join("、")} 正在采集，将自动跳过`}
           />
         ) : null}
 

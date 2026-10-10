@@ -2,7 +2,6 @@ package cache
 
 import (
 	"log"
-	"path"
 	"strings"
 
 	"server/internal/config"
@@ -127,12 +126,34 @@ func matchPattern(pattern, key string) bool {
 	if strings.HasSuffix(pattern, "*") && strings.Count(pattern, "*") == 1 && !strings.ContainsAny(pattern, "?[") {
 		return strings.HasPrefix(key, pattern[:len(pattern)-1])
 	}
-	matched, _ := path.Match(pattern, key)
-	if !matched && strings.Contains(key, "/") {
-		escapedPattern := strings.ReplaceAll(pattern, "/", "\x00")
-		escapedKey := strings.ReplaceAll(key, "/", "\x00")
-		m, _ := path.Match(escapedPattern, escapedKey)
-		return m
+	return redisGlobMatch(pattern, key)
+}
+
+// redisGlobMatch 按 Redis glob 匹配 * 和 ?。* 可以跨过 /。
+func redisGlobMatch(pattern, key string) bool {
+	for {
+		if pattern == "" {
+			return key == ""
+		}
+		if pattern[0] == '*' {
+			pattern = pattern[1:]
+			if pattern == "" {
+				return true
+			}
+			for i := 0; i <= len(key); i++ {
+				if redisGlobMatch(pattern, key[i:]) {
+					return true
+				}
+			}
+			return false
+		}
+		if key == "" {
+			return false
+		}
+		if pattern[0] != '?' && pattern[0] != key[0] {
+			return false
+		}
+		pattern = pattern[1:]
+		key = key[1:]
 	}
-	return matched
 }

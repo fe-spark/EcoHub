@@ -58,119 +58,55 @@ func BuildPlayGroupID(sourceID, rawName string, index, total int) string {
 
 func LoadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int64]map[string][]model.PlayLinkVo, error) {
 	result := make(map[int64]map[string][]model.PlayLinkVo, len(infos))
+	if len(infos) == 0 {
+		return result, nil
+	}
 	mids := make([]int64, 0, len(infos))
 	for _, info := range infos {
 		if info.Mid > 0 {
 			mids = append(mids, info.Mid)
+			result[info.Mid] = make(map[string][]model.PlayLinkVo)
 		}
 	}
-
-	keysByMid := LoadMovieMatchKeysByMidsTx(tx, mids)
-	for mid, keys := range keysByMid {
-		keysByMid[mid] = DropSharedMatchKeys(keys)
-	}
-	allKeys := make([]string, 0, len(infos)*4)
-	for _, keys := range keysByMid {
-		allKeys = append(allKeys, keys...)
-	}
-	allKeys = UniqueKeys(allKeys)
-
-	sources := make([]model.FilmSource, 0)
-	sourceIDs := make([]string, 0)
-	for _, source := range support.GetCollectSourceList() {
-		if source.Grade != model.SlaveCollect || !source.State {
-			continue
-		}
-		sources = append(sources, source)
-		sourceIDs = append(sourceIDs, source.Id)
+	if len(mids) == 0 {
+		return result, nil
 	}
 
-	playlistsBySourceKey, err := LoadPlaylistsBySourceAndKeysTx(tx, sourceIDs, allKeys)
-	if err != nil {
+	var playlists []model.FilmSourcePlaylist
+	if err := tx.Where("mid IN ? AND line_kind = ?", mids, "play").
+		Order("group_index ASC").Find(&playlists).Error; err != nil {
 		return nil, err
 	}
-	for _, info := range infos {
-		groupsBySource := make(map[string][]model.PlayLinkVo)
-		lookupKeys := keysByMid[info.Mid]
-		if len(lookupKeys) == 0 || len(playlistsBySourceKey) == 0 {
-			result[info.Mid] = groupsBySource
-			continue
-		}
 
-		for _, source := range sources {
-			groups := BuildPlayGroupsFromLoadedPlaylists(source.Id, source.Name, lookupKeys, playlistsBySourceKey)
-			if len(groups) == 0 {
-				continue
-			}
-			groupsBySource[source.Id] = groups
+	rowsByMidSource := make(map[int64]map[string][]model.FilmSourcePlaylist)
+	for _, pl := range playlists {
+		if rowsByMidSource[pl.Mid] == nil {
+			rowsByMidSource[pl.Mid] = make(map[string][]model.FilmSourcePlaylist)
 		}
-		result[info.Mid] = groupsBySource
+		rowsByMidSource[pl.Mid][pl.SourceId] = append(rowsByMidSource[pl.Mid][pl.SourceId], pl)
+	}
+
+	sourceMap := make(map[string]model.FilmSource)
+	for _, s := range support.GetCollectSourceList() {
+		sourceMap[s.Id] = s
+	}
+
+	for mid, bySource := range rowsByMidSource {
+		for sourceID, rows := range bySource {
+			sName := sourceID
+			if s, ok := sourceMap[sourceID]; ok && s.Name != "" {
+				sName = s.Name
+			}
+			groups := PlayGroupsFromPlaylistRows(sourceID, sName, rows)
+			if len(groups) > 0 {
+				result[mid][sourceID] = groups
+			}
+		}
 	}
 	return result, nil
 }
 
-func LoadPlaylistsBySourceAndKeysTx(tx *gorm.DB, sourceIDs []string, keys []string) (map[string]map[string][]model.SlaveMoviePlaylist, error) {
-	if len(sourceIDs) == 0 || len(keys) == 0 {
-		return nil, nil
-	}
-
-	var playlists []model.SlaveMoviePlaylist
-	if err := tx.Where("source_id IN ? AND movie_key IN ?", sourceIDs, keys).
-		Order("source_id ASC").
-		Order("movie_key ASC").
-		Order("group_index ASC").
-		Find(&playlists).Error; err != nil {
-		return nil, err
-	}
-
-	result := make(map[string]map[string][]model.SlaveMoviePlaylist)
-	for _, playlist := range playlists {
-		byKey := result[playlist.SourceId]
-		if byKey == nil {
-			byKey = make(map[string][]model.SlaveMoviePlaylist)
-			result[playlist.SourceId] = byKey
-		}
-		byKey[playlist.MovieKey] = append(byKey[playlist.MovieKey], playlist)
-	}
-	return result, nil
-}
-
-func BuildPlayGroupsFromLoadedPlaylists(
-	siteID string,
-	siteName string,
-	keys []string,
-	playlistsBySourceKey map[string]map[string][]model.SlaveMoviePlaylist,
-) []model.PlayLinkVo {
-	byKey := playlistsBySourceKey[siteID]
-	if len(byKey) == 0 {
-		return nil
-	}
-	return SelectBestPlayGroups(siteID, siteName, keys, byKey)
-}
-
-func SelectBestPlayGroups(siteID, siteName string, keys []string, byKey map[string][]model.SlaveMoviePlaylist) []model.PlayLinkVo {
-	var best []model.PlayLinkVo
-	bestCount := -1
-	for _, key := range UniqueKeys(keys) {
-		groups := playGroupsFromPlaylistRows(siteID, siteName, byKey[key])
-		if len(groups) == 0 {
-			continue
-		}
-		count := 0
-		for _, group := range groups {
-			if n := EpisodeCount(group.LinkList); n > count {
-				count = n
-			}
-		}
-		if count > bestCount {
-			best = groups
-			bestCount = count
-		}
-	}
-	return best
-}
-
-func playGroupsFromPlaylistRows(siteID, siteName string, matched []model.SlaveMoviePlaylist) []model.PlayLinkVo {
+func PlayGroupsFromPlaylistRows(siteID, siteName string, matched []model.FilmSourcePlaylist) []model.PlayLinkVo {
 	if len(matched) == 0 {
 		return nil
 	}

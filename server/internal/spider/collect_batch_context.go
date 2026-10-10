@@ -2,7 +2,6 @@ package spider
 
 import (
 	"log"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -178,9 +177,7 @@ type collectBatchContext struct {
 	batch              *notify.ChangeBatch
 	startedAt          time.Time
 	isStandalone       bool
-	affectedMIDs       map[int64]struct{}
 	masterAffectedMIDs map[int64]struct{}
-	pendingMasterMIDs  map[string]map[int64]struct{}
 	finishedSources    map[string]model.FilmSource
 	occupyTokens       map[string]uint64
 }
@@ -203,9 +200,7 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 		batch:              batch,
 		startedAt:          startedAt,
 		isStandalone:       standalone,
-		affectedMIDs:       make(map[int64]struct{}),
 		masterAffectedMIDs: make(map[int64]struct{}),
-		pendingMasterMIDs:  make(map[string]map[int64]struct{}),
 		finishedSources:    make(map[string]model.FilmSource),
 		occupyTokens:       snapshotOccupyTokens(sources),
 	}
@@ -213,80 +208,20 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 	return b
 }
 
-func (b *collectBatchContext) beginMasterRebuild(sourceID string) {
-	if b == nil {
-		return
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	b.pendingMasterMIDs[sourceID] = make(map[int64]struct{})
-}
-
-func (b *collectBatchContext) publishPendingMasterMIDs(sourceID string) {
-	if b == nil {
-		return
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	pending := b.pendingMasterMIDs[sourceID]
-	delete(b.pendingMasterMIDs, sourceID)
-	for mid := range pending {
-		if mid > 0 {
-			b.affectedMIDs[mid] = struct{}{}
-			b.masterAffectedMIDs[mid] = struct{}{}
-		}
-	}
-}
-
-func (b *collectBatchContext) discardPendingMasterMIDs(sourceID string) {
-	if b == nil {
-		return
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	delete(b.pendingMasterMIDs, sourceID)
-}
-
 func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
 	if b == nil || len(mids) == 0 || s == nil {
 		return
 	}
 	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if s.Grade == model.MasterCollect && h < 0 {
-		pending := b.pendingMasterMIDs[s.Id]
-		if pending == nil {
-			pending = make(map[int64]struct{})
-			b.pendingMasterMIDs[s.Id] = pending
-		}
-		for _, mid := range mids {
-			if mid > 0 {
-				pending[mid] = struct{}{}
-			}
-		}
-		return
-	}
-
 	for _, mid := range mids {
 		if mid > 0 {
-			b.affectedMIDs[mid] = struct{}{}
-			if s.Grade == model.MasterCollect {
-				b.masterAffectedMIDs[mid] = struct{}{}
-			}
+			b.masterAffectedMIDs[mid] = struct{}{}
 		}
+	}
+	sourceID := s.Id
+	b.mu.Unlock()
+	if err := enqueueStreamPublish(sourceID, mids); err != nil {
+		log.Printf("[Spider][StreamPublish] 流式刷窗失败 source=%s err=%v", sourceID, err)
 	}
 }
 
@@ -362,40 +297,13 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		return nil
 	}
 	b.mu.Lock()
-	if len(b.finishedSources) == 0 && len(b.affectedMIDs) == 0 {
+	if len(b.finishedSources) == 0 && len(b.masterAffectedMIDs) == 0 && streamBuf.pendingCount() == 0 {
 		b.mu.Unlock()
 		return nil
 	}
 
-	sources := make([]model.FilmSource, 0, len(b.finishedSources))
-	for _, s := range b.finishedSources {
-		sources = append(sources, s)
-	}
-	sort.Slice(sources, func(i, j int) bool {
-		if sources[i].Grade == sources[j].Grade {
-			return sources[i].Id < sources[j].Id
-		}
-		return sources[i].Grade == model.MasterCollect
-	})
-
-	affectedMIDs := make([]int64, 0, len(b.affectedMIDs))
-	for mid := range b.affectedMIDs {
-		if mid > 0 {
-			affectedMIDs = append(affectedMIDs, mid)
-		}
-	}
-	sort.Slice(affectedMIDs, func(i, j int) bool { return affectedMIDs[i] < affectedMIDs[j] })
-
-	masterMIDs := make([]int64, 0, len(b.masterAffectedMIDs))
-	for mid := range b.masterAffectedMIDs {
-		if mid > 0 {
-			masterMIDs = append(masterMIDs, mid)
-		}
-	}
-	sort.Slice(masterMIDs, func(i, j int) bool { return masterMIDs[i] < masterMIDs[j] })
 	finishedMap := b.finishedSources
 	b.finishedSources = make(map[string]model.FilmSource)
-	b.affectedMIDs = make(map[int64]struct{})
 	b.masterAffectedMIDs = make(map[int64]struct{})
 	b.mu.Unlock()
 
@@ -406,8 +314,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	_, _, err := finalizeCollectRun(sources, affectedMIDs, masterMIDs)
-	if err != nil {
+	if err := finalizeStreamPublish(); err != nil {
 		progress.MarkSourcesFinalizeFailed(finishedMap)
 		return err
 	}

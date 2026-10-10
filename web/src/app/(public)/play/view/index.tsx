@@ -7,61 +7,18 @@ import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
+import { trackPageView } from "@/lib/track-page-view";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
+import {
+  formatLocalUpdateTime,
+  formatActorNames,
+  resolveFilmScore,
+  makeEpisodeKey,
+  buildPlayLink,
+  buildInitialPlaybackState,
+} from "./formatters";
 import styles from "./index.module.less";
-
-function parseInitialTimeParam(value?: string): number {
-  if (!value) return 0;
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function makeEpisodeKey(sourceId: string, episodeIndex: number) {
-  return `${sourceId}:${episodeIndex}`;
-}
-
-function buildPlayLink(
-  filmId: string | number,
-  sourceId: string,
-  episodeIndex: number,
-  currentTime = 0,
-) {
-  return buildPlayPath(String(filmId), sourceId, episodeIndex, currentTime);
-}
-
-function buildInitialPlaybackState(data: any, initialTime?: string) {
-  const playingSourceId = data?.currentPlayFrom || "";
-  const episodeIndex = data?.currentEpisode ?? 0;
-
-  return {
-    playingSourceId,
-    viewingSourceId: playingSourceId,
-    current: data?.current ? { index: episodeIndex, ...data.current } : null,
-    playInitialTime: parseInitialTimeParam(initialTime),
-  };
-}
-
-function formatLocalUpdateTime(value?: string | number | null) {
-  const stamp = Number(value);
-  if (!Number.isFinite(stamp) || stamp <= 0) return "";
-
-  const date = new Date(stamp * 1000);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const pad = (part: number) => String(part).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
-
-function formatActorNames(value?: string) {
-  const raw = String(value || "").trim();
-  if (!raw) return "暂无";
-  return raw.replace(/\s*[，,、]\s*/g, " / ");
-}
-
-function resolveFilmScore(descriptor?: { score?: string; dbScore?: string }) {
-  return String(descriptor?.score || descriptor?.dbScore || "").trim() || "9.0";
-}
 
 interface PlayPageViewProps {
   data: any;
@@ -103,6 +60,8 @@ export default function PlayPageView({
 
   const currentFilm = data?.detail;
 
+  const reportedPlaybackKeys = useRef<Set<string>>(new Set());
+
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
       setCurrent(currentPlay ? { index: episodeIndex, ...currentPlay } : null);
@@ -113,6 +72,25 @@ export default function PlayPageView({
     },
     [],
   );
+
+  const handlePlayStart = useCallback(() => {
+    if (!currentFilm || !playingSourceId) return;
+    const epIdx = current?.index ?? 0;
+    const key = `${filmId}:${playingSourceId}:${epIdx}`;
+    if (reportedPlaybackKeys.current.has(key)) {
+      return;
+    }
+    reportedPlaybackKeys.current.add(key);
+    trackPageView({
+      action: "play",
+      resource: String(filmId),
+      collect_source: playingSourceId,
+      resource_title: currentFilm.name || "",
+      resource_poster: currentFilm.picture || "",
+      resource_cat: currentFilm.descriptor?.cName || "",
+      path: buildPlayPath(String(filmId), playingSourceId, epIdx),
+    });
+  }, [currentFilm, playingSourceId, filmId, current]);
 
   const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
   const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
@@ -322,6 +300,7 @@ export default function PlayPageView({
                 autoplay={autoplay}
                 onEnded={() => autoplay && handlePlayNext()}
                 onTimeUpdate={handleTimeUpdate}
+                onPlayStart={handlePlayStart}
                 onError={() => {
                   setPlayerError(true);
                   message.error("该视频源加载失败，请尝试切换播放源。");
@@ -351,6 +330,9 @@ export default function PlayPageView({
                   <span className={styles.sourcePickerLabel}>播放源</span>
                   <span className={styles.sourcePickerValue}>
                     {viewingSource?.name || "选择播放源"}
+                    {viewingSource?.proxy && (
+                      <span className={styles.proxyBadge}>代理</span>
+                    )}
                   </span>
                 </div>
                 <span className={styles.sourcePickerArrow} aria-hidden="true" />
@@ -364,30 +346,33 @@ export default function PlayPageView({
                     const episodeCount = item.linkList?.length ?? 0;
 
                     return (
-                      <button
+                      <div
                         key={item.id}
-                        type="button"
                         className={`${styles.sourcePickerOption} ${isViewing ? styles.active : ""}`}
                         onClick={() => {
-                          if (viewingSourceId === item.id) {
-                            setIsSourceMenuOpen(false);
-                            return;
+                          if (viewingSourceId !== item.id) {
+                            setViewingSourceId(item.id);
                           }
-
-                          setViewingSourceId(item.id);
                           setIsSourceMenuOpen(false);
                         }}
                       >
-                        <span className={styles.sourcePickerOptionMain}>{item.name}</span>
-                        <span className={styles.sourcePickerOptionMeta}>
-                          {isPlaying ? "当前播放" : `${episodeCount} 集`}
+                        <span className={styles.sourcePickerOptionMain}>
+                          {item.name}
+                          {item.proxy && (
+                            <span className={styles.proxyBadge}>代理</span>
+                          )}
                         </span>
-                      </button>
+                        <div className={styles.sourcePickerOptionMeta}>
+                          {isPlaying && <span className={styles.playingBadge}>正在播放</span>}
+                          <span>{episodeCount} 集</span>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
               )}
             </div>
+            <div className={styles.sourcePickerDivider} />
 
             <div className={styles.sourceTabs} ref={sourceTabsRef}>
               {currentFilm?.list?.map((item: any) => {
@@ -404,6 +389,9 @@ export default function PlayPageView({
                     }}
                   >
                     {item.name}
+                    {item.proxy && (
+                      <span className={styles.proxyBadge}>代理</span>
+                    )}
                   </div>
                 );
               })}

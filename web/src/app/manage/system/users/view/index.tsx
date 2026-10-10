@@ -310,8 +310,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
           </Tooltip>
           {currentUser?.isAdmin && !record.builtin && record.id !== currentUser?.id && (
             <Popconfirm
-              title="确定要删除该用户账号吗？"
-              description="删除后无法撤销，该账号将失去所有后台访问权限。"
+              title="删除该账号？"
+              description="不可恢复"
               onConfirm={() => handleDelete(record.id)}
               okText="确定"
               cancelText="取消"

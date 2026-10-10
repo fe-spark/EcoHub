@@ -34,6 +34,9 @@
       rgba(0, 0, 0, 0.95) 0%,
       rgba(0, 0, 0, 0.4) 50%,
       transparent 100%);
+  --public-dropdown-bg: rgba(22, 26, 38, 0.96);
+  --public-dropdown-border: rgba(255, 255, 255, 0.12);
+  --public-dropdown-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.4);
   --text-main-light: #101218;
   --text-main-dark: #ffffff;
   --text-secondary-light: rgba(16, 18, 24, 0.7);
@@ -79,6 +82,9 @@
         rgba(15, 23, 42, 0.92) 0%,
         rgba(15, 23, 42, 0.35) 50%,
         transparent 100%);
+    --public-dropdown-bg: rgba(255, 255, 255, 0.98);
+    --public-dropdown-border: rgba(0, 0, 0, 0.08);
+    --public-dropdown-shadow: 0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
   }
 }
 
@@ -114,6 +120,9 @@ html[data-theme="dark"] {
       rgba(0, 0, 0, 0.95) 0%,
       rgba(0, 0, 0, 0.4) 50%,
       transparent 100%);
+  --public-dropdown-bg: rgba(22, 26, 38, 0.96);
+  --public-dropdown-border: rgba(255, 255, 255, 0.12);
+  --public-dropdown-shadow: 0 16px 40px rgba(0, 0, 0, 0.65), 0 4px 12px rgba(0, 0, 0, 0.4);
 }
 
 html[data-theme="light"] {
@@ -151,6 +160,9 @@ html[data-theme="light"] {
       rgba(15, 23, 42, 0.92) 0%,
       rgba(15, 23, 42, 0.35) 50%,
       transparent 100%);
+  --public-dropdown-bg: rgba(255, 255, 255, 0.98);
+  --public-dropdown-border: rgba(0, 0, 0, 0.08);
+  --public-dropdown-shadow: 0 12px 32px rgba(15, 23, 42, 0.12), 0 4px 12px rgba(15, 23, 42, 0.06);
 }
 
 * {

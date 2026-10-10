@@ -1,8 +1,6 @@
 package service
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"server/internal/model"
@@ -24,21 +22,13 @@ func TestRedactProxyURL(t *testing.T) {
 
 func TestNormalizeProxyConfig(t *testing.T) {
 	cfg := model.ProxyConfig{
-		Enabled:   true,
-		ProxyURL:  "  http://127.0.0.1:7890/  ",
-		Scope:     "invalid_scope",
-		SourceIds: []string{"s1", "s2", "s1", "  ", "s3"},
+		Enabled:  true,
+		ProxyURL: "  http://127.0.0.1:7890/  ",
 	}
 
 	norm := repository.NormalizeProxyConfig(cfg)
 	if norm.ProxyURL != "http://127.0.0.1:7890/" {
 		t.Errorf("expected trimmed proxyUrl, got %s", norm.ProxyURL)
-	}
-	if norm.Scope != model.ProxyScopeAll {
-		t.Errorf("expected default scope 'all', got %s", norm.Scope)
-	}
-	if len(norm.SourceIds) != 3 {
-		t.Errorf("expected 3 unique sourceIds, got %d", len(norm.SourceIds))
 	}
 }
 
@@ -49,16 +39,21 @@ func TestResolveSourceProxy(t *testing.T) {
 	}
 }
 
-func TestTestProxyWithServer(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	}))
-	defer ts.Close()
-
-	// 使用直接地址测试 TestProxy 错误处理
-	_, err := ProxySvc.TestProxy("", ts.URL)
+func TestTestProxyEmptyURL(t *testing.T) {
+	_, err := ProxySvc.TestProxy("")
 	if err == nil {
 		t.Errorf("expected error for empty proxy url")
+	}
+}
+
+func TestResolveModuleProxies(t *testing.T) {
+	if ok, _ := repository.ResolveTMDBProxy(); ok {
+		t.Errorf("expected false when disabled")
+	}
+	if ok, _ := repository.ResolveNotifyProxy(); ok {
+		t.Errorf("expected false when disabled")
+	}
+	if ok, _ := repository.ResolveUpgradeProxy(); ok {
+		t.Errorf("expected false when disabled")
 	}
 }

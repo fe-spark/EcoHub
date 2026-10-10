@@ -67,9 +67,9 @@ func InitMysql() (err error) {
 		return err
 	}
 
-	// 前台读链路已切快照表，连接池保持保守上限，避免采集期把 MySQL 连接打满。
-	sqlDB.SetMaxIdleConns(5)
-	sqlDB.SetMaxOpenConns(20)
+	// 列表和采集都打 film_index。写事务并发默认 3，再留前台读和分页请求的余量。
+	sqlDB.SetMaxIdleConns(10)
+	sqlDB.SetMaxOpenConns(32)
 	sqlDB.SetConnMaxLifetime(time.Minute * 30)
 	sqlDB.SetConnMaxIdleTime(time.Minute * 5)
 	if err := sqlDB.Ping(); err != nil {

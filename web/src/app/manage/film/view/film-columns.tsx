@@ -140,7 +140,7 @@ export function useFilmColumns({
         align: "center",
         render: (v) => (
           <Text type="secondary" style={{ fontSize: 13 }}>
-            {dayjs(v * 1000).format("YYYY-MM-DD HH:ss")}
+            {dayjs(v * 1000).format("YYYY-MM-DD HH:mm:ss")}
           </Text>
         ),
       },
@@ -202,7 +202,7 @@ export function useFilmColumns({
               />
             </Tooltip>
             <Popconfirm
-              title="确认删除此影片？"
+              title="删除此影片？"
               onConfirm={() => handleDelFilm(record.mid || record.ID)}
             >
               <Tooltip title="删除">

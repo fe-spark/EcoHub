@@ -684,8 +684,8 @@ function FilmAddForm() {
             <Space wrap className={styles.submitActions}>
               {id ? (
                 <Popconfirm
-                  title="确定还原为初始数据？"
-                  description="将放弃当前所有未保存修改（包括 TMDB 填充与手动编辑），恢复为影片初始数据。"
+                  title="还原为初始数据？"
+                  description="未保存的修改将丢失"
                   onConfirm={handleResetToOriginal}
                   okText="确定还原"
                   cancelText="取消"

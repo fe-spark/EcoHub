@@ -14,12 +14,12 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
-	filmplaylist "server/internal/repository/film/playlist"
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
@@ -27,7 +27,7 @@ import (
 )
 
 // recoverMaxRetryCount 失败页重试的最大轮次。
-const recoverMaxRetryCount = 5
+const recoverMaxRetryCount = 3
 
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
@@ -58,7 +58,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		ctx = context.Background()
 	}
 
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
@@ -179,12 +179,12 @@ func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) str
 	if globalMid <= 0 {
 		return ""
 	}
-	sourceMid := filmplaylist.LoadSourceMidByGlobalMid(globalMid, source.Id)
-	if sourceMid > 0 {
+	var sourceMid int64
+	if err := db.Mdb.Model(&model.MovieSourceMapping{}).
+		Where("global_mid = ? AND source_id = ?", globalMid, source.Id).
+		Select("source_mid").
+		First(&sourceMid).Error; err == nil && sourceMid > 0 {
 		return strconv.FormatInt(sourceMid, 10)
-	}
-	if source.Grade == model.MasterCollect {
-		return strconv.FormatInt(globalMid, 10)
 	}
 	return ""
 }
@@ -198,7 +198,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	default:
 	}
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	r.Params.Set("pg", fmt.Sprint(fr.PageNumber))
 	if fr.Hour > 0 {
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
@@ -243,6 +243,10 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 	s := repository.FindCollectSourceById(fr.OriginId)
 	if s == nil {
 		syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
+		return
+	}
+	if !s.State {
+		syslog.Warnf("[Spider] 站点已禁用，跳过失败页重试 source_id=%s name=%s page=%d", s.Id, s.Name, fr.PageNumber)
 		return
 	}
 	claimed := filterCollectableSources([]model.FilmSource{*s}, "失败恢复")
@@ -301,6 +305,10 @@ func FullRecoverSpider() {
 		s := repository.FindCollectSourceById(fr.OriginId)
 		if s == nil {
 			syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
+			continue
+		}
+		if !s.State {
+			syslog.Warnf("[Spider] FullRecoverSpider: 站点已禁用，跳过重试 source_id=%s name=%s page=%d", s.Id, s.Name, fr.PageNumber)
 			continue
 		}
 		if _, ok := seen[s.Id]; !ok {
@@ -395,14 +403,13 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 			}
 			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 		}
+	} else if s.ProxyCollect {
+		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+			r.ProxyURL = proxy
+		}
 	} else if s.Id != "" {
 		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
 			r.ProxyURL = proxy
-		}
-	} else {
-		cfg := repository.GetProxyConfig()
-		if cfg.Enabled && cfg.Scope == model.ProxyScopeAll && cfg.ProxyURL != "" {
-			r.ProxyURL = cfg.ProxyURL
 		}
 	}
 	err := utils.ApiTest(&r)

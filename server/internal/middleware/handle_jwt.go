@@ -4,12 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	"server/internal/utils"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
@@ -69,7 +69,7 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 
-		// 处理 token 刷新逻辑（针对过期但 Redis 中有效的 token）
+		// JWT 已过期时，只有 Redis 里仍是同一把 token 才刷新。Redis 有效期与 JWT 相同，这里只覆盖到期瞬间的时差。
 		if err != nil && errors.Is(err, jwt.ErrTokenExpired) {
 			// 使用 singleflight 防止并发刷新
 			key := fmt.Sprintf("refresh:%d", uc.UserID)

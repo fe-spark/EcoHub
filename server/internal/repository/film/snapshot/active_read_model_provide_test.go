@@ -2,12 +2,9 @@ package snapshot
 
 import (
 	"testing"
-	"time"
 
 	"server/internal/model"
 	"server/internal/model/dto"
-
-	"gorm.io/gorm"
 )
 
 func TestListProvideSnapshots_TagFilter(t *testing.T) {
@@ -23,10 +20,8 @@ func TestListProvideSnapshots_TagFilter(t *testing.T) {
 		{SnapshotVersion: version, Mid: 2, Pid: targetPid, Name: "美国动作片", Area: "美国", Year: 2023, ClassTag: "动作"},
 		{SnapshotVersion: version, Mid: 3, Pid: targetPid, Name: "大陆喜剧片", Area: "中国大陆", Year: 2024, ClassTag: "喜剧"},
 	}
-	for _, s := range snapshots {
-		if err := gdb.Create(&s).Error; err != nil {
-			t.Fatalf("create snapshot: %v", err)
-		}
+	if err := WriteLiveFilmsFromSnapshots(snapshots); err != nil {
+		t.Fatalf("seed live films: %v", err)
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
@@ -51,28 +46,20 @@ func TestListProvideSnapshots_TagFilter(t *testing.T) {
 func TestGetSnapshotByMid_UnscopedIncludesSoftDeleted(t *testing.T) {
 	gdb := setupOthersFilterTestDB(t)
 	version := "test_provide_unscoped_v1"
-	s := model.FilmListSnapshot{SnapshotVersion: version, Mid: 11, Name: "软删快照"}
-	if err := gdb.Create(&s).Error; err != nil {
-		t.Fatalf("create snapshot: %v", err)
+	idx := model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 11}, FilmIndexContent: model.FilmIndexContent{Name: "软删影片"}}
+	if err := gdb.Create(&idx).Error; err != nil {
+		t.Fatalf("create film: %v", err)
 	}
-	if err := gdb.Unscoped().Model(&model.FilmListSnapshot{}).Where("mid = ?", 11).Update("deleted_at", time.Now()).Error; err != nil {
-		t.Fatalf("mark deleted_at: %v", err)
-	}
-
-	var scoped model.FilmListSnapshot
-	if err := gdb.Where("snapshot_version = ? AND mid = ?", version, int64(11)).First(&scoped).Error; err == nil {
-		t.Fatal("scoped query should hide soft-deleted snapshot")
-	} else if err != gorm.ErrRecordNotFound {
-		t.Fatalf("scoped query unexpected err: %v", err)
+	if err := gdb.Delete(&model.FilmIndex{}, 11).Error; err != nil {
+		t.Fatalf("soft delete: %v", err)
 	}
 
 	got := GetSnapshotByMid(version, 11)
-	if got == nil || got.Mid != 11 {
-		t.Fatalf("Unscoped point lookup should still return snapshot, got %+v", got)
+	if got != nil {
+		t.Fatalf("列表直读应尊重 film_index 软删, got %+v", got)
 	}
-
 	rows := GetSnapshotsByMidsOrdered(version, []int64{11})
-	if len(rows) != 1 || rows[0].Mid != 11 {
-		t.Fatalf("Unscoped batch lookup should still return snapshot, got %+v", rows)
+	if len(rows) != 0 {
+		t.Fatalf("软删影片不应出现在列表, got %+v", rows)
 	}
 }
