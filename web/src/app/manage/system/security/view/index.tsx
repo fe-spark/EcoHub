@@ -20,7 +20,6 @@ import {
   CloudSyncOutlined,
 } from "@ant-design/icons";
 import type { UploadProps } from "antd";
-import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -36,6 +35,8 @@ interface ConfigBackupModules {
   banners: boolean;
   notify: boolean;
   mappingRules: boolean;
+  proxy: boolean;
+  tmdb: boolean;
 }
 
 interface ConfigBackup {
@@ -48,6 +49,8 @@ interface ConfigBackup {
   banners?: unknown[];
   notify?: unknown;
   mappingRules?: unknown[];
+  proxy?: unknown;
+  tmdb?: unknown;
 }
 
 const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
@@ -57,6 +60,8 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "banners", label: "首页轮播" },
   { key: "notify", label: "通知配置" },
   { key: "mappingRules", label: "映射规则" },
+  { key: "proxy", label: "网络代理" },
+  { key: "tmdb", label: "TMDB刮削" },
 ];
 
 const ALL_MODULES: ConfigBackupModules = {
@@ -66,6 +71,8 @@ const ALL_MODULES: ConfigBackupModules = {
   banners: true,
   notify: true,
   mappingRules: true,
+  proxy: true,
+  tmdb: true,
 };
 
 function downloadJson(filename: string, data: unknown) {
@@ -103,6 +110,12 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   }
   if (Array.isArray(backup.mappingRules)) {
     parts.push(`映射规则 ${backup.mappingRules.length}`);
+  }
+  if (backup.proxy) {
+    parts.push("网络代理");
+  }
+  if (backup.tmdb) {
+    parts.push("TMDB刮削");
   }
   return parts.join(" · ");
 }
@@ -216,31 +229,6 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         <ManagePageHeader
           title="数据安全"
           description="管理站点配置备份导入与导出，数据分析积累数据清理，以及影视库存与采集派生数据重置。"
-        />
-      )}
-
-      {embedded ? null : (
-        <Alert
-          type="info"
-          showIcon
-          title="配置备份与数据重置"
-          description={
-            <>
-              导出/导入仅包含站点配置（网站、采集站、计划任务、封面、通知、映射规则），不含影视库存与账号密码。
-              当前影视体量可在{" "}
-              <Link href="/manage">工作台</Link>
-              {" "}查看；清空影视与采集派生数据请使用下方「数据重置」。
-            </>
-          }
-        />
-      )}
-
-      {!isAdmin && (
-        <Alert
-          type="warning"
-          showIcon
-          title="权限受限"
-          description="数据安全相关操作（配置备份/恢复、数据分析数据清理、影视数据重置）包含高危与敏感配置，仅超级管理员可操作。"
         />
       )}
 

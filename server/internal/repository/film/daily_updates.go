@@ -1,4 +1,4 @@
-package notify
+package film
 
 import (
 	"database/sql"
@@ -9,6 +9,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 
 	"gorm.io/gorm"
 )
@@ -29,19 +30,83 @@ type dailyPidCountRow struct {
 	Count int           `gorm:"column:cnt"`
 }
 
+// CategoryCountItem 顶级分类计数项。
+type CategoryCountItem struct {
+	CategoryID   int64
+	CategoryName string
+	Count        int
+}
+
 // NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源。
 func NavTopCategories() []model.Category {
-	return navTopCategories()
+	if db.Mdb == nil {
+		return nil
+	}
+	tree := repository.GetCategoryTree()
+	out := make([]model.Category, 0, len(tree.Children))
+	for _, c := range tree.Children {
+		if c == nil || !c.Show {
+			continue
+		}
+		out = append(out, model.Category{
+			Id:   c.Id,
+			Pid:  c.Pid,
+			Name: c.Name,
+			Sort: c.Sort,
+		})
+	}
+	return out
 }
 
 // NavTopCategoryIDs 由 NavTopCategories 结果提取 ID 列表，供查询复用避免重复全表扫描分类树。
 func NavTopCategoryIDs(nav []model.Category) []int64 {
-	return navTopCategoryIDs(nav)
+	ids := make([]int64, 0, len(nav))
+	for _, c := range nav {
+		if c.Id > 0 {
+			ids = append(ids, c.Id)
+		}
+	}
+	return ids
+}
+
+// Rolling24hWindow 滚动近 24 小时：now-24h（含）到 now（含）。
+func Rolling24hWindow(now time.Time) (from, to time.Time) {
+	return now.Add(-24 * time.Hour), now
+}
+
+// LoadChangeMidsBetween 汇总时间窗内的变更 mid，直接走 film_index 的 update_stamp 索引。
+func LoadChangeMidsBetween(from, to time.Time, limit int) ([]int64, error) {
+	if db.Mdb == nil {
+		return nil, fmt.Errorf("数据库未就绪")
+	}
+	if to.Before(from) {
+		return nil, nil
+	}
+
+	type row struct {
+		Mid int64 `gorm:"column:mid"`
+	}
+	var rows []row
+	q := db.Mdb.Table(model.TableFilmIndex).
+		Select("mid").
+		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()).
+		Order("update_stamp DESC, mid DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	if err := q.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	out := make([]int64, 0, len(rows))
+	for _, r := range rows {
+		if r.Mid > 0 {
+			out = append(out, r.Mid)
+		}
+	}
+	return out, nil
 }
 
 // DailyUpdateListQuery 近 24h 更新列表查询。
-// Pid: 0 全部；-1 其他（非导航大类）；>0 导航大类 pid。
-// NavIDs 由调用方预取的导航大类 ID（pid=0 时可不传）。
 type DailyUpdateListQuery struct {
 	From     time.Time
 	To       time.Time
@@ -62,6 +127,26 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 		return &CategoryCountItem{CategoryID: 0, CategoryName: "其他"}
 	}
 	return &CategoryCountItem{CategoryID: pid, CategoryName: "_"}
+}
+
+func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64) *gorm.DB {
+	if cat == nil {
+		return q
+	}
+	name := strings.TrimSpace(cat.CategoryName)
+	if name == "" || name == "全部" {
+		return q
+	}
+	if name == "其他" {
+		if len(navIDs) == 0 {
+			return q
+		}
+		return q.Where("pid IS NULL OR pid = 0 OR pid NOT IN ?", navIDs)
+	}
+	if cat.CategoryID > 0 {
+		return q.Where("pid = ?", cat.CategoryID)
+	}
+	return q.Where("1 = 0")
 }
 
 func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64, sourceID string) *gorm.DB {
@@ -99,7 +184,6 @@ func clampDailyUpdatePage(current, pageSize int) (int, int) {
 }
 
 // ListDailyUpdateMids 近 24h 变更 mid：标准分页或随机抽样。
-// 随机时忽略 offset，按排除列表抽一页；total 为筛选后（随机时再扣 exclude）可抽数量。
 func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err error) {
 	if db.Mdb == nil {
 		return nil, 0, fmt.Errorf("数据库未就绪")
@@ -110,7 +194,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	current, pageSize := clampDailyUpdatePage(q.Current, q.PageSize)
 	navIDs := q.NavIDs
 	if q.Pid != DailyPidAll && len(navIDs) == 0 {
-		navIDs = navTopCategoryIDs(navTopCategories())
+		navIDs = NavTopCategoryIDs(NavTopCategories())
 	}
 
 	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
@@ -162,8 +246,7 @@ func pickRandomDailyUpdateRows(rows []dailyUpdateMidRow, pageSize int) []dailyUp
 	return shuffled
 }
 
-// DailyUpdatePidCounts 近 24h 按导航大类聚合数量。navIDs 由调用方预取，避免重复全表扫描分类树。
-// 孤儿 mid（film_index 缺失 / f.pid NULL）计入 total 与 otherCount，与「其他」列表口径一致。
+// DailyUpdatePidCounts 近 24h 按导航大类聚合数量。
 func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (countByPid map[int64]int, otherCount int, total int, err error) {
 	countByPid = map[int64]int{}
 	if db.Mdb == nil {

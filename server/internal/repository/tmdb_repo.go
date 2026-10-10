@@ -22,7 +22,6 @@ func DefaultTMDBConfig() model.TMDBConfig {
 	return model.TMDBConfig{
 		Enabled:     false,
 		ApiKey:      "",
-		Proxy:       "",
 		Language:    DefaultTMDBLanguage,
 		ImageDomain: DefaultTMDBImageDomain,
 	}
@@ -31,7 +30,6 @@ func DefaultTMDBConfig() model.TMDBConfig {
 // NormalizeTMDBConfig 规范化配置
 func NormalizeTMDBConfig(cfg model.TMDBConfig) model.TMDBConfig {
 	cfg.ApiKey = strings.TrimSpace(cfg.ApiKey)
-	cfg.Proxy = strings.TrimSpace(cfg.Proxy)
 	cfg.Language = strings.TrimSpace(cfg.Language)
 	if cfg.Language == "" {
 		cfg.Language = DefaultTMDBLanguage

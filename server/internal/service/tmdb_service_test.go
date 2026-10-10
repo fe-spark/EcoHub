@@ -98,7 +98,6 @@ func TestNormalizeTMDBConfig(t *testing.T) {
 	cfg := model.TMDBConfig{
 		Enabled:     true,
 		ApiKey:      "  test_key  ",
-		Proxy:       " http://127.0.0.1:7890/ ",
 		Language:    "",
 		ImageDomain: "https://image.tmdb.org/t/p///",
 	}

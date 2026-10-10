@@ -34,6 +34,8 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 
 	site := repository.GetSiteBasic()
 	notifyCfg := repository.GetNotifyConfig()
+	proxyCfg := repository.GetProxyConfig()
+	tmdbCfg := repository.GetTMDBConfig()
 
 	rules, _ := repository.ListAllMappingRules(repository.MappingRuleQuery{})
 	exports := make([]model.MappingRuleExport, 0, len(rules))
@@ -57,6 +59,8 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 		Banners:      banners,
 		Notify:       &notifyCfg,
 		MappingRules: exports,
+		Proxy:        &proxyCfg,
+		TMDB:         &tmdbCfg,
 	}
 }
 
@@ -148,6 +152,25 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		}
 		if err := repository.ReplaceMappingRules(exports); err != nil {
 			return fmt.Errorf("导入映射规则失败: %w", err)
+		}
+	}
+
+	if req.Modules.Proxy {
+		if backup.Proxy == nil {
+			return errors.New("备份中缺少网络代理配置数据")
+		}
+		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
+			return fmt.Errorf("导入网络代理配置失败: %w", err)
+		}
+		notify.ReloadTelegramClient()
+	}
+
+	if req.Modules.TMDB {
+		if backup.TMDB == nil {
+			return errors.New("备份中缺少 TMDB 刮削配置数据")
+		}
+		if err := repository.SaveTMDBConfig(*backup.TMDB); err != nil {
+			return fmt.Errorf("导入 TMDB 刮削配置失败: %w", err)
 		}
 	}
 

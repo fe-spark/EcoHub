@@ -8,6 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -103,10 +104,10 @@ func TestBuildCategoryPlanForMids_OrderConsistency(t *testing.T) {
 	}
 
 	// 与每日更新接口查询结果对比：验证两者的排序完全一致
-	dailyMids, totalMids, err := ListDailyUpdateMids(DailyUpdateListQuery{
+	dailyMids, totalMids, err := film.ListDailyUpdateMids(film.DailyUpdateListQuery{
 		From:     time.Unix(0, 0),
 		To:       time.Now().Add(24 * time.Hour),
-		Pid:      DailyPidAll,
+		Pid:      film.DailyPidAll,
 		Current:  1,
 		PageSize: 10,
 	})

@@ -58,37 +58,31 @@ func provideCollectSource(path string, query url.Values) string {
 		return ""
 	}
 	raw := strings.TrimSpace(query.Get("source"))
-	if raw != "" {
-		if !validCollectSourceID(raw) {
-			return ""
-		}
+	if raw != "" && validCollectSourceID(raw) {
 		return raw
 	}
-	ac := strings.TrimSpace(query.Get("ac"))
-	ids := strings.TrimSpace(query.Get("ids"))
-	if (ac == "detail" || ac == "videolist") && ids != "" {
-		return ""
-	}
-	return activeCollectSourceID()
+	return ""
 }
 
 func pageCollectSource(action, collectSource, resource string) string {
-	switch action {
-	case ActionBrowse, ActionClassify, ActionSearch:
-		return activeCollectSourceID()
-	case ActionPlay:
-		id := strings.TrimSpace(collectSource)
+	if action != ActionPlay {
+		return ""
+	}
+	id := strings.TrimSpace(collectSource)
+	if id != "" {
 		if validCollectSourceID(id) && lookupCollectSourceExists(id) {
 			return id
 		}
-		liveID := liveCollectSourceID(resource)
+		return ""
+	}
+	liveID := liveCollectSourceID(resource)
+	if liveID != "" {
 		if validCollectSourceID(liveID) && lookupCollectSourceExists(liveID) {
 			return liveID
 		}
 		return ""
-	default:
-		return ""
 	}
+	return activeCollectSourceID()
 }
 
 func activeCollectSourceID() string {
@@ -117,7 +111,7 @@ func countCollectSource(pipe redis.Pipeliner, ctx context.Context, day, id strin
 	pipe.ExpireNX(ctx, key, ttlDay)
 }
 
-// QuerySourceCalls 返回选定日期各采集站的调用次数。当前首选站只用于标记，不改归属。
+// QuerySourceCalls 返回选定日期有调用的各片源站计数，按调用量降序排列。
 func QuerySourceCalls(day string) ([]SourceCallRow, error) {
 	target, err := parseDay(day, time.Now().In(time.Local))
 	if err != nil {
@@ -127,43 +121,50 @@ func QuerySourceCalls(day string) ([]SourceCallRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	if len(counts) == 0 {
+		return []SourceCallRow{}, nil
+	}
+
 	primary := activeCollectSourceID()
-	rows := make([]SourceCallRow, 0)
-	seen := map[string]struct{}{}
+	sourceMap := map[string]model.FilmSource{}
 	for _, source := range listCollectSources() {
 		id := strings.TrimSpace(source.Id)
-		if id == "" {
-			continue
+		if id != "" {
+			sourceMap[id] = source
 		}
-		seen[id] = struct{}{}
-		rows = append(rows, SourceCallRow{
-			Id:        id,
-			Name:      source.Name,
-			Enabled:   source.State,
-			IsPrimary: id == primary,
-			Count:     counts[id],
-		})
 	}
-	unknown := make([]SourceCallRow, 0)
+
+	rows := make([]SourceCallRow, 0, len(counts))
 	for id, count := range counts {
-		if _, ok := seen[id]; ok || count <= 0 {
+		if count <= 0 {
 			continue
 		}
-		unknown = append(unknown, SourceCallRow{
-			Id:        id,
-			Name:      id,
-			Enabled:   false,
-			IsPrimary: false,
-			Count:     count,
-		})
-	}
-	sort.Slice(unknown, func(i, j int) bool {
-		if unknown[i].Count != unknown[j].Count {
-			return unknown[i].Count > unknown[j].Count
+		if s, ok := sourceMap[id]; ok {
+			rows = append(rows, SourceCallRow{
+				Id:        id,
+				Name:      s.Name,
+				Enabled:   s.State,
+				IsPrimary: id == primary,
+				Count:     count,
+			})
+		} else {
+			rows = append(rows, SourceCallRow{
+				Id:        id,
+				Name:      id,
+				Enabled:   false,
+				IsPrimary: id == primary,
+				Count:     count,
+			})
 		}
-		return unknown[i].Id < unknown[j].Id
+	}
+
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Id < rows[j].Id
 	})
-	return append(rows, unknown...), nil
+	return rows, nil
 }
 
 func loadCollectSourceCounts(dayKey string) (map[string]int64, error) {

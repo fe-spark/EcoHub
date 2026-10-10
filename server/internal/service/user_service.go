@@ -80,7 +80,6 @@ func (s *UserService) AddUser(u model.User) error {
 			return errors.New("邮箱已被其它账号使用")
 		}
 	}
-	u.Role, u.Status = model.ClampNewUser(true, u.Role, u.Status)
 	// 密码加密
 	u.Salt = utils.GenerateSalt()
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)

@@ -33,6 +33,7 @@ interface SourceFormModalProps {
   mode: "add" | "edit";
   loading: boolean;
   testing?: boolean;
+  globalSpiderProxyReady?: boolean;
   initialValues: SourceFormValues;
   formNonce: number;
   onCancel: () => void;
@@ -41,15 +42,23 @@ interface SourceFormModalProps {
 }
 
 export default function SourceFormModal(props: SourceFormModalProps) {
-  const { open, mode, loading, testing, initialValues, onCancel, onSubmit, onTest } =
-    props;
+  const {
+    open,
+    mode,
+    loading,
+    testing,
+    globalSpiderProxyReady = false,
+    initialValues,
+    onCancel,
+    onSubmit,
+    onTest,
+  } = props;
   const [form] = Form.useForm<SourceFormValues>();
   const { canWrite } = useManagePermission();
   const title = useMemo(
     () => (mode === "add" ? "新增采集站" : "编辑采集站"),
     [mode],
   );
-
 
   const currentUri = Form.useWatch("uri", form);
   const isUriChanged =
@@ -65,8 +74,12 @@ export default function SourceFormModal(props: SourceFormModalProps) {
       return;
     }
     form.resetFields();
-    form.setFieldsValue(initialValues);
-  }, [open, form, initialValues]);
+    const effectiveValues: SourceFormValues = {
+      ...initialValues,
+      proxyCollect: globalSpiderProxyReady ? Boolean(initialValues.proxyCollect) : false,
+    };
+    form.setFieldsValue(effectiveValues);
+  }, [open, form, initialValues, globalSpiderProxyReady]);
 
   return (
     <Modal
@@ -111,7 +124,12 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         form={form}
         layout="vertical"
         initialValues={initialValues}
-        onFinish={onSubmit}
+        onFinish={(values) => {
+          if (!globalSpiderProxyReady || !values.proxyCollect) {
+            values.proxyCollect = false;
+          }
+          void onSubmit(values);
+        }}
         disabled={loading}
       >
         <Form.Item
@@ -190,6 +208,39 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         >
           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
         </Form.Item>
+
+        <Form.Item
+          label={
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span>采集接口代理</span>
+              {!globalSpiderProxyReady && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: "var(--ant-color-text-tertiary, #8c8c8c)",
+                    fontWeight: "normal",
+                  }}
+                >
+                  （系统网络代理未开启）
+                </span>
+              )}
+            </div>
+          }
+          name="proxyCollect"
+          valuePropName="checked"
+          tooltip={
+            globalSpiderProxyReady
+              ? "源站 API 抓取与详情拉取经由全局网络代理转发"
+              : "系统全局网络代理未开启或爬虫通道未启用，无法开启代理"
+          }
+        >
+          <Switch
+            checkedChildren="开启"
+            unCheckedChildren="直连"
+            disabled={!globalSpiderProxyReady}
+          />
+        </Form.Item>
+
         <Form.Item label="是否启用" name="state" valuePropName="checked">
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>

@@ -352,6 +352,8 @@
 
 .sourcePickerOptionMain {
   min-width: 0;
+  display: inline-flex;
+  align-items: center;
   font-size: 14px;
   font-weight: 600;
   overflow: hidden;
@@ -378,6 +380,22 @@
   background: rgba(250, 140, 22, 0.18);
   color: #fa8c16;
   border: 1px solid rgba(250, 140, 22, 0.35);
+  flex-shrink: 0;
+}
+
+.proxyBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(19, 194, 194, 0.15);
+  color: #13c2c2;
+  border: 1px solid rgba(19, 194, 194, 0.3);
+  margin-left: 6px;
+  line-height: 1.2;
+  flex-shrink: 0;
 }
 
 .sourceTabs {

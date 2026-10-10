@@ -26,6 +26,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import ImagePicker from "@/app/manage/components/image-picker";
 import TipModal from "@/components/public/TipModal";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import {
   DEFAULT_TIP_MESSAGE,
   DEFAULT_TIP_TITLE,
@@ -77,7 +78,7 @@ function emptyChannel(key: TipChannelKey, label: string): DraftChannel {
 export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
   const [data, setData] = useState<TipConfig>(createDefaultTipConfig);
   const [draft, setDraft] = useState<DraftTip>(() => toDraft(createDefaultTipConfig()));
-  const [isEditing, setIsEditing] = useState(false);
+  const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [pickerUid, setPickerUid] = useState<string | null>(null);
@@ -94,6 +95,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
         const normalized = normalizeTipConfig(resp.data);
         setData(normalized);
         setDraft(toDraft(normalized));
+        setIsTouched(false);
       }
     } finally {
       setFetching(false);
@@ -111,12 +113,13 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
       message: draft.message,
       channels: draft.channels,
     });
-    return serializeTipConfig(currentTip) !== serializeTipConfig(data);
-  }, [draft, data]);
+    return isTouched && serializeTipConfig(currentTip) !== serializeTipConfig(data);
+  }, [isTouched, draft, data]);
 
   const canAdd = draft.channels.length < MAX_TIP_CHANNELS;
 
   const updateChannel = (uid: string, patch: Partial<TipChannel>) => {
+    setIsTouched(true);
     setDraft((prev) => ({
       ...prev,
       channels: prev.channels.map((channel) =>
@@ -127,6 +130,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
 
   const addChannel = () => {
     if (!canAdd) return;
+    setIsTouched(true);
     setDraft((prev) => ({
       ...prev,
       channels: [...prev.channels, emptyChannel("custom", "")],
@@ -137,6 +141,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
     if (pickerUid === uid) {
       setPickerUid(null);
     }
+    setIsTouched(true);
     setDraft((prev) => {
       const next = prev.channels.filter((channel) => channel.uid !== uid);
       const fallback = createDefaultTipConfig().channels.map((channel) => ({
@@ -152,7 +157,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
 
   const handleCancel = () => {
     setDraft(toDraft(data));
-    setIsEditing(false);
+    setIsTouched(false);
   };
 
   const handleSave = async () => {
@@ -170,7 +175,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
         message.success(resp.msg || "赞赏配置已保存");
         setData(nextTip);
         setDraft(toDraft(nextTip));
-        setIsEditing(false);
+        setIsTouched(false);
         await refreshSiteConfig();
       } else {
         message.error(resp.msg || "保存失败");
@@ -180,7 +185,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
     }
   };
 
-  const currentValues = isEditing ? draft : toDraft(data);
+  const currentValues = draft;
 
   const previewTip = useMemo(
     () =>
@@ -204,52 +209,13 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
       }
       extra={
         <Space size={8} align="center">
-          {isEditing ? (
-            <>
-              <Button size="small" disabled={saving} onClick={handleCancel}>
-                取消
-              </Button>
-              <Button
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => setPreviewOpen(true)}
-              >
-                预览
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<SaveOutlined />}
-                disabled={!canWrite || !hasDirty}
-                loading={saving}
-                onClick={handleSave}
-              >
-                保存赞赏
-              </Button>
-            </>
-          ) : (
-            <>
-              <Button
-                size="small"
-                icon={<EyeOutlined />}
-                onClick={() => setPreviewOpen(true)}
-              >
-                预览
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<EditOutlined />}
-                disabled={!canWrite}
-                onClick={() => {
-                  setDraft(toDraft(data));
-                  setIsEditing(true);
-                }}
-              >
-                编辑
-              </Button>
-            </>
-          )}
+          <Button
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => setPreviewOpen(true)}
+          >
+            预览
+          </Button>
         </Space>
       }
     >
@@ -269,8 +235,11 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               checked={currentValues.enabled}
               checkedChildren="开启"
               unCheckedChildren="关闭"
-              disabled={!isEditing || !canWrite}
-              onChange={(enabled) => setDraft((prev) => ({ ...prev, enabled }))}
+              disabled={!canWrite}
+              onChange={(enabled) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, enabled }));
+              }}
             />
           </Flex>
 
@@ -286,10 +255,11 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               value={currentValues.title}
               maxLength={MAX_TIP_TITLE_LEN}
               placeholder={DEFAULT_TIP_TITLE}
-              disabled={!isEditing || !canWrite}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, title: event.target.value }))
-              }
+              disabled={!canWrite}
+              onChange={(event) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, title: event.target.value }));
+              }}
             />
           </div>
 
@@ -306,10 +276,11 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
               maxLength={MAX_TIP_MESSAGE_LEN}
               placeholder={DEFAULT_TIP_MESSAGE}
               rows={2}
-              disabled={!isEditing || !canWrite}
-              onChange={(event) =>
-                setDraft((prev) => ({ ...prev, message: event.target.value }))
-              }
+              disabled={!canWrite}
+              onChange={(event) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, message: event.target.value }));
+              }}
             />
           </div>
 
@@ -331,7 +302,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                     value={channel.label}
                     maxLength={MAX_TIP_LABEL_LEN}
                     placeholder={`渠道 ${index + 1}`}
-                    disabled={!isEditing || !canWrite}
+                    disabled={!canWrite}
                     onChange={(event) =>
                       updateChannel(channel.uid, { label: event.target.value })
                     }
@@ -349,14 +320,14 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                       <Input
                         value={channel.qrImage}
                         placeholder="收款码图片链接"
-                        disabled={!isEditing || !canWrite}
+                        disabled={!canWrite}
                         onChange={(event) =>
                           updateChannel(channel.uid, { qrImage: event.target.value })
                         }
                       />
                       <Button
                         icon={<PictureOutlined />}
-                        disabled={!isEditing || !canWrite}
+                        disabled={!canWrite}
                         onClick={() => setPickerUid(channel.uid)}
                       >
                         选图
@@ -368,7 +339,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                     value={channel.link}
                     maxLength={MAX_TIP_LINK_LEN}
                     placeholder="可选外链，如 afdian.com"
-                    disabled={!isEditing || !canWrite}
+                    disabled={!canWrite}
                     onChange={(event) =>
                       updateChannel(channel.uid, { link: event.target.value })
                     }
@@ -378,7 +349,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
                   type="text"
                   danger
                   icon={<DeleteOutlined />}
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   onClick={() => removeChannel(channel.uid)}
                 >
                   删除
@@ -390,7 +361,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
           <div>
             <Button
               icon={<PlusOutlined />}
-              disabled={!isEditing || !canWrite || !canAdd}
+              disabled={!canWrite || !canAdd}
               onClick={addChannel}
             >
               添加渠道
@@ -415,6 +386,13 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
         open={previewOpen}
         tip={previewTip}
         onClose={() => setPreviewOpen(false)}
+      />
+
+      <UnsavedChangesBar
+        visible={hasDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
       />
     </Card>
   );

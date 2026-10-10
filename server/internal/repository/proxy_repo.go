@@ -15,34 +15,36 @@ import (
 // DefaultProxyConfig 默认代理配置
 func DefaultProxyConfig() model.ProxyConfig {
 	return model.ProxyConfig{
-		Enabled:   false,
-		ProxyURL:  "",
-		Scope:     model.ProxyScopeAll,
-		SourceIds: []string{},
+		Enabled:  false,
+		ProxyURL: "",
+		Modules: model.ProxyModuleScope{
+			Spider:  true,
+			TMDB:    true,
+			Notify:  true,
+			Upgrade: true,
+		},
+	}
+}
+
+// applyMissingProxyModulesDefault 兼容历史 JSON 缺失 modules 时默认全部开启
+func applyMissingProxyModulesDefault(raw []byte, cfg *model.ProxyConfig) {
+	var probe map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return
+	}
+	if _, ok := probe["modules"]; !ok {
+		cfg.Modules = model.ProxyModuleScope{
+			Spider:  true,
+			TMDB:    true,
+			Notify:  true,
+			Upgrade: true,
+		}
 	}
 }
 
 // NormalizeProxyConfig 规范化代理配置
 func NormalizeProxyConfig(cfg model.ProxyConfig) model.ProxyConfig {
 	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
-	cfg.Scope = strings.TrimSpace(cfg.Scope)
-	if cfg.Scope != model.ProxyScopeCustom {
-		cfg.Scope = model.ProxyScopeAll
-	}
-
-	seen := make(map[string]struct{}, len(cfg.SourceIds))
-	cleanIds := make([]string, 0, len(cfg.SourceIds))
-	for _, id := range cfg.SourceIds {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-		if _, ok := seen[id]; !ok {
-			seen[id] = struct{}{}
-			cleanIds = append(cleanIds, id)
-		}
-	}
-	cfg.SourceIds = cleanIds
 	return cfg
 }
 
@@ -51,7 +53,9 @@ func GetProxyConfig() model.ProxyConfig {
 	cfg := DefaultProxyConfig()
 	if db.Rdb != nil {
 		if data := db.Rdb.Get(db.Cxt, config.ProxyConfigKey).Val(); data != "" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
+			raw := []byte(data)
+			if err := json.Unmarshal(raw, &cfg); err == nil {
+				applyMissingProxyModulesDefault(raw, &cfg)
 				return NormalizeProxyConfig(cfg)
 			}
 		}
@@ -66,8 +70,10 @@ func GetProxyConfig() model.ProxyConfig {
 		return cfg
 	}
 
-	if rec.Payload != "" {
-		_ = json.Unmarshal([]byte(rec.Payload), &cfg)
+	raw := []byte(rec.Payload)
+	if len(raw) > 0 {
+		_ = json.Unmarshal(raw, &cfg)
+		applyMissingProxyModulesDefault(raw, &cfg)
 	}
 
 	cfg = NormalizeProxyConfig(cfg)
@@ -112,32 +118,58 @@ func cacheProxyConfig(cfg model.ProxyConfig) {
 	}
 }
 
-// ResolveSourceProxy 判断指定采集站是否启用代理，返回是否启用及代理地址
-func ResolveSourceProxy(sourceID string) (bool, string) {
+// ResolveSpiderProxy 全局爬虫代理通道判断：是否启用全局爬虫代理及代理地址
+func ResolveSpiderProxy() (bool, string) {
 	cfg := GetProxyConfig()
-	if !cfg.Enabled || cfg.ProxyURL == "" {
+	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.Spider {
 		return false, ""
 	}
-	if cfg.Scope == model.ProxyScopeAll {
-		return true, cfg.ProxyURL
+	return true, cfg.ProxyURL
+}
+
+// ResolveSourceProxy 判断指定采集源是否走代理（结合全局爬虫通道和源自身 ProxyCollect 开关）
+func ResolveSourceProxy(sourceID string) (bool, string) {
+	ok, proxyURL := ResolveSpiderProxy()
+	if !ok {
+		return false, ""
 	}
 	sourceID = strings.TrimSpace(sourceID)
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			return true, cfg.ProxyURL
-		}
+	if sourceID == "" || db.Mdb == nil {
+		return false, ""
+	}
+	var src model.FilmSource
+	if err := db.Mdb.Select("proxy_collect").Where("id = ?", sourceID).First(&src).Error; err != nil {
+		return false, ""
+	}
+	if src.ProxyCollect {
+		return true, proxyURL
 	}
 	return false, ""
 }
 
-// IsSourceProxyConfigured 判断指定采集站是否在代理配置名单中（不论全局总开关是否开启）
-func IsSourceProxyConfigured(sourceID string) bool {
+// ResolveTMDBProxy 判断 TMDB 刮削是否启用代理
+func ResolveTMDBProxy() (bool, string) {
 	cfg := GetProxyConfig()
-	sourceID = strings.TrimSpace(sourceID)
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			return true
-		}
+	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.TMDB {
+		return false, ""
 	}
-	return false
+	return true, cfg.ProxyURL
+}
+
+// ResolveNotifyProxy 判断 Telegram 通知是否启用代理
+func ResolveNotifyProxy() (bool, string) {
+	cfg := GetProxyConfig()
+	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.Notify {
+		return false, ""
+	}
+	return true, cfg.ProxyURL
+}
+
+// ResolveUpgradeProxy 判断 GitHub 版本更新检查是否启用代理
+func ResolveUpgradeProxy() (bool, string) {
+	cfg := GetProxyConfig()
+	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.Upgrade {
+		return false, ""
+	}
+	return true, cfg.ProxyURL
 }

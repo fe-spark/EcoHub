@@ -1,16 +1,18 @@
 package snapshot
 
 import (
-	"gorm.io/gorm"
 	"log"
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
+
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
-	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -25,21 +27,22 @@ func applyNameLikeFilter(query *gorm.DB, keyword string) *gorm.DB {
 	return query
 }
 
-func applyCategorySearchFilter(query *gorm.DB, pid int64, cid int64) *gorm.DB {
-	cid = support.ResolveCategoryID(cid)
-	pid = support.ResolveCategoryID(pid)
+func applyCategorySearchFilter(query *gorm.DB, sourceId string, pid int64, cid int64) *gorm.DB {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId != "" {
+		if cid > 0 {
+			return filmquery.ApplySourceTypeMatchIDs(query, sourceId, "cid", repository.PublicSourceTypeIDs(sourceId, "cid", cid))
+		}
+		if pid > 0 {
+			return filmquery.ApplySourceTypeMatchIDs(query, sourceId, "pid", repository.PublicSourceTypeIDs(sourceId, "pid", pid))
+		}
+		return query
+	}
 	if cid > 0 {
-		return query.Where("cid = ?", cid)
+		return filmquery.ApplyManageCategoryFieldFilter(query, "cid", cid)
 	}
 	if pid > 0 {
-		var subIDs []int64
-		if db.Mdb != nil {
-			_ = db.Mdb.Model(&model.Category{}).Where("pid = ?", pid).Pluck("id", &subIDs).Error
-		}
-		if len(subIDs) > 0 {
-			return query.Where("(pid = ? OR cid IN (?))", pid, subIDs)
-		}
-		return query.Where("pid = ?", pid)
+		return filmquery.ApplyManageCategoryFieldFilter(query, "pid", pid)
 	}
 	return query
 }
@@ -139,7 +142,7 @@ func queryManageFilmsBySnapshotDB(version string, s model.SearchVo, page *dto.Pa
 	if sourceId != "" {
 		query = applySourceMembership(query, sourceId)
 	}
-	query = applyCategorySearchFilter(query, s.Pid, s.Cid)
+	query = applyCategorySearchFilter(query, sourceId, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}
@@ -210,12 +213,9 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 	}
 	sourceId := strings.TrimSpace(s.SourceId)
 	if sourceId != "" {
-		sourceMidSubQuery := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-			Select("mid").
-			Where("source_id = ? AND line_kind = 'play'", sourceId)
-		query = query.Where("(first_source_id = ? OR mid IN (?))", sourceId, sourceMidSubQuery)
+		query = applySourceMembership(query, sourceId)
 	}
-	query = applyCategorySearchFilter(query, s.Pid, s.Cid)
+	query = applyCategorySearchFilter(query, sourceId, s.Pid, s.Cid)
 	if plot := strings.TrimSpace(s.Plot); plot != "" {
 		query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(plot)+"%")
 	}

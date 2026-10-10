@@ -10,8 +10,8 @@ import (
 )
 
 var (
-	// 数字 chat id（含负数群组/频道）或 @username
-	chatIDPattern = regexp.MustCompile(`^(-?\d+|@[A-Za-z0-9_]+)$`)
+	// 数字 chat id（含负数群组/频道）或 @username，支持可选的 :threadId
+	chatIDPattern = regexp.MustCompile(`^(-?\d+|@[A-Za-z0-9_]+)(:\d+)?$`)
 )
 
 // MaskBotToken Token 脱敏展示。
@@ -78,13 +78,6 @@ func ValidateAndMergeUpdate(old, incoming model.NotifyConfig) (model.NotifyConfi
 		}
 	}
 	cfg.ChatIDs = chatIDs
-
-	// ChatIDs 为成员真相源：合并旧配置与请求中的 Target 元数据（Thread/等级/订阅），
-	// 再按 ChatIDs 重建，避免前端只改 chatIds 时残留旧 Targets 导致仍发到旧群。
-	targetSources := make([]model.NotifyTarget, 0, len(old.Targets)+len(cfg.Targets))
-	targetSources = append(targetSources, old.Targets...)
-	targetSources = append(targetSources, cfg.Targets...)
-	cfg.Targets = repository.RebuildTargetsFromChatIDs(cfg.ChatIDs, targetSources)
 
 	if cfg.MaxFilmsInMessage <= 0 {
 		cfg.MaxFilmsInMessage = model.DefaultMaxFilmsInMessage

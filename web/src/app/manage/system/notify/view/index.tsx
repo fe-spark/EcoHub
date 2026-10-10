@@ -37,12 +37,14 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import ProxyOutletBanner from "@/app/manage/components/proxy-outlet-banner";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { useFormDirtyTracker } from "@/lib/use-form-dirty";
+import NotifyEventsBlock from "./NotifyEventsBlock";
 import {
   DEFAULT_CONFIG,
   DEFAULT_EVENTS,
   DEFAULT_QUIET_HOURS,
-  EVENT_GROUPS,
-  EVENT_OPTIONS,
   normalizeConfig,
   type NotifyConfigValues,
   type NotifyEventSwitches,
@@ -73,7 +75,6 @@ interface NotifyConfigPageViewProps {
 
 export default function NotifyConfigPageView({ embedded = false }: NotifyConfigPageViewProps) {
   const [form] = Form.useForm<NotifyConfigValues>();
-  const [isEditing, setIsEditing] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -82,6 +83,9 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
   const canOperate = canWrite && isAdmin;
+
+  const { isDirty, onValuesChange: trackFormChange, setBaseline, resetToBaseline } =
+    useFormDirtyTracker(form, serverData);
 
   const watchedBotToken = Form.useWatch("botToken", form);
   const watchedChatIds = Form.useWatch("chatIds", form);
@@ -102,21 +106,21 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
         const normalized = normalizeConfig(resp.data);
         setServerData(normalized);
         form.setFieldsValue(normalized);
+        setBaseline(normalized);
         return;
       }
       message.error(resp.msg || "加载通知配置失败");
     } finally {
       setFetching(false);
     }
-  }, [form, message]);
+  }, [form, message, setBaseline]);
 
   useEffect(() => {
     void loadConfig();
   }, [loadConfig]);
 
   const handleCancel = () => {
-    form.setFieldsValue(serverData);
-    setIsEditing(false);
+    resetToBaseline();
   };
 
   const handleSave = async () => {
@@ -149,7 +153,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
         const normalized = normalizeConfig(resp.data || payload);
         setServerData(normalized);
         form.setFieldsValue(normalized);
-        setIsEditing(false);
+        setBaseline(normalized);
         return;
       }
       message.error(resp.msg || "保存失败");
@@ -192,10 +196,12 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
       nextEvents[key] = status;
     });
     form.setFieldsValue({ events: nextEvents });
+    trackFormChange({ events: nextEvents }, form.getFieldsValue(true));
   };
 
   const handleResetDefaultEvents = () => {
     form.setFieldsValue({ events: { ...DEFAULT_EVENTS } });
+    trackFormChange({ events: DEFAULT_EVENTS }, form.getFieldsValue(true));
   };
 
   return (
@@ -215,38 +221,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
             <span>Telegram 消息通知配置</span>
           </Space>
         }
-        extra={
-          <Space size={8} align="center">
-            {!isAdmin && <Tag color="default">仅超级管理员可操作</Tag>}
-            {isEditing ? (
-              <>
-                <Button size="small" disabled={saving} onClick={handleCancel}>
-                  取消
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  loading={saving}
-                  disabled={!canOperate}
-                  onClick={() => void handleSave()}
-                >
-                  保存配置
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="small"
-                type="primary"
-                icon={<EditOutlined />}
-                disabled={!canOperate}
-                onClick={() => setIsEditing(true)}
-              >
-                编辑
-              </Button>
-            )}
-          </Space>
-        }
+        extra={!isAdmin ? <Tag color="default">仅超级管理员可操作</Tag> : null}
       >
         <Spin spinning={fetching} description="正在加载通知配置...">
           <Form
@@ -254,9 +229,12 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
             layout="vertical"
             className={styles.form}
             initialValues={DEFAULT_CONFIG}
-            disabled={!isEditing || !canOperate}
+            disabled={!canOperate}
+            onValuesChange={trackFormChange}
           >
             <Flex vertical gap={0} className={styles.contentStack}>
+              <ProxyOutletBanner module="notify" />
+
               {/* 最上层：启用/禁用消息推送总开关卡片 */}
               <div className={styles.masterSwitchBlock}>
                 <Flex align="center" justify="space-between" gap={20}>
@@ -425,7 +403,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                                 placeholder="23:00"
                                 allowClear={false}
                                 style={{ width: "100%" }}
-                                disabled={!isEditing || !canOperate || !watchedQuietHoursEnabled}
+                                disabled={!canOperate || !watchedQuietHoursEnabled}
                               />
                             </Form.Item>
                           </Col>
@@ -455,7 +433,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                                 placeholder="07:00"
                                 allowClear={false}
                                 style={{ width: "100%" }}
-                                disabled={!isEditing || !canOperate || !watchedQuietHoursEnabled}
+                                disabled={!canOperate || !watchedQuietHoursEnabled}
                               />
                             </Form.Item>
                           </Col>
@@ -467,99 +445,24 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
                   <Divider style={{ margin: "28px 0" }} />
 
                   {/* 模块 3：触发事件订阅规则 */}
-                  <div className={styles.sectionBlock}>
-                    <Flex align="center" justify="space-between" wrap="wrap" gap={12}>
-                      <div className={styles.sectionHeader}>
-                        <BellOutlined style={{ color: "#52c41a" }} />
-                        <span>触发事件订阅规则</span>
-                      </div>
-                      {isEditing ? (
-                        <Space size={8}>
-                          <Button
-                            size="small"
-                            icon={<CheckOutlined />}
-                            onClick={() => handleSetAllEvents(true)}
-                          >
-                            全选
-                          </Button>
-                          <Button
-                            size="small"
-                            icon={<ReloadOutlined />}
-                            onClick={handleResetDefaultEvents}
-                          >
-                            恢复默认
-                          </Button>
-                          <Button
-                            size="small"
-                            icon={<ClearOutlined />}
-                            onClick={() => handleSetAllEvents(false)}
-                          >
-                            清空
-                          </Button>
-                        </Space>
-                      ) : null}
-                    </Flex>
-
-                    <Row gutter={[20, 20]}>
-                      {EVENT_GROUPS.map((group) => {
-                        const groupEvents = EVENT_OPTIONS.filter((e) => e.category === group.key);
-                        return (
-                          <Col xs={24} lg={8} key={group.key}>
-                            <div className={styles.subGroupCard}>
-                              <span className={styles.groupTitle}>{group.title}</span>
-                              <span className={styles.groupDesc}>{group.description}</span>
-                              <Flex vertical gap={10}>
-                                {groupEvents.map((event) => {
-                                  const checked = Boolean(watchedEvents?.[event.field]);
-                                  const disabled = !isEditing || !canOperate;
-                                  return (
-                                    <div
-                                      key={event.field}
-                                      className={`${styles.eventTile} ${
-                                        checked ? styles.eventTileActive : ""
-                                      } ${disabled ? styles.eventTileDisabled : ""}`}
-                                      onClick={() => {
-                                        if (!disabled) {
-                                          form.setFieldValue(["events", event.field], !checked);
-                                        }
-                                      }}
-                                    >
-                                      <Flex align="center" justify="space-between" gap={8}>
-                                        <Space size={8} align="center">
-                                          <Form.Item
-                                            name={["events", event.field]}
-                                            valuePropName="checked"
-                                            noStyle
-                                          >
-                                            <Checkbox
-                                              disabled={disabled}
-                                              className={styles.eventCheckbox}
-                                              onChange={(e) => e.stopPropagation()}
-                                            />
-                                          </Form.Item>
-                                          <span className={styles.eventTitle}>{event.label}</span>
-                                        </Space>
-                                        <Tag color={event.badgeColor} className={styles.eventBadge}>
-                                          {event.badge}
-                                        </Tag>
-                                      </Flex>
-                                      {event.hint ? (
-                                        <span className={styles.eventHint}>{event.hint}</span>
-                                      ) : null}
-                                    </div>
-                                  );
-                                })}
-                              </Flex>
-                            </div>
-                          </Col>
-                        );
-                      })}
-                    </Row>
-                  </div>
+                  <NotifyEventsBlock
+                    form={form}
+                    canOperate={canOperate}
+                    watchedEvents={watchedEvents}
+                    onSetAllEvents={handleSetAllEvents}
+                    onResetDefaultEvents={handleResetDefaultEvents}
+                  />
             </Flex>
           </Form>
         </Spin>
       </Card>
+
+      <UnsavedChangesBar
+        visible={isDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
+      />
     </div>
   );
 }

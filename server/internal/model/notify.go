@@ -20,17 +20,6 @@ const (
 	CategoryAudit   = "audit"
 )
 
-// NotifyTarget 通知接收目标（支持 Chat ID 和 Telegram Topic Thread ID）。
-type NotifyTarget struct {
-	ID                   string   `json:"id"`
-	Name                 string   `json:"name"`
-	ChatID               string   `json:"chatId"`
-	ThreadID             string   `json:"threadId,omitempty"` // Telegram Forum Topic Thread ID
-	Enabled              bool     `json:"enabled"`
-	MinLevel             Severity `json:"minLevel,omitempty"`
-	SubscribedCategories []string `json:"subscribedCategories,omitempty"`
-}
-
 // NotifyQuietHours 免打扰时段设置。
 type NotifyQuietHours struct {
 	Enabled     bool       `json:"enabled"`
@@ -41,10 +30,9 @@ type NotifyQuietHours struct {
 
 // NotifyConfig Telegram 通知配置（MySQL JSON + Redis 缓存）。
 type NotifyConfig struct {
-	Enabled  bool           `json:"enabled"`
-	BotToken string         `json:"botToken"`
-	ChatIDs  []string       `json:"chatIds"` // 向后兼容旧版
-	Targets  []NotifyTarget `json:"targets"` // 新版路由目标
+	Enabled  bool     `json:"enabled"`
+	BotToken string   `json:"botToken"`
+	ChatIDs  []string `json:"chatIds"` // 支持 "chatId" 或 "chatId:threadId"
 
 	Events NotifyEventSwitches `json:"events"`
 

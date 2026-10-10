@@ -77,6 +77,7 @@ type FilmSource struct {
 	Cd                 int       `json:"cd"`                                   // 采集时长 单位/小时
 	Format             string    `json:"format" gorm:"size:16;default:'json'"` // 采集数据格式: json | xml (默认 json)
 	DomainReplaceRules string    `json:"domainReplaceRules" gorm:"type:text"`  // 播放链接域名替换规则 (每行一条: old.com => new.com)
+	ProxyCollect       bool      `json:"proxyCollect" gorm:"default:false"`    // 采集接口是否走代理
 	CreatedAt          time.Time `json:"createdAt" gorm:"autoCreateTime;<-:create;index"`
 }
 

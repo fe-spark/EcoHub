@@ -8,36 +8,19 @@ import (
 	"server/internal/model"
 )
 
-var severityRank = map[model.Severity]int{
-	model.SeverityInfo:     1,
-	model.SeverityNotice:   2,
-	model.SeverityWarn:     3,
-	model.SeverityError:    4,
-	model.SeverityCritical: 5,
+// ChatTarget 解析后的目标聊天（支持 Topic Thread ID）
+type ChatTarget struct {
+	ChatID   string
+	ThreadID string
 }
 
-func isLevelAllowed(targetMin model.Severity, evtLevel model.Severity) bool {
-	if targetMin == "" {
-		return true
+// ParseChatTarget 从 "chatId" 或 "chatId:threadId" 解析出目标聊天与线程
+func ParseChatTarget(raw string) (chatID, threadID string) {
+	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, ":"); idx != -1 {
+		return strings.TrimSpace(raw[:idx]), strings.TrimSpace(raw[idx+1:])
 	}
-	rTarget, ok1 := severityRank[targetMin]
-	rEvt, ok2 := severityRank[evtLevel]
-	if !ok1 || !ok2 {
-		return true
-	}
-	return rEvt >= rTarget
-}
-
-func isCategorySubscribed(subscribed []string, category string) bool {
-	if len(subscribed) == 0 {
-		return true
-	}
-	for _, c := range subscribed {
-		if c == category || strings.HasPrefix(category, c+".") {
-			return true
-		}
-	}
-	return false
+	return raw, ""
 }
 
 func parseHHMM(s string) (int, int, error) {
@@ -100,44 +83,18 @@ func shouldMuteByQuietHours(cfg model.NotifyConfig, severity model.Severity) boo
 	return true
 }
 
-// effectiveTargets 优先 Targets；空时由 ChatIDs 兼容包装。
-func effectiveTargets(cfg model.NotifyConfig) []model.NotifyTarget {
-	if len(cfg.Targets) > 0 {
-		return cfg.Targets
-	}
-	if len(cfg.ChatIDs) == 0 {
-		return nil
-	}
-	targets := make([]model.NotifyTarget, 0, len(cfg.ChatIDs))
-	for _, id := range cfg.ChatIDs {
-		targets = append(targets, model.NotifyTarget{
-			ID:       id,
-			Name:     id,
-			ChatID:   id,
-			Enabled:  true,
-			MinLevel: model.SeverityInfo,
-		})
-	}
-	return targets
-}
-
-// routeTargets 按免打扰、最低等级、分类订阅筛选接收目标。
+// routeTargets 按免打扰规则筛选接收目标。
 // muted=true 表示被免打扰整体静音（调用方应跳过发送）。
-func routeTargets(cfg model.NotifyConfig, severity model.Severity, category string) (targets []model.NotifyTarget, muted bool) {
+func routeTargets(cfg model.NotifyConfig, severity model.Severity) (targets []ChatTarget, muted bool) {
 	if shouldMuteByQuietHours(cfg, severity) {
 		return nil, true
 	}
-	for _, t := range effectiveTargets(cfg) {
-		if !t.Enabled || strings.TrimSpace(t.ChatID) == "" {
+	for _, raw := range cfg.ChatIDs {
+		cID, tID := ParseChatTarget(raw)
+		if cID == "" {
 			continue
 		}
-		if !isLevelAllowed(t.MinLevel, severity) {
-			continue
-		}
-		if category != "" && !isCategorySubscribed(t.SubscribedCategories, category) {
-			continue
-		}
-		targets = append(targets, t)
+		targets = append(targets, ChatTarget{ChatID: cID, ThreadID: tID})
 	}
 	return targets, false
 }

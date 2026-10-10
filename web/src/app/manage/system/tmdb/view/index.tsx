@@ -29,12 +29,14 @@ import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import ProxyOutletBanner from "@/app/manage/components/proxy-outlet-banner";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { useFormDirtyTracker } from "@/lib/use-form-dirty";
 import styles from "./index.module.less";
 
 interface TMDBConfigValues {
   enabled: boolean;
   apiKey: string;
-  proxy: string;
   imageDomain: string;
   language: string;
 }
@@ -42,7 +44,6 @@ interface TMDBConfigValues {
 const DEFAULT_CONFIG: TMDBConfigValues = {
   enabled: false,
   apiKey: "",
-  proxy: "",
   imageDomain: "https://image.tmdb.org/t/p",
   language: "zh-CN",
 };
@@ -56,12 +57,14 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
   const [fetching, setFetching] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
-  const [isEditing, setIsEditing] = useState(false);
   const [serverData, setServerData] = useState<TMDBConfigValues>(DEFAULT_CONFIG);
 
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
   const canOperate = canWrite && isAdmin;
+
+  const { isDirty, onValuesChange: trackFormChange, setBaseline, resetToBaseline } =
+    useFormDirtyTracker(form, serverData);
 
   const fetchConfig = useCallback(async () => {
     setFetching(true);
@@ -71,25 +74,24 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
         const normalized: TMDBConfigValues = {
           enabled: Boolean(resp.data.enabled),
           apiKey: resp.data.apiKey || "",
-          proxy: resp.data.proxy || "",
           imageDomain: resp.data.imageDomain || "https://image.tmdb.org/t/p",
           language: resp.data.language || "zh-CN",
         };
         setServerData(normalized);
         form.setFieldsValue(normalized);
+        setBaseline(normalized);
       }
     } finally {
       setFetching(false);
     }
-  }, [form]);
+  }, [form, setBaseline]);
 
   useEffect(() => {
     void fetchConfig();
   }, [fetchConfig]);
 
   const handleCancel = () => {
-    form.setFieldsValue(serverData);
-    setIsEditing(false);
+    resetToBaseline();
   };
 
   const handleSave = async () => {
@@ -105,7 +107,7 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
       if (resp.code === 0) {
         message.success(resp.msg || "TMDB 配置已保存");
         setServerData(payload);
-        setIsEditing(false);
+        setBaseline(payload);
         void fetchConfig();
         return;
       }
@@ -125,12 +127,11 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
         message.error("请先填写有效的 API Key");
         return;
       }
-      const values = await form.validateFields(["apiKey", "proxy"]);
+      const values = await form.validateFields(["apiKey"]);
       setTesting(true);
       const resp = await ApiPost("/manage/tmdb/config/test", {
         ...form.getFieldsValue(),
         apiKey: values.apiKey,
-        proxy: values.proxy,
       });
       if (resp.code === 0) {
         message.success(resp.msg || "TMDB 连接测试成功！");
@@ -173,38 +174,7 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
             <span>TMDB 影视元数据刮削配置</span>
           </Space>
         }
-        extra={
-          <Space size={8} align="center">
-            {!isAdmin && <Tag color="default">仅超级管理员可操作</Tag>}
-            {isEditing ? (
-              <>
-                <Button size="small" disabled={saving} onClick={handleCancel}>
-                  取消
-                </Button>
-                <Button
-                  size="small"
-                  type="primary"
-                  icon={<SaveOutlined />}
-                  loading={saving}
-                  disabled={!canOperate}
-                  onClick={() => void handleSave()}
-                >
-                  保存配置
-                </Button>
-              </>
-            ) : (
-              <Button
-                size="small"
-                type="primary"
-                icon={<EditOutlined />}
-                disabled={!canOperate}
-                onClick={() => setIsEditing(true)}
-              >
-                编辑
-              </Button>
-            )}
-          </Space>
-        }
+        extra={!isAdmin ? <Tag color="default">仅超级管理员可操作</Tag> : null}
       >
         <Spin spinning={fetching} description="正在加载刮削配置...">
           <Form
@@ -212,9 +182,12 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
             layout="vertical"
             className={styles.form}
             initialValues={DEFAULT_CONFIG}
-            disabled={!isEditing || !canOperate}
+            disabled={!canOperate}
+            onValuesChange={trackFormChange}
           >
             <Flex vertical gap={0} className={styles.contentStack}>
+              <ProxyOutletBanner module="tmdb" />
+
               {/* 最上层：启用/禁用刮削总开关卡片 */}
               <div className={styles.masterSwitchBlock}>
                 <Flex align="center" justify="space-between" gap={20}>
@@ -232,15 +205,15 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
 
               <Divider style={{ margin: "28px 0" }} />
 
-              {/* 模块 1：API 密钥与网络连接 */}
+              {/* 模块 1：API 密钥 */}
               <div className={styles.sectionBlock}>
                 <div className={styles.sectionHeader}>
                   <ApiOutlined style={{ color: "var(--ant-color-primary)" }} />
-                  <span>API 密钥与网络连接</span>
+                  <span>API 密钥</span>
                 </div>
 
                 <Row gutter={[24, 16]}>
-                  <Col xs={24} md={12}>
+                  <Col xs={24}>
                     <Form.Item
                       noStyle
                       shouldUpdate={(prev, cur) => prev.enabled !== cur.enabled}
@@ -276,28 +249,19 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
                       }}
                     </Form.Item>
                   </Col>
-                  <Col xs={24} md={12}>
-                    <Form.Item
-                      label="网络代理 (HTTP Proxy)"
-                      name="proxy"
-                      tooltip="境内服务器访问 TMDB 容易超时，可配置本地或局域网 HTTP 代理 (例如 http://127.0.0.1:7890)。留空则直连。"
-                    >
-                      <Input placeholder="例如 http://127.0.0.1:7890" allowClear />
-                    </Form.Item>
-                  </Col>
                 </Row>
 
                 <div className={styles.testFooter}>
                   <Space size={8} align="center">
                     <SendOutlined style={{ color: "var(--ant-color-primary)" }} />
                     <Typography.Text type="secondary" style={{ fontSize: 13 }}>
-                      支持使用当前填写的 API Key 与网络代理测试连通性，无需先保存配置。
+                      支持使用当前填写的 API Key 测试连通性（如开启网络代理将自动通过统一代理请求），无需先保存配置。
                     </Typography.Text>
                   </Space>
                   <Button
                     icon={<ApiOutlined />}
                     loading={testing}
-                    disabled={!isEditing || !canOperate}
+                    disabled={!canOperate}
                     onClick={() => void handleTest()}
                   >
                     测试连接
@@ -345,6 +309,13 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
           </Form>
         </Spin>
       </Card>
+
+      <UnsavedChangesBar
+        visible={isDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
+      />
     </div>
   );
 }

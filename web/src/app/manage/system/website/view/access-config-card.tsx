@@ -20,6 +20,8 @@ import {
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { isFormValuesEqual } from "@/lib/deep-equal";
 import styles from "./access-config-card.module.less";
 
 function generateRandomKey(length: number = 16): string {
@@ -74,7 +76,7 @@ interface AccessConfigCardProps {
 export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
   const [data, setData] = useState<AccessConfigPayload>(DEFAULT_ACCESS_CONFIG);
   const [draft, setDraft] = useState<AccessConfigPayload>(DEFAULT_ACCESS_CONFIG);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -89,6 +91,7 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
         const normalized = normalizeAccessConfig(resp.data);
         setData(normalized);
         setDraft(normalized);
+        setIsTouched(false);
       }
     } finally {
       setFetching(false);
@@ -100,12 +103,12 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
   }, [loadData]);
 
   const hasDirty = useMemo(() => {
-    return JSON.stringify(draft) !== JSON.stringify(data);
-  }, [draft, data]);
+    return isTouched && !isFormValuesEqual(draft, data);
+  }, [isTouched, draft, data]);
 
   const handleCancel = () => {
     setDraft(data);
-    setIsEditing(false);
+    setIsTouched(false);
   };
 
   const handleSave = async () => {
@@ -122,7 +125,7 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
         message.success(resp.msg || "访问控制配置已保存");
         setData(normalized);
         setDraft(normalized);
-        setIsEditing(false);
+        setIsTouched(false);
         await refreshSiteConfig();
       } else {
         message.error(resp.msg || "保存失败");
@@ -132,7 +135,7 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
     }
   };
 
-  const currentValues = isEditing ? draft : data;
+  const currentValues = draft;
 
   return (
     <Card
@@ -141,40 +144,6 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
         <Space size={8} align="center">
           <SafetyCertificateOutlined style={{ color: "var(--ant-color-primary)" }} />
           <span>运行与访问控制</span>
-        </Space>
-      }
-      extra={
-        <Space size={8} align="center">
-          {isEditing ? (
-            <>
-              <Button size="small" disabled={saving} onClick={handleCancel}>
-                取消
-              </Button>
-              <Button
-                size="small"
-                type="primary"
-                icon={<SaveOutlined />}
-                disabled={!canWrite || !hasDirty}
-                loading={saving}
-                onClick={handleSave}
-              >
-                保存配置
-              </Button>
-            </>
-          ) : (
-            <Button
-              size="small"
-              type="primary"
-              icon={<EditOutlined />}
-              disabled={!canWrite}
-              onClick={() => {
-                setDraft(data);
-                setIsEditing(true);
-              }}
-            >
-              编辑
-            </Button>
-          )}
         </Space>
       }
     >
@@ -189,11 +158,14 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Switch
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               checked={currentValues.state}
               checkedChildren="开启"
               unCheckedChildren="关闭"
-              onChange={(state) => setDraft((prev) => ({ ...prev, state }))}
+              onChange={(state) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, state }));
+              }}
             />
           </Flex>
 
@@ -206,14 +178,15 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Input.TextArea
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               maxLength={MAX_HINT_LEN}
               rows={2}
               placeholder="网站维护中，请稍后再试..."
               value={currentValues.hint}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, hint: e.target.value }))
-              }
+              onChange={(e) => {
+                setIsTouched(true);
+                setDraft((prev) => ({ ...prev, hint: e.target.value }));
+              }}
             />
             <Typography.Text type="secondary" style={{ fontSize: 12 }}>
               网站处于关闭维护状态时，向前台访问用户呈现的友好提示语
@@ -229,19 +202,20 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
               </Typography.Text>
             </Flex>
             <Switch
-              disabled={!isEditing || !canWrite}
+              disabled={!canWrite}
               checked={currentValues.privateAccess}
               checkedChildren="开启"
               unCheckedChildren="关闭"
-              onChange={(privateAccess) =>
+              onChange={(privateAccess) => {
+                setIsTouched(true);
                 setDraft((prev) => {
                   let provideKey = prev.provideKey;
                   if (privateAccess && !provideKey.trim()) {
                     provideKey = generateRandomKey(16);
                   }
                   return { ...prev, privateAccess, provideKey };
-                })
-              }
+                });
+              }}
             />
           </Flex>
 
@@ -259,31 +233,33 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
               </Flex>
               <Space.Compact style={{ width: "100%" }}>
                 <Input
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   maxLength={MAX_PROVIDE_KEY_LEN}
                   placeholder="必填，请输入订阅密钥，例如 mysecret888"
                   status={
-                    isEditing && !currentValues.provideKey.trim()
+                    !currentValues.provideKey.trim()
                       ? "error"
                       : undefined
                   }
                   value={currentValues.provideKey}
-                  onChange={(e) =>
+                  onChange={(e) => {
+                    setIsTouched(true);
                     setDraft((prev) => ({
                       ...prev,
                       provideKey: e.target.value,
-                    }))
-                  }
+                    }));
+                  }}
                 />
                 <Button
                   icon={<ReloadOutlined />}
-                  disabled={!isEditing || !canWrite}
-                  onClick={() =>
+                  disabled={!canWrite}
+                  onClick={() => {
+                    setIsTouched(true);
                     setDraft((prev) => ({
                       ...prev,
                       provideKey: generateRandomKey(16),
-                    }))
-                  }
+                    }));
+                  }}
                 >
                   随机生成
                 </Button>
@@ -295,6 +271,13 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
           )}
         </Flex>
       </Spin>
+
+      <UnsavedChangesBar
+        visible={hasDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
+      />
     </Card>
   );
 }

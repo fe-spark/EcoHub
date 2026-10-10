@@ -244,27 +244,15 @@ func isAllowedChat(chatID, username string) bool {
 	}
 	chatID = strings.TrimSpace(chatID)
 	username = strings.TrimSpace(strings.TrimPrefix(username, "@"))
-	for _, id := range cfg.ChatIDs {
-		id = strings.TrimSpace(id)
-		if id == "" {
+	for _, raw := range cfg.ChatIDs {
+		targetChat, _ := ParseChatTarget(raw)
+		if targetChat == "" {
 			continue
 		}
-		if id == chatID {
+		if targetChat == chatID {
 			return true
 		}
-		if username != "" && strings.EqualFold(strings.TrimPrefix(id, "@"), username) {
-			return true
-		}
-	}
-	for _, t := range cfg.Targets {
-		if !t.Enabled {
-			continue
-		}
-		tChat := strings.TrimSpace(t.ChatID)
-		if tChat == chatID {
-			return true
-		}
-		if username != "" && strings.EqualFold(strings.TrimPrefix(tChat, "@"), username) {
+		if username != "" && strings.EqualFold(strings.TrimPrefix(targetChat, "@"), username) {
 			return true
 		}
 	}

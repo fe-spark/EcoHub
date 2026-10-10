@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect } from "react";
+import React, { Suspense, useCallback, useEffect } from "react";
 
 import {
   BellOutlined,
@@ -20,12 +20,27 @@ import styles from "./index.module.less";
 
 type MainTab = "notify" | "proxy" | "tmdb" | "security" | "logs";
 
-const MAIN_TABS: { key: MainTab; label: string; icon: React.ReactNode }[] = [
-  { key: "notify", label: "通知配置", icon: <BellOutlined /> },
-  { key: "proxy", label: "网络代理", icon: <ApiOutlined /> },
-  { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
-  { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
-  { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
+interface TabGroup {
+  name: string;
+  tabs: { key: MainTab; label: string; icon: React.ReactNode }[];
+}
+
+const TAB_GROUPS: TabGroup[] = [
+  {
+    name: "服务集成",
+    tabs: [
+      { key: "notify", label: "通知配置", icon: <BellOutlined /> },
+      { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
+    ],
+  },
+  {
+    name: "基础底座",
+    tabs: [
+      { key: "proxy", label: "网络代理", icon: <ApiOutlined /> },
+      { key: "security", label: "数据安全", icon: <SafetyCertificateOutlined /> },
+      { key: "logs", label: "运行日志", icon: <FileTextOutlined /> },
+    ],
+  },
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
@@ -96,25 +111,35 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="通知配置、网络代理、刮削配置、数据安全与运行日志。"
+        description="第三方服务集成（通知、刮削）与系统运行基础底座（网络代理、数据安全、日志）。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
-        {MAIN_TABS.map((tab) => {
-          const active = mainTab === tab.key;
-          return (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              className={`${styles.tabItem} ${active ? styles.tabItemActive : ""}`}
-              onClick={() => replaceQuery(tab.key)}
-            >
-              <span className={styles.tabIcon}>{tab.icon}</span>
-              <span>{tab.label}</span>
-            </button>
-          );
-        })}
+        {TAB_GROUPS.map((group, groupIdx) => (
+          <React.Fragment key={group.name}>
+            {groupIdx > 0 && <div className={styles.groupDivider} />}
+            <div className={styles.tabGroupWrapper}>
+              <span className={styles.groupBadge}>{group.name}</span>
+              <div className={styles.groupTabs}>
+                {group.tabs.map((tab) => {
+                  const active = mainTab === tab.key;
+                  return (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      className={`${styles.tabItem} ${active ? styles.tabItemActive : ""}`}
+                      onClick={() => replaceQuery(tab.key)}
+                    >
+                      <span className={styles.tabIcon}>{tab.icon}</span>
+                      <span>{tab.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </React.Fragment>
+        ))}
       </div>
       <div className={styles.tabContent} role="tabpanel">
         {renderPane()}

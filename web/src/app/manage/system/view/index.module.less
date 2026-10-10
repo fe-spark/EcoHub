@@ -31,12 +31,42 @@ html[data-theme="dark"] .panelCard {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 24px;
+  gap: 20px;
   padding: 0 4px;
   border-bottom: 1px solid var(--ant-color-border-secondary);
   background: transparent;
   overflow-x: auto;
   overflow-y: hidden;
+}
+
+.tabGroupWrapper {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.groupBadge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ant-color-text-tertiary, rgba(0, 0, 0, 0.45));
+  background: var(--ant-color-fill-quaternary, rgba(0, 0, 0, 0.04));
+  padding: 2px 7px;
+  border-radius: 4px;
+  user-select: none;
+  letter-spacing: 0.5px;
+}
+
+.groupTabs {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.groupDivider {
+  width: 1px;
+  height: 18px;
+  background: var(--ant-color-border-secondary, rgba(0, 0, 0, 0.08));
+  margin: 0 2px;
 }
 
 .tabItem {
@@ -106,6 +136,7 @@ html[data-theme="dark"] .panelCard {
   flex-direction: column;
   gap: 16px;
   padding-right: 4px;
+  padding-bottom: 72px;
 }
 
 .websitePane {
