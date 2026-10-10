@@ -199,16 +199,27 @@ func (s *BannerAutoService) generateAutoBannersWithConfig(ctx context.Context, c
 
 	ReportBannerGenerateProgress(15, "正在检索候选影片大池...")
 
-	// 2. 动态过滤已在分类管理中设为不显示的分类：哪怕之前选中的时候显示，后面分类设置为不显示，依旧严格过滤
-	effectiveCategories := repository.FilterShownCategoryIDs(cfg.Categories)
-	if len(cfg.Categories) > 0 && len(effectiveCategories) == 0 {
-		return nil, fmt.Errorf("所选分类已全部在分类管理中设置为不显示，无法排片，请重新选择排片分类")
-	}
-	if len(effectiveCategories) == 0 {
-		// 未限定分类时，候选范围亦严格限定在当前所有显示的大类中，杜绝已隐藏分类（如体育/录像）渗透进轮播
-		effectiveCategories = repository.GetShownRootCategoryIDs()
+	// 2. 排片分类用首选站自己的一级分类，和首页栏目同一套。
+	var effectiveCategories []int64
+	if sourceID != "" {
+		var fellBack bool
+		effectiveCategories, fellBack = repository.ResolveBannerSourceCategories(sourceID, cfg.Categories)
+		if fellBack {
+			log.Printf("[BannerAuto] 已保存的排片分类不属于当前首选站，改为该站全部一级分类")
+		}
 		if len(effectiveCategories) == 0 && db.Mdb != nil {
-			return nil, fmt.Errorf("当前系统无任何处于显示状态的分类，无法排片，请在分类管理中开启至少一个分类")
+			return nil, fmt.Errorf("当前首选站没有可显示的分类，无法排片")
+		}
+	} else {
+		effectiveCategories = repository.FilterShownCategoryIDs(cfg.Categories)
+		if len(cfg.Categories) > 0 && len(effectiveCategories) == 0 {
+			return nil, fmt.Errorf("所选分类已全部在分类管理中设置为不显示，无法排片，请重新选择排片分类")
+		}
+		if len(effectiveCategories) == 0 {
+			effectiveCategories = repository.GetShownRootCategoryIDs()
+			if len(effectiveCategories) == 0 && db.Mdb != nil {
+				return nil, fmt.Errorf("当前系统无任何处于显示状态的分类，无法排片，请在分类管理中开启至少一个分类")
+			}
 		}
 	}
 

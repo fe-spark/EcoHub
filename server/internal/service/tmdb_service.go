@@ -94,9 +94,14 @@ func (s *TMDBService) GetConfig() model.TMDBConfig {
 	return repository.PublicTMDBConfig(repository.GetTMDBConfig())
 }
 
+func tmdbScrapeReady(cfg model.TMDBConfig) bool {
+	return cfg.Enabled && strings.TrimSpace(cfg.ApiKey) != ""
+}
+
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 	existing := repository.GetTMDBConfig()
+	wasReady := tmdbScrapeReady(existing)
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
@@ -104,9 +109,14 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 		return err
 	}
 
-	// 级联处理：关闭 TMDB 或清空 API Key 时仅暂停在线刮削，不强制切换手动模式，保留当前排片
-	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
+	nowReady := tmdbScrapeReady(cfg)
+	// 关闭或清空密钥时只停在线刮削，不改轮播模式，也不清掉已有轮播。
+	if wasReady && !nowReady {
 		BannerAutoSvc.HandleTMDBDisabled()
+	}
+	// 从关到开，且轮播里「影片是否刮削」本来就是开，立刻换一批。
+	if !wasReady && nowReady {
+		BannerAutoSvc.RefreshAfterTMDBEnabled()
 	}
 
 	return nil

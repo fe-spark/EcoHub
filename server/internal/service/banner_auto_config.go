@@ -65,8 +65,12 @@ func (s *BannerAutoService) InitCron() {
 	s.SyncWithCronTask(cfg.Mode, cfg.RefreshCron)
 }
 
-// UpdateConfig 更新轮播配置并联动计划任务
+// UpdateConfig 更新轮播配置并联动计划任务。
+// 刮削总开关未就绪时，界面上的「影片是否刮削」是关，保存也写成关。
 func (s *BannerAutoService) UpdateConfig(cfg model.BannerConfig) error {
+	if !tmdbScrapeReady(repository.GetTMDBConfig()) {
+		cfg.AutoTMDB = false
+	}
 	if err := repository.SaveBannerConfig(cfg); err != nil {
 		return err
 	}
@@ -77,6 +81,19 @@ func (s *BannerAutoService) UpdateConfig(cfg model.BannerConfig) error {
 // HandleTMDBDisabled 当 TMDB 被中途关闭或 API Key 被清空时记录日志；轮播排片保留原有模式，后续仅使用片库已有图片
 func (s *BannerAutoService) HandleTMDBDisabled() {
 	log.Printf("[BannerAuto] 检测到系统关闭 TMDB 影视刮削，后续自动排片将仅使用片库已有图片，不发起在线刮削")
+}
+
+// RefreshAfterTMDBEnabled 刮削总开关从关到开时，轮播刮削本来就是开的自动模式立刻换一批。
+func (s *BannerAutoService) RefreshAfterTMDBEnabled() {
+	cfg := repository.GetBannerConfig()
+	if cfg.Mode != repository.BannerModeAuto || !cfg.AutoTMDB {
+		return
+	}
+	if _, err := s.StartBannerGenerateTask("tmdb_enabled"); err != nil {
+		log.Printf("[BannerAuto] 刮削开启后换一批失败: %v", err)
+		return
+	}
+	log.Printf("[BannerAuto] 刮削已开启且轮播刮削为开，开始换一批")
 }
 
 // RefreshAfterPrimarySwitch 自动排片开启时，清空当前轮播并按新首选站重新获取一次。

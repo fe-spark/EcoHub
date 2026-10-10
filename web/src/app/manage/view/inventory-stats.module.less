@@ -6,8 +6,8 @@
 }
 
 .header {
-  min-height: 52px;
-  padding: 0 18px;
+  min-height: 48px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--ant-color-border-secondary);
 }
 
@@ -17,10 +17,10 @@
 }
 
 .body {
-  padding: 16px 18px 14px;
+  padding: 16px;
 }
 
-.securityLink {
+.filmLink {
   font-size: 13px;
   color: #fa8c16;
 
@@ -84,17 +84,95 @@
   margin-top: 16px;
 }
 
+.stationToggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  margin: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-fill-quaternary);
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    border-color: rgba(250, 173, 20, 0.55);
+    background: rgba(250, 173, 20, 0.08);
+  }
+}
+
+.stationToggleOpen {
+  border-color: rgba(250, 173, 20, 0.4);
+  background:
+    linear-gradient(180deg, rgba(250, 173, 20, 0.14), rgba(250, 173, 20, 0.04)),
+    var(--ant-color-fill-quaternary);
+}
+
+.stationLead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.stationCopy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
 .stationTitle {
-  margin-bottom: 10px;
   font-size: 13px;
   font-weight: 600;
   color: var(--ant-color-text);
+}
+
+.stationHint {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ant-color-text-tertiary);
+}
+
+.stationAction {
+  flex: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(250, 173, 20, 0.18);
+  color: #d48806;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.chevronWrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 8px;
+  background: var(--ant-color-bg-container);
+  color: var(--ant-color-text-secondary);
+}
+
+.chevron {
+  transition: transform 0.2s ease;
+}
+
+.chevronOpen {
+  transform: rotate(180deg);
 }
 
 .stationGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  margin-top: 10px;
 }
 
 .stationCard {
@@ -167,6 +245,7 @@
 }
 
 .stationEmpty {
+  margin-top: 10px;
   padding: 28px 14px;
   text-align: center;
   border: 1px solid var(--ant-color-border-secondary);

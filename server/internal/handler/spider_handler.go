@@ -120,9 +120,9 @@ func (h *SpiderHandler) ResetProgress(c *gin.Context) {
 	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
 }
 
-// InventoryStats 返回工作台片库规模（整库合计，并按采集站拆开）。
+// InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
 func (h *SpiderHandler) InventoryStats(c *gin.Context) {
-	dto.Success(service.SpiderSvc.InventoryStats(), "获取成功", c)
+	dto.Success(service.SpiderSvc.InventoryStats(c.Query("scope")), "获取成功", c)
 }
 
 // SingleUpdateSpider 单一影片主站更新采集

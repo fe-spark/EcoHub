@@ -98,12 +98,16 @@ func TestGenerateAutoBannersNoSnapshotVersion(t *testing.T) {
 }
 
 func TestUpdateConfigWithoutTMDB(t *testing.T) {
-	// 当 TMDB 未配置或未启用时，切换为 auto 模式依然能够成功保存，不被强制阻断
+	if repository.DefaultBannerConfig().AutoTMDB {
+		t.Fatal("banner scrape defaults to off")
+	}
+	// 当 TMDB 未配置或未启用时，切换为 auto 模式依然能够成功保存，不被强制阻断。
+	// 界面上的刮削开关此时是关，即便请求里带着开，也存成关。
 	err := BannerAutoSvc.UpdateConfig(model.BannerConfig{
 		Mode:     repository.BannerModeAuto,
 		Strategy: repository.BannerStrategyHot,
 		Count:    6,
-		AutoTMDB: false,
+		AutoTMDB: true,
 	})
 	if err != nil {
 		t.Fatalf("Expected update to auto mode to succeed even without TMDB, got: %v", err)
@@ -112,6 +116,13 @@ func TestUpdateConfigWithoutTMDB(t *testing.T) {
 	current := repository.GetBannerConfig()
 	if current.Mode != repository.BannerModeAuto {
 		t.Fatalf("Expected config mode to be auto, but got %s", current.Mode)
+	}
+	if current.AutoTMDB {
+		t.Fatal("expected autoTMDB stored false while scrape is not ready")
+	}
+	BannerAutoSvc.RefreshAfterTMDBEnabled()
+	if BannerAutoSvc.GetBannerGenerateProgress().Running {
+		t.Fatal("scrape off must not start a banner refresh")
 	}
 }
 

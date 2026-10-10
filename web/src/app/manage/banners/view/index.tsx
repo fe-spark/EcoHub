@@ -39,7 +39,7 @@ const { Text } = Typography;
 
 export default function BannersPageView() {
   const [banners, setBanners] = useState<BannerRecord[]>([]);
-  const [config, setConfig] = useState<BannerConfig>({ mode: "manual", strategy: "hot_random", count: 6, autoTMDB: true, refreshCron: "" });
+  const [config, setConfig] = useState<BannerConfig>({ mode: "manual", strategy: "hot_random", count: 6, autoTMDB: false, refreshCron: "" });
   const [loading, setLoading] = useState(false);
   const [configLoading, setConfigLoading] = useState(false);
   const [saving, setSaving] = useState(false);
