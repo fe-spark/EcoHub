@@ -28,11 +28,6 @@ func SetupRouter() *gin.Engine {
 
 	api := r.Group("/api")
 
-	// Deprecated: 后续主版本计划移除。
-	// 废弃原因：/api/health 仅返回静态健康状态，无法校验私有化密钥安全与站点核心依赖。
-	// 替代方案：探活与站点公开基础信息统一使用 /api/config/basic；EcoHub 原生客户端软件源鉴权测通统一使用 /api/provide/app。
-	api.GET(`/health`, handler.Health)
-	api.HEAD(`/health`, handler.Health)
 	api.GET(`/config/basic`, handler.ManageHd.SiteBasicConfig)
 	api.POST(`/login`, handler.UserHd.Login)
 	api.POST(`/logout`, middleware.AuthToken(), handler.UserHd.Logout)
@@ -41,10 +36,6 @@ func SetupRouter() *gin.Engine {
 	frontApi := api.Group("/", middleware.PrivateAccessGuard())
 	{
 		frontApi.GET(`/index`, handler.IndexHd.Index)
-		// Deprecated: 后续主版本计划移除。
-		// 废弃原因：早期版本（beta.3）遗留的每日更新接口，不支持大类分类联动且缺乏规范的分页参数与短缓存。
-		// 替代方案：请使用 /api/dailyUpdates (对应 IndexHandler.DailyUpdatesV2)，支持 pid 分类筛选、标准分页及排重。
-		frontApi.GET(`/index/dailyUpdates`, handler.IndexHd.DailyUpdates)
 		frontApi.GET(`/dailyUpdates`, handler.IndexHd.DailyUpdatesV2)
 		frontApi.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
 		frontApi.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
@@ -133,10 +124,10 @@ func SetupRouter() *gin.Engine {
 		userRoute := manageRoute.Group(`/user`)
 		{
 			userRoute.GET(`/info`, handler.UserHd.UserInfo)
-			userRoute.GET(`/list`, handler.UserHd.UserListPage)
-			userRoute.POST(`/add`, handler.UserHd.UserAdd)
-			userRoute.POST(`/update`, handler.UserHd.UserUpdate)
-			userRoute.POST(`/del`, handler.UserHd.UserDelete)
+			userRoute.GET(`/list`, middleware.AdminAccess(), handler.UserHd.UserListPage)
+			userRoute.POST(`/add`, middleware.AdminAccess(), handler.UserHd.UserAdd)
+			userRoute.POST(`/update`, middleware.AdminAccess(), handler.UserHd.UserUpdate)
+			userRoute.POST(`/del`, middleware.AdminAccess(), handler.UserHd.UserDelete)
 		}
 
 		// 采集相关
@@ -232,10 +223,6 @@ func SetupRouter() *gin.Engine {
 	provideRoute := api.Group(`/provide`, middleware.ProvideKeyGuard())
 	{
 		provideRoute.GET(`/vod`, handler.ProvideHd.HandleProvide)
-		// Deprecated: 后续主版本计划移除该别名路由。
-		// 废弃原因：早期 TVBox 聚合配置路径，命名过于泛化。
-		// 替代方案：第三方 TVBox / 影视仓配置推荐统一使用 /api/provide/tvbox；EcoHub 原生客户端请使用 /api/provide/app。
-		provideRoute.GET(`/config`, handler.ProvideHd.HandleProvideConfig)
 		provideRoute.GET(`/tvbox`, handler.ProvideHd.HandleProvideConfig)
 		provideRoute.GET(`/app`, handler.ProvideHd.HandleProvideApp)
 	}

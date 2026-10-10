@@ -59,13 +59,14 @@ export default async function PlayPage({
     filmDetail?.isCustomPicture && filmDetail?.customPicture
       ? filmDetail.customPicture
       : filmDetail?.picture || "";
+  const currentSourceId =
+    sourceId || playPageData?.currentPlayFrom || playPageData?.detail?.list?.[0]?.id || "";
 
   return (
     <>
       <TrackPageView
-        action="play"
+        action="browse"
         resource={filmId}
-        collectSource={sourceId || ""}
         resourceTitle={filmDetail?.name || ""}
         resourcePoster={filmPoster}
         resourceCat={filmDetail?.descriptor?.cName || ""}

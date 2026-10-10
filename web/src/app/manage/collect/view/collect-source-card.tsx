@@ -1,7 +1,9 @@
 import { Button, Checkbox, Popconfirm, Select, Tag, Tooltip } from "antd";
 import {
   DeleteOutlined,
+  DisconnectOutlined,
   EditOutlined,
+  GlobalOutlined,
   PoweroffOutlined,
   StopOutlined,
 } from "@ant-design/icons";
@@ -35,6 +37,7 @@ interface CollectSourceCardProps {
   selected: boolean;
   /** 任务仍处于采集生命周期（starting/running/page_done/waiting_publish/finalizing） */
   active: boolean;
+  globalSpiderProxyReady?: boolean;
   headerDragProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect: (id: string, checked: boolean) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
@@ -49,6 +52,7 @@ export default function CollectSourceCard({
   record,
   selected,
   active,
+  globalSpiderProxyReady = false,
   headerDragProps,
   onSelect,
   onChangeCollectDuration,
@@ -63,9 +67,12 @@ export default function CollectSourceCard({
   const phase = record.progress?.status;
   const canStop = phase === "starting" || phase === "running";
 
+  const hasProxy = Boolean(record.proxyCollect);
+
   const cardClassNames = [
     styles.sourceCard,
     toneClassMap[statusTone],
+    record.isPrimary ? styles.sourceCardMaster : "",
     selected ? styles.sourceCardSelected : "",
   ]
     .filter(Boolean)
@@ -95,11 +102,6 @@ export default function CollectSourceCard({
               <span className={styles.posterSourceTag} title="全局优先海报图源">
                 海报源
               </span>
-            ) : null}
-            {record.proxyEnabled ? (
-              <Tag color="cyan" bordered={false} style={{ marginInlineEnd: 0 }}>
-                代理
-              </Tag>
             ) : null}
             {record.format === "xml" ? (
               <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>
@@ -135,6 +137,7 @@ export default function CollectSourceCard({
 
       {/* 底部信息/操作沉底：进度改为环形固定占位，卡片高度恒定 */}
       <div className={styles.cardFoot}>
+
         <div
           className={styles.cardMeta}
           onPointerDown={(event) => event.stopPropagation()}
@@ -156,6 +159,31 @@ export default function CollectSourceCard({
             <dt className={styles.metaLabel}>请求间隔：</dt>
             <dd className={styles.metaValue}>
               {record.interval > 0 ? `${record.interval} ms` : "无限制"}
+            </dd>
+          </div>
+          <div className={styles.metaItem}>
+            <dt className={styles.metaLabel}>网络代理：</dt>
+            <dd className={styles.metaValue}>
+              {hasProxy ? (
+                <Tooltip
+                  title={
+                    globalSpiderProxyReady
+                      ? "采集接口走系统网络代理"
+                      : "代理未开启（系统网络代理或爬虫模块未启用）"
+                  }
+                >
+                  <Tag
+                    icon={globalSpiderProxyReady ? <GlobalOutlined /> : <DisconnectOutlined />}
+                    color={globalSpiderProxyReady ? "cyan" : "default"}
+                    bordered={false}
+                    style={{ marginInlineEnd: 0 }}
+                  >
+                    代理
+                  </Tag>
+                </Tooltip>
+              ) : (
+                <span className={styles.metaValueMuted}>直连</span>
+              )}
             </dd>
           </div>
           <div className={styles.metaItem}>

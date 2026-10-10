@@ -60,12 +60,6 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 	if id == "" {
 		id = utils.GenerateHashKey(body.Uri)
 	}
-	if body.UseProxy != nil && *body.UseProxy {
-		if err := service.ProxySvc.RememberCustomProxySource(id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已添加，但加入代理名单失败: ", err.Error()), c)
-			return
-		}
-	}
 	if err := service.SpiderSvc.SyncSourceCategories(id); err != nil {
 		if delErr := service.CollectSvc.DelFilmSource(id); delErr != nil {
 			dto.Failed(fmt.Sprintf("分类获取失败，且采集站未能撤回: %s", err.Error()), c)
@@ -116,15 +110,11 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
 	}
-	if body.UseProxy != nil && *body.UseProxy {
-		if err := service.ProxySvc.RememberCustomProxySource(s.Id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已更新，但加入代理名单失败: ", err.Error()), c)
+	if isUriChanged || isFormatChanged {
+		if err := service.SpiderSvc.SyncSourceCategories(s.Id); err != nil {
+			dto.Failed(fmt.Sprint("资源站已更新，但分类获取失败: ", err.Error()), c)
 			return
 		}
-	}
-	if err := service.SpiderSvc.SyncSourceCategories(s.Id); err != nil {
-		dto.Failed(fmt.Sprint("资源站已更新，但分类获取失败: ", err.Error()), c)
-		return
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
 }

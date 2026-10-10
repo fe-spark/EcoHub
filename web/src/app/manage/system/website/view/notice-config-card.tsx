@@ -32,6 +32,8 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useSiteConfig } from "@/components/common/SiteGuard";
 import NoticeMarkdown from "@/components/public/NoticeMarkdown";
 import NoticeModal from "@/components/public/NoticeModal";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { isFormValuesEqual } from "@/lib/deep-equal";
 import {
   DEFAULT_NOTICE_TITLE,
   MAX_NOTICE_CONTENT_LEN,
@@ -55,7 +57,7 @@ interface NoticeConfigCardProps {
 export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   const [data, setData] = useState<NoticeConfig>(createDefaultNoticeConfig);
   const [draft, setDraft] = useState<NoticeConfig>(createDefaultNoticeConfig);
-  const [isEditing, setIsEditing] = useState(false);
+  const [isTouched, setIsTouched] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [saving, setSaving] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -72,6 +74,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
       message.warning(`公告正文不能超过 ${MAX_NOTICE_CONTENT_LEN} 字`);
       return;
     }
+    setIsTouched(true);
     setDraft((prev) => ({ ...prev, content: res.newContent }));
     setTimeout(() => {
       textarea.focus();
@@ -80,7 +83,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   };
 
   const handleToggleWrap = (tag: string, placeholder: string = "文本") => {
-    if (!isEditing || !canWrite) return;
+    if (!canWrite) return;
     const textarea = textareaRef.current?.resizableTextArea?.textArea;
     if (!textarea) return;
 
@@ -97,7 +100,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   };
 
   const handleTogglePrefix = (prefix: string, placeholder: string = "内容") => {
-    if (!isEditing || !canWrite) return;
+    if (!canWrite) return;
     const textarea = textareaRef.current?.resizableTextArea?.textArea;
     if (!textarea) return;
 
@@ -114,7 +117,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   };
 
   const handleToggleLink = () => {
-    if (!isEditing || !canWrite) return;
+    if (!canWrite) return;
     const textarea = textareaRef.current?.resizableTextArea?.textArea;
     if (!textarea) return;
 
@@ -136,6 +139,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         const normalized = normalizeNoticeConfig(resp.data);
         setData(normalized);
         setDraft(normalized);
+        setIsTouched(false);
       }
     } finally {
       setFetching(false);
@@ -147,14 +151,20 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
   }, [loadData]);
 
   const hasDirty = useMemo(() => {
-    return JSON.stringify(normalizeNoticeConfig(draft)) !== JSON.stringify(data);
-  }, [draft, data]);
+    return (
+      isTouched &&
+      !isFormValuesEqual(
+        normalizeNoticeConfig(draft),
+        normalizeNoticeConfig(data)
+      )
+    );
+  }, [isTouched, draft, data]);
 
-  const currentValues = isEditing ? draft : data;
+  const currentValues = draft;
 
   const handleCancel = () => {
     setDraft(data);
-    setIsEditing(false);
+    setIsTouched(false);
   };
 
   const handleSave = async () => {
@@ -171,7 +181,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         message.success(resp.msg || "公告配置已保存");
         setData(nextNotice);
         setDraft(nextNotice);
-        setIsEditing(false);
+        setIsTouched(false);
         await refreshSiteConfig();
       } else {
         message.error(resp.msg || "保存失败");
@@ -193,54 +203,13 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         }
         extra={
           <div className={styles.extraActions}>
-            <Space size={8} align="center" wrap>
-              {isEditing ? (
-                <>
-                  <Button size="small" disabled={saving} onClick={handleCancel}>
-                    取消
-                  </Button>
-                  <Button
-                    size="small"
-                    icon={<EyeOutlined />}
-                    onClick={() => setPreviewOpen(true)}
-                  >
-                    预览
-                  </Button>
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={<SaveOutlined />}
-                    disabled={!canWrite || !hasDirty}
-                    loading={saving}
-                    onClick={handleSave}
-                  >
-                    保存公告
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button
-                    size="small"
-                    icon={<EyeOutlined />}
-                    onClick={() => setPreviewOpen(true)}
-                  >
-                    预览
-                  </Button>
-                  <Button
-                    size="small"
-                    type="primary"
-                    icon={<EditOutlined />}
-                    disabled={!canWrite}
-                    onClick={() => {
-                      setDraft(data);
-                      setIsEditing(true);
-                    }}
-                  >
-                    编辑
-                  </Button>
-                </>
-              )}
-            </Space>
+            <Button
+              size="small"
+              icon={<EyeOutlined />}
+              onClick={() => setPreviewOpen(true)}
+            >
+              预览
+            </Button>
           </div>
         }
       >
@@ -255,13 +224,14 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                 </Typography.Text>
               </Flex>
               <Switch
-                disabled={!isEditing || !canWrite}
+                disabled={!canWrite}
                 checked={currentValues.enabled}
                 checkedChildren="开启"
                 unCheckedChildren="关闭"
-                onChange={(enabled) =>
-                  setDraft((prev) => ({ ...prev, enabled }))
-                }
+                onChange={(enabled) => {
+                  setIsTouched(true);
+                  setDraft((prev) => ({ ...prev, enabled }));
+                }}
               />
             </Flex>
 
@@ -270,20 +240,22 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
               <Typography.Text strong>生效展示终端</Typography.Text>
               <Space size={16} wrap style={{ marginTop: 4 }}>
                 <Checkbox
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   checked={currentValues.showInWeb}
-                  onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, showInWeb: e.target.checked }))
-                  }
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({ ...prev, showInWeb: e.target.checked }));
+                  }}
                 >
                   Web 浏览器端
                 </Checkbox>
                 <Checkbox
-                  disabled={!isEditing || !canWrite}
+                  disabled={!canWrite}
                   checked={currentValues.showInApp}
-                  onChange={(e) =>
-                    setDraft((prev) => ({ ...prev, showInApp: e.target.checked }))
-                  }
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({ ...prev, showInApp: e.target.checked }));
+                  }}
                 >
                   App 移动客户端
                 </Checkbox>
@@ -302,13 +274,14 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                 </Typography.Text>
               </Flex>
               <Input
-                disabled={!isEditing || !canWrite}
+                disabled={!canWrite}
                 maxLength={MAX_NOTICE_TITLE_LEN}
                 placeholder={DEFAULT_NOTICE_TITLE}
                 value={currentValues.title}
-                onChange={(e) =>
-                  setDraft((prev) => ({ ...prev, title: e.target.value }))
-                }
+                onChange={(e) => {
+                  setIsTouched(true);
+                  setDraft((prev) => ({ ...prev, title: e.target.value }));
+                }}
               />
             </div>
 
@@ -340,7 +313,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<FontSizeOutlined />}
                           className={styles.toolBtn}
                           onClick={() => handleTogglePrefix("### ", "标题内容")}
@@ -350,7 +323,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<BoldOutlined />}
                           className={styles.toolBtn}
                           onClick={() => handleToggleWrap("**", "粗体内容")}
@@ -360,7 +333,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<ItalicOutlined />}
                           className={styles.toolBtn}
                           onClick={() => handleToggleWrap("*", "斜体内容")}
@@ -370,7 +343,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<UnorderedListOutlined />}
                           className={styles.toolBtn}
                           onClick={() => handleTogglePrefix("- ", "列表条目")}
@@ -380,7 +353,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<LinkOutlined />}
                           className={styles.toolBtn}
                           onClick={handleToggleLink}
@@ -390,7 +363,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                         <Button
                           type="text"
                           size="small"
-                          disabled={!isEditing || !canWrite}
+                          disabled={!canWrite}
                           icon={<CodeOutlined />}
                           className={styles.toolBtn}
                           onClick={() => handleToggleWrap("`", "代码")}
@@ -405,14 +378,15 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
                   <Input.TextArea
                     ref={textareaRef}
                     className={styles.editorTextarea}
-                    disabled={!isEditing || !canWrite}
+                    disabled={!canWrite}
                     maxLength={MAX_NOTICE_CONTENT_LEN}
                     rows={6}
                     placeholder={`支持 Markdown 排版，例如：\n### 维护通知\n- 站点优化升级完成\n- 支持 [访问帮助文档](https://...)\n**重要提示**：请按需刷新页面`}
                     value={currentValues.content}
-                    onChange={(e) =>
-                      setDraft((prev) => ({ ...prev, content: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setIsTouched(true);
+                      setDraft((prev) => ({ ...prev, content: e.target.value }));
+                    }}
                   />
                 ) : (
                   <div className={styles.previewPanel}>
@@ -445,6 +419,13 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         open={previewOpen}
         notice={currentValues}
         onClose={() => setPreviewOpen(false)}
+      />
+
+      <UnsavedChangesBar
+        visible={hasDirty}
+        saving={saving}
+        onDiscard={handleCancel}
+        onSave={() => void handleSave()}
       />
     </>
   );

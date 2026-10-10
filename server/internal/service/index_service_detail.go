@@ -250,6 +250,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 				Id:       groupID,
 				SourceId: r.SourceId,
 				Name:     displayName,
+				Proxy:    source.ProxyCollect,
 				LinkList: links,
 			})
 		} else if r.LineKind == "download" {
@@ -333,6 +334,7 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 			Id:       groupID,
 			SourceId: r.SourceId,
 			Name:     displayName,
+			Proxy:    source.ProxyCollect,
 			LinkList: links,
 		})
 	}

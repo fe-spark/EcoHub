@@ -28,10 +28,19 @@ import (
 
 var spiderCore = &JsonCollect{}
 
-func requestForSource(uri, sourceID string) utils.RequestInfo {
-	r := utils.RequestInfo{Uri: uri, Params: url.Values{}}
-	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {
-		r.ProxyURL = proxy
+func requestForSource(s *model.FilmSource) utils.RequestInfo {
+	if s == nil {
+		return utils.RequestInfo{Params: url.Values{}}
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	if s.ProxyCollect {
+		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+			r.ProxyURL = proxy
+		}
+	} else if s.Id != "" {
+		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+			r.ProxyURL = proxy
+		}
 	}
 	return r
 }
@@ -59,6 +68,7 @@ func init() {
 		NoteSourceError:     noteSourceError,
 		NotifySourceFailed:  emitSourceFailedNotify,
 		BatchSummaryEnabled: func() bool { return notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) },
+		ResolveSpiderProxy:  repository.ResolveSpiderProxy,
 		ResolveSourceProxy:  repository.ResolveSourceProxy,
 	})
 }
@@ -340,7 +350,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
 	progress.Ensure(id, s.Name)
 
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}

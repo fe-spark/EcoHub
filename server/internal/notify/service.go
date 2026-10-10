@@ -352,7 +352,7 @@ func WaitPendingPublishes(ctx context.Context) error {
 }
 
 func sendMessagesWithMarkup(cfg model.NotifyConfig, severity model.Severity, category, text string, markup *InlineKeyboardMarkup) {
-	targets, muted := routeTargets(cfg, severity, category)
+	targets, muted := routeTargets(cfg, severity)
 	if muted {
 		log.Printf("[Notify] muted by quiet hours severity=%s category=%s", severity, category)
 		return
@@ -360,7 +360,7 @@ func sendMessagesWithMarkup(cfg model.NotifyConfig, severity model.Severity, cat
 	sendMessagesToTargets(cfg, targets, text, markup)
 }
 
-func sendMessagesToTargets(cfg model.NotifyConfig, targets []model.NotifyTarget, text string, markup *InlineKeyboardMarkup) {
+func sendMessagesToTargets(cfg model.NotifyConfig, targets []ChatTarget, text string, markup *InlineKeyboardMarkup) {
 	if strings.TrimSpace(text) == "" || len(targets) == 0 || strings.TrimSpace(cfg.BotToken) == "" {
 		return
 	}
@@ -373,11 +373,11 @@ func sendMessagesToTargets(cfg model.NotifyConfig, targets []model.NotifyTarget,
 		lastFail string
 	)
 	for _, target := range targets {
-		if !target.Enabled || strings.TrimSpace(target.ChatID) == "" {
+		if strings.TrimSpace(target.ChatID) == "" {
 			continue
 		}
 		wg.Add(1)
-		go func(t model.NotifyTarget) {
+		go func(t ChatTarget) {
 			defer wg.Done()
 			sendSem <- struct{}{}
 			defer func() { <-sendSem }()
@@ -386,7 +386,7 @@ func sendMessagesToTargets(cfg model.NotifyConfig, targets []model.NotifyTarget,
 				failN++
 				lastFail = err.Error()
 				failMu.Unlock()
-				syslog.Errorf("[Notify] Telegram 发送失败 target=%s chat=%s thread=%s err=%v", t.Name, t.ChatID, t.ThreadID, err)
+				syslog.Errorf("[Notify] Telegram 发送失败 chat=%s thread=%s err=%v", t.ChatID, t.ThreadID, err)
 			}
 		}(target)
 	}

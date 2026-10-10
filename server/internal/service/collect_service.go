@@ -189,9 +189,7 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 	}
 
 	clearProvideNetworkConfigCache()
-	if old.DomainReplaceRules != source.DomainReplaceRules || isUriChanged {
-		filmsnapshot.ClearDynamicPlayCaches()
-	}
+	filmsnapshot.ClearDynamicPlayCaches()
 	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
 		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
 	}
@@ -242,6 +240,9 @@ func sourceChangeLabels(old, next model.FilmSource) []string {
 	if old.DomainReplaceRules != next.DomainReplaceRules {
 		changes = append(changes, "播放链接域名替换规则已更新")
 	}
+	if old.ProxyCollect != next.ProxyCollect {
+		changes = append(changes, fmt.Sprintf("采集接口代理: %s → %s", sourceStateLabel(old.ProxyCollect), sourceStateLabel(next.ProxyCollect)))
+	}
 	return changes
 }
 
@@ -286,6 +287,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	}
 	spider.ClearLimiter(source.Id)
 	clearProvideNetworkConfigCache()
+	filmsnapshot.ClearDynamicPlayCaches()
 	notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源"})
 	return nil
 }
@@ -305,9 +307,9 @@ func (s *CollectService) DelFilmSource(id string) error {
 	}
 	spider.ClearLimiter(id)
 	clearProvideNetworkConfigCache()
+	filmsnapshot.ClearDynamicPlayCaches()
 	repository.MarkCategoryChanged()
 	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
-	removeSourceFromProxyConfig(id)
 	return nil
 }
 
@@ -373,24 +375,4 @@ func (s *CollectService) ClearRetriedRecords() {
 
 func (s *CollectService) ClearAllRecord() {
 	repository.TruncateRecordTable()
-}
-
-func removeSourceFromProxyConfig(sourceID string) {
-	if sourceID == "" {
-		return
-	}
-	cfg := repository.GetProxyConfig()
-	var newIds []string
-	changed := false
-	for _, id := range cfg.SourceIds {
-		if id == sourceID {
-			changed = true
-		} else {
-			newIds = append(newIds, id)
-		}
-	}
-	if changed {
-		cfg.SourceIds = newIds
-		_ = repository.SaveProxyConfig(cfg)
-	}
 }

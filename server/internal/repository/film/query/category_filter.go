@@ -30,7 +30,7 @@ func categoryStableKey(id int64) string {
 }
 
 func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
-	if len(categoryIDs) == 0 {
+	if db.Mdb == nil || len(categoryIDs) == 0 {
 		return nil
 	}
 	var mappings []model.CategoryMapping
@@ -54,7 +54,7 @@ func sourceCategoryKeysByCategoryIDs(categoryIDs []int64) []string {
 }
 
 func visibleDescendantCategoryIDs(categoryID int64) []int64 {
-	if categoryID <= 0 {
+	if db.Mdb == nil || categoryID <= 0 {
 		return nil
 	}
 	ids := make([]int64, 0)
@@ -121,11 +121,15 @@ func rootCategorySourceKeyGroups(id int64) ([]string, []string) {
 }
 
 func applyRootCategorySourceFilter(query *gorm.DB, rootID int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
 	rootKeys, visibleKeys := rootCategorySourceKeyGroups(rootID)
 	if len(visibleKeys) == 0 {
 		return query
 	}
-	visibleCategoryQuery := db.Mdb.Where("category_key IN ?", visibleKeys)
+	subQuery := query.Session(&gorm.Session{NewDB: true})
+	visibleCategoryQuery := subQuery.Where("category_key IN ?", visibleKeys)
 	if len(rootKeys) > 0 {
 		visibleCategoryQuery = visibleCategoryQuery.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
 	}
@@ -133,6 +137,9 @@ func applyRootCategorySourceFilter(query *gorm.DB, rootID int64) *gorm.DB {
 }
 
 func categoryByID(id int64) (*model.Category, bool) {
+	if db.Mdb == nil {
+		return nil, false
+	}
 	resolvedID := support.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return nil, false
@@ -380,6 +387,9 @@ func sqlPlaceholders(n int) string {
 
 // ApplyManageCategoryFieldFilter 专供管理后台多维检索分类过滤（不校验前台 show 状态，兼容聚合映射与物理 pid/cid）
 func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gorm.DB {
+	if query == nil {
+		return nil
+	}
 	resolvedID := support.ResolveCategoryID(id)
 	if resolvedID <= 0 {
 		return emptyFilmIndexQuery(query)
@@ -387,7 +397,8 @@ func ApplyManageCategoryFieldFilter(query *gorm.DB, field string, id int64) *gor
 	if keys := categorySourceKeys(field, resolvedID); len(keys) > 0 {
 		if field == "pid" {
 			rootKeys, visibleKeys := rootCategorySourceKeyGroups(resolvedID)
-			cond := db.Mdb.Where("category_key IN ? OR pid = ?", visibleKeys, resolvedID)
+			subQuery := query.Session(&gorm.Session{NewDB: true})
+			cond := subQuery.Where("category_key IN ? OR pid = ?", visibleKeys, resolvedID)
 			if len(rootKeys) > 0 {
 				cond = cond.Or("root_category_key IN ? AND (category_key = '' OR category_key IS NULL)", rootKeys)
 			}

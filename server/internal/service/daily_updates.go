@@ -13,8 +13,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
 	"server/internal/repository"
+	"server/internal/repository/film"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
@@ -71,7 +71,7 @@ func normalizeDailyUpdateReq(req DailyUpdateListReq) DailyUpdateListReq {
 	if !req.Random {
 		req.Exclude = nil
 	} else {
-		req.Exclude = notify.ClampDailyUpdateExclude(req.Exclude, dailyUpdateMaxExclude)
+		req.Exclude = film.ClampDailyUpdateExclude(req.Exclude, dailyUpdateMaxExclude)
 	}
 	return req
 }
@@ -91,7 +91,7 @@ func fillDailyUpdatePage(page *dto.Page, total int) *dto.Page {
 // AssembleDailyUpdateCategories 导航顺序输出有片的大类；全部永远第一项。
 func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]int, otherCount, total int) []DailyUpdateCategory {
 	out := make([]DailyUpdateCategory, 0, len(nav)+2)
-	out = append(out, DailyUpdateCategory{Pid: notify.DailyPidAll, Name: "全部", Count: total})
+	out = append(out, DailyUpdateCategory{Pid: film.DailyPidAll, Name: "全部", Count: total})
 	for _, n := range nav {
 		if n.Id <= 0 {
 			continue
@@ -101,7 +101,7 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 		}
 	}
 	if otherCount > 0 {
-		out = append(out, DailyUpdateCategory{Pid: notify.DailyPidOther, Name: "其他", Count: otherCount})
+		out = append(out, DailyUpdateCategory{Pid: film.DailyPidOther, Name: "其他", Count: otherCount})
 	}
 	return out
 }
@@ -114,11 +114,11 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 			req.SourceId = active.Id
 		}
 	}
-	from, to := notify.Rolling24hWindow(time.Now())
+	from, to := film.Rolling24hWindow(time.Now())
 
 	// 分类树每请求只取一次，复用给列表筛选、分类计数与组装，避免多次全表扫描。
-	nav := notify.NavTopCategories()
-	navIDs := notify.NavTopCategoryIDs(nav)
+	nav := film.NavTopCategories()
+	navIDs := film.NavTopCategoryIDs(nav)
 
 	// 非随机且前 5 页支持短缓存（1 分钟）与 Singleflight，避免全量采集后高频刷新冲击数据库
 	usePageCache := !req.Random && req.Page.Current <= 5
@@ -141,7 +141,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	}
 
 	execQuery := func() (*DailyUpdateResult, error) {
-		mids, total, err := notify.ListDailyUpdateMids(notify.DailyUpdateListQuery{
+		mids, total, err := film.ListDailyUpdateMids(film.DailyUpdateListQuery{
 			From:     from,
 			To:       to,
 			Pid:      req.Pid,
@@ -213,10 +213,10 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 			}
 		}
 
-		countByPid, otherCount, catTotal, catErr := notify.DailyUpdatePidCounts(from, to, navIDs, sourceID)
+		countByPid, otherCount, catTotal, catErr := film.DailyUpdatePidCounts(from, to, navIDs, sourceID)
 		if catErr != nil {
 			log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
-			return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
+			return []DailyUpdateCategory{{Pid: film.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
 		}
 		cats := AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
 		if db.Rdb != nil && len(cats) > 0 {
@@ -232,7 +232,7 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 			return cats
 		}
 	}
-	return []DailyUpdateCategory{{Pid: notify.DailyPidAll, Name: "全部", Count: fallbackTotal}}
+	return []DailyUpdateCategory{{Pid: film.DailyPidAll, Name: "全部", Count: fallbackTotal}}
 }
 
 func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {
@@ -309,15 +309,15 @@ func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
 			return empty, nil
 		}
 
-		from, to := notify.Rolling24hWindow(time.Now())
-		items, _ := notify.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
+		from, to := film.Rolling24hWindow(time.Now())
+		rawMids, _ := film.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
 		mids := make([]int64, 0, homeDailyUpdatePoolCap)
 		seen := make(map[int64]struct{}, homeDailyUpdatePoolCap)
-		for _, it := range items {
-			if it.Mid > 0 {
-				if _, ok := seen[it.Mid]; !ok {
-					seen[it.Mid] = struct{}{}
-					mids = append(mids, it.Mid)
+		for _, m := range rawMids {
+			if m > 0 {
+				if _, ok := seen[m]; !ok {
+					seen[m] = struct{}{}
+					mids = append(mids, m)
 				}
 			}
 		}

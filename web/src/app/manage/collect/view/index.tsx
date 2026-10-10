@@ -98,7 +98,7 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     format: (item.format as "json" | "xml") || "json",
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
-    proxyEnabled: Boolean(item.proxyEnabled),
+    proxyCollect: Boolean(item.proxyCollect),
     createdAt: item.createdAt,
   };
 }
@@ -127,7 +127,25 @@ export default function CollectManagePageView() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [testing, setTesting] = useState(false);
-  const proxyChoiceRef = useRef<boolean | null>(null);
+  const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
+
+  const fetchProxyStatus = useCallback(async () => {
+    try {
+      const resp = await ApiGet("/manage/proxy/config");
+      if (resp.code === 0 && resp.data) {
+        const ready = Boolean(
+          resp.data.enabled &&
+            String(resp.data.proxyUrl || "").trim() &&
+            resp.data.modules?.spider,
+        );
+        setGlobalSpiderProxyReady(ready);
+      } else {
+        setGlobalSpiderProxyReady(false);
+      }
+    } catch {
+      setGlobalSpiderProxyReady(false);
+    }
+  }, []);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchIds, setBatchIds] = useState<string[]>([]);
@@ -411,6 +429,7 @@ export default function CollectManagePageView() {
   useEffect(() => {
     mountedRef.current = true;
     void getCollectList();
+    void fetchProxyStatus();
     return () => {
       mountedRef.current = false;
       clearPollTimer();
@@ -418,7 +437,7 @@ export default function CollectManagePageView() {
       sortConfirmRef.current = null;
       pendingSortRef.current = null;
     };
-  }, [clearPollTimer, getCollectList]);
+  }, [clearPollTimer, fetchProxyStatus, getCollectList]);
 
   const updateSiteListItem = useCallback(
     (id: string, updater: (record: FilmSource) => FilmSource) => {
@@ -661,10 +680,10 @@ export default function CollectManagePageView() {
   };
 
   const openAddForm = () => {
+    void fetchProxyStatus();
     setSourceModalMode("add");
     setEditingId(null);
     setSourceInitialValues(SOURCE_FORM_DEFAULTS);
-    proxyChoiceRef.current = null;
     setSourceFormNonce((n) => n + 1);
     setSourceModalOpen(true);
   };
@@ -762,6 +781,7 @@ export default function CollectManagePageView() {
   };
 
   const openEditDialog = async (id: string) => {
+    void fetchProxyStatus();
     setSourceModalMode("edit");
     setEditingId(id);
     const resp = await ApiGet("/manage/collect/find", { id });
@@ -775,8 +795,8 @@ export default function CollectManagePageView() {
         cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
         format: (resp.data.format as "json" | "xml") || "json",
         domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
+        proxyCollect: Boolean(resp.data.proxyCollect),
       });
-      proxyChoiceRef.current = null;
       setSourceFormNonce((n) => n + 1);
       setSourceModalOpen(true);
       return;
@@ -785,7 +805,6 @@ export default function CollectManagePageView() {
   };
 
   const handleSubmitSource = async (values: SourceFormValues) => {
-    const useProxy = proxyChoiceRef.current ?? undefined;
     setSubmitting(true);
     try {
       const resp = await ApiPost(
@@ -793,8 +812,8 @@ export default function CollectManagePageView() {
           ? "/manage/collect/add"
           : "/manage/collect/update",
         sourceModalMode === "add"
-          ? { ...values, ...(useProxy !== undefined ? { useProxy } : {}) }
-          : { ...values, id: editingId, ...(useProxy !== undefined ? { useProxy } : {}) },
+          ? values
+          : { ...values, id: editingId },
       );
       if (resp.code === 0) {
         message.success(resp.msg);
@@ -835,63 +854,9 @@ export default function CollectManagePageView() {
     }
   };
 
-  const askProxyChoice = (): Promise<boolean | null> => {
-    return new Promise((resolve) => {
-      void (async () => {
-        let enabled = false;
-        let proxyUrl = "";
-        try {
-          const cfg = await ApiGet("/manage/proxy/config");
-          if (cfg.code !== 0) {
-            message.error(cfg.msg || "获取代理配置失败");
-            resolve(null);
-            return;
-          }
-          enabled = Boolean(cfg.data?.enabled);
-          proxyUrl = String(cfg.data?.proxyUrl || "").trim();
-        } catch {
-          message.error("获取代理配置失败");
-          resolve(null);
-          return;
-        }
-        if (!enabled || !proxyUrl) {
-          proxyChoiceRef.current = false;
-          resolve(false);
-          return;
-        }
-        const dialogRef: { current?: { destroy: () => void } } = {};
-        let settled = false;
-        const finish = (choice: boolean | null) => {
-          if (settled) return;
-          settled = true;
-          if (choice !== null) {
-            proxyChoiceRef.current = choice;
-          }
-          dialogRef.current?.destroy();
-          resolve(choice);
-        };
-        dialogRef.current = modal.confirm({
-          title: "使用代理测试？",
-          content: proxyUrl,
-          okText: "走代理",
-          cancelText: "直连",
-          zIndex: 2000,
-          onOk: () => finish(true),
-          onCancel: () => finish(null),
-          cancelButtonProps: {
-            onClick: () => finish(false),
-          },
-        });
-      })();
-    });
-  };
-
   const testApi = async (values: SourceFormValues) => {
-    const useProxy = await askProxyChoice();
-    if (useProxy === null) {
-      return;
-    }
-    await runSourceTest(values, useProxy);
+    const shouldUseProxy = Boolean(globalSpiderProxyReady && values.proxyCollect);
+    await runSourceTest(values, shouldUseProxy);
   };
 
   const openBatchCollect = async () => {
@@ -1130,6 +1095,7 @@ export default function CollectManagePageView() {
               hiddenDoneIds={hiddenDoneIds}
               canWrite={canWrite}
               canAddSource={canAddSource}
+              globalSpiderProxyReady={globalSpiderProxyReady}
               onSelect={handleSelectSource}
               onChangeCollectDuration={changeCollectDuration}
               onStartTask={(record) => void startTask(record)}
@@ -1161,6 +1127,7 @@ export default function CollectManagePageView() {
         mode={sourceModalMode}
         loading={submitting}
         testing={testing}
+        globalSpiderProxyReady={globalSpiderProxyReady}
         initialValues={sourceInitialValues}
         formNonce={sourceFormNonce}
         onCancel={() => setSourceModalOpen(false)}

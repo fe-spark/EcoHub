@@ -34,6 +34,7 @@ interface CollectSourceGridProps {
   hiddenDoneIds: string[];
   canWrite: boolean;
   canAddSource: boolean;
+  globalSpiderProxyReady?: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
   onStartTask: (record: FilmSource) => void;
@@ -51,6 +52,7 @@ export default function CollectSourceGrid({
   hiddenDoneIds,
   canWrite,
   canAddSource,
+  globalSpiderProxyReady = false,
   onSelect,
   onChangeCollectDuration,
   onStartTask,
@@ -125,6 +127,7 @@ export default function CollectSourceGrid({
                 record={hiddenDone ? { ...site, progress: null } : site}
                 selected={selectedSourceIds.includes(site.id)}
                 active={activeCollectIds.includes(site.id)}
+                globalSpiderProxyReady={globalSpiderProxyReady}
                 onSelect={onSelect}
                 onChangeCollectDuration={onChangeCollectDuration}
                 onStartTask={onStartTask}
@@ -163,6 +166,7 @@ export default function CollectSourceGrid({
               record={activeSite}
               selected={selectedSourceIds.includes(activeSite.id)}
               active={activeCollectIds.includes(activeSite.id)}
+              globalSpiderProxyReady={globalSpiderProxyReady}
               onSelect={() => {}}
               onChangeCollectDuration={() => {}}
               onStartTask={() => {}}

@@ -77,52 +77,36 @@ func TestValidateAndMergeUpdateKeepToken(t *testing.T) {
 	if len(merged.ChatIDs) != 2 {
 		t.Fatalf("chat ids: %v", merged.ChatIDs)
 	}
-	// Targets 应与 ChatIDs 对齐
-	if len(merged.Targets) != 2 {
-		t.Fatalf("targets should match chatIDs: %+v", merged.Targets)
-	}
 }
 
-func TestValidateAndMergeUpdateSyncsTargetsWithChatIDs(t *testing.T) {
+func TestValidateAndMergeUpdateWithChatTargetSyntax(t *testing.T) {
 	old := model.NotifyConfig{
 		BotToken: "123456:REALTOKENVALUE",
-		ChatIDs:  []string{"A"},
-		Targets: []model.NotifyTarget{
-			{ChatID: "A", ThreadID: "10", Enabled: true, MinLevel: model.SeverityError, Name: "主题A"},
-		},
+		ChatIDs:  []string{"-100123:10"},
 	}
-	// 前端只改 chatIds，不传 targets（或仍带陈旧 A）
 	incoming := model.NotifyConfig{
-		Enabled:           false,
-		ChatIDs:           []string{"C"},
-		Targets:           []model.NotifyTarget{{ChatID: "A", Enabled: true}}, // 陈旧
-		MaxFilmsInMessage: 15,
-		MinIntervalSec:    60,
+		Enabled:  true,
+		BotToken: "123456***ALUE",
+		ChatIDs:  []string{"-100123:10", "-100456", "@my_channel:99"},
 	}
 	merged, err := ValidateAndMergeUpdate(old, incoming)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(merged.ChatIDs) != 1 || merged.ChatIDs[0] != "C" {
-		t.Fatalf("chatIDs: %v", merged.ChatIDs)
+	if merged.BotToken != "123456:REALTOKENVALUE" {
+		t.Fatalf("token should be preserved, got %s", merged.BotToken)
 	}
-	if len(merged.Targets) != 1 || merged.Targets[0].ChatID != "C" {
-		t.Fatalf("stale target A must be dropped: %+v", merged.Targets)
+	if len(merged.ChatIDs) != 3 {
+		t.Fatalf("expected 3 chatIDs, got %v", merged.ChatIDs)
 	}
 
-	// 保留仍在成员列表中的 Thread 元数据
-	incoming2 := model.NotifyConfig{
-		Enabled:           false,
-		ChatIDs:           []string{"A"},
-		MaxFilmsInMessage: 15,
-		MinIntervalSec:    60,
+	invalidIncoming := model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:REALTOKENVALUE",
+		ChatIDs:  []string{"invalid chat id with spaces"},
 	}
-	merged2, err := ValidateAndMergeUpdate(old, incoming2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(merged2.Targets) != 1 || merged2.Targets[0].ThreadID != "10" || merged2.Targets[0].MinLevel != model.SeverityError {
-		t.Fatalf("should preserve thread meta for A: %+v", merged2.Targets)
+	if _, err := ValidateAndMergeUpdate(old, invalidIncoming); err == nil {
+		t.Fatalf("expected error for invalid chat id")
 	}
 }
 
@@ -543,19 +527,29 @@ func TestSourceConfigBatchRateKey(t *testing.T) {
 	}
 }
 
-func TestLevelAndCategoryFiltering(t *testing.T) {
-	if !isLevelAllowed(model.SeverityWarn, model.SeverityError) {
-		t.Fatal("ERROR should be allowed when target min level is WARN")
-	}
-	if isLevelAllowed(model.SeverityError, model.SeverityInfo) {
-		t.Fatal("INFO should be blocked when target min level is ERROR")
+func TestParseChatTargetAndRoute(t *testing.T) {
+	cID, tID := ParseChatTarget("-100123:456")
+	if cID != "-100123" || tID != "456" {
+		t.Fatalf("ParseChatTarget with thread failed: %q, %q", cID, tID)
 	}
 
-	if !isCategorySubscribed([]string{"collect"}, "collect.batch_summary") {
-		t.Fatal("collect.batch_summary should match collect category subscription")
+	cID, tID = ParseChatTarget("@channel")
+	if cID != "@channel" || tID != "" {
+		t.Fatalf("ParseChatTarget without thread failed: %q, %q", cID, tID)
 	}
-	if isCategorySubscribed([]string{"cron"}, "collect.batch_summary") {
-		t.Fatal("collect.batch_summary should not match cron category subscription")
+
+	cfg := model.NotifyConfig{
+		ChatIDs: []string{"-100123:456", "@channel"},
+	}
+	targets, muted := routeTargets(cfg, model.SeverityInfo)
+	if muted || len(targets) != 2 {
+		t.Fatalf("routeTargets failed: len=%d, muted=%v", len(targets), muted)
+	}
+	if targets[0].ChatID != "-100123" || targets[0].ThreadID != "456" {
+		t.Fatalf("target[0] mismatch: %+v", targets[0])
+	}
+	if targets[1].ChatID != "@channel" || targets[1].ThreadID != "" {
+		t.Fatalf("target[1] mismatch: %+v", targets[1])
 	}
 }
 

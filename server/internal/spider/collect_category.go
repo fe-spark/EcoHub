@@ -38,8 +38,14 @@ func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) e
 	}
 	// 获取分类树形数据
 	req := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
-	if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
-		req.ProxyURL = proxy
+	if s.ProxyCollect {
+		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+			req.ProxyURL = proxy
+		}
+	} else if s.Id != "" {
+		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+			req.ProxyURL = proxy
+		}
 	}
 	categoryTree, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {

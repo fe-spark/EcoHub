@@ -2,17 +2,19 @@ package model
 
 import "gorm.io/gorm"
 
-const (
-	ProxyScopeAll    = "all"    // 全部采集源生效
-	ProxyScopeCustom = "custom" // 仅指定采集源生效
-)
+// ProxyModuleScope 细粒度生效模块配置
+type ProxyModuleScope struct {
+	Spider  bool `json:"spider"`  // 采集站爬虫
+	TMDB    bool `json:"tmdb"`    // TMDB 刮削
+	Notify  bool `json:"notify"`  // Telegram 通知
+	Upgrade bool `json:"upgrade"` // GitHub 版本检查
+}
 
-// ProxyConfig 采集网络代理配置
+// ProxyConfig 统一网络代理配置
 type ProxyConfig struct {
-	Enabled   bool     `json:"enabled"`   // 是否启用代理
-	ProxyURL  string   `json:"proxyUrl"`  // 代理地址 (http://, https://, socks5://)
-	Scope     string   `json:"scope"`     // 生效范围: all | custom
-	SourceIds []string `json:"sourceIds"` // 指定生效的采集源 ID 列表 (Scope == custom 时有效)
+	Enabled  bool             `json:"enabled"`  // 是否启用代理
+	ProxyURL string           `json:"proxyUrl"` // 代理地址 (http://, https://, socks5://)
+	Modules  ProxyModuleScope `json:"modules"`  // 各模块代理开关
 }
 
 // ProxyConfigRecord 代理配置持久化模型 (MySQL)
@@ -25,8 +27,7 @@ func (ProxyConfigRecord) TableName() string {
 	return TableProxyConfig
 }
 
-// ProxyTestReq 连通测试请求
+// ProxyTestReq 连通测试请求（移除自定义 Target 彻底杜绝 SSRF）
 type ProxyTestReq struct {
 	ProxyURL string `json:"proxyUrl"`
-	Target   string `json:"target,omitempty"` // 可选自定义测试目标
 }

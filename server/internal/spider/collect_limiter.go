@@ -51,14 +51,14 @@ func getSourceRequestGate(sourceID string) *sourceRequestGate {
 }
 
 func getSourceInterval(sourceID string, fallback *model.FilmSource) time.Duration {
+	if fallback != nil && fallback.Interval > 0 {
+		return time.Duration(fallback.Interval) * time.Millisecond
+	}
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID != "" {
 		if latest := repository.FindCollectSourceById(sourceID); latest != nil && latest.Interval > 0 {
 			return time.Duration(latest.Interval) * time.Millisecond
 		}
-	}
-	if fallback != nil && fallback.Interval > 0 {
-		return time.Duration(fallback.Interval) * time.Millisecond
 	}
 	return config.DefaultSpiderInterval * time.Millisecond
 }

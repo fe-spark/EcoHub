@@ -14,10 +14,6 @@ import (
 )
 
 func TestProvideCollectSource(t *testing.T) {
-	prev := lookupActiveCollectSourceID
-	lookupActiveCollectSourceID = func() string { return "primary01" }
-	t.Cleanup(func() { lookupActiveCollectSourceID = prev })
-
 	vod := "/api/provide/vod"
 	if got := provideCollectSource("/api/provide/tvbox", url.Values{}); got != "" {
 		t.Fatalf("config must not count, got %q", got)
@@ -32,21 +28,14 @@ func TestProvideCollectSource(t *testing.T) {
 	if got := provideCollectSource(vod, url.Values{"source": {longID}}); got != "" {
 		t.Fatalf("overlong source must not count, got %q", got)
 	}
-	if got := provideCollectSource(vod, url.Values{"ac": {"list"}}); got != "primary01" {
-		t.Fatalf("list without source = %q", got)
+	if got := provideCollectSource(vod, url.Values{"ac": {"list"}}); got != "" {
+		t.Fatalf("list without source must be empty, got %q", got)
 	}
 	if got := provideCollectSource(vod, url.Values{"ac": {"detail"}, "ids": {"9"}}); got != "" {
-		t.Fatalf("detail without source = %q", got)
+		t.Fatalf("detail without source must be empty, got %q", got)
 	}
 	if got := provideCollectSource(vod, url.Values{"ac": {"videolist"}, "ids": {"9"}, "source": {"srcB"}}); got != "srcB" {
 		t.Fatalf("detail with source = %q", got)
-	}
-	if got := provideCollectSource(vod, url.Values{"ac": {"detail"}}); got != "primary01" {
-		t.Fatalf("detail without ids = %q", got)
-	}
-	lookupActiveCollectSourceID = func() string { return "" }
-	if got := provideCollectSource(vod, url.Values{"ac": {"list"}}); got != "" {
-		t.Fatalf("list without preferred = %q", got)
 	}
 }
 
@@ -60,17 +49,20 @@ func TestPageCollectSource(t *testing.T) {
 		lookupCollectSourceExists = prevExists
 	})
 
-	if got := pageCollectSource(ActionBrowse, "web", ""); got != "primary01" {
-		t.Fatalf("browse = %q", got)
+	if got := pageCollectSource(ActionBrowse, "web", ""); got != "" {
+		t.Fatalf("browse must be empty, got %q", got)
 	}
-	if got := pageCollectSource(ActionSearch, "other", "庆余年"); got != "primary01" {
-		t.Fatalf("search = %q", got)
+	if got := pageCollectSource(ActionSearch, "other", "庆余年"); got != "" {
+		t.Fatalf("search must be empty, got %q", got)
+	}
+	if got := pageCollectSource(ActionClassify, "", ""); got != "" {
+		t.Fatalf("classify must be empty, got %q", got)
 	}
 	if got := pageCollectSource(ActionPlay, "web", "1024"); got != "" {
 		t.Fatalf("client type must not become a station, got %q", got)
 	}
-	if got := pageCollectSource(ActionPlay, "", "1024"); got != "" {
-		t.Fatalf("play without source = %q", got)
+	if got := pageCollectSource(ActionPlay, "", "1024"); got != "primary01" {
+		t.Fatalf("play without source must fallback to primary01, got %q", got)
 	}
 	if got := pageCollectSource(ActionPlay, "primary01", "1024"); got != "primary01" {
 		t.Fatalf("play source = %q", got)
@@ -128,14 +120,15 @@ func TestQuerySourceCallsOrdersKnownThenUnknown(t *testing.T) {
 	if len(rows) != 3 {
 		t.Fatalf("rows = %+v", rows)
 	}
-	if rows[0].Id != "srcA" || !rows[0].IsPrimary || rows[0].Count != 1 || !rows[0].Enabled {
-		t.Fatalf("primary row = %+v", rows[0])
+	// 结果应按 Count DESC 降序：ghost(5), srcB(2), srcA(1)
+	if rows[0].Id != "ghost" || rows[0].Count != 5 {
+		t.Fatalf("first row = %+v", rows[0])
 	}
-	if rows[1].Id != "srcB" || rows[1].Enabled || rows[1].Count != 2 {
-		t.Fatalf("disabled row = %+v", rows[1])
+	if rows[1].Id != "srcB" || rows[1].Count != 2 {
+		t.Fatalf("second row = %+v", rows[1])
 	}
-	if rows[2].Id != "ghost" || rows[2].Name != "ghost" || rows[2].Count != 5 {
-		t.Fatalf("unknown row = %+v", rows[2])
+	if rows[2].Id != "srcA" || rows[2].Count != 1 || !rows[2].IsPrimary {
+		t.Fatalf("third row = %+v", rows[2])
 	}
 }
 

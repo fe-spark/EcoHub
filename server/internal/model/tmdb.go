@@ -6,7 +6,6 @@ import "gorm.io/gorm"
 type TMDBConfig struct {
 	Enabled     bool   `json:"enabled"`
 	ApiKey      string `json:"apiKey"`
-	Proxy       string `json:"proxy"`
 	Language    string `json:"language"`
 	ImageDomain string `json:"imageDomain"`
 }

@@ -3,7 +3,6 @@ package repository
 import (
 	"encoding/json"
 	"log"
-	"sort"
 	"strings"
 
 	"server/internal/config"
@@ -126,20 +125,6 @@ func normalizeNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 	cfg.BotToken = strings.TrimSpace(cfg.BotToken)
 	cfg.ChatIDs = NormalizeChatIDs(cfg.ChatIDs)
 
-	// ChatIDs 为成员列表真相源；Targets 承载 Thread/等级等路由元数据。
-	// 若仅有 Targets（高级配置），则反推 ChatIDs。
-	if len(cfg.ChatIDs) == 0 && len(cfg.Targets) > 0 {
-		derived := make([]string, 0, len(cfg.Targets))
-		for _, t := range cfg.Targets {
-			if id := strings.TrimSpace(t.ChatID); id != "" {
-				derived = append(derived, id)
-			}
-		}
-		cfg.ChatIDs = NormalizeChatIDs(derived)
-	}
-	// 始终按 ChatIDs 重建 Targets，避免「改了 Chat 仍发到旧 Target」的漂移。
-	cfg.Targets = RebuildTargetsFromChatIDs(cfg.ChatIDs, cfg.Targets)
-
 	if cfg.QuietHours.AllowLevels == nil {
 		cfg.QuietHours.AllowLevels = []model.Severity{model.SeverityError, model.SeverityCritical}
 	}
@@ -164,78 +149,6 @@ func normalizeNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 		cfg.QuietHours.End = "07:00"
 	}
 	return cfg
-}
-
-// RebuildTargetsFromChatIDs 以 chatIDs 为成员真相源重建 Targets。
-// sources 中同 ChatID（及 ThreadID）的元数据会被保留；后出现的覆盖先前的。
-// 不在 chatIDs 中的目标丢弃；chatIDs 中全新的项生成默认 Target。
-func RebuildTargetsFromChatIDs(chatIDs []string, sources []model.NotifyTarget) []model.NotifyTarget {
-	chatIDs = NormalizeChatIDs(chatIDs)
-	if len(chatIDs) == 0 {
-		if len(sources) == 0 {
-			return []model.NotifyTarget{}
-		}
-		// 无成员列表时不保留游离 Targets，避免与 ChatIDs 再次漂移
-		return []model.NotifyTarget{}
-	}
-
-	// chatID -> threadID -> target（后写覆盖）
-	byChatThread := make(map[string]map[string]model.NotifyTarget, len(chatIDs))
-	for _, t := range sources {
-		chat := strings.TrimSpace(t.ChatID)
-		if chat == "" {
-			continue
-		}
-		thread := strings.TrimSpace(t.ThreadID)
-		if byChatThread[chat] == nil {
-			byChatThread[chat] = make(map[string]model.NotifyTarget)
-		}
-		nt := t
-		nt.ChatID = chat
-		nt.ThreadID = thread
-		if strings.TrimSpace(nt.ID) == "" {
-			nt.ID = chat
-		}
-		if strings.TrimSpace(nt.Name) == "" {
-			nt.Name = chat
-		}
-		if nt.MinLevel == "" {
-			nt.MinLevel = model.SeverityInfo
-		}
-		byChatThread[chat][thread] = nt
-	}
-
-	out := make([]model.NotifyTarget, 0, len(chatIDs))
-	for _, id := range chatIDs {
-		tm := byChatThread[id]
-		if len(tm) == 0 {
-			out = append(out, model.NotifyTarget{
-				ID:       id,
-				Name:     id,
-				ChatID:   id,
-				Enabled:  true,
-				MinLevel: model.SeverityInfo,
-			})
-			continue
-		}
-		// 稳定顺序：无 thread 优先，其余按 threadID 排序
-		if t, ok := tm[""]; ok {
-			out = append(out, t)
-			delete(tm, "")
-		}
-		if len(tm) == 0 {
-			continue
-		}
-		threads := make([]string, 0, len(tm))
-		for th := range tm {
-			threads = append(threads, th)
-		}
-		sort.Strings(threads)
-		for _, th := range threads {
-			out = append(out, tm[th])
-		}
-	}
-	return out
 }
 
 // NormalizeChatIDs 去空、trim、去重（notify 校验与持久化共用）。

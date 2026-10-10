@@ -10,6 +10,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
@@ -85,5 +87,69 @@ func TestProvideKeyGuard(t *testing.T) {
 		if w4.Code != http.StatusOK {
 			t.Errorf("expected status 200, got %d", w4.Code)
 		}
+	}
+}
+
+func TestPrivateAccessGuard(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(PrivateAccessGuard())
+	r.GET("/api/test-front", func(c *gin.Context) {
+		uid, _ := c.Get("user_id")
+		dto.Success(uid, "ok", c)
+	})
+
+	// 1. 未开启私有化，无任何凭证应直接通过
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 when private access disabled, got %d", w.Code)
+	}
+
+	if db.Rdb != nil {
+		testCfg := model.BasicConfig{
+			PrivateAccess: true,
+			ProvideKey:    "secret-123",
+		}
+		data, _ := json.Marshal(testCfg)
+		_ = db.Rdb.Set(db.Cxt, config.SiteConfigBasic, data, 0).Err()
+
+		// 2. 开启私有化，无凭据访问 -> 401
+		w1 := httptest.NewRecorder()
+		req1, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
+		r.ServeHTTP(w1, req1)
+		if w1.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 without auth, got %d", w1.Code)
+		}
+
+		// 3. 携带正确订阅密钥 -> 200
+		w2 := httptest.NewRecorder()
+		req2, _ := http.NewRequest(http.MethodGet, "/api/test-front?key=secret-123", nil)
+		r.ServeHTTP(w2, req2)
+		if w2.Code != http.StatusOK {
+			t.Errorf("expected 200 with provide key, got %d", w2.Code)
+		}
+
+		// 4. 携带仅 JWT 签名合法但 Redis 无凭据的伪造/注销 Token -> 401
+		forgedToken, _ := utils.GenToken(999, "fakeUser", 2)
+		w3 := httptest.NewRecorder()
+		req3, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
+		req3.Header.Set("Authorization", "Bearer "+forgedToken)
+		r.ServeHTTP(w3, req3)
+		if w3.Code != http.StatusUnauthorized {
+			t.Errorf("expected 401 for token not present in redis, got %d", w3.Code)
+		}
+
+		// 5. 携带 Redis 同步有效的合法 Token -> 200，且 user_id 为 uint 999
+		_ = repository.SaveUserToken(forgedToken, 999)
+		w4 := httptest.NewRecorder()
+		req4, _ := http.NewRequest(http.MethodGet, "/api/test-front", nil)
+		req4.Header.Set("Authorization", "Bearer "+forgedToken)
+		r.ServeHTTP(w4, req4)
+		if w4.Code != http.StatusOK {
+			t.Errorf("expected 200 for valid token in redis, got %d", w4.Code)
+		}
+		_ = repository.ClearUserToken(999)
 	}
 }

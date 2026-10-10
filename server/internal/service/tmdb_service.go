@@ -15,6 +15,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/utils"
 )
 
 type TMDBService struct{}
@@ -22,8 +23,11 @@ type TMDBService struct{}
 var TMDBSvc = new(TMDBService)
 
 const (
+	httpTimeout = 15 * time.Second
+)
+
+var (
 	tmdbAPIBaseURL = "https://api.themoviedb.org/3"
-	httpTimeout    = 15 * time.Second
 )
 
 var (
@@ -64,24 +68,12 @@ func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
 	return s, extractedYear
 }
 
-func getHTTPClient(proxyStr string) *http.Client {
+func getHTTPClient() *http.Client {
 	var transport *http.Transport
-	if t, ok := http.DefaultTransport.(*http.Transport); ok {
-		transport = t.Clone()
+	if ok, proxyURL := repository.ResolveTMDBProxy(); ok && proxyURL != "" {
+		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	} else {
-		transport = &http.Transport{}
-	}
-
-	proxyStr = strings.TrimSpace(proxyStr)
-	if proxyStr != "" {
-		if !strings.HasPrefix(proxyStr, "http://") && !strings.HasPrefix(proxyStr, "https://") && !strings.HasPrefix(proxyStr, "socks5://") {
-			proxyStr = "http://" + proxyStr
-		}
-		if u, err := url.Parse(proxyStr); err == nil {
-			transport.Proxy = http.ProxyURL(u)
-		}
-	} else {
-		transport.Proxy = http.ProxyFromEnvironment
+		transport = utils.GetOrCreateProxyTransport("")
 	}
 	return &http.Client{
 		Transport: transport,
@@ -132,7 +124,7 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 		return errors.New("API Key 不能为空")
 	}
 
-	client := getHTTPClient(strings.TrimSpace(cfg.Proxy))
+	client := getHTTPClient()
 	testURL := fmt.Sprintf("%s/configuration?api_key=%s", tmdbAPIBaseURL, url.QueryEscape(apiKey))
 
 	req, err := http.NewRequest(http.MethodGet, testURL, nil)
@@ -197,7 +189,7 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 	}
 	year = strings.TrimSpace(year)
 
-	client := getHTTPClient(cfg.Proxy)
+	client := getHTTPClient()
 	var endpoint string
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
@@ -371,7 +363,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		mediaType = "movie"
 	}
 
-	client := getHTTPClient(cfg.Proxy)
+	client := getHTTPClient()
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
 	qVals.Set("language", cfg.Language)

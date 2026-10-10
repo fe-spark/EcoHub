@@ -7,41 +7,18 @@ import VideoPlayer from "@/components/public/VideoPlayer";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { readHistoryMap, writeHistoryMap } from "@/lib/historyStorage";
 import { buildPlayPath } from "@/lib/playNavigation";
+import { trackPageView } from "@/lib/track-page-view";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
-import { formatLocalUpdateTime, formatActorNames, resolveFilmScore } from "./formatters";
+import {
+  formatLocalUpdateTime,
+  formatActorNames,
+  resolveFilmScore,
+  makeEpisodeKey,
+  buildPlayLink,
+  buildInitialPlaybackState,
+} from "./formatters";
 import styles from "./index.module.less";
-
-function parseInitialTimeParam(value?: string): number {
-  if (!value) return 0;
-  const parsed = Number.parseFloat(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function makeEpisodeKey(sourceId: string, episodeIndex: number) {
-  return `${sourceId}:${episodeIndex}`;
-}
-
-function buildPlayLink(
-  filmId: string | number,
-  sourceId: string,
-  episodeIndex: number,
-  currentTime = 0,
-) {
-  return buildPlayPath(String(filmId), sourceId, episodeIndex, currentTime);
-}
-
-function buildInitialPlaybackState(data: any, initialTime?: string) {
-  const playingSourceId = data?.currentPlayFrom || "";
-  const episodeIndex = data?.currentEpisode ?? 0;
-
-  return {
-    playingSourceId,
-    viewingSourceId: playingSourceId,
-    current: data?.current ? { index: episodeIndex, ...data.current } : null,
-    playInitialTime: parseInitialTimeParam(initialTime),
-  };
-}
 
 interface PlayPageViewProps {
   data: any;
@@ -83,6 +60,8 @@ export default function PlayPageView({
 
   const currentFilm = data?.detail;
 
+  const reportedPlaybackKeys = useRef<Set<string>>(new Set());
+
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
       setCurrent(currentPlay ? { index: episodeIndex, ...currentPlay } : null);
@@ -93,6 +72,25 @@ export default function PlayPageView({
     },
     [],
   );
+
+  const handlePlayStart = useCallback(() => {
+    if (!currentFilm || !playingSourceId) return;
+    const epIdx = current?.index ?? 0;
+    const key = `${filmId}:${playingSourceId}:${epIdx}`;
+    if (reportedPlaybackKeys.current.has(key)) {
+      return;
+    }
+    reportedPlaybackKeys.current.add(key);
+    trackPageView({
+      action: "play",
+      resource: String(filmId),
+      collect_source: playingSourceId,
+      resource_title: currentFilm.name || "",
+      resource_poster: currentFilm.picture || "",
+      resource_cat: currentFilm.descriptor?.cName || "",
+      path: buildPlayPath(String(filmId), playingSourceId, epIdx),
+    });
+  }, [currentFilm, playingSourceId, filmId, current]);
 
   const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
   const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
@@ -302,6 +300,7 @@ export default function PlayPageView({
                 autoplay={autoplay}
                 onEnded={() => autoplay && handlePlayNext()}
                 onTimeUpdate={handleTimeUpdate}
+                onPlayStart={handlePlayStart}
                 onError={() => {
                   setPlayerError(true);
                   message.error("该视频源加载失败，请尝试切换播放源。");
@@ -331,6 +330,9 @@ export default function PlayPageView({
                   <span className={styles.sourcePickerLabel}>播放源</span>
                   <span className={styles.sourcePickerValue}>
                     {viewingSource?.name || "选择播放源"}
+                    {viewingSource?.proxy && (
+                      <span className={styles.proxyBadge}>代理</span>
+                    )}
                   </span>
                 </div>
                 <span className={styles.sourcePickerArrow} aria-hidden="true" />
@@ -356,6 +358,9 @@ export default function PlayPageView({
                       >
                         <span className={styles.sourcePickerOptionMain}>
                           {item.name}
+                          {item.proxy && (
+                            <span className={styles.proxyBadge}>代理</span>
+                          )}
                         </span>
                         <div className={styles.sourcePickerOptionMeta}>
                           {isPlaying && <span className={styles.playingBadge}>正在播放</span>}
@@ -384,6 +389,9 @@ export default function PlayPageView({
                     }}
                   >
                     {item.name}
+                    {item.proxy && (
+                      <span className={styles.proxyBadge}>代理</span>
+                    )}
                   </div>
                 );
               })}

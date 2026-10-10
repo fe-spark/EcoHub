@@ -400,6 +400,7 @@ type PlayLinkVo struct {
 	SourceId    string         `json:"sourceId"`
 	Name        string         `json:"name"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
+	Proxy       bool           `json:"proxy,omitempty"`
 	LinkList    []MovieUrlInfo `json:"linkList"`
 }
 

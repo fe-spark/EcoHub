@@ -16,6 +16,9 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/repository"
+	"server/internal/utils"
+
 	xproxy "golang.org/x/net/proxy"
 )
 
@@ -49,6 +52,30 @@ func newTelegramClient() *telegramClient {
 	}
 }
 
+// ReloadTelegramClient 刷新全局 Telegram 客户端 Transport 并确保轮询协程正常运行
+func ReloadTelegramClient() {
+	if client != nil {
+		client.reloadTransport()
+	}
+	EnsureBotPoller()
+}
+
+func (c *telegramClient) reloadTransport() {
+	transport, proxyLabel, err := buildTelegramTransport()
+	if err != nil {
+		log.Printf("[Notify] Telegram 代理重载失败，回退直连: %v", err)
+		transport = defaultTelegramTransport()
+		proxyLabel = ""
+	}
+	c.httpClient.Transport = transport
+	c.proxyURL = proxyLabel
+	if proxyLabel != "" {
+		log.Printf("[Notify] Telegram API 已切换代理: %s", proxyLabel)
+	} else {
+		log.Printf("[Notify] Telegram API 已切换直连")
+	}
+}
+
 func defaultTelegramTransport() *http.Transport {
 	return &http.Transport{
 		DialContext: (&net.Dialer{
@@ -62,9 +89,14 @@ func defaultTelegramTransport() *http.Transport {
 	}
 }
 
-// buildTelegramTransport 优先 TG_PROXY，其次 HTTPS_PROXY / HTTP_PROXY / ALL_PROXY。
+// buildTelegramTransport 优先系统网络代理 (ResolveNotifyProxy)，其次 TG_PROXY 等环境变量。
 // 支持 http / https / socks5 代理。
 func buildTelegramTransport() (*http.Transport, string, error) {
+	if ok, proxyURL := repository.ResolveNotifyProxy(); ok && proxyURL != "" {
+		transport := utils.GetOrCreateProxyTransport(proxyURL)
+		return transport, proxyURL, nil
+	}
+
 	proxyRaw := firstNonEmpty(
 		os.Getenv("TG_PROXY"),
 		os.Getenv("HTTPS_PROXY"),

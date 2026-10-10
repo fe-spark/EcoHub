@@ -58,7 +58,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		ctx = context.Background()
 	}
 
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
@@ -198,7 +198,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	default:
 	}
-	r := requestForSource(s.Uri, s.Id)
+	r := requestForSource(s)
 	r.Params.Set("pg", fmt.Sprint(fr.PageNumber))
 	if fr.Hour > 0 {
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
@@ -403,14 +403,13 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 			}
 			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 		}
+	} else if s.ProxyCollect {
+		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+			r.ProxyURL = proxy
+		}
 	} else if s.Id != "" {
 		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
 			r.ProxyURL = proxy
-		}
-	} else {
-		cfg := repository.GetProxyConfig()
-		if cfg.Enabled && cfg.Scope == model.ProxyScopeAll && cfg.ProxyURL != "" {
-			r.ProxyURL = cfg.ProxyURL
 		}
 	}
 	err := utils.ApiTest(&r)
