@@ -17,11 +17,9 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	"server/internal/spider/fetcher"
-	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
@@ -110,8 +108,7 @@ func CollectSingleFilm(ids string) {
 	}
 
 	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerSingleUpdate, "单片更新", targets, batch, startedAt)
+	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, "单片更新", targets, startedAt)
 	defer batchCtx.close()
 
 	type singleResult struct {
@@ -132,11 +129,9 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
-			mids, err := collectFilmById(sourceMid, &src, batchCtx)
+			_, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
-			} else if len(mids) > 0 {
-				noteCollectedMIDs(batch, src.Id, src.Name, mids)
 			}
 			mu.Lock()
 			results = append(results, singleResult{source: src, err: err})
@@ -145,34 +140,9 @@ func CollectSingleFilm(ids string) {
 	}
 	wg.Wait()
 
-	var finalizeErr error
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[CollectSingleFilm] 收尾刷新失败: %v", err)
-		finalizeErr = err
 	}
-
-	notifyResults := make([]model.SourceNotifyResult, 0, len(results))
-	for _, r := range results {
-		status := progress.StatusDone
-		errMsg := ""
-		if r.err != nil {
-			status = progress.StatusFailed
-			errMsg = r.err.Error()
-		} else if finalizeErr != nil {
-			status = progress.StatusFailed
-			errMsg = finalizeErr.Error()
-		}
-		notifyResults = append(notifyResults, notify.BuildSourceResultDirect(r.source, status, errMsg))
-	}
-	if len(notifyResults) == 0 {
-		notifyResults = append(notifyResults, model.SourceNotifyResult{
-			SourceName: "单片更新",
-			Status:     progress.StatusFailed,
-			Error:      fmt.Sprintf("影片 #%d 未匹配到任何启用站点的 source_mid", globalMid),
-			FailedCnt:  1,
-		})
-	}
-	emitBatchSummaryDirect(batch, model.NotifyTriggerSingleUpdate, notifyResults, startedAt, finalizeErr)
 }
 
 func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
@@ -218,7 +188,6 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	}
 	if batchCtx != nil {
-		noteCollectedMIDs(batchCtx.batch, s.Id, s.Name, written.Notify)
 		batchCtx.addAffectedMIDs(s, fr.Hour, written.Affected)
 	}
 	repository.DeleteFailureRecord(fr)
@@ -255,18 +224,10 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 		return
 	}
 	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
-	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "失败恢复", claimed, batch, startedAt, true)
+	batchCtx := newCollectBatchContext(model.CollectTriggerRecover, "失败恢复", claimed, startedAt, true)
 	if err := collectLifecycle.beginSource(s.Id); err != nil {
 		syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", s.Id, err)
 		batchCtx.close()
-		if notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) {
-			emitBatchSummaryDirect(batch, model.NotifyTriggerRecover, []model.SourceNotifyResult{
-				notify.BuildSourceResultDirect(*s, progress.StatusFailed, err.Error()),
-			}, startedAt, err)
-		} else {
-			emitSourceFailedNotify(s.Id, s.Name, err.Error())
-		}
 		return
 	}
 	defer collectLifecycle.endSource(s.Id)
@@ -277,7 +238,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 	if finalizeErr != nil {
 		syslog.Errorf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v", s.Id, finalizeErr)
 	}
-	batchCtx.emitSummary(finalizeErr)
+	batchCtx.close()
 }
 
 func FullRecoverSpider() {
@@ -299,7 +260,6 @@ func FullRecoverSpider() {
 	sem := make(chan struct{}, limit)
 	var wg sync.WaitGroup
 	startedAt := time.Now()
-	batch := notify.StartChangeBatch()
 	for i := range list {
 		fr := list[i]
 		s := repository.FindCollectSourceById(fr.OriginId)
@@ -327,7 +287,7 @@ func FullRecoverSpider() {
 	for _, source := range sourcesToFlush {
 		claimed[source.Id] = struct{}{}
 	}
-	batchCtx := newCollectBatchContext(model.NotifyTriggerRecover, "FullRecoverSpider", sourcesToFlush, batch, startedAt)
+	batchCtx := newCollectBatchContext(model.CollectTriggerRecover, "FullRecoverSpider", sourcesToFlush, startedAt)
 	for sourceID, records := range recordsBySource {
 		src, ok := sourceByID[sourceID]
 		if !ok {
@@ -355,12 +315,10 @@ func FullRecoverSpider() {
 		}(src, recordsCopy)
 	}
 	wg.Wait()
-	var finalizeErr error
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[FullRecoverSpider] 收尾刷新失败: %v", err)
-		finalizeErr = err
 	}
-	batchCtx.emitSummary(finalizeErr)
+	batchCtx.close()
 }
 
 func ClearSpider() error {

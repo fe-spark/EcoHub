@@ -55,12 +55,10 @@ func pruneStale() {
 		if isActiveStatus(status) {
 			_, live := tasks.Load(id)
 			if shouldMarkStale(id, status, live, age, staleAfter) {
-				name := state.data.Name
 				state.data.Status = StatusFailed
 				state.updated = now
 				state.mu.Unlock()
 				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, status, age.Round(time.Second))
-				staleNotifier(id, name, status, age)
 				return true
 			}
 		}

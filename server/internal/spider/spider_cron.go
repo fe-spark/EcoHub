@@ -11,7 +11,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -237,44 +236,30 @@ func executeTask(ft model.FilmCollectTask) {
 func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
-	var runErr error
-	var doneDetail string
 	switch ft.Model {
 	case 0: // 自动更新已启用站点
-		AutoCollectTriggered(model.NotifyTriggerCron, ft.Time)
-		doneDetail = "自动更新已启用站点"
+		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
 		log.Println("执行一次自动更新任务")
 	case 1: // 更新指定资源站
 		if len(ft.Ids) == 0 {
-			runErr = fmt.Errorf("定时任务[%s]未配置资源站，跳过执行", ft.Id)
 			log.Printf("定时任务[%s]未配置资源站，跳过执行\n", ft.Id)
 			break
 		}
-		BatchCollectTriggered(model.NotifyTriggerCron, ft.Time, ft.Ids...)
+		BatchCollectTriggered(model.CollectTriggerCron, ft.Time, ft.Ids...)
 	case 2: // 失败采集记录重试
 		FullRecoverSpider()
-		doneDetail = "执行失败采集恢复"
 		log.Println("执行一次失败采集恢复任务")
-	case 3: // 片库冗余数据与孤儿清理（executeOrphanCleanTask 内部已发 done/failed 通知）
+	case 3: // 片库冗余数据与孤儿清理
 		executeOrphanCleanTask(ft)
 		return
-	case 4: // 系统运行日志清理（executeLogCleanTask 内部已发 done/failed 通知）
+	case 4: // 系统运行日志清理
 		executeLogCleanTask(ft)
 		return
-	case 5: // 首页轮播自动智能排片（executeBannerAutoTask 内部已发 done/failed 通知）
+	case 5: // 首页轮播自动智能排片
 		executeBannerAutoTask(ft)
 		return
 	default:
-		runErr = fmt.Errorf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
 		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
-	}
-
-	// 采集类定时任务（模型 0/1/2）补齐 cron_task_done/failed 事件；
-	// 采集源层面的成败仍由批次概要承载，此处只覆盖任务级成功与结构性失败。
-	if runErr != nil {
-		notify.PublishCronFailed(ft.Id, ft.Remark, runErr.Error())
-	} else {
-		notify.PublishCronDone(ft.Id, ft.Remark, doneDetail)
 	}
 
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
@@ -293,7 +278,6 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	if collectLifecycle.isBusy() {
 		detail := "采集正在入库，跳过本轮片库清理"
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
-		notify.PublishCronDone(ft.Id, remark, detail)
 		return
 	}
 
@@ -301,7 +285,6 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	var n int64
 	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
 		syslog.Errorf("[CleanOrphan] 孤儿播放列表清理失败: %v", res.Error)
-		notify.PublishCronFailed(ft.Id, remark, res.Error.Error())
 		return
 	} else {
 		n = res.RowsAffected
@@ -314,7 +297,6 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	if collectLifecycle.isBusy() {
 		detail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d；采集发布正忙，片库幽灵清理留待下轮", n, k)
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
-		notify.PublishCronDone(ft.Id, remark, detail)
 		return
 	}
 
@@ -334,25 +316,18 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	}()
 	if err != nil {
 		syslog.Errorf("[CleanOrphan] 数据清理后刷新读模型失败: %v", err)
-		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
 
 	cleanDetail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d、无线路幽灵 %d、空记录 %d", n, k, p, m)
 	log.Printf("[CleanOrphan] 片库冗余数据与孤儿清理完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
-	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
 	n, err := syslog.PruneExpiredLogs(7 * 24 * time.Hour)
-	remark := ft.Remark
-	if strings.TrimSpace(remark) == "" {
-		remark = "自动清理过期运行日志"
-	}
 	if err != nil {
 		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
-		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
 
@@ -360,7 +335,6 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 
 	cleanDetail := fmt.Sprintf("清理过期日志文件 %d 个、修剪失败流水 %d 条", n, prunedRecords)
 	log.Printf("[LogClean] 清理过期运行日志完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
-	notify.PublishCronDone(ft.Id, remark, cleanDetail)
 }
 
 func executeBannerAutoTask(ft model.FilmCollectTask) {
@@ -369,27 +343,18 @@ func executeBannerAutoTask(ft model.FilmCollectTask) {
 	fn := bannerAutoExecutor
 	bannerAutoExecutorMu.RUnlock()
 
-	remark := ft.Remark
-	if strings.TrimSpace(remark) == "" {
-		remark = "首页轮播自动智能排片"
-	}
-
 	if fn == nil {
 		err := errors.New("轮播排片执行器未初始化")
 		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
-		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
 
 	if err := fn(); err != nil {
 		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
-		notify.PublishCronFailed(ft.Id, remark, err.Error())
 		return
 	}
 
-	detail := "首页轮播智能排片完成"
 	log.Printf("[BannerAuto] 定时排片执行完成: cost=%s", time.Since(startedAt))
-	notify.PublishCronDone(ft.Id, remark, detail)
 }
 
 // RunTaskOnce 立即手动执行一次任务

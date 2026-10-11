@@ -14,7 +14,6 @@ import (
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	"server/internal/notify"
 	"server/internal/router"
 	"server/internal/service"
 	"server/internal/spider"
@@ -96,7 +95,6 @@ func start() {
 
 	service.InitSvc.DefaultDataInit()
 	access.StartCollector()
-	notify.EnsureBotPoller()
 
 	r := router.SetupRouter()
 	srv := &http.Server{
@@ -125,9 +123,6 @@ func start() {
 
 	// 2. 快速停止采集任务（非阻塞通知协程退出）
 	spider.StopAllTasks()
-
-	// 3. 停止 Telegram Bot 轮询
-	notify.StopBotPoller()
 
 	log.Printf("[Shutdown] 退出完成")
 }

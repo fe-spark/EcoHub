@@ -37,7 +37,7 @@ Before going live, change at least `JWT_SECRET` and MySQL/Redis passwords.
 openssl rand -hex 32
 ```
 
-Optional: `TG_PROXY`, `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `COLLECT_PROFILE` (`auto|light|standard|high`), `ACCESS_ANALYTICS_ENABLED`. See [Environment Variables](#environment-variables).
+Optional: `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `COLLECT_PROFILE` (`auto|light|standard|high`), `ACCESS_ANALYTICS_ENABLED`. See [Environment Variables](#environment-variables).
 
 ---
 
@@ -161,7 +161,6 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
-      TG_PROXY: ${TG_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
@@ -349,7 +348,6 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `TG_PROXY` | No | Empty | Dedicated proxy for Telegram Bot (supports `http://`, `socks5://`, `socks5h://`, e.g., `http://host.docker.internal:7890`). Takes precedence over global proxies. |
 | `HTTPS_PROXY` | No | Empty | Container global HTTPS outbound proxy (for scraping external sources, fetching metadata, etc., avoiding timeouts). |
 | `HTTP_PROXY` | No | Empty | Container global HTTP outbound proxy. |
 | `ALL_PROXY` | No | Empty | Container global outbound proxy (typically for SOCKS protocols). |
@@ -394,8 +392,6 @@ Data is in the install directory `data/` (Method 3 defaults to `~/ecohub/data`).
 - Methods 1 / 2 restart loop: check `.env` passwords, `JWT_SECRET`, port conflicts, `docker pull ghcr.io/fe-spark/ecohub:latest`
 - Method 3 restart loop: `docker logs Eco-hub`; use `docker inspect Eco-hub` for env and ports
 - Site opens, APIs fail: reverse proxy should target Web only; do not set `API_URL` on the release image
-- Telegram never sends: Methods 1 / 2 set `TG_PROXY` in `.env`; Method 3 add `-e TG_PROXY=...` to `docker run`; Token is configured in admin
-
 More: [README-FAQ_EN.md](./README-FAQ_EN.md)
 
 ---

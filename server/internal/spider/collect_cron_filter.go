@@ -17,7 +17,7 @@ const (
 )
 
 func collectDispatchDelay(batchCtx *collectBatchContext) time.Duration {
-	if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron {
+	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
 		span := cronDispatchJitterMax - cronDispatchJitterMin + 1
 		return time.Duration(cronDispatchJitterMin+rand.Intn(span)) * time.Second
 	}
@@ -34,7 +34,7 @@ func backupCollectInterval(sourceID string) time.Duration {
 }
 
 func AutoCollect(h int) {
-	AutoCollectTriggered(model.NotifyTriggerManual, h)
+	AutoCollectTriggered(model.CollectTriggerManual, h)
 }
 
 func AutoCollectTriggered(trigger string, h int) {
@@ -44,9 +44,9 @@ func AutoCollectTriggered(trigger string, h int) {
 		return
 	}
 	if trigger == "" {
-		trigger = model.NotifyTriggerManual
+		trigger = model.CollectTriggerManual
 	}
-	if trigger == model.NotifyTriggerCron {
+	if trigger == model.CollectTriggerCron {
 		enabled = filterCronIncrementalSources(enabled)
 		if len(enabled) == 0 {
 			log.Println("[Spider] 自动采集：错峰过滤后无待采集站点")

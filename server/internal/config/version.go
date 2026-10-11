@@ -4,5 +4,5 @@ package config
 // 与 web/package.json / git tag 对齐（如 2.6.0）。
 var Version = "2.7.9"
 
-// ProjectURL 开源仓库地址，Telegram 欢迎 / 帮助文案中的项目地址跳转。
+// ProjectURL 开源仓库地址。
 const ProjectURL = "https://github.com/fe-spark/EcoHub"

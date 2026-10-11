@@ -20,7 +20,6 @@ const (
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
 	TableFileInfo           = "files"
-	TableNotifyConfig       = "notify_config"
 	TableAccessDailyStats   = "access_daily_stats"
 	TableAccessDailyTop     = "access_daily_top"
 	TableFailureRecord      = "failure_records"
@@ -58,7 +57,6 @@ var AllModels = []any{
 	&MappingRule{},
 	&CategoryMapping{},
 	&SourceCategory{},
-	&NotifyConfigRecord{},
 	&AccessDailyStats{},
 	&AccessDailyTop{},
 	&FailureRecord{},

@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -10,7 +9,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
@@ -120,16 +118,9 @@ func (s *CollectService) GetAllFilmSources() []model.FilmSource {
 	return repository.GetCollectSourceList()
 }
 
-// UpdateFilmSource 编辑采集源配置（单源），发生变更时发送 source_config_changed 通知。
+// UpdateFilmSource 编辑采集源配置（单源）。
 // 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
-	return s.updateFilmSource(source, nil)
-}
-
-// updateFilmSource 编辑采集源配置核心逻辑。
-// collector 非 nil 时（批量操作）不直接发送通知，而是把各源变更追加到收集器，
-// 由调用方统一发送聚合通知，避免批量操作逐源轰炸。
-func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]notify.SourceConfigChangeItem) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -190,71 +181,10 @@ func (s *CollectService) updateFilmSource(source model.FilmSource, collector *[]
 
 	clearProvideNetworkConfigCache()
 	filmsnapshot.ClearDynamicPlayCaches()
-	if changes := sourceChangeLabels(*old, source); len(changes) > 0 {
-		notifySourceConfigChanged(source.Name, source.Id, changes, collector)
-	}
 	return nil
 }
 
-// notifySourceConfigChanged 单条源配置变更通知：批量收集器非空时累积到收集器，否则立即发送。
-func notifySourceConfigChanged(sourceName, sourceID string, changes []string, collector *[]notify.SourceConfigChangeItem) {
-	if collector != nil {
-		*collector = append(*collector, notify.SourceConfigChangeItem{
-			SourceName: sourceName,
-			SourceID:   sourceID,
-			Changes:    changes,
-		})
-		return
-	}
-	notify.PublishSourceConfigChanged(sourceName, sourceID, changes)
-}
-
-// sourceChangeLabels 对比 old→next 生成源配置变更描述；无差异时返回 nil。
-func sourceChangeLabels(old, next model.FilmSource) []string {
-	var changes []string
-	if old.State != next.State {
-		changes = append(changes, fmt.Sprintf("启用状态: %s → %s", sourceStateLabel(old.State), sourceStateLabel(next.State)))
-	}
-	if old.ResolveFormat() != next.ResolveFormat() {
-		changes = append(changes, fmt.Sprintf("接口格式: %s → %s", strings.ToUpper(old.ResolveFormat()), strings.ToUpper(next.ResolveFormat())))
-	}
-	if old.Uri != next.Uri {
-		changes = append(changes, "接口地址已变更")
-	}
-	if old.Name != next.Name {
-		changes = append(changes, fmt.Sprintf("站点名称: %s → %s", old.Name, next.Name))
-	}
-	if old.Interval != next.Interval {
-		changes = append(changes, fmt.Sprintf("请求间隔: %dms → %dms", old.Interval, next.Interval))
-	}
-	if old.Cd != next.Cd {
-		changes = append(changes, fmt.Sprintf("采集时长: %d小时 → %d小时", old.Cd, next.Cd))
-	}
-	if old.IsPosterSource != next.IsPosterSource {
-		if next.IsPosterSource {
-			changes = append(changes, "海报图源: 设为优先海报图源")
-		} else {
-			changes = append(changes, "海报图源: 取消优先海报图源")
-		}
-	}
-	if old.DomainReplaceRules != next.DomainReplaceRules {
-		changes = append(changes, "播放链接域名替换规则已更新")
-	}
-	if old.ProxyCollect != next.ProxyCollect {
-		changes = append(changes, fmt.Sprintf("采集接口代理: %s → %s", sourceStateLabel(old.ProxyCollect), sourceStateLabel(next.ProxyCollect)))
-	}
-	return changes
-}
-
-func sourceStateLabel(on bool) string {
-	if on {
-		return "已启用"
-	}
-	return "已停用"
-}
-
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
-	var collector []notify.SourceConfigChangeItem
 	var firstErr error
 	for _, id := range ids {
 		source := repository.FindCollectSourceById(id)
@@ -267,13 +197,10 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 		}
 		next := *source
 		next.State = state
-		if err := s.updateFilmSource(next, &collector); err != nil {
+		if err := s.UpdateFilmSource(next); err != nil {
 			firstErr = err
 			break
 		}
-	}
-	if len(collector) > 0 {
-		notify.PublishSourceConfigsChanged(collector)
 	}
 	return firstErr
 }
@@ -288,7 +215,6 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	spider.ClearLimiter(source.Id)
 	clearProvideNetworkConfigCache()
 	filmsnapshot.ClearDynamicPlayCaches()
-	notify.PublishSourceConfigChanged(source.Name, source.Id, []string{"新增采集源"})
 	return nil
 }
 
@@ -309,7 +235,6 @@ func (s *CollectService) DelFilmSource(id string) error {
 	clearProvideNetworkConfigCache()
 	filmsnapshot.ClearDynamicPlayCaches()
 	repository.MarkCategoryChanged()
-	notify.PublishSourceConfigChanged(src.Name, src.Id, []string{"删除采集源"})
 	return nil
 }
 

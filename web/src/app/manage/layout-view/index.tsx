@@ -101,7 +101,6 @@ const menuItems: MenuItem[] = [
     label: "服务集成",
     children: [
       { key: "/manage/system/tmdb", label: "TMDB 刮削" },
-      { key: "/manage/system/notify", label: "通知推送" },
     ],
   },
   {
@@ -128,7 +127,6 @@ function resolveMenuKey(pathname: string) {
   if (pathname.startsWith("/manage/cron")) return "/manage/cron";
   if (pathname.startsWith("/manage/system/proxy")) return "/manage/system/proxy";
   if (pathname.startsWith("/manage/system/tmdb")) return "/manage/system/tmdb";
-  if (pathname.startsWith("/manage/system/notify")) return "/manage/system/notify";
   if (pathname.startsWith("/manage/system/users")) return "/manage/system/users";
   if (pathname.startsWith("/manage/system/website")) return "/manage/system/website";
   if (pathname.startsWith("/manage/system/security")) return "/manage/system/security";

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/spider/progress"
 )
 
@@ -174,7 +173,6 @@ type collectBatchContext struct {
 	trigger            string
 	tag                string
 	sources            []model.FilmSource
-	batch              *notify.ChangeBatch
 	startedAt          time.Time
 	isStandalone       bool
 	masterAffectedMIDs map[int64]struct{}
@@ -182,12 +180,9 @@ type collectBatchContext struct {
 	occupyTokens       map[string]uint64
 }
 
-func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, batch *notify.ChangeBatch, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
+func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
 	if startedAt.IsZero() {
 		startedAt = time.Now()
-	}
-	if batch == nil {
-		batch = notify.StartChangeBatch()
 	}
 	standalone := false
 	if len(isStandalone) > 0 {
@@ -197,7 +192,6 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, bat
 		trigger:            trigger,
 		tag:                tag,
 		sources:            sources,
-		batch:              batch,
 		startedAt:          startedAt,
 		isStandalone:       standalone,
 		masterAffectedMIDs: make(map[int64]struct{}),
@@ -233,14 +227,6 @@ func (b *collectBatchContext) IsStandalone() bool {
 // AddAffectedMIDs 实现 fetcher.Batch：记录影响到的全局 mid。
 func (b *collectBatchContext) AddAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
 	b.addAffectedMIDs(s, h, mids)
-}
-
-// NoteCollectedMIDs 实现 fetcher.Batch：累计本源应进更新列表的 mid。
-func (b *collectBatchContext) NoteCollectedMIDs(sourceID, sourceName string, mids []int64) {
-	if b == nil {
-		return
-	}
-	noteCollectedMIDs(b.batch, sourceID, sourceName, mids)
 }
 
 func (b *collectBatchContext) dropOccupyToken(id string) {
@@ -332,12 +318,4 @@ func (b *collectBatchContext) close() {
 	b.occupyTokens = nil
 	b.mu.Unlock()
 	releaseCollectTokens(tokens)
-}
-
-func (b *collectBatchContext) emitSummary(finalizeErr error) {
-	if b == nil {
-		return
-	}
-	defer b.close()
-	emitBatchSummaryForSources(b.batch, b.trigger, b.sources, b.startedAt, finalizeErr)
 }

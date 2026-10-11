@@ -89,8 +89,8 @@ func TestCollectBatchContext_StreamEnqueueKeepsTagMIDsIsolated(t *testing.T) {
 
 	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
 	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
-	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
-	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)
+	batchA := newCollectBatchContext(model.CollectTriggerManual, "全量", []model.FilmSource{sourceA}, time.Now(), true)
+	batchB := newCollectBatchContext(model.CollectTriggerCron, "定时", []model.FilmSource{sourceB}, time.Now(), false)
 	defer unregisterActiveBatch(batchA)
 	defer unregisterActiveBatch(batchB)
 

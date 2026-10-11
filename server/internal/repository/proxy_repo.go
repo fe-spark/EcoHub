@@ -20,7 +20,6 @@ func DefaultProxyConfig() model.ProxyConfig {
 		Modules: model.ProxyModuleScope{
 			Spider:  true,
 			TMDB:    true,
-			Notify:  true,
 			Upgrade: true,
 		},
 	}
@@ -36,7 +35,6 @@ func applyMissingProxyModulesDefault(raw []byte, cfg *model.ProxyConfig) {
 		cfg.Modules = model.ProxyModuleScope{
 			Spider:  true,
 			TMDB:    true,
-			Notify:  true,
 			Upgrade: true,
 		}
 	}
@@ -151,15 +149,6 @@ func ResolveSourceProxy(sourceID string) (bool, string) {
 func ResolveTMDBProxy() (bool, string) {
 	cfg := GetProxyConfig()
 	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.TMDB {
-		return false, ""
-	}
-	return true, cfg.ProxyURL
-}
-
-// ResolveNotifyProxy 判断 Telegram 通知是否启用代理
-func ResolveNotifyProxy() (bool, string) {
-	cfg := GetProxyConfig()
-	if !cfg.Enabled || cfg.ProxyURL == "" || !cfg.Modules.Notify {
 		return false, ""
 	}
 	return true, cfg.ProxyURL

@@ -126,31 +126,6 @@ go run ./cmd/server
 - 非法值会打日志并回退自动选档
 - 写阀、分页 worker、源站并发等由档位内置表决定，**无需**再配其它采集并发环境变量
 
-### Telegram 与代理（可选）
-
-Bot Token / Chat ID / 路由策略在**管理后台**配置，不通过环境变量。进程环境仅控制出网代理（发送时读取，优先级从上到下）：
-
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `TG_PROXY` | 否 | Telegram **专用**代理，优先于通用代理；支持 `http://` / `https://` / `socks5://` / `socks5h://` |
-| `HTTPS_PROXY` / `https_proxy` | 否 | 通用 HTTPS 代理（Telegram 次选） |
-| `HTTP_PROXY` / `http_proxy` | 否 | 通用 HTTP 代理 |
-| `ALL_PROXY` / `all_proxy` | 否 | 全局代理兜底 |
-
-示例：
-
-```env
-# 本机 Clash / V2Ray
-TG_PROXY=http://127.0.0.1:7890
-# 或
-TG_PROXY=socks5://127.0.0.1:7891
-
-# Docker 内访问宿主机代理（发布版 / 源码版 compose 已配 host.docker.internal）
-# TG_PROXY=http://host.docker.internal:7890
-```
-
-国内直连 `api.telegram.org` 常超时，建议至少配置 `TG_PROXY`。`HTTPS_PROXY` 等也会影响其它依赖系统代理的出站（若业务侧使用）；Telegram 客户端明确按上表解析。
-
 ### 数据分析（可选）
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -172,7 +147,7 @@ TG_PROXY=socks5://127.0.0.1:7891
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `TG_PROXY` / `COLLECT_PROFILE` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `COLLECT_PROFILE` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 
@@ -362,4 +337,3 @@ GOCACHE=/tmp/ecohub-go-cache go test ./...
 - [部署指南](../docs/README-Deploy.md)
 - [FAQ 与排障](../docs/README-FAQ.md)
 - [版本变更](../docs/RELEASE.md)
-- [Telegram 通知行为](./docs/notify.md)

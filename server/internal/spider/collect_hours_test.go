@@ -9,13 +9,13 @@ import (
 )
 
 func TestShouldCatchUpCollectHoursOnlyCronIncremental(t *testing.T) {
-	if !shouldCatchUpCollectHours(model.NotifyTriggerCron, 3) {
+	if !shouldCatchUpCollectHours(model.CollectTriggerCron, 3) {
 		t.Fatal("定时增量应补窗")
 	}
-	if shouldCatchUpCollectHours(model.NotifyTriggerManual, 3) {
+	if shouldCatchUpCollectHours(model.CollectTriggerManual, 3) {
 		t.Fatal("手动采集不应补窗")
 	}
-	if shouldCatchUpCollectHours(model.NotifyTriggerCron, -1) {
+	if shouldCatchUpCollectHours(model.CollectTriggerCron, -1) {
 		t.Fatal("全量不应补窗")
 	}
 	if shouldCatchUpCollectHours("", 24) {

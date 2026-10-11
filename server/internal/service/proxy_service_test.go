@@ -50,9 +50,6 @@ func TestResolveModuleProxies(t *testing.T) {
 	if ok, _ := repository.ResolveTMDBProxy(); ok {
 		t.Errorf("expected false when disabled")
 	}
-	if ok, _ := repository.ResolveNotifyProxy(); ok {
-		t.Errorf("expected false when disabled")
-	}
 	if ok, _ := repository.ResolveUpgradeProxy(); ok {
 		t.Errorf("expected false when disabled")
 	}
