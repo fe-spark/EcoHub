@@ -95,28 +95,18 @@ func sourceTypeKeysForProbe(sourceID, field string, categoryID int64) []string {
 	return keys
 }
 
-// sourceTypeProbeBranches 按当前站 type_id 点查。
-// 一级分类要同时走 root_category_key 和 category_key。合并后的分类每个成员各查一次。
-func sourceTypeProbeBranches(field, orderKind string, sourceKeys []string) []probeBranch {
-	rootIndex := probeIndexRootUpdate
+// sourceTypeProbeBranches 按当前站分类树展开后的 type_id 点查 category_key。
+func sourceTypeProbeBranches(_, orderKind string, sourceKeys []string) []probeBranch {
 	catIndex := probeIndexCatUpdate
 	if orderKind == "hits" {
-		rootIndex = probeIndexRootHits
 		catIndex = probeIndexCatHits
 	}
-	branches := make([]probeBranch, 0, len(sourceKeys)*2)
+	branches := make([]probeBranch, 0, len(sourceKeys))
 	for _, sourceKey := range sourceKeys {
 		if sourceKey == "" {
 			continue
 		}
-		if field == "cid" {
-			branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: catIndex})
-			continue
-		}
-		branches = append(branches,
-			probeBranch{column: "root_category_key", value: sourceKey, index: rootIndex},
-			probeBranch{column: "category_key", value: sourceKey, index: catIndex},
-		)
+		branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: catIndex})
 	}
 	return branches
 }

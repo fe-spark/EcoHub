@@ -28,8 +28,8 @@ func TestApplyCategorySearchFilter_SourceScoped(t *testing.T) {
 		return q.Find(&rows)
 	})
 
-	if !strings.Contains(sqlPid, "root_category_key") || !strings.Contains(sqlPid, "category_key") {
-		t.Fatalf("source-scoped pid search must match source category keys, got: %s", sqlPid)
+	if strings.Contains(sqlPid, "root_category_key") || !strings.Contains(sqlPid, "category_key") {
+		t.Fatalf("source-scoped pid search must match category_key without root_category_key pollution, got: %s", sqlPid)
 	}
 	if strings.Contains(sqlPid, "pid =") {
 		t.Fatalf("source-scoped pid search must not match local pid column, got: %s", sqlPid)

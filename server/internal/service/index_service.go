@@ -83,9 +83,9 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 	ruleVersion := repository.GetRuleVersion()
 	var cacheKey string
 	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s:s%s:r%s:ck", repository.GetVersionedIndexPageCacheKey(), sourceId, version, ruleVersion)
+		cacheKey = fmt.Sprintf("%s:src_%s:s%s:r%s:ck3", repository.GetVersionedIndexPageCacheKey(), sourceId, version, ruleVersion)
 	} else {
-		cacheKey = fmt.Sprintf("%s:s%s:r%s:ck", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
+		cacheKey = fmt.Sprintf("%s:s%s:r%s:ck3", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
 	}
 
 	// 1. 尝试从 Redis 获取缓存
@@ -130,7 +130,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 				}()
 				var movies []model.MovieBasicInfo
 				var hotMovies []model.MovieBasicInfo
-				if cat.Children != nil {
+				if len(cat.Children) > 0 {
 					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
 					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
 				} else {

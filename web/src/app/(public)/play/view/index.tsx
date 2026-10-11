@@ -59,8 +59,11 @@ export default function PlayPageView({
   const sourceMenuRef = useRef<HTMLDivElement>(null);
 
   const currentFilm = data?.detail;
+  const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
+  const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
 
   const reportedPlaybackKeys = useRef<Set<string>>(new Set());
+  const failedSourcesRef = useRef<Set<string>>(new Set());
 
   const applyPlaybackSelection = useCallback(
     (nextSourceId: string, episodeIndex: number, currentPlay: any, nextInitialTime = 0) => {
@@ -74,6 +77,7 @@ export default function PlayPageView({
   );
 
   const handlePlayStart = useCallback(() => {
+    setPlayerError(false);
     if (!currentFilm || !playingSourceId) return;
     const epIdx = current?.index ?? 0;
     const key = `${filmId}:${playingSourceId}:${epIdx}`;
@@ -92,8 +96,64 @@ export default function PlayPageView({
     });
   }, [currentFilm, playingSourceId, filmId, current]);
 
-  const viewingSource = currentFilm?.list?.find((item: any) => item.id === viewingSourceId);
-  const playingSource = currentFilm?.list?.find((item: any) => item.id === playingSourceId);
+  const handlePlayerError = useCallback(
+    (err?: any) => {
+      console.warn("Playback error encountered on source:", playingSourceId, err);
+      if (!playingSourceId || !currentFilm?.list || currentFilm.list.length === 0) {
+        setPlayerError(true);
+        message.error("该视频源加载失败，请尝试重新加载。");
+        return;
+      }
+
+      failedSourcesRef.current.add(playingSourceId);
+
+      // 寻找下一个未失败且包含播放地址的备用线路
+      const nextSource = currentFilm.list.find(
+        (item: any) =>
+          item.id !== playingSourceId &&
+          !failedSourcesRef.current.has(item.id) &&
+          Array.isArray(item.linkList) &&
+          item.linkList.length > 0,
+      );
+
+      if (nextSource) {
+        const targetEpisodeIndex =
+          current?.index !== undefined &&
+          current.index >= 0 &&
+          current.index < nextSource.linkList.length
+            ? current.index
+            : 0;
+        const targetPlay = nextSource.linkList[targetEpisodeIndex];
+        if (targetPlay) {
+          message.warning(
+            `播放源【${playingSource?.name || "当前源"}】连接失败，正在自动切换至【${nextSource.name}】...`,
+          );
+          applyPlaybackSelection(nextSource.id, targetEpisodeIndex, targetPlay, playInitialTime);
+          router.replace(
+            buildPlayPath(String(filmId), nextSource.id, targetEpisodeIndex),
+            { scroll: false },
+          );
+          return;
+        }
+      }
+
+      // 所有播放源均失败，展示播放器错误视图
+      setPlayerError(true);
+      message.error("该视频源加载失败，暂无其他可用播放源。");
+    },
+    [
+      playingSourceId,
+      currentFilm,
+      current,
+      playInitialTime,
+      playingSource,
+      applyPlaybackSelection,
+      router,
+      filmId,
+      message,
+    ],
+  );
+
   const currentEpisodeKey =
     current && playingSourceId ? makeEpisodeKey(playingSourceId, current.index) : "";
   const visibleActiveEpisodeKey =
@@ -294,17 +354,14 @@ export default function PlayPageView({
           <div className={`${styles.playerWrapper} ${playerError ? styles.isPlayerError : ""}`}>
             {current?.link && (
               <VideoPlayer
-                key={current.link}
+                key={`${playingSourceId}-${current.index}-${current.link}`}
                 src={current.link}
                 initialTime={playInitialTime}
                 autoplay={autoplay}
                 onEnded={() => autoplay && handlePlayNext()}
                 onTimeUpdate={handleTimeUpdate}
                 onPlayStart={handlePlayStart}
-                onError={() => {
-                  setPlayerError(true);
-                  message.error("该视频源加载失败，请尝试切换播放源。");
-                }}
+                onError={handlePlayerError}
               />
             )}
           </div>
@@ -410,6 +467,7 @@ export default function PlayPageView({
                     onClick={() => {
                       if (currentEpisodeKey === episodeKey) return;
 
+                      failedSourcesRef.current.delete(viewingSourceId);
                       applyPlaybackSelection(viewingSourceId, index, item);
                       router.replace(buildPlayPath(String(filmId), viewingSourceId, index), {
                         scroll: false,

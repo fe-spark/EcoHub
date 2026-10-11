@@ -11,6 +11,7 @@ async function getPlayData(filmId: string, sourceId?: string, episodeIdx?: strin
     id: filmId,
     source: sourceId,
     playFrom: sourceId,
+    preferredSource: sourceId,
     episode: episodeIdx || 0,
   });
 

@@ -236,6 +236,7 @@ export default function FilmListPageView() {
     handleDelFilm,
     handleScrapeFilm,
     tmdbEnabled,
+    activeSourceId: params.sourceId,
   });
 
   const categoryTreeData = useMemo(() => {

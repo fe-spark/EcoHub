@@ -176,7 +176,7 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]
 	if key == "" {
 		return emptyFilterOptionResponse()
 	}
-	cacheKey := fmt.Sprintf("%s:stvis:src_%s:v%s:r%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), typeID)
+	cacheKey := fmt.Sprintf("%s:ck3:src_%s:v%s:r%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), typeID)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
@@ -211,7 +211,7 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]
 	var films []filmFilterRow
 	_ = db.Mdb.Model(&model.FilmIndex{}).
 		Select("class_tag, area, language, year").
-		Where("root_category_key IN ? OR category_key IN ?", filterKeys, filterKeys).
+		Where("category_key IN ?", filterKeys).
 		Find(&films).Error
 
 	counts := map[string]map[string]int{
