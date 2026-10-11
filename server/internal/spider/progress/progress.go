@@ -10,18 +10,6 @@ import (
 	"server/internal/repository"
 )
 
-// staleNotifier 由采集编排层注入，用于在进度超时被判定失败时广播通知。
-// 未注入时仅落日志，不影响状态机行为。
-var staleNotifier = func(sourceID, sourceName, oldStatus string, age time.Duration) {}
-
-// SetStaleNotifier 注册进度超时通知回调。
-func SetStaleNotifier(fn func(sourceID, sourceName, oldStatus string, age time.Duration)) {
-	if fn == nil {
-		return
-	}
-	staleNotifier = fn
-}
-
 // occupyChecker 由编排层注入：排队占用中的 starting 不是僵尸。
 var occupyChecker func(string) bool
 
@@ -210,13 +198,11 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	}
 	if shouldMarkStale(sourceID, state.data.Status, live, age, staleAfter) {
 		old := state.data.Status
-		name := state.data.Name
 		state.data.Status = StatusFailed
 		state.updated = now
 		state.mu.Unlock()
 		log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed",
 			sourceID, old, age.Round(time.Second))
-		staleNotifier(sourceID, name, old, age)
 		return false
 	}
 	state.mu.Unlock()
@@ -345,13 +331,11 @@ func GetActiveTaskProgress() []model.CollectProgress {
 			_, live := tasks.Load(id)
 			if shouldMarkStale(id, progress.Status, live, age, staleAfter) {
 				old := progress.Status
-				name := progress.Name
 				progress.Status = StatusFailed
 				state.data.Status = StatusFailed
 				state.updated = now
 				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, old, age.Round(time.Second))
 				state.mu.Unlock()
-				staleNotifier(id, name, old, age)
 				list = append(list, progress)
 				return true
 			}

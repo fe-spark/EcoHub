@@ -1,12 +1,9 @@
 package service
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"server/internal/infra/db"
-	"server/internal/notify"
 	"server/internal/repository"
 	"server/internal/spider"
 )
@@ -45,11 +42,6 @@ func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
 }
 
 func TestService_RedisNilSafety(t *testing.T) {
-	// 等待前序并发测试可能派生的异步通知协程消费完毕，避免对全局 db.Rdb 产生数据竞态
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer drainCancel()
-	_ = notify.WaitPendingPublishes(drainCtx)
-
 	origRdb := db.Rdb
 	db.Rdb = nil
 	defer func() {

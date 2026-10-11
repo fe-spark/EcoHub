@@ -18,6 +18,14 @@ const (
 	TaskModelBannerAuto    = 5 // 首页轮播自动智能排片
 )
 
+// 采集触发方式常量。
+const (
+	CollectTriggerManual       = "manual"
+	CollectTriggerCron         = "cron"
+	CollectTriggerSingleUpdate = "single_update"
+	CollectTriggerRecover      = "recover"
+)
+
 const (
 	TaskIDBannerAuto = "sys_cron_banner_auto"
 )

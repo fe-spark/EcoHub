@@ -37,7 +37,7 @@
 openssl rand -hex 32
 ```
 
-可选：`TG_PROXY`、`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
+可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -161,7 +161,6 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
-      TG_PROXY: ${TG_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
@@ -349,7 +348,6 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
-| `TG_PROXY` | 否 | 空 | Telegram Bot 出网专用代理（支持 `http://`、`socks5://`、`socks5h://`，如 `http://host.docker.internal:7890`）。优先级高于通用出网代理。 |
 | `HTTPS_PROXY` | 否 | 空 | 容器全局 HTTPS 出网代理（用于采集外部源、解析影片元数据等，防止直连外部站点超时）。 |
 | `HTTP_PROXY` | 否 | 空 | 容器全局 HTTP 出网代理。 |
 | `ALL_PROXY` | 否 | 空 | 容器全局出网代理（通常用于 SOCKS 协议代理）。 |
@@ -394,8 +392,6 @@ docker inspect Eco-hub --format '{{range .Config.Env}}{{println .}}{{end}}'
 - 方式 1 / 2 反复重启：查 `.env` 密码、`JWT_SECRET`、端口占用、`docker pull ghcr.io/fe-spark/ecohub:latest`
 - 方式 3 反复重启：`docker logs Eco-hub`，用 `docker inspect Eco-hub` 核对环境变量与端口
 - 前台开、接口挂：反代是否只指 Web、是否误配 `API_URL`
-- Telegram 发不出：方式 1 / 2 在 `.env` 配 `TG_PROXY`；方式 3 在 `docker run` 增加 `-e TG_PROXY=...`；Token 在后台配置  
-
 更多：[README-FAQ.md](./README-FAQ.md)
 
 ---

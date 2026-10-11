@@ -23,8 +23,6 @@ type Batch interface {
 	IsStandalone() bool
 	// AddAffectedMIDs 记录影响到的全局 mid，供本轮发布使用。
 	AddAffectedMIDs(s *model.FilmSource, h int, mids []int64)
-	// NoteCollectedMIDs 累计本源应进更新列表的 mid。
-	NoteCollectedMIDs(sourceID, sourceName string, mids []int64)
 }
 
 const (
@@ -165,7 +163,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		snapshot := recordPageFinished(page, true)
 		recordSuccess()
 		if batch != nil {
-			batch.NoteCollectedMIDs(s.Id, s.Name, notifyMIDs)
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
 		}
 		progress.Update(s.Id, func(cur *model.CollectProgress) {
@@ -260,7 +257,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 	if stopErr != nil {
 		skipPublish := deps.SkipPublishOnError(*s, h)
 		if shouldWrapUpAfterFetchAbort(stats.success, skipPublish) {
-			deps.NoteSourceError(s.Id, stopErr.Error())
 			return true, nil
 		}
 		progress.Update(s.Id, func(cur *model.CollectProgress) {
@@ -268,11 +264,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 				cur.Status = progress.StatusFailed
 			}
 		})
-		isStandalone := batch.IsStandalone()
-		if isStandalone || !deps.BatchSummaryEnabled() {
-			deps.NotifySourceFailed(s.Id, s.Name, stopErr.Error())
-		}
-		deps.NoteSourceError(s.Id, stopErr.Error())
 		return stats.success > 0, stopErr
 	}
 	if ctx.Err() != nil {

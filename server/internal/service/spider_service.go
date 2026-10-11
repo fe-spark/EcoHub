@@ -63,7 +63,7 @@ func (s *SpiderService) BatchCollect(time int, ids []string) error {
 	if err != nil {
 		return err
 	}
-	go spider.BatchCollectPrepared(model.NotifyTriggerManual, time, sources)
+	go spider.BatchCollectPrepared(model.CollectTriggerManual, time, sources)
 	return nil
 }
 

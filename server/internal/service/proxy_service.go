@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
@@ -60,8 +59,6 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) er
 		return err
 	}
 	filmsnapshot.ClearDynamicPlayCaches()
-	// 代理配置变更，通知客户端与轮询重载连接
-	notify.ReloadTelegramClient()
 	return nil
 }
 
@@ -119,10 +116,6 @@ func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
 
 func (s *ProxyService) ResolveTMDBProxy() (bool, string) {
 	return repository.ResolveTMDBProxy()
-}
-
-func (s *ProxyService) ResolveNotifyProxy() (bool, string) {
-	return repository.ResolveNotifyProxy()
 }
 
 func (s *ProxyService) ResolveUpgradeProxy() (bool, string) {

@@ -33,7 +33,6 @@ interface ConfigBackupModules {
   filmSources: boolean;
   cronTasks: boolean;
   banners: boolean;
-  notify: boolean;
   mappingRules: boolean;
   proxy: boolean;
   tmdb: boolean;
@@ -47,7 +46,6 @@ interface ConfigBackup {
   filmSources?: unknown[];
   cronTasks?: unknown[];
   banners?: unknown[];
-  notify?: unknown;
   mappingRules?: unknown[];
   proxy?: unknown;
   tmdb?: unknown;
@@ -58,7 +56,6 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "filmSources", label: "采集站" },
   { key: "cronTasks", label: "计划任务" },
   { key: "banners", label: "首页轮播" },
-  { key: "notify", label: "通知配置" },
   { key: "mappingRules", label: "映射规则" },
   { key: "proxy", label: "网络代理" },
   { key: "tmdb", label: "TMDB刮削" },
@@ -69,7 +66,6 @@ const ALL_MODULES: ConfigBackupModules = {
   filmSources: true,
   cronTasks: true,
   banners: true,
-  notify: true,
   mappingRules: true,
   proxy: true,
   tmdb: true,

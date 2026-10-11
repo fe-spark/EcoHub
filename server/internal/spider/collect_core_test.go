@@ -167,7 +167,7 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 	}
 	defer releaseCollectSources([]model.FilmSource{ik, wrap})
 
-	batch := newCollectBatchContext(model.NotifyTriggerManual, "Batch-Collect", claimed, nil, time.Now())
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
 	abortUnstartedCollect(ik.Id, batch)
 
 	if len(occupyCollectSources([]model.FilmSource{ik}, "Single-Collect")) != 1 {
@@ -219,7 +219,7 @@ func TestStandaloneCloseDoesNotLeaveOccupyForSecondRelease(t *testing.T) {
 	if len(occupyCollectSources([]model.FilmSource{source}, "first")) != 1 {
 		t.Fatal("first occupy failed")
 	}
-	batch := newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{source}, nil, time.Now(), true)
+	batch := newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{source}, time.Now(), true)
 	batch.close()
 	if isOccupiedCollectSource(source.Id) {
 		t.Fatal("close should release occupy")
@@ -306,8 +306,8 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	sourceA := model.FilmSource{Id: "source-a", Name: "Source A", Sort: 0}
 	sourceB := model.FilmSource{Id: "source-b", Name: "Source B", Sort: 1}
 
-	batchA := newCollectBatchContext(model.NotifyTriggerManual, "全量", []model.FilmSource{sourceA}, nil, time.Now(), true)
-	batchB := newCollectBatchContext(model.NotifyTriggerCron, "定时", []model.FilmSource{sourceB}, nil, time.Now(), false)
+	batchA := newCollectBatchContext(model.CollectTriggerManual, "全量", []model.FilmSource{sourceA}, time.Now(), true)
+	batchB := newCollectBatchContext(model.CollectTriggerCron, "定时", []model.FilmSource{sourceB}, time.Now(), false)
 
 	if !batchA.isStandalone {
 		t.Errorf("expected batch A isStandalone=true")

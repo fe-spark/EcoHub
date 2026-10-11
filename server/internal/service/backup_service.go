@@ -7,7 +7,6 @@ import (
 
 	"server/internal/config"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	"server/internal/spider"
 )
@@ -33,7 +32,6 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 	}
 
 	site := repository.GetSiteBasic()
-	notifyCfg := repository.GetNotifyConfig()
 	proxyCfg := repository.GetProxyConfig()
 	tmdbCfg := repository.GetTMDBConfig()
 
@@ -57,7 +55,6 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 		FilmSources:  sources,
 		CronTasks:    tasks,
 		Banners:      banners,
-		Notify:       &notifyCfg,
 		MappingRules: exports,
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
@@ -136,15 +133,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		}
 	}
 
-	if req.Modules.Notify {
-		if backup.Notify == nil {
-			return errors.New("备份中缺少通知配置数据")
-		}
-		if err := notify.SaveConfig(*backup.Notify); err != nil {
-			return fmt.Errorf("导入通知配置失败: %w", err)
-		}
-	}
-
 	if req.Modules.MappingRules {
 		exports := backup.MappingRules
 		if exports == nil {
@@ -162,7 +150,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
-		notify.ReloadTelegramClient()
 	}
 
 	if req.Modules.TMDB {

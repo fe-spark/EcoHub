@@ -43,12 +43,6 @@ type Deps struct {
 	SavePageFailure func(s *model.FilmSource, h, page int, stage string, err error)
 	// SkipPublishOnError 该站该采集窗口出错时是否跳过发布。
 	SkipPublishOnError func(s model.FilmSource, h int) bool
-	// NoteSourceError 记录单源失败原因，供批次摘要使用。
-	NoteSourceError func(sourceID, reason string)
-	// NotifySourceFailed 单源失败即时通知。
-	NotifySourceFailed func(sourceID, sourceName, reason string)
-	// BatchSummaryEnabled 批次摘要事件是否开启（决定失败是否单独通知）。
-	BatchSummaryEnabled func() bool
 	// ResolveSpiderProxy 获取全局爬虫通道代理配置（纯内存读取，避免逐页查库）。
 	ResolveSpiderProxy func() (bool, string)
 	// ResolveSourceProxy 查询站点是否启用代理并获取代理地址（兼容兜底）。

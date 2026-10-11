@@ -6,7 +6,6 @@ import "gorm.io/gorm"
 type ProxyModuleScope struct {
 	Spider  bool `json:"spider"`  // 采集站爬虫
 	TMDB    bool `json:"tmdb"`    // TMDB 刮削
-	Notify  bool `json:"notify"`  // Telegram 通知
 	Upgrade bool `json:"upgrade"` // GitHub 版本检查
 }
 

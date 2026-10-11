@@ -81,9 +81,7 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
-      REDIS_DB: ${REDIS_DB:-0}
-      # Telegram 专用代理（可选；通用代理 HTTPS_PROXY 等供采集等网络请求使用）
-      TG_PROXY: ${TG_PROXY:-}
+      # 通用代理供采集等网络请求使用（可选）
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}

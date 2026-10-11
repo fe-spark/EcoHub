@@ -17,11 +17,11 @@ func TestBackupCollectIntervalRange(t *testing.T) {
 }
 
 func TestCollectDispatchDelay(t *testing.T) {
-	manual := collectDispatchDelay(&collectBatchContext{trigger: model.NotifyTriggerManual})
+	manual := collectDispatchDelay(&collectBatchContext{trigger: model.CollectTriggerManual})
 	if manual != 200*time.Millisecond {
 		t.Fatalf("manual delay want 200ms, got %s", manual)
 	}
-	cron := collectDispatchDelay(&collectBatchContext{trigger: model.NotifyTriggerCron})
+	cron := collectDispatchDelay(&collectBatchContext{trigger: model.CollectTriggerCron})
 	if cron < 5*time.Second || cron > 15*time.Second {
 		t.Fatalf("cron jitter want 5-15s, got %s", cron)
 	}

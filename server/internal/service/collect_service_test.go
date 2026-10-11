@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/notify"
 	"server/internal/repository"
 
 	"gorm.io/driver/sqlite"
@@ -165,18 +163,6 @@ func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
 	srv := &CollectService{}
 	sUpdate := s
 	sUpdate.Name = "新名称"
-	labels := sourceChangeLabels(s, sUpdate)
-	foundNameLabel := false
-	for _, l := range labels {
-		if l == "站点名称: 测试源 → 新名称" {
-			foundNameLabel = true
-			break
-		}
-	}
-	if !foundNameLabel {
-		t.Fatalf("expected name change label, got: %v", labels)
-	}
-
 	if err := srv.UpdateFilmSource(sUpdate); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
@@ -188,10 +174,6 @@ func TestCollectService_UpdateFilmSource_NameChange(t *testing.T) {
 	if updated.Name != "新名称" {
 		t.Fatalf("expected name 新名称, got %s", updated.Name)
 	}
-
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer drainCancel()
-	_ = notify.WaitPendingPublishes(drainCtx)
 }
 
 func TestCollectService_FailureRecords(t *testing.T) {
@@ -342,18 +324,6 @@ func TestCollectService_UpdateFilmSource_FormatChange(t *testing.T) {
 	// 更新为 XML 格式
 	sUpdate := s
 	sUpdate.Format = model.SourceFormatXML
-	labels := sourceChangeLabels(s, sUpdate)
-	foundFormatLabel := false
-	for _, l := range labels {
-		if l == "接口格式: JSON → XML" {
-			foundFormatLabel = true
-			break
-		}
-	}
-	if !foundFormatLabel {
-		t.Fatalf("expected format change label '接口格式: JSON → XML', got: %v", labels)
-	}
-
 	if err := srv.UpdateFilmSource(sUpdate); err != nil {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}

@@ -14,7 +14,6 @@ import (
 	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/notify"
 	"server/internal/repository"
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
@@ -49,9 +48,8 @@ func requestForSource(s *model.FilmSource) utils.RequestInfo {
 // 每次执行一键终止都会递增版本号，旧版本调度器检测到版本变化后不再继续启动新站点任务。
 var stopAllVersion atomic.Uint64
 
-// init 把采集编排层的进度超时通知与取数能力注入子包（子包不反向依赖本包）。
+// init 把采集编排层的取数能力注入子包（子包不反向依赖本包）。
 func init() {
-	progress.SetStaleNotifier(emitProgressStaleNotify)
 	progress.SetOccupyChecker(isOccupiedCollectSource)
 	fetcher.Configure(fetcher.Deps{
 		GetPageCount: func(s *model.FilmSource, r utils.RequestInfo) (int, error) {
@@ -60,16 +58,13 @@ func init() {
 		GetFilmDetail: func(s *model.FilmSource, r utils.RequestInfo) ([]model.MovieDetail, error) {
 			return ResolveCollector(s.ResolveFormat()).GetFilmDetail(r)
 		},
-		WaitTurn:            waitSourceRequestTurn,
-		LiveTaskCount:       countLiveCollectTasks,
-		SavePage:            saveCollectedFilmForCollect,
-		SavePageFailure:     saveFilmPageFailure,
-		SkipPublishOnError:  shouldSkipCollectPublishOnError,
-		NoteSourceError:     noteSourceError,
-		NotifySourceFailed:  emitSourceFailedNotify,
-		BatchSummaryEnabled: func() bool { return notify.IsEventEnabled(model.NotifyEventCollectBatchSummary) },
-		ResolveSpiderProxy:  repository.ResolveSpiderProxy,
-		ResolveSourceProxy:  repository.ResolveSourceProxy,
+		WaitTurn:           waitSourceRequestTurn,
+		LiveTaskCount:      countLiveCollectTasks,
+		SavePage:           saveCollectedFilmForCollect,
+		SavePageFailure:    saveFilmPageFailure,
+		SkipPublishOnError: shouldSkipCollectPublishOnError,
+		ResolveSpiderProxy: repository.ResolveSpiderProxy,
+		ResolveSourceProxy: repository.ResolveSourceProxy,
 	})
 }
 
@@ -143,11 +138,10 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	}
 
 	sources = prioritizeCollectSources(sources)
-	batch := notify.StartChangeBatch()
 	startedAt := time.Now()
 	runVersion := stopAllVersion.Load()
 
-	batchCtx := newCollectBatchContext(trigger, tag, sources, batch, startedAt)
+	batchCtx := newCollectBatchContext(trigger, tag, sources, startedAt)
 	defer batchCtx.close()
 
 	sourceLimit := config.CollectSourceConcurrency
@@ -162,12 +156,9 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		tag, len(sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
 	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
-	var finalizeErr error
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集收尾刷新失败: %v", tag, err)
-		finalizeErr = err
 	}
-	batchCtx.emitSummary(finalizeErr)
 	triggerCollectDoneHooks()
 }
 
@@ -271,11 +262,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 	if isStandalone {
-		batchCtx = newCollectBatchContext(model.NotifyTriggerManual, "单站采集", []model.FilmSource{*s}, nil, time.Now(), true)
+		batchCtx = newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{*s}, time.Now(), true)
 	}
 	defer func() {
 		originalErr := retErr
-		if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron && statsOwned {
+		if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron && statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
 			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
 				repository.NoteCollectSourceStats(s.Id)
@@ -284,8 +275,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		progress.FlushHotpathSideEffects(s.Id)
 		if originalErr != nil && !hadWrites {
 			if isStandalone && batchCtx != nil {
-				noteSourceError(s.Id, originalErr.Error())
-				batchCtx.emitSummary(originalErr)
+				batchCtx.close()
 				releasedPreparedOccupy = true
 			}
 			return
@@ -298,7 +288,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			if originalErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
-			batchCtx.emitSummary(flushErr)
+			batchCtx.close()
 			releasedPreparedOccupy = true
 			return
 		}
@@ -327,7 +317,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		return err
 	}
 	collectCtx = ctx
-	if batchCtx != nil && batchCtx.trigger == model.NotifyTriggerCron {
+	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
 		repository.SuppressCollectSourceStats(s.Id)
 		statsOwned = true
 	}
@@ -340,9 +330,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 					return
 				}
 			})
-			if retErr != nil {
-				noteSourceError(id, retErr.Error())
-			}
 			log.Printf("[Spider] 站点 %s 任务结束\n", id)
 		}
 	}()
@@ -354,7 +341,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}
-	trigger := model.NotifyTriggerManual
+	trigger := model.CollectTriggerManual
 	if batchCtx != nil && batchCtx.trigger != "" {
 		trigger = batchCtx.trigger
 	}
@@ -455,13 +442,13 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 		return
 	}
 	if trigger == "" {
-		trigger = model.NotifyTriggerManual
+		trigger = model.CollectTriggerManual
 	}
 	runSourcesWithLimitCore(sources, h, "Batch-Collect", trigger)
 }
 
 func BatchCollect(h int, ids ...string) {
-	BatchCollectTriggered(model.NotifyTriggerManual, h, ids...)
+	BatchCollectTriggered(model.CollectTriggerManual, h, ids...)
 }
 
 func BatchCollectTriggered(trigger string, h int, ids ...string) {
@@ -476,7 +463,7 @@ func BatchCollectTriggered(trigger string, h int, ids ...string) {
 		return
 	}
 	if trigger == "" {
-		trigger = model.NotifyTriggerManual
+		trigger = model.CollectTriggerManual
 	}
 	runSourcesWithLimit(sources, h, "Batch-Collect", trigger)
 }

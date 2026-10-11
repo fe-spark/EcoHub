@@ -3,7 +3,6 @@
 import React, { Suspense, useCallback, useEffect } from "react";
 
 import {
-  BellOutlined,
   SafetyCertificateOutlined,
   FileTextOutlined,
   CompassOutlined,
@@ -11,14 +10,13 @@ import {
 } from "@ant-design/icons";
 import { useRouter, useSearchParams } from "next/navigation";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import NotifyConfigPageView from "@/app/manage/system/notify/view";
 import ProxyConfigPageView from "@/app/manage/system/proxy/view";
 import DataSecurityPageView from "@/app/manage/system/security/view";
 import SystemLogsPageView from "@/app/manage/system/logs/view";
 import TMDBConfigPageView from "@/app/manage/system/tmdb/view";
 import styles from "./index.module.less";
 
-type MainTab = "notify" | "proxy" | "tmdb" | "security" | "logs";
+type MainTab = "proxy" | "tmdb" | "security" | "logs";
 
 interface TabGroup {
   name: string;
@@ -29,7 +27,6 @@ const TAB_GROUPS: TabGroup[] = [
   {
     name: "服务集成",
     tabs: [
-      { key: "notify", label: "通知配置", icon: <BellOutlined /> },
       { key: "tmdb", label: "刮削配置", icon: <CompassOutlined /> },
     ],
   },
@@ -44,11 +41,10 @@ const TAB_GROUPS: TabGroup[] = [
 ];
 
 function normalizeMainTab(raw: string | null): MainTab {
-  if (raw === "proxy") return "proxy";
   if (raw === "tmdb") return "tmdb";
   if (raw === "security") return "security";
   if (raw === "logs") return "logs";
-  return "notify";
+  return "proxy";
 }
 
 function SystemSettingsBody() {
@@ -96,11 +92,11 @@ function SystemSettingsBody() {
         );
       case "logs":
         return <SystemLogsPageView embedded />;
-      case "notify":
+      case "proxy":
       default:
         return (
           <div className={styles.tabPaneScrollable}>
-            <NotifyConfigPageView embedded />
+            <ProxyConfigPageView embedded />
           </div>
         );
     }
@@ -111,7 +107,7 @@ function SystemSettingsBody() {
       <ManagePageHeader
         className={styles.pageHeader}
         title="系统设置"
-        description="第三方服务集成（通知、刮削）与系统运行基础底座（网络代理、数据安全、日志）。"
+        description="第三方服务集成（刮削）与系统运行基础底座（网络代理、数据安全、日志）。"
       />
       <div className={styles.tabBar} role="tablist" aria-label="系统设置分类">
         {TAB_GROUPS.map((group, groupIdx) => (
