@@ -49,7 +49,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 
 	var cacheKey string
 	if st.SourceId != "" {
-		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d:st2",
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d:ck3",
 			config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
 	} else {
 		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",
@@ -98,7 +98,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		var total int64 = -1
 		var countKey string
 		if st.SourceId != "" {
-			countKey = fmt.Sprintf("%s:count:v%s:src_%s:%d:%d:%s:%s:%s:%s:st2",
+			countKey = fmt.Sprintf("%s:count:v%s:src_%s:%d:%d:%s:%s:%s:%s:ck3",
 				config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
 		} else {
 			countKey = fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",

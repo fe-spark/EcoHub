@@ -52,7 +52,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:st2", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck3", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -105,7 +105,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck2", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck3", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -235,7 +235,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck2", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck3", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -287,7 +287,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck2", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck3", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo

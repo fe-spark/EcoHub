@@ -48,8 +48,14 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("请求异常,暂无影片信息!!!", c)
 		return
 	}
-	preferredSource := strings.TrimSpace(c.Query("preferredSource"))
 	playFrom := strings.TrimSpace(c.Query("playFrom"))
+	if playFrom == "" {
+		playFrom = strings.TrimSpace(c.Query("source"))
+	}
+	preferredSource := strings.TrimSpace(c.Query("preferredSource"))
+	if preferredSource == "" {
+		preferredSource = playFrom
+	}
 	episode, err := strconv.Atoi(c.DefaultQuery("episode", "0"))
 	if err != nil || episode < 0 {
 		episode = 0

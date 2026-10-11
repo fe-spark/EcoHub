@@ -102,10 +102,21 @@ export function resolvePlayEntryPath(
   fallback?: PlayEntryFallback,
 ): string {
   const normalizedFilmId = normalizeFilmID(filmId);
+  const explicitSourceId = String(fallback?.sourceId || "").trim();
   const historyKey = isLocalFilmID(normalizedFilmId)
     ? normalizedFilmId
-    : normalizedFilmId || livePlayHistoryID(fallback?.sourceId, fallback?.sourceMid);
+    : normalizedFilmId || livePlayHistoryID(explicitSourceId, fallback?.sourceMid);
   const historyRecord = resolveHistoryRecord(historyKey);
+
+  if (explicitSourceId && isLocalFilmID(normalizedFilmId)) {
+    const isSameSource = historyRecord?.sourceId === explicitSourceId;
+    return buildPlayPath(
+      normalizedFilmId,
+      explicitSourceId,
+      isSameSource ? historyRecord?.episodeIndex : fallback?.episodeIndex,
+      isSameSource ? historyRecord?.currentTime : undefined,
+    );
+  }
 
   if (historyRecord && isLocalFilmID(historyRecord.id)) {
     return buildPlayPath(

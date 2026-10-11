@@ -409,6 +409,10 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	if hidden == nil || hidden.Name != "公告" || hidden.Show {
 		t.Fatalf("hidden 公告 lookup = %+v", hidden)
 	}
+	movieIDs := PublicSourceTypeIDs("src1", "pid", 1)
+	if len(movieIDs) != 4 || movieIDs[0] != 1 || movieIDs[1] != 11 || movieIDs[2] != 12 || movieIDs[3] != 13 {
+		t.Fatalf("电影 members = %v, want [1 11 12 13]", movieIDs)
+	}
 	rootIDs := PublicSourceTypeIDs("src1", "pid", 21)
 	if len(rootIDs) != 2 || rootIDs[0] != 21 || rootIDs[1] != 30 {
 		t.Fatalf("测试 members = %v, want 21 and 30", rootIDs)

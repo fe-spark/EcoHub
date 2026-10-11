@@ -264,8 +264,8 @@ func sourceTypeKeys(sourceID string, typeIDs []int64) []string {
 }
 
 // sourceTypeMatchCond 当前站这些 type_id 的影片条件。
-// 一级分类同时认 root_category_key 和 category_key。二级分类只认 category_key。
-func sourceTypeMatchCond(columnPrefix, field string, keys []string) (string, []any) {
+// 一级分类已在 PublicSourceTypeIDs 中展开为自身及下属子类成员，统一按实际归属的 category_key 匹配。
+func sourceTypeMatchCond(columnPrefix, _ string, keys []string) (string, []any) {
 	if len(keys) == 0 {
 		return "1 = 0", nil
 	}
@@ -276,20 +276,11 @@ func sourceTypeMatchCond(columnPrefix, field string, keys []string) (string, []a
 		return columnPrefix + name
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(keys)), ",")
-	args := make([]any, 0, len(keys)*2)
-	if field == "cid" {
-		for _, key := range keys {
-			args = append(args, key)
-		}
-		return col("category_key") + " IN (" + placeholders + ")", args
-	}
+	args := make([]any, 0, len(keys))
 	for _, key := range keys {
 		args = append(args, key)
 	}
-	for _, key := range keys {
-		args = append(args, key)
-	}
-	return "(" + col("root_category_key") + " IN (" + placeholders + ") OR " + col("category_key") + " IN (" + placeholders + "))", args
+	return col("category_key") + " IN (" + placeholders + ")", args
 }
 
 // ApplySourceTypeMatch 只匹配当前采集站自己的分类键。不把其他站的同名分类并进来。

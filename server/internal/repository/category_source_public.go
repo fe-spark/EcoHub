@@ -161,22 +161,25 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 }
 
 // PublicSourceTypeIDs 前台这个分类要包含的本站 type_id。
-// 已合并的分类返回全部成员。隐藏分类和未建组的 type 只返回自己。
+// 一级分类返回自身成员及下属可见子类成员；二级分类返回自身合并成员。隐藏分类和未建组的 type 只返回自己。
 func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if typeID <= 0 {
 		return nil
 	}
 	view := loadPublicSourceTypes(sourceID)
 	if group, ok := view.groupByMember(typeID); ok && group.Show {
-		if field == "cid" && group.Parent == 0 {
+		if field == "cid" {
+			if group.Parent == 0 && len(group.Children) > 0 {
+				return []int64{typeID}
+			}
+			out := make([]int64, len(group.Members))
+			copy(out, group.Members)
+			return out
+		}
+		if group.Parent != 0 {
 			return []int64{typeID}
 		}
-		if field != "cid" && group.Parent != 0 {
-			return []int64{typeID}
-		}
-		out := make([]int64, len(group.Members))
-		copy(out, group.Members)
-		return out
+		return group.allTypeIDs()
 	}
 	return []int64{typeID}
 }
@@ -211,6 +214,34 @@ type publicTypeGroup struct {
 	Show     bool
 	Members  []int64
 	Children []publicTypeGroup
+}
+
+func (g publicTypeGroup) allTypeIDs() []int64 {
+	out := make([]int64, 0, len(g.Members)+len(g.Children)*2)
+	seen := make(map[int64]struct{}, len(g.Members)+len(g.Children)*2)
+	for _, id := range g.Members {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	for i := range g.Children {
+		for _, id := range g.Children[i].Members {
+			if id <= 0 {
+				continue
+			}
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 func (g publicTypeGroup) treeNode(parentID int64) *model.CategoryTree {

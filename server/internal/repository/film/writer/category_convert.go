@@ -46,18 +46,8 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 
 func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int64, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
-	if strings.TrimSpace(sourceId) == "manual" {
+	if strings.TrimSpace(sourceId) == "manual" || db.Mdb == nil {
 		return fallback
-	}
-
-	if sourcePid > 0 {
-		var root model.SourceCategory
-		if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, sourcePid).First(&root).Error; err == nil {
-			name := strings.TrimSpace(root.RawName)
-			if name != "" {
-				return name
-			}
-		}
 	}
 
 	if sourceCid > 0 {
@@ -81,6 +71,16 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 		}
 	}
 
+	if sourcePid > 0 {
+		var root model.SourceCategory
+		if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, sourcePid).First(&root).Error; err == nil {
+			name := strings.TrimSpace(root.RawName)
+			if name != "" {
+				return name
+			}
+		}
+	}
+
 	return fallback
 }
 
@@ -88,25 +88,27 @@ func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) 
 	if strings.TrimSpace(sourceId) == "" {
 		return 0
 	}
+	if sourceCid > 0 && db.Mdb != nil {
+		current := sourceCid
+		for step := range [5]int{} {
+			var row model.SourceCategory
+			if err := db.Mdb.Select("parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, current).First(&row).Error; err != nil {
+				if step == 0 && sourcePid > 0 {
+					return sourcePid
+				}
+				return current
+			}
+			if row.ParentSourceTypeId <= 0 {
+				return current
+			}
+			current = row.ParentSourceTypeId
+		}
+		return current
+	}
 	if sourcePid > 0 {
 		return sourcePid
 	}
-	if sourceCid <= 0 {
-		return 0
-	}
-
-	current := sourceCid
-	for range [5]int{} {
-		var row model.SourceCategory
-		if err := db.Mdb.Select("parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, current).First(&row).Error; err != nil {
-			return current
-		}
-		if row.ParentSourceTypeId <= 0 {
-			return current
-		}
-		current = row.ParentSourceTypeId
-	}
-	return current
+	return sourceCid
 }
 
 type normalizedSearchMeta struct {
@@ -133,6 +135,9 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	}
 	if detail.RawPid > 0 {
 		sourcePid = detail.RawPid
+	}
+	if sourceCid <= 0 && sourcePid > 0 {
+		sourceCid = sourcePid
 	}
 
 	result := resolvedSearchCategory{CName: strings.TrimSpace(detail.CName)}

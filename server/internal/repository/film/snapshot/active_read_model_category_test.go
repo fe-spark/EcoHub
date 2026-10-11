@@ -136,7 +136,7 @@ func TestSortFastHits_DrivesFromPlaylistIndex(t *testing.T) {
 		var rows []model.FilmIndex
 		return categorySortFastQuery(tx, "src_new", 2, 29).Limit(21).Find(&rows)
 	})
-	if !strings.Contains(recentSQL, "film_source_playlists") || !strings.Contains(recentSQL, "root_category_key") {
+	if !strings.Contains(recentSQL, "film_source_playlists") || !strings.Contains(recentSQL, "category_key") {
 		t.Fatalf("classify recent must filter by this source category key, got: %s", recentSQL)
 	}
 	if strings.Contains(recentSQL, "idx_pid_hits") || strings.Contains(recentSQL, "pid =") {
@@ -195,7 +195,7 @@ func TestApplyCategoryUpdateIndexHint_MySQLQuotedSeparately(t *testing.T) {
 
 func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
-	if err := gdb.AutoMigrate(&model.CategoryMapping{}); err != nil {
+	if err := gdb.AutoMigrate(&model.CategoryMapping{}, &model.SourceCategory{}); err != nil {
 		t.Fatalf("migrate mapping: %v", err)
 	}
 	categories := []model.Category{
@@ -213,6 +213,14 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	}
 	if err := gdb.Create(&mappings).Error; err != nil {
 		t.Fatalf("create mappings: %v", err)
+	}
+	sourceCategories := []model.SourceCategory{
+		{SourceId: "src_new", SourceTypeId: 2, ParentSourceTypeId: 0, RawName: "连续剧", Sort: 1, Depth: 0},
+		{SourceId: "src_new", SourceTypeId: 13, ParentSourceTypeId: 2, RawName: "国产剧", Sort: 1, Depth: 1},
+		{SourceId: "src_new", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 2, Depth: 0},
+	}
+	if err := gdb.Create(&sourceCategories).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
 	}
 	films := []model.FilmIndex{
 		{
@@ -269,12 +277,12 @@ func TestCategoryList_KeepsOtherSourceCategoryOut(t *testing.T) {
 	films := []model.FilmIndex{
 		{
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"},
-			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_a:4", Pid: 20},
+			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_a:4", CategoryKey: "source:src_a:4", Pid: 20},
 			FilmIndexContent:  model.FilmIndexContent{Name: "别站动漫", UpdateStamp: 10, Hits: 100},
 		},
 		{
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_new"},
-			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_new:4"},
+			FilmIndexCategory: model.FilmIndexCategory{RootCategoryKey: "source:src_new:4", CategoryKey: "source:src_new:4"},
 			FilmIndexContent:  model.FilmIndexContent{Name: "本站动漫", UpdateStamp: 50, Hits: 1},
 		},
 	}
@@ -318,7 +326,7 @@ func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 	}
 
 	if err := gdb.Model(&model.FilmIndex{}).Where("mid IN ?", []int64{11, 12}).
-		Update("root_category_key", "source:source_master:1").Error; err != nil {
+		Update("category_key", "source:source_master:1").Error; err != nil {
 		t.Fatalf("set category key: %v", err)
 	}
 	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "source_master", "pid", 1, 10, 0)
@@ -329,6 +337,17 @@ func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 
 func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 	gdb := setupSnapshotRepoTestDB(t)
+	if err := gdb.AutoMigrate(&model.SourceCategory{}); err != nil {
+		t.Fatalf("migrate source categories: %v", err)
+	}
+	sourceCategories := []model.SourceCategory{
+		{SourceId: "src_new", SourceTypeId: 1, ParentSourceTypeId: 0, RawName: "电影", Sort: 1, Depth: 0},
+		{SourceId: "src_new", SourceTypeId: 13, ParentSourceTypeId: 1, RawName: "动作片", Sort: 1, Depth: 1},
+		{SourceId: "src_new", SourceTypeId: 21, ParentSourceTypeId: 0, RawName: "纪录片", Sort: 2, Depth: 0},
+	}
+	if err := gdb.Create(&sourceCategories).Error; err != nil {
+		t.Fatalf("create source categories: %v", err)
+	}
 	films := []model.FilmIndex{
 		{
 			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 21, FirstSourceId: "src_new"},
@@ -372,8 +391,8 @@ func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 		t.Fatalf("pid 21 list = %+v, want mids 21 then 22", got)
 	}
 	movies := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 1, 14, 0)
-	if len(movies) != 2 || movies[0].Id != 21 || movies[1].Id != 24 {
-		t.Fatalf("pid 1 list = %+v, want mids 21 then 24", movies)
+	if len(movies) != 1 || movies[0].Id != 24 {
+		t.Fatalf("pid 1 list = %+v, want only mid 24 (must not include independent leaf root 21)", movies)
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 20}
@@ -395,8 +414,8 @@ func TestSourceTypePidMatch_IncludesCategoryKey(t *testing.T) {
 		var rows []model.FilmIndex
 		return categoryFilmQuery(tx, "src_new", "pid", 21, basicSelectFields).Find(&rows)
 	})
-	if !strings.Contains(sql, "root_category_key") || !strings.Contains(sql, "category_key") {
-		t.Fatalf("pid match must accept either category key, got: %s", sql)
+	if strings.Contains(sql, "root_category_key") || !strings.Contains(sql, "category_key") {
+		t.Fatalf("pid match must filter by category_key without root_category_key pollution, got: %s", sql)
 	}
 	if strings.Contains(sql, "pid =") {
 		t.Fatalf("pid match must not use the local pid column, got: %s", sql)

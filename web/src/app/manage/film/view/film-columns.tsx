@@ -44,6 +44,7 @@ interface UseFilmColumnsProps {
   handleDelFilm: (id: number) => void;
   handleScrapeFilm: (record: FilmItem) => void;
   tmdbEnabled?: boolean;
+  activeSourceId?: string;
 }
 
 export function useFilmColumns({
@@ -55,6 +56,7 @@ export function useFilmColumns({
   handleDelFilm,
   handleScrapeFilm,
   tmdbEnabled = false,
+  activeSourceId,
 }: UseFilmColumnsProps) {
   return useMemo<ColumnsType<FilmItem>>(
     () => [
@@ -81,7 +83,10 @@ export function useFilmColumns({
               className={styles.filmName}
               style={{ whiteSpace: "nowrap" }}
               onClick={() =>
-                window.open(resolvePlayEntryPath(record.mid), "_blank")
+                window.open(
+                  resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
+                  "_blank",
+                )
               }
             >
               {record.name}
@@ -158,7 +163,10 @@ export function useFilmColumns({
                 size="small"
                 icon={<AimOutlined />}
                 onClick={() =>
-                  window.open(resolvePlayEntryPath(record.mid), "_blank")
+                  window.open(
+                    resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
+                    "_blank",
+                  )
                 }
               />
             </Tooltip>
@@ -220,6 +228,16 @@ export function useFilmColumns({
         ),
       },
     ],
-    [syncingIds, router, handleDelFilm, handleUpdateSingle, handleScrapeFilm, canWrite, styles, tmdbEnabled],
+    [
+      syncingIds,
+      router,
+      handleDelFilm,
+      handleUpdateSingle,
+      handleScrapeFilm,
+      canWrite,
+      styles,
+      tmdbEnabled,
+      activeSourceId,
+    ],
   );
 }

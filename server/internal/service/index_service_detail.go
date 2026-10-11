@@ -165,7 +165,7 @@ func OrganizePlaySources(playSources []model.PlayLinkVo, preferredSource string)
 			cp.LinkList = make([]model.MovieUrlInfo, len(item.LinkList))
 			copy(cp.LinkList, item.LinkList)
 		}
-		if cp.SourceId == preferredSource {
+		if cp.SourceId == preferredSource || cp.Id == preferredSource {
 			cp.IsPreferred = true
 			preferredLines = append(preferredLines, cp)
 		} else {
