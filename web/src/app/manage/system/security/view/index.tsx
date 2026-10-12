@@ -47,6 +47,7 @@ interface ConfigBackup {
   filmSources?: unknown[];
   cronTasks?: unknown[];
   banners?: unknown[];
+  bannerConfig?: unknown;
   notify?: unknown;
   mappingRules?: unknown[];
   proxy?: unknown;
@@ -99,6 +100,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
     parts.push(`版本 ${backup.appVersion}`);
   }
   parts.push(`格式 v${backup.version ?? "?"}`);
+  if (backup.site) {
+    parts.push("网站配置");
+  }
   if (Array.isArray(backup.filmSources)) {
     parts.push(`采集站 ${backup.filmSources.length}`);
   }
@@ -108,6 +112,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   if (Array.isArray(backup.banners)) {
     parts.push(`封面 ${backup.banners.length}`);
   }
+  if (backup.bannerConfig) {
+    parts.push("轮播排片");
+  }
   if (Array.isArray(backup.mappingRules)) {
     parts.push(`映射规则 ${backup.mappingRules.length}`);
   }
@@ -116,6 +123,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   }
   if (backup.tmdb) {
     parts.push("TMDB刮削");
+  }
+  if (backup.notify) {
+    parts.push("通知配置");
   }
   return parts.join(" · ");
 }

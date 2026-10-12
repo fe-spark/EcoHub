@@ -6,7 +6,7 @@ import { PlaySquareOutlined, VideoCameraOutlined } from "@ant-design/icons";
 import AppLoading from "@/components/public/Loading";
 import HighlightMatchedText from "@/components/public/HighlightMatchedText";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
-import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import { isLocalFilmID, resolvePlayEntryPath } from "@/lib/playNavigation";
 import styles from "./index.module.less";
 
 interface FilmItem {
@@ -239,8 +239,9 @@ export default function FilmList({
   }
 
   const handleOpenPlayPage = (id: string, item?: FilmItem) => {
+    const isLocal = isLocalFilmID(id);
     const href = resolvePlayEntryPath(id, {
-      sourceId: item?.sourceId,
+      sourceId: isLocal ? undefined : item?.sourceId,
       sourceMid: item?.sourceMid,
     });
     if (onOpenPlayPage) {

@@ -25,11 +25,16 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 	tasks := repository.GetAllFilmTask()
 	if tasks == nil {
 		tasks = []model.FilmCollectTask{}
+	} else {
+		for i := range tasks {
+			tasks[i].Cid = 0
+		}
 	}
 	banners := repository.GetBanners()
 	if banners == nil {
 		banners = model.Banners{}
 	}
+	bannerConfig := repository.GetBannerConfig()
 
 	site := repository.GetSiteBasic()
 	proxyCfg := repository.GetProxyConfig()
@@ -56,6 +61,7 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 		FilmSources:  sources,
 		CronTasks:    tasks,
 		Banners:      banners,
+		BannerConfig: &bannerConfig,
 		MappingRules: exports,
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
@@ -103,6 +109,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			spider.ClearLimiter(src.Id)
 		}
 		clearProvideNetworkConfigCache()
+		repository.ClearIndexPageCache()
 	}
 
 	if req.Modules.CronTasks {
@@ -132,6 +139,12 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		}
 		if err := repository.SaveBanners(banners); err != nil {
 			return fmt.Errorf("导入首页轮播失败: %w", err)
+		}
+		if backup.BannerConfig != nil {
+			if err := repository.SaveBannerConfig(*backup.BannerConfig); err != nil {
+				return fmt.Errorf("导入首页轮播排片配置失败: %w", err)
+			}
+			BannerAutoSvc.SyncWithCronTask(backup.BannerConfig.Mode, backup.BannerConfig.RefreshCron)
 		}
 	}
 

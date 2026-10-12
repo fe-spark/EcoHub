@@ -13,7 +13,7 @@ import {
   UnorderedListOutlined,
 } from "@ant-design/icons";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { resolvePlayEntryPath } from "@/lib/playNavigation";
+import { isLocalFilmID, resolvePlayEntryPath } from "@/lib/playNavigation";
 import { useContentNavigate } from "@/components/public/PublicContentLoading";
 import SearchResultPanel from "./SearchResultPanel";
 import useSearchSources from "./useSearchSources";
@@ -249,9 +249,10 @@ export default function SearchPageView({
 
   const handlePlay = (movie: { id?: string | number; sourceId?: string; sourceMid?: string | number }) => {
     const localId = Number(movie?.id) > 0 ? String(movie.id) : "";
+    const isLocal = isLocalFilmID(localId);
     navigate(
       resolvePlayEntryPath(localId, {
-        sourceId: movie?.sourceId,
+        sourceId: isLocal ? undefined : movie?.sourceId,
         sourceMid: movie?.sourceMid,
         episodeIndex: 0,
       }),
