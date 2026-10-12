@@ -20,7 +20,6 @@ export interface CollectQueueProgressView {
   failedCount: number;
   stoppedCount: number;
   fetchingCount: number;
-  wrappingCount: number;
   percent: number;
   success: number;
   failed: number;
@@ -72,7 +71,6 @@ export function computeCollectQueueProgress(
   let success = 0;
   let failed = 0;
   let fetchingCount = 0;
-  let wrappingCount = 0;
   let doneCount = 0;
   let failedCount = 0;
   let stoppedCount = 0;
@@ -86,14 +84,8 @@ export function computeCollectQueueProgress(
       failed += progress.failed;
       percentSum += stationProgressPercent(progress);
       const status = progress.status;
-      if (status === "starting" || status === "running") {
+      if (isActiveCollectStatus(status)) {
         fetchingCount += 1;
-      } else if (
-        status === "page_done" ||
-        status === "waiting_publish" ||
-        status === "finalizing"
-      ) {
-        wrappingCount += 1;
       } else if (status === "failed") {
         failedCount += 1;
       } else if (status === "stopped") {
@@ -111,7 +103,7 @@ export function computeCollectQueueProgress(
   }
 
   const total = sourceIds.length;
-  const activeCount = fetchingCount + wrappingCount;
+  const activeCount = fetchingCount;
   const percent = total > 0 ? Math.floor(percentSum / total) : 0;
   const running = activeCount > 0;
   if (!running && !hasAnyProgress) {
@@ -122,9 +114,6 @@ export function computeCollectQueueProgress(
   if (running) {
     if (fetchingCount > 0) {
       phaseParts.push(`采集中 ${fetchingCount}`);
-    }
-    if (wrappingCount > 0) {
-      phaseParts.push(`收尾 ${wrappingCount}`);
     }
     if (doneCount > 0) {
       phaseParts.push(`完成 ${doneCount}`);
@@ -157,7 +146,6 @@ export function computeCollectQueueProgress(
     failedCount,
     stoppedCount,
     fetchingCount,
-    wrappingCount,
     percent: running ? Math.min(percent, 99) : Math.min(percent, 100),
     success,
     failed,

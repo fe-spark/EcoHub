@@ -121,8 +121,9 @@ func start() {
 	// 1. 立即关闭 HTTP 端口监听（断开连接，避免新请求进入与端口占用）
 	_ = srv.Close()
 
-	// 2. 快速停止采集任务（非阻塞通知协程退出）
+	// 2. 快速停止采集任务与通知轮询（非阻塞通知协程退出）
 	spider.StopAllTasks()
+	service.NotifySvc.StopBotPoller()
 
 	log.Printf("[Shutdown] 退出完成")
 }

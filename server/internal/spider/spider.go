@@ -65,6 +65,7 @@ func init() {
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,
 		ResolveSourceProxy: repository.ResolveSourceProxy,
+		OnSourceFailed:     emitSourceFailedNotify,
 	})
 }
 
@@ -157,8 +158,9 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
 	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
 	if err := batchCtx.flushAndFinalize(); err != nil {
-		syslog.Errorf("[%s] 批量采集收尾刷新失败: %v", tag, err)
+		syslog.Errorf("[%s] 批量采集缓存刷新失败: %v", tag, err)
 	}
+	batchCtx.emitSummary()
 	triggerCollectDoneHooks()
 }
 
@@ -230,9 +232,13 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	statsOwned := false
 	releasedPreparedOccupy := false
 	defer func() {
-		// 失败必须立刻放占用并把 starting 标 failed，否则 UI 仍显示采集中、重试被挡住。
-		if !releasedPreparedOccupy && retErr != nil {
-			abortUnstartedCollect(id, batchCtx)
+		// 单站退出（无论完成、失败还是终止）立即释放自身占用锁，不等待批量内其他慢速站点。
+		if !releasedPreparedOccupy {
+			if retErr != nil {
+				abortUnstartedCollect(id, batchCtx)
+			} else {
+				batchCtx.releaseSourceOccupy(id)
+			}
 		}
 	}()
 	if runVersion != nil && isDispatchStopped(*runVersion) {
@@ -258,6 +264,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	defer collectLifecycle.endSource(id)
 
 	if err := ensureMasterCategoriesReady(s); err != nil {
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+		}
 		retErr = err
 		return err
 	}
@@ -266,6 +275,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	}
 	defer func() {
 		originalErr := retErr
+		if originalErr != nil && batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, originalErr.Error())
+		}
 		if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron && statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
 			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
@@ -275,6 +287,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		progress.FlushHotpathSideEffects(s.Id)
 		if originalErr != nil && !hadWrites {
 			if isStandalone && batchCtx != nil {
+				batchCtx.emitSummary()
 				batchCtx.close()
 				releasedPreparedOccupy = true
 			}
@@ -282,23 +295,20 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 		if batchCtx != nil {
 			batchCtx.markSourceFinished(*s)
+			if !isStandalone && isPreferredCollectSource(s.Id) {
+				if err := batchCtx.finalizePrimarySource(s.Id); err != nil && originalErr == nil {
+					retErr = err
+				}
+			}
 		}
 		if isStandalone && batchCtx != nil {
 			flushErr := batchCtx.flushAndFinalize()
 			if originalErr == nil && flushErr != nil {
 				retErr = flushErr
 			}
+			batchCtx.emitSummary()
 			batchCtx.close()
 			releasedPreparedOccupy = true
-			return
-		}
-		if !progress.IsStopped(s.Id) {
-			progress.Update(s.Id, func(cur *model.CollectProgress) {
-				switch cur.Status {
-				case progress.StatusRunning, progress.StatusStarting, progress.StatusPageDone:
-					cur.Status = progress.StatusWaitingPublish
-				}
-			})
 		}
 	}()
 
@@ -369,13 +379,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			cur.Current = 0
 			cur.Success = 0
 			cur.Failed = 0
-			if isStandalone {
-				cur.Status = progress.StatusPageDone
-			} else {
-				cur.Status = progress.StatusWaitingPublish
-			}
+			cur.Status = progress.StatusDone
 		})
-		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容) isStandalone=%v\n", s.Name, pageCount, isStandalone)
+		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容)\n", s.Name, pageCount)
 		return nil
 	}
 	progress.Update(id, func(cur *model.CollectProgress) {
@@ -392,10 +398,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if err != nil {
 		return err
 	}
-	if progress.IsStopped(id) {
-		log.Printf("[Spider] 站点 %s 已停止接收新分页，等待收尾刷新\n", s.Name)
-	} else {
-		progress.MarkSourcePagesFinished(id, isStandalone)
+	if !progress.IsStopped(id) {
+		progress.MarkSourceDone(id)
 	}
 	return nil
 }

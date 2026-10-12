@@ -59,6 +59,7 @@ func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) er
 		return err
 	}
 	filmsnapshot.ClearDynamicPlayCaches()
+	NotifySvc.EnsureBotPoller()
 	return nil
 }
 
@@ -116,6 +117,10 @@ func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
 
 func (s *ProxyService) ResolveTMDBProxy() (bool, string) {
 	return repository.ResolveTMDBProxy()
+}
+
+func (s *ProxyService) ResolveNotifyProxy() (bool, string) {
+	return repository.ResolveNotifyProxy()
 }
 
 func (s *ProxyService) ResolveUpgradeProxy() (bool, string) {

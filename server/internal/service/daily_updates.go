@@ -117,7 +117,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	from, to := film.Rolling24hWindow(time.Now())
 
 	// 分类树每请求只取一次，复用给列表筛选、分类计数与组装，避免多次全表扫描。
-	nav := film.NavTopCategories()
+	nav := film.NavTopCategories(req.SourceId)
 	navIDs := film.NavTopCategoryIDs(nav)
 
 	// 非随机且前 5 页支持短缓存（1 分钟）与 Singleflight，避免全量采集后高频刷新冲击数据库

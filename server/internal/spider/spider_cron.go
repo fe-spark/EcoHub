@@ -242,7 +242,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 		log.Println("执行一次自动更新任务")
 	case 1: // 更新指定资源站
 		if len(ft.Ids) == 0 {
-			log.Printf("定时任务[%s]未配置资源站，跳过执行\n", ft.Id)
+			errMsg := fmt.Sprintf("定时任务[%s]未配置资源站，跳过执行", ft.Id)
+			log.Println(errMsg)
+			emitCronFailedNotify(ft.Id, ft.Remark, errMsg)
 			break
 		}
 		BatchCollectTriggered(model.CollectTriggerCron, ft.Time, ft.Ids...)
@@ -259,7 +261,9 @@ func runTaskBody(ft model.FilmCollectTask) {
 		executeBannerAutoTask(ft)
 		return
 	default:
-		log.Printf("定时任务[%s]类型[%d]已废弃，跳过执行\n", ft.Id, ft.Model)
+		errMsg := fmt.Sprintf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
+		log.Println(errMsg)
+		emitCronFailedNotify(ft.Id, ft.Remark, errMsg)
 	}
 
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
@@ -285,6 +289,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	var n int64
 	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
 		syslog.Errorf("[CleanOrphan] 孤儿播放列表清理失败: %v", res.Error)
+		emitCronFailedNotify(ft.Id, remark, res.Error.Error())
 		return
 	} else {
 		n = res.RowsAffected
@@ -316,6 +321,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	}()
 	if err != nil {
 		syslog.Errorf("[CleanOrphan] 数据清理后刷新读模型失败: %v", err)
+		emitCronFailedNotify(ft.Id, remark, err.Error())
 		return
 	}
 
@@ -325,9 +331,14 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "自动清理过期运行日志"
+	}
 	n, err := syslog.PruneExpiredLogs(7 * 24 * time.Hour)
 	if err != nil {
 		syslog.Errorf("[LogClean] 清理过期运行日志失败: %v", err)
+		emitCronFailedNotify(ft.Id, remark, err.Error())
 		return
 	}
 
@@ -343,14 +354,21 @@ func executeBannerAutoTask(ft model.FilmCollectTask) {
 	fn := bannerAutoExecutor
 	bannerAutoExecutorMu.RUnlock()
 
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "首页轮播自动智能排片"
+	}
+
 	if fn == nil {
 		err := errors.New("轮播排片执行器未初始化")
 		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
+		emitCronFailedNotify(ft.Id, remark, err.Error())
 		return
 	}
 
 	if err := fn(); err != nil {
 		syslog.Errorf("[BannerAuto] 执行失败: %v", err)
+		emitCronFailedNotify(ft.Id, remark, err.Error())
 		return
 	}
 

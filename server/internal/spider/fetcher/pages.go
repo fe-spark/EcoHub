@@ -23,6 +23,10 @@ type Batch interface {
 	IsStandalone() bool
 	// AddAffectedMIDs 记录影响到的全局 mid，供本轮发布使用。
 	AddAffectedMIDs(s *model.FilmSource, h int, mids []int64)
+	// AddNotifyMIDs 记录应进通知更新列表的全局 mid（新片或播放线路实质变更）。
+	AddNotifyMIDs(sourceID string, mids []int64)
+	// RecordSourceError 记录站点采集错误原因。
+	RecordSourceError(sourceID, reason string)
 }
 
 const (
@@ -120,6 +124,12 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		stopOnce.Do(func() {
 			stopErr = fmt.Errorf("站点 %s 连续采集失败 %d 次，已终止本次采集", s.Name, sourceConsecutiveFailureLimit)
 			syslog.Errorf("[Spider] 站点 %s 连续失败达到阈值，终止采集 page=%d stage=%s err=%v", s.Name, page, stage, err)
+			if batch != nil {
+				batch.RecordSourceError(s.Id, stopErr.Error())
+			}
+			if deps.OnSourceFailed != nil {
+				deps.OnSourceFailed(s.Id, s.Name, stopErr.Error())
+			}
 			cancel()
 		})
 	}
@@ -129,19 +139,11 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		consecutiveFailuresMu.Unlock()
 	}
 	markStopped := func() {
-		// 连续失败停抓走收尾，不能写成用户「已停止」。
+		// 连续失败停抓不写成用户「已停止」。
 		if stopErr != nil {
 			return
 		}
 		progress.MarkStopped(s.Id)
-	}
-	maybeMarkPagePhaseDone := func(cur *model.CollectProgress, snapshot pageStats) {
-		if cur.Status != progress.StatusRunning && cur.Status != progress.StatusStarting {
-			return
-		}
-		if cur.Total > 0 && snapshot.success+snapshot.failed >= cur.Total {
-			cur.Status = progress.StatusPageDone
-		}
 	}
 	recordPageFailure := func(page int, stage string, err error) {
 		snapshot := recordPageFinished(page, false)
@@ -150,7 +152,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 			if page > cur.Current {
 				cur.Current = page
 			}
-			maybeMarkPagePhaseDone(cur, snapshot)
 		})
 		deps.SavePageFailure(s, h, page, stage, err)
 		if shouldLogFailure(snapshot.failed) {
@@ -164,6 +165,7 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 		recordSuccess()
 		if batch != nil {
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
+			batch.AddNotifyMIDs(s.Id, notifyMIDs)
 		}
 		progress.Update(s.Id, func(cur *model.CollectProgress) {
 			cur.Success = snapshot.success
@@ -171,7 +173,6 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 			if page > cur.Current {
 				cur.Current = page
 			}
-			maybeMarkPagePhaseDone(cur, snapshot)
 		})
 		logProgress(false)
 	}

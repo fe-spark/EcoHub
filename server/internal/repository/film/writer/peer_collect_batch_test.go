@@ -5,9 +5,11 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/utils"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -309,3 +311,77 @@ func countRows(t *testing.T, gdb *gorm.DB, modelValue any) int64 {
 	}
 	return n
 }
+
+func TestSaveCollectedPeerDetails_NewFilmKeepsVodTimeAndFollowupUsesLocalTime(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	source := &model.FilmSource{Id: "src-time", Name: "甲站", State: true}
+	vodTimeStr := "2020-05-01 10:00:00"
+	expectedVodStamp, err := utils.ParseCollectUpdateTime(vodTimeStr)
+	if err != nil {
+		t.Fatalf("parse vod time: %v", err)
+	}
+
+	detail := testPeerDetail(101, "老片首入库", "第1集")
+	detail.UpdateTime = vodTimeStr
+
+	res, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{detail})
+	if err != nil {
+		t.Fatalf("first collect: %v", err)
+	}
+	mid := res.Affected[0]
+
+	var fi model.FilmIndex
+	if err := gdb.Where("mid = ?", mid).First(&fi).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fi.UpdateStamp != expectedVodStamp {
+		t.Fatalf("new film should keep vod_time stamp %d, got %d", expectedVodStamp, fi.UpdateStamp)
+	}
+
+	// 仅下载线路变化：不应刷新 update_stamp
+	detailWithDown := detail
+	detailWithDown.DownFrom = "down"
+	detailWithDown.DownloadList = [][]model.MovieUrlInfo{{{Episode: "种子1", Link: "magnet:?xt=1"}}}
+	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{detailWithDown}); err != nil {
+		t.Fatalf("download update: %v", err)
+	}
+	if err := gdb.Where("mid = ?", mid).First(&fi).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fi.UpdateStamp != expectedVodStamp {
+		t.Fatalf("download-only change should not update stamp: want %d, got %d", expectedVodStamp, fi.UpdateStamp)
+	}
+
+	// 续集追更（播放线路变化）：应刷新为当前本地采集时间
+	beforeFollowup := time.Now().Unix()
+	followup := testPeerDetail(101, "老片首入库", "第2集")
+	followup.UpdateTime = vodTimeStr
+	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{followup}); err != nil {
+		t.Fatalf("followup update: %v", err)
+	}
+	if err := gdb.Where("mid = ?", mid).First(&fi).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fi.UpdateStamp < beforeFollowup {
+		t.Fatalf("followup play change should use local collect time >= %d, got %d", beforeFollowup, fi.UpdateStamp)
+	}
+}
+
+func TestPickPlaylistRemarks_IgnoresDisabledSources(t *testing.T) {
+	sources := []model.FilmSource{
+		{Id: "src-active", State: true},
+		{Id: "src-disabled", State: false},
+	}
+	lines := []model.FilmSourcePlaylist{
+		{SourceId: "src-active", EpisodeCount: 10, LastEpisode: "第10集"},
+		{SourceId: "src-disabled", EpisodeCount: 15, LastEpisode: "第15集"},
+	}
+	if got := pickPlaylistRemarks(lines, sources); got != "第10集" {
+		t.Fatalf("want active source remark '第10集', got %q", got)
+	}
+}
+

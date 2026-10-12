@@ -108,12 +108,14 @@ func FlushSnapshotCacheInvalidation() {
 
 func fireDebouncedSnapshotCacheInvalidation() {
 	cacheDebounceMu.Lock()
-	version := cacheDebounceVer
 	mids := drainCacheDebounceMidsLocked()
 	cacheDebounceTimer = nil
 	cacheDebounceVer = ""
 	cacheDebounceMu.Unlock()
-	applyBroadSnapshotCacheInvalidation(version, mids)
+	cache.ClearProvideListCache()
+	BumpSearchCacheVersion()
+	cache.ClearPatterns(filmListDerivedCachePatterns()...)
+	deletePlayInfoCacheKeys(mids)
 }
 
 func drainCacheDebounceMidsLocked() []int64 {

@@ -40,7 +40,7 @@ test("groupCollectQueues: 单站重采与原批次拆成两条队列", () => {
   const groups = groupCollectQueues([
     site("默认", {
       ...starting("默认", "q-batch-12")!,
-      status: "waiting_publish",
+      status: "done",
     }),
     site("HD(IK)", starting("HD(IK)", "q-single-retry")),
     site("HD(BF)", {

@@ -42,6 +42,7 @@ const DEFAULT_CONFIG: ProxyConfigValues = {
   modules: {
     spider: true,
     tmdb: true,
+    notify: true,
     upgrade: true,
   },
 };
@@ -78,6 +79,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
           modules: {
             spider: resp.data.modules?.spider ?? true,
             tmdb: resp.data.modules?.tmdb ?? true,
+            notify: resp.data.modules?.notify ?? true,
             upgrade: resp.data.modules?.upgrade ?? true,
           },
         };

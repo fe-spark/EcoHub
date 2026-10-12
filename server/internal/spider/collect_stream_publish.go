@@ -265,23 +265,22 @@ func publishStreamWindowReal(mids []int64) error {
 	if err := writer.UpsertSearchTagsByMids(mids...); err != nil {
 		log.Printf("[Spider][StreamPublish] 搜索标签增量失败 mids=%d err=%v", len(mids), err)
 	}
-	version, err := publishFilmSnapshot(mids)
-	if err != nil {
-		return err
-	}
-	if version != "" {
-		filmsnapshot.ScheduleSnapshotPublishedNotify(version)
-	}
-	return nil
+	_, err := publishFilmSnapshot(mids)
+	return err
 }
 
-func finalizeStreamPublish() error {
+func finalizeStreamPublish(warmupHome ...bool) error {
 	if err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
 	filmcache.ClearTVBoxConfigCache()
-	filmsnapshot.FlushSnapshotCacheInvalidation()
-	filmsnapshot.FlushSnapshotPublishedNotify()
+	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
+	if shouldWarmup {
+		filmsnapshot.FlushSnapshotCacheInvalidation()
+		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
+			filmsnapshot.NotifySnapshotPublished(version)
+		}
+	}
 	return nil
 }
 

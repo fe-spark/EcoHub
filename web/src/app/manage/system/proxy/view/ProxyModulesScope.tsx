@@ -100,6 +100,32 @@ export default function ProxyModulesScope({
           >
             <Flex justify="space-between" align="center">
               <div>
+                <div className={styles.moduleTitle}>Telegram 机器人</div>
+                <div className={styles.moduleDesc}>
+                  {isEnabled
+                    ? "消息推送与翻页交互通知"
+                    : "全局代理未开启，Telegram 直连访问"}
+                </div>
+              </div>
+              <Form.Item name={["modules", "notify"]} valuePropName="checked" noStyle>
+                <Switch
+                  size="small"
+                  disabled={!isEnabled || !canOperate}
+                />
+              </Form.Item>
+            </Flex>
+          </div>
+        </Col>
+        <Col xs={24} sm={12}>
+          <div
+            className={styles.moduleCard}
+            style={{
+              opacity: isEnabled ? 1 : 0.55,
+              transition: "opacity 0.2s ease",
+            }}
+          >
+            <Flex justify="space-between" align="center">
+              <div>
                 <div className={styles.moduleTitle}>系统版本更新</div>
                 <div className={styles.moduleDesc}>
                   {isEnabled

@@ -27,6 +27,7 @@ const (
 	TableTMDBConfig         = "tmdb_config"
 	TableBannerConfig       = "banner_config"
 	TableProxyConfig        = "proxy_config"
+	TableNotifyConfig       = "notify_config"
 	TableFilmSource         = "film_sources"
 )
 
@@ -64,4 +65,5 @@ var AllModels = []any{
 	&TMDBConfigRecord{},
 	&BannerConfigRecord{},
 	&ProxyConfigRecord{},
+	&NotifyConfigRecord{},
 }

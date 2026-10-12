@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import { ApiGet } from "@/lib/client-api";
 import styles from "./index.module.less";
 
-export type ProxyModuleType = "tmdb" | "spider" | "upgrade";
+export type ProxyModuleType = "tmdb" | "notify" | "spider" | "upgrade";
 
 interface ProxyConfigResp {
   enabled: boolean;
@@ -19,6 +19,7 @@ interface ProxyConfigResp {
   modules?: {
     spider?: boolean;
     tmdb?: boolean;
+    notify?: boolean;
     upgrade?: boolean;
   };
 }

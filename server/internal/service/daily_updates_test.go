@@ -149,3 +149,49 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 		t.Fatalf("want total %d, got %d", res1.Page.Total, res2.Page.Total)
 	}
 }
+
+func TestDailyUpdatesV2_PrimarySourceCategoryIsolation(t *testing.T) {
+	gdb, _ := setupTestDBAndRedis(t)
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.SourceCategory{}, &model.FilmSourcePlaylist{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+
+	now := time.Now()
+	_ = filmsnapshot.SetActiveSnapshotVersion("live")
+
+	gdb.Create(&model.FilmSource{Id: "src_a", Name: "A站", State: true, Sort: 1})
+	gdb.Create(&model.FilmSource{Id: "src_b", Name: "B站", State: true, Sort: 2})
+	gdb.Create(&model.SourceCategory{SourceId: "src_a", SourceTypeId: 10, ParentSourceTypeId: 0, RawName: "电影", Sort: 1})
+	gdb.Create(&model.SourceCategory{SourceId: "src_b", SourceTypeId: 20, ParentSourceTypeId: 0, RawName: "连续剧", Sort: 1})
+
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2001, FirstSourceId: "src_a"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_a:10", RootCategoryKey: "source:src_a:10"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "A站电影", UpdateStamp: now.Unix()},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2001, SourceId: "src_a", LineKind: "play", GroupIndex: 0})
+
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2002, FirstSourceId: "src_b"},
+		FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src_b:20", RootCategoryKey: "source:src_b:20"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "B站剧集", UpdateStamp: now.Unix()},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 2002, SourceId: "src_b", LineKind: "play", GroupIndex: 0})
+
+	resA, err := IndexSvc.DailyUpdatesV2(DailyUpdateListReq{Pid: 10, SourceId: "src_a"})
+	if err != nil {
+		t.Fatalf("src_a query failed: %v", err)
+	}
+	if resA.Page.Total != 1 || len(resA.Categories) != 2 || resA.Categories[1].Pid != 10 {
+		t.Fatalf("src_a unexpected result: total=%d cats=%+v", resA.Page.Total, resA.Categories)
+	}
+
+	resB, err := IndexSvc.DailyUpdatesV2(DailyUpdateListReq{Pid: 20, SourceId: "src_b"})
+	if err != nil {
+		t.Fatalf("src_b query failed: %v", err)
+	}
+	if resB.Page.Total != 1 || len(resB.Categories) != 2 || resB.Categories[1].Pid != 20 {
+		t.Fatalf("src_b unexpected result: total=%d cats=%+v", resB.Page.Total, resB.Categories)
+	}
+}
+

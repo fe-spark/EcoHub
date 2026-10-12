@@ -86,7 +86,14 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = backfillPageFilmsTx(tx, source, items); err != nil {
 		return nil, nil, err
 	}
+	newMids := make(map[int64]struct{}, len(items))
+	for i := range items {
+		if items[i].isNew && items[i].mid > 0 {
+			newMids[items[i].mid] = struct{}{}
+		}
+	}
 	remarkMids := make([]int64, 0, len(items))
+	stampMids := make(map[int64]struct{}, len(items))
 	affected := make([]int64, 0, len(items))
 	notify := make([]int64, 0, len(items))
 	for i := range items {
@@ -100,8 +107,11 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 		if items[i].isNew || items[i].linesChanged {
 			remarkMids = append(remarkMids, items[i].mid)
 		}
+		if _, isNew := newMids[items[i].mid]; !isNew && items[i].playChanged {
+			stampMids[items[i].mid] = struct{}{}
+		}
 	}
-	if err = refreshRemarksAndPlaySummaryMidsTx(tx, remarkMids, sources); err != nil {
+	if err = refreshRemarksAndPlaySummaryWithStampTx(tx, remarkMids, stampMids, sources); err != nil {
 		return nil, nil, err
 	}
 	return affected, notify, nil
@@ -127,27 +137,21 @@ func bindMappedFilmsTx(tx *gorm.DB, items []peerPageItem, mapped map[int64]int64
 	mids := make([]int64, 0, len(mapped))
 	seen := make(map[int64]struct{}, len(mapped))
 	for _, mid := range mapped {
-		if _, ok := seen[mid]; ok {
-			continue
+		if _, ok := seen[mid]; !ok {
+			seen[mid] = struct{}{}
+			mids = append(mids, mid)
 		}
-		seen[mid] = struct{}{}
-		mids = append(mids, mid)
 	}
 	films, err := loadFilmsByMidsTx(tx, mids)
 	if err != nil {
 		return err
 	}
 	for i := range items {
-		mid, ok := mapped[items[i].detail.Id]
-		if !ok {
-			continue
+		if mid, ok := mapped[items[i].detail.Id]; ok {
+			if film, exists := films[mid]; exists {
+				items[i].mid, items[i].film = mid, film
+			}
 		}
-		film, ok := films[mid]
-		if !ok {
-			continue
-		}
-		items[i].mid = mid
-		items[i].film = film
 	}
 	return nil
 }
@@ -180,14 +184,12 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 			continue
 		}
 		for _, key := range items[i].keys {
-			if key == "" {
-				continue
+			if key != "" {
+				if _, ok := seen[key]; !ok {
+					seen[key] = struct{}{}
+					keys = append(keys, key)
+				}
 			}
-			if _, ok := seen[key]; ok {
-				continue
-			}
-			seen[key] = struct{}{}
-			keys = append(keys, key)
 		}
 	}
 	if len(keys) == 0 {
@@ -205,15 +207,13 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 	claimMids := make([]int64, 0, len(rows))
 	claimed := make(map[int64]struct{}, len(rows))
 	for _, row := range rows {
-		if row.Mid <= 0 || row.MatchKey == "" {
-			continue
+		if row.Mid > 0 && row.MatchKey != "" {
+			keyMid[row.MatchKey] = row.Mid
+			if _, ok := claimed[row.Mid]; !ok {
+				claimed[row.Mid] = struct{}{}
+				claimMids = append(claimMids, row.Mid)
+			}
 		}
-		keyMid[row.MatchKey] = row.Mid
-		if _, ok := claimed[row.Mid]; ok {
-			continue
-		}
-		claimed[row.Mid] = struct{}{}
-		claimMids = append(claimMids, row.Mid)
 	}
 	films, err := loadFilmsByMidsTx(tx, claimMids)
 	if err != nil {
@@ -224,26 +224,14 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 			continue
 		}
 		var mid int64
-		found := false
 		for _, key := range items[i].keys {
-			candidate, ok := keyMid[key]
-			if !ok {
-				continue
-			}
-			if !found || candidate < mid {
+			if candidate, ok := keyMid[key]; ok && (mid == 0 || candidate < mid) {
 				mid = candidate
-				found = true
 			}
 		}
-		if !found {
-			continue
+		if film, ok := films[mid]; ok {
+			items[i].mid, items[i].film = film.Mid, film
 		}
-		film, ok := films[mid]
-		if !ok {
-			continue
-		}
-		items[i].mid = film.Mid
-		items[i].film = film
 	}
 	return nil
 }
