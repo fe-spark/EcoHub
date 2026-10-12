@@ -19,30 +19,17 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 		t.Fatal("expected not blocking when no progress")
 	}
 
-	// 2) waiting_publish 新鲜 → 阻挡
+	// 2) 新鲜 running → 阻挡
 	state := ensure(sourceID, "T")
 	state.mu.Lock()
-	state.data.Status = StatusWaitingPublish
+	state.data.Status = StatusRunning
 	state.updated = time.Now()
 	state.mu.Unlock()
 	if !IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected blocking on fresh waiting_publish")
+		t.Fatal("expected blocking on fresh running")
 	}
 
-	// 3) waiting_publish 即使很久仍阻挡，且不因超时标 failed（整批收尾等待）
-	state.mu.Lock()
-	state.data.Status = StatusWaitingPublish
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
-	state.mu.Unlock()
-	if !IsAlreadyQueuedOrRunning(sourceID) {
-		t.Fatal("expected blocking on long waiting_publish (batch finalize wait)")
-	}
-	snap, ok := Snapshot(sourceID)
-	if !ok || snap.Status != StatusWaitingPublish {
-		t.Fatalf("waiting_publish must not stale-fail, got ok=%v status=%q", ok, snap.Status)
-	}
-
-	// 4) 无 live 的 running 超时 → failed 且不阻挡
+	// 3) 无 live 的 running 超时 → failed 且不阻挡
 	state.mu.Lock()
 	state.data.Status = StatusRunning
 	state.updated = time.Now().Add(-staleDuration() - time.Second)
@@ -50,12 +37,12 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 	if IsAlreadyQueuedOrRunning(sourceID) {
 		t.Fatal("expected not blocking after stale running without live task")
 	}
-	snap, ok = Snapshot(sourceID)
+	snap, ok := Snapshot(sourceID)
 	if !ok || snap.Status != StatusFailed {
 		t.Fatalf("expected status failed after stale running, got ok=%v status=%q", ok, snap.Status)
 	}
 
-	// 5) live tasks + running → 阻挡（即使 updated 很旧）
+	// 4) live tasks + running → 阻挡（即使 updated 很旧）
 	tasks.Store(sourceID, task{cancel: func() {}, reqID: "req"})
 	state.mu.Lock()
 	state.data.Status = StatusRunning
@@ -66,7 +53,7 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 	}
 	tasks.Delete(sourceID)
 
-	// 6) 占用中的 starting 即使很久仍是排队
+	// 5) 占用中的 starting 即使很久仍是排队
 	SetOccupyChecker(func(id string) bool { return id == sourceID })
 	state.mu.Lock()
 	state.data.Status = StatusStarting
@@ -82,7 +69,7 @@ func TestIsAlreadyQueuedOrRunningRespectsActiveAndStale(t *testing.T) {
 	}
 	SetOccupyChecker(nil)
 
-	// 7) 无占用、无 live 的 starting 超时 → failed，不阻挡
+	// 6) 无占用、无 live 的 starting 超时 → failed，不阻挡
 	state.mu.Lock()
 	state.data.Status = StatusStarting
 	state.updated = time.Now().Add(-staleDuration() - time.Minute)
@@ -123,7 +110,7 @@ func TestGetActiveTaskProgressPurgesTerminalPerSource(t *testing.T) {
 
 	s2 := ensure(activeID, "Active")
 	s2.mu.Lock()
-	s2.data.Status = StatusWaitingPublish
+	s2.data.Status = StatusRunning
 	s2.data.Total = 5
 	s2.data.Success = 5
 	s2.updated = time.Now()
@@ -140,27 +127,8 @@ func TestGetActiveTaskProgressPurgesTerminalPerSource(t *testing.T) {
 	if _, ok := store.Load(failedID); ok {
 		t.Fatal("expected early failed purged on its own retain window")
 	}
-	if p, ok := byID[activeID]; !ok || p.Status != StatusWaitingPublish {
-		t.Fatalf("expected active waiting_publish, got ok=%v status=%q", ok, p.Status)
-	}
-}
-
-func TestCanEnterFinalizingSkipsStopped(t *testing.T) {
-	if canEnterFinalizing(StatusStopped) {
-		t.Fatal("用户停止后不应进入 finalizing，否则单站收尾会变成采集完成")
-	}
-	if canEnterFinalizing(StatusFailed) {
-		t.Fatal("failed 不应进入 finalizing")
-	}
-	for _, status := range []string{
-		StatusPageDone,
-		StatusWaitingPublish,
-		StatusRunning,
-		StatusStarting,
-	} {
-		if !canEnterFinalizing(status) {
-			t.Fatalf("%s 应能进入 finalizing", status)
-		}
+	if p, ok := byID[activeID]; !ok || p.Status != StatusRunning {
+		t.Fatalf("expected active running, got ok=%v status=%q", ok, p.Status)
 	}
 }
 
@@ -203,6 +171,12 @@ func TestStampPageRunningSkipsTerminal(t *testing.T) {
 		t.Fatalf("stopped 不可被写回 running, got %q", stopped.Status)
 	}
 
+	done := model.CollectProgress{Status: StatusDone, Current: 5}
+	StampPageRunning(&done, 9)
+	if done.Status != StatusDone {
+		t.Fatalf("done 不可被写回 running, got %q", done.Status)
+	}
+
 	running := model.CollectProgress{Status: StatusStarting, Current: 1}
 	StampPageRunning(&running, 3)
 	if running.Status != StatusRunning {
@@ -211,34 +185,24 @@ func TestStampPageRunningSkipsTerminal(t *testing.T) {
 	if running.Current != 3 {
 		t.Fatalf("running 页码应为 3, got %d", running.Current)
 	}
-
-	wrapping := model.CollectProgress{Status: StatusWaitingPublish, Current: 5}
-	StampPageRunning(&wrapping, 9)
-	if wrapping.Status != StatusWaitingPublish {
-		t.Fatalf("收尾态不可被写回 running, got %q", wrapping.Status)
-	}
 }
 
-func TestMarkSourcePagesFinishedAfterAbortEntersWrapUp(t *testing.T) {
-	const sourceID = "abort-wrap-up"
+func TestMarkSourceDone(t *testing.T) {
+	const sourceID = "mark-source-done"
 	store.Delete(sourceID)
 	t.Cleanup(func() { store.Delete(sourceID) })
 
-	ensure(sourceID, "AbortWrap")
+	ensure(sourceID, "DoneSource")
 	Update(sourceID, func(p *model.CollectProgress) {
 		p.Status = StatusRunning
-		p.Total = 698
-		p.Success = 672
-		p.Failed = 10
-		p.Current = 682
+		p.Total = 10
+		p.Success = 10
+		p.Current = 10
 	})
-	MarkSourcePagesFinished(sourceID, false)
+	MarkSourceDone(sourceID)
 	snap, ok := Snapshot(sourceID)
-	if !ok || snap.Status != StatusWaitingPublish {
-		t.Fatalf("连续失败停抓且有成功入库应变 waiting_publish, got ok=%v status=%q", ok, snap.Status)
-	}
-	if !isActiveStatus(snap.Status) {
-		t.Fatal("收尾态必须仍在采集生命周期内")
+	if !ok || snap.Status != StatusDone {
+		t.Fatalf("MarkSourceDone 应变 done, got ok=%v status=%q", ok, snap.Status)
 	}
 }
 
@@ -293,38 +257,6 @@ func TestGetActiveTaskProgressClearsTerminalPerSourceRetain(t *testing.T) {
 	if _, ok := store.Load(newDoneID); ok {
 		t.Fatal("expected new done deleted after its retain window")
 	}
-}
-
-func TestGetActiveTaskProgressDoesNotStaleWaitingPublish(t *testing.T) {
-	const sourceID = "progress-wait-publish-long"
-	store.Delete(sourceID)
-	tasks.Delete(sourceID)
-
-	state := ensure(sourceID, "WaitPublish")
-	state.mu.Lock()
-	state.data.Status = StatusWaitingPublish
-	state.updated = time.Now().Add(-staleDuration() - time.Minute)
-	state.mu.Unlock()
-
-	list := GetActiveTaskProgress()
-	found := false
-	for _, p := range list {
-		if p.Id == sourceID {
-			found = true
-			if p.Status != StatusWaitingPublish {
-				t.Fatalf("waiting_publish must stay, got %q", p.Status)
-			}
-		}
-	}
-	if !found {
-		t.Fatal("expected long waiting_publish still listed")
-	}
-
-	snap, ok := Snapshot(sourceID)
-	if !ok || snap.Status != StatusWaitingPublish {
-		t.Fatalf("map status should remain waiting_publish, ok=%v status=%q", ok, snap.Status)
-	}
-	store.Delete(sourceID)
 }
 
 func TestGetActiveTaskProgressMarksStaleRunningWithoutLive(t *testing.T) {
@@ -438,84 +370,6 @@ func TestGetActiveTaskProgressMarksStaleAbandonedStarting(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected abandoned starting to appear as failed within retain window")
-	}
-}
-
-func TestMarkSourcePagesFinishedStatuses(t *testing.T) {
-	const singleID = "pages-finished-single"
-	const batchID = "pages-finished-batch"
-	for _, id := range []string{singleID, batchID} {
-		store.Delete(id)
-	}
-
-	ensure(singleID, "S")
-	Update(singleID, func(p *model.CollectProgress) {
-		p.Status = StatusRunning
-		p.Total = 3
-		p.Success = 3
-	})
-	MarkSourcePagesFinished(singleID, true)
-	if snap, _ := Snapshot(singleID); snap.Status != StatusPageDone {
-		t.Fatalf("single flushAtEnd want page_done, got %q", snap.Status)
-	}
-
-	ensure(batchID, "B")
-	Update(batchID, func(p *model.CollectProgress) {
-		p.Status = StatusRunning
-		p.Total = 3
-		p.Success = 3
-	})
-	MarkSourcePagesFinished(batchID, false)
-	if snap, _ := Snapshot(batchID); snap.Status != StatusWaitingPublish {
-		t.Fatalf("batch want waiting_publish, got %q", snap.Status)
-	}
-
-	for _, id := range []string{singleID, batchID} {
-		store.Delete(id)
-	}
-}
-
-// 0 页时列表状态须与生命周期一致：批量 → waiting_publish，单站 → page_done（再由 defer 收尾）。
-func TestZeroPageProgressStatusMatchesLifecycle(t *testing.T) {
-	const (
-		batchID  = "zero-page-batch"
-		singleID = "zero-page-single"
-	)
-	for _, id := range []string{batchID, singleID} {
-		store.Delete(id)
-	}
-
-	// 模拟 handleCollect 0 页分支（与生产代码同一套状态赋值）
-	markZeroPageProgress := func(id string, flushAtEnd bool) {
-		ensure(id, id)
-		Update(id, func(p *model.CollectProgress) {
-			p.Total = 0
-			p.Current = 0
-			p.Success = 0
-			p.Failed = 0
-			if flushAtEnd {
-				p.Status = StatusPageDone
-			} else {
-				p.Status = StatusWaitingPublish
-			}
-		})
-	}
-
-	markZeroPageProgress(batchID, false)
-	if snap, _ := Snapshot(batchID); snap.Status != StatusWaitingPublish {
-		t.Fatalf("batch zero-page want waiting_publish, got %q", snap.Status)
-	}
-	if !isActiveStatus(StatusWaitingPublish) {
-		t.Fatal("waiting_publish must stay active so list shows 等待收尾")
-	}
-
-	markZeroPageProgress(singleID, true)
-	if snap, _ := Snapshot(singleID); snap.Status != StatusPageDone {
-		t.Fatalf("single zero-page want page_done, got %q", snap.Status)
-	}
-
-	for _, id := range []string{batchID, singleID} {
-		store.Delete(id)
 	}
 }
 

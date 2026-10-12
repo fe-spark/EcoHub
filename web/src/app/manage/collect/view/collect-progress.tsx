@@ -22,25 +22,16 @@ export default function CollectProgressView({
   const done = Math.min(finished, total || finished);
   const isDone = progress?.status === "done";
   const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
-  // 未 done 前封顶 99%；等待收尾/发布阶段固定 99%，避免“满页却像没结束”的误解。
-  const inPostPagePhase =
-    progress?.status === "page_done" ||
-    progress?.status === "waiting_publish" ||
-    progress?.status === "finalizing";
-  // 0 页完成（无新内容）：收尾前 99%，完成后 100%
   const zeroPageFinished =
     total === 0 &&
-    (inPostPagePhase || isDone || progress?.status === "failed" || progress?.status === "stopped");
+    (isDone || progress?.status === "failed" || progress?.status === "stopped");
   const percent = !progress
     ? 0
     : isDone
       ? 100
-      : inPostPagePhase || zeroPageFinished
-        ? 99
-        : progress.status === "starting"
-          ? 0
-          : Math.min(rawPercent, 99);
-  // 与旧表格列一致：展示「等待收尾 / 收尾发布中 / 部分失败」等阶段文案
+      : progress.status === "starting"
+        ? 0
+        : Math.min(rawPercent, 99);
   const statusText = resolveCollectProgressStatusText(progress);
   const progressText = !progress
     ? "未开始"
@@ -66,10 +57,7 @@ export default function CollectProgressView({
   const progressStrokeColor = failed > 0 && !isFullFail ? "#faad14" : undefined;
 
   const countLine = `${progressText}${failed > 0 ? ` · 失败 ${failed} 页` : ""}`;
-  // 收尾阶段：状态优先；计数作补充，避免只剩 9/9 看不出在发布
-  const metaLine = inPostPagePhase
-    ? `${statusText}${total > 0 || zeroPageFinished ? ` · ${countLine}` : ""}`
-    : countLine;
+  const metaLine = countLine;
 
   // 无进度数据时不渲染任何占位
   if (!progress) {

@@ -10,6 +10,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	"server/internal/repository/support"
 
 	"gorm.io/gorm"
 )
@@ -30,6 +31,11 @@ type dailyPidCountRow struct {
 	Count int           `gorm:"column:cnt"`
 }
 
+type dailyCategoryKeyCountRow struct {
+	CategoryKey string `gorm:"column:category_key"`
+	Count       int    `gorm:"column:cnt"`
+}
+
 // CategoryCountItem 顶级分类计数项。
 type CategoryCountItem struct {
 	CategoryID   int64
@@ -37,12 +43,27 @@ type CategoryCountItem struct {
 	Count        int
 }
 
-// NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源。
-func NavTopCategories() []model.Category {
+// NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源（按当前生效采集站隔离）。
+func NavTopCategories(sourceIdOpt ...string) []model.Category {
 	if db.Mdb == nil {
 		return nil
 	}
-	tree := repository.GetCategoryTree()
+	var sourceID string
+	if len(sourceIdOpt) > 0 {
+		sourceID = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceID == "" {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceID = strings.TrimSpace(active.Id)
+		}
+	}
+	var tree model.CategoryTree
+	if sourceID != "" {
+		tree = repository.GetActiveCategoryTree(sourceID)
+	}
+	if len(tree.Children) == 0 {
+		tree = repository.GetCategoryTree()
+	}
 	out := make([]model.Category, 0, len(tree.Children))
 	for _, c := range tree.Children {
 		if c == nil || !c.Show {
@@ -129,13 +150,67 @@ func dailyPidFilter(pid int64) *CategoryCountItem {
 	return &CategoryCountItem{CategoryID: pid, CategoryName: "_"}
 }
 
-func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64) *gorm.DB {
+func sourceTopCategoryKeyGroups(sourceID string, navIDs []int64) (keyToRoot map[string]int64, allVisibleKeys []string, ok bool) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil || len(repository.SourceRootTypeIDs(sourceID)) == 0 {
+		return nil, nil, false
+	}
+	if len(navIDs) == 0 {
+		navIDs = repository.SourceRootTypeIDs(sourceID)
+	}
+	keyToRoot = make(map[string]int64, len(navIDs)*4)
+	allVisibleKeys = make([]string, 0, len(navIDs)*4)
+	for _, rootID := range navIDs {
+		if rootID <= 0 {
+			continue
+		}
+		for _, typeID := range repository.PublicSourceTypeIDs(sourceID, "pid", rootID) {
+			key := support.BuildSourceCategoryKey(sourceID, typeID)
+			if key == "" {
+				continue
+			}
+			if _, exists := keyToRoot[key]; !exists {
+				keyToRoot[key] = rootID
+				allVisibleKeys = append(allVisibleKeys, key)
+			}
+		}
+	}
+	return keyToRoot, allVisibleKeys, len(keyToRoot) > 0
+}
+
+func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64, sourceID ...string) *gorm.DB {
 	if cat == nil {
 		return q
 	}
 	name := strings.TrimSpace(cat.CategoryName)
 	if name == "" || name == "全部" {
 		return q
+	}
+	var srcID string
+	if len(sourceID) > 0 {
+		srcID = strings.TrimSpace(sourceID[0])
+	}
+	if _, allVisibleKeys, useSourceKeys := sourceTopCategoryKeyGroups(srcID, navIDs); useSourceKeys {
+		if name == "其他" {
+			if len(allVisibleKeys) == 0 {
+				return q
+			}
+			return q.Where("category_key IS NULL OR category_key = '' OR category_key NOT IN ?", allVisibleKeys)
+		}
+		if cat.CategoryID > 0 {
+			typeIDs := repository.PublicSourceTypeIDs(srcID, "pid", cat.CategoryID)
+			keys := make([]string, 0, len(typeIDs))
+			for _, id := range typeIDs {
+				if k := support.BuildSourceCategoryKey(srcID, id); k != "" {
+					keys = append(keys, k)
+				}
+			}
+			if len(keys) == 0 {
+				return q.Where("1 = 0")
+			}
+			return q.Where("category_key IN ?", keys)
+		}
+		return q.Where("1 = 0")
 	}
 	if name == "其他" {
 		if len(navIDs) == 0 {
@@ -153,7 +228,7 @@ func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64, sourceI
 	q := db.Mdb.Table(model.TableFilmIndex).
 		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix())
 	q = applyDailySourceMembership(q, sourceID)
-	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs)
+	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs, sourceID)
 }
 
 func applyDailySourceMembership(q *gorm.DB, sourceID string) *gorm.DB {
@@ -194,7 +269,7 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	current, pageSize := clampDailyUpdatePage(q.Current, q.PageSize)
 	navIDs := q.NavIDs
 	if q.Pid != DailyPidAll && len(navIDs) == 0 {
-		navIDs = NavTopCategoryIDs(NavTopCategories())
+		navIDs = NavTopCategoryIDs(NavTopCategories(q.SourceId))
 	}
 
 	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
@@ -254,6 +329,29 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (
 	}
 	if to.Before(from) {
 		return countByPid, 0, 0, nil
+	}
+
+	if keyToRoot, _, useSourceKeys := sourceTopCategoryKeyGroups(sourceID, navIDs); useSourceKeys {
+		var rows []dailyCategoryKeyCountRow
+		q := applyDailySourceMembership(db.Mdb.Table(model.TableFilmIndex).
+			Select("category_key AS category_key, COUNT(mid) AS cnt").
+			Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()), sourceID).
+			Group("category_key")
+		if err = q.Scan(&rows).Error; err != nil {
+			return countByPid, 0, 0, err
+		}
+		for _, r := range rows {
+			if r.Count <= 0 {
+				continue
+			}
+			total += r.Count
+			if rootID, ok := keyToRoot[strings.TrimSpace(r.CategoryKey)]; ok && rootID > 0 {
+				countByPid[rootID] += r.Count
+			} else {
+				otherCount += r.Count
+			}
+		}
+		return countByPid, otherCount, total, nil
 	}
 
 	navSet := make(map[int64]struct{}, len(navIDs))

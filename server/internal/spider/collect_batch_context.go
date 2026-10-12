@@ -175,7 +175,11 @@ type collectBatchContext struct {
 	sources            []model.FilmSource
 	startedAt          time.Time
 	isStandalone       bool
+	primaryWarmedUp    bool
 	masterAffectedMIDs map[int64]struct{}
+	notifyMIDs         map[int64]struct{}
+	sourceNotifyMIDs   map[string]map[int64]struct{}
+	sourceErrors       map[string]string
 	finishedSources    map[string]model.FilmSource
 	occupyTokens       map[string]uint64
 }
@@ -195,6 +199,9 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 		startedAt:          startedAt,
 		isStandalone:       standalone,
 		masterAffectedMIDs: make(map[int64]struct{}),
+		notifyMIDs:         make(map[int64]struct{}),
+		sourceNotifyMIDs:   make(map[string]map[int64]struct{}, len(sources)),
+		sourceErrors:       make(map[string]string),
 		finishedSources:    make(map[string]model.FilmSource),
 		occupyTokens:       snapshotOccupyTokens(sources),
 	}
@@ -229,17 +236,68 @@ func (b *collectBatchContext) AddAffectedMIDs(s *model.FilmSource, h int, mids [
 	b.addAffectedMIDs(s, h, mids)
 }
 
-func (b *collectBatchContext) dropOccupyToken(id string) {
+// AddNotifyMIDs 实现 fetcher.Batch：记录本批次新增或播放线路实质变更的 mid（含分源去重统计）。
+func (b *collectBatchContext) AddNotifyMIDs(sourceID string, mids []int64) {
+	if b == nil || len(mids) == 0 {
+		return
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	b.mu.Lock()
+	var srcSet map[int64]struct{}
+	if sourceID != "" {
+		srcSet = b.sourceNotifyMIDs[sourceID]
+		if srcSet == nil {
+			srcSet = make(map[int64]struct{}, len(mids))
+			b.sourceNotifyMIDs[sourceID] = srcSet
+		}
+	}
+	for _, mid := range mids {
+		if mid > 0 {
+			b.notifyMIDs[mid] = struct{}{}
+			if srcSet != nil {
+				srcSet[mid] = struct{}{}
+			}
+		}
+	}
+	b.mu.Unlock()
+}
+
+// RecordSourceError 实现 fetcher.Batch：记录单站采集错误信息。
+func (b *collectBatchContext) RecordSourceError(sourceID, reason string) {
 	if b == nil {
 		return
 	}
+	sourceID = strings.TrimSpace(sourceID)
+	reason = strings.TrimSpace(reason)
+	if sourceID == "" || reason == "" {
+		return
+	}
+	b.mu.Lock()
+	b.sourceErrors[sourceID] = reason
+	b.mu.Unlock()
+}
+
+// emitSummary 构建并异步投递本次采集批次汇总通知。
+func (b *collectBatchContext) emitSummary() {
+	emitBatchNotify(b)
+}
+
+func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	id = collectSourceID(id)
 	if id == "" {
 		return
 	}
-	b.mu.Lock()
-	delete(b.occupyTokens, id)
-	b.mu.Unlock()
+	if b != nil {
+		b.mu.Lock()
+		tok, hasTok := b.occupyTokens[id]
+		delete(b.occupyTokens, id)
+		b.mu.Unlock()
+		if hasTok {
+			releaseCollectTokens(map[string]uint64{id: tok})
+			return
+		}
+	}
+	releaseCollectSourceIDs(id)
 }
 
 func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
@@ -249,20 +307,13 @@ func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
 			cur.Status = progress.StatusFailed
 		}
 	})
-	if batchCtx != nil {
-		batchCtx.dropOccupyToken(id)
-	}
-	releaseCollectSourceIDs(id)
+	batchCtx.releaseSourceOccupy(id)
 }
 
-// abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：记完成并立刻放占用，允许单独重试。
+// abandonQueuedCollectSource 站点不再采集（排队中停止 / 一键终止未派发）：立刻放占用，允许单独重试。
 func abandonQueuedCollectSource(source model.FilmSource, batchCtx *collectBatchContext) {
 	progress.MarkStopped(source.Id)
-	if batchCtx != nil {
-		batchCtx.markSourceFinished(source)
-		batchCtx.dropOccupyToken(source.Id)
-	}
-	releaseCollectSourceIDs(source.Id)
+	batchCtx.releaseSourceOccupy(source.Id)
 }
 
 func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
@@ -278,34 +329,56 @@ func (b *collectBatchContext) markSourceFinished(source model.FilmSource) {
 	b.finishedSources[source.Id] = source
 }
 
-func (b *collectBatchContext) flushAndFinalize() error {
-	if b == nil {
+// finalizePrimarySource 首选采集站完成时立即刷窗并触发首页缓存预热，无需等待同批其余慢速非首选站。
+func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
+	if b == nil || !isPreferredCollectSource(sourceID) {
 		return nil
 	}
 	b.mu.Lock()
-	if len(b.finishedSources) == 0 && len(b.masterAffectedMIDs) == 0 && streamBuf.pendingCount() == 0 {
+	if b.primaryWarmedUp {
 		b.mu.Unlock()
 		return nil
 	}
-
-	finishedMap := b.finishedSources
-	b.finishedSources = make(map[string]model.FilmSource)
-	b.masterAffectedMIDs = make(map[int64]struct{})
+	b.primaryWarmedUp = true
 	b.mu.Unlock()
-
-	progress.MarkSourcesFinalizing(finishedMap)
 
 	collectLifecycle.beginPublish()
 	defer collectLifecycle.endPublish()
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	if err := finalizeStreamPublish(); err != nil {
-		progress.MarkSourcesFinalizeFailed(finishedMap)
-		return err
+	return finalizeStreamPublish(true)
+}
+
+func (b *collectBatchContext) flushAndFinalize() error {
+	if b == nil {
+		return nil
 	}
-	progress.MarkSourcesPublished(finishedMap)
-	return nil
+	b.mu.Lock()
+	hasWork := len(b.finishedSources) > 0 || len(b.masterAffectedMIDs) > 0 || streamBuf.pendingCount() > 0
+	warmupHome := false
+	if !b.primaryWarmedUp {
+		for id := range b.finishedSources {
+			if isPreferredCollectSource(id) {
+				warmupHome = true
+				b.primaryWarmedUp = true
+				break
+			}
+		}
+	}
+	b.finishedSources = make(map[string]model.FilmSource)
+	b.masterAffectedMIDs = make(map[int64]struct{})
+	b.mu.Unlock()
+	if !hasWork {
+		return nil
+	}
+
+	collectLifecycle.beginPublish()
+	defer collectLifecycle.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+
+	return finalizeStreamPublish(warmupHome)
 }
 
 func (b *collectBatchContext) close() {

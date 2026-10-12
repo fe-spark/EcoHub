@@ -21,21 +21,11 @@ import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import {
-  COLLECT_BATCH_FAILED_EVENT,
-  TOUR_HOLD_PROGRESS_ATTR,
-} from "@/app/manage/components/manage-tour";
+import { COLLECT_BATCH_FAILED_EVENT } from "@/app/manage/components/manage-tour";
 import BatchCollectModal from "./batch-collect-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
-import CollectQueueBars, { type CollectQueueBarItem } from "./collect-queue-bars";
 import CollectSourceGrid from "./collect-source-grid";
 import SourceFormModal from "./source-form-modal";
-import {
-  computeCollectQueueProgress,
-  groupCollectQueues,
-  matchPrevCollectQueueBar,
-  newClientCollectQueueId,
-} from "./collect-queue";
 import {
   isActiveCollectStatus,
   COLLECT_SOURCE_WARN_COUNT,
@@ -57,16 +47,8 @@ interface CollectListItemResponse extends Partial<FilmSource> {
   uri: string;
 }
 
-type QueueBarState = {
-  queueId: string;
-  sourceIds: string[];
-  seq: number;
-  view: NonNullable<ReturnType<typeof computeCollectQueueProgress>>;
-  hideAt: number | null;
-};
-
-/** 启动瞬间本地进度：0%，避免等轮询才出现进度条 */
-function makeStartingProgress(id: string, name: string, queueId: string): CollectProgress {
+/** 启动瞬间本地进度：0%，避免等轮询才出现进度 */
+function makeStartingProgress(id: string, name: string): CollectProgress {
   return {
     id,
     name,
@@ -75,14 +57,11 @@ function makeStartingProgress(id: string, name: string, queueId: string): Collec
     success: 0,
     failed: 0,
     status: "starting",
-    queueId,
   };
 }
 
 const POLL_INTERVAL = 4000;
 const MAX_POLL_FAILURES = 10;
-/** 采集全部完成/失败后，顶部总进度条保留展示的时长 */
-const OVERALL_DONE_KEEP_MS = 10000;
 
 function normalizeSource(item: CollectListItemResponse): FilmSource {
   return {
@@ -160,15 +139,6 @@ export default function CollectManagePageView() {
   const [cleanupSkipped, setCleanupSkipped] = useState<CleanupSkippedItem[]>([]);
   const cleanupScanCanceledRef = useRef(false);
 
-  const [stoppingQueueId, setStoppingQueueId] = useState<string | null>(null);
-  const [queueBars, setQueueBars] = useState<QueueBarState[]>([]);
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  const queueSeqRef = useRef(0);
-  const seenRunningQueueIdsRef = useRef<Set<string>>(new Set());
-  /** 顶部进度条已倒计时隐藏的终态任务；同步隐藏对应卡片环形进度 */
-  const [hiddenDoneIds, setHiddenDoneIds] = useState<string[]>([]);
-  const [tourHoldProgress, setTourHoldProgress] = useState(false);
-
   // 仅「仍在生命周期内」的任务禁用操作；done/failed 短暂展示进度但不锁按钮。
   const activeCollectIds = useMemo(
     () =>
@@ -178,172 +148,24 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
+  const tourProgressPhase = useMemo(() => {
+    if (activeCollectIds.length > 0) {
+      return "running";
+    }
+    const statuses = siteList.map((item) => item.progress?.status).filter(Boolean);
+    if (statuses.length === 0) {
+      return undefined;
+    }
+    if (statuses.includes("failed")) {
+      return "failed";
+    }
+    if (statuses.includes("stopped")) {
+      return "stopped";
+    }
+    return "done";
+  }, [activeCollectIds.length, siteList]);
+
   const canAddSource = canWrite;
-
-  const liveQueueGroups = useMemo(() => groupCollectQueues(siteList), [siteList]);
-
-  useEffect(() => {
-    const root = document.documentElement;
-    const sync = () => setTourHoldProgress(root.hasAttribute(TOUR_HOLD_PROGRESS_ATTR));
-    sync();
-    const obs = new MutationObserver(sync);
-    obs.observe(root, { attributes: true, attributeFilter: [TOUR_HOLD_PROGRESS_ATTR] });
-    return () => obs.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const liveIds = new Set(liveQueueGroups.map((group) => group.queueId));
-    const expiredIds: string[] = [];
-    const expiredSourceIds: string[] = [];
-
-    setQueueBars((prev) => {
-      const usedPrev = new Set<string>();
-      const next: QueueBarState[] = [];
-
-      const matchPrev = (group: { queueId: string; sourceIds: string[] }) =>
-        matchPrevCollectQueueBar(group, prev, usedPrev);
-
-      for (const group of liveQueueGroups) {
-        const view = computeCollectQueueProgress(group.sourceIds, siteList, activeCollectIds);
-        if (!view) {
-          continue;
-        }
-        const existing = matchPrev(group);
-        if (existing) {
-          usedPrev.add(existing.queueId);
-        }
-        if (view.running) {
-          seenRunningQueueIdsRef.current.add(group.queueId);
-          next.push({
-            queueId: group.queueId,
-            sourceIds: group.sourceIds,
-            seq: existing?.seq ?? ++queueSeqRef.current,
-            view,
-            hideAt: null,
-          });
-          continue;
-        }
-        if (!existing && !seenRunningQueueIdsRef.current.has(group.queueId) && !tourHoldProgress) {
-          expiredSourceIds.push(...group.sourceIds);
-          continue;
-        }
-        const hideAt = tourHoldProgress
-          ? null
-          : existing?.hideAt ?? nowMs + OVERALL_DONE_KEEP_MS;
-        if (hideAt != null && hideAt <= nowMs) {
-          expiredSourceIds.push(...group.sourceIds);
-          expiredIds.push(group.queueId);
-          continue;
-        }
-        next.push({
-          queueId: group.queueId,
-          sourceIds: group.sourceIds,
-          seq: existing?.seq ?? ++queueSeqRef.current,
-          view,
-          hideAt,
-        });
-      }
-
-      const coveredSources = new Set(next.flatMap((bar) => bar.sourceIds));
-      for (const bar of prev) {
-        if (liveIds.has(bar.queueId) || usedPrev.has(bar.queueId)) {
-          continue;
-        }
-        if (bar.sourceIds.some((id) => coveredSources.has(id))) {
-          continue;
-        }
-        if (tourHoldProgress) {
-          next.push(bar);
-          continue;
-        }
-        if (bar.hideAt != null && bar.hideAt > nowMs) {
-          next.push({
-            ...bar,
-            view: {
-              ...bar.view,
-              running: false,
-              percent: 100,
-              activeCount: 0,
-              fetchingCount: 0,
-              wrappingCount: 0,
-            },
-          });
-          continue;
-        }
-        if (bar.view.running && bar.hideAt == null) {
-          next.push({
-            ...bar,
-            view: {
-              ...bar.view,
-              running: false,
-              percent: 100,
-              activeCount: 0,
-              fetchingCount: 0,
-              wrappingCount: 0,
-            },
-            hideAt: nowMs + OVERALL_DONE_KEEP_MS,
-          });
-          continue;
-        }
-        expiredIds.push(bar.queueId);
-        expiredSourceIds.push(...bar.sourceIds);
-      }
-
-      next.sort((a, b) => a.seq - b.seq);
-      return next;
-    });
-
-    if (expiredIds.length > 0) {
-      for (const id of expiredIds) {
-        seenRunningQueueIdsRef.current.delete(id);
-      }
-    }
-    if (expiredSourceIds.length > 0) {
-      setHiddenDoneIds((prev) => {
-        const merged = [...new Set([...prev, ...expiredSourceIds])];
-        return merged.length === prev.length ? prev : merged;
-      });
-    }
-  }, [activeCollectIds, liveQueueGroups, nowMs, siteList, tourHoldProgress]);
-
-  useEffect(() => {
-    const pending = queueBars.some((bar) => bar.hideAt != null);
-    if (!pending) {
-      return;
-    }
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [queueBars]);
-
-  const visibleQueueBars = useMemo<CollectQueueBarItem[]>(() => {
-    const byId = new Map(siteList.map((item) => [item.id, item]));
-    return queueBars
-      .filter((bar) => bar.hideAt == null || bar.hideAt > nowMs)
-      .map((bar) => ({
-        queueId: bar.queueId,
-        sourceIds: bar.sourceIds,
-        seq: bar.seq,
-        view: bar.view,
-        countdown:
-          bar.hideAt != null ? Math.max(1, Math.ceil((bar.hideAt - nowMs) / 1000)) : null,
-        canStop: bar.sourceIds.some((id) => {
-          const status = byId.get(id)?.progress?.status;
-          return status === "starting" || status === "running";
-        }),
-      }));
-  }, [nowMs, queueBars, siteList]);
-
-  // 站点重新变为活跃（再次采集）时，取消卡片进度隐藏
-  useEffect(() => {
-    if (hiddenDoneIds.length === 0) {
-      return;
-    }
-    const activeSet = new Set(activeCollectIds);
-    setHiddenDoneIds((prev) => {
-      const next = prev.filter((id) => !activeSet.has(id));
-      return next.length === prev.length ? prev : next;
-    });
-  }, [activeCollectIds, hiddenDoneIds]);
 
   const clearPollTimer = useCallback(() => {
     if (timerRef.current) {
@@ -638,11 +460,10 @@ export default function CollectManagePageView() {
       message.warning("该采集站已在采集中");
       return;
     }
-    // 点击后立即展示 0% 进度条，再等接口与列表校准
-    const queueId = newClientCollectQueueId();
+    // 点击后立即展示 0% 进度，再等接口与列表校准
     updateSiteListItem(record.id, (item) => ({
       ...item,
-      progress: makeStartingProgress(record.id, record.name, queueId),
+      progress: makeStartingProgress(record.id, record.name),
     }));
     const collectTime = record.cd ?? 24;
     const resp = await ApiPost("/manage/spider/start", {
@@ -919,11 +740,10 @@ export default function CollectManagePageView() {
     }
     setBatchOpen(false);
     const idSet = new Set(claimedIds);
-    const queueId = newClientCollectQueueId();
     setSiteList((current) =>
       current.map((item) =>
         idSet.has(item.id)
-          ? { ...item, progress: makeStartingProgress(item.id, item.name, queueId) }
+          ? { ...item, progress: makeStartingProgress(item.id, item.name) }
           : item,
       ),
     );
@@ -947,30 +767,6 @@ export default function CollectManagePageView() {
     );
     window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
     await getCollectList();
-  };
-
-  const stopQueue = async (queueId: string, sourceIds: string[]) => {
-    const stoppable = sourceIds.filter((id) => {
-      const status = siteList.find((item) => item.id === id)?.progress?.status;
-      return status === "starting" || status === "running";
-    });
-    if (stoppable.length === 0) {
-      return;
-    }
-    setStoppingQueueId(queueId);
-    try {
-      const results = await Promise.all(
-        stoppable.map((id) => ApiPost("/manage/spider/stop", { id })),
-      );
-      if (results.some((resp) => resp.code === 0)) {
-        message.success("已停止采集");
-      } else {
-        message.error(results[0]?.msg || "终止任务失败");
-      }
-      await getCollectList();
-    } finally {
-      setStoppingQueueId(null);
-    }
   };
 
   const selectedCount = selectedSourceIds.length;
@@ -1078,21 +874,17 @@ export default function CollectManagePageView() {
           </div>
         </Card>
 
-        <CollectQueueBars
-          items={visibleQueueBars}
-          tourHoldProgress={tourHoldProgress}
-          stoppingQueueId={stoppingQueueId}
-          canWrite={canWrite}
-          onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}
-        />
-
         {siteList.length > 0 ? (
-          <div className={styles.sourceGroups}>
+          <div
+            className={styles.sourceGroups}
+            data-tour={tourProgressPhase ? "collect-progress" : undefined}
+            data-tour-progress={tourProgressPhase}
+          >
             <CollectSourceGrid
               siteList={siteList}
               selectedSourceIds={selectedSourceIds.map(String)}
               activeCollectIds={activeCollectIds}
-              hiddenDoneIds={hiddenDoneIds}
+              hiddenDoneIds={[]}
               canWrite={canWrite}
               canAddSource={canAddSource}
               globalSpiderProxyReady={globalSpiderProxyReady}

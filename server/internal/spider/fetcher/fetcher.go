@@ -47,6 +47,8 @@ type Deps struct {
 	ResolveSpiderProxy func() (bool, string)
 	// ResolveSourceProxy 查询站点是否启用代理并获取代理地址（兼容兜底）。
 	ResolveSourceProxy func(sourceID string) (bool, string)
+	// OnSourceFailed 单站连续失败达到上限终止采集时的通知回调（可选）。
+	OnSourceFailed func(sourceID, sourceName, reason string)
 }
 
 var deps Deps

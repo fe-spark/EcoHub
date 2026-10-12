@@ -34,6 +34,7 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 	site := repository.GetSiteBasic()
 	proxyCfg := repository.GetProxyConfig()
 	tmdbCfg := repository.GetTMDBConfig()
+	notifyCfg := repository.GetNotifyConfig()
 
 	rules, _ := repository.ListAllMappingRules(repository.MappingRuleQuery{})
 	exports := make([]model.MappingRuleExport, 0, len(rules))
@@ -58,6 +59,7 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 		MappingRules: exports,
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
+		Notify:       &notifyCfg,
 	}
 }
 
@@ -150,6 +152,7 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
+		NotifySvc.EnsureBotPoller()
 	}
 
 	if req.Modules.TMDB {
@@ -159,6 +162,16 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err := repository.SaveTMDBConfig(*backup.TMDB); err != nil {
 			return fmt.Errorf("导入 TMDB 刮削配置失败: %w", err)
 		}
+	}
+
+	if req.Modules.Notify {
+		if backup.Notify == nil {
+			return errors.New("备份中缺少通知配置数据")
+		}
+		if err := repository.SaveNotifyConfig(*backup.Notify); err != nil {
+			return fmt.Errorf("导入通知配置失败: %w", err)
+		}
+		NotifySvc.EnsureBotPoller()
 	}
 
 	return nil

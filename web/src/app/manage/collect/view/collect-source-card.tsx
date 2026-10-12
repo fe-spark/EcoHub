@@ -228,15 +228,7 @@ export default function CollectSourceCard({
                   </Button>
                 </Popconfirm>
               ) : (
-                <Tooltip
-                  title={
-                    phase === "finalizing"
-                      ? "正在收尾发布，无法停止"
-                      : phase === "waiting_publish" || phase === "page_done"
-                        ? "等待收尾中，无法停止"
-                        : "数据抓取已完成，正在等待落库"
-                  }
-                >
+                <Tooltip title="数据抓取已完成，正在等待落库">
                   <span>
                     <Button danger icon={<StopOutlined />} disabled>
                       停止采集

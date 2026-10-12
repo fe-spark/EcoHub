@@ -204,6 +204,17 @@ func SetupRouter() *gin.Engine {
 			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.ProxyHd.TestProxy)
 		}
 
+		// Telegram 消息通知相关
+		notifyRoute := manageRoute.Group(`/notify`)
+		{
+			notifyRoute.GET(``, handler.NotifyHd.GetConfig)
+			notifyRoute.GET(`/config`, handler.NotifyHd.GetConfig)
+			notifyRoute.POST(`/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
+			notifyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
+			notifyRoute.POST(`/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
+			notifyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
+		}
+
 		// 文件管理
 		fileRoute := manageRoute.Group(`/file`)
 		{

@@ -132,6 +132,77 @@ func TestEnqueueStreamPublish_PreferredCountFlushes(t *testing.T) {
 	}
 }
 
+func TestCollectBatchContext_OnlyPrimarySourceTriggersWarmup(t *testing.T) {
+	resetStreamPublishBufferForTest()
+	origPub := publishStreamWindowFn
+	origPref := preferredSourceIDFn
+	publishStreamWindowFn = func(mids []int64) error { return nil }
+	preferredSourceIDFn = func() string { return "primary" }
+	t.Cleanup(func() {
+		resetStreamPublishBufferForTest()
+		publishStreamWindowFn = origPub
+		preferredSourceIDFn = origPref
+	})
+
+	primarySrc := model.FilmSource{Id: "primary", Name: "Primary", Sort: 0}
+	backupSrc := model.FilmSource{Id: "backup", Name: "Backup", Sort: 1}
+
+	// 1. 非首选站单站完成：primaryWarmedUp 应保持 false
+	backupBatch := newCollectBatchContext(model.CollectTriggerManual, "单站采集", []model.FilmSource{backupSrc}, time.Now(), true)
+	defer backupBatch.close()
+	backupBatch.markSourceFinished(backupSrc)
+	if err := backupBatch.flushAndFinalize(); err != nil {
+		t.Fatalf("backup flushAndFinalize: %v", err)
+	}
+	if backupBatch.primaryWarmedUp {
+		t.Fatal("非首选站不应触发首页预热标记")
+	}
+
+	// 2. 批量采集中首选站先完成：finalizePrimarySource 立即置位 primaryWarmedUp，收尾 flushAndFinalize 不再重复预热
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", []model.FilmSource{primarySrc, backupSrc}, time.Now(), false)
+	defer batch.close()
+	batch.markSourceFinished(primarySrc)
+	if err := batch.finalizePrimarySource(primarySrc.Id); err != nil {
+		t.Fatalf("finalizePrimarySource: %v", err)
+	}
+	if !batch.primaryWarmedUp {
+		t.Fatal("首选站完成后应立即置位 primaryWarmedUp")
+	}
+	batch.markSourceFinished(backupSrc)
+	if err := batch.flushAndFinalize(); err != nil {
+		t.Fatalf("batch flushAndFinalize: %v", err)
+	}
+}
+
+func TestCollectBatchContext_ReleaseSourceOccupyPerSource(t *testing.T) {
+	s1 := model.FilmSource{Id: "occ-s1", Name: "S1", State: true}
+	s2 := model.FilmSource{Id: "occ-s2", Name: "S2", State: true}
+	releaseCollectSourceIDs(s1.Id, s2.Id)
+	t.Cleanup(func() { releaseCollectSourceIDs(s1.Id, s2.Id) })
+
+	occupied := occupyCollectSources([]model.FilmSource{s1, s2}, "Batch-1")
+	if len(occupied) != 2 {
+		t.Fatalf("expected 2 occupied sources, got %d", len(occupied))
+	}
+	batch1 := newCollectBatchContext(model.CollectTriggerManual, "Batch-1", occupied, time.Now(), false)
+	defer batch1.close()
+
+	// s1 完成并立即释放自身占用锁，而 s2 仍在运行
+	batch1.releaseSourceOccupy(s1.Id)
+	if isOccupiedCollectSource(s1.Id) {
+		t.Fatal("s1 完成后应立即释放占用")
+	}
+	if !isOccupiedCollectSource(s2.Id) {
+		t.Fatal("s2 仍在运行，应保持占用")
+	}
+
+	// 新批次尝试占用 s1, s2：应仅占到已完成的 s1，跳过仍在跑的 s2
+	occupied2 := occupyCollectSources([]model.FilmSource{s1, s2}, "Batch-2")
+	if len(occupied2) != 1 || occupied2[0].Id != s1.Id {
+		t.Fatalf("新批次应仅占用已释放的 s1，got %+v", occupied2)
+	}
+}
+
 func seqMIDs(from, to int64) []int64 {
 	out := make([]int64, 0, to-from+1)
 	for i := from; i <= to; i++ {

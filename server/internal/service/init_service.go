@@ -51,6 +51,7 @@ func (s *InitService) DefaultDataInit() {
 	// 定时任务启动前，从 Redis 备忘恢复活跃快照版本到内存。
 	filmsnapshot.RestoreActiveSnapshotVersion()
 	s.SpiderInit()
+	NotifySvc.EnsureBotPoller()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
 }

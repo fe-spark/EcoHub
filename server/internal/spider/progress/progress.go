@@ -79,23 +79,18 @@ func Snapshot(sourceID string) (model.CollectProgress, bool) {
 
 // 采集进度状态机（SourceJob）：
 //
-//	starting → running → page_done → waiting_publish → finalizing → done
-//	                ↘ stopped / failed
+//	starting → running → done / stopped / failed
 const (
-	StatusStarting       = "starting"
-	StatusRunning        = "running"
-	StatusPageDone       = "page_done"
-	StatusWaitingPublish = "waiting_publish"
-	StatusFinalizing     = "finalizing"
-	StatusDone           = "done"
-	StatusFailed         = "failed"
-	StatusStopped        = "stopped"
+	StatusStarting = "starting"
+	StatusRunning  = "running"
+	StatusDone     = "done"
+	StatusFailed   = "failed"
+	StatusStopped  = "stopped"
 )
 
 func isActiveStatus(status string) bool {
 	switch status {
-	case StatusStarting, StatusRunning, StatusPageDone,
-		StatusWaitingPublish, StatusFinalizing:
+	case StatusStarting, StatusRunning:
 		return true
 	default:
 		return false
@@ -111,20 +106,8 @@ func IsTerminalStatus(status string) bool {
 	}
 }
 
-func isPostFetchStatus(status string) bool {
-	switch status {
-	case StatusPageDone, StatusWaitingPublish, StatusFinalizing:
-		return true
-	default:
-		return false
-	}
-}
-
 func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Duration) bool {
 	if age < staleAfter {
-		return false
-	}
-	if isPostFetchStatus(status) {
 		return false
 	}
 	// 占用中的 starting = 排队等并发槽；无占用且无 live 才是遗弃进度。
@@ -135,17 +118,6 @@ func shouldMarkStale(sourceID, status string, live bool, age, staleAfter time.Du
 		return false
 	}
 	return status == StatusRunning
-}
-
-// canEnterFinalizing 不含 stopped：用户停止后仍可 flush，但终态保持「已停止」，避免单站收尾写成采集完成。
-func canEnterFinalizing(status string) bool {
-	switch status {
-	case StatusStarting, StatusRunning, StatusPageDone,
-		StatusWaitingPublish, StatusDone:
-		return true
-	default:
-		return false
-	}
 }
 
 func IsStopped(sourceID string) bool {
@@ -188,10 +160,6 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	}
 	_, live := tasks.Load(sourceID)
 	age := now.Sub(state.updated)
-	if isPostFetchStatus(state.data.Status) {
-		state.mu.Unlock()
-		return true
-	}
 	if live && (state.data.Status == StatusRunning || state.data.Status == StatusStarting) {
 		state.mu.Unlock()
 		return true
@@ -209,16 +177,11 @@ func refreshAndIsBlockingProgress(sourceID string) bool {
 	return true
 }
 
-func MarkSourcePagesFinished(sourceID string, flushAtEnd bool) {
+func MarkSourceDone(sourceID string) {
 	Update(sourceID, func(progress *model.CollectProgress) {
-		if progress.Status != StatusRunning && progress.Status != StatusStarting {
-			return
+		if progress.Status == StatusRunning || progress.Status == StatusStarting {
+			progress.Status = StatusDone
 		}
-		if flushAtEnd {
-			progress.Status = StatusPageDone
-			return
-		}
-		progress.Status = StatusWaitingPublish
 	})
 	FlushHotpathSideEffects(sourceID)
 }
@@ -255,48 +218,15 @@ func MarkStopped(sourceID string) {
 	})
 }
 
-// StampPageRunning 记录正在抓取的页码。终态和收尾态不可被 worker 写回 running。
+// StampPageRunning 记录正在抓取的页码。终态不可被 worker 写回 running。
 func StampPageRunning(progress *model.CollectProgress, page int) {
-	if IsTerminalStatus(progress.Status) || isPostFetchStatus(progress.Status) {
+	if IsTerminalStatus(progress.Status) {
 		return
 	}
 	if page > progress.Current {
 		progress.Current = page
 	}
 	progress.Status = StatusRunning
-}
-
-func MarkSourcesFinalizing(sources map[string]model.FilmSource) {
-	ids := make([]string, 0, len(sources))
-	for _, source := range sources {
-		ids = append(ids, source.Id)
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if canEnterFinalizing(progress.Status) {
-				progress.Status = StatusFinalizing
-			}
-		})
-	}
-	FlushHotpathSideEffects(ids...)
-}
-
-func MarkSourcesPublished(sources map[string]model.FilmSource) {
-	for _, source := range sources {
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if progress.Status == StatusFinalizing {
-				progress.Status = StatusDone
-			}
-		})
-	}
-}
-
-func MarkSourcesFinalizeFailed(sources map[string]model.FilmSource) {
-	for _, source := range sources {
-		Update(source.Id, func(progress *model.CollectProgress) {
-			if progress.Status == StatusFinalizing {
-				progress.Status = StatusFailed
-			}
-		})
-	}
 }
 
 func GetActiveTaskProgress() []model.CollectProgress {

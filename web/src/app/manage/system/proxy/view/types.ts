@@ -1,6 +1,7 @@
 export interface ProxyModulesValues {
   spider: boolean;
   tmdb: boolean;
+  notify: boolean;
   upgrade: boolean;
 }
 

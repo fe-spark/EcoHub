@@ -21,9 +21,6 @@ export interface FilmSource {
 export type CollectProgressStatus =
   | "starting"
   | "running"
-  | "page_done"
-  | "waiting_publish"
-  | "finalizing"
   | "done"
   | "failed"
   | "stopped"
@@ -43,21 +40,7 @@ export interface CollectProgress {
 
 /** 仍处于采集生命周期、列表应展示进度的状态 */
 export function isActiveCollectStatus(status?: string | null): boolean {
-  return (
-    status === "starting" ||
-    status === "running" ||
-    status === "page_done" ||
-    status === "waiting_publish" ||
-    status === "finalizing"
-  );
-}
-
-export function isCollectWrapUpStatus(status?: string | null): boolean {
-  return (
-    status === "page_done" ||
-    status === "waiting_publish" ||
-    status === "finalizing"
-  );
+  return status === "starting" || status === "running";
 }
 
 export function isPartialCollectFailure(progress?: CollectProgress | null): boolean {
@@ -70,12 +53,6 @@ export function resolveCollectStatusText(status?: string | null): string {
       return "等待中";
     case "running":
       return "采集中";
-    case "page_done":
-      return "分页完成";
-    case "waiting_publish":
-      return "等待收尾";
-    case "finalizing":
-      return "收尾发布中";
     case "done":
       return "采集完成";
     case "failed":
@@ -90,9 +67,6 @@ export function resolveCollectStatusText(status?: string | null): string {
 export function resolveCollectProgressStatusText(progress?: CollectProgress | null): string {
   if (!progress) {
     return "暂无采集进度";
-  }
-  if (isCollectWrapUpStatus(progress.status) && isPartialCollectFailure(progress)) {
-    return progress.status === "finalizing" ? "部分失败，收尾发布中" : "部分失败，等待收尾";
   }
   if (progress.status === "failed") {
     return progress.success > 0 ? "部分失败" : "采集失败";
@@ -192,20 +166,12 @@ export function stationProgressPercent(progress?: CollectProgress | null): numbe
   ) {
     return 100;
   }
+  if (progress.status === "starting") {
+    return 0;
+  }
   const total = Math.max(progress.total, 0);
   const finished = Math.max(progress.success + progress.failed, 0);
   const done = Math.min(finished, total || finished);
   const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
-  const inPostPagePhase =
-    progress.status === "page_done" ||
-    progress.status === "waiting_publish" ||
-    progress.status === "finalizing";
-  const zeroPageFinished = total === 0 && inPostPagePhase;
-  if (inPostPagePhase || zeroPageFinished) {
-    return 99;
-  }
-  if (progress.status === "starting") {
-    return 0;
-  }
   return Math.min(rawPercent, 99);
 }

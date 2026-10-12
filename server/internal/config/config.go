@@ -214,6 +214,8 @@ const (
 	BannerConfigKey = RedisKeyPrefix + ":Config:BannerConfig"
 	// ProxyConfigKey 采集网络代理配置缓存
 	ProxyConfigKey = RedisKeyPrefix + ":Config:Proxy"
+	// NotifyConfigKey Telegram 通知配置缓存
+	NotifyConfigKey = RedisKeyPrefix + ":Config:Notify"
 
 	// DefaultUpdateSpec 每小时整点执行一次
 	DefaultUpdateSpec = "0 0 * * * *"

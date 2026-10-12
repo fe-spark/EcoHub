@@ -74,6 +74,7 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	if batchCtx != nil {
 		batchCtx.markSourceFinished(*s)
 		batchCtx.addAffectedMIDs(s, 1, written.Affected)
+		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
 	return written, nil
 }
@@ -111,14 +112,6 @@ func CollectSingleFilm(ids string) {
 	batchCtx := newCollectBatchContext(model.CollectTriggerSingleUpdate, "单片更新", targets, startedAt)
 	defer batchCtx.close()
 
-	type singleResult struct {
-		source model.FilmSource
-		err    error
-	}
-	var (
-		mu      sync.Mutex
-		results []singleResult
-	)
 	var wg sync.WaitGroup
 	for _, source := range targets {
 		requestID := sourceMids[source.Id]
@@ -129,20 +122,26 @@ func CollectSingleFilm(ids string) {
 		wg.Add(1)
 		go func(src model.FilmSource, sourceMid string) {
 			defer wg.Done()
+			defer batchCtx.releaseSourceOccupy(src.Id)
 			_, err := collectFilmById(sourceMid, &src, batchCtx)
 			if err != nil {
+				batchCtx.RecordSourceError(src.Id, err.Error())
 				syslog.Errorf("[Spider] CollectSingleFilm 站点 %s 更新失败: %v", src.Name, err)
+				return
 			}
-			mu.Lock()
-			results = append(results, singleResult{source: src, err: err})
-			mu.Unlock()
+			if isPreferredCollectSource(src.Id) {
+				if err := batchCtx.finalizePrimarySource(src.Id); err != nil {
+					syslog.Errorf("[CollectSingleFilm] 首选站 %s 缓存刷新失败: %v", src.Name, err)
+				}
+			}
 		}(source, requestID)
 	}
 	wg.Wait()
 
 	if err := batchCtx.flushAndFinalize(); err != nil {
-		syslog.Errorf("[CollectSingleFilm] 收尾刷新失败: %v", err)
+		syslog.Errorf("[CollectSingleFilm] 缓存刷新失败: %v", err)
 	}
+	batchCtx.emitSummary()
 }
 
 func resolveSingleCollectSourceMid(globalMid int64, source model.FilmSource) string {
@@ -176,6 +175,9 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
 	if err != nil || len(list) <= 0 {
+		if batchCtx != nil && err != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+		}
 		markRecoverFailure(s, fr, "recover_fetch", err)
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
@@ -183,12 +185,16 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 
 	written, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
 	if err != nil {
+		if batchCtx != nil {
+			batchCtx.RecordSourceError(s.Id, err.Error())
+		}
 		markRecoverFailure(s, fr, "recover_save", err)
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
 	if batchCtx != nil {
 		batchCtx.addAffectedMIDs(s, fr.Hour, written.Affected)
+		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
 	repository.DeleteFailureRecord(fr)
 }
@@ -234,10 +240,10 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 
 	recoverFilmPage(context.Background(), s, fr, batchCtx)
 	batchCtx.markSourceFinished(*s)
-	finalizeErr := batchCtx.flushAndFinalize()
-	if finalizeErr != nil {
-		syslog.Errorf("[Spider] 站点 %s 失败页重试收尾刷新失败: %v", s.Id, finalizeErr)
+	if err := batchCtx.flushAndFinalize(); err != nil {
+		syslog.Errorf("[Spider] 站点 %s 失败页重试缓存刷新失败: %v", s.Id, err)
 	}
+	batchCtx.emitSummary()
 	batchCtx.close()
 }
 
@@ -302,6 +308,7 @@ func FullRecoverSpider() {
 		go func(source model.FilmSource, pending []model.FailureRecord) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer batchCtx.releaseSourceOccupy(source.Id)
 			if err := collectLifecycle.beginSource(source.Id); err != nil {
 				syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", source.Id, err)
 				return
@@ -312,12 +319,18 @@ func FullRecoverSpider() {
 				recoverFilmPage(context.Background(), &source, &record, batchCtx)
 			}
 			batchCtx.markSourceFinished(source)
+			if isPreferredCollectSource(source.Id) {
+				if err := batchCtx.finalizePrimarySource(source.Id); err != nil {
+					syslog.Errorf("[FullRecoverSpider] 首选站 %s 缓存刷新失败: %v", source.Name, err)
+				}
+			}
 		}(src, recordsCopy)
 	}
 	wg.Wait()
 	if err := batchCtx.flushAndFinalize(); err != nil {
-		syslog.Errorf("[FullRecoverSpider] 收尾刷新失败: %v", err)
+		syslog.Errorf("[FullRecoverSpider] 缓存刷新失败: %v", err)
 	}
+	batchCtx.emitSummary()
 	batchCtx.close()
 }
 

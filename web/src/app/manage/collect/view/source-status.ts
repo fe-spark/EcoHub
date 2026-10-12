@@ -1,5 +1,4 @@
 import {
-  isPartialCollectFailure,
   resolveCollectProgressStatusText,
   type FilmSource,
 } from "./types";
@@ -18,18 +17,6 @@ export function resolveSourceStatus(
     }
     if (phase === "starting") {
       return { label: "排队中", tone: "running" };
-    }
-    if (phase === "page_done" || phase === "waiting_publish") {
-      if (isPartialCollectFailure(record.progress)) {
-        return { label: "部分失败，等待收尾", tone: "stopping" };
-      }
-      return { label: "等待收尾", tone: "running" };
-    }
-    if (phase === "finalizing") {
-      if (isPartialCollectFailure(record.progress)) {
-        return { label: "部分失败，收尾发布中", tone: "stopping" };
-      }
-      return { label: "收尾发布中", tone: "running" };
     }
     return { label: "采集中", tone: "running" };
   }

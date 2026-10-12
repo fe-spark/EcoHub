@@ -73,6 +73,33 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 	return list
 }
 
+func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
+	oldID := ""
+	if oldPrimary != nil {
+		oldID = oldPrimary.Id
+	}
+	newID := ""
+	if newPrimary != nil {
+		newID = newPrimary.Id
+	}
+	if oldID == newID {
+		return false
+	}
+	// 分类在添加或编辑采集站时已经按站保存。切换首选站只换前台读取的那一份。
+	repository.MarkCategoryChanged()
+	filmsnapshot.RefreshAccessDataCaches()
+	filmsnapshot.ClearSearchCache()
+	InvalidateInventoryStatsCache()
+	if newID != "" {
+		BannerAutoSvc.RefreshAfterPrimarySwitch()
+		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
+			filmsnapshot.NotifySnapshotPublished(version)
+		}
+	}
+	NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, repository.GetEnabledCollectSourceList())
+	return true
+}
+
 func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -83,15 +110,9 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	}
 	filmsnapshot.ClearDynamicPlayCaches()
 	clearProvideNetworkConfigCache()
-
 	newPrimary := repository.PickPrimarySourceForCategory()
-	if newPrimary != nil && (oldPrimary == nil || oldPrimary.Id != newPrimary.Id) {
-		// 分类在添加或编辑采集站时已经按站保存。切换首选站只换前台读取的那一份。
-		repository.MarkCategoryChanged()
-		filmsnapshot.RefreshAccessDataCaches()
-		filmsnapshot.ClearSearchCache()
-		InvalidateInventoryStatsCache()
-		BannerAutoSvc.RefreshAfterPrimarySwitch()
+	if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
+		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, repository.GetEnabledCollectSourceList())
 	}
 	return nil
 }
@@ -121,6 +142,15 @@ func (s *CollectService) GetAllFilmSources() []model.FilmSource {
 // UpdateFilmSource 编辑采集源配置（单源）。
 // 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
+	oldPrimary := repository.PickPrimarySourceForCategory()
+	if err := s.updateFilmSourceCore(source); err != nil {
+		return err
+	}
+	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+	return nil
+}
+
+func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	old := repository.FindCollectSourceById(source.Id)
 	if old == nil {
 		return errors.New("采集站信息不存在")
@@ -185,7 +215,9 @@ func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
+	oldPrimary := repository.PickPrimarySourceForCategory()
 	var firstErr error
+	changed := false
 	for _, id := range ids {
 		source := repository.FindCollectSourceById(id)
 		if source == nil {
@@ -197,15 +229,20 @@ func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) er
 		}
 		next := *source
 		next.State = state
-		if err := s.UpdateFilmSource(next); err != nil {
+		if err := s.updateFilmSourceCore(next); err != nil {
 			firstErr = err
 			break
 		}
+		changed = true
+	}
+	if changed {
+		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	}
 	return firstErr
 }
 
 func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
+	oldPrimary := repository.PickPrimarySourceForCategory()
 	if source.Id == "" {
 		source.Id = utils.GenerateHashKey(source.Uri)
 	}
@@ -215,6 +252,7 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	spider.ClearLimiter(source.Id)
 	clearProvideNetworkConfigCache()
 	filmsnapshot.ClearDynamicPlayCaches()
+	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	return nil
 }
 
@@ -223,6 +261,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 	if src == nil {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
+	oldPrimary := repository.PickPrimarySourceForCategory()
 	orphanMids, err := repository.DelCollectResource(id)
 	if err != nil {
 		return err
@@ -235,6 +274,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 	clearProvideNetworkConfigCache()
 	filmsnapshot.ClearDynamicPlayCaches()
 	repository.MarkCategoryChanged()
+	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	return nil
 }
 
