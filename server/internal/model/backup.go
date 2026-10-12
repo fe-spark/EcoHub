@@ -12,6 +12,7 @@ type ConfigBackup struct {
 	FilmSources  []FilmSource        `json:"filmSources,omitempty"`
 	CronTasks    []FilmCollectTask   `json:"cronTasks,omitempty"`
 	Banners      Banners             `json:"banners,omitempty"`
+	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
 	MappingRules []MappingRuleExport `json:"mappingRules,omitempty"`
 	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
 	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`

@@ -1,0 +1,253 @@
+package service
+
+import (
+	"fmt"
+	"math/rand"
+	"testing"
+	"time"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+	"server/internal/repository"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+)
+
+func setupBackupTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	dsn := fmt.Sprintf("file:backup_test_%d_%d?mode=memory&cache=shared", time.Now().UnixNano(), rand.Intn(100000))
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+
+	if err := gdb.AutoMigrate(
+		&model.SiteConfigRecord{},
+		&model.FilmSource{},
+		&model.CrontabRecord{},
+		&model.CronSourceRel{},
+		&model.Banner{},
+		&model.BannerConfigRecord{},
+		&model.MappingRule{},
+		&model.ProxyConfigRecord{},
+		&model.TMDBConfigRecord{},
+		&model.NotifyConfigRecord{},
+	); err != nil {
+		t.Fatalf("migrate schema: %v", err)
+	}
+
+	origMdb := db.Mdb
+	db.Mdb = gdb
+
+	t.Cleanup(func() {
+		db.Mdb = origMdb
+	})
+	return gdb
+}
+
+func TestExportConfig_CompleteAndClean(t *testing.T) {
+	setupBackupTestDB(t)
+
+	// 1. 准备初始数据
+	siteCfg := model.BasicConfig{
+		SiteName: "测试站点",
+		SiteURL:  "https://example.com",
+		Tip: model.TipConfig{
+			Enabled: true,
+			Title:   "赞赏测试",
+		},
+		Notice: model.NoticeConfig{
+			Enabled: true,
+			Content: "开屏公告测试",
+		},
+	}
+	if err := repository.SaveSiteBasic(siteCfg); err != nil {
+		t.Fatalf("save site basic: %v", err)
+	}
+
+	srcList := []model.FilmSource{
+		{
+			Id:       "src_1",
+			Name:     "资源站A",
+			Uri:      "https://api.source1.com/api.php/provide/vod",
+			State:    true,
+			Sort:     1,
+			Interval: 300,
+			Cd:       24,
+			Format:   "json",
+		},
+	}
+	if err := repository.ReplaceCollectSources(srcList); err != nil {
+		t.Fatalf("replace collect sources: %v", err)
+	}
+
+	task := model.FilmCollectTask{
+		Id:     "task_1",
+		Ids:    []string{"src_1"},
+		Cid:    99, // 运行时临时内存 ID
+		Time:   24,
+		Spec:   "0 0 */2 * * *",
+		Model:  0,
+		State:  true,
+		Remark: "定时采集任务",
+	}
+	if err := repository.SaveFilmTask(task); err != nil {
+		t.Fatalf("save film task: %v", err)
+	}
+
+	bannerItems := model.Banners{
+		{
+			Id:   "b1",
+			Mid:  1001,
+			Name: "测试轮播影片",
+			Sort: 1,
+		},
+	}
+	if err := repository.SaveBanners(bannerItems); err != nil {
+		t.Fatalf("save banners: %v", err)
+	}
+
+	bannerCfg := model.BannerConfig{
+		Mode:        repository.BannerModeAuto,
+		Strategy:    repository.BannerStrategySmartMix,
+		Count:       8,
+		AutoTMDB:    true,
+		RefreshCron: "0 0 6 * * *",
+		Categories:  []int64{1, 2},
+	}
+	if err := repository.SaveBannerConfig(bannerCfg); err != nil {
+		t.Fatalf("save banner config: %v", err)
+	}
+
+	proxyCfg := model.ProxyConfig{
+		Enabled:  true,
+		ProxyURL: "http://user:secret123@proxy.test:8080",
+		Modules:  model.ProxyModuleScope{Spider: true, TMDB: true},
+	}
+	if err := repository.SaveProxyConfig(proxyCfg); err != nil {
+		t.Fatalf("save proxy config: %v", err)
+	}
+
+	tmdbCfg := model.TMDBConfig{
+		Enabled: true,
+		ApiKey:  "tmdb_api_key_secret",
+	}
+	if err := repository.SaveTMDBConfig(tmdbCfg); err != nil {
+		t.Fatalf("save tmdb config: %v", err)
+	}
+
+	notifyCfg := model.NotifyConfig{
+		Enabled:  true,
+		BotToken: "123456:ABC-DEF-bot-token",
+		ChatIDs:  []string{"-10012345678"},
+	}
+	if err := repository.SaveNotifyConfig(notifyCfg); err != nil {
+		t.Fatalf("save notify config: %v", err)
+	}
+
+	rule := model.MappingRule{
+		Group:     "Area",
+		Raw:       "中国大陆",
+		Target:    "大陆",
+		MatchType: "exact",
+		Remarks:   "地区转换",
+	}
+	if err := repository.CreateMappingRule(&rule); err != nil {
+		t.Fatalf("create mapping rule: %v", err)
+	}
+
+	// 2. 执行导出
+	backup := BackupSvc.ExportConfig()
+
+	// 3. 校验导出结果
+	if backup.Version != model.ConfigBackupVersion {
+		t.Fatalf("expected backup version %d, got %d", model.ConfigBackupVersion, backup.Version)
+	}
+	if backup.Site == nil || backup.Site.SiteName != "测试站点" {
+		t.Fatalf("site config export mismatch: %+v", backup.Site)
+	}
+	if len(backup.FilmSources) != 1 || backup.FilmSources[0].Id != "src_1" {
+		t.Fatalf("film sources export mismatch: %+v", backup.FilmSources)
+	}
+	if len(backup.CronTasks) != 1 || backup.CronTasks[0].Id != "task_1" {
+		t.Fatalf("cron tasks export mismatch: %+v", backup.CronTasks)
+	}
+	// 验证运行时 Cid 是否已被清零，不污染备份
+	if backup.CronTasks[0].Cid != 0 {
+		t.Fatalf("expected task Cid to be cleared to 0 in export, got %d", backup.CronTasks[0].Cid)
+	}
+	if len(backup.Banners) != 1 || backup.Banners[0].Name != "测试轮播影片" {
+		t.Fatalf("banners export mismatch: %+v", backup.Banners)
+	}
+	// 验证 BannerConfig 轮播排片配置导出
+	if backup.BannerConfig == nil || backup.BannerConfig.Mode != repository.BannerModeAuto || backup.BannerConfig.Strategy != repository.BannerStrategySmartMix {
+		t.Fatalf("bannerConfig export mismatch: %+v", backup.BannerConfig)
+	}
+	if backup.BannerConfig.Count != 8 || backup.BannerConfig.RefreshCron != "0 0 6 * * *" {
+		t.Fatalf("bannerConfig fields mismatch: %+v", backup.BannerConfig)
+	}
+	// 验证敏感凭据在灾备导出中完整保留
+	if backup.Proxy == nil || backup.Proxy.ProxyURL != "http://user:secret123@proxy.test:8080" {
+		t.Fatalf("proxy config raw url should be retained for migration: %+v", backup.Proxy)
+	}
+	if backup.TMDB == nil || backup.TMDB.ApiKey != "tmdb_api_key_secret" {
+		t.Fatalf("tmdb raw api key should be retained for migration: %+v", backup.TMDB)
+	}
+	if backup.Notify == nil || backup.Notify.BotToken != "123456:ABC-DEF-bot-token" {
+		t.Fatalf("notify bot token should be retained for migration: %+v", backup.Notify)
+	}
+	if len(backup.MappingRules) != 1 || backup.MappingRules[0].Raw != "中国大陆" {
+		t.Fatalf("mapping rules export mismatch: %+v", backup.MappingRules)
+	}
+}
+
+func TestImportConfig_WithBannerConfig(t *testing.T) {
+	setupBackupTestDB(t)
+
+	// 构建备份数据并导入
+	backup := model.ConfigBackup{
+		Version:    model.ConfigBackupVersion,
+		ExportedAt: time.Now().Format(time.RFC3339),
+		Banners: model.Banners{
+			{
+				Id:   "imp_b1",
+				Mid:  2001,
+				Name: "导入的轮播",
+				Sort: 1,
+			},
+		},
+		BannerConfig: &model.BannerConfig{
+			Mode:        repository.BannerModeAuto,
+			Strategy:    repository.BannerStrategyScore,
+			Count:       10,
+			AutoTMDB:    false,
+			RefreshCron: "0 0 5 * * *",
+		},
+	}
+
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{
+			Banners: true,
+		},
+		Backup: backup,
+	}
+
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	// 验证落库
+	banners := repository.GetBanners()
+	if len(banners) != 1 || banners[0].Name != "导入的轮播" {
+		t.Fatalf("imported banners mismatch: %+v", banners)
+	}
+
+	bannerCfg := repository.GetBannerConfig()
+	if bannerCfg.Mode != repository.BannerModeAuto || bannerCfg.Strategy != repository.BannerStrategyScore || bannerCfg.Count != 10 {
+		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
+	}
+}
