@@ -217,17 +217,16 @@ flowchart TD
 
 公共接口：
 
-- `/api/index`
-- `/api/dailyUpdates`
-- `/api/navCategory`
-- `/api/filmPlayInfo`
-- `/api/filmRelate`
-- `/api/liveFilmPlayInfo`
-- `/api/liveFilmRelate`
-- `/api/searchFilm`
-- `/api/hotKeywords`
-- `/api/filmClassify`
-- `/api/filmClassifySearch`
+- `/api/home` (首页聚合数据)
+- `/api/daily-updates` (每日更新)
+- `/api/categories` (前台分类导航树)
+- `/api/categories/overview` (分类专区精选概览)
+- `/api/films/play-info` (影片播放与线路详情)
+- `/api/films/related` (关联影片推荐)
+- `/api/films/search` (综合影片搜索)
+- `/api/films/filter` (片库多维标签筛选与分页)
+- `/api/search/hot-keywords` (搜索热搜词榜单)
+- `/api/stats/view` (浏览与点播访问埋点)
 - `/api/config/basic` (站点基础信息 / 探活)
 - `/api/provide/app` (EcoHub 客户端软件源)
 - `/api/provide/tvbox` (TVBox / 影视仓配置)

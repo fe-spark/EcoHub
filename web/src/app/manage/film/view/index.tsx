@@ -227,6 +227,19 @@ export default function FilmListPageView() {
     setScrapeModalOpen(true);
   }, []);
 
+  const handleRevertScrape = useCallback(
+    async (mid: number) => {
+      const resp = await ApiPost("/manage/tmdb/revert", { mid });
+      if (resp.code === 0) {
+        message.success(resp.msg || "已成功还原为采集站原始数据！");
+        getFilmPage();
+      } else {
+        message.error(resp.msg || "还原失败");
+      }
+    },
+    [getFilmPage, message],
+  );
+
   const columns = useFilmColumns({
     syncingIds,
     canWrite,
@@ -235,6 +248,7 @@ export default function FilmListPageView() {
     handleUpdateSingle,
     handleDelFilm,
     handleScrapeFilm,
+    handleRevertScrape,
     tmdbEnabled,
     activeSourceId: params.sourceId,
   });
@@ -358,11 +372,13 @@ export default function FilmListPageView() {
         open={scrapeModalOpen}
         mid={currentScrapeFilm ? (currentScrapeFilm.mid || currentScrapeFilm.ID) : undefined}
         initialName={currentScrapeFilm?.name}
+        isScraped={currentScrapeFilm?.isScraped}
         onClose={() => {
           setScrapeModalOpen(false);
           setCurrentScrapeFilm(null);
         }}
         onSuccess={() => getFilmPage()}
+        onRevert={handleRevertScrape}
       />
     </div>
   );

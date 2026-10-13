@@ -100,7 +100,7 @@ func TestAssembleDailyUpdateCategoriesEmpty(t *testing.T) {
 	}
 }
 
-func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
+func TestDailyUpdates_CacheBehavior(t *testing.T) {
 	gdb, mr := setupTestDBAndRedis(t)
 	_ = mr
 
@@ -122,35 +122,35 @@ func TestDailyUpdatesV2_CacheBehavior(t *testing.T) {
 	}
 
 	// 1. 首次调用
-	res1, err := IndexSvc.DailyUpdatesV2(req)
+	res1, err := IndexSvc.DailyUpdates(req)
 	if err != nil {
-		t.Fatalf("first DailyUpdatesV2 call failed: %v", err)
+		t.Fatalf("first DailyUpdates call failed: %v", err)
 	}
 	if len(res1.Categories) == 0 {
 		t.Fatalf("expected categories not empty")
 	}
 
 	// 2. 验证缓存已写入 Redis
-	catKey := config.DailyUpdatesV2CatCacheKey
+	catKey := config.DailyUpdatesCatCacheKey
 	if !mr.Exists(catKey) {
 		t.Fatalf("expected category cache key %s to exist in redis", catKey)
 	}
-	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesV2CachePrefix)
+	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesCachePrefix)
 	if !mr.Exists(pageKey) {
 		t.Fatalf("expected page cache key %s to exist in redis", pageKey)
 	}
 
 	// 3. 再次调用验证直接走缓存
-	res2, err := IndexSvc.DailyUpdatesV2(req)
+	res2, err := IndexSvc.DailyUpdates(req)
 	if err != nil {
-		t.Fatalf("second DailyUpdatesV2 call failed: %v", err)
+		t.Fatalf("second DailyUpdates call failed: %v", err)
 	}
 	if res2.Page.Total != res1.Page.Total {
 		t.Fatalf("want total %d, got %d", res1.Page.Total, res2.Page.Total)
 	}
 }
 
-func TestDailyUpdatesV2_PrimarySourceCategoryIsolation(t *testing.T) {
+func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
 	gdb, _ := setupTestDBAndRedis(t)
 	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.SourceCategory{}, &model.FilmSourcePlaylist{}); err != nil {
 		t.Fatalf("migrate: %v", err)
@@ -178,7 +178,7 @@ func TestDailyUpdatesV2_PrimarySourceCategoryIsolation(t *testing.T) {
 	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 2002, SourceId: "src_b", LineKind: "play", GroupIndex: 0})
 
-	resA, err := IndexSvc.DailyUpdatesV2(DailyUpdateListReq{Pid: 10, SourceId: "src_a"})
+	resA, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 10, SourceId: "src_a"})
 	if err != nil {
 		t.Fatalf("src_a query failed: %v", err)
 	}
@@ -186,7 +186,7 @@ func TestDailyUpdatesV2_PrimarySourceCategoryIsolation(t *testing.T) {
 		t.Fatalf("src_a unexpected result: total=%d cats=%+v", resA.Page.Total, resA.Categories)
 	}
 
-	resB, err := IndexSvc.DailyUpdatesV2(DailyUpdateListReq{Pid: 20, SourceId: "src_b"})
+	resB, err := IndexSvc.DailyUpdates(DailyUpdateListReq{Pid: 20, SourceId: "src_b"})
 	if err != nil {
 		t.Fatalf("src_b query failed: %v", err)
 	}

@@ -17,6 +17,7 @@ import { BannerRecord, MAX_BANNER_COUNT } from "./types";
 
 interface BannerQuickModalProps {
   open: boolean;
+  tmdbEnabled?: boolean;
   onClose: () => void;
   onSuccess: (banners: BannerRecord[]) => void;
 }
@@ -29,6 +30,7 @@ interface FormValues {
 
 export default function BannerQuickModal({
   open,
+  tmdbEnabled = false,
   onClose,
   onSuccess,
 }: BannerQuickModalProps) {
@@ -42,7 +44,7 @@ export default function BannerQuickModal({
       return;
     }
     // 拉取当前首选站的所有可用一级分类
-    ApiGet("/navCategory").then((resp) => {
+    ApiGet("/categories").then((resp) => {
       if (resp.code === 0 && Array.isArray(resp.data)) {
         setCategoryOptions(
           resp.data.map((c: { id?: number; name?: string }) => ({
@@ -107,7 +109,11 @@ export default function BannerQuickModal({
         <Alert
           type="info"
           showIcon
-          message="根据指定分类与排序参数从片库快速生成轮播。排片完成后可在表格中自由调整排序，或进行 TMDB 刮削。"
+          message={
+            tmdbEnabled
+              ? "根据指定分类与排序参数从片库快速生成轮播。排片完成后可在表格中自由调整排序，或进行 TMDB 刮削。"
+              : "根据指定分类与排序参数从片库快速生成轮播。排片完成后可在表格中自由调整排序。"
+          }
           style={{ marginBottom: 16 }}
         />
 

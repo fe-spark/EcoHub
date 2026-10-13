@@ -39,7 +39,7 @@ async function fetchSearchFilm(keyword: string, current: number, sort: string) {
     params.set("sort", sort);
   }
   try {
-    const res = await fetch(`/api/searchFilm?${params.toString()}`, { credentials: "include" });
+    const res = await fetch(`/api/films/search?${params.toString()}`, { credentials: "include" });
     if (!res.ok) {
       return null;
     }

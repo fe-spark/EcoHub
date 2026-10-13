@@ -265,7 +265,7 @@ func playRankMember(path string, query url.Values) string {
 		}
 		return canonicalFilmID(query.Get("ids"))
 	}
-	if strings.HasPrefix(path, "/api/filmPlayInfo") {
+	if strings.HasPrefix(path, "/api/films/play-info") {
 		return canonicalFilmID(query.Get("id"))
 	}
 	return ""
@@ -313,21 +313,10 @@ func httpResource(path string, query url.Values) string {
 	if strings.HasPrefix(path, "/api/provide/config") {
 		return "config"
 	}
-	if strings.HasPrefix(path, "/api/filmPlayInfo") {
+	if strings.HasPrefix(path, "/api/films/play-info") {
 		return TruncateRunes(query.Get("id"), maxResourceLen)
 	}
-	if strings.HasPrefix(path, "/api/liveFilmPlayInfo") {
-		source := strings.TrimSpace(query.Get("source"))
-		if source == "" {
-			source = strings.TrimSpace(query.Get("playFrom"))
-		}
-		sid := strings.TrimSpace(query.Get("sid"))
-		if source != "" && sid != "" {
-			return TruncateRunes(source+":"+sid, maxResourceLen)
-		}
-		return TruncateRunes(sid, maxResourceLen)
-	}
-	if strings.HasPrefix(path, "/api/searchFilm") {
+	if strings.HasPrefix(path, "/api/films/search") {
 		return TruncateRunes(query.Get("keyword"), maxResourceLen)
 	}
 	return ""

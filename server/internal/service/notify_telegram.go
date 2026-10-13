@@ -376,7 +376,7 @@ func buildCategoryKeyboardForSite(rawSiteURL string, cats []model.NotifyCategory
 		}
 		targetURL := siteURL
 		if c.CategoryID > 0 {
-			targetURL = fmt.Sprintf("%s/filmClassifySearch?Pid=%d", siteURL, c.CategoryID)
+			targetURL = fmt.Sprintf("%s/category/filter?pid=%d", siteURL, c.CategoryID)
 		}
 		row = append(row, InlineKeyboardButton{
 			Text: fmt.Sprintf("%s (%d)", c.CategoryName, len(c.Films)),

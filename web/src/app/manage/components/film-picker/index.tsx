@@ -54,7 +54,7 @@ export default function FilmPicker({
     async (current = 1, query = "", sort = "") => {
       setLoading(true);
       try {
-        const resp = await ApiGet("/searchFilm", {
+        const resp = await ApiGet("/films/search", {
           keyword: query,
           current,
           pageSize: 15,
@@ -294,6 +294,11 @@ export default function FilmPicker({
                         <div className={styles.cardMetaRow}>
                           <span>{item.year || "未知年份"}</span>
                           <span>{item.area || ""}</span>
+                          {item.isScraped && (
+                            <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0, fontSize: 10, lineHeight: "16px", padding: "0 3px" }}>
+                              已刮削
+                            </Tag>
+                          )}
                         </div>
                         {(item.director || item.actor) && (
                           <Tooltip title={`导演: ${item.director || "暂无"} | 主演: ${item.actor || "暂无"}`}>

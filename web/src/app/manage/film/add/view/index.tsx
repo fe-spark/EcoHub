@@ -197,7 +197,7 @@ function FilmAddForm() {
 
     if (id) {
       setFetching(true);
-      ApiGet(`/filmPlayInfo`, { id })
+      ApiGet(`/films/play-info`, { id })
         .then((resp: any) => {
           if (resp.code === 0 && resp.data?.detail) {
             const filmData = resp.data.detail;
@@ -254,7 +254,7 @@ function FilmAddForm() {
           form.resetFields();
           form.setFieldsValue({ followPosterSource: false });
         } else {
-          ApiGet(`/filmPlayInfo`, { id }).then((fresh: any) => {
+          ApiGet(`/films/play-info`, { id }).then((fresh: any) => {
             if (fresh.code === 0 && fresh.data?.detail) {
               loadedDetailRef.current = fresh.data.detail;
               setLoadedDetail(fresh.data.detail);
@@ -338,6 +338,11 @@ function FilmAddForm() {
                   style={{ color: "var(--ant-color-primary)" }}
                 />
                 基础信息
+                {loadedDetail?.isScraped && (
+                  <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
+                    已刮削
+                  </Tag>
+                )}
               </Space>
             }
             extra={
@@ -349,6 +354,33 @@ function FilmAddForm() {
                   >
                     撤销 TMDB 填充
                   </Button>
+                )}
+                {loadedDetail?.isScraped && id && (
+                  <Popconfirm
+                    title="确定还原该影片的 TMDB 刮削？"
+                    description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
+                    okText="确定还原"
+                    cancelText="取消"
+                    onConfirm={async () => {
+                      const resp = await ApiPost("/manage/tmdb/revert", { mid: Number(id) });
+                      if (resp.code === 0) {
+                        message.success(resp.msg || "已成功还原为采集站原始数据！");
+                        ApiGet(`/films/play-info`, { id }).then((r: any) => {
+                          if (r.code === 0 && r.data?.detail) {
+                            loadedDetailRef.current = r.data.detail;
+                            setLoadedDetail(r.data.detail);
+                            populateForm(r.data.detail);
+                          }
+                        });
+                      } else {
+                        message.error(resp.msg || "还原失败");
+                      }
+                    }}
+                  >
+                    <Button icon={<UndoOutlined />} style={{ color: "#fa8c16", borderColor: "#ffd591" }}>
+                      还原为采集站数据
+                    </Button>
+                  </Popconfirm>
                 )}
                 {tmdbEnabled ? (
                   <Button
@@ -724,9 +756,26 @@ function FilmAddForm() {
 
       <TmdbModal
         open={tmdbModalOpen}
+        mid={id ? Number(id) : undefined}
         initialName={form.getFieldValue("name")}
+        isScraped={Boolean(loadedDetail?.isScraped)}
         onClose={() => setTmdbModalOpen(false)}
         onPrefill={handleTmdbPrefill}
+        onRevert={async (revertMid) => {
+          const resp = await ApiPost("/manage/tmdb/revert", { mid: revertMid });
+          if (resp.code === 0) {
+            message.success(resp.msg || "已成功还原为采集站原始数据！");
+            ApiGet(`/films/play-info`, { id }).then((r: any) => {
+              if (r.code === 0 && r.data?.detail) {
+                loadedDetailRef.current = r.data.detail;
+                setLoadedDetail(r.data.detail);
+                populateForm(r.data.detail);
+              }
+            });
+          } else {
+            message.error(resp.msg || "还原失败");
+          }
+        }}
       />
     </div>
   );

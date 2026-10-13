@@ -32,6 +32,8 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 	detail.Blurb = info.Blurb
 	detail.Content = info.Content
 	detail.ReleaseDate = info.ReleaseDate
+	detail.IsScraped = info.IsScraped
+	detail.TmdbID = info.TmdbID
 	if info.Year > 0 {
 		detail.Year = fmt.Sprint(info.Year)
 	}
@@ -60,6 +62,8 @@ func BuildMovieBasicInfosFromSnapshots(infos ...model.FilmListSnapshot) []model.
 			Score:        s.Score,
 			Hits:         s.Hits,
 			SourceId:     s.SourceId,
+			IsScraped:    s.IsScraped,
+			TmdbID:       s.TmdbID,
 		})
 	}
 	return list

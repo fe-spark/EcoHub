@@ -16,6 +16,8 @@ export type BannerRecord = {
   blurb?: string;
   actor?: string;
   director?: string;
+  isScraped?: boolean;
+  tmdbId?: number;
 };
 
 export const MAX_BANNER_COUNT = 12;
@@ -30,7 +32,6 @@ export type BannerFormValues = {
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
-  followPosterSource?: boolean;
 };
 
 export type FilmOption = {
@@ -46,6 +47,7 @@ export type FilmOption = {
   actor?: string;
   label: string;
   value: number;
+  isScraped?: boolean;
 };
 
 export type EditorMode = "create" | "edit";

@@ -6,7 +6,7 @@ async function getHomeData() {
     const response = await serverGet<{
       banners: any[];
       content: any[];
-    }>("/index");
+    }>("/home");
 
     if (response.code === 0 && response.data) {
       return {

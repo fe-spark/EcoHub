@@ -35,16 +35,16 @@ func SetupRouter() *gin.Engine {
 	// 前台业务接口，开启私有化模式时需携带有效登录态
 	frontApi := api.Group("/", middleware.PrivateAccessGuard())
 	{
-		frontApi.GET(`/index`, handler.IndexHd.Index)
-		frontApi.GET(`/dailyUpdates`, handler.IndexHd.DailyUpdatesV2)
-		frontApi.GET(`/navCategory`, handler.IndexHd.CategoriesInfo)
-		frontApi.GET(`/filmPlayInfo`, handler.IndexHd.FilmPlayInfo)
-		frontApi.GET(`/filmRelate`, handler.IndexHd.FilmRelate)
-		frontApi.GET(`/searchFilm`, handler.IndexHd.SearchFilm)
-		frontApi.GET(`/hotKeywords`, handler.IndexHd.HotKeywords)
-		frontApi.GET(`/filmClassify`, handler.IndexHd.FilmClassify)
-		frontApi.GET(`/filmClassifySearch`, handler.IndexHd.FilmTagSearch)
-		frontApi.POST(`/stat/view`, handler.AccessHd.TrackView)
+		frontApi.GET(`/home`, handler.IndexHd.Index)
+		frontApi.GET(`/daily-updates`, handler.IndexHd.DailyUpdates)
+		frontApi.GET(`/categories`, handler.IndexHd.CategoriesInfo)
+		frontApi.GET(`/categories/overview`, handler.IndexHd.FilmClassify)
+		frontApi.GET(`/films/play-info`, handler.IndexHd.FilmPlayInfo)
+		frontApi.GET(`/films/related`, handler.IndexHd.FilmRelate)
+		frontApi.GET(`/films/search`, handler.IndexHd.SearchFilm)
+		frontApi.GET(`/films/filter`, handler.IndexHd.FilmTagSearch)
+		frontApi.GET(`/search/hot-keywords`, handler.IndexHd.HotKeywords)
+		frontApi.POST(`/stats/view`, handler.AccessHd.TrackView)
 	}
 
 	manageRoute := api.Group(`/manage`)
@@ -165,7 +165,7 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgress)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
 			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
-			spiderRoute.POST(`/stopAll`, handler.SpiderHd.StopAllTasks)
+			spiderRoute.POST(`/stop-all`, handler.SpiderHd.StopAllTasks)
 		}
 
 		// filmManage 影视管理
@@ -190,26 +190,23 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
 			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
+			tmdbRoute.POST(`/revert`, handler.TMDBHd.Revert)
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
 		}
 
 		// 采集网络代理相关
 		proxyRoute := manageRoute.Group(`/proxy`)
 		{
-			proxyRoute.GET(``, handler.ProxyHd.GetConfig)
 			proxyRoute.GET(`/config`, handler.ProxyHd.GetConfig)
 			proxyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.ProxyHd.UpdateConfig)
 			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.ProxyHd.TestProxy)
 		}
 
-		// Telegram 消息通知相关
+		// 消息通知相关
 		notifyRoute := manageRoute.Group(`/notify`)
 		{
-			notifyRoute.GET(``, handler.NotifyHd.GetConfig)
 			notifyRoute.GET(`/config`, handler.NotifyHd.GetConfig)
-			notifyRoute.POST(`/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
 			notifyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
-			notifyRoute.POST(`/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
 			notifyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
 		}
 

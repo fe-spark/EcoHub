@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"golang.org/x/sync/singleflight"
 	"log"
-	"math/rand"
 	"strings"
 	"time"
 
@@ -23,14 +22,11 @@ const (
 	dailyUpdateDefaultPageSize = 21
 	dailyUpdateMaxPageSize     = 100
 	dailyUpdateMaxExclude      = 500
-	homeDailyUpdateLimitMax    = 12
-	homeDailyUpdateCacheTTL    = 5 * time.Minute
-	homeDailyUpdatePoolCap     = 120
 )
 
 var dailyUpdateSfGroup singleflight.Group
 
-// DailyUpdateListReq V2 每日更新：分类 + 标准分页 + 随机。
+// DailyUpdateListReq 每日更新列表请求：分类 + 标准分页 + 随机。
 type DailyUpdateListReq struct {
 	Pid      int64
 	Page     *dto.Page
@@ -46,7 +42,7 @@ type DailyUpdateCategory struct {
 	Count int    `json:"count"`
 }
 
-// DailyUpdateResult V2 响应。
+// DailyUpdateResult 每日更新响应。
 type DailyUpdateResult struct {
 	List       []model.MovieBasicInfo `json:"list"`
 	Page       *dto.Page              `json:"page"`
@@ -106,8 +102,8 @@ func AssembleDailyUpdateCategories(nav []model.Category, countByPid map[int64]in
 	return out
 }
 
-// DailyUpdatesV2 近 24h 更新。破坏性契约：无流式、不走首页 120 池。
-func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResult, error) {
+// DailyUpdates 近 24h 更新列表与分类聚合。
+func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult, error) {
 	req = normalizeDailyUpdateReq(req)
 	if req.SourceId == "" {
 		if active := repository.GetActiveCollectSource(); active != nil {
@@ -124,9 +120,9 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 	usePageCache := !req.Random && req.Page.Current <= 5
 	var pageCacheKey string
 	if req.SourceId != "" {
-		pageCacheKey = fmt.Sprintf("%s:src_%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.SourceId, req.Pid, req.Page.Current, req.Page.PageSize)
+		pageCacheKey = fmt.Sprintf("%s:src_%s:p%d:c%d:s%d", config.DailyUpdatesCachePrefix, req.SourceId, req.Pid, req.Page.Current, req.Page.PageSize)
 	} else {
-		pageCacheKey = fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesV2CachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
+		pageCacheKey = fmt.Sprintf("%s:p%d:c%d:s%d", config.DailyUpdatesCachePrefix, req.Pid, req.Page.Current, req.Page.PageSize)
 	}
 
 	if usePageCache && db.Rdb != nil {
@@ -153,7 +149,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 			SourceId: req.SourceId,
 		})
 		if err != nil {
-			log.Printf("[IndexService] DailyUpdatesV2 list mids: %v", err)
+			log.Printf("[IndexService] DailyUpdates list mids: %v", err)
 			return nil, err
 		}
 
@@ -190,7 +186,7 @@ func (i *IndexService) DailyUpdatesV2(req DailyUpdateListReq) (*DailyUpdateResul
 }
 
 func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []int64, from, to time.Time, fallbackTotal int, sourceID string) []DailyUpdateCategory {
-	cacheKey := config.DailyUpdatesV2CatCacheKey
+	cacheKey := config.DailyUpdatesCatCacheKey
 	if strings.TrimSpace(sourceID) != "" {
 		cacheKey = cacheKey + ":src_" + sourceID
 	}
@@ -215,7 +211,7 @@ func (i *IndexService) getDailyUpdateCategories(nav []model.Category, navIDs []i
 
 		countByPid, otherCount, catTotal, catErr := film.DailyUpdatePidCounts(from, to, navIDs, sourceID)
 		if catErr != nil {
-			log.Printf("[IndexService] DailyUpdatesV2 category counts: %v", catErr)
+			log.Printf("[IndexService] DailyUpdates category counts: %v", catErr)
 			return []DailyUpdateCategory{{Pid: film.DailyPidAll, Name: "全部", Count: fallbackTotal}}, nil
 		}
 		cats := AssembleDailyUpdateCategories(nav, countByPid, otherCount, catTotal)
@@ -247,180 +243,4 @@ func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {
 	}
 	applyLiveRemarksToMovies(list)
 	return list
-}
-
-// HomeDailyUpdates 近 24h 采集变更（还原 beta.3 行为，使用 120 条候选池短缓存）。
-// limit<=0（不传）返回候选池全部内容（最多 120 条）；limit>0 时从池中随机取，exclude 排除当前批次。
-func (i *IndexService) HomeDailyUpdates(limit int, exclude []int64) []model.MovieBasicInfo {
-	return selectDailyUpdates(i.homeDailyUpdatePool(), limit, exclude)
-}
-
-func selectDailyUpdates(pool []model.MovieBasicInfo, limit int, exclude []int64) []model.MovieBasicInfo {
-	if len(pool) == 0 {
-		return []model.MovieBasicInfo{}
-	}
-	if limit <= 0 {
-		out := make([]model.MovieBasicInfo, len(pool))
-		copy(out, pool)
-		return out
-	}
-	if limit > homeDailyUpdateLimitMax {
-		limit = homeDailyUpdateLimitMax
-	}
-	return pickRandomMovieInfos(pool, limit, exclude)
-}
-
-func (i *IndexService) WarmupHomeDailyUpdatePool() {
-	_ = i.homeDailyUpdatePool()
-}
-
-func (i *IndexService) homeDailyUpdatePool() []model.MovieBasicInfo {
-	empty := make([]model.MovieBasicInfo, 0)
-	sourceID := i.BaselineSourceID()
-	cacheKey := config.IndexDailyUpdatesCacheKey
-	if sourceID != "" {
-		cacheKey = cacheKey + ":src_" + sourceID
-	}
-
-	// 1. 优先直接读取 Redis 缓存（0 数据库查询，耗时 0.2ms）
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var list []model.MovieBasicInfo
-			if json.Unmarshal([]byte(data), &list) == nil && len(list) > 0 {
-				return list
-			}
-		}
-	}
-
-	// 2. 并发合并防击穿构建
-	val, err, _ := dailyUpdateSfGroup.Do("homeDailyUpdatePool:"+sourceID, func() (any, error) {
-		// Double check 缓存
-		if db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				var list []model.MovieBasicInfo
-				if json.Unmarshal([]byte(data), &list) == nil && len(list) > 0 {
-					return list, nil
-				}
-			}
-		}
-
-		version := filmsnapshot.GetActiveReadModelVersion()
-		if version == "" {
-			return empty, nil
-		}
-
-		from, to := film.Rolling24hWindow(time.Now())
-		rawMids, _ := film.LoadChangeMidsBetween(from, to, homeDailyUpdatePoolCap)
-		mids := make([]int64, 0, homeDailyUpdatePoolCap)
-		seen := make(map[int64]struct{}, homeDailyUpdatePoolCap)
-		for _, m := range rawMids {
-			if m > 0 {
-				if _, ok := seen[m]; !ok {
-					seen[m] = struct{}{}
-					mids = append(mids, m)
-				}
-			}
-		}
-		mids = filterMidsByPlaySource(mids, sourceID)
-
-		// 若 24h 变更不足 120 部，从活跃快照按最新时间自动补齐至 120 部，保证候选池永远饱满
-		if len(mids) < homeDailyUpdatePoolCap && db.Mdb != nil {
-			needed := homeDailyUpdatePoolCap - len(mids)
-			var fallbackRows []struct {
-				Mid int64
-			}
-			query := db.Mdb.Model(&model.FilmIndex{}).Select("mid")
-			if sourceID != "" {
-				query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
-			}
-			if len(mids) > 0 {
-				query = query.Where("mid NOT IN ?", mids)
-			}
-			_ = query.Order("update_stamp DESC, mid DESC").Limit(needed).Scan(&fallbackRows).Error
-			for _, r := range fallbackRows {
-				if r.Mid > 0 {
-					mids = append(mids, r.Mid)
-				}
-			}
-		}
-
-		if len(mids) == 0 {
-			storeHomeDailyUpdatesCache(cacheKey, empty)
-			return empty, nil
-		}
-
-		snaps := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
-		list := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
-		if list == nil {
-			list = empty
-		}
-		storeHomeDailyUpdatesCache(cacheKey, list)
-		return list, nil
-	})
-
-	if err != nil || val == nil {
-		return empty
-	}
-	resList, ok := val.([]model.MovieBasicInfo)
-	if !ok || len(resList) == 0 {
-		return empty
-	}
-	return resList
-}
-
-func pickRandomMovieInfos(src []model.MovieBasicInfo, n int, exclude []int64) []model.MovieBasicInfo {
-	if n <= 0 || len(src) == 0 {
-		return []model.MovieBasicInfo{}
-	}
-	skip := make(map[int64]struct{}, len(exclude))
-	for _, id := range exclude {
-		if id > 0 {
-			skip[id] = struct{}{}
-		}
-	}
-	pool := src
-	if len(skip) > 0 {
-		left := make([]model.MovieBasicInfo, 0, len(src))
-		for _, item := range src {
-			if _, hit := skip[item.Id]; hit {
-				continue
-			}
-			left = append(left, item)
-		}
-		if len(left) > 0 {
-			pool = left
-		}
-	}
-	if len(pool) <= n {
-		out := make([]model.MovieBasicInfo, len(pool))
-		copy(out, pool)
-		return out
-	}
-	perm := rand.Perm(len(pool))
-	out := make([]model.MovieBasicInfo, n)
-	for i := 0; i < n; i++ {
-		out[i] = pool[perm[i]]
-	}
-	return out
-}
-
-func storeHomeDailyUpdatesCache(cacheKey string, list []model.MovieBasicInfo) {
-	if db.Rdb == nil {
-		return
-	}
-	if raw, err := json.Marshal(list); err == nil {
-		_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), homeDailyUpdateCacheTTL).Err()
-	}
-}
-
-func filterMidsByPlaySource(mids []int64, sourceID string) []int64 {
-	if len(mids) == 0 || strings.TrimSpace(sourceID) == "" || db.Mdb == nil {
-		return mids
-	}
-	var keep []int64
-	_ = db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Where("mid IN ? AND source_id = ? AND line_kind = ?", mids, sourceID, "play").
-		Distinct("mid").
-		Pluck("mid", &keep).Error
-	return keep
 }

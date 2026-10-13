@@ -26,7 +26,7 @@ interface CategoryData {
   };
 }
 
-export default function FilmClassifyPageView({
+export default function CategoryPageView({
   data,
   pid,
 }: {
@@ -67,7 +67,7 @@ export default function FilmClassifyPageView({
             className={styles.moreBtn}
             onClick={() =>
               handleNavigate(
-                `/filmClassifySearch?Pid=${pid}&Sort=${sort}`,
+                `/category/filter?pid=${encodeURIComponent(pid)}&sort=${sort}`,
                 "片库检索中...",
               )
             }
@@ -100,7 +100,7 @@ export default function FilmClassifyPageView({
               type="button"
               className={`${styles.tabBtn} ${styles.active}`}
               onClick={() =>
-                handleNavigate(`/filmClassify?Pid=${pid}`, "分类专区加载中...")
+                handleNavigate(`/category?pid=${encodeURIComponent(pid)}`, "分类专区加载中...")
               }
             >
               <AppstoreOutlined />
@@ -110,7 +110,7 @@ export default function FilmClassifyPageView({
               type="button"
               className={styles.tabBtn}
               onClick={() =>
-                handleNavigate(`/filmClassifySearch?Pid=${pid}`, "片库加载中...")
+                handleNavigate(`/category/filter?pid=${encodeURIComponent(pid)}`, "片库加载中...")
               }
             >
               <CompassOutlined />

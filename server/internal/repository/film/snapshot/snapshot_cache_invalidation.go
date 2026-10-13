@@ -28,22 +28,20 @@ func RefreshAccessDataCaches() {
 			config.CategoryTreeKey,
 			config.TVBoxConfigCacheKey,
 			config.BannersKey,
-			config.IndexDailyUpdatesCacheKey,
-			config.DailyUpdatesV2CatCacheKey,
+			config.DailyUpdatesCatCacheKey,
 		)
 	}
 	cache.BumpSearchTagsVersion()
 	cache.ClearPatterns(
 		fmt.Sprintf("%s*", config.IndexPageCacheKey),
-		fmt.Sprintf("%s*", config.IndexDailyUpdatesCacheKey),
-		fmt.Sprintf("%s*", config.DailyUpdatesV2CatCacheKey),
+		fmt.Sprintf("%s*", config.DailyUpdatesCatCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxConfigCacheKey),
 		fmt.Sprintf("%s:*", config.TVBoxList),
 		fmt.Sprintf("%s:*", config.TVBoxNetworkConfigCacheKey),
 		fmt.Sprintf("%s:*", config.FilmClassifyCacheKey),
 		fmt.Sprintf("%s:*", config.FilmSearchTagsKey),
 		fmt.Sprintf("%s:*", config.FilmFilterOptionKey),
-		fmt.Sprintf("%s:*", config.DailyUpdatesV2CachePrefix),
+		fmt.Sprintf("%s:*", config.DailyUpdatesCachePrefix),
 	)
 }
 

@@ -98,7 +98,7 @@ func TestSanitizeAccessLogURI(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"/api/index", "/api/index"},
+		{"/api/home", "/api/home"},
 		{"/api/test\n\r?foo=bar", "/api/test?foo=bar"},
 		{strings.Repeat("a", 600), strings.Repeat("a", 512) + "..."},
 		{strings.Repeat("中", 600), strings.Repeat("中", 512) + "..."},

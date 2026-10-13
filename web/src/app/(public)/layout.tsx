@@ -37,7 +37,7 @@ async function verifyPublicAccess() {
 
 async function getNavList(): Promise<NavItem[]> {
   try {
-    const response = await serverGet<NavItem[]>("/navCategory");
+    const response = await serverGet<NavItem[]>("/categories");
     if (response.code === 0 && Array.isArray(response.data)) {
       return response.data;
     }

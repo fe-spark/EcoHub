@@ -84,24 +84,13 @@ func (h *IndexHandler) Index(c *gin.Context) {
 	dto.Success(data, "首页数据获取成功", c)
 }
 
-// DailyUpdates 近 24h 更新。
-// Deprecated: 保持早期版本（beta.3）原始接口契约（不传 limit 返回全部；传 limit 则随机抽取，exclude 排除当前批次）。
-// 后续主版本计划移除，请迁移至 /api/dailyUpdates (DailyUpdatesV2)，支持 pid 大类分类、标准分页、排除已出现项与随机抽样。
-func (h *IndexHandler) DailyUpdates(c *gin.Context) {
-	data := service.IndexSvc.HomeDailyUpdates(parseDailyUpdateLimit(c.Query("limit")), parseDailyUpdateExclude(c.Query("exclude")))
-	if data == nil {
-		data = make([]model.MovieBasicInfo, 0)
-	}
-	dto.Success(data, "每日更新获取成功", c)
-}
-
-// DailyUpdatesV2 近 24h 更新：
+// DailyUpdates 近 24h 更新：
 //
 //	pid=0 全部；pid=-1 其他；pid>0 导航大类
 //	current/page + pageSize/size 标准分页
 //	random=1 时按分类随机抽样，exclude 排除已出现的 mid
-func (h *IndexHandler) DailyUpdatesV2(c *gin.Context) {
-	result, err := service.IndexSvc.DailyUpdatesV2(service.DailyUpdateListReq{
+func (h *IndexHandler) DailyUpdates(c *gin.Context) {
+	result, err := service.IndexSvc.DailyUpdates(service.DailyUpdateListReq{
 		Pid: parseDailyUpdatePid(queryFirst(c, "pid", "Pid")),
 		Page: &dto.Page{
 			Current:  parseQueryInt(queryFirst(c, "page", "current"), 1),
@@ -170,17 +159,6 @@ func parseDailyUpdatePid(raw string) int64 {
 	return n
 }
 
-func parseDailyUpdateLimit(raw string) int {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0
-	}
-	n, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0
-	}
-	return n
-}
 
 const dailyUpdateExcludeCap = 500
 
@@ -268,26 +246,27 @@ func (h *IndexHandler) HotKeywords(c *gin.Context) {
 	dto.Success(list, "热门搜索获取成功", c)
 }
 
-// FilmTagSearch 通过tag获取满足条件的对应影片
+// FilmTagSearch 通过tag获取满足条件的对应影片 (GET /api/films/filter)
 func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params := model.SearchTagsVO{}
-	pidStr := c.DefaultQuery("Pid", "")
-	cidStr := c.DefaultQuery("Category", "")
-	yStr := c.DefaultQuery("Year", "")
+	pidStr := queryFirst(c, "pid", "Pid")
+	cidStr := queryFirst(c, "category", "Category", "cid", "Cid")
+	yStr := queryFirst(c, "year", "Year")
 	if pidStr == "" {
 		dto.Failed("缺少分类信息", c)
 		return
 	}
 	params.Pid, _ = strconv.ParseInt(pidStr, 10, 64)
 	params.Cid, _ = strconv.ParseInt(cidStr, 10, 64)
-	params.Plot = c.DefaultQuery("Plot", "")
-	params.Area = c.DefaultQuery("Area", "")
-	params.Language = c.DefaultQuery("Language", "")
+	params.Plot = queryFirst(c, "plot", "Plot")
+	params.Area = queryFirst(c, "area", "Area")
+	params.Language = queryFirst(c, "language", "Language")
 	params.Year = yStr
+	params.Sort = queryFirst(c, "sort", "Sort")
 	params.SourceId = service.IndexSvc.BaselineSourceID()
 
 	page := dto.GetPageParams(c)
-	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("limit") == "" {
+	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("size") == "" && c.Query("limit") == "" {
 		page.PageSize = 48
 	}
 
@@ -321,13 +300,13 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 		"title": titleObj,
 		"list":  list,
 		"params": map[string]string{
-			"Pid":      pidStr,
-			"Category": cidStr,
-			"Plot":     params.Plot,
-			"Area":     params.Area,
-			"Language": params.Language,
-			"Year":     yStr,
-			"Sort":     params.Sort,
+			"pid":      pidStr,
+			"category": cidStr,
+			"plot":     params.Plot,
+			"area":     params.Area,
+			"language": params.Language,
+			"year":     yStr,
+			"sort":     params.Sort,
 		},
 		"page": page,
 	}
@@ -337,9 +316,9 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	dto.Success(response, "分类影片数据获取成功", c)
 }
 
-// FilmClassify  影片分类首页数据展示
+// FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
 func (h *IndexHandler) FilmClassify(c *gin.Context) {
-	pidStr := c.DefaultQuery("Pid", "")
+	pidStr := queryFirst(c, "pid", "Pid")
 	if pidStr == "" {
 		dto.Failed("主分类信息获取异常", c)
 		return
