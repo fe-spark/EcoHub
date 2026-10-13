@@ -24,7 +24,7 @@ import (
 const (
 	snapshotListCacheTTL = 10 * time.Minute
 	snapshotPageCacheTTL = 5 * time.Minute
-	basicSelectFields    = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year"
+	basicSelectFields    = "mid, first_source_id, pid, cid, c_name, name, score, hits, update_stamp, remarks, state, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture, year, class_tag, area, language, actor, director, blurb"
 )
 
 type categoryPageCacheItem struct {
@@ -52,7 +52,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck3", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck5", config.FilmCategoryCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -105,7 +105,7 @@ func GetSnapshotMovieListByCategoryPageWithSourceReadModel(version string, sourc
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck3", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:p%d:s%d:ck5", config.FilmCategoryPageCachePrefix, version, sourceID, field, id, page.Current, page.PageSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var item categoryPageCacheItem
@@ -235,7 +235,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		offset = 0
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck3", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck5", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
@@ -287,7 +287,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck3", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck4", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo

@@ -52,8 +52,14 @@ func (s *UserService) GetUserInfo(id uint) model.UserInfoVo {
 
 // VerifyUserPassword 校验密码
 func (s *UserService) VerifyUserPassword(id uint, password string) bool {
+	if id == 0 || password == "" {
+		return false
+	}
 	// 获取当前登录的用户全部信息
 	u := repository.GetUserById(id)
+	if u.ID == 0 || u.Password == "" {
+		return false
+	}
 	// 校验密码是否正确
 	return utils.PasswordEncrypt(password, u.Salt) == u.Password
 }

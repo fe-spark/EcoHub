@@ -91,7 +91,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	filmsnapshot.ClearSearchCache()
 	InvalidateInventoryStatsCache()
 	if newID != "" {
-		BannerAutoSvc.RefreshAfterPrimarySwitch()
 		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
 			filmsnapshot.NotifySnapshotPublished(version)
 		}

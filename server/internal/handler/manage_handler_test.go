@@ -11,6 +11,7 @@ import (
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/utils"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 )
@@ -23,6 +24,14 @@ func testContext(method, path string) (*gin.Context, *httptest.ResponseRecorder)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(method, path, nil)
+	return c, w
+}
+
+func testJSONContext(method, path, body string) (*gin.Context, *httptest.ResponseRecorder) {
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(method, path, strings.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
 	return c, w
 }
 
@@ -199,11 +208,11 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 	}
 }
 
-func TestBannerGenerateAndProgressHandlers(t *testing.T) {
+func TestBannerHandlers(t *testing.T) {
 	h := &ManageHandler{}
 
-	c, w := testContext(http.MethodPost, "/api/manage/banner/generate")
-	h.BannerGenerate(c)
+	c, w := testContext(http.MethodGet, "/api/manage/banner/list")
+	h.BannerList(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d want 200 body=%s", w.Code, w.Body.String())
 	}
@@ -212,13 +221,10 @@ func TestBannerGenerateAndProgressHandlers(t *testing.T) {
 		t.Fatalf("code=%d want 0", resp.Code)
 	}
 
-	cProg, wProg := testContext(http.MethodGet, "/api/manage/banner/generate/progress")
-	h.BannerGenerateProgress(cProg)
-	if wProg.Code != http.StatusOK {
-		t.Fatalf("status=%d want 200 body=%s", wProg.Code, wProg.Body.String())
-	}
-	respProg := decodeResponse(t, wProg)
-	if respProg.Code != dto.SUCCESS {
-		t.Fatalf("code=%d want 0", respProg.Code)
+	// 测试一键排片参数解析异常与成功处理
+	cGen, wGen := testJSONContext(http.MethodPost, "/api/manage/banner/quick-generate", `{"count":6,"strategy":"hot"}`)
+	h.BannerQuickGenerate(cGen)
+	if wGen.Code != http.StatusOK {
+		t.Fatalf("status=%d want 200 body=%s", wGen.Code, wGen.Body.String())
 	}
 }

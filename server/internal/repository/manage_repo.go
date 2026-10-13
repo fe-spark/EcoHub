@@ -154,6 +154,9 @@ func GetBanners() model.Banners {
 		}
 	}
 	// 2. MySQL 兜底
+	if db.Mdb == nil {
+		return bl
+	}
 	if err := db.Mdb.Order("sort ASC").Find(&bl).Error; err != nil {
 		log.Println("GetBanners MySQL Error:", err)
 		return bl
@@ -174,6 +177,9 @@ func GetBanners() model.Banners {
 // SaveBanners 保存轮播配置信息 (MySQL + Redis 短期缓存)
 func SaveBanners(bl model.Banners) error {
 	bl = normalizeBannerImageFields(bl)
+	if db.Mdb == nil {
+		return nil
+	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		// 清空旧轮播数据
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.Banner{}).Error; err != nil {

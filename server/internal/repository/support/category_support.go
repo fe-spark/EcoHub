@@ -247,3 +247,28 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 	rootCategoryCNameCache.Store(cName, rootId)
 	return rootId
 }
+
+// PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
+func PickPrimarySourceForCategory() *model.FilmSource {
+	if db.Mdb == nil {
+		return nil
+	}
+	var primary model.FilmSource
+	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
+		return &primary
+	}
+	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
+		return &primary
+	}
+	return nil
+}
+
+// IsBaselineCollectSource 判断指定采集站是否为当前首位基准源。
+func IsBaselineCollectSource(sourceID string) bool {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return false
+	}
+	primary := PickPrimarySourceForCategory()
+	return primary != nil && strings.TrimSpace(primary.Id) == sourceID
+}

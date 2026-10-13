@@ -89,18 +89,16 @@ func SetupRouter() *gin.Engine {
 			accessRoute.POST(`/clean`, middleware.AdminAccess(), handler.AccessHd.CleanData)
 		}
 
-		// 轮播相关
+		// 首页轮播管理 (手动排片 + 一键排片 + 手动/一键刮削)
 		banner := manageRoute.Group(`banner`)
 		{
 			banner.GET(`/list`, handler.ManageHd.BannerList)
-			banner.GET(`/find`, handler.ManageHd.BannerFind)
 			banner.POST(`/add`, handler.ManageHd.BannerAdd)
 			banner.POST(`/update`, handler.ManageHd.BannerUpdate)
 			banner.POST(`/del`, handler.ManageHd.BannerDel)
-			banner.GET(`/config`, handler.ManageHd.BannerConfigGet)
-			banner.POST(`/config/update`, handler.ManageHd.BannerConfigUpdate)
-			banner.POST(`/generate`, handler.ManageHd.BannerGenerate)
-			banner.GET(`/generate/progress`, handler.ManageHd.BannerGenerateProgress)
+			banner.POST(`/save-deck`, handler.ManageHd.BannerSaveDeck)
+			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
+			banner.POST(`/batch-scrape`, handler.ManageHd.BannerBatchScrape)
 		}
 
 		// 映射规则管理

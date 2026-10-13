@@ -314,9 +314,11 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 		}
 
 		pid := int64(t)
-		pid = repository.ResolveCategoryID(pid)
-		if cid > 0 {
-			cid = repository.ResolveCategoryID(cid)
+		if sourceId == "" {
+			pid = repository.ResolveCategoryID(pid)
+			if cid > 0 {
+				cid = repository.ResolveCategoryID(cid)
+			}
 		}
 		if cid == model.TagUncategorizedValue && pid <= 0 {
 			return tvboxListResult{Current: 1, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, nil
@@ -397,4 +399,95 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 
 	res, err := fetchList()
 	return res.Current, res.PageCount, res.Total, res.VodList, err
+}
+
+// GetTVBoxConfig 获取 TVBox 网络配置（sites 源站列表，支持缓存）
+func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
+	if key != "" {
+		cacheKey += ":" + url.QueryEscape(key)
+	}
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+
+	apiPath := baseURL + "/api/provide/vod"
+	baseVodApi := apiPath
+	if key != "" {
+		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
+	}
+
+	sites := []map[string]any{
+		{
+			"key":         "EcoHub",
+			"name":        "🌟 EcoHub 私人影视库全量",
+			"type":        1,
+			"api":         baseVodApi,
+			"searchable":  1,
+			"quickSearch": 1,
+			"filterable":  1,
+		},
+	}
+
+	for _, source := range repository.GetCollectSourceList() {
+		if !source.State {
+			continue
+		}
+		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
+		if key != "" {
+			sourceApi += "&key=" + url.QueryEscape(key)
+		}
+		sites = append(sites, map[string]any{
+			"key":         "source_" + source.Id,
+			"name":        "📡 " + source.Name,
+			"type":        1,
+			"api":         sourceApi,
+			"searchable":  1,
+			"quickSearch": 1,
+			"filterable":  1,
+		})
+	}
+
+	configJson := map[string]any{
+		"spider":    "",
+		"wallpaper": "",
+		"logo":      "",
+		"sites":     sites,
+	}
+	if db.Rdb != nil {
+		if data, err := json.Marshal(configJson); err == nil {
+			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
+		}
+	}
+
+	return configJson, nil
+}
+
+// GetAppSourceConfig 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
+func (p *ProvideService) GetAppSourceConfig(baseURL string) (map[string]any, error) {
+	baseURL = strings.TrimRight(baseURL, "/")
+	basic := repository.GetSiteBasic()
+	siteName := strings.TrimSpace(basic.SiteName)
+	if siteName == "" {
+		siteName = "EcoHub"
+	}
+
+	return map[string]any{
+		"code": 1,
+		"msg":  "EcoHub 客户端软件源在线",
+		"data": map[string]any{
+			"site_name":      siteName,
+			"site_url":       baseURL,
+			"api_base":       baseURL + "/api",
+			"version":        config.Version,
+			"private_access": basic.PrivateAccess,
+			"status":         "online",
+		},
+	}, nil
 }

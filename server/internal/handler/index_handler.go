@@ -348,7 +348,7 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	sourceId := service.IndexSvc.BaselineSourceID()
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
-	page.PageSize = 21
+	page.PageSize = 24
 	dto.Success(gin.H{
 		"title":   title,
 		"content": service.IndexSvc.GetFilmClassify(pid, page, sourceId),

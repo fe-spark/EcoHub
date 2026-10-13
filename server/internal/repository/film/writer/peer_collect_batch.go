@@ -83,7 +83,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
 		return nil, nil, err
 	}
-	if err = backfillPageFilmsTx(tx, source, items); err != nil {
+	if err = backfillPageFilmsTx(tx, source, items, sources); err != nil {
 		return nil, nil, err
 	}
 	newMids := make(map[int64]struct{}, len(items))
@@ -466,10 +466,11 @@ func savePagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) err
 	return tx.Clauses(playlistUpsertClause()).CreateInBatches(&upserts, peerPagePlaylistBatch).Error
 }
 
-func backfillPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem) error {
+func backfillPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
+	isBaseline := isBaselineCollectSource(source, sources)
 	order := make([]int, 0, len(items))
 	for i := range items {
-		if items[i].linesChanged && !items[i].isNew && items[i].film != nil {
+		if (items[i].linesChanged || isBaseline) && !items[i].isNew && items[i].film != nil {
 			order = append(order, i)
 		}
 	}
@@ -480,7 +481,7 @@ func backfillPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPage
 		return items[order[i]].mid < items[order[j]].mid
 	})
 	for _, idx := range order {
-		if _, err := backfillFilmMetadataTx(tx, items[idx].film, source, items[idx].detail); err != nil {
+		if _, err := backfillFilmMetadataTx(tx, items[idx].film, source, items[idx].detail, isBaseline); err != nil {
 			return err
 		}
 	}

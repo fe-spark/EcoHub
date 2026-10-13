@@ -144,7 +144,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			if err := repository.SaveBannerConfig(*backup.BannerConfig); err != nil {
 				return fmt.Errorf("导入首页轮播排片配置失败: %w", err)
 			}
-			BannerAutoSvc.SyncWithCronTask(backup.BannerConfig.Mode, backup.BannerConfig.RefreshCron)
 		}
 	}
 

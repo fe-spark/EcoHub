@@ -11,20 +11,14 @@ export type BannerRecord = {
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
+  score?: number;
+  hits?: number;
+  blurb?: string;
+  actor?: string;
+  director?: string;
 };
 
 export const MAX_BANNER_COUNT = 12;
-
-export type BannerConfig = {
-  mode: "manual" | "auto";
-  strategy: "hot_random" | "score_random" | "latest_random" | "smart_mix";
-  count: number;
-  autoTMDB: boolean;
-  refreshCron: string;
-  pinnedMids?: number[];
-  categories?: number[];
-  tmdbReady?: boolean;
-};
 
 export type BannerFormValues = {
   mid?: number;

@@ -195,7 +195,7 @@ func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64, 
 			if len(allVisibleKeys) == 0 {
 				return q
 			}
-			return q.Where("category_key IS NULL OR category_key = '' OR category_key NOT IN ?", allVisibleKeys)
+			return q.Where("(category_key IS NULL OR category_key = '' OR category_key NOT IN ?) AND (root_category_key IS NULL OR root_category_key = '' OR root_category_key NOT IN ?)", allVisibleKeys, allVisibleKeys)
 		}
 		if cat.CategoryID > 0 {
 			typeIDs := repository.PublicSourceTypeIDs(srcID, "pid", cat.CategoryID)
@@ -208,7 +208,7 @@ func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64, 
 			if len(keys) == 0 {
 				return q.Where("1 = 0")
 			}
-			return q.Where("category_key IN ?", keys)
+			return q.Where("category_key IN ? OR root_category_key IN ?", keys, keys)
 		}
 		return q.Where("1 = 0")
 	}
@@ -334,9 +334,9 @@ func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (
 	if keyToRoot, _, useSourceKeys := sourceTopCategoryKeyGroups(sourceID, navIDs); useSourceKeys {
 		var rows []dailyCategoryKeyCountRow
 		q := applyDailySourceMembership(db.Mdb.Table(model.TableFilmIndex).
-			Select("category_key AS category_key, COUNT(mid) AS cnt").
+			Select("COALESCE(NULLIF(category_key, ''), root_category_key) AS category_key, COUNT(mid) AS cnt").
 			Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()), sourceID).
-			Group("category_key")
+			Group("COALESCE(NULLIF(category_key, ''), root_category_key)")
 		if err = q.Scan(&rows).Error; err != nil {
 			return countByPid, 0, 0, err
 		}

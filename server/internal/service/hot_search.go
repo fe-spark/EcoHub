@@ -62,9 +62,17 @@ func (i *IndexService) SearchFilmInfoWithSort(key string, sortField string, page
 	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...)
 }
 
-// GetHotSearchKeywords 全站热门推荐：按当前快照播放热度取片名，与个人搜索历史无关。
-func (i *IndexService) GetHotSearchKeywords(limit int) []string {
+// GetHotSearchKeywords 全站热门推荐：按当前首选站播放热度取片名，与个人搜索历史无关。
+func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []string {
 	limit = clampHotSearchLimit(limit)
+
+	var sourceID string
+	if len(sourceIdOpt) > 0 {
+		sourceID = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceID == "" {
+		sourceID = i.BaselineSourceID()
+	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()
 	if version == "" {
@@ -74,7 +82,12 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		return []string{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
+	var cacheKey string
+	if sourceID != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s", config.FilmHotKeywordsKey, version, sourceID)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s", config.FilmHotKeywordsKey, version)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []string
@@ -84,7 +97,8 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		}
 	}
 
-	val, err, _ := hotKeywordsSfGroup.Do(cacheKey, func() (any, error) {
+	sfKey := cacheKey
+	val, err, _ := hotKeywordsSfGroup.Do(sfKey, func() (any, error) {
 		if db.Rdb != nil {
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var cached []string
@@ -101,9 +115,11 @@ func (i *IndexService) GetHotSearchKeywords(limit int) []string {
 		var snapshots []model.FilmIndex
 		query := db.Mdb.Model(&model.FilmIndex{}).
 			Select("name").
-			Where("pid > 0").
-			Order("hits DESC").
-			Limit(hotSearchMaxLimit * 3)
+			Where("pid > 0")
+		if sourceID != "" {
+			query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
+		}
+		query = query.Order("hits DESC").Limit(hotSearchMaxLimit * 3)
 		if err := query.Find(&snapshots).Error; err != nil {
 			return []string{}, err
 		}

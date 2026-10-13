@@ -83,6 +83,8 @@ type Banner struct {
 	Remark        string  `gorm:"size:128" json:"remark"`           // 更新状态描述信息
 	Sort          int64   `json:"sort"`                             // 排序分値
 	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"` // 是否为人工自定义图片（锁定不被海报源覆盖）
+	IsPinned      bool    `gorm:"default:false" json:"isPinned"`    // 是否人工置顶锁定
+	Source        string  `gorm:"size:32;default:'manual'" json:"source"` // 来源: manual(手动) | auto(系统自动推荐)
 	Area          string  `gorm:"-" json:"area,omitempty"`          // 地区（由快照动态覆盖）
 	ClassTag      string  `gorm:"-" json:"classTag,omitempty"`      // 类型标签（由快照动态覆盖）
 	Actor         string  `gorm:"-" json:"actor,omitempty"`         // 主演（由快照动态覆盖）
