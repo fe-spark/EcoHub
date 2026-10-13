@@ -1,18 +1,18 @@
-import FilmClassifySearchPageView from "./view";
+import CategoryFilterPageView from "./view";
 import TrackPageView from "@/components/public/TrackPageView";
 import { serverGet } from "@/lib/server-api";
 import { Alert } from "antd";
 
-async function getFilmClassifySearchData(params: Record<string, string>) {
+async function getCategoryFilterData(params: Record<string, string>) {
   try {
-    const response = await serverGet<any>("/filmClassifySearch", params);
+    const response = await serverGet<any>("/films/filter", params);
     if (response.code === 0) {
       return { data: response.data, error: "" };
     }
 
     return { data: null, error: response.msg || "分类筛选数据获取失败" };
   } catch (error) {
-    console.error("fetch film classify search data error:", error);
+    console.error("fetch category filter data error:", error);
     return {
       data: null,
       error: error instanceof Error ? error.message : "分类筛选数据获取失败",
@@ -20,7 +20,7 @@ async function getFilmClassifySearchData(params: Record<string, string>) {
   }
 }
 
-export default async function FilmClassifySearchPage({
+export default async function CategoryFilterPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
@@ -39,7 +39,7 @@ export default async function FilmClassifySearchPage({
     }),
   );
 
-  const { data, error } = await getFilmClassifySearchData(currentParams);
+  const { data, error } = await getCategoryFilterData(currentParams);
   if (!data) {
     return (
       <Alert type="error" showIcon title={error || "分类筛选数据获取失败"} />
@@ -60,11 +60,11 @@ export default async function FilmClassifySearchPage({
     <>
       <TrackPageView
         action="classify"
-        resource={String(currentParams.Pid || currentParams.pid || "")}
+        resource={String(currentParams.pid || currentParams.Pid || "")}
         resourceCat={data.title.name}
         resourceTitle={data.title.name}
       />
-      <FilmClassifySearchPageView data={data} currentParams={currentParams} />
+      <CategoryFilterPageView data={data} currentParams={currentParams} />
     </>
   );
 }

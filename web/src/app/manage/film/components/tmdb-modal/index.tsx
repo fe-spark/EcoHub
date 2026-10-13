@@ -2,10 +2,10 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Input, Select, Button, Space, Tag, Spin, Alert, Checkbox, Typography, Empty, Image as AntImage,
+  Modal, Input, Select, Button, Space, Tag, Spin, Alert, Checkbox, Typography, Empty, Image as AntImage, Popconfirm, Flex,
 } from "antd";
 import {
-  SearchOutlined, CompassOutlined, ArrowLeftOutlined, CheckOutlined, StarFilled, CalendarOutlined, PictureOutlined,
+  SearchOutlined, CompassOutlined, ArrowLeftOutlined, CheckOutlined, StarFilled, CalendarOutlined, PictureOutlined, UndoOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -32,9 +32,11 @@ interface TmdbModalProps {
   mid?: number;
   initialName?: string;
   initialYear?: string | number;
+  isScraped?: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   onPrefill?: (data: any, fields?: string[]) => void;
+  onRevert?: (mid: number) => void;
 }
 
 const FIELD_OPTIONS = [
@@ -54,9 +56,11 @@ export default function TmdbModal({
   mid,
   initialName = "",
   initialYear = "",
+  isScraped = false,
   onClose,
   onSuccess,
   onPrefill,
+  onRevert,
 }: TmdbModalProps) {
   const [keyword, setKeyword] = useState("");
   const [year, setYear] = useState("");
@@ -174,7 +178,7 @@ export default function TmdbModal({
       if (onPrefill) {
         if (previewDetail) {
           onPrefill(previewDetail, selectedFields);
-          message.success("TMDB 元数据已成功填充至表单！如需恢复可在页面中随时一键撤销");
+          message.success("TMDB 元数据已应用到表单，请点击编辑弹窗【确定】保存生效");
           onClose();
           return;
         }
@@ -184,7 +188,7 @@ export default function TmdbModal({
         });
         if (resp.code === 0 && resp.data) {
           onPrefill(resp.data, selectedFields);
-          message.success("TMDB 元数据已成功填充至表单！如需恢复可在页面中随时一键撤销");
+          message.success("TMDB 元数据已应用到表单，请点击编辑弹窗【确定】保存生效");
           onClose();
         } else {
           message.error(resp.msg || "获取 TMDB 预填数据失败");
@@ -214,10 +218,37 @@ export default function TmdbModal({
       open={open}
       onCancel={onClose}
       title={
-        <Space size={8}>
-          <CompassOutlined style={{ color: "#1890ff" }} />
-          <span>TMDB 影视刮削匹配</span>
-        </Space>
+        <Flex justify="space-between" align="center" style={{ width: "100%", paddingRight: 32 }}>
+          <Space size={8}>
+            <CompassOutlined style={{ color: "#722ed1" }} />
+            <span>TMDB 影视刮削匹配</span>
+            {isScraped && (
+              <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
+                已刮削
+              </Tag>
+            )}
+          </Space>
+          {isScraped && mid && onRevert && (
+            <Popconfirm
+              title="还原该影片的 TMDB 刮削？"
+              description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
+              okText="确定还原"
+              cancelText="取消"
+              onConfirm={async () => {
+                await onRevert(mid);
+                onClose();
+              }}
+            >
+              <Button
+                size="small"
+                icon={<UndoOutlined />}
+                style={{ color: "#fa8c16", borderColor: "#ffd591" }}
+              >
+                还原为原始数据
+              </Button>
+            </Popconfirm>
+          )}
+        </Flex>
       }
       width={720}
       footer={
@@ -240,7 +271,7 @@ export default function TmdbModal({
               disabled={detailLoading}
               onClick={handleApply}
             >
-              {onPrefill ? "填充至表单" : "确认应用并更新"}
+              {onPrefill ? "应用到当前编辑" : "确认应用并更新"}
             </Button>
           </Space>
         ) : null

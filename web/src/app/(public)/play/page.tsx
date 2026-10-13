@@ -7,7 +7,7 @@ function firstParam(value: string | string[] | undefined) {
 }
 
 async function getPlayData(filmId: string, sourceId?: string, episodeIdx?: string) {
-  const playPageResponse = await serverGet<any>("/filmPlayInfo", {
+  const playPageResponse = await serverGet<any>("/films/play-info", {
     id: filmId,
     source: sourceId,
     playFrom: sourceId,

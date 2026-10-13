@@ -27,7 +27,7 @@ func TestTrackViewMaxBody(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	raw := `{"action":"browse","resource":"` + strings.Repeat("a", 8000) + `"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/stat/view", strings.NewReader(raw))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/stats/view", strings.NewReader(raw))
 	c.Request.Header.Set("Content-Type", "application/json")
 	AccessHd.TrackView(c)
 	if w.Code != http.StatusOK {
@@ -43,8 +43,8 @@ func TestTrackViewValidPayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	raw := `{"action":"browse","path":"/filmClassify","page_title":"分类","device_id":"eh_did_12345"}`
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/stat/view", strings.NewReader(raw))
+	raw := `{"action":"browse","path":"/category","page_title":"分类","device_id":"eh_did_12345"}`
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/stats/view", strings.NewReader(raw))
 	c.Request.Header.Set("Content-Type", "application/json")
 	AccessHd.TrackView(c)
 	if w.Code != http.StatusOK {

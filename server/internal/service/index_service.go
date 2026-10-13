@@ -375,6 +375,10 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if snap.Hits > 0 {
 			out[i].Hits = snap.Hits
 		}
+		if snap.IsScraped {
+			out[i].IsScraped = true
+			out[i].TmdbID = snap.TmdbID
+		}
 		// 核心优先级：若该轮播项已由管理员手动自定义修改 (IsCustomPic == true)，严格展示用户的自定义图片（优先 CustomPicture，兼容历史 Picture 字段）
 		customPic := strings.TrimSpace(out[i].CustomPicture)
 		if customPic == "" {

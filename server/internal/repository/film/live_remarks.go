@@ -7,6 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film/snapshot"
 )
 
 type liveProgress struct {
@@ -66,6 +67,8 @@ type LiveBannerSnapshot struct {
 	CustomPicture      string
 	CustomPictureSlide string
 	IsCustomPicture    bool
+	IsScraped          bool
+	TmdbID             int64
 }
 
 func (s LiveBannerSnapshot) DisplayPicture() string {
@@ -114,8 +117,9 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 		return out
 	}
 
+	scrapes := snapshot.LoadActiveScrapesByMids(mids)
 	for _, r := range rows {
-		out[r.Mid] = LiveBannerSnapshot{
+		snap := LiveBannerSnapshot{
 			Mid:                r.Mid,
 			Remarks:            strings.TrimSpace(r.Remarks),
 			Area:               strings.TrimSpace(r.Area),
@@ -131,8 +135,45 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 			CustomPictureSlide: strings.TrimSpace(r.CustomPictureSlide),
 			IsCustomPicture:    r.IsCustomPicture,
 		}
+		if sc, ok := scrapes[r.Mid]; ok {
+			overlayScrapeOnLiveBanner(&snap, &sc)
+		}
+		out[r.Mid] = snap
 	}
 	return out
+}
+
+func overlayScrapeOnLiveBanner(snap *LiveBannerSnapshot, sc *model.FilmTMDBScrape) {
+	if snap == nil || sc == nil || sc.Status != 1 {
+		return
+	}
+	snap.IsScraped = true
+	snap.TmdbID = sc.TmdbID
+	fieldSet := snapshot.ParseAppliedFields(sc.AppliedFields)
+	if snapshot.ShouldApplyField(fieldSet, "poster", "picture") && sc.Poster != "" {
+		snap.Picture = sc.Poster
+		snap.CustomPicture = sc.Poster
+		snap.IsCustomPicture = true
+	}
+	if snapshot.ShouldApplyField(fieldSet, "backdrop", "pictureslide") && sc.Backdrop != "" {
+		snap.PictureSlide = sc.Backdrop
+		snap.CustomPictureSlide = sc.Backdrop
+	}
+	if snapshot.ShouldApplyField(fieldSet, "overview", "content") && sc.Overview != "" {
+		snap.Blurb = sc.Overview
+	}
+	if snapshot.ShouldApplyField(fieldSet, "actor", "credits") && sc.Actors != "" {
+		snap.Actor = sc.Actors
+	}
+	if snapshot.ShouldApplyField(fieldSet, "director", "credits") && sc.Directors != "" {
+		snap.Director = sc.Directors
+	}
+	if snapshot.ShouldApplyField(fieldSet, "score", "voteaverage") && sc.VoteAverage > 0 {
+		snap.Score = sc.VoteAverage
+	}
+	if snapshot.ShouldApplyField(fieldSet, "tag", "genres") && sc.Genres != "" {
+		snap.ClassTag = sc.Genres
+	}
 }
 
 // LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。

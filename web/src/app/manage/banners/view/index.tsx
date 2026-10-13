@@ -29,6 +29,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
+import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BannerModal from "./banner-modal";
@@ -39,6 +40,7 @@ import styles from "./index.module.less";
 const { Text } = Typography;
 
 export default function BannersPageView() {
+  const tmdbEnabled = useTmdbEnabled();
   const [banners, setBanners] = useState<BannerRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [batchScraping, setBatchScraping] = useState(false);
@@ -168,6 +170,11 @@ export default function BannersPageView() {
     ).length;
   }, [banners]);
 
+  // 统计自定义封面情况
+  const customCoverCount = useMemo(() => {
+    return banners.filter((b) => b.isCustomPic).length;
+  }, [banners]);
+
   const columns = useMemo<ColumnsType<BannerRecord>>(() => {
     return [
       {
@@ -241,6 +248,25 @@ export default function BannersPageView() {
                       {record.year}
                     </Tag>
                   ) : null}
+                  {record.isCustomPic ? (
+                    <Tooltip title="已开启自定义封面，优先展示当前轮播独立配置的封面与幻灯图">
+                      <Tag color="cyan" style={{ borderRadius: 4, margin: 0, cursor: "default" }}>
+                        自定义封面
+                      </Tag>
+                    </Tooltip>
+                  ) : record.isScraped ? (
+                    <Tooltip title={record.tmdbId ? `未开启自定义，当前自动使用影片 TMDB 刮削数据 (ID: ${record.tmdbId})` : "未开启自定义，当前自动使用影片刮削数据"}>
+                      <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0, cursor: "default" }}>
+                        跟随刮削
+                      </Tag>
+                    </Tooltip>
+                  ) : (
+                    <Tooltip title="未开启自定义，当前自动使用采集站海报源封面">
+                      <Tag color="default" style={{ borderRadius: 4, margin: 0, cursor: "default" }}>
+                        跟随海报源
+                      </Tag>
+                    </Tooltip>
+                  )}
                   <span className={styles.filmId}>MID: {record.mid || record.id}</span>
                 </div>
               </div>
@@ -281,7 +307,13 @@ export default function BannersPageView() {
 
           return (
             <div className={styles.slideCell}>
-              <Tooltip title="缺少横屏大图，点击可进入编辑弹窗刮削补齐">
+              <Tooltip
+                title={
+                  tmdbEnabled
+                    ? "缺少横屏大图，点击可进入编辑弹窗刮削补齐"
+                    : "缺少横屏大图，点击可进入编辑弹窗配置图片"
+                }
+              >
                 <div
                   className={styles.emptySlideBox}
                   onClick={() => openEditEditor(record)}
@@ -335,7 +367,13 @@ export default function BannersPageView() {
         width: 110,
         render: (_, record) => (
           <Space size={6}>
-            <Tooltip title="编辑轮播（内含 TMDB 刮削与图片配置）">
+            <Tooltip
+              title={
+                tmdbEnabled
+                  ? "编辑轮播（内含 TMDB 刮削与图片配置）"
+                  : "编辑轮播（配置图片与信息）"
+              }
+            >
               <Button
                 size="small"
                 icon={<EditOutlined />}
@@ -364,13 +402,17 @@ export default function BannersPageView() {
         ),
       },
     ];
-  }, [banners.length, canWrite, handleMoveOrder, openEditEditor, handleDelete]);
+  }, [banners.length, canWrite, tmdbEnabled, handleMoveOrder, openEditEditor, handleDelete]);
 
   return (
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="首页轮播"
-        description="纯手动排片模式。支持自由添加、排序、编辑影片，支持单片精准 TMDB 刮削与一键批量刮削补图。"
+        description={
+          tmdbEnabled
+            ? "纯手动排片模式。支持自由添加、排序、编辑影片，支持单片精准 TMDB 刮削与一键批量刮削补图。"
+            : "纯手动排片模式。支持自由添加、排序、编辑影片与横屏背景图配置。"
+        }
       />
 
       <Card
@@ -385,6 +427,11 @@ export default function BannersPageView() {
             <Tag color={slideReadyCount === banners.length ? "success" : "warning"} style={{ borderRadius: 4 }}>
               横屏大图就绪: {slideReadyCount}/{banners.length}
             </Tag>
+            {customCoverCount > 0 && (
+              <Tag color="cyan" style={{ borderRadius: 4 }}>
+                自定义封面: {customCoverCount}/{banners.length}
+              </Tag>
+            )}
           </Space>
         }
         extra={
@@ -402,18 +449,20 @@ export default function BannersPageView() {
               </Button>
             </Tooltip>
 
-            <Tooltip title="自动检测当前排片中缺少横屏大图的影片，一键并发从 TMDB 检索补齐横屏背景图">
-              <Button
-                type="default"
-                size="middle"
-                icon={<ThunderboltOutlined />}
-                loading={batchScraping}
-                disabled={!canWrite || banners.length === 0}
-                onClick={handleBatchScrape}
-              >
-                一键批量刮削
-              </Button>
-            </Tooltip>
+            {tmdbEnabled && (
+              <Tooltip title="自动检测当前排片中缺少横屏大图的影片，一键并发从 TMDB 检索补齐横屏背景图">
+                <Button
+                  type="default"
+                  size="middle"
+                  icon={<ThunderboltOutlined />}
+                  loading={batchScraping}
+                  disabled={!canWrite || banners.length === 0}
+                  onClick={handleBatchScrape}
+                >
+                  一键批量刮削
+                </Button>
+              </Tooltip>
+            )}
 
             <Tooltip title={isFull ? `已达上限（${MAX_BANNER_COUNT}部）` : undefined}>
               <span>
@@ -446,6 +495,7 @@ export default function BannersPageView() {
       {/* 一键快速排片弹窗 */}
       <BannerQuickModal
         open={quickModalOpen}
+        tmdbEnabled={tmdbEnabled}
         onClose={() => setQuickModalOpen(false)}
         onSuccess={(newBanners) => {
           setBanners(newBanners);
@@ -453,11 +503,12 @@ export default function BannersPageView() {
         }}
       />
 
-      {/* 手动添加/编辑轮播弹窗（内含单片 TMDB 精准刮削） */}
+      {/* 手动添加/编辑轮播弹窗 */}
       <BannerModal
         open={editorVisible}
         mode={editorMode}
         currentRow={currentRow}
+        tmdbEnabled={tmdbEnabled}
         onClose={() => setEditorVisible(false)}
         onSuccess={fetchBanners}
       />

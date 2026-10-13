@@ -94,7 +94,7 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 	if kb == nil || len(kb.InlineKeyboard) == 0 {
 		t.Fatalf("expected non-empty category keyboard when siteURL is http://localhost:3300/")
 	}
-	if got := kb.InlineKeyboard[0][0].URL; got != "http://localhost:3300/filmClassifySearch?Pid=1" {
+	if got := kb.InlineKeyboard[0][0].URL; got != "http://localhost:3300/category/filter?pid=1" {
 		t.Fatalf("unexpected category button URL: %q", got)
 	}
 	if got := kb.InlineKeyboard[0][1].URL; got != "http://localhost:3300" {

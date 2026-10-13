@@ -31,6 +31,7 @@ func setupTMDBApplyTestDB(t *testing.T) *gorm.DB {
 		&model.FilmIndex{},
 		&model.SearchTagItem{},
 		&model.TMDBConfigRecord{},
+		&model.FilmTMDBScrape{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -146,71 +147,91 @@ func TestApplyDetailWithOptions_CategoryIsolation(t *testing.T) {
 		t.Fatalf("expected mid=1001, got %d", mid)
 	}
 
-	// 4. 验证分类与核心隔离字段绝未被修改
-	var updatedFilm model.FilmIndex
-	if err := db.Mdb.Where("mid = ?", 1001).First(&updatedFilm).Error; err != nil {
-		t.Fatalf("fetch updated film failed: %v", err)
+	// 4. 验证底层 film_index 原始采集数据绝未被修改篡改
+	var rawFilm model.FilmIndex
+	if err := db.Mdb.Where("mid = ?", 1001).First(&rawFilm).Error; err != nil {
+		t.Fatalf("fetch raw film failed: %v", err)
 	}
 
-	if updatedFilm.Pid != 1 {
-		t.Errorf("pid corrupted: expected 1, got %d", updatedFilm.Pid)
+	if rawFilm.Pid != 1 || rawFilm.Cid != 10 {
+		t.Errorf("pid/cid corrupted: got %d/%d", rawFilm.Pid, rawFilm.Cid)
 	}
-	if updatedFilm.Cid != 10 {
-		t.Errorf("cid corrupted: expected 10, got %d", updatedFilm.Cid)
+	if rawFilm.Picture != "https://example.com/old_poster.jpg" {
+		t.Errorf("film_index picture should remain raw untouched, got %q", rawFilm.Picture)
 	}
-	if updatedFilm.RootCategoryKey != "movie" {
-		t.Errorf("rootCategoryKey corrupted: expected 'movie', got %q", updatedFilm.RootCategoryKey)
+	if rawFilm.Content != "原剧情简介" {
+		t.Errorf("film_index content should remain raw untouched, got %q", rawFilm.Content)
 	}
-	if updatedFilm.CategoryKey != "sci_fi" {
-		t.Errorf("categoryKey corrupted: expected 'sci_fi', got %q", updatedFilm.CategoryKey)
-	}
-	if updatedFilm.OriginalCategory != "科幻片" {
-		t.Errorf("originalCategory corrupted: expected '科幻片', got %q", updatedFilm.OriginalCategory)
-	}
-	if updatedFilm.FirstSourceId != "station_test" {
-		t.Errorf("firstSourceId corrupted: expected 'station_test', got %q", updatedFilm.FirstSourceId)
+	if rawFilm.Year != 2020 {
+		t.Errorf("film_index year should remain raw untouched, got %d", rawFilm.Year)
 	}
 
-	// 5. 验证白名单展示字段成功生效
+	// 5. 验证独立刮削持久化表 film_tmdb_scrapes 写入完整
+	var scrapeRec model.FilmTMDBScrape
+	if err := db.Mdb.Where("mid = ?", 1001).First(&scrapeRec).Error; err != nil {
+		t.Fatalf("fetch film_tmdb_scrapes failed: %v", err)
+	}
+	if scrapeRec.TmdbID != 9999 || scrapeRec.Status != 1 {
+		t.Errorf("scrape record mismatch: tmdbID=%d status=%d", scrapeRec.TmdbID, scrapeRec.Status)
+	}
 	expectedPoster := "https://image.tmdb.org/t/p/w780/new_poster.jpg"
-	if updatedFilm.Picture != expectedPoster || updatedFilm.CustomPicture != expectedPoster {
-		t.Errorf("picture mismatch: got picture=%q custom=%q", updatedFilm.Picture, updatedFilm.CustomPicture)
+	if scrapeRec.Poster != expectedPoster {
+		t.Errorf("scrape poster mismatch: got %q, expected %q", scrapeRec.Poster, expectedPoster)
 	}
-	if !updatedFilm.IsCustomPicture {
-		t.Errorf("is_custom_picture should be true for poster update")
-	}
-
-	expectedSlide := "https://image.tmdb.org/t/p/original/new_backdrop.jpg"
-	if updatedFilm.PictureSlide != expectedSlide || updatedFilm.CustomPictureSlide != expectedSlide {
-		t.Errorf("pictureSlide mismatch: got %q custom=%q", updatedFilm.PictureSlide, updatedFilm.CustomPictureSlide)
+	if scrapeRec.Overview != "这是TMDB抓取的全新高清剧情梗概" {
+		t.Errorf("scrape overview mismatch: got %q", scrapeRec.Overview)
 	}
 
-	if updatedFilm.Content != "这是TMDB抓取的全新高清剧情梗概" {
-		t.Errorf("content mismatch: got %q", updatedFilm.Content)
+	// 6. 验证快照读取层合成投影生效（TMDB 覆盖层优先）
+	snap := filmsnapshot.GetSnapshotByMid("", 1001)
+	if snap == nil {
+		t.Fatalf("GetSnapshotByMid returned nil")
 	}
-	if updatedFilm.SubTitle != "Test Movie Original" {
-		t.Errorf("subTitle mismatch: got %q", updatedFilm.SubTitle)
+	if !snap.IsScraped || snap.TmdbID != 9999 {
+		t.Errorf("snapshot scrape flag mismatch: isScraped=%v tmdbId=%d", snap.IsScraped, snap.TmdbID)
 	}
-	if updatedFilm.Actor != "新演员A/新演员B" {
-		t.Errorf("actor mismatch: got %q", updatedFilm.Actor)
+	if snap.Picture != expectedPoster || snap.CustomPicture != expectedPoster {
+		t.Errorf("snapshot picture mismatch: got %q", snap.Picture)
 	}
-	if updatedFilm.Director != "新导演A" {
-		t.Errorf("director mismatch: got %q", updatedFilm.Director)
+	if snap.Content != "这是TMDB抓取的全新高清剧情梗概" {
+		t.Errorf("snapshot content mismatch: got %q", snap.Content)
 	}
-	if updatedFilm.Year != 2023 {
-		t.Errorf("year mismatch: expected 2023, got %d", updatedFilm.Year)
+	if snap.Actor != "新演员A/新演员B" {
+		t.Errorf("snapshot actor mismatch: got %q", snap.Actor)
 	}
-	if updatedFilm.ReleaseDate != "2023-05-20" {
-		t.Errorf("releaseDate mismatch: expected 2023-05-20, got %q", updatedFilm.ReleaseDate)
+	if snap.Year != 2023 {
+		t.Errorf("snapshot year mismatch: expected 2023, got %d", snap.Year)
 	}
-	if updatedFilm.Score != 8.8 {
-		t.Errorf("score mismatch: expected 8.8, got %f", updatedFilm.Score)
+	if snap.Score != 8.8 {
+		t.Errorf("snapshot score mismatch: expected 8.8, got %f", snap.Score)
 	}
-	if updatedFilm.ClassTag != "科幻,冒险" {
-		t.Errorf("classTag mismatch: expected '科幻,冒险', got %q", updatedFilm.ClassTag)
+
+	// 7. 测试还原刮削 (Revert)
+	if err := TMDBSvc.RevertDetail(1001); err != nil {
+		t.Fatalf("RevertDetail failed: %v", err)
 	}
-	if updatedFilm.UpdateReason != "TMDB刮削" {
-		t.Errorf("updateReason mismatch: got %q", updatedFilm.UpdateReason)
+	var countScrapes int64
+	db.Mdb.Model(&model.FilmTMDBScrape{}).Where("mid = ?", 1001).Count(&countScrapes)
+	if countScrapes != 0 {
+		t.Errorf("film_tmdb_scrapes should be empty after revert, got %d", countScrapes)
+	}
+
+	// 还原后快照重新投影，无缝变回采集站原始数据
+	revertedSnap := filmsnapshot.GetSnapshotByMid("", 1001)
+	if revertedSnap == nil {
+		t.Fatalf("reverted snapshot is nil")
+	}
+	if revertedSnap.IsScraped {
+		t.Errorf("isScraped should be false after revert")
+	}
+	if revertedSnap.Picture != "https://example.com/old_poster.jpg" {
+		t.Errorf("reverted picture mismatch: got %q, expected raw poster", revertedSnap.Picture)
+	}
+	if revertedSnap.Content != "原剧情简介" {
+		t.Errorf("reverted content mismatch: got %q, expected raw content", revertedSnap.Content)
+	}
+	if revertedSnap.Year != 2020 {
+		t.Errorf("reverted year mismatch: got %d, expected 2020", revertedSnap.Year)
 	}
 }
 
@@ -276,19 +297,42 @@ func TestApplyDetailWithOptions_SelectiveFields(t *testing.T) {
 		t.Fatalf("ApplyDetailWithOptions failed: %v", err)
 	}
 
-	var updatedFilm model.FilmIndex
-	if err := db.Mdb.Where("mid = ?", 1002).First(&updatedFilm).Error; err != nil {
-		t.Fatalf("fetch updated film: %v", err)
+	// 验证底层 film_index 仍然完整保留
+	var rawFilm model.FilmIndex
+	if err := db.Mdb.Where("mid = ?", 1002).First(&rawFilm).Error; err != nil {
+		t.Fatalf("fetch raw film: %v", err)
+	}
+	if rawFilm.Content != "旧内容" || rawFilm.Picture != "https://example.com/stay_same.jpg" {
+		t.Errorf("film_index was touched unexpectedly: content=%q picture=%q", rawFilm.Content, rawFilm.Picture)
 	}
 
-	// 验证 overview 变了，但 picture 和 year 没有被覆盖
-	if updatedFilm.Content != "改动后的内容" {
-		t.Errorf("content should be updated, got %q", updatedFilm.Content)
+	// 验证快照层精准合成 overview，其余字段保持原样
+	snap := filmsnapshot.GetSnapshotByMid("", 1002)
+	if snap == nil {
+		t.Fatalf("snapshot is nil")
 	}
-	if updatedFilm.Picture != "https://example.com/stay_same.jpg" {
-		t.Errorf("picture should remain unchanged, got %q", updatedFilm.Picture)
+	if snap.Content != "改动后的内容" {
+		t.Errorf("content should be updated in snapshot, got %q", snap.Content)
 	}
-	if updatedFilm.Year != 1999 {
-		t.Errorf("year should remain 1999, got %d", updatedFilm.Year)
+	if snap.Picture != "https://example.com/stay_same.jpg" {
+		t.Errorf("picture should remain unchanged, got %q", snap.Picture)
+	}
+	if snap.Year != 1999 {
+		t.Errorf("year should remain 1999, got %d", snap.Year)
+	}
+	if !snap.IsScraped || snap.TmdbID != 9998 {
+		t.Errorf("snapshot scrape metadata mismatch")
+	}
+
+	// 还原并检查
+	if err := TMDBSvc.RevertDetail(1002); err != nil {
+		t.Fatalf("revert failed: %v", err)
+	}
+	revertedSnap := filmsnapshot.GetSnapshotByMid("", 1002)
+	if revertedSnap.Content != "旧内容" {
+		t.Errorf("reverted content mismatch: got %q, expected '旧内容'", revertedSnap.Content)
+	}
+	if revertedSnap.IsScraped {
+		t.Errorf("reverted isScraped should be false")
 	}
 }

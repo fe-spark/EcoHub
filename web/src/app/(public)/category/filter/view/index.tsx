@@ -33,7 +33,7 @@ function getSafeTags(tags: any[] | undefined) {
   });
 }
 
-export default function FilmClassifySearchPageView({
+export default function CategoryFilterPageView({
   data,
   currentParams,
 }: {
@@ -53,9 +53,9 @@ export default function FilmClassifySearchPageView({
   };
   const safeParams = params ?? {};
   const safePage = page ?? { total: 0, pageSize: 48 };
-  const pid = safeParams.Pid || currentParams.Pid || "0";
+  const pid = safeParams.pid || safeParams.Pid || currentParams.pid || currentParams.Pid || "0";
   const categoryName = title?.name || "分类";
-  const categoryKey = [pid, safeParams.Category || currentParams.Category || ""].join(":");
+  const categoryKey = [pid, safeParams.category || safeParams.Category || currentParams.category || currentParams.Category || ""].join(":");
 
   /** 语义化 query 比较：忽略键序与空值，避免 page 过滤假值后全等失败卡 loading */
   const normalizeQueryKey = useCallback((input: string | Record<string, string>) => {
@@ -76,7 +76,7 @@ export default function FilmClassifySearchPageView({
     () => normalizeQueryKey(currentParams),
     [currentParams, normalizeQueryKey],
   );
-  const currentUrl = `/filmClassifySearch?${currentQueryKey}`;
+  const currentUrl = `/category/filter?${currentQueryKey}`;
   const reachedTarget =
     navigatingUrl === "" ||
     normalizeQueryKey(navigatingUrl) === currentQueryKey;
@@ -141,7 +141,7 @@ export default function FilmClassifySearchPageView({
       nextParams.set(key, normalizedValue);
     }
     nextParams.set("current", "1");
-    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "筛选影片中...");
+    pushFilterUrl(`/category/filter?${nextParams.toString()}`, "筛选影片中...");
   };
 
   const handlePageChange = (pageNo: number) => {
@@ -151,7 +151,7 @@ export default function FilmClassifySearchPageView({
 
     const nextParams = new URLSearchParams(currentParams);
     nextParams.set("current", pageNo.toString());
-    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "加载列表中...");
+    pushFilterUrl(`/category/filter?${nextParams.toString()}`, "加载列表中...");
   };
 
   // 统计已激活的筛选条件列表
@@ -181,20 +181,22 @@ export default function FilmClassifySearchPageView({
       return;
     }
     const nextParams = new URLSearchParams();
-    if (currentParams.Pid) {
-      nextParams.set("Pid", currentParams.Pid);
+    const pidVal = currentParams.pid || currentParams.Pid;
+    if (pidVal) {
+      nextParams.set("pid", pidVal);
     }
     nextParams.set("current", "1");
-    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "重置筛选中...");
+    pushFilterUrl(`/category/filter?${nextParams.toString()}`, "重置筛选中...");
   };
 
   const handleApplyFilters = (nextObj: Record<string, string>) => {
     const nextParams = new URLSearchParams();
-    if (currentParams.Pid) {
-      nextParams.set("Pid", currentParams.Pid);
+    const pidVal = currentParams.pid || currentParams.Pid;
+    if (pidVal) {
+      nextParams.set("pid", pidVal);
     }
     for (const [k, v] of Object.entries(nextObj)) {
-      if (v && v !== "" && k !== "Pid" && k !== "current") {
+      if (v && v !== "" && k.toLowerCase() !== "pid" && k !== "current") {
         if (isDefaultSortValue(k, v)) {
           continue;
         }
@@ -202,7 +204,7 @@ export default function FilmClassifySearchPageView({
       }
     }
     nextParams.set("current", "1");
-    pushFilterUrl(`/filmClassifySearch?${nextParams.toString()}`, "筛选影片中...");
+    pushFilterUrl(`/category/filter?${nextParams.toString()}`, "筛选影片中...");
   };
 
   return (
@@ -225,7 +227,7 @@ export default function FilmClassifySearchPageView({
                 type="button"
                 className={styles.tabBtn}
                 onClick={() =>
-                  navigate(`/filmClassify?Pid=${pid}`, "分类专区加载中...")
+                  navigate(`/category?pid=${encodeURIComponent(pid)}`, "分类专区加载中...")
                 }
               >
                 <AppstoreOutlined />
@@ -235,7 +237,7 @@ export default function FilmClassifySearchPageView({
                 type="button"
                 className={`${styles.tabBtn} ${styles.active}`}
                 onClick={() =>
-                  navigate(`/filmClassifySearch?Pid=${pid}`, "片库加载中...")
+                  navigate(`/category/filter?pid=${encodeURIComponent(pid)}`, "片库加载中...")
                 }
               >
                 <CompassOutlined />

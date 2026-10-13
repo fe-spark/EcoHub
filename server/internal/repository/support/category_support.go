@@ -98,10 +98,14 @@ func ClearIndexPageCache() {
 	for iter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, iter.Val())
 	}
-	db.Rdb.Del(db.Cxt, config.IndexDailyUpdatesCacheKey)
-	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.IndexDailyUpdatesCacheKey+"*", config.MaxScanCount).Iterator()
+	db.Rdb.Del(db.Cxt, config.DailyUpdatesCatCacheKey)
+	dailyIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCatCacheKey+"*", config.MaxScanCount).Iterator()
 	for dailyIter.Next(db.Cxt) {
 		db.Rdb.Del(db.Cxt, dailyIter.Val())
+	}
+	pageIter := db.Rdb.Scan(db.Cxt, 0, config.DailyUpdatesCachePrefix+"*", config.MaxScanCount).Iterator()
+	for pageIter.Next(db.Cxt) {
+		db.Rdb.Del(db.Cxt, pageIter.Val())
 	}
 }
 

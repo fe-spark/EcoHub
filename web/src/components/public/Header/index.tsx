@@ -130,7 +130,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
   const historyRef = useRef<HTMLDivElement>(null);
   const quickNavs = navList.slice(0, QUICK_NAV_LIMIT);
   const [visibleQuickCount, setVisibleQuickCount] = useState(quickNavs.length);
-  const activePid = pathname.startsWith("/filmClassify") ? urlPid : null;
+  const activePid = pathname.startsWith("/category") ? urlPid : null;
   const isHomeActive = pathname === "/";
   const isSearchActive = pathname === "/search";
   const isCategoryActive = (id: string | number) => activeCategoryId === String(id);
@@ -245,7 +245,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
 
     // 已在该分类页：不重复导航（避免整页内容 loading 卡死）
     if (
-      pathname.startsWith("/filmClassify") &&
+      pathname.startsWith("/category") &&
       activePid !== null &&
       String(activePid) === nextId
     ) {
@@ -262,7 +262,7 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     beginHeaderNavigation(
       nextId,
       "分类加载中...",
-      `/filmClassify?Pid=${encodeURIComponent(nextId)}`,
+      `/category?pid=${encodeURIComponent(nextId)}`,
     );
   };
 

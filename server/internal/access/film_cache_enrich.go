@@ -29,7 +29,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 
 		// 仅点播行为才提取影片 ID，分类筛选与搜索严禁当做影片处理
 		// 若事件自带不可变快照（已有合法片名），直接使用快照，无需反查
-		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/films/play-info") || isTvboxPlay(it.Path, it.Query) {
 			if it.ResourceTitle != "" && !strings.HasPrefix(it.ResourceTitle, "影片 #") {
 				continue
 			}
@@ -56,7 +56,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 			res = strings.TrimSpace(res[:idx])
 		}
 
-		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/filmPlayInfo") || isTvboxPlay(it.Path, it.Query) {
+		if it.Action == ActionPlay || strings.HasPrefix(it.Path, "/api/films/play-info") || isTvboxPlay(it.Path, it.Query) {
 			// 若未固化片名，才尝试补齐
 			if it.ResourceTitle == "" || strings.HasPrefix(it.ResourceTitle, "影片 #") {
 				if id, ok := parseFilmID(res); ok {
@@ -128,7 +128,7 @@ func snapshotAccessEvent(evt *AccessEvent) {
 		res = strings.TrimSpace(res[:idx])
 	}
 
-	if evt.Action == ActionPlay || strings.HasPrefix(evt.Path, "/api/filmPlayInfo") || isTvboxPlay(evt.Path, evt.Query) {
+	if evt.Action == ActionPlay || strings.HasPrefix(evt.Path, "/api/films/play-info") || isTvboxPlay(evt.Path, evt.Query) {
 		id, ok := parseFilmID(res)
 		if !ok {
 			return

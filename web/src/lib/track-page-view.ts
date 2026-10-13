@@ -110,8 +110,8 @@ export function trackPageView(
   });
 
   const url = deviceId
-    ? `/api/stat/view?device_id=${encodeURIComponent(deviceId)}`
-    : "/api/stat/view";
+    ? `/api/stats/view?device_id=${encodeURIComponent(deviceId)}`
+    : "/api/stats/view";
   try {
     if (typeof navigator.sendBeacon === "function") {
       if (navigator.sendBeacon(url, new Blob([body], { type: "application/json" }))) {

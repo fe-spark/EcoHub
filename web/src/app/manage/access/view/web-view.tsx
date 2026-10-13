@@ -49,7 +49,7 @@ const OS_MAP: Record<string, { label: string; color: string }> = {
   other: { label: "其他系统", color: "var(--ant-color-text-tertiary, #8c8c8c)" },
 };
 
-// 页面值来自公开无鉴权埋点接口（/api/stat/view），只能作为站内相对路径渲染成链接，
+// 页面值来自公开无鉴权埋点接口（/api/stats/view），只能作为站内相对路径渲染成链接，
 // 拒绝协议相对外链（//）与任何 URL scheme（javascript:/data:/https: 等），否则回退纯文本。
 function isSafeInternalHref(v: string): boolean {
   const s = String(v ?? "").trim();

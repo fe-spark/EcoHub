@@ -16,6 +16,7 @@ import {
   AimOutlined,
   FireOutlined,
   CompassOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -33,6 +34,8 @@ export interface FilmItem {
   hits: number;
   remarks: string;
   updateStamp: number;
+  isScraped?: boolean;
+  tmdbId?: number;
 }
 
 interface UseFilmColumnsProps {
@@ -43,6 +46,7 @@ interface UseFilmColumnsProps {
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
   handleScrapeFilm: (record: FilmItem) => void;
+  handleRevertScrape?: (mid: number) => void;
   tmdbEnabled?: boolean;
   activeSourceId?: string;
 }
@@ -55,6 +59,7 @@ export function useFilmColumns({
   handleUpdateSingle,
   handleDelFilm,
   handleScrapeFilm,
+  handleRevertScrape,
   tmdbEnabled = false,
   activeSourceId,
 }: UseFilmColumnsProps) {
@@ -94,6 +99,13 @@ export function useFilmColumns({
             <Tag color="orange" style={{ borderRadius: 4, flexShrink: 0 }}>
               {record.cName}
             </Tag>
+            {record.isScraped && (
+              <Tooltip title={record.tmdbId ? `已匹配 TMDB (ID: ${record.tmdbId})` : "已关联 TMDB 刮削数据"}>
+                <Tag color="#722ed1" style={{ borderRadius: 4, flexShrink: 0, cursor: "default" }}>
+                  已刮削
+                </Tag>
+              </Tooltip>
+            )}
           </Space>
         ),
       },
@@ -183,6 +195,26 @@ export function useFilmColumns({
                 />
               </Tooltip>
             )}
+            {record.isScraped && handleRevertScrape && (
+              <Popconfirm
+                title="还原该影片的 TMDB 刮削？"
+                description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
+                okText="确定还原"
+                cancelText="取消"
+                onConfirm={() => handleRevertScrape(record.mid)}
+              >
+                <Tooltip title="还原刮削（恢复采集站原始数据）">
+                  <Button
+                    type="primary"
+                    shape="circle"
+                    size="small"
+                    style={{ background: "#fa8c16", borderColor: "#fa8c16" }}
+                    icon={<UndoOutlined />}
+                    disabled={!canWrite}
+                  />
+                </Tooltip>
+              </Popconfirm>
+            )}
             <Tooltip title="同步更新">
               <Button
                 type="primary"
@@ -234,6 +266,7 @@ export function useFilmColumns({
       handleDelFilm,
       handleUpdateSingle,
       handleScrapeFilm,
+      handleRevertScrape,
       canWrite,
       styles,
       tmdbEnabled,

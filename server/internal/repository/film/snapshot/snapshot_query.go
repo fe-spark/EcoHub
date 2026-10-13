@@ -24,6 +24,10 @@ func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
 		return nil
 	}
 	snap := buildFilmListSnapshot(resolveListVersion(version), index)
+	scrapes := LoadActiveScrapesByMids([]int64{mid})
+	if sc, ok := scrapes[mid]; ok {
+		ApplyTMDBScrapeToSnapshot(&snap, &sc)
+	}
 	return &snap
 }
 
@@ -54,13 +58,19 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		if end > len(uniq) {
 			end = len(uniq)
 		}
+		chunkMids := uniq[start:end]
 		var rows []model.FilmIndex
-		if err := liveFilmQuery().Where("mid IN ?", uniq[start:end]).Find(&rows).Error; err != nil {
+		if err := liveFilmQuery().Where("mid IN ?", chunkMids).Find(&rows).Error; err != nil {
 			continue
 		}
+		scrapes := LoadActiveScrapesByMids(chunkMids)
 		for _, row := range rows {
 			if row.Mid > 0 {
-				byMid[row.Mid] = buildFilmListSnapshot(resolveListVersion(version), row)
+				snap := buildFilmListSnapshot(resolveListVersion(version), row)
+				if sc, ok := scrapes[row.Mid]; ok {
+					ApplyTMDBScrapeToSnapshot(&snap, &sc)
+				}
+				byMid[row.Mid] = snap
 			}
 		}
 	}

@@ -8,7 +8,7 @@ async function getSearchData(keyword: string, sort?: string) {
   }
 
   try {
-    const response = await serverGet<any>("/searchFilm", {
+    const response = await serverGet<any>("/films/search", {
       keyword,
       current: "1",
       pageSize: 12,
@@ -27,7 +27,7 @@ async function getSearchData(keyword: string, sort?: string) {
 
 async function getHotKeywordsData(): Promise<string[]> {
   try {
-    const response = await serverGet<string[]>("/hotKeywords", { limit: 8 });
+    const response = await serverGet<string[]>("/search/hot-keywords", { limit: 8 });
     if (response.code === 0 && Array.isArray(response.data)) {
       return response.data;
     }

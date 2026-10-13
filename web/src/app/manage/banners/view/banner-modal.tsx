@@ -16,6 +16,8 @@ import {
   Space,
   Flex,
   Button,
+  Tag,
+  Switch,
 } from "antd";
 import {
   UploadOutlined,
@@ -23,6 +25,7 @@ import {
   VideoCameraAddOutlined,
   SwapOutlined,
   ThunderboltOutlined,
+  UndoOutlined,
 } from "@ant-design/icons";
 
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -45,10 +48,16 @@ import styles from "./index.module.less";
 
 const { Title, Text } = Typography;
 
+interface BannerSnapshot {
+  formValues: BannerFormValues;
+  selectedFilm: FilmOption | null;
+}
+
 interface BannerModalProps {
   open: boolean;
   mode: EditorMode;
   currentRow: BannerRecord | null;
+  tmdbEnabled?: boolean;
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -57,6 +66,7 @@ export default function BannerModal({
   open,
   mode,
   currentRow,
+  tmdbEnabled = false,
   onClose,
   onSuccess,
 }: BannerModalProps) {
@@ -68,6 +78,7 @@ export default function BannerModal({
   const [pickerTarget, setPickerTarget] = useState<UploadFieldName>("picture");
   const [filmPickerOpen, setFilmPickerOpen] = useState(false);
   const [tmdbOpen, setTmdbOpen] = useState(false);
+  const [tmdbSnapshot, setTmdbSnapshot] = useState<BannerSnapshot | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const watchedName = Form.useWatch("name", form);
@@ -75,7 +86,7 @@ export default function BannerModal({
   const watchedYear = Form.useWatch("year", form);
   const watchedPicture = Form.useWatch("picture", form);
   const watchedPictureSlide = Form.useWatch("pictureSlide", form);
-  const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
+  const watchedIsCustomPic = Form.useWatch("isCustomPic", form);
 
   const resetState = useCallback(() => {
     form.resetFields();
@@ -83,11 +94,12 @@ export default function BannerModal({
     setPickerOpen(false);
     setFilmPickerOpen(false);
     setTmdbOpen(false);
+    setTmdbSnapshot(null);
   }, [form]);
 
   const loadFilmDetail = useCallback(async (mid: number) => {
     try {
-      const resp = await ApiGet("/filmPlayInfo", { id: mid });
+      const resp = await ApiGet("/films/play-info", { id: mid });
       const d = resp?.data?.detail;
       if (resp?.code === 0 && d) {
         const option: FilmOption = {
@@ -103,6 +115,7 @@ export default function BannerModal({
           actor: d.actor,
           label: d.name || "",
           value: d.id || mid,
+          isScraped: d.isScraped,
         };
         setSelectedFilm(option);
         return option;
@@ -113,6 +126,7 @@ export default function BannerModal({
 
   const onFilmSelect = (film: FilmOption) => {
     setSelectedFilm(film);
+    setTmdbSnapshot(null);
     form.setFieldsValue({
       ...form.getFieldsValue(),
       mid: film.id,
@@ -121,7 +135,7 @@ export default function BannerModal({
       year: parseInt(String(film.year || "0"), 10) || undefined,
       picture: "",
       pictureSlide: "",
-      followPosterSource: true,
+      isCustomPic: false,
     });
     setFilmPickerOpen(false);
     if (film.id) void loadFilmDetail(film.id);
@@ -129,6 +143,7 @@ export default function BannerModal({
 
   useEffect(() => {
     if (!open) return;
+    setTmdbSnapshot(null);
     if (mode === "edit" && currentRow) {
       const isCustom = currentRow.isCustomPic === true || Boolean(currentRow.customPicture?.trim());
       form.setFieldsValue({
@@ -136,14 +151,14 @@ export default function BannerModal({
         name: currentRow.name,
         cName: currentRow.cName,
         year: currentRow.year,
-        followPosterSource: !isCustom,
+        isCustomPic: isCustom,
         picture: isCustom ? resolveEditablePicture(currentRow) : "",
         pictureSlide: isCustom ? (currentRow.pictureSlide || "") : "",
         sort: currentRow.sort ?? 0,
       });
       if (currentRow.mid) void loadFilmDetail(currentRow.mid);
     } else if (mode === "create") {
-      form.setFieldsValue({ followPosterSource: true, sort: 0 });
+      form.setFieldsValue({ isCustomPic: false, sort: 0 });
     }
   }, [open, mode, currentRow, form, loadFilmDetail]);
 
@@ -174,24 +189,88 @@ export default function BannerModal({
     }
   };
 
-  const handleScrapeSuccess = async () => {
-    message.success("TMDB 元数据已应用");
-    setTmdbOpen(false);
-    const mid = selectedFilm?.id || currentRow?.mid || form.getFieldValue("mid");
-    if (mid) {
-      const d = await loadFilmDetail(mid);
-      if (d && form.getFieldValue("followPosterSource")) {
-        form.setFieldsValue({
-          name: d.name || form.getFieldValue("name"),
-          cName: d.cName || form.getFieldValue("cName"),
-          year: parseInt(String(d.year || "0"), 10) || form.getFieldValue("year"),
-        });
+  const handleTmdbPrefill = (data: any, fields?: string[]) => {
+    // 记录最初未被刮削覆盖的表单与选中影片状态，用于后续一键还原
+    if (!tmdbSnapshot) {
+      setTmdbSnapshot({
+        formValues: form.getFieldsValue(true),
+        selectedFilm: selectedFilm ? { ...selectedFilm } : null,
+      });
+    }
+
+    const shouldFill = (name: string, ...aliases: string[]) => {
+      if (!fields || fields.length === 0) return true;
+      return [name, ...aliases].some((key) => fields.includes(key));
+    };
+
+    const currentValues = form.getFieldsValue();
+    const updates: Partial<BannerFormValues> = {};
+
+    if (shouldFill("name") && data.name) {
+      updates.name = data.name;
+    }
+    if (shouldFill("subTitle", "cName") && (data.subTitle || data.cName)) {
+      updates.cName = data.subTitle || data.cName;
+    }
+    if (shouldFill("year", "releaseDate") && (data.year || data.releaseDate)) {
+      const parsedYear = parseInt(String(data.year || data.releaseDate || "0"), 10);
+      if (parsedYear > 0) {
+        updates.year = parsedYear;
       }
     }
+
+    const fillPoster = shouldFill("poster", "picture") && Boolean(data.picture);
+    const fillSlide = shouldFill("backdrop", "pictureSlide") && Boolean(data.pictureSlide);
+
+    if (fillPoster || fillSlide) {
+      // 开启自定义封面，并将刮削结果作为当前轮播的自定义图片覆盖展示
+      updates.isCustomPic = true;
+      if (fillPoster) {
+        updates.picture = data.picture;
+      } else {
+        updates.picture = currentValues.picture || selectedFilm?.picture || "";
+      }
+      if (fillSlide) {
+        updates.pictureSlide = data.pictureSlide;
+      } else {
+        updates.pictureSlide = currentValues.pictureSlide || selectedFilm?.pictureSlide || "";
+      }
+    }
+
+    form.setFieldsValue(updates);
+
+    // 仅同步前端临时展示对象，不向后端发送持久化请求
+    setSelectedFilm((prev) => {
+      const base: FilmOption = prev || {
+        id: currentMid || 0,
+        name: data.name || "",
+        label: data.name || "",
+        value: currentMid || 0,
+      };
+      return {
+        ...base,
+        name: updates.name || base.name,
+        cName: updates.cName || base.cName,
+        year: updates.year || base.year,
+        director: data.director || base.director,
+        actor: data.actor || base.actor,
+      };
+    });
+
+    setTmdbOpen(false);
+  };
+
+  const handleUndoTmdb = () => {
+    if (!tmdbSnapshot) return;
+    form.resetFields();
+    form.setFieldsValue(tmdbSnapshot.formValues);
+    setSelectedFilm(tmdbSnapshot.selectedFilm);
+    setTmdbSnapshot(null);
+    message.info("已还原刮削，表单已恢复填充前状态");
   };
 
   const buildBannerPayload = (values: BannerFormValues): BannerRecord => {
-    const isCustom = values.followPosterSource === false;
+    const isCustom = Boolean(values.isCustomPic);
     const customPic = isCustom ? (values.picture || "").trim() : "";
     const customSlide = isCustom ? (values.pictureSlide || "").trim() : "";
     const livePic = selectedFilm?.picture || currentRow?.picture || "";
@@ -203,10 +282,10 @@ export default function BannerModal({
       name: String(values.name || "").trim(),
       cName: String(values.cName || "").trim(),
       year: values.year,
-      poster: isCustom ? customPic : livePic,
-      picture: isCustom ? customPic : livePic,
-      pictureSlide: isCustom ? (customSlide || customPic) : liveSlide,
-      customPicture: customPic,
+      poster: isCustom && customPic ? customPic : livePic,
+      picture: isCustom && customPic ? customPic : livePic,
+      pictureSlide: isCustom && customSlide ? customSlide : (customPic || liveSlide),
+      customPicture: isCustom ? customPic : "",
       sort: values.sort ?? 0,
       remark: currentRow?.remark || selectedFilm?.remarks || "",
       isCustomPic: isCustom,
@@ -252,12 +331,14 @@ export default function BannerModal({
   const previewActor = selectedFilm?.actor || "暂无";
 
   const liveFilmPic = selectedFilm?.picture || (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") || "";
-  const previewPicture = watchedFollowPosterSource
-    ? liveFilmPic
+  const previewPicture = !watchedIsCustomPic
+    ? (liveFilmPic || resolvePreviewPicture(previewFilm))
     : (watchedPicture || liveFilmPic || resolvePreviewPicture(previewFilm));
 
   const liveFilmSlide = selectedFilm?.pictureSlide || currentRow?.pictureSlide || "";
-  const previewSlide = watchedFollowPosterSource ? liveFilmSlide : (watchedPictureSlide || liveFilmSlide);
+  const previewSlide = !watchedIsCustomPic
+    ? liveFilmSlide
+    : (watchedPictureSlide || liveFilmSlide);
 
   const renderImageField = (fieldName: UploadFieldName, label: string, tooltip: string) => (
     <Form.Item label={label} tooltip={tooltip}>
@@ -291,7 +372,15 @@ export default function BannerModal({
     >
       <Form form={form} layout="vertical">
         <Space direction="vertical" size={16} style={{ width: "100%" }}>
-          <Form.Item label="绑定影片" required tooltip="点击从片库选择影片，可在弹窗内一键 TMDB 刮削获取高清横图。">
+          <Form.Item
+            label="绑定影片"
+            required
+            tooltip={
+              tmdbEnabled
+                ? "点击从片库选择影片，可在弹窗内一键 TMDB 刮削获取高清横图。"
+                : "点击从片库选择影片。"
+            }
+          >
             {previewFilm?.name ? (
               <Card size="small" bordered className={styles.filmSelectedCard} styles={{ body: { padding: 12 } }}>
                 <Flex gap={14} align="center" justify="space-between">
@@ -305,7 +394,14 @@ export default function BannerModal({
                       preview={false}
                     />
                     <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
-                      <Title level={5} style={{ margin: 0 }} ellipsis={{ tooltip: previewName }}>{previewName}</Title>
+                      <Flex align="center" gap={6}>
+                        <Title level={5} style={{ margin: 0 }} ellipsis={{ tooltip: previewName }}>{previewName}</Title>
+                        {(currentRow?.isScraped || selectedFilm?.isScraped) && (
+                          <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0, fontSize: 11, lineHeight: "18px", padding: "0 4px" }}>
+                            已刮削
+                          </Tag>
+                        )}
+                      </Flex>
                       <Text type="secondary" style={{ fontSize: 12 }}>{previewCategory} · {previewYear} · {previewArea}</Text>
                       <Text type="secondary" style={{ fontSize: 12 }} ellipsis={{ tooltip: `导演: ${previewDirector} | 主演: ${previewActor}` }}>
                         状态: {previewRemark}
@@ -313,15 +409,26 @@ export default function BannerModal({
                     </Space>
                   </Flex>
                   <Space size={8}>
-                    <Button
-                      size="middle"
-                      icon={<ThunderboltOutlined />}
-                      onClick={() => setTmdbOpen(true)}
-                      disabled={!currentMid}
-                      style={{ color: "#722ed1", borderColor: "#d3adf7" }}
-                    >
-                      TMDB 刮削
-                    </Button>
+                    {tmdbSnapshot && (
+                      <Button
+                        size="middle"
+                        icon={<UndoOutlined />}
+                        onClick={handleUndoTmdb}
+                      >
+                        还原刮削
+                      </Button>
+                    )}
+                    {tmdbEnabled && (
+                      <Button
+                        size="middle"
+                        icon={<ThunderboltOutlined />}
+                        onClick={() => setTmdbOpen(true)}
+                        disabled={!currentMid}
+                        style={{ color: "#722ed1", borderColor: "#d3adf7" }}
+                      >
+                        TMDB 刮削
+                      </Button>
+                    )}
                     <Button size="middle" icon={<SwapOutlined />} onClick={() => setFilmPickerOpen(true)}>
                       更换影片
                     </Button>
@@ -364,42 +471,57 @@ export default function BannerModal({
             </Col>
           </Row>
 
-          <Form.Item label="是否跟随海报源" name="followPosterSource" tooltip="开启自动同步海报源；关闭可自定义并锁定图片。" initialValue={true}>
-            <Radio.Group
-              buttonStyle="solid"
-              options={[
-                { label: "是（跟随海报源）", value: true },
-                { label: "否（自定义封面）", value: false },
-              ]}
+          <Form.Item
+            label="自定义封面"
+            name="isCustomPic"
+            valuePropName="checked"
+            initialValue={false}
+            tooltip="关闭时默认自动同步影片的海报源或 TMDB 刮削数据；开启后可为本轮播单独配置自定义封面或横屏大图，覆盖底层影片数据。"
+          >
+            <Switch
+              checkedChildren="自定义开启"
+              unCheckedChildren="跟随影片"
             />
           </Form.Item>
 
-          {watchedFollowPosterSource ? (
-            <Form.Item label="影片封面">
+          {!watchedIsCustomPic ? (
+            <Form.Item label="封面图片展示来源">
               <div
                 style={{
-                  padding: "8px 12px",
+                  padding: "10px 14px",
                   background: "rgba(255, 255, 255, 0.04)",
                   borderRadius: 6,
                   border: "1px dashed var(--ant-color-border)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  minHeight: 32,
+                  gap: 16,
                 }}
               >
-                <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
-                  已开启跟随海报源，将自动同步片库最新封面与幻灯横图。
-                </Text>
+                <Space direction="vertical" size={2}>
+                  <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)" }}>
+                    未开启自定义封面，自动采用影片原本的数据
+                    {selectedFilm?.isScraped || currentRow?.isScraped ? "（已应用 TMDB 刮削数据）" : "（海报源原始数据）"}。
+                  </Text>
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    开启「自定义封面」开关后，可为此轮播项单独上传或指定封面与横屏大图。
+                  </Text>
+                </Space>
                 {previewPicture && (
-                  <AntImage src={previewPicture || FALLBACK_IMG} height={32} style={{ borderRadius: 4, objectFit: "cover" }} fallback={FALLBACK_IMG} />
+                  <AntImage
+                    src={previewPicture || FALLBACK_IMG}
+                    height={38}
+                    style={{ borderRadius: 4, objectFit: "cover" }}
+                    fallback={FALLBACK_IMG}
+                    preview={false}
+                  />
                 )}
               </div>
             </Form.Item>
           ) : (
             <>
-              {renderImageField("picture", "竖版封面地址", "自定义竖屏封面，锁定后不被片库采集覆盖。")}
-              {renderImageField("pictureSlide", "横屏大图地址", "前台 16:9 横版大图 (Backdrop)，选填；未填回退竖图。")}
+              {renderImageField("picture", "竖版封面地址", "自定义竖版封面图片，覆盖底层影片的海报源或刮削数据。")}
+              {renderImageField("pictureSlide", "横屏大图地址", "自定义横屏背景大图 (Backdrop)，覆盖底层影片的海报源或刮削数据。")}
             </>
           )}
 
@@ -436,7 +558,11 @@ export default function BannerModal({
                     }}
                   >
                     <Text type="secondary" style={{ fontSize: 13 }}>暂无横屏大图</Text>
-                    <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>点击上方【TMDB 刮削】可一键补齐</Text>
+                    {tmdbEnabled ? (
+                      <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>点击上方【TMDB 刮削】可一键补齐</Text>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12, marginTop: 4 }}>可上传图片或输入外部图片地址</Text>
+                    )}
                   </Flex>
                 )}
               </Card>
@@ -461,14 +587,15 @@ export default function BannerModal({
         }}
       />
 
-      <TmdbModal
-        open={tmdbOpen}
-        mid={currentMid}
-        initialName={previewName !== "未选择影片" ? previewName : ""}
-        initialYear={previewYear !== "未知年份" ? previewYear : ""}
-        onClose={() => setTmdbOpen(false)}
-        onSuccess={handleScrapeSuccess}
-      />
+      {tmdbEnabled && (
+        <TmdbModal
+          open={tmdbOpen}
+          initialName={previewName !== "未选择影片" ? previewName : ""}
+          initialYear={previewYear !== "未知年份" ? previewYear : ""}
+          onClose={() => setTmdbOpen(false)}
+          onPrefill={handleTmdbPrefill}
+        />
+      )}
     </Modal>
   );
 }

@@ -72,6 +72,24 @@ func loadFilmSearchMetaItems(version string) ([]FilmSearchMeta, error) {
 		if len(rows) == 0 {
 			break
 		}
+		mids := make([]int64, len(rows))
+		for i, r := range rows {
+			mids[i] = r.Mid
+		}
+		scrapes := LoadActiveScrapesByMids(mids)
+		if len(scrapes) > 0 {
+			for i := range rows {
+				if sc, ok := scrapes[rows[i].Mid]; ok {
+					fieldSet := ParseAppliedFields(sc.AppliedFields)
+					if ShouldApplyField(fieldSet, "year", "releasedate") && sc.Year > 0 {
+						rows[i].Year = sc.Year
+					}
+					if ShouldApplyField(fieldSet, "score", "voteaverage") && sc.VoteAverage > 0 {
+						rows[i].Score = sc.VoteAverage
+					}
+				}
+			}
+		}
 		pageItems := make([]FilmSearchMeta, len(rows))
 		fillSearchMetaPage(rows, pageItems)
 		items = append(items, pageItems...)

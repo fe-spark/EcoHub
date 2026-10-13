@@ -25,7 +25,7 @@ async function fetchDailyUpdates(exclude: string): Promise<DailyFilm[]> {
   if (exclude) {
     params.set("exclude", exclude);
   }
-  const res = await fetch(`/api/dailyUpdates?${params.toString()}`, { cache: "no-store" });
+  const res = await fetch(`/api/daily-updates?${params.toString()}`, { cache: "no-store" });
   if (!res.ok) {
     throw new Error(String(res.status));
   }

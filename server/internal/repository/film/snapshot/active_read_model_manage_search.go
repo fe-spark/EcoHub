@@ -251,6 +251,21 @@ func queryManageFilmsFallback(s model.SearchVo, page *dto.Page, name string, sta
 		return []model.FilmIndex{}
 	}
 
+	if len(indexes) > 0 {
+		mids := make([]int64, 0, len(indexes))
+		for _, idx := range indexes {
+			if idx.Mid > 0 {
+				mids = append(mids, idx.Mid)
+			}
+		}
+		scrapes := LoadActiveScrapesByMids(mids)
+		for i := range indexes {
+			if sc, ok := scrapes[indexes[i].Mid]; ok {
+				ApplyTMDBScrapeToFilmIndex(&indexes[i], &sc)
+			}
+		}
+	}
+
 	log.Printf(
 		"[ManageFilmSearch] 降级检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s",
 		s.Name,
@@ -319,6 +334,8 @@ func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.F
 			FilmIndexDerived: model.FilmIndexDerived{
 				PlayFromSummary: snap.PlayFromSummary,
 			},
+			IsScraped: snap.IsScraped,
+			TmdbID:    snap.TmdbID,
 		}
 	}
 	return result

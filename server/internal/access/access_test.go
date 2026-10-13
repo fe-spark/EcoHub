@@ -21,7 +21,7 @@ func TestShouldSkip(t *testing.T) {
 		status       int
 		skip         bool
 	}{
-		{"OPTIONS", "/api/index", 204, true},
+		{"OPTIONS", "/api/home", 204, true},
 		{"GET", "/api/config/basic", 200, true},
 		{"GET", "/api/config/basic", 500, false},
 		{"GET", "/api/health", 200, true},
@@ -34,10 +34,9 @@ func TestShouldSkip(t *testing.T) {
 		{"GET", "/api/manage/system/logs/delta", 200, true},
 		{"GET", "/api/manage/collect/list", 200, false},
 		{"POST", "/api/manage/film/add", 200, false},
-		{"GET", "/api/dailyUpdates", 200, false},
-		{"GET", "/api/index/dailyUpdates", 200, false},
-		{"POST", "/api/stat/view", 200, false},
-		{"GET", "/api/index", 200, false},
+		{"GET", "/api/daily-updates", 200, false},
+		{"POST", "/api/stats/view", 200, false},
+		{"GET", "/api/home", 200, false},
 		{"GET", "/api/provide/vod", 200, false},
 	}
 	for _, c := range cases {
@@ -49,11 +48,11 @@ func TestShouldSkip(t *testing.T) {
 }
 
 func TestHTTPKindAndClient(t *testing.T) {
-	if httpKind("/api/index") != "http" {
-		t.Fatal("index is http not browse")
+	if httpKind("/api/home") != "http" {
+		t.Fatal("home is http not browse")
 	}
-	if httpKind("/api/searchFilm") != "http" {
-		t.Fatal("searchFilm is http not search")
+	if httpKind("/api/films/search") != "http" {
+		t.Fatal("search is http not search")
 	}
 	if httpKind("/api/provide/vod") != "provide" {
 		t.Fatal("provide")
@@ -61,7 +60,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 	if httpKind("/api/manage/film/search/list") != "manage" {
 		t.Fatal("manage")
 	}
-	if ClassifyHTTPClient("/api/index", "EcoHub-OHOS/1.1.0") != "app" {
+	if ClassifyHTTPClient("/api/home", "EcoHub-OHOS/1.1.0") != "app" {
 		t.Fatal("ohos app")
 	}
 	if clientFromUA("EcoHub-OHOS/1.1.0") != "app" {
@@ -76,7 +75,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 	if ClassifyHTTPClient("/api/provide/vod", "Mozilla/5.0") != "tvbox" {
 		t.Fatal("tvbox by path")
 	}
-	if ClassifyHTTPClient("/api/index", "curl/8.0") != "crawler" {
+	if ClassifyHTTPClient("/api/home", "curl/8.0") != "crawler" {
 		t.Fatal("curl crawler")
 	}
 	if isCrawlerUA("EcoHub-SSR") {
@@ -85,7 +84,7 @@ func TestHTTPKindAndClient(t *testing.T) {
 }
 
 func TestSanitizeAndNormalize(t *testing.T) {
-	if SanitizePath("/api/searchFilm?keyword=a\nb") != "/api/searchFilm" {
+	if SanitizePath("/api/films/search?keyword=a\nb") != "/api/films/search" {
 		t.Fatal("strip query and newline")
 	}
 	long := "/" + string(make([]byte, 300))
@@ -98,8 +97,8 @@ func TestSanitizeAndNormalize(t *testing.T) {
 }
 
 func TestHTTPResource(t *testing.T) {
-	if httpResource("/api/filmPlayInfo", url.Values{"id": {"12345"}}) != "12345" {
-		t.Fatal("filmPlayInfo id")
+	if httpResource("/api/films/play-info", url.Values{"id": {"12345"}}) != "12345" {
+		t.Fatal("films play-info id")
 	}
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}}) != "" {
 		t.Fatal("provide ac list without t should be empty")
@@ -149,7 +148,7 @@ func TestHTTPResource(t *testing.T) {
 	if httpResource("/api/provide/vod", url.Values{"ac": {"list"}, "wd": {"2024"}}) != "2024" {
 		t.Fatal("provide list wd takes priority over ac")
 	}
-	if httpResource("/api/searchFilm", url.Values{"keyword": {"斗罗"}}) != "斗罗" {
+	if httpResource("/api/films/search", url.Values{"keyword": {"斗罗"}}) != "斗罗" {
 		t.Fatal("searchFilm keyword")
 	}
 }
@@ -192,10 +191,10 @@ func TestPlayRankMember(t *testing.T) {
 		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"1,2"}}, ""},
 		{"/api/provide/vod", url.Values{"ac": {"detail"}, "ids": {"id 77"}}, "77"},
 		{"/api/provide/vod", url.Values{"ac": {"list"}}, ""},
-		{"/api/filmPlayInfo", url.Values{"id": {"99"}}, "99"},
-		{"/api/filmPlayInfo", url.Values{"id": {"id 88"}}, "88"},
-		{"/api/filmPlayInfo", url.Values{"id": {"0"}}, ""},
-		{"/api/searchFilm", url.Values{"keyword": {"2024"}}, ""},
+		{"/api/films/play-info", url.Values{"id": {"99"}}, "99"},
+		{"/api/films/play-info", url.Values{"id": {"id 88"}}, "88"},
+		{"/api/films/play-info", url.Values{"id": {"0"}}, ""},
+		{"/api/films/search", url.Values{"keyword": {"2024"}}, ""},
 	}
 	for _, tc := range cases {
 		if got := playRankMember(tc.path, tc.query); got != tc.want {
@@ -322,7 +321,7 @@ func TestIPPreviewAndHash(t *testing.T) {
 }
 
 func TestRecordRecent(t *testing.T) {
-	web := &AccessEvent{Method: "GET", Path: "/api/index", Action: "http", Status: 200}
+	web := &AccessEvent{Method: "GET", Path: "/api/home", Action: "http", Status: 200}
 	if RecordRecent(web) {
 		t.Fatal("public http 2xx should NOT be in recent")
 	}
@@ -346,7 +345,7 @@ func TestRecordRecent(t *testing.T) {
 		t.Fatal("provide error handled in errorKey, not recent")
 	}
 	ssr := &AccessEvent{
-		Method: "GET", Path: "/api/index", Action: "http", Status: 200,
+		Method: "GET", Path: "/api/home", Action: "http", Status: 200,
 		Internal: "ssr", UAFamily: "ecohub-ssr",
 	}
 	if RecordRecent(ssr) {
@@ -356,7 +355,7 @@ func TestRecordRecent(t *testing.T) {
 		t.Fatal("ssr still in health hist")
 	}
 	ssrErr := &AccessEvent{
-		Method: "GET", Path: "/api/index", Action: "http", Status: 502,
+		Method: "GET", Path: "/api/home", Action: "http", Status: 502,
 		Internal: "ssr", UAFamily: "ecohub-ssr",
 	}
 	if RecordRecent(ssrErr) {
@@ -378,13 +377,13 @@ func TestEstimateP95(t *testing.T) {
 }
 
 func TestUAFamily(t *testing.T) {
-	if uaFamily("/api/index", "Mozilla/5.0 Chrome/120.0") != "chrome" {
+	if uaFamily("/api/home", "Mozilla/5.0 Chrome/120.0") != "chrome" {
 		t.Fatal("chrome")
 	}
 	if uaFamily("/api/provide/vod", "okhttp") != "tvbox" {
 		t.Fatal("tvbox ua")
 	}
-	if uaFamily("/api/index", "EcoHub-SSR") != "ecohub-ssr" {
+	if uaFamily("/api/home", "EcoHub-SSR") != "ecohub-ssr" {
 		t.Fatal("ssr ua")
 	}
 }
@@ -393,7 +392,7 @@ func testPageCtx(ua, ip string) *gin.Context {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodPost, "/api/stat/view", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/stats/view", nil)
 	req.Header.Set("User-Agent", ua)
 	req.RemoteAddr = ip + ":1234"
 	c.Request = req
@@ -468,7 +467,7 @@ func TestFromContextSSR(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/api/index", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/home", nil)
 	req.Header.Set("User-Agent", "EcoHub-SSR")
 	c.Request = req
 	if evt := FromContext(c, time.Millisecond); evt != nil {
@@ -537,13 +536,13 @@ func TestFromContextPlayMember(t *testing.T) {
 	if detail == nil || detail.playMember != "1024" {
 		t.Fatalf("detail ids should rank as play: %+v", detail)
 	}
-	if info := mk("/api/filmPlayInfo?id=88"); info != nil {
-		t.Fatalf("filmPlayInfo HTTP must not enter collector, got %+v", info)
+	if info := mk("/api/films/play-info?id=88"); info != nil {
+		t.Fatalf("films play-info HTTP must not enter collector, got %+v", info)
 	}
-	if keyword := mk("/api/searchFilm?keyword=2024"); keyword != nil {
+	if keyword := mk("/api/films/search?keyword=2024"); keyword != nil {
 		t.Fatalf("searchFilm HTTP must not enter collector, got %+v", keyword)
 	}
-	if idx := mk("/api/index"); idx != nil {
+	if idx := mk("/api/home"); idx != nil {
 		t.Fatalf("public HTTP must not enter collector, got %+v", idx)
 	}
 
@@ -603,7 +602,7 @@ func TestQueryLogsMatchStatus(t *testing.T) {
 
 func TestQueryLogsMatchQuery(t *testing.T) {
 	evt := &AccessEvent{
-		Path:      "/api/filmPlayInfo",
+		Path:      "/api/films/play-info",
 		IPPreview: "192.168.1.x",
 		Resource:  "1024",
 	}
@@ -617,10 +616,10 @@ func TestQueryLogsMatchQuery(t *testing.T) {
 	if !matchQuery("1.x", evt) {
 		t.Fatal("should match IP preview suffix")
 	}
-	if !matchQuery("filmplay", evt) {
+	if !matchQuery("play-info", evt) {
 		t.Fatal("should match path case-insensitively")
 	}
-	if !matchQuery("FILMPLAY", evt) {
+	if !matchQuery("PLAY-INFO", evt) {
 		t.Fatal("should match path with uppercase query")
 	}
 	if !matchQuery("  1024  ", evt) {
@@ -687,7 +686,7 @@ func TestResolveDeviceID(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest("GET", "/api/index", nil)
+	c.Request = httptest.NewRequest("GET", "/api/home", nil)
 	c.Request.Header.Set("X-Device-Id", "web-device-1")
 	if got := ResolveDeviceID(c, "web", "1.1.1.1", "Mozilla"); got != "web-device-1" {
 		t.Fatalf("header device id, got %q", got)
@@ -858,7 +857,7 @@ func TestBuildPageEventPayload_Platforms(t *testing.T) {
 		Source:   "web",
 		Action:   "classify",
 		Resource: "19",
-		Path:     "/filmClassify?Pid=19",
+		Path:     "/category?pid=19",
 	}
 	evtWebClassify := buildPageEventPayload(ctx, pWebClassify)
 	if evtWebClassify == nil || evtWebClassify.Action != ActionClassify || evtWebClassify.Resource != "19" || evtWebClassify.ClientType != "web" {

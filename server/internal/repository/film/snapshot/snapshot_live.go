@@ -47,12 +47,23 @@ func indexesToListSnapshots(indexes []model.FilmIndex) []model.FilmListSnapshot 
 	if len(indexes) == 0 {
 		return []model.FilmListSnapshot{}
 	}
+	mids := make([]int64, 0, len(indexes))
+	for _, idx := range indexes {
+		if idx.Mid > 0 {
+			mids = append(mids, idx.Mid)
+		}
+	}
+	scrapes := LoadActiveScrapesByMids(mids)
 	out := make([]model.FilmListSnapshot, 0, len(indexes))
 	for _, index := range indexes {
 		if index.Mid <= 0 {
 			continue
 		}
-		out = append(out, buildFilmListSnapshot("", index))
+		snap := buildFilmListSnapshot("", index)
+		if sc, ok := scrapes[index.Mid]; ok {
+			ApplyTMDBScrapeToSnapshot(&snap, &sc)
+		}
+		out = append(out, snap)
 	}
 	return out
 }

@@ -37,6 +37,9 @@ func DelFilmSearch(id int64) error {
 		if err := tx.Where("mid = ?", id).Delete(&model.Banner{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("mid = ?", id).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
+			return err
+		}
 		return nil
 	})
 
@@ -109,6 +112,7 @@ func masterDataResetTables() []string {
 		model.TableCategoryMapping,
 		model.TableSourceCategory,
 		model.TableBanners,
+		model.TableFilmTMDBScrape,
 	}
 }
 
@@ -126,6 +130,7 @@ func FilmZero() error {
 		model.TableMovieSourceMapping,
 		model.TableMovieMatchKey,
 		model.TableMoviePoster,
+		model.TableFilmTMDBScrape,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
@@ -180,9 +185,9 @@ func FilmZero() error {
 func RefreshMasterDataCaches() {
 	markCategoryChanged()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.BannersKey, config.DailyUpdatesV2CatCacheKey)
+		db.Rdb.Del(db.Cxt, config.BannersKey, config.DailyUpdatesCatCacheKey)
 	}
-	cache.ClearPatterns(fmt.Sprintf("%s:*", config.DailyUpdatesV2CachePrefix))
+	cache.ClearPatterns(fmt.Sprintf("%s:*", config.DailyUpdatesCachePrefix))
 	cache.ClearTVBoxListCache()
 	cache.ClearTVBoxConfigCache()
 }

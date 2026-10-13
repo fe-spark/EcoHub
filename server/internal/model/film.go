@@ -55,6 +55,8 @@ type MovieBasicInfo struct {
 	Hits         int64   `json:"hits,omitempty"`      // 播放/浏览热度
 	SourceId     string  `json:"sourceId,omitempty"`  // 当前结果所属采集源
 	SourceMid    int64   `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
+	IsScraped    bool    `json:"isScraped,omitempty"` // 是否已启用 TMDB 刮削
+	TmdbID       int64   `json:"tmdbId,omitempty"`   // TMDB 词条 ID
 }
 
 // SearchSourceTab 搜索页按采集源分组的 Tab。
@@ -89,6 +91,8 @@ type MovieDetail struct {
 	DownFrom           string              `json:"DownFrom"`           // 下载来源 例: http
 	PlayList           [][]MovieUrlInfo    `json:"playList"`           // 播放地址url
 	DownloadList       [][]MovieUrlInfo    `json:"downloadList"`       // 下载url地址
+	IsScraped          bool                `json:"isScraped"`          // 是否已启用 TMDB 刮削
+	TmdbID             int64               `json:"tmdbId"`             // TMDB 词条 ID
 	MovieDescriptor    `json:"descriptor"` // 影片描述信息
 }
 
@@ -230,6 +234,8 @@ type FilmIndex struct {
 	FilmIndexContent  `gorm:"embedded"`
 	FilmIndexVersion  `gorm:"embedded"`
 	FilmIndexDerived  `gorm:"embedded"`
+	IsScraped         bool  `json:"isScraped" gorm:"-"` // 是否已启用 TMDB 刮削（动态合成，不落库）
+	TmdbID            int64 `json:"tmdbId" gorm:"-"`    // TMDB 词条 ID（动态合成，不落库）
 }
 
 func (FilmIndex) TableName() string {
@@ -301,6 +307,8 @@ type FilmListSnapshot struct {
 	CategoryVersion    string  `json:"categoryVersion"`
 	RuleVersion        string  `json:"ruleVersion"`
 	PlayFromSummary    string  `json:"playFromSummary"`
+	IsScraped          bool    `json:"isScraped"` // 是否已启用 TMDB 刮削
+	TmdbID             int64   `json:"tmdbId"`    // TMDB 词条 ID
 }
 
 func (s FilmListSnapshot) DisplayPicture() string {

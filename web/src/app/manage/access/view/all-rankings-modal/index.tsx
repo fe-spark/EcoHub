@@ -253,7 +253,7 @@ export default function AllRankingsModal({
                   const rawId = item.key.replace(/^id\s+/, "").trim();
                   const isNumericId = /^\d+$/.test(rawId);
                   const displayName = item.title || item.category || (isNumericId ? `分类 #${rawId}` : item.key);
-                  const classifyUrl = isNumericId ? `/filmClassify?Pid=${encodeURIComponent(rawId)}` : undefined;
+                  const classifyUrl = isNumericId ? `/category?pid=${encodeURIComponent(rawId)}` : undefined;
                   const showIdTag =
                     isNumericId &&
                     displayName !== `#${rawId}` &&

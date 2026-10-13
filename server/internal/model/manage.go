@@ -92,6 +92,8 @@ type Banner struct {
 	Blurb         string  `gorm:"-" json:"blurb,omitempty"`         // 简介（由快照动态覆盖）
 	Score         float64 `gorm:"-" json:"score,omitempty"`         // 真实评分（由快照动态覆盖）
 	Hits          int64   `gorm:"-" json:"hits,omitempty"`          // 真实热度（由快照动态覆盖）
+	IsScraped     bool    `gorm:"-" json:"isScraped"`               // 是否已启用 TMDB 刮削（由快照动态覆盖）
+	TmdbID        int64   `gorm:"-" json:"tmdbId,omitempty"`         // TMDB 词条 ID（由快照动态覆盖）
 }
 
 func (Banner) TableName() string {

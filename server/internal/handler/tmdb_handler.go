@@ -107,3 +107,22 @@ func (h *TMDBHandler) Prefill(c *gin.Context) {
 	}
 	dto.Success(data, "获取详情成功", c)
 }
+
+// Revert 还原指定影片的 TMDB 刮削数据，恢复为采集站原始数据
+func (h *TMDBHandler) Revert(c *gin.Context) {
+	var req model.TMDBRevertReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数格式异常", c)
+		return
+	}
+	if req.Mid <= 0 {
+		dto.Failed("缺少影片 ID", c)
+		return
+	}
+
+	if err := service.TMDBSvc.RevertDetail(req.Mid); err != nil {
+		dto.Failed("还原刮削失败: "+err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("已成功还原为采集站原始数据！", c)
+}

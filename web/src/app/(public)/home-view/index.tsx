@@ -119,7 +119,7 @@ export default function HomePageView({
                 {getSectionIcon(section.nav.name)}
                 <a
                   onClick={() => {
-                    navigate(`/filmClassify?Pid=${section.nav.id}`, "分类加载中");
+                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
@@ -132,7 +132,7 @@ export default function HomePageView({
                     key={childIndex}
                     onClick={() => {
                       navigate(
-                        `/filmClassifySearch?Pid=${child.pid}&Category=${child.id}`,
+                        `/category/filter?pid=${child.pid}&category=${child.id}`,
                         "分类加载中",
                       );
                     }}
@@ -144,7 +144,7 @@ export default function HomePageView({
                 <a
                   className={styles.more}
                   onClick={() => {
-                    navigate(`/filmClassify?Pid=${section.nav.id}`, "分类加载中");
+                    navigate(`/category?pid=${section.nav.id}`, "分类加载中");
                   }}
                   style={{ cursor: "pointer" }}
                 >
