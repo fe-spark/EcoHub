@@ -161,7 +161,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	}
 	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
 	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s:st2", cacheKey, sourceId)
+		cacheKey = fmt.Sprintf("%s:src_%s:st3", cacheKey, sourceId)
 	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
@@ -172,7 +172,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		}
 	}
 
-	limit := 21
+	limit := 24
 	if page != nil && page.PageSize > 0 {
 		limit = page.PageSize
 	}

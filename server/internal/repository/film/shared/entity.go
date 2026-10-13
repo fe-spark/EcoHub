@@ -56,6 +56,9 @@ func BuildMovieBasicInfosFromSnapshots(infos ...model.FilmListSnapshot) []model.
 			Remarks:      s.Remarks,
 			Area:         s.Area,
 			Year:         fmt.Sprint(s.Year),
+			ClassTag:     s.ClassTag,
+			Score:        s.Score,
+			Hits:         s.Hits,
 			SourceId:     s.SourceId,
 		})
 	}

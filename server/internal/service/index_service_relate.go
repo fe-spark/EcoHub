@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"server/internal/config"
@@ -17,8 +18,8 @@ import (
 
 var relateMovieSfGroup singleflight.Group
 
-// RelateMovie 根据当前影片快照匹配相关的影片
-func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasicInfo {
+// RelateMovie 根据当前影片快照匹配相关的影片（默认锁定首选站）
+func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...string) []model.MovieBasicInfo {
 	if mid <= 0 {
 		return []model.MovieBasicInfo{}
 	}
@@ -32,7 +33,20 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 		return []model.MovieBasicInfo{}
 	}
 
-	cacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, mid, page.Current, page.PageSize)
+	var sourceID string
+	if len(sourceIdOpt) > 0 {
+		sourceID = strings.TrimSpace(sourceIdOpt[0])
+	}
+	if sourceID == "" {
+		sourceID = i.BaselineSourceID()
+	}
+
+	var cacheKey string
+	if sourceID != "" {
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, sourceID, mid, page.Current, page.PageSize)
+	} else {
+		cacheKey = fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, mid, page.Current, page.PageSize)
+	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if data == "[]" {
@@ -75,7 +89,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page) []model.MovieBasic
 			return []model.MovieBasicInfo{}, nil
 		}
 		listStartedAt := time.Now()
-		list := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page)
+		list := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page, sourceID)
 		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
 		buildStartedAt := time.Now()
 		result := filmshared.BuildMovieBasicInfosFromSnapshots(list...)

@@ -317,9 +317,9 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	const pid = int64(1)
 	// 插入几条数据，分别赋予不同 hits, year, update_stamp
 	items := []model.FilmListSnapshot{
-		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000},
-		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000},
-		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500},
+		{SnapshotVersion: version, Mid: 301, Pid: pid, Name: "影片A", Hits: 100, Year: 2021, UpdateStamp: 1000, ClassTag: "科幻", Area: "香港", Score: 7.5, Actor: "刘德华", Blurb: "精彩科幻"},
+		{SnapshotVersion: version, Mid: 302, Pid: pid, Name: "影片B", Hits: 900, Year: 2020, UpdateStamp: 2000, ClassTag: "悬疑", Area: "大陆", Score: 8.0, Actor: "葛优", Blurb: "悬疑大案"},
+		{SnapshotVersion: version, Mid: 303, Pid: pid, Name: "影片C", Hits: 500, Year: 2023, UpdateStamp: 500, ClassTag: "动作", Area: "大陆", Score: 9.1, Actor: "吴京", Blurb: "火爆动作"},
 	}
 	seedLiveSnaps(t, items...)
 
@@ -360,6 +360,10 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 	}
 	if _, ok := res["recent"]; !ok {
 		t.Fatal("missing 'recent' in classify response")
+	}
+	newsList := res["news"].([]model.MovieBasicInfo)
+	if len(newsList) == 0 || newsList[0].ClassTag != "动作" || newsList[0].Score != 9.1 || newsList[0].Actor != "吴京" || newsList[0].Blurb != "火爆动作" {
+		t.Fatalf("classify news item missing fields: %+v", newsList[0])
 	}
 
 	// 确认顶层分类缓存已生成

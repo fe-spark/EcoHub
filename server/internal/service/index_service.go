@@ -83,9 +83,9 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 	ruleVersion := repository.GetRuleVersion()
 	var cacheKey string
 	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s:s%s:r%s:ck3", repository.GetVersionedIndexPageCacheKey(), sourceId, version, ruleVersion)
+		cacheKey = fmt.Sprintf("%s:src_%s:s%s:r%s:ck4", repository.GetVersionedIndexPageCacheKey(), sourceId, version, ruleVersion)
 	} else {
-		cacheKey = fmt.Sprintf("%s:s%s:r%s:ck3", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
+		cacheKey = fmt.Sprintf("%s:s%s:r%s:ck4", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
 	}
 
 	// 1. 尝试从 Redis 获取缓存

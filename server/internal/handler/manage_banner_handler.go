@@ -1,0 +1,131 @@
+package handler
+
+import (
+	"fmt"
+	"strings"
+
+	"server/internal/model"
+	"server/internal/model/dto"
+	"server/internal/service"
+	"server/internal/utils"
+
+	"github.com/gin-gonic/gin"
+)
+
+// BannerList 获取当前首页轮播列表
+func (h *ManageHandler) BannerList(c *gin.Context) {
+	bl := service.ManageSvc.GetBanners()
+	dto.Success(bl, "获取轮播列表成功", c)
+}
+
+// BannerAdd 手动添加影片到轮播
+func (h *ManageHandler) BannerAdd(c *gin.Context) {
+	var b model.Banner
+	if err := c.ShouldBindJSON(&b); err != nil {
+		dto.Failed("Banner 参数提交异常", c)
+		return
+	}
+	b.Id = utils.GenerateSalt()
+	bl := service.ManageSvc.GetBanners()
+	if len(bl) >= model.MaxBannerCount {
+		dto.Failed(fmt.Sprintf("已达轮播上限（%d 部）", model.MaxBannerCount), c)
+		return
+	}
+	b.Sort = int64(len(bl) + 1)
+	bl = append(bl, b)
+	if err := service.ManageSvc.SaveBanners(bl); err != nil {
+		dto.Failed("添加轮播失败: "+err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("添加轮播成功", c)
+}
+
+// BannerUpdate 更新轮播数据
+func (h *ManageHandler) BannerUpdate(c *gin.Context) {
+	var banner model.Banner
+	if err := c.ShouldBindJSON(&banner); err != nil {
+		dto.Failed("Banner 参数提交异常", c)
+		return
+	}
+	bl := service.ManageSvc.GetBanners()
+	for i, b := range bl {
+		if b.Id == banner.Id {
+			bl[i] = banner
+			if err := service.ManageSvc.SaveBanners(bl); err != nil {
+				dto.Failed("更新轮播失败: "+err.Error(), c)
+			} else {
+				dto.SuccessOnlyMsg("更新轮播成功", c)
+				return
+			}
+		}
+	}
+	dto.Failed("未匹配到对应轮播项", c)
+}
+
+// BannerDel 删除轮播数据
+func (h *ManageHandler) BannerDel(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	id := strings.TrimSpace(req.Id)
+	if id == "" {
+		dto.Failed("缺少 ID 参数", c)
+		return
+	}
+	bl := service.ManageSvc.GetBanners()
+	for i, b := range bl {
+		if b.Id == id {
+			bl = append(bl[:i], bl[i+1:]...)
+			_ = service.ManageSvc.SaveBanners(bl)
+			dto.SuccessOnlyMsg("删除轮播成功", c)
+			return
+		}
+	}
+	dto.Failed("删除失败，未找到该轮播项", c)
+}
+
+// BannerSaveDeck 批量保存排片卡组与排序
+func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
+	var req model.Banners
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("排片卡组数据格式异常", c)
+		return
+	}
+	if err := service.ManageSvc.SaveBannerDeck(req); err != nil {
+		dto.Failed("保存排片卡组失败: "+err.Error(), c)
+		return
+	}
+	dto.Success(service.ManageSvc.GetBanners(), "排片卡组已保存并生效", c)
+}
+
+// BannerBatchScrape 一键批量对当前排片列表中缺失横图的影片进行 TMDB 刮削
+func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
+	result, err := service.ManageSvc.BatchScrapeBanners(c.Request.Context())
+	if err != nil {
+		dto.Failed("批量刮削失败: "+err.Error(), c)
+		return
+	}
+	dto.Success(gin.H{
+		"result":  result,
+		"banners": service.ManageSvc.GetBanners(),
+	}, fmt.Sprintf("批量刮削完成：已检查 %d 部，成功匹配 %d 部横版背景大图", result.TotalChecked, result.SuccessCount), c)
+}
+
+// BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表
+func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
+	var req service.OneClickGenerateReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("排片参数解析异常", c)
+		return
+	}
+	deck, err := service.ManageSvc.OneClickGenerateDeck(req)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(deck, "一键排片成功并已实时生效", c)
+}

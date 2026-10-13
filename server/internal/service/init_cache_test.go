@@ -56,8 +56,8 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	setupTestDBAndRedis(t)
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 5 {
-		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 default tasks, got %d", len(tasks))
 	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {

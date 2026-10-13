@@ -1,75 +1,45 @@
 /* Theme tokens for FilmList */
 :global(html) {
   --film-placeholder-bg: var(--public-surface-3);
-  --film-tag-bg: rgba(var(--primary-color-rgb), 0.15);
-  --film-tag-text: #fff;
-  --film-tag-border: rgba(255, 255, 255, 0.3);
-  --film-overlay-meta-text: rgba(255, 255, 255, 0.78);
-  --film-overlay-blurb-text: rgba(255, 255, 255, 0.68);
 }
 
 :global(html[data-theme="light"]) {
   --film-placeholder-bg: linear-gradient(135deg, #e3e8f1 0%, #d7deea 100%);
-  --film-tag-bg: rgba(255, 255, 255, 0.92);
-  --film-tag-text: #0f172a;
-  --film-tag-border: rgba(226, 232, 240, 0.9);
-  --film-overlay-meta-text: rgba(255, 255, 255, 0.95);
-  --film-overlay-blurb-text: rgba(255, 255, 255, 0.85);
 }
 
 // Flex override classes for non-24-divisor column counts (5, 7) or specific overrides
 .grid-col-5 {
-  @media (min-width: 1200px) {
-    flex: 0 0 20% !important;
-    max-width: 20% !important;
-  }
+  @media (min-width: 1200px) { flex: 0 0 20% !important; max-width: 20% !important; }
 }
-
 .grid-col-6 {
-  @media (min-width: 1200px) {
-    flex: 0 0 20% !important;
-    max-width: 20% !important;
-  }
-
-  @media (min-width: 1440px) {
-    flex: 0 0 16.6666% !important;
-    max-width: 16.6666% !important;
-  }
+  @media (min-width: 1200px) { flex: 0 0 16.6666% !important; max-width: 16.6666% !important; }
 }
-
 .grid-col-7 {
-  @media (min-width: 1440px) {
-    flex: 0 0 14.2857% !important;
-    max-width: 14.2857% !important;
-  }
+  @media (min-width: 1440px) { flex: 0 0 14.2857% !important; max-width: 14.2857% !important; }
 }
-
 .grid-col-8 {
-  @media (min-width: 1440px) {
-    flex: 0 0 12.5% !important;
-    max-width: 12.5% !important;
-  }
+  @media (min-width: 1440px) { flex: 0 0 12.5% !important; max-width: 12.5% !important; }
 }
 
 .item {
   position: relative;
   cursor: pointer;
-  transition: transform 0.3s cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition: transform 0.28s cubic-bezier(0.165, 0.84, 0.44, 1);
   min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
 
   &:hover {
-    transform: translateY(-8px) scale(1.02);
+    transform: translateY(-5px);
 
     .posterWrapper {
       box-shadow:
-        0 20px 40px rgba(var(--primary-color-rgb), 0.22),
-        0 0 0 1px rgba(var(--primary-color-rgb), 0.35);
+        0 18px 36px rgba(0, 0, 0, 0.28),
+        0 0 0 1px rgba(var(--primary-color-rgb), 0.4);
 
       .poster {
-        transform: scale(1.1);
+        transform: scale(1.06);
       }
 
       .overlay {
@@ -79,17 +49,20 @@
         .overlayContent {
           transform: translateY(0);
         }
+
+        .playBtn {
+          transform: translateY(0);
+        }
       }
 
-      .remark,
-      .tagGroup {
+      .categoryBadge,
+      .topRightBadges {
         opacity: 0;
       }
     }
 
     .name {
       color: var(--primary-color);
-      text-shadow: 0 0 10px rgba(var(--primary-color-rgb), 0.3);
     }
   }
 }
@@ -97,12 +70,12 @@
 .posterWrapper {
   position: relative;
   aspect-ratio: 3 / 4.2;
-  border-radius: 12px;
+  border-radius: 10px;
   overflow: hidden;
   background: var(--film-placeholder-bg);
-  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
-  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
-  margin-bottom: 12px;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  transition: all 0.35s cubic-bezier(0.165, 0.84, 0.44, 1);
+  margin-bottom: 8px;
   border: 1px solid var(--public-border-2);
 
   .poster {
@@ -112,7 +85,7 @@
     height: 100%;
     object-fit: cover;
     opacity: 0;
-    transition: transform 0.8s cubic-bezier(0.165, 0.84, 0.44, 1);
+    transition: transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1);
     z-index: 1;
   }
 }
@@ -174,163 +147,140 @@
       transparent 80%);
 }
 
-.remark {
+/* 左上角分类/题材徽标 */
+.categoryBadge {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  left: 8px;
   background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
   color: #ffffff;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 11px;
+  padding: 1.5px 7px;
+  border-radius: 5px;
+  font-size: 10.5px;
   font-weight: 700;
+  line-height: 1.25;
   z-index: 2;
-  box-shadow: 0 2px 8px rgba(250, 140, 22, 0.35);
-  transition: opacity 0.25s ease;
-}
-
-.tagGroup {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  padding: 8px 10px;
-  display: flex;
-  flex-wrap: nowrap;
+  box-shadow: 0 2px 8px rgba(250, 140, 22, 0.38);
+  pointer-events: none;
+  max-width: 60%;
   overflow: hidden;
-  gap: 5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 右上角徽标组合容器：评分 + 状态 */
+.topRightBadges {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   z-index: 2;
-  background: linear-gradient(to top, rgba(15, 23, 42, 0.65) 0%, transparent 100%);
-  transition: opacity 0.3s ease;
+  pointer-events: none;
+  max-width: calc(100% - 64px);
+}
 
-  .tag {
-    background: rgba(15, 23, 42, 0.78);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    color: #ffffff;
-    padding: 3px 8px;
-    border-radius: 6px;
-    font-size: 10.5px;
-    font-weight: 700;
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    flex-shrink: 1;
-    min-width: 0;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+.scoreBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 2.5px;
+  padding: 1.5px 5.5px;
+  border-radius: 5px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(250, 173, 20, 0.45);
+  color: #ffc53d;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1.25;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
 
-    &:first-child {
-      flex-shrink: 0;
-      background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
-      color: #ffffff;
-      border: none;
-      box-shadow: 0 2px 8px rgba(250, 140, 22, 0.45);
-    }
+  .scoreIcon {
+    font-size: 9.5px;
+    color: #faad14;
   }
 }
 
-:global(html[data-theme="light"]) {
-  .tagGroup {
-    background: linear-gradient(to top, rgba(15, 23, 42, 0.35) 0%, transparent 100%);
-
-    .tag {
-      background: rgba(15, 23, 42, 0.82);
-      color: #ffffff;
-      border-color: rgba(255, 255, 255, 0.3);
-      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-
-      &:first-child {
-        background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
-        color: #ffffff;
-        border: none;
-        box-shadow: 0 2px 8px rgba(250, 140, 22, 0.45);
-      }
-    }
-  }
+.remarkBadge {
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #ffffff;
+  padding: 1.5px 6.5px;
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.25;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-/* Specific mobile overrides for absolute stability */
-@media (max-width: 576px) {
-  .tagGroup {
-    padding: 6px;
-    gap: 3px;
-
-    .tag {
-      font-size: 9px;
-      padding: 1px 5px;
-
-      /* 移动端窄卡片仅保留前2个最重要标签，避免因宽度不足被切断半个字，完整标签在下方文字区展示 */
-      &:nth-child(n+3) {
-        display: none;
-      }
-    }
-  }
-
-  .remark {
-    top: 6px;
-    right: 6px;
-    padding: 1px 6px;
-    font-size: 10px;
-  }
-}
-
+/* Hover 浮层：沉浸式磨砂遮罩 + 片名 + 看点 + 底部弹出【立即播放】大按钮 */
 .overlay {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: var(--public-overlay-card);
+  inset: 0;
+  z-index: 5;
   opacity: 0;
   visibility: hidden;
+  background: rgba(8, 12, 24, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
   display: flex;
   align-items: flex-end;
-  padding: 14px;
-  transition: all 0.4s cubic-bezier(0.165, 0.84, 0.44, 1);
-  z-index: 5;
+  padding: 14px 12px;
+  transition: all 0.32s cubic-bezier(0.165, 0.84, 0.44, 1);
 
   .overlayContent {
     width: 100%;
-    max-height: 100%;
     display: flex;
     flex-direction: column;
-    transform: translateY(20px);
-    transition: transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1) 0.1s;
+    transform: translateY(16px);
+    transition: transform 0.36s cubic-bezier(0.165, 0.84, 0.44, 1) 0.04s;
   }
 
   .overlayTitle {
-    color: var(--public-on-accent);
-    font-size: 18px;
-    font-weight: 800;
-    margin-bottom: 6px;
+    color: #ffffff;
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 5px 0;
     line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 1;
-    line-clamp: 1;
-    -webkit-box-orient: vertical;
     overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .overlayMeta {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--film-overlay-meta-text);
-    margin-bottom: 8px;
+    gap: 6px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.82);
+    margin-bottom: 7px;
+    overflow: hidden;
+    white-space: nowrap;
 
-    .dot {
+    .metaDot {
       color: var(--primary-color);
       font-weight: 900;
+    }
+
+    .overlayScore {
+      color: #ffc53d;
+      font-weight: 700;
     }
   }
 
   .overlayBlurb {
-    font-size: 12px;
-    color: var(--film-overlay-blurb-text);
-    line-height: 1.45;
-    margin-bottom: 10px;
+    margin: 0 0 10px 0;
+    font-size: 11.5px;
+    line-height: 1.42;
+    color: rgba(255, 255, 255, 0.72);
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
@@ -340,79 +290,108 @@
 
   .playBtn {
     margin-top: auto;
-    height: 40px;
-    border-radius: 10px;
+    height: 36px;
+    border-radius: 8px;
     font-weight: 700;
-    font-size: 14px;
-    background: var(--primary-color) !important;
-    color: var(--public-on-accent) !important;
+    font-size: 13px;
+    background: linear-gradient(135deg, var(--primary-color) 0%, #fa541c 100%) !important;
+    color: #ffffff !important;
     border: none !important;
-    box-shadow: 0 4px 15px rgba(var(--primary-color-rgb), 0.4) !important;
+    box-shadow: 0 4px 14px rgba(var(--primary-color-rgb), 0.45) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transform: translateY(10px);
+    transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 
     &:hover {
-      filter: brightness(1.08);
-      transform: translateY(-2px);
-      box-shadow: 0 6px 20px rgba(var(--primary-color-rgb), 0.5) !important;
+      filter: brightness(1.1);
+      transform: translateY(-2px) !important;
+      box-shadow: 0 6px 20px rgba(var(--primary-color-rgb), 0.6) !important;
     }
   }
 }
 
+/* 下方元信息区：仅保留片名与单行看点/副标题 */
 .infoLine {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 0 4px;
+  gap: 3px;
+  padding: 0 2px;
   overflow: hidden;
-  /* 防止文字溢出 */
 
   .name {
-    font-size: 15px;
+    font-size: 14px;
     font-weight: 600;
+    line-height: 1.35;
     color: var(--public-text-1);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    transition: color 0.3s ease;
+    transition: color 0.2s ease;
   }
 
   .subText {
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--public-text-3);
-    font-weight: 500;
-    white-space: nowrap;
+    line-height: 1.3;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
-
 }
 
-// UI specific responsive adjustments
-@media (max-width: 768px) {
-  .overlay {
-    display: none;
-  }
-
-  .item {
-    &:hover {
-      transform: none;
-    }
-  }
-
+@media (max-width: 576px) {
   .posterWrapper {
-    border-radius: 10px;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
+    border-radius: 8px;
+  }
+
+  .categoryBadge {
+    top: 5px;
+    left: 5px;
+    padding: 1px 5px;
+    font-size: 9.5px;
+    border-radius: 4px;
+  }
+
+  .topRightBadges {
+    top: 5px;
+    right: 5px;
+    gap: 3px;
+  }
+
+  .scoreBadge {
+    padding: 1px 4.5px;
+    font-size: 9px;
+  }
+
+  .remarkBadge {
+    padding: 1px 5px;
+    font-size: 9px;
+    border-radius: 4px;
   }
 
   .infoLine {
+    gap: 2px;
+
     .name {
       font-size: 13px;
     }
 
     .subText {
-      font-size: 11px;
+      font-size: 10.5px;
     }
-
   }
+}
+
+// UI specific responsive adjustments
+@media (max-width: 768px) {
+  .overlay { display: none; }
+  .item:hover { transform: none; }
+  .posterWrapper { border-radius: 9px; margin-bottom: 7px; }
+  .infoLine .name { font-size: 13.5px; }
 }
 
 

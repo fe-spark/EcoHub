@@ -117,8 +117,21 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 		return
 	}
 
+	source := strings.TrimSpace(c.Query("source"))
+	if source == "" {
+		source = strings.TrimSpace(c.Query("playFrom"))
+	}
+	if source == "" {
+		source = strings.TrimSpace(c.Query("preferredSource"))
+	}
+
 	page := dto.Page{Current: 0, PageSize: 14}
-	relateMovie := service.IndexSvc.RelateMovie(int64(id), &page)
+	var relateMovie []model.MovieBasicInfo
+	if source != "" {
+		relateMovie = service.IndexSvc.RelateMovie(int64(id), &page, source)
+	} else {
+		relateMovie = service.IndexSvc.RelateMovie(int64(id), &page)
+	}
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
 	dto.Success(relateMovie, "相关推荐获取成功", c)
 }

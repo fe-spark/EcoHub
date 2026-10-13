@@ -57,7 +57,32 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 	return &fi, nil
 }
 
-func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail) (bool, error) {
+// isBaselineCollectSource 判断当前源是否为基准源（首位生效站点）
+func isBaselineCollectSource(source *model.FilmSource, sources []model.FilmSource) bool {
+	if source == nil || source.Id == "" {
+		return false
+	}
+	var topEnabled *model.FilmSource
+	for i := range sources {
+		if sources[i].State {
+			if topEnabled == nil || sources[i].Sort < topEnabled.Sort || (sources[i].Sort == topEnabled.Sort && sources[i].Id < topEnabled.Id) {
+				topEnabled = &sources[i]
+			}
+		}
+	}
+	if topEnabled != nil {
+		return topEnabled.Id == source.Id
+	}
+	var topAll *model.FilmSource
+	for i := range sources {
+		if topAll == nil || sources[i].Sort < topAll.Sort || (sources[i].Sort == topAll.Sort && sources[i].Id < topAll.Id) {
+			topAll = &sources[i]
+		}
+	}
+	return topAll != nil && topAll.Id == source.Id
+}
+
+func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail, isBaseline bool) (bool, error) {
 	updates := make(map[string]any)
 	if existing.Actor == "" && detail.Actor != "" {
 		updates["actor"] = detail.Actor
@@ -107,6 +132,45 @@ func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *mode
 		if detail.PictureSlide != "" && detail.PictureSlide != existing.PictureSlide {
 			updates["picture_slide"] = detail.PictureSlide
 			existing.PictureSlide = detail.PictureSlide
+		}
+	}
+
+	// 核心宗旨：一切以当前选中的首选站为主。
+	// 若当前采集源是基准源（或原有分类键为空），首选站认领此片时将自身分类同步更新到 film_index，
+	// 彻底解决备用源先建档导致首选站分类漏片的问题。
+	if isBaseline || existing.CategoryKey == "" || existing.RootCategoryKey == "" {
+		if source != nil && strings.TrimSpace(source.Id) != "" {
+			cat := resolveSearchCategory(source.Id, detail)
+			if cat.CKey != "" && (isBaseline || existing.CategoryKey == "") {
+				if existing.CategoryKey != cat.CKey {
+					updates["category_key"] = cat.CKey
+					existing.CategoryKey = cat.CKey
+				}
+			}
+			if cat.PKey != "" && (isBaseline || existing.RootCategoryKey == "") {
+				if existing.RootCategoryKey != cat.PKey {
+					updates["root_category_key"] = cat.PKey
+					existing.RootCategoryKey = cat.PKey
+				}
+			}
+			if cat.Pid > 0 && (isBaseline || existing.Pid <= 0) {
+				if existing.Pid != cat.Pid {
+					updates["pid"] = cat.Pid
+					existing.Pid = cat.Pid
+				}
+			}
+			if cat.Cid > 0 && (isBaseline || existing.Cid <= 0) {
+				if existing.Cid != cat.Cid {
+					updates["cid"] = cat.Cid
+					existing.Cid = cat.Cid
+				}
+			}
+			if cat.CName != "" && (isBaseline || existing.CName == "") {
+				if existing.CName != cat.CName {
+					updates["c_name"] = cat.CName
+					existing.CName = cat.CName
+				}
+			}
 		}
 	}
 
@@ -273,7 +337,9 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 
 		if linesChanged || isNew {
 			if !isNew {
-				if _, err := backfillFilmMetadataTx(tx, filmIndex, source, detail); err != nil {
+				sources := support.GetCollectSourceList()
+				isBaseline := isBaselineCollectSource(source, sources)
+				if _, err := backfillFilmMetadataTx(tx, filmIndex, source, detail, isBaseline); err != nil {
 					return err
 				}
 			}

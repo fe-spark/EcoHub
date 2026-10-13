@@ -403,6 +403,11 @@ export default function DailyUpdates() {
             >
               <Poster src={lead.picture} alt={leadName} className={styles.posterImg} />
               {lead.remarks ? <span className={styles.leadRemark}>{lead.remarks}</span> : null}
+              <div className={styles.leadTagGroup}>
+                {filmTags(lead).slice(0, 3).map((tag, idx) => (
+                  <span key={idx} className={styles.leadTagItem}>{tag}</span>
+                ))}
+              </div>
               <span className={styles.cardShade} />
               <span className={styles.cardMeta}>
                 <span className={styles.cardName}>{leadName}</span>
@@ -430,6 +435,7 @@ export default function DailyUpdates() {
                 <div className={styles.rail} aria-label="本批其他更新">
                   {rail.map((item, index) => {
                     const name = filmTitle(item.name);
+                    const itemTags = filmTags(item);
                     return (
                       <button
                         key={index}
@@ -443,8 +449,16 @@ export default function DailyUpdates() {
                         <Poster src={item.picture} alt={name} className={styles.cardImg} />
                         <span className={styles.cardShade} />
                         {item.remarks ? <span className={styles.cardTip}>{item.remarks}</span> : null}
+                        <div className={styles.cardTagGroup}>
+                          {itemTags.slice(0, 2).map((tag, idx) => (
+                            <span key={idx} className={styles.cardTagItem}>{tag}</span>
+                          ))}
+                        </div>
                         <span className={styles.cardMeta}>
                           <span className={styles.cardName}>{name}</span>
+                          <span className={styles.cardTags}>
+                            {itemTags.join(" · ")}
+                          </span>
                         </span>
                       </button>
                     );

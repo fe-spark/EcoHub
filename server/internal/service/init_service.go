@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -159,21 +158,14 @@ func (s *InitService) CollectCrontabInit() {
 	}
 
 	spider.CronCollect.Start()
-	// 注册首页轮播自动智能排片执行回调（供计划任务系统统一调度）
-	spider.RegisterBannerAutoExecutor(func() error {
-		cfg := repository.GetBannerConfig()
-		if cfg.Mode != repository.BannerModeAuto {
-			return nil
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		_, err := BannerAutoSvc.GenerateAutoBanners(ctx, "cron_schedule")
-		return err
-	})
 }
 
 // ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
+	// 清理已废弃的轮播自动排片定时任务
+	repository.DelFilmTask(model.TaskIDBannerAuto)
+	spider.RemoveCronByTaskId(model.TaskIDBannerAuto)
+
 	existing := repository.GetAllFilmTask()
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
@@ -215,8 +207,6 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
 	case 4:
 		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
-	case 5:
-		cid, err = spider.AddBannerAutoCron(task.Id, task.Spec)
 	default:
 		return
 	}
@@ -254,10 +244,5 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: 4, State: true, Remark: "自动清理过期运行日志",
 	}
 
-	bannerAutoTask := model.FilmCollectTask{
-		Id: model.TaskIDBannerAuto, Time: 0, Spec: repository.DefaultBannerRefreshCron,
-		Model: model.TaskModelBannerAuto, State: repository.GetBannerConfig().Mode == repository.BannerModeAuto, Remark: "首页轮播自动智能排片",
-	}
-
-	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, bannerAutoTask}
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask}
 }

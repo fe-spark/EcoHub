@@ -49,7 +49,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 
 	var cacheKey string
 	if st.SourceId != "" {
-		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d:ck3",
+		cacheKey = fmt.Sprintf("%s:v%s:src_%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d:ck4",
 			config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Current, page.PageSize)
 	} else {
 		cacheKey = fmt.Sprintf("%s:v%s:%d:%d:%s:%s:%s:%s:%s:p%d:s%d",

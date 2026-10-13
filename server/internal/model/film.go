@@ -50,9 +50,11 @@ type MovieBasicInfo struct {
 	Remarks      string `json:"remarks"`             // 更新情况
 	Area         string `json:"area"`                // 地区
 	Year         string `json:"year"`                // 年份
-	ClassTag     string `json:"classTag,omitempty"`  // 源站分类/类型标签
-	SourceId     string `json:"sourceId,omitempty"`  // 当前结果所属采集源
-	SourceMid    int64  `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
+	ClassTag     string  `json:"classTag,omitempty"`  // 源站分类/类型标签
+	Score        float64 `json:"score,omitempty"`     // 影片评分
+	Hits         int64   `json:"hits,omitempty"`      // 播放/浏览热度
+	SourceId     string  `json:"sourceId,omitempty"`  // 当前结果所属采集源
+	SourceMid    int64   `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
 }
 
 // SearchSourceTab 搜索页按采集源分组的 Tab。
@@ -166,7 +168,7 @@ type FilmIndexCategory struct {
 // FilmIndexContent 展示内容层：列表与详情入口直接消费的字段。
 type FilmIndexContent struct {
 	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`                                                                                                                                                                                                                                     // 系列标识，用于相关推荐召回与排序
-	Name               string  `json:"name"`                                                                                                                                                                                                                                                                // 片名
+	Name               string  `json:"name" gorm:"size:255;index:idx_film_index_name"`                                                                                                                                                                                                                     // 片名
 	SubTitle           string  `json:"subTitle" gorm:"type:text"`                                                                                                                                                                                                                                           // 影片子标题
 	ClassTag           string  `json:"classTag" gorm:"type:text"`                                                                                                                                                                                                                                           // 类型标签
 	Area               string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                                                                                              // 地区

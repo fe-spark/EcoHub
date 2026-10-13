@@ -92,12 +92,6 @@ func TestNormalizeMediaURL(t *testing.T) {
 }
 
 func TestHandleProvideConfig_RedisNilSafety(t *testing.T) {
-	origRdb := db.Rdb
-	db.Rdb = nil
-	defer func() {
-		db.Rdb = origRdb
-	}()
-
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)

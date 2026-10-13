@@ -1,18 +1,12 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
-	"net/url"
 	"strconv"
 	"strings"
-	"time"
 
-	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -239,70 +233,12 @@ func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 		return
 	}
 	key := strings.TrimSpace(c.Query("key"))
-	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
-	if key != "" {
-		cacheKey += ":" + url.QueryEscape(key)
+	cfg, err := service.ProvideSvc.GetTVBoxConfig(baseURL, key)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var cached gin.H
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				c.JSON(200, cached)
-				return
-			}
-		}
-	}
-
-	apiPath := baseURL + "/api/provide/vod"
-	baseVodApi := apiPath
-	if key != "" {
-		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
-	}
-
-	sites := []gin.H{
-		{
-			"key":         "EcoHub",
-			"name":        "🌟 EcoHub 私人影视库全量",
-			"type":        1,
-			"api":         baseVodApi,
-			"searchable":  1,
-			"quickSearch": 1,
-			"filterable":  1,
-		},
-	}
-
-	for _, source := range repository.GetCollectSourceList() {
-		if !source.State {
-			continue
-		}
-		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
-		if key != "" {
-			sourceApi += "&key=" + url.QueryEscape(key)
-		}
-		sites = append(sites, gin.H{
-			"key":         "source_" + source.Id,
-			"name":        "📡 " + source.Name,
-			"type":        1,
-			"api":         sourceApi,
-			"searchable":  1,
-			"quickSearch": 1,
-			"filterable":  1,
-		})
-	}
-
-	configJson := gin.H{
-		"spider":    "",
-		"wallpaper": "",
-		"logo":      "",
-		"sites":     sites,
-	}
-	if db.Rdb != nil {
-		if data, err := json.Marshal(configJson); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Minute*30)
-		}
-	}
-
-	c.JSON(200, configJson)
+	c.JSON(200, cfg)
 }
 
 // HandleProvideApp 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
@@ -312,22 +248,11 @@ func (h *ProvideHandler) HandleProvideApp(c *gin.Context) {
 		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
 		return
 	}
-	basic := repository.GetSiteBasic()
-	siteName := strings.TrimSpace(basic.SiteName)
-	if siteName == "" {
-		siteName = "EcoHub"
+	res, err := service.ProvideSvc.GetAppSourceConfig(baseURL)
+	if err != nil {
+		c.JSON(500, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
-
-	c.JSON(200, gin.H{
-		"code": 1,
-		"msg":  "EcoHub 客户端软件源在线",
-		"data": gin.H{
-			"site_name":      siteName,
-			"site_url":       baseURL,
-			"api_base":       baseURL + "/api",
-			"version":        config.Version,
-			"private_access": basic.PrivateAccess,
-			"status":         "online",
-		},
-	})
+	c.JSON(200, res)
 }
+

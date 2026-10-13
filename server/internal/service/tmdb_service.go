@@ -93,22 +93,11 @@ func tmdbScrapeReady(cfg model.TMDBConfig) bool {
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 	existing := repository.GetTMDBConfig()
-	wasReady := tmdbScrapeReady(existing)
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
 	if err := repository.SaveTMDBConfig(cfg); err != nil {
 		return err
-	}
-
-	nowReady := tmdbScrapeReady(cfg)
-	// 关闭或清空密钥时只停在线刮削，不改轮播模式，也不清掉已有轮播。
-	if wasReady && !nowReady {
-		BannerAutoSvc.HandleTMDBDisabled()
-	}
-	// 从关到开，且轮播里「影片是否刮削」本来就是开，立刻换一批。
-	if !wasReady && nowReady {
-		BannerAutoSvc.RefreshAfterTMDBEnabled()
 	}
 
 	return nil

@@ -32,12 +32,14 @@ export function normalizeMeta(value?: string | number | null) {
 }
 
 export function filmTags(item: DailyFilm) {
-  const year = normalizeMeta(item.year?.slice(0, 4));
   const category = normalizeMeta(item.cName);
+  const year = normalizeMeta(item.year ? String(item.year).slice(0, 4) : "");
+  const plotTag = normalizeMeta(item.classTag?.split(/[,，/|、\s]+/)[0]);
   const area = normalizeMeta(item.area?.split(",")[0]);
-  const tags = [year, category];
-  if (area && !category.includes(area)) {
-    tags.push(area);
-  }
+  const tags: string[] = [];
+  if (category) tags.push(category);
+  if (year) tags.push(year);
+  if (plotTag && !tags.some((t) => t.includes(plotTag) || plotTag.includes(t))) tags.push(plotTag);
+  if (area && !tags.some((t) => t.includes(area) || area.includes(t))) tags.push(area);
   return tags.filter(Boolean);
 }
