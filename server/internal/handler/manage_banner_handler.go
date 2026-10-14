@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync"
 
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -107,7 +108,7 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 // BannerBatchScrape 一键批量对当前排片列表中缺失横图的影片进行 TMDB 刮削（支持 SSE 实时事件流）
 func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
 	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache")
+	c.Header("Cache-Control", "no-cache, no-transform")
 	c.Header("Connection", "keep-alive")
 	c.Header("X-Accel-Buffering", "no")
 
@@ -116,8 +117,12 @@ func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
 		dto.Failed("当前环境不支持流式推送", c)
 		return
 	}
+	flusher.Flush()
 
+	var writeMu sync.Mutex
 	sendEvent := func(evt service.BatchScrapeProgressEvent) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
 		payload, err := json.Marshal(evt)
 		if err != nil {
 			return
@@ -126,26 +131,40 @@ func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
 		flusher.Flush()
 	}
 
-	err := service.ManageSvc.BatchScrapeBannersStream(c.Request.Context(), sendEvent)
-	if err != nil {
-		sendEvent(service.BatchScrapeProgressEvent{
-			Event: "error",
-			Error: err.Error(),
-		})
-	}
+	_ = service.ManageSvc.BatchScrapeBannersStream(c.Request.Context(), sendEvent)
 }
 
-// BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表
+// BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表（支持 SSE 实时事件流）
 func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
 	var req service.OneClickGenerateReq
 	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("排片参数解析异常", c)
+		dto.Failed("排片参数解析异常: "+err.Error(), c)
 		return
 	}
-	deck, err := service.ManageSvc.OneClickGenerateDeck(req)
-	if err != nil {
-		dto.Failed(err.Error(), c)
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache, no-transform")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		dto.Failed("当前环境不支持流式推送", c)
 		return
 	}
-	dto.Success(deck, "一键排片成功并已实时生效", c)
+	flusher.Flush()
+
+	var writeMu sync.Mutex
+	sendEvent := func(evt service.OneClickProgressEvent) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		payload, err := json.Marshal(evt)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+		flusher.Flush()
+	}
+
+	_ = service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, sendEvent)
 }

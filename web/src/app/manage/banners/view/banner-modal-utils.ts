@@ -26,6 +26,11 @@ export function initBannerFormValues(
 ): Partial<BannerFormValues> {
   if (mode === "edit" && currentRow) {
     const isCustom = currentRow.isCustomPic === true || Boolean(currentRow.customPicture?.trim());
+    const rawSlide = (currentRow.pictureSlide || "").trim();
+    const rawPic = (currentRow.picture || "").trim();
+    const rawPoster = (currentRow.poster || "").trim();
+    // 严禁拿竖版封面/海报填充横屏大图。若等于封面图，直接视为无横图
+    const validSlide = (rawSlide && rawSlide !== rawPic && rawSlide !== rawPoster) ? rawSlide : "";
     return {
       mid: currentRow.mid,
       name: currentRow.name,
@@ -33,7 +38,7 @@ export function initBannerFormValues(
       year: currentRow.year,
       isCustomPic: isCustom,
       picture: isCustom ? resolveEditablePicture(currentRow) : "",
-      pictureSlide: isCustom ? (currentRow.pictureSlide || "") : "",
+      pictureSlide: isCustom ? validSlide : "",
       sort: currentRow.sort ?? 0,
     };
   }
@@ -58,7 +63,10 @@ export function buildBannerPayload({
   const customSlide = isCustom ? (values.pictureSlide || "").trim() : "";
   const baseFilm = isReplacingFilm ? selectedFilm : (selectedFilm || currentRow);
   const livePic = baseFilm?.picture || "";
-  const liveSlide = baseFilm?.pictureSlide || livePic;
+  const rawLiveSlide = baseFilm?.pictureSlide?.trim() || "";
+  // 严格隔离：横屏大图必须是真实横图，绝不可回退为竖屏海报 livePic
+  const liveSlide = (rawLiveSlide && rawLiveSlide !== livePic) ? rawLiveSlide : "";
+  const finalSlide = isCustom ? customSlide : liveSlide;
 
   return {
     id: currentRow?.id || "",
@@ -68,7 +76,7 @@ export function buildBannerPayload({
     year: values.year,
     poster: isCustom && customPic ? customPic : livePic,
     picture: isCustom && customPic ? customPic : livePic,
-    pictureSlide: isCustom && customSlide ? customSlide : (customPic || liveSlide),
+    pictureSlide: finalSlide,
     customPicture: isCustom ? customPic : "",
     sort: values.sort ?? currentRow?.sort ?? 0,
     remark: selectedFilm?.remarks || (!isReplacingFilm ? (currentRow?.remark || "") : ""),
@@ -228,13 +236,14 @@ export function computeBannerPreview({
     ? (liveFilmPic || (!isReplacingFilm ? resolvePreviewPicture(currentRow) : (selectedFilm?.picture || "")))
     : (watchedPicture || liveFilmPic);
 
-  const liveFilmSlide = isReplacingFilm
+  const rawLiveSlide = isReplacingFilm
     ? (selectedFilm?.pictureSlide || "")
     : (selectedFilm?.pictureSlide || currentRow?.pictureSlide || "");
+  const liveFilmSlide = (rawLiveSlide && rawLiveSlide !== liveFilmPic) ? rawLiveSlide : "";
 
   const previewSlide = !watchedIsCustomPic
     ? liveFilmSlide
-    : (watchedPictureSlide || liveFilmSlide);
+    : (watchedPictureSlide?.trim() || "");
 
   return {
     currentMid,

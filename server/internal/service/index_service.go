@@ -387,8 +387,8 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if out[i].IsCustomPic && customPic != "" {
 			out[i].Picture = customPic
 			out[i].Poster = customPic
-			if strings.TrimSpace(out[i].PictureSlide) == "" {
-				out[i].PictureSlide = customPic
+			if strings.TrimSpace(out[i].PictureSlide) == customPic {
+				out[i].PictureSlide = ""
 			}
 		} else {
 			dispPic := snap.DisplayPicture()
@@ -397,10 +397,10 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 				out[i].Poster = dispPic
 			}
 			dispSlide := snap.DisplayPictureSlide()
-			if dispSlide != "" {
+			if dispSlide != "" && dispSlide != dispPic {
 				out[i].PictureSlide = dispSlide
-			} else if dispPic != "" {
-				out[i].PictureSlide = dispPic
+			} else {
+				out[i].PictureSlide = ""
 			}
 		}
 	}

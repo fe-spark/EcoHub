@@ -4,145 +4,332 @@
   gap: 16px;
 }
 
-.tableCard {
-  border-radius: 8px;
+/* 顶部操作工具栏卡片 */
+.toolbarCard {
+  min-width: 0;
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  background: var(--ant-color-bg-container);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  padding: 14px 16px;
 }
 
-.tableHeader {
+.toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  flex-wrap: wrap;
   gap: 12px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.tableTitle {
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 32px;
-  color: var(--ant-color-text);
+.toolbarLeft {
   display: flex;
   align-items: center;
-}
-
-.tableActions {
-  display: flex;
-  flex-wrap: wrap;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-@media (max-width: 1200px) {
-  .tableActions {
-    width: 100%;
-  }
+.toolbarTitle {
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--ant-color-text);
+}
+
+.toolbarHint {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.toolbarActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .countBadge {
   font-size: 12px;
-  font-weight: normal;
+  font-weight: 600;
   color: var(--ant-color-text-secondary);
   background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.08));
-  padding: 1px 8px;
+  padding: 2px 8px;
   border-radius: 10px;
 }
 
-/* 竖屏海报单元格 */
-.filmCell {
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.posterThumbWrapper {
-  width: 52px !important;
-  height: 72px !important;
-  flex-shrink: 0;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
-  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.posterThumb {
-  width: 52px !important;
-  height: 72px !important;
-  object-fit: cover !important;
-  border-radius: 6px;
-  display: block;
-}
-
-/* 横屏海报独立列单元格 (16:9) */
-.slideCell {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.slideThumbWrapper {
-  width: 96px !important;
-  height: 54px !important;
-  flex-shrink: 0;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary, rgba(255, 255, 255, 0.08));
-  background: var(--ant-color-fill-secondary, rgba(255, 255, 255, 0.06));
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.slideThumb {
-  width: 96px !important;
-  height: 54px !important;
-  object-fit: cover !important;
-  border-radius: 6px;
-  display: block;
-}
-
-.emptySlideBox {
-  width: 96px;
-  height: 54px;
-  border-radius: 6px;
-  border: 1px dashed var(--ant-color-border-secondary, rgba(255, 255, 255, 0.12));
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  font-size: 11px;
-  color: var(--ant-color-text-tertiary);
-}
-
-.filmInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* 卡片多列网格：宽幅响应式排布，保证标题不被截断且卡片不过高 */
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  gap: 16px;
+  align-items: stretch;
   min-width: 0;
 }
 
-.filmName {
+/* 单个轮播卡片 */
+.bannerCard {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 12px;
+  cursor: default;
+  transition: all 0.25s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+
+  &:hover {
+    transform: translateY(-3px);
+    border-color: var(--ant-color-primary);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+
+    .posterContainer img {
+      transform: scale(1.04);
+    }
+  }
+}
+
+/* 头部：仅此区域支持抓取拖拽排序 */
+.cardHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 14px;
+  background: var(--ant-color-fill-quaternary);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  border-radius: 11px 11px 0 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  transition: background 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    background: var(--ant-color-fill-tertiary);
+  }
+
+  &:active {
+    cursor: grabbing;
+    background: var(--ant-color-fill-secondary);
+  }
+}
+
+.cardHeadLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.dragHandleIcon {
+  color: var(--ant-color-text-tertiary);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.orderTag {
+  border-radius: 4px;
+  font-weight: 700;
+  margin: 0 !important;
+  flex-shrink: 0;
+}
+
+.cardFilmName {
   font-size: 14px;
   font-weight: 600;
   color: var(--ant-color-text);
-  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.filmMeta {
+.cardHeadActions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 卡片主体：左侧大封面图，右侧信息，整体高度适中 (~230px) */
+.cardBody {
+  display: flex;
+  gap: 14px;
+  padding: 14px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+
+/* 大封面海报容器 (宽 120px，高 168px，比例 1:1.4，清晰突出) */
+.posterContainer {
+  width: 120px;
+  height: 168px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+
+  img {
+    transition: transform 0.3s ease;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+.posterImage {
+  width: 120px !important;
+  height: 168px !important;
+  object-fit: cover !important;
+  border-radius: 8px;
+  display: block;
+}
+
+.cardMainInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.cardTagsRow {
   display: flex;
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
-  font-size: 12px;
 }
 
-.filmId {
+.cardScoreRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.remarkText {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.blurbText {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ant-color-text-secondary);
+  margin-bottom: 0 !important;
+}
+
+.blurbTextEmpty {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  font-style: italic;
+}
+
+.cardFooterRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: 6px;
+  border-top: 1px dashed var(--ant-color-border-secondary);
   font-size: 11px;
-  color: var(--ant-color-text-tertiary, rgba(255, 255, 255, 0.45));
+  color: var(--ant-color-text-tertiary);
   font-variant-numeric: tabular-nums;
+}
+
+.filmMetaMid {
+  color: var(--ant-color-text-tertiary);
+}
+
+.filmMetaHits {
+  color: var(--ant-color-text-tertiary);
+}
+
+/* 拖拽原位占位符：虚线边框与半透明 */
+.dragPlaceholder {
+  opacity: 0.35;
+  border-radius: 12px;
+  outline: 2px dashed var(--ant-color-primary, #1677ff);
+  outline-offset: -2px;
+  filter: grayscale(0.4);
+  pointer-events: none;
+}
+
+/* 拖拽悬浮抓取预览卡片 */
+.dragOverlayCard {
+  cursor: grabbing;
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.22), 0 4px 12px rgba(0, 0, 0, 0.14);
+  transform: scale(1.02);
+  border-radius: 12px;
+  pointer-events: none;
+  background: var(--ant-color-bg-container);
+}
+
+/* 新增排片 Tile：高度与卡片一致 (~230px) */
+.addBannerTile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 230px;
+  padding: 24px 16px;
+  border: 2px dashed var(--ant-color-border);
+  border-radius: 12px;
+  background: var(--ant-color-fill-quaternary);
+  cursor: pointer;
+  transition: all 0.25s ease;
+  outline: none;
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    background: color-mix(in srgb, var(--ant-color-primary) 6%, var(--ant-color-bg-container));
+    color: var(--ant-color-primary);
+    transform: translateY(-3px);
+  }
+}
+
+.addBannerIcon {
+  font-size: 28px;
+  color: var(--ant-color-text-tertiary);
+}
+
+.addBannerLabel {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.addBannerHint {
+  font-size: 12px;
+  color: var(--ant-color-text-quaternary);
+  text-align: center;
+  max-width: 200px;
+  line-height: 1.5;
+}
+
+.emptyCard {
+  min-width: 0;
+  padding: 48px 16px;
+  background: var(--ant-color-bg-container);
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 12px;
+  text-align: center;
 }
 
 /* 弹窗触发器与已选卡片样式 */
@@ -250,3 +437,179 @@
   gap: 6px;
   background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
 }
+
+/* 批量刮削 SSE 进度指示条卡片 */
+.scrapeProgressCard {
+  border: 1px solid var(--ant-color-info-border, #91caff);
+  background: var(--ant-color-info-bg, #e6f4ff);
+  border-radius: 10px;
+  padding: 12px 16px;
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.08);
+}
+
+.scrapeProgressTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scrapeProgressTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.scrapeProgressDetail {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  margin-top: 4px;
+}
+
+/* 一键排片抽屉专属样式 */
+.drawerStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.drawerSectionCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawerSectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.drawerSummaryBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.previewDeckGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 12px;
+}
+
+.previewDeckCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  padding: 10px 12px;
+  display: flex;
+  gap: 12px;
+  position: relative;
+  transition: all 0.2s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  }
+}
+
+.previewDeckCardIndex {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+}
+
+.previewDeckCardPoster {
+  width: 58px;
+  height: 82px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: var(--public-surface-3);
+  position: relative;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+.previewDeckCardInfo {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  flex: 1;
+}
+
+.previewDeckCardTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.previewDeckCardTags {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 3px 0;
+}
+
+.previewDeckCardBlurb {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 16px;
+}
+
+.previewDeckCardSlideThumb {
+  width: 72px;
+  height: 40px;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  flex-shrink: 0;
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+}
+
+

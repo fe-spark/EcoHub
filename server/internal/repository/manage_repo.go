@@ -20,9 +20,6 @@ func normalizeBannerImageFields(bl model.Banners) model.Banners {
 			picture = strings.TrimSpace(bl[index].Poster)
 		}
 		if picture == "" {
-			picture = strings.TrimSpace(bl[index].PictureSlide)
-		}
-		if picture == "" {
 			continue
 		}
 
@@ -30,8 +27,12 @@ func normalizeBannerImageFields(bl model.Banners) model.Banners {
 		if strings.TrimSpace(bl[index].Poster) == "" {
 			bl[index].Poster = picture
 		}
-		if strings.TrimSpace(bl[index].PictureSlide) == "" {
-			bl[index].PictureSlide = picture
+
+		// 严禁拿竖版封面/海报填充横屏大图 PictureSlide！
+		// 若 PictureSlide 等于 Picture 或 Poster，说明是伪横图，直接置为空字符串
+		slide := strings.TrimSpace(bl[index].PictureSlide)
+		if slide == picture || slide == strings.TrimSpace(bl[index].Poster) {
+			bl[index].PictureSlide = ""
 		}
 	}
 

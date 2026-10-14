@@ -7,7 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"server/internal/infra/db"
 	"server/internal/model"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // AutoScrapeFilm 对单部影片执行智能匹配与 TMDB 元数据自动刮削落库
@@ -156,16 +158,11 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 		return nil, false, nil
 	}
 
-	fields := []string{"poster"}
-	if strings.TrimSpace(bestCandidate.Backdrop) != "" {
-		fields = append(fields, "backdrop")
-	}
-
 	applyReq := model.TMDBApplyReq{
 		Mid:       snap.Mid,
 		TmdbID:    bestCandidate.ID,
 		MediaType: bestCandidate.MediaType,
-		Fields:    fields,
+		Fields:    nil, // nil 表示全量应用所有字段（海报、横图、评分、演职员、简介、年份等）
 	}
 
 	if _, err := s.ApplyDetailWithOptions(applyReq, false); err != nil {
@@ -174,18 +171,31 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	}
 
 	updatedSnap := snap
-	if strings.TrimSpace(bestCandidate.Poster) != "" {
-		updatedSnap.Picture = strings.TrimSpace(bestCandidate.Poster)
-		updatedSnap.CustomPicture = strings.TrimSpace(bestCandidate.Poster)
-		updatedSnap.IsCustomPicture = true
-	}
-	if strings.TrimSpace(bestCandidate.Backdrop) != "" {
-		updatedSnap.PictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
-		updatedSnap.CustomPictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
+	var sc model.FilmTMDBScrape
+	if err := db.Mdb.Where("mid = ?", snap.Mid).First(&sc).Error; err == nil {
+		filmsnapshot.ApplyTMDBScrapeToSnapshot(&updatedSnap, &sc)
+	} else {
+		if strings.TrimSpace(bestCandidate.Poster) != "" {
+			updatedSnap.Picture = strings.TrimSpace(bestCandidate.Poster)
+			updatedSnap.CustomPicture = strings.TrimSpace(bestCandidate.Poster)
+			updatedSnap.IsCustomPicture = true
+		}
+		if strings.TrimSpace(bestCandidate.Backdrop) != "" {
+			updatedSnap.PictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
+			updatedSnap.CustomPictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
+		}
+		if bestCandidate.VoteAverage > 0 {
+			updatedSnap.Score = bestCandidate.VoteAverage
+		}
+		if strings.TrimSpace(bestCandidate.Overview) != "" {
+			updatedSnap.Content = strings.TrimSpace(bestCandidate.Overview)
+			updatedSnap.Blurb = strings.TrimSpace(bestCandidate.Overview)
+		}
+		updatedSnap.IsScraped = true
 	}
 
-	log.Printf("[TMDBAuto] 影片 TMDB 高清数据已自动刮削落库 mid=%d 片名=%q (横图=%s)",
-		snap.Mid, snap.Name, updatedSnap.DisplayPictureSlide())
+	log.Printf("[TMDBAuto] 影片 TMDB 全量元数据已自动刮削落库 mid=%d 片名=%q (评分=%.1f, 横图=%s)",
+		snap.Mid, snap.Name, updatedSnap.Score, updatedSnap.DisplayPictureSlide())
 	return &updatedSnap, true, nil
 }
 

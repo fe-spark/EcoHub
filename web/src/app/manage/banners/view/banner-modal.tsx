@@ -183,7 +183,12 @@ export default function BannerModal({
       if (!form.getFieldValue("picture") && preview.liveFilmPic) {
         form.setFieldValue("picture", preview.liveFilmPic);
       }
-      if (!form.getFieldValue("pictureSlide") && preview.liveFilmSlide) {
+      // 仅当影片有真实的横屏大图（且不等于竖版封面）时才预填；绝不可用竖屏海报填充！
+      if (
+        !form.getFieldValue("pictureSlide") &&
+        preview.liveFilmSlide &&
+        preview.liveFilmSlide !== preview.liveFilmPic
+      ) {
         form.setFieldValue("pictureSlide", preview.liveFilmSlide);
       }
     }

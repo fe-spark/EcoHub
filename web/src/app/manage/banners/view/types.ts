@@ -87,9 +87,5 @@ export function resolvePreviewPicture(
     return record.poster;
   }
 
-  if ("pictureSlide" in record && record.pictureSlide) {
-    return record.pictureSlide;
-  }
-
   return "";
 }
