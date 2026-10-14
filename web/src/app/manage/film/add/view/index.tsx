@@ -14,8 +14,6 @@ import {
   Card,
   Row,
   Col,
-  Divider,
-  Flex,
   Tag,
   Radio,
   Image as AntImage,
@@ -24,9 +22,6 @@ import {
 } from "antd";
 import {
   UploadOutlined,
-  SaveOutlined,
-  ClearOutlined,
-  ArrowLeftOutlined,
   InfoCircleOutlined,
   UserOutlined,
   GlobalOutlined,
@@ -35,13 +30,14 @@ import {
   PictureOutlined,
   CompassOutlined,
   UndoOutlined,
-  ReloadOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { isFormValuesEqual } from "@/lib/deep-equal";
 import ImagePicker from "@/app/manage/components/image-picker";
 import TmdbModal from "../../components/tmdb-modal";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
@@ -69,11 +65,31 @@ function FilmAddForm() {
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/manage/film");
+    }
+  }, [router]);
+
   const watchedFollowPosterSource = Form.useWatch("followPosterSource", form);
   const watchedPicture = Form.useWatch("picture", form);
 
   const loadedDetailRef = useRef<any>(null);
   const [loadedDetail, setLoadedDetail] = useState<any>(null);
+  const [isDirty, setIsDirty] = useState(false);
+  const baselineRef = useRef<Record<string, any> | null>(null);
+
+  const checkDirty = useCallback((allValues?: any) => {
+    if (!baselineRef.current) {
+      setIsDirty(false);
+      return;
+    }
+    const current = allValues ?? form.getFieldsValue();
+    const equal = isFormValuesEqual(current, baselineRef.current);
+    setIsDirty(!equal);
+  }, [form]);
 
   const populateForm = useCallback((filmData: any) => {
     if (!filmData) return;
@@ -109,6 +125,8 @@ function FilmAddForm() {
       hits: filmDescriptor.hits ?? 0,
       content: filmDescriptor.content || "",
     });
+    baselineRef.current = form.getFieldsValue();
+    setIsDirty(false);
   }, [form]);
 
   const handleTmdbPrefill = (data: any, fields?: string[]) => {
@@ -157,6 +175,7 @@ function FilmAddForm() {
 
     if (Object.keys(updates).length > 0) {
       form.setFieldsValue(updates);
+      checkDirty();
     }
   };
 
@@ -164,6 +183,7 @@ function FilmAddForm() {
     if (!tmdbSnapshot) return;
     form.setFieldsValue(tmdbSnapshot);
     setTmdbSnapshot(null);
+    checkDirty();
     message.info("已撤销 TMDB 填充，表单已恢复填充前状态");
   };
 
@@ -171,7 +191,8 @@ function FilmAddForm() {
     if (loadedDetailRef.current) {
       populateForm(loadedDetailRef.current);
       setTmdbSnapshot(null);
-      message.success("已还原为影片初始数据");
+      setIsDirty(false);
+      message.success("已还原初始数据");
     }
   };
 
@@ -179,7 +200,8 @@ function FilmAddForm() {
     form.resetFields();
     form.setFieldsValue({ followPosterSource: false });
     setTmdbSnapshot(null);
-    message.info("已清空表单");
+    setIsDirty(false);
+    message.info("已重置表单");
   };
 
   useEffect(() => {
@@ -195,7 +217,10 @@ function FilmAddForm() {
       }
     });
 
-    if (id) {
+    if (!id) {
+      baselineRef.current = form.getFieldsValue();
+      setIsDirty(false);
+    } else {
       setFetching(true);
       ApiGet(`/films/play-info`, { id })
         .then((resp: any) => {
@@ -220,6 +245,7 @@ function FilmAddForm() {
         pid: selected.pid,
         cName: selected.name,
       });
+      checkDirty();
     }
   };
 
@@ -289,6 +315,7 @@ function FilmAddForm() {
             : resp.data;
         form.setFieldValue("picture", fullUrl);
         onSuccess(fullUrl);
+        checkDirty();
       } else {
         message.error(resp.msg);
         onError(resp.msg);
@@ -308,21 +335,23 @@ function FilmAddForm() {
   }
 
   return (
-    <div className={styles.pageStack}>
-      <ManagePageHeader
-        title={id ? "修改影片详情" : "录入新影片"}
-        description={
-          id
-            ? "修改主库存影片详情与播放资源。"
-            : "手动录入主库存影片信息、剧情详情与播放资源。"
-        }
-      />
+    <div className={styles.pageContainer}>
+      <div className={styles.fixedHeader}>
+        <ManagePageHeader
+          className={styles.pageHeaderReset}
+          title={id ? "编辑影片" : "新增影片"}
+          description={id ? "修改影片详情与播放资源" : "录入影片基本信息与播放资源"}
+          onBack={handleBack}
+        />
+      </div>
 
-      <Form
-        form={form}
-        layout="vertical"
-        onFinish={onFinish}
-        className={`${styles.form} ${styles.formCompact}`}
+      <div className={styles.scrollBody}>
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={onFinish}
+          onValuesChange={(_changed, allValues) => checkDirty(allValues)}
+          className={`${styles.form} ${styles.formCompact}`}
         initialValues={{
           dbId: 0,
           hits: 0,
@@ -330,7 +359,7 @@ function FilmAddForm() {
         }}
         requiredMark="optional"
       >
-        <Space direction="vertical" size={16} className={styles.formSections}>
+        <Space orientation="vertical" size={16} className={styles.formSections}>
           <Card
             title={
               <Space>
@@ -352,19 +381,18 @@ function FilmAddForm() {
                     icon={<UndoOutlined />}
                     onClick={handleUndoTmdb}
                   >
-                    撤销 TMDB 填充
+                    撤销填入
                   </Button>
                 )}
                 {loadedDetail?.isScraped && id && (
                   <Popconfirm
-                    title="确定还原该影片的 TMDB 刮削？"
-                    description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
-                    okText="确定还原"
+                    title="确定还原刮削？"
+                    okText="还原"
                     cancelText="取消"
                     onConfirm={async () => {
                       const resp = await ApiPost("/manage/tmdb/revert", { mid: Number(id) });
                       if (resp.code === 0) {
-                        message.success(resp.msg || "已成功还原为采集站原始数据！");
+                        message.success(resp.msg || "已还原刮削");
                         ApiGet(`/films/play-info`, { id }).then((r: any) => {
                           if (r.code === 0 && r.data?.detail) {
                             loadedDetailRef.current = r.data.detail;
@@ -373,12 +401,12 @@ function FilmAddForm() {
                           }
                         });
                       } else {
-                        message.error(resp.msg || "还原失败");
+                        message.error(resp.msg || "还原刮削失败");
                       }
                     }}
                   >
                     <Button icon={<UndoOutlined />} style={{ color: "#fa8c16", borderColor: "#ffd591" }}>
-                      还原为采集站数据
+                      还原刮削
                     </Button>
                   </Popconfirm>
                 )}
@@ -389,7 +417,7 @@ function FilmAddForm() {
                     onClick={() => setTmdbModalOpen(true)}
                     disabled={!canWrite}
                   >
-                    TMDB 智能识别
+                    刮削
                   </Button>
                 ) : null}
               </Space>
@@ -482,41 +510,35 @@ function FilmAddForm() {
                     <Col xs={24}>
                       <Form.Item
                         label="封面图片地址"
-                        name="picture"
-                        rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
                         tooltip="自定义封面，锁定后不被海报源或采集覆盖。"
                       >
-                        <Input
-                          className={styles.posterInput}
-                          placeholder="输入图片URL或点击右侧上传/选图"
-                          addonAfter={
-                            <Space size={4}>
-                              <Upload
-                                customRequest={customUpload}
-                                showUploadList={false}
-                                accept={IMAGE_UPLOAD_ACCEPT}
-                                disabled={!canWrite}
-                              >
-                                <Button
-                                  icon={<UploadOutlined />}
-                                  type="text"
-                                  size="small"
-                                >
-                                  上传封面
-                                </Button>
-                              </Upload>
-                              <Button
-                                icon={<PictureOutlined />}
-                                type="text"
-                                size="small"
-                                disabled={!canWrite}
-                                onClick={() => setPickerOpen(true)}
-                              >
-                                选图
-                              </Button>
-                            </Space>
-                          }
-                        />
+                        <Space.Compact style={{ width: "100%" }}>
+                          <Form.Item
+                            name="picture"
+                            noStyle
+                            rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
+                          >
+                            <Input
+                              className={styles.posterInput}
+                              placeholder="输入图片URL或点击右侧上传/选图"
+                            />
+                          </Form.Item>
+                          <Upload
+                            customRequest={customUpload}
+                            showUploadList={false}
+                            accept={IMAGE_UPLOAD_ACCEPT}
+                            disabled={!canWrite}
+                          >
+                            <Button icon={<UploadOutlined />}>上传封面</Button>
+                          </Upload>
+                          <Button
+                            icon={<PictureOutlined />}
+                            disabled={!canWrite}
+                            onClick={() => setPickerOpen(true)}
+                          >
+                            选图
+                          </Button>
+                        </Space.Compact>
                       </Form.Item>
                     </Col>
                   ) : (
@@ -697,53 +719,10 @@ function FilmAddForm() {
             </Form.Item>
           </Card>
 
-          <Divider className={styles.formDivider} />
-          <Flex
-            justify="space-between"
-            align="center"
-            wrap="wrap"
-            gap={12}
-            className={styles.footerActions}
-          >
-            <Button
-              type="text"
-              icon={<ArrowLeftOutlined />}
-              onClick={() => router.back()}
-              className={styles.backButton}
-            >
-              返回影片列表
-            </Button>
-            <Space wrap className={styles.submitActions}>
-              {id ? (
-                <Popconfirm
-                  title="还原为初始数据？"
-                  description="未保存的修改将丢失"
-                  onConfirm={handleResetToOriginal}
-                  okText="确定还原"
-                  cancelText="取消"
-                >
-                  <Button icon={<ReloadOutlined />}>
-                    还原初始数据
-                  </Button>
-                </Popconfirm>
-              ) : (
-                <Button icon={<ClearOutlined />} onClick={handleClearForm}>
-                  清空重填
-                </Button>
-              )}
-              <Button
-                type="primary"
-                icon={<SaveOutlined />}
-                onClick={() => form.submit()}
-                loading={loading}
-                disabled={!canWrite}
-              >
-                {id ? "确认保存更新" : "立即提交"}
-              </Button>
-            </Space>
-          </Flex>
+
         </Space>
-      </Form>
+        </Form>
+      </div>
 
       <ImagePicker
         open={pickerOpen}
@@ -751,6 +730,7 @@ function FilmAddForm() {
         onSelect={(link) => {
           form.setFieldValue("picture", link);
           setPickerOpen(false);
+          checkDirty();
         }}
       />
 
@@ -761,21 +741,17 @@ function FilmAddForm() {
         isScraped={Boolean(loadedDetail?.isScraped)}
         onClose={() => setTmdbModalOpen(false)}
         onPrefill={handleTmdbPrefill}
-        onRevert={async (revertMid) => {
-          const resp = await ApiPost("/manage/tmdb/revert", { mid: revertMid });
-          if (resp.code === 0) {
-            message.success(resp.msg || "已成功还原为采集站原始数据！");
-            ApiGet(`/films/play-info`, { id }).then((r: any) => {
-              if (r.code === 0 && r.data?.detail) {
-                loadedDetailRef.current = r.data.detail;
-                setLoadedDetail(r.data.detail);
-                populateForm(r.data.detail);
-              }
-            });
-          } else {
-            message.error(resp.msg || "还原失败");
-          }
-        }}
+      />
+
+      <UnsavedChangesBar
+        visible={isDirty}
+        saving={loading}
+        discardText={id ? "还原" : "重置"}
+        saveText={id ? "保存" : "提交"}
+        onDiscard={id ? handleResetToOriginal : handleClearForm}
+        onSave={() => form.submit()}
+        saveDisabled={!canWrite}
+        discardDisabled={!canWrite}
       />
     </div>
   );

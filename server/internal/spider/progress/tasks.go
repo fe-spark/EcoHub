@@ -106,4 +106,5 @@ func MarkAllRunningStopped() {
 		state.mu.Unlock()
 		return true
 	})
+	NotifyChange()
 }

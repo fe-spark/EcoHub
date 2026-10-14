@@ -124,5 +124,5 @@ func (h *TMDBHandler) Revert(c *gin.Context) {
 		dto.Failed("还原刮削失败: "+err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("已成功还原为采集站原始数据！", c)
+	dto.SuccessOnlyMsg("已还原刮削", c)
 }

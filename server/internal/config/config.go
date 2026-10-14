@@ -57,8 +57,8 @@ const (
 	DefaultCollectSourceConcurrency             = 6   // 批量同时跑的站点数；0=不限制
 	DefaultCollectStatsFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
-	// 仅保留足够前端完成结束态展示的窗口（轮询 + 倒计时），过后查询不到，避免残留到下次进入。
-	DefaultCollectProgressRetainSec = 10
+	// 仅保留足够前端完成结束态展示的窗口（SSE 实时推送 + 倒计时），过后自动清除，恢复初始态。
+	DefaultCollectProgressRetainSec = 3
 	// DefaultCollectProgressStaleSec 无 live task 的 running，以及无占用的 starting，超时秒数。
 	// 占用中的 starting 是排队等槽，不算僵尸。不含 waiting_publish / finalizing / page_done。
 	DefaultCollectProgressStaleSec = 30 * 60

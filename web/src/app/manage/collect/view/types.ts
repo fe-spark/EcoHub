@@ -175,3 +175,41 @@ export function stationProgressPercent(progress?: CollectProgress | null): numbe
   const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
   return Math.min(rawPercent, 99);
 }
+
+export interface CollectListItemResponse extends Partial<FilmSource> {
+  id: string;
+  name: string;
+  uri: string;
+}
+
+export function makeStartingProgress(id: string, name: string): CollectProgress {
+  return {
+    id,
+    name,
+    total: 0,
+    current: 0,
+    success: 0,
+    failed: 0,
+    status: "starting",
+  };
+}
+
+export function normalizeSource(item: CollectListItemResponse): FilmSource {
+  return {
+    id: item.id,
+    name: item.name,
+    uri: item.uri,
+    state: Boolean(item.state),
+    sort: Number(item.sort ?? 0),
+    isPosterSource: Boolean(item.isPosterSource),
+    isPrimary: Boolean(item.isPrimary),
+    interval: Number(item.interval ?? 0),
+    cd: Number(item.cd > 0 ? item.cd : 24),
+    format: (item.format as "json" | "xml") || "json",
+    lastCollectTime: item.lastCollectTime,
+    progress: item.progress ?? null,
+    proxyCollect: Boolean(item.proxyCollect),
+    createdAt: item.createdAt,
+  };
+}
+

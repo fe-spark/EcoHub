@@ -1,7 +1,49 @@
-.pageStack {
+.pageContainer {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.fixedHeader {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  min-height: 72px;
+  padding: 16px 24px;
+  background: var(--ant-color-bg-container);
+  border-bottom: 1px solid var(--ant-color-border-secondary);
+  z-index: 10;
+  box-sizing: border-box;
+
+  @media (max-width: 992px) {
+    min-height: 64px;
+    padding: 14px 16px;
+  }
+
+  @media (max-width: 768px) {
+    min-height: auto;
+    padding: 14px 16px;
+  }
+}
+
+.pageHeaderReset {
+  flex: 1;
+  width: 100%;
+  margin-bottom: 0 !important;
+}
+
+.scrollBody {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px 24px 80px 24px;
+
+  @media (max-width: 992px) {
+    padding: 16px 16px 80px 16px;
+  }
 }
 
 .form {
@@ -10,14 +52,6 @@
 
 .formSections {
   width: 100%;
-}
-
-.backButton {
-  padding-left: 0;
-}
-
-.formDivider {
-  margin: 0 !important;
 }
 
 .sectionCard {
@@ -37,6 +71,7 @@
   justify-content: center;
   align-items: center;
   min-height: 400px;
+  height: 100%;
   gap: 16px;
 }
 
@@ -98,15 +133,6 @@
   width: 100%;
 }
 
-.footerActions {
-  width: 100%;
-}
-
-.submitActions {
-  display: flex;
-  flex-wrap: wrap;
-}
-
 @media (max-width: 768px) {
   .basicInfoLayout {
     flex-direction: column;
@@ -130,18 +156,5 @@
 
   .formRow {
     padding: 0;
-  }
-
-  .backButton {
-    width: 100%;
-    justify-content: flex-start;
-  }
-
-  .submitActions {
-    width: 100%;
-  }
-
-  .submitActions :global(.ant-btn) {
-    width: 100%;
   }
 }

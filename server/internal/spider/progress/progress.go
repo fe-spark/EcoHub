@@ -63,6 +63,7 @@ func Update(sourceID string, update func(*model.CollectProgress)) {
 		update(&state.data)
 		state.updated = time.Now()
 		state.mu.Unlock()
+		NotifyChange()
 	}
 }
 
@@ -208,6 +209,7 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 		state.updated = time.Now()
 		state.mu.Unlock()
 	}
+	NotifyChange()
 }
 
 func MarkStopped(sourceID string) {
@@ -227,6 +229,7 @@ func StampPageRunning(progress *model.CollectProgress, page int) {
 		progress.Current = page
 	}
 	progress.Status = StatusRunning
+	NotifyChange()
 }
 
 func GetActiveTaskProgress() []model.CollectProgress {

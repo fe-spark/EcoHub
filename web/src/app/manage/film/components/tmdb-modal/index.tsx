@@ -2,54 +2,37 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import {
-  Modal, Input, Select, Button, Space, Tag, Spin, Alert, Checkbox, Typography, Empty, Image as AntImage, Popconfirm, Flex,
+  Modal, Input, Select, Button, Space, Tag, Spin, Checkbox, Typography, Empty, Image as AntImage,
 } from "antd";
 import {
-  SearchOutlined, CompassOutlined, ArrowLeftOutlined, CheckOutlined, StarFilled, CalendarOutlined, PictureOutlined, UndoOutlined,
+  SearchOutlined, CompassOutlined, ArrowLeftOutlined, CheckOutlined, StarFilled, CalendarOutlined, PictureOutlined,
 } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
+import { TmdbCandidate, TmdbModalProps, FIELD_OPTIONS } from "./types";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
 
-export interface TmdbCandidate {
-  id: number;
-  mediaType: "movie" | "tv";
-  title: string;
-  originalTitle: string;
-  releaseDate: string;
-  year: string;
-  poster: string;
-  backdrop: string;
-  voteAverage: number;
-  overview: string;
+function cleanInitialTitle(raw: string): { name: string; year?: string } {
+  let s = (raw || "").trim();
+  let extractedYear = "";
+  const yearMatch = s.match(/\b(19\d{2}|20\d{2})\b/);
+  if (yearMatch) {
+    extractedYear = yearMatch[1];
+    s = s.replace(yearMatch[0], " ");
+  }
+  s = s.replace(/[【\[].*?[】\]]/g, " ").replace(/[（(].*?[）)]/g, " ");
+  s = s.replace(/[-_—·\s]*(预告片|预告|先导片|先导预告|片花|花絮|特辑|彩蛋|幕后|采访|纯享版|精编版|精华版|速看版|解说版|正片|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版)/gi, " ");
+  s = s.replace(/\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray|trailer|teaser|pv|preview|sp)\b/gi, " ");
+  s = s.replace(/[-_—·:：\s]+$/g, "").replace(/^[-_—·:：\s]+/g, "");
+  s = s.replace(/\s+/g, " ");
+  return {
+    name: s || raw.trim(),
+    year: extractedYear,
+  };
 }
-
-interface TmdbModalProps {
-  open: boolean;
-  mid?: number;
-  initialName?: string;
-  initialYear?: string | number;
-  isScraped?: boolean;
-  onClose: () => void;
-  onSuccess?: () => void;
-  onPrefill?: (data: any, fields?: string[]) => void;
-  onRevert?: (mid: number) => void;
-}
-
-const FIELD_OPTIONS = [
-  { label: "竖版海报", value: "poster" },
-  { label: "横版幻灯背景", value: "backdrop" },
-  { label: "剧情简介", value: "overview" },
-  { label: "副标题/原名", value: "subTitle" },
-  { label: "主演阵容", value: "actor" },
-  { label: "导演", value: "director" },
-  { label: "上映年份/日期", value: "year" },
-  { label: "TMDB 评分", value: "score" },
-  { label: "分类标签", value: "tag" },
-];
 
 export default function TmdbModal({
   open,
@@ -60,7 +43,6 @@ export default function TmdbModal({
   onClose,
   onSuccess,
   onPrefill,
-  onRevert,
 }: TmdbModalProps) {
   const [keyword, setKeyword] = useState("");
   const [year, setYear] = useState("");
@@ -124,19 +106,25 @@ export default function TmdbModal({
 
   useEffect(() => {
     if (open) {
-      const initialKw = (initialName || "").trim();
-      setKeyword(initialKw);
-      setYear("");
+      const cleaned = cleanInitialTitle(initialName || "");
+      let initY = "";
+      if (initialYear && initialYear !== "未知" && initialYear !== "未知年份") {
+        initY = String(initialYear).trim();
+      } else if (cleaned.year) {
+        initY = cleaned.year;
+      }
+      setKeyword(cleaned.name);
+      setYear(initY);
       setMediaType("");
       setSelectedCandidate(null);
       setPreviewDetail(null);
       setCandidates([]);
       setHasSearched(false);
-      if (initialKw) {
-        void doSearch(initialKw, "", "");
+      if (cleaned.name) {
+        void doSearch(cleaned.name, initY, "");
       }
     }
-  }, [open, initialName, doSearch]);
+  }, [open, initialName, initialYear, doSearch]);
 
   const handleSelectCandidate = async (item: TmdbCandidate) => {
     setSelectedCandidate(item);
@@ -218,37 +206,15 @@ export default function TmdbModal({
       open={open}
       onCancel={onClose}
       title={
-        <Flex justify="space-between" align="center" style={{ width: "100%", paddingRight: 32 }}>
-          <Space size={8}>
-            <CompassOutlined style={{ color: "#722ed1" }} />
-            <span>TMDB 影视刮削匹配</span>
-            {isScraped && (
-              <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
-                已刮削
-              </Tag>
-            )}
-          </Space>
-          {isScraped && mid && onRevert && (
-            <Popconfirm
-              title="还原该影片的 TMDB 刮削？"
-              description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
-              okText="确定还原"
-              cancelText="取消"
-              onConfirm={async () => {
-                await onRevert(mid);
-                onClose();
-              }}
-            >
-              <Button
-                size="small"
-                icon={<UndoOutlined />}
-                style={{ color: "#fa8c16", borderColor: "#ffd591" }}
-              >
-                还原为原始数据
-              </Button>
-            </Popconfirm>
+        <Space size={8}>
+          <CompassOutlined style={{ color: "#722ed1" }} />
+          <span>TMDB 影视刮削匹配</span>
+          {isScraped && (
+            <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
+              已刮削
+            </Tag>
           )}
-        </Flex>
+        </Space>
       }
       width={720}
       footer={
@@ -271,12 +237,12 @@ export default function TmdbModal({
               disabled={detailLoading}
               onClick={handleApply}
             >
-              {onPrefill ? "应用到当前编辑" : "确认应用并更新"}
+              {onPrefill ? "填入表单" : "应用"}
             </Button>
           </Space>
         ) : null
       }
-      destroyOnClose
+      destroyOnHidden
     >
       <div className={styles.modalContent}>
         {!selectedCandidate && (
@@ -318,7 +284,7 @@ export default function TmdbModal({
               </Button>
             </div>
 
-            <Spin spinning={loading} tip={loading && candidates.length === 0 ? "正在检索 TMDB..." : undefined}>
+            <Spin spinning={loading}>
               <div className={candidates.length > 0 ? styles.candidateList : styles.spinPlaceholder}>
                 {candidates.length > 0 ? (
                   candidates.map((item) => (
@@ -371,7 +337,7 @@ export default function TmdbModal({
                             size="small"
                             onClick={() => void handleSelectCandidate(item)}
                           >
-                            选择此项
+                            选择
                           </Button>
                         </div>
                       </div>
@@ -380,14 +346,7 @@ export default function TmdbModal({
                 ) : hasSearched && !loading ? (
                   <Empty
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description={
-                      <div>
-                        <span>未在 TMDB 找到相关条目</span>
-                        <div style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)", marginTop: 4 }}>
-                          提示：综艺与动漫请选「剧集」或「全部」；可尝试清空年份或简化片名重新搜索
-                        </div>
-                      </div>
-                    }
+                    description="未找到相关条目"
                   />
                 ) : null}
               </div>
@@ -396,23 +355,21 @@ export default function TmdbModal({
         )}
 
         {selectedCandidate && (
-          <Spin spinning={detailLoading} tip="正在拉取完整详情...">
+          <Spin spinning={detailLoading}>
             <div className={styles.previewCard}>
               <div className={styles.previewHeader}>
-                {/* 竖版海报 */}
                 <div className={styles.previewPoster}>
                   <AntImage
                     src={previewDetail?.picture || selectedCandidate.poster || FALLBACK_IMG}
                     fallback={FALLBACK_IMG}
-                    alt="竖版海报"
-                    preview={{ mask: "查看海报" }}
+                    alt="海报"
+                    preview={{ mask: "查看" }}
                     width={140}
                     height={210}
                     style={{ objectFit: "cover", width: "100%", height: "100%" }}
                   />
                 </div>
 
-                {/* 详情核心元数据 */}
                 <div className={styles.previewInfo}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <Text strong style={{ fontSize: 16 }}>
@@ -434,62 +391,43 @@ export default function TmdbModal({
                   </div>
 
                   <div className={styles.metaLine}>
-                    <span className={styles.metaLabel}>上映日期:</span>
+                    <span className={styles.metaLabel}>上映:</span>
                     <span className={styles.metaValue}>
                       {previewDetail?.releaseDate || selectedCandidate.releaseDate || previewDetail?.year || selectedCandidate.year || "暂无"}
                     </span>
                     <span className={styles.metaLabel} style={{ marginLeft: 16 }}>导演:</span>
                     <span className={styles.metaValue}>
-                      {previewDetail?.director ? (
-                        <Text strong style={{ color: "var(--ant-color-text)" }}>
-                          {previewDetail.director}
-                        </Text>
-                      ) : (
-                        "暂无"
-                      )}
+                      {previewDetail?.director ? <Text strong style={{ color: "var(--ant-color-text)" }}>{previewDetail.director}</Text> : "暂无"}
                     </span>
                   </div>
 
                   <div className={styles.metaLine}>
-                    <span className={styles.metaLabel}>主演阵容:</span>
-                    <span
-                      className={styles.metaValue}
-                      style={{
-                        display: "-webkit-box",
-                        WebkitLineClamp: 1,
-                        WebkitBoxOrient: "vertical",
-                        overflow: "hidden",
-                      }}
-                    >
+                    <span className={styles.metaLabel}>主演:</span>
+                    <span className={styles.metaValue} style={{ display: "-webkit-box", WebkitLineClamp: 1, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
                       {previewDetail?.actor || "暂无"}
                     </span>
                   </div>
 
                   <div className={styles.metaLine}>
-                    <span className={styles.metaLabel}>分类标签:</span>
+                    <span className={styles.metaLabel}>标签:</span>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                       {previewDetail?.classTag ? (
                         previewDetail.classTag.split(/[,/]/).map((tag: string) => (
-                          <Tag key={tag} color="cyan" style={{ margin: 0, fontSize: 11, padding: "0 5px" }}>
-                            {tag.trim()}
-                          </Tag>
+                          <Tag key={tag} color="cyan" style={{ margin: 0, fontSize: 11, padding: "0 5px" }}>{tag.trim()}</Tag>
                         ))
-                      ) : (
-                        <span className={styles.metaValue}>暂无</span>
-                      )}
+                      ) : <span className={styles.metaValue}>暂无</span>}
                     </div>
                   </div>
 
-                  {/* 横版幻灯背景（16:9缩略图，点击可全屏查看大图） */}
                   <div className={styles.metaLine} style={{ alignItems: "center", marginTop: 2 }}>
-                    <span className={styles.metaLabel}>横版背景:</span>
+                    <span className={styles.metaLabel}>背景:</span>
                     {previewDetail?.pictureSlide || selectedCandidate.backdrop ? (
                       <div className={styles.backdropThumbWrapper}>
                         <AntImage
                           src={previewDetail?.pictureSlide || selectedCandidate.backdrop}
                           fallback={FALLBACK_IMG}
-                          alt="横版幻灯背景"
-                          preview={{ mask: "点击看大图" }}
+                          alt="背景图"
+                          preview={{ mask: "查看" }}
                           width={128}
                           height={72}
                           style={{ objectFit: "cover", width: "100%", height: "100%" }}
@@ -497,22 +435,19 @@ export default function TmdbModal({
                       </div>
                     ) : (
                       <span className={styles.metaValue} style={{ color: "var(--ant-color-text-tertiary)" }}>
-                        TMDB 暂未收录该影视横版背景
+                        暂无背景图
                       </span>
                     )}
                   </div>
 
                   <div className={styles.previewOverview}>
-                    {previewDetail?.content || selectedCandidate.overview || "暂无剧情简介"}
+                    {previewDetail?.content || selectedCandidate.overview || "暂无简介"}
                   </div>
                 </div>
               </div>
 
-              {/* 覆盖字段选择 */}
               <div className={styles.fieldsSection}>
-                <div className={styles.fieldsTitle}>
-                  {onPrefill ? "选择需要填充至表单的元数据字段：" : "选择需要覆盖落库的元数据字段："}
-                </div>
+                <div className={styles.fieldsTitle}>同步字段</div>
                 <Checkbox.Group
                   options={FIELD_OPTIONS}
                   value={selectedFields}

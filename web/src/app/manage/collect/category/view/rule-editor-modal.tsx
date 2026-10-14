@@ -77,7 +77,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
             style={{ marginBottom: 16 }}
             title="发现冲突规则"
             description={
-              <Space direction="vertical" size={4}>
+              <Space orientation="vertical" size={4}>
                 {conflictRules.map((item) => (
                   <div key={item.id}>
                     #{item.id} {item.group}/{item.raw} · 目标值：{item.target || "未设置"} · 匹配方式：
@@ -108,7 +108,7 @@ export default function RuleEditorModal(props: RuleEditorModalProps) {
             {!regexPreview.valid ? (
               <Alert type="error" showIcon title={`正则无效：${regexPreview.error}`} />
             ) : (
-              <Space direction="vertical" size={12} style={{ width: "100%" }}>
+              <Space orientation="vertical" size={12} style={{ width: "100%" }}>
                 <div className={styles.previewTags}>
                   {regexPreviewSamples.map((sample) => {
                     const matched = regexPreview.matches.includes(sample);

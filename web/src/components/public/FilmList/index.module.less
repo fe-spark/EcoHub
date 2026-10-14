@@ -55,8 +55,8 @@
         }
       }
 
-      .categoryBadge,
-      .topRightBadges {
+      .posterTopBadges,
+      .posterBottom {
         opacity: 0;
       }
     }
@@ -147,11 +147,23 @@
       transparent 80%);
 }
 
-/* 左上角分类/题材徽标 */
-.categoryBadge {
+/* 顶部标签行：Flex 左右两端对齐，彻底杜绝绝对定位重叠 */
+.posterTopBadges {
   position: absolute;
   top: 8px;
   left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+/* 左上角分类/题材徽标 */
+.categoryBadge {
   background: linear-gradient(135deg, #fa8c16 0%, #fa541c 100%);
   color: #ffffff;
   padding: 1.5px 7px;
@@ -159,28 +171,16 @@
   font-size: 10.5px;
   font-weight: 700;
   line-height: 1.25;
-  z-index: 2;
   box-shadow: 0 2px 8px rgba(250, 140, 22, 0.38);
-  pointer-events: none;
-  max-width: 60%;
+  min-width: 0;
+  max-width: 70%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex-shrink: 1;
 }
 
-/* 右上角徽标组合容器：评分 + 状态 */
-.topRightBadges {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  z-index: 2;
-  pointer-events: none;
-  max-width: calc(100% - 64px);
-}
-
+/* 右上角评分徽标 */
 .scoreBadge {
   display: inline-flex;
   align-items: center;
@@ -197,6 +197,7 @@
   line-height: 1.25;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   flex-shrink: 0;
+  margin-left: auto;
 
   .scoreIcon {
     font-size: 9.5px;
@@ -204,21 +205,37 @@
   }
 }
 
-.remarkBadge {
-  background: rgba(15, 23, 42, 0.72);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+/* 海报底部流媒体沉浸式渐变栏与更新状态 */
+.posterBottom {
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 42px;
+  background: linear-gradient(
+    180deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.38) 45%,
+    rgba(0, 0, 0, 0.78) 100%
+  );
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 8px 6px;
+  z-index: 2;
+  pointer-events: none;
+  transition: opacity 0.25s ease;
+}
+
+.bottomRemark {
   color: #ffffff;
-  padding: 1.5px 6.5px;
-  border-radius: 5px;
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
   line-height: 1.25;
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: 0.2px;
 }
 
 /* Hover 浮层：沉浸式磨砂遮罩 + 片名 + 看点 + 底部弹出【立即播放】大按钮 */
@@ -348,18 +365,17 @@
     border-radius: 8px;
   }
 
-  .categoryBadge {
+  .posterTopBadges {
     top: 5px;
     left: 5px;
+    right: 5px;
+    gap: 4px;
+  }
+
+  .categoryBadge {
     padding: 1px 5px;
     font-size: 9.5px;
     border-radius: 4px;
-  }
-
-  .topRightBadges {
-    top: 5px;
-    right: 5px;
-    gap: 3px;
   }
 
   .scoreBadge {
@@ -367,10 +383,13 @@
     font-size: 9px;
   }
 
-  .remarkBadge {
-    padding: 1px 5px;
-    font-size: 9px;
-    border-radius: 4px;
+  .posterBottom {
+    height: 32px;
+    padding: 0 6px 4px;
+  }
+
+  .bottomRemark {
+    font-size: 10px;
   }
 
   .infoLine {

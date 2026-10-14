@@ -11,6 +11,7 @@ export type BannerRecord = {
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
+  area?: string;
   score?: number;
   hits?: number;
   blurb?: string;
@@ -18,7 +19,14 @@ export type BannerRecord = {
   director?: string;
   isScraped?: boolean;
   tmdbId?: number;
+  source?: string;
+  isPinned?: boolean;
 };
+
+export interface BannerSnapshot {
+  formValues: BannerFormValues;
+  selectedFilm: FilmOption | null;
+}
 
 export const MAX_BANNER_COUNT = 12;
 
@@ -48,6 +56,8 @@ export type FilmOption = {
   label: string;
   value: number;
   isScraped?: boolean;
+  score?: number;
+  hits?: number;
 };
 
 export type EditorMode = "create" | "edit";

@@ -13,7 +13,6 @@ import {
   ReloadOutlined,
   EditOutlined,
   DeleteOutlined,
-  AimOutlined,
   FireOutlined,
   CompassOutlined,
   UndoOutlined,
@@ -100,8 +99,12 @@ export function useFilmColumns({
               {record.cName}
             </Tag>
             {record.isScraped && (
-              <Tooltip title={record.tmdbId ? `已匹配 TMDB (ID: ${record.tmdbId})` : "已关联 TMDB 刮削数据"}>
-                <Tag color="#722ed1" style={{ borderRadius: 4, flexShrink: 0, cursor: "default" }}>
+              <Tooltip title={record.tmdbId ? `TMDB: ${record.tmdbId}` : "已刮削"}>
+                <Tag
+                  color="#722ed1"
+                  style={{ borderRadius: 4, flexShrink: 0, cursor: tmdbEnabled && canWrite ? "pointer" : "default" }}
+                  onClick={() => tmdbEnabled && canWrite && handleScrapeFilm(record)}
+                >
                   已刮削
                 </Tag>
               </Tooltip>
@@ -166,24 +169,11 @@ export function useFilmColumns({
         key: "action",
         align: "center",
         fixed: "right",
+        width: tmdbEnabled ? 180 : 120,
         render: (_, record) => (
           <Space size={8}>
-            <Tooltip title="打开播放页">
-              <Button
-                type="primary"
-                shape="circle"
-                size="small"
-                icon={<AimOutlined />}
-                onClick={() =>
-                  window.open(
-                    resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
-                    "_blank",
-                  )
-                }
-              />
-            </Tooltip>
             {tmdbEnabled && (
-              <Tooltip title="TMDB 刮削">
+              <Tooltip title="刮削">
                 <Button
                   type="primary"
                   shape="circle"
@@ -195,27 +185,7 @@ export function useFilmColumns({
                 />
               </Tooltip>
             )}
-            {record.isScraped && handleRevertScrape && (
-              <Popconfirm
-                title="还原该影片的 TMDB 刮削？"
-                description="将撤销 TMDB 覆盖，恢复为采集站原始数据。"
-                okText="确定还原"
-                cancelText="取消"
-                onConfirm={() => handleRevertScrape(record.mid)}
-              >
-                <Tooltip title="还原刮削（恢复采集站原始数据）">
-                  <Button
-                    type="primary"
-                    shape="circle"
-                    size="small"
-                    style={{ background: "#fa8c16", borderColor: "#fa8c16" }}
-                    icon={<UndoOutlined />}
-                    disabled={!canWrite}
-                  />
-                </Tooltip>
-              </Popconfirm>
-            )}
-            <Tooltip title="同步更新">
+            <Tooltip title="更新">
               <Button
                 type="primary"
                 shape="circle"
@@ -230,7 +200,7 @@ export function useFilmColumns({
                 onClick={() => handleUpdateSingle(record.mid)}
               />
             </Tooltip>
-            <Tooltip title="修改影视">
+            <Tooltip title="编辑">
               <Button
                 type="primary"
                 shape="circle"
@@ -241,8 +211,41 @@ export function useFilmColumns({
                 onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
               />
             </Tooltip>
+            {tmdbEnabled && (
+              record.isScraped && canWrite ? (
+                <Popconfirm
+                  title="确定还原刮削？"
+                  okText="还原"
+                  cancelText="取消"
+                  onConfirm={() => handleRevertScrape?.(record.mid)}
+                >
+                  <Tooltip title="还原刮削">
+                    <Button
+                      type="primary"
+                      shape="circle"
+                      size="small"
+                      style={{ background: "#fa8c16", borderColor: "#fa8c16" }}
+                      icon={<UndoOutlined />}
+                    />
+                  </Tooltip>
+                </Popconfirm>
+              ) : (
+                <Tooltip title="还原刮削">
+                  <span>
+                    <Button
+                      shape="circle"
+                      size="small"
+                      disabled
+                      icon={<UndoOutlined />}
+                    />
+                  </span>
+                </Tooltip>
+              )
+            )}
             <Popconfirm
-              title="删除此影片？"
+              title="确定删除？"
+              okText="确定"
+              cancelText="取消"
               onConfirm={() => handleDelFilm(record.mid || record.ID)}
             >
               <Tooltip title="删除">

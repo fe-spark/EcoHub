@@ -23,7 +23,7 @@ type TMDBService struct{}
 var TMDBSvc = new(TMDBService)
 
 const (
-	httpTimeout = 15 * time.Second
+	httpTimeout = 8 * time.Second
 )
 
 var (
@@ -35,12 +35,14 @@ var (
 	noiseRegexes = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\[.*?\]`),
 		regexp.MustCompile(`(?i)【.*?】`),
-		regexp.MustCompile(`(?i)[（(]?\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray)\b[）)]?`),
+		regexp.MustCompile(`(?i)[（(]?\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray|uhd|remux|h264|h265|x264|x265|hevc|aac)\b[）)]?`),
 		regexp.MustCompile(`(?i)[0-9]+(帧|fps)`),
-		regexp.MustCompile(`(?i)[-_—·\s]*(普通话版|普通话|国粤双语|国语版|国语|粤语版|粤语|原声版|中配版|中配|配音版|译制版|重制版|重置版|真人版|剧场版|电影版|特别篇)`),
-		regexp.MustCompile(`(?i)[-_—·\s]*(动态漫画|动态漫|有声漫|短剧|微短剧|竖屏剧)`),
-		regexp.MustCompile(`(?i)(中文字幕|中英双字|双语字幕|抢先版|修复版|加长版|无删减|未删减)`),
-		regexp.MustCompile(`(?i)(第[0-9一二三四五六七八九十]+[集期话]|更新至[0-9]+[集期话]|全[0-9]+[集期话]|完结|连载中)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(预告片|预告|先导片|先导预告|片花|花絮|特辑|彩蛋|幕后|采访|纯享版|精编版|精华版|速看版|解说版|正片)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]+(trailer|teaser|pv|preview|sp)\b`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(普通话版|普通话|国粤双语|国语版|国语|粤语版|粤语|英语版|原声版|中配版|中配|配音版|译制版|重制版|重置版|真人版|剧场版|电影版|特别篇)`),
+		regexp.MustCompile(`(?i)[-_—·\s\x{3000}]*(动态漫画|动态漫|有声漫|短剧|微短剧|竖屏剧)`),
+		regexp.MustCompile(`(?i)(中文字幕|中英双字|双语字幕|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版|导演剪辑版|公映版)`),
+		regexp.MustCompile(`(?i)(第[0-9一二三四五六七八九十]+[集期话]|更新至[0-9]+[集期话]|全[0-9]+[集期话]|完结|连载中|(Episode|EP)[0-9]+)`),
 	}
 	yearRegex          = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
 	emptyBracketsRegex = regexp.MustCompile(`[（(]\s*[）)]|[【\[]\s*[】\]]`)
@@ -62,9 +64,9 @@ func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
 	// 清理残留的空括号
 	s = emptyBracketsRegex.ReplaceAllString(s, " ")
 
-	// 清洗标点与多余空格
-	s = strings.Trim(s, " -_·—:：")
-	s = regexp.MustCompile(`\s+`).ReplaceAllString(s, " ")
+	// 清洗标点与多余空格（包括半角和全角中文空格）
+	s = strings.Trim(s, " \t\r\n\u3000-_·—:：.~～〜!！?？")
+	s = regexp.MustCompile(`[\s\x{3000}]+`).ReplaceAllString(s, " ")
 	return s, extractedYear
 }
 
@@ -168,24 +170,22 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能，请前往「系统设置 → 刮削配置」完成设置")
 	}
 
-	searchQuery := strings.TrimSpace(query)
+	rawQuery := strings.TrimSpace(query)
+	searchQuery := rawQuery
 	var detectedYear string
 	if cleanNoise {
 		searchQuery, detectedYear = CleanKeywordForSearch(query)
 		if searchQuery == "" {
-			searchQuery = strings.TrimSpace(query)
+			searchQuery = rawQuery
 		}
 	}
 	year = strings.TrimSpace(year)
+	if year == "" && detectedYear != "" {
+		year = detectedYear
+	}
 
 	client := getHTTPClient()
-	var endpoint string
-	qVals := url.Values{}
-	qVals.Set("api_key", cfg.ApiKey)
-	qVals.Set("language", cfg.Language)
-	qVals.Set("query", searchQuery)
-	qVals.Set("page", "1")
-	qVals.Set("include_adult", "false")
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
 
 	doFetch := func(targetEndpoint string, targetQVals url.Values) ([]rawTMDBItem, error) {
 		reqURL := fmt.Sprintf("%s%s?%s", tmdbAPIBaseURL, targetEndpoint, targetQVals.Encode())
@@ -214,36 +214,89 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 		return searchResp.Results, nil
 	}
 
-	var (
-		results []rawTMDBItem
-		err     error
-	)
+	doSearchOnce := func(kw, targetYear string) ([]model.TMDBCandidate, error) {
+		kw = strings.TrimSpace(kw)
+		if kw == "" {
+			return nil, nil
+		}
+		qVals := url.Values{}
+		qVals.Set("api_key", cfg.ApiKey)
+		qVals.Set("language", cfg.Language)
+		qVals.Set("query", kw)
+		qVals.Set("page", "1")
+		qVals.Set("include_adult", "false")
 
-	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
-	switch mediaType {
-	case "movie":
-		endpoint = "/search/movie"
-		if year != "" {
-			qVals.Set("year", year)
+		var endpoint string
+		switch mediaType {
+		case "movie":
+			endpoint = "/search/movie"
+			if targetYear != "" {
+				qVals.Set("year", targetYear)
+			}
+		case "tv":
+			endpoint = "/search/tv"
+			if targetYear != "" {
+				qVals.Set("first_air_date_year", targetYear)
+			}
+		default:
+			endpoint = "/search/multi"
 		}
-		results, err = doFetch(endpoint, qVals)
-	case "tv":
-		endpoint = "/search/tv"
-		if year != "" {
-			qVals.Set("first_air_date_year", year)
+
+		rawItems, err := doFetch(endpoint, qVals)
+		if err != nil {
+			return nil, err
 		}
-		results, err = doFetch(endpoint, qVals)
-	default:
-		endpoint = "/search/multi"
-		results, err = doFetch(endpoint, qVals)
+		return parseCandidates(rawItems, mediaType, targetYear, cfg.ImageDomain), nil
 	}
 
+	// 1. 精准阶段：去噪清洗词 + 目标年份
+	candidates, err := doSearchOnce(searchQuery, year)
 	if err != nil {
 		return nil, err
 	}
 
+	// 2. 容错阶段：若指定年份未搜到，自动去掉年份限制重试
+	if len(candidates) == 0 && year != "" {
+		candidates, _ = doSearchOnce(searchQuery, "")
+	}
+
+	// 3. 降级阶段：若去噪词未命中且包含分隔符，尝试按空格或标点提取首个主词
+	if len(candidates) == 0 {
+		for _, sep := range []string{" ", "-", "_", "：", ":", "·"} {
+			if idx := strings.Index(searchQuery, sep); idx > 0 {
+				primary := strings.TrimSpace(searchQuery[:idx])
+				if len([]rune(primary)) >= 2 && primary != searchQuery {
+					candidates, _ = doSearchOnce(primary, "")
+					if len(candidates) > 0 {
+						break
+					}
+				}
+			}
+		}
+	}
+
+	// 4. 兜底阶段：若仍未搜到且 rawQuery 与清洗后不同，使用 rawQuery 兜底
+	if len(candidates) == 0 && rawQuery != searchQuery {
+		candidates, _ = doSearchOnce(rawQuery, "")
+	}
+
+	// 当未显式指定年份，但搜索片名中包含检测出的年份时，优先将匹配该年份的候选条目排在前面
+	if year == "" && detectedYear != "" && len(candidates) > 1 {
+		sort.SliceStable(candidates, func(i, j int) bool {
+			matchI := candidates[i].Year == detectedYear
+			matchJ := candidates[j].Year == detectedYear
+			if matchI && !matchJ {
+				return true
+			}
+			return false
+		})
+	}
+
+	return candidates, nil
+}
+
+func parseCandidates(results []rawTMDBItem, mediaType, filterYear, imagePrefix string) []model.TMDBCandidate {
 	candidates := make([]model.TMDBCandidate, 0, len(results))
-	imagePrefix := cfg.ImageDomain
 	for _, item := range results {
 		mType := item.MediaType
 		if mType == "" {
@@ -270,16 +323,15 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 			y = relDate[:4]
 		}
 
-		// 用户显式指定了年份过滤条件时，容差 ±1 年（采集站年份与 TMDB 首播年份常有 1 年偏差）
-		if year != "" && y != "" {
+		if filterYear != "" && y != "" {
 			candY, err1 := strconv.Atoi(y)
-			filterY, err2 := strconv.Atoi(year)
+			filterY, err2 := strconv.Atoi(filterYear)
 			if err1 == nil && err2 == nil {
 				diff := candY - filterY
 				if diff < -1 || diff > 1 {
 					continue
 				}
-			} else if y != year {
+			} else if y != filterYear {
 				continue
 			}
 		}
@@ -305,20 +357,7 @@ func (s *TMDBService) searchInternal(query, year, mediaType string, cleanNoise b
 			Overview:      item.Overview,
 		})
 	}
-
-	// 当未显式指定年份，但搜索片名中包含检测出的年份时，优先将匹配该年份的候选条目排在前面
-	if year == "" && detectedYear != "" && len(candidates) > 1 {
-		sort.SliceStable(candidates, func(i, j int) bool {
-			matchI := candidates[i].Year == detectedYear
-			matchJ := candidates[j].Year == detectedYear
-			if matchI && !matchJ {
-				return true
-			}
-			return false
-		})
-	}
-
-	return candidates, nil
+	return candidates
 }
 
 type tmdbCreditPerson struct {

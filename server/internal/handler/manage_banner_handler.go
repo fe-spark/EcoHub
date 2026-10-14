@@ -1,7 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"server/internal/model"
@@ -102,17 +104,35 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 	dto.Success(service.ManageSvc.GetBanners(), "排片卡组已保存并生效", c)
 }
 
-// BannerBatchScrape 一键批量对当前排片列表中缺失横图的影片进行 TMDB 刮削
+// BannerBatchScrape 一键批量对当前排片列表中缺失横图的影片进行 TMDB 刮削（支持 SSE 实时事件流）
 func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
-	result, err := service.ManageSvc.BatchScrapeBanners(c.Request.Context())
-	if err != nil {
-		dto.Failed("批量刮削失败: "+err.Error(), c)
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		dto.Failed("当前环境不支持流式推送", c)
 		return
 	}
-	dto.Success(gin.H{
-		"result":  result,
-		"banners": service.ManageSvc.GetBanners(),
-	}, fmt.Sprintf("批量刮削完成：已检查 %d 部，成功匹配 %d 部横版背景大图", result.TotalChecked, result.SuccessCount), c)
+
+	sendEvent := func(evt service.BatchScrapeProgressEvent) {
+		payload, err := json.Marshal(evt)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
+		flusher.Flush()
+	}
+
+	err := service.ManageSvc.BatchScrapeBannersStream(c.Request.Context(), sendEvent)
+	if err != nil {
+		sendEvent(service.BatchScrapeProgressEvent{
+			Event: "error",
+			Error: err.Error(),
+		})
+	}
 }
 
 // BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表
