@@ -2,9 +2,11 @@ package snapshot
 
 import (
 	"fmt"
-	"gorm.io/gorm"
 	"log"
+	"math/rand"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -179,7 +181,7 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
 }
 
-// GetSnapshotBannerCandidates 按排片策略、分类和采集站获取轮播候选。sourceID 为空时不限站。
+// GetSnapshotBannerCandidates 按排片策略、分类和采集站获取轮播候选（支持优质候选池随机抽样）。sourceID 为空时不限站。
 func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
@@ -207,7 +209,13 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 		}
 	}
 
-	results, err := scanListSnapshots(applyStrategy(query, true).Limit(limit))
+	// 扩大候选池范围（取前 30~50 部优质候选），在高质量池中随机抽选
+	poolLimit := limit * 4
+	if poolLimit < 30 {
+		poolLimit = 30
+	}
+
+	results, err := scanListSnapshots(applyStrategy(query, true).Limit(poolLimit))
 	if err != nil {
 		log.Println("[Snapshot] 获取轮播候选集异常:", err)
 		return []model.FilmListSnapshot{}
@@ -215,13 +223,31 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 	if len(results) == 0 && strategy == "score_random" {
 		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
 		fallback := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
-		results, err = scanListSnapshots(applyStrategy(fallback, false).Limit(limit))
+		results, err = scanListSnapshots(applyStrategy(fallback, false).Limit(poolLimit))
 		if err != nil {
 			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
 			return []model.FilmListSnapshot{}
 		}
 	}
-	return results
+
+	if len(results) <= limit {
+		return results
+	}
+
+	// 随机打散抽取 limit 部，保证每次排片均能呈现不同组合
+	indices := make([]int, len(results))
+	for i := range indices {
+		indices[i] = i
+	}
+	rand.Shuffle(len(indices), func(i, j int) {
+		indices[i], indices[j] = indices[j], indices[i]
+	})
+
+	picked := make([]model.FilmListSnapshot, limit)
+	for i := 0; i < limit; i++ {
+		picked[i] = results[indices[i]]
+	}
+	return picked
 }
 
 // GetSnapshotHDBackdropCandidates 获取已有高清横图的候选。sourceID 为空时不限站。

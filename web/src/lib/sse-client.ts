@@ -90,6 +90,22 @@ export async function fetchEventStream(
         }
       }
     }
+
+    if (buffer.trim()) {
+      for (const rawLine of buffer.trim().split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (line.startsWith("data:")) {
+          const rawData = line.slice(5).trim();
+          if (!rawData) continue;
+          try {
+            const parsed = JSON.parse(rawData);
+            onMessage?.(parsed, rawData);
+          } catch {
+            onMessage?.(rawData, rawData);
+          }
+        }
+      }
+    }
   } finally {
     reader.releaseLock();
   }

@@ -120,10 +120,10 @@ func (s *ManageService) SaveBanners(bl model.Banners) error {
 						bl[i].Poster = dispPic
 					}
 					dispSlide := snap.DisplayPictureSlide()
-					if dispSlide != "" {
+					if dispSlide != "" && dispSlide != dispPic {
 						bl[i].PictureSlide = dispSlide
-					} else if dispPic != "" {
-						bl[i].PictureSlide = dispPic
+					} else {
+						bl[i].PictureSlide = ""
 					}
 				}
 			}
