@@ -34,8 +34,16 @@ html[data-theme="dark"] .panelCard {
   gap: 12px;
 }
 
-.filterItem {
-  width: 160px;
+.sourceCategoryGroup {
+  display: inline-flex;
+}
+
+.sourceSelect {
+  width: 150px;
+}
+
+.categorySelect {
+  width: 150px;
 }
 
 .searchInput {
@@ -99,8 +107,17 @@ html[data-theme="dark"] .panelCard {
 }
 
 @media (max-width: 768px) {
+  .sourceCategoryGroup {
+    width: 100%;
+    display: flex;
+  }
+
+  .sourceSelect,
+  .categorySelect {
+    width: 50%;
+  }
+
   .searchInput,
-  .filterItem,
   .dateRange,
   .searchButton {
     width: 100%;

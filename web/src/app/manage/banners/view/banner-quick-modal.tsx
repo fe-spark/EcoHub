@@ -8,7 +8,6 @@ import {
   InputNumber,
   Radio,
   Space,
-  Alert,
 } from "antd";
 import { CompassOutlined, FireOutlined, StarOutlined, ClockCircleOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
@@ -93,30 +92,19 @@ export default function BannerQuickModal({
       title={
         <Space size={8}>
           <CompassOutlined style={{ color: "var(--ant-color-primary)" }} />
-          <span>一键快速排片</span>
+          <span>一键排片</span>
         </Space>
       }
       open={open}
       onCancel={onClose}
       onOk={handleSubmit}
       confirmLoading={submitting}
-      okText="开始排片"
+      okText="确定"
       cancelText="取消"
       width={480}
-      destroyOnClose
+      destroyOnHidden
     >
       <Form form={form} layout="vertical" initialValues={{ strategy: "hot", count: 6 }}>
-        <Alert
-          type="info"
-          showIcon
-          message={
-            tmdbEnabled
-              ? "根据指定分类与排序参数从片库快速生成轮播。排片完成后可在表格中自由调整排序，或进行 TMDB 刮削。"
-              : "根据指定分类与排序参数从片库快速生成轮播。排片完成后可在表格中自由调整排序。"
-          }
-          style={{ marginBottom: 16 }}
-        />
-
         <Form.Item
           name="strategy"
           label="排序策略"
@@ -138,12 +126,11 @@ export default function BannerQuickModal({
         <Form.Item
           name="categories"
           label="限定分类"
-          tooltip="留空表示不限分类，系统将从全部一级分类中均衡抽取；支持多选指定类别。"
         >
           <Select
             mode="multiple"
             allowClear
-            placeholder="全部分类（默认均衡抽取）"
+            placeholder="全部分类"
             options={categoryOptions}
             maxTagCount="responsive"
           />
@@ -153,7 +140,6 @@ export default function BannerQuickModal({
           name="count"
           label="排片数量"
           rules={[{ required: true, message: "请输入排片数量" }]}
-          tooltip={`推荐 6 ~ 8 部，上限 ${MAX_BANNER_COUNT} 部`}
         >
           <InputNumber min={1} max={MAX_BANNER_COUNT} style={{ width: "100%" }} />
         </Form.Item>

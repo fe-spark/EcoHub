@@ -40,6 +40,20 @@ import styles from "./index.module.less";
 const { RangePicker } = DatePicker;
 const { Text } = Typography;
 
+function flattenCategoryNodes(nodes: any[]): any[] {
+  const result: any[] = [];
+  const walk = (list: any[]) => {
+    for (const item of list) {
+      result.push(item);
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+      }
+    }
+  };
+  walk(nodes || []);
+  return result;
+}
+
 export default function FilmListPageView() {
   const router = useRouter();
   const { canWrite } = useManagePermission();
@@ -58,6 +72,7 @@ export default function FilmListPageView() {
     beginTime: "",
     endTime: "",
   });
+  const [tableSourceId, setTableSourceId] = useState<string>("");
   const [options, setOptions] = useState<any>({
     sources: [],
     defaultSourceId: "",
@@ -96,6 +111,7 @@ export default function FilmListPageView() {
               resp.data.params?.sourceId ||
               resp.data.options.currentSourceId ||
               resp.data.options.defaultSourceId;
+            setTableSourceId(activeSource || "");
             if (activeSource && !reqParams.sourceId) {
               setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
             }
@@ -113,19 +129,32 @@ export default function FilmListPageView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleSourceChange = (value?: string) => {
+  const handleSourceChange = async (value?: string) => {
     const nextSourceId = value || "";
-    const newParams = {
-      ...params,
+    setParams((prev: any) => ({
+      ...prev,
       sourceId: nextSourceId,
       pid: 0,
       cid: 0,
-    };
-    setParams(newParams);
+    }));
     setClassId(0);
-    const newPage = { ...page, current: 1 };
-    setPage(newPage);
-    void getFilmPage(newPage, newParams);
+
+    try {
+      const resp = await ApiGet("/manage/film/class/tree", {
+        scoped: 1,
+        sourceId: nextSourceId,
+      });
+      if (resp.code === 0 && resp.data) {
+        const rawTree = resp.data.children || [];
+        setOptions((prev: any) => ({
+          ...prev,
+          categoryTree: rawTree,
+          class: flattenCategoryNodes(rawTree),
+        }));
+      }
+    } catch {
+      // 联动选项更新异常静默处理
+    }
   };
 
   const handleClassChange = (value?: number) => {
@@ -146,9 +175,6 @@ export default function FilmListPageView() {
       }
     }
     setParams(newParams);
-    const newPage = { ...page, current: 1 };
-    setPage(newPage);
-    void getFilmPage(newPage, newParams);
   };
 
   const onSearch = () => {
@@ -231,10 +257,10 @@ export default function FilmListPageView() {
     async (mid: number) => {
       const resp = await ApiPost("/manage/tmdb/revert", { mid });
       if (resp.code === 0) {
-        message.success(resp.msg || "已成功还原为采集站原始数据！");
+        message.success(resp.msg || "已还原刮削");
         getFilmPage();
       } else {
-        message.error(resp.msg || "还原失败");
+        message.error(resp.msg || "还原刮削失败");
       }
     },
     [getFilmPage, message],
@@ -250,7 +276,7 @@ export default function FilmListPageView() {
     handleScrapeFilm,
     handleRevertScrape,
     tmdbEnabled,
-    activeSourceId: params.sourceId,
+    activeSourceId: tableSourceId || params.sourceId,
   });
 
   const categoryTreeData = useMemo(() => {
@@ -274,42 +300,41 @@ export default function FilmListPageView() {
 
   return (
     <div className={styles.pageStack}>
-      <ManagePageHeader
-        title="影片列表"
-        description="管理影片库存，支持片名、采集源、分类及更新日期筛选。"
-      />
+      <ManagePageHeader title="影片列表" />
 
       <Space size={[8, 8]} wrap className={styles.filterBar}>
-        <Select
-          placeholder="选择采集源"
-          className={styles.filterItem}
-          value={params.sourceId || undefined}
-          onChange={handleSourceChange}
-          options={options.sources?.map((s: any) => ({
-            label: s.name,
-            value: s.id,
-          }))}
-        />
+        <Space.Compact className={styles.sourceCategoryGroup}>
+          <Select
+            placeholder="采集源"
+            className={styles.sourceSelect}
+            value={params.sourceId || undefined}
+            onChange={handleSourceChange}
+            options={options.sources?.map((s: any) => ({
+              label: s.name,
+              value: s.id,
+            }))}
+          />
+          <TreeSelect
+            placeholder="分类"
+            className={styles.categorySelect}
+            value={classId || undefined}
+            onChange={handleClassChange}
+            treeData={categoryTreeData}
+            treeDefaultExpandAll
+            treeLine={{ showLeafIcon: false }}
+            popupMatchSelectWidth={false}
+            styles={{ popup: { root: { minWidth: 240, maxHeight: 380, overflow: "auto" } } }}
+            virtual={false}
+            allowClear
+          />
+        </Space.Compact>
         <Input
-          placeholder="搜索片名..."
+          placeholder="片名"
           value={params.name}
           onChange={(e) => setParams({ ...params, name: e.target.value })}
           className={styles.searchInput}
           allowClear
           onPressEnter={onSearch}
-        />
-        <TreeSelect
-          placeholder="选择分类"
-          className={styles.filterItem}
-          value={classId || undefined}
-          onChange={handleClassChange}
-          treeData={categoryTreeData}
-          treeDefaultExpandAll
-          treeLine={{ showLeafIcon: false }}
-          popupMatchSelectWidth={false}
-          dropdownStyle={{ minWidth: 240, maxHeight: 380, overflow: "auto" }}
-          virtual={false}
-          allowClear
         />
         <RangePicker
           showTime
@@ -336,7 +361,7 @@ export default function FilmListPageView() {
         size="middle"
         title={() => (
           <div className={styles.tableHeader}>
-            <div className={styles.tableTitle}>影片资源库</div>
+            <div className={styles.tableTitle}>影片列表</div>
             <Space size={[8, 8]} wrap className={styles.tableActions}>
               <Button
                 type="primary"
@@ -344,7 +369,7 @@ export default function FilmListPageView() {
                 disabled={!canWrite}
                 onClick={() => router.push("/manage/film/add")}
               >
-                新增影视
+                新增
               </Button>
             </Space>
           </div>
@@ -378,7 +403,6 @@ export default function FilmListPageView() {
           setCurrentScrapeFilm(null);
         }}
         onSuccess={() => getFilmPage()}
-        onRevert={handleRevertScrape}
       />
     </div>
   );

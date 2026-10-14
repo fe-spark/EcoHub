@@ -94,7 +94,7 @@ export default function CollectSourceCard({
           <div className={styles.cardTitleRow}>
             <span className={styles.cardName}>{record.name}</span>
             {record.isPrimary ? (
-              <Tag color="gold" bordered={false} style={{ marginInlineEnd: 0 }}>
+              <Tag color="gold" variant="filled" style={{ marginInlineEnd: 0 }}>
                 首选站
               </Tag>
             ) : null}
@@ -104,12 +104,12 @@ export default function CollectSourceCard({
               </span>
             ) : null}
             {record.format === "xml" ? (
-              <Tag color="purple" bordered={false} style={{ marginInlineEnd: 0 }}>
+              <Tag color="purple" variant="filled" style={{ marginInlineEnd: 0 }}>
                 XML
               </Tag>
             ) : null}
             {record.categoryReady === false ? (
-              <Tag color="orange" bordered={false} style={{ marginInlineEnd: 0 }}>
+              <Tag color="orange" variant="filled" style={{ marginInlineEnd: 0 }}>
                 缺分类
               </Tag>
             ) : null}
@@ -175,7 +175,7 @@ export default function CollectSourceCard({
                   <Tag
                     icon={globalSpiderProxyReady ? <GlobalOutlined /> : <DisconnectOutlined />}
                     color={globalSpiderProxyReady ? "cyan" : "default"}
-                    bordered={false}
+                    variant="filled"
                     style={{ marginInlineEnd: 0 }}
                   >
                     代理

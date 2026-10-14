@@ -58,6 +58,36 @@ func TestCleanKeywordForSearch(t *testing.T) {
 			expectedName: "Gotham Knights",
 			expectedYear: "",
 		},
+		{
+			input:        "异星战境 预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境   预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境　预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "异星战境 - 预告片",
+			expectedName: "异星战境",
+			expectedYear: "",
+		},
+		{
+			input:        "阿凡达：水之道 特辑 (2022)",
+			expectedName: "阿凡达：水之道",
+			expectedYear: "2022",
+		},
+		{
+			input:        "蜡笔小新：爆盛！功夫男孩.拉面大乱.",
+			expectedName: "蜡笔小新：爆盛！功夫男孩.拉面大乱",
+			expectedYear: "",
+		},
 	}
 
 	for _, tc := range tests {

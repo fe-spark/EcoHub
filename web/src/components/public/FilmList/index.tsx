@@ -185,23 +185,29 @@ function FilmCard({
             </div>
           )}
 
-          {/* 左上角：类型/题材徽标 */}
-          {categoryLabel && (
-            <span className={styles.categoryBadge}>{categoryLabel}</span>
-          )}
-
-          {/* 右上角：评分 + 状态徽标组合 */}
-          <div className={styles.topRightBadges}>
+          {/* 顶部标签行：Flex 左右两端对齐，彻底根除多徽标重叠 */}
+          <div className={styles.posterTopBadges}>
+            {categoryLabel ? (
+              <span className={styles.categoryBadge} title={categoryLabel}>
+                {categoryLabel}
+              </span>
+            ) : null}
             {scoreStr ? (
-              <span className={styles.scoreBadge}>
+              <span className={styles.scoreBadge} title={`评分: ${scoreStr}`}>
                 <StarFilled className={styles.scoreIcon} />
                 <span>{scoreStr}</span>
               </span>
             ) : null}
-            {remarks ? (
-              <span className={styles.remarkBadge}>{remarks}</span>
-            ) : null}
           </div>
+
+          {/* 右下角：流媒体沉浸式更新状态（底部自然微渐变，去除突兀色块标签） */}
+          {remarks ? (
+            <div className={styles.posterBottom}>
+              <span className={styles.bottomRemark} title={remarks}>
+                {remarks}
+              </span>
+            </div>
+          ) : null}
 
           {/* Hover 浮层：沉浸式磨砂浮层 + 简介 + 底部弹出【立即播放】大按钮 */}
           <div className={styles.overlay}>

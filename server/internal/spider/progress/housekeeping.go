@@ -26,8 +26,9 @@ func staleDuration() time.Duration {
 	return time.Duration(sec) * time.Second
 }
 
-func maybePurgeTerminal(now time.Time) {
+func maybePurgeTerminal(now time.Time) bool {
 	retain := retainDuration()
+	var purged bool
 	store.Range(func(key, value any) bool {
 		id, _ := key.(string)
 		state := value.(*progressState)
@@ -37,14 +38,17 @@ func maybePurgeTerminal(now time.Time) {
 		state.mu.RUnlock()
 		if terminal && now.Sub(updated) >= retain {
 			store.Delete(id)
+			purged = true
 		}
 		return true
 	})
+	return purged
 }
 
 func pruneStale() {
 	now := time.Now()
 	staleAfter := staleDuration()
+	var changed bool
 	store.Range(func(key, value any) bool {
 		id, _ := key.(string)
 		state := value.(*progressState)
@@ -58,6 +62,7 @@ func pruneStale() {
 				state.data.Status = StatusFailed
 				state.updated = now
 				state.mu.Unlock()
+				changed = true
 				log.Printf("[Spider] 进度超时清理 source=%s status=%s age=%s -> failed", id, status, age.Round(time.Second))
 				return true
 			}
@@ -65,13 +70,18 @@ func pruneStale() {
 		state.mu.Unlock()
 		return true
 	})
-	maybePurgeTerminal(now)
+	if maybePurgeTerminal(now) {
+		changed = true
+	}
+	if changed {
+		NotifyChange()
+	}
 }
 
 func StartHousekeeping() {
 	housekeepingOnce.Do(func() {
 		go func() {
-			ticker := time.NewTicker(30 * time.Second)
+			ticker := time.NewTicker(1 * time.Second)
 			defer ticker.Stop()
 			for range ticker.C {
 				pruneStale()
@@ -79,3 +89,4 @@ func StartHousekeeping() {
 		}()
 	})
 }
+

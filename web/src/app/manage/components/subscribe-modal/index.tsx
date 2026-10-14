@@ -152,7 +152,7 @@ export default function SubscribeModal(props: SubscribeModalProps) {
             <div key={item.key} className={styles.itemRow}>
               <div className={styles.itemLabel}>
                 <span>{item.title}</span>
-                <Tag bordered={false} style={{ margin: 0 }}>
+                <Tag variant="filled" style={{ margin: 0 }}>
                   {item.tag}
                 </Tag>
               </div>

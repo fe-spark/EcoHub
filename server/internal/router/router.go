@@ -127,6 +127,7 @@ func SetupRouter() *gin.Engine {
 		collect := manageRoute.Group(`/collect`)
 		{
 			collect.GET(`/list`, handler.CollectHd.FilmSourceList)
+			collect.GET(`/progress-stream`, handler.CollectHd.ProgressStream)
 			collect.GET(`/find`, handler.CollectHd.FindFilmSource)
 			collect.POST(`/test`, handler.CollectHd.FilmSourceTest)
 			collect.POST(`/add`, handler.CollectHd.FilmSourceAdd)

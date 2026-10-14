@@ -4,13 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
-	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
 	"server/internal/utils"
@@ -20,6 +19,21 @@ type BatchScrapeResult struct {
 	TotalChecked int `json:"totalChecked"`
 	MissingCount int `json:"missingCount"`
 	SuccessCount int `json:"successCount"`
+}
+
+// BatchScrapeProgressEvent 轮播批量刮削 SSE 进度事件模型
+type BatchScrapeProgressEvent struct {
+	Event        string        `json:"event"`                  // "start" | "progress" | "done" | "error"
+	TotalChecked int           `json:"totalChecked,omitempty"` // 总轮播检查数
+	MissingCount int           `json:"missingCount,omitempty"` // 缺失横图待刮削数
+	Current      int           `json:"current,omitempty"`      // 当前已处理完成数
+	Mid          int64         `json:"mid,omitempty"`          // 当前影片 MID
+	Name         string        `json:"name,omitempty"`         // 当前影片名称
+	Success      bool          `json:"success,omitempty"`      // 是否成功匹配刮削
+	Slide        string        `json:"slide,omitempty"`        // 刮削成功获取的横屏大图 URL
+	SuccessCount int           `json:"successCount,omitempty"` // 最终累计成功数
+	Banners      model.Banners `json:"banners,omitempty"`      // 最终最新的轮播完整列表
+	Error        string        `json:"error,omitempty"`        // 错误提示
 }
 
 type OneClickGenerateReq struct {
@@ -195,27 +209,41 @@ func (s *ManageService) SaveBannerDeck(bl model.Banners) error {
 	return s.SaveBanners(bl)
 }
 
-// BatchScrapeBanners 为当前手动排片列表中缺失真实横屏幻灯大图的影片执行一键批量 TMDB 刮削
-func (s *ManageService) BatchScrapeBanners(ctx context.Context) (BatchScrapeResult, error) {
+// BatchScrapeBannersStream 执行带 SSE 实时流式推送的轮播批量刮削
+func (s *ManageService) BatchScrapeBannersStream(ctx context.Context, onEvent func(BatchScrapeProgressEvent)) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	banners := repository.GetBanners()
-	result := BatchScrapeResult{
-		TotalChecked: len(banners),
-	}
 	if len(banners) == 0 {
-		return result, nil
+		if onEvent != nil {
+			onEvent(BatchScrapeProgressEvent{
+				Event:        "done",
+				TotalChecked: 0,
+				MissingCount: 0,
+				SuccessCount: 0,
+				Banners:      banners,
+			})
+		}
+		return nil
 	}
 
 	tmdbCfg := repository.GetTMDBConfig()
 	if !tmdbCfg.Enabled || strings.TrimSpace(tmdbCfg.ApiKey) == "" {
-		return result, fmt.Errorf("TMDB 刮削功能未启用或未配置 API Key，请先前往「系统设置 → 刮削配置」完成配置")
+		err := fmt.Errorf("TMDB 刮削功能未启用或未配置 API Key，请先前往「系统设置 → 刮削配置」完成配置")
+		if onEvent != nil {
+			onEvent(BatchScrapeProgressEvent{Event: "error", Error: err.Error()})
+		}
+		return err
 	}
 
 	version := filmsnapshot.GetActiveSnapshotVersion()
 	if version == "" {
-		return result, fmt.Errorf("当前系统无可用影片快照，请先采集影视数据")
+		err := fmt.Errorf("当前系统无可用影片快照，请先采集影视数据")
+		if onEvent != nil {
+			onEvent(BatchScrapeProgressEvent{Event: "error", Error: err.Error()})
+		}
+		return err
 	}
 
 	// 找出所有缺失横图的影片 MID
@@ -224,195 +252,149 @@ func (s *ManageService) BatchScrapeBanners(ctx context.Context) (BatchScrapeResu
 		if b.Mid <= 0 {
 			continue
 		}
-		// 无横图或横图仅为竖图兜底
 		hasRealSlide := b.PictureSlide != "" && b.PictureSlide != b.Picture && b.PictureSlide != b.Poster
 		if !hasRealSlide {
 			missingMids = append(missingMids, b.Mid)
 		}
 	}
 
-	result.MissingCount = len(missingMids)
+	if onEvent != nil {
+		onEvent(BatchScrapeProgressEvent{
+			Event:        "start",
+			TotalChecked: len(banners),
+			MissingCount: len(missingMids),
+		})
+	}
+
 	if len(missingMids) == 0 {
-		return result, nil
+		if onEvent != nil {
+			onEvent(BatchScrapeProgressEvent{
+				Event:        "done",
+				TotalChecked: len(banners),
+				MissingCount: 0,
+				SuccessCount: 0,
+				Banners:      s.GetBanners(),
+			})
+		}
+		return nil
 	}
 
 	snaps := filmsnapshot.GetSnapshotsByMidsOrdered(version, missingMids)
-	scrapedSuccessMids := make([]int64, 0, len(snaps))
 
-	scrapeCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	bannerMap := make(map[int64]model.Banner, len(banners))
+	for _, b := range banners {
+		if b.Mid > 0 {
+			bannerMap[b.Mid] = b
+		}
+	}
+
+	// 并发刮削：利用 semaphore 限制并发数为 4，全局硬超时 45s，单片超时 8s
+	scrapeCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+
+	var (
+		mu                 sync.Mutex
+		scrapedSuccessMids []int64
+		processedCount     int
+		wg                 sync.WaitGroup
+		sem                = make(chan struct{}, 4)
+	)
 
 	for _, snap := range snaps {
 		if scrapeCtx.Err() != nil {
 			break
 		}
-		updatedSnap, success, err := scrapeSingleFilmTMDB(scrapeCtx, snap)
-		if err == nil && success && updatedSnap != nil && updatedSnap.DisplayPictureSlide() != "" {
-			result.SuccessCount++
-			scrapedSuccessMids = append(scrapedSuccessMids, updatedSnap.Mid)
+		curSnap := snap
+		// 若快照原始数据缺失年份或分类，融合当前轮播卡组中管理员配置的真实年份与分类
+		if b, ok := bannerMap[curSnap.Mid]; ok {
+			if curSnap.Year <= 0 && b.Year > 0 {
+				curSnap.Year = b.Year
+			}
+			if curSnap.CName == "" && b.CName != "" {
+				curSnap.CName = b.CName
+			}
 		}
+
+		select {
+		case sem <- struct{}{}:
+		case <-scrapeCtx.Done():
+			break
+		}
+
+		wg.Add(1)
+		go func(s model.FilmListSnapshot) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+
+			singleCtx, singleCancel := context.WithTimeout(scrapeCtx, 8*time.Second)
+			defer singleCancel()
+
+			updatedSnap, success, err := TMDBSvc.AutoScrapeFilm(singleCtx, s)
+			var slideUrl string
+			isSuccess := err == nil && success && updatedSnap != nil && updatedSnap.DisplayPictureSlide() != ""
+			if isSuccess {
+				slideUrl = updatedSnap.DisplayPictureSlide()
+			}
+
+			mu.Lock()
+			processedCount++
+			if isSuccess {
+				scrapedSuccessMids = append(scrapedSuccessMids, updatedSnap.Mid)
+			}
+			curProcessed := processedCount
+			mu.Unlock()
+
+			if onEvent != nil {
+				onEvent(BatchScrapeProgressEvent{
+					Event:   "progress",
+					Current: curProcessed,
+					Mid:     s.Mid,
+					Name:    s.Name,
+					Success: isSuccess,
+					Slide:   slideUrl,
+				})
+			}
+		}(curSnap)
 	}
 
+	wg.Wait()
+
+	var freshBanners model.Banners
 	if len(scrapedSuccessMids) > 0 {
-		// 增量发布快照，保证前台与后续读取即刻生效
 		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(scrapedSuccessMids...)
-
-		// 同步回填当前排片列表中的横图
-		liveData := filmrepo.LiveBannerSnapshotsByMIDs(scrapedSuccessMids)
-		for i := range banners {
-			if snap, ok := liveData[banners[i].Mid]; ok {
-				if slide := snap.DisplayPictureSlide(); slide != "" {
-					banners[i].PictureSlide = slide
-				}
-			}
-		}
-		_ = repository.SaveBanners(banners)
 		support.ClearIndexPageCache()
-		log.Printf("[BatchScrapeBanners] 一键批量刮削成功更新 %d 部影片横版大图", len(scrapedSuccessMids))
+		freshBanners = OverlayBannerLiveRemarks(banners)
+		_ = repository.SaveBanners(freshBanners)
+		log.Printf("[BatchScrapeBannersStream] 轮播批量刮削成功更新 %d 部影片横屏大图", len(scrapedSuccessMids))
+	} else {
+		freshBanners = s.GetBanners()
 	}
 
-	return result, nil
+	if onEvent != nil {
+		onEvent(BatchScrapeProgressEvent{
+			Event:        "done",
+			TotalChecked: len(banners),
+			MissingCount: len(missingMids),
+			SuccessCount: len(scrapedSuccessMids),
+			Banners:      freshBanners,
+		})
+	}
+
+	return nil
 }
 
-// scrapeSingleFilmTMDB 针对单个影片进行 TMDB 智能匹配并写入元数据
-func scrapeSingleFilmTMDB(ctx context.Context, snap model.FilmListSnapshot) (*model.FilmListSnapshot, bool, error) {
-	select {
-	case <-ctx.Done():
-		return nil, false, ctx.Err()
-	default:
-	}
-
-	rawName := strings.TrimSpace(snap.Name)
-	cleanedTarget, extractedYear := CleanKeywordForSearch(rawName)
-	if cleanedTarget == "" {
-		cleanedTarget = rawName
-	}
-	snapYear := snap.Year
-	if snapYear == 0 && extractedYear != "" {
-		if y, err := strconv.ParseInt(extractedYear, 10, 64); err == nil {
-			snapYear = y
+// BatchScrapeBanners 为当前手动排片列表中缺失真实横屏幻灯大图的影片执行一键批量 TMDB 刮削
+func (s *ManageService) BatchScrapeBanners(ctx context.Context) (BatchScrapeResult, error) {
+	var result BatchScrapeResult
+	err := s.BatchScrapeBannersStream(ctx, func(evt BatchScrapeProgressEvent) {
+		if evt.Event == "start" {
+			result.TotalChecked = evt.TotalChecked
+			result.MissingCount = evt.MissingCount
+		} else if evt.Event == "done" {
+			result.SuccessCount = evt.SuccessCount
 		}
-	}
-
-	isTVCategory := strings.Contains(snap.CName, "剧") || strings.Contains(snap.CName, "动漫")
-	isMovieCategory := strings.Contains(snap.CName, "影") || strings.Contains(snap.CName, "片")
-
-	candidates, err := TMDBSvc.Search(cleanedTarget, "", "")
-	if err != nil {
-		log.Printf("[BannerScrape] TMDB 请求异常 mid=%d 关键词=%q: %v", snap.Mid, cleanedTarget, err)
-		return nil, false, err
-	}
-
-	if len(candidates) == 0 {
-		return nil, false, nil
-	}
-
-	var bestCandidate *model.TMDBCandidate
-	bestScore := -1
-
-	for i := range candidates {
-		c := &candidates[i]
-		hasPoster := strings.TrimSpace(c.Poster) != ""
-		hasBackdrop := strings.TrimSpace(c.Backdrop) != ""
-		if !hasPoster && !hasBackdrop {
-			continue
-		}
-
-		cleanedCand, _ := CleanKeywordForSearch(c.Title)
-		candTitle := strings.TrimSpace(c.Title)
-		candOrig := strings.TrimSpace(c.OriginalTitle)
-		exactTarget := strings.TrimSpace(cleanedTarget)
-
-		mainCandTitle := extractCleanTitle(candTitle)
-		mainExactTarget := extractCleanTitle(exactTarget)
-
-		nameExact := strings.EqualFold(candTitle, exactTarget) ||
-			strings.EqualFold(candOrig, exactTarget) ||
-			(cleanedCand != "" && strings.EqualFold(cleanedCand, exactTarget)) ||
-			strings.EqualFold(mainCandTitle, mainExactTarget) ||
-			strings.EqualFold(candTitle, rawName) ||
-			strings.EqualFold(candOrig, rawName)
-
-		if !nameExact {
-			continue
-		}
-
-		score := 100
-		if isTVCategory && c.MediaType == "tv" {
-			score += 30
-		} else if isMovieCategory && c.MediaType == "movie" {
-			score += 30
-		}
-
-		if snapYear > 0 && c.Year != "" {
-			candY, _ := strconv.Atoi(c.Year)
-			if candY > 0 {
-				diff := int(snapYear) - candY
-				if diff == 0 {
-					score += 30
-				} else if diff == 1 || diff == -1 {
-					score += 15
-				}
-			}
-		}
-
-		if hasPoster {
-			score += 20
-		}
-		if hasBackdrop {
-			score += 30 // 横版大图高优先级加权
-		}
-		score += int(c.VoteAverage * 2)
-
-		if score > bestScore {
-			bestScore = score
-			bestCandidate = c
-		}
-	}
-
-	if bestCandidate == nil {
-		return nil, false, nil
-	}
-
-	fields := []string{"poster"}
-	if strings.TrimSpace(bestCandidate.Backdrop) != "" {
-		fields = append(fields, "backdrop")
-	}
-
-	applyReq := model.TMDBApplyReq{
-		Mid:       snap.Mid,
-		TmdbID:    bestCandidate.ID,
-		MediaType: bestCandidate.MediaType,
-		Fields:    fields,
-	}
-
-	if _, err := TMDBSvc.ApplyDetailWithOptions(applyReq, false); err != nil {
-		log.Printf("[BannerScrape] TMDB 应用详情失败 mid=%d tmdbId=%d: %v", snap.Mid, bestCandidate.ID, err)
-		return nil, false, err
-	}
-
-	updatedSnap := snap
-	if strings.TrimSpace(bestCandidate.Poster) != "" {
-		updatedSnap.Picture = strings.TrimSpace(bestCandidate.Poster)
-		updatedSnap.CustomPicture = strings.TrimSpace(bestCandidate.Poster)
-		updatedSnap.IsCustomPicture = true
-	}
-	if strings.TrimSpace(bestCandidate.Backdrop) != "" {
-		updatedSnap.PictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
-		updatedSnap.CustomPictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
-	}
-
-	log.Printf("[BannerScrape] 影片 TMDB 高清数据已保存 mid=%d 片名=%q (横图=%s)",
-		snap.Mid, snap.Name, updatedSnap.DisplayPictureSlide())
-	return &updatedSnap, true, nil
-}
-
-func extractCleanTitle(s string) string {
-	s = strings.TrimSpace(s)
-	for _, sep := range []string{"（", "(", "【", "["} {
-		if idx := strings.Index(s, sep); idx > 0 {
-			s = strings.TrimSpace(s[:idx])
-		}
-	}
-	return s
+	})
+	return result, err
 }

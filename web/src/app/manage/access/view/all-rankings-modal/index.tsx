@@ -121,7 +121,7 @@ export default function AllRankingsModal({
       onCancel={onClose}
       footer={null}
       width={760}
-      destroyOnClose
+      destroyOnHidden
       title={
         <div className={styles.headerTitle}>
           {isPlay ? (
