@@ -75,6 +75,7 @@ func SetupRouter() *gin.Engine {
 		}
 		systemLog := manageRoute.Group(`/system/logs`, middleware.AdminAccess())
 		{
+			systemLog.GET(`/stream`, handler.SystemLogHd.Stream)
 			systemLog.GET(`/delta`, handler.SystemLogHd.Delta)
 		}
 
@@ -89,7 +90,7 @@ func SetupRouter() *gin.Engine {
 			accessRoute.POST(`/clean`, middleware.AdminAccess(), handler.AccessHd.CleanData)
 		}
 
-		// 首页轮播管理 (手动排片 + 一键排片 + 手动/一键刮削)
+		// 首页轮播管理 (手动排片 + 一键排片 + 草稿刮削)
 		banner := manageRoute.Group(`banner`)
 		{
 			banner.GET(`/list`, handler.ManageHd.BannerList)
@@ -97,8 +98,10 @@ func SetupRouter() *gin.Engine {
 			banner.POST(`/update`, handler.ManageHd.BannerUpdate)
 			banner.POST(`/del`, handler.ManageHd.BannerDel)
 			banner.POST(`/save-deck`, handler.ManageHd.BannerSaveDeck)
+			banner.GET(`/quick-config`, handler.ManageHd.BannerQuickConfigGet)
+			banner.POST(`/quick-config`, handler.ManageHd.BannerQuickConfigSave)
 			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
-			banner.POST(`/batch-scrape`, handler.ManageHd.BannerBatchScrape)
+			banner.POST(`/preview-scrape`, handler.ManageHd.BannerPreviewScrape)
 		}
 
 		// 映射规则管理
@@ -139,6 +142,7 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
+			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
@@ -163,9 +167,9 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
 			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
 			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
-			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgress)
+			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgressStream)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
-			spiderRoute.POST(`/update/single`, handler.SpiderHd.SingleUpdateSpider)
+			spiderRoute.POST(`/update`, handler.SpiderHd.UpdateSpider)
 			spiderRoute.POST(`/stop-all`, handler.SpiderHd.StopAllTasks)
 		}
 
@@ -174,6 +178,7 @@ func SetupRouter() *gin.Engine {
 		{
 			filmRoute.POST(`/add`, handler.FilmHd.FilmAdd)
 			filmRoute.GET(`/search/list`, handler.FilmHd.FilmSearchPage)
+			filmRoute.GET(`/search/options`, handler.FilmHd.FilmSearchOptions)
 			filmRoute.POST(`/search/del`, handler.FilmHd.FilmDelete)
 
 			filmRoute.GET(`/class/tree`, handler.FilmHd.FilmClassTree)
@@ -190,6 +195,7 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.POST(`/config/update`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
 			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
+			tmdbRoute.POST(`/scrape`, handler.TMDBHd.Scrape)
 			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
 			tmdbRoute.POST(`/revert`, handler.TMDBHd.Revert)
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)

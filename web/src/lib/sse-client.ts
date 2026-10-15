@@ -3,7 +3,9 @@ export interface SSERequestOptions {
   body?: any;
   headers?: Record<string, string>;
   signal?: AbortSignal;
-  onMessage?: (data: any, raw: string) => void;
+  /** 响应成功、开始读流时调用一次 */
+  onOpen?: () => void;
+  onMessage?: (data: any, raw: string, event?: string) => void;
   onError?: (err: Error) => void;
 }
 
@@ -19,6 +21,7 @@ export async function fetchEventStream(
     body,
     headers = {},
     signal,
+    onOpen,
     onMessage,
     onError,
   } = options;
@@ -55,6 +58,7 @@ export async function fetchEventStream(
     throw err;
   }
 
+  onOpen?.();
   if (!response.body) {
     return;
   }
@@ -75,16 +79,20 @@ export async function fetchEventStream(
       for (const block of blocks) {
         const trimmed = block.trim();
         if (!trimmed) continue;
+        let event = "";
         for (const rawLine of trimmed.split(/\r?\n/)) {
           const line = rawLine.trim();
+          if (line.startsWith("event:")) {
+            event = line.slice(6).trim();
+          }
           if (line.startsWith("data:")) {
             const rawData = line.slice(5).trim();
             if (!rawData) continue;
             try {
               const parsed = JSON.parse(rawData);
-              onMessage?.(parsed, rawData);
+              onMessage?.(parsed, rawData, event);
             } catch {
-              onMessage?.(rawData, rawData);
+              onMessage?.(rawData, rawData, event);
             }
           }
         }
@@ -92,16 +100,20 @@ export async function fetchEventStream(
     }
 
     if (buffer.trim()) {
+      let event = "";
       for (const rawLine of buffer.trim().split(/\r?\n/)) {
         const line = rawLine.trim();
+        if (line.startsWith("event:")) {
+          event = line.slice(6).trim();
+        }
         if (line.startsWith("data:")) {
           const rawData = line.slice(5).trim();
           if (!rawData) continue;
           try {
             const parsed = JSON.parse(rawData);
-            onMessage?.(parsed, rawData);
+            onMessage?.(parsed, rawData, event);
           } catch {
-            onMessage?.(rawData, rawData);
+            onMessage?.(rawData, rawData, event);
           }
         }
       }

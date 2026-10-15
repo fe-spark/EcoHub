@@ -65,9 +65,14 @@ type TMDBApplyReq struct {
 	Fields    []string `json:"fields"`    // 需覆盖的字段列表: "poster", "backdrop", "overview", "actor", "director", "year", "score", "tag"
 }
 
-// TMDBRevertReq 刮削还原请求
+// TMDBRevertReq 刮削还原请求（兼容单个与批量）
 type TMDBRevertReq struct {
-	Mid int64 `json:"mid"`
+	Ids []int64 `json:"ids"`
+}
+
+// TMDBScrapeReq 刮削请求（兼容单个与批量）
+type TMDBScrapeReq struct {
+	Ids []int64 `json:"ids"`
 }
 
 // FilmTMDBScrape TMDB 刮削元数据持久化模型 (MySQL)

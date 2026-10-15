@@ -96,10 +96,10 @@ const EVENT_ITEMS: {
   },
   {
     field: "sourceOrderChange",
-    title: "首选站与排序变更",
+    title: "主站与排序变更",
     badge: "配置变更",
     color: "cyan",
-    desc: "采集站拖拽排序或首选采集站发生切换时推送通知",
+    desc: "采集站拖拽排序或主站发生切换时推送通知",
   },
 ];
 

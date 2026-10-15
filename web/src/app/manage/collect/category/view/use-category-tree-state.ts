@@ -1,6 +1,6 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { getFilmClassTree, resetFilmClassTree, saveFilmClassTree, updateFilmClassShow } from "./api";
+import { getFilmClassTree, saveFilmClassTree, updateFilmClassShow } from "./api";
 import {
   cloneTree,
   collectStats,
@@ -18,7 +18,6 @@ export function useCategoryTreeState() {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loadingTree, setLoadingTree] = useState(false);
   const [savingTree, setSavingTree] = useState(false);
-  const [resettingTree, setResettingTree] = useState(false);
   const [updatingShowIds, setUpdatingShowIds] = useState<number[]>([]);
   const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
   const [sourceId, setSourceId] = useState("");
@@ -51,22 +50,6 @@ export function useCategoryTreeState() {
       setLoadingTree(false);
     }
   }, [message]);
-
-  const resetTree = useCallback(async () => {
-    setResettingTree(true);
-    try {
-      const resp = await resetFilmClassTree();
-      if (resp.code !== 0) {
-        message.error(resp.msg || "重置分类失败");
-        return false;
-      }
-      message.success(resp.msg || "分类已重置");
-      await fetchFilmClassTree();
-      return true;
-    } finally {
-      setResettingTree(false);
-    }
-  }, [fetchFilmClassTree, message]);
 
   const saveTree = useCallback(async () => {
     setSavingTree(true);
@@ -111,14 +94,12 @@ export function useCategoryTreeState() {
     expandedKeys,
     loadingTree,
     savingTree,
-    resettingTree,
     updatingShowIds,
     stats,
     hasPendingChanges,
     sources,
     sourceId,
     fetchFilmClassTree,
-    resetTree,
     saveTree,
     setExpandedKeys,
     moveClassWithinSameParent,

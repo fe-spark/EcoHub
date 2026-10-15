@@ -199,10 +199,12 @@ func TestFilterShownCategoryIDs_DynamicHidden(t *testing.T) {
 		t.Fatalf("expected empty slice for only hidden categories, got %v", onlyHidden)
 	}
 
-	// 排片分类保存的是首选站 type_id，保存时不去按展示分类的显示开关删掉。
-	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{1, 2, 4}})
-	if len(cfg.Categories) != 3 || cfg.Categories[0] != 1 || cfg.Categories[1] != 2 || cfg.Categories[2] != 4 {
-		t.Fatalf("expected banner categories kept as selected type ids, got %v", cfg.Categories)
+	// 排片数量只认配方里的分类编号，不按展示分类的显示开关删掉。
+	cfg := NormalizeBannerConfig(model.BannerConfig{Quotas: []model.BannerQuota{
+		{CategoryID: 1, Count: 1}, {CategoryID: 2, Count: 1}, {CategoryID: 4, Count: 2},
+	}})
+	if len(cfg.Quotas) != 3 || cfg.Quotas[0].CategoryID != 1 || cfg.Quotas[2].CategoryID != 4 {
+		t.Fatalf("expected banner quotas kept, got %+v", cfg.Quotas)
 	}
 }
 
@@ -227,10 +229,12 @@ func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
 		t.Fatalf("expected empty slice when all categories hidden, got %v", filtered)
 	}
 
-	// 展示分类全部隐藏时，已选的首选站 type_id 仍然保留，排片时再按该站分类树决定。
-	cfg := NormalizeBannerConfig(model.BannerConfig{Categories: []int64{10, 20}})
-	if len(cfg.Categories) != 2 || cfg.Categories[0] != 10 || cfg.Categories[1] != 20 {
-		t.Fatalf("expected selected type ids kept, got %v", cfg.Categories)
+	// 展示分类全部隐藏时，配方里的分类编号仍然保留，排片时再按该站分类树决定。
+	cfg := NormalizeBannerConfig(model.BannerConfig{Quotas: []model.BannerQuota{
+		{CategoryID: 10, Count: 1}, {CategoryID: 20, Count: 1},
+	}})
+	if len(cfg.Quotas) != 2 || cfg.Quotas[0].CategoryID != 10 || cfg.Quotas[1].CategoryID != 20 {
+		t.Fatalf("expected banner quotas kept, got %+v", cfg.Quotas)
 	}
 }
 

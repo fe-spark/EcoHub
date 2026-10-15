@@ -205,7 +205,7 @@ export default function InventoryStats() {
                   >
                     <div className={styles.identity}>
                       <span className={styles.sourceName}>{row.name}</span>
-                      {row.isPrimary ? <Tag color="gold">首选站</Tag> : null}
+                      {row.isPrimary ? <Tag color="gold">主站</Tag> : null}
                       {!row.enabled ? <Tag>已停用</Tag> : null}
                     </div>
                     <div className={styles.stationStats}>

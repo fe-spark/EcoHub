@@ -3,7 +3,6 @@ package snapshot
 import (
 	"fmt"
 	"log"
-	"math/rand"
 	"strings"
 
 	"gorm.io/gorm"
@@ -181,8 +180,9 @@ func SnapshotClassifyCacheKey(version string, pid int64, page *dto.Page) string 
 	return fmt.Sprintf("%s:v%s:P%d:C%d:S%d", config.FilmClassifyCacheKey, version, pid, page.Current, page.PageSize)
 }
 
-// GetSnapshotBannerCandidates 按排片策略、分类和采集站获取轮播候选（支持优质候选池随机抽样）。sourceID 为空时不限站。
-func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int) []model.FilmListSnapshot {
+// GetSnapshotBannerCandidates 按排片策略取该分类的前 limit 部。sourceID 为空时不限站。
+// exclude 中的影片会跳过，便于多个分类名额不重复。
+func GetSnapshotBannerCandidates(version string, strategy string, sourceID string, categoryPids []int64, limit int, exclude []int64) []model.FilmListSnapshot {
 	version = strings.TrimSpace(version)
 	if version == "" {
 		version = GetActiveSnapshotVersion()
@@ -191,63 +191,62 @@ func GetSnapshotBannerCandidates(version string, strategy string, sourceID strin
 		return []model.FilmListSnapshot{}
 	}
 
-	query := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
-
 	applyStrategy := func(q *gorm.DB, withScoreFilter bool) *gorm.DB {
 		switch strategy {
 		case "hot_random":
-			return q.Order("hits DESC")
+			q = q.Order("hits DESC, mid DESC")
 		case "score_random":
 			if withScoreFilter {
 				q = q.Where("score >= ?", 6.0)
 			}
-			return q.Order("score DESC, hits DESC")
+			q = q.Order("score DESC, hits DESC, mid DESC")
 		case "latest_random":
-			return q.Order("update_stamp DESC")
+			q = q.Order("update_stamp DESC, mid DESC")
 		default:
-			return q.Order("hits DESC, update_stamp DESC")
+			q = q.Order("hits DESC, update_stamp DESC, mid DESC")
 		}
+		return q
 	}
 
-	// 扩大候选池范围（取前 30~50 部优质候选），在高质量池中随机抽选
-	poolLimit := limit * 4
-	if poolLimit < 30 {
-		poolLimit = 30
+	baseQuery := func(skip []int64) *gorm.DB {
+		q := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
+		if len(skip) > 0 {
+			q = q.Where("mid NOT IN ?", skip)
+		}
+		return q
 	}
 
-	results, err := scanListSnapshots(applyStrategy(query, true).Limit(poolLimit))
+	results, err := scanListSnapshots(applyStrategy(baseQuery(exclude), true).Limit(limit))
 	if err != nil {
 		log.Println("[Snapshot] 获取轮播候选集异常:", err)
 		return []model.FilmListSnapshot{}
 	}
-	if len(results) == 0 && strategy == "score_random" {
-		log.Printf("[Snapshot] 高分候选池为空，已回退为不加评分过滤的候选池")
-		fallback := applyBannerCategories(applySourceMembership(liveFilmQuery(), sourceID), sourceID, categoryPids)
-		results, err = scanListSnapshots(applyStrategy(fallback, false).Limit(poolLimit))
-		if err != nil {
-			log.Println("[Snapshot] 获取轮播候选集回退异常:", err)
-			return []model.FilmListSnapshot{}
+	if strategy == "score_random" && len(results) < limit {
+		skip := append(append([]int64{}, exclude...), snapshotMids(results)...)
+		more, fillErr := scanListSnapshots(applyStrategy(baseQuery(skip), false).Limit(limit - len(results)))
+		if fillErr != nil {
+			log.Println("[Snapshot] 评分候选补齐异常:", fillErr)
+		} else {
+			results = append(results, more...)
 		}
 	}
-
-	if len(results) <= limit {
-		return results
+	if len(results) > limit {
+		return results[:limit]
 	}
+	return results
+}
 
-	// 随机打散抽取 limit 部，保证每次排片均能呈现不同组合
-	indices := make([]int, len(results))
-	for i := range indices {
-		indices[i] = i
+func snapshotMids(snaps []model.FilmListSnapshot) []int64 {
+	if len(snaps) == 0 {
+		return nil
 	}
-	rand.Shuffle(len(indices), func(i, j int) {
-		indices[i], indices[j] = indices[j], indices[i]
-	})
-
-	picked := make([]model.FilmListSnapshot, limit)
-	for i := 0; i < limit; i++ {
-		picked[i] = results[indices[i]]
+	mids := make([]int64, 0, len(snaps))
+	for _, snap := range snaps {
+		if snap.Mid > 0 {
+			mids = append(mids, snap.Mid)
+		}
 	}
-	return picked
+	return mids
 }
 
 // GetSnapshotHDBackdropCandidates 获取已有高清横图的候选。sourceID 为空时不限站。

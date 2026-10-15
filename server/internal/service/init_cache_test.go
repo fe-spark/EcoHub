@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"server/internal/infra/db"
+	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider"
 )
@@ -56,8 +57,15 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	setupTestDBAndRedis(t)
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 default tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
+	}
+	banner, err := repository.GetFilmTaskById(model.TaskIDBannerAuto)
+	if err != nil {
+		t.Fatalf("banner cron: %v", err)
+	}
+	if banner.Model != model.TaskModelBannerAuto || banner.Spec != "0 0 4 * * *" || banner.State {
+		t.Fatalf("unexpected banner task: %+v", banner)
 	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {

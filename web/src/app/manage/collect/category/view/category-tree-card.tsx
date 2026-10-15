@@ -30,7 +30,6 @@ interface CategoryTreeCardProps {
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  resettingTree: boolean;
   updatingShowIds: number[];
   hasPendingChanges: boolean;
   sources: { id: string; name: string }[];
@@ -38,7 +37,6 @@ interface CategoryTreeCardProps {
   stats: { total: number; roots: number; children: number; hidden: number };
   onSourceChange: (sourceId: string) => void;
   onRefresh: () => void;
-  onReset: () => void;
   onSave: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
@@ -83,7 +81,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     expandedKeys,
     loadingTree,
     savingTree,
-    resettingTree,
     updatingShowIds,
     hasPendingChanges,
     sources,
@@ -91,7 +88,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     stats,
     onSourceChange,
     onRefresh,
-    onReset,
     onSave,
     onExpand,
     onMove,
@@ -270,7 +266,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
       >
         <SortableContext items={sortableItems} strategy={verticalListSortingStrategy}>
           <Table<FilmClassNode>
-            bordered
             rowKey="id"
             columns={columns}
             dataSource={classTree}
@@ -349,9 +344,6 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                 <Space wrap className={styles.tableActions}>
                   <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
                     刷新分类
-                  </Button>
-                  <Button onClick={onReset} loading={resettingTree} disabled={!canWrite}>
-                    重置分类
                   </Button>
                   <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!canWrite || !hasPendingChanges}>
                     保存变更

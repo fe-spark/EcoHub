@@ -45,7 +45,6 @@ import {
   buildBannerPayload,
   computeTmdbPrefillUpdates,
   fetchFilmOption,
-  mergeTmdbFilmOption,
   computeBannerPreview,
   uploadBannerFile,
   initBannerFormValues,
@@ -207,8 +206,6 @@ export default function BannerModal({
     const currentValues = form.getFieldsValue();
     const updates = computeTmdbPrefillUpdates(data, fields, currentValues, selectedFilm);
     form.setFieldsValue(updates);
-
-    setSelectedFilm((prev) => mergeTmdbFilmOption(prev, data, updates, currentMid));
     setTmdbOpen(false);
   };
 
@@ -298,16 +295,6 @@ export default function BannerModal({
                         <Title level={5} style={{ margin: 0 }} ellipsis={{ tooltip: preview.previewName }}>
                           {preview.previewName}
                         </Title>
-                        {preview.isScraped && (
-                          <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0, fontSize: 11, lineHeight: "18px", padding: "0 4px" }}>
-                            已刮削
-                          </Tag>
-                        )}
-                        {!preview.liveFilmSlide && (
-                          <Tag style={{ borderRadius: 4, margin: 0, fontSize: 11, lineHeight: "18px", padding: "0 4px" }}>
-                            无横图
-                          </Tag>
-                        )}
                       </Flex>
                       <Text type="secondary" style={{ fontSize: 12 }}>
                         {preview.previewCategory} · {preview.previewYear} · {preview.previewArea}

@@ -115,27 +115,56 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 	return req.Mid, nil
 }
 
-// RevertDetail 还原影片的 TMDB 刮削数据，恢复为采集站原始数据
-func (s *TMDBService) RevertDetail(mid int64) error {
-	if mid <= 0 {
-		return errors.New("影片ID参数非法")
+// RevertDetails 还原影片的 TMDB 刮削数据（支持单个与批量），恢复为采集站原始数据
+func (s *TMDBService) RevertDetails(mids []int64) error {
+	if len(mids) == 0 {
+		return nil
 	}
 
-	if err := db.Mdb.Where("mid = ?", mid).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
+	cleanMids := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, id := range mids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanMids = append(cleanMids, id)
+	}
+	if len(cleanMids) == 0 {
+		return nil
+	}
+
+	if err := db.Mdb.Where("mid IN ?", cleanMids).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
 		return fmt.Errorf("还原刮削失败: %w", err)
 	}
 
 	// 增量发布快照并清理播放详情缓存
-	_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(mid)
+	_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(cleanMids...)
 	filmsnapshot.ClearDynamicPlayCaches()
 	support.ClearIndexPageCache()
 
-	var indexRec model.FilmIndex
-	if err := db.Mdb.Where("mid = ?", mid).First(&indexRec).Error; err == nil && indexRec.Pid > 0 {
-		writer.ClearFilmIndexCachesByPidSet(map[int64]struct{}{indexRec.Pid: {}})
+	var indexRecs []model.FilmIndex
+	if err := db.Mdb.Where("mid IN ?", cleanMids).Find(&indexRecs).Error; err == nil {
+		pids := make(map[int64]struct{})
+		for _, rec := range indexRecs {
+			if rec.Pid > 0 {
+				pids[rec.Pid] = struct{}{}
+			}
+		}
+		if len(pids) > 0 {
+			writer.ClearFilmIndexCachesByPidSet(pids)
+		}
 	}
 
 	return nil
+}
+
+// RevertDetail 还原单个影片的 TMDB 刮削数据
+func (s *TMDBService) RevertDetail(mid int64) error {
+	return s.RevertDetails([]int64{mid})
 }
 
 // FetchFormPrefill 拉取用于前端表单自动填充的元数据

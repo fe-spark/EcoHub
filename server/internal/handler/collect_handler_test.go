@@ -117,3 +117,62 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		t.Fatal("expected update to fail when changing URI to an unreachable address")
 	}
 }
+
+func TestCollectHandler_FilmSourceSyncCategory_Validations(t *testing.T) {
+	_ = setupCollectHandlerTestDB(t)
+	h := &CollectHandler{}
+
+	// 1. 空 ID 校验
+	c, w := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":""}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceSyncCategory(c)
+	resp := decodeResponse(t, w)
+	if resp.Code == dto.SUCCESS {
+		t.Fatal("expected failure for empty source ID")
+	}
+
+	// 2. 站点不存在校验
+	c2, w2 := testContext(http.MethodPost, "/api/manage/collect/category/sync")
+	c2.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/category/sync", bytes.NewReader([]byte(`{"id":"non_existent"}`)))
+	c2.Request.Header.Set("Content-Type", "application/json")
+	h.FilmSourceSyncCategory(c2)
+	resp2 := decodeResponse(t, w2)
+	if resp2.Code == dto.SUCCESS {
+		t.Fatal("expected failure for non-existent source")
+	}
+}
+
+func TestCollectHandler_FilmSourceAdd_AsyncCategorySync(t *testing.T) {
+	gdb := setupCollectHandlerTestDB(t)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"code":1,"msg":"数据列表","page":1,"pagecount":1,"limit":"20","total":0,"list":[],"class":[]}`))
+	}))
+	defer server.Close()
+
+	h := &CollectHandler{}
+	body := filmSourceBody{
+		FilmSource: model.FilmSource{
+			Name:   "测试新站",
+			Uri:    server.URL,
+			Format: model.SourceFormatJSON,
+			State:  true,
+		},
+	}
+	bodyBytes, _ := json.Marshal(body)
+	c, w := testContext(http.MethodPost, "/api/manage/collect/add")
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/collect/add", bytes.NewReader(bodyBytes))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.FilmSourceAdd(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected add to succeed immediately, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+
+	var count int64
+	if err := gdb.Model(&model.FilmSource{}).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("expected 1 source saved, got count=%d, err=%v", count, err)
+	}
+}

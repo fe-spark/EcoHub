@@ -228,18 +228,15 @@ export function computeBannerPreview({
   const previewActor = (isReplacingFilm ? selectedFilm?.actor : (selectedFilm?.actor || currentRow?.actor)) || "暂无";
   const isScraped = Boolean(isReplacingFilm ? selectedFilm?.isScraped : (selectedFilm?.isScraped ?? currentRow?.isScraped));
 
-  const liveFilmPic = isReplacingFilm
-    ? (selectedFilm?.picture || "")
-    : (selectedFilm?.picture || (currentRow && !currentRow.isCustomPic ? currentRow.picture : "") || "");
+  // 片库原图。轮播记录上的 picture / pictureSlide 可能已是刮削或自定义结果，不能回填到绑定影片。
+  const filmPic = (selectedFilm?.picture || "").trim();
+  const filmSlideRaw = (selectedFilm?.pictureSlide || "").trim();
+  const liveFilmPic = filmPic;
+  const liveFilmSlide = filmSlideRaw && filmSlideRaw !== filmPic ? filmSlideRaw : "";
 
   const previewPicture = !watchedIsCustomPic
-    ? (liveFilmPic || (!isReplacingFilm ? resolvePreviewPicture(currentRow) : (selectedFilm?.picture || "")))
+    ? (liveFilmPic || (!isReplacingFilm ? resolvePreviewPicture(currentRow) : ""))
     : (watchedPicture || liveFilmPic);
-
-  const rawLiveSlide = isReplacingFilm
-    ? (selectedFilm?.pictureSlide || "")
-    : (selectedFilm?.pictureSlide || currentRow?.pictureSlide || "");
-  const liveFilmSlide = (rawLiveSlide && rawLiveSlide !== liveFilmPic) ? rawLiveSlide : "";
 
   const previewSlide = !watchedIsCustomPic
     ? liveFilmSlide

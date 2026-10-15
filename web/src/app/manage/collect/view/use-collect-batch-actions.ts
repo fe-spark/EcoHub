@@ -19,12 +19,18 @@ export function useCollectBatchActions(
   }, []);
 
   const selectAllSources = useCallback(() => {
-    setSelectedSourceIds(siteList.map((item) => item.id));
+    setSelectedSourceIds(
+      siteList
+        .filter((item) => item.categoryReady !== false)
+        .map((item) => item.id),
+    );
   }, [siteList]);
 
   const invertSelection = useCallback(() => {
     setSelectedSourceIds((current) =>
-      siteList.filter((item) => !current.includes(item.id)).map((item) => item.id),
+      siteList
+        .filter((item) => item.categoryReady !== false && !current.includes(item.id))
+        .map((item) => item.id),
     );
   }, [siteList]);
 

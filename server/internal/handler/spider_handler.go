@@ -4,10 +4,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
-	"sync/atomic"
 
 	"server/internal/config"
-	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -74,10 +72,7 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 	dto.SuccessOnlyMsg("采集任务已成功开启!!!", c)
 }
 
-// resetSiteDataRunning 防止并发重复触发站点数据重置（重置为长耗时异步任务）
-var resetSiteDataRunning atomic.Bool
-
-// ClearAllFilm 删除所有film信息：密钥校验通过后立即返回成功，重置在后台异步执行（仅超级管理员）。
+// ClearAllFilm 校验通过后以 SSE 推送数据重置进度。重置在后台跑完，连接断开不中止。
 func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
@@ -100,24 +95,26 @@ func (h *SpiderHandler) ClearAllFilm(c *gin.Context) {
 		dto.Failed("重置失败, 密钥校验失败!!!", c)
 		return
 	}
-	if !resetSiteDataRunning.CompareAndSwap(false, true) {
+	if service.SpiderSvc.SiteResetRunning() {
 		dto.Failed("站点数据正在重置中，请勿重复操作", c)
 		return
 	}
-	go func() {
-		defer resetSiteDataRunning.Store(false)
-		if err := service.SpiderSvc.ClearFilms(); err != nil {
-			syslog.Errorf("[数据重置] 重置失败: %v", err)
-			return
-		}
-		syslog.Infof("[数据重置] 重置完成")
-	}()
-	dto.SuccessOnlyMsg("数据重置已开始，正在清空影视与采集数据", c)
+	stream, ok := openSSE(c)
+	if !ok {
+		return
+	}
+	if err := service.SpiderSvc.StreamSiteReset(c.Request.Context(), stream.SendData); err != nil {
+		_ = stream.SendData(map[string]any{"running": false, "error": err.Error()})
+	}
 }
 
-// ResetProgress 返回数据重置实时进度（供前端轮询）
-func (h *SpiderHandler) ResetProgress(c *gin.Context) {
-	dto.Success(service.SpiderSvc.ResetProgress(), "获取成功", c)
+// ResetProgressStream 订阅正在进行的数据重置进度。刷新页面后靠它接上。
+func (h *SpiderHandler) ResetProgressStream(c *gin.Context) {
+	stream, ok := openSSE(c)
+	if !ok {
+		return
+	}
+	_ = service.SpiderSvc.FollowSiteReset(c.Request.Context(), stream.SendData)
 }
 
 // InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
@@ -125,22 +122,21 @@ func (h *SpiderHandler) InventoryStats(c *gin.Context) {
 	dto.Success(service.SpiderSvc.InventoryStats(c.Query("scope")), "获取成功", c)
 }
 
-// SingleUpdateSpider 单一影片主站更新采集
-func (h *SpiderHandler) SingleUpdateSpider(c *gin.Context) {
+// UpdateSpider 影片主站更新采集（兼容单个与批量）
+func (h *SpiderHandler) UpdateSpider(c *gin.Context) {
 	var req struct {
-		Ids string `json:"ids"`
+		Ids []int64 `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常!!!", c)
+		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	ids := req.Ids
-	if ids == "" {
-		dto.Failed("参数异常, 资源标识ID信息缺失", c)
+	if len(req.Ids) == 0 {
+		dto.Failed("缺少影片 ID", c)
 		return
 	}
-	service.SpiderSvc.SyncCollect(ids)
-	dto.SuccessOnlyMsg("主站影片更新任务已成功开启!!!", c)
+	service.SpiderSvc.CollectFilms(req.Ids)
+	dto.SuccessOnlyMsg("更新任务已开启", c)
 }
 
 // StopAllTasks 一键终止所有采集中任务

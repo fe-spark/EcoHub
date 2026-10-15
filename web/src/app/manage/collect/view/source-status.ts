@@ -9,6 +9,14 @@ export function resolveSourceStatus(
   record: FilmSource,
   active: boolean,
 ): { label: string; tone: StatusTone } {
+  if (record.categorySyncing) {
+    return { label: "分类采集中", tone: "running" };
+  }
+
+  if (record.categoryReady === false) {
+    return { label: "缺分类", tone: "disabled" };
+  }
+
   const phase = record.progress?.status;
 
   if (active) {

@@ -60,15 +60,8 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 	if id == "" {
 		id = utils.GenerateHashKey(body.Uri)
 	}
-	if err := service.SpiderSvc.SyncSourceCategories(id); err != nil {
-		if delErr := service.CollectSvc.DelFilmSource(id); delErr != nil {
-			dto.Failed(fmt.Sprintf("分类获取失败，且采集站未能撤回: %s", err.Error()), c)
-			return
-		}
-		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
-		return
-	}
-	dto.SuccessOnlyMsg("添加成功", c)
+	service.SpiderSvc.SyncSourceCategoriesAsync(id)
+	dto.Success(gin.H{"id": id}, "添加成功", c)
 }
 
 func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
@@ -111,10 +104,7 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 		return
 	}
 	if isUriChanged || isFormatChanged {
-		if err := service.SpiderSvc.SyncSourceCategories(s.Id); err != nil {
-			dto.Failed(fmt.Sprint("资源站已更新，但分类获取失败: ", err.Error()), c)
-			return
-		}
+		service.SpiderSvc.SyncSourceCategoriesAsync(s.Id)
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
 }
@@ -457,4 +447,28 @@ func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
 func (h *CollectHandler) ClearAllRecord(c *gin.Context) {
 	service.CollectSvc.ClearAllRecord()
 	dto.SuccessOnlyMsg("采集异常记录信息已清空!!!", c)
+}
+
+func (h *CollectHandler) FilmSourceSyncCategory(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Id == "" {
+		dto.Failed("参数异常, 资源站标识不能为空", c)
+		return
+	}
+	fs := service.CollectSvc.GetFilmSource(req.Id)
+	if fs == nil {
+		dto.Failed("数据异常, 资源站信息不存在", c)
+		return
+	}
+	if spider.IsTaskRunning(req.Id) {
+		dto.Failed("站点正在采集, 请先停止采集后再尝试操作", c)
+		return
+	}
+	if err := service.SpiderSvc.SyncSourceCategories(req.Id); err != nil {
+		dto.Failed(fmt.Sprint("获取分类失败: ", err.Error()), c)
+		return
+	}
+	dto.SuccessOnlyMsg("获取分类成功", c)
 }

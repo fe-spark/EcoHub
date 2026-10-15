@@ -108,19 +108,39 @@ func (h *TMDBHandler) Prefill(c *gin.Context) {
 	dto.Success(data, "获取详情成功", c)
 }
 
-// Revert 还原指定影片的 TMDB 刮削数据，恢复为采集站原始数据
+// Scrape 执行影片 TMDB 自动刮削（兼容单个与批量）
+func (h *TMDBHandler) Scrape(c *gin.Context) {
+	var req model.TMDBScrapeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数格式异常", c)
+		return
+	}
+	if len(req.Ids) == 0 {
+		dto.Failed("缺少影片 ID", c)
+		return
+	}
+
+	res, err := service.TMDBSvc.ScrapeFilms(c.Request.Context(), req.Ids)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(res, "刮削完成", c)
+}
+
+// Revert 还原指定影片的 TMDB 刮削数据（兼容单个与批量）
 func (h *TMDBHandler) Revert(c *gin.Context) {
 	var req model.TMDBRevertReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	if req.Mid <= 0 {
+	if len(req.Ids) == 0 {
 		dto.Failed("缺少影片 ID", c)
 		return
 	}
 
-	if err := service.TMDBSvc.RevertDetail(req.Mid); err != nil {
+	if err := service.TMDBSvc.RevertDetails(req.Ids); err != nil {
 		dto.Failed("还原刮削失败: "+err.Error(), c)
 		return
 	}

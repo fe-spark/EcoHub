@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log"
 	"regexp"
 	"strconv"
@@ -9,14 +10,97 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
+
+type ScrapeResult struct {
+	Total   int `json:"total"`
+	Success int `json:"success"`
+	Failed  int `json:"failed"`
+}
+
+// ScrapeFilms 对影片执行 TMDB 自动匹配与元数据刮削落库（兼容单个与批量）
+func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeResult, error) {
+	cfg := repository.GetTMDBConfig()
+	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
+		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能")
+	}
+
+	cleanMids := make([]int64, 0, len(mids))
+	seen := make(map[int64]struct{}, len(mids))
+	for _, id := range mids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanMids = append(cleanMids, id)
+	}
+
+	res := &ScrapeResult{Total: len(cleanMids)}
+	if len(cleanMids) == 0 {
+		return res, nil
+	}
+
+	var successMids []int64
+	for _, mid := range cleanMids {
+		select {
+		case <-ctx.Done():
+			return res, ctx.Err()
+		default:
+		}
+
+		snap := filmsnapshot.GetSnapshotByMid("", mid)
+		if snap == nil {
+			var index model.FilmIndex
+			if err := db.Mdb.Where("mid = ?", mid).First(&index).Error; err != nil {
+				res.Failed++
+				continue
+			}
+			snap = filmsnapshot.GetSnapshotByMid("", mid)
+			if snap == nil {
+				res.Failed++
+				continue
+			}
+		}
+
+		_, ok, err := s.AutoScrapeFilm(ctx, *snap)
+		if err != nil || !ok {
+			res.Failed++
+		} else {
+			res.Success++
+			successMids = append(successMids, mid)
+		}
+	}
+
+	if len(successMids) > 0 {
+		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(successMids...)
+		filmsnapshot.ClearDynamicPlayCaches()
+		support.ClearIndexPageCache()
+	}
+
+	return res, nil
+}
 
 // AutoScrapeFilm 对单部影片执行智能匹配与 TMDB 元数据自动刮削落库
 func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSnapshot) (*model.FilmListSnapshot, bool, error) {
+	updated, _, ok, err := s.autoScrapeFilm(ctx, snap, true)
+	return updated, ok, err
+}
+
+// PreviewScrapeFilm 只匹配并组装预览，不写刮削表，不刷新线上快照。
+func (s *TMDBService) PreviewScrapeFilm(ctx context.Context, snap model.FilmListSnapshot) (*model.FilmListSnapshot, string, bool, error) {
+	return s.autoScrapeFilm(ctx, snap, false)
+}
+
+func (s *TMDBService) autoScrapeFilm(ctx context.Context, snap model.FilmListSnapshot, persist bool) (*model.FilmListSnapshot, string, bool, error) {
 	select {
 	case <-ctx.Done():
-		return nil, false, ctx.Err()
+		return nil, "", false, ctx.Err()
 	default:
 	}
 
@@ -38,11 +122,18 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	candidates, err := s.Search(cleanedTarget, "", "")
 	if err != nil {
 		log.Printf("[TMDBAuto] TMDB 检索异常 mid=%d 关键词=%q: %v", snap.Mid, cleanedTarget, err)
-		return nil, false, err
+		return nil, "", false, err
+	}
+
+	// Search 本身不接收 context，进行中的 HTTP 会跑完。返回后若已取消，不再落库。
+	select {
+	case <-ctx.Done():
+		return nil, "", false, ctx.Err()
+	default:
 	}
 
 	if len(candidates) == 0 {
-		return nil, false, nil
+		return nil, "", false, nil
 	}
 
 	var bestCandidate *model.TMDBCandidate
@@ -155,7 +246,18 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	}
 
 	if bestCandidate == nil {
-		return nil, false, nil
+		return nil, "", false, nil
+	}
+
+	select {
+	case <-ctx.Done():
+		return nil, "", false, ctx.Err()
+	default:
+	}
+
+	if !persist {
+		updated := previewSnapshotFromCandidate(snap, bestCandidate)
+		return &updated, bestCandidate.MediaType, true, nil
 	}
 
 	applyReq := model.TMDBApplyReq{
@@ -167,7 +269,7 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 
 	if _, err := s.ApplyDetailWithOptions(applyReq, false); err != nil {
 		log.Printf("[TMDBAuto] 应用 TMDB 详情失败 mid=%d tmdbId=%d: %v", snap.Mid, bestCandidate.ID, err)
-		return nil, false, err
+		return nil, "", false, err
 	}
 
 	updatedSnap := snap
@@ -196,7 +298,29 @@ func (s *TMDBService) AutoScrapeFilm(ctx context.Context, snap model.FilmListSna
 
 	log.Printf("[TMDBAuto] 影片 TMDB 全量元数据已自动刮削落库 mid=%d 片名=%q (评分=%.1f, 横图=%s)",
 		snap.Mid, snap.Name, updatedSnap.Score, updatedSnap.DisplayPictureSlide())
-	return &updatedSnap, true, nil
+	return &updatedSnap, bestCandidate.MediaType, true, nil
+}
+
+func previewSnapshotFromCandidate(snap model.FilmListSnapshot, c *model.TMDBCandidate) model.FilmListSnapshot {
+	updated := snap
+	updated.TmdbID = c.ID
+	if poster := strings.TrimSpace(c.Poster); poster != "" {
+		updated.Picture = poster
+	}
+	if slide := strings.TrimSpace(c.Backdrop); slide != "" && slide != strings.TrimSpace(updated.Picture) {
+		updated.PictureSlide = slide
+	}
+	if c.VoteAverage > 0 {
+		updated.Score = c.VoteAverage
+	}
+	if overview := strings.TrimSpace(c.Overview); overview != "" {
+		updated.Blurb = overview
+		updated.Content = overview
+	}
+	if y, err := strconv.Atoi(strings.TrimSpace(c.Year)); err == nil && y > 0 {
+		updated.Year = int64(y)
+	}
+	return updated
 }
 
 func extractCleanTitle(s string) string {
@@ -258,5 +382,3 @@ func calculateTitleSimilarity(s1, s2 string) float64 {
 	simMax := float64(lcs) / float64(maxLen)
 	return simMin*0.4 + simMax*0.6
 }
-
-

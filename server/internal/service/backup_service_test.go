@@ -112,12 +112,12 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 
 	bannerCfg := model.BannerConfig{
-		Mode:        repository.BannerModeAuto,
-		Strategy:    repository.BannerStrategySmartMix,
-		Count:       8,
-		AutoTMDB:    true,
-		RefreshCron: "0 0 6 * * *",
-		Categories:  []int64{1, 2},
+		Strategy: repository.BannerStrategyHot,
+		AutoTMDB: true,
+		Quotas: []model.BannerQuota{
+			{CategoryID: 1, Count: 2},
+			{CategoryID: 2, Count: 1},
+		},
 	}
 	if err := repository.SaveBannerConfig(bannerCfg); err != nil {
 		t.Fatalf("save banner config: %v", err)
@@ -184,10 +184,10 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 		t.Fatalf("banners export mismatch: %+v", backup.Banners)
 	}
 	// 验证 BannerConfig 轮播排片配置导出
-	if backup.BannerConfig == nil || backup.BannerConfig.Mode != repository.BannerModeAuto || backup.BannerConfig.Strategy != repository.BannerStrategySmartMix {
+	if backup.BannerConfig == nil || backup.BannerConfig.Strategy != repository.BannerStrategyHot || !backup.BannerConfig.AutoTMDB {
 		t.Fatalf("bannerConfig export mismatch: %+v", backup.BannerConfig)
 	}
-	if backup.BannerConfig.Count != 8 || backup.BannerConfig.RefreshCron != "0 0 6 * * *" {
+	if len(backup.BannerConfig.Quotas) != 2 {
 		t.Fatalf("bannerConfig fields mismatch: %+v", backup.BannerConfig)
 	}
 	// 验证敏感凭据在灾备导出中完整保留
@@ -221,11 +221,9 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 			},
 		},
 		BannerConfig: &model.BannerConfig{
-			Mode:        repository.BannerModeAuto,
-			Strategy:    repository.BannerStrategyScore,
-			Count:       10,
-			AutoTMDB:    false,
-			RefreshCron: "0 0 5 * * *",
+			Strategy: repository.BannerStrategyScore,
+			AutoTMDB: false,
+			Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 1}},
 		},
 	}
 
@@ -247,7 +245,7 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 	}
 
 	bannerCfg := repository.GetBannerConfig()
-	if bannerCfg.Mode != repository.BannerModeAuto || bannerCfg.Strategy != repository.BannerStrategyScore || bannerCfg.Count != 10 {
+	if bannerCfg.Strategy != repository.BannerStrategyScore || len(bannerCfg.Quotas) != 1 || bannerCfg.Quotas[0].CategoryID != 3 {
 		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
 	}
 }

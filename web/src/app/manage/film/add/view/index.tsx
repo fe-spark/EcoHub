@@ -390,7 +390,7 @@ function FilmAddForm() {
                     okText="还原"
                     cancelText="取消"
                     onConfirm={async () => {
-                      const resp = await ApiPost("/manage/tmdb/revert", { mid: Number(id) });
+                      const resp = await ApiPost("/manage/tmdb/revert", { ids: [Number(id)] });
                       if (resp.code === 0) {
                         message.success(resp.msg || "已还原刮削");
                         ApiGet(`/films/play-info`, { id }).then((r: any) => {

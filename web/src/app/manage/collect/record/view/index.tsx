@@ -327,7 +327,6 @@ export default function FailureRecordPageView() {
       </Space>
 
       <Table
-        bordered
         columns={columns}
         dataSource={records}
         rowKey="ID"

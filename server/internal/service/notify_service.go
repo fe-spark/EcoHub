@@ -270,11 +270,11 @@ func formatSourceOrderChangeHTML(siteName string, oldPrimary, newPrimary *model.
 
 	var b strings.Builder
 	if oldID != newID {
-		fmt.Fprintf(&b, "<b>%s 首选采集站已切换</b>\n", formatTitlePrefix(siteName))
-		fmt.Fprintf(&b, "🔄 首选站：<b>%s</b> → <b>%s</b>\n", html.EscapeString(oldName), html.EscapeString(newName))
+		fmt.Fprintf(&b, "<b>%s 主站已切换</b>\n", formatTitlePrefix(siteName))
+		fmt.Fprintf(&b, "🔄 主站：<b>%s</b> → <b>%s</b>\n", html.EscapeString(oldName), html.EscapeString(newName))
 	} else {
 		fmt.Fprintf(&b, "<b>%s 采集站排序已更新</b>\n", formatTitlePrefix(siteName))
-		fmt.Fprintf(&b, "⭐ 首选站：<b>%s</b>\n", html.EscapeString(newName))
+		fmt.Fprintf(&b, "⭐ 主站：<b>%s</b>\n", html.EscapeString(newName))
 	}
 	fmt.Fprintf(&b, "📋 启用顺序：%s\n", orderLine)
 	fmt.Fprintf(&b, "🕒 时间：<code>%s</code>", time.Now().Format("2006-01-02 15:04:05"))

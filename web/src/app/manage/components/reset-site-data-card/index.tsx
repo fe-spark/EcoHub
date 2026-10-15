@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, Flex, Input, Modal, Progress, Space, Tag, Typography } from "antd";
 import { DeleteOutlined, WarningOutlined } from "@ant-design/icons";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { fetchEventStream } from "@/lib/sse-client";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import styles from "./index.module.less";
@@ -13,8 +13,6 @@ interface ResetProgress {
   error: string;
 }
 
-const POLL_INTERVAL = 800;
-
 interface ResetSiteDataCardProps {
   /** 数据重置成功后触发（用于刷新页面上的影响面统计等） */
   onResetComplete?: () => void;
@@ -25,72 +23,167 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
   const [password, setPassword] = useState("");
   const [resetting, setResetting] = useState(false);
   const [resetProgress, setResetProgress] = useState<ResetProgress | null>(null);
-  const pollTimerRef = useRef<number | null>(null);
+  const postAbortRef = useRef<AbortController | null>(null);
   const hideTimerRef = useRef<number | null>(null);
+  const seenRunningRef = useRef(false);
+  const followRef = useRef<{ stop: () => void; start: () => void }>({
+    stop: () => undefined,
+    start: () => undefined,
+  });
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const messageRef = useRef(message);
+  const onResetCompleteRef = useRef(onResetComplete);
+  const applyProgressRef = useRef<(data: ResetProgress) => void>(() => undefined);
+  messageRef.current = message;
+  onResetCompleteRef.current = onResetComplete;
 
-  const stopPolling = useCallback(() => {
-    if (pollTimerRef.current !== null) {
-      window.clearInterval(pollTimerRef.current);
-      pollTimerRef.current = null;
+  const applyProgress = (data: ResetProgress) => {
+    if (!data.running && !seenRunningRef.current) {
+      return;
+    }
+    setResetProgress({
+      running: data.running,
+      percent: data.percent ?? 0,
+      stage: data.stage ?? "",
+      error: data.error ?? "",
+    });
+    if (data.running) {
+      seenRunningRef.current = true;
+      return;
+    }
+    seenRunningRef.current = false;
+    if (data.error) {
+      messageRef.current.error(`数据重置失败：${data.error}`);
+    } else {
+      messageRef.current.success("数据重置完成");
+      onResetCompleteRef.current?.();
     }
     if (hideTimerRef.current !== null) {
       window.clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
     }
-  }, []);
+    hideTimerRef.current = window.setTimeout(() => setResetProgress(null), 1500);
+  };
+  applyProgressRef.current = applyProgress;
 
-  // 轮询后端真实进度，直到重置结束（成功或失败）
-  const pollResetProgress = useCallback(() => {
-    const tick = async () => {
+  useEffect(() => {
+    if (!isAdmin) {
+      followRef.current.stop();
+      return;
+    }
+    let stopped = false;
+    let timer: number | null = null;
+    let ctrl: AbortController | null = null;
+
+    const stop = () => {
+      stopped = true;
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
+      }
+      ctrl?.abort();
+      ctrl = null;
+    };
+
+    const run = async () => {
+      if (stopped) {
+        return;
+      }
+      const current = new AbortController();
+      ctrl = current;
+      let sawIdle = false;
       try {
-        const resp = await ApiGet<ResetProgress>("/manage/spider/clear/progress");
-        if (resp.code !== 0 || !resp.data) return;
-        const p = resp.data;
-        setResetProgress({ running: p.running, percent: p.percent, stage: p.stage, error: p.error });
-        if (!p.running) {
-          stopPolling();
-          if (p.error) {
-            message.error(`数据重置失败：${p.error}`);
-          } else {
-            message.success("数据重置完成");
-            onResetComplete?.();
-          }
-          hideTimerRef.current = window.setTimeout(() => setResetProgress(null), 1500);
+        await fetchEventStream("/api/manage/spider/clear/progress", {
+          method: "GET",
+          signal: current.signal,
+          onMessage: (data: ResetProgress) => {
+            if (!data || typeof data.running !== "boolean") {
+              return;
+            }
+            if (!data.running) {
+              sawIdle = true;
+            }
+            applyProgressRef.current(data);
+          },
+        });
+      } catch (err) {
+        if (stopped || current.signal.aborted) {
+          return;
         }
-      } catch {
-        // 单次轮询失败不中断，等待下次
+        const msg = err instanceof Error ? err.message : "";
+        if (/401|403|鉴权|权限不足/.test(msg)) {
+          return;
+        }
+      }
+      if (stopped || current.signal.aborted || sawIdle) {
+        return;
+      }
+      timer = window.setTimeout(() => void run(), 1500);
+    };
+
+    followRef.current = {
+      stop,
+      start: () => {
+        stop();
+        stopped = false;
+        void run();
+      },
+    };
+    void run();
+    return () => {
+      followRef.current = { stop: () => undefined, start: () => undefined };
+      stop();
+      postAbortRef.current?.abort();
+      if (hideTimerRef.current !== null) {
+        window.clearTimeout(hideTimerRef.current);
       }
     };
-    void tick();
-    pollTimerRef.current = window.setInterval(tick, POLL_INTERVAL);
-  }, [message, onResetComplete, stopPolling]);
+  }, [isAdmin]);
 
   const confirmReset = async () => {
     if (!password) {
       message.error("请输入管理密码");
       return;
     }
+    followRef.current.stop();
+    const ctrl = new AbortController();
+    postAbortRef.current = ctrl;
     setResetting(true);
+    let started = false;
     try {
-      const resp = await ApiPost("/manage/spider/clear", { password });
-      if (resp.code === 0) {
-        setResetOpen(false);
-        setPassword("");
-        message.success("数据重置已发起，正在后台执行");
-        setResetProgress({ running: true, percent: 0, stage: "正在启动重置", error: "" });
-        pollResetProgress();
+      await fetchEventStream("/api/manage/spider/clear", {
+        method: "POST",
+        body: { password },
+        signal: ctrl.signal,
+        onMessage: (data: ResetProgress) => {
+          if (!data || typeof data.running !== "boolean") {
+            return;
+          }
+          if (!started) {
+            started = true;
+            setResetOpen(false);
+            setPassword("");
+          }
+          applyProgress(data);
+        },
+      });
+    } catch (err) {
+      if (ctrl.signal.aborted) {
         return;
       }
-      message.error(resp.msg || "数据重置发起失败");
+      if (!started) {
+        message.error(err instanceof Error ? err.message : "数据重置失败");
+      }
     } finally {
+      if (postAbortRef.current === ctrl) {
+        postAbortRef.current = null;
+      }
       setResetting(false);
+      if (!ctrl.signal.aborted) {
+        followRef.current.start();
+      }
     }
   };
-
-  // 组件卸载时清理轮询定时器
-  useEffect(() => () => stopPolling(), [stopPolling]);
 
   return (
     <>
@@ -115,13 +208,13 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空全部采集站的影片、展示分类、失败记录与关联轮播；账号、采集站和配置保留。规模见工作台「片库规模」。
+                清空影片、分类、失败记录和轮播，并关闭定时排片。账号、采集站和排片配方保留。
               </Typography.Text>
             </Flex>
             <Button
               danger
               icon={<DeleteOutlined />}
-              disabled={!canWrite || !isAdmin}
+              disabled={!canWrite || !isAdmin || resetting || Boolean(resetProgress?.running)}
               onClick={() => setResetOpen(true)}
             >
               数据重置
@@ -164,7 +257,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             showIcon
             type="error"
             title="该操作不可逆"
-            description="清空全部采集站的片库与分类，采集站和账号保留。"
+            description="清空片库与分类，并关闭定时排片。采集站和账号保留。"
           />
           <Input.Password
             placeholder="请输入管理密码"

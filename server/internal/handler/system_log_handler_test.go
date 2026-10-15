@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"testing"
+	"time"
 
 	"server/internal/config"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/utils"
@@ -58,5 +62,40 @@ func TestSystemLogHandler_Delta(t *testing.T) {
 	resp2 := decodeResponse(t, w2)
 	if resp2.Code != dto.SUCCESS {
 		t.Fatalf("expected code SUCCESS, got %d", resp2.Code)
+	}
+}
+
+func TestSystemLogHandler_StreamAuthAndSnapshot(t *testing.T) {
+	c, w := testContext(http.MethodGet, "/api/manage/system/logs/stream")
+	SystemLogHd.Stream(c)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on missing claims, got %d", w.Code)
+	}
+
+	c, w = testContext(http.MethodGet, "/api/manage/system/logs/stream")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20002, Role: model.UserRoleNormal})
+	SystemLogHd.Stream(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on normal user, got %d", w.Code)
+	}
+
+	marker := "handler-stream-" + t.Name()
+	syslog.Infof("%s", marker)
+	c, w = testContext(http.MethodGet, "/api/manage/system/logs/stream?lines=50")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
+	ctx, cancel := context.WithCancel(c.Request.Context())
+	defer cancel()
+	c.Request = c.Request.WithContext(ctx)
+	go func() {
+		time.Sleep(time.Second)
+		cancel()
+	}()
+	SystemLogHd.Stream(c)
+	body := w.Body.String()
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, body)
+	}
+	if !strings.Contains(body, marker) || !strings.Contains(body, `"reset":true`) {
+		t.Fatalf("snapshot missing: %s", body)
 	}
 }

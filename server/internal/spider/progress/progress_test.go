@@ -1,6 +1,7 @@
 package progress
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -434,3 +435,33 @@ func TestMarkSourcesCollectStarting_RetryOverwritesQueueId(t *testing.T) {
 		t.Fatalf("retry status = %q, want starting", snap.Status)
 	}
 }
+
+func TestSubscribeCategory_Broadcast(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ch := SubscribeCategory(ctx)
+	BroadcastCategoryStatus("test-src-1", "syncing")
+
+	select {
+	case evt, ok := <-ch:
+		if !ok {
+			t.Fatal("channel closed unexpectedly")
+		}
+		if evt.SourceID != "test-src-1" || evt.Status != "syncing" {
+			t.Fatalf("unexpected event: %+v", evt)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for category event")
+	}
+
+	if !IsCategorySyncing("test-src-1") {
+		t.Fatal("expected test-src-1 to be syncing")
+	}
+
+	BroadcastCategoryStatus("test-src-1", "ready")
+	if IsCategorySyncing("test-src-1") {
+		t.Fatal("expected test-src-1 to not be syncing after ready")
+	}
+}
+

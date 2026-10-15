@@ -1,13 +1,13 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-import { Button, Card, Input, Select, Space, Switch, Tag, Typography } from "antd";
+import { Button, Input, Select, Space, Switch, Tag, Typography } from "antd";
 import { ClearOutlined, CopyOutlined, FileTextOutlined, PauseCircleOutlined, PlayCircleOutlined, ReloadOutlined, SearchOutlined } from "@ant-design/icons";
-import { ApiGet } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import styles from "./index.module.less";
+import { useSystemLogStream, type LogBatch, type LogEntry } from "./use-log-stream";
 
 interface SystemLogsPageViewProps {
   /** 嵌入系统设置 Tabs 时隐藏独立页头 */
@@ -15,27 +15,10 @@ interface SystemLogsPageViewProps {
 }
 
 
-const INITIAL_LOG_LINES = 500;
 const MAX_LOG_LINES = 1000;
-const DELTA_LOG_LIMIT = 10000;
-const POLLING_INTERVAL_MS = 1000;
 
 /** 服务端写入时确定的级别；前端只读该字段，禁止按正文猜。 */
 type LogLevel = "info" | "warn" | "error";
-
-interface LogEntry {
-  seq: number;
-  line: string;
-  /** info | warn | error，缺省按 info */
-  level?: string;
-}
-
-interface DeltaLogsResponse {
-  entries: LogEntry[];
-  nextSeq: number;
-  minSeq?: number;
-  expired: boolean;
-}
 
 function normalizeLevel(level?: string): LogLevel {
   const v = (level || "").toLowerCase().trim();
@@ -59,97 +42,45 @@ function levelTag(level: LogLevel) {
 
 export default function SystemLogsPageView({ embedded = false }: SystemLogsPageViewProps) {
   const [entries, setEntries] = useState<LogEntry[]>([]);
-  const [loading, setLoading] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [refreshError, setRefreshError] = useState(false);
   const [cursorExpired, setCursorExpired] = useState(false);
-  const [cursor, setCursor] = useState(0);
   const [lastReceivedAt, setLastReceivedAt] = useState("");
   const [autoScroll, setAutoScroll] = useState(true);
   const [inputKeyword, setInputKeyword] = useState("");
   const [keyword, setKeyword] = useState("");
   const [level, setLevel] = useState<string>("all");
   const logBodyRef = useRef<HTMLDivElement | null>(null);
-  const cursorRef = useRef(0);
-  const deltaFetchingRef = useRef(false);
   const { message } = useAppMessage();
 
-  const fetchRecentLogs = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await ApiGet<DeltaLogsResponse>("/manage/system/logs/delta", { lines: INITIAL_LOG_LINES });
-      if (resp.code === 0) {
-        const list = resp.data.entries || [];
-        const nextSeq = resp.data.nextSeq || 0;
-        cursorRef.current = nextSeq;
-        setCursor(nextSeq);
-        setCursorExpired(false);
-        setRefreshError(false);
-        setEntries(list);
-        return;
-      }
-      message.error(resp.msg);
-    } finally {
-      setLoading(false);
+  const applyBatch = (batch: LogBatch) => {
+    if (batch.error) {
+      message.error(`系统日志读取失败：${batch.error}`);
     }
-  }, [message]);
+    const list = batch.entries || [];
+    const touched = list.length > 0 || batch.reset || batch.expired;
+    if (touched) {
+      setLastReceivedAt(new Date().toLocaleTimeString());
+    }
+    if (batch.expired) {
+      const minSeq = batch.minSeq ?? 0;
+      const notice: LogEntry = {
+        seq: -1,
+        level: "warn",
+        line: `[SystemLog] 日志游标已过期，已从当前缓冲区最早序号 ${minSeq} 重新加载，过期窗口内日志可能已被截断`,
+      };
+      setCursorExpired(true);
+      setEntries([notice, ...list].slice(-MAX_LOG_LINES));
+      return;
+    }
+    setCursorExpired(false);
+    if (batch.reset) {
+      setEntries(list.slice(-MAX_LOG_LINES));
+      return;
+    }
+    setEntries((prev) => appendBoundedEntries(prev, list));
+  };
 
-  useEffect(() => {
-    void fetchRecentLogs();
-  }, [fetchRecentLogs]);
-
-  useEffect(() => {
-    if (!autoRefresh) return;
-
-    const timer = window.setInterval(async () => {
-      if (deltaFetchingRef.current) return;
-      deltaFetchingRef.current = true;
-      try {
-        const resp = await ApiGet<DeltaLogsResponse>("/manage/system/logs/delta", {
-          after: cursorRef.current,
-          limit: DELTA_LOG_LIMIT,
-        });
-        if (resp.code !== 0) {
-          setRefreshError(true);
-          return;
-        }
-        const list = resp.data.entries || [];
-        setRefreshError(false);
-        if (resp.data.expired) {
-          const minSeq = resp.data.minSeq ?? 0;
-          const notice: LogEntry = {
-            seq: -1,
-            level: "warn",
-            line: `[SystemLog] 日志游标已过期，已从当前缓冲区最早序号 ${minSeq} 重新加载，过期窗口内日志可能已被截断`,
-          };
-          const nextSeq = resp.data.nextSeq || cursorRef.current;
-          cursorRef.current = nextSeq;
-          setCursor(nextSeq);
-          setCursorExpired(true);
-          setEntries([notice, ...list].slice(-MAX_LOG_LINES));
-          setLastReceivedAt(new Date().toLocaleTimeString());
-          return;
-        }
-        const nextSeq = resp.data.nextSeq || cursorRef.current;
-        cursorRef.current = nextSeq;
-        setCursor(nextSeq);
-        setCursorExpired(false);
-        setEntries((prev) => appendBoundedEntries(prev, list));
-        if (list.length > 0) {
-          setLastReceivedAt(new Date().toLocaleTimeString());
-        }
-      } catch {
-        setRefreshError(true);
-      } finally {
-        deltaFetchingRef.current = false;
-      }
-    }, POLLING_INTERVAL_MS);
-
-    return () => {
-      window.clearInterval(timer);
-      deltaFetchingRef.current = false;
-    };
-  }, [autoRefresh]);
+  const { cursor, loading, alive, failed, reload } = useSystemLogStream(autoRefresh, applyBatch);
 
   const filteredEntries = useMemo(() => {
     const word = keyword.trim().toLowerCase();
@@ -174,9 +105,10 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
 
   const renderRefreshStatus = () => {
     if (!autoRefresh) return <Tag>已暂停</Tag>;
+    if (failed) return <Tag color="error">连接中断</Tag>;
     if (cursorExpired) return <Tag color="error">游标过期</Tag>;
-    if (refreshError) return <Tag color="error">刷新失败</Tag>;
-    return <Tag color="success">自动刷新中</Tag>;
+    if (alive) return <Tag color="success">实时推送</Tag>;
+    return <Tag color="processing">连接中</Tag>;
   };
 
   return (
@@ -185,7 +117,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
         <div className={styles.headerArea}>
           <ManagePageHeader
             title="系统日志"
-            description="级别由服务端写入时确定并随接口下发；页面打开期间按游标增量刷新，前端最多展示最近 1000 行。"
+            description="级别由服务端写入时确定。实时推送，最多展示最近 1000 行。"
           />
         </div>
       )}
@@ -214,7 +146,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
         </div>
 
         <Space size={8}>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={fetchRecentLogs}>
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={reload}>
             刷新最近日志
           </Button>
           <Button
@@ -222,7 +154,7 @@ export default function SystemLogsPageView({ embedded = false }: SystemLogsPageV
             icon={autoRefresh ? <PauseCircleOutlined /> : <PlayCircleOutlined />}
             onClick={() => setAutoRefresh((value) => !value)}
           >
-            {autoRefresh ? "暂停刷新" : "恢复刷新"}
+            {autoRefresh ? "暂停推送" : "恢复推送"}
           </Button>
           <Button icon={<CopyOutlined />} onClick={copyLogs} disabled={filteredEntries.length === 0}>
             复制日志

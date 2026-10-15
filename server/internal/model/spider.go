@@ -15,7 +15,7 @@ const (
 	TaskModelRetryCollect  = 2 // 定期清理失败采集记录并重试
 	TaskModelOrphanClean   = 3 // 片库冗余数据与孤儿清理
 	TaskModelLogClean      = 4 // 自动清理过期运行日志
-	TaskModelBannerAuto    = 5 // 首页轮播自动智能排片
+	TaskModelBannerAuto    = 5 // 按已保存配方定时替换首页轮播
 )
 
 // 采集触发方式常量。
@@ -198,8 +198,9 @@ type FilmSourceListItem struct {
 	FilmSource
 	LastCollectTime *time.Time       `json:"lastCollectTime,omitempty"`
 	Progress        *CollectProgress `json:"progress,omitempty"`
-	ProxyEnabled    bool             `json:"proxyEnabled"`  // 是否启用了网络代理
-	CategoryReady   bool             `json:"categoryReady"` // 该站是否已有分类副本，没有则不能采集
+	ProxyEnabled    bool             `json:"proxyEnabled"`    // 是否启用了网络代理
+	CategoryReady   bool             `json:"categoryReady"`   // 该站是否已有分类副本，没有则不能采集
+	CategorySyncing bool             `json:"categorySyncing"` // 该站是否正在采集分类
 }
 
 type Option struct {

@@ -37,7 +37,9 @@ export function useCollectSort(
       sortConfirmRef.current?.destroy();
       sortConfirmRef.current = modal.confirm({
         title: "保存顺序？",
-        content: isPrimaryChanged && nextPrimary ? `首选站改为「${nextPrimary.name}」` : undefined,
+        content: isPrimaryChanged && nextPrimary
+          ? `主站改为「${nextPrimary.name}」。将清空轮播和排片配置，并关闭定时排片`
+          : undefined,
         okText: "保存",
         cancelText: "取消",
         centered: true,
@@ -51,7 +53,7 @@ export function useCollectSort(
             if (resp.code === 0) {
               pendingSortRef.current = null;
               message.success({
-                content: isPrimaryChanged && nextPrimary ? `首选站：${nextPrimary.name}` : "顺序已保存",
+                content: isPrimaryChanged && nextPrimary ? `主站：${nextPrimary.name}` : "顺序已保存",
                 key: "collect-sort",
               });
               return;

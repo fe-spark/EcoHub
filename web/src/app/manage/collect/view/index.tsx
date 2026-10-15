@@ -18,72 +18,81 @@ import { useCollectCleanup } from "./use-collect-cleanup";
 import { useCollectBatchActions } from "./use-collect-batch-actions";
 import { useCollectBatchRunner } from "./use-collect-batch-runner";
 import { useCollectSort } from "./use-collect-sort";
+import { useCollectSourceForm } from "./use-collect-source-form";
 import {
   isActiveCollectStatus,
-  COLLECT_SOURCE_WARN_COUNT,
   type CollectListItemResponse,
   type CollectProgress,
   type FilmSource,
   makeStartingProgress,
   normalizeSource,
-  SOURCE_FORM_DEFAULTS,
-  type SourceFormValues,
 } from "./types";
 import styles from "./index.module.less";
 
 export default function CollectManagePageView() {
   const router = useRouter();
-  const { message, modal } = useAppMessage();
+  const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
-
-  const [sourceModalMode, setSourceModalMode] = useState<"add" | "edit">("add");
-  const [sourceModalOpen, setSourceModalOpen] = useState(false);
-  const [sourceInitialValues, setSourceInitialValues] = useState<SourceFormValues>(SOURCE_FORM_DEFAULTS);
-  const [sourceFormNonce, setSourceFormNonce] = useState(0);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [testing, setTesting] = useState(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
 
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
 
-  const getCollectList = useCallback(async () => {
-    setLoading(true);
-    try {
-      const resp = await ApiGet("/manage/collect/list");
-      if (!mountedRef.current) return;
-      if (resp.code === 0) {
-        const rawData = Array.isArray(resp.data) ? resp.data : [];
-        setSiteList((current) => {
-          const cdMap = new Map(current.map((item) => [item.id, item.cd]));
-          const normalizedList = rawData.map((item: CollectListItemResponse) => {
-            const normalized = normalizeSource(item);
-            if (cdMap.has(item.id) && cdMap.get(item.id)) {
-              normalized.cd = cdMap.get(item.id);
-            }
-            return normalized;
+  const pendingCategoryStatusRef = useRef<Map<string, string>>(new Map());
+
+  const getCollectList = useCallback(
+    async (createdId?: string) => {
+      setLoading(true);
+      try {
+        const resp = await ApiGet("/manage/collect/list");
+        if (!mountedRef.current) return;
+        if (resp.code === 0) {
+          const rawData = Array.isArray(resp.data) ? resp.data : [];
+          setSiteList((current) => {
+            const cdMap = new Map(current.map((item) => [item.id, item.cd]));
+            const normalizedList = rawData.map((item: CollectListItemResponse) => {
+              const normalized = normalizeSource(item);
+              if (cdMap.has(item.id) && cdMap.get(item.id)) {
+                normalized.cd = cdMap.get(item.id);
+              }
+              const pendingStatus = pendingCategoryStatusRef.current.get(item.id);
+              if (pendingStatus) {
+                normalized.categorySyncing = pendingStatus === "syncing";
+                if (pendingStatus === "ready") normalized.categoryReady = true;
+                if (pendingStatus === "failed") normalized.categoryReady = false;
+              }
+              return normalized;
+            });
+            const pending = pendingSortRef.current;
+            if (!pending) return normalizedList;
+            const freshMap = new Map(normalizedList.map((item) => [item.id, item]));
+            return current.map((item) => {
+              const fresh = freshMap.get(item.id);
+              if (!fresh) return item;
+              return { ...fresh, isPrimary: item.isPrimary };
+            });
           });
-          const pending = pendingSortRef.current;
-          if (!pending) return normalizedList;
-          const freshMap = new Map(normalizedList.map((item) => [item.id, item]));
-          return current.map((item) => {
-            const fresh = freshMap.get(item.id);
-            if (!fresh) return item;
-            return { ...fresh, isPrimary: item.isPrimary };
-          });
-        });
-      } else {
-        message.error(resp.msg || "采集站列表加载失败");
+          if (createdId) {
+            setTimeout(() => {
+              document.getElementById(`source-card-${createdId}`)?.scrollIntoView({
+                behavior: "smooth",
+                block: "center",
+              });
+            }, 100);
+          }
+        } else {
+          message.error(resp.msg || "采集站列表加载失败");
+        }
+      } catch {
+        // 拦截器已处理
+      } finally {
+        if (mountedRef.current) setLoading(false);
       }
-    } catch {
-      // 拦截器已处理
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, [message, pendingSortRef]);
+    },
+    [message, pendingSortRef],
+  );
 
   const resetTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
@@ -140,7 +149,55 @@ export default function CollectManagePageView() {
     );
   }, []);
 
-  useCollectStream(handleProgressStream);
+  // SSE 实时分类状态同步
+  const handleCategorySnapshot = useCallback((snapshot: Record<string, string>) => {
+    if (!snapshot || typeof snapshot !== "object") return;
+    setSiteList((current) =>
+      current.map((item) => {
+        const status = snapshot[item.id];
+        if (!status) return item;
+        return {
+          ...item,
+          categorySyncing: status === "syncing",
+          categoryReady: status === "ready" ? true : status === "failed" ? false : item.categoryReady,
+        };
+      }),
+    );
+  }, []);
+
+  const handleCategoryStatus = useCallback(
+    (evt: { sourceId: string; status: string }) => {
+      if (!evt || !evt.sourceId) return;
+      pendingCategoryStatusRef.current.set(evt.sourceId, evt.status);
+      setSiteList((current) => {
+        const target = current.find((item) => item.id === evt.sourceId);
+        if (target?.categorySyncing) {
+          if (evt.status === "ready") {
+            message.success("分类获取成功");
+          } else if (evt.status === "failed") {
+            message.error("分类获取失败");
+          }
+        }
+        return current.map((item) =>
+          item.id === evt.sourceId
+            ? {
+                ...item,
+                categorySyncing: evt.status === "syncing",
+                categoryReady:
+                  evt.status === "ready" ? true : evt.status === "failed" ? false : item.categoryReady,
+              }
+            : item,
+        );
+      });
+    },
+    [message],
+  );
+
+  useCollectStream({
+    onProgress: handleProgressStream,
+    onCategorySnapshot: handleCategorySnapshot,
+    onCategoryStatus: handleCategoryStatus,
+  });
 
   const {
     cleanupOpen,
@@ -232,97 +289,57 @@ export default function CollectManagePageView() {
     [updateSiteListItem],
   );
 
-  const openAddForm = () => {
-    void fetchProxyStatus();
-    setSourceModalMode("add");
-    setEditingId(null);
-    setSourceInitialValues(SOURCE_FORM_DEFAULTS);
-    setSourceFormNonce((n) => n + 1);
-    setSourceModalOpen(true);
-  };
+  const {
+    sourceModalMode,
+    sourceModalOpen,
+    setSourceModalOpen,
+    sourceInitialValues,
+    sourceFormNonce,
+    editingId,
+    submitting,
+    testing,
+    openAddDialog,
+    openEditDialog,
+    handleSubmitSource,
+    testApi,
+  } = useCollectSourceForm({
+    siteList,
+    getCollectList,
+    globalSpiderProxyReady,
+    fetchProxyStatus,
+  });
 
-  const openAddDialog = () => {
-    if (siteList.length >= COLLECT_SOURCE_WARN_COUNT) {
-      modal.confirm({
-        title: "采集站过多",
-        content: `已有 ${siteList.length} 个，继续添加？`,
-        okText: "继续",
-        cancelText: "取消",
-        onOk: openAddForm,
-      });
-      return;
-    }
-    openAddForm();
-  };
-
-  const openEditDialog = async (id: string) => {
-    void fetchProxyStatus();
-    setSourceModalMode("edit");
-    setEditingId(id);
-    const resp = await ApiGet("/manage/collect/find", { id });
-    if (resp.code === 0 && resp.data) {
-      setSourceInitialValues({
-        name: String(resp.data.name ?? ""),
-        uri: String(resp.data.uri ?? ""),
-        state: Boolean(resp.data.state),
-        isPosterSource: Boolean(resp.data.isPosterSource),
-        interval: Number(resp.data.interval ?? 0),
-        cd: Number(resp.data.cd > 0 ? resp.data.cd : 24),
-        format: (resp.data.format as "json" | "xml") || "json",
-        domainReplaceRules: String(resp.data.domainReplaceRules ?? ""),
-        proxyCollect: Boolean(resp.data.proxyCollect),
-      });
-      setSourceFormNonce((n) => n + 1);
-      setSourceModalOpen(true);
-      return;
-    }
-    message.error(resp.msg || "获取采集站信息失败");
-  };
-
-  const handleSubmitSource = async (values: SourceFormValues) => {
-    setSubmitting(true);
-    try {
-      const resp = await ApiPost(
-        sourceModalMode === "add" ? "/manage/collect/add" : "/manage/collect/update",
-        sourceModalMode === "add" ? values : { ...values, id: editingId },
-      );
-      if (resp.code === 0) {
-        message.success(resp.msg);
-        setSourceModalOpen(false);
-        await getCollectList();
-        return;
+  const handleSyncCategory = useCallback(
+    async (id: string) => {
+      setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: true } : s)));
+      try {
+        const resp = await ApiPost("/manage/collect/category/sync", { id });
+        const ok = resp.code === 0;
+        if (ok) {
+          message.success(resp.msg || "获取分类成功");
+        } else {
+          message.error(resp.msg || "获取分类失败");
+        }
+        setSiteList((prev) =>
+          prev.map((s) =>
+            s.id === id ? { ...s, categorySyncing: false, categoryReady: ok ? true : false } : s,
+          ),
+        );
+      } catch {
+        message.error("获取分类失败");
+        setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: false } : s)));
       }
-      message.error(resp.msg || "保存采集站失败");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const testApi = async (values: SourceFormValues) => {
-    const shouldUseProxy = Boolean(globalSpiderProxyReady && values.proxyCollect);
-    try {
-      setTesting(true);
-      message.loading({ key: "collect-test", content: shouldUseProxy ? "正在通过代理测试接口..." : "正在直接测试接口..." });
-      const resp = await ApiPost("/manage/collect/test", { ...values, ...(editingId ? { id: editingId } : {}), useProxy: shouldUseProxy });
-      if (resp.code === 0) {
-        message.success({ key: "collect-test", content: resp.msg });
-        return;
-      }
-      message.error({ key: "collect-test", content: resp.msg || "接口测试失败" });
-    } catch {
-      message.error({ key: "collect-test", content: "接口测试失败" });
-    } finally {
-      setTesting(false);
-    }
-  };
+    },
+    [message],
+  );
 
   const startTask = async (record: FilmSource) => {
     if (!record.state) {
-      message.warning("采集站已被禁用");
+      message.warning("已禁用");
       return;
     }
     if (record.categoryReady === false) {
-      message.warning("采集站缺少分类配置");
+      message.warning("不可采集");
       return;
     }
     if (isActiveCollectStatus(record.progress?.status)) {
@@ -406,6 +423,7 @@ export default function CollectManagePageView() {
               onDeleteSource={(id) => void delSource(id)}
               onOpenAddDialog={openAddDialog}
               onSortList={handleSortList}
+              onSyncCategory={handleSyncCategory}
             />
           </div>
         ) : (

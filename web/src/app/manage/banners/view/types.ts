@@ -19,6 +19,9 @@ export type BannerRecord = {
   director?: string;
   isScraped?: boolean;
   tmdbId?: number;
+  mediaType?: string;
+  pendingScrape?: boolean;
+  scrapeState?: "pending" | "scraped" | "miss" | "none";
   source?: string;
   isPinned?: boolean;
 };
@@ -27,8 +30,6 @@ export interface BannerSnapshot {
   formValues: BannerFormValues;
   selectedFilm: FilmOption | null;
 }
-
-export const MAX_BANNER_COUNT = 12;
 
 export type BannerFormValues = {
   mid?: number;
