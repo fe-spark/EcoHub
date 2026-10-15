@@ -29,7 +29,16 @@ function normalizeLevel(level?: string): LogLevel {
 
 function appendBoundedEntries(prev: LogEntry[], incoming: LogEntry[]) {
   if (incoming.length === 0) return prev;
-  const next = [...prev, ...incoming];
+  const seenSeqs = new Set(prev.map((item) => item.seq).filter((seq) => seq > 0));
+  const dedupedIncoming = incoming.filter((item) => {
+    if (item.seq > 0) {
+      if (seenSeqs.has(item.seq)) return false;
+      seenSeqs.add(item.seq);
+    }
+    return true;
+  });
+  if (dedupedIncoming.length === 0) return prev;
+  const next = [...prev, ...dedupedIncoming];
   if (next.length <= MAX_LOG_LINES) return next;
   return next.slice(next.length - MAX_LOG_LINES);
 }

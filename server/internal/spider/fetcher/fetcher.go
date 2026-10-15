@@ -21,10 +21,12 @@ import (
 const (
 	// pageCountRetryTimes 页数探测默认重试次数。
 	pageCountRetryTimes = 3
-	// filmDetailRetryTimes 分页拉取默认重试次数。
-	filmDetailRetryTimes = 3
+	// filmDetailRetryTimes 分页拉取默认重试次数（1 次初试 + 1 次重试，超时或坏页快速登记入库，不卡死流水线）。
+	filmDetailRetryTimes = 2
 	// rateLimitRetryTimes 命中限流后的重试次数上限。
-	rateLimitRetryTimes = 6
+	rateLimitRetryTimes = 3
+	// singlePageFetchTimeout 单页抓取最大超时，避免深分页慢查询长期卡死 worker。
+	singlePageFetchTimeout = 15 * time.Second
 )
 
 // Deps 采集编排层注入的外部能力；全部为必需项，缺项会在调用处 panic。
@@ -106,12 +108,18 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		r.Ctx = ctx
-		release, err := deps.WaitTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
+		reqCtx, reqCancel := context.WithTimeout(ctx, singlePageFetchTimeout)
+		r.Ctx = reqCtx
+		release, err := deps.WaitTurn(reqCtx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
 		if err != nil {
+			reqCancel()
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
 			return nil, err
 		}
 		list, err := deps.GetFilmDetail(s, r)
+		reqCancel()
 		if err == nil && len(list) > 0 {
 			release(nil)
 			return list, nil
@@ -195,6 +203,22 @@ func GetSourcePageConcurrency(_ *model.FilmSource) int {
 		perSource = base
 	}
 	return perSource
+}
+
+// GetSourcePageConcurrencyMax 获取单站允许的最大并发协程上限（用于弹性 worker 协程池容量）。
+func GetSourcePageConcurrencyMax(_ *model.FilmSource) int {
+	solo := config.CollectPageWorkersSolo
+	if solo <= 0 {
+		solo = config.DefaultCollectPageWorkersSolo
+	}
+	base := config.CollectPageWorkers
+	if base <= 0 {
+		base = config.DefaultCollectPageWorkers
+	}
+	if solo < base {
+		solo = base
+	}
+	return solo
 }
 
 func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {

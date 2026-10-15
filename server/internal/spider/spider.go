@@ -393,8 +393,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	pageWorkerLimit := fetcher.GetSourcePageConcurrency(s)
-	hadWrites, err = fetcher.CollectPages(ctx, pageCount, pageWorkerLimit, s, h, batchCtx)
+	hadWrites, err = fetcher.CollectPages(ctx, pageCount, s, h, batchCtx)
 	if err != nil {
 		return err
 	}

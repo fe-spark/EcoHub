@@ -17,6 +17,7 @@ export interface CollectStreamHandlers {
   onCategorySnapshot?: (snapshot: Record<string, string>) => void;
   onCategoryStatus?: (event: CategorySyncEvent) => void;
   onCategoryReady?: (event: CategoryReadyEvent) => void;
+  onReconnect?: () => void;
 }
 
 /**
@@ -34,6 +35,7 @@ export function useCollectStream(
     let aborted = false;
     let abortController: AbortController | null = null;
     let retryTimer: NodeJS.Timeout | null = null;
+    let hasConnectedOnce = false;
 
     async function connect() {
       if (aborted) return;
@@ -42,6 +44,12 @@ export function useCollectStream(
         await fetchEventStream("/api/manage/collect/progress-stream", {
           method: "GET",
           signal: abortController.signal,
+          onOpen: () => {
+            if (hasConnectedOnce) {
+              handlersRef.current.onReconnect?.();
+            }
+            hasConnectedOnce = true;
+          },
           onMessage: (data: any, _raw: string, event?: string) => {
             if (
               event === "category_snapshot" ||

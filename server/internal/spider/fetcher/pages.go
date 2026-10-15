@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -57,16 +58,93 @@ func shouldLogFailure(failed int) bool {
 	return failed == 1 || failed%failureLogStep == 0
 }
 
-func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit int, s *model.FilmSource, h int, batch Batch) (bool, error) {
+type dynamicLimiter struct {
+	mu      sync.Mutex
+	cond    *sync.Cond
+	running int
+	limitFn func() int
+}
+
+func newDynamicLimiter(limitFn func() int) *dynamicLimiter {
+	l := &dynamicLimiter{limitFn: limitFn}
+	l.cond = sync.NewCond(&l.mu)
+	return l
+}
+
+func (l *dynamicLimiter) startProbe(ctx context.Context, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				l.mu.Lock()
+				l.cond.Broadcast()
+				l.mu.Unlock()
+				return
+			case <-ticker.C:
+				l.mu.Lock()
+				if l.running < l.limitFn() {
+					l.cond.Broadcast()
+				}
+				l.mu.Unlock()
+			}
+		}
+	}()
+}
+
+func (l *dynamicLimiter) acquire(ctx context.Context) error {
+	stop := context.AfterFunc(ctx, func() {
+		l.mu.Lock()
+		l.cond.Broadcast()
+		l.mu.Unlock()
+	})
+	defer stop()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		limit := l.limitFn()
+		if limit <= 0 {
+			limit = 1
+		}
+		if l.running < limit {
+			l.running++
+			return nil
+		}
+		l.cond.Wait()
+	}
+}
+
+func (l *dynamicLimiter) release() {
+	l.mu.Lock()
+	if l.running > 0 {
+		l.running--
+	}
+	l.cond.Broadcast()
+	l.mu.Unlock()
+}
+
+func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, error) {
 	if pageCount <= 0 {
 		return false, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
-	if requestWorkerLimit <= 0 {
-		requestWorkerLimit = 1
+
+	maxWorkers := min(pageCount, GetSourcePageConcurrencyMax(s))
+	if maxWorkers <= 0 {
+		maxWorkers = 1
 	}
-	requestWorkers := min(pageCount, requestWorkerLimit)
+
+	limiter := newDynamicLimiter(func() int {
+		return GetSourcePageConcurrency(s)
+	})
+	limiter.startProbe(ctx, 300*time.Millisecond)
 
 	pages := make(chan int, pageCount)
 	writeCompletions := make(chan scheduler.Completion, pageCount)
@@ -178,8 +256,8 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 	}
 
 	var requestWG sync.WaitGroup
-	requestWG.Add(requestWorkers)
-	for i := 0; i < requestWorkers; i++ {
+	requestWG.Add(maxWorkers)
+	for i := 0; i < maxWorkers; i++ {
 		go func() {
 			defer requestWG.Done()
 			for {
@@ -191,10 +269,17 @@ func CollectPages(parentCtx context.Context, pageCount int, requestWorkerLimit i
 					if !ok {
 						return
 					}
-					progress.Update(s.Id, func(cur *model.CollectProgress) {
-						progress.StampPageRunning(cur, pg)
-					})
-					list, err := GetFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
+					if err := limiter.acquire(ctx); err != nil {
+						markStopped()
+						return
+					}
+					list, err := func() ([]model.MovieDetail, error) {
+						defer limiter.release()
+						progress.Update(s.Id, func(cur *model.CollectProgress) {
+							progress.StampPageRunning(cur, pg)
+						})
+						return GetFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
+					}()
 					if err == nil && len(list) == 0 {
 						err = errors.New("response list is empty")
 					}

@@ -18,9 +18,10 @@ import (
 var requestGates sync.Map
 
 type sourceRequestGate struct {
-	mu            sync.Mutex
-	nextAllowedAt time.Time
-	rateLimitHits int
+	mu               sync.Mutex
+	nextAllowedAt    time.Time
+	rateLimitHits    int
+	lastRateLimitHit time.Time
 }
 
 func ClearLimiter(sourceID string) {
@@ -33,6 +34,7 @@ func ClearLimiter(sourceID string) {
 		gate.mu.Lock()
 		gate.nextAllowedAt = time.Time{}
 		gate.rateLimitHits = 0
+		gate.lastRateLimitHit = time.Time{}
 		gate.mu.Unlock()
 	}
 }
@@ -80,8 +82,8 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 			// 若当前站点处于限流敏感状态(rateLimitHits > 0)，平滑拉长单次请求放行间隔
 			if gate.rateLimitHits > 0 {
 				adaptiveInterval := interval * time.Duration(1+gate.rateLimitHits)
-				if adaptiveInterval > 1500*time.Millisecond {
-					adaptiveInterval = 1500 * time.Millisecond
+				if adaptiveInterval > 1000*time.Millisecond {
+					adaptiveInterval = 1000 * time.Millisecond
 				}
 				if adaptiveInterval > interval {
 					interval = adaptiveInterval
@@ -93,27 +95,31 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 				if requestErr == nil {
 					gate.mu.Lock()
 					if gate.rateLimitHits > 0 {
-						gate.rateLimitHits--
+						gate.rateLimitHits = 0
 					}
 					gate.mu.Unlock()
 					return
 				}
 				if utils.IsRateLimitedErr(requestErr) {
 					gate.mu.Lock()
-					gate.rateLimitHits++
+					now := time.Now()
+					if now.Sub(gate.lastRateLimitHit) > time.Second {
+						gate.rateLimitHits++
+						gate.lastRateLimitHit = now
+					}
 					hits := gate.rateLimitHits
-					if hits > 5 {
-						hits = 5
+					if hits > 3 {
+						hits = 3
 					}
 					backoffFactor := time.Duration(1 << uint(hits-1))
 					cooldown := interval * backoffFactor
 					if cooldown < 1*time.Second {
 						cooldown = 1 * time.Second
 					}
-					if cooldown > 15*time.Second {
-						cooldown = 15 * time.Second
+					if cooldown > 5*time.Second {
+						cooldown = 5 * time.Second
 					}
-					protectUntil := time.Now().Add(cooldown)
+					protectUntil := now.Add(cooldown)
 					if gate.nextAllowedAt.Before(protectUntil) {
 						gate.nextAllowedAt = protectUntil
 					}
