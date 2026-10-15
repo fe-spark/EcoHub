@@ -41,6 +41,7 @@ export default function CollectManagePageView() {
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
 
   const pendingCategoryStatusRef = useRef<Map<string, string>>(new Map());
+  const syncingSourcesRef = useRef<Set<string>>(new Set());
 
   const getCollectList = useCallback(
     async (createdId?: string) => {
@@ -169,16 +170,22 @@ export default function CollectManagePageView() {
     (evt: { sourceId: string; status: string }) => {
       if (!evt || !evt.sourceId) return;
       pendingCategoryStatusRef.current.set(evt.sourceId, evt.status);
-      setSiteList((current) => {
-        const target = current.find((item) => item.id === evt.sourceId);
-        if (target?.categorySyncing) {
+
+      if (evt.status === "syncing") {
+        syncingSourcesRef.current.add(evt.sourceId);
+      } else if (evt.status === "ready" || evt.status === "failed") {
+        if (syncingSourcesRef.current.has(evt.sourceId)) {
+          syncingSourcesRef.current.delete(evt.sourceId);
           if (evt.status === "ready") {
-            message.success("分类获取成功");
-          } else if (evt.status === "failed") {
-            message.error("分类获取失败");
+            message.success({ key: `category-sync-${evt.sourceId}`, content: "分类获取成功" });
+          } else {
+            message.error({ key: `category-sync-${evt.sourceId}`, content: "分类获取失败" });
           }
         }
-        return current.map((item) =>
+      }
+
+      setSiteList((current) =>
+        current.map((item) =>
           item.id === evt.sourceId
             ? {
                 ...item,
@@ -187,8 +194,8 @@ export default function CollectManagePageView() {
                   evt.status === "ready" ? true : evt.status === "failed" ? false : item.categoryReady,
               }
             : item,
-        );
-      });
+        ),
+      );
     },
     [message],
   );
@@ -311,14 +318,18 @@ export default function CollectManagePageView() {
 
   const handleSyncCategory = useCallback(
     async (id: string) => {
+      syncingSourcesRef.current.add(id);
       setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: true } : s)));
       try {
         const resp = await ApiPost("/manage/collect/category/sync", { id });
         const ok = resp.code === 0;
-        if (ok) {
-          message.success(resp.msg || "获取分类成功");
-        } else {
-          message.error(resp.msg || "获取分类失败");
+        if (syncingSourcesRef.current.has(id)) {
+          syncingSourcesRef.current.delete(id);
+          if (ok) {
+            message.success({ key: `category-sync-${id}`, content: "分类获取成功" });
+          } else {
+            message.error({ key: `category-sync-${id}`, content: resp.msg || "分类获取失败" });
+          }
         }
         setSiteList((prev) =>
           prev.map((s) =>
@@ -326,7 +337,8 @@ export default function CollectManagePageView() {
           ),
         );
       } catch {
-        message.error("获取分类失败");
+        syncingSourcesRef.current.delete(id);
+        message.error({ key: `category-sync-${id}`, content: "分类获取失败" });
         setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: false } : s)));
       }
     },
