@@ -16,10 +16,6 @@ export async function getFilmClassTree(sourceId = "") {
   };
 }
 
-export async function resetFilmClassTree() {
-  return ApiPost("/manage/film/class/collect", {});
-}
-
 export async function saveFilmClassTree(children: FilmClassNode[], sourceId: string) {
   return ApiPost("/manage/film/class/tree/save", { children, sourceId });
 }

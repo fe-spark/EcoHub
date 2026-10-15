@@ -5,54 +5,7 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"server/internal/model"
-	"server/internal/repository"
 )
-
-func TestBatchScrapeBannersStream_EmptyBanners(t *testing.T) {
-	// 保存旧轮播
-	oldBanners := repository.GetBanners()
-	defer func() {
-		_ = repository.SaveBanners(oldBanners)
-	}()
-
-	_ = repository.SaveBanners(model.Banners{})
-
-	var events []BatchScrapeProgressEvent
-	var mu sync.Mutex
-	err := ManageSvc.BatchScrapeBannersStream(context.Background(), func(evt BatchScrapeProgressEvent) {
-		mu.Lock()
-		defer mu.Unlock()
-		events = append(events, evt)
-	})
-
-	if err != nil {
-		t.Fatalf("expected nil error on empty banners, got: %v", err)
-	}
-
-	if len(events) != 1 || events[0].Event != "done" {
-		t.Fatalf("expected 1 done event, got %+v", events)
-	}
-}
-
-func TestBatchScrapeBannersStream_CanceledContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // 预先取消
-
-	doneCh := make(chan struct{})
-	go func() {
-		defer close(doneCh)
-		_ = ManageSvc.BatchScrapeBannersStream(ctx, func(evt BatchScrapeProgressEvent) {})
-	}()
-
-	select {
-	case <-doneCh:
-		// 正常退出，未发生死锁
-	case <-time.After(2 * time.Second):
-		t.Fatalf("BatchScrapeBannersStream deadlocked on canceled context")
-	}
-}
 
 func TestOneClickGenerateDeckStream_CanceledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())

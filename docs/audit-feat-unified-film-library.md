@@ -19,7 +19,7 @@
 - 采集源成员用 `FilmHasPlaySourceSQL()`：`EXISTS` 子查询 `film_source_playlists`，条件是 `line_kind = play`。
 - 活跃版本固定为内存/Redis 中的 `live`（`SnapshotActiveVersionKey`），只当缓存世代，不再按版本复制宽行。
 - 采集页事务只写 `film_index`、`movie_match_keys`、`movie_source_mappings`、`film_source_playlists`，隔离级别 `READ COMMITTED`。
-- 页提交后 mid 进入可见性缓冲：首选站 300 条 / 3 秒，备用站 1000 条 / 10 秒，单窗最多 1000。窗口刷出时增量更新内存检索索引、搜索标签，并以 5 秒防抖清 Redis。
+- 页提交后 mid 进入可见性缓冲：主站 300 条 / 3 秒，备用站 1000 条 / 10 秒，单窗最多 1000。窗口刷出时增量更新内存检索索引、搜索标签，并以 5 秒防抖清 Redis。
 
 仍挂着旧模型的部分见第 5 节。
 
@@ -226,7 +226,7 @@ flowchart TD
 - `mid` 自增不会复用，但软删行仍占主键。
 - `CleanOrphanMatchKeysAndMappings` 用 `mid NOT IN (film_index)`。GORM 默认排除软删行，匹配键会被清掉，这是对的。
 - 孤儿播放列表同样把软删影片的线路当成孤儿再删一次。
-- 列表 `EXISTS` 看不到已删线路，影片从首选站列表消失，档案行仍在。
+- 列表 `EXISTS` 看不到已删线路，影片从主站列表消失，档案行仍在。
 
 清库 `FilmZero` 是 `TRUNCATE`，不受软删除影响。单片级联删除则不是。
 

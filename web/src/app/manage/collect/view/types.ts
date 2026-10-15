@@ -15,6 +15,8 @@ export interface FilmSource {
   proxyCollect?: boolean;
   /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
   categoryReady?: boolean;
+  /** 该站当前是否正在采集分类 */
+  categorySyncing?: boolean;
   createdAt?: string;
 }
 
@@ -209,6 +211,8 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     lastCollectTime: item.lastCollectTime,
     progress: item.progress ?? null,
     proxyCollect: Boolean(item.proxyCollect),
+    categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,
+    categorySyncing: Boolean(item.categorySyncing),
     createdAt: item.createdAt,
   };
 }

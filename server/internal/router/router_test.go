@@ -78,21 +78,20 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("POST /api/manage/spider/clear should forbid normal user, got %d", wNormalClear.Code)
 	}
 
-	// 3. /api/manage/spider/clear/progress MUST forbid non-admin
+	// 3. Reset progress stream is admin-only
 	wNormalProg := performReq(http.MethodGet, "/api/manage/spider/clear/progress", normalToken)
 	if wNormalProg.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/spider/clear/progress should forbid normal user, got %d", wNormalProg.Code)
+		t.Errorf("GET /api/manage/spider/clear/progress should forbid non-admin, got %d", wNormalProg.Code)
+	}
+	wAdminProg := performReq(http.MethodGet, "/api/manage/spider/clear/progress", adminToken)
+	if wAdminProg.Code == http.StatusForbidden {
+		t.Errorf("GET /api/manage/spider/clear/progress should allow admin, got %d", wAdminProg.Code)
 	}
 
-	// 4. Admin user should be allowed through to all admin endpoints
+	// 4. Admin user should be allowed through to the stats endpoint
 	wAdminClearStats := performReq(http.MethodGet, "/api/manage/spider/clear/stats", adminToken)
 	if wAdminClearStats.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/spider/clear/stats should allow admin, got %d", wAdminClearStats.Code)
-	}
-
-	wAdminProgress := performReq(http.MethodGet, "/api/manage/spider/clear/progress", adminToken)
-	if wAdminProgress.Code == http.StatusForbidden {
-		t.Errorf("GET /api/manage/spider/clear/progress should allow admin, got %d", wAdminProgress.Code)
 	}
 
 	// 5. /api/manage/access/status allows any authenticated manage user (non-admin)
@@ -101,7 +100,7 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/status should allow normal manage user, got %d", wNormalAccessStatus.Code)
 	}
 
-	// 6. Access stats and clean MUST forbid non-admin
+	// 5. Access stats and clean MUST forbid non-admin
 	wNormalAccessStats := performReq(http.MethodGet, "/api/manage/access/stats", normalToken)
 	if wNormalAccessStats.Code != http.StatusForbidden {
 		t.Errorf("GET /api/manage/access/stats should forbid normal user, got %d", wNormalAccessStats.Code)
@@ -117,7 +116,7 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/overview should forbid normal user, got %d", wNormalAccessOverview.Code)
 	}
 
-	// 7. Admin user should be allowed through to access admin endpoints
+	// 6. Admin user should be allowed through to access admin endpoints
 	wAdminAccessStatus := performReq(http.MethodGet, "/api/manage/access/status", adminToken)
 	if wAdminAccessStatus.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/access/status should allow admin, got %d", wAdminAccessStatus.Code)
@@ -128,19 +127,23 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/stats should allow admin, got %d", wAdminAccessStats.Code)
 	}
 
-	// 8. System settings routes: system logs MUST forbid non-admin
+	// 7. System settings routes: system logs MUST forbid non-admin
 	wNormalLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", normalToken)
 	if wNormalLogsDelta.Code != http.StatusForbidden {
 		t.Errorf("GET /api/manage/system/logs/delta should forbid normal user, got %d", wNormalLogsDelta.Code)
 	}
+	wNormalLogsStream := performReq(http.MethodGet, "/api/manage/system/logs/stream", normalToken)
+	if wNormalLogsStream.Code != http.StatusForbidden {
+		t.Errorf("GET /api/manage/system/logs/stream should forbid normal user, got %d", wNormalLogsStream.Code)
+	}
 
-	// 9. Admin user allowed through to system logs
+	// 8. Admin user allowed through to system logs
 	wAdminLogsDelta := performReq(http.MethodGet, "/api/manage/system/logs/delta", adminToken)
 	if wAdminLogsDelta.Code == http.StatusForbidden {
 		t.Errorf("GET /api/manage/system/logs/delta should allow admin, got %d", wAdminLogsDelta.Code)
 	}
 
-	// 10. Notify routes: GET config allows normal manage user, POST update/test forbids non-admin
+	// 9. Notify routes: GET config allows normal manage user, POST update/test forbids non-admin
 	wNormalNotifyGet := performReq(http.MethodGet, "/api/manage/notify/config", normalToken)
 	if wNormalNotifyGet.Code == http.StatusForbidden || wNormalNotifyGet.Code == http.StatusUnauthorized {
 		t.Errorf("GET /api/manage/notify/config should allow normal manage user, got %d", wNormalNotifyGet.Code)

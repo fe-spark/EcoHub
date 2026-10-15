@@ -37,7 +37,7 @@ const quickEntries: QuickEntryItem[] = [
     key: "collect",
     icon: DatabaseOutlined,
     title: "采集中心",
-    description: "配置采集站顺序、首选站与批量采集任务。",
+    description: "配置采集站顺序、主站与批量采集任务。",
     href: "/manage/collect",
   },
   {

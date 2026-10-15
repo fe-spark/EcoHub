@@ -20,10 +20,6 @@ func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
 	tl := repository.GetAllFilmTask()
 
 	for _, t := range tl {
-		// 忽略可能残留的已废弃轮播定时任务
-		if t.Id == model.TaskIDBannerAuto {
-			continue
-		}
 		e := spider.GetEntryByTaskId(t.Id)
 		var preV, nextV string
 		// 只有任务开启时，Next 才有意义
@@ -57,6 +53,9 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
+	}
+	if state && ft.Model == model.TaskModelBannerAuto && !bannerQuickHasQuotas() {
+		return fmt.Errorf("请配置排片数量")
 	}
 	ft.State = state
 	if err := repository.UpdateFilmTask(ft); err != nil {

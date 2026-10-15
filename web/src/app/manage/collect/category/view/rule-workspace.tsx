@@ -318,7 +318,6 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
       </Space>
 
       <Table<MappingRuleRecord>
-        bordered
         rowKey="id"
         columns={ruleColumns}
         dataSource={rules}

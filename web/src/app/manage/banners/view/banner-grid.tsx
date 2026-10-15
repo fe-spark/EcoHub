@@ -19,7 +19,7 @@ import {
   sortableKeyboardCoordinates,
   rectSortingStrategy,
 } from "@dnd-kit/sortable";
-import { BannerRecord, MAX_BANNER_COUNT } from "./types";
+import { BannerRecord } from "./types";
 import { BannerCard, SortableBannerCard } from "./banner-card";
 import styles from "./index.module.less";
 
@@ -86,7 +86,7 @@ export default function BannerGrid({
     ? banners.findIndex((b) => b.id === activeBanner.id)
     : 0;
 
-  const canAdd = canWrite && banners.length < MAX_BANNER_COUNT;
+  const canAdd = canWrite;
 
   return (
     <DndContext
@@ -125,7 +125,7 @@ export default function BannerGrid({
               <PlusOutlined className={styles.addBannerIcon} />
               <span className={styles.addBannerLabel}>添加排片影片</span>
               <span className={styles.addBannerHint}>
-                已排片 {banners.length} / {MAX_BANNER_COUNT} 部，支持从片库检索添加
+                已排片 {banners.length} 部
               </span>
             </button>
           )}

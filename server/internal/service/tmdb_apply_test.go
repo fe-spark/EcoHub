@@ -336,3 +336,38 @@ func TestApplyDetailWithOptions_SelectiveFields(t *testing.T) {
 		t.Errorf("reverted isScraped should be false")
 	}
 }
+
+func TestRevertDetails_BatchAndSingle(t *testing.T) {
+	setupTMDBApplyTestDB(t)
+
+	// 初始化两条已刮削数据
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2001, DbId: 1},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片1"},
+	})
+	db.Mdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2002, DbId: 2},
+		FilmIndexContent:  model.FilmIndexContent{Name: "片2"},
+	})
+	db.Mdb.Create(&model.FilmTMDBScrape{
+		Mid:    2001,
+		TmdbID: 101,
+		Status: 1,
+	})
+	db.Mdb.Create(&model.FilmTMDBScrape{
+		Mid:    2002,
+		TmdbID: 102,
+		Status: 1,
+	})
+
+	// 1. 批量还原
+	if err := TMDBSvc.RevertDetails([]int64{2001, 2002}); err != nil {
+		t.Fatalf("batch revert failed: %v", err)
+	}
+
+	var count int64
+	db.Mdb.Model(&model.FilmTMDBScrape{}).Where("mid IN ?", []int64{2001, 2002}).Count(&count)
+	if count != 0 {
+		t.Fatalf("expected 0 scrape records, got %d", count)
+	}
+}

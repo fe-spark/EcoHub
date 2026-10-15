@@ -17,8 +17,6 @@ import {
   ArrowDownOutlined,
   HolderOutlined,
   StarFilled,
-  CheckCircleOutlined,
-  ExclamationCircleOutlined,
 } from "@ant-design/icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -55,28 +53,15 @@ export function BannerCard({
   const posterUrl =
     record.picture || record.poster || record.customPicture || FALLBACK_IMG;
 
-  const hasRealSlide = Boolean(
-    record.pictureSlide &&
-      record.pictureSlide.trim() !== "" &&
-      record.pictureSlide !== record.picture &&
-      record.pictureSlide !== record.poster,
-  );
-
   return (
     <div className={styles.bannerCard}>
-      {/* 头部：宽幅头部，片名有充足宽度展示，支持抓取拖拽排序 */}
+      {/* 头部：拖拽手柄、序号及操作区 */}
       <div className={styles.cardHead} {...headerDragProps}>
         <div className={styles.cardHeadLeft}>
           <HolderOutlined className={styles.dragHandleIcon} />
           <Tag color="purple" className={styles.orderTag}>
             #{String(index + 1).padStart(2, "0")}
           </Tag>
-          <Text
-            className={styles.cardFilmName}
-            ellipsis={{ tooltip: record.name }}
-          >
-            {record.name}
-          </Text>
         </div>
 
         <div
@@ -90,7 +75,7 @@ export function BannerCard({
               icon={<ArrowUpOutlined style={{ fontSize: 11 }} />}
               disabled={!canWrite || isFirst}
               onClick={() => onMoveOrder(index, "up")}
-              title="上移位次"
+              title="上移"
             />
             <Button
               size="small"
@@ -98,11 +83,11 @@ export function BannerCard({
               icon={<ArrowDownOutlined style={{ fontSize: 11 }} />}
               disabled={!canWrite || isLast}
               onClick={() => onMoveOrder(index, "down")}
-              title="下移位次"
+              title="下移"
             />
           </Space.Compact>
 
-          <Tooltip title="编辑 / 查看横图与详情">
+          <Tooltip title="编辑">
             <Button
               size="small"
               type="text"
@@ -113,7 +98,7 @@ export function BannerCard({
           </Tooltip>
 
           <Popconfirm
-            title="确认从轮播移除该影片？"
+            title="确认移除？"
             onConfirm={() => onDelete(record.id)}
             okText="确定"
             cancelText="取消"
@@ -159,7 +144,17 @@ export function BannerCard({
         </div>
 
         <div className={styles.cardMainInfo}>
-          {/* 标签栏：分类、年份、海报来源、横图就绪状态 */}
+          {/* 影视标题 */}
+          <div className={styles.cardTitleRow}>
+            <Paragraph
+              className={styles.cardFilmTitle}
+              ellipsis={{ rows: 2, tooltip: record.name }}
+            >
+              {record.name}
+            </Paragraph>
+          </div>
+
+          {/* 标签栏：分类、年份、海报来源等 */}
           <div className={styles.cardTagsRow}>
             {record.cName && (
               <Tag color="orange" style={{ borderRadius: 4, margin: 0 }}>
@@ -171,39 +166,10 @@ export function BannerCard({
                 {record.year}
               </Tag>
             ) : null}
-            {record.isCustomPic ? (
+            {record.isCustomPic && (
               <Tag color="cyan" style={{ borderRadius: 4, margin: 0 }}>
                 自定义封面
               </Tag>
-            ) : record.isScraped ? (
-              <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
-                跟随刮削
-              </Tag>
-            ) : (
-              <Tag color="default" style={{ borderRadius: 4, margin: 0 }}>
-                跟随海报源
-              </Tag>
-            )}
-            {hasRealSlide ? (
-              <Tooltip title="横屏大图已就绪，点击卡片可在详情中查看">
-                <Tag
-                  color="success"
-                  icon={<CheckCircleOutlined />}
-                  style={{ borderRadius: 4, margin: 0 }}
-                >
-                  横图就绪
-                </Tag>
-              </Tooltip>
-            ) : (
-              <Tooltip title="暂无独立横图，点击卡片可单独上传或刮削补齐">
-                <Tag
-                  color="warning"
-                  icon={<ExclamationCircleOutlined />}
-                  style={{ borderRadius: 4, margin: 0 }}
-                >
-                  无横图
-                </Tag>
-              </Tooltip>
             )}
           </div>
 
@@ -237,7 +203,7 @@ export function BannerCard({
             </Paragraph>
           ) : (
             <div className={styles.blurbTextEmpty}>
-              点击卡片可查看详情或替换横版幻灯图...
+              暂无简介
             </div>
           )}
 

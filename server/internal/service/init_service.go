@@ -162,10 +162,6 @@ func (s *InitService) CollectCrontabInit() {
 
 // ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
-	// 清理已废弃的轮播自动排片定时任务
-	repository.DelFilmTask(model.TaskIDBannerAuto)
-	spider.RemoveCronByTaskId(model.TaskIDBannerAuto)
-
 	existing := repository.GetAllFilmTask()
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
@@ -207,6 +203,8 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
 	case 4:
 		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
+	case model.TaskModelBannerAuto:
+		cid, err = spider.AddBannerQuickCron(task.Id, task.Spec)
 	default:
 		return
 	}
@@ -244,5 +242,10 @@ func defaultFilmTasks() []model.FilmCollectTask {
 		Model: 4, State: true, Remark: "自动清理过期运行日志",
 	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask}
+	bannerTask := model.FilmCollectTask{
+		Id: model.TaskIDBannerAuto, Time: 0, Spec: "0 0 4 * * *",
+		Model: model.TaskModelBannerAuto, State: false, Remark: "按已保存配方替换首页轮播",
+	}
+
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, bannerTask}
 }

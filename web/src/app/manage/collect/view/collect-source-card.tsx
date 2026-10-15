@@ -4,8 +4,10 @@ import {
   DisconnectOutlined,
   EditOutlined,
   GlobalOutlined,
+  LoadingOutlined,
   PoweroffOutlined,
   StopOutlined,
+  SyncOutlined,
 } from "@ant-design/icons";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -45,9 +47,10 @@ interface CollectSourceCardProps {
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
+  onSyncCategory?: (id: string) => void;
 }
 
-/** 采集站卡片（仅顶部 Header 可拖拽，首位启用站点自动展现首选站徽章） */
+/** 采集站卡片（仅顶部 Header 可拖拽，首位启用站点自动展现主站徽章） */
 export default function CollectSourceCard({
   record,
   selected,
@@ -60,6 +63,7 @@ export default function CollectSourceCard({
   onTerminateTask,
   onEditSource,
   onDeleteSource,
+  onSyncCategory,
 }: CollectSourceCardProps) {
   const isRunning = active;
   const { canWrite } = useManagePermission();
@@ -87,6 +91,7 @@ export default function CollectSourceCard({
         >
           <Checkbox
             checked={selected}
+            disabled={Boolean(record.categorySyncing || record.categoryReady === false)}
             onChange={(event) => onSelect(record.id, event.target.checked)}
           />
         </span>
@@ -95,7 +100,7 @@ export default function CollectSourceCard({
             <span className={styles.cardName}>{record.name}</span>
             {record.isPrimary ? (
               <Tag color="gold" variant="filled" style={{ marginInlineEnd: 0 }}>
-                首选站
+                主站
               </Tag>
             ) : null}
             {record.isPosterSource ? (
@@ -108,9 +113,18 @@ export default function CollectSourceCard({
                 XML
               </Tag>
             ) : null}
-            {record.categoryReady === false ? (
-              <Tag color="orange" variant="filled" style={{ marginInlineEnd: 0 }}>
-                缺分类
+            {record.categorySyncing ? (
+              <Tag
+                icon={<LoadingOutlined spin />}
+                color="processing"
+                variant="filled"
+                style={{ marginInlineEnd: 0 }}
+              >
+                分类采集中
+              </Tag>
+            ) : record.categoryReady === false ? (
+              <Tag color="error" variant="filled" style={{ marginInlineEnd: 0 }}>
+                不可采集
               </Tag>
             ) : null}
           </div>
@@ -192,7 +206,13 @@ export default function CollectSourceCard({
               <Select
                 size="small"
                 value={record.cd}
-                disabled={!canWrite || isRunning || !record.state}
+                disabled={
+                  !canWrite ||
+                  isRunning ||
+                  !record.state ||
+                  record.categoryReady === false ||
+                  Boolean(record.categorySyncing)
+                }
                 style={{ width: "100%" }}
                 options={collectDuration.map((item) => ({ value: item.time, label: item.label }))}
                 onChange={(value) => {
@@ -236,32 +256,46 @@ export default function CollectSourceCard({
                   </span>
                 </Tooltip>
               )
-            ) : (
-              <Tooltip
-                title={
-                  record.categoryReady === false
-                    ? "该采集站还没有分类，请重新保存后再采集"
-                    : !record.state
-                      ? "该采集站已被禁用，无法发起采集"
-                      : undefined
-                }
+            ) : record.categorySyncing ? (
+              <Button icon={<LoadingOutlined spin />} disabled>
+                分类采集中
+              </Button>
+            ) : record.categoryReady === false ? (
+              <Button
+                type="primary"
+                icon={<SyncOutlined />}
+                disabled={!canWrite}
+                onClick={() => onSyncCategory?.(record.id)}
               >
+                获取分类
+              </Button>
+            ) : (
+              <Tooltip title={!record.state ? "已禁用" : undefined}>
                 <span>
                   <Button
                     type="primary"
                     icon={<PoweroffOutlined />}
                     onClick={() => onStartTask(record)}
-                    disabled={!canWrite || !record.state || record.categoryReady === false}
+                    disabled={!canWrite || !record.state}
                   >
                     开始采集
                   </Button>
                 </span>
               </Tooltip>
             )}
+            {!record.categorySyncing && record.categoryReady !== false ? (
+              <Tooltip title="重新获取分类">
+                <Button
+                  icon={<SyncOutlined />}
+                  disabled={!canWrite || isRunning}
+                  onClick={() => onSyncCategory?.(record.id)}
+                />
+              </Tooltip>
+            ) : null}
             <Tooltip title={isRunning ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}
-                disabled={!canWrite || isRunning}
+                disabled={!canWrite || isRunning || Boolean(record.categorySyncing)}
                 onClick={() => onEditSource(record.id)}
               />
             </Tooltip>
@@ -271,7 +305,11 @@ export default function CollectSourceCard({
               </Tooltip>
             ) : (
               <Popconfirm title="删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
-                <Button danger icon={<DeleteOutlined />} disabled={!canWrite} />
+                <Button
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={!canWrite || Boolean(record.categorySyncing)}
+                />
               </Popconfirm>
             )}
           </div>
@@ -305,6 +343,7 @@ export function SortableCollectSourceCard(props: CollectSourceCardProps) {
     <div
       ref={setNodeRef}
       style={style}
+      id={`source-card-${props.record.id}`}
       className={isDragging ? styles.dragSourcePlaceholder : undefined}
     >
       <CollectSourceCard

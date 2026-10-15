@@ -1,14 +1,12 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   Table,
   Button,
   Space,
   Tooltip,
   Pagination,
-  Modal,
-  Form,
   Input,
   Select,
   Tag,
@@ -21,13 +19,10 @@ import {
   PlusOutlined,
   EditOutlined,
   DeleteOutlined,
-  LockOutlined,
-  MailOutlined,
   CrownOutlined,
   EyeOutlined,
   CheckCircleOutlined,
   StopOutlined,
-  UserAddOutlined,
   SearchOutlined,
   ReloadOutlined,
 } from "@ant-design/icons";
@@ -35,9 +30,9 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import { UserModal } from "./user-modal";
 import styles from "./index.module.less";
 
-const { Option } = Select;
 const { Text } = Typography;
 
 interface UsersPageViewProps {
@@ -59,8 +54,6 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
-  const editingUserRef = useRef<any>(null);
-  const [form] = Form.useForm();
   const { message } = useAppMessage();
 
   const fetchCurrentUser = useCallback(async () => {
@@ -135,30 +128,12 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
     }
   };
 
-  const fillAccountForm = (record: any) => {
-    if (!record) {
-      form.resetFields();
-      return;
-    }
-    form.setFieldsValue({
-      userName: record.userName ?? "",
-      nickName: record.nickName ?? "",
-      email: record.email ?? "",
-      gender: record.gender ?? 0,
-      status: record.status ?? 0,
-      password: "",
-      role: record.role ?? (record.isAdmin ? 1 : record.isVisitor ? 2 : 0),
-    });
-  };
-
   const handleAdd = () => {
-    editingUserRef.current = null;
     setEditingUser(null);
     setIsModalOpen(true);
   };
 
   const handleEdit = (record: any) => {
-    editingUserRef.current = record;
     setEditingUser(record);
     setIsModalOpen(true);
   };
@@ -177,11 +152,9 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
     }
   };
 
-  const handleModalOk = async () => {
+  const handleSaveUser = async (values: any) => {
+    setLoading(true);
     try {
-      const values = await form.validateFields();
-      setLoading(true);
-
       const url = editingUser ? "/manage/user/update" : "/manage/user/add";
       const payload = editingUser ? { ...values, id: editingUser.id } : values;
 
@@ -390,7 +363,6 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
       </div>
 
       <Table
-        bordered
         columns={columns}
         dataSource={data}
         rowKey="id"
@@ -432,119 +404,14 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         )}
       />
 
-      <Modal
-        title={
-          <Space>
-            <UserAddOutlined style={{ color: "#1677ff" }} />
-            <span>{editingUser ? "编辑账号" : "新增账号"}</span>
-          </Space>
-        }
+      <UserModal
         open={isModalOpen}
-        onOk={handleModalOk}
+        editingUser={editingUser}
+        currentUser={currentUser}
+        loading={loading}
+        onOk={handleSaveUser}
         onCancel={() => setIsModalOpen(false)}
-        afterOpenChange={(open) => {
-          if (open) fillAccountForm(editingUserRef.current);
-        }}
-        confirmLoading={loading}
-        destroyOnHidden
-        width={540}
-      >
-        <Form form={form} layout="vertical" preserve={false}>
-          <Form.Item
-            name="userName"
-            label="用户名"
-            rules={[{ required: true, message: "请输入用户名" }]}
-          >
-            <Input
-              prefix={<UserOutlined />}
-              placeholder="用于登录系统的账号"
-              disabled={!!editingUser}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="password"
-            label={editingUser ? "新密码 (留空表示维持原密码)" : "登录密码"}
-            rules={[{ required: !editingUser, message: "请输入登录密码" }]}
-            extra={editingUser ? "不修改密码请直接留空" : "请设置不少于6位的登录密码"}
-          >
-            <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="请输入密码"
-            />
-          </Form.Item>
-
-          <Form.Item name="nickName" label="显示昵称">
-            <Input placeholder="用户显示的别名或昵称" />
-          </Form.Item>
-
-          <Form.Item
-            name="email"
-            label="电子邮箱"
-            initialValue=""
-            rules={[
-              {
-                validator: (_, value) => {
-                  const text = String(value ?? "").trim();
-                  if (!text || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text)) {
-                    return Promise.resolve();
-                  }
-                  return Promise.reject(new Error("请输入有效的电子邮箱地址"));
-                },
-              },
-            ]}
-          >
-            <Input prefix={<MailOutlined />} placeholder="选填" />
-          </Form.Item>
-
-          <Form.Item name="gender" label="性别" initialValue={0}>
-            <Select>
-              <Option value={0}>保密</Option>
-              <Option value={1}>男</Option>
-              <Option value={2}>女</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="role"
-            label="身份角色"
-            initialValue={0}
-            extra={
-              editingUser?.builtin
-                ? "默认超级用户不可修改角色"
-                : currentUser?.isAdmin
-                  ? "可指定超级用户、普通用户或访客"
-                  : "仅超级用户可指定角色"
-            }
-          >
-            <Select disabled={Boolean(editingUser?.builtin) || !currentUser?.isAdmin}>
-              <Option value={1}>超级用户</Option>
-              <Option value={0}>普通用户</Option>
-              <Option value={2}>访客</Option>
-            </Select>
-          </Form.Item>
-
-          <Form.Item
-            name="status"
-            label="账号状态"
-            initialValue={0}
-            extra={
-              !currentUser?.isAdmin
-                ? "仅超级用户可修改账号状态"
-                : editingUser?.id === currentUser?.id
-                  ? "不能禁用当前登录账号"
-                  : undefined
-            }
-          >
-            <Select disabled={!currentUser?.isAdmin}>
-              <Option value={0}>启用</Option>
-              <Option value={1} disabled={editingUser?.id === currentUser?.id}>
-                禁用
-              </Option>
-            </Select>
-          </Form.Item>
-        </Form>
-      </Modal>
+      />
     </div>
   );
 }

@@ -276,7 +276,6 @@ export default function CronManagePageView() {
       />
 
       <Table
-        bordered
         columns={columns}
         dataSource={taskList}
         rowKey="id"

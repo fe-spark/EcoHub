@@ -1,11 +1,7 @@
 package handler
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
 	"strings"
-	"sync"
 
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -30,10 +26,6 @@ func (h *ManageHandler) BannerAdd(c *gin.Context) {
 	}
 	b.Id = utils.GenerateSalt()
 	bl := service.ManageSvc.GetBanners()
-	if len(bl) >= model.MaxBannerCount {
-		dto.Failed(fmt.Sprintf("已达轮播上限（%d 部）", model.MaxBannerCount), c)
-		return
-	}
 	b.Sort = int64(len(bl) + 1)
 	bl = append(bl, b)
 	if err := service.ManageSvc.SaveBanners(bl); err != nil {
@@ -105,33 +97,24 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 	dto.Success(service.ManageSvc.GetBanners(), "排片卡组已保存并生效", c)
 }
 
-// BannerBatchScrape 一键批量对当前排片列表中缺失横图的影片进行 TMDB 刮削（支持 SSE 实时事件流）
-func (h *ManageHandler) BannerBatchScrape(c *gin.Context) {
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache, no-transform")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
+// BannerQuickConfigGet 读取已保存的一键排片配方。
+func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
+	dto.Success(service.ManageSvc.GetBannerQuickConfig(), "获取排片配置成功", c)
+}
 
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
-		dto.Failed("当前环境不支持流式推送", c)
+// BannerQuickConfigSave 保存一键排片配方。不生成卡组，不替换线上轮播。
+func (h *ManageHandler) BannerQuickConfigSave(c *gin.Context) {
+	var req service.BannerQuickConfigInput
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("排片配置参数异常", c)
 		return
 	}
-	flusher.Flush()
-
-	var writeMu sync.Mutex
-	sendEvent := func(evt service.BatchScrapeProgressEvent) {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		payload, err := json.Marshal(evt)
-		if err != nil {
-			return
-		}
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
-		flusher.Flush()
+	view, err := service.ManageSvc.SaveBannerQuickConfig(req)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
-
-	_ = service.ManageSvc.BatchScrapeBannersStream(c.Request.Context(), sendEvent)
+	dto.Success(view, "配置已保存", c)
 }
 
 // BannerQuickGenerate 一键排片：按选择分类与策略（最热/高分/最新）一键生成排片列表（支持 SSE 实时事件流）
@@ -142,29 +125,28 @@ func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
 		return
 	}
 
-	c.Header("Content-Type", "text/event-stream")
-	c.Header("Cache-Control", "no-cache, no-transform")
-	c.Header("Connection", "keep-alive")
-	c.Header("X-Accel-Buffering", "no")
-
-	flusher, ok := c.Writer.(http.Flusher)
+	stream, ok := openSSE(c)
 	if !ok {
-		dto.Failed("当前环境不支持流式推送", c)
 		return
 	}
-	flusher.Flush()
+	_ = service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, func(evt service.OneClickProgressEvent) {
+		_ = stream.SendData(evt)
+	})
+}
 
-	var writeMu sync.Mutex
-	sendEvent := func(evt service.OneClickProgressEvent) {
-		writeMu.Lock()
-		defer writeMu.Unlock()
-		payload, err := json.Marshal(evt)
-		if err != nil {
-			return
-		}
-		_, _ = fmt.Fprintf(c.Writer, "data: %s\n\n", payload)
-		flusher.Flush()
+// BannerPreviewScrape 排片草稿批量刮削预览。不写片库，确认替换后才落库。
+func (h *ManageHandler) BannerPreviewScrape(c *gin.Context) {
+	var req service.PreviewScrapeReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("刮削参数解析异常", c)
+		return
 	}
 
-	_ = service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, sendEvent)
+	stream, ok := openSSE(c)
+	if !ok {
+		return
+	}
+	_ = service.ManageSvc.PreviewScrapeDeckStream(c.Request.Context(), req.Mids, func(evt service.PreviewScrapeEvent) {
+		_ = stream.SendData(evt)
+	})
 }

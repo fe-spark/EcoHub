@@ -20,6 +20,14 @@ import (
 
 var CronCollect *cron.Cron = CreateCron()
 
+// runBannerQuick 由 service 注入，避免 spider 反向依赖 service。
+var runBannerQuick func() error
+
+// SetBannerQuickRunner 注册定时排片的执行函数。
+func SetBannerQuickRunner(fn func() error) {
+	runBannerQuick = fn
+}
+
 // taskCidMap 运行时内存注册表：task.Id → cron.EntryID
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
 var taskCidMap = make(map[string]cron.EntryID)
@@ -150,6 +158,21 @@ func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
+// AddBannerQuickCron 到点按已保存配方替换首页轮播。
+func AddBannerQuickCron(id, spec string) (cron.EntryID, error) {
+	if err := ValidSpec(spec); err != nil {
+		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
+	}
+	return CronCollect.AddFunc(spec, func() {
+		ft, err := repository.GetFilmTaskById(id)
+		if err != nil {
+			log.Println("BannerQuickCron Exec Failed: ", err)
+			return
+		}
+		executeTask(ft)
+	})
+}
+
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
 	// 1. 获取最新配置
@@ -177,6 +200,8 @@ func ReloadCronTask(id string) error {
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
 	case 4:
 		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
+	case model.TaskModelBannerAuto:
+		cid, err = AddBannerQuickCron(ft.Id, ft.Spec)
 	default:
 		return fmt.Errorf("不支持的定时任务类型: %d", ft.Model)
 	}
@@ -227,6 +252,18 @@ func runTaskBody(ft model.FilmCollectTask) {
 		return
 	case 4: // 系统运行日志清理
 		executeLogCleanTask(ft)
+		return
+	case model.TaskModelBannerAuto:
+		if runBannerQuick == nil {
+			errMsg := fmt.Sprintf("定时任务[%s]未注册排片执行函数", ft.Id)
+			log.Println(errMsg)
+			emitCronFailedNotify(ft.Id, ft.Remark, errMsg)
+			return
+		}
+		if err := runBannerQuick(); err != nil {
+			log.Printf("[BannerSchedule] %v", err)
+			emitCronFailedNotify(ft.Id, ft.Remark, err.Error())
+		}
 		return
 	default:
 		errMsg := fmt.Sprintf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)

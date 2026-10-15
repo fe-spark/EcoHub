@@ -101,16 +101,17 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	return nil
 }
 
+// DelFilms 删除影片（支持单个与批量）
+func (s *FilmService) DelFilms(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	return filmrepo.DelFilmSearchBatch(ids)
+}
+
 // DelFilm 删除分类影片
 func (s *FilmService) DelFilm(id int64) error {
-	filmIndex := filmrepo.GetFilmIndexById(id)
-	if filmIndex == nil || filmIndex.Mid == 0 {
-		return errors.New("影片信息不存在")
-	}
-	if err := filmrepo.DelFilmSearch(id); err != nil {
-		return err
-	}
-	return nil
+	return s.DelFilms([]int64{id})
 }
 
 // GetFilmClassTree 获取影片分类信息

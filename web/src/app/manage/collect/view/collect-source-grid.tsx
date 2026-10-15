@@ -43,6 +43,7 @@ interface CollectSourceGridProps {
   onDeleteSource: (id: string) => void;
   onOpenAddDialog: () => void;
   onSortList: (nextList: FilmSource[]) => void;
+  onSyncCategory?: (id: string) => void;
 }
 
 export default function CollectSourceGrid({
@@ -61,6 +62,7 @@ export default function CollectSourceGrid({
   onDeleteSource,
   onOpenAddDialog,
   onSortList,
+  onSyncCategory,
 }: CollectSourceGridProps) {
   const dndId = useId();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -134,6 +136,7 @@ export default function CollectSourceGrid({
                 onTerminateTask={onTerminateTask}
                 onEditSource={onEditSource}
                 onDeleteSource={onDeleteSource}
+                onSyncCategory={onSyncCategory}
               />
             );
           })}

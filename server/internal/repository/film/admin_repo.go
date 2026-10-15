@@ -19,38 +19,65 @@ import (
 	"gorm.io/gorm"
 )
 
-func DelFilmSearch(id int64) error {
-	info := GetFilmIndexById(id)
+func DelFilmSearchBatch(ids []int64) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	cleanIds := make([]int64, 0, len(ids))
+	seen := make(map[int64]struct{}, len(ids))
+	for _, id := range ids {
+		if id <= 0 {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		cleanIds = append(cleanIds, id)
+	}
+	if len(cleanIds) == 0 {
+		return nil
+	}
+
+	var indexes []model.FilmIndex
+	_ = db.Mdb.Where("mid IN ?", cleanIds).Find(&indexes)
+
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("mid = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Unscoped().Where("mid = ?", id).Delete(&model.FilmIndex{}).Error; err != nil {
+		if err := tx.Unscoped().Where("mid IN ?", cleanIds).Delete(&model.FilmIndex{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid = ?", id).Delete(&model.MovieMatchKey{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.MovieMatchKey{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("global_mid = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		if err := tx.Where("global_mid IN ?", cleanIds).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid = ?", id).Delete(&model.Banner{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.Banner{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("mid = ?", id).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", cleanIds).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
 			return err
 		}
 		return nil
 	})
 
 	if err == nil {
-		snapshot.DeleteActiveSnapshotsByMids(id)
+		snapshot.DeleteActiveSnapshotsByMids(cleanIds...)
 		cache.ClearTVBoxListCache()
-		if info != nil {
-			cache.ClearSearchTagsCache(info.Pid)
+		for _, info := range indexes {
+			if info.Pid > 0 {
+				cache.ClearSearchTagsCache(info.Pid)
+			}
 		}
 	}
 	return err
+}
+
+func DelFilmSearch(id int64) error {
+	return DelFilmSearchBatch([]int64{id})
 }
 
 func ClearMasterDataBySourceIDsFast(sourceIDs ...string) error {

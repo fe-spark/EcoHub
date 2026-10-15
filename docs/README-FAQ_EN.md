@@ -8,17 +8,19 @@
 
 The release image does not ship catalog data. First boot writes default collect sources, but it does not finish a collect by itself. Run collect in the administration panel. The first full collect may take several hours; more sources take longer.
 
-The public site, the admin film list, and TVBox / MacCMS all read the snapshot / in-memory read model published after collect, not the tables while collect is still running. An empty site before that publish is expected.
+The public site, the admin film list, and TVBox / MacCMS all read the snapshot / in-memory read model published after collect, not the tables while collect is still running. Films from the main source appear as each window is published. An empty site before that publish is expected.
 
-### How do master and slave sites differ? Why is a master required?
+### What is the main source?
 
-The master writes film records (`film_index`, details, search entry). Slaves only write playlists. Detail and play pages attach slave sources under a matched master film. Admin can “update all sites” for one film.
+The main source is the first enabled collect source in sort order. The public home page, categories, search, and daily updates follow that source’s catalog and categories. Moving another enabled source to the front changes what visitors see. Films and play lines from the other sources stay in the library. Nothing is rebuilt.
 
-Without a master, playlists have nowhere to attach, and the category tree is not built from slaves. Only one master is allowed. Adding or promoting a master demotes the previous one.
+The play page still lists lines from every enabled source, in collect-source order. The poster source is a separate flag and does not decide the main source. If every source is disabled, the same order picks the first one as a fallback.
 
-### Why rebuild after switching the master?
+### What does switching the main source clear?
 
-The master owns film basics, categories, and search. Switching the master, changing its URI, or demoting it stops collect and clears that master’s film data, then rebuilds from the new master so old and new categories, details, and lists do not mix. Slave playlists are kept and rematched after the new master’s full collect.
+The library is not rebuilt. Category ids belong to the previous main source, so the live banner deck and the saved scheduling recipe are cleared, and the scheduled banner job is turned off.
+
+Changing one source’s collect URL clears that source’s collected data, failure records, and categories, then fetches categories again. That is separate from switching the main source.
 
 ### How are titles deduplicated and aligned across sites?
 
@@ -27,11 +29,11 @@ Two keys, not “always merge by Douban ID”:
 - **Identity**: one film is one `film_index.mid`. A source `vod_id` is bound to that mid through `movie_source_mapping`.
 - **Cross-site match** (`movie_match_key`): Douban ID **plus** the normalized title first — the same Douban ID with a different title is not the same film. Title matching strips trailing progress/quality/language noise but keeps version identity (theatrical, 3D, motion comic). Then normalized title#category, plus a bare-title fallback. Category stays on `film_index.pid` / `cid` and is **not** baked into `mid`; the category suffix on the match key keeps same-title films in different categories apart (a finished short drama vs a still-updating cartoon that share a title).
 
-**How play sources bind**: a slave is considered only when its normalized title equals the master’s. Douban ID, year, director, and episode shape **veto** a candidate when both sides have values and they conflict; a missing or unknown value on either side does not veto. After vetoes, a unique remaining title binds immediately. If the master catalog has several films with that title, pick by unique Douban ID, then category, then year (same year, then ±1); if none is unique, do not bind. Bound sources are shown as-is — episode shape is not used again as a display filter.
+**How play sources bind**: another source is considered only when its normalized title equals a film already in the library. Douban ID, year, director, and episode shape **veto** a candidate when both sides have values and they conflict; a missing or unknown value on either side does not veto. After vetoes, a unique remaining title binds immediately. If several films share that title, pick by unique Douban ID, then category, then year (same year, then ±1); if none is unique, do not bind. Bound sources are shown as-is — episode shape is not used again as a display filter.
 
 **Why same-title films must stay isolated**: the daily-update list is driven by `update_stamp`, which only bumps when this source’s episode count is strictly higher than the film’s current global max. If two same-title films share a bare title key, the finished short drama’s episode count is counted against the cartoon, so a new cartoon episode never makes the daily list.
 
-**Collection order is not restricted**: when a slave’s title hits only one master film and is not vetoed, playlists are written onto that film’s stored primary key — including when the slave’s category is wrong. When several master films share the title, pick by Douban / category / year; otherwise they use the slave’s own candidate keys (Douban / title#category). Categorized slaves do not write the bare title key.
+**Collection order is not restricted**: when another source’s title hits only one stored film and is not vetoed, playlists are written onto that film’s stored primary key — including when that source’s category is wrong. When several stored films share the title, pick by Douban / category / year; otherwise the source uses its own candidate keys (Douban / title#category). A source that already has a category does not write the bare title key.
 
 ### What happens if a collect is stopped manually?
 
@@ -49,14 +51,11 @@ Tables keep changing during collect. Each window refreshes play summaries for th
 
 Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
 
-Film lists, categories, and filters read `film_index` and stay locked to the preferred source. Changing sources does not fill the public site until that source is collected. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
+Film lists, categories, and filters read `film_index` and stay locked to the main source. Changing sources does not fill the public site until that source is collected, especially a new main source. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
 
 ### What does “recently updated” use? Do category pages match TVBox?
 
-Recently updated sorts snapshots by `update_stamp` descending (then `mid`). That stamp is not refreshed on every master-field change:
-
-- Master: new titles, or a strictly higher episode count. Remarks, cast, and cover do not move the sort.
-- Slave: only when the film already matches a master mid **and** this source’s episode count is strictly higher than the historical maximum. Adding extra play lines, changing URLs, or changing the last-episode label without a higher count does not change the sort. A slave’s first attach keeps the master’s existing stamp.
+Recently updated sorts `film_index.update_stamp` descending (then `mid`). A new film keeps the time given by its source. An existing film moves to the current collect time only when its play-line content changes. Download-only lines, remarks, cast, and covers do not move the sort. Every collect source uses the same rule.
 
 Public category filters and TVBox share the same read-model rules (category, plot / region / language / year, sort). TVBox plain lists add a Redis cache, so short-lived mismatches are usually cache.
 

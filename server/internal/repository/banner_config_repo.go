@@ -14,81 +14,94 @@ import (
 )
 
 const (
-	BannerModeManual         = "manual"
-	BannerModeAuto           = "auto"
-	BannerStrategyHot        = "hot_random"
-	BannerStrategyScore      = "score_random"
-	BannerStrategyLatest     = "latest_random"
-	BannerStrategySmartMix   = "smart_mix"
-	DefaultBannerCount       = model.DefaultBannerCount
-	MaxBannerCount           = model.MaxBannerCount
-	DefaultBannerRefreshCron = "0 0 4 * * *"
+	BannerStrategyHot    = "hot_random"
+	BannerStrategyScore  = "score_random"
+	BannerStrategyLatest = "latest_random"
 )
 
-// DefaultBannerConfig 返回默认轮播配置
+// DefaultBannerConfig 返回未保存时的排片配方。
 func DefaultBannerConfig() model.BannerConfig {
 	return model.BannerConfig{
-		Mode:        BannerModeManual,
-		Strategy:    BannerStrategyHot,
-		Count:       DefaultBannerCount,
-		AutoTMDB:    false,
-		RefreshCron: DefaultBannerRefreshCron,
-		PinnedMids:  []int64{},
-		Categories:  []int64{},
+		Strategy: BannerStrategyHot,
+		Quotas:   []model.BannerQuota{},
 	}
 }
 
-// NormalizeBannerConfig 规范化轮播配置
+// NormalizeBannerConfig 规范化轮播配置。只保留当前配方字段。
 func NormalizeBannerConfig(cfg model.BannerConfig) model.BannerConfig {
-	cfg.Mode = strings.ToLower(strings.TrimSpace(cfg.Mode))
-	if cfg.Mode != BannerModeAuto {
-		cfg.Mode = BannerModeManual
-	}
-
 	cfg.Strategy = strings.ToLower(strings.TrimSpace(cfg.Strategy))
 	switch cfg.Strategy {
-	case BannerStrategyHot, BannerStrategyScore, BannerStrategyLatest, BannerStrategySmartMix:
+	case BannerStrategyHot, BannerStrategyScore, BannerStrategyLatest:
 	default:
 		cfg.Strategy = BannerStrategyHot
 	}
-
-	if cfg.Count <= 0 {
-		cfg.Count = DefaultBannerCount
-	} else if cfg.Count > MaxBannerCount {
-		cfg.Count = MaxBannerCount
-	}
-
-	cfg.RefreshCron = strings.TrimSpace(cfg.RefreshCron)
-	if cfg.RefreshCron == "" {
-		cfg.RefreshCron = DefaultBannerRefreshCron
-	}
-
-	if cfg.PinnedMids == nil {
-		cfg.PinnedMids = []int64{}
-	}
-	if cfg.Categories == nil {
-		cfg.Categories = []int64{}
-	} else {
-		validCats := make([]int64, 0, len(cfg.Categories))
-		seenCat := make(map[int64]struct{}, len(cfg.Categories))
-		for _, cat := range cfg.Categories {
-			if cat > 0 {
-				if _, ok := seenCat[cat]; !ok {
-					seenCat[cat] = struct{}{}
-					validCats = append(validCats, cat)
-				}
-			}
-		}
-		// 这里只去重。是不是当前首选站的分类，排片时再按该站分类树过滤。
-		cfg.Categories = validCats
-	}
+	cfg.Quotas = normalizeBannerQuotas(cfg.Quotas)
 	return cfg
+}
+
+func normalizeBannerQuotas(quotas []model.BannerQuota) []model.BannerQuota {
+	if len(quotas) == 0 {
+		return []model.BannerQuota{}
+	}
+	out := make([]model.BannerQuota, 0, len(quotas))
+	seen := make(map[int64]struct{}, len(quotas))
+	for _, quota := range quotas {
+		if quota.CategoryID <= 0 {
+			continue
+		}
+		if _, ok := seen[quota.CategoryID]; ok {
+			continue
+		}
+		seen[quota.CategoryID] = struct{}{}
+		if quota.Count <= 0 {
+			continue
+		}
+		out = append(out, model.BannerQuota{CategoryID: quota.CategoryID, Count: quota.Count})
+	}
+	return out
 }
 
 var (
 	memBannerConfigLock sync.RWMutex
 	memBannerConfig     *model.BannerConfig
 )
+
+// DeleteBannerConfig 删除已存排片配方。
+func DeleteBannerConfig() error {
+	memBannerConfigLock.Lock()
+	memBannerConfig = nil
+	memBannerConfigLock.Unlock()
+
+	if db.Rdb != nil {
+		if err := db.Rdb.Del(db.Cxt, config.BannerConfigKey).Err(); err != nil {
+			_ = db.Rdb.Set(db.Cxt, config.BannerConfigKey, "null", config.ConfigCacheTTL).Err()
+		}
+	}
+	if db.Mdb == nil {
+		return nil
+	}
+	return db.Mdb.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerConfigRecord{}).Error
+}
+
+// BannerConfigExists 是否已经保存过一键排片配方。
+func BannerConfigExists() bool {
+	if db.Rdb != nil {
+		n, err := db.Rdb.Exists(db.Cxt, config.BannerConfigKey).Result()
+		if err == nil && n > 0 {
+			return true
+		}
+	}
+	if db.Mdb == nil {
+		memBannerConfigLock.RLock()
+		defer memBannerConfigLock.RUnlock()
+		return memBannerConfig != nil
+	}
+	var count int64
+	if err := db.Mdb.Model(&model.BannerConfigRecord{}).Count(&count).Error; err != nil {
+		return false
+	}
+	return count > 0
+}
 
 // GetBannerConfig 读取轮播排片配置（Redis 缓存优先，MySQL 兜底）
 func GetBannerConfig() model.BannerConfig {

@@ -12,6 +12,7 @@ import (
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
+	"server/internal/spider/progress"
 	"server/internal/utils"
 
 	"gorm.io/gorm"
@@ -68,9 +69,53 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		if _, ok := categoryReady[source.Id]; ok {
 			item.CategoryReady = true
 		}
+		if progress.IsCategorySyncing(source.Id) {
+			item.CategorySyncing = true
+		}
 		list = append(list, item)
 	}
 	return list
+}
+
+// GetCategoryStatusMap 返回所有采集站的分类同步状态映射 ("syncing" | "ready" | "failed")
+func (s *CollectService) GetCategoryStatusMap() map[string]string {
+	sources := repository.GetCollectSourceList()
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	readySet := repository.SourceIDsWithCategory(sourceIDs)
+	result := make(map[string]string, len(sources))
+	for _, source := range sources {
+		if progress.IsCategorySyncing(source.Id) {
+			result[source.Id] = "syncing"
+		} else if _, ok := readySet[source.Id]; ok {
+			result[source.Id] = "ready"
+		} else {
+			result[source.Id] = "failed"
+		}
+	}
+	return result
+}
+
+// GetCategoryReadyMap 返回所有采集站的分类就绪状态映射
+func (s *CollectService) GetCategoryReadyMap() map[string]bool {
+	sources := repository.GetCollectSourceList()
+	sourceIDs := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Id != "" {
+			sourceIDs = append(sourceIDs, source.Id)
+		}
+	}
+	readySet := repository.SourceIDsWithCategory(sourceIDs)
+	result := make(map[string]bool, len(sources))
+	for _, source := range sources {
+		_, ok := readySet[source.Id]
+		result[source.Id] = ok
+	}
+	return result
 }
 
 func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
@@ -85,7 +130,10 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	if oldID == newID {
 		return false
 	}
-	// 分类在添加或编辑采集站时已经按站保存。切换首选站只换前台读取的那一份。
+	// 分类编号属于原首选站。轮播和排片配方一起清空，定时排片关闭。
+	if err := ResetBannerDeckForSourceChange(); err != nil {
+		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
+	}
 	repository.MarkCategoryChanged()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
@@ -198,6 +246,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	if isUriChanged {
 		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据、失败记录和分类，独占孤儿影片 %d 部", source.Name, source.Id, len(orphanMids))
 		repository.MarkCategoryChanged()
+		progress.BroadcastCategoryReady(source.Id, false)
 	}
 	if len(orphanMids) > 0 {
 		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)

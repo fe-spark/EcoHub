@@ -213,7 +213,7 @@ func TestFormatSourceOrderChangeHTML(t *testing.T) {
 	}
 
 	switchedHTML := formatSourceOrderChangeHTML("EcoHub", oldPrimary, newPrimary, enabled)
-	if !strings.Contains(switchedHTML, "首选采集站已切换") ||
+	if !strings.Contains(switchedHTML, "主站已切换") ||
 		!strings.Contains(switchedHTML, "<b>量子资源</b> → <b>非凡资源</b>") ||
 		!strings.Contains(switchedHTML, "<b>非凡资源</b> → 量子资源 → 暴风资源") {
 		t.Fatalf("unexpected switched HTML: %s", switchedHTML)
@@ -221,7 +221,7 @@ func TestFormatSourceOrderChangeHTML(t *testing.T) {
 
 	reorderedHTML := formatSourceOrderChangeHTML("EcoHub", newPrimary, newPrimary, enabled)
 	if !strings.Contains(reorderedHTML, "采集站排序已更新") ||
-		!strings.Contains(reorderedHTML, "⭐ 首选站：<b>非凡资源</b>") ||
+		!strings.Contains(reorderedHTML, "⭐ 主站：<b>非凡资源</b>") ||
 		!strings.Contains(reorderedHTML, "<b>非凡资源</b> → 量子资源 → 暴风资源") {
 		t.Fatalf("unexpected reordered HTML: %s", reorderedHTML)
 	}

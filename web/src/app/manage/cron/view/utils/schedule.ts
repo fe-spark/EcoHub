@@ -43,7 +43,7 @@ export function getTaskActionText(model: number) {
     case 4:
       return "定时日志清理";
     case 5:
-      return "轮播排片";
+      return "定时排片";
     default:
       return "计划任务";
   }

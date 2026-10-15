@@ -86,6 +86,13 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}, "影片分页信息获取成功", c)
 }
 
+// FilmSearchOptions 获取影片检索筛选项（按 sourceId 联动返回对应站点的分类树与配置项）
+func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
+	sourceId := strings.TrimSpace(c.DefaultQuery("sourceId", ""))
+	options := service.FilmSvc.GetSearchOptions(sourceId)
+	dto.Success(options, "影片检索筛选项获取成功", c)
+}
+
 // FilmAdd 手动添加影片
 func (h *FilmHandler) FilmAdd(c *gin.Context) {
 	var fd = model.FilmDetailVo{}
@@ -101,27 +108,22 @@ func (h *FilmHandler) FilmAdd(c *gin.Context) {
 	dto.SuccessOnlyMsg("影片信息添加成功", c)
 }
 
-// FilmDelete 删除影片检索信息
+// FilmDelete 删除影片检索信息（兼容单个与批量）
 func (h *FilmHandler) FilmDelete(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Ids []int64 `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数异常", c)
+		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	idStr := strings.TrimSpace(req.Id)
-	if idStr == "" {
-		dto.Failed("删除失败,缺少ID参数", c)
+	if len(req.Ids) == 0 {
+		dto.Failed("缺少影片 ID", c)
 		return
 	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		dto.Failed("删除失败,参数类型异常", c)
-		return
-	}
-	if err = service.FilmSvc.DelFilm(id); err != nil {
-		dto.Failed(fmt.Sprintln("删除失败: ", err.Error()), c)
+
+	if err := service.FilmSvc.DelFilms(req.Ids); err != nil {
+		dto.Failed("删除失败: "+err.Error(), c)
 		return
 	}
 	dto.SuccessOnlyMsg("影片删除成功", c)

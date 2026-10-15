@@ -158,7 +158,7 @@ export default function SourceCalls({
                       </span>
                       {item.isPrimary ? (
                         <Tag color="gold" style={{ marginInlineStart: 2 }}>
-                          首选站
+                          主站
                         </Tag>
                       ) : null}
                       {!item.enabled ? (

@@ -79,6 +79,14 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 	return written, nil
 }
 
+func CollectFilms(mids []int64) {
+	for _, id := range mids {
+		if id > 0 {
+			CollectSingleFilm(strconv.FormatInt(id, 10))
+		}
+	}
+}
+
 func CollectSingleFilm(ids string) {
 	globalMid, err := strconv.ParseInt(strings.TrimSpace(ids), 10, 64)
 	if err != nil || globalMid <= 0 {

@@ -96,8 +96,8 @@ export default function CollectOverview() {
       return;
     }
     modal.confirm({
-      title: "切换首选站？",
-      content: `首选站改为「${chosen.name}」`,
+      title: "切换主站？",
+      content: `主站改为「${chosen.name}」。将清空轮播和排片配置，并关闭定时排片`,
       okText: "切换",
       cancelText: "取消",
       centered: true,
@@ -125,15 +125,15 @@ export default function CollectOverview() {
       }
       if (resp.code !== 0) {
         setSiteList(previous);
-        message.error(resp.msg || "切换首选站失败");
+        message.error(resp.msg || "切换主站失败");
         return;
       }
       window.dispatchEvent(new CustomEvent("ecohub:primary-source", { detail: chosen.id }));
-      message.success(`首选站：${chosen.name}`);
+      message.success(`主站：${chosen.name}`);
     } catch {
       if (mountedRef.current) {
         setSiteList(previous);
-        message.error("切换首选站失败");
+        message.error("切换主站失败");
       }
     } finally {
       if (mountedRef.current) {
@@ -174,11 +174,11 @@ export default function CollectOverview() {
       </Card>
 
       <Card
-        title="当前首选站"
+        title="当前主站"
         loading={loading && siteList.length === 0}
         className={styles.summaryCard}
         extra={
-          topSite ? <Tag color="gold">首选站</Tag> : <Tag color="warning">未配置</Tag>
+          topSite ? <Tag color="gold">主站</Tag> : <Tag color="warning">未配置</Tag>
         }
       >
         {topSite ? (

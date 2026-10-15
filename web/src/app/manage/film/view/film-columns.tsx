@@ -15,6 +15,7 @@ import {
   DeleteOutlined,
   FireOutlined,
   CompassOutlined,
+  AimOutlined,
   UndoOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
@@ -44,7 +45,8 @@ interface UseFilmColumnsProps {
   styles: any;
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
-  handleScrapeFilm: (record: FilmItem) => void;
+  handleScrapeSingle: (mid: number) => void;
+  handleManualScrape: (record: FilmItem) => void;
   handleRevertScrape?: (mid: number) => void;
   tmdbEnabled?: boolean;
   activeSourceId?: string;
@@ -57,7 +59,8 @@ export function useFilmColumns({
   styles,
   handleUpdateSingle,
   handleDelFilm,
-  handleScrapeFilm,
+  handleScrapeSingle,
+  handleManualScrape,
   handleRevertScrape,
   tmdbEnabled = false,
   activeSourceId,
@@ -103,7 +106,7 @@ export function useFilmColumns({
                 <Tag
                   color="#722ed1"
                   style={{ borderRadius: 4, flexShrink: 0, cursor: tmdbEnabled && canWrite ? "pointer" : "default" }}
-                  onClick={() => tmdbEnabled && canWrite && handleScrapeFilm(record)}
+                  onClick={() => tmdbEnabled && canWrite && handleManualScrape(record)}
                 >
                   已刮削
                 </Tag>
@@ -169,21 +172,32 @@ export function useFilmColumns({
         key: "action",
         align: "center",
         fixed: "right",
-        width: tmdbEnabled ? 180 : 120,
+        width: tmdbEnabled ? 220 : 120,
         render: (_, record) => (
           <Space size={8}>
             {tmdbEnabled && (
-              <Tooltip title="刮削">
-                <Button
-                  type="primary"
-                  shape="circle"
-                  size="small"
-                  style={{ background: "#722ed1", borderColor: "#722ed1" }}
-                  icon={<CompassOutlined />}
-                  disabled={!canWrite}
-                  onClick={() => handleScrapeFilm(record)}
-                />
-              </Tooltip>
+              <>
+                <Tooltip title="刮削">
+                  <Button
+                    type="primary"
+                    shape="circle"
+                    size="small"
+                    style={{ background: "#722ed1", borderColor: "#722ed1" }}
+                    icon={<CompassOutlined />}
+                    disabled={!canWrite}
+                    onClick={() => handleScrapeSingle(record.mid)}
+                  />
+                </Tooltip>
+                <Tooltip title="精准匹配">
+                  <Button
+                    shape="circle"
+                    size="small"
+                    icon={<AimOutlined />}
+                    disabled={!canWrite}
+                    onClick={() => handleManualScrape(record)}
+                  />
+                </Tooltip>
+              </>
             )}
             <Tooltip title="更新">
               <Button
@@ -268,7 +282,8 @@ export function useFilmColumns({
       router,
       handleDelFilm,
       handleUpdateSingle,
-      handleScrapeFilm,
+      handleScrapeSingle,
+      handleManualScrape,
       handleRevertScrape,
       canWrite,
       styles,
