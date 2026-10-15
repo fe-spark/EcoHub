@@ -35,6 +35,9 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
+		&model.MoviePoster{},
+		&model.MovieSourceMapping{},
+		&model.FilmIndex{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
@@ -94,7 +97,7 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 		t.Fatalf("expected updated name '新站点', got '%s'", updated.Name)
 	}
 
-	// 2. 修改 URI 指向另一个无法连接的地址 -> 此时必须触发接口探测并报错拦截
+	// 2. 修改 URI 指向另一个地址 -> 不进行同步阻塞探测，直接保存成功并通过异步处理分类
 	newUnreachableURI := "http://127.0.0.1:59998/new_unreachable/api.php"
 	updateBodyUriChanged := filmSourceBody{
 		FilmSource: model.FilmSource{
@@ -113,8 +116,16 @@ func TestCollectHandler_FilmSourceUpdate_DecoupledMetadataUpdate(t *testing.T) {
 
 	h.FilmSourceUpdate(c2)
 	resp2 := decodeResponse(t, w2)
-	if resp2.Code == dto.SUCCESS {
-		t.Fatal("expected update to fail when changing URI to an unreachable address")
+	if resp2.Code != dto.SUCCESS {
+		t.Fatalf("expected update to succeed immediately without blocking network probe, got code=%d msg=%s", resp2.Code, resp2.Msg)
+	}
+
+	var updated2 model.FilmSource
+	if err := gdb.First(&updated2, "id = ?", "src_unreachable").Error; err != nil {
+		t.Fatalf("query updated source: %v", err)
+	}
+	if updated2.Uri != newUnreachableURI {
+		t.Fatalf("expected updated uri '%s', got '%s'", newUnreachableURI, updated2.Uri)
 	}
 }
 
