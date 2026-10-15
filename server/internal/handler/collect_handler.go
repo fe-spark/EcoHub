@@ -48,10 +48,6 @@ func (h *CollectHandler) FilmSourceAdd(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := testFilmSourceAPI(body.FilmSource, body.UseProxy); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
 	if err := service.CollectSvc.SaveFilmSource(body.FilmSource); err != nil {
 		dto.Failed(fmt.Sprint("资源站添加失败: ", err.Error()), c)
 		return
@@ -93,12 +89,6 @@ func (h *CollectHandler) FilmSourceUpdate(c *gin.Context) {
 	}
 	isUriChanged := fs.Uri != s.Uri
 	isFormatChanged := fs.ResolveFormat() != s.ResolveFormat()
-	if isUriChanged || isFormatChanged {
-		if err := testFilmSourceAPI(s, body.UseProxy); err != nil {
-			dto.Failed(err.Error(), c)
-			return
-		}
-	}
 	if err := service.CollectSvc.UpdateFilmSource(s); err != nil {
 		dto.Failed(fmt.Sprint("资源站更新失败: ", err.Error()), c)
 		return
