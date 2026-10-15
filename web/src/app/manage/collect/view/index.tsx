@@ -141,7 +141,9 @@ export default function CollectManagePageView() {
           item.progress &&
           (item.progress.status === "done" ||
             item.progress.status === "stopped" ||
-            item.progress.status === "failed")
+            item.progress.status === "failed" ||
+            item.progress.status === "starting" ||
+            item.progress.status === "running")
         ) {
           return { ...item, progress: null };
         }
@@ -204,6 +206,9 @@ export default function CollectManagePageView() {
     onProgress: handleProgressStream,
     onCategorySnapshot: handleCategorySnapshot,
     onCategoryStatus: handleCategoryStatus,
+    onReconnect: () => {
+      void getCollectList();
+    },
   });
 
   const {
