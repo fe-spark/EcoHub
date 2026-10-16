@@ -247,9 +247,9 @@ func (FilmIndex) TableName() string {
 type FilmSourcePlaylist struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
-	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2"`
+	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2;index:idx_playlist_kind_mid,priority:2"`
 	SourceId     string `gorm:"primaryKey;size:32;index:idx_playlist_source_mid,priority:1"`
-	LineKind     string `gorm:"primaryKey;size:16"` // play 或 download
+	LineKind     string `gorm:"primaryKey;size:16;index:idx_playlist_kind_mid,priority:1"` // play 或 download
 	GroupIndex   int    `gorm:"primaryKey;autoIncrement:false"`
 	GroupName    string `gorm:"type:varchar(255)"`
 	EpisodeCount int    `gorm:"default:0"`

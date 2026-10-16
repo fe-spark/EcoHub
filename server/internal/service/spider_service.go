@@ -61,14 +61,13 @@ func (s *SpiderService) StartCollect(id string, h int) error {
 	return nil
 }
 
-// BatchCollect 批量采集：同步标记 starting(0%) 后异步执行，列表可立即显示进度。
-func (s *SpiderService) BatchCollect(time int, ids []string) error {
-	sources, err := spider.PrepareBatchCollectStart(ids)
-	if err != nil {
-		return err
+// BatchCollect 批量采集：能开的站同步标成 starting 后异步执行，跳过的站带原因返回。
+func (s *SpiderService) BatchCollect(time int, ids []string) model.CollectBatchResult {
+	sources, result := spider.PrepareBatchCollectStart(ids)
+	if len(sources) > 0 {
+		go spider.BatchCollectPrepared(model.CollectTriggerManual, time, sources)
 	}
-	go spider.BatchCollectPrepared(model.CollectTriggerManual, time, sources)
-	return nil
+	return result
 }
 
 // AutoCollect 自动采集
@@ -285,26 +284,6 @@ func (s *SpiderService) FilmClassCollect() error {
 	return s.SyncAllSourceCategories()
 }
 
-// SyncSourceCategories 拉取一个采集站的分类，并写入该站自己的副本。
-func (s *SpiderService) SyncSourceCategories(id string) error {
-	id = strings.TrimSpace(id)
-	source := repository.FindCollectSourceById(id)
-	if source == nil {
-		return errors.New("采集站信息不存在")
-	}
-	progress.BroadcastCategoryStatus(source.Id, "syncing")
-	log.Printf("[SpiderService] 拉取采集站分类: name=%s id=%s uri=%s", source.Name, source.Id, source.Uri)
-	if err := spider.CollectCategory(source); err != nil {
-		log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, err)
-		progress.BroadcastCategoryStatus(source.Id, "failed")
-		return fmt.Errorf("获取采集站分类失败: %w", err)
-	}
-	finalizeCategorySync()
-	log.Printf("[SpiderService] 采集站分类已保存: name=%s id=%s", source.Name, source.Id)
-	progress.BroadcastCategoryStatus(source.Id, "ready")
-	return nil
-}
-
 // SyncSourceCategoriesAsync 异步拉取一个采集站的分类，立即广播 syncing 状态，后台完成写入。
 func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 	id = strings.TrimSpace(id)
@@ -313,7 +292,7 @@ func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 	}
 	progress.BroadcastCategoryStatus(id, "syncing")
 	go func() {
-		_ = s.SyncSourceCategories(id)
+		_, _ = s.SyncSourceCategories(id, "")
 	}()
 }
 

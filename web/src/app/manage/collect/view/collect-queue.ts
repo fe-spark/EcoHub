@@ -20,6 +20,7 @@ export interface CollectQueueProgressView {
   failedCount: number;
   stoppedCount: number;
   fetchingCount: number;
+  stoppingCount: number;
   percent: number;
   success: number;
   failed: number;
@@ -71,6 +72,7 @@ export function computeCollectQueueProgress(
   let success = 0;
   let failed = 0;
   let fetchingCount = 0;
+  let stoppingCount = 0;
   let doneCount = 0;
   let failedCount = 0;
   let stoppedCount = 0;
@@ -86,6 +88,8 @@ export function computeCollectQueueProgress(
       const status = progress.status;
       if (isActiveCollectStatus(status)) {
         fetchingCount += 1;
+      } else if (status === "stopping") {
+        stoppingCount += 1;
       } else if (status === "failed") {
         failedCount += 1;
       } else if (status === "stopped") {
@@ -103,7 +107,7 @@ export function computeCollectQueueProgress(
   }
 
   const total = sourceIds.length;
-  const activeCount = fetchingCount;
+  const activeCount = fetchingCount + stoppingCount;
   const percent = total > 0 ? Math.floor(percentSum / total) : 0;
   const running = activeCount > 0;
   if (!running && !hasAnyProgress) {
@@ -114,6 +118,9 @@ export function computeCollectQueueProgress(
   if (running) {
     if (fetchingCount > 0) {
       phaseParts.push(`采集中 ${fetchingCount}`);
+    }
+    if (stoppingCount > 0) {
+      phaseParts.push(`停止中 ${stoppingCount}`);
     }
     if (doneCount > 0) {
       phaseParts.push(`完成 ${doneCount}`);
@@ -146,6 +153,7 @@ export function computeCollectQueueProgress(
     failedCount,
     stoppedCount,
     fetchingCount,
+    stoppingCount,
     percent: running ? Math.min(percent, 99) : Math.min(percent, 100),
     success,
     failed,

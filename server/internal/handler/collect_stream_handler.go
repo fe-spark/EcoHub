@@ -19,6 +19,7 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 
 	progressCh := progress.Subscribe(c.Request.Context())
 	categoryCh := progress.SubscribeCategory(c.Request.Context())
+	deleteCh := progress.SubscribeSourceDelete(c.Request.Context())
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
@@ -27,6 +28,16 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 	if err := stream.SendEvent("category_snapshot", statusMap); err != nil {
 		if errors.Is(err, errSSEWrite) {
 			return
+		}
+	}
+
+	// 连接建立时下发当前删除中的站点快照
+	deletingIDs := progress.GetDeletingSourceIDs()
+	if len(deletingIDs) > 0 {
+		if err := stream.SendEvent("delete_snapshot", deletingIDs); err != nil {
+			if errors.Is(err, errSSEWrite) {
+				return
+			}
 		}
 	}
 
@@ -48,6 +59,15 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 				return
 			}
 			if err := stream.SendEvent("category_status", evt); err != nil {
+				if errors.Is(err, errSSEWrite) {
+					return
+				}
+			}
+		case evt, ok := <-deleteCh:
+			if !ok {
+				return
+			}
+			if err := stream.SendEvent("source_delete", evt); err != nil {
 				if errors.Is(err, errSSEWrite) {
 					return
 				}

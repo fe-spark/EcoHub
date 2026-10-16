@@ -35,8 +35,9 @@ instance.interceptors.response.use(
 export const ApiGet = <T = any>(
   url: string,
   params?: Record<string, any>,
+  timeout?: number,
 ): Promise<ApiResponse<T>> => {
-  return instance.get(url, { params }) as any;
+  return instance.get(url, timeout ? { params, timeout } : { params }) as any;
 };
 
 export const ApiPost = <T = any>(

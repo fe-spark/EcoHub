@@ -47,7 +47,7 @@ export default function CollectProgressView({
   const isFullFail = progress?.status === "failed" && (progress.success ?? 0) === 0;
   const progressStatus = !progress
     ? "normal"
-    : progress.status === "running"
+    : progress.status === "running" || progress.status === "stopping"
       ? "active"
       : isFullFail
         ? "exception"

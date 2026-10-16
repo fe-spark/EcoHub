@@ -11,6 +11,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	"server/internal/spider/progress"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -127,6 +128,58 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	}
 }
 
+func TestSortFilmSources_BlocksPrimaryChangeWhileCollecting(t *testing.T) {
+	gdb := setupCollectServiceTestDB(t)
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 0, State: true}).Error; err != nil {
+		t.Fatalf("create src_1: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", Sort: 1, State: true}).Error; err != nil {
+		t.Fatalf("create src_2: %v", err)
+	}
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src_1", Name: "站1"}}, "q-test")
+	t.Cleanup(func() { progress.MarkStopped("src_1") })
+
+	srv := &CollectService{}
+	err := srv.SortFilmSources([]string{"src_2", "src_1"})
+	if err == nil || err.Error() != "采集进行中，不能更换主站" {
+		t.Fatalf("expected primary switch to be blocked, got %v", err)
+	}
+	list := srv.GetFilmSourceList()
+	if len(list) == 0 || list[0].Id != "src_1" {
+		t.Fatalf("primary should stay src_1, got %+v", list)
+	}
+	if err := srv.SortFilmSources([]string{"src_1", "src_2"}); err != nil {
+		t.Fatalf("reordering without changing primary should pass: %v", err)
+	}
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}); err == nil || err.Error() != "采集进行中，不能更换主站" {
+		t.Fatalf("expected disabling primary to be blocked, got %v", err)
+	}
+	var kept model.FilmSource
+	if err := gdb.First(&kept, "id = ?", "src_1").Error; err != nil {
+		t.Fatalf("query src_1: %v", err)
+	}
+	if !kept.State {
+		t.Fatal("primary was disabled")
+	}
+	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}); err != nil {
+		t.Fatalf("disabling a non-primary source should pass: %v", err)
+	}
+}
+
+func TestSyncSourceCategories_MissingSourceClearsSyncing(t *testing.T) {
+	setupCollectServiceTestDB(t)
+	progress.BroadcastCategoryStatus("gone-src", "syncing")
+	t.Cleanup(func() { progress.BroadcastCategoryStatus("gone-src", "idle") })
+
+	_, err := SpiderSvc.SyncSourceCategories("gone-src", "")
+	if err == nil || err.Error() != "采集站信息不存在" {
+		t.Fatalf("err=%v", err)
+	}
+	if progress.IsCategorySyncing("gone-src") {
+		t.Fatal("missing source left category syncing")
+	}
+}
+
 func TestSyncSourceCategories_StoresCopyForThatSource(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 	ts := mockCollectServer()
@@ -135,7 +188,7 @@ func TestSyncSourceCategories_StoresCopyForThatSource(t *testing.T) {
 	if err := gdb.Create(&model.FilmSource{Id: "src_sync", Name: "同步站", Uri: ts.URL, State: true}).Error; err != nil {
 		t.Fatalf("create source: %v", err)
 	}
-	if err := SpiderSvc.SyncSourceCategories("src_sync"); err != nil {
+	if _, err := SpiderSvc.SyncSourceCategories("src_sync", ""); err != nil {
 		t.Fatalf("SyncSourceCategories: %v", err)
 	}
 

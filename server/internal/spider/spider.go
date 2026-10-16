@@ -183,6 +183,12 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			}
 			break
 		}
+		if batchCtx != nil && !batchCtx.ownsOccupy(src.Id) {
+			log.Printf("[%s] 站点 %s 已从本队列移除，跳过派发", tag, src.Name)
+			scheduler.FinishSource(src.Id)
+			batchCtx.releaseSourceOccupy(src.Id)
+			continue
+		}
 		if progress.IsStopped(src.Id) {
 			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
 			scheduler.FinishSource(src.Id)
@@ -209,6 +215,11 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				abandonQueuedCollectSource(fs, batchCtx)
 				return
 			}
+			if batchCtx != nil && !batchCtx.ownsOccupy(fs.Id) {
+				log.Printf("[%s] 站点 %s 已从本队列移除，跳过采集", tag, fs.Name)
+				batchCtx.releaseSourceOccupy(fs.Id)
+				return
+			}
 			if progress.IsStopped(fs.Id) {
 				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
 				abandonQueuedCollectSource(fs, batchCtx)
@@ -232,6 +243,11 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	statsOwned := false
 	releasedPreparedOccupy := false
 	defer func() {
+		if collectCtx != nil {
+			progress.FinishRun(collectCtx, id, retErr)
+		}
+	}()
+	defer func() {
 		// 单站退出（无论完成、失败还是终止）立即释放自身占用锁，不等待批量内其他慢速站点。
 		if !releasedPreparedOccupy {
 			if retErr != nil {
@@ -244,7 +260,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	if runVersion != nil && isDispatchStopped(*runVersion) {
 		return errors.New("任务已被一键终止，跳过启动")
 	}
-	if (runVersion != nil || allowPreparedStart) && progress.IsStopped(id) {
+	if (runVersion != nil || allowPreparedStart) && (progress.IsStopped(id) || progress.IsStopping(id)) {
 		return errors.New("任务已被停止，跳过启动")
 	}
 	if runVersion == nil && !allowPreparedStart && progress.IsStarting(id) {
@@ -278,11 +294,15 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		if originalErr != nil && batchCtx != nil {
 			batchCtx.RecordSourceError(s.Id, originalErr.Error())
 		}
+		runOK := shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id)
 		if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron && statsOwned {
 			repository.UnsuppressCollectSourceStats(s.Id)
-			if shouldNoteCronCollectSuccess(originalErr, collectCtx, s.Id) {
+			if runOK {
 				repository.NoteCollectSourceStats(s.Id)
 			}
+		}
+		if runOK {
+			repository.NoteCollectSourceRun(s.Id)
 		}
 		progress.FlushHotpathSideEffects(s.Id)
 		if originalErr != nil && !hadWrites {
@@ -320,13 +340,15 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	switch {
 	case errors.Is(err, progress.ErrDispatchStopped):
 		return errors.New("任务已被一键终止，跳过启动")
+	case errors.Is(err, progress.ErrStopRequested):
+		return errors.New("任务已被停止，跳过启动")
 	case errors.Is(err, progress.ErrTaskExists):
 		log.Printf("[Spider] 站点 %s 已有任务正在运行，跳过本次采集...\n", id)
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", id)
 	case err != nil:
 		return err
 	}
-	collectCtx = ctx
+	collectCtx = progress.WithRunEpoch(ctx, progress.Epoch(id))
 	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
 		repository.SuppressCollectSourceStats(s.Id)
 		statsOwned = true
@@ -335,7 +357,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	defer func() {
 		if progress.UnregisterTask(id, reqId) {
 			progress.Update(id, func(cur *model.CollectProgress) {
-				if retErr != nil && cur.Status != progress.StatusStopped {
+				if retErr != nil && cur.Status != progress.StatusStopped && cur.Status != progress.StatusStopping {
 					cur.Status = progress.StatusFailed
 					return
 				}
@@ -369,12 +391,12 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		r.Params.Set("ac", "videolist")
 	}
 
-	pageCount, err := fetcher.GetPageCountWithRetry(ctx, s, r)
+	pageCount, err := fetcher.GetPageCountWithRetry(collectCtx, s, r)
 	if err != nil {
 		return err
 	}
 	if pageCount <= 0 {
-		progress.Update(id, func(cur *model.CollectProgress) {
+		progress.UpdateRun(collectCtx, id, func(cur *model.CollectProgress) {
 			cur.Total = 0
 			cur.Current = 0
 			cur.Success = 0
@@ -384,7 +406,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容)\n", s.Name, pageCount)
 		return nil
 	}
-	progress.Update(id, func(cur *model.CollectProgress) {
+	progress.UpdateRun(collectCtx, id, func(cur *model.CollectProgress) {
 		cur.Total = pageCount
 		cur.Current = 0
 		cur.Success = 0
@@ -393,29 +415,12 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	hadWrites, err = fetcher.CollectPages(ctx, pageCount, s, h, batchCtx)
+	hadWrites, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
 	if err != nil {
 		return err
 	}
-	if !progress.IsStopped(id) {
-		progress.MarkSourceDone(id)
-	}
+	progress.MarkSourceDoneIfRun(collectCtx, id)
 	return nil
-}
-
-func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, error) {
-	sources := make([]model.FilmSource, 0, len(ids))
-	for _, id := range ids {
-		if fs := repository.FindCollectSourceById(id); fs != nil && fs.State {
-			sources = append(sources, *fs)
-		}
-	}
-	sources = filterSourcesReadyForCollect(sources)
-	sources = occupyAndMarkCollectSources(sources, "Batch-Collect")
-	if len(sources) == 0 {
-		return nil, fmt.Errorf("没有可启动的采集站（还没有分类、未启用或已在采集中）")
-	}
-	return sources, nil
 }
 
 func filterSourcesReadyForCollect(sources []model.FilmSource) []model.FilmSource {

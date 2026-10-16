@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from "react";
-import { ApiPost, ApiPostLong } from "@/lib/client-api";
+import { ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import type { CheckAllResult, CleanupSkippedItem, DelBatchResult, InvalidSourceItem } from "./types";
 
@@ -58,7 +58,7 @@ export function useCollectCleanup(reloadList: () => Promise<void>) {
     if (invalidSources.length === 0) return;
     setCleanupDeleting(true);
     try {
-      const resp = await ApiPost<DelBatchResult>("/manage/collect/del/batch", {
+      const resp = await ApiPostLong<DelBatchResult>("/manage/collect/del/batch", {
         ids: invalidSources.map((item) => item.id),
       });
       if (resp.code === 0) {

@@ -82,15 +82,6 @@ func GetActiveCollectSource() *model.FilmSource {
 	return PickPrimarySourceForCategory()
 }
 
-func PickMasterSourceForCategory() *model.FilmSource {
-	return PickPrimarySourceForCategory()
-}
-
-// SetPrimaryCollectSource 全链路首位即基准原则下已废除，保留空实现兼容
-func SetPrimaryCollectSource(sourceId string) error {
-	return nil
-}
-
 // GetEnabledCollectSourceList 获取已启用采集站列表。
 func GetEnabledCollectSourceList() []model.FilmSource {
 	if db.Mdb == nil {
@@ -191,7 +182,9 @@ func FindCollectSourceById(id string) *model.FilmSource {
 // 返回被级联清理的独占影片 mid 列表。
 func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	var affectedMids []int64
-	_ = tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", id).Pluck("DISTINCT mid", &affectedMids).Error
+	if err := tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", id).Pluck("DISTINCT mid", &affectedMids).Error; err != nil {
+		return nil, err
+	}
 
 	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 		return nil, err
@@ -204,26 +197,38 @@ func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
 	}
 
 	var orphanMids []int64
-	if len(affectedMids) > 0 {
-		_ = tx.Model(&model.FilmIndex{}).
-			Where("mid IN (?) AND mid NOT IN (?)",
-				affectedMids,
-				tx.Model(&model.FilmSourcePlaylist{}).Where("line_kind = 'play'").Select("mid"),
-			).
-			Pluck("mid", &orphanMids).Error
+	for i := 0; i < len(affectedMids); i += 2000 {
+		end := min(i+2000, len(affectedMids))
+		chunk := affectedMids[i:end]
+		var aliveMids []int64
+		if err := tx.Model(&model.FilmSourcePlaylist{}).
+			Where("mid IN (?) AND line_kind = 'play'", chunk).
+			Pluck("DISTINCT mid", &aliveMids).Error; err != nil {
+			return nil, err
+		}
+		aliveSet := make(map[int64]struct{}, len(aliveMids))
+		for _, m := range aliveMids {
+			aliveSet[m] = struct{}{}
+		}
+		for _, m := range chunk {
+			if _, ok := aliveSet[m]; !ok {
+				orphanMids = append(orphanMids, m)
+			}
+		}
 	}
 
-	if len(orphanMids) > 0 {
-		if err := tx.Unscoped().Where("mid IN ?", orphanMids).Delete(&model.FilmIndex{}).Error; err != nil {
+	for i := 0; i < len(orphanMids); i += 1000 {
+		chunk := orphanMids[i:min(i+1000, len(orphanMids))]
+		if err := tx.Unscoped().Where("mid IN ?", chunk).Delete(&model.FilmIndex{}).Error; err != nil {
 			return nil, err
 		}
-		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.MovieMatchKey{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.MovieMatchKey{}).Error; err != nil {
 			return nil, err
 		}
-		if err := tx.Where("global_mid IN ?", orphanMids).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		if err := tx.Where("global_mid IN ?", chunk).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 			return nil, err
 		}
-		if err := tx.Where("mid IN ?", orphanMids).Delete(&model.Banner{}).Error; err != nil {
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.Banner{}).Error; err != nil {
 			return nil, err
 		}
 	}
@@ -409,11 +414,6 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
-}
-
-func DemoteExistingMasterTx(tx *gorm.DB) error {
-	// 全站平权架构下不再区分主从站点，保留空实现兼容旧调用
-	return nil
 }
 
 // GetPosterSource 获取当前启用的优先海报图源站：

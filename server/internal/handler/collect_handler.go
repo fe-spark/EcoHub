@@ -183,15 +183,11 @@ func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
 		dto.Failed("资源站ID信息不能为空", c)
 		return
 	}
-	if spider.IsTaskRunning(id) {
-		dto.Failed("站点正在采集, 请先停止采集后再尝试删除操作", c)
+	if err := service.CollectSvc.TriggerDelFilmSource(id); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
-	if err := service.CollectSvc.DelFilmSource(id); err != nil {
-		dto.Failed("删除资源站失败", c)
-		return
-	}
-	dto.SuccessOnlyMsg("删除成功", c)
+	dto.SuccessOnlyMsg("已提交删除", c)
 }
 
 // ------------------------------------------------------ 失效源检测与清理 ------------------------------------------------------
@@ -253,7 +249,7 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 	}, "站点连通性检测完成", c)
 }
 
-// FilmSourceDelBatch 批量删除采集站，返回实际删除与跳过（含原因）的站点。
+// FilmSourceDelBatch 批量删除采集站：触发即返回，通过 SSE 广播 deleting 与 deleted 状态
 func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 	req := model.FilmSourceDelBatchRequest{}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -278,32 +274,12 @@ func (h *CollectHandler) FilmSourceDelBatch(c *gin.Context) {
 		return
 	}
 
-	type deleteResult struct {
-		Id     string `json:"id"`
-		Name   string `json:"name"`
-		Reason string `json:"reason"`
-	}
-	deleted := make([]string, 0, len(ids))
-	skipped := make([]deleteResult, 0)
-
-	for _, id := range ids {
-		src := service.CollectSvc.GetFilmSource(id)
-		if src == nil {
-			skipped = append(skipped, deleteResult{Id: id, Reason: "采集站不存在，可能已被删除"})
-			continue
-		}
-		if spider.IsTaskRunning(id) {
-			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: "站点正在采集，请先停止后再删除"})
-			continue
-		}
-		if err := service.CollectSvc.DelFilmSource(id); err != nil {
-			skipped = append(skipped, deleteResult{Id: id, Name: src.Name, Reason: err.Error()})
-			continue
-		}
-		deleted = append(deleted, id)
+	if err := service.CollectSvc.TriggerDelFilmSourceBatch(ids); err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
 
-	dto.Success(gin.H{"deleted": deleted, "skipped": skipped}, "批量删除完成", c)
+	dto.SuccessOnlyMsg("已提交批量删除", c)
 }
 
 func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
@@ -437,28 +413,4 @@ func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
 func (h *CollectHandler) ClearAllRecord(c *gin.Context) {
 	service.CollectSvc.ClearAllRecord()
 	dto.SuccessOnlyMsg("采集异常记录信息已清空!!!", c)
-}
-
-func (h *CollectHandler) FilmSourceSyncCategory(c *gin.Context) {
-	var req struct {
-		Id string `json:"id"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil || req.Id == "" {
-		dto.Failed("参数异常, 资源站标识不能为空", c)
-		return
-	}
-	fs := service.CollectSvc.GetFilmSource(req.Id)
-	if fs == nil {
-		dto.Failed("数据异常, 资源站信息不存在", c)
-		return
-	}
-	if spider.IsTaskRunning(req.Id) {
-		dto.Failed("站点正在采集, 请先停止采集后再尝试操作", c)
-		return
-	}
-	if err := service.SpiderSvc.SyncSourceCategories(req.Id); err != nil {
-		dto.Failed(fmt.Sprint("获取分类失败: ", err.Error()), c)
-		return
-	}
-	dto.SuccessOnlyMsg("获取分类成功", c)
 }

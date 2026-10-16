@@ -10,13 +10,15 @@ export interface FilmSource {
   cd?: number;
   format?: "json" | "xml";
   domainReplaceRules?: string;
-  lastCollectTime?: string;
+  lastRunTime?: string;
   progress?: CollectProgress | null;
   proxyCollect?: boolean;
   /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
   categoryReady?: boolean;
   /** 该站当前是否正在采集分类 */
   categorySyncing?: boolean;
+  /** 该站当前是否正在执行删除 */
+  deleting?: boolean;
   createdAt?: string;
 }
 
@@ -40,9 +42,14 @@ export interface CollectProgress {
   queueId?: string;
 }
 
-/** 仍处于采集生命周期、列表应展示进度的状态 */
+/** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */
 export function isActiveCollectStatus(status?: string | null): boolean {
   return status === "starting" || status === "running";
+}
+
+/** 含停止后的收尾。这段时间按钮保持「停止采集」并显示 loading。 */
+export function isCollectBusyStatus(status?: string | null): boolean {
+  return isActiveCollectStatus(status) || status === "stopping";
 }
 
 export function isPartialCollectFailure(progress?: CollectProgress | null): boolean {
@@ -55,6 +62,8 @@ export function resolveCollectStatusText(status?: string | null): string {
       return "等待中";
     case "running":
       return "采集中";
+    case "stopping":
+      return "停止中";
     case "done":
       return "采集完成";
     case "failed":
@@ -79,11 +88,14 @@ export function resolveCollectProgressStatusText(progress?: CollectProgress | nu
   return resolveCollectStatusText(progress.status);
 }
 
-export interface BatchOption {
+export interface CollectBatchItem {
   id: string;
-  name: string;
-  sort?: number;
-  state?: boolean;
+  name?: string;
+}
+
+export interface CollectBatchResult {
+  started: CollectBatchItem[];
+  skipped: CleanupSkippedItem[];
 }
 
 /** 失效源检测结果项 */
@@ -184,7 +196,37 @@ export interface CollectListItemResponse extends Partial<FilmSource> {
   uri: string;
 }
 
-export function makeStartingProgress(id: string, name: string): CollectProgress {
+/** 点击停止后先标成停止中，避免服务端进度还没回来时按钮跳成开始采集。 */
+export function progressAsStopping(
+  progress: CollectProgress | null | undefined,
+  id: string,
+  name: string,
+): CollectProgress {
+  if (progress) {
+    return { ...progress, status: "stopping" };
+  }
+  return { id, name, total: 0, current: 0, success: 0, failed: 0, status: "stopping" };
+}
+
+/**
+ * 同一队列里，停止中不被迟到的 running/starting 盖回。
+ * 新队列的起始进度照常接上。
+ */
+export function mergeCollectProgress(
+  current: CollectProgress | null | undefined,
+  incoming: CollectProgress,
+): CollectProgress {
+  if (
+    current?.status === "stopping" &&
+    (incoming.status === "running" || incoming.status === "starting") &&
+    (incoming.queueId || "") === (current.queueId || "")
+  ) {
+    return current;
+  }
+  return incoming;
+}
+
+export function makeStartingProgress(id: string, name: string, queueId?: string): CollectProgress {
   return {
     id,
     name,
@@ -193,6 +235,7 @@ export function makeStartingProgress(id: string, name: string): CollectProgress 
     success: 0,
     failed: 0,
     status: "starting",
+    queueId,
   };
 }
 
@@ -208,7 +251,7 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     format: (item.format as "json" | "xml") || "json",
-    lastCollectTime: item.lastCollectTime,
+    lastRunTime: item.lastRunTime,
     progress: item.progress ?? null,
     proxyCollect: Boolean(item.proxyCollect),
     categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,

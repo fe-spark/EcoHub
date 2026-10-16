@@ -40,7 +40,7 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 	for _, progress := range spider.GetActiveTaskProgress() {
 		progressByID[progress.Id] = progress
 	}
-	lastCollectTimeByID := getLastCollectTimeBySource(sources)
+	lastRunTimeByID := getLastRunTimeBySource(sources)
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
@@ -59,7 +59,7 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		} else {
 			source.IsPrimary = false
 		}
-		item := model.FilmSourceListItem{FilmSource: source, LastCollectTime: lastCollectTimeByID[source.Id]}
+		item := model.FilmSourceListItem{FilmSource: source, LastRunTime: lastRunTimeByID[source.Id]}
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
@@ -151,6 +151,9 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
 	}
+	if err := rejectIfPrimaryChanges(sourcesAfterSort(ids)); err != nil {
+		return err
+	}
 	oldPrimary := repository.PickPrimarySourceForCategory()
 	if err := repository.SortCollectSources(ids); err != nil {
 		return err
@@ -164,14 +167,14 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	return nil
 }
 
-func getLastCollectTimeBySource(sources []model.FilmSource) map[string]*time.Time {
+func getLastRunTimeBySource(sources []model.FilmSource) map[string]*time.Time {
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
 			sourceIDs = append(sourceIDs, source.Id)
 		}
 	}
-	return repository.GetCollectSourceStats(sourceIDs)
+	return repository.GetCollectSourceRunTimes(sourceIDs)
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
@@ -190,6 +193,11 @@ func (s *CollectService) GetAllFilmSources() []model.FilmSource {
 // 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	oldPrimary := repository.PickPrimarySourceForCategory()
+	if old := repository.FindCollectSourceById(source.Id); old != nil && old.State != source.State {
+		if err := rejectIfPrimaryChanges(sourcesAfterStates(map[string]bool{source.Id: source.State})); err != nil {
+			return err
+		}
+	}
 	if err := s.updateFilmSourceCore(source); err != nil {
 		return err
 	}
@@ -205,6 +213,8 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	if source.CreatedAt.IsZero() && !old.CreatedAt.IsZero() {
 		source.CreatedAt = old.CreatedAt
 	}
+	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
+	source.Sort = old.Sort
 
 	// 安全校验：如果有任何采集任务正在运行，禁止修改 URI 或数据协议，防止引发解析错乱
 	isUriChanged := old.Uri != source.Uri
@@ -263,6 +273,22 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
+	planned := make(map[string]bool)
+	for _, id := range ids {
+		source := repository.FindCollectSourceById(id)
+		if source == nil {
+			return errors.New("采集站信息不存在")
+		}
+		if source.State != state {
+			planned[id] = state
+		}
+	}
+	if len(planned) == 0 {
+		return nil
+	}
+	if err := rejectIfPrimaryChanges(sourcesAfterStates(planned)); err != nil {
+		return err
+	}
 	oldPrimary := repository.PickPrimarySourceForCategory()
 	var firstErr error
 	changed := false
@@ -304,26 +330,90 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	return nil
 }
 
-func (s *CollectService) DelFilmSource(id string) error {
+var deleteSourceQueue = make(chan string, 1000)
+
+func init() {
+	go runDeleteSourceWorker()
+}
+
+func runDeleteSourceWorker() {
+	for id := range deleteSourceQueue {
+		processAsyncDeleteSource(id)
+	}
+}
+
+func processAsyncDeleteSource(id string) {
+	defer progress.SetSourceDeleting(id, false)
+	if err := CollectSvc.DelFilmSource(id); err != nil {
+		syslog.Errorf("[Collect] 异步删除站点 %s 失败: %v", id, err)
+		progress.BroadcastSourceDeleteStatus(id, "failed", err.Error())
+		return
+	}
+	progress.BroadcastSourceDeleteStatus(id, "deleted", "")
+}
+
+// TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理
+func (s *CollectService) TriggerDelFilmSource(id string) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("采集站ID不能为空")
+	}
 	src := repository.FindCollectSourceById(id)
 	if src == nil {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
-	oldPrimary := repository.PickPrimarySourceForCategory()
-	orphanMids, err := repository.DelCollectResource(id)
-	if err != nil {
-		return err
+	if progress.IsSourceDeleting(id) {
+		return nil
 	}
-	if len(orphanMids) > 0 {
-		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-		syslog.Infof("[Collect] 删除采集源 %s(%s) 级联清理独占孤儿影片 %d 部", src.Name, id, len(orphanMids))
+
+	progress.BroadcastSourceDeleteStatus(id, "deleting", "")
+
+	select {
+	case deleteSourceQueue <- id:
+	default:
+		go processAsyncDeleteSource(id)
 	}
-	spider.ClearLimiter(id)
-	clearProvideNetworkConfigCache()
-	filmsnapshot.ClearDynamicPlayCaches()
-	repository.MarkCategoryChanged()
-	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+
 	return nil
+}
+
+// TriggerDelFilmSourceBatch 异步批量触发采集站删除：全部标记 deleting 后串行排队处理
+func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
+	for _, id := range ids {
+		_ = s.TriggerDelFilmSource(id)
+	}
+	return nil
+}
+
+func (s *CollectService) DelFilmSource(id string) error {
+	return spider.WithSourceExclusive(id, func() error {
+		src := repository.FindCollectSourceById(id)
+		if src == nil {
+			return errors.New("当前资源站信息不存在, 请勿重复操作")
+		}
+		// 采集中、停止中、分类采集中都不拦截。先停采集，等本次运行退出后再删。
+		release, err := spider.StopSourceForDelete(id)
+		if err != nil {
+			return err
+		}
+		defer release()
+		oldPrimary := repository.PickPrimarySourceForCategory()
+		orphanMids, err := repository.DelCollectResource(id)
+		if err != nil {
+			return err
+		}
+		if len(orphanMids) > 0 {
+			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+			syslog.Infof("[Collect] 删除采集源 %s(%s) 级联清理独占孤儿影片 %d 部", src.Name, id, len(orphanMids))
+		}
+		spider.ClearLimiter(id)
+		clearProvideNetworkConfigCache()
+		filmsnapshot.ClearDynamicPlayCaches()
+		repository.MarkCategoryChanged()
+		progress.BroadcastCategoryStatus(id, "idle")
+		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
+		return nil
+	})
 }
 
 // PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。

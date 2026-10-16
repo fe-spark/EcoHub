@@ -10,8 +10,19 @@ import (
 
 // CategorySyncEvent 采集站分类同步状态事件
 type CategorySyncEvent struct {
+	SourceID    string                     `json:"sourceId"`
+	Status      string                     `json:"status"` // "syncing" | "ready" | "failed" | "confirm" | "idle"
+	Name        string                     `json:"name,omitempty"`
+	Changes     []model.CategoryTreeChange `json:"changes,omitempty"`
+	Message     string                     `json:"message,omitempty"`
+	DataCleared bool                       `json:"dataCleared,omitempty"`
+}
+
+// SourceDeleteEvent 采集站异步删除事件
+type SourceDeleteEvent struct {
 	SourceID string `json:"sourceId"`
-	Status   string `json:"status"` // "syncing" | "ready" | "failed"
+	Status   string `json:"status"` // "deleting" | "deleted" | "failed"
+	Message  string `json:"message,omitempty"`
 }
 
 // Hub 采集进度全局广播中心
@@ -19,6 +30,7 @@ type Hub struct {
 	mu                  sync.RWMutex
 	subscribers         map[chan []model.CollectProgress]struct{}
 	categorySubscribers map[chan CategorySyncEvent]struct{}
+	deleteSubscribers   map[chan SourceDeleteEvent]struct{}
 	notifyCh            chan struct{}
 }
 
@@ -26,6 +38,7 @@ type Hub struct {
 var GlobalHub = &Hub{
 	subscribers:         make(map[chan []model.CollectProgress]struct{}),
 	categorySubscribers: make(map[chan CategorySyncEvent]struct{}),
+	deleteSubscribers:   make(map[chan SourceDeleteEvent]struct{}),
 	notifyCh:            make(chan struct{}, 1),
 }
 
@@ -148,12 +161,52 @@ func BroadcastCategoryStatus(sourceID string, status string) {
 	}
 }
 
-// BroadcastCategoryReady 兼容旧调用：广播就绪或失败
+// BroadcastCategoryReady 广播就绪或失败
 func BroadcastCategoryReady(sourceID string, ready bool) {
 	if ready {
 		BroadcastCategoryStatus(sourceID, "ready")
 	} else {
 		BroadcastCategoryStatus(sourceID, "failed")
+	}
+}
+
+// BroadcastCategoryConfirm 广播分类树变更确认事件
+func BroadcastCategoryConfirm(sourceID string, name string, changes []model.CategoryTreeChange) {
+	SetCategorySyncing(sourceID, false)
+
+	GlobalHub.mu.RLock()
+	defer GlobalHub.mu.RUnlock()
+	evt := CategorySyncEvent{
+		SourceID: sourceID,
+		Status:   "confirm",
+		Name:     name,
+		Changes:  changes,
+	}
+	for ch := range GlobalHub.categorySubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// BroadcastCategoryReadyMessage 广播分类就绪事件及执行结果文案
+func BroadcastCategoryReadyMessage(sourceID string, message string, dataCleared bool) {
+	SetCategorySyncing(sourceID, false)
+
+	GlobalHub.mu.RLock()
+	defer GlobalHub.mu.RUnlock()
+	evt := CategorySyncEvent{
+		SourceID:    sourceID,
+		Status:      "ready",
+		Message:     message,
+		DataCleared: dataCleared,
+	}
+	for ch := range GlobalHub.categorySubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
 	}
 }
 
@@ -169,6 +222,82 @@ func SubscribeCategory(ctx context.Context) <-chan CategorySyncEvent {
 		<-ctx.Done()
 		GlobalHub.mu.Lock()
 		delete(GlobalHub.categorySubscribers, ch)
+		GlobalHub.mu.Unlock()
+		close(ch)
+	}()
+
+	return ch
+}
+
+var (
+	deletingSourcesMu sync.RWMutex
+	deletingSources   = make(map[string]bool)
+)
+
+// SetSourceDeleting 设置采集站异步删除运行态
+func SetSourceDeleting(sourceID string, deleting bool) {
+	deletingSourcesMu.Lock()
+	if deleting {
+		deletingSources[sourceID] = true
+	} else {
+		delete(deletingSources, sourceID)
+	}
+	deletingSourcesMu.Unlock()
+}
+
+// IsSourceDeleting 判断采集站是否正在执行异步删除
+func IsSourceDeleting(sourceID string) bool {
+	deletingSourcesMu.RLock()
+	defer deletingSourcesMu.RUnlock()
+	return deletingSources[sourceID]
+}
+
+// GetDeletingSourceIDs 返回当前处于异步删除中的所有站点 ID 列表
+func GetDeletingSourceIDs() []string {
+	deletingSourcesMu.RLock()
+	defer deletingSourcesMu.RUnlock()
+	ids := make([]string, 0, len(deletingSources))
+	for id := range deletingSources {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
+// BroadcastSourceDeleteStatus 广播采集站删除状态变更
+func BroadcastSourceDeleteStatus(sourceID string, status string, message string) {
+	if status == "deleting" {
+		SetSourceDeleting(sourceID, true)
+	} else {
+		SetSourceDeleting(sourceID, false)
+	}
+
+	GlobalHub.mu.RLock()
+	defer GlobalHub.mu.RUnlock()
+	evt := SourceDeleteEvent{
+		SourceID: sourceID,
+		Status:   status,
+		Message:  message,
+	}
+	for ch := range GlobalHub.deleteSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// SubscribeSourceDelete 订阅采集站删除事件流
+func SubscribeSourceDelete(ctx context.Context) <-chan SourceDeleteEvent {
+	ch := make(chan SourceDeleteEvent, 16)
+
+	GlobalHub.mu.Lock()
+	GlobalHub.deleteSubscribers[ch] = struct{}{}
+	GlobalHub.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		GlobalHub.mu.Lock()
+		delete(GlobalHub.deleteSubscribers, ch)
 		GlobalHub.mu.Unlock()
 		close(ch)
 	}()

@@ -2,9 +2,21 @@ import { useEffect, useRef } from "react";
 import { fetchEventStream } from "@/lib/sse-client";
 import type { CollectProgress } from "./types";
 
+export interface CategoryTreeChange {
+  typeId: number;
+  kind: "renamed" | "removed" | "moved" | string;
+  name?: string;
+  from?: string;
+  to?: string;
+}
+
 export interface CategorySyncEvent {
   sourceId: string;
-  status: "syncing" | "ready" | "failed" | string;
+  status: "syncing" | "ready" | "failed" | "confirm" | "idle" | string;
+  name?: string;
+  changes?: CategoryTreeChange[];
+  message?: string;
+  dataCleared?: boolean;
 }
 
 export interface CategoryReadyEvent {
@@ -12,11 +24,19 @@ export interface CategoryReadyEvent {
   categoryReady: boolean;
 }
 
+export interface SourceDeleteEvent {
+  sourceId: string;
+  status: "deleting" | "deleted" | "failed" | string;
+  message?: string;
+}
+
 export interface CollectStreamHandlers {
   onProgress?: (progressList: CollectProgress[]) => void;
   onCategorySnapshot?: (snapshot: Record<string, string>) => void;
   onCategoryStatus?: (event: CategorySyncEvent) => void;
   onCategoryReady?: (event: CategoryReadyEvent) => void;
+  onSourceDelete?: (event: SourceDeleteEvent) => void;
+  onDeleteSnapshot?: (deletingIds: string[]) => void;
   onReconnect?: () => void;
 }
 
@@ -52,6 +72,16 @@ export function useCollectStream(
           },
           onMessage: (data: any, _raw: string, event?: string) => {
             if (
+              event === "delete_snapshot" ||
+              (Array.isArray(data) && data.length > 0 && typeof data[0] === "string")
+            ) {
+              handlersRef.current.onDeleteSnapshot?.(data as string[]);
+            } else if (
+              event === "source_delete" ||
+              (data && typeof data === "object" && "sourceId" in data && ("status" in data && (data.status === "deleting" || data.status === "deleted" || data.status === "failed")))
+            ) {
+              handlersRef.current.onSourceDelete?.(data as SourceDeleteEvent);
+            } else if (
               event === "category_snapshot" ||
               (!Array.isArray(data) && data && typeof data === "object" && !data.sourceId)
             ) {

@@ -1,7 +1,7 @@
 import React, { useRef, useCallback } from "react";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import type { FilmSource } from "./types";
+import { isCollectBusyStatus, type FilmSource } from "./types";
 
 export function useCollectSort(
   siteList: FilmSource[],
@@ -14,6 +14,14 @@ export function useCollectSort(
   const handleSortList = useCallback(
     (nextList: FilmSource[]) => {
       const prevList = pendingSortRef.current?.prev ?? siteList;
+      const prevPrimary = prevList.find((s) => s.state) ?? prevList[0];
+      const nextPrimary = nextList.find((s) => s.state) ?? nextList[0];
+      const isPrimaryChanged = Boolean(prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id);
+      const collecting = prevList.some((item) => isCollectBusyStatus(item.progress?.status));
+      if (isPrimaryChanged && collecting) {
+        message.warning({ content: "采集中不能更换主站", key: "collect-sort" });
+        return;
+      }
       let assignedPrimary = false;
       const optimisticList = nextList.map((item) => {
         if (item.state && !assignedPrimary) {
@@ -27,12 +35,6 @@ export function useCollectSort(
       }
       setSiteList(optimisticList);
       pendingSortRef.current = { prev: prevList, next: optimisticList };
-
-      const prevPrimary = prevList.find((s) => s.state) ?? prevList[0];
-      const nextPrimary = optimisticList.find((s) => s.isPrimary);
-      const isPrimaryChanged = Boolean(
-        prevPrimary && nextPrimary && prevPrimary.id !== nextPrimary.id,
-      );
 
       sortConfirmRef.current?.destroy();
       sortConfirmRef.current = modal.confirm({

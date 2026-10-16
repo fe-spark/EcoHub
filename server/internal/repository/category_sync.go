@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
@@ -26,14 +27,31 @@ type categoryTreeWalkNode struct {
 }
 
 func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
-	return saveCategoryTree(sourceId, tree, true, false)
+	_, err := ApplyCategoryTree(sourceId, tree, false)
+	return err
 }
 
 func ResetCategoryTree(sourceId string, tree *model.CategoryTree) error {
-	return saveCategoryTree(sourceId, tree, false, false)
+	return saveCategoryTree(sourceId, tree, false, false, false)
 }
 
-func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusinessFields bool, skipRebuild bool) error {
+func ApplyCategoryTree(sourceId string, tree *model.CategoryTree, clearCollected bool) (CategoryApplyResult, error) {
+	sourceId = strings.TrimSpace(sourceId)
+	if sourceId == "" {
+		return CategoryApplyResult{}, fmt.Errorf("source id 不能为空")
+	}
+	if tree == nil {
+		return CategoryApplyResult{}, nil
+	}
+
+	plans := make([]sourceCategoryPlacement, 0)
+	if err := flattenSourceCategoryPlacements(tree.Children, 0, 0, &plans); err != nil {
+		return CategoryApplyResult{}, err
+	}
+	return applyCategoryPlans(sourceId, plans, true, false, clearCollected)
+}
+
+func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusinessFields bool, skipRebuild bool, clearCollected bool) error {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" {
 		return fmt.Errorf("source id 不能为空")
@@ -46,16 +64,42 @@ func saveCategoryTree(sourceId string, tree *model.CategoryTree, preserveBusines
 	if err := flattenSourceCategoryPlacements(tree.Children, 0, 0, &plans); err != nil {
 		return err
 	}
-	return saveCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild)
+	_, err := applyCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild, clearCollected)
+	return err
 }
 
 func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserveBusinessFields bool, skipRebuild bool) error {
+	_, err := applyCategoryPlans(sourceId, plans, preserveBusinessFields, skipRebuild, false)
+	return err
+}
+
+func applyCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserveBusinessFields bool, skipRebuild bool, clearCollected bool) (CategoryApplyResult, error) {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" {
-		return fmt.Errorf("source id 不能为空")
+		return CategoryApplyResult{}, fmt.Errorf("source id 不能为空")
 	}
 
+	var applyResult CategoryApplyResult
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var oldSourceCategories []model.SourceCategory
+		if err := tx.Where("source_id = ?", sourceId).Order("source_type_id ASC").Find(&oldSourceCategories).Error; err != nil {
+			return err
+		}
+
+		if len(oldSourceCategories) > 0 && len(plans) == 0 {
+			return errors.New("采集站返回的分类为空，未更新")
+		}
+
+		if clearCollected && len(oldSourceCategories) > 0 {
+			changes := DiffSourceCategoryTree(oldSourceCategories, plans)
+			if len(changes) > 0 {
+				res, err := clearChangedSourceDataTx(tx, sourceId, changes)
+				if err != nil {
+					return err
+				}
+				applyResult = res
+			}
+		}
 		var oldCategories []model.Category
 		if err := tx.Order("pid ASC, sort ASC, id ASC").Find(&oldCategories).Error; err != nil {
 			return err
@@ -234,13 +278,13 @@ func saveCategoryPlans(sourceId string, plans []sourceCategoryPlacement, preserv
 		return nil
 	})
 	if err != nil {
-		return err
+		return CategoryApplyResult{}, err
 	}
 
 	if !skipRebuild {
 		MarkCategoryChanged()
 	}
-	return nil
+	return applyResult, nil
 }
 
 // dropStaleCategoriesTx 删掉只属于当前站、且这次同步不再使用的展示分类。

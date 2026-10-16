@@ -4,25 +4,32 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Button, Empty, Space } from "antd";
 import { PlusOutlined, ApiOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectModal from "./batch-collect-modal";
+import CategoryChangeModal from "./category-change-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
+import CollectQueueBars from "./collect-queue-bars";
 import CollectSourceGrid from "./collect-source-grid";
 import CollectToolbar from "./collect-toolbar";
 import SourceFormModal from "./source-form-modal";
-import { useCollectStream } from "./use-collect-stream";
+import { useCollectProgressStream } from "./use-collect-progress-stream";
+import { useCollectStream, type CategoryTreeChange } from "./use-collect-stream";
+import { useCollectSourceEvents } from "./use-collect-source-events";
+import { useCategoryChangeConfirm } from "./use-category-change-confirm";
 import { useCollectCleanup } from "./use-collect-cleanup";
 import { useCollectBatchActions } from "./use-collect-batch-actions";
 import { useCollectBatchRunner } from "./use-collect-batch-runner";
+import { useCollectQueueBars } from "./use-collect-queue-bars";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
+import { newClientCollectQueueId } from "./collect-queue";
 import {
   isActiveCollectStatus,
+  progressAsStopping,
   type CollectListItemResponse,
-  type CollectProgress,
   type FilmSource,
   makeStartingProgress,
   normalizeSource,
@@ -37,11 +44,17 @@ export default function CollectManagePageView() {
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
+  const [deletingSourceId, setDeletingSourceId] = useState("");
 
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
-
-  const pendingCategoryStatusRef = useRef<Map<string, string>>(new Map());
-  const syncingSourcesRef = useRef<Set<string>>(new Set());
+  const {
+    pendingCategoryStatusRef,
+    syncingSourcesRef,
+    handleCategorySnapshot,
+    handleCategoryStatus,
+    handleSourceDelete,
+    handleDeleteSnapshot,
+  } = useCollectSourceEvents({ setSiteList, message });
 
   const getCollectList = useCallback(
     async (createdId?: string) => {
@@ -92,120 +105,18 @@ export default function CollectManagePageView() {
         if (mountedRef.current) setLoading(false);
       }
     },
-    [message, pendingSortRef],
+    [message, pendingCategoryStatusRef, pendingSortRef],
   );
 
   const resetTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-
-  // SSE 实时进度分发
-  const handleProgressStream = useCallback((progressList: CollectProgress[]) => {
-    if (!Array.isArray(progressList)) return;
-    const progressMap = new Map(progressList.map((p) => [String(p.id), p]));
-
-    for (const p of progressList) {
-      const id = String(p.id);
-      if (p.status === "done" || p.status === "stopped" || p.status === "failed") {
-        if (!resetTimersRef.current.has(id)) {
-          const timer = setTimeout(() => {
-            resetTimersRef.current.delete(id);
-            setSiteList((current) =>
-              current.map((item) =>
-                item.id === id &&
-                item.progress &&
-                (item.progress.status === "done" ||
-                  item.progress.status === "stopped" ||
-                  item.progress.status === "failed")
-                  ? { ...item, progress: null }
-                  : item,
-              ),
-            );
-          }, 3000);
-          resetTimersRef.current.set(id, timer);
-        }
-      } else {
-        const existingTimer = resetTimersRef.current.get(id);
-        if (existingTimer) {
-          clearTimeout(existingTimer);
-          resetTimersRef.current.delete(id);
-        }
-      }
-    }
-
-    setSiteList((current) =>
-      current.map((item) => {
-        const p = progressMap.get(String(item.id));
-        if (p) {
-          return { ...item, progress: p };
-        }
-        if (
-          item.progress &&
-          (item.progress.status === "done" ||
-            item.progress.status === "stopped" ||
-            item.progress.status === "failed" ||
-            item.progress.status === "starting" ||
-            item.progress.status === "running")
-        ) {
-          return { ...item, progress: null };
-        }
-        return item;
-      }),
-    );
-  }, []);
-
-  // SSE 实时分类状态同步
-  const handleCategorySnapshot = useCallback((snapshot: Record<string, string>) => {
-    if (!snapshot || typeof snapshot !== "object") return;
-    setSiteList((current) =>
-      current.map((item) => {
-        const status = snapshot[item.id];
-        if (!status) return item;
-        return {
-          ...item,
-          categorySyncing: status === "syncing",
-          categoryReady: status === "ready" ? true : status === "failed" ? false : item.categoryReady,
-        };
-      }),
-    );
-  }, []);
-
-  const handleCategoryStatus = useCallback(
-    (evt: { sourceId: string; status: string }) => {
-      if (!evt || !evt.sourceId) return;
-      pendingCategoryStatusRef.current.set(evt.sourceId, evt.status);
-
-      if (evt.status === "syncing") {
-        syncingSourcesRef.current.add(evt.sourceId);
-      } else if (evt.status === "ready" || evt.status === "failed") {
-        if (syncingSourcesRef.current.has(evt.sourceId)) {
-          syncingSourcesRef.current.delete(evt.sourceId);
-          if (evt.status === "ready") {
-            message.success({ key: `category-sync-${evt.sourceId}`, content: "分类获取成功" });
-          } else {
-            message.error({ key: `category-sync-${evt.sourceId}`, content: "分类获取失败" });
-          }
-        }
-      }
-
-      setSiteList((current) =>
-        current.map((item) =>
-          item.id === evt.sourceId
-            ? {
-                ...item,
-                categorySyncing: evt.status === "syncing",
-                categoryReady:
-                  evt.status === "ready" ? true : evt.status === "failed" ? false : item.categoryReady,
-              }
-            : item,
-        ),
-      );
-    },
-    [message],
-  );
+  const handleProgressStream = useCollectProgressStream(setSiteList, resetTimersRef);
 
   useCollectStream({
     onProgress: handleProgressStream,
     onCategorySnapshot: handleCategorySnapshot,
     onCategoryStatus: handleCategoryStatus,
+    onSourceDelete: handleSourceDelete,
+    onDeleteSnapshot: handleDeleteSnapshot,
     onReconnect: () => {
       void getCollectList();
     },
@@ -222,25 +133,28 @@ export default function CollectManagePageView() {
     confirmCleanup,
   } = useCollectCleanup(getCollectList);
 
+  const categoryConfirm = useCategoryChangeConfirm(getCollectList);
+
   const {
     selectedSourceIds,
     batchStateUpdating,
     batchDeleting,
+    deleteConfirmTitle,
+    deleteConfirmDescription,
     handleSelectSource,
     selectAllSources,
     invertSelection,
     clearSelection,
     batchChangeSourceState,
     batchDeleteSources,
-  } = useCollectBatchActions(siteList, getCollectList);
+  } = useCollectBatchActions(siteList, setSiteList, getCollectList);
 
   const {
     batchOpen,
     setBatchOpen,
-    batchIds,
     batchTime,
     setBatchTime,
-    batchOptions,
+    batchRows,
     openBatchCollect,
     startBatchCollect,
   } = useCollectBatchRunner(siteList, setSiteList, selectedSourceIds, getCollectList);
@@ -281,14 +195,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const tourProgressPhase = useMemo(() => {
-    if (activeCollectIds.length > 0) return "running";
-    const statuses = siteList.map((item) => item.progress?.status).filter(Boolean);
-    if (statuses.length === 0) return undefined;
-    if (statuses.includes("failed")) return "failed";
-    if (statuses.includes("stopped")) return "stopped";
-    return "done";
-  }, [activeCollectIds.length, siteList]);
+  const { queueBars, stoppingQueueId, tourHoldProgress, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
 
   const updateSiteListItem = useCallback((id: string, updater: (record: FilmSource) => FilmSource) => {
     setSiteList((current) => current.map((item) => (item.id === id ? updater(item) : item)));
@@ -326,12 +233,25 @@ export default function CollectManagePageView() {
       syncingSourcesRef.current.add(id);
       setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: true } : s)));
       try {
-        const resp = await ApiPost("/manage/collect/category/sync", { id });
+        const resp = await ApiPost<{
+          needConfirm?: boolean;
+          name?: string;
+          changes?: CategoryTreeChange[];
+        }>("/manage/collect/category/sync", { id });
         const ok = resp.code === 0;
+
+        if (resp.data?.needConfirm) {
+          syncingSourcesRef.current.delete(id);
+          const target = siteList.find((s) => s.id === id);
+          categoryConfirm.openConfirm(id, resp.data.name || target?.name || id, resp.data.changes || []);
+          setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: false } : s)));
+          return;
+        }
+
         if (syncingSourcesRef.current.has(id)) {
           syncingSourcesRef.current.delete(id);
           if (ok) {
-            message.success({ key: `category-sync-${id}`, content: "分类获取成功" });
+            message.success({ key: `category-sync-${id}`, content: resp.msg || "分类获取成功" });
           } else {
             message.error({ key: `category-sync-${id}`, content: resp.msg || "分类获取失败" });
           }
@@ -347,10 +267,13 @@ export default function CollectManagePageView() {
         setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, categorySyncing: false } : s)));
       }
     },
-    [message],
+    [categoryConfirm, message, siteList, syncingSourcesRef],
   );
 
   const startTask = async (record: FilmSource) => {
+    if (deletingSourceId === record.id) {
+      return;
+    }
     if (!record.state) {
       message.warning("已禁用");
       return;
@@ -359,11 +282,19 @@ export default function CollectManagePageView() {
       message.warning("不可采集");
       return;
     }
+    if (record.categorySyncing) {
+      message.warning("分类采集中");
+      return;
+    }
+    if (record.progress?.status === "stopping") {
+      message.warning("停止中");
+      return;
+    }
     if (isActiveCollectStatus(record.progress?.status)) {
       message.warning("采集站已在采集中");
       return;
     }
-    updateSiteListItem(record.id, (item) => ({ ...item, progress: makeStartingProgress(record.id, record.name) }));
+    updateSiteListItem(record.id, (item) => ({ ...item, progress: makeStartingProgress(record.id, record.name, newClientCollectQueueId()) }));
     const resp = await ApiPost("/manage/spider/start", { id: record.id, time: record.cd ?? 24, batch: false });
     if (resp.code === 0) {
       message.success(resp.msg);
@@ -375,22 +306,33 @@ export default function CollectManagePageView() {
   };
 
   const stopTask = async (id: string) => {
+    updateSiteListItem(id, (item) => ({ ...item, progress: progressAsStopping(item.progress, item.id, item.name) }));
     const resp = await ApiPost("/manage/spider/stop", { id });
     if (resp.code === 0) {
-      message.success("已停止采集");
+      message.success("正在停止");
       return;
     }
     message.error(resp.msg || "终止任务失败");
+    void getCollectList();
   };
 
   const delSource = async (id: string) => {
-    const resp = await ApiPost("/manage/collect/del", { id });
-    if (resp.code === 0) {
-      message.success(resp.msg);
-      await getCollectList();
-      return;
+    setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: true } : s)));
+    setDeletingSourceId(id);
+    try {
+      const resp = await ApiPost("/manage/collect/del", { id });
+      if (resp.code === 0) {
+        message.success("已提交删除");
+        return;
+      }
+      message.error(resp.msg || "删除失败");
+      void getCollectList();
+    } catch {
+      message.error("删除失败");
+      void getCollectList();
+    } finally {
+      setDeletingSourceId("");
     }
-    message.error(resp.msg || "删除采集站失败");
   };
 
   return (
@@ -413,17 +355,29 @@ export default function CollectManagePageView() {
           canWrite={canWrite}
           batchStateUpdating={batchStateUpdating}
           batchDeleting={batchDeleting}
+          deleteConfirmTitle={deleteConfirmTitle}
+          deleteConfirmDescription={deleteConfirmDescription}
           onSelectAll={selectAllSources}
           onInvertSelection={invertSelection}
           onClearSelection={clearSelection}
-          onOpenBatchCollect={() => void openBatchCollect()}
+          onOpenBatchCollect={openBatchCollect}
           onBatchEnable={() => void batchChangeSourceState(true)}
           onBatchDisable={() => void batchChangeSourceState(false)}
           onBatchDelete={() => void batchDeleteSources()}
         />
 
+        {queueBars.length > 0 ? (
+          <CollectQueueBars
+            items={queueBars}
+            tourHoldProgress={tourHoldProgress}
+            stoppingQueueId={stoppingQueueId}
+            canWrite={canWrite}
+            onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}
+          />
+        ) : null}
+
         {siteList.length > 0 ? (
-          <div className={styles.sourceGroups} data-tour={tourProgressPhase ? "collect-progress" : undefined} data-tour-progress={tourProgressPhase}>
+          <div className={styles.sourceGroups}>
             <CollectSourceGrid
               siteList={siteList}
               selectedSourceIds={selectedSourceIds.map(String)}
@@ -438,6 +392,7 @@ export default function CollectManagePageView() {
               onTerminateTask={(id) => void stopTask(id)}
               onEditSource={(id) => void openEditDialog(id)}
               onDeleteSource={(id) => void delSource(id)}
+              deletingSourceId={deletingSourceId}
               onOpenAddDialog={openAddDialog}
               onSortList={handleSortList}
               onSyncCategory={handleSyncCategory}
@@ -470,9 +425,7 @@ export default function CollectManagePageView() {
 
       <BatchCollectModal
         open={batchOpen}
-        options={batchOptions}
-        selectedIds={batchIds}
-        activeCollectIds={activeCollectIds}
+        rows={batchRows}
         batchTime={batchTime}
         onCancel={() => setBatchOpen(false)}
         onSubmit={() => void startBatchCollect()}
@@ -487,6 +440,16 @@ export default function CollectManagePageView() {
         skipped={cleanupSkipped}
         onCancel={cancelCleanup}
         onConfirm={() => void confirmCleanup()}
+      />
+
+      <CategoryChangeModal
+        open={categoryConfirm.open}
+        sourceName={categoryConfirm.sourceName}
+        changes={categoryConfirm.changes}
+        loading={categoryConfirm.loading}
+        onCancel={categoryConfirm.closeConfirm}
+        onKeep={() => void categoryConfirm.handleKeep()}
+        onClear={() => void categoryConfirm.handleClear()}
       />
     </div>
   );

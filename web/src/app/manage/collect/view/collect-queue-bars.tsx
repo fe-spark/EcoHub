@@ -47,35 +47,11 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
               <span className={styles.batchProgressTitle}>
                 {queueProgressTitle(item.view.running, items.length, index + 1)}
               </span>
-              <span className={styles.batchProgressHeadRight}>
-                <span className={styles.batchProgressStats}>
-                  {item.view.statsText}
-                  {!item.view.running && !tourHoldProgress && item.countdown != null
-                    ? ` · ${item.countdown}s 后关闭`
-                    : ""}
-                </span>
-                {item.view.running && item.canStop ? (
-                  <Popconfirm
-                    title="终止该队列？"
-                    onConfirm={() => onStopQueue(item.queueId, item.sourceIds)}
-                    okText="终止"
-                    cancelText="取消"
-                    okButtonProps={{
-                      danger: true,
-                      loading: stoppingQueueId === item.queueId,
-                    }}
-                  >
-                    <Button
-                      danger
-                      size="small"
-                      loading={stoppingQueueId === item.queueId}
-                      disabled={!canWrite}
-                      className={styles.batchStopBtn}
-                    >
-                      终止
-                    </Button>
-                  </Popconfirm>
-                ) : null}
+              <span className={styles.batchProgressStats}>
+                {item.view.statsText}
+                {!item.view.running && !tourHoldProgress && item.countdown != null
+                  ? ` · ${item.countdown}s 后关闭`
+                  : ""}
               </span>
             </div>
             <div className={styles.batchProgressRow}>
@@ -92,6 +68,28 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                 size="small"
                 className={styles.batchProgressFill}
               />
+              {item.view.running && item.canStop ? (
+                <Popconfirm
+                  title="终止该队列？"
+                  onConfirm={() => onStopQueue(item.queueId, item.sourceIds)}
+                  okText="终止"
+                  cancelText="取消"
+                  okButtonProps={{
+                    danger: true,
+                    loading: stoppingQueueId === item.queueId,
+                  }}
+                >
+                  <Button
+                    danger
+                    size="small"
+                    loading={stoppingQueueId === item.queueId}
+                    disabled={!canWrite}
+                    className={styles.batchStopBtn}
+                  >
+                    终止
+                  </Button>
+                </Popconfirm>
+              ) : null}
             </div>
           </div>
         </div>

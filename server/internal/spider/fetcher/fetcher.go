@@ -23,8 +23,9 @@ const (
 	pageCountRetryTimes = 3
 	// filmDetailRetryTimes 分页拉取默认重试次数（1 次初试 + 1 次重试，超时或坏页快速登记入库，不卡死流水线）。
 	filmDetailRetryTimes = 2
-	// rateLimitRetryTimes 命中限流后的重试次数上限。
-	rateLimitRetryTimes = 3
+	// rateLimitRetryTimes 命中限流后的重试次数。
+	// 3 次只覆盖约 9 秒，源站此时仍返回 429。多留几次，等冷却拉到 30 秒后再记失败。
+	rateLimitRetryTimes = 6
 	// singlePageFetchTimeout 单页抓取最大超时，避免深分页慢查询长期卡死 worker。
 	singlePageFetchTimeout = 15 * time.Second
 )
@@ -108,16 +109,16 @@ func GetFilmDetailWithRetry(ctx context.Context, s *model.FilmSource, r utils.Re
 		default:
 		}
 
-		reqCtx, reqCancel := context.WithTimeout(ctx, singlePageFetchTimeout)
-		r.Ctx = reqCtx
-		release, err := deps.WaitTurn(reqCtx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
+		// 等令牌沿用采集任务上下文。限流冷却最长 30 秒，不能套进单页 15 秒超时。
+		release, err := deps.WaitTurn(ctx, s, fmt.Sprintf("分页请求 pg=%s attempt=%d ", page, attempt))
 		if err != nil {
-			reqCancel()
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			return nil, err
 		}
+		reqCtx, reqCancel := context.WithTimeout(ctx, singlePageFetchTimeout)
+		r.Ctx = reqCtx
 		list, err := deps.GetFilmDetail(s, r)
 		reqCancel()
 		if err == nil && len(list) > 0 {

@@ -8,6 +8,10 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/model"
+
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // collectStatsCoalescer 合并采集热路径中的 last_collect_time 写库。
@@ -150,4 +154,56 @@ func FlushCollectSourceStats(sourceIDs ...string) {
 		collectStats.lastFlushed[id] = nowFlush
 		collectStats.mu.Unlock()
 	}
+}
+
+// NoteCollectSourceRun 记下一次采集跑完的时间，供卡片「上次采集」。
+// 不写 last_collect_time，定时补窗锚点仍只在整次定时成功时更新。
+func NoteCollectSourceRun(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" || db.Mdb == nil {
+		return
+	}
+	if err := touchCollectSourceRunTime(db.Mdb, sourceID, time.Now()); err != nil {
+		log.Printf("NoteCollectSourceRun source=%s err=%v", sourceID, err)
+	}
+}
+
+func touchCollectSourceRunTime(tx *gorm.DB, sourceID string, at time.Time) error {
+	if tx == nil || sourceID == "" {
+		return nil
+	}
+	if at.IsZero() {
+		at = time.Now()
+	}
+	now := time.Now()
+	stat := model.CollectSourceStats{SourceId: sourceID, LastRunTime: &at}
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "source_id"}},
+		DoUpdates: clause.Assignments(map[string]any{
+			"last_run_time": at,
+			"updated_at":    now,
+			"deleted_at":    nil,
+		}),
+	}).Create(&stat).Error
+}
+
+// GetCollectSourceRunTimes 返回各站最近一次采集跑完时间。
+func GetCollectSourceRunTimes(sourceIDs []string) map[string]*time.Time {
+	result := make(map[string]*time.Time, len(sourceIDs))
+	if len(sourceIDs) == 0 || db.Mdb == nil {
+		return result
+	}
+	var rows []model.CollectSourceStats
+	if err := db.Mdb.Where("source_id IN ?", sourceIDs).Find(&rows).Error; err != nil {
+		log.Println("GetCollectSourceRunTimes Error:", err)
+		return result
+	}
+	for _, row := range rows {
+		if row.LastRunTime == nil || row.LastRunTime.IsZero() {
+			continue
+		}
+		value := *row.LastRunTime
+		result[row.SourceId] = &value
+	}
+	return result
 }

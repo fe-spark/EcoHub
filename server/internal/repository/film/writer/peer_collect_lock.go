@@ -55,15 +55,54 @@ func matchKeyLockIndexes(keys []string) []int {
 	return out
 }
 
-func peerMatchKeys(source *model.FilmSource, detail model.MovieDetail) []string {
-	pid := detail.RawPid
+func resolveMatchCategoryPid(source *model.FilmSource, detail model.MovieDetail) int64 {
+	sourceId := ""
 	if source != nil {
-		if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.Cid)); local > 0 {
-			pid = local
-		} else if local := support.GetRootId(support.GetLocalCategoryId(source.Id, detail.RawPid)); local > 0 {
-			pid = local
+		sourceId = strings.TrimSpace(source.Id)
+	}
+	if sourceId == "" || sourceId == "manual" {
+		if detail.Cid > 0 {
+			if root := support.GetRootId(detail.Cid); root > 0 {
+				return root
+			}
+		}
+		if detail.Pid > 0 {
+			return detail.Pid
+		}
+		return detail.RawPid
+	}
+
+	sourceCid := detail.Cid
+	sourcePid := detail.Pid
+	if detail.RawCid > 0 {
+		sourceCid = detail.RawCid
+	}
+	if detail.RawPid > 0 {
+		sourcePid = detail.RawPid
+	}
+
+	if sourceCid > 0 {
+		if localCid := support.GetLocalCategoryId(sourceId, sourceCid); localCid > 0 {
+			if root := support.GetRootId(localCid); root > 0 {
+				return root
+			}
 		}
 	}
+	if sourcePid > 0 {
+		if localPid := support.GetLocalCategoryId(sourceId, sourcePid); localPid > 0 {
+			if root := support.GetRootId(localPid); root > 0 {
+				return root
+			}
+		}
+	}
+	if detail.RawPid > 0 {
+		return detail.RawPid
+	}
+	return detail.Pid
+}
+
+func peerMatchKeys(source *model.FilmSource, detail model.MovieDetail) []string {
+	pid := resolveMatchCategoryPid(source, detail)
 	keys := shared.BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 	sort.Strings(keys)
 	return keys

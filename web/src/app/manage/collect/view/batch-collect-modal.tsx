@@ -1,15 +1,16 @@
-import { Alert, Flex, Form, Modal, Select, Space, Table, Tag, Typography } from "antd";
-import { useEffect, useMemo, useState } from "react";
-import { LoadingOutlined } from "@ant-design/icons";
+import { Flex, Form, Modal, Select, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import type { BatchOption } from "./types";
 import { collectDuration } from "./types";
+
+export interface BatchCollectRow {
+  id: string;
+  name: string;
+  reason: string;
+}
 
 interface BatchCollectModalProps {
   open: boolean;
-  options: BatchOption[];
-  selectedIds: string[];
-  activeCollectIds: string[];
+  rows: BatchCollectRow[];
   batchTime: number;
   onCancel: () => void;
   onSubmit: () => void;
@@ -17,52 +18,33 @@ interface BatchCollectModalProps {
 }
 
 export default function BatchCollectModal(props: BatchCollectModalProps) {
-  const {
-    open,
-    options,
-    selectedIds,
-    activeCollectIds,
-    batchTime,
-    onCancel,
-    onSubmit,
-    onBatchTimeChange,
-  } = props;
+  const { open, rows, batchTime, onCancel, onSubmit, onBatchTimeChange } = props;
+  const startCount = rows.filter((item) => !item.reason).length;
+  const skipCount = rows.length - startCount;
 
-  // 保持弹窗内的运行态稳定：仅在弹窗打开状态下同步，避免关闭及退场动画期间因外部乐观置为 starting 而闪烁 Alert
-  const [stableActiveIds, setStableActiveIds] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (open) {
-      setStableActiveIds(activeCollectIds);
-    }
-  }, [open, activeCollectIds]);
-
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const selectedRunningNames = useMemo(
-    () =>
-      options
-        .filter((item) => selectedSet.has(item.id) && stableActiveIds.includes(item.id))
-        .map((item) => item.name),
-    [options, selectedSet, stableActiveIds],
-  );
-
-  const columns: ColumnsType<BatchOption> = [
+  const columns: ColumnsType<BatchCollectRow> = [
     {
       title: "采集站",
       dataIndex: "name",
       render: (value: string, record) => (
         <Flex vertical gap={4}>
-          <Space size={[8, 4]} wrap>
-            <Typography.Text strong>{value}</Typography.Text>
-            {stableActiveIds.includes(record.id) ? (
-              <Tag icon={<LoadingOutlined />} color="processing" variant="filled">
-                采集中
-              </Tag>
-            ) : null}
-          </Space>
+          <Typography.Text strong>{value}</Typography.Text>
           <Typography.Text type="secondary">{record.id}</Typography.Text>
         </Flex>
       ),
+    },
+    {
+      title: "状态",
+      dataIndex: "reason",
+      width: 160,
+      render: (reason: string) =>
+        reason ? (
+          <Tag variant="filled">{reason}</Tag>
+        ) : (
+          <Tag color="success" variant="filled">
+            可采集
+          </Tag>
+        ),
     },
   ];
 
@@ -72,30 +54,17 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
       open={open}
       onCancel={onCancel}
       onOk={onSubmit}
-      okText="开始采集"
-      okButtonProps={{ "data-tour": "collect-batch-submit" }}
-      width={960}
+      okText={skipCount > 0 ? `将采集 ${startCount} 个，跳过 ${skipCount} 个` : `将采集 ${startCount} 个`}
+      okButtonProps={{ "data-tour": "collect-batch-submit", disabled: startCount === 0 }}
+      width={720}
       destroyOnHidden
     >
       <Flex vertical gap={16}>
-        {selectedRunningNames.length > 0 ? (
-          <Alert
-            showIcon
-            type="warning"
-            title={`${selectedRunningNames.join("、")} 正在采集，将自动跳过`}
-          />
-        ) : null}
-
-        <Space size={[8, 8]} wrap>
-          <Tag variant="filled">将采集 {selectedIds.length} 个采集站</Tag>
-          <Tag variant="filled">运行中 {stableActiveIds.length}</Tag>
-        </Space>
-
-        <Table<BatchOption>
+        <Table<BatchCollectRow>
           rowKey="id"
           size="middle"
           columns={columns}
-          dataSource={options}
+          dataSource={rows}
           pagination={false}
           scroll={{ y: 360 }}
         />

@@ -55,10 +55,14 @@ func (h *SpiderHandler) StarSpider(c *gin.Context) {
 			dto.Failed("批量采集开启失败, 关联的资源站信息为空", c)
 			return
 		}
-		if err := service.SpiderSvc.BatchCollect(cp.Time, cp.Ids); err != nil {
-			dto.Failed(err.Error(), c)
+		result := service.SpiderSvc.BatchCollect(cp.Time, cp.Ids)
+		msg := batchOutcomeMessage(result, "已开启", "没有可采集的站点")
+		if len(result.Started) == 0 {
+			dto.FailedWithData(result, msg, c)
 			return
 		}
+		dto.Success(result, msg, c)
+		return
 	} else {
 		if len(cp.Id) <= 0 {
 			dto.Failed("批量采集开启失败, 资源站Id获取失败", c)

@@ -6,6 +6,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/spider/progress"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -110,6 +111,49 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src2").Count(&src2Map)
 	if src2Raw != 1 || src2Map != 1 {
 		t.Fatalf("expected src2 category copy to remain, raw=%d map=%d", src2Raw, src2Map)
+	}
+}
+
+func TestCollectService_DelFilmSource_StopsRunningThenCleans(t *testing.T) {
+	gdb := setupCascadeCleanTestDB(t)
+	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
+	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1},
+		FilmIndexContent:  model.FilmIndexContent{Name: "独占影片"},
+	})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 1, SourceId: "src1", LineKind: "play", Content: "[]"})
+	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "电影"})
+	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 9})
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src1", Name: "源1"}, {Id: "src2", Name: "源2"}}, "q-del")
+	t.Cleanup(func() {
+		progress.MarkStopped("src1")
+		progress.MarkStopped("src2")
+	})
+
+	if err := new(CollectService).DelFilmSource("src1"); err != nil {
+		t.Fatalf("delete while collecting: %v", err)
+	}
+	var sourceCount int64
+	gdb.Model(&model.FilmSource{}).Where("id = ?", "src1").Count(&sourceCount)
+	if sourceCount != 0 {
+		t.Fatal("src1 should be deleted")
+	}
+	var raw int64
+	var mapped int64
+	var lines int64
+	gdb.Model(&model.SourceCategory{}).Where("source_id = ?", "src1").Count(&raw)
+	gdb.Model(&model.CategoryMapping{}).Where("source_id = ?", "src1").Count(&mapped)
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", "src1").Count(&lines)
+	if raw != 0 || mapped != 0 || lines != 0 {
+		t.Fatalf("src1 data left raw=%d map=%d lines=%d", raw, mapped, lines)
+	}
+	gdb.Model(&model.FilmSource{}).Where("id = ?", "src2").Count(&sourceCount)
+	if sourceCount != 1 {
+		t.Fatal("src2 should stay")
+	}
+	if !progress.IsTaskRunning("src2") {
+		t.Fatal("another running source should stay running")
 	}
 }
 
