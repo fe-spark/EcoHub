@@ -108,6 +108,51 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	return action()
 }
 
+// waitSource 等到该站离开采集生命周期。超时表示这次运行还没退出。
+func (s *collectLifecycleState) waitSource(sourceID string, timeout time.Duration) error {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.activeSources[sourceID]; !ok {
+		return nil
+	}
+	if timeout <= 0 {
+		return errors.New("停止采集超时，未删除")
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		select {
+		case <-timer.C:
+			s.mu.Lock()
+			s.cond.Broadcast()
+			s.mu.Unlock()
+		case <-done:
+		}
+	}()
+
+	for {
+		if _, ok := s.activeSources[sourceID]; !ok {
+			return nil
+		}
+		select {
+		case <-timer.C:
+			if _, ok := s.activeSources[sourceID]; !ok {
+				return nil
+			}
+			return errors.New("停止采集超时，未删除")
+		default:
+		}
+		s.cond.Wait()
+	}
+}
+
 func (s *collectLifecycleState) waitIdle(timeout time.Duration) error {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()

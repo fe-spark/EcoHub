@@ -1,8 +1,16 @@
 package repository
 
 import (
+	"fmt"
 	"testing"
 	"time"
+
+	"server/internal/infra/db"
+	"server/internal/model"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func TestNoteCollectSourceStatsCoalescesPending(t *testing.T) {
@@ -74,5 +82,42 @@ func TestDropCollectSourceStatsPendingClearsHold(t *testing.T) {
 	collectStats.mu.Unlock()
 	if pending || held {
 		t.Fatal("drop should clear pending and suppress")
+	}
+}
+
+func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.CollectSourceStats{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	anchor := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	if err := gdb.Create(&model.CollectSourceStats{SourceId: "src-run", LastCollectTime: &anchor}).Error; err != nil {
+		t.Fatal(err)
+	}
+	NoteCollectSourceRun("src-run")
+
+	gotAnchor := GetLastCollectTime("src-run")
+	if gotAnchor == nil || !gotAnchor.Equal(anchor) {
+		t.Fatalf("cron anchor = %v, want %v", gotAnchor, anchor)
+	}
+	runAt := GetCollectSourceRunTimes([]string{"src-run"})["src-run"]
+	if runAt == nil || runAt.IsZero() {
+		t.Fatal("last run time missing")
+	}
+
+	onlyCron := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
+	if err := gdb.Create(&model.CollectSourceStats{SourceId: "src-cron", LastCollectTime: &onlyCron}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := GetCollectSourceRunTimes([]string{"src-cron"})["src-cron"]; ok {
+		t.Fatal("cron anchor was returned as last run time")
 	}
 }

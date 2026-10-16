@@ -52,8 +52,6 @@ func GetLibraryInventory() LibraryInventory {
 	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&library.Films).Error
 	_ = db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error
 	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error
-	// 没有软删除影片时，播放线路上的片子都还在片库里，不必再连表。
-	// 连表会让优化器从全表出发，线路一百多万行时要十几秒。
 	library.Playable = countPlayMids("", hasSoftDeletedFilms())
 	return library
 }
@@ -93,21 +91,23 @@ func GetSourceInventories() []SourceInventory {
 func hasSoftDeletedFilms() bool {
 	var n int64
 	err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).Where("deleted_at IS NOT NULL").Count(&n).Error
-	return err != nil || n > 0
+	return err == nil && n > 0
 }
 
-// countPlayMids 统计有播放线路的影片。sourceID 为空时统计整库。
-// accurate 为真时只保留未删除、且仍在片库中的影片。
+// countPlayMids 统计有播放地址的影片。sourceID 为空时统计整库。
+// accurate 为真时只保留未删除的影片。计数走 idx_playlist_kind_mid，避免全表扫描把请求拖到超时。
 func countPlayMids(sourceID string, accurate bool) int64 {
-	query := db.Mdb.Table(model.TableFilmSourcePlaylist+" AS p").Where("p.line_kind = ?", "play")
+	sqlText := "SELECT COUNT(DISTINCT p.mid) FROM " + model.TableFilmSourcePlaylist + " AS p WHERE p.line_kind = ?"
+	args := []any{"play"}
 	if sourceID != "" {
-		query = query.Where("p.source_id = ?", sourceID)
+		sqlText += " AND p.source_id = ?"
+		args = append(args, sourceID)
 	}
 	if accurate {
-		query = query.Joins("INNER JOIN " + model.TableFilmIndex + " AS f ON f.mid = p.mid AND f.deleted_at IS NULL")
+		sqlText += " AND EXISTS (SELECT 1 FROM " + model.TableFilmIndex + " AS f WHERE f.mid = p.mid AND f.deleted_at IS NULL)"
 	}
 	var n int64
-	_ = query.Distinct("p.mid").Count(&n).Error
+	_ = db.Mdb.Raw(sqlText, args...).Scan(&n).Error
 	return n
 }
 

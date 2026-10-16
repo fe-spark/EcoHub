@@ -41,6 +41,7 @@ interface CollectSourceGridProps {
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
+  deletingSourceId?: string;
   onOpenAddDialog: () => void;
   onSortList: (nextList: FilmSource[]) => void;
   onSyncCategory?: (id: string) => void;
@@ -60,6 +61,7 @@ export default function CollectSourceGrid({
   onTerminateTask,
   onEditSource,
   onDeleteSource,
+  deletingSourceId = "",
   onOpenAddDialog,
   onSortList,
   onSyncCategory,
@@ -136,6 +138,7 @@ export default function CollectSourceGrid({
                 onTerminateTask={onTerminateTask}
                 onEditSource={onEditSource}
                 onDeleteSource={onDeleteSource}
+                deleting={deletingSourceId === site.id || Boolean(site.deleting)}
                 onSyncCategory={onSyncCategory}
               />
             );

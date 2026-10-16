@@ -1,8 +1,11 @@
-import React, { useState, useCallback } from "react";
-import { ApiGet, ApiPost } from "@/lib/client-api";
+import React, { useCallback, useMemo, useState } from "react";
+import { ApiPost, type ApiResponse } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { COLLECT_BATCH_FAILED_EVENT } from "@/app/manage/components/manage-tour";
-import { isActiveCollectStatus, makeStartingProgress, type BatchOption, type FilmSource } from "./types";
+import { collectBlockReason, formatSkipSummary } from "./collect-selection";
+import { newClientCollectQueueId } from "./collect-queue";
+import type { BatchCollectRow } from "./batch-collect-modal";
+import { makeStartingProgress, type CollectBatchResult, type FilmSource } from "./types";
 
 export function useCollectBatchRunner(
   siteList: FilmSource[],
@@ -12,98 +15,103 @@ export function useCollectBatchRunner(
 ) {
   const { message } = useAppMessage();
   const [batchOpen, setBatchOpen] = useState(false);
-  const [batchIds, setBatchIds] = useState<string[]>([]);
+  const [batchScopeIds, setBatchScopeIds] = useState<string[]>([]);
   const [batchTime, setBatchTime] = useState(24);
-  const [batchOptions, setBatchOptions] = useState<BatchOption[]>([]);
 
-  const openBatchCollect = useCallback(async () => {
-    const resp = await ApiGet("/manage/collect/options");
-    if (resp.code === 0) {
-      const allOptions = Array.isArray(resp.data)
-        ? resp.data.map((item: BatchOption) => ({
-            ...item,
-            sort: siteList.find((site) => site.id === item.id)?.sort ?? 0,
-            state: siteList.find((site) => site.id === item.id)?.state ?? false,
-          }))
-        : [];
-      const enabledIds = new Set(allOptions.map((item) => item.id));
-      const selectedEnabledIds = selectedSourceIds
-        .map(String)
-        .filter((id) => enabledIds.has(id));
-      if (selectedSourceIds.length === 0) {
-        message.warning("请先选择采集站");
-        return;
-      }
-      if (selectedEnabledIds.length === 0) {
-        message.warning("选中的采集站均未启用");
-        return;
-      }
-      const readyIds = selectedEnabledIds.filter(
-        (id) => siteList.find((item) => item.id === id)?.categoryReady !== false,
-      );
-      if (readyIds.length === 0) {
-        message.warning("选中的采集站缺少分类配置");
-        return;
-      }
-      const options = allOptions.filter((item) => readyIds.includes(item.id));
-      setBatchOptions(options);
-      setBatchIds(readyIds);
-      setBatchOpen(true);
+  const batchRows = useMemo<BatchCollectRow[]>(
+    () =>
+      batchScopeIds.flatMap((id) => {
+        const site = siteList.find((item) => item.id === id);
+        if (!site) return [];
+        return [{ id: site.id, name: site.name, reason: collectBlockReason(site) }];
+      }),
+    [batchScopeIds, siteList],
+  );
+
+  const openBatchCollect = useCallback(() => {
+    const selected = siteList.filter((item) => selectedSourceIds.includes(item.id));
+    if (selected.length === 0) {
+      message.warning("请先选择采集站");
       return;
     }
-    message.error(resp.msg || "加载批量采集列表失败");
+    const blocked = selected
+      .map((item) => ({ name: item.name, reason: collectBlockReason(item) }))
+      .filter((item) => item.reason);
+    if (blocked.length === selected.length) {
+      message.warning(`没有可采集的站点：${formatSkipSummary(blocked)}`);
+      return;
+    }
+    setBatchScopeIds(selected.map((item) => item.id));
+    setBatchOpen(true);
   }, [message, selectedSourceIds, siteList]);
 
+  const clearStarting = useCallback(
+    (ids: Set<string>) => {
+      if (ids.size === 0) return;
+      setSiteList((current) =>
+        current.map((item) =>
+          ids.has(item.id) && item.progress?.status === "starting" ? { ...item, progress: null } : item,
+        ),
+      );
+    },
+    [setSiteList],
+  );
+
   const startBatchCollect = useCallback(async () => {
-    if (batchIds.length === 0) {
-      message.warning("请选择采集站");
-      return;
-    }
-    const claimedIds = batchIds.filter(
-      (id) => !isActiveCollectStatus(siteList.find((item) => item.id === id)?.progress?.status),
-    );
-    if (claimedIds.length === 0) {
-      message.warning("选中采集站均已在采集中");
-      setBatchOpen(false);
+    const ids = batchRows.filter((item) => !item.reason).map((item) => item.id);
+    if (ids.length === 0) {
+      message.warning("没有可采集的站点");
       return;
     }
     setBatchOpen(false);
-    const idSet = new Set(claimedIds);
+    const idSet = new Set(ids);
+    const queueId = newClientCollectQueueId();
     setSiteList((current) =>
       current.map((item) =>
-        idSet.has(item.id)
-          ? { ...item, progress: makeStartingProgress(item.id, item.name) }
-          : item,
+        idSet.has(item.id) ? { ...item, progress: makeStartingProgress(item.id, item.name, queueId) } : item,
       ),
     );
-    const resp = await ApiPost("/manage/spider/start", {
-      ids: batchIds,
-      time: batchTime,
-      batch: true,
-    });
-    if (resp.code === 0) {
-      message.success(resp.msg);
+    let resp: ApiResponse<CollectBatchResult>;
+    try {
+      resp = await ApiPost<CollectBatchResult>("/manage/spider/start", {
+        ids,
+        time: batchTime,
+        batch: true,
+      });
+    } catch {
+      clearStarting(idSet);
+      window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
       return;
     }
-    message.error(resp.msg || "批量采集启动失败");
-    setSiteList((current) =>
-      current.map((item) =>
-        idSet.has(item.id) && item.progress?.status === "starting"
-          ? { ...item, progress: null }
-          : item,
-      ),
+    const started = new Set(
+      (Array.isArray(resp.data?.started) ? resp.data.started : []).map((item) => item.id),
     );
+    const skipped = Array.isArray(resp.data?.skipped) ? resp.data.skipped : [];
+    const skippedIds = new Set(skipped.map((item) => item.id));
+    if (resp.code === 0) {
+      message.success(resp.msg || `已开启 ${started.size} 个`);
+      if (skipped.length > 0) {
+        message.warning(`跳过：${formatSkipSummary(skipped.map((item) => ({ name: item.name || item.id, reason: item.reason })))}`);
+        clearStarting(skippedIds);
+      }
+      return;
+    }
+    message.warning(
+      skipped.length > 0
+        ? `没有可采集的站点：${formatSkipSummary(skipped.map((item) => ({ name: item.name || item.id, reason: item.reason })))}`
+        : resp.msg || "批量采集启动失败",
+    );
+    clearStarting(new Set(ids.filter((id) => !started.has(id))));
     window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
     await reloadList();
-  }, [batchIds, batchTime, message, reloadList, setSiteList, siteList]);
+  }, [batchRows, batchTime, clearStarting, message, reloadList, setSiteList]);
 
   return {
     batchOpen,
     setBatchOpen,
-    batchIds,
     batchTime,
     setBatchTime,
-    batchOptions,
+    batchRows,
     openBatchCollect,
     startBatchCollect,
   };

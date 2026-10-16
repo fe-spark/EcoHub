@@ -3,12 +3,17 @@ import {
   type FilmSource,
 } from "./types";
 
-export type StatusTone = "running" | "enabled" | "disabled" | "stopping" | "failed";
+export type StatusTone = "running" | "enabled" | "disabled" | "stopping" | "failed" | "deleting";
 
 export function resolveSourceStatus(
   record: FilmSource,
   active: boolean,
+  deleting = false,
 ): { label: string; tone: StatusTone } {
+  if (deleting || record.deleting) {
+    return { label: "删除中", tone: "deleting" };
+  }
+
   if (record.categorySyncing) {
     return { label: "分类采集中", tone: "running" };
   }
@@ -18,6 +23,10 @@ export function resolveSourceStatus(
   }
 
   const phase = record.progress?.status;
+
+  if (phase === "stopping") {
+    return { label: "停止中", tone: "stopping" };
+  }
 
   if (active) {
     if (!record.state) {

@@ -21,6 +21,9 @@ var ErrDispatchStopped = errors.New("采集派发已终止")
 // ErrTaskExists 同名站点已有活跃任务。
 var ErrTaskExists = errors.New("站点已有活跃任务")
 
+// ErrStopRequested 停止已生效，不再登记新的运行。
+var ErrStopRequested = errors.New("采集已停止")
+
 type task struct {
 	cancel context.CancelFunc
 	reqID  string
@@ -38,9 +41,47 @@ func TryRegisterTask(id, reqID string, canStart func() bool) (context.Context, e
 	if _, ok := tasks.Load(id); ok {
 		return nil, ErrTaskExists
 	}
+	if snap, ok := Snapshot(id); ok && (snap.Status == StatusStopped || snap.Status == StatusStopping) {
+		return nil, ErrStopRequested
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	tasks.Store(id, task{cancel: cancel, reqID: reqID})
 	return ctx, nil
+}
+
+// RequestStop 停止该站。已登记的运行改为「停止中」并立刻摘出任务表，收尾由原协程完成。
+// 还没登记的排队站直接标成已停止。
+func RequestStop(id string) {
+	taskMu.Lock()
+	defer taskMu.Unlock()
+
+	if val, ok := tasks.Load(id); ok {
+		// 先标成停止中，再取消。避免正在退出的拉页把状态直接写成已停止。
+		setStatusIf(id, StatusStopping, StatusStarting, StatusRunning)
+		val.(task).cancel()
+		tasks.Delete(id)
+		return
+	}
+	setStatusIf(id, StatusStopped, StatusStarting, StatusRunning, StatusStopping)
+}
+
+func setStatusIf(id, next string, from ...string) {
+	val, ok := store.Load(id)
+	if !ok {
+		return
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	for _, status := range from {
+		if state.data.Status != status {
+			continue
+		}
+		state.data.Status = next
+		state.updated = time.Now()
+		NotifyChange()
+		return
+	}
 }
 
 // UnregisterTask 在 reqID 匹配时注销任务，返回是否发生注销。

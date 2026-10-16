@@ -18,6 +18,7 @@ const peerPagePlaylistBatch = 40
 type peerPageItem struct {
 	detail       model.MovieDetail
 	keys         []string
+	keyRank      map[string]int
 	mid          int64
 	film         *model.FilmIndex
 	isNew        bool
@@ -55,7 +56,12 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	items := make([]peerPageItem, len(details))
 	sourceMids := make([]int64, len(details))
 	for i, detail := range details {
-		items[i] = peerPageItem{detail: detail, keys: peerMatchKeys(source, detail), owner: -1}
+		items[i] = peerPageItem{
+			detail:  detail,
+			keys:    peerMatchKeys(source, detail),
+			keyRank: peerMatchKeyRanks(source, detail),
+			owner:   -1,
+		}
 		sourceMids[i] = detail.Id
 	}
 
@@ -197,25 +203,12 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 	}
 	var rows []matchKeyMid
 	if err := tx.Model(&model.MovieMatchKey{}).
-		Select("match_key, MIN(mid) AS mid").
+		Select("match_key, mid").
 		Where("match_key IN ?", keys).
-		Group("match_key").
-		Scan(&rows).Error; err != nil {
+		Find(&rows).Error; err != nil {
 		return err
 	}
-	keyMid := make(map[string]int64, len(rows))
-	claimMids := make([]int64, 0, len(rows))
-	claimed := make(map[int64]struct{}, len(rows))
-	for _, row := range rows {
-		if row.Mid > 0 && row.MatchKey != "" {
-			keyMid[row.MatchKey] = row.Mid
-			if _, ok := claimed[row.Mid]; !ok {
-				claimed[row.Mid] = struct{}{}
-				claimMids = append(claimMids, row.Mid)
-			}
-		}
-	}
-	films, err := loadFilmsByMidsTx(tx, claimMids)
+	films, err := loadFilmsByMidsTx(tx, midsFromMatchRows(rows))
 	if err != nil {
 		return err
 	}
@@ -223,12 +216,7 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 		if items[i].film != nil || len(items[i].keys) == 0 {
 			continue
 		}
-		var mid int64
-		for _, key := range items[i].keys {
-			if candidate, ok := keyMid[key]; ok && (mid == 0 || candidate < mid) {
-				mid = candidate
-			}
-		}
+		mid := bestMidForKeys(items[i].keys, items[i].keyRank, rows)
 		if film, ok := films[mid]; ok {
 			items[i].mid, items[i].film = film.Mid, film
 		}

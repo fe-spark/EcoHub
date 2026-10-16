@@ -31,7 +31,7 @@ interface InventoryStatsData {
 
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "全部采集站入库", lead: true },
-  { key: "playable", label: "有播放线路", hint: "至少一条播放线路" },
+  { key: "playable", label: "可播放影片", hint: "有播放地址的影片" },
   { key: "categories", label: "展示分类", hint: "共享展示树" },
   { key: "failures", label: "失败记录", hint: "全部来源" },
 ];
@@ -56,6 +56,7 @@ function placePrimaryFirst(sources: SourceInventory[], id: string) {
 export default function InventoryStats() {
   const [library, setLibrary] = useState<LibraryInventory | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(true);
+  const [libraryFailed, setLibraryFailed] = useState(false);
   const [sources, setSources] = useState<SourceInventory[] | null>(null);
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
@@ -78,13 +79,22 @@ export default function InventoryStats() {
 
   useEffect(() => {
     let active = true;
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=library")
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=library", undefined, 10000)
       .then((resp) => {
-        if (active && resp.code === 0 && resp.data?.library) {
-          setLibrary(resp.data.library);
+        if (!active) {
+          return;
+        }
+        if (resp.code !== 0 || !resp.data?.library) {
+          setLibraryFailed(true);
+          return;
+        }
+        setLibrary(resp.data.library);
+      })
+      .catch(() => {
+        if (active) {
+          setLibraryFailed(true);
         }
       })
-      .catch(() => {})
       .finally(() => {
         if (active) {
           setLibraryLoading(false);
@@ -102,7 +112,7 @@ export default function InventoryStats() {
     let active = true;
     setSourcesLoading(true);
     setSourcesFailed(false);
-    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=sources")
+    ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=sources", undefined, 10000)
       .then((resp) => {
         if (!active) {
           return;
@@ -146,6 +156,8 @@ export default function InventoryStats() {
         <div className={styles.loading} role="status" aria-busy="true">
           <Spin />
         </div>
+      ) : libraryFailed || library === null ? (
+        <div className={styles.stationEmpty}>统计失败</div>
       ) : (
         <div className={styles.metrics}>
           {metricItems.map((item) => (

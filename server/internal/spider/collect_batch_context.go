@@ -287,20 +287,60 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	if id == "" {
 		return
 	}
-	if b != nil {
-		b.mu.Lock()
-		tok, hasTok := b.occupyTokens[id]
-		delete(b.occupyTokens, id)
-		b.mu.Unlock()
-		if hasTok {
-			releaseCollectTokens(map[string]uint64{id: tok})
-			return
-		}
+	if b == nil {
+		releaseCollectSourceIDs(id)
+		return
 	}
-	releaseCollectSourceIDs(id)
+	b.mu.Lock()
+	tok, hasTok := b.occupyTokens[id]
+	delete(b.occupyTokens, id)
+	b.mu.Unlock()
+	if !hasTok {
+		return
+	}
+	releaseCollectTokens(map[string]uint64{id: tok})
+}
+
+// ownsOccupy 当前占用令牌仍是本批次抢到的那一个。停止后被新采集重新占用时为 false。
+func (b *collectBatchContext) ownsOccupy(id string) bool {
+	if b == nil {
+		return false
+	}
+	id = collectSourceID(id)
+	b.mu.Lock()
+	tok, ok := b.occupyTokens[id]
+	b.mu.Unlock()
+	if !ok {
+		return false
+	}
+	collectingSourcesMu.Lock()
+	cur, exists := collectingSources[id]
+	collectingSourcesMu.Unlock()
+	return exists && cur == tok
+}
+
+// releaseQueuedCollectOccupies 放掉还没跑起来的队列占用。运行中的任务仍由自己的退出释放。
+func releaseQueuedCollectOccupies() {
+	live := make(map[string]struct{})
+	progress.RangeTasks(func(id, _ string) bool {
+		live[id] = struct{}{}
+		return true
+	})
+	collectingSourcesMu.Lock()
+	defer collectingSourcesMu.Unlock()
+	for id := range collectingSources {
+		if _, ok := live[id]; ok {
+			continue
+		}
+		delete(collectingSources, id)
+	}
 }
 
 func abortUnstartedCollect(id string, batchCtx *collectBatchContext) {
+	if batchCtx != nil && !batchCtx.ownsOccupy(id) {
+		batchCtx.releaseSourceOccupy(id)
+		return
+	}
 	progress.Update(id, func(cur *model.CollectProgress) {
 		switch cur.Status {
 		case progress.StatusStarting, progress.StatusRunning:

@@ -185,7 +185,7 @@ func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
 	if mid <= 0 {
 		return nil
 	}
-	return refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, map[int64]struct{}{mid: {}}, support.GetCollectSourceList())
+	return refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, map[int64]struct{}{mid: {}}, support.GetCollectSourceListTx(tx))
 }
 
 func pickPlaylistRemarks(playLines []model.FilmSourcePlaylist, sources []model.FilmSource) string {
@@ -298,18 +298,15 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		}
 
 		if filmIndex == nil {
-			allKeys := peerMatchKeys(source, detail)
-			if len(allKeys) > 0 {
-				var matchKey model.MovieMatchKey
-				if err := tx.Where("match_key IN ?", allKeys).Order("mid ASC").First(&matchKey).Error; err == nil && matchKey.Mid > 0 {
-					var fi model.FilmIndex
-					if err := tx.Where("mid = ?", matchKey.Mid).First(&fi).Error; err == nil && fi.Mid > 0 {
-						mid = fi.Mid
-						filmIndex = &fi
-						if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
-							return err
-						}
-					}
+			claimedMid, claimedFilm, err := claimPeerFilmByMatchKeysTx(tx, source, detail)
+			if err != nil {
+				return err
+			}
+			if claimedFilm != nil {
+				mid = claimedMid
+				filmIndex = claimedFilm
+				if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {
+					return err
 				}
 			}
 		}
@@ -336,8 +333,8 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		playLinesChanged = playChanged
 
 		if linesChanged || isNew {
+			sources := support.GetCollectSourceListTx(tx)
 			if !isNew {
-				sources := support.GetCollectSourceList()
 				isBaseline := isBaselineCollectSource(source, sources)
 				if _, err := backfillFilmMetadataTx(tx, filmIndex, source, detail, isBaseline); err != nil {
 					return err
@@ -347,7 +344,7 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			if !isNew && playChanged {
 				stampMids = map[int64]struct{}{mid: {}}
 			}
-			if err := refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, stampMids, support.GetCollectSourceList()); err != nil {
+			if err := refreshRemarksAndPlaySummaryWithStampTx(tx, []int64{mid}, stampMids, sources); err != nil {
 				return err
 			}
 		}

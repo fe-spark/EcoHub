@@ -6,8 +6,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-
-	"server/internal/utils"
 )
 
 var errNilCollectSource = errors.New("采集源为空")
@@ -43,21 +41,6 @@ func uniqueMIDs(mids []int64) []int64 {
 		out = append(out, m)
 	}
 	return out
-}
-
-var filmIdentityLocks [matchKeyLockStripes]sync.Mutex
-
-func getFilmIdentityLock(name string) *sync.Mutex {
-	clean := utils.NormalizeIdentityTitle(name)
-	if clean == "" {
-		clean = strings.TrimSpace(name)
-	}
-	hash := utils.GenerateHashKey(clean)
-	var idx uint64
-	if len(hash) >= 8 {
-		idx, _ = strconv.ParseUint(hash[:8], 16, 32)
-	}
-	return &filmIdentityLocks[idx%matchKeyLockStripes]
 }
 
 var sourceWriteLocks sync.Map

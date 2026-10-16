@@ -76,7 +76,7 @@
 .batchProgressRow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   min-width: 0;
 }
 
@@ -139,13 +139,6 @@
   flex-wrap: wrap;
   gap: 4px 12px;
   margin-bottom: 6px;
-}
-
-.batchProgressHeadRight {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
 }
 
 .batchProgressTitle {
@@ -366,6 +359,12 @@
   --card-accent: #ff4d4f;
 }
 
+/* 删除中 */
+.toneDeleting {
+  --card-accent: #ff4d4f;
+  border-color: rgba(255, 77, 79, 0.45);
+}
+
 /* 头部：可拖拽区域，增加背景色标识 */
 .cardHead {
   display: flex;
@@ -573,6 +572,16 @@
 .statusFailed {
   color: #ff4d4f;
   background: rgba(255, 77, 79, 0.1);
+}
+
+.statusDeleting {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.12);
+  border: 1px solid rgba(255, 77, 79, 0.25);
+}
+
+.statusDeleting .statusDot {
+  animation: statusPulse 0.8s ease-in-out infinite;
 }
 
 @keyframes statusPulse {

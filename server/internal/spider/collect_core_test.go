@@ -1,8 +1,6 @@
 package spider
 
 import (
-	"context"
-	"errors"
 	"reflect"
 	"sort"
 	"sync"
@@ -182,6 +180,116 @@ func TestBatchCloseDoesNotDropRetryOccupy(t *testing.T) {
 	}
 }
 
+func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
+	src := model.FilmSource{Id: "stop-queued-retry", Name: "111"}
+	claimed := occupyCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if len(claimed) != 1 {
+		t.Fatal("batch occupy failed")
+	}
+	batch := newCollectBatchContext(model.CollectTriggerManual, "Batch-Collect", claimed, time.Now())
+	defer batch.close()
+
+	StopTask(src.Id)
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("stopping a queued source must leave the old queue")
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopped queued source must not block a new collect")
+	}
+
+	retried := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if len(retried) != 1 {
+		t.Fatal("retry should occupy after the source left the old queue")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	before, ok := progress.Snapshot(src.Id)
+	if !ok || before.Status != progress.StatusStarting || before.QueueId == "" {
+		t.Fatalf("retry progress = ok:%v status:%q queue:%q", ok, before.Status, before.QueueId)
+	}
+
+	runSourcesGroupWithLimit(claimed, 24, "Batch-Collect", 1, 0, batch)
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.QueueId != before.QueueId {
+		t.Fatalf("old queue must not overwrite retry, ok=%v status=%q queue=%q want %q", ok, after.Status, after.QueueId, before.QueueId)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("old queue must not drop the retry occupy")
+	}
+}
+
+func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
+	src := model.FilmSource{Id: "stop-running-detach", Name: "111"}
+	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")) != 1 {
+		t.Fatal("occupy failed")
+	}
+	ctx, err := progress.TryRegisterTask(src.Id, "req-running", nil)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	runCtx := progress.WithRunEpoch(ctx, progress.Epoch(src.Id))
+
+	StopTask(src.Id)
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("running source must leave the old queue on stop")
+	}
+	if !progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopping source must stay busy until the run exits")
+	}
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopping {
+		t.Fatalf("status must stay stopping until the run exits, ok=%v status=%q", ok, snap.Status)
+	}
+	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")) != 0 {
+		t.Fatal("retry must wait until the run really exits")
+	}
+
+	progress.FinishRun(runCtx, src.Id, nil)
+	done, ok := progress.Snapshot(src.Id)
+	if !ok || done.Status != progress.StatusStopped {
+		t.Fatalf("true exit must become stopped, ok=%v status=%q", ok, done.Status)
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("exited source must accept a new collect")
+	}
+	retried := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if len(retried) != 1 {
+		t.Fatal("retry should occupy after the run exits")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+
+	progress.FinishRun(runCtx, src.Id, nil)
+	progress.UpdateRun(runCtx, src.Id, func(cur *model.CollectProgress) {
+		cur.Status = progress.StatusRunning
+		cur.Current = 9
+	})
+	after, ok := progress.Snapshot(src.Id)
+	if !ok || after.Status != progress.StatusStarting || after.Current != 0 {
+		t.Fatalf("old exit must not overwrite retry, ok=%v status=%q current=%d", ok, after.Status, after.Current)
+	}
+}
+
+func TestFinishRunMarksStoppedWhenNoRetry(t *testing.T) {
+	src := model.FilmSource{Id: "stop-running-finish", Name: "111"}
+	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")) != 1 {
+		t.Fatal("occupy failed")
+	}
+	defer releaseCollectSourceIDs(src.Id)
+	ctx, err := progress.TryRegisterTask(src.Id, "req-finish", nil)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	runCtx := progress.WithRunEpoch(ctx, progress.Epoch(src.Id))
+	StopTask(src.Id)
+	progress.FinishRun(runCtx, src.Id, nil)
+	snap, ok := progress.Snapshot(src.Id)
+	if !ok || snap.Status != progress.StatusStopped {
+		t.Fatalf("true exit must become stopped, ok=%v status=%q", ok, snap.Status)
+	}
+	if progress.IsAlreadyQueuedOrRunning(src.Id) {
+		t.Fatal("stopped source must accept a new collect")
+	}
+}
+
 func TestDispatchSkipStoppedReleasesOccupy(t *testing.T) {
 	source := model.FilmSource{Id: "batch-skip-stopped-occupy", Name: "HD(IK)", Sort: 1}
 	if len(occupyCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
@@ -347,58 +455,5 @@ func TestCollectBatchContext_Isolation(t *testing.T) {
 	}
 	if !reflect.DeepEqual(midsB, expectedB) {
 		t.Errorf("batch B MIDs = %v; want %v", midsB, expectedB)
-	}
-}
-
-func TestAdaptiveRateLimiting_SmoothBackoff(t *testing.T) {
-	const sourceID = "test_source_rl"
-	ClearLimiter(sourceID)
-	defer ClearLimiter(sourceID)
-
-	source := &model.FilmSource{
-		Id:       sourceID,
-		Name:     "Test RL",
-		Interval: 50,
-	}
-
-	// 1) 首次请求放行，并模拟上游返回 429 限流错误
-	release1, err := waitSourceRequestTurn(context.Background(), source, "test-turn-1")
-	if err != nil {
-		t.Fatalf("unexpected wait turn error: %v", err)
-	}
-	release1(errors.New("HTTP 429 Too Many Requests"))
-
-	gate := getSourceRequestGate(sourceID)
-	gate.mu.Lock()
-	hits := gate.rateLimitHits
-	nextAllowed := gate.nextAllowedAt
-	gate.mu.Unlock()
-
-	if hits != 1 {
-		t.Fatalf("expected rateLimitHits=1 after 429, got %d", hits)
-	}
-	if !nextAllowed.After(time.Now()) {
-		t.Fatalf("expected nextAllowedAt to be in the future after 429 backoff")
-	}
-
-	// 2) 再次请求放行（模拟冷却后），并模拟请求成功，hits 应递减
-	gate.mu.Lock()
-	gate.nextAllowedAt = time.Now().Add(-100 * time.Millisecond) // 模拟冷却结束
-	gate.mu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	release2, err := waitSourceRequestTurn(ctx, source, "test-turn-2")
-	if err != nil {
-		t.Fatalf("unexpected wait turn error: %v", err)
-	}
-	release2(nil) // 成功放行释放
-
-	gate.mu.Lock()
-	hitsAfterSuccess := gate.rateLimitHits
-	gate.mu.Unlock()
-
-	if hitsAfterSuccess != 0 {
-		t.Fatalf("expected rateLimitHits=0 after success, got %d", hitsAfterSuccess)
 	}
 }

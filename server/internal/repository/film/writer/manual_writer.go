@@ -2,6 +2,7 @@ package writer
 
 import (
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/infra/db"
@@ -39,6 +40,37 @@ func isFilmSearchTagFieldsChanged(oldInfo, newInfo model.FilmIndex) bool {
 		oldInfo.Year != newInfo.Year
 }
 
+func lockManualUpdate(source *model.FilmSource, existingFilm model.FilmIndex, detail model.MovieDetail) func() {
+	held := make([]*sync.Mutex, 0, 8)
+	keys := make([]string, 0, 8)
+	if source != nil {
+		keys = append(keys, peerMatchKeys(source, detail)...)
+	}
+	oldKeys := shared.BuildMovieMatchKeysWithCategory(existingFilm.DbId, existingFilm.Name, existingFilm.Pid)
+	keys = append(keys, oldKeys...)
+
+	for _, idx := range matchKeyLockIndexes(keys) {
+		mu := &filmMatchKeyLocks[idx]
+		mu.Lock()
+		held = append(held, mu)
+	}
+	if source != nil {
+		mu := getSourceWriteLock(source.Id)
+		mu.Lock()
+		held = append(held, mu)
+	}
+	if existingFilm.Mid > 0 {
+		mu := getFilmMidLock(existingFilm.Mid)
+		mu.Lock()
+		held = append(held, mu)
+	}
+	return func() {
+		for i := len(held) - 1; i >= 0; i-- {
+			held[i].Unlock()
+		}
+	}
+}
+
 // SaveDetail 后台单片手动保存/修改入口。
 func SaveDetail(sourceID string, detail model.MovieDetail) error {
 	_, err := SaveDetailWithOptions(sourceID, detail, SaveDetailOptions{PublishSnapshot: true})
@@ -52,14 +84,6 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		source = &model.FilmSource{Id: sourceID, Name: sourceID, State: true}
 	}
 
-	identLock := getFilmIdentityLock(detail.Name)
-	identLock.Lock()
-	defer identLock.Unlock()
-
-	sourceLock := getSourceWriteLock(source.Id)
-	sourceLock.Lock()
-	defer sourceLock.Unlock()
-
 	var existingFilm model.FilmIndex
 	isManualUpdate := false
 	if detail.Id > 0 {
@@ -71,6 +95,8 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 	var mid int64
 	if isManualUpdate {
 		mid = existingFilm.Mid
+		unlock := lockManualUpdate(source, existingFilm, detail)
+		defer unlock()
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			categoryVersion := support.GetCategoryVersion()
 			ruleVersion := support.GetRuleVersion()

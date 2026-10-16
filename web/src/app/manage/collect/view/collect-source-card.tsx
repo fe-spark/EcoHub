@@ -24,6 +24,7 @@ const toneClassMap: Record<StatusTone, string> = {
   disabled: styles.toneDisabled,
   stopping: styles.toneStopping,
   failed: styles.toneFailed,
+  deleting: styles.toneDeleting,
 };
 
 const statusClassMap: Record<StatusTone, string> = {
@@ -32,6 +33,7 @@ const statusClassMap: Record<StatusTone, string> = {
   disabled: styles.statusDisabled,
   stopping: styles.statusStopping,
   failed: styles.statusFailed,
+  deleting: styles.statusDeleting,
 };
 
 interface CollectSourceCardProps {
@@ -47,6 +49,7 @@ interface CollectSourceCardProps {
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
+  deleting?: boolean;
   onSyncCategory?: (id: string) => void;
 }
 
@@ -63,12 +66,20 @@ export default function CollectSourceCard({
   onTerminateTask,
   onEditSource,
   onDeleteSource,
+  deleting = false,
   onSyncCategory,
 }: CollectSourceCardProps) {
-  const isRunning = active;
-  const { canWrite } = useManagePermission();
-  const { label: statusLabel, tone: statusTone } = resolveSourceStatus(record, active);
+  const isDeleting = deleting || Boolean(record.deleting);
   const phase = record.progress?.status;
+  const isStopping = phase === "stopping";
+  const isRunning = active;
+  const busy = isRunning || isStopping;
+  const { canWrite } = useManagePermission();
+  const { label: statusLabel, tone: statusTone } = resolveSourceStatus(
+    record,
+    active || isStopping,
+    isDeleting,
+  );
   const canStop = phase === "starting" || phase === "running";
 
   const hasProxy = Boolean(record.proxyCollect);
@@ -91,7 +102,7 @@ export default function CollectSourceCard({
         >
           <Checkbox
             checked={selected}
-            disabled={Boolean(record.categorySyncing || record.categoryReady === false)}
+            disabled={isDeleting || Boolean(record.categorySyncing)}
             onChange={(event) => onSelect(record.id, event.target.checked)}
           />
         </span>
@@ -161,11 +172,11 @@ export default function CollectSourceCard({
             <dt className={styles.metaLabel}>上次采集：</dt>
             <dd
               className={`${styles.metaValue}${
-                record.lastCollectTime ? "" : ` ${styles.metaValueMuted}`
+                record.lastRunTime ? "" : ` ${styles.metaValueMuted}`
               }`}
             >
-              {record.lastCollectTime
-                ? dayjs(record.lastCollectTime).format("YYYY-MM-DD HH:mm")
+              {record.lastRunTime
+                ? dayjs(record.lastRunTime).format("YYYY-MM-DD HH:mm")
                 : "暂无"}
             </dd>
           </div>
@@ -208,7 +219,8 @@ export default function CollectSourceCard({
                 value={record.cd}
                 disabled={
                   !canWrite ||
-                  isRunning ||
+                  busy ||
+                  deleting ||
                   !record.state ||
                   record.categoryReady === false ||
                   Boolean(record.categorySyncing)
@@ -229,12 +241,20 @@ export default function CollectSourceCard({
           onClick={(event) => event.stopPropagation()}
         >
           <div className={styles.actionGroup}>
-            {isRunning ? (
+            {isDeleting ? (
+              <Button danger icon={<LoadingOutlined spin />} disabled>
+                删除中
+              </Button>
+            ) : isStopping ? (
+              <Button danger icon={<StopOutlined />} loading>
+                停止采集
+              </Button>
+            ) : isRunning ? (
               canStop ? (
                 <Popconfirm
                   title="停止采集？"
                   onConfirm={() => onTerminateTask(record.id)}
-                  disabled={!record.state}
+                  disabled={!record.state || isDeleting}
                   okText="停止"
                   cancelText="取消"
                   okButtonProps={{ danger: true }}
@@ -242,7 +262,7 @@ export default function CollectSourceCard({
                   <Button
                     danger
                     icon={<StopOutlined />}
-                    disabled={!canWrite || !record.state}
+                    disabled={!canWrite || !record.state || isDeleting}
                   >
                     {record.state ? "停止采集" : "已停止"}
                   </Button>
@@ -264,7 +284,7 @@ export default function CollectSourceCard({
               <Button
                 type="primary"
                 icon={<SyncOutlined />}
-                disabled={!canWrite}
+                disabled={!canWrite || isDeleting}
                 onClick={() => onSyncCategory?.(record.id)}
               >
                 获取分类
@@ -276,7 +296,13 @@ export default function CollectSourceCard({
                     type="primary"
                     icon={<PoweroffOutlined />}
                     onClick={() => onStartTask(record)}
-                    disabled={!canWrite || !record.state}
+                    disabled={
+                      !canWrite ||
+                      !record.state ||
+                      isDeleting ||
+                      busy ||
+                      Boolean(record.categorySyncing)
+                    }
                   >
                     开始采集
                   </Button>
@@ -287,31 +313,33 @@ export default function CollectSourceCard({
               <Tooltip title="重新获取分类">
                 <Button
                   icon={<SyncOutlined />}
-                  disabled={!canWrite || isRunning}
+                  disabled={!canWrite || busy || isDeleting}
                   onClick={() => onSyncCategory?.(record.id)}
                 />
               </Tooltip>
             ) : null}
-            <Tooltip title={isRunning ? "采集进行中，禁止编辑" : "编辑采集站"}>
+            <Tooltip title={busy ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}
-                disabled={!canWrite || isRunning || Boolean(record.categorySyncing)}
+                disabled={!canWrite || busy || isDeleting || Boolean(record.categorySyncing)}
                 onClick={() => onEditSource(record.id)}
               />
             </Tooltip>
-            {isRunning ? (
-              <Tooltip title="采集进行中，禁止删除">
-                <Button danger icon={<DeleteOutlined />} disabled />
-              </Tooltip>
-            ) : (
-              <Popconfirm title="删除此采集站？" onConfirm={() => onDeleteSource(record.id)}>
-                <Button
-                  danger
-                  icon={<DeleteOutlined />}
-                  disabled={!canWrite || Boolean(record.categorySyncing)}
-                />
-              </Popconfirm>
-            )}
+            <Popconfirm
+              title="确认删除该采集站？"
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true, loading: isDeleting }}
+              disabled={!canWrite || isDeleting}
+              onConfirm={() => onDeleteSource(record.id)}
+            >
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                loading={isDeleting}
+                disabled={!canWrite || isDeleting}
+              />
+            </Popconfirm>
           </div>
 
           <div className={styles.ringGroup}>

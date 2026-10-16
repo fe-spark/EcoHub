@@ -3,33 +3,69 @@ package spider
 import (
 	"fmt"
 	"log"
+	"strings"
+	"time"
 
 	"server/internal/model"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 )
 
-// StopTask 停止单个站点：先置进度为已停止，再打断其写队列与运行中的任务上下文。
+// deleteStopTimeout 删除前等待本次采集退出的上限。
+const deleteStopTimeout = 3 * time.Minute
+
+// StopTask 停止单个站点：打断写队列，并立刻从采集队列摘掉。
+// 已经跑起来的站进度保持「停止中」，等本次运行真正退出后再标成已停止。
+// 还没跑起来的站直接标成已停止。两种情况都马上放掉占用，新采集不会被旧批次盖掉。
 func StopTask(sourceID string) {
-	progress.MarkStopped(sourceID)
 	scheduler.CancelSource(sourceID)
-	progress.CancelTask(sourceID)
+	progress.RequestStop(sourceID)
+	releaseCollectSourceIDs(sourceID)
+}
+
+// StopSourceForDelete 先停止该站并等到本次运行退出，再占住生命周期。
+// 调用方删除结束后必须调用 release，否则这个站无法再开采集。
+func StopSourceForDelete(sourceID string) (release func(), err error) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return func() {}, nil
+	}
+	if err := stopAndWaitSource(sourceID); err != nil {
+		return nil, err
+	}
+	if err := collectLifecycle.beginSource(sourceID); err != nil {
+		if err := stopAndWaitSource(sourceID); err != nil {
+			return nil, err
+		}
+		if err := collectLifecycle.beginSource(sourceID); err != nil {
+			collectLifecycle.endSource(sourceID)
+			_ = collectLifecycle.beginSource(sourceID)
+		}
+	}
+	return func() { collectLifecycle.endSource(sourceID) }, nil
+}
+
+func stopAndWaitSource(sourceID string) error {
+	StopTask(sourceID)
+	return collectLifecycle.waitSource(sourceID, deleteStopTimeout)
 }
 
 // StopAllTasks 一键终止：先递增派发版本号阻断新站点启动，再停止全部活跃任务。
 func StopAllTasks() {
 	stopAllVersion.Add(1)
-	progress.MarkAllRunningStopped()
-	count := 0
+	ids := make([]string, 0)
 	progress.RangeTasks(func(id, _ string) bool {
-		count++
-		progress.MarkStopped(id)
-		scheduler.CancelSource(id)
+		ids = append(ids, id)
 		return true
 	})
-	progress.CancelAllTasks()
-	if count > 0 {
-		log.Printf("[Spider] 已强制停止 %d 个活跃采集任务\n", count)
+	for _, id := range ids {
+		scheduler.CancelSource(id)
+		progress.RequestStop(id)
+	}
+	progress.MarkAllRunningStopped()
+	releaseQueuedCollectOccupies()
+	if len(ids) > 0 {
+		log.Printf("[Spider] 已强制停止 %d 个活跃采集任务\n", len(ids))
 	}
 }
 

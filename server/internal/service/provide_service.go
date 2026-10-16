@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"net/url"
@@ -20,7 +19,6 @@ import (
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/utils"
 )
 
 type ProvideService struct{}
@@ -30,62 +28,6 @@ var (
 	tvboxListSfGroup singleflight.Group
 )
 
-// GetVodDirectBySource 获取指定采集站直连原始数据(MacCMS 兼容)
-func (p *ProvideService) GetVodDirectBySource(sourceId, ac string, t int, pg int, wd string, h int, ids string, year int, area, lang, plot, sort string) ([]byte, error) {
-	if sourceId == "" {
-		return nil, errors.New("source is required")
-	}
-	s := repository.FindCollectSourceById(sourceId)
-	if s == nil || !s.State {
-		return nil, errors.New("collect source not found or disabled")
-	}
-
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, ProxyURL: sourceProxyURL(s.Id)}
-	if ac == "" {
-		ac = "list"
-	}
-	r.Params.Set("ac", ac)
-	if t > 0 {
-		r.Params.Set("t", strconv.Itoa(t))
-	}
-	if pg > 0 {
-		r.Params.Set("pg", strconv.Itoa(pg))
-	}
-	if wd != "" {
-		r.Params.Set("wd", wd)
-	}
-	if h > 0 {
-		r.Params.Set("h", strconv.Itoa(h))
-	}
-	if ids != "" {
-		r.Params.Set("ids", ids)
-	}
-	if year > 0 {
-		r.Params.Set("year", strconv.Itoa(year))
-	}
-	if area != "" {
-		r.Params.Set("area", area)
-	}
-	if lang != "" {
-		r.Params.Set("lang", lang)
-		r.Params.Set("language", lang)
-	}
-	if plot != "" {
-		r.Params.Set("plot", plot)
-	}
-	if sort != "" {
-		r.Params.Set("sort", sort)
-	}
-
-	utils.ApiGet(&r)
-	if len(r.Resp) > 0 {
-		return r.Resp, nil
-	}
-	if r.Err != "" {
-		return nil, errors.New(r.Err)
-	}
-	return nil, errors.New("empty response from collect source")
-}
 
 // GetClassList 获取格式化的分类列表和筛选条件
 func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any) {

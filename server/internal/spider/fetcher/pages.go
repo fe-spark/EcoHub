@@ -225,7 +225,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	}
 	recordPageFailure := func(page int, stage string, err error) {
 		snapshot := recordPageFinished(page, false)
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Failed = snapshot.failed
 			if page > cur.Current {
 				cur.Current = page
@@ -245,7 +245,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 			batch.AddAffectedMIDs(s, h, affectedMIDs)
 			batch.AddNotifyMIDs(s.Id, notifyMIDs)
 		}
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			cur.Success = snapshot.success
 			cur.Failed = snapshot.failed
 			if page > cur.Current {
@@ -275,7 +275,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 					}
 					list, err := func() ([]model.MovieDetail, error) {
 						defer limiter.release()
-						progress.Update(s.Id, func(cur *model.CollectProgress) {
+						progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 							progress.StampPageRunning(cur, pg)
 						})
 						return GetFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
@@ -345,8 +345,8 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		if shouldWrapUpAfterFetchAbort(stats.success, skipPublish) {
 			return true, nil
 		}
-		progress.Update(s.Id, func(cur *model.CollectProgress) {
-			if !progress.IsTerminalStatus(cur.Status) {
+		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
+			if !progress.IsTerminalStatus(cur.Status) && cur.Status != progress.StatusStopping {
 				cur.Status = progress.StatusFailed
 			}
 		})

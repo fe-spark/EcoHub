@@ -5,6 +5,22 @@ import (
 	"time"
 )
 
+func TestWaitSourceReturnsAfterEnd(t *testing.T) {
+	state := newCollectLifecycle()
+	if err := state.beginSource("s1"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- state.waitSource("s1", time.Second)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	state.endSource("s1")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCollectLifecycle_IsBusy(t *testing.T) {
 	s := newCollectLifecycle()
 	if s.isBusy() {

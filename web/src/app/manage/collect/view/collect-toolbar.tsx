@@ -8,6 +8,8 @@ export interface CollectToolbarProps {
   canWrite: boolean;
   batchStateUpdating: boolean;
   batchDeleting: boolean;
+  deleteConfirmTitle: string;
+  deleteConfirmDescription: string;
   onSelectAll: () => void;
   onInvertSelection: () => void;
   onClearSelection: () => void;
@@ -24,6 +26,8 @@ export default function CollectToolbar(props: CollectToolbarProps) {
     canWrite,
     batchStateUpdating,
     batchDeleting,
+    deleteConfirmTitle,
+    deleteConfirmDescription,
     onSelectAll,
     onInvertSelection,
     onClearSelection,
@@ -82,12 +86,12 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             </Button>
           </Popconfirm>
           <Popconfirm
-            title={`删除 ${selectedCount} 个采集站？`}
-            description="不可恢复"
+            title={deleteConfirmTitle}
+            description={deleteConfirmDescription}
             okText="删除"
             cancelText="取消"
             okButtonProps={{ danger: true, loading: batchDeleting }}
-            disabled={selectedCount === 0}
+            disabled={!canWrite || selectedCount === 0 || batchDeleting}
             onConfirm={onBatchDelete}
           >
             <Button
