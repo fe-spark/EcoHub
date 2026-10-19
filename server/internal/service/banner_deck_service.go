@@ -1,19 +1,24 @@
 package service
 
 import (
+	"strings"
+
 	"server/internal/model"
 )
 
-// SaveBannerDeck 保存排片卡组列表与排序。轮播刮削物料独立存储于轮播，不改动片库影视列表。
+// SaveBannerDeck 保存排片。刮削结果写入轮播行，不写影片，也不写刮削表。
 func (s *ManageService) SaveBannerDeck(bl model.Banners) error {
 	for i := range bl {
 		bl[i].Sort = int64(i + 1)
+		scraped := bl[i].TmdbID > 0 || bl[i].PendingScrape
 		bl[i].PendingScrape = false
-		// 轮播专属横图与海报独立持久化，不随片库快照冲刷，且不污染影视列表
-		if bl[i].PictureSlide != "" {
+		if scraped || strings.TrimSpace(bl[i].PictureSlide) != "" {
 			bl[i].IsCustomPic = true
-			if bl[i].CustomPicture == "" && bl[i].Picture != "" {
-				bl[i].CustomPicture = bl[i].Picture
+			if strings.TrimSpace(bl[i].CustomPicture) == "" && strings.TrimSpace(bl[i].Picture) != "" {
+				bl[i].CustomPicture = strings.TrimSpace(bl[i].Picture)
+			}
+			if strings.TrimSpace(bl[i].Poster) == "" {
+				bl[i].Poster = strings.TrimSpace(bl[i].Picture)
 			}
 		}
 	}

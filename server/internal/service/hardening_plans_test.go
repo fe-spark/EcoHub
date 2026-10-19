@@ -291,7 +291,7 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
-	details := ProvideSvc.GetVodDetail(ids)
+	details := ProvideSvc.GetVodDetail(ids, "")
 
 	if len(details) != 3 {
 		t.Fatalf("want 3 valid film details, got %d", len(details))
@@ -598,7 +598,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		manyIDs[i] = fmt.Sprintf("%d", 601+i)
 	}
-	res := ProvideSvc.GetVodDetail(manyIDs)
+	res := ProvideSvc.GetVodDetail(manyIDs, "")
 	if len(res) != 1 || res[0].VodID != 601 {
 		t.Fatalf("expected exactly 1 found detail, got %d", len(res))
 	}
@@ -608,7 +608,7 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	db.Rdb = nil
 	defer func() { db.Rdb = origRdb }()
 
-	resNilRedis := ProvideSvc.GetVodDetail([]string{"601"})
+	resNilRedis := ProvideSvc.GetVodDetail([]string{"601"}, "")
 	if len(resNilRedis) != 1 || resNilRedis[0].VodID != 601 {
 		t.Fatalf("expected 1 detail on nil redis, got %d", len(resNilRedis))
 	}

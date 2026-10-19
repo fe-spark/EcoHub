@@ -42,7 +42,7 @@ func setupFilmZeroTestDB(t *testing.T) *gorm.DB {
 	return gdb
 }
 
-func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
+func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	origRdb := db.Rdb
 	db.Rdb = nil
 	defer func() {
@@ -52,7 +52,6 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 	gdb := setupFilmZeroTestDB(t)
 
 	// 注入数据
-	gdb.Create(&model.MoviePoster{SourceId: "src1", MovieKey: "k1", Picture: "http://poster1"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 200, SourceId: "src1", LineKind: "play", Content: "playlist"})
 	gdb.Create(&model.Category{Name: "动作片"})
 	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 100, GlobalMid: 200})
@@ -62,22 +61,8 @@ func TestFilmZero_CleansAllTablesIncludingPosters(t *testing.T) {
 	gdb.Create(&model.Banner{Id: "b1", Mid: 200, Name: "测试轮播"})
 	gdb.Create(&model.FailureRecord{OriginId: "src1", Uri: "http://test", Cause: "err"})
 
-	// 确认数据已存在
-	var posterCount int64
-	gdb.Model(&model.MoviePoster{}).Count(&posterCount)
-	if posterCount != 1 {
-		t.Fatalf("expected 1 poster before FilmZero, got %d", posterCount)
-	}
-
-	// 执行清库
 	if err := FilmZero(); err != nil {
 		t.Fatalf("FilmZero failed: %v", err)
-	}
-
-	// 验证所有表均已被清空，尤其是 TableMoviePoster 及物理清空的映射表与快照表
-	gdb.Model(&model.MoviePoster{}).Count(&posterCount)
-	if posterCount != 0 {
-		t.Fatalf("expected 0 posters after FilmZero, got %d", posterCount)
 	}
 
 	var playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, bannerCount, failureCount int64

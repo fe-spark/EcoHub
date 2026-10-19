@@ -20,10 +20,6 @@ export async function saveFilmClassTree(children: FilmClassNode[], sourceId: str
   return ApiPost("/manage/film/class/tree/save", { children, sourceId });
 }
 
-export async function updateFilmClassShow(id: number, show: boolean) {
-  return ApiPost("/manage/film/class/update", { id, show });
-}
-
 export async function getCategoryRules(page: number, pageSize: number, keyword: string, group: string) {
   const resp = await ApiGet("/manage/mapping/rule/list", {
     current: page,

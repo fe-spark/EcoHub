@@ -27,7 +27,7 @@ export function collectBlockReason(site: FilmSource): string {
     parts.push("未启用");
   }
   if (site.categoryReady === false) {
-    parts.push("无分类");
+    parts.push("缺分类");
   }
   return parts.join("、");
 }

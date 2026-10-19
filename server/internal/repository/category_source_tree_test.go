@@ -50,16 +50,18 @@ func TestSaveSourceCategoryOrder_KeepsOtherSource(t *testing.T) {
 		{
 			Id:   9,
 			Name: "电影",
+			Show: true,
 			Children: []*model.CategoryTree{
-				{Id: 11, Name: "喜剧片"},
-				{Id: 10, Name: "动作片"},
+				{Id: 11, Name: "喜剧片", Show: false},
+				{Id: 10, Name: "动作片", Show: true},
 			},
 		},
 	}
 	if err := SaveSourceCategoryOrder("src_a", nodes); err != nil {
 		t.Fatalf("save: %v", err)
 	}
-	var action, comedy, other model.Category
+	var movie, action, comedy, other model.Category
+	gdb.First(&movie, 9)
 	gdb.First(&action, 10)
 	gdb.First(&comedy, 11)
 	gdb.First(&other, 1)
@@ -68,6 +70,9 @@ func TestSaveSourceCategoryOrder_KeepsOtherSource(t *testing.T) {
 	}
 	if other.Sort != 3 {
 		t.Fatalf("other source sort changed: %d", other.Sort)
+	}
+	if !movie.Show || !action.Show || comedy.Show || !other.Show {
+		t.Fatalf("show movie=%v action=%v comedy=%v other=%v", movie.Show, action.Show, comedy.Show, other.Show)
 	}
 	if err := SaveSourceCategoryOrder("src_a", []*model.CategoryTree{{Id: 1, Name: "电视剧"}}); err == nil {
 		t.Fatal("category from another source should be rejected")

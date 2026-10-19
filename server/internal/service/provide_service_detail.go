@@ -18,7 +18,7 @@ import (
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
+func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.FilmDetail {
 	if len(ids) == 0 {
 		return []model.FilmDetail{}
 	}
@@ -34,6 +34,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 	if len(mids) == 0 {
 		return []model.FilmDetail{}
 	}
+	sourceId = resolveProvideSourceID(sourceId)
 	if len(mids) > maxProvideVodDetailBatch {
 		mids = mids[:maxProvideVodDetailBatch]
 	}
@@ -110,7 +111,7 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 			continue
 		}
 
-		detailList = append(detailList, formatProvideFilmDetail(s, vo))
+		detailList = append(detailList, formatProvideFilmDetail(s, vo, sourceId))
 	}
 
 	if len(toCacheVo) > 0 && db.Rdb != nil {
@@ -125,14 +126,14 @@ func (p *ProvideService) GetVodDetail(ids []string) []model.FilmDetail {
 	return detailList
 }
 
-func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo) model.FilmDetail {
-	typeID, typeName := resolveProvideTypeFromSnapshot(snapshot)
+func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo, sourceId string) model.FilmDetail {
+	typeID, typeName := resolveProvideListedType(snapshot, sourceId)
 
 	var playFromList []string
 	var playUrlList []string
 
 	for _, source := range movieDetailVo.List {
-		playFromList = append(playFromList, source.Name)
+		playFromList = append(playFromList, providePlayFromName(source))
 
 		var linkStrs []string
 		for _, link := range source.LinkList {
@@ -160,7 +161,7 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 	return model.FilmDetail{
 		VodID:       snapshot.Mid,
 		TypeID:      typeID,
-		TypeID1:     resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot),
+		TypeID1:     resolveProvideListedRootType(snapshot, sourceId),
 		TypeName:    typeName,
 		VodName:     snapshot.Name,
 		VodEn:       snapshot.Initial,

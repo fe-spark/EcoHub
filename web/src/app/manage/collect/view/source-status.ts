@@ -14,14 +14,6 @@ export function resolveSourceStatus(
     return { label: "删除中", tone: "deleting" };
   }
 
-  if (record.categorySyncing) {
-    return { label: "分类采集中", tone: "running" };
-  }
-
-  if (record.categoryReady === false) {
-    return { label: "缺分类", tone: "disabled" };
-  }
-
   const phase = record.progress?.status;
 
   if (phase === "stopping") {

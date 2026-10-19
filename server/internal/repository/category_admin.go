@@ -14,6 +14,7 @@ type categoryPlacement struct {
 	Id    int64
 	Pid   int64
 	Sort  int
+	Show  bool
 	Depth int
 }
 
@@ -27,19 +28,11 @@ func flattenCategoryPlacements(nodes []*model.CategoryTree, parentId int64, dept
 			Id:    node.Id,
 			Pid:   item.ParentId,
 			Sort:  item.Sort,
+			Show:  node.Show,
 			Depth: item.Depth,
 		})
 		return nil
 	})
-}
-
-// UpdateCategoryStatus 仅更新分类的显示状态或名称，并清除缓存
-func UpdateCategoryStatus(id int64, updates map[string]any) error {
-	if err := db.Mdb.Model(&model.Category{}).Where("id = ?", id).Updates(updates).Error; err != nil {
-		return err
-	}
-	MarkCategoryChanged()
-	return nil
 }
 
 func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
@@ -92,7 +85,7 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 			}
 			if err := tx.Model(&model.Category{}).
 				Where("id = ?", placement.Id).
-				Updates(map[string]any{"pid": placement.Pid, "sort": placement.Sort}).Error; err != nil {
+				Updates(map[string]any{"pid": placement.Pid, "sort": placement.Sort, "show": placement.Show}).Error; err != nil {
 				return err
 			}
 		}
@@ -106,7 +99,7 @@ func SaveCategoryTreeStructure(nodes []*model.CategoryTree) error {
 	return nil
 }
 
-// SaveSourceCategoryOrder 只改该采集站分类的排序。其它站的分类保持不动，也不改父子关系。
+// SaveSourceCategoryOrder 只改该采集站分类的排序和显示。其它站的分类保持不动，也不改父子关系。
 func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
@@ -170,7 +163,7 @@ func SaveSourceCategoryOrder(sourceID string, nodes []*model.CategoryTree) error
 		for _, placement := range placements {
 			if err := tx.Model(&model.Category{}).
 				Where("id = ?", placement.Id).
-				Update("sort", placement.Sort).Error; err != nil {
+				Updates(map[string]any{"sort": placement.Sort, "show": placement.Show}).Error; err != nil {
 				return err
 			}
 		}

@@ -8,8 +8,6 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import { useFilmColumns, type FilmItem } from "./film-columns";
-import TmdbModal from "../components/tmdb-modal";
-import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import { FilmFilterBar } from "./film-filter-bar";
 import { FilmBatchBar } from "./film-batch-bar";
 import styles from "./index.module.less";
@@ -31,17 +29,12 @@ function flattenCategoryNodes(nodes: any[]): any[] {
 export default function FilmListPageView() {
   const router = useRouter();
   const { canWrite } = useManagePermission();
-  const tmdbEnabled = useTmdbEnabled();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncingIds, setSyncingIds] = useState<number[]>([]);
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
-  const [scraping, setScraping] = useState(false);
   const [updating, setUpdating] = useState(false);
-  const [reverting, setReverting] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [scrapeModalOpen, setScrapeModalOpen] = useState(false);
-  const [currentScrapeFilm, setCurrentScrapeFilm] = useState<FilmItem | null>(null);
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
   const [params, setParams] = useState<any>({
     name: "",
@@ -263,49 +256,6 @@ export default function FilmListPageView() {
     [getFilmPage, message],
   );
 
-  const handleScrapeFilms = useCallback(
-    async (ids: number[]) => {
-      if (!ids.length) return;
-      setScraping(true);
-      try {
-        const resp = await ApiPost("/manage/tmdb/scrape", { ids });
-        if (resp.code === 0) {
-          message.success(resp.msg || "刮削完成");
-          getFilmPage();
-        } else {
-          message.error(resp.msg || "刮削失败");
-        }
-      } finally {
-        setScraping(false);
-      }
-    },
-    [getFilmPage, message],
-  );
-
-  const handleManualScrape = useCallback((record: FilmItem) => {
-    setCurrentScrapeFilm(record);
-    setScrapeModalOpen(true);
-  }, []);
-
-  const handleRevertScrape = useCallback(
-    async (ids: number[]) => {
-      if (!ids.length) return;
-      setReverting(true);
-      try {
-        const resp = await ApiPost("/manage/tmdb/revert", { ids });
-        if (resp.code === 0) {
-          message.success(resp.msg || "已还原刮削");
-          getFilmPage();
-        } else {
-          message.error(resp.msg || "还原刮削失败");
-        }
-      } finally {
-        setReverting(false);
-      }
-    },
-    [getFilmPage, message],
-  );
-
   const columns = useFilmColumns({
     syncingIds,
     canWrite,
@@ -313,10 +263,6 @@ export default function FilmListPageView() {
     styles,
     handleUpdateSingle: (mid) => handleUpdateFilms([mid]),
     handleDelFilm: (id) => handleDelFilms([id]),
-    handleScrapeSingle: (mid) => handleScrapeFilms([mid]),
-    handleManualScrape,
-    handleRevertScrape: (mid) => handleRevertScrape([mid]),
-    tmdbEnabled,
     activeSourceId: tableSourceId || params.sourceId,
   });
 
@@ -377,14 +323,9 @@ export default function FilmListPageView() {
           <FilmBatchBar
             selectedCount={selectedRowKeys.length}
             canWrite={canWrite}
-            tmdbEnabled={tmdbEnabled}
-            scraping={scraping}
             updating={updating}
-            reverting={reverting}
             deleting={deleting}
-            onBatchScrape={() => handleScrapeFilms(selectedRowKeys.map(Number))}
             onBatchUpdate={() => handleUpdateFilms(selectedRowKeys.map(Number))}
-            onBatchRevert={() => handleRevertScrape(selectedRowKeys.map(Number))}
             onBatchDelete={() => handleDelFilms(selectedRowKeys.map(Number))}
             onClearSelection={() => setSelectedRowKeys([])}
             onAdd={() => router.push("/manage/film/add")}
@@ -408,18 +349,6 @@ export default function FilmListPageView() {
             />
           </div>
         )}
-      />
-
-      <TmdbModal
-        open={scrapeModalOpen}
-        mid={currentScrapeFilm ? (currentScrapeFilm.mid || currentScrapeFilm.ID) : undefined}
-        initialName={currentScrapeFilm?.name}
-        isScraped={currentScrapeFilm?.isScraped}
-        onClose={() => {
-          setScrapeModalOpen(false);
-          setCurrentScrapeFilm(null);
-        }}
-        onSuccess={() => getFilmPage()}
       />
     </div>
   );

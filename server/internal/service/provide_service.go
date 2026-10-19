@@ -18,6 +18,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
+	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -28,18 +29,13 @@ var (
 	tvboxListSfGroup singleflight.Group
 )
 
-
 // GetClassList 获取格式化的分类列表和筛选条件
 func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
-		sourceId = strings.TrimSpace(sourceIdOpt[0])
+		sourceId = sourceIdOpt[0]
 	}
-	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			sourceId = active.Id
-		}
-	}
+	sourceId = resolveProvideSourceID(sourceId)
 	// 1. 尝试从 Redis 获取缓存 (TVBox 配置缓存 5 分钟)
 	categoryVersion := repository.GetCategoryVersion()
 	cacheKey := fmt.Sprintf("%s:v%s", config.TVBoxConfigCacheKey, categoryVersion)
@@ -207,15 +203,7 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 		limit = 20
 	}
 	wd = strings.TrimSpace(wd)
-	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			sourceId = active.Id
-		}
-	}
-	if t <= 0 && cid == 0 && wd == "" && h == 0 && year == "" && area == "" && lang == "" && plot == "" && sourceId == "" {
-		return 1, 1, 0, []model.FilmList{}, nil
-	}
+	sourceId = resolveProvideSourceID(sourceId)
 	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
@@ -250,18 +238,13 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 	}
 
 	fetchList := func() (tvboxListResult, error) {
+		listGen := filmsnapshot.GetSearchCacheVersion()
 		page := dto.Page{PageSize: limit, Current: pg}
 		if page.Current <= 0 {
 			page.Current = 1
 		}
 
 		pid := int64(t)
-		if sourceId == "" {
-			pid = repository.ResolveCategoryID(pid)
-			if cid > 0 {
-				cid = repository.ResolveCategoryID(cid)
-			}
-		}
 		if cid == model.TagUncategorizedValue && pid <= 0 {
 			return tvboxListResult{Current: 1, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, nil
 		}
@@ -279,11 +262,11 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 		if err := validateReadModelSearchTags(searchTags); err != nil {
 			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err
 		}
-		sl := filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+		sl := filmshared.ApplyPosterSourcePictures(filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page))
 
 		var vodList []model.FilmList
 		for _, s := range sl {
-			typeID, typeName := resolveProvideTypeFromSnapshot(s)
+			typeID, typeName := resolveProvideListedType(s, sourceId)
 			vodList = append(vodList, model.FilmList{
 				VodID:       s.Mid,
 				VodName:     s.Name,
@@ -293,7 +276,7 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 				VodTime:     resolveProvideSnapshotVodTime(s),
 				VodRemarks:  s.Remarks,
 				VodPlayFrom: resolveProvideSnapshotPlayFromSummary(s),
-				VodPic:      s.Picture,
+				VodPic:      s.DisplayPicture(),
 			})
 		}
 
@@ -312,7 +295,7 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 				if res.Total == 0 || len(res.VodList) == 0 {
 					ttl = time.Minute
 				}
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), ttl).Err()
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), ttl, listGen)
 			}
 		}
 
@@ -360,27 +343,8 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 	}
 
 	apiPath := baseURL + "/api/provide/vod"
-	baseVodApi := apiPath
-	if key != "" {
-		baseVodApi = apiPath + "?key=" + url.QueryEscape(key)
-	}
-
-	sites := []map[string]any{
-		{
-			"key":         "EcoHub",
-			"name":        "🌟 EcoHub 私人影视库全量",
-			"type":        1,
-			"api":         baseVodApi,
-			"searchable":  1,
-			"quickSearch": 1,
-			"filterable":  1,
-		},
-	}
-
-	for _, source := range repository.GetCollectSourceList() {
-		if !source.State {
-			continue
-		}
+	sites := make([]map[string]any, 0)
+	for _, source := range repository.GetEnabledCollectSourceList() {
 		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
 		if key != "" {
 			sourceApi += "&key=" + url.QueryEscape(key)

@@ -39,7 +39,6 @@ export default function TmdbModal({
   mid,
   initialName = "",
   initialYear = "",
-  isScraped = false,
   onClose,
   onSuccess,
   onPrefill,
@@ -209,11 +208,6 @@ export default function TmdbModal({
         <Space size={8}>
           <CompassOutlined style={{ color: "#722ed1" }} />
           <span>TMDB 影视刮削匹配</span>
-          {isScraped && (
-            <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0 }}>
-              已刮削
-            </Tag>
-          )}
         </Space>
       }
       width={720}

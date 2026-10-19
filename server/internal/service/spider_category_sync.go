@@ -75,9 +75,6 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 		if len(applyRes.OrphanMids) > 0 {
 			filmsnapshot.DeleteActiveSnapshotsByMids(applyRes.OrphanMids...)
 		}
-		if len(applyRes.DetachedMids) > 0 {
-			_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(applyRes.DetachedMids...)
-		}
 		filmsnapshot.ClearDynamicPlayCaches()
 	}
 

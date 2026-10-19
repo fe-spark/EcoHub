@@ -10,6 +10,9 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 	if detail == nil {
 		return
 	}
+	if replaced := ApplyPosterSourcePictures([]model.FilmListSnapshot{info}); len(replaced) == 1 {
+		info = replaced[0]
+	}
 	detail.Id = info.Mid
 	detail.Pid = info.Pid
 	detail.Cid = info.Cid
@@ -40,6 +43,7 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 }
 
 func BuildMovieBasicInfosFromSnapshots(infos ...model.FilmListSnapshot) []model.MovieBasicInfo {
+	infos = ApplyPosterSourcePictures(infos)
 	list := make([]model.MovieBasicInfo, 0, len(infos))
 	for _, s := range infos {
 		list = append(list, model.MovieBasicInfo{

@@ -25,24 +25,6 @@ func TestTMDBHandler_Scrape_Validation(t *testing.T) {
 	}
 }
 
-func TestTMDBHandler_Revert_Validation(t *testing.T) {
-	// 1. 无效 JSON
-	c, w := testJSONContext(http.MethodPost, "/api/manage/tmdb/revert", "invalid-json")
-	TMDBHd.Revert(c)
-	resp := decodeResponse(t, w)
-	if resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on invalid JSON, got %d", resp.Code)
-	}
-
-	// 2. 缺少 ids 参数
-	c, w = testJSONContext(http.MethodPost, "/api/manage/tmdb/revert", `{"ids":[]}`)
-	TMDBHd.Revert(c)
-	resp = decodeResponse(t, w)
-	if resp.Code != dto.FAILED {
-		t.Fatalf("expected FAILED on empty ids, got %d", resp.Code)
-	}
-}
-
 func TestFilmHandler_FilmDelete_Validation(t *testing.T) {
 	// 1. 无效 JSON
 	c, w := testJSONContext(http.MethodPost, "/api/manage/film/search/del", "invalid-json")

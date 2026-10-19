@@ -35,28 +35,28 @@ type MovieDescriptor struct {
 
 // MovieBasicInfo 影片基本信息
 type MovieBasicInfo struct {
-	Id           int64  `json:"id"`                  // 影片Id
-	Cid          int64  `json:"cid"`                 // 分类ID
-	Pid          int64  `json:"pid"`                 // 一级分类ID
-	Name         string `json:"name"`                // 片名
-	SubTitle     string `json:"subTitle"`            // 子标题
-	CName        string `json:"cName"`               // 分类名称
-	State        string `json:"state"`               // 影片状态 正片|预告...
-	Picture      string `json:"picture"`             // 竖版封面图
-	PictureSlide string `json:"pictureSlide"`        // 横版幻灯图
-	Actor        string `json:"actor"`               // 主演
-	Director     string `json:"director"`            // 导演
-	Blurb        string `json:"blurb"`               // 简介, 不完整
-	Remarks      string `json:"remarks"`             // 更新情况
-	Area         string `json:"area"`                // 地区
-	Year         string `json:"year"`                // 年份
+	Id           int64   `json:"id"`                  // 影片Id
+	Cid          int64   `json:"cid"`                 // 分类ID
+	Pid          int64   `json:"pid"`                 // 一级分类ID
+	Name         string  `json:"name"`                // 片名
+	SubTitle     string  `json:"subTitle"`            // 子标题
+	CName        string  `json:"cName"`               // 分类名称
+	State        string  `json:"state"`               // 影片状态 正片|预告...
+	Picture      string  `json:"picture"`             // 竖版封面图
+	PictureSlide string  `json:"pictureSlide"`        // 横版幻灯图
+	Actor        string  `json:"actor"`               // 主演
+	Director     string  `json:"director"`            // 导演
+	Blurb        string  `json:"blurb"`               // 简介, 不完整
+	Remarks      string  `json:"remarks"`             // 更新情况
+	Area         string  `json:"area"`                // 地区
+	Year         string  `json:"year"`                // 年份
 	ClassTag     string  `json:"classTag,omitempty"`  // 源站分类/类型标签
 	Score        float64 `json:"score,omitempty"`     // 影片评分
 	Hits         int64   `json:"hits,omitempty"`      // 播放/浏览热度
 	SourceId     string  `json:"sourceId,omitempty"`  // 当前结果所属采集源
 	SourceMid    int64   `json:"sourceMid,omitempty"` // 源站 vod_id，未对齐本地 mid 时进播用
 	IsScraped    bool    `json:"isScraped,omitempty"` // 是否已启用 TMDB 刮削
-	TmdbID       int64   `json:"tmdbId,omitempty"`   // TMDB 词条 ID
+	TmdbID       int64   `json:"tmdbId,omitempty"`    // TMDB 词条 ID
 }
 
 // SearchSourceTab 搜索页按采集源分组的 Tab。
@@ -124,21 +124,6 @@ func (MovieSourceMapping) TableName() string {
 	return TableMovieSourceMapping
 }
 
-// MoviePoster 附属站海报图源持久化模型。
-// 当站点设为 IsPosterSource 时，采集时将海报按 match_key 写入该表。
-// 主站入库和附属站采集双向反查该表，彻底解耦时序依赖。
-type MoviePoster struct {
-	gorm.Model
-	SourceId     string `gorm:"uniqueIndex:uidx_poster_source_key;size:64"`
-	MovieKey     string `gorm:"uniqueIndex:uidx_poster_source_key;index:idx_movie_poster_movie_key;size:128"`
-	Picture      string `gorm:"type:text"`
-	PictureSlide string `gorm:"type:text"`
-}
-
-func (MoviePoster) TableName() string {
-	return TableMoviePoster
-}
-
 // MovieMatchKey 主站影片匹配键索引（豆瓣 / 片名#大类 / 纯片名回退）。
 // 主键就是 (mid, match_key)。match_key 只保留普通索引，供跨站反查。
 type MovieMatchKey struct {
@@ -172,7 +157,7 @@ type FilmIndexCategory struct {
 // FilmIndexContent 展示内容层：列表与详情入口直接消费的字段。
 type FilmIndexContent struct {
 	SeriesKey          string  `json:"seriesKey" gorm:"size:128;index"`                                                                                                                                                                                                                                     // 系列标识，用于相关推荐召回与排序
-	Name               string  `json:"name" gorm:"size:255;index:idx_film_index_name"`                                                                                                                                                                                                                     // 片名
+	Name               string  `json:"name" gorm:"size:255;index:idx_film_index_name"`                                                                                                                                                                                                                      // 片名
 	SubTitle           string  `json:"subTitle" gorm:"type:text"`                                                                                                                                                                                                                                           // 影片子标题
 	ClassTag           string  `json:"classTag" gorm:"type:text"`                                                                                                                                                                                                                                           // 类型标签
 	Area               string  `json:"area" gorm:"index;index:idx_filter_score;index:idx_filter_update;index:idx_filter_hits"`                                                                                                                                                                              // 地区
@@ -185,17 +170,18 @@ type FilmIndexContent struct {
 	Hits               int64   `json:"hits" gorm:"index;index:idx_pid_hits;index:idx_cid_hits;index:idx_root_key_hits_val,priority:2;index:idx_cat_key_hits_val,priority:2;index:idx_filter_hits"`                                                                                                          // 热度排行
 	State              string  `json:"state"`                                                                                                                                                                                                                                                               // 状态 正片|预告
 	Remarks            string  `json:"remarks"`                                                                                                                                                                                                                                                             // 完结 | 更新至x集
-	Picture            string  `json:"picture" gorm:"type:text"`                                                                                                                                                                                                                                            // 竖版封面图（源站/海报源原图）
-	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`                                                                                                                                                                                                                                       // 横版幻灯图（源站/海报源原图）
+	Picture            string  `json:"picture" gorm:"type:text"`                                                                                                                                                                                                                                            // 本片采集到的竖版封面
+	PictureSlide       string  `json:"pictureSlide" gorm:"type:text"`                                                                                                                                                                                                                                       // 本片采集到的横版幻灯图
 	CustomPicture      string  `json:"customPicture" gorm:"type:text"`                                                                                                                                                                                                                                      // 自定义竖版封面图（独立存储）
 	CustomPictureSlide string  `json:"customPictureSlide" gorm:"type:text"`                                                                                                                                                                                                                                 // 自定义横版幻灯图（独立存储）
-	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`                                                                                                                                                                                                                                // 是否人工自定义海报（锁定保护）
+	IsCustomPicture    bool    `json:"isCustomPicture" gorm:"default:false"`                                                                                                                                                                                                                                // 自定义封面。采集不覆盖这张图
 	Actor              string  `json:"actor" gorm:"type:text"`                                                                                                                                                                                                                                              // 主演
 	Director           string  `json:"director" gorm:"type:text"`                                                                                                                                                                                                                                           // 导演
 	Writer             string  `json:"writer" gorm:"type:text"`                                                                                                                                                                                                                                             // 编剧
 	Blurb              string  `json:"blurb" gorm:"type:text"`                                                                                                                                                                                                                                              // 简介, 不完整
 	Content            string  `json:"content" gorm:"type:longtext"`                                                                                                                                                                                                                                        // 完整详情内容
 	ReleaseDate        string  `json:"releaseDate" gorm:"size:64"`                                                                                                                                                                                                                                          // 上映日期
+	LockedFields       string  `json:"-" gorm:"type:text"`                                                                                                                                                                                                                                                  // 刮削已写入的列，再采集不覆盖。没有还原
 }
 
 func (c FilmIndexContent) DisplayPicture() string {
@@ -373,11 +359,11 @@ type FilmDetailVo struct {
 	Cid                int64    `json:"cid"`                // 分类ID
 	Pid                int64    `json:"pid"`                // 一级分类ID
 	Name               string   `json:"name"`               // 片名
-	Picture            string   `json:"picture"`            // 竖版封面图（源站/海报源原图）
-	PictureSlide       string   `json:"pictureSlide"`       // 横版幻灯图（源站/海报源原图）
+	Picture            string   `json:"picture"`            // 本片采集到的竖版封面
+	PictureSlide       string   `json:"pictureSlide"`       // 本片采集到的横版幻灯图
 	CustomPicture      string   `json:"customPicture"`      // 自定义竖版封面图（独立存储）
 	CustomPictureSlide string   `json:"customPictureSlide"` // 自定义横版幻灯图（独立存储）
-	IsCustomPicture    bool     `json:"isCustomPicture"`    // 是否人工自定义海报（锁定保护）
+	IsCustomPicture    bool     `json:"isCustomPicture"`    // 自定义封面。采集不覆盖这张图
 	PlayFrom           []string `json:"playFrom"`           // 播放来源
 	DownFrom           string   `json:"DownFrom"`           // 下载来源 例: http
 	PlayLink           string   `json:"playLink"`           // 播放地址url

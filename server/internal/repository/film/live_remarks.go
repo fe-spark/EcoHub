@@ -7,7 +7,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository/film/snapshot"
+	filmshared "server/internal/repository/film/shared"
 )
 
 type liveProgress struct {
@@ -94,6 +94,10 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 
 	type row struct {
 		Mid                int64
+		FirstSourceId      string
+		DbId               int64
+		Name               string
+		Pid                int64
 		Remarks            string
 		Area               string
 		ClassTag           string
@@ -110,14 +114,13 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 	}
 	var rows []row
 	if err := db.Mdb.Model(&model.FilmIndex{}).
-		Select("mid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
+		Select("mid, first_source_id, db_id, name, pid, remarks, area, class_tag, actor, director, blurb, score, hits, picture, picture_slide, custom_picture, custom_picture_slide, is_custom_picture").
 		Where("mid IN ?", mids).
 		Scan(&rows).Error; err != nil {
 		log.Printf("[Film] LiveBannerSnapshotsByMIDs 读快照状态失败: %v", err)
 		return out
 	}
 
-	scrapes := snapshot.LoadActiveScrapesByMids(mids)
 	for _, r := range rows {
 		snap := LiveBannerSnapshot{
 			Mid:                r.Mid,
@@ -135,45 +138,35 @@ func LiveBannerSnapshotsByMIDs(mids []int64) map[int64]LiveBannerSnapshot {
 			CustomPictureSlide: strings.TrimSpace(r.CustomPictureSlide),
 			IsCustomPicture:    r.IsCustomPicture,
 		}
-		if sc, ok := scrapes[r.Mid]; ok {
-			overlayScrapeOnLiveBanner(&snap, &sc)
-		}
 		out[r.Mid] = snap
 	}
+	posters := make([]model.FilmListSnapshot, 0, len(rows))
+	for _, r := range rows {
+		current := out[r.Mid]
+		posters = append(posters, model.FilmListSnapshot{
+			Mid:             r.Mid,
+			SourceId:        r.FirstSourceId,
+			DbId:            r.DbId,
+			Name:            r.Name,
+			Pid:             r.Pid,
+			Picture:         current.Picture,
+			PictureSlide:    current.PictureSlide,
+			IsCustomPicture: current.IsCustomPicture,
+		})
+	}
+	for _, snap := range filmshared.ApplyPosterSourcePictures(posters) {
+		current := out[snap.Mid]
+		if current.Picture == snap.Picture && current.PictureSlide == snap.PictureSlide && current.IsCustomPicture == snap.IsCustomPicture {
+			continue
+		}
+		current.Picture = snap.Picture
+		current.PictureSlide = snap.PictureSlide
+		current.CustomPicture = snap.CustomPicture
+		current.CustomPictureSlide = snap.CustomPictureSlide
+		current.IsCustomPicture = snap.IsCustomPicture
+		out[snap.Mid] = current
+	}
 	return out
-}
-
-func overlayScrapeOnLiveBanner(snap *LiveBannerSnapshot, sc *model.FilmTMDBScrape) {
-	if snap == nil || sc == nil || sc.Status != 1 {
-		return
-	}
-	snap.IsScraped = true
-	snap.TmdbID = sc.TmdbID
-	fieldSet := snapshot.ParseAppliedFields(sc.AppliedFields)
-	if snapshot.ShouldApplyField(fieldSet, "poster", "picture") && sc.Poster != "" {
-		snap.Picture = sc.Poster
-		snap.CustomPicture = sc.Poster
-		snap.IsCustomPicture = true
-	}
-	if snapshot.ShouldApplyField(fieldSet, "backdrop", "pictureslide") && sc.Backdrop != "" {
-		snap.PictureSlide = sc.Backdrop
-		snap.CustomPictureSlide = sc.Backdrop
-	}
-	if snapshot.ShouldApplyField(fieldSet, "overview", "content") && sc.Overview != "" {
-		snap.Blurb = sc.Overview
-	}
-	if snapshot.ShouldApplyField(fieldSet, "actor", "credits") && sc.Actors != "" {
-		snap.Actor = sc.Actors
-	}
-	if snapshot.ShouldApplyField(fieldSet, "director", "credits") && sc.Directors != "" {
-		snap.Director = sc.Directors
-	}
-	if snapshot.ShouldApplyField(fieldSet, "score", "voteaverage") && sc.VoteAverage > 0 {
-		snap.Score = sc.VoteAverage
-	}
-	if snapshot.ShouldApplyField(fieldSet, "tag", "genres") && sc.Genres != "" {
-		snap.ClassTag = sc.Genres
-	}
 }
 
 // LiveUpdateRemarksByMIDs 从活跃快照读取展示用更新状态（毫秒级索引直查）。

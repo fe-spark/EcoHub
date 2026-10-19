@@ -189,11 +189,6 @@ export default function FilmPicker({
                 <Text strong ellipsis={{ tooltip: record.name }} style={{ maxWidth: 210, fontSize: 13 }}>
                   {record.name}
                 </Text>
-                {record.isScraped && (
-                  <Tag color="#722ed1" style={{ borderRadius: 4, margin: 0, fontSize: 11, padding: "0 4px", lineHeight: "18px" }}>
-                    已刮削
-                  </Tag>
-                )}
               </Flex>
               <Text type="secondary" style={{ fontSize: 12 }}>
                 {[record.cName, record.year, record.area].filter(Boolean).join(" · ")}

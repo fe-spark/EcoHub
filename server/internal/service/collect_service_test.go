@@ -128,7 +128,7 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	}
 }
 
-func TestSortFilmSources_BlocksPrimaryChangeWhileCollecting(t *testing.T) {
+func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	gdb := setupCollectServiceTestDB(t)
 	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", Sort: 0, State: true}).Error; err != nil {
 		t.Fatalf("create src_1: %v", err)
@@ -140,29 +140,31 @@ func TestSortFilmSources_BlocksPrimaryChangeWhileCollecting(t *testing.T) {
 	t.Cleanup(func() { progress.MarkStopped("src_1") })
 
 	srv := &CollectService{}
-	err := srv.SortFilmSources([]string{"src_2", "src_1"})
-	if err == nil || err.Error() != "采集进行中，不能更换主站" {
-		t.Fatalf("expected primary switch to be blocked, got %v", err)
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
+		t.Fatalf("switch while collecting: %v", err)
 	}
 	list := srv.GetFilmSourceList()
-	if len(list) == 0 || list[0].Id != "src_1" {
-		t.Fatalf("primary should stay src_1, got %+v", list)
+	if len(list) == 0 || list[0].Id != "src_2" || !list[0].IsPrimary {
+		t.Fatalf("primary should be src_2, got %+v", list)
 	}
-	if err := srv.SortFilmSources([]string{"src_1", "src_2"}); err != nil {
+	if !progress.IsTaskRunning("src_1") {
+		t.Fatal("the running collect should stay running")
+	}
+	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
 		t.Fatalf("reordering without changing primary should pass: %v", err)
 	}
-	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://1", State: false}); err == nil || err.Error() != "采集进行中，不能更换主站" {
-		t.Fatalf("expected disabling primary to be blocked, got %v", err)
-	}
-	var kept model.FilmSource
-	if err := gdb.First(&kept, "id = ?", "src_1").Error; err != nil {
-		t.Fatalf("query src_1: %v", err)
-	}
-	if !kept.State {
-		t.Fatal("primary was disabled")
-	}
 	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}); err != nil {
-		t.Fatalf("disabling a non-primary source should pass: %v", err)
+		t.Fatalf("disabling primary while collecting should pass: %v", err)
+	}
+	list = srv.GetFilmSourceList()
+	var primaryID string
+	for _, item := range list {
+		if item.IsPrimary {
+			primaryID = item.Id
+		}
+	}
+	if primaryID != "src_1" {
+		t.Fatalf("primary should fall back to src_1, got %+v", list)
 	}
 }
 

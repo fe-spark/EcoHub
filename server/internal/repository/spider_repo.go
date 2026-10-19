@@ -178,65 +178,55 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	return &fs
 }
 
-// CascadeCleanSourceDataTx 在事务中清理指定采集站点的附属数据，并同步清理该源独占的孤儿影片实体。
-// 返回被级联清理的独占影片 mid 列表。
+// CascadeCleanSourceDataTx 删除该站自己的档案和挂载数据。有没有播放线路都删。
+// 返回被删除的档案 mid。其他站的档案不删。
 func CascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
-	var affectedMids []int64
-	if err := tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", id).Pluck("DISTINCT mid", &affectedMids).Error; err != nil {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil, nil
+	}
+	var owned []int64
+	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
 		return nil, err
 	}
-
 	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
-		return nil, err
-	}
-	if err := tx.Where("source_id = ?", id).Unscoped().Delete(&model.MoviePoster{}).Error; err != nil {
 		return nil, err
 	}
 	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
 		return nil, err
 	}
-
-	var orphanMids []int64
-	for i := 0; i < len(affectedMids); i += 2000 {
-		end := min(i+2000, len(affectedMids))
-		chunk := affectedMids[i:end]
-		var aliveMids []int64
-		if err := tx.Model(&model.FilmSourcePlaylist{}).
-			Where("mid IN (?) AND line_kind = 'play'", chunk).
-			Pluck("DISTINCT mid", &aliveMids).Error; err != nil {
-			return nil, err
-		}
-		aliveSet := make(map[int64]struct{}, len(aliveMids))
-		for _, m := range aliveMids {
-			aliveSet[m] = struct{}{}
-		}
-		for _, m := range chunk {
-			if _, ok := aliveSet[m]; !ok {
-				orphanMids = append(orphanMids, m)
-			}
-		}
+	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
+		return nil, err
 	}
-
-	for i := 0; i < len(orphanMids); i += 1000 {
-		chunk := orphanMids[i:min(i+1000, len(orphanMids))]
-		if err := tx.Unscoped().Where("mid IN ?", chunk).Delete(&model.FilmIndex{}).Error; err != nil {
-			return nil, err
-		}
-		if err := tx.Where("mid IN ?", chunk).Delete(&model.MovieMatchKey{}).Error; err != nil {
-			return nil, err
-		}
-		if err := tx.Where("global_mid IN ?", chunk).Delete(&model.MovieSourceMapping{}).Error; err != nil {
-			return nil, err
-		}
-		if err := tx.Where("mid IN ?", chunk).Delete(&model.Banner{}).Error; err != nil {
-			return nil, err
-		}
-	}
-
-	return orphanMids, nil
+	return owned, nil
 }
 
-// DelCollectResource 通过 Id 删除对应的采集站点信息及其附属采集数据，并级联清理独占孤儿影片
+func deleteOwnedFilmsTx(tx *gorm.DB, mids []int64) error {
+	for i := 0; i < len(mids); i += 1000 {
+		chunk := mids[i:min(i+1000, len(mids))]
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.MovieMatchKey{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("global_mid IN ?", chunk).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.Banner{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("mid IN ?", chunk).Delete(&model.FilmTMDBScrape{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("mid IN ?", chunk).Delete(&model.FilmIndex{}).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// DelCollectResource 删除采集站，并删除该站自己的档案和挂载数据。
 func DelCollectResource(id string) ([]int64, error) {
 	var orphanMids []int64
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -244,7 +234,7 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
 			return err
 		}
-		// 2. 清理源采集数据及独占孤儿影片
+		// 2. 删除该站档案和挂载数据
 		orphans, err := CascadeCleanSourceDataTx(tx, id)
 		if err != nil {
 			return err
@@ -271,7 +261,7 @@ func DelCollectResource(id string) ([]int64, error) {
 	return orphanMids, nil
 }
 
-// CleanCollectSourceData 清空指定采集源的历史采集数据并级联清理独占孤儿影片（保留采集站点配置本身）
+// CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。
 func CleanCollectSourceData(id string) ([]int64, error) {
 	var orphanMids []int64
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
@@ -414,26 +404,6 @@ func UpdateCollectSourceTx(tx *gorm.DB, s model.FilmSource) error {
 		return err
 	}
 	return EnsureDefaultPosterSourceTx(tx)
-}
-
-// GetPosterSource 获取当前启用的优先海报图源站：
-// 优先取显式标记 is_poster_source = true AND state = true 的站点；
-// 若无显式开启海报源的站点，自动兜底取当前活跃的最高权重站点。
-func GetPosterSource() *model.FilmSource {
-	if db.Mdb == nil {
-		return nil
-	}
-	var fs model.FilmSource
-	if err := db.Mdb.Where("is_poster_source = ? AND state = ?", true, true).First(&fs).Error; err == nil {
-		normalizeCollectCd(&fs)
-		return &fs
-	}
-	// 兜底：取活跃首位站点
-	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&fs).Error; err == nil {
-		normalizeCollectCd(&fs)
-		return &fs
-	}
-	return nil
 }
 
 // EnsureDefaultPosterSourceTx 确保全局至少有一个活跃海报图源（无外部海报源时将活跃首位站点设为海报源）

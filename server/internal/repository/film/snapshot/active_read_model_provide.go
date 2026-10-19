@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
@@ -128,11 +129,16 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
-		if st.Pid > 0 {
-			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
-		}
-		if st.Cid > 0 {
+		if st.SourceId != "" {
+			if st.Cid > 0 {
+				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "cid", repository.PublicSourceTypeIDs(st.SourceId, "cid", st.Cid))
+			} else if st.Pid > 0 {
+				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "pid", repository.PublicSourceTypeIDs(st.SourceId, "pid", st.Pid))
+			}
+		} else if st.Cid > 0 {
 			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
+		} else if st.Pid > 0 {
+			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
 		query = applyTagSearchFilter(query, version, st)
 		if keyword != "" {

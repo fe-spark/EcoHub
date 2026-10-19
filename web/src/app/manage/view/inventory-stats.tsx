@@ -30,8 +30,8 @@ interface InventoryStatsData {
 }
 
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
-  { key: "films", label: "片库影片", hint: "全部采集站入库", lead: true },
-  { key: "playable", label: "可播放影片", hint: "有播放地址的影片" },
+  { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
+  { key: "playable", label: "可播放影片", hint: "主站有播放地址" },
   { key: "categories", label: "展示分类", hint: "共享展示树" },
   { key: "failures", label: "失败记录", hint: "全部来源" },
 ];

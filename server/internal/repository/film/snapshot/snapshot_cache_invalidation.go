@@ -45,8 +45,8 @@ func RefreshAccessDataCaches() {
 	)
 }
 
-// filmListDerivedCachePatterns 快照派生的列表类缓存。增量发布不换快照版本，
-// key 里的 v{version} 不会变，必须在写库后主动删掉，否则列表上的播放源摘要/备注会脏到 TTL。
+// filmListDerivedCachePatterns 快照派生的列表、分类首页和首页缓存。增量发布不换快照版本，
+// key 里的版本不会变，必须在写库后主动删掉，否则影片和热播会脏到 TTL。
 func filmListDerivedCachePatterns() []string {
 	return []string{
 		config.FilmCategoryCachePrefix + ":*",
@@ -56,7 +56,14 @@ func filmListDerivedCachePatterns() []string {
 		config.FilmSortCachePrefix + ":*",
 		config.FilmHotKeywordsKey + ":*",
 		config.FilmRelatePrefix + ":*",
+		config.FilmClassifyCacheKey + ":*",
+		config.IndexPageCacheKey + "*",
 	}
+}
+
+// ClearDerivedFilmListCaches 清掉带影片内容的列表、分类首页和首页缓存。
+func ClearDerivedFilmListCaches() {
+	cache.ClearPatterns(filmListDerivedCachePatterns()...)
 }
 
 // ClearSearchCache 清除所有前台搜索缓存

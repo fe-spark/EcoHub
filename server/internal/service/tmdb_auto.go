@@ -273,27 +273,12 @@ func (s *TMDBService) autoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	}
 
 	updatedSnap := snap
-	var sc model.FilmTMDBScrape
-	if err := db.Mdb.Where("mid = ?", snap.Mid).First(&sc).Error; err == nil {
-		filmsnapshot.ApplyTMDBScrapeToSnapshot(&updatedSnap, &sc)
-	} else {
-		if strings.TrimSpace(bestCandidate.Poster) != "" {
-			updatedSnap.Picture = strings.TrimSpace(bestCandidate.Poster)
-			updatedSnap.CustomPicture = strings.TrimSpace(bestCandidate.Poster)
-			updatedSnap.IsCustomPicture = true
-		}
-		if strings.TrimSpace(bestCandidate.Backdrop) != "" {
-			updatedSnap.PictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
-			updatedSnap.CustomPictureSlide = strings.TrimSpace(bestCandidate.Backdrop)
-		}
-		if bestCandidate.VoteAverage > 0 {
-			updatedSnap.Score = bestCandidate.VoteAverage
-		}
-		if strings.TrimSpace(bestCandidate.Overview) != "" {
-			updatedSnap.Content = strings.TrimSpace(bestCandidate.Overview)
-			updatedSnap.Blurb = strings.TrimSpace(bestCandidate.Overview)
-		}
-		updatedSnap.IsScraped = true
+	if stored := filmsnapshot.GetSnapshotByMid("", snap.Mid); stored != nil {
+		updatedSnap = *stored
+	}
+	updatedSnap.IsScraped = true
+	if updatedSnap.TmdbID <= 0 {
+		updatedSnap.TmdbID = bestCandidate.ID
 	}
 
 	log.Printf("[TMDBAuto] 影片 TMDB 全量元数据已自动刮削落库 mid=%d 片名=%q (评分=%.1f, 横图=%s)",

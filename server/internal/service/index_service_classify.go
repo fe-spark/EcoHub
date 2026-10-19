@@ -176,6 +176,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	if page != nil && page.PageSize > 0 {
 		limit = page.PageSize
 	}
+	listGen := filmsnapshot.GetSearchCacheVersion()
 
 	var (
 		newsMovies   []model.MovieBasicInfo
@@ -215,7 +216,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 	res["recent"] = recentMovies
 	if db.Rdb != nil {
 		if data, err := json.Marshal(res); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*12)
+			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*12, listGen)
 		}
 	}
 	return res

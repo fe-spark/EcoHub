@@ -72,7 +72,8 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = bindMappedFilmsTx(tx, items, mapped); err != nil {
 		return nil, nil, err
 	}
-	if err = claimFilmsByMatchKeysTx(tx, items); err != nil {
+	dropForeignFilms(items, source.Id)
+	if err = claimFilmsByMatchKeysTx(tx, source.Id, items); err != nil {
 		return nil, nil, err
 	}
 	linkSamePageFilms(items)
@@ -89,7 +90,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 	if err = savePagePlaylistsTx(tx, source.Id, items); err != nil {
 		return nil, nil, err
 	}
-	if err = backfillPageFilmsTx(tx, source, items, sources); err != nil {
+	if err = syncPageFilmsTx(tx, source, items); err != nil {
 		return nil, nil, err
 	}
 	newMids := make(map[int64]struct{}, len(items))
@@ -182,7 +183,16 @@ type matchKeyMid struct {
 	Mid      int64  `gorm:"column:mid"`
 }
 
-func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
+func dropForeignFilms(items []peerPageItem, sourceID string) {
+	for i := range items {
+		if items[i].film != nil && items[i].film.FirstSourceId != sourceID {
+			items[i].film = nil
+			items[i].mid = 0
+		}
+	}
+}
+
+func claimFilmsByMatchKeysTx(tx *gorm.DB, sourceID string, items []peerPageItem) error {
 	keys := make([]string, 0, len(items)*3)
 	seen := make(map[string]struct{})
 	for i := range items {
@@ -217,7 +227,8 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, items []peerPageItem) error {
 			continue
 		}
 		mid := bestMidForKeys(items[i].keys, items[i].keyRank, rows)
-		if film, ok := films[mid]; ok {
+		film, ok := films[mid]
+		if ok && film.FirstSourceId == sourceID {
 			items[i].mid, items[i].film = film.Mid, film
 		}
 	}
@@ -454,11 +465,10 @@ func savePagePlaylistsTx(tx *gorm.DB, sourceID string, items []peerPageItem) err
 	return tx.Clauses(playlistUpsertClause()).CreateInBatches(&upserts, peerPagePlaylistBatch).Error
 }
 
-func backfillPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem, sources []model.FilmSource) error {
-	isBaseline := isBaselineCollectSource(source, sources)
+func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem) error {
 	order := make([]int, 0, len(items))
 	for i := range items {
-		if (items[i].linesChanged || isBaseline) && !items[i].isNew && items[i].film != nil {
+		if !items[i].isNew && items[i].film != nil {
 			order = append(order, i)
 		}
 	}
@@ -469,7 +479,7 @@ func backfillPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPage
 		return items[order[i]].mid < items[order[j]].mid
 	})
 	for _, idx := range order {
-		if _, err := backfillFilmMetadataTx(tx, items[idx].film, source, items[idx].detail, isBaseline); err != nil {
+		if err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail); err != nil {
 			return err
 		}
 	}

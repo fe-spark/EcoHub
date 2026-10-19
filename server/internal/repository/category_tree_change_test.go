@@ -26,8 +26,8 @@ func setupCategoryChangeTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSourcePlaylist{},
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
-		&model.MoviePoster{},
 		&model.Banner{},
+		&model.FilmTMDBScrape{},
 		&model.FailureRecord{},
 	)
 	if err != nil {
@@ -45,7 +45,7 @@ func TestCategoryTreeDiff_OnlyAddOrSort_EmptyChanges(t *testing.T) {
 	}
 	plans := []sourceCategoryPlacement{
 		{SourceTypeId: 2, ParentSourceTypeId: 1, Name: "动作片", Sort: 1}, // 仅改排序
-		{SourceTypeId: 1, ParentSourceTypeId: 0, Name: "电影", Sort: 2},   // 仅改排序
+		{SourceTypeId: 1, ParentSourceTypeId: 0, Name: "电影", Sort: 2},  // 仅改排序
 		{SourceTypeId: 3, ParentSourceTypeId: 1, Name: "喜剧片", Sort: 3}, // 新增 type_id
 	}
 
@@ -200,41 +200,38 @@ func TestCategoryTreeSync_ApplyWithClear(t *testing.T) {
 		t.Fatalf("initial save: %v", err)
 	}
 
-	// 1. 片 101：src_1 独占片，绑定变更分类 2
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101},
-		FilmIndexContent:  model.FilmIndexContent{Name: "独占片1"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 101, FirstSourceId: "src_1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源1片"},
 		FilmIndexCategory: model.FilmIndexCategory{
 			CategoryKey:     "source:src_1:2",
 			RootCategoryKey: "source:src_1:1",
 		},
 	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 104, FirstSourceId: "src_1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源1无线路"},
+	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 101, SourceId: "src_1", LineKind: "play"})
 	gdb.Create(&model.MovieMatchKey{Mid: 101, MatchKey: "key_101"})
 
-	// 2. 片 102：src_1 与 src_2 共有片，挂在变更分类 2 上
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102},
-		FilmIndexContent:  model.FilmIndexContent{Name: "共有片2"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 102, FirstSourceId: "src_2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源2片"},
 		FilmIndexCategory: model.FilmIndexCategory{
-			CategoryKey:      "source:src_1:2",
-			RootCategoryKey:  "source:src_1:1",
-			Cid:              20,
-			Pid:              10,
-			CName:            "动作片",
-			OriginalCategory: "动作片",
+			CategoryKey:     "source:src_2:2",
+			RootCategoryKey: "source:src_2:1",
 		},
 	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src_1", LineKind: "play"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 102, SourceId: "src_2", LineKind: "play"})
 
-	// 3. 片 103：src_1 与 src_2 共有片，挂在未变更分类 3 上
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103},
-		FilmIndexContent:  model.FilmIndexContent{Name: "共有片3"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 103, FirstSourceId: "src_2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源2片3"},
 		FilmIndexCategory: model.FilmIndexCategory{
-			CategoryKey:     "source:src_1:3",
-			RootCategoryKey: "source:src_1:1",
+			CategoryKey:     "source:src_2:3",
+			RootCategoryKey: "source:src_2:1",
 		},
 	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 103, SourceId: "src_1", LineKind: "play"})
@@ -271,29 +268,35 @@ func TestCategoryTreeSync_ApplyWithClear(t *testing.T) {
 		t.Fatalf("src_2 playlists must remain, got %d", src2Playlists)
 	}
 
-	// c. 只属于该站的孤儿片子 101 没了
 	var fi101Count int64
 	gdb.Model(&model.FilmIndex{}).Where("mid = 101").Count(&fi101Count)
 	if fi101Count != 0 {
-		t.Fatalf("orphan film 101 must be deleted")
+		t.Fatalf("owned film 101 must be deleted")
+	}
+	var fi104Count int64
+	gdb.Model(&model.FilmIndex{}).Where("mid = 104").Count(&fi104Count)
+	if fi104Count != 0 {
+		t.Fatalf("playless film 104 must be deleted")
+	}
+	var keys int64
+	gdb.Model(&model.MovieMatchKey{}).Where("mid = 101").Count(&keys)
+	if keys != 0 {
+		t.Fatalf("match key left on deleted film")
 	}
 
-	// d. 另一站也有的片子 102 还在，但它在变更 type_id 上的分类字段被清空
 	var fi102 model.FilmIndex
 	if err := gdb.Where("mid = 102").First(&fi102).Error; err != nil {
-		t.Fatalf("shared film 102 must remain: %v", err)
+		t.Fatalf("src_2 film 102 must remain: %v", err)
 	}
-	if fi102.CategoryKey != "" || fi102.RootCategoryKey != "" || fi102.Cid != 0 || fi102.Pid != 0 || fi102.CName != "" {
-		t.Fatalf("film 102 category fields must be cleared, got %+v", fi102)
+	if fi102.CategoryKey != "source:src_2:2" {
+		t.Fatalf("film 102 category changed, got %s", fi102.CategoryKey)
 	}
-
-	// e. 没变更的 type_id(3) 上，共有片子 103 的分类不动
 	var fi103 model.FilmIndex
 	if err := gdb.Where("mid = 103").First(&fi103).Error; err != nil {
-		t.Fatalf("shared film 103 must remain: %v", err)
+		t.Fatalf("src_2 film 103 must remain: %v", err)
 	}
-	if fi103.CategoryKey != "source:src_1:3" {
-		t.Fatalf("film 103 category_key should be untouched, got %s", fi103.CategoryKey)
+	if fi103.CategoryKey != "source:src_2:3" {
+		t.Fatalf("film 103 category changed, got %s", fi103.CategoryKey)
 	}
 }
 

@@ -6,7 +6,6 @@ const (
 	TableUser               = "user"
 	TableFilmIndex          = "film_index"
 	TableFilmSourcePlaylist = "film_source_playlists"
-	TableMoviePoster        = "movie_poster"
 	TableMovieMatchKey      = "movie_match_key"
 	TableMovieSourceMapping = "movie_source_mapping"
 	TableCollectSourceStats = "collect_source_stats"
@@ -46,7 +45,6 @@ var AllModels = []any{
 	&FileInfo{},
 	&FilmSourcePlaylist{},
 	&Category{},
-	&MoviePoster{},
 	&MovieMatchKey{},
 	&FilmSource{},
 	&CollectSourceStats{},

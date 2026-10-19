@@ -113,6 +113,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 			}
 		}
 
+		listGen := filmsnapshot.GetSearchCacheVersion()
 		info := make(map[string]any)
 		tree := repository.GetActiveCategoryTree(sourceId)
 		info["category"] = tree
@@ -160,10 +161,10 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 		}
 		info["banners"] = banners
 
-		// 2. 写入 Redis 缓存
+		// 2. 写入 Redis 缓存。检索世代变了就放弃，避免采集失效后把旧热播写回 24 小时。
 		if version != "" && db.Rdb != nil {
 			if data, err := json.Marshal(info); err == nil {
-				_ = db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour*24).Err()
+				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*24, listGen)
 			}
 		}
 		return info, nil
@@ -319,7 +320,7 @@ func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
 	}
 }
 
-// OverlayBannerLiveRemarks 实时叠加片库最新状态、海报图源高清封面与幻灯图
+// OverlayBannerLiveRemarks 只把片库更新状态补到轮播。图片和简介用轮播行自己的。
 func OverlayBannerLiveRemarks(banners model.Banners) model.Banners {
 	return overlayBannerLiveRemarks(banners)
 }
@@ -354,54 +355,8 @@ func overlayBannerLiveRemarks(banners model.Banners) model.Banners {
 		if snap.Remarks != "" {
 			out[i].Remark = snap.Remarks
 		}
-		if snap.Area != "" {
-			out[i].Area = snap.Area
-		}
-		if snap.ClassTag != "" {
-			out[i].ClassTag = snap.ClassTag
-		}
-		if snap.Actor != "" {
-			out[i].Actor = snap.Actor
-		}
-		if snap.Director != "" {
-			out[i].Director = snap.Director
-		}
-		if snap.Blurb != "" {
-			out[i].Blurb = snap.Blurb
-		}
-		if snap.Score > 0 {
-			out[i].Score = snap.Score
-		}
-		if snap.Hits > 0 {
-			out[i].Hits = snap.Hits
-		}
-		if snap.IsScraped {
+		if out[i].TmdbID > 0 {
 			out[i].IsScraped = true
-			out[i].TmdbID = snap.TmdbID
-		}
-		// 核心优先级：若该轮播项已由管理员手动自定义修改 (IsCustomPic == true)，严格展示用户的自定义图片（优先 CustomPicture，兼容历史 Picture 字段）
-		customPic := strings.TrimSpace(out[i].CustomPicture)
-		if customPic == "" {
-			customPic = strings.TrimSpace(out[i].Picture)
-		}
-		if out[i].IsCustomPic && customPic != "" {
-			out[i].Picture = customPic
-			out[i].Poster = customPic
-			if strings.TrimSpace(out[i].PictureSlide) == customPic {
-				out[i].PictureSlide = ""
-			}
-		} else {
-			dispPic := snap.DisplayPicture()
-			if dispPic != "" {
-				out[i].Picture = dispPic
-				out[i].Poster = dispPic
-			}
-			dispSlide := snap.DisplayPictureSlide()
-			if dispSlide != "" && dispSlide != dispPic {
-				out[i].PictureSlide = dispSlide
-			} else {
-				out[i].PictureSlide = ""
-			}
 		}
 	}
 	return out
