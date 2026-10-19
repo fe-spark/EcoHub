@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Card, Descriptions, Select, Statistic, Tag, Tooltip, Typography } from "antd";
+import { Card, Descriptions, Select, Statistic, Tag, Typography } from "antd";
 import Link from "next/link";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { isCollectBusyStatus, type FilmSource } from "./types";
+import { type FilmSource } from "./types";
 import styles from "./collect-overview.module.less";
 
 interface CollectListItemResponse extends Partial<FilmSource> {
@@ -86,16 +86,7 @@ export default function CollectOverview() {
     () => orderBySort(siteList).filter((item) => item.state && item.id !== topSite?.id),
     [siteList, topSite?.id],
   );
-  const collecting = useMemo(
-    () => siteList.some((item) => isCollectBusyStatus(item.progress?.status)),
-    [siteList],
-  );
-
   const askSwitchPrimary = (sourceId: string) => {
-    if (collecting) {
-      message.warning("采集中不能更换主站");
-      return;
-    }
     if (!sourceId || sourceId === topSite?.id || switching) {
       return;
     }
@@ -193,24 +184,22 @@ export default function CollectOverview() {
           <Descriptions column={1} size="small" className={styles.masterDescriptions}>
             <Descriptions.Item label="名称">
               {switchCandidates.length > 0 ? (
-                <Tooltip title={collecting ? "采集中不能更换主站" : undefined}>
-                  <span className={styles.sourceSelect}>
-                    <Select
-                      className={styles.sourceSelect}
-                      size="middle"
-                      value={topSite.id}
-                      loading={switching}
-                      disabled={switching || collecting}
-                      popupMatchSelectWidth={false}
-                      options={orderBySort(siteList)
-                        .filter((item) => item.state)
-                        .map((item) => ({ value: item.id, label: item.name }))}
-                      onChange={(sourceId) => {
-                        askSwitchPrimary(sourceId);
-                      }}
-                    />
-                  </span>
-                </Tooltip>
+                <span className={styles.sourceSelect}>
+                  <Select
+                    className={styles.sourceSelect}
+                    size="middle"
+                    value={topSite.id}
+                    loading={switching}
+                    disabled={switching}
+                    popupMatchSelectWidth={false}
+                    options={orderBySort(siteList)
+                      .filter((item) => item.state)
+                      .map((item) => ({ value: item.id, label: item.name }))}
+                    onChange={(sourceId) => {
+                      askSwitchPrimary(sourceId);
+                    }}
+                  />
+                </span>
               ) : (
                 topSite.name
               )}

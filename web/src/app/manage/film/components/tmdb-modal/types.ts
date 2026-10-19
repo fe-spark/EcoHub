@@ -16,7 +16,6 @@ export interface TmdbModalProps {
   mid?: number;
   initialName?: string;
   initialYear?: string | number;
-  isScraped?: boolean;
   onClose: () => void;
   onSuccess?: () => void;
   onPrefill?: (data: any, fields?: string[]) => void;

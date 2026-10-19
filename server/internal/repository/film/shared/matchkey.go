@@ -198,28 +198,3 @@ func LoadMovieMatchKeysBySnapshot(snapshot *model.FilmListSnapshot, detail *mode
 	}
 	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
 }
-
-func BuildPlaylistMovieKeys(detail model.MovieDetail) []string {
-	pid := ResolveMovieDetailRootPid(detail)
-	return BuildMovieMatchKeysWithCategory(detail.DbId, detail.Name, pid)
-}
-
-// BuildPlaylistPrimaryMovieKey 播放列表 / 海报主键（豆瓣，否则片名#大类，否则纯片名）。
-func BuildPlaylistPrimaryMovieKey(detail model.MovieDetail) string {
-	keys := BuildPlaylistMovieKeys(detail)
-	if len(keys) == 0 {
-		return ""
-	}
-	return keys[0]
-}
-
-// ResolveSlaveGlobalMid 用影片身份键把详情翻译成全局 mid。
-func ResolveSlaveGlobalMid(detail model.MovieDetail, globalMidByKey map[string]int64) (int64, bool) {
-	for _, key := range BuildPlaylistMovieKeys(detail) {
-		globalMid, ok := globalMidByKey[key]
-		if ok {
-			return globalMid, true
-		}
-	}
-	return 0, false
-}

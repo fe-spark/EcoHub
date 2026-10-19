@@ -2,7 +2,7 @@
 
 - 分支：`feat/unified-film-library`
 - 范围：`server/` 持久化模型、入库与读路径、Redis 键与失效
-- 对照：`统一聚合片库实现方案.md`、`.ai/database-schema.md`、`.ai/business-dictionary.md`
+- 对照：`项目方向.md`、`.ai/database-schema.md`、`.ai/business-dictionary.md`
 - 结论：列表读路径已经落到 `film_index`，但旧快照表、旧详情表清理任务和知识库仍按上一套模型工作。定时孤儿清理有两条会误伤或空转的路径。
 
 本文只记录现状与问题，不改代码。
@@ -11,7 +11,7 @@
 
 ## 1. 读模型已经切到 `film_index`
 
-方案第 8 节要求：采集只写业务表，前台列表直读 `film_index`，`film_list_snapshot` 不再作为读模型。
+项目方向要求：采集只写业务表，前台列表直读 `film_index`，`film_list_snapshot` 不再作为读模型。
 
 当前实现与方案一致的部分：
 
@@ -212,7 +212,7 @@ flowchart TD
 
 ### P0 空片名清理只动缓存，不删行
 
-`CleanEmptyFilms` 查出 `name` 为空或 `pid = 0` 的行，只调用 `DelFilmSearch` 和 `ClearSearchTagsCache`，然后把行数当清理结果返回。`film_index` 行还在。方案第 7.1 节要求清掉空片名和 `pid = 0`。
+`CleanEmptyFilms` 查出 `name` 为空或 `pid = 0` 的行，只调用 `DelFilmSearch` 和 `ClearSearchTagsCache`，然后把行数当清理结果返回。`film_index` 行还在。当时的方案要求清掉空片名和 `pid = 0`。
 
 同一函数把命中行全部 `Find` 进内存，没有分页。
 

@@ -279,7 +279,7 @@ export default function CollectManagePageView() {
       return;
     }
     if (record.categoryReady === false) {
-      message.warning("不可采集");
+      message.warning("缺分类");
       return;
     }
     if (record.categorySyncing) {

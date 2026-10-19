@@ -85,6 +85,25 @@ func LoadPlaylistGroupsByInfosTx(tx *gorm.DB, infos []model.FilmIndex) (map[int6
 		}
 		rowsByMidSource[pl.Mid][pl.SourceId] = append(rowsByMidSource[pl.Mid][pl.SourceId], pl)
 	}
+	peers, err := LoadPeerPlaylists(tx, infos)
+	if err != nil {
+		return nil, err
+	}
+	for mid, lines := range peers {
+		if rowsByMidSource[mid] == nil {
+			rowsByMidSource[mid] = make(map[string][]model.FilmSourcePlaylist)
+		}
+		grouped := make(map[string][]model.FilmSourcePlaylist)
+		for _, line := range lines {
+			grouped[line.SourceId] = append(grouped[line.SourceId], line)
+		}
+		for sourceID, peerLines := range grouped {
+			if len(rowsByMidSource[mid][sourceID]) > 0 {
+				continue
+			}
+			rowsByMidSource[mid][sourceID] = peerLines
+		}
+	}
 
 	sourceMap := make(map[string]model.FilmSource)
 	for _, s := range support.GetCollectSourceList() {

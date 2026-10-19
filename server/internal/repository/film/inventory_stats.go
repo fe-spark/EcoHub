@@ -8,7 +8,7 @@ import (
 	"server/internal/repository"
 )
 
-// LibraryInventory 整库规模。数据重置清空的是这一组，不是单个采集站。
+// LibraryInventory 工作台片库规模。影片和可播放按当前主站。分类和失败记录是全库。
 type LibraryInventory struct {
 	Films      int64 `json:"films"`
 	Playable   int64 `json:"playable"`
@@ -43,33 +43,49 @@ func GetInventoryStats() InventoryStats {
 	return InventoryStats{Library: GetLibraryInventory(), Sources: GetSourceInventories()}
 }
 
-// GetLibraryInventory 统计整库影片、可播放、分类和失败记录。
+// GetLibraryInventory 统计当前主站档案、可播放、展示分类和失败记录。
 func GetLibraryInventory() LibraryInventory {
 	var library LibraryInventory
 	if db.Mdb == nil {
 		return library
 	}
-	_ = db.Mdb.Model(&model.FilmIndex{}).Count(&library.Films).Error
+	primaryID := activePrimaryID()
+	library.Films = countOwnedFilms(primaryID)
+	if primaryID != "" {
+		library.Playable = countPlayMids(primaryID, hasSoftDeletedFilms())
+	}
 	_ = db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error
 	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error
-	library.Playable = countPlayMids("", hasSoftDeletedFilms())
 	return library
 }
 
+func activePrimaryID() string {
+	if primary := repository.GetActiveCollectSource(); primary != nil {
+		return strings.TrimSpace(primary.Id)
+	}
+	return ""
+}
+
+func countOwnedFilms(sourceID string) int64 {
+	sourceID = strings.TrimSpace(sourceID)
+	if db.Mdb == nil || sourceID == "" {
+		return 0
+	}
+	var n int64
+	_ = db.Mdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", sourceID).Count(&n).Error
+	return n
+}
+
 // GetSourceInventories 按采集站统计影片、分类和失败记录。
-// 影片只计仍在片库里、且有该站播放线路的片子。分类只计该站映射到、且展示分类还在的节点。
+// 影片是该站自己的档案，含没有线路的。分类只计该站映射到、且展示分类还在的节点。
 func GetSourceInventories() []SourceInventory {
 	sources := []SourceInventory{}
 	if db.Mdb == nil {
 		return sources
 	}
-	accurate := hasSoftDeletedFilms()
 	categoryCounts := indexCounts(countCategoriesBySource())
 	failureCounts := indexCounts(countFailuresBySource())
-	primaryID := ""
-	if primary := repository.GetActiveCollectSource(); primary != nil {
-		primaryID = strings.TrimSpace(primary.Id)
-	}
+	primaryID := activePrimaryID()
 	for _, source := range repository.GetCollectSourceList() {
 		id := strings.TrimSpace(source.Id)
 		if id == "" {
@@ -80,7 +96,7 @@ func GetSourceInventories() []SourceInventory {
 			Name:       source.Name,
 			Enabled:    source.State,
 			IsPrimary:  id == primaryID,
-			Films:      countPlayMids(id, accurate),
+			Films:      countOwnedFilms(id),
 			Categories: categoryCounts[id],
 			Failures:   failureCounts[id],
 		})

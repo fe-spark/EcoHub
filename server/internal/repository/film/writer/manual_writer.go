@@ -110,6 +110,10 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				fi.FirstSourceId = sourceID
 			}
 
+			if strings.TrimSpace(fi.Blurb) == "" {
+				fi.Blurb = strings.TrimSpace(fi.Content)
+			}
+			locks := existingFilm.LockedFields
 			if detail.IsCustomPicture {
 				if strings.TrimSpace(detail.CustomPicture) == "" && strings.TrimSpace(detail.Picture) != "" {
 					detail.CustomPicture = strings.TrimSpace(detail.Picture)
@@ -120,10 +124,23 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				if strings.TrimSpace(fi.Picture) == "" {
 					fi.Picture = existingFilm.Picture
 				}
+				locks = model.MergeLocks(locks, model.LockPoster)
+				if strings.TrimSpace(fi.CustomPictureSlide) != "" {
+					locks = model.MergeLocks(locks, model.LockBackdrop)
+				} else {
+					locks = model.DropLocks(locks, model.LockBackdrop)
+				}
 			} else {
 				fi.CustomPicture = ""
 				fi.CustomPictureSlide = ""
 				fi.IsCustomPicture = false
+				if strings.TrimSpace(fi.Picture) == "" {
+					fi.Picture = existingFilm.Picture
+				}
+				if strings.TrimSpace(fi.PictureSlide) == "" {
+					fi.PictureSlide = existingFilm.PictureSlide
+				}
+				locks = model.DropLocks(locks, model.LockPoster, model.LockBackdrop)
 			}
 
 			updateCols := map[string]interface{}{
@@ -151,6 +168,7 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				"custom_picture":       fi.CustomPicture,
 				"custom_picture_slide": fi.CustomPictureSlide,
 				"is_custom_picture":    fi.IsCustomPicture,
+				"locked_fields":        locks,
 				"actor":                fi.Actor,
 				"director":             fi.Director,
 				"writer":               fi.Writer,

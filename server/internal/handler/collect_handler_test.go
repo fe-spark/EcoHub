@@ -35,7 +35,6 @@ func setupCollectHandlerTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
-		&model.MoviePoster{},
 		&model.MovieSourceMapping{},
 		&model.FilmIndex{},
 	); err != nil {

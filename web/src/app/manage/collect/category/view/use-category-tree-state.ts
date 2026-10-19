@@ -1,11 +1,10 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { getFilmClassTree, saveFilmClassTree, updateFilmClassShow } from "./api";
+import { getFilmClassTree, saveFilmClassTree } from "./api";
 import {
   cloneTree,
   collectStats,
   moveCategoryWithinSameParent,
-  normalizeTree,
   serializeTree,
   updateTreeNodeVisibility,
   type FilmClassNode,
@@ -18,7 +17,6 @@ export function useCategoryTreeState() {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loadingTree, setLoadingTree] = useState(false);
   const [savingTree, setSavingTree] = useState(false);
-  const [updatingShowIds, setUpdatingShowIds] = useState<number[]>([]);
   const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
   const [sourceId, setSourceId] = useState("");
   const sourceIdRef = useRef("");
@@ -29,7 +27,8 @@ export function useCategoryTreeState() {
     [classTree, originalTree],
   );
 
-  const fetchFilmClassTree = useCallback(async (nextSourceId?: string) => {
+  const fetchFilmClassTree = useCallback(async (nextSourceId?: string, keepExpanded = false) => {
+    const previousSourceId = sourceIdRef.current;
     setLoadingTree(true);
     try {
       const requested = nextSourceId ?? sourceIdRef.current;
@@ -45,7 +44,9 @@ export function useCategoryTreeState() {
       setSources(nextSources);
       setClassTree(tree);
       setOriginalTree(cloneTree(tree));
-      setExpandedKeys([]);
+      if (!keepExpanded || previousSourceId !== activeSourceId) {
+        setExpandedKeys([]);
+      }
     } finally {
       setLoadingTree(false);
     }
@@ -60,47 +61,42 @@ export function useCategoryTreeState() {
         return;
       }
       message.success(resp.msg || "分类变更已保存");
-      await fetchFilmClassTree(sourceIdRef.current);
+      await fetchFilmClassTree(sourceIdRef.current, true);
     } finally {
       setSavingTree(false);
     }
   }, [classTree, fetchFilmClassTree, message]);
 
-  const moveClassWithinSameParent = useCallback((dragId: number, dropId: number) => {
-    setClassTree((prev) => moveCategoryWithinSameParent(prev, dragId, dropId));
-  }, []);
+  const discardTree = useCallback(() => {
+    setClassTree(cloneTree(originalTree));
+  }, [originalTree]);
 
-  const updateClassVisibility = useCallback(
-    async (id: number, show: boolean) => {
-      setUpdatingShowIds((prev) => [...prev, id]);
-      try {
-        const resp = await updateFilmClassShow(id, show);
-        if (resp.code !== 0) {
-          message.error(resp.msg || "更新分类显示状态失败");
-          return;
-        }
-        setClassTree((prev) => updateTreeNodeVisibility(prev, id, show));
-        setOriginalTree((prev) => updateTreeNodeVisibility(prev, id, show));
-        message.success(show ? "分类已显示" : "分类已隐藏");
-      } finally {
-        setUpdatingShowIds((prev) => prev.filter((item) => item !== id));
-      }
-    },
-    [message],
-  );
+  const moveClassWithinSameParent = useCallback((dragId: number, dropId: number) => {
+    if (savingTree) {
+      return;
+    }
+    setClassTree((prev) => moveCategoryWithinSameParent(prev, dragId, dropId));
+  }, [savingTree]);
+
+  const updateClassVisibility = useCallback((id: number, show: boolean) => {
+    if (savingTree) {
+      return;
+    }
+    setClassTree((prev) => updateTreeNodeVisibility(prev, id, show));
+  }, [savingTree]);
 
   return {
     classTree,
     expandedKeys,
     loadingTree,
     savingTree,
-    updatingShowIds,
     stats,
     hasPendingChanges,
     sources,
     sourceId,
     fetchFilmClassTree,
     saveTree,
+    discardTree,
     setExpandedKeys,
     moveClassWithinSameParent,
     updateClassVisibility,

@@ -91,7 +91,7 @@ func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error 
 	return repository.SaveSiteBasic(curr)
 }
 
-// GetBanners 获取轮播组件信息（实时叠加片库状态与海报源）
+// GetBanners 获取轮播。更新状态跟片库，图片和简介用轮播行自己的。
 func (s *ManageService) GetBanners() model.Banners {
 	return OverlayBannerLiveRemarks(repository.GetBanners())
 }
@@ -104,14 +104,14 @@ func (s *ManageService) SaveBanners(bl model.Banners) error {
 	// 若轮播项为跟随海报源（IsCustomPic == false），自动查询快照获取最新海报与幻灯图打底并清空 custom_picture
 	mids := make([]int64, 0, len(bl))
 	for _, b := range bl {
-		if b.Mid > 0 && !b.IsCustomPic {
+		if b.Mid > 0 && !b.IsCustomPic && b.TmdbID <= 0 {
 			mids = append(mids, b.Mid)
 		}
 	}
 	if len(mids) > 0 {
 		liveData := filmrepo.LiveBannerSnapshotsByMIDs(mids)
 		for i := range bl {
-			if !bl[i].IsCustomPic {
+			if !bl[i].IsCustomPic && bl[i].TmdbID <= 0 {
 				bl[i].CustomPicture = ""
 				if snap, ok := liveData[bl[i].Mid]; ok {
 					dispPic := snap.DisplayPicture()
@@ -125,14 +125,30 @@ func (s *ManageService) SaveBanners(bl model.Banners) error {
 					} else {
 						bl[i].PictureSlide = ""
 					}
+					if bl[i].Blurb == "" {
+						bl[i].Blurb = snap.Blurb
+					}
+					if bl[i].Score == 0 && snap.Score > 0 {
+						bl[i].Score = snap.Score
+					}
+					if bl[i].Area == "" {
+						bl[i].Area = snap.Area
+					}
+					if bl[i].ClassTag == "" {
+						bl[i].ClassTag = snap.ClassTag
+					}
+					if bl[i].Actor == "" {
+						bl[i].Actor = snap.Actor
+					}
+					if bl[i].Director == "" {
+						bl[i].Director = snap.Director
+					}
 				}
 			}
 		}
 	}
 	return repository.SaveBanners(bl)
 }
-
-
 
 type MappingRuleListResult struct {
 	List   []model.MappingRule `json:"list"`

@@ -194,12 +194,45 @@ func playGroupsFromPlayLinkVos(sources []model.PlayLinkVo) ([][]model.MovieUrlIn
 	return groups, names
 }
 
+func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) []model.FilmSourcePlaylist {
+	if db.Mdb == nil || len(mids) == 0 {
+		return rows
+	}
+	var films []model.FilmIndex
+	if err := db.Mdb.Select("mid", "first_source_id", "db_id", "name", "pid").Where("mid IN ?", mids).Find(&films).Error; err != nil || len(films) == 0 {
+		return rows
+	}
+	peers, err := filmshared.LoadPeerPlaylists(db.Mdb, films)
+	if err != nil || len(peers) == 0 {
+		return rows
+	}
+	own := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		if row.LineKind == "play" {
+			own[fmt.Sprintf("%d\x00%s", row.Mid, row.SourceId)] = struct{}{}
+		}
+	}
+	for origin, lines := range peers {
+		for _, line := range lines {
+			if _, ok := own[fmt.Sprintf("%d\x00%s", origin, line.SourceId)]; ok {
+				continue
+			}
+			rows = append(rows, line)
+		}
+	}
+	return rows
+}
+
 func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.MovieUrlInfo) {
 	if mid <= 0 {
 		return nil, nil
 	}
 	var rows []model.FilmSourcePlaylist
-	if err := db.Mdb.Where("mid = ?", mid).Order("line_kind ASC, group_index ASC").Find(&rows).Error; err != nil || len(rows) == 0 {
+	if err := db.Mdb.Where("mid = ?", mid).Order("line_kind ASC, group_index ASC").Find(&rows).Error; err != nil {
+		return nil, nil
+	}
+	rows = appendPeerPlayRows([]int64{mid}, rows)
+	if len(rows) == 0 {
 		return nil, nil
 	}
 
@@ -286,7 +319,11 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 	var rows []model.FilmSourcePlaylist
 	if err := db.Mdb.Where("mid IN ? AND line_kind = 'play'", mids).
 		Order("mid ASC, group_index ASC").
-		Find(&rows).Error; err != nil || len(rows) == 0 {
+		Find(&rows).Error; err != nil {
+		return result
+	}
+	rows = appendPeerPlayRows(mids, rows)
+	if len(rows) == 0 {
 		return result
 	}
 

@@ -183,10 +183,6 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 		if slide == pic {
 			slide = ""
 		}
-		scrapeState := "none"
-		if snap.IsScraped {
-			scrapeState = "scraped"
-		}
 		b := model.Banner{
 			Id:           utils.GenerateSalt(),
 			Mid:          snap.Mid,
@@ -198,9 +194,14 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 			PictureSlide: slide,
 			Remark:       snap.Remarks,
 			Sort:         int64(i + 1),
+			Area:         snap.Area,
+			ClassTag:     snap.ClassTag,
+			Actor:        snap.Actor,
+			Director:     snap.Director,
+			Blurb:        snap.Blurb,
+			Score:        snap.Score,
 			IsCustomPic:  false,
-			IsScraped:    snap.IsScraped,
-			ScrapeState:  scrapeState,
+			ScrapeState:  "none",
 		}
 		banners = append(banners, b)
 
@@ -234,7 +235,7 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 			var missingIndices []int
 			for idx, b := range banners {
 				hasRealSlide := b.PictureSlide != "" && b.PictureSlide != b.Picture && b.PictureSlide != b.Poster
-				if !b.IsScraped || !hasRealSlide {
+				if !hasRealSlide {
 					missingIndices = append(missingIndices, idx)
 				}
 			}

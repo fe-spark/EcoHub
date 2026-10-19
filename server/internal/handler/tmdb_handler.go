@@ -127,22 +127,3 @@ func (h *TMDBHandler) Scrape(c *gin.Context) {
 	}
 	dto.Success(res, "刮削完成", c)
 }
-
-// Revert 还原指定影片的 TMDB 刮削数据（兼容单个与批量）
-func (h *TMDBHandler) Revert(c *gin.Context) {
-	var req model.TMDBRevertReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("请求参数格式异常", c)
-		return
-	}
-	if len(req.Ids) == 0 {
-		dto.Failed("缺少影片 ID", c)
-		return
-	}
-
-	if err := service.TMDBSvc.RevertDetails(req.Ids); err != nil {
-		dto.Failed("还原刮削失败: "+err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("已还原刮削", c)
-}

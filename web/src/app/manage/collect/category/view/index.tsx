@@ -3,30 +3,36 @@
 import { useEffect } from "react";
 import { Modal } from "antd";
 import ManagePageHeader from "@/app/manage/components/page-header";
+import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
+import { useManagePermission } from "@/lib/manage-permission";
 import CategoryTreeCard from "./category-tree-card";
 import { useCategoryTreeState } from "./use-category-tree-state";
 import styles from "./index.module.less";
 
 export default function CategoryWorkspacePageView() {
   const treeState = useCategoryTreeState();
+  const { canWrite } = useManagePermission();
   const { fetchFilmClassTree } = treeState;
 
   useEffect(() => {
     void fetchFilmClassTree();
   }, [fetchFilmClassTree]);
 
-  const handleSourceChange = (value: string) => {
-    if (treeState.hasPendingChanges) {
-      Modal.confirm({
-        title: "切换采集源？",
-        content: "当前排序还没保存，切换后会丢掉这次调整。",
-        okText: "切换",
-        cancelText: "留下",
-        onOk: () => treeState.fetchFilmClassTree(value),
-      });
+  const runUnlessDirty = (action: () => void, title: string, okText: string) => {
+    if (treeState.savingTree) {
       return;
     }
-    void treeState.fetchFilmClassTree(value);
+    if (!treeState.hasPendingChanges) {
+      action();
+      return;
+    }
+    Modal.confirm({
+      title,
+      content: "当前调整还没保存，继续后会丢掉这次调整。",
+      okText,
+      cancelText: "留下",
+      onOk: action,
+    });
   };
 
   return (
@@ -42,17 +48,28 @@ export default function CategoryWorkspacePageView() {
         expandedKeys={treeState.expandedKeys}
         loadingTree={treeState.loadingTree}
         savingTree={treeState.savingTree}
-        updatingShowIds={treeState.updatingShowIds}
-        hasPendingChanges={treeState.hasPendingChanges}
         sources={treeState.sources}
         sourceId={treeState.sourceId}
         stats={treeState.stats}
-        onSourceChange={handleSourceChange}
-        onRefresh={() => void treeState.fetchFilmClassTree(treeState.sourceId)}
-        onSave={() => void treeState.saveTree()}
+        onSourceChange={(value) =>
+          runUnlessDirty(() => void treeState.fetchFilmClassTree(value), "切换采集源？", "切换")
+        }
+        onRefresh={() =>
+          runUnlessDirty(
+            () => void treeState.fetchFilmClassTree(treeState.sourceId),
+            "刷新分类？",
+            "刷新",
+          )
+        }
         onExpand={(keys) => treeState.setExpandedKeys(keys)}
         onMove={treeState.moveClassWithinSameParent}
         onShowChange={(id, show) => void treeState.updateClassVisibility(id, show)}
+      />
+      <UnsavedChangesBar
+        visible={canWrite && treeState.hasPendingChanges}
+        saving={treeState.savingTree}
+        onDiscard={treeState.discardTree}
+        onSave={() => void treeState.saveTree()}
       />
     </div>
   );

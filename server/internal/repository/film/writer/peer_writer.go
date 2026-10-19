@@ -57,128 +57,121 @@ func createNewFilmIndexTx(tx *gorm.DB, sourceID string, detail model.MovieDetail
 	return &fi, nil
 }
 
-// isBaselineCollectSource 判断当前源是否为基准源（首位生效站点）
-func isBaselineCollectSource(source *model.FilmSource, sources []model.FilmSource) bool {
-	if source == nil || source.Id == "" {
-		return false
+// syncOwnedFilmTx 用本站最新采集结果更新自己的档案。不改其他站的档案，也不改播放备注和更新时间。
+func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, detail model.MovieDetail) error {
+	if existing == nil || existing.Mid <= 0 || existing.FirstSourceId != sourceID {
+		return nil
 	}
-	var topEnabled *model.FilmSource
-	for i := range sources {
-		if sources[i].State {
-			if topEnabled == nil || sources[i].Sort < topEnabled.Sort || (sources[i].Sort == topEnabled.Sort && sources[i].Id < topEnabled.Id) {
-				topEnabled = &sources[i]
-			}
-		}
+	next, err := ConvertFilmIndex(sourceID, detail, support.GetCategoryVersion(), support.GetRuleVersion())
+	if err != nil {
+		return err
 	}
-	if topEnabled != nil {
-		return topEnabled.Id == source.Id
-	}
-	var topAll *model.FilmSource
-	for i := range sources {
-		if topAll == nil || sources[i].Sort < topAll.Sort || (sources[i].Sort == topAll.Sort && sources[i].Id < topAll.Id) {
-			topAll = &sources[i]
-		}
-	}
-	return topAll != nil && topAll.Id == source.Id
-}
-
-func backfillFilmMetadataTx(tx *gorm.DB, existing *model.FilmIndex, source *model.FilmSource, detail model.MovieDetail, isBaseline bool) (bool, error) {
-	updates := make(map[string]any)
-	if existing.Actor == "" && detail.Actor != "" {
-		updates["actor"] = detail.Actor
-		existing.Actor = detail.Actor
-	}
-	if existing.Director == "" && detail.Director != "" {
-		updates["director"] = detail.Director
-		existing.Director = detail.Director
-	}
-	if existing.Writer == "" && detail.Writer != "" {
-		updates["writer"] = detail.Writer
-		existing.Writer = detail.Writer
-	}
-	if existing.Blurb == "" && detail.Blurb != "" {
-		updates["blurb"] = detail.Blurb
-		existing.Blurb = detail.Blurb
-	}
-	if existing.Content == "" && detail.Content != "" {
-		updates["content"] = detail.Content
-		existing.Content = detail.Content
-	}
-	if existing.ReleaseDate == "" {
-		if clipped := firstISOReleaseDate(detail.ReleaseDate); clipped != "" {
-			updates["release_date"] = clipped
-			existing.ReleaseDate = clipped
-		}
-	}
-	if existing.Year == 0 {
-		y := parseYear(detail.ReleaseDate)
-		if y == 0 {
-			y = parseYear(detail.Year)
-		}
-		if y > 0 {
-			updates["year"] = y
-			existing.Year = y
-		}
-	}
-	if existing.DbId == 0 && detail.DbId > 0 {
-		updates["db_id"] = detail.DbId
-		existing.DbId = detail.DbId
-	}
-	if source != nil && source.IsPosterSource && !existing.IsCustomPicture {
-		if detail.Picture != "" && detail.Picture != existing.Picture {
-			updates["picture"] = detail.Picture
-			existing.Picture = detail.Picture
-		}
-		if detail.PictureSlide != "" && detail.PictureSlide != existing.PictureSlide {
-			updates["picture_slide"] = detail.PictureSlide
-			existing.PictureSlide = detail.PictureSlide
-		}
-	}
-
-	// 核心宗旨：一切以当前选中的首选站为主。
-	// 若当前采集源是基准源（或原有分类键为空），首选站认领此片时将自身分类同步更新到 film_index，
-	// 彻底解决备用源先建档导致首选站分类漏片的问题。
-	if isBaseline || existing.CategoryKey == "" || existing.RootCategoryKey == "" {
-		if source != nil && strings.TrimSpace(source.Id) != "" {
-			cat := resolveSearchCategory(source.Id, detail)
-			if cat.CKey != "" && (isBaseline || existing.CategoryKey == "") {
-				if existing.CategoryKey != cat.CKey {
-					updates["category_key"] = cat.CKey
-					existing.CategoryKey = cat.CKey
-				}
-			}
-			if cat.PKey != "" && (isBaseline || existing.RootCategoryKey == "") {
-				if existing.RootCategoryKey != cat.PKey {
-					updates["root_category_key"] = cat.PKey
-					existing.RootCategoryKey = cat.PKey
-				}
-			}
-			if cat.Pid > 0 && (isBaseline || existing.Pid <= 0) {
-				if existing.Pid != cat.Pid {
-					updates["pid"] = cat.Pid
-					existing.Pid = cat.Pid
-				}
-			}
-			if cat.Cid > 0 && (isBaseline || existing.Cid <= 0) {
-				if existing.Cid != cat.Cid {
-					updates["cid"] = cat.Cid
-					existing.Cid = cat.Cid
-				}
-			}
-			if cat.CName != "" && (isBaseline || existing.CName == "") {
-				if existing.CName != cat.CName {
-					updates["c_name"] = cat.CName
-					existing.CName = cat.CName
-				}
-			}
-		}
-	}
-
+	updates := ownedFilmUpdates(existing, &next)
 	if len(updates) > 0 {
 		updates["updated_at"] = time.Now()
-		return true, tx.Model(&model.FilmIndex{}).Where("mid = ?", existing.Mid).Updates(updates).Error
+		if err := tx.Model(&model.FilmIndex{}).Where("mid = ?", existing.Mid).Updates(updates).Error; err != nil {
+			return err
+		}
 	}
-	return false, nil
+	return rewriteOwnedMatchKeysTx(tx, existing, updates, detail)
+}
+
+func ownedFilmUpdates(existing, next *model.FilmIndex) map[string]any {
+	updates := make(map[string]any)
+	locked := model.LockedColumns(existing.LockedFields)
+	if existing.IsCustomPicture {
+		locked["picture"] = struct{}{}
+		locked["picture_slide"] = struct{}{}
+	}
+	putPresentInt(updates, "db_id", existing.DbId, next.DbId)
+	putPresentInt(updates, "cid", existing.Cid, next.Cid)
+	putPresentInt(updates, "pid", existing.Pid, next.Pid)
+	putPresentString(updates, "root_category_key", existing.RootCategoryKey, next.RootCategoryKey)
+	putPresentString(updates, "category_key", existing.CategoryKey, next.CategoryKey)
+	putPresentString(updates, "original_category", existing.OriginalCategory, next.OriginalCategory)
+	putPresentString(updates, "c_name", existing.CName, next.CName)
+	putPresentString(updates, "series_key", existing.SeriesKey, next.SeriesKey)
+	putPresentString(updates, "name", existing.Name, next.Name)
+	putUnlocked(updates, locked, "sub_title", existing.SubTitle, next.SubTitle)
+	putUnlocked(updates, locked, "class_tag", existing.ClassTag, next.ClassTag)
+	putDiff(updates, "area", existing.Area, next.Area)
+	putDiff(updates, "language", existing.Language, next.Language)
+	putUnlocked(updates, locked, "year", existing.Year, next.Year)
+	putDiff(updates, "initial", existing.Initial, next.Initial)
+	putUnlocked(updates, locked, "score", existing.Score, next.Score)
+	putDiff(updates, "hits", existing.Hits, next.Hits)
+	putDiff(updates, "state", existing.State, next.State)
+	putUnlocked(updates, locked, "actor", existing.Actor, next.Actor)
+	putUnlocked(updates, locked, "director", existing.Director, next.Director)
+	putDiff(updates, "writer", existing.Writer, next.Writer)
+	putUnlocked(updates, locked, "blurb", existing.Blurb, next.Blurb)
+	putUnlocked(updates, locked, "content", existing.Content, next.Content)
+	putUnlocked(updates, locked, "release_date", existing.ReleaseDate, next.ReleaseDate)
+	putPresentUnlocked(updates, locked, "picture", existing.Picture, next.Picture)
+	putPresentUnlocked(updates, locked, "picture_slide", existing.PictureSlide, next.PictureSlide)
+	return updates
+}
+
+// 豆瓣、片名、分类、封面只在新值非空时覆盖。列表缺字段时不能把已有值写成空。
+func putPresentInt(updates map[string]any, column string, oldValue, nextValue int64) {
+	if nextValue <= 0 || oldValue == nextValue {
+		return
+	}
+	updates[column] = nextValue
+}
+
+func putPresentString(updates map[string]any, column, oldValue, nextValue string) {
+	if strings.TrimSpace(nextValue) == "" || oldValue == nextValue {
+		return
+	}
+	updates[column] = nextValue
+}
+
+func putPresentUnlocked(updates map[string]any, locked map[string]struct{}, column, oldValue, nextValue string) {
+	if _, skip := locked[column]; skip {
+		return
+	}
+	putPresentString(updates, column, oldValue, nextValue)
+}
+
+// rewriteOwnedMatchKeysTx 按更新后的豆瓣、片名、大类重写本片匹配键，并删掉不再成立的旧键。
+func rewriteOwnedMatchKeysTx(tx *gorm.DB, existing *model.FilmIndex, updates map[string]any, detail model.MovieDetail) error {
+	if existing == nil || existing.Mid <= 0 {
+		return nil
+	}
+	dbID := existing.DbId
+	name := existing.Name
+	pid := existing.Pid
+	if v, ok := updates["db_id"].(int64); ok && v > 0 {
+		dbID = v
+	}
+	if v, ok := updates["name"].(string); ok && strings.TrimSpace(v) != "" {
+		name = v
+	}
+	if v, ok := updates["pid"].(int64); ok && v > 0 {
+		pid = v
+	}
+	if pid <= 0 {
+		pid = detail.RawPid
+	}
+	if pid <= 0 {
+		pid = detail.Pid
+	}
+	keys := shared.BuildMovieMatchKeysWithCategory(dbID, name, pid)
+	return shared.SaveMovieMatchKeysByMidTx(tx, map[int64][]string{existing.Mid: keys})
+}
+
+func putUnlocked[T comparable](updates map[string]any, locked map[string]struct{}, column string, oldValue, nextValue T) {
+	if _, skip := locked[column]; skip {
+		return
+	}
+	putDiff(updates, column, oldValue, nextValue)
+}
+
+func putDiff[T comparable](updates map[string]any, column string, oldValue, nextValue T) {
+	if oldValue != nextValue {
+		updates[column] = nextValue
+	}
 }
 
 func refreshRemarksAndPlaySummaryTx(tx *gorm.DB, mid int64) error {
@@ -297,6 +290,11 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			}
 		}
 
+		if filmIndex != nil && filmIndex.FirstSourceId != source.Id {
+			filmIndex = nil
+			mid = 0
+		}
+
 		if filmIndex == nil {
 			claimedMid, claimedFilm, err := claimPeerFilmByMatchKeysTx(tx, source, detail)
 			if err != nil {
@@ -332,14 +330,13 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		}
 		playLinesChanged = playChanged
 
+		if !isNew {
+			if err := syncOwnedFilmTx(tx, filmIndex, source.Id, detail); err != nil {
+				return err
+			}
+		}
 		if linesChanged || isNew {
 			sources := support.GetCollectSourceListTx(tx)
-			if !isNew {
-				isBaseline := isBaselineCollectSource(source, sources)
-				if _, err := backfillFilmMetadataTx(tx, filmIndex, source, detail, isBaseline); err != nil {
-					return err
-				}
-			}
 			var stampMids map[int64]struct{}
 			if !isNew && playChanged {
 				stampMids = map[int64]struct{}{mid: {}}

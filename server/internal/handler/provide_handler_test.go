@@ -183,6 +183,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Name:            "流浪地球",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Hits:            500,
 		Year:            2021,
 		Area:            "中国大陆",
@@ -235,6 +237,8 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 		Name:            "星际穿越",
 		Pid:             1,
 		Cid:             10,
+		CategoryKey:     "source:src_default:1",
+		RootCategoryKey: "source:src_default:1",
 		Hits:            800,
 		Year:            2014,
 		Area:            "美国",
@@ -306,8 +310,18 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected non-empty sites")
 		}
 		firstSite := sites[0].(map[string]any)
-		if firstSite["key"] != "EcoHub" {
-			t.Fatalf("expected EcoHub site key, got %v", firstSite["key"])
+		if firstSite["key"] != "source_src_default" {
+			t.Fatalf("expected primary site key, got %v", firstSite["key"])
+		}
+		api, _ := firstSite["api"].(string)
+		if !strings.Contains(api, "source=src_default") {
+			t.Fatalf("primary api = %v", api)
+		}
+		for _, item := range sites {
+			name, _ := item.(map[string]any)["name"].(string)
+			if strings.Contains(name, "全量") {
+				t.Fatalf("不应再有全量站点: %v", name)
+			}
 		}
 	})
 

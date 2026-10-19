@@ -2,7 +2,6 @@ package repository
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"strings"
 
@@ -14,9 +13,8 @@ import (
 
 // CategoryApplyResult 存储分类树应用与数据清理的结果
 type CategoryApplyResult struct {
-	DataCleared  bool
-	OrphanMids   []int64
-	DetachedMids []int64
+	DataCleared bool
+	OrphanMids  []int64
 }
 
 // DiffSourceCategoryTree 对比采集站现有原始分类树与最新拉取到的分类树计划
@@ -141,14 +139,10 @@ func PreviewSourceCategoryChanges(sourceId string, tree *model.CategoryTree) ([]
 	return DiffSourceCategoryTree(oldList, plans), nil
 }
 
-// clearChangedSourceDataTx 在事务中清空该站采集数据，并摘除变动分类在存活影片上的关联
-func clearChangedSourceDataTx(tx *gorm.DB, sourceId string, changes []model.CategoryTreeChange) (CategoryApplyResult, error) {
+// clearChangedSourceDataTx 清空该站自己的档案和挂载数据。其他站的档案不动。
+func clearChangedSourceDataTx(tx *gorm.DB, sourceId string, _ []model.CategoryTreeChange) (CategoryApplyResult, error) {
 	var hasPlaylist int64
 	if err := tx.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", sourceId).Count(&hasPlaylist).Error; err != nil {
-		return CategoryApplyResult{}, err
-	}
-	var hasPoster int64
-	if err := tx.Model(&model.MoviePoster{}).Where("source_id = ?", sourceId).Count(&hasPoster).Error; err != nil {
 		return CategoryApplyResult{}, err
 	}
 	var hasMapping int64
@@ -169,41 +163,8 @@ func clearChangedSourceDataTx(tx *gorm.DB, sourceId string, changes []model.Cate
 		return CategoryApplyResult{}, err
 	}
 
-	dataCleared := hasPlaylist > 0 || hasPoster > 0 || hasMapping > 0 || hasFailures > 0 || len(orphanMids) > 0
-
-	changedTypeKeys := make([]string, 0, len(changes))
-	for _, c := range changes {
-		changedTypeKeys = append(changedTypeKeys, fmt.Sprintf("source:%s:%d", sourceId, c.TypeId))
-	}
-
-	var detachedMids []int64
-	if len(changedTypeKeys) > 0 {
-		dq := tx.Model(&model.FilmIndex{}).Where("category_key IN (?) OR root_category_key IN (?)", changedTypeKeys, changedTypeKeys)
-		if len(orphanMids) > 0 {
-			dq = dq.Where("mid NOT IN (?)", orphanMids)
-		}
-		if err := dq.Pluck("mid", &detachedMids).Error; err != nil {
-			return CategoryApplyResult{}, err
-		}
-		if len(detachedMids) > 0 {
-			clearFields := map[string]any{
-				"category_key":      "",
-				"root_category_key": "",
-				"cid":               0,
-				"pid":               0,
-				"c_name":            "",
-				"original_category": "",
-			}
-			if err := tx.Model(&model.FilmIndex{}).Where("mid IN (?)", detachedMids).Updates(clearFields).Error; err != nil {
-				return CategoryApplyResult{}, err
-			}
-			dataCleared = true
-		}
-	}
-
 	return CategoryApplyResult{
-		DataCleared:  dataCleared,
-		OrphanMids:   orphanMids,
-		DetachedMids: detachedMids,
+		DataCleared: hasPlaylist > 0 || hasMapping > 0 || hasFailures > 0 || len(orphanMids) > 0,
+		OrphanMids:  orphanMids,
 	}, nil
 }

@@ -185,7 +185,6 @@ func SetupRouter() *gin.Engine {
 			filmRoute.GET(`/class/find`, handler.FilmHd.FindFilmClass)
 			filmRoute.POST(`/class/collect`, handler.FilmHd.CollectFilmClass)
 			filmRoute.POST(`/class/tree/save`, handler.FilmHd.SaveFilmClassTree)
-			filmRoute.POST(`/class/update`, handler.FilmHd.UpdateFilmClass)
 		}
 
 		// TMDB 刮削相关
@@ -197,7 +196,6 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
 			tmdbRoute.POST(`/scrape`, handler.TMDBHd.Scrape)
 			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
-			tmdbRoute.POST(`/revert`, handler.TMDBHd.Revert)
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
 		}
 

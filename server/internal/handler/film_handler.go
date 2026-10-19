@@ -175,24 +175,6 @@ func (h *FilmHandler) FindFilmClass(c *gin.Context) {
 	dto.Success(class, "分类信息查找成功", c)
 }
 
-// UpdateFilmClass 更新指定分类的显示状态
-func (h *FilmHandler) UpdateFilmClass(c *gin.Context) {
-	var class = model.CategoryTree{}
-	if err := c.ShouldBindJSON(&class); err != nil {
-		dto.Failed("更新失败, 请求参数异常", c)
-		return
-	}
-	if class.Id == 0 {
-		dto.Failed("更新失败, 分类Id缺失", c)
-		return
-	}
-	if err := service.FilmSvc.UpdateClass(class); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("影片分类状态更新成功", c)
-}
-
 func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 	var req struct {
 		Children []*model.CategoryTree `json:"children"`
@@ -216,7 +198,7 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("分类排序与层级已更新", c)
+	dto.SuccessOnlyMsg("分类变更已保存", c)
 }
 
 // CollectFilmClass 重置当前分类并重新获取主站原始分类

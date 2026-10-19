@@ -29,8 +29,8 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.FilmSourcePlaylist{},
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
-		&model.MoviePoster{},
 		&model.Banner{},
+		&model.FilmTMDBScrape{},
 		&model.FailureRecord{},
 		&model.CronSourceRel{},
 		&model.SourceCategory{},
@@ -51,21 +51,29 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true})
 
-	// 影片 1: 仅属于 src1 (独占影片)
-	// 影片 2: 属于 src1 和 src2 (多源影片)
+	// 影片 1、3 属于 src1。3 没有线路，也要删。影片 2 属于 src2。
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1},
-		FilmIndexContent:  model.FilmIndexContent{Name: "独占影片"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源1影片"},
 	})
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2},
-		FilmIndexContent:  model.FilmIndexContent{Name: "多源影片"},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源2影片"},
+	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src1"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "源1无线路"},
 	})
 
-	// 播放线路
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 1, SourceId: "src1", LineKind: "play", Content: "[]"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src1", LineKind: "play", Content: "[]"})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 2, SourceId: "src2", LineKind: "play", Content: "[]"})
+	gdb.Create(&model.MovieMatchKey{Mid: 1, MatchKey: "k1"})
+	gdb.Create(&model.MovieMatchKey{Mid: 3, MatchKey: "k3"})
+	gdb.Create(&model.MovieSourceMapping{SourceId: "src1", SourceMid: 1, GlobalMid: 1})
+	gdb.Create(&model.Banner{Id: "b1", Mid: 1, Name: "源1影片"})
+	gdb.Create(&model.FilmTMDBScrape{Mid: 1, TmdbID: 11, MediaType: "movie"})
+	gdb.Create(&model.FilmTMDBScrape{Mid: 2, TmdbID: 22, MediaType: "movie"})
 	gdb.Create(&model.SourceCategory{SourceId: "src1", SourceTypeId: 1, RawName: "电影"})
 	gdb.Create(&model.SourceCategory{SourceId: "src2", SourceTypeId: 1, RawName: "电影"})
 	gdb.Create(&model.CategoryMapping{SourceId: "src1", SourceTypeId: 1, CategoryId: 9})
@@ -77,26 +85,46 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 		t.Fatalf("DelFilmSource failed: %v", err)
 	}
 
-	// 验证结果:
-	// 1. src1 独占的影片 1 应该被彻底清理
 	var count1 int64
 	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 1).Count(&count1)
 	if count1 != 0 {
-		t.Fatalf("expected orphan film 1 to be deleted, got count=%d", count1)
+		t.Fatalf("expected film 1 to be deleted, got count=%d", count1)
 	}
-
-	// 2. 多源影片 2 应该依然存在 (因为还有 src2 的线路)
+	var count3 int64
+	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 3).Count(&count3)
+	if count3 != 0 {
+		t.Fatalf("expected playless film 3 to be deleted, got count=%d", count3)
+	}
 	var count2 int64
 	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 2).Count(&count2)
 	if count2 != 1 {
-		t.Fatalf("expected multi-source film 2 to be kept, got count=%d", count2)
+		t.Fatalf("expected src2 film 2 to be kept, got count=%d", count2)
 	}
-
-	// 3. 影片 2 在 src1 的线路应被删除，src2 的线路应保留
 	var lineCount int64
 	gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ? AND source_id = ?", 2, "src2").Count(&lineCount)
 	if lineCount != 1 {
 		t.Fatalf("expected src2 playlist to remain, got %d", lineCount)
+	}
+	var src1Lines int64
+	gdb.Model(&model.FilmSourcePlaylist{}).Where("source_id = ?", "src1").Count(&src1Lines)
+	if src1Lines != 0 {
+		t.Fatalf("expected src1 playlists to be deleted, got %d", src1Lines)
+	}
+	var keys int64
+	var maps int64
+	var banners int64
+	var scrapes int64
+	gdb.Model(&model.MovieMatchKey{}).Where("mid IN ?", []int64{1, 3}).Count(&keys)
+	gdb.Model(&model.MovieSourceMapping{}).Where("source_id = ?", "src1").Count(&maps)
+	gdb.Model(&model.Banner{}).Where("mid = ?", 1).Count(&banners)
+	gdb.Model(&model.FilmTMDBScrape{}).Where("mid = ?", 1).Count(&scrapes)
+	if keys != 0 || maps != 0 || banners != 0 || scrapes != 0 {
+		t.Fatalf("residue keys=%d maps=%d banners=%d scrapes=%d", keys, maps, banners, scrapes)
+	}
+	var src2Scrape int64
+	gdb.Model(&model.FilmTMDBScrape{}).Where("mid = ?", 2).Count(&src2Scrape)
+	if src2Scrape != 1 {
+		t.Fatalf("expected src2 scrape to remain, got %d", src2Scrape)
 	}
 	var src1Raw int64
 	var src1Map int64
@@ -119,7 +147,7 @@ func TestCollectService_DelFilmSource_StopsRunningThenCleans(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "源1", Uri: "http://src1.com", State: true, Sort: 0})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "源2", Uri: "http://src2.com", State: true, Sort: 1})
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src1"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "独占影片"},
 	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 1, SourceId: "src1", LineKind: "play", Content: "[]"})
@@ -163,10 +191,15 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	// 创建采集源 src1
 	gdb.Create(&model.FilmSource{Id: "src1", Name: "旧源", Uri: "http://old-src.com", State: true})
 	gdb.Create(&model.FilmIndex{
-		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 10},
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 10, FirstSourceId: "src1"},
 		FilmIndexContent:  model.FilmIndexContent{Name: "旧源独占影片"},
 	})
+	gdb.Create(&model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{Mid: 11, FirstSourceId: "src2"},
+		FilmIndexContent:  model.FilmIndexContent{Name: "其他站影片"},
+	})
 	gdb.Create(&model.FilmSourcePlaylist{Mid: 10, SourceId: "src1", LineKind: "play", Content: "[]"})
+	gdb.Create(&model.FilmSourcePlaylist{Mid: 11, SourceId: "src2", LineKind: "play", Content: "[]"})
 	gdb.Create(&model.FilmSource{Id: "src2", Name: "其他站", Uri: "http://other-src.com", State: true})
 	gdb.Create(&model.Category{Id: 8, Pid: 0, Name: "旧分类", StableKey: "display:root:旧分类", Show: true})
 	gdb.Create(&model.Category{Id: 9, Pid: 0, Name: "共用分类", StableKey: "display:root:共用分类", Show: true})
@@ -191,6 +224,11 @@ func TestCollectService_UpdateFilmSource_CleanOldData(t *testing.T) {
 	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 10).Count(&filmCount)
 	if filmCount != 0 {
 		t.Fatalf("expected old film 10 to be cleaned, got count=%d", filmCount)
+	}
+	var otherFilms int64
+	gdb.Model(&model.FilmIndex{}).Where("mid = ?", 11).Count(&otherFilms)
+	if otherFilms != 1 {
+		t.Fatalf("expected the other source film to stay, got %d", otherFilms)
 	}
 
 	// 验证: 站点 URI 已成功更新

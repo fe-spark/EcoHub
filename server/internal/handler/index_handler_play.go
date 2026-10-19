@@ -71,6 +71,9 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		dto.Failed("暂无影片信息", c)
 		return
 	}
+	if c.Query("stored") == "1" {
+		service.UseStoredFilm(&detail)
+	}
 	for i := range detail.List {
 		var valid []model.MovieUrlInfo
 		for _, ep := range detail.List[i].LinkList {

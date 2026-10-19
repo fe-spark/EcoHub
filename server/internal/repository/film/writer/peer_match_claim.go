@@ -105,8 +105,8 @@ func midsFromMatchRows(rows []matchKeyMid) []int64 {
 	return out
 }
 
-// claimPeerFilmByMatchKeysTx 按最强匹配键认领已有影片。
-// 只把不比命中键更强的键补到该 mid 上，避免豆瓣键和分类键被抄到仅片名相同的更小 mid。
+// claimPeerFilmByMatchKeysTx 按最强匹配键认领本站已有档案。
+// 不认领其他站的 mid。只把不比命中键更强的键补到该 mid 上。
 func claimPeerFilmByMatchKeysTx(tx *gorm.DB, source *model.FilmSource, detail model.MovieDetail) (int64, *model.FilmIndex, error) {
 	ranked := rankedPeerMatchKeys(source, detail)
 	if len(ranked) == 0 {
@@ -134,7 +134,7 @@ func claimPeerFilmByMatchKeysTx(tx *gorm.DB, source *model.FilmSource, detail mo
 	if err := tx.Where("mid = ?", mid).First(&film).Error; err != nil {
 		return 0, nil, nil
 	}
-	if film.Mid <= 0 {
+	if film.Mid <= 0 || film.FirstSourceId != source.Id {
 		return 0, nil, nil
 	}
 	winRank := 2

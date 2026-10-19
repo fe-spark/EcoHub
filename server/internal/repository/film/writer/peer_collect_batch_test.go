@@ -9,6 +9,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	"server/internal/repository/film/shared"
 	"server/internal/utils"
 
 	"gorm.io/driver/sqlite"
@@ -85,18 +86,30 @@ func TestSaveCollectedPeerDetails_PageCommit(t *testing.T) {
 	if len(second.Affected) != 1 {
 		t.Fatalf("second affected=%v", second.Affected)
 	}
-	if countRows(t, gdb, &model.FilmIndex{}) != 2 {
-		t.Fatal("matched film was inserted again")
+	if countRows(t, gdb, &model.FilmIndex{}) != 3 {
+		t.Fatal("other source should keep its own film")
 	}
 	if countRows(t, gdb, &model.MovieSourceMapping{}) != 3 {
 		t.Fatal("second source mapping missing")
+	}
+	for _, mid := range first.Affected {
+		if second.Affected[0] == mid {
+			t.Fatal("second source reused the first source mid")
+		}
+	}
+	var owner model.FilmIndex
+	if err := gdb.Where("mid = ?", second.Affected[0]).First(&owner).Error; err != nil {
+		t.Fatal(err)
+	}
+	if owner.FirstSourceId != sourceB.Id {
+		t.Fatalf("owner=%s", owner.FirstSourceId)
 	}
 	var playCount int64
 	if err := gdb.Model(&model.FilmSourcePlaylist{}).Where("mid = ?", second.Affected[0]).Count(&playCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if playCount != 2 {
-		t.Fatalf("shared film playlists=%d", playCount)
+	if playCount != 1 {
+		t.Fatalf("own film playlists=%d", playCount)
 	}
 
 	merged, err := SaveCollectedPeerDetails(context.Background(), sourceA, 4, []model.MovieDetail{
@@ -109,7 +122,7 @@ func TestSaveCollectedPeerDetails_PageCommit(t *testing.T) {
 	if len(merged.Affected) != 1 {
 		t.Fatalf("same title should be one film, affected=%v", merged.Affected)
 	}
-	if countRows(t, gdb, &model.FilmIndex{}) != 3 {
+	if countRows(t, gdb, &model.FilmIndex{}) != 4 {
 		t.Fatal("same-page title was not merged")
 	}
 	var mergedMaps int64
@@ -371,6 +384,93 @@ func TestSaveCollectedPeerDetails_NewFilmKeepsVodTimeAndFollowupUsesLocalTime(t 
 	}
 }
 
+func TestRecollect_RewritesMatchKeysAndKeepsEmptyFields(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	source := &model.FilmSource{Id: "src-key", Name: "甲站", State: true}
+	first := testPeerDetail(7, "仙逆", "第1集")
+	first.DbId = 36117912
+	first.Picture = "https://a/p.jpg"
+	first.PictureSlide = "https://a/s.jpg"
+	res, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{first})
+	if err != nil {
+		t.Fatalf("first collect: %v", err)
+	}
+	if len(res.Affected) != 1 {
+		t.Fatalf("affected=%v", res.Affected)
+	}
+	mid := res.Affected[0]
+	if err := gdb.Model(&model.FilmIndex{}).Where("mid = ?", mid).Update("pid", int64(3)).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	second := testPeerDetail(7, "仙逆", "第1集")
+	second.Picture = ""
+	second.PictureSlide = ""
+	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{second}); err != nil {
+		t.Fatalf("empty recollect: %v", err)
+	}
+	var fi model.FilmIndex
+	if err := gdb.Where("mid = ?", mid).First(&fi).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fi.DbId != 36117912 || fi.Name != "仙逆" || fi.Pid != 3 || fi.Picture != "https://a/p.jpg" || fi.PictureSlide != "https://a/s.jpg" {
+		t.Fatalf("empty recollect changed film: %+v", fi)
+	}
+	assertMatchKeys(t, gdb, mid, shared.BuildMovieMatchKeysWithCategory(36117912, "仙逆", 3))
+
+	third := testPeerDetail(7, "仙逆年番", "第2集")
+	third.DbId = 36117912
+	third.Picture = "https://a/p2.jpg"
+	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{third}); err != nil {
+		t.Fatalf("rename collect: %v", err)
+	}
+	if err := gdb.Where("mid = ?", mid).First(&fi).Error; err != nil {
+		t.Fatal(err)
+	}
+	if fi.Name != "仙逆年番" || fi.DbId != 36117912 || fi.Picture != "https://a/p2.jpg" || fi.PictureSlide != "https://a/s.jpg" || fi.Pid != 3 {
+		t.Fatalf("rename collect film: %+v", fi)
+	}
+	assertMatchKeys(t, gdb, mid, shared.BuildMovieMatchKeysWithCategory(36117912, "仙逆年番", 3))
+	stale := shared.BuildMovieMatchKeysWithCategory(0, "仙逆", 3)
+	var rows []model.MovieMatchKey
+	if err := gdb.Where("mid = ?", mid).Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	kept := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		kept[row.MatchKey] = struct{}{}
+	}
+	for _, key := range stale {
+		if _, ok := kept[key]; ok {
+			t.Fatalf("stale key %s still stored", key)
+		}
+	}
+}
+
+func assertMatchKeys(t *testing.T, gdb *gorm.DB, mid int64, want []string) {
+	t.Helper()
+	var rows []model.MovieMatchKey
+	if err := gdb.Where("mid = ?", mid).Find(&rows).Error; err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		got[row.MatchKey] = struct{}{}
+	}
+	if len(got) != len(want) {
+		t.Fatalf("keys=%d want=%d got=%v", len(got), len(want), got)
+	}
+	for _, key := range want {
+		if _, ok := got[key]; !ok {
+			t.Fatalf("missing key %s in %v", key, got)
+		}
+	}
+}
+
 func TestPickPlaylistRemarks_IgnoresDisabledSources(t *testing.T) {
 	sources := []model.FilmSource{
 		{Id: "src-active", State: true},
@@ -384,4 +484,3 @@ func TestPickPlaylistRemarks_IgnoresDisabledSources(t *testing.T) {
 		t.Fatalf("want active source remark '第10集', got %q", got)
 	}
 }
-

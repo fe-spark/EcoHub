@@ -252,18 +252,8 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		allRows = append(allRows, batchRows...)
 	}
 
-	scrapes := LoadActiveScrapesByMids(cleanMids)
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
-		if sc, ok := scrapes[r.Mid]; ok {
-			fieldSet := ParseAppliedFields(sc.AppliedFields)
-			if ShouldApplyField(fieldSet, "year", "releasedate") && sc.Year > 0 {
-				r.Year = sc.Year
-			}
-			if ShouldApplyField(fieldSet, "score", "voteaverage") && sc.VoteAverage > 0 {
-				r.Score = sc.VoteAverage
-			}
-		}
 		item := utils.FilmSearchItem{
 			Mid:         r.Mid,
 			Name:        r.Name,

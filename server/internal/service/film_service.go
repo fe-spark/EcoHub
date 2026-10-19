@@ -155,26 +155,6 @@ func (s *FilmService) GetFilmClassById(id int64) *model.CategoryTree {
 	return repository.GetCategoryTreeByID(id)
 }
 
-// UpdateClass 更新分类状态
-func (s *FilmService) UpdateClass(class model.CategoryTree) error {
-	updates := map[string]any{"show": class.Show}
-
-	oldClass := s.GetFilmClassById(class.Id)
-	if oldClass == nil {
-		return errors.New("需要更新的分类信息不存在")
-	}
-
-	if err := repository.UpdateCategoryStatus(class.Id, updates); err != nil {
-		return err
-	}
-	if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
-		return err
-	}
-	filmcache.ClearTVBoxConfigCache()
-	filmcache.ClearTVBoxListCache()
-	return nil
-}
-
 func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTree {
 	if len(nodes) == 0 {
 		return []*model.CategoryTree{}
@@ -187,6 +167,7 @@ func sanitizeCategoryTreeNodes(nodes []*model.CategoryTree) []*model.CategoryTre
 		res = append(res, &model.CategoryTree{
 			Id:       node.Id,
 			Name:     strings.TrimSpace(node.Name),
+			Show:     node.Show,
 			Children: sanitizeCategoryTreeNodes(node.Children),
 		})
 	}

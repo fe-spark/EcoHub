@@ -76,26 +76,26 @@ type Banner struct {
 	Name          string  `gorm:"size:128" json:"name"`                   // 影片名称
 	Year          int64   `json:"year"`                                   // 上映年份
 	CName         string  `gorm:"size:64" json:"cName"`                   // 分类名称
-	Poster        string  `gorm:"size:512" json:"poster"`                 // 竖版海报图（最终展示）
-	Picture       string  `gorm:"size:512" json:"picture"`                // 竖版封面图（片库/海报源原图）
-	PictureSlide  string  `gorm:"size:512" json:"pictureSlide"`           // 横版幻灯图（片库/海报源原图）
-	CustomPicture string  `gorm:"size:512" json:"customPicture"`          // 自定义封面图（独立存储）
+	Poster        string  `gorm:"size:512" json:"poster"`                 // 本行竖版海报
+	Picture       string  `gorm:"size:512" json:"picture"`                // 本行竖版封面
+	PictureSlide  string  `gorm:"size:512" json:"pictureSlide"`           // 本行横版幻灯图
+	CustomPicture string  `gorm:"size:512" json:"customPicture"`          // 本行自定义封面
 	Remark        string  `gorm:"size:128" json:"remark"`                 // 更新状态描述信息
 	Sort          int64   `json:"sort"`                                   // 排序分値
-	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"`       // 是否为人工自定义图片（锁定不被海报源覆盖）
+	IsCustomPic   bool    `gorm:"default:false" json:"isCustomPic"`       // 本行自有图片。为真时不跟随影片封面
 	IsPinned      bool    `gorm:"default:false" json:"isPinned"`          // 是否人工置顶锁定
 	Source        string  `gorm:"size:32;default:'manual'" json:"source"` // 来源: manual(手动) | auto(系统自动推荐)
-	Area          string  `gorm:"-" json:"area,omitempty"`                // 地区（由快照动态覆盖）
-	ClassTag      string  `gorm:"-" json:"classTag,omitempty"`            // 类型标签（由快照动态覆盖）
-	Actor         string  `gorm:"-" json:"actor,omitempty"`               // 主演（由快照动态覆盖）
-	Director      string  `gorm:"-" json:"director,omitempty"`            // 导演（由快照动态覆盖）
-	Blurb         string  `gorm:"-" json:"blurb,omitempty"`               // 简介（由快照动态覆盖）
-	Score         float64 `gorm:"-" json:"score,omitempty"`               // 真实评分（由快照动态覆盖）
-	Hits          int64   `gorm:"-" json:"hits,omitempty"`                // 真实热度（由快照动态覆盖）
-	IsScraped     bool    `gorm:"-" json:"isScraped"`                     // 是否已启用 TMDB 刮削（由快照动态覆盖）
-	TmdbID        int64   `gorm:"-" json:"tmdbId,omitempty"`              // TMDB 词条 ID（由快照动态覆盖）
-	MediaType     string  `gorm:"-" json:"mediaType,omitempty"`           // 待写入刮削的 TMDB 类型，不落库
-	PendingScrape bool    `gorm:"-" json:"pendingScrape,omitempty"`       // 草稿已匹配，替换线上时才写入
+	Area          string  `gorm:"size:128" json:"area,omitempty"`         // 地区，排片时写入轮播行
+	ClassTag      string  `gorm:"type:text" json:"classTag,omitempty"`    // 类型标签，排片时写入轮播行
+	Actor         string  `gorm:"type:text" json:"actor,omitempty"`       // 主演，排片时写入轮播行
+	Director      string  `gorm:"type:text" json:"director,omitempty"`    // 导演，排片时写入轮播行
+	Blurb         string  `gorm:"type:text" json:"blurb,omitempty"`       // 简介，排片时写入轮播行
+	Score         float64 `json:"score,omitempty"`                        // 评分，排片时写入轮播行
+	Hits          int64   `gorm:"-" json:"hits,omitempty"`                // 热度，不落库
+	TmdbID        int64   `json:"tmdbId,omitempty"`                       // 本行刮削词条。海报和简介写在本行，不进刮削表
+	IsScraped     bool    `gorm:"-" json:"isScraped"`                     // 由 TmdbID 得出，不落库
+	MediaType     string  `gorm:"-" json:"mediaType,omitempty"`           // 草稿匹配类型，不落库
+	PendingScrape bool    `gorm:"-" json:"pendingScrape,omitempty"`       // 草稿已匹配，发布时写入本行
 	ScrapeState   string  `gorm:"-" json:"scrapeState,omitempty"`         // pending | scraped | miss | none
 }
 

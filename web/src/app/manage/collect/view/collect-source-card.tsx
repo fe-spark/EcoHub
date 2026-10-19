@@ -81,6 +81,25 @@ export default function CollectSourceCard({
     isDeleting,
   );
   const canStop = phase === "starting" || phase === "running";
+  const startDisabled =
+    !canWrite ||
+    !record.state ||
+    isDeleting ||
+    busy ||
+    Boolean(record.categorySyncing) ||
+    record.categoryReady === false;
+  const startTitle = !record.state
+    ? "已禁用"
+    : record.categorySyncing
+      ? "分类采集中"
+      : record.categoryReady === false
+        ? "缺分类"
+        : undefined;
+  const categoryTitle = record.categorySyncing
+    ? "分类采集中"
+    : record.categoryReady === false
+      ? "获取分类"
+      : "重新获取分类";
 
   const hasProxy = Boolean(record.proxyCollect);
 
@@ -134,8 +153,8 @@ export default function CollectSourceCard({
                 分类采集中
               </Tag>
             ) : record.categoryReady === false ? (
-              <Tag color="error" variant="filled" style={{ marginInlineEnd: 0 }}>
-                不可采集
+              <Tag color="warning" variant="filled" style={{ marginInlineEnd: 0 }}>
+                缺分类
               </Tag>
             ) : null}
           </div>
@@ -276,48 +295,30 @@ export default function CollectSourceCard({
                   </span>
                 </Tooltip>
               )
-            ) : record.categorySyncing ? (
-              <Button icon={<LoadingOutlined spin />} disabled>
-                分类采集中
-              </Button>
-            ) : record.categoryReady === false ? (
-              <Button
-                type="primary"
-                icon={<SyncOutlined />}
-                disabled={!canWrite || isDeleting}
-                onClick={() => onSyncCategory?.(record.id)}
-              >
-                获取分类
-              </Button>
             ) : (
-              <Tooltip title={!record.state ? "已禁用" : undefined}>
+              <Tooltip title={startTitle}>
                 <span>
                   <Button
                     type="primary"
                     icon={<PoweroffOutlined />}
                     onClick={() => onStartTask(record)}
-                    disabled={
-                      !canWrite ||
-                      !record.state ||
-                      isDeleting ||
-                      busy ||
-                      Boolean(record.categorySyncing)
-                    }
+                    disabled={startDisabled}
                   >
                     开始采集
                   </Button>
                 </span>
               </Tooltip>
             )}
-            {!record.categorySyncing && record.categoryReady !== false ? (
-              <Tooltip title="重新获取分类">
+            <Tooltip title={categoryTitle}>
+              <span>
                 <Button
                   icon={<SyncOutlined />}
-                  disabled={!canWrite || busy || isDeleting}
+                  loading={Boolean(record.categorySyncing)}
+                  disabled={!canWrite || busy || isDeleting || Boolean(record.categorySyncing)}
                   onClick={() => onSyncCategory?.(record.id)}
                 />
-              </Tooltip>
-            ) : null}
+              </span>
+            </Tooltip>
             <Tooltip title={busy ? "采集进行中，禁止编辑" : "编辑采集站"}>
               <Button
                 icon={<EditOutlined />}

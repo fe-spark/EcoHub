@@ -156,7 +156,6 @@ func FilmZero() error {
 		model.TableFilmSourcePlaylist,
 		model.TableMovieSourceMapping,
 		model.TableMovieMatchKey,
-		model.TableMoviePoster,
 		model.TableFilmTMDBScrape,
 	} {
 		if err := truncateTable(db.Mdb, t); err != nil {

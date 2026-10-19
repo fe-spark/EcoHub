@@ -14,9 +14,7 @@ import {
   EditOutlined,
   DeleteOutlined,
   FireOutlined,
-  CompassOutlined,
   AimOutlined,
-  UndoOutlined,
 } from "@ant-design/icons";
 import type { ColumnsType } from "antd/es/table";
 import dayjs from "dayjs";
@@ -34,8 +32,6 @@ export interface FilmItem {
   hits: number;
   remarks: string;
   updateStamp: number;
-  isScraped?: boolean;
-  tmdbId?: number;
 }
 
 interface UseFilmColumnsProps {
@@ -45,10 +41,6 @@ interface UseFilmColumnsProps {
   styles: any;
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
-  handleScrapeSingle: (mid: number) => void;
-  handleManualScrape: (record: FilmItem) => void;
-  handleRevertScrape?: (mid: number) => void;
-  tmdbEnabled?: boolean;
   activeSourceId?: string;
 }
 
@@ -59,10 +51,6 @@ export function useFilmColumns({
   styles,
   handleUpdateSingle,
   handleDelFilm,
-  handleScrapeSingle,
-  handleManualScrape,
-  handleRevertScrape,
-  tmdbEnabled = false,
   activeSourceId,
 }: UseFilmColumnsProps) {
   return useMemo<ColumnsType<FilmItem>>(
@@ -89,29 +77,13 @@ export function useFilmColumns({
             <Text
               className={styles.filmName}
               style={{ whiteSpace: "nowrap" }}
-              onClick={() =>
-                window.open(
-                  resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
-                  "_blank",
-                )
-              }
+              onClick={() => router.push(`/manage/film/add?id=${record.mid}&readonly=1`)}
             >
               {record.name}
             </Text>
             <Tag color="orange" style={{ borderRadius: 4, flexShrink: 0 }}>
               {record.cName}
             </Tag>
-            {record.isScraped && (
-              <Tooltip title={record.tmdbId ? `TMDB: ${record.tmdbId}` : "已刮削"}>
-                <Tag
-                  color="#722ed1"
-                  style={{ borderRadius: 4, flexShrink: 0, cursor: tmdbEnabled && canWrite ? "pointer" : "default" }}
-                  onClick={() => tmdbEnabled && canWrite && handleManualScrape(record)}
-                >
-                  已刮削
-                </Tag>
-              </Tooltip>
-            )}
           </Space>
         ),
       },
@@ -172,33 +144,22 @@ export function useFilmColumns({
         key: "action",
         align: "center",
         fixed: "right",
-        width: tmdbEnabled ? 220 : 120,
+        width: 160,
         render: (_, record) => (
           <Space size={8}>
-            {tmdbEnabled && (
-              <>
-                <Tooltip title="刮削">
-                  <Button
-                    type="primary"
-                    shape="circle"
-                    size="small"
-                    style={{ background: "#722ed1", borderColor: "#722ed1" }}
-                    icon={<CompassOutlined />}
-                    disabled={!canWrite}
-                    onClick={() => handleScrapeSingle(record.mid)}
-                  />
-                </Tooltip>
-                <Tooltip title="精准匹配">
-                  <Button
-                    shape="circle"
-                    size="small"
-                    icon={<AimOutlined />}
-                    disabled={!canWrite}
-                    onClick={() => handleManualScrape(record)}
-                  />
-                </Tooltip>
-              </>
-            )}
+            <Tooltip title="定位">
+              <Button
+                shape="circle"
+                size="small"
+                icon={<AimOutlined />}
+                onClick={() =>
+                  window.open(
+                    resolvePlayEntryPath(record.mid, { sourceId: activeSourceId }),
+                    "_blank",
+                  )
+                }
+              />
+            </Tooltip>
             <Tooltip title="更新">
               <Button
                 type="primary"
@@ -225,37 +186,6 @@ export function useFilmColumns({
                 onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
               />
             </Tooltip>
-            {tmdbEnabled && (
-              record.isScraped && canWrite ? (
-                <Popconfirm
-                  title="确定还原刮削？"
-                  okText="还原"
-                  cancelText="取消"
-                  onConfirm={() => handleRevertScrape?.(record.mid)}
-                >
-                  <Tooltip title="还原刮削">
-                    <Button
-                      type="primary"
-                      shape="circle"
-                      size="small"
-                      style={{ background: "#fa8c16", borderColor: "#fa8c16" }}
-                      icon={<UndoOutlined />}
-                    />
-                  </Tooltip>
-                </Popconfirm>
-              ) : (
-                <Tooltip title="还原刮削">
-                  <span>
-                    <Button
-                      shape="circle"
-                      size="small"
-                      disabled
-                      icon={<UndoOutlined />}
-                    />
-                  </span>
-                </Tooltip>
-              )
-            )}
             <Popconfirm
               title="确定删除？"
               okText="确定"
@@ -282,12 +212,8 @@ export function useFilmColumns({
       router,
       handleDelFilm,
       handleUpdateSingle,
-      handleScrapeSingle,
-      handleManualScrape,
-      handleRevertScrape,
       canWrite,
       styles,
-      tmdbEnabled,
       activeSourceId,
     ],
   );

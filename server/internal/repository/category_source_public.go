@@ -184,6 +184,21 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	return []int64{typeID}
 }
 
+// PublicSourceTypeName 当前站这个 type_id 的前台名。合并后的成员共用合成名。
+func PublicSourceTypeName(sourceID string, typeID int64) string {
+	if typeID <= 0 {
+		return ""
+	}
+	view := loadPublicSourceTypes(sourceID)
+	if group, ok := view.groupByMember(typeID); ok {
+		return strings.TrimSpace(group.Name)
+	}
+	if row, ok := view.Hidden[typeID]; ok {
+		return strings.TrimSpace(row.Name)
+	}
+	return ""
+}
+
 // PublicSourceChildNodes 前台一级分类下的子类。已套规则，不含隐藏。
 func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.CategoryTree {
 	view := loadPublicSourceTypes(sourceID)

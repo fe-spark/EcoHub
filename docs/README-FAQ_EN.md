@@ -12,28 +12,28 @@ The public site, the admin film list, and TVBox / MacCMS all read the snapshot /
 
 ### What is the main source?
 
-The main source is the first enabled collect source in sort order. The public home page, categories, search, and daily updates follow that source’s catalog and categories. Moving another enabled source to the front changes what visitors see. Films and play lines from the other sources stay in the library. Nothing is rebuilt.
+The main source is the first enabled collect source in sort order. The public home page, categories, search, and daily updates show only that source’s own collected films and categories. Moving another enabled source to the front shows that source’s stored data immediately. Nothing is re-collected, and other sources’ films stay.
 
-The play page still lists lines from every enabled source, in collect-source order. The poster source is a separate flag and does not decide the main source. If every source is disabled, the same order picks the first one as a fallback.
+The play page starts from the main source’s film and appends play lines already stored by other enabled sources, matched by key. Lines stay separated by source. The poster source is a separate flag and does not decide the main source. Public covers use the matched poster-source film’s current cover. The main film’s image is used only when nothing matches. When the poster source is the main source, its own image is used. If every source is disabled, the same order picks the first one as a fallback.
+
+### Where do scrape results live?
+
+A film scrape writes the selected cover, blurb, score, and related fields onto that film. The title and category stay. There is no restore. A homepage banner scrape is stored on that banner row. It does not change the film, and there is no second scrape table. The homepage uses the banner row’s own image and blurb. The update remark still comes from the library.
 
 ### What does switching the main source clear?
 
-The library is not rebuilt. Category ids belong to the previous main source, so the live banner deck and the saved scheduling recipe are cleared, and the scheduled banner job is turned off.
+Films are not deleted and collect does not restart. The live banner deck and the saved scheduling recipe are cleared, and the scheduled banner job is turned off. Switching is allowed while a collect is running.
 
-Changing one source’s collect URL clears that source’s collected data, failure records, and categories, then fetches categories again. That is separate from switching the main source.
+Changing one source’s collect URL clears that source’s films, play lines, failure records, and categories, including films with no play lines, then fetches categories again. Other sources stay. That is separate from switching the main source. Deleting a source clears only that source.
 
 ### How are titles deduplicated and aligned across sites?
 
-Two keys, not “always merge by Douban ID”:
+Each source keeps its own film row. Collect does not merge rows.
 
-- **Identity**: one film is one `film_index.mid`. A source `vod_id` is bound to that mid through `movie_source_mapping`.
-- **Cross-site match** (`movie_match_key`): Douban ID **plus** the normalized title first — the same Douban ID with a different title is not the same film. Title matching strips trailing progress/quality/language noise but keeps version identity (theatrical, 3D, motion comic). Then normalized title#category, plus a bare-title fallback. Category stays on `film_index.pid` / `cid` and is **not** baked into `mid`; the category suffix on the match key keeps same-title films in different categories apart (a finished short drama vs a still-updating cartoon that share a title).
+- Inside one source, `movie_source_mapping` finds the old row by source id and source `vod_id`. A later collect updates that row only. Items on the same page that share a match key become one film.
+- Across sources, match keys do not merge rows. The play page uses them to find the same film on other enabled sources and append those sources’ own lines. Order is Douban ID plus title, then title#category, then bare title. Several keys hitting one film show it once. Lines stay separated by source.
 
-**How play sources bind**: another source is considered only when its normalized title equals a film already in the library. Douban ID, year, director, and episode shape **veto** a candidate when both sides have values and they conflict; a missing or unknown value on either side does not veto. After vetoes, a unique remaining title binds immediately. If several films share that title, pick by unique Douban ID, then category, then year (same year, then ±1); if none is unique, do not bind. Bound sources are shown as-is — episode shape is not used again as a display filter.
-
-**Why same-title films must stay isolated**: the daily-update list is driven by `update_stamp`, which only bumps when this source’s episode count is strictly higher than the film’s current global max. If two same-title films share a bare title key, the finished short drama’s episode count is counted against the cartoon, so a new cartoon episode never makes the daily list.
-
-**Collection order is not restricted**: when another source’s title hits only one stored film and is not vetoed, playlists are written onto that film’s stored primary key — including when that source’s category is wrong. When several stored films share the title, pick by Douban / category / year; otherwise the source uses its own candidate keys (Douban / title#category). A source that already has a category does not write the bare title key.
+Category keys are `source:{this source}:{typeId}` and match that source’s own category tree.
 
 ### What happens if a collect is stopped manually?
 
@@ -51,7 +51,7 @@ Tables keep changing during collect. Each window refreshes play summaries for th
 
 Saving site config updates Redis and clears the home-page cache. If the page still looks old, typical causes are browser, CDN, or reverse-proxy cache, or a process that is not running the latest code.
 
-Film lists, categories, and filters read `film_index` and stay locked to the main source. Changing sources does not fill the public site until that source is collected, especially a new main source. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
+Film lists, categories, and filters show only the current main source’s own films. Switching the main source shows films that source has already stored. A source that has not been collected yet stays empty. TVBox plain lists have an extra Redis cache (up to about 12 hours), which is cleared after collect. If they still differ, check the running instance and request parameters.
 
 ### What does “recently updated” use? Do category pages match TVBox?
 

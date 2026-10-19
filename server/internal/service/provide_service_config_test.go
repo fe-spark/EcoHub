@@ -3,43 +3,53 @@ package service
 import (
 	"strings"
 	"testing"
+
+	"server/internal/model"
 )
 
-func TestProvideService_GetTVBoxConfig(t *testing.T) {
+func TestProvideService_GetTVBoxConfig_PrimarySites(t *testing.T) {
+	gdb := setupFilmServiceTestDB(t)
+	if err := gdb.Create(&[]model.FilmSource{
+		{Id: "src_b", Name: "乙站", Uri: "https://b.example/api", State: true, Sort: 2},
+		{Id: "src_off", Name: "停用站", Uri: "https://off.example/api", State: false, Sort: 1},
+		{Id: "src_a", Name: "甲站", Uri: "https://a.example/api", State: true, Sort: 0},
+	}).Error; err != nil {
+		t.Fatalf("sources: %v", err)
+	}
+
 	res, err := ProvideSvc.GetTVBoxConfig("http://127.0.0.1:8080", "")
 	if err != nil {
 		t.Fatalf("GetTVBoxConfig 失败: %v", err)
 	}
-
 	sites, ok := res["sites"].([]map[string]any)
-	if !ok || len(sites) == 0 {
-		t.Fatalf("sites 应为非空切片，实际: %+v", res["sites"])
+	if !ok || len(sites) != 2 {
+		t.Fatalf("应只有两个启用站，实际: %+v", res["sites"])
+	}
+	if sites[0]["key"] != "source_src_a" || sites[0]["name"] != "📡 甲站" {
+		t.Fatalf("首位应为主站，实际: %+v", sites[0])
+	}
+	api, _ := sites[0]["api"].(string)
+	if !strings.Contains(api, "/api/provide/vod") || !strings.Contains(api, "source=src_a") {
+		t.Fatalf("主站 api = %v", api)
+	}
+	if sites[1]["key"] != "source_src_b" {
+		t.Fatalf("第二站 = %+v", sites[1])
+	}
+	for _, site := range sites {
+		name, _ := site["name"].(string)
+		if strings.Contains(name, "全量") {
+			t.Fatalf("不应再有全量站点: %s", name)
+		}
 	}
 
-	first := sites[0]
-	if first["key"] != "EcoHub" {
-		t.Errorf("首个站点 key 应为 EcoHub，实际: %v", first["key"])
-	}
-	if api, _ := first["api"].(string); !strings.Contains(api, "/api/provide/vod") {
-		t.Errorf("api 应包含 /api/provide/vod，实际: %v", api)
-	}
-}
-
-func TestProvideService_GetTVBoxConfig_WithKey(t *testing.T) {
-	res, err := ProvideSvc.GetTVBoxConfig("https://movie.example.com/", "mysecretkey")
+	withKey, err := ProvideSvc.GetTVBoxConfig("https://movie.example.com/", "mysecretkey")
 	if err != nil {
 		t.Fatalf("GetTVBoxConfig 失败: %v", err)
 	}
-
-	sites, ok := res["sites"].([]map[string]any)
-	if !ok || len(sites) == 0 {
-		t.Fatalf("sites 应为非空切片，实际: %+v", res["sites"])
-	}
-
-	first := sites[0]
-	api, _ := first["api"].(string)
-	if !strings.Contains(api, "key=mysecretkey") {
-		t.Errorf("api 应携带 key 参数，实际: %v", api)
+	keyed, _ := withKey["sites"].([]map[string]any)
+	keyedAPI, _ := keyed[0]["api"].(string)
+	if !strings.Contains(keyedAPI, "key=mysecretkey") || !strings.Contains(keyedAPI, "source=src_a") {
+		t.Fatalf("api 应携带 key 和主站 source，实际: %v", keyedAPI)
 	}
 }
 

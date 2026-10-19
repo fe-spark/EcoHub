@@ -6,21 +6,14 @@ import {
   PlusOutlined,
   ReloadOutlined,
   DeleteOutlined,
-  CompassOutlined,
-  UndoOutlined,
 } from "@ant-design/icons";
 
 interface FilmBatchBarProps {
   selectedCount: number;
   canWrite: boolean;
-  tmdbEnabled: boolean;
-  scraping: boolean;
   updating: boolean;
-  reverting: boolean;
   deleting: boolean;
-  onBatchScrape: () => void;
   onBatchUpdate: () => void;
-  onBatchRevert: () => void;
   onBatchDelete: () => void;
   onClearSelection: () => void;
   onAdd: () => void;
@@ -30,14 +23,9 @@ interface FilmBatchBarProps {
 export function FilmBatchBar({
   selectedCount,
   canWrite,
-  tmdbEnabled,
-  scraping,
   updating,
-  reverting,
   deleting,
-  onBatchScrape,
   onBatchUpdate,
-  onBatchRevert,
   onBatchDelete,
   onClearSelection,
   onAdd,
@@ -66,18 +54,6 @@ export function FilmBatchBar({
       </div>
 
       <Space size={[8, 8]} wrap align="center" className={styles.tableActions}>
-        {tmdbEnabled && (
-          <Button
-            type="primary"
-            style={!isActionDisabled ? { background: "#722ed1", borderColor: "#722ed1" } : undefined}
-            icon={<CompassOutlined />}
-            disabled={isActionDisabled}
-            loading={scraping}
-            onClick={onBatchScrape}
-          >
-            批量刮削
-          </Button>
-        )}
         <Button
           type="primary"
           style={!isActionDisabled ? { background: "#52c41a", borderColor: "#52c41a" } : undefined}
@@ -88,31 +64,6 @@ export function FilmBatchBar({
         >
           批量更新
         </Button>
-        {tmdbEnabled && (
-          !isActionDisabled ? (
-            <Popconfirm
-              title="确定还原刮削？"
-              okText="确定"
-              cancelText="取消"
-              onConfirm={onBatchRevert}
-            >
-              <Button
-                style={{ color: "#fa8c16", borderColor: "#fa8c16" }}
-                icon={<UndoOutlined />}
-                loading={reverting}
-              >
-                批量还原
-              </Button>
-            </Popconfirm>
-          ) : (
-            <Button
-              icon={<UndoOutlined />}
-              disabled
-            >
-              批量还原
-            </Button>
-          )
-        )}
         {!isActionDisabled ? (
           <Popconfirm
             title="确定删除？"

@@ -6,7 +6,6 @@ import {
   FolderOpenOutlined,
   HolderOutlined,
   ReloadOutlined,
-  SaveOutlined,
   SubnodeOutlined,
 } from "@ant-design/icons";
 import {
@@ -30,14 +29,11 @@ interface CategoryTreeCardProps {
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  updatingShowIds: number[];
-  hasPendingChanges: boolean;
   sources: { id: string; name: string }[];
   sourceId: string;
   stats: { total: number; roots: number; children: number; hidden: number };
   onSourceChange: (sourceId: string) => void;
   onRefresh: () => void;
-  onSave: () => void;
   onExpand: (keys: React.Key[]) => void;
   onMove: (dragId: number, dropId: number) => void;
   onShowChange: (id: number, show: boolean) => void;
@@ -81,14 +77,11 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
     expandedKeys,
     loadingTree,
     savingTree,
-    updatingShowIds,
-    hasPendingChanges,
     sources,
     sourceId,
     stats,
     onSourceChange,
     onRefresh,
-    onSave,
     onExpand,
     onMove,
     onShowChange,
@@ -134,7 +127,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
-    if (!canWrite) {
+    if (!canWrite || savingTree) {
       return;
     }
     const { active, over } = event;
@@ -242,8 +235,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
         <Switch
           size="small"
           checked={value}
-          disabled={!canWrite}
-          loading={updatingShowIds.includes(record.id)}
+          disabled={!canWrite || savingTree}
           onChange={(checked) => onShowChange(record.id, checked)}
         />
       ),
@@ -341,14 +333,11 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                     ) : null}
                   </div>
                 </div>
-                <Space wrap className={styles.tableActions}>
-                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree}>
+                <div className={styles.tableActions}>
+                  <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loadingTree} disabled={savingTree}>
                     刷新分类
                   </Button>
-                  <Button type="primary" icon={<SaveOutlined />} onClick={onSave} loading={savingTree} disabled={!canWrite || !hasPendingChanges}>
-                    保存变更
-                  </Button>
-                </Space>
+                </div>
               </div>
             )}
             expandable={{

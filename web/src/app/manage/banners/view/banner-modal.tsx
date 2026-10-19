@@ -215,7 +215,7 @@ export default function BannerModal({
     form.setFieldsValue(tmdbSnapshot.formValues);
     setSelectedFilm(tmdbSnapshot.selectedFilm);
     setTmdbSnapshot(null);
-    message.info("已还原刮削");
+    message.info("已撤销填入");
   };
 
   const handleSubmit = async () => {
@@ -307,7 +307,7 @@ export default function BannerModal({
                   <Space size={8}>
                     {tmdbSnapshot && (
                       <Button size="middle" icon={<UndoOutlined />} onClick={handleUndoTmdb}>
-                        还原
+                        撤销填入
                       </Button>
                     )}
                     {tmdbEnabled && (
