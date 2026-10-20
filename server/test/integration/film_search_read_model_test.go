@@ -285,7 +285,11 @@ func TestSearchSnapshotsByKeywordAndSortReadModel_SingleFlightStability(t *testi
 		go func() {
 			defer wg.Done()
 			page := &dto.Page{Current: 1, PageSize: 10}
-			results := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "斗罗大陆", "", page)
+			results, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "斗罗大陆", "", page)
+			if err != nil {
+				errChan <- err
+				return
+			}
 			if len(results) != 2 {
 				errChan <- fmt.Errorf("期望命中 2 条，实际 %d 条", len(results))
 				return
@@ -303,15 +307,10 @@ func TestSearchSnapshotsByKeywordAndSortReadModel_SingleFlightStability(t *testi
 	}
 
 	keys := client.Keys(db.Cxt, "*").Val()
-	foundCache := false
 	for _, key := range keys {
 		if strings.HasPrefix(key, config.FilmSearchCachePrefix+":v"+version+":sv") {
-			foundCache = true
-			break
+			t.Fatalf("关键词检索不应写入 Redis：%s", key)
 		}
-	}
-	if !foundCache {
-		t.Fatalf("Redis 中应存在前缀 %s 的搜索缓存 key，实际 keys=%v", config.FilmSearchCachePrefix, keys)
 	}
 }
 
@@ -364,11 +363,8 @@ func TestSearchCacheVersion_NoCrossVersionPollution(t *testing.T) {
 
 	v2Key := fmt.Sprintf("%s:v%s:sv%s:斗罗大陆::p1:s10", config.FilmSearchCachePrefix, version, v2)
 	v1Key := fmt.Sprintf("%s:v%s:sv%s:斗罗大陆::p1:s10", config.FilmSearchCachePrefix, version, v1)
-	if client.Exists(db.Cxt, v2Key).Val() != 1 {
-		t.Errorf("新版本缓存 key %s 应存在", v2Key)
-	}
-	if client.Exists(db.Cxt, v1Key).Val() != 0 {
-		t.Errorf("旧版本缓存 key %s 不应被写入", v1Key)
+	if client.Exists(db.Cxt, v2Key).Val() != 0 || client.Exists(db.Cxt, v1Key).Val() != 0 {
+		t.Fatalf("关键词检索不应写入 Redis：%s %s", v2Key, v1Key)
 	}
 }
 

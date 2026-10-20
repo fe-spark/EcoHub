@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -33,7 +34,7 @@ type tagSearchCacheItem struct {
 
 var tagSearchSfGroup singleflight.Group
 
-func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, page *dto.Page) []model.FilmListSnapshot {
+func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, page *dto.Page) ([]model.FilmListSnapshot, error) {
 	startedAt := time.Now()
 	page = shared.EnsurePage(page)
 	st = shared.NormalizeSearchTagsVO(st)
@@ -42,9 +43,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		version = GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+		return nil, ErrSearchIndexMissing
 	}
 
 	var cacheKey string
@@ -65,7 +64,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 					"[FilmClassifySearch] 命中缓存 source=%q pid=%d cid=%d plot=%q area=%q language=%q year=%q sort=%q total=%d page=%d size=%d cost=%s",
 					st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year, st.Sort, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
 				)
-				return item.Snapshots
+				return item.Snapshots, nil
 			}
 		}
 	}
@@ -153,12 +152,15 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		return item, nil
 	})
 
-	if err != nil || val == nil {
-		return []model.FilmListSnapshot{}
+	if err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return nil, ErrSearchIndexMissing
 	}
 	item, ok := val.(tagSearchCacheItem)
 	if !ok {
-		return []model.FilmListSnapshot{}
+		return nil, errors.New("检索索引损坏")
 	}
 	page.Total = item.Total
 	page.PageCount = item.PageCount
@@ -180,7 +182,7 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		len(res),
 		time.Since(startedAt),
 	)
-	return res
+	return res, nil
 }
 
 type searchCacheItem struct {
@@ -198,254 +200,74 @@ func cloneFilmListSnapshots(src []model.FilmListSnapshot) []model.FilmListSnapsh
 	return out
 }
 
-var searchSnapshotsSf singleflight.Group
-
-func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, sortField string, page *dto.Page) []model.FilmListSnapshot {
-	startedAt := time.Now()
+func memoryKeywordSnapshots(version, sourceID, keyword, sortField string, pid, cid int64, page *dto.Page) ([]model.FilmListSnapshot, error) {
 	page = shared.EnsurePage(page)
 	keyword = strings.TrimSpace(keyword)
 	sortField = utils.NormalizeSearchSortField(sortField)
+	sourceID = strings.TrimSpace(sourceID)
+	if keyword == "" || len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}, nil
+	}
 	version = strings.TrimSpace(version)
 	if version == "" {
-		version = GetActiveSnapshotVersion()
+		version = strings.TrimSpace(GetActiveSnapshotVersion())
 	}
-	if version == "" || keyword == "" {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+	if version == "" {
+		return nil, ErrSearchIndexMissing
 	}
-
-	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
-	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+	idx, err := loadFilmSearchMetaIndex(version)
+	if err != nil {
+		return nil, err
 	}
-
-	// 1. 尝试从 Redis 读搜索缓存
-	searchVer := GetSearchCacheVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:sv%s:%s:%s:p%d:s%d", config.FilmSearchCachePrefix, version, searchVer, keyword, sortField, page.Current, page.PageSize)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var item searchCacheItem
-			if json.Unmarshal([]byte(data), &item) == nil {
-				page.Total = item.Total
-				page.PageCount = item.PageCount
-				log.Printf("[SearchFilm] 搜索命中缓存 keyword=%q sort=%q cache=HIT total=%d page=%d size=%d cost=%s",
-					keyword, sortField, item.Total, page.Current, len(item.Snapshots), time.Since(startedAt))
-				return item.Snapshots
+	hits := searchFilmMetas(idx, keyword, sortField, pid, cid)
+	if sourceID != "" {
+		filtered := make([]scoredMetaHit, 0, len(hits))
+		for _, h := range hits {
+			pos, ok := idx.Pos[h.mid]
+			if !ok || pos < 0 || pos >= len(idx.Items) {
+				return nil, errors.New("检索索引损坏")
+			}
+			if idx.Items[pos].HasPlaySource(sourceID) {
+				filtered = append(filtered, h)
 			}
 		}
+		hits = filtered
 	}
-
-	// 2. 并发防击穿：相同关键词搜索合并执行
-	sfKey := fmt.Sprintf("v%s:sv%s:%s:%s:p%d:s%d", version, searchVer, keyword, sortField, page.Current, page.PageSize)
-	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
-		// 二次双检 Redis 缓存
-		if db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				var item searchCacheItem
-				if json.Unmarshal([]byte(data), &item) == nil {
-					return item, nil
-				}
-			}
-		}
-
-		// A. 优先内存元数据检索
-		idx := loadFilmSearchMetaIndex(version)
-		if idx != nil && len(idx.Items) > 0 {
-			hits := searchFilmMetas(idx, keyword, sortField, 0, 0)
-			pageMids := pageMidsFromMetaHits(hits, page)
-			var snapshots []model.FilmListSnapshot
-			if len(pageMids) > 0 {
-				snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
-			}
-			if snapshots == nil {
-				snapshots = []model.FilmListSnapshot{}
-			}
-			item := searchCacheItem{
-				Total:     page.Total,
-				PageCount: page.PageCount,
-				Snapshots: snapshots,
-			}
-			if db.Rdb != nil {
-				// 仅在当前检索版本与全局版本一致时回写缓存，防止已过期的旧检索结果污染新版本
-				if GetSearchCacheVersion() == searchVer {
-					if raw, err := json.Marshal(item); err == nil {
-						ttl := 3 * time.Minute
-						if len(snapshots) == 0 {
-							ttl = 1 * time.Minute
-						}
-						_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-					}
-				}
-			}
-			log.Printf("[SearchFilm] 内存检索完成 keyword=%q sort=%q cache=MISS(MEMORY_HIT) total=%d page=%d size=%d cost=%s",
-				keyword, sortField, page.Total, page.Current, len(snapshots), time.Since(startedAt))
-			return item, nil
-		}
-
-		if db.Mdb == nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		// B. 数据库兜底查询（采用延迟关联避免全字段参与 filesort）
-		query := applyNameLikeFilter(liveFilmQuery(), keyword)
-
-		var total int64
-		if err := query.Count(&total).Error; err != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-		calcTotal := int(total)
-		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
-		if calcPageCount <= 0 {
-			calcPageCount = 1
-		}
-
-		orderClause := liveTieOrder(snapshotSortOrderClause(sortField, true))
-		offset := shared.PageOffset(page)
-
-		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
-		if findErr != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		item := searchCacheItem{
-			Total:     calcTotal,
-			PageCount: calcPageCount,
-			Snapshots: snapshots,
-		}
-		if db.Rdb != nil {
-			// 仅在当前检索版本与全局版本一致时回写缓存，防止已过期的旧检索结果污染新版本
-			if GetSearchCacheVersion() == searchVer {
-				if raw, err := json.Marshal(item); err == nil {
-					ttl := 3 * time.Minute
-					if len(snapshots) == 0 {
-						ttl = 1 * time.Minute // 空结果防穿透短缓存
-					}
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-				}
-			}
-		}
-
-		log.Printf("[SearchFilm] DB搜索完成 keyword=%q sort=%q cache=MISS total=%d page=%d size=%d cost=%s",
-			keyword, sortField, calcTotal, page.Current, len(snapshots), time.Since(startedAt))
-		return item, nil
-	})
-
-	if err != nil || val == nil {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+	pageMids := pageMidsFromMetaHits(hits, page)
+	if len(pageMids) == 0 {
+		return []model.FilmListSnapshot{}, nil
 	}
-	cachedItem, ok := val.(searchCacheItem)
-	if !ok {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+	snaps := GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+	if snaps == nil {
+		return []model.FilmListSnapshot{}, nil
 	}
-	page.Total = cachedItem.Total
-	page.PageCount = cachedItem.PageCount
-	return cloneFilmListSnapshots(cachedItem.Snapshots)
+	return snaps, nil
 }
 
-func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID string, keyword string, sortField string, page *dto.Page) []model.FilmListSnapshot {
+func SearchSnapshotsByKeywordAndSortReadModel(version string, keyword string, sortField string, page *dto.Page) ([]model.FilmListSnapshot, error) {
+	startedAt := time.Now()
+	snaps, err := memoryKeywordSnapshots(version, "", keyword, sortField, 0, 0, page)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[SearchFilm] 内存检索完成 keyword=%q sort=%q total=%d page=%d size=%d cost=%s",
+		strings.TrimSpace(keyword), sortField, page.Total, page.Current, len(snaps), time.Since(startedAt))
+	return snaps, nil
+}
+
+func SearchSnapshotsByKeywordSourceAndSortReadModel(version string, sourceID string, keyword string, sortField string, page *dto.Page) ([]model.FilmListSnapshot, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" {
 		return SearchSnapshotsByKeywordAndSortReadModel(version, keyword, sortField, page)
 	}
-
 	startedAt := time.Now()
-	page = shared.EnsurePage(page)
-	keyword = strings.TrimSpace(keyword)
-	sortField = utils.NormalizeSearchSortField(sortField)
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
+	snaps, err := memoryKeywordSnapshots(version, sourceID, keyword, sortField, 0, 0, page)
+	if err != nil {
+		return nil, err
 	}
-	if version == "" || keyword == "" || len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
-	}
-
-	searchVer := GetSearchCacheVersion()
-	cacheKey := fmt.Sprintf("%s:v%s:sv%s:src_%s:%s:%s:p%d:s%d", config.FilmSearchCachePrefix, version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var item searchCacheItem
-			if json.Unmarshal([]byte(data), &item) == nil {
-				page.Total = item.Total
-				page.PageCount = item.PageCount
-				return item.Snapshots
-			}
-		}
-	}
-
-	sfKey := fmt.Sprintf("v%s:sv%s:src_%s:%s:%s:p%d:s%d", version, searchVer, sourceID, keyword, sortField, page.Current, page.PageSize)
-	val, err, _ := searchSnapshotsSf.Do(sfKey, func() (any, error) {
-		if db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				var item searchCacheItem
-				if json.Unmarshal([]byte(data), &item) == nil {
-					return item, nil
-				}
-			}
-		}
-
-		if db.Mdb == nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		query := applyNameLikeFilter(applySourceMembership(liveFilmQuery(), sourceID), keyword)
-
-		var total int64
-		if err := query.Count(&total).Error; err != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-		calcTotal := int(total)
-		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
-		if calcPageCount <= 0 {
-			calcPageCount = 1
-		}
-
-		orderClause := liveTieOrder(snapshotSortOrderClause(sortField, true))
-		offset := shared.PageOffset(page)
-
-		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
-		if findErr != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
-		}
-
-		item := searchCacheItem{
-			Total:     calcTotal,
-			PageCount: calcPageCount,
-			Snapshots: snapshots,
-		}
-		if db.Rdb != nil {
-			if GetSearchCacheVersion() == searchVer {
-				if raw, err := json.Marshal(item); err == nil {
-					ttl := 3 * time.Minute
-					if len(snapshots) == 0 {
-						ttl = 1 * time.Minute
-					}
-					_ = db.Rdb.Set(db.Cxt, cacheKey, string(raw), ttl).Err()
-				}
-			}
-		}
-
-		log.Printf("[SearchFilm] Source过滤搜索完成 keyword=%q source=%q sort=%q total=%d page=%d size=%d cost=%s",
-			keyword, sourceID, sortField, calcTotal, page.Current, len(snapshots), time.Since(startedAt))
-		return item, nil
-	})
-
-	cachedItem, ok := val.(searchCacheItem)
-	if err != nil || val == nil || !ok {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
-	}
-	page.Total = cachedItem.Total
-	page.PageCount = cachedItem.PageCount
-	return cloneFilmListSnapshots(cachedItem.Snapshots)
+	log.Printf("[SearchFilm] 内存检索完成 keyword=%q source=%q sort=%q total=%d page=%d size=%d cost=%s",
+		strings.TrimSpace(keyword), sourceID, sortField, page.Total, page.Current, len(snaps), time.Since(startedAt))
+	return snaps, nil
 }

@@ -138,7 +138,6 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	filmsnapshot.BumpSearchCacheVersion()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
-	InvalidateInventoryStatsCache()
 	if newID != "" {
 		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
 			filmsnapshot.NotifySnapshotPublished(version)
@@ -217,29 +216,30 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	}
 
 	var orphanMids []int64
+	if isUriChanged {
+		orphans, err := repository.CascadeCleanSourceData(source.Id)
+		if len(orphans) > 0 {
+			filmsnapshot.DeleteActiveSnapshotsByMids(orphans...)
+		}
+		if err != nil {
+			syslog.Errorf("[Collect] 更换源地址清空历史数据失败: %v", err)
+			return errors.New("清空历史数据失败，请重试")
+		}
+		orphanMids = orphans
+	}
+	if isUriChanged || isFormatChanged {
+		if err := repository.DeleteFailureRecordsByOriginIdTx(db.Mdb, source.Id); err != nil {
+			syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
+			return errors.New("清理原失败记录失败，请重试")
+		}
+	}
+	if isUriChanged {
+		if err := repository.ClearSourceCategoryDataTx(db.Mdb, source.Id); err != nil {
+			syslog.Errorf("[Collect] 更换源地址清空分类失败: %v", err)
+			return errors.New("清空分类失败，请重试")
+		}
+	}
 	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		// 接口地址或数据格式变更时同步清空该源站的历史失败采集记录，避免使用新接口拉取旧页码导致数据错乱
-		if isUriChanged || isFormatChanged {
-			if err := repository.DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
-				syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
-				return errors.New("清理原失败记录失败，请重试")
-			}
-		}
-
-		// 更换接口地址时直接清空该站已采集数据和分类副本。
-		if isUriChanged {
-			orphans, err := repository.CascadeCleanSourceDataTx(tx, source.Id)
-			if err != nil {
-				syslog.Errorf("[Collect] 更换源地址清空历史数据失败: %v", err)
-				return errors.New("清空历史数据失败，请重试")
-			}
-			orphanMids = orphans
-			if err := repository.ClearSourceCategoryDataTx(tx, source.Id); err != nil {
-				syslog.Errorf("[Collect] 更换源地址清空分类失败: %v", err)
-				return errors.New("清空分类失败，请重试")
-			}
-		}
-
 		return repository.UpdateCollectSourceTx(tx, source)
 	})
 	if err != nil {
@@ -250,9 +250,6 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 		syslog.Infof("[Collect] 采集源 %s(%s) 更换地址，已清空该站采集数据、失败记录和分类，删除档案 %d 部", source.Name, source.Id, len(orphanMids))
 		repository.MarkCategoryChanged()
 		progress.BroadcastCategoryReady(source.Id, false)
-	}
-	if len(orphanMids) > 0 {
-		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 	}
 
 	spider.ClearLimiter(source.Id)
@@ -268,7 +265,7 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 		filmsnapshot.RefreshAccessDataCaches()
 		filmsnapshot.ClearSearchCache()
 	}
-	return nil
+	return repository.RefreshCollectSourceCatalog()
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
@@ -354,7 +351,7 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 	if id == "" {
 		return errors.New("采集站ID不能为空")
 	}
-	src := repository.FindCollectSourceById(id)
+	src := repository.FindCollectSourceForDelete(id)
 	if src == nil {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
@@ -395,12 +392,12 @@ func (s *CollectService) DelFilmSource(id string) error {
 		defer release()
 		oldPrimary := repository.PickPrimarySourceForCategory()
 		orphanMids, err := repository.DelCollectResource(id)
-		if err != nil {
-			return err
-		}
 		if len(orphanMids) > 0 {
 			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
+		}
+		if err != nil {
+			return err
 		}
 		spider.ClearLimiter(id)
 		clearProvideNetworkConfigCache()
@@ -455,6 +452,9 @@ func (s *CollectService) CollectRecover(id int) error {
 	fr := repository.FindRecordById(uint(id))
 	if fr == nil {
 		return errors.New("采集重试执行失败: 失败记录信息获取异常")
+	}
+	if !spider.TryBeginFailureRetry(fr.ID) {
+		return errors.New("正在重试中")
 	}
 	if fr.Status == model.FailureRecordStatusFailed {
 		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)

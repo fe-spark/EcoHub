@@ -195,7 +195,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const { queueBars, stoppingQueueId, tourHoldProgress, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
+  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
 
   const updateSiteListItem = useCallback((id: string, updater: (record: FilmSource) => FilmSource) => {
     setSiteList((current) => current.map((item) => (item.id === id ? updater(item) : item)));
@@ -294,7 +294,10 @@ export default function CollectManagePageView() {
       message.warning("采集站已在采集中");
       return;
     }
-    updateSiteListItem(record.id, (item) => ({ ...item, progress: makeStartingProgress(record.id, record.name, newClientCollectQueueId()) }));
+    updateSiteListItem(record.id, (item) => ({
+      ...item,
+      progress: makeStartingProgress(record.id, record.name, newClientCollectQueueId(), item.progress?.queueId ?? ""),
+    }));
     const resp = await ApiPost("/manage/spider/start", { id: record.id, time: record.cd ?? 24, batch: false });
     if (resp.code === 0) {
       message.success(resp.msg);
@@ -369,7 +372,6 @@ export default function CollectManagePageView() {
         {queueBars.length > 0 ? (
           <CollectQueueBars
             items={queueBars}
-            tourHoldProgress={tourHoldProgress}
             stoppingQueueId={stoppingQueueId}
             canWrite={canWrite}
             onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}

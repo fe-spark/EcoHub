@@ -262,7 +262,11 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 		if err := validateReadModelSearchTags(searchTags); err != nil {
 			return tvboxListResult{Current: page.Current, PageCount: 1, Total: 0, VodList: []model.FilmList{}}, err
 		}
-		sl := filmshared.ApplyPosterSourcePictures(filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page))
+		sl, err := filmsnapshot.ListProvideSnapshotsFast(version, searchTags, wd, h, &page)
+		if err != nil {
+			return tvboxListResult{}, err
+		}
+		sl = filmshared.ApplyPosterSourcePictures(sl)
 
 		var vodList []model.FilmList
 		for _, s := range sl {

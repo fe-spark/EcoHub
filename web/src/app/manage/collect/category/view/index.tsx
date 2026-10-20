@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect } from "react";
-import { Modal } from "antd";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { useManagePermission } from "@/lib/manage-permission";
+import { useAppMessage } from "@/lib/useAppMessage";
 import CategoryTreeCard from "./category-tree-card";
 import { useCategoryTreeState } from "./use-category-tree-state";
 import styles from "./index.module.less";
@@ -12,6 +12,7 @@ import styles from "./index.module.less";
 export default function CategoryWorkspacePageView() {
   const treeState = useCategoryTreeState();
   const { canWrite } = useManagePermission();
+  const { modal } = useAppMessage();
   const { fetchFilmClassTree } = treeState;
 
   useEffect(() => {
@@ -26,7 +27,7 @@ export default function CategoryWorkspacePageView() {
       action();
       return;
     }
-    Modal.confirm({
+    modal.confirm({
       title,
       content: "当前调整还没保存，继续后会丢掉这次调整。",
       okText,

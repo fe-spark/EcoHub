@@ -63,6 +63,7 @@ export default function InventoryStats() {
   const [sourcesFailed, setSourcesFailed] = useState(false);
   const primaryIdRef = useRef("");
   const sourcesLoadedRef = useRef(false);
+  const [libraryVersion, setLibraryVersion] = useState(0);
 
   useEffect(() => {
     const onPrimary = (event: Event) => {
@@ -72,6 +73,8 @@ export default function InventoryStats() {
       }
       primaryIdRef.current = id;
       setSources((prev) => (prev ? placePrimaryFirst(prev, id) : prev));
+      sourcesLoadedRef.current = false;
+      setLibraryVersion((version) => version + 1);
     };
     window.addEventListener("ecohub:primary-source", onPrimary);
     return () => window.removeEventListener("ecohub:primary-source", onPrimary);
@@ -79,6 +82,10 @@ export default function InventoryStats() {
 
   useEffect(() => {
     let active = true;
+    if (libraryVersion > 0) {
+      setLibraryLoading(true);
+      setLibraryFailed(false);
+    }
     ApiGet<InventoryStatsData>("/manage/spider/clear/stats?scope=library", undefined, 10000)
       .then((resp) => {
         if (!active) {
@@ -103,7 +110,7 @@ export default function InventoryStats() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [libraryVersion]);
 
   useEffect(() => {
     if (!sourcesOpen || sourcesLoadedRef.current) {
@@ -139,7 +146,7 @@ export default function InventoryStats() {
     return () => {
       active = false;
     };
-  }, [sourcesOpen]);
+  }, [sourcesOpen, libraryVersion]);
 
   return (
     <Card

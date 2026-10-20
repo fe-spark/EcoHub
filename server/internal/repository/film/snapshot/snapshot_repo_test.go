@@ -129,7 +129,10 @@ func TestEnsureActiveFilmListSnapshot_InitialBuild(t *testing.T) {
 	}
 
 	WaitActiveFilmSearchIndexBuilt()
-	idx := loadFilmSearchMetaIndex(ver)
+	idx, err := loadFilmSearchMetaIndex(ver)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx == nil || len(idx.Items) != 1 {
 		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
@@ -155,7 +158,10 @@ func TestEnsureActiveFilmListSnapshot_GhostSnapshotSelfHealing(t *testing.T) {
 	if got := GetActiveSnapshotVersion(); got != ghostVer {
 		t.Fatalf("live 读模型应沿用已有版本号 %q, got %q", ghostVer, got)
 	}
-	idx := loadFilmSearchMetaIndex(ghostVer)
+	idx, err := loadFilmSearchMetaIndex(ghostVer)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx == nil || len(idx.Items) != 1 {
 		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}
@@ -178,7 +184,10 @@ func TestEnsureActiveFilmListSnapshot_CountMismatch(t *testing.T) {
 		t.Fatalf("列表直读 film_index 无需因快照行数不一致重建, got %q", got)
 	}
 	WaitActiveFilmSearchIndexBuilt()
-	idx := loadFilmSearchMetaIndex(oldVer)
+	idx, err := loadFilmSearchMetaIndex(oldVer)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx == nil || len(idx.Items) != 2 {
 		t.Fatalf("expected 2 live search items, got %+v", idx)
 	}
@@ -217,7 +226,10 @@ func TestEnsureActiveFilmListSnapshot_ClearOnShutdownAndRebuildOnStartup(t *test
 	if ver2 == "" {
 		t.Fatal("expected live version after restart")
 	}
-	idx := loadFilmSearchMetaIndex(ver2)
+	idx, err := loadFilmSearchMetaIndex(ver2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx == nil || len(idx.Items) != 2 {
 		t.Fatalf("expected 2 live search items after restart, got %+v", idx)
 	}
@@ -271,7 +283,10 @@ func TestEnsureActiveFilmListSnapshot_PlayFromSummaryHealed(t *testing.T) {
 		t.Fatal("expected non-empty active version")
 	}
 	WaitActiveFilmSearchIndexBuilt()
-	idx := loadFilmSearchMetaIndex(ver)
+	idx, err := loadFilmSearchMetaIndex(ver)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if idx == nil || len(idx.Items) != 1 {
 		t.Fatalf("expected 1 live search item, got %+v", idx)
 	}

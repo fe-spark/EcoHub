@@ -21,6 +21,50 @@ type ScrapeResult struct {
 	Failed  int `json:"failed"`
 }
 
+// searchAutoCandidates 为无人值守刮削放宽召回。弹窗检索不走这里。
+// 空结果时依次去掉年份、截取分隔符前主词、回退原始词。
+func (s *TMDBService) searchAutoCandidates(query string) ([]model.TMDBCandidate, error) {
+	cfg := repository.GetTMDBConfig()
+	if !cfg.Enabled || cfg.ApiKey == "" {
+		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能，请前往「系统设置 → 刮削配置」完成设置")
+	}
+
+	rawQuery := strings.TrimSpace(query)
+	searchQuery, detectedYear := CleanKeywordForSearch(rawQuery)
+	if searchQuery == "" {
+		searchQuery = rawQuery
+	}
+
+	candidates, err := s.fetchTMDBCandidates(cfg, searchQuery, detectedYear, "")
+	if err != nil || len(candidates) > 0 {
+		return candidates, err
+	}
+	if detectedYear != "" {
+		candidates, err = s.fetchTMDBCandidates(cfg, searchQuery, "", "")
+		if err != nil || len(candidates) > 0 {
+			return candidates, err
+		}
+	}
+	for _, sep := range []string{" ", "-", "_", "：", ":", "·"} {
+		idx := strings.Index(searchQuery, sep)
+		if idx <= 0 {
+			continue
+		}
+		primary := strings.TrimSpace(searchQuery[:idx])
+		if len([]rune(primary)) < 2 || primary == searchQuery {
+			continue
+		}
+		candidates, err = s.fetchTMDBCandidates(cfg, primary, "", "")
+		if err != nil || len(candidates) > 0 {
+			return candidates, err
+		}
+	}
+	if rawQuery != searchQuery {
+		return s.fetchTMDBCandidates(cfg, rawQuery, "", "")
+	}
+	return candidates, nil
+}
+
 // ScrapeFilms 对影片执行 TMDB 自动匹配与元数据刮削落库（兼容单个与批量）
 func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeResult, error) {
 	cfg := repository.GetTMDBConfig()
@@ -119,7 +163,7 @@ func (s *TMDBService) autoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	isTVCategory := strings.Contains(snap.CName, "剧") || strings.Contains(snap.CName, "动漫")
 	isMovieCategory := strings.Contains(snap.CName, "影") || strings.Contains(snap.CName, "片")
 
-	candidates, err := s.Search(cleanedTarget, "", "")
+	candidates, err := s.searchAutoCandidates(cleanedTarget)
 	if err != nil {
 		log.Printf("[TMDBAuto] TMDB 检索异常 mid=%d 关键词=%q: %v", snap.Mid, cleanedTarget, err)
 		return nil, "", false, err

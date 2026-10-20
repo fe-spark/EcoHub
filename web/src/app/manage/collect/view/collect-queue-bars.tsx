@@ -1,29 +1,33 @@
 "use client";
 
-import { Button, Popconfirm, Progress } from "antd";
+import React from "react";
+import { Button, Popconfirm, Progress, Space, Tag } from "antd";
+import { CloseOutlined } from "@ant-design/icons";
 import type { CollectQueueProgressView } from "./collect-queue";
 import { queueProgressTitle, tourProgressPhase } from "./collect-queue";
-import styles from "./index.module.less";
+import styles from "./collect-queue-bars.module.less";
 
 export interface CollectQueueBarItem {
   queueId: string;
   sourceIds: string[];
   seq: number;
   view: CollectQueueProgressView;
-  countdown: number | null;
   canStop: boolean;
 }
 
 interface CollectQueueBarsProps {
   items: CollectQueueBarItem[];
-  tourHoldProgress: boolean;
   stoppingQueueId: string | null;
   canWrite: boolean;
   onStopQueue: (queueId: string, sourceIds: string[]) => void;
 }
 
+function pageCount(value: number) {
+  return value.toLocaleString("zh-CN");
+}
+
 export default function CollectQueueBars(props: CollectQueueBarsProps) {
-  const { items, tourHoldProgress, stoppingQueueId, canWrite, onStopQueue } = props;
+  const { items, stoppingQueueId, canWrite, onStopQueue } = props;
   if (items.length === 0) {
     return null;
   }
@@ -31,44 +35,146 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
   const tourTarget = tourIndex >= 0 ? tourIndex : 0;
 
   return (
-    <div className={styles.batchProgressList}>
-      {items.map((item, index) => (
-        <div
-          // seq 在乐观队列号换成服务端队列号时不变，进度条保持同一节点
-          key={item.seq}
-          className={styles.batchProgressBar}
-          data-tour={index === tourTarget ? "collect-progress" : undefined}
-          data-tour-progress={
-            index === tourTarget ? tourProgressPhase(item.view) : undefined
-          }
-        >
-          <div className={styles.batchProgressMain}>
-            <div className={styles.batchProgressHead}>
-              <span className={styles.batchProgressTitle}>
-                {queueProgressTitle(item.view.running, items.length, index + 1)}
-              </span>
-              <span className={styles.batchProgressStats}>
-                {item.view.statsText}
-                {!item.view.running && !tourHoldProgress && item.countdown != null
-                  ? ` · ${item.countdown}s 后关闭`
-                  : ""}
-              </span>
+    <div className={styles.queueList}>
+      {items.map((item, index) => {
+        const isRunning = item.view.running;
+        const isStopping = item.view.stoppingCount > 0;
+        const hasFailed = item.view.failedCount > 0;
+        const cardStateClass = isRunning
+          ? styles.queueRunning
+          : hasFailed
+            ? styles.queueException
+            : styles.queueSuccess;
+
+        const percentStateClass = isRunning
+          ? styles.percentRunning
+          : hasFailed
+            ? styles.percentException
+            : styles.percentSuccess;
+
+        const progressStrokeColor = isRunning
+          ? item.view.failed > 0
+            ? { "0%": "#fa8c16", "100%": "#ff4d4f" }
+            : { "0%": "#fa8c16", "100%": "#ffa940" }
+          : hasFailed
+            ? "#ff4d4f"
+            : "#52c41a";
+
+        return (
+          <div
+            // seq 在乐观队列号换成服务端队列号时不变，进度条保持同一节点
+            key={item.seq}
+            className={`${styles.queueCard} ${cardStateClass}`}
+            data-tour={index === tourTarget ? "collect-progress" : undefined}
+            data-tour-progress={
+              index === tourTarget ? tourProgressPhase(item.view) : undefined
+            }
+          >
+            {/* 左侧主要区域：包含标题状态行与下方的进度条 */}
+            <div className={styles.queueMain}>
+              <div className={styles.queueHeader}>
+                <span
+                  className={`${styles.statusPill} ${
+                    isRunning
+                      ? isStopping
+                        ? styles.statusStopping
+                        : styles.statusRunning
+                      : hasFailed
+                        ? styles.statusException
+                        : styles.statusSuccess
+                  }`}
+                >
+                  <span className={styles.statusDot} />
+                  {isRunning
+                    ? isStopping
+                      ? "停止中"
+                      : "采集中"
+                    : hasFailed
+                      ? "异常"
+                      : "已完成"}
+                </span>
+
+                <span className={styles.queueTitle}>
+                  {queueProgressTitle(item.view.running, items.length, index + 1)}
+                </span>
+
+                <span className={styles.queuePages}>
+                  <strong className={styles.pageDoneNum}>
+                    {pageCount(item.view.pageDone)}
+                  </strong>
+                  <span className={styles.pageTotalNum}>
+                    / {pageCount(item.view.pageTotal)} 页
+                  </span>
+                </span>
+
+                <Space size={4} wrap className={styles.queueTags}>
+                  <Tag
+                    bordered={false}
+                    className={`${styles.microTag} ${styles.stationTag}`}
+                  >
+                    共 {item.view.total} 站
+                  </Tag>
+                  {item.view.doneCount > 0 && item.view.fetchingCount > 0 ? (
+                    <Tag
+                      color="success"
+                      bordered={false}
+                      className={styles.microTag}
+                    >
+                      已完成 {item.view.doneCount} 站
+                    </Tag>
+                  ) : null}
+                  {item.view.failedCount > 0 ? (
+                    <Tag
+                      color="error"
+                      bordered={false}
+                      className={styles.microTag}
+                    >
+                      异常 {item.view.failedCount} 站
+                    </Tag>
+                  ) : null}
+                  {item.view.stoppedCount > 0 ? (
+                    <Tag bordered={false} className={styles.microTag}>
+                      终止 {item.view.stoppedCount} 站
+                    </Tag>
+                  ) : null}
+                  {item.view.failed > 0 ? (
+                    <Tag
+                      color="warning"
+                      bordered={false}
+                      className={styles.microTag}
+                    >
+                      失败 {pageCount(item.view.failed)} 页
+                    </Tag>
+                  ) : null}
+                </Space>
+              </div>
+
+              {/* 第二行：进度条与末尾的进度百分比 */}
+              <div className={styles.progressRow}>
+                <Progress
+                  percent={item.view.percent}
+                  showInfo={false}
+                  size={{ height: 6 }}
+                  status={
+                    isRunning
+                      ? "active"
+                      : hasFailed
+                        ? "exception"
+                        : "success"
+                  }
+                  strokeColor={progressStrokeColor}
+                  trailColor="var(--ant-color-fill-secondary)"
+                  className={styles.progressBar}
+                />
+                <span className={`${styles.percentNum} ${percentStateClass}`}>
+                  {item.view.percent}%
+                </span>
+              </div>
             </div>
-            <div className={styles.batchProgressRow}>
-              <Progress
-                percent={item.view.percent}
-                status={
-                  item.view.running
-                    ? "active"
-                    : item.view.failedCount > 0
-                      ? "normal"
-                      : "success"
-                }
-                strokeColor={item.view.failed > 0 ? "#faad14" : undefined}
-                size="small"
-                className={styles.batchProgressFill}
-              />
-              {item.view.running && item.canStop ? (
+
+            {/* 整个横幅的最右侧：关闭样式的终止操作 */}
+            {isRunning && item.canStop ? (
+              <div className={styles.queueCloseWrap}>
                 <Popconfirm
                   title="终止该队列？"
                   onConfirm={() => onStopQueue(item.queueId, item.sourceIds)}
@@ -80,20 +186,20 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                   }}
                 >
                   <Button
-                    danger
+                    type="text"
                     size="small"
+                    aria-label="终止"
+                    icon={<CloseOutlined />}
                     loading={stoppingQueueId === item.queueId}
                     disabled={!canWrite}
-                    className={styles.batchStopBtn}
-                  >
-                    终止
-                  </Button>
+                    className={styles.queueCloseBtn}
+                  />
                 </Popconfirm>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

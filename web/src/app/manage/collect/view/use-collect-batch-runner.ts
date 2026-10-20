@@ -68,7 +68,9 @@ export function useCollectBatchRunner(
     const queueId = newClientCollectQueueId();
     setSiteList((current) =>
       current.map((item) =>
-        idSet.has(item.id) ? { ...item, progress: makeStartingProgress(item.id, item.name, queueId) } : item,
+        idSet.has(item.id)
+          ? { ...item, progress: makeStartingProgress(item.id, item.name, queueId, item.progress?.queueId ?? "") }
+          : item,
       ),
     );
     let resp: ApiResponse<CollectBatchResult>;

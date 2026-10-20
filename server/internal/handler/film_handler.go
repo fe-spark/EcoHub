@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -72,17 +73,19 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}
 
 	s.Paging = dto.GetPageParams(c)
-	sl := service.FilmSvc.GetFilmPage(s)
-	options := service.FilmSvc.GetSearchOptions(s.SourceId)
 	if s.SourceId == "" {
-		if curr, ok := options["currentSourceId"].(string); ok && curr != "" {
-			s.SourceId = curr
+		if active := repository.GetActiveCollectSource(); active != nil {
+			s.SourceId = active.Id
 		}
 	}
+	sl, err := service.FilmSvc.GetFilmPage(s)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
-		"params":  s,
-		"list":    sl,
-		"options": options,
+		"params": s,
+		"list":   sl,
 	}, "影片分页信息获取成功", c)
 }
 

@@ -1,7 +1,6 @@
 package film
 
 import (
-	"database/sql"
 	"fmt"
 	"math/rand"
 	"strings"
@@ -10,9 +9,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/support"
-
-	"gorm.io/gorm"
 )
 
 const (
@@ -23,24 +21,7 @@ const (
 )
 
 type dailyUpdateMidRow struct {
-	Mid int64 `gorm:"column:mid"`
-}
-
-type dailyPidCountRow struct {
-	Pid   sql.NullInt64 `gorm:"column:pid"`
-	Count int           `gorm:"column:cnt"`
-}
-
-type dailyCategoryKeyCountRow struct {
-	CategoryKey string `gorm:"column:category_key"`
-	Count       int    `gorm:"column:cnt"`
-}
-
-// CategoryCountItem 顶级分类计数项。
-type CategoryCountItem struct {
-	CategoryID   int64
-	CategoryName string
-	Count        int
+	Mid int64
 }
 
 // NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源（按当前生效采集站隔离）。
@@ -140,16 +121,6 @@ type DailyUpdateListQuery struct {
 	SourceId string
 }
 
-func dailyPidFilter(pid int64) *CategoryCountItem {
-	if pid == DailyPidAll {
-		return nil
-	}
-	if pid == DailyPidOther {
-		return &CategoryCountItem{CategoryID: 0, CategoryName: "其他"}
-	}
-	return &CategoryCountItem{CategoryID: pid, CategoryName: "_"}
-}
-
 func sourceTopCategoryKeyGroups(sourceID string, navIDs []int64) (keyToRoot map[string]int64, allVisibleKeys []string, ok bool) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || db.Mdb == nil || len(repository.SourceRootTypeIDs(sourceID)) == 0 {
@@ -178,71 +149,86 @@ func sourceTopCategoryKeyGroups(sourceID string, navIDs []int64) (keyToRoot map[
 	return keyToRoot, allVisibleKeys, len(keyToRoot) > 0
 }
 
-func applyNavCategoryFilter(q *gorm.DB, cat *CategoryCountItem, navIDs []int64, sourceID ...string) *gorm.DB {
-	if cat == nil {
-		return q
-	}
-	name := strings.TrimSpace(cat.CategoryName)
-	if name == "" || name == "全部" {
-		return q
-	}
-	var srcID string
-	if len(sourceID) > 0 {
-		srcID = strings.TrimSpace(sourceID[0])
-	}
-	if _, allVisibleKeys, useSourceKeys := sourceTopCategoryKeyGroups(srcID, navIDs); useSourceKeys {
-		if name == "其他" {
-			if len(allVisibleKeys) == 0 {
-				return q
-			}
-			return q.Where("(category_key IS NULL OR category_key = '' OR category_key NOT IN ?) AND (root_category_key IS NULL OR root_category_key = '' OR root_category_key NOT IN ?)", allVisibleKeys, allVisibleKeys)
-		}
-		if cat.CategoryID > 0 {
-			typeIDs := repository.PublicSourceTypeIDs(srcID, "pid", cat.CategoryID)
-			keys := make([]string, 0, len(typeIDs))
-			for _, id := range typeIDs {
-				if k := support.BuildSourceCategoryKey(srcID, id); k != "" {
-					keys = append(keys, k)
-				}
-			}
-			if len(keys) == 0 {
-				return q.Where("1 = 0")
-			}
-			return q.Where("category_key IN ? OR root_category_key IN ?", keys, keys)
-		}
-		return q.Where("1 = 0")
-	}
-	if name == "其他" {
-		if len(navIDs) == 0 {
-			return q
-		}
-		return q.Where("pid IS NULL OR pid = 0 OR pid NOT IN ?", navIDs)
-	}
-	if cat.CategoryID > 0 {
-		return q.Where("pid = ?", cat.CategoryID)
-	}
-	return q.Where("1 = 0")
+type dailyNavIndex struct {
+	useSourceKeys bool
+	keyToRoot     map[string]int64
+	navSet        map[int64]struct{}
 }
 
-func dailyUpdateBaseQuery(from, to time.Time, pid int64, navIDs []int64, sourceID string) *gorm.DB {
-	q := db.Mdb.Table(model.TableFilmIndex).
-		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix())
-	q = applyDailySourceMembership(q, sourceID)
-	return applyNavCategoryFilter(q, dailyPidFilter(pid), navIDs, sourceID)
+func buildDailyNavIndex(sourceID string, navIDs []int64) dailyNavIndex {
+	keyToRoot, _, ok := sourceTopCategoryKeyGroups(sourceID, navIDs)
+	navSet := make(map[int64]struct{}, len(navIDs))
+	for _, id := range navIDs {
+		if id > 0 {
+			navSet[id] = struct{}{}
+		}
+	}
+	return dailyNavIndex{useSourceKeys: ok, keyToRoot: keyToRoot, navSet: navSet}
 }
 
-func applyDailySourceMembership(q *gorm.DB, sourceID string) *gorm.DB {
-	if strings.TrimSpace(sourceID) == "" {
-		return q
+func (n dailyNavIndex) knownRoot(meta *filmsnapshot.FilmSearchMeta) (int64, bool) {
+	if meta == nil {
+		return 0, false
 	}
-	return q.Where(model.FilmHasPlaySourceSQL(), strings.TrimSpace(sourceID), "play")
+	if !n.useSourceKeys {
+		if meta.Pid > 0 {
+			if _, ok := n.navSet[meta.Pid]; ok {
+				return meta.Pid, true
+			}
+		}
+		return 0, false
+	}
+	if r, ok := n.keyToRoot[strings.TrimSpace(meta.CategoryKey)]; ok && r > 0 {
+		return r, true
+	}
+	if r, ok := n.keyToRoot[strings.TrimSpace(meta.RootCategoryKey)]; ok && r > 0 {
+		return r, true
+	}
+	return 0, false
 }
 
-func applyDailyUpdateExclude(q *gorm.DB, random bool, exclude []int64) *gorm.DB {
-	if !random || len(exclude) == 0 {
-		return q
+func (n dailyNavIndex) matches(meta *filmsnapshot.FilmSearchMeta, pid int64) bool {
+	if n.useSourceKeys {
+		switch pid {
+		case DailyPidAll:
+			return true
+		case DailyPidOther:
+			_, known := n.knownRoot(meta)
+			return !known
+		default:
+			if r, ok := n.keyToRoot[strings.TrimSpace(meta.CategoryKey)]; ok && r == pid {
+				return true
+			}
+			if r, ok := n.keyToRoot[strings.TrimSpace(meta.RootCategoryKey)]; ok && r == pid {
+				return true
+			}
+			return false
+		}
 	}
-	return q.Where("mid NOT IN ?", exclude)
+	switch pid {
+	case DailyPidAll:
+		return true
+	case DailyPidOther:
+		_, known := n.knownRoot(meta)
+		return !known
+	default:
+		return meta != nil && meta.Pid == pid
+	}
+}
+
+func dailyMetaStop(meta *filmsnapshot.FilmSearchMeta, sourceID string, fromUnix, toUnix int64) (skip bool, stop bool) {
+	stamp := meta.Item.UpdateStamp
+	if stamp > toUnix {
+		return true, false
+	}
+	if stamp < fromUnix {
+		return false, true
+	}
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID != "" && !meta.HasPlaySource(sourceID) {
+		return true, false
+	}
+	return false, false
 }
 
 func clampDailyUpdatePage(current, pageSize int) (int, int) {
@@ -260,9 +246,6 @@ func clampDailyUpdatePage(current, pageSize int) (int, int) {
 
 // ListDailyUpdateMids 近 24h 变更 mid：标准分页或随机抽样。
 func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err error) {
-	if db.Mdb == nil {
-		return nil, 0, fmt.Errorf("数据库未就绪")
-	}
 	if q.To.Before(q.From) {
 		return []int64{}, 0, nil
 	}
@@ -271,40 +254,62 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	if q.Pid != DailyPidAll && len(navIDs) == 0 {
 		navIDs = NavTopCategoryIDs(NavTopCategories(q.SourceId))
 	}
-
-	base := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
-	var n int64
-	if err = base.Select("COUNT(mid)").Scan(&n).Error; err != nil {
+	nav := buildDailyNavIndex(q.SourceId, navIDs)
+	exclude := map[int64]struct{}{}
+	if q.Random {
+		for _, id := range q.Exclude {
+			if id > 0 {
+				exclude[id] = struct{}{}
+			}
+		}
+	}
+	fromUnix, toUnix := q.From.Unix(), q.To.Unix()
+	start := (current - 1) * pageSize
+	pool := make([]int64, 0)
+	err = filmsnapshot.VisitSearchMetasByUpdate(func(meta *filmsnapshot.FilmSearchMeta) bool {
+		skip, stop := dailyMetaStop(meta, q.SourceId, fromUnix, toUnix)
+		if stop {
+			return false
+		}
+		if skip || meta.Mid <= 0 || !nav.matches(meta, q.Pid) {
+			return true
+		}
+		if _, drop := exclude[meta.Mid]; drop {
+			return true
+		}
+		total++
+		if q.Random {
+			if len(pool) < dailyRandomPoolCap {
+				pool = append(pool, meta.Mid)
+			}
+			return true
+		}
+		if total > start && len(pool) < pageSize {
+			pool = append(pool, meta.Mid)
+		}
+		return true
+	})
+	if err != nil {
 		return nil, 0, err
 	}
-	total = int(n)
 	if total == 0 {
 		return []int64{}, 0, nil
 	}
-
-	listQ := applyDailyUpdateExclude(dailyUpdateBaseQuery(q.From, q.To, q.Pid, navIDs, q.SourceId), q.Random, q.Exclude)
-	listQ = listQ.Select("mid, update_stamp")
-
-	var rows []dailyUpdateMidRow
 	if q.Random {
-		var pool []dailyUpdateMidRow
-		if err = listQ.Order("update_stamp DESC, mid DESC").Limit(dailyRandomPoolCap).Scan(&pool).Error; err != nil {
-			return nil, total, err
+		rows := make([]dailyUpdateMidRow, len(pool))
+		for i, mid := range pool {
+			rows[i] = dailyUpdateMidRow{Mid: mid}
 		}
-		rows = pickRandomDailyUpdateRows(pool, pageSize)
-	} else {
-		offset := (current - 1) * pageSize
-		if err = listQ.Order("update_stamp DESC, mid DESC").Offset(offset).Limit(pageSize).Scan(&rows).Error; err != nil {
-			return nil, total, err
+		picked := pickRandomDailyUpdateRows(rows, pageSize)
+		mids = make([]int64, 0, len(picked))
+		for _, row := range picked {
+			if row.Mid > 0 {
+				mids = append(mids, row.Mid)
+			}
 		}
+		return mids, total, nil
 	}
-	mids = make([]int64, 0, len(rows))
-	for _, r := range rows {
-		if r.Mid > 0 {
-			mids = append(mids, r.Mid)
-		}
-	}
-	return mids, total, nil
+	return pool, total, nil
 }
 
 func pickRandomDailyUpdateRows(rows []dailyUpdateMidRow, pageSize int) []dailyUpdateMidRow {
@@ -324,69 +329,31 @@ func pickRandomDailyUpdateRows(rows []dailyUpdateMidRow, pageSize int) []dailyUp
 // DailyUpdatePidCounts 近 24h 按导航大类聚合数量。
 func DailyUpdatePidCounts(from, to time.Time, navIDs []int64, sourceID string) (countByPid map[int64]int, otherCount int, total int, err error) {
 	countByPid = map[int64]int{}
-	if db.Mdb == nil {
-		return countByPid, 0, 0, fmt.Errorf("数据库未就绪")
-	}
 	if to.Before(from) {
 		return countByPid, 0, 0, nil
 	}
-
-	if keyToRoot, _, useSourceKeys := sourceTopCategoryKeyGroups(sourceID, navIDs); useSourceKeys {
-		var rows []dailyCategoryKeyCountRow
-		q := applyDailySourceMembership(db.Mdb.Table(model.TableFilmIndex).
-			Select("COALESCE(NULLIF(category_key, ''), root_category_key) AS category_key, COUNT(mid) AS cnt").
-			Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()), sourceID).
-			Group("COALESCE(NULLIF(category_key, ''), root_category_key)")
-		if err = q.Scan(&rows).Error; err != nil {
-			return countByPid, 0, 0, err
+	nav := buildDailyNavIndex(sourceID, navIDs)
+	fromUnix, toUnix := from.Unix(), to.Unix()
+	err = filmsnapshot.VisitSearchMetasByUpdate(func(meta *filmsnapshot.FilmSearchMeta) bool {
+		skip, stop := dailyMetaStop(meta, sourceID, fromUnix, toUnix)
+		if stop {
+			return false
 		}
-		for _, r := range rows {
-			if r.Count <= 0 {
-				continue
-			}
-			total += r.Count
-			if rootID, ok := keyToRoot[strings.TrimSpace(r.CategoryKey)]; ok && rootID > 0 {
-				countByPid[rootID] += r.Count
-			} else {
-				otherCount += r.Count
-			}
+		if skip || meta.Mid <= 0 {
+			return true
 		}
-		return countByPid, otherCount, total, nil
+		total++
+		if root, known := nav.knownRoot(meta); known {
+			countByPid[root]++
+		} else {
+			otherCount++
+		}
+		return true
+	})
+	if err != nil {
+		return map[int64]int{}, 0, 0, err
 	}
-
-	navSet := make(map[int64]struct{}, len(navIDs))
-	for _, id := range navIDs {
-		navSet[id] = struct{}{}
-	}
-
-	var rows []dailyPidCountRow
-	q := applyDailySourceMembership(db.Mdb.Table(model.TableFilmIndex).
-		Select("pid AS pid, COUNT(mid) AS cnt").
-		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()), sourceID).
-		Group("pid")
-	if err = q.Scan(&rows).Error; err != nil {
-		return countByPid, 0, 0, err
-	}
-	countByPid, otherCount, total = accumulateDailyPidCounts(rows, navSet)
 	return countByPid, otherCount, total, nil
-}
-
-func accumulateDailyPidCounts(rows []dailyPidCountRow, navSet map[int64]struct{}) (countByPid map[int64]int, otherCount, total int) {
-	countByPid = map[int64]int{}
-	for _, r := range rows {
-		if r.Count <= 0 {
-			continue
-		}
-		total += r.Count
-		if r.Pid.Valid && r.Pid.Int64 > 0 {
-			if _, ok := navSet[r.Pid.Int64]; ok {
-				countByPid[r.Pid.Int64] += r.Count
-				continue
-			}
-		}
-		otherCount += r.Count
-	}
-	return countByPid, otherCount, total
 }
 
 // ClampDailyUpdateExclude 限制随机排除列表长度，避免 NOT IN 占位符/包过大。

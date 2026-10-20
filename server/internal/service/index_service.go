@@ -1,21 +1,16 @@
 package service
 
 import (
-	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
-
-	"golang.org/x/sync/singleflight"
 )
 
 type IndexService struct{}
@@ -27,14 +22,6 @@ func (i *IndexService) BaselineSourceID() string {
 		return strings.TrimSpace(active.Id)
 	}
 	return ""
-}
-
-func init() {
-	filmsnapshot.RegisterSnapshotPublishedHook(func(version string) {
-		startedAt := time.Now()
-		_ = IndexSvc.IndexPage()
-		log.Printf("[IndexService][Warmup] 快照发布后首页缓存预热完成 version=%s cost=%s", version, time.Since(startedAt))
-	})
 }
 
 func normalizeIndexPage(page *dto.Page) *dto.Page {
@@ -65,10 +52,37 @@ func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
 	log.Println(args...)
 }
 
-var indexPageSfGroup singleflight.Group
+func categoryHomeMovies(version, sourceId string, cat *model.CategoryTree) (movies, hot []model.MovieBasicInfo, err error) {
+	field := "cid"
+	if cat != nil && len(cat.Children) > 0 {
+		field = "pid"
+	}
+	id := int64(0)
+	if cat != nil {
+		id = cat.Id
+	}
+	movies, err = filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, field, id, 14, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+	hot, err = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, field, id, 14, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if movies == nil {
+		movies = []model.MovieBasicInfo{}
+	}
+	if hot == nil {
+		hot = []model.MovieBasicInfo{}
+	}
+	return movies, hot, nil
+}
 
-// IndexPage 首页数据处理
-func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
+// IndexPage 首页数据处理。推荐片从热度池抽样，热播按热度排序，每次现算。
+func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) {
+	if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
+		return nil, err
+	}
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
@@ -78,225 +92,42 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) map[string]any {
 			sourceId = defSource.Id
 		}
 	}
-
 	version := filmsnapshot.GetActiveReadModelVersion()
-	ruleVersion := repository.GetRuleVersion()
-	var cacheKey string
-	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s:s%s:r%s:ck4", repository.GetVersionedIndexPageCacheKey(), sourceId, version, ruleVersion)
-	} else {
-		cacheKey = fmt.Sprintf("%s:s%s:r%s:ck4", repository.GetVersionedIndexPageCacheKey(), version, ruleVersion)
-	}
-
-	// 1. 尝试从 Redis 获取缓存
-	if version != "" && db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			res := make(map[string]any)
-			if json.Unmarshal([]byte(data), &res) == nil && res != nil {
-				res["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
-				overlayDynamicCategoryMovies(version, sourceId, res)
-				res["currentSource"] = sourceId
-				return res
+	tree := repository.GetActiveCategoryTree(sourceId)
+	list := make([]map[string]any, len(tree.Children))
+	var wg sync.WaitGroup
+	var errMu sync.Mutex
+	var pageErr error
+	for idx, c := range tree.Children {
+		wg.Add(1)
+		go func(i int, cat *model.CategoryTree) {
+			defer wg.Done()
+			movies, hot, err := categoryHomeMovies(version, sourceId, cat)
+			if err != nil {
+				errMu.Lock()
+				if pageErr == nil {
+					pageErr = err
+				}
+				errMu.Unlock()
+				return
 			}
-		}
+			list[i] = map[string]any{"nav": cat, "movies": movies, "hot": hot}
+		}(idx, c)
 	}
-
-	sfKey := "IndexPage:" + sourceId
-	val, err, _ := indexPageSfGroup.Do(sfKey, func() (any, error) {
-		// Double check 缓存
-		if version != "" && db.Rdb != nil {
-			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-				res := make(map[string]any)
-				if json.Unmarshal([]byte(data), &res) == nil && res != nil {
-					return res, nil
-				}
-			}
-		}
-
-		listGen := filmsnapshot.GetSearchCacheVersion()
-		info := make(map[string]any)
-		tree := repository.GetActiveCategoryTree(sourceId)
-		info["category"] = tree
-		info["currentSource"] = sourceId
-		list := make([]map[string]any, len(tree.Children))
-		var wg sync.WaitGroup
-		for idx, c := range tree.Children {
-			wg.Add(1)
-			go func(i int, cat *model.CategoryTree) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[IndexPage] 加载分类 %d 发生异常: %v", cat.Id, r)
-					}
-					wg.Done()
-				}()
-				var movies []model.MovieBasicInfo
-				var hotMovies []model.MovieBasicInfo
-				if len(cat.Children) > 0 {
-					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "pid", cat.Id, 14, 0)
-				} else {
-					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
-				}
-				if len(movies) == 0 {
-					movies = filmsnapshot.GetSnapshotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
-				}
-				if len(hotMovies) == 0 {
-					hotMovies = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, "cid", cat.Id, 14, 0)
-				}
-				if movies == nil {
-					movies = make([]model.MovieBasicInfo, 0)
-				}
-				if hotMovies == nil {
-					hotMovies = make([]model.MovieBasicInfo, 0)
-				}
-				list[i] = map[string]any{"nav": cat, "movies": movies, "hot": hotMovies}
-			}(idx, c)
-		}
-		wg.Wait()
-		info["content"] = list
-		banners := overlayBannerLiveRemarks(repository.GetBanners())
-		if banners == nil {
-			banners = make(model.Banners, 0)
-		}
-		info["banners"] = banners
-
-		// 2. 写入 Redis 缓存。检索世代变了就放弃，避免采集失效后把旧热播写回 24 小时。
-		if version != "" && db.Rdb != nil {
-			if data, err := json.Marshal(info); err == nil {
-				filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*24, listGen)
-			}
-		}
-		return info, nil
-	})
-
-	if err != nil || val == nil {
-		out := map[string]any{
-			"category":      repository.GetActiveCategoryTree(sourceId),
-			"content":       []map[string]any{},
-			"banners":       overlayBannerLiveRemarks(repository.GetBanners()),
-			"currentSource": sourceId,
-		}
-		overlayDynamicCategoryMovies(version, sourceId, out)
-		return out
+	wg.Wait()
+	if pageErr != nil {
+		return nil, pageErr
 	}
-
-	rawInfo, ok := val.(map[string]any)
-	if !ok {
-		return map[string]any{"currentSource": sourceId}
+	banners := overlayBannerLiveRemarks(repository.GetBanners())
+	if banners == nil {
+		banners = make(model.Banners, 0)
 	}
-	outInfo := make(map[string]any, len(rawInfo))
-	for k, v := range rawInfo {
-		outInfo[k] = v
-	}
-	outInfo["banners"] = overlayBannerLiveRemarks(repository.GetBanners())
-	outInfo["currentSource"] = sourceId
-	overlayDynamicCategoryMovies(version, sourceId, outInfo)
-	return outInfo
-}
-
-func extractCategoryID(nav any) (id int64, isPid bool) {
-	if nav == nil {
-		return 0, false
-	}
-	switch item := nav.(type) {
-	case model.CategoryTree:
-		return item.Id, len(item.Children) > 0
-	case *model.CategoryTree:
-		if item != nil {
-			return item.Id, len(item.Children) > 0
-		}
-	case map[string]any:
-		if v, ok := item["id"]; ok {
-			switch n := v.(type) {
-			case float64:
-				id = int64(n)
-			case int64:
-				id = n
-			case int:
-				id = int64(n)
-			}
-		}
-		if children, ok := item["children"]; ok && children != nil {
-			switch cList := children.(type) {
-			case []any:
-				isPid = len(cList) > 0
-			case []*model.CategoryTree:
-				isPid = len(cList) > 0
-			}
-		}
-	}
-	return id, isPid
-}
-
-func processDynamicRecommendSection(secMap map[string]any, version string, sourceId string) map[string]any {
-	itemCopy := make(map[string]any, len(secMap))
-	for k, v := range secMap {
-		itemCopy[k] = v
-	}
-	catID, isPid := extractCategoryID(itemCopy["nav"])
-	if catID > 0 {
-		field := "cid"
-		if isPid {
-			field = "pid"
-		}
-		dynamicMovies := filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, field, catID, 14, 50)
-		if len(dynamicMovies) == 0 && field == "pid" {
-			dynamicMovies = filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, "cid", catID, 14, 50)
-		}
-		if len(dynamicMovies) > 0 {
-			itemCopy["movies"] = dynamicMovies
-		}
-	}
-	return itemCopy
-}
-
-func overlayDynamicCategoryMovies(version string, sourceId string, outInfo map[string]any) {
-	rawContent, ok := outInfo["content"]
-	if !ok || rawContent == nil {
-		return
-	}
-
-	switch list := rawContent.(type) {
-	case []map[string]any:
-		newList := make([]map[string]any, len(list))
-		var wg sync.WaitGroup
-		for i, section := range list {
-			wg.Add(1)
-			go func(idx int, sec map[string]any) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[overlayDynamicCategoryMovies] 抽样板块发生异常: %v", r)
-					}
-					wg.Done()
-				}()
-				newList[idx] = processDynamicRecommendSection(sec, version, sourceId)
-			}(i, section)
-		}
-		wg.Wait()
-		outInfo["content"] = newList
-	case []any:
-		newList := make([]any, len(list))
-		var wg sync.WaitGroup
-		for i, rawSec := range list {
-			wg.Add(1)
-			go func(idx int, raw any) {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("[overlayDynamicCategoryMovies] 抽样板块发生异常: %v", r)
-					}
-					wg.Done()
-				}()
-				if secMap, ok := raw.(map[string]any); ok {
-					newList[idx] = processDynamicRecommendSection(secMap, version, sourceId)
-				} else {
-					newList[idx] = raw
-				}
-			}(i, rawSec)
-		}
-		wg.Wait()
-		outInfo["content"] = newList
-	}
+	return map[string]any{
+		"category":      tree,
+		"content":       list,
+		"banners":       banners,
+		"currentSource": sourceId,
+	}, nil
 }
 
 func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {

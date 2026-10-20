@@ -9,8 +9,8 @@ async function getCategoryData(pid: string) {
     if (response.code === 0) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch category overview data error:", error);
+  } catch {
+    // 后端未就绪时走空态
   }
 
   return null;

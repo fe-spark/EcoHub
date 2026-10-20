@@ -12,7 +12,6 @@ async function getCategoryFilterData(params: Record<string, string>) {
 
     return { data: null, error: response.msg || "分类筛选数据获取失败" };
   } catch (error) {
-    console.error("fetch category filter data error:", error);
     return {
       data: null,
       error: error instanceof Error ? error.message : "分类筛选数据获取失败",

@@ -41,8 +41,8 @@ export default async function PlayPage({
   let playPageData: any = null;
   try {
     playPageData = await getPlayData(filmId, sourceId, episodeIdx);
-  } catch (error) {
-    console.error("fetch play data error:", error);
+  } catch {
+    // 后端未就绪时走空态
   }
 
   if (!playPageData) {

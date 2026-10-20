@@ -24,6 +24,8 @@ import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import { FailRecord, FAILURE_RECORD_STATUS } from "./types";
 import { getRecordColumns, normalizeStatusOptionLabel } from "./columns";
+import { applyRecordRetry, applyRecordSnapshot, RecordRetryEvent } from "./record-retry-state";
+import { useRecordStream } from "./use-record-stream";
 import styles from "./index.module.less";
 
 const { RangePicker } = DatePicker;
@@ -31,7 +33,8 @@ const { RangePicker } = DatePicker;
 export default function FailureRecordPageView() {
   const [records, setRecords] = useState<FailRecord[]>([]);
   const [loading, setLoading] = useState(false);
-  const [queuedRetryIds, setQueuedRetryIds] = useState<Set<number>>(() => new Set());
+  const [retryingIds, setRetryingIds] = useState<Set<number>>(() => new Set());
+  const [heldIds, setHeldIds] = useState<Set<number>>(() => new Set());
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [batchRetrying, setBatchRetrying] = useState(false);
   const [page, setPage] = useState({ current: 1, pageSize: 10, total: 0 });
@@ -50,10 +53,13 @@ export default function FailureRecordPageView() {
 
   const pageRef = useRef(page);
   const paramsRef = useRef(params);
-  useEffect(() => {
-    pageRef.current = page;
-    paramsRef.current = params;
-  }, [page, params]);
+  const recordsRef = useRef(records);
+  const retryingRef = useRef(retryingIds);
+  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  pageRef.current = page;
+  paramsRef.current = params;
+  recordsRef.current = records;
+  retryingRef.current = retryingIds;
 
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
@@ -72,7 +78,9 @@ export default function FailureRecordPageView() {
           pageSize: pg.pageSize,
         });
         if (resp.code === 0) {
-          setRecords(resp.data.list || []);
+          const list = resp.data.list || [];
+          recordsRef.current = list;
+          setRecords(list);
           if (resp.data.params?.paging) {
             setPage((prev) => ({
               ...prev,
@@ -100,35 +108,91 @@ export default function FailureRecordPageView() {
     [],
   );
 
+  const scheduleRefetch = useCallback(() => {
+    if (refetchTimer.current) {
+      clearTimeout(refetchTimer.current);
+    }
+    refetchTimer.current = setTimeout(() => {
+      refetchTimer.current = null;
+      void getRecords(undefined, undefined, true);
+    }, 300);
+  }, [getRecords]);
+
   useEffect(() => {
     void getRecords();
+    return () => {
+      if (refetchTimer.current) {
+        clearTimeout(refetchTimer.current);
+      }
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const releaseHold = useCallback((id: number) => {
+    setHeldIds((prev) => {
+      if (!prev.has(id)) {
+        return prev;
+      }
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }, []);
+
+  const onSnapshot = useCallback((inflightIds: number[]) => {
+    const pageIds = recordsRef.current.map((row) => row.ID);
+    const next = applyRecordSnapshot(pageIds, inflightIds);
+    retryingRef.current = next;
+    setRetryingIds(next);
+    setHeldIds((prev) => {
+      if (prev.size === 0) {
+        return prev;
+      }
+      const keep = new Set<number>();
+      for (const id of prev) {
+        if (next.has(id)) {
+          keep.add(id);
+        }
+      }
+      return keep.size === prev.size ? prev : keep;
+    });
+  }, []);
+
+  const onRecord = useCallback((ev: RecordRetryEvent) => {
+    releaseHold(ev.id);
+    const view = applyRecordRetry(
+      recordsRef.current,
+      retryingRef.current,
+      ev,
+      paramsRef.current.status,
+    );
+    recordsRef.current = view.records;
+    retryingRef.current = view.retrying;
+    setRecords(view.records);
+    setRetryingIds(view.retrying);
+    if (view.refetch) {
+      setSelectedRowKeys((prev) => prev.filter((key) => Number(key) !== ev.id));
+      scheduleRefetch();
+    }
+  }, [releaseHold, scheduleRefetch]);
+
+  const recordIds = useMemo(() => records.map((row) => row.ID), [records]);
+  useRecordStream(recordIds, { onSnapshot, onRecord });
+
   const handleRetry = useCallback(
     async (id: number) => {
-      setQueuedRetryIds((prev) => new Set(prev).add(id));
+      setHeldIds((prev) => new Set(prev).add(id));
       const resp = await ApiPost("/manage/collect/record/retry", { id });
       if (resp.code === 0) {
         message.success("重试任务已加入队列");
-        window.setTimeout(() => {
-          setQueuedRetryIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
-          void getRecords(undefined, undefined, true);
-        }, 3000);
-      } else {
-        setQueuedRetryIds((prev) => {
-          const next = new Set(prev);
-          next.delete(id);
-          return next;
-        });
-        message.error(resp.msg);
+        return;
       }
+      if (resp.msg !== "正在重试中") {
+        releaseHold(id);
+      }
+      message.error(resp.msg);
     },
-    [getRecords, message],
+    [message, releaseHold],
   );
 
   const handleRetrySelected = async () => {
@@ -141,7 +205,7 @@ export default function FailureRecordPageView() {
     }
 
     const targetIds = targets.map((t) => t.ID);
-    setQueuedRetryIds((prev) => {
+    setHeldIds((prev) => {
       const next = new Set(prev);
       targetIds.forEach((id) => next.add(id));
       return next;
@@ -157,54 +221,24 @@ export default function FailureRecordPageView() {
         successCount++;
       } else {
         failCount++;
+        if (resp.msg !== "正在重试中") {
+          releaseHold(target.ID);
+        }
       }
     }
 
     setBatchRetrying(false);
     setSelectedRowKeys([]);
     message.success(`已提交重试任务：成功 ${successCount} 条，失败 ${failCount} 条`);
-
-    window.setTimeout(() => {
-      setQueuedRetryIds((prev) => {
-        const next = new Set(prev);
-        targetIds.forEach((id) => next.delete(id));
-        return next;
-      });
-      void getRecords(undefined, undefined, true);
-    }, 3000);
   };
 
   const handleRetryAll = async () => {
-    const pendingIds = records
-      .filter((r) => r.status === FAILURE_RECORD_STATUS.pending)
-      .map((r) => r.ID);
-    setQueuedRetryIds((prev) => {
-      const next = new Set(prev);
-      pendingIds.forEach((id) => next.add(id));
-      return next;
-    });
-
     const resp = await ApiPost("/manage/collect/record/retry/all", {});
     if (resp.code !== 0) {
-      setQueuedRetryIds((prev) => {
-        const next = new Set(prev);
-        pendingIds.forEach((id) => next.delete(id));
-        return next;
-      });
       message.error(resp.msg);
       return;
     }
-
-    message.success(resp.msg || "已触发全量待处理项重试，系统正在后台并发执行");
-
-    window.setTimeout(() => {
-      setQueuedRetryIds((prev) => {
-        const next = new Set(prev);
-        pendingIds.forEach((id) => next.delete(id));
-        return next;
-      });
-      void getRecords(undefined, undefined, true);
-    }, 4000);
+    message.success(resp.msg || "已触发全量待处理项重试");
   };
 
   const handleCleanResult = async () => {
@@ -236,6 +270,12 @@ export default function FailureRecordPageView() {
     setPage(newPage);
     void getRecords(newPage, next);
   };
+
+  const queuedRetryIds = useMemo(() => {
+    const next = new Set(retryingIds);
+    heldIds.forEach((id) => next.add(id));
+    return next;
+  }, [retryingIds, heldIds]);
 
   const columns = useMemo(
     () =>

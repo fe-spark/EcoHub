@@ -2,9 +2,13 @@ package handler
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"time"
 
+	"server/internal/model/dto"
 	"server/internal/service"
+	"server/internal/spider"
 	"server/internal/spider/progress"
 
 	"github.com/gin-gonic/gin"
@@ -69,6 +73,84 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 			}
 			if err := stream.SendEvent("source_delete", evt); err != nil {
 				if errors.Is(err, errSSEWrite) {
+					return
+				}
+			}
+		case <-heartbeat.C:
+			if err := stream.Comment("ping"); err != nil {
+				return
+			}
+		}
+	}
+}
+
+const recordStreamIDLimit = 500
+
+func parseRecordStreamIDs(raw string) ([]uint, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, errors.New("缺少当前页记录")
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > recordStreamIDLimit {
+		return nil, errors.New("当前页记录过多")
+	}
+	ids := make([]uint, 0, len(parts))
+	seen := make(map[uint]struct{}, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		n, err := strconv.ParseUint(part, 10, 64)
+		if err != nil || n == 0 {
+			return nil, errors.New("记录编号无效")
+		}
+		id := uint(n)
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil, errors.New("缺少当前页记录")
+	}
+	return ids, nil
+}
+
+// RecordStream 只推当前页失败记录的重试状态。
+func (h *CollectHandler) RecordStream(c *gin.Context) {
+	ids, err := parseRecordStreamIDs(c.Query("ids"))
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	stream, ok := openSSE(c)
+	if !ok {
+		return
+	}
+	ctx := c.Request.Context()
+	events := spider.SubscribeFailureRetry(ctx, ids)
+	inflight := make([]uint, 0)
+	for _, ev := range spider.FailureRetrySnapshot(ids) {
+		inflight = append(inflight, ev.ID)
+	}
+	if err := stream.SendEvent("record_snapshot", gin.H{"ids": inflight}); err != nil && errors.Is(err, errSSEWrite) {
+		return
+	}
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case batch, ok := <-events:
+			if !ok {
+				return
+			}
+			for _, ev := range batch {
+				if err := stream.SendEvent("record", ev); err != nil && errors.Is(err, errSSEWrite) {
 					return
 				}
 			}

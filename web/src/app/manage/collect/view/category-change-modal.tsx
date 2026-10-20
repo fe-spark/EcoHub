@@ -49,7 +49,7 @@ export default function CategoryChangeModal(props: CategoryChangeModalProps) {
           清空该站数据
         </Button>,
       ]}
-      destroyOnClose
+      destroyOnHidden
     >
       <div style={{ display: "flex", flexDirection: "column", gap: 12, padding: "12px 0" }}>
         <Text type="secondary">选择处理方式</Text>
@@ -63,7 +63,7 @@ export default function CategoryChangeModal(props: CategoryChangeModalProps) {
             border: "1px solid rgba(0, 0, 0, 0.06)",
           }}
         >
-          <Space direction="vertical" size={6} style={{ width: "100%" }}>
+          <Space orientation="vertical" size={6} style={{ width: "100%" }}>
             {displayChanges.map((change, idx) => (
               <div key={`${change.typeId}-${change.kind}-${idx}`}>
                 <Text>{formatCategoryChangeText(change)}</Text>

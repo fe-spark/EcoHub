@@ -24,9 +24,6 @@ import (
 	"server/internal/utils"
 )
 
-// recoverMaxRetryCount 失败页重试的最大轮次。
-const recoverMaxRetryCount = 3
-
 func collectFilmById(ids string, s *model.FilmSource, batchCtx *collectBatchContext) (changedMids []int64, retErr error) {
 	if s == nil {
 		return nil, errors.New("采集站信息不存在")
@@ -170,6 +167,18 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	if s == nil || fr == nil {
 		return
 	}
+	beginFailureRetry(fr.ID)
+	settled := false
+	finish := func(removed bool, status, retryCount int, cause string, hasResult bool) {
+		if settled {
+			return
+		}
+		settled = true
+		settleFailureRetry(fr.ID, removed, status, retryCount, cause, hasResult)
+	}
+	defer func() {
+		finish(false, fr.Status, fr.RetryCount, fr.Cause, false)
+	}()
 	select {
 	case <-ctx.Done():
 		return
@@ -186,7 +195,10 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		if batchCtx != nil && err != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
 		}
-		markRecoverFailure(s, fr, "recover_fetch", err)
+		status, retryCount, cause, wrote := markRecoverFailure(s, fr, "recover_fetch", err)
+		if wrote {
+			finish(false, status, retryCount, cause, true)
+		}
 		log.Println("Recover GetMovieDetail Error: ", err)
 		return
 	}
@@ -196,7 +208,10 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		if batchCtx != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
 		}
-		markRecoverFailure(s, fr, "recover_save", err)
+		status, retryCount, cause, wrote := markRecoverFailure(s, fr, "recover_save", err)
+		if wrote {
+			finish(false, status, retryCount, cause, true)
+		}
 		log.Println("Recover saveCollectedFilm Error: ", err)
 		return
 	}
@@ -205,24 +220,39 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		batchCtx.AddNotifyMIDs(s.Id, written.Notify)
 	}
 	repository.DeleteFailureRecord(fr)
+	finish(true, model.FailureRecordStatusSuccess, fr.RetryCount, "", true)
 }
 
-func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) {
+func markRecoverFailure(s *model.FilmSource, fr *model.FailureRecord, phase string, err error) (status, retryCount int, cause string, wrote bool) {
 	if err == nil {
 		err = errors.New("unknown error")
 	}
-	cause := fmt.Sprintf("%s: %v", phase, err)
-	final, retryCount, updateErr := repository.MarkFailureRecordRetryFailed(fr, cause, recoverMaxRetryCount)
+	cause = fmt.Sprintf("%s: %v", phase, err)
+	final, count, updateErr := repository.MarkFailureRecordRetryFailed(fr, cause, model.MaxFailureRetryCount)
 	if updateErr != nil {
 		syslog.Errorf("[Spider][Recover] 失败记录更新失败 source_id=%s source=%s page=%d hour=%d err=%v", s.Id, s.Name, fr.PageNumber, fr.Hour, updateErr)
-		return
+		return 0, 0, "", false
 	}
 	if final {
-		syslog.Warnf("[Spider][Recover] 失败页达到最大自动重试次数 source_id=%s source=%s page=%d hour=%d retry_count=%d", s.Id, s.Name, fr.PageNumber, fr.Hour, retryCount)
+		syslog.Warnf("[Spider][Recover] 失败页达到最大自动重试次数 source_id=%s source=%s page=%d hour=%d retry_count=%d", s.Id, s.Name, fr.PageNumber, fr.Hour, count)
 	}
+	status = model.FailureRecordStatusPending
+	if final {
+		status = model.FailureRecordStatusFailed
+	}
+	return status, count, cause, true
 }
 
 func SingleRecoverSpider(fr *model.FailureRecord) {
+	if fr == nil {
+		return
+	}
+	ran := false
+	defer func() {
+		if !ran {
+			abandonFailureRetry(fr.ID)
+		}
+	}()
 	s := repository.FindCollectSourceById(fr.OriginId)
 	if s == nil {
 		syslog.Errorf("[Spider] 重试失败: 站点 %s 不存在", fr.OriginId)
@@ -246,6 +276,7 @@ func SingleRecoverSpider(fr *model.FailureRecord) {
 	}
 	defer collectLifecycle.endSource(s.Id)
 
+	ran = true
 	recoverFilmPage(context.Background(), s, fr, batchCtx)
 	batchCtx.markSourceFinished(*s)
 	if err := batchCtx.flushAndFinalize(); err != nil {
@@ -301,16 +332,9 @@ func FullRecoverSpider() {
 	for _, source := range sourcesToFlush {
 		claimed[source.Id] = struct{}{}
 	}
+	jobs := queueRecoverJobs(recordsBySource, sourceByID, claimed)
 	batchCtx := newCollectBatchContext(model.CollectTriggerRecover, "FullRecoverSpider", sourcesToFlush, startedAt)
-	for sourceID, records := range recordsBySource {
-		src, ok := sourceByID[sourceID]
-		if !ok {
-			continue
-		}
-		if _, ok := claimed[sourceID]; !ok {
-			continue
-		}
-		recordsCopy := append([]model.FailureRecord(nil), records...)
+	for _, job := range jobs {
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(source model.FilmSource, pending []model.FailureRecord) {
@@ -319,6 +343,9 @@ func FullRecoverSpider() {
 			defer batchCtx.releaseSourceOccupy(source.Id)
 			if err := collectLifecycle.beginSource(source.Id); err != nil {
 				syslog.Errorf("[Spider] 站点 %s 无法启动失败页重试: %v", source.Id, err)
+				for i := range pending {
+					abandonFailureRetry(pending[i].ID)
+				}
 				return
 			}
 			defer collectLifecycle.endSource(source.Id)
@@ -332,7 +359,7 @@ func FullRecoverSpider() {
 					syslog.Errorf("[FullRecoverSpider] 首选站 %s 缓存刷新失败: %v", source.Name, err)
 				}
 			}
-		}(src, recordsCopy)
+		}(job.source, job.records)
 	}
 	wg.Wait()
 	if err := batchCtx.flushAndFinalize(); err != nil {

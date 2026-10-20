@@ -129,18 +129,18 @@ func TestDailyUpdates_CacheBehavior(t *testing.T) {
 	if len(res1.Categories) == 0 {
 		t.Fatalf("expected categories not empty")
 	}
-
-	// 2. 验证缓存已写入 Redis
+	if res1.Page.Total != 1 {
+		t.Fatalf("want total 1, got %d", res1.Page.Total)
+	}
 	catKey := config.DailyUpdatesCatCacheKey
-	if !mr.Exists(catKey) {
-		t.Fatalf("expected category cache key %s to exist in redis", catKey)
+	if mr.Exists(catKey) {
+		t.Fatalf("category cache %s must not be written", catKey)
 	}
 	pageKey := fmt.Sprintf("%s:p0:c1:s21", config.DailyUpdatesCachePrefix)
-	if !mr.Exists(pageKey) {
-		t.Fatalf("expected page cache key %s to exist in redis", pageKey)
+	if mr.Exists(pageKey) {
+		t.Fatalf("page cache %s must not be written", pageKey)
 	}
 
-	// 3. 再次调用验证直接走缓存
 	res2, err := IndexSvc.DailyUpdates(req)
 	if err != nil {
 		t.Fatalf("second DailyUpdates call failed: %v", err)
@@ -194,4 +194,3 @@ func TestDailyUpdates_PrimarySourceCategoryIsolation(t *testing.T) {
 		t.Fatalf("src_b unexpected result: total=%d cats=%+v", resB.Page.Total, resB.Categories)
 	}
 }
-

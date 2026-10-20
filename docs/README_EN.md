@@ -56,7 +56,7 @@ Visitors log in with `guest` / `guest`. This account is read-only and cannot sav
 | --- | --- | --- |
 | LiangXinYun | As low as ¥2/mo <br>New users receive trial traffic | [Register](https://xn--9kqz23b19z.com/#/register?code=xAmvfdic) |
 | PeiQian Airport | As low as ¥1.5/mo <br>Suitable for high traffic and backup use | [Register](https://xn--mes358aby2apfg.com/register?code=FA4xlzHD&cover=sfw) |
-| iKuuu | Long-running stable airport <br>New users receive trial traffic | [Register](https://ikuuu.top/auth/register?code=Uubm) |
+| DOVE |  | [Register](https://dovee.cc/a.php?asbcbO1PCgTx2JM66) |
 
 ## Quick start
 

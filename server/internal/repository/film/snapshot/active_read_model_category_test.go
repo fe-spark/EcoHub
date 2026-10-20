@@ -251,7 +251,10 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	if len(got) != 1 || got[0].Id != 501 {
 		t.Fatalf("latest drama list = %+v, want mid 501", got)
 	}
-	hot := GetSnapshotHotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 2, 14, 0)
+	hot, err := GetSnapshotHotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 2, 14, 0)
+	if err != nil {
+		t.Fatalf("hot list: %v", err)
+	}
 	if len(hot) != 1 || hot[0].Id != 501 {
 		t.Fatalf("hot drama list = %+v, want mid 501", hot)
 	}
@@ -396,7 +399,7 @@ func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 20}
-	searched := ListFilmSnapshotsByTagsReadModel("vtest", model.SearchTagsVO{Pid: 21, SourceId: "src_new"}, page)
+	searched := mustListTags(t, "vtest", model.SearchTagsVO{Pid: 21, SourceId: "src_new"}, page)
 	if page.Total != 2 || len(searched) != 2 || searched[0].Mid != 21 || searched[1].Mid != 22 {
 		t.Fatalf("library pid 21 = total %d %+v, want mids 21 then 22", page.Total, searched)
 	}

@@ -132,7 +132,7 @@ const (
 	// FailureRecordStatusFailed 本次重试已失败，不再进入后续定时队列。
 	FailureRecordStatusFailed = 2
 
-	MaxFailureRetryCount = 3
+	MaxFailureRetryCount = 5
 )
 
 func (FailureRecord) TableName() string {

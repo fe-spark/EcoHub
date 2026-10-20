@@ -191,27 +191,30 @@ export default function AccessPageView() {
 
             {/* 刷新与自动轮询组合 */}
             {isToday ? (
-              <Dropdown.Button
-                icon={<DownOutlined />}
-                onClick={handleManualRefresh}
-                menu={{
-                  items: refreshMenuItems,
-                  selectable: true,
-                  selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
-                  onClick: handleMenuClick,
-                }}
-              >
-                <Space size={6} align="center">
-                  <ReloadOutlined spin={isRefreshing} />
-                  <span>刷新</span>
-                  {autoRefresh && (
-                    <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
-                      {refreshInterval}s
-                    </span>
-                  )}
-                  <Badge status={autoRefresh ? "processing" : "default"} />
-                </Space>
-              </Dropdown.Button>
+              <Space.Compact>
+                <Button onClick={handleManualRefresh}>
+                  <Space size={6} align="center">
+                    <ReloadOutlined spin={isRefreshing} />
+                    <span>刷新</span>
+                    {autoRefresh && (
+                      <span style={{ fontSize: 12, color: "var(--ant-color-text-tertiary)" }}>
+                        {refreshInterval}s
+                      </span>
+                    )}
+                    <Badge status={autoRefresh ? "processing" : "default"} />
+                  </Space>
+                </Button>
+                <Dropdown
+                  menu={{
+                    items: refreshMenuItems,
+                    selectable: true,
+                    selectedKeys: autoRefresh ? [String(refreshInterval)] : [],
+                    onClick: handleMenuClick,
+                  }}
+                >
+                  <Button icon={<DownOutlined />} />
+                </Dropdown>
+              </Space.Compact>
             ) : (
               <Button icon={<ReloadOutlined spin={isRefreshing} />} onClick={handleManualRefresh}>
                 刷新

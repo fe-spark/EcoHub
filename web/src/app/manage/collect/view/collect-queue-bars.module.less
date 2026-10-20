@@ -1,0 +1,260 @@
+.queueList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.queueCard {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px 10px 16px;
+  background: var(--ant-color-bg-container);
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
+  transition: all 0.2s ease;
+
+  &::before {
+    content: "";
+    position: absolute;
+    top: 8px;
+    bottom: 8px;
+    left: 0;
+    width: 3px;
+    border-radius: 0 3px 3px 0;
+    background: var(--ant-color-border-secondary);
+    transition: background 0.2s ease;
+  }
+}
+
+.queueRunning {
+  background: linear-gradient(
+    180deg,
+    rgba(250, 140, 22, 0.035) 0%,
+    var(--ant-color-bg-container) 100%
+  );
+  border-color: rgba(250, 140, 22, 0.28);
+  box-shadow: 0 2px 8px -2px rgba(250, 140, 22, 0.1), 0 1px 2px rgba(0, 0, 0, 0.03);
+
+  &::before {
+    background: var(--ant-color-primary, #fa8c16);
+  }
+}
+
+.queueSuccess {
+  &::before {
+    background: #52c41a;
+  }
+}
+
+.queueException {
+  border-color: rgba(255, 77, 79, 0.28);
+
+  &::before {
+    background: #ff4d4f;
+  }
+}
+
+.queueMain {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.queueHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.queueTitle {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  color: var(--ant-color-text);
+  white-space: nowrap;
+}
+
+/* 紧凑状态胶囊 */
+.statusPill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.statusDot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.statusRunning {
+  color: #fa8c16;
+  background: rgba(250, 140, 22, 0.1);
+
+  .statusDot {
+    animation: statusPulse 1.2s ease-in-out infinite;
+  }
+}
+
+.statusStopping {
+  color: #faad14;
+  background: rgba(250, 173, 20, 0.1);
+
+  .statusDot {
+    animation: statusPulse 1.2s ease-in-out infinite;
+  }
+}
+
+.statusSuccess {
+  color: #52c41a;
+  background: rgba(82, 196, 26, 0.1);
+}
+
+.statusException {
+  color: #ff4d4f;
+  background: rgba(255, 77, 79, 0.1);
+}
+
+@keyframes statusPulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.queuePages {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  font-size: 12px;
+  line-height: 20px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.pageDoneNum {
+  font-weight: 700;
+  color: var(--ant-color-text);
+}
+
+.pageTotalNum {
+  color: var(--ant-color-text-tertiary);
+}
+
+.queueTags {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.microTag {
+  margin-inline-end: 0 !important;
+  line-height: 18px !important;
+  padding-inline: 6px !important;
+  font-size: 11px !important;
+}
+
+.stationTag {
+  color: var(--ant-color-text-secondary);
+  background: var(--ant-color-fill-quaternary);
+}
+
+.progressRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+
+.progressBar {
+  flex: 1 1 auto;
+  min-width: 0;
+  line-height: 1;
+}
+
+.percentNum {
+  flex: none;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  min-width: 36px;
+  text-align: right;
+}
+
+.percentRunning {
+  color: var(--ant-color-primary, #fa8c16);
+}
+
+.percentSuccess {
+  color: #52c41a;
+}
+
+.percentException {
+  color: #ff4d4f;
+}
+
+/* 横幅最右侧关闭操作区（带垂直分割线与左右对称呼吸间距） */
+.queueCloseWrap {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-self: stretch;
+  margin-inline-start: 2px;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--ant-color-border-secondary);
+}
+
+.queueCloseBtn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  color: var(--ant-color-text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover:not(:disabled) {
+    color: var(--ant-color-error, #ff4d4f);
+    background: rgba(255, 77, 79, 0.08);
+  }
+}
+
+@media (max-width: 640px) {
+  .queueCard {
+    padding: 8px 10px;
+    gap: 8px;
+  }
+
+  .queueCloseWrap {
+    padding-inline-start: 8px;
+  }
+}

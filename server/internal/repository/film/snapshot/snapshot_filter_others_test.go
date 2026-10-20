@@ -103,7 +103,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 	// 验证 1: 常规筛选 Area=中国大陆 -> 仅命中 Mid=1
 	{
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆"}, page)
+		res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆"}, page)
 		if len(res) != 1 || res[0].Mid != 1 {
 			t.Fatalf("expected only Mid=1, got %+v", res)
 		}
@@ -115,7 +115,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 	// 验证 2: Area=others 筛选 -> 应命中 Mid=3, 4（排除 Mid=1, 2）
 	{
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: "others"}, page)
+		res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Area: "others"}, page)
 		if len(res) != 2 {
 			t.Fatalf("Area=others: expected 2 results, got %d: %+v", len(res), res)
 		}
@@ -128,7 +128,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 	// 验证 3: Language=others 筛选 -> 应命中 Mid=2, 3, 4（排除 Mid=1）
 	{
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Language: "others"}, page)
+		res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Language: "others"}, page)
 		if len(res) != 3 {
 			t.Fatalf("Language=others: expected 3 results, got %d", len(res))
 		}
@@ -142,7 +142,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 	// 验证 4: Year=others 筛选 -> 应命中 Mid=3, 4
 	{
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Year: "others"}, page)
+		res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Year: "others"}, page)
 		if len(res) != 2 {
 			t.Fatalf("Year=others: expected 2 results, got %d", len(res))
 		}
@@ -157,7 +157,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 	// Mid=6 的「动作,科幻」含可见标签「动作」，因此不命中。
 	{
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Plot: "others"}, page)
+		res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Plot: "others"}, page)
 		if len(res) != 2 {
 			t.Fatalf("Plot=others: expected 2 results, got %d", len(res))
 		}
@@ -181,7 +181,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 			Year:     "others",
 			Plot:     "others",
 		}
-		res := ListFilmSnapshotsByTagsReadModel(version, st, page)
+		res := mustListTags(t, version, st, page)
 		if len(res) != 2 {
 			t.Fatalf("All others: expected 2 results (Mid 3 and 4), got %d (all data leaked!)", len(res))
 		}
@@ -199,7 +199,7 @@ func TestListFilmSnapshotsByTags_OthersFilter(t *testing.T) {
 		aliases := []string{model.TagOthersValue, "其他", "其它", "other"}
 		for _, alias := range aliases {
 			page := &dto.Page{Current: 1, PageSize: 10}
-			res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: alias}, page)
+			res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Area: alias}, page)
 			if len(res) != 2 {
 				t.Fatalf("alias %q: expected 2 results, got %d", alias, len(res))
 			}
@@ -241,7 +241,7 @@ func TestListFilmSnapshotsByTags_OthersFilter_OverDisplayLimit(t *testing.T) {
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
-	res := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: model.TagOthersValue}, page)
+	res := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid, Area: model.TagOthersValue}, page)
 	if len(res) != 2 {
 		t.Fatalf("Area=others: expected 2 results (Mid 2 and 3), got %d: %+v", len(res), res)
 	}
@@ -285,7 +285,7 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 
 	// 第 1 页: 每页 2 条，预期返回 Mid 5, 4 (默认 update_stamp DESC)
 	p1 := &dto.Page{Current: 1, PageSize: 2}
-	res1 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p1)
+	res1 := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid}, p1)
 	if len(res1) != 2 || p1.Total != 5 || p1.PageCount != 3 {
 		t.Fatalf("Page 1 error: got len=%d total=%d pageCount=%d, expected len=2 total=5 pageCount=3", len(res1), p1.Total, p1.PageCount)
 	}
@@ -295,7 +295,7 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 
 	// 第 2 页: 每页 2 条，预期返回 Mid 3, 2
 	p2 := &dto.Page{Current: 2, PageSize: 2}
-	res2 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p2)
+	res2 := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid}, p2)
 	if len(res2) != 2 || p2.Total != 5 || p2.PageCount != 3 {
 		t.Fatalf("Page 2 error: got len=%d total=%d pageCount=%d, expected len=2 total=5 pageCount=3", len(res2), p2.Total, p2.PageCount)
 	}
@@ -305,7 +305,7 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 
 	// 第 3 页: 每页 2 条，最后一页预期返回 Mid 1
 	p3 := &dto.Page{Current: 3, PageSize: 2}
-	res3 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p3)
+	res3 := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid}, p3)
 	if len(res3) != 1 || p3.Total != 5 || p3.PageCount != 3 {
 		t.Fatalf("Page 3 error: got len=%d total=%d pageCount=%d, expected len=1 total=5 pageCount=3", len(res3), p3.Total, p3.PageCount)
 	}
@@ -315,8 +315,17 @@ func TestListFilmSnapshotsByTags_Pagination(t *testing.T) {
 
 	// 第 4 页: 超出范围，预期返回空列表，但 Total 与 PageCount 仍正确
 	p4 := &dto.Page{Current: 4, PageSize: 2}
-	res4 := ListFilmSnapshotsByTagsReadModel(version, model.SearchTagsVO{Pid: targetPid}, p4)
+	res4 := mustListTags(t, version, model.SearchTagsVO{Pid: targetPid}, p4)
 	if len(res4) != 0 || p4.Total != 5 || p4.PageCount != 3 {
 		t.Fatalf("Page 4 error: got len=%d total=%d pageCount=%d, expected len=0 total=5 pageCount=3", len(res4), p4.Total, p4.PageCount)
 	}
+}
+
+func mustListTags(t *testing.T, version string, st model.SearchTagsVO, page *dto.Page) []model.FilmListSnapshot {
+	t.Helper()
+	res, err := ListFilmSnapshotsByTagsReadModel(version, st, page)
+	if err != nil {
+		t.Fatalf("分类检索失败: %v", err)
+	}
+	return res
 }

@@ -25,19 +25,19 @@ func TestListProvideSnapshots_TagFilter(t *testing.T) {
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
-	res := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆"}, "", 0, page)
+	res := mustProvide(t, version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆"}, "", 0, page)
 	if len(res) != 2 || page.Total != 2 {
 		t.Fatalf("Area=中国大陆: expected 2, got len=%d total=%d", len(res), page.Total)
 	}
 
 	page2 := &dto.Page{Current: 1, PageSize: 10}
-	res2 := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆", Plot: "动作"}, "", 0, page2)
+	res2 := mustProvide(t, version, model.SearchTagsVO{Pid: targetPid, Area: "中国大陆", Plot: "动作"}, "", 0, page2)
 	if len(res2) != 1 || page2.Total != 1 || res2[0].Mid != 1 {
 		t.Fatalf("Area+Plot: expected only Mid=1, got %+v total=%d", res2, page2.Total)
 	}
 
 	page3 := &dto.Page{Current: 1, PageSize: 10}
-	res3 := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{Pid: targetPid, Area: "美国"}, "动作片", 0, page3)
+	res3 := mustProvide(t, version, model.SearchTagsVO{Pid: targetPid, Area: "美国"}, "动作片", 0, page3)
 	if len(res3) != 1 || page3.Total != 1 || res3[0].Mid != 2 {
 		t.Fatalf("keyword+Area: expected only Mid=2, got %+v total=%d", res3, page3.Total)
 	}
@@ -83,19 +83,19 @@ func TestListProvideSnapshots_SourceTypeNotLocalID(t *testing.T) {
 	}
 
 	page := &dto.Page{Current: 1, PageSize: 10}
-	res := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{SourceId: "src_tv", Pid: 2}, "", 0, page)
+	res := mustProvide(t, version, model.SearchTagsVO{SourceId: "src_tv", Pid: 2}, "", 0, page)
 	if len(res) != 1 || res[0].Mid != 1 {
 		t.Fatalf("source type 2: got %+v total=%d", res, page.Total)
 	}
 
 	pageLocal := &dto.Page{Current: 1, PageSize: 10}
-	local := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{Pid: 90}, "", 0, pageLocal)
+	local := mustProvide(t, version, model.SearchTagsVO{Pid: 90}, "", 0, pageLocal)
 	if len(local) != 1 || local[0].Mid != 1 {
 		t.Fatalf("local pid 90: got %+v total=%d", local, pageLocal.Total)
 	}
 
 	pageMiss := &dto.Page{Current: 1, PageSize: 10}
-	miss := ListProvideSnapshotsReadModel(version, model.SearchTagsVO{SourceId: "src_tv", Pid: 90}, "", 0, pageMiss)
+	miss := mustProvide(t, version, model.SearchTagsVO{SourceId: "src_tv", Pid: 90}, "", 0, pageMiss)
 	if len(miss) != 0 || pageMiss.Total != 0 {
 		t.Fatalf("local id must not match this source type, got %+v total=%d", miss, pageMiss.Total)
 	}
@@ -120,4 +120,13 @@ func TestGetSnapshotByMid_UnscopedIncludesSoftDeleted(t *testing.T) {
 	if len(rows) != 0 {
 		t.Fatalf("软删影片不应出现在列表, got %+v", rows)
 	}
+}
+
+func mustProvide(t *testing.T, version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) []model.FilmListSnapshot {
+	t.Helper()
+	res, err := ListProvideSnapshotsReadModel(version, st, keyword, recentHours, page)
+	if err != nil {
+		t.Fatalf("采集输出检索失败: %v", err)
+	}
+	return res
 }

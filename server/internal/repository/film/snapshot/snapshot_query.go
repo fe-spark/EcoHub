@@ -159,19 +159,19 @@ func GetSnapshotMovieListByCategoryPageWithSource(version string, sourceId strin
 	return GetSnapshotMovieListByCategoryPageWithSourceReadModel(version, sourceId, field, id, page)
 }
 
-func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
 }
 
-func GetSnapshotHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
 }
 
-func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotDynamicHotMovieListByCategoryReadModel(version, field, id, limit, poolSize)
 }
 
-func GetSnapshotDynamicHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotDynamicHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, poolSize)
 }
 

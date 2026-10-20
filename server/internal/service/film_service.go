@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"log"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -19,7 +18,7 @@ type FilmService struct{}
 var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
-func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
+func (s *FilmService) GetFilmPage(vo model.SearchVo) ([]model.FilmIndex, error) {
 	if strings.TrimSpace(vo.SourceId) == "" {
 		if activeSrc := repository.GetActiveCollectSource(); activeSrc != nil {
 			vo.SourceId = activeSrc.Id
@@ -30,7 +29,6 @@ func (s *FilmService) GetFilmPage(vo model.SearchVo) []model.FilmIndex {
 
 // GetSearchOptions 获取影片检索的select的选项options
 func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
-	startedAt := time.Now()
 	options := make(map[string]any)
 
 	var sourceId string
@@ -54,21 +52,6 @@ func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
 	options["currentSourceId"] = sourceId
 	options["class"] = converter.ConvertCategoryList(&tree)
 	options["categoryTree"] = tree.Children
-	options["year"] = make([]map[string]string, 0)
-	tagGroup := filmsnapshot.GetAdminFilterOptionSnapshots()
-	if tree.Children != nil {
-		for _, t := range tree.Children {
-			option := tagGroup[t.Id]
-			if len(option) == 0 {
-				continue
-			}
-			if v, ok := options["year"].([]map[string]string); !ok || len(v) == 0 {
-				options["year"] = option["Year"]
-			}
-		}
-	}
-	options["tags"] = tagGroup
-	log.Printf("[ManageFilmSearch] 筛选选项快照读取 sourceId=%s cost=%s", sourceId, time.Since(startedAt))
 	return options
 }
 

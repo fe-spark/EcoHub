@@ -156,12 +156,71 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	log.Printf("[%s] 采集派发 站点数=%d 站点并发=%s 页并发=%d 取数在途=%d 写阀 inflight=%d pages/s=%d",
 		tag, len(sources), limitDesc, config.CollectPageWorkers, config.CollectFetchInFlight,
 		config.CollectWriteMaxInflight, config.CollectWritePagesPerSec)
+	probeQueuePageCounts(sources, h, tag, trigger, runVersion, batchCtx)
 	runSourcesGroupWithLimit(sources, h, tag, sourceLimit, runVersion, batchCtx)
 	if err := batchCtx.flushAndFinalize(); err != nil {
 		syslog.Errorf("[%s] 批量采集缓存刷新失败: %v", tag, err)
 	}
 	batchCtx.emitSummary()
 	triggerCollectDoneHooks()
+}
+
+// probeQueuePageCounts 开抓前探完全队列总页，写入进度。失败的站标失败，不再进入抓页。
+func probeQueuePageCounts(sources []model.FilmSource, h int, tag, trigger string, runVersion uint64, batchCtx *collectBatchContext) {
+	var wg sync.WaitGroup
+	for _, src := range sources {
+		if isDispatchStopped(runVersion) || progress.IsStopped(src.Id) {
+			continue
+		}
+		if batchCtx != nil && !batchCtx.ownsOccupy(src.Id) {
+			continue
+		}
+		wg.Add(1)
+		go func(fs model.FilmSource) {
+			defer wg.Done()
+			if err := probeSourcePageCount(&fs, h, trigger); err != nil {
+				syslog.Errorf("[%s] 站点 %s 总页探测失败: %v", tag, fs.Name, err)
+			}
+		}(src)
+	}
+	wg.Wait()
+}
+
+func probeSourcePageCount(s *model.FilmSource, h int, trigger string) error {
+	if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
+		return nil
+	}
+	resolved := h
+	if shouldCatchUpCollectHours(trigger, h) {
+		resolved = resolveCollectHours(h, repository.GetLastCollectTime(s.Id), time.Now())
+	}
+	if resolved == 0 {
+		return errors.New("采集时长不能为 0")
+	}
+	r := requestForSource(s)
+	if resolved > 0 {
+		r.Params.Set("h", fmt.Sprint(resolved))
+	}
+	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
+		r.Params.Set("ac", "videolist")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	pageCount, err := fetcher.GetPageCountWithRetry(ctx, s, r)
+	if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
+		return nil
+	}
+	if err != nil {
+		progress.Update(s.Id, func(cur *model.CollectProgress) {
+			if cur.Status == progress.StatusStarting {
+				cur.Status = progress.StatusFailed
+			}
+		})
+		return err
+	}
+	progress.SetPageTotal(s.Id, pageCount)
+	log.Printf("[Spider] 站点 %s 总页=%d\n", s.Name, pageCount)
+	return nil
 }
 
 func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {
@@ -189,10 +248,17 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			batchCtx.releaseSourceOccupy(src.Id)
 			continue
 		}
-		if progress.IsStopped(src.Id) {
-			log.Printf("[%s] 站点 %s 已在排队中停止，跳过派发", tag, src.Name)
+		if progress.IsStopped(src.Id) || progress.PageTotal(src.Id) < 0 {
+			log.Printf("[%s] 站点 %s 总页未就绪或已停止，跳过派发", tag, src.Name)
 			scheduler.FinishSource(src.Id)
 			abandonQueuedCollectSource(src, batchCtx)
+			continue
+		}
+		if progress.PageTotal(src.Id) == 0 {
+			scheduler.FinishSource(src.Id)
+			if batchCtx != nil {
+				batchCtx.releaseSourceOccupy(src.Id)
+			}
 			continue
 		}
 		if idx > 0 {
@@ -220,8 +286,12 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 				batchCtx.releaseSourceOccupy(fs.Id)
 				return
 			}
-			if progress.IsStopped(fs.Id) {
-				log.Printf("[%s] 站点 %s 已在启动前停止，跳过采集", tag, fs.Name)
+			if progress.IsStopped(fs.Id) || progress.PageTotal(fs.Id) <= 0 {
+				log.Printf("[%s] 站点 %s 无页可采或已停止，跳过采集", tag, fs.Name)
+				if progress.PageTotal(fs.Id) == 0 && batchCtx != nil {
+					batchCtx.releaseSourceOccupy(fs.Id)
+					return
+				}
 				abandonQueuedCollectSource(fs, batchCtx)
 				return
 			}
@@ -234,6 +304,12 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 }
 
 func HandlePreparedCollect(id string, h int) error {
+	if s := repository.FindCollectSourceById(id); s != nil {
+		if err := probeSourcePageCount(s, h, model.CollectTriggerManual); err != nil {
+			abortUnstartedCollect(id, nil)
+			return err
+		}
+	}
 	return handleCollectWithStopVersion(id, h, nil, true, true, nil)
 }
 
@@ -369,7 +445,6 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	log.Printf("[Spider] 站点 %s 任务启动 (reqId: %s)\n", id, reqId)
 	progress.Ensure(id, s.Name)
 
-	r := requestForSource(s)
 	if h == 0 {
 		return errors.New("采集时长不能为 0")
 	}
@@ -384,34 +459,21 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 			log.Printf("[Spider] 站点 %s 定时采集窗口补齐 %dh → %dh（距上次成功采集）\n", s.Name, origH, h)
 		}
 	}
-	if h > 0 {
-		r.Params.Set("h", fmt.Sprint(h))
-	}
-	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
-		r.Params.Set("ac", "videolist")
-	}
-
-	pageCount, err := fetcher.GetPageCountWithRetry(collectCtx, s, r)
-	if err != nil {
-		return err
+	pageCount := progress.PageTotal(id)
+	if pageCount < 0 {
+		if err := probeSourcePageCount(s, h, trigger); err != nil {
+			return err
+		}
+		pageCount = progress.PageTotal(id)
 	}
 	if pageCount <= 0 {
-		progress.UpdateRun(collectCtx, id, func(cur *model.CollectProgress) {
-			cur.Total = 0
-			cur.Current = 0
-			cur.Success = 0
-			cur.Failed = 0
-			cur.Status = progress.StatusDone
-		})
 		log.Printf("[Spider] 站点 %s 无需分页 (pageCount=%d，该时间段无新内容)\n", s.Name, pageCount)
 		return nil
 	}
 	progress.UpdateRun(collectCtx, id, func(cur *model.CollectProgress) {
-		cur.Total = pageCount
-		cur.Current = 0
-		cur.Success = 0
-		cur.Failed = 0
-		cur.Status = progress.StatusRunning
+		if cur.Status == progress.StatusStarting {
+			cur.Status = progress.StatusRunning
+		}
 	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 

@@ -325,9 +325,9 @@ export default function BannerQuickDrawer({
         if (scraping) stopScrape();
         onClose();
       }}
-      width={840}
+      size={840}
       destroyOnHidden
-      maskClosable={!busy}
+      mask={{ closable: !busy }}
       title={
         <Flex align="center" justify="space-between" style={{ width: "100%", paddingRight: 8 }}>
           <Space size={10} align="center">
@@ -436,7 +436,7 @@ export default function BannerQuickDrawer({
           </div>
         </div>
         {deck.length === 0 ? (
-          <Alert type="warning" showIcon message="没有可排片的影片" style={{ borderRadius: 8 }} />
+          <Alert type="warning" showIcon title="没有可排片的影片" style={{ borderRadius: 8 }} />
         ) : null}
         <div className={styles.previewDeckGrid}>
           {deck.map((item, idx) => (
@@ -460,7 +460,6 @@ export default function BannerQuickDrawer({
           open={Boolean(tmdbTargetItem)}
           mid={tmdbTargetItem.mid}
           initialName={tmdbTargetItem.name || ""}
-          initialYear={tmdbTargetItem.year || ""}
           onClose={() => setTmdbTargetItem(null)}
           onPrefill={handleTmdbPrefill}
         />

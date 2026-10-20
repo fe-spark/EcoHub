@@ -6,6 +6,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+	filmsnapshot "server/internal/repository/film/snapshot"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -79,7 +80,11 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	gdb.Create(&model.FailureRecord{OriginId: "src_b", OriginName: "备用站B", Cause: "b2"})
 	gdb.Create(&model.FailureRecord{OriginId: "gone", OriginName: "已删站", Cause: "gone"})
 
-	stats := GetInventoryStats()
+	filmsnapshot.ClearActiveFilmReadModel()
+	stats, err := GetInventoryStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.Library.Films != 3 || stats.Library.Playable != 2 || stats.Library.Categories != 3 || stats.Library.Failures != 4 {
 		t.Fatalf("library = %+v", stats.Library)
 	}

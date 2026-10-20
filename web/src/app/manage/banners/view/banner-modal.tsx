@@ -385,7 +385,7 @@ export default function BannerModal({
                       src={preview.previewPicture}
                       width="100%"
                       height="100%"
-                      wrapperStyle={{ width: "100%", height: "100%", display: "block" }}
+                      styles={{ root: { width: "100%", height: "100%", display: "block" } }}
                       style={{ objectFit: "cover" }}
                       fallback={FALLBACK_IMG}
                     />
@@ -406,7 +406,7 @@ export default function BannerModal({
                       src={preview.previewSlide}
                       width="100%"
                       height="100%"
-                      wrapperStyle={{ width: "100%", height: "100%", display: "block" }}
+                      styles={{ root: { width: "100%", height: "100%", display: "block" } }}
                       style={{ objectFit: "cover" }}
                       fallback={FALLBACK_IMG}
                     />
@@ -476,7 +476,6 @@ export default function BannerModal({
           open={tmdbOpen}
           mid={currentMid ? Number(currentMid) : undefined}
           initialName={preview.previewName !== "未选择影片" ? preview.previewName : ""}
-          initialYear={preview.previewYear !== "未知年份" ? preview.previewYear : ""}
           onClose={() => setTmdbOpen(false)}
           onPrefill={handleTmdbPrefill}
         />

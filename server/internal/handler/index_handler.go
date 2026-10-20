@@ -80,7 +80,11 @@ func logSlowIndexStep(name string, startedAt time.Time, fields ...any) {
 
 // Index 首页数据
 func (h *IndexHandler) Index(c *gin.Context) {
-	data := service.IndexSvc.IndexPage()
+	data, err := service.IndexSvc.IndexPage()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(data, "首页数据获取成功", c)
 }
 
@@ -159,7 +163,6 @@ func parseDailyUpdatePid(raw string) int64 {
 	return n
 }
 
-
 const dailyUpdateExcludeCap = 500
 
 func parseDailyUpdateExclude(raw string) []int64 {
@@ -225,18 +228,17 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 	resolveSearchFilmPageSize(c, page)
 	trimmed := strings.TrimSpace(keyword)
 	result := service.IndexSvc.SearchFilm(trimmed, "", sortField, page)
+	if strings.TrimSpace(result.Error) != "" {
+		dto.Failed(result.Error, c)
+		return
+	}
 	if result.List == nil {
 		result.List = []model.MovieBasicInfo{}
 	}
 	if result.Sources == nil {
 		result.Sources = []model.SearchSourceTab{}
 	}
-
-	payload := gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}
-	if strings.TrimSpace(result.Error) != "" {
-		payload["error"] = result.Error
-	}
-	dto.Success(payload, "影片搜索成功", c)
+	dto.Success(gin.H{"list": result.List, "page": page, "sort": sortField, "sources": result.Sources}, "影片搜索成功", c)
 }
 
 // HotKeywords 获取当前全站热门搜索推荐词
@@ -328,8 +330,13 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
 	page.PageSize = 24
+	content, err := service.IndexSvc.GetFilmClassify(pid, page, sourceId)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
 		"title":   title,
-		"content": service.IndexSvc.GetFilmClassify(pid, page, sourceId),
+		"content": content,
 	}, "分类影片信息获取成功", c)
 }

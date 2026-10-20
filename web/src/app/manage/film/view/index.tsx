@@ -87,37 +87,64 @@ export default function FilmListPageView() {
           current: pg.current,
           pageSize: pg.pageSize,
         });
-        if (resp.code === 0) {
-          const formattedList = resp.data?.list?.map((item: any) => ({
-            ...item,
-            year: item.year <= 0 ? "未知" : item.year,
-            score: item.score === 0 ? "暂无" : item.score,
-          }));
-          setList(formattedList);
-          setPage(resp.data.params.paging);
-
-          if (resp.data.options) {
-            setOptions(resp.data.options);
-            const activeSource =
-              reqParams.sourceId ||
-              resp.data.params?.sourceId ||
-              resp.data.options.currentSourceId ||
-              resp.data.options.defaultSourceId;
-            setTableSourceId(activeSource || "");
-            if (activeSource && !reqParams.sourceId) {
-              setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
-            }
+        if (resp.code !== 0) {
+          message.error(resp.msg || "影片列表获取失败");
+          return;
+        }
+        const formattedList = resp.data?.list?.map((item: any) => ({
+          ...item,
+          year: item.year <= 0 ? "未知" : item.year,
+          score: item.score === 0 ? "暂无" : item.score,
+        }));
+        setList(formattedList);
+        setPage(resp.data.params.paging);
+        const activeSource = reqParams.sourceId || resp.data.params?.sourceId || "";
+        if (activeSource) {
+          setTableSourceId(activeSource);
+          if (!reqParams.sourceId) {
+            setParams((prev: any) => ({ ...prev, sourceId: activeSource }));
           }
         }
+      } catch {
+        message.error("影片列表获取失败");
       } finally {
         setLoading(false);
       }
     },
-    [params, page],
+    [message, params, page],
   );
 
   useEffect(() => {
-    getFilmPage();
+    let cancelled = false;
+    (async () => {
+      setCategoryLoading(true);
+      try {
+        const resp = await ApiGet("/manage/film/search/options", { sourceId: "" });
+        const nextParams = {
+          name: "",
+          sourceId: "",
+          pid: 0,
+          cid: 0,
+          beginTime: "",
+          endTime: "",
+        };
+        if (cancelled) return;
+        if (resp.code !== 0 || !resp.data) {
+          message.error(resp.msg || "筛选项获取失败");
+          return;
+        }
+        setOptions(resp.data);
+        nextParams.sourceId = resp.data.currentSourceId || resp.data.defaultSourceId || "";
+        setParams(nextParams);
+        setTableSourceId(nextParams.sourceId);
+        await getFilmPage({ current: 1, pageSize: page.pageSize || 10, total: 0 }, nextParams);
+      } finally {
+        if (!cancelled) setCategoryLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -138,14 +165,16 @@ export default function FilmListPageView() {
         sourceId: nextSourceId,
       });
       if (seq !== sourceReqSeqRef.current) return;
-      if (resp.code === 0 && resp.data) {
-        setOptions((prev: any) => ({
-          ...prev,
-          ...resp.data,
-        }));
+      if (resp.code !== 0 || !resp.data) {
+        message.error(resp.msg || "筛选项获取失败");
+        return;
       }
+      setOptions((prev: any) => ({
+        ...prev,
+        ...resp.data,
+      }));
     } catch {
-      // 联动选项更新异常静默处理
+      if (seq === sourceReqSeqRef.current) message.error("筛选项获取失败");
     } finally {
       if (seq === sourceReqSeqRef.current) {
         setCategoryLoading(false);

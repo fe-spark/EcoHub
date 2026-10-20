@@ -40,6 +40,8 @@ export interface CollectProgress {
   status: CollectProgressStatus;
   /** 同一次采集队列的标识；不同队列各自一条总进度 */
   queueId?: string;
+  /** 本地 starting 记下的上一轮 queueId。空字符串表示当时没有上一轮。 */
+  staleQueueId?: string;
 }
 
 /** 仍在拉页或排队。停止中的收尾不算，避免按钮提前变成开始采集。 */
@@ -165,31 +167,6 @@ export const collectDuration = [
 /** 超过该数量时弹窗提醒：排队、写库、快照和内存占用都会上升 */
 export const COLLECT_SOURCE_WARN_COUNT = 12;
 
-/**
- * 单站进度百分比。
- * 活跃态与 CollectProgressView 一致；终态（done/failed/stopped）计 100%，便于批量总进度收口。
- */
-export function stationProgressPercent(progress?: CollectProgress | null): number {
-  if (!progress) {
-    return 0;
-  }
-  if (
-    progress.status === "done" ||
-    progress.status === "failed" ||
-    progress.status === "stopped"
-  ) {
-    return 100;
-  }
-  if (progress.status === "starting") {
-    return 0;
-  }
-  const total = Math.max(progress.total, 0);
-  const finished = Math.max(progress.success + progress.failed, 0);
-  const done = Math.min(finished, total || finished);
-  const rawPercent = total > 0 ? Math.floor((done / total) * 100) : 0;
-  return Math.min(rawPercent, 99);
-}
-
 export interface CollectListItemResponse extends Partial<FilmSource> {
   id: string;
   name: string;
@@ -208,25 +185,12 @@ export function progressAsStopping(
   return { id, name, total: 0, current: 0, success: 0, failed: 0, status: "stopping" };
 }
 
-/**
- * 同一队列里，停止中不被迟到的 running/starting 盖回。
- * 新队列的起始进度照常接上。
- */
-export function mergeCollectProgress(
-  current: CollectProgress | null | undefined,
-  incoming: CollectProgress,
+export function makeStartingProgress(
+  id: string,
+  name: string,
+  queueId: string,
+  staleQueueId?: string | null,
 ): CollectProgress {
-  if (
-    current?.status === "stopping" &&
-    (incoming.status === "running" || incoming.status === "starting") &&
-    (incoming.queueId || "") === (current.queueId || "")
-  ) {
-    return current;
-  }
-  return incoming;
-}
-
-export function makeStartingProgress(id: string, name: string, queueId?: string): CollectProgress {
   return {
     id,
     name,
@@ -236,6 +200,7 @@ export function makeStartingProgress(id: string, name: string, queueId?: string)
     failed: 0,
     status: "starting",
     queueId,
+    staleQueueId: staleQueueId == null ? undefined : staleQueueId.trim(),
   };
 }
 

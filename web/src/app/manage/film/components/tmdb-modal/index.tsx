@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import {
   Modal, Input, Select, Button, Space, Tag, Spin, Checkbox, Typography, Empty, Image as AntImage,
 } from "antd";
@@ -15,30 +15,21 @@ import styles from "./index.module.less";
 
 const { Text } = Typography;
 
-function cleanInitialTitle(raw: string): { name: string; year?: string } {
+function cleanInitialTitle(raw: string): string {
   let s = (raw || "").trim();
-  let extractedYear = "";
-  const yearMatch = s.match(/\b(19\d{2}|20\d{2})\b/);
-  if (yearMatch) {
-    extractedYear = yearMatch[1];
-    s = s.replace(yearMatch[0], " ");
-  }
+  s = s.replace(/[（(]\s*(19\d{2}|20\d{2})\s*[）)]/g, " ");
   s = s.replace(/[【\[].*?[】\]]/g, " ").replace(/[（(].*?[）)]/g, " ");
   s = s.replace(/[-_—·\s]*(预告片|预告|先导片|先导预告|片花|花絮|特辑|彩蛋|幕后|采访|纯享版|精编版|精华版|速看版|解说版|正片|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版)/gi, " ");
   s = s.replace(/\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray|trailer|teaser|pv|preview|sp)\b/gi, " ");
   s = s.replace(/[-_—·:：\s]+$/g, "").replace(/^[-_—·:：\s]+/g, "");
-  s = s.replace(/\s+/g, " ");
-  return {
-    name: s || raw.trim(),
-    year: extractedYear,
-  };
+  s = s.replace(/\s+/g, " ").trim();
+  return s || raw.trim();
 }
 
 export default function TmdbModal({
   open,
   mid,
   initialName = "",
-  initialYear = "",
   onClose,
   onSuccess,
   onPrefill,
@@ -65,6 +56,7 @@ export default function TmdbModal({
   ]);
   const [submitting, setSubmitting] = useState(false);
   const { message } = useAppMessage();
+  const searchSeq = useRef(0);
 
   const doSearch = useCallback(
     async (q: string, y?: string, t?: string) => {
@@ -73,6 +65,7 @@ export default function TmdbModal({
         message.warning("请输入搜索片名");
         return;
       }
+      const seq = ++searchSeq.current;
       setLoading(true);
       setHasSearched(true);
       setSelectedCandidate(null);
@@ -83,6 +76,7 @@ export default function TmdbModal({
           year: (y ?? "").trim(),
           type: (t ?? "").trim(),
         });
+        if (seq !== searchSeq.current) return;
         if (resp.code === 0) {
           setCandidates(resp.data || []);
         } else {
@@ -90,10 +84,11 @@ export default function TmdbModal({
           setCandidates([]);
         }
       } catch {
+        if (seq !== searchSeq.current) return;
         message.error("网络异常，检索 TMDB 失败");
         setCandidates([]);
       } finally {
-        setLoading(false);
+        if (seq === searchSeq.current) setLoading(false);
       }
     },
     [message],
@@ -106,24 +101,18 @@ export default function TmdbModal({
   useEffect(() => {
     if (open) {
       const cleaned = cleanInitialTitle(initialName || "");
-      let initY = "";
-      if (initialYear && initialYear !== "未知" && initialYear !== "未知年份") {
-        initY = String(initialYear).trim();
-      } else if (cleaned.year) {
-        initY = cleaned.year;
-      }
-      setKeyword(cleaned.name);
-      setYear(initY);
+      setKeyword(cleaned);
+      setYear("");
       setMediaType("");
       setSelectedCandidate(null);
       setPreviewDetail(null);
       setCandidates([]);
       setHasSearched(false);
-      if (cleaned.name) {
-        void doSearch(cleaned.name, initY, "");
+      if (cleaned) {
+        void doSearch(cleaned, "", "");
       }
     }
-  }, [open, initialName, initialYear, doSearch]);
+  }, [open, initialName, doSearch]);
 
   const handleSelectCandidate = async (item: TmdbCandidate) => {
     setSelectedCandidate(item);
