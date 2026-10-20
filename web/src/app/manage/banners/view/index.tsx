@@ -188,7 +188,7 @@ export default function BannersPageView() {
       {/* 轮播卡片列表展示 */}
       {loading && banners.length === 0 ? (
         <div className={styles.emptyCard}>
-          <Spin tip="加载轮播数据中..." />
+          <Spin description="加载轮播数据中..." />
         </div>
       ) : banners.length === 0 ? (
         <div className={styles.emptyCard}>

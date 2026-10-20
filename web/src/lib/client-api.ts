@@ -1,4 +1,5 @@
 import axios, { AxiosInstance } from "axios";
+import { message } from "@/lib/app-message";
 
 export interface ApiResponse<T = any> {
   code: number;
@@ -17,8 +18,6 @@ instance.interceptors.response.use(
     return response.data;
   },
   async (error) => {
-    const { message } = await import("antd");
-
     if (error.response?.status === 401) {
       message.error(error.response.data?.msg || "请先登录");
       window.location.href = "/login";

@@ -276,7 +276,7 @@ export default function BannerQuickModal({
       }
       width={760}
       centered
-      maskClosable={!submitting}
+      mask={{ closable: !submitting }}
       closable={!submitting}
       onCancel={handleClose}
       destroyOnHidden

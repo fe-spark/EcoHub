@@ -135,10 +135,12 @@ export function BannerCard({
               objectFit: "cover",
               display: "block",
             }}
-            wrapperStyle={{
-              width: "100%",
-              height: "100%",
-              display: "block",
+            styles={{
+              root: {
+                width: "100%",
+                height: "100%",
+                display: "block",
+              },
             }}
           />
         </div>

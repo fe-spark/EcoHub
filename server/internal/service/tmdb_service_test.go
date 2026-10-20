@@ -101,6 +101,26 @@ func TestCleanKeywordForSearch(t *testing.T) {
 	}
 }
 
+func TestPrepareManualSearchKeepsQueryAndYear(t *testing.T) {
+	query, year := prepareManualSearch("流浪地球：飞跃2020 1080p", "2020")
+	if query != "流浪地球：飞跃2020" {
+		t.Fatalf("query = %q", query)
+	}
+	if year != "2020" {
+		t.Fatalf("year = %q", year)
+	}
+
+	query, year = prepareManualSearch("星际穿越 (2014) [1080P]", "")
+	if query != "星际穿越" || year != "2014" {
+		t.Fatalf("query = %q year = %q", query, year)
+	}
+
+	query, year = prepareManualSearch("流浪地球：飞跃2020", "1999")
+	if query != "流浪地球：飞跃2020" || year != "1999" {
+		t.Fatalf("query = %q year = %q", query, year)
+	}
+}
+
 func TestTMDBApiKeyMasking(t *testing.T) {
 	key := "12345678abcdef90"
 	masked := repository.MaskTMDBApiKey(key)

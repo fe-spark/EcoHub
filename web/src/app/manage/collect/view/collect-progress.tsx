@@ -72,7 +72,6 @@ export default function CollectProgressView({
           type="circle"
           percent={percent}
           size={40}
-          strokeWidth={6}
           status={progressStatus}
           strokeColor={progressStrokeColor}
           className={styles.progressRing}
@@ -93,6 +92,11 @@ export default function CollectProgressView({
           strokeColor={progressStrokeColor}
           showInfo={false}
           className={styles.progressInlineBar}
+          classNames={
+            progressStatus === "active"
+              ? { track: styles.progressSheenTrack }
+              : undefined
+          }
         />
         <span className={styles.progressMetaText}>{metaLine}</span>
       </div>
@@ -112,6 +116,11 @@ export default function CollectProgressView({
         strokeColor={progressStrokeColor}
         showInfo={false}
         className={styles.progressBar}
+        classNames={
+          progressStatus === "active"
+            ? { track: styles.progressSheenTrack }
+            : undefined
+        }
       />
       <div className={styles.progressMetaText}>{countLine}</div>
     </div>

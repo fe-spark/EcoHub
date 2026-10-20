@@ -145,6 +145,7 @@ func SetupRouter() *gin.Engine {
 			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
+			collect.GET(`/record/stream`, handler.CollectHd.RecordStream)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
 			collect.POST(`/record/retry/all`, handler.CollectHd.CollectRecoverAll)
 			collect.POST(`/record/clear/result`, handler.CollectHd.ClearRetriedRecords)

@@ -220,125 +220,106 @@ func applyCategoryIndexHint(query *gorm.DB, field, pidIndex, cidIndex string) *g
 	}
 }
 
-func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	startedAt := time.Now()
-	version = strings.TrimSpace(version)
-	sourceID = strings.TrimSpace(sourceID)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
-	id = listedCategoryID(sourceID, id)
-	if version == "" || id <= 0 || limit <= 0 {
+func movieInfosByMids(version string, mids []int64) []model.MovieBasicInfo {
+	if len(mids) == 0 {
 		return []model.MovieBasicInfo{}
+	}
+	snaps := GetSnapshotsByMidsOrdered(version, mids)
+	if len(snaps) == 0 {
+		return []model.MovieBasicInfo{}
+	}
+	infos := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
+	if infos == nil {
+		return []model.MovieBasicInfo{}
+	}
+	return infos
+}
+
+func resolveHotListVersion(version string) string {
+	version = strings.TrimSpace(version)
+	if version == "" {
+		version = strings.TrimSpace(GetActiveSnapshotVersion())
+	}
+	if version == "" {
+		version = LiveReadVersion
+	}
+	return version
+}
+
+func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
+	if limit <= 0 {
+		return []model.MovieBasicInfo{}, nil
 	}
 	if offset < 0 {
 		offset = 0
 	}
-
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:%d:ck5", config.FilmHotCachePrefix, version, sourceID, field, id, limit, offset)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var cached []model.MovieBasicInfo
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
-			}
-		}
+	sourceID = strings.TrimSpace(sourceID)
+	id = listedCategoryID(sourceID, id)
+	if id <= 0 {
+		return []model.MovieBasicInfo{}, nil
 	}
-
-	listGen := GetSearchCacheVersion()
-	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "hits", offset, limit); used {
-		if err != nil {
-			log.Printf("[FilmHotList] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
-		} else {
-			return finishHotList(cacheKey, listGen, snaps, sourceID, field, id, offset, limit, startedAt)
-		}
+	need := offset + limit
+	if need > searchHotPoolCap {
+		need = searchHotPoolCap
 	}
-	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
-	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Offset(offset).Limit(limit))
+	version = resolveHotListVersion(version)
+	mids, err := hotMidsFromIndex(version, sourceID, field, id, need)
 	if err != nil {
-		return []model.MovieBasicInfo{}
+		return nil, err
 	}
-	return finishHotList(cacheKey, listGen, snapshots, sourceID, field, id, offset, limit, startedAt)
+	if offset >= len(mids) {
+		return []model.MovieBasicInfo{}, nil
+	}
+	end := offset + limit
+	if end > len(mids) {
+		end = len(mids)
+	}
+	return movieInfosByMids(version, mids[offset:end]), nil
 }
 
-func finishHotList(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, offset, limit int, startedAt time.Time) []model.MovieBasicInfo {
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
-	if raw, err := json.Marshal(result); err == nil {
-		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
-	}
-	log.Printf("[FilmHotList] 获取分类热播列表 source=%s field=%s id=%d count=%d offset=%d limit=%d cost=%s",
-		sourceID, field, id, len(result), offset, limit, time.Since(startedAt))
-	return result
-}
-
-func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
 }
 
-func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, poolSize int) []model.MovieBasicInfo {
-	startedAt := time.Now()
-	version = strings.TrimSpace(version)
+func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, poolSize int) ([]model.MovieBasicInfo, error) {
+	if poolSize <= 0 {
+		poolSize = searchHotPoolCap
+	}
+	if poolSize > searchHotPoolCap {
+		poolSize = searchHotPoolCap
+	}
 	sourceID = strings.TrimSpace(sourceID)
-	if version == "" {
-		version = GetActiveSnapshotVersion()
-	}
 	id = listedCategoryID(sourceID, id)
-	if version == "" || id <= 0 || poolSize <= 0 {
-		return []model.MovieBasicInfo{}
+	if id <= 0 {
+		return []model.MovieBasicInfo{}, nil
 	}
-
-	cacheKey := fmt.Sprintf("%s:v%s:src_%s:%s:%d:%d:ck4", config.FilmHotPoolCachePrefix, version, sourceID, field, id, poolSize)
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var cached []model.MovieBasicInfo
-			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
-			}
-		}
-	}
-
-	listGen := GetSearchCacheVersion()
-	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "hits", 0, poolSize); used {
-		if err != nil {
-			log.Printf("[FilmHotPool] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
-		} else {
-			return finishHotPool(cacheKey, listGen, snaps, sourceID, field, id, poolSize, startedAt)
-		}
-	}
-	query := hotCategoryQuery(db.Mdb, sourceID, field, id)
-	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("hits DESC, mid DESC")).Limit(poolSize))
+	version = resolveHotListVersion(version)
+	mids, err := hotMidsFromIndex(version, sourceID, field, id, poolSize)
 	if err != nil {
-		return []model.MovieBasicInfo{}
+		return nil, err
 	}
-	return finishHotPool(cacheKey, listGen, snapshots, sourceID, field, id, poolSize, startedAt)
+	return movieInfosByMids(version, mids), nil
 }
 
-func finishHotPool(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, poolSize int, startedAt time.Time) []model.MovieBasicInfo {
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
-	if raw, err := json.Marshal(result); err == nil {
-		writeListCache(cacheKey, raw, listCacheTTL(len(result), snapshotListCacheTTL), listGen)
-	}
-	log.Printf("[FilmHotPool] 获取分类热门候选池 source=%s field=%s id=%d count=%d poolSize=%d cost=%s",
-		sourceID, field, id, len(result), poolSize, time.Since(startedAt))
-	return result
-}
-
-func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotHotPoolByCategoryWithSourceReadModel(version, "", field, id, poolSize)
 }
 
-func GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
 	if limit <= 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	if poolSize <= 0 {
 		poolSize = 50
 	}
-	pool := GetSnapshotHotPoolByCategoryWithSourceReadModel(version, sourceID, field, id, poolSize)
+	pool, err := GetSnapshotHotPoolByCategoryWithSourceReadModel(version, sourceID, field, id, poolSize)
+	if err != nil {
+		return nil, err
+	}
 	if len(pool) <= limit {
 		res := make([]model.MovieBasicInfo, len(pool))
 		copy(res, pool)
-		return res
+		return res, nil
 	}
 
 	indices := make([]int, len(pool))
@@ -353,10 +334,10 @@ func GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version string,
 	for i := 0; i < limit; i++ {
 		result[i] = pool[indices[i]]
 	}
-	return result
+	return result, nil
 }
 
-func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) []model.MovieBasicInfo {
+func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, poolSize)
 }
 

@@ -78,10 +78,13 @@ export async function serverGet<T = any>(
       }
     }
   } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
     if (error instanceof Error && error.name === "AbortError") {
       throw new Error(`服务端请求超时: ${apiUrl}`);
     }
-    throw error;
+    // 连接失败是 TypeError("fetch failed")，Next 会当成未处理异常打到 Console overlay。
+    // 转成普通 Error，由各页面 catch 后降级。
+    throw new Error(`服务端请求失败: ${apiUrl}; ${reason}`);
   } finally {
     clearTimeout(timeout);
   }

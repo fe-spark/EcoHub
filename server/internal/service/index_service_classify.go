@@ -133,12 +133,15 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 		return nil, err
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	sl := filmsnapshot.ListFilmSnapshotsByTagsFast(version, st, page)
+	sl, err := filmsnapshot.ListFilmSnapshotsByTagsFast(version, st, page)
+	if err != nil {
+		return nil, err
+	}
 	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...), nil
 }
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
-func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) map[string]any {
+func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) (map[string]any, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
@@ -153,11 +156,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		return map[string]any{
-			"news":   []model.MovieBasicInfo{},
-			"top":    []model.MovieBasicInfo{},
-			"recent": []model.MovieBasicInfo{},
-		}
+		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
 	cacheKey := filmsnapshot.SnapshotClassifyCacheKey(version, pid, page)
 	if sourceId != "" {
@@ -167,7 +166,7 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
+				return cached, nil
 			}
 		}
 	}
@@ -219,5 +218,5 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), time.Hour*12, listGen)
 		}
 	}
-	return res
+	return res, nil
 }

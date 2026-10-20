@@ -123,18 +123,24 @@ func TestFilmService_GetFilmPage_FilterBySource(t *testing.T) {
 	srv := new(FilmService)
 
 	// 1. 未指定 SourceId 时，默认筛选第一个源 (src1)
-	page1 := srv.GetFilmPage(model.SearchVo{
+	page1, err := srv.GetFilmPage(model.SearchVo{
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(page1) != 1 || page1[0].Mid != 101 {
 		t.Fatalf("expected 1 film from default src1 (mid=101), got %v", page1)
 	}
 
 	// 2. 指定 SourceId = src2 时，筛选出 src2 的影片
-	page2 := srv.GetFilmPage(model.SearchVo{
+	page2, err := srv.GetFilmPage(model.SearchVo{
 		SourceId: "src2",
 		Paging:   &dto.Page{Current: 1, PageSize: 10},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(page2) != 1 || page2[0].Mid != 102 {
 		t.Fatalf("expected 1 film from src2 (mid=102), got %v", page2)
 	}
@@ -159,18 +165,24 @@ func TestFilmService_GetFilmPage_SnapshotMode_FilterBySource(t *testing.T) {
 	srv := new(FilmService)
 
 	// 默认未带 SourceId -> 首位源 src1
-	page1 := srv.GetFilmPage(model.SearchVo{
+	page1, err := srv.GetFilmPage(model.SearchVo{
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(page1) != 1 || page1[0].Mid != 201 {
 		t.Fatalf("expected 1 film from default src1 in snapshot (mid=201), got %v", page1)
 	}
 
 	// 筛选 src2 -> 快照影片2
-	page2 := srv.GetFilmPage(model.SearchVo{
+	page2, err := srv.GetFilmPage(model.SearchVo{
 		SourceId: "src2",
 		Paging:   &dto.Page{Current: 1, PageSize: 10},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(page2) != 1 || page2[0].Mid != 202 {
 		t.Fatalf("expected 1 film from src2 in snapshot (mid=202), got %v", page2)
 	}

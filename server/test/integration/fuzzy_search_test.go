@@ -29,7 +29,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 
 	t.Run("KeywordSearch_QingYuNian", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "庆余年", "", page)
+		res, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "庆余年", "", page)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res) == 0 {
 			t.Fatal("关键词「庆余年」应有命中结果")
 		}
@@ -40,7 +43,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 
 	t.Run("SpaceToken_LiuLangDiQiu2", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "流浪地球 2", "", page)
+		res, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "流浪地球 2", "", page)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res) == 0 {
 			t.Fatal("关键词「流浪地球 2」应有命中结果")
 		}
@@ -51,7 +57,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 
 	t.Run("SortByHits", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "庆余年", "hits", page)
+		res, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "庆余年", "hits", page)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res) < 2 {
 			t.Fatalf("按热度排序应至少 2 条，实际 %d", len(res))
 		}
@@ -62,7 +71,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 
 	t.Run("NonExistent_Film_Returns_Empty", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		res := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "绝对不可能存在的片名XYZ12345", "", page)
+		res, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, "绝对不可能存在的片名XYZ12345", "", page)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res) != 0 {
 			t.Fatalf("不存在的片名应返回 0 条，实际 %d", len(res))
 		}
@@ -73,30 +85,50 @@ func TestFuzzySearchScenarios(t *testing.T) {
 
 	t.Run("ProvideVod_Search_And_Empty", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		if res := filmsnapshot.ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "庆余年", 0, page); len(res) == 0 {
+		res, err := filmsnapshot.ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "庆余年", 0, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res) == 0 {
 			t.Fatal("OpenAPI 检索「庆余年」应有命中结果")
 		}
 
 		emptyPage := &dto.Page{Current: 1, PageSize: 10}
-		if res := filmsnapshot.ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "不存在的片名ABC999", 0, emptyPage); len(res) != 0 || emptyPage.Total != 0 {
-			t.Fatalf("OpenAPI 检索不存在的片名应为空，实际 %d 条（total=%d）", len(res), emptyPage.Total)
+		emptyRes, err := filmsnapshot.ListProvideSnapshotsReadModel(version, model.SearchTagsVO{}, "不存在的片名ABC999", 0, emptyPage)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(emptyRes) != 0 || emptyPage.Total != 0 {
+			t.Fatalf("OpenAPI 检索不存在的片名应为空，实际 %d 条（total=%d）", len(emptyRes), emptyPage.Total)
 		}
 	})
 
 	t.Run("GetSearchPageReadModel_Scenarios", func(t *testing.T) {
 		page := &dto.Page{Current: 1, PageSize: 10}
-		if res := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Paging: page}); len(res) == 0 {
+		res, err := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Paging: page})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res) == 0 {
 			t.Fatal("管理端检索「庆余年」应有命中结果")
 		}
 
 		emptyPage := &dto.Page{Current: 1, PageSize: 10}
-		if res := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "不存在的片名ZZZ000", Paging: emptyPage}); len(res) != 0 {
-			t.Fatalf("管理端检索不存在的片名应为空，实际 %d 条", len(res))
+		emptyRes, err := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "不存在的片名ZZZ000", Paging: emptyPage})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(emptyRes) != 0 {
+			t.Fatalf("管理端检索不存在的片名应为空，实际 %d 条", len(emptyRes))
 		}
 
 		plotPage := &dto.Page{Current: 1, PageSize: 10}
-		if res := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Plot: "古装", Paging: plotPage}); len(res) != 0 {
-			t.Fatalf("叠加无匹配剧情条件后应为空，实际 %d 条", len(res))
+		plotRes, err := filmsnapshot.GetSearchPageReadModel(model.SearchVo{Name: "庆余年", Plot: "古装", Paging: plotPage})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(plotRes) != 0 {
+			t.Fatalf("叠加无匹配剧情条件后应为空，实际 %d 条", len(plotRes))
 		}
 	})
 
@@ -149,8 +181,8 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		})
 
 		p1 := &dto.Page{Current: 1, PageSize: 10}
-		if r := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel("", "庆余年", "", p1); len(r) != 0 || p1.Total != 0 || p1.PageCount != 1 {
-			t.Errorf("SearchSnapshots 空版本应返回空且分页合法：len=%d total=%d pageCount=%d", len(r), p1.Total, p1.PageCount)
+		if _, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel("", "庆余年", "", p1); err == nil {
+			t.Fatal("SearchSnapshots 空版本应返回错误")
 		}
 
 		p2 := &dto.Page{Current: 1, PageSize: 10}
@@ -164,13 +196,13 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 
 		p4 := &dto.Page{Current: 1, PageSize: 10}
-		if r := filmsnapshot.ListProvideSnapshotsReadModel("", model.SearchTagsVO{}, "庆余年", 0, p4); len(r) != 0 || p4.Total != 0 || p4.PageCount != 1 {
-			t.Errorf("ListProvideSnapshots 空版本应返回空且分页合法：len=%d total=%d pageCount=%d", len(r), p4.Total, p4.PageCount)
+		if _, err := filmsnapshot.ListProvideSnapshotsReadModel("", model.SearchTagsVO{}, "庆余年", 0, p4); err == nil {
+			t.Fatal("ListProvideSnapshots 空版本应返回错误")
 		}
 
 		p5 := &dto.Page{Current: 1, PageSize: 10}
-		if r := filmsnapshot.ListFilmSnapshotsByTagsReadModel("", model.SearchTagsVO{}, p5); len(r) != 0 || p5.Total != 0 || p5.PageCount != 1 {
-			t.Errorf("ListFilmSnapshotsByTags 空版本应返回空且分页合法：len=%d total=%d pageCount=%d", len(r), p5.Total, p5.PageCount)
+		if _, err := filmsnapshot.ListFilmSnapshotsByTagsReadModel("", model.SearchTagsVO{}, p5); err == nil {
+			t.Fatal("ListFilmSnapshotsByTags 空版本应返回错误")
 		}
 	})
 }

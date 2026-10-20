@@ -88,7 +88,7 @@ export function FilmBatchBar({
             批量删除
           </Button>
         )}
-        <Divider type="vertical" style={{ height: 20, margin: "0 4px" }} />
+        <Divider orientation="vertical" style={{ height: 20, margin: "0 4px" }} />
         <Button
           type="primary"
           icon={<PlusOutlined />}

@@ -81,7 +81,7 @@ export default function BannerQuickCard({
           alt={item.name}
           fallback={FALLBACK_IMG}
           preview={isScrapingThis ? false : { mask: "预览" }}
-          wrapperStyle={{ width: "100%", height: "100%" }}
+          styles={{ root: { width: "100%", height: "100%" } }}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
         {isScrapingThis && (
@@ -210,7 +210,7 @@ export default function BannerQuickCard({
                 alt="横图"
                 fallback={FALLBACK_IMG}
                 preview={{ mask: "预览" }}
-                wrapperStyle={{ width: "100%", height: "100%" }}
+                styles={{ root: { width: "100%", height: "100%" } }}
                 style={{ width: "100%", height: "100%", objectFit: "cover" }}
               />
             </div>

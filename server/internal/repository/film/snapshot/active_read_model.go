@@ -39,7 +39,9 @@ func LoadActiveFilmReadModel(version string) error {
 		searchMetaBuildWg.Add(1)
 		go func(ver string) {
 			defer searchMetaBuildWg.Done()
-			_ = loadFilmSearchMetaIndex(ver)
+			if _, err := loadFilmSearchMetaIndex(ver); err != nil {
+				log.Printf("[ActiveReadModel] 检索索引重建失败 version=%s: %v", ver, err)
+			}
 		}(version)
 	}
 	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
@@ -63,7 +65,9 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 		searchMetaBuildWg.Add(1)
 		go func(ver string) {
 			defer searchMetaBuildWg.Done()
-			_ = loadFilmSearchMetaIndex(ver)
+			if _, err := loadFilmSearchMetaIndex(ver); err != nil {
+				log.Printf("[ActiveReadModel] 检索索引重建失败 version=%s: %v", ver, err)
+			}
 		}(version)
 	}
 	RefreshAccessDataCaches()

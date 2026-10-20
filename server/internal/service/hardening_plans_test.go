@@ -348,7 +348,10 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 
 	// 测试 IndexSvc.GetFilmClassify 并发组装
 	page := &dto.Page{PageSize: 10}
-	res := IndexSvc.GetFilmClassify(pid, page)
+	res, err := IndexSvc.GetFilmClassify(pid, page)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res == nil {
 		t.Fatal("expected non-nil classify response")
 	}
@@ -427,7 +430,12 @@ func TestPlan5_FilmClassifySearch_LimitsAndSingleFlight(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			results[idx] = filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
+			rows, err := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, pages[idx])
+			if err != nil {
+				t.Errorf("worker %d: %v", idx, err)
+				return
+			}
+			results[idx] = rows
 		}(i)
 	}
 	wg.Wait()
@@ -631,7 +639,10 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	}
 	seedLiveSnaps(t, s)
 
-	res := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	res, err := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if res == nil {
 		t.Fatal("expected non-nil classify")
 	}
@@ -649,7 +660,10 @@ func TestPlan5_EmptyTagsSearch_Sentinel(t *testing.T) {
 
 	st := model.SearchTagsVO{Pid: 999, Cid: 888}
 	page := &dto.Page{Current: 1, PageSize: 10}
-	snaps := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, page)
+	snaps, err := filmsnapshot.ListFilmSnapshotsByTagsReadModel(version, st, page)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(snaps) != 0 {
 		t.Fatalf("expected 0 snapshots, got %d", len(snaps))
 	}

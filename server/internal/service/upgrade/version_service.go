@@ -4,14 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/repository"
 	"server/internal/utils"
 )
@@ -54,11 +52,8 @@ func (s *VersionService) GetAppVersion(checkUpdate bool) AppVersionInfo {
 	info.UpgradePhase = st.Phase
 	info.UpgradeError = st.Error
 	onPre := isPreRelease(info.Current, "", false)
-	latest, err := s.LoadLatestRelease(onPre)
-	if err != nil || latest.TagName == "" {
-		if err != nil {
-			log.Printf("[Version] 获取 GitHub Release 失败: %v", err)
-		}
+	latest, ok := currentRelease(onPre)
+	if !ok || latest.TagName == "" {
 		return info
 	}
 	info.Latest = latest.TagName
@@ -71,26 +66,9 @@ func (s *VersionService) GetAppVersion(checkUpdate bool) AppVersionInfo {
 }
 
 func (s *VersionService) LoadLatestRelease(includePre bool) (githubReleaseCache, error) {
-	key := config.LatestReleaseCacheKey
-	if includePre {
-		key = config.LatestReleasePreCacheKey
-	}
-	if db.Rdb != nil {
-		if raw, err := db.Rdb.Get(db.Cxt, key).Result(); err == nil && raw != "" {
-			var cached githubReleaseCache
-			if json.Unmarshal([]byte(raw), &cached) == nil && cached.TagName != "" {
-				return cached, nil
-			}
-		}
-	}
-	rel, err := fetchGithubLatestRelease(includePre)
-	if err != nil {
-		return githubReleaseCache{}, err
-	}
-	if db.Rdb != nil {
-		if b, err := json.Marshal(rel); err == nil {
-			_ = db.Rdb.Set(db.Cxt, key, b, config.LatestReleaseCacheTTL).Err()
-		}
+	rel, ok := currentRelease(includePre)
+	if !ok {
+		return githubReleaseCache{}, fmt.Errorf("尚未取得最新版本")
 	}
 	return rel, nil
 }

@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -21,7 +22,7 @@ import (
 
 var provideSnapshotsSf singleflight.Group
 
-func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) []model.FilmListSnapshot {
+func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keyword string, recentHours int, page *dto.Page) ([]model.FilmListSnapshot, error) {
 	startedAt := time.Now()
 	page = shared.EnsurePage(page)
 	st = shared.NormalizeSearchTagsVO(st)
@@ -32,16 +33,24 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		version = GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		page.Total = 0
-		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+		return nil, ErrSearchIndexMissing
 	}
 
-	// 快速过滤非正常片名（例如 URL 或长度过长字符串），避免无意义全表扫描
 	if len([]rune(keyword)) > 64 || strings.HasPrefix(keyword, "http://") || strings.HasPrefix(keyword, "https://") {
 		page.Total = 0
 		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+		return []model.FilmListSnapshot{}, nil
+	}
+
+	keywordOnly := keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == ""
+	if keywordOnly {
+		snaps, err := memoryKeywordSnapshots(version, "", keyword, st.Sort, st.Pid, st.Cid, page)
+		if err != nil {
+			return nil, err
+		}
+		log.Printf("[ProvideVod] 内存检索完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
+			st.Pid, st.Cid, keyword, page.Total, page.Current, len(snaps), time.Since(startedAt))
+		return snaps, nil
 	}
 
 	// 1. 尝试从 Redis 读 Provide 缓存
@@ -67,7 +76,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 					"[ProvideVod] 命中缓存 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
 					st.Pid, st.Cid, keyword, page.Total, page.Current, len(item.Snapshots), time.Since(startedAt),
 				)
-				return item.Snapshots
+				return item.Snapshots, nil
 			}
 		}
 	}
@@ -85,47 +94,8 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		listGen := GetSearchCacheVersion()
-		// A. 若有搜索词且无时间限制、复合分类筛选和特定采集站限制，优先走内存元数据检索
-		if keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == "" {
-			idx := loadFilmSearchMetaIndex(version)
-			if idx != nil && len(idx.Items) > 0 {
-				hits := searchFilmMetas(idx, keyword, st.Sort, st.Pid, st.Cid)
-				pageMids := pageMidsFromMetaHits(hits, page)
-				var snapshots []model.FilmListSnapshot
-				if len(pageMids) > 0 {
-					snapshots = GetProjectedSnapshotsByMidsOrdered(version, pageMids)
-				}
-				if snapshots == nil {
-					snapshots = []model.FilmListSnapshot{}
-				}
-				item := searchCacheItem{
-					Total:     page.Total,
-					PageCount: page.PageCount,
-					Snapshots: snapshots,
-				}
-				if raw, err := json.Marshal(item); err == nil {
-					ttl := 3 * time.Minute
-					if len(snapshots) == 0 {
-						ttl = emptyListCacheTTL
-					}
-					writeListCache(cacheKey, raw, ttl, listGen)
-				}
-				log.Printf(
-					"[ProvideVod] 内存筛选完成 pid=%d cid=%d keyword=%q total=%d page=%d size=%d cost=%s",
-					st.Pid,
-					st.Cid,
-					keyword,
-					page.Total,
-					page.Current,
-					len(snapshots),
-					time.Since(startedAt),
-				)
-				return item, nil
-			}
-		}
-
 		if db.Mdb == nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			return nil, ErrSearchIndexMissing
 		}
 
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
@@ -151,7 +121,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 
 		var total int64
 		if err := query.Count(&total).Error; err != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			return nil, err
 		}
 		calcTotal := int(total)
 		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
@@ -164,7 +134,7 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 
 		snapshots, findErr := findListPage(query, orderClause, offset, page.PageSize)
 		if findErr != nil {
-			return searchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+			return nil, findErr
 		}
 
 		item := searchCacheItem{
@@ -194,13 +164,14 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return item, nil
 	})
 
-	if err == nil && val != nil {
-		if item, ok := val.(searchCacheItem); ok {
-			page.Total = item.Total
-			page.PageCount = item.PageCount
-			return item.Snapshots
-		}
+	if err != nil {
+		return nil, err
 	}
-
-	return []model.FilmListSnapshot{}
+	item, ok := val.(searchCacheItem)
+	if !ok {
+		return nil, errors.New("检索索引损坏")
+	}
+	page.Total = item.Total
+	page.PageCount = item.PageCount
+	return item.Snapshots, nil
 }

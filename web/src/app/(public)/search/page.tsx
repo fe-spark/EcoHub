@@ -18,8 +18,8 @@ async function getSearchData(keyword: string, sort?: string) {
     if (response.code === 0) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch search data error:", error);
+  } catch {
+    // 后端未就绪时走空结果
   }
 
   return null;
@@ -31,8 +31,8 @@ async function getHotKeywordsData(): Promise<string[]> {
     if (response.code === 0 && Array.isArray(response.data)) {
       return response.data;
     }
-  } catch (error) {
-    console.error("fetch hot keywords error:", error);
+  } catch {
+    // 热词失败时用空列表
   }
   return [];
 }

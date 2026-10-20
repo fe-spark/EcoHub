@@ -62,21 +62,30 @@ func TestSearchSnapshotsByKeywordSourceAndSort(t *testing.T) {
 
 	// 1. 搜索 "斗破", 源 "uku" -> 应该命中 Mid 1
 	page1 := &dto.Page{Current: 1, PageSize: 10}
-	res1 := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "uku", "斗破", "", page1)
+	res1, err := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "uku", "斗破", "", page1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res1) != 1 || page1.Total != 1 || res1[0].Mid != 1 {
 		t.Fatalf("uku search expected Mid=1, got len=%d total=%d", len(res1), page1.Total)
 	}
 
 	// 2. 搜索 "斗破", 源 "hd" -> 应该命中 Mid 1 和 Mid 2
 	page2 := &dto.Page{Current: 1, PageSize: 10}
-	res2 := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "hd", "斗破", "", page2)
+	res2, err := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "hd", "斗破", "", page2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res2) != 2 || page2.Total != 2 {
 		t.Fatalf("hd search expected 2 (Mid 1, 2), got len=%d total=%d", len(res2), page2.Total)
 	}
 
 	// 3. 搜索 "斗", 源 "subo" -> 应该命中 Mid 3
 	page3 := &dto.Page{Current: 1, PageSize: 10}
-	res3 := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "subo", "斗", "", page3)
+	res3, err := SearchSnapshotsByKeywordSourceAndSortReadModel(version, "subo", "斗", "", page3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res3) != 1 || page3.Total != 1 || res3[0].Mid != 3 {
 		t.Fatalf("subo search expected Mid=3, got len=%d total=%d", len(res3), page3.Total)
 	}

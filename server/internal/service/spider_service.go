@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"sync/atomic"
-	"time"
 
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -17,8 +15,6 @@ import (
 	filmcache "server/internal/repository/film/cache"
 	"server/internal/spider"
 	"server/internal/spider/progress"
-
-	"golang.org/x/sync/singleflight"
 )
 
 type SpiderService struct{}
@@ -217,61 +213,23 @@ func (s *SpiderService) FollowSiteReset(ctx context.Context, onEvent func(any) e
 	}
 }
 
-var (
-	inventoryStatsFlight singleflight.Group
-	inventoryStatsMu     sync.Mutex
-	inventoryStatsCached = map[string]filmrepo.InventoryStats{}
-	inventoryStatsAt     = map[string]time.Time{}
-)
-
-const inventoryStatsTTL = 20 * time.Second
-
-// InvalidateInventoryStatsCache 首选站变化后丢掉片库规模缓存，避免刷新仍看到旧顺序。
-func InvalidateInventoryStatsCache() {
-	inventoryStatsMu.Lock()
-	inventoryStatsAt = map[string]time.Time{}
-	inventoryStatsMu.Unlock()
-}
-
 // InventoryStats 返回工作台片库规模。scope=sources 只算各采集站，其余只算整库。
-// 同一次打开页面会连打这个接口，20 秒内复用上一次结果。
-func (s *SpiderService) InventoryStats(scope string) filmrepo.InventoryStats {
-	if scope != "sources" {
-		scope = "library"
-	}
-	inventoryStatsMu.Lock()
-	if at := inventoryStatsAt[scope]; !at.IsZero() && time.Since(at) < inventoryStatsTTL {
-		cached := inventoryStatsCached[scope]
-		inventoryStatsMu.Unlock()
-		return cached
-	}
-	inventoryStatsMu.Unlock()
-
-	value, _, _ := inventoryStatsFlight.Do(scope, func() (any, error) {
-		inventoryStatsMu.Lock()
-		if at := inventoryStatsAt[scope]; !at.IsZero() && time.Since(at) < inventoryStatsTTL {
-			cached := inventoryStatsCached[scope]
-			inventoryStatsMu.Unlock()
-			return cached, nil
+func (s *SpiderService) InventoryStats(scope string) (filmrepo.InventoryStats, error) {
+	stats := filmrepo.InventoryStats{Sources: []filmrepo.SourceInventory{}}
+	if scope == "sources" {
+		sources, err := filmrepo.GetSourceInventories()
+		if err != nil {
+			return stats, err
 		}
-		inventoryStatsMu.Unlock()
-		stats := filmrepo.InventoryStats{Sources: []filmrepo.SourceInventory{}}
-		if scope == "sources" {
-			stats.Sources = filmrepo.GetSourceInventories()
-		} else {
-			stats.Library = filmrepo.GetLibraryInventory()
-		}
-		inventoryStatsMu.Lock()
-		inventoryStatsCached[scope] = stats
-		inventoryStatsAt[scope] = time.Now()
-		inventoryStatsMu.Unlock()
+		stats.Sources = sources
 		return stats, nil
-	})
-	stats, _ := value.(filmrepo.InventoryStats)
-	if stats.Sources == nil {
-		stats.Sources = []filmrepo.SourceInventory{}
 	}
-	return stats
+	library, err := filmrepo.GetLibraryInventory()
+	if err != nil {
+		return stats, err
+	}
+	stats.Library = library
+	return stats, nil
 }
 
 // CollectFilms 触发主站影片采集同步（兼容单个与批量）

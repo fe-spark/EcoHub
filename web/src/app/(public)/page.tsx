@@ -14,8 +14,8 @@ async function getHomeData() {
         content: response.data.content ?? [],
       };
     }
-  } catch (error) {
-    console.error("fetch home data error:", error);
+  } catch {
+    // 后端未就绪时降级为空数据
   }
 
   return {

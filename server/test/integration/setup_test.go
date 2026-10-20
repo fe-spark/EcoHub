@@ -108,7 +108,10 @@ func seedSnapshots(t *testing.T, gdb *gorm.DB, version string, rows ...model.Fil
 // searchFilms 执行前台关键词检索，返回命中的快照与分页态。
 func searchFilms(version, keyword string, pageSize int) ([]model.FilmListSnapshot, *dto.Page) {
 	page := &dto.Page{Current: 1, PageSize: pageSize}
-	rows := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
+	rows, err := filmsnapshot.SearchSnapshotsByKeywordAndSortReadModel(version, keyword, "", page)
+	if err != nil {
+		panic(err)
+	}
 	return rows, page
 }
 

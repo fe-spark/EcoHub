@@ -1,11 +1,6 @@
 import { useCallback, type Dispatch, type MutableRefObject, type SetStateAction } from "react";
-import { mergeCollectProgress, type CollectProgress, type FilmSource } from "./types";
-
-const TERMINAL = new Set(["done", "stopped", "failed"]);
-
-function isShownProgress(status: string): boolean {
-  return TERMINAL.has(status) || status === "starting" || status === "running";
-}
+import { isTerminalCollectStatus, nextCollectProgress } from "./collect-queue";
+import type { CollectProgress, FilmSource } from "./types";
 
 /** 把采集进度 SSE 写进站点列表。终态保留 3 秒再清掉。停止中不会被清掉。 */
 export function useCollectProgressStream(
@@ -18,13 +13,13 @@ export function useCollectProgressStream(
 
     for (const p of progressList) {
       const id = String(p.id);
-      if (TERMINAL.has(p.status)) {
+      if (isTerminalCollectStatus(p.status)) {
         if (resetTimersRef.current.has(id)) continue;
         const timer = setTimeout(() => {
           resetTimersRef.current.delete(id);
           setSiteList((current) =>
             current.map((item) =>
-              item.id === id && item.progress && TERMINAL.has(item.progress.status)
+              item.id === id && item.progress && isTerminalCollectStatus(item.progress.status)
                 ? { ...item, progress: null }
                 : item,
             ),
@@ -42,18 +37,17 @@ export function useCollectProgressStream(
 
     setSiteList((current) =>
       current.map((item) => {
-        const p = progressMap.get(String(item.id));
-        if (p) {
-          const next = { ...item, progress: mergeCollectProgress(item.progress, p) };
-          if (p.status === "done") {
-            next.lastRunTime = new Date().toISOString();
-          }
-          return next;
+        const incoming = progressMap.get(String(item.id));
+        const progress = nextCollectProgress(item.progress, incoming);
+        if (progress === item.progress) {
+          return item;
         }
-        if (item.progress && isShownProgress(item.progress.status)) {
-          return { ...item, progress: null };
-        }
-        return item;
+        return {
+          ...item,
+          progress,
+          lastRunTime:
+            progress?.status === "done" ? new Date().toISOString() : item.lastRunTime,
+        };
       }),
     );
   }, [resetTimersRef, setSiteList]);

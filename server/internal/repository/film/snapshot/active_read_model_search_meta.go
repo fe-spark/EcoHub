@@ -16,15 +16,27 @@ import (
 )
 
 type FilmSearchMeta struct {
-	Mid  int64
-	Pid  int64
-	Cid  int64
-	Item utils.FilmSearchItem
+	Mid             int64
+	Pid             int64
+	Cid             int64
+	FirstSourceId   string
+	PlaySources     []string
+	Area            string
+	Language        string
+	ClassTag        string
+	CategoryKey     string
+	RootCategoryKey string
+	Item            utils.FilmSearchItem
 }
 
 type filmSearchMetaIndex struct {
-	Version string
-	Items   []FilmSearchMeta
+	Version          string
+	Items            []FilmSearchMeta
+	ByUpdate         []int
+	Pos              map[int64]int
+	FilmsBySource    map[string]int64
+	PlayableBySource map[string]int64
+	HotPools         map[string][]int64
 }
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
@@ -172,7 +184,10 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 	cur := activeFilmSearchMetas.Load()
 	if cur == nil || cur.Version != version {
 		activeFilmSearchMetasMu.Unlock()
-		loadFilmSearchMetaIndex(version)
+		if _, err := loadFilmSearchMetaIndex(version); err != nil {
+			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
+			return
+		}
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
@@ -192,10 +207,7 @@ func RemoveMidsFromActiveFilmSearchIndex(version string, mids []int64) {
 		newItems = append(newItems, item)
 	}
 	if removed > 0 {
-		activeFilmSearchMetas.Store(&filmSearchMetaIndex{
-			Version: version,
-			Items:   newItems,
-		})
+		activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
 		log.Printf("[ActiveReadModel] 内存索引增量剔除 mids=%d removed=%d remaining=%d", len(mids), removed, len(newItems))
 	}
 }
@@ -224,16 +236,6 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		return
 	}
 
-	type dbMetaRow struct {
-		Mid         int64
-		Pid         int64
-		Cid         int64
-		Name        string
-		Hits        int64
-		Score       float64
-		Year        int64
-		UpdateStamp int64
-	}
 	const batchSize = 500
 	var allRows []dbMetaRow
 	for i := 0; i < len(cleanMids); i += batchSize {
@@ -243,7 +245,7 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		}
 		var batchRows []dbMetaRow
 		if err := db.Mdb.Model(&model.FilmIndex{}).
-			Select("mid, pid, cid, name, hits, score, year, update_stamp").
+			Select(filmMetaSelect).
 			Where("mid IN ?", cleanMids[i:end]).
 			Find(&batchRows).Error; err != nil {
 			log.Printf("[ActiveReadModel] UpsertMidsToActiveFilmSearchIndex 查询 film_index 失败: %v", err)
@@ -252,30 +254,26 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		allRows = append(allRows, batchRows...)
 	}
 
+	plays, err := loadPlaySources(cleanMids)
+	if err != nil {
+		log.Printf("[ActiveReadModel] 播放源加载失败: %v", err)
+		return
+	}
 	upsertMap := make(map[int64]FilmSearchMeta, len(allRows))
 	for _, r := range allRows {
-		item := utils.FilmSearchItem{
-			Mid:         r.Mid,
-			Name:        r.Name,
-			Hits:        r.Hits,
-			Score:       r.Score,
-			Year:        r.Year,
-			UpdateStamp: r.UpdateStamp,
-		}
-		utils.FillSearchDerivedFields(&item)
-		upsertMap[r.Mid] = FilmSearchMeta{
-			Mid:  r.Mid,
-			Pid:  r.Pid,
-			Cid:  r.Cid,
-			Item: item,
-		}
+		meta := metaFromRow(r)
+		meta.PlaySources = plays[r.Mid]
+		upsertMap[r.Mid] = meta
 	}
 
 	activeFilmSearchMetasMu.Lock()
 	cur := activeFilmSearchMetas.Load()
 	if cur == nil || cur.Version != version {
 		activeFilmSearchMetasMu.Unlock()
-		loadFilmSearchMetaIndex(version)
+		if _, err := loadFilmSearchMetaIndex(version); err != nil {
+			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
+			return
+		}
 		activeFilmSearchMetasMu.Lock()
 		cur = activeFilmSearchMetas.Load()
 	}
@@ -304,9 +302,6 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		}
 	}
 
-	activeFilmSearchMetas.Store(&filmSearchMetaIndex{
-		Version: version,
-		Items:   newItems,
-	})
+	activeFilmSearchMetas.Store(sealSearchMetaIndex(version, newItems))
 	log.Printf("[ActiveReadModel] 内存索引增量更新/剔除 mids=%d snapshot_found=%d total=%d", len(cleanMids), len(upsertMap), len(newItems))
 }

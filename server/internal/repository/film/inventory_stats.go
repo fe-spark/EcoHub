@@ -6,6 +6,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 // LibraryInventory 工作台片库规模。影片和可播放按当前主站。分类和失败记录是全库。
@@ -39,24 +40,39 @@ type sourceCount struct {
 }
 
 // GetInventoryStats 统计整库和各采集站。工作台首屏只取整库，各站在展开时另取。
-func GetInventoryStats() InventoryStats {
-	return InventoryStats{Library: GetLibraryInventory(), Sources: GetSourceInventories()}
+func GetInventoryStats() (InventoryStats, error) {
+	library, err := GetLibraryInventory()
+	if err != nil {
+		return InventoryStats{}, err
+	}
+	sources, err := GetSourceInventories()
+	if err != nil {
+		return InventoryStats{}, err
+	}
+	return InventoryStats{Library: library, Sources: sources}, nil
 }
 
 // GetLibraryInventory 统计当前主站档案、可播放、展示分类和失败记录。
-func GetLibraryInventory() LibraryInventory {
+func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
-		return library
+		return library, filmsnapshot.ErrSearchIndexMissing
 	}
-	primaryID := activePrimaryID()
-	library.Films = countOwnedFilms(primaryID)
-	if primaryID != "" {
-		library.Playable = countPlayMids(primaryID, hasSoftDeletedFilms())
+	films, playable, err := filmsnapshot.SearchInventoryCounts()
+	if err != nil {
+		return library, err
 	}
-	_ = db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error
-	_ = db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error
-	return library
+	if primaryID := activePrimaryID(); primaryID != "" {
+		library.Films = films[primaryID]
+		library.Playable = playable[primaryID]
+	}
+	if err := db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error; err != nil {
+		return library, err
+	}
+	if err := db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error; err != nil {
+		return library, err
+	}
+	return library, nil
 }
 
 func activePrimaryID() string {
@@ -66,25 +82,27 @@ func activePrimaryID() string {
 	return ""
 }
 
-func countOwnedFilms(sourceID string) int64 {
-	sourceID = strings.TrimSpace(sourceID)
-	if db.Mdb == nil || sourceID == "" {
-		return 0
-	}
-	var n int64
-	_ = db.Mdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", sourceID).Count(&n).Error
-	return n
-}
-
 // GetSourceInventories 按采集站统计影片、分类和失败记录。
 // 影片是该站自己的档案，含没有线路的。分类只计该站映射到、且展示分类还在的节点。
-func GetSourceInventories() []SourceInventory {
+func GetSourceInventories() ([]SourceInventory, error) {
 	sources := []SourceInventory{}
 	if db.Mdb == nil {
-		return sources
+		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
-	categoryCounts := indexCounts(countCategoriesBySource())
-	failureCounts := indexCounts(countFailuresBySource())
+	films, _, err := filmsnapshot.SearchInventoryCounts()
+	if err != nil {
+		return nil, err
+	}
+	categoryRows, err := countCategoriesBySource()
+	if err != nil {
+		return nil, err
+	}
+	failureRows, err := countFailuresBySource()
+	if err != nil {
+		return nil, err
+	}
+	categoryCounts := indexCounts(categoryRows)
+	failureCounts := indexCounts(failureRows)
 	primaryID := activePrimaryID()
 	for _, source := range repository.GetCollectSourceList() {
 		id := strings.TrimSpace(source.Id)
@@ -96,55 +114,32 @@ func GetSourceInventories() []SourceInventory {
 			Name:       source.Name,
 			Enabled:    source.State,
 			IsPrimary:  id == primaryID,
-			Films:      countOwnedFilms(id),
+			Films:      films[id],
 			Categories: categoryCounts[id],
 			Failures:   failureCounts[id],
 		})
 	}
-	return sources
+	return sources, nil
 }
 
-func hasSoftDeletedFilms() bool {
-	var n int64
-	err := db.Mdb.Unscoped().Model(&model.FilmIndex{}).Where("deleted_at IS NOT NULL").Count(&n).Error
-	return err == nil && n > 0
-}
-
-// countPlayMids 统计有播放地址的影片。sourceID 为空时统计整库。
-// accurate 为真时只保留未删除的影片。计数走 idx_playlist_kind_mid，避免全表扫描把请求拖到超时。
-func countPlayMids(sourceID string, accurate bool) int64 {
-	sqlText := "SELECT COUNT(DISTINCT p.mid) FROM " + model.TableFilmSourcePlaylist + " AS p WHERE p.line_kind = ?"
-	args := []any{"play"}
-	if sourceID != "" {
-		sqlText += " AND p.source_id = ?"
-		args = append(args, sourceID)
-	}
-	if accurate {
-		sqlText += " AND EXISTS (SELECT 1 FROM " + model.TableFilmIndex + " AS f WHERE f.mid = p.mid AND f.deleted_at IS NULL)"
-	}
-	var n int64
-	_ = db.Mdb.Raw(sqlText, args...).Scan(&n).Error
-	return n
-}
-
-func countCategoriesBySource() []sourceCount {
+func countCategoriesBySource() ([]sourceCount, error) {
 	var rows []sourceCount
-	_ = db.Mdb.Model(&model.CategoryMapping{}).
+	err := db.Mdb.Model(&model.CategoryMapping{}).
 		Select("source_id, COUNT(DISTINCT category_id) AS n").
 		Where("category_id > 0").
 		Where("category_id IN (?)", db.Mdb.Model(&model.Category{}).Select("id")).
 		Group("source_id").
 		Scan(&rows).Error
-	return rows
+	return rows, err
 }
 
-func countFailuresBySource() []sourceCount {
+func countFailuresBySource() ([]sourceCount, error) {
 	var rows []sourceCount
-	_ = db.Mdb.Model(&model.FailureRecord{}).
+	err := db.Mdb.Model(&model.FailureRecord{}).
 		Select("origin_id AS source_id, COUNT(*) AS n").
 		Group("origin_id").
 		Scan(&rows).Error
-	return rows
+	return rows, err
 }
 
 func indexCounts(rows []sourceCount) map[string]int64 {

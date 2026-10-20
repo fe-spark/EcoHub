@@ -13,24 +13,32 @@ import (
 
 const searchMetaLoadPageSize = 5000
 
+const filmMetaSelect = "mid, pid, cid, first_source_id, name, hits, score, year, update_stamp, area, language, class_tag, category_key, root_category_key"
+
 type dbMetaRow struct {
-	Mid         int64
-	Pid         int64
-	Cid         int64
-	Name        string
-	Hits        int64
-	Score       float64
-	Year        int64
-	UpdateStamp int64
+	Mid             int64
+	Pid             int64
+	Cid             int64
+	FirstSourceId   string
+	Name            string
+	Hits            int64
+	Score           float64
+	Year            int64
+	UpdateStamp     int64
+	Area            string
+	Language        string
+	ClassTag        string
+	CategoryKey     string
+	RootCategoryKey string
 }
 
-func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
+func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	version = strings.TrimSpace(version)
 	if version == "" || db.Mdb == nil {
-		return nil
+		return nil, ErrSearchIndexMissing
 	}
 	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-		return cur
+		return cur, nil
 	}
 	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
 		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
@@ -40,20 +48,26 @@ func loadFilmSearchMetaIndex(version string) *filmSearchMetaIndex {
 		if err != nil {
 			return nil, err
 		}
-		idx := &filmSearchMetaIndex{Version: version, Items: items}
+		plays, err := loadPlaySources(nil)
+		if err != nil {
+			return nil, err
+		}
+		attachPlaySources(items, plays)
+		idx := sealSearchMetaIndex(version, items)
 		activeFilmSearchMetasMu.Lock()
 		activeFilmSearchMetas.Store(idx)
 		activeFilmSearchMetasMu.Unlock()
 		log.Printf("[ActiveReadModel] 检索索引分页加载完成 version=%s count=%d", version, len(items))
 		return idx, nil
 	})
-	if err != nil || val == nil {
-		if err != nil {
-			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
-		}
-		return nil
+	if err != nil {
+		return nil, err
 	}
-	return val.(*filmSearchMetaIndex)
+	idx, ok := val.(*filmSearchMetaIndex)
+	if !ok || idx == nil {
+		return nil, ErrSearchIndexMissing
+	}
+	return idx, nil
 }
 
 func loadFilmSearchMetaItems(version string) ([]FilmSearchMeta, error) {
@@ -62,7 +76,7 @@ func loadFilmSearchMetaItems(version string) ([]FilmSearchMeta, error) {
 	for {
 		var rows []dbMetaRow
 		if err := db.Mdb.Model(&model.FilmIndex{}).
-			Select("mid, pid, cid, name, hits, score, year, update_stamp").
+			Select(filmMetaSelect).
 			Where("mid > ?", lastMid).
 			Order("mid ASC").
 			Limit(searchMetaLoadPageSize).
@@ -109,19 +123,33 @@ func fillSearchMetaPage(rows []dbMetaRow, items []FilmSearchMeta) {
 		go func(s, e int) {
 			defer wg.Done()
 			for i := s; i < e; i++ {
-				r := rows[i]
-				item := utils.FilmSearchItem{
-					Mid:         r.Mid,
-					Name:        r.Name,
-					Hits:        r.Hits,
-					Score:       r.Score,
-					Year:        r.Year,
-					UpdateStamp: r.UpdateStamp,
-				}
-				utils.FillSearchDerivedFields(&item)
-				items[i] = FilmSearchMeta{Mid: r.Mid, Pid: r.Pid, Cid: r.Cid, Item: item}
+				items[i] = metaFromRow(rows[i])
 			}
 		}(startIdx, endIdx)
 	}
 	wg.Wait()
+}
+
+func metaFromRow(r dbMetaRow) FilmSearchMeta {
+	item := utils.FilmSearchItem{
+		Mid:         r.Mid,
+		Name:        r.Name,
+		Hits:        r.Hits,
+		Score:       r.Score,
+		Year:        r.Year,
+		UpdateStamp: r.UpdateStamp,
+	}
+	utils.FillSearchDerivedFields(&item)
+	return FilmSearchMeta{
+		Mid:             r.Mid,
+		Pid:             r.Pid,
+		Cid:             r.Cid,
+		FirstSourceId:   strings.TrimSpace(r.FirstSourceId),
+		Area:            strings.TrimSpace(r.Area),
+		Language:        strings.TrimSpace(r.Language),
+		ClassTag:        strings.TrimSpace(r.ClassTag),
+		CategoryKey:     strings.TrimSpace(r.CategoryKey),
+		RootCategoryKey: strings.TrimSpace(r.RootCategoryKey),
+		Item:            item,
+	}
 }

@@ -109,7 +109,8 @@ func PendingRecord() []model.FailureRecord {
 	return list
 }
 
-// MarkFailureRecordRetryFailed 更新当前失败记录的失败原因，并用数据库当前重试次数判断是否最终失败。
+// MarkFailureRecordRetryFailed 用更新前的重试次数决定是否最终失败。
+// 次数和状态必须一起按旧值计算，不能在同一条 UPDATE 里先写次数再读次数。
 func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetryCount int) (bool, int, error) {
 	if fr == nil || fr.ID == 0 {
 		return false, 0, errors.New("failure record not found")
@@ -117,19 +118,32 @@ func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetr
 	if maxRetryCount <= 0 {
 		maxRetryCount = model.MaxFailureRetryCount
 	}
-	updates := map[string]any{
-		"cause":       cause,
-		"retry_count": gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE retry_count + 1 END", maxRetryCount, maxRetryCount),
-		"status":      gorm.Expr("CASE WHEN retry_count + 1 >= ? THEN ? ELSE ? END", maxRetryCount, model.FailureRecordStatusFailed, model.FailureRecordStatusPending),
-	}
-	if err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(updates).Error; err != nil {
+	var final bool
+	var count int
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var current model.FailureRecord
+		if err := tx.Select("id", "retry_count").First(&current, fr.ID).Error; err != nil {
+			return err
+		}
+		count = current.RetryCount + 1
+		final = count >= maxRetryCount
+		if count > maxRetryCount {
+			count = maxRetryCount
+		}
+		status := model.FailureRecordStatusPending
+		if final {
+			status = model.FailureRecordStatusFailed
+		}
+		return tx.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(map[string]any{
+			"cause":       cause,
+			"retry_count": count,
+			"status":      status,
+		}).Error
+	})
+	if err != nil {
 		return false, 0, err
 	}
-	var current model.FailureRecord
-	if err := db.Mdb.Select("status", "retry_count").First(&current, fr.ID).Error; err != nil {
-		return false, 0, err
-	}
-	return current.Status == model.FailureRecordStatusFailed, current.RetryCount, nil
+	return final, count, nil
 }
 
 // UpdateFailureRecordStatusByID 按 ID 修改失败记录的重试结果状态。

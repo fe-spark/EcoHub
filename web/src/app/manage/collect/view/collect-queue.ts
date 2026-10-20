@@ -1,12 +1,8 @@
 import {
   isActiveCollectStatus,
-  stationProgressPercent,
   type CollectProgress,
   type FilmSource,
 } from "./types";
-
-/** 无 queueId 的进度归入同一兜底队列，避免旧数据拆成 N 条。 */
-export const UNTAGGED_COLLECT_QUEUE_ID = "__none";
 
 export interface CollectQueueGroup {
   queueId: string;
@@ -15,25 +11,21 @@ export interface CollectQueueGroup {
 
 export interface CollectQueueProgressView {
   total: number;
-  activeCount: number;
   doneCount: number;
   failedCount: number;
   stoppedCount: number;
   fetchingCount: number;
   stoppingCount: number;
   percent: number;
-  success: number;
+  pageDone: number;
+  pageTotal: number;
   failed: number;
   running: boolean;
-  statsText: string;
 }
 
 export function collectQueueIdOf(progress?: CollectProgress | null): string | null {
-  if (!progress) {
-    return null;
-  }
-  const tagged = progress.queueId?.trim();
-  return tagged || UNTAGGED_COLLECT_QUEUE_ID;
+  const queueId = progress?.queueId?.trim();
+  return queueId || null;
 }
 
 /** 按采集队列分组：有 queueId 的各成一条，未打标的进度合在一起。 */
@@ -62,104 +54,119 @@ export function groupCollectQueues(sites: FilmSource[]): CollectQueueGroup[] {
 export function computeCollectQueueProgress(
   sourceIds: string[],
   sites: FilmSource[],
-  activeIds: string[],
 ): CollectQueueProgressView | null {
   if (sourceIds.length === 0) {
     return null;
   }
   const byId = new Map(sites.map((item) => [item.id, item]));
-  let percentSum = 0;
-  let success = 0;
+  let pageDone = 0;
+  let pageTotal = 0;
   let failed = 0;
   let fetchingCount = 0;
   let stoppingCount = 0;
   let doneCount = 0;
   let failedCount = 0;
   let stoppedCount = 0;
-  let hasAnyProgress = false;
+  let counted = 0;
 
   for (const id of sourceIds) {
-    const progress = byId.get(id)?.progress ?? null;
-    if (progress) {
-      hasAnyProgress = true;
-      success += progress.success;
-      failed += progress.failed;
-      percentSum += stationProgressPercent(progress);
-      const status = progress.status;
-      if (isActiveCollectStatus(status)) {
-        fetchingCount += 1;
-      } else if (status === "stopping") {
-        stoppingCount += 1;
-      } else if (status === "failed") {
-        failedCount += 1;
-      } else if (status === "stopped") {
-        stoppedCount += 1;
-      } else {
-        doneCount += 1;
-      }
-    } else if (activeIds.includes(id)) {
+    const progress = byId.get(id)?.progress;
+    if (!progress) {
+      continue;
+    }
+    counted += 1;
+    failed += progress.failed;
+    const pages = progress.total;
+    if (pages > 0) {
+      pageTotal += pages;
+      pageDone += Math.min(progress.success + progress.failed, pages);
+    }
+    const status = progress.status;
+    if (isActiveCollectStatus(status)) {
       fetchingCount += 1;
-      hasAnyProgress = true;
+    } else if (status === "stopping") {
+      stoppingCount += 1;
+    } else if (status === "failed") {
+      failedCount += 1;
+    } else if (status === "stopped") {
+      stoppedCount += 1;
     } else {
       doneCount += 1;
-      percentSum += 100;
     }
   }
 
-  const total = sourceIds.length;
-  const activeCount = fetchingCount + stoppingCount;
-  const percent = total > 0 ? Math.floor(percentSum / total) : 0;
-  const running = activeCount > 0;
-  if (!running && !hasAnyProgress) {
+  if (counted === 0) {
     return null;
   }
-
-  const phaseParts: string[] = [`共 ${total} 站`];
-  if (running) {
-    if (fetchingCount > 0) {
-      phaseParts.push(`采集中 ${fetchingCount}`);
-    }
-    if (stoppingCount > 0) {
-      phaseParts.push(`停止中 ${stoppingCount}`);
-    }
-    if (doneCount > 0) {
-      phaseParts.push(`完成 ${doneCount}`);
-    }
-    if (failedCount > 0) {
-      phaseParts.push(`异常 ${failedCount}`);
-    }
-  } else {
-    if (failedCount > 0) {
-      phaseParts.push(`异常 ${failedCount}`);
-    }
-    if (stoppedCount > 0) {
-      phaseParts.push(`终止 ${stoppedCount}`);
-    }
-    if (doneCount > 0 || (failedCount === 0 && stoppedCount === 0)) {
-      phaseParts.push("已结束");
-    }
-  }
-  if (success > 0 || failed > 0) {
-    phaseParts.push(`已采集 ${success} 页`);
-  }
-  if (failed > 0) {
-    phaseParts.push(`失败 ${failed} 页`);
-  }
-
+  const running = fetchingCount + stoppingCount > 0;
+  const percent = pageTotal > 0 ? Math.floor((pageDone / pageTotal) * 100) : 0;
   return {
-    total,
-    activeCount,
+    total: sourceIds.length,
     doneCount,
     failedCount,
     stoppedCount,
     fetchingCount,
     stoppingCount,
     percent: running ? Math.min(percent, 99) : Math.min(percent, 100),
-    success,
+    pageDone,
+    pageTotal,
     failed,
     running,
-    statsText: phaseParts.join(" · "),
   };
+}
+
+function isPromotedClientQueue(
+  prev: { queueId: string; staleQueueId?: string },
+  nextQueueId: string,
+): boolean {
+  if (!isClientCollectQueueId(prev.queueId)) {
+    return false;
+  }
+  const nextId = nextQueueId.trim();
+  if (!nextId || nextId === prev.queueId || isClientCollectQueueId(nextId)) {
+    return false;
+  }
+  const stale = prev.staleQueueId?.trim() || "";
+  return nextId !== stale;
+}
+
+/** 同一条队列从进行中收到终态才算结束。q-local 接到新的服务端 queueId 也算。上一轮 id 不算。 */
+export function finishedQueueViews<
+  T extends { seq: number; queueId: string; view: CollectQueueProgressView },
+>(prev: (T & { staleQueueId?: string })[], next: T[]): CollectQueueProgressView[] {
+  const ended: CollectQueueProgressView[] = [];
+  for (const bar of prev) {
+    if (!bar.view.running) {
+      continue;
+    }
+    const current = next.find(
+      (item) =>
+        item.seq === bar.seq &&
+        (item.queueId === bar.queueId || isPromotedClientQueue(bar, item.queueId)),
+    );
+    if (current && !current.view.running) {
+      ended.push(current.view);
+    }
+  }
+  return ended;
+}
+
+export type QueueEndLevel = "success" | "info" | "warning" | "error";
+
+export function queueEndNotice(view: CollectQueueProgressView): {
+  level: QueueEndLevel;
+  text: string;
+} {
+  if (view.stoppedCount > 0) {
+    return { level: "info", text: "采集已停止" };
+  }
+  if (view.failedCount > 0) {
+    return {
+      level: view.doneCount > 0 ? "warning" : "error",
+      text: view.doneCount > 0 ? "采集部分失败" : "采集失败",
+    };
+  }
+  return { level: "success", text: "采集完成" };
 }
 
 export function queueProgressTitle(
@@ -174,12 +181,69 @@ export function queueProgressTitle(
   return `${name} · 已结束`;
 }
 
+const CLIENT_QUEUE_PREFIX = "q-local-";
+const TERMINAL_COLLECT_STATUS = new Set(["done", "failed", "stopped"]);
+
 export function newClientCollectQueueId(): string {
-  return `q-local-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `${CLIENT_QUEUE_PREFIX}${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function isClientCollectQueueId(queueId: string): boolean {
-  return queueId.startsWith("q-local-");
+export function isClientCollectQueueId(queueId?: string | null): boolean {
+  return !!queueId?.startsWith(CLIENT_QUEUE_PREFIX);
+}
+
+export function isTerminalCollectStatus(status?: string | null): boolean {
+  return !!status && TERMINAL_COLLECT_STATUS.has(status);
+}
+
+function isLocalStart(progress?: CollectProgress | null): boolean {
+  return progress?.status === "starting" && isClientCollectQueueId(progress.queueId);
+}
+
+function dropStaleTerminal(current: CollectProgress, incoming: CollectProgress): boolean {
+  if (!isTerminalCollectStatus(incoming.status)) {
+    return false;
+  }
+  // 没记下上一轮时，终态一律丢掉，避免把还在播的旧完成当成这次结果。
+  if (current.staleQueueId == null) {
+    return true;
+  }
+  const incomingId = incoming.queueId?.trim() ?? "";
+  const staleId = current.staleQueueId.trim();
+  return incomingId === "" || incomingId === staleId || incomingId === current.queueId;
+}
+
+/** 站点进度的下一次值。本地刚发起时丢掉上一轮或空 queueId 的终态；新 queueId 的终态直接采用。 */
+export function nextCollectProgress(
+  current: CollectProgress | null | undefined,
+  incoming: CollectProgress | undefined,
+): CollectProgress | null {
+  if (isLocalStart(current) && current) {
+    if (!incoming || dropStaleTerminal(current, incoming)) {
+      return current;
+    }
+  }
+  if (
+    current?.status === "stopping" &&
+    incoming &&
+    isActiveCollectStatus(incoming.status) &&
+    incoming.queueId === current.queueId
+  ) {
+    return current;
+  }
+  if (incoming) {
+    return incoming;
+  }
+  if (!current || current.status === "stopping") {
+    return current ?? null;
+  }
+  if (
+    isActiveCollectStatus(current.status) ||
+    isTerminalCollectStatus(current.status)
+  ) {
+    return null;
+  }
+  return current;
 }
 
 /** 进度条对齐：同 queueId 原条；仅 q-local 乐观条可按站点接到服务端 id。单站重采不得并回旧批次。 */

@@ -1,28 +1,25 @@
-import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { TOUR_HOLD_PROGRESS_ATTR } from "@/app/manage/components/manage-tour";
 import type { CollectQueueBarItem } from "./collect-queue-bars";
 import {
   computeCollectQueueProgress,
+  finishedQueueViews,
   groupCollectQueues,
+  isClientCollectQueueId,
   matchPrevCollectQueueBar,
+  queueEndNotice,
   type CollectQueueProgressView,
 } from "./collect-queue";
 import { progressAsStopping, type FilmSource } from "./types";
-
-const CLOSE_SECONDS = 8;
 
 interface QueueBarState {
   queueId: string;
   sourceIds: string[];
   seq: number;
+  staleQueueId?: string;
   view: CollectQueueProgressView;
-  countdown: number | null;
-}
-
-function finishedView(view: CollectQueueProgressView): CollectQueueProgressView {
-  return { ...view, running: false, percent: 100, activeCount: 0, fetchingCount: 0 };
 }
 
 export function useCollectQueueBars(
@@ -32,6 +29,7 @@ export function useCollectQueueBars(
 ) {
   const { message } = useAppMessage();
   const [bars, setBars] = useState<QueueBarState[]>([]);
+  const barsRef = useRef<QueueBarState[]>([]);
   const [stoppingQueueId, setStoppingQueueId] = useState<string | null>(null);
   const [tourHoldProgress, setTourHoldProgress] = useState(false);
 
@@ -49,67 +47,49 @@ export function useCollectQueueBars(
   }, []);
 
   useEffect(() => {
+    const prev = barsRef.current;
     const groups = groupCollectQueues(sites);
-    setBars((prev) => {
-      const used = new Set<string>();
-      let seqCursor = prev.reduce((max, bar) => Math.max(max, bar.seq), 0);
-      const next: QueueBarState[] = [];
-      for (const group of groups) {
-        const view = computeCollectQueueProgress(group.sourceIds, sites, []);
-        if (!view) {
-          continue;
-        }
-        const matched = matchPrevCollectQueueBar(group, prev, used);
-        if (matched) {
-          used.add(matched.queueId);
-        }
-        const seq = matched?.seq ?? ++seqCursor;
-        next.push({
-          queueId: group.queueId,
-          sourceIds: group.sourceIds,
-          seq,
-          view,
-          countdown: view.running ? null : matched?.countdown ?? CLOSE_SECONDS,
-        });
+    const used = new Set<string>();
+    let seqCursor = prev.reduce((max, bar) => Math.max(max, bar.seq), 0);
+    const next: QueueBarState[] = [];
+    for (const group of groups) {
+      const view = computeCollectQueueProgress(group.sourceIds, sites);
+      if (!view) {
+        continue;
       }
-      for (const bar of prev) {
-        if (next.some((item) => item.seq === bar.seq)) {
-          continue;
-        }
-        if (bar.countdown === 0) {
-          continue;
-        }
-        next.push({
-          ...bar,
-          view: bar.view.running ? finishedView(bar.view) : bar.view,
-          countdown: bar.countdown ?? CLOSE_SECONDS,
-        });
+      const matched = matchPrevCollectQueueBar(group, prev, used);
+      if (matched) {
+        used.add(matched.queueId);
       }
-      return next;
-    });
-  }, [sites]);
-
-  const countdownActive = bars.some((bar) => !bar.view.running && bar.countdown != null);
-  useEffect(() => {
-    if (tourHoldProgress || !countdownActive) {
-      return;
+      const seq = matched?.seq ?? ++seqCursor;
+      const staleQueueId = isClientCollectQueueId(group.queueId)
+        ? sites.find((site) => group.sourceIds.includes(site.id))?.progress?.staleQueueId
+        : undefined;
+      next.push({
+        queueId: group.queueId,
+        sourceIds: group.sourceIds,
+        seq,
+        staleQueueId,
+        view,
+      });
     }
-    const timer = window.setInterval(() => {
-      setBars((current) =>
-        current.flatMap((bar) => {
-          if (bar.view.running || bar.countdown == null) {
-            return [bar];
-          }
-          const countdown = bar.countdown - 1;
-          if (countdown <= 0) {
-            return [];
-          }
-          return [{ ...bar, countdown }];
-        }),
-      );
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [countdownActive, tourHoldProgress]);
+    let visible = next;
+    if (tourHoldProgress) {
+      for (const bar of prev) {
+        if (!next.some((item) => item.seq === bar.seq)) {
+          visible.push(bar);
+        }
+      }
+    } else {
+      for (const view of finishedQueueViews(prev, next)) {
+        const notice = queueEndNotice(view);
+        message[notice.level](notice.text);
+      }
+      visible = next.filter((item) => item.view.running);
+    }
+    barsRef.current = visible;
+    setBars(visible);
+  }, [sites, tourHoldProgress, message]);
 
   const stopQueue = async (queueId: string, sourceIds: string[]) => {
     setStoppingQueueId(queueId);
@@ -145,11 +125,10 @@ export function useCollectQueueBars(
         sourceIds: bar.sourceIds,
         seq: bar.seq,
         view: bar.view,
-        countdown: bar.view.running || tourHoldProgress ? null : bar.countdown,
         canStop: bar.view.fetchingCount > 0,
       })),
-    [bars, tourHoldProgress],
+    [bars],
   );
 
-  return { queueBars: items, stoppingQueueId, tourHoldProgress, stopQueue };
+  return { queueBars: items, stoppingQueueId, stopQueue };
 }

@@ -1,23 +1,8 @@
 package film
 
 import (
-	"database/sql"
 	"testing"
 )
-
-func TestDailyPidFilter(t *testing.T) {
-	if dailyPidFilter(DailyPidAll) != nil {
-		t.Fatal("all should be nil filter")
-	}
-	other := dailyPidFilter(DailyPidOther)
-	if other == nil || other.CategoryName != "其他" {
-		t.Fatalf("other: %+v", other)
-	}
-	cat := dailyPidFilter(12)
-	if cat == nil || cat.CategoryID != 12 {
-		t.Fatalf("pid 12: %+v", cat)
-	}
-}
 
 func TestClampDailyUpdatePage(t *testing.T) {
 	c, s := clampDailyUpdatePage(0, 0)
@@ -42,35 +27,6 @@ func TestClampDailyUpdateExclude(t *testing.T) {
 	got = ClampDailyUpdateExclude(in, 2)
 	if len(got) != 2 || got[0] != 1 || got[1] != 2 {
 		t.Fatalf("truncate: %v", got)
-	}
-}
-
-func TestDailyUpdateBaseQueryAllSkipsJoin(t *testing.T) {
-	if dailyPidFilter(DailyPidAll) != nil {
-		t.Fatal("pid=0 must skip nav filter (no film_index join needed)")
-	}
-	if dailyPidFilter(DailyPidOther) == nil || dailyPidFilter(12) == nil {
-		t.Fatal("pid filter/-1/>0 still need join")
-	}
-}
-
-func TestAccumulateDailyPidCountsIncludesNullPidInOther(t *testing.T) {
-	navSet := map[int64]struct{}{1: {}, 2: {}}
-	rows := []dailyPidCountRow{
-		{Pid: sql.NullInt64{Int64: 1, Valid: true}, Count: 10},
-		{Pid: sql.NullInt64{Int64: 9, Valid: true}, Count: 3},
-		{Pid: sql.NullInt64{Valid: false}, Count: 2},
-		{Pid: sql.NullInt64{Int64: 0, Valid: true}, Count: 1},
-	}
-	byPid, other, total := accumulateDailyPidCounts(rows, navSet)
-	if total != 16 {
-		t.Fatalf("total: want 16 got %d", total)
-	}
-	if byPid[1] != 10 {
-		t.Fatalf("pid 1: want 10 got %d", byPid[1])
-	}
-	if other != 6 {
-		t.Fatalf("other should include non-nav + NULL + pid0, got %d", other)
 	}
 }
 

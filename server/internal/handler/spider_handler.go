@@ -123,7 +123,12 @@ func (h *SpiderHandler) ResetProgressStream(c *gin.Context) {
 
 // InventoryStats 返回工作台片库规模。scope=sources 时只返回各采集站。
 func (h *SpiderHandler) InventoryStats(c *gin.Context) {
-	dto.Success(service.SpiderSvc.InventoryStats(c.Query("scope")), "获取成功", c)
+	stats, err := service.SpiderSvc.InventoryStats(c.Query("scope"))
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(stats, "获取成功", c)
 }
 
 // UpdateSpider 影片主站更新采集（兼容单个与批量）

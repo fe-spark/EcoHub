@@ -177,7 +177,7 @@ export default function MobileFilterDrawer({
         styles={{
           header: { display: "none" },
           body: { padding: 0 },
-          content: {
+          section: {
             background: "var(--public-surface-2)",
             borderRadius: "20px 20px 0 0",
           },

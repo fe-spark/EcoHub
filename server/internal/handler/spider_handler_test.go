@@ -7,20 +7,25 @@ import (
 	"testing"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/utils"
 )
 
 func TestSpiderHandler_InventoryStats(t *testing.T) {
+	orig := db.Mdb
+	db.Mdb = nil
+	t.Cleanup(func() { db.Mdb = orig })
+
 	c, w := testContext(http.MethodGet, "/api/manage/spider/clear/stats")
 	SpiderHd.InventoryStats(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
 	}
 	resp := decodeResponse(t, w)
-	if resp.Code != dto.SUCCESS {
-		t.Fatalf("expected code SUCCESS, got %d", resp.Code)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected code FAILED, got %d msg=%s", resp.Code, resp.Msg)
 	}
 }
 

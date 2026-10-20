@@ -32,6 +32,8 @@ type progressState struct {
 	mu      sync.RWMutex
 	data    model.CollectProgress
 	updated time.Time
+	// probed 总页已写入。新开一轮采集时清掉。
+	probed bool
 	// epoch 每次新开采集加一。旧运行的进度写入对不上就丢弃。
 	epoch uint64
 }
@@ -57,6 +59,47 @@ func ensure(sourceID string, name string) *progressState {
 	state := &progressState{data: model.CollectProgress{Id: sourceID, Name: name, Status: StatusStarting}, updated: time.Now()}
 	actual, _ := store.LoadOrStore(sourceID, state)
 	return actual.(*progressState)
+}
+
+// SetPageTotal 写入探测结果。只接受仍在排队的站，并在同一次锁里标成已探测。0 页直接标完成。
+func SetPageTotal(sourceID string, pageCount int) {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return
+	}
+	state := val.(*progressState)
+	state.mu.Lock()
+	accepted := state.data.Status == StatusStarting
+	if accepted {
+		state.data.Total = pageCount
+		state.data.Current = 0
+		state.data.Success = 0
+		state.data.Failed = 0
+		if pageCount <= 0 {
+			state.data.Status = StatusDone
+		}
+		state.probed = true
+		state.updated = time.Now()
+	}
+	state.mu.Unlock()
+	if accepted {
+		NotifyChange()
+	}
+}
+
+// PageTotal 返回已探到的总页。尚未探测返回 -1。
+func PageTotal(sourceID string) int {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return -1
+	}
+	state := val.(*progressState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	if !state.probed {
+		return -1
+	}
+	return state.data.Total
 }
 
 func Update(sourceID string, update func(*model.CollectProgress)) {
@@ -310,6 +353,7 @@ func MarkSourcesCollectStarting(sources []model.FilmSource, queueID string) {
 		state.data.Current = 0
 		state.data.Success = 0
 		state.data.Failed = 0
+		state.probed = false
 		state.data.Status = StatusStarting
 		state.data.QueueId = queueID
 		state.epoch++
