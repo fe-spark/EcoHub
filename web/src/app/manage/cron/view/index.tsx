@@ -272,7 +272,7 @@ export default function CronManagePageView() {
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="计划任务"
-        description="统一维护后台自动更新、采集重试和清理类计划任务。"
+        description="每条任务只做一件事：自动采集、指定采集、失败重试、片库清理、日志清理、失败记录清理、自动排片。"
       />
 
       <Table

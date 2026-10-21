@@ -3,7 +3,6 @@ import type { FailRecord } from "./types";
 export interface RecordRetryEvent {
   id: number;
   retrying: boolean;
-  removed: boolean;
   hasResult: boolean;
   status: number;
   retryCount: number;
@@ -13,14 +12,13 @@ export interface RecordRetryEvent {
 export interface RecordRetryView {
   records: FailRecord[];
   retrying: Set<number>;
-  refetch: boolean;
 }
 
+/** 重试结果只改当前行。行留在原地，避免成功后抽行走位。 */
 export function applyRecordRetry(
   records: FailRecord[],
   retrying: Set<number>,
   ev: RecordRetryEvent,
-  statusFilter: number,
 ): RecordRetryView {
   const nextRetrying = new Set(retrying);
   if (ev.retrying) {
@@ -30,21 +28,8 @@ export function applyRecordRetry(
   }
 
   const index = records.findIndex((row) => row.ID === ev.id);
-  if (index < 0) {
-    return { records, retrying: nextRetrying, refetch: false };
-  }
-  if (ev.removed) {
-    const next = records.slice();
-    next.splice(index, 1);
-    return { records: next, retrying: nextRetrying, refetch: true };
-  }
-  if (!ev.hasResult) {
-    return { records, retrying: nextRetrying, refetch: false };
-  }
-  if (statusFilter >= 0 && ev.status !== statusFilter) {
-    const next = records.slice();
-    next.splice(index, 1);
-    return { records: next, retrying: nextRetrying, refetch: true };
+  if (index < 0 || !ev.hasResult) {
+    return { records, retrying: nextRetrying };
   }
 
   const next = records.slice();
@@ -54,7 +39,7 @@ export function applyRecordRetry(
     retryCount: ev.retryCount,
     cause: ev.cause,
   };
-  return { records: next, retrying: nextRetrying, refetch: false };
+  return { records: next, retrying: nextRetrying };
 }
 
 /** 当前页里仍在重试队列中的 id。其它页的 id 不保留。 */

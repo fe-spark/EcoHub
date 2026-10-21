@@ -32,8 +32,8 @@ func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
 			if !task.State {
 				t.Errorf("expected State to be true, got false")
 			}
-			if task.Remark != "自动清理过期运行日志" {
-				t.Errorf("expected Remark '自动清理过期运行日志', got %s", task.Remark)
+			if task.Remark != "清理过期运行日志" {
+				t.Errorf("expected Remark '清理过期运行日志', got %s", task.Remark)
 			}
 		}
 	}
@@ -57,8 +57,15 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	setupTestDBAndRedis(t)
 	svc := &InitService{}
 	tasks := svc.ensureDefaultTasks()
-	if len(tasks) != 5 {
-		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
+	if len(tasks) != 6 {
+		t.Fatalf("expected 6 default tasks, got %d", len(tasks))
+	}
+	failureClean, err := repository.GetFilmTaskById(model.TaskIDFailureClean)
+	if err != nil {
+		t.Fatalf("failure record clean cron: %v", err)
+	}
+	if failureClean.Model != model.TaskModelFailureClean || failureClean.Spec != "0 30 3 * * *" || !failureClean.State {
+		t.Fatalf("unexpected failure clean task: %+v", failureClean)
 	}
 	banner, err := repository.GetFilmTaskById(model.TaskIDBannerAuto)
 	if err != nil {
