@@ -36,6 +36,11 @@ func setupCollectServiceTestDB(t *testing.T) *gorm.DB {
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.FailureRecord{},
+		&model.ProxyConfigRecord{},
+		&model.BannerConfigRecord{},
+		&model.NotifyConfigRecord{},
+		&model.Banner{},
+		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -62,7 +67,10 @@ func TestGetFilmSourceList_MarksMissingCategory(t *testing.T) {
 		t.Fatalf("create mapping: %v", err)
 	}
 
-	list := (&CollectService{}).GetFilmSourceList()
+	list, err := (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	byID := make(map[string]model.FilmSourceListItem, len(list))
 	for _, item := range list {
 		byID[item.Id] = item
@@ -102,7 +110,10 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
-	list := srv.GetFilmSourceList()
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) < 2 {
 		t.Fatalf("expected at least 2 sources, got %d", len(list))
 	}
@@ -117,7 +128,10 @@ func TestCollectService_SaveFilmSource_SortOrdering(t *testing.T) {
 	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
 		t.Fatalf("SortFilmSources failed: %v", err)
 	}
-	sortedList := srv.GetFilmSourceList()
+	sortedList, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if sortedList[0].Id != "src_2" || sortedList[1].Id != "src_1" {
 		t.Fatalf("expected src_2 to be first after sorting, got %+v", sortedList)
 	}
@@ -143,7 +157,10 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	if err := srv.SortFilmSources([]string{"src_2", "src_1"}); err != nil {
 		t.Fatalf("switch while collecting: %v", err)
 	}
-	list := srv.GetFilmSourceList()
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) == 0 || list[0].Id != "src_2" || !list[0].IsPrimary {
 		t.Fatalf("primary should be src_2, got %+v", list)
 	}
@@ -156,7 +173,10 @@ func TestSortFilmSources_AllowsPrimaryChangeWhileCollecting(t *testing.T) {
 	if err := srv.UpdateFilmSource(model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://2", State: false}); err != nil {
 		t.Fatalf("disabling primary while collecting should pass: %v", err)
 	}
-	list = srv.GetFilmSourceList()
+	list, err = srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	var primaryID string
 	for _, item := range list {
 		if item.IsPrimary {
@@ -275,13 +295,19 @@ func TestCollectService_FailureRecords(t *testing.T) {
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 		Status: -1,
 	}
-	list := srv.GetRecordList(params)
+	list, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 3 {
 		t.Fatalf("expected 3 failure records, got %d", len(list))
 	}
 
 	// 3. 测试 GetRecordOptions
-	opts := srv.GetRecordOptions()
+	opts, err := srv.GetRecordOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
 	status, _ := opts["status"].([]model.Option)
 	if len(status) == 0 {
 		t.Fatalf("expected non-empty status options")
@@ -289,7 +315,10 @@ func TestCollectService_FailureRecords(t *testing.T) {
 
 	// 4. 测试 ClearRetriedRecords (应清理 success 和 failed，保留 pending)
 	srv.ClearRetriedRecords()
-	listAfterClear := srv.GetRecordList(params)
+	listAfterClear, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(listAfterClear) != 1 {
 		t.Fatalf("expected 1 record after ClearRetriedRecords, got %d", len(listAfterClear))
 	}
@@ -299,7 +328,10 @@ func TestCollectService_FailureRecords(t *testing.T) {
 
 	// 5. 测试 ClearAllRecord (truncate table)
 	srv.ClearAllRecord()
-	listAfterTruncate := srv.GetRecordList(params)
+	listAfterTruncate, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(listAfterTruncate) != 0 {
 		t.Fatalf("expected 0 records after ClearAllRecord, got %d", len(listAfterTruncate))
 	}
@@ -327,12 +359,18 @@ func TestGetRecordList_DefaultsToPrimarySource(t *testing.T) {
 	if params.OriginId != "src_a" {
 		t.Fatalf("empty origin should fall back to primary src_a, got %q", params.OriginId)
 	}
-	list := srv.GetRecordList(params)
+	list, err := srv.GetRecordList(params)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 1 || list[0].OriginId != "src_a" {
 		t.Fatalf("expected only primary source records, got %+v", list)
 	}
 
-	opts := srv.GetRecordOptions()
+	opts, err := srv.GetRecordOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if opts["defaultSourceId"] != "src_a" {
 		t.Fatalf("defaultSourceId = %v, want src_a", opts["defaultSourceId"])
 	}
@@ -340,8 +378,8 @@ func TestGetRecordList_DefaultsToPrimarySource(t *testing.T) {
 	if !ok {
 		t.Fatalf("origin options type %T", opts["origin"])
 	}
-	if len(origins) != 2 {
-		t.Fatalf("expected 2 enabled sources, got %d", len(origins))
+	if len(origins) != 3 {
+		t.Fatalf("expected 3 total sources, got %d", len(origins))
 	}
 	for _, item := range origins {
 		if item.Name == "全部" || item.Value == "" {
@@ -443,7 +481,10 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		t.Fatalf("SaveFilmSource failed: %v", err)
 	}
 
-	list := srv.GetFilmSourceList()
+	list, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 4 {
 		t.Fatalf("expected 4 sources, got %d", len(list))
 	}
@@ -470,7 +511,10 @@ func TestCollectService_AddFilmSource_OrderAtTheEnd(t *testing.T) {
 		t.Fatalf("UpdateFilmSource failed: %v", err)
 	}
 
-	listAfterUpdate := srv.GetFilmSourceList()
+	listAfterUpdate, err := srv.GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if listAfterUpdate[1].Id != "slave_1_zz" || listAfterUpdate[1].Name != "附属站1重命名" {
 		t.Errorf("expected list[1] to remain slave_1_zz after update, got %+v", listAfterUpdate[1])
 	}
@@ -496,7 +540,10 @@ func TestRepository_ReplaceCollectSources_PreservesOrderWithoutCreatedAt(t *test
 		t.Fatalf("ReplaceCollectSources failed: %v", err)
 	}
 
-	list := repository.GetCollectSourceList()
+	list, err := repository.GetCollectSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 3 {
 		t.Fatalf("expected 3 sources, got %d", len(list))
 	}

@@ -217,7 +217,10 @@ func TestClearAccessData_All(t *testing.T) {
 		t.Errorf("expected empty stats after clear all, got %+v", stats)
 	}
 
-	hasData, total := HasPersistedData()
+	hasData, total, err := HasPersistedData()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if hasData || total != 0 {
 		t.Errorf("expected HasPersistedData false and 0, got %v and %d", hasData, total)
 	}

@@ -92,7 +92,10 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		} else if st.Pid > 0 {
 			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
-		query = applyTagSearchFilter(query, version, st)
+		query, err := applyTagSearchFilter(query, version, st)
+		if err != nil {
+			return nil, err
+		}
 
 		var total int64 = -1
 		var countKey string
@@ -239,7 +242,10 @@ func memoryKeywordSnapshots(version, sourceID, keyword, sortField string, pid, c
 	if len(pageMids) == 0 {
 		return []model.FilmListSnapshot{}, nil
 	}
-	snaps := GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+	snaps, err := GetProjectedSnapshotsByMidsOrdered(version, pageMids)
+	if err != nil {
+		return nil, err
+	}
 	if snaps == nil {
 		return []model.FilmListSnapshot{}, nil
 	}

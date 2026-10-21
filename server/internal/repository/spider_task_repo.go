@@ -53,17 +53,21 @@ func SaveFilmTask(t model.FilmCollectTask) error {
 }
 
 // GetAllFilmTask 获取所有的任务信息
-func GetAllFilmTask() []model.FilmCollectTask {
+func GetAllFilmTask() ([]model.FilmCollectTask, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
 	var records []model.CrontabRecord
 	if err := db.Mdb.Find(&records).Error; err != nil {
-		log.Println("GetAllFilmTask Error:", err)
-		return nil
+		return nil, err
 	}
 
-	var tl []model.FilmCollectTask
+	tl := make([]model.FilmCollectTask, 0, len(records))
 	for _, r := range records {
 		var ids []string
-		db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids)
+		if err := db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids).Error; err != nil {
+			return nil, err
+		}
 		tl = append(tl, model.FilmCollectTask{
 			Id:     r.TaskId,
 			Ids:    ids,
@@ -74,7 +78,7 @@ func GetAllFilmTask() []model.FilmCollectTask {
 			Remark: r.Remark,
 		})
 	}
-	return tl
+	return tl, nil
 }
 
 // GetFilmTaskById 通过 Id 获取当前任务信息
@@ -88,7 +92,9 @@ func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
 	}
 
 	var ids []string
-	db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids)
+	if err := db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids).Error; err != nil {
+		return model.FilmCollectTask{}, err
+	}
 
 	return model.FilmCollectTask{
 		Id:     r.TaskId,
@@ -104,16 +110,6 @@ func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
 // UpdateFilmTask 更新定时任务信息 (直接覆盖 Id 对应的定时任务信息)
 func UpdateFilmTask(t model.FilmCollectTask) error {
 	return SaveFilmTask(t)
-}
-
-// DelFilmTask 通过 Id 删除对应的定时任务信息
-func DelFilmTask(id string) {
-	_ = db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("task_id = ?", id).Delete(&model.CrontabRecord{}).Error; err != nil {
-			return err
-		}
-		return tx.Where("task_id = ?", id).Delete(&model.CronSourceRel{}).Error
-	})
 }
 
 func ResetFilmTasks(tasks []model.FilmCollectTask) error {

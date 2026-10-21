@@ -86,7 +86,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 	plot := c.Query("plot")
 	sort := c.Query("sort")
 
-	classList, filters := service.ProvideSvc.GetClassList(sourceId)
+	classList, filters, classErr := service.ProvideSvc.GetClassList(sourceId)
+	if classErr != nil {
+		c.JSON(200, gin.H{"code": 0, "msg": classErr.Error()})
+		return
+	}
 	if classList == nil {
 		classList = []model.FilmClass{}
 	}
@@ -149,7 +153,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		var idsArr []string
 		if ids != "" {
 			idsArr = strings.Split(ids, ",")
-			vodList := service.ProvideSvc.GetVodDetail(idsArr, sourceId)
+			vodList, err := service.ProvideSvc.GetVodDetail(idsArr, sourceId)
+			if err != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+				return
+			}
 			if vodList == nil {
 				vodList = []model.FilmDetail{}
 			}
@@ -174,7 +182,11 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 			for _, v := range vodListSimple {
 				_idsArr = append(_idsArr, strconv.FormatInt(v.VodID, 10))
 			}
-			detailList := service.ProvideSvc.GetVodDetail(_idsArr, sourceId)
+			detailList, err := service.ProvideSvc.GetVodDetail(_idsArr, sourceId)
+			if err != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+				return
+			}
 			if detailList == nil {
 				detailList = []model.FilmDetail{}
 			}

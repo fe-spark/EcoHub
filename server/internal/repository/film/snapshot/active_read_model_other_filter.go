@@ -1,7 +1,7 @@
 package snapshot
 
 import (
-	"log"
+	"errors"
 	"strconv"
 	"strings"
 
@@ -79,15 +79,14 @@ func visibleSearchTagYears(tags map[string]any) []int64 {
 	return years
 }
 
-// logOthersFilterFallback 筛选项缺失时算不出可见集合，只能退化为空结果，留日志便于排查。
-func logOthersFilterFallback(version string, pid int64, tagType string) {
-	log.Printf("[FilmClassifySearch] 筛选项缺失，%s=其他 无法计算可见集合，按空结果处理 pid=%d version=%s", tagType, pid, version)
+func missingVisibleTags(tagType string) error {
+	return errors.New("筛选项缺失，无法计算" + tagType)
 }
 
 // applyTagSearchFilter 应用剧情/地区/语言/年份筛选。
 // 「其他」= 该维度取值不在前台展示的筛选项里（空值与异常值同样算其他），
 // 可见集合取当前分类的筛选项快照，同一次请求只取一次。
-func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO) *gorm.DB {
+func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO) (*gorm.DB, error) {
 	var tags map[string]any
 	if st.Plot == model.TagOthersValue || st.Area == model.TagOthersValue ||
 		st.Language == model.TagOthersValue || st.Year == model.TagOthersValue {
@@ -106,8 +105,7 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 				}
 				query = query.Where(cond.Or(allNotLike))
 			} else {
-				logOthersFilterFallback(version, st.Pid, "Plot")
-				query = query.Where("class_tag = ?", model.TagOthersValue)
+				return nil, missingVisibleTags("剧情")
 			}
 		} else {
 			query = query.Where("class_tag LIKE ?", "%"+escapeLikePattern(st.Plot)+"%")
@@ -120,8 +118,7 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 			if len(visibleAreas) > 0 {
 				query = query.Where("area NOT IN ? OR area = '' OR area IS NULL", visibleAreas)
 			} else {
-				logOthersFilterFallback(version, st.Pid, "Area")
-				query = query.Where("area = ?", model.TagOthersValue)
+				return nil, missingVisibleTags("地区")
 			}
 		} else {
 			query = query.Where("area = ?", st.Area)
@@ -134,8 +131,7 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 			if len(visibleLangs) > 0 {
 				query = query.Where("language NOT IN ? OR language = '' OR language IS NULL", visibleLangs)
 			} else {
-				logOthersFilterFallback(version, st.Pid, "Language")
-				query = query.Where("language = ?", model.TagOthersValue)
+				return nil, missingVisibleTags("语言")
 			}
 		} else {
 			query = query.Where("language = ?", st.Language)
@@ -148,8 +144,7 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 			if len(visibleYears) > 0 {
 				query = query.Where("year NOT IN ? OR year <= 0 OR year IS NULL", visibleYears)
 			} else {
-				logOthersFilterFallback(version, st.Pid, "Year")
-				query = query.Where("year = -1")
+				return nil, missingVisibleTags("年份")
 			}
 		} else {
 			if yearInt, err := strconv.ParseInt(st.Year, 10, 64); err == nil && yearInt > 0 {
@@ -158,5 +153,5 @@ func applyTagSearchFilter(query *gorm.DB, version string, st model.SearchTagsVO)
 		}
 	}
 
-	return query
+	return query, nil
 }

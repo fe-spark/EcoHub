@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -24,7 +23,10 @@ type ScrapeResult struct {
 // searchAutoCandidates 为无人值守刮削放宽召回。弹窗检索不走这里。
 // 空结果时依次去掉年份、截取分隔符前主词、回退原始词。
 func (s *TMDBService) searchAutoCandidates(query string) ([]model.TMDBCandidate, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || cfg.ApiKey == "" {
 		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能，请前往「系统设置 → 刮削配置」完成设置")
 	}
@@ -67,7 +69,10 @@ func (s *TMDBService) searchAutoCandidates(query string) ([]model.TMDBCandidate,
 
 // ScrapeFilms 对影片执行 TMDB 自动匹配与元数据刮削落库（兼容单个与批量）
 func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeResult, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || strings.TrimSpace(cfg.ApiKey) == "" {
 		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能")
 	}
@@ -98,18 +103,13 @@ func (s *TMDBService) ScrapeFilms(ctx context.Context, mids []int64) (*ScrapeRes
 		default:
 		}
 
-		snap := filmsnapshot.GetSnapshotByMid("", mid)
+		snap, err := filmsnapshot.GetSnapshotByMid("", mid)
+		if err != nil {
+			return res, err
+		}
 		if snap == nil {
-			var index model.FilmIndex
-			if err := db.Mdb.Where("mid = ?", mid).First(&index).Error; err != nil {
-				res.Failed++
-				continue
-			}
-			snap = filmsnapshot.GetSnapshotByMid("", mid)
-			if snap == nil {
-				res.Failed++
-				continue
-			}
+			res.Failed++
+			continue
 		}
 
 		_, ok, err := s.AutoScrapeFilm(ctx, *snap)
@@ -317,7 +317,11 @@ func (s *TMDBService) autoScrapeFilm(ctx context.Context, snap model.FilmListSna
 	}
 
 	updatedSnap := snap
-	if stored := filmsnapshot.GetSnapshotByMid("", snap.Mid); stored != nil {
+	stored, err := filmsnapshot.GetSnapshotByMid("", snap.Mid)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if stored != nil {
 		updatedSnap = *stored
 	}
 	updatedSnap.IsScraped = true

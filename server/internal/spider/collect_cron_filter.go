@@ -38,7 +38,12 @@ func AutoCollect(h int) {
 }
 
 func AutoCollectTriggered(trigger string, h int) {
-	enabled := filterEnabledSources(repository.GetCollectSourceList())
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		log.Printf("[Spider] 自动采集：读取采集站失败: %v", err)
+		return
+	}
+	enabled := filterEnabledSources(sources)
 	if len(enabled) == 0 {
 		log.Println("[Spider] 自动采集：未找到任何启用的站点")
 		return
@@ -47,7 +52,11 @@ func AutoCollectTriggered(trigger string, h int) {
 		trigger = model.CollectTriggerManual
 	}
 	if trigger == model.CollectTriggerCron {
-		enabled = filterCronIncrementalSources(enabled)
+		enabled, err = filterCronIncrementalSources(enabled)
+		if err != nil {
+			log.Printf("[Spider] 自动采集：读取采集时间失败: %v", err)
+			return
+		}
 		if len(enabled) == 0 {
 			log.Println("[Spider] 自动采集：错峰过滤后无待采集站点")
 			return
@@ -61,9 +70,9 @@ func AutoCollectTriggered(trigger string, h int) {
 	runSourcesWithLimit(enabled, h, "Auto-Collect", trigger)
 }
 
-func filterCronIncrementalSources(sources []model.FilmSource) []model.FilmSource {
+func filterCronIncrementalSources(sources []model.FilmSource) ([]model.FilmSource, error) {
 	if len(sources) == 0 {
-		return sources
+		return sources, nil
 	}
 	primary := repository.PickPrimarySourceForCategory()
 	primaryID := ""
@@ -74,7 +83,10 @@ func filterCronIncrementalSources(sources []model.FilmSource) []model.FilmSource
 	for _, s := range sources {
 		ids = append(ids, s.Id)
 	}
-	stats := repository.GetCollectSourceStats(ids)
+	stats, err := repository.GetCollectSourceStats(ids)
+	if err != nil {
+		return nil, err
+	}
 	now := time.Now()
 	out := make([]model.FilmSource, 0, len(sources))
 	for _, s := range sources {
@@ -91,5 +103,5 @@ func filterCronIncrementalSources(sources []model.FilmSource) []model.FilmSource
 		log.Printf("[Spider] 备用源错峰跳过 name=%s id=%s interval=%s last=%s",
 			s.Name, s.Id, interval, last.Format(time.RFC3339))
 	}
-	return out
+	return out, nil
 }

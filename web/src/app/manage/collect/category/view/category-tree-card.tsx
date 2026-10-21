@@ -29,7 +29,7 @@ interface CategoryTreeCardProps {
   expandedKeys: React.Key[];
   loadingTree: boolean;
   savingTree: boolean;
-  sources: { id: string; name: string }[];
+  sources: { id: string; name: string; state?: boolean }[];
   sourceId: string;
   stats: { total: number; roots: number; children: number; hidden: number };
   onSourceChange: (sourceId: string) => void;
@@ -305,7 +305,7 @@ export default function CategoryTreeCard(props: CategoryTreeCardProps) {
                       value={sourceId || undefined}
                       onChange={onSourceChange}
                       options={sources.map((source) => ({
-                        label: source.name,
+                        label: source.state === false ? `${source.name} (已停用)` : source.name,
                         value: source.id,
                       }))}
                       showSearch

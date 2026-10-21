@@ -31,6 +31,7 @@ func setupTMDBApplyTestDB(t *testing.T) *gorm.DB {
 		&model.FilmIndex{},
 		&model.SearchTagItem{},
 		&model.TMDBConfigRecord{},
+		&model.ProxyConfigRecord{},
 		&model.FilmTMDBScrape{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
@@ -177,7 +178,10 @@ func TestApplyDetailWithOptions_CategoryIsolation(t *testing.T) {
 		t.Errorf("scrape link mismatch: %+v", scrapeRec)
 	}
 
-	snap := filmsnapshot.GetSnapshotByMid("", 1001)
+	snap, err := filmsnapshot.GetSnapshotByMid("", 1001)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if snap == nil {
 		t.Fatalf("GetSnapshotByMid returned nil")
 	}
@@ -265,7 +269,10 @@ func TestApplyDetailWithOptions_SelectiveFields(t *testing.T) {
 		t.Errorf("kept fields=%q", rawFilm.LockedFields)
 	}
 
-	snap := filmsnapshot.GetSnapshotByMid("", 1002)
+	snap, err := filmsnapshot.GetSnapshotByMid("", 1002)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if snap == nil {
 		t.Fatalf("snapshot is nil")
 	}

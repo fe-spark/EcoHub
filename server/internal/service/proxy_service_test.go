@@ -34,8 +34,12 @@ func TestNormalizeProxyConfig(t *testing.T) {
 
 func TestResolveSourceProxy(t *testing.T) {
 	// 默认未配置或未开启
-	if ok, _ := repository.ResolveSourceProxy("s1"); ok {
-		t.Errorf("expected false when proxy is not configured or disabled")
+	ok, _, err := repository.ResolveSourceProxy("s1")
+	if err != nil {
+		return
+	}
+	if ok {
+		t.Fatal("未配置代理时不能启用")
 	}
 }
 
@@ -47,10 +51,10 @@ func TestTestProxyEmptyURL(t *testing.T) {
 }
 
 func TestResolveModuleProxies(t *testing.T) {
-	if ok, _ := repository.ResolveTMDBProxy(); ok {
-		t.Errorf("expected false when disabled")
+	if ok, _, err := repository.ResolveTMDBProxy(); err == nil && ok {
+		t.Fatal("未配置代理时不能启用")
 	}
-	if ok, _ := repository.ResolveUpgradeProxy(); ok {
-		t.Errorf("expected false when disabled")
+	if ok, _, err := repository.ResolveUpgradeProxy(); err == nil && ok {
+		t.Fatal("未配置代理时不能启用")
 	}
 }

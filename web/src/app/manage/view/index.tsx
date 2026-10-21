@@ -12,6 +12,7 @@ import {
 } from "@ant-design/icons";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import CollectOverview from "@/app/manage/collect/view/collect-overview";
+import { type FilmSource } from "@/app/manage/collect/view/types";
 import SubscribeModal from "@/app/manage/components/subscribe-modal";
 import InventoryStats from "./inventory-stats";
 import styles from "./index.module.less";
@@ -72,6 +73,7 @@ const quickEntries: QuickEntryItem[] = [
 
 export default function ManagePageView() {
   const [subscribeModalOpen, setSubscribeModalOpen] = useState(false);
+  const [primarySource, setPrimarySource] = useState<FilmSource | null>(null);
 
   return (
     <div className={styles.dashboard}>
@@ -88,9 +90,9 @@ export default function ManagePageView() {
         }
       />
 
-      <CollectOverview />
+      <CollectOverview onPrimaryChange={setPrimarySource} />
 
-      <InventoryStats />
+      {Boolean(primarySource) && <InventoryStats primaryId={primarySource?.id} />}
 
       <Card className={styles.panelCard} title="快捷入口">
         <div className={styles.entryGrid}>

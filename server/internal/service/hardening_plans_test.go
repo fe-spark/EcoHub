@@ -86,7 +86,10 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	// 1. 请求 limit = 3
-	kw := IndexSvc.GetHotSearchKeywords(3)
+	kw, err := IndexSvc.GetHotSearchKeywords(3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(kw) != 3 {
 		t.Fatalf("want 3 keywords, got %d: %v", len(kw), kw)
 	}
@@ -107,7 +110,10 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 
 	// 3. 验证内存切片隔离性：修改返回切片不影响缓存与后续调用
 	kw[0] = "篡改片名"
-	kw2 := IndexSvc.GetHotSearchKeywords(3)
+	kw2, err := IndexSvc.GetHotSearchKeywords(3)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if kw2[0] != "复仇者联盟" {
 		t.Fatalf("cache was mutated by caller modification: got %s", kw2[0])
 	}
@@ -118,7 +124,11 @@ func TestPlan1_HotKeywords_Hardening(t *testing.T) {
 		wg.Add(1)
 		go func(limit int) {
 			defer wg.Done()
-			res := IndexSvc.GetHotSearchKeywords(limit)
+			res, err := IndexSvc.GetHotSearchKeywords(limit)
+			if err != nil {
+				t.Errorf("GetHotSearchKeywords: %v", err)
+				return
+			}
 			if len(res) == 0 {
 				t.Errorf("concurrent GetHotSearchKeywords returned empty")
 			}
@@ -291,7 +301,10 @@ func TestPlan3_ProvideVodDetail_BatchAndPipeline(t *testing.T) {
 
 	// 请求批量详情：包含命中的 201、未命中的 202 和 203、哨兵 9999、完全不存在的 8888
 	ids := []string{"201", "202", "203", "9999", "8888"}
-	details := ProvideSvc.GetVodDetail(ids, "")
+	details, err := ProvideSvc.GetVodDetail(ids, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(details) != 3 {
 		t.Fatalf("want 3 valid film details, got %d", len(details))
@@ -329,19 +342,28 @@ func TestPlan4_FilmClassify_FastSortAndParallel(t *testing.T) {
 
 	// 测试 GetSnapshotTopMoviesBySortFast:
 	// sortType 0 (news: year DESC, update_stamp DESC) -> 应最先是 303 (2023)
-	news := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
+	news, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 0, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(news) != 3 || news[0].Id != 303 {
 		t.Fatalf("sortType 0 unexpected top: %+v", news)
 	}
 
 	// sortType 1 (top: hits DESC) -> 应最先是 302 (hits 900)
-	top := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
+	top, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 1, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(top) != 3 || top[0].Id != 302 {
 		t.Fatalf("sortType 1 unexpected top: %+v", top)
 	}
 
 	// sortType 2 (recent: update_stamp DESC) -> 应最先是 302 (update_stamp 2000)
-	recent := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
+	recent, err := filmsnapshot.GetSnapshotTopMoviesBySortFast(version, 2, pid, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(recent) != 3 || recent[0].Id != 302 {
 		t.Fatalf("sortType 2 unexpected top: %+v", recent)
 	}
@@ -554,7 +576,10 @@ func TestPlan1_EmptyHotKeywords_Sentinel(t *testing.T) {
 	const version = "v_plan1_empty"
 	_ = filmsnapshot.SetActiveSnapshotVersion(version)
 
-	kw := IndexSvc.GetHotSearchKeywords(10)
+	kw, err := IndexSvc.GetHotSearchKeywords(10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(kw) != 0 {
 		t.Fatalf("expected 0 keywords, got %d", len(kw))
 	}
@@ -606,7 +631,10 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	for i := 0; i < 150; i++ {
 		manyIDs[i] = fmt.Sprintf("%d", 601+i)
 	}
-	res := ProvideSvc.GetVodDetail(manyIDs, "")
+	res, err := ProvideSvc.GetVodDetail(manyIDs, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 1 || res[0].VodID != 601 {
 		t.Fatalf("expected exactly 1 found detail, got %d", len(res))
 	}
@@ -616,7 +644,10 @@ func TestPlan3_BatchClampingAndNilRedis(t *testing.T) {
 	db.Rdb = nil
 	defer func() { db.Rdb = origRdb }()
 
-	resNilRedis := ProvideSvc.GetVodDetail([]string{"601"}, "")
+	resNilRedis, err := ProvideSvc.GetVodDetail([]string{"601"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(resNilRedis) != 1 || resNilRedis[0].VodID != 601 {
 		t.Fatalf("expected 1 detail on nil redis, got %d", len(resNilRedis))
 	}

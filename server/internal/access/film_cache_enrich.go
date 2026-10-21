@@ -14,9 +14,9 @@ func isTvboxPlay(path, query string) bool {
 }
 
 // enrichLogEvents 为访问流水记录按动作类型精准补齐详情信息
-func enrichLogEvents(events []AccessEvent) []AccessEvent {
+func enrichLogEvents(events []AccessEvent) ([]AccessEvent, error) {
 	if len(events) == 0 {
-		return events
+		return events, nil
 	}
 	filmIDs := make([]int64, 0, len(events))
 	catIDs := make([]int64, 0, len(events))
@@ -46,7 +46,10 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 		}
 	}
 
-	metaMap := resolveFilmMetas(filmIDs)
+	metaMap, err := resolveFilmMetas(filmIDs)
+	if err != nil {
+		return nil, err
+	}
 	catMap := resolveCategoryNames(catIDs)
 
 	for i := range events {
@@ -64,8 +67,6 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 						it.ResourceTitle = meta.Title
 						it.ResourcePoster = meta.Poster
 						it.ResourceCat = meta.Category
-					} else if it.ResourceTitle == "" {
-						it.ResourceTitle = fmt.Sprintf("影片 #%d", id)
 					}
 				}
 			}
@@ -82,7 +83,7 @@ func enrichLogEvents(events []AccessEvent) []AccessEvent {
 			}
 		}
 	}
-	return events
+	return events, nil
 }
 
 func sanitizePosterURL(s string) string {

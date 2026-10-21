@@ -24,12 +24,22 @@ func ensureMasterCategoriesReady(s *model.FilmSource) error {
 
 // CollectCategory 影视分类采集
 func CollectCategory(s *model.FilmSource) error {
-	return collectCategoryWithMode(s, true)
-}
-
-// ResetCategory 重置分类并清除业务属性
-func ResetCategory(s *model.FilmSource) error {
-	return collectCategoryWithMode(s, false)
+	if s == nil {
+		return errors.New("采集站信息不存在")
+	}
+	return WithSourceExclusive(s.Id, func() error {
+		if s.Id != "" && repository.FindCollectSourceById(s.Id) == nil {
+			return errors.New("采集站信息不存在")
+		}
+		categoryTree, err := FetchCategoryTree(s)
+		if err != nil {
+			return err
+		}
+		if err := repository.SaveCategoryTree(s.Id, categoryTree); err != nil {
+			return fmt.Errorf("保存采集站分类失败: %w", err)
+		}
+		return nil
+	})
 }
 
 // FetchCategoryTree 仅发起网络请求获取采集源分类树，不写库
@@ -39,11 +49,19 @@ func FetchCategoryTree(s *model.FilmSource) (*model.CategoryTree, error) {
 	}
 	req := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	if s.ProxyCollect {
-		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+		ok, proxy, err := repository.ResolveSpiderProxy()
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			req.ProxyURL = proxy
 		}
 	} else if s.Id != "" {
-		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			req.ProxyURL = proxy
 		}
 	}
@@ -72,32 +90,4 @@ func ApplySourceCategory(s *model.FilmSource, tree *model.CategoryTree, clearDat
 		return nil
 	})
 	return res, err
-}
-
-func collectCategoryWithMode(s *model.FilmSource, preserveBusinessFields bool) error {
-	if s == nil {
-		return errors.New("采集站信息不存在")
-	}
-	return WithSourceExclusive(s.Id, func() error {
-		if s.Id != "" && repository.FindCollectSourceById(s.Id) == nil {
-			return errors.New("采集站信息不存在")
-		}
-		return saveSourceCategories(s, preserveBusinessFields)
-	})
-}
-
-func saveSourceCategories(s *model.FilmSource, preserveBusinessFields bool) error {
-	categoryTree, err := FetchCategoryTree(s)
-	if err != nil {
-		return err
-	}
-	if preserveBusinessFields {
-		err = repository.SaveCategoryTree(s.Id, categoryTree)
-	} else {
-		err = repository.ResetCategoryTree(s.Id, categoryTree)
-	}
-	if err != nil {
-		return fmt.Errorf("保存采集站分类失败: %w", err)
-	}
-	return nil
 }

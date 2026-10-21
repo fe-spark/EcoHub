@@ -52,7 +52,10 @@ func collectFilmIDs(ctx context.Context, ids string, s *model.FilmSource, batchC
 		ctx = context.Background()
 	}
 
-	r := requestForSource(s)
+	r, err := requestForSource(s)
+	if err != nil {
+		return scheduler.Mids{}, err
+	}
 	r.Params.Set("pg", "1")
 	r.Params.Set("ids", ids)
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
@@ -90,7 +93,12 @@ func CollectSingleFilm(ids string) {
 		return
 	}
 
-	enabled := filterEnabledSources(repository.GetCollectSourceList())
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		log.Printf("[Spider] CollectSingleFilm 读取采集站失败: %v", err)
+		return
+	}
+	enabled := filterEnabledSources(sources)
 	if len(enabled) == 0 {
 		log.Println("[Spider] CollectSingleFilm: 未找到任何启用的站点")
 		return
@@ -183,7 +191,11 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	default:
 	}
-	r := requestForSource(s)
+	r, err := requestForSource(s)
+	if err != nil {
+		finish(fr.Status, fr.RetryCount, err.Error(), false)
+		return
+	}
 	r.Params.Set("pg", fmt.Sprint(fr.PageNumber))
 	if fr.Hour > 0 {
 		r.Params.Set("h", fmt.Sprint(fr.Hour))
@@ -316,9 +328,12 @@ func AcceptFailureRecover(fr *model.FailureRecord) error {
 
 // EnqueuePendingFailureRecovers 把所有待重试记录放进各自站点的队列。
 // 本站队列已在跑时继续加入；别的采集占着站点时跳过，不把记录标成重试中。
-func EnqueuePendingFailureRecovers() FailureRecoverOutcome {
+func EnqueuePendingFailureRecovers() (FailureRecoverOutcome, error) {
 	var out FailureRecoverOutcome
-	list := repository.PendingRecord()
+	list, err := repository.PendingRecord()
+	if err != nil {
+		return out, err
+	}
 	for i := range list {
 		err := AcceptFailureRecover(&list[i])
 		switch {
@@ -330,7 +345,7 @@ func EnqueuePendingFailureRecovers() FailureRecoverOutcome {
 			out.Skipped++
 		}
 	}
-	return out
+	return out, nil
 }
 
 func recoverQueuedFailureRecords(source model.FilmSource, records []model.FailureRecord, batchCtx *collectBatchContext) {
@@ -341,7 +356,11 @@ func recoverQueuedFailureRecords(source model.FilmSource, records []model.Failur
 }
 
 func FullRecoverSpider() {
-	out := EnqueuePendingFailureRecovers()
+	out, err := EnqueuePendingFailureRecovers()
+	if err != nil {
+		log.Printf("[Spider] 失败记录重试：读取待重试记录失败: %v", err)
+		return
+	}
 	log.Printf("[Spider] 失败记录重试：%s", out.Message())
 }
 
@@ -379,18 +398,29 @@ func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxy
 	}
 	if proxyChosen {
 		if useProxy {
-			cfg := repository.GetProxyConfig()
+			cfg, err := repository.GetProxyConfig()
+			if err != nil {
+				return err
+			}
 			if !cfg.Enabled || strings.TrimSpace(cfg.ProxyURL) == "" {
 				return errors.New("测试失败, 代理未开启或地址为空")
 			}
 			r.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 		}
 	} else if s.ProxyCollect {
-		if ok, proxy := repository.ResolveSpiderProxy(); ok {
+		ok, proxy, err := repository.ResolveSpiderProxy()
+		if err != nil {
+			return err
+		}
+		if ok {
 			r.ProxyURL = proxy
 		}
 	} else if s.Id != "" {
-		if ok, proxy := repository.ResolveSourceProxy(s.Id); ok {
+		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
+		if err != nil {
+			return err
+		}
+		if ok {
 			r.ProxyURL = proxy
 		}
 	}

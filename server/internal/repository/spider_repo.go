@@ -18,19 +18,15 @@ import (
 // --------- Collect Source -----------
 
 // GetCollectSourceList 获取采集站 API 列表（按排序序号升序）
-func GetCollectSourceList() []model.FilmSource {
+func GetCollectSourceList() ([]model.FilmSource, error) {
 	if db.Mdb == nil {
-		return nil
+		return nil, errors.New("数据库未连接")
 	}
-	var list []model.FilmSource
+	list := make([]model.FilmSource, 0)
 	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
-		log.Println("GetCollectSourceList Error:", err)
-		return nil
+		return nil, err
 	}
-	for i := range list {
-		normalizeCollectCd(&list[i])
-	}
-	return list
+	return list, nil
 }
 
 // ReplaceCollectSources 用备份列表整体替换采集站（事务清空后写入）
@@ -60,23 +56,16 @@ func ReplaceCollectSources(list []model.FilmSource) error {
 	return RefreshCollectSourceCatalog()
 }
 
-// PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前生效主站）。
 // PickPrimarySourceForCategory 选取用于分类树同步的首选站点（当前基准源）。
 // 统一原则：首位即基准（Sort-as-Master）。
-// 1. 优先取当前排在首位且已启用的站点（sort ASC, created_at ASC）；
-// 2. 兜底：若所有站点均停用，取排在首位的站点；
-// 3. 没有任何站点时返回 nil。
+// 仅从已启用的站点中按顺序选取首位（sort ASC, created_at ASC）；
+// 若所有站点均停用或无站点，返回 nil，严禁无视停用开关进行静默兜底。
 func PickPrimarySourceForCategory() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
 	var primary model.FilmSource
 	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		normalizeCollectCd(&primary)
-		return &primary
-	}
-	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		normalizeCollectCd(&primary)
 		return &primary
 	}
 	return nil
@@ -87,38 +76,40 @@ func GetActiveCollectSource() *model.FilmSource {
 }
 
 // GetEnabledCollectSourceList 获取已启用采集站列表。
-func GetEnabledCollectSourceList() []model.FilmSource {
+func GetEnabledCollectSourceList() ([]model.FilmSource, error) {
 	if db.Mdb == nil {
-		return nil
+		return nil, errors.New("数据库未连接")
 	}
-	var list []model.FilmSource
+	list := make([]model.FilmSource, 0)
 	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
-		log.Println("GetEnabledCollectSourceList Error:", err)
-		return nil
+		return nil, err
 	}
-	for i := range list {
-		normalizeCollectCd(&list[i])
-	}
-	return list
+	return list, nil
 }
 
-func GetLastCollectTime(sourceID string) *time.Time {
+func GetLastCollectTime(sourceID string) (*time.Time, error) {
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" || db.Mdb == nil {
-		return nil
+	if sourceID == "" {
+		return nil, nil
 	}
-	return GetCollectSourceStats([]string{sourceID})[sourceID]
+	stats, err := GetCollectSourceStats([]string{sourceID})
+	if err != nil {
+		return nil, err
+	}
+	return stats[sourceID], nil
 }
 
-func GetCollectSourceStats(sourceIDs []string) map[string]*time.Time {
+func GetCollectSourceStats(sourceIDs []string) (map[string]*time.Time, error) {
 	result := make(map[string]*time.Time, len(sourceIDs))
 	if len(sourceIDs) == 0 {
-		return result
+		return result, nil
+	}
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
 	}
 	var rows []model.CollectSourceStats
 	if err := db.Mdb.Where("source_id IN ?", sourceIDs).Find(&rows).Error; err != nil {
-		log.Println("GetCollectSourceStats Error:", err)
-		return result
+		return nil, err
 	}
 	for _, row := range rows {
 		if row.LastCollectTime == nil || row.LastCollectTime.IsZero() {
@@ -127,7 +118,7 @@ func GetCollectSourceStats(sourceIDs []string) map[string]*time.Time {
 		value := *row.LastCollectTime
 		result[row.SourceId] = &value
 	}
-	return result
+	return result, nil
 }
 
 func TouchCollectSourceStatsTx(tx *gorm.DB, sourceID string, at time.Time) error {
@@ -178,7 +169,6 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	if err := db.Mdb.Where("id = ?", id).First(&fs).Error; err != nil {
 		return nil
 	}
-	normalizeCollectCd(&fs)
 	return &fs
 }
 
@@ -436,7 +426,6 @@ func normalizeCollectSourceDefaults(source *model.FilmSource) {
 	}
 }
 
-// normalizeCollectCd 读取路径兜底：历史数据 cd 列可能为 0，统一按默认 24 小时处理。
 func normalizeCollectCd(source *model.FilmSource) {
 	if source.Cd <= 0 {
 		source.Cd = 24

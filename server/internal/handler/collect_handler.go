@@ -21,7 +21,12 @@ type CollectHandler struct{}
 var CollectHd = new(CollectHandler)
 
 func (h *CollectHandler) FilmSourceList(c *gin.Context) {
-	dto.Success(service.CollectSvc.GetFilmSourceList(), "影视源站点信息获取成功", c)
+	list, err := service.CollectSvc.GetFilmSourceList()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(list, "影视源站点信息获取成功", c)
 }
 
 func (h *CollectHandler) FindFilmSource(c *gin.Context) {
@@ -195,7 +200,11 @@ func (h *CollectHandler) FilmSourceDel(c *gin.Context) {
 // FilmSourceCheckAll 批量对每个采集站执行接口测试，返回无法正常采集的站点列表。
 // 正在采集中的站点与主站不参与测试，会以 skipped 形式返回并附原因。
 func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
-	sources := service.CollectSvc.GetFilmSourceList()
+	sources, err := service.CollectSvc.GetFilmSourceList()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 
 	const concurrency = 10
 	sem := make(chan struct{}, concurrency)
@@ -309,10 +318,17 @@ func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 }
 
 func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
-	sources := service.CollectSvc.GetEnabledFilmSources()
 	includeDisabled := c.Query("all") == "1"
+	var sources []model.FilmSource
+	var err error
 	if includeDisabled {
-		sources = service.CollectSvc.GetAllFilmSources()
+		sources, err = service.CollectSvc.GetAllFilmSources()
+	} else {
+		sources, err = service.CollectSvc.GetEnabledFilmSources()
+	}
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
 	}
 	l := make([]model.FilmTaskOptions, 0, len(sources))
 	for _, v := range sources {
@@ -374,8 +390,16 @@ func (h *CollectHandler) FailureRecordList(c *gin.Context) {
 	params.Paging = dto.GetPageParams(c)
 	params = service.CollectSvc.PrepareRecordQuery(params)
 
-	options := service.CollectSvc.GetRecordOptions()
-	list := service.CollectSvc.GetRecordList(params)
+	options, err := service.CollectSvc.GetRecordOptions()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	list, err := service.CollectSvc.GetRecordList(params)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{"params": params, "list": list, "options": options}, "影片分页信息获取成功", c)
 }
 
@@ -401,7 +425,11 @@ func (h *CollectHandler) CollectRecover(c *gin.Context) {
 }
 
 func (h *CollectHandler) CollectRecoverAll(c *gin.Context) {
-	out := service.CollectSvc.RecoverAll()
+	out, err := service.CollectSvc.RecoverAll()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
 		"queued":  out.Queued,
 		"already": out.Already,
@@ -410,11 +438,17 @@ func (h *CollectHandler) CollectRecoverAll(c *gin.Context) {
 }
 
 func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
-	service.CollectSvc.ClearRetriedRecords()
+	if err := service.CollectSvc.ClearRetriedRecords(); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.SuccessOnlyMsg("已有重试结果的记录已删除", c)
 }
 
 func (h *CollectHandler) ClearAllRecord(c *gin.Context) {
-	service.CollectSvc.ClearAllRecord()
+	if err := service.CollectSvc.ClearAllRecord(); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.SuccessOnlyMsg("采集异常记录信息已清空!!!", c)
 }

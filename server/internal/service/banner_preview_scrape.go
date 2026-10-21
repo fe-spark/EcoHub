@@ -51,7 +51,13 @@ func (s *ManageService) PreviewScrapeDeckStream(ctx context.Context, mids []int6
 		return nil
 	}
 
-	tmdbCfg := repository.GetTMDBConfig()
+	tmdbCfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		if onEvent != nil {
+			onEvent(PreviewScrapeEvent{Event: "error", Error: err.Error()})
+		}
+		return err
+	}
 	if !tmdbCfg.Enabled || strings.TrimSpace(tmdbCfg.ApiKey) == "" {
 		err := fmt.Errorf("TMDB 未启用")
 		if onEvent != nil {
@@ -69,7 +75,13 @@ func (s *ManageService) PreviewScrapeDeckStream(ctx context.Context, mids []int6
 		return err
 	}
 
-	snaps := filmsnapshot.GetSnapshotsByMidsOrdered(version, unique)
+	snaps, err := filmsnapshot.GetSnapshotsByMidsOrdered(version, unique)
+	if err != nil {
+		if onEvent != nil {
+			onEvent(PreviewScrapeEvent{Event: "error", Error: err.Error()})
+		}
+		return err
+	}
 	byMid := make(map[int64]int, len(snaps))
 	for i := range snaps {
 		byMid[snaps[i].Mid] = i

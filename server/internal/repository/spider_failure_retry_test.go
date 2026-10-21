@@ -91,7 +91,10 @@ func TestFailureRecordList_ClampsEmptyHighPage(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 	paging := &dto.Page{Current: 8, PageSize: 10}
-	list := FailureRecordList(model.RecordRequestVo{OriginId: "src", Status: -1, Paging: paging})
+	list, err := FailureRecordList(model.RecordRequestVo{OriginId: "src", Status: -1, Paging: paging})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if paging.Current != 1 || paging.Total != 1 {
 		t.Fatalf("paging = %+v", paging)
 	}

@@ -120,35 +120,36 @@ func SubscribeFailureRetry(ctx context.Context, ids []uint) <-chan []FailureRetr
 			set[id] = struct{}{}
 		}
 	}
+	hub := failureRetries
 	sub := &failureRetrySub{
 		ids:     set,
 		pending: map[uint]FailureRetryEvent{},
 		kick:    make(chan struct{}, 1),
 	}
-	failureRetries.mu.Lock()
-	failureRetries.subs[sub] = struct{}{}
-	failureRetries.mu.Unlock()
+	hub.mu.Lock()
+	hub.subs[sub] = struct{}{}
+	hub.mu.Unlock()
 
 	out := make(chan []FailureRetryEvent, 8)
 	go func() {
 		defer close(out)
 		defer func() {
-			failureRetries.mu.Lock()
-			delete(failureRetries.subs, sub)
-			failureRetries.mu.Unlock()
+			hub.mu.Lock()
+			delete(hub.subs, sub)
+			hub.mu.Unlock()
 		}()
 		for {
 			select {
 			case <-ctx.Done():
 				return
 			case <-sub.kick:
-				failureRetries.mu.Lock()
+				hub.mu.Lock()
 				batch := make([]FailureRetryEvent, 0, len(sub.pending))
 				for _, ev := range sub.pending {
 					batch = append(batch, ev)
 				}
 				sub.pending = map[uint]FailureRetryEvent{}
-				failureRetries.mu.Unlock()
+				hub.mu.Unlock()
 				if len(batch) == 0 {
 					continue
 				}

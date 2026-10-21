@@ -1,7 +1,7 @@
 package film
 
 import (
-	"fmt"
+	"errors"
 	"math/rand"
 	"strings"
 	"time"
@@ -25,9 +25,9 @@ type dailyUpdateMidRow struct {
 }
 
 // NavTopCategories 首页可见顶级大类（Show=true），与 /navCategory 同源（按当前生效采集站隔离）。
-func NavTopCategories(sourceIdOpt ...string) []model.Category {
+func NavTopCategories(sourceIdOpt ...string) ([]model.Category, error) {
 	if db.Mdb == nil {
-		return nil
+		return nil, errors.New("数据库未连接")
 	}
 	var sourceID string
 	if len(sourceIdOpt) > 0 {
@@ -40,7 +40,11 @@ func NavTopCategories(sourceIdOpt ...string) []model.Category {
 	}
 	var tree model.CategoryTree
 	if sourceID != "" {
-		tree = repository.GetActiveCategoryTree(sourceID)
+		var err error
+		tree, err = repository.GetActiveCategoryTree(sourceID)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(tree.Children) == 0 {
 		tree = repository.GetCategoryTree()
@@ -57,7 +61,7 @@ func NavTopCategories(sourceIdOpt ...string) []model.Category {
 			Sort: c.Sort,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // NavTopCategoryIDs 由 NavTopCategories 结果提取 ID 列表，供查询复用避免重复全表扫描分类树。
@@ -74,38 +78,6 @@ func NavTopCategoryIDs(nav []model.Category) []int64 {
 // Rolling24hWindow 滚动近 24 小时：now-24h（含）到 now（含）。
 func Rolling24hWindow(now time.Time) (from, to time.Time) {
 	return now.Add(-24 * time.Hour), now
-}
-
-// LoadChangeMidsBetween 汇总时间窗内的变更 mid，直接走 film_index 的 update_stamp 索引。
-func LoadChangeMidsBetween(from, to time.Time, limit int) ([]int64, error) {
-	if db.Mdb == nil {
-		return nil, fmt.Errorf("数据库未就绪")
-	}
-	if to.Before(from) {
-		return nil, nil
-	}
-
-	type row struct {
-		Mid int64 `gorm:"column:mid"`
-	}
-	var rows []row
-	q := db.Mdb.Table(model.TableFilmIndex).
-		Select("mid").
-		Where("update_stamp >= ? AND update_stamp <= ?", from.Unix(), to.Unix()).
-		Order("update_stamp DESC, mid DESC")
-	if limit > 0 {
-		q = q.Limit(limit)
-	}
-	if err := q.Scan(&rows).Error; err != nil {
-		return nil, err
-	}
-	out := make([]int64, 0, len(rows))
-	for _, r := range rows {
-		if r.Mid > 0 {
-			out = append(out, r.Mid)
-		}
-	}
-	return out, nil
 }
 
 // DailyUpdateListQuery 近 24h 更新列表查询。
@@ -252,7 +224,11 @@ func ListDailyUpdateMids(q DailyUpdateListQuery) (mids []int64, total int, err e
 	current, pageSize := clampDailyUpdatePage(q.Current, q.PageSize)
 	navIDs := q.NavIDs
 	if q.Pid != DailyPidAll && len(navIDs) == 0 {
-		navIDs = NavTopCategoryIDs(NavTopCategories(q.SourceId))
+		nav, navErr := NavTopCategories(q.SourceId)
+		if navErr != nil {
+			return nil, 0, navErr
+		}
+		navIDs = NavTopCategoryIDs(nav)
 	}
 	nav := buildDailyNavIndex(q.SourceId, navIDs)
 	exclude := map[int64]struct{}{}

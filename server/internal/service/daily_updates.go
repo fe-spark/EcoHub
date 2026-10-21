@@ -103,7 +103,10 @@ func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult,
 		}
 	}
 	from, to := film.Rolling24hWindow(time.Now())
-	nav := film.NavTopCategories(req.SourceId)
+	nav, err := film.NavTopCategories(req.SourceId)
+	if err != nil {
+		return nil, err
+	}
 	navIDs := film.NavTopCategoryIDs(nav)
 
 	mids, total, err := film.ListDailyUpdateMids(film.DailyUpdateListQuery{
@@ -123,7 +126,10 @@ func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult,
 	}
 
 	page := fillDailyUpdatePage(req.Page, total)
-	list := hydrateDailyUpdateMids(mids)
+	list, err := hydrateDailyUpdateMids(mids)
+	if err != nil {
+		return nil, err
+	}
 	countByPid, otherCount, catTotal, catErr := film.DailyUpdatePidCounts(from, to, navIDs, req.SourceId)
 	if catErr != nil {
 		return nil, catErr
@@ -132,15 +138,18 @@ func (i *IndexService) DailyUpdates(req DailyUpdateListReq) (*DailyUpdateResult,
 	return &DailyUpdateResult{List: list, Page: page, Categories: cats}, nil
 }
 
-func hydrateDailyUpdateMids(mids []int64) []model.MovieBasicInfo {
+func hydrateDailyUpdateMids(mids []int64) ([]model.MovieBasicInfo, error) {
 	if len(mids) == 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	snaps := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	snaps, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
 	list := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
 	if list == nil {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
-	return list
+	return list, nil
 }

@@ -22,7 +22,10 @@ func TestGetFilmSourceList_UsesLastRunTime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	list := (&CollectService{}).GetFilmSourceList()
+	list, err := (&CollectService{}).GetFilmSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(list) != 1 {
 		t.Fatalf("list len = %d", len(list))
 	}

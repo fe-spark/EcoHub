@@ -6,15 +6,36 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"fmt"
+	"strings"
+
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/utils"
-	"strings"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func setupManageConfigDB(t *testing.T) {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.Banner{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+}
 
 func init() {
 	gin.SetMode(gin.TestMode)
@@ -171,6 +192,7 @@ func TestUpdateSiteAccess_Validation(t *testing.T) {
 }
 
 func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
+	setupManageConfigDB(t)
 	h := &ManageHandler{}
 	cases := []struct {
 		name   string
@@ -209,6 +231,7 @@ func TestSiteAccessConfig_HidesProvideKeyForNonAdmin(t *testing.T) {
 }
 
 func TestBannerHandlers(t *testing.T) {
+	setupManageConfigDB(t)
 	h := &ManageHandler{}
 
 	c, w := testContext(http.MethodGet, "/api/manage/banner/list")

@@ -2,16 +2,16 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang.org/x/sync/singleflight"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/model/dto"
-	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -46,27 +46,8 @@ func sliceHotKeywords(keywords []string, limit int) []string {
 	return res
 }
 
-// SearchFilmInfo 获取关键字匹配的影片信息（默认相关度优先）
-func (i *IndexService) SearchFilmInfo(key string, page *dto.Page) ([]model.MovieBasicInfo, error) {
-	return i.SearchFilmInfoWithSort(key, "", page)
-}
-
-// SearchFilmInfoWithSort 获取关键字匹配的影片信息（支持相关度/热度/最新/评分排序）
-func (i *IndexService) SearchFilmInfoWithSort(key string, sortField string, page *dto.Page) ([]model.MovieBasicInfo, error) {
-	trimmed := strings.TrimSpace(key)
-	if page == nil {
-		page = &dto.Page{Current: 1, PageSize: 12}
-	}
-	version := filmsnapshot.GetActiveReadModelVersion()
-	sl, err := filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, trimmed, sortField, page)
-	if err != nil {
-		return nil, err
-	}
-	return filmshared.BuildMovieBasicInfosFromSnapshots(sl...), nil
-}
-
 // GetHotSearchKeywords 全站热门推荐：按当前首选站播放热度取片名，与个人搜索历史无关。
-func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []string {
+func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([]string, error) {
 	limit = clampHotSearchLimit(limit)
 
 	var sourceID string
@@ -82,7 +63,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []
 		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		return []string{}
+		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
 
 	var cacheKey string
@@ -95,7 +76,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []string
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return sliceHotKeywords(cached, limit)
+				return sliceHotKeywords(cached, limit), nil
 			}
 		}
 	}
@@ -112,7 +93,7 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []
 		}
 
 		if db.Mdb == nil {
-			return []string{}, nil
+			return nil, filmsnapshot.ErrSearchIndexMissing
 		}
 
 		var snapshots []model.FilmIndex
@@ -156,12 +137,15 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) []
 		return topKeywords, nil
 	})
 
-	if err != nil || val == nil {
-		return []string{}
+	if err != nil {
+		return nil, err
+	}
+	if val == nil {
+		return []string{}, nil
 	}
 	keywords, ok := val.([]string)
 	if !ok {
-		return []string{}
+		return nil, errors.New("热词结果无效")
 	}
-	return sliceHotKeywords(keywords, limit)
+	return sliceHotKeywords(keywords, limit), nil
 }

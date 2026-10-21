@@ -35,7 +35,11 @@ function orderBySort(list: FilmSource[]) {
   return [...list].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0) || a.id.localeCompare(b.id));
 }
 
-export default function CollectOverview() {
+interface CollectOverviewProps {
+  onPrimaryChange?: (primary: FilmSource | null) => void;
+}
+
+export default function CollectOverview({ onPrimaryChange }: CollectOverviewProps = {}) {
   const { message, modal } = useAppMessage();
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(true);
@@ -82,6 +86,12 @@ export default function CollectOverview() {
     () => orderBySort(siteList).find((item) => item.state) ?? null,
     [siteList],
   );
+
+  useEffect(() => {
+    if (!loading) {
+      onPrimaryChange?.(topSite);
+    }
+  }, [topSite, loading, onPrimaryChange]);
   const switchCandidates = useMemo(
     () => orderBySort(siteList).filter((item) => item.state && item.id !== topSite?.id),
     [siteList, topSite?.id],

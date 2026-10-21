@@ -18,9 +18,9 @@ import (
 const maxProvideVodDetailBatch = 100
 
 // GetVodDetail 获取视频详情（带播放列表）
-func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.FilmDetail {
+func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.FilmDetail, error) {
 	if len(ids) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
 
 	mids := make([]int64, 0, len(ids))
@@ -32,7 +32,7 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.Fil
 		mids = append(mids, idInt)
 	}
 	if len(mids) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
 	sourceId = resolveProvideSourceID(sourceId)
 	if len(mids) > maxProvideVodDetailBatch {
@@ -40,9 +40,12 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.Fil
 	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()
-	snapshots := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	snapshots, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
 	if len(snapshots) == 0 {
-		return []model.FilmDetail{}
+		return []model.FilmDetail{}, nil
 	}
 
 	cachedVos := make(map[int64]*model.MovieDetailVo, len(snapshots))
@@ -83,7 +86,11 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.Fil
 
 	var batchPlaylists map[int64][]model.PlayLinkVo
 	if len(uncachedMids) > 0 {
-		batchPlaylists = BatchGetPlayPlaylistsByMids(uncachedMids)
+		var err error
+		batchPlaylists, err = BatchGetPlayPlaylistsByMids(uncachedMids)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	detailList := make([]model.FilmDetail, 0, len(snapshots))
@@ -123,7 +130,7 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) []model.Fil
 		}
 	}
 
-	return detailList
+	return detailList, nil
 }
 
 func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo, sourceId string) model.FilmDetail {

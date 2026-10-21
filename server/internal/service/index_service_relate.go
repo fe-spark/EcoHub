@@ -73,15 +73,22 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 		}
 
 		snapshotStartedAt := time.Now()
-		snapshot := filmsnapshot.GetSnapshotByMid(version, mid)
+		snapshot, snapErr := filmsnapshot.GetSnapshotByMid(version, mid)
 		logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
+		if snapErr != nil {
+			return nil, snapErr
+		}
 		if snapshot == nil {
 			if db.Rdb != nil {
 				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
 			}
 			return []model.MovieBasicInfo{}, nil
 		}
-		if !filmsnapshot.HasMovieDetail(snapshot.Mid) {
+		exists, detailErr := filmsnapshot.HasMovieDetail(snapshot.Mid)
+		if detailErr != nil {
+			return nil, detailErr
+		}
+		if !exists {
 			filmsnapshot.DeleteActiveSnapshotsByMids(snapshot.Mid)
 			if db.Rdb != nil {
 				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()

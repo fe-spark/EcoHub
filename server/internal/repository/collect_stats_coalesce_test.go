@@ -104,7 +104,10 @@ func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
 	}
 	NoteCollectSourceRun("src-run")
 
-	gotAnchor := GetLastCollectTime("src-run")
+	gotAnchor, err := GetLastCollectTime("src-run")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if gotAnchor == nil || !gotAnchor.Equal(anchor) {
 		t.Fatalf("cron anchor = %v, want %v", gotAnchor, anchor)
 	}

@@ -24,7 +24,10 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 		}
 	})
 
-	view := ManageSvc.GetBannerQuickConfig()
+	view, err := ManageSvc.GetBannerQuickConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if view.Saved || view.Strategy != "hot" {
 		t.Fatalf("unsaved view: %+v", view)
 	}
@@ -43,7 +46,10 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	if !saved.Saved || saved.Strategy != "score" || !saved.AutoScrape {
 		t.Fatalf("saved view: %+v", saved)
 	}
-	cfg := repository.GetBannerConfig()
+	cfg, err := repository.GetBannerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if cfg.Strategy != repository.BannerStrategyScore || len(cfg.Quotas) != 1 || cfg.Quotas[0].Count != 2 {
 		t.Fatalf("stored quotas: %+v", cfg)
 	}
@@ -84,7 +90,11 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	if err := ManageSvc.RunBannerQuickSchedule(); err == nil {
 		t.Fatal("run without snapshot should fail and keep the live deck")
 	}
-	if banners := repository.GetBanners(); len(banners) != 0 {
+	banners, err := repository.GetBanners()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(banners) != 0 {
 		t.Fatalf("live deck changed: %+v", banners)
 	}
 }
@@ -117,13 +127,20 @@ func TestResetBannerDeckForSourceChange(t *testing.T) {
 	if err := ResetBannerDeckForSourceChange(); err != nil {
 		t.Fatalf("reset: %v", err)
 	}
-	if banners := repository.GetBanners(); len(banners) != 0 {
+	banners, err := repository.GetBanners()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(banners) != 0 {
 		t.Fatalf("banners not cleared: %+v", banners)
 	}
-	if repository.BannerConfigExists() {
+	if exists, err := repository.BannerConfigExists(); err != nil || exists {
 		t.Fatal("banner config should be removed")
 	}
-	view := ManageSvc.GetBannerQuickConfig()
+	view, err := ManageSvc.GetBannerQuickConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if view.Saved || len(view.Quotas) != 0 {
 		t.Fatalf("config view: %+v", view)
 	}
@@ -162,7 +179,10 @@ func TestDisableBannerQuickSchedule_KeepsRecipe(t *testing.T) {
 	if err := DisableBannerQuickSchedule(); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
-	view := ManageSvc.GetBannerQuickConfig()
+	view, err := ManageSvc.GetBannerQuickConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !view.Saved || !view.AutoScrape || view.Strategy != "score" {
 		t.Fatalf("recipe should stay: %+v", view)
 	}

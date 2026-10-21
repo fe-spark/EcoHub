@@ -270,7 +270,19 @@ func ConvertCategoryList(tree *model.CategoryTree) []model.Category {
 	return list
 }
 
-// ConvertFilmDetails 批量处理影片详情信息
+// HasPlayableLinks 校验影片是否包含至少一条有效播放链接。
+func HasPlayableLinks(detail model.MovieDetail) bool {
+	for _, group := range detail.PlayList {
+		for _, ep := range group {
+			if strings.TrimSpace(ep.Link) != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// ConvertFilmDetails 批量处理影片详情信息，过滤掉无片名或无有效播放链接的条目
 func ConvertFilmDetails(details []model.FilmDetail) []model.MovieDetail {
 	var dl []model.MovieDetail
 	for _, d := range details {
@@ -278,7 +290,11 @@ func ConvertFilmDetails(details []model.FilmDetail) []model.MovieDetail {
 		if strings.TrimSpace(d.VodName) == "" {
 			continue
 		}
-		dl = append(dl, ConvertFilmDetail(d))
+		item := ConvertFilmDetail(d)
+		if !HasPlayableLinks(item) {
+			continue
+		}
+		dl = append(dl, item)
 	}
 	return dl
 }

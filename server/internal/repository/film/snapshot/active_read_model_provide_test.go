@@ -112,11 +112,17 @@ func TestGetSnapshotByMid_UnscopedIncludesSoftDeleted(t *testing.T) {
 		t.Fatalf("soft delete: %v", err)
 	}
 
-	got := GetSnapshotByMid(version, 11)
+	got, err := GetSnapshotByMid(version, 11)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got != nil {
 		t.Fatalf("列表直读应尊重 film_index 软删, got %+v", got)
 	}
-	rows := GetSnapshotsByMidsOrdered(version, []int64{11})
+	rows, err := GetSnapshotsByMidsOrdered(version, []int64{11})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(rows) != 0 {
 		t.Fatalf("软删影片不应出现在列表, got %+v", rows)
 	}

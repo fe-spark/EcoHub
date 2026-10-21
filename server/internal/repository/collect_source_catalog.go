@@ -20,9 +20,6 @@ func RefreshCollectSourceCatalog() error {
 	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").Find(&list).Error; err != nil {
 		return err
 	}
-	for i := range list {
-		normalizeCollectCd(&list[i])
-	}
 	collectSourceCatalog.Store(&list)
 	return nil
 }

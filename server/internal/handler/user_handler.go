@@ -81,7 +81,11 @@ func (h *UserHandler) UserInfo(c *gin.Context) {
 		dto.Failed("用户信息获取失败, 户授权信息异常", c)
 		return
 	}
-	info := service.UserSvc.GetUserInfo(uc.UserID)
+	info, err := service.UserSvc.GetUserInfo(uc.UserID)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(info, "成功获取用户信息", c)
 }
 

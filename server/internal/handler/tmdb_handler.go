@@ -17,7 +17,11 @@ var TMDBHd = new(TMDBHandler)
 
 // GetConfig 获取 TMDB 配置
 func (h *TMDBHandler) GetConfig(c *gin.Context) {
-	cfg := service.TMDBSvc.GetConfig()
+	cfg, err := service.TMDBSvc.GetConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(cfg, "获取 TMDB 配置成功", c)
 }
 

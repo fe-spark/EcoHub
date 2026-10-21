@@ -83,7 +83,16 @@ export function useCollectQueueBars(
     } else {
       for (const view of finishedQueueViews(prev, next)) {
         const notice = queueEndNotice(view);
-        message[notice.level](notice.text);
+        const msgKey = view.queueId ? `collect-stop-queue-${view.queueId}` : undefined;
+        if (msgKey) {
+          message[notice.level]({
+            key: msgKey,
+            content: notice.text,
+            duration: 2,
+          });
+        } else {
+          message[notice.level](notice.text);
+        }
       }
       visible = next.filter((item) => item.view.running);
     }
@@ -93,6 +102,12 @@ export function useCollectQueueBars(
 
   const stopQueue = async (queueId: string, sourceIds: string[]) => {
     setStoppingQueueId(queueId);
+    const msgKey = `collect-stop-queue-${queueId}`;
+    message.loading({
+      key: msgKey,
+      content: "正在停止...",
+      duration: 0,
+    });
     const idSet = new Set(sourceIds);
     setSiteList((current) =>
       current.map((item) =>
@@ -102,16 +117,22 @@ export function useCollectQueueBars(
       ),
     );
     try {
-      const results = await Promise.all(
-        sourceIds.map((id) => ApiPost("/manage/spider/stop", { id })),
-      );
-      if (results.every((item) => item.code === 0)) {
-        message.success("正在停止");
+      const resp = await ApiPost("/manage/spider/stop", { ids: sourceIds });
+      if (resp.code !== 0) {
+        message.error({
+          key: msgKey,
+          content: resp.msg || "终止任务失败",
+          duration: 2,
+        });
+        void reloadList();
         return;
       }
-      message.error(results.find((item) => item.code !== 0)?.msg || "终止任务失败");
-      void reloadList();
     } catch {
+      message.error({
+        key: msgKey,
+        content: "终止任务失败",
+        duration: 2,
+      });
       void reloadList();
     } finally {
       setStoppingQueueId(null);

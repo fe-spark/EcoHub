@@ -50,7 +50,7 @@ export function FilmFilterBar({
           value={params.sourceId || undefined}
           onChange={handleSourceChange}
           options={options.sources?.map((s: any) => ({
-            label: s.name,
+            label: s.state === false ? `${s.name} (已停用)` : s.name,
             value: s.id,
           }))}
         />

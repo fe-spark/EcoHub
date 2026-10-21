@@ -2,6 +2,8 @@ package shared
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
 
 	"server/internal/model"
 )
@@ -14,8 +16,25 @@ func ApplyFilmListSnapshot(detail *model.MovieDetail, info model.FilmListSnapsho
 		info = replaced[0]
 	}
 	detail.Id = info.Mid
+	detail.SourceId = info.SourceId
 	detail.Pid = info.Pid
 	detail.Cid = info.Cid
+	if detail.RawCid == 0 && info.CategoryKey != "" {
+		parts := strings.Split(info.CategoryKey, ":")
+		if len(parts) >= 3 {
+			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
+				detail.RawCid = id
+			}
+		}
+	}
+	if detail.RawPid == 0 && info.RootCategoryKey != "" {
+		parts := strings.Split(info.RootCategoryKey, ":")
+		if len(parts) >= 3 {
+			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
+				detail.RawPid = id
+			}
+		}
+	}
 	detail.Name = info.Name
 	detail.SubTitle = info.SubTitle
 	detail.CName = info.CName

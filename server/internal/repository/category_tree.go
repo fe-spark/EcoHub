@@ -1,14 +1,9 @@
 package repository
 
 import (
-	"encoding/json"
-	"fmt"
-	"log"
 	"sort"
 	"strings"
-	"time"
 
-	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
@@ -125,7 +120,7 @@ func GetCategoryTreeByID(id int64) *model.CategoryTree {
 }
 
 // GetActiveCategoryTree 获取前台导航分类树。支持可选 sourceId 按采集站独立隔离。优先 Redis；未命中时用分类映射构建。
-func GetActiveCategoryTree(sourceIdOpt ...string) model.CategoryTree {
+func GetActiveCategoryTree(sourceIdOpt ...string) (model.CategoryTree, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
@@ -139,88 +134,10 @@ func GetActiveCategoryTree(sourceIdOpt ...string) model.CategoryTree {
 		return sourceTypeCategoryTree(sourceId)
 	}
 
-	cacheKey := config.ActiveCategoryTreeKey
-	if sourceId != "" {
-		cacheKey = fmt.Sprintf("%s:src_%s", config.ActiveCategoryTreeKey, sourceId)
-	}
-
-	// 1. 尝试从 Redis 获取
-	if db.Rdb != nil {
-		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
-			var tree model.CategoryTree
-			if json.Unmarshal([]byte(data), &tree) == nil && isValidActiveCategoryTree(tree) {
-				return tree
-			}
-			log.Printf("[Category] 活跃分类树缓存失效或非法，清除缓存并重新构建 key=%s", cacheKey)
-			db.Rdb.Del(db.Cxt, cacheKey)
-		}
-	}
-
-	activeCategoryMap := loadActiveCategoryIDs(sourceId)
-	if len(activeCategoryMap) == 0 && sourceId != "" {
-		activeCategoryMap = loadActiveCategoryIDs("")
-	}
-	activeVisibleMap := buildActiveCategoryAncestorMap(activeCategoryMap)
-
-	// 3. 构建树
-	var allList []model.Category
-	if db.Mdb != nil {
-		db.Mdb.Where("`show` = ?", true).Order("pid ASC, sort ASC, id ASC").Find(&allList)
-	}
-
-	nodes := make(map[int64]*model.CategoryTree)
-	root := model.CategoryTree{
+	return model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
 		Children: make([]*model.CategoryTree, 0),
-	}
-
-	// 第一遍：创建所有节点
-	for _, c := range allList {
-		node := &model.CategoryTree{
-			Id:        c.Id,
-			Pid:       c.Pid,
-			Name:      c.Name,
-			StableKey: c.StableKey,
-			Alias:     c.Alias,
-			Show:      c.Show,
-			Sort:      c.Sort,
-			CreatedAt: c.CreatedAt,
-			UpdatedAt: c.UpdatedAt,
-			Children:  make([]*model.CategoryTree, 0),
-		}
-		nodes[c.Id] = node
-	}
-
-	// 第二遍：按活跃分类及其祖先关系挂载整棵展示树。
-	for _, c := range allList {
-		if !activeVisibleMap[c.Id] || c.Pid == 0 {
-			continue
-		}
-		if parent, ok := nodes[c.Pid]; ok && activeVisibleMap[c.Pid] {
-			parent.Children = append(parent.Children, nodes[c.Id])
-		}
-	}
-
-	// 第三遍：收集活跃的大类到根节点下
-	for _, c := range allList {
-		if c.Pid != 0 {
-			continue
-		}
-		node := nodes[c.Id]
-		if activeVisibleMap[c.Id] {
-			root.Children = append(root.Children, node)
-		}
-	}
-	sortRootCategories(root.Children)
-
-	// 7. 写入 Redis 缓存 (1小时)
-	if db.Rdb != nil {
-		if data, err := json.Marshal(root); err == nil {
-			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour)
-		}
-	}
-
-	return root
+	}, nil
 }
 
 func loadActiveCategoryIDs(sourceId string) map[int64]bool {
@@ -240,34 +157,6 @@ func loadActiveCategoryIDs(sourceId string) map[int64]bool {
 			}
 		}
 
-		if len(active) == 0 && sourceId != "" {
-			var pids []int64
-			_ = db.Mdb.Model(&model.FilmIndex{}).
-				Where(model.FilmHasPlaySourceSQL()+" AND pid > 0", sourceId, "play").
-				Distinct("pid").
-				Pluck("pid", &pids).Error
-			for _, id := range pids {
-				if id > 0 {
-					active[id] = true
-				}
-			}
-
-			var cids []int64
-			_ = db.Mdb.Model(&model.FilmIndex{}).
-				Where(model.FilmHasPlaySourceSQL()+" AND cid > 0", sourceId, "play").
-				Distinct("cid").
-				Pluck("cid", &cids).Error
-			for _, id := range cids {
-				if id > 0 {
-					active[id] = true
-				}
-			}
-
-			// 若该源既无独立分类映射也无快照数据，平滑兜底回退至全量活跃分类，避免前台导航栏白屏
-			if len(active) == 0 {
-				return loadActiveCategoryIDs("")
-			}
-		}
 	}
 
 	return active

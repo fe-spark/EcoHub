@@ -16,8 +16,10 @@ var UserSvc = new(UserService)
 // UserLogin 用户登录
 func (s *UserService) UserLogin(account, password string) (token string, err error) {
 	// 根据 username 或 email 查询用户信息
-	var u *model.User = repository.GetUserByNameOrEmail(account)
-	// 用户信息不存在则返回提示信息
+	u, err := repository.GetUserByNameOrEmail(account)
+	if err != nil {
+		return "", err
+	}
 	if u == nil {
 		return "", errors.New("用户信息不存在!!!")
 	}
@@ -44,10 +46,15 @@ func (s *UserService) UserLogout(id uint) {
 }
 
 // GetUserInfo 获取用户基本信息
-func (s *UserService) GetUserInfo(id uint) model.UserInfoVo {
-	// 通过用户ID查询对应的用户信息
-	u := repository.GetUserById(id)
-	return buildUserInfoVo(u)
+func (s *UserService) GetUserInfo(id uint) (model.UserInfoVo, error) {
+	u, err := repository.GetUserById(id)
+	if err != nil {
+		return model.UserInfoVo{}, err
+	}
+	if u.ID == 0 {
+		return model.UserInfoVo{}, errors.New("用户不存在")
+	}
+	return buildUserInfoVo(u), nil
 }
 
 // VerifyUserPassword 校验密码
@@ -56,8 +63,8 @@ func (s *UserService) VerifyUserPassword(id uint, password string) bool {
 		return false
 	}
 	// 获取当前登录的用户全部信息
-	u := repository.GetUserById(id)
-	if u.ID == 0 || u.Password == "" {
+	u, err := repository.GetUserById(id)
+	if err != nil || u.ID == 0 || u.Password == "" {
 		return false
 	}
 	// 校验密码是否正确
@@ -77,12 +84,19 @@ func (s *UserService) GetUserPage(page *dto.Page, userName string, role, status 
 // AddUser 添加用户
 func (s *UserService) AddUser(u model.User) error {
 	// 检查用户名是否重复
-	if exist := repository.GetUserByNameOrEmail(u.UserName); exist != nil {
+	exist, err := repository.GetUserByNameOrEmail(u.UserName)
+	if err != nil {
+		return err
+	}
+	if exist != nil {
 		return errors.New("用户名已存在")
 	}
-	// 检查邮箱是否重复
 	if u.Email != "" {
-		if exist := repository.GetUserByNameOrEmail(u.Email); exist != nil && exist.ID != 0 {
+		exist, err = repository.GetUserByNameOrEmail(u.Email)
+		if err != nil {
+			return err
+		}
+		if exist != nil && exist.ID != 0 {
 			return errors.New("邮箱已被其它账号使用")
 		}
 	}
@@ -94,7 +108,10 @@ func (s *UserService) AddUser(u model.User) error {
 
 // UpdateUser 更新用户。operatorID、operatorRole 为当前登录人。
 func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.UserUpdatePayload) error {
-	oldUser := repository.GetUserById(req.ID)
+	oldUser, err := repository.GetUserById(req.ID)
+	if err != nil {
+		return err
+	}
 	if oldUser.ID == 0 {
 		return errors.New("用户不存在")
 	}
@@ -105,7 +122,11 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 
 	if req.Email != nil {
 		if *req.Email != "" && *req.Email != oldUser.Email {
-			if exist := repository.GetUserByNameOrEmail(*req.Email); exist != nil && exist.ID != oldUser.ID {
+			exist, err := repository.GetUserByNameOrEmail(*req.Email)
+			if err != nil {
+				return err
+			}
+			if exist != nil && exist.ID != oldUser.ID {
 				return errors.New("邮箱已被其它账号使用")
 			}
 		}
@@ -150,11 +171,17 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 
 // DeleteUser 删除用户。operatorID、operatorRole 为当前登录人。
 func (s *UserService) DeleteUser(operatorID uint, operatorRole int, id uint) error {
-	user := repository.GetUserById(id)
+	user, err := repository.GetUserById(id)
+	if err != nil {
+		return err
+	}
+	if user.ID == 0 {
+		return errors.New("用户不存在")
+	}
 	if msg := model.CheckUserDelete(operatorID, operatorRole, id, user.UserName); msg != "" {
 		return errors.New(msg)
 	}
-	err := repository.DeleteUser(id)
+	err = repository.DeleteUser(id)
 	if err == nil {
 		// 删除成功后，强制清除该用户的登录状态
 		_ = repository.ClearUserToken(id)

@@ -72,4 +72,3 @@ func TestOrganizePlaySources_KeepsSourcesIndependent(t *testing.T) {
 		t.Fatalf("expected exactly 2 episodes in second line, got %d", len(res[1].LinkList))
 	}
 }
-

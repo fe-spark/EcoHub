@@ -120,7 +120,10 @@ func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
 	}
 
 	// 1. GetActiveCategoryTree with db.Rdb == nil
-	tree := GetActiveCategoryTree()
+	tree, err := GetActiveCategoryTree()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if tree.Name != "分类信息" {
 		t.Fatalf("expected 分类信息, got %s", tree.Name)
 	}
@@ -140,7 +143,10 @@ func TestRepository_RedisNilAndSQLiteDialect(t *testing.T) {
 	if err := SaveSiteBasic(cfg); err != nil {
 		t.Fatalf("SaveSiteBasic failed with nil Redis: %v", err)
 	}
-	gotCfg := GetSiteBasic()
+	gotCfg, err := GetSiteBasic()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if gotCfg.SiteName != "TestSite" {
 		t.Fatalf("expected TestSite, got %s", gotCfg.SiteName)
 	}
@@ -259,7 +265,10 @@ func TestGetActiveCategoryTree_SourceScoped(t *testing.T) {
 		t.Fatalf("create source categories: %v", err)
 	}
 
-	tree1 := GetActiveCategoryTree("src1")
+	tree1, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(tree1.Children) != 1 || tree1.Children[0].Id != 1 || tree1.Children[0].Name != "电影" {
 		t.Fatalf("expected src1 root type 1 电影, got: %+v", tree1.Children)
 	}
@@ -267,7 +276,10 @@ func TestGetActiveCategoryTree_SourceScoped(t *testing.T) {
 		t.Fatalf("expected src1 child type 10, got: %+v", tree1.Children[0].Children)
 	}
 
-	tree2 := GetActiveCategoryTree("src2")
+	tree2, err := GetActiveCategoryTree("src2")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(tree2.Children) != 1 || tree2.Children[0].Id != 2 || tree2.Children[0].Name != "电视剧" {
 		t.Fatalf("expected src2 root type 2 电视剧, got: %+v", tree2.Children)
 	}
@@ -316,7 +328,10 @@ func TestSourceTypeTree_UsesMappedShowFlag(t *testing.T) {
 		t.Fatalf("create source categories: %v", err)
 	}
 
-	tree := GetActiveCategoryTree("src1")
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	shown := map[int64]bool{}
 	for _, child := range tree.Children {
 		shown[child.Id] = child.Show
@@ -387,7 +402,10 @@ func TestSourceTypeTree_AppliesPreferredStationRules(t *testing.T) {
 	}
 	ReloadMappingRules()
 
-	tree := GetActiveCategoryTree("src1")
+	tree, err := GetActiveCategoryTree("src1")
+	if err != nil {
+		t.Fatal(err)
+	}
 	names := make([]string, 0, len(tree.Children))
 	byName := map[string]*model.CategoryTree{}
 	for _, child := range tree.Children {

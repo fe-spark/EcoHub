@@ -21,21 +21,27 @@ var ProxySvc = new(ProxyService)
 
 const defaultProxyTestTarget = "https://cloudflare.com/cdn-cgi/trace"
 
-func (s *ProxyService) GetConfig() model.ProxyConfig {
+func (s *ProxyService) GetConfig() (model.ProxyConfig, error) {
 	return repository.GetProxyConfig()
 }
 
 // PublicConfig 去掉代理地址里的账号密码，供管理端读取。
-func (s *ProxyService) PublicConfig() model.ProxyConfig {
-	cfg := s.GetConfig()
+func (s *ProxyService) PublicConfig() (model.ProxyConfig, error) {
+	cfg, err := s.GetConfig()
+	if err != nil {
+		return model.ProxyConfig{}, err
+	}
 	cfg.ProxyURL = RedactProxyURL(cfg.ProxyURL)
-	return cfg
+	return cfg, nil
 }
 
 func (s *ProxyService) UpdateConfig(cfg model.ProxyConfig, preserveAuth bool) error {
 	cfg.ProxyURL = strings.TrimSpace(cfg.ProxyURL)
 	if preserveAuth {
-		stored := s.GetConfig()
+		stored, err := s.GetConfig()
+		if err != nil {
+			return err
+		}
 		if RedactProxyURL(cfg.ProxyURL) == RedactProxyURL(stored.ProxyURL) && !proxyURLHasUser(cfg.ProxyURL) {
 			cfg.ProxyURL = stored.ProxyURL
 		}
@@ -107,23 +113,23 @@ func (s *ProxyService) TestProxy(proxyURL string) (int64, error) {
 	return duration, nil
 }
 
-func (s *ProxyService) ResolveSpiderProxy() (bool, string) {
+func (s *ProxyService) ResolveSpiderProxy() (bool, string, error) {
 	return repository.ResolveSpiderProxy()
 }
 
-func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string) {
+func (s *ProxyService) ResolveSourceProxy(sourceID string) (bool, string, error) {
 	return repository.ResolveSourceProxy(sourceID)
 }
 
-func (s *ProxyService) ResolveTMDBProxy() (bool, string) {
+func (s *ProxyService) ResolveTMDBProxy() (bool, string, error) {
 	return repository.ResolveTMDBProxy()
 }
 
-func (s *ProxyService) ResolveNotifyProxy() (bool, string) {
+func (s *ProxyService) ResolveNotifyProxy() (bool, string, error) {
 	return repository.ResolveNotifyProxy()
 }
 
-func (s *ProxyService) ResolveUpgradeProxy() (bool, string) {
+func (s *ProxyService) ResolveUpgradeProxy() (bool, string, error) {
 	return repository.ResolveUpgradeProxy()
 }
 
@@ -156,9 +162,13 @@ func proxyURLHasUser(raw string) bool {
 	return err == nil && u.User != nil
 }
 
-func sourceProxyURL(sourceID string) string {
-	if ok, proxy := repository.ResolveSourceProxy(sourceID); ok {
-		return proxy
+func sourceProxyURL(sourceID string) (string, error) {
+	ok, proxy, err := repository.ResolveSourceProxy(sourceID)
+	if err != nil {
+		return "", err
 	}
-	return ""
+	if ok {
+		return proxy, nil
+	}
+	return "", nil
 }

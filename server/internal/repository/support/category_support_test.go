@@ -4,6 +4,11 @@ import (
 	"sync"
 	"testing"
 
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
+
+	"server/internal/infra/db"
 	"server/internal/model"
 )
 
@@ -161,3 +166,45 @@ func TestResolveRootCategoryIDByCName_ConcurrencyDeadlockFree(t *testing.T) {
 	wg.Wait()
 	close(done)
 }
+
+func TestPickPrimarySourceForCategory_DisabledReturnsNil(t *testing.T) {
+	gdb, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	// 1. 无任何站点
+	if primary := PickPrimarySourceForCategory(); primary != nil {
+		t.Fatalf("expected nil when no sources, got %+v", primary)
+	}
+
+	// 2. 插入两个站点，但全部为停用 (state = false)
+	if err := gdb.Create(&model.FilmSource{Id: "src_1", Name: "站1", Uri: "http://src1.test", State: false, Sort: 0}).Error; err != nil {
+		t.Fatalf("create src_1 error: %v", err)
+	}
+	if err := gdb.Create(&model.FilmSource{Id: "src_2", Name: "站2", Uri: "http://src2.test", State: false, Sort: 1}).Error; err != nil {
+		t.Fatalf("create src_2 error: %v", err)
+	}
+
+	if primary := PickPrimarySourceForCategory(); primary != nil {
+		t.Fatalf("expected nil when all sources are disabled, got %+v", primary)
+	}
+
+	// 3. 启用站2
+	if err := gdb.Model(&model.FilmSource{}).Where("id = ?", "src_2").Update("state", true).Error; err != nil {
+		t.Fatalf("update error: %v", err)
+	}
+	primary := PickPrimarySourceForCategory()
+	if primary == nil || primary.Id != "src_2" {
+		t.Fatalf("expected src_2 as primary, got %+v", primary)
+	}
+}
+

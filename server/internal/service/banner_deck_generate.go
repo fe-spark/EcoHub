@@ -230,7 +230,10 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 
 	// 自动刮削只填充草稿预览，专属轮播使用，绝不改写片库
 	if req.AutoScrape {
-		tmdbCfg := repository.GetTMDBConfig()
+		tmdbCfg, err := repository.GetTMDBConfig()
+		if err != nil {
+			return err
+		}
 		if tmdbCfg.Enabled && strings.TrimSpace(tmdbCfg.ApiKey) != "" {
 			var missingIndices []int
 			for idx, b := range banners {
@@ -358,7 +361,10 @@ func (s *ManageService) OneClickGenerateDeck(req OneClickGenerateReq) (model.Ban
 		return nil, err
 	}
 	if finalBanners == nil {
-		finalBanners = s.GetBanners()
+		finalBanners, err = s.GetBanners()
+		if err != nil {
+			return nil, err
+		}
 	}
 	return finalBanners, nil
 }

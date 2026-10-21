@@ -28,11 +28,11 @@ type peerPageItem struct {
 	owner        int
 }
 
-// filterPeerPageDetails 丢掉无效条目。同一源站 vod_id 在一页里出现多次时保留最后一条。
+// filterPeerPageDetails 丢掉无效条目。过滤无片名或无有效播放链接的数据，同一源站 vod_id 在一页里出现多次时保留最后一条。
 func filterPeerPageDetails(list []model.MovieDetail) []model.MovieDetail {
 	lastAt := make(map[int64]int, len(list))
 	for i, detail := range list {
-		if detail.Id <= 0 || strings.TrimSpace(detail.Name) == "" {
+		if detail.Id <= 0 || strings.TrimSpace(detail.Name) == "" || !shared.HasPlayableLinks(detail) {
 			continue
 		}
 		lastAt[detail.Id] = i

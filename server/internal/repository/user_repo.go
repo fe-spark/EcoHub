@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"log"
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -22,7 +23,11 @@ func InitBuiltinAccounts() {
 }
 
 func ensureBuiltinUser(userName, password, email, nickName string, role int) {
-	user := GetUserByNameOrEmail(userName)
+	user, err := GetUserByNameOrEmail(userName)
+	if err != nil {
+		log.Println("ensureBuiltinUser Error:", err)
+		return
+	}
 	if user != nil {
 		updates := map[string]any{}
 		if user.Role != role {
@@ -51,27 +56,35 @@ func ensureBuiltinUser(userName, password, email, nickName string, role int) {
 }
 
 // GetUserByNameOrEmail 查询 username || email 对应的账户信息
-func GetUserByNameOrEmail(userName string) *model.User {
+func GetUserByNameOrEmail(userName string) (*model.User, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
 	var u model.User
 	err := db.Mdb.Where("user_name = ? OR email = ?", userName, userName).Limit(1).Find(&u).Error
 	if err != nil {
-		log.Println("GetUserByNameOrEmail Error:", err)
-		return nil
+		return nil, err
 	}
 	if u.ID == 0 {
-		return nil
+		return nil, nil
 	}
-	return &u
+	return &u, nil
 }
 
 // GetUserById 通过id获取对应的用户信息
-func GetUserById(id uint) model.User {
+func GetUserById(id uint) (model.User, error) {
 	var user = model.User{Model: gorm.Model{ID: id}}
 	if db.Mdb == nil {
-		return user
+		return user, errors.New("数据库未连接")
 	}
-	db.Mdb.First(&user)
-	return user
+	err := db.Mdb.First(&user).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return model.User{}, nil
+	}
+	if err != nil {
+		return model.User{}, err
+	}
+	return user, nil
 }
 
 // UpdateUserInfo 更新用户信息

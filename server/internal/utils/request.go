@@ -35,7 +35,12 @@ var sharedTransport = &http.Transport{
 }
 
 // 代理 Transport 缓存池 (proxyURL -> *http.Transport)，避免高并发下频繁建连
-var proxyTransports sync.Map
+var (
+	proxyTransportsMu sync.RWMutex
+	proxyTransports   = map[string]*http.Transport{}
+)
+
+const maxProxyTransports = 16
 
 // GetOrCreateProxyTransport 根据代理地址复用或创建长连接池。
 // http/https 走 CONNECT；socks5/socks5h 走 SOCKS5 拨号。地址无效时请求失败，避免静默改回直连。
@@ -44,11 +49,13 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 	if proxyStr == "" {
 		return sharedTransport
 	}
-	if val, ok := proxyTransports.Load(proxyStr); ok {
-		if t, ok := val.(*http.Transport); ok {
-			return t
-		}
+	proxyTransportsMu.RLock()
+	if t, ok := proxyTransports[proxyStr]; ok {
+		proxyTransportsMu.RUnlock()
+		return t
 	}
+	proxyTransportsMu.RUnlock()
+
 	t, err := newProxyTransport(proxyStr)
 	if err != nil {
 		log.Printf("创建代理传输失败: %v", err)
@@ -58,8 +65,24 @@ func GetOrCreateProxyTransport(proxyStr string) *http.Transport {
 			},
 		}
 	}
-	actual, _ := proxyTransports.LoadOrStore(proxyStr, t)
-	return actual.(*http.Transport)
+
+	proxyTransportsMu.Lock()
+	defer proxyTransportsMu.Unlock()
+	if existing, ok := proxyTransports[proxyStr]; ok {
+		if t != existing {
+			t.CloseIdleConnections()
+		}
+		return existing
+	}
+	if len(proxyTransports) >= maxProxyTransports {
+		for k, old := range proxyTransports {
+			old.CloseIdleConnections()
+			delete(proxyTransports, k)
+			break
+		}
+	}
+	proxyTransports[proxyStr] = t
+	return t
 }
 
 func normalizeProxyURL(proxyStr string) string {

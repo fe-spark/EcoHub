@@ -161,7 +161,10 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 
 	// 2. 执行导出
-	backup := BackupSvc.ExportConfig()
+	backup, err := BackupSvc.ExportConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// 3. 校验导出结果
 	if backup.Version != model.ConfigBackupVersion {
@@ -239,12 +242,18 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 	}
 
 	// 验证落库
-	banners := repository.GetBanners()
+	banners, err := repository.GetBanners()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(banners) != 1 || banners[0].Name != "导入的轮播" {
 		t.Fatalf("imported banners mismatch: %+v", banners)
 	}
 
-	bannerCfg := repository.GetBannerConfig()
+	bannerCfg, err := repository.GetBannerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if bannerCfg.Strategy != repository.BannerStrategyScore || len(bannerCfg.Quotas) != 1 || bannerCfg.Quotas[0].CategoryID != 3 {
 		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
 	}

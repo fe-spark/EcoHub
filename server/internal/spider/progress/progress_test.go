@@ -464,4 +464,3 @@ func TestSubscribeCategory_Broadcast(t *testing.T) {
 		t.Fatal("expected test-src-1 to not be syncing after ready")
 	}
 }
-

@@ -37,7 +37,7 @@ func (i *IndexService) GetCategoryInfo() map[string]any {
 }
 
 // GetNavCategory 获取导航分类信息 (按当前生效站点隔离)
-func (i *IndexService) GetNavCategory(sourceIdOpt ...string) []*model.Category {
+func (i *IndexService) GetNavCategory(sourceIdOpt ...string) ([]*model.Category, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
@@ -47,7 +47,10 @@ func (i *IndexService) GetNavCategory(sourceIdOpt ...string) []*model.Category {
 			sourceId = active.Id
 		}
 	}
-	tree := repository.GetActiveCategoryTree(sourceId)
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, err
+	}
 	cl := make([]*model.Category, 0)
 	for _, c := range tree.Children {
 		if c.Show {
@@ -63,21 +66,7 @@ func (i *IndexService) GetNavCategory(sourceIdOpt ...string) []*model.Category {
 			})
 		}
 	}
-	return cl
-}
-
-// GetFilmCategory 根据Pid或Cid获取指定的分页数据
-func (i *IndexService) GetFilmCategory(id int64, idType string, page *dto.Page) []model.MovieBasicInfo {
-	var basicList []model.MovieBasicInfo
-	version := filmsnapshot.GetActiveReadModelVersion()
-	page = normalizeIndexPage(page)
-	switch idType {
-	case "pid":
-		basicList = filmsnapshot.GetSnapshotMovieListByCategoryPage(version, "pid", id, page)
-	case "cid":
-		basicList = filmsnapshot.GetSnapshotMovieListByCategoryPage(version, "cid", id, page)
-	}
-	return basicList
+	return cl, nil
 }
 
 // GetPidCategory 获取pid对应的分类信息
@@ -94,24 +83,6 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 	if sourceId != "" {
 		return repository.LookupRootSourceType(sourceId, pid)
 	}
-	pid = repository.ResolveCategoryID(pid)
-
-	tree := repository.GetCategoryTree()
-	for _, t := range tree.Children {
-		if t.Id == pid {
-			return &model.CategoryTree{
-				Id:        t.Id,
-				Pid:       t.Pid,
-				Name:      t.Name,
-				Alias:     t.Alias,
-				Show:      t.Show,
-				Sort:      t.Sort,
-				CreatedAt: t.CreatedAt,
-				UpdatedAt: t.UpdatedAt,
-				Children:  t.Children,
-			}
-		}
-	}
 	return nil
 }
 
@@ -122,6 +93,9 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 		if active := repository.GetActiveCollectSource(); active != nil {
 			sourceId = active.Id
 		}
+	}
+	if sourceId == "" {
+		return map[string]any{"tags": map[string]any{}, "titles": map[string]any{}}
 	}
 	return filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), st.Pid, sourceId)
 }
@@ -182,22 +156,43 @@ func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ..
 		topMovies    []model.MovieBasicInfo
 		recentMovies []model.MovieBasicInfo
 		wg           sync.WaitGroup
+		errMu        sync.Mutex
+		pageErr      error
 	)
+	setPageErr := func(err error) {
+		if err == nil {
+			return
+		}
+		errMu.Lock()
+		if pageErr == nil {
+			pageErr = err
+		}
+		errMu.Unlock()
+	}
 
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		newsMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 0, pid, limit)
+		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 0, pid, limit)
+		setPageErr(err)
+		newsMovies = list
 	}()
 	go func() {
 		defer wg.Done()
-		topMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 1, pid, limit)
+		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 1, pid, limit)
+		setPageErr(err)
+		topMovies = list
 	}()
 	go func() {
 		defer wg.Done()
-		recentMovies = filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 2, pid, limit)
+		list, err := filmsnapshot.GetSnapshotTopMoviesBySortFastWithSource(version, sourceId, 2, pid, limit)
+		setPageErr(err)
+		recentMovies = list
 	}()
 	wg.Wait()
+	if pageErr != nil {
+		return nil, pageErr
+	}
 
 	if newsMovies == nil {
 		newsMovies = []model.MovieBasicInfo{}

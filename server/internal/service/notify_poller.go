@@ -33,12 +33,20 @@ var (
 
 // EnsureBotPoller 根据当前通知配置与代理配置启停 Telegram getUpdates 轮询协程
 func (s *NotifyService) EnsureBotPoller() {
-	cfg := repository.GetNotifyConfig()
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败，保持轮询状态: %v", err)
+		return
+	}
 	token := ""
 	if cfg.Enabled {
 		token = strings.TrimSpace(cfg.BotToken)
 	}
-	_, proxyURL := repository.ResolveNotifyProxy()
+	_, proxyURL, err := repository.ResolveNotifyProxy()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知代理失败，保持轮询状态: %v", err)
+		return
+	}
 	ensurePollerState(token, strings.TrimSpace(proxyURL))
 }
 
@@ -228,7 +236,12 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 			return
 		}
 		chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
-		markup := buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
+		markup, err := buildCategoryKeyboard(sess.Categories, len(sess.AllFilms))
+		if err != nil {
+			log.Printf("[Notify] 读取站点配置失败: %v", err)
+			_ = answerTelegramCallback(ctx, token, cb.ID, "返回失败", false)
+			return
+		}
 		if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, sess.OverviewHTML, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 			log.Printf("[Notify] 返回汇总失败: %v", err)
 			_ = answerTelegramCallback(ctx, token, cb.ID, "返回失败", false)
@@ -243,7 +256,12 @@ func handleNotifyCallback(parentCtx context.Context, token string, cb *tgCallbac
 		return
 	}
 	chatID := strconv.FormatInt(cb.Message.Chat.ID, 10)
-	text, totalPages := formatFilmListPageHTML(sess, catIdx, page)
+	text, totalPages, err := formatFilmListPageHTML(sess, catIdx, page)
+	if err != nil {
+		log.Printf("[Notify] 读取站点配置失败: %v", err)
+		_ = answerTelegramCallback(ctx, token, cb.ID, "翻页失败", false)
+		return
+	}
 	markup := buildPagedKeyboard(sess.BatchID, catIdx, page, totalPages)
 	if err := editTelegramMessage(ctx, token, chatID, cb.Message.MessageID, text, markup); err != nil && !strings.Contains(err.Error(), "message is not modified") {
 		log.Printf("[Notify] 翻页更新失败: %v", err)

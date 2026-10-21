@@ -9,7 +9,7 @@ import styles from "./inventory-stats.module.less";
 
 interface LibraryInventory {
   films: number;
-  playable: number;
+  multiSource: number;
   categories: number;
   failures: number;
 }
@@ -20,6 +20,7 @@ interface SourceInventory {
   enabled: boolean;
   isPrimary: boolean;
   films: number;
+  multiSource?: number;
   categories: number;
   failures: number;
 }
@@ -31,9 +32,9 @@ interface InventoryStatsData {
 
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
-  { key: "playable", label: "可播放影片", hint: "主站有播放地址" },
+  { key: "multiSource", label: "多源聚合", hint: "多源覆盖档案" },
   { key: "categories", label: "展示分类", hint: "共享展示树" },
-  { key: "failures", label: "失败记录", hint: "全部来源" },
+  { key: "failures", label: "采集异常", hint: "全部来源" },
 ];
 
 function formatCount(value: number | undefined) {
@@ -53,7 +54,11 @@ function placePrimaryFirst(sources: SourceInventory[], id: string) {
   return [chosen, ...next];
 }
 
-export default function InventoryStats() {
+interface InventoryStatsProps {
+  primaryId?: string;
+}
+
+export default function InventoryStats({ primaryId }: InventoryStatsProps = {}) {
   const [library, setLibrary] = useState<LibraryInventory | null>(null);
   const [libraryLoading, setLibraryLoading] = useState(true);
   const [libraryFailed, setLibraryFailed] = useState(false);
@@ -61,9 +66,18 @@ export default function InventoryStats() {
   const [sourcesOpen, setSourcesOpen] = useState(false);
   const [sourcesLoading, setSourcesLoading] = useState(false);
   const [sourcesFailed, setSourcesFailed] = useState(false);
-  const primaryIdRef = useRef("");
+  const primaryIdRef = useRef(primaryId || "");
   const sourcesLoadedRef = useRef(false);
   const [libraryVersion, setLibraryVersion] = useState(0);
+
+  useEffect(() => {
+    if (primaryId && primaryId !== primaryIdRef.current) {
+      primaryIdRef.current = primaryId;
+      setSources((prev) => (prev ? placePrimaryFirst(prev, primaryId) : prev));
+      sourcesLoadedRef.current = false;
+      setLibraryVersion((v) => v + 1);
+    }
+  }, [primaryId]);
 
   useEffect(() => {
     const onPrimary = (event: Event) => {

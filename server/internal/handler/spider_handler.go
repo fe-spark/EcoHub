@@ -18,13 +18,19 @@ type SpiderHandler struct{}
 
 var SpiderHd = new(SpiderHandler)
 
-// StopTask 停止单个采集任务（仅停止任务，不禁用采集站）。
+// StopTask 停止采集任务（支持单站 id 或批量 ids，不禁用采集站）。
 func (h *SpiderHandler) StopTask(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Id  string   `json:"id"`
+		Ids []string `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
+		return
+	}
+	if len(req.Ids) > 0 {
+		service.SpiderSvc.StopTasks(req.Ids)
+		dto.SuccessOnlyMsg("已发送停止指令，采集任务正在停止", c)
 		return
 	}
 	if strings.TrimSpace(req.Id) == "" {
@@ -146,10 +152,4 @@ func (h *SpiderHandler) UpdateSpider(c *gin.Context) {
 	}
 	service.SpiderSvc.CollectFilms(req.Ids)
 	dto.SuccessOnlyMsg("更新任务已开启", c)
-}
-
-// StopAllTasks 一键终止所有采集中任务
-func (h *SpiderHandler) StopAllTasks(c *gin.Context) {
-	service.SpiderSvc.StopAllTasks()
-	dto.SuccessOnlyMsg("已发送终止指令，所有采集任务正在停止", c)
 }

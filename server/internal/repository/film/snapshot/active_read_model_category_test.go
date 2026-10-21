@@ -247,7 +247,10 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 		t.Fatalf("set version: %v", err)
 	}
 
-	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 2, 14, 0)
+	got, err := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 2, 14, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].Id != 501 {
 		t.Fatalf("latest drama list = %+v, want mid 501", got)
 	}
@@ -302,7 +305,10 @@ func TestCategoryList_KeepsOtherSourceCategoryOut(t *testing.T) {
 		t.Fatalf("set version: %v", err)
 	}
 
-	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 4, 14, 0)
+	got, err := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 4, 14, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].Id != 2 {
 		t.Fatalf("source type list = %+v, want only mid 2", got)
 	}
@@ -332,7 +338,10 @@ func TestSourceMembership_UsesPrimaryKeyProbe(t *testing.T) {
 		Update("category_key", "source:source_master:1").Error; err != nil {
 		t.Fatalf("set category key: %v", err)
 	}
-	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "source_master", "pid", 1, 10, 0)
+	got, err := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "source_master", "pid", 1, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0].Id != 11 {
 		t.Fatalf("source list = %+v, want only mid 11", got)
 	}
@@ -389,11 +398,17 @@ func TestCategoryList_LeafRootStoredOnCategoryKey(t *testing.T) {
 		t.Fatalf("set version: %v", err)
 	}
 
-	got := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 21, 14, 0)
+	got, err := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 21, 14, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || got[0].Id != 21 || got[1].Id != 22 {
 		t.Fatalf("pid 21 list = %+v, want mids 21 then 22", got)
 	}
-	movies := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 1, 14, 0)
+	movies, err := GetSnapshotMovieListByCategoryWithSourceReadModel("vtest", "src_new", "pid", 1, 14, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(movies) != 1 || movies[0].Id != 24 {
 		t.Fatalf("pid 1 list = %+v, want only mid 24 (must not include independent leaf root 21)", movies)
 	}

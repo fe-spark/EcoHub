@@ -139,5 +139,5 @@ func findListPage(query *gorm.DB, order string, offset, limit int) ([]model.Film
 	if len(mids) == 0 {
 		return []model.FilmListSnapshot{}, nil
 	}
-	return GetSnapshotsByMidsOrdered("", mids), nil
+	return GetSnapshotsByMidsOrdered("", mids)
 }

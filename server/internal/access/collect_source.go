@@ -27,7 +27,7 @@ var (
 	lookupCollectSourceExists = func(id string) bool {
 		return repository.FindCollectSourceById(id) != nil
 	}
-	listCollectSources = func() []model.FilmSource {
+	listCollectSources = func() ([]model.FilmSource, error) {
 		return repository.GetCollectSourceList()
 	}
 )
@@ -127,7 +127,11 @@ func QuerySourceCalls(day string) ([]SourceCallRow, error) {
 
 	primary := activeCollectSourceID()
 	sourceMap := map[string]model.FilmSource{}
-	for _, source := range listCollectSources() {
+	sources, err := listCollectSources()
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range sources {
 		id := strings.TrimSpace(source.Id)
 		if id != "" {
 			sourceMap[id] = source

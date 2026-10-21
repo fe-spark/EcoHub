@@ -6,6 +6,7 @@ import type { CollectProgress, FilmSource } from "./types";
 export function useCollectProgressStream(
   setSiteList: Dispatch<SetStateAction<FilmSource[]>>,
   resetTimersRef: MutableRefObject<Map<string, NodeJS.Timeout>>,
+  onTerminalStatus?: (id: string, status: string) => void,
 ) {
   return useCallback((progressList: CollectProgress[]) => {
     if (!Array.isArray(progressList)) return;
@@ -14,6 +15,7 @@ export function useCollectProgressStream(
     for (const p of progressList) {
       const id = String(p.id);
       if (isTerminalCollectStatus(p.status)) {
+        onTerminalStatus?.(id, p.status);
         if (resetTimersRef.current.has(id)) continue;
         const timer = setTimeout(() => {
           resetTimersRef.current.delete(id);

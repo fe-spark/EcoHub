@@ -54,6 +54,7 @@ func TestProvideService_GetTVBoxConfig_PrimarySites(t *testing.T) {
 }
 
 func TestProvideService_GetAppSourceConfig(t *testing.T) {
+	setupFilmServiceTestDB(t)
 	res, err := ProvideSvc.GetAppSourceConfig("https://movie.example.com/")
 	if err != nil {
 		t.Fatalf("GetAppSourceConfig 失败: %v", err)

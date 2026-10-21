@@ -39,11 +39,6 @@ const (
 	failureLogStep = 10
 )
 
-// shouldWrapUpAfterFetchAbort 连续失败停抓后，已有成功入库且允许发布时进入收尾，而不是立刻 failed/stopped。
-func shouldWrapUpAfterFetchAbort(success int, skipPublish bool) bool {
-	return success > 0 && !skipPublish
-}
-
 type pageStats struct {
 	latestPage int
 	success    int
@@ -278,7 +273,11 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 						progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 							progress.StampPageRunning(cur, pg)
 						})
-						return GetFilmDetailWithRetry(ctx, s, buildPageRequest(s, h, pg))
+						req, reqErr := buildPageRequest(s, h, pg)
+						if reqErr != nil {
+							return nil, reqErr
+						}
+						return GetFilmDetailWithRetry(ctx, s, req)
 					}()
 					if err == nil && len(list) == 0 {
 						err = errors.New("response list is empty")
@@ -341,10 +340,6 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		log.Printf("[Spider] 站点 %s 并发采集任务已中断，worker 已全部退出\n", s.Name)
 	}
 	if stopErr != nil {
-		skipPublish := deps.SkipPublishOnError(*s, h)
-		if shouldWrapUpAfterFetchAbort(stats.success, skipPublish) {
-			return true, nil
-		}
 		progress.UpdateRun(ctx, s.Id, func(cur *model.CollectProgress) {
 			if !progress.IsTerminalStatus(cur.Status) && cur.Status != progress.StatusStopping {
 				cur.Status = progress.StatusFailed
@@ -353,7 +348,7 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 		return stats.success > 0, stopErr
 	}
 	if ctx.Err() != nil {
-		return stats.success > 0, nil
+		return stats.success > 0, ctx.Err()
 	}
 	return stats.success > 0, nil
 }

@@ -112,5 +112,3 @@ func TestCalculateTitleSimilarity(t *testing.T) {
 		t.Errorf("expected similarity < 0.60 for series vs movie, got %.3f", simTV)
 	}
 }
-
-

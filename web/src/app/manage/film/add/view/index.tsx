@@ -1,58 +1,29 @@
 "use client";
 
-import React, { useState, useEffect, useRef, Suspense, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef, Suspense, useCallback } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import {
-  Form,
-  Input,
-  Select,
-  Button,
-  Upload,
-  InputNumber,
-  Space,
-  Spin,
-  Card,
-  Row,
-  Col,
-  Tag,
-  Radio,
-  Image as AntImage,
-  Typography,
-} from "antd";
-import {
-  UploadOutlined,
-  InfoCircleOutlined,
-  UserOutlined,
-  GlobalOutlined,
-  DatabaseOutlined,
-  ContainerOutlined,
-  PictureOutlined,
-  CompassOutlined,
-  UndoOutlined,
-} from "@ant-design/icons";
+import { Form, Space, Spin } from "antd";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
-import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { isFormValuesEqual } from "@/lib/deep-equal";
 import ImagePicker from "@/app/manage/components/image-picker";
 import TmdbModal from "../../components/tmdb-modal";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
-import {
-  IMAGE_UPLOAD_ACCEPT,
-  isAllowedImageFile,
-} from "@/lib/imageUpload";
+import { isAllowedImageFile } from "@/lib/imageUpload";
+import FilmBasicCard from "./film-basic-card";
+import FilmMetaCards from "./film-meta-cards";
+import { formatCategoryNodes, flattenCategoryNodes, resolveCategoryFields } from "./film-add-utils";
 import styles from "./index.module.less";
-
-const { TextArea } = Input;
-const { Text } = Typography;
 
 function FilmAddForm() {
   const [form] = Form.useForm();
   const tmdbEnabled = useTmdbEnabled();
-  const [categories, setCategories] = useState<any[]>([]);
+  const [sources, setSources] = useState<{ id: string; name: string; state?: boolean }[]>([]);
+  const [categoryTreeNodes, setCategoryTreeNodes] = useState<any[]>([]);
+  const [categoryLoading, setCategoryLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -62,6 +33,8 @@ function FilmAddForm() {
   const router = useRouter();
   const id = searchParams.get("id");
   const readOnly = Boolean(id) && searchParams.get("readonly") === "1";
+  const urlSourceId = searchParams.get("sourceId") || "";
+  const urlCid = searchParams.get("cid") ? Number(searchParams.get("cid")) : undefined;
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
@@ -87,94 +60,123 @@ function FilmAddForm() {
       return;
     }
     const current = allValues ?? form.getFieldsValue();
-    const equal = isFormValuesEqual(current, baselineRef.current);
-    setIsDirty(!equal);
+    setIsDirty(!isFormValuesEqual(current, baselineRef.current));
   }, [form]);
 
-  const populateForm = useCallback((filmData: any) => {
-    if (!filmData) return;
-    const filmDescriptor = filmData.descriptor || {};
+  const categoryTreeData = useMemo(() => formatCategoryNodes(categoryTreeNodes), [categoryTreeNodes]);
+  const allCategoryList = useMemo(() => flattenCategoryNodes(categoryTreeNodes), [categoryTreeNodes]);
+  const allCategoryListRef = useRef<any[]>([]);
+  allCategoryListRef.current = allCategoryList;
 
-    const isCustom = filmData.isCustomPicture === true;
-    const displayPic = String(filmData.picture || "").trim();
-    const savedCustom = String(filmData.customPicture || "").trim();
-    const customPic = isCustom ? savedCustom || displayPic : displayPic;
-    const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
+  const loadCategoryTree = useCallback(async (targetSourceId: string) => {
+    setCategoryLoading(true);
+    try {
+      const resp = await ApiGet("/manage/film/search/options", {
+        sourceId: targetSourceId || undefined,
+      });
+      if (resp.code === 0 && resp.data) {
+        if (Array.isArray(resp.data.sources)) {
+          setSources(resp.data.sources);
+        }
+        const treeNodes = Array.isArray(resp.data.categoryTree) ? resp.data.categoryTree : [];
+        setCategoryTreeNodes(treeNodes);
+        const flatList = Array.isArray(resp.data.class) ? resp.data.class : flattenCategoryNodes(treeNodes);
+        allCategoryListRef.current = flatList;
+        return {
+          sources: (resp.data.sources || []) as { id: string; name: string; state?: boolean }[],
+          treeNodes,
+          allCategories: flatList,
+          defaultSourceId: String(resp.data.defaultSourceId || ""),
+          currentSourceId: String(resp.data.currentSourceId || targetSourceId || ""),
+        };
+      }
+    } catch {
+      message.error("加载采集站分类失败");
+    } finally {
+      setCategoryLoading(false);
+    }
+    return null;
+  }, [message]);
 
-    form.setFieldsValue({
-      id: filmData.id,
-      cid: filmData.cid,
-      pid: filmData.pid,
-      cName: filmData.cName || "",
-      name: filmData.name,
-      followPosterSource: !isCustom,
-      picture: customPic,
-      pictureSlide: slidePic,
-      subTitle: filmDescriptor.subTitle || "",
-      initial: filmDescriptor.initial || "",
-      classTag: filmDescriptor.classTag || "",
-      director: filmDescriptor.director || "",
-      actor: filmDescriptor.actor || "",
-      writer: filmDescriptor.writer || "",
-      remarks: filmDescriptor.remarks || "",
-      releaseDate: filmDescriptor.releaseDate || "",
-      area: filmDescriptor.area || "",
-      lang: filmDescriptor.language || "",
-      year: filmDescriptor.year || "",
-      state: filmDescriptor.state || "",
-      dbId: filmDescriptor.dbId ?? 0,
-      dbScore: filmDescriptor.dbScore || "",
-      hits: filmDescriptor.hits ?? 0,
-      content: filmDescriptor.content || "",
-    });
-    baselineRef.current = form.getFieldsValue();
-    setIsDirty(false);
-  }, [form]);
+  const populateForm = useCallback(
+    (filmData: any, ownSourceId?: string, categories?: any[]) => {
+      if (!filmData) return;
+      const desc = filmData.descriptor || {};
+      const isCustom = filmData.isCustomPicture === true;
+      const displayPic = String(filmData.picture || "").trim();
+      const savedCustom = String(filmData.customPicture || "").trim();
+      const customPic = isCustom ? savedCustom || displayPic : displayPic;
+      const slidePic = filmData.customPictureSlide || filmData.pictureSlide || "";
+      const sourceId =
+        ownSourceId ||
+        filmData.sourceId ||
+        filmData.firstSourceId ||
+        (filmData.list && filmData.list[0]?.id) ||
+        "";
+      const cat = resolveCategoryFields(filmData, categories || allCategoryListRef.current);
+
+      form.setFieldsValue({
+        id: filmData.id,
+        sourceId,
+        cid: cat.cid,
+        pid: cat.pid,
+        cName: cat.cName,
+        name: filmData.name,
+        followPosterSource: !isCustom,
+        picture: customPic,
+        pictureSlide: slidePic,
+        subTitle: desc.subTitle || "",
+        initial: desc.initial || "",
+        classTag: desc.classTag || "",
+        director: desc.director || "",
+        actor: desc.actor || "",
+        writer: desc.writer || "",
+        remarks: desc.remarks || "",
+        releaseDate: desc.releaseDate || "",
+        area: desc.area || "",
+        lang: desc.language || "",
+        year: desc.year || "",
+        state: desc.state || "",
+        dbId: desc.dbId ?? 0,
+        dbScore: desc.dbScore || "",
+        hits: desc.hits ?? 0,
+        content: desc.content || "",
+      });
+      baselineRef.current = form.getFieldsValue();
+      setIsDirty(false);
+    },
+    [form],
+  );
 
   const handleTmdbPrefill = (data: any, fields?: string[]) => {
-    // 记录填充前的表单快照（优先保留最初未被 TMDB 覆盖的表单状态，避免连续预填后丢失原数据）
-    const currentValues = form.getFieldsValue();
-    setTmdbSnapshot((prev) => prev || currentValues);
-
+    setTmdbSnapshot((prev) => prev || form.getFieldsValue());
     const shouldFill = (name: string, ...aliases: string[]) => {
       if (!fields || fields.length === 0) return true;
       return [name, ...aliases].some((key) => fields.includes(key));
     };
 
     const updates: Record<string, any> = {};
-    if (!form.getFieldValue("name") && data.name) {
-      updates.name = data.name;
-    }
-    if (shouldFill("poster", "picture") && data.picture) {
-      updates.picture = data.picture;
-      updates.followPosterSource = false;
-    }
-    if (shouldFill("backdrop", "pictureSlide") && data.pictureSlide) {
-      updates.pictureSlide = data.pictureSlide;
-    }
-    if (shouldFill("overview", "content") && data.content) {
-      updates.content = data.content;
-    }
-    if (shouldFill("subTitle") && data.subTitle) {
-      updates.subTitle = data.subTitle;
-    }
-    if (shouldFill("actor") && data.actor) {
-      updates.actor = data.actor;
-    }
-    if (shouldFill("director") && data.director) {
-      updates.director = data.director;
-    }
-    if (shouldFill("year", "releaseDate")) {
-      if (data.year) updates.year = data.year;
-      if (data.releaseDate) updates.releaseDate = data.releaseDate;
-    }
-    if (shouldFill("score") && data.dbScore) {
-      updates.dbScore = data.dbScore;
-    }
-    if (shouldFill("tag") && data.classTag) {
-      updates.classTag = data.classTag;
-    }
+    if (!form.getFieldValue("name") && data.name) updates.name = data.name;
 
+    const mapping: Array<[string, any, string[]?]> = [
+      ["picture", data.picture, ["poster"]],
+      ["pictureSlide", data.pictureSlide, ["backdrop"]],
+      ["subTitle", data.subTitle],
+      ["director", data.director],
+      ["actor", data.actor],
+      ["writer", data.writer],
+      ["releaseDate", data.releaseDate],
+      ["year", data.year],
+      ["area", data.area],
+      ["lang", data.language, ["language"]],
+      ["content", data.content, ["blurb"]],
+      ["classTag", data.classTag],
+    ];
+    for (const [key, val, aliases] of mapping) {
+      if (val && shouldFill(key, ...(aliases || []))) {
+        updates[key] = val;
+      }
+    }
     if (Object.keys(updates).length > 0) {
       form.setFieldsValue(updates);
       checkDirty();
@@ -186,7 +188,7 @@ function FilmAddForm() {
     form.setFieldsValue(tmdbSnapshot);
     setTmdbSnapshot(null);
     checkDirty();
-    message.info("已撤销 TMDB 填充，表单已恢复填充前状态");
+    message.info("已撤销 TMDB 填充");
   };
 
   const handleResetToOriginal = () => {
@@ -207,44 +209,80 @@ function FilmAddForm() {
   };
 
   useEffect(() => {
-    ApiGet("/manage/film/class/tree").then((resp: any) => {
-      if (resp.code === 0) {
-        let list: any[] = [];
-        resp.data.children?.forEach((parent: any) => {
-          if (parent.children && parent.children.length > 0) {
-            list = [...list, ...parent.children];
-          }
-        });
-        setCategories(list);
-      }
-    });
-
+    let cancelled = false;
     if (!id) {
-      baselineRef.current = form.getFieldsValue();
-      setIsDirty(false);
+      loadCategoryTree(urlSourceId).then((data) => {
+        if (cancelled) return;
+        const resolvedSourceId =
+          urlSourceId || data?.currentSourceId || data?.defaultSourceId || data?.sources?.[0]?.id || "";
+        const initialValues: Record<string, any> = {
+          sourceId: resolvedSourceId,
+          followPosterSource: false,
+        };
+        if (urlCid && data?.allCategories) {
+          const matched = data.allCategories.find((c: any) => Number(c.id) === urlCid);
+          if (matched) {
+            initialValues.cid = Number(matched.id);
+            initialValues.pid = Number(matched.pid <= 0 ? matched.id : matched.pid);
+            initialValues.cName = matched.name;
+          }
+        }
+        form.setFieldsValue(initialValues);
+        baselineRef.current = form.getFieldsValue();
+        setIsDirty(false);
+      });
     } else {
       setFetching(true);
       ApiGet(`/films/play-info`, { id, stored: 1 })
-        .then((resp: any) => {
+        .then(async (resp: any) => {
+          if (cancelled) return;
           if (resp.code === 0 && resp.data?.detail) {
             const filmData = resp.data.detail;
             loadedDetailRef.current = filmData;
             setLoadedDetail(filmData);
-            populateForm(filmData);
+            const ownSourceId =
+              filmData.sourceId ||
+              filmData.firstSourceId ||
+              (filmData.list && filmData.list[0]?.id) ||
+              "";
+            const catData = await loadCategoryTree(ownSourceId);
+            if (cancelled) return;
+            populateForm(filmData, ownSourceId, catData?.allCategories);
           } else {
             message.error("获取影片详情失败");
           }
         })
-        .finally(() => setFetching(false));
+        .finally(() => {
+          if (!cancelled) setFetching(false);
+        });
     }
-  }, [id, form, message, populateForm]);
+    return () => {
+      cancelled = true;
+    };
+  }, [id, urlSourceId, urlCid, form, loadCategoryTree, message, populateForm]);
 
-  const handleClassChange = (value: number) => {
-    const selected = categories.find((c) => c.id === value);
+  const handleSourceChange = async (newSourceId: string) => {
+    form.setFieldsValue({
+      sourceId: newSourceId,
+      cid: undefined,
+      pid: 0,
+      cName: "",
+    });
+    checkDirty();
+    await loadCategoryTree(newSourceId);
+  };
+
+  const handleClassChange = (value?: number) => {
+    if (!value) {
+      form.setFieldsValue({ cid: undefined, pid: 0, cName: "" });
+      checkDirty();
+      return;
+    }
+    const selected = allCategoryList.find((c) => c.id === value);
     if (selected) {
       form.setFieldsValue({
         cid: selected.id,
-        pid: selected.pid,
+        pid: selected.pid <= 0 ? selected.id : selected.pid,
         cName: selected.name,
       });
       checkDirty();
@@ -261,10 +299,10 @@ function FilmAddForm() {
       const customSlide = isCustom
         ? (values.pictureSlide || loadedDetailRef.current?.customPictureSlide || "").trim()
         : "";
-      // 明确剔除剧集播放资源字段，不向后端传递 playLink，绝不更新剧集数据
       const { playLink, playForm, ...restValues } = values;
-      const payload = {
+      const payload: Record<string, any> = {
         ...restValues,
+        sourceId: values.sourceId || "",
         language: restValues.lang || restValues.language || "",
         id: id ? Number(id) : 0,
         dbId: Number(restValues.dbId) || 0,
@@ -274,6 +312,10 @@ function FilmAddForm() {
         picture: isCustom ? (sourcePic || customPic) : "",
         customPictureSlide: customSlide,
       };
+      if (!id) {
+        payload.playLink = (playLink || "").trim();
+        payload.playForm = playForm || "";
+      }
 
       const resp = await ApiPost("/manage/film/add", payload);
       if (resp.code === 0) {
@@ -307,32 +349,27 @@ function FilmAddForm() {
     }
     const formData = new FormData();
     formData.append("file", file);
-
     try {
       const resp = await ApiPost("/manage/file/upload", formData);
       if (resp.code === 0) {
         message.success(resp.msg);
-        const fullUrl =
-          typeof window !== "undefined" && String(resp.data).startsWith("/")
-            ? `${window.location.origin}${resp.data}`
-            : resp.data;
-        form.setFieldValue("picture", fullUrl);
-        onSuccess(fullUrl);
+        form.setFieldValue("picture", resp.data);
+        onSuccess?.(resp.data);
         checkDirty();
       } else {
         message.error(resp.msg);
-        onError(resp.msg);
+        onError?.(new Error(resp.msg));
       }
     } catch (err: any) {
-      // 拦截器已统一提示，避免重复弹窗
-      onError(err);
+      message.error(err.message || "上传图片失败");
+      onError?.(err);
     }
   };
 
   if (fetching) {
     return (
       <div className={styles.loadingContainer}>
-        <Spin size="large" description="正在加载影片数据..." />
+        <Spin size="large" />
       </div>
     );
   }
@@ -356,348 +393,38 @@ function FilmAddForm() {
           onValuesChange={(_changed, allValues) => checkDirty(allValues)}
           disabled={readOnly}
           className={`${styles.form} ${styles.formCompact}`}
-        initialValues={{
-          dbId: 0,
-          hits: 0,
-          followPosterSource: Boolean(id),
-        }}
-        requiredMark="optional"
-      >
-        <Space orientation="vertical" size={16} className={styles.formSections}>
-          <Card
-            title={
-              <Space>
-                <InfoCircleOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                基础信息
-              </Space>
-            }
-            extra={readOnly ? null : (
-              <Space>
-                {tmdbSnapshot && (
-                  <Button
-                    icon={<UndoOutlined />}
-                    onClick={handleUndoTmdb}
-                  >
-                    撤销填入
-                  </Button>
-                )}
-                {tmdbEnabled ? (
-                  <Button
-                    icon={<CompassOutlined />}
-                    style={{ color: "#722ed1", borderColor: "#722ed1" }}
-                    onClick={() => setTmdbModalOpen(true)}
-                    disabled={!canWrite}
-                  >
-                    刮削
-                  </Button>
-                ) : null}
-              </Space>
-            )}
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <div className={styles.basicInfoLayout}>
-              {/* 左侧：封面图展示与快捷操作 */}
-              <div className={styles.posterColumn}>
-                <div className={styles.posterWrapper}>
-                  <AntImage
-                    src={watchedPicture || loadedDetail?.picture || FALLBACK_IMG}
-                    fallback={FALLBACK_IMG}
-                    alt="影片封面"
-                    preview={{ mask: "查看封面" }}
-                  />
-                  <div className={styles.posterTagBadge}>
-                    <Tag color={watchedFollowPosterSource ? "blue" : "orange"} style={{ margin: 0 }}>
-                      {watchedFollowPosterSource ? "跟随海报源" : "自定义封面"}
-                    </Tag>
-                  </div>
-                </div>
-              </div>
+          initialValues={{
+            sourceId: urlSourceId || undefined,
+            dbId: 0,
+            hits: 0,
+            followPosterSource: Boolean(id),
+          }}
+          requiredMark="optional"
+        >
+          <Space direction="vertical" size={16} className={styles.formSections}>
+            <FilmBasicCard
+              id={id}
+              readOnly={readOnly}
+              sources={sources}
+              categoryTreeData={categoryTreeData}
+              categoryLoading={categoryLoading}
+              watchedFollowPosterSource={Boolean(watchedFollowPosterSource)}
+              watchedPicture={String(watchedPicture || "")}
+              loadedDetail={loadedDetail}
+              canWrite={canWrite}
+              tmdbEnabled={tmdbEnabled}
+              tmdbSnapshot={tmdbSnapshot}
+              onUndoTmdb={handleUndoTmdb}
+              onOpenTmdb={() => setTmdbModalOpen(true)}
+              onSourceChange={handleSourceChange}
+              onClassChange={handleClassChange}
+              onUpload={customUpload}
+              onOpenPicker={() => setPickerOpen(true)}
+              styles={styles}
+            />
 
-              {/* 右侧：基础字段表单 */}
-              <div className={styles.formColumn}>
-                <Row gutter={[24, 0]}>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="影片名称"
-                      name="name"
-                      rules={[{ required: true, message: "请输入名称" }]}
-                    >
-                      <Input placeholder="请输入影片名称" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item label="影片别名" name="subTitle">
-                      <Input placeholder="如: 英文名、又名" />
-                    </Form.Item>
-                  </Col>
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="所属分类"
-                      name="cid"
-                      rules={[{ required: true, message: "请选择分类" }]}
-                    >
-                      <Select
-                        placeholder="请选择"
-                        onChange={handleClassChange}
-                        options={categories.map((c: any) => ({
-                          label: c.name,
-                          value: c.id,
-                        }))}
-                      />
-                    </Form.Item>
-                  </Col>
-
-                  <Form.Item name="pid" hidden>
-                    <Input />
-                  </Form.Item>
-                  <Form.Item name="cName" hidden>
-                    <Input />
-                  </Form.Item>
-
-                  <Col xs={24} sm={12}>
-                    <Form.Item
-                      label="是否跟随海报源"
-                      name="followPosterSource"
-                      tooltip="关闭后保存自定义封面，采集不覆盖。"
-                      initialValue={Boolean(id)}
-                    >
-                      <Radio.Group
-                        buttonStyle="solid"
-                        options={[
-                          { label: "是（跟随海报源）", value: true },
-                          { label: "否（自定义封面）", value: false },
-                        ]}
-                      />
-                    </Form.Item>
-                  </Col>
-
-                  {!watchedFollowPosterSource ? (
-                    <Col xs={24}>
-                      <Form.Item
-                        label="封面图片地址"
-                        tooltip="采集不覆盖。对得上海报源时，前台用那边的最终图。"
-                      >
-                        <Space.Compact style={{ width: "100%" }}>
-                          <Form.Item
-                            name="picture"
-                            noStyle
-                            rules={[{ required: true, message: "请输入自定义封面图片地址或上传" }]}
-                          >
-                            <Input
-                              className={styles.posterInput}
-                              placeholder="输入图片URL或点击右侧上传/选图"
-                            />
-                          </Form.Item>
-                          {!readOnly && (
-                            <Upload
-                              customRequest={customUpload}
-                              showUploadList={false}
-                              accept={IMAGE_UPLOAD_ACCEPT}
-                              disabled={!canWrite}
-                            >
-                              <Button icon={<UploadOutlined />}>上传封面</Button>
-                            </Upload>
-                          )}
-                          {!readOnly && (
-                            <Button
-                              icon={<PictureOutlined />}
-                              disabled={!canWrite}
-                              onClick={() => setPickerOpen(true)}
-                            >
-                              选图
-                            </Button>
-                          )}
-                        </Space.Compact>
-                      </Form.Item>
-                    </Col>
-                  ) : (
-                    <Col xs={24}>
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          background: "rgba(255, 255, 255, 0.03)",
-                          borderRadius: 6,
-                          border: "1px dashed var(--ant-color-border)",
-                          marginBottom: 20,
-                        }}
-                      >
-                        <Text style={{ fontSize: 13, color: "var(--ant-color-text-secondary)", wordBreak: "break-all" }}>
-                          {String(loadedDetail?.picture || "").trim() || "暂无封面"}
-                        </Text>
-                      </div>
-                    </Col>
-                  )}
-                </Row>
-              </div>
-            </div>
-          </Card>
-
-            <Card
-              title={
-                <Space>
-                <UserOutlined style={{ color: "var(--ant-color-primary)" }} />
-                演职人员
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Row gutter={[40, 0]} className={styles.formRow}>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="导演" name="director">
-                  <Input placeholder="多个以逗号分隔" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="主演" name="actor">
-                  <Input placeholder="多个以逗号分隔" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="作者/编剧" name="writer">
-                  <Input placeholder="多个以逗号分隔" />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
-
-          <Card
-            title={
-              <Space>
-                <GlobalOutlined style={{ color: "var(--ant-color-primary)" }} />
-                发行与元数据
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Row gutter={[40, 0]} className={styles.formRow}>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="上映日期" name="releaseDate">
-                  <Input placeholder="YYYY-MM-DD" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="制作地区" name="area">
-                  <Input placeholder="如: 中国大陆, 美国" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="语言" name="lang">
-                  <Input placeholder="如: 国语, 英语" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="上映年份" name="year">
-                  <Input placeholder="YYYY" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="检索首字母" name="initial">
-                  <Input placeholder="大写字母" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="剧情标签" name="classTag">
-                  <Input placeholder="如: 动作, 冒险" />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
-
-          <Card
-            title={
-              <Space>
-                <DatabaseOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                状态与外部数据
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Row gutter={[40, 0]} className={styles.formRow}>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="更新备注" name="remarks">
-                  <Input placeholder="如: 完结, 第10集" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="影片状态" name="state">
-                  <Input placeholder="如: 正片, 预告" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="影片热度" name="hits">
-                  <InputNumber style={{ width: "100%" }} />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="播放来源标识" name="playForm">
-                  <Input placeholder="如: m3u8_list" />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="豆瓣 ID" name="dbId">
-                  <InputNumber style={{ width: "100%" }} />
-                </Form.Item>
-              </Col>
-              <Col xs={24} lg={12} xl={8}>
-                <Form.Item label="豆瓣评分" name="dbScore">
-                  <Input />
-                </Form.Item>
-              </Col>
-            </Row>
-          </Card>
-
-          <Card
-            title={
-              <Space>
-                <ContainerOutlined
-                  style={{ color: "var(--ant-color-primary)" }}
-                />
-                剧情详情
-              </Space>
-            }
-            className={styles.sectionCard}
-            styles={{
-              header: {
-                background: "rgba(255, 255, 255, 0.02)",
-                borderBottom: "1px solid var(--ant-color-border-secondary)",
-              },
-            }}
-          >
-            <Form.Item name="content" noStyle>
-              <TextArea rows={6} placeholder="输入剧情详细描述..." />
-            </Form.Item>
-          </Card>
-
-
-        </Space>
+            <FilmMetaCards isNew={!id} styles={styles} />
+          </Space>
         </Form>
       </div>
 

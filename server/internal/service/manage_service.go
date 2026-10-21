@@ -17,13 +17,16 @@ type ManageService struct{}
 var ManageSvc = new(ManageService)
 
 // GetSiteBasicConfig 获取网站基本配置信息
-func (s *ManageService) GetSiteBasicConfig() model.BasicConfig {
+func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
 	return repository.GetSiteBasic()
 }
 
 // UpdateSiteBasic 更新网站基本信息（仅更新站点品牌与描述信息，保留已存的访问控制、Tip 和 Notice，除非显式传入）
 func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
-	curr := repository.GetSiteBasic()
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
 	curr.SiteName = bc.SiteName
 	curr.SiteURL = bc.SiteURL
 	curr.Logo = bc.Logo
@@ -39,19 +42,25 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 }
 
 // GetSiteAccessConfig 获取网站访问控制配置
-func (s *ManageService) GetSiteAccessConfig() model.AccessConfig {
-	b := repository.GetSiteBasic()
+func (s *ManageService) GetSiteAccessConfig() (model.AccessConfig, error) {
+	b, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.AccessConfig{}, err
+	}
 	return model.AccessConfig{
 		State:         b.State,
 		Hint:          b.Hint,
 		PrivateAccess: b.PrivateAccess,
 		ProvideKey:    b.ProvideKey,
-	}
+	}, nil
 }
 
 // UpdateSiteAccessConfig 更新网站访问控制配置
 func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
-	curr := repository.GetSiteBasic()
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
 	curr.State = ac.State
 	curr.Hint = ac.Hint
 	curr.PrivateAccess = ac.PrivateAccess
@@ -68,32 +77,50 @@ func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
 }
 
 // GetSiteTipConfig 获取赞赏配置
-func (s *ManageService) GetSiteTipConfig() model.TipConfig {
-	return repository.GetSiteBasic().Tip
+func (s *ManageService) GetSiteTipConfig() (model.TipConfig, error) {
+	b, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.TipConfig{}, err
+	}
+	return b.Tip, nil
 }
 
 // UpdateSiteTipConfig 更新赞赏配置
 func (s *ManageService) UpdateSiteTipConfig(tip model.TipConfig) error {
-	curr := repository.GetSiteBasic()
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
 	curr.Tip = tip
 	return repository.SaveSiteBasic(curr)
 }
 
 // GetSiteNoticeConfig 获取站点公告配置
-func (s *ManageService) GetSiteNoticeConfig() model.NoticeConfig {
-	return repository.GetSiteBasic().Notice
+func (s *ManageService) GetSiteNoticeConfig() (model.NoticeConfig, error) {
+	b, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.NoticeConfig{}, err
+	}
+	return b.Notice, nil
 }
 
 // UpdateSiteNoticeConfig 更新站点公告配置
 func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error {
-	curr := repository.GetSiteBasic()
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
 	curr.Notice = notice
 	return repository.SaveSiteBasic(curr)
 }
 
 // GetBanners 获取轮播。更新状态跟片库，图片和简介用轮播行自己的。
-func (s *ManageService) GetBanners() model.Banners {
-	return OverlayBannerLiveRemarks(repository.GetBanners())
+func (s *ManageService) GetBanners() (model.Banners, error) {
+	banners, err := repository.GetBanners()
+	if err != nil {
+		return nil, err
+	}
+	return OverlayBannerLiveRemarks(banners), nil
 }
 
 // SaveBanners 保存轮播信息

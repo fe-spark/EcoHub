@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -21,17 +22,27 @@ type AccessHandler struct{}
 
 var AccessHd = new(AccessHandler)
 
-func (h *AccessHandler) isAccessible() bool {
+func (h *AccessHandler) accessible() error {
 	if config.AccessLogEnabled {
-		return true
+		return nil
 	}
-	hasData, _ := access.HasPersistedData()
-	return hasData
+	hasData, _, err := access.HasPersistedData()
+	if err != nil {
+		return err
+	}
+	if !hasData {
+		return errors.New("数据分析功能未开启")
+	}
+	return nil
 }
 
 // Status 查询数据分析功能开启状态与落库数据状态
 func (h *AccessHandler) Status(c *gin.Context) {
-	hasData, totalRows := access.HasPersistedData()
+	hasData, totalRows, err := access.HasPersistedData()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
 		"enabled":   config.AccessLogEnabled,
 		"hasData":   hasData,
@@ -40,8 +51,8 @@ func (h *AccessHandler) Status(c *gin.Context) {
 }
 
 func (h *AccessHandler) Overview(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+	if err := h.accessible(); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
 	data, err := access.QueryOverviewScope(c.Query("day"), c.Query("module"), c.Query("platform"))
@@ -53,8 +64,8 @@ func (h *AccessHandler) Overview(c *gin.Context) {
 }
 
 func (h *AccessHandler) SourceCalls(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+	if err := h.accessible(); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
 	list, err := access.QuerySourceCalls(c.Query("day"))
@@ -66,8 +77,8 @@ func (h *AccessHandler) SourceCalls(c *gin.Context) {
 }
 
 func (h *AccessHandler) Tops(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+	if err := h.accessible(); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
@@ -98,8 +109,8 @@ func (h *AccessHandler) TrackView(c *gin.Context) {
 }
 
 func (h *AccessHandler) Logs(c *gin.Context) {
-	if !h.isAccessible() {
-		dto.Failed("数据分析功能未开启", c)
+	if err := h.accessible(); err != nil {
+		dto.Failed(err.Error(), c)
 		return
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
