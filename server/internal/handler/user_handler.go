@@ -64,7 +64,19 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		dto.Failed("注销失败, 身份信息格式化异常!!!", c)
 		return
 	}
-	service.UserSvc.UserLogout(uc.UserID)
+	authToken, _ := c.Cookie(config.AuthCookieName)
+	if authToken == "" {
+		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			authToken = strings.TrimSpace(authHeader[7:])
+		} else if authHeader != "" {
+			authToken = authHeader
+		}
+		if authToken == "" {
+			authToken = strings.TrimSpace(c.GetHeader("Token"))
+		}
+	}
+	service.UserSvc.UserLogout(uc.UserID, authToken)
 	clearAuthCookie(c)
 	dto.SuccessOnlyMsg("已退出登录!!!", c)
 }

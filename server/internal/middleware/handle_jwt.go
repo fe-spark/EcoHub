@@ -69,19 +69,19 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 
-		// JWT 已过期时，只有 Redis 里仍是同一把 token 才刷新。Redis 有效期与 JWT 相同，这里只覆盖到期瞬间的时差。
+		// JWT 已过期时，只有 Redis 活跃集合中仍包含该 token 才刷新。
 		if err != nil && errors.Is(err, jwt.ErrTokenExpired) {
-			// 使用 singleflight 防止并发刷新
-			key := fmt.Sprintf("refresh:%d", uc.UserID)
+			// 使用 singleflight 防止当前 token 并发刷新
+			key := fmt.Sprintf("refresh:%d:%s", uc.UserID, authToken)
 			val, _, _ := sfGroup.Do(key, func() (any, error) {
-				// 再次检查 Redis 中的 token
-				t := repository.GetUserTokenById(uc.UserID)
-				if len(t) <= 0 || t != authToken {
+				// 检查 Redis 中该设备 token 是否仍有效
+				if !repository.HasUserToken(uc.UserID, authToken) {
 					return nil, errors.New("invalid or expired token in redis")
 				}
 				// 生成新token
 				newToken, _ := utils.GenToken(uc.UserID, uc.UserName, uc.Role)
 				_ = repository.SaveUserToken(newToken, uc.UserID)
+				_ = repository.RemoveUserToken(uc.UserID, authToken)
 				return newToken, nil
 			})
 
@@ -96,17 +96,10 @@ func AuthToken() gin.HandlerFunc {
 			uc, _ = utils.ParseToken(newToken)
 			setAuthCookie(c, newToken)
 		} else {
-			// 未过期的情况，仅校验 Redis 一致性
-			t := repository.GetUserTokenById(uc.UserID)
-			if len(t) <= 0 {
+			// 未过期的情况，校验当前 token 是否存在于该用户的活跃会话集合中
+			if !repository.HasUserToken(uc.UserID, authToken) {
 				clearAuthCookie(c)
 				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
-			if t != authToken {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
 				c.Abort()
 				return
 			}

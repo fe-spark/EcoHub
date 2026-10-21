@@ -234,6 +234,31 @@ export default function CollectManagePageView() {
     [updateSiteListItem],
   );
 
+  const [togglingStateSourceId, setTogglingStateSourceId] = useState<string | null>(null);
+
+  const changeSourceState = useCallback(
+    async (id: string, nextState: boolean) => {
+      setTogglingStateSourceId(id);
+      updateSiteListItem(id, (item) => ({ ...item, state: nextState }));
+      try {
+        const resp = await ApiPost("/manage/collect/change", { id, state: nextState });
+        if (resp.code === 0) {
+          message.success(nextState ? "采集站已启用" : "采集站已禁用");
+          await getCollectList();
+        } else {
+          message.error(resp.msg || "状态切换失败");
+          updateSiteListItem(id, (item) => ({ ...item, state: !nextState }));
+        }
+      } catch {
+        message.error("状态切换失败");
+        updateSiteListItem(id, (item) => ({ ...item, state: !nextState }));
+      } finally {
+        setTogglingStateSourceId(null);
+      }
+    },
+    [getCollectList, message, updateSiteListItem],
+  );
+
   const {
     sourceModalMode,
     sourceModalOpen,
@@ -426,6 +451,8 @@ export default function CollectManagePageView() {
               globalSpiderProxyReady={globalSpiderProxyReady}
               onSelect={handleSelectSource}
               onChangeCollectDuration={changeCollectDuration}
+              onChangeSourceState={changeSourceState}
+              togglingSourceId={togglingStateSourceId}
               onStartTask={(record) => void startTask(record)}
               onTerminateTask={(id) => void stopTask(id)}
               onEditSource={(id) => void openEditDialog(id)}

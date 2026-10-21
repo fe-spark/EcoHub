@@ -44,6 +44,7 @@ export default function TmdbModal({
   const [previewDetail, setPreviewDetail] = useState<any>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [selectedFields, setSelectedFields] = useState<string[]>([
+    "name",
     "poster",
     "backdrop",
     "overview",
@@ -154,7 +155,7 @@ export default function TmdbModal({
       if (onPrefill) {
         if (previewDetail) {
           onPrefill(previewDetail, selectedFields);
-          message.success("TMDB 元数据已应用到表单，请点击编辑弹窗【确定】保存生效");
+          message.success("TMDB 元数据已应用到表单，请保存生效");
           onClose();
           return;
         }
@@ -164,7 +165,7 @@ export default function TmdbModal({
         });
         if (resp.code === 0 && resp.data) {
           onPrefill(resp.data, selectedFields);
-          message.success("TMDB 元数据已应用到表单，请点击编辑弹窗【确定】保存生效");
+          message.success("TMDB 元数据已应用到表单，请保存生效");
           onClose();
         } else {
           message.error(resp.msg || "获取 TMDB 预填数据失败");

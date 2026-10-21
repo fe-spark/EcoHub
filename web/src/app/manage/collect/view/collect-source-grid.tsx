@@ -37,11 +37,13 @@ interface CollectSourceGridProps {
   globalSpiderProxyReady?: boolean;
   onSelect: (id: string, checked: boolean) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
+  onChangeSourceState?: (id: string, state: boolean) => void;
   onStartTask: (record: FilmSource) => void;
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
   deletingSourceId?: string;
+  togglingSourceId?: string | null;
   onOpenAddDialog: () => void;
   onSortList: (nextList: FilmSource[]) => void;
   onSyncCategory?: (id: string) => void;
@@ -57,11 +59,13 @@ export default function CollectSourceGrid({
   globalSpiderProxyReady = false,
   onSelect,
   onChangeCollectDuration,
+  onChangeSourceState,
   onStartTask,
   onTerminateTask,
   onEditSource,
   onDeleteSource,
   deletingSourceId = "",
+  togglingSourceId = null,
   onOpenAddDialog,
   onSortList,
   onSyncCategory,
@@ -139,6 +143,8 @@ export default function CollectSourceGrid({
                 onEditSource={onEditSource}
                 onDeleteSource={onDeleteSource}
                 deleting={deletingSourceId === site.id || Boolean(site.deleting)}
+                toggling={togglingSourceId === site.id}
+                onChangeSourceState={onChangeSourceState}
                 onSyncCategory={onSyncCategory}
               />
             );

@@ -66,8 +66,7 @@ func PrivateAccessGuard() gin.HandlerFunc {
 		if authToken != "" {
 			uc, err := utils.ParseToken(authToken)
 			if err == nil && uc != nil && uc.UserID > 0 {
-				storedToken := repository.GetUserTokenById(uc.UserID)
-				if storedToken != "" && storedToken == authToken {
+				if repository.HasUserToken(uc.UserID, authToken) {
 					c.Set(config.AuthUserClaims, uc)
 					c.Set("user_id", uc.UserID)
 					c.Set("role", uc.Role)

@@ -80,7 +80,6 @@ export default function ManageLayoutView({
   const router = useRouter();
   const pathname = usePathname();
   const isFixedTabbedPage = pathname.startsWith("/manage/system/website");
-  const isFullBleedPage = pathname.startsWith("/manage/film/add");
   const selectedKey = resolveMenuKey(pathname);
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
@@ -341,8 +340,8 @@ export default function ManageLayoutView({
           </Space>
         </Header>
         <Content
-          className={`${styles.content} ${isFixedTabbedPage ? styles.contentFixed : ""} ${isFullBleedPage ? styles.contentFullBleed : ""}`}
-          style={{ flex: 1, overflow: isFixedTabbedPage || isFullBleedPage ? "hidden" : "auto" }}
+          className={`${styles.content} ${isFixedTabbedPage ? styles.contentFixed : ""}`}
+          style={{ flex: 1, overflow: isFixedTabbedPage ? "hidden" : "auto" }}
         >
           {notices.length > 0 && (
             <div className={styles.noticeStack}>
