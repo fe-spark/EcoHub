@@ -3,6 +3,7 @@ package utils
 import (
 	"sort"
 	"testing"
+	"unsafe"
 )
 
 func testFilmItem(mid int64, name string, hits int64) FilmSearchItem {
@@ -13,6 +14,32 @@ func testFilmItem(mid int64, name string, hits int64) FilmSearchItem {
 	}
 	FillSearchDerivedFields(&item)
 	return item
+}
+
+func TestFillSearchDerivedFieldsReusesUnchangedCleanName(t *testing.T) {
+	same := FilmSearchItem{Name: "流浪地球2"}
+	FillSearchDerivedFields(&same)
+	if same.CleanName != "流浪地球2" || unsafe.StringData(same.CleanName) != unsafe.StringData(same.Name) {
+		t.Fatalf("CleanName=%q 未复用原名", same.CleanName)
+	}
+
+	changed := FilmSearchItem{Name: "哈利·波特"}
+	FillSearchDerivedFields(&changed)
+	if changed.CleanName != "哈利波特" {
+		t.Fatalf("CleanName=%q", changed.CleanName)
+	}
+	if unsafe.StringData(changed.CleanName) == unsafe.StringData(changed.Name) {
+		t.Fatal("清洗结果已变化，不应复用原名")
+	}
+
+	trad := FilmSearchItem{Name: "慶餘年"}
+	FillSearchDerivedFields(&trad)
+	if trad.CleanName != "庆余年" {
+		t.Fatalf("CleanName=%q", trad.CleanName)
+	}
+	if unsafe.StringData(trad.CleanName) == unsafe.StringData(trad.Name) {
+		t.Fatal("简繁不同应另存清洗名")
+	}
 }
 
 func TestPinyinConversion(t *testing.T) {

@@ -1,7 +1,10 @@
 package snapshot
 
 import (
+	"sort"
 	"testing"
+
+	"server/internal/model"
 )
 
 // 空快照索引必须被缓存，二次载入直接复用同一对象，不得因 len(Items)==0 反复穿透查库。
@@ -53,5 +56,76 @@ func TestSealSearchMetaIndexCopiesPlaySources(t *testing.T) {
 	}
 	if shared[0] != "src-a" || shared[1] != "src-b" {
 		t.Fatalf("原播放源被改写: %#v", shared)
+	}
+}
+
+func TestSealSearchMetaIndexSharesSinglePlaySource(t *testing.T) {
+	idx := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, PlaySources: []string{"src-a"}},
+		{Mid: 2, PlaySources: []string{"src-a"}},
+		{Mid: 3, PlaySources: []string{"src-b"}},
+		{Mid: 4, PlaySources: []string{"src-a", "src-b"}},
+		{Mid: 5, PlaySources: []string{"src-a", "src-b"}},
+	})
+	a := idx.Items[0].PlaySources
+	b := idx.Items[1].PlaySources
+	if len(a) != 1 || len(b) != 1 || &a[0] != &b[0] {
+		t.Fatalf("同一单源应共用切片: %#v %#v", a, b)
+	}
+	if &idx.Items[2].PlaySources[0] == &a[0] {
+		t.Fatal("不同单源不应共用切片")
+	}
+	left := idx.Items[3].PlaySources
+	right := idx.Items[4].PlaySources
+	if len(left) != 2 || &left[0] == &a[0] || &left[0] == &right[0] {
+		t.Fatalf("多源应各自分配: %#v %#v", left, right)
+	}
+
+	again := append([]FilmSearchMeta(nil), idx.Items...)
+	idx2 := sealSearchMetaIndex("v", again)
+	if idx.Items[0].PlaySources[0] != "src-a" || &idx2.Items[0].PlaySources[0] == &a[0] {
+		t.Fatal("再次封口改写了已发布切片")
+	}
+	if &idx2.Items[0].PlaySources[0] != &idx2.Items[1].PlaySources[0] {
+		t.Fatal("再次封口后同一单源应共用切片")
+	}
+}
+
+func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	createTestFilm(t, gdb, 7, "慶餘年", 10, "")
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_master", LineKind: "play", GroupIndex: 1, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_b", LineKind: "play", GroupIndex: 0, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.FilmSourcePlaylist{
+		Mid: 7, SourceId: "source_down", LineKind: "download", GroupIndex: 0, Content: "[]",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	activeFilmSearchMetas.Store(nil)
+	idx, err := loadFilmSearchMetaIndex("v_dedupe_play")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if idx == nil || len(idx.Items) != 1 {
+		t.Fatalf("items=%v", idx)
+	}
+	item := idx.Items[0]
+	if item.Item.CleanName != "庆余年" {
+		t.Fatalf("CleanName=%q", item.Item.CleanName)
+	}
+	got := append([]string(nil), item.PlaySources...)
+	sort.Strings(got)
+	want := []string{"source_b", "source_master"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("PlaySources=%v", got)
 	}
 }

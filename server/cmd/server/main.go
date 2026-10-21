@@ -15,7 +15,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/repository"
-	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/router"
 	"server/internal/service"
 	"server/internal/service/upgrade"
@@ -99,9 +98,6 @@ func start() {
 	service.InitSvc.DefaultDataInit()
 	if err := repository.RefreshCollectSourceCatalog(); err != nil {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
-	}
-	if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
-		log.Fatalf("[Init] 检索索引加载失败: %v", err)
 	}
 	upgrade.StartReleasePoller()
 	access.StartCollector()

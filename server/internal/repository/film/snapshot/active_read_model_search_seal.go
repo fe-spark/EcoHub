@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"database/sql"
 	"errors"
 	"sort"
 	"strings"
@@ -37,7 +38,7 @@ func loadCurrentSearchIndex() (*filmSearchMetaIndex, error) {
 	return loadFilmSearchMetaIndex(version)
 }
 
-// WarmSearchMetaIndex 启动时建好检索索引，避免第一次请求扛全表扫描。
+// WarmSearchMetaIndex 等到当前这次检索索引构建结束。
 func WarmSearchMetaIndex() error {
 	_, err := loadCurrentSearchIndex()
 	return err
@@ -47,29 +48,64 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 	if db.Mdb == nil {
 		return nil, ErrSearchIndexMissing
 	}
+	if len(mids) == 0 {
+		return streamPlaySources()
+	}
 	type row struct {
 		Mid      int64
 		SourceId string `gorm:"column:source_id"`
 	}
-	q := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Select("mid, source_id").
-		Where("line_kind = ?", "play")
-	if len(mids) > 0 {
-		q = q.Where("mid IN ?", mids)
-	}
 	var rows []row
-	if err := q.Group("mid, source_id").Scan(&rows).Error; err != nil {
+	if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+		Select("mid, source_id").
+		Where("line_kind = ?", "play").
+		Where("mid IN ?", mids).
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	out := make(map[int64][]string, len(rows))
+	out := make(map[int64][]string)
 	for _, r := range rows {
-		id := strings.TrimSpace(r.SourceId)
-		if r.Mid <= 0 || id == "" {
-			continue
-		}
-		out[r.Mid] = append(out[r.Mid], id)
+		addPlaySource(out, r.Mid, r.SourceId)
 	}
 	return out, nil
+}
+
+func streamPlaySources() (map[int64][]string, error) {
+	rows, err := db.Mdb.Raw(
+		"SELECT mid, source_id FROM "+model.TableFilmSourcePlaylist+" WHERE line_kind = ?",
+		"play",
+	).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[int64][]string)
+	for rows.Next() {
+		var mid int64
+		var sourceID sql.NullString
+		if err := rows.Scan(&mid, &sourceID); err != nil {
+			return nil, err
+		}
+		addPlaySource(out, mid, sourceID.String)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func addPlaySource(out map[int64][]string, mid int64, sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if mid <= 0 || sourceID == "" {
+		return
+	}
+	list := out[mid]
+	for _, id := range list {
+		if id == sourceID {
+			return
+		}
+	}
+	out[mid] = append(list, sourceID)
 }
 
 func attachPlaySources(items []FilmSearchMeta, plays map[int64][]string) {
@@ -95,6 +131,7 @@ func internSearchMetas(items []FilmSearchMeta) {
 		pool[s] = s
 		return s
 	}
+	singlePlay := make(map[string][]string)
 	for i := range items {
 		item := &items[i]
 		item.FirstSourceId = keep(item.FirstSourceId)
@@ -103,16 +140,32 @@ func internSearchMetas(items []FilmSearchMeta) {
 		item.ClassTag = keep(item.ClassTag)
 		item.CategoryKey = keep(item.CategoryKey)
 		item.RootCategoryKey = keep(item.RootCategoryKey)
-		// 增量封口按值拷贝条目，播放源切片仍和已发布索引共享。先复制再改。
-		if n := len(item.PlaySources); n > 0 {
-			copied := make([]string, n)
-			copy(copied, item.PlaySources)
-			for j, src := range copied {
-				copied[j] = keep(src)
-			}
-			item.PlaySources = copied
-		}
+		item.PlaySources = internPlaySources(item.PlaySources, keep, singlePlay)
 	}
+}
+
+// internPlaySources 单源影片共用一个新切片。多源仍各自分配，不改已发布索引里的切片。
+func internPlaySources(srcs []string, keep func(string) string, single map[string][]string) []string {
+	if len(srcs) == 0 {
+		return nil
+	}
+	if len(srcs) == 1 {
+		src := keep(srcs[0])
+		if src == "" {
+			return nil
+		}
+		shared, ok := single[src]
+		if !ok {
+			shared = []string{src}
+			single[src] = shared
+		}
+		return shared
+	}
+	copied := make([]string, len(srcs))
+	for i, src := range srcs {
+		copied[i] = keep(src)
+	}
+	return copied
 }
 
 func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMetaIndex {
@@ -144,12 +197,12 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		}
 	}
 	sort.Slice(byUpdate, func(i, j int) bool {
-		a := items[byUpdate[i]]
-		b := items[byUpdate[j]]
-		if a.Item.UpdateStamp != b.Item.UpdateStamp {
-			return a.Item.UpdateStamp > b.Item.UpdateStamp
+		left := &items[byUpdate[i]]
+		right := &items[byUpdate[j]]
+		if left.Item.UpdateStamp != right.Item.UpdateStamp {
+			return left.Item.UpdateStamp > right.Item.UpdateStamp
 		}
-		return a.Mid > b.Mid
+		return left.Mid > right.Mid
 	})
 	pools := make(map[string][]int64, len(hot))
 	for key, cands := range hot {
@@ -267,9 +320,6 @@ func hotMidsFromIndex(version, sourceID, field string, categoryID int64, limit i
 	idx, err := loadFilmSearchMetaIndex(version)
 	if err != nil {
 		return nil, err
-	}
-	if idx == nil {
-		return nil, ErrSearchIndexMissing
 	}
 	if len(idx.Items) == 0 {
 		return nil, nil
