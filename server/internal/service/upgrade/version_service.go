@@ -83,7 +83,11 @@ func fetchGithubLatestRelease(includePre bool) (githubReleaseCache, error) {
 	req.Header.Set("User-Agent", "EcoHub/"+config.Version)
 
 	var transport *http.Transport
-	if ok, proxyURL := repository.ResolveUpgradeProxy(); ok && proxyURL != "" {
+	ok, proxyURL, err := repository.ResolveUpgradeProxy()
+	if err != nil {
+		return githubReleaseCache{}, err
+	}
+	if ok && proxyURL != "" {
 		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	} else {
 		transport = utils.GetOrCreateProxyTransport("")

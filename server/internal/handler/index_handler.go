@@ -18,14 +18,6 @@ type IndexHandler struct{}
 
 var IndexHd = new(IndexHandler)
 
-// Health 健康检查接口
-// Deprecated: 后续主版本计划移除。
-// 该接口仅返回静态健康状态，无法校验私有化密钥安全与站点核心依赖。
-// 探活与站点公开基础信息请统一使用 /api/config/basic；EcoHub 客户端软件源鉴权测通统一使用 /api/provide/app。
-func Health(c *gin.Context) {
-	dto.Success(gin.H{"status": "ok"}, "服务正常", c)
-}
-
 func hasSearchOptions(searchTags map[string]any) bool {
 	if len(searchTags) == 0 {
 		return false
@@ -192,7 +184,11 @@ func parseDailyUpdateExclude(raw string) []int64 {
 
 // CategoriesInfo 分类信息获取
 func (h *IndexHandler) CategoriesInfo(c *gin.Context) {
-	data := service.IndexSvc.GetNavCategory()
+	data, err := service.IndexSvc.GetNavCategory()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	if len(data) <= 0 {
 		dto.Failed("暂无分类信息", c)
 		return
@@ -244,7 +240,11 @@ func (h *IndexHandler) SearchFilm(c *gin.Context) {
 // HotKeywords 获取当前全站热门搜索推荐词
 func (h *IndexHandler) HotKeywords(c *gin.Context) {
 	limit := parseHotKeywordsLimit(c.Query("limit"))
-	list := service.IndexSvc.GetHotSearchKeywords(limit)
+	list, err := service.IndexSvc.GetHotSearchKeywords(limit)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(list, "热门搜索获取成功", c)
 }
 

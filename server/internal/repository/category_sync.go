@@ -31,10 +31,6 @@ func SaveCategoryTree(sourceId string, tree *model.CategoryTree) error {
 	return err
 }
 
-func ResetCategoryTree(sourceId string, tree *model.CategoryTree) error {
-	return saveCategoryTree(sourceId, tree, false, false, false)
-}
-
 func ApplyCategoryTree(sourceId string, tree *model.CategoryTree, clearCollected bool) (CategoryApplyResult, error) {
 	sourceId = strings.TrimSpace(sourceId)
 	if sourceId == "" {

@@ -44,11 +44,11 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "src_off", Name: "停用站", Uri: "http://off.test", State: false, Sort: 2})
 
 	for _, row := range []model.FilmIndex{
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_b"}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src_a"}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src_a"}},
-		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src_a"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "共享片"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src_b"}, FilmIndexContent: model.FilmIndexContent{Name: "共享片"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "独播片"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "单源片"}},
+		{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "src_a"}, FilmIndexContent: model.FilmIndexContent{Name: "已删片"}},
 	} {
 		gdb.Create(&row)
 	}
@@ -85,7 +85,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.Playable != 2 || stats.Library.Categories != 3 || stats.Library.Failures != 4 {
+	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Categories != 3 || stats.Library.Failures != 4 {
 		t.Fatalf("library = %+v", stats.Library)
 	}
 	if len(stats.Sources) != 3 {
@@ -96,11 +96,11 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 		byID[item.Id] = item
 	}
 	primary := byID["src_a"]
-	if !primary.IsPrimary || !primary.Enabled || primary.Films != 3 || primary.Categories != 2 || primary.Failures != 1 {
+	if !primary.IsPrimary || !primary.Enabled || primary.Films != 3 || primary.MultiSource != 2 || primary.Categories != 2 || primary.Failures != 1 {
 		t.Fatalf("src_a = %+v", primary)
 	}
 	other := byID["src_b"]
-	if other.IsPrimary || other.Films != 1 || other.Categories != 1 || other.Failures != 2 {
+	if other.IsPrimary || other.Films != 1 || other.MultiSource != 1 || other.Categories != 1 || other.Failures != 2 {
 		t.Fatalf("src_b = %+v", other)
 	}
 	off := byID["src_off"]

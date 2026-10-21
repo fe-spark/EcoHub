@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/utils"
 )
 
 // 空快照索引必须被缓存，二次载入直接复用同一对象，不得因 len(Items)==0 反复穿透查库。
@@ -88,6 +89,21 @@ func TestSealSearchMetaIndexSharesSinglePlaySource(t *testing.T) {
 	}
 	if &idx2.Items[0].PlaySources[0] != &idx2.Items[1].PlaySources[0] {
 		t.Fatal("再次封口后同一单源应共用切片")
+	}
+}
+
+func TestSealSearchMetaIndex_MultiSourceCounts(t *testing.T) {
+	idx := sealSearchMetaIndex("v", []FilmSearchMeta{
+		{Mid: 1, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		{Mid: 2, FirstSourceId: "src-b", Item: utils.FilmSearchItem{CleanName: "嫁金钗"}},
+		{Mid: 3, FirstSourceId: "src-a", Item: utils.FilmSearchItem{CleanName: "独家影片"}},
+		{Mid: 4, FirstSourceId: "src-a", PlaySources: []string{"src-a", "src-c"}, Item: utils.FilmSearchItem{CleanName: "多线路影片"}},
+	})
+	if idx.MultiSourceBySource["src-a"] != 2 {
+		t.Fatalf("src-a multiSource=%d, want 2", idx.MultiSourceBySource["src-a"])
+	}
+	if idx.MultiSourceBySource["src-b"] != 1 {
+		t.Fatalf("src-b multiSource=%d, want 1", idx.MultiSourceBySource["src-b"])
 	}
 }
 

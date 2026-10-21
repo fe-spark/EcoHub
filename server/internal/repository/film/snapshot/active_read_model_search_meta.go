@@ -30,13 +30,13 @@ type FilmSearchMeta struct {
 }
 
 type filmSearchMetaIndex struct {
-	Version          string
-	Items            []FilmSearchMeta
-	ByUpdate         []int
-	Pos              map[int64]int
-	FilmsBySource    map[string]int64
-	PlayableBySource map[string]int64
-	HotPools         map[string][]int64
+	Version             string
+	Items               []FilmSearchMeta
+	ByUpdate            []int
+	Pos                 map[int64]int
+	FilmsBySource       map[string]int64
+	MultiSourceBySource map[string]int64
+	HotPools            map[string][]int64
 }
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]

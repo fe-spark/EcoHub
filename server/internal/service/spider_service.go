@@ -93,7 +93,11 @@ func (s *SpiderService) ClearFilms() (retErr error) {
 		return err
 	}
 	// 物理清空后，广播各采集站分类已清空（未就绪态）
-	for _, src := range repository.GetCollectSourceList() {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return err
+	}
+	for _, src := range sources {
 		if src.Id != "" {
 			progress.BroadcastCategoryReady(src.Id, false)
 		}
@@ -101,7 +105,8 @@ func (s *SpiderService) ClearFilms() (retErr error) {
 	// 分类与影视库存一并清空后，按每个采集站重新拉取，采集才能写上 pid/cid。
 	filmrepo.ReportResetProgress(96, "正在同步各采集站分类")
 	if err := s.SyncAllSourceCategories(); err != nil {
-		log.Printf("[SpiderService] 重置后部分采集站分类同步失败（不影响重置结果）: %v", err)
+		filmrepo.FinishResetProgress(err)
+		return err
 	}
 	filmrepo.ReportResetProgress(100, "重置完成，各采集站分类已同步")
 	filmrepo.FinishResetProgress(nil)
@@ -256,7 +261,10 @@ func (s *SpiderService) SyncSourceCategoriesAsync(id string) {
 
 // SyncAllSourceCategories 按现有采集站逐个拉取分类。某一站失败不影响其他站，最后返回首个错误。
 func (s *SpiderService) SyncAllSourceCategories() error {
-	sources := repository.GetCollectSourceList()
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return err
+	}
 	if len(sources) == 0 {
 		return errors.New("没有采集站，不能同步分类")
 	}
@@ -291,7 +299,11 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 
 // SyncMissingSourceCategories 只给还没有分类副本的采集站补拉一次。已有副本的站不覆盖。
 func (s *SpiderService) SyncMissingSourceCategories() {
-	sources := repository.GetCollectSourceList()
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		log.Printf("[SpiderService] 读取采集站失败: %v", err)
+		return
+	}
 	var missing []model.FilmSource
 	for i := range sources {
 		if !repository.SourceHasCategoryMapping(sources[i].Id) {
@@ -322,6 +334,16 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 // StopAllTasks 强制停止所有採集任務
 func (s *SpiderService) StopAllTasks() {
 	spider.StopAllTasks()
+}
+
+// StopTasks 批量停止指定采集站的任务。
+func (s *SpiderService) StopTasks(ids []string) {
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			spider.StopTask(id)
+		}
+	}
 }
 
 // StopTask 停止指定采集站的任务（仅停止任务，不影响采集站启用状态）。

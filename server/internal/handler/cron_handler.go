@@ -18,7 +18,11 @@ var CronHd = new(CronHandler)
 
 // FilmCronTaskList 获取所有的定时任务信息
 func (h *CronHandler) FilmCronTaskList(c *gin.Context) {
-	tl := service.CronSvc.GetFilmCrontab()
+	tl, err := service.CronSvc.GetFilmCrontab()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(tl, "定时任务列表获取成功", c)
 }
 

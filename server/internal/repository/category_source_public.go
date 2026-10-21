@@ -2,6 +2,7 @@ package repository
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -16,7 +17,10 @@ import (
 
 // SourceRootTypeIDs 当前采集站前台正在显示的一级分类。id 是该站 type_id，和首页栏目一致。
 func SourceRootTypeIDs(sourceID string) []int64 {
-	tree := GetActiveCategoryTree(sourceID)
+	tree, err := GetActiveCategoryTree(sourceID)
+	if err != nil {
+		return nil
+	}
 	ids := make([]int64, 0, len(tree.Children))
 	for _, child := range tree.Children {
 		if child == nil || !child.Show || child.Id <= 0 {
@@ -58,14 +62,17 @@ func ResolveBannerSourceCategories(sourceID string, selected []int64) (ids []int
 
 // sourceTypeCategoryTree 前台分类树。节点 id 是当前采集站自己的 type_id。
 // 首选站套用分类规则：命中的改名，同一父级下目标名相同的 type 合成一个节点。
-func sourceTypeCategoryTree(sourceId string) model.CategoryTree {
+func sourceTypeCategoryTree(sourceId string) (model.CategoryTree, error) {
 	root := model.CategoryTree{
 		Id: 0, Pid: -1, Name: "分类信息", Show: true,
 		Children: make([]*model.CategoryTree, 0),
 	}
 	sourceId = strings.TrimSpace(sourceId)
-	if sourceId == "" || db.Mdb == nil {
-		return root
+	if sourceId == "" {
+		return root, nil
+	}
+	if db.Mdb == nil {
+		return root, errors.New("数据库未连接")
 	}
 
 	cacheKey := fmt.Sprintf("%s:src_%s:stvis:r%s:c%s", config.ActiveCategoryTreeKey, sourceId, support.GetRuleVersion(), support.GetCategoryVersion())
@@ -73,13 +80,16 @@ func sourceTypeCategoryTree(sourceId string) model.CategoryTree {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var tree model.CategoryTree
 			if json.Unmarshal([]byte(data), &tree) == nil && validSourceTypeTree(tree) {
-				return tree
+				return tree, nil
 			}
 			db.Rdb.Del(db.Cxt, cacheKey)
 		}
 	}
 
-	view := loadPublicSourceTypes(sourceId)
+	view, err := loadPublicSourceTypes(sourceId)
+	if err != nil {
+		return root, err
+	}
 	for _, group := range view.Groups {
 		if !group.Show {
 			continue
@@ -93,11 +103,11 @@ func sourceTypeCategoryTree(sourceId string) model.CategoryTree {
 			db.Rdb.Set(db.Cxt, cacheKey, string(data), time.Hour)
 		}
 	}
-	return root
+	return root, nil
 }
 
 // sourceTypeShown 分类管理里的显示开关。键是该站 type_id。没有映射的分类保持显示。
-func sourceTypeShown(sourceId string) map[int64]bool {
+func sourceTypeShown(sourceId string) (map[int64]bool, error) {
 	type pair struct {
 		SourceTypeId int64 `gorm:"column:source_type_id"`
 		Show         bool  `gorm:"column:show"`
@@ -108,7 +118,7 @@ func sourceTypeShown(sourceId string) map[int64]bool {
 		Joins("JOIN film_category ON film_category.id = category_mappings.category_id").
 		Where("category_mappings.source_id = ?", sourceId).
 		Scan(&pairs).Error; err != nil {
-		return map[int64]bool{}
+		return nil, err
 	}
 	flags := make(map[int64]bool, len(pairs))
 	for _, pair := range pairs {
@@ -121,7 +131,7 @@ func sourceTypeShown(sourceId string) map[int64]bool {
 		}
 		flags[pair.SourceTypeId] = pair.Show
 	}
-	return flags
+	return flags, nil
 }
 
 func validSourceTypeTree(tree model.CategoryTree) bool {
@@ -142,7 +152,10 @@ func LookupRootSourceType(sourceId string, typeId int64) *model.CategoryTree {
 	if typeId <= 0 {
 		return nil
 	}
-	view := loadPublicSourceTypes(sourceId)
+	view, err := loadPublicSourceTypes(sourceId)
+	if err != nil {
+		return nil
+	}
 	if group, ok := view.groupByMember(typeId); ok && group.Show && group.Parent == 0 {
 		node := group.treeNode(0)
 		return node
@@ -166,7 +179,10 @@ func PublicSourceTypeIDs(sourceID, field string, typeID int64) []int64 {
 	if typeID <= 0 {
 		return nil
 	}
-	view := loadPublicSourceTypes(sourceID)
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil {
+		return nil
+	}
 	if group, ok := view.groupByMember(typeID); ok && group.Show {
 		if field == "cid" {
 			if group.Parent == 0 && len(group.Children) > 0 {
@@ -189,7 +205,10 @@ func PublicSourceTypeName(sourceID string, typeID int64) string {
 	if typeID <= 0 {
 		return ""
 	}
-	view := loadPublicSourceTypes(sourceID)
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil {
+		return ""
+	}
 	if group, ok := view.groupByMember(typeID); ok {
 		return strings.TrimSpace(group.Name)
 	}
@@ -201,7 +220,10 @@ func PublicSourceTypeName(sourceID string, typeID int64) string {
 
 // PublicSourceChildNodes 前台一级分类下的子类。已套规则，不含隐藏。
 func PublicSourceChildNodes(sourceID string, parentTypeID int64) []*model.CategoryTree {
-	view := loadPublicSourceTypes(sourceID)
+	view, err := loadPublicSourceTypes(sourceID)
+	if err != nil {
+		return nil
+	}
 	group, ok := view.groupByMember(parentTypeID)
 	if !ok || !group.Show || group.Parent != 0 {
 		return []*model.CategoryTree{}
@@ -298,35 +320,41 @@ var (
 	publicSourceCache   = map[string]publicSourceCacheEntry{}
 )
 
-func loadPublicSourceTypes(sourceID string) publicSourceView {
+func loadPublicSourceTypes(sourceID string) (publicSourceView, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID == "" || db.Mdb == nil {
-		return publicSourceView{}
+		return publicSourceView{}, nil
 	}
 	cacheKey := sourceID + ":" + support.GetRuleVersion() + ":" + support.GetCategoryVersion()
 	publicSourceCacheMu.Lock()
 	if entry, ok := publicSourceCache[sourceID]; ok && entry.key == cacheKey {
 		view := entry.view
 		publicSourceCacheMu.Unlock()
-		return view
+		return view, nil
 	}
 	publicSourceCacheMu.Unlock()
 
-	view := buildPublicSourceView(sourceID)
+	view, err := buildPublicSourceView(sourceID)
+	if err != nil {
+		return publicSourceView{}, err
+	}
 	publicSourceCacheMu.Lock()
 	publicSourceCache[sourceID] = publicSourceCacheEntry{key: cacheKey, view: view}
 	publicSourceCacheMu.Unlock()
-	return view
+	return view, nil
 }
 
-func buildPublicSourceView(sourceID string) publicSourceView {
+func buildPublicSourceView(sourceID string) (publicSourceView, error) {
 	var rows []model.SourceCategory
 	if err := db.Mdb.Where("source_id = ?", sourceID).
 		Order("depth ASC, sort ASC, source_type_id ASC").
 		Find(&rows).Error; err != nil {
-		return publicSourceView{}
+		return publicSourceView{}, err
 	}
-	shown := sourceTypeShown(sourceID)
+	shown, err := sourceTypeShown(sourceID)
+	if err != nil {
+		return publicSourceView{}, err
+	}
 	useRules := publicRulesForSource(sourceID)
 	parsed := make([]sourceTypeRow, 0, len(rows))
 	hidden := map[int64]sourceTypeRow{}
@@ -357,7 +385,7 @@ func buildPublicSourceView(sourceID string) publicSourceView {
 		members: map[int64]publicTypeGroup{},
 	}
 	indexPublicGroups(view.Groups, view.members)
-	return view
+	return view, nil
 }
 
 func publicRulesForSource(sourceID string) bool {

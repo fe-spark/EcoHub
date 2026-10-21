@@ -94,8 +94,11 @@ func (s *InitService) SiteWebConfigInit() {
 		}
 		return
 	}
-	// 已初始化：回填网站配置的 Redis 缓存
-	_ = repository.GetSiteBasic()
+	// 已初始化：回填网站配置的 Redis 缓存。读失败不能写默认配置盖掉库。
+	if _, err := repository.GetSiteBasic(); err != nil {
+		syslog.Errorf("SiteWebConfigInit GetSiteBasic Error: %v", err)
+		return
+	}
 }
 
 // defaultBasicConfig 默认网站基本信息
@@ -167,7 +170,11 @@ func (s *InitService) CollectCrontabInit() {
 
 // ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
 func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
-	existing := repository.GetAllFilmTask()
+	existing, err := repository.GetAllFilmTask()
+	if err != nil {
+		syslog.Errorf("[Cron] 读取定时任务失败: %v", err)
+		return nil
+	}
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
 		existingModels[t.Model] = true
@@ -219,12 +226,6 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 		spider.RegisterTaskCid(task.Id, cid)
 	} else {
 		syslog.Errorf("Task [%s, model=%d] Add Cron Error: %v", task.Id, task.Model, err)
-	}
-}
-
-func (s *InitService) createDefaultTasks() {
-	for _, task := range defaultFilmTasks() {
-		s.registerTask(task)
 	}
 }
 

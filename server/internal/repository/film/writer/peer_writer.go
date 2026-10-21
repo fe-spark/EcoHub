@@ -3,6 +3,7 @@ package writer
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"log"
 	"math"
 	"sort"
@@ -310,6 +311,9 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 		}
 
 		if filmIndex == nil {
+			if !shared.HasPlayableLinks(detail) {
+				return errors.New("影片没有有效播放链接，不能建档")
+			}
 			fi, err := createNewFilmIndexTx(tx, source.Id, detail)
 			if err != nil {
 				return err

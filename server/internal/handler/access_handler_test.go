@@ -58,6 +58,7 @@ func TestTrackViewValidPayload(t *testing.T) {
 
 func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	setupAccessDailyTestDB(t)
 
 	orig := config.AccessLogEnabled
 	defer func() { config.AccessLogEnabled = orig }()
@@ -123,8 +124,8 @@ func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 			t.Fatalf("overview code=%d body=%s", w2.Code, w2.Body.String())
 		}
 		resp2 := decodeResponse(t, w2)
-		if resp2.Code != 0 {
-			t.Fatalf("want code 0, got %+v", resp2)
+		if resp2.Code == 0 {
+			t.Fatalf("没有落库时不能返回空概览: %+v", resp2)
 		}
 
 		// 测试 Tops 榜单接口

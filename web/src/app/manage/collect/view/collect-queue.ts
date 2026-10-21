@@ -10,6 +10,7 @@ export interface CollectQueueGroup {
 }
 
 export interface CollectQueueProgressView {
+  queueId?: string;
   total: number;
   doneCount: number;
   failedCount: number;
@@ -145,7 +146,7 @@ export function finishedQueueViews<
         (item.queueId === bar.queueId || isPromotedClientQueue(bar, item.queueId)),
     );
     if (current && !current.view.running) {
-      ended.push(current.view);
+      ended.push({ ...current.view, queueId: bar.queueId });
     }
   }
   return ended;

@@ -14,10 +14,13 @@ type CronService struct{}
 var CronSvc = new(CronService)
 
 // GetFilmCrontab 获取所有定时任务信息
-func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
+func (s *CronService) GetFilmCrontab() ([]model.CronTaskVo, error) {
 	cst := time.FixedZone("UTC", 8*3600)
 	var l []model.CronTaskVo
-	tl := repository.GetAllFilmTask()
+	tl, err := repository.GetAllFilmTask()
+	if err != nil {
+		return nil, err
+	}
 
 	for _, t := range tl {
 		e := spider.GetEntryByTaskId(t.Id)
@@ -39,7 +42,7 @@ func (s *CronService) GetFilmCrontab() []model.CronTaskVo {
 
 		l = append(l, taskVo)
 	}
-	return l
+	return l, nil
 }
 
 // GetFilmCrontabById 通过ID获取对应的定时任务信息
@@ -54,8 +57,14 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 	if err != nil {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
 	}
-	if state && ft.Model == model.TaskModelBannerAuto && !bannerQuickHasQuotas() {
-		return fmt.Errorf("请配置排片数量")
+	if state && ft.Model == model.TaskModelBannerAuto {
+		hasQuotas, err := bannerQuickHasQuotas()
+		if err != nil {
+			return err
+		}
+		if !hasQuotas {
+			return fmt.Errorf("请配置排片数量")
+		}
 	}
 	ft.State = state
 	if err := repository.UpdateFilmTask(ft); err != nil {

@@ -28,7 +28,10 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 	defer heartbeat.Stop()
 
 	// 连接建立时下发全量采集站分类同步状态快照
-	statusMap := service.CollectSvc.GetCategoryStatusMap()
+	statusMap, err := service.CollectSvc.GetCategoryStatusMap()
+	if err != nil {
+		return
+	}
 	if err := stream.SendEvent("category_snapshot", statusMap); err != nil {
 		if errors.Is(err, errSSEWrite) {
 			return

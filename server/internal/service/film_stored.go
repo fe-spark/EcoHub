@@ -17,6 +17,28 @@ func UseStoredFilm(detail *model.MovieDetailVo) {
 	if err := db.Mdb.Where("mid = ?", detail.Id).First(&row).Error; err != nil {
 		return
 	}
+	if detail.SourceId == "" && row.FirstSourceId != "" {
+		detail.SourceId = row.FirstSourceId
+	}
+	if detail.RawCid == 0 && row.CategoryKey != "" {
+		parts := strings.Split(row.CategoryKey, ":")
+		if len(parts) >= 3 {
+			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
+				detail.RawCid = id
+			}
+		}
+	}
+	if detail.RawPid == 0 && row.RootCategoryKey != "" {
+		parts := strings.Split(row.RootCategoryKey, ":")
+		if len(parts) >= 3 {
+			if id, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil && id > 0 {
+				detail.RawPid = id
+			}
+		}
+	}
+	if row.CName != "" {
+		detail.CName = row.CName
+	}
 	detail.Picture = row.Picture
 	detail.PictureSlide = row.PictureSlide
 	detail.CustomPicture = row.CustomPicture

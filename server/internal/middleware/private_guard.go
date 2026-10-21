@@ -19,7 +19,12 @@ var defaultAuthToken = AuthToken()
 // 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态或有效的订阅密钥（X-Provide-Key / ?key=）
 func PrivateAccessGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := repository.GetSiteBasic()
+		cfg, err := repository.GetSiteBasic()
+		if err != nil {
+			dto.Failed("站点配置读取失败", c)
+			c.Abort()
+			return
+		}
 		if !cfg.PrivateAccess {
 			c.Next()
 			return
@@ -85,7 +90,12 @@ func PrivateAccessGuard() gin.HandlerFunc {
 // 3. 若配置了 ProvideKey，使用恒定时间校验 ?key= 或 Header X-Provide-Key
 func ProvideKeyGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg := repository.GetSiteBasic()
+		cfg, err := repository.GetSiteBasic()
+		if err != nil {
+			dto.Failed("站点配置读取失败", c)
+			c.Abort()
+			return
+		}
 		if !cfg.PrivateAccess {
 			c.Next()
 			return

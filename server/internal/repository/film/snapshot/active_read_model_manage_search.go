@@ -72,7 +72,10 @@ func GetSearchPageReadModel(s model.SearchVo) ([]model.FilmIndex, error) {
 			mids = append(mids, meta.Mid)
 		}
 	}
-	snaps := GetProjectedSnapshotsByMidsOrdered(idx.Version, mids)
+	snaps, err := GetProjectedSnapshotsByMidsOrdered(idx.Version, mids)
+	if err != nil {
+		return nil, err
+	}
 	log.Printf("[ManageFilmSearch] 内存检索完成 name=%q pid=%d cid=%d total=%d page=%d size=%d cost=%s", strings.TrimSpace(s.Name), s.Pid, s.Cid, page.Total, page.Current, len(snaps), time.Since(startedAt))
 	return convertSnapshotsToFilmIndexes(snaps), nil
 }
@@ -87,11 +90,11 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 	}
 	name := strings.TrimSpace(s.Name)
 	if name != "" {
-		matched, err := filterManageMetas(idx, s)
+		hits, err := filterManageMetas(idx, s)
 		if err != nil {
 			return nil, 0, err
 		}
-		total := len(matched)
+		total := len(hits)
 		offset := shared.PageOffset(page)
 		if offset >= total {
 			return nil, total, nil
@@ -100,7 +103,11 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 		if end > total {
 			end = total
 		}
-		return matched[offset:end], total, nil
+		window := make([]FilmSearchMeta, 0, end-offset)
+		for _, hit := range hits[offset:end] {
+			window = append(window, idx.Items[hit])
+		}
+		return window, total, nil
 	}
 	sourceID := strings.TrimSpace(s.SourceId)
 	offset := shared.PageOffset(page)
@@ -123,57 +130,51 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 	return window, total, nil
 }
 
-func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo) ([]FilmSearchMeta, error) {
+func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo) ([]int, error) {
 	if idx == nil || len(idx.Items) == 0 {
 		return nil, nil
 	}
 	sourceID := strings.TrimSpace(s.SourceId)
-	matched := make([]FilmSearchMeta, 0)
+	name := strings.TrimSpace(s.Name)
+	q := utils.BuildQueryContext(name)
+	type scored struct {
+		index int
+		score int
+	}
+	hits := make([]scored, 0)
 	for _, i := range idx.ByUpdate {
 		if i < 0 || i >= len(idx.Items) {
 			return nil, fmt.Errorf("检索索引损坏")
 		}
-		meta := idx.Items[i]
-		if manageMetaPass(&meta, s, sourceID) {
-			matched = append(matched, meta)
+		meta := &idx.Items[i]
+		if !manageMetaPass(meta, s, sourceID) {
+			continue
 		}
-	}
-	name := strings.TrimSpace(s.Name)
-	if name == "" || len(matched) == 0 {
-		return matched, nil
-	}
-	q := utils.BuildQueryContext(name)
-	type scored struct {
-		meta  FilmSearchMeta
-		score int
-	}
-	hits := make([]scored, 0, len(matched))
-	for _, meta := range matched {
 		score := utils.ScoreFilmMatch(meta.Item, q)
 		if score <= 0 {
 			continue
 		}
-		hits = append(hits, scored{meta: meta, score: score})
+		hits = append(hits, scored{index: i, score: score})
 	}
 	sort.SliceStable(hits, func(i, j int) bool {
-		a, b := hits[i], hits[j]
-		if a.score != b.score {
-			return a.score > b.score
+		a, b := &idx.Items[hits[i].index], &idx.Items[hits[j].index]
+		if hits[i].score != hits[j].score {
+			return hits[i].score > hits[j].score
 		}
-		if a.meta.Item.Hits != b.meta.Item.Hits {
-			return a.meta.Item.Hits > b.meta.Item.Hits
+		if a.Item.Hits != b.Item.Hits {
+			return a.Item.Hits > b.Item.Hits
 		}
-		if a.meta.Item.Year != b.meta.Item.Year {
-			return a.meta.Item.Year > b.meta.Item.Year
+		if a.Item.Year != b.Item.Year {
+			return a.Item.Year > b.Item.Year
 		}
-		if a.meta.Item.UpdateStamp != b.meta.Item.UpdateStamp {
-			return a.meta.Item.UpdateStamp > b.meta.Item.UpdateStamp
+		if a.Item.UpdateStamp != b.Item.UpdateStamp {
+			return a.Item.UpdateStamp > b.Item.UpdateStamp
 		}
-		return a.meta.Mid > b.meta.Mid
+		return a.Mid > b.Mid
 	})
-	out := make([]FilmSearchMeta, len(hits))
+	out := make([]int, len(hits))
 	for i, hit := range hits {
-		out[i] = hit.meta
+		out[i] = hit.index
 	}
 	return out, nil
 }

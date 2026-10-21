@@ -104,23 +104,33 @@ func TestNormalizeTipLinkAndLimits(t *testing.T) {
 }
 
 func TestDecodeTipJSON(t *testing.T) {
-	if got := DecodeTipJSON(""); got.Title != DefaultTipTitle {
+	got, err := DecodeTipJSON("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != DefaultTipTitle {
 		t.Fatalf("empty json title = %q", got.Title)
 	}
-	if got := DecodeTipJSON("{not-json"); got.Title != DefaultTipTitle {
-		t.Fatalf("invalid json title = %q", got.Title)
+	if _, err := DecodeTipJSON("{not-json"); err == nil {
+		t.Fatal("invalid json should fail")
 	}
-	raw := EncodeTipJSON(TipConfig{
+	raw, err := EncodeTipJSON(TipConfig{
 		Enabled: true,
 		Title:   "支持一下",
 		Channels: []TipChannel{
 			{Key: "wechat", QrImage: "https://cdn.example/wx.png"},
 		},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(raw, "wechat") {
 		t.Fatalf("encode missing wechat: %s", raw)
 	}
-	got := DecodeTipJSON(raw)
+	got, err = DecodeTipJSON(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !got.Enabled || got.Title != "支持一下" || got.Channels[0].QrImage != "https://cdn.example/wx.png" {
 		t.Fatalf("roundtrip = %+v", got)
 	}

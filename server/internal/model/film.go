@@ -77,6 +77,7 @@ type MovieUrlInfo struct {
 // MovieDetail 影片详情信息
 type MovieDetail struct {
 	Id                 int64               `json:"id"`                 // 影片Id
+	SourceId           string              `json:"sourceId,omitempty"` // 归属采集站ID
 	RawCid             int64               `json:"rawCid"`             // 原始来源分类ID
 	RawPid             int64               `json:"rawPid"`             // 原始来源一级分类ID
 	Cid                int64               `json:"cid"`                // 分类ID
@@ -356,6 +357,7 @@ type SearchVo struct {
 // FilmDetailVo 添加影片对象
 type FilmDetailVo struct {
 	Id                 int64    `json:"id"`                 // 影片id
+	SourceId           string   `json:"sourceId"`           // 所属采集站ID
 	Cid                int64    `json:"cid"`                // 分类ID
 	Pid                int64    `json:"pid"`                // 一级分类ID
 	Name               string   `json:"name"`               // 片名

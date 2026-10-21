@@ -25,7 +25,7 @@ import { useCollectBatchRunner } from "./use-collect-batch-runner";
 import { useCollectQueueBars } from "./use-collect-queue-bars";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
-import { newClientCollectQueueId } from "./collect-queue";
+import { isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
 import {
   isActiveCollectStatus,
   progressAsStopping,
@@ -88,6 +88,15 @@ export default function CollectManagePageView() {
               return { ...fresh, isPrimary: item.isPrimary };
             });
           });
+          if (stoppingSiteIdsRef.current.size > 0) {
+            for (const id of stoppingSiteIdsRef.current) {
+              const item = rawData.find((s: CollectListItemResponse) => s.id === id);
+              if (!item || !item.progress || isTerminalCollectStatus(item.progress.status)) {
+                stoppingSiteIdsRef.current.delete(id);
+                message.info({ key: `collect-stop-site-${id}`, content: "采集已停止", duration: 2 });
+              }
+            }
+          }
           if (createdId) {
             setTimeout(() => {
               document.getElementById(`source-card-${createdId}`)?.scrollIntoView({
@@ -109,7 +118,24 @@ export default function CollectManagePageView() {
   );
 
   const resetTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
-  const handleProgressStream = useCollectProgressStream(setSiteList, resetTimersRef);
+  const stoppingSiteIdsRef = useRef<Set<string>>(new Set());
+
+  const handleTerminalStatus = useCallback(
+    (id: string, status: string) => {
+      if (stoppingSiteIdsRef.current.has(id)) {
+        stoppingSiteIdsRef.current.delete(id);
+        const text = status === "stopped" ? "采集已停止" : status === "failed" ? "采集失败" : "采集完成";
+        message.info({
+          key: `collect-stop-site-${id}`,
+          content: text,
+          duration: 2,
+        });
+      }
+    },
+    [message],
+  );
+
+  const handleProgressStream = useCollectProgressStream(setSiteList, resetTimersRef, handleTerminalStatus);
 
   useCollectStream({
     onProgress: handleProgressStream,
@@ -275,7 +301,7 @@ export default function CollectManagePageView() {
       return;
     }
     if (!record.state) {
-      message.warning("已禁用");
+      message.warning("采集站已停用，请先启用后再采集");
       return;
     }
     if (record.categoryReady === false) {
@@ -309,14 +335,24 @@ export default function CollectManagePageView() {
   };
 
   const stopTask = async (id: string) => {
+    stoppingSiteIdsRef.current.add(id);
     updateSiteListItem(id, (item) => ({ ...item, progress: progressAsStopping(item.progress, item.id, item.name) }));
+    message.loading({
+      key: `collect-stop-site-${id}`,
+      content: "正在停止...",
+      duration: 0,
+    });
     const resp = await ApiPost("/manage/spider/stop", { id });
-    if (resp.code === 0) {
-      message.success("正在停止");
+    if (resp.code !== 0) {
+      stoppingSiteIdsRef.current.delete(id);
+      message.error({
+        key: `collect-stop-site-${id}`,
+        content: resp.msg || "终止任务失败",
+        duration: 2,
+      });
+      void getCollectList();
       return;
     }
-    message.error(resp.msg || "终止任务失败");
-    void getCollectList();
   };
 
   const delSource = async (id: string) => {

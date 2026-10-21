@@ -21,7 +21,7 @@ type NotifyEventSwitches struct {
 type NotifyConfig struct {
 	Enabled            bool                `json:"enabled"`
 	BotToken           string              `json:"botToken"`
-	ChatIDs            []string            `json:"chatIds"`            // 支持 "chatId" 或 "chatId:threadId"
+	ChatIDs            []string            `json:"chatIds"` // 支持 "chatId" 或 "chatId:threadId"
 	Events             NotifyEventSwitches `json:"events"`
 	OnlyNotifyOnUpdate bool                `json:"onlyNotifyOnUpdate"` // 无更新且无失败时跳过汇总推送
 	MaxFilmsInMessage  int                 `json:"maxFilmsInMessage"`  // 翻页列表每页展示条数（1~20，默认 15）

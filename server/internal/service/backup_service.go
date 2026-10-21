@@ -17,12 +17,18 @@ type BackupService struct{}
 var BackupSvc = new(BackupService)
 
 // ExportConfig 导出当前可迁移配置
-func (s *BackupService) ExportConfig() model.ConfigBackup {
-	sources := repository.GetCollectSourceList()
+func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 	if sources == nil {
 		sources = []model.FilmSource{}
 	}
-	tasks := repository.GetAllFilmTask()
+	tasks, err := repository.GetAllFilmTask()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 	if tasks == nil {
 		tasks = []model.FilmCollectTask{}
 	} else {
@@ -30,18 +36,39 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 			tasks[i].Cid = 0
 		}
 	}
-	banners := repository.GetBanners()
+	banners, err := repository.GetBanners()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 	if banners == nil {
 		banners = model.Banners{}
 	}
-	bannerConfig := repository.GetBannerConfig()
+	bannerConfig, err := repository.GetBannerConfig()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 
-	site := repository.GetSiteBasic()
-	proxyCfg := repository.GetProxyConfig()
-	tmdbCfg := repository.GetTMDBConfig()
-	notifyCfg := repository.GetNotifyConfig()
+	site, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
+	proxyCfg, err := repository.GetProxyConfig()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
+	tmdbCfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
+	notifyCfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 
-	rules, _ := repository.ListAllMappingRules(repository.MappingRuleQuery{})
+	rules, err := repository.ListAllMappingRules(repository.MappingRuleQuery{})
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 	exports := make([]model.MappingRuleExport, 0, len(rules))
 	for _, r := range rules {
 		exports = append(exports, model.MappingRuleExport{
@@ -66,7 +93,7 @@ func (s *BackupService) ExportConfig() model.ConfigBackup {
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
 		Notify:       &notifyCfg,
-	}
+	}, nil
 }
 
 // ImportConfig 按模块恢复配置备份（调用方已校验密码）
@@ -99,7 +126,11 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			list = []model.FilmSource{}
 		}
 		// 导入前清理旧站限流器
-		for _, src := range repository.GetCollectSourceList() {
+		oldSources, err := repository.GetCollectSourceList()
+		if err != nil {
+			return err
+		}
+		for _, src := range oldSources {
 			spider.ClearLimiter(src.Id)
 		}
 		if err := repository.ReplaceCollectSources(list); err != nil {
@@ -118,13 +149,21 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			tasks = []model.FilmCollectTask{}
 		}
 		// 先卸掉旧任务运行时
-		for _, t := range repository.GetAllFilmTask() {
+		oldTasks, err := repository.GetAllFilmTask()
+		if err != nil {
+			return err
+		}
+		for _, t := range oldTasks {
 			spider.RemoveCronByTaskId(t.Id)
 		}
 		if err := repository.ResetFilmTasks(tasks); err != nil {
 			return fmt.Errorf("导入定时任务失败: %w", err)
 		}
-		for _, t := range repository.GetAllFilmTask() {
+		reloaded, err := repository.GetAllFilmTask()
+		if err != nil {
+			return err
+		}
+		for _, t := range reloaded {
 			if err := spider.ReloadCronTask(t.Id); err != nil {
 				// 单任务重载失败不阻断整批导入
 				_ = err

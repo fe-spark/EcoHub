@@ -17,7 +17,7 @@ export function useCategoryTreeState() {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loadingTree, setLoadingTree] = useState(false);
   const [savingTree, setSavingTree] = useState(false);
-  const [sources, setSources] = useState<{ id: string; name: string }[]>([]);
+  const [sources, setSources] = useState<{ id: string; name: string; state?: boolean }[]>([]);
   const [sourceId, setSourceId] = useState("");
   const sourceIdRef = useRef("");
 

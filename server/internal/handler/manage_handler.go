@@ -65,7 +65,11 @@ func (h *ManageHandler) UpgradeApp(c *gin.Context) {
 
 // SiteBasicConfig 网站基本配置
 func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
-	cfg := service.ManageSvc.GetSiteBasicConfig()
+	cfg, err := service.ManageSvc.GetSiteBasicConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	// 若非超级管理员（如公开未登录接口或访客），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
@@ -97,7 +101,11 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 
 // SiteAccessConfig 网站访问控制配置
 func (h *ManageHandler) SiteAccessConfig(c *gin.Context) {
-	cfg := service.ManageSvc.GetSiteAccessConfig()
+	cfg, err := service.ManageSvc.GetSiteAccessConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	// 若非超级管理员（如只读访客账号），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
@@ -127,7 +135,12 @@ func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
 
 // SiteTipConfig 获取赞赏配置
 func (h *ManageHandler) SiteTipConfig(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetSiteTipConfig(), "赞赏配置获取成功", c)
+	tip, err := service.ManageSvc.GetSiteTipConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(tip, "赞赏配置获取成功", c)
 }
 
 // UpdateSiteTip 更新赞赏配置
@@ -146,7 +159,12 @@ func (h *ManageHandler) UpdateSiteTip(c *gin.Context) {
 
 // SiteNoticeConfig 获取公告配置
 func (h *ManageHandler) SiteNoticeConfig(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetSiteNoticeConfig(), "公告配置获取成功", c)
+	notice, err := service.ManageSvc.GetSiteNoticeConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(notice, "公告配置获取成功", c)
 }
 
 // UpdateSiteNotice 更新公告配置
@@ -177,7 +195,12 @@ func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
 		return
 	}
-	dto.Success(service.BackupSvc.ExportConfig(), "配置备份导出成功", c)
+	backup, err := service.BackupSvc.ExportConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(backup, "配置备份导出成功", c)
 }
 
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）

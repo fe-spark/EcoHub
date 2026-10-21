@@ -1,6 +1,7 @@
 package access
 
 import (
+	"errors"
 	"strings"
 
 	"server/internal/infra/db"
@@ -28,40 +29,46 @@ func persistDaily(stats model.AccessDailyStats, tops []model.AccessDailyTop) err
 	})
 }
 
-func loadDailyStats(day string) (model.AccessDailyStats, bool) {
+func loadDailyStats(day string) (model.AccessDailyStats, bool, error) {
 	var row model.AccessDailyStats
 	if db.Mdb == nil {
-		return row, false
+		return row, false, errors.New("数据库未连接")
 	}
 	err := db.Mdb.Where("day = ?", day).First(&row).Error
-	if err != nil {
-		return row, false
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return row, false, nil
 	}
-	return row, true
+	if err != nil {
+		return row, false, err
+	}
+	return row, true, nil
 }
 
 // HasPersistedData 检查数据库中是否存在历史分析落库数据及总行数
-func HasPersistedData() (bool, int64) {
+func HasPersistedData() (bool, int64, error) {
 	if db.Mdb == nil {
-		return false, 0
+		return false, 0, errors.New("数据库未连接")
 	}
 	var count int64
 	if err := db.Mdb.Model(&model.AccessDailyStats{}).Count(&count).Error; err != nil {
-		return false, 0
+		return false, 0, err
 	}
 	if count > 0 {
-		return true, count
+		return true, count, nil
 	}
 	var topCount int64
-	if err := db.Mdb.Model(&model.AccessDailyTop{}).Limit(1).Count(&topCount).Error; err == nil && topCount > 0 {
-		return true, topCount
+	if err := db.Mdb.Model(&model.AccessDailyTop{}).Limit(1).Count(&topCount).Error; err != nil {
+		return false, 0, err
 	}
-	return false, 0
+	if topCount > 0 {
+		return true, topCount, nil
+	}
+	return false, 0, nil
 }
 
-func loadDailyTops(day, kind string, limit int) []TopItem {
+func loadDailyTops(day, kind string, limit int) ([]TopItem, error) {
 	if db.Mdb == nil {
-		return nil
+		return nil, errors.New("数据库未连接")
 	}
 	if limit <= 0 {
 		limit = accessTopKeep
@@ -69,7 +76,7 @@ func loadDailyTops(day, kind string, limit int) []TopItem {
 	var rows []model.AccessDailyTop
 	if err := db.Mdb.Where("day = ? AND kind = ?", day, kind).
 		Order("rank ASC").Limit(limit).Find(&rows).Error; err != nil {
-		return nil
+		return nil, err
 	}
 	items := make([]TopItem, 0, len(rows))
 	for _, r := range rows {
@@ -82,10 +89,10 @@ func loadDailyTops(day, kind string, limit int) []TopItem {
 			Year:     r.Year,
 		})
 	}
-	return items
+	return items, nil
 }
 
-func overviewFromDailyScope(row model.AccessDailyStats, module, platform string) *Overview {
+func overviewFromDailyScope(row model.AccessDailyStats, module, platform string) (*Overview, error) {
 	module = strings.ToLower(strings.TrimSpace(module))
 	platform = strings.ToLower(strings.TrimSpace(platform))
 	out := &Overview{
@@ -106,7 +113,7 @@ func overviewFromDailyScope(row model.AccessDailyStats, module, platform string)
 		Hist:      unmarshalIntMap(row.HistJSON),
 		Series:    unmarshalSeries(row.SeriesJSON),
 		Platforms: unmarshalIntMap(row.PlatformJSON),
-		Versions:  versionsFromDaily(row.VersionJSON, platform),
+		Versions:  nil,
 		Browsers:  unmarshalIntMap(row.BrowserJSON),
 		OS:        unmarshalIntMap(row.OSJSON),
 		Models:    unmarshalIntMap(row.ModelsJSON),
@@ -148,5 +155,10 @@ func overviewFromDailyScope(row model.AccessDailyStats, module, platform string)
 			out.Series[i].PV = out.Series[i].ProvidePV
 		}
 	}
-	return out
+	versions, err := versionsFromDaily(row.VersionJSON, platform)
+	if err != nil {
+		return nil, err
+	}
+	out.Versions = versions
+	return out, nil
 }

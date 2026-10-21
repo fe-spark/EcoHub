@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -16,26 +17,35 @@ import (
 	"server/internal/repository/film/shared"
 )
 
-func GetSnapshotByMid(version string, mid int64) *model.FilmListSnapshot {
-	if mid <= 0 || db.Mdb == nil {
-		return nil
+func GetSnapshotByMid(version string, mid int64) (*model.FilmListSnapshot, error) {
+	if mid <= 0 {
+		return nil, nil
+	}
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
 	}
 	var index model.FilmIndex
 	if err := liveFilmQuery().Where("mid = ?", mid).First(&index).Error; err != nil {
-		return nil
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
 	}
 	snap := buildFilmListSnapshot(resolveListVersion(version), index)
 	scrapes := LoadActiveScrapesByMids([]int64{mid})
 	if sc, ok := scrapes[mid]; ok {
 		ApplyTMDBScrapeToSnapshot(&snap, &sc)
 	}
-	return &snap
+	return &snap, nil
 }
 
 // GetSnapshotsByMidsOrdered 按 mid 列表顺序取当前版本快照；无快照的 mid 跳过。
-func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
-	if len(mids) == 0 || db.Mdb == nil {
-		return nil
+func GetSnapshotsByMidsOrdered(version string, mids []int64) ([]model.FilmListSnapshot, error) {
+	if len(mids) == 0 {
+		return nil, nil
+	}
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
 	}
 	uniq := make([]int64, 0, len(mids))
 	seen := make(map[int64]struct{}, len(mids))
@@ -50,7 +60,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		uniq = append(uniq, mid)
 	}
 	if len(uniq) == 0 {
-		return nil
+		return nil, nil
 	}
 	byMid := make(map[int64]model.FilmListSnapshot, len(uniq))
 	const chunk = 200
@@ -62,7 +72,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		chunkMids := uniq[start:end]
 		var rows []model.FilmIndex
 		if err := liveFilmQuery().Where("mid IN ?", chunkMids).Find(&rows).Error; err != nil {
-			continue
+			return nil, err
 		}
 		scrapes := LoadActiveScrapesByMids(chunkMids)
 		for _, row := range rows {
@@ -91,7 +101,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSna
 		emitted[mid] = struct{}{}
 		out = append(out, snap)
 	}
-	return out
+	return out, nil
 }
 
 func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDetail, int64) {
@@ -104,16 +114,18 @@ func GetMovieDetailBySnapshot(snapshot model.FilmListSnapshot) (*model.MovieDeta
 	return &detail, snapshot.UpdateStamp
 }
 
-func HasMovieDetail(mid int64) bool {
+func HasMovieDetail(mid int64) (bool, error) {
 	if mid <= 0 {
-		return false
+		return false, nil
+	}
+	if db.Mdb == nil {
+		return false, ErrSearchIndexMissing
 	}
 	var count int64
 	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid = ?", mid).Limit(1).Count(&count).Error; err != nil {
-		log.Printf("HasMovieDetail Error: %v", err)
-		return false
+		return false, err
 	}
-	return count > 0
+	return count > 0, nil
 }
 
 func normalizeMovieDetailLists(detail *model.MovieDetail) {
@@ -143,32 +155,8 @@ func normalizeMovieDetailLists(detail *model.MovieDetail) {
 	}
 }
 
-func GetSnapshotMovieListByCategory(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryReadModel(version, field, id, limit, offset)
-}
-
-func GetSnapshotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
-}
-
-func GetSnapshotMovieListByCategoryPage(version string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryPageReadModel(version, field, id, page)
-}
-
-func GetSnapshotMovieListByCategoryPageWithSource(version string, sourceId string, field string, id int64, page *dto.Page) []model.MovieBasicInfo {
-	return GetSnapshotMovieListByCategoryPageWithSourceReadModel(version, sourceId, field, id, page)
-}
-
-func GetSnapshotHotMovieListByCategory(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
-	return GetSnapshotHotMovieListByCategoryReadModel(version, field, id, limit, offset)
-}
-
 func GetSnapshotHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotHotMovieListByCategoryWithSourceReadModel(version, sourceId, field, id, limit, offset)
-}
-
-func GetSnapshotDynamicHotMovieListByCategory(version string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {
-	return GetSnapshotDynamicHotMovieListByCategoryReadModel(version, field, id, limit, poolSize)
 }
 
 func GetSnapshotDynamicHotMovieListByCategoryWithSource(version string, sourceId string, field string, id int64, limit int, poolSize int) ([]model.MovieBasicInfo, error) {

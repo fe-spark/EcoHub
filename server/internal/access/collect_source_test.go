@@ -95,11 +95,11 @@ func TestQuerySourceCallsOrdersKnownThenUnknown(t *testing.T) {
 
 	prevList := listCollectSources
 	prevActive := lookupActiveCollectSourceID
-	listCollectSources = func() []model.FilmSource {
+	listCollectSources = func() ([]model.FilmSource, error) {
 		return []model.FilmSource{
 			{Id: "srcA", Name: "甲", State: true},
 			{Id: "srcB", Name: "乙", State: false},
-		}
+		}, nil
 	}
 	lookupActiveCollectSourceID = func() string { return "srcA" }
 	t.Cleanup(func() {

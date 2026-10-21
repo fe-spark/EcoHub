@@ -16,7 +16,12 @@ var NotifyHd = new(NotifyHandler)
 
 // GetConfig 获取脱敏后的 Telegram 通知配置
 func (h *NotifyHandler) GetConfig(c *gin.Context) {
-	dto.Success(service.NotifySvc.PublicConfig(), "获取通知配置成功", c)
+	cfg, err := service.NotifySvc.PublicConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(cfg, "获取通知配置成功", c)
 }
 
 // UpdateConfig 更新 Telegram 通知配置（仅超级管理员）

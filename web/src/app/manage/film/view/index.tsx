@@ -357,7 +357,19 @@ export default function FilmListPageView() {
             onBatchUpdate={() => handleUpdateFilms(selectedRowKeys.map(Number))}
             onBatchDelete={() => handleDelFilms(selectedRowKeys.map(Number))}
             onClearSelection={() => setSelectedRowKeys([])}
-            onAdd={() => router.push("/manage/film/add")}
+            onAdd={() => {
+              const query = new URLSearchParams();
+              const targetSourceId =
+                params.sourceId ||
+                tableSourceId ||
+                options.defaultSourceId ||
+                options.sources?.[0]?.id;
+              const targetCid = classId || params.cid || params.pid;
+              if (targetSourceId) query.set("sourceId", targetSourceId);
+              if (targetCid) query.set("cid", String(targetCid));
+              const qs = query.toString();
+              router.push(qs ? `/manage/film/add?${qs}` : "/manage/film/add");
+            }}
             styles={styles}
           />
         )}

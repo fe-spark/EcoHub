@@ -30,18 +30,12 @@ func (i *IndexService) SearchFilm(keyword, _ string, sortField string, page *dto
 		List:    []model.MovieBasicInfo{},
 		Sources: []model.SearchSourceTab{},
 	}
-	if keyword == "" {
+	if keyword == "" || sourceID == "" {
 		return out
 	}
 
 	version := filmsnapshot.GetActiveReadModelVersion()
-	var sl []model.FilmListSnapshot
-	var err error
-	if sourceID != "" {
-		sl, err = filmsnapshot.SearchSnapshotsByKeywordSourceAndSortFast(version, sourceID, keyword, sortField, page)
-	} else {
-		sl, err = filmsnapshot.SearchSnapshotsByKeywordAndSortFast(version, keyword, sortField, page)
-	}
+	sl, err := filmsnapshot.SearchSnapshotsByKeywordSourceAndSortFast(version, sourceID, keyword, sortField, page)
 	if err != nil {
 		out.Error = err.Error()
 		return out

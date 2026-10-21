@@ -42,9 +42,9 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}, nil
 	}
 
-	keywordOnly := keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == "" && st.SourceId == ""
+	keywordOnly := keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == ""
 	if keywordOnly {
-		snaps, err := memoryKeywordSnapshots(version, "", keyword, st.Sort, st.Pid, st.Cid, page)
+		snaps, err := memoryKeywordSnapshots(version, st.SourceId, keyword, st.Sort, st.Pid, st.Cid, page)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +110,10 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		} else if st.Pid > 0 {
 			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
 		}
-		query = applyTagSearchFilter(query, version, st)
+		query, err := applyTagSearchFilter(query, version, st)
+		if err != nil {
+			return nil, err
+		}
 		if keyword != "" {
 			query = applyNameLikeFilter(query, keyword)
 		}

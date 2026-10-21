@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/film"
@@ -47,18 +48,25 @@ func init() {
 }
 
 // GetConfig 获取完整通知配置（内部使用，含明文 BotToken）
-func (s *NotifyService) GetConfig() model.NotifyConfig {
+func (s *NotifyService) GetConfig() (model.NotifyConfig, error) {
 	return repository.GetNotifyConfig()
 }
 
 // PublicConfig 获取脱敏后的通知配置（供管理后台展示）
-func (s *NotifyService) PublicConfig() model.NotifyConfig {
-	return repository.PublicNotifyConfig(repository.GetNotifyConfig())
+func (s *NotifyService) PublicConfig() (model.NotifyConfig, error) {
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		return model.NotifyConfig{}, err
+	}
+	return repository.PublicNotifyConfig(cfg), nil
 }
 
 // UpdateConfig 校验并保存通知配置，同时自动重载轮询器
 func (s *NotifyService) UpdateConfig(incoming model.NotifyConfig) (model.NotifyConfig, error) {
-	stored := repository.GetNotifyConfig()
+	stored, err := repository.GetNotifyConfig()
+	if err != nil {
+		return model.NotifyConfig{}, err
+	}
 	merged, err := validateAndMergeNotifyConfig(stored, incoming)
 	if err != nil {
 		return model.NotifyConfig{}, err
@@ -95,7 +103,10 @@ func validateAndMergeNotifyConfig(stored, incoming model.NotifyConfig) (model.No
 
 // SendTest 发送测试通知（支持传入未保存的草稿 Token 和 ChatIDs）
 func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResult, error) {
-	stored := repository.GetNotifyConfig()
+	stored, err := repository.GetNotifyConfig()
+	if err != nil {
+		return model.NotifyTestResult{}, err
+	}
 	token := strings.TrimSpace(req.BotToken)
 	if token == "" || repository.IsMaskedBotToken(token) {
 		token = stored.BotToken
@@ -125,7 +136,11 @@ func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResul
 		return model.NotifyTestResult{}, errors.New("请至少填写一个接收通知的 Chat ID")
 	}
 
-	siteName := repository.GetSiteBasic().SiteName
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.NotifyTestResult{}, err
+	}
+	siteName := basic.SiteName
 	text := fmt.Sprintf(
 		"<b>%s 通知通道测试</b>\n✅ Telegram 机器人连接正常\n🕒 时间：<code>%s</code>",
 		formatTitlePrefix(siteName),
@@ -154,7 +169,11 @@ func (s *NotifyService) SendTest(req model.NotifyTestReq) (model.NotifyTestResul
 
 // PublishBatchSummary 异步构建并推送采集批次完成汇总（含与前台同源的分类更新片单及内联翻页）
 func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayload) {
-	cfg := repository.GetNotifyConfig()
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+		return
+	}
 	if !cfg.Enabled || !cfg.Events.CollectBatchSummary || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
@@ -166,7 +185,11 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 		}
 	}
 
-	sess := buildNotifyBatchSession(payload, cfg.MaxFilmsInMessage)
+	sess, err := buildNotifyBatchSession(payload, cfg.MaxFilmsInMessage)
+	if err != nil {
+		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
 	if cfg.OnlyNotifyOnUpdate && len(sess.AllFilms) == 0 && failedSources == 0 {
 		return
 	}
@@ -174,7 +197,11 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 	var markup *InlineKeyboardMarkup
 	if len(sess.AllFilms) > 0 {
 		_ = repository.SaveNotifyBatchSession(sess)
-		markup = buildCategoryKeyboard(sess.BatchID, sess.Categories, len(sess.AllFilms))
+		markup, err = buildCategoryKeyboard(sess.Categories, len(sess.AllFilms))
+		if err != nil {
+			syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+			return
+		}
 	}
 
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, sess.OverviewHTML, markup)
@@ -182,14 +209,23 @@ func (s *NotifyService) PublishBatchSummary(payload model.CollectBatchNotifyPayl
 
 // PublishSourceFailed 发送单源连续失败终止告警
 func (s *NotifyService) PublishSourceFailed(sourceID, sourceName, reason string) {
-	cfg := repository.GetNotifyConfig()
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+		return
+	}
 	if !cfg.Enabled || !cfg.Events.CollectSourceFailed || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
 	if !s.allowAlert("src_fail:" + sourceID) {
 		return
 	}
-	siteName := repository.GetSiteBasic().SiteName
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	siteName := basic.SiteName
 	text := fmt.Sprintf(
 		"<b>%s 采集源异常告警</b>\n❌ 站点：<b>%s</b>\n⚠️ 原因：<code>%s</code>\n🕒 时间：<code>%s</code>",
 		formatTitlePrefix(siteName),
@@ -202,14 +238,23 @@ func (s *NotifyService) PublishSourceFailed(sourceID, sourceName, reason string)
 
 // PublishCronFailed 发送定时任务执行失败告警
 func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
-	cfg := repository.GetNotifyConfig()
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+		return
+	}
 	if !cfg.Enabled || !cfg.Events.CronTaskFailed || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
 	if !s.allowAlert("cron_fail:" + taskID) {
 		return
 	}
-	siteName := repository.GetSiteBasic().SiteName
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	siteName := basic.SiteName
 	title := strings.TrimSpace(remark)
 	if title == "" {
 		title = taskID
@@ -226,11 +271,20 @@ func (s *NotifyService) PublishCronFailed(taskID, remark, reason string) {
 
 // PublishSourceOrderChange 发送采集站排序更新或首选站切换通知
 func (s *NotifyService) PublishSourceOrderChange(oldPrimary, newPrimary *model.FilmSource, enabledSources []model.FilmSource) {
-	cfg := repository.GetNotifyConfig()
+	cfg, err := repository.GetNotifyConfig()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取通知配置失败: %v", err)
+		return
+	}
 	if !cfg.Enabled || !cfg.Events.SourceOrderChange || cfg.BotToken == "" || len(cfg.ChatIDs) == 0 {
 		return
 	}
-	siteName := repository.GetSiteBasic().SiteName
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		syslog.Errorf("[Notify] 读取站点配置失败: %v", err)
+		return
+	}
+	siteName := basic.SiteName
 	text := formatSourceOrderChangeHTML(siteName, oldPrimary, newPrimary, enabledSources)
 	go broadcastTelegram(cfg.BotToken, cfg.ChatIDs, text, nil)
 }
@@ -289,6 +343,13 @@ func (s *NotifyService) allowAlert(key string) bool {
 		return false
 	}
 	s.alertLast[key] = now
+	if len(s.alertLast) > 64 {
+		for k, t := range s.alertLast {
+			if now.Sub(t) >= alertCooldown {
+				delete(s.alertLast, k)
+			}
+		}
+	}
 	return true
 }
 
@@ -303,20 +364,30 @@ func broadcastTelegram(token string, chatIDs []string, htmlText string, markup *
 }
 
 // buildNotifyBatchSession 按前台「每日更新」同源分类树与排序规则构建批次翻页会话
-func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize int) model.NotifyBatchSession {
+func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize int) (model.NotifyBatchSession, error) {
 	if pageSize <= 0 {
 		pageSize = model.DefaultNotifyPageSize
 	} else if pageSize > model.MaxNotifyPageSize {
 		pageSize = model.MaxNotifyPageSize
 	}
-	siteName := repository.GetSiteBasic().SiteName
-	metas, _ := repository.LoadNotifyFilmMetas(payload.NotifyMIDs)
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.NotifyBatchSession{}, err
+	}
+	siteName := basic.SiteName
+	metas, err := repository.LoadNotifyFilmMetas(payload.NotifyMIDs)
+	if err != nil {
+		return model.NotifyBatchSession{}, err
+	}
 
 	var activeSourceID string
 	if active := repository.GetActiveCollectSource(); active != nil {
 		activeSourceID = strings.TrimSpace(active.Id)
 	}
-	nav := film.NavTopCategories(activeSourceID)
+	nav, err := film.NavTopCategories(activeSourceID)
+	if err != nil {
+		return model.NotifyBatchSession{}, err
+	}
 	navSet := make(map[int64]struct{}, len(nav))
 	keyToRoot := make(map[string]int64, len(nav)*4)
 	for _, c := range nav {
@@ -384,5 +455,5 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 		PageSize:     pageSize,
 		Categories:   categories,
 		AllFilms:     allFilms,
-	}
+	}, nil
 }

@@ -10,7 +10,7 @@ export async function getFilmClassTree(sourceId = "") {
   return {
     resp,
     tree: normalizeTree((resp.data?.children || []) as FilmClassNode[]),
-    sources: sources as { id: string; name: string }[],
+    sources: sources as { id: string; name: string; state?: boolean }[],
     defaultSourceId: String(resp.data?.defaultSourceId || ""),
     currentSourceId: String(resp.data?.currentSourceId || sourceId || ""),
   };

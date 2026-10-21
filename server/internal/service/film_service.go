@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -18,17 +19,22 @@ type FilmService struct{}
 var FilmSvc = new(FilmService)
 
 // GetFilmPage 获取影片检索信息分页数据
-func (s *FilmService) GetFilmPage(vo model.SearchVo) ([]model.FilmIndex, error) {
+func (s *FilmService) GetFilmPage(vo *model.SearchVo) ([]model.FilmIndex, error) {
+	if vo == nil {
+		return nil, errors.New("search params cannot be nil")
+	}
 	if strings.TrimSpace(vo.SourceId) == "" {
 		if activeSrc := repository.GetActiveCollectSource(); activeSrc != nil {
 			vo.SourceId = activeSrc.Id
+		} else if sources, err := repository.GetCollectSourceList(); err == nil && len(sources) > 0 {
+			vo.SourceId = sources[0].Id
 		}
 	}
-	return filmsnapshot.GetSearchPageReadModel(vo)
+	return filmsnapshot.GetSearchPageReadModel(*vo)
 }
 
 // GetSearchOptions 获取影片检索的select的选项options
-func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
+func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) (map[string]any, error) {
 	options := make(map[string]any)
 
 	var sourceId string
@@ -36,23 +42,31 @@ func (s *FilmService) GetSearchOptions(sourceIdOpt ...string) map[string]any {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
 	}
 
-	sources := repository.GetEnabledCollectSourceList()
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	defaultSourceId := ""
-	if len(sources) > 0 {
+	if active := repository.GetActiveCollectSource(); active != nil {
+		defaultSourceId = active.Id
+	} else if len(sources) > 0 {
 		defaultSourceId = sources[0].Id
 	}
 	if sourceId == "" {
 		sourceId = defaultSourceId
 	}
 
-	tree := repository.GetActiveCategoryTree(sourceId)
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, err
+	}
 	tree.Name = "全部分类"
 	options["sources"] = sources
 	options["defaultSourceId"] = defaultSourceId
 	options["currentSourceId"] = sourceId
 	options["class"] = converter.ConvertCategoryList(&tree)
 	options["categoryTree"] = tree.Children
-	return options
+	return options, nil
 }
 
 // SaveFilmDetail 自定义上传保存影片信息
@@ -68,14 +82,19 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 		return errors.New("影片参数格式异常或缺少关键信息")
 	}
 
-	if detail.PlayList == nil {
-		detail.PlayList = [][]model.MovieUrlInfo{}
-	}
-
-	// 手动上传的影片，尝试归属于首个启用的采集站 ID，如果没有则标记为 "manual"
-	sourceId := "manual"
-	if sources := repository.GetEnabledCollectSourceList(); len(sources) > 0 {
-		sourceId = sources[0].Id
+	sourceId := strings.TrimSpace(fd.SourceId)
+	if sourceId != "" {
+		if src := repository.FindCollectSourceById(sourceId); src == nil {
+			return fmt.Errorf("指定的采集站不存在: %s", sourceId)
+		}
+	} else {
+		if active := repository.GetActiveCollectSource(); active != nil {
+			sourceId = active.Id
+		} else if sources, err := repository.GetCollectSourceList(); err == nil && len(sources) > 0 {
+			sourceId = sources[0].Id
+		} else {
+			sourceId = "manual"
+		}
 	}
 
 	if err := writer.SaveDetail(sourceId, detail); err != nil {
@@ -111,8 +130,11 @@ type ClassTreeScope struct {
 }
 
 // GetScopedClassTree 按采集站返回该站分类。未指定站点时用首选站。
-func (s *FilmService) GetScopedClassTree(sourceID string) ClassTreeScope {
-	sources := repository.GetCollectSourceList()
+func (s *FilmService) GetScopedClassTree(sourceID string) (ClassTreeScope, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return ClassTreeScope{}, err
+	}
 	defaultSourceID := ""
 	if active := repository.GetActiveCollectSource(); active != nil {
 		defaultSourceID = active.Id
@@ -130,7 +152,7 @@ func (s *FilmService) GetScopedClassTree(sourceID string) ClassTreeScope {
 		Sources:         sources,
 		DefaultSourceId: defaultSourceID,
 		CurrentSourceId: sourceID,
-	}
+	}, nil
 }
 
 // GetFilmClassById 通过ID获取影片分类信息

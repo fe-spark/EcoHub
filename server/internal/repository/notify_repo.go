@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -115,43 +114,56 @@ func PublicNotifyConfig(cfg model.NotifyConfig) model.NotifyConfig {
 	return cfg
 }
 
-// GetNotifyConfig 读取 Telegram 通知配置（Redis 缓存优先，MySQL 兜底）
-func GetNotifyConfig() model.NotifyConfig {
-	cfg := DefaultNotifyConfig()
-	if db.Rdb != nil {
-		if data := db.Rdb.Get(db.Cxt, config.NotifyConfigKey).Val(); data != "" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
-				return NormalizeNotifyConfig(cfg)
+// GetNotifyConfig 读取 Telegram 通知配置。没有记录时返回默认值，不写入缓存。
+func GetNotifyConfig() (model.NotifyConfig, error) {
+	if data, ok, err := readCache(config.NotifyConfigKey); err != nil {
+		return model.NotifyConfig{}, err
+	} else if ok && data != "" {
+		cfg, err := decodeNotifyConfig(data)
+		if err != nil {
+			if delErr := dropCache(config.NotifyConfigKey); delErr != nil {
+				return model.NotifyConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
 			}
+		} else {
+			return cfg, nil
 		}
 	}
-
 	if db.Mdb == nil {
-		return cfg
+		return model.NotifyConfig{}, errors.New("数据库未连接")
 	}
-
 	var rec model.NotifyConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		return cfg
+		if recordNotFound(err) {
+			return DefaultNotifyConfig(), nil
+		}
+		return model.NotifyConfig{}, err
 	}
-	raw := strings.TrimSpace(rec.Payload)
-	if raw == "" {
-		return cfg
+	cfg, err := decodeNotifyConfig(rec.Payload)
+	if err != nil {
+		return model.NotifyConfig{}, err
 	}
+	if err := cacheNotifyConfig(cfg); err != nil {
+		return model.NotifyConfig{}, err
+	}
+	return cfg, nil
+}
+
+func decodeNotifyConfig(raw string) (model.NotifyConfig, error) {
+	if strings.TrimSpace(raw) == "" {
+		return DefaultNotifyConfig(), nil
+	}
+	var cfg model.NotifyConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return cfg
+		return model.NotifyConfig{}, fmt.Errorf("通知配置无法解析: %w", err)
 	}
-	cfg = NormalizeNotifyConfig(cfg)
-	cacheNotifyConfig(cfg)
-	return cfg
+	return NormalizeNotifyConfig(cfg), nil
 }
 
 // SaveNotifyConfig 持久化 Telegram 通知配置并刷新 Redis 缓存
 func SaveNotifyConfig(cfg model.NotifyConfig) error {
 	cfg = NormalizeNotifyConfig(cfg)
 	if db.Mdb == nil {
-		cacheNotifyConfig(cfg)
-		return nil
+		return errors.New("数据库未连接")
 	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
@@ -166,22 +178,15 @@ func SaveNotifyConfig(cfg model.NotifyConfig) error {
 	}); err != nil {
 		return err
 	}
-	cacheNotifyConfig(cfg)
-	return nil
+	return cacheNotifyConfig(cfg)
 }
 
-func cacheNotifyConfig(cfg model.NotifyConfig) {
-	if db.Rdb == nil {
-		return
-	}
+func cacheNotifyConfig(cfg model.NotifyConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return
+		return err
 	}
-	if err := db.Rdb.Set(db.Cxt, config.NotifyConfigKey, data, config.ConfigCacheTTL).Err(); err != nil {
-		log.Println("SaveNotifyConfig Redis Error:", err)
-		_ = db.Rdb.Del(db.Cxt, config.NotifyConfigKey).Err()
-	}
+	return writeCache(config.NotifyConfigKey, string(data))
 }
 
 // SaveNotifyBatchSession 保存批次翻页会话（内存 + Redis 双写，TTL 24h）

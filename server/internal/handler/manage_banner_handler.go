@@ -13,7 +13,11 @@ import (
 
 // BannerList 获取当前首页轮播列表
 func (h *ManageHandler) BannerList(c *gin.Context) {
-	bl := service.ManageSvc.GetBanners()
+	bl, err := service.ManageSvc.GetBanners()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(bl, "获取轮播列表成功", c)
 }
 
@@ -25,7 +29,11 @@ func (h *ManageHandler) BannerAdd(c *gin.Context) {
 		return
 	}
 	b.Id = utils.GenerateSalt()
-	bl := service.ManageSvc.GetBanners()
+	bl, err := service.ManageSvc.GetBanners()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	b.Sort = int64(len(bl) + 1)
 	bl = append(bl, b)
 	if err := service.ManageSvc.SaveBanners(bl); err != nil {
@@ -42,7 +50,11 @@ func (h *ManageHandler) BannerUpdate(c *gin.Context) {
 		dto.Failed("Banner 参数提交异常", c)
 		return
 	}
-	bl := service.ManageSvc.GetBanners()
+	bl, err := service.ManageSvc.GetBanners()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	for i, b := range bl {
 		if b.Id == banner.Id {
 			bl[i] = banner
@@ -71,7 +83,11 @@ func (h *ManageHandler) BannerDel(c *gin.Context) {
 		dto.Failed("缺少 ID 参数", c)
 		return
 	}
-	bl := service.ManageSvc.GetBanners()
+	bl, err := service.ManageSvc.GetBanners()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	for i, b := range bl {
 		if b.Id == id {
 			bl = append(bl[:i], bl[i+1:]...)
@@ -94,12 +110,22 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 		dto.Failed("保存排片卡组失败: "+err.Error(), c)
 		return
 	}
-	dto.Success(service.ManageSvc.GetBanners(), "排片卡组已保存并生效", c)
+	banners, err := service.ManageSvc.GetBanners()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(banners, "排片卡组已保存并生效", c)
 }
 
 // BannerQuickConfigGet 读取已保存的一键排片配方。
 func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
-	dto.Success(service.ManageSvc.GetBannerQuickConfig(), "获取排片配置成功", c)
+	view, err := service.ManageSvc.GetBannerQuickConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(view, "获取排片配置成功", c)
 }
 
 // BannerQuickConfigSave 保存一键排片配方。不生成卡组，不替换线上轮播。

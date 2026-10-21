@@ -70,9 +70,13 @@ func CleanKeywordForSearch(raw string) (cleaned string, extractedYear string) {
 	return s, extractedYear
 }
 
-func getHTTPClient() *http.Client {
+func getHTTPClient() (*http.Client, error) {
+	ok, proxyURL, err := repository.ResolveTMDBProxy()
+	if err != nil {
+		return nil, err
+	}
 	var transport *http.Transport
-	if ok, proxyURL := repository.ResolveTMDBProxy(); ok && proxyURL != "" {
+	if ok && proxyURL != "" {
 		transport = utils.GetOrCreateProxyTransport(proxyURL)
 	} else {
 		transport = utils.GetOrCreateProxyTransport("")
@@ -80,12 +84,16 @@ func getHTTPClient() *http.Client {
 	return &http.Client{
 		Transport: transport,
 		Timeout:   httpTimeout,
-	}
+	}, nil
 }
 
 // GetConfig 获取脱敏配置
-func (s *TMDBService) GetConfig() model.TMDBConfig {
-	return repository.PublicTMDBConfig(repository.GetTMDBConfig())
+func (s *TMDBService) GetConfig() (model.TMDBConfig, error) {
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return model.TMDBConfig{}, err
+	}
+	return repository.PublicTMDBConfig(cfg), nil
 }
 
 func tmdbScrapeReady(cfg model.TMDBConfig) bool {
@@ -94,7 +102,10 @@ func tmdbScrapeReady(cfg model.TMDBConfig) bool {
 
 // UpdateConfig 更新 TMDB 配置
 func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
-	existing := repository.GetTMDBConfig()
+	existing, err := repository.GetTMDBConfig()
+	if err != nil {
+		return err
+	}
 	if repository.IsMaskedTMDBApiKey(cfg.ApiKey) {
 		cfg.ApiKey = existing.ApiKey
 	}
@@ -109,13 +120,20 @@ func (s *TMDBService) UpdateConfig(cfg model.TMDBConfig) error {
 func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 	apiKey := strings.TrimSpace(cfg.ApiKey)
 	if repository.IsMaskedTMDBApiKey(apiKey) {
-		apiKey = repository.GetTMDBConfig().ApiKey
+		stored, err := repository.GetTMDBConfig()
+		if err != nil {
+			return err
+		}
+		apiKey = stored.ApiKey
 	}
 	if apiKey == "" {
 		return errors.New("API Key 不能为空")
 	}
 
-	client := getHTTPClient()
+	client, err := getHTTPClient()
+	if err != nil {
+		return err
+	}
 	testURL := fmt.Sprintf("%s/configuration?api_key=%s", tmdbAPIBaseURL, url.QueryEscape(apiKey))
 
 	req, err := http.NewRequest(http.MethodGet, testURL, nil)
@@ -186,7 +204,10 @@ func prepareManualSearch(query, year string) (string, string) {
 
 // Search 供刮削弹窗检索。只去噪，并严格使用调用方传入的年份，只请求一次。
 func (s *TMDBService) Search(query, year, mediaType string) ([]model.TMDBCandidate, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || cfg.ApiKey == "" {
 		return nil, errors.New("尚未配置或未启用 TMDB 刮削功能，请前往「系统设置 → 刮削配置」完成设置")
 	}
@@ -231,7 +252,11 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 		return nil, err
 	}
 
-	resp, err := getHTTPClient().Do(req)
+	client, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求 TMDB 失败: %w", err)
 	}
@@ -337,7 +362,10 @@ type tmdbDetailRaw struct {
 
 // FetchDetail 拉取影片/剧集详情与演职员表
 func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDetail, error) {
-	cfg := repository.GetTMDBConfig()
+	cfg, err := repository.GetTMDBConfig()
+	if err != nil {
+		return nil, err
+	}
 	if !cfg.Enabled || cfg.ApiKey == "" {
 		return nil, errors.New("TMDB 刮削尚未启用或配置")
 	}
@@ -347,7 +375,10 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		mediaType = "movie"
 	}
 
-	client := getHTTPClient()
+	client, err := getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
 	qVals := url.Values{}
 	qVals.Set("api_key", cfg.ApiKey)
 	qVals.Set("language", cfg.Language)

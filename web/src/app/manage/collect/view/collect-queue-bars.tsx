@@ -109,7 +109,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
 
                 <Space size={4} wrap className={styles.queueTags}>
                   <Tag
-                    bordered={false}
+                    variant="filled"
                     className={`${styles.microTag} ${styles.stationTag}`}
                   >
                     共 {item.view.total} 站
@@ -117,7 +117,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                   {item.view.doneCount > 0 && item.view.fetchingCount > 0 ? (
                     <Tag
                       color="success"
-                      bordered={false}
+                      variant="filled"
                       className={styles.microTag}
                     >
                       已完成 {item.view.doneCount} 站
@@ -126,21 +126,21 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                   {item.view.failedCount > 0 ? (
                     <Tag
                       color="error"
-                      bordered={false}
+                      variant="filled"
                       className={styles.microTag}
                     >
                       异常 {item.view.failedCount} 站
                     </Tag>
                   ) : null}
                   {item.view.stoppedCount > 0 ? (
-                    <Tag bordered={false} className={styles.microTag}>
+                    <Tag variant="filled" className={styles.microTag}>
                       终止 {item.view.stoppedCount} 站
                     </Tag>
                   ) : null}
                   {item.view.failed > 0 ? (
                     <Tag
                       color="warning"
-                      bordered={false}
+                      variant="filled"
                       className={styles.microTag}
                     >
                       失败 {pageCount(item.view.failed)} 页
@@ -163,7 +163,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                         : "success"
                   }
                   strokeColor={progressStrokeColor}
-                  trailColor="var(--ant-color-fill-secondary)"
+                  railColor="var(--ant-color-fill-secondary)"
                   className={styles.progressBar}
                 />
                 <span className={`${styles.percentNum} ${percentStateClass}`}>

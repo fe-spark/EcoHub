@@ -112,7 +112,7 @@ func QueryLogsScope(day, source, status, client, q, module, platform string, lim
 			break
 		}
 	}
-	return enrichLogEvents(out), nil
+	return enrichLogEvents(out)
 }
 
 func recentKeysForModule(module, dayKey string) []string {

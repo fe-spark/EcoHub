@@ -278,7 +278,10 @@ func TestSnapshotAccessEvent_NoSQL_EvenWhenDBConnected(t *testing.T) {
 	}
 
 	// 2. 验证读取路径（enrichLogEvents）仍可批量懒补齐库中元数据
-	enriched := enrichLogEvents([]AccessEvent{*evtFilm, *evtCat})
+	enriched, err := enrichLogEvents([]AccessEvent{*evtFilm, *evtCat})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(enriched) != 2 {
 		t.Fatalf("expected 2 enriched events, got %d", len(enriched))
 	}

@@ -171,7 +171,6 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgressStream)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
 			spiderRoute.POST(`/update`, handler.SpiderHd.UpdateSpider)
-			spiderRoute.POST(`/stop-all`, handler.SpiderHd.StopAllTasks)
 		}
 
 		// filmManage 影视管理

@@ -2,7 +2,7 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
+	"fmt"
 	"strings"
 	"sync"
 
@@ -72,10 +72,8 @@ func DeleteBannerConfig() error {
 	memBannerConfig = nil
 	memBannerConfigLock.Unlock()
 
-	if db.Rdb != nil {
-		if err := db.Rdb.Del(db.Cxt, config.BannerConfigKey).Err(); err != nil {
-			_ = db.Rdb.Set(db.Cxt, config.BannerConfigKey, "null", config.ConfigCacheTTL).Err()
-		}
+	if err := dropCache(config.BannerConfigKey); err != nil {
+		return err
 	}
 	if db.Mdb == nil {
 		return nil
@@ -84,60 +82,65 @@ func DeleteBannerConfig() error {
 }
 
 // BannerConfigExists 是否已经保存过一键排片配方。
-func BannerConfigExists() bool {
-	if db.Rdb != nil {
-		n, err := db.Rdb.Exists(db.Cxt, config.BannerConfigKey).Result()
-		if err == nil && n > 0 {
-			return true
-		}
-	}
-	if db.Mdb == nil {
-		memBannerConfigLock.RLock()
-		defer memBannerConfigLock.RUnlock()
-		return memBannerConfig != nil
-	}
-	var count int64
-	if err := db.Mdb.Model(&model.BannerConfigRecord{}).Count(&count).Error; err != nil {
-		return false
-	}
-	return count > 0
+func BannerConfigExists() (bool, error) {
+	_, exists, err := LoadBannerConfig()
+	return exists, err
 }
 
-// GetBannerConfig 读取轮播排片配置（Redis 缓存优先，MySQL 兜底）
-func GetBannerConfig() model.BannerConfig {
-	cfg := DefaultBannerConfig()
-	if db.Rdb != nil {
-		if data := db.Rdb.Get(db.Cxt, config.BannerConfigKey).Val(); data != "" && data != "null" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
-				return NormalizeBannerConfig(cfg)
+// GetBannerConfig 读取轮播排片配置。没有记录时返回默认配方，不写入缓存。
+func GetBannerConfig() (model.BannerConfig, error) {
+	cfg, _, err := LoadBannerConfig()
+	return cfg, err
+}
+
+// LoadBannerConfig 读取轮播排片配置及是否存在记录。
+func LoadBannerConfig() (model.BannerConfig, bool, error) {
+	if data, ok, err := readCache(config.BannerConfigKey); err != nil {
+		return model.BannerConfig{}, false, err
+	} else if ok && data != "" && data != "null" {
+		cfg, err := decodeBannerConfig(data)
+		if err != nil {
+			if delErr := dropCache(config.BannerConfigKey); delErr != nil {
+				return model.BannerConfig{}, false, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
 			}
+		} else {
+			return cfg, true, nil
 		}
 	}
-
 	if db.Mdb == nil {
 		memBannerConfigLock.RLock()
 		defer memBannerConfigLock.RUnlock()
 		if memBannerConfig != nil {
-			return NormalizeBannerConfig(*memBannerConfig)
+			return *memBannerConfig, true, nil
 		}
-		return cfg
+		return DefaultBannerConfig(), false, nil
 	}
-
 	var rec model.BannerConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		return cfg
+		if recordNotFound(err) {
+			return DefaultBannerConfig(), false, nil
+		}
+		return model.BannerConfig{}, false, err
 	}
-	raw := strings.TrimSpace(rec.Payload)
-	if raw == "" {
-		return cfg
+	cfg, err := decodeBannerConfig(rec.Payload)
+	if err != nil {
+		return model.BannerConfig{}, false, err
 	}
+	if err := cacheBannerConfig(cfg); err != nil {
+		return model.BannerConfig{}, false, err
+	}
+	return cfg, true, nil
+}
+
+func decodeBannerConfig(raw string) (model.BannerConfig, error) {
+	if strings.TrimSpace(raw) == "" {
+		return DefaultBannerConfig(), nil
+	}
+	var cfg model.BannerConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		log.Println("[BannerConfig] 解析配置 JSON 异常:", err)
-		return cfg
+		return model.BannerConfig{}, fmt.Errorf("排片配置无法解析: %w", err)
 	}
-	cfg = NormalizeBannerConfig(cfg)
-	cacheBannerConfig(cfg)
-	return cfg
+	return NormalizeBannerConfig(cfg), nil
 }
 
 // SaveBannerConfig 持久化轮播排片配置并同步刷新 Redis 缓存
@@ -163,17 +166,13 @@ func SaveBannerConfig(cfg model.BannerConfig) error {
 	}); err != nil {
 		return err
 	}
-	cacheBannerConfig(cfg)
-	return nil
+	return cacheBannerConfig(cfg)
 }
 
-func cacheBannerConfig(cfg model.BannerConfig) {
-	if db.Rdb == nil {
-		return
-	}
+func cacheBannerConfig(cfg model.BannerConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return
+		return err
 	}
-	_ = db.Rdb.Set(db.Cxt, config.BannerConfigKey, string(data), config.ConfigCacheTTL).Err()
+	return writeCache(config.BannerConfigKey, string(data))
 }

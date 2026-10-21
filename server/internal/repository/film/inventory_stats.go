@@ -9,23 +9,24 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// LibraryInventory 工作台片库规模。影片和可播放按当前主站。分类和失败记录是全库。
+// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。分类和失败记录是全库。
 type LibraryInventory struct {
-	Films      int64 `json:"films"`
-	Playable   int64 `json:"playable"`
-	Categories int64 `json:"categories"`
-	Failures   int64 `json:"failures"`
+	Films       int64 `json:"films"`
+	MultiSource int64 `json:"multiSource"`
+	Categories  int64 `json:"categories"`
+	Failures    int64 `json:"failures"`
 }
 
-// SourceInventory 单个采集站的规模。影片、分类、失败记录各自跟当前列表口径。
+// SourceInventory 单个采集站的规模。影片、多源聚合、分类、失败记录各自跟当前列表口径。
 type SourceInventory struct {
-	Id         string `json:"id"`
-	Name       string `json:"name"`
-	Enabled    bool   `json:"enabled"`
-	IsPrimary  bool   `json:"isPrimary"`
-	Films      int64  `json:"films"`
-	Categories int64  `json:"categories"`
-	Failures   int64  `json:"failures"`
+	Id          string `json:"id"`
+	Name        string `json:"name"`
+	Enabled     bool   `json:"enabled"`
+	IsPrimary   bool   `json:"isPrimary"`
+	Films       int64  `json:"films"`
+	MultiSource int64  `json:"multiSource"`
+	Categories  int64  `json:"categories"`
+	Failures    int64  `json:"failures"`
 }
 
 // InventoryStats 工作台片库规模。
@@ -52,19 +53,19 @@ func GetInventoryStats() (InventoryStats, error) {
 	return InventoryStats{Library: library, Sources: sources}, nil
 }
 
-// GetLibraryInventory 统计当前主站档案、可播放、展示分类和失败记录。
+// GetLibraryInventory 统计当前主站档案、多源聚合、展示分类和失败记录。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
 		return library, filmsnapshot.ErrSearchIndexMissing
 	}
-	films, playable, err := filmsnapshot.SearchInventoryCounts()
+	films, multiSource, err := filmsnapshot.SearchInventoryCounts()
 	if err != nil {
 		return library, err
 	}
 	if primaryID := activePrimaryID(); primaryID != "" {
 		library.Films = films[primaryID]
-		library.Playable = playable[primaryID]
+		library.MultiSource = multiSource[primaryID]
 	}
 	if err := db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error; err != nil {
 		return library, err
@@ -82,14 +83,14 @@ func activePrimaryID() string {
 	return ""
 }
 
-// GetSourceInventories 按采集站统计影片、分类和失败记录。
+// GetSourceInventories 按采集站统计影片、多源聚合、分类和失败记录。
 // 影片是该站自己的档案，含没有线路的。分类只计该站映射到、且展示分类还在的节点。
 func GetSourceInventories() ([]SourceInventory, error) {
 	sources := []SourceInventory{}
 	if db.Mdb == nil {
 		return nil, filmsnapshot.ErrSearchIndexMissing
 	}
-	films, _, err := filmsnapshot.SearchInventoryCounts()
+	films, multiSource, err := filmsnapshot.SearchInventoryCounts()
 	if err != nil {
 		return nil, err
 	}
@@ -104,19 +105,24 @@ func GetSourceInventories() ([]SourceInventory, error) {
 	categoryCounts := indexCounts(categoryRows)
 	failureCounts := indexCounts(failureRows)
 	primaryID := activePrimaryID()
-	for _, source := range repository.GetCollectSourceList() {
+	sourceList, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range sourceList {
 		id := strings.TrimSpace(source.Id)
 		if id == "" {
 			continue
 		}
 		sources = append(sources, SourceInventory{
-			Id:         id,
-			Name:       source.Name,
-			Enabled:    source.State,
-			IsPrimary:  id == primaryID,
-			Films:      films[id],
-			Categories: categoryCounts[id],
-			Failures:   failureCounts[id],
+			Id:          id,
+			Name:        source.Name,
+			Enabled:     source.State,
+			IsPrimary:   id == primaryID,
+			Films:       films[id],
+			MultiSource: multiSource[id],
+			Categories:  categoryCounts[id],
+			Failures:    failureCounts[id],
 		})
 	}
 	return sources, nil

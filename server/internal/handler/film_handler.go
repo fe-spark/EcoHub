@@ -8,7 +8,6 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -73,12 +72,7 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 	}
 
 	s.Paging = dto.GetPageParams(c)
-	if s.SourceId == "" {
-		if active := repository.GetActiveCollectSource(); active != nil {
-			s.SourceId = active.Id
-		}
-	}
-	sl, err := service.FilmSvc.GetFilmPage(s)
+	sl, err := service.FilmSvc.GetFilmPage(&s)
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
@@ -92,7 +86,11 @@ func (h *FilmHandler) FilmSearchPage(c *gin.Context) {
 // FilmSearchOptions 获取影片检索筛选项（按 sourceId 联动返回对应站点的分类树与配置项）
 func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
 	sourceId := strings.TrimSpace(c.DefaultQuery("sourceId", ""))
-	options := service.FilmSvc.GetSearchOptions(sourceId)
+	options, err := service.FilmSvc.GetSearchOptions(sourceId)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(options, "影片检索筛选项获取成功", c)
 }
 
@@ -141,10 +139,14 @@ func (h *FilmHandler) FilmClassTree(c *gin.Context) {
 		dto.Success(tree, "影片分类信息获取成功", c)
 		return
 	}
-	view := service.FilmSvc.GetScopedClassTree(c.Query("sourceId"))
+	view, err := service.FilmSvc.GetScopedClassTree(c.Query("sourceId"))
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	sources := make([]gin.H, 0, len(view.Sources))
 	for _, source := range view.Sources {
-		sources = append(sources, gin.H{"id": source.Id, "name": source.Name})
+		sources = append(sources, gin.H{"id": source.Id, "name": source.Name, "state": source.State})
 	}
 	dto.Success(gin.H{
 		"id":              view.Tree.Id,

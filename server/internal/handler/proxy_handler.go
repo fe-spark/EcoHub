@@ -15,7 +15,12 @@ type ProxyHandler struct{}
 var ProxyHd = new(ProxyHandler)
 
 func (h *ProxyHandler) GetConfig(c *gin.Context) {
-	dto.Success(service.ProxySvc.PublicConfig(), "获取代理配置成功", c)
+	cfg, err := service.ProxySvc.PublicConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(cfg, "获取代理配置成功", c)
 }
 
 func (h *ProxyHandler) UpdateConfig(c *gin.Context) {

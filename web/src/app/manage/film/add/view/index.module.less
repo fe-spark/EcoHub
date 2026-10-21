@@ -99,29 +99,17 @@
   overflow: hidden;
   border: 1px solid var(--ant-color-border-secondary);
   background: rgba(255, 255, 255, 0.02);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.posterWrapper :global(.ant-image) {
-  width: 100%;
-  height: 100%;
-  display: flex;
-}
-
-.posterWrapper :global(.ant-image-img) {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
 }
 
 .posterTagBadge {
   position: absolute;
   top: 8px;
   right: 8px;
+  margin: 0;
   z-index: 2;
+  pointer-events: none;
+  border: none;
+  backdrop-filter: blur(4px);
 }
 
 .formColumn {

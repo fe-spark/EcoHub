@@ -66,7 +66,7 @@ func SaveFailureRecord(fl model.FailureRecord) error {
 }
 
 // FailureRecordList 获取所有的采集失效记录
-func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
+func FailureRecordList(vo model.RecordRequestVo) ([]model.FailureRecord, error) {
 	qw := db.Mdb.Model(&model.FailureRecord{})
 	if vo.OriginId != "" {
 		qw = qw.Where("origin_id = ?", vo.OriginId)
@@ -82,12 +82,11 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	if vo.Paging.Current > vo.Paging.PageCount {
 		vo.Paging.Current = vo.Paging.PageCount
 	}
-	var list []model.FailureRecord
+	list := make([]model.FailureRecord, 0)
 	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("created_at DESC, id DESC").Find(&list).Error; err != nil {
-		log.Println(err)
-		return nil
+		return nil, err
 	}
-	return list
+	return list, nil
 }
 
 // FindRecordById 获取 id 对应的失效记录
@@ -100,16 +99,18 @@ func FindRecordById(id uint) *model.FailureRecord {
 }
 
 // PendingRecord 查询所有待处理的记录信息
-func PendingRecord() []model.FailureRecord {
-	var list []model.FailureRecord
+func PendingRecord() ([]model.FailureRecord, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
+	list := make([]model.FailureRecord, 0)
 	if err := db.Mdb.
 		Where("status = ?", model.FailureRecordStatusPending).
 		Order("created_at ASC, id ASC").
 		Find(&list).Error; err != nil {
-		log.Println("Query pending failure records failed:", err)
-		return nil
+		return nil, err
 	}
-	return list
+	return list, nil
 }
 
 // MarkFailureRecordRetryFailed 用更新前的重试次数决定是否最终失败。
@@ -176,10 +177,11 @@ func UpdateFailureRecordStatusByID(id uint, status int) error {
 }
 
 // DeleteRetriedRecords 删除已有重试结果的记录信息
-func DeleteRetriedRecords() {
-	if err := db.Mdb.Where("status IN ?", []int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}).Delete(&model.FailureRecord{}).Error; err != nil {
-		log.Println("Delete failure record failed:", err)
+func DeleteRetriedRecords() error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
 	}
+	return db.Mdb.Where("status IN ?", []int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}).Delete(&model.FailureRecord{}).Error
 }
 
 // DeleteFailureRecordsByOriginIdTx 按源站 ID 物理清除对应的采集失败记录
@@ -191,30 +193,12 @@ func DeleteFailureRecordsByOriginIdTx(tx *gorm.DB, originId string) error {
 }
 
 // NormalizeFailureRecordsRetryCount 纠正历史数据中状态与重试次数不一致的记录
-func NormalizeFailureRecordsRetryCount() {
-	if db.Mdb == nil {
-		return
-	}
-	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("retry_count >= ?", model.MaxFailureRetryCount).
-		Updates(map[string]any{
-			"retry_count": model.MaxFailureRetryCount,
-			"status":      model.FailureRecordStatusFailed,
-		}).Error
-
-	_ = db.Mdb.Model(&model.FailureRecord{}).
-		Where("retry_count < ? AND status = ?", model.MaxFailureRetryCount, model.FailureRecordStatusFailed).
-		Updates(map[string]any{
-			"status": model.FailureRecordStatusPending,
-		}).Error
-}
-
 // TruncateRecordTable 截断 record table
-func TruncateRecordTable() {
-	err := support.TruncateTable(db.Mdb, model.TableFailureRecord)
-	if err != nil {
-		log.Println("TRUNCATE TABLE Error: ", err)
+func TruncateRecordTable() error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
 	}
+	return support.TruncateTable(db.Mdb, model.TableFailureRecord)
 }
 
 // PruneExpiredFailureRecords 物理修剪超过保留期的终态失败记录（status 为 success 或 failed 且创建超过 retention）

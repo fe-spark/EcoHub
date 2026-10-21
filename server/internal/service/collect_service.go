@@ -33,8 +33,11 @@ func clearProvideNetworkConfigCache() {
 	}
 }
 
-func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
-	sources := repository.GetCollectSourceList()
+func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	list := make([]model.FilmSourceListItem, 0, len(sources))
 	progressByID := make(map[string]model.CollectProgress)
 	for _, progress := range spider.GetActiveTaskProgress() {
@@ -63,7 +66,11 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
-		if ok, _ := repository.ResolveSourceProxy(source.Id); ok {
+		ok, _, err := repository.ResolveSourceProxy(source.Id)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			item.ProxyEnabled = true
 		}
 		if _, ok := categoryReady[source.Id]; ok {
@@ -74,12 +81,15 @@ func (s *CollectService) GetFilmSourceList() []model.FilmSourceListItem {
 		}
 		list = append(list, item)
 	}
-	return list
+	return list, nil
 }
 
 // GetCategoryStatusMap 返回所有采集站的分类同步状态映射 ("syncing" | "ready" | "failed")
-func (s *CollectService) GetCategoryStatusMap() map[string]string {
-	sources := repository.GetCollectSourceList()
+func (s *CollectService) GetCategoryStatusMap() (map[string]string, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
@@ -97,12 +107,15 @@ func (s *CollectService) GetCategoryStatusMap() map[string]string {
 			result[source.Id] = "failed"
 		}
 	}
-	return result
+	return result, nil
 }
 
 // GetCategoryReadyMap 返回所有采集站的分类就绪状态映射
-func (s *CollectService) GetCategoryReadyMap() map[string]bool {
-	sources := repository.GetCollectSourceList()
+func (s *CollectService) GetCategoryReadyMap() (map[string]bool, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
@@ -115,7 +128,7 @@ func (s *CollectService) GetCategoryReadyMap() map[string]bool {
 		_, ok := readySet[source.Id]
 		result[source.Id] = ok
 	}
-	return result
+	return result, nil
 }
 
 func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool {
@@ -143,7 +156,12 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			filmsnapshot.NotifySnapshotPublished(version)
 		}
 	}
-	NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, repository.GetEnabledCollectSourceList())
+	enabled, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		syslog.Errorf("[Collect] 读取启用采集站失败: %v", err)
+	} else {
+		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
+	}
 	return true
 }
 
@@ -159,7 +177,11 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	clearProvideNetworkConfigCache()
 	newPrimary := repository.PickPrimarySourceForCategory()
 	if !onPrimarySourceMaybeChanged(oldPrimary, newPrimary) {
-		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, repository.GetEnabledCollectSourceList())
+		enabled, err := repository.GetEnabledCollectSourceList()
+		if err != nil {
+			return err
+		}
+		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
 	}
 	return nil
 }
@@ -178,11 +200,11 @@ func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
 	return repository.FindCollectSourceById(id)
 }
 
-func (s *CollectService) GetEnabledFilmSources() []model.FilmSource {
+func (s *CollectService) GetEnabledFilmSources() ([]model.FilmSource, error) {
 	return repository.GetEnabledCollectSourceList()
 }
 
-func (s *CollectService) GetAllFilmSources() []model.FilmSource {
+func (s *CollectService) GetAllFilmSources() ([]model.FilmSource, error) {
 	return repository.GetCollectSourceList()
 }
 
@@ -359,21 +381,25 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 		return nil
 	}
 
-	progress.BroadcastSourceDeleteStatus(id, "deleting", "")
-
 	select {
 	case deleteSourceQueue <- id:
+		progress.BroadcastSourceDeleteStatus(id, "deleting", "")
+		return nil
 	default:
-		go processAsyncDeleteSource(id)
+		return errors.New("删除队列已满")
 	}
-
-	return nil
 }
 
-// TriggerDelFilmSourceBatch 异步批量触发采集站删除：全部标记 deleting 后串行排队处理
+// TriggerDelFilmSourceBatch 异步批量触发采集站删除。有一站失败就返回错误。
 func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
+	var failed []string
 	for _, id := range ids {
-		_ = s.TriggerDelFilmSource(id)
+		if err := s.TriggerDelFilmSource(id); err != nil {
+			failed = append(failed, err.Error())
+		}
+	}
+	if len(failed) > 0 {
+		return errors.New(strings.Join(failed, "；"))
 	}
 	return nil
 }
@@ -420,21 +446,29 @@ func (s *CollectService) PrepareRecordQuery(params model.RecordRequestVo) model.
 	return params
 }
 
-func (s *CollectService) GetRecordList(params model.RecordRequestVo) []model.FailureRecord {
+func (s *CollectService) GetRecordList(params model.RecordRequestVo) ([]model.FailureRecord, error) {
 	params = s.PrepareRecordQuery(params)
-	repository.NormalizeFailureRecordsRetryCount()
 	return repository.FailureRecordList(params)
 }
 
-func (s *CollectService) GetRecordOptions() map[string]any {
-	sources := repository.GetEnabledCollectSourceList()
+func (s *CollectService) GetRecordOptions() (map[string]any, error) {
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	defaultSourceId := ""
-	if len(sources) > 0 {
+	if active := repository.GetActiveCollectSource(); active != nil {
+		defaultSourceId = active.Id
+	} else if len(sources) > 0 {
 		defaultSourceId = sources[0].Id
 	}
 	originOptions := make([]model.Option, 0, len(sources))
 	for _, v := range sources {
-		originOptions = append(originOptions, model.Option{Name: v.Name, Value: v.Id})
+		name := v.Name
+		if !v.State {
+			name += " (已停用)"
+		}
+		originOptions = append(originOptions, model.Option{Name: name, Value: v.Id})
 	}
 	return map[string]any{
 		"status": []model.Option{
@@ -445,21 +479,21 @@ func (s *CollectService) GetRecordOptions() map[string]any {
 		},
 		"origin":          originOptions,
 		"defaultSourceId": defaultSourceId,
-	}
+	}, nil
 }
 
 func (s *CollectService) CollectRecover(id int) error {
 	return spider.AcceptFailureRecover(repository.FindRecordById(uint(id)))
 }
 
-func (s *CollectService) RecoverAll() spider.FailureRecoverOutcome {
+func (s *CollectService) RecoverAll() (spider.FailureRecoverOutcome, error) {
 	return spider.EnqueuePendingFailureRecovers()
 }
 
-func (s *CollectService) ClearRetriedRecords() {
-	repository.DeleteRetriedRecords()
+func (s *CollectService) ClearRetriedRecords() error {
+	return repository.DeleteRetriedRecords()
 }
 
-func (s *CollectService) ClearAllRecord() {
-	repository.TruncateRecordTable()
+func (s *CollectService) ClearAllRecord() error {
+	return repository.TruncateRecordTable()
 }

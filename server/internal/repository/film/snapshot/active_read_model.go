@@ -152,6 +152,6 @@ func GetActiveFilmReadModel() *FilmReadModel {
 	return activeFilmReadModel.Load()
 }
 
-func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) []model.FilmListSnapshot {
+func GetProjectedSnapshotsByMidsOrdered(version string, mids []int64) ([]model.FilmListSnapshot, error) {
 	return GetSnapshotsByMidsOrdered(version, mids)
 }

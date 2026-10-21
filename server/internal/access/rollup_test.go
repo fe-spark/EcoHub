@@ -90,11 +90,17 @@ func TestPersistDailyUpsertAndPrune(t *testing.T) {
 	if err := persistDaily(stats, tops); err != nil {
 		t.Fatalf("upsert: %v", err)
 	}
-	row, ok := loadDailyStats("2026-08-20")
+	row, ok, err := loadDailyStats("2026-08-20")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !ok || row.PV != 22 {
 		t.Fatalf("upsert pv want 22 got ok=%v pv=%d", ok, row.PV)
 	}
-	items := loadDailyTops("2026-08-20", "search", 10)
+	items, err := loadDailyTops("2026-08-20", "search", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(items) != 1 || items[0].Key != "流浪地球" {
 		t.Fatalf("tops: %+v", items)
 	}
@@ -103,10 +109,14 @@ func TestPersistDailyUpsertAndPrune(t *testing.T) {
 	if err := persistDaily(old, nil); err != nil {
 		t.Fatalf("old: %v", err)
 	}
-	if _, ok := loadDailyStats("2026-07-01"); !ok {
+	if _, ok, err := loadDailyStats("2026-07-01"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatal("historical day should remain without auto prune")
 	}
-	if _, ok := loadDailyStats("2026-08-20"); !ok {
+	if _, ok, err := loadDailyStats("2026-08-20"); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatal("in-window day should remain")
 	}
 }
@@ -175,12 +185,8 @@ func TestQueryPastDayWithoutRedisReturnsEmpty(t *testing.T) {
 
 	yesterday := startOfLocalDay(time.Now().In(time.Local)).AddDate(0, 0, -1)
 	day := yesterday.Format("2006-01-02")
-	ov, err := QueryOverviewScope(day, "", "")
-	if err != nil {
-		t.Fatalf("historical overview must not require redis: %v", err)
-	}
-	if ov.Day != day || ov.PV != 0 {
-		t.Fatalf("empty overview: %+v", ov)
+	if _, err := QueryOverviewScope(day, "", ""); err == nil {
+		t.Fatal("没有落库也没有 Redis 时必须返回错误")
 	}
 
 	if err := persistDaily(model.AccessDailyStats{
@@ -324,7 +330,10 @@ func TestPersistDailyWithDropped(t *testing.T) {
 func TestHasPersistedData(t *testing.T) {
 	setupAccessDailyTestDB(t)
 
-	hasData, count := HasPersistedData()
+	hasData, count, err := HasPersistedData()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if hasData || count != 0 {
 		t.Fatalf("expected false and 0, got %v and %d", hasData, count)
 	}
@@ -343,7 +352,10 @@ func TestHasPersistedData(t *testing.T) {
 		t.Fatalf("persist: %v", err)
 	}
 
-	hasData, count = HasPersistedData()
+	hasData, count, err = HasPersistedData()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !hasData || count != 1 {
 		t.Fatalf("expected true and 1, got %v and %d", hasData, count)
 	}

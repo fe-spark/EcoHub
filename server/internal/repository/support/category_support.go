@@ -253,15 +253,13 @@ func ResolveRootCategoryIDByCName(cName string) int64 {
 }
 
 // PickPrimarySourceForCategory 选取当前基准源站点（首位即基准原则）。
+// 仅从已启用的站点中按顺序选取首位；全部站点停用或无站点时返回 nil。
 func PickPrimarySourceForCategory() *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
 	var primary model.FilmSource
 	if err := db.Mdb.Where("state = ?", true).Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
-		return &primary
-	}
-	if err := db.Mdb.Order("sort ASC, created_at ASC, id ASC").First(&primary).Error; err == nil && primary.Id != "" {
 		return &primary
 	}
 	return nil

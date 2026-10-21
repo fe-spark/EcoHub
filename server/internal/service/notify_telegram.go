@@ -68,17 +68,21 @@ type tgChat struct {
 // tgAPIBaseURL 允许测试覆盖 Telegram API 地址
 var tgAPIBaseURL = telegramAPIBase
 
-func getTelegramHTTPClient(timeout time.Duration) *http.Client {
+func getTelegramHTTPClient(timeout time.Duration) (*http.Client, error) {
 	if timeout <= 0 {
 		timeout = 15 * time.Second
 	}
-	if ok, proxyURL := repository.ResolveNotifyProxy(); ok && strings.TrimSpace(proxyURL) != "" {
+	ok, proxyURL, err := repository.ResolveNotifyProxy()
+	if err != nil {
+		return nil, err
+	}
+	if ok && strings.TrimSpace(proxyURL) != "" {
 		return &http.Client{
 			Transport: utils.GetOrCreateProxyTransport(proxyURL),
 			Timeout:   timeout,
-		}
+		}, nil
 	}
-	return &http.Client{Timeout: timeout}
+	return &http.Client{Timeout: timeout}, nil
 }
 
 func parseChatTarget(target string) (chatID string, threadID int64, err error) {
@@ -118,7 +122,11 @@ func callTelegramJSON(ctx context.Context, token, method string, payload any, ti
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := getTelegramHTTPClient(timeout).Do(req)
+	client, err := getTelegramHTTPClient(timeout)
+	if err != nil {
+		return apiResp, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return apiResp, fmt.Errorf("请求 Telegram 失败: %w", err)
 	}
@@ -297,7 +305,7 @@ func isTelegramSupportedWebURL(raw string) bool {
 	return strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://")
 }
 
-func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (string, int) {
+func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (string, int, error) {
 	var films []model.NotifyFilmItem
 	catTitle := "全部"
 	if catIdx >= 0 && catIdx < len(sess.Categories) {
@@ -327,7 +335,7 @@ func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (st
 	fmt.Fprintf(&b, "<b>%s 更新片单 · %s</b>\n", formatTitlePrefix(sess.SiteName), html.EscapeString(catTitle))
 	if total == 0 {
 		b.WriteString("<i>暂无更新影片</i>\n")
-		return b.String(), 1
+		return b.String(), 1, nil
 	}
 
 	start := (page - 1) * pageSize
@@ -338,7 +346,11 @@ func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (st
 	fmt.Fprintf(&b, "📄 第 <b>%d/%d</b> 页 · <code>%d–%d</code> / 共 <b>%d</b> 部\n\n",
 		page, totalPages, start+1, end, total)
 
-	siteURL := strings.TrimRight(strings.TrimSpace(repository.GetSiteBasic().SiteURL), "/")
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return "", 0, err
+	}
+	siteURL := strings.TrimRight(strings.TrimSpace(basic.SiteURL), "/")
 	canLink := isTelegramSupportedWebURL(siteURL)
 	for _, f := range films[start:end] {
 		name := truncateRunes(strings.TrimSpace(f.Name), 60)
@@ -353,11 +365,15 @@ func formatFilmListPageHTML(sess model.NotifyBatchSession, catIdx, page int) (st
 			fmt.Fprintf(&b, "· %s (<code>#%d</code>)\n", html.EscapeString(name), f.Mid)
 		}
 	}
-	return b.String(), totalPages
+	return b.String(), totalPages, nil
 }
 
-func buildCategoryKeyboard(batchID string, cats []model.NotifyCategoryGroup, total int) *InlineKeyboardMarkup {
-	return buildCategoryKeyboardForSite(repository.GetSiteBasic().SiteURL, cats, total)
+func buildCategoryKeyboard(cats []model.NotifyCategoryGroup, total int) (*InlineKeyboardMarkup, error) {
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return nil, err
+	}
+	return buildCategoryKeyboardForSite(basic.SiteURL, cats, total), nil
 }
 
 func buildCategoryKeyboardForSite(rawSiteURL string, cats []model.NotifyCategoryGroup, total int) *InlineKeyboardMarkup {

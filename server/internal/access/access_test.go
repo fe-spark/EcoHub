@@ -10,10 +10,41 @@ import (
 	"unicode/utf8"
 
 	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
+
+func useAccessFilmDB(t *testing.T, films ...model.FilmIndex) {
+	t.Helper()
+	filmMetaCacheMu.Lock()
+	filmMetaCache = map[int64]filmMetaCacheItem{}
+	filmMetaCacheMu.Unlock()
+	dsn := "file:" + strings.ReplaceAll(t.Name(), "/", "_") + "?mode=memory&cache=shared"
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(films) > 0 {
+		if err := gdb.Create(&films).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() {
+		db.Mdb = prev
+		filmMetaCacheMu.Lock()
+		filmMetaCache = map[int64]filmMetaCacheItem{}
+		filmMetaCacheMu.Unlock()
+	})
+}
 
 func TestShouldSkip(t *testing.T) {
 	cases := []struct {
@@ -225,15 +256,9 @@ func TestEnrichPlayTopItems_FilterDirtyKeys(t *testing.T) {
 		{Key: "class", Count: 26},
 		{Key: "999999", Count: 10},
 	}
-	res := enrichPlayTopItems(input)
-	if len(res) != 1 {
-		t.Fatalf("enrichPlayTopItems should filter invalid non-numeric keys, got len=%d", len(res))
-	}
-	if res[0].Key != "999999" || res[0].Count != 10 {
-		t.Fatalf("unexpected res[0]: %+v", res[0])
-	}
-	if res[0].Title != "影片 #999999" {
-		t.Fatalf("expected Title to be placeholder '影片 #999999', got %s", res[0].Title)
+	_, err := enrichPlayTopItems(input)
+	if err == nil {
+		t.Fatal("没有数据库时不能发明片名")
 	}
 }
 
@@ -485,16 +510,23 @@ func TestFromContextSSR(t *testing.T) {
 }
 
 func TestEnrichPlayTopItems(t *testing.T) {
+	useAccessFilmDB(t,
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1024}, FilmIndexContent: model.FilmIndexContent{Name: "影片1024"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2048}, FilmIndexContent: model.FilmIndexContent{Name: "影片2048"}},
+	)
 	items := []TopItem{
 		{Key: "1024", Count: 10},
 		{Key: "id 2048", Count: 5},
 		{Key: "custom_keyword", Count: 3},
 	}
-	enriched := enrichPlayTopItems(items)
+	enriched, err := enrichPlayTopItems(items)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(enriched) != 2 {
 		t.Fatalf("want 2 valid film items (custom_keyword filtered), got %d", len(enriched))
 	}
-	if enriched[0].Title != "影片 #1024" || enriched[1].Title != "影片 #2048" {
+	if enriched[0].Title != "影片1024" || enriched[1].Title != "影片2048" {
 		t.Fatalf("enrich items %+v", enriched)
 	}
 	if enriched[1].Key != "2048" {
@@ -503,6 +535,11 @@ func TestEnrichPlayTopItems(t *testing.T) {
 }
 
 func TestTakePlayTopsOverFetch(t *testing.T) {
+	useAccessFilmDB(t,
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1}, FilmIndexContent: model.FilmIndexContent{Name: "一"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2}, FilmIndexContent: model.FilmIndexContent{Name: "二"}},
+		model.FilmIndex{FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3}, FilmIndexContent: model.FilmIndexContent{Name: "三"}},
+	)
 	items := []TopItem{
 		{Key: "search", Count: 497},
 		{Key: "class", Count: 26},
@@ -510,7 +547,10 @@ func TestTakePlayTopsOverFetch(t *testing.T) {
 		{Key: "2", Count: 9},
 		{Key: "3", Count: 8},
 	}
-	got := takePlayTops(items, 2)
+	got, err := takePlayTops(items, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 {
 		t.Fatalf("want 2 after filter+limit, got %d", len(got))
 	}
@@ -943,7 +983,10 @@ func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
 		SeriesJSON: seriesJSON,
 	}
 
-	ov := overviewFromDailyScope(row, "tvbox", "")
+	ov, err := overviewFromDailyScope(row, "tvbox", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ov.PV != 25 || ov.UV != 15 {
 		t.Fatalf("expected TVBox PV=25, UV=15, got PV=%d, UV=%d", ov.PV, ov.UV)
 	}
@@ -951,7 +994,10 @@ func TestOverviewFromDailyScope_TVBoxSeries(t *testing.T) {
 		t.Fatalf("expected TVBox Series[0].PV=25, got %+v", ov.Series)
 	}
 
-	globalOv := overviewFromDailyScope(row, "", "")
+	globalOv, err := overviewFromDailyScope(row, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if globalOv.PV != 125 || globalOv.UV != 80 {
 		t.Fatalf("expected Global PV=125, UV=80, got PV=%d, UV=%d", globalOv.PV, globalOv.UV)
 	}
@@ -1011,7 +1057,7 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 		ProvidePV:      50,
 		ProvideUV:      35,
 		SeriesJSON:     seriesJSON,
-		VersionJSON:    `{"1.0.0":10,"1.0.1":10}`,
+		VersionJSON:    `{"android":{"1.0.0":10,"1.0.1":10}}`,
 		PlatformJSON:   `{"android":15,"ios":5}`,
 		PlatformUVJSON: `{"android":8,"ios":3}`,
 		BrowserJSON:    `{"chrome":25}`,
@@ -1020,7 +1066,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// Web 端验证
-	webOv := overviewFromDailyScope(row, "web", "")
+	webOv, err := overviewFromDailyScope(row, "web", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if webOv.PV != 30 || webOv.UV != 20 {
 		t.Fatalf("expected Web PV=30, UV=20, got PV=%d, UV=%d", webOv.PV, webOv.UV)
 	}
@@ -1029,7 +1078,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// App 端验证
-	appOv := overviewFromDailyScope(row, "app", "")
+	appOv, err := overviewFromDailyScope(row, "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if appOv.PV != 20 || appOv.UV != 15 {
 		t.Fatalf("expected App PV=20, UV=15, got PV=%d, UV=%d", appOv.PV, appOv.UV)
 	}
@@ -1047,7 +1099,10 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 	}
 
 	// App 端分平台下钻验证（Issue 2）
-	androidOv := overviewFromDailyScope(row, "app", "android")
+	androidOv, err := overviewFromDailyScope(row, "app", "android")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if androidOv.PV != 15 {
 		t.Fatalf("expected Android platform PV=15, got %d", androidOv.PV)
 	}
@@ -1060,11 +1115,17 @@ func TestOverviewFromDailyScope_WebAndAppSeries(t *testing.T) {
 
 	nestedRow := row
 	nestedRow.VersionJSON = `{"android":{"2.5.4":7},"ios":{"2.5.4":2}}`
-	androidVer := overviewFromDailyScope(nestedRow, "app", "android")
+	androidVer, err := overviewFromDailyScope(nestedRow, "app", "android")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if androidVer.Versions["2.5.4"] != 7 {
 		t.Fatalf("expected android versions 2.5.4=7, got %+v", androidVer.Versions)
 	}
-	allVer := overviewFromDailyScope(nestedRow, "app", "")
+	allVer, err := overviewFromDailyScope(nestedRow, "app", "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if allVer.Versions["2.5.4"] != 9 {
 		t.Fatalf("expected merged versions 2.5.4=9, got %+v", allVer.Versions)
 	}
@@ -1101,6 +1162,7 @@ func TestModuleIsolationKeys(t *testing.T) {
 }
 
 func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
+	useAccessFilmDB(t)
 	events := []AccessEvent{
 		{
 			Action:         ActionPlay,
@@ -1121,7 +1183,10 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 		},
 	}
 
-	res := enrichLogEvents(events)
+	res, err := enrichLogEvents(events)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(res))
 	}
@@ -1137,9 +1202,8 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 		t.Fatalf("expected ResourceCat to be preserved as '科幻', got %q", res[0].ResourceCat)
 	}
 
-	// 验证未固化快照的事件仍会兜底处理
-	if res[1].ResourceTitle == "" {
-		t.Fatalf("expected res[1] to have fallback title, got empty")
+	if res[1].ResourceTitle != "" {
+		t.Fatalf("库里没有这部片时标题应为空，got %q", res[1].ResourceTitle)
 	}
 
 	// 验证分类快照保留
@@ -1149,6 +1213,7 @@ func TestEnrichLogEvents_PreservesImmutableSnapshots(t *testing.T) {
 }
 
 func TestEnrichPlayTopItems_PreservesHistoricalTitle(t *testing.T) {
+	useAccessFilmDB(t)
 	items := []TopItem{
 		{
 			Key:      "1024",
@@ -1164,14 +1229,14 @@ func TestEnrichPlayTopItems_PreservesHistoricalTitle(t *testing.T) {
 		},
 	}
 
-	res := enrichPlayTopItems(items)
-	if len(res) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(res))
+	res, err := enrichPlayTopItems(items)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(res))
 	}
 	if res[0].Title != "历史归档-阿凡达" {
 		t.Fatalf("expected Title to be preserved as '历史归档-阿凡达', got %q", res[0].Title)
-	}
-	if res[1].Title != "影片 #2048" {
-		t.Fatalf("expected Title fallback '影片 #2048', got %q", res[1].Title)
 	}
 }

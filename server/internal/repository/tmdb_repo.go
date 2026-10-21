@@ -2,7 +2,8 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
+	"errors"
+	"fmt"
 	"strings"
 
 	"server/internal/config"
@@ -80,35 +81,49 @@ func PublicTMDBConfig(cfg model.TMDBConfig) model.TMDBConfig {
 	return cfg
 }
 
-// GetTMDBConfig 读取 TMDB 配置（Redis 缓存优先，MySQL 兜底）
-func GetTMDBConfig() model.TMDBConfig {
-	cfg := DefaultTMDBConfig()
-	if db.Rdb != nil {
-		if data := db.Rdb.Get(db.Cxt, config.TMDBConfigKey).Val(); data != "" {
-			if err := json.Unmarshal([]byte(data), &cfg); err == nil {
-				return NormalizeTMDBConfig(cfg)
+// GetTMDBConfig 读取 TMDB 配置。没有记录时返回默认值，不写入缓存。
+func GetTMDBConfig() (model.TMDBConfig, error) {
+	if data, ok, err := readCache(config.TMDBConfigKey); err != nil {
+		return model.TMDBConfig{}, err
+	} else if ok && data != "" {
+		cfg, err := decodeTMDBConfig(data)
+		if err != nil {
+			if delErr := dropCache(config.TMDBConfigKey); delErr != nil {
+				return model.TMDBConfig{}, fmt.Errorf("%w; 删除缓存失败: %v", err, delErr)
 			}
+		} else {
+			return cfg, nil
 		}
 	}
-
 	if db.Mdb == nil {
-		return cfg
+		return model.TMDBConfig{}, errors.New("数据库未连接")
 	}
-
 	var rec model.TMDBConfigRecord
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
-		return cfg
+		if recordNotFound(err) {
+			return DefaultTMDBConfig(), nil
+		}
+		return model.TMDBConfig{}, err
 	}
-	raw := strings.TrimSpace(rec.Payload)
-	if raw == "" {
-		return cfg
+	cfg, err := decodeTMDBConfig(rec.Payload)
+	if err != nil {
+		return model.TMDBConfig{}, err
 	}
+	if err := cacheTMDBConfig(cfg); err != nil {
+		return model.TMDBConfig{}, err
+	}
+	return cfg, nil
+}
+
+func decodeTMDBConfig(raw string) (model.TMDBConfig, error) {
+	if strings.TrimSpace(raw) == "" {
+		return DefaultTMDBConfig(), nil
+	}
+	var cfg model.TMDBConfig
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
-		return cfg
+		return model.TMDBConfig{}, fmt.Errorf("TMDB 配置无法解析: %w", err)
 	}
-	cfg = NormalizeTMDBConfig(cfg)
-	cacheTMDBConfig(cfg)
-	return cfg
+	return NormalizeTMDBConfig(cfg), nil
 }
 
 // SaveTMDBConfig 持久化 TMDB 配置并刷新 Redis 缓存
@@ -127,20 +142,13 @@ func SaveTMDBConfig(cfg model.TMDBConfig) error {
 	}); err != nil {
 		return err
 	}
-	cacheTMDBConfig(cfg)
-	return nil
+	return cacheTMDBConfig(cfg)
 }
 
-func cacheTMDBConfig(cfg model.TMDBConfig) {
-	if db.Rdb == nil {
-		return
-	}
+func cacheTMDBConfig(cfg model.TMDBConfig) error {
 	data, err := json.Marshal(cfg)
 	if err != nil {
-		return
+		return err
 	}
-	if err := db.Rdb.Set(db.Cxt, config.TMDBConfigKey, data, config.ConfigCacheTTL).Err(); err != nil {
-		log.Println("SaveTMDBConfig Redis Error:", err)
-		_ = db.Rdb.Del(db.Cxt, config.TMDBConfigKey).Err()
-	}
+	return writeCache(config.TMDBConfigKey, string(data))
 }

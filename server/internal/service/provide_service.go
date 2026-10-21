@@ -30,7 +30,7 @@ var (
 )
 
 // GetClassList 获取格式化的分类列表和筛选条件
-func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any) {
+func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass, map[string][]map[string]any, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = sourceIdOpt[0]
@@ -49,7 +49,7 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 				Filters   map[string][]map[string]any
 			}
 			if json.Unmarshal([]byte(data), &res) == nil {
-				return res.ClassList, res.Filters
+				return res.ClassList, res.Filters, nil
 			}
 		}
 	}
@@ -57,7 +57,10 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 	var classList []model.FilmClass
 	filters := make(map[string][]map[string]any)
 
-	tree := repository.GetActiveCategoryTree(sourceId)
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, nil, err
+	}
 
 	type categoryResult struct {
 		index   int
@@ -194,7 +197,7 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 		}
 	}
 
-	return classList, filters
+	return classList, filters, nil
 }
 
 // GetVodList 获取视频列表 (支持多维度筛选与采集源隔离)
@@ -348,7 +351,11 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 
 	apiPath := baseURL + "/api/provide/vod"
 	sites := make([]map[string]any, 0)
-	for _, source := range repository.GetEnabledCollectSourceList() {
+	enabledSources, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
+	for _, source := range enabledSources {
 		sourceApi := apiPath + "?source=" + url.QueryEscape(source.Id)
 		if key != "" {
 			sourceApi += "&key=" + url.QueryEscape(key)
@@ -382,7 +389,10 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 // GetAppSourceConfig 提供给 EcoHub 官方原生客户端（OHOS / Android）的软件源描述配置
 func (p *ProvideService) GetAppSourceConfig(baseURL string) (map[string]any, error) {
 	baseURL = strings.TrimRight(baseURL, "/")
-	basic := repository.GetSiteBasic()
+	basic, err := repository.GetSiteBasic()
+	if err != nil {
+		return nil, err
+	}
 	siteName := strings.TrimSpace(basic.SiteName)
 	if siteName == "" {
 		siteName = "EcoHub"

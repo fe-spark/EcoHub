@@ -29,7 +29,9 @@ func setupFilmServiceTestDB(t *testing.T) *gorm.DB {
 		&model.FilmIndex{},
 		&model.FilmSourcePlaylist{},
 		&model.Category{},
+		&model.SourceCategory{},
 		&model.CategoryMapping{},
+		&model.SiteConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -57,7 +59,10 @@ func TestFilmService_GetSearchOptions_DefaultSource(t *testing.T) {
 	gdb.Create(&model.FilmSource{Id: "src_a", Name: "站点A", Uri: "http://a.com", State: true, Sort: 1})
 
 	srv := new(FilmService)
-	options := srv.GetSearchOptions()
+	options, err := srv.GetSearchOptions()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if defaultSrc, ok := options["defaultSourceId"].(string); !ok || defaultSrc != "src_a" {
 		t.Fatalf("expected defaultSourceId to be src_a, got %v", options["defaultSourceId"])
@@ -84,7 +89,10 @@ func TestFilmService_GetScopedClassTree_DefaultsToPrimary(t *testing.T) {
 	gdb.Create(&model.CategoryMapping{SourceId: "src_a", SourceTypeId: 1, CategoryId: 9})
 	gdb.Create(&model.CategoryMapping{SourceId: "src_b", SourceTypeId: 2, CategoryId: 1})
 
-	view := new(FilmService).GetScopedClassTree("")
+	view, err := new(FilmService).GetScopedClassTree("")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if view.DefaultSourceId != "src_a" || view.CurrentSourceId != "src_a" {
 		t.Fatalf("default source = %s current = %s", view.DefaultSourceId, view.CurrentSourceId)
 	}
@@ -94,7 +102,10 @@ func TestFilmService_GetScopedClassTree_DefaultsToPrimary(t *testing.T) {
 	if len(view.Tree.Children) != 1 || view.Tree.Children[0].Name != "电影" {
 		t.Fatalf("default tree = %+v", view.Tree.Children)
 	}
-	picked := new(FilmService).GetScopedClassTree("src_b")
+	picked, err := new(FilmService).GetScopedClassTree("src_b")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(picked.Tree.Children) != 1 || picked.Tree.Children[0].Name != "电视剧" {
 		t.Fatalf("src_b tree = %+v", picked.Tree.Children)
 	}
@@ -123,7 +134,7 @@ func TestFilmService_GetFilmPage_FilterBySource(t *testing.T) {
 	srv := new(FilmService)
 
 	// 1. 未指定 SourceId 时，默认筛选第一个源 (src1)
-	page1, err := srv.GetFilmPage(model.SearchVo{
+	page1, err := srv.GetFilmPage(&model.SearchVo{
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 	})
 	if err != nil {
@@ -134,7 +145,7 @@ func TestFilmService_GetFilmPage_FilterBySource(t *testing.T) {
 	}
 
 	// 2. 指定 SourceId = src2 时，筛选出 src2 的影片
-	page2, err := srv.GetFilmPage(model.SearchVo{
+	page2, err := srv.GetFilmPage(&model.SearchVo{
 		SourceId: "src2",
 		Paging:   &dto.Page{Current: 1, PageSize: 10},
 	})
@@ -165,7 +176,7 @@ func TestFilmService_GetFilmPage_SnapshotMode_FilterBySource(t *testing.T) {
 	srv := new(FilmService)
 
 	// 默认未带 SourceId -> 首位源 src1
-	page1, err := srv.GetFilmPage(model.SearchVo{
+	page1, err := srv.GetFilmPage(&model.SearchVo{
 		Paging: &dto.Page{Current: 1, PageSize: 10},
 	})
 	if err != nil {
@@ -176,7 +187,7 @@ func TestFilmService_GetFilmPage_SnapshotMode_FilterBySource(t *testing.T) {
 	}
 
 	// 筛选 src2 -> 快照影片2
-	page2, err := srv.GetFilmPage(model.SearchVo{
+	page2, err := srv.GetFilmPage(&model.SearchVo{
 		SourceId: "src2",
 		Paging:   &dto.Page{Current: 1, PageSize: 10},
 	})

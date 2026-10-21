@@ -10,10 +10,32 @@ import (
 	"testing"
 	"time"
 
+	"fmt"
+
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider/progress"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func setupNotifyConfigDB(t *testing.T) {
+	t.Helper()
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.NotifyConfigRecord{}, &model.ProxyConfigRecord{}, &model.FilmIndex{}); err != nil {
+		t.Fatal(err)
+	}
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+}
 
 func TestMaskAndMergeNotifyConfig(t *testing.T) {
 	rawToken := "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw"
@@ -60,6 +82,7 @@ func TestMaskAndMergeNotifyConfig(t *testing.T) {
 }
 
 func TestNotifyCallbackAndPagination(t *testing.T) {
+	setupNotifyConfigDB(t)
 	sess := model.NotifyBatchSession{
 		BatchID:      "b123",
 		SiteName:     "EcoHub",
@@ -106,18 +129,25 @@ func TestNotifyCallbackAndPagination(t *testing.T) {
 		t.Fatalf("unexpected callback parse result: batch=%s action=%s catIdx=%d page=%d ok=%v", batchID, action, catIdx, page, ok)
 	}
 
-	pageHTML, totalPages := formatFilmListPageHTML(sess, 0, 1)
+	pageHTML, totalPages, err := formatFilmListPageHTML(sess, 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if totalPages != 2 || !strings.Contains(pageHTML, "影片A") || !strings.Contains(pageHTML, "影片B") || strings.Contains(pageHTML, "影片C") {
 		t.Fatalf("unexpected page 1 html (totalPages=%d): %s", totalPages, pageHTML)
 	}
 
-	page2HTML, _ := formatFilmListPageHTML(sess, 0, 2)
+	page2HTML, _, err := formatFilmListPageHTML(sess, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !strings.Contains(page2HTML, "影片C") {
 		t.Fatalf("expected page 2 to contain 影片C: %s", page2HTML)
 	}
 }
 
 func TestSendTestAndCallbackEditWithMockServer(t *testing.T) {
+	setupNotifyConfigDB(t)
 	var (
 		mu      sync.Mutex
 		methods []string

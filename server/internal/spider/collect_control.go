@@ -38,8 +38,7 @@ func StopSourceForDelete(sourceID string) (release func(), err error) {
 			return nil, err
 		}
 		if err := collectLifecycle.beginSource(sourceID); err != nil {
-			collectLifecycle.endSource(sourceID)
-			_ = collectLifecycle.beginSource(sourceID)
+			return nil, err
 		}
 	}
 	return func() { collectLifecycle.endSource(sourceID) }, nil

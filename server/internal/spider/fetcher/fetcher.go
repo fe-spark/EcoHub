@@ -47,9 +47,9 @@ type Deps struct {
 	// SkipPublishOnError 该站该采集窗口出错时是否跳过发布。
 	SkipPublishOnError func(s model.FilmSource, h int) bool
 	// ResolveSpiderProxy 获取全局爬虫通道代理配置（纯内存读取，避免逐页查库）。
-	ResolveSpiderProxy func() (bool, string)
-	// ResolveSourceProxy 查询站点是否启用代理并获取代理地址（兼容兜底）。
-	ResolveSourceProxy func(sourceID string) (bool, string)
+	ResolveSpiderProxy func() (bool, string, error)
+	// ResolveSourceProxy 查询站点是否启用代理。配置读取失败必须返回错误。
+	ResolveSourceProxy func(sourceID string) (bool, string, error)
 	// OnSourceFailed 单站连续失败达到上限终止采集时的通知回调（可选）。
 	OnSourceFailed func(sourceID, sourceName, reason string)
 }
@@ -222,27 +222,39 @@ func GetSourcePageConcurrencyMax(_ *model.FilmSource) int {
 	return solo
 }
 
-func buildPageRequest(s *model.FilmSource, h, pg int) utils.RequestInfo {
+func buildPageRequest(s *model.FilmSource, h, pg int) (utils.RequestInfo, error) {
 	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
-	if s != nil {
-		if s.ResolveFormat() == model.SourceFormatXML {
-			r.Params.Set("ac", "videolist")
+	if s == nil {
+		return r, nil
+	}
+	if s.ResolveFormat() == model.SourceFormatXML {
+		r.Params.Set("ac", "videolist")
+	}
+	if !s.ProxyCollect {
+		return r, nil
+	}
+	if deps.ResolveSpiderProxy != nil {
+		ok, proxy, err := deps.ResolveSpiderProxy()
+		if err != nil {
+			return r, err
 		}
-		if s.ProxyCollect {
-			if deps.ResolveSpiderProxy != nil {
-				if ok, proxy := deps.ResolveSpiderProxy(); ok {
-					r.ProxyURL = proxy
-				}
-			} else if deps.ResolveSourceProxy != nil {
-				if ok, proxy := deps.ResolveSourceProxy(s.Id); ok {
-					r.ProxyURL = proxy
-				}
-			}
+		if ok {
+			r.ProxyURL = proxy
+		}
+		return r, nil
+	}
+	if deps.ResolveSourceProxy != nil {
+		ok, proxy, err := deps.ResolveSourceProxy(s.Id)
+		if err != nil {
+			return r, err
+		}
+		if ok {
+			r.ProxyURL = proxy
 		}
 	}
-	return r
+	return r, nil
 }

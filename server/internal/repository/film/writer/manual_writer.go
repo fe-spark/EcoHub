@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -216,6 +217,9 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		}
 		ClearFilmIndexCachesByPidSet(map[int64]struct{}{existingFilm.Pid: {}})
 	} else {
+		if !shared.HasPlayableLinks(detail) {
+			return 0, errors.New("影片必须包含至少一条有效播放链接")
+		}
 		var err error
 		mid, _, _, err = saveSinglePeerDetailSynced(source, detail)
 		if err != nil {

@@ -268,3 +268,40 @@ func TestInferCategoryParentsBySemantic_RootAliases(t *testing.T) {
 		t.Errorf("expected 悬疑 to stay unhinted, got parent %d", hints[46])
 	}
 }
+
+func TestConvertFilmDetails_FiltersUnplayableFilms(t *testing.T) {
+	details := []model.FilmDetail{
+		{
+			VodID:       101,
+			VodName:     "有播放地址影片",
+			VodPlayFrom: "hnyun",
+			VodPlayURL:  "第1集$https://cdn.example/1.m3u8",
+		},
+		{
+			VodID:       102,
+			VodName:     "只有分隔符空壳",
+			VodPlayFrom: "hnyun$$$hnm3u8",
+			VodPlayURL:  "$$$",
+		},
+		{
+			VodID:       103,
+			VodName:     "播放地址完全为空",
+			VodPlayFrom: "",
+			VodPlayURL:  "",
+		},
+		{
+			VodID:       104,
+			VodName:     "",
+			VodPlayFrom: "hnyun",
+			VodPlayURL:  "第1集$https://cdn.example/4.m3u8",
+		},
+	}
+	converted := ConvertFilmDetails(details)
+	if len(converted) != 1 {
+		t.Fatalf("expected 1 playable film, got %d", len(converted))
+	}
+	if converted[0].Id != 101 || converted[0].Name != "有播放地址影片" {
+		t.Fatalf("unexpected film: %+v", converted[0])
+	}
+}
+

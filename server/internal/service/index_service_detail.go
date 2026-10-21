@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -92,8 +93,11 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		startedAt := time.Now()
 		version := filmsnapshot.GetActiveReadModelVersion()
 		snapshotStartedAt := time.Now()
-		snapshot := filmsnapshot.GetSnapshotByMid(version, int64(id))
+		snapshot, snapErr := filmsnapshot.GetSnapshotByMid(version, int64(id))
 		logSlowIndexServiceStep("GetFilmDetail.snapshot", snapshotStartedAt, "id", id)
+		if snapErr != nil {
+			return model.MovieDetailVo{}, snapErr
+		}
 		if snapshot == nil {
 			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
@@ -107,7 +111,10 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			return model.MovieDetailVo{}, nil
 		}
 
-		playList, downloadList := loadPlayAndDownloadSourcesByMid(int64(id))
+		playList, downloadList, err := loadPlayAndDownloadSourcesByMid(int64(id))
+		if err != nil {
+			return nil, err
+		}
 		movieDetail.DownloadList = downloadList
 		res := model.MovieDetailVo{
 			MovieDetail:     *movieDetail,
@@ -223,20 +230,26 @@ func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) []model.F
 	return rows
 }
 
-func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.MovieUrlInfo) {
+func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.MovieUrlInfo, error) {
 	if mid <= 0 {
-		return nil, nil
+		return nil, nil, nil
+	}
+	if db.Mdb == nil {
+		return nil, nil, errors.New("数据库未连接")
 	}
 	var rows []model.FilmSourcePlaylist
 	if err := db.Mdb.Where("mid = ?", mid).Order("line_kind ASC, group_index ASC").Find(&rows).Error; err != nil {
-		return nil, nil
+		return nil, nil, err
 	}
 	rows = appendPeerPlayRows([]int64{mid}, rows)
 	if len(rows) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
-	sources := repository.GetEnabledCollectSourceList()
+	sources, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		return nil, nil, err
+	}
 	sourcesByID := make(map[string]model.FilmSource, len(sources))
 	sourceOrderMap := make(map[string]int, len(sources))
 	for idx, s := range sources {
@@ -306,28 +319,34 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		return playList[i].Id < playList[j].Id
 	})
 
-	return playList, downloadList
+	return playList, downloadList, nil
 }
 
 // BatchGetPlayPlaylistsByMids 批量加载影片播放列表（TVBox 批量组装，无 N+1）。
-func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
+func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, error) {
 	result := make(map[int64][]model.PlayLinkVo, len(mids))
 	if len(mids) == 0 {
-		return result
+		return result, nil
+	}
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
 	}
 
 	var rows []model.FilmSourcePlaylist
 	if err := db.Mdb.Where("mid IN ? AND line_kind = 'play'", mids).
 		Order("mid ASC, group_index ASC").
 		Find(&rows).Error; err != nil {
-		return result
+		return nil, err
 	}
 	rows = appendPeerPlayRows(mids, rows)
 	if len(rows) == 0 {
-		return result
+		return result, nil
 	}
 
-	sources := repository.GetEnabledCollectSourceList()
+	sources, err := repository.GetEnabledCollectSourceList()
+	if err != nil {
+		return nil, err
+	}
 	sourcesByID := make(map[string]model.FilmSource, len(sources))
 	sourceOrderMap := make(map[string]int, len(sources))
 	for idx, s := range sources {
@@ -395,7 +414,7 @@ func BatchGetPlayPlaylistsByMids(mids []int64) map[int64][]model.PlayLinkVo {
 		result[mid] = lines
 	}
 
-	return result
+	return result, nil
 }
 
 func storeFilmPlayInfoCache(cacheKey, payload string, ttl time.Duration, gen int64) {
@@ -416,8 +435,11 @@ func (i *IndexService) GetFilmDetailOnly(id int) (model.MovieDetail, error) {
 	startedAt := time.Now()
 	version := filmsnapshot.GetActiveReadModelVersion()
 	snapshotStartedAt := time.Now()
-	snapshot := filmsnapshot.GetSnapshotByMid(version, int64(id))
+	snapshot, err := filmsnapshot.GetSnapshotByMid(version, int64(id))
 	logSlowIndexServiceStep("GetFilmDetailOnly.snapshot", snapshotStartedAt, "id", id)
+	if err != nil {
+		return model.MovieDetail{}, err
+	}
 	if snapshot == nil {
 		return model.MovieDetail{}, nil
 	}

@@ -34,14 +34,17 @@ type BannerQuickConfigView struct {
 
 var bannerScheduleRunning atomic.Bool
 
-func (s *ManageService) GetBannerQuickConfig() BannerQuickConfigView {
-	if !repository.BannerConfigExists() {
+func (s *ManageService) GetBannerQuickConfig() (BannerQuickConfigView, error) {
+	cfg, exists, err := repository.LoadBannerConfig()
+	if err != nil {
+		return BannerQuickConfigView{}, err
+	}
+	if !exists {
 		return BannerQuickConfigView{
 			Strategy: "hot",
 			Quotas:   []model.BannerQuota{},
-		}
+		}, nil
 	}
-	cfg := repository.GetBannerConfig()
 	if cfg.Quotas == nil {
 		cfg.Quotas = []model.BannerQuota{}
 	}
@@ -50,7 +53,7 @@ func (s *ManageService) GetBannerQuickConfig() BannerQuickConfigView {
 		Strategy:   quickStrategyName(cfg.Strategy),
 		AutoScrape: cfg.AutoTMDB,
 		Quotas:     cfg.Quotas,
-	}
+	}, nil
 }
 
 func (s *ManageService) SaveBannerQuickConfig(in BannerQuickConfigInput) (BannerQuickConfigView, error) {
@@ -66,7 +69,7 @@ func (s *ManageService) SaveBannerQuickConfig(in BannerQuickConfigInput) (Banner
 	if err := repository.SaveBannerConfig(cfg); err != nil {
 		return BannerQuickConfigView{}, fmt.Errorf("保存排片配置失败")
 	}
-	return s.GetBannerQuickConfig(), nil
+	return s.GetBannerQuickConfig()
 }
 
 // ResetBannerDeckForSourceChange 切换首选站后清空轮播和排片配方，并关闭定时排片。
@@ -85,11 +88,15 @@ func ResetBannerDeckForSourceChange() error {
 }
 
 // bannerQuickHasQuotas 已保存配方里是否有正数量。
-func bannerQuickHasQuotas() bool {
-	if !repository.BannerConfigExists() {
-		return false
+func bannerQuickHasQuotas() (bool, error) {
+	cfg, exists, err := repository.LoadBannerConfig()
+	if err != nil {
+		return false, err
 	}
-	return len(repository.GetBannerConfig().Quotas) > 0
+	if !exists {
+		return false, nil
+	}
+	return len(cfg.Quotas) > 0, nil
 }
 
 // DisableBannerQuickSchedule 关闭计划任务里的定时排片。配方保留。
@@ -110,7 +117,10 @@ func DisableBannerQuickSchedule() error {
 
 // RunBannerQuickSchedule 按已存配方生成并替换线上轮播。
 func (s *ManageService) RunBannerQuickSchedule() error {
-	cfg := repository.GetBannerConfig()
+	cfg, err := repository.GetBannerConfig()
+	if err != nil {
+		return err
+	}
 	if !bannerScheduleRunning.CompareAndSwap(false, true) {
 		return fmt.Errorf("定时排片正在执行")
 	}
@@ -128,7 +138,7 @@ func (s *ManageService) RunBannerQuickSchedule() error {
 
 	var generated model.Banners
 	sawDone := false
-	err := s.OneClickGenerateDeckStream(context.Background(), OneClickGenerateReq{
+	err = s.OneClickGenerateDeckStream(context.Background(), OneClickGenerateReq{
 		Strategy:   cfg.Strategy,
 		Quotas:     quotas,
 		AutoScrape: cfg.AutoTMDB,

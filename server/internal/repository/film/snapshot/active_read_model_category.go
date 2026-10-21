@@ -37,7 +37,7 @@ func applyCategorySnapshotSourceFilter(query *gorm.DB, version string, sourceID 
 	return applySourceMembership(query, sourceID)
 }
 
-func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
 	sourceID = strings.TrimSpace(sourceID)
@@ -46,7 +46,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	}
 	id = listedCategoryID(sourceID, id)
 	if version == "" || id <= 0 || limit <= 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	if offset < 0 {
 		offset = 0
@@ -57,7 +57,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached []model.MovieBasicInfo
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
+				return cached, nil
 			}
 		}
 	}
@@ -65,17 +65,19 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	listGen := GetSearchCacheVersion()
 	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "update", offset, limit); used {
 		if err != nil {
-			log.Printf("[FilmCategoryList] 分类索引点查失败，回退原查询 source=%s field=%s id=%d err=%v", sourceID, field, id, err)
-		} else {
-			return finishCategoryList(cacheKey, listGen, snaps, sourceID, field, id, offset, limit, startedAt)
+			return nil, err
 		}
+		return finishCategoryList(cacheKey, listGen, snaps, sourceID, field, id, offset, limit, startedAt), nil
+	}
+	if db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
 	}
 	query := categoryFilmQuery(db.Mdb, sourceID, field, id, basicSelectFields)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder("update_stamp DESC, mid DESC")).Offset(offset).Limit(limit))
 	if err != nil {
-		return []model.MovieBasicInfo{}
+		return nil, err
 	}
-	return finishCategoryList(cacheKey, listGen, snapshots, sourceID, field, id, offset, limit, startedAt)
+	return finishCategoryList(cacheKey, listGen, snapshots, sourceID, field, id, offset, limit, startedAt), nil
 }
 
 func finishCategoryList(cacheKey string, listGen string, snapshots []model.FilmListSnapshot, sourceID, field string, id int64, offset, limit int, startedAt time.Time) []model.MovieBasicInfo {
@@ -88,7 +90,7 @@ func finishCategoryList(cacheKey string, listGen string, snapshots []model.FilmL
 	return result
 }
 
-func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) []model.MovieBasicInfo {
+func GetSnapshotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, offset)
 }
 
@@ -220,19 +222,22 @@ func applyCategoryIndexHint(query *gorm.DB, field, pidIndex, cidIndex string) *g
 	}
 }
 
-func movieInfosByMids(version string, mids []int64) []model.MovieBasicInfo {
+func movieInfosByMids(version string, mids []int64) ([]model.MovieBasicInfo, error) {
 	if len(mids) == 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
-	snaps := GetSnapshotsByMidsOrdered(version, mids)
+	snaps, err := GetSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
 	if len(snaps) == 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	infos := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
 	if infos == nil {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
-	return infos
+	return infos, nil
 }
 
 func resolveHotListVersion(version string) string {
@@ -274,7 +279,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 	if end > len(mids) {
 		end = len(mids)
 	}
-	return movieInfosByMids(version, mids[offset:end]), nil
+	return movieInfosByMids(version, mids[offset:end])
 }
 
 func GetSnapshotHotMovieListByCategoryReadModel(version string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
@@ -298,7 +303,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 	if err != nil {
 		return nil, err
 	}
-	return movieInfosByMids(version, mids), nil
+	return movieInfosByMids(version, mids)
 }
 
 func GetSnapshotHotPoolByCategoryReadModel(version string, field string, id int64, poolSize int) ([]model.MovieBasicInfo, error) {
@@ -342,7 +347,7 @@ func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field str
 }
 
 // GetSnapshotTopMoviesBySortFastWithSource 快速获取指定采集站分类排序 Top 影片
-func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
+func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, sortType int, pid int64, limit int) ([]model.MovieBasicInfo, error) {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
 	sourceID = strings.TrimSpace(sourceID)
@@ -351,10 +356,10 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	}
 	pid = listedCategoryID(sourceID, pid)
 	if version == "" || pid <= 0 || limit <= 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	if db.Mdb == nil {
-		return []model.MovieBasicInfo{}
+		return nil, ErrSearchIndexMissing
 	}
 
 	orderClause := "update_stamp DESC"
@@ -374,28 +379,27 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 		}
 		if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, "pid", pid, orderKind, 0, limit); used {
 			if err != nil {
-				log.Printf("[FilmSortListFast] 分类索引点查失败，回退原查询 source=%s pid=%d sortType=%d err=%v", sourceID, pid, sortType, err)
-			} else {
-				result := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
-				log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
-					sourceID, pid, sortType, len(result), time.Since(startedAt))
-				return result
+				return nil, err
 			}
+			result := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
+			log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
+				sourceID, pid, sortType, len(result), time.Since(startedAt))
+			return result, nil
 		}
 	}
 	query := categorySortFastQuery(db.Mdb, sourceID, sortType, pid)
 	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
 	if err != nil {
-		return []model.MovieBasicInfo{}
+		return nil, err
 	}
 	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
 	log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
 		sourceID, pid, sortType, len(result), time.Since(startedAt))
-	return result
+	return result, nil
 }
 
 // GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，消除 COUNT 扫描开销
-func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) []model.MovieBasicInfo {
+func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotTopMoviesBySortFastWithSource(version, "", sortType, pid, limit)
 }
 

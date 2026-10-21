@@ -10,6 +10,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/support"
+	"server/internal/utils"
 )
 
 // ErrSearchIndexMissing 检索索引还没建好，或数据库不可用。
@@ -168,12 +169,22 @@ func internPlaySources(srcs []string, keep func(string) string, single map[strin
 	return copied
 }
 
+func itemAggregateKey(item *FilmSearchMeta) string {
+	if item == nil {
+		return ""
+	}
+	clean := strings.TrimSpace(item.Item.CleanName)
+	if clean != "" {
+		return clean
+	}
+	return utils.NormalizeIdentityTitle(item.Item.Name)
+}
+
 func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMetaIndex {
 	internSearchMetas(items)
 	byUpdate := make([]int, len(items))
 	pos := make(map[int64]int, len(items))
 	films := make(map[string]int64)
-	playable := make(map[string]int64)
 	hot := make(map[string][]hotCand)
 	for i := range items {
 		byUpdate[i] = i
@@ -189,11 +200,41 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 			if src == "" {
 				continue
 			}
-			playable[src]++
 			considerHot(hot, hotPoolMapKey(src, item.CategoryKey), item.Item.Hits, item.Mid)
 			if item.RootCategoryKey != "" && item.RootCategoryKey != item.CategoryKey {
 				considerHot(hot, hotPoolMapKey(src, item.RootCategoryKey), item.Item.Hits, item.Mid)
 			}
+		}
+	}
+
+	sourceByKey := make(map[string]string, len(items)/2)
+	multiSourceKey := make(map[string]bool, len(items)/2)
+	for i := range items {
+		item := &items[i]
+		key := itemAggregateKey(item)
+		src := strings.TrimSpace(item.FirstSourceId)
+		if key == "" || src == "" {
+			continue
+		}
+		if firstSrc, ok := sourceByKey[key]; ok {
+			if firstSrc != src {
+				multiSourceKey[key] = true
+			}
+		} else {
+			sourceByKey[key] = src
+		}
+	}
+
+	multiSource := make(map[string]int64)
+	for i := range items {
+		item := &items[i]
+		src := strings.TrimSpace(item.FirstSourceId)
+		if src == "" {
+			continue
+		}
+		key := itemAggregateKey(item)
+		if len(item.PlaySources) >= 2 || (key != "" && multiSourceKey[key]) {
+			multiSource[src]++
 		}
 	}
 	sort.Slice(byUpdate, func(i, j int) bool {
@@ -216,13 +257,13 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		pools[key] = mids
 	}
 	return &filmSearchMetaIndex{
-		Version:          version,
-		Items:            items,
-		ByUpdate:         byUpdate,
-		Pos:              pos,
-		FilmsBySource:    films,
-		PlayableBySource: playable,
-		HotPools:         pools,
+		Version:             version,
+		Items:               items,
+		ByUpdate:            byUpdate,
+		Pos:                 pos,
+		FilmsBySource:       films,
+		MultiSourceBySource: multiSource,
+		HotPools:            pools,
 	}
 }
 
@@ -298,12 +339,12 @@ func VisitSearchMetasByUpdate(visit func(*FilmSearchMeta) bool) error {
 	return nil
 }
 
-func SearchInventoryCounts() (films map[string]int64, playable map[string]int64, err error) {
+func SearchInventoryCounts() (films map[string]int64, multiSource map[string]int64, err error) {
 	idx, err := loadCurrentSearchIndex()
 	if err != nil {
 		return nil, nil, err
 	}
-	return idx.FilmsBySource, idx.PlayableBySource, nil
+	return idx.FilmsBySource, idx.MultiSourceBySource, nil
 }
 
 func hotMidsFromIndex(version, sourceID, field string, categoryID int64, limit int) ([]int64, error) {

@@ -92,8 +92,22 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			sourceId = defSource.Id
 		}
 	}
+	if sourceId == "" {
+		return map[string]any{
+			"category": model.CategoryTree{
+				Id: 0, Pid: -1, Name: "分类信息", Show: true,
+				Children: make([]*model.CategoryTree, 0),
+			},
+			"content":       []map[string]any{},
+			"banners":       make(model.Banners, 0),
+			"currentSource": "",
+		}, nil
+	}
 	version := filmsnapshot.GetActiveReadModelVersion()
-	tree := repository.GetActiveCategoryTree(sourceId)
+	tree, err := repository.GetActiveCategoryTree(sourceId)
+	if err != nil {
+		return nil, err
+	}
 	list := make([]map[string]any, len(tree.Children))
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
@@ -118,7 +132,11 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 	if pageErr != nil {
 		return nil, pageErr
 	}
-	banners := overlayBannerLiveRemarks(repository.GetBanners())
+	rawBanners, err := repository.GetBanners()
+	if err != nil {
+		return nil, err
+	}
+	banners := overlayBannerLiveRemarks(rawBanners)
 	if banners == nil {
 		banners = make(model.Banners, 0)
 	}
@@ -128,27 +146,6 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		"banners":       banners,
 		"currentSource": sourceId,
 	}, nil
-}
-
-func applyLiveRemarksToMovies(list []model.MovieBasicInfo) {
-	if len(list) == 0 {
-		return
-	}
-	mids := make([]int64, 0, len(list))
-	for _, item := range list {
-		if item.Id > 0 {
-			mids = append(mids, item.Id)
-		}
-	}
-	live := filmrepo.LiveUpdateRemarksByMIDs(mids)
-	if len(live) == 0 {
-		return
-	}
-	for i := range list {
-		if remark, ok := live[list[i].Id]; ok {
-			list[i].Remarks = remark
-		}
-	}
 }
 
 // OverlayBannerLiveRemarks 只把片库更新状态补到轮播。图片和简介用轮播行自己的。
