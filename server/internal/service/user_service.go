@@ -40,8 +40,12 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 }
 
 // UserLogout 用户退出登录 注销
-func (s *UserService) UserLogout(id uint) {
-	// 通过用户ID清除Redis中的token信息
+func (s *UserService) UserLogout(id uint, tokenOpt ...string) {
+	if len(tokenOpt) > 0 && tokenOpt[0] != "" {
+		_ = repository.RemoveUserToken(id, tokenOpt[0])
+		return
+	}
+	// 通过用户ID清除Redis中全部token信息
 	_ = repository.ClearUserToken(id)
 }
 

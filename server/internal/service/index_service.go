@@ -132,6 +132,17 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 	if pageErr != nil {
 		return nil, pageErr
 	}
+	filteredList := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if item == nil {
+			continue
+		}
+		movies, _ := item["movies"].([]model.MovieBasicInfo)
+		if len(movies) == 0 {
+			continue
+		}
+		filteredList = append(filteredList, item)
+	}
 	rawBanners, err := repository.GetBanners()
 	if err != nil {
 		return nil, err
@@ -142,7 +153,7 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 	}
 	return map[string]any{
 		"category":      tree,
-		"content":       list,
+		"content":       filteredList,
 		"banners":       banners,
 		"currentSource": sourceId,
 	}, nil

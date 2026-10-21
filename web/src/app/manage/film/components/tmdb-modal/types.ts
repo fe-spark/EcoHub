@@ -21,6 +21,7 @@ export interface TmdbModalProps {
 }
 
 export const FIELD_OPTIONS = [
+  { label: "片名", value: "name" },
   { label: "海报", value: "poster" },
   { label: "背景图", value: "backdrop" },
   { label: "简介", value: "overview" },

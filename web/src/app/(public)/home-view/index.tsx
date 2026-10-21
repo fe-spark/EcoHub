@@ -92,8 +92,8 @@ export default function HomePageView({
     data.content.some(
       (section) =>
         section.nav?.show &&
-        ((section.movies && section.movies.length > 0) ||
-          (section.hot && section.hot.length > 0)),
+        section.movies &&
+        section.movies.length > 0,
     );
   const isEmpty = heroDeck.length === 0 && !hasContent;
 
@@ -108,7 +108,11 @@ export default function HomePageView({
       <DailyUpdates />
 
       {data.content.map((section, idx) => {
-        if (!section.nav.show) {
+        if (!section.nav?.show) {
+          return null;
+        }
+
+        if (!section.movies || section.movies.length === 0) {
           return null;
         }
 

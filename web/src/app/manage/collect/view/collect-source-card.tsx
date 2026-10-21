@@ -1,4 +1,4 @@
-import { Button, Checkbox, Popconfirm, Select, Tag, Tooltip } from "antd";
+import { Button, Checkbox, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
 import {
   DeleteOutlined,
   DisconnectOutlined,
@@ -45,11 +45,13 @@ interface CollectSourceCardProps {
   headerDragProps?: React.HTMLAttributes<HTMLDivElement>;
   onSelect: (id: string, checked: boolean) => void;
   onChangeCollectDuration: (id: string, value: number) => void;
+  onChangeSourceState?: (id: string, state: boolean) => void;
   onStartTask: (record: FilmSource) => void;
   onTerminateTask: (id: string) => void;
   onEditSource: (id: string) => void;
   onDeleteSource: (id: string) => void;
   deleting?: boolean;
+  toggling?: boolean;
   onSyncCategory?: (id: string) => void;
 }
 
@@ -62,11 +64,13 @@ export default function CollectSourceCard({
   headerDragProps,
   onSelect,
   onChangeCollectDuration,
+  onChangeSourceState,
   onStartTask,
   onTerminateTask,
   onEditSource,
   onDeleteSource,
   deleting = false,
+  toggling = false,
   onSyncCategory,
 }: CollectSourceCardProps) {
   const isDeleting = deleting || Boolean(record.deleting);
@@ -170,13 +174,30 @@ export default function CollectSourceCard({
             </a>
           </Tooltip>
         </div>
-        <span
-          className={`${styles.statusPill} ${statusClassMap[statusTone]}`}
+        <div
           onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}
         >
-          <span className={styles.statusDot} />
-          {statusLabel}
-        </span>
+          {(isRunning || isStopping || isDeleting || phase === "failed" || phase === "stopping") && (
+            <span className={`${styles.statusPill} ${statusClassMap[statusTone]}`}>
+              <span className={styles.statusDot} />
+              {statusLabel}
+            </span>
+          )}
+          <Tooltip title={!canWrite ? "无操作权限" : isRunning ? "任务运行中不可切换" : record.state ? "点击禁用采集站" : "点击启用采集站"}>
+            <Switch
+              checked={Boolean(record.state)}
+              disabled={!canWrite || isDeleting || isRunning || isStopping || toggling}
+              loading={toggling}
+              checkedChildren="启用"
+              unCheckedChildren="禁用"
+              onChange={(checked) => {
+                onChangeSourceState?.(record.id, checked);
+              }}
+            />
+          </Tooltip>
+        </div>
       </div>
 
       {/* 底部信息/操作沉底：进度改为环形固定占位，卡片高度恒定 */}

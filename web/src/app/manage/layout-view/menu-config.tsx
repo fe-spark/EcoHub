@@ -70,7 +70,6 @@ export const menuItems: MenuItem[] = [
 
 export function resolveMenuKey(pathname: string): string {
   if (pathname.startsWith("/manage/banners")) return "/manage/banners";
-  if (pathname.startsWith("/manage/film/add")) return "/manage/film";
   if (pathname.startsWith("/manage/collect/category/rules")) return "/manage/collect/category/rules";
   if (pathname.startsWith("/manage/collect/category")) return "/manage/collect/category";
   if (pathname.startsWith("/manage/film")) return "/manage/film";

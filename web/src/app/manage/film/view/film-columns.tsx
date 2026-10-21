@@ -37,20 +37,20 @@ export interface FilmItem {
 interface UseFilmColumnsProps {
   syncingIds: number[];
   canWrite: boolean;
-  router: any;
   styles: any;
   handleUpdateSingle: (mid: number) => void;
   handleDelFilm: (id: number) => void;
+  handleEditFilm: (mid: number) => void;
   activeSourceId?: string;
 }
 
 export function useFilmColumns({
   syncingIds,
   canWrite,
-  router,
   styles,
   handleUpdateSingle,
   handleDelFilm,
+  handleEditFilm,
   activeSourceId,
 }: UseFilmColumnsProps) {
   return useMemo<ColumnsType<FilmItem>>(
@@ -77,7 +77,7 @@ export function useFilmColumns({
             <Text
               className={styles.filmName}
               style={{ whiteSpace: "nowrap" }}
-              onClick={() => router.push(`/manage/film/add?id=${record.mid}&readonly=1`)}
+              onClick={() => handleEditFilm(record.mid)}
             >
               {record.name}
             </Text>
@@ -183,7 +183,7 @@ export function useFilmColumns({
                 style={{ background: "#1890ff", borderColor: "#1890ff" }}
                 icon={<EditOutlined />}
                 disabled={!canWrite}
-                onClick={() => router.push(`/manage/film/add?id=${record.mid}`)}
+                onClick={() => handleEditFilm(record.mid)}
               />
             </Tooltip>
             <Popconfirm
@@ -209,9 +209,9 @@ export function useFilmColumns({
     ],
     [
       syncingIds,
-      router,
       handleDelFilm,
       handleUpdateSingle,
+      handleEditFilm,
       canWrite,
       styles,
       activeSourceId,

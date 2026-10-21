@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Table, Pagination } from "antd";
-import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -10,6 +9,7 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import { useFilmColumns, type FilmItem } from "./film-columns";
 import { FilmFilterBar } from "./film-filter-bar";
 import { FilmBatchBar } from "./film-batch-bar";
+import FilmModal from "../components/film-modal";
 import styles from "./index.module.less";
 
 function flattenCategoryNodes(nodes: any[]): any[] {
@@ -27,7 +27,6 @@ function flattenCategoryNodes(nodes: any[]): any[] {
 }
 
 export default function FilmListPageView() {
-  const router = useRouter();
   const { canWrite } = useManagePermission();
   const [list, setList] = useState<FilmItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -58,6 +57,11 @@ export default function FilmListPageView() {
   const sourceReqSeqRef = useRef(0);
   const [dateRange, setDateRange] = useState<any>(null);
   const { message } = useAppMessage();
+
+  const [filmModalOpen, setFilmModalOpen] = useState(false);
+  const [editingFilmId, setEditingFilmId] = useState<number | null>(null);
+  const [modalDefaultSourceId, setModalDefaultSourceId] = useState<string>("");
+  const [modalDefaultCid, setModalDefaultCid] = useState<number | undefined>(undefined);
 
   useEffect(() => {
     const collectParentKeys = (nodes: any[]): (string | number)[] => {
@@ -288,10 +292,13 @@ export default function FilmListPageView() {
   const columns = useFilmColumns({
     syncingIds,
     canWrite,
-    router,
     styles,
     handleUpdateSingle: (mid) => handleUpdateFilms([mid]),
     handleDelFilm: (id) => handleDelFilms([id]),
+    handleEditFilm: (mid) => {
+      setEditingFilmId(mid);
+      setFilmModalOpen(true);
+    },
     activeSourceId: tableSourceId || params.sourceId,
   });
 
@@ -358,17 +365,17 @@ export default function FilmListPageView() {
             onBatchDelete={() => handleDelFilms(selectedRowKeys.map(Number))}
             onClearSelection={() => setSelectedRowKeys([])}
             onAdd={() => {
-              const query = new URLSearchParams();
               const targetSourceId =
                 params.sourceId ||
                 tableSourceId ||
                 options.defaultSourceId ||
-                options.sources?.[0]?.id;
-              const targetCid = classId || params.cid || params.pid;
-              if (targetSourceId) query.set("sourceId", targetSourceId);
-              if (targetCid) query.set("cid", String(targetCid));
-              const qs = query.toString();
-              router.push(qs ? `/manage/film/add?${qs}` : "/manage/film/add");
+                options.sources?.[0]?.id ||
+                "";
+              const targetCid = classId || params.cid || params.pid || undefined;
+              setEditingFilmId(null);
+              setModalDefaultSourceId(targetSourceId);
+              setModalDefaultCid(targetCid);
+              setFilmModalOpen(true);
             }}
             styles={styles}
           />
@@ -390,6 +397,18 @@ export default function FilmListPageView() {
             />
           </div>
         )}
+      />
+
+      <FilmModal
+        open={filmModalOpen}
+        filmId={editingFilmId}
+        defaultSourceId={modalDefaultSourceId}
+        defaultCid={modalDefaultCid}
+        onClose={() => setFilmModalOpen(false)}
+        onSuccess={() => {
+          setFilmModalOpen(false);
+          void getFilmPage();
+        }}
       />
     </div>
   );
