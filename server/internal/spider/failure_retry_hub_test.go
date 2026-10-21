@@ -33,10 +33,10 @@ func TestFailureRetryHub_OnlySelectedIDs(t *testing.T) {
 		t.Fatal("其它页的在途重试必须仍能被该页快照读到")
 	}
 
-	settleFailureRetry(1, true, 0, 1, "", true)
+	settleFailureRetry(1, 0, 1, "", true)
 	select {
 	case batch := <-events:
-		if len(batch) != 1 || !batch[0].Removed || batch[0].Retrying {
+		if len(batch) != 1 || batch[0].Retrying || !batch[0].HasResult || batch[0].Status != 0 {
 			t.Fatalf("settle = %+v", batch)
 		}
 	case <-time.After(time.Second):

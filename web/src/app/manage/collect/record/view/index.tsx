@@ -55,7 +55,6 @@ export default function FailureRecordPageView() {
   const paramsRef = useRef(params);
   const recordsRef = useRef(records);
   const retryingRef = useRef(retryingIds);
-  const refetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   pageRef.current = page;
   paramsRef.current = params;
   recordsRef.current = records;
@@ -64,69 +63,47 @@ export default function FailureRecordPageView() {
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
 
-  const getRecords = useCallback(
-    async (p?: any, overrideParams?: any, silent = false) => {
-      if (!silent) {
-        setLoading(true);
-      }
-      const pg = p || pageRef.current;
-      const reqParams = overrideParams || paramsRef.current;
-      try {
-        const resp = await ApiGet("/manage/collect/record/list", {
-          ...reqParams,
-          current: pg.current,
-          pageSize: pg.pageSize,
-        });
-        if (resp.code === 0) {
-          const list = resp.data.list || [];
-          recordsRef.current = list;
-          setRecords(list);
-          if (resp.data.params?.paging) {
-            setPage((prev) => ({
-              ...prev,
-              ...resp.data.params.paging,
-            }));
-          }
-          if (resp.data.options) {
-            setOptions(resp.data.options);
-          }
-          const resolved =
-            reqParams.originId ||
-            resp.data.params?.originId ||
-            resp.data.options?.defaultSourceId ||
-            "";
-          if (resolved && reqParams.originId !== resolved) {
-            setParams((prev) => ({ ...prev, originId: resolved }));
-          }
+  const getRecords = useCallback(async (p?: any, overrideParams?: any) => {
+    setSelectedRowKeys([]);
+    setLoading(true);
+    const pg = p || pageRef.current;
+    const reqParams = overrideParams || paramsRef.current;
+    try {
+      const resp = await ApiGet("/manage/collect/record/list", {
+        ...reqParams,
+        current: pg.current,
+        pageSize: pg.pageSize,
+      });
+      if (resp.code === 0) {
+        const list = resp.data.list || [];
+        recordsRef.current = list;
+        setRecords(list);
+        if (resp.data.params?.paging) {
+          setPage((prev) => ({
+            ...prev,
+            ...resp.data.params.paging,
+          }));
         }
-      } finally {
-        if (!silent) {
-          setLoading(false);
+        if (resp.data.options) {
+          setOptions(resp.data.options);
+        }
+        const resolved =
+          reqParams.originId ||
+          resp.data.params?.originId ||
+          resp.data.options?.defaultSourceId ||
+          "";
+        if (resolved && reqParams.originId !== resolved) {
+          setParams((prev) => ({ ...prev, originId: resolved }));
         }
       }
-    },
-    [],
-  );
-
-  const scheduleRefetch = useCallback(() => {
-    if (refetchTimer.current) {
-      clearTimeout(refetchTimer.current);
+    } finally {
+      setLoading(false);
     }
-    refetchTimer.current = setTimeout(() => {
-      refetchTimer.current = null;
-      void getRecords(undefined, undefined, true);
-    }, 300);
-  }, [getRecords]);
+  }, []);
 
   useEffect(() => {
     void getRecords();
-    return () => {
-      if (refetchTimer.current) {
-        clearTimeout(refetchTimer.current);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [getRecords]);
 
   const releaseHold = useCallback((id: number) => {
     setHeldIds((prev) => {
@@ -160,21 +137,15 @@ export default function FailureRecordPageView() {
 
   const onRecord = useCallback((ev: RecordRetryEvent) => {
     releaseHold(ev.id);
-    const view = applyRecordRetry(
-      recordsRef.current,
-      retryingRef.current,
-      ev,
-      paramsRef.current.status,
-    );
+    const view = applyRecordRetry(recordsRef.current, retryingRef.current, ev);
     recordsRef.current = view.records;
     retryingRef.current = view.retrying;
     setRecords(view.records);
     setRetryingIds(view.retrying);
-    if (view.refetch) {
+    if (ev.hasResult && ev.status === FAILURE_RECORD_STATUS.success) {
       setSelectedRowKeys((prev) => prev.filter((key) => Number(key) !== ev.id));
-      scheduleRefetch();
     }
-  }, [releaseHold, scheduleRefetch]);
+  }, [releaseHold]);
 
   const recordIds = useMemo(() => records.map((row) => row.ID), [records]);
   useRecordStream(recordIds, { onSnapshot, onRecord });
@@ -196,8 +167,9 @@ export default function FailureRecordPageView() {
   );
 
   const handleRetrySelected = async () => {
+    const selectedIds = new Set(selectedRowKeys.map((key) => Number(key)));
     const targets = records.filter(
-      (r) => selectedRowKeys.includes(r.ID) && r.status !== FAILURE_RECORD_STATUS.success,
+      (r) => selectedIds.has(r.ID) && r.status !== FAILURE_RECORD_STATUS.success,
     );
     if (targets.length === 0) {
       message.warning("所选记录均已重试成功，无需重复重试");
@@ -213,23 +185,47 @@ export default function FailureRecordPageView() {
 
     setBatchRetrying(true);
     let successCount = 0;
+    let alreadyCount = 0;
     let failCount = 0;
+    let lastError = "";
+    const doneIds = new Set<number>();
 
     for (const target of targets) {
       const resp = await ApiPost("/manage/collect/record/retry", { id: target.ID });
       if (resp.code === 0) {
         successCount++;
+        doneIds.add(target.ID);
+      } else if (resp.msg === "正在重试中") {
+        alreadyCount++;
+        doneIds.add(target.ID);
       } else {
         failCount++;
-        if (resp.msg !== "正在重试中") {
-          releaseHold(target.ID);
-        }
+        lastError = resp.msg || "";
+        releaseHold(target.ID);
       }
     }
 
     setBatchRetrying(false);
-    setSelectedRowKeys([]);
-    message.success(`已提交重试任务：成功 ${successCount} 条，失败 ${failCount} 条`);
+    setSelectedRowKeys((prev) => prev.filter((key) => !doneIds.has(Number(key))));
+    const summary = [
+      `成功 ${successCount} 条`,
+      alreadyCount > 0 ? `已在重试 ${alreadyCount} 条` : "",
+      failCount > 0 ? `失败 ${failCount} 条` : "",
+    ].filter(Boolean).join("，");
+    const detail = lastError ? `${summary}。${lastError}` : summary;
+    if (failCount === 0) {
+      message.success(detail);
+    } else if (successCount === 0 && alreadyCount === 0) {
+      message.error(detail);
+    } else {
+      message.warning(detail);
+    }
+  };
+
+  const reloadFirstPage = () => {
+    const firstPage = { ...pageRef.current, current: 1 };
+    setPage(firstPage);
+    void getRecords(firstPage);
   };
 
   const handleRetryAll = async () => {
@@ -238,15 +234,23 @@ export default function FailureRecordPageView() {
       message.error(resp.msg);
       return;
     }
-    message.success(resp.msg || "已触发全量待处理项重试");
+    const queued = Number(resp.data?.queued || 0);
+    const already = Number(resp.data?.already || 0);
+    const skipped = Number(resp.data?.skipped || 0);
+    if (queued === 0) {
+      message.warning(resp.msg);
+    } else if (already > 0 || skipped > 0) {
+      message.warning(resp.msg);
+    } else {
+      message.success(resp.msg);
+    }
   };
 
   const handleCleanResult = async () => {
     const resp = await ApiPost("/manage/collect/record/clear/result", {});
     if (resp.code === 0) {
       message.success(resp.msg || "已清理所有已完结（成功/最终失败）记录");
-      setSelectedRowKeys([]);
-      void getRecords();
+      reloadFirstPage();
     } else {
       message.error(resp.msg);
     }
@@ -256,8 +260,7 @@ export default function FailureRecordPageView() {
     const resp = await ApiPost("/manage/collect/record/clear/all", {});
     if (resp.code === 0) {
       message.success(resp.msg || "已清空所有失败记录");
-      setSelectedRowKeys([]);
-      void getRecords();
+      reloadFirstPage();
     } else {
       message.error(resp.msg);
     }
@@ -408,7 +411,7 @@ export default function FailureRecordPageView() {
                 </Button>
               )}
 
-              <Tooltip title="并发拉取所有状态为「待自动重试」的页面进行重试采集">
+              <Tooltip title="把所有采集站中「待自动重试」的记录加入队列。正在采集的站点会跳过">
                 <Popconfirm
                   title="重试全部待处理记录？"
                   icon={<QuestionCircleOutlined style={{ color: "#1677ff" }} />}

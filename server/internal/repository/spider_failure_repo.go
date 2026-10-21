@@ -79,6 +79,9 @@ func FailureRecordList(vo model.RecordRequestVo) []model.FailureRecord {
 	}
 
 	dto.GetPage(qw, vo.Paging)
+	if vo.Paging.Current > vo.Paging.PageCount {
+		vo.Paging.Current = vo.Paging.PageCount
+	}
 	var list []model.FailureRecord
 	if err := qw.Limit(vo.Paging.PageSize).Offset((vo.Paging.Current - 1) * vo.Paging.PageSize).Order("created_at DESC, id DESC").Find(&list).Error; err != nil {
 		log.Println(err)
@@ -146,6 +149,23 @@ func MarkFailureRecordRetryFailed(fr *model.FailureRecord, cause string, maxRetr
 	return final, count, nil
 }
 
+// MarkFailureRecordRetrySucceeded 重试成功后把记录留在列表里，只改成成功状态。
+func MarkFailureRecordRetrySucceeded(fr *model.FailureRecord) error {
+	if fr == nil || fr.ID == 0 {
+		return errors.New("failure record not found")
+	}
+	err := db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Updates(map[string]any{
+		"status": model.FailureRecordStatusSuccess,
+		"cause":  "",
+	}).Error
+	if err != nil {
+		return err
+	}
+	fr.Status = model.FailureRecordStatusSuccess
+	fr.Cause = ""
+	return nil
+}
+
 // UpdateFailureRecordStatusByID 按 ID 修改失败记录的重试结果状态。
 func UpdateFailureRecordStatusByID(id uint, status int) error {
 	fr := FindRecordById(id)
@@ -153,16 +173,6 @@ func UpdateFailureRecordStatusByID(id uint, status int) error {
 		return errors.New("failure record not found")
 	}
 	return db.Mdb.Model(&model.FailureRecord{}).Where("id = ?", fr.ID).Update("status", status).Error
-}
-
-// DeleteFailureRecord 按记录 ID 删除单个失败记录。
-func DeleteFailureRecord(fr *model.FailureRecord) {
-	if fr == nil || fr.ID == 0 {
-		return
-	}
-	if err := db.Mdb.Delete(&model.FailureRecord{}, fr.ID).Error; err != nil {
-		log.Printf("[Spider] 删除重试成功记录失败 id=%d: %v\n", fr.ID, err)
-	}
 }
 
 // DeleteRetriedRecords 删除已有重试结果的记录信息

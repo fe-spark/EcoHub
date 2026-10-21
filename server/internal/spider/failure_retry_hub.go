@@ -9,7 +9,6 @@ import (
 type FailureRetryEvent struct {
 	ID         uint   `json:"id"`
 	Retrying   bool   `json:"retrying"`
-	Removed    bool   `json:"removed"`
 	HasResult  bool   `json:"hasResult"`
 	Status     int    `json:"status"`
 	RetryCount int    `json:"retryCount"`
@@ -58,13 +57,12 @@ func TryBeginFailureRetry(id uint) bool {
 	return true
 }
 
-func settleFailureRetry(id uint, removed bool, status, retryCount int, cause string, hasResult bool) {
+func settleFailureRetry(id uint, status, retryCount int, cause string, hasResult bool) {
 	if id == 0 {
 		return
 	}
 	failureRetries.publish(FailureRetryEvent{
 		ID:         id,
-		Removed:    removed,
 		HasResult:  hasResult,
 		Status:     status,
 		RetryCount: retryCount,
@@ -74,7 +72,7 @@ func settleFailureRetry(id uint, removed bool, status, retryCount int, cause str
 
 // abandonFailureRetry 记录没进入执行就离开队列，页面恢复原状态。
 func abandonFailureRetry(id uint) {
-	settleFailureRetry(id, false, 0, 0, "", false)
+	settleFailureRetry(id, 0, 0, "", false)
 }
 
 func (h *failureRetryHub) publish(ev FailureRetryEvent) {

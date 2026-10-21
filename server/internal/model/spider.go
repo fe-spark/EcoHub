@@ -10,12 +10,13 @@ import (
 )
 
 const (
-	TaskModelAutoCollect   = 0 // 自动更新已启用站点
-	TaskModelCustomCollect = 1 // 更新Ids中的指定站点数据
-	TaskModelRetryCollect  = 2 // 定期清理失败采集记录并重试
-	TaskModelOrphanClean   = 3 // 片库冗余数据与孤儿清理
-	TaskModelLogClean      = 4 // 自动清理过期运行日志
-	TaskModelBannerAuto    = 5 // 按已保存配方定时替换首页轮播
+	TaskModelAutoCollect   = 0 // 采集已启用站点
+	TaskModelCustomCollect = 1 // 采集指定站点
+	TaskModelRetryCollect  = 2 // 重试待处理的失败记录
+	TaskModelOrphanClean   = 3 // 清理片库冗余和孤儿数据
+	TaskModelLogClean      = 4 // 清理过期运行日志
+	TaskModelBannerAuto    = 5 // 按配方替换首页轮播
+	TaskModelFailureClean  = 6 // 清理超过保留期的成功和最终失败记录
 )
 
 // 采集触发方式常量。
@@ -27,7 +28,8 @@ const (
 )
 
 const (
-	TaskIDBannerAuto = "sys_cron_banner_auto"
+	TaskIDBannerAuto   = "sys_cron_banner_auto"
+	TaskIDFailureClean = "sys_cron_failure_clean"
 )
 
 // FilmCollectTask 影视采集任务

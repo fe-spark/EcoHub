@@ -449,23 +449,11 @@ func (s *CollectService) GetRecordOptions() map[string]any {
 }
 
 func (s *CollectService) CollectRecover(id int) error {
-	fr := repository.FindRecordById(uint(id))
-	if fr == nil {
-		return errors.New("采集重试执行失败: 失败记录信息获取异常")
-	}
-	if !spider.TryBeginFailureRetry(fr.ID) {
-		return errors.New("正在重试中")
-	}
-	if fr.Status == model.FailureRecordStatusFailed {
-		_ = repository.UpdateFailureRecordStatusByID(fr.ID, model.FailureRecordStatusPending)
-		fr.Status = model.FailureRecordStatusPending
-	}
-	go spider.SingleRecoverSpider(fr)
-	return nil
+	return spider.AcceptFailureRecover(repository.FindRecordById(uint(id)))
 }
 
-func (s *CollectService) RecoverAll() {
-	go spider.FullRecoverSpider()
+func (s *CollectService) RecoverAll() spider.FailureRecoverOutcome {
+	return spider.EnqueuePendingFailureRecovers()
 }
 
 func (s *CollectService) ClearRetriedRecords() {

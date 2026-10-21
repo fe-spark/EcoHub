@@ -401,8 +401,12 @@ func (h *CollectHandler) CollectRecover(c *gin.Context) {
 }
 
 func (h *CollectHandler) CollectRecoverAll(c *gin.Context) {
-	service.CollectSvc.RecoverAll()
-	dto.SuccessOnlyMsg("恢复任务已成功开启!!!", c)
+	out := service.CollectSvc.RecoverAll()
+	dto.Success(gin.H{
+		"queued":  out.Queued,
+		"already": out.Already,
+		"skipped": out.Skipped,
+	}, out.Message(), c)
 }
 
 func (h *CollectHandler) ClearRetriedRecords(c *gin.Context) {
