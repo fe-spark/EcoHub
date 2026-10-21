@@ -2,9 +2,10 @@ package utils
 
 import (
 	"strings"
+	"sync"
+	"unicode"
 
 	"github.com/mozillazg/go-pinyin"
-	"unicode"
 )
 
 const maxPinyinInitialVariants = 8
@@ -62,9 +63,8 @@ func pinyinFullNormalized(s string) string {
 				b.WriteString(custom[0])
 				continue
 			}
-			pys := pinyin.SinglePinyin(r, pinyinArgsSingle)
-			if len(pys) > 0 && len(pys[0]) > 0 {
-				b.WriteString(strings.ToLower(pys[0]))
+			if py := cachedHanSound(r).syllable; py != "" {
+				b.WriteString(py)
 			}
 		}
 	}
@@ -102,9 +102,8 @@ func pinyinSyllablesNormalized(s string) []string {
 				syllables = append(syllables, custom[0])
 				continue
 			}
-			pys := pinyin.SinglePinyin(r, pinyinArgsSingle)
-			if len(pys) > 0 && len(pys[0]) > 0 {
-				syllables = append(syllables, strings.ToLower(pys[0]))
+			if py := cachedHanSound(r).syllable; py != "" {
+				syllables = append(syllables, py)
 			}
 		}
 	}
@@ -153,8 +152,62 @@ func pinyinInitialVariantsNormalized(s string) []string {
 }
 
 func hanInitialOptions(r rune) []byte {
+	custom, ok := customCharPinyin[r]
+	if !ok {
+		return cachedHanSound(r).initials
+	}
+	seen := make(map[byte]struct{}, len(custom))
+	set := make([]byte, 0, len(custom))
+	for _, py := range custom {
+		if py == "" {
+			continue
+		}
+		c := py[0]
+		if _, exists := seen[c]; exists {
+			continue
+		}
+		seen[c] = struct{}{}
+		set = append(set, c)
+	}
+	return set
+}
+
+type hanSound struct {
+	syllable string
+	initials []byte
+}
+
+var (
+	hanSoundMu sync.RWMutex
+	hanSounds  = map[rune]hanSound{}
+)
+
+func cachedHanSound(r rune) hanSound {
+	hanSoundMu.RLock()
+	sound, ok := hanSounds[r]
+	hanSoundMu.RUnlock()
+	if ok {
+		return sound
+	}
+	sound = buildHanSound(r)
+	hanSoundMu.Lock()
+	if exist, ok := hanSounds[r]; ok {
+		hanSoundMu.Unlock()
+		return exist
+	}
+	hanSounds[r] = sound
+	hanSoundMu.Unlock()
+	return sound
+}
+
+func buildHanSound(r rune) hanSound {
+	syllable := ""
+	pys := pinyin.SinglePinyin(r, pinyinArgsSingle)
+	if len(pys) > 0 && len(pys[0]) > 0 {
+		syllable = strings.ToLower(pys[0])
+	}
 	seen := make(map[byte]struct{}, 4)
-	set := make([]byte, 0, 4)
+	initials := make([]byte, 0, 4)
 	add := func(c byte) {
 		if c == 0 {
 			return
@@ -163,29 +216,17 @@ func hanInitialOptions(r rune) []byte {
 			return
 		}
 		seen[c] = struct{}{}
-		set = append(set, c)
+		initials = append(initials, c)
 	}
-
-	if custom, ok := customCharPinyin[r]; ok {
-		for _, py := range custom {
-			if len(py) > 0 {
-				add(py[0])
-			}
-		}
-		return set
+	if syllable != "" {
+		add(syllable[0])
 	}
-
-	pys := pinyin.SinglePinyin(r, pinyinArgsSingle)
-	if len(pys) > 0 && len(pys[0]) > 0 {
-		add(strings.ToLower(pys[0])[0])
-	}
-	het := pinyin.SinglePinyin(r, pinyinArgsHetero)
-	for _, py := range het {
+	for _, py := range pinyin.SinglePinyin(r, pinyinArgsHetero) {
 		if len(py) > 0 {
 			add(strings.ToLower(py)[0])
 		}
 	}
-	return set
+	return hanSound{syllable: syllable, initials: initials}
 }
 
 func expandInitialVariants(sets [][]byte) []string {

@@ -1,19 +1,30 @@
 package snapshot
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"log"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/utils"
+
+	"golang.org/x/sync/errgroup"
 )
 
 const searchMetaLoadPageSize = 5000
 
+// 少于这个数量时分段并发的连接开销大于收益。
+const searchMetaParallelMin = 16384
+
 const filmMetaSelect = "mid, pid, cid, first_source_id, name, hits, score, year, update_stamp, area, language, class_tag, category_key, root_category_key"
+
+const filmMetaLoadSQL = "SELECT " + filmMetaSelect + " FROM " + model.TableFilmIndex + " WHERE deleted_at IS NULL"
 
 type dbMetaRow struct {
 	Mid             int64
@@ -32,6 +43,11 @@ type dbMetaRow struct {
 	RootCategoryKey string
 }
 
+type midSpan struct {
+	lo, hi  int64
+	bounded bool
+}
+
 func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	version = strings.TrimSpace(version)
 	if version == "" || db.Mdb == nil {
@@ -44,12 +60,23 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 			return cur, nil
 		}
-		items, err := loadFilmSearchMetaItems(version)
-		if err != nil {
-			return nil, err
-		}
-		plays, err := loadPlaySources(nil)
-		if err != nil {
+		started := time.Now()
+		var (
+			items []FilmSearchMeta
+			plays map[int64][]string
+		)
+		g, gctx := errgroup.WithContext(context.Background())
+		g.Go(func() error {
+			var err error
+			items, err = loadFilmSearchMetaItems(gctx)
+			return err
+		})
+		g.Go(func() error {
+			var err error
+			plays, err = loadPlaySources(nil)
+			return err
+		})
+		if err := g.Wait(); err != nil {
 			return nil, err
 		}
 		attachPlaySources(items, plays)
@@ -57,7 +84,7 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 		activeFilmSearchMetasMu.Lock()
 		activeFilmSearchMetas.Store(idx)
 		activeFilmSearchMetasMu.Unlock()
-		log.Printf("[ActiveReadModel] 检索索引分页加载完成 version=%s count=%d", version, len(items))
+		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
 		return idx, nil
 	})
 	if err != nil {
@@ -70,38 +97,192 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	return idx, nil
 }
 
-func loadFilmSearchMetaItems(version string) ([]FilmSearchMeta, error) {
-	items := make([]FilmSearchMeta, 0)
-	var lastMid int64
-	for {
-		var rows []dbMetaRow
-		if err := db.Mdb.Model(&model.FilmIndex{}).
-			Select(filmMetaSelect).
-			Where("mid > ?", lastMid).
-			Order("mid ASC").
-			Limit(searchMetaLoadPageSize).
-			Find(&rows).Error; err != nil {
-			return nil, err
+func loadFilmSearchMetaItems(ctx context.Context) ([]FilmSearchMeta, error) {
+	var total int64
+	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Count(&total).Error; err != nil {
+		return nil, err
+	}
+	if total == 0 {
+		return []FilmSearchMeta{}, nil
+	}
+	spans, err := searchMetaSpans(ctx, total)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	items := make([]FilmSearchMeta, 0, total)
+	batches := make(chan []dbMetaRow, len(spans))
+	var mu sync.Mutex
+	var firstErr error
+	fail := func(err error) {
+		if err == nil {
+			return
 		}
-		if len(rows) == 0 {
-			break
+		mu.Lock()
+		if firstErr == nil {
+			firstErr = err
+			cancel()
 		}
-		pageItems := make([]FilmSearchMeta, len(rows))
-		fillSearchMetaPage(rows, pageItems)
-		items = append(items, pageItems...)
-		lastMid = rows[len(rows)-1].Mid
-		if len(rows) < searchMetaLoadPageSize {
-			break
-		}
+		mu.Unlock()
+	}
+
+	var scanWg sync.WaitGroup
+	for _, span := range spans {
+		scanWg.Add(1)
+		go func(span midSpan) {
+			defer scanWg.Done()
+			if err := streamMetaRows(ctx, span, batches); err != nil && ctx.Err() == nil {
+				fail(err)
+			}
+		}(span)
+	}
+	go func() {
+		scanWg.Wait()
+		close(batches)
+	}()
+
+	parallelPage := len(spans) == 1
+	var fillWg sync.WaitGroup
+	for i := 0; i < len(spans); i++ {
+		fillWg.Add(1)
+		go func() {
+			defer fillWg.Done()
+			for rows := range batches {
+				if ctx.Err() != nil {
+					continue
+				}
+				page := make([]FilmSearchMeta, len(rows))
+				if parallelPage {
+					fillSearchMetaPage(rows, page)
+				} else {
+					for n := range rows {
+						page[n] = metaFromRow(rows[n])
+					}
+				}
+				mu.Lock()
+				items = append(items, page...)
+				mu.Unlock()
+			}
+		}()
+	}
+	fillWg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
 	}
 	return items, nil
 }
 
+func searchMetaSpans(ctx context.Context, total int64) ([]midSpan, error) {
+	workers := 1
+	if total >= searchMetaParallelMin {
+		workers = runtime.GOMAXPROCS(0)
+		if workers > 8 {
+			workers = 8
+		}
+	}
+	if workers == 1 {
+		return []midSpan{{}}, nil
+	}
+	row := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Select("MIN(mid), MAX(mid)").Row()
+	var lo, hi sql.NullInt64
+	if err := row.Scan(&lo, &hi); err != nil {
+		return nil, err
+	}
+	if !lo.Valid || !hi.Valid || hi.Int64 < lo.Int64 {
+		return nil, errors.New("影片检索边界为空")
+	}
+	span := (hi.Int64 - lo.Int64) / int64(workers)
+	if span < 1 {
+		return []midSpan{{}}, nil
+	}
+	out := make([]midSpan, workers)
+	for i := 0; i < workers; i++ {
+		start := lo.Int64 + int64(i)*span
+		end := start + span
+		if i == workers-1 {
+			end = hi.Int64 + 1
+		}
+		out[i] = midSpan{lo: start, hi: end, bounded: true}
+	}
+	return out, nil
+}
+
+func streamMetaRows(ctx context.Context, span midSpan, batches chan<- []dbMetaRow) error {
+	q := filmMetaLoadSQL
+	var args []any
+	if span.bounded {
+		q += " AND mid >= ? AND mid < ?"
+		args = []any{span.lo, span.hi}
+	}
+	rows, err := db.Mdb.WithContext(ctx).Raw(q, args...).Rows()
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	batch := make([]dbMetaRow, 0, searchMetaLoadPageSize)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		out := batch
+		batch = make([]dbMetaRow, 0, searchMetaLoadPageSize)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case batches <- out:
+			return nil
+		}
+	}
+	for rows.Next() {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		item, err := scanMetaRow(rows)
+		if err != nil {
+			return err
+		}
+		batch = append(batch, item)
+		if len(batch) >= searchMetaLoadPageSize {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return flush()
+}
+
+func scanMetaRow(rows *sql.Rows) (dbMetaRow, error) {
+	var mid, pid, cid, hits, year, stamp sql.NullInt64
+	var score sql.NullFloat64
+	var src, name, area, lang, tag, ck, rk sql.NullString
+	if err := rows.Scan(&mid, &pid, &cid, &src, &name, &hits, &score, &year, &stamp, &area, &lang, &tag, &ck, &rk); err != nil {
+		return dbMetaRow{}, err
+	}
+	return dbMetaRow{
+		Mid:             mid.Int64,
+		Pid:             pid.Int64,
+		Cid:             cid.Int64,
+		FirstSourceId:   src.String,
+		Name:            name.String,
+		Hits:            hits.Int64,
+		Score:           score.Float64,
+		Year:            year.Int64,
+		UpdateStamp:     stamp.Int64,
+		Area:            area.String,
+		Language:        lang.String,
+		ClassTag:        tag.String,
+		CategoryKey:     ck.String,
+		RootCategoryKey: rk.String,
+	}, nil
+}
+
 func fillSearchMetaPage(rows []dbMetaRow, items []FilmSearchMeta) {
 	numWorkers := runtime.GOMAXPROCS(0)
-	if numWorkers < 1 {
-		numWorkers = 1
-	}
 	if numWorkers > 8 {
 		numWorkers = 8
 	}

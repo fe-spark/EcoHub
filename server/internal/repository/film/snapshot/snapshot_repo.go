@@ -119,7 +119,7 @@ func EnsureActiveFilmListSnapshot() error {
 	if err := LoadActiveFilmReadModel(version); err != nil {
 		return err
 	}
-	log.Printf("[Snapshot] 列表直读 film_index 已就绪 version=%s film_count=%d", version, dbCount)
+	log.Printf("[Snapshot] film_index count=%d version=%s", dbCount, version)
 	return nil
 }
 

@@ -44,7 +44,7 @@ func LoadActiveFilmReadModel(version string) error {
 			}
 		}(version)
 	}
-	log.Printf("[ActiveReadModel] 活跃读模型已就绪 version=%s", version)
+	log.Printf("[ActiveReadModel] 检索索引开始加载 version=%s", version)
 	return nil
 }
 

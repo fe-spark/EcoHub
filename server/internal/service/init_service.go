@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"server/internal/config"
@@ -62,6 +63,10 @@ func (s *InitService) ensureFilmListSnapshot() {
 }
 
 func (s *InitService) loadActiveFilmReadModel() {
+	// 片库非空时，列表快照引导已经按同一版本开始加载。再调一次会清掉索引并重扫。
+	if rm := filmsnapshot.GetActiveFilmReadModel(); rm != nil && strings.TrimSpace(rm.Version) != "" {
+		return
+	}
 	if err := filmsnapshot.LoadActiveFilmReadModel(""); err != nil {
 		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
 	}
