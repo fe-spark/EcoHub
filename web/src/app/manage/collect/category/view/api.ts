@@ -17,7 +17,7 @@ export async function getFilmClassTree(sourceId = "") {
 }
 
 export async function saveFilmClassTree(children: FilmClassNode[], sourceId: string) {
-  return ApiPost("/manage/film/class/tree/save", { children, sourceId });
+  return ApiPost("/manage/film/class/tree", { children, sourceId });
 }
 
 export async function getCategoryRules(page: number, pageSize: number, keyword: string, group: string) {
@@ -67,9 +67,9 @@ export async function saveCategoryRule(payload: {
   matchType: string;
   remarks: string;
 }) {
-  return ApiPost(payload.id ? "/manage/mapping/rule/update" : "/manage/mapping/rule/add", payload);
+  return ApiPost("/manage/mapping/rule/save", payload);
 }
 
 export async function deleteCategoryRule(id: number) {
-  return ApiPost("/manage/mapping/rule/del", { id });
+  return ApiPost("/manage/mapping/rule/delete", { ids: [id] });
 }

@@ -3,7 +3,6 @@ package handler
 import (
 	"fmt"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -32,8 +31,8 @@ func isAllowedImage(filename string) bool {
 	return allowedImageExt[ext]
 }
 
-// SingleUpload 单文件上传, 暂定为图片上传
-func (h *FileHandler) SingleUpload(c *gin.Context) {
+// Upload 统一文件上传接口（支持图片上传）
+func (h *FileHandler) Upload(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
 		dto.Failed("上传失败, 当前用户信息异常", c)
@@ -68,15 +67,14 @@ func (h *FileHandler) SingleUpload(c *gin.Context) {
 // RenameFile 重命名素材
 func (h *FileHandler) RenameFile(c *gin.Context) {
 	var req struct {
-		Id   string `json:"id"`
+		Id   uint   `json:"id"`
 		Name string `json:"name"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	id, err := strconv.ParseUint(strings.TrimSpace(req.Id), 10, 64)
-	if err != nil {
+	if req.Id == 0 {
 		dto.Failed("操作失败, 未获取到需重命名的文件标识信息", c)
 		return
 	}
@@ -85,64 +83,37 @@ func (h *FileHandler) RenameFile(c *gin.Context) {
 		dto.Failed("素材名称不能为空", c)
 		return
 	}
-	if e := service.FileSvc.RenameFile(uint(id), name); e != nil {
+	if e := service.FileSvc.RenameFile(req.Id, name); e != nil {
 		dto.Failed(fmt.Sprint("重命名失败", e.Error()), c)
 		return
 	}
 	dto.SuccessOnlyMsg("素材名称已更新", c)
 }
 
-// MultipleUpload 批量文件上传
-func (h *FileHandler) MultipleUpload(c *gin.Context) {
-	v, ok := c.Get(config.AuthUserClaims)
-	if !ok {
-		dto.Failed("上传失败, 当前用户信息异常", c)
-		return
-	}
-	form, err := c.MultipartForm()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	files := form.File["files"]
-	uc := v.(*utils.UserClaims)
-
-	var fileNames []string
-	for _, file := range files {
-		if !isAllowedImage(file.Filename) {
-			dto.Failed("仅支持上传 JPG/JPEG/PNG/WebP/ICO 格式的图片", c)
-			return
-		}
-		fileName := fmt.Sprintf("%s/%s%s", config.FilmPictureUploadDir, utils.RandomString(8), filepath.Ext(file.Filename))
-		err = c.SaveUploadedFile(file, fileName)
-		if err != nil {
-			dto.Failed(err.Error(), c)
-			return
-		}
-		name := strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
-		fileNames = append(fileNames, service.FileSvc.SingleFileUpload(fileName, name, int(uc.UserID)))
-	}
-
-	dto.Success(fileNames, "上传成功", c)
-}
-
-// DelFile 删除文件
+// DelFile 删除文件（统一批量/单文件删除）
 func (h *FileHandler) DelFile(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Ids []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	id, err := strconv.ParseUint(strings.TrimSpace(req.Id), 10, 64)
-	if err != nil {
+	cleanIds := make([]uint, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
 		dto.Failed("操作失败, 未获取到需删除的文件标识信息", c)
 		return
 	}
-	if e := service.FileSvc.RemoveFileById(uint(id)); e != nil {
-		dto.Failed(fmt.Sprint("删除失败", e.Error()), c)
-		return
+	for _, id := range cleanIds {
+		if e := service.FileSvc.RemoveFileById(id); e != nil {
+			dto.Failed(fmt.Sprint("删除失败: ", e.Error()), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("文件已删除", c)
 }

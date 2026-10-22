@@ -1,4 +1,4 @@
-import { Flex, Form, Modal, Select, Table, Tag, Typography } from "antd";
+import { Button, Drawer, Flex, Form, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { collectDuration } from "./types";
 
@@ -8,7 +8,7 @@ export interface BatchCollectRow {
   reason: string;
 }
 
-interface BatchCollectModalProps {
+interface BatchCollectDrawerProps {
   open: boolean;
   rows: BatchCollectRow[];
   batchTime: number;
@@ -17,7 +17,7 @@ interface BatchCollectModalProps {
   onBatchTimeChange: (value: number) => void;
 }
 
-export default function BatchCollectModal(props: BatchCollectModalProps) {
+export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
   const { open, rows, batchTime, onCancel, onSubmit, onBatchTimeChange } = props;
   const startCount = rows.filter((item) => !item.reason).length;
   const skipCount = rows.length - startCount;
@@ -27,50 +27,56 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
       title: "采集站",
       dataIndex: "name",
       render: (value: string, record) => (
-        <Flex vertical gap={4}>
+        <Flex vertical gap={2}>
           <Typography.Text strong>{value}</Typography.Text>
-          <Typography.Text type="secondary">{record.id}</Typography.Text>
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            {record.id}
+          </Typography.Text>
         </Flex>
       ),
     },
     {
       title: "状态",
       dataIndex: "reason",
-      width: 160,
+      width: 140,
       render: (reason: string) =>
         reason ? (
           <Tag variant="filled">{reason}</Tag>
         ) : (
           <Tag color="success" variant="filled">
-            可采集
+            就绪
           </Tag>
         ),
     },
   ];
 
+  const submitText =
+    skipCount > 0 ? `采集 (${startCount}) · 跳过 (${skipCount})` : `开始采集 (${startCount})`;
+
   return (
-    <Modal
+    <Drawer
       title="批量采集"
       open={open}
-      onCancel={onCancel}
-      onOk={onSubmit}
-      okText={skipCount > 0 ? `将采集 ${startCount} 个，跳过 ${skipCount} 个` : `将采集 ${startCount} 个`}
-      okButtonProps={{ "data-tour": "collect-batch-submit", disabled: startCount === 0 }}
-      width={720}
-      destroyOnHidden
+      onClose={onCancel}
+      width={600}
+      destroyOnClose
+      extra={
+        <Space>
+          <Button onClick={onCancel}>取消</Button>
+          <Button
+            type="primary"
+            data-tour="collect-batch-submit"
+            disabled={startCount === 0}
+            onClick={onSubmit}
+          >
+            {submitText}
+          </Button>
+        </Space>
+      }
     >
-      <Flex vertical gap={16}>
-        <Table<BatchCollectRow>
-          rowKey="id"
-          size="middle"
-          columns={columns}
-          dataSource={rows}
-          pagination={false}
-          scroll={{ y: 360 }}
-        />
-
+      <Flex vertical gap={16} style={{ height: "100%" }}>
         <Form layout="vertical">
-          <Form.Item label="采集时长" style={{ marginBottom: 0 }}>
+          <Form.Item label="采集范围" style={{ marginBottom: 0 }}>
             <Select
               value={batchTime}
               onChange={onBatchTimeChange}
@@ -78,7 +84,16 @@ export default function BatchCollectModal(props: BatchCollectModalProps) {
             />
           </Form.Item>
         </Form>
+
+        <Table<BatchCollectRow>
+          rowKey="id"
+          size="middle"
+          columns={columns}
+          dataSource={rows}
+          pagination={false}
+          scroll={{ y: "calc(100vh - 280px)" }}
+        />
       </Flex>
-    </Modal>
+    </Drawer>
   );
 }

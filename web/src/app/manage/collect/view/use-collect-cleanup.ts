@@ -58,7 +58,7 @@ export function useCollectCleanup(reloadList: () => Promise<void>) {
     if (invalidSources.length === 0) return;
     setCleanupDeleting(true);
     try {
-      const resp = await ApiPostLong<DelBatchResult>("/manage/collect/del/batch", {
+      const resp = await ApiPostLong<DelBatchResult>("/manage/collect/delete", {
         ids: invalidSources.map((item) => item.id),
       });
       if (resp.code === 0) {

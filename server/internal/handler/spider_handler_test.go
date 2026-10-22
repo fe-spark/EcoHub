@@ -67,3 +67,37 @@ func TestSpiderHandler_ClearAllFilm_AuthAndValidation(t *testing.T) {
 		t.Fatalf("expected password verification error, got code=%d msg=%q", resp.Code, resp.Msg)
 	}
 }
+
+func TestSpiderHandler_StarSpiderAndStopTask_BatchContract(t *testing.T) {
+	// 1. 测试 StarSpider 参数校验（空的 ids 或 0 时间）
+	c, w := testContext(http.MethodPost, "/api/manage/spider/start")
+	body, _ := json.Marshal(model.CollectParams{Ids: []string{}, Time: 0})
+	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/start", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	SpiderHd.StarSpider(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on zero time, got %d", resp.Code)
+	}
+
+	c, w = testContext(http.MethodPost, "/api/manage/spider/start")
+	body, _ = json.Marshal(model.CollectParams{Ids: []string{}, Time: 24})
+	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/start", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	SpiderHd.StarSpider(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty ids, got %d", resp.Code)
+	}
+
+	// 2. 测试 StopTask 参数校验（空的 ids）
+	c, w = testContext(http.MethodPost, "/api/manage/spider/stop")
+	body, _ = json.Marshal(map[string][]string{"ids": {}})
+	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/spider/stop", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	SpiderHd.StopTask(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty ids for StopTask, got %d", resp.Code)
+	}
+}

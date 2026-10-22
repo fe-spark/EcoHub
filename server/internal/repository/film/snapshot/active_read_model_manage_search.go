@@ -88,9 +88,13 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 	if len(idx.ByUpdate) != len(idx.Items) {
 		return nil, 0, fmt.Errorf("检索索引损坏")
 	}
+	filterCtx, ok := newManageFilterContext(s)
+	if !ok {
+		return nil, 0, nil
+	}
 	name := strings.TrimSpace(s.Name)
 	if name != "" {
-		hits, err := filterManageMetas(idx, s)
+		hits, err := filterManageMetas(idx, s, filterCtx)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -109,7 +113,6 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 		}
 		return window, total, nil
 	}
-	sourceID := strings.TrimSpace(s.SourceId)
 	offset := shared.PageOffset(page)
 	end := offset + page.PageSize
 	window := make([]FilmSearchMeta, 0, page.PageSize)
@@ -119,7 +122,7 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 			return nil, 0, fmt.Errorf("检索索引损坏")
 		}
 		meta := &idx.Items[i]
-		if !manageMetaPass(meta, s, sourceID) {
+		if !filterCtx.pass(meta) {
 			continue
 		}
 		if total >= offset && total < end {
@@ -130,11 +133,109 @@ func pageManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, page *dto.Page)
 	return window, total, nil
 }
 
-func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo) ([]int, error) {
+type manageFilterContext struct {
+	sourceID          string
+	categoryCheckMode int // 0: none, 1: local cid, 2: local pid, 3: source type key set
+	cid               int64
+	pid               int64
+	validCategoryKeys map[string]struct{}
+	year              int64
+	beginTime         int64
+	endTime           int64
+	area              string
+	language          string
+	plot              string
+}
+
+func newManageFilterContext(s model.SearchVo) (*manageFilterContext, bool) {
+	ctx := &manageFilterContext{
+		sourceID:  strings.TrimSpace(s.SourceId),
+		cid:       s.Cid,
+		pid:       s.Pid,
+		year:      s.Year,
+		beginTime: s.BeginTime,
+		endTime:   s.EndTime,
+		area:      strings.TrimSpace(s.Area),
+		language:  strings.TrimSpace(s.Language),
+		plot:      strings.TrimSpace(s.Plot),
+	}
+	if s.Cid > 0 || s.Pid > 0 {
+		if ctx.sourceID != "" {
+			field := "pid"
+			typeID := s.Pid
+			if s.Cid > 0 {
+				field = "cid"
+				typeID = s.Cid
+			}
+			typeIDs := repository.PublicSourceTypeIDs(ctx.sourceID, field, typeID)
+			if len(typeIDs) == 0 {
+				return nil, false
+			}
+			ctx.categoryCheckMode = 3
+			ctx.validCategoryKeys = make(map[string]struct{}, len(typeIDs))
+			for _, id := range typeIDs {
+				key := support.BuildSourceCategoryKey(ctx.sourceID, id)
+				if key != "" {
+					ctx.validCategoryKeys[key] = struct{}{}
+				}
+			}
+		} else {
+			if s.Cid > 0 {
+				ctx.categoryCheckMode = 1
+			} else {
+				ctx.categoryCheckMode = 2
+			}
+		}
+	}
+	return ctx, true
+}
+
+func (f *manageFilterContext) pass(meta *FilmSearchMeta) bool {
+	if meta == nil {
+		return false
+	}
+	if f.sourceID != "" && !meta.HasPlaySource(f.sourceID) {
+		return false
+	}
+	switch f.categoryCheckMode {
+	case 1:
+		if meta.Cid != f.cid {
+			return false
+		}
+	case 2:
+		if meta.Pid != f.pid {
+			return false
+		}
+	case 3:
+		if _, ok := f.validCategoryKeys[meta.CategoryKey]; !ok {
+			return false
+		}
+	}
+	if f.year > 0 && meta.Item.Year != f.year {
+		return false
+	}
+	if f.beginTime > 0 && meta.Item.UpdateStamp < f.beginTime {
+		return false
+	}
+	if f.endTime > 0 && meta.Item.UpdateStamp > f.endTime {
+		return false
+	}
+	if f.area != "" && meta.Area != f.area {
+		return false
+	}
+	if f.language != "" && meta.Language != f.language {
+		return false
+	}
+	if f.plot != "" && !strings.Contains(meta.ClassTag, f.plot) {
+		return false
+	}
+	return true
+}
+
+func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo, filterCtx *manageFilterContext) ([]int, error) {
 	if idx == nil || len(idx.Items) == 0 {
 		return nil, nil
 	}
-	sourceID := strings.TrimSpace(s.SourceId)
 	name := strings.TrimSpace(s.Name)
 	q := utils.BuildQueryContext(name)
 	type scored struct {
@@ -147,7 +248,7 @@ func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo) ([]int, error
 			return nil, fmt.Errorf("检索索引损坏")
 		}
 		meta := &idx.Items[i]
-		if !manageMetaPass(meta, s, sourceID) {
+		if !filterCtx.pass(meta) {
 			continue
 		}
 		score := utils.ScoreFilmMatch(meta.Item, q)
@@ -177,67 +278,6 @@ func filterManageMetas(idx *filmSearchMetaIndex, s model.SearchVo) ([]int, error
 		out[i] = hit.index
 	}
 	return out, nil
-}
-
-func manageMetaPass(meta *FilmSearchMeta, s model.SearchVo, sourceID string) bool {
-	if sourceID != "" && !meta.HasPlaySource(sourceID) {
-		return false
-	}
-	if !metaMatchesManageCategory(meta, sourceID, s.Pid, s.Cid) {
-		return false
-	}
-	if s.Year > 0 && meta.Item.Year != s.Year {
-		return false
-	}
-	if s.BeginTime > 0 && meta.Item.UpdateStamp < s.BeginTime {
-		return false
-	}
-	if s.EndTime > 0 && meta.Item.UpdateStamp > s.EndTime {
-		return false
-	}
-	if area := strings.TrimSpace(s.Area); area != "" && meta.Area != area {
-		return false
-	}
-	if lang := strings.TrimSpace(s.Language); lang != "" && meta.Language != lang {
-		return false
-	}
-	if plot := strings.TrimSpace(s.Plot); plot != "" && !strings.Contains(meta.ClassTag, plot) {
-		return false
-	}
-	return true
-}
-
-func metaMatchesManageCategory(meta *FilmSearchMeta, sourceID string, pid, cid int64) bool {
-	if cid <= 0 && pid <= 0 {
-		return true
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID != "" {
-		field := "pid"
-		typeID := pid
-		if cid > 0 {
-			field = "cid"
-			typeID = cid
-		}
-		return metaHasSourceType(meta, sourceID, repository.PublicSourceTypeIDs(sourceID, field, typeID))
-	}
-	if cid > 0 {
-		return meta.Cid == cid
-	}
-	return meta.Pid == pid
-}
-
-func metaHasSourceType(meta *FilmSearchMeta, sourceID string, typeIDs []int64) bool {
-	if meta == nil || len(typeIDs) == 0 {
-		return false
-	}
-	for _, id := range typeIDs {
-		key := support.BuildSourceCategoryKey(sourceID, id)
-		if key != "" && meta.CategoryKey == key {
-			return true
-		}
-	}
-	return false
 }
 
 func convertSnapshotsToFilmIndexes(snapshots []model.FilmListSnapshot) []model.FilmIndex {

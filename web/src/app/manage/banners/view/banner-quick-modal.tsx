@@ -34,6 +34,7 @@ interface QuickProgressState {
   current: number;
   total: number;
   message: string;
+  stage: "filtering" | "picking" | "scraping" | "done";
   pickedList: PickedFilm[];
 }
 
@@ -41,6 +42,7 @@ const initialProgress: QuickProgressState = {
   current: 0,
   total: 0,
   message: "",
+  stage: "picking",
   pickedList: [],
 };
 
@@ -180,6 +182,7 @@ export default function BannerQuickModal({
       current: 0,
       total: totalPlannedCount,
       message: "连接中...",
+      stage: "filtering",
       pickedList: [],
     });
 
@@ -204,6 +207,7 @@ export default function BannerQuickModal({
             setProgress((prev) => ({
               ...prev,
               total: evt.total ?? prev.total,
+              stage: "filtering",
               message: evt.message || "检索中...",
             }));
             return;
@@ -218,9 +222,11 @@ export default function BannerQuickModal({
                   category: evt.category,
                 });
               }
+              const isScraping = evt.stage === "scraping";
               return {
                 current: typeof evt.current === "number" ? evt.current : prev.current,
                 total: typeof evt.total === "number" ? evt.total : prev.total,
+                stage: (evt.stage as any) || (isScraping ? "scraping" : "picking"),
                 message: evt.message || prev.message,
                 pickedList: nextList,
               };
@@ -261,9 +267,18 @@ export default function BannerQuickModal({
     }
   };
 
-  const percent = progress.total > 0
-    ? Math.min(100, Math.round((progress.current / progress.total) * 100))
-    : 0;
+  const isScrapingStage = progress.stage === "scraping";
+  const percent = useMemo(() => {
+    if (progress.total <= 0) return 0;
+    const ratio = Math.min(1, Math.max(0, progress.current / progress.total));
+    if (autoScrape && tmdbEnabled) {
+      if (isScrapingStage) {
+        return Math.min(100, Math.round(40 + ratio * 60));
+      }
+      return Math.round(ratio * 40);
+    }
+    return Math.min(100, Math.round(ratio * 100));
+  }, [progress.current, progress.total, isScrapingStage, autoScrape, tmdbEnabled]);
 
   return (
     <Modal
@@ -271,7 +286,7 @@ export default function BannerQuickModal({
       title={
         <Space size={8}>
           <CompassOutlined style={{ color: "var(--ant-color-primary)" }} />
-          <span>{stage === "progress" ? "正在排片" : "一键排片"}</span>
+          <span>{stage === "progress" ? (isScrapingStage ? "TMDB 剧照刮削" : "正在排片") : "一键排片"}</span>
         </Space>
       }
       width={760}
@@ -321,7 +336,9 @@ export default function BannerQuickModal({
       ) : (
         <div className={styles.progressPanel}>
           <div className={styles.progressHead}>
-            <span className={styles.progressTitle}>排片中</span>
+            <span className={styles.progressTitle}>
+              {isScrapingStage ? "TMDB 智能刮削" : "正在从片库排片"}
+            </span>
             <span className={styles.progressCount}>
               {progress.current} / {progress.total}
             </span>

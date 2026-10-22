@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"server/internal/model"
@@ -117,11 +118,21 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 	// 针对每个分类取策略排序下的前 N 部，已占用的影片不再进入后面的分类。
 	catPicks := make(map[int64][]model.FilmListSnapshot, len(validQuotas))
 	usedMids := make([]int64, 0, totalCount)
-	for _, q := range validQuotas {
+	for qIdx, q := range validQuotas {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		default:
+		}
+
+		if onEvent != nil {
+			onEvent(OneClickProgressEvent{
+				Event:   "progress",
+				Stage:   "filtering",
+				Current: qIdx,
+				Total:   len(validQuotas),
+				Message: fmt.Sprintf("正在检索片库分类 (%d/%d)...", qIdx+1, len(validQuotas)),
+			})
 		}
 
 		effectiveCats := []int64{q.CategoryID}
@@ -250,29 +261,73 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 						Stage:   "scraping",
 						Current: 0,
 						Total:   len(missingIndices),
-						Message: fmt.Sprintf("正在刮削 (%d 部)...", len(missingIndices)),
+						Message: fmt.Sprintf("正在并行刮削 (%d 部)...", len(missingIndices)),
 					})
 				}
 
-				for sIdx, bannerIdx := range missingIndices {
-					select {
-					case <-ctx.Done():
-						return ctx.Err()
-					default:
-					}
+				type scrapeResult struct {
+					bannerIdx   int
+					targetSnap  model.FilmListSnapshot
+					updatedSnap *model.FilmListSnapshot
+					mediaType   string
+					success     bool
+					err         error
+				}
 
-					targetSnap := pickedSnaps[bannerIdx]
-					singleCtx, singleCancel := context.WithTimeout(ctx, 8*time.Second)
-					updatedSnap, mediaType, success, err := TMDBSvc.PreviewScrapeFilm(singleCtx, targetSnap)
-					singleCancel()
+				workerCount := 4
+				if len(missingIndices) < workerCount {
+					workerCount = len(missingIndices)
+				}
 
+				taskCh := make(chan int, len(missingIndices))
+				resultCh := make(chan scrapeResult, len(missingIndices))
+				var wg sync.WaitGroup
+
+				for w := 0; w < workerCount; w++ {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for bIdx := range taskCh {
+							if ctx.Err() != nil {
+								return
+							}
+							tSnap := pickedSnaps[bIdx]
+							singleCtx, singleCancel := context.WithTimeout(ctx, 4*time.Second)
+							uSnap, mType, succ, sErr := TMDBSvc.PreviewScrapeFilm(singleCtx, tSnap)
+							singleCancel()
+							resultCh <- scrapeResult{
+								bannerIdx:   bIdx,
+								targetSnap:  tSnap,
+								updatedSnap: uSnap,
+								mediaType:   mType,
+								success:     succ,
+								err:         sErr,
+							}
+						}
+					}()
+				}
+
+				for _, idx := range missingIndices {
+					taskCh <- idx
+				}
+				close(taskCh)
+
+				go func() {
+					wg.Wait()
+					close(resultCh)
+				}()
+
+				doneCount := 0
+				for res := range resultCh {
+					doneCount++
 					if ctx.Err() != nil {
 						return ctx.Err()
 					}
-
-					if err == nil && success && updatedSnap != nil {
-						slideUrl := strings.TrimSpace(updatedSnap.DisplayPictureSlide())
-						dispPic := strings.TrimSpace(updatedSnap.DisplayPicture())
+					bannerIdx := res.bannerIdx
+					targetSnap := res.targetSnap
+					if res.err == nil && res.success && res.updatedSnap != nil {
+						slideUrl := strings.TrimSpace(res.updatedSnap.DisplayPictureSlide())
+						dispPic := strings.TrimSpace(res.updatedSnap.DisplayPicture())
 						if slideUrl == dispPic {
 							slideUrl = ""
 						}
@@ -281,24 +336,24 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 							banners[bannerIdx].Poster = dispPic
 						}
 						banners[bannerIdx].PictureSlide = slideUrl
-						if updatedSnap.Score > 0 {
-							banners[bannerIdx].Score = updatedSnap.Score
+						if res.updatedSnap.Score > 0 {
+							banners[bannerIdx].Score = res.updatedSnap.Score
 						}
-						if updatedSnap.Blurb != "" {
-							banners[bannerIdx].Blurb = updatedSnap.Blurb
+						if res.updatedSnap.Blurb != "" {
+							banners[bannerIdx].Blurb = res.updatedSnap.Blurb
 						}
-						if updatedSnap.Year > 0 {
-							banners[bannerIdx].Year = updatedSnap.Year
+						if res.updatedSnap.Year > 0 {
+							banners[bannerIdx].Year = res.updatedSnap.Year
 						}
-						banners[bannerIdx].TmdbID = updatedSnap.TmdbID
-						banners[bannerIdx].MediaType = mediaType
+						banners[bannerIdx].TmdbID = res.updatedSnap.TmdbID
+						banners[bannerIdx].MediaType = res.mediaType
 						banners[bannerIdx].PendingScrape = true
 						banners[bannerIdx].ScrapeState = "pending"
 						if onEvent != nil {
 							onEvent(OneClickProgressEvent{
 								Event:   "progress",
 								Stage:   "scraping",
-								Current: sIdx + 1,
+								Current: doneCount,
 								Total:   len(missingIndices),
 								Mid:     targetSnap.Mid,
 								Name:    targetSnap.Name,
@@ -314,7 +369,7 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 							onEvent(OneClickProgressEvent{
 								Event:   "progress",
 								Stage:   "scraping",
-								Current: sIdx + 1,
+								Current: doneCount,
 								Total:   len(missingIndices),
 								Mid:     targetSnap.Mid,
 								Name:    targetSnap.Name,

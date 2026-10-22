@@ -11,7 +11,7 @@ import {
   getCategoryRuleTotals,
   saveCategoryRule,
 } from "./api";
-import RuleEditorModal from "./rule-editor-modal";
+import RuleEditorDrawer from "./rule-editor-drawer";
 import styles from "./index.module.less";
 import {
   CATEGORY_GROUPS,
@@ -354,7 +354,7 @@ export default function RuleWorkspace(props: RuleWorkspaceProps) {
         )}
       />
 
-      <RuleEditorModal
+      <RuleEditorDrawer
         open={editorVisible}
         loading={rulesSubmitting}
         editingRule={editingRule}

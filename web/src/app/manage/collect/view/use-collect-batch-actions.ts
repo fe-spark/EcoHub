@@ -72,7 +72,7 @@ export function useCollectBatchActions(
 
       setBatchStateUpdating(true);
       try {
-        const resp = await ApiPost("/manage/collect/change/batch", {
+        const resp = await ApiPost("/manage/collect/state", {
           ids: sourceIdsToUpdate,
           state,
         });
@@ -103,7 +103,7 @@ export function useCollectBatchActions(
     setSelectedSourceIds([]);
     setBatchDeleting(true);
     try {
-      const resp = await ApiPost("/manage/collect/del/batch", { ids });
+      const resp = await ApiPost("/manage/collect/delete", { ids });
       if (resp.code === 0) {
         message.success("已提交批量删除");
         return;

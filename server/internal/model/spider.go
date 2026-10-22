@@ -213,10 +213,8 @@ type Option struct {
 
 type OptionGroup map[string][]Option
 
-// CollectParams 数据采集所需要的参数
+// CollectParams 数据采集所需要的参数（统一批量结构，单站即单个元素）
 type CollectParams struct {
-	Id    string   `json:"id"`    // 资源站id
-	Ids   []string `json:"ids"`   // 资源站id列表
-	Time  int      `json:"time"`  // 采集时长
-	Batch bool     `json:"batch"` // 是否批量执行
+	Ids  []string `json:"ids"`  // 资源站id列表
+	Time int      `json:"time"` // 采集时长
 }

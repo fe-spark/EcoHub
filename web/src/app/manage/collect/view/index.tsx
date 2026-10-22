@@ -8,13 +8,13 @@ import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import BatchCollectModal from "./batch-collect-modal";
+import BatchCollectDrawer from "./batch-collect-drawer";
 import CategoryChangeModal from "./category-change-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectQueueBars from "./collect-queue-bars";
 import CollectSourceGrid from "./collect-source-grid";
 import CollectToolbar from "./collect-toolbar";
-import SourceFormModal from "./source-form-modal";
+import SourceFormDrawer from "./source-form-drawer";
 import { useCollectProgressStream } from "./use-collect-progress-stream";
 import { useCollectStream, type CategoryTreeChange } from "./use-collect-stream";
 import { useCollectSourceEvents } from "./use-collect-source-events";
@@ -25,13 +25,12 @@ import { useCollectBatchRunner } from "./use-collect-batch-runner";
 import { useCollectQueueBars } from "./use-collect-queue-bars";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
+import { useCollectCardActions } from "./use-collect-card-actions";
 import { isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
 import {
   isActiveCollectStatus,
-  progressAsStopping,
   type CollectListItemResponse,
   type FilmSource,
-  makeStartingProgress,
   normalizeSource,
 } from "./types";
 import styles from "./index.module.less";
@@ -44,7 +43,6 @@ export default function CollectManagePageView() {
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
-  const [deletingSourceId, setDeletingSourceId] = useState("");
 
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
   const {
@@ -234,30 +232,19 @@ export default function CollectManagePageView() {
     [updateSiteListItem],
   );
 
-  const [togglingStateSourceId, setTogglingStateSourceId] = useState<string | null>(null);
-
-  const changeSourceState = useCallback(
-    async (id: string, nextState: boolean) => {
-      setTogglingStateSourceId(id);
-      updateSiteListItem(id, (item) => ({ ...item, state: nextState }));
-      try {
-        const resp = await ApiPost("/manage/collect/change", { id, state: nextState });
-        if (resp.code === 0) {
-          message.success(nextState ? "采集站已启用" : "采集站已禁用");
-          await getCollectList();
-        } else {
-          message.error(resp.msg || "状态切换失败");
-          updateSiteListItem(id, (item) => ({ ...item, state: !nextState }));
-        }
-      } catch {
-        message.error("状态切换失败");
-        updateSiteListItem(id, (item) => ({ ...item, state: !nextState }));
-      } finally {
-        setTogglingStateSourceId(null);
-      }
-    },
-    [getCollectList, message, updateSiteListItem],
-  );
+  const {
+    togglingStateSourceId,
+    deletingSourceId,
+    changeSourceState,
+    startTask,
+    stopTask,
+    delSource,
+  } = useCollectCardActions({
+    setSiteList,
+    updateSiteListItem,
+    getCollectList,
+    stoppingSiteIdsRef,
+  });
 
   const {
     sourceModalMode,
@@ -320,84 +307,6 @@ export default function CollectManagePageView() {
     },
     [categoryConfirm, message, siteList, syncingSourcesRef],
   );
-
-  const startTask = async (record: FilmSource) => {
-    if (deletingSourceId === record.id) {
-      return;
-    }
-    if (!record.state) {
-      message.warning("采集站已停用，请先启用后再采集");
-      return;
-    }
-    if (record.categoryReady === false) {
-      message.warning("缺分类");
-      return;
-    }
-    if (record.categorySyncing) {
-      message.warning("分类采集中");
-      return;
-    }
-    if (record.progress?.status === "stopping") {
-      message.warning("停止中");
-      return;
-    }
-    if (isActiveCollectStatus(record.progress?.status)) {
-      message.warning("采集站已在采集中");
-      return;
-    }
-    updateSiteListItem(record.id, (item) => ({
-      ...item,
-      progress: makeStartingProgress(record.id, record.name, newClientCollectQueueId(), item.progress?.queueId ?? ""),
-    }));
-    const resp = await ApiPost("/manage/spider/start", { id: record.id, time: record.cd ?? 24, batch: false });
-    if (resp.code === 0) {
-      message.success(resp.msg);
-      return;
-    }
-    message.error(resp.msg || "启动采集失败");
-    updateSiteListItem(record.id, (item) => ({ ...item, progress: null }));
-    await getCollectList();
-  };
-
-  const stopTask = async (id: string) => {
-    stoppingSiteIdsRef.current.add(id);
-    updateSiteListItem(id, (item) => ({ ...item, progress: progressAsStopping(item.progress, item.id, item.name) }));
-    message.loading({
-      key: `collect-stop-site-${id}`,
-      content: "正在停止...",
-      duration: 0,
-    });
-    const resp = await ApiPost("/manage/spider/stop", { id });
-    if (resp.code !== 0) {
-      stoppingSiteIdsRef.current.delete(id);
-      message.error({
-        key: `collect-stop-site-${id}`,
-        content: resp.msg || "终止任务失败",
-        duration: 2,
-      });
-      void getCollectList();
-      return;
-    }
-  };
-
-  const delSource = async (id: string) => {
-    setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: true } : s)));
-    setDeletingSourceId(id);
-    try {
-      const resp = await ApiPost("/manage/collect/del", { id });
-      if (resp.code === 0) {
-        message.success("已提交删除");
-        return;
-      }
-      message.error(resp.msg || "删除失败");
-      void getCollectList();
-    } catch {
-      message.error("删除失败");
-      void getCollectList();
-    } finally {
-      setDeletingSourceId("");
-    }
-  };
 
   return (
     <div className={styles.pageBody}>
@@ -474,7 +383,7 @@ export default function CollectManagePageView() {
         )}
       </div>
 
-      <SourceFormModal
+      <SourceFormDrawer
         key={sourceFormNonce}
         open={sourceModalOpen}
         mode={sourceModalMode}
@@ -488,7 +397,7 @@ export default function CollectManagePageView() {
         onTest={testApi}
       />
 
-      <BatchCollectModal
+      <BatchCollectDrawer
         open={batchOpen}
         rows={batchRows}
         batchTime={batchTime}

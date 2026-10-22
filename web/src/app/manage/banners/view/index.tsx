@@ -14,7 +14,7 @@ import { useManagePermission } from "@/lib/manage-permission";
 import { useTmdbEnabled } from "@/lib/useTmdbEnabled";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
-import BannerModal from "./banner-modal";
+import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
 import BannerGrid from "./banner-grid";
@@ -98,7 +98,7 @@ export default function BannersPageView() {
     const draft = bannersRef.current;
     setOrderSaving(true);
     try {
-      const resp = await ApiPost("/manage/banner/save-deck", draft);
+      const resp = await ApiPost("/manage/banner/deck", draft);
       if (resp.code === 0) {
         const next = Array.isArray(resp.data) ? (resp.data as BannerRecord[]) : draft;
         replaceList(next);
@@ -117,7 +117,7 @@ export default function BannersPageView() {
   const handleDelete = useCallback(
     async (id: string) => {
       try {
-        const resp = await ApiPost("/manage/banner/del", { id: String(id) });
+        const resp = await ApiPost("/manage/banner/delete", { ids: [String(id)] });
         if (resp.code === 0) {
           message.success("删除成功");
           void fetchBanners();
@@ -263,7 +263,7 @@ export default function BannersPageView() {
       />
 
       {/* 手动添加/编辑轮播弹窗（在详情中完整展示横屏大图与封面图） */}
-      <BannerModal
+      <BannerDrawer
         open={editorVisible}
         mode={editorMode}
         currentRow={currentRow}

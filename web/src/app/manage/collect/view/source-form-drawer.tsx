@@ -1,4 +1,4 @@
-import { Alert, Button, Form, Input, Modal, Radio, Switch } from "antd";
+import { Alert, Button, Drawer, Flex, Form, Input, Radio, Space, Switch } from "antd";
 import { useEffect, useMemo } from "react";
 import { useManagePermission } from "@/lib/manage-permission";
 import type { SourceFormValues } from "./types";
@@ -28,7 +28,7 @@ function isDomainReplaceRuleLine(line: string): boolean {
   return Boolean(from.trim() && to.trim());
 }
 
-interface SourceFormModalProps {
+interface SourceFormDrawerProps {
   open: boolean;
   mode: "add" | "edit";
   loading: boolean;
@@ -41,7 +41,7 @@ interface SourceFormModalProps {
   onTest: (values: SourceFormValues) => void;
 }
 
-export default function SourceFormModal(props: SourceFormModalProps) {
+export default function SourceFormDrawer(props: SourceFormDrawerProps) {
   const {
     open,
     mode,
@@ -82,43 +82,40 @@ export default function SourceFormModal(props: SourceFormModalProps) {
   }, [open, form, initialValues, globalSpiderProxyReady]);
 
   return (
-    <Modal
+    <Drawer
       title={title}
       open={open}
-      onCancel={() => {
+      onClose={() => {
         if (!loading) {
           onCancel();
         }
       }}
-      onOk={() => form.submit()}
-      confirmLoading={loading}
-      closable={!loading}
-      mask={{ closable: !loading }}
-      destroyOnHidden
-      footer={[
-        <Button
-          key="test"
-          onClick={() => {
-            void form.validateFields().then(onTest);
-          }}
-          loading={testing}
-          disabled={!canWrite}
-        >
-          测试接口
-        </Button>,
-        <Button key="cancel" onClick={onCancel} disabled={loading}>
-          取消
-        </Button>,
-        <Button
-          key="ok"
-          type="primary"
-          onClick={() => form.submit()}
-          loading={loading}
-          disabled={!canWrite}
-        >
-          确定
-        </Button>,
-      ]}
+      width={600}
+      destroyOnClose
+      extra={
+        <Space>
+          <Button
+            onClick={() => {
+              void form.validateFields().then(onTest);
+            }}
+            loading={testing}
+            disabled={!canWrite}
+          >
+            测试接口
+          </Button>
+          <Button onClick={onCancel} disabled={loading}>
+            取消
+          </Button>
+          <Button
+            type="primary"
+            onClick={() => form.submit()}
+            loading={loading}
+            disabled={!canWrite}
+          >
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form<SourceFormValues>
         form={form}
@@ -151,14 +148,10 @@ export default function SourceFormModal(props: SourceFormModalProps) {
             showIcon
             type="warning"
             style={{ marginBottom: 16 }}
-            title="更换接口地址会清空该站已采集的线路、失败记录和分类，并按新地址重新获取分类。"
+            title="更换接口地址将重置已采集的线路与分类"
           />
         ) : null}
-        <Form.Item
-          label="接口格式"
-          name="format"
-          tooltip="采集源返回的数据协议。大部分苹果 CMS 资源站支持 JSON 格式；部分特定或早期站点仅支持 XML 格式。"
-        >
+        <Form.Item label="接口格式" name="format">
           <Radio.Group>
             <Radio value="json">JSON 格式</Radio>
             <Radio value="xml">XML 格式</Radio>
@@ -167,9 +160,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         <Form.Item
           label="播放链接域名替换规则"
           name="domainReplaceRules"
-          tooltip={
-            "将采集到的播放链接中匹配的域名替换为新域名。例如源站提供防盗链失效链接时，可替换为镜像或有效访问地址。每行一条，格式：old.com => new.com"
-          }
+          tooltip="格式：old.com => new.com"
           rules={[
             {
               validator: async (_, value: string) => {
@@ -188,7 +179,7 @@ export default function SourceFormModal(props: SourceFormModalProps) {
                 }
                 if (bad.length > 0) {
                   return Promise.reject(
-                    new Error(`无法解析: ${bad.join("；")}。请使用 旧域名 => 新域名`),
+                    new Error(`格式错误: ${bad.join("；")}`),
                   );
                 }
               },
@@ -197,21 +188,20 @@ export default function SourceFormModal(props: SourceFormModalProps) {
         >
           <Input.TextArea
             rows={3}
-            placeholder={`每行一条，例如：\nhd.ijycnd.com => hd.kuktxu.com`}
+            placeholder={`每行一条，例如：\nhd.domain1.com => hd.domain2.com`}
           />
         </Form.Item>
         <Form.Item
           label="海报图源"
           name="isPosterSource"
           valuePropName="checked"
-          tooltip="前台封面用这个站影片的最终展示图。全局只有一个，关掉后改到其他启用站。"
         >
           <Switch checkedChildren="开启" unCheckedChildren="关闭" />
         </Form.Item>
 
         <Form.Item
           label={
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Space size={6}>
               <span>采集接口代理</span>
               {!globalSpiderProxyReady && (
                 <span
@@ -224,15 +214,10 @@ export default function SourceFormModal(props: SourceFormModalProps) {
                   （系统网络代理未开启）
                 </span>
               )}
-            </div>
+            </Space>
           }
           name="proxyCollect"
           valuePropName="checked"
-          tooltip={
-            globalSpiderProxyReady
-              ? "源站 API 抓取与详情拉取经由全局网络代理转发"
-              : "系统全局网络代理未开启或爬虫通道未启用，无法开启代理"
-          }
         >
           <Switch
             checkedChildren="开启"
@@ -245,6 +230,6 @@ export default function SourceFormModal(props: SourceFormModalProps) {
           <Switch checkedChildren="启用" unCheckedChildren="禁用" />
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   );
 }

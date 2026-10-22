@@ -41,8 +41,8 @@ func (h *CronHandler) GetFilmCronTask(c *gin.Context) {
 	dto.Success(task, "定时任务详情获取成功!!!", c)
 }
 
-// FilmCronUpdate 更新定时任务信息
-func (h *CronHandler) FilmCronUpdate(c *gin.Context) {
+// FilmCronSave 保存定时任务信息
+func (h *CronHandler) FilmCronSave(c *gin.Context) {
 	t := model.FilmCollectTask{}
 	if err := c.ShouldBindJSON(&t); err != nil {
 		dto.Failed("请求参数异常!!!", c)
@@ -73,35 +73,61 @@ func (h *CronHandler) FilmCronUpdate(c *gin.Context) {
 	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]更新成功", task.Id), c)
 }
 
-// ChangeTaskState 开启 | 关闭Id 对应的定时任务
+// ChangeTaskState 统一批量/单任务启停状态
 func (h *CronHandler) ChangeTaskState(c *gin.Context) {
-	t := model.FilmCollectTask{}
-	if err := c.ShouldBindJSON(&t); err != nil {
+	var req struct {
+		Ids   []string `json:"ids"`
+		State bool     `json:"state"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	if err := service.CronSvc.ChangeFilmCrontab(t.Id, t.State); err != nil {
-		dto.Failed(fmt.Sprint("更新失败: ", err.Error()), c)
+	cleanIds := make([]string, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
+		dto.Failed("任务ID列表不能为空", c)
 		return
 	}
-	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]更新成功", t.Id), c)
+	for _, id := range cleanIds {
+		if err := service.CronSvc.ChangeFilmCrontab(id, req.State); err != nil {
+			dto.Failed(fmt.Sprint("更新失败: ", err.Error()), c)
+			return
+		}
+	}
+	dto.SuccessOnlyMsg("定时任务状态更新成功", c)
 }
 
-// RunFilmCronTask 立即手动执行一次定时任务
+// RunFilmCronTask 手动执行定时任务（批量/单任务，数组入参）
 func (h *CronHandler) RunFilmCronTask(c *gin.Context) {
-	t := model.FilmCollectTask{}
-	if err := c.ShouldBindJSON(&t); err != nil {
+	var req struct {
+		Ids []string `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	id := strings.TrimSpace(t.Id)
-	if id == "" {
-		dto.Failed("任务Id不能为空", c)
+	cleanIds := make([]string, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
+		dto.Failed("任务ID不能为空", c)
 		return
 	}
-	if err := service.CronSvc.RunFilmCronTaskOnce(id); err != nil {
-		dto.Failed(fmt.Sprint("手动执行失败: ", err.Error()), c)
-		return
+	for _, id := range cleanIds {
+		if err := service.CronSvc.RunFilmCronTaskOnce(id); err != nil {
+			dto.Failed(fmt.Sprint("手动执行失败: ", err.Error()), c)
+			return
+		}
 	}
-	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]已触发，执行结果请查看运行日志", id), c)
+	dto.SuccessOnlyMsg("定时任务已触发，执行结果请查看运行日志", c)
 }

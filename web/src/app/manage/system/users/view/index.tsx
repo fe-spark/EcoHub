@@ -30,7 +30,7 @@ import type { ColumnsType } from "antd/es/table";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import ManagePageHeader from "@/app/manage/components/page-header";
-import { UserModal } from "./user-modal";
+import { UserDrawer } from "./user-drawer";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -140,7 +140,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
 
   const handleDelete = async (id: number) => {
     try {
-      const resp = await ApiPost("/manage/user/del", { id: String(id) });
+      const resp = await ApiPost("/manage/user/delete", { ids: [id] });
       if (resp.code === 0) {
         message.success("账号删除成功");
         fetchData();
@@ -155,10 +155,8 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
   const handleSaveUser = async (values: any) => {
     setLoading(true);
     try {
-      const url = editingUser ? "/manage/user/update" : "/manage/user/add";
       const payload = editingUser ? { ...values, id: editingUser.id } : values;
-
-      const resp = await ApiPost(url, payload);
+      const resp = await ApiPost("/manage/user/save", payload);
       if (resp.code === 0) {
         message.success(editingUser ? "账号信息更新成功" : "新增账号成功");
         setIsModalOpen(false);
@@ -404,7 +402,7 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
         )}
       />
 
-      <UserModal
+      <UserDrawer
         open={isModalOpen}
         editingUser={editingUser}
         currentUser={currentUser}

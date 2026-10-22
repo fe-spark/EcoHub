@@ -161,7 +161,7 @@ export default function NotifyConfigPageView({ embedded = false }: NotifyConfigP
       const values = await form.validateFields();
       setSaving(true);
       const payload = normalizeNotifyConfig({ ...serverData, ...values });
-      const resp = await ApiPost<NotifyConfigValues>("/manage/notify/config/update", payload);
+      const resp = await ApiPost<NotifyConfigValues>("/manage/notify/config", payload);
       if (resp.code === 0) {
         message.success(resp.msg || "通知配置已保存");
         const updated = normalizeNotifyConfig(resp.data || payload);

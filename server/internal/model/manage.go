@@ -1,6 +1,10 @@
 package model
 
-import "gorm.io/gorm"
+import (
+	"time"
+
+	"gorm.io/gorm"
+)
 
 const (
 	TipChannelWeChat  = "wechat"
@@ -133,12 +137,15 @@ func (SiteConfigRecord) TableName() string {
 
 // MappingRule 定义从采集源到标准系统的转换规则 (地区/语言/标签黑名单)
 type MappingRule struct {
-	gorm.Model
-	Group     string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:32" json:"group"`                   // Area, Language, Blacklist
-	Raw       string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:128" json:"raw"`                    // 原始值 (采集源)
-	Target    string `gorm:"size:128" json:"target"`                                                       // 标准值 (如果为空则视为黑名单项)
-	MatchType string `gorm:"uniqueIndex:uidx_group_raw_match_type;size:16;default:exact" json:"matchType"` // exact | regex
-	Remarks   string `gorm:"size:256" json:"remarks"`                                                      // 备注
+	ID        uint           `gorm:"primarykey" json:"id"`
+	CreatedAt time.Time      `json:"createdAt"`
+	UpdatedAt time.Time      `json:"updatedAt"`
+	DeletedAt gorm.DeletedAt `gorm:"index" json:"-"`
+	Group     string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:32" json:"group"`                   // Area, Language, Blacklist
+	Raw       string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:128" json:"raw"`                    // 原始值 (采集源)
+	Target    string         `gorm:"size:128" json:"target"`                                                       // 标准值 (如果为空则视为黑名单项)
+	MatchType string         `gorm:"uniqueIndex:uidx_group_raw_match_type;size:16;default:exact" json:"matchType"` // exact | regex
+	Remarks   string         `gorm:"size:256" json:"remarks"`                                                      // 备注
 }
 
 func (MappingRule) TableName() string {

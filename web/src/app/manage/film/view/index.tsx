@@ -9,7 +9,7 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import { useFilmColumns, type FilmItem } from "./film-columns";
 import { FilmFilterBar } from "./film-filter-bar";
 import { FilmBatchBar } from "./film-batch-bar";
-import FilmModal from "../components/film-modal";
+import FilmDrawer from "../components/film-drawer";
 import styles from "./index.module.less";
 
 function flattenCategoryNodes(nodes: any[]): any[] {
@@ -58,7 +58,7 @@ export default function FilmListPageView() {
   const [dateRange, setDateRange] = useState<any>(null);
   const { message } = useAppMessage();
 
-  const [filmModalOpen, setFilmModalOpen] = useState(false);
+  const [filmDrawerOpen, setFilmDrawerOpen] = useState(false);
   const [editingFilmId, setEditingFilmId] = useState<number | null>(null);
   const [modalDefaultSourceId, setModalDefaultSourceId] = useState<string>("");
   const [modalDefaultCid, setModalDefaultCid] = useState<number | undefined>(undefined);
@@ -250,7 +250,7 @@ export default function FilmListPageView() {
         setSyncingIds((prev) => [...prev, ids[0]]);
       }
       try {
-        const resp = await ApiPost("/manage/spider/update", { ids });
+        const resp = await ApiPost("/manage/film/refresh", { ids });
         if (resp.code === 0) {
           message.success(resp.msg || "更新任务已开启");
           getFilmPage();
@@ -274,7 +274,7 @@ export default function FilmListPageView() {
       if (!ids.length) return;
       setDeleting(true);
       try {
-        const resp = await ApiPost("/manage/film/search/del", { ids });
+        const resp = await ApiPost("/manage/film/delete", { ids });
         if (resp.code === 0) {
           message.success(resp.msg || "影片删除成功");
           setSelectedRowKeys((prev) => prev.filter((k) => !ids.includes(Number(k))));
@@ -297,7 +297,7 @@ export default function FilmListPageView() {
     handleDelFilm: (id) => handleDelFilms([id]),
     handleEditFilm: (mid) => {
       setEditingFilmId(mid);
-      setFilmModalOpen(true);
+      setFilmDrawerOpen(true);
     },
     activeSourceId: tableSourceId || params.sourceId,
   });
@@ -375,7 +375,7 @@ export default function FilmListPageView() {
               setEditingFilmId(null);
               setModalDefaultSourceId(targetSourceId);
               setModalDefaultCid(targetCid);
-              setFilmModalOpen(true);
+              setFilmDrawerOpen(true);
             }}
             styles={styles}
           />
@@ -399,14 +399,14 @@ export default function FilmListPageView() {
         )}
       />
 
-      <FilmModal
-        open={filmModalOpen}
+      <FilmDrawer
+        open={filmDrawerOpen}
         filmId={editingFilmId}
         defaultSourceId={modalDefaultSourceId}
         defaultCid={modalDefaultCid}
-        onClose={() => setFilmModalOpen(false)}
+        onClose={() => setFilmDrawerOpen(false)}
         onSuccess={() => {
-          setFilmModalOpen(false);
+          setFilmDrawerOpen(false);
           void getFilmPage();
         }}
       />

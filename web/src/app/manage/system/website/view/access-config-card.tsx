@@ -120,7 +120,7 @@ export default function AccessConfigCard({ canWrite }: AccessConfigCardProps) {
     setSaving(true);
     try {
       const normalized = normalizeAccessConfig(draft);
-      const resp = await ApiPost("/manage/config/access/update", normalized);
+      const resp = await ApiPost("/manage/config/access", normalized);
       if (resp.code === 0) {
         message.success(resp.msg || "访问控制配置已保存");
         setData(normalized);

@@ -1,0 +1,188 @@
+/* 抽屉内容堆栈 */
+.drawerStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 16px;
+}
+
+.drawerSectionCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    border-color: var(--ant-color-border);
+  }
+}
+
+.drawerSectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.titleLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sectionIcon {
+  color: var(--ant-color-primary);
+  font-size: 15px;
+}
+
+.switchLabel {
+  font-size: 13px;
+  color: var(--ant-color-text-secondary);
+  font-weight: 400;
+  user-select: none;
+}
+
+.loadingWrap {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 360px;
+  gap: 14px;
+  padding: 30px;
+}
+
+/* 基础档案：沉浸式电影档案卡头 */
+.heroProfileCard {
+  display: flex;
+  gap: 16px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  align-items: flex-start;
+}
+
+.posterColumn {
+  width: 110px;
+  min-width: 110px;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.posterContainer {
+  position: relative;
+  width: 110px;
+  height: 154px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--ant-color-fill-tertiary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  }
+}
+
+.posterTag {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  margin: 0;
+  z-index: 2;
+  pointer-events: none;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 500;
+}
+
+.heroProfileInfo {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* 属性网格 */
+.metaAttributeGrid {
+  margin-top: 2px;
+}
+
+.formItemReset {
+  margin-bottom: 0 !important;
+}
+
+.posterSourceBox {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 11px;
+  border-radius: 6px;
+  background: var(--ant-color-fill-quaternary);
+  border: 1px solid var(--ant-color-border-secondary);
+  box-sizing: border-box;
+  min-width: 0;
+  width: 100%;
+}
+
+.posterSourceText {
+  width: 100%;
+  min-width: 0;
+}
+
+.posterInput {
+  width: 100%;
+}
+
+/* 剧集播放资源扁平布局（零套娃） */
+.episodeList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 130px;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.episodeTagItem {
+  margin: 0;
+  font-size: 12px;
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .heroProfileCard {
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .posterColumn {
+    width: 120px;
+    min-width: 120px;
+  }
+
+  .posterContainer {
+    width: 120px;
+    height: 168px;
+  }
+
+  .heroProfileInfo {
+    width: 100%;
+  }
+}

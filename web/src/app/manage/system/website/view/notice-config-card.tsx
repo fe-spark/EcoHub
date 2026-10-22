@@ -176,7 +176,7 @@ export default function NoticeConfigCard({ canWrite }: NoticeConfigCardProps) {
         appVersion: "",
         version: "",
       });
-      const resp = await ApiPost("/manage/config/notice/update", nextNotice);
+      const resp = await ApiPost("/manage/config/notice", nextNotice);
       if (resp.code === 0) {
         message.success(resp.msg || "公告配置已保存");
         setData(nextNotice);

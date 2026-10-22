@@ -108,7 +108,7 @@ export default function ProxyConfigPageView({ embedded = false }: ProxyConfigPag
     try {
       const values = await form.validateFields();
       setSaving(true);
-      const resp = await ApiPost("/manage/proxy/config/update", {
+      const resp = await ApiPost("/manage/proxy/config", {
         ...values,
         preserveAuth: !proxyUrlTouched.current,
       });
