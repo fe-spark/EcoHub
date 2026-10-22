@@ -28,12 +28,15 @@ import (
 func newTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:it_%s?mode=memory&cache=shared", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
+	dsn := fmt.Sprintf("file:it_%s?mode=memory&cache=shared&_busy_timeout=5000", strings.NewReplacer("/", "_", " ", "_").Replace(t.Name()))
 	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
 		Logger: logger.Default.LogMode(logger.Silent),
 	})
 	if err != nil {
 		t.Fatalf("打开内存 sqlite 失败: %v", err)
+	}
+	if sqlDB, err := gdb.DB(); err == nil {
+		sqlDB.SetMaxOpenConns(1)
 	}
 	if err := gdb.AutoMigrate(model.AllModels...); err != nil {
 		t.Fatalf("迁移测试库结构失败: %v", err)

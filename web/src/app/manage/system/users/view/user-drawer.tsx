@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect } from "react";
-import { Modal, Form, Input, Select, Space } from "antd";
+import { Drawer, Form, Input, Select, Space, Button, Flex } from "antd";
 import {
   UserOutlined,
   LockOutlined,
@@ -11,7 +11,7 @@ import {
 
 const { Option } = Select;
 
-interface UserModalProps {
+interface UserDrawerProps {
   open: boolean;
   editingUser: any;
   currentUser: any;
@@ -20,14 +20,14 @@ interface UserModalProps {
   onCancel: () => void;
 }
 
-export function UserModal({
+export function UserDrawer({
   open,
   editingUser,
   currentUser,
   loading,
   onOk,
   onCancel,
-}: UserModalProps) {
+}: UserDrawerProps) {
   const [form] = Form.useForm();
 
   useEffect(() => {
@@ -61,13 +61,13 @@ export function UserModal({
     try {
       const values = await form.validateFields();
       await onOk(values);
-    } catch (error) {
-      // Form validation failed
+    } catch {
+      // 验证未通过
     }
   };
 
   return (
-    <Modal
+    <Drawer
       title={
         <Space>
           <UserAddOutlined style={{ color: "#1677ff" }} />
@@ -75,11 +75,19 @@ export function UserModal({
         </Space>
       }
       open={open}
-      onOk={handleOk}
-      onCancel={onCancel}
-      confirmLoading={loading}
-      destroyOnHidden
-      width={540}
+      onClose={onCancel}
+      width={520}
+      destroyOnClose
+      extra={
+        <Space>
+          <Button onClick={onCancel} disabled={loading}>
+            取消
+          </Button>
+          <Button type="primary" onClick={handleOk} loading={loading}>
+            保存
+          </Button>
+        </Space>
+      }
     >
       <Form form={form} layout="vertical" preserve={false}>
         <Form.Item
@@ -89,22 +97,21 @@ export function UserModal({
         >
           <Input
             prefix={<UserOutlined />}
-            placeholder="用于登录系统的账号"
+            placeholder="登录账号"
             disabled={!!editingUser}
           />
         </Form.Item>
 
         <Form.Item
           name="password"
-          label={editingUser ? "新密码 (留空表示维持原密码)" : "登录密码"}
+          label={editingUser ? "新密码（留空维持原密码）" : "登录密码"}
           rules={[{ required: !editingUser, message: "请输入登录密码" }]}
-          extra={editingUser ? "不修改密码请直接留空" : "请设置不少于6位的登录密码"}
         >
           <Input.Password prefix={<LockOutlined />} placeholder="请输入密码" />
         </Form.Item>
 
         <Form.Item name="nickName" label="显示昵称">
-          <Input placeholder="用户显示的别名或昵称" />
+          <Input placeholder="用户昵称" />
         </Form.Item>
 
         <Form.Item
@@ -138,13 +145,6 @@ export function UserModal({
           name="role"
           label="身份角色"
           initialValue={0}
-          extra={
-            editingUser?.builtin
-              ? "默认超级用户不可修改角色"
-              : currentUser?.isAdmin
-                ? "可指定超级用户、普通用户或访客"
-                : "仅超级用户可指定角色"
-          }
         >
           <Select disabled={Boolean(editingUser?.builtin) || !currentUser?.isAdmin}>
             <Option value={1}>超级用户</Option>
@@ -157,13 +157,6 @@ export function UserModal({
           name="status"
           label="账号状态"
           initialValue={0}
-          extra={
-            !currentUser?.isAdmin
-              ? "仅超级用户可修改账号状态"
-              : editingUser?.id === currentUser?.id
-                ? "不能禁用当前登录账号"
-                : undefined
-          }
         >
           <Select disabled={!currentUser?.isAdmin}>
             <Option value={0}>启用</Option>
@@ -173,6 +166,6 @@ export function UserModal({
           </Select>
         </Form.Item>
       </Form>
-    </Modal>
+    </Drawer>
   );
 }

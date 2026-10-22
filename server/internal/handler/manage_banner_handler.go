@@ -21,65 +21,66 @@ func (h *ManageHandler) BannerList(c *gin.Context) {
 	dto.Success(bl, "获取轮播列表成功", c)
 }
 
-// BannerAdd 手动添加影片到轮播
-func (h *ManageHandler) BannerAdd(c *gin.Context) {
+// BannerSave 保存轮播数据（新增或更新）
+func (h *ManageHandler) BannerSave(c *gin.Context) {
 	var b model.Banner
 	if err := c.ShouldBindJSON(&b); err != nil {
 		dto.Failed("Banner 参数提交异常", c)
 		return
 	}
-	b.Id = utils.GenerateSalt()
 	bl, err := service.ManageSvc.GetBanners()
 	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	b.Sort = int64(len(bl) + 1)
-	bl = append(bl, b)
-	if err := service.ManageSvc.SaveBanners(bl); err != nil {
-		dto.Failed("添加轮播失败: "+err.Error(), c)
+	b.Id = strings.TrimSpace(b.Id)
+	if b.Id == "" {
+		b.Id = utils.GenerateSalt()
+		b.Sort = int64(len(bl) + 1)
+		bl = append(bl, b)
+		if err := service.ManageSvc.SaveBanners(bl); err != nil {
+			dto.Failed("添加轮播失败: "+err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("添加轮播成功", c)
 		return
 	}
-	dto.SuccessOnlyMsg("添加轮播成功", c)
-}
-
-// BannerUpdate 更新轮播数据
-func (h *ManageHandler) BannerUpdate(c *gin.Context) {
-	var banner model.Banner
-	if err := c.ShouldBindJSON(&banner); err != nil {
-		dto.Failed("Banner 参数提交异常", c)
-		return
-	}
-	bl, err := service.ManageSvc.GetBanners()
-	if err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	for i, b := range bl {
-		if b.Id == banner.Id {
-			bl[i] = banner
-			if err := service.ManageSvc.SaveBanners(bl); err != nil {
-				dto.Failed("更新轮播失败: "+err.Error(), c)
-			} else {
-				dto.SuccessOnlyMsg("更新轮播成功", c)
-				return
-			}
+	found := false
+	for i, item := range bl {
+		if item.Id == b.Id {
+			bl[i] = b
+			found = true
+			break
 		}
 	}
-	dto.Failed("未匹配到对应轮播项", c)
+	if !found {
+		dto.Failed("未匹配到对应轮播项", c)
+		return
+	}
+	if err := service.ManageSvc.SaveBanners(bl); err != nil {
+		dto.Failed("更新轮播失败: "+err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("更新轮播成功", c)
 }
 
-// BannerDel 删除轮播数据
-func (h *ManageHandler) BannerDel(c *gin.Context) {
+// BannerDelete 删除轮播数据（批量/单条，数组入参）
+func (h *ManageHandler) BannerDelete(c *gin.Context) {
 	var req struct {
-		Id string `json:"id"`
+		Ids []string `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常", c)
 		return
 	}
-	id := strings.TrimSpace(req.Id)
-	if id == "" {
+	idMap := make(map[string]struct{}, len(req.Ids))
+	for _, id := range req.Ids {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			idMap[id] = struct{}{}
+		}
+	}
+	if len(idMap) == 0 {
 		dto.Failed("缺少 ID 参数", c)
 		return
 	}
@@ -88,15 +89,17 @@ func (h *ManageHandler) BannerDel(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	for i, b := range bl {
-		if b.Id == id {
-			bl = append(bl[:i], bl[i+1:]...)
-			_ = service.ManageSvc.SaveBanners(bl)
-			dto.SuccessOnlyMsg("删除轮播成功", c)
-			return
+	newBl := make([]model.Banner, 0, len(bl))
+	for _, b := range bl {
+		if _, ok := idMap[b.Id]; !ok {
+			newBl = append(newBl, b)
 		}
 	}
-	dto.Failed("删除失败，未找到该轮播项", c)
+	if err := service.ManageSvc.SaveBanners(newBl); err != nil {
+		dto.Failed("删除失败: "+err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("删除轮播成功", c)
 }
 
 // BannerSaveDeck 批量保存排片卡组与排序

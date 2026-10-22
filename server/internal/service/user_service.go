@@ -40,12 +40,7 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 }
 
 // UserLogout 用户退出登录 注销
-func (s *UserService) UserLogout(id uint, tokenOpt ...string) {
-	if len(tokenOpt) > 0 && tokenOpt[0] != "" {
-		_ = repository.RemoveUserToken(id, tokenOpt[0])
-		return
-	}
-	// 通过用户ID清除Redis中全部token信息
+func (s *UserService) UserLogout(id uint) {
 	_ = repository.ClearUserToken(id)
 }
 
@@ -161,13 +156,15 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 		roleChanged = false
 	}
 	// 如果修改了密码，需要重新加密
+	passwordChanged := false
 	if req.Password != nil && *req.Password != "" {
 		u.Salt = oldUser.Salt
 		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
+		passwordChanged = true
 	}
 	repository.UpdateUserInfo(u)
-	// 如果用户被禁用（Status == 1）或角色变更，强制清除其登录状态使 Token 失效
-	if u.Status == 1 || roleChanged {
+	// 如果修改密码、用户被禁用（Status == 1）或角色变更，强制清除其登录状态使 Token 失效
+	if passwordChanged || u.Status == 1 || roleChanged {
 		_ = repository.ClearUserToken(u.ID)
 	}
 	return nil

@@ -4,7 +4,7 @@ import { useAppMessage } from "@/lib/useAppMessage";
 import { COLLECT_BATCH_FAILED_EVENT } from "@/app/manage/components/manage-tour";
 import { collectBlockReason, formatSkipSummary } from "./collect-selection";
 import { newClientCollectQueueId } from "./collect-queue";
-import type { BatchCollectRow } from "./batch-collect-modal";
+import type { BatchCollectRow } from "./batch-collect-drawer";
 import { makeStartingProgress, type CollectBatchResult, type FilmSource } from "./types";
 
 export function useCollectBatchRunner(
@@ -78,7 +78,6 @@ export function useCollectBatchRunner(
       resp = await ApiPost<CollectBatchResult>("/manage/spider/start", {
         ids,
         time: batchTime,
-        batch: true,
       });
     } catch {
       clearStarting(idSet);

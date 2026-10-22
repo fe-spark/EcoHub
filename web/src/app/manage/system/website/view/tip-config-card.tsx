@@ -170,7 +170,7 @@ export default function TipConfigCard({ canWrite }: TipConfigCardProps) {
         message: draft.message,
         channels: draft.channels,
       });
-      const resp = await ApiPost("/manage/config/tip/update", nextTip);
+      const resp = await ApiPost("/manage/config/tip", nextTip);
       if (resp.code === 0) {
         message.success(resp.msg || "赞赏配置已保存");
         setData(nextTip);

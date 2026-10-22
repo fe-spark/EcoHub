@@ -94,19 +94,19 @@ func (h *FilmHandler) FilmSearchOptions(c *gin.Context) {
 	dto.Success(options, "影片检索筛选项获取成功", c)
 }
 
-// FilmAdd 手动添加影片
-func (h *FilmHandler) FilmAdd(c *gin.Context) {
+// FilmSave 保存影片信息（支持手动添加或编辑更新）
+func (h *FilmHandler) FilmSave(c *gin.Context) {
 	var fd = model.FilmDetailVo{}
 	if err := c.ShouldBindJSON(&fd); err != nil {
-		dto.Failed("影片添加失败, 影片参数提交异常", c)
+		dto.Failed("影片保存失败, 影片参数提交异常", c)
 		return
 	}
 
 	if err := service.FilmSvc.SaveFilmDetail(fd); err != nil {
-		dto.Failed(fmt.Sprint("影片添加失败, 影片信息保存错误: ", err.Error()), c)
+		dto.Failed(fmt.Sprint("影片保存失败, 影片信息保存错误: ", err.Error()), c)
 		return
 	}
-	dto.SuccessOnlyMsg("影片信息添加成功", c)
+	dto.SuccessOnlyMsg("影片信息已保存", c)
 }
 
 // FilmDelete 删除影片检索信息（兼容单个与批量）
@@ -160,24 +160,27 @@ func (h *FilmHandler) FilmClassTree(c *gin.Context) {
 	}, "影片分类信息获取成功", c)
 }
 
-// FindFilmClass 获取指定ID对应的影片分类信息
-func (h *FilmHandler) FindFilmClass(c *gin.Context) {
-	idStr := c.DefaultQuery("id", "")
-	if idStr == "" {
-		dto.Failed("影片分类信息获取失败, 分类Id不能为空", c)
+// FilmRefresh 批量重新采集指定影片
+func (h *FilmHandler) FilmRefresh(c *gin.Context) {
+	var req struct {
+		Ids []int64 `json:"ids"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数格式异常", c)
 		return
 	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil {
-		dto.Failed("影片分类信息获取失败, 参数分类Id格式异常", c)
+	cleanIds := make([]int64, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
+		dto.Failed("缺少影片 ID", c)
 		return
 	}
-	class := service.FilmSvc.GetFilmClassById(id)
-	if class == nil {
-		dto.Failed("影片分类信息获取失败, 分类信息不存在", c)
-		return
-	}
-	dto.Success(class, "分类信息查找成功", c)
+	service.SpiderSvc.CollectFilms(cleanIds)
+	dto.SuccessOnlyMsg("更新任务已开启", c)
 }
 
 func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
@@ -204,13 +207,4 @@ func (h *FilmHandler) SaveFilmClassTree(c *gin.Context) {
 		return
 	}
 	dto.SuccessOnlyMsg("分类变更已保存", c)
-}
-
-// CollectFilmClass 重置当前分类并重新获取主站原始分类
-func (h *FilmHandler) CollectFilmClass(c *gin.Context) {
-	if err := service.SpiderSvc.FilmClassCollect(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("分类已重置为主站原始分类", c)
 }

@@ -9,19 +9,14 @@ import React, {
   useState,
 } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { Drawer, Empty } from "antd";
 import {
   SearchOutlined,
   HistoryOutlined,
-  DeleteOutlined,
   MenuOutlined,
   HomeOutlined,
   FireOutlined,
   DownOutlined,
   GithubOutlined,
-  SunOutlined,
-  MoonOutlined,
-  DesktopOutlined,
 } from "@ant-design/icons";
 import styles from "./index.module.less";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -31,6 +26,8 @@ import { usePublicContentLoading } from "@/components/public/PublicContentLoadin
 import SiteLogo from "@/components/public/SiteLogo";
 import { PROJECT_GITHUB_URL, DEFAULT_SITE_NAME } from "@/lib/project";
 import { useThemeMode } from "@/components/theme/GlobalThemeProvider";
+import HistoryPopover, { type HistoryItem } from "./history-popover";
+import MobileNavDrawer from "./mobile-nav-drawer";
 
 interface NavItem {
   id: string | number;
@@ -38,14 +35,6 @@ interface NavItem {
 }
 
 const QUICK_NAV_LIMIT = 8;
-
-interface HistoryItem {
-  id: string;
-  name: string;
-  episode: string;
-  link: string;
-  timeStamp: number;
-}
 
 /**
  * 仅这一层调用 useSearchParams，并放在内层 Suspense 里。
@@ -315,46 +304,6 @@ export default function Header({ navList }: { navList: NavItem[] }) {
     navigateToHome();
   };
 
-  const historyContent = (
-    <div className={`${styles.historyPanel} ${showHistory ? styles.show : ""}`}>
-      <div className={styles.historyHeader}>
-        <HistoryOutlined className={styles.icon} />
-        <span className={styles.title}>历史观看记录</span>
-        {historyList.length > 0 && (
-          <DeleteOutlined
-            className={styles.clear}
-            onClick={handleClearHistory}
-          />
-        )}
-      </div>
-      <div className={styles.historyList}>
-        {historyList.length > 0 ? (
-          historyList.map((item, idx) => (
-            <div
-              key={idx}
-              className={styles.historyItem}
-              onClick={() => {
-                setShowHistory(false);
-                beginHeaderNavigation(`history:${item.link}`, "页面加载中...", item.link);
-              }}
-              style={{ cursor: "pointer" }}
-            >
-              <span className={styles.filmTitle}>{item.name}</span>
-              <span className={styles.episode}>{item.episode}</span>
-            </div>
-          ))
-        ) : (
-          <div style={{ padding: '20px 0' }}>
-            <Empty
-              image={Empty.PRESENTED_IMAGE_SIMPLE}
-              description="暂无观看记录"
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
   return (
     <>
       {/* useSearchParams 仅挂在空桥接组件上，fallback 也为 null，不会拆掉 logo DOM */}
@@ -503,7 +452,15 @@ export default function Header({ navList }: { navList: NavItem[] }) {
                 >
                   <HistoryOutlined />
                 </button>
-                {historyContent}
+                <HistoryPopover
+                  show={showHistory}
+                  historyList={historyList}
+                  onClear={handleClearHistory}
+                  onSelect={(link) => {
+                    setShowHistory(false);
+                    beginHeaderNavigation(`history:${link}`, "页面加载中...", link);
+                  }}
+                />
               </div>
               <button
                 type="button"
@@ -518,66 +475,18 @@ export default function Header({ navList }: { navList: NavItem[] }) {
           </div>
         </div>
 
-        <Drawer
-          title={<div className={styles.drawerTitle}>{siteInfo?.siteName || "Menu"}</div>}
-          placement="left"
-          onClose={() => setMobileMenuVisible(false)}
+        <MobileNavDrawer
           open={mobileMenuVisible}
-          size={280}
-          zIndex={1300}
-          className={styles.mobileDrawer}
-        >
-          <div className={styles.mobileDrawerBody}>
-            <div className={styles.mobileNav}>
-              <div
-                className={`${styles.mobileNavItem} ${isHomeActive ? styles.mobileNavItemActive : ""}`}
-                onClick={navigateToHome}
-              >
-                <HomeOutlined /> <span>首页</span>
-              </div>
-              {navList.map((nav) => {
-                const isActive = isCategoryActive(nav.id);
-                return (
-                  <div 
-                    key={nav.id} 
-                    className={`${styles.mobileNavItem} ${isActive ? styles.mobileNavItemActive : ""}`}
-                    onClick={() => navigateToCategory(nav.id)}
-                  >
-                    <FireOutlined /> <span>{nav.name}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* 移动端抽屉底部：主题外观切换 */}
-            <div className={styles.mobileThemeSection}>
-              <div className={styles.mobileThemeLabel}>外观模式</div>
-              <div className={styles.mobileThemeSegment}>
-                <button
-                  type="button"
-                  className={`${styles.themeOptionBtn} ${mode === "light" ? styles.themeOptionActive : ""}`}
-                  onClick={() => setMode("light")}
-                >
-                  <SunOutlined /> <span>浅色</span>
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.themeOptionBtn} ${mode === "dark" ? styles.themeOptionActive : ""}`}
-                  onClick={() => setMode("dark")}
-                >
-                  <MoonOutlined /> <span>深色</span>
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.themeOptionBtn} ${mode === "system" ? styles.themeOptionActive : ""}`}
-                  onClick={() => setMode("system")}
-                >
-                  <DesktopOutlined /> <span>系统</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </Drawer>
+          siteName={siteInfo?.siteName}
+          navList={navList}
+          isHomeActive={isHomeActive}
+          isCategoryActive={isCategoryActive}
+          mode={mode}
+          onClose={() => setMobileMenuVisible(false)}
+          onNavigateHome={navigateToHome}
+          onNavigateCategory={navigateToCategory}
+          onSetMode={setMode}
+        />
       </header>
     </>
   );

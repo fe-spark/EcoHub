@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"errors"
-	"fmt"
 	"net/http"
 	"server/internal/config"
 	"server/internal/model"
@@ -12,11 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/sync/singleflight"
 )
-
-var sfGroup singleflight.Group
 
 func useSecureCookie(c *gin.Context) bool {
 	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
@@ -32,7 +26,7 @@ func clearAuthCookie(c *gin.Context) {
 	c.SetCookie(config.AuthCookieName, "", -1, "/", "", useSecureCookie(c), true)
 }
 
-// AuthToken 用户登录Token拦截
+// AuthToken 用户登录Token拦截（单点登录校验）
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		authToken, _ := c.Cookie(config.AuthCookieName)
@@ -56,53 +50,26 @@ func AuthToken() gin.HandlerFunc {
 		}
 		// 解析token中的信息
 		uc, err := utils.ParseToken(authToken)
-		if err != nil && !errors.Is(err, jwt.ErrTokenExpired) {
+		if err != nil || uc == nil {
 			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "无效的口令,请重新登录!!!", c)
-			c.Abort()
-			return
-		}
-		if uc == nil {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "无效的口令,请重新登录!!!", c)
+			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 
-		// JWT 已过期时，只有 Redis 活跃集合中仍包含该 token 才刷新。
-		if err != nil && errors.Is(err, jwt.ErrTokenExpired) {
-			// 使用 singleflight 防止当前 token 并发刷新
-			key := fmt.Sprintf("refresh:%d:%s", uc.UserID, authToken)
-			val, _, _ := sfGroup.Do(key, func() (any, error) {
-				// 检查 Redis 中该设备 token 是否仍有效
-				if !repository.HasUserToken(uc.UserID, authToken) {
-					return nil, errors.New("invalid or expired token in redis")
-				}
-				// 生成新token
-				newToken, _ := utils.GenToken(uc.UserID, uc.UserName, uc.Role)
-				_ = repository.SaveUserToken(newToken, uc.UserID)
-				_ = repository.RemoveUserToken(uc.UserID, authToken)
-				return newToken, nil
-			})
-
-			if val == nil {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
-			newToken := val.(string)
-			// 解析出新的 UserClaims
-			uc, _ = utils.ParseToken(newToken)
-			setAuthCookie(c, newToken)
-		} else {
-			// 未过期的情况，校验当前 token 是否存在于该用户的活跃会话集合中
-			if !repository.HasUserToken(uc.UserID, authToken) {
-				clearAuthCookie(c)
-				dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
-				c.Abort()
-				return
-			}
+		// 单点登录校验：校验当前 Token 是否与 Redis 中最新签发的活跃 Token 一致
+		storedToken := repository.GetUserToken(uc.UserID)
+		if storedToken == "" {
+			clearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
+			c.Abort()
+			return
+		}
+		if storedToken != authToken {
+			clearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
+			c.Abort()
+			return
 		}
 
 		// 将UserClaims存放到context中

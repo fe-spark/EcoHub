@@ -148,9 +148,9 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if wNormalNotifyGet.Code == http.StatusForbidden || wNormalNotifyGet.Code == http.StatusUnauthorized {
 		t.Errorf("GET /api/manage/notify/config should allow normal manage user, got %d", wNormalNotifyGet.Code)
 	}
-	wNormalNotifyUpdate := performReq(http.MethodPost, "/api/manage/notify/config/update", normalToken)
+	wNormalNotifyUpdate := performReq(http.MethodPost, "/api/manage/notify/config", normalToken)
 	if wNormalNotifyUpdate.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/notify/config/update should forbid normal user, got %d", wNormalNotifyUpdate.Code)
+		t.Errorf("POST /api/manage/notify/config should forbid normal user, got %d", wNormalNotifyUpdate.Code)
 	}
 	wNormalNotifyTest := performReq(http.MethodPost, "/api/manage/notify/config/test", normalToken)
 	if wNormalNotifyTest.Code != http.StatusForbidden {

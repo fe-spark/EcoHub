@@ -65,7 +65,7 @@ func TestShouldSkip(t *testing.T) {
 		{"GET", "/api/manage/system/logs/delta", 200, true},
 		{"GET", "/api/manage/system/logs/stream", 200, true},
 		{"GET", "/api/manage/collect/list", 200, false},
-		{"POST", "/api/manage/film/add", 200, false},
+		{"POST", "/api/manage/film/save", 200, false},
 		{"GET", "/api/daily-updates", 200, false},
 		{"POST", "/api/stats/view", 200, false},
 		{"GET", "/api/home", 200, false},

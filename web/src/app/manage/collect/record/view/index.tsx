@@ -153,7 +153,7 @@ export default function FailureRecordPageView() {
   const handleRetry = useCallback(
     async (id: number) => {
       setHeldIds((prev) => new Set(prev).add(id));
-      const resp = await ApiPost("/manage/collect/record/retry", { id });
+      const resp = await ApiPost("/manage/collect/record/retry", { ids: [id] });
       if (resp.code === 0) {
         message.success("重试任务已加入队列");
         return;
@@ -184,41 +184,20 @@ export default function FailureRecordPageView() {
     });
 
     setBatchRetrying(true);
-    let successCount = 0;
-    let alreadyCount = 0;
-    let failCount = 0;
-    let lastError = "";
-    const doneIds = new Set<number>();
-
-    for (const target of targets) {
-      const resp = await ApiPost("/manage/collect/record/retry", { id: target.ID });
+    try {
+      const resp = await ApiPost("/manage/collect/record/retry", { ids: targetIds });
       if (resp.code === 0) {
-        successCount++;
-        doneIds.add(target.ID);
-      } else if (resp.msg === "正在重试中") {
-        alreadyCount++;
-        doneIds.add(target.ID);
+        message.success(`已提交 ${targetIds.length} 条重试任务`);
+        setSelectedRowKeys([]);
       } else {
-        failCount++;
-        lastError = resp.msg || "";
-        releaseHold(target.ID);
+        message.error(resp.msg || "批量重试提交失败");
+        targetIds.forEach((id) => releaseHold(id));
       }
-    }
-
-    setBatchRetrying(false);
-    setSelectedRowKeys((prev) => prev.filter((key) => !doneIds.has(Number(key))));
-    const summary = [
-      `成功 ${successCount} 条`,
-      alreadyCount > 0 ? `已在重试 ${alreadyCount} 条` : "",
-      failCount > 0 ? `失败 ${failCount} 条` : "",
-    ].filter(Boolean).join("，");
-    const detail = lastError ? `${summary}。${lastError}` : summary;
-    if (failCount === 0) {
-      message.success(detail);
-    } else if (successCount === 0 && alreadyCount === 0) {
-      message.error(detail);
-    } else {
-      message.warning(detail);
+    } catch {
+      message.error("批量重试提交失败");
+      targetIds.forEach((id) => releaseHold(id));
+    } finally {
+      setBatchRetrying(false);
     }
   };
 
@@ -229,7 +208,10 @@ export default function FailureRecordPageView() {
   };
 
   const handleRetryAll = async () => {
-    const resp = await ApiPost("/manage/collect/record/retry/all", {});
+    const resp = await ApiPost<{ queued?: number; already?: number; skipped?: number }>(
+      "/manage/collect/record/retry",
+      { all: true },
+    );
     if (resp.code !== 0) {
       message.error(resp.msg);
       return;
@@ -237,9 +219,7 @@ export default function FailureRecordPageView() {
     const queued = Number(resp.data?.queued || 0);
     const already = Number(resp.data?.already || 0);
     const skipped = Number(resp.data?.skipped || 0);
-    if (queued === 0) {
-      message.warning(resp.msg);
-    } else if (already > 0 || skipped > 0) {
+    if (queued === 0 || already > 0 || skipped > 0) {
       message.warning(resp.msg);
     } else {
       message.success(resp.msg);
@@ -247,9 +227,9 @@ export default function FailureRecordPageView() {
   };
 
   const handleCleanResult = async () => {
-    const resp = await ApiPost("/manage/collect/record/clear/result", {});
+    const resp = await ApiPost("/manage/collect/record/clear", { scope: "retried" });
     if (resp.code === 0) {
-      message.success(resp.msg || "已清理所有已完结（成功/最终失败）记录");
+      message.success(resp.msg || "已清理所有已完结记录");
       reloadFirstPage();
     } else {
       message.error(resp.msg);
@@ -257,7 +237,7 @@ export default function FailureRecordPageView() {
   };
 
   const handleCleanAll = async () => {
-    const resp = await ApiPost("/manage/collect/record/clear/all", {});
+    const resp = await ApiPost("/manage/collect/record/clear", { scope: "all" });
     if (resp.code === 0) {
       message.success(resp.msg || "已清空所有失败记录");
       reloadFirstPage();

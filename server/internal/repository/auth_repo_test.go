@@ -24,17 +24,12 @@ func TestAuthRepo_RedisNilSafety(t *testing.T) {
 		t.Fatalf("expected nil err when db.Rdb is nil, got %v", err)
 	}
 
-	// 2. HasUserToken with nil Rdb
-	if HasUserToken(100, "test-token") {
-		t.Fatalf("expected false when db.Rdb is nil")
+	// 2. GetUserToken with nil Rdb
+	if token := GetUserToken(100); token != "" {
+		t.Fatalf("expected empty token when db.Rdb is nil, got %q", token)
 	}
 
-	// 3. RemoveUserToken with nil Rdb
-	if err := RemoveUserToken(100, "test-token"); err != nil {
-		t.Fatalf("expected nil err when db.Rdb is nil, got %v", err)
-	}
-
-	// 4. ClearUserToken with nil Rdb
+	// 3. ClearUserToken with nil Rdb
 	if err := ClearUserToken(100); err != nil {
 		t.Fatalf("expected nil err when db.Rdb is nil, got %v", err)
 	}
@@ -60,8 +55,9 @@ func TestAuthRepo_WithRedis(t *testing.T) {
 		t.Fatalf("SaveUserToken failed: %v", err)
 	}
 
-	if !HasUserToken(42, "token-123") {
-		t.Fatalf("expected token-123 to exist in redis")
+	token := GetUserToken(42)
+	if token != "token-123" {
+		t.Fatalf("expected token-123, got %q", token)
 	}
 	ttl := mr.TTL(fmt.Sprintf(config.UserTokenKey, 42))
 	want := config.AuthTokenExpires * time.Hour
@@ -73,12 +69,12 @@ func TestAuthRepo_WithRedis(t *testing.T) {
 		t.Fatalf("ClearUserToken failed: %v", err)
 	}
 
-	if HasUserToken(42, "token-123") {
-		t.Fatalf("expected false after clear")
+	if token := GetUserToken(42); token != "" {
+		t.Fatalf("expected empty token after clear, got %q", token)
 	}
 }
 
-func TestAuthRepo_MultiDeviceSupport(t *testing.T) {
+func TestAuthRepo_SingleSignOn(t *testing.T) {
 	origRdb := db.Rdb
 	defer func() {
 		db.Rdb = origRdb
@@ -98,36 +94,23 @@ func TestAuthRepo_MultiDeviceSupport(t *testing.T) {
 	if err := SaveUserToken("token-device-a", 10000); err != nil {
 		t.Fatalf("SaveUserToken A failed: %v", err)
 	}
-	// 2. 设备 B 登录
+	if token := GetUserToken(10000); token != "token-device-a" {
+		t.Fatalf("expected token-device-a, got %q", token)
+	}
+
+	// 2. 设备 B 登录，覆盖顶掉设备 A 的登录状态
 	if err := SaveUserToken("token-device-b", 10000); err != nil {
 		t.Fatalf("SaveUserToken B failed: %v", err)
 	}
-
-	// 3. 两个设备的 Token 均处于有效状态，互不影响
-	if !HasUserToken(10000, "token-device-a") {
-		t.Fatalf("expected token-device-a to be valid")
-	}
-	if !HasUserToken(10000, "token-device-b") {
-		t.Fatalf("expected token-device-b to be valid")
+	if token := GetUserToken(10000); token != "token-device-b" {
+		t.Fatalf("expected token-device-b to supersede token-device-a, got %q", token)
 	}
 
-	// 4. 设备 A 单点登出
-	if err := RemoveUserToken(10000, "token-device-a"); err != nil {
-		t.Fatalf("RemoveUserToken failed: %v", err)
-	}
-	if HasUserToken(10000, "token-device-a") {
-		t.Fatalf("expected token-device-a to be removed")
-	}
-	// 设备 B 依然有效
-	if !HasUserToken(10000, "token-device-b") {
-		t.Fatalf("expected token-device-b to remain valid after device A logout")
-	}
-
-	// 5. 全量登出 / 修改密码清空
+	// 3. 注销 / 修改密码清空
 	if err := ClearUserToken(10000); err != nil {
 		t.Fatalf("ClearUserToken failed: %v", err)
 	}
-	if HasUserToken(10000, "token-device-b") {
-		t.Fatalf("expected token-device-b to be cleared")
+	if token := GetUserToken(10000); token != "" {
+		t.Fatalf("expected empty token after clear, got %q", token)
 	}
 }

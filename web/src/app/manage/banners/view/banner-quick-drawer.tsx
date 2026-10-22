@@ -6,7 +6,6 @@ import {
   Button,
   Drawer,
   Flex,
-  Popconfirm,
   Space,
   Spin,
   Tag,
@@ -303,7 +302,7 @@ export default function BannerQuickDrawer({
     }
     setPublishing(true);
     try {
-      const resp = await ApiPost("/manage/banner/save-deck", deck);
+      const resp = await ApiPost("/manage/banner/deck", deck);
       if (resp.code === 0) {
         message.success("发布成功");
         const next = Array.isArray(resp.data) ? (resp.data as BannerRecord[]) : deck;
@@ -354,22 +353,15 @@ export default function BannerQuickDrawer({
             >
               取消
             </Button>
-            <Popconfirm
-              title="确认发布？"
-              onConfirm={() => void handlePublish()}
-              okText="确定"
-              cancelText="取消"
-              okButtonProps={{ loading: publishing }}
+            <Button
+              type="primary"
+              loading={publishing}
+              disabled={busy || deck.length === 0}
+              onClick={() => void handlePublish()}
+              style={{ background: "#52c41a", borderColor: "#52c41a" }}
             >
-              <Button
-                type="primary"
-                loading={publishing}
-                disabled={busy || deck.length === 0}
-                style={{ background: "#52c41a", borderColor: "#52c41a" }}
-              >
-                发布
-              </Button>
-            </Popconfirm>
+              发布
+            </Button>
           </Space>
         </Flex>
       }

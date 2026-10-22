@@ -58,16 +58,16 @@ func SetupRouter() *gin.Engine {
 		sysConfig := manageRoute.Group(`/config`)
 		{
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
-			sysConfig.POST(`/basic/update`, handler.ManageHd.UpdateSiteBasic)
+			sysConfig.POST(`/basic`, handler.ManageHd.UpdateSiteBasic)
 
 			sysConfig.GET(`/access`, handler.ManageHd.SiteAccessConfig)
-			sysConfig.POST(`/access/update`, handler.ManageHd.UpdateSiteAccess)
+			sysConfig.POST(`/access`, handler.ManageHd.UpdateSiteAccess)
 
 			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
-			sysConfig.POST(`/tip/update`, handler.ManageHd.UpdateSiteTip)
+			sysConfig.POST(`/tip`, handler.ManageHd.UpdateSiteTip)
 
 			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
-			sysConfig.POST(`/notice/update`, handler.ManageHd.UpdateSiteNotice)
+			sysConfig.POST(`/notice`, handler.ManageHd.UpdateSiteNotice)
 
 			// 配置备份：导出/导入（不含影视库存与账号，仅超级管理员）
 			sysConfig.GET(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
@@ -94,10 +94,9 @@ func SetupRouter() *gin.Engine {
 		banner := manageRoute.Group(`banner`)
 		{
 			banner.GET(`/list`, handler.ManageHd.BannerList)
-			banner.POST(`/add`, handler.ManageHd.BannerAdd)
-			banner.POST(`/update`, handler.ManageHd.BannerUpdate)
-			banner.POST(`/del`, handler.ManageHd.BannerDel)
-			banner.POST(`/save-deck`, handler.ManageHd.BannerSaveDeck)
+			banner.POST(`/save`, handler.ManageHd.BannerSave)
+			banner.POST(`/delete`, handler.ManageHd.BannerDelete)
+			banner.POST(`/deck`, handler.ManageHd.BannerSaveDeck)
 			banner.GET(`/quick-config`, handler.ManageHd.BannerQuickConfigGet)
 			banner.POST(`/quick-config`, handler.ManageHd.BannerQuickConfigSave)
 			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
@@ -110,9 +109,8 @@ func SetupRouter() *gin.Engine {
 			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
 			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
 			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
-			mapping.POST(`/rule/add`, handler.ManageHd.MappingRuleAdd)
-			mapping.POST(`/rule/update`, handler.ManageHd.MappingRuleUpdate)
-			mapping.POST(`/rule/del`, handler.ManageHd.MappingRuleDel)
+			mapping.POST(`/rule/save`, handler.ManageHd.MappingRuleSave)
+			mapping.POST(`/rule/delete`, handler.ManageHd.MappingRuleDelete)
 			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)
 		}
 
@@ -121,9 +119,8 @@ func SetupRouter() *gin.Engine {
 		{
 			userRoute.GET(`/info`, handler.UserHd.UserInfo)
 			userRoute.GET(`/list`, middleware.AdminAccess(), handler.UserHd.UserListPage)
-			userRoute.POST(`/add`, middleware.AdminAccess(), handler.UserHd.UserAdd)
-			userRoute.POST(`/update`, middleware.AdminAccess(), handler.UserHd.UserUpdate)
-			userRoute.POST(`/del`, middleware.AdminAccess(), handler.UserHd.UserDelete)
+			userRoute.POST(`/save`, middleware.AdminAccess(), handler.UserHd.UserSave)
+			userRoute.POST(`/delete`, middleware.AdminAccess(), handler.UserHd.UserDelete)
 		}
 
 		// 采集相关
@@ -133,12 +130,9 @@ func SetupRouter() *gin.Engine {
 			collect.GET(`/progress-stream`, handler.CollectHd.ProgressStream)
 			collect.GET(`/find`, handler.CollectHd.FindFilmSource)
 			collect.POST(`/test`, handler.CollectHd.FilmSourceTest)
-			collect.POST(`/add`, handler.CollectHd.FilmSourceAdd)
-			collect.POST(`/update`, handler.CollectHd.FilmSourceUpdate)
-			collect.POST(`/change`, handler.CollectHd.FilmSourceChange)
-			collect.POST(`/change/batch`, handler.CollectHd.FilmSourceBatchChange)
-			collect.POST(`/del`, handler.CollectHd.FilmSourceDel)
-			collect.POST(`/del/batch`, handler.CollectHd.FilmSourceDelBatch)
+			collect.POST(`/save`, handler.CollectHd.FilmSourceSave)
+			collect.POST(`/state`, handler.CollectHd.FilmSourceBatchChange)
+			collect.POST(`/delete`, handler.CollectHd.FilmSourceDelBatch)
 			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
@@ -147,9 +141,7 @@ func SetupRouter() *gin.Engine {
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.GET(`/record/stream`, handler.CollectHd.RecordStream)
 			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
-			collect.POST(`/record/retry/all`, handler.CollectHd.CollectRecoverAll)
-			collect.POST(`/record/clear/result`, handler.CollectHd.ClearRetriedRecords)
-			collect.POST(`/record/clear/all`, handler.CollectHd.ClearAllRecord)
+			collect.POST(`/record/clear`, handler.CollectHd.ClearRecords)
 		}
 
 		// 定时任务相关
@@ -157,8 +149,8 @@ func SetupRouter() *gin.Engine {
 		{
 			collectCron.GET(`/list`, handler.CronHd.FilmCronTaskList)
 			collectCron.GET(`/find`, handler.CronHd.GetFilmCronTask)
-			collectCron.POST(`/update`, handler.CronHd.FilmCronUpdate)
-			collectCron.POST(`/change`, handler.CronHd.ChangeTaskState)
+			collectCron.POST(`/save`, handler.CronHd.FilmCronSave)
+			collectCron.POST(`/state`, handler.CronHd.ChangeTaskState)
 			collectCron.POST(`/run`, handler.CronHd.RunFilmCronTask)
 		}
 
@@ -170,28 +162,26 @@ func SetupRouter() *gin.Engine {
 			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
 			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgressStream)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
-			spiderRoute.POST(`/update`, handler.SpiderHd.UpdateSpider)
 		}
 
 		// filmManage 影视管理
 		filmRoute := manageRoute.Group(`/film`)
 		{
-			filmRoute.POST(`/add`, handler.FilmHd.FilmAdd)
+			filmRoute.POST(`/save`, handler.FilmHd.FilmSave)
+			filmRoute.POST(`/refresh`, handler.FilmHd.FilmRefresh)
 			filmRoute.GET(`/search/list`, handler.FilmHd.FilmSearchPage)
 			filmRoute.GET(`/search/options`, handler.FilmHd.FilmSearchOptions)
-			filmRoute.POST(`/search/del`, handler.FilmHd.FilmDelete)
+			filmRoute.POST(`/delete`, handler.FilmHd.FilmDelete)
 
 			filmRoute.GET(`/class/tree`, handler.FilmHd.FilmClassTree)
-			filmRoute.GET(`/class/find`, handler.FilmHd.FindFilmClass)
-			filmRoute.POST(`/class/collect`, handler.FilmHd.CollectFilmClass)
-			filmRoute.POST(`/class/tree/save`, handler.FilmHd.SaveFilmClassTree)
+			filmRoute.POST(`/class/tree`, handler.FilmHd.SaveFilmClassTree)
 		}
 
 		// TMDB 刮削相关
 		tmdbRoute := manageRoute.Group(`/tmdb`)
 		{
 			tmdbRoute.GET(`/config`, handler.TMDBHd.GetConfig)
-			tmdbRoute.POST(`/config/update`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
+			tmdbRoute.POST(`/config`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
 			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
 			tmdbRoute.POST(`/scrape`, handler.TMDBHd.Scrape)
@@ -203,7 +193,7 @@ func SetupRouter() *gin.Engine {
 		proxyRoute := manageRoute.Group(`/proxy`)
 		{
 			proxyRoute.GET(`/config`, handler.ProxyHd.GetConfig)
-			proxyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.ProxyHd.UpdateConfig)
+			proxyRoute.POST(`/config`, middleware.AdminAccess(), handler.ProxyHd.UpdateConfig)
 			proxyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.ProxyHd.TestProxy)
 		}
 
@@ -211,17 +201,16 @@ func SetupRouter() *gin.Engine {
 		notifyRoute := manageRoute.Group(`/notify`)
 		{
 			notifyRoute.GET(`/config`, handler.NotifyHd.GetConfig)
-			notifyRoute.POST(`/config/update`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
+			notifyRoute.POST(`/config`, middleware.AdminAccess(), handler.NotifyHd.UpdateConfig)
 			notifyRoute.POST(`/config/test`, middleware.AdminAccess(), handler.NotifyHd.TestNotify)
 		}
 
 		// 文件管理
 		fileRoute := manageRoute.Group(`/file`)
 		{
-			fileRoute.POST(`/upload`, handler.FileHd.SingleUpload)
-			fileRoute.POST(`/upload/multiple`, handler.FileHd.MultipleUpload)
+			fileRoute.POST(`/upload`, handler.FileHd.Upload)
 			fileRoute.POST(`/rename`, handler.FileHd.RenameFile)
-			fileRoute.POST(`/del`, handler.FileHd.DelFile)
+			fileRoute.POST(`/delete`, handler.FileHd.DelFile)
 			fileRoute.GET(`/list`, handler.FileHd.PhotoWall)
 		}
 	}

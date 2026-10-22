@@ -1,9 +1,9 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 
 	"server/internal/config"
 	"server/internal/model"
@@ -64,19 +64,7 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		dto.Failed("注销失败, 身份信息格式化异常!!!", c)
 		return
 	}
-	authToken, _ := c.Cookie(config.AuthCookieName)
-	if authToken == "" {
-		authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-			authToken = strings.TrimSpace(authHeader[7:])
-		} else if authHeader != "" {
-			authToken = authHeader
-		}
-		if authToken == "" {
-			authToken = strings.TrimSpace(c.GetHeader("Token"))
-		}
-	}
-	service.UserSvc.UserLogout(uc.UserID, authToken)
+	service.UserSvc.UserLogout(uc.UserID)
 	clearAuthCookie(c)
 	dto.SuccessOnlyMsg("已退出登录!!!", c)
 }
@@ -115,43 +103,8 @@ func (h *UserHandler) UserListPage(c *gin.Context) {
 	}, "用户列表获取成功", c)
 }
 
-// UserAdd 添加用户
-func (h *UserHandler) UserAdd(c *gin.Context) {
-	var u model.User
-	if err := c.ShouldBindJSON(&u); err != nil {
-		dto.Failed("参数校验失败!!!", c)
-		return
-	}
-	if u.UserName == "" || u.Password == "" {
-		dto.Failed("用户名和密码必填!!!", c)
-		return
-	}
-	operatorIsAdmin := false
-	if v, ok := c.Get(config.AuthUserClaims); ok {
-		if uc, ok := v.(*utils.UserClaims); ok && uc != nil {
-			operatorIsAdmin = model.IsAdmin(uc.UserID, uc.Role)
-		}
-	}
-	u.Role, u.Status = model.ClampNewUser(operatorIsAdmin, u.Role, u.Status)
-
-	if err := service.UserSvc.AddUser(u); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
-	dto.SuccessOnlyMsg("用户添加成功", c)
-}
-
-// UserUpdate 更新用户
-func (h *UserHandler) UserUpdate(c *gin.Context) {
-	var req model.UserUpdatePayload
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("参数校验失败!!!", c)
-		return
-	}
-	if req.ID == 0 {
-		dto.Failed("用户ID缺失!!!", c)
-		return
-	}
+// UserSave 保存用户（新增或更新）
+func (h *UserHandler) UserSave(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
 		dto.Failed("鉴权失败，请重新登录", c)
@@ -163,14 +116,62 @@ func (h *UserHandler) UserUpdate(c *gin.Context) {
 		return
 	}
 
-	if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
+	bodyBytes, err := c.GetRawData()
+	if err != nil {
+		dto.Failed("请求参数异常!!!", c)
+		return
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
+		dto.Failed("参数校验失败!!!", c)
+		return
+	}
+
+	var userID uint
+	if idVal, exists := raw["id"]; exists {
+		switch v := idVal.(type) {
+		case float64:
+			userID = uint(v)
+		case int:
+			userID = uint(v)
+		}
+	}
+
+	if userID > 0 {
+		var req model.UserUpdatePayload
+		if err := json.Unmarshal(bodyBytes, &req); err != nil {
+			dto.Failed("参数校验失败!!!", c)
+			return
+		}
+		req.ID = userID
+		if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		dto.SuccessOnlyMsg("用户信息更新成功", c)
+		return
+	}
+
+	var u model.User
+	if err := json.Unmarshal(bodyBytes, &u); err != nil {
+		dto.Failed("参数校验失败!!!", c)
+		return
+	}
+	if u.UserName == "" || u.Password == "" {
+		dto.Failed("用户名和密码必填!!!", c)
+		return
+	}
+	operatorIsAdmin := model.IsAdmin(uc.UserID, uc.Role)
+	u.Role, u.Status = model.ClampNewUser(operatorIsAdmin, u.Role, u.Status)
+
+	if err := service.UserSvc.AddUser(u); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	dto.SuccessOnlyMsg("用户信息更新成功", c)
+	dto.SuccessOnlyMsg("用户添加成功", c)
 }
 
-// UserDelete 删除用户
+// UserDelete 删除用户（统一批量/单用户删除，接收整型数组 ids: []uint）
 func (h *UserHandler) UserDelete(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
@@ -184,25 +185,27 @@ func (h *UserHandler) UserDelete(c *gin.Context) {
 	}
 
 	var req struct {
-		Id string `json:"id"`
+		Ids []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	idStr := strings.TrimSpace(req.Id)
-	if idStr == "" {
+	cleanIds := make([]uint, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
+		}
+	}
+	if len(cleanIds) == 0 {
 		dto.Failed("用户ID缺失!!!", c)
 		return
 	}
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
-		dto.Failed("用户ID缺失!!!", c)
-		return
-	}
-	if err := service.UserSvc.DeleteUser(uc.UserID, uc.Role, uint(id)); err != nil {
-		dto.Failed(err.Error(), c)
-		return
+	for _, id := range cleanIds {
+		if err := service.UserSvc.DeleteUser(uc.UserID, uc.Role, id); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("用户删除成功", c)
 }

@@ -109,7 +109,7 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
     setSaving(true);
     try {
       const normalized = normalizeBasicInfo(draft);
-      const resp = await ApiPost("/manage/config/basic/update", normalized);
+      const resp = await ApiPost("/manage/config/basic", normalized);
       if (resp.code === 0) {
         message.success(resp.msg || "基本信息已保存");
         setData(normalized);

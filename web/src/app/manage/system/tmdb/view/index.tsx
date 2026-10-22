@@ -103,7 +103,7 @@ export default function TMDBConfigPageView({ embedded = false }: TMDBConfigPageV
         ...serverData,
         ...values,
       };
-      const resp = await ApiPost("/manage/tmdb/config/update", payload);
+      const resp = await ApiPost("/manage/tmdb/config", payload);
       if (resp.code === 0) {
         message.success(resp.msg || "TMDB 配置已保存");
         setServerData(payload);

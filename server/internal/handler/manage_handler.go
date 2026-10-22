@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"server/internal/config"
@@ -285,11 +284,19 @@ func (h *ManageHandler) MappingRuleCheck(c *gin.Context) {
 	dto.Success(result, "映射规则冲突检查成功", c)
 }
 
-// MappingRuleAdd 新增映射规则
-func (h *ManageHandler) MappingRuleAdd(c *gin.Context) {
+// MappingRuleSave 保存映射规则（支持新增或更新）
+func (h *ManageHandler) MappingRuleSave(c *gin.Context) {
 	var rule model.MappingRule
 	if err := c.ShouldBindJSON(&rule); err != nil {
 		dto.Failed("映射规则参数异常", c)
+		return
+	}
+	if rule.ID > 0 {
+		if err := service.ManageSvc.UpdateMappingRule(rule); err != nil {
+			dto.Failed(fmt.Sprintf("映射规则更新失败: %v", err), c)
+			return
+		}
+		dto.SuccessOnlyMsg("映射规则更新成功", c)
 		return
 	}
 	if err := service.ManageSvc.CreateMappingRule(rule); err != nil {
@@ -299,41 +306,30 @@ func (h *ManageHandler) MappingRuleAdd(c *gin.Context) {
 	dto.SuccessOnlyMsg("映射规则新增成功", c)
 }
 
-// MappingRuleUpdate 更新映射规则
-func (h *ManageHandler) MappingRuleUpdate(c *gin.Context) {
-	var rule model.MappingRule
-	if err := c.ShouldBindJSON(&rule); err != nil {
-		dto.Failed("映射规则参数异常", c)
-		return
-	}
-	if err := service.ManageSvc.UpdateMappingRule(rule); err != nil {
-		dto.Failed(fmt.Sprintf("映射规则更新失败: %v", err), c)
-		return
-	}
-	dto.SuccessOnlyMsg("映射规则更新成功", c)
-}
-
-// MappingRuleDel 删除映射规则
-func (h *ManageHandler) MappingRuleDel(c *gin.Context) {
+// MappingRuleDelete 批量删除映射规则
+func (h *ManageHandler) MappingRuleDelete(c *gin.Context) {
 	var req struct {
-		ID uint `json:"id"`
+		Ids []uint `json:"ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("映射规则删除参数异常", c)
 		return
 	}
-	if req.ID == 0 {
-		idStr := strings.TrimSpace(c.DefaultQuery("id", ""))
-		if idStr != "" {
-			id, _ := strconv.Atoi(idStr)
-			if id > 0 {
-				req.ID = uint(id)
-			}
+	cleanIds := make([]uint, 0, len(req.Ids))
+	for _, id := range req.Ids {
+		if id > 0 {
+			cleanIds = append(cleanIds, id)
 		}
 	}
-	if err := service.ManageSvc.DeleteMappingRule(req.ID); err != nil {
-		dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+	if len(cleanIds) == 0 {
+		dto.Failed("缺少需要删除的规则标识", c)
 		return
+	}
+	for _, id := range cleanIds {
+		if err := service.ManageSvc.DeleteMappingRule(id); err != nil {
+			dto.Failed(fmt.Sprintf("映射规则删除失败: %v", err), c)
+			return
+		}
 	}
 	dto.SuccessOnlyMsg("映射规则删除成功", c)
 }

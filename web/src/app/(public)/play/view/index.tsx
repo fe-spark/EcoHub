@@ -10,6 +10,7 @@ import { buildPlayPath } from "@/lib/playNavigation";
 import { trackPageView } from "@/lib/track-page-view";
 import RelatedFilmsSection from "./RelatedFilmsSection";
 import PlayHeaderCard from "./PlayHeaderCard";
+import PlaySidebar from "./PlaySidebar";
 import {
   formatLocalUpdateTime,
   formatActorNames,
@@ -367,158 +368,40 @@ export default function PlayPageView({
           </div>
         </div>
 
-        <div className={styles.sidebarWrapper}>
-          <div className={styles.sidebar}>
-            <div className={styles.sideHeader}>
-              <div className={styles.title}>正在播放</div>
-              <div className={styles.subtitle}>
-                {currentFilm.name} - {current?.episode}
-              </div>
-            </div>
-
-            <div className={styles.sourcePicker} ref={sourceMenuRef}>
-              <button
-                type="button"
-                className={`${styles.sourcePickerTrigger} ${isSourceMenuOpen ? styles.open : ""}`}
-                aria-expanded={isSourceMenuOpen}
-                onClick={() => setIsSourceMenuOpen((prev) => !prev)}
-              >
-                <div className={styles.sourcePickerMeta}>
-                  <span className={styles.sourcePickerLabel}>播放源</span>
-                  <span className={styles.sourcePickerValue}>
-                    {viewingSource?.name || "选择播放源"}
-                    {viewingSource?.proxy && (
-                      <span className={styles.proxyBadge}>代理</span>
-                    )}
-                  </span>
-                </div>
-                <span className={styles.sourcePickerArrow} aria-hidden="true" />
-              </button>
-
-              {isSourceMenuOpen && (
-                <div className={styles.sourcePickerMenu}>
-                  {currentFilm?.list?.map((item: any) => {
-                    const isViewing = viewingSourceId === item.id;
-                    const isPlaying = playingSourceId === item.id;
-                    const episodeCount = item.linkList?.length ?? 0;
-
-                    return (
-                      <div
-                        key={item.id}
-                        className={`${styles.sourcePickerOption} ${isViewing ? styles.active : ""}`}
-                        onClick={() => {
-                          if (viewingSourceId !== item.id) {
-                            setViewingSourceId(item.id);
-                          }
-                          setIsSourceMenuOpen(false);
-                        }}
-                      >
-                        <span className={styles.sourcePickerOptionMain}>
-                          {item.name}
-                          {item.proxy && (
-                            <span className={styles.proxyBadge}>代理</span>
-                          )}
-                        </span>
-                        <div className={styles.sourcePickerOptionMeta}>
-                          {isPlaying && <span className={styles.playingBadge}>正在播放</span>}
-                          <span>{episodeCount} 集</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-            <div className={styles.sourcePickerDivider} />
-
-            <div className={styles.sourceTabs} ref={sourceTabsRef}>
-              {currentFilm?.list?.map((item: any) => {
-                const isActive = viewingSourceId === item.id;
-                return (
-                  <div
-                    key={item.id}
-                    ref={isActive ? activeTabRef : null}
-                    className={`${styles.tab} ${isActive ? styles.active : ""}`}
-                    onClick={() => {
-                      if (viewingSourceId === item.id) return;
-                      setViewingSourceId(item.id);
-                      setIsSourceMenuOpen(false);
-                    }}
-                  >
-                    {item.name}
-                    {item.proxy && (
-                      <span className={styles.proxyBadge}>代理</span>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className={styles.episodeList} ref={episodeListRef}>
-              {viewingSource?.linkList?.map((item: any, index: number) => {
-                const episodeKey = makeEpisodeKey(viewingSourceId, index);
-                const isActive = visibleActiveEpisodeKey === episodeKey;
-                return (
-                  <div
-                    key={index}
-                    ref={isActive ? activeEpRef : undefined}
-                    className={`${styles.epItem} ${isActive ? styles.active : ""}`}
-                    title={item.episode}
-                    onClick={() => {
-                      if (currentEpisodeKey === episodeKey) return;
-
-                      failedSourcesRef.current.delete(viewingSourceId);
-                      applyPlaybackSelection(viewingSourceId, index, item);
-                      router.replace(buildPlayPath(String(filmId), viewingSourceId, index), {
-                        scroll: false,
-                      });
-                    }}
-                    onMouseEnter={(event) => {
-                      const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                        `.${styles.epText}`,
-                      );
-                      if (span && span.scrollWidth > span.clientWidth) {
-                        const overflow = span.scrollWidth - span.clientWidth;
-                        const duration = overflow / 50 / 0.6;
-                        span.style.setProperty("--scroll-distance", `-${overflow}px`);
-                        span.style.setProperty("--scroll-duration", `${duration.toFixed(2)}s`);
-                        span.classList.add(styles.marquee);
-                      }
-                    }}
-                    onMouseLeave={(event) => {
-                      const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                        `.${styles.epText}`,
-                      );
-                      if (span) {
-                        span.classList.remove(styles.marquee);
-                        span.style.removeProperty("--scroll-distance");
-                        span.style.removeProperty("--scroll-duration");
-                      }
-                    }}
-                  >
-                    <span className={styles.epText}>{item.episode}</span>
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className={styles.sideFooter}>
-              <div
-                className={`${styles.footerBtn} ${autoplay ? styles.active : ""}`}
-                onClick={() => setAutoplay(!autoplay)}
-              >
-                <PlayCircleOutlined />
-                <span>{autoplay ? "自动播放 开" : "自动播放 关"}</span>
-              </div>
-              {hasNext && (
-                <div className={styles.footerBtn} onClick={handlePlayNext}>
-                  <StepForwardOutlined />
-                  <span>下一集</span>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        <PlaySidebar
+          filmName={currentFilm.name}
+          currentEpisodeName={current?.episode}
+          sources={currentFilm?.list}
+          viewingSourceId={viewingSourceId}
+          playingSourceId={playingSourceId}
+          viewingSource={viewingSource}
+          isSourceMenuOpen={isSourceMenuOpen}
+          visibleActiveEpisodeKey={visibleActiveEpisodeKey}
+          currentEpisodeKey={currentEpisodeKey}
+          autoplay={autoplay}
+          hasNext={hasNext}
+          sourceMenuRef={sourceMenuRef}
+          sourceTabsRef={sourceTabsRef}
+          activeTabRef={activeTabRef}
+          episodeListRef={episodeListRef}
+          activeEpRef={activeEpRef}
+          onToggleSourceMenu={() => setIsSourceMenuOpen((prev) => !prev)}
+          onSelectViewingSource={(id) => {
+            if (viewingSourceId !== id) {
+              setViewingSourceId(id);
+            }
+            setIsSourceMenuOpen(false);
+          }}
+          onSelectEpisode={(sourceId, index, item) => {
+            failedSourcesRef.current.delete(sourceId);
+            applyPlaybackSelection(sourceId, index, item);
+            router.replace(buildPlayPath(String(filmId), sourceId, index), {
+              scroll: false,
+            });
+          }}
+          onToggleAutoplay={() => setAutoplay(!autoplay)}
+          onPlayNext={handlePlayNext}
+        />
       </div>
 
       <div className={styles.infoArea}>

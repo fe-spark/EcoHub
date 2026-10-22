@@ -84,8 +84,8 @@ export function useCollectSourceForm({
     setSubmitting(true);
     try {
       const resp = await ApiPost(
-        sourceModalMode === "add" ? "/manage/collect/add" : "/manage/collect/update",
-        sourceModalMode === "add" ? values : { ...values, id: editingId },
+        "/manage/collect/save",
+        editingId ? { ...values, id: editingId } : values,
       );
       if (resp.code === 0) {
         message.success(resp.msg);
