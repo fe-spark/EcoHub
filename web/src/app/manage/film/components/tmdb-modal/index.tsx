@@ -20,6 +20,7 @@ function cleanInitialTitle(raw: string): string {
   s = s.replace(/[（(]\s*(19\d{2}|20\d{2})\s*[）)]/g, " ");
   s = s.replace(/[【\[].*?[】\]]/g, " ").replace(/[（(].*?[）)]/g, " ");
   s = s.replace(/[-_—·\s]*(预告片|预告|先导片|先导预告|片花|花絮|特辑|彩蛋|幕后|采访|纯享版|精编版|精华版|速看版|解说版|正片|抢先版|枪版|高清版|超清版|蓝光版|完整版|未删减版|无删减版|未删减|无删减|修复版|加长版)/gi, " ");
+  s = s.replace(/[-_—·\s]*(普通话版|普通话|国粤双语|国语版|国语|粤语版|粤语|英语版|原声版|中配版|中配|配音版|译制版|中文字幕|中英双字|双语字幕|HD中字|HD国语)/gi, " ");
   s = s.replace(/\b(4k|1080p|720p|2160p|hd|bd|tc|ts|dvd|web-dl|bluray|trailer|teaser|pv|preview|sp)\b/gi, " ");
   s = s.replace(/[-_—·:：\s]+$/g, "").replace(/^[-_—·:：\s]+/g, "");
   s = s.replace(/\s+/g, " ").trim();
@@ -51,6 +52,9 @@ export default function TmdbModal({
     "subTitle",
     "actor",
     "director",
+    "writer",
+    "area",
+    "language",
     "year",
     "score",
     "tag",
@@ -155,7 +159,6 @@ export default function TmdbModal({
       if (onPrefill) {
         if (previewDetail) {
           onPrefill(previewDetail, selectedFields);
-          message.success("TMDB 元数据已应用到表单，请保存生效");
           onClose();
           return;
         }
@@ -165,10 +168,9 @@ export default function TmdbModal({
         });
         if (resp.code === 0 && resp.data) {
           onPrefill(resp.data, selectedFields);
-          message.success("TMDB 元数据已应用到表单，请保存生效");
           onClose();
         } else {
-          message.error(resp.msg || "获取 TMDB 预填数据失败");
+          message.error(resp.msg || "获取预填数据失败");
         }
       } else if (mid) {
         const resp = await ApiPost("/manage/tmdb/apply", {
@@ -178,7 +180,7 @@ export default function TmdbModal({
           fields: selectedFields,
         });
         if (resp.code === 0) {
-          message.success(resp.msg || "TMDB 元数据已成功应用！");
+          message.success(resp.msg || "应用成功");
           onSuccess?.();
           onClose();
         } else {

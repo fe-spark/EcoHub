@@ -1,9 +1,16 @@
 "use client";
 
-import React from "react";
-import { PlayCircleOutlined, StepForwardOutlined } from "@ant-design/icons";
+import React, { useMemo, useState } from "react";
+import {
+  PlayCircleOutlined,
+  StepForwardOutlined,
+  AppstoreOutlined,
+  BarsOutlined,
+  SortAscendingOutlined,
+  SortDescendingOutlined,
+} from "@ant-design/icons";
 import { makeEpisodeKey } from "./formatters";
-import styles from "./index.module.less";
+import styles from "./PlaySidebar.module.less";
 
 interface PlaySidebarProps {
   filmName: string;
@@ -29,6 +36,40 @@ interface PlaySidebarProps {
   onPlayNext: () => void;
 }
 
+function parseEpisodeMeta(rawTitle: string, index: number) {
+  const title = (rawTitle || "").trim();
+
+  // 匹配日期格式: 2024-01-06 或 2024.01.06 或 2024/01/06
+  const dateMatch = title.match(/^(\d{4}[-/.年]\d{1,2}[-/.月]\d{1,2}[日]?)(.*)$/);
+  if (dateMatch) {
+    const badge = dateMatch[1].replace(/[年月]/g, "-").replace(/日/g, "");
+    const rest = dateMatch[2].replace(/^[:：\s\-]+/, "").trim();
+    return {
+      badge,
+      title: rest || badge,
+      fullTitle: title,
+    };
+  }
+
+  // 匹配 第XX集 / 第XX期 / EPXX
+  const epMatch = title.match(/^(第?\s*\d+\s*[集期话回]|EP?\s*\d+)(.*)$/i);
+  if (epMatch) {
+    const badge = epMatch[1].trim();
+    const rest = epMatch[2].replace(/^[:：\s\-]+/, "").trim();
+    return {
+      badge,
+      title: rest || badge,
+      fullTitle: title,
+    };
+  }
+
+  return {
+    badge: String(index + 1).padStart(2, "0"),
+    title: title || `第 ${index + 1} 集`,
+    fullTitle: title,
+  };
+}
+
 export default function PlaySidebar({
   filmName,
   currentEpisodeName,
@@ -52,12 +93,41 @@ export default function PlaySidebar({
   onToggleAutoplay,
   onPlayNext,
 }: PlaySidebarProps) {
+  const linkList: any[] = useMemo(() => {
+    return Array.isArray(viewingSource?.linkList) ? viewingSource.linkList : [];
+  }, [viewingSource]);
+
+  // 智能识别当前源是适合列表视图（综艺/长标题）还是网格视图（短集数/数字）
+  const isLongTitle = useMemo(() => {
+    if (!linkList.length) return false;
+    const sample = linkList.slice(0, 10);
+    const hasLong = sample.some((item: any) => (item?.episode?.length || 0) > 6);
+    const avgLen =
+      sample.reduce((acc: number, item: any) => acc + (item?.episode?.length || 0), 0) /
+      sample.length;
+    return hasLong || avgLen > 4.5;
+  }, [linkList]);
+
+  const [userSelectedMode, setUserSelectedMode] = useState<"grid" | "list" | null>(null);
+  const [sortOrder, setSortOrder] = useState<"asc" | "desc">("asc");
+
+  const viewMode = userSelectedMode ?? (isLongTitle ? "list" : "grid");
+
+  const displayEpisodes = useMemo(() => {
+    if (!linkList.length) return [];
+    const listWithIndex = linkList.map((item: any, originalIndex: number) => ({
+      ...item,
+      originalIndex,
+    }));
+    return sortOrder === "desc" ? [...listWithIndex].reverse() : listWithIndex;
+  }, [linkList, sortOrder]);
+
   return (
     <div className={styles.sidebarWrapper}>
       <div className={styles.sidebar}>
         <div className={styles.sideHeader}>
           <div className={styles.title}>正在播放</div>
-          <div className={styles.subtitle}>
+          <div className={styles.subtitle} title={`${filmName} - ${currentEpisodeName || ""}`}>
             {filmName} - {currentEpisodeName}
           </div>
         </div>
@@ -131,44 +201,92 @@ export default function PlaySidebar({
           })}
         </div>
 
-        <div className={styles.episodeList} ref={episodeListRef}>
-          {viewingSource?.linkList?.map((item: any, index: number) => {
-            const episodeKey = makeEpisodeKey(viewingSourceId, index);
+        <div className={styles.episodesToolbar}>
+          <div className={styles.episodesToolbarLeft}>
+            <span className={styles.episodesToolbarTitle}>选集</span>
+            <span className={styles.episodesCount}>共 {linkList.length} 集</span>
+          </div>
+          <div className={styles.episodesToolbarRight}>
+            <button
+              type="button"
+              className={`${styles.toolbarBtn} ${sortOrder === "desc" ? styles.toolbarBtnActive : ""}`}
+              onClick={() => setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"))}
+              title={sortOrder === "desc" ? "倒序" : "正序"}
+            >
+              {sortOrder === "desc" ? <SortDescendingOutlined /> : <SortAscendingOutlined />}
+              <span>{sortOrder === "desc" ? "倒序" : "正序"}</span>
+            </button>
+            <div className={styles.viewModeSwitch}>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${viewMode === "grid" ? styles.viewBtnActive : ""}`}
+                onClick={() => setUserSelectedMode("grid")}
+                title="网格"
+              >
+                <AppstoreOutlined />
+              </button>
+              <button
+                type="button"
+                className={`${styles.viewBtn} ${viewMode === "list" ? styles.viewBtnActive : ""}`}
+                onClick={() => setUserSelectedMode("list")}
+                title="列表"
+              >
+                <BarsOutlined />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={`${styles.episodeList} ${viewMode === "list" ? styles.listMode : styles.gridMode}`}
+          ref={episodeListRef}
+        >
+          {displayEpisodes.map((item: any) => {
+            const episodeKey = makeEpisodeKey(viewingSourceId, item.originalIndex);
             const isActive = visibleActiveEpisodeKey === episodeKey;
+
+            if (viewMode === "list") {
+              const meta = parseEpisodeMeta(item.episode, item.originalIndex);
+              return (
+                <div
+                  key={item.originalIndex}
+                  ref={isActive ? activeEpRef : undefined}
+                  className={`${styles.epListItem} ${isActive ? styles.active : ""}`}
+                  title={meta.fullTitle}
+                  onClick={() => {
+                    if (currentEpisodeKey === episodeKey) return;
+                    onSelectEpisode(viewingSourceId, item.originalIndex, item);
+                  }}
+                >
+                  <span className={styles.epListBadge}>{meta.badge}</span>
+                  <div className={styles.epListMain}>
+                    <span className={styles.epListTitle}>{meta.title}</span>
+                  </div>
+                  <div className={styles.epStatusArea}>
+                    {isActive ? (
+                      <div className={styles.waveBars} aria-hidden="true">
+                        <span className={styles.waveBar} />
+                        <span className={styles.waveBar} />
+                        <span className={styles.waveBar} />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              );
+            }
+
             return (
               <div
-                key={index}
+                key={item.originalIndex}
                 ref={isActive ? activeEpRef : undefined}
-                className={`${styles.epItem} ${isActive ? styles.active : ""}`}
+                className={`${styles.epGridItem} ${isActive ? styles.active : ""}`}
                 title={item.episode}
                 onClick={() => {
                   if (currentEpisodeKey === episodeKey) return;
-                  onSelectEpisode(viewingSourceId, index, item);
-                }}
-                onMouseEnter={(event) => {
-                  const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                    `.${styles.epText}`,
-                  );
-                  if (span && span.scrollWidth > span.clientWidth) {
-                    const overflow = span.scrollWidth - span.clientWidth;
-                    const duration = overflow / 50 / 0.6;
-                    span.style.setProperty("--scroll-distance", `-${overflow}px`);
-                    span.style.setProperty("--scroll-duration", `${duration.toFixed(2)}s`);
-                    span.classList.add(styles.marquee);
-                  }
-                }}
-                onMouseLeave={(event) => {
-                  const span = event.currentTarget.querySelector<HTMLSpanElement>(
-                    `.${styles.epText}`,
-                  );
-                  if (span) {
-                    span.classList.remove(styles.marquee);
-                    span.style.removeProperty("--scroll-distance");
-                    span.style.removeProperty("--scroll-duration");
-                  }
+                  onSelectEpisode(viewingSourceId, item.originalIndex, item);
                 }}
               >
-                <span className={styles.epText}>{item.episode}</span>
+                <span className={styles.epGridText}>{item.episode}</span>
               </div>
             );
           })}

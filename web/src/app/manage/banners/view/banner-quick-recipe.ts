@@ -38,11 +38,10 @@ export function positiveQuotas(categories: CategoryQuotaItem[]) {
 
 export function quickRecipeSnapshot(
   strategy: QuickStrategy,
-  autoScrape: boolean,
   categories: CategoryQuotaItem[],
 ) {
   const quotas = positiveQuotas(categories)
     .map((item) => `${item.categoryId}:${item.count}`)
     .join(",");
-  return `${strategy}|${autoScrape ? 1 : 0}|${quotas}`;
+  return `${strategy}|${quotas}`;
 }

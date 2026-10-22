@@ -1,0 +1,131 @@
+/* 手动新增/编辑轮播抽屉样式 */
+.drawerStack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 24px;
+}
+
+.drawerSectionCard {
+  border: 1px solid var(--ant-color-border-secondary);
+  border-radius: 10px;
+  background: var(--ant-color-bg-container);
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drawerSectionTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.filmSelectTrigger {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 24px 16px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px dashed var(--ant-color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+
+  &:hover {
+    border-color: var(--ant-color-primary);
+    background: rgba(250, 140, 22, 0.04);
+  }
+}
+
+.triggerIcon {
+  font-size: 28px;
+  color: var(--ant-color-primary);
+}
+
+.triggerText {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.triggerHint {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+}
+
+.filmSelectedCard {
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
+  padding: 10px 14px;
+}
+
+.previewSection {
+  margin-top: 4px;
+}
+
+.previewHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.previewCol {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.previewLabelRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.posterFrame {
+  width: 108px;
+  height: 160px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slideFrame {
+  width: 284px;
+  height: 160px;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slideEmptyBox {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+}

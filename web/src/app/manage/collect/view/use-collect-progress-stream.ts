@@ -52,5 +52,5 @@ export function useCollectProgressStream(
         };
       }),
     );
-  }, [resetTimersRef, setSiteList]);
+  }, [onTerminalStatus, resetTimersRef, setSiteList]);
 }

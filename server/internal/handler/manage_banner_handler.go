@@ -162,20 +162,3 @@ func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
 		_ = stream.SendData(evt)
 	})
 }
-
-// BannerPreviewScrape 排片草稿批量刮削预览。不写片库，确认替换后才落库。
-func (h *ManageHandler) BannerPreviewScrape(c *gin.Context) {
-	var req service.PreviewScrapeReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.Failed("刮削参数解析异常", c)
-		return
-	}
-
-	stream, ok := openSSE(c)
-	if !ok {
-		return
-	}
-	_ = service.ManageSvc.PreviewScrapeDeckStream(c.Request.Context(), req.Mids, func(evt service.PreviewScrapeEvent) {
-		_ = stream.SendData(evt)
-	})
-}

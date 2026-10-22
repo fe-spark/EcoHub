@@ -173,6 +173,13 @@ func buildPlaylistsFromDetail(mid int64, sourceID string, detail model.MovieDeta
 		if i < len(detail.PlayFrom) {
 			rawName = strings.TrimSpace(detail.PlayFrom[i])
 		}
+		if rawName == "" {
+			if sourceID == "manual" {
+				rawName = "默认播放"
+			} else {
+				rawName = sourceID
+			}
+		}
 		contentBytes, _ := json.Marshal(group)
 		contentStr := string(contentBytes)
 		lastEp := ""

@@ -69,6 +69,13 @@ export default function FilmBasicSection({
   onSourceChange,
   onClassChange,
 }: FilmBasicSectionProps) {
+  const sourceOptions = React.useMemo(() => {
+    return sources.map((s) => ({
+      label: s.state === false ? `${s.name} (停用)` : s.name,
+      value: s.id,
+    }));
+  }, [sources]);
+
   const isCustomMode = watchedFollowPosterSource === false;
   const posterSource = String(loadedDetail?.picture || (!isCustomMode ? watchedPicture : "") || "").trim();
   const currentPreview = isCustomMode
@@ -179,10 +186,7 @@ export default function FilmBasicSection({
                 placeholder="选择采集站"
                 onChange={onSourceChange}
                 disabled={Boolean(filmId)}
-                options={sources.map((s) => ({
-                  label: s.state === false ? `${s.name} (停用)` : s.name,
-                  value: s.id,
-                }))}
+                options={sourceOptions}
               />
             </Form.Item>
           </Col>

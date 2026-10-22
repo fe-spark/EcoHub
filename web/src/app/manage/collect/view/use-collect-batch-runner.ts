@@ -12,6 +12,7 @@ export function useCollectBatchRunner(
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>,
   selectedSourceIds: React.Key[],
   reloadList: () => Promise<void>,
+  clearSelection?: () => void,
 ) {
   const { message } = useAppMessage();
   const [batchOpen, setBatchOpen] = useState(false);
@@ -64,6 +65,7 @@ export function useCollectBatchRunner(
       return;
     }
     setBatchOpen(false);
+    clearSelection?.();
     const idSet = new Set(ids);
     const queueId = newClientCollectQueueId();
     setSiteList((current) =>
@@ -105,7 +107,7 @@ export function useCollectBatchRunner(
     clearStarting(new Set(ids.filter((id) => !started.has(id))));
     window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
     await reloadList();
-  }, [batchRows, batchTime, clearStarting, message, reloadList, setSiteList]);
+  }, [batchRows, batchTime, clearSelection, clearStarting, message, reloadList, setSiteList]);
 
   return {
     batchOpen,

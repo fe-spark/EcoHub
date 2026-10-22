@@ -139,9 +139,8 @@ func (s *ManageService) RunBannerQuickSchedule() error {
 	var generated model.Banners
 	sawDone := false
 	err = s.OneClickGenerateDeckStream(context.Background(), OneClickGenerateReq{
-		Strategy:   cfg.Strategy,
-		Quotas:     quotas,
-		AutoScrape: cfg.AutoTMDB,
+		Strategy: cfg.Strategy,
+		Quotas:   quotas,
 	}, func(evt OneClickProgressEvent) {
 		if evt.Event == "done" {
 			generated = evt.Banners

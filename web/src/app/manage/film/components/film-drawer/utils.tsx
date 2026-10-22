@@ -63,3 +63,24 @@ export function formatEpisodesToPlayLink(linkList: { episode: string; link: stri
   if (!Array.isArray(linkList) || linkList.length === 0) return "";
   return linkList.map((item) => `${item.episode}$${item.link}`).join("#");
 }
+
+export function parsePlayLinkToEpisodes(raw: string): { episode: string; link: string }[] {
+  if (!raw || !raw.trim()) return [];
+  const parts = raw.split("#");
+  const list: { episode: string; link: string }[] = [];
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i].trim();
+    if (!part) continue;
+    const dollarIdx = part.indexOf("$");
+    if (dollarIdx >= 0) {
+      const episode = part.substring(0, dollarIdx).trim() || `第${String(i + 1).padStart(2, "0")}集`;
+      const link = part.substring(dollarIdx + 1).trim();
+      if (link) {
+        list.push({ episode, link });
+      }
+    } else {
+      list.push({ episode: `第${String(i + 1).padStart(2, "0")}集`, link: part });
+    }
+  }
+  return list;
+}

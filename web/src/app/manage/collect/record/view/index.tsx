@@ -173,6 +173,7 @@ export default function FailureRecordPageView() {
     );
     if (targets.length === 0) {
       message.warning("所选记录均已重试成功，无需重复重试");
+      setSelectedRowKeys([]);
       return;
     }
 
@@ -216,6 +217,7 @@ export default function FailureRecordPageView() {
       message.error(resp.msg);
       return;
     }
+    setSelectedRowKeys([]);
     const queued = Number(resp.data?.queued || 0);
     const already = Number(resp.data?.already || 0);
     const skipped = Number(resp.data?.skipped || 0);
@@ -230,6 +232,7 @@ export default function FailureRecordPageView() {
     const resp = await ApiPost("/manage/collect/record/clear", { scope: "retried" });
     if (resp.code === 0) {
       message.success(resp.msg || "已清理所有已完结记录");
+      setSelectedRowKeys([]);
       reloadFirstPage();
     } else {
       message.error(resp.msg);
@@ -240,6 +243,7 @@ export default function FailureRecordPageView() {
     const resp = await ApiPost("/manage/collect/record/clear", { scope: "all" });
     if (resp.code === 0) {
       message.success(resp.msg || "已清空所有失败记录");
+      setSelectedRowKeys([]);
       reloadFirstPage();
     } else {
       message.error(resp.msg);
@@ -247,6 +251,7 @@ export default function FailureRecordPageView() {
   };
 
   const handleSourceChange = (value: string) => {
+    setSelectedRowKeys([]);
     const next = { ...paramsRef.current, originId: value };
     setParams(next);
     const newPage = { ...pageRef.current, current: 1 };
@@ -452,6 +457,7 @@ export default function FailureRecordPageView() {
               showTotal={(total) => `共 ${total} 条`}
               pageSizeOptions={[10, 20, 50, 100, 500]}
               onChange={(current, pageSize) => {
+                setSelectedRowKeys([]);
                 const newPage = { ...pageRef.current, current, pageSize };
                 setPage(newPage);
                 void getRecords(newPage);

@@ -86,8 +86,8 @@ func TestApplyDetailWithOptions_CategoryIsolation(t *testing.T) {
 
 	// 2. 启动 mock TMDB 服务
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := tmdbDetailRaw{
-			rawTMDBItem: rawTMDBItem{
+		resp := model.TMDBDetailRaw{
+			RawTMDBItem: model.RawTMDBItem{
 				ID:            9999,
 				Title:         "测试电影",
 				OriginalTitle: "Test Movie Original",
@@ -110,7 +110,7 @@ func TestApplyDetailWithOptions_CategoryIsolation(t *testing.T) {
 			{Name: "新演员A"},
 			{Name: "新演员B"},
 		}
-		resp.Credits.Crew = []tmdbCreditPerson{
+		resp.Credits.Crew = []model.TMDBCreditPerson{
 			{Name: "新导演A", Job: "Director"},
 		}
 
@@ -216,8 +216,8 @@ func TestApplyDetailWithOptions_SelectiveFields(t *testing.T) {
 	}
 
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		resp := tmdbDetailRaw{
-			rawTMDBItem: rawTMDBItem{
+		resp := model.TMDBDetailRaw{
+			RawTMDBItem: model.RawTMDBItem{
 				ID:          9998,
 				Title:       "单字段测试",
 				PosterPath:  "/changed_poster.jpg",

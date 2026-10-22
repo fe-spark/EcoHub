@@ -119,7 +119,7 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		res := model.MovieDetailVo{
 			MovieDetail:     *movieDetail,
 			LocalUpdateTime: localUpdateTime,
-			UpdateReason:    resolveUpdateReason(snapshot.UpdateReason, *snapshot, *movieDetail),
+			UpdateReason:    strings.TrimSpace(snapshot.UpdateReason),
 			List:            playList,
 		}
 		res.PlayList, res.PlayFrom = playGroupsFromPlayLinkVos(playList)
@@ -282,6 +282,26 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 			links = rewriteURLGroup(links, rules)
 		}
 
+		if r.SourceId == "manual" {
+			if r.LineKind == "play" {
+				siteName := strings.TrimSpace(r.GroupName)
+				if siteName == "" {
+					siteName = "自定义线路"
+				}
+				groupID := fmt.Sprintf("manual#%d", r.GroupIndex)
+				playList = append(playList, model.PlayLinkVo{
+					Id:       groupID,
+					SourceId: "manual",
+					Name:     siteName,
+					IsManual: true,
+					LinkList: links,
+				})
+			} else if r.LineKind == "download" {
+				downloadList = append(downloadList, links)
+			}
+			continue
+		}
+
 		if !hasSource {
 			continue
 		}
@@ -304,20 +324,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		}
 	}
 
-	sort.SliceStable(playList, func(i, j int) bool {
-		orderI, okI := sourceOrderMap[playList[i].SourceId]
-		if !okI {
-			orderI = 999999
-		}
-		orderJ, okJ := sourceOrderMap[playList[j].SourceId]
-		if !okJ {
-			orderJ = 999999
-		}
-		if orderI != orderJ {
-			return orderI < orderJ
-		}
-		return playList[i].Id < playList[j].Id
-	})
+	sortPlayListSources(playList, sourceOrderMap)
 
 	return playList, downloadList, nil
 }
@@ -375,6 +382,22 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 			links = rewriteURLGroup(links, rules)
 		}
 
+		if r.SourceId == "manual" {
+			siteName := strings.TrimSpace(r.GroupName)
+			if siteName == "" {
+				siteName = "自定义线路"
+			}
+			groupID := fmt.Sprintf("manual#%d", r.GroupIndex)
+			result[r.Mid] = append(result[r.Mid], model.PlayLinkVo{
+				Id:       groupID,
+				SourceId: "manual",
+				Name:     siteName,
+				IsManual: true,
+				LinkList: links,
+			})
+			continue
+		}
+
 		if !hasSource {
 			continue
 		}
@@ -397,24 +420,28 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 
 	for mid := range result {
 		lines := result[mid]
-		sort.SliceStable(lines, func(i, j int) bool {
-			orderI, okI := sourceOrderMap[lines[i].SourceId]
-			if !okI {
-				orderI = 999999
-			}
-			orderJ, okJ := sourceOrderMap[lines[j].SourceId]
-			if !okJ {
-				orderJ = 999999
-			}
-			if orderI != orderJ {
-				return orderI < orderJ
-			}
-			return lines[i].Id < lines[j].Id
-		})
+		sortPlayListSources(lines, sourceOrderMap)
 		result[mid] = lines
 	}
 
 	return result, nil
+}
+func sortPlayListSources(lines []model.PlayLinkVo, orderMap map[string]int) {
+	getOrder := func(s string) int {
+		if s == "manual" {
+			return -1
+		}
+		if idx, ok := orderMap[s]; ok {
+			return idx
+		}
+		return 999999
+	}
+	sort.SliceStable(lines, func(i, j int) bool {
+		if oi, oj := getOrder(lines[i].SourceId), getOrder(lines[j].SourceId); oi != oj {
+			return oi < oj
+		}
+		return lines[i].Id < lines[j].Id
+	})
 }
 
 func storeFilmPlayInfoCache(cacheKey, payload string, ttl time.Duration, gen int64) {
@@ -468,8 +495,4 @@ func rewriteURLGroup(links []model.MovieUrlInfo, rules []utils.DomainReplaceRule
 		}
 	}
 	return out
-}
-
-func resolveUpdateReason(reason string, snapshot model.FilmListSnapshot, detail model.MovieDetail) string {
-	return strings.TrimSpace(reason)
 }
