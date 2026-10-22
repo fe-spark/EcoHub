@@ -29,20 +29,17 @@ export function initBannerFormValues(
     const rawSlide = (currentRow.pictureSlide || "").trim();
     const rawPic = (currentRow.picture || "").trim();
     const rawPoster = (currentRow.poster || "").trim();
-    // 严禁拿竖版封面/海报填充横屏大图。若等于封面图，直接视为无横图
     const validSlide = (rawSlide && rawSlide !== rawPic && rawSlide !== rawPoster) ? rawSlide : "";
     return {
       mid: currentRow.mid,
-      name: currentRow.name,
-      cName: currentRow.cName,
-      year: currentRow.year,
       isCustomPic: isCustom,
       picture: isCustom ? resolveEditablePicture(currentRow) : "",
       pictureSlide: isCustom ? validSlide : "",
       sort: currentRow.sort ?? 0,
+      isPinned: currentRow.isPinned ?? false,
     };
   }
-  return { isCustomPic: false, sort: 0 };
+  return { isCustomPic: false, sort: 0, isPinned: false };
 }
 
 interface BuildPayloadParams {
@@ -50,6 +47,11 @@ interface BuildPayloadParams {
   currentRow: BannerRecord | null;
   selectedFilm: FilmOption | null;
   isReplacingFilm: boolean;
+  scrapedData?: {
+    score?: number;
+    blurb?: string;
+    tmdbId?: number;
+  };
 }
 
 export function buildBannerPayload({
@@ -57,6 +59,7 @@ export function buildBannerPayload({
   currentRow,
   selectedFilm,
   isReplacingFilm,
+  scrapedData,
 }: BuildPayloadParams): BannerRecord {
   const isCustom = Boolean(values.isCustomPic);
   const customPic = isCustom ? (values.picture || "").trim() : "";
@@ -64,16 +67,18 @@ export function buildBannerPayload({
   const baseFilm = isReplacingFilm ? selectedFilm : (selectedFilm || currentRow);
   const livePic = baseFilm?.picture || "";
   const rawLiveSlide = baseFilm?.pictureSlide?.trim() || "";
-  // 严格隔离：横屏大图必须是真实横图，绝不可回退为竖屏海报 livePic
   const liveSlide = (rawLiveSlide && rawLiveSlide !== livePic) ? rawLiveSlide : "";
   const finalSlide = isCustom ? customSlide : liveSlide;
+
+  const rawYear = baseFilm?.year;
+  const parsedYear = typeof rawYear === "number" ? rawYear : parseInt(String(rawYear || "0"), 10) || 0;
 
   return {
     id: currentRow?.id || "",
     mid: Number(values.mid || baseFilm?.id || 0),
-    name: String(values.name || baseFilm?.name || "").trim(),
-    cName: String(values.cName || baseFilm?.cName || "").trim(),
-    year: values.year,
+    name: String(baseFilm?.name || "").trim(),
+    cName: String(baseFilm?.cName || "").trim(),
+    year: parsedYear,
     poster: isCustom && customPic ? customPic : livePic,
     picture: isCustom && customPic ? customPic : livePic,
     pictureSlide: finalSlide,
@@ -82,7 +87,10 @@ export function buildBannerPayload({
     remark: selectedFilm?.remarks || (!isReplacingFilm ? (currentRow?.remark || "") : ""),
     isCustomPic: isCustom,
     source: currentRow?.source || "manual",
-    isPinned: currentRow?.isPinned ?? false,
+    isPinned: values.isPinned ?? currentRow?.isPinned ?? false,
+    score: scrapedData?.score ?? (currentRow?.score || selectedFilm?.score || 0),
+    blurb: scrapedData?.blurb ?? (currentRow?.blurb || (selectedFilm as any)?.blurb || ""),
+    tmdbId: scrapedData?.tmdbId ?? (currentRow?.tmdbId || (selectedFilm as any)?.tmdbId || 0),
   };
 }
 
@@ -98,19 +106,6 @@ export function computeTmdbPrefillUpdates(
   };
 
   const updates: Partial<BannerFormValues> = {};
-  if (shouldFill("name") && data.name) {
-    updates.name = data.name;
-  }
-  if (shouldFill("subTitle", "cName") && (data.subTitle || data.cName)) {
-    updates.cName = data.subTitle || data.cName;
-  }
-  if (shouldFill("year", "releaseDate") && (data.year || data.releaseDate)) {
-    const parsedYear = parseInt(String(data.year || data.releaseDate || "0"), 10);
-    if (parsedYear > 0) {
-      updates.year = parsedYear;
-    }
-  }
-
   const fillPoster = shouldFill("poster", "picture") && Boolean(data.picture);
   const fillSlide = shouldFill("backdrop", "pictureSlide") && Boolean(data.pictureSlide);
 
@@ -133,58 +128,44 @@ export function computeTmdbPrefillUpdates(
 
 export async function fetchFilmOption(mid: number): Promise<FilmOption | null> {
   try {
-    const resp = await ApiGet("/films/play-info", { id: mid });
+    const resp = await ApiGet("/films/play-info", { id: mid, stored: 1 });
     const d = resp?.data?.detail;
     if (resp?.code === 0 && d) {
+      const desc = d.descriptor || {};
+      const cName = d.cName || desc.cName || "";
+      const year = d.year || (desc.year ? String(desc.year) : "") || "";
+      const area = d.area || desc.area || "";
+      const remarks = d.remarks || desc.remarks || "";
+      const director = d.director || desc.director || "";
+      const actor = d.actor || desc.actor || "";
+      const rawScore = d.score ?? desc.dbScore;
+      const score = Number(rawScore) || 0;
+
       return {
         id: d.id || mid,
         name: d.name || "",
-        cName: d.cName || "",
-        year: d.year || "",
-        remarks: d.remarks || "",
+        cName,
+        year,
+        remarks,
         picture: d.picture || "",
         pictureSlide: d.pictureSlide || "",
-        area: d.area,
-        director: d.director,
-        actor: d.actor,
+        area,
+        director,
+        actor,
         label: d.name || "",
         value: d.id || mid,
-        isScraped: d.isScraped,
+        isScraped: Boolean(d.isScraped),
+        score,
       };
     }
   } catch {}
   return null;
 }
 
-export function mergeTmdbFilmOption(
-  prev: FilmOption | null,
-  data: any,
-  updates: Partial<BannerFormValues>,
-  currentMid?: number,
-): FilmOption {
-  const base: FilmOption = prev || {
-    id: currentMid || 0,
-    name: data.name || "",
-    label: data.name || "",
-    value: currentMid || 0,
-  };
-  return {
-    ...base,
-    name: updates.name || base.name,
-    cName: updates.cName || base.cName,
-    year: updates.year || base.year,
-    director: data.director || base.director,
-    actor: data.actor || base.actor,
-  };
-}
-
 export interface BannerPreviewParams {
   currentRow: BannerRecord | null;
   selectedFilm: FilmOption | null;
   isReplacingFilm: boolean;
-  watchedName?: string;
-  watchedCName?: string;
-  watchedYear?: number;
   watchedPicture?: string;
   watchedPictureSlide?: string;
   watchedIsCustomPic?: boolean;
@@ -210,25 +191,21 @@ export function computeBannerPreview({
   currentRow,
   selectedFilm,
   isReplacingFilm,
-  watchedName,
-  watchedCName,
-  watchedYear,
   watchedPicture,
   watchedPictureSlide,
   watchedIsCustomPic,
 }: BannerPreviewParams): BannerPreviewState {
   const activeFilm = isReplacingFilm ? selectedFilm : (selectedFilm || currentRow);
   const currentMid = selectedFilm?.id || (!isReplacingFilm ? currentRow?.mid : undefined);
-  const previewName = watchedName || activeFilm?.name || "未选择影片";
-  const previewCategory = watchedCName || activeFilm?.cName || "未分类";
-  const previewYear = watchedYear || activeFilm?.year || "未知年份";
+  const previewName = activeFilm?.name || "未选择影片";
+  const previewCategory = activeFilm?.cName || "未分类";
+  const previewYear = activeFilm?.year || "未知年份";
   const previewRemark = (isReplacingFilm ? selectedFilm?.remarks : (selectedFilm?.remarks || currentRow?.remark)) || "暂无";
   const previewArea = (isReplacingFilm ? selectedFilm?.area : (selectedFilm?.area || currentRow?.area)) || "未知地区";
   const previewDirector = (isReplacingFilm ? selectedFilm?.director : (selectedFilm?.director || currentRow?.director)) || "暂无";
   const previewActor = (isReplacingFilm ? selectedFilm?.actor : (selectedFilm?.actor || currentRow?.actor)) || "暂无";
   const isScraped = Boolean(isReplacingFilm ? selectedFilm?.isScraped : (selectedFilm?.isScraped ?? currentRow?.isScraped));
 
-  // 片库原图。轮播记录上的 picture / pictureSlide 可能已是刮削或自定义结果，不能回填到绑定影片。
   const filmPic = (selectedFilm?.picture || "").trim();
   const filmSlideRaw = (selectedFilm?.pictureSlide || "").trim();
   const liveFilmPic = filmPic;

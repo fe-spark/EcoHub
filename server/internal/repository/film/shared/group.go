@@ -136,11 +136,19 @@ func PlayGroupsFromPlaylistRows(siteID, siteName string, matched []model.FilmSou
 			continue
 		}
 		displayName := BuildDisplaySourceName(siteName, playlist.GroupName, playlist.GroupIndex, len(matched))
+		if siteID == "manual" {
+			if strings.TrimSpace(playlist.GroupName) != "" {
+				displayName = playlist.GroupName
+			} else {
+				displayName = "自定义线路"
+			}
+		}
 		groupID := BuildPlayGroupID(siteID, playlist.GroupName, playlist.GroupIndex, len(matched))
 		groups = append(groups, model.PlayLinkVo{
 			Id:       groupID,
 			SourceId: siteID,
 			Name:     displayName,
+			IsManual: siteID == "manual",
 			LinkList: links,
 		})
 	}

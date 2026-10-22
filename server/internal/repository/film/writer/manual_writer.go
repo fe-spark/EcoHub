@@ -183,9 +183,17 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 				return err
 			}
 
-			if len(detail.PlayList) > 0 || len(detail.DownloadList) > 0 {
-				newLines := buildPlaylistsFromDetail(mid, source.Id, detail)
-				if _, _, err := saveStationPlaylistsTx(tx, mid, source.Id, newLines); err != nil {
+			// 播放资源保存：保存当前影片所属采集站（或指定站点）的播放线路
+			ownerSourceID := strings.TrimSpace(existingFilm.FirstSourceId)
+			if ownerSourceID == "" {
+				ownerSourceID = strings.TrimSpace(sourceID)
+			}
+			if ownerSourceID == "" {
+				ownerSourceID = "manual"
+			}
+			if len(detail.PlayList) > 0 {
+				newLines := buildPlaylistsFromDetail(mid, ownerSourceID, detail)
+				if _, _, err := saveStationPlaylistsTx(tx, mid, ownerSourceID, newLines); err != nil {
 					return err
 				}
 				if err := refreshRemarksAndPlaySummaryTx(tx, mid); err != nil {

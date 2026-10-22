@@ -156,22 +156,6 @@ func (s *TMDBService) TestConnection(cfg model.TMDBConfig) error {
 	return nil
 }
 
-// rawTMDBItem TMDB API 原始条目
-type rawTMDBItem struct {
-	ID            int64   `json:"id"`
-	MediaType     string  `json:"media_type"`
-	Title         string  `json:"title"`
-	Name          string  `json:"name"`
-	OriginalTitle string  `json:"original_title"`
-	OriginalName  string  `json:"original_name"`
-	ReleaseDate   string  `json:"release_date"`
-	FirstAirDate  string  `json:"first_air_date"`
-	PosterPath    string  `json:"poster_path"`
-	BackdropPath  string  `json:"backdrop_path"`
-	VoteAverage   float64 `json:"vote_average"`
-	Overview      string  `json:"overview"`
-}
-
 // SearchRaw 已无调用方。弹窗检索请用 Search。
 func (s *TMDBService) SearchRaw(query, year, mediaType string) ([]model.TMDBCandidate, error) {
 	return s.Search(query, year, mediaType)
@@ -268,7 +252,7 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 	}
 
 	var searchResp struct {
-		Results []rawTMDBItem `json:"results"`
+		Results []model.RawTMDBItem `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
 		return nil, fmt.Errorf("解析 TMDB 数据失败: %w", err)
@@ -276,7 +260,7 @@ func (s *TMDBService) fetchTMDBCandidates(cfg model.TMDBConfig, kw, year, mediaT
 	return parseCandidates(searchResp.Results, mediaType, year, cfg.ImageDomain), nil
 }
 
-func parseCandidates(results []rawTMDBItem, mediaType, filterYear, imagePrefix string) []model.TMDBCandidate {
+func parseCandidates(results []model.RawTMDBItem, mediaType, filterYear, imagePrefix string) []model.TMDBCandidate {
 	candidates := make([]model.TMDBCandidate, 0, len(results))
 	for _, item := range results {
 		mType := item.MediaType
@@ -341,25 +325,6 @@ func parseCandidates(results []rawTMDBItem, mediaType, filterYear, imagePrefix s
 	return candidates
 }
 
-type tmdbCreditPerson struct {
-	Name string `json:"name"`
-	Job  string `json:"job"`
-}
-
-type tmdbDetailRaw struct {
-	rawTMDBItem
-	Tagline string `json:"tagline"`
-	Genres  []struct {
-		Name string `json:"name"`
-	} `json:"genres"`
-	Credits struct {
-		Cast []struct {
-			Name string `json:"name"`
-		} `json:"cast"`
-		Crew []tmdbCreditPerson `json:"crew"`
-	} `json:"credits"`
-}
-
 // FetchDetail 拉取影片/剧集详情与演职员表
 func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDetail, error) {
 	cfg, err := repository.GetTMDBConfig()
@@ -400,7 +365,7 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		return nil, fmt.Errorf("TMDB 详情返回错误 (HTTP %d)", resp.StatusCode)
 	}
 
-	var raw tmdbDetailRaw
+	var raw model.TMDBDetailRaw
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
 		return nil, err
 	}
@@ -440,11 +405,35 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 	}
 
 	directors := make([]string, 0, 3)
+	writers := make([]string, 0, 3)
 	for _, c := range raw.Credits.Crew {
-		if strings.EqualFold(c.Job, "Director") {
-			if name := strings.TrimSpace(c.Name); name != "" {
-				directors = append(directors, name)
-			}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			continue
+		}
+		job := strings.ToLower(strings.TrimSpace(c.Job))
+		if job == "director" && len(directors) < 3 {
+			directors = append(directors, name)
+		} else if (job == "writer" || job == "screenplay" || job == "author") && len(writers) < 3 {
+			writers = append(writers, name)
+		}
+	}
+
+	area := ""
+	for _, pc := range raw.ProductionCountries {
+		if n := strings.TrimSpace(pc.Name); n != "" {
+			area = n
+			break
+		}
+	}
+	if area == "" && len(raw.OriginCountry) > 0 {
+		area = strings.TrimSpace(raw.OriginCountry[0])
+	}
+	language := ""
+	for _, sl := range raw.SpokenLanguages {
+		if n := strings.TrimSpace(sl.Name); n != "" {
+			language = n
+			break
 		}
 	}
 
@@ -477,5 +466,8 @@ func (s *TMDBService) FetchDetail(tmdbID int64, mediaType string) (*model.TMDBDe
 		Genres:        genres,
 		Directors:     directors,
 		Actors:        actors,
+		Writers:       writers,
+		Area:          area,
+		Language:      language,
 	}, nil
 }

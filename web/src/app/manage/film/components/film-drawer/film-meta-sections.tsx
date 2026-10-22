@@ -105,27 +105,22 @@ export default function FilmMetaSections() {
         </div>
 
         <Row gutter={[16, 12]}>
-          <Col xs={24} sm={8}>
+          <Col xs={24} sm={6}>
             <Form.Item label="影片状态" name="state" className={styles.formItemReset}>
               <Input placeholder="影片状态 (如正片/预告)" allowClear />
             </Form.Item>
           </Col>
-          <Col xs={24} sm={8}>
+          <Col xs={24} sm={6}>
             <Form.Item label="热度" name="hits" className={styles.formItemReset}>
               <InputNumber style={{ width: "100%" }} placeholder="0" />
             </Form.Item>
           </Col>
-          <Col xs={24} sm={8}>
-            <Form.Item label="播放来源标识" name="playForm" className={styles.formItemReset}>
-              <Input placeholder="来源标识" allowClear />
-            </Form.Item>
-          </Col>
-          <Col xs={24} sm={12}>
+          <Col xs={24} sm={6}>
             <Form.Item label="豆瓣 ID" name="dbId" className={styles.formItemReset}>
               <InputNumber style={{ width: "100%" }} placeholder="0" />
             </Form.Item>
           </Col>
-          <Col xs={24} sm={12}>
+          <Col xs={24} sm={6}>
             <Form.Item label="豆瓣评分" name="dbScore" className={styles.formItemReset}>
               <Input placeholder="豆瓣评分" allowClear />
             </Form.Item>

@@ -5,6 +5,7 @@ export interface MovieUrlInfo {
 
 export interface PlayLine {
   id: string;
+  sourceId?: string;
   name: string;
   linkList: MovieUrlInfo[];
 }

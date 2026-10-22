@@ -2,6 +2,7 @@ package writer
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -183,5 +184,113 @@ func TestSaveDetail_ConcurrentSaveAndCollect_NoDeadlock(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+	}
+}
+
+func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
+	gdb := openPeerPageDB(t)
+	prev := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	spiderSource := model.FilmSource{Id: "spider_sn", Name: "采集站SN", State: true}
+	if err := gdb.Create(&spiderSource).Error; err != nil {
+		t.Fatalf("create spider source: %v", err)
+	}
+
+	fi := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:           2001,
+			FirstSourceId: "spider_sn",
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name: "采集入库影片",
+		},
+	}
+	if err := gdb.Create(&fi).Error; err != nil {
+		t.Fatalf("create film: %v", err)
+	}
+
+	spiderLine := model.FilmSourcePlaylist{
+		Mid:          2001,
+		SourceId:     "spider_sn",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "HD(SN)",
+		EpisodeCount: 1,
+		Content:      `[{"episode":"第01集","link":"http://spider.com/1.m3u8"}]`,
+	}
+	if err := gdb.Create(&spiderLine).Error; err != nil {
+		t.Fatalf("create spider playlist: %v", err)
+	}
+
+	// 1. 修改采集站入库的影片的播放资源（支持编辑所属采集站的播放直链）
+	attemptSpiderEdit := model.MovieDetail{
+		Id:              2001,
+		Name:            "采集入库影片-改名",
+		PlayList: [][]model.MovieUrlInfo{
+			{{Episode: "01", Link: "http://spider.com/updated.m3u8"}},
+		},
+		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-16 13:00:00"},
+	}
+	if err := SaveDetail("spider_sn", attemptSpiderEdit); err != nil {
+		t.Fatalf("SaveDetail failed: %v", err)
+	}
+
+	// 验证：所属采集站的播放线路成功更新为新直链
+	var checkSpider model.FilmSourcePlaylist
+	if err := gdb.Where("mid = ? AND source_id = ?", 2001, "spider_sn").First(&checkSpider).Error; err != nil {
+		t.Fatalf("spider line must exist: %v", err)
+	}
+	if checkSpider.EpisodeCount != 1 || !strings.Contains(checkSpider.Content, "http://spider.com/updated.m3u8") {
+		t.Fatalf("spider line content not updated! content=%s", checkSpider.Content)
+	}
+
+	// 2. 自己新增的影片 (FirstSourceId == "manual")：允许编辑自己新增的播放直链
+	manualFilm := model.FilmIndex{
+		FilmIndexIdentity: model.FilmIndexIdentity{
+			Mid:           3001,
+			FirstSourceId: "manual",
+		},
+		FilmIndexContent: model.FilmIndexContent{
+			Name: "自己新增的影片",
+		},
+	}
+	if err := gdb.Create(&manualFilm).Error; err != nil {
+		t.Fatalf("create manual film: %v", err)
+	}
+	initialManualLine := model.FilmSourcePlaylist{
+		Mid:          3001,
+		SourceId:     "manual",
+		LineKind:     "play",
+		GroupIndex:   0,
+		GroupName:    "默认播放",
+		EpisodeCount: 1,
+		Content:      `[{"episode":"第01集","link":"http://myserver.com/old.m3u8"}]`,
+	}
+	if err := gdb.Create(&initialManualLine).Error; err != nil {
+		t.Fatalf("create initial manual playlist: %v", err)
+	}
+
+	// 用户编辑自己新增的影片的播放直链
+	editManualDetail := model.MovieDetail{
+		Id:   3001,
+		Name: "自己新增的影片-更新",
+		PlayList: [][]model.MovieUrlInfo{
+			{{Episode: "第01集", Link: "http://myserver.com/new.m3u8"}, {Episode: "第02集", Link: "http://myserver.com/new2.m3u8"}},
+		},
+		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-16 14:00:00"},
+	}
+	if err := SaveDetail("manual", editManualDetail); err != nil {
+		t.Fatalf("SaveDetail for manual film failed: %v", err)
+	}
+
+	// 验证：自己新增的影片播放直链更新成功
+	var updatedManualLine model.FilmSourcePlaylist
+	if err := gdb.Where("mid = ? AND source_id = ?", 3001, "manual").First(&updatedManualLine).Error; err != nil {
+		t.Fatalf("manual film playlist must exist: %v", err)
+	}
+	if updatedManualLine.EpisodeCount != 2 {
+		t.Fatalf("expected 2 episodes for updated manual film, got %d", updatedManualLine.EpisodeCount)
 	}
 }

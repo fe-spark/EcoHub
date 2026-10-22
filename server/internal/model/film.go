@@ -92,6 +92,7 @@ type MovieDetail struct {
 	DownFrom           string              `json:"DownFrom"`           // 下载来源 例: http
 	PlayList           [][]MovieUrlInfo    `json:"playList"`           // 播放地址url
 	DownloadList       [][]MovieUrlInfo    `json:"downloadList"`       // 下载url地址
+	ManualLinesUpdate  bool                `json:"manualLinesUpdate,omitempty"` // 是否显式更新自定义播放线路
 	IsScraped          bool                `json:"isScraped"`          // 是否已启用 TMDB 刮削
 	TmdbID             int64               `json:"tmdbId"`             // TMDB 词条 ID
 	MovieDescriptor    `json:"descriptor"` // 影片描述信息
@@ -370,6 +371,7 @@ type FilmDetailVo struct {
 	DownFrom           string   `json:"DownFrom"`           // 下载来源 例: http
 	PlayLink           string   `json:"playLink"`           // 播放地址url
 	DownloadLink       string   `json:"downloadLink"`       // 下载url地址
+	ManualLinesUpdate  bool     `json:"manualLinesUpdate,omitempty"` // 是否显式更新自定义播放线路
 	SubTitle           string   `json:"subTitle"`           // 子标题
 	CName              string   `json:"cName"`              // 分类名称
 	EnName             string   `json:"enName"`             // 英文名
@@ -397,6 +399,7 @@ type PlayLinkVo struct {
 	Id          string         `json:"id"`
 	SourceId    string         `json:"sourceId"`
 	Name        string         `json:"name"`
+	IsManual    bool           `json:"isManual"`
 	IsPreferred bool           `json:"isPreferred,omitempty"`
 	Proxy       bool           `json:"proxy,omitempty"`
 	LinkList    []MovieUrlInfo `json:"linkList"`

@@ -153,6 +153,7 @@ export default function FilmListPageView() {
   }, []);
 
   const handleSourceChange = async (value?: string) => {
+    setSelectedRowKeys([]);
     const nextSourceId = value || "";
     setParams((prev: any) => ({
       ...prev,
@@ -207,6 +208,7 @@ export default function FilmListPageView() {
   };
 
   const onSearch = () => {
+    setSelectedRowKeys([]);
     const p = { ...params };
     if (dateRange?.[0] && dateRange?.[1]) {
       p.beginTime = dateRange[0].format("YYYY-MM-DD HH:mm:ss");
@@ -222,6 +224,7 @@ export default function FilmListPageView() {
   };
 
   const onReset = () => {
+    setSelectedRowKeys([]);
     const defaultSrc =
       options.defaultSourceId ||
       options.sources?.[0]?.id ||
@@ -253,6 +256,7 @@ export default function FilmListPageView() {
         const resp = await ApiPost("/manage/film/refresh", { ids });
         if (resp.code === 0) {
           message.success(resp.msg || "更新任务已开启");
+          setSelectedRowKeys((prev) => prev.filter((k) => !ids.includes(Number(k))));
           getFilmPage();
         } else {
           message.error(resp.msg || "更新失败");
@@ -361,8 +365,16 @@ export default function FilmListPageView() {
             canWrite={canWrite}
             updating={updating}
             deleting={deleting}
-            onBatchUpdate={() => handleUpdateFilms(selectedRowKeys.map(Number))}
-            onBatchDelete={() => handleDelFilms(selectedRowKeys.map(Number))}
+            onBatchUpdate={async () => {
+              const ids = selectedRowKeys.map(Number);
+              await handleUpdateFilms(ids);
+              setSelectedRowKeys([]);
+            }}
+            onBatchDelete={async () => {
+              const ids = selectedRowKeys.map(Number);
+              await handleDelFilms(ids);
+              setSelectedRowKeys([]);
+            }}
             onClearSelection={() => setSelectedRowKeys([])}
             onAdd={() => {
               const targetSourceId =
@@ -390,6 +402,7 @@ export default function FilmListPageView() {
               pageSizeOptions={[10, 20, 50, 100, 500]}
               showTotal={(total) => `共 ${total} 条`}
               onChange={(current, pageSize) => {
+                setSelectedRowKeys([]);
                 const newPage = { ...page, current, pageSize };
                 setPage(newPage);
                 getFilmPage(newPage);

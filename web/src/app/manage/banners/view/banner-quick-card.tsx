@@ -1,18 +1,17 @@
 "use client";
 
 import React from "react";
-import { Button, Image, Popconfirm, Space, Spin, Tag } from "antd";
+import { Button, Popconfirm, Space, Spin, Tooltip } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
   DeleteOutlined,
   LoadingOutlined,
   StarFilled,
-  ThunderboltOutlined,
 } from "@ant-design/icons";
 import { FALLBACK_IMG } from "@/lib/fallbackImg";
 import { BannerRecord } from "./types";
-import styles from "./index.module.less";
+import styles from "./banner-quick.module.less";
 
 interface BannerQuickCardProps {
   item: BannerRecord;
@@ -23,28 +22,6 @@ interface BannerQuickCardProps {
   onMove: (index: number, direction: "up" | "down") => void;
   onRemove: (index: number) => void;
   onScrape?: (mid: number) => void;
-}
-
-function resolveCardScrapeTag(item: BannerRecord, isScraping: boolean) {
-  if (isScraping) {
-    return {
-      text: "刮削中",
-      color: "purple",
-      icon: <LoadingOutlined spin style={{ fontSize: 11 }} />,
-    };
-  }
-  const state =
-    item.scrapeState ||
-    (item.pendingScrape ? "pending" : item.isScraped ? "scraped" : "none");
-  switch (state) {
-    case "pending":
-    case "scraped":
-      return { text: "已刮削", color: "purple" };
-    case "miss":
-      return { text: "未匹配", color: "warning" };
-    default:
-      return { text: "未刮削", color: "default" };
-  }
 }
 
 export default function BannerQuickCard({
@@ -58,13 +35,11 @@ export default function BannerQuickCard({
   onScrape,
 }: BannerQuickCardProps) {
   const posterUrl = item.picture || item.poster || item.customPicture || FALLBACK_IMG;
-  const scrapeTag = resolveCardScrapeTag(item, isScrapingThis);
-  const hasRealSlide = Boolean(
-    item.pictureSlide &&
-      item.pictureSlide.trim() !== "" &&
-      item.pictureSlide !== item.picture &&
-      item.pictureSlide !== item.poster,
-  );
+
+  const metaParts = [
+    item.cName,
+    item.year ? String(item.year) : null,
+  ].filter(Boolean);
 
   return (
     <div
@@ -72,150 +47,111 @@ export default function BannerQuickCard({
         isScrapingThis ? styles.previewDeckCardScraping : ""
       }`}
     >
-      <div className={styles.previewDeckCardIndex}>
-        #{String(index + 1).padStart(2, "0")}
-      </div>
-      <div className={styles.previewDeckCardPoster}>
-        <Image
-          src={posterUrl}
-          alt={item.name}
-          fallback={FALLBACK_IMG}
-          preview={isScrapingThis ? false : { mask: "预览" }}
-          styles={{ root: { width: "100%", height: "100%" } }}
-          style={{ width: "100%", height: "100%", objectFit: "cover" }}
-        />
+      {/* 主体信息：左侧海报封面 + 右侧详情 */}
+      <div className={styles.cardBody}>
+        <div className={styles.posterBox}>
+          <img
+            src={posterUrl}
+            alt={item.name}
+            className={styles.posterImg}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src = FALLBACK_IMG;
+            }}
+          />
+          {item.score && item.score > 0 ? (
+            <span className={styles.scoreBadge}>
+              <StarFilled style={{ color: "#faad14" }} />
+              {item.score.toFixed(1)}
+            </span>
+          ) : null}
+        </div>
+
+        <div className={styles.cardMainInfo}>
+          <div>
+            <div className={styles.cardHeadRow}>
+              <span className={styles.orderNum}>
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <div className={styles.cardTitle} title={item.name}>
+                {item.name}
+              </div>
+            </div>
+
+            <div className={styles.metaLine}>
+              {metaParts.length > 0 ? metaParts.join(" · ") : "未分类"}
+            </div>
+
+            <div className={styles.cardBlurb} title={item.blurb}>
+              {item.blurb || "暂无简介"}
+            </div>
+          </div>
+        </div>
+
         {isScrapingThis && (
           <div className={styles.posterLoadingMask}>
             <Spin
               indicator={
-                <LoadingOutlined style={{ fontSize: 20, color: "#ffffff" }} spin />
+                <LoadingOutlined style={{ fontSize: 24, color: "#ffffff" }} spin />
               }
             />
             <span className={styles.posterLoadingText}>刮削中</span>
           </div>
         )}
       </div>
-      <div className={styles.previewDeckCardInfo}>
-        <div>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "flex-start",
-              gap: 6,
-            }}
+
+      {/* 底部操作条 */}
+      <div className={styles.cardFooter}>
+        {onScrape ? (
+          <Button
+            size="small"
+            type="text"
+            disabled={isAnyBusy}
+            onClick={() => onScrape(item.mid)}
           >
-            <span className={styles.previewDeckCardTitle} title={item.name}>
-              {item.name}
-            </span>
-            <Space size={2} align="center">
-              {onScrape && (
-                <Button
-                  type="text"
-                  size="small"
-                  icon={
-                    <ThunderboltOutlined
-                      style={{
-                        fontSize: 11,
-                        color: isAnyBusy ? undefined : "#722ed1",
-                      }}
-                    />
-                  }
-                  disabled={isAnyBusy}
-                  onClick={() => onScrape(item.mid)}
-                  title="刮削"
-                  style={{ width: 22, height: 22, padding: 0 }}
-                />
-              )}
+            刮削
+          </Button>
+        ) : (
+          <div />
+        )}
+
+        <Space size={6}>
+          <Tooltip title="上移">
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowUpOutlined style={{ fontSize: 11 }} />}
+              disabled={isAnyBusy || index === 0}
+              onClick={() => onMove(index, "up")}
+            />
+          </Tooltip>
+
+          <Tooltip title="下移">
+            <Button
+              size="small"
+              type="text"
+              icon={<ArrowDownOutlined style={{ fontSize: 11 }} />}
+              disabled={isAnyBusy || index === total - 1}
+              onClick={() => onMove(index, "down")}
+            />
+          </Tooltip>
+
+          <Popconfirm
+            title="确认移除？"
+            onConfirm={() => onRemove(index)}
+            okText="确定"
+            cancelText="取消"
+          >
+            <Tooltip title="移除">
               <Button
                 type="text"
+                danger
                 size="small"
-                icon={<ArrowUpOutlined style={{ fontSize: 10 }} />}
-                disabled={isAnyBusy || index === 0}
-                onClick={() => onMove(index, "up")}
-                title="上移"
-                style={{ width: 22, height: 22, padding: 0 }}
+                icon={<DeleteOutlined style={{ fontSize: 12 }} />}
+                disabled={isAnyBusy}
               />
-              <Button
-                type="text"
-                size="small"
-                icon={<ArrowDownOutlined style={{ fontSize: 10 }} />}
-                disabled={isAnyBusy || index === total - 1}
-                onClick={() => onMove(index, "down")}
-                title="下移"
-                style={{ width: 22, height: 22, padding: 0 }}
-              />
-              <Popconfirm
-                title="确认移除？"
-                onConfirm={() => onRemove(index)}
-                okText="确定"
-                cancelText="取消"
-              >
-                <Button
-                  type="text"
-                  danger
-                  size="small"
-                  icon={<DeleteOutlined style={{ fontSize: 11 }} />}
-                  title="移除"
-                  disabled={isAnyBusy}
-                  style={{ width: 22, height: 22, padding: 0 }}
-                />
-              </Popconfirm>
-            </Space>
-          </div>
-          <div className={styles.previewDeckCardTags}>
-            {item.cName && (
-              <Tag color="orange" style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>
-                {item.cName}
-              </Tag>
-            )}
-            {item.year ? (
-              <Tag color="blue" style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>
-                {item.year}
-              </Tag>
-            ) : null}
-            {item.score && item.score > 0 ? (
-              <Tag
-                color="gold"
-                icon={<StarFilled />}
-                style={{ margin: 0, borderRadius: 4, fontSize: 11 }}
-              >
-                {item.score.toFixed(1)}
-              </Tag>
-            ) : null}
-            <Tag
-              color={scrapeTag.color}
-              icon={scrapeTag.icon}
-              style={{
-                margin: 0,
-                borderRadius: 4,
-                fontSize: 11,
-                cursor: onScrape && !isAnyBusy ? "pointer" : "default",
-              }}
-              onClick={onScrape && !isAnyBusy ? () => onScrape(item.mid) : undefined}
-              title={onScrape && !isAnyBusy ? "刮削" : undefined}
-            >
-              {scrapeTag.text}
-            </Tag>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "flex-end", marginTop: 4 }}>
-          <div className={styles.previewDeckCardBlurb} title={item.blurb}>
-            {item.blurb || "暂无简介"}
-          </div>
-          {hasRealSlide && item.pictureSlide && (
-            <div className={styles.previewDeckCardSlideThumb} title="横图">
-              <Image
-                src={item.pictureSlide}
-                alt="横图"
-                fallback={FALLBACK_IMG}
-                preview={{ mask: "预览" }}
-                styles={{ root: { width: "100%", height: "100%" } }}
-                style={{ width: "100%", height: "100%", objectFit: "cover" }}
-              />
-            </div>
-          )}
-        </div>
+            </Tooltip>
+          </Popconfirm>
+        </Space>
       </div>
     </div>
   );

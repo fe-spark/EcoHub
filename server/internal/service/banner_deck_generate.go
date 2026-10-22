@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"server/internal/model"
@@ -38,9 +37,8 @@ type CategoryQuota struct {
 }
 
 type OneClickGenerateReq struct {
-	Strategy   string          `json:"strategy"`   // hot(最热), score(高分), latest(最新)
-	Quotas     []CategoryQuota `json:"quotas"`     // 每个分类指定的排片配额列表
-	AutoScrape bool            `json:"autoScrape"` // 生成时只预览匹配，替换线上轮播时才写入
+	Strategy string          `json:"strategy"` // hot(最热), score(高分), latest(最新)
+	Quotas   []CategoryQuota `json:"quotas"`   // 每个分类指定的排片配额列表
 }
 
 // OneClickGenerateDeckStream 一键排片：按指定分类配额与策略流式生成排片卡组（支持 SSE 实时事件流）
@@ -90,7 +88,7 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 			Event:   "start",
 			Stage:   "filtering",
 			Current: 0,
-			Total:   totalCount,
+			Total:   len(validQuotas),
 			Message: fmt.Sprintf("正在从片库检索候选影片（策略：%s，共 %d 个分类，目标 %d 部）...", strategyDesc, len(validQuotas), totalCount),
 		})
 	}
@@ -129,7 +127,7 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 			onEvent(OneClickProgressEvent{
 				Event:   "progress",
 				Stage:   "filtering",
-				Current: qIdx,
+				Current: qIdx + 1,
 				Total:   len(validQuotas),
 				Message: fmt.Sprintf("正在检索片库分类 (%d/%d)...", qIdx+1, len(validQuotas)),
 			})
@@ -228,7 +226,7 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 				Year:     snap.Year,
 				Poster:   pic,
 				Slide:    slide,
-				Message:  fmt.Sprintf("已选入: %s", snap.Name),
+				Message:  fmt.Sprintf("已选入 (%d/%d): %s", i+1, len(pickedSnaps), snap.Name),
 			})
 		}
 
@@ -236,149 +234,6 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-time.After(30 * time.Millisecond):
-		}
-	}
-
-	// 自动刮削只填充草稿预览，专属轮播使用，绝不改写片库
-	if req.AutoScrape {
-		tmdbCfg, err := repository.GetTMDBConfig()
-		if err != nil {
-			return err
-		}
-		if tmdbCfg.Enabled && strings.TrimSpace(tmdbCfg.ApiKey) != "" {
-			var missingIndices []int
-			for idx, b := range banners {
-				hasRealSlide := b.PictureSlide != "" && b.PictureSlide != b.Picture && b.PictureSlide != b.Poster
-				if !hasRealSlide {
-					missingIndices = append(missingIndices, idx)
-				}
-			}
-
-			if len(missingIndices) > 0 {
-				if onEvent != nil {
-					onEvent(OneClickProgressEvent{
-						Event:   "progress",
-						Stage:   "scraping",
-						Current: 0,
-						Total:   len(missingIndices),
-						Message: fmt.Sprintf("正在并行刮削 (%d 部)...", len(missingIndices)),
-					})
-				}
-
-				type scrapeResult struct {
-					bannerIdx   int
-					targetSnap  model.FilmListSnapshot
-					updatedSnap *model.FilmListSnapshot
-					mediaType   string
-					success     bool
-					err         error
-				}
-
-				workerCount := 4
-				if len(missingIndices) < workerCount {
-					workerCount = len(missingIndices)
-				}
-
-				taskCh := make(chan int, len(missingIndices))
-				resultCh := make(chan scrapeResult, len(missingIndices))
-				var wg sync.WaitGroup
-
-				for w := 0; w < workerCount; w++ {
-					wg.Add(1)
-					go func() {
-						defer wg.Done()
-						for bIdx := range taskCh {
-							if ctx.Err() != nil {
-								return
-							}
-							tSnap := pickedSnaps[bIdx]
-							singleCtx, singleCancel := context.WithTimeout(ctx, 4*time.Second)
-							uSnap, mType, succ, sErr := TMDBSvc.PreviewScrapeFilm(singleCtx, tSnap)
-							singleCancel()
-							resultCh <- scrapeResult{
-								bannerIdx:   bIdx,
-								targetSnap:  tSnap,
-								updatedSnap: uSnap,
-								mediaType:   mType,
-								success:     succ,
-								err:         sErr,
-							}
-						}
-					}()
-				}
-
-				for _, idx := range missingIndices {
-					taskCh <- idx
-				}
-				close(taskCh)
-
-				go func() {
-					wg.Wait()
-					close(resultCh)
-				}()
-
-				doneCount := 0
-				for res := range resultCh {
-					doneCount++
-					if ctx.Err() != nil {
-						return ctx.Err()
-					}
-					bannerIdx := res.bannerIdx
-					targetSnap := res.targetSnap
-					if res.err == nil && res.success && res.updatedSnap != nil {
-						slideUrl := strings.TrimSpace(res.updatedSnap.DisplayPictureSlide())
-						dispPic := strings.TrimSpace(res.updatedSnap.DisplayPicture())
-						if slideUrl == dispPic {
-							slideUrl = ""
-						}
-						if dispPic != "" {
-							banners[bannerIdx].Picture = dispPic
-							banners[bannerIdx].Poster = dispPic
-						}
-						banners[bannerIdx].PictureSlide = slideUrl
-						if res.updatedSnap.Score > 0 {
-							banners[bannerIdx].Score = res.updatedSnap.Score
-						}
-						if res.updatedSnap.Blurb != "" {
-							banners[bannerIdx].Blurb = res.updatedSnap.Blurb
-						}
-						if res.updatedSnap.Year > 0 {
-							banners[bannerIdx].Year = res.updatedSnap.Year
-						}
-						banners[bannerIdx].TmdbID = res.updatedSnap.TmdbID
-						banners[bannerIdx].MediaType = res.mediaType
-						banners[bannerIdx].PendingScrape = true
-						banners[bannerIdx].ScrapeState = "pending"
-						if onEvent != nil {
-							onEvent(OneClickProgressEvent{
-								Event:   "progress",
-								Stage:   "scraping",
-								Current: doneCount,
-								Total:   len(missingIndices),
-								Mid:     targetSnap.Mid,
-								Name:    targetSnap.Name,
-								Slide:   slideUrl,
-								Message: fmt.Sprintf("已匹配: %s", targetSnap.Name),
-							})
-						}
-					} else {
-						if banners[bannerIdx].ScrapeState != "scraped" {
-							banners[bannerIdx].ScrapeState = "miss"
-						}
-						if onEvent != nil {
-							onEvent(OneClickProgressEvent{
-								Event:   "progress",
-								Stage:   "scraping",
-								Current: doneCount,
-								Total:   len(missingIndices),
-								Mid:     targetSnap.Mid,
-								Name:    targetSnap.Name,
-								Message: fmt.Sprintf("未匹配: %s", targetSnap.Name),
-							})
-						}
-					}
-				}
-			}
 		}
 	}
 

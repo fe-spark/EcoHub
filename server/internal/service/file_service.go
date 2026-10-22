@@ -34,19 +34,6 @@ func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, pa
 	return repository.GetFileInfoPage(tl, name, beginTime, endTime, page)
 }
 
-// StorageStatus 素材存储探测结果；文案由前端组装。
-type StorageStatus struct {
-	VolumeMounted bool `json:"volumeMounted"`
-	MissingCount  int  `json:"missingCount"`
-}
-
-func (s *FileService) StorageStatus() StorageStatus {
-	return StorageStatus{
-		VolumeMounted: config.ContainerUploadVolumeOK(),
-		MissingCount:  repository.CountMissingUserGallery(),
-	}
-}
-
 func (s *FileService) RenameFile(id uint, name string) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {

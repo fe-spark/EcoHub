@@ -100,7 +100,6 @@ func SetupRouter() *gin.Engine {
 			banner.GET(`/quick-config`, handler.ManageHd.BannerQuickConfigGet)
 			banner.POST(`/quick-config`, handler.ManageHd.BannerQuickConfigSave)
 			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
-			banner.POST(`/preview-scrape`, handler.ManageHd.BannerPreviewScrape)
 		}
 
 		// 映射规则管理

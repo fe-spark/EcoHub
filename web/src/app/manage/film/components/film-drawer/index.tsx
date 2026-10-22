@@ -112,9 +112,17 @@ export default function FilmDrawer({
       const lines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
       setPlayLines(lines);
 
+      const targetSourceId = String(filmData.sourceId || filmData.firstSourceId || "");
+      const ownerLine =
+        lines.find(
+          (l) =>
+            targetSourceId &&
+            (l.sourceId === targetSourceId || l.id?.startsWith(targetSourceId)),
+        ) || lines[0];
+
       const formattedPlayLink =
-        lines.length > 0 && lines[0].linkList
-          ? formatEpisodesToPlayLink(lines[0].linkList)
+        ownerLine && ownerLine.linkList && ownerLine.linkList.length > 0
+          ? formatEpisodesToPlayLink(ownerLine.linkList)
           : "";
 
       form.setFieldsValue({
@@ -139,10 +147,10 @@ export default function FilmDrawer({
         classTag: desc.classTag || filmData.classTag || "",
         remarks: desc.remarks || filmData.remarks || "",
         state: desc.state || filmData.state || "",
-        hits: Number(desc.hits ?? filmData.hits) || 0,
-        playForm: filmData.playForm || "",
+        hits: Number(desc.hits || filmData.hits) || 0,
+        playForm: ownerLine?.name || ownerLine?.id || "",
         playLink: formattedPlayLink,
-        dbId: Number(desc.dbId ?? filmData.dbId) || 0,
+        dbId: Number(desc.dbId || filmData.dbId) || 0,
         dbScore: desc.dbScore || (filmData.score ? String(filmData.score) : "") || "",
         content: desc.content || filmData.content || desc.blurb || filmData.blurb || "",
       });
@@ -183,6 +191,7 @@ export default function FilmDrawer({
     } else {
       loadedDetailRef.current = null;
       setLoadedDetail(null);
+      setPlayLines([]);
       loadCategoryTree(defaultSourceId || "")
         .then((data) => {
           if (cancelled) return;
@@ -239,15 +248,12 @@ export default function FilmDrawer({
     }
   };
 
-  const handleTmdbPrefill = (data: any, fields?: string[]) => {
+  const handleTmdbPrefill = (data: Record<string, unknown>, fields?: string[]) => {
     setTmdbSnapshot((prev) => prev || form.getFieldsValue(true));
-    const shouldFill = (name: string, ...aliases: string[]) => {
-      if (!fields || fields.length === 0) return true;
-      return [name, ...aliases].some((key) => fields.includes(key));
-    };
+    const shouldFill = (name: string, ...aliases: string[]) =>
+      !fields?.length || [name, ...aliases].some((key) => fields.includes(key));
 
-    const updates: Record<string, any> = {};
-
+    const updates: Record<string, unknown> = {};
     if (shouldFill("poster", "picture") && data.picture) {
       updates.picture = data.picture;
       updates.followPosterSource = false;
@@ -255,43 +261,26 @@ export default function FilmDrawer({
     if (shouldFill("backdrop", "pictureSlide") && data.pictureSlide) {
       updates.pictureSlide = data.pictureSlide;
     }
-
-    if (shouldFill("name", "title") && data.name) {
-      updates.name = data.name;
+    const textFields: [string, string[], unknown][] = [
+      ["name", ["name", "title"], data.name],
+      ["subTitle", ["subTitle", "originalTitle"], data.subTitle || data.originalTitle],
+      ["releaseDate", ["releaseDate"], data.releaseDate],
+      ["year", ["year"], data.year ? String(data.year) : undefined],
+      ["area", ["area", "country"], data.area],
+      ["language", ["lang", "language"], data.language || data.lang],
+      ["director", ["director"], data.director],
+      ["actor", ["actor"], data.actor],
+      ["writer", ["writer"], data.writer],
+      ["classTag", ["classTag", "genres"], data.classTag],
+      ["content", ["content", "overview"], data.content || data.overview],
+    ];
+    for (const [key, aliases, val] of textFields) {
+      if (val && shouldFill(key, ...aliases)) {
+        updates[key] = val;
+      }
     }
-    if (shouldFill("subTitle", "originalTitle") && (data.subTitle || data.originalTitle)) {
-      updates.subTitle = data.subTitle || data.originalTitle;
-    }
-    if (shouldFill("releaseDate") && data.releaseDate) {
-      updates.releaseDate = data.releaseDate;
-    }
-    if (shouldFill("year") && data.year) {
-      updates.year = String(data.year);
-    }
-    if (shouldFill("area", "country") && data.area) {
-      updates.area = data.area;
-    }
-    if (shouldFill("lang", "language") && (data.language || data.lang)) {
-      updates.language = data.language || data.lang;
-    }
-    if (shouldFill("director") && data.director) {
-      updates.director = data.director;
-    }
-    if (shouldFill("actor") && data.actor) {
-      updates.actor = data.actor;
-    }
-    if (shouldFill("writer") && data.writer) {
-      updates.writer = data.writer;
-    }
-    if (shouldFill("classTag", "genres") && data.classTag) {
-      updates.classTag = data.classTag;
-    }
-    if (shouldFill("content", "overview") && (data.content || data.overview)) {
-      updates.content = data.content || data.overview;
-    }
-
     form.setFieldsValue(updates);
-    message.success("TMDB 预填完成");
+    message.success("预填完成");
   };
 
   const handleUndoTmdb = () => {
@@ -338,7 +327,7 @@ export default function FilmDrawer({
       const { playLink, playForm, ...restValues } = values;
       const payload: Record<string, any> = {
         ...restValues,
-        sourceId: values.sourceId || "",
+        sourceId: values.sourceId || loadedDetailRef.current?.sourceId || defaultSourceId || "",
         language: restValues.language || "",
         id: filmId ? Number(filmId) : 0,
         dbId: Number(restValues.dbId) || 0,
@@ -348,11 +337,16 @@ export default function FilmDrawer({
         picture: isCustom ? (sourcePic || customPic) : (sourcePic || customPic),
         customPictureSlide: customSlide,
       };
+
+      if (!filmId && (!values.playLink || !values.playLink.trim())) {
+        message.error("请至少输入一条有效播放地址");
+        setSubmitting(false);
+        return;
+      }
       if (values.playLink && values.playLink.trim()) {
         payload.playLink = values.playLink.trim();
-        payload.playForm = values.playForm || "";
+        payload.playForm = (playForm || "").trim();
       }
-
       const resp = await ApiPost("/manage/film/save", payload);
       if (resp.code === 0) {
         message.success(filmId ? "更新成功" : "添加成功");
@@ -466,9 +460,9 @@ export default function FilmDrawer({
               <FilmMetaSections />
 
               <FilmPlaySection
-                form={form}
                 lines={playLines}
-                filmId={filmId ? String(filmId) : undefined}
+                filmId={filmId}
+                ownerSourceId={form.getFieldValue("sourceId") || loadedDetail?.sourceId || ""}
               />
             </div>
           </Form>

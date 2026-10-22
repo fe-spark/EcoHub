@@ -1,12 +1,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { Button, Space, Spin, Empty } from "antd";
-import {
-  PlusOutlined,
-  DesktopOutlined,
-  CompassOutlined,
-} from "@ant-design/icons";
+import { Button, Space, Spin, Empty, Tooltip } from "antd";
+import { DesktopOutlined, SettingOutlined } from "@ant-design/icons";
 
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
@@ -17,6 +13,7 @@ import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import BannerDrawer from "./banner-drawer";
 import BannerQuickDrawer from "./banner-quick-drawer";
 import BannerQuickModal from "./banner-quick-modal";
+import BannerConfigDrawer from "./banner-config-drawer";
 import BannerGrid from "./banner-grid";
 import { QuickStrategy } from "./banner-quick-config";
 import { useBannerDeck } from "./use-banner-deck";
@@ -37,6 +34,7 @@ export default function BannersPageView() {
   const [loading, setLoading] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
   const [quickModalOpen, setQuickModalOpen] = useState(false);
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [quickDrawerOpen, setQuickDrawerOpen] = useState(false);
   const [quickDeck, setQuickDeck] = useState<BannerRecord[]>([]);
   const [quickStrategy, setQuickStrategy] = useState<QuickStrategy>("hot");
@@ -149,37 +147,34 @@ export default function BannersPageView() {
     <div className={`${styles.pageStack} ${orderDirty ? styles.pageStackDirty : ""}`}>
       <ManagePageHeader title="首页轮播" />
 
-      {/* 顶部操作工具栏卡片 */}
+      {/* 顶部操作工具栏：配置使用齿轮图标按钮，独立放置；其他操作保持文字按钮 */}
       <div className={styles.toolbarCard}>
         <div className={styles.toolbar}>
+          {/* 左侧：标题与统计徽标 */}
           <div className={styles.toolbarLeft}>
-            <Space size={10} align="center" wrap>
-              <DesktopOutlined style={{ color: "var(--ant-color-primary)", fontSize: 16 }} />
-              <span className={styles.toolbarTitle}>首页轮播卡组</span>
-              <span className={styles.countBadge}>{banners.length}</span>
-            </Space>
+            <DesktopOutlined style={{ color: "var(--ant-color-primary)", fontSize: 16 }} />
+            <span className={styles.toolbarTitle}>首页轮播</span>
+            <span className={styles.countBadge}>{banners.length}</span>
           </div>
 
+          {/* 右侧：只放配置 + 一键排片 */}
           <Space size={8} wrap className={styles.toolbarActions}>
-            <Button
-              type="primary"
-              size="middle"
-              icon={<CompassOutlined />}
-              disabled={!canWrite}
-              onClick={openQuickModal}
-              style={{ background: "#0958d9", borderColor: "#0958d9" }}
-            >
-              一键排片
-            </Button>
+            <Tooltip title="排片配置">
+              <Button
+                size="middle"
+                icon={<SettingOutlined />}
+                disabled={!canWrite}
+                onClick={() => setConfigDrawerOpen(true)}
+              />
+            </Tooltip>
 
             <Button
               type="primary"
               size="middle"
-              icon={<PlusOutlined />}
-              onClick={openCreateEditor}
               disabled={!canWrite}
+              onClick={openQuickModal}
             >
-              添加影片
+              一键排片
             </Button>
           </Space>
         </div>
@@ -188,31 +183,21 @@ export default function BannersPageView() {
       {/* 轮播卡片列表展示 */}
       {loading && banners.length === 0 ? (
         <div className={styles.emptyCard}>
-          <Spin description="加载轮播数据中..." />
+          <Spin description="加载中..." />
         </div>
       ) : banners.length === 0 ? (
         <div className={styles.emptyCard}>
           <Empty
-            description="当前暂无首页排片影片，支持一键排片或手动添加"
+            description="暂无排片内容"
             image={Empty.PRESENTED_IMAGE_SIMPLE}
           >
-            <Space size={12}>
-              <Button
-                type="primary"
-                icon={<CompassOutlined />}
-                disabled={!canWrite}
-                onClick={openQuickModal}
-              >
-                一键排片
-              </Button>
-              <Button
-                icon={<PlusOutlined />}
-                disabled={!canWrite}
-                onClick={openCreateEditor}
-              >
-                添加影片
-              </Button>
-            </Space>
+            <Button
+              type="primary"
+              disabled={!canWrite}
+              onClick={openCreateEditor}
+            >
+              添加影片
+            </Button>
           </Empty>
         </div>
       ) : (
@@ -227,10 +212,11 @@ export default function BannersPageView() {
         />
       )}
 
+      {/* 纯净一键排片进度执行器 */}
       <BannerQuickModal
         open={quickModalOpen}
-        tmdbEnabled={tmdbEnabled}
         onClose={() => setQuickModalOpen(false)}
+        onOpenConfig={() => setConfigDrawerOpen(true)}
         onGenerated={(deck, strategy) => {
           setQuickDeck(deck);
           setQuickStrategy(strategy);
@@ -239,7 +225,13 @@ export default function BannersPageView() {
         }}
       />
 
-      {/* 排片结果抽屉：顺序在抽屉内直接调整，确认后才替换线上 */}
+      {/* 独立的排片配置抽屉 */}
+      <BannerConfigDrawer
+        open={configDrawerOpen}
+        onClose={() => setConfigDrawerOpen(false)}
+      />
+
+      {/* 排片结果抽屉 */}
       <BannerQuickDrawer
         open={quickDrawerOpen}
         deck={quickDeck}
@@ -262,7 +254,7 @@ export default function BannersPageView() {
         }}
       />
 
-      {/* 手动添加/编辑轮播弹窗（在详情中完整展示横屏大图与封面图） */}
+      {/* 手动添加/编辑轮播抽屉 */}
       <BannerDrawer
         open={editorVisible}
         mode={editorMode}

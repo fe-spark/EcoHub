@@ -60,6 +60,18 @@ func UseStoredFilm(detail *model.MovieDetailVo) {
 	if row.Score > 0 {
 		detail.DbScore = strconv.FormatFloat(row.Score, 'f', -1, 64)
 	}
+	if row.DbId > 0 {
+		detail.DbId = row.DbId
+	}
+	if row.Hits > 0 {
+		detail.Hits = row.Hits
+	}
+	if row.Initial != "" {
+		detail.Initial = row.Initial
+	}
+	if row.State != "" {
+		detail.State = row.State
+	}
 	if strings.TrimSpace(row.Remarks) != "" {
 		detail.Remarks = row.Remarks
 	}

@@ -36,13 +36,10 @@ import ManagePageHeader from "@/app/manage/components/page-header";
 import dayjs from "dayjs";
 import {
   type PhotoItem,
-  type StorageStatus,
   type DateRangeValue,
   RANGE_TIME_DEFAULT,
   formatDateRange,
-  buildStorageAlerts,
 } from "./types";
-import StorageAlerts from "./storage-alerts";
 import RenameModal from "./rename-modal";
 import styles from "./index.module.less";
 
@@ -51,7 +48,6 @@ const { RangePicker } = DatePicker;
 
 export default function FileUploadPageView() {
   const [list, setList] = useState<PhotoItem[]>([]);
-  const [storage, setStorage] = useState<StorageStatus | null>(null);
   const [loading, setLoading] = useState(false);
   const [dragging, setDragging] = useState(false);
   const [page, setPage] = useState({ current: 1, pageSize: 36, total: 0 });
@@ -69,7 +65,6 @@ export default function FileUploadPageView() {
   const [previewIndex, setPreviewIndex] = useState(0);
   const { message } = useAppMessage();
   const { canWrite } = useManagePermission();
-  const alerts = buildStorageAlerts(storage);
 
   const getPhotoList = useCallback(
     async (
@@ -88,7 +83,6 @@ export default function FileUploadPageView() {
         });
         if (resp.code === 0) {
           setList(resp.data.list || []);
-          setStorage(resp.data.storage ?? null);
           if (resp.data.page) {
             setPage({
               current: resp.data.page.current,
@@ -310,7 +304,6 @@ export default function FileUploadPageView() {
           </Upload>
         </div>
       </div>
-      <StorageAlerts alerts={alerts} />
 
       <div
         className={styles.container}

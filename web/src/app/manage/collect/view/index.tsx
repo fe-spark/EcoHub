@@ -181,7 +181,7 @@ export default function CollectManagePageView() {
     batchRows,
     openBatchCollect,
     startBatchCollect,
-  } = useCollectBatchRunner(siteList, setSiteList, selectedSourceIds, getCollectList);
+  } = useCollectBatchRunner(siteList, setSiteList, selectedSourceIds, getCollectList, clearSelection);
 
   const fetchProxyStatus = useCallback(async () => {
     try {

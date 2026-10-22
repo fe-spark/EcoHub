@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"fmt"
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
@@ -85,15 +84,15 @@ func (s *FilmService) SaveFilmDetail(fd model.FilmDetailVo) error {
 	sourceId := strings.TrimSpace(fd.SourceId)
 	if sourceId != "" {
 		if src := repository.FindCollectSourceById(sourceId); src == nil {
-			return fmt.Errorf("指定的采集站不存在: %s", sourceId)
+			if active := repository.GetActiveCollectSource(); active != nil {
+				sourceId = active.Id
+			}
 		}
 	} else {
 		if active := repository.GetActiveCollectSource(); active != nil {
 			sourceId = active.Id
 		} else if sources, err := repository.GetCollectSourceList(); err == nil && len(sources) > 0 {
 			sourceId = sources[0].Id
-		} else {
-			sourceId = "manual"
 		}
 	}
 

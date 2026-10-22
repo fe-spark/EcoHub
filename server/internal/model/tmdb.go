@@ -55,6 +55,9 @@ type TMDBDetail struct {
 	Genres        []string `json:"genres"`
 	Directors     []string `json:"directors"`
 	Actors        []string `json:"actors"`
+	Writers       []string `json:"writers"`
+	Area          string   `json:"area"`
+	Language      string   `json:"language"`
 }
 
 // TMDBApplyReq 刮削应用请求
@@ -81,4 +84,38 @@ type FilmTMDBScrape struct {
 
 func (FilmTMDBScrape) TableName() string {
 	return TableFilmTMDBScrape
+}
+
+// RawTMDBItem TMDB API 原始条目
+type RawTMDBItem struct {
+	ID            int64   `json:"id"`
+	MediaType     string  `json:"media_type"`
+	Title         string  `json:"title"`
+	Name          string  `json:"name"`
+	OriginalTitle string  `json:"original_title"`
+	OriginalName  string  `json:"original_name"`
+	ReleaseDate   string  `json:"release_date"`
+	FirstAirDate  string  `json:"first_air_date"`
+	PosterPath    string  `json:"poster_path"`
+	BackdropPath  string  `json:"backdrop_path"`
+	VoteAverage   float64 `json:"vote_average"`
+	Overview      string  `json:"overview"`
+}
+
+type TMDBCreditPerson struct {
+	Name string `json:"name"`
+	Job  string `json:"job"`
+}
+
+type TMDBDetailRaw struct {
+	RawTMDBItem
+	Tagline             string `json:"tagline"`
+	Genres              []struct{ Name string `json:"name"` } `json:"genres"`
+	ProductionCountries []struct{ Name string `json:"name"` } `json:"production_countries"`
+	OriginCountry       []string                              `json:"origin_country"`
+	SpokenLanguages     []struct{ Name string `json:"name"` } `json:"spoken_languages"`
+	Credits             struct {
+		Cast []struct{ Name string `json:"name"` } `json:"cast"`
+		Crew []TMDBCreditPerson                    `json:"crew"`
+	} `json:"credits"`
 }

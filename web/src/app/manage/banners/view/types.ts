@@ -33,14 +33,12 @@ export interface BannerSnapshot {
 
 export type BannerFormValues = {
   mid?: number;
-  name: string;
-  cName: string;
-  year?: number;
   picture?: string;
   pictureSlide?: string;
   customPicture?: string;
   sort?: number;
   isCustomPic?: boolean;
+  isPinned?: boolean;
 };
 
 export type FilmOption = {

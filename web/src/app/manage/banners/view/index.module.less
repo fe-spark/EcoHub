@@ -1,3 +1,6 @@
+/* ============================================================
+   首页轮播主页面布局 (BannersPageView & BannerGrid)
+   ============================================================ */
 .pageStack {
   display: flex;
   flex-direction: column;
@@ -15,7 +18,7 @@
   border-radius: 12px;
   background: var(--ant-color-bg-container);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-  padding: 14px 16px;
+  padding: 12px 16px;
 }
 
 .toolbar {
@@ -30,7 +33,7 @@
 .toolbarLeft {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-wrap: wrap;
 }
 
@@ -39,11 +42,6 @@
   font-weight: 600;
   line-height: 24px;
   color: var(--ant-color-text);
-}
-
-.toolbarHint {
-  font-size: 12px;
-  color: var(--ant-color-text-tertiary);
 }
 
 .toolbarActions {
@@ -62,218 +60,190 @@
   border-radius: 10px;
 }
 
-/* 卡片多列网格：宽幅响应式排布，保证标题不被截断且卡片不过高 */
+.configIconButton {
+  color: var(--ant-color-text-secondary);
+  border-radius: 6px;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+
+  &:hover {
+    color: var(--ant-color-primary);
+    background: var(--ant-color-fill-tertiary);
+  }
+}
+
+/* 宽屏多列网格 */
 .cardGrid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   gap: 16px;
   align-items: stretch;
   min-width: 0;
 }
 
-/* 单个轮播卡片 */
+/* ============================================================
+   现代极简电影排片卡片 (BannerCard)
+   ============================================================ */
 .bannerCard {
   position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-width: 0;
   background: var(--ant-color-bg-container);
   border: 1px solid var(--ant-color-border-secondary);
   border-radius: 12px;
-  cursor: default;
-  transition: all 0.25s ease;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
 
   &:hover {
-    transform: translateY(-3px);
+    transform: translateY(-2px);
     border-color: var(--ant-color-primary);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06);
 
-    .posterContainer img {
-      transform: scale(1.04);
+    .posterImg {
+      transform: scale(1.03);
     }
   }
 }
 
-/* 头部：仅此区域支持抓取拖拽排序 */
-.cardHead {
+/* 卡片主体：左侧海报 + 右侧信息详情 */
+.cardBody {
+  display: flex;
+  gap: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
+  flex: 1;
+  min-width: 0;
+}
+
+/* 海报封面容器：标准 1:1.414 黄金比例海报 */
+.posterBox {
+  position: relative;
+  width: 92px;
+  height: 130px;
+  border-radius: 8px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--ant-color-border-secondary);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+  background: var(--public-surface-3);
+}
+
+.posterImg {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.3s ease;
+}
+
+.scoreBadge {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.75);
+  padding: 1px 6px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+}
+
+.cardInfo {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  flex: 1;
+}
+
+.cardHeadRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.orderNum {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  color: var(--ant-color-text-quaternary);
+  flex-shrink: 0;
+}
+
+.cardTitle {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+  line-height: 1.35;
+  margin-bottom: 0 !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.metaLine {
+  font-size: 12px;
+  color: var(--ant-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 4px;
+}
+
+.cardBlurb {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+/* 底部操作工具行 */
+.cardFooter {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-  padding: 10px 14px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--ant-color-border-secondary);
   background: var(--ant-color-fill-quaternary);
-  border-bottom: 1px solid var(--ant-color-border-secondary);
-  border-radius: 11px 11px 0 0;
+  border-radius: 0 0 11px 11px;
+}
+
+.dragHandle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
   cursor: grab;
   user-select: none;
   touch-action: none;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  padding: 2px 4px;
+  border-radius: 4px;
 
   &:hover {
+    color: var(--ant-color-text);
     background: var(--ant-color-fill-tertiary);
   }
 
   &:active {
     cursor: grabbing;
-    background: var(--ant-color-fill-secondary);
   }
-}
-
-.cardHeadLeft {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.dragHandleIcon {
-  color: var(--ant-color-text-tertiary);
-  font-size: 14px;
-  flex-shrink: 0;
-}
-
-.orderTag {
-  border-radius: 4px;
-  font-weight: 700;
-  margin: 0 !important;
-  flex-shrink: 0;
-}
-
-.cardTitleRow {
-  min-width: 0;
-  width: 100%;
-  min-height: 42px;
-  display: flex;
-  align-items: flex-start;
-}
-
-.cardFilmTitle {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-  line-height: 1.4;
-  margin-bottom: 0 !important;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  word-break: break-all;
-}
-
-.cardHeadActions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-}
-
-/* 卡片主体：左侧大封面图，右侧信息，整体高度适中 (~230px) */
-.cardBody {
-  display: flex;
-  gap: 14px;
-  padding: 14px;
-  min-width: 0;
-  flex: 1;
-  cursor: pointer;
-}
-
-/* 大封面海报容器 (宽 120px，高 168px，比例 1:1.4，清晰突出) */
-.posterContainer {
-  width: 120px;
-  height: 168px;
-  flex-shrink: 0;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  background: var(--ant-color-fill-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
-
-  img {
-    transition: transform 0.3s ease;
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-  }
-}
-
-.posterImage {
-  width: 120px !important;
-  height: 168px !important;
-  object-fit: cover !important;
-  border-radius: 8px;
-  display: block;
-}
-
-.cardMainInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-  flex: 1;
-}
-
-.cardTagsRow {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.cardScoreRow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.remarkText {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.blurbText {
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ant-color-text-secondary);
-  margin-bottom: 0 !important;
-}
-
-.blurbTextEmpty {
-  font-size: 12px;
-  color: var(--ant-color-text-quaternary);
-  font-style: italic;
-}
-
-.cardFooterRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: auto;
-  padding-top: 6px;
-  border-top: 1px dashed var(--ant-color-border-secondary);
-  font-size: 11px;
-  color: var(--ant-color-text-tertiary);
-  font-variant-numeric: tabular-nums;
-}
-
-.filmMetaMid {
-  color: var(--ant-color-text-tertiary);
-}
-
-.filmMetaHits {
-  color: var(--ant-color-text-tertiary);
 }
 
 /* 拖拽原位占位符：虚线边框与半透明 */
@@ -296,14 +266,14 @@
   background: var(--ant-color-bg-container);
 }
 
-/* 新增排片 Tile：高度与卡片一致 (~230px) */
+/* 新增排片 Tile */
 .addBannerTile {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  min-height: 230px;
+  gap: 8px;
+  min-height: 180px;
   padding: 24px 16px;
   border: 2px dashed var(--ant-color-border);
   border-radius: 12px;
@@ -316,12 +286,12 @@
     border-color: var(--ant-color-primary);
     background: color-mix(in srgb, var(--ant-color-primary) 6%, var(--ant-color-bg-container));
     color: var(--ant-color-primary);
-    transform: translateY(-3px);
+    transform: translateY(-2px);
   }
 }
 
 .addBannerIcon {
-  font-size: 28px;
+  font-size: 24px;
   color: var(--ant-color-text-tertiary);
 }
 
@@ -347,361 +317,3 @@
   border-radius: 12px;
   text-align: center;
 }
-
-/* 弹窗触发器与已选卡片样式 */
-.filmSelectTrigger {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 24px 16px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-  border: 1px dashed var(--ant-color-border);
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-
-  &:hover {
-    border-color: var(--ant-color-primary);
-    background: rgba(250, 140, 22, 0.04);
-  }
-}
-
-.triggerIcon {
-  font-size: 28px;
-  color: var(--ant-color-primary);
-}
-
-.triggerText {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-}
-
-.triggerHint {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-}
-
-.filmSelectedCard {
-  border-radius: 8px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-  border: 1px solid var(--ant-color-border-secondary);
-  padding: 10px 14px;
-}
-
-.previewSection {
-  margin-top: 4px;
-}
-
-.previewHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-
-.previewCol {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.previewLabelRow {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.posterFrame {
-  width: 108px;
-  height: 160px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.slideFrame {
-  width: 284px;
-  height: 160px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.slideEmptyBox {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-}
-
-/* 一键排片抽屉专属样式 */
-.drawerStack {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding-bottom: 24px;
-}
-
-.drawerSectionCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
-  background: var(--ant-color-bg-container);
-  padding: 14px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.drawerSectionTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.drawerSummaryBar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px 8px 16px;
-  border-radius: 8px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-  border: 1px solid var(--ant-color-border-secondary);
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.summaryLeft {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--ant-color-text);
-}
-
-.summaryRight {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.batchScrapeBtn {
-  background: #722ed1;
-  border-color: #722ed1;
-  color: #fff;
-  font-weight: 500;
-  border-radius: 6px;
-  box-shadow: 0 2px 4px rgba(114, 46, 209, 0.2);
-
-  &:hover,
-  &:focus {
-    background: #8543e0 !important;
-    border-color: #8543e0 !important;
-    color: #fff !important;
-  }
-}
-
-.summaryScrapeActive {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: rgba(114, 46, 209, 0.06);
-  border: 1px solid rgba(114, 46, 209, 0.2);
-}
-
-.summaryScrapeProgress {
-  font-size: 12px;
-  font-weight: 600;
-  color: #722ed1;
-  white-space: nowrap;
-}
-
-.summaryScrapeCurrentName {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.summaryScrapeCancelBtn {
-  height: 24px;
-  padding: 0 6px;
-  font-size: 12px;
-}
-
-.previewDeckGrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-  gap: 12px;
-}
-
-.previewDeckCard {
-  border: 1px solid var(--ant-color-border-secondary);
-  border-radius: 10px;
-  background: var(--ant-color-bg-container);
-  padding: 10px 12px;
-  display: flex;
-  gap: 12px;
-  position: relative;
-  transition: border-color 0.25s ease, box-shadow 0.25s ease;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
-
-  &:hover {
-    border-color: var(--ant-color-primary);
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
-  }
-}
-
-.previewDeckCardScraping {
-  border-color: #722ed1;
-  box-shadow: 0 0 0 2px rgba(114, 46, 209, 0.2), 0 4px 14px rgba(114, 46, 209, 0.12);
-  animation: cardScrapePulse 1.6s ease-in-out infinite alternate;
-}
-
-@keyframes cardScrapePulse {
-  0% {
-    box-shadow: 0 0 0 1px rgba(114, 46, 209, 0.2), 0 2px 6px rgba(114, 46, 209, 0.08);
-  }
-  100% {
-    box-shadow: 0 0 0 3px rgba(114, 46, 209, 0.35), 0 4px 16px rgba(114, 46, 209, 0.18);
-  }
-}
-
-.previewDeckCardIndex {
-  position: absolute;
-  top: 6px;
-  left: 6px;
-  z-index: 4;
-  font-size: 11px;
-  font-weight: 700;
-  line-height: 16px;
-  padding: 0 5px;
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.65);
-  color: #fff;
-}
-
-.previewDeckCardPoster {
-  width: 58px;
-  height: 82px;
-  border-radius: 6px;
-  overflow: hidden;
-  flex-shrink: 0;
-  background: var(--public-surface-3);
-  position: relative;
-
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-}
-
-.posterLoadingMask {
-  position: absolute;
-  inset: 0;
-  z-index: 3;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 5px;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(2px);
-  border-radius: 6px;
-  pointer-events: auto;
-}
-
-.posterLoadingText {
-  font-size: 11px;
-  font-weight: 500;
-  color: #ffffff;
-  line-height: 1;
-}
-
-.previewDeckCardInfo {
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  min-width: 0;
-  flex: 1;
-}
-
-.previewDeckCardTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--ant-color-text);
-  line-height: 1.35;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  word-break: break-all;
-  flex: 1;
-  min-width: 0;
-}
-
-.previewDeckCardTags {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin: 3px 0;
-}
-
-.previewDeckCardBlurb {
-  font-size: 12px;
-  color: var(--ant-color-text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  line-height: 16px;
-}
-
-.previewDeckCardSlideThumb {
-  width: 72px;
-  height: 40px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  flex-shrink: 0;
-
-  img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-}
-
-
-
-
