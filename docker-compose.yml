@@ -72,6 +72,7 @@ services:
       dockerfile: Dockerfile
     restart: always
     environment:
+      PORT: ${PORT:-8080}
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
       MYSQL_HOST: ${MYSQL_HOST:-mysql}
       MYSQL_PORT: ${MYSQL_PORT:-3306}
@@ -81,12 +82,16 @@ services:
       REDIS_HOST: ${REDIS_HOST:-redis}
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
+      REDIS_DB: ${REDIS_DB:-0}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       # 通用代理供采集等网络请求使用（可选）
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
       # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
       COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
+      # 数据分析（可选；默认 false 关闭）
+      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - 0.0.0.0:${SERVER_PORT:-18080}:${PORT:-8080}
     volumes:
@@ -97,7 +102,7 @@ services:
       - "host.docker.internal:host-gateway"
     healthcheck:
       test:
-        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${PORT}/api/config/basic"]
+        ["CMD-SHELL", "wget -q -O /dev/null http://localhost:$${PORT:-8080}/api/config/basic"]
       interval: 10s
       timeout: 5s
       retries: 5

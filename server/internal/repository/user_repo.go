@@ -21,7 +21,7 @@ func ExistUserTable() bool {
 }
 
 // InitBuiltinAccounts 初始化内置管理员。已存在则不改密码。
-// 首次创建必须设置 ECOHUB_ADMIN_PASSWORD，密码不写入日志。
+// 首次创建优先读取 ECOHUB_ADMIN_PASSWORD；未设置时回退至默认密码 admin，密码不写入日志。
 func InitBuiltinAccounts() error {
 	existing, err := GetUserByNameOrEmail(config.DefaultAdminUser)
 	if err != nil {
@@ -35,7 +35,7 @@ func InitBuiltinAccounts() error {
 	}
 	password := strings.TrimSpace(os.Getenv("ECOHUB_ADMIN_PASSWORD"))
 	if password == "" {
-		return errors.New("缺少环境变量 ECOHUB_ADMIN_PASSWORD")
+		password = config.DefaultAdminPassword
 	}
 	_, err = ensureBuiltinUser(config.DefaultAdminUser, password, "", "Spark", model.UserRoleAdmin)
 	if err != nil {

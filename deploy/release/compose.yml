@@ -43,7 +43,7 @@ services:
 
   ecohub:
     container_name: Eco-hub
-    image: ghcr.io/fe-spark/ecohub:latest
+    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
     restart: always
     environment:
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
@@ -56,6 +56,7 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       # 通用代理供采集等网络请求使用（可选）
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}

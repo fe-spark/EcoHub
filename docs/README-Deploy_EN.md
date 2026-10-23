@@ -161,6 +161,7 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
@@ -200,9 +201,8 @@ networks:
 ```env
 WEB_PORT=3000
 SERVER_PORT=18080
-
 JWT_SECRET=replace-with-a-long-random-string
-
+ECOHUB_ADMIN_PASSWORD=replace-with-a-strong-password
 MYSQL_ROOT_PASSWORD=use-a-strong-password
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
@@ -290,6 +290,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -p 18080:8080 \
   -e PORT=8080 \
   -e JWT_SECRET="$JWT_SECRET" \
+  -e ECOHUB_ADMIN_PASSWORD="replace-with-a-strong-password" \
   -e MYSQL_HOST=Eco-mysql \
   -e MYSQL_PORT=3306 \
   -e MYSQL_USER=eco \
@@ -328,7 +329,7 @@ All environment variables supported via `.env`, Docker Compose, or container run
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
 | `JWT_SECRET` | **Yes** | - | Secret key used for signing JWT tokens and deriving IP masking salt. **Must** be changed to a strong random string in production (generate via `openssl rand -hex 32`). |
-
+| `ECOHUB_ADMIN_PASSWORD` | No | `admin` | Password for the initial administrator (`admin`) on first database setup. Defaults to `admin` if unset (**strongly recommend changing to a strong password** for public deployments). Ignored if admin account already exists. |
 ### 3. Data Storage (MySQL & Redis)
 
 | Variable | Required | Default | Description |
