@@ -161,6 +161,7 @@ services:
       REDIS_PORT: ${REDIS_PORT:-6379}
       REDIS_PASSWORD: ${REDIS_PASSWORD:-ecohub}
       REDIS_DB: ${REDIS_DB:-0}
+      ECOHUB_ADMIN_PASSWORD: ${ECOHUB_ADMIN_PASSWORD:-admin}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
@@ -200,9 +201,8 @@ networks:
 ```env
 WEB_PORT=3000
 SERVER_PORT=18080
-
 JWT_SECRET=请替换为长随机串
-
+ECOHUB_ADMIN_PASSWORD=请改成强密码（首次初始化生效；默认admin）
 MYSQL_ROOT_PASSWORD=请改成强密码
 MYSQL_HOST=mysql
 MYSQL_PORT=3306
@@ -290,6 +290,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
   -p 18080:8080 \
   -e PORT=8080 \
   -e JWT_SECRET="$JWT_SECRET" \
+  -e ECOHUB_ADMIN_PASSWORD="请改成强密码" \
   -e MYSQL_HOST=Eco-mysql \
   -e MYSQL_PORT=3306 \
   -e MYSQL_USER=eco \
@@ -328,7 +329,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
 | `JWT_SECRET` | **是** | - | 用户与管理员登录态 JWT 签名密钥，同时作为访问分析数据脱敏的 Salt 派生源。生产部署**必须**修改为长随机字符串（可通过 `openssl rand -hex 32` 生成）。 |
-
+| `ECOHUB_ADMIN_PASSWORD` | 否 | `admin` | 首次初始化超级管理员 `admin` 的密码。若未配置默认使用 `admin`（生产环境对外部署前**强烈建议修改为强密码**）。数据库已初始化内置管理员时忽略。 |
 ### 3. 数据存储（MySQL & Redis）
 
 | 环境变量 | 必填 | 默认值 | 说明 |

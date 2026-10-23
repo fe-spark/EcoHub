@@ -194,7 +194,8 @@ const (
 const (
 	AuthUserClaims   = "UserClaims"
 	AuthCookieName   = "ecohub_auth_token"
-	DefaultAdminUser = "admin"
+	DefaultAdminUser     = "admin"
+	DefaultAdminPassword = "admin"
 )
 
 // -------------------------manage 管理后台相关key----------------------------------
@@ -280,7 +281,7 @@ func InitConfig() {
 		ListenerPort = port
 	}
 	if ListenerPort == "" {
-		panic("环境变量缺失: PORT")
+		ListenerPort = "8080"
 	}
 
 	fmt.Printf("[Config] 加载端口: %s\n", ListenerPort)

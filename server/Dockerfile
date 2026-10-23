@@ -23,7 +23,8 @@ LABEL maintainer="spark" \
       org.opencontainers.image.description="EcoHub Go API server for collection, aggregation, cache, authentication, and open interfaces." \
       org.opencontainers.image.source="https://github.com/fe-spark/EcoHub"
 
-ENV TZ=Asia/Shanghai
+ENV TZ=Asia/Shanghai \
+    PORT=8080
 
 RUN apk add --no-cache ca-certificates tzdata wget
 
