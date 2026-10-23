@@ -1,17 +1,26 @@
 package writer
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"strconv"
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
 	"server/internal/utils"
 )
+
+var ErrCategoryNotMapped = errors.New("影片未映射到分类")
+
+func IsCategoryNotMapped(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, ErrCategoryNotMapped) || strings.Contains(err.Error(), "影片未映射到分类")
+}
 
 type resolvedSearchCategory struct {
 	Pid              int64
@@ -33,6 +42,9 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 	if result.Pid == 0 && pid > 0 {
 		result.Pid = pid
 	}
+	if result.Pid == 0 && result.CName != "" {
+		result.Pid = support.ResolveRootCategoryIDByCName(result.CName)
+	}
 	if result.Pid > 0 && result.Cid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Cid)
 	}
@@ -47,13 +59,12 @@ func resolveLocalCategory(pid int64, cid int64, cName string) resolvedSearchCate
 
 func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int64, fallback string) string {
 	fallback = strings.TrimSpace(fallback)
-	if strings.TrimSpace(sourceId) == "manual" || db.Mdb == nil {
+	if strings.TrimSpace(sourceId) == "manual" {
 		return fallback
 	}
 
 	if sourceCid > 0 {
-		var row model.SourceCategory
-		if err := db.Mdb.Select("raw_name", "parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, sourceCid).First(&row).Error; err == nil {
+		if row, ok := support.GetSourceCategoryInfo(sourceId, sourceCid); ok {
 			if row.ParentSourceTypeId == 0 {
 				name := strings.TrimSpace(row.RawName)
 				if name != "" {
@@ -61,8 +72,7 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 				}
 			}
 			if row.ParentSourceTypeId > 0 {
-				var parent model.SourceCategory
-				if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, row.ParentSourceTypeId).First(&parent).Error; err == nil {
+				if parent, ok := support.GetSourceCategoryInfo(sourceId, row.ParentSourceTypeId); ok {
 					name := strings.TrimSpace(parent.RawName)
 					if name != "" {
 						return name
@@ -73,8 +83,7 @@ func resolveOriginalCategoryName(sourceId string, sourcePid int64, sourceCid int
 	}
 
 	if sourcePid > 0 {
-		var root model.SourceCategory
-		if err := db.Mdb.Select("raw_name").Where("source_id = ? AND source_type_id = ?", sourceId, sourcePid).First(&root).Error; err == nil {
+		if root, ok := support.GetSourceCategoryInfo(sourceId, sourcePid); ok {
 			name := strings.TrimSpace(root.RawName)
 			if name != "" {
 				return name
@@ -89,11 +98,11 @@ func resolveSourceRootTypeID(sourceId string, sourcePid int64, sourceCid int64) 
 	if strings.TrimSpace(sourceId) == "" {
 		return 0
 	}
-	if sourceCid > 0 && db.Mdb != nil {
+	if sourceCid > 0 {
 		current := sourceCid
 		for step := range [5]int{} {
-			var row model.SourceCategory
-			if err := db.Mdb.Select("parent_source_type_id").Where("source_id = ? AND source_type_id = ?", sourceId, current).First(&row).Error; err != nil {
+			row, ok := support.GetSourceCategoryInfo(sourceId, current)
+			if !ok {
 				if step == 0 && sourcePid > 0 {
 					return sourcePid
 				}
@@ -152,6 +161,12 @@ func resolveSearchCategory(sourceId string, detail model.MovieDetail) resolvedSe
 	}
 	if result.Pid == 0 {
 		result.Pid = support.GetRootId(support.GetLocalCategoryId(sourceId, sourcePid))
+	}
+	if result.Pid == 0 && detail.Pid > 0 {
+		result.Pid = support.GetRootId(detail.Pid)
+	}
+	if result.Pid == 0 && detail.CName != "" {
+		result.Pid = support.ResolveRootCategoryIDByCName(detail.CName)
 	}
 	if result.Pid > 0 && result.CName == "" {
 		result.CName = support.GetCategoryNameById(result.Pid)
@@ -254,7 +269,7 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
 	if category.Pid <= 0 {
-		return model.FilmIndex{}, fmt.Errorf("影片未映射到分类: %s", strings.TrimSpace(detail.Name))
+		return model.FilmIndex{}, fmt.Errorf("%w: %s", ErrCategoryNotMapped, strings.TrimSpace(detail.Name))
 	}
 	meta, err := normalizeSearchMetadata(sourceId, detail, category)
 	if err != nil {

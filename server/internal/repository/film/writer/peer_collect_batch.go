@@ -295,6 +295,11 @@ func createPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageIt
 		}
 		fi, err := ConvertFilmIndex(source.Id, items[i].detail, categoryVersion, ruleVersion)
 		if err != nil {
+			if IsCategoryNotMapped(err) {
+				// 未映射分类的影片不入库：跳过本片创建，不阻断整页其他有效影片入库
+				items[i].create = false
+				continue
+			}
 			return err
 		}
 		fi.Mid = 0
@@ -480,6 +485,9 @@ func syncPageFilmsTx(tx *gorm.DB, source *model.FilmSource, items []peerPageItem
 	})
 	for _, idx := range order {
 		if err := syncOwnedFilmTx(tx, items[idx].film, source.Id, items[idx].detail); err != nil {
+			if IsCategoryNotMapped(err) {
+				continue
+			}
 			return err
 		}
 	}

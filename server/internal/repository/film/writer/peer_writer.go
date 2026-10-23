@@ -63,8 +63,20 @@ func syncOwnedFilmTx(tx *gorm.DB, existing *model.FilmIndex, sourceID string, de
 	if existing == nil || existing.Mid <= 0 || existing.FirstSourceId != sourceID {
 		return nil
 	}
+	if detail.Pid <= 0 && existing.Pid > 0 {
+		detail.Pid = existing.Pid
+	}
+	if detail.Cid <= 0 && existing.Cid > 0 {
+		detail.Cid = existing.Cid
+	}
+	if detail.CName == "" && existing.CName != "" {
+		detail.CName = existing.CName
+	}
 	next, err := ConvertFilmIndex(sourceID, detail, support.GetCategoryVersion(), support.GetRuleVersion())
 	if err != nil {
+		if IsCategoryNotMapped(err) {
+			return nil
+		}
 		return err
 	}
 	updates := ownedFilmUpdates(existing, &next)
@@ -316,6 +328,9 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			}
 			fi, err := createNewFilmIndexTx(tx, source.Id, detail)
 			if err != nil {
+				if IsCategoryNotMapped(err) {
+					return nil
+				}
 				return err
 			}
 			mid = fi.Mid

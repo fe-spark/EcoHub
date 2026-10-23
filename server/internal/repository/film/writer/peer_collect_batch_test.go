@@ -10,6 +10,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
 
 	"gorm.io/driver/sqlite"
@@ -292,9 +293,15 @@ func openPeerPageDB(t *testing.T) *gorm.DB {
 		&model.MovieMatchKey{},
 		&model.MovieSourceMapping{},
 		&model.FilmSourcePlaylist{},
+		&model.Category{},
+		&model.CategoryMapping{},
+		&model.SourceCategory{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	_ = gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true}).Error
+	db.Mdb = gdb
+	support.RefreshCategoryCache()
 	return gdb
 }
 
@@ -310,12 +317,12 @@ func testPeerDetailWithLines(id int64, name string, from []string, episodes []st
 	return model.MovieDetail{
 		Id:              id,
 		Name:            name,
-		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-08 12:00:00"},
+		Pid:             1,
+		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-08 12:00:00", CName: "电影"},
 		PlayFrom:        from,
 		PlayList:        play,
 	}
 }
-
 func countRows(t *testing.T, gdb *gorm.DB, modelValue any) int64 {
 	t.Helper()
 	var n int64
@@ -408,6 +415,8 @@ func TestRecollect_RewritesMatchKeysAndKeepsEmptyFields(t *testing.T) {
 	}
 
 	second := testPeerDetail(7, "仙逆", "第1集")
+	second.Pid = 0
+	second.CName = ""
 	second.Picture = ""
 	second.PictureSlide = ""
 	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{second}); err != nil {
@@ -423,6 +432,7 @@ func TestRecollect_RewritesMatchKeysAndKeepsEmptyFields(t *testing.T) {
 	assertMatchKeys(t, gdb, mid, shared.BuildMovieMatchKeysWithCategory(36117912, "仙逆", 3))
 
 	third := testPeerDetail(7, "仙逆年番", "第2集")
+	third.Pid = 3
 	third.DbId = 36117912
 	third.Picture = "https://a/p2.jpg"
 	if _, err := SaveCollectedPeerDetails(context.Background(), source, 1, []model.MovieDetail{third}); err != nil {

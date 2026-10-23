@@ -24,7 +24,8 @@ func TestSaveDetail_NewFilm_NoDeadlock(t *testing.T) {
 
 	detail := model.MovieDetail{
 		Name:            "死锁测试影片",
-		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-16 12:00:00"},
+		Pid:             1,
+		MovieDescriptor: model.MovieDescriptor{UpdateTime: "2026-10-16 12:00:00", CName: "电影"},
 		PlayList: [][]model.MovieUrlInfo{
 			{{Episode: "第01集", Link: "http://play/1"}},
 		},
@@ -72,6 +73,7 @@ func TestSaveDetail_ManualUpdate_NoDeadlock(t *testing.T) {
 			Mid:           1001,
 			FirstSourceId: "test_source",
 		},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, CName: "电影"},
 		FilmIndexContent: model.FilmIndexContent{
 			Name: "原始影片",
 		},
@@ -142,6 +144,7 @@ func TestSaveDetail_ConcurrentSaveAndCollect_NoDeadlock(t *testing.T) {
 		defer wg.Done()
 		d := model.MovieDetail{
 			Name: "并发电影1",
+			Pid:  1,
 			PlayList: [][]model.MovieUrlInfo{
 				{{Episode: "01", Link: "http://a/1"}},
 			},
@@ -203,6 +206,7 @@ func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
 			Mid:           2001,
 			FirstSourceId: "spider_sn",
 		},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, CName: "电影"},
 		FilmIndexContent: model.FilmIndexContent{
 			Name: "采集入库影片",
 		},
@@ -252,6 +256,7 @@ func TestSaveDetail_ManualPlaylists_IsolatesSpiderLines(t *testing.T) {
 			Mid:           3001,
 			FirstSourceId: "manual",
 		},
+		FilmIndexCategory: model.FilmIndexCategory{Pid: 1, CName: "电影"},
 		FilmIndexContent: model.FilmIndexContent{
 			Name: "自己新增的影片",
 		},
