@@ -1,6 +1,7 @@
 package writer
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"strings"
@@ -252,6 +253,9 @@ func buildFilmIndex(sourceId string, detail model.MovieDetail, category resolved
 
 func ConvertFilmIndex(sourceId string, detail model.MovieDetail, categoryVersion string, ruleVersion string) (model.FilmIndex, error) {
 	category := resolveSearchCategory(sourceId, detail)
+	if category.Pid <= 0 {
+		return model.FilmIndex{}, fmt.Errorf("影片未映射到分类: %s", strings.TrimSpace(detail.Name))
+	}
 	meta, err := normalizeSearchMetadata(sourceId, detail, category)
 	if err != nil {
 		return model.FilmIndex{}, err

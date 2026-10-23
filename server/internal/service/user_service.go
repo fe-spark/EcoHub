@@ -44,9 +44,19 @@ func (s *UserService) UserLogout(id uint) error {
 	return repository.ClearUserToken(id)
 }
 
-// StoredToken 返回用户当前有效登录令牌。
-func (s *UserService) StoredToken(userID uint) string {
+// StoredToken 返回用户当前有效登录令牌。Redis 没有该键时令牌为空。
+func (s *UserService) StoredToken(userID uint) (string, error) {
 	return repository.GetUserToken(userID)
+}
+
+// AccountStatus 读取账号状态。0 为正常。
+func (s *UserService) AccountStatus(userID uint) (int, error) {
+	return repository.UserAccountStatus(userID)
+}
+
+// AccountGate 读取账号状态和角色。鉴权以库里的值为准，不信 JWT 里的旧角色。
+func (s *UserService) AccountGate(userID uint) (status int, role int, err error) {
+	return repository.UserAccountGate(userID)
 }
 
 // GetUserInfo 获取用户基本信息
@@ -173,16 +183,13 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
 		passwordChanged = true
 	}
-	if err := repository.UpdateUserInfo(u); err != nil {
-		return err
-	}
-	// 如果修改密码、用户被禁用（Status == 1）或角色变更，强制清除其登录状态使 Token 失效
+	// 先清令牌再改库。清失败则密码、角色、状态都不变，旧令牌仍只对应旧账号。
 	if passwordChanged || u.Status == 1 || roleChanged {
 		if err := repository.ClearUserToken(u.ID); err != nil {
 			return err
 		}
 	}
-	return nil
+	return repository.UpdateUserInfo(u)
 }
 
 // DeleteUser 删除用户。operatorID、operatorRole 为当前登录人。
@@ -197,10 +204,10 @@ func (s *UserService) DeleteUser(operatorID uint, operatorRole int, id uint) err
 	if msg := model.CheckUserDelete(operatorID, operatorRole, id, user.UserName); msg != "" {
 		return errors.New(msg)
 	}
-	if err = repository.DeleteUser(id); err != nil {
+	if err = repository.ClearUserToken(id); err != nil {
 		return err
 	}
-	return repository.ClearUserToken(id)
+	return repository.DeleteUser(id)
 }
 
 func buildUserInfoVo(u model.User) model.UserInfoVo {

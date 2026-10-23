@@ -72,6 +72,8 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 
 	resultChan := make(chan categoryResult, len(tree.Children))
 	var wg sync.WaitGroup
+	var filterErr error
+	var errMu sync.Mutex
 
 	for i, c := range tree.Children {
 		if !c.Show {
@@ -81,7 +83,15 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 		go func(index int, category *model.CategoryTree) {
 			defer wg.Done()
 
-			searchTags := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id, sourceId)
+			searchTags, tagErr := filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), category.Id, sourceId)
+			if tagErr != nil {
+				errMu.Lock()
+				if filterErr == nil {
+					filterErr = tagErr
+				}
+				errMu.Unlock()
+				return
+			}
 			tvboxFilters := make([]map[string]any, 0)
 
 			// Robustly get metadata from searchTags
@@ -186,6 +196,9 @@ func (p *ProvideService) GetClassList(sourceIdOpt ...string) ([]model.FilmClass,
 	for _, f := range finals {
 		classList = append(classList, f.item)
 		filters[strconv.FormatInt(f.item.ID, 10)] = f.filters
+	}
+	if filterErr != nil {
+		return nil, nil, filterErr
 	}
 
 	// 写入 Redis 缓存 (5 分钟)

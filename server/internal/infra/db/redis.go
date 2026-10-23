@@ -28,7 +28,7 @@ func InitRedisConn() error {
 		DB:              config.RedisDBNo,
 		PoolSize:        64,
 		MinIdleConns:    10,
-		MaxRetries:      3,
+		MaxRetries:      -1, // 0 会被 go-redis 当成默认 3 次，INCR 会整段重放
 		DialTimeout:     time.Second * 10,
 		ReadTimeout:     time.Second * 5,
 		WriteTimeout:    time.Second * 5,

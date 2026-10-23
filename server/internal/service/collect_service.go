@@ -235,31 +235,10 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行地址或协议变更操作")
 	}
 
-	var orphanMids []int64
-	if isUriChanged {
-		orphans, err := repository.CascadeCleanSourceData(source.Id)
-		if len(orphans) > 0 {
-			filmsnapshot.DeleteActiveSnapshotsByMids(orphans...)
-		}
-		if err != nil {
-			syslog.Errorf("[Collect] 更换源地址清空历史数据失败: %v", err)
-			return errors.New("清空历史数据失败，请重试")
-		}
-		orphanMids = orphans
+	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged, isUriChanged || isFormatChanged)
+	if len(orphanMids) > 0 {
+		filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 	}
-	if isUriChanged || isFormatChanged {
-		if err := repository.DeleteFailureRecordsByOrigin(source.Id); err != nil {
-			syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
-			return errors.New("清理原失败记录失败，请重试")
-		}
-	}
-	if isUriChanged {
-		if err := repository.ClearSourceCategoryData(source.Id); err != nil {
-			syslog.Errorf("[Collect] 更换源地址清空分类失败: %v", err)
-			return errors.New("清空分类失败，请重试")
-		}
-	}
-	err := repository.UpdateCollectSource(source)
 	if err != nil {
 		return err
 	}
@@ -374,7 +353,7 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 		return errors.New("当前资源站信息不存在, 请勿重复操作")
 	}
 	if progress.IsSourceDeleting(id) {
-		return nil
+		return errors.New("该站正在删除")
 	}
 
 	select {
@@ -414,12 +393,15 @@ func (s *CollectService) DelFilmSource(id string) error {
 		defer release()
 		oldPrimary := repository.PickPrimarySourceForCategory()
 		orphanMids, err := repository.DelCollectResource(id)
+		if err != nil {
+			if len(orphanMids) > 0 {
+				filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
+			}
+			return err
+		}
 		if len(orphanMids) > 0 {
 			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
-		}
-		if err != nil {
-			return err
 		}
 		spider.ClearLimiter(id)
 		clearProvideNetworkConfigCache()

@@ -253,6 +253,24 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		return
 	}
 
+	activeFilmSearchMetasMu.Lock()
+	cur := activeFilmSearchMetas.Load()
+	if cur == nil || cur.Version != version {
+		activeFilmSearchMetasMu.Unlock()
+		if _, err := loadFilmSearchMetaIndex(version); err != nil {
+			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
+			return
+		}
+		activeFilmSearchMetasMu.Lock()
+		cur = activeFilmSearchMetas.Load()
+	}
+	defer activeFilmSearchMetasMu.Unlock()
+
+	if cur == nil || cur.Version != version {
+		return
+	}
+
+	// 拿锁后再读库。重建扫描持有同一把锁，过期预读不能在 Store 之后把已删片子写回去。
 	const batchSize = 500
 	var allRows []dbMetaRow
 	for i := 0; i < len(cleanMids); i += batchSize {
@@ -281,23 +299,6 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		meta := metaFromRow(r)
 		meta.PlaySources = plays[r.Mid]
 		upsertMap[r.Mid] = meta
-	}
-
-	activeFilmSearchMetasMu.Lock()
-	cur := activeFilmSearchMetas.Load()
-	if cur == nil || cur.Version != version {
-		activeFilmSearchMetasMu.Unlock()
-		if _, err := loadFilmSearchMetaIndex(version); err != nil {
-			log.Printf("[ActiveReadModel] 检索索引加载失败 version=%s: %v", version, err)
-			return
-		}
-		activeFilmSearchMetasMu.Lock()
-		cur = activeFilmSearchMetas.Load()
-	}
-	defer activeFilmSearchMetasMu.Unlock()
-
-	if cur == nil || cur.Version != version {
-		return
 	}
 
 	newItems := make([]FilmSearchMeta, 0, len(cur.Items)+len(upsertMap))

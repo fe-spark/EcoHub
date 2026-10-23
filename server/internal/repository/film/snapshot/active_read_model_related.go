@@ -2,11 +2,13 @@ package snapshot
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang.org/x/sync/singleflight"
 	"log"
 	"strings"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -37,7 +39,7 @@ func pageSnapshots(snapshots []model.FilmListSnapshot, page *dto.Page) []model.F
 	return snapshots[offset:end]
 }
 
-func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page, sourceIdOpt ...string) []model.FilmListSnapshot {
+func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapshot, page *dto.Page, sourceIdOpt ...string) ([]model.FilmListSnapshot, error) {
 	startedAt := time.Now()
 	page = shared.EnsurePage(page)
 	version = strings.TrimSpace(version)
@@ -47,7 +49,7 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	if version == "" || snapshot.Mid <= 0 {
 		page.Total = 0
 		page.PageCount = 1
-		return []model.FilmListSnapshot{}
+		return []model.FilmListSnapshot{}, nil
 	}
 
 	var sourceID string
@@ -64,7 +66,6 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	var candidates []model.FilmListSnapshot
 	hitCache := false
 
-	// 1. 尝试从 Redis 缓存获取候选集
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if json.Unmarshal([]byte(data), &candidates) == nil {
@@ -75,7 +76,6 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 		}
 	}
 
-	// 2. 并发防击穿：同 mid 详情页并发打开时合并计算候选集
 	if !hitCache {
 		var sfKey string
 		if sourceID != "" {
@@ -84,7 +84,6 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 			sfKey = fmt.Sprintf("v%s:%d", version, snapshot.Mid)
 		}
 		val, err, _ := relatedSnapshotsSf.Do(sfKey, func() (any, error) {
-			// 二次双检 Redis 缓存
 			if db.Rdb != nil {
 				if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 					var cached []model.FilmListSnapshot
@@ -95,7 +94,10 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 			}
 
 			listGen := GetSearchCacheVersion()
-			cands := loadRelatedSnapshotCandidates(version, snapshot, maxRelatedRecommendCount, sourceID)
+			cands, loadErr := loadRelatedSnapshotCandidates(version, snapshot, maxRelatedRecommendCount, sourceID)
+			if loadErr != nil {
+				return nil, loadErr
+			}
 			ttl := relatedCacheTTL
 			if len(cands) == 0 {
 				ttl = emptyListCacheTTL
@@ -106,15 +108,16 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 
 			log.Printf("[FilmRelate] 相关推荐候选集计算完成 mid=%d name=%q source=%q cache=MISS candidates=%d cost=%s",
 				snapshot.Mid, snapshot.Name, sourceID, len(cands), time.Since(startedAt))
-
 			return cands, nil
 		})
-
-		if err == nil && val != nil {
-			if cands, ok := val.([]model.FilmListSnapshot); ok {
-				candidates = cands
-			}
+		if err != nil {
+			return nil, err
 		}
+		cands, ok := val.([]model.FilmListSnapshot)
+		if !ok {
+			return nil, errors.New("相关推荐结果异常")
+		}
+		candidates = cands
 	}
 
 	curTotal := len(candidates)
@@ -126,12 +129,12 @@ func ListRelatedSnapshotsReadModel(version string, snapshot model.FilmListSnapsh
 	page.PageCount = curPageCount
 
 	result := pageSnapshots(candidates, page)
-	return cloneFilmListSnapshots(result)
+	return cloneFilmListSnapshots(result), nil
 }
 
 const candidatePoolLimit = 60
 
-func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapshot, maxCandidates int, sourceID string) []model.FilmListSnapshot {
+func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapshot, maxCandidates int, sourceID string) ([]model.FilmListSnapshot, error) {
 	seen := make(map[int64]struct{}, candidatePoolLimit+1)
 	seen[current.Mid] = struct{}{}
 	list := make([]model.FilmListSnapshot, 0, candidatePoolLimit)
@@ -157,73 +160,83 @@ func loadRelatedSnapshotCandidates(version string, current model.FilmListSnapsho
 		return q
 	}
 
-	// 1. 同系列极速召回（命中 series_key 索引）
-	if current.SeriesKey != "" && db.Mdb != nil {
-		seriesRows, _ := scanListSnapshots(baseQuery().
-			Where("series_key = ? AND mid <> ?", current.SeriesKey, current.Mid).
-			Order("hits DESC, mid DESC").Limit(candidatePoolLimit))
-		appendUnique(seriesRows)
+	recall := func(query *gorm.DB) error {
+		rows, err := scanListSnapshots(query)
+		if err != nil {
+			return err
+		}
+		appendUnique(rows)
+		return nil
 	}
 
-	// 2. 同核心片名/同IP系列极速召回（命中 idx_film_index_name 索引，召回同IP剧场版、年番、衍生番）
+	if current.SeriesKey != "" && db.Mdb != nil {
+		if err := recall(baseQuery().
+			Where("series_key = ? AND mid <> ?", current.SeriesKey, current.Mid).
+			Order("hits DESC, mid DESC").Limit(candidatePoolLimit)); err != nil {
+			return nil, err
+		}
+	}
+
 	coreToken := extractCoreSearchToken(current.Name)
 	if len(list) < candidatePoolLimit && len([]rune(coreToken)) >= 2 && db.Mdb != nil {
-		titleRows, _ := scanListSnapshots(baseQuery().
+		if err := recall(baseQuery().
 			Where("name LIKE ? AND mid <> ?", coreToken+"%", current.Mid).
-			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-		appendUnique(titleRows)
+			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+			return nil, err
+		}
 	}
 
-	// 3. 同细分类极速召回（命中 category_key 或 cid 复合索引）
 	if len(list) < candidatePoolLimit && db.Mdb != nil {
 		catKey := strings.TrimSpace(current.CategoryKey)
 		if catKey != "" {
-			catRows, _ := scanListSnapshots(baseQuery().
+			if err := recall(baseQuery().
 				Where("category_key = ? AND mid <> ?", catKey, current.Mid).
-				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-			appendUnique(catRows)
+				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+				return nil, err
+			}
 		} else if current.Cid > 0 {
-			cidRows, _ := scanListSnapshots(baseQuery().
+			if err := recall(baseQuery().
 				Where("cid = ? AND mid <> ?", current.Cid, current.Mid).
-				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-			appendUnique(cidRows)
+				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	// 4. 同大分类热播极速召回（命中 root_category_key 或 pid 复合索引）
 	rootKey, pid := resolveCurrentRootCategory(current)
 	if len(list) < candidatePoolLimit && db.Mdb != nil {
 		if rootKey != "" {
-			rootRows, _ := scanListSnapshots(baseQuery().
+			if err := recall(baseQuery().
 				Where("root_category_key = ? AND mid <> ?", rootKey, current.Mid).
-				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-			appendUnique(rootRows)
+				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+				return nil, err
+			}
 		}
 		if len(list) < candidatePoolLimit && pid > 0 {
-			pidRows, _ := scanListSnapshots(baseQuery().
+			if err := recall(baseQuery().
 				Where("pid = ? AND mid <> ?", pid, current.Mid).
-				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-			appendUnique(pidRows)
+				Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+				return nil, err
+			}
 		}
 	}
 
-	// 5. 首选站热播兜底（仅在影片自身无任何分类归属时作为孤立片保底，有大分类时绝对禁止跨类污染）
 	if len(list) < candidatePoolLimit && rootKey == "" && pid <= 0 && db.Mdb != nil {
-		fallbackRows, _ := scanListSnapshots(baseQuery().
+		if err := recall(baseQuery().
 			Where("mid <> ?", current.Mid).
-			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-		appendUnique(fallbackRows)
+			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+			return nil, err
+		}
 	}
 
-	// 6. 全库热播兜底（仅在未指定首选站且影片无分类归属时）
 	if len(list) < candidatePoolLimit && sourceID == "" && rootKey == "" && pid <= 0 && db.Mdb != nil {
-		globalRows, _ := scanListSnapshots(liveFilmQuery().
+		if err := recall(liveFilmQuery().
 			Select(relatedSnapshotSelectFields).
 			Where("mid <> ?", current.Mid).
-			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list)))
-		appendUnique(globalRows)
+			Order("hits DESC, mid DESC").Limit(candidatePoolLimit - len(list))); err != nil {
+			return nil, err
+		}
 	}
 
-	// 7. 内存多维特征打分与重排（微秒级 CPU 计算，彻底避免 SQL 字符串与全表扫描）
-	return rankRelatedCandidates(current, list, maxCandidates)
+	return rankRelatedCandidates(current, list, maxCandidates), nil
 }

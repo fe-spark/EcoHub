@@ -87,7 +87,7 @@ func (i *IndexService) GetPidCategory(pid int64, sourceIdOpt ...string) *model.C
 }
 
 // SearchTags 整合对应分类的搜索tag
-func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
+func (i *IndexService) SearchTags(st model.SearchTagsVO) (map[string]any, error) {
 	sourceId := strings.TrimSpace(st.SourceId)
 	if sourceId == "" {
 		if active := repository.GetActiveCollectSource(); active != nil {
@@ -95,7 +95,7 @@ func (i *IndexService) SearchTags(st model.SearchTagsVO) map[string]any {
 		}
 	}
 	if sourceId == "" {
-		return map[string]any{"tags": map[string]any{}, "titles": map[string]any{}}
+		return map[string]any{"tags": map[string]any{}, "titles": map[string]any{}}, nil
 	}
 	return filmsnapshot.GetFilterOptionSnapshot(filmsnapshot.GetActiveReadModelVersion(), st.Pid, sourceId)
 }

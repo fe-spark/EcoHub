@@ -26,7 +26,7 @@ func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 	if s == nil {
 		return utils.RequestInfo{Params: url.Values{}}, nil
 	}
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, SkipTLSVerify: s.SkipTLSVerify}
 	if s.ProxyCollect {
 		ok, proxy, err := repository.ResolveSpiderProxy()
 		if err != nil {
@@ -46,7 +46,6 @@ func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 			r.ProxyURL = proxy
 		}
 	}
-	r.SkipTLSVerify = s.SkipTLSVerify
 	return r, nil
 }
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -19,9 +20,9 @@ import (
 var relateMovieSfGroup singleflight.Group
 
 // RelateMovie 根据当前影片快照匹配相关的影片（默认锁定首选站）
-func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...string) []model.MovieBasicInfo {
+func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...string) ([]model.MovieBasicInfo, error) {
 	if mid <= 0 {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 	startedAt := time.Now()
 	page = normalizeIndexPage(page)
@@ -30,7 +31,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 		version = filmsnapshot.GetActiveSnapshotVersion()
 	}
 	if version == "" {
-		return []model.MovieBasicInfo{}
+		return []model.MovieBasicInfo{}, nil
 	}
 
 	var sourceID string
@@ -50,11 +51,11 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if data == "[]" {
-				return []model.MovieBasicInfo{}
+				return []model.MovieBasicInfo{}, nil
 			}
 			var cached []model.MovieBasicInfo
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached
+				return cached, nil
 			}
 		}
 	}
@@ -96,7 +97,10 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 			return []model.MovieBasicInfo{}, nil
 		}
 		listStartedAt := time.Now()
-		list := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page, sourceID)
+		list, listErr := filmsnapshot.ListRelatedSnapshotsReadModel(version, *snapshot, page, sourceID)
+		if listErr != nil {
+			return nil, listErr
+		}
 		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
 		buildStartedAt := time.Now()
 		result := filmshared.BuildMovieBasicInfosFromSnapshots(list...)
@@ -120,13 +124,16 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	})
 
 	if err != nil || val == nil {
-		return []model.MovieBasicInfo{}
+		if err != nil {
+			return nil, err
+		}
+		return []model.MovieBasicInfo{}, nil
 	}
 	result, ok := val.([]model.MovieBasicInfo)
 	if !ok {
-		return []model.MovieBasicInfo{}
+		return nil, errors.New("相关推荐结果异常")
 	}
 	res := make([]model.MovieBasicInfo, len(result))
 	copy(res, result)
-	return res
+	return res, nil
 }

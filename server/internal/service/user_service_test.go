@@ -87,8 +87,8 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if err := repository.SaveUserToken("initial_token", u.ID); err != nil {
 		t.Fatalf("save token: %v", err)
 	}
-	if tok := repository.GetUserToken(u.ID); tok != "initial_token" {
-		t.Fatalf("expected initial_token, got %q", tok)
+	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "initial_token" {
+		t.Fatalf("expected initial_token, got %q err=%v", tok, err)
 	}
 
 	// 2. 普通修改（仅更新昵称），Token 应该保持有效
@@ -100,8 +100,30 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update nick: %v", err)
 	}
-	if tok := repository.GetUserToken(u.ID); tok != "initial_token" {
-		t.Fatalf("token should remain after nickname update, got %q", tok)
+	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "initial_token" {
+		t.Fatalf("token should remain after nickname update, got %q err=%v", tok, err)
+	}
+
+	// 清令牌失败时不改密码，旧令牌保持有效。
+	testRdb := db.Rdb
+	db.Rdb = nil
+	blockedPwd := "should-not-apply"
+	if err := UserSvc.UpdateUser(u.ID, u.Role, model.UserUpdatePayload{
+		ID:       u.ID,
+		Password: &blockedPwd,
+	}); err == nil {
+		t.Fatal("expected password update to fail when token store is unavailable")
+	}
+	db.Rdb = testRdb
+	var stored model.User
+	if err := gdb.First(&stored, u.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.Password != "oldpassword" {
+		t.Fatalf("password changed despite token clear failure: %q", stored.Password)
+	}
+	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "initial_token" {
+		t.Fatalf("token should remain when password update is rejected, got %q err=%v", tok, err)
 	}
 
 	// 3. 修改密码，必须清除 Token（强制全设备重新登录）
@@ -113,8 +135,8 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("update password: %v", err)
 	}
-	if tok := repository.GetUserToken(u.ID); tok != "" {
-		t.Fatalf("token should be cleared after password change, got %q", tok)
+	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "" {
+		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
 	}
 
 	// 4. 再次登录后注销，必须清除 Token
@@ -122,7 +144,7 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 		t.Fatalf("save second token: %v", err)
 	}
 	UserSvc.UserLogout(u.ID)
-	if tok := repository.GetUserToken(u.ID); tok != "" {
-		t.Fatalf("token should be cleared after logout, got %q", tok)
+	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "" {
+		t.Fatalf("token should be cleared after logout, got %q err=%v", tok, err)
 	}
 }

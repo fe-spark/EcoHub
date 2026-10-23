@@ -66,6 +66,11 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		return nil, ErrSearchIndexMissing
 	}
 	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
+		activeFilmSearchMetasMu.Lock()
+		defer activeFilmSearchMetasMu.Unlock()
+		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
+			return cur, nil
+		}
 		started := time.Now()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
 		var (
@@ -89,9 +94,7 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
 		attachPlaySources(items, plays)
 		idx := sealSearchMetaIndex(version, items)
-		activeFilmSearchMetasMu.Lock()
 		activeFilmSearchMetas.Store(idx)
-		activeFilmSearchMetasMu.Unlock()
 		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
 		return idx, nil
 	})

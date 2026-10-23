@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -16,6 +17,8 @@ import (
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
 )
 
 func init() {
@@ -90,7 +93,31 @@ func TestAdminAccess(t *testing.T) {
 	}
 }
 
+func seedAuthUser(t *testing.T, id uint) {
+	t.Helper()
+	gdb, err := gorm.Open(sqlite.Open(fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.User{}); err != nil {
+		t.Fatalf("migrate user: %v", err)
+	}
+	user := model.User{
+		Model:    gorm.Model{ID: id},
+		UserName: "admin",
+		Status:   0,
+		Role:     model.UserRoleAdmin,
+	}
+	if err := gdb.Create(&user).Error; err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	orig := db.Mdb
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = orig })
+}
+
 func TestAuthToken_SingleSignOn(t *testing.T) {
+	seedAuthUser(t, 10086)
 	origRdb := db.Rdb
 	defer func() {
 		db.Rdb = origRdb
@@ -167,5 +194,54 @@ func TestAuthToken_SingleSignOn(t *testing.T) {
 	r.ServeHTTP(w5, req5)
 	if w5.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 after clear, got %d", w5.Code)
+	}
+}
+
+func TestAuthToken_ReReadsRole(t *testing.T) {
+	seedAuthUser(t, 10087)
+	origRdb := db.Rdb
+	defer func() { db.Rdb = origRdb }()
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	defer client.Close()
+	db.Rdb = client
+
+	token, err := utils.GenToken(10087, "admin", model.UserRoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveUserToken(token, 10087); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Mdb.Model(&model.User{}).Where("id = ?", 10087).Update("role", model.UserRoleNormal).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	r := gin.New()
+	r.GET("/api/manage/config/access", AuthToken(), AdminAccess(), func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/api/manage/config/access", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("demoted token should be forbidden, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestForwardedProto(t *testing.T) {
+	if got := forwardedProto("https, http"); got != "https" {
+		t.Fatalf("got %q", got)
+	}
+	if got := forwardedProto("http"); got != "http" {
+		t.Fatalf("got %q", got)
+	}
+	if got := forwardedProto("HTTPS"); got != "" {
+		t.Fatalf("got %q", got)
 	}
 }

@@ -29,7 +29,12 @@ func AuthToken() gin.HandlerFunc {
 			return
 		}
 
-		storedToken := service.UserSvc.StoredToken(uc.UserID)
+		storedToken, err := service.UserSvc.StoredToken(uc.UserID)
+		if err != nil {
+			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+			c.Abort()
+			return
+		}
 		if storedToken == "" {
 			ClearAuthCookie(c)
 			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
@@ -42,6 +47,20 @@ func AuthToken() gin.HandlerFunc {
 			c.Abort()
 			return
 		}
+		status, role, err := service.UserSvc.AccountGate(uc.UserID)
+		if err != nil {
+			dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+			c.Abort()
+			return
+		}
+		if status != 0 {
+			_ = service.UserSvc.UserLogout(uc.UserID)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号已被禁用", c)
+			c.Abort()
+			return
+		}
+		uc.Role = role
 
 		// 将UserClaims存放到context中
 		c.Set(config.AuthUserClaims, uc)

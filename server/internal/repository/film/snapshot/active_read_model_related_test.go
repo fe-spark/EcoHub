@@ -95,7 +95,10 @@ func TestRelatedSnapshotCandidates_MultiStageFunnel(t *testing.T) {
 	// 测试 1：仙逆在首选站下召回
 	snap := buildFilmListSnapshot("live", currentFilm)
 	page := dto.Page{Current: 0, PageSize: 14}
-	res := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	res, err := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(res) == 0 {
 		t.Fatalf("expected non-empty related films for 仙逆, got 0")
@@ -149,7 +152,10 @@ func TestRelatedSnapshotCandidates_IsolatedNoCategoryFallback(t *testing.T) {
 
 	snap := buildFilmListSnapshot("live", currentFilm)
 	page := dto.Page{Current: 0, PageSize: 14}
-	res := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	res, err := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(res) == 0 {
 		t.Fatalf("expected popularity fallback to provide recommendations for isolated film, got 0")
@@ -203,7 +209,10 @@ func TestRelatedSnapshotCandidates_GenreAndRegionRelevance(t *testing.T) {
 
 	snap := buildFilmListSnapshot("live", currentFilm)
 	page := dto.Page{Current: 0, PageSize: 14}
-	res := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	res, err := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(res) == 0 {
 		t.Fatalf("expected recommendations, got 0")
@@ -266,7 +275,10 @@ func TestRelatedSnapshotCandidates_SameFranchiseTheatricalVersions(t *testing.T)
 
 	snap := buildFilmListSnapshot("live", currentFilm)
 	page := dto.Page{Current: 0, PageSize: 14}
-	res := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	res, err := ListRelatedSnapshotsReadModel("live", snap, &page, srcID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if len(res) < 2 {
 		t.Fatalf("expected at least 2 recommendations, got %d", len(res))

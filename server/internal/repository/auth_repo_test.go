@@ -19,19 +19,14 @@ func TestAuthRepo_RedisNilSafety(t *testing.T) {
 		db.Rdb = origRdb
 	}()
 
-	// 1. SaveUserToken with nil Rdb
-	if err := SaveUserToken("test-token", 100); err != nil {
-		t.Fatalf("expected nil err when db.Rdb is nil, got %v", err)
+	if err := SaveUserToken("test-token", 100); err == nil {
+		t.Fatal("expected error when db.Rdb is nil")
 	}
-
-	// 2. GetUserToken with nil Rdb
-	if token := GetUserToken(100); token != "" {
-		t.Fatalf("expected empty token when db.Rdb is nil, got %q", token)
+	if _, err := GetUserToken(100); err == nil {
+		t.Fatal("expected error when db.Rdb is nil")
 	}
-
-	// 3. ClearUserToken with nil Rdb
-	if err := ClearUserToken(100); err != nil {
-		t.Fatalf("expected nil err when db.Rdb is nil, got %v", err)
+	if err := ClearUserToken(100); err == nil {
+		t.Fatal("expected error when db.Rdb is nil")
 	}
 }
 
@@ -55,7 +50,10 @@ func TestAuthRepo_WithRedis(t *testing.T) {
 		t.Fatalf("SaveUserToken failed: %v", err)
 	}
 
-	token := GetUserToken(42)
+	token, err := GetUserToken(42)
+	if err != nil {
+		t.Fatalf("GetUserToken failed: %v", err)
+	}
 	if token != "token-123" {
 		t.Fatalf("expected token-123, got %q", token)
 	}
@@ -69,7 +67,11 @@ func TestAuthRepo_WithRedis(t *testing.T) {
 		t.Fatalf("ClearUserToken failed: %v", err)
 	}
 
-	if token := GetUserToken(42); token != "" {
+	token, err = GetUserToken(42)
+	if err != nil {
+		t.Fatalf("GetUserToken after clear failed: %v", err)
+	}
+	if token != "" {
 		t.Fatalf("expected empty token after clear, got %q", token)
 	}
 }
@@ -94,7 +96,11 @@ func TestAuthRepo_SingleSignOn(t *testing.T) {
 	if err := SaveUserToken("token-device-a", 10000); err != nil {
 		t.Fatalf("SaveUserToken A failed: %v", err)
 	}
-	if token := GetUserToken(10000); token != "token-device-a" {
+	token, err := GetUserToken(10000)
+	if err != nil {
+		t.Fatalf("GetUserToken A failed: %v", err)
+	}
+	if token != "token-device-a" {
 		t.Fatalf("expected token-device-a, got %q", token)
 	}
 
@@ -102,7 +108,11 @@ func TestAuthRepo_SingleSignOn(t *testing.T) {
 	if err := SaveUserToken("token-device-b", 10000); err != nil {
 		t.Fatalf("SaveUserToken B failed: %v", err)
 	}
-	if token := GetUserToken(10000); token != "token-device-b" {
+	token, err = GetUserToken(10000)
+	if err != nil {
+		t.Fatalf("GetUserToken B failed: %v", err)
+	}
+	if token != "token-device-b" {
 		t.Fatalf("expected token-device-b to supersede token-device-a, got %q", token)
 	}
 
@@ -110,7 +120,11 @@ func TestAuthRepo_SingleSignOn(t *testing.T) {
 	if err := ClearUserToken(10000); err != nil {
 		t.Fatalf("ClearUserToken failed: %v", err)
 	}
-	if token := GetUserToken(10000); token != "" {
+	token, err = GetUserToken(10000)
+	if err != nil {
+		t.Fatalf("GetUserToken after clear failed: %v", err)
+	}
+	if token != "" {
 		t.Fatalf("expected empty token after clear, got %q", token)
 	}
 }

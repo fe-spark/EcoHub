@@ -22,6 +22,12 @@ func resolveProvideBaseURL(c *gin.Context) (string, error) {
 		scheme = "https"
 	}
 	if forwardedProto := strings.TrimSpace(c.GetHeader("X-Forwarded-Proto")); forwardedProto != "" {
+		if i := strings.Index(forwardedProto, ","); i >= 0 {
+			forwardedProto = strings.TrimSpace(forwardedProto[:i])
+		}
+		if forwardedProto != "http" && forwardedProto != "https" {
+			return "", errors.New("无法解析当前请求协议")
+		}
 		scheme = forwardedProto
 	}
 

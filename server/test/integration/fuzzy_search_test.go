@@ -135,7 +135,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 	t.Run("RelatedCandidates_SeriesAndCategory", func(t *testing.T) {
 		curr := model.FilmListSnapshot{Mid: 101, SeriesKey: "qingyunian", Name: "庆余年 第二季", Pid: 1, Cid: 10}
 		page := &dto.Page{Current: 1, PageSize: 10}
-		cands := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page)
+		cands, err := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(cands) == 0 {
 			t.Fatal("「庆余年 第二季」应有相关推荐候选")
 		}
@@ -148,7 +151,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		curr := model.FilmListSnapshot{Mid: 101, SeriesKey: "qingyunian", Name: "庆余年 第二季", Pid: 1, Cid: 10}
 
 		page1 := &dto.Page{Current: 1, PageSize: 1}
-		res1 := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page1)
+		res1, err := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page1)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res1) != 1 {
 			t.Fatalf("第 1 页应有 1 条，实际 %d 条", len(res1))
 		}
@@ -157,7 +163,10 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 
 		page2 := &dto.Page{Current: 2, PageSize: 1}
-		res2 := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page2)
+		res2, err := filmsnapshot.ListRelatedSnapshotsReadModel(version, curr, page2)
+		if err != nil {
+			t.Fatal(err)
+		}
 		if len(res2) != 1 {
 			t.Fatalf("第 2 页应有 1 条，实际 %d 条", len(res2))
 		}
@@ -186,13 +195,13 @@ func TestFuzzySearchScenarios(t *testing.T) {
 		}
 
 		p2 := &dto.Page{Current: 1, PageSize: 10}
-		if r := filmsnapshot.ListRelatedSnapshotsReadModel("", model.FilmListSnapshot{Mid: 101}, p2); len(r) != 0 || p2.Total != 0 || p2.PageCount != 1 {
-			t.Errorf("ListRelatedSnapshots 空版本应返回空且分页合法：len=%d total=%d pageCount=%d", len(r), p2.Total, p2.PageCount)
+		if r, err := filmsnapshot.ListRelatedSnapshotsReadModel("", model.FilmListSnapshot{Mid: 101}, p2); err != nil || len(r) != 0 || p2.Total != 0 || p2.PageCount != 1 {
+			t.Errorf("ListRelatedSnapshots 空版本应返回空且分页合法：len=%d total=%d pageCount=%d err=%v", len(r), p2.Total, p2.PageCount, err)
 		}
 
 		p3 := &dto.Page{Current: 1, PageSize: 10}
-		if r := filmsnapshot.ListRelatedSnapshotsReadModel(version, model.FilmListSnapshot{Mid: 0}, p3); len(r) != 0 || p3.Total != 0 || p3.PageCount != 1 {
-			t.Errorf("ListRelatedSnapshots mid=0 应返回空且分页合法：len=%d total=%d pageCount=%d", len(r), p3.Total, p3.PageCount)
+		if r, err := filmsnapshot.ListRelatedSnapshotsReadModel(version, model.FilmListSnapshot{Mid: 0}, p3); err != nil || len(r) != 0 || p3.Total != 0 || p3.PageCount != 1 {
+			t.Errorf("ListRelatedSnapshots mid=0 应返回空且分页合法：len=%d total=%d pageCount=%d err=%v", len(r), p3.Total, p3.PageCount, err)
 		}
 
 		p4 := &dto.Page{Current: 1, PageSize: 10}

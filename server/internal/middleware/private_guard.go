@@ -51,11 +51,28 @@ func PrivateAccessGuard() gin.HandlerFunc {
 		if authToken != "" {
 			uc, err := utils.ParseToken(authToken)
 			if err == nil && uc != nil && uc.UserID > 0 {
-				storedToken := service.UserSvc.StoredToken(uc.UserID)
+				storedToken, tokenErr := service.UserSvc.StoredToken(uc.UserID)
+				if tokenErr != nil {
+					dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+					c.Abort()
+					return
+				}
 				if storedToken != "" && storedToken == authToken {
+					status, role, statusErr := service.UserSvc.AccountGate(uc.UserID)
+					if statusErr != nil {
+						dto.CustomResult(http.StatusServiceUnavailable, dto.FAILED, nil, "登录状态暂不可用", c)
+						c.Abort()
+						return
+					}
+					if status != 0 {
+						dto.CustomResult(http.StatusUnauthorized, dto.FAILED, gin.H{"private_access": true}, "账号已被禁用", c)
+						c.Abort()
+						return
+					}
+					uc.Role = role
 					c.Set(config.AuthUserClaims, uc)
 					c.Set("user_id", uc.UserID)
-					c.Set("role", uc.Role)
+					c.Set("role", role)
 					c.Next()
 					return
 				}

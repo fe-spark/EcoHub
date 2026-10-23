@@ -356,5 +356,8 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	if ctx.Err() != nil {
 		return stats.success > 0, ctx.Err()
 	}
+	if stats.failed > 0 {
+		return stats.success > 0, fmt.Errorf("站点 %s 有 %d 页采集失败", s.Name, stats.failed)
+	}
 	return stats.success > 0, nil
 }

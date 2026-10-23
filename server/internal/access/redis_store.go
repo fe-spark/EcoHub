@@ -183,17 +183,19 @@ func writeEvent(evt *AccessEvent) {
 	pipe.ExpireNX(ctx, mk, ttlMinute)
 	pipe.ExpireNX(ctx, dk, ttlDay)
 
-	if n := takeUnsyncedDropped(); n > 0 {
+	dropped := takeUnsyncedDropped()
+	if dropped > 0 {
 		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, n)
+		pipe.IncrBy(ctx, dk, dropped)
 		pipe.ExpireNX(ctx, dk, ttlDay)
 
 		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, n)
+		pipe.IncrBy(ctx, dkDay, dropped)
 		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 
 	if _, err := pipe.Exec(ctx); err != nil {
+		restoreUnsyncedDropped(dropped)
 		syslog.Errorf("[Access] Redis 写入失败: %v", err)
 	}
 }
@@ -440,16 +442,18 @@ func writePageView(evt *AccessEvent) {
 		pipe.PFAdd(ctx, uk, uvIdentity)
 		pipe.ExpireNX(ctx, uk, ttlDay)
 	}
-	if n := takeUnsyncedDropped(); n > 0 {
+	dropped := takeUnsyncedDropped()
+	if dropped > 0 {
 		dk := droppedKey()
-		pipe.IncrBy(ctx, dk, n)
+		pipe.IncrBy(ctx, dk, dropped)
 		pipe.ExpireNX(ctx, dk, ttlDay)
 
 		dkDay := droppedDayKey(day)
-		pipe.IncrBy(ctx, dkDay, n)
+		pipe.IncrBy(ctx, dkDay, dropped)
 		pipe.ExpireNX(ctx, dkDay, ttlDay)
 	}
 	if _, err := pipe.Exec(ctx); err != nil {
+		restoreUnsyncedDropped(dropped)
 		syslog.Errorf("[Access] 页面埋点写入失败: %v", err)
 	}
 }

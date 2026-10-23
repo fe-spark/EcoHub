@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"errors"
 	"strings"
 
 	"server/internal/infra/db"
@@ -9,34 +10,42 @@ import (
 	"gorm.io/gorm"
 )
 
-// CascadeCleanSourceData 按块提交删除该站档案。中途失败再删一次会接着清完。
+// CascadeCleanSourceData 在一个事务里删除该站档案。失败则全部回滚。
 func CascadeCleanSourceData(id string) ([]int64, error) {
-	id = strings.TrimSpace(id)
-	if id == "" || db.Mdb == nil {
-		return nil, nil
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
 	}
 	var owned []int64
-	if err := db.Mdb.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var err error
+		owned, err = cascadeCleanSourceDataTx(tx, id)
+		return err
+	})
+	if err != nil {
 		return nil, err
 	}
-	if err := db.Mdb.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
+	return owned, nil
+}
+
+func cascadeCleanSourceDataTx(tx *gorm.DB, id string) ([]int64, error) {
+	id = strings.TrimSpace(id)
+	if id == "" || tx == nil {
+		return nil, errors.New("采集站不存在")
+	}
+	var owned []int64
+	if err := tx.Model(&model.FilmIndex{}).Where("first_source_id = ?", id).Pluck("mid", &owned).Error; err != nil {
 		return nil, err
 	}
-	if err := db.Mdb.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+	if err := tx.Where("source_id = ?", id).Delete(&model.FilmSourcePlaylist{}).Error; err != nil {
 		return nil, err
 	}
-	const chunkSize = 1000
-	deleted := make([]int64, 0, len(owned))
-	for i := 0; i < len(owned); i += chunkSize {
-		chunk := owned[i:min(i+chunkSize, len(owned))]
-		if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-			return deleteOwnedFilmChunk(tx, chunk)
-		}); err != nil {
-			return deleted, err
-		}
-		deleted = append(deleted, chunk...)
+	if err := tx.Where("source_id = ?", id).Delete(&model.MovieSourceMapping{}).Error; err != nil {
+		return nil, err
 	}
-	return deleted, nil
+	if err := deleteOwnedFilmsTx(tx, owned); err != nil {
+		return nil, err
+	}
+	return owned, nil
 }
 
 func deleteOwnedFilmChunk(tx *gorm.DB, mids []int64) error {

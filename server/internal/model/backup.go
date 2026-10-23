@@ -9,11 +9,11 @@ type ConfigBackup struct {
 	ExportedAt   string              `json:"exportedAt"`
 	AppVersion   string              `json:"appVersion,omitempty"`
 	Site         *BasicConfig        `json:"site,omitempty"`
-	FilmSources  []FilmSource        `json:"filmSources,omitempty"`
-	CronTasks    []FilmCollectTask   `json:"cronTasks,omitempty"`
-	Banners      Banners             `json:"banners,omitempty"`
+	FilmSources  []FilmSource        `json:"filmSources"`
+	CronTasks    []FilmCollectTask   `json:"cronTasks"`
+	Banners      Banners             `json:"banners"`
 	BannerConfig *BannerConfig       `json:"bannerConfig,omitempty"`
-	MappingRules []MappingRuleExport `json:"mappingRules,omitempty"`
+	MappingRules []MappingRuleExport `json:"mappingRules"`
 	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
 	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`
 	Notify       *NotifyConfig       `json:"notify,omitempty"`

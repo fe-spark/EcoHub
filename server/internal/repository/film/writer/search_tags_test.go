@@ -166,7 +166,10 @@ func TestFilterOptionsFollowCollectedFilms(t *testing.T) {
 		t.Fatalf("创建影片失败: %v", err)
 	}
 
-	res := filmsnapshot.GetFilterOptionSnapshot("v-test", 8)
+	res, err := filmsnapshot.GetFilterOptionSnapshot("v-test", 8)
+	if err != nil {
+		t.Fatalf("GetFilterOptionSnapshot: %v", err)
+	}
 	list, ok := res["sortList"].([]string)
 	if !ok {
 		t.Fatalf("sortList 类型错误: %T", res["sortList"])
