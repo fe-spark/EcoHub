@@ -76,25 +76,25 @@ type MovieUrlInfo struct {
 
 // MovieDetail 影片详情信息
 type MovieDetail struct {
-	Id                 int64               `json:"id"`                 // 影片Id
-	SourceId           string              `json:"sourceId,omitempty"` // 归属采集站ID
-	RawCid             int64               `json:"rawCid"`             // 原始来源分类ID
-	RawPid             int64               `json:"rawPid"`             // 原始来源一级分类ID
-	Cid                int64               `json:"cid"`                // 分类ID
-	Pid                int64               `json:"pid"`                // 一级分类ID
-	Name               string              `json:"name"`               // 片名
-	Picture            string              `json:"picture"`            // 竖版封面图（源站/海报图源）
-	PictureSlide       string              `json:"pictureSlide"`       // 横版幻灯图（源站/海报图源）
-	CustomPicture      string              `json:"customPicture"`      // 自定义竖版封面图（独立存储）
-	CustomPictureSlide string              `json:"customPictureSlide"` // 自定义横版幻灯图（独立存储）
-	IsCustomPicture    bool                `json:"isCustomPicture"`    // 是否启用人工自定义海报
-	PlayFrom           []string            `json:"playFrom"`           // 播放来源
-	DownFrom           string              `json:"DownFrom"`           // 下载来源 例: http
-	PlayList           [][]MovieUrlInfo    `json:"playList"`           // 播放地址url
-	DownloadList       [][]MovieUrlInfo    `json:"downloadList"`       // 下载url地址
+	Id                 int64               `json:"id"`                          // 影片Id
+	SourceId           string              `json:"sourceId,omitempty"`          // 归属采集站ID
+	RawCid             int64               `json:"rawCid"`                      // 原始来源分类ID
+	RawPid             int64               `json:"rawPid"`                      // 原始来源一级分类ID
+	Cid                int64               `json:"cid"`                         // 分类ID
+	Pid                int64               `json:"pid"`                         // 一级分类ID
+	Name               string              `json:"name"`                        // 片名
+	Picture            string              `json:"picture"`                     // 竖版封面图（源站/海报图源）
+	PictureSlide       string              `json:"pictureSlide"`                // 横版幻灯图（源站/海报图源）
+	CustomPicture      string              `json:"customPicture"`               // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string              `json:"customPictureSlide"`          // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool                `json:"isCustomPicture"`             // 是否启用人工自定义海报
+	PlayFrom           []string            `json:"playFrom"`                    // 播放来源
+	DownFrom           string              `json:"DownFrom"`                    // 下载来源 例: http
+	PlayList           [][]MovieUrlInfo    `json:"playList"`                    // 播放地址url
+	DownloadList       [][]MovieUrlInfo    `json:"downloadList"`                // 下载url地址
 	ManualLinesUpdate  bool                `json:"manualLinesUpdate,omitempty"` // 是否显式更新自定义播放线路
-	IsScraped          bool                `json:"isScraped"`          // 是否已启用 TMDB 刮削
-	TmdbID             int64               `json:"tmdbId"`             // TMDB 词条 ID
+	IsScraped          bool                `json:"isScraped"`                   // 是否已启用 TMDB 刮削
+	TmdbID             int64               `json:"tmdbId"`                      // TMDB 词条 ID
 	MovieDescriptor    `json:"descriptor"` // 影片描述信息
 }
 
@@ -230,6 +230,13 @@ func (FilmIndex) TableName() string {
 	return TableFilmIndex
 }
 
+const (
+	// LineKindPlay 播放线路。
+	LineKindPlay = "play"
+	// LineKindDownload 下载线路。
+	LineKindDownload = "download"
+)
+
 // FilmSourcePlaylist 统一多源播放列表持久化模型。
 // 主键就是线路身份。group_index 从 0 开始，必须允许 0 值写入。
 type FilmSourcePlaylist struct {
@@ -237,7 +244,7 @@ type FilmSourcePlaylist struct {
 	UpdatedAt    time.Time
 	Mid          int64  `gorm:"primaryKey;autoIncrement:false;index:idx_playlist_source_mid,priority:2;index:idx_playlist_kind_mid,priority:2"`
 	SourceId     string `gorm:"primaryKey;size:32;index:idx_playlist_source_mid,priority:1"`
-	LineKind     string `gorm:"primaryKey;size:16;index:idx_playlist_kind_mid,priority:1"` // play 或 download
+	LineKind     string `gorm:"primaryKey;size:16;index:idx_playlist_kind_mid,priority:1"` // LineKindPlay 或 LineKindDownload
 	GroupIndex   int    `gorm:"primaryKey;autoIncrement:false"`
 	GroupName    string `gorm:"type:varchar(255)"`
 	EpisodeCount int    `gorm:"default:0"`
@@ -357,41 +364,41 @@ type SearchVo struct {
 
 // FilmDetailVo 添加影片对象
 type FilmDetailVo struct {
-	Id                 int64    `json:"id"`                 // 影片id
-	SourceId           string   `json:"sourceId"`           // 所属采集站ID
-	Cid                int64    `json:"cid"`                // 分类ID
-	Pid                int64    `json:"pid"`                // 一级分类ID
-	Name               string   `json:"name"`               // 片名
-	Picture            string   `json:"picture"`            // 本片采集到的竖版封面
-	PictureSlide       string   `json:"pictureSlide"`       // 本片采集到的横版幻灯图
-	CustomPicture      string   `json:"customPicture"`      // 自定义竖版封面图（独立存储）
-	CustomPictureSlide string   `json:"customPictureSlide"` // 自定义横版幻灯图（独立存储）
-	IsCustomPicture    bool     `json:"isCustomPicture"`    // 自定义封面。采集不覆盖这张图
-	PlayFrom           []string `json:"playFrom"`           // 播放来源
-	DownFrom           string   `json:"DownFrom"`           // 下载来源 例: http
-	PlayLink           string   `json:"playLink"`           // 播放地址url
-	DownloadLink       string   `json:"downloadLink"`       // 下载url地址
+	Id                 int64    `json:"id"`                          // 影片id
+	SourceId           string   `json:"sourceId"`                    // 所属采集站ID
+	Cid                int64    `json:"cid"`                         // 分类ID
+	Pid                int64    `json:"pid"`                         // 一级分类ID
+	Name               string   `json:"name"`                        // 片名
+	Picture            string   `json:"picture"`                     // 本片采集到的竖版封面
+	PictureSlide       string   `json:"pictureSlide"`                // 本片采集到的横版幻灯图
+	CustomPicture      string   `json:"customPicture"`               // 自定义竖版封面图（独立存储）
+	CustomPictureSlide string   `json:"customPictureSlide"`          // 自定义横版幻灯图（独立存储）
+	IsCustomPicture    bool     `json:"isCustomPicture"`             // 自定义封面。采集不覆盖这张图
+	PlayFrom           []string `json:"playFrom"`                    // 播放来源
+	DownFrom           string   `json:"DownFrom"`                    // 下载来源 例: http
+	PlayLink           string   `json:"playLink"`                    // 播放地址url
+	DownloadLink       string   `json:"downloadLink"`                // 下载url地址
 	ManualLinesUpdate  bool     `json:"manualLinesUpdate,omitempty"` // 是否显式更新自定义播放线路
-	SubTitle           string   `json:"subTitle"`           // 子标题
-	CName              string   `json:"cName"`              // 分类名称
-	EnName             string   `json:"enName"`             // 英文名
-	Initial            string   `json:"initial"`            // 首字母
-	ClassTag           string   `json:"classTag"`           // 分类标签
-	Actor              string   `json:"actor"`              // 主演
-	Director           string   `json:"director"`           // 导演
-	Writer             string   `json:"writer"`             // 作者
-	Remarks            string   `json:"remarks"`            // 更新情况
-	ReleaseDate        string   `json:"releaseDate"`        // 上映时间
-	Area               string   `json:"area"`               // 地区
-	Language           string   `json:"language"`           // 语言
-	Year               string   `json:"year"`               // 年份
-	State              string   `json:"state"`              // 影片状态 正片|预告...
-	UpdateTime         string   `json:"updateTime"`         // 更新时间
-	AddTime            string   `json:"addTime"`            // 资源添加时间戳
-	DbId               int64    `json:"dbId"`               // 豆瓣id
-	DbScore            string   `json:"dbScore"`            // 豆瓣评分
-	Hits               int64    `json:"hits"`               // 影片热度
-	Content            string   `json:"content"`            // 内容简介
+	SubTitle           string   `json:"subTitle"`                    // 子标题
+	CName              string   `json:"cName"`                       // 分类名称
+	EnName             string   `json:"enName"`                      // 英文名
+	Initial            string   `json:"initial"`                     // 首字母
+	ClassTag           string   `json:"classTag"`                    // 分类标签
+	Actor              string   `json:"actor"`                       // 主演
+	Director           string   `json:"director"`                    // 导演
+	Writer             string   `json:"writer"`                      // 作者
+	Remarks            string   `json:"remarks"`                     // 更新情况
+	ReleaseDate        string   `json:"releaseDate"`                 // 上映时间
+	Area               string   `json:"area"`                        // 地区
+	Language           string   `json:"language"`                    // 语言
+	Year               string   `json:"year"`                        // 年份
+	State              string   `json:"state"`                       // 影片状态 正片|预告...
+	UpdateTime         string   `json:"updateTime"`                  // 更新时间
+	AddTime            string   `json:"addTime"`                     // 资源添加时间戳
+	DbId               int64    `json:"dbId"`                        // 豆瓣id
+	DbScore            string   `json:"dbScore"`                     // 豆瓣评分
+	Hits               int64    `json:"hits"`                        // 影片热度
+	Content            string   `json:"content"`                     // 内容简介
 }
 
 // PlayLinkVo 多站点播放链接数据列表

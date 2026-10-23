@@ -35,7 +35,12 @@ func (h *ManageHandler) BannerSave(c *gin.Context) {
 	}
 	b.Id = strings.TrimSpace(b.Id)
 	if b.Id == "" {
-		b.Id = utils.GenerateSalt()
+		id, err := utils.GenerateSalt()
+		if err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
+		b.Id = id
 		b.Sort = int64(len(bl) + 1)
 		bl = append(bl, b)
 		if err := service.ManageSvc.SaveBanners(bl); err != nil {
@@ -158,7 +163,9 @@ func (h *ManageHandler) BannerQuickGenerate(c *gin.Context) {
 	if !ok {
 		return
 	}
-	_ = service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, func(evt service.OneClickProgressEvent) {
+	if err := service.ManageSvc.OneClickGenerateDeckStream(c.Request.Context(), req, func(evt service.OneClickProgressEvent) {
 		_ = stream.SendData(evt)
-	})
+	}); err != nil {
+		_ = stream.SendData(gin.H{"error": err.Error()})
+	}
 }

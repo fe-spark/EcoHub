@@ -51,7 +51,7 @@ func EnsureMappingRuleIndexes() error {
 	if err := db.Mdb.Unscoped().Where("deleted_at IS NOT NULL").Delete(&model.MappingRule{}).Error; err != nil {
 		return err
 	}
-	if err := db.Mdb.Exec("UPDATE mapping_rules SET match_type = 'exact' WHERE match_type = '' OR match_type IS NULL").Error; err != nil {
+	if err := db.Mdb.Exec("UPDATE " + model.TableMappingRule + " SET match_type = 'exact' WHERE match_type = '' OR match_type IS NULL").Error; err != nil {
 		return err
 	}
 
@@ -114,7 +114,9 @@ func ListMappingRules(query MappingRuleQuery) ([]model.MappingRule, dto.Page, er
 
 	dbQuery := buildMappingRuleQuery(query)
 
-	dto.GetPage(dbQuery, &page)
+	if err := dto.GetPage(dbQuery, &page); err != nil {
+		return nil, page, err
+	}
 	list := make([]model.MappingRule, 0)
 	err := dbQuery.Order("`group` ASC, raw ASC, id ASC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list).Error
 	return list, page, err

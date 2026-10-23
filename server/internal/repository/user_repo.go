@@ -3,6 +3,9 @@ package repository
 import (
 	"errors"
 	"log"
+	"os"
+	"strings"
+
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -17,32 +20,53 @@ func ExistUserTable() bool {
 	return db.Mdb.Migrator().HasTable(&model.User{})
 }
 
-// InitBuiltinAccounts 初始化内置账号。默认只有超级管理员，其它角色由管理员自行创建。
-func InitBuiltinAccounts() {
-	ensureBuiltinUser(config.DefaultAdminUser, config.DefaultAdminPass, "", "Spark", model.UserRoleAdmin)
+// InitBuiltinAccounts 初始化内置管理员。已存在则不改密码。
+// 初始密码读 ECOHUB_ADMIN_PASSWORD；未设置时生成随机密码并写入启动日志。
+func InitBuiltinAccounts() error {
+	password := strings.TrimSpace(os.Getenv("ECOHUB_ADMIN_PASSWORD"))
+	generated := false
+	if password == "" {
+		var err error
+		password, err = utils.RandomString(8)
+		if err != nil {
+			return err
+		}
+		generated = true
+	}
+	created, err := ensureBuiltinUser(config.DefaultAdminUser, password, "", "Spark", model.UserRoleAdmin)
+	if err != nil {
+		return err
+	}
+	if created && generated {
+		log.Printf("[Init] 已创建管理员 %s，初始密码: %s", config.DefaultAdminUser, password)
+	}
+	if created && !generated {
+		log.Printf("[Init] 已创建管理员 %s，初始密码来自 ECOHUB_ADMIN_PASSWORD", config.DefaultAdminUser)
+	}
+	return nil
 }
 
-func ensureBuiltinUser(userName, password, email, nickName string, role int) {
+func ensureBuiltinUser(userName, password, email, nickName string, role int) (bool, error) {
 	user, err := GetUserByNameOrEmail(userName)
 	if err != nil {
-		log.Println("ensureBuiltinUser Error:", err)
-		return
+		return false, err
 	}
 	if user != nil {
-		updates := map[string]any{}
-		if user.Role != role {
-			updates["role"] = role
+		if user.Role == role {
+			return false, nil
 		}
-		if len(updates) > 0 {
-			db.Mdb.Model(&model.User{}).Where("id = ?", user.ID).Updates(updates)
-		}
-		return
+		err = db.Mdb.Model(&model.User{}).Where("id = ?", user.ID).Update("role", role).Error
+		return false, err
 	}
 
+	salt, err := utils.GenerateSalt()
+	if err != nil {
+		return false, err
+	}
 	u := &model.User{
 		UserName: userName,
-		Password: password,
-		Salt:     utils.GenerateSalt(),
+		Password: utils.PasswordEncrypt(password, salt),
+		Salt:     salt,
 		Email:    email,
 		Gender:   2,
 		NickName: nickName,
@@ -50,9 +74,10 @@ func ensureBuiltinUser(userName, password, email, nickName string, role int) {
 		Status:   0,
 		Role:     role,
 	}
-
-	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
-	db.Mdb.Create(u)
+	if err := db.Mdb.Create(u).Error; err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // GetUserByNameOrEmail 查询 username || email 对应的账户信息
@@ -88,7 +113,10 @@ func GetUserById(id uint) (model.User, error) {
 }
 
 // UpdateUserInfo 更新用户信息
-func UpdateUserInfo(u model.User) {
+func UpdateUserInfo(u model.User) error {
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
+	}
 	updates := map[string]any{
 		"email":     u.Email,
 		"nick_name": u.NickName,
@@ -100,11 +128,11 @@ func UpdateUserInfo(u model.User) {
 	if u.Password != "" {
 		updates["password"] = u.Password
 	}
-	db.Mdb.Model(&model.User{}).Where("id = ?", u.ID).Updates(updates)
+	return db.Mdb.Model(&model.User{}).Where("id = ?", u.ID).Updates(updates).Error
 }
 
 // GetUserPage 分页获取用户信息
-func GetUserPage(page *dto.Page, userName string, role, status int) []model.User {
+func GetUserPage(page *dto.Page, userName string, role, status int) ([]model.User, error) {
 	var list []model.User
 	query := db.Mdb.Model(&model.User{})
 	if userName != "" {
@@ -116,9 +144,14 @@ func GetUserPage(page *dto.Page, userName string, role, status int) []model.User
 	if status >= 0 {
 		query = query.Where("status = ?", status)
 	}
-	dto.GetPage(query, page)
-	query.Order("id DESC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list)
-	return list
+	if err := dto.GetPage(query, page); err != nil {
+		return nil, err
+	}
+	if page.PageCount == 0 {
+		return []model.User{}, nil
+	}
+	err := query.Order("id DESC").Offset((page.Current - 1) * page.PageSize).Limit(page.PageSize).Find(&list).Error
+	return list, err
 }
 
 // AddUser 添加新用户

@@ -6,9 +6,7 @@ import (
 	"time"
 
 	"server/internal/config"
-	"server/internal/infra/db"
 	"server/internal/infra/syslog"
-	"server/internal/migration"
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
@@ -22,19 +20,24 @@ type InitService struct{}
 
 var InitSvc = new(InitService)
 
-func (s *InitService) DefaultDataInit() {
+func (s *InitService) DefaultDataInit() error {
 	isNewDatabase := !repository.ExistUserTable()
 
-	// 统一执行单一事实来源 AllModels 的幂等迁移
-	s.TableInit()
+	if err := s.TableInit(); err != nil {
+		return err
+	}
 
 	if isNewDatabase {
-		db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
+		if err := repository.AlignUserAutoIncrement(); err != nil {
+			return err
+		}
 	}
 
 	repository.InitMappingEngine()
 	repository.InitMainCategories()
-	repository.InitBuiltinAccounts()
+	if err := repository.InitBuiltinAccounts(); err != nil {
+		return err
+	}
 	if err := utils.CreateBaseDir(); err != nil {
 		syslog.Errorf("[Init] 素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err)
 		panic(fmt.Sprintf("素材目录创建失败 %s: %v", config.FilmPictureUploadDir, err))
@@ -45,7 +48,7 @@ func (s *InitService) DefaultDataInit() {
 
 	// 网站基本信息初始化（首页轮播已移入内容管理）
 	s.SiteWebConfigInit()
-	if err := repository.EnsureDefaultPosterSourceTx(db.Mdb); err != nil {
+	if err := repository.EnsureDefaultPosterSource(); err != nil {
 		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
 	}
 	// 定时任务启动前，从 Redis 备忘恢复活跃快照版本到内存。
@@ -54,6 +57,7 @@ func (s *InitService) DefaultDataInit() {
 	NotifySvc.EnsureBotPoller()
 	s.ensureFilmListSnapshot()
 	s.loadActiveFilmReadModel()
+	return nil
 }
 
 func (s *InitService) ensureFilmListSnapshot() {
@@ -72,17 +76,17 @@ func (s *InitService) loadActiveFilmReadModel() {
 	}
 }
 
-func (s *InitService) TableInit() {
-	err := db.Mdb.AutoMigrate(model.AllModels...)
-	if err != nil {
-		syslog.Errorf("Database AutoMigrate Failed: %v", err)
-		return
+func (s *InitService) TableInit() error {
+	if err := repository.AutoMigrateAll(); err != nil {
+		return fmt.Errorf("数据库结构迁移失败: %w", err)
 	}
-	if err := migration.RunAutoMigrations(db.Mdb); err != nil {
-		syslog.Errorf("Database RunAutoMigrations Failed: %v", err)
+	if err := repository.RunSchemaMigrations(); err != nil {
+		return fmt.Errorf("数据库版本迁移失败: %w", err)
 	}
-
-	db.Mdb.Exec(fmt.Sprintf("alter table %s auto_Increment = %d", model.TableUser, config.UserIdInitialVal))
+	if err := repository.AlignUserAutoIncrement(); err != nil {
+		return fmt.Errorf("用户表自增对齐失败: %w", err)
+	}
+	return nil
 }
 
 // SiteWebConfigInit 初始化网站基本信息（首页轮播已移入内容管理，不再由初始化维护）

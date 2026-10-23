@@ -56,11 +56,18 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 		return cur, nil
 	}
+	return buildAndStoreFilmSearchMetaIndex(version)
+}
+
+// buildAndStoreFilmSearchMetaIndex 重建检索索引，完成后一次换上。重建期间请求继续读旧索引。
+func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
+	version = strings.TrimSpace(version)
+	if version == "" || db.Mdb == nil {
+		return nil, ErrSearchIndexMissing
+	}
 	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
-		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
-			return cur, nil
-		}
 		started := time.Now()
+		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
 		var (
 			items []FilmSearchMeta
 			plays map[int64][]string
@@ -68,7 +75,7 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 		g, gctx := errgroup.WithContext(context.Background())
 		g.Go(func() error {
 			var err error
-			items, err = loadFilmSearchMetaItems(gctx)
+			items, err = loadFilmSearchMetaItems(gctx, version)
 			return err
 		})
 		g.Go(func() error {
@@ -79,6 +86,7 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 		if err := g.Wait(); err != nil {
 			return nil, err
 		}
+		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
 		attachPlaySources(items, plays)
 		idx := sealSearchMetaIndex(version, items)
 		activeFilmSearchMetasMu.Lock()
@@ -97,14 +105,16 @@ func loadFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, error) {
 	return idx, nil
 }
 
-func loadFilmSearchMetaItems(ctx context.Context) ([]FilmSearchMeta, error) {
+func loadFilmSearchMetaItems(ctx context.Context, version string) ([]FilmSearchMeta, error) {
 	var total int64
 	if err := db.Mdb.WithContext(ctx).Model(&model.FilmIndex{}).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	if total == 0 {
+		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 0/0", version)
 		return []FilmSearchMeta{}, nil
 	}
+	progress := newSearchLoadProgress(version, total)
 	spans, err := searchMetaSpans(ctx, total)
 	if err != nil {
 		return nil, err
@@ -164,6 +174,7 @@ func loadFilmSearchMetaItems(ctx context.Context) ([]FilmSearchMeta, error) {
 				mu.Lock()
 				items = append(items, page...)
 				mu.Unlock()
+				progress.add(len(page))
 			}
 		}()
 	}
@@ -172,6 +183,49 @@ func loadFilmSearchMetaItems(ctx context.Context) ([]FilmSearchMeta, error) {
 		return nil, firstErr
 	}
 	return items, nil
+}
+
+type searchLoadProgress struct {
+	version string
+	total   int64
+	loaded  int64
+	next    int64
+	mu      sync.Mutex
+}
+
+func newSearchLoadProgress(version string, total int64) *searchLoadProgress {
+	step := total / 10
+	if step < 1 {
+		step = total
+	}
+	return &searchLoadProgress{version: version, total: total, next: step}
+}
+
+func (p *searchLoadProgress) add(n int) {
+	if p == nil || n <= 0 || p.total <= 0 {
+		return
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.loaded += int64(n)
+	if p.loaded < p.next && p.loaded < p.total {
+		return
+	}
+	loaded := p.loaded
+	if loaded > p.total {
+		loaded = p.total
+	}
+	log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 %d/%d %d%%",
+		p.version, loaded, p.total, loaded*100/p.total)
+	if p.loaded >= p.total {
+		p.next = p.total + 1
+		return
+	}
+	step := p.total / 10
+	if step < 1 {
+		step = 1
+	}
+	p.next = (p.loaded/step + 1) * step
 }
 
 func searchMetaSpans(ctx context.Context, total int64) ([]midSpan, error) {

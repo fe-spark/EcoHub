@@ -38,30 +38,30 @@ func provideTypeFromKey(sourceID, key string) (int64, string, bool) {
 	return typeID, repository.PublicSourceTypeName(sourceID, typeID), true
 }
 
-func resolveProvideListedType(snapshot model.FilmListSnapshot, sourceID string) (int64, string) {
+func resolveProvideListedType(snapshot model.FilmListSnapshot, sourceID string) (int64, string, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID != "" {
 		if typeID, name, ok := provideTypeFromKey(sourceID, snapshot.CategoryKey); ok {
 			if name == "" {
 				name = snapshot.CName
 			}
-			return typeID, name
+			return typeID, name, nil
 		}
 		if typeID, name, ok := provideTypeFromKey(sourceID, snapshot.RootCategoryKey); ok {
 			if name == "" {
 				name = snapshot.CName
 			}
-			return typeID, name
+			return typeID, name, nil
 		}
 	}
 	return resolveProvideTypeFromSnapshot(snapshot)
 }
 
-func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID string) int64 {
+func resolveProvideListedRootType(snapshot model.FilmListSnapshot, sourceID string) (int64, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if sourceID != "" {
 		if typeID, _, ok := provideTypeFromKey(sourceID, snapshot.RootCategoryKey); ok {
-			return typeID
+			return typeID, nil
 		}
 	}
 	return resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot)

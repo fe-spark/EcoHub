@@ -3,6 +3,7 @@ package dto
 import (
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -70,37 +71,42 @@ func CustomResult(statusCode int, code int, data any, msg string, c *gin.Context
 	})
 }
 
-// GetPage 获取分页相关数据 (带 Redis 缓存优化，避免大表 COUNT(*) 性能危机)
-func GetPage(query *gorm.DB, page *Page) {
+// GetPage 统计当前查询的总数和页数。
+func GetPage(query *gorm.DB, page *Page) error {
 	if page.PageSize <= 0 {
 		page.PageSize = 20
 	}
-
-	// 1. 尝试从缓存获取 Total (仅对影片索引表开启缓存)
-	// 通过反射或语句分析判断表名 (简化处理：目前主要瓶颈在 film_index)
 	var count int64
-	// 暂时维持现状，但在 repository 调用处进行优化。
-	query.Count(&count)
-
-	page.Total = int(count)
-	page.PageCount = int((page.Total + page.PageSize - 1) / page.PageSize)
-	if page.PageCount <= 0 {
-		page.PageCount = 1
+	if err := query.Count(&count).Error; err != nil {
+		return err
 	}
+	page.Total = int(count)
+	if page.Total <= 0 {
+		page.PageCount = 0
+		return nil
+	}
+	page.PageCount = (page.Total + page.PageSize - 1) / page.PageSize
+	return nil
 }
 
-// GetPageParams 从 Gin 上下文中提取通用的分页参数
+func firstQuery(c *gin.Context, keys ...string) string {
+	for _, key := range keys {
+		if v := strings.TrimSpace(c.Query(key)); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+// GetPageParams 从 Gin 上下文中提取通用的分页参数。
+// 页码认 current、page、pg。每页条数认 pageSize、pagesize、limit、size。
 func GetPageParams(c *gin.Context) *Page {
-	// 针对 Current: page, pg, current
-	currentStr := c.DefaultQuery("current", c.DefaultQuery("page", c.DefaultQuery("pg", "1")))
-	current, _ := strconv.Atoi(currentStr)
+	current, _ := strconv.Atoi(firstQuery(c, "current", "page", "pg"))
 	if current <= 0 {
 		current = 1
 	}
 
-	// 针对 PageSize: pageSize, pagesize, limit
-	pageSizeStr := c.DefaultQuery("pageSize", c.DefaultQuery("pagesize", c.DefaultQuery("limit", "20")))
-	pageSize, _ := strconv.Atoi(pageSizeStr)
+	pageSize, _ := strconv.Atoi(firstQuery(c, "pageSize", "pagesize", "limit", "size"))
 	if pageSize <= 0 {
 		pageSize = 20
 	} else if pageSize > 500 {

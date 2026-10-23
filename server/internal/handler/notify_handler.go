@@ -42,7 +42,12 @@ func (h *NotifyHandler) UpdateConfig(c *gin.Context) {
 // TestNotify 发送测试通知（仅超级管理员，支持草稿参数）
 func (h *NotifyHandler) TestNotify(c *gin.Context) {
 	var req model.NotifyTestReq
-	_ = c.ShouldBindJSON(&req)
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&req); err != nil {
+			dto.Failed("请求参数格式异常", c)
+			return
+		}
+	}
 
 	res, err := service.NotifySvc.SendTest(req)
 	if err != nil {

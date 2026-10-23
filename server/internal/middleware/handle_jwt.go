@@ -5,69 +5,40 @@ import (
 	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
+	"server/internal/service"
 	"server/internal/utils"
-	"strings"
 
 	"github.com/gin-gonic/gin"
 )
 
-func useSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-}
-
-func setAuthCookie(c *gin.Context, token string) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, token, config.AuthTokenExpires*3600, "/", "", useSecureCookie(c), true)
-}
-
-func clearAuthCookie(c *gin.Context) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, "", -1, "/", "", useSecureCookie(c), true)
-}
-
 // AuthToken 用户登录Token拦截（单点登录校验）
 func AuthToken() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		authToken, _ := c.Cookie(config.AuthCookieName)
+		authToken := ReadAuthToken(c)
 		if authToken == "" {
-			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-				authToken = strings.TrimSpace(authHeader[7:])
-			} else if authHeader != "" {
-				authToken = authHeader
-			}
-			if authToken == "" {
-				authToken = strings.TrimSpace(c.GetHeader("Token"))
-			}
-		}
-		// 如果没有登录信息则直接清退
-		if authToken == "" {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "用户未授权,请先登录", c)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "用户未授权,请先登录", c)
 			c.Abort()
 			return
 		}
-		// 解析token中的信息
 		uc, err := utils.ParseToken(authToken)
 		if err != nil || uc == nil {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 
-		// 单点登录校验：校验当前 Token 是否与 Redis 中最新签发的活跃 Token 一致
-		storedToken := repository.GetUserToken(uc.UserID)
+		storedToken := service.UserSvc.StoredToken(uc.UserID)
 		if storedToken == "" {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "身份验证信息已失效,请重新登录!!!", c)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "身份验证信息已失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}
 		if storedToken != authToken {
-			clearAuthCookie(c)
-			dto.CustomResult(http.StatusUnauthorized, dto.SUCCESS, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
+			ClearAuthCookie(c)
+			dto.CustomResult(http.StatusUnauthorized, dto.FAILED, nil, "账号在其它设备登录,身份验证信息失效,请重新登录!!!", c)
 			c.Abort()
 			return
 		}

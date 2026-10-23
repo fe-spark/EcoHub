@@ -61,71 +61,156 @@
   color: var(--ant-color-text-secondary);
 }
 
-.filmSelectedCard {
+.filmProfileCard {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 12px 14px;
   border-radius: 8px;
   background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
   border: 1px solid var(--ant-color-border-secondary);
-  padding: 10px 14px;
 }
 
-.previewSection {
+.filmProfileContent {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.filmTitleRow {
+  width: 100%;
+}
+
+.filmMetaRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filmActionRow {
   margin-top: 4px;
 }
 
-.previewHeader {
+/* 轮播画幅工业级标准视窗 */
+.frameStack {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-top: 4px;
+}
+
+.heroBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.heroHeader {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
 }
 
-.previewCol {
+.heroTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ant-color-text);
+}
+
+.heroCanvas {
+  position: relative;
+  width: 100%;
+  height: 220px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+
+.heroImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.heroEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--ant-color-text-quaternary);
+}
+
+.heroActionRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.posterCompactBlock {
+  display: flex;
+  gap: 14px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
+  border: 1px solid var(--ant-color-border-secondary);
+  align-items: center;
+}
+
+.posterMiniFrame {
+  width: 52px;
+  height: 76px;
+  border-radius: 6px;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--ant-color-border-secondary);
+  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.posterMiniInfo {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.previewLabelRow {
+.posterMiniHead {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 
-.posterFrame {
-  width: 108px;
-  height: 160px;
-  border-radius: 6px;
-  overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
-  flex-shrink: 0;
+.posterMiniTitle {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ant-color-text);
 }
 
-.slideFrame {
-  width: 284px;
-  height: 160px;
-  border-radius: 6px;
+.urlReadonlyHint {
+  font-size: 12px;
+  color: var(--ant-color-text-tertiary);
+  white-space: nowrap;
   overflow: hidden;
-  border: 1px solid var(--ant-color-border-secondary);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18);
-  background: var(--public-surface-3, rgba(255, 255, 255, 0.04));
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  text-overflow: ellipsis;
 }
 
-.slideEmptyBox {
-  width: 100%;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: var(--ant-color-fill-quaternary, rgba(255, 255, 255, 0.02));
-}
+

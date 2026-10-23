@@ -11,6 +11,8 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
+
+	"gorm.io/gorm"
 )
 
 type filmMetaCacheItem struct {
@@ -175,41 +177,45 @@ var (
 	catNameCacheAt   time.Time
 )
 
-func resolveCategoryIDByName(name string) (int64, bool) {
+func resolveCategoryIDByName(name string) (int64, bool, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	catNameCacheMu.RLock()
 	if time.Since(catNameCacheAt) < 5*time.Minute {
 		if id, ok := catIdByNameCache[name]; ok && id > 0 {
 			catNameCacheMu.RUnlock()
-			return id, true
+			return id, true, nil
 		}
 	}
 	catNameCacheMu.RUnlock()
 
 	if db.Mdb == nil {
-		return 0, false
+		return 0, false, nil
 	}
 
 	var cat model.Category
-	if err := db.Mdb.Model(&model.Category{}).
+	err := db.Mdb.Model(&model.Category{}).
 		Select("id, name").
 		Where("name = ?", name).
-		First(&cat).Error; err == nil && cat.Id > 0 {
-		catNameCacheMu.Lock()
-		catNameCache[cat.Id] = cat.Name
-		catIdByNameCache[cat.Name] = cat.Id
-		catNameCacheMu.Unlock()
-		return cat.Id, true
+		First(&cat).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) || (err == nil && cat.Id <= 0) {
+		return 0, false, nil
 	}
-	return 0, false
+	if err != nil {
+		return 0, false, err
+	}
+	catNameCacheMu.Lock()
+	catNameCache[cat.Id] = cat.Name
+	catIdByNameCache[cat.Name] = cat.Id
+	catNameCacheMu.Unlock()
+	return cat.Id, true, nil
 }
 
-func resolveCategoryNames(ids []int64) map[int64]string {
+func resolveCategoryNames(ids []int64) (map[int64]string, error) {
 	if len(ids) == 0 {
-		return map[int64]string{}
+		return map[int64]string{}, nil
 	}
 	result := make(map[int64]string, len(ids))
 	missing := make([]int64, 0, len(ids))
@@ -229,14 +235,17 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 	catNameCacheMu.RUnlock()
 
 	if len(missing) == 0 || db.Mdb == nil {
-		return result
+		return result, nil
 	}
 
 	var cats []model.Category
 	if err := db.Mdb.Model(&model.Category{}).
 		Select("id, name").
 		Where("id IN ?", missing).
-		Find(&cats).Error; err == nil {
+		Find(&cats).Error; err != nil {
+		return nil, err
+	}
+	{
 		catNameCacheMu.Lock()
 		if time.Since(catNameCacheAt) >= 5*time.Minute {
 			catNameCache = map[int64]string{}
@@ -259,11 +268,11 @@ func resolveCategoryNames(ids []int64) map[int64]string {
 		catNameCacheMu.Unlock()
 	}
 
-	return result
+	return result, nil
 }
 
 // enrichClassifyTopItems 为分类榜填补真实分类名称，并过滤噪声数据，同时兼容纯数字 ID 与真实分类名称
-func enrichClassifyTopItems(items []TopItem) []TopItem {
+func enrichClassifyTopItems(items []TopItem) ([]TopItem, error) {
 	ids := make([]int64, 0, len(items))
 	for _, it := range items {
 		if it.Category != "" && !strings.HasPrefix(it.Category, "分类 #") {
@@ -274,7 +283,10 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		}
 	}
 
-	catMap := resolveCategoryNames(ids)
+	catMap, err := resolveCategoryNames(ids)
+	if err != nil {
+		return nil, err
+	}
 	validItems := make([]TopItem, 0, len(items))
 	for _, it := range items {
 		trimmedKey := strings.TrimSpace(it.Key)
@@ -301,7 +313,11 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		} else {
 			// 非数字 member（例如分类名 "伦理片"、"电影"）
 			// 尝试反查其分类 ID（若在 Category 表中存在则标准化绑定）
-			if catId, found := resolveCategoryIDByName(trimmedKey); found {
+			catId, found, err := resolveCategoryIDByName(trimmedKey)
+			if err != nil {
+				return nil, err
+			}
+			if found {
 				it.Key = strconv.FormatInt(catId, 10)
 				it.Category = trimmedKey
 				it.Title = trimmedKey
@@ -318,7 +334,7 @@ func enrichClassifyTopItems(items []TopItem) []TopItem {
 		}
 		validItems = append(validItems, it)
 	}
-	return validItems
+	return validItems, nil
 }
 
 func mergeClassifyItems(items []TopItem) []TopItem {
@@ -345,6 +361,18 @@ func mergeClassifyItems(items []TopItem) []TopItem {
 	return merged
 }
 
-func takeClassifyTops(items []TopItem, limit int) []TopItem {
-	return limitTopItems(mergeClassifyItems(enrichClassifyTopItems(items)), limit)
+func takeClassifyTops(items []TopItem, limit int) ([]TopItem, error) {
+	enriched, err := enrichClassifyTopItems(items)
+	if err != nil {
+		return nil, err
+	}
+	return limitTopItems(mergeClassifyItems(enriched), limit), nil
+}
+
+func appendClassifyTopRows(tops []model.AccessDailyTop, day, kind string, items []TopItem, limit int) ([]model.AccessDailyTop, error) {
+	classified, err := takeClassifyTops(items, limit)
+	if err != nil {
+		return nil, err
+	}
+	return append(tops, topItemsToRows(day, kind, classified)...), nil
 }

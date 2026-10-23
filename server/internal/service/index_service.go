@@ -1,15 +1,20 @@
 package service
 
 import (
+	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"sync"
 	"time"
 
+	"server/internal/config"
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -52,7 +57,7 @@ func logSlowIndexServiceStep(name string, startedAt time.Time, fields ...any) {
 	log.Println(args...)
 }
 
-func categoryHomeMovies(version, sourceId string, cat *model.CategoryTree) (movies, hot []model.MovieBasicInfo, err error) {
+func categoryHomeField(cat *model.CategoryTree) (string, int64) {
 	field := "cid"
 	if cat != nil && len(cat.Children) > 0 {
 		field = "pid"
@@ -61,24 +66,40 @@ func categoryHomeMovies(version, sourceId string, cat *model.CategoryTree) (movi
 	if cat != nil {
 		id = cat.Id
 	}
-	movies, err = filmsnapshot.GetSnapshotDynamicHotMovieListByCategoryWithSource(version, sourceId, field, id, 14, 50)
-	if err != nil {
-		return nil, nil, err
-	}
-	hot, err = filmsnapshot.GetSnapshotHotMovieListByCategoryWithSource(version, sourceId, field, id, 14, 0)
-	if err != nil {
-		return nil, nil, err
-	}
-	if movies == nil {
-		movies = []model.MovieBasicInfo{}
-	}
-	if hot == nil {
-		hot = []model.MovieBasicInfo{}
-	}
-	return movies, hot, nil
+	return field, id
 }
 
-// IndexPage 首页数据处理。推荐片从热度池抽样，热播按热度排序，每次现算。
+func infosByMid(version string, mids []int64) (map[int64]model.MovieBasicInfo, error) {
+	if len(mids) == 0 {
+		return map[int64]model.MovieBasicInfo{}, nil
+	}
+	snaps, err := filmsnapshot.GetSnapshotsByMidsOrdered(version, mids)
+	if err != nil {
+		return nil, err
+	}
+	infos := filmshared.BuildMovieBasicInfosFromSnapshots(snaps...)
+	byID := make(map[int64]model.MovieBasicInfo, len(infos))
+	for _, info := range infos {
+		if info.Id > 0 {
+			byID[info.Id] = info
+		}
+	}
+	return byID, nil
+}
+
+func pickInfos(byID map[int64]model.MovieBasicInfo, mids []int64) []model.MovieBasicInfo {
+	out := make([]model.MovieBasicInfo, 0, len(mids))
+	for _, mid := range mids {
+		info, ok := byID[mid]
+		if !ok {
+			continue
+		}
+		out = append(out, info)
+	}
+	return out
+}
+
+// IndexPage 首页。推荐片从热度池抽样，热播按热度排序。结果缓存 10 分钟，抽样在缓存期内不变。
 func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) {
 	if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
 		return nil, err
@@ -104,11 +125,26 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		}, nil
 	}
 	version := filmsnapshot.GetActiveReadModelVersion()
+	cacheKey := fmt.Sprintf("%s:v%s:src_%s:home", config.IndexPageCacheKey, version, sourceId)
+	if db.Rdb != nil {
+		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
+			var cached map[string]any
+			if json.Unmarshal([]byte(data), &cached) == nil {
+				return cached, nil
+			}
+		}
+	}
+	listGen := filmsnapshot.GetSearchCacheVersion()
 	tree, err := repository.GetActiveCategoryTree(sourceId)
 	if err != nil {
 		return nil, err
 	}
-	list := make([]map[string]any, len(tree.Children))
+	type homeSlot struct {
+		nav    *model.CategoryTree
+		movies []int64
+		hot    []int64
+	}
+	slots := make([]homeSlot, len(tree.Children))
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
 	var pageErr error
@@ -116,7 +152,8 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		wg.Add(1)
 		go func(i int, cat *model.CategoryTree) {
 			defer wg.Done()
-			movies, hot, err := categoryHomeMovies(version, sourceId, cat)
+			field, id := categoryHomeField(cat)
+			movies, hot, err := filmsnapshot.HomeCategoryMids(version, sourceId, field, id, 14, 50)
 			if err != nil {
 				errMu.Lock()
 				if pageErr == nil {
@@ -125,23 +162,36 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 				errMu.Unlock()
 				return
 			}
-			list[i] = map[string]any{"nav": cat, "movies": movies, "hot": hot}
+			slots[i] = homeSlot{nav: cat, movies: movies, hot: hot}
 		}(idx, c)
 	}
 	wg.Wait()
 	if pageErr != nil {
 		return nil, pageErr
 	}
-	filteredList := make([]map[string]any, 0, len(list))
-	for _, item := range list {
-		if item == nil {
+	allMids := make([]int64, 0)
+	for _, slot := range slots {
+		allMids = append(allMids, slot.movies...)
+		allMids = append(allMids, slot.hot...)
+	}
+	byID, err := infosByMid(version, allMids)
+	if err != nil {
+		return nil, err
+	}
+	filteredList := make([]map[string]any, 0, len(slots))
+	for _, slot := range slots {
+		if slot.nav == nil {
 			continue
 		}
-		movies, _ := item["movies"].([]model.MovieBasicInfo)
+		movies := pickInfos(byID, slot.movies)
 		if len(movies) == 0 {
 			continue
 		}
-		filteredList = append(filteredList, item)
+		filteredList = append(filteredList, map[string]any{
+			"nav":    slot.nav,
+			"movies": movies,
+			"hot":    pickInfos(byID, slot.hot),
+		})
 	}
 	rawBanners, err := repository.GetBanners()
 	if err != nil {
@@ -151,12 +201,18 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 	if banners == nil {
 		banners = make(model.Banners, 0)
 	}
-	return map[string]any{
+	res := map[string]any{
 		"category":      tree,
 		"content":       filteredList,
 		"banners":       banners,
 		"currentSource": sourceId,
-	}, nil
+	}
+	if db.Rdb != nil {
+		if data, err := json.Marshal(res); err == nil {
+			filmsnapshot.StoreCacheIfCurrent(cacheKey, string(data), 10*time.Minute, listGen)
+		}
+	}
+	return res, nil
 }
 
 // OverlayBannerLiveRemarks 只把片库更新状态补到轮播。图片和简介用轮播行自己的。

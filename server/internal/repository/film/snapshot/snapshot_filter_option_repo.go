@@ -201,34 +201,10 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]
 		})
 	}
 
-	type filmFilterRow struct {
-		ClassTag string
-		Area     string
-		Language string
-		Year     int64
-	}
-	filterKeys := sourceTypeFilterKeys(sourceId, typeID)
-	var films []filmFilterRow
-	_ = db.Mdb.Model(&model.FilmIndex{}).
-		Select("class_tag, area, language, year").
-		Where("category_key IN ?", filterKeys).
-		Find(&films).Error
-
-	counts := map[string]map[string]int{
-		"Plot":     {},
-		"Area":     {},
-		"Language": {},
-		"Year":     {},
-	}
-	for _, film := range films {
-		for _, part := range shared.SplitRawSearchTags(film.ClassTag) {
-			addSourceTypeTagCount(counts["Plot"], shared.NormalizeSearchTagValue("Plot", part))
-		}
-		addSourceTypeTagCount(counts["Area"], shared.NormalizeSearchTagValue("Area", film.Area))
-		addSourceTypeTagCount(counts["Language"], shared.NormalizeSearchTagValue("Language", film.Language))
-		if film.Year > 0 {
-			addSourceTypeTagCount(counts["Year"], fmt.Sprint(film.Year))
-		}
+	counts, err := countSourceTypeTagsFromIndex(version, sourceTypeFilterKeys(sourceId, typeID))
+	if err != nil {
+		log.Printf("[SearchTags] 筛选项统计失败 source=%s type=%d: %v", sourceId, typeID, err)
+		return emptyFilterOptionResponse()
 	}
 
 	tags := make(map[string]any)

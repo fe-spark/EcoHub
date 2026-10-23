@@ -37,6 +37,11 @@ type filmSearchMetaIndex struct {
 	FilmsBySource       map[string]int64
 	MultiSourceBySource map[string]int64
 	HotPools            map[string][]int64
+	YearPools           map[string][]int64
+	RecentPools         map[string][]int64
+	SourceHot           map[string][]int64
+	ByCategory          map[string][]int
+	SearchPosts         *searchPostings
 }
 
 var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
@@ -62,18 +67,18 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 		return nil
 	}
 	q := utils.BuildQueryContext(keyword)
+	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
-	for i := range idx.Items {
-		meta := &idx.Items[i]
+	visit := func(meta *FilmSearchMeta) {
 		if pid > 0 && meta.Pid != pid {
-			continue
+			return
 		}
 		if cid > 0 && meta.Cid != cid {
-			continue
+			return
 		}
 		score := utils.ScoreFilmMatch(meta.Item, q)
 		if score <= 0 {
-			continue
+			return
 		}
 		matches = append(matches, scoredMetaHit{
 			mid:         meta.Mid,
@@ -83,6 +88,18 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 			year:        meta.Item.Year,
 			updateStamp: meta.Item.UpdateStamp,
 		})
+	}
+	if narrowed {
+		for _, pos := range positions {
+			if pos < 0 || int(pos) >= len(idx.Items) {
+				continue
+			}
+			visit(&idx.Items[pos])
+		}
+	} else {
+		for i := range idx.Items {
+			visit(&idx.Items[i])
+		}
 	}
 	if len(matches) == 0 {
 		return matches

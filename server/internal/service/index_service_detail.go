@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -13,6 +12,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
@@ -201,21 +201,27 @@ func playGroupsFromPlayLinkVos(sources []model.PlayLinkVo) ([][]model.MovieUrlIn
 	return groups, names
 }
 
-func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) []model.FilmSourcePlaylist {
-	if db.Mdb == nil || len(mids) == 0 {
-		return rows
+func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) ([]model.FilmSourcePlaylist, error) {
+	if len(mids) == 0 {
+		return rows, nil
 	}
-	var films []model.FilmIndex
-	if err := db.Mdb.Select("mid", "first_source_id", "db_id", "name", "pid").Where("mid IN ?", mids).Find(&films).Error; err != nil || len(films) == 0 {
-		return rows
+	films, err := filmrepo.ListFilmIndexBrief(mids)
+	if err != nil {
+		return nil, err
 	}
-	peers, err := filmshared.LoadPeerPlaylists(db.Mdb, films)
-	if err != nil || len(peers) == 0 {
-		return rows
+	if len(films) == 0 {
+		return rows, nil
+	}
+	peers, err := filmshared.LoadActivePeerPlaylists(films)
+	if err != nil {
+		return nil, err
+	}
+	if len(peers) == 0 {
+		return rows, nil
 	}
 	own := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
-		if row.LineKind == "play" {
+		if row.LineKind == model.LineKindPlay {
 			own[fmt.Sprintf("%d\x00%s", row.Mid, row.SourceId)] = struct{}{}
 		}
 	}
@@ -227,21 +233,21 @@ func appendPeerPlayRows(mids []int64, rows []model.FilmSourcePlaylist) []model.F
 			rows = append(rows, line)
 		}
 	}
-	return rows
+	return rows, nil
 }
 
 func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.MovieUrlInfo, error) {
 	if mid <= 0 {
 		return nil, nil, nil
 	}
-	if db.Mdb == nil {
-		return nil, nil, errors.New("数据库未连接")
-	}
-	var rows []model.FilmSourcePlaylist
-	if err := db.Mdb.Where("mid = ?", mid).Order("line_kind ASC, group_index ASC").Find(&rows).Error; err != nil {
+	rows, err := filmrepo.ListPlaylistsByMid(mid)
+	if err != nil {
 		return nil, nil, err
 	}
-	rows = appendPeerPlayRows([]int64{mid}, rows)
+	rows, err = appendPeerPlayRows([]int64{mid}, rows)
+	if err != nil {
+		return nil, nil, err
+	}
 	if len(rows) == 0 {
 		return nil, nil, nil
 	}
@@ -259,7 +265,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 
 	sourcePlayGroupCounts := make(map[string]int)
 	for _, r := range rows {
-		if r.LineKind == "play" {
+		if r.LineKind == model.LineKindPlay {
 			sourcePlayGroupCounts[r.SourceId]++
 		}
 	}
@@ -283,7 +289,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		}
 
 		if r.SourceId == "manual" {
-			if r.LineKind == "play" {
+			if r.LineKind == model.LineKindPlay {
 				siteName := strings.TrimSpace(r.GroupName)
 				if siteName == "" {
 					siteName = "自定义线路"
@@ -296,7 +302,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 					IsManual: true,
 					LinkList: links,
 				})
-			} else if r.LineKind == "download" {
+			} else if r.LineKind == model.LineKindDownload {
 				downloadList = append(downloadList, links)
 			}
 			continue
@@ -305,7 +311,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 		if !hasSource {
 			continue
 		}
-		if r.LineKind == "play" {
+		if r.LineKind == model.LineKindPlay {
 			siteName := source.Name
 			if siteName == "" {
 				siteName = r.SourceId
@@ -319,7 +325,7 @@ func loadPlayAndDownloadSourcesByMid(mid int64) ([]model.PlayLinkVo, [][]model.M
 				Proxy:    source.ProxyCollect,
 				LinkList: links,
 			})
-		} else if r.LineKind == "download" {
+		} else if r.LineKind == model.LineKindDownload {
 			downloadList = append(downloadList, links)
 		}
 	}
@@ -335,17 +341,14 @@ func BatchGetPlayPlaylistsByMids(mids []int64) (map[int64][]model.PlayLinkVo, er
 	if len(mids) == 0 {
 		return result, nil
 	}
-	if db.Mdb == nil {
-		return nil, errors.New("数据库未连接")
-	}
-
-	var rows []model.FilmSourcePlaylist
-	if err := db.Mdb.Where("mid IN ? AND line_kind = 'play'", mids).
-		Order("mid ASC, group_index ASC").
-		Find(&rows).Error; err != nil {
+	rows, err := filmrepo.ListPlayPlaylistsByMids(mids)
+	if err != nil {
 		return nil, err
 	}
-	rows = appendPeerPlayRows(mids, rows)
+	rows, err = appendPeerPlayRows(mids, rows)
+	if err != nil {
+		return nil, err
+	}
 	if len(rows) == 0 {
 		return result, nil
 	}
@@ -442,19 +445,6 @@ func sortPlayListSources(lines []model.PlayLinkVo, orderMap map[string]int) {
 		}
 		return lines[i].Id < lines[j].Id
 	})
-}
-
-func storeFilmPlayInfoCache(cacheKey, payload string, ttl time.Duration, gen int64) {
-	if db.Rdb == nil {
-		return
-	}
-	if filmsnapshot.PlayInfoGeneration() != gen {
-		return
-	}
-	_ = db.Rdb.Set(db.Cxt, cacheKey, payload, ttl).Err()
-	if filmsnapshot.PlayInfoGeneration() != gen {
-		_ = db.Rdb.Del(db.Cxt, cacheKey).Err()
-	}
 }
 
 // GetFilmDetailOnly 读取影片详情主体，不聚合播放源。

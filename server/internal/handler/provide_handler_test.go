@@ -614,6 +614,7 @@ func TestProvideVodList_SingleFlightAndJitter(t *testing.T) {
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1&pg=1", nil)
+	c.Request.Host = "tvbox.ecohub.com"
 	ProvideHd.HandleProvide(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)
@@ -645,6 +646,7 @@ func TestProvideVodList_EmptyList_ShortTTL(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	// 请求无数据的分类 t=999
 	c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=999&pg=1", nil)
+	c.Request.Host = "tvbox.ecohub.com"
 	ProvideHd.HandleProvide(c)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", w.Code)

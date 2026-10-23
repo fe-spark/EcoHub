@@ -88,7 +88,10 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 				}
 			}
 			if kind == "classify" {
-				items = takeClassifyTops(items, limit)
+				items, err = takeClassifyTops(items, limit)
+				if err != nil {
+					return nil, err
+				}
 			}
 			if len(items) > 0 {
 				return items, nil
@@ -178,7 +181,10 @@ func QueryTopsScope(day, kind, module, platform string, limit int) ([]TopItem, e
 		}
 	}
 	if kind == "classify" {
-		items = takeClassifyTops(items, limit)
+		items, err = takeClassifyTops(items, limit)
+		if err != nil {
+			return nil, err
+		}
 	}
 	return items, nil
 }

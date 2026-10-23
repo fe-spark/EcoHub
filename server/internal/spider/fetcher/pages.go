@@ -141,12 +141,18 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 	})
 	limiter.startProbe(ctx, 300*time.Millisecond)
 
-	pages := make(chan int, pageCount)
-	writeCompletions := make(chan scheduler.Completion, pageCount)
-	for pg := 1; pg <= pageCount; pg++ {
-		pages <- pg
-	}
-	close(pages)
+	pages := make(chan int, maxWorkers)
+	writeCompletions := make(chan scheduler.Completion, maxWorkers)
+	go func() {
+		defer close(pages)
+		for pg := 1; pg <= pageCount; pg++ {
+			select {
+			case <-ctx.Done():
+				return
+			case pages <- pg:
+			}
+		}
+	}()
 
 	var writeWG sync.WaitGroup
 	var consecutiveFailuresMu sync.Mutex

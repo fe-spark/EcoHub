@@ -46,6 +46,7 @@ func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 			r.ProxyURL = proxy
 		}
 	}
+	r.SkipTLSVerify = s.SkipTLSVerify
 	return r, nil
 }
 
@@ -179,7 +180,10 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 	}()
 
-	reqId := utils.GenerateSalt()
+	reqId, err := utils.GenerateSalt()
+	if err != nil {
+		return err
+	}
 
 	ctx, err := progress.TryRegisterTask(id, reqId, func() bool {
 		return runVersion == nil || !isDispatchStopped(*runVersion)

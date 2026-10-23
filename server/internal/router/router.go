@@ -2,13 +2,26 @@ package router
 
 import (
 	"mime"
+	"net/http"
+	"path/filepath"
+
 	"server/internal/config"
 	"server/internal/handler"
 	"server/internal/infra/syslog"
 	"server/internal/middleware"
+	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
+
+func serveFilmPicture(c *gin.Context) {
+	name := filepath.Base(c.Param("name"))
+	if !utils.IsGalleryImage(name) {
+		c.Status(http.StatusNotFound)
+		return
+	}
+	c.File(filepath.Join(config.FilmPictureUploadDir, name))
+}
 
 func SetupRouter() *gin.Engine {
 	// 部分运行环境系统 mime 库可能缺失 webp/ico，主动注册保证图库可渲染
@@ -24,7 +37,7 @@ func SetupRouter() *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(middleware.Cors())
 
-	r.Static(config.FilmPictureAccess, config.FilmPictureUploadDir)
+	r.GET(config.FilmPictureAccess+"*name", serveFilmPicture)
 
 	api := r.Group("/api")
 

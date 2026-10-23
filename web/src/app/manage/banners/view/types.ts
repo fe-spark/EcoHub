@@ -36,9 +36,7 @@ export type BannerFormValues = {
   picture?: string;
   pictureSlide?: string;
   customPicture?: string;
-  sort?: number;
   isCustomPic?: boolean;
-  isPinned?: boolean;
 };
 
 export type FilmOption = {

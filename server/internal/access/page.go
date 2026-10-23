@@ -19,10 +19,37 @@ var pageActions = map[string]struct{}{
 
 const pageMinInterval = 2 * time.Second
 
-var (
-	pageHitMu   sync.Mutex
-	pageHitLast = map[string]time.Time{}
-)
+const pageHitShardCount = 16
+
+type pageHitShard struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}
+
+var pageHitBuckets [pageHitShardCount]pageHitShard
+
+func init() {
+	for i := range pageHitBuckets {
+		pageHitBuckets[i].last = map[string]time.Time{}
+	}
+}
+
+func pageHitBucket(key string) *pageHitShard {
+	var hash uint32
+	for i := 0; i < len(key); i++ {
+		hash = hash*16777619 ^ uint32(key[i])
+	}
+	return &pageHitBuckets[hash%pageHitShardCount]
+}
+
+func resetPageHits() {
+	for i := range pageHitBuckets {
+		bucket := &pageHitBuckets[i]
+		bucket.mu.Lock()
+		bucket.last = map[string]time.Time{}
+		bucket.mu.Unlock()
+	}
+}
 
 type TrackViewPayload struct {
 	Action         string `json:"action"`
@@ -197,21 +224,22 @@ func pageTooFast(ip, pageKey string) bool {
 	}
 	key := ipHash + ":" + strings.TrimSpace(pageKey)
 	now := time.Now()
-	pageHitMu.Lock()
-	defer pageHitMu.Unlock()
-	if last, ok := pageHitLast[key]; ok && now.Sub(last) < pageMinInterval {
+	bucket := pageHitBucket(key)
+	bucket.mu.Lock()
+	defer bucket.mu.Unlock()
+	if last, ok := bucket.last[key]; ok && now.Sub(last) < pageMinInterval {
 		return true
 	}
-	pageHitLast[key] = now
-	if len(pageHitLast) > 10000 {
+	bucket.last[key] = now
+	if len(bucket.last) > 1024 {
 		cutoff := now.Add(-pageMinInterval)
-		for k, t := range pageHitLast {
+		for k, t := range bucket.last {
 			if t.Before(cutoff) && k != key {
-				delete(pageHitLast, k)
+				delete(bucket.last, k)
 			}
 		}
-		if len(pageHitLast) > 10000 {
-			pageHitLast = map[string]time.Time{key: now}
+		if len(bucket.last) > 1024 {
+			bucket.last = map[string]time.Time{key: now}
 		}
 	}
 	return false

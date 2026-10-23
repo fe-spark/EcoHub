@@ -78,7 +78,12 @@ func FailureRecordList(vo model.RecordRequestVo) ([]model.FailureRecord, error) 
 		qw = qw.Where("status = ?", vo.Status)
 	}
 
-	dto.GetPage(qw, vo.Paging)
+	if err := dto.GetPage(qw, vo.Paging); err != nil {
+		return nil, err
+	}
+	if vo.Paging.PageCount == 0 {
+		return []model.FailureRecord{}, nil
+	}
 	if vo.Paging.Current > vo.Paging.PageCount {
 		vo.Paging.Current = vo.Paging.PageCount
 	}

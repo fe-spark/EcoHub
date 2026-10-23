@@ -7,30 +7,26 @@ import (
 
 	"server/internal/config"
 	"server/internal/model/dto"
-	"server/internal/repository"
+	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
 )
 
-var defaultAuthToken = AuthToken()
-
 // PrivateAccessGuard 动态私有化守卫
 // 当后台开启「私有化访问」时，前台业务接口必须携带有效登录态或有效的订阅密钥（X-Provide-Key / ?key=）
 func PrivateAccessGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := repository.GetSiteBasic()
+		privateAccess, expectedKey, err := service.ManageSvc.AccessGuardConfig()
 		if err != nil {
 			dto.Failed("站点配置读取失败", c)
 			c.Abort()
 			return
 		}
-		if !cfg.PrivateAccess {
+		if !privateAccess {
 			c.Next()
 			return
 		}
-
-		expectedKey := strings.TrimSpace(cfg.ProvideKey)
 		key := strings.TrimSpace(c.Query("key"))
 		if key == "" {
 			key = strings.TrimSpace(c.GetHeader("X-Provide-Key"))
@@ -50,23 +46,12 @@ func PrivateAccessGuard() gin.HandlerFunc {
 		}
 
 		// 3. 检查 Web 端用户 Token
-		authToken, _ := c.Cookie(config.AuthCookieName)
-		if authToken == "" {
-			authHeader := strings.TrimSpace(c.GetHeader("Authorization"))
-			if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-				authToken = strings.TrimSpace(authHeader[7:])
-			} else if authHeader != "" {
-				authToken = authHeader
-			}
-			if authToken == "" {
-				authToken = strings.TrimSpace(c.GetHeader("Token"))
-			}
-		}
+		authToken := ReadAuthToken(c)
 
 		if authToken != "" {
 			uc, err := utils.ParseToken(authToken)
 			if err == nil && uc != nil && uc.UserID > 0 {
-				storedToken := repository.GetUserToken(uc.UserID)
+				storedToken := service.UserSvc.StoredToken(uc.UserID)
 				if storedToken != "" && storedToken == authToken {
 					c.Set(config.AuthUserClaims, uc)
 					c.Set("user_id", uc.UserID)
@@ -90,18 +75,16 @@ func PrivateAccessGuard() gin.HandlerFunc {
 // 3. 若配置了 ProvideKey，使用恒定时间校验 ?key= 或 Header X-Provide-Key
 func ProvideKeyGuard() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		cfg, err := repository.GetSiteBasic()
+		privateAccess, expectedKey, err := service.ManageSvc.AccessGuardConfig()
 		if err != nil {
 			dto.Failed("站点配置读取失败", c)
 			c.Abort()
 			return
 		}
-		if !cfg.PrivateAccess {
+		if !privateAccess {
 			c.Next()
 			return
 		}
-
-		expectedKey := strings.TrimSpace(cfg.ProvideKey)
 		if expectedKey == "" {
 			dto.CustomResult(http.StatusForbidden, dto.FAILED, gin.H{"private_access": true}, "该软件源已开启私有化访问，但管理员未设置订阅密钥，请联系管理员", c)
 			c.Abort()

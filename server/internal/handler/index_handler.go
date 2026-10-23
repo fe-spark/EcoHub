@@ -96,10 +96,14 @@ func (h *IndexHandler) DailyUpdates(c *gin.Context) {
 		Exclude: parseDailyUpdateExclude(c.Query("exclude")),
 	})
 	if err != nil {
-		dto.Failed("获取每日更新失败", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(result, "获取每日更新成功", c)
+}
+
+func pageSizeSpecified(c *gin.Context) bool {
+	return c.Query("pageSize") != "" || c.Query("pagesize") != "" || c.Query("size") != "" || c.Query("limit") != ""
 }
 
 func queryFirst(c *gin.Context, keys ...string) string {
@@ -268,7 +272,7 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	params.SourceId = service.IndexSvc.BaselineSourceID()
 
 	page := dto.GetPageParams(c)
-	if c.Query("pageSize") == "" && c.Query("pagesize") == "" && c.Query("size") == "" && c.Query("limit") == "" {
+	if !pageSizeSpecified(c) {
 		page.PageSize = 48
 	}
 
@@ -329,7 +333,9 @@ func (h *IndexHandler) FilmClassify(c *gin.Context) {
 	sourceId := service.IndexSvc.BaselineSourceID()
 	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
-	page.PageSize = 24
+	if !pageSizeSpecified(c) {
+		page.PageSize = 24
+	}
 	content, err := service.IndexSvc.GetFilmClassify(pid, page, sourceId)
 	if err != nil {
 		dto.Failed(err.Error(), c)

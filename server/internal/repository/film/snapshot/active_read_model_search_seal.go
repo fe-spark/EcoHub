@@ -3,13 +3,12 @@ package snapshot
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"sort"
 	"strings"
 
 	"server/internal/infra/db"
 	"server/internal/model"
-	"server/internal/repository"
-	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -17,11 +16,6 @@ import (
 var ErrSearchIndexMissing = errors.New("检索索引未就绪")
 
 const searchHotPoolCap = 50
-
-type hotCand struct {
-	hits int64
-	mid  int64
-}
 
 func loadCurrentSearchIndex() (*filmSearchMetaIndex, error) {
 	if db.Mdb == nil {
@@ -81,6 +75,7 @@ func streamPlaySources() (map[int64][]string, error) {
 	}
 	defer rows.Close()
 	out := make(map[int64][]string)
+	n := 0
 	for rows.Next() {
 		var mid int64
 		var sourceID sql.NullString
@@ -88,6 +83,13 @@ func streamPlaySources() (map[int64][]string, error) {
 			return nil, err
 		}
 		addPlaySource(out, mid, sourceID.String)
+		n++
+		if n%200000 == 0 {
+			log.Printf("[ActiveReadModel] 检索索引加载中 播放线路 %d", n)
+		}
+	}
+	if n == 0 || n%200000 != 0 {
+		log.Printf("[ActiveReadModel] 检索索引加载中 播放线路 %d", n)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -185,7 +187,10 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 	byUpdate := make([]int, len(items))
 	pos := make(map[int64]int, len(items))
 	films := make(map[string]int64)
-	hot := make(map[string][]hotCand)
+	hits := make(map[string][]rankCand)
+	years := make(map[string][]rankCand)
+	recents := make(map[string][]rankCand)
+	sourceHot := make(map[string][]rankCand)
 	for i := range items {
 		byUpdate[i] = i
 		item := &items[i]
@@ -200,9 +205,10 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 			if src == "" {
 				continue
 			}
-			considerHot(hot, hotPoolMapKey(src, item.CategoryKey), item.Item.Hits, item.Mid)
+			keepRank(sourceHot, src, rankFromMeta(item), 1, sourceHotNameCap)
+			noteFilmRanks(hits, years, recents, hotPoolMapKey(src, item.CategoryKey), item)
 			if item.RootCategoryKey != "" && item.RootCategoryKey != item.CategoryKey {
-				considerHot(hot, hotPoolMapKey(src, item.RootCategoryKey), item.Item.Hits, item.Mid)
+				noteFilmRanks(hits, years, recents, hotPoolMapKey(src, item.RootCategoryKey), item)
 			}
 		}
 	}
@@ -245,16 +251,13 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		}
 		return left.Mid > right.Mid
 	})
-	pools := make(map[string][]int64, len(hot))
-	for key, cands := range hot {
-		sort.Slice(cands, func(i, j int) bool {
-			return hotter(cands[i], cands[j])
-		})
-		mids := make([]int64, len(cands))
-		for i, c := range cands {
-			mids[i] = c.mid
+	byCategory := make(map[string][]int)
+	for _, pos := range byUpdate {
+		key := strings.TrimSpace(items[pos].CategoryKey)
+		if key == "" {
+			continue
 		}
-		pools[key] = mids
+		byCategory[key] = append(byCategory[key], pos)
 	}
 	return &filmSearchMetaIndex{
 		Version:             version,
@@ -263,7 +266,12 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		Pos:                 pos,
 		FilmsBySource:       films,
 		MultiSourceBySource: multiSource,
-		HotPools:            pools,
+		HotPools:            finishRanks(hits, 1),
+		YearPools:           finishRanks(years, 0),
+		RecentPools:         finishRanks(recents, 2),
+		SourceHot:           finishRanks(sourceHot, 1),
+		ByCategory:          byCategory,
+		SearchPosts:         buildSearchPostings(items),
 	}
 }
 
@@ -274,34 +282,6 @@ func hotPoolMapKey(sourceID, categoryKey string) string {
 		return ""
 	}
 	return sourceID + "\x00" + categoryKey
-}
-
-func considerHot(pools map[string][]hotCand, key string, hits, mid int64) {
-	if key == "" || mid <= 0 {
-		return
-	}
-	cand := hotCand{hits: hits, mid: mid}
-	slot := pools[key]
-	if len(slot) < searchHotPoolCap {
-		pools[key] = append(slot, cand)
-		return
-	}
-	cold := 0
-	for i := 1; i < len(slot); i++ {
-		if hotter(slot[cold], slot[i]) {
-			cold = i
-		}
-	}
-	if hotter(cand, slot[cold]) {
-		slot[cold] = cand
-	}
-}
-
-func hotter(a, b hotCand) bool {
-	if a.hits != b.hits {
-		return a.hits > b.hits
-	}
-	return a.mid > b.mid
 }
 
 func (m *FilmSearchMeta) HasPlaySource(sourceID string) bool {
@@ -345,83 +325,4 @@ func SearchInventoryCounts() (films map[string]int64, multiSource map[string]int
 		return nil, nil, err
 	}
 	return idx.FilmsBySource, idx.MultiSourceBySource, nil
-}
-
-func hotMidsFromIndex(version, sourceID, field string, categoryID int64, limit int) ([]int64, error) {
-	if limit <= 0 || categoryID <= 0 {
-		return nil, nil
-	}
-	version = strings.TrimSpace(version)
-	if version == "" {
-		version = strings.TrimSpace(GetActiveSnapshotVersion())
-	}
-	if version == "" {
-		version = LiveReadVersion
-	}
-	idx, err := loadFilmSearchMetaIndex(version)
-	if err != nil {
-		return nil, err
-	}
-	if len(idx.Items) == 0 {
-		return nil, nil
-	}
-	sourceID = strings.TrimSpace(sourceID)
-	categoryID = listedCategoryID(sourceID, categoryID)
-	if sourceID == "" {
-		return topHitsByLocalCategory(idx, field, categoryID, limit), nil
-	}
-	typeIDs := repository.PublicSourceTypeIDs(sourceID, field, categoryID)
-	seen := make(map[int64]struct{})
-	cands := make([]hotCand, 0, limit)
-	for _, typeID := range typeIDs {
-		key := support.BuildSourceCategoryKey(sourceID, typeID)
-		for _, mid := range idx.HotPools[hotPoolMapKey(sourceID, key)] {
-			if mid <= 0 {
-				continue
-			}
-			if _, ok := seen[mid]; ok {
-				continue
-			}
-			seen[mid] = struct{}{}
-			pos, ok := idx.Pos[mid]
-			if !ok || pos < 0 || pos >= len(idx.Items) {
-				continue
-			}
-			cands = append(cands, hotCand{hits: idx.Items[pos].Item.Hits, mid: mid})
-		}
-	}
-	sort.Slice(cands, func(i, j int) bool { return hotter(cands[i], cands[j]) })
-	if len(cands) > limit {
-		cands = cands[:limit]
-	}
-	mids := make([]int64, len(cands))
-	for i, c := range cands {
-		mids[i] = c.mid
-	}
-	return mids, nil
-}
-
-func topHitsByLocalCategory(idx *filmSearchMetaIndex, field string, categoryID int64, limit int) []int64 {
-	pools := map[string][]hotCand{}
-	for i := range idx.Items {
-		item := &idx.Items[i]
-		match := item.Pid == categoryID
-		if field == "cid" {
-			match = item.Cid == categoryID
-		}
-		if !match {
-			continue
-		}
-		considerHot(pools, "k", item.Item.Hits, item.Mid)
-	}
-	cands := pools["k"]
-	sort.Slice(cands, func(i, j int) bool { return hotter(cands[i], cands[j]) })
-	if len(cands) > limit {
-		cands = cands[:limit]
-	}
-	mids := make([]int64, len(cands))
-	for i, c := range cands {
-		mids[i] = c.mid
-	}
-	return mids
 }

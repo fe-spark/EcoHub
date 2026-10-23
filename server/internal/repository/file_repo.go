@@ -2,7 +2,6 @@ package repository
 
 import (
 	"fmt"
-	"log"
 	"time"
 
 	"server/internal/config"
@@ -37,7 +36,7 @@ func GetFileInfoById(id uint) model.FileInfo {
 
 // GetFileInfoPage 获取素材分页数据（仅用户手动上传，relevance_id = 0）
 // name 支持素材名称模糊搜索；beginTime/endTime 为零值时不按时间过滤
-func GetFileInfoPage(tl []string, name string, beginTime, endTime time.Time, page *dto.Page) []model.FileInfo {
+func GetFileInfoPage(tl []string, name string, beginTime, endTime time.Time, page *dto.Page) ([]model.FileInfo, error) {
 	var fl []model.FileInfo
 	query := db.Mdb.Model(&model.FileInfo{}).
 		Where("file_type IN ?", tl).
@@ -52,12 +51,14 @@ func GetFileInfoPage(tl []string, name string, beginTime, endTime time.Time, pag
 		query = query.Where("created_at <= ?", endTime)
 	}
 	query = query.Order("id DESC")
-	dto.GetPage(query, page)
-	if err := query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&fl).Error; err != nil {
-		log.Println(err)
-		return nil
+	if err := dto.GetPage(query, page); err != nil {
+		return nil, err
 	}
-	return fl
+	if page.PageCount == 0 {
+		return []model.FileInfo{}, nil
+	}
+	err := query.Limit(page.PageSize).Offset((page.Current - 1) * page.PageSize).Find(&fl).Error
+	return fl, err
 }
 
 // RenameFileInfo 更新素材名称

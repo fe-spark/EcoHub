@@ -3,6 +3,9 @@ package shared
 import (
 	"strings"
 
+	"errors"
+
+	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository/support"
 
@@ -12,6 +15,14 @@ import (
 type peerPick struct {
 	mid  int64
 	rank int
+}
+
+// LoadActivePeerPlaylists 使用当前数据库连接加载其他站的播放线路。
+func LoadActivePeerPlaylists(infos []model.FilmIndex) (map[int64][]model.FilmSourcePlaylist, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
+	return LoadPeerPlaylists(db.Mdb, infos)
 }
 
 // LoadPeerPlaylists 按匹配键找出其他已启用站的播放线路，挂到这些档案上。

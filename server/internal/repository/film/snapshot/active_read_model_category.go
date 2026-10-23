@@ -63,7 +63,7 @@ func GetSnapshotMovieListByCategoryWithSourceReadModel(version string, sourceID 
 	}
 
 	listGen := GetSearchCacheVersion()
-	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, "update", offset, limit); used {
+	if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, field, id, offset, limit); used {
 		if err != nil {
 			return nil, err
 		}
@@ -178,29 +178,6 @@ func (h mysqlUseIndexHint) Build(builder clause.Builder) {
 	builder.WriteByte(')')
 }
 
-func applyCategoryHotIndexHint(query *gorm.DB, field string) *gorm.DB {
-	return applyCategoryIndexHint(query, field, "idx_pid_hits", "idx_cid_hits")
-}
-
-// hotCategoryQuery 热播深分页仍从该站线路取成员。
-// 首页这种小结果集不走这里，改由分类键索引点查播放线路主键。
-func hotCategoryQuery(conn *gorm.DB, sourceID, field string, categoryID int64) *gorm.DB {
-	if conn == nil {
-		return nil
-	}
-	col := "cid"
-	if field == "pid" {
-		col = "pid"
-	}
-	q := conn.Model(&model.FilmIndex{}).Select(basicSelectFields)
-	sourceID = strings.TrimSpace(sourceID)
-	if sourceID == "" {
-		return applyCategoryHotIndexHint(q.Where(col+" = ?", categoryID), field)
-	}
-	memberSQL, args := query.LiveCategoryMemberSQLIDs(dialectName(conn), sourceID, field, repository.PublicSourceTypeIDs(sourceID, field, categoryID))
-	return q.Where("mid IN (SELECT mid FROM ("+memberSQL+") AS hot_members)", args...)
-}
-
 func applyCategoryUpdateIndexHint(query *gorm.DB, field string) *gorm.DB {
 	return applyCategoryIndexHint(query, field, "idx_film_index_pid_update_mid", "idx_cid_update")
 }
@@ -251,6 +228,43 @@ func resolveHotListVersion(version string) string {
 	return version
 }
 
+// HomeCategoryMids 首页一个分类的推荐片和热播 mid。推荐从热度池抽样，热播取热度序。
+func HomeCategoryMids(version, sourceID, field string, categoryID int64, movieLimit, poolSize int) (movies []int64, hot []int64, err error) {
+	if poolSize <= 0 {
+		poolSize = searchHotPoolCap
+	}
+	if poolSize > searchHotPoolCap {
+		poolSize = searchHotPoolCap
+	}
+	if movieLimit <= 0 {
+		movieLimit = 14
+	}
+	pool, err := categoryRankMids(version, sourceID, field, categoryID, 1, poolSize)
+	if err != nil {
+		return nil, nil, err
+	}
+	hotN := movieLimit
+	if hotN > len(pool) {
+		hotN = len(pool)
+	}
+	hot = append([]int64(nil), pool[:hotN]...)
+	if len(pool) <= movieLimit {
+		return append([]int64(nil), pool...), hot, nil
+	}
+	order := make([]int, len(pool))
+	for i := range order {
+		order[i] = i
+	}
+	rand.Shuffle(len(order), func(i, j int) {
+		order[i], order[j] = order[j], order[i]
+	})
+	movies = make([]int64, movieLimit)
+	for i := 0; i < movieLimit; i++ {
+		movies[i] = pool[order[i]]
+	}
+	return movies, hot, nil
+}
+
 func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, sourceID string, field string, id int64, limit int, offset int) ([]model.MovieBasicInfo, error) {
 	if limit <= 0 {
 		return []model.MovieBasicInfo{}, nil
@@ -268,7 +282,7 @@ func GetSnapshotHotMovieListByCategoryWithSourceReadModel(version string, source
 		need = searchHotPoolCap
 	}
 	version = resolveHotListVersion(version)
-	mids, err := hotMidsFromIndex(version, sourceID, field, id, need)
+	mids, err := categoryRankMids(version, sourceID, field, id, 1, need)
 	if err != nil {
 		return nil, err
 	}
@@ -299,7 +313,7 @@ func GetSnapshotHotPoolByCategoryWithSourceReadModel(version string, sourceID st
 		return []model.MovieBasicInfo{}, nil
 	}
 	version = resolveHotListVersion(version)
-	mids, err := hotMidsFromIndex(version, sourceID, field, id, poolSize)
+	mids, err := categoryRankMids(version, sourceID, field, id, 1, poolSize)
 	if err != nil {
 		return nil, err
 	}
@@ -346,7 +360,7 @@ func GetSnapshotDynamicHotMovieListByCategoryReadModel(version string, field str
 	return GetSnapshotDynamicHotMovieListByCategoryWithSourceReadModel(version, "", field, id, limit, poolSize)
 }
 
-// GetSnapshotTopMoviesBySortFastWithSource 快速获取指定采集站分类排序 Top 影片
+// GetSnapshotTopMoviesBySortFastWithSource 分类页三路排序。年份、热播、最新读同一套内存榜。
 func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, sortType int, pid int64, limit int) ([]model.MovieBasicInfo, error) {
 	startedAt := time.Now()
 	version = strings.TrimSpace(version)
@@ -358,58 +372,25 @@ func GetSnapshotTopMoviesBySortFastWithSource(version string, sourceID string, s
 	if version == "" || pid <= 0 || limit <= 0 {
 		return []model.MovieBasicInfo{}, nil
 	}
-	if db.Mdb == nil {
-		return nil, ErrSearchIndexMissing
-	}
-
-	orderClause := "update_stamp DESC"
-	switch sortType {
-	case 0:
-		orderClause = "year DESC, update_stamp DESC"
-	case 1:
-		orderClause = "hits DESC, mid DESC"
-	case 2:
-		orderClause = "update_stamp DESC"
-	}
-
-	if sortType == 1 || sortType == 2 {
-		orderKind := "update"
-		if sortType == 1 {
-			orderKind = "hits"
-		}
-		if snaps, used, err := probeCategorySourceList(db.Mdb, sourceID, "pid", pid, orderKind, 0, limit); used {
-			if err != nil {
-				return nil, err
-			}
-			result := shared.BuildMovieBasicInfosFromSnapshots(snaps...)
-			log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
-				sourceID, pid, sortType, len(result), time.Since(startedAt))
-			return result, nil
-		}
-	}
-	query := categorySortFastQuery(db.Mdb, sourceID, sortType, pid)
-	snapshots, err := scanListSnapshots(query.Order(liveTieOrder(orderClause)).Limit(limit))
+	mids, err := categoryRankMids(version, sourceID, "pid", pid, sortType, limit)
 	if err != nil {
 		return nil, err
 	}
-	result := shared.BuildMovieBasicInfosFromSnapshots(snapshots...)
+	result, err := movieInfosByMids(version, mids)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		result = []model.MovieBasicInfo{}
+	}
 	log.Printf("[FilmSortListFast] 获取分类排序Top列表 source=%s pid=%d sortType=%d count=%d cost=%s",
 		sourceID, pid, sortType, len(result), time.Since(startedAt))
 	return result, nil
 }
 
-// GetSnapshotTopMoviesBySortFast 快速获取分类排序 Top 影片，直接基于复合索引排序，消除 COUNT 扫描开销
+// GetSnapshotTopMoviesBySortFast 分类页三路排序，不限采集站。
 func GetSnapshotTopMoviesBySortFast(version string, sortType int, pid int64, limit int) ([]model.MovieBasicInfo, error) {
 	return GetSnapshotTopMoviesBySortFastWithSource(version, "", sortType, pid, limit)
-}
-
-// categorySortFastQuery 分类页三路排序的深分页回退。
-// 热播和最新的小结果集先走分类键索引点查，这里只在点查不适用时使用。
-func categorySortFastQuery(conn *gorm.DB, sourceID string, sortType int, pid int64) *gorm.DB {
-	if sortType == 1 {
-		return hotCategoryQuery(conn, sourceID, "pid", pid)
-	}
-	return categoryFilmQuery(conn, sourceID, "pid", pid, basicSelectFields)
 }
 
 // categoryFilmQuery 分类列表。指定采集站时只认该站自己的分类键。

@@ -70,7 +70,10 @@ func StopAllTasks() {
 
 // PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
 func PrepareSingleCollectStart(source model.FilmSource) error {
-	claimed := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
+	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
+	if err != nil {
+		return err
+	}
 	if len(claimed) == 0 {
 		return fmt.Errorf("站点 %s 已在采集队列或正在运行，已跳过本次采集", source.Name)
 	}

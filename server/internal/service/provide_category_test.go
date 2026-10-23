@@ -22,12 +22,15 @@ func TestProvidePlayFromName_Proxy(t *testing.T) {
 }
 
 func TestFormatProvideFilmDetail_ProxyMark(t *testing.T) {
-	detail := formatProvideFilmDetail(model.FilmListSnapshot{Mid: 1, Name: "片"}, model.MovieDetailVo{
+	detail, err := formatProvideFilmDetail(model.FilmListSnapshot{Mid: 1, Name: "片"}, model.MovieDetailVo{
 		List: []model.PlayLinkVo{
 			{Name: "直连站", LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://a"}}},
 			{Name: "代理站", Proxy: true, LinkList: []model.MovieUrlInfo{{Episode: "1", Link: "http://b"}}},
 		},
 	}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if detail.VodPlayFrom != "直连站$$$代理站代理" {
 		t.Fatalf("play from %q", detail.VodPlayFrom)
 	}

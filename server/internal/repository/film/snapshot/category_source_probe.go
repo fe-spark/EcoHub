@@ -18,15 +18,12 @@ const (
 	categoryProbeMaxKeys = 400
 
 	probeIndexRootUpdate = "idx_root_key_upd_stamp"
-	probeIndexRootHits   = "idx_root_key_hits_val"
 	probeIndexCatUpdate  = "idx_cat_key_upd_stamp"
-	probeIndexCatHits    = "idx_cat_key_hits_val"
 	probeIndexPidUpdate  = "idx_film_index_pid_update_mid"
 )
 
 type probeRank struct {
 	Mid         int64 `gorm:"column:mid"`
-	Hits        int64 `gorm:"column:hits"`
 	UpdateStamp int64 `gorm:"column:update_stamp"`
 }
 
@@ -38,21 +35,18 @@ type probeBranch struct {
 
 // probeCategorySourceList 按分类键的有序索引各取一段，再用播放线路主键点查该站，合并后取够即停。
 // 空分类每个键都是空范围，不会扫完整库。offset+limit 过大时返回 used=false，调用方走原查询。
-func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID int64, orderKind string, offset, limit int) ([]model.FilmListSnapshot, bool, error) {
+func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID int64, offset, limit int) ([]model.FilmListSnapshot, bool, error) {
 	sourceID = strings.TrimSpace(sourceID)
 	if conn == nil || sourceID == "" || limit <= 0 || offset < 0 || offset+limit > categoryProbeMaxRows {
 		return nil, false, nil
 	}
-	if orderKind != "hits" && orderKind != "update" {
-		return nil, false, nil
-	}
 	need := offset + limit
 	if sourceKeys := sourceTypeKeysForProbe(sourceID, field, categoryID); len(sourceKeys) > 0 {
-		ranks, err := scanProbeBranches(conn, sourceTypeProbeBranches(field, orderKind, sourceKeys), sourceID, orderKind, need)
+		ranks, err := scanProbeBranches(conn, sourceTypeProbeBranches(sourceKeys), sourceID, need)
 		if err != nil {
 			return nil, true, err
 		}
-		mids := pageProbeMids(ranks, orderKind, offset, limit)
+		mids := pageProbeMids(ranks, offset, limit)
 		snaps, err := listSnapshotsByMIDs(conn, mids)
 		if err != nil {
 			return nil, true, err
@@ -60,16 +54,16 @@ func probeCategorySourceList(conn *gorm.DB, sourceID, field string, categoryID i
 		return snaps, true, nil
 	}
 	idColumn, id, categoryKeys, rootKeys := query.LiveCategoryProbeKeys(field, categoryID)
-	branches := buildProbeBranches(orderKind, idColumn, id, categoryKeys, rootKeys)
+	branches := buildProbeBranches(idColumn, id, categoryKeys, rootKeys)
 	if len(branches) == 0 || len(branches) > categoryProbeMaxKeys {
 		return nil, false, nil
 	}
 
-	ranks, err := scanProbeBranches(conn, branches, sourceID, orderKind, need)
+	ranks, err := scanProbeBranches(conn, branches, sourceID, need)
 	if err != nil {
 		return nil, true, err
 	}
-	mids := pageProbeMids(ranks, orderKind, offset, limit)
+	mids := pageProbeMids(ranks, offset, limit)
 	snaps, err := listSnapshotsByMIDs(conn, mids)
 	if err != nil {
 		return nil, true, err
@@ -96,36 +90,28 @@ func sourceTypeKeysForProbe(sourceID, field string, categoryID int64) []string {
 }
 
 // sourceTypeProbeBranches 按当前站分类树展开后的 type_id 点查 category_key。
-func sourceTypeProbeBranches(_, orderKind string, sourceKeys []string) []probeBranch {
-	catIndex := probeIndexCatUpdate
-	if orderKind == "hits" {
-		catIndex = probeIndexCatHits
-	}
+func sourceTypeProbeBranches(sourceKeys []string) []probeBranch {
 	branches := make([]probeBranch, 0, len(sourceKeys))
 	for _, sourceKey := range sourceKeys {
 		if sourceKey == "" {
 			continue
 		}
-		branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: catIndex})
+		branches = append(branches, probeBranch{column: "category_key", value: sourceKey, index: probeIndexCatUpdate})
 	}
 	return branches
 }
 
-func buildProbeBranches(orderKind, idColumn string, id int64, categoryKeys, rootKeys []string) []probeBranch {
+func buildProbeBranches(idColumn string, id int64, categoryKeys, rootKeys []string) []probeBranch {
 	branches := make([]probeBranch, 0, 1+len(categoryKeys)+len(rootKeys))
 	if id > 0 && (idColumn == "pid" || idColumn == "cid") {
 		index := ""
-		if orderKind == "update" && idColumn == "pid" {
+		if idColumn == "pid" {
 			index = probeIndexPidUpdate
 		}
 		branches = append(branches, probeBranch{column: idColumn, value: id, index: index})
 	}
 	rootIndex := probeIndexRootUpdate
 	catIndex := probeIndexCatUpdate
-	if orderKind == "hits" {
-		rootIndex = probeIndexRootHits
-		catIndex = probeIndexCatHits
-	}
 	for _, key := range rootKeys {
 		if key == "" {
 			continue
@@ -141,32 +127,25 @@ func buildProbeBranches(orderKind, idColumn string, id int64, categoryKeys, root
 	return branches
 }
 
-func probeOrderSQL(orderKind string) string {
-	if orderKind == "hits" {
-		return "hits DESC, mid DESC"
-	}
-	return "update_stamp DESC, mid DESC"
-}
-
-func probeBranchSQL(dialect string, branch probeBranch, orderKind string) string {
+func probeBranchSQL(dialect string, branch probeBranch) string {
 	from := model.TableFilmIndex
 	if dialect == "mysql" && branch.index != "" {
 		from += " USE INDEX (`" + branch.index + "`)"
 	}
 	inner := fmt.Sprintf(
-		"SELECT mid, hits, update_stamp FROM %s WHERE deleted_at IS NULL AND %s = ? AND EXISTS (SELECT 1 FROM %s AS p WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY %s LIMIT ?",
-		from, branch.column, model.TableFilmSourcePlaylist, model.TableFilmIndex, probeOrderSQL(orderKind),
+		"SELECT mid, update_stamp FROM %s WHERE deleted_at IS NULL AND %s = ? AND EXISTS (SELECT 1 FROM %s AS p WHERE p.mid = %s.mid AND p.source_id = ? AND p.line_kind = ?) ORDER BY update_stamp DESC, mid DESC LIMIT ?",
+		from, branch.column, model.TableFilmSourcePlaylist, model.TableFilmIndex,
 	)
-	return "SELECT mid, hits, update_stamp FROM (" + inner + ") AS probe_branch"
+	return "SELECT mid, update_stamp FROM (" + inner + ") AS probe_branch"
 }
 
-func scanProbeBranches(conn *gorm.DB, branches []probeBranch, sourceID, orderKind string, need int) ([]probeRank, error) {
+func scanProbeBranches(conn *gorm.DB, branches []probeBranch, sourceID string, need int) ([]probeRank, error) {
 	dialect := dialectName(conn)
 	parts := make([]string, 0, len(branches))
 	args := make([]any, 0, len(branches)*4)
 	for _, branch := range branches {
-		parts = append(parts, probeBranchSQL(dialect, branch, orderKind))
-		args = append(args, branch.value, sourceID, "play", need)
+		parts = append(parts, probeBranchSQL(dialect, branch))
+		args = append(args, branch.value, sourceID, model.LineKindPlay, need)
 	}
 	sql := strings.Join(parts, " UNION ALL ")
 	var ranks []probeRank
@@ -176,17 +155,11 @@ func scanProbeBranches(conn *gorm.DB, branches []probeBranch, sourceID, orderKin
 	return ranks, nil
 }
 
-func pageProbeMids(ranks []probeRank, orderKind string, offset, limit int) []int64 {
+func pageProbeMids(ranks []probeRank, offset, limit int) []int64 {
 	if len(ranks) == 0 {
 		return nil
 	}
 	sort.SliceStable(ranks, func(i, j int) bool {
-		if orderKind == "hits" {
-			if ranks[i].Hits != ranks[j].Hits {
-				return ranks[i].Hits > ranks[j].Hits
-			}
-			return ranks[i].Mid > ranks[j].Mid
-		}
 		if ranks[i].UpdateStamp != ranks[j].UpdateStamp {
 			return ranks[i].UpdateStamp > ranks[j].UpdateStamp
 		}

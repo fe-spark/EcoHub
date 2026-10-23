@@ -223,31 +223,30 @@ func GetSourcePageConcurrencyMax(_ *model.FilmSource) int {
 }
 
 func buildPageRequest(s *model.FilmSource, h, pg int) (utils.RequestInfo, error) {
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+	if s == nil {
+		return utils.RequestInfo{}, errors.New("采集站为空")
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, SkipTLSVerify: s.SkipTLSVerify}
 	r.Params.Set("pg", fmt.Sprint(pg))
 	if h > 0 {
 		r.Params.Set("h", fmt.Sprint(h))
 	}
-	if s == nil {
-		return r, nil
-	}
 	if s.ResolveFormat() == model.SourceFormatXML {
 		r.Params.Set("ac", "videolist")
 	}
-	if !s.ProxyCollect {
+	if s.ProxyCollect {
+		if deps.ResolveSpiderProxy != nil {
+			ok, proxy, err := deps.ResolveSpiderProxy()
+			if err != nil {
+				return r, err
+			}
+			if ok {
+				r.ProxyURL = proxy
+			}
+		}
 		return r, nil
 	}
-	if deps.ResolveSpiderProxy != nil {
-		ok, proxy, err := deps.ResolveSpiderProxy()
-		if err != nil {
-			return r, err
-		}
-		if ok {
-			r.ProxyURL = proxy
-		}
-		return r, nil
-	}
-	if deps.ResolveSourceProxy != nil {
+	if s.Id != "" && deps.ResolveSourceProxy != nil {
 		ok, proxy, err := deps.ResolveSourceProxy(s.Id)
 		if err != nil {
 			return r, err

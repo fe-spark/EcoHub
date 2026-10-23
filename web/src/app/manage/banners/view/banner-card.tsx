@@ -88,11 +88,6 @@ export function BannerCard({
               <Paragraph className={styles.cardTitle} ellipsis={{ rows: 1, tooltip: record.name }}>
                 {record.name}
               </Paragraph>
-              {record.isPinned && (
-                <Tag color="magenta" style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>
-                  置顶
-                </Tag>
-              )}
             </div>
 
             <div className={styles.metaLine}>

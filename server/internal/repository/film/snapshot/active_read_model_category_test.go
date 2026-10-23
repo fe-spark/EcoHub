@@ -13,159 +13,6 @@ import (
 	"gorm.io/gorm/logger"
 )
 
-func TestApplyCategoryHotIndexHint_SQLiteUnchanged(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:hint_sqlite?mode=memory&cache=shared"), &gorm.Config{
-		DryRun: true,
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-
-	sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		q := tx.Model(&model.FilmIndex{}).Select("mid").Where("pid = ?", 1)
-		q = applyCategoryHotIndexHint(q, "pid")
-		return q.Order("hits DESC, mid DESC").Limit(10).Find(&rows)
-	})
-	if strings.Contains(strings.ToUpper(sql), "USE INDEX") {
-		t.Fatalf("sqlite must not inject USE INDEX, got: %s", sql)
-	}
-}
-
-func TestApplyCategoryHotIndexHint_MySQLQuotedSeparately(t *testing.T) {
-	gdb, err := gorm.Open(mysql.New(mysql.Config{
-		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
-		SkipInitializeWithVersion: true,
-	}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-		Logger:               logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open mysql dry-run: %v", err)
-	}
-
-	assertHint := func(field, index string) {
-		t.Helper()
-		sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-			var rows []model.FilmIndex
-			q := tx.Model(&model.FilmIndex{}).Select("mid").Where("pid = ?", 1)
-			q = applyCategoryHotIndexHint(q, field)
-			return q.Order("hits DESC, mid DESC").Limit(10).Find(&rows)
-		})
-		if strings.Contains(sql, "`film_index USE INDEX") {
-			t.Fatalf("table name must not swallow USE INDEX, got: %s", sql)
-		}
-		wantTable := "`film_index`"
-		wantHint := "USE INDEX (`" + index + "`)"
-		if !strings.Contains(sql, wantTable) || !strings.Contains(sql, wantHint) {
-			t.Fatalf("expected quoted table + %s, got: %s", wantHint, sql)
-		}
-	}
-
-	assertHint("pid", "idx_pid_hits")
-	assertHint("cid", "idx_cid_hits")
-}
-
-func TestHotCategoryQuery_DrivesFromPlaylistIndex(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:hot_member_sqlite?mode=memory&cache=shared"), &gorm.Config{
-		DryRun: true,
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		return hotCategoryQuery(tx, "src_new", "pid", 29).Limit(14).Find(&rows)
-	})
-	if !strings.Contains(sql, "film_source_playlists") || !strings.Contains(sql, "hot_members") {
-		t.Fatalf("hot query must start from source playlists, got: %s", sql)
-	}
-	if strings.Contains(strings.ToUpper(sql), "USE INDEX") {
-		t.Fatalf("sqlite hot query must not inject USE INDEX, got: %s", sql)
-	}
-	if strings.Contains(sql, "idx_pid_hits") {
-		t.Fatalf("source hot query must not scan idx_pid_hits, got: %s", sql)
-	}
-
-	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
-		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
-		SkipInitializeWithVersion: true,
-	}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-		Logger:               logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open mysql dry-run: %v", err)
-	}
-	mysqlSQL := mysqlDB.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		return hotCategoryQuery(tx, "src_new", "pid", 29).Limit(14).Find(&rows)
-	})
-	if !strings.Contains(mysqlSQL, "USE INDEX (`idx_playlist_source_mid`)") {
-		t.Fatalf("mysql hot query must use playlist source index, got: %s", mysqlSQL)
-	}
-	if strings.Contains(mysqlSQL, "idx_pid_hits") {
-		t.Fatalf("mysql hot query must not scan idx_pid_hits, got: %s", mysqlSQL)
-	}
-}
-
-func TestSortFastHits_DrivesFromPlaylistIndex(t *testing.T) {
-	gdb, err := gorm.Open(sqlite.Open("file:sort_fast_hot_sqlite?mode=memory&cache=shared"), &gorm.Config{
-		DryRun: true,
-		Logger: logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open sqlite: %v", err)
-	}
-	sql := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		return categorySortFastQuery(tx, "src_new", 1, 29).Limit(21).Find(&rows)
-	})
-	if !strings.Contains(sql, "film_source_playlists") || !strings.Contains(sql, "hot_members") {
-		t.Fatalf("classify hits top must start from source playlists, got: %s", sql)
-	}
-	if strings.Contains(sql, "idx_pid_hits") {
-		t.Fatalf("classify hits top must not scan idx_pid_hits, got: %s", sql)
-	}
-
-	recentSQL := gdb.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		return categorySortFastQuery(tx, "src_new", 2, 29).Limit(21).Find(&rows)
-	})
-	if !strings.Contains(recentSQL, "film_source_playlists") || !strings.Contains(recentSQL, "category_key") {
-		t.Fatalf("classify recent must filter by this source category key, got: %s", recentSQL)
-	}
-	if strings.Contains(recentSQL, "idx_pid_hits") || strings.Contains(recentSQL, "pid =") {
-		t.Fatalf("classify recent must not match the merged local pid, got: %s", recentSQL)
-	}
-
-	mysqlDB, err := gorm.Open(mysql.New(mysql.Config{
-		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
-		SkipInitializeWithVersion: true,
-	}), &gorm.Config{
-		DryRun:               true,
-		DisableAutomaticPing: true,
-		Logger:               logger.Default.LogMode(logger.Silent),
-	})
-	if err != nil {
-		t.Fatalf("open mysql dry-run: %v", err)
-	}
-	mysqlSQL := mysqlDB.ToSQL(func(tx *gorm.DB) *gorm.DB {
-		var rows []model.FilmIndex
-		return categorySortFastQuery(tx, "src_new", 1, 29).Order("hits DESC, mid DESC").Limit(21).Find(&rows)
-	})
-	if !strings.Contains(mysqlSQL, "USE INDEX (`idx_playlist_source_mid`)") {
-		t.Fatalf("mysql classify hits top must use playlist source index, got: %s", mysqlSQL)
-	}
-	if strings.Contains(mysqlSQL, "idx_pid_hits") {
-		t.Fatalf("mysql classify hits top must not scan idx_pid_hits, got: %s", mysqlSQL)
-	}
-}
-
 func TestApplyCategoryUpdateIndexHint_MySQLQuotedSeparately(t *testing.T) {
 	gdb, err := gorm.Open(mysql.New(mysql.Config{
 		DSN:                       "gorm:gorm@tcp(127.0.0.1:3306)/gorm?charset=utf8mb4&parseTime=True&loc=Local",
@@ -263,16 +110,121 @@ func TestCategoryList_ZeroPidUsesCategoryKey(t *testing.T) {
 	}
 }
 
+func TestCategoryRank_ThreeSortsShareBoard(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	films := []model.FilmIndex{
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 1, FirstSourceId: "src"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "旧片", Year: 2001, Hits: 10, UpdateStamp: 100},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 2, FirstSourceId: "src"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "热片", Year: 2010, Hits: 900, UpdateStamp: 300},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 3, FirstSourceId: "src"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "新年", Year: 2024, Hits: 50, UpdateStamp: 200},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 6, FirstSourceId: "src"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "同年更旧", Year: 2024, Hits: 1, UpdateStamp: 50},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 4, FirstSourceId: "src"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:src:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "无播放", Year: 2099, Hits: 9999, UpdateStamp: 9999},
+		},
+		{
+			FilmIndexIdentity: model.FilmIndexIdentity{Mid: 5, FirstSourceId: "other"},
+			FilmIndexCategory: model.FilmIndexCategory{CategoryKey: "source:other:1", Pid: 1},
+			FilmIndexContent:  model.FilmIndexContent{Name: "别站", Year: 2030, Hits: 8000, UpdateStamp: 8000},
+		},
+	}
+	if err := gdb.Create(&films).Error; err != nil {
+		t.Fatalf("create films: %v", err)
+	}
+	for _, mid := range []int64{1, 2, 3, 6} {
+		line := model.FilmSourcePlaylist{Mid: mid, SourceId: "src", LineKind: "play", GroupIndex: 0}
+		if err := gdb.Create(&line).Error; err != nil {
+			t.Fatalf("create playlist: %v", err)
+		}
+	}
+	other := model.FilmSourcePlaylist{Mid: 5, SourceId: "other", LineKind: "play", GroupIndex: 0}
+	if err := gdb.Create(&other).Error; err != nil {
+		t.Fatalf("create other playlist: %v", err)
+	}
+	if err := SetActiveSnapshotVersion("vrank"); err != nil {
+		t.Fatalf("set version: %v", err)
+	}
+	if err := LoadActiveFilmReadModel("vrank"); err != nil {
+		t.Fatalf("load read model: %v", err)
+	}
+	WaitActiveFilmSearchIndexBuilt()
+
+	news, err := GetSnapshotTopMoviesBySortFastWithSource("vrank", "src", 0, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := movieIDs(news); !sameIDs(ids, []int64{3, 6, 2, 1}) {
+		t.Fatalf("year order = %v", ids)
+	}
+	top, err := GetSnapshotTopMoviesBySortFastWithSource("vrank", "src", 1, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := movieIDs(top); !sameIDs(ids, []int64{2, 3, 1, 6}) {
+		t.Fatalf("hits order = %v", ids)
+	}
+	recent, err := GetSnapshotTopMoviesBySortFastWithSource("vrank", "src", 2, 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := movieIDs(recent); !sameIDs(ids, []int64{2, 3, 1, 6}) {
+		t.Fatalf("update order = %v", ids)
+	}
+	hot, err := GetSnapshotHotMovieListByCategoryWithSourceReadModel("vrank", "src", "pid", 1, 10, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := movieIDs(hot); !sameIDs(ids, movieIDs(top)) {
+		t.Fatalf("hot list = %v, classify top = %v", ids, movieIDs(top))
+	}
+}
+
+func movieIDs(list []model.MovieBasicInfo) []int64 {
+	ids := make([]int64, len(list))
+	for i := range list {
+		ids[i] = list[i].Id
+	}
+	return ids
+}
+
+func sameIDs(got, want []int64) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestProbeBranchSQL_MySQLUsesCategoryKeyIndex(t *testing.T) {
-	branch := probeBranch{column: "root_category_key", value: "source:src:1", index: probeIndexRootHits}
-	sql := probeBranchSQL("mysql", branch, "hits")
-	if !strings.Contains(sql, "USE INDEX (`idx_root_key_hits_val`)") {
-		t.Fatalf("mysql probe must walk the category hits index, got: %s", sql)
+	branch := probeBranch{column: "root_category_key", value: "source:src:1", index: probeIndexRootUpdate}
+	sql := probeBranchSQL("mysql", branch)
+	if !strings.Contains(sql, "USE INDEX (`idx_root_key_upd_stamp`)") {
+		t.Fatalf("mysql probe must walk the category update index, got: %s", sql)
 	}
 	if !strings.Contains(sql, "EXISTS") || strings.Contains(sql, "hot_members") || strings.Contains(sql, "idx_playlist_source_mid") {
 		t.Fatalf("probe must point-check playlist primary key, got: %s", sql)
 	}
-	sqliteSQL := probeBranchSQL("sqlite", branch, "update")
+	sqliteSQL := probeBranchSQL("sqlite", branch)
 	if strings.Contains(strings.ToUpper(sqliteSQL), "USE INDEX") {
 		t.Fatalf("sqlite probe must not inject USE INDEX, got: %s", sqliteSQL)
 	}

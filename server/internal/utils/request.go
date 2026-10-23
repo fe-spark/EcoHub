@@ -31,7 +31,6 @@ var sharedTransport = &http.Transport{
 	MaxIdleConns:        200,
 	MaxIdleConnsPerHost: 30,
 	IdleConnTimeout:     90 * time.Second,
-	TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 }
 
 // 代理 Transport 缓存池 (proxyURL -> *http.Transport)，避免高并发下频繁建连
@@ -105,7 +104,6 @@ func newProxyTransport(proxyStr string) (*http.Transport, error) {
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
-		TLSClientConfig:     &tls.Config{InsecureSkipVerify: true},
 	}
 	switch strings.ToLower(u.Scheme) {
 	case "http", "https":
@@ -147,13 +145,14 @@ var Client = CreateClient()
 
 // RequestInfo 请求参数结构体
 type RequestInfo struct {
-	Uri      string          `json:"uri"`                // 请求url地址
-	Params   url.Values      `json:"param"`              // 请求参数
-	Header   http.Header     `json:"header"`             // 请求头数据
-	Resp     []byte          `json:"resp"`               // 响应结果数据
-	Err      string          `json:"err"`                // 错误信息
-	Ctx      context.Context `json:"-"`                  // 可选，停止采集时取消在途 HTTP
-	ProxyURL string          `json:"proxyUrl,omitempty"` // 可选，网络代理地址
+	Uri           string          `json:"uri"`                // 请求url地址
+	Params        url.Values      `json:"param"`              // 请求参数
+	Header        http.Header     `json:"header"`             // 请求头数据
+	Resp          []byte          `json:"resp"`               // 响应结果数据
+	Err           string          `json:"err"`                // 错误信息
+	Ctx           context.Context `json:"-"`                  // 可选，停止采集时取消在途 HTTP
+	ProxyURL      string          `json:"proxyUrl,omitempty"` // 可选，网络代理地址
+	SkipTLSVerify bool            `json:"-"`                  // 仅自签名源站跳过证书校验
 }
 
 // userAgents 现代主流浏览器 UA 池（Chrome / Firefox / Edge）
@@ -241,6 +240,12 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+func insecureTransport(base *http.Transport) *http.Transport {
+	cloned := base.Clone()
+	cloned.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
+	return cloned
+}
+
 // ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
 func ApiGet(r *RequestInfo) {
 	targetUrl := buildUrl(r.Uri, r.Params)
@@ -260,6 +265,9 @@ func ApiGet(r *RequestInfo) {
 	transport := sharedTransport
 	if r != nil && strings.TrimSpace(r.ProxyURL) != "" {
 		transport = GetOrCreateProxyTransport(r.ProxyURL)
+	}
+	if r != nil && r.SkipTLSVerify {
+		transport = insecureTransport(transport)
 	}
 
 	timeout := 20 * time.Second

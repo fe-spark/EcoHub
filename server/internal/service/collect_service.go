@@ -14,8 +14,6 @@ import (
 	"server/internal/spider"
 	"server/internal/spider/progress"
 	"server/internal/utils"
-
-	"gorm.io/gorm"
 )
 
 type CollectService struct{}
@@ -250,20 +248,18 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 		orphanMids = orphans
 	}
 	if isUriChanged || isFormatChanged {
-		if err := repository.DeleteFailureRecordsByOriginIdTx(db.Mdb, source.Id); err != nil {
+		if err := repository.DeleteFailureRecordsByOrigin(source.Id); err != nil {
 			syslog.Errorf("[Collect] 清理变更源关联失败记录失败: %v", err)
 			return errors.New("清理原失败记录失败，请重试")
 		}
 	}
 	if isUriChanged {
-		if err := repository.ClearSourceCategoryDataTx(db.Mdb, source.Id); err != nil {
+		if err := repository.ClearSourceCategoryData(source.Id); err != nil {
 			syslog.Errorf("[Collect] 更换源地址清空分类失败: %v", err)
 			return errors.New("清空分类失败，请重试")
 		}
 	}
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		return repository.UpdateCollectSourceTx(tx, source)
-	})
+	err := repository.UpdateCollectSource(source)
 	if err != nil {
 		return err
 	}
@@ -405,7 +401,7 @@ func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
 }
 
 func (s *CollectService) DelFilmSource(id string) error {
-	return spider.WithSourceExclusive(id, func() error {
+	err := spider.WithSourceExclusive(id, func() error {
 		src := repository.FindCollectSourceById(id)
 		if src == nil {
 			return errors.New("当前资源站信息不存在, 请勿重复操作")
@@ -433,6 +429,11 @@ func (s *CollectService) DelFilmSource(id string) error {
 		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	spider.DropSourceRuntime(id)
+	return nil
 }
 
 // PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。

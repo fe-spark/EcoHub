@@ -35,11 +35,9 @@ export function initBannerFormValues(
       isCustomPic: isCustom,
       picture: isCustom ? resolveEditablePicture(currentRow) : "",
       pictureSlide: isCustom ? validSlide : "",
-      sort: currentRow.sort ?? 0,
-      isPinned: currentRow.isPinned ?? false,
     };
   }
-  return { isCustomPic: false, sort: 0, isPinned: false };
+  return { isCustomPic: false };
 }
 
 interface BuildPayloadParams {
@@ -83,11 +81,11 @@ export function buildBannerPayload({
     picture: isCustom && customPic ? customPic : livePic,
     pictureSlide: finalSlide,
     customPicture: isCustom ? customPic : "",
-    sort: values.sort ?? currentRow?.sort ?? 0,
+    sort: currentRow?.sort ?? 0,
     remark: selectedFilm?.remarks || (!isReplacingFilm ? (currentRow?.remark || "") : ""),
     isCustomPic: isCustom,
     source: currentRow?.source || "manual",
-    isPinned: values.isPinned ?? currentRow?.isPinned ?? false,
+    isPinned: false,
     score: scrapedData?.score ?? (currentRow?.score || selectedFilm?.score || 0),
     blurb: scrapedData?.blurb ?? (currentRow?.blurb || (selectedFilm as any)?.blurb || ""),
     tmdbId: scrapedData?.tmdbId ?? (currentRow?.tmdbId || (selectedFilm as any)?.tmdbId || 0),

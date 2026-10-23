@@ -16,6 +16,15 @@ type ManageService struct{}
 
 var ManageSvc = new(ManageService)
 
+// AccessGuardConfig 返回私有化开关和订阅密钥。
+func (s *ManageService) AccessGuardConfig() (bool, string, error) {
+	cfg, err := repository.GetSiteBasic()
+	if err != nil {
+		return false, "", err
+	}
+	return cfg.PrivateAccess, strings.TrimSpace(cfg.ProvideKey), nil
+}
+
 // GetSiteBasicConfig 获取网站基本配置信息
 func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
 	return repository.GetSiteBasic()
@@ -66,7 +75,11 @@ func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
 	curr.PrivateAccess = ac.PrivateAccess
 	if curr.PrivateAccess {
 		if strings.TrimSpace(ac.ProvideKey) == "" {
-			curr.ProvideKey = utils.RandomString(8)
+			key, err := utils.RandomString(8)
+			if err != nil {
+				return err
+			}
+			curr.ProvideKey = key
 		} else {
 			curr.ProvideKey = strings.TrimSpace(ac.ProvideKey)
 		}
