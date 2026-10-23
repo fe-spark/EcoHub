@@ -1,7 +1,8 @@
 "use client";
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { Button, Drawer, Flex, Space, Spin } from "antd";
+import { Button, Drawer, Space, Spin, Tag } from "antd";
+import { SettingOutlined } from "@ant-design/icons";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import BannerQuickConfig, { CategoryQuotaItem, QuickStrategy } from "./banner-quick-config";
@@ -116,26 +117,31 @@ export default function BannerConfigDrawer({
       onClose={onClose}
       width={560}
       destroyOnClose
-      title={<span style={{ fontSize: 16, fontWeight: 600 }}>排片配置</span>}
-      footer={
-        <Flex justify="space-between" align="center">
-          <div>
-            {configDirty && <span className={styles.quotaHint}>配置未保存</span>}
-          </div>
-          <Space size={8}>
-            <Button onClick={onClose} disabled={saving}>
-              取消
-            </Button>
-            <Button
-              type="primary"
-              loading={saving}
-              disabled={loading || saving}
-              onClick={() => void handleSave()}
-            >
-              保存配置
-            </Button>
-          </Space>
-        </Flex>
+      title={
+        <Space size={10} align="center">
+          <SettingOutlined style={{ color: "var(--ant-color-primary)", fontSize: 18 }} />
+          <span style={{ fontSize: 16, fontWeight: 600 }}>排片配置</span>
+          {configDirty && (
+            <Tag color="warning" style={{ borderRadius: 4, margin: 0 }}>
+              未保存
+            </Tag>
+          )}
+        </Space>
+      }
+      extra={
+        <Space size={8}>
+          <Button onClick={onClose} disabled={saving}>
+            取消
+          </Button>
+          <Button
+            type="primary"
+            loading={saving}
+            disabled={loading || saving}
+            onClick={() => void handleSave()}
+          >
+            保存配置
+          </Button>
+        </Space>
       }
     >
       <Spin spinning={loading}>

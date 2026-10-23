@@ -99,7 +99,10 @@ func TestGetAccessDataStats_Empty(t *testing.T) {
 	_, cleanup := setupTestRedisAndDB(t)
 	defer cleanup()
 
-	stats := GetAccessDataStats()
+	stats, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.DailyStatsCount != 0 || stats.DailyTopCount != 0 || stats.RedisKeyCount != 0 {
 		t.Errorf("expected empty stats, got %+v", stats)
 	}
@@ -136,7 +139,10 @@ func TestGetAccessDataStats_Populated(t *testing.T) {
 	_ = db.Rdb.Set(db.Cxt, uvKey("20260901"), "val", 0)
 	_ = db.Rdb.Set(db.Cxt, uvKey("20260902"), "val", 0)
 
-	stats := GetAccessDataStats()
+	stats, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.DailyStatsCount != 2 {
 		t.Errorf("want DailyStatsCount=2, got %d", stats.DailyStatsCount)
 	}
@@ -173,7 +179,10 @@ func TestGetAccessDataStats_TopOnlyFallback(t *testing.T) {
 		Count:   5,
 	})
 
-	stats := GetAccessDataStats()
+	stats, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.DailyStatsCount != 0 {
 		t.Errorf("want DailyStatsCount=0, got %d", stats.DailyStatsCount)
 	}
@@ -212,7 +221,10 @@ func TestClearAccessData_All(t *testing.T) {
 	}
 
 	// Verify DB is empty
-	stats := GetAccessDataStats()
+	stats, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.DailyStatsCount != 0 || stats.DailyTopCount != 0 || stats.RedisKeyCount != 0 {
 		t.Errorf("expected empty stats after clear all, got %+v", stats)
 	}
@@ -309,7 +321,10 @@ func TestClearAccessData_LargeKeySetBatching(t *testing.T) {
 		t.Fatalf("populate redis keys: %v", err)
 	}
 
-	stats := GetAccessDataStats()
+	stats, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if stats.RedisKeyCount != int64(totalKeys) {
 		t.Fatalf("want RedisKeyCount=%d, got %d", totalKeys, stats.RedisKeyCount)
 	}
@@ -322,7 +337,10 @@ func TestClearAccessData_LargeKeySetBatching(t *testing.T) {
 		t.Fatalf("want DeletedRedisKeys=%d, got %d", totalKeys, res.DeletedRedisKeys)
 	}
 
-	statsAfter := GetAccessDataStats()
+	statsAfter, err := GetAccessDataStats()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if statsAfter.RedisKeyCount != 0 {
 		t.Fatalf("expected 0 redis keys after clear, got %d", statsAfter.RedisKeyCount)
 	}

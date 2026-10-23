@@ -192,8 +192,12 @@ func (s *ManageService) OneClickGenerateDeckStream(ctx context.Context, req OneC
 		if slide == pic {
 			slide = ""
 		}
+		bannerID, err := utils.GenerateSalt()
+		if err != nil {
+			return err
+		}
 		b := model.Banner{
-			Id:           utils.GenerateSalt(),
+			Id:           bannerID,
 			Mid:          snap.Mid,
 			Name:         snap.Name,
 			Year:         snap.Year,

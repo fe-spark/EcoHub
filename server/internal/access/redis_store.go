@@ -21,14 +21,24 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			if _, ok := parseFilmID(res); ok {
 				return res
 			}
-			if catId, found := resolveCategoryIDByName(res); found {
+			catId, found, err := resolveCategoryIDByName(res)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return res
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return res
 		}
 		if evt.ResourceCat != "" {
 			trimmedCat := strings.TrimSpace(evt.ResourceCat)
-			if catId, found := resolveCategoryIDByName(trimmedCat); found {
+			catId, found, err := resolveCategoryIDByName(trimmedCat)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return trimmedCat
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return trimmedCat
@@ -47,7 +57,12 @@ func resolveClassifyMember(evt *AccessEvent) string {
 			}
 		}
 		if cat != "" {
-			if catId, found := resolveCategoryIDByName(cat); found {
+			catId, found, err := resolveCategoryIDByName(cat)
+			if err != nil {
+				syslog.Errorf("[Access] 分类查询失败: %v", err)
+				return cat
+			}
+			if found {
 				return strconv.FormatInt(catId, 10)
 			}
 			return cat

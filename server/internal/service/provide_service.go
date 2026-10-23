@@ -1,6 +1,8 @@
 package service
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -273,7 +275,10 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 
 		var vodList []model.FilmList
 		for _, s := range sl {
-			typeID, typeName := resolveProvideListedType(s, sourceId)
+			typeID, typeName, err := resolveProvideListedType(s, sourceId)
+			if err != nil {
+				return tvboxListResult{}, err
+			}
 			vodList = append(vodList, model.FilmList{
 				VodID:       s.Mid,
 				VodName:     s.Name,
@@ -338,7 +343,8 @@ func (p *ProvideService) GetTVBoxConfig(baseURL, key string) (map[string]any, er
 	baseURL = strings.TrimRight(baseURL, "/")
 	cacheKey := config.TVBoxNetworkConfigCacheKey + ":" + url.QueryEscape(baseURL)
 	if key != "" {
-		cacheKey += ":" + url.QueryEscape(key)
+		sum := sha256.Sum256([]byte(key))
+		cacheKey += ":" + hex.EncodeToString(sum[:])
 	}
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {

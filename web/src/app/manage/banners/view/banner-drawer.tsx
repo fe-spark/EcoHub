@@ -4,14 +4,13 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   Drawer,
   Form,
-  InputNumber,
+  Input,
   Image as AntImage,
   Typography,
   Space,
   Flex,
   Button,
   Tag,
-  Switch,
 } from "antd";
 import {
   PictureOutlined,
@@ -20,6 +19,7 @@ import {
   ThunderboltOutlined,
   UndoOutlined,
   ExportOutlined,
+  CompassOutlined,
 } from "@ant-design/icons";
 
 import { ApiPost } from "@/lib/client-api";
@@ -311,92 +311,95 @@ export default function BannerDrawer({
               <div className={styles.drawerSectionTitle}>
                 <span>已绑定影片</span>
                 {activeFilm?.name && (
-                  <Space size={6}>
-                    {hasSlide && (
-                      <Tag color="success" style={{ margin: 0, borderRadius: 4 }}>
-                        横屏大图已配置
-                      </Tag>
-                    )}
-                    {preview.isScraped && (
-                      <Tag color="purple" style={{ margin: 0, borderRadius: 4 }}>
-                        已刮削
-                      </Tag>
-                    )}
-                  </Space>
+                  <Button
+                    size="small"
+                    icon={<SwapOutlined />}
+                    onClick={() => setFilmPickerOpen(true)}
+                  >
+                    更换影片
+                  </Button>
                 )}
               </div>
 
               {activeFilm?.name ? (
-                <div className={styles.filmSelectedCard}>
-                  <Flex gap={14} align="center" justify="space-between" wrap="wrap">
-                    <Flex gap={12} align="center" style={{ minWidth: 0 }}>
-                      <AntImage
-                        src={preview.liveFilmPic || FALLBACK_IMG}
-                        width={50}
-                        height={70}
-                        style={{
-                          objectFit: "cover",
-                          borderRadius: 6,
-                          background: "var(--public-surface-3)",
-                        }}
-                        fallback={FALLBACK_IMG}
-                        preview={false}
-                      />
-                      <Space direction="vertical" size={2} style={{ minWidth: 0 }}>
-                        <Flex align="center" gap={6}>
-                          <Title
-                            level={5}
-                            style={{ margin: 0 }}
-                            ellipsis={{ tooltip: preview.previewName }}
-                          >
-                            {preview.previewName}
-                          </Title>
-                        </Flex>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {preview.previewCategory} · {preview.previewYear} · {preview.previewArea}
-                        </Text>
-                        <Text
-                          type="secondary"
-                          style={{ fontSize: 12 }}
-                          ellipsis={{ tooltip: `状态: ${preview.previewRemark}` }}
-                        >
-                          状态: {preview.previewRemark}
-                        </Text>
-                      </Space>
-                    </Flex>
-                    <Space size={8} wrap>
-                      <Button
-                        size="middle"
-                        onClick={() => setFilmPickerOpen(true)}
+                <div className={styles.filmProfileCard}>
+                  <AntImage
+                    src={preview.liveFilmPic || FALLBACK_IMG}
+                    width={56}
+                    height={80}
+                    style={{
+                      objectFit: "cover",
+                      borderRadius: 6,
+                      background: "var(--public-surface-3)",
+                    }}
+                    fallback={FALLBACK_IMG}
+                    preview={{ mask: "预览" }}
+                  />
+                  <div className={styles.filmProfileContent}>
+                    {/* 1. 片名独享整行横向空间，绝不受按钮挤压 */}
+                    <div className={styles.filmTitleRow}>
+                      <Title
+                        level={5}
+                        style={{ margin: 0, fontSize: 16, lineHeight: 1.4 }}
+                        ellipsis={{ rows: 2, tooltip: preview.previewName }}
                       >
-                        更换影片
-                      </Button>
-                      {tmdbEnabled && (
+                        {preview.previewName}
+                      </Title>
+                    </div>
+
+                    {/* 2. 元数据与更新状态 */}
+                    <div className={styles.filmMetaRow}>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {[preview.previewCategory, preview.previewYear, preview.previewArea]
+                          .filter(Boolean)
+                          .join(" · ") || "暂无分类"}
+                      </Text>
+                      {preview.previewRemark && (
+                        <Tag style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>
+                          {preview.previewRemark}
+                        </Tag>
+                      )}
+                      {preview.isScraped && (
+                        <Tag color="purple" style={{ margin: 0, borderRadius: 4, fontSize: 11 }}>
+                          已刮削
+                        </Tag>
+                      )}
+                    </div>
+
+                    {/* 3. 操作按钮栏自然置于下方 */}
+                    <div className={styles.filmActionRow}>
+                      <Space size={8} wrap>
+                        {tmdbEnabled && (
+                          <Button
+                            size="small"
+                            icon={<CompassOutlined />}
+                            style={{ color: "#722ed1", borderColor: "#722ed1" }}
+                            onClick={() => setTmdbOpen(true)}
+                            disabled={!currentMid}
+                          >
+                            TMDB 刮削
+                          </Button>
+                        )}
                         <Button
-                          size="middle"
-                          onClick={() => setTmdbOpen(true)}
+                          size="small"
+                          icon={<ExportOutlined />}
+                          onClick={handleGoToFilmList}
                           disabled={!currentMid}
                         >
-                          TMDB 刮削
+                          前往片库编辑
                         </Button>
-                      )}
-                      <Button
-                        size="middle"
-                        onClick={handleGoToFilmList}
-                        disabled={!currentMid}
-                      >
-                        前往片库编辑
-                      </Button>
-                      {watchedIsCustomPic && (
-                        <Button
-                          size="middle"
-                          onClick={handleResetToFilmDefault}
-                        >
-                          恢复片库默认
-                        </Button>
-                      )}
-                    </Space>
-                  </Flex>
+                        {watchedIsCustomPic && (
+                          <Button
+                            size="small"
+                            icon={<UndoOutlined />}
+                            onClick={handleResetToFilmDefault}
+                          >
+                            恢复片库默认
+                          </Button>
+                        )}
+                      </Space>
+                    </div>
+                  </div>
                 </div>
               ) : (
                 <div className={styles.filmSelectTrigger} onClick={() => setFilmPickerOpen(true)}>
@@ -412,7 +415,7 @@ export default function BannerDrawer({
               hidden
               rules={[{ required: true, message: "请选择影片" }]}
             >
-              <InputNumber style={{ width: "100%" }} />
+              <Input />
             </Form.Item>
 
             {/* 2. 画幅预览与封面配置 */}
@@ -428,26 +431,6 @@ export default function BannerDrawer({
               }}
               onClearSlide={() => form.setFieldValue("pictureSlide", "")}
             />
-
-            {/* 3. 排片配置属性 */}
-            <div className={styles.drawerSectionCard}>
-              <div className={styles.drawerSectionTitle}>
-                <span>排片设置</span>
-              </div>
-              <Flex gap={24} align="center">
-                <Form.Item name="sort" label="排序分值" style={{ marginBottom: 0, flex: 1 }}>
-                  <InputNumber min={0} max={9999} style={{ width: "100%" }} />
-                </Form.Item>
-                <Form.Item
-                  name="isPinned"
-                  label="置顶锁定"
-                  valuePropName="checked"
-                  style={{ marginBottom: 0 }}
-                >
-                  <Switch />
-                </Form.Item>
-              </Flex>
-            </div>
           </div>
         </Form>
       </Drawer>

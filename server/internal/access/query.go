@@ -144,7 +144,11 @@ func queryOverviewScopeFresh(day, module, platform string) (*Overview, error) {
 				return nil, err
 			}
 			if len(out.Series) == 0 {
-				out.Series = collectMinuteSeries(target, now)
+				series, err := collectMinuteSeries(target, now)
+				if err != nil {
+					return nil, err
+				}
+				out.Series = series
 			}
 			return out, nil
 		}

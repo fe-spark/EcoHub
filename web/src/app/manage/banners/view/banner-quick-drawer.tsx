@@ -5,7 +5,6 @@ import {
   Alert,
   Button,
   Drawer,
-  Flex,
   Space,
   Tag,
 } from "antd";
@@ -183,38 +182,34 @@ export default function BannerQuickDrawer({
       destroyOnHidden
       mask={{ closable: !publishing }}
       title={
-        <Flex align="center" justify="space-between" style={{ width: "100%", paddingRight: 8 }}>
-          <Space size={10} align="center">
-            <CompassOutlined style={{ color: "var(--ant-color-primary)", fontSize: 18 }} />
-            <span style={{ fontSize: 16, fontWeight: 600 }}>排片审核结果</span>
-            <Tag color="blue" style={{ borderRadius: 4, margin: 0 }}>
-              {STRATEGY_LABEL[strategy]}
-            </Tag>
-          </Space>
+        <Space size={10} align="center">
+          <CompassOutlined style={{ color: "var(--ant-color-primary)", fontSize: 18 }} />
+          <span style={{ fontSize: 16, fontWeight: 600 }}>排片结果</span>
+          <Tag color="blue" style={{ borderRadius: 4, margin: 0 }}>
+            {STRATEGY_LABEL[strategy]}
+          </Tag>
           <Tag color="success" icon={<CheckCircleOutlined />} style={{ borderRadius: 4, margin: 0 }}>
             待发布
           </Tag>
-        </Flex>
+        </Space>
       }
-      footer={
-        <Flex justify="space-between" align="center">
+      extra={
+        <Space size={8}>
+          <Button onClick={onClose} disabled={publishing}>
+            取消
+          </Button>
           <Button onClick={onRedo} disabled={publishing}>
             重新排片
           </Button>
-          <Space size={8}>
-            <Button onClick={onClose} disabled={publishing}>
-              取消
-            </Button>
-            <Button
-              type="primary"
-              loading={publishing}
-              disabled={publishing || deck.length === 0}
-              onClick={() => void handlePublish()}
-            >
-              发布
-            </Button>
-          </Space>
-        </Flex>
+          <Button
+            type="primary"
+            loading={publishing}
+            disabled={publishing || deck.length === 0}
+            onClick={() => void handlePublish()}
+          >
+            发布
+          </Button>
+        </Space>
       }
     >
       <div className={styles.drawerStack}>

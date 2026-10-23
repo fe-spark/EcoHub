@@ -7,6 +7,7 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/repository/film/cache"
 	"server/internal/repository/support"
 )
@@ -142,18 +143,22 @@ func invalidateSnapshotDataCaches(version string, mids []int64) {
 func applyBroadSnapshotCacheInvalidation(version string, mids []int64) {
 	support.ClearIndexPageCache()
 	if db.Rdb != nil {
-		db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey)
+		if err := db.Rdb.Del(db.Cxt, config.ActiveCategoryTreeKey).Err(); err != nil {
+			syslog.Errorf("[Snapshot] 清理分类树缓存失败: %v", err)
+		}
 	}
 	cache.ClearProvideListCache()
 	BumpSearchCacheVersion()
 	cache.ClearPatterns(filmListDerivedCachePatterns()...)
-	deletePlayInfoCacheKeys(mids)
+	if err := deletePlayInfoCacheKeys(mids); err != nil {
+		syslog.Errorf("[Snapshot] 清理播放详情缓存失败: %v", err)
+	}
 	RefreshAccessDataCaches()
 }
 
-func deletePlayInfoCacheKeys(mids []int64) {
+func deletePlayInfoCacheKeys(mids []int64) error {
 	if db.Rdb == nil || len(mids) == 0 {
-		return
+		return nil
 	}
 	const pipeBatchSize = 1000
 	for i := 0; i < len(mids); i += pipeBatchSize {
@@ -165,9 +170,12 @@ func deletePlayInfoCacheKeys(mids []int64) {
 		for _, mid := range mids[i:end] {
 			pipe.Del(db.Cxt, fmt.Sprintf("%s:%d", config.FilmPlayInfoKey, mid))
 		}
-		_, _ = pipe.Exec(db.Cxt)
+		if _, err := pipe.Exec(db.Cxt); err != nil {
+			return err
+		}
 	}
 	BumpPlayInfoGeneration()
+	return nil
 }
 
 func ClearAllSnapshotDynamicCaches() {

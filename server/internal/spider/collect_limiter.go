@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/utils"
@@ -107,15 +108,22 @@ func ClearLimiter(sourceID string) {
 	if sourceID == "" {
 		return
 	}
-	if val, ok := requestGates.Load(sourceID); ok {
-		gate := val.(*sourceRequestGate)
-		gate.mu.Lock()
-		gate.nextAllowedAt = time.Time{}
-		gate.rateLimitHits = 0
-		gate.rateLimitStreak = 0
-		gate.lastRateLimitHit = time.Time{}
-		gate.mu.Unlock()
+	requestGates.Delete(sourceID)
+}
+
+// DropSourceRuntime 采集站删除后丢掉运行时条目。
+func DropSourceRuntime(sourceID string) {
+	sourceID = strings.TrimSpace(sourceID)
+	if sourceID == "" {
+		return
 	}
+	ClearLimiter(sourceID)
+	if failureRecoverLaneBusy(sourceID) {
+		syslog.Errorf("[Spider] 采集站 %s 已删除，重试队列仍在运行", sourceID)
+	} else {
+		failureRecoverLanes.Delete(sourceID)
+	}
+	sourceExclusive.Delete(sourceID)
 }
 
 func getSourceRequestGate(sourceID string) *sourceRequestGate {

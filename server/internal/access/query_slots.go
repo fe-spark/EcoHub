@@ -122,24 +122,24 @@ func foldMinuteSlots(slots []minSlot) ([]SeriesPoint, minuteTotals) {
 	return series, tot
 }
 
-func collectMinuteSeries(target, now time.Time) []SeriesPoint {
+func collectMinuteSeries(target, now time.Time) ([]SeriesPoint, error) {
 	if db.Rdb == nil {
-		return []SeriesPoint{}
+		return []SeriesPoint{}, nil
 	}
 	nMin := minuteSlotCount(target, now)
 	if nMin <= 0 {
-		return []SeriesPoint{}
+		return []SeriesPoint{}, nil
 	}
 	pipe := db.Rdb.Pipeline()
 	slots := queueMinuteSlots(pipe, target, nMin)
 	if _, err := pipe.Exec(db.Cxt); err != nil && err != redis.Nil {
-		return []SeriesPoint{}
+		return nil, err
 	}
 	series, _ := foldMinuteSlots(slots)
 	if series == nil {
-		return []SeriesPoint{}
+		return []SeriesPoint{}, nil
 	}
-	return series
+	return series, nil
 }
 
 func marshalSeries(series []SeriesPoint) string {

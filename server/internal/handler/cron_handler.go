@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"strings"
+
+	"gorm.io/gorm"
 
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -48,9 +51,8 @@ func (h *CronHandler) FilmCronSave(c *gin.Context) {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	task, err := service.CronSvc.GetFilmCrontabById(t.Id)
-	if err != nil {
-		dto.Failed(fmt.Sprint("更新失败: ", err.Error()), c)
+	if strings.TrimSpace(t.Id) == "" {
+		dto.Failed("任务Id不能为空", c)
 		return
 	}
 	spec := strings.TrimSpace(t.Spec)
@@ -62,12 +64,27 @@ func (h *CronHandler) FilmCronSave(c *gin.Context) {
 		dto.Failed(fmt.Sprint("参数校验失败 cron表达式校验失败: ", err.Error()), c)
 		return
 	}
-	task.Spec = spec
-	if remark := strings.TrimSpace(t.Remark); remark != "" {
-		task.Remark = remark
+	t.Spec = spec
+	task, err := service.CronSvc.GetFilmCrontabById(t.Id)
+	if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	created := errors.Is(err, gorm.ErrRecordNotFound)
+	if created {
+		task = t
+	} else {
+		task.Spec = spec
+		if remark := strings.TrimSpace(t.Remark); remark != "" {
+			task.Remark = remark
+		}
 	}
 	if err := service.CronSvc.UpdateFilmCron(task); err != nil {
-		dto.Failed(fmt.Sprint("更新失败: ", err.Error()), c)
+		dto.Failed(err.Error(), c)
+		return
+	}
+	if created {
+		dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]已创建", task.Id), c)
 		return
 	}
 	dto.SuccessOnlyMsg(fmt.Sprintf("定时任务[%s]更新成功", task.Id), c)

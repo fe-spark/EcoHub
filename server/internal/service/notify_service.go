@@ -442,7 +442,10 @@ func buildNotifyBatchSession(payload model.CollectBatchNotifyPayload, pageSize i
 		})
 	}
 
-	batchID := utils.GenerateSalt()
+	batchID, err := utils.GenerateSalt()
+	if err != nil {
+		return model.NotifyBatchSession{}, err
+	}
 	if len(batchID) > 10 {
 		batchID = batchID[:10]
 	}

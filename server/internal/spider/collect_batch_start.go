@@ -35,7 +35,13 @@ func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBa
 		ready = append(ready, *fs)
 	}
 
-	claimed := occupyAndMarkCollectSources(ready, "Batch-Collect")
+	claimed, err := occupyAndMarkCollectSources(ready, "Batch-Collect")
+	if err != nil {
+		for _, source := range ready {
+			skipped = append(skipped, model.CollectBatchSkip{Id: source.Id, Name: source.Name, Reason: err.Error()})
+		}
+		return nil, model.CollectBatchResult{Skipped: skipped}
+	}
 	claimedIDs := make(map[string]struct{}, len(claimed))
 	started := make([]model.CollectBatchItem, 0, len(claimed))
 	for _, source := range claimed {

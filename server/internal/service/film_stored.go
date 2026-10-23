@@ -1,21 +1,22 @@
 package service
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
-	"server/internal/infra/db"
 	"server/internal/model"
+	filmrepo "server/internal/repository/film"
 )
 
 // UseStoredFilm 编辑页使用影片自己保存的正文和封面，不用前台海报源替换结果。
-func UseStoredFilm(detail *model.MovieDetailVo) {
-	if detail == nil || detail.Id <= 0 || db.Mdb == nil {
-		return
+func UseStoredFilm(detail *model.MovieDetailVo) error {
+	if detail == nil || detail.Id <= 0 {
+		return errors.New("影片信息无效")
 	}
-	var row model.FilmIndex
-	if err := db.Mdb.Where("mid = ?", detail.Id).First(&row).Error; err != nil {
-		return
+	row, err := filmrepo.FindFilmIndex(detail.Id)
+	if err != nil {
+		return err
 	}
 	if detail.SourceId == "" && row.FirstSourceId != "" {
 		detail.SourceId = row.FirstSourceId
@@ -75,4 +76,5 @@ func UseStoredFilm(detail *model.MovieDetailVo) {
 	if strings.TrimSpace(row.Remarks) != "" {
 		detail.Remarks = row.Remarks
 	}
+	return nil
 }

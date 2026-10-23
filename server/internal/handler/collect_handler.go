@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"strconv"
 	"strings"
@@ -151,6 +152,8 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 	}
 
 	const concurrency = 10
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+	defer cancel()
 	sem := make(chan struct{}, concurrency)
 	var mu sync.Mutex
 	failed := make([]model.SourceHealthItem, 0)
@@ -180,7 +183,7 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 				mu.Unlock()
 				return
 			}
-			if err := spider.CollectApiTest(src.FilmSource); err != nil {
+			if err := spider.CollectApiTestCtx(ctx, src.FilmSource); err != nil {
 				item.Reason = err.Error()
 				mu.Lock()
 				failed = append(failed, item)
@@ -195,10 +198,11 @@ func (h *CollectHandler) FilmSourceCheckAll(c *gin.Context) {
 	wg.Wait()
 
 	dto.Success(gin.H{
-		"checked": len(sources),
-		"ok":      okCount,
-		"failed":  failed,
-		"skipped": skipped,
+		"checked":  len(sources),
+		"ok":       okCount,
+		"failed":   failed,
+		"skipped":  skipped,
+		"timedOut": ctx.Err() != nil,
 	}, "站点连通性检测完成", c)
 }
 

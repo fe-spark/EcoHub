@@ -29,7 +29,7 @@ func (s *FileService) SingleFileUpload(fileName string, name string, uid int) st
 	return f.Link
 }
 
-func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, page *dto.Page) []model.FileInfo {
+func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, page *dto.Page) ([]model.FileInfo, error) {
 	var tl = []string{"jpeg", "jpg", "png", "webp", "ico"}
 	return repository.GetFileInfoPage(tl, name, beginTime, endTime, page)
 }

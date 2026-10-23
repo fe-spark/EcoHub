@@ -5,6 +5,7 @@ import { Button, Popconfirm, Space, Spin, Tooltip } from "antd";
 import {
   ArrowDownOutlined,
   ArrowUpOutlined,
+  CompassOutlined,
   DeleteOutlined,
   LoadingOutlined,
   StarFilled,
@@ -104,11 +105,12 @@ export default function BannerQuickCard({
         {onScrape ? (
           <Button
             size="small"
-            type="text"
+            icon={<CompassOutlined />}
+            style={{ color: "#722ed1", borderColor: "#722ed1" }}
             disabled={isAnyBusy}
             onClick={() => onScrape(item.mid)}
           >
-            刮削
+            TMDB 刮削
           </Button>
         ) : (
           <div />

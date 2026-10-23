@@ -57,7 +57,7 @@ func (h *AccessHandler) Overview(c *gin.Context) {
 	}
 	data, err := access.QueryOverviewScope(c.Query("day"), c.Query("module"), c.Query("platform"))
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(data, "数据分析概览获取成功", c)
@@ -70,7 +70,7 @@ func (h *AccessHandler) SourceCalls(c *gin.Context) {
 	}
 	list, err := access.QuerySourceCalls(c.Query("day"))
 	if err != nil {
-		dto.Failed("采集站调用次数暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{"list": list}, "采集站调用次数获取成功", c)
@@ -85,7 +85,7 @@ func (h *AccessHandler) Tops(c *gin.Context) {
 	kind := c.DefaultQuery("kind", "path")
 	items, err := access.QueryTopsScope(c.Query("day"), kind, c.Query("module"), c.Query("platform"), limit)
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{"kind": kind, "items": items}, "数据分析榜单获取成功", c)
@@ -125,7 +125,7 @@ func (h *AccessHandler) Logs(c *gin.Context) {
 		limit,
 	)
 	if err != nil {
-		dto.Failed("数据分析暂不可用", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	dto.Success(gin.H{"list": list}, "数据流转日志获取成功", c)
@@ -143,7 +143,11 @@ func (h *AccessHandler) DataStats(c *gin.Context) {
 		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可查看数据分析统计", c)
 		return
 	}
-	stats := access.GetAccessDataStats()
+	stats, err := access.GetAccessDataStats()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(stats, "数据分析统计获取成功", c)
 }
 

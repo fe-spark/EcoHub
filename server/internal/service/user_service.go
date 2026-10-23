@@ -40,8 +40,13 @@ func (s *UserService) UserLogin(account, password string) (token string, err err
 }
 
 // UserLogout 用户退出登录 注销
-func (s *UserService) UserLogout(id uint) {
-	_ = repository.ClearUserToken(id)
+func (s *UserService) UserLogout(id uint) error {
+	return repository.ClearUserToken(id)
+}
+
+// StoredToken 返回用户当前有效登录令牌。
+func (s *UserService) StoredToken(userID uint) string {
+	return repository.GetUserToken(userID)
 }
 
 // GetUserInfo 获取用户基本信息
@@ -71,13 +76,16 @@ func (s *UserService) VerifyUserPassword(id uint, password string) bool {
 }
 
 // GetUserPage 用户分页
-func (s *UserService) GetUserPage(page *dto.Page, userName string, role, status int) []model.UserInfoVo {
-	list := repository.GetUserPage(page, userName, role, status)
-	var voList []model.UserInfoVo
+func (s *UserService) GetUserPage(page *dto.Page, userName string, role, status int) ([]model.UserInfoVo, error) {
+	list, err := repository.GetUserPage(page, userName, role, status)
+	if err != nil {
+		return nil, err
+	}
+	voList := make([]model.UserInfoVo, 0, len(list))
 	for _, u := range list {
 		voList = append(voList, buildUserInfoVo(u))
 	}
-	return voList
+	return voList, nil
 }
 
 // AddUser 添加用户
@@ -99,8 +107,11 @@ func (s *UserService) AddUser(u model.User) error {
 			return errors.New("邮箱已被其它账号使用")
 		}
 	}
-	// 密码加密
-	u.Salt = utils.GenerateSalt()
+	salt, err := utils.GenerateSalt()
+	if err != nil {
+		return err
+	}
+	u.Salt = salt
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
 	return repository.AddUser(&u)
 }
@@ -162,10 +173,14 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
 		passwordChanged = true
 	}
-	repository.UpdateUserInfo(u)
+	if err := repository.UpdateUserInfo(u); err != nil {
+		return err
+	}
 	// 如果修改密码、用户被禁用（Status == 1）或角色变更，强制清除其登录状态使 Token 失效
 	if passwordChanged || u.Status == 1 || roleChanged {
-		_ = repository.ClearUserToken(u.ID)
+		if err := repository.ClearUserToken(u.ID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -182,12 +197,10 @@ func (s *UserService) DeleteUser(operatorID uint, operatorRole int, id uint) err
 	if msg := model.CheckUserDelete(operatorID, operatorRole, id, user.UserName); msg != "" {
 		return errors.New(msg)
 	}
-	err = repository.DeleteUser(id)
-	if err == nil {
-		// 删除成功后，强制清除该用户的登录状态
-		_ = repository.ClearUserToken(id)
+	if err = repository.DeleteUser(id); err != nil {
+		return err
 	}
-	return err
+	return repository.ClearUserToken(id)
 }
 
 func buildUserInfoVo(u model.User) model.UserInfoVo {

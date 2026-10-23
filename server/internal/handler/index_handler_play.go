@@ -72,7 +72,10 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 		return
 	}
 	if c.Query("stored") == "1" {
-		service.UseStoredFilm(&detail)
+		if err := service.UseStoredFilm(&detail); err != nil {
+			dto.Failed(err.Error(), c)
+			return
+		}
 	}
 	for i := range detail.List {
 		var valid []model.MovieUrlInfo

@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"strings"
 
-	"server/internal/infra/db"
+	"server/internal/infra/syslog"
 	"server/internal/model"
+	"server/internal/repository"
+	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/repository/film/writer"
 	"server/internal/repository/support"
-
-	"gorm.io/gorm/clause"
 )
 
 // ApplyDetail 把刮削结果写入影片。写入后就是这部影片的内容。
@@ -34,30 +34,26 @@ func (s *TMDBService) ApplyDetailWithOptions(req model.TMDBApplyReq, publishSnap
 		return 0, errors.New("获取 TMDB 详情失败")
 	}
 
-	var indexRec model.FilmIndex
-	if err := db.Mdb.Where("mid = ?", req.Mid).First(&indexRec).Error; err != nil {
+	indexRec, err := filmrepo.FindFilmIndex(req.Mid)
+	if err != nil {
 		return 0, fmt.Errorf("未找到对应的影片信息 (mid=%d): %w", req.Mid, err)
 	}
 
 	updates := filmScrapeUpdates(indexRec, *tmdbData, req.Fields)
-	if err := db.Mdb.Model(&model.FilmIndex{}).Where("mid = ?", req.Mid).Updates(updates).Error; err != nil {
-		return 0, fmt.Errorf("写入影片失败: %w", err)
-	}
-
 	scrapeRecord := model.FilmTMDBScrape{
 		Mid:       req.Mid,
 		TmdbID:    req.TmdbID,
 		MediaType: strings.TrimSpace(req.MediaType),
 	}
-	if err := db.Mdb.Clauses(clause.OnConflict{
-		UpdateAll: true,
-	}).Create(&scrapeRecord).Error; err != nil {
-		return 0, fmt.Errorf("保存 TMDB 词条失败: %w", err)
+	if err := repository.SaveFilmScrape(req.Mid, updates, scrapeRecord); err != nil {
+		return 0, fmt.Errorf("写入影片失败: %w", err)
 	}
 
-	// 增量发布快照并清理播放详情缓存
 	if publishSnapshot {
-		_, _, _ = filmsnapshot.UpsertActiveSnapshotsByMids(req.Mid)
+		if _, _, err := filmsnapshot.UpsertActiveSnapshotsByMids(req.Mid); err != nil {
+			syslog.Errorf("[TMDB] 影片 %d 快照发布失败: %v", req.Mid, err)
+			return req.Mid, err
+		}
 		filmsnapshot.ClearDynamicPlayCaches()
 		support.ClearIndexPageCache()
 	}

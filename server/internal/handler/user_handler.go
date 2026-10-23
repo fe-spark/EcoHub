@@ -2,10 +2,10 @@ package handler
 
 import (
 	"encoding/json"
-	"net/http"
 	"strconv"
 
 	"server/internal/config"
+	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
@@ -17,20 +17,6 @@ import (
 type UserHandler struct{}
 
 var UserHd = new(UserHandler)
-
-func useSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
-}
-
-func setAuthCookie(c *gin.Context, token string) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, token, config.AuthTokenExpires*3600, "/", "", useSecureCookie(c), true)
-}
-
-func clearAuthCookie(c *gin.Context) {
-	c.SetSameSite(http.SameSiteLaxMode)
-	c.SetCookie(config.AuthCookieName, "", -1, "/", "", useSecureCookie(c), true)
-}
 
 // Login 管理员登录接口
 func (h *UserHandler) Login(c *gin.Context) {
@@ -48,7 +34,7 @@ func (h *UserHandler) Login(c *gin.Context) {
 		dto.Failed(err.Error(), c)
 		return
 	}
-	setAuthCookie(c, token)
+	middleware.SetAuthCookie(c, token)
 	dto.SuccessOnlyMsg("登录成功!!!", c)
 }
 
@@ -64,8 +50,11 @@ func (h *UserHandler) Logout(c *gin.Context) {
 		dto.Failed("注销失败, 身份信息格式化异常!!!", c)
 		return
 	}
-	service.UserSvc.UserLogout(uc.UserID)
-	clearAuthCookie(c)
+	if err := service.UserSvc.UserLogout(uc.UserID); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	middleware.ClearAuthCookie(c)
 	dto.SuccessOnlyMsg("已退出登录!!!", c)
 }
 
@@ -96,7 +85,11 @@ func (h *UserHandler) UserListPage(c *gin.Context) {
 	role, _ := strconv.Atoi(c.DefaultQuery("role", "-1"))
 	status, _ := strconv.Atoi(c.DefaultQuery("status", "-1"))
 
-	list := service.UserSvc.GetUserPage(paging, userName, role, status)
+	list, err := service.UserSvc.GetUserPage(paging, userName, role, status)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{
 		"list":  list,
 		"total": paging.Total,

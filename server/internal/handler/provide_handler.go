@@ -95,137 +95,92 @@ func (h *ProvideHandler) HandleProvide(c *gin.Context) {
 		classList = []model.FilmClass{}
 	}
 
-	baseURL, _ := resolveProvideBaseURL(c)
-
-	normalizeVodListPic := func(list []model.FilmList) []model.FilmList {
-		if len(list) == 0 {
-			return list
-		}
-		cloned := make([]model.FilmList, len(list))
-		copy(cloned, list)
-		if baseURL == "" {
-			return cloned
-		}
-		for i := range cloned {
-			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
-		}
-		return cloned
+	baseURL, err := resolveProvideBaseURL(c)
+	if err != nil {
+		c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+		return
 	}
 
-	normalizeDetailListPic := func(list []model.FilmDetail) []model.FilmDetail {
-		if len(list) == 0 {
-			return list
+	writeProvide := func(page, pagecount, total int, list any, withRecord bool) {
+		body := gin.H{
+			"code":      1,
+			"msg":       "数据列表",
+			"page":      page,
+			"pagecount": pagecount,
+			"limit":     strconv.Itoa(limit),
+			"total":     total,
+			"list":      list,
+			"class":     classList,
+			"filters":   filters,
 		}
-		cloned := make([]model.FilmDetail, len(list))
-		copy(cloned, list)
-		if baseURL == "" {
-			return cloned
+		if withRecord {
+			body["recordcount"] = total
 		}
-		for i := range cloned {
-			cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
-		}
-		return cloned
+		c.JSON(200, body)
 	}
 
 	switch ac {
-	case "list":
-		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
+	case "videolist", "detail":
+		if ids != "" {
+			vodList, err := service.ProvideSvc.GetVodDetail(strings.Split(ids, ","), sourceId)
+			if err != nil {
+				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+				return
+			}
+			writeProvide(1, 1, len(vodList), prefixDetailPics(vodList, baseURL), false)
+			return
+		}
+		page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		if vodList == nil {
-			vodList = []model.FilmList{}
+		idList := make([]string, 0, len(vodListSimple))
+		for _, v := range vodListSimple {
+			idList = append(idList, strconv.FormatInt(v.VodID, 10))
 		}
-		c.JSON(200, gin.H{
-			"code":        1,
-			"msg":         "数据列表",
-			"page":        page,
-			"pagecount":   pagecount,
-			"limit":       limit,
-			"total":       total,
-			"recordcount": total,
-			"list":        normalizeVodListPic(vodList),
-			"class":       classList,
-			"filters":     filters,
-		})
-	case "videolist", "detail":
-		var idsArr []string
-		if ids != "" {
-			idsArr = strings.Split(ids, ",")
-			vodList, err := service.ProvideSvc.GetVodDetail(idsArr, sourceId)
-			if err != nil {
-				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
-				return
-			}
-			if vodList == nil {
-				vodList = []model.FilmDetail{}
-			}
-			c.JSON(200, gin.H{
-				"code":      1,
-				"msg":       "数据列表",
-				"page":      1,
-				"pagecount": 1,
-				"limit":     "20",
-				"total":     len(vodList),
-				"list":      normalizeDetailListPic(vodList),
-				"class":     classList,
-				"filters":   filters,
-			})
-		} else {
-			page, pagecount, total, vodListSimple, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
-			if err != nil {
-				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
-				return
-			}
-			var _idsArr []string
-			for _, v := range vodListSimple {
-				_idsArr = append(_idsArr, strconv.FormatInt(v.VodID, 10))
-			}
-			detailList, err := service.ProvideSvc.GetVodDetail(_idsArr, sourceId)
-			if err != nil {
-				c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
-				return
-			}
-			if detailList == nil {
-				detailList = []model.FilmDetail{}
-			}
-			c.JSON(200, gin.H{
-				"code":        1,
-				"msg":         "数据列表",
-				"page":        page,
-				"pagecount":   pagecount,
-				"limit":       limit,
-				"total":       total,
-				"recordcount": total,
-				"list":        normalizeDetailListPic(detailList),
-				"class":       classList,
-				"filters":     filters,
-			})
+		detailList, err := service.ProvideSvc.GetVodDetail(idList, sourceId)
+		if err != nil {
+			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
+			return
 		}
-
+		writeProvide(page, pagecount, total, prefixDetailPics(detailList, baseURL), true)
 	default:
 		page, pagecount, total, vodList, err := service.ProvideSvc.GetVodList(sourceId, t, cid, pg, wd, h_param, year, area, lang, plot, sort, limit)
 		if err != nil {
 			c.JSON(200, gin.H{"code": 0, "msg": err.Error()})
 			return
 		}
-		if vodList == nil {
-			vodList = []model.FilmList{}
-		}
-		c.JSON(200, gin.H{
-			"code":        1,
-			"msg":         "数据列表",
-			"page":        page,
-			"pagecount":   pagecount,
-			"limit":       limit,
-			"total":       total,
-			"recordcount": total,
-			"list":        normalizeVodListPic(vodList),
-			"class":       classList,
-			"filters":     filters,
-		})
+		writeProvide(page, pagecount, total, prefixListPics(vodList, baseURL), true)
 	}
+}
+
+func prefixListPics(list []model.FilmList, baseURL string) []model.FilmList {
+	if list == nil {
+		return []model.FilmList{}
+	}
+	if baseURL == "" || len(list) == 0 {
+		return list
+	}
+	cloned := append([]model.FilmList(nil), list...)
+	for i := range cloned {
+		cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+	}
+	return cloned
+}
+
+func prefixDetailPics(list []model.FilmDetail, baseURL string) []model.FilmDetail {
+	if list == nil {
+		return []model.FilmDetail{}
+	}
+	if baseURL == "" || len(list) == 0 {
+		return list
+	}
+	cloned := append([]model.FilmDetail(nil), list...)
+	for i := range cloned {
+		cloned[i].VodPic = normalizeMediaURL(cloned[i].VodPic, baseURL)
+	}
+	return cloned
 }
 
 // HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)。

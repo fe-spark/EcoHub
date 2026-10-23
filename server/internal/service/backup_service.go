@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/spider"
@@ -163,11 +164,17 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		if err != nil {
 			return err
 		}
+		var reloadErr error
 		for _, t := range reloaded {
 			if err := spider.ReloadCronTask(t.Id); err != nil {
-				// 单任务重载失败不阻断整批导入
-				_ = err
+				syslog.Errorf("[Backup] 重载定时任务 %s 失败: %v", t.Id, err)
+				if reloadErr == nil {
+					reloadErr = fmt.Errorf("重载定时任务 %s 失败: %w", t.Id, err)
+				}
 			}
+		}
+		if reloadErr != nil {
+			return reloadErr
 		}
 	}
 

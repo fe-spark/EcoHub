@@ -118,7 +118,11 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 			continue
 		}
 
-		detailList = append(detailList, formatProvideFilmDetail(s, vo, sourceId))
+		detail, err := formatProvideFilmDetail(s, vo, sourceId)
+		if err != nil {
+			return nil, err
+		}
+		detailList = append(detailList, detail)
 	}
 
 	if len(toCacheVo) > 0 && db.Rdb != nil {
@@ -133,8 +137,15 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 	return detailList, nil
 }
 
-func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo, sourceId string) model.FilmDetail {
-	typeID, typeName := resolveProvideListedType(snapshot, sourceId)
+func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo model.MovieDetailVo, sourceId string) (model.FilmDetail, error) {
+	typeID, typeName, err := resolveProvideListedType(snapshot, sourceId)
+	if err != nil {
+		return model.FilmDetail{}, err
+	}
+	rootTypeID, err := resolveProvideListedRootType(snapshot, sourceId)
+	if err != nil {
+		return model.FilmDetail{}, err
+	}
 
 	var playFromList []string
 	var playUrlList []string
@@ -168,7 +179,7 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 	return model.FilmDetail{
 		VodID:       snapshot.Mid,
 		TypeID:      typeID,
-		TypeID1:     resolveProvideListedRootType(snapshot, sourceId),
+		TypeID1:     rootTypeID,
 		TypeName:    typeName,
 		VodName:     snapshot.Name,
 		VodEn:       snapshot.Initial,
@@ -191,5 +202,5 @@ func formatProvideFilmDetail(snapshot model.FilmListSnapshot, movieDetailVo mode
 		VodHits:     snapshot.Hits,
 		VodScore:    movieDetailVo.DbScore,
 		VodContent:  movieDetailVo.Content,
-	}
+	}, nil
 }

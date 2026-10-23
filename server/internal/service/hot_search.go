@@ -11,7 +11,6 @@ import (
 
 	"server/internal/config"
 	"server/internal/infra/db"
-	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
@@ -92,26 +91,15 @@ func (i *IndexService) GetHotSearchKeywords(limit int, sourceIdOpt ...string) ([
 			}
 		}
 
-		if db.Mdb == nil {
-			return nil, filmsnapshot.ErrSearchIndexMissing
-		}
-
-		var snapshots []model.FilmIndex
-		query := db.Mdb.Model(&model.FilmIndex{}).
-			Select("name").
-			Where("pid > 0")
-		if sourceID != "" {
-			query = query.Where(model.FilmHasPlaySourceSQL(), sourceID, "play")
-		}
-		query = query.Order("hits DESC").Limit(hotSearchMaxLimit * 3)
-		if err := query.Find(&snapshots).Error; err != nil {
-			return []string{}, err
+		names, err := filmsnapshot.TopSourceFilmNames(sourceID, hotSearchMaxLimit*3)
+		if err != nil {
+			return nil, err
 		}
 
 		topKeywords := make([]string, 0, hotSearchMaxLimit)
 		seen := make(map[string]struct{}, hotSearchMaxLimit)
-		for _, snap := range snapshots {
-			name := strings.TrimSpace(snap.Name)
+		for _, rawName := range names {
+			name := strings.TrimSpace(rawName)
 			if name == "" {
 				continue
 			}

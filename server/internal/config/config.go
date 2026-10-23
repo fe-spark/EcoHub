@@ -192,12 +192,9 @@ const (
 )
 
 const (
-	AuthUserClaims     = "UserClaims"
-	AuthCookieName     = "ecohub_auth_token"
-	DefaultAdminUser   = "admin"
-	DefaultAdminPass   = "admin"
-	DefaultVisitorUser = "guest"
-	DefaultVisitorPass = "guest"
+	AuthUserClaims   = "UserClaims"
+	AuthCookieName   = "ecohub_auth_token"
+	DefaultAdminUser = "admin"
 )
 
 // -------------------------manage 管理后台相关key----------------------------------

@@ -1,26 +1,23 @@
 package service
 
 import (
-	"log"
 	"strings"
 	"time"
 
-	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
 	"server/internal/repository/support"
 )
 
-func currentProvideCategoryIDsBySourceKey(sourceKey string) []int64 {
+func currentProvideCategoryIDsBySourceKey(sourceKey string) ([]int64, error) {
 	sourceKey = strings.TrimSpace(sourceKey)
 	if sourceKey == "" {
-		return nil
+		return nil, nil
 	}
 
-	var mappings []model.CategoryMapping
-	if err := db.Mdb.Find(&mappings).Error; err != nil {
-		log.Printf("currentProvideCategoryIDsBySourceKey Error: %v", err)
-		return nil
+	mappings, err := repository.ListCategoryMappings()
+	if err != nil {
+		return nil, err
 	}
 
 	ids := make([]int64, 0)
@@ -35,65 +32,85 @@ func currentProvideCategoryIDsBySourceKey(sourceKey string) []int64 {
 		seen[mapping.CategoryId] = struct{}{}
 		ids = append(ids, mapping.CategoryId)
 	}
-	return ids
+	return ids, nil
 }
 
-func resolveProvideCurrentCategoryIDFromSnapshot(snapshot model.FilmListSnapshot) int64 {
-	if ids := currentProvideCategoryIDsBySourceKey(snapshot.CategoryKey); len(ids) > 0 {
-		return ids[0]
+func resolveProvideCurrentCategoryIDFromSnapshot(snapshot model.FilmListSnapshot) (int64, error) {
+	ids, err := currentProvideCategoryIDsBySourceKey(snapshot.CategoryKey)
+	if err != nil {
+		return 0, err
 	}
-	if ids := currentProvideCategoryIDsBySourceKey(snapshot.RootCategoryKey); len(ids) > 0 {
-		return ids[0]
+	if len(ids) > 0 {
+		return ids[0], nil
+	}
+	ids, err = currentProvideCategoryIDsBySourceKey(snapshot.RootCategoryKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) > 0 {
+		return ids[0], nil
 	}
 	if snapshot.Cid > 0 {
-		return repository.ResolveCategoryID(snapshot.Cid)
+		return repository.ResolveCategoryID(snapshot.Cid), nil
 	}
 	if snapshot.Pid > 0 {
-		return repository.ResolveCategoryID(snapshot.Pid)
+		return repository.ResolveCategoryID(snapshot.Pid), nil
 	}
-	return 0
+	return 0, nil
 }
 
-func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnapshot) int64 {
-	if ids := currentProvideCategoryIDsBySourceKey(snapshot.RootCategoryKey); len(ids) > 0 {
+func resolveProvideCurrentRootCategoryIDFromSnapshot(snapshot model.FilmListSnapshot) (int64, error) {
+	ids, err := currentProvideCategoryIDsBySourceKey(snapshot.RootCategoryKey)
+	if err != nil {
+		return 0, err
+	}
+	if len(ids) > 0 {
 		rootID := repository.GetRootId(ids[0])
 		if rootID > 0 {
-			return rootID
+			return rootID, nil
 		}
-		return ids[0]
+		return ids[0], nil
 	}
-	if categoryID := resolveProvideCurrentCategoryIDFromSnapshot(snapshot); categoryID > 0 {
+	categoryID, err := resolveProvideCurrentCategoryIDFromSnapshot(snapshot)
+	if err != nil {
+		return 0, err
+	}
+	if categoryID > 0 {
 		rootID := repository.GetRootId(categoryID)
 		if rootID > 0 {
-			return rootID
+			return rootID, nil
 		}
-		return categoryID
+		return categoryID, nil
 	}
-	return 0
+	return 0, nil
 }
 
-func resolveProvideTypeFromSnapshot(snapshot model.FilmListSnapshot) (int64, string) {
-	if categoryID := resolveProvideCurrentCategoryIDFromSnapshot(snapshot); categoryID > 0 {
+func resolveProvideTypeFromSnapshot(snapshot model.FilmListSnapshot) (int64, string, error) {
+	categoryID, err := resolveProvideCurrentCategoryIDFromSnapshot(snapshot)
+	if err != nil {
+		return 0, "", err
+	}
+	if categoryID > 0 {
 		if name := support.GetCategoryNameById(categoryID); name != "" {
-			return categoryID, name
+			return categoryID, name, nil
 		}
 		if name := support.GetMainCategoryName(categoryID); name != "" {
-			return categoryID, name
+			return categoryID, name, nil
 		}
 	}
 	if snapshot.Cid > 0 {
 		if name := support.GetCategoryNameById(snapshot.Cid); name != "" {
-			return snapshot.Cid, name
+			return snapshot.Cid, name, nil
 		}
-		return snapshot.Cid, snapshot.CName
+		return snapshot.Cid, snapshot.CName, nil
 	}
 	if snapshot.Pid > 0 {
 		if name := support.GetMainCategoryName(snapshot.Pid); name != "" {
-			return snapshot.Pid, name
+			return snapshot.Pid, name, nil
 		}
-		return snapshot.Pid, snapshot.CName
+		return snapshot.Pid, snapshot.CName, nil
 	}
-	return 0, snapshot.CName
+	return 0, snapshot.CName, nil
 }
 
 func resolveProvideSnapshotPlayFromSummary(snapshot model.FilmListSnapshot) string {

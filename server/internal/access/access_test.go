@@ -269,7 +269,10 @@ func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
 		{Key: "19", Count: 53},
 		{Key: "34", Count: 11},
 	}
-	res := enrichClassifyTopItems(input)
+	res, err := enrichClassifyTopItems(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 2 {
 		t.Fatalf("enrichClassifyTopItems should filter invalid non-numeric keys like 'list', got len=%d", len(res))
 	}
@@ -284,7 +287,10 @@ func TestEnrichClassifyTopItems_FilterDirtyKeys(t *testing.T) {
 		t.Fatalf("expected Title placeholder '分类 #19', got %s", res[0].Title)
 	}
 	// 测试截断与过滤结合
-	top1 := takeClassifyTops(input, 1)
+	top1, err := takeClassifyTops(input, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(top1) != 1 || top1[0].Key != "19" {
 		t.Fatalf("takeClassifyTops limit=1 failed: %+v", top1)
 	}
@@ -296,7 +302,10 @@ func TestEnrichClassifyTopItems_PreservesValidCategoryNames(t *testing.T) {
 		{Key: "伦理片", Count: 6},
 		{Key: "24", Count: 5},
 	}
-	res := enrichClassifyTopItems(input)
+	res, err := enrichClassifyTopItems(input)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(res) != 2 {
 		t.Fatalf("expected 2 valid items (list filtered out), got len=%d", len(res))
 	}
@@ -426,9 +435,7 @@ func testPageCtx(ua, ip string) *gin.Context {
 }
 
 func resetPageHit() {
-	pageHitMu.Lock()
-	pageHitLast = map[string]time.Time{}
-	pageHitMu.Unlock()
+	resetPageHits()
 }
 
 func buildPageEvent(c *gin.Context, action, resource, source, path string) *AccessEvent {

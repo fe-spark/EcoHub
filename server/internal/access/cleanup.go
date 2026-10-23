@@ -31,11 +31,15 @@ type ClearAccessResult struct {
 }
 
 // GetAccessDataStats 统计当前数据分析积累的数据体量
-func GetAccessDataStats() AccessDataStats {
+func GetAccessDataStats() (AccessDataStats, error) {
 	var stats AccessDataStats
 	if db.Mdb != nil {
-		_ = db.Mdb.Model(&model.AccessDailyStats{}).Count(&stats.DailyStatsCount).Error
-		_ = db.Mdb.Model(&model.AccessDailyTop{}).Count(&stats.DailyTopCount).Error
+		if err := db.Mdb.Model(&model.AccessDailyStats{}).Count(&stats.DailyStatsCount).Error; err != nil {
+			return stats, err
+		}
+		if err := db.Mdb.Model(&model.AccessDailyTop{}).Count(&stats.DailyTopCount).Error; err != nil {
+			return stats, err
+		}
 
 		if stats.DailyStatsCount > 0 {
 			type statsAgg struct {
@@ -45,9 +49,11 @@ func GetAccessDataStats() AccessDataStats {
 				TotalUV  int64  `gorm:"column:total_uv"`
 			}
 			var agg statsAgg
-			_ = db.Mdb.Model(&model.AccessDailyStats{}).
+			if err := db.Mdb.Model(&model.AccessDailyStats{}).
 				Select("MIN(day) AS earliest, MAX(day) AS latest, COALESCE(SUM(pv), 0) AS total_pv, COALESCE(SUM(uv), 0) AS total_uv").
-				Scan(&agg).Error
+				Scan(&agg).Error; err != nil {
+				return stats, err
+			}
 			stats.EarliestDay = agg.Earliest
 			stats.LatestDay = agg.Latest
 			stats.TotalPV = agg.TotalPV
@@ -58,9 +64,11 @@ func GetAccessDataStats() AccessDataStats {
 				Latest   string `gorm:"column:latest"`
 			}
 			var tagg topAgg
-			_ = db.Mdb.Model(&model.AccessDailyTop{}).
+			if err := db.Mdb.Model(&model.AccessDailyTop{}).
 				Select("MIN(day) AS earliest, MAX(day) AS latest").
-				Scan(&tagg).Error
+				Scan(&tagg).Error; err != nil {
+				return stats, err
+			}
 			stats.EarliestDay = tagg.Earliest
 			stats.LatestDay = tagg.Latest
 		}
@@ -72,7 +80,7 @@ func GetAccessDataStats() AccessDataStats {
 		for {
 			keys, nextCursor, err := db.Rdb.Scan(ctx, cursor, config.AccessKeyPrefix+"*", 500).Result()
 			if err != nil {
-				break
+				return stats, err
 			}
 			stats.RedisKeyCount += int64(len(keys))
 			cursor = nextCursor
@@ -82,7 +90,7 @@ func GetAccessDataStats() AccessDataStats {
 		}
 	}
 
-	return stats
+	return stats, nil
 }
 
 // ClearAccessData 清理数据分析积累的数据。

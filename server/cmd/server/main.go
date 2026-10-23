@@ -15,6 +15,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/router"
 	"server/internal/service"
 	"server/internal/service/upgrade"
@@ -95,7 +96,9 @@ func start() {
 	db.StartRedisHealthCheck()
 	db.StartMysqlHealthCheck()
 
-	service.InitSvc.DefaultDataInit()
+	if err := service.InitSvc.DefaultDataInit(); err != nil {
+		log.Fatalf("[Init] 初始化失败: %v", err)
+	}
 	if err := repository.RefreshCollectSourceCatalog(); err != nil {
 		log.Fatalf("[Init] 采集站目录加载失败: %v", err)
 	}
@@ -107,6 +110,7 @@ func start() {
 		Addr:    fmt.Sprintf(":%s", config.ListenerPort),
 		Handler: r,
 	}
+	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)

@@ -378,19 +378,27 @@ func ClearSpider() error {
 }
 
 func CollectApiTest(s model.FilmSource) error {
-	return CollectApiTestWithTimeout(s, 0)
+	return CollectApiTestCtx(context.Background(), s)
+}
+
+// CollectApiTestCtx 在给定超时内探测采集站。
+func CollectApiTestCtx(ctx context.Context, s model.FilmSource) error {
+	return collectApiTest(ctx, s, 0, false, false)
 }
 
 func CollectApiTestChoosingProxy(s model.FilmSource, useProxy bool) error {
-	return collectApiTest(s, 0, useProxy, true)
+	return collectApiTest(context.Background(), s, 0, useProxy, true)
 }
 
 func CollectApiTestWithTimeout(s model.FilmSource, timeoutSeconds int) error {
-	return collectApiTest(s, timeoutSeconds, false, false)
+	return collectApiTest(context.Background(), s, timeoutSeconds, false, false)
 }
 
-func collectApiTest(s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
-	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
+func collectApiTest(ctx context.Context, s model.FilmSource, timeoutSeconds int, useProxy bool, proxyChosen bool) error {
+	if ctx == nil {
+		return errors.New("检测上下文为空")
+	}
+	r := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}, Ctx: ctx, SkipTLSVerify: s.SkipTLSVerify}
 	r.Params.Set("ac", "list")
 	r.Params.Set("pg", "1")
 	if timeoutSeconds > 0 {

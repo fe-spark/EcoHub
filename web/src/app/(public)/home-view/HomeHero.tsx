@@ -66,6 +66,7 @@ function getPoster(item: HeroBannerItem) {
 export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
   const { navigate } = useContentNavigate();
   const swiperRef = useRef<SwiperType | null>(null);
+  const thumbsRef = useRef<HTMLDivElement | null>(null);
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -142,6 +143,16 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
   );
 
   useEffect(() => () => clearResumeTimer(), [clearResumeTimer]);
+
+  useEffect(() => {
+    const root = thumbsRef.current;
+    const thumb = root?.children[safeIndex] as HTMLElement | undefined;
+    if (!root || !thumb) {
+      return;
+    }
+    const left = thumb.offsetLeft - (root.clientWidth - thumb.offsetWidth) / 2;
+    root.scrollTo({ left: Math.max(0, left), behavior: "smooth" });
+  }, [safeIndex]);
 
   if (!covers.length || !active) {
     return null;
@@ -238,7 +249,7 @@ export default function HomeHero({ banners }: { banners: HeroBannerItem[] }) {
             </Button>
 
             {multi ? (
-              <div className={styles.thumbs} aria-label="推荐列表">
+              <div ref={thumbsRef} className={styles.thumbs} aria-label="推荐列表">
                 {covers.map((item, index) => (
                   <button
                     key={`${item.id}-thumb`}

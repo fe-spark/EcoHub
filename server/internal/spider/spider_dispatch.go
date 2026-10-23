@@ -59,24 +59,36 @@ func filterCollectableSources(sources []model.FilmSource, tag string) []model.Fi
 	return occupyCollectSources(sources, tag)
 }
 
-func newCollectQueueID() string {
-	return "q-" + utils.GenerateSalt()
+func newCollectQueueID() (string, error) {
+	salt, err := utils.GenerateSalt()
+	if err != nil {
+		return "", err
+	}
+	return "q-" + salt, nil
 }
 
-func occupyAndMarkCollectSources(sources []model.FilmSource, tag string) []model.FilmSource {
+func occupyAndMarkCollectSources(sources []model.FilmSource, tag string) ([]model.FilmSource, error) {
 	occupied := filterCollectableSources(sources, tag)
 	if len(occupied) == 0 {
-		return occupied
+		return occupied, nil
 	}
-	progress.MarkSourcesCollectStarting(occupied, newCollectQueueID())
-	return occupied
+	queueID, err := newCollectQueueID()
+	if err != nil {
+		return nil, err
+	}
+	progress.MarkSourcesCollectStarting(occupied, queueID)
+	return occupied, nil
 }
 
 func runSourcesWithLimit(sources []model.FilmSource, h int, tag, trigger string) {
 	if len(sources) == 0 {
 		return
 	}
-	sources = occupyAndMarkCollectSources(sources, tag)
+	sources, err := occupyAndMarkCollectSources(sources, tag)
+	if err != nil {
+		syslog.Errorf("[%s] 分配采集队列失败: %v", tag, err)
+		return
+	}
 	if len(sources) == 0 {
 		return
 	}

@@ -50,7 +50,10 @@ func enrichLogEvents(events []AccessEvent) ([]AccessEvent, error) {
 	if err != nil {
 		return nil, err
 	}
-	catMap := resolveCategoryNames(catIDs)
+	catMap, err := resolveCategoryNames(catIDs)
+	if err != nil {
+		return nil, err
+	}
 
 	for i := range events {
 		it := &events[i]

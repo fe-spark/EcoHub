@@ -12,11 +12,8 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
-	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
 	"server/internal/utils"
-	"strconv"
 
 	"golang.org/x/sync/singleflight"
 )
@@ -80,77 +77,13 @@ func ListFilmSnapshotsByTagsReadModel(version string, st model.SearchTagsVO, pag
 		}
 
 		listGen := GetSearchCacheVersion()
-		query := applySourceMembership(liveFilmQuery(), st.SourceId)
-		if st.SourceId != "" {
-			if st.Cid > 0 {
-				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "cid", repository.PublicSourceTypeIDs(st.SourceId, "cid", st.Cid))
-			} else if st.Pid > 0 {
-				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "pid", repository.PublicSourceTypeIDs(st.SourceId, "pid", st.Pid))
-			}
-		} else if st.Cid > 0 {
-			query = filmquery.ApplyLiveCategoryMatch(query, "cid", st.Cid)
-		} else if st.Pid > 0 {
-			query = filmquery.ApplyLiveCategoryMatch(query, "pid", st.Pid)
-		}
-		query, err := applyTagSearchFilter(query, version, st)
+		item, err := tagPageFromIndex(version, st, page)
 		if err != nil {
 			return nil, err
 		}
 
-		var total int64 = -1
-		var countKey string
-		if st.SourceId != "" {
-			countKey = fmt.Sprintf("%s:count:v%s:src_%s:%d:%d:%s:%s:%s:%s:ck3",
-				config.FilmSearchTagsKey, version, st.SourceId, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
-		} else {
-			countKey = fmt.Sprintf("%s:count:v%s:%d:%d:%s:%s:%s:%s",
-				config.FilmSearchTagsKey, version, st.Pid, st.Cid, st.Plot, st.Area, st.Language, st.Year)
-		}
-		if db.Rdb != nil {
-			if countStr, err := db.Rdb.Get(db.Cxt, countKey).Result(); err == nil && countStr != "" {
-				if parsedTotal, err := strconv.ParseInt(countStr, 10, 64); err == nil && parsedTotal >= 0 {
-					total = parsedTotal
-				}
-			}
-		}
-
-		if total < 0 {
-			if err := query.Count(&total).Error; err != nil {
-				return tagSearchCacheItem{}, err
-			}
-			writeListCache(countKey, []byte(strconv.FormatInt(total, 10)), 10*time.Minute, listGen)
-		}
-
-		calcTotal := int(total)
-		calcPageCount := (calcTotal + page.PageSize - 1) / page.PageSize
-		if calcPageCount <= 0 {
-			calcPageCount = 1
-		}
-
-		orderClause := "update_stamp DESC, mid DESC"
-		switch st.Sort {
-		case "hits":
-			orderClause = "hits DESC, mid DESC"
-		case "score":
-			orderClause = "score DESC, mid DESC"
-		case "year":
-			orderClause = "year DESC, update_stamp DESC, mid DESC"
-		}
-
-		offset := shared.PageOffset(page)
-		snapshots, err := findListPage(query, orderClause, offset, page.PageSize)
-		if err != nil {
-			return tagSearchCacheItem{}, err
-		}
-
-		item := tagSearchCacheItem{
-			Total:     calcTotal,
-			PageCount: calcPageCount,
-			Snapshots: snapshots,
-		}
-
 		if raw, err := json.Marshal(item); err == nil {
-			writeListCache(cacheKey, raw, listCacheTTL(len(snapshots), tagSearchCacheTTL), listGen)
+			writeListCache(cacheKey, raw, listCacheTTL(len(item.Snapshots), tagSearchCacheTTL), listGen)
 		}
 		return item, nil
 	})

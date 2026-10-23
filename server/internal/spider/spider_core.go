@@ -99,12 +99,6 @@ func (jc *JsonCollect) GetPageCount(r utils.RequestInfo) (count int, err error) 
 
 // GetFilmDetail 通过 RequestInfo 获取并解析出对应的 MovieDetail list
 func (jc *JsonCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error) {
-	// 防止json解析异常引发panic
-	defer func() {
-		if e := recover(); e != nil {
-			err = fmt.Errorf("JSON 详情解析失败: %v", e)
-		}
-	}()
 	// 设置分页请求参数
 	r.Params.Set(`ac`, `detail`)
 	utils.ApiGet(&r)

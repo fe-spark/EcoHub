@@ -88,7 +88,7 @@ func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
 	}
 	var r model.CrontabRecord
 	if err := db.Mdb.Where("task_id = ?", id).First(&r).Error; err != nil {
-		return model.FilmCollectTask{}, errors.New(" The task does not exist ")
+		return model.FilmCollectTask{}, err
 	}
 
 	var ids []string

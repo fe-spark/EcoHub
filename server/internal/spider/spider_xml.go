@@ -164,13 +164,6 @@ func (xc *XmlCollect) GetPageCount(r utils.RequestInfo) (int, error) {
 
 // GetFilmDetail 获取 XML 源单页影片明细
 func (xc *XmlCollect) GetFilmDetail(r utils.RequestInfo) (list []model.MovieDetail, err error) {
-	defer func() {
-		if e := recover(); e != nil {
-			log.Printf("[Spider-XML] GetFilmDetail 异常恢复: %v", e)
-			err = fmt.Errorf("XML GetFilmDetail panic recovered: %v", e)
-		}
-	}()
-
 	ensureParams(&r)
 	if len(r.Params.Get("ac")) == 0 {
 		r.Params.Set("ac", "videolist")

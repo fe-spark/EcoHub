@@ -18,17 +18,8 @@ type FileHandler struct{}
 
 var FileHd = new(FileHandler)
 
-var allowedImageExt = map[string]bool{
-	"jpg":  true,
-	"jpeg": true,
-	"png":  true,
-	"webp": true,
-	"ico":  true,
-}
-
 func isAllowedImage(filename string) bool {
-	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(filename), "."))
-	return allowedImageExt[ext]
+	return utils.IsGalleryImage(filename)
 }
 
 // Upload 统一文件上传接口（支持图片上传）
@@ -48,7 +39,12 @@ func (h *FileHandler) Upload(c *gin.Context) {
 		return
 	}
 
-	fileName := fmt.Sprintf("%s/%s%s", config.FilmPictureUploadDir, utils.RandomString(8), filepath.Ext(file.Filename))
+	token, err := utils.RandomString(8)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	fileName := fmt.Sprintf("%s/%s%s", config.FilmPictureUploadDir, token, filepath.Ext(file.Filename))
 	err = c.SaveUploadedFile(file, fileName)
 	if err != nil {
 		dto.Failed(err.Error(), c)
@@ -130,7 +126,11 @@ func (h *FileHandler) PhotoWall(c *gin.Context) {
 	if !ok {
 		return
 	}
-	pl := service.FileSvc.GetPhotoPage(name, beginTime, endTime, page)
+	pl, err := service.FileSvc.GetPhotoPage(name, beginTime, endTime, page)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 	dto.Success(gin.H{"list": pl, "page": page}, "图片分页数据获取成功", c)
 }
 

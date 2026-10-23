@@ -95,7 +95,10 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 	wrap := model.FilmSource{Id: "retry-queue-wrap", Name: "默认"}
 	defer releaseCollectSources([]model.FilmSource{ik, wrap})
 
-	batch := occupyAndMarkCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	batch, err := occupyAndMarkCollectSources([]model.FilmSource{ik, wrap}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(batch) != 2 {
 		t.Fatalf("batch occupy got %d, want 2", len(batch))
 	}
@@ -114,7 +117,10 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 		p.Status = progress.StatusFailed
 	})
 
-	retry := occupyAndMarkCollectSources([]model.FilmSource{ik}, "Single-Collect")
+	retry, err := occupyAndMarkCollectSources([]model.FilmSource{ik}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(retry) != 1 {
 		t.Fatalf("retry occupy got %d, want 1", len(retry))
 	}
@@ -137,7 +143,11 @@ func TestOccupyAndMarkCollectSources_RetryIsNewQueue(t *testing.T) {
 func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 	id := "batch-fail-release-occupy"
 	source := model.FilmSource{Id: id, Name: "HD(IK)"}
-	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Batch-Collect")) != 1 {
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
 		t.Fatal("occupy failed")
 	}
 	defer releaseCollectSourceIDs(id)
@@ -157,7 +167,11 @@ func TestBatchCollectErrorReleasesOccupyForRetry(t *testing.T) {
 		t.Fatal("failed leftover must not block retry")
 	}
 
-	if len(occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")) != 1 {
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(retried) != 1 {
 		t.Fatal("retry should occupy after failed batch source released")
 	}
 }
@@ -203,7 +217,10 @@ func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
 		t.Fatal("stopped queued source must not block a new collect")
 	}
 
-	retried := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(retried) != 1 {
 		t.Fatal("retry should occupy after the source left the old queue")
 	}
@@ -225,7 +242,11 @@ func TestStopTaskDropsQueuedOccupySoRetryCanStart(t *testing.T) {
 
 func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
 	src := model.FilmSource{Id: "stop-running-detach", Name: "111"}
-	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")) != 1 {
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
 		t.Fatal("occupy failed")
 	}
 	ctx, err := progress.TryRegisterTask(src.Id, "req-running", nil)
@@ -245,7 +266,11 @@ func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
 	if !ok || snap.Status != progress.StatusStopping {
 		t.Fatalf("status must stay stopping until the run exits, ok=%v status=%q", ok, snap.Status)
 	}
-	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")) != 0 {
+	blocked, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocked) != 0 {
 		t.Fatal("retry must wait until the run really exits")
 	}
 
@@ -257,7 +282,10 @@ func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
 	if progress.IsAlreadyQueuedOrRunning(src.Id) {
 		t.Fatal("exited source must accept a new collect")
 	}
-	retried := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	retried, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Single-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(retried) != 1 {
 		t.Fatal("retry should occupy after the run exits")
 	}
@@ -276,7 +304,11 @@ func TestStopTaskDetachesRunningSourceAndKeepsStoppingUntilExit(t *testing.T) {
 
 func TestFinishRunMarksStoppedWhenNoRetry(t *testing.T) {
 	src := model.FilmSource{Id: "stop-running-finish", Name: "111"}
-	if len(occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")) != 1 {
+	occupied, err := occupyAndMarkCollectSources([]model.FilmSource{src}, "Batch-Collect")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(occupied) != 1 {
 		t.Fatal("occupy failed")
 	}
 	defer releaseCollectSourceIDs(src.Id)
