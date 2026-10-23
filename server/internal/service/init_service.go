@@ -46,34 +46,42 @@ func (s *InitService) DefaultDataInit() error {
 		syslog.Warnf("[Init] %v", err)
 	}
 
-	// 网站基本信息初始化（首页轮播已移入内容管理）
-	s.SiteWebConfigInit()
-	if err := repository.EnsureDefaultPosterSource(); err != nil {
-		syslog.Errorf("[Init] EnsureDefaultPosterSourceTx 失败: %v", err)
+	if err := s.SiteWebConfigInit(); err != nil {
+		return err
 	}
-	// 定时任务启动前，从 Redis 备忘恢复活跃快照版本到内存。
+	if err := repository.EnsureDefaultPosterSource(); err != nil {
+		return fmt.Errorf("默认海报源初始化失败: %w", err)
+	}
 	filmsnapshot.RestoreActiveSnapshotVersion()
-	s.SpiderInit()
+	if err := s.SpiderInit(); err != nil {
+		return err
+	}
 	NotifySvc.EnsureBotPoller()
-	s.ensureFilmListSnapshot()
-	s.loadActiveFilmReadModel()
+	if err := s.ensureFilmListSnapshot(); err != nil {
+		return err
+	}
+	if err := s.loadActiveFilmReadModel(); err != nil {
+		return err
+	}
 	return nil
 }
 
-func (s *InitService) ensureFilmListSnapshot() {
+func (s *InitService) ensureFilmListSnapshot() error {
 	if err := filmsnapshot.EnsureActiveFilmListSnapshot(); err != nil {
-		syslog.Errorf("[Init] 前台影片列表快照引导失败: %v", err)
+		return fmt.Errorf("前台影片列表快照引导失败: %w", err)
 	}
+	return nil
 }
 
-func (s *InitService) loadActiveFilmReadModel() {
-	// 片库非空时，列表快照引导已经按同一版本开始加载。再调一次会清掉索引并重扫。
+func (s *InitService) loadActiveFilmReadModel() error {
+	// 片库非空时，列表快照引导已经按同一版本加载完成。再调一次会清掉索引并重扫。
 	if rm := filmsnapshot.GetActiveFilmReadModel(); rm != nil && strings.TrimSpace(rm.Version) != "" {
-		return
+		return nil
 	}
 	if err := filmsnapshot.LoadActiveFilmReadModel(""); err != nil {
-		syslog.Errorf("[Init] 影片内存读模型加载失败: %v", err)
+		return fmt.Errorf("影片内存读模型加载失败: %w", err)
 	}
+	return nil
 }
 
 func (s *InitService) TableInit() error {
@@ -89,20 +97,22 @@ func (s *InitService) TableInit() error {
 	return nil
 }
 
-// SiteWebConfigInit 初始化网站基本信息（首页轮播已移入内容管理，不再由初始化维护）
-func (s *InitService) SiteWebConfigInit() {
-	// 首次：写入默认基本信息
-	if !repository.ExistSiteConfig() {
+// SiteWebConfigInit 初始化网站基本信息。读失败直接返回，不写默认配置。
+func (s *InitService) SiteWebConfigInit() error {
+	exists, err := repository.ExistSiteConfig()
+	if err != nil {
+		return fmt.Errorf("读取网站配置失败: %w", err)
+	}
+	if !exists {
 		if err := repository.SaveSiteBasic(defaultBasicConfig()); err != nil {
-			syslog.Errorf("SiteWebConfigInit SaveSiteBasic Error: %v", err)
+			return fmt.Errorf("写入默认网站配置失败: %w", err)
 		}
-		return
+		return nil
 	}
-	// 已初始化：回填网站配置的 Redis 缓存。读失败不能写默认配置盖掉库。
 	if _, err := repository.GetSiteBasic(); err != nil {
-		syslog.Errorf("SiteWebConfigInit GetSiteBasic Error: %v", err)
-		return
+		return fmt.Errorf("回填网站配置失败: %w", err)
 	}
+	return nil
 }
 
 // defaultBasicConfig 默认网站基本信息
@@ -122,19 +132,26 @@ func defaultBasicConfig() model.BasicConfig {
 	}
 }
 
-func (s *InitService) SpiderInit() {
-	s.FilmSourceInit()
+func (s *InitService) SpiderInit() error {
+	if err := s.FilmSourceInit(); err != nil {
+		return err
+	}
 	go SpiderSvc.SyncMissingSourceCategories()
-	s.CollectCrontabInit()
+	return s.CollectCrontabInit()
 }
 
-func (s *InitService) FilmSourceInit() {
-	if repository.ExistCollectSourceList() {
-		return
+func (s *InitService) FilmSourceInit() error {
+	exists, err := repository.ExistCollectSourceList()
+	if err != nil {
+		return fmt.Errorf("读取采集站失败: %w", err)
+	}
+	if exists {
+		return nil
 	}
 	if err := repository.BatchAddCollectSource(defaultFilmSources()); err != nil {
-		syslog.Errorf("BatchAddCollectSource Error: %v", err)
+		return fmt.Errorf("写入默认采集站失败: %w", err)
 	}
+	return nil
 }
 
 func defaultFilmSources() []model.FilmSource {
@@ -161,23 +178,25 @@ func defaultFilmSources() []model.FilmSource {
 	return list
 }
 
-func (s *InitService) CollectCrontabInit() {
-
-	// 已有任务保持原样，缺的任务类型补默认任务。
-	tasks := s.ensureDefaultTasks()
-	for _, task := range tasks {
-		s.registerTask(task)
+func (s *InitService) CollectCrontabInit() error {
+	tasks, err := s.ensureDefaultTasks()
+	if err != nil {
+		return err
 	}
-
+	for _, task := range tasks {
+		if err := s.registerTask(task); err != nil {
+			return err
+		}
+	}
 	spider.CronCollect.Start()
+	return nil
 }
 
 // ensureDefaultTasks 已有任务保持原样。某个任务类型还没有记录时，补一条默认任务。
-func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
+func (s *InitService) ensureDefaultTasks() ([]model.FilmCollectTask, error) {
 	existing, err := repository.GetAllFilmTask()
 	if err != nil {
-		syslog.Errorf("[Cron] 读取定时任务失败: %v", err)
-		return nil
+		return nil, fmt.Errorf("读取定时任务失败: %w", err)
 	}
 	existingModels := make(map[int]bool, len(existing))
 	for _, t := range existing {
@@ -189,21 +208,20 @@ func (s *InitService) ensureDefaultTasks() []model.FilmCollectTask {
 			continue
 		}
 		if err := repository.SaveFilmTask(dt); err != nil {
-			syslog.Errorf("[Cron] 补齐默认任务失败 id=%s: %v", dt.Id, err)
-			continue
+			return nil, fmt.Errorf("补齐默认任务失败 id=%s: %w", dt.Id, err)
 		}
 		existing = append(existing, dt)
 		existingModels[dt.Model] = true
 	}
-	return existing
+	return existing, nil
 }
 
-func (s *InitService) registerTask(task model.FilmCollectTask) {
+func (s *InitService) registerTask(task model.FilmCollectTask) error {
 	if !task.State {
 		if err := repository.UpdateFilmTask(task); err != nil {
-			syslog.Errorf("UpdateFilmTask Error: %v", err)
+			return fmt.Errorf("保存定时任务 %s 失败: %w", task.Id, err)
 		}
-		return
+		return nil
 	}
 
 	var cid cron.EntryID
@@ -224,13 +242,13 @@ func (s *InitService) registerTask(task model.FilmCollectTask) {
 	case model.TaskModelFailureClean:
 		cid, err = spider.AddFailureRecordCleanCron(task.Id, task.Spec)
 	default:
-		return
+		return nil
 	}
-	if err == nil {
-		spider.RegisterTaskCid(task.Id, cid)
-	} else {
-		syslog.Errorf("Task [%s, model=%d] Add Cron Error: %v", task.Id, task.Model, err)
+	if err != nil {
+		return fmt.Errorf("注册定时任务 %s 失败: %w", task.Id, err)
 	}
+	spider.RegisterTaskCid(task.Id, cid)
+	return nil
 }
 
 func defaultFilmTasks() []model.FilmCollectTask {

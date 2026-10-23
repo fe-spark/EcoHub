@@ -21,28 +21,27 @@ func ExistUserTable() bool {
 }
 
 // InitBuiltinAccounts 初始化内置管理员。已存在则不改密码。
-// 初始密码读 ECOHUB_ADMIN_PASSWORD；未设置时生成随机密码并写入启动日志。
+// 首次创建必须设置 ECOHUB_ADMIN_PASSWORD，密码不写入日志。
 func InitBuiltinAccounts() error {
-	password := strings.TrimSpace(os.Getenv("ECOHUB_ADMIN_PASSWORD"))
-	generated := false
-	if password == "" {
-		var err error
-		password, err = utils.RandomString(8)
-		if err != nil {
-			return err
-		}
-		generated = true
-	}
-	created, err := ensureBuiltinUser(config.DefaultAdminUser, password, "", "Spark", model.UserRoleAdmin)
+	existing, err := GetUserByNameOrEmail(config.DefaultAdminUser)
 	if err != nil {
 		return err
 	}
-	if created && generated {
-		log.Printf("[Init] 已创建管理员 %s，初始密码: %s", config.DefaultAdminUser, password)
+	if existing != nil {
+		if existing.Role == model.UserRoleAdmin {
+			return nil
+		}
+		return db.Mdb.Model(&model.User{}).Where("id = ?", existing.ID).Update("role", model.UserRoleAdmin).Error
 	}
-	if created && !generated {
-		log.Printf("[Init] 已创建管理员 %s，初始密码来自 ECOHUB_ADMIN_PASSWORD", config.DefaultAdminUser)
+	password := strings.TrimSpace(os.Getenv("ECOHUB_ADMIN_PASSWORD"))
+	if password == "" {
+		return errors.New("缺少环境变量 ECOHUB_ADMIN_PASSWORD")
 	}
+	_, err = ensureBuiltinUser(config.DefaultAdminUser, password, "", "Spark", model.UserRoleAdmin)
+	if err != nil {
+		return err
+	}
+	log.Printf("[Init] 已创建管理员 %s", config.DefaultAdminUser)
 	return nil
 }
 
@@ -162,4 +161,29 @@ func AddUser(u *model.User) error {
 // DeleteUser 删除用户
 func DeleteUser(id uint) error {
 	return db.Mdb.Delete(&model.User{}, id).Error
+}
+
+// UserAccountGate 读取账号状态和角色。状态 0 为正常。
+func UserAccountGate(id uint) (status int, role int, err error) {
+	if db.Mdb == nil {
+		return 0, 0, errors.New("数据库未连接")
+	}
+	var row struct {
+		Status int
+		Role   int
+	}
+	err = db.Mdb.Model(&model.User{}).Select("status", "role").Where("id = ?", id).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return 0, 0, errors.New("用户不存在")
+	}
+	if err != nil {
+		return 0, 0, err
+	}
+	return row.Status, row.Role, nil
+}
+
+// UserAccountStatus 读取账号状态。0 为正常。
+func UserAccountStatus(id uint) (int, error) {
+	status, _, err := UserAccountGate(id)
+	return status, err
 }

@@ -133,10 +133,15 @@ func (h *IndexHandler) FilmRelate(c *gin.Context) {
 
 	page := dto.Page{Current: 0, PageSize: 14}
 	var relateMovie []model.MovieBasicInfo
+	var relateErr error
 	if source != "" {
-		relateMovie = service.IndexSvc.RelateMovie(int64(id), &page, source)
+		relateMovie, relateErr = service.IndexSvc.RelateMovie(int64(id), &page, source)
 	} else {
-		relateMovie = service.IndexSvc.RelateMovie(int64(id), &page)
+		relateMovie, relateErr = service.IndexSvc.RelateMovie(int64(id), &page)
+	}
+	if relateErr != nil {
+		dto.Failed(relateErr.Error(), c)
+		return
 	}
 	logSlowIndexStep("FilmRelate.total", startedAt, "id", id)
 	dto.Success(relateMovie, "相关推荐获取成功", c)

@@ -3,7 +3,6 @@ package snapshot
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -34,7 +33,7 @@ func emptyFilterOptionResponse() map[string]any {
 	}
 }
 
-func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) map[string]any {
+func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) (map[string]any, error) {
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
@@ -48,7 +47,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	}
 	pid = support.ResolveCategoryID(pid)
 	if pid <= 0 {
-		return emptyFilterOptionResponse()
+		return emptyFilterOptionResponse(), nil
 	}
 
 	var cacheKey string
@@ -61,13 +60,13 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
 			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
-				return cached
+				return cached, nil
 			}
 		}
 	}
 
 	if db.Mdb == nil {
-		return emptyFilterOptionResponse()
+		return nil, ErrSearchIndexMissing
 	}
 	listGen := GetSearchCacheVersion()
 
@@ -75,16 +74,22 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	var subCats []model.Category
 	if sourceId != "" {
 		var mappedCategoryIDs []int64
-		_ = db.Mdb.Model(&model.CategoryMapping{}).
+		if err := db.Mdb.Model(&model.CategoryMapping{}).
 			Where("source_id = ? AND category_id > 0", sourceId).
-			Pluck("category_id", &mappedCategoryIDs).Error
+			Pluck("category_id", &mappedCategoryIDs).Error; err != nil {
+			return nil, err
+		}
 		if len(mappedCategoryIDs) > 0 {
-			_ = db.Mdb.Where("pid = ? AND id IN ? AND `show` = ?", pid, mappedCategoryIDs, true).
-				Order("sort ASC, id ASC").Find(&subCats).Error
+			if err := db.Mdb.Where("pid = ? AND id IN ? AND `show` = ?", pid, mappedCategoryIDs, true).
+				Order("sort ASC, id ASC").Find(&subCats).Error; err != nil {
+				return nil, err
+			}
 		}
 	}
 	if len(subCats) == 0 {
-		_ = db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&subCats).Error
+		if err := db.Mdb.Where("pid = ? AND `show` = ?", pid, true).Order("sort ASC, id ASC").Find(&subCats).Error; err != nil {
+			return nil, err
+		}
 	}
 	catItems := []map[string]string{{"Name": "全部", "Value": ""}}
 	for _, c := range subCats {
@@ -96,13 +101,16 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 
 	// 2. 获取标签 (Plot, Area, Language, Year)。没有这些行时，从已经入库的影片补齐。
 	var tagRows []model.SearchTagItem
-	_ = db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error
+	if err := db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error; err != nil {
+		return nil, err
+	}
 	if !rawFilterHasDynamicTags(tagRows) && searchTagBackfill != nil {
 		if err := searchTagBackfill(pid); err != nil {
-			log.Printf("[SearchTags] 按入库影片补齐筛选标签失败 pid=%d err=%v", pid, err)
-		} else {
-			tagRows = nil
-			_ = db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error
+			return nil, err
+		}
+		tagRows = nil
+		if err := db.Mdb.Where("pid = ?", pid).Order("score DESC, id ASC").Find(&tagRows).Error; err != nil {
+			return nil, err
 		}
 	}
 	itemsByType := make(map[string][]model.SearchTagItem)
@@ -152,7 +160,7 @@ func GetFilterOptionSnapshot(version string, pid int64, sourceIdOpt ...string) m
 	if raw, err := json.Marshal(res); err == nil {
 		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
 	}
-	return res
+	return res, nil
 }
 
 func sourceTypeFilterKeys(sourceID string, typeID int64) []string {
@@ -171,22 +179,22 @@ func sourceTypeFilterKeys(sourceID string, typeID int64) []string {
 }
 
 // sourceTypeFilterOptions 筛选项跟当前站的 type_id 走。子类是该站自己的下级 type_id，剧情地区从这些片子上统计。
-func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]any {
+func sourceTypeFilterOptions(version, sourceId string, typeID int64) (map[string]any, error) {
 	key := support.BuildSourceCategoryKey(sourceId, typeID)
 	if key == "" {
-		return emptyFilterOptionResponse()
+		return emptyFilterOptionResponse(), nil
 	}
 	cacheKey := fmt.Sprintf("%s:ck3:src_%s:v%s:r%s:%d", config.FilmFilterOptionKey, sourceId, version, support.GetRuleVersion(), typeID)
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			var cached map[string]any
 			if json.Unmarshal([]byte(data), &cached) == nil && cachedFilterHasDynamicTags(cached) {
-				return cached
+				return cached, nil
 			}
 		}
 	}
 	if db.Mdb == nil {
-		return emptyFilterOptionResponse()
+		return nil, ErrSearchIndexMissing
 	}
 	listGen := GetSearchCacheVersion()
 
@@ -203,8 +211,7 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]
 
 	counts, err := countSourceTypeTagsFromIndex(version, sourceTypeFilterKeys(sourceId, typeID))
 	if err != nil {
-		log.Printf("[SearchTags] 筛选项统计失败 source=%s type=%d: %v", sourceId, typeID, err)
-		return emptyFilterOptionResponse()
+		return nil, err
 	}
 
 	tags := make(map[string]any)
@@ -244,7 +251,7 @@ func sourceTypeFilterOptions(version, sourceId string, typeID int64) map[string]
 	if raw, err := json.Marshal(res); err == nil {
 		writeListCache(cacheKey, raw, 10*time.Minute, listGen)
 	}
-	return res
+	return res, nil
 }
 
 func addSourceTypeTagCount(counts map[string]int, value string) {

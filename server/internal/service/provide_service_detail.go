@@ -22,7 +22,6 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 	if len(ids) == 0 {
 		return []model.FilmDetail{}, nil
 	}
-
 	mids := make([]int64, 0, len(ids))
 	for _, idStr := range ids {
 		idInt, err := strconv.ParseInt(strings.TrimSpace(idStr), 10, 64)
@@ -35,10 +34,22 @@ func (p *ProvideService) GetVodDetail(ids []string, sourceId string) ([]model.Fi
 		return []model.FilmDetail{}, nil
 	}
 	sourceId = resolveProvideSourceID(sourceId)
-	if len(mids) > maxProvideVodDetailBatch {
-		mids = mids[:maxProvideVodDetailBatch]
+	all := make([]model.FilmDetail, 0, len(mids))
+	for start := 0; start < len(mids); start += maxProvideVodDetailBatch {
+		end := start + maxProvideVodDetailBatch
+		if end > len(mids) {
+			end = len(mids)
+		}
+		part, err := p.getVodDetailMids(mids[start:end], sourceId)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, part...)
 	}
+	return all, nil
+}
 
+func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]model.FilmDetail, error) {
 	version := filmsnapshot.GetActiveReadModelVersion()
 	snapshots, err := filmsnapshot.GetProjectedSnapshotsByMidsOrdered(version, mids)
 	if err != nil {

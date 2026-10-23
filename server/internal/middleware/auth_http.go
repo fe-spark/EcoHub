@@ -10,7 +10,18 @@ import (
 )
 
 func useSecureCookie(c *gin.Context) bool {
-	return c.Request.TLS != nil || c.GetHeader("X-Forwarded-Proto") == "https"
+	return c.Request.TLS != nil || forwardedProto(c.GetHeader("X-Forwarded-Proto")) == "https"
+}
+
+func forwardedProto(header string) string {
+	header = strings.TrimSpace(header)
+	if i := strings.Index(header, ","); i >= 0 {
+		header = strings.TrimSpace(header[:i])
+	}
+	if header != "http" && header != "https" {
+		return ""
+	}
+	return header
 }
 
 // SetAuthCookie 写入登录令牌。

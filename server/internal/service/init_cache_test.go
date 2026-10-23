@@ -56,7 +56,10 @@ func TestService_RedisNilSafety(t *testing.T) {
 func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	setupTestDBAndRedis(t)
 	svc := &InitService{}
-	tasks := svc.ensureDefaultTasks()
+	tasks, err := svc.ensureDefaultTasks()
+	if err != nil {
+		t.Fatalf("ensureDefaultTasks: %v", err)
+	}
 	if len(tasks) != 6 {
 		t.Fatalf("expected 6 default tasks, got %d", len(tasks))
 	}

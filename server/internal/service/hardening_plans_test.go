@@ -507,7 +507,10 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 
 	// 2. 不存在影片的推荐请求 -> 返回空并写入 "[]" 哨兵（60s）
 	const nonExistentMid = int64(77777)
-	resEmpty := IndexSvc.RelateMovie(nonExistentMid, page)
+	resEmpty, relateErr := IndexSvc.RelateMovie(nonExistentMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate: %v", relateErr)
+	}
 	if len(resEmpty) != 0 {
 		t.Fatalf("expected empty relate for non-existent film, got %d", len(resEmpty))
 	}
@@ -523,13 +526,19 @@ func TestPlan6_FilmRelate_FrontCacheAndSentinel(t *testing.T) {
 	}
 
 	// 再次请求该不存在的影片，验证直接命中 "[]" 哨兵
-	resEmpty2 := IndexSvc.RelateMovie(nonExistentMid, page)
+	resEmpty2, relateErr := IndexSvc.RelateMovie(nonExistentMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate sentinel: %v", relateErr)
+	}
 	if len(resEmpty2) != 0 {
 		t.Fatalf("expected empty relate from sentinel")
 	}
 
 	// 3. 请求相关推荐
-	relList := IndexSvc.RelateMovie(validMid, page)
+	relList, relateErr := IndexSvc.RelateMovie(validMid, page)
+	if relateErr != nil {
+		t.Fatalf("relate list: %v", relateErr)
+	}
 	relCacheKey := fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, validMid, 1, 10)
 	cachedVal, err := mr.Get(relCacheKey)
 	if err != nil || cachedVal == "" {
@@ -725,11 +734,17 @@ func TestPlan6_RelateMovie_SliceIsolation(t *testing.T) {
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
 
 	page := &dto.Page{Current: 1, PageSize: 10}
-	list1 := IndexSvc.RelateMovie(801, page)
+	list1, relateErr := IndexSvc.RelateMovie(801, page)
+	if relateErr != nil {
+		t.Fatalf("relate list1: %v", relateErr)
+	}
 	if len(list1) > 0 {
 		origName := list1[0].Name
 		list1[0].Name = "篡改推荐片名"
-		list2 := IndexSvc.RelateMovie(801, page)
+		list2, relateErr := IndexSvc.RelateMovie(801, page)
+		if relateErr != nil {
+			t.Fatalf("relate list2: %v", relateErr)
+		}
 		if list2[0].Name != origName {
 			t.Fatalf("relateMovie slice isolation failed: mutated to %s", list2[0].Name)
 		}

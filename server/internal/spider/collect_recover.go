@@ -367,9 +367,6 @@ func FullRecoverSpider() {
 func ClearSpider() error {
 	filmrepo.ReportResetProgress(5, "正在停止采集任务")
 	StopAllTasks()
-	if err := collectLifecycle.waitIdle(time.Second * 30); err != nil {
-		return err
-	}
 	filmrepo.ReportResetProgress(15, "正在清空数据")
 	return collectLifecycle.runExclusive(func() error {
 		repository.ResetCollectStatsCoalescer()

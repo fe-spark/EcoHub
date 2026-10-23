@@ -18,6 +18,7 @@ type collectLifecycleState struct {
 	activeSources map[string]struct{}
 	activeCount   int
 	publishing    int
+	draining      bool
 }
 
 func newCollectLifecycle() *collectLifecycleState {
@@ -36,6 +37,9 @@ func (s *collectLifecycleState) beginSource(sourceID string) error {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.draining {
+		return errors.New("片库正在清空，已拒绝采集")
+	}
 	if _, ok := s.activeSources[sourceID]; ok {
 		return fmt.Errorf("站点 %s 已有任务正在运行，已跳过本次采集", sourceID)
 	}
@@ -96,9 +100,10 @@ func (s *collectLifecycleState) endPublish() {
 }
 
 func (s *collectLifecycleState) runExclusive(action func() error) error {
-	s.mu.Lock()
-	s.waitIdleLocked()
-	s.mu.Unlock()
+	if err := s.beginDrain(30 * time.Second); err != nil {
+		return err
+	}
+	defer s.endDrain()
 
 	s.beginPublish()
 	defer s.endPublish()
@@ -106,6 +111,35 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	defer publishMu.Unlock()
 
 	return action()
+}
+
+func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
+	s.mu.Lock()
+	s.draining = true
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
+	defer timer.Stop()
+	for s.activeCount > 0 {
+		if !time.Now().Before(deadline) {
+			s.draining = false
+			s.mu.Unlock()
+			return fmt.Errorf("等待采集任务停止超时: active=%d", s.activeCount)
+		}
+		s.cond.Wait()
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *collectLifecycleState) endDrain() {
+	s.mu.Lock()
+	s.draining = false
+	s.cond.Broadcast()
+	s.mu.Unlock()
 }
 
 // waitSource 等到该站离开采集生命周期。超时表示这次运行还没退出。
@@ -123,31 +157,20 @@ func (s *collectLifecycleState) waitSource(sourceID string, timeout time.Duratio
 		return errors.New("停止采集超时，未删除")
 	}
 
-	timer := time.NewTimer(timeout)
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
 	defer timer.Stop()
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-timer.C:
-			s.mu.Lock()
-			s.cond.Broadcast()
-			s.mu.Unlock()
-		case <-done:
-		}
-	}()
 
 	for {
 		if _, ok := s.activeSources[sourceID]; !ok {
 			return nil
 		}
-		select {
-		case <-timer.C:
-			if _, ok := s.activeSources[sourceID]; !ok {
-				return nil
-			}
+		if !time.Now().Before(deadline) {
 			return errors.New("停止采集超时，未删除")
-		default:
 		}
 		s.cond.Wait()
 	}
@@ -186,31 +209,19 @@ func (s *collectLifecycleState) waitNotBusy(timeout time.Duration) error {
 		return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
 	}
 
-	timer := time.NewTimer(timeout)
+	deadline := time.Now().Add(timeout)
+	timer := time.AfterFunc(timeout, func() {
+		s.mu.Lock()
+		s.cond.Broadcast()
+		s.mu.Unlock()
+	})
 	defer timer.Stop()
 
-	done := make(chan struct{})
-	defer close(done)
-	go func() {
-		select {
-		case <-timer.C:
-			s.mu.Lock()
-			s.cond.Broadcast()
-			s.mu.Unlock()
-		case <-done:
-		}
-	}()
-
 	for s.activeCount > 0 || s.publishing > 0 {
-		s.cond.Wait()
-		select {
-		case <-timer.C:
-			if s.activeCount == 0 && s.publishing == 0 {
-				return nil
-			}
+		if !time.Now().Before(deadline) {
 			return fmt.Errorf("等待采集空闲超时: active=%d publishing=%d", s.activeCount, s.publishing)
-		default:
 		}
+		s.cond.Wait()
 	}
 	return nil
 }

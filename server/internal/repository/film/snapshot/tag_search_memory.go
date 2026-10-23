@@ -88,7 +88,11 @@ func tagValueMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta)
 	var tags map[string]any
 	if st.Plot == model.TagOthersValue || st.Area == model.TagOthersValue ||
 		st.Language == model.TagOthersValue || st.Year == model.TagOthersValue {
-		tags = loadFilterOptionTags(version, st.Pid, st.SourceId)
+		var err error
+		tags, err = loadFilterOptionTags(version, st.Pid, st.SourceId)
+		if err != nil {
+			return nil, err
+		}
 	}
 	plot := activeTagValue(st.Plot)
 	area := activeTagValue(st.Area)

@@ -122,10 +122,10 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.FilmSources {
-		list := backup.FilmSources
-		if list == nil {
-			list = []model.FilmSource{}
+		if backup.FilmSources == nil {
+			return errors.New("备份中缺少采集站")
 		}
+		list := backup.FilmSources
 		// 导入前清理旧站限流器
 		oldSources, err := repository.GetCollectSourceList()
 		if err != nil {
@@ -145,10 +145,10 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.CronTasks {
-		tasks := backup.CronTasks
-		if tasks == nil {
-			tasks = []model.FilmCollectTask{}
+		if backup.CronTasks == nil {
+			return errors.New("备份中缺少定时任务")
 		}
+		tasks := backup.CronTasks
 		// 先卸掉旧任务运行时
 		oldTasks, err := repository.GetAllFilmTask()
 		if err != nil {
@@ -179,10 +179,10 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.Banners {
-		banners := backup.Banners
-		if banners == nil {
-			banners = model.Banners{}
+		if backup.Banners == nil {
+			return errors.New("备份中缺少首页轮播")
 		}
+		banners := backup.Banners
 		if err := repository.SaveBanners(banners); err != nil {
 			return fmt.Errorf("导入首页轮播失败: %w", err)
 		}
@@ -194,10 +194,10 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.MappingRules {
-		exports := backup.MappingRules
-		if exports == nil {
-			exports = []model.MappingRuleExport{}
+		if backup.MappingRules == nil {
+			return errors.New("备份中缺少映射规则")
 		}
+		exports := backup.MappingRules
 		if err := repository.ReplaceMappingRules(exports); err != nil {
 			return fmt.Errorf("导入映射规则失败: %w", err)
 		}

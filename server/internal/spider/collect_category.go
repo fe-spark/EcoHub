@@ -3,11 +3,9 @@ package spider
 import (
 	"errors"
 	"fmt"
-	"net/url"
 
 	"server/internal/model"
 	"server/internal/repository"
-	"server/internal/utils"
 )
 
 // ensureMasterCategoriesReady 采集前确认该站已经有自己的分类副本。
@@ -47,23 +45,9 @@ func FetchCategoryTree(s *model.FilmSource) (*model.CategoryTree, error) {
 	if s == nil {
 		return nil, errors.New("采集站信息不存在")
 	}
-	req := utils.RequestInfo{Uri: s.Uri, Params: url.Values{}}
-	if s.ProxyCollect {
-		ok, proxy, err := repository.ResolveSpiderProxy()
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			req.ProxyURL = proxy
-		}
-	} else if s.Id != "" {
-		ok, proxy, err := repository.ResolveSourceProxy(s.Id)
-		if err != nil {
-			return nil, err
-		}
-		if ok {
-			req.ProxyURL = proxy
-		}
+	req, err := requestForSource(s)
+	if err != nil {
+		return nil, err
 	}
 	categoryTree, err := ResolveCollector(s.ResolveFormat()).GetCategoryTree(req)
 	if err != nil {

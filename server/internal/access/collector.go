@@ -50,6 +50,12 @@ func takeUnsyncedDropped() int64 {
 	return atomic.SwapInt64(&droppedUnsynced, 0)
 }
 
+func restoreUnsyncedDropped(n int64) {
+	if n > 0 {
+		atomic.AddInt64(&droppedUnsynced, n)
+	}
+}
+
 func worker() {
 	for evt := range eventCh {
 		func(e *AccessEvent) {

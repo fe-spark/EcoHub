@@ -286,7 +286,11 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 	if list == nil {
 		list = make([]model.MovieBasicInfo, 0)
 	}
-	searchTags := service.IndexSvc.SearchTags(params)
+	searchTags, err := service.IndexSvc.SearchTags(params)
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
 
 	var titleObj *model.Category
 	if cat != nil {

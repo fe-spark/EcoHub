@@ -90,6 +90,48 @@ func TestCollectLifecycle_WaitNotBusy(t *testing.T) {
 	if err := s.waitNotBusy(time.Second); err != nil {
 		t.Fatalf("waitNotBusy while publish ending: %v", err)
 	}
+
+	s.beginPublish()
+	start := time.Now()
+	if err := s.waitNotBusy(40 * time.Millisecond); err == nil {
+		t.Fatal("expected timeout while publish stays active")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout waited %s", time.Since(start))
+	}
+	s.endPublish()
+}
+
+func TestCollectLifecycle_WaitSourceTimeout(t *testing.T) {
+	s := newCollectLifecycle()
+	if err := s.beginSource("s1"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err := s.waitSource("s1", 40*time.Millisecond)
+	if err == nil {
+		t.Fatal("expected timeout")
+	}
+	if time.Since(start) > time.Second {
+		t.Fatalf("timeout waited %s", time.Since(start))
+	}
+	if err := s.beginSource("s2"); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- s.beginDrain(time.Second)
+	}()
+	time.Sleep(20 * time.Millisecond)
+	if err := s.beginSource("s3"); err == nil {
+		t.Fatal("expected drain to reject new collect")
+	}
+	s.endSource("s1")
+	s.endSource("s2")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	s.endDrain()
 }
 
 func TestCollectLifecycle_RunExclusiveIsBusy(t *testing.T) {

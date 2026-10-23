@@ -204,16 +204,18 @@ func deleteOwnedFilmsTx(tx *gorm.DB, mids []int64) error {
 	return nil
 }
 
-// DelCollectResource 删除采集站。档案按块提交。块全部成功后，再删定时任务、失败记录和站点行。
+// DelCollectResource 删除采集站。档案、失败记录、分类和站点行在同一个事务里提交。
 func DelCollectResource(id string) ([]int64, error) {
 	if db.Mdb == nil {
 		return nil, errors.New("database not available")
 	}
-	orphanMids, err := CascadeCleanSourceData(id)
-	if err != nil {
-		return orphanMids, err
-	}
-	err = db.Mdb.Transaction(func(tx *gorm.DB) error {
+	var orphanMids []int64
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		var err error
+		orphanMids, err = cascadeCleanSourceDataTx(tx, id)
+		if err != nil {
+			return err
+		}
 		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
 			return err
 		}
@@ -229,13 +231,46 @@ func DelCollectResource(id string) ([]int64, error) {
 		return EnsureDefaultPosterSourceTx(tx)
 	})
 	if err != nil {
-		return orphanMids, err
+		return nil, err
 	}
 	if err := RefreshCollectSourceCatalog(); err != nil {
 		forgetCollectSource(id)
 		return orphanMids, err
 	}
 	return orphanMids, nil
+}
+
+// UpdateCollectSourceReplacingData 更换地址或协议时，清数据和更新配置在同一个事务里提交。
+func UpdateCollectSourceReplacingData(source model.FilmSource, cleanData, cleanFailures bool) ([]int64, error) {
+	if db.Mdb == nil {
+		return nil, errors.New("数据库未连接")
+	}
+	var owned []int64
+	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
+		if cleanData {
+			var err error
+			owned, err = cascadeCleanSourceDataTx(tx, source.Id)
+			if err != nil {
+				return err
+			}
+			if err := ClearSourceCategoryDataTx(tx, source.Id); err != nil {
+				return err
+			}
+		}
+		if cleanFailures {
+			if err := DeleteFailureRecordsByOriginIdTx(tx, source.Id); err != nil {
+				return err
+			}
+		}
+		return UpdateCollectSourceTx(tx, source)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := RefreshCollectSourceCatalog(); err != nil {
+		return owned, err
+	}
+	return owned, nil
 }
 
 // CleanCollectSourceData 清空该站已采集数据（保留采集站配置本身）。
@@ -432,9 +467,14 @@ func normalizeCollectCd(source *model.FilmSource) {
 	}
 }
 
-// ExistCollectSourceList 查询是否已经存在站点 list 相关数据
-func ExistCollectSourceList() bool {
+// ExistCollectSourceList 查询是否已经存在站点 list 相关数据。
+func ExistCollectSourceList() (bool, error) {
+	if db.Mdb == nil {
+		return false, errors.New("数据库未连接")
+	}
 	var count int64
-	db.Mdb.Model(&model.FilmSource{}).Count(&count)
-	return count > 0
+	if err := db.Mdb.Model(&model.FilmSource{}).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }

@@ -40,11 +40,16 @@ func normalizeBannerImageFields(bl model.Banners) model.Banners {
 	return bl
 }
 
-// ExistSiteConfig 判断 MySQL 中是否已有网站配置
-func ExistSiteConfig() bool {
+// ExistSiteConfig 判断 MySQL 中是否已有网站配置。
+func ExistSiteConfig() (bool, error) {
+	if db.Mdb == nil {
+		return false, errors.New("数据库未连接")
+	}
 	var count int64
-	db.Mdb.Model(&model.SiteConfigRecord{}).Count(&count)
-	return count > 0
+	if err := db.Mdb.Model(&model.SiteConfigRecord{}).Count(&count).Error; err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 // NormalizeSiteURL 规范化网站访问地址：trim、去尾斜杠；非法 scheme 返回空。

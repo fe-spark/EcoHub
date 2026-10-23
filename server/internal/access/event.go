@@ -155,11 +155,25 @@ func FromContext(c *gin.Context, elapsed time.Duration) *AccessEvent {
 		OS:              detectOS(ua),
 		Resource:        res,
 		DeviceId:        TruncateRunes(did, 64),
-		Query:           TruncateRunes(c.Request.URL.RawQuery, 500),
+		Query:           TruncateRunes(accessQuery(query), 500),
 		CollectSourceId: provideCollectSource(path, query),
 		playMember:      playRankMember(path, query),
 		uvMember:        HashIP(clientIP + "|" + ua),
 	}
+}
+
+func accessQuery(query url.Values) string {
+	if len(query) == 0 {
+		return ""
+	}
+	copied := make(url.Values, len(query))
+	for key, values := range query {
+		if strings.EqualFold(key, "key") {
+			continue
+		}
+		copied[key] = values
+	}
+	return copied.Encode()
 }
 
 // ResolveDeviceID 从 Header / Query 解析客户端设备 ID；TVBox 无上报时用 IP+UA 虚拟指纹。
