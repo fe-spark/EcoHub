@@ -101,6 +101,15 @@ func SaveDetailWithOptions(sourceID string, detail model.MovieDetail, opts SaveD
 		err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 			categoryVersion := support.GetCategoryVersion()
 			ruleVersion := support.GetRuleVersion()
+			if detail.Pid <= 0 && existingFilm.Pid > 0 {
+				detail.Pid = existingFilm.Pid
+			}
+			if detail.Cid <= 0 && existingFilm.Cid > 0 {
+				detail.Cid = existingFilm.Cid
+			}
+			if detail.CName == "" && existingFilm.CName != "" {
+				detail.CName = existingFilm.CName
+			}
 			fi, err := ConvertFilmIndex(sourceID, detail, categoryVersion, ruleVersion)
 			if err != nil {
 				return err

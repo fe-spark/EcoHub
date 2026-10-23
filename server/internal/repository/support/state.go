@@ -10,6 +10,10 @@ type categoryRuleMatcher struct {
 	Pattern *regexp.Regexp
 	Target  string
 }
+type SourceCategoryInfo struct {
+	RawName            string
+	ParentSourceTypeId int64
+}
 
 type MappingSnapshot struct {
 	Area              map[string]string
@@ -22,26 +26,29 @@ type MappingSnapshot struct {
 	CategoryRootRegex []categoryRuleMatcher
 	CategorySubRegex  []categoryRuleMatcher
 	Source            map[string]int64
+	SourceCategories  map[string]SourceCategoryInfo
 }
 
 var (
 	mappingState      atomic.Pointer[MappingSnapshot]
-	categoryNameCache sync.Map
-
-	idToPid = make(map[int64]int64)
-	catMu   sync.RWMutex
+	categoryNameCache      sync.Map
+	categoryStableKeyCache sync.Map
+	idToPid        = make(map[int64]int64)
+	catInitialized = false
+	catMu          sync.RWMutex
 )
 
 func init() {
 	mappingState.Store(&MappingSnapshot{
-		Area:         make(map[string]string),
-		Lang:         make(map[string]string),
-		Filter:       make(map[string]bool),
-		Attribute:    make(map[string]string),
-		Plot:         make(map[string]string),
-		CategoryRoot: make(map[string]string),
-		CategorySub:  make(map[string]string),
-		Source:       make(map[string]int64),
+		Area:             make(map[string]string),
+		Lang:             make(map[string]string),
+		Filter:           make(map[string]bool),
+		Attribute:        make(map[string]string),
+		Plot:             make(map[string]string),
+		CategoryRoot:     make(map[string]string),
+		CategorySub:      make(map[string]string),
+		Source:           make(map[string]int64),
+		SourceCategories: make(map[string]SourceCategoryInfo),
 	})
 }
 

@@ -24,7 +24,7 @@ func newWriterTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("打开测试数据库失败: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.SearchTagItem{}, &model.FilmIndex{}); err != nil {
+	if err := gdb.AutoMigrate(&model.SearchTagItem{}, &model.FilmIndex{}, &model.Category{}); err != nil {
 		t.Fatalf("迁移测试数据库失败: %v", err)
 	}
 

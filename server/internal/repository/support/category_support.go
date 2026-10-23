@@ -32,13 +32,21 @@ func BuildSourceCategoryKey(sourceId string, sourceTypeId int64) string {
 }
 
 func GetCategoryStableKeyByID(id int64) string {
-	if id <= 0 || db.Mdb == nil {
+	if id <= 0 {
+		return ""
+	}
+	if k, ok := GetCategoryStableKeyFromCache(id); ok {
+		return k
+	}
+	if catInitialized || db.Mdb == nil {
 		return ""
 	}
 	var category model.Category
 	if err := db.Mdb.Select("stable_key").Where("id = ?", id).First(&category).Error; err != nil {
+		SetCategoryStableKeyCache(id, "")
 		return ""
 	}
+	SetCategoryStableKeyCache(id, category.StableKey)
 	return category.StableKey
 }
 
@@ -118,14 +126,17 @@ func RefreshCategoryCache() {
 
 	newPidMap := make(map[int64]int64)
 	ResetCategoryNameCache()
+	ResetCategoryStableKeyCache()
 	for _, c := range all {
 		item := c
 		newPidMap[item.Id] = item.Pid
 		SetCategoryNameCache(item.Id, item.Name)
+		SetCategoryStableKeyCache(item.Id, item.StableKey)
 	}
 
 	catMu.Lock()
 	idToPid = newPidMap
+	catInitialized = true
 	catMu.Unlock()
 
 	ClearRootCategoryCNameCache()
@@ -137,7 +148,7 @@ func GetRootId(id int64) int64 {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
@@ -161,7 +172,7 @@ func IsRootCategory(id int64) bool {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
@@ -178,7 +189,7 @@ func GetParentId(id int64) int64 {
 	}
 
 	catMu.RLock()
-	if len(idToPid) == 0 {
+	if !catInitialized {
 		catMu.RUnlock()
 		RefreshCategoryCache()
 		catMu.RLock()
