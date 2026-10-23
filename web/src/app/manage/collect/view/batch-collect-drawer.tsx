@@ -1,6 +1,7 @@
 import { Button, Drawer, Flex, Form, Select, Space, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
 import { collectDuration } from "./types";
+import styles from "./batch-collect-drawer.module.less";
 
 export interface BatchCollectRow {
   id: string;
@@ -20,7 +21,6 @@ interface BatchCollectDrawerProps {
 export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
   const { open, rows, batchTime, onCancel, onSubmit, onBatchTimeChange } = props;
   const startCount = rows.filter((item) => !item.reason).length;
-  const skipCount = rows.length - startCount;
 
   const columns: ColumnsType<BatchCollectRow> = [
     {
@@ -50,9 +50,6 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
     },
   ];
 
-  const submitText =
-    skipCount > 0 ? `采集 (${startCount}) · 跳过 (${skipCount})` : `开始采集 (${startCount})`;
-
   return (
     <Drawer
       title="批量采集"
@@ -69,12 +66,12 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
             disabled={startCount === 0}
             onClick={onSubmit}
           >
-            {submitText}
+            开始采集
           </Button>
         </Space>
       }
     >
-      <Flex vertical gap={16} style={{ height: "100%" }}>
+      <Flex vertical gap={16}>
         <Form layout="vertical">
           <Form.Item label="采集范围" style={{ marginBottom: 0 }}>
             <Select
@@ -91,7 +88,7 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
           columns={columns}
           dataSource={rows}
           pagination={false}
-          scroll={{ y: "calc(100vh - 280px)" }}
+          rowClassName={(record) => (record.reason ? styles.blockedRow : "")}
         />
       </Flex>
     </Drawer>
