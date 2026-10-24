@@ -115,7 +115,7 @@ export default function BannerConfigDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      width={560}
+      size={560}
       destroyOnClose
       title={
         <Space size={10} align="center">

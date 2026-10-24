@@ -178,7 +178,7 @@ export default function BannerQuickDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      width="min(1180px, 96vw)"
+      size="min(1180px, 96vw)"
       destroyOnHidden
       mask={{ closable: !publishing }}
       title={

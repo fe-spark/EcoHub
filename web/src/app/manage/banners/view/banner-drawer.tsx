@@ -275,7 +275,7 @@ export default function BannerDrawer({
       <Drawer
         open={open}
         onClose={onClose}
-        width={720}
+        size={720}
         destroyOnClose
         afterOpenChange={(visible) => {
           if (!visible) resetState();

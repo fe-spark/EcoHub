@@ -55,7 +55,7 @@ export default function BatchCollectDrawer(props: BatchCollectDrawerProps) {
       title="批量采集"
       open={open}
       onClose={onCancel}
-      width={600}
+      size={600}
       destroyOnClose
       extra={
         <Space>

@@ -41,7 +41,7 @@ export default function RuleEditorDrawer(props: RuleEditorDrawerProps) {
     <Drawer
       title={editingRule ? "编辑分类规则" : "新增分类规则"}
       open={open}
-      width={600}
+      size={600}
       onClose={onCancel}
       afterOpenChange={onAfterOpenChange}
       destroyOnClose

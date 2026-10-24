@@ -221,12 +221,6 @@ export default function CollectSourceCard({
             </dd>
           </div>
           <div className={styles.metaItem}>
-            <dt className={styles.metaLabel}>请求间隔：</dt>
-            <dd className={styles.metaValue}>
-              {record.interval > 0 ? `${record.interval} ms` : "无限制"}
-            </dd>
-          </div>
-          <div className={styles.metaItem}>
             <dt className={styles.metaLabel}>网络代理：</dt>
             <dd className={styles.metaValue}>
               {hasProxy ? (
