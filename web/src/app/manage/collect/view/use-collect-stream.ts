@@ -17,6 +17,7 @@ export interface CategorySyncEvent {
   changes?: CategoryTreeChange[];
   message?: string;
   dataCleared?: boolean;
+  sitePageTotal?: number;
 }
 
 export interface CategoryReadyEvent {
@@ -26,8 +27,10 @@ export interface CategoryReadyEvent {
 
 export interface SourceDeleteEvent {
   sourceId: string;
+  sourceName?: string;
   status: "deleting" | "deleted" | "failed" | string;
   message?: string;
+  deletedFilms?: number;
 }
 
 export interface CollectStreamHandlers {
@@ -70,34 +73,25 @@ export function useCollectStream(
             }
             hasConnectedOnce = true;
           },
-          onMessage: (data: any, _raw: string, event?: string) => {
-            if (
-              event === "delete_snapshot" ||
-              (Array.isArray(data) && data.length > 0 && typeof data[0] === "string")
-            ) {
+          onMessage: (data: unknown, _raw: string, event?: string) => {
+            if (event === "delete_snapshot") {
               handlersRef.current.onDeleteSnapshot?.(data as string[]);
-            } else if (
-              event === "source_delete" ||
-              (data && typeof data === "object" && "sourceId" in data && ("status" in data && (data.status === "deleting" || data.status === "deleted" || data.status === "failed")))
-            ) {
+            } else if (event === "source_delete") {
               handlersRef.current.onSourceDelete?.(data as SourceDeleteEvent);
-            } else if (
-              event === "category_snapshot" ||
-              (!Array.isArray(data) && data && typeof data === "object" && !data.sourceId)
-            ) {
-              handlersRef.current.onCategorySnapshot?.(data);
-            } else if (
-              event === "category_status" ||
-              (data && typeof data === "object" && "sourceId" in data && "status" in data)
-            ) {
+            } else if (event === "category_snapshot") {
+              handlersRef.current.onCategorySnapshot?.(data as Record<string, string>);
+            } else if (event === "category_status") {
               handlersRef.current.onCategoryStatus?.(data as CategorySyncEvent);
-            } else if (
-              event === "category_ready" ||
-              (data && typeof data === "object" && "sourceId" in data && "categoryReady" in data)
-            ) {
+            } else if (event === "category_ready") {
               handlersRef.current.onCategoryReady?.(data as CategoryReadyEvent);
-            } else if (event === "progress" || Array.isArray(data)) {
-              handlersRef.current.onProgress?.(data);
+            } else if (event === "progress") {
+              handlersRef.current.onProgress?.(data as CollectProgress[]);
+            } else if (!event && Array.isArray(data)) {
+              if (data.length > 0 && typeof data[0] === "string") {
+                handlersRef.current.onDeleteSnapshot?.(data as string[]);
+              } else {
+                handlersRef.current.onProgress?.(data as CollectProgress[]);
+              }
             }
           },
         });

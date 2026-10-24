@@ -26,4 +26,5 @@ type CategorySyncResult struct {
 	Changes     []CategoryTreeChange `json:"changes"`
 	DataCleared bool                 `json:"dataCleared,omitempty"`
 	Message     string               `json:"message,omitempty"`
+	SitePageTotal int                  `json:"sitePageTotal,omitempty"`
 }

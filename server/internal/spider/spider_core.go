@@ -16,7 +16,7 @@ import (
 
 // Collector 采集引擎统一接口，支持 JSON 与 XML 等多协议接入。
 type Collector interface {
-	GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, error)
+	GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error)
 	GetPageCount(r utils.RequestInfo) (int, error)
 	GetFilmDetail(r utils.RequestInfo) ([]model.MovieDetail, error)
 }
@@ -40,7 +40,7 @@ func ResolveCollector(format string) Collector {
 type JsonCollect struct{}
 
 // GetCategoryTree 获取分类树形数据
-func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, error) {
+func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error) {
 	// 设置请求参数信息
 	r.Params.Set(`ac`, "list")
 	r.Params.Set(`pg`, "1")
@@ -54,20 +54,20 @@ func (jc *JsonCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree
 			errMsg = "response is empty"
 		}
 		log.Printf("filmListPage 数据获取异常: %s", errMsg)
-		return nil, fmt.Errorf("filmListPage 数据获取异常: %s", errMsg)
+		return nil, 0, fmt.Errorf("filmListPage 数据获取异常: %s", errMsg)
 	}
 	if err := json.Unmarshal(r.Resp, &filmListPage); err != nil {
-		return nil, fmt.Errorf("filmListPage JSON unmarshal error: %w", err)
+		return nil, 0, fmt.Errorf("filmListPage JSON unmarshal error: %w", err)
 	}
 	// 获取分类列表信息
 	cl := filmListPage.Class
 	if len(cl) == 0 {
-		return &model.CategoryTree{}, nil
+		return &model.CategoryTree{}, filmListPage.PageCount, nil
 	}
 	// 组装分类数据信息树形结构
 	tree := converter.GenCategoryTreeWithParentHints(cl, nil)
 
-	return tree, nil
+	return tree, filmListPage.PageCount, nil
 }
 
 // GetPageCount 获取分页总页数

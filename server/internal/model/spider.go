@@ -105,9 +105,11 @@ func (f *FilmSource) TableName() string {
 
 type CollectSourceStats struct {
 	gorm.Model
-	SourceId        string     `gorm:"uniqueIndex;size:32"`
-	LastCollectTime *time.Time `gorm:"index"` // 定时采集整次成功，补窗锚点
-	LastRunTime     *time.Time `gorm:"index"` // 任意采集跑完，卡片「上次采集」
+	SourceId         string     `gorm:"uniqueIndex;size:32"`
+	LastCollectTime  *time.Time `gorm:"index"` // 定时采集整次成功，补窗锚点
+	LastRunTime      *time.Time `gorm:"index"` // 任意采集跑完，卡片「上次采集」
+	LastRunPageCount int        `gorm:"default:0"` // 任意采集跑完，卡片「上次采集总页」
+	SitePageTotal    int        `gorm:"default:0"` // 采集站全站总页
 }
 
 func (CollectSourceStats) TableName() string {
@@ -200,11 +202,14 @@ type CollectProgress struct {
 
 type FilmSourceListItem struct {
 	FilmSource
-	LastRunTime     *time.Time       `json:"lastRunTime,omitempty"`
-	Progress        *CollectProgress `json:"progress,omitempty"`
-	ProxyEnabled    bool             `json:"proxyEnabled"`    // 是否启用了网络代理
-	CategoryReady   bool             `json:"categoryReady"`   // 该站是否已有分类副本，没有则不能采集
-	CategorySyncing bool             `json:"categorySyncing"` // 该站是否正在采集分类
+	LastRunTime      *time.Time       `json:"lastRunTime,omitempty"`
+	LastRunPageCount int              `json:"lastRunPageCount,omitempty"`
+	SitePageTotal    int              `json:"sitePageTotal,omitempty"`
+	Progress         *CollectProgress `json:"progress,omitempty"`
+	ProxyEnabled     bool             `json:"proxyEnabled"`    // 是否启用了网络代理
+	CategoryReady    bool             `json:"categoryReady"`   // 该站是否已有分类副本，没有则不能采集
+	CategorySyncing  bool             `json:"categorySyncing"` // 该站是否正在采集分类
+	Deleting         bool             `json:"deleting"`        // 该站是否正在执行后台异步级联删除
 }
 
 type Option struct {

@@ -29,7 +29,7 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 	progress.BroadcastCategoryStatus(source.Id, "syncing")
 	log.Printf("[SpiderService] 拉取采集站分类: name=%s id=%s uri=%s confirm=%s", source.Name, source.Id, source.Uri, confirm)
 
-	categoryTree, err := spider.FetchCategoryTree(source)
+	categoryTree, pageCount, err := spider.FetchCategoryTree(source)
 	if err != nil {
 		log.Printf("[SpiderService] 采集站分类拉取失败: name=%s id=%s err=%v", source.Name, source.Id, err)
 		if repository.FindCollectSourceById(source.Id) == nil {
@@ -51,10 +51,11 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 			log.Printf("[SpiderService] 采集站分类树发生变化，等待确认: name=%s id=%s count=%d", source.Name, source.Id, len(changes))
 			progress.BroadcastCategoryConfirm(source.Id, source.Name, changes)
 			return model.CategorySyncResult{
-				NeedConfirm: true,
-				Id:          source.Id,
-				Name:        source.Name,
-				Changes:     changes,
+				NeedConfirm:   true,
+				Id:            source.Id,
+				Name:          source.Name,
+				Changes:       changes,
+				SitePageTotal: pageCount,
 			}, nil
 		}
 	}
@@ -92,12 +93,13 @@ func (s *SpiderService) SyncSourceCategories(id, confirm string) (model.Category
 		}
 	}
 
-	progress.BroadcastCategoryReadyMessage(source.Id, message, applyRes.DataCleared)
+	progress.BroadcastCategoryReadyMessage(source.Id, message, applyRes.DataCleared, pageCount)
 	return model.CategorySyncResult{
-		NeedConfirm: false,
-		Id:          source.Id,
-		Name:        source.Name,
-		DataCleared: applyRes.DataCleared,
-		Message:     message,
+		NeedConfirm:   false,
+		Id:            source.Id,
+		Name:          source.Name,
+		DataCleared:   applyRes.DataCleared,
+		Message:       message,
+		SitePageTotal: pageCount,
 	}, nil
 }

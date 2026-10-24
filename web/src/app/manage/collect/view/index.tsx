@@ -12,6 +12,7 @@ import BatchCollectDrawer from "./batch-collect-drawer";
 import CategoryChangeModal from "./category-change-modal";
 import CleanupInvalidModal from "./cleanup-invalid-modal";
 import CollectQueueBars from "./collect-queue-bars";
+import DeleteQueueBar from "./delete-queue-bar";
 import CollectSourceGrid from "./collect-source-grid";
 import CollectToolbar from "./collect-toolbar";
 import SourceFormDrawer from "./source-form-drawer";
@@ -23,6 +24,7 @@ import { useCollectCleanup } from "./use-collect-cleanup";
 import { useCollectBatchActions } from "./use-collect-batch-actions";
 import { useCollectBatchRunner } from "./use-collect-batch-runner";
 import { useCollectQueueBars } from "./use-collect-queue-bars";
+import { useCollectDeleteQueue } from "./use-collect-delete-queue";
 import { useCollectSort } from "./use-collect-sort";
 import { useCollectSourceForm } from "./use-collect-source-form";
 import { useCollectCardActions } from "./use-collect-card-actions";
@@ -135,17 +137,38 @@ export default function CollectManagePageView() {
 
   const handleProgressStream = useCollectProgressStream(setSiteList, resetTimersRef, handleTerminalStatus);
 
+  const {
+    deleteQueueItems,
+    enqueueDeletingSources,
+    handleSourceDeleteEvent,
+    handleDeleteSnapshot: handleDeleteSnapshotQueue,
+    hydrateSourceNames: hydrateDeleteQueueNames,
+    dismissDeleteQueue,
+  } = useCollectDeleteQueue();
+
+  useEffect(() => {
+    hydrateDeleteQueueNames(siteList);
+  }, [siteList, hydrateDeleteQueueNames]);
+
   useCollectStream({
     onProgress: handleProgressStream,
     onCategorySnapshot: handleCategorySnapshot,
     onCategoryStatus: handleCategoryStatus,
-    onSourceDelete: handleSourceDelete,
-    onDeleteSnapshot: handleDeleteSnapshot,
+    onSourceDelete: (evt) => {
+      handleSourceDelete(evt);
+      handleSourceDeleteEvent(evt);
+    },
+    onDeleteSnapshot: (ids) => {
+      handleDeleteSnapshot(ids);
+      setSiteList((current) => {
+        handleDeleteSnapshotQueue(ids, current);
+        return current;
+      });
+    },
     onReconnect: () => {
       void getCollectList();
     },
   });
-
   const {
     cleanupOpen,
     cleanupScanning,
@@ -155,7 +178,7 @@ export default function CollectManagePageView() {
     startCleanupScan,
     cancelCleanup,
     confirmCleanup,
-  } = useCollectCleanup(getCollectList);
+  } = useCollectCleanup(getCollectList, setSiteList, enqueueDeletingSources);
 
   const categoryConfirm = useCategoryChangeConfirm(getCollectList);
 
@@ -171,7 +194,7 @@ export default function CollectManagePageView() {
     clearSelection,
     batchChangeSourceState,
     batchDeleteSources,
-  } = useCollectBatchActions(siteList, setSiteList, getCollectList);
+  } = useCollectBatchActions(siteList, setSiteList, getCollectList, enqueueDeletingSources);
 
   const {
     batchOpen,
@@ -240,10 +263,12 @@ export default function CollectManagePageView() {
     stopTask,
     delSource,
   } = useCollectCardActions({
+    siteList,
     setSiteList,
     updateSiteListItem,
     getCollectList,
     stoppingSiteIdsRef,
+    onDeleteSubmitted: enqueueDeletingSources,
   });
 
   const {
@@ -275,8 +300,10 @@ export default function CollectManagePageView() {
           needConfirm?: boolean;
           name?: string;
           changes?: CategoryTreeChange[];
+          sitePageTotal?: number;
         }>("/manage/collect/category/sync", { id });
         const ok = resp.code === 0;
+        const pageTotal = resp.data?.sitePageTotal;
 
         if (resp.data?.needConfirm) {
           syncingSourcesRef.current.delete(id);
@@ -296,7 +323,15 @@ export default function CollectManagePageView() {
         }
         setSiteList((prev) =>
           prev.map((s) =>
-            s.id === id ? { ...s, categorySyncing: false, categoryReady: ok ? true : false } : s,
+            s.id === id
+              ? {
+                  ...s,
+                  categorySyncing: false,
+                  categoryReady: ok ? true : false,
+                  sitePageTotal:
+                    pageTotal && pageTotal > 0 ? pageTotal : s.sitePageTotal,
+                }
+              : s,
           ),
         );
       } catch {
@@ -339,6 +374,13 @@ export default function CollectManagePageView() {
           onBatchDelete={() => void batchDeleteSources()}
         />
 
+        {deleteQueueItems.length > 0 ? (
+          <DeleteQueueBar
+            items={deleteQueueItems}
+            onDismiss={dismissDeleteQueue}
+          />
+        ) : null}
+
         {queueBars.length > 0 ? (
           <CollectQueueBars
             items={queueBars}
@@ -370,6 +412,7 @@ export default function CollectManagePageView() {
               onOpenAddDialog={openAddDialog}
               onSortList={handleSortList}
               onSyncCategory={handleSyncCategory}
+              onUpdateSite={updateSiteListItem}
             />
           </div>
         ) : (

@@ -124,9 +124,9 @@ func (l *dynamicLimiter) release() {
 	l.mu.Unlock()
 }
 
-func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, error) {
+func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource, h int, batch Batch) (bool, int, error) {
 	if pageCount <= 0 {
-		return false, nil
+		return false, 0, nil
 	}
 	ctx, cancel := context.WithCancel(parentCtx)
 	defer cancel()
@@ -357,13 +357,13 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 				cur.Status = progress.StatusFailed
 			}
 		})
-		return stats.success > 0, stopErr
+		return stats.success > 0, stats.success, stopErr
 	}
 	if ctx.Err() != nil {
-		return stats.success > 0, ctx.Err()
+		return stats.success > 0, stats.success, ctx.Err()
 	}
 	if stats.failed > 0 {
-		return stats.success > 0, fmt.Errorf("站点 %s 有 %d 页采集失败", s.Name, stats.failed)
+		return stats.success > 0, stats.success, fmt.Errorf("站点 %s 有 %d 页采集失败", s.Name, stats.failed)
 	}
-	return stats.success > 0, nil
+	return stats.success > 0, stats.success, nil
 }

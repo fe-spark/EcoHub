@@ -181,8 +181,28 @@ func probeSourcePageCount(s *model.FilmSource, h int, trigger string) error {
 		return err
 	}
 	progress.SetPageTotal(s.Id, pageCount)
+	if pageCount > 0 && resolved <= 0 {
+		_ = repository.UpdateSitePageTotal(s.Id, pageCount)
+	}
 	log.Printf("[Spider] 站点 %s 总页=%d\n", s.Name, pageCount)
 	return nil
+}
+
+// ProbeSitePageTotal 探测采集站全站总页数（不带时间过滤）。
+func ProbeSitePageTotal(s *model.FilmSource) (int, error) {
+	if s == nil {
+		return 0, errors.New("采集源为空")
+	}
+	r, err := requestForSource(s)
+	if err != nil {
+		return 0, err
+	}
+	if s.ResolveFormat() == model.SourceFormatXML && r.Params.Get("ac") == "" {
+		r.Params.Set("ac", "videolist")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return fetcher.GetPageCountWithRetry(ctx, s, r)
 }
 
 func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, limit int, runVersion uint64, batchCtx *collectBatchContext) {

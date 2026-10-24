@@ -10,17 +10,21 @@ import {
 } from "./types";
 
 interface UseCollectCardActionsParams {
+  siteList: FilmSource[];
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>;
   updateSiteListItem: (id: string, updater: (record: FilmSource) => FilmSource) => void;
   getCollectList: (createdId?: string) => Promise<void>;
   stoppingSiteIdsRef: React.MutableRefObject<Set<string>>;
+  onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void;
 }
 
 export function useCollectCardActions({
+  siteList,
   setSiteList,
   updateSiteListItem,
   getCollectList,
   stoppingSiteIdsRef,
+  onDeleteSubmitted,
 }: UseCollectCardActionsParams) {
   const { message } = useAppMessage();
   const [togglingStateSourceId, setTogglingStateSourceId] = useState<string | null>(null);
@@ -126,24 +130,28 @@ export function useCollectCardActions({
 
   const delSource = useCallback(
     async (id: string) => {
+      const src = siteList.find((s) => s.id === id);
       setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: true } : s)));
       setDeletingSourceId(id);
       try {
         const resp = await ApiPost("/manage/collect/delete", { ids: [id] });
         if (resp.code === 0) {
+          onDeleteSubmitted?.([{ id, name: src?.name || id }]);
           message.success("已提交删除");
           return;
         }
+        setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: false } : s)));
         message.error(resp.msg || "删除失败");
         void getCollectList();
       } catch {
+        setSiteList((prev) => prev.map((s) => (s.id === id ? { ...s, deleting: false } : s)));
         message.error("删除失败");
         void getCollectList();
       } finally {
         setDeletingSourceId("");
       }
     },
-    [getCollectList, message, setSiteList],
+    [getCollectList, message, onDeleteSubmitted, setSiteList, siteList],
   );
 
   return {

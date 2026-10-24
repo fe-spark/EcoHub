@@ -70,7 +70,7 @@ func TestXmlCollect_GetCategoryTree(t *testing.T) {
 
 	xc := &XmlCollect{}
 	r := utils.RequestInfo{Uri: server.URL}
-	tree, err := xc.GetCategoryTree(r)
+	tree, _, err := xc.GetCategoryTree(r)
 	if err != nil {
 		t.Fatalf("GetCategoryTree failed: %v", err)
 	}
@@ -328,7 +328,7 @@ func TestXmlCollect_GBKEncoding(t *testing.T) {
 	r := utils.RequestInfo{Uri: server.URL}
 
 	// 1. GetCategoryTree
-	tree, err := xc.GetCategoryTree(r)
+	tree, _, err := xc.GetCategoryTree(r)
 	if err != nil {
 		t.Fatalf("GetCategoryTree with GBK failed: %v", err)
 	}

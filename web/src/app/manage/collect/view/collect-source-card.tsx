@@ -1,3 +1,4 @@
+import React, { useState } from "react";
 import { Button, Checkbox, Popconfirm, Select, Switch, Tag, Tooltip } from "antd";
 import {
   DeleteOutlined,
@@ -6,6 +7,7 @@ import {
   GlobalOutlined,
   LoadingOutlined,
   PoweroffOutlined,
+  ReloadOutlined,
   StopOutlined,
   SyncOutlined,
 } from "@ant-design/icons";
@@ -16,6 +18,8 @@ import { collectDuration, type FilmSource } from "./types";
 import { resolveSourceStatus, type StatusTone } from "./source-status";
 import CollectProgressView from "./collect-progress";
 import { useManagePermission } from "@/lib/manage-permission";
+import { useAppMessage } from "@/lib/useAppMessage";
+import { ApiPost } from "@/lib/client-api";
 import styles from "./index.module.less";
 
 const toneClassMap: Record<StatusTone, string> = {
@@ -53,6 +57,7 @@ interface CollectSourceCardProps {
   deleting?: boolean;
   toggling?: boolean;
   onSyncCategory?: (id: string) => void;
+  onUpdateSite?: (id: string, updater: (record: FilmSource) => FilmSource) => void;
 }
 
 /** 采集站卡片（仅顶部 Header 可拖拽，首位启用站点自动展现主站徽章） */
@@ -72,6 +77,7 @@ export default function CollectSourceCard({
   deleting = false,
   toggling = false,
   onSyncCategory,
+  onUpdateSite,
 }: CollectSourceCardProps) {
   const isDeleting = deleting || Boolean(record.deleting);
   const phase = record.progress?.status;
@@ -106,6 +112,37 @@ export default function CollectSourceCard({
       : "重新获取分类";
 
   const hasProxy = Boolean(record.proxyCollect);
+  const displaySuccessPages =
+    record.progress && record.progress.success > 0
+      ? record.progress.success
+      : record.lastRunPageCount;
+
+
+  const { message } = useAppMessage();
+  const [refreshingPageTotal, setRefreshingPageTotal] = useState(false);
+
+  const handleRefreshPageTotal = async (event: React.MouseEvent) => {
+    event.stopPropagation();
+    if (refreshingPageTotal) return;
+    setRefreshingPageTotal(true);
+    try {
+      const resp = await ApiPost<{ pageTotal: number }>("/manage/collect/page-total", {
+        id: record.id,
+      });
+      if (resp.code === 0 && resp.data) {
+        const total = resp.data.pageTotal;
+        onUpdateSite?.(record.id, (prev) => ({ ...prev, sitePageTotal: total }));
+        message.success(`${record.name} 最新采集站总页：${total.toLocaleString()} 页`);
+      } else {
+        message.error(resp.msg || "获取最新总页失败");
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "获取最新总页失败";
+      message.error(msg);
+    } finally {
+      setRefreshingPageTotal(false);
+    }
+  };
 
   const cardClassNames = [
     styles.sourceCard,
@@ -218,6 +255,57 @@ export default function CollectSourceCard({
               {record.lastRunTime
                 ? dayjs(record.lastRunTime).format("YYYY-MM-DD HH:mm")
                 : "暂无"}
+            </dd>
+          </div>
+          <div className={styles.metaItem}>
+            <dt className={styles.metaLabel}>上次采集页：</dt>
+            <dd
+              className={`${styles.metaValue}${
+                displaySuccessPages && displaySuccessPages > 0
+                  ? ""
+                  : ` ${styles.metaValueMuted}`
+              }`}
+            >
+              {displaySuccessPages && displaySuccessPages > 0
+                ? `${displaySuccessPages.toLocaleString()} 页`
+                : "暂无"}
+            </dd>
+          </div>
+          <div className={styles.metaItem}>
+            <dt className={styles.metaLabel}>采集站总页：</dt>
+            <dd
+              className={styles.metaValue}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4 }}
+            >
+              <span
+                className={
+                  record.sitePageTotal && record.sitePageTotal > 0
+                    ? ""
+                    : styles.metaValueMuted
+                }
+              >
+                {record.sitePageTotal && record.sitePageTotal > 0
+                  ? `${record.sitePageTotal.toLocaleString()} 页`
+                  : "暂无"}
+              </span>
+              <Tooltip title="刷新获取该采集站最新全量总页数">
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<ReloadOutlined spin={refreshingPageTotal} />}
+                  loading={refreshingPageTotal}
+                  onClick={handleRefreshPageTotal}
+                  disabled={!canWrite || isDeleting}
+                  style={{
+                    width: 18,
+                    height: 18,
+                    padding: 0,
+                    fontSize: 11,
+                    minWidth: 18,
+                    color: "var(--ant-color-text-tertiary)",
+                  }}
+                />
+              </Tooltip>
             </dd>
           </div>
           <div className={styles.metaItem}>

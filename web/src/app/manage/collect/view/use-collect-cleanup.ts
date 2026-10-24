@@ -1,9 +1,13 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, type Dispatch, type SetStateAction } from "react";
 import { ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import type { CheckAllResult, CleanupSkippedItem, DelBatchResult, InvalidSourceItem } from "./types";
+import type { CheckAllResult, CleanupSkippedItem, DelBatchResult, FilmSource, InvalidSourceItem } from "./types";
 
-export function useCollectCleanup(reloadList: () => Promise<void>) {
+export function useCollectCleanup(
+  _reloadList: () => Promise<void>,
+  setSiteList: Dispatch<SetStateAction<FilmSource[]>>,
+  onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void,
+) {
   const { message } = useAppMessage();
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupScanning, setCleanupScanning] = useState(false);
@@ -56,34 +60,44 @@ export function useCollectCleanup(reloadList: () => Promise<void>) {
 
   const confirmCleanup = useCallback(async () => {
     if (invalidSources.length === 0) return;
+    const targetSources = [...invalidSources];
+    const targetIds = targetSources.map((item) => item.id);
+    const targetIdSet = new Set(targetIds);
+
+    // 1. 立即乐观将卡片置为“删除中”
+    setSiteList((prev) =>
+      prev.map((s) => (targetIdSet.has(s.id) ? { ...s, deleting: true } : s)),
+    );
+
     setCleanupDeleting(true);
     try {
       const resp = await ApiPostLong<DelBatchResult>("/manage/collect/delete", {
-        ids: invalidSources.map((item) => item.id),
+        ids: targetIds,
       });
       if (resp.code === 0) {
-        const data = resp.data ?? { deleted: [], skipped: [] };
-        const deleted = Array.isArray(data.deleted) ? data.deleted : [];
-        const skipped = Array.isArray(data.skipped) ? data.skipped : [];
-        message.success(`已删除 ${deleted.length} 个失效采集站`);
-        if (skipped.length > 0) {
-          message.warning(
-            `${skipped.length} 个采集站未删除：${skipped
-              .map((item) => `${item.name || item.id}（${item.reason}）`)
-              .join("；")}`,
-          );
-        }
+        onDeleteSubmitted?.(
+          targetSources.map((s) => ({ id: s.id, name: s.name || s.id })),
+        );
+        message.success(`已提交 ${targetIds.length} 个失效采集站后台级联删除任务`);
         setCleanupOpen(false);
         setInvalidSources([]);
         setCleanupSkipped([]);
-        await reloadList();
         return;
       }
+      setSiteList((prev) =>
+        prev.map((s) => (targetIdSet.has(s.id) ? { ...s, deleting: false } : s)),
+      );
       message.error(resp.msg || "清理失败");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "清理失败";
+      setSiteList((prev) =>
+        prev.map((s) => (targetIdSet.has(s.id) ? { ...s, deleting: false } : s)),
+      );
+      message.error(msg);
     } finally {
       setCleanupDeleting(false);
     }
-  }, [invalidSources, message, reloadList]);
+  }, [invalidSources, message, onDeleteSubmitted, setSiteList]);
 
   return {
     cleanupOpen,

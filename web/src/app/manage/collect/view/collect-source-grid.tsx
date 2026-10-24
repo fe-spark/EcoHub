@@ -47,6 +47,7 @@ interface CollectSourceGridProps {
   onOpenAddDialog: () => void;
   onSortList: (nextList: FilmSource[]) => void;
   onSyncCategory?: (id: string) => void;
+  onUpdateSite?: (id: string, updater: (record: FilmSource) => FilmSource) => void;
 }
 
 export default function CollectSourceGrid({
@@ -69,6 +70,7 @@ export default function CollectSourceGrid({
   onOpenAddDialog,
   onSortList,
   onSyncCategory,
+  onUpdateSite,
 }: CollectSourceGridProps) {
   const dndId = useId();
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -146,6 +148,7 @@ export default function CollectSourceGrid({
                 toggling={togglingSourceId === site.id}
                 onChangeSourceState={onChangeSourceState}
                 onSyncCategory={onSyncCategory}
+                onUpdateSite={onUpdateSite}
               />
             );
           })}

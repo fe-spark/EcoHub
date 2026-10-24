@@ -149,6 +149,7 @@ func SetupRouter() *gin.Engine {
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
 			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
 			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
+			collect.POST(`/page-total`, handler.CollectHd.RefreshSitePageTotal)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.GET(`/record/stream`, handler.CollectHd.RecordStream)

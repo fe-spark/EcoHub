@@ -8,6 +8,7 @@ import (
 
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -328,14 +329,29 @@ func (h *IndexHandler) FilmTagSearch(c *gin.Context) {
 
 // FilmClassify 影片分类首页数据展示 (GET /api/categories/overview)
 func (h *IndexHandler) FilmClassify(c *gin.Context) {
+	sourceId := service.IndexSvc.BaselineSourceID()
 	pidStr := queryFirst(c, "pid", "Pid")
-	if pidStr == "" {
+	var pid int64
+	if pidStr != "" {
+		pid, _ = strconv.ParseInt(pidStr, 10, 64)
+	}
+	title := service.IndexSvc.GetPidCategory(pid, sourceId)
+	if title == nil {
+		tree, err := repository.GetActiveCategoryTree(sourceId)
+		if err == nil && len(tree.Children) > 0 {
+			for _, child := range tree.Children {
+				if child != nil && child.Show && child.Id > 0 {
+					pid = child.Id
+					title = child
+					break
+				}
+			}
+		}
+	}
+	if title == nil {
 		dto.Failed("主分类信息获取异常", c)
 		return
 	}
-	pid, _ := strconv.ParseInt(pidStr, 10, 64)
-	sourceId := service.IndexSvc.BaselineSourceID()
-	title := service.IndexSvc.GetPidCategory(pid, sourceId)
 	page := dto.GetPageParams(c)
 	if !pageSizeSpecified(c) {
 		page.PageSize = 24

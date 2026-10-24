@@ -162,9 +162,8 @@ func FilmZero() error {
 			return fmt.Errorf("truncate %s failed: %w", t, err)
 		}
 	}
-
 	// 关键节点：清空采集派生与依赖运营数据（快照/筛选/搜索标签/统计/失败记录/轮播图）
-	ReportResetProgress(45, "正在清空派生数据")
+	ReportResetProgress(50, "正在清空派生数据")
 	for _, t := range []string{
 		model.TableCollectSourceStats,
 		model.TableSearchTag,
@@ -183,28 +182,16 @@ func FilmZero() error {
 		return fmt.Errorf("clear gallery dir failed: %w", err)
 	}
 
-	// 关键节点：清空分类与映射（统一使用 truncateTable 物理清空，规避软删除残留引发唯一键冲突）
-	ReportResetProgress(70, "正在清空分类与映射")
-	for _, t := range []string{
-		model.TableCategory,
-		model.TableMovieSourceMapping,
-		model.TableCategoryMapping,
-		model.TableSourceCategory,
-	} {
-		if err := truncateTable(db.Mdb, t); err != nil {
-			return fmt.Errorf("truncate %s failed: %w", t, err)
-		}
-	}
-	time.Sleep(100 * time.Millisecond)
-
-	// 关键节点：清理缓存。ClearSnapshotState 只丢掉内存快照版本和首页/TVBox 等入口缓存；
-	// 详情 PlayInfo、分类列表、搜索、相关推荐仍按 TTL 活着，必须再扫一遍动态缓存前缀。
-	ReportResetProgress(90, "正在清理缓存")
+	// 关键节点：清理缓存（清空内存快照版本、动态缓存、检索索引及 Redis 页面缓存）
+	ReportResetProgress(80, "正在清理缓存")
+	repository.ResetCollectStatsCoalescer()
 	snapshot.ClearSnapshotState()
 	snapshot.ClearAllSnapshotDynamicCaches()
+	snapshot.ClearActiveFilmReadModel()
 	snapshot.BumpSearchCacheVersion()
 	RefreshMasterDataCaches()
-	ReportResetProgress(95, "数据清空完成")
+	support.ClearIndexPageCache()
+	ReportResetProgress(100, "数据清空完成")
 	return nil
 }
 

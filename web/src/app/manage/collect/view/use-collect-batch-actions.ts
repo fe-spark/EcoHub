@@ -11,6 +11,7 @@ export function useCollectBatchActions(
   siteList: FilmSource[],
   setSiteList: React.Dispatch<React.SetStateAction<FilmSource[]>>,
   reloadList: () => Promise<void>,
+  onDeleteSubmitted?: (sources: { id: string; name: string }[]) => void,
 ) {
   const { message } = useAppMessage();
   const [selectedSourceIds, setSelectedSourceIds] = useState<React.Key[]>([]);
@@ -107,18 +108,25 @@ export function useCollectBatchActions(
     try {
       const resp = await ApiPost("/manage/collect/delete", { ids });
       if (resp.code === 0) {
+        onDeleteSubmitted?.(selectedSources.map((s) => ({ id: s.id, name: s.name })));
         message.success("已提交批量删除");
         return;
       }
+      setSiteList((current) =>
+        current.map((item) => (idSet.has(item.id) ? { ...item, deleting: false } : item)),
+      );
       message.error(resp.msg || "批量删除失败");
       void reloadList();
     } catch {
+      setSiteList((current) =>
+        current.map((item) => (idSet.has(item.id) ? { ...item, deleting: false } : item)),
+      );
       message.error("批量删除失败");
       void reloadList();
     } finally {
       setBatchDeleting(false);
     }
-  }, [message, reloadList, selectedSources, setSiteList]);
+  }, [message, onDeleteSubmitted, reloadList, selectedSources, setSiteList]);
 
   const deleteConfirmTitle = `删除 ${selectedSources.length} 个采集站？`;
   const deleteConfirmDescription = "";

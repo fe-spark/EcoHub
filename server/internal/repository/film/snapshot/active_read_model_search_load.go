@@ -71,6 +71,8 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 			return cur, nil
 		}
+		isSearchIndexBuilding.Store(true)
+		defer isSearchIndexBuilding.Store(false)
 		started := time.Now()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
 		var (

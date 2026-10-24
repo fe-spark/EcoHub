@@ -265,6 +265,27 @@ func (h *CollectHandler) FilmSourceTest(c *gin.Context) {
 	dto.SuccessOnlyMsg("测试成功!!!", c)
 }
 
+func (h *CollectHandler) RefreshSitePageTotal(c *gin.Context) {
+	var req struct {
+		Id string `json:"id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	req.Id = strings.TrimSpace(req.Id)
+	if req.Id == "" {
+		dto.Failed("采集站标识不能为空", c)
+		return
+	}
+	total, err := service.CollectSvc.RefreshSitePageTotal(req.Id)
+	if err != nil {
+		dto.Failed(fmt.Sprint("获取采集站总页失败: ", err.Error()), c)
+		return
+	}
+	dto.Success(gin.H{"pageTotal": total}, fmt.Sprintf("最新总页：%d 页", total), c)
+}
+
 func (h *CollectHandler) GetNormalFilmSource(c *gin.Context) {
 	includeDisabled := c.Query("all") == "1"
 	var sources []model.FilmSource

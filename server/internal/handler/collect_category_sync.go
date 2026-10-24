@@ -49,5 +49,5 @@ func (h *CollectHandler) FilmSourceSyncCategory(c *gin.Context) {
 	if msg == "" {
 		msg = "分类获取成功"
 	}
-	dto.SuccessOnlyMsg(msg, c)
+	dto.Success(result, msg, c)
 }
