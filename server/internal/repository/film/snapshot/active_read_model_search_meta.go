@@ -301,6 +301,11 @@ func UpsertMidsToActiveFilmSearchIndex(version string, mids []int64) {
 		upsertMap[r.Mid] = meta
 	}
 
+	if len(cleanMids) > 0 && len(midSet) == len(upsertMap) && len(cur.Items) > 0 {
+		activeFilmSearchMetas.Store(updateSearchMetaIndexIncremental(cur, version, upsertMap))
+		log.Printf("[ActiveReadModel] 内存索引快速增量更新 mids=%d snapshot_found=%d", len(cleanMids), len(upsertMap))
+		return
+	}
 	newItems := make([]FilmSearchMeta, 0, len(cur.Items)+len(upsertMap))
 	seenMids := make(map[int64]struct{}, len(upsertMap))
 	for _, it := range cur.Items {

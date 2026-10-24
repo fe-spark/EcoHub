@@ -8,10 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
-	"server/internal/repository"
 	"server/internal/utils"
 )
 
@@ -84,6 +82,9 @@ func rateLimitHitsForBackoff(hits int) int {
 
 func rateLimitCooldown(hits, streak int, interval time.Duration) time.Duration {
 	hits = rateLimitHitsForBackoff(hits)
+	if interval < 500*time.Millisecond {
+		interval = 500 * time.Millisecond
+	}
 	cooldown := interval * time.Duration(uint(1)<<uint(hits-1))
 	if cooldown < rateLimitCooldownMin {
 		cooldown = rateLimitCooldownMin
@@ -140,16 +141,33 @@ func getSourceRequestGate(sourceID string) *sourceRequestGate {
 }
 
 func getSourceInterval(sourceID string, fallback *model.FilmSource) time.Duration {
-	if fallback != nil && fallback.Interval > 0 {
+	if fallback != nil && fallback.Interval > 0 && fallback.Interval != 200 && fallback.Interval != 50 {
 		return time.Duration(fallback.Interval) * time.Millisecond
 	}
+	return 0
+}
+
+// GetSourceConcurrencyScale 根据当前站点的限流状态返回动态并发缩放系数 (0.1 ~ 1.0)。
+// 正常状态为 1.0 全速；触发 429 时依命中数指数级削减该站并发。
+func GetSourceConcurrencyScale(sourceID string) float64 {
 	sourceID = strings.TrimSpace(sourceID)
-	if sourceID != "" {
-		if latest := repository.FindCollectSourceById(sourceID); latest != nil && latest.Interval > 0 {
-			return time.Duration(latest.Interval) * time.Millisecond
-		}
+	if sourceID == "" {
+		return 1.0
 	}
-	return config.DefaultSpiderInterval * time.Millisecond
+	gate := getSourceRequestGate(sourceID)
+	gate.mu.Lock()
+	defer gate.mu.Unlock()
+	if gate.rateLimitHits <= 0 {
+		return 1.0
+	}
+	switch gate.rateLimitHits {
+	case 1:
+		return 0.5
+	case 2:
+		return 0.25
+	default:
+		return 0.125
+	}
 }
 
 func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string) (func(error), error) {
@@ -166,9 +184,9 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 		if waitUntil.IsZero() || !waitUntil.After(now) {
 			grantedAt := now
 			interval := getSourceInterval(s.Id, s)
-			// 若当前站点处于限流敏感状态(rateLimitHits > 0)，平滑拉长单次请求放行间隔
+			// 若当前站点处于限流敏感状态(rateLimitHits > 0)，自适应施加请求间隔保护
 			if gate.rateLimitHits > 0 {
-				adaptiveInterval := interval * time.Duration(1+gate.rateLimitHits)
+				adaptiveInterval := time.Duration(gate.rateLimitHits*250) * time.Millisecond
 				if adaptiveInterval > 1000*time.Millisecond {
 					adaptiveInterval = 1000 * time.Millisecond
 				}
@@ -176,7 +194,9 @@ func waitSourceRequestTurn(ctx context.Context, s *model.FilmSource, tag string)
 					interval = adaptiveInterval
 				}
 			}
-			gate.nextAllowedAt = grantedAt.Add(interval)
+			if interval > 0 {
+				gate.nextAllowedAt = grantedAt.Add(interval)
+			}
 			gate.mu.Unlock()
 			return func(requestErr error) {
 				if requestErr == nil {

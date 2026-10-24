@@ -52,6 +52,8 @@ type Deps struct {
 	ResolveSourceProxy func(sourceID string) (bool, string, error)
 	// OnSourceFailed 单站连续失败达到上限终止采集时的通知回调（可选）。
 	OnSourceFailed func(sourceID, sourceName, reason string)
+	// SourceConcurrencyScale 返回当前站点因限流等状态计算的并发缩放系数 (0.1 ~ 1.0)。
+	SourceConcurrencyScale func(sourceID string) float64
 }
 
 var deps Deps
@@ -165,7 +167,7 @@ func waitRetryBackoff(ctx context.Context, attempt int) error {
 	}
 }
 
-func GetSourcePageConcurrency(_ *model.FilmSource) int {
+func GetSourcePageConcurrency(s *model.FilmSource) int {
 	base := config.CollectPageWorkers
 	if base <= 0 {
 		base = config.DefaultCollectPageWorkers
@@ -183,25 +185,31 @@ func GetSourcePageConcurrency(_ *model.FilmSource) int {
 			live = n
 		}
 	}
+	perSource := base
 	if live <= 1 {
-		if solo <= 0 {
-			return 1
+		perSource = solo
+	} else {
+		budget := config.CollectFetchInFlight
+		if budget <= 0 {
+			budget = base * 2
 		}
-		return solo
+		perSource = budget / live
+		if perSource < 2 {
+			perSource = 2
+		}
+		if perSource > base {
+			perSource = base
+		}
 	}
-	if base <= 0 {
-		return 1
-	}
-	budget := config.CollectFetchInFlight
-	if budget <= 0 {
-		budget = base * 2
-	}
-	perSource := budget / live
-	if perSource < 2 {
-		perSource = 2
-	}
-	if perSource > base {
-		perSource = base
+	if s != nil && deps.SourceConcurrencyScale != nil {
+		scale := deps.SourceConcurrencyScale(s.Id)
+		if scale < 1.0 {
+			scaled := int(float64(perSource) * scale)
+			if scaled < 1 {
+				scaled = 1
+			}
+			return scaled
+		}
 	}
 	return perSource
 }
