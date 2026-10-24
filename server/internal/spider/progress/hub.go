@@ -16,13 +16,16 @@ type CategorySyncEvent struct {
 	Changes     []model.CategoryTreeChange `json:"changes,omitempty"`
 	Message     string                     `json:"message,omitempty"`
 	DataCleared bool                       `json:"dataCleared,omitempty"`
+	SitePageTotal int                        `json:"sitePageTotal,omitempty"`
 }
 
 // SourceDeleteEvent 采集站异步删除事件
 type SourceDeleteEvent struct {
-	SourceID string `json:"sourceId"`
-	Status   string `json:"status"` // "deleting" | "deleted" | "failed"
-	Message  string `json:"message,omitempty"`
+	SourceID     string `json:"sourceId"`
+	SourceName   string `json:"sourceName,omitempty"`
+	Status       string `json:"status"` // "deleting" | "deleted" | "failed"
+	Message      string `json:"message,omitempty"`
+	DeletedFilms int    `json:"deletedFilms,omitempty"`
 }
 
 // Hub 采集进度全局广播中心
@@ -190,17 +193,18 @@ func BroadcastCategoryConfirm(sourceID string, name string, changes []model.Cate
 	}
 }
 
-// BroadcastCategoryReadyMessage 广播分类就绪事件及执行结果文案
-func BroadcastCategoryReadyMessage(sourceID string, message string, dataCleared bool) {
+// BroadcastCategoryReadyMessage 广播分类就绪事件及执行结果文案与最新采集站总页
+func BroadcastCategoryReadyMessage(sourceID string, message string, dataCleared bool, sitePageTotal int) {
 	SetCategorySyncing(sourceID, false)
 
 	GlobalHub.mu.RLock()
 	defer GlobalHub.mu.RUnlock()
 	evt := CategorySyncEvent{
-		SourceID:    sourceID,
-		Status:      "ready",
-		Message:     message,
-		DataCleared: dataCleared,
+		SourceID:      sourceID,
+		Status:        "ready",
+		Message:       message,
+		DataCleared:   dataCleared,
+		SitePageTotal: sitePageTotal,
 	}
 	for ch := range GlobalHub.categorySubscribers {
 		select {
@@ -264,7 +268,7 @@ func GetDeletingSourceIDs() []string {
 }
 
 // BroadcastSourceDeleteStatus 广播采集站删除状态变更
-func BroadcastSourceDeleteStatus(sourceID string, status string, message string) {
+func BroadcastSourceDeleteStatus(sourceID, sourceName, status, message string, deletedFilms int) {
 	if status == "deleting" {
 		SetSourceDeleting(sourceID, true)
 	} else {
@@ -274,9 +278,11 @@ func BroadcastSourceDeleteStatus(sourceID string, status string, message string)
 	GlobalHub.mu.RLock()
 	defer GlobalHub.mu.RUnlock()
 	evt := SourceDeleteEvent{
-		SourceID: sourceID,
-		Status:   status,
-		Message:  message,
+		SourceID:     sourceID,
+		SourceName:   sourceName,
+		Status:       status,
+		Message:      message,
+		DeletedFilms: deletedFilms,
 	}
 	for ch := range GlobalHub.deleteSubscribers {
 		select {

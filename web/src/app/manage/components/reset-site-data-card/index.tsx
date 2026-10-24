@@ -208,7 +208,7 @@ export default function ResetSiteDataCard({ onResetComplete }: ResetSiteDataCard
             <Flex vertical gap={4} className={styles.dangerText}>
               <Typography.Text type="danger" strong>数据重置</Typography.Text>
               <Typography.Text type="secondary">
-                清空影片、分类、失败记录和轮播，并关闭定时排片。账号、采集站和排片配方保留。
+                清空影片档案、播放线路、失败记录和轮播，并关闭定时排片。账号、采集站、分类结构与排片配方保留。
               </Typography.Text>
             </Flex>
             <Button

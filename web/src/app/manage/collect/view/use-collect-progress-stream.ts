@@ -44,11 +44,16 @@ export function useCollectProgressStream(
         if (progress === item.progress) {
           return item;
         }
+        const isTerminal = isTerminalCollectStatus(progress?.status);
+        const isDone = progress?.status === "done";
+        const hasFinishedRun = isTerminal && (progress?.success ?? 0) > 0;
         return {
           ...item,
           progress,
           lastRunTime:
-            progress?.status === "done" ? new Date().toISOString() : item.lastRunTime,
+            isDone || hasFinishedRun ? new Date().toISOString() : item.lastRunTime,
+          lastRunPageCount:
+            hasFinishedRun ? progress.success : item.lastRunPageCount,
         };
       }),
     );

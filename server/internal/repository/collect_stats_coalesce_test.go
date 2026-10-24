@@ -102,7 +102,7 @@ func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
 	if err := gdb.Create(&model.CollectSourceStats{SourceId: "src-run", LastCollectTime: &anchor}).Error; err != nil {
 		t.Fatal(err)
 	}
-	NoteCollectSourceRun("src-run")
+	NoteCollectSourceRun("src-run", 123)
 
 	gotAnchor, err := GetLastCollectTime("src-run")
 	if err != nil {
@@ -111,7 +111,11 @@ func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
 	if gotAnchor == nil || !gotAnchor.Equal(anchor) {
 		t.Fatalf("cron anchor = %v, want %v", gotAnchor, anchor)
 	}
-	runAt := GetCollectSourceRunTimes([]string{"src-run"})["src-run"]
+	runStat := GetCollectSourceRunStats([]string{"src-run"})["src-run"]
+	runAt := runStat.LastRunTime
+	if runStat.LastRunPageCount != 123 {
+		t.Fatalf("last run page count = %d, want 123", runStat.LastRunPageCount)
+	}
 	if runAt == nil || runAt.IsZero() {
 		t.Fatal("last run time missing")
 	}
@@ -120,7 +124,7 @@ func TestNoteCollectSourceRunDoesNotMoveCronAnchor(t *testing.T) {
 	if err := gdb.Create(&model.CollectSourceStats{SourceId: "src-cron", LastCollectTime: &onlyCron}).Error; err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := GetCollectSourceRunTimes([]string{"src-cron"})["src-cron"]; ok {
+	if stat, ok := GetCollectSourceRunStats([]string{"src-cron"})["src-cron"]; ok && stat.LastRunTime != nil {
 		t.Fatal("cron anchor was returned as last run time")
 	}
 }

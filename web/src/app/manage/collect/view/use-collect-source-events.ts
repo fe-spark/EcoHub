@@ -92,6 +92,10 @@ export function useCollectSourceEvents({
                     : evt.status === "failed"
                       ? false
                       : item.categoryReady,
+                sitePageTotal:
+                  evt.sitePageTotal && evt.sitePageTotal > 0
+                    ? evt.sitePageTotal
+                    : item.sitePageTotal,
               }
             : item,
         ),

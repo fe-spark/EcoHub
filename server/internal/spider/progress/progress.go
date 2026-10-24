@@ -102,6 +102,18 @@ func PageTotal(sourceID string) int {
 	return state.data.Total
 }
 
+// PageSuccess 返回指定站点的成功页数。没有进度返回 0。
+func PageSuccess(sourceID string) int {
+	val, ok := store.Load(sourceID)
+	if !ok {
+		return 0
+	}
+	state := val.(*progressState)
+	state.mu.RLock()
+	defer state.mu.RUnlock()
+	return state.data.Success
+}
+
 func Update(sourceID string, update func(*model.CollectProgress)) {
 	if val, ok := store.Load(sourceID); ok {
 		state := val.(*progressState)

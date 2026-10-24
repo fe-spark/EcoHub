@@ -111,6 +111,18 @@ func start() {
 		Handler: r,
 	}
 	filmsnapshot.WaitActiveFilmSearchIndexBuilt()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[Init] 启动预热首页缓存发生异常: %v", r)
+			}
+		}()
+		if primary := repository.PickPrimarySourceForCategory(); primary != nil {
+			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
+				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
+			}
+		}
+	}()
 	ln, err := net.Listen("tcp", srv.Addr)
 	if err != nil {
 		log.Fatalf("[Init] HTTP 监听失败: %v", err)

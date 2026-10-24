@@ -75,9 +75,13 @@ func TestFilmZero_CleansInventoryTables(t *testing.T) {
 	gdb.Model(&model.Banner{}).Count(&bannerCount)
 	gdb.Model(&model.FailureRecord{}).Count(&failureCount)
 
-	if playlistCount != 0 || catCount != 0 || fileCount != 0 || mappingCount != 0 || catMapCount != 0 || srcCatCount != 0 || bannerCount != 0 || failureCount != 0 {
-		t.Fatalf("expected all tables physically cleared, got playlists=%d cats=%d files=%d mapping=%d catMap=%d srcCat=%d banners=%d failures=%d",
-			playlistCount, catCount, fileCount, mappingCount, catMapCount, srcCatCount, bannerCount, failureCount)
+	if playlistCount != 0 || fileCount != 0 || mappingCount != 0 || bannerCount != 0 || failureCount != 0 {
+		t.Fatalf("expected inventory tables physically cleared, got playlists=%d files=%d mapping=%d banners=%d failures=%d",
+			playlistCount, fileCount, mappingCount, bannerCount, failureCount)
+	}
+	if catCount == 0 || catMapCount == 0 || srcCatCount == 0 {
+		t.Fatalf("expected category structures to be preserved, got cats=%d catMap=%d srcCat=%d",
+			catCount, catMapCount, srcCatCount)
 	}
 }
 

@@ -92,23 +92,7 @@ func (s *SpiderService) ClearFilms() (retErr error) {
 		log.Printf("[SpiderService] 重置后关闭定时排片失败: %v", err)
 		return err
 	}
-	// 物理清空后，广播各采集站分类已清空（未就绪态）
-	sources, err := repository.GetCollectSourceList()
-	if err != nil {
-		return err
-	}
-	for _, src := range sources {
-		if src.Id != "" {
-			progress.BroadcastCategoryReady(src.Id, false)
-		}
-	}
-	// 分类与影视库存一并清空后，按每个采集站重新拉取，采集才能写上 pid/cid。
-	filmrepo.ReportResetProgress(96, "正在同步各采集站分类")
-	if err := s.SyncAllSourceCategories(); err != nil {
-		filmrepo.FinishResetProgress(err)
-		return err
-	}
-	filmrepo.ReportResetProgress(100, "重置完成，各采集站分类已同步")
+	filmrepo.ReportResetProgress(100, "重置完成，片库与业务数据已清空")
 	filmrepo.FinishResetProgress(nil)
 	return nil
 }
@@ -277,7 +261,8 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 	failed := 0
 	for i := range sources {
 		source := sources[i]
-		if err := spider.CollectCategory(&source); err != nil {
+		pageCount, err := spider.CollectCategory(&source)
+		if err != nil {
 			log.Printf("[SpiderService] 采集站分类同步失败: name=%s id=%s err=%v", source.Name, source.Id, err)
 			progress.BroadcastCategoryStatus(source.Id, "failed")
 			failed++
@@ -287,7 +272,7 @@ func (s *SpiderService) SyncAllSourceCategories() error {
 			continue
 		}
 		log.Printf("[SpiderService] 采集站分类已保存: name=%s id=%s", source.Name, source.Id)
-		progress.BroadcastCategoryStatus(source.Id, "ready")
+		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 	}
 	finalizeCategorySync()
 	if failed == 0 {
@@ -320,12 +305,13 @@ func (s *SpiderService) SyncMissingSourceCategories() {
 	for i := range missing {
 		source := missing[i]
 		log.Printf("[SpiderService] 采集站还没有分类副本，补拉: name=%s id=%s", source.Name, source.Id)
-		if err := spider.CollectCategory(&source); err != nil {
+		pageCount, err := spider.CollectCategory(&source)
+		if err != nil {
 			log.Printf("[SpiderService] 补拉采集站分类失败: name=%s id=%s err=%v", source.Name, source.Id, err)
 			progress.BroadcastCategoryStatus(source.Id, "failed")
 			continue
 		}
-		progress.BroadcastCategoryStatus(source.Id, "ready")
+		progress.BroadcastCategoryReadyMessage(source.Id, "分类获取成功", false, pageCount)
 		synced++
 	}
 	if synced > 0 {

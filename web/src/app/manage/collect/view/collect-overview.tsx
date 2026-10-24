@@ -25,6 +25,8 @@ function normalizeSource(item: CollectListItemResponse): FilmSource {
     interval: Number(item.interval ?? 0),
     cd: Number(item.cd > 0 ? item.cd : 24),
     lastRunTime: item.lastRunTime,
+    lastRunPageCount: item.lastRunPageCount ? Number(item.lastRunPageCount) : 0,
+    sitePageTotal: item.sitePageTotal ? Number(item.sitePageTotal) : 0,
     progress: item.progress ?? null,
     createdAt: item.createdAt,
   };

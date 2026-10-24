@@ -25,28 +25,22 @@ export default async function CategoryPage({
   const pidValue = resolvedSearchParams.pid || resolvedSearchParams.Pid;
   const pid = Array.isArray(pidValue) ? pidValue[0] : pidValue;
 
-  if (!pid) {
-    return <Alert type="warning" showIcon title="缺少分类参数" />;
-  }
-
-  const data = await getCategoryData(pid);
-  if (!data) {
+  const data = await getCategoryData(pid || "");
+  if (!data || !data.title || data.title.id === undefined || data.title.id === null) {
     return <Alert type="error" showIcon title="分类页面数据获取失败" />;
   }
 
-  if (!data?.title) {
-    return <Alert type="warning" showIcon title="当前分类已失效，请从最新分类导航重新进入" />;
-  }
+  const effectivePid = String(data.title.id);
 
   return (
     <>
       <TrackPageView
         action="classify"
-        resource={pid}
+        resource={effectivePid}
         resourceCat={data.title.name}
         resourceTitle={data.title.name}
       />
-      <CategoryPageView data={data} pid={pid} />
+      <CategoryPageView data={data} pid={effectivePid} />
     </>
   );
 }

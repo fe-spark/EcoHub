@@ -48,6 +48,12 @@ var activeFilmSearchMetas atomic.Pointer[filmSearchMetaIndex]
 var activeFilmSearchMetasMu sync.Mutex
 var searchMetaBuildSf singleflight.Group
 var searchMetaBuildWg sync.WaitGroup
+var isSearchIndexBuilding atomic.Bool
+
+// IsSearchIndexBuilding 返回当前是否正在加载或重建检索倒排索引
+func IsSearchIndexBuilding() bool {
+	return isSearchIndexBuilding.Load()
+}
 
 func WaitActiveFilmSearchIndexBuilt() {
 	searchMetaBuildWg.Wait()

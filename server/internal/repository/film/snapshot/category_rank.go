@@ -145,7 +145,10 @@ func categoryRankMids(version, sourceID, field string, categoryID int64, sortTyp
 	if limit > categoryRankCap {
 		return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
 	}
-	return mergeRankPools(idx, rankPools(idx, sortType), sourceID, field, categoryID, sortType, limit), nil
+	if res := mergeRankPools(idx, rankPools(idx, sortType), sourceID, field, categoryID, sortType, limit); len(res) > 0 {
+		return res, nil
+	}
+	return scanSourceRanks(idx, sourceID, field, categoryID, sortType, limit), nil
 }
 
 func mergeRankPools(idx *filmSearchMetaIndex, pools map[string][]int64, sourceID, field string, categoryID int64, sortType, limit int) []int64 {

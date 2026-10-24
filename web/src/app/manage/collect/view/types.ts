@@ -11,6 +11,8 @@ export interface FilmSource {
   format?: "json" | "xml";
   domainReplaceRules?: string;
   lastRunTime?: string;
+  lastRunPageCount?: number;
+  sitePageTotal?: number;
   progress?: CollectProgress | null;
   proxyCollect?: boolean;
   /** 该站是否已有分类副本。没有分类时采集中心不能开始采集。 */
@@ -217,10 +219,13 @@ export function normalizeSource(item: CollectListItemResponse): FilmSource {
     cd: Number(item.cd > 0 ? item.cd : 24),
     format: (item.format as "json" | "xml") || "json",
     lastRunTime: item.lastRunTime,
+    lastRunPageCount: item.lastRunPageCount ? Number(item.lastRunPageCount) : 0,
+    sitePageTotal: item.sitePageTotal ? Number(item.sitePageTotal) : 0,
     progress: item.progress ?? null,
     proxyCollect: Boolean(item.proxyCollect),
     categoryReady: item.categoryReady !== undefined ? Boolean(item.categoryReady) : true,
     categorySyncing: Boolean(item.categorySyncing),
+    deleting: Boolean(item.deleting),
     createdAt: item.createdAt,
   };
 }

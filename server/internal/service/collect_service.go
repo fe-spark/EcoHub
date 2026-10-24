@@ -3,8 +3,9 @@ package service
 import (
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
-
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -19,6 +20,17 @@ import (
 type CollectService struct{}
 
 var CollectSvc = new(CollectService)
+
+var (
+	primarySwitchEpoch atomic.Uint64
+	primarySwitchMu    sync.Mutex
+	isPrimaryWarming   atomic.Bool
+)
+
+// IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
+func IsPrimarySiteSwitching() bool {
+	return filmsnapshot.IsSearchIndexBuilding() || isPrimaryWarming.Load()
+}
 
 func clearProvideNetworkConfigCache() {
 	if db.Rdb == nil {
@@ -41,7 +53,7 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 	for _, progress := range spider.GetActiveTaskProgress() {
 		progressByID[progress.Id] = progress
 	}
-	lastRunTimeByID := getLastRunTimeBySource(sources)
+	runStatsByID := getRunStatsBySource(sources)
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
@@ -60,7 +72,14 @@ func (s *CollectService) GetFilmSourceList() ([]model.FilmSourceListItem, error)
 		} else {
 			source.IsPrimary = false
 		}
-		item := model.FilmSourceListItem{FilmSource: source, LastRunTime: lastRunTimeByID[source.Id]}
+		stat := runStatsByID[source.Id]
+		item := model.FilmSourceListItem{
+			FilmSource:       source,
+			LastRunTime:      stat.LastRunTime,
+			LastRunPageCount: stat.LastRunPageCount,
+			SitePageTotal:    stat.SitePageTotal,
+			Deleting:         progress.IsSourceDeleting(source.Id),
+		}
 		if progress, ok := progressByID[source.Id]; ok {
 			item.Progress = &progress
 		}
@@ -141,11 +160,14 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	if oldID == newID {
 		return false
 	}
+	epoch := primarySwitchEpoch.Add(1)
 	// 分类编号属于原首选站。轮播和排片配方一起清空，定时排片关闭。
 	if err := ResetBannerDeckForSourceChange(); err != nil {
 		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
 	}
 	repository.MarkCategoryChanged()
+	repository.ClearIndexPageCache()
+	filmsnapshot.ClearActiveFilmReadModel()
 	filmsnapshot.BumpSearchCacheVersion()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
@@ -160,12 +182,66 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	} else {
 		NotifySvc.PublishSourceOrderChange(oldPrimary, newPrimary, enabled)
 	}
+	go func(targetSourceID string, currentEpoch uint64) {
+		defer func() {
+			if r := recover(); r != nil {
+				syslog.Errorf("[Collect] 切换主站后异步预热索引发生异常: %v", r)
+			}
+		}()
+
+		// 150ms 防抖：如果连续快速拖拽切换主站，直接跳过旧代数，避免短时间内多次并发全库扫描
+		time.Sleep(150 * time.Millisecond)
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 检测到更新的主站切换，跳过历史代数预热 epoch=%d targetSource=%s", currentEpoch, targetSourceID)
+			return
+		}
+
+		// 互斥排队串行化构建，杜绝多线程重叠全表扫描导致 DB 负载过高
+		primarySwitchMu.Lock()
+		defer primarySwitchMu.Unlock()
+		isPrimaryWarming.Store(true)
+		defer isPrimaryWarming.Store(false)
+
+		// 获取锁后再次检查代数与当前最新主站：如果中途有更新切换，立即退出
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 排队期间主站再次变更，放弃本代构建 epoch=%d", currentEpoch)
+			return
+		}
+		latestPrimary := repository.PickPrimarySourceForCategory()
+		if latestPrimary == nil || latestPrimary.Id != targetSourceID {
+			syslog.Infof("[Collect] 实际主站已非目标站，跳过预热 targetSource=%s", targetSourceID)
+			return
+		}
+
+		syslog.Infof("[Collect] 开始预热主站检索索引与首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
+		if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
+			syslog.Errorf("[Collect] 切换主站后预热检索索引失败: %v", err)
+			return
+		}
+
+		// 索引构建耗时期间若又有新切换发生，放弃写首页缓存，杜绝脏数据覆盖（ABA 问题）
+		if primarySwitchEpoch.Load() != currentEpoch {
+			syslog.Infof("[Collect] 索引已构建完成，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
+			return
+		}
+
+		if targetSourceID != "" {
+			if _, err := IndexSvc.IndexPage(targetSourceID); err != nil {
+				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
+			} else {
+				syslog.Infof("[Collect] 切换主站检索索引与首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+			}
+		}
+	}(newID, epoch)
 	return true
 }
 
 func (s *CollectService) SortFilmSources(ids []string) error {
 	if len(ids) == 0 {
 		return nil
+	}
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可切换主站，请稍候")
 	}
 	oldPrimary := repository.PickPrimarySourceForCategory()
 	if err := repository.SortCollectSources(ids); err != nil {
@@ -184,14 +260,29 @@ func (s *CollectService) SortFilmSources(ids []string) error {
 	return nil
 }
 
-func getLastRunTimeBySource(sources []model.FilmSource) map[string]*time.Time {
+func getRunStatsBySource(sources []model.FilmSource) map[string]repository.CollectSourceRunStat {
 	sourceIDs := make([]string, 0, len(sources))
 	for _, source := range sources {
 		if source.Id != "" {
 			sourceIDs = append(sourceIDs, source.Id)
 		}
 	}
-	return repository.GetCollectSourceRunTimes(sourceIDs)
+	return repository.GetCollectSourceRunStats(sourceIDs)
+}
+
+func (s *CollectService) RefreshSitePageTotal(id string) (int, error) {
+	src := repository.FindCollectSourceById(id)
+	if src == nil {
+		return 0, errors.New("当前资源站信息不存在")
+	}
+	total, err := spider.ProbeSitePageTotal(src)
+	if err != nil {
+		return 0, err
+	}
+	if total > 0 {
+		_ = repository.UpdateSitePageTotal(id, total)
+	}
+	return total, nil
 }
 
 func (s *CollectService) GetFilmSource(id string) *model.FilmSource {
@@ -210,6 +301,9 @@ func (s *CollectService) GetAllFilmSources() ([]model.FilmSource, error) {
 // 采集链接变更时清空该站已采集数据、失败记录和分类，调用方再按新地址重新获取分类。
 func (s *CollectService) UpdateFilmSource(source model.FilmSource) error {
 	oldPrimary := repository.PickPrimarySourceForCategory()
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可修改站点配置，请稍候")
+	}
 	if err := s.updateFilmSourceCore(source); err != nil {
 		return err
 	}
@@ -266,6 +360,9 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 }
 
 func (s *CollectService) BatchUpdateFilmSourceState(ids []string, state bool) error {
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可切换站点状态，请稍候")
+	}
 	planned := make(map[string]bool)
 	for _, id := range ids {
 		source := repository.FindCollectSourceById(id)
@@ -334,12 +431,19 @@ func runDeleteSourceWorker() {
 
 func processAsyncDeleteSource(id string) {
 	defer progress.SetSourceDeleting(id, false)
-	if err := CollectSvc.DelFilmSource(id); err != nil {
+	src := repository.FindCollectSourceForDelete(id)
+	name := id
+	if src != nil && src.Name != "" {
+		name = src.Name
+	}
+	progress.BroadcastSourceDeleteStatus(id, name, "deleting", "", 0)
+	deletedFilms, err := CollectSvc.DelFilmSource(id)
+	if err != nil {
 		syslog.Errorf("[Collect] 异步删除站点 %s 失败: %v", id, err)
-		progress.BroadcastSourceDeleteStatus(id, "failed", err.Error())
+		progress.BroadcastSourceDeleteStatus(id, name, "failed", err.Error(), 0)
 		return
 	}
-	progress.BroadcastSourceDeleteStatus(id, "deleted", "")
+	progress.BroadcastSourceDeleteStatus(id, name, "deleted", "", deletedFilms)
 }
 
 // TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理
@@ -347,6 +451,9 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return errors.New("采集站ID不能为空")
+	}
+	if IsPrimarySiteSwitching() {
+		return errors.New("检索索引正在构建中，暂不可操作站点，请稍候")
 	}
 	src := repository.FindCollectSourceForDelete(id)
 	if src == nil {
@@ -358,7 +465,7 @@ func (s *CollectService) TriggerDelFilmSource(id string) error {
 
 	select {
 	case deleteSourceQueue <- id:
-		progress.BroadcastSourceDeleteStatus(id, "deleting", "")
+		progress.BroadcastSourceDeleteStatus(id, src.Name, "deleting", "", 0)
 		return nil
 	default:
 		return errors.New("删除队列已满")
@@ -379,7 +486,8 @@ func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
 	return nil
 }
 
-func (s *CollectService) DelFilmSource(id string) error {
+func (s *CollectService) DelFilmSource(id string) (int, error) {
+	deletedCount := 0
 	err := spider.WithSourceExclusive(id, func() error {
 		src := repository.FindCollectSourceById(id)
 		if src == nil {
@@ -399,6 +507,7 @@ func (s *CollectService) DelFilmSource(id string) error {
 			}
 			return err
 		}
+		deletedCount = len(orphanMids)
 		if len(orphanMids) > 0 {
 			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
 			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
@@ -412,10 +521,10 @@ func (s *CollectService) DelFilmSource(id string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	spider.DropSourceRuntime(id)
-	return nil
+	return deletedCount, nil
 }
 
 // PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。

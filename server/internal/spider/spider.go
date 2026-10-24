@@ -87,6 +87,7 @@ func HandlePreparedCollect(id string, h int) error {
 
 func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStandalone bool, allowPreparedStart bool, batchCtx *collectBatchContext) (retErr error) {
 	hadWrites := false
+	successPagesCount := 0
 	var collectCtx context.Context
 	statsOwned := false
 	releasedPreparedOccupy := false
@@ -149,8 +150,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 				repository.NoteCollectSourceStats(s.Id)
 			}
 		}
-		if runOK {
-			repository.NoteCollectSourceRun(s.Id)
+		effectiveSuccess := successPagesCount
+		if runOK || effectiveSuccess > 0 || hadWrites {
+			repository.NoteCollectSourceRun(s.Id, effectiveSuccess)
 		}
 		progress.FlushHotpathSideEffects(s.Id)
 		if originalErr != nil && !hadWrites {
@@ -256,7 +258,7 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 	})
 	log.Printf("[Spider] 站点 %s 共 %d 页，开始采集...\n", s.Name, pageCount)
 
-	hadWrites, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
+	hadWrites, successPagesCount, err = fetcher.CollectPages(collectCtx, pageCount, s, h, batchCtx)
 	if err != nil {
 		return err
 	}

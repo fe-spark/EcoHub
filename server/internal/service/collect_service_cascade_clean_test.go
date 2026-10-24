@@ -81,7 +81,7 @@ func TestCollectService_DelFilmSource_CleansOrphanFilms(t *testing.T) {
 
 	// 删除 src1
 	srv := new(CollectService)
-	if err := srv.DelFilmSource("src1"); err != nil {
+	if _, err := srv.DelFilmSource("src1"); err != nil {
 		t.Fatalf("DelFilmSource failed: %v", err)
 	}
 
@@ -159,7 +159,7 @@ func TestCollectService_DelFilmSource_StopsRunningThenCleans(t *testing.T) {
 		progress.MarkStopped("src2")
 	})
 
-	if err := new(CollectService).DelFilmSource("src1"); err != nil {
+	if _, err := new(CollectService).DelFilmSource("src1"); err != nil {
 		t.Fatalf("delete while collecting: %v", err)
 	}
 	var sourceCount int64

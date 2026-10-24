@@ -94,7 +94,7 @@ func unmarshalXMLWithCharset(data []byte, v any) error {
 type XmlCollect struct{}
 
 // GetCategoryTree 获取 XML 源分类树形数据
-func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, error) {
+func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree, int, error) {
 	ensureParams(&r)
 	if r.Params.Get("ac") == "" {
 		r.Params.Set("ac", "list")
@@ -109,16 +109,16 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 			errMsg = "response is empty"
 		}
 		log.Printf("[Spider-XML] 分类数据获取异常: %s", errMsg)
-		return nil, fmt.Errorf("XML 分类数据获取异常: %s", errMsg)
+		return nil, 0, fmt.Errorf("XML 分类数据获取异常: %s", errMsg)
 	}
 
 	var rss XMLRSS
 	if err := unmarshalXMLWithCharset(r.Resp, &rss); err != nil {
-		return nil, fmt.Errorf("XML unmarshal error: %w", err)
+		return nil, 0, fmt.Errorf("XML unmarshal error: %w", err)
 	}
 
 	if len(rss.Class.Types) == 0 {
-		return &model.CategoryTree{}, nil
+		return &model.CategoryTree{}, rss.List.PageCount, nil
 	}
 
 	classes := make([]model.FilmClass, 0, len(rss.Class.Types))
@@ -135,7 +135,7 @@ func (xc *XmlCollect) GetCategoryTree(r utils.RequestInfo) (*model.CategoryTree,
 	}
 
 	tree := converter.GenCategoryTreeWithParentHints(classes, nil)
-	return tree, nil
+	return tree, rss.List.PageCount, nil
 }
 
 // GetPageCount 探测 XML 源分页总页数
