@@ -76,7 +76,7 @@ export function UserDrawer({
       }
       open={open}
       onClose={onCancel}
-      width={520}
+      size={520}
       destroyOnClose
       extra={
         <Space>

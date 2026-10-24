@@ -24,7 +24,7 @@ export default function CronDrawer({
       title="修改运行时间"
       open={open}
       onClose={onClose}
-      width={520}
+      size={520}
       destroyOnClose
       extra={
         <Space>

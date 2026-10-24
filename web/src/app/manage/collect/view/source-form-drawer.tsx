@@ -90,7 +90,7 @@ export default function SourceFormDrawer(props: SourceFormDrawerProps) {
           onCancel();
         }
       }}
-      width={600}
+      size={600}
       destroyOnClose
       extra={
         <Space>
