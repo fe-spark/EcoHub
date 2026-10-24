@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -44,17 +43,16 @@ var (
 
 const (
 
-	// 采集默认面向 2C2G 单机「速度优先仍可控」档（写阀 + 站/页并发），
-	// 同时作为运行时参数为 0 时的兜底默认值。实际档位按 CPU 和内存中更紧的一侧自动选
-	// （见 resolveCollectProfile），可用 COLLECT_PROFILE 手动覆盖。
-	DefaultCollectWriteMaxInflight              = 3   // 写库事务并发（2 核可承受 3）
-	DefaultCollectWritePagesPerSec              = 24  // 稳态页/秒（主要吞吐闸）
-	DefaultCollectWriteBurstPages               = 8   // 突发，减少写阀空转
-	DefaultCollectWriteMaxPendingPagesPerSource = 48  // 单站写队列
-	DefaultCollectWriteMaxPendingPagesGlobal    = 144 // 全局写队列
-	DefaultCollectPageWorkers                   = 6   // 单站分页 HTTP 并发
-	DefaultCollectPageWorkersSolo               = 10  // 仅 1 站在跑时提高页并发，吃满写阀
-	DefaultCollectSourceConcurrency             = 6   // 批量同时跑的站点数；0=不限制
+	// 统一高吞吐采集运行时参数（支持 12 站全并行，稳态 240 页/s，30 分钟内跑完全站）
+	DefaultCollectWriteMaxInflight              = 16  // 写库事务并发
+	DefaultCollectWritePagesPerSec              = 240 // 稳态页/秒
+	DefaultCollectWriteBurstPages               = 80  // 突发，减少写阀空转
+	DefaultCollectWriteMaxPendingPagesPerSource = 500 // 单站写队列
+	DefaultCollectWriteMaxPendingPagesGlobal    = 5000 // 全局写队列
+	DefaultCollectPageWorkers                   = 16  // 单站分页 HTTP 并发
+	DefaultCollectPageWorkersSolo               = 32  // 仅 1 站在跑时提高页并发
+	DefaultCollectSourceConcurrency             = 0   // 批量同时跑的站点数；0=不限制全部站点并行
+	DefaultCollectFetchInFlight                 = 128 // 全局取数在途上限
 	DefaultCollectStatsFlushIntervalSec         = 5
 	// DefaultCollectProgressRetainSec done/failed 在列表中短暂保留秒数。
 	// 仅保留足够前端完成结束态展示的窗口（SSE 实时推送 + 倒计时），过后自动清除，恢复初始态。
@@ -84,8 +82,7 @@ var (
 	CollectPageWorkersSolo = DefaultCollectPageWorkersSolo
 	// CollectSourceConcurrency 批量采集同时运行的站点数；0 表示不限制。
 	CollectSourceConcurrency = DefaultCollectSourceConcurrency
-	// CollectFetchInFlight 多站同时采集时的全局取数在途上限，按宿主档位设置。
-	CollectFetchInFlight = 16
+	CollectFetchInFlight = DefaultCollectFetchInFlight
 	// CollectStatsFlushIntervalSec last_collect_time 合并写库最小间隔（秒）。
 	CollectStatsFlushIntervalSec = DefaultCollectStatsFlushIntervalSec
 	// CollectProgressRetainSec done/failed 进度保留秒数。
@@ -342,140 +339,16 @@ func InitConfig() {
 	loadAccessRuntimeConfig()
 
 }
-
-// collectProfile 采集并发/写阀档位：light=2C2G 保守档，standard=4C 中档，high=8C+ 高档。
-type collectProfile struct {
-	writeMaxInflight      int
-	writePagesPerSec      int
-	writeBurstPages       int
-	writePendingPerSource int
-	writePendingGlobal    int
-	pageWorkers           int
-	pageWorkersSolo       int
-	sourceConcurrency     int
-	fetchInFlight         int
-}
-
-// collectProfiles 档位数值表（light 与 Default* 兜底一致）。
-var collectProfiles = map[string]collectProfile{
-	"light": {
-		writeMaxInflight:      3,
-		writePagesPerSec:      24,
-		writeBurstPages:       8,
-		writePendingPerSource: 48,
-		writePendingGlobal:    144,
-		pageWorkers:           6,
-		pageWorkersSolo:       10,
-		sourceConcurrency:     6,
-		fetchInFlight:         16,
-	},
-	"standard": {
-		writeMaxInflight:      6,
-		writePagesPerSec:      48,
-		writeBurstPages:       12,
-		writePendingPerSource: 96,
-		writePendingGlobal:    288,
-		pageWorkers:           10,
-		pageWorkersSolo:       16,
-		sourceConcurrency:     8,
-		fetchInFlight:         32,
-	},
-	"high": {
-		writeMaxInflight:      10,
-		writePagesPerSec:      96,
-		writeBurstPages:       20,
-		writePendingPerSource: 160,
-		writePendingGlobal:    480,
-		pageWorkers:           16,
-		pageWorkersSolo:       24,
-		sourceConcurrency:     12,
-		fetchInFlight:         48,
-	},
-}
-
-// resolveCollectProfile 解析采集档位：COLLECT_PROFILE 显式指定（auto|light|standard|high）；
-// auto 或未设置时取 CPU 档和内存档中更低的一档。
-// CPU：≤2=light，3-7=standard，≥8=high。内存：≤3GiB=light，≤7GiB=standard，更大=high。
-func resolveCollectProfile() (collectProfile, string) {
-	return resolveCollectProfileFor(runtime.NumCPU(), hostMemoryBytes(), os.Getenv("COLLECT_PROFILE"))
-}
-
-func resolveCollectProfileFor(cpu int, memBytes uint64, profileEnv string) (collectProfile, string) {
-	name := strings.ToLower(strings.TrimSpace(profileEnv))
-	if name != "" && name != "auto" {
-		if p, ok := collectProfiles[name]; ok {
-			return p, name
-		}
-		fmt.Printf("[Config] COLLECT_PROFILE=%q 无效，回退自动选档\n", name)
-	}
-	cpuTier := tierByCPU(cpu)
-	memTier := tierByMemory(memBytes)
-	name = cpuTier
-	if memTier != "" && tierRank[memTier] < tierRank[name] {
-		name = memTier
-	}
-	return collectProfiles[name], name
-}
-
-var tierRank = map[string]int{"light": 0, "standard": 1, "high": 2}
-
-func tierByCPU(n int) string {
-	switch {
-	case n <= 2:
-		return "light"
-	case n >= 8:
-		return "high"
-	default:
-		return "standard"
-	}
-}
-
-func tierByMemory(bytes uint64) string {
-	if bytes == 0 {
-		return ""
-	}
-	const gib = 1024 * 1024 * 1024
-	switch {
-	case bytes <= 3*gib:
-		return "light"
-	case bytes <= 7*gib:
-		return "standard"
-	default:
-		return "high"
-	}
-}
-
-// loadCollectRuntimeConfig 按服务器资源自动选择采集写阀/并发档位（无环境变量配置）。
 func loadCollectRuntimeConfig() {
-	p, name := resolveCollectProfile()
-	CollectWriteMaxInflight = p.writeMaxInflight
-	CollectWritePagesPerSec = p.writePagesPerSec
-	CollectWriteBurstPages = p.writeBurstPages
-	CollectWriteMaxPendingPagesPerSource = p.writePendingPerSource
-	CollectWriteMaxPendingPagesGlobal = p.writePendingGlobal
-	CollectPageWorkers = p.pageWorkers
-	CollectPageWorkersSolo = p.pageWorkersSolo
-	CollectSourceConcurrency = p.sourceConcurrency
-	CollectFetchInFlight = p.fetchInFlight
-
 	srcLimit := "不限制"
 	if CollectSourceConcurrency > 0 {
 		srcLimit = fmt.Sprintf("%d", CollectSourceConcurrency)
 	}
-	fmt.Printf("[Config] 采集档位=%s（CPU=%d核 内存=%s） 写阀 inflight=%d pages/s=%d burst=%d pending=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
-		name, runtime.NumCPU(), formatMemoryGB(hostMemoryBytes()),
+	fmt.Printf("[Config] 采集配置: 写并发=%d 速率=%d页/s burst=%d 队列缓冲=%d/%d | 页并发=%d(单站=%d) 站并发=%s 取数在途=%d | retain=%ds stale=%ds\n",
 		CollectWriteMaxInflight, CollectWritePagesPerSec, CollectWriteBurstPages,
 		CollectWriteMaxPendingPagesPerSource, CollectWriteMaxPendingPagesGlobal,
 		CollectPageWorkers, CollectPageWorkersSolo, srcLimit, CollectFetchInFlight,
 		CollectProgressRetainSec, CollectProgressStaleSec)
-}
-
-func formatMemoryGB(bytes uint64) string {
-	if bytes == 0 {
-		return "未知"
-	}
-	gb := float64(bytes) / (1024 * 1024 * 1024)
-	return fmt.Sprintf("%.1fGiB", gb)
 }
 
 // GetRootMysqlDsn 获取不带数据库名的 DSN，用于 CREATE DATABASE 等管理操作

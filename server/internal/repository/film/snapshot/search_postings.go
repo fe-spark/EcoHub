@@ -16,29 +16,55 @@ type searchPostings struct {
 	ascii map[string][]int32
 }
 
+func appendSingleItemPostings(posts *searchPostings, pos int32, item *FilmSearchMeta) {
+	if posts == nil || item == nil {
+		return
+	}
+	seenRune := map[rune]struct{}{}
+	for _, r := range item.Item.CleanName {
+		if r < 128 {
+			continue
+		}
+		if _, ok := seenRune[r]; ok {
+			continue
+		}
+		seenRune[r] = struct{}{}
+		posts.runes[r] = append(posts.runes[r], pos)
+	}
+	addAsciiPostings(posts.ascii, pos, item.Item.PinyinInitials)
+	for _, alt := range strings.Fields(item.Item.PinyinInitialAlts) {
+		addAsciiPostings(posts.ascii, pos, alt)
+	}
+	addAsciiPostings(posts.ascii, pos, item.Item.PinyinFull)
+}
+
+func cloneSearchPostings(orig *searchPostings) *searchPostings {
+	if orig == nil {
+		return &searchPostings{
+			runes: map[rune][]int32{},
+			ascii: map[string][]int32{},
+		}
+	}
+	p := &searchPostings{
+		runes: make(map[rune][]int32, len(orig.runes)),
+		ascii: make(map[string][]int32, len(orig.ascii)),
+	}
+	for k, v := range orig.runes {
+		p.runes[k] = append([]int32(nil), v...)
+	}
+	for k, v := range orig.ascii {
+		p.ascii[k] = append([]int32(nil), v...)
+	}
+	return p
+}
+
 func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	posts := &searchPostings{
 		runes: map[rune][]int32{},
 		ascii: map[string][]int32{},
 	}
 	for i := range items {
-		pos := int32(i)
-		seenRune := map[rune]struct{}{}
-		for _, r := range items[i].Item.CleanName {
-			if r < 128 {
-				continue
-			}
-			if _, ok := seenRune[r]; ok {
-				continue
-			}
-			seenRune[r] = struct{}{}
-			posts.runes[r] = append(posts.runes[r], pos)
-		}
-		addAsciiPostings(posts.ascii, pos, items[i].Item.PinyinInitials)
-		for _, alt := range strings.Fields(items[i].Item.PinyinInitialAlts) {
-			addAsciiPostings(posts.ascii, pos, alt)
-		}
-		addAsciiPostings(posts.ascii, pos, items[i].Item.PinyinFull)
+		appendSingleItemPostings(posts, int32(i), &items[i])
 	}
 	return posts
 }

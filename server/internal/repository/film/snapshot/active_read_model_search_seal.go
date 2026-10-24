@@ -274,6 +274,82 @@ func sealSearchMetaIndex(version string, items []FilmSearchMeta) *filmSearchMeta
 		SearchPosts:         buildSearchPostings(items),
 	}
 }
+func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, upsertMap map[int64]FilmSearchMeta) *filmSearchMetaIndex {
+	if cur == nil || len(cur.Items) == 0 || cur.Version != version {
+		items := make([]FilmSearchMeta, 0, len(upsertMap))
+		for _, v := range upsertMap {
+			items = append(items, v)
+		}
+		return sealSearchMetaIndex(version, items)
+	}
+
+	newItems := make([]FilmSearchMeta, len(cur.Items), len(cur.Items)+len(upsertMap))
+	copy(newItems, cur.Items)
+
+	newPos := make(map[int64]int, len(cur.Pos)+len(upsertMap))
+	for k, v := range cur.Pos {
+		newPos[k] = v
+	}
+
+	newByCategory := make(map[string][]int, len(cur.ByCategory))
+	for k, v := range cur.ByCategory {
+		newByCategory[k] = append([]int(nil), v...)
+	}
+
+	newFilms := make(map[string]int64, len(cur.FilmsBySource))
+	for k, v := range cur.FilmsBySource {
+		newFilms[k] = v
+	}
+
+	newPosts := cloneSearchPostings(cur.SearchPosts)
+
+	for mid, meta := range upsertMap {
+		if idx, exists := newPos[mid]; exists {
+			newItems[idx] = meta
+			appendSingleItemPostings(newPosts, int32(idx), &newItems[idx])
+		} else {
+			newIdx := len(newItems)
+			newItems = append(newItems, meta)
+			newPos[mid] = newIdx
+			if src := strings.TrimSpace(meta.FirstSourceId); src != "" {
+				newFilms[src]++
+			}
+			if cKey := strings.TrimSpace(meta.CategoryKey); cKey != "" {
+				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
+			}
+			appendSingleItemPostings(newPosts, int32(newIdx), &newItems[newIdx])
+		}
+	}
+
+	newByUpdate := make([]int, len(newItems))
+	for i := range newItems {
+		newByUpdate[i] = i
+	}
+	sort.Slice(newByUpdate, func(i, j int) bool {
+		left := &newItems[newByUpdate[i]]
+		right := &newItems[newByUpdate[j]]
+		if left.Item.UpdateStamp != right.Item.UpdateStamp {
+			return left.Item.UpdateStamp > right.Item.UpdateStamp
+		}
+		return left.Mid > right.Mid
+	})
+
+	return &filmSearchMetaIndex{
+		Version:             version,
+		Items:               newItems,
+		ByUpdate:            newByUpdate,
+		Pos:                 newPos,
+		FilmsBySource:       newFilms,
+		MultiSourceBySource: cur.MultiSourceBySource,
+		HotPools:            cur.HotPools,
+		YearPools:           cur.YearPools,
+		RecentPools:         cur.RecentPools,
+		SourceHot:           cur.SourceHot,
+		ByCategory:          newByCategory,
+		SearchPosts:         newPosts,
+	}
+}
+
 
 func hotPoolMapKey(sourceID, categoryKey string) string {
 	sourceID = strings.TrimSpace(sourceID)

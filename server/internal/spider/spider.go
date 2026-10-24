@@ -69,8 +69,9 @@ func init() {
 		SavePageFailure:    saveFilmPageFailure,
 		SkipPublishOnError: shouldSkipCollectPublishOnError,
 		ResolveSpiderProxy: repository.ResolveSpiderProxy,
-		ResolveSourceProxy: repository.ResolveSourceProxy,
-		OnSourceFailed:     emitSourceFailedNotify,
+		ResolveSourceProxy:     repository.ResolveSourceProxy,
+		OnSourceFailed:         emitSourceFailedNotify,
+		SourceConcurrencyScale: GetSourceConcurrencyScale,
 	})
 }
 

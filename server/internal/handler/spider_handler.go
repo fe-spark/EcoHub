@@ -37,7 +37,7 @@ func (h *SpiderHandler) StopTask(c *gin.Context) {
 		dto.Failed("参数异常，采集站标识不能为空", c)
 		return
 	}
-	service.SpiderSvc.StopTasks(cleanIds)
+	go service.SpiderSvc.StopTasks(cleanIds)
 	dto.SuccessOnlyMsg("已发送停止指令，采集任务正在停止", c)
 }
 
