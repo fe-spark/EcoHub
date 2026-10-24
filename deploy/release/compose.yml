@@ -61,8 +61,6 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      # 采集档位（可选；默认 auto 按容器 CPU 核数自动选档）
-      COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
       # 数据分析（可选；默认 false 关闭）
       ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:

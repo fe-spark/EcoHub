@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 cd ~/ecohub
 ```
 
-Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, change the MySQL / Redis passwords, then start:
+Edit `.env`: put the output of `openssl rand -hex 32` into `JWT_SECRET`, customize `ECOHUB_ADMIN_PASSWORD` as needed, update MySQL / Redis passwords, then start:
 
 ```bash
 docker compose up -d
@@ -81,7 +81,7 @@ docker compose up -d
 | `http://<host>:3000/api/provide/tvbox` | TVBox / YingShiCang subscription URL |
 | `http://<host>:3000/api/provide/vod` | MacCMS-compatible API |
 
-Default account: `admin` / `admin`. Create other roles in account management. Change the default password before any public deployment.
+Default account: `admin` / `admin` (unless customized via `ECOHUB_ADMIN_PASSWORD` in `.env`). Create other roles in account management. Change the default password before any public deployment.
 
 > **Security & Network**: In production, it is recommended to use Nginx / 1Panel reverse proxy with HTTPS (80/443). To **avoid exposing raw ports to the public internet**, explicitly bind `127.0.0.1:` in `compose.yml` (e.g. `127.0.0.1:3000:3000`), preventing Docker from bypassing system firewalls. If direct player access is not needed, comment out the `18080` port mapping.
 

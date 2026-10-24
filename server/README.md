@@ -112,19 +112,6 @@ go run ./cmd/server
 
 `REDIS_HOST` / `REDIS_PORT` 为空会启动 panic。
 
-### 采集档位
-
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `COLLECT_PROFILE` | 否 | `auto` | 采集写阀与并发档位：`auto` / `light` / `standard` / `high` |
-
-- `auto` 或未设置：按 CPU 核数自动选档（≤2 → `light`，3–7 → `standard`，≥8 → `high`）
-- `light`：保守（约 2C2G）
-- `standard`：中档
-- `high`：高并发（约 8C+）
-- 非法值会打日志并回退自动选档
-- 写阀、分页 worker、源站并发等由档位内置表决定，**无需**再配其它采集并发环境变量
-
 ### 数据分析（可选）
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -146,7 +133,7 @@ go run ./cmd/server
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `COLLECT_PROFILE` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `ECOHUB_ADMIN_PASSWORD` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 

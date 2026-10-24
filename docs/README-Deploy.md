@@ -37,7 +37,7 @@
 openssl rand -hex 32
 ```
 
-可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`COLLECT_PROFILE`（`auto|light|standard|high`）、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
+可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -74,7 +74,7 @@ docker compose up -d
 
 默认账号（**立刻改密**）：`admin` / `admin`。其它角色在账号管理中新建。
 
-首次需在后台配置 **采集源** 并执行采集，否则前台无影片。第一次全量采集**可能要数个小时**；入库成功的页会按窗口刷进快照，前台按主站边采边展示。
+首次需在后台检查或配置 **采集站** 并执行采集，否则前台无影片。内置 12 个预设采集站批量采集通常在 10~20 分钟内完成；入库成功的页会按窗口刷进快照，前台按主站边采边展示。
 
 ### 4. 数据与更新
 
@@ -90,7 +90,7 @@ docker compose pull
 docker compose up -d
 ```
 
-固定版本：compose 中改为 `ghcr.io/fe-spark/ecohub:v2.0.1` 等。正式版 tag 会覆盖 `:latest`。升级请使用 `docker compose pull` 或拉取新镜像。
+固定版本：可在 `.env` 中指定 `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` 或在 compose 中修改。正式版 tag 会覆盖 `:latest`。
 
 ---
 
@@ -148,7 +148,7 @@ services:
 
   ecohub:
     container_name: Eco-hub
-    image: ghcr.io/fe-spark/ecohub:latest
+    image: ${ECOHUB_IMAGE:-ghcr.io/fe-spark/ecohub:latest}
     restart: always
     environment:
       JWT_SECRET: ${JWT_SECRET:-ecohub_2026!local@dev_secret$$001}
@@ -165,7 +165,6 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      COLLECT_PROFILE: ${COLLECT_PROFILE:-auto}
       ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
@@ -319,6 +318,7 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
+| `ECOHUB_IMAGE` | 否 | `ghcr.io/fe-spark/ecohub:latest` | Docker 镜像地址及版本 Tag，可指定固定版本或预发布版本。 |
 | `WEB_PORT` | 否 | `3000` | 宿主机 Web 访问入口端口（包含前台页面与 `/manage` 管理后台）。 |
 | `SERVER_PORT` | 否 | `18080` | 宿主机后端 API 直连端口（供 TVBox 或外部播放器直连；生产环境建议不映射或绑定 `127.0.0.1`）。 |
 
@@ -357,8 +357,6 @@ docker run -d --name Eco-hub --restart always --network Eco-network \
 
 | 环境变量 | 必填 | 默认值 | 说明 |
 | --- | :---: | --- | --- |
-| `COLLECT_PROFILE` | 否 | `auto` | 采集并发与写库性能档位。可选值：<br>• `auto`: 根据服务器 CPU 核心数自动调优（推荐）；<br>• `light`: 低配单机（≤2 核），写库稳态 24 页/秒，事务并发 3；<br>• `standard`: 主流机型（3-7 核）；<br>• `high`: 高配机型（≥8 核），大幅提升写阀与分页抓取并发。 |
-| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 全站访问量、播放热度与客户端设备类型数据分析总开关。默认 `false` 保持系统零额外开销与完全无痕；设为 `true` 或 `1` 开启后台统计报表。 |
 | `NODE_NAME` | 否 | 主机名 | 多节点分布式部署时当前节点的标识名称（单机部署无需配置）。 |
 | `ECOHUB_LOG_DIR` | 否 | 容器内 `logs/` | 自定义日志落盘目录（容器部署默认挂载或保留即可，无需修改）。 |
 

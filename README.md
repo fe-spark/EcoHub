@@ -68,7 +68,7 @@ curl -fsSL https://raw.githubusercontent.com/fe-spark/EcoHub/main/scripts/instal
 cd ~/ecohub
 ```
 
-编辑 `.env`：将 `openssl rand -hex 32` 的输出写入 `JWT_SECRET`，并修改 MySQL / Redis 密码，然后启动：
+编辑 `.env`：将 `openssl rand -hex 32` 的输出写入 `JWT_SECRET`，按需修改超级管理员密码 `ECOHUB_ADMIN_PASSWORD` 与 MySQL / Redis 密码，然后启动：
 
 ```bash
 docker compose up -d
@@ -82,7 +82,7 @@ docker compose up -d
 | `http://<主机>:3000/api/provide/tvbox` | TVBox / 影视仓 订阅地址 |
 | `http://<主机>:3000/api/provide/vod` | MacCMS 兼容接口 |
 
-默认账号：`admin` / `admin`。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
+默认账号：`admin` / `admin`（如未在 `.env` 中配置 `ECOHUB_ADMIN_PASSWORD`）。其它角色在账号管理中新建。对外部署前须立即修改默认密码。
 
 > **安全与网络建议**：生产环境建议通过 Nginx / 1Panel 配置反向代理与 HTTPS（80/443）。如需**不对公网暴露裸端口**，请在 `compose.yml` 的 `ports` 中显式绑定 `127.0.0.1:`（如 `127.0.0.1:3000:3000`），避免 Docker 默认规则绕过系统防火墙直接暴露端口；若无播放器直连需求，可直接注释 `18080` 端口映射。
 
