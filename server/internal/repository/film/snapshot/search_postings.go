@@ -20,20 +20,37 @@ func appendSingleItemPostings(posts *searchPostings, pos int32, item *FilmSearch
 	if posts == nil || item == nil {
 		return
 	}
-	seenRune := map[rune]struct{}{}
+	var seenRune [32]rune
+	seenRuneCount := 0
 	for _, r := range item.Item.CleanName {
 		if r < 128 {
 			continue
 		}
-		if _, ok := seenRune[r]; ok {
+		dup := false
+		for _, s := range seenRune[:seenRuneCount] {
+			if s == r {
+				dup = true
+				break
+			}
+		}
+		if dup {
 			continue
 		}
-		seenRune[r] = struct{}{}
-		posts.runes[r] = append(posts.runes[r], pos)
+		if seenRuneCount < len(seenRune) {
+			seenRune[seenRuneCount] = r
+			seenRuneCount++
+		}
+		list := posts.runes[r]
+		if len(list) > 0 && list[len(list)-1] == pos {
+			continue
+		}
+		posts.runes[r] = append(list, pos)
 	}
 	addAsciiPostings(posts.ascii, pos, item.Item.PinyinInitials)
-	for _, alt := range strings.Fields(item.Item.PinyinInitialAlts) {
-		addAsciiPostings(posts.ascii, pos, alt)
+	if alts := item.Item.PinyinInitialAlts; alts != "" {
+		for _, alt := range strings.Fields(alts) {
+			addAsciiPostings(posts.ascii, pos, alt)
+		}
 	}
 	addAsciiPostings(posts.ascii, pos, item.Item.PinyinFull)
 }
@@ -60,8 +77,8 @@ func cloneSearchPostings(orig *searchPostings) *searchPostings {
 
 func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	posts := &searchPostings{
-		runes: map[rune][]int32{},
-		ascii: map[string][]int32{},
+		runes: make(map[rune][]int32, 4096),
+		ascii: make(map[string][]int32, 4096),
 	}
 	for i := range items {
 		appendSingleItemPostings(posts, int32(i), &items[i])
@@ -74,20 +91,32 @@ func addAsciiPostings(dst map[string][]int32, pos int32, raw string) {
 	if raw == "" {
 		return
 	}
-	seen := map[string]struct{}{}
 	if len(raw) == 1 && isSearchASCII(raw[0]) {
 		appendPosting(dst, raw, pos)
 		return
 	}
-	for i := 0; i+1 < len(raw); i++ {
-		if !isSearchASCII(raw[i]) || !isSearchASCII(raw[i+1]) {
+	var seen [64]string
+	seenCount := 0
+	for i := range len(raw) - 1 {
+		c1, c2 := raw[i], raw[i+1]
+		if !isSearchASCII(c1) || !isSearchASCII(c2) {
 			continue
 		}
 		gram := raw[i : i+2]
-		if _, ok := seen[gram]; ok {
+		dup := false
+		for _, s := range seen[:seenCount] {
+			if s == gram {
+				dup = true
+				break
+			}
+		}
+		if dup {
 			continue
 		}
-		seen[gram] = struct{}{}
+		if seenCount < len(seen) {
+			seen[seenCount] = gram
+			seenCount++
+		}
 		appendPosting(dst, gram, pos)
 	}
 }
