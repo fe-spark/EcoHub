@@ -352,13 +352,14 @@ func ConvertFilmDetail(detail model.FilmDetail) model.MovieDetail {
 
 func resolvePlayGroupSeparator(note, playFrom, playURL string) string {
 	note = strings.TrimSpace(note)
-	if note != "" {
+	// 备注必须真的出现在线路名或地址里。爱旦把 note 填成一长串 $，实际分组仍是 $$$。
+	if note != "" && (strings.Contains(playFrom, note) || strings.Contains(playURL, note)) {
 		return note
 	}
 	if strings.Contains(playFrom, macCMSGroupSeparator) || strings.Contains(playURL, macCMSGroupSeparator) {
 		return macCMSGroupSeparator
 	}
-	return ""
+	return note
 }
 
 func splitPlaySources(playFrom, separator string) []string {
@@ -475,5 +476,5 @@ func ConvertPlayUrl(playUrl string) []model.MovieUrlInfo {
 		}
 		result = append(result, model.MovieUrlInfo{Episode: episode, Link: link})
 	}
-	return result
+	return model.DedupPlayURLs(result)
 }
