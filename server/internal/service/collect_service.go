@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -167,15 +168,9 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 	}
 	repository.MarkCategoryChanged()
 	repository.ClearIndexPageCache()
-	filmsnapshot.ClearActiveFilmReadModel()
 	filmsnapshot.BumpSearchCacheVersion()
 	filmsnapshot.RefreshAccessDataCaches()
 	filmsnapshot.ClearSearchCache()
-	if newID != "" {
-		if version := filmsnapshot.GetActiveReadModelVersion(); version != "" {
-			filmsnapshot.NotifySnapshotPublished(version)
-		}
-	}
 	enabled, err := repository.GetEnabledCollectSourceList()
 	if err != nil {
 		syslog.Errorf("[Collect] 读取启用采集站失败: %v", err)
@@ -213,15 +208,14 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			return
 		}
 
-		syslog.Infof("[Collect] 开始预热主站检索索引与首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
+		syslog.Infof("[Collect] 开始预热主站首页缓存 (epoch=%d, targetSource=%s)...", currentEpoch, targetSourceID)
 		if err := filmsnapshot.WarmSearchMetaIndex(); err != nil {
-			syslog.Errorf("[Collect] 切换主站后预热检索索引失败: %v", err)
+			syslog.Errorf("[Collect] 切换主站后确认检索索引失败: %v", err)
 			return
 		}
 
-		// 索引构建耗时期间若又有新切换发生，放弃写首页缓存，杜绝脏数据覆盖（ABA 问题）
 		if primarySwitchEpoch.Load() != currentEpoch {
-			syslog.Infof("[Collect] 索引已构建完成，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
+			syslog.Infof("[Collect] 索引已就绪，但主站代数已失效，跳过首页缓存写入 epoch=%d", currentEpoch)
 			return
 		}
 
@@ -229,7 +223,7 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 			if _, err := IndexSvc.IndexPage(targetSourceID); err != nil {
 				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
 			} else {
-				syslog.Infof("[Collect] 切换主站检索索引与首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
 			}
 		}
 	}(newID, epoch)
@@ -322,11 +316,15 @@ func (s *CollectService) updateFilmSourceCore(source model.FilmSource) error {
 	// 排序只走排序接口。编辑请求不带 sort，不能写成 0 把别的站顶成主站。
 	source.Sort = old.Sort
 
-	// 安全校验：如果有任何采集任务正在运行，禁止修改 URI 或数据协议，防止引发解析错乱
+	// 安全校验：如果当前采集站有任务正在运行，禁止修改 URI 或数据协议，防止引发解析错乱
 	isUriChanged := old.Uri != source.Uri
 	isFormatChanged := old.ResolveFormat() != source.ResolveFormat()
-	if (isUriChanged || isFormatChanged) && spider.IsAnyTaskRunning() {
-		return errors.New("当前有采集任务正在运行，请先停止所有任务后再执行地址或协议变更操作")
+	if (isUriChanged || isFormatChanged) && spider.IsTaskRunning(source.Id) {
+		name := strings.TrimSpace(source.Name)
+		if name == "" {
+			name = old.Name
+		}
+		return fmt.Errorf("采集站「%s」当前有采集任务正在运行或正在停止退出中，请稍候几秒后再修改地址或协议", name)
 	}
 
 	orphanMids, err := repository.UpdateCollectSourceReplacingData(source, isUriChanged, isUriChanged || isFormatChanged)
