@@ -184,8 +184,12 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 			continue
 		}
 		movies := pickInfos(byID, slot.movies)
-		if len(movies) == 0 {
-			continue
+		if movies == nil {
+			movies = make([]model.MovieBasicInfo, 0)
+		}
+		hot := pickInfos(byID, slot.hot)
+		if hot == nil {
+			hot = make([]model.MovieBasicInfo, 0)
 		}
 		filteredList = append(filteredList, map[string]any{
 			"nav":    slot.nav,

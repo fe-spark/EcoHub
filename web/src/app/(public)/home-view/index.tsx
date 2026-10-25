@@ -89,12 +89,7 @@ export default function HomePageView({
 
   const hasContent =
     Array.isArray(data.content) &&
-    data.content.some(
-      (section) =>
-        section.nav?.show &&
-        section.movies &&
-        section.movies.length > 0,
-    );
+    data.content.some((section) => section.nav?.show);
   const isEmpty = heroDeck.length === 0 && !hasContent;
 
   if (isEmpty) {
@@ -111,10 +106,8 @@ export default function HomePageView({
         if (!section.nav?.show) {
           return null;
         }
-
-        if (!section.movies || section.movies.length === 0) {
-          return null;
-        }
+        const movies = section.movies || [];
+        const hot = section.hot || [];
 
         return (
           <section key={idx} className={styles.section}>
@@ -160,7 +153,7 @@ export default function HomePageView({
             <div className={styles.sectionBody}>
               <div className={styles.filmGrid}>
                 <FilmList
-                  list={section.movies.slice(0, 12)}
+                  list={movies.slice(0, 12)}
                   className={styles.homeList}
                   col={6}
                 />
@@ -171,16 +164,29 @@ export default function HomePageView({
                   <FireOutlined style={{ color: "#ff4d4f" }} />
                   热播{section.nav.name}
                 </div>
-                {section.hot.slice(0, 12).map((movie, movieIndex) => (
+                {hot.length > 0 ? (
+                  hot.slice(0, 12).map((movie, movieIndex) => (
+                    <div
+                      key={movieIndex}
+                      className={styles.hotItem}
+                      onClick={() => goPlay(movie.id)}
+                    >
+                      <span className={styles.rank}>{movieIndex + 1}.</span>
+                      <span className={styles.name}>{movie.name}</span>
+                    </div>
+                  ))
+                ) : (
                   <div
-                    key={movieIndex}
-                    className={styles.hotItem}
-                    onClick={() => goPlay(movie.id)}
+                    style={{
+                      color: "var(--public-text-3, rgba(255, 255, 255, 0.45))",
+                      fontSize: 13,
+                      padding: "24px 0",
+                      textAlign: "center",
+                    }}
                   >
-                    <span className={styles.rank}>{movieIndex + 1}.</span>
-                    <span className={styles.name}>{movie.name}</span>
+                    暂无热播影片
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </section>
