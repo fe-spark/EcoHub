@@ -58,6 +58,8 @@ func SetupRouter() *gin.Engine {
 		frontApi.GET(`/films/filter`, handler.IndexHd.FilmTagSearch)
 		frontApi.GET(`/search/hot-keywords`, handler.IndexHd.HotKeywords)
 		frontApi.POST(`/stats/view`, handler.AccessHd.TrackView)
+		frontApi.GET(`/film/danmaku`, handler.DanmakuHd.GetDanmaku)
+		frontApi.POST(`/film/danmaku`, handler.DanmakuHd.PostDanmaku)
 	}
 
 	manageRoute := api.Group(`/manage`)

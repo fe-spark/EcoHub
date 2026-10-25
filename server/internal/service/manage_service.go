@@ -30,8 +30,8 @@ func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
 	return repository.GetSiteBasic()
 }
 
-// UpdateSiteBasic 更新网站基本信息（仅更新站点品牌与描述信息，保留已存的访问控制、Tip 和 Notice，除非显式传入）
-func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
+// UpdateSiteBasic 更新网站基本信息。访问控制保留。弹幕对象缺省时保留已存配置；传入时替换开关和地址，空白 AppID / AppSecret 不覆盖已存密钥。Tip 和 Notice 仅在请求带内容时替换。
+func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig, danmaku *model.DanmakuConfig) error {
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -41,6 +41,16 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr.Logo = bc.Logo
 	curr.Keyword = bc.Keyword
 	curr.Describe = bc.Describe
+	if danmaku != nil {
+		next := *danmaku
+		if strings.TrimSpace(next.AppID) == "" {
+			next.AppID = curr.Danmaku.AppID
+		}
+		if strings.TrimSpace(next.AppSecret) == "" {
+			next.AppSecret = curr.Danmaku.AppSecret
+		}
+		curr.Danmaku = next
+	}
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}

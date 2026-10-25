@@ -240,12 +240,46 @@ func decompressBody(resp *http.Response) ([]byte, error) {
 	return body, nil
 }
 
+var (
+	sharedInsecureTransport   = insecureTransport(sharedTransport)
+	proxyInsecureTransportsMu sync.RWMutex
+	proxyInsecureTransports   = map[string]*http.Transport{}
+)
+
 func insecureTransport(base *http.Transport) *http.Transport {
 	cloned := base.Clone()
 	cloned.TLSClientConfig = &tls.Config{InsecureSkipVerify: true}
 	return cloned
 }
 
+func getOrCreateInsecureTransport(base *http.Transport, proxyURL string) *http.Transport {
+	proxyURL = normalizeProxyURL(proxyURL)
+	if proxyURL == "" {
+		return sharedInsecureTransport
+	}
+	proxyInsecureTransportsMu.RLock()
+	if t, ok := proxyInsecureTransports[proxyURL]; ok {
+		proxyInsecureTransportsMu.RUnlock()
+		return t
+	}
+	proxyInsecureTransportsMu.RUnlock()
+
+	proxyInsecureTransportsMu.Lock()
+	defer proxyInsecureTransportsMu.Unlock()
+	if existing, ok := proxyInsecureTransports[proxyURL]; ok {
+		return existing
+	}
+	if len(proxyInsecureTransports) >= maxProxyTransports {
+		for k, old := range proxyInsecureTransports {
+			old.CloseIdleConnections()
+			delete(proxyInsecureTransports, k)
+			break
+		}
+	}
+	t := insecureTransport(base)
+	proxyInsecureTransports[proxyURL] = t
+	return t
+}
 // ApiGet 高性能原生 HTTP GET 请求（自动解压 Gzip/Deflate）
 func ApiGet(r *RequestInfo) {
 	targetUrl := buildUrl(r.Uri, r.Params)
@@ -267,7 +301,7 @@ func ApiGet(r *RequestInfo) {
 		transport = GetOrCreateProxyTransport(r.ProxyURL)
 	}
 	if r != nil && r.SkipTLSVerify {
-		transport = insecureTransport(transport)
+		transport = getOrCreateInsecureTransport(transport, r.ProxyURL)
 	}
 
 	timeout := 20 * time.Second

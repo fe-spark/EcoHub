@@ -55,25 +55,6 @@ func appendSingleItemPostings(posts *searchPostings, pos int32, item *FilmSearch
 	addAsciiPostings(posts.ascii, pos, item.Item.PinyinFull)
 }
 
-func cloneSearchPostings(orig *searchPostings) *searchPostings {
-	if orig == nil {
-		return &searchPostings{
-			runes: map[rune][]int32{},
-			ascii: map[string][]int32{},
-		}
-	}
-	p := &searchPostings{
-		runes: make(map[rune][]int32, len(orig.runes)),
-		ascii: make(map[string][]int32, len(orig.ascii)),
-	}
-	for k, v := range orig.runes {
-		p.runes[k] = append([]int32(nil), v...)
-	}
-	for k, v := range orig.ascii {
-		p.ascii[k] = append([]int32(nil), v...)
-	}
-	return p
-}
 
 func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	posts := &searchPostings{

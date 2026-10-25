@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -74,24 +77,45 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 	uc, isUser := v.(*utils.UserClaims)
 	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
 		cfg.ProvideKey = ""
+		cfg.Danmaku.AppID = ""
+		cfg.Danmaku.AppSecret = ""
 	}
 	dto.Success(cfg, "网站基本信息获取成功", c)
 }
 
 // UpdateSiteBasic 更新网站配置信息
 func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
-	bc := model.BasicConfig{}
-	if err := c.ShouldBindJSON(&bc); err == nil {
-		if len(strings.TrimSpace(bc.SiteName)) <= 0 {
-			dto.Failed("网站名称不能为空", c)
-			return
-		}
-	} else {
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
 		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
 		return
 	}
-
-	if err := service.ManageSvc.UpdateSiteBasic(bc); err != nil {
+	var bc model.BasicConfig
+	if err := json.Unmarshal(body, &bc); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
+		return
+	}
+	if len(strings.TrimSpace(bc.SiteName)) <= 0 {
+		dto.Failed("网站名称不能为空", c)
+		return
+	}
+	var probe struct {
+		Danmaku json.RawMessage `json:"danmaku"`
+	}
+	if err := json.Unmarshal(body, &probe); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
+		return
+	}
+	var incoming *model.DanmakuConfig
+	if raw := bytes.TrimSpace(probe.Danmaku); len(raw) > 0 && string(raw) != "null" {
+		var parsed model.DanmakuConfig
+		if err := json.Unmarshal(raw, &parsed); err != nil {
+			dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
+			return
+		}
+		incoming = &parsed
+	}
+	if err := service.ManageSvc.UpdateSiteBasic(bc, incoming); err != nil {
 		dto.Failed(fmt.Sprint("网站配置更新失败:  ", err), c)
 		return
 	}

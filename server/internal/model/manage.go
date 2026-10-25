@@ -60,9 +60,10 @@ type BasicConfig struct {
 	State         bool         `json:"state"`         // 网站状态 开启 || 关闭
 	Hint          string       `json:"hint"`          // 网站关闭提示
 	PrivateAccess bool         `json:"privateAccess"` // 私有化访问控制（仅登录可用）
-	ProvideKey    string       `json:"provideKey"`    // TVBox/订阅专属访问密钥
-	Tip           TipConfig    `json:"tip"`           // 前台赞赏
-	Notice        NoticeConfig `json:"notice"`        // 开屏公告
+	ProvideKey    string        `json:"provideKey"`    // TVBox/订阅专属访问密钥
+	Danmaku       DanmakuConfig `json:"danmaku"`       // 弹幕系统配置
+	Tip           TipConfig     `json:"tip"`           // 前台赞赏
+	Notice        NoticeConfig  `json:"notice"`        // 开屏公告
 }
 
 // AccessConfig 网站访问控制配置（运行状态/维护提示/私有化/订阅密钥）
@@ -127,8 +128,9 @@ type SiteConfigRecord struct {
 	Hint          string `gorm:"size:512"`
 	PrivateAccess bool   `gorm:"default:false;column:private_access"`
 	ProvideKey    string `gorm:"size:64;column:provide_key"`
-	TipJSON       string `gorm:"type:text;column:tip_json"`    // TipConfig JSON
-	NoticeJSON    string `gorm:"type:text;column:notice_json"` // NoticeConfig JSON
+	DanmakuJSON   string `gorm:"type:text;column:danmaku_json"` // DanmakuConfig JSON
+	TipJSON       string `gorm:"type:text;column:tip_json"`     // TipConfig JSON
+	NoticeJSON    string `gorm:"type:text;column:notice_json"`  // NoticeConfig JSON
 }
 
 func (SiteConfigRecord) TableName() string {

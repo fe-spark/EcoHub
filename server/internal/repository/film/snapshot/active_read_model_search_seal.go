@@ -313,12 +313,9 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		newFilms[k] = v
 	}
 
-	newPosts := cloneSearchPostings(cur.SearchPosts)
-
 	for mid, meta := range upsertMap {
 		if idx, exists := newPos[mid]; exists {
 			newItems[idx] = meta
-			appendSingleItemPostings(newPosts, int32(idx), &newItems[idx])
 		} else {
 			newIdx := len(newItems)
 			newItems = append(newItems, meta)
@@ -329,7 +326,6 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 			if cKey := strings.TrimSpace(meta.CategoryKey); cKey != "" {
 				newByCategory[cKey] = append(newByCategory[cKey], newIdx)
 			}
-			appendSingleItemPostings(newPosts, int32(newIdx), &newItems[newIdx])
 		}
 	}
 
@@ -358,7 +354,7 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		RecentPools:         cur.RecentPools,
 		SourceHot:           cur.SourceHot,
 		ByCategory:          newByCategory,
-		SearchPosts:         newPosts,
+		SearchPosts:         buildSearchPostings(newItems),
 	}
 }
 
