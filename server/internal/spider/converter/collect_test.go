@@ -50,6 +50,25 @@ func TestParseEpisodeGluedURL(t *testing.T) {
 	}
 }
 
+func TestLovedanDollarNoteDoesNotMergePlayGroups(t *testing.T) {
+	detail := ConvertFilmDetail(model.FilmDetail{
+		VodID:       147496,
+		VodName:     "时光代理人第三季",
+		VodPlayNote: "$$$$$$$$$$$$$$$$$$$$$",
+		VodPlayFrom: "1080zyk$$$ffm3u8",
+		VodPlayURL:  "第01集$https://cdn.example/a1.m3u8#第02集$https://cdn.example/a2.m3u8$$$第01集$https://cdn.example/b1.m3u8#第02集$https://cdn.example/b2.m3u8",
+	})
+	if len(detail.PlayFrom) != 2 || len(detail.PlayList) != 2 {
+		t.Fatalf("from=%v groups=%d", detail.PlayFrom, len(detail.PlayList))
+	}
+	if len(detail.PlayList[0]) != 2 || detail.PlayList[0][0].Episode != "第01集" {
+		t.Fatalf("group0=%+v", detail.PlayList[0])
+	}
+	if len(detail.PlayList[1]) != 2 || detail.PlayList[1][1].Link != "https://cdn.example/b2.m3u8" {
+		t.Fatalf("group1=%+v", detail.PlayList[1])
+	}
+}
+
 func TestInferCategoryParentsBySemantic(t *testing.T) {
 	classes := []model.FilmClass{
 		{ID: 1, Name: "电影"},
@@ -304,4 +323,3 @@ func TestConvertFilmDetails_FiltersUnplayableFilms(t *testing.T) {
 		t.Fatalf("unexpected film: %+v", converted[0])
 	}
 }
-
