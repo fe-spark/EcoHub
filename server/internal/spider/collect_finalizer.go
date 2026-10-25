@@ -20,7 +20,7 @@ func publishFilmSnapshot(affectedMIDs []int64) (string, error) {
 			return "", nil
 		}
 	}
-	version, updated, err := filmsnapshot.UpsertActiveSnapshotsByMids(mids...)
+	version, updated, err := filmsnapshot.TouchActiveSnapshotsByMids(mids...)
 	if err != nil {
 		return "", fmt.Errorf("upsert film list snapshot failed: %w", err)
 	}

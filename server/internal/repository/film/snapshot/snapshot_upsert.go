@@ -101,6 +101,15 @@ func UpsertActiveSnapshotByMid(mid int64) error {
 }
 
 func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
+	return upsertActiveSnapshots(mids, true)
+}
+
+// TouchActiveSnapshotsByMids 只登记列表缓存失效。不碰检索索引。
+func TouchActiveSnapshotsByMids(mids ...int64) (string, int, error) {
+	return upsertActiveSnapshots(mids, false)
+}
+
+func upsertActiveSnapshots(mids []int64, refreshSearch bool) (string, int, error) {
 	activeSnapshotUpsertMu.Lock()
 	defer activeSnapshotUpsertMu.Unlock()
 	startedAt := time.Now()
@@ -123,14 +132,16 @@ func UpsertActiveSnapshotsByMids(mids ...int64) (string, int, error) {
 		return "", 0, err
 	}
 	deletedMIDs := diffMIDs(ids, existing)
-	if len(deletedMIDs) > 0 {
-		RemoveMidsFromActiveFilmSearchIndex(version, deletedMIDs)
-	}
-	if len(existing) > 0 {
-		UpsertMidsToActiveFilmSearchIndex(version, existing)
+	if refreshSearch {
+		if len(deletedMIDs) > 0 {
+			RemoveMidsFromActiveFilmSearchIndex(version, deletedMIDs)
+		}
+		if len(existing) > 0 {
+			UpsertMidsToActiveFilmSearchIndex(version, existing)
+		}
 	}
 	scheduleSnapshotCacheInvalidation(version, ids)
-	log.Printf("[Snapshot] 列表可见性已跟随 film_index version=%s input=%d kept=%d deleted=%d cost=%s", version, len(ids), len(existing), len(deletedMIDs), time.Since(startedAt))
+	log.Printf("[Snapshot] 列表可见性已跟随 film_index version=%s input=%d kept=%d deleted=%d search=%t cost=%s", version, len(ids), len(existing), len(deletedMIDs), refreshSearch, time.Since(startedAt))
 	return version, len(existing), nil
 }
 

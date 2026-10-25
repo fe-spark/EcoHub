@@ -354,10 +354,9 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		RecentPools:         cur.RecentPools,
 		SourceHot:           cur.SourceHot,
 		ByCategory:          newByCategory,
-		SearchPosts:         buildSearchPostings(newItems),
+		SearchPosts:         cur.SearchPosts,
 	}
 }
-
 
 func hotPoolMapKey(sourceID, categoryKey string) string {
 	sourceID = strings.TrimSpace(sourceID)
