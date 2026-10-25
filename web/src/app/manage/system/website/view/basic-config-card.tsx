@@ -9,6 +9,7 @@ import {
   Input,
   Space,
   Spin,
+  Switch,
   Typography,
 } from "antd";
 import {
@@ -25,13 +26,30 @@ import UnsavedChangesBar from "@/app/manage/components/unsaved-changes-bar";
 import { isFormValuesEqual } from "@/lib/deep-equal";
 import styles from "./basic-config-card.module.less";
 
+export interface DanmakuPayload {
+  enabled: boolean;
+  autoSniff: boolean;
+  apiUrl: string;
+  appId?: string;
+  appSecret?: string;
+}
+
 export interface BasicInfoPayload {
   siteName: string;
   siteUrl: string;
   keyword: string;
   logo: string;
   describe: string;
+  danmaku: DanmakuPayload;
 }
+
+const DEFAULT_DANMAKU: DanmakuPayload = {
+  enabled: true,
+  autoSniff: true,
+  apiUrl: "",
+  appId: "",
+  appSecret: "",
+};
 
 const DEFAULT_BASIC_INFO: BasicInfoPayload = {
   siteName: "EcoHub",
@@ -39,8 +57,8 @@ const DEFAULT_BASIC_INFO: BasicInfoPayload = {
   keyword: "",
   logo: "",
   describe: "",
+  danmaku: DEFAULT_DANMAKU,
 };
-
 const MAX_SITE_NAME_LEN = 64;
 const MAX_KEYWORD_LEN = 128;
 const MAX_DESCRIBE_LEN = 512;
@@ -54,6 +72,13 @@ function normalizeBasicInfo(
     keyword: String(raw?.keyword ?? "").trim(),
     logo: String(raw?.logo ?? "").trim(),
     describe: String(raw?.describe ?? "").trim(),
+    danmaku: {
+      enabled: raw?.danmaku?.enabled !== false,
+      autoSniff: raw?.danmaku?.autoSniff !== false,
+      apiUrl: String(raw?.danmaku?.apiUrl ?? "").trim(),
+      appId: String(raw?.danmaku?.appId ?? "").trim(),
+      appSecret: String(raw?.danmaku?.appSecret ?? "").trim(),
+    },
   };
 }
 
@@ -257,6 +282,119 @@ export default function BasicConfigCard({ canWrite }: BasicConfigCardProps) {
               }}
             />
           </div>
+
+          {/* 弹幕功能配置 */}
+          <div className={styles.field}>
+            <Flex justify="space-between" align="center">
+              <div>
+                <Typography.Text strong>启用弹幕系统</Typography.Text>
+                <div>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    开启后，播放器将挂载弹幕插件并展示弹幕图层
+                  </Typography.Text>
+                </div>
+              </div>
+              <Switch
+                disabled={!canWrite}
+                checked={currentValues.danmaku?.enabled !== false}
+                onChange={(checked) => {
+                  setIsTouched(true);
+                  setDraft((prev) => ({
+                    ...prev,
+                    danmaku: { ...(prev.danmaku || DEFAULT_DANMAKU), enabled: checked },
+                  }));
+                }}
+              />
+            </Flex>
+          </div>
+
+          {currentValues.danmaku?.enabled !== false && (
+            <>
+              <div className={styles.field}>
+                <Flex justify="space-between" align="center">
+                  <div>
+                    <Typography.Text strong>自动嗅探全网弹幕</Typography.Text>
+                    <div>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        开启后，播放视频时自动根据片名和集数联网嗅探全网弹幕（弹弹play协议），关闭后仅保留本站自发弹幕
+                      </Typography.Text>
+                    </div>
+                  </div>
+                  <Switch
+                    disabled={!canWrite}
+                    checked={currentValues.danmaku?.autoSniff !== false}
+                    onChange={(checked) => {
+                      setIsTouched(true);
+                      setDraft((prev) => ({
+                        ...prev,
+                        danmaku: { ...(prev.danmaku || DEFAULT_DANMAKU), autoSniff: checked },
+                      }));
+                    }}
+                  />
+                </Flex>
+              </div>
+
+              <div className={styles.field}>
+                <Typography.Text strong>自定义弹幕 API 地址 (可选)</Typography.Text>
+                <Input
+                  disabled={!canWrite}
+                  placeholder="留空默认走官方接口；自建节点可填如 http://192.168.1.100:9321/api/v2"
+                  value={currentValues.danmaku?.apiUrl || ""}
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({
+                      ...prev,
+                      danmaku: { ...(prev.danmaku || DEFAULT_DANMAKU), apiUrl: e.target.value },
+                    }));
+                  }}
+                  style={{ marginTop: 6 }}
+                />
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  支持兼容弹弹play协议的自建 danmu-api 容器；留空则直接使用官方开放接口（需配置下方 AppId 与 Secret）
+                </Typography.Text>
+              </div>
+
+              <div className={styles.field}>
+                <Typography.Text strong>弹弹play AppId (官方接口必填)</Typography.Text>
+                <Input
+                  disabled={!canWrite}
+                  placeholder="填写开放平台分配的 AppId（例如 jedqb3k6s7）"
+                  value={currentValues.danmaku?.appId || ""}
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({
+                      ...prev,
+                      danmaku: { ...(prev.danmaku || DEFAULT_DANMAKU), appId: e.target.value },
+                    }));
+                  }}
+                  style={{ marginTop: 6 }}
+                />
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  从 dev.dandanplay.com 应用详情页获取
+                </Typography.Text>
+              </div>
+
+              <div className={styles.field}>
+                <Typography.Text strong>弹弹play AppSecret (官方接口必填)</Typography.Text>
+                <Input.Password
+                  disabled={!canWrite}
+                  placeholder="填写 dev.dandanplay.com 分配的 AppSecret 密钥"
+                  value={currentValues.danmaku?.appSecret || ""}
+                  onChange={(e) => {
+                    setIsTouched(true);
+                    setDraft((prev) => ({
+                      ...prev,
+                      danmaku: { ...(prev.danmaku || DEFAULT_DANMAKU), appSecret: e.target.value },
+                    }));
+                  }}
+                  style={{ marginTop: 6 }}
+                />
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  在开放平台应用详情页中复制 AppSecret 1 或 AppSecret 2 即可
+                </Typography.Text>
+              </div>
+            </>
+          )}
         </Flex>
       </Spin>
 

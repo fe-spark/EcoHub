@@ -309,12 +309,13 @@ func CollectPages(parentCtx context.Context, pageCount int, s *model.FilmSource,
 						Complete: func(completion scheduler.Completion) {
 							select {
 							case writeCompletions <- completion:
+								writeWG.Done()
 							default:
 								go func() {
 									writeCompletions <- completion
+									writeWG.Done()
 								}()
 							}
-							writeWG.Done()
 						},
 					})
 					if submitErr != nil {

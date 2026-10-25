@@ -29,6 +29,7 @@ const (
 	TableNotifyConfig       = "notify_config"
 	TableFilmSource         = "film_sources"
 	TableFilmTMDBScrape     = "film_tmdb_scrapes"
+	TableDanmakuRecord      = "danmaku_record"
 )
 
 // FilmHasPlaySourceSQL 判断 film_index 当前行是否有指定采集源的播放线路。
@@ -66,4 +67,5 @@ var AllModels = []any{
 	&ProxyConfigRecord{},
 	&NotifyConfigRecord{},
 	&FilmTMDBScrape{},
+	&DanmakuRecord{},
 }

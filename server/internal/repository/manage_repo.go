@@ -83,12 +83,20 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	if err != nil {
 		return err
 	}
+	danmakuJSON, err := model.EncodeDanmakuJSON(c.Danmaku)
+	if err != nil {
+		return err
+	}
 	rec := model.SiteConfigRecord{
 		SiteName: c.SiteName, SiteURL: c.SiteURL, Logo: c.Logo,
 		Keyword: c.Keyword, Describe: c.Describe, State: c.State, Hint: c.Hint,
 		PrivateAccess: c.PrivateAccess, ProvideKey: strings.TrimSpace(c.ProvideKey),
-		TipJSON:    tipJSON,
-		NoticeJSON: noticeJSON,
+		DanmakuJSON: danmakuJSON,
+		TipJSON:     tipJSON,
+		NoticeJSON:  noticeJSON,
+	}
+	if db.Mdb == nil {
+		return errors.New("数据库未连接")
 	}
 	if err := db.Mdb.Transaction(func(tx *gorm.DB) error {
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.SiteConfigRecord{}).Error; err != nil {
@@ -110,11 +118,22 @@ func SaveSiteBasic(c model.BasicConfig) error {
 	return nil
 }
 
+func cachedBasicHasDanmaku(data string) bool {
+	var probe struct {
+		Danmaku json.RawMessage `json:"danmaku"`
+	}
+	if err := json.Unmarshal([]byte(data), &probe); err != nil {
+		return false
+	}
+	raw := strings.TrimSpace(string(probe.Danmaku))
+	return raw != "" && raw != "null"
+}
+
 // GetSiteBasic 读取网站基本配置。没有记录时返回默认赞赏和公告，不写入缓存。
 func GetSiteBasic() (model.BasicConfig, error) {
 	if data, ok, err := readCache(config.SiteConfigBasic); err != nil {
 		return model.BasicConfig{}, err
-	} else if ok && data != "" {
+	} else if ok && data != "" && cachedBasicHasDanmaku(data) {
 		var cached model.BasicConfig
 		if err := json.Unmarshal([]byte(data), &cached); err != nil {
 			if delErr := dropCache(config.SiteConfigBasic); delErr != nil {
@@ -134,8 +153,9 @@ func GetSiteBasic() (model.BasicConfig, error) {
 	if err := db.Mdb.Order("id DESC").First(&rec).Error; err != nil {
 		if recordNotFound(err) {
 			return model.BasicConfig{
-				Tip:    model.DefaultTipConfig(),
-				Notice: model.DefaultNoticeConfig(),
+				Danmaku: model.DefaultDanmakuConfig(),
+				Tip:     model.DefaultTipConfig(),
+				Notice:  model.DefaultNoticeConfig(),
 			}, nil
 		}
 		return model.BasicConfig{}, err
@@ -148,12 +168,18 @@ func GetSiteBasic() (model.BasicConfig, error) {
 	if err != nil {
 		return model.BasicConfig{}, err
 	}
+	danmaku, err := model.DecodeDanmakuJSON(rec.DanmakuJSON)
+	if err != nil {
+		return model.BasicConfig{}, err
+	}
 	c := model.BasicConfig{
 		SiteName: rec.SiteName, SiteURL: NormalizeSiteURL(rec.SiteURL), Logo: rec.Logo,
 		Keyword: rec.Keyword, Describe: rec.Describe, State: rec.State, Hint: rec.Hint,
-		PrivateAccess: rec.PrivateAccess, ProvideKey: rec.ProvideKey,
-		Tip:    tip,
-		Notice: notice,
+		PrivateAccess: rec.PrivateAccess,
+		ProvideKey:    rec.ProvideKey,
+		Danmaku:       danmaku,
+		Tip:           tip,
+		Notice:        notice,
 	}
 	raw, err := json.Marshal(c)
 	if err != nil {

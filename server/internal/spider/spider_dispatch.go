@@ -125,7 +125,6 @@ func runSourcesWithLimitCore(sources []model.FilmSource, h int, tag, trigger str
 	triggerCollectDoneHooks()
 }
 
-
 func probeSourcePageCount(s *model.FilmSource, h int, trigger string) error {
 	if progress.IsStopped(s.Id) || progress.IsStopping(s.Id) {
 		return nil
@@ -262,7 +261,17 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 			}
 			if err := probeSourcePageCount(&fs, h, trigger); err != nil {
 				syslog.Errorf("[%s] 站点 %s 总页探测失败: %v", tag, fs.Name, err)
-				abandonQueuedCollectSource(fs, batchCtx)
+				if batchCtx != nil {
+					batchCtx.RecordSourceError(fs.Id, err.Error())
+				}
+				emitSourceFailedNotify(fs.Id, fs.Name, err.Error())
+				progress.Update(fs.Id, func(cur *model.CollectProgress) {
+					switch cur.Status {
+					case progress.StatusStarting, progress.StatusRunning:
+						cur.Status = progress.StatusFailed
+					}
+				})
+				batchCtx.releaseSourceOccupy(fs.Id)
 				return
 			}
 			if progress.IsStopped(fs.Id) || progress.PageTotal(fs.Id) <= 0 {

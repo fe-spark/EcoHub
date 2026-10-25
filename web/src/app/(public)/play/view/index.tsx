@@ -357,6 +357,9 @@ export default function PlayPageView({
               <VideoPlayer
                 key={`${playingSourceId}-${current.index}-${current.link}`}
                 src={current.link}
+                filmId={currentFilm?.id}
+                filmTitle={currentFilm?.name}
+                episode={typeof current.index === "number" ? current.index + 1 : 1}
                 initialTime={playInitialTime}
                 autoplay={autoplay}
                 onEnded={() => autoplay && handlePlayNext()}

@@ -19,6 +19,7 @@ import (
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	"server/internal/spider/fetcher"
+	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
@@ -188,6 +189,8 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	}()
 	select {
 	case <-ctx.Done():
+		settled = true
+		abandonFailureRetry(fr.ID)
 		return
 	default:
 	}
@@ -202,6 +205,11 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	}
 
 	list, err := fetcher.GetFilmDetailWithRetry(ctx, s, r)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		settled = true
+		abandonFailureRetry(fr.ID)
+		return
+	}
 	if err != nil || len(list) <= 0 {
 		if batchCtx != nil && err != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
@@ -215,6 +223,11 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 	}
 
 	written, err := saveCollectedFilmForCollect(ctx, s, fr.PageNumber, list)
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		settled = true
+		abandonFailureRetry(fr.ID)
+		return
+	}
 	if err != nil {
 		if batchCtx != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
@@ -349,10 +362,45 @@ func EnqueuePendingFailureRecovers() (FailureRecoverOutcome, error) {
 }
 
 func recoverQueuedFailureRecords(source model.FilmSource, records []model.FailureRecord, batchCtx *collectBatchContext) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// 上一轮采集留下的 stopping/stopped 不是这次重试的停止信号。
+	baselineStopped := progress.IsStopping(source.Id) || progress.IsStopped(source.Id)
+	stopWatch := make(chan struct{})
+	defer close(stopWatch)
+	go func() {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-ticker.C:
+				if recoverStopRequested(source.Id, baselineStopped) {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
 	for i := range records {
+		if ctx.Err() != nil || recoverStopRequested(source.Id, baselineStopped) {
+			for j := i; j < len(records); j++ {
+				abandonFailureRetry(records[j].ID)
+			}
+			abandonFailureRecoverPending(source.Id)
+			break
+		}
 		record := records[i]
-		recoverFilmPage(context.Background(), &source, &record, batchCtx)
+		recoverFilmPage(ctx, &source, &record, batchCtx)
 	}
+}
+
+func recoverStopRequested(id string, baselineStopped bool) bool {
+	if baselineStopped {
+		return false
+	}
+	return progress.IsStopping(id) || progress.IsStopped(id)
 }
 
 func FullRecoverSpider() {
