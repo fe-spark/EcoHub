@@ -19,24 +19,6 @@ export function isLocalFilmID(filmId: string | number): boolean {
   return Number.isFinite(numeric) && numeric > 0;
 }
 
-export function livePlayHistoryID(sourceId?: string, sourceMid?: string | number): string {
-  const source = String(sourceId || "").trim();
-  const sid = String(sourceMid ?? "").trim();
-  if (!source || !sid || sid === "0") {
-    return "";
-  }
-  return `${source}:${sid}`;
-}
-
-function splitLivePlayID(filmId: string): { sourceId: string; sid: string } | null {
-  const id = normalizeFilmID(filmId);
-  const sep = id.lastIndexOf(":");
-  if (sep <= 0 || sep === id.length - 1) {
-    return null;
-  }
-  return { sourceId: id.slice(0, sep), sid: id.slice(sep + 1) };
-}
-
 export function buildPlayPath(
   filmId: string,
   sourceId?: string,
@@ -56,30 +38,6 @@ export function buildPlayPath(
     params.set("currentTime", String(Math.floor(currentTime)));
   }
   return `/play?${params.toString()}`;
-}
-
-export function buildLivePlayPath(
-  sourceId?: string,
-  sourceMid?: string | number,
-  episodeIndex?: number,
-  currentTime?: number,
-): string {
-  const params = new URLSearchParams();
-  const source = String(sourceId || "").trim();
-  const sid = String(sourceMid ?? "").trim();
-  if (source) {
-    params.set("source", source);
-  }
-  if (sid && sid !== "0") {
-    params.set("sid", sid);
-  }
-  if (typeof episodeIndex === "number" && Number.isFinite(episodeIndex) && episodeIndex >= 0) {
-    params.set("episode", String(episodeIndex));
-  }
-  if (typeof currentTime === "number" && Number.isFinite(currentTime) && currentTime > 0) {
-    params.set("currentTime", String(Math.floor(currentTime)));
-  }
-  return `/play/live?${params.toString()}`;
 }
 
 function resolveHistoryRecord(filmId: string): HistoryRecord | null {
@@ -103,10 +61,7 @@ export function resolvePlayEntryPath(
 ): string {
   const normalizedFilmId = normalizeFilmID(filmId);
   const explicitSourceId = String(fallback?.sourceId || "").trim();
-  const historyKey = isLocalFilmID(normalizedFilmId)
-    ? normalizedFilmId
-    : normalizedFilmId || livePlayHistoryID(explicitSourceId, fallback?.sourceMid);
-  const historyRecord = resolveHistoryRecord(historyKey);
+  const historyRecord = resolveHistoryRecord(normalizedFilmId);
 
   if (explicitSourceId && isLocalFilmID(normalizedFilmId)) {
     const isSameSource = historyRecord?.sourceId === explicitSourceId;
@@ -135,11 +90,5 @@ export function resolvePlayEntryPath(
     );
   }
 
-  const live = splitLivePlayID(String(historyRecord?.id || historyKey || ""));
-  return buildLivePlayPath(
-    live?.sourceId || fallback?.sourceId,
-    live?.sid || fallback?.sourceMid,
-    historyRecord?.episodeIndex ?? fallback?.episodeIndex,
-    historyRecord?.currentTime,
-  );
+  return "/search";
 }
