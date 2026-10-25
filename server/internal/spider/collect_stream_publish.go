@@ -273,6 +273,7 @@ func finalizeStreamPublish(warmupHome ...bool) error {
 	if err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
+	filmsnapshot.RequestActiveFilmSearchIndexRebuild()
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
