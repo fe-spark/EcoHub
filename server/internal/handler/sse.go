@@ -35,7 +35,9 @@ func openSSE(c *gin.Context) (*sseWriter, bool) {
 		return nil, false
 	}
 	flusher.Flush()
-	return &sseWriter{w: c.Writer, f: flusher}, true
+	writer := &sseWriter{w: c.Writer, f: flusher}
+	_ = writer.Comment("ready")
+	return writer, true
 }
 
 // SendData 写出一条不带事件名的 data。

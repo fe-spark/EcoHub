@@ -48,7 +48,12 @@ func startSearchRebuild() {
 	}
 	searchRebuild.running = true
 	searchRebuild.mu.Unlock()
-	go runSearchRebuild()
+
+	searchMetaBuildWg.Add(1)
+	go func() {
+		defer searchMetaBuildWg.Done()
+		runSearchRebuild()
+	}()
 }
 
 func runSearchRebuild() {
@@ -63,11 +68,6 @@ func runSearchRebuild() {
 		}
 
 		searchRebuild.mu.Lock()
-		if err != nil && searchRebuild.gen == seen {
-			searchRebuild.running = false
-			searchRebuild.mu.Unlock()
-			return
-		}
 		if searchRebuild.gen == seen {
 			searchRebuild.running = false
 			searchRebuild.mu.Unlock()
@@ -82,6 +82,9 @@ func scanAndStoreActiveFilmSearchIndex() error {
 	if version == "" || db.Mdb == nil {
 		return nil
 	}
+	activeFilmSearchMetasMu.Lock()
+	defer activeFilmSearchMetasMu.Unlock()
+
 	isSearchIndexBuilding.Store(true)
 	defer isSearchIndexBuilding.Store(false)
 	started := time.Now()
@@ -92,9 +95,7 @@ func scanAndStoreActiveFilmSearchIndex() error {
 	}
 	attachPlaySources(items, plays)
 	idx := sealSearchMetaIndex(version, items)
-	activeFilmSearchMetasMu.Lock()
 	activeFilmSearchMetas.Store(idx)
-	activeFilmSearchMetasMu.Unlock()
 	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
 	return nil
 }

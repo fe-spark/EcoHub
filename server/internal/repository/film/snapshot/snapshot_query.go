@@ -71,7 +71,7 @@ func GetSnapshotsByMidsOrdered(version string, mids []int64) ([]model.FilmListSn
 		}
 		chunkMids := uniq[start:end]
 		var rows []model.FilmIndex
-		if err := liveFilmQuery().Select(basicSelectFields+", sub_title").Where("mid IN ?", chunkMids).Find(&rows).Error; err != nil {
+		if err := liveFilmQuery().Select(basicSelectFields+", sub_title, category_key, root_category_key").Where("mid IN ?", chunkMids).Find(&rows).Error; err != nil {
 			return nil, err
 		}
 		scrapes := LoadActiveScrapesByMids(chunkMids)

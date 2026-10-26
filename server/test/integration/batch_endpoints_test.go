@@ -17,8 +17,8 @@ import (
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 )
-
 func init() {
 	gin.SetMode(gin.TestMode)
 }
@@ -36,7 +36,7 @@ func setupIntegrationContext(t *testing.T) (*gin.Engine, string, uint) {
 	if err := repository.SaveUserToken(adminToken, adminUserID); err != nil {
 		t.Fatalf("保存管理员 Token 失败: %v", err)
 	}
-
+	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, UserName: "admin", Role: model.UserRoleAdmin, Status: 0})
 	gdb.Create(&model.Category{Id: 1, Pid: 0, Name: "电影", Show: true, Sort: 1})
 	gdb.Create(&model.Category{Id: 2, Pid: 1, Name: "动作片", Show: true, Sort: 1})
 	gdb.Create(&model.FilmSource{

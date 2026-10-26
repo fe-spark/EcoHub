@@ -82,10 +82,11 @@ func (h *SystemLogHandler) Stream(c *gin.Context) {
 		if err != nil {
 			return
 		}
-	}
-	after, err = sendLogDelta(stream, after)
-	if err != nil {
-		return
+	} else {
+		after, err = sendLogDelta(stream, after)
+		if err != nil {
+			return
+		}
 	}
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()

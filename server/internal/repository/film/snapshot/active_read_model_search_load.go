@@ -14,7 +14,6 @@ import (
 	"server/internal/model"
 	"server/internal/utils"
 
-	"golang.org/x/sync/errgroup"
 )
 
 const searchMetaLoadPageSize = 5000
@@ -75,22 +74,8 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		defer isSearchIndexBuilding.Store(false)
 		started := time.Now()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
-		var (
-			items []FilmSearchMeta
-			plays map[int64][]string
-		)
-		g, gctx := errgroup.WithContext(context.Background())
-		g.Go(func() error {
-			var err error
-			items, err = loadFilmSearchMetaItems(gctx, version)
-			return err
-		})
-		g.Go(func() error {
-			var err error
-			plays, err = loadPlaySources(nil)
-			return err
-		})
-		if err := g.Wait(); err != nil {
+		items, plays, err := loadSearchIndexParts(version)
+		if err != nil {
 			return nil, err
 		}
 		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
