@@ -209,6 +209,23 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 	return b
 }
 
+func (b *collectBatchContext) takeAffectedMIDs() []int64 {
+	if b == nil {
+		return nil
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if len(b.masterAffectedMIDs) == 0 {
+		return nil
+	}
+	mids := make([]int64, 0, len(b.masterAffectedMIDs))
+	for mid := range b.masterAffectedMIDs {
+		mids = append(mids, mid)
+	}
+	b.masterAffectedMIDs = make(map[int64]struct{})
+	return mids
+}
+
 func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids []int64) {
 	if b == nil || len(mids) == 0 || s == nil {
 		return
@@ -387,7 +404,7 @@ func (b *collectBatchContext) finalizePrimarySource(sourceID string) error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	return finalizeStreamPublish(true)
+	return finalizeStreamPublish(b.takeAffectedMIDs, true)
 }
 
 func (b *collectBatchContext) flushAndFinalize() error {
@@ -407,7 +424,6 @@ func (b *collectBatchContext) flushAndFinalize() error {
 		}
 	}
 	b.finishedSources = make(map[string]model.FilmSource)
-	b.masterAffectedMIDs = make(map[int64]struct{})
 	b.mu.Unlock()
 	if !hasWork {
 		return nil
@@ -418,7 +434,7 @@ func (b *collectBatchContext) flushAndFinalize() error {
 	publishMu.Lock()
 	defer publishMu.Unlock()
 
-	return finalizeStreamPublish(warmupHome)
+	return finalizeStreamPublish(b.takeAffectedMIDs, warmupHome)
 }
 
 func (b *collectBatchContext) close() {
