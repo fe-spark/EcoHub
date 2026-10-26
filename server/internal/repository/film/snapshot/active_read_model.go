@@ -53,6 +53,9 @@ func ApplyActiveFilmReadModelSnapshots(version string, snapshots []model.FilmLis
 	if version == "" {
 		version = GetActiveSnapshotVersion()
 	}
+	activeFilmSearchMetasMu.Lock()
+	activeFilmSearchMetas.Store(nil)
+	activeFilmSearchMetasMu.Unlock()
 	if version != "" {
 		if err := LoadActiveFilmReadModel(version); err != nil {
 			return err

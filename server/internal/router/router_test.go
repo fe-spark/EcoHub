@@ -11,9 +11,15 @@ import (
 	"server/internal/repository"
 	"server/internal/utils"
 
+	"fmt"
+	"time"
+
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func init() {
@@ -33,6 +39,18 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	db.Rdb = rdb
 	defer func() { db.Rdb = prevRdb }()
 
+	dsn := fmt.Sprintf("file:router_%d?mode=memory&cache=shared&_busy_timeout=5000", time.Now().UnixNano())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		t.Fatalf("sqlite open: %v", err)
+	}
+	_ = gdb.AutoMigrate(&model.User{})
+	prevMdb := db.Mdb
+	db.Mdb = gdb
+	defer func() { db.Mdb = prevMdb }()
+
 	adminUserID := uint(config.UserIdInitialVal)
 	adminToken, err := utils.GenToken(adminUserID, "admin", model.UserRoleAdmin)
 	if err != nil {
@@ -50,6 +68,9 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 	if err := repository.SaveUserToken(normalToken, normalUserID); err != nil {
 		t.Fatalf("save normal token: %v", err)
 	}
+
+	gdb.Create(&model.User{Model: gorm.Model{ID: adminUserID}, Role: model.UserRoleAdmin, Status: 0})
+	gdb.Create(&model.User{Model: gorm.Model{ID: normalUserID}, Role: model.UserRoleNormal, Status: 0})
 
 	r := SetupRouter()
 
