@@ -92,7 +92,7 @@ func NotifySearchIndexProgress(total, current int64, status string) {
 	}
 }
 
-// RequestActiveFilmSearchIndexRebuild 采集队列结束时调用。只递增代数并延后启动，不在调用方扫库。
+// RequestActiveFilmSearchIndexRebuild 没有可增量的检索索引时才全库扫描。采集结束优先走 ResealSearchIndexMids。
 func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++

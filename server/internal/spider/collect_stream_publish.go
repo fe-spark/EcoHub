@@ -272,11 +272,15 @@ func publishStreamWindowReal(mids []int64) error {
 	return err
 }
 
-func finalizeStreamPublish(warmupHome ...bool) error {
+func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if _, err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
-	filmsnapshot.RequestActiveFilmSearchIndexRebuild()
+	var mids []int64
+	if takeMIDs != nil {
+		mids = takeMIDs()
+	}
+	filmsnapshot.ResealSearchIndexMids(mids)
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
