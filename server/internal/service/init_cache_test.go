@@ -21,7 +21,7 @@ func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
 	tasks := defaultFilmTasks()
 	var found bool
 	for _, task := range tasks {
-		if task.Model == 4 {
+		if task.Model == model.TaskModelLogClean {
 			found = true
 			if task.Id != "sys_cron_log_clean" {
 				t.Errorf("expected Id 'sys_cron_log_clean', got %s", task.Id)
@@ -38,7 +38,7 @@ func TestDefaultFilmTasks_ContainsLogClean(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("Model 4 log clean task not found in defaultFilmTasks()")
+		t.Fatalf("Model TaskModelLogClean task not found in defaultFilmTasks()")
 	}
 }
 
@@ -60,8 +60,8 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ensureDefaultTasks: %v", err)
 	}
-	if len(tasks) != 6 {
-		t.Fatalf("expected 6 default tasks, got %d", len(tasks))
+	if len(tasks) != 5 {
+		t.Fatalf("expected 5 default tasks, got %d", len(tasks))
 	}
 	failureClean, err := repository.GetFilmTaskById(model.TaskIDFailureClean)
 	if err != nil {
@@ -70,18 +70,11 @@ func TestEnsureDefaultTasks_CleanInstall(t *testing.T) {
 	if failureClean.Model != model.TaskModelFailureClean || failureClean.Spec != "0 30 3 * * *" || !failureClean.State {
 		t.Fatalf("unexpected failure clean task: %+v", failureClean)
 	}
-	banner, err := repository.GetFilmTaskById(model.TaskIDBannerAuto)
-	if err != nil {
-		t.Fatalf("banner cron: %v", err)
-	}
-	if banner.Model != model.TaskModelBannerAuto || banner.Spec != "0 0 4 * * *" || banner.State {
-		t.Fatalf("unexpected banner task: %+v", banner)
-	}
 	task, err := repository.GetFilmTaskById("sys_cron_log_clean")
 	if err != nil {
 		t.Fatalf("failed to get sys_cron_log_clean: %v", err)
 	}
-	if task.Model != 4 || task.Spec != "0 0 3 * * *" || !task.State {
+	if task.Model != model.TaskModelLogClean || task.Spec != "0 0 3 * * *" || !task.State {
 		t.Fatalf("unexpected task fields: %+v", task)
 	}
 }

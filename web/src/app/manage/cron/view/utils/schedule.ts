@@ -35,17 +35,13 @@ export function getTaskActionText(model: number) {
     case 0:
       return "采集已启用站点的更新";
     case 1:
-      return "采集指定站点的更新";
-    case 2:
       return "重试待处理的失败记录";
-    case 3:
+    case 2:
       return "清理片库冗余和孤儿数据";
-    case 4:
+    case 3:
       return "清理过期运行日志";
-    case 5:
-      return "按配方替换首页轮播";
-    case 6:
-      return "清理超过 30 天的成功和最终失败记录";
+    case 4:
+      return "清理超过 7 天的成功和最终失败记录";
     default:
       return "计划任务";
   }
@@ -56,16 +52,12 @@ export function getTaskTypeText(model: number) {
     case 0:
       return "自动采集";
     case 1:
-      return "指定采集";
-    case 2:
       return "失败重试";
-    case 3:
+    case 2:
       return "片库清理";
-    case 4:
+    case 3:
       return "日志清理";
-    case 5:
-      return "自动排片";
-    case 6:
+    case 4:
       return "记录清理";
     default:
       return "计划任务";

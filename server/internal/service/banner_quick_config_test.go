@@ -7,7 +7,6 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
-	"server/internal/spider"
 )
 
 func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
@@ -18,7 +17,6 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	filmsnapshot.ResetActiveSnapshotFallbackForTest()
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		spider.RemoveCronByTaskId(model.TaskIDBannerAuto)
 		if prevVersion != "" {
 			_ = filmsnapshot.SetActiveSnapshotVersion(prevVersion)
 		}
@@ -53,26 +51,6 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	if cfg.Strategy != repository.BannerStrategyScore || len(cfg.Quotas) != 1 || cfg.Quotas[0].Count != 2 {
 		t.Fatalf("stored quotas: %+v", cfg)
 	}
-	if err := saveBannerCron(t, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := CronSvc.ChangeFilmCrontab(model.TaskIDBannerAuto, true); err != nil {
-		t.Fatalf("enable cron: %v", err)
-	}
-	if spider.GetEntryByTaskId(model.TaskIDBannerAuto).ID == 0 {
-		t.Fatal("enabled schedule was not registered")
-	}
-
-	if err := repository.SaveBannerConfig(model.BannerConfig{Strategy: repository.BannerStrategyHot}); err != nil {
-		t.Fatal(err)
-	}
-	if err := CronSvc.ChangeFilmCrontab(model.TaskIDBannerAuto, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := CronSvc.ChangeFilmCrontab(model.TaskIDBannerAuto, true); err == nil {
-		t.Fatal("enabled schedule without quotas should fail")
-	}
-
 	enabled, err := ManageSvc.SaveBannerQuickConfig(BannerQuickConfigInput{
 		Strategy: "latest",
 		Quotas:   []model.BannerQuota{{CategoryID: 9, Count: 1}},
@@ -83,10 +61,6 @@ func TestBannerQuickConfig_SaveAndSchedule(t *testing.T) {
 	if enabled.Strategy != "latest" {
 		t.Fatalf("enabled view: %+v", enabled)
 	}
-	if err := CronSvc.ChangeFilmCrontab(model.TaskIDBannerAuto, true); err != nil {
-		t.Fatalf("re-enable: %v", err)
-	}
-
 	if err := ManageSvc.RunBannerQuickSchedule(); err == nil {
 		t.Fatal("run without snapshot should fail and keep the live deck")
 	}
@@ -105,7 +79,6 @@ func TestResetBannerDeckForSourceChange(t *testing.T) {
 	db.Rdb = nil
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		spider.RemoveCronByTaskId(model.TaskIDBannerAuto)
 	})
 
 	if err := repository.SaveBanners(model.Banners{{Id: "b1", Mid: 1, Name: "旧站影片", Sort: 1}}); err != nil {
@@ -116,12 +89,6 @@ func TestResetBannerDeckForSourceChange(t *testing.T) {
 		Quotas:   []model.BannerQuota{{CategoryID: 8, Count: 2}},
 	}); err != nil {
 		t.Fatalf("save config: %v", err)
-	}
-	if err := saveBannerCron(t, true); err != nil {
-		t.Fatal(err)
-	}
-	if spider.GetEntryByTaskId(model.TaskIDBannerAuto).ID == 0 {
-		t.Fatal("schedule should be registered before reset")
 	}
 
 	if err := ResetBannerDeckForSourceChange(); err != nil {
@@ -144,69 +111,108 @@ func TestResetBannerDeckForSourceChange(t *testing.T) {
 	if view.Saved || len(view.Quotas) != 0 {
 		t.Fatalf("config view: %+v", view)
 	}
-	task, err := repository.GetFilmTaskById(model.TaskIDBannerAuto)
-	if err != nil || task.State {
-		t.Fatalf("schedule should be off: %+v err=%v", task, err)
-	}
-	if spider.GetEntryByTaskId(model.TaskIDBannerAuto).ID != 0 {
-		t.Fatal("schedule should be unregistered")
-	}
 }
 
-func TestDisableBannerQuickSchedule_KeepsRecipe(t *testing.T) {
-	setupBackupTestDB(t)
+func TestBannerQuickConfig_AutoDefaultOnCategoriesReady(t *testing.T) {
+	gdb := setupBackupTestDB(t)
 	origRdb := db.Rdb
 	db.Rdb = nil
 	t.Cleanup(func() {
 		db.Rdb = origRdb
-		spider.RemoveCronByTaskId(model.TaskIDBannerAuto)
 	})
+	_ = gdb.AutoMigrate(&model.Category{}, &model.SourceCategory{}, &model.CategoryMapping{})
 
-	if _, err := ManageSvc.SaveBannerQuickConfig(BannerQuickConfigInput{
-		Strategy:   "score",
-		AutoScrape: true,
-		Quotas:     []model.BannerQuota{{CategoryID: 8, Count: 2}},
-	}); err != nil {
-		t.Fatalf("save config: %v", err)
+	// 1. 无主站/分类时，EnsureBannerQuickDefaultConfig 返回 ok = false
+	if _, ok, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil || ok {
+		t.Fatalf("expected ok=false when no categories, got ok=%v err=%v", ok, err)
 	}
-	if err := saveBannerCron(t, true); err != nil {
+
+	// 2. 配置主站与分类
+	src := model.FilmSource{Id: "src_master_banner", Name: "主站", Uri: "http://test", State: true, Sort: 1}
+	if err := gdb.Create(&src).Error; err != nil {
 		t.Fatal(err)
 	}
-	if spider.GetEntryByTaskId(model.TaskIDBannerAuto).ID == 0 {
-		t.Fatal("schedule should be registered")
+	sc1 := model.SourceCategory{SourceId: src.Id, SourceTypeId: 1, RawName: "电影", Sort: 1, Depth: 0}
+	sc2 := model.SourceCategory{SourceId: src.Id, SourceTypeId: 2, RawName: "电视剧", Sort: 2, Depth: 0}
+	if err := gdb.Create(&[]model.SourceCategory{sc1, sc2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	m1 := model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 101}
+	m2 := model.CategoryMapping{SourceId: src.Id, SourceTypeId: 2, CategoryId: 102}
+	if err := gdb.Create(&[]model.CategoryMapping{m1, m2}).Error; err != nil {
+		t.Fatal(err)
+	}
+	cat1 := model.Category{Id: 101, Pid: 0, Name: "电影", Show: true, Sort: 1, StableKey: "source:src_master_banner:1"}
+	cat2 := model.Category{Id: 102, Pid: 0, Name: "电视剧", Show: true, Sort: 2, StableKey: "source:src_master_banner:2"}
+	if err := gdb.Create(&[]model.Category{cat1, cat2}).Error; err != nil {
+		t.Fatal(err)
 	}
 
-	if err := DisableBannerQuickSchedule(); err != nil {
-		t.Fatalf("disable: %v", err)
+	// 3. 分类就绪后，EnsureBannerQuickDefaultConfig 应自愈补建默认排片规则 (每类 1 部)
+	defaultCfg, ok, err := ManageSvc.EnsureBannerQuickDefaultConfig()
+	if err != nil || !ok {
+		t.Fatalf("expected ok=true when categories ready, got ok=%v err=%v", ok, err)
 	}
-	view, err := ManageSvc.GetBannerQuickConfig()
+	if len(defaultCfg.Quotas) != 2 || defaultCfg.Quotas[0].Count != 1 || defaultCfg.Quotas[1].Count != 1 {
+		t.Fatalf("unexpected auto default quotas: %+v", defaultCfg.Quotas)
+	}
+
+	// 4. 验证已存入 repository
+	cfg, err := repository.GetBannerConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !view.Saved || !view.AutoScrape || view.Strategy != "score" {
-		t.Fatalf("recipe should stay: %+v", view)
-	}
-	if len(view.Quotas) != 1 || view.Quotas[0].CategoryID != 8 || view.Quotas[0].Count != 2 {
-		t.Fatalf("quotas: %+v", view.Quotas)
-	}
-	task, err := repository.GetFilmTaskById(model.TaskIDBannerAuto)
-	if err != nil || task.State {
-		t.Fatalf("schedule should be off: %+v err=%v", task, err)
-	}
-	if spider.GetEntryByTaskId(model.TaskIDBannerAuto).ID != 0 {
-		t.Fatal("schedule should be unregistered")
+	if len(cfg.Quotas) != 2 || cfg.Quotas[0].Count != 1 || cfg.Quotas[1].Count != 1 {
+		t.Fatalf("stored quotas mismatch: %+v", cfg.Quotas)
 	}
 }
 
-func saveBannerCron(t *testing.T, enabled bool) error {
-	t.Helper()
-	if err := repository.SaveFilmTask(model.FilmCollectTask{
-		Id: model.TaskIDBannerAuto, Spec: "0 0 4 * * *", Model: model.TaskModelBannerAuto, State: false,
+func TestSaveBannerConfigIfEmptyKeepsSavedQuotas(t *testing.T) {
+	setupBackupTestDB(t)
+	origRdb := db.Rdb
+	db.Rdb = nil
+	t.Cleanup(func() {
+		_ = repository.DeleteBannerConfig()
+		db.Rdb = origRdb
+	})
+	if err := repository.DeleteBannerConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SaveBannerConfig(model.BannerConfig{
+		Strategy: repository.BannerStrategyScore,
+		Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 4}},
 	}); err != nil {
-		return err
+		t.Fatal(err)
 	}
-	if !enabled {
-		return nil
+	got, wrote, err := repository.SaveBannerConfigIfEmpty(model.BannerConfig{
+		Strategy: repository.BannerStrategyHot,
+		Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 1}},
+	})
+	if err != nil || wrote {
+		t.Fatalf("wrote=%v err=%v", wrote, err)
 	}
-	return CronSvc.ChangeFilmCrontab(model.TaskIDBannerAuto, true)
+	if len(got.Quotas) != 1 || got.Quotas[0].Count != 4 {
+		t.Fatalf("got %+v", got.Quotas)
+	}
+	stored, err := repository.GetBannerConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Quotas) != 1 || stored.Quotas[0].Count != 4 {
+		t.Fatalf("stored %+v", stored.Quotas)
+	}
+
+	if err := repository.DeleteBannerConfig(); err != nil {
+		t.Fatal(err)
+	}
+	got, wrote, err = repository.SaveBannerConfigIfEmpty(model.BannerConfig{
+		Strategy: repository.BannerStrategyHot,
+		Quotas:   []model.BannerQuota{{CategoryID: 3, Count: 1}},
+	})
+	if err != nil || !wrote {
+		t.Fatalf("wrote=%v err=%v", wrote, err)
+	}
+	if len(got.Quotas) != 1 || got.Quotas[0].Count != 1 {
+		t.Fatalf("default %+v", got.Quotas)
+	}
 }

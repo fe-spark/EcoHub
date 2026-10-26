@@ -13,7 +13,6 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/utils"
-
 )
 
 const searchMetaLoadPageSize = 5000
@@ -65,17 +64,20 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		return nil, ErrSearchIndexMissing
 	}
 	val, err, _ := searchMetaBuildSf.Do(version, func() (any, error) {
+		searchRebuild.mu.Lock()
+		seen := searchRebuild.gen
+		searchRebuild.mu.Unlock()
+
 		activeFilmSearchMetasMu.Lock()
 		defer activeFilmSearchMetasMu.Unlock()
 		if cur := activeFilmSearchMetas.Load(); cur != nil && cur.Version == version {
 			return cur, nil
 		}
-		isSearchIndexBuilding.Store(true)
-		defer isSearchIndexBuilding.Store(false)
 		started := time.Now()
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s", version)
 		items, plays, err := loadSearchIndexParts(version)
 		if err != nil {
+			notifySearchIndexIfCurrent(seen, 0, 0, "idle")
 			return nil, err
 		}
 		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
@@ -83,6 +85,7 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		idx := sealSearchMetaIndex(version, items)
 		activeFilmSearchMetas.Store(idx)
 		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
+		notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
 		return idx, nil
 	})
 	if err != nil {
@@ -104,6 +107,7 @@ func loadFilmSearchMetaItems(ctx context.Context, version string) ([]FilmSearchM
 		log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 0/0", version)
 		return []FilmSearchMeta{}, nil
 	}
+	NotifySearchIndexProgress(total, 0, "indexing")
 	progress := newSearchLoadProgress(version, total)
 	spans, err := searchMetaSpans(ctx, total)
 	if err != nil {
@@ -205,6 +209,7 @@ func (p *searchLoadProgress) add(n int) {
 	if loaded > p.total {
 		loaded = p.total
 	}
+	NotifySearchIndexProgress(p.total, loaded, "indexing")
 	log.Printf("[ActiveReadModel] 检索索引加载中 version=%s 影片 %d/%d %d%%",
 		p.version, loaded, p.total, loaded*100/p.total)
 	if p.loaded >= p.total {

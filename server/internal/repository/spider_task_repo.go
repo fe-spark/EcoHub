@@ -2,7 +2,6 @@ package repository
 
 import (
 	"errors"
-	"log"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -22,34 +21,10 @@ func SaveFilmTask(t model.FilmCollectTask) error {
 		Remark:    t.Remark,
 	}
 
-	err := db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.OnConflict{
-			Columns:   []clause.Column{{Name: "task_id"}},
-			DoUpdates: clause.AssignmentColumns([]string{"time", "spec", "task_model", "state", "remark", "updated_at"}),
-		}).Create(&rec).Error; err != nil {
-			return err
-		}
-
-		// 更新关联站点
-		if err := tx.Where("task_id = ?", t.Id).Delete(&model.CronSourceRel{}).Error; err != nil {
-			return err
-		}
-		if len(t.Ids) > 0 {
-			rels := make([]model.CronSourceRel, 0, len(t.Ids))
-			for _, sid := range t.Ids {
-				rels = append(rels, model.CronSourceRel{TaskId: t.Id, SourceId: sid})
-			}
-			if err := tx.Create(&rels).Error; err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-
-	if err != nil {
-		log.Println("SaveFilmTask Error:", err)
-	}
-	return err
+	return db.Mdb.Clauses(clause.OnConflict{
+		Columns:   []clause.Column{{Name: "task_id"}},
+		DoUpdates: clause.AssignmentColumns([]string{"time", "spec", "task_model", "state", "remark", "updated_at"}),
+	}).Create(&rec).Error
 }
 
 // GetAllFilmTask 获取所有的任务信息
@@ -64,13 +39,8 @@ func GetAllFilmTask() ([]model.FilmCollectTask, error) {
 
 	tl := make([]model.FilmCollectTask, 0, len(records))
 	for _, r := range records {
-		var ids []string
-		if err := db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids).Error; err != nil {
-			return nil, err
-		}
 		tl = append(tl, model.FilmCollectTask{
 			Id:     r.TaskId,
-			Ids:    ids,
 			Time:   r.Time,
 			Spec:   r.Spec,
 			Model:  r.TaskModel,
@@ -91,14 +61,8 @@ func GetFilmTaskById(id string) (model.FilmCollectTask, error) {
 		return model.FilmCollectTask{}, err
 	}
 
-	var ids []string
-	if err := db.Mdb.Model(&model.CronSourceRel{}).Where("task_id = ?", r.TaskId).Pluck("source_id", &ids).Error; err != nil {
-		return model.FilmCollectTask{}, err
-	}
-
 	return model.FilmCollectTask{
 		Id:     r.TaskId,
-		Ids:    ids,
 		Time:   r.Time,
 		Spec:   r.Spec,
 		Model:  r.TaskModel,
@@ -114,9 +78,6 @@ func UpdateFilmTask(t model.FilmCollectTask) error {
 
 func ResetFilmTasks(tasks []model.FilmCollectTask) error {
 	return db.Mdb.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.CronSourceRel{}).Error; err != nil {
-			return err
-		}
 		if err := tx.Session(&gorm.Session{AllowGlobalUpdate: true}).Unscoped().Delete(&model.CrontabRecord{}).Error; err != nil {
 			return err
 		}
@@ -130,16 +91,6 @@ func ResetFilmTasks(tasks []model.FilmCollectTask) error {
 				Remark:    task.Remark,
 			}
 			if err := tx.Create(&rec).Error; err != nil {
-				return err
-			}
-			if len(task.Ids) == 0 {
-				continue
-			}
-			rels := make([]model.CronSourceRel, 0, len(task.Ids))
-			for _, sid := range task.Ids {
-				rels = append(rels, model.CronSourceRel{TaskId: task.Id, SourceId: sid})
-			}
-			if err := tx.Create(&rels).Error; err != nil {
 				return err
 			}
 		}

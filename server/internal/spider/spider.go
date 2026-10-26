@@ -14,6 +14,7 @@ import (
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
 	"server/internal/utils"
+	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
 /*
@@ -21,6 +22,17 @@ import (
 */
 
 var spiderCore = &JsonCollect{}
+
+func init() {
+	filmsnapshot.AddSearchIndexProgressListener(func(p filmsnapshot.SearchIndexProgress) {
+		progress.BroadcastSearchIndexProgress(progress.SearchIndexProgressEvent{
+			Total:   p.Total,
+			Current: p.Current,
+			Percent: p.Percent,
+			Status:  p.Status,
+		})
+	})
+}
 
 func requestForSource(s *model.FilmSource) (utils.RequestInfo, error) {
 	if s == nil {
@@ -298,19 +310,3 @@ func BatchCollectPrepared(trigger string, h int, sources []model.FilmSource) {
 	runSourcesWithLimitCore(sources, h, "Batch-Collect", trigger)
 }
 
-func BatchCollectTriggered(trigger string, h int, ids ...string) {
-	sources := make([]model.FilmSource, 0)
-	for _, id := range ids {
-		if fs := repository.FindCollectSourceById(id); fs != nil && fs.State {
-			sources = append(sources, *fs)
-		}
-	}
-
-	if len(sources) == 0 {
-		return
-	}
-	if trigger == "" {
-		trigger = model.CollectTriggerManual
-	}
-	runSourcesWithLimit(sources, h, "Batch-Collect", trigger)
-}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"server/internal/infra/db"
@@ -11,12 +12,23 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-const defaultSearchRebuildDebounce = 2 * time.Second
+const defaultSearchRebuildDebounce = 500 * time.Millisecond
+
+// SearchIndexProgress 检索索引构建的数字进度
+type SearchIndexProgress struct {
+	Total   int64  `json:"total"`
+	Current int64  `json:"current"`
+	Percent int    `json:"percent"`
+	Status  string `json:"status"` // "indexing" | "done" | "idle"
+}
 
 var (
-	searchRebuildDebounce     = defaultSearchRebuildDebounce
-	scanActiveFilmSearchIndex = scanAndStoreActiveFilmSearchIndex
-	searchRebuild             = struct {
+	searchRebuildDebounce         = 500 * time.Millisecond
+	scanActiveFilmSearchIndex     = scanAndStoreActiveFilmSearchIndex
+	searchIndexProgressListenerMu sync.RWMutex
+	searchIndexProgressListeners  []func(SearchIndexProgress)
+	latestSearchIndexProgress     atomic.Pointer[SearchIndexProgress]
+	searchRebuild                 = struct {
 		mu      sync.Mutex
 		gen     uint64
 		running bool
@@ -24,10 +36,67 @@ var (
 	}{}
 )
 
+// AddSearchIndexProgressListener 注册检索索引重建进度监听回调
+func AddSearchIndexProgressListener(fn func(SearchIndexProgress)) {
+	if fn == nil {
+		return
+	}
+	searchIndexProgressListenerMu.Lock()
+	defer searchIndexProgressListenerMu.Unlock()
+	searchIndexProgressListeners = append(searchIndexProgressListeners, fn)
+}
+
+// GetLatestSearchIndexProgress 获取最新检索索引进度快照
+func GetLatestSearchIndexProgress() *SearchIndexProgress {
+	p := latestSearchIndexProgress.Load()
+	if p == nil {
+		return &SearchIndexProgress{Status: "idle"}
+	}
+	return p
+}
+
+// NotifySearchIndexProgress 广播检索索引构建数字进度
+func NotifySearchIndexProgress(total, current int64, status string) {
+	if total < 0 {
+		total = 0
+	}
+	if current < 0 {
+		current = 0
+	}
+	if current > total && total > 0 {
+		current = total
+	}
+	percent := 0
+	if total > 0 {
+		percent = int(current * 100 / total)
+	} else if status == "done" {
+		percent = 100
+	}
+	if status == "indexing" {
+		isSearchIndexBuilding.Store(true)
+	} else {
+		isSearchIndexBuilding.Store(false)
+	}
+	p := SearchIndexProgress{
+		Total:   total,
+		Current: current,
+		Percent: percent,
+		Status:  status,
+	}
+	latestSearchIndexProgress.Store(&p)
+	searchIndexProgressListenerMu.RLock()
+	listeners := append([]func(SearchIndexProgress){}, searchIndexProgressListeners...)
+	searchIndexProgressListenerMu.RUnlock()
+	for _, fn := range listeners {
+		fn(p)
+	}
+}
+
 // RequestActiveFilmSearchIndexRebuild 采集队列结束时调用。只递增代数并延后启动，不在调用方扫库。
 func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.gen++
+	NotifySearchIndexProgress(0, 0, "indexing")
 	if searchRebuild.running {
 		searchRebuild.mu.Unlock()
 		return
@@ -62,9 +131,10 @@ func runSearchRebuild() {
 		seen := searchRebuild.gen
 		searchRebuild.mu.Unlock()
 
-		err := scanActiveFilmSearchIndex()
+		err := scanActiveFilmSearchIndex(seen)
 		if err != nil {
 			log.Printf("[ActiveReadModel] 检索索引重建失败: %v", err)
+			notifySearchIndexIfCurrent(seen, 0, 0, "idle")
 		}
 
 		searchRebuild.mu.Lock()
@@ -77,18 +147,26 @@ func runSearchRebuild() {
 	}
 }
 
-func scanAndStoreActiveFilmSearchIndex() error {
+// notifySearchIndexIfCurrent 只在代数未变时发终态。旧一轮完成不能把新一轮的构建标记清掉。
+func notifySearchIndexIfCurrent(seen uint64, total, current int64, status string) {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	if searchRebuild.gen != seen {
+		return
+	}
+	NotifySearchIndexProgress(total, current, status)
+}
+
+func scanAndStoreActiveFilmSearchIndex(seen uint64) error {
 	version := currentSearchIndexVersion()
 	if version == "" || db.Mdb == nil {
+		notifySearchIndexIfCurrent(seen, 0, 0, "idle")
 		return nil
 	}
 	activeFilmSearchMetasMu.Lock()
 	defer activeFilmSearchMetasMu.Unlock()
 
-	isSearchIndexBuilding.Store(true)
-	defer isSearchIndexBuilding.Store(false)
 	started := time.Now()
-	log.Printf("[ActiveReadModel] 检索索引重建开始 version=%s", version)
 	items, plays, err := loadSearchIndexParts(version)
 	if err != nil {
 		return err
@@ -96,7 +174,9 @@ func scanAndStoreActiveFilmSearchIndex() error {
 	attachPlaySources(items, plays)
 	idx := sealSearchMetaIndex(version, items)
 	activeFilmSearchMetas.Store(idx)
-	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))
+	cost := time.Since(started).Round(time.Millisecond)
+	log.Printf("[ActiveReadModel] 检索索引重建完成 version=%s count=%d cost=%s", version, len(items), cost)
+	notifySearchIndexIfCurrent(seen, int64(len(items)), int64(len(items)), "done")
 	return nil
 }
 

@@ -57,15 +57,6 @@ func (s *CronService) ChangeFilmCrontab(id string, state bool) error {
 	if err != nil {
 		return fmt.Errorf("定时任务状态切换失败: %w", err)
 	}
-	if state && ft.Model == model.TaskModelBannerAuto {
-		hasQuotas, err := bannerQuickHasQuotas()
-		if err != nil {
-			return err
-		}
-		if !hasQuotas {
-			return fmt.Errorf("请配置排片数量")
-		}
-	}
 	ft.State = state
 	if err := repository.UpdateFilmTask(ft); err != nil {
 		return fmt.Errorf("定时任务状态保存失败: %w", err)

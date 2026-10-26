@@ -32,6 +32,13 @@ export interface SourceDeleteEvent {
   message?: string;
   deletedFilms?: number;
 }
+export interface SearchIndexProgress {
+  total: number;
+  current: number;
+  percent: number;
+  status: "indexing" | "done" | "idle";
+}
+
 
 export interface CollectStreamHandlers {
   onProgress?: (progressList: CollectProgress[]) => void;
@@ -40,6 +47,7 @@ export interface CollectStreamHandlers {
   onCategoryReady?: (event: CategoryReadyEvent) => void;
   onSourceDelete?: (event: SourceDeleteEvent) => void;
   onDeleteSnapshot?: (deletingIds: string[]) => void;
+  onSearchIndexProgress?: (progress: SearchIndexProgress) => void;
   onReconnect?: () => void;
 }
 
@@ -86,6 +94,8 @@ export function useCollectStream(
               handlersRef.current.onCategoryReady?.(data as CategoryReadyEvent);
             } else if (event === "progress") {
               handlersRef.current.onProgress?.(data as CollectProgress[]);
+            } else if (event === "search_index_progress") {
+              handlersRef.current.onSearchIndexProgress?.(data as SearchIndexProgress);
             } else if (!event && Array.isArray(data)) {
               if (data.length > 0 && typeof data[0] === "string") {
                 handlersRef.current.onDeleteSnapshot?.(data as string[]);

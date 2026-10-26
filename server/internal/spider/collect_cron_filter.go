@@ -2,106 +2,45 @@ package spider
 
 import (
 	"log"
-	"math/rand"
-	"time"
 
 	"server/internal/model"
 	"server/internal/repository"
 )
 
-const (
-	backupCollectMinHours = 6
-	backupCollectMaxHours = 12
-	cronDispatchJitterMin = 5
-	cronDispatchJitterMax = 15
-)
-
-func collectDispatchDelay(batchCtx *collectBatchContext) time.Duration {
-	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
-		span := cronDispatchJitterMax - cronDispatchJitterMin + 1
-		return time.Duration(cronDispatchJitterMin+rand.Intn(span)) * time.Second
-	}
-	return 200 * time.Millisecond
-}
-
-func backupCollectInterval(sourceID string) time.Duration {
-	sum := 0
-	for _, c := range sourceID {
-		sum += int(c)
-	}
-	hours := backupCollectMinHours + sum%(backupCollectMaxHours-backupCollectMinHours+1)
-	return time.Duration(hours) * time.Hour
-}
-
+// AutoCollect 自动采集（内部或手动调用）。
 func AutoCollect(h int) {
 	AutoCollectTriggered(model.CollectTriggerManual, h)
 }
 
+// AutoCollectTriggered 定时或自动触发采集，完全复用采集中心的批量采集逻辑。
 func AutoCollectTriggered(trigger string, h int) {
+	if trigger == "" {
+		trigger = model.CollectTriggerCron
+	}
 	sources, err := repository.GetCollectSourceList()
 	if err != nil {
 		log.Printf("[Spider] 自动采集：读取采集站失败: %v", err)
 		return
 	}
-	enabled := filterEnabledSources(sources)
-	if len(enabled) == 0 {
+	ids := make([]string, 0, len(sources))
+	for _, s := range sources {
+		if s.State {
+			ids = append(ids, s.Id)
+		}
+	}
+	if len(ids) == 0 {
 		log.Println("[Spider] 自动采集：未找到任何启用的站点")
 		return
 	}
-	if trigger == "" {
-		trigger = model.CollectTriggerManual
+
+	ready, result := PrepareBatchCollectStart(ids)
+	for _, skip := range result.Skipped {
+		log.Printf("[Spider] 自动采集跳过站点: id=%s name=%s reason=%s", skip.Id, skip.Name, skip.Reason)
 	}
-	if trigger == model.CollectTriggerCron {
-		enabled, err = filterCronIncrementalSources(enabled)
-		if err != nil {
-			log.Printf("[Spider] 自动采集：读取采集时间失败: %v", err)
-			return
-		}
-		if len(enabled) == 0 {
-			log.Println("[Spider] 自动采集：错峰过滤后无待采集站点")
-			return
-		}
-	}
-	enabled = filterSourcesReadyForCollect(enabled)
-	if len(enabled) == 0 {
-		log.Println("[Spider] 自动采集：采集站都还没有分类")
+	if len(ready) == 0 {
+		log.Println("[Spider] 自动采集：没有可采集的就绪站点")
 		return
 	}
-	runSourcesWithLimit(enabled, h, "Auto-Collect", trigger)
-}
-
-func filterCronIncrementalSources(sources []model.FilmSource) ([]model.FilmSource, error) {
-	if len(sources) == 0 {
-		return sources, nil
-	}
-	primary := repository.PickPrimarySourceForCategory()
-	primaryID := ""
-	if primary != nil {
-		primaryID = primary.Id
-	}
-	ids := make([]string, 0, len(sources))
-	for _, s := range sources {
-		ids = append(ids, s.Id)
-	}
-	stats, err := repository.GetCollectSourceStats(ids)
-	if err != nil {
-		return nil, err
-	}
-	now := time.Now()
-	out := make([]model.FilmSource, 0, len(sources))
-	for _, s := range sources {
-		if s.Id == primaryID {
-			out = append(out, s)
-			continue
-		}
-		last := stats[s.Id]
-		interval := backupCollectInterval(s.Id)
-		if last == nil || last.IsZero() || now.Sub(*last) >= interval {
-			out = append(out, s)
-			continue
-		}
-		log.Printf("[Spider] 备用源错峰跳过 name=%s id=%s interval=%s last=%s",
-			s.Name, s.Id, interval, last.Format(time.RFC3339))
-	}
-	return out, nil
+	log.Printf("[Spider] 自动采集开启: 共 %d 个站点进入批量采集队列 (trigger=%s, h=%d)", len(ready), trigger, h)
+	BatchCollectPrepared(trigger, h, ready)
 }

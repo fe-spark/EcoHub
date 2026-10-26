@@ -40,8 +40,7 @@ export default function BannerConfigDrawer({
 
   const applyRecipe = useCallback(
     (nav: { id: number; name: string }[], recipe: BannerQuickRecipe | null) => {
-      const saved = Boolean(recipe?.saved);
-      const nextStrategy = saved ? normalizeQuickStrategy(recipe?.strategy) : "hot";
+      const nextStrategy = normalizeQuickStrategy(recipe?.strategy);
       const nextCategories = mergeBannerQuickCategories(nav, recipe);
       setStrategy(nextStrategy);
       setCategories(nextCategories);

@@ -3,10 +3,6 @@ package service
 import (
 	"errors"
 	"fmt"
-	"strings"
-	"sync"
-	"sync/atomic"
-	"time"
 	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/infra/syslog"
@@ -16,6 +12,10 @@ import (
 	"server/internal/spider"
 	"server/internal/spider/progress"
 	"server/internal/utils"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type CollectService struct{}
@@ -31,6 +31,10 @@ var (
 // IsPrimarySiteSwitching 返回当前是否正在构建检索索引或预热主站缓存
 func IsPrimarySiteSwitching() bool {
 	return filmsnapshot.IsSearchIndexBuilding() || isPrimaryWarming.Load()
+}
+
+func (s *CollectService) SearchIndexProgress() filmsnapshot.SearchIndexProgress {
+	return *filmsnapshot.GetLatestSearchIndexProgress()
 }
 
 func clearProvideNetworkConfigCache() {
@@ -162,7 +166,7 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 		return false
 	}
 	epoch := primarySwitchEpoch.Add(1)
-	// 分类编号属于原首选站。轮播和排片配方一起清空，定时排片关闭。
+	// 分类编号属于原首选站。轮播和排片规则一起清空，定时排片关闭。
 	if err := ResetBannerDeckForSourceChange(); err != nil {
 		syslog.Errorf("[Banner] 切换首选站清空轮播失败: %v", err)
 	}
@@ -224,6 +228,9 @@ func onPrimarySourceMaybeChanged(oldPrimary, newPrimary *model.FilmSource) bool 
 				syslog.Errorf("[Collect] 切换主站后预热首页数据失败: %v", err)
 			} else {
 				syslog.Infof("[Collect] 切换主站首页缓存预热完成 (epoch=%d, targetSource=%s)", currentEpoch, targetSourceID)
+				if _, _, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
+					syslog.Errorf("[Banner] 切换主站后初始化默认排片规则失败: %v", err)
+				}
 			}
 		}
 	}(newID, epoch)
@@ -413,116 +420,6 @@ func (s *CollectService) SaveFilmSource(source model.FilmSource) error {
 	filmsnapshot.ClearDynamicPlayCaches()
 	onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
 	return nil
-}
-
-var deleteSourceQueue = make(chan string, 1000)
-
-func init() {
-	go runDeleteSourceWorker()
-}
-
-func runDeleteSourceWorker() {
-	for id := range deleteSourceQueue {
-		processAsyncDeleteSource(id)
-	}
-}
-
-func processAsyncDeleteSource(id string) {
-	defer progress.SetSourceDeleting(id, false)
-	src := repository.FindCollectSourceForDelete(id)
-	name := id
-	if src != nil && src.Name != "" {
-		name = src.Name
-	}
-	progress.BroadcastSourceDeleteStatus(id, name, "deleting", "", 0)
-	deletedFilms, err := CollectSvc.DelFilmSource(id)
-	if err != nil {
-		syslog.Errorf("[Collect] 异步删除站点 %s 失败: %v", id, err)
-		progress.BroadcastSourceDeleteStatus(id, name, "failed", err.Error(), 0)
-		return
-	}
-	progress.BroadcastSourceDeleteStatus(id, name, "deleted", "", deletedFilms)
-}
-
-// TriggerDelFilmSource 异步触发采集站删除：广播 deleting 状态并毫秒级返回，后台串行队列安全停工与级联清理
-func (s *CollectService) TriggerDelFilmSource(id string) error {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return errors.New("采集站ID不能为空")
-	}
-	if IsPrimarySiteSwitching() {
-		return errors.New("检索索引正在构建中，暂不可操作站点，请稍候")
-	}
-	src := repository.FindCollectSourceForDelete(id)
-	if src == nil {
-		return errors.New("当前资源站信息不存在, 请勿重复操作")
-	}
-	if progress.IsSourceDeleting(id) {
-		return errors.New("该站正在删除")
-	}
-
-	select {
-	case deleteSourceQueue <- id:
-		progress.BroadcastSourceDeleteStatus(id, src.Name, "deleting", "", 0)
-		return nil
-	default:
-		return errors.New("删除队列已满")
-	}
-}
-
-// TriggerDelFilmSourceBatch 异步批量触发采集站删除。有一站失败就返回错误。
-func (s *CollectService) TriggerDelFilmSourceBatch(ids []string) error {
-	var failed []string
-	for _, id := range ids {
-		if err := s.TriggerDelFilmSource(id); err != nil {
-			failed = append(failed, err.Error())
-		}
-	}
-	if len(failed) > 0 {
-		return errors.New(strings.Join(failed, "；"))
-	}
-	return nil
-}
-
-func (s *CollectService) DelFilmSource(id string) (int, error) {
-	deletedCount := 0
-	err := spider.WithSourceExclusive(id, func() error {
-		src := repository.FindCollectSourceById(id)
-		if src == nil {
-			return errors.New("当前资源站信息不存在, 请勿重复操作")
-		}
-		// 采集中、停止中、分类采集中都不拦截。先停采集，等本次运行退出后再删。
-		release, err := spider.StopSourceForDelete(id)
-		if err != nil {
-			return err
-		}
-		defer release()
-		oldPrimary := repository.PickPrimarySourceForCategory()
-		orphanMids, err := repository.DelCollectResource(id)
-		if err != nil {
-			if len(orphanMids) > 0 {
-				filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-			}
-			return err
-		}
-		deletedCount = len(orphanMids)
-		if len(orphanMids) > 0 {
-			filmsnapshot.DeleteActiveSnapshotsByMids(orphanMids...)
-			syslog.Infof("[Collect] 删除采集源 %s(%s)，已删除该站档案 %d 部", src.Name, id, len(orphanMids))
-		}
-		spider.ClearLimiter(id)
-		clearProvideNetworkConfigCache()
-		filmsnapshot.ClearDynamicPlayCaches()
-		repository.MarkCategoryChanged()
-		progress.BroadcastCategoryStatus(id, "idle")
-		onPrimarySourceMaybeChanged(oldPrimary, repository.PickPrimarySourceForCategory())
-		return nil
-	})
-	if err != nil {
-		return 0, err
-	}
-	spider.DropSourceRuntime(id)
-	return deletedCount, nil
 }
 
 // PrepareRecordQuery 未指定采集源时落到首选站。没有站点时保持空条件。

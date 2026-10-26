@@ -204,10 +204,12 @@ func ensureStreamFlushLoop() {
 }
 
 func drainStreamPublish(force bool) error {
-	return drainStreamPublishLocked(force, true)
+	_, err := drainStreamPublishLocked(force, true)
+	return err
 }
 
-func drainStreamPublishLocked(force, acquire bool) error {
+func drainStreamPublishLocked(force, acquire bool) (int, error) {
+	totalDrained := 0
 	for {
 		mids, flags := streamBuf.take(streamNowFn(), force)
 		if len(mids) == 0 {
@@ -215,7 +217,7 @@ func drainStreamPublishLocked(force, acquire bool) error {
 				mids, flags = streamBuf.take(streamNowFn(), true)
 			}
 			if len(mids) == 0 {
-				return nil
+				return totalDrained, nil
 			}
 		}
 		if acquire {
@@ -229,13 +231,14 @@ func drainStreamPublishLocked(force, acquire bool) error {
 		}
 		if err != nil {
 			streamBuf.putBack(flags)
-			return err
+			return totalDrained, err
 		}
+		totalDrained += len(mids)
 		if !force && streamBuf.pendingCount() < streamBackpressureN {
-			return nil
+			return totalDrained, nil
 		}
 		if force && streamBuf.pendingCount() == 0 {
-			return nil
+			return totalDrained, nil
 		}
 	}
 }
@@ -270,7 +273,7 @@ func publishStreamWindowReal(mids []int64) error {
 }
 
 func finalizeStreamPublish(warmupHome ...bool) error {
-	if err := drainStreamPublishLocked(true, false); err != nil {
+	if _, err := drainStreamPublishLocked(true, false); err != nil {
 		return err
 	}
 	filmsnapshot.RequestActiveFilmSearchIndexRebuild()

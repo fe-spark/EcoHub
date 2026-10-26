@@ -29,7 +29,6 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 		&model.SiteConfigRecord{},
 		&model.FilmSource{},
 		&model.CrontabRecord{},
-		&model.CronSourceRel{},
 		&model.Banner{},
 		&model.BannerConfigRecord{},
 		&model.MappingRule{},

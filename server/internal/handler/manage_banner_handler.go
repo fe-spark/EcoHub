@@ -126,7 +126,7 @@ func (h *ManageHandler) BannerSaveDeck(c *gin.Context) {
 	dto.Success(banners, "排片卡组已保存并生效", c)
 }
 
-// BannerQuickConfigGet 读取已保存的一键排片配方。
+// BannerQuickConfigGet 读取已保存的一键排片配置。
 func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
 	view, err := service.ManageSvc.GetBannerQuickConfig()
 	if err != nil {
@@ -136,7 +136,7 @@ func (h *ManageHandler) BannerQuickConfigGet(c *gin.Context) {
 	dto.Success(view, "获取排片配置成功", c)
 }
 
-// BannerQuickConfigSave 保存一键排片配方。不生成卡组，不替换线上轮播。
+// BannerQuickConfigSave 保存一键排片配置。不生成卡组，不替换线上轮播。
 func (h *ManageHandler) BannerQuickConfigSave(c *gin.Context) {
 	var req service.BannerQuickConfigInput
 	if err := c.ShouldBindJSON(&req); err != nil {

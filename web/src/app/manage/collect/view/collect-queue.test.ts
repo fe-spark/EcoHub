@@ -268,3 +268,27 @@ test("isClientCollectQueueId 只认 q-local- 前缀", () => {
   assert.equal(isClientCollectQueueId("q-batch-12"), false);
   assert.equal(isClientCollectQueueId(undefined), false);
 });
+
+test("所有站点跑完且检索索引构建中时，队列进入收尾中状态", () => {
+  const doneSite = site("a", {
+    id: "a",
+    name: "a",
+    total: 10,
+    current: 10,
+    success: 10,
+    failed: 0,
+    status: "done",
+    queueId: "q-1",
+  });
+  const view = computeCollectQueueProgress(["a"], [doneSite], {
+    total: 17200,
+    current: 12400,
+    percent: 72,
+    status: "indexing",
+  });
+  assert.equal(view?.running, true);
+  assert.equal(view?.finalizing, true);
+  assert.equal(view?.percent, 72);
+  assert.equal(view?.finalizingCurrent, 12400);
+  assert.equal(view?.finalizingTotal, 17200);
+});

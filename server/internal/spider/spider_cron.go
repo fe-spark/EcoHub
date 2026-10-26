@@ -20,13 +20,6 @@ import (
 
 var CronCollect *cron.Cron = CreateCron()
 
-// runBannerQuick 由 service 注入，避免 spider 反向依赖 service。
-var runBannerQuick func() error
-
-// SetBannerQuickRunner 注册定时排片的执行函数。
-func SetBannerQuickRunner(fn func() error) {
-	runBannerQuick = fn
-}
 
 // taskCidMap 运行时内存注册表：task.Id → cron.EntryID
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
@@ -70,22 +63,6 @@ func CreateCron() *cron.Cron {
 	return cron.New(cron.WithSeconds())
 }
 
-// AddFilmUpdateCron 添加 指定站点的影片更新定时任务
-func AddFilmUpdateCron(id, spec string) (cron.EntryID, error) {
-	// 校验 spec 表达式的有效性
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		// 通过创建任务时生成的 Id 获取任务相关数据
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("FilmCollectCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
-}
 
 // AddAutoUpdateCron 添加 所有已启用站点的影片更新定时任务
 func AddAutoUpdateCron(id, spec string) (cron.EntryID, error) {
@@ -173,20 +150,6 @@ func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
-// AddBannerQuickCron 到点按已保存配方替换首页轮播。
-func AddBannerQuickCron(id, spec string) (cron.EntryID, error) {
-	if err := ValidSpec(spec); err != nil {
-		return -99, errors.New(fmt.Sprint("定时任务添加失败,Cron表达式校验失败: ", err.Error()))
-	}
-	return CronCollect.AddFunc(spec, func() {
-		ft, err := repository.GetFilmTaskById(id)
-		if err != nil {
-			log.Println("BannerQuickCron Exec Failed: ", err)
-			return
-		}
-		executeTask(ft)
-	})
-}
 
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
@@ -207,16 +170,12 @@ func ReloadCronTask(id string) error {
 	switch ft.Model {
 	case model.TaskModelAutoCollect:
 		cid, err = AddAutoUpdateCron(ft.Id, ft.Spec)
-	case model.TaskModelCustomCollect:
-		cid, err = AddFilmUpdateCron(ft.Id, ft.Spec)
 	case model.TaskModelRetryCollect:
 		cid, err = AddFilmRecoverCron(ft.Id, ft.Spec)
 	case model.TaskModelOrphanClean:
 		cid, err = AddOrphanCleanCron(ft.Id, ft.Spec)
 	case model.TaskModelLogClean:
 		cid, err = AddLogCleanCron(ft.Id, ft.Spec)
-	case model.TaskModelBannerAuto:
-		cid, err = AddBannerQuickCron(ft.Id, ft.Spec)
 	case model.TaskModelFailureClean:
 		cid, err = AddFailureRecordCleanCron(ft.Id, ft.Spec)
 	default:
@@ -253,14 +212,6 @@ func runTaskBody(ft model.FilmCollectTask) {
 	case model.TaskModelAutoCollect:
 		AutoCollectTriggered(model.CollectTriggerCron, ft.Time)
 		log.Println("执行一次已启用站点采集")
-	case model.TaskModelCustomCollect:
-		if len(ft.Ids) == 0 {
-			errMsg := fmt.Sprintf("定时任务[%s]未配置资源站，跳过执行", ft.Id)
-			log.Println(errMsg)
-			emitCronFailedNotify(ft.Id, ft.Remark, errMsg)
-			break
-		}
-		BatchCollectTriggered(model.CollectTriggerCron, ft.Time, ft.Ids...)
 	case model.TaskModelRetryCollect:
 		FullRecoverSpider()
 		log.Println("执行一次失败记录重试")
@@ -272,18 +223,6 @@ func runTaskBody(ft model.FilmCollectTask) {
 		return
 	case model.TaskModelFailureClean:
 		executeFailureRecordCleanTask(ft)
-		return
-	case model.TaskModelBannerAuto:
-		if runBannerQuick == nil {
-			errMsg := fmt.Sprintf("定时任务[%s]未注册排片执行函数", ft.Id)
-			log.Println(errMsg)
-			emitCronFailedNotify(ft.Id, ft.Remark, errMsg)
-			return
-		}
-		if err := runBannerQuick(); err != nil {
-			log.Printf("[BannerSchedule] %v", err)
-			emitCronFailedNotify(ft.Id, ft.Remark, err.Error())
-		}
 		return
 	default:
 		errMsg := fmt.Sprintf("定时任务[%s]类型[%d]已废弃，跳过执行", ft.Id, ft.Model)
@@ -309,6 +248,10 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
 		return
 	}
+	if db.Mdb == nil {
+		return
+	}
+
 
 	// 1. 多源播放列表孤儿清理（film_source_playlists 中 mid 不在 film_index 的残余）
 	var n int64
@@ -356,7 +299,7 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 
 const (
 	logRetention           = 7 * 24 * time.Hour
-	failureRecordRetention = 30 * 24 * time.Hour
+	failureRecordRetention = 7 * 24 * time.Hour
 )
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
@@ -378,7 +321,7 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 func executeFailureRecordCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
 	pruned := repository.PruneExpiredFailureRecords(failureRecordRetention)
-	log.Printf("[FailureRecordClean] 任务 %s 清理超过 30 天的重试成功和最终失败记录 %d 条，cost=%s", ft.Id, pruned, time.Since(startedAt))
+	log.Printf("[FailureRecordClean] 任务 %s 清理超过 7 天的重试成功和最终失败记录 %d 条，cost=%s", ft.Id, pruned, time.Since(startedAt))
 }
 
 // RunTaskOnce 立即手动执行一次任务
@@ -386,9 +329,6 @@ func RunTaskOnce(id string) error {
 	ft, err := repository.GetFilmTaskById(id)
 	if err != nil {
 		return err
-	}
-	if !ft.State {
-		return fmt.Errorf("定时任务已禁用，请先启用后再手动执行")
 	}
 	if _, alreadyRunning := runningCronTasks.LoadOrStore(ft.Id, struct{}{}); alreadyRunning {
 		return fmt.Errorf("定时任务正在执行中，请等待当前执行完成")

@@ -205,7 +205,7 @@ func TestFilterShownCategoryIDs_DynamicHidden(t *testing.T) {
 		t.Fatalf("expected empty slice for only hidden categories, got %v", onlyHidden)
 	}
 
-	// 排片数量只认配方里的分类编号，不按展示分类的显示开关删掉。
+	// 排片数量只认排片规则里的分类编号，不按展示分类的显示开关删掉。
 	cfg := NormalizeBannerConfig(model.BannerConfig{Quotas: []model.BannerQuota{
 		{CategoryID: 1, Count: 1}, {CategoryID: 2, Count: 1}, {CategoryID: 4, Count: 2},
 	}})
@@ -235,7 +235,7 @@ func TestFilterShownCategoryIDs_AllHidden(t *testing.T) {
 		t.Fatalf("expected empty slice when all categories hidden, got %v", filtered)
 	}
 
-	// 展示分类全部隐藏时，配方里的分类编号仍然保留，排片时再按该站分类树决定。
+	// 展示分类全部隐藏时，排片规则里的分类编号仍然保留，排片时再按该站分类树决定。
 	cfg := NormalizeBannerConfig(model.BannerConfig{Quotas: []model.BannerQuota{
 		{CategoryID: 10, Count: 1}, {CategoryID: 20, Count: 1},
 	}})

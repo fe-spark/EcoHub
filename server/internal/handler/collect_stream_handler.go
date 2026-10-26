@@ -24,6 +24,7 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 	progressCh := progress.Subscribe(c.Request.Context())
 	categoryCh := progress.SubscribeCategory(c.Request.Context())
 	deleteCh := progress.SubscribeSourceDelete(c.Request.Context())
+	searchIndexCh := progress.SubscribeSearchIndex(c.Request.Context())
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
@@ -45,6 +46,15 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 			if errors.Is(err, errSSEWrite) {
 				return
 			}
+		}
+	}
+
+	// 慢查询期间通道里会积压旧进度，快照必须读最新一份。
+	discardSearchIndexProgress(searchIndexCh)
+	latest := service.CollectSvc.SearchIndexProgress()
+	if err := stream.SendEvent("search_index_progress", latest); err != nil {
+		if errors.Is(err, errSSEWrite) {
+			return
 		}
 	}
 
@@ -79,10 +89,32 @@ func (h *CollectHandler) ProgressStream(c *gin.Context) {
 					return
 				}
 			}
+		case evt, ok := <-searchIndexCh:
+			if !ok {
+				return
+			}
+			if err := stream.SendEvent("search_index_progress", evt); err != nil {
+				if errors.Is(err, errSSEWrite) {
+					return
+				}
+			}
 		case <-heartbeat.C:
 			if err := stream.Comment("ping"); err != nil {
 				return
 			}
+		}
+	}
+}
+
+func discardSearchIndexProgress(ch <-chan progress.SearchIndexProgressEvent) {
+	for {
+		select {
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+		default:
+			return
 		}
 	}
 }
