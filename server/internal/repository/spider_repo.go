@@ -216,9 +216,6 @@ func DelCollectResource(id string) ([]int64, error) {
 		if err != nil {
 			return err
 		}
-		if err := tx.Where("source_id = ?", id).Delete(&model.CronSourceRel{}).Error; err != nil {
-			return err
-		}
 		if err := DeleteFailureRecordsByOriginIdTx(tx, id); err != nil {
 			return err
 		}

@@ -15,7 +15,6 @@ const (
 	TableMappingRule        = "mapping_rules"
 	TableSearchTag          = "search_tag_item"
 	TableCrontabRecord      = "crontab_record"
-	TableCronSourceRel      = "cron_source_rel"
 	TableSiteConfig         = "site_config_record"
 	TableBanners            = "banners_record"
 	TableFileInfo           = "files"
@@ -54,7 +53,6 @@ var AllModels = []any{
 	&SiteConfigRecord{},
 	&MovieSourceMapping{},
 	&Banner{},
-	&CronSourceRel{},
 	&MappingRule{},
 	&CategoryMapping{},
 	&SourceCategory{},

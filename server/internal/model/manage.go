@@ -160,7 +160,7 @@ type BannerQuota struct {
 	Count      int   `json:"count"`
 }
 
-// BannerConfig 一键排片配方。定时开关在计划任务 sys_cron_banner_auto，不写在这里。
+// BannerConfig 一键排片配置。定时开关在计划任务 sys_cron_banner_auto，不写在这里。
 type BannerConfig struct {
 	Strategy string        `json:"strategy"` // hot_random | score_random | latest_random
 	AutoTMDB bool          `json:"autoTMDB"` // 替换线上时是否写入刮削

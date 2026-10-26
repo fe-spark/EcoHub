@@ -230,16 +230,12 @@ func (s *InitService) registerTask(task model.FilmCollectTask) error {
 	switch task.Model {
 	case model.TaskModelAutoCollect:
 		cid, err = spider.AddAutoUpdateCron(task.Id, task.Spec)
-	case model.TaskModelCustomCollect:
-		cid, err = spider.AddFilmUpdateCron(task.Id, task.Spec)
 	case model.TaskModelRetryCollect:
 		cid, err = spider.AddFilmRecoverCron(task.Id, task.Spec)
 	case model.TaskModelOrphanClean:
 		cid, err = spider.AddOrphanCleanCron(task.Id, task.Spec)
 	case model.TaskModelLogClean:
 		cid, err = spider.AddLogCleanCron(task.Id, task.Spec)
-	case model.TaskModelBannerAuto:
-		cid, err = spider.AddBannerQuickCron(task.Id, task.Spec)
 	case model.TaskModelFailureClean:
 		cid, err = spider.AddFailureRecordCleanCron(task.Id, task.Spec)
 	default:
@@ -255,17 +251,17 @@ func (s *InitService) registerTask(task model.FilmCollectTask) error {
 func defaultFilmTasks() []model.FilmCollectTask {
 	task := model.FilmCollectTask{
 		Id: "sys_cron_auto_collect", Time: config.DefaultUpdateTime, Spec: config.DefaultUpdateSpec,
-		Model: model.TaskModelAutoCollect, State: false, Remark: "采集已启用站点的更新",
+		Model: model.TaskModelAutoCollect, State: true, Remark: "采集已启用站点的更新",
 	}
 
 	recoverTask := model.FilmCollectTask{
 		Id: "sys_cron_recover_collect", Time: 0, Spec: config.EveryDaySpec,
-		Model: model.TaskModelRetryCollect, State: false, Remark: "重试待处理的失败记录",
+		Model: model.TaskModelRetryCollect, State: true, Remark: "重试待处理的失败记录",
 	}
 
 	orphanTask := model.FilmCollectTask{
 		Id: "sys_cron_orphan_clean", Time: 0, Spec: config.OrphanCleanSpec,
-		Model: model.TaskModelOrphanClean, State: false, Remark: "清理片库冗余和孤儿数据",
+		Model: model.TaskModelOrphanClean, State: true, Remark: "清理片库冗余和孤儿数据",
 	}
 
 	logCleanTask := model.FilmCollectTask{
@@ -275,13 +271,9 @@ func defaultFilmTasks() []model.FilmCollectTask {
 
 	failureCleanTask := model.FilmCollectTask{
 		Id: model.TaskIDFailureClean, Time: 0, Spec: "0 30 3 * * *",
-		Model: model.TaskModelFailureClean, State: true, Remark: "清理超过 30 天的成功和最终失败记录",
+		Model: model.TaskModelFailureClean, State: true, Remark: "清理超过 7 天的成功和最终失败记录",
 	}
 
-	bannerTask := model.FilmCollectTask{
-		Id: model.TaskIDBannerAuto, Time: 0, Spec: "0 0 4 * * *",
-		Model: model.TaskModelBannerAuto, State: false, Remark: "按已保存配方替换首页轮播",
-	}
 
-	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, failureCleanTask, bannerTask}
+	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, failureCleanTask}
 }

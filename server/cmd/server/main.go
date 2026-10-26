@@ -121,6 +121,9 @@ func start() {
 			if _, err := service.IndexSvc.IndexPage(primary.Id); err == nil {
 				log.Printf("[Init] 首页数据缓存预热完成 primary=%s", primary.Name)
 			}
+			if _, _, err := service.ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
+				log.Printf("[Init] 初始化排片规则失败: %v", err)
+			}
 		}
 	}()
 	ln, err := net.Listen("tcp", srv.Addr)

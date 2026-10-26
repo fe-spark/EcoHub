@@ -9,7 +9,7 @@ import (
 )
 
 // PrepareBatchCollectStart 挑出这次能开的站并占用。跳过的站带原因返回，不占队列。
-// 定时采集不走这里，仍只跳过并写日志。
+// 手动批量采集与计划任务定时采集均复用此逻辑。
 func PrepareBatchCollectStart(ids []string) ([]model.FilmSource, model.CollectBatchResult) {
 	seen := make(map[string]struct{}, len(ids))
 	ready := make([]model.FilmSource, 0, len(ids))

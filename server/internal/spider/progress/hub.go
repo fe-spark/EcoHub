@@ -31,18 +31,20 @@ type SourceDeleteEvent struct {
 // Hub 采集进度全局广播中心
 type Hub struct {
 	mu                  sync.RWMutex
-	subscribers         map[chan []model.CollectProgress]struct{}
-	categorySubscribers map[chan CategorySyncEvent]struct{}
-	deleteSubscribers   map[chan SourceDeleteEvent]struct{}
-	notifyCh            chan struct{}
+	subscribers            map[chan []model.CollectProgress]struct{}
+	categorySubscribers    map[chan CategorySyncEvent]struct{}
+	deleteSubscribers      map[chan SourceDeleteEvent]struct{}
+	searchIndexSubscribers map[chan SearchIndexProgressEvent]struct{}
+	notifyCh               chan struct{}
 }
 
 // GlobalHub 全局单例
 var GlobalHub = &Hub{
-	subscribers:         make(map[chan []model.CollectProgress]struct{}),
-	categorySubscribers: make(map[chan CategorySyncEvent]struct{}),
-	deleteSubscribers:   make(map[chan SourceDeleteEvent]struct{}),
-	notifyCh:            make(chan struct{}, 1),
+	subscribers:            make(map[chan []model.CollectProgress]struct{}),
+	categorySubscribers:    make(map[chan CategorySyncEvent]struct{}),
+	deleteSubscribers:      make(map[chan SourceDeleteEvent]struct{}),
+	searchIndexSubscribers: make(map[chan SearchIndexProgressEvent]struct{}),
+	notifyCh:               make(chan struct{}, 1),
 }
 
 func init() {
@@ -304,6 +306,43 @@ func SubscribeSourceDelete(ctx context.Context) <-chan SourceDeleteEvent {
 		<-ctx.Done()
 		GlobalHub.mu.Lock()
 		delete(GlobalHub.deleteSubscribers, ch)
+		GlobalHub.mu.Unlock()
+		close(ch)
+	}()
+
+	return ch
+}
+// SearchIndexProgressEvent 检索索引重建数字进度事件
+type SearchIndexProgressEvent struct {
+	Total   int64  `json:"total"`
+	Current int64  `json:"current"`
+	Percent int    `json:"percent"`
+	Status  string `json:"status"` // "indexing" | "done" | "idle"
+}
+
+// BroadcastSearchIndexProgress 广播检索索引重建数字进度
+func BroadcastSearchIndexProgress(evt SearchIndexProgressEvent) {
+	GlobalHub.mu.RLock()
+	defer GlobalHub.mu.RUnlock()
+	for ch := range GlobalHub.searchIndexSubscribers {
+		select {
+		case ch <- evt:
+		default:
+		}
+	}
+}
+
+// SubscribeSearchIndex 订阅检索索引重建进度事件流
+func SubscribeSearchIndex(ctx context.Context) <-chan SearchIndexProgressEvent {
+	ch := make(chan SearchIndexProgressEvent, 8)
+	GlobalHub.mu.Lock()
+	GlobalHub.searchIndexSubscribers[ch] = struct{}{}
+	GlobalHub.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		GlobalHub.mu.Lock()
+		delete(GlobalHub.searchIndexSubscribers, ch)
 		GlobalHub.mu.Unlock()
 		close(ch)
 	}()

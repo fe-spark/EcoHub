@@ -11,12 +11,10 @@ import (
 
 const (
 	TaskModelAutoCollect   = 0 // 采集已启用站点
-	TaskModelCustomCollect = 1 // 采集指定站点
-	TaskModelRetryCollect  = 2 // 重试待处理的失败记录
-	TaskModelOrphanClean   = 3 // 清理片库冗余和孤儿数据
-	TaskModelLogClean      = 4 // 清理过期运行日志
-	TaskModelBannerAuto    = 5 // 按配方替换首页轮播
-	TaskModelFailureClean  = 6 // 清理超过保留期的成功和最终失败记录
+	TaskModelRetryCollect  = 1 // 重试待处理的失败记录
+	TaskModelOrphanClean   = 2 // 清理片库冗余和孤儿数据
+	TaskModelLogClean      = 3 // 清理过期运行日志
+	TaskModelFailureClean  = 4 // 清理超过保留期的成功和最终失败记录
 )
 
 // 采集触发方式常量。
@@ -28,7 +26,6 @@ const (
 )
 
 const (
-	TaskIDBannerAuto   = "sys_cron_banner_auto"
 	TaskIDFailureClean = "sys_cron_failure_clean"
 )
 
@@ -59,15 +56,6 @@ func (CrontabRecord) TableName() string {
 	return TableCrontabRecord
 }
 
-// CronSourceRel 定时任务与资源站关联表
-type CronSourceRel struct {
-	TaskId   string `gorm:"primaryKey;index;size:64"`
-	SourceId string `gorm:"primaryKey;index;size:64"`
-}
-
-func (CronSourceRel) TableName() string {
-	return TableCronSourceRel
-}
 
 const (
 	SourceFormatJSON = "json"

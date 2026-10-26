@@ -18,6 +18,8 @@ import (
 	"server/internal/spider/scheduler"
 	"server/internal/utils"
 )
+const collectDispatchDelay = 200 * time.Millisecond
+
 
 func isDispatchStopped(runVersion uint64) bool {
 	return stopAllVersion.Load() != runVersion
@@ -235,7 +237,7 @@ func runSourcesGroupWithLimit(sources []model.FilmSource, h int, tag string, lim
 		}
 		// 独立探页与抓取解耦：直接派发协程，由各站点探完总页后立即开跑，不再被死站阻塞
 		if idx > 0 {
-			time.Sleep(collectDispatchDelay(batchCtx))
+			time.Sleep(collectDispatchDelay)
 		}
 		wg.Add(1)
 		if sem != nil {

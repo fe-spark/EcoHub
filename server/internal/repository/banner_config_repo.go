@@ -19,7 +19,7 @@ const (
 	BannerStrategyLatest = "latest_random"
 )
 
-// DefaultBannerConfig 返回未保存时的排片配方。
+// DefaultBannerConfig 返回未保存时的排片配置。
 func DefaultBannerConfig() model.BannerConfig {
 	return model.BannerConfig{
 		Strategy: BannerStrategyHot,
@@ -27,7 +27,7 @@ func DefaultBannerConfig() model.BannerConfig {
 	}
 }
 
-// NormalizeBannerConfig 规范化轮播配置。只保留当前配方字段。
+// NormalizeBannerConfig 规范化轮播排片配置。
 func NormalizeBannerConfig(cfg model.BannerConfig) model.BannerConfig {
 	cfg.Strategy = strings.ToLower(strings.TrimSpace(cfg.Strategy))
 	switch cfg.Strategy {
@@ -66,7 +66,7 @@ var (
 	memBannerConfig     *model.BannerConfig
 )
 
-// DeleteBannerConfig 删除已存排片配方。
+// DeleteBannerConfig 删除已存排片配置。
 func DeleteBannerConfig() error {
 	memBannerConfigLock.Lock()
 	memBannerConfig = nil
@@ -81,13 +81,13 @@ func DeleteBannerConfig() error {
 	return db.Mdb.Unscoped().Session(&gorm.Session{AllowGlobalUpdate: true}).Delete(&model.BannerConfigRecord{}).Error
 }
 
-// BannerConfigExists 是否已经保存过一键排片配方。
+// BannerConfigExists 是否已经保存过排片配置。
 func BannerConfigExists() (bool, error) {
 	_, exists, err := LoadBannerConfig()
 	return exists, err
 }
 
-// GetBannerConfig 读取轮播排片配置。没有记录时返回默认配方，不写入缓存。
+// GetBannerConfig 读取轮播排片配置。没有记录时返回默认配置，不写入缓存。
 func GetBannerConfig() (model.BannerConfig, error) {
 	cfg, _, err := LoadBannerConfig()
 	return cfg, err
@@ -147,9 +147,29 @@ func decodeBannerConfig(raw string) (model.BannerConfig, error) {
 func SaveBannerConfig(cfg model.BannerConfig) error {
 	cfg = NormalizeBannerConfig(cfg)
 	memBannerConfigLock.Lock()
-	memBannerConfig = &cfg
+	stored := cfg
+	memBannerConfig = &stored
 	memBannerConfigLock.Unlock()
+	return writeBannerConfigRecord(cfg)
+}
 
+// SaveBannerConfigIfEmpty 仅在还没有正数量配额时写入。已有配额则原样返回。
+func SaveBannerConfigIfEmpty(cfg model.BannerConfig) (model.BannerConfig, bool, error) {
+	cfg = NormalizeBannerConfig(cfg)
+	memBannerConfigLock.Lock()
+	defer memBannerConfigLock.Unlock()
+	if memBannerConfig != nil && len(memBannerConfig.Quotas) > 0 {
+		return *memBannerConfig, false, nil
+	}
+	if err := writeBannerConfigRecord(cfg); err != nil {
+		return model.BannerConfig{}, false, err
+	}
+	stored := cfg
+	memBannerConfig = &stored
+	return stored, true, nil
+}
+
+func writeBannerConfigRecord(cfg model.BannerConfig) error {
 	if db.Mdb == nil {
 		return nil
 	}

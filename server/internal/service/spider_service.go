@@ -31,6 +31,9 @@ func clearCategorySyncRedisCaches() {
 func finalizeCategorySync() {
 	repository.RefreshCategoryCache()
 	clearCategorySyncRedisCaches()
+	if _, _, err := ManageSvc.EnsureBannerQuickDefaultConfig(); err != nil {
+		syslog.Errorf("[Banner] 分类同步后初始化排片规则失败: %v", err)
+	}
 }
 
 // StartCollect 执行对指定站点的采集任务
@@ -76,7 +79,7 @@ var resetSiteDataRunning atomic.Bool
 
 // ClearFilms 重置站点业务数据：清空影视/采集派生数据。
 // 清空会连分类一起清掉，随后按每个采集站重新拉取分类副本。
-// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，定时排片关闭，排片配方保留。
+// 注意：不重置任何账号与密码，也不改网站配置、映射规则、采集源和采集计划任务。线上轮播清空，定时排片关闭，排片规则保留。
 // 全程按关键节点上报真实进度，由 SSE 推给页面。
 func (s *SpiderService) ClearFilms() (retErr error) {
 	filmrepo.StartResetProgress()
@@ -86,10 +89,6 @@ func (s *SpiderService) ClearFilms() (retErr error) {
 		}
 	}()
 	if err := spider.ClearSpider(); err != nil {
-		return err
-	}
-	if err := DisableBannerQuickSchedule(); err != nil {
-		log.Printf("[SpiderService] 重置后关闭定时排片失败: %v", err)
 		return err
 	}
 	filmrepo.ReportResetProgress(100, "重置完成，片库与业务数据已清空")

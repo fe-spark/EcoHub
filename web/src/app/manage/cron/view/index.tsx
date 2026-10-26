@@ -225,12 +225,8 @@ export default function CronManagePageView() {
           );
         }
         const isRunning = runningId === record.id;
-        const runDisabled = !record.state || isRunning || !!record.disabledReason;
-        const runTooltip = record.disabledReason
-          ? record.disabledReason
-          : record.state
-          ? "立即执行一次"
-          : "请先启用任务";
+        const runDisabled = isRunning || !!record.disabledReason;
+        const runTooltip = record.disabledReason || "立即执行一次";
         return (
           <Space size={8}>
             <Tooltip title={runTooltip}>
@@ -272,7 +268,7 @@ export default function CronManagePageView() {
     <div className={styles.pageStack}>
       <ManagePageHeader
         title="计划任务"
-        description="每条任务只做一件事：自动采集、指定采集、失败重试、片库清理、日志清理、失败记录清理、自动排片。"
+        description="管理系统后台定时调度任务。支持调整执行周期、启用/禁用自动调度，或随时手动触发单次执行。"
       />
 
       <Table

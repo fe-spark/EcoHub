@@ -17,16 +17,14 @@ export function mergeBannerQuickCategories(
   recipe: BannerQuickRecipe | null,
 ): CategoryQuotaItem[] {
   const counts = new Map<number, number>();
-  if (recipe?.saved) {
-    for (const item of recipe.quotas || []) {
-      const id = Number(item.categoryId);
-      if (id > 0) counts.set(id, Math.max(0, Number(item.count) || 0));
-    }
+  for (const item of recipe?.quotas || []) {
+    const id = Number(item.categoryId);
+    if (id > 0) counts.set(id, Math.max(0, Number(item.count) || 0));
   }
   return nav.map((item) => ({
     id: item.id,
     name: item.name,
-    count: recipe?.saved ? counts.get(item.id) ?? 0 : 1,
+    count: counts.get(item.id) ?? 0,
   }));
 }
 

@@ -32,7 +32,6 @@ func setupCascadeCleanTestDB(t *testing.T) *gorm.DB {
 		&model.Banner{},
 		&model.FilmTMDBScrape{},
 		&model.FailureRecord{},
-		&model.CronSourceRel{},
 		&model.SourceCategory{},
 		&model.CategoryMapping{},
 		&model.Category{},

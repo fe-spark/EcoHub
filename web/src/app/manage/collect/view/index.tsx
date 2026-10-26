@@ -17,7 +17,7 @@ import CollectSourceGrid from "./collect-source-grid";
 import CollectToolbar from "./collect-toolbar";
 import SourceFormDrawer from "./source-form-drawer";
 import { useCollectProgressStream } from "./use-collect-progress-stream";
-import { useCollectStream, type CategoryTreeChange } from "./use-collect-stream";
+import { useCollectStream, type CategoryTreeChange, type SearchIndexProgress } from "./use-collect-stream";
 import { useCollectSourceEvents } from "./use-collect-source-events";
 import { useCategoryChangeConfirm } from "./use-category-change-confirm";
 import { useCollectCleanup } from "./use-collect-cleanup";
@@ -45,6 +45,9 @@ export default function CollectManagePageView() {
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
   const [globalSpiderProxyReady, setGlobalSpiderProxyReady] = useState(false);
+  const [searchIndexProgress, setSearchIndexProgress] = useState<SearchIndexProgress>();
+  const searchIndexRef = useRef(searchIndexProgress);
+  searchIndexRef.current = searchIndexProgress;
 
   const { pendingSortRef, handleSortList, cleanupSort } = useCollectSort(siteList, setSiteList);
   const {
@@ -135,7 +138,12 @@ export default function CollectManagePageView() {
     [message],
   );
 
-  const handleProgressStream = useCollectProgressStream(setSiteList, resetTimersRef, handleTerminalStatus);
+  const handleProgressStream = useCollectProgressStream(
+    setSiteList,
+    resetTimersRef,
+    handleTerminalStatus,
+    searchIndexRef,
+  );
 
   const {
     deleteQueueItems,
@@ -154,6 +162,9 @@ export default function CollectManagePageView() {
     onProgress: handleProgressStream,
     onCategorySnapshot: handleCategorySnapshot,
     onCategoryStatus: handleCategoryStatus,
+    onSearchIndexProgress: (p) => {
+      setSearchIndexProgress(p);
+    },
     onSourceDelete: (evt) => {
       handleSourceDelete(evt);
       handleSourceDeleteEvent(evt);
@@ -242,7 +253,7 @@ export default function CollectManagePageView() {
     [siteList],
   );
 
-  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList);
+  const { queueBars, stoppingQueueId, stopQueue } = useCollectQueueBars(siteList, setSiteList, getCollectList, searchIndexProgress);
 
   const updateSiteListItem = useCallback((id: string, updater: (record: FilmSource) => FilmSource) => {
     setSiteList((current) => current.map((item) => (item.id === id ? updater(item) : item)));
