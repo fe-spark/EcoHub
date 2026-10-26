@@ -112,12 +112,10 @@ export function useCollectSourceEvents({
         );
       } else if (evt.status === "deleted") {
         setSiteList((prev) => prev.filter((s) => s.id !== evt.sourceId));
-        message.success("删除成功");
       } else if (evt.status === "failed") {
         setSiteList((prev) =>
           prev.map((s) => (s.id === evt.sourceId ? { ...s, deleting: false } : s)),
         );
-        message.error("删除失败");
       }
     },
     [message, setSiteList],

@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
+import { useAppMessage } from "@/lib/useAppMessage";
 import type { DeletingQueueItem } from "./delete-queue-bar";
 import type { SourceDeleteEvent } from "./use-collect-stream";
 import type { FilmSource } from "./types";
@@ -6,6 +7,8 @@ import type { FilmSource } from "./types";
 export function useCollectDeleteQueue() {
   const [deleteQueueItems, setDeleteQueueItems] = useState<DeletingQueueItem[]>([]);
   const autoDismissTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const { message } = useAppMessage();
+  const wasRunningRef = useRef(false);
 
   const clearAutoDismiss = useCallback(() => {
     if (autoDismissTimerRef.current) {
@@ -119,11 +122,39 @@ export function useCollectDeleteQueue() {
   }, []);
 
   useEffect(() => {
-    if (deleteQueueItems.length === 0) return;
+    if (deleteQueueItems.length === 0) {
+      wasRunningRef.current = false;
+      return;
+    }
+    const isRunning = deleteQueueItems.some(
+      (item) => item.status === "pending" || item.status === "deleting",
+    );
+    if (isRunning) {
+      wasRunningRef.current = true;
+    }
     const allTerminal = deleteQueueItems.every(
       (item) => item.status === "deleted" || item.status === "failed",
     );
-    if (allTerminal) {
+    if (allTerminal && wasRunningRef.current) {
+      wasRunningRef.current = false;
+      const total = deleteQueueItems.length;
+      const failedCount = deleteQueueItems.filter((i) => i.status === "failed").length;
+      const totalDeletedFilms = deleteQueueItems.reduce((sum, i) => sum + (i.deletedFilms || 0), 0);
+      const noticeKey = "collect-delete-queue-finished";
+      if (failedCount > 0) {
+        message.warning({
+          key: noticeKey,
+          content: total > 1 ? `删除完成，其中 ${failedCount} 站失败` : "删除失败",
+          duration: 3,
+        });
+      } else {
+        const filmText = totalDeletedFilms > 0 ? `，共清理 ${totalDeletedFilms.toLocaleString()} 部影片档案` : "";
+        message.success({
+          key: noticeKey,
+          content: total > 1 ? `批量删除完成，已清理 ${total} 个采集站${filmText}` : "删除成功",
+          duration: 3,
+        });
+      }
       autoDismissTimerRef.current = setTimeout(() => {
         setDeleteQueueItems([]);
       }, 5000);
@@ -134,7 +165,7 @@ export function useCollectDeleteQueue() {
         }
       };
     }
-  }, [deleteQueueItems]);
+  }, [deleteQueueItems, message]);
 
   return {
     deleteQueueItems,
