@@ -113,9 +113,23 @@ func (s *collectLifecycleState) runExclusive(action func() error) error {
 	return action()
 }
 
+// reserveMaintenance 低频维护预约：立刻拒绝新采集，等在途站点与发布收尾后独占执行。
+func (s *collectLifecycleState) reserveMaintenance(timeout time.Duration, action func() error) error {
+	if err := s.beginDrain(timeout); err != nil {
+		return err
+	}
+	defer s.endDrain()
+	s.beginPublish()
+	defer s.endPublish()
+	publishMu.Lock()
+	defer publishMu.Unlock()
+	return action()
+}
+
+var errDrainTimeout = errors.New("等待采集空闲超时")
+
 func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
 	s.mu.Lock()
-	s.draining = true
 	deadline := time.Now().Add(timeout)
 	timer := time.AfterFunc(timeout, func() {
 		s.mu.Lock()
@@ -123,11 +137,22 @@ func (s *collectLifecycleState) beginDrain(timeout time.Duration) error {
 		s.mu.Unlock()
 	})
 	defer timer.Stop()
-	for s.activeCount > 0 {
+
+	for s.draining {
+		if !time.Now().Before(deadline) {
+			s.mu.Unlock()
+			return fmt.Errorf("%w: 维护闸门仍被占用", errDrainTimeout)
+		}
+		s.cond.Wait()
+	}
+	s.draining = true
+
+	for s.activeCount > 0 || s.publishing > 0 {
 		if !time.Now().Before(deadline) {
 			s.draining = false
+			s.cond.Broadcast()
 			s.mu.Unlock()
-			return fmt.Errorf("等待采集任务停止超时: active=%d", s.activeCount)
+			return fmt.Errorf("%w: active=%d publishing=%d", errDrainTimeout, s.activeCount, s.publishing)
 		}
 		s.cond.Wait()
 	}

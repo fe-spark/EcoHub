@@ -241,7 +241,7 @@ export default function BannerQuickDrawer({
               isAnyBusy={publishing}
               onMove={handleMove}
               onRemove={handleRemove}
-              onScrape={handleSingleScrape}
+              onScrape={tmdbEnabled ? handleSingleScrape : undefined}
             />
           ))}
         </div>

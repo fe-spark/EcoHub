@@ -40,6 +40,11 @@ type ConfigBackupModules struct {
 	Notify       bool `json:"notify"`
 }
 
+// ConfigBackupExportRequest 配置备份导出请求
+type ConfigBackupExportRequest struct {
+	Password string `json:"password"`
+}
+
 // ConfigBackupImportRequest 配置备份导入请求
 type ConfigBackupImportRequest struct {
 	Password string              `json:"password"`

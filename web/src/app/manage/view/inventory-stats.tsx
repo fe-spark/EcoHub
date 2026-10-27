@@ -10,7 +10,6 @@ import styles from "./inventory-stats.module.less";
 interface LibraryInventory {
   films: number;
   multiSource: number;
-  categories: number;
   failures: number;
 }
 
@@ -33,7 +32,6 @@ interface InventoryStatsData {
 const metricItems: Array<{ key: keyof LibraryInventory; label: string; hint: string; lead?: boolean }> = [
   { key: "films", label: "片库影片", hint: "当前主站档案", lead: true },
   { key: "multiSource", label: "多源聚合", hint: "多源覆盖档案" },
-  { key: "categories", label: "展示分类", hint: "共享展示树" },
   { key: "failures", label: "采集异常", hint: "全部来源" },
 ];
 

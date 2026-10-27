@@ -139,7 +139,9 @@ interface DataSecurityPageViewProps {
 export default function DataSecurityPageView({ embedded = false }: DataSecurityPageViewProps) {
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
+  const [exportOpen, setExportOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportPassword, setExportPassword] = useState("");
 
   const [importOpen, setImportOpen] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -150,10 +152,27 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
 
   const backupSummary = useMemo(() => summarizeBackup(backup), [backup]);
 
-  const handleExport = async () => {
+  const openExport = () => {
+    setExportOpen(true);
+    setExportPassword("");
+  };
+
+  const closeExport = () => {
+    if (exporting) return;
+    setExportOpen(false);
+    setExportPassword("");
+  };
+
+  const confirmExport = async () => {
+    if (!exportPassword.trim()) {
+      message.error("请输入管理密码");
+      return;
+    }
     setExporting(true);
     try {
-      const resp = await ApiGet<ConfigBackup>("/manage/config/backup/export");
+      const resp = await ApiPost<ConfigBackup>("/manage/config/backup/export", {
+        password: exportPassword,
+      });
       if (resp.code !== 0 || !resp.data) {
         message.error(resp.msg || "导出失败");
         return;
@@ -161,11 +180,12 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
       downloadJson(`ecohub-config-backup-${stamp}.json`, resp.data);
       message.success("配置备份已下载");
+      setExportOpen(false);
+      setExportPassword("");
     } finally {
       setExporting(false);
     }
   };
-
   const beforeUpload: UploadProps["beforeUpload"] = (file) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -267,9 +287,8 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             <Button
               type="primary"
               icon={<DownloadOutlined />}
-              loading={exporting}
               disabled={!canWrite || !isAdmin}
-              onClick={() => void handleExport()}
+              onClick={openExport}
             >
               导出配置
             </Button>
@@ -353,6 +372,31 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
             placeholder="请输入管理密码"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+        </Flex>
+      </Modal>
+
+      <Modal
+        title="导出配置备份"
+        open={exportOpen}
+        onCancel={closeExport}
+        onOk={() => void confirmExport()}
+        okText="确认导出"
+        confirmLoading={exporting}
+        destroyOnHidden
+        width={460}
+      >
+        <Flex vertical gap={14}>
+          <Alert
+            type="info"
+            showIcon
+            title="备份包含站点订阅密钥、弹幕与第三方集成凭据，导出需验证管理密码并请妥善保管"
+          />
+          <Input.Password
+            placeholder="请输入管理密码"
+            value={exportPassword}
+            onChange={(e) => setExportPassword(e.target.value)}
             autoComplete="current-password"
           />
         </Flex>

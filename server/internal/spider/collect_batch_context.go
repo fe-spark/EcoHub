@@ -182,6 +182,7 @@ type collectBatchContext struct {
 	sourceErrors       map[string]string
 	finishedSources    map[string]model.FilmSource
 	occupyTokens       map[string]uint64
+	runNoted           atomic.Bool
 }
 
 func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, startedAt time.Time, isStandalone ...bool) *collectBatchContext {
@@ -207,6 +208,13 @@ func newCollectBatchContext(trigger, tag string, sources []model.FilmSource, sta
 	}
 	registerActiveBatch(b)
 	return b
+}
+
+func (b *collectBatchContext) noteCronCollectStarted() {
+	if b == nil || b.trigger != model.CollectTriggerCron || b.runNoted.Swap(true) {
+		return
+	}
+	noteTaskRan("sys_cron_auto_collect", time.Now())
 }
 
 func (b *collectBatchContext) takeAffectedMIDs() []int64 {

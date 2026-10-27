@@ -144,6 +144,7 @@ func serveFailureRecoverLane(sourceID string, source model.FilmSource, run failu
 		return
 	}
 	defer collectLifecycle.endSource(source.Id)
+	noteTaskRan("sys_cron_recover_collect", time.Now())
 	defer func() {
 		batchCtx.markSourceFinished(source)
 		if err := batchCtx.flushAndFinalize(); err != nil {

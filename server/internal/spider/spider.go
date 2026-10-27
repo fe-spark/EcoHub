@@ -138,6 +138,9 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		log.Printf("[Spider] 站点 %s 无法启动采集: %v\n", id, err)
 		return err
 	}
+	if batchCtx != nil && batchCtx.trigger == model.CollectTriggerCron {
+		batchCtx.noteCronCollectStarted()
+	}
 	defer collectLifecycle.endSource(id)
 
 	if err := ensureMasterCategoriesReady(s); err != nil {

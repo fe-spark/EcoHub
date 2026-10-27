@@ -78,14 +78,17 @@ func SetupRouter() *gin.Engine {
 			sysConfig.GET(`/access`, handler.ManageHd.SiteAccessConfig)
 			sysConfig.POST(`/access`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteAccess)
 
+			sysConfig.GET(`/danmaku`, handler.ManageHd.SiteDanmakuConfig)
+			sysConfig.POST(`/danmaku`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteDanmaku)
+
 			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
 			sysConfig.POST(`/tip`, handler.ManageHd.UpdateSiteTip)
 
 			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
 			sysConfig.POST(`/notice`, handler.ManageHd.UpdateSiteNotice)
 
-			// 配置备份：导出/导入（不含影视库存与账号，仅超级管理员）
-			sysConfig.GET(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
+			// 配置备份：导出/导入（需管理密码，不含影视库存与账号，仅超级管理员）
+			sysConfig.POST(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
 			sysConfig.POST(`/backup/import`, middleware.AdminAccess(), handler.ManageHd.ImportConfigBackup)
 		}
 		systemLog := manageRoute.Group(`/system/logs`, middleware.AdminAccess())

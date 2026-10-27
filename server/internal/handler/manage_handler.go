@@ -106,16 +106,11 @@ func (h *ManageHandler) UpdateSiteBasic(c *gin.Context) {
 		dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
 		return
 	}
-	var incoming *model.DanmakuConfig
 	if raw := bytes.TrimSpace(probe.Danmaku); len(raw) > 0 && string(raw) != "null" {
-		var parsed model.DanmakuConfig
-		if err := json.Unmarshal(raw, &parsed); err != nil {
-			dto.Failed(fmt.Sprint("请求参数异常:  ", err), c)
-			return
-		}
-		incoming = &parsed
+		dto.Failed("弹幕配置请使用弹幕接口更新", c)
+		return
 	}
-	if err := service.ManageSvc.UpdateSiteBasic(bc, incoming); err != nil {
+	if err := service.ManageSvc.UpdateSiteBasic(bc); err != nil {
 		dto.Failed(fmt.Sprint("网站配置更新失败:  ", err), c)
 		return
 	}
@@ -151,6 +146,36 @@ func (h *ManageHandler) UpdateSiteAccess(c *gin.Context) {
 	}
 	if err := service.ManageSvc.UpdateSiteAccessConfig(ac); err != nil {
 		dto.Failed(fmt.Sprint("访问控制配置更新失败: ", err), c)
+		return
+	}
+	dto.SuccessOnlyMsg("更新成功", c)
+}
+
+// SiteDanmakuConfig 网站弹幕系统配置
+func (h *ManageHandler) SiteDanmakuConfig(c *gin.Context) {
+	cfg, err := service.ManageSvc.GetSiteDanmakuConfig()
+	if err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	v, ok := c.Get(config.AuthUserClaims)
+	uc, isUser := v.(*utils.UserClaims)
+	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+		cfg.AppID = ""
+		cfg.AppSecret = ""
+	}
+	dto.Success(cfg, "弹幕系统配置获取成功", c)
+}
+
+// UpdateSiteDanmaku 更新网站弹幕系统配置
+func (h *ManageHandler) UpdateSiteDanmaku(c *gin.Context) {
+	var cfg model.DanmakuConfig
+	if err := c.ShouldBindJSON(&cfg); err != nil {
+		dto.Failed(fmt.Sprint("请求参数异常: ", err), c)
+		return
+	}
+	if err := service.ManageSvc.UpdateSiteDanmakuConfig(cfg); err != nil {
+		dto.Failed(fmt.Sprint("弹幕系统配置更新失败: ", err), c)
 		return
 	}
 	dto.SuccessOnlyMsg("更新成功", c)
@@ -206,7 +231,7 @@ func (h *ManageHandler) UpdateSiteNotice(c *gin.Context) {
 
 // ------------------------------------------------------ 配置备份导入/导出 ------------------------------------------------------
 
-// ExportConfigBackup 导出站点配置备份（不含影视库存与账号，仅超级管理员）
+// ExportConfigBackup 导出站点配置备份（需管理密码，不含影视库存与账号，仅超级管理员）
 func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)
 	if !ok {
@@ -218,6 +243,15 @@ func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 		dto.CustomResult(http.StatusForbidden, dto.FAILED, nil, "权限不足，仅超级管理员可导出配置备份", c)
 		return
 	}
+	var req model.ConfigBackupExportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if strings.TrimSpace(req.Password) == "" || !verifyManagePassword(c, req.Password) {
+		dto.Failed("导出失败, 密钥校验失败!!!", c)
+		return
+	}
 	backup, err := service.BackupSvc.ExportConfig()
 	if err != nil {
 		dto.Failed(err.Error(), c)
@@ -225,7 +259,6 @@ func (h *ManageHandler) ExportConfigBackup(c *gin.Context) {
 	}
 	dto.Success(backup, "配置备份导出成功", c)
 }
-
 // ImportConfigBackup 导入站点配置备份（需管理密码，仅超级管理员）
 func (h *ManageHandler) ImportConfigBackup(c *gin.Context) {
 	v, ok := c.Get(config.AuthUserClaims)

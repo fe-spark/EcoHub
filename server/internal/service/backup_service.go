@@ -9,9 +9,9 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/repository"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider"
 )
-
 // BackupService 站点配置备份/恢复（不含影视库存与账号）
 type BackupService struct{}
 
@@ -107,24 +107,27 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		return fmt.Errorf("不支持的备份版本：%d（当前支持 %d）", backup.Version, model.ConfigBackupVersion)
 	}
 
-	// 导入采集站前先停采集，避免写入冲突
-	if req.Modules.FilmSources || req.Modules.CronTasks {
-		spider.StopAllTasks()
+	// 1. 动库前统一校验所有勾选模块的数据是否存在，避免部分模块生效后才报错
+	if err := validateImportPayload(req); err != nil {
+		return err
 	}
 
-	if req.Modules.Site {
-		if backup.Site == nil {
-			return errors.New("备份中缺少网站配置数据")
+	// 2. 导入采集站或计划任务前，阻断新采集并等待在途写入和发布彻底排空
+	if req.Modules.FilmSources || req.Modules.CronTasks {
+		if err := spider.StopAllTasksAndWait(0); err != nil {
+			return fmt.Errorf("停止进行中的采集失败: %w", err)
 		}
+	}
+
+	needCategoryRefresh := false
+
+	if req.Modules.Site {
 		if err := repository.SaveSiteBasic(*backup.Site); err != nil {
 			return fmt.Errorf("导入网站配置失败: %w", err)
 		}
 	}
 
 	if req.Modules.FilmSources {
-		if backup.FilmSources == nil {
-			return errors.New("备份中缺少采集站")
-		}
 		list := backup.FilmSources
 		// 导入前清理旧站限流器
 		oldSources, err := repository.GetCollectSourceList()
@@ -142,23 +145,22 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		}
 		clearProvideNetworkConfigCache()
 		repository.ClearIndexPageCache()
+		needCategoryRefresh = true
 	}
 
 	if req.Modules.CronTasks {
-		if backup.CronTasks == nil {
-			return errors.New("备份中缺少定时任务")
-		}
 		tasks := backup.CronTasks
-		// 先卸掉旧任务运行时
+		// 记录旧任务用于后续卸载运行时
 		oldTasks, err := repository.GetAllFilmTask()
 		if err != nil {
 			return err
 		}
-		for _, t := range oldTasks {
-			spider.RemoveCronByTaskId(t.Id)
-		}
+		// 必须先写库成功，再替换运行时，避免写库失败时运行时已被卸掉
 		if err := repository.ResetFilmTasks(tasks); err != nil {
 			return fmt.Errorf("导入定时任务失败: %w", err)
+		}
+		for _, t := range oldTasks {
+			spider.RemoveCronByTaskId(t.Id)
 		}
 		reloaded, err := repository.GetAllFilmTask()
 		if err != nil {
@@ -179,9 +181,6 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.Banners {
-		if backup.Banners == nil {
-			return errors.New("备份中缺少首页轮播")
-		}
 		banners := backup.Banners
 		if err := repository.SaveBanners(banners); err != nil {
 			return fmt.Errorf("导入首页轮播失败: %w", err)
@@ -194,19 +193,14 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.MappingRules {
-		if backup.MappingRules == nil {
-			return errors.New("备份中缺少映射规则")
-		}
 		exports := backup.MappingRules
 		if err := repository.ReplaceMappingRules(exports); err != nil {
 			return fmt.Errorf("导入映射规则失败: %w", err)
 		}
+		needCategoryRefresh = true
 	}
 
 	if req.Modules.Proxy {
-		if backup.Proxy == nil {
-			return errors.New("备份中缺少网络代理配置数据")
-		}
 		if err := repository.SaveProxyConfig(*backup.Proxy); err != nil {
 			return fmt.Errorf("导入网络代理配置失败: %w", err)
 		}
@@ -214,23 +208,55 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 	}
 
 	if req.Modules.TMDB {
-		if backup.TMDB == nil {
-			return errors.New("备份中缺少 TMDB 刮削配置数据")
-		}
 		if err := repository.SaveTMDBConfig(*backup.TMDB); err != nil {
 			return fmt.Errorf("导入 TMDB 刮削配置失败: %w", err)
 		}
 	}
 
 	if req.Modules.Notify {
-		if backup.Notify == nil {
-			return errors.New("备份中缺少通知配置数据")
-		}
 		if err := repository.SaveNotifyConfig(*backup.Notify); err != nil {
 			return fmt.Errorf("导入通知配置失败: %w", err)
 		}
 		NotifySvc.EnsureBotPoller()
 	}
 
+	if needCategoryRefresh {
+		if err := repository.RefreshFutureCategoryMappingsFromSourceCategories(); err != nil {
+			syslog.Errorf("[Backup] 刷新来源分类映射失败: %v", err)
+		}
+		if err := filmsnapshot.RefreshActiveProjectedReadModel(); err != nil {
+			syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func validateImportPayload(req model.ConfigBackupImportRequest) error {
+	b := req.Backup
+	if req.Modules.Site && b.Site == nil {
+		return errors.New("备份中缺少网站配置数据")
+	}
+	if req.Modules.FilmSources && b.FilmSources == nil {
+		return errors.New("备份中缺少采集站")
+	}
+	if req.Modules.CronTasks && b.CronTasks == nil {
+		return errors.New("备份中缺少定时任务")
+	}
+	if req.Modules.Banners && b.Banners == nil {
+		return errors.New("备份中缺少首页轮播")
+	}
+	if req.Modules.MappingRules && b.MappingRules == nil {
+		return errors.New("备份中缺少映射规则")
+	}
+	if req.Modules.Proxy && b.Proxy == nil {
+		return errors.New("备份中缺少网络代理配置数据")
+	}
+	if req.Modules.TMDB && b.TMDB == nil {
+		return errors.New("备份中缺少 TMDB 刮削配置数据")
+	}
+	if req.Modules.Notify && b.Notify == nil {
+		return errors.New("备份中缺少通知配置数据")
+	}
 	return nil
 }

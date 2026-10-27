@@ -9,11 +9,10 @@ import (
 	filmsnapshot "server/internal/repository/film/snapshot"
 )
 
-// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。分类和失败记录是全库。
+// LibraryInventory 工作台片库规模。影片和多源聚合按当前主站。失败记录是全库。
 type LibraryInventory struct {
 	Films       int64 `json:"films"`
 	MultiSource int64 `json:"multiSource"`
-	Categories  int64 `json:"categories"`
 	Failures    int64 `json:"failures"`
 }
 
@@ -53,7 +52,7 @@ func GetInventoryStats() (InventoryStats, error) {
 	return InventoryStats{Library: library, Sources: sources}, nil
 }
 
-// GetLibraryInventory 统计当前主站档案、多源聚合、展示分类和失败记录。
+// GetLibraryInventory 统计当前主站档案、多源聚合和失败记录。
 func GetLibraryInventory() (LibraryInventory, error) {
 	var library LibraryInventory
 	if db.Mdb == nil {
@@ -66,9 +65,6 @@ func GetLibraryInventory() (LibraryInventory, error) {
 	if primaryID := activePrimaryID(); primaryID != "" {
 		library.Films = films[primaryID]
 		library.MultiSource = multiSource[primaryID]
-	}
-	if err := db.Mdb.Model(&model.Category{}).Count(&library.Categories).Error; err != nil {
-		return library, err
 	}
 	if err := db.Mdb.Model(&model.FailureRecord{}).Count(&library.Failures).Error; err != nil {
 		return library, err
