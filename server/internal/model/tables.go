@@ -28,6 +28,7 @@ const (
 	TableNotifyConfig       = "notify_config"
 	TableFilmSource         = "film_sources"
 	TableFilmTMDBScrape     = "film_tmdb_scrapes"
+	TableAnalyticsConfig    = "analytics_config_records"
 	TableDanmakuRecord      = "danmaku_record"
 )
 
@@ -66,4 +67,5 @@ var AllModels = []any{
 	&NotifyConfigRecord{},
 	&FilmTMDBScrape{},
 	&DanmakuRecord{},
+	&AnalyticsConfigRecord{},
 }

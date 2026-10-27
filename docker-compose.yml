@@ -88,8 +88,6 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      # 数据分析（可选；默认 false 关闭）
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - 0.0.0.0:${SERVER_PORT:-18080}:${PORT:-8080}
     volumes:

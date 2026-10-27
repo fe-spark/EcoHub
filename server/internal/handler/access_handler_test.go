@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"server/internal/access"
 	"time"
 
 	"server/internal/config"
@@ -60,11 +61,11 @@ func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupAccessDailyTestDB(t)
 
-	orig := config.AccessLogEnabled
-	defer func() { config.AccessLogEnabled = orig }()
+	orig := access.IsEnabled()
+	defer func() { access.SetEnabled(orig) }()
 
 	// 1. 关闭状态下测试
-	config.AccessLogEnabled = false
+	access.SetEnabled(false)
 	{
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -74,14 +75,13 @@ func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 		if resp.Code != 0 {
 			t.Fatalf("want code 0, got %+v", resp)
 		}
-
 		w2 := httptest.NewRecorder()
 		c2, _ := gin.CreateTestContext(w2)
-		c2.Request = httptest.NewRequest(http.MethodGet, "/manage/access/overview?day=2020-01-01&module=web", nil)
+		c2.Request = httptest.NewRequest(http.MethodGet, "/manage/access/overview?module=web", nil)
 		AccessHd.Overview(c2)
 		resp2 := decodeResponse(t, w2)
-		if resp2.Code == 0 {
-			t.Fatalf("overview should fail when disabled, got %+v", resp2)
+		if resp2.Code != 0 {
+			t.Fatalf("overview should not fail when disabled, got %+v", resp2)
 		}
 
 		w3 := httptest.NewRecorder()
@@ -89,8 +89,8 @@ func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 		c3.Request = httptest.NewRequest(http.MethodGet, "/manage/access/tops?day=2020-01-01&kind=play&module=web&limit=5", nil)
 		AccessHd.Tops(c3)
 		resp3 := decodeResponse(t, w3)
-		if resp3.Code == 0 {
-			t.Fatalf("tops should fail when disabled, got %+v", resp3)
+		if resp3.Code != 0 {
+			t.Fatalf("tops should not fail when disabled, got %+v", resp3)
 		}
 
 		w4 := httptest.NewRecorder()
@@ -98,13 +98,13 @@ func TestAccessOverviewAndTopsHandlers(t *testing.T) {
 		c4.Request = httptest.NewRequest(http.MethodGet, "/manage/access/logs?day=2020-01-01&module=web&limit=10", nil)
 		AccessHd.Logs(c4)
 		resp4 := decodeResponse(t, w4)
-		if resp4.Code == 0 {
-			t.Fatalf("logs should fail when disabled, got %+v", resp4)
+		if resp4.Code != 0 {
+			t.Fatalf("logs should not fail when disabled, got %+v", resp4)
 		}
 	}
 
 	// 2. 开启状态下测试
-	config.AccessLogEnabled = true
+	access.SetEnabled(true)
 	{
 		w := httptest.NewRecorder()
 		c, _ := gin.CreateTestContext(w)
@@ -161,7 +161,7 @@ func setupAccessDailyTestDB(t *testing.T) *gorm.DB {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
-	if err := gdb.AutoMigrate(&model.AccessDailyStats{}, &model.AccessDailyTop{}); err != nil {
+	if err := gdb.AutoMigrate(&model.AccessDailyStats{}, &model.AccessDailyTop{}, &model.AnalyticsConfigRecord{}); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
 	prev := db.Mdb
@@ -174,9 +174,9 @@ func TestAccessDisabledWithHistoricalData(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	gdb := setupAccessDailyTestDB(t)
 
-	orig := config.AccessLogEnabled
-	defer func() { config.AccessLogEnabled = orig }()
-	config.AccessLogEnabled = false
+	orig := access.IsEnabled()
+	defer func() { access.SetEnabled(orig) }()
+	access.SetEnabled(false)
 
 	// 插入一条历史落库数据
 	testDay := "2026-08-20"
@@ -346,5 +346,56 @@ func TestCleanData_AuthAndValidation(t *testing.T) {
 	resp = decodeResponse(t, w)
 	if resp.Code != dto.FAILED || resp.Msg != "清理失败, 密钥校验失败!!!" {
 		t.Fatalf("expected empty password failure, got code=%d msg=%q", resp.Code, resp.Msg)
+	}
+}
+
+func TestAccessConfigHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupAccessDailyTestDB(t)
+
+	orig := access.IsEnabled()
+	defer func() { access.SetEnabled(orig) }()
+
+	// 1. 读取默认配置
+	c, w := testContext(http.MethodGet, "/api/manage/access/config")
+	AccessHd.GetConfig(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS, got %d", resp.Code)
+	}
+
+	// 2. 更新为开启
+	c, w = testContext(http.MethodPost, "/api/manage/access/config")
+	body, _ := json.Marshal(map[string]any{"enabled": true})
+	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/access/config", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	AccessHd.UpdateConfig(c)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if !access.IsEnabled() {
+		t.Fatalf("expected access.IsEnabled() == true")
+	}
+
+	// 3. 读取更新后的配置
+	c, w = testContext(http.MethodGet, "/api/manage/access/config")
+	AccessHd.GetConfig(c)
+	resp = decodeResponse(t, w)
+	data, ok := resp.Data.(map[string]any)
+	if !ok || data["enabled"] != true {
+		t.Fatalf("expected enabled=true, got %v", resp.Data)
+	}
+
+	// 4. 更新为关闭
+	c, w = testContext(http.MethodPost, "/api/manage/access/config")
+	body, _ = json.Marshal(map[string]any{"enabled": false})
+	c.Request, _ = http.NewRequest(http.MethodPost, "/api/manage/access/config", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+	AccessHd.UpdateConfig(c)
+	if access.IsEnabled() {
+		t.Fatalf("expected access.IsEnabled() == false")
 	}
 }

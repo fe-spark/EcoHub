@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +10,7 @@ import (
 	"server/internal/infra/syslog"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/service"
 	"server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -22,20 +22,6 @@ type AccessHandler struct{}
 
 var AccessHd = new(AccessHandler)
 
-func (h *AccessHandler) accessible() error {
-	if config.AccessLogEnabled {
-		return nil
-	}
-	hasData, _, err := access.HasPersistedData()
-	if err != nil {
-		return err
-	}
-	if !hasData {
-		return errors.New("数据分析功能未开启")
-	}
-	return nil
-}
-
 // Status 查询数据分析功能开启状态与落库数据状态
 func (h *AccessHandler) Status(c *gin.Context) {
 	hasData, totalRows, err := access.HasPersistedData()
@@ -44,17 +30,44 @@ func (h *AccessHandler) Status(c *gin.Context) {
 		return
 	}
 	dto.Success(gin.H{
-		"enabled":   config.AccessLogEnabled,
+		"enabled":   access.IsEnabled(),
 		"hasData":   hasData,
 		"totalRows": totalRows,
 	}, "数据分析状态获取成功", c)
 }
 
-func (h *AccessHandler) Overview(c *gin.Context) {
-	if err := h.accessible(); err != nil {
+// GetConfig 读取数据分析配置
+func (h *AccessHandler) GetConfig(c *gin.Context) {
+	cfg, err := service.ManageSvc.GetAnalyticsConfig()
+	if err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
+	dto.Success(cfg, "数据分析配置获取成功", c)
+}
+
+// UpdateAnalyticsConfigRequest 更新数据分析配置请求
+type UpdateAnalyticsConfigRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// UpdateConfig 更新数据分析配置并热生效
+func (h *AccessHandler) UpdateConfig(c *gin.Context) {
+	var req UpdateAnalyticsConfigRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("请求参数异常", c)
+		return
+	}
+	if err := service.ManageSvc.UpdateAnalyticsConfig(model.AnalyticsConfig{
+		Enabled: req.Enabled,
+	}); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.Success(model.AnalyticsConfig{Enabled: req.Enabled}, "数据分析配置更新成功", c)
+}
+
+func (h *AccessHandler) Overview(c *gin.Context) {
 	data, err := access.QueryOverviewScope(c.Query("day"), c.Query("module"), c.Query("platform"))
 	if err != nil {
 		dto.Failed(err.Error(), c)
@@ -64,10 +77,6 @@ func (h *AccessHandler) Overview(c *gin.Context) {
 }
 
 func (h *AccessHandler) SourceCalls(c *gin.Context) {
-	if err := h.accessible(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
 	list, err := access.QuerySourceCalls(c.Query("day"))
 	if err != nil {
 		dto.Failed(err.Error(), c)
@@ -77,10 +86,6 @@ func (h *AccessHandler) SourceCalls(c *gin.Context) {
 }
 
 func (h *AccessHandler) Tops(c *gin.Context) {
-	if err := h.accessible(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "10"))
 	kind := c.DefaultQuery("kind", "path")
 	items, err := access.QueryTopsScope(c.Query("day"), kind, c.Query("module"), c.Query("platform"), limit)
@@ -92,7 +97,7 @@ func (h *AccessHandler) Tops(c *gin.Context) {
 }
 
 func (h *AccessHandler) TrackView(c *gin.Context) {
-	if !config.AccessLogEnabled {
+	if !access.IsEnabled() {
 		dto.SuccessOnlyMsg("ok", c)
 		return
 	}
@@ -109,10 +114,6 @@ func (h *AccessHandler) TrackView(c *gin.Context) {
 }
 
 func (h *AccessHandler) Logs(c *gin.Context) {
-	if err := h.accessible(); err != nil {
-		dto.Failed(err.Error(), c)
-		return
-	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "0"))
 	list, err := access.QueryLogsScope(
 		c.Query("day"),

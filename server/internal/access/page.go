@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"server/internal/config"
 
 	"github.com/gin-gonic/gin"
 )
@@ -68,7 +67,7 @@ type TrackViewPayload struct {
 }
 
 func TrackPagePayload(c *gin.Context, p TrackViewPayload) {
-	if !config.AccessLogEnabled {
+	if !IsEnabled() {
 		return
 	}
 	Collect(buildPageEventPayload(c, p))

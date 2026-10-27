@@ -100,6 +100,8 @@ func SetupRouter() *gin.Engine {
 		accessRoute := manageRoute.Group(`/access`)
 		{
 			accessRoute.GET(`/status`, handler.AccessHd.Status)
+			accessRoute.GET(`/config`, handler.AccessHd.GetConfig)
+			accessRoute.POST(`/config`, middleware.AdminAccess(), handler.AccessHd.UpdateConfig)
 			accessRoute.GET(`/overview`, middleware.AdminAccess(), handler.AccessHd.Overview)
 			accessRoute.GET(`/sources`, middleware.AdminAccess(), handler.AccessHd.SourceCalls)
 			accessRoute.GET(`/tops`, middleware.AdminAccess(), handler.AccessHd.Tops)

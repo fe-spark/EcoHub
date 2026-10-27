@@ -112,12 +112,6 @@ go run ./cmd/server
 
 `REDIS_HOST` / `REDIS_PORT` 为空会启动 panic。
 
-### 数据分析（可选）
-
-| 变量 | 必填 | 默认 | 说明 |
-| --- | --- | --- | --- |
-| `ACCESS_ANALYTICS_ENABLED` | 否 | `false` | 数据分析总开关：开启全站访问量、播放热度与客户端统计（默认关闭以保持最高性能与零开销） |
-
 ### 日志存储（可选）
 
 | 变量 | 必填 | 默认 | 说明 |
@@ -133,7 +127,7 @@ go run ./cmd/server
 | `WEB_PORT` | 宿主机暴露 Web（Next）访问端口，默认 `3000` |
 | `SERVER_PORT` | 宿主机暴露 API 直连端口，默认 `18080`（映射到容器内 8080） |
 | `MYSQL_ROOT_PASSWORD` | 仅内置 MySQL 容器初始化用，**不是** server 读取项 |
-| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `ECOHUB_ADMIN_PASSWORD` / `ACCESS_ANALYTICS_ENABLED` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
+| `JWT_SECRET` / `MYSQL_*` / `REDIS_*` / `ECOHUB_ADMIN_PASSWORD` 等 | 通过 compose `environment` 直接注入 server（或 All-in-One）进程 |
 
 完整部署说明见 [部署指南](../docs/README-Deploy.md)。
 
