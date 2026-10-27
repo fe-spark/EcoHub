@@ -257,3 +257,43 @@ func TestImportConfig_WithBannerConfig(t *testing.T) {
 		t.Fatalf("imported bannerConfig mismatch: %+v", bannerCfg)
 	}
 }
+
+func TestImportConfig_RejectsMissingPayloadBeforeWrite(t *testing.T) {
+	setupBackupTestDB(t)
+
+	// 初始先写一个网站配置
+	initialSite := model.BasicConfig{SiteName: "初始站点"}
+	if err := repository.SaveSiteBasic(initialSite); err != nil {
+		t.Fatal(err)
+	}
+
+	// 构造一个备份包：声明要导入 Site 和 FilmSources，但 FilmSources 字段为 nil
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{
+			Site:        true,
+			FilmSources: true,
+		},
+		Backup: model.ConfigBackup{
+			Version:     model.ConfigBackupVersion,
+			Site:        &model.BasicConfig{SiteName: "试图覆盖的新站点"},
+			FilmSources: nil, // 缺失
+		},
+	}
+
+	err := BackupSvc.ImportConfig(req)
+	if err == nil {
+		t.Fatal("expected error on missing FilmSources payload, got nil")
+	}
+	if err.Error() != "备份中缺少采集站" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 验证库里的网站配置完全未被动过，没有发生部分导入
+	savedSite, err := repository.GetSiteBasic()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if savedSite.SiteName != "初始站点" {
+		t.Fatalf("site config should not be touched when validation fails, got %q", savedSite.SiteName)
+	}
+}

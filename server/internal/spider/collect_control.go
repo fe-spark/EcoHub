@@ -68,6 +68,14 @@ func StopAllTasks() {
 	}
 }
 
+// StopAllTasksAndWait 强制停止全部采集任务并等待在途写入和发布彻底排空。
+func StopAllTasksAndWait(timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = deleteStopTimeout
+	}
+	StopAllTasks()
+	return collectLifecycle.waitNotBusy(timeout)
+}
 // PrepareSingleCollectStart 单站采集启动前占用采集源并预置起始进度。
 func PrepareSingleCollectStart(source model.FilmSource) error {
 	claimed, err := occupyAndMarkCollectSources([]model.FilmSource{source}, "Single-Collect")

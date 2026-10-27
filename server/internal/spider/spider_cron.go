@@ -20,7 +20,6 @@ import (
 
 var CronCollect *cron.Cron = CreateCron()
 
-
 // taskCidMap 运行时内存注册表：task.Id → cron.EntryID
 // Cid 是内存值，不持久化到 DB，每次重启重新注册
 var taskCidMap = make(map[string]cron.EntryID)
@@ -62,7 +61,6 @@ func RemoveCronByTaskId(taskId string) {
 func CreateCron() *cron.Cron {
 	return cron.New(cron.WithSeconds())
 }
-
 
 // AddAutoUpdateCron 添加 所有已启用站点的影片更新定时任务
 func AddAutoUpdateCron(id, spec string) (cron.EntryID, error) {
@@ -150,7 +148,6 @@ func AddLogCleanCron(id, spec string) (cron.EntryID, error) {
 	})
 }
 
-
 // ReloadCronTask 重新加载定时任务（当配置或状态发生变化时）
 func ReloadCronTask(id string) error {
 	// 1. 获取最新配置
@@ -206,6 +203,7 @@ func executeTask(ft model.FilmCollectTask) {
 }
 
 func runTaskBody(ft model.FilmCollectTask) {
+
 	log.Printf("开始执行定时任务: Task[%s] Model[%d]\n", ft.Id, ft.Model)
 
 	switch ft.Model {
@@ -233,6 +231,8 @@ func runTaskBody(ft model.FilmCollectTask) {
 	log.Printf("定时任务执行完毕: Task[%s]\n", ft.Id)
 }
 
+var orphanCleanWaitTimeout = 10 * time.Minute
+
 func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	orphanCleanTaskLock.Lock()
 	defer orphanCleanTaskLock.Unlock()
@@ -242,59 +242,59 @@ func executeOrphanCleanTask(ft model.FilmCollectTask) {
 	if strings.TrimSpace(remark) == "" {
 		remark = "片库冗余数据与孤儿清理"
 	}
+	err := collectLifecycle.reserveMaintenance(orphanCleanWaitTimeout, func() error {
+		noteTaskRan(ft.Id, time.Now())
+		log.Printf("[CleanOrphan] 低频清理优先：已阻断新采集，开始独占清理，waitCost=%s", time.Since(startedAt))
+		if db.Mdb == nil {
+			return nil
+		}
+		n, k, cleanErr := cleanOrphanData()
+		if cleanErr != nil {
+			return cleanErr
+		}
+		m, p, ghostErr := cleanGhostFilms()
+		if ghostErr != nil {
+			return ghostErr
+		}
+		log.Printf("定时任务完成: %s，孤儿播放列表 %d 条，悬空映射 %d 条，无线路幽灵 %d 条，空记录 %d 条，耗时 %s",
+			remark, n, k, p, m, time.Since(startedAt))
+		return nil
+	})
+	finishOrphanClean(ft, remark, startedAt, err)
+}
 
-	if collectLifecycle.isBusy() {
-		detail := "采集正在入库，跳过本轮片库清理"
-		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
+func finishOrphanClean(ft model.FilmCollectTask, remark string, startedAt time.Time, err error) {
+	if err == nil {
 		return
 	}
-	if db.Mdb == nil {
+	if errors.Is(err, errDrainTimeout) {
+		log.Printf("定时任务跳过: %s，%v，耗时 %s", remark, err, time.Since(startedAt))
 		return
 	}
+	syslog.Errorf("[CleanOrphan] 片库清理已执行但失败: %v", err)
+	emitCronFailedNotify(ft.Id, remark, err.Error())
+}
 
-
-	// 1. 多源播放列表孤儿清理（film_source_playlists 中 mid 不在 film_index 的残余）
+func cleanOrphanData() (int64, int64, error) {
 	var n int64
 	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
-		syslog.Errorf("[CleanOrphan] 孤儿播放列表清理失败: %v", res.Error)
-		emitCronFailedNotify(ft.Id, remark, res.Error.Error())
-		return
+		return 0, 0, res.Error
 	} else {
 		n = res.RowsAffected
 	}
-
-	// 2. 悬空匹配键与源映射清理
 	k := filmrepo.CleanOrphanMatchKeysAndMappings()
+	return n, k, nil
+}
 
-	// 3. 空记录与零线路幽灵影片清理：采集正忙则跳过，优先保证入库。
-	if collectLifecycle.isBusy() {
-		detail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d；采集发布正忙，片库幽灵清理留待下轮", n, k)
-		log.Printf("[CleanOrphan] %s，cost=%s", detail, time.Since(startedAt))
-		return
-	}
-
-	var m, p int64
-	err := func() error {
-		collectLifecycle.beginPublish()
-		defer collectLifecycle.endPublish()
-		publishMu.Lock()
-		defer publishMu.Unlock()
-
-		m = filmrepo.CleanEmptyFilms()
-		p = filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
-		if m > 0 || p > 0 {
-			return filmsnapshot.ActivateRebuiltFilmListSnapshot("")
+func cleanGhostFilms() (int64, int64, error) {
+	m := filmrepo.CleanEmptyFilms()
+	p := filmrepo.CleanPlaylessFilms(7 * 24 * time.Hour)
+	if m > 0 || p > 0 {
+		if err := filmsnapshot.ActivateRebuiltFilmListSnapshot(""); err != nil {
+			return m, p, err
 		}
-		return nil
-	}()
-	if err != nil {
-		syslog.Errorf("[CleanOrphan] 数据清理后刷新读模型失败: %v", err)
-		emitCronFailedNotify(ft.Id, remark, err.Error())
-		return
 	}
-
-	cleanDetail := fmt.Sprintf("回收孤儿 %d、悬空映射 %d、无线路幽灵 %d、空记录 %d", n, k, p, m)
-	log.Printf("[CleanOrphan] 片库冗余数据与孤儿清理完成: %s，cost=%s", cleanDetail, time.Since(startedAt))
+	return m, p, nil
 }
 
 const (
@@ -303,6 +303,7 @@ const (
 )
 
 func executeLogCleanTask(ft model.FilmCollectTask) {
+	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
@@ -315,13 +316,18 @@ func executeLogCleanTask(ft model.FilmCollectTask) {
 		return
 	}
 
-	log.Printf("[LogClean] 清理过期运行日志完成: 清理过期日志文件 %d 个，cost=%s", n, time.Since(startedAt))
+	log.Printf("定时任务完成: %s，清理过期日志 %d 个，耗时 %s", remark, n, time.Since(startedAt))
 }
 
 func executeFailureRecordCleanTask(ft model.FilmCollectTask) {
+	noteTaskRan(ft.Id, time.Now())
 	startedAt := time.Now()
+	remark := ft.Remark
+	if strings.TrimSpace(remark) == "" {
+		remark = "清理超过 7 天的成功和最终失败记录"
+	}
 	pruned := repository.PruneExpiredFailureRecords(failureRecordRetention)
-	log.Printf("[FailureRecordClean] 任务 %s 清理超过 7 天的重试成功和最终失败记录 %d 条，cost=%s", ft.Id, pruned, time.Since(startedAt))
+	log.Printf("定时任务完成: %s，清理 %d 条，耗时 %s", remark, pruned, time.Since(startedAt))
 }
 
 // RunTaskOnce 立即手动执行一次任务
@@ -345,8 +351,27 @@ func RunTaskOnce(id string) error {
 	return nil
 }
 
-// IsCronTaskRunning 报告指定 cron 任务是否正在执行
 func IsCronTaskRunning(id string) bool {
 	_, ok := runningCronTasks.Load(id)
 	return ok
+}
+
+var taskRanAt sync.Map
+
+func noteTaskRan(id string, at time.Time) {
+	if id == "" || at.IsZero() {
+		return
+	}
+	taskRanAt.Store(id, at)
+}
+
+// TaskPrev 上次真正开工的时间。排队和等待让路不算，调度触发和手动执行都算。
+func TaskPrev(taskId string) time.Time {
+	prev := GetEntryByTaskId(taskId).Prev
+	if v, ok := taskRanAt.Load(taskId); ok {
+		if at, ok := v.(time.Time); ok && at.After(prev) {
+			return at
+		}
+	}
+	return prev
 }

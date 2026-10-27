@@ -340,3 +340,29 @@ func TestCronHandler_StateAndRun_Validation(t *testing.T) {
 		t.Fatalf("expected FAILED on empty ids for RunFilmCronTask, got %d", resp.Code)
 	}
 }
+
+func TestExportConfigBackup_PasswordValidation(t *testing.T) {
+	// 1. 无凭证 -> 401
+	c, w := testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
+	ManageHd.ExportConfigBackup(c)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 on unauthenticated export, got %d", w.Code)
+	}
+
+	// 2. 非超管 -> 403
+	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":"test"}`)
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 20001, Role: model.UserRoleNormal})
+	ManageHd.ExportConfigBackup(c)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 on non-admin export, got %d", w.Code)
+	}
+
+	// 3. 超管但密码为空 -> FAILED
+	c, w = testJSONContext(http.MethodPost, "/api/manage/config/backup/export", `{"password":""}`)
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, Role: model.UserRoleAdmin})
+	ManageHd.ExportConfigBackup(c)
+	resp := decodeResponse(t, w)
+	if resp.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on empty password, got code=%d", resp.Code)
+	}
+}

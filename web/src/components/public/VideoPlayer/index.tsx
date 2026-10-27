@@ -43,7 +43,7 @@ const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onPlayStart,
 }) => {
   const { config: siteConfig } = useSiteConfig();
-  const danmakuEnabled = siteConfig?.danmaku ? siteConfig.danmaku.enabled !== false : true;
+  const danmakuEnabled = Boolean(siteConfig?.danmaku?.enabled);
   const danmakuMetaRef = useRef({ filmId, filmTitle, episode });
   danmakuMetaRef.current = { filmId, filmTitle, episode };
   const artRef = useRef<HTMLDivElement>(null);

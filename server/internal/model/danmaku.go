@@ -7,8 +7,8 @@ import (
 )
 
 type DanmakuConfig struct {
-	Enabled   bool   `json:"enabled"`   // 弹幕功能总开关，默认 true
-	AutoSniff bool   `json:"autoSniff"` // 自动嗅探全网弹幕，默认 true
+	Enabled   bool   `json:"enabled"`   // 弹幕功能总开关，默认 false
+	AutoSniff bool   `json:"autoSniff"` // 自动嗅探全网弹幕，默认 false
 	ApiURL    string `json:"apiUrl"`    // 自定义弹幕接口地址，留空走官方弹弹play接口
 	AppID     string `json:"appId"`     // 弹弹play 开放平台 AppId
 	AppSecret string `json:"appSecret"` // 弹弹play 开放平台 AppSecret
@@ -16,8 +16,8 @@ type DanmakuConfig struct {
 
 func DefaultDanmakuConfig() DanmakuConfig {
 	return DanmakuConfig{
-		Enabled:   true,
-		AutoSniff: true,
+		Enabled:   false,
+		AutoSniff: false,
 		ApiURL:    "",
 	}
 }

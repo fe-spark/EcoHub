@@ -29,9 +29,9 @@ func (s *CronService) GetFilmCrontab() ([]model.CronTaskVo, error) {
 		if t.State && !e.Next.IsZero() {
 			nextV = e.Next.In(cst).Format(time.DateTime)
 		}
-		// 上次执行时间，如果从来没执行过则是零值
-		if !e.Prev.IsZero() {
-			preV = e.Prev.In(cst).Format(time.DateTime)
+		// 上次执行时间是任务真正开工的时间。排队、等待让路不算。
+		if prev := spider.TaskPrev(t.Id); !prev.IsZero() {
+			preV = prev.In(cst).Format(time.DateTime)
 		}
 		taskVo := model.CronTaskVo{
 			FilmCollectTask: t,

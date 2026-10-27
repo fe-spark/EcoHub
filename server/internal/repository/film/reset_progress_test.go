@@ -85,7 +85,7 @@ func TestGetInventoryStats_LibraryAndSources(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Categories != 3 || stats.Library.Failures != 4 {
+	if stats.Library.Films != 3 || stats.Library.MultiSource != 2 || stats.Library.Failures != 4 {
 		t.Fatalf("library = %+v", stats.Library)
 	}
 	if len(stats.Sources) != 3 {

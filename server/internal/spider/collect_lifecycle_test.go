@@ -1,6 +1,7 @@
 package spider
 
 import (
+	"errors"
 	"testing"
 	"time"
 )
@@ -152,5 +153,65 @@ func TestCollectLifecycle_RunExclusiveIsBusy(t *testing.T) {
 	}
 	if s.isBusy() {
 		t.Fatal("expected isBusy to be false after runExclusive finishes")
+	}
+}
+
+func TestCollectLifecycle_ReserveMaintenanceBlocksNewCollect(t *testing.T) {
+	s := newCollectLifecycle()
+	if err := s.beginSource("in-flight"); err != nil {
+		t.Fatal(err)
+	}
+	entered := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.reserveMaintenance(time.Second, func() error {
+			close(entered)
+			if err := s.beginSource("late"); err == nil {
+				return errors.New("maintenance should reject new collect")
+			}
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+		t.Fatal("maintenance entered before in-flight source finished")
+	case <-time.After(30 * time.Millisecond):
+	}
+	s.endSource("in-flight")
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if err := s.beginSource("after"); err != nil {
+		t.Fatalf("collect should resume after maintenance: %v", err)
+	}
+	s.endSource("after")
+}
+
+func TestCollectLifecycle_BeginDrainTimeoutDoesNotReleaseOwner(t *testing.T) {
+	s := newCollectLifecycle()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		done <- s.reserveMaintenance(time.Second, func() error {
+			close(entered)
+			<-release
+			return nil
+		})
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("maintenance did not start")
+	}
+	if err := s.beginDrain(40 * time.Millisecond); err == nil || !errors.Is(err, errDrainTimeout) {
+		t.Fatalf("second drain should time out, got %v", err)
+	}
+	if err := s.beginSource("during"); err == nil {
+		t.Fatal("owner gate must still reject collect after the other drain times out")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }

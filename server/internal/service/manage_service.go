@@ -1,15 +1,15 @@
 package service
 
 import (
+	"errors"
 	"regexp"
-	"strings"
-
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
 	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/utils"
+	"strings"
 )
 
 type ManageService struct{}
@@ -30,8 +30,8 @@ func (s *ManageService) GetSiteBasicConfig() (model.BasicConfig, error) {
 	return repository.GetSiteBasic()
 }
 
-// UpdateSiteBasic 更新网站基本信息。访问控制保留。弹幕对象缺省时保留已存配置；传入时替换开关和地址，空白 AppID / AppSecret 不覆盖已存密钥。Tip 和 Notice 仅在请求带内容时替换。
-func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig, danmaku *model.DanmakuConfig) error {
+// UpdateSiteBasic 更新网站名称和简介。访问控制、弹幕、缺省的赞赏和公告保留。
+func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig) error {
 	curr, err := repository.GetSiteBasic()
 	if err != nil {
 		return err
@@ -41,16 +41,6 @@ func (s *ManageService) UpdateSiteBasic(bc model.BasicConfig, danmaku *model.Dan
 	curr.Logo = bc.Logo
 	curr.Keyword = bc.Keyword
 	curr.Describe = bc.Describe
-	if danmaku != nil {
-		next := *danmaku
-		if strings.TrimSpace(next.AppID) == "" {
-			next.AppID = curr.Danmaku.AppID
-		}
-		if strings.TrimSpace(next.AppSecret) == "" {
-			next.AppSecret = curr.Danmaku.AppSecret
-		}
-		curr.Danmaku = next
-	}
 	if bc.Tip.Title != "" || len(bc.Tip.Channels) > 0 {
 		curr.Tip = bc.Tip
 	}
@@ -96,6 +86,40 @@ func (s *ManageService) UpdateSiteAccessConfig(ac model.AccessConfig) error {
 	} else {
 		curr.ProvideKey = ac.ProvideKey
 	}
+	return repository.SaveSiteBasic(curr)
+}
+
+// GetSiteDanmakuConfig 获取网站弹幕系统配置
+func (s *ManageService) GetSiteDanmakuConfig() (model.DanmakuConfig, error) {
+	b, err := repository.GetSiteBasic()
+	if err != nil {
+		return model.DanmakuConfig{}, err
+	}
+	return b.Danmaku, nil
+}
+
+// UpdateSiteDanmakuConfig 更新网站弹幕系统配置
+func (s *ManageService) UpdateSiteDanmakuConfig(cfg model.DanmakuConfig) error {
+	curr, err := repository.GetSiteBasic()
+	if err != nil {
+		return err
+	}
+	if cfg.Enabled && cfg.AutoSniff && strings.TrimSpace(cfg.ApiURL) == "" {
+		if strings.TrimSpace(cfg.AppID) == "" {
+			return errors.New("使用弹弹play官方接口嗅探时，必须填写 AppId")
+		}
+		if strings.TrimSpace(cfg.AppSecret) == "" && strings.TrimSpace(curr.Danmaku.AppSecret) == "" {
+			return errors.New("使用弹弹play官方接口嗅探时，必须填写 AppSecret")
+		}
+	}
+	next := cfg
+	if strings.TrimSpace(next.AppID) == "" {
+		next.AppID = curr.Danmaku.AppID
+	}
+	if strings.TrimSpace(next.AppSecret) == "" {
+		next.AppSecret = curr.Danmaku.AppSecret
+	}
+	curr.Danmaku = next
 	return repository.SaveSiteBasic(curr)
 }
 
