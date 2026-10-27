@@ -1,12 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
 import { Badge, Button, DatePicker, Dropdown, Space, Switch } from "antd";
 import type { MenuProps } from "antd";
 import { DesktopOutlined, DownOutlined, MobileOutlined, PlaySquareOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { ApiGet } from "@/lib/client-api";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import GlobalOverviewBar from "./global-overview-bar";
 import WebAnalyticsView from "./web-view";
@@ -48,25 +46,10 @@ const MODULE_OPTIONS: { key: "web" | "app" | "tvbox"; label: string; icon: React
 ];
 
 export default function AccessPageView() {
-  const router = useRouter();
   const [activeModule, setActiveModule] = useState<"web" | "app" | "tvbox">("web");
   const [selectedDay, setSelectedDay] = useState<Dayjs>(dayjs());
   const [refreshKey, setRefreshKey] = useState(0);
   const [autoRefresh, setAutoRefresh] = useState(true);
-
-  useEffect(() => {
-    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
-      .then((res) => {
-        if (res.code === 0 && res.data) {
-          if (!res.data.enabled) {
-            router.replace("/manage");
-          }
-        }
-      })
-      .catch(() => {
-        router.replace("/manage");
-      });
-  }, [router]);
 
   const [refreshInterval, setRefreshInterval] = useState<number>(() => {
     if (typeof window !== "undefined") {
@@ -180,6 +163,7 @@ export default function AccessPageView() {
         title="数据分析"
         actions={
           <Space size={12} align="center">
+
             {/* 日期选择：默认当天 */}
             <DatePicker
               allowClear={false}

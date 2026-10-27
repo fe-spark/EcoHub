@@ -3,7 +3,6 @@ package access
 import (
 	"sync/atomic"
 
-	"server/internal/config"
 	"server/internal/infra/syslog"
 )
 
@@ -17,21 +16,17 @@ var (
 )
 
 func StartCollector() {
-	if !config.AccessLogEnabled {
-		syslog.Infof("[Access] 访问分析已关闭")
-		return
-	}
 	startDailyRollup()
 	if !started.CompareAndSwap(false, true) {
 		return
 	}
 	eventCh = make(chan *AccessEvent, channelSize)
 	go worker()
-	syslog.Infof("[Access] 采集已启动")
+	syslog.Infof("[Access] 采集服务已启动 (enabled=%v)", IsEnabled())
 }
 
 func Collect(evt *AccessEvent) {
-	if !config.AccessLogEnabled || evt == nil || eventCh == nil {
+	if !IsEnabled() || evt == nil || eventCh == nil {
 		return
 	}
 	select {

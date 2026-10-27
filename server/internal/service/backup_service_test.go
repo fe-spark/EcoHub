@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"testing"
 	"time"
+	"server/internal/access"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -35,6 +36,7 @@ func setupBackupTestDB(t *testing.T) *gorm.DB {
 		&model.ProxyConfigRecord{},
 		&model.TMDBConfigRecord{},
 		&model.NotifyConfigRecord{},
+		&model.AnalyticsConfigRecord{},
 	); err != nil {
 		t.Fatalf("migrate schema: %v", err)
 	}
@@ -147,6 +149,12 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	if err := repository.SaveNotifyConfig(notifyCfg); err != nil {
 		t.Fatalf("save notify config: %v", err)
 	}
+	analyticsCfg := model.AnalyticsConfig{
+		Enabled: true,
+	}
+	if err := repository.SaveAnalyticsConfig(analyticsCfg); err != nil {
+		t.Fatalf("save analytics config: %v", err)
+	}
 
 	rule := model.MappingRule{
 		Group:     "Area",
@@ -204,6 +212,9 @@ func TestExportConfig_CompleteAndClean(t *testing.T) {
 	}
 	if len(backup.MappingRules) != 1 || backup.MappingRules[0].Raw != "中国大陆" {
 		t.Fatalf("mapping rules export mismatch: %+v", backup.MappingRules)
+	}
+	if backup.Analytics == nil || !backup.Analytics.Enabled {
+		t.Fatalf("analytics export mismatch: %+v", backup.Analytics)
 	}
 }
 
@@ -295,5 +306,53 @@ func TestImportConfig_RejectsMissingPayloadBeforeWrite(t *testing.T) {
 	}
 	if savedSite.SiteName != "初始站点" {
 		t.Fatalf("site config should not be touched when validation fails, got %q", savedSite.SiteName)
+	}
+}
+
+func TestImportConfig_Analytics(t *testing.T) {
+	setupBackupTestDB(t)
+
+	access.SetEnabled(false)
+	backup := model.ConfigBackup{
+		Version: model.ConfigBackupVersion,
+		Analytics: &model.AnalyticsConfig{
+			Enabled: true,
+		},
+	}
+
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{
+			Analytics: true,
+		},
+		Backup: backup,
+	}
+
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	cfg, err := repository.GetAnalyticsConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Enabled {
+		t.Fatalf("expected analytics enabled=true in repo")
+	}
+	if !access.IsEnabled() {
+		t.Fatalf("expected access.IsEnabled() == true")
+	}
+
+	// 验证缺少 payload 时拒绝导入
+	badReq := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{
+			Analytics: true,
+		},
+		Backup: model.ConfigBackup{
+			Version:   model.ConfigBackupVersion,
+			Analytics: nil,
+		},
+	}
+	if err := BackupSvc.ImportConfig(badReq); err == nil {
+		t.Fatal("expected error on missing analytics payload")
 	}
 }

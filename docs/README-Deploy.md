@@ -37,7 +37,7 @@
 openssl rand -hex 32
 ```
 
-可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`、`ACCESS_ANALYTICS_ENABLED`。详见 [环境变量速查](#环境变量速查)。
+可选：`HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`。详见 [环境变量速查](#环境变量速查)。
 
 ---
 
@@ -165,7 +165,6 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PORT:-18080}:8080

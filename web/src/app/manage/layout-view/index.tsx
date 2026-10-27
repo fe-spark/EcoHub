@@ -83,16 +83,15 @@ export default function ManageLayoutView({
   const selectedKey = resolveMenuKey(pathname);
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
-  useEffect(() => {
-    ApiGet("/manage/user/info").then((resp) => {
-      if (resp.code === 0) {
-        setUserInfo(resp.data);
-      }
-    });
-    ApiGet<{ enabled: boolean; hasData: boolean; totalRows?: number }>("/manage/access/status")
+  const fetchAccessVisible = useCallback(() => {
+    if (!userInfo?.isAdmin) {
+      setAccessVisible(false);
+      return;
+    }
+    ApiGet<{ enabled: boolean }>("/manage/access/config")
       .then((resp) => {
-        if (resp.code === 0 && resp.data?.enabled) {
-          setAccessVisible(true);
+        if (resp.code === 0 && resp.data) {
+          setAccessVisible(Boolean(resp.data.enabled));
         } else {
           setAccessVisible(false);
         }
@@ -100,11 +99,35 @@ export default function ManageLayoutView({
       .catch(() => {
         setAccessVisible(false);
       });
+  }, [userInfo?.isAdmin]);
+
+  useEffect(() => {
+    fetchAccessVisible();
+    const handleConfigChange = (e: Event) => {
+      const customEvent = e as CustomEvent<{ enabled: boolean }>;
+      if (customEvent?.detail?.enabled !== undefined) {
+        setAccessVisible(Boolean(customEvent.detail.enabled));
+      } else {
+        fetchAccessVisible();
+      }
+    };
+    window.addEventListener("ecohub:access-config-changed", handleConfigChange);
+    return () => {
+      window.removeEventListener("ecohub:access-config-changed", handleConfigChange);
+    };
+  }, [fetchAccessVisible]);
+
+  useEffect(() => {
+    ApiGet("/manage/user/info").then((resp) => {
+      if (resp.code === 0) {
+        setUserInfo(resp.data);
+      }
+    });
   }, []);
 
   useEffect(() => {
     if (pathname.startsWith("/manage/access")) {
-      if (userInfo && (!userInfo.isAdmin || accessVisible === false)) {
+      if (userInfo && !userInfo.isAdmin) {
         router.replace("/manage");
       }
     }
@@ -117,8 +140,7 @@ export default function ManageLayoutView({
         router.replace("/manage");
       }
     }
-  }, [userInfo, accessVisible, pathname, router]);
-
+  }, [userInfo, pathname, router]);
   // 进入后台及路由切换时刷新公告（数据重置后应消失）
   useEffect(() => {
     ApiGet("/manage/index").then((resp) => {
@@ -164,8 +186,8 @@ export default function ManageLayoutView({
       })
       .map((item) => {
         if (!item || !("children" in item) || !item.children) return item;
-        const filteredChildren = item.children.filter((child: any) => {
-          if (child.key === "/manage/system/security" || child.key === "/manage/system/logs") {
+        const filteredChildren = item.children.filter((child) => {
+          if (child && "key" in child && (child.key === "/manage/system/security" || child.key === "/manage/system/logs")) {
             return isAdmin;
           }
           return true;

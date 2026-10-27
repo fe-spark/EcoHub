@@ -16,6 +16,7 @@ type ConfigBackup struct {
 	MappingRules []MappingRuleExport `json:"mappingRules"`
 	Proxy        *ProxyConfig        `json:"proxy,omitempty"`
 	TMDB         *TMDBConfig         `json:"tmdb,omitempty"`
+	Analytics    *AnalyticsConfig    `json:"analytics,omitempty"`
 	Notify       *NotifyConfig       `json:"notify,omitempty"`
 }
 
@@ -37,6 +38,7 @@ type ConfigBackupModules struct {
 	MappingRules bool `json:"mappingRules"`
 	Proxy        bool `json:"proxy"`
 	TMDB         bool `json:"tmdb"`
+	Analytics    bool `json:"analytics"`
 	Notify       bool `json:"notify"`
 }
 
@@ -54,5 +56,5 @@ type ConfigBackupImportRequest struct {
 
 // Any 是否至少勾选一个模块
 func (m ConfigBackupModules) Any() bool {
-	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.MappingRules || m.Proxy || m.TMDB || m.Notify
+	return m.Site || m.FilmSources || m.CronTasks || m.Banners || m.MappingRules || m.Proxy || m.TMDB || m.Notify || m.Analytics
 }

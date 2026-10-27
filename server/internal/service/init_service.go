@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"server/internal/access"
 	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
@@ -51,6 +52,9 @@ func (s *InitService) DefaultDataInit() error {
 	}
 	if err := repository.EnsureDefaultPosterSource(); err != nil {
 		return fmt.Errorf("默认海报源初始化失败: %w", err)
+	}
+	if err := s.AnalyticsConfigInit(); err != nil {
+		return err
 	}
 	filmsnapshot.RestoreActiveSnapshotVersion()
 	if err := s.SpiderInit(); err != nil {
@@ -131,6 +135,16 @@ func defaultBasicConfig() model.BasicConfig {
 		Tip:      model.DefaultTipConfig(),
 		Notice:   model.DefaultNoticeConfig(),
 	}
+}
+
+// AnalyticsConfigInit 初始化数据分析配置并同步内存原子状态
+func (s *InitService) AnalyticsConfigInit() error {
+	cfg, err := repository.GetAnalyticsConfig()
+	if err != nil {
+		return fmt.Errorf("读取数据分析配置失败: %w", err)
+	}
+	access.SetEnabled(cfg.Enabled)
+	return nil
 }
 
 func (s *InitService) SpiderInit() error {

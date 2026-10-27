@@ -126,7 +126,7 @@ func startDailyRollup() {
 }
 
 func safeDailyRollup() {
-	if !config.AccessLogEnabled {
+	if !IsEnabled() {
 		return
 	}
 	defer func() {
@@ -139,7 +139,7 @@ func safeDailyRollup() {
 
 // RunDailyRollup 把已闭合的 Redis 日桶 UPSERT 进 MySQL，并裁剪 14 天外的行。
 func RunDailyRollup() {
-	if !config.AccessLogEnabled || db.Rdb == nil || db.Mdb == nil {
+	if !IsEnabled() || db.Rdb == nil || db.Mdb == nil {
 		return
 	}
 	rollupMu.Lock()

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"server/internal/access"
 	"regexp"
 	"server/internal/model"
 	"server/internal/model/dto"
@@ -159,6 +160,25 @@ func (s *ManageService) UpdateSiteNoticeConfig(notice model.NoticeConfig) error 
 	}
 	curr.Notice = notice
 	return repository.SaveSiteBasic(curr)
+}
+
+// GetAnalyticsConfig 获取数据分析配置
+func (s *ManageService) GetAnalyticsConfig() (model.AnalyticsConfig, error) {
+	cfg, err := repository.GetAnalyticsConfig()
+	if err != nil {
+		return model.DefaultAnalyticsConfig(), err
+	}
+	access.SetEnabled(cfg.Enabled)
+	return cfg, nil
+}
+
+// UpdateAnalyticsConfig 更新数据分析配置并即时热生效
+func (s *ManageService) UpdateAnalyticsConfig(cfg model.AnalyticsConfig) error {
+	if err := repository.SaveAnalyticsConfig(cfg); err != nil {
+		return err
+	}
+	access.SetEnabled(cfg.Enabled)
+	return nil
 }
 
 // GetBanners 获取轮播。更新状态跟片库，图片和简介用轮播行自己的。

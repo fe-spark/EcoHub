@@ -37,7 +37,7 @@ Before going live, change at least `JWT_SECRET` and MySQL/Redis passwords.
 openssl rand -hex 32
 ```
 
-Optional: `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`, `ACCESS_ANALYTICS_ENABLED`. See [Environment Variables](#environment-variables).
+Optional: `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`. See [Environment Variables](#environment-variables).
 
 ---
 
@@ -165,7 +165,6 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       HTTP_PROXY: ${HTTP_PROXY:-}
       ALL_PROXY: ${ALL_PROXY:-}
-      ACCESS_ANALYTICS_ENABLED: ${ACCESS_ANALYTICS_ENABLED:-false}
     ports:
       - ${WEB_PORT:-3000}:3000
       - 0.0.0.0:${SERVER_PORT:-18080}:8080
@@ -357,7 +356,6 @@ All environment variables supported via `.env`, Docker Compose, or container run
 
 | Variable | Required | Default | Description |
 | --- | :---: | --- | --- |
-| `ACCESS_ANALYTICS_ENABLED` | No | `false` | Master toggle for access metrics, playback analytics, and client device tracking. Set to `false` for zero overhead and complete privacy; set to `true` or `1` to enable admin analytics reports. |
 | `NODE_NAME` | No | Hostname | Current node identifier in distributed multi-node setups (leave empty for single-node deployments). |
 | `ECOHUB_LOG_DIR` | No | Container `logs/` | Custom log directory (defaults to container internal logs directory; usually left unchanged). |
 

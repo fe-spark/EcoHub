@@ -1,19 +1,28 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Alert,
   Button,
   Card,
+  Divider,
   Flex,
   Input,
   Modal,
   Radio,
   Space,
+  Switch,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
-import { ClearOutlined, LineChartOutlined } from "@ant-design/icons";
+import {
+  AreaChartOutlined,
+  ArrowRightOutlined,
+  ClearOutlined,
+  LineChartOutlined,
+} from "@ant-design/icons";
+import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
 import { useManagePermission } from "@/lib/manage-permission";
@@ -30,10 +39,13 @@ interface ClearAccessDataCardProps {
 }
 
 export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessDataCardProps) {
+  const router = useRouter();
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
 
   const [status, setStatus] = useState<AccessStatus | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [toggling, setToggling] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [cleaning, setCleaning] = useState(false);
   const [password, setPassword] = useState("");
@@ -47,25 +59,50 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
       }
     } catch {
       // ignore
+    } finally {
+      setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     void fetchStatus();
+    const handleConfigChange = () => {
+      void fetchStatus();
+    };
+    window.addEventListener("ecohub:access-config-changed", handleConfigChange);
+    return () => {
+      window.removeEventListener("ecohub:access-config-changed", handleConfigChange);
+    };
   }, [fetchStatus]);
 
-  // 展示规则：
-  // 1. 数据分析开关打开 (enabled == true)：即使数据库里还没有数据（0 行），也必须展示该卡片！
-  // 2. 数据分析开关没开启 (enabled == false)：如果数据库里有历史落库数据 (hasData == true / totalRows > 0)，也必须展示该卡片！
-  // 3. 只有当「开关未开启 且 库里无数据」时，才在数据安全中隐藏该卡片。
-  const shouldShow = useMemo(() => {
-    if (!status) return false;
-    return status.enabled || status.hasData || (status.totalRows ?? 0) > 0;
-  }, [status]);
+  const hasData = Boolean(status?.hasData && (status?.totalRows ?? 0) > 0);
 
-  if (!shouldShow) {
-    return null;
-  }
+  const handleToggleEnabled = async (checked: boolean) => {
+    if (!canWrite || !isAdmin) return;
+    setToggling(true);
+    try {
+      const resp = await ApiPost<{ enabled: boolean }>("/manage/access/config", {
+        enabled: checked,
+      });
+      if (resp.code === 0) {
+        setStatus((prev) =>
+          prev
+            ? { ...prev, enabled: checked }
+            : { enabled: checked, hasData: false, totalRows: 0 }
+        );
+        window.dispatchEvent(
+          new CustomEvent("ecohub:access-config-changed", { detail: { enabled: checked } })
+        );
+        message.success(checked ? "数据分析已开启" : "数据分析已暂停");
+      } else {
+        message.error(resp.msg || "修改数据分析状态失败");
+      }
+    } catch {
+      message.error("网络请求失败，请稍后重试");
+    } finally {
+      setToggling(false);
+    }
+  };
 
   const openModal = () => {
     setModalOpen(true);
@@ -117,36 +154,90 @@ export default function ClearAccessDataCard({ onCleanComplete }: ClearAccessData
         title={
           <Space size={8} align="center">
             <LineChartOutlined style={{ color: "var(--ant-color-primary)" }} />
-            <span>数据分析清理</span>
+            <span>数据分析</span>
           </Space>
         }
         extra={
           <Space size={8}>
-            {status?.enabled ? (
-              <Tag color="processing">已开启</Tag>
-            ) : (
-              <Tag color="default">未开启</Tag>
+            {status?.enabled && (
+              <Button
+                type="link"
+                size="small"
+                icon={<AreaChartOutlined />}
+                onClick={() => router.push("/manage/access")}
+                style={{ padding: "0 4px" }}
+              >
+                前往看板 <ArrowRightOutlined />
+              </Button>
             )}
             {!isAdmin && <Tag color="default">仅超级管理员可操作</Tag>}
           </Space>
         }
       >
-        <div className={styles.sectionHead}>
-          <div className={styles.sectionText}>
-            <Typography.Text strong>清理历史统计数据</Typography.Text>
-            <Typography.Text type="secondary">
-              清空站点访问流量与统计数据，支持全部清空或按天数保留。
-            </Typography.Text>
+        <Flex vertical gap={16}>
+          {/* 启停总开关 */}
+          <div className={styles.sectionHead}>
+            <div className={styles.sectionText}>
+              <Space size={8} align="center">
+                <Typography.Text strong>全站数据分析与行为统计</Typography.Text>
+                {status?.enabled ? (
+                  <Tag color="processing">运行中</Tag>
+                ) : (
+                  <Tag color="default">已暂停</Tag>
+                )}
+              </Space>
+              <Typography.Text type="secondary">
+                开启后系统记录全站访问量 (PV/UV)、播放热度、搜索词与客户端分布，并在侧边栏展示数据分析看板；关闭后停止记录，保持零 I/O 零性能开销。
+              </Typography.Text>
+            </div>
+            <Switch
+              checked={Boolean(status?.enabled)}
+              loading={loading || toggling}
+              disabled={loading || !canWrite || !isAdmin}
+              onChange={handleToggleEnabled}
+            />
           </div>
-          <Button
-            danger
-            icon={<ClearOutlined />}
-            disabled={!canWrite || !isAdmin}
-            onClick={openModal}
-          >
-            清理数据
-          </Button>
-        </div>
+
+          <Divider style={{ margin: "4px 0" }} />
+
+          {/* 清理历史统计数据 */}
+          <div className={styles.sectionHead}>
+            <div className={styles.sectionText}>
+              <Typography.Text strong>清理历史统计数据</Typography.Text>
+              <Typography.Text type="secondary">
+                {loading
+                  ? "正在检测历史统计数据..."
+                  : hasData
+                    ? `清空站点访问流量与统计数据，当前已累计保存 ${status?.totalRows} 条历史数据，支持全部清空或按天数保留（需管理密码）。`
+                    : "当前暂无历史落库统计数据，无需清理。"}
+              </Typography.Text>
+            </div>
+            <Tooltip
+              title={
+                loading
+                  ? undefined
+                  : !isAdmin
+                    ? "仅超级管理员可操作"
+                    : !canWrite
+                      ? "当前账号无写入权限"
+                      : !hasData
+                        ? "当前暂无历史数据，无需清理"
+                        : undefined
+              }
+            >
+              <span style={{ display: "inline-block" }}>
+                <Button
+                  danger
+                  icon={<ClearOutlined />}
+                  disabled={loading || !canWrite || !isAdmin || !hasData}
+                  onClick={openModal}
+                >
+                  清理数据
+                </Button>
+              </span>
+            </Tooltip>
+          </div>
+        </Flex>
       </Card>
 
       <Modal

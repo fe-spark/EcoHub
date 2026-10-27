@@ -5,19 +5,17 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"server/internal/config"
+	"server/internal/access"
 
 	"github.com/gin-gonic/gin"
 )
 
 func TestAccessLogMiddleware(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	origEnabled := config.AccessLogEnabled
+	origEnabled := access.IsEnabled()
 	t.Cleanup(func() {
-		config.AccessLogEnabled = origEnabled
+		access.SetEnabled(origEnabled)
 	})
-	config.AccessLogEnabled = true
+	access.SetEnabled(true)
 
 	r := gin.New()
 	r.Use(AccessLog())
@@ -59,7 +57,7 @@ func TestAccessLogMiddleware(t *testing.T) {
 	})
 
 	t.Run("access log disabled", func(t *testing.T) {
-		config.AccessLogEnabled = false
+		access.SetEnabled(false)
 		req := httptest.NewRequest(http.MethodGet, "/api/test-ok", nil)
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, req)

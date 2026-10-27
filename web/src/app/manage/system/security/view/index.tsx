@@ -37,6 +37,7 @@ interface ConfigBackupModules {
   mappingRules: boolean;
   proxy: boolean;
   tmdb: boolean;
+  analytics: boolean;
 }
 
 interface ConfigBackup {
@@ -51,6 +52,7 @@ interface ConfigBackup {
   notify?: unknown;
   mappingRules?: unknown[];
   proxy?: unknown;
+  analytics?: unknown;
   tmdb?: unknown;
 }
 
@@ -63,6 +65,7 @@ const MODULE_OPTIONS: { key: keyof ConfigBackupModules; label: string }[] = [
   { key: "mappingRules", label: "映射规则" },
   { key: "proxy", label: "网络代理" },
   { key: "tmdb", label: "TMDB刮削" },
+  { key: "analytics", label: "数据分析" },
 ];
 
 const ALL_MODULES: ConfigBackupModules = {
@@ -74,6 +77,7 @@ const ALL_MODULES: ConfigBackupModules = {
   mappingRules: true,
   proxy: true,
   tmdb: true,
+  analytics: true,
 };
 
 function downloadJson(filename: string, data: unknown) {
@@ -126,6 +130,9 @@ function summarizeBackup(backup: ConfigBackup | null): string {
   }
   if (backup.notify) {
     parts.push("通知配置");
+  }
+  if (backup.analytics) {
+    parts.push("数据分析");
   }
   return parts.join(" · ");
 }
@@ -245,6 +252,7 @@ export default function DataSecurityPageView({ embedded = false }: DataSecurityP
         message.success(resp.msg || "配置导入成功");
         setImportOpen(false);
         setPassword("");
+        window.dispatchEvent(new CustomEvent("ecohub:access-config-changed"));
         return;
       }
       message.error(resp.msg || "导入失败");

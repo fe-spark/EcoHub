@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"time"
+	"server/internal/access"
 
 	"server/internal/config"
 	"server/internal/infra/syslog"
@@ -65,6 +66,10 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 	if err != nil {
 		return model.ConfigBackup{}, err
 	}
+	analyticsCfg, err := repository.GetAnalyticsConfig()
+	if err != nil {
+		return model.ConfigBackup{}, err
+	}
 
 	rules, err := repository.ListAllMappingRules(repository.MappingRuleQuery{})
 	if err != nil {
@@ -94,6 +99,7 @@ func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
 		Proxy:        &proxyCfg,
 		TMDB:         &tmdbCfg,
 		Notify:       &notifyCfg,
+		Analytics:    &analyticsCfg,
 	}, nil
 }
 
@@ -228,6 +234,13 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 			syslog.Errorf("[Backup] 刷新读模型投影失败: %v", err)
 		}
 	}
+	if req.Modules.Analytics {
+		if err := repository.SaveAnalyticsConfig(*backup.Analytics); err != nil {
+			return fmt.Errorf("导入数据分析配置失败: %w", err)
+		}
+		access.SetEnabled(backup.Analytics.Enabled)
+	}
+
 
 	return nil
 }
@@ -257,6 +270,9 @@ func validateImportPayload(req model.ConfigBackupImportRequest) error {
 	}
 	if req.Modules.Notify && b.Notify == nil {
 		return errors.New("备份中缺少通知配置数据")
+	}
+	if req.Modules.Analytics && b.Analytics == nil {
+		return errors.New("备份中缺少数据分析配置数据")
 	}
 	return nil
 }

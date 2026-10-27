@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"server/internal/access"
-	"server/internal/config"
 	"server/internal/infra/syslog"
 
 	"github.com/gin-gonic/gin"
@@ -22,7 +21,7 @@ func AccessLog() gin.HandlerFunc {
 		elapsed := time.Since(start)
 		status := c.Writer.Status()
 
-		if config.AccessLogEnabled {
+		if access.IsEnabled() {
 			evt := access.FromContext(c, elapsed)
 			if evt != nil {
 				access.Collect(evt)
