@@ -123,6 +123,13 @@ export function useCollectCardActions({
           duration: 2,
         });
         void getCollectList();
+      } else {
+        stoppingSiteIdsRef.current.delete(id);
+        message.info({
+          key: `collect-stop-site-${id}`,
+          content: "采集已终止",
+          duration: 2,
+        });
       }
     },
     [getCollectList, message, stoppingSiteIdsRef, updateSiteListItem],
