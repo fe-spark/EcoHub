@@ -69,6 +69,7 @@ export function useCollectBatchRunner(
     siteList.forEach((site) => {
       message.destroy(`collect-stop-site-${site.id}`);
       if (site.progress?.queueId) {
+        message.destroy(`collect-queue-notice-${site.progress.queueId}`);
         message.destroy(`collect-stop-queue-${site.progress.queueId}`);
       }
     });

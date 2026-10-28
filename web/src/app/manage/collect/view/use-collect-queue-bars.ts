@@ -8,6 +8,7 @@ import {
   finishedQueueViews,
   groupCollectQueues,
   isClientCollectQueueId,
+  isTerminalCollectStatus,
   matchPrevCollectQueueBar,
   queueEndNotice,
   type CollectQueueProgressView,
@@ -35,7 +36,8 @@ export function useCollectQueueBars(
   const barsRef = useRef<QueueBarState[]>([]);
   const [stoppingQueueId, setStoppingQueueId] = useState<string | null>(null);
   const [tourHoldProgress, setTourHoldProgress] = useState(false);
-
+  const notifiedQueueIdsRef = useRef<Set<string>>(new Set());
+  const stoppingQueuesRef = useRef<Map<string, string[]>>(new Map());
   useEffect(() => {
     const sync = () => {
       setTourHoldProgress(document.documentElement.hasAttribute(TOUR_HOLD_PROGRESS_ATTR));
@@ -84,9 +86,51 @@ export function useCollectQueueBars(
         }
       }
     } else {
+      // 检查正在手动终止的队列：必须该队列下的所有站点均达到终态，才触发「采集已终止」
+      if (stoppingQueuesRef.current.size > 0) {
+        for (const [qId, sIds] of Array.from(stoppingQueuesRef.current.entries())) {
+          const allStopped = sIds.every((id) => {
+            const site = sites.find((s) => s.id === id);
+            if (!site || !site.progress) return true;
+            return isTerminalCollectStatus(site.progress.status);
+          });
+          if (allStopped) {
+            stoppingQueuesRef.current.delete(qId);
+            notifiedQueueIdsRef.current.add(qId);
+            message.info({
+              key: `collect-queue-notice-${qId}`,
+              content: "采集已终止",
+              duration: 2,
+            });
+            setStoppingQueueId((current) => (current === qId ? null : current));
+            const stopIdSet = new Set(sIds);
+            setSiteList((current) =>
+              current.map((item) =>
+                stopIdSet.has(item.id)
+                  ? { ...item, progress: null }
+                  : item,
+              ),
+            );
+          }
+        }
+      }
+
+      for (const item of next) {
+        if (item.view.running) {
+          notifiedQueueIdsRef.current.delete(item.queueId);
+        }
+      }
       for (const view of finishedQueueViews(prev, next)) {
+        const qId = view.queueId;
+        // 如果该队列已被 stopQueue 记录拦截或已通知过，不再重复触发
+        if (qId && (notifiedQueueIdsRef.current.has(qId) || stoppingQueuesRef.current.has(qId))) {
+          continue;
+        }
+        if (qId) {
+          notifiedQueueIdsRef.current.add(qId);
+        }
         const notice = queueEndNotice(view);
-        const msgKey = view.queueId ? `collect-stop-queue-${view.queueId}` : undefined;
+        const msgKey = qId ? `collect-queue-notice-${qId}` : undefined;
         if (msgKey) {
           message[notice.level]({
             key: msgKey,
@@ -101,16 +145,21 @@ export function useCollectQueueBars(
     }
     barsRef.current = visible;
     setBars(visible);
-  }, [sites, tourHoldProgress, message, searchIndex]);
+  }, [sites, tourHoldProgress, message, searchIndex, setSiteList]);
 
   const stopQueue = async (queueId: string, sourceIds: string[]) => {
     setStoppingQueueId(queueId);
-    const msgKey = `collect-stop-queue-${queueId}`;
-    message.loading({
-      key: msgKey,
-      content: "正在停止...",
-      duration: 0,
-    });
+    if (queueId) {
+      stoppingQueuesRef.current.set(queueId, sourceIds);
+    }
+    const msgKey = queueId ? `collect-queue-notice-${queueId}` : undefined;
+    if (msgKey) {
+      message.loading({
+        key: msgKey,
+        content: "正在停止...",
+        duration: 0,
+      });
+    }
     const idSet = new Set(sourceIds);
     setSiteList((current) =>
       current.map((item) =>
@@ -122,28 +171,38 @@ export function useCollectQueueBars(
     try {
       const resp = await ApiPost("/manage/spider/stop", { ids: sourceIds });
       if (resp.code !== 0) {
-        message.error({
-          key: msgKey,
-          content: resp.msg || "终止任务失败",
-          duration: 2,
-        });
+        if (queueId) {
+          stoppingQueuesRef.current.delete(queueId);
+        }
+        setStoppingQueueId((current) => (current === queueId ? null : current));
+        if (msgKey) {
+          message.error({
+            key: msgKey,
+            content: resp.msg || "终止任务失败",
+            duration: 2,
+          });
+        } else {
+          message.error(resp.msg || "终止任务失败");
+        }
         void reloadList();
         return;
       }
-      message.info({
-        key: msgKey,
-        content: "采集已终止",
-        duration: 2,
-      });
+      // API 请求成功后保持 loading，待所有站点在后台完全退出由 useEffect 统一提示
     } catch {
-      message.error({
-        key: msgKey,
-        content: "终止任务失败",
-        duration: 2,
-      });
+      if (queueId) {
+        stoppingQueuesRef.current.delete(queueId);
+      }
+      setStoppingQueueId((current) => (current === queueId ? null : current));
+      if (msgKey) {
+        message.error({
+          key: msgKey,
+          content: "终止任务失败",
+          duration: 2,
+        });
+      } else {
+        message.error("终止任务失败");
+      }
       void reloadList();
-    } finally {
-      setStoppingQueueId(null);
     }
   };
 
