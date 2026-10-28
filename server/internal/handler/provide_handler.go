@@ -190,10 +190,7 @@ func prefixDetailPics(list []model.FilmDetail, baseURL string) []model.FilmDetai
 }
 
 // HandleProvideConfig 提供给 TVBox/影视仓 的一键网络配置 (config.json)。
-// 对应路由：
-//   - GET /api/provide/tvbox (推荐：语义明确的标准端点)
-//   - GET /api/provide/config (Deprecated: 早期路径别名，后续主版本计划移除)
-//
+// 对应端点：GET /api/provide/tvbox
 // 注意：EcoHub 官方原生客户端（OHOS / Android）请走专属软件源端点 HandleProvideApp (/api/provide/app)。
 func (h *ProvideHandler) HandleProvideConfig(c *gin.Context) {
 	baseURL, err := resolveProvideBaseURL(c)

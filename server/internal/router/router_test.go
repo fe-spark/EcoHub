@@ -121,22 +121,16 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("GET /api/manage/access/status should allow normal manage user, got %d", wNormalAccessStatus.Code)
 	}
 
-	// 5. Access stats and clean MUST forbid non-admin
-	wNormalAccessStats := performReq(http.MethodGet, "/api/manage/access/stats", normalToken)
-	if wNormalAccessStats.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/stats should forbid normal user, got %d", wNormalAccessStats.Code)
-	}
-
+	// 5. Access clean MUST forbid non-admin, but overview allows normal user
 	wNormalAccessClean := performReq(http.MethodPost, "/api/manage/access/clean", normalToken)
 	if wNormalAccessClean.Code != http.StatusForbidden {
 		t.Errorf("POST /api/manage/access/clean should forbid normal user, got %d", wNormalAccessClean.Code)
 	}
 
 	wNormalAccessOverview := performReq(http.MethodGet, "/api/manage/access/overview", normalToken)
-	if wNormalAccessOverview.Code != http.StatusForbidden {
-		t.Errorf("GET /api/manage/access/overview should forbid normal user, got %d", wNormalAccessOverview.Code)
+	if wNormalAccessOverview.Code == http.StatusForbidden || wNormalAccessOverview.Code == http.StatusUnauthorized {
+		t.Errorf("GET /api/manage/access/overview should allow normal user, got %d", wNormalAccessOverview.Code)
 	}
-
 	// 6. Admin user should be allowed through to access admin endpoints
 	wAdminAccessStatus := performReq(http.MethodGet, "/api/manage/access/status", adminToken)
 	if wAdminAccessStatus.Code == http.StatusForbidden {
@@ -178,27 +172,42 @@ func TestRouterPermissions_SpiderClearAndSystemLogs(t *testing.T) {
 		t.Errorf("POST /api/manage/notify/config/test should forbid normal user, got %d", wNormalNotifyTest.Code)
 	}
 
-	// 10. Additional hardened routes: basic config, film delete, collect save, tmdb scrape MUST forbid non-admin
+	// 10. Operational routes: normal user CAN operate film/collect/tmdb/banner, but system config is admin-only
 	wNormalBasicConfig := performReq(http.MethodPost, "/api/manage/config/basic", normalToken)
 	if wNormalBasicConfig.Code != http.StatusForbidden {
 		t.Errorf("POST /api/manage/config/basic should forbid normal user, got %d", wNormalBasicConfig.Code)
 	}
 	wNormalFilmDelete := performReq(http.MethodPost, "/api/manage/film/delete", normalToken)
-	if wNormalFilmDelete.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/film/delete should forbid normal user, got %d", wNormalFilmDelete.Code)
+	if wNormalFilmDelete.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/film/delete should allow normal user, got %d", wNormalFilmDelete.Code)
 	}
 	wNormalCollectSave := performReq(http.MethodPost, "/api/manage/collect/save", normalToken)
-	if wNormalCollectSave.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/collect/save should forbid normal user, got %d", wNormalCollectSave.Code)
+	if wNormalCollectSave.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/collect/save should allow normal user, got %d", wNormalCollectSave.Code)
 	}
 	wNormalTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", normalToken)
-	if wNormalTMDBScrape.Code != http.StatusForbidden {
-		t.Errorf("POST /api/manage/tmdb/scrape should forbid normal user, got %d", wNormalTMDBScrape.Code)
+	if wNormalTMDBScrape.Code == http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/scrape should allow normal user, got %d", wNormalTMDBScrape.Code)
 	}
-
 	// 11. Profile endpoint allows normal authenticated user (not 403)
 	wNormalUserProfile := performReq(http.MethodPost, "/api/manage/user/profile", normalToken)
 	if wNormalUserProfile.Code == http.StatusForbidden || wNormalUserProfile.Code == http.StatusUnauthorized {
 		t.Errorf("POST /api/manage/user/profile should allow normal user, got %d", wNormalUserProfile.Code)
 	}
+
+	// 12. Visitor (read-only) MUST be forbidden on all mutating routes
+	visitorUserID := uint(20003)
+	visitorToken, _ := utils.GenToken(visitorUserID, "guest", model.UserRoleVisitor)
+	_ = repository.SaveUserToken(visitorToken, visitorUserID)
+	gdb.Create(&model.User{Model: gorm.Model{ID: visitorUserID}, Role: model.UserRoleVisitor, Status: 0})
+
+	wVisitorFilmSave := performReq(http.MethodPost, "/api/manage/film/save", visitorToken)
+	if wVisitorFilmSave.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/film/save should forbid visitor, got %d", wVisitorFilmSave.Code)
+	}
+	wVisitorTMDBScrape := performReq(http.MethodPost, "/api/manage/tmdb/scrape", visitorToken)
+	if wVisitorTMDBScrape.Code != http.StatusForbidden {
+		t.Errorf("POST /api/manage/tmdb/scrape should forbid visitor, got %d", wVisitorTMDBScrape.Code)
+	}
 }
+

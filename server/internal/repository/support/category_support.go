@@ -51,20 +51,7 @@ func GetCategoryStableKeyByID(id int64) string {
 }
 
 func ResolveCategoryID(id int64) int64 {
-	if id <= 0 || db.Mdb == nil {
-		return id
-	}
-	var category model.Category
-	if err := db.Mdb.Where("id = ?", id).First(&category).Error; err != nil {
-		return id
-	}
-	if category.StableKey != "" {
-		var current model.Category
-		if err := db.Mdb.Where("stable_key = ?", category.StableKey).First(&current).Error; err == nil {
-			return current.Id
-		}
-	}
-	return category.Id
+	return id
 }
 
 func TouchCategoryVersion() {

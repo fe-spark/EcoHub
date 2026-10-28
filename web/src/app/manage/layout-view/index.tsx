@@ -92,11 +92,7 @@ export default function ManageLayoutView({
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
   const fetchAccessVisible = useCallback(() => {
-    if (!userInfo?.isAdmin) {
-      setAccessVisible(false);
-      return;
-    }
-    ApiGet<{ enabled: boolean }>("/manage/access/config")
+    ApiGet<{ enabled: boolean }>("/manage/access/status")
       .then((resp) => {
         if (resp.code === 0 && resp.data) {
           setAccessVisible(Boolean(resp.data.enabled));
@@ -107,7 +103,7 @@ export default function ManageLayoutView({
       .catch(() => {
         setAccessVisible(false);
       });
-  }, [userInfo?.isAdmin]);
+  }, []);
 
   useEffect(() => {
     fetchAccessVisible();
@@ -134,11 +130,6 @@ export default function ManageLayoutView({
   }, []);
 
   useEffect(() => {
-    if (pathname.startsWith("/manage/access")) {
-      if (userInfo && !userInfo.isAdmin) {
-        router.replace("/manage");
-      }
-    }
     if (
       pathname !== "/manage/system" &&
       pathname.startsWith("/manage/system") &&
@@ -188,7 +179,7 @@ export default function ManageLayoutView({
     const isAdmin = Boolean(userInfo?.isAdmin);
     return menuItems
       .filter((item) => {
-        if (item?.key === "/manage/access") return Boolean(isAdmin && accessVisible);
+        if (item?.key === "/manage/access") return Boolean(accessVisible);
         if (item?.key === "/manage/system/proxy" || item?.key === "sub-integrations") return isAdmin;
         return true;
       })
