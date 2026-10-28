@@ -7,6 +7,7 @@ import {
   Modal,
   Space,
   Tag,
+  Tooltip,
   Typography,
 } from "antd";
 import {
@@ -83,24 +84,52 @@ export default function SubscribeModal(props: SubscribeModalProps) {
     return `${origin}${item.path}`;
   };
 
-  const handleCopy = async (text: string, label: string) => {
+  const handleCopy = async (text: string, label: string, inputEl?: HTMLInputElement | null) => {
     if (!text) return;
-    try {
-      if (navigator?.clipboard?.writeText) {
+    let copied = false;
+    if (navigator?.clipboard?.writeText) {
+      try {
         await navigator.clipboard.writeText(text);
-        message.success(`${label}已复制`);
-      } else {
-        const textarea = document.createElement("textarea");
+        copied = true;
+      } catch {
+        copied = false;
+      }
+    }
+    if (!copied && inputEl) {
+      try {
+        inputEl.focus();
+        inputEl.select();
+        inputEl.setSelectionRange(0, text.length);
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      }
+    }
+    if (!copied) {
+      const textarea = document.createElement("textarea");
+      try {
         textarea.value = text;
+        textarea.setAttribute("readonly", "");
         textarea.style.position = "fixed";
+        textarea.style.left = "-9999px";
+        textarea.style.top = "-9999px";
         textarea.style.opacity = "0";
         document.body.appendChild(textarea);
+        textarea.focus();
         textarea.select();
-        document.execCommand("copy");
-        document.body.removeChild(textarea);
-        message.success(`${label}已复制`);
+        textarea.setSelectionRange(0, text.length);
+        copied = document.execCommand("copy");
+      } catch {
+        copied = false;
+      } finally {
+        if (textarea.parentNode) {
+          textarea.parentNode.removeChild(textarea);
+        }
       }
-    } catch {
+    }
+    if (copied) {
+      message.success(`${label}已复制`);
+    } else {
       message.error("复制失败，请手动选中文本复制");
     }
   };
@@ -158,15 +187,25 @@ export default function SubscribeModal(props: SubscribeModalProps) {
               </div>
 
               <Space.Compact style={{ width: "100%" }}>
-                <Input
-                  readOnly
-                  value={fullUrl}
-                  className={styles.urlInput}
-                />
+                <Tooltip title="点击输入框快速复制">
+                  <Input
+                    readOnly
+                    value={fullUrl}
+                    className={styles.urlInput}
+                    style={{ cursor: "pointer" }}
+                    onClick={(e) => {
+                      e.currentTarget.select();
+                      void handleCopy(fullUrl, item.title, e.currentTarget);
+                    }}
+                  />
+                </Tooltip>
                 <Button
                   type="primary"
                   icon={<CopyOutlined />}
-                  onClick={() => handleCopy(fullUrl, item.title)}
+                  onClick={(e) => {
+                    const prevInput = e.currentTarget.parentElement?.querySelector("input");
+                    void handleCopy(fullUrl, item.title, prevInput);
+                  }}
                 >
                   复制
                 </Button>

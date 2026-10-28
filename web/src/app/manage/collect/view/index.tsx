@@ -6,7 +6,7 @@ import { PlusOutlined, ApiOutlined } from "@ant-design/icons";
 import { useRouter } from "next/navigation";
 import { ApiGet, ApiPost, ApiPostLong } from "@/lib/client-api";
 import { useAppMessage } from "@/lib/useAppMessage";
-import { useManagePermission } from "@/lib/manage-permission";
+import { useManagePermission, ManagePermissionProvider } from "@/lib/manage-permission";
 import ManagePageHeader from "@/app/manage/components/page-header";
 import BatchCollectDrawer from "./batch-collect-drawer";
 import CategoryChangeModal from "./category-change-modal";
@@ -40,7 +40,8 @@ import styles from "./index.module.less";
 export default function CollectManagePageView() {
   const router = useRouter();
   const { message } = useAppMessage();
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
+  const canOperate = canWrite && isAdmin;
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);
@@ -355,14 +356,17 @@ export default function CollectManagePageView() {
   );
 
   return (
-    <div className={styles.pageBody}>
+    <ManagePermissionProvider canWrite={canOperate} isAdmin={isAdmin}>
+      <div className={styles.pageBody}>
       <ManagePageHeader
         title="采集中心"
         description={<>统一管理采集站与采集任务<span className={styles.headerMeta}>· {siteList.length} 个</span></>}
         actions={
           <Space size={8}>
-            <Button icon={<ApiOutlined />} onClick={() => router.push("/manage/system?tab=proxy")}>网络代理</Button>
-            <Button danger loading={cleanupScanning} disabled={!canWrite || siteList.length === 0} onClick={() => void startCleanupScan()}>清理失效源</Button>
+            {isAdmin && (
+              <Button icon={<ApiOutlined />} onClick={() => router.push("/manage/system/proxy")}>网络代理</Button>
+            )}
+            <Button danger loading={cleanupScanning} disabled={!canOperate || siteList.length === 0} onClick={() => void startCleanupScan()}>清理失效源</Button>
           </Space>
         }
       />
@@ -371,7 +375,7 @@ export default function CollectManagePageView() {
         <CollectToolbar
           totalCount={siteList.length}
           selectedCount={selectedSourceIds.length}
-          canWrite={canWrite}
+          canWrite={canOperate}
           batchStateUpdating={batchStateUpdating}
           batchDeleting={batchDeleting}
           deleteConfirmTitle={deleteConfirmTitle}
@@ -396,7 +400,7 @@ export default function CollectManagePageView() {
           <CollectQueueBars
             items={queueBars}
             stoppingQueueId={stoppingQueueId}
-            canWrite={canWrite}
+            canWrite={canOperate}
             onStopQueue={(queueId, sourceIds) => void stopQueue(queueId, sourceIds)}
           />
         ) : null}
@@ -408,8 +412,8 @@ export default function CollectManagePageView() {
               selectedSourceIds={selectedSourceIds.map(String)}
               activeCollectIds={activeCollectIds}
               hiddenDoneIds={[]}
-              canWrite={canWrite}
-              canAddSource={canWrite}
+              canWrite={canOperate}
+              canAddSource={canOperate}
               globalSpiderProxyReady={globalSpiderProxyReady}
               onSelect={handleSelectSource}
               onChangeCollectDuration={changeCollectDuration}
@@ -429,7 +433,7 @@ export default function CollectManagePageView() {
         ) : (
           <div className={styles.emptyCard}>
             <Empty description={loading ? "采集站加载中…" : "暂无采集站"}>
-              {!loading && canWrite ? (
+              {!loading && canOperate ? (
                 <Button type="primary" icon={<PlusOutlined />} onClick={openAddDialog}>新增采集站</Button>
               ) : null}
             </Empty>
@@ -479,6 +483,7 @@ export default function CollectManagePageView() {
         onKeep={() => void categoryConfirm.handleKeep()}
         onClear={() => void categoryConfirm.handleClear()}
       />
-    </div>
+      </div>
+    </ManagePermissionProvider>
   );
 }

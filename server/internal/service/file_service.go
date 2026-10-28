@@ -34,18 +34,24 @@ func (s *FileService) GetPhotoPage(name string, beginTime, endTime time.Time, pa
 	return repository.GetFileInfoPage(tl, name, beginTime, endTime, page)
 }
 
-func (s *FileService) RenameFile(id uint, name string) error {
+func (s *FileService) RenameFile(id uint, name string, operatorID uint, operatorIsAdmin bool) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
 	}
+	if !operatorIsAdmin && f.Uid != int(operatorID) {
+		return fmt.Errorf("权限不足，仅可操作本人上传的素材")
+	}
 	return repository.RenameFileInfo(id, name)
 }
 
-func (s *FileService) RemoveFileById(id uint) error {
+func (s *FileService) RemoveFileById(id uint, operatorID uint, operatorIsAdmin bool) error {
 	f := repository.GetFileInfoById(id)
 	if f.ID == 0 {
 		return fmt.Errorf("图片不存在")
+	}
+	if !operatorIsAdmin && f.Uid != int(operatorID) {
+		return fmt.Errorf("权限不足，仅可操作本人上传的素材")
 	}
 	storagePath := repository.StoragePath(&f)
 	err := os.Remove(storagePath)

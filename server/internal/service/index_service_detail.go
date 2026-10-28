@@ -1,7 +1,7 @@
 package service
-
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sort"
@@ -15,8 +15,8 @@ import (
 	filmrepo "server/internal/repository/film"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 	"server/internal/utils"
-
 	"golang.org/x/sync/singleflight"
 )
 
@@ -71,6 +71,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 			}
 			var cached model.MovieDetailVo
 			if json.Unmarshal([]byte(data), &cached) == nil {
+				if !support.IsCategoryVisible(cached.Cid, cached.Pid) {
+					return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
+				}
 				return cached, nil
 			}
 		}
@@ -84,6 +87,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 				}
 				var cached model.MovieDetailVo
 				if json.Unmarshal([]byte(data), &cached) == nil {
+					if !support.IsCategoryVisible(cached.Cid, cached.Pid) {
+						return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
+					}
 					return cached, nil
 				}
 			}
@@ -101,6 +107,9 @@ func (i *IndexService) GetFilmDetail(id int) (model.MovieDetailVo, error) {
 		if snapshot == nil {
 			storeFilmPlayInfoCache(cacheKey, "{}", 60*time.Second, playGen)
 			return model.MovieDetailVo{}, nil
+		}
+		if !support.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
+			return model.MovieDetailVo{}, errors.New("影片所在分类已下架或停用")
 		}
 		detailStartedAt := time.Now()
 		movieDetail, localUpdateTime := filmsnapshot.GetMovieDetailBySnapshot(*snapshot)

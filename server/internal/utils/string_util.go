@@ -91,10 +91,14 @@ func PasswordEncrypt(password, salt string) string {
 	return hex.EncodeToString(r[:])
 }
 
-// ValidURL 校验http链接是否是符合规范的URL
+// ValidURL 校验http/https链接是否是符合规范的URL
 func ValidURL(s string) bool {
-	_, err := url.ParseRequestURI(s)
-	return err == nil
+	u, err := url.ParseRequestURI(strings.TrimSpace(s))
+	if err != nil {
+		return false
+	}
+	scheme := strings.ToLower(u.Scheme)
+	return (scheme == "http" || scheme == "https") && u.Host != ""
 }
 
 // ContainsAny 判断字符串是否包含切片中的任意一个关键词

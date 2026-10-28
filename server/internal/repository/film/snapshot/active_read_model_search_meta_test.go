@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"server/internal/model"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -143,5 +144,33 @@ func TestLoadFilmSearchMetaIndex_DedupesPlayLines(t *testing.T) {
 	want := []string{"source_b", "source_master"}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("PlaySources=%v", got)
+	}
+}
+
+func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
+	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	support.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	t.Cleanup(func() {
+		support.SetCategoryShowForTest(nil)
+		support.SetCategoryTreeForTest(nil, nil)
+	})
+
+	item1 := utils.FilmSearchItem{Mid: 101, Name: "复仇者联盟"}
+	utils.FillSearchDerivedFields(&item1)
+	item2 := utils.FilmSearchItem{Mid: 102, Name: "复仇者电视剧"}
+	utils.FillSearchDerivedFields(&item2)
+
+	items := []FilmSearchMeta{
+		{Mid: 101, Pid: 1, Cid: 1, Item: item1}, // 电影（可见）
+		{Mid: 102, Pid: 2, Cid: 2, Item: item2}, // 电视剧（已停用）
+	}
+	idx := sealSearchMetaIndex("v_test_hidden", items)
+
+	hits := searchFilmMetas(idx, "复仇者", "relate", 0, 0)
+	if len(hits) != 1 {
+		t.Fatalf("expected 1 hit, got %d hits", len(hits))
+	}
+	if hits[0].mid != 101 {
+		t.Fatalf("expected mid 101, got %d", hits[0].mid)
 	}
 }

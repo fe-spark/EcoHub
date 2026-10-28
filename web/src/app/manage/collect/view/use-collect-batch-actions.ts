@@ -68,7 +68,6 @@ export function useCollectBatchActions(
       const stateLabel = state ? "启用" : "禁用";
       if (sourceIdsToUpdate.length === 0) {
         message.info(`选中采集站已全部${stateLabel}`);
-        setSelectedSourceIds([]);
         return;
       }
 
@@ -83,7 +82,6 @@ export function useCollectBatchActions(
         } else {
           const skippedText = already > 0 ? `，跳过 ${already} 个（已${stateLabel}）` : "";
           message.success(`已${stateLabel} ${sourceIdsToUpdate.length} 个${skippedText}`);
-          setSelectedSourceIds([]);
         }
         await reloadList();
       } finally {

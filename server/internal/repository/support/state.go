@@ -33,9 +33,10 @@ var (
 	mappingState      atomic.Pointer[MappingSnapshot]
 	categoryNameCache      sync.Map
 	categoryStableKeyCache sync.Map
-	idToPid        = make(map[int64]int64)
-	catInitialized = false
-	catMu          sync.RWMutex
+	idToPid         = make(map[int64]int64)
+	categoryShowMap = make(map[int64]bool)
+	catInitialized  = false
+	catMu           sync.RWMutex
 )
 
 func init() {

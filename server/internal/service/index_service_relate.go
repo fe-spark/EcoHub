@@ -13,7 +13,7 @@ import (
 	"server/internal/model/dto"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
-
+	"server/internal/repository/support"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -48,6 +48,20 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 	} else {
 		cacheKey = fmt.Sprintf("%s:v%s:%d:p%d:s%d", config.FilmRelateVOCachePrefix, version, mid, page.Current, page.PageSize)
 	}
+
+	filterVisible := func(list []model.MovieBasicInfo) []model.MovieBasicInfo {
+		if len(list) == 0 {
+			return list
+		}
+		out := make([]model.MovieBasicInfo, 0, len(list))
+		for _, item := range list {
+			if support.IsCategoryVisible(item.Cid, item.Pid) {
+				out = append(out, item)
+			}
+		}
+		return out
+	}
+
 	if db.Rdb != nil {
 		if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 			if data == "[]" {
@@ -55,7 +69,7 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 			}
 			var cached []model.MovieBasicInfo
 			if json.Unmarshal([]byte(data), &cached) == nil {
-				return cached, nil
+				return filterVisible(cached), nil
 			}
 		}
 	}
@@ -68,11 +82,10 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 				}
 				var cached []model.MovieBasicInfo
 				if json.Unmarshal([]byte(data), &cached) == nil {
-					return cached, nil
+					return filterVisible(cached), nil
 				}
 			}
 		}
-
 		snapshotStartedAt := time.Now()
 		snapshot, snapErr := filmsnapshot.GetSnapshotByMid(version, mid)
 		logSlowIndexServiceStep("RelateMovie.snapshot", snapshotStartedAt, "id", mid)
@@ -80,6 +93,12 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 			return nil, snapErr
 		}
 		if snapshot == nil {
+			if db.Rdb != nil {
+				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
+			}
+			return []model.MovieBasicInfo{}, nil
+		}
+		if !support.IsCategoryVisible(snapshot.Cid, snapshot.Pid) {
 			if db.Rdb != nil {
 				_ = db.Rdb.Set(db.Cxt, cacheKey, "[]", 60*time.Second).Err()
 			}
@@ -101,9 +120,15 @@ func (i *IndexService) RelateMovie(mid int64, page *dto.Page, sourceIdOpt ...str
 		if listErr != nil {
 			return nil, listErr
 		}
+		visibleList := make([]model.FilmListSnapshot, 0, len(list))
+		for _, item := range list {
+			if support.IsCategoryVisible(item.Cid, item.Pid) {
+				visibleList = append(visibleList, item)
+			}
+		}
 		logSlowIndexServiceStep("RelateMovie.list", listStartedAt, "id", mid)
 		buildStartedAt := time.Now()
-		result := filmshared.BuildMovieBasicInfosFromSnapshots(list...)
+		result := filmshared.BuildMovieBasicInfosFromSnapshots(visibleList...)
 		logSlowIndexServiceStep("RelateMovie.build", buildStartedAt, "id", mid)
 		logSlowIndexServiceStep("RelateMovie.total", startedAt, "id", mid)
 

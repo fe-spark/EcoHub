@@ -29,7 +29,7 @@ func setupManageConfigDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.Banner{}, &model.MappingRule{}); err != nil {
+	if err := gdb.AutoMigrate(&model.SiteConfigRecord{}, &model.Banner{}, &model.MappingRule{}, &model.TMDBConfigRecord{}, &model.User{}, &model.FileInfo{}); err != nil {
 		t.Fatal(err)
 	}
 	prev := db.Mdb

@@ -125,17 +125,20 @@ func RefreshCategoryCache() {
 	db.Mdb.Find(&all)
 
 	newPidMap := make(map[int64]int64)
+	newShowMap := make(map[int64]bool)
 	ResetCategoryNameCache()
 	ResetCategoryStableKeyCache()
 	for _, c := range all {
 		item := c
 		newPidMap[item.Id] = item.Pid
+		newShowMap[item.Id] = item.Show
 		SetCategoryNameCache(item.Id, item.Name)
 		SetCategoryStableKeyCache(item.Id, item.StableKey)
 	}
 
 	catMu.Lock()
 	idToPid = newPidMap
+	categoryShowMap = newShowMap
 	catInitialized = true
 	catMu.Unlock()
 
@@ -199,10 +202,61 @@ func GetParentId(id int64) int64 {
 	return idToPid[id]
 }
 
+// IsCategoryVisible 判断分类是否处于全站可用状态（自身及所有父级大类均 Show = true）
+func IsCategoryVisible(cid, pid int64) bool {
+	catMu.RLock()
+	if !catInitialized {
+		catMu.RUnlock()
+		RefreshCategoryCache()
+		catMu.RLock()
+	}
+	defer catMu.RUnlock()
+
+	if len(categoryShowMap) == 0 {
+		return true
+	}
+
+	checkID := func(id int64) bool {
+		if id <= 0 {
+			return true
+		}
+		curr := id
+		for range [5]int{} {
+			if show, exists := categoryShowMap[curr]; exists && !show {
+				return false
+			}
+			p, ok := idToPid[curr]
+			if !ok || p == 0 {
+				break
+			}
+			curr = p
+		}
+		return true
+	}
+
+	if cid > 0 && !checkID(cid) {
+		return false
+	}
+	if pid > 0 && !checkID(pid) {
+		return false
+	}
+	return true
+}
+
+// SetCategoryShowForTest 供单元测试注入分类可见性映射
+func SetCategoryShowForTest(showMap map[int64]bool) {
+	catMu.Lock()
+	categoryShowMap = showMap
+	catInitialized = true
+	catMu.Unlock()
+}
+
 // SetCategoryTreeForTest 供单元测试快速注入内存模拟分类树
 func SetCategoryTreeForTest(pidMap map[int64]int64, nameMap map[int64]string) {
 	catMu.Lock()
 	idToPid = pidMap
+	categoryShowMap = make(map[int64]bool)
+	catInitialized = true
 	catMu.Unlock()
 	ResetCategoryNameCache()
 	for id, name := range nameMap {

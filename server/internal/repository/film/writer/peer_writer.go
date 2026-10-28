@@ -303,8 +303,16 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 			}
 		}
 
-		if filmIndex != nil && filmIndex.FirstSourceId != source.Id {
-			filmIndex = nil
+		if filmIndex != nil {
+			if filmIndex.FirstSourceId == source.Id && !support.IsCategoryVisible(filmIndex.Cid, filmIndex.Pid) {
+				mid = 0
+				return nil
+			}
+			if filmIndex.FirstSourceId != source.Id {
+				filmIndex = nil
+				mid = 0
+			}
+		} else {
 			mid = 0
 		}
 
@@ -314,6 +322,10 @@ func saveSinglePeerDetailTx(source *model.FilmSource, detail model.MovieDetail) 
 				return err
 			}
 			if claimedFilm != nil {
+				if !support.IsCategoryVisible(claimedFilm.Cid, claimedFilm.Pid) {
+					mid = 0
+					return nil
+				}
 				mid = claimedMid
 				filmIndex = claimedFilm
 				if err := shared.SaveMovieSourceMappingTx(tx, source.Id, detail.Id, mid); err != nil {

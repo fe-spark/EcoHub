@@ -2,7 +2,6 @@ package service
 
 import (
 	"errors"
-	"server/internal/config"
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
@@ -171,10 +170,13 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 		}
 		u.Role = *req.Role
 	}
-	// 默认超级管理员只锁定角色，状态可以改。
-	if oldUser.ID == config.UserIdInitialVal {
+	// 默认超级管理员锁定角色，且密码仅允许本人修改。
+	if model.IsBuiltinAccount(oldUser.ID, oldUser.UserName) {
 		u.Role = model.UserRoleAdmin
 		roleChanged = false
+		if req.Password != nil && *req.Password != "" && operatorID != oldUser.ID {
+			return errors.New("默认超级管理员密码仅允许本人修改")
+		}
 	}
 	// 如果修改了密码，需要重新加密
 	passwordChanged := false

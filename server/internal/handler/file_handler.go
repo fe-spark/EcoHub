@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"server/internal/config"
+	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/service"
 	"server/internal/utils"
@@ -62,6 +63,16 @@ func (h *FileHandler) Upload(c *gin.Context) {
 
 // RenameFile 重命名素材
 func (h *FileHandler) RenameFile(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
 	var req struct {
 		Id   uint   `json:"id"`
 		Name string `json:"name"`
@@ -79,8 +90,9 @@ func (h *FileHandler) RenameFile(c *gin.Context) {
 		dto.Failed("素材名称不能为空", c)
 		return
 	}
-	if e := service.FileSvc.RenameFile(req.Id, name); e != nil {
-		dto.Failed(fmt.Sprint("重命名失败", e.Error()), c)
+	isAdmin := model.IsAdmin(uc.UserID, uc.Role)
+	if e := service.FileSvc.RenameFile(req.Id, name, uc.UserID, isAdmin); e != nil {
+		dto.Failed(fmt.Sprint("重命名失败: ", e.Error()), c)
 		return
 	}
 	dto.SuccessOnlyMsg("素材名称已更新", c)
@@ -88,6 +100,16 @@ func (h *FileHandler) RenameFile(c *gin.Context) {
 
 // DelFile 删除文件（统一批量/单文件删除）
 func (h *FileHandler) DelFile(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
 	var req struct {
 		Ids []uint `json:"ids"`
 	}
@@ -105,8 +127,9 @@ func (h *FileHandler) DelFile(c *gin.Context) {
 		dto.Failed("操作失败, 未获取到需删除的文件标识信息", c)
 		return
 	}
+	isAdmin := model.IsAdmin(uc.UserID, uc.Role)
 	for _, id := range cleanIds {
-		if e := service.FileSvc.RemoveFileById(id); e != nil {
+		if e := service.FileSvc.RemoveFileById(id, uc.UserID, isAdmin); e != nil {
 			dto.Failed(fmt.Sprint("删除失败: ", e.Error()), c)
 			return
 		}

@@ -12,6 +12,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
 )
 
@@ -76,6 +77,9 @@ func searchFilmMetas(idx *filmSearchMetaIndex, keyword, sortField string, pid, c
 	positions, narrowed := idx.SearchPosts.lookup(q)
 	matches := make([]scoredMetaHit, 0, 64)
 	visit := func(meta *FilmSearchMeta) {
+		if !support.IsCategoryVisible(meta.Cid, meta.Pid) {
+			return
+		}
 		if pid > 0 && meta.Pid != pid {
 			return
 		}

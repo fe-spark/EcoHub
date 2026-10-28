@@ -49,7 +49,7 @@ export default function CollectToolbar(props: CollectToolbarProps) {
             反选
           </Button>
           <Button size="small" disabled={selectedCount === 0} onClick={onClearSelection}>
-            清空
+            清空选择
           </Button>
         </Space>
         <Space size={8} wrap className={styles.toolbarActions}>

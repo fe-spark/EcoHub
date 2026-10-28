@@ -88,20 +88,20 @@ export function resolveMenuKey(pathname: string): string {
   return "/manage";
 }
 
-export function collectAllOpenKeys(items: MenuItem[]): string[] {
-  const openKeys: string[] = [];
+export function resolveParentMenuKeys(items: MenuItem[], targetKey: string): string[] {
   for (const item of items) {
     if (
-      !item ||
-      typeof item !== "object" ||
-      !("children" in item) ||
-      !item.children ||
-      !("key" in item) ||
-      typeof item.key !== "string"
+      item &&
+      typeof item === "object" &&
+      "children" in item &&
+      Array.isArray(item.children) &&
+      "key" in item &&
+      typeof item.key === "string"
     ) {
-      continue;
+      if (item.children.some((child) => child && typeof child === "object" && "key" in child && child.key === targetKey)) {
+        return [item.key];
+      }
     }
-    openKeys.push(item.key);
   }
-  return openKeys;
+  return [];
 }
