@@ -48,3 +48,34 @@ func TestFilmDetailPageAcceptsNumericSerial(t *testing.T) {
 		t.Fatalf("列表中的连载数不符: %+v", page.List)
 	}
 }
+func TestFilmDetailVo_UnmarshalPlayFrom(t *testing.T) {
+	// 1. array playFrom
+	raw1 := []byte(`{"name":"测试","playFrom":["1080zyk","ffm3u8"]}`)
+	var fd1 FilmDetailVo
+	if err := json.Unmarshal(raw1, &fd1); err != nil {
+		t.Fatal(err)
+	}
+	if len(fd1.PlayFrom) != 2 || fd1.PlayFrom[0] != "1080zyk" || fd1.PlayFrom[1] != "ffm3u8" {
+		t.Fatalf("array playFrom parse failed: %+v", fd1.PlayFrom)
+	}
+
+	// 2. string playFrom with $$$
+	raw2 := []byte(`{"name":"测试","playFrom":"1080zyk$$$ffm3u8"}`)
+	var fd2 FilmDetailVo
+	if err := json.Unmarshal(raw2, &fd2); err != nil {
+		t.Fatal(err)
+	}
+	if len(fd2.PlayFrom) != 2 || fd2.PlayFrom[0] != "1080zyk" || fd2.PlayFrom[1] != "ffm3u8" {
+		t.Fatalf("string playFrom parse failed: %+v", fd2.PlayFrom)
+	}
+
+	// 3. alias playForm string
+	raw3 := []byte(`{"name":"测试","playForm":"1080zyk"}`)
+	var fd3 FilmDetailVo
+	if err := json.Unmarshal(raw3, &fd3); err != nil {
+		t.Fatal(err)
+	}
+	if len(fd3.PlayFrom) != 1 || fd3.PlayFrom[0] != "1080zyk" {
+		t.Fatalf("playForm alias parse failed: %+v", fd3.PlayFrom)
+	}
+}

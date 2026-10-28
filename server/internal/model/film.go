@@ -1,6 +1,8 @@
 package model
 
 import (
+	"encoding/json"
+	"strings"
 	"time"
 
 	"server/internal/model/dto"
@@ -400,6 +402,57 @@ type FilmDetailVo struct {
 	Hits               int64    `json:"hits"`                        // 影片热度
 	Content            string   `json:"content"`                     // 内容简介
 }
+func (fd *FilmDetailVo) UnmarshalJSON(data []byte) error {
+	type Alias FilmDetailVo
+	aux := struct {
+		*Alias
+		RawPlayFrom any `json:"playFrom"`
+		RawPlayForm any `json:"playForm"`
+	}{
+		Alias: (*Alias)(fd),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	var parseFrom = func(val any) []string {
+		if val == nil {
+			return nil
+		}
+		switch v := val.(type) {
+		case string:
+			v = strings.TrimSpace(v)
+			if v == "" {
+				return nil
+			}
+			parts := strings.Split(v, "$$$")
+			out := make([]string, 0, len(parts))
+			for _, p := range parts {
+				if trimmed := strings.TrimSpace(p); trimmed != "" {
+					out = append(out, trimmed)
+				}
+			}
+			return out
+		case []any:
+			out := make([]string, 0, len(v))
+			for _, item := range v {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					out = append(out, strings.TrimSpace(s))
+				}
+			}
+			return out
+		case []string:
+			return v
+		}
+		return nil
+	}
+	if fromList := parseFrom(aux.RawPlayFrom); len(fromList) > 0 {
+		fd.PlayFrom = fromList
+	} else if fromList := parseFrom(aux.RawPlayForm); len(fromList) > 0 {
+		fd.PlayFrom = fromList
+	}
+	return nil
+}
+
 
 // PlayLinkVo 多站点播放链接数据列表
 type PlayLinkVo struct {
