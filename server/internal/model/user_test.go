@@ -38,8 +38,8 @@ func TestCheckUserUpdateStatus(t *testing.T) {
 	if msg := CheckUserUpdate(config.UserIdInitialVal, adminRole, config.UserIdInitialVal, "admin", adminRole, enabled, nil, &disabled); msg != "不能禁用当前登录账号" {
 		t.Fatalf("self disable = %q", msg)
 	}
-	if msg := CheckUserUpdate(10001, adminRole, config.UserIdInitialVal, "admin", adminRole, enabled, nil, &disabled); msg != "" {
-		t.Fatalf("another admin should disable builtin admin, got %q", msg)
+	if msg := CheckUserUpdate(10001, adminRole, config.UserIdInitialVal, "admin", adminRole, enabled, nil, &disabled); msg != "默认超级管理员不可被禁用" {
+		t.Fatalf("another admin disabling builtin admin = %q", msg)
 	}
 	if msg := CheckUserUpdate(10002, normalRole, 10002, "editor", normalRole, enabled, &normalRole, &enabled); msg != "" {
 		t.Fatalf("normal user keeping own role and status = %q", msg)

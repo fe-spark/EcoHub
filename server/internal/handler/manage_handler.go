@@ -75,7 +75,7 @@ func (h *ManageHandler) SiteBasicConfig(c *gin.Context) {
 	// 若非超级管理员（如公开未登录接口或访客），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
-	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.ProvideKey = ""
 		cfg.Danmaku.AppID = ""
 		cfg.Danmaku.AppSecret = ""
@@ -127,7 +127,7 @@ func (h *ManageHandler) SiteAccessConfig(c *gin.Context) {
 	// 若非超级管理员（如只读访客账号），清空 ProvideKey 防止敏感密钥泄露
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
-	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.ProvideKey = ""
 	}
 	dto.Success(cfg, "访问控制配置获取成功", c)
@@ -160,7 +160,7 @@ func (h *ManageHandler) SiteDanmakuConfig(c *gin.Context) {
 	}
 	v, ok := c.Get(config.AuthUserClaims)
 	uc, isUser := v.(*utils.UserClaims)
-	if !ok || !isUser || !model.IsAdminRole(uc.Role) {
+	if !ok || !isUser || uc == nil || !model.IsAdmin(uc.UserID, uc.Role) {
 		cfg.AppID = ""
 		cfg.AppSecret = ""
 	}

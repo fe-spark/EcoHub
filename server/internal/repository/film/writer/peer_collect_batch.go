@@ -25,6 +25,7 @@ type peerPageItem struct {
 	linesChanged bool
 	playChanged  bool
 	create       bool
+	disabled     bool
 	owner        int
 }
 
@@ -32,10 +33,9 @@ type peerPageItem struct {
 func filterPeerPageDetails(list []model.MovieDetail) []model.MovieDetail {
 	lastAt := make(map[int64]int, len(list))
 	for i, detail := range list {
-		if detail.Id <= 0 || strings.TrimSpace(detail.Name) == "" || !shared.HasPlayableLinks(detail) {
-			continue
+		if detail.Id > 0 && strings.TrimSpace(detail.Name) != "" && shared.HasPlayableLinks(detail) {
+			lastAt[detail.Id] = i
 		}
-		lastAt[detail.Id] = i
 	}
 	if len(lastAt) == 0 {
 		return nil
@@ -99,10 +99,7 @@ func writePeerPageTx(tx *gorm.DB, source *model.FilmSource, details []model.Movi
 			newMids[items[i].mid] = struct{}{}
 		}
 	}
-	remarkMids := make([]int64, 0, len(items))
-	stampMids := make(map[int64]struct{}, len(items))
-	affected := make([]int64, 0, len(items))
-	notify := make([]int64, 0, len(items))
+	remarkMids, stampMids, affected, notify := make([]int64, 0, len(items)), make(map[int64]struct{}, len(items)), make([]int64, 0, len(items)), make([]int64, 0, len(items))
 	for i := range items {
 		if items[i].mid <= 0 {
 			continue
@@ -185,9 +182,13 @@ type matchKeyMid struct {
 
 func dropForeignFilms(items []peerPageItem, sourceID string) {
 	for i := range items {
-		if items[i].film != nil && items[i].film.FirstSourceId != sourceID {
-			items[i].film = nil
-			items[i].mid = 0
+		if items[i].film == nil {
+			continue
+		}
+		if items[i].film.FirstSourceId == sourceID && !support.IsCategoryVisible(items[i].film.Cid, items[i].film.Pid) {
+			items[i].film, items[i].mid, items[i].disabled = nil, 0, true
+		} else if items[i].film.FirstSourceId != sourceID {
+			items[i].film, items[i].mid = nil, 0
 		}
 	}
 }
@@ -196,15 +197,13 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, sourceID string, items []peerPageItem)
 	keys := make([]string, 0, len(items)*3)
 	seen := make(map[string]struct{})
 	for i := range items {
-		if items[i].film != nil {
+		if items[i].film != nil || items[i].disabled {
 			continue
 		}
 		for _, key := range items[i].keys {
-			if key != "" {
-				if _, ok := seen[key]; !ok {
-					seen[key] = struct{}{}
-					keys = append(keys, key)
-				}
+			if _, ok := seen[key]; !ok && key != "" {
+				seen[key] = struct{}{}
+				keys = append(keys, key)
 			}
 		}
 	}
@@ -223,12 +222,16 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, sourceID string, items []peerPageItem)
 		return err
 	}
 	for i := range items {
-		if items[i].film != nil || len(items[i].keys) == 0 {
+		if items[i].film != nil || items[i].disabled || len(items[i].keys) == 0 {
 			continue
 		}
 		mid := bestMidForKeys(items[i].keys, items[i].keyRank, rows)
 		film, ok := films[mid]
 		if ok && film.FirstSourceId == sourceID {
+			if !support.IsCategoryVisible(film.Cid, film.Pid) {
+				items[i].disabled = true
+				continue
+			}
 			items[i].mid, items[i].film = film.Mid, film
 		}
 	}
@@ -239,12 +242,14 @@ func claimFilmsByMatchKeysTx(tx *gorm.DB, sourceID string, items []peerPageItem)
 func linkSamePageFilms(items []peerPageItem) {
 	ownerByKey := make(map[string]int, len(items)*3)
 	for i := range items {
+		if items[i].disabled {
+			continue
+		}
 		if items[i].film != nil {
 			rememberPageKeys(ownerByKey, items[i].keys, i)
 			continue
 		}
-		best := -1
-		var bestMid int64
+		best, bestMid := -1, int64(0)
 		for _, key := range items[i].keys {
 			owner, ok := ownerByKey[key]
 			if !ok {

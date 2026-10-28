@@ -92,6 +92,9 @@ func CheckUserUpdate(operatorID uint, operatorRole int, targetID uint, targetNam
 		if *nextStatus == 1 && operatorID == targetID {
 			return "不能禁用当前登录账号"
 		}
+		if IsBuiltinAccount(targetID, targetName) && *nextStatus == 1 {
+			return "默认超级管理员不可被禁用"
+		}
 	}
 	return ""
 }

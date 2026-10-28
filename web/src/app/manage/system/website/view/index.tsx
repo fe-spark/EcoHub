@@ -1,6 +1,7 @@
 "use client";
 
 import React, { Suspense, useCallback } from "react";
+import { Alert } from "antd";
 import {
   BellOutlined,
   HeartOutlined,
@@ -39,7 +40,8 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const currentTab = normalizeWebsiteTab(searchParams.get("tab"));
-  const { canWrite } = useManagePermission();
+  const { canWrite, isAdmin } = useManagePermission();
+  const canOperate = canWrite && isAdmin;
 
   const replaceTabQuery = useCallback(
     (tab: WebsiteTab) => {
@@ -56,22 +58,22 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
       case "tip":
         return (
           <div className={styles.tabPaneScrollable}>
-            <TipConfigCard canWrite={canWrite} />
+            <TipConfigCard canWrite={canOperate} />
           </div>
         );
       case "notice":
         return (
           <div className={styles.tabPaneScrollable}>
-            <NoticeConfigCard canWrite={canWrite} />
+            <NoticeConfigCard canWrite={canOperate} />
           </div>
         );
       case "basic":
       default:
         return (
           <div className={styles.tabPaneScrollable}>
-            <BasicConfigCard canWrite={canWrite} />
-            <AccessConfigCard canWrite={canWrite} />
-            <DanmakuConfigCard canWrite={canWrite} />
+            <BasicConfigCard canWrite={canOperate} />
+            <AccessConfigCard canWrite={canOperate} />
+            <DanmakuConfigCard canWrite={canOperate} />
           </div>
         );
     }
@@ -87,6 +89,14 @@ function SiteConfigBody({ embedded = false }: SiteConfigPageViewProps) {
         />
       )}
 
+      {!isAdmin && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前为只读查看模式，修改网站配置与运维选项需超级管理员权限"
+          style={{ marginBottom: 16 }}
+        />
+      )}
       <div className={styles.tabBar} role="tablist" aria-label="网站配置分类">
         {WEBSITE_TABS.map((tab) => {
           const active = currentTab === tab.key;

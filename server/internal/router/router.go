@@ -73,7 +73,7 @@ func SetupRouter() *gin.Engine {
 		sysConfig := manageRoute.Group(`/config`)
 		{
 			sysConfig.GET(`/basic`, handler.ManageHd.SiteBasicConfig)
-			sysConfig.POST(`/basic`, handler.ManageHd.UpdateSiteBasic)
+			sysConfig.POST(`/basic`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteBasic)
 
 			sysConfig.GET(`/access`, handler.ManageHd.SiteAccessConfig)
 			sysConfig.POST(`/access`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteAccess)
@@ -82,10 +82,10 @@ func SetupRouter() *gin.Engine {
 			sysConfig.POST(`/danmaku`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteDanmaku)
 
 			sysConfig.GET(`/tip`, handler.ManageHd.SiteTipConfig)
-			sysConfig.POST(`/tip`, handler.ManageHd.UpdateSiteTip)
+			sysConfig.POST(`/tip`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteTip)
 
 			sysConfig.GET(`/notice`, handler.ManageHd.SiteNoticeConfig)
-			sysConfig.POST(`/notice`, handler.ManageHd.UpdateSiteNotice)
+			sysConfig.POST(`/notice`, middleware.AdminAccess(), handler.ManageHd.UpdateSiteNotice)
 
 			// 配置备份：导出/导入（需管理密码，不含影视库存与账号，仅超级管理员）
 			sysConfig.POST(`/backup/export`, middleware.AdminAccess(), handler.ManageHd.ExportConfigBackup)
@@ -111,15 +111,15 @@ func SetupRouter() *gin.Engine {
 		}
 
 		// 首页轮播管理 (手动排片 + 一键排片 + 草稿刮削)
-		banner := manageRoute.Group(`banner`)
+		banner := manageRoute.Group(`/banner`)
 		{
 			banner.GET(`/list`, handler.ManageHd.BannerList)
-			banner.POST(`/save`, handler.ManageHd.BannerSave)
-			banner.POST(`/delete`, handler.ManageHd.BannerDelete)
-			banner.POST(`/deck`, handler.ManageHd.BannerSaveDeck)
+			banner.POST(`/save`, middleware.AdminAccess(), handler.ManageHd.BannerSave)
+			banner.POST(`/delete`, middleware.AdminAccess(), handler.ManageHd.BannerDelete)
+			banner.POST(`/deck`, middleware.AdminAccess(), handler.ManageHd.BannerSaveDeck)
 			banner.GET(`/quick-config`, handler.ManageHd.BannerQuickConfigGet)
-			banner.POST(`/quick-config`, handler.ManageHd.BannerQuickConfigSave)
-			banner.POST(`/quick-generate`, handler.ManageHd.BannerQuickGenerate)
+			banner.POST(`/quick-config`, middleware.AdminAccess(), handler.ManageHd.BannerQuickConfigSave)
+			banner.POST(`/quick-generate`, middleware.AdminAccess(), handler.ManageHd.BannerQuickGenerate)
 		}
 
 		// 映射规则管理
@@ -127,16 +127,17 @@ func SetupRouter() *gin.Engine {
 		{
 			mapping.GET(`/group/list`, handler.ManageHd.MappingRuleGroups)
 			mapping.GET(`/rule/list`, handler.ManageHd.MappingRuleList)
-			mapping.POST(`/rule/check`, handler.ManageHd.MappingRuleCheck)
-			mapping.POST(`/rule/save`, handler.ManageHd.MappingRuleSave)
-			mapping.POST(`/rule/delete`, handler.ManageHd.MappingRuleDelete)
-			mapping.POST(`/rule/reload`, handler.ManageHd.MappingRuleReload)
+			mapping.POST(`/rule/check`, middleware.AdminAccess(), handler.ManageHd.MappingRuleCheck)
+			mapping.POST(`/rule/save`, middleware.AdminAccess(), handler.ManageHd.MappingRuleSave)
+			mapping.POST(`/rule/delete`, middleware.AdminAccess(), handler.ManageHd.MappingRuleDelete)
+			mapping.POST(`/rule/reload`, middleware.AdminAccess(), handler.ManageHd.MappingRuleReload)
 		}
 
 		// 用户相关
 		userRoute := manageRoute.Group(`/user`)
 		{
 			userRoute.GET(`/info`, handler.UserHd.UserInfo)
+			userRoute.POST(`/profile`, handler.UserHd.UserProfile)
 			userRoute.GET(`/list`, middleware.AdminAccess(), handler.UserHd.UserListPage)
 			userRoute.POST(`/save`, middleware.AdminAccess(), handler.UserHd.UserSave)
 			userRoute.POST(`/delete`, middleware.AdminAccess(), handler.UserHd.UserDelete)
@@ -148,20 +149,20 @@ func SetupRouter() *gin.Engine {
 			collect.GET(`/list`, handler.CollectHd.FilmSourceList)
 			collect.GET(`/progress-stream`, handler.CollectHd.ProgressStream)
 			collect.GET(`/find`, handler.CollectHd.FindFilmSource)
-			collect.POST(`/test`, handler.CollectHd.FilmSourceTest)
-			collect.POST(`/save`, handler.CollectHd.FilmSourceSave)
-			collect.POST(`/state`, handler.CollectHd.FilmSourceBatchChange)
-			collect.POST(`/delete`, handler.CollectHd.FilmSourceDelBatch)
-			collect.POST(`/check/all`, handler.CollectHd.FilmSourceCheckAll)
+			collect.POST(`/test`, middleware.AdminAccess(), handler.CollectHd.FilmSourceTest)
+			collect.POST(`/save`, middleware.AdminAccess(), handler.CollectHd.FilmSourceSave)
+			collect.POST(`/state`, middleware.AdminAccess(), handler.CollectHd.FilmSourceBatchChange)
+			collect.POST(`/delete`, middleware.AdminAccess(), handler.CollectHd.FilmSourceDelBatch)
+			collect.POST(`/check/all`, middleware.AdminAccess(), handler.CollectHd.FilmSourceCheckAll)
 			collect.GET(`/options`, handler.CollectHd.GetNormalFilmSource)
-			collect.POST(`/sort`, handler.CollectHd.FilmSourceSort)
-			collect.POST(`/category/sync`, handler.CollectHd.FilmSourceSyncCategory)
-			collect.POST(`/page-total`, handler.CollectHd.RefreshSitePageTotal)
+			collect.POST(`/sort`, middleware.AdminAccess(), handler.CollectHd.FilmSourceSort)
+			collect.POST(`/category/sync`, middleware.AdminAccess(), handler.CollectHd.FilmSourceSyncCategory)
+			collect.POST(`/page-total`, middleware.AdminAccess(), handler.CollectHd.RefreshSitePageTotal)
 
 			collect.GET(`/record/list`, handler.CollectHd.FailureRecordList)
 			collect.GET(`/record/stream`, handler.CollectHd.RecordStream)
-			collect.POST(`/record/retry`, handler.CollectHd.CollectRecover)
-			collect.POST(`/record/clear`, handler.CollectHd.ClearRecords)
+			collect.POST(`/record/retry`, middleware.AdminAccess(), handler.CollectHd.CollectRecover)
+			collect.POST(`/record/clear`, middleware.AdminAccess(), handler.CollectHd.ClearRecords)
 		}
 
 		// 定时任务相关
@@ -169,16 +170,16 @@ func SetupRouter() *gin.Engine {
 		{
 			collectCron.GET(`/list`, handler.CronHd.FilmCronTaskList)
 			collectCron.GET(`/find`, handler.CronHd.GetFilmCronTask)
-			collectCron.POST(`/save`, handler.CronHd.FilmCronSave)
-			collectCron.POST(`/state`, handler.CronHd.ChangeTaskState)
-			collectCron.POST(`/run`, handler.CronHd.RunFilmCronTask)
+			collectCron.POST(`/save`, middleware.AdminAccess(), handler.CronHd.FilmCronSave)
+			collectCron.POST(`/state`, middleware.AdminAccess(), handler.CronHd.ChangeTaskState)
+			collectCron.POST(`/run`, middleware.AdminAccess(), handler.CronHd.RunFilmCronTask)
 		}
 
 		// spider 数据采集
 		spiderRoute := manageRoute.Group(`/spider`)
 		{
-			spiderRoute.POST(`/start`, handler.SpiderHd.StarSpider)
-			spiderRoute.POST(`/stop`, handler.SpiderHd.StopTask)
+			spiderRoute.POST(`/start`, middleware.AdminAccess(), handler.SpiderHd.StarSpider)
+			spiderRoute.POST(`/stop`, middleware.AdminAccess(), handler.SpiderHd.StopTask)
 			spiderRoute.POST(`/clear`, middleware.AdminAccess(), handler.SpiderHd.ClearAllFilm)
 			spiderRoute.GET(`/clear/progress`, middleware.AdminAccess(), handler.SpiderHd.ResetProgressStream)
 			spiderRoute.GET(`/clear/stats`, handler.SpiderHd.InventoryStats)
@@ -187,14 +188,14 @@ func SetupRouter() *gin.Engine {
 		// filmManage 影视管理
 		filmRoute := manageRoute.Group(`/film`)
 		{
-			filmRoute.POST(`/save`, handler.FilmHd.FilmSave)
-			filmRoute.POST(`/refresh`, handler.FilmHd.FilmRefresh)
+			filmRoute.POST(`/save`, middleware.AdminAccess(), handler.FilmHd.FilmSave)
+			filmRoute.POST(`/refresh`, middleware.AdminAccess(), handler.FilmHd.FilmRefresh)
 			filmRoute.GET(`/search/list`, handler.FilmHd.FilmSearchPage)
 			filmRoute.GET(`/search/options`, handler.FilmHd.FilmSearchOptions)
-			filmRoute.POST(`/delete`, handler.FilmHd.FilmDelete)
+			filmRoute.POST(`/delete`, middleware.AdminAccess(), handler.FilmHd.FilmDelete)
 
 			filmRoute.GET(`/class/tree`, handler.FilmHd.FilmClassTree)
-			filmRoute.POST(`/class/tree`, handler.FilmHd.SaveFilmClassTree)
+			filmRoute.POST(`/class/tree`, middleware.AdminAccess(), handler.FilmHd.SaveFilmClassTree)
 		}
 
 		// TMDB 刮削相关
@@ -204,8 +205,8 @@ func SetupRouter() *gin.Engine {
 			tmdbRoute.POST(`/config`, middleware.AdminAccess(), handler.TMDBHd.UpdateConfig)
 			tmdbRoute.POST(`/config/test`, middleware.AdminAccess(), handler.TMDBHd.TestConfig)
 			tmdbRoute.GET(`/search`, handler.TMDBHd.Search)
-			tmdbRoute.POST(`/scrape`, handler.TMDBHd.Scrape)
-			tmdbRoute.POST(`/apply`, handler.TMDBHd.Apply)
+			tmdbRoute.POST(`/scrape`, middleware.AdminAccess(), handler.TMDBHd.Scrape)
+			tmdbRoute.POST(`/apply`, middleware.AdminAccess(), handler.TMDBHd.Apply)
 			tmdbRoute.GET(`/prefill`, handler.TMDBHd.Prefill)
 		}
 

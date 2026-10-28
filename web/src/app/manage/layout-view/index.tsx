@@ -41,7 +41,7 @@ import SiderVersion from "@/app/manage/components/sider-version";
 import {
   menuItems,
   resolveMenuKey,
-  collectAllOpenKeys,
+  resolveParentMenuKeys,
   themeModeLabels,
 } from "./menu-config";
 import styles from "./index.module.less";
@@ -81,6 +81,14 @@ export default function ManageLayoutView({
   const pathname = usePathname();
   const isFixedTabbedPage = pathname.startsWith("/manage/system/website");
   const selectedKey = resolveMenuKey(pathname);
+  const [openKeys, setOpenKeys] = useState<string[]>(() => resolveParentMenuKeys(menuItems, resolveMenuKey(pathname)));
+
+  useEffect(() => {
+    const parentKeys = resolveParentMenuKeys(menuItems, selectedKey);
+    if (parentKeys.length > 0) {
+      setOpenKeys((prev) => Array.from(new Set([...prev, ...parentKeys])));
+    }
+  }, [selectedKey]);
   const [accessVisible, setAccessVisible] = useState<boolean | null>(null);
 
   const fetchAccessVisible = useCallback(() => {
@@ -132,8 +140,8 @@ export default function ManageLayoutView({
       }
     }
     if (
+      pathname !== "/manage/system" &&
       pathname.startsWith("/manage/system") &&
-      !pathname.startsWith("/manage/system/users") &&
       !pathname.startsWith("/manage/system/website")
     ) {
       if (userInfo && !userInfo.isAdmin) {
@@ -187,7 +195,13 @@ export default function ManageLayoutView({
       .map((item) => {
         if (!item || !("children" in item) || !item.children) return item;
         const filteredChildren = item.children.filter((child) => {
-          if (child && "key" in child && (child.key === "/manage/system/security" || child.key === "/manage/system/logs")) {
+          if (
+            child &&
+            "key" in child &&
+            (child.key === "/manage/system/security" ||
+              child.key === "/manage/system/logs" ||
+              child.key === "/manage/system/users")
+          ) {
             return isAdmin;
           }
           return true;
@@ -195,7 +209,6 @@ export default function ManageLayoutView({
         return { ...item, children: filteredChildren };
       });
   }, [userInfo?.isAdmin, accessVisible]);
-  const openKeys = collectAllOpenKeys(visibleMenuItems);
   const themeMenuItems: MenuProps["items"] = [
     {
       key: "light",
@@ -240,7 +253,12 @@ export default function ManageLayoutView({
           className={styles.menu}
           style={{ borderInlineEnd: 0 }}
           selectedKeys={[selectedKey]}
-          defaultOpenKeys={openKeys}
+          openKeys={collapsed ? [] : openKeys}
+          onOpenChange={(keys) => {
+            if (!collapsed) {
+              setOpenKeys(keys);
+            }
+          }}
           items={visibleMenuItems}
           onClick={onMenuClick}
         />

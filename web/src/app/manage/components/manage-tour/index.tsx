@@ -326,7 +326,8 @@ export default function ManageTour({
     let prev = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${readProgressPhase()}`;
     const check = () => {
       const phase = readProgressPhase();
-      setModalOpen(Boolean(step?.submitClick && queryTarget(step.submitClick)));
+      const hasSubmit = Boolean(step?.submitClick && queryTarget(step.submitClick));
+      setModalOpen(hasSubmit);
       setProgressPhase(phase);
       const next = `${selectors.map((item) => Boolean(queryTarget(item))).join(",")},${phase}`;
       if (next !== prev) {
@@ -356,9 +357,10 @@ export default function ManageTour({
       attributeFilter: ["data-tour-progress"],
     });
     check();
-    return () => obs.disconnect();
+    return () => {
+      obs.disconnect();
+    };
   }, [open, step, submitted]);
-
   useEffect(() => {
     const hold = Boolean(open && needWait && submitted);
     if (hold) {
@@ -385,33 +387,35 @@ export default function ManageTour({
       : (step?.target ?? null);
 
   const currentStep: NonNullable<TourProps["steps"]>[number] = {
-    title: step?.title,
-    placement: watchingProgress && !modalOpen ? "top" : step?.placement,
+    title: modalOpen ? "开始采集" : step?.title,
+    placement: modalOpen ? "bottomRight" : watchingProgress ? "top" : step?.placement,
     target: () => queryTarget(liveTarget),
-    description: watchingProgress
-      ? collectWaitDescription(progressPhase, progressEnded)
-      : step?.description,
+    arrow: { pointAtCenter: true },
+    description: modalOpen
+      ? "确认采集范围后，点击「开始采集」启动多源聚合入库。"
+      : watchingProgress
+        ? collectWaitDescription(progressPhase, progressEnded)
+        : step?.description,
   };
 
   const last = current >= GUIDE_STEPS.length - 1;
 
   return (
     <Tour
-      key={`${pathname}-${current}-${modalOpen ? "modal" : watchingProgress ? "progress" : "page"}-${targetTick}`}
+      key={`${pathname}-${current}-${modalOpen ? "modal" : watchingProgress ? "progress" : "page"}`}
       open={open}
       current={0}
       onClose={closeTour}
       steps={[currentStep]}
-      zIndex={1100}
+      arrow={{ pointAtCenter: true }}
+      zIndex={modalOpen ? 2000 : 1100}
       classNames={{ section: styles.panel }}
       styles={{
-        section: {
-          border: "1px solid var(--ant-color-primary)",
-          boxShadow: "0 8px 24px rgba(0, 0, 0, 0.45)",
-          background: "var(--ant-color-bg-layout)",
-        },
+        root: {
+          "--ant-tooltip-arrow-background-color": "var(--ant-color-bg-layout)",
+        } as React.CSSProperties,
       }}
-      mask={watchingProgress && !modalOpen ? false : { color: "rgba(0,0,0,0.45)" }}
+      mask={watchingProgress || modalOpen ? false : { color: "rgba(0,0,0,0.45)" }}
       actionsRender={() => [
         <Button key="skip" size="small" onClick={closeTour}>
           跳过

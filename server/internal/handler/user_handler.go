@@ -78,6 +78,34 @@ func (h *UserHandler) UserInfo(c *gin.Context) {
 	dto.Success(info, "成功获取用户信息", c)
 }
 
+// UserProfile 当前登录用户修改个人资料（支持修改密码、昵称、头像、性别、邮箱）
+func (h *UserHandler) UserProfile(c *gin.Context) {
+	v, ok := c.Get(config.AuthUserClaims)
+	if !ok {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
+	uc, ok := v.(*utils.UserClaims)
+	if !ok || uc == nil {
+		dto.Failed("鉴权失败，请重新登录", c)
+		return
+	}
+	var req model.UserUpdatePayload
+	if err := c.ShouldBindJSON(&req); err != nil {
+		dto.Failed("参数校验失败!!!", c)
+		return
+	}
+	// 强制设为当前登录人 ID，普通用户不能修改角色与状态
+	req.ID = uc.UserID
+	req.Role = nil
+	req.Status = nil
+	if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
+		dto.Failed(err.Error(), c)
+		return
+	}
+	dto.SuccessOnlyMsg("个人信息更新成功", c)
+}
+
 // UserListPage 用户列表分页
 func (h *UserHandler) UserListPage(c *gin.Context) {
 	paging := dto.GetPageParams(c)

@@ -2,12 +2,13 @@ package service
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
+	"server/internal/config"
 	"server/internal/infra/db"
 	"server/internal/model"
 	"server/internal/repository"
-
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
 	"gorm.io/driver/sqlite"
@@ -146,5 +147,61 @@ func TestUserService_TokenLifecycleOnUpdateAndLogout(t *testing.T) {
 	UserSvc.UserLogout(u.ID)
 	if tok, err := repository.GetUserToken(u.ID); err != nil || tok != "" {
 		t.Fatalf("token should be cleared after logout, got %q err=%v", tok, err)
+	}
+}
+
+func TestUserService_BuiltinAdminPasswordProtection(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	origRdb := db.Rdb
+	origMdb := db.Mdb
+	defer func() {
+		db.Rdb = origRdb
+		db.Mdb = origMdb
+	}()
+	db.Rdb = redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	gdb, _ := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	_ = gdb.AutoMigrate(&model.User{})
+	db.Mdb = gdb
+
+	root := model.User{
+		Model:    gorm.Model{ID: config.UserIdInitialVal},
+		UserName: "admin",
+		Password: "rootpassword",
+		Salt:     "rootsalt",
+		Role:     model.UserRoleAdmin,
+		Status:   0,
+	}
+	gdb.Create(&root)
+
+	newPwd := "hacked123"
+	err = UserSvc.UpdateUser(10001, model.UserRoleAdmin, model.UserUpdatePayload{
+		ID:       config.UserIdInitialVal,
+		Password: &newPwd,
+	})
+	if err == nil || !strings.Contains(err.Error(), "默认超级管理员密码仅允许本人修改") {
+		t.Fatalf("expected error on another admin modifying root password, got: %v", err)
+	}
+
+	err = UserSvc.UpdateUser(config.UserIdInitialVal, model.UserRoleAdmin, model.UserUpdatePayload{
+		ID:       config.UserIdInitialVal,
+		Password: &newPwd,
+	})
+	if err != nil {
+		t.Fatalf("expected root admin self password update to succeed, got: %v", err)
+	}
+
+	var stored model.User
+	if err := gdb.First(&stored, config.UserIdInitialVal).Error; err != nil {
+		t.Fatalf("query updated user: %v", err)
+	}
+	if stored.Password == "rootpassword" || stored.Password == "" {
+		t.Fatalf("password should be updated and hashed, got %q", stored.Password)
+	}
+	if tok, err := repository.GetUserToken(config.UserIdInitialVal); err != nil || tok != "" {
+		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
 	}
 }

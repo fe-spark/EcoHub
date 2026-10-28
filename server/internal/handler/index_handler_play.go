@@ -64,7 +64,7 @@ func (h *IndexHandler) FilmPlayInfo(c *gin.Context) {
 	detail, err := service.IndexSvc.GetFilmDetailWithPreferred(id, preferredSource)
 	logSlowIndexStep("FilmPlayInfo.GetFilmDetail", detailStartedAt, "id", id)
 	if err != nil {
-		dto.Failed("影片详情数据异常", c)
+		dto.Failed(err.Error(), c)
 		return
 	}
 	if detail.Id <= 0 {
