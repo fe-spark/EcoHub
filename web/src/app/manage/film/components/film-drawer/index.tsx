@@ -51,6 +51,7 @@ export default function FilmDrawer({
   const [fetching, setFetching] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [playLines, setPlayLines] = useState<PlayLine[]>([]);
+  const [lineLinksMap, setLineLinksMap] = useState<Record<string, string>>({});
 
   const [pickerOpen, setPickerOpen] = useState(false);
   const [tmdbModalOpen, setTmdbModalOpen] = useState(false);
@@ -111,7 +112,12 @@ export default function FilmDrawer({
       const cat = resolveCategoryFields(filmData, categoryList || allCategoryListRef.current);
       const lines = Array.isArray(filmData.list) ? (filmData.list as PlayLine[]) : [];
       setPlayLines(lines);
-
+      const initialLinks: Record<string, string> = {};
+      lines.forEach((l) => {
+        const k = l.id || l.name;
+        initialLinks[k] = formatEpisodesToPlayLink(l.linkList || []);
+      });
+      setLineLinksMap(initialLinks);
       const targetSourceId = String(filmData.sourceId || filmData.firstSourceId || "");
       const ownerLine =
         lines.find(
@@ -343,9 +349,39 @@ export default function FilmDrawer({
         setSubmitting(false);
         return;
       }
-      if (values.playLink && values.playLink.trim()) {
+      const targetSourceId = String(payload.sourceId || loadedDetailRef.current?.firstSourceId || "");
+      const ownerLines = playLines.filter(
+        (l) =>
+          !targetSourceId ||
+          l.sourceId === targetSourceId ||
+          l.id?.startsWith(targetSourceId) ||
+          l.id === targetSourceId,
+      );
+
+      if (ownerLines.length > 1) {
+        const playFromList: string[] = [];
+        const playLinkList: string[] = [];
+        for (const l of ownerLines) {
+          const k = l.id || l.name;
+          const link =
+            lineLinksMap[k] !== undefined
+              ? lineLinksMap[k]
+              : formatEpisodesToPlayLink(l.linkList || []);
+          if (link && link.trim()) {
+            playFromList.push(l.name || l.id);
+            playLinkList.push(link.trim());
+          }
+        }
+        if (playLinkList.length > 0) {
+          payload.playLink = playLinkList.join("$$$");
+          payload.playFrom = playFromList;
+          payload.playForm = playFromList.join("$$$");
+        }
+      } else if (values.playLink && values.playLink.trim()) {
         payload.playLink = values.playLink.trim();
-        payload.playForm = (playForm || "").trim();
+        const singleForm = (playForm || ownerLines[0]?.name || "默认播放").trim();
+        payload.playFrom = [singleForm];
+        payload.playForm = singleForm;
       }
       const resp = await ApiPost("/manage/film/save", payload);
       if (resp.code === 0) {
@@ -365,6 +401,7 @@ export default function FilmDrawer({
     setTmdbSnapshot(null);
     setLoadedDetail(null);
     setPlayLines([]);
+    setLineLinksMap({});
     loadedDetailRef.current = null;
     setPickerOpen(false);
     setTmdbModalOpen(false);
@@ -463,6 +500,10 @@ export default function FilmDrawer({
                 lines={playLines}
                 filmId={filmId}
                 ownerSourceId={form.getFieldValue("sourceId") || loadedDetail?.sourceId || ""}
+                lineLinks={lineLinksMap}
+                onLineLinkChange={(lineKey, newLink) => {
+                  setLineLinksMap((prev) => ({ ...prev, [lineKey]: newLink }));
+                }}
               />
             </div>
           </Form>

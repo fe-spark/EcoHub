@@ -13,15 +13,31 @@ interface FilmPlaySectionProps {
   lines?: PlayLine[];
   filmId?: string | number | null;
   ownerSourceId?: string;
+  lineLinks?: Record<string, string>;
+  onLineLinkChange?: (lineKey: string, newLink: string) => void;
 }
 
 export default function FilmPlaySection({
   lines = [],
   filmId,
   ownerSourceId = "",
+  lineLinks,
+  onLineLinkChange,
 }: FilmPlaySectionProps) {
   const form = Form.useFormInstance();
   const [activeLineKey, setActiveLineKey] = useState<string>("");
+  const [internalLinks, setInternalLinks] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (lines.length > 0) {
+      const initialMap: Record<string, string> = {};
+      lines.forEach((l) => {
+        const k = l.id || l.name;
+        initialMap[k] = formatEpisodesToPlayLink(l.linkList || []);
+      });
+      setInternalLinks(initialMap);
+    }
+  }, [lines]);
 
   useEffect(() => {
     if (lines.length > 0) {
@@ -48,37 +64,59 @@ export default function FilmPlaySection({
     return lines.find((l) => (l.id || l.name) === activeLineKey) || lines[0];
   }, [lines, activeLineKey]);
 
-  const isOwnerLine = useMemo(() => {
-    if (!ownerSourceId || lines.length <= 1) return true;
-    if (!activeLine) return true;
-    return (
-      activeLine.sourceId === ownerSourceId ||
-      activeLine.id?.startsWith(ownerSourceId) ||
-      activeLine.id === ownerSourceId
-    );
-  }, [activeLine, lines.length, ownerSourceId]);
-
-  const handleCopy = useCallback(
-    (text: string) => {
-      const content =
-        (isOwnerLine ? form?.getFieldValue("playLink") || text : text) || "";
-      if (!content) {
-        message.info("暂无可复制的链接");
-        return;
-      }
-      navigator.clipboard
-        .writeText(content)
-        .then(() => message.success("已复制到剪贴板"))
-        .catch(() => message.error("复制失败"));
+  const isLineOwner = useCallback(
+    (line?: PlayLine | null) => {
+      if (!line) return false;
+      if (!ownerSourceId) return true;
+      return (
+        line.sourceId === ownerSourceId ||
+        line.id === ownerSourceId ||
+        Boolean(line.id?.startsWith(ownerSourceId))
+      );
     },
-    [form, isOwnerLine],
+    [ownerSourceId],
   );
+
+  const isOwnerLine = useMemo(() => {
+    return isLineOwner(activeLine);
+  }, [activeLine, isLineOwner]);
+
+  const currentLineText = useMemo(() => {
+    if (!activeLine) return "";
+    const k = activeLine.id || activeLine.name;
+    if (lineLinks && lineLinks[k] !== undefined) {
+      return lineLinks[k];
+    }
+    if (internalLinks[k] !== undefined) {
+      return internalLinks[k];
+    }
+    return formatEpisodesToPlayLink(activeLine.linkList || []);
+  }, [activeLine, lineLinks, internalLinks]);
+
+  useEffect(() => {
+    if (!activeLine) return;
+    form.setFieldsValue({
+      playLink: currentLineText,
+      playForm: activeLine.name || activeLine.id || "",
+    });
+  }, [activeLineKey, currentLineText, activeLine, form]);
+
+  const handleCopy = useCallback(() => {
+    const content =
+      (isOwnerLine ? form?.getFieldValue("playLink") || currentLineText : currentLineText) || "";
+    if (!content) {
+      message.info("暂无可复制的链接");
+      return;
+    }
+    navigator.clipboard
+      .writeText(content)
+      .then(() => message.success("已复制到剪贴板"))
+      .catch(() => message.error("复制失败"));
+  }, [form, isOwnerLine, currentLineText]);
 
   const tabItems = useMemo(() => {
     return lines.map((l) => {
-      const isOwner =
-        ownerSourceId &&
-        (l.sourceId === ownerSourceId || l.id?.startsWith(ownerSourceId));
+      const isOwner = isLineOwner(l);
       return {
         key: l.id || l.name,
         label: (
@@ -101,13 +139,9 @@ export default function FilmPlaySection({
         ),
       };
     });
-  }, [lines, ownerSourceId]);
+  }, [lines, isLineOwner]);
 
   const episodeCount = activeLine?.linkList?.length || 0;
-  const activeFormattedLink = useMemo(() => {
-    if (!activeLine) return "";
-    return formatEpisodesToPlayLink(activeLine.linkList || []);
-  }, [activeLine]);
 
   return (
     <div className={styles.drawerSectionCard}>
@@ -167,7 +201,7 @@ export default function FilmPlaySection({
           size="small"
           type="link"
           icon={<CopyOutlined />}
-          onClick={() => handleCopy(activeFormattedLink)}
+          onClick={handleCopy}
           style={{ padding: 0 }}
         >
           复制直链
@@ -176,6 +210,7 @@ export default function FilmPlaySection({
 
       {isOwnerLine ? (
         <Form.Item
+          key={activeLineKey}
           name="playLink"
           noStyle
           rules={[{ required: !filmId, message: "请输入播放地址" }]}
@@ -184,12 +219,21 @@ export default function FilmPlaySection({
             rows={5}
             placeholder="格式: 第01集$https://example.com/play/1.m3u8#第02集$https://example.com/play/2.m3u8"
             className={styles.editableTextArea}
+            onChange={(e) => {
+              const val = e.target.value;
+              const k = activeLine?.id || activeLine?.name;
+              if (k) {
+                setInternalLinks((prev) => ({ ...prev, [k]: val }));
+                onLineLinkChange?.(k, val);
+              }
+            }}
           />
         </Form.Item>
       ) : (
         <TextArea
+          key={activeLineKey}
           rows={5}
-          value={activeFormattedLink}
+          value={currentLineText}
           readOnly
           className={styles.readonlyTextArea}
         />
