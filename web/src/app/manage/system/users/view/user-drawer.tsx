@@ -34,9 +34,14 @@ export function UserDrawer({
     if (open) {
       form.resetFields();
       if (editingUser) {
+        const userNameVal =
+          editingUser.userName ??
+          editingUser.username ??
+          editingUser.user_name ??
+          "";
         form.setFieldsValue({
-          userName: editingUser.userName ?? "",
-          nickName: editingUser.nickName ?? "",
+          userName: userNameVal,
+          nickName: editingUser.nickName ?? editingUser.nickname ?? "",
           email: editingUser.email || "",
           gender: editingUser.gender ?? 0,
           role: editingUser.role ?? (editingUser.isAdmin ? 1 : editingUser.isVisitor ? 2 : 0),
@@ -89,11 +94,11 @@ export function UserDrawer({
         </Space>
       }
     >
-      <Form form={form} layout="vertical" preserve={false}>
+      <Form form={form} layout="vertical">
         <Form.Item
           name="userName"
           label="用户名"
-          rules={[{ required: true, message: "请输入用户名" }]}
+          rules={[{ required: !editingUser, message: "请输入用户名" }]}
         >
           <Input
             prefix={<UserOutlined />}

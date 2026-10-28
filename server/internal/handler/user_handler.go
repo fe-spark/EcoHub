@@ -169,15 +169,29 @@ func (h *UserHandler) UserSave(c *gin.Context) {
 	}
 
 	var userID uint
-	if idVal, exists := raw["id"]; exists {
-		switch v := idVal.(type) {
-		case float64:
-			userID = uint(v)
-		case int:
-			userID = uint(v)
+	extractID := func(val any) uint {
+		if val == nil {
+			return 0
 		}
+		switch v := val.(type) {
+		case float64:
+			return uint(v)
+		case int:
+			return uint(v)
+		case int64:
+			return uint(v)
+		case string:
+			if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+				return uint(n)
+			}
+		}
+		return 0
 	}
-
+	if idVal, exists := raw["id"]; exists {
+		userID = extractID(idVal)
+	} else if idVal, exists := raw["ID"]; exists {
+		userID = extractID(idVal)
+	}
 	if userID > 0 {
 		var req model.UserUpdatePayload
 		if err := json.Unmarshal(bodyBytes, &req); err != nil {
