@@ -3,11 +3,13 @@ package handler
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"server/internal/config"
 	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
+	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -94,6 +96,24 @@ func (h *UserHandler) UserProfile(c *gin.Context) {
 	if err := c.ShouldBindJSON(&req); err != nil {
 		dto.Failed("参数校验失败!!!", c)
 		return
+	}
+	// 修改密码前强制校验原密码
+	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		oldUser, err := repository.GetUserById(uc.UserID)
+		if err != nil || oldUser.ID == 0 {
+			dto.Failed("用户不存在", c)
+			return
+		}
+		if oldUser.Password != "" {
+			if req.OldPassword == nil || strings.TrimSpace(*req.OldPassword) == "" {
+				dto.Failed("修改密码必须提供原密码", c)
+				return
+			}
+			if !service.UserSvc.VerifyUserPassword(uc.UserID, strings.TrimSpace(*req.OldPassword)) {
+				dto.Failed("原密码校验失败，请核对后重试", c)
+				return
+			}
+		}
 	}
 	// 强制设为当前登录人 ID，普通用户不能修改角色与状态
 	req.ID = uc.UserID

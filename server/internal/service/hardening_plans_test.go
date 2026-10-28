@@ -18,6 +18,7 @@ import (
 	"server/internal/model"
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func setupTestDBAndRedis(t *testing.T) (*gorm.DB, *miniredis.Miniredis) {
@@ -689,6 +690,18 @@ func TestPlan4_EmptyReadModelFallback(t *testing.T) {
 	news, ok := res["news"].([]model.MovieBasicInfo)
 	if !ok || len(news) != 1 || news[0].Id != 701 {
 		t.Fatalf("expected 1 news item from fallback version, got: %+v", news)
+	}
+
+	// 验证停用分类拦截
+	support.SetCategoryShowForTest(map[int64]bool{1: false})
+	resDisabled, err := IndexSvc.GetFilmClassify(1, &dto.Page{PageSize: 10})
+	support.SetCategoryShowForTest(map[int64]bool{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newsDisabled := resDisabled["news"].([]model.MovieBasicInfo)
+	if len(newsDisabled) != 0 {
+		t.Fatalf("expected 0 news item when category disabled, got: %+v", newsDisabled)
 	}
 }
 

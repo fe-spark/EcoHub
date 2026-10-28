@@ -181,7 +181,11 @@ func (s *UserService) UpdateUser(operatorID uint, operatorRole int, req model.Us
 	// 如果修改了密码，需要重新加密
 	passwordChanged := false
 	if req.Password != nil && *req.Password != "" {
-		u.Salt = oldUser.Salt
+		newSalt, err := utils.GenerateSalt()
+		if err != nil {
+			return err
+		}
+		u.Salt = newSalt
 		u.Password = utils.PasswordEncrypt(*req.Password, u.Salt)
 		passwordChanged = true
 	}

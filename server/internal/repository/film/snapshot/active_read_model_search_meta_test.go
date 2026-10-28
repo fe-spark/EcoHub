@@ -174,3 +174,26 @@ func TestSearchFilmMetas_DisabledCategoryHidden(t *testing.T) {
 		t.Fatalf("expected mid 101, got %d", hits[0].mid)
 	}
 }
+func TestTagMetaMatch_DisabledCategoryHidden(t *testing.T) {
+	support.SetCategoryTreeForTest(map[int64]int64{1: 0, 2: 0}, map[int64]string{1: "电影", 2: "电视剧"})
+	support.SetCategoryShowForTest(map[int64]bool{1: true, 2: false}) // 分类 2 停用
+	t.Cleanup(func() {
+		support.SetCategoryShowForTest(nil)
+		support.SetCategoryTreeForTest(nil, nil)
+	})
+
+	matcher, err := tagMetaMatch("v_test", model.SearchTagsVO{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	visibleMeta := &FilmSearchMeta{Mid: 101, Pid: 1, Cid: 1}
+	disabledMeta := &FilmSearchMeta{Mid: 102, Pid: 2, Cid: 2}
+
+	if !matcher(visibleMeta) {
+		t.Fatal("expected visibleMeta to match")
+	}
+	if matcher(disabledMeta) {
+		t.Fatal("expected disabledMeta to be filtered out")
+	}
+}

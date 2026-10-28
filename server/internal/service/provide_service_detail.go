@@ -11,6 +11,7 @@ import (
 	"server/internal/infra/db"
 	"server/internal/model"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -90,6 +91,9 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 
 	var uncachedMids []int64
 	for _, s := range snapshots {
+		if !support.IsCategoryVisible(s.Cid, s.Pid) {
+			continue
+		}
 		if _, ok := cachedVos[s.Mid]; !ok {
 			uncachedMids = append(uncachedMids, s.Mid)
 		}
@@ -110,6 +114,9 @@ func (p *ProvideService) getVodDetailMids(mids []int64, sourceId string) ([]mode
 		toCacheVo = make(map[int64]model.MovieDetailVo, len(uncachedMids))
 	}
 	for _, s := range snapshots {
+		if !support.IsCategoryVisible(s.Cid, s.Pid) {
+			continue
+		}
 		voPtr, ok := cachedVos[s.Mid]
 		var vo model.MovieDetailVo
 		if ok && voPtr != nil {

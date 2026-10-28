@@ -22,6 +22,7 @@ import (
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 type ProvideService struct{}
@@ -226,6 +227,14 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 	if len([]rune(wd)) > 64 || strings.HasPrefix(wd, "http://") || strings.HasPrefix(wd, "https://") {
 		return 1, 1, 0, []model.FilmList{}, nil
 	}
+
+	pid := int64(t)
+	if pid > 0 && !support.IsCategoryVisible(0, pid) {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
+	if cid > 0 && !support.IsCategoryVisible(cid, pid) {
+		return 1, 1, 0, []model.FilmList{}, nil
+	}
 	version := filmsnapshot.GetActiveReadModelVersion()
 	ruleVersion := repository.GetRuleVersion()
 	categoryVersion := repository.GetCategoryVersion()
@@ -249,7 +258,13 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 			if data, err := db.Rdb.Get(db.Cxt, cacheKey).Result(); err == nil && data != "" {
 				var res tvboxListResult
 				if json.Unmarshal([]byte(data), &res) == nil {
-					return res.Current, res.PageCount, res.Total, res.VodList, nil
+					filteredVodList := make([]model.FilmList, 0, len(res.VodList))
+					for _, item := range res.VodList {
+						if support.IsCategoryVisible(int64(item.TypeID), 0) {
+							filteredVodList = append(filteredVodList, item)
+						}
+					}
+					return res.Current, res.PageCount, res.Total, filteredVodList, nil
 				}
 			}
 		}
@@ -288,6 +303,9 @@ func (p *ProvideService) GetVodList(sourceId string, t int, cid int64, pg int, w
 
 		var vodList []model.FilmList
 		for _, s := range sl {
+			if !support.IsCategoryVisible(s.Cid, s.Pid) {
+				continue
+			}
 			typeID, typeName, err := resolveProvideListedType(s, sourceId)
 			if err != nil {
 				return tvboxListResult{}, err

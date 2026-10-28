@@ -22,6 +22,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 func TestNormalizeMediaURL(t *testing.T) {
@@ -514,6 +515,49 @@ func TestHandleProvide_FullPipeline(t *testing.T) {
 			t.Fatalf("expected code=1 and item 202, got %+v", res)
 		}
 	})
+	// 验证分类停用全链路拦截：当根分类 1 或子分类 10 停用时，详情与列表均应阻断
+	t.Run("ProvideVodCategoryVisibilityInterception", func(t *testing.T) {
+		support.SetCategoryShowForTest(map[int64]bool{1: false, 10: true})
+		defer support.SetCategoryShowForTest(map[int64]bool{})
+
+		// 验证 ids 详情拉取被拦截（返回空列表）
+		w := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(w)
+		c.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=detail&ids=201,202", nil)
+		c.Request.Host = "127.0.0.1:8080"
+		ProvideHd.HandleProvide(c)
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d", w.Code)
+		}
+		var resDetail struct {
+			Code int                `json:"code"`
+			List []model.FilmDetail `json:"list"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resDetail); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(resDetail.List) != 0 {
+			t.Fatalf("expected 0 details when category disabled, got %d", len(resDetail.List))
+		}
+
+		// 验证分类列表拉取被拦截
+		w2 := httptest.NewRecorder()
+		c2, _ := gin.CreateTestContext(w2)
+		c2.Request, _ = http.NewRequest(http.MethodGet, "/api/provide/vod?ac=list&t=1", nil)
+		c2.Request.Host = "127.0.0.1:8080"
+		ProvideHd.HandleProvide(c2)
+		var resList struct {
+			Code int              `json:"code"`
+			List []model.FilmList `json:"list"`
+		}
+		if err := json.Unmarshal(w2.Body.Bytes(), &resList); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if len(resList.List) != 0 {
+			t.Fatalf("expected 0 list items when category disabled, got %d", len(resList.List))
+		}
+	})
+
 
 	// F. 验证 GET /api/provide/vod?wd=星际 (关键字搜索)
 	t.Run("ProvideVodKeywordSearch", func(t *testing.T) {

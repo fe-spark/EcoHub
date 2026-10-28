@@ -126,6 +126,7 @@ func UpdateUserInfo(u model.User) error {
 	}
 	if u.Password != "" {
 		updates["password"] = u.Password
+		updates["salt"] = u.Salt
 	}
 	return db.Mdb.Model(&model.User{}).Where("id = ?", u.ID).Updates(updates).Error
 }
