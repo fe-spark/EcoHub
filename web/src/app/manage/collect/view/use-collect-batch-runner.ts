@@ -66,6 +66,12 @@ export function useCollectBatchRunner(
     }
     setBatchOpen(false);
     clearSelection?.();
+    siteList.forEach((site) => {
+      message.destroy(`collect-stop-site-${site.id}`);
+      if (site.progress?.queueId) {
+        message.destroy(`collect-stop-queue-${site.progress.queueId}`);
+      }
+    });
     const idSet = new Set(ids);
     const queueId = newClientCollectQueueId();
     setSiteList((current) =>
@@ -107,7 +113,7 @@ export function useCollectBatchRunner(
     clearStarting(new Set(ids.filter((id) => !started.has(id))));
     window.dispatchEvent(new Event(COLLECT_BATCH_FAILED_EVENT));
     await reloadList();
-  }, [batchRows, batchTime, clearSelection, clearStarting, message, reloadList, setSiteList]);
+  }, [batchRows, batchTime, clearSelection, clearStarting, message, reloadList, setSiteList, siteList]);
 
   return {
     batchOpen,

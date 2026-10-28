@@ -130,6 +130,11 @@ export function useCollectQueueBars(
         void reloadList();
         return;
       }
+      message.info({
+        key: msgKey,
+        content: "采集已终止",
+        duration: 2,
+      });
     } catch {
       message.error({
         key: msgKey,
