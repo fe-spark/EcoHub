@@ -134,9 +134,12 @@ export default function CollectManagePageView() {
           content: text,
           duration: 2,
         });
+        setSiteList((current) =>
+          current.map((item) => (item.id === id ? { ...item, progress: null } : item)),
+        );
       }
     },
-    [message],
+    [message, setSiteList],
   );
 
   const handleProgressStream = useCollectProgressStream(
