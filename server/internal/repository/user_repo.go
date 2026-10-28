@@ -67,7 +67,7 @@ func ensureBuiltinUser(userName, password, email, nickName string, role int) (bo
 		Password: utils.PasswordEncrypt(password, salt),
 		Salt:     salt,
 		Email:    email,
-		Gender:   2,
+		Gender:   0,
 		NickName: nickName,
 		Avatar:   "empty",
 		Status:   0,

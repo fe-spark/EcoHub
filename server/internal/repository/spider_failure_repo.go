@@ -197,7 +197,6 @@ func DeleteFailureRecordsByOriginIdTx(tx *gorm.DB, originId string) error {
 	return tx.Where("origin_id = ?", originId).Delete(&model.FailureRecord{}).Error
 }
 
-// NormalizeFailureRecordsRetryCount 纠正历史数据中状态与重试次数不一致的记录
 // TruncateRecordTable 截断 record table
 func TruncateRecordTable() error {
 	if db.Mdb == nil {

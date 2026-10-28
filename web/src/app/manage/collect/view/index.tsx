@@ -41,7 +41,7 @@ export default function CollectManagePageView() {
   const router = useRouter();
   const { message } = useAppMessage();
   const { canWrite, isAdmin } = useManagePermission();
-  const canOperate = canWrite && isAdmin;
+  const canOperate = canWrite;
   const [siteList, setSiteList] = useState<FilmSource[]>([]);
   const [loading, setLoading] = useState(false);
   const mountedRef = useRef(false);

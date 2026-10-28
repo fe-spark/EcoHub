@@ -198,23 +198,6 @@ func sourceMappedCategoryIDs(sourceID string) map[int64]struct{} {
 // InitMainCategories 启动时刷新映射引擎与分类缓存
 func InitMainCategories() {
 	fmt.Println("[Init] 正在初始化分类表与缓存...")
-	ensureCategoryIndexes()
 	MarkCategoryChanged()
 	fmt.Println("[Init] 分类缓存初始化完成。")
-}
-
-func ensureCategoryIndexes() {
-	db.Mdb.AutoMigrate(&model.Category{}, &model.CategoryMapping{}, &model.SourceCategory{})
-	// 旧库用 (pid, name) 唯一索引把各站同名分类挤成一行。同名可以各自存在。
-	if db.Mdb.Migrator().HasIndex(&model.Category{}, "uidx_pid_name") {
-		db.Mdb.Migrator().DropIndex(&model.Category{}, "uidx_pid_name")
-	}
-	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_type")
-	db.Mdb.Migrator().CreateIndex(&model.CategoryMapping{}, "idx_source_version")
-	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_parent_sort")
-	// 旧库曾把 source_type_id 做成单列唯一索引，多主站常见 type_id 会冲突；启动时重建为复合唯一。
-	if db.Mdb.Migrator().HasIndex(&model.SourceCategory{}, "idx_source_type_id") {
-		db.Mdb.Migrator().DropIndex(&model.SourceCategory{}, "idx_source_type_id")
-	}
-	db.Mdb.Migrator().CreateIndex(&model.SourceCategory{}, "idx_source_type_id")
 }

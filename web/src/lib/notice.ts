@@ -2,8 +2,6 @@ export const DEFAULT_NOTICE_TITLE = "站点公告";
 export const MAX_NOTICE_TITLE_LEN = 64;
 export const MAX_NOTICE_CONTENT_LEN = 2048;
 export const MAX_NOTICE_APP_VERSION_LEN = 128;
-/** @deprecated 保持兼容性常量 */
-export const MAX_NOTICE_VERSION_LEN = 128;
 
 export interface NoticeConfig {
   enabled: boolean;
