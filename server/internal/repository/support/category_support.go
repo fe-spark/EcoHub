@@ -202,16 +202,8 @@ func GetParentId(id int64) int64 {
 	return idToPid[id]
 }
 
-// IsCategoryVisible 判断分类是否处于全站可用状态（自身及所有父级大类均 Show = true）
-func IsCategoryVisible(cid, pid int64) bool {
-	catMu.RLock()
-	if !catInitialized {
-		catMu.RUnlock()
-		RefreshCategoryCache()
-		catMu.RLock()
-	}
-	defer catMu.RUnlock()
-
+// isCategoryVisibleLocked 判断分类是否可用，调用方必须持有 catMu 锁
+func isCategoryVisibleLocked(cid, pid int64) bool {
 	if len(categoryShowMap) == 0 {
 		return true
 	}
@@ -241,6 +233,41 @@ func IsCategoryVisible(cid, pid int64) bool {
 		return false
 	}
 	return true
+}
+
+// IsCategoryVisible 判断分类是否处于全站可用状态（自身及所有父级大类均 Show = true）
+func IsCategoryVisible(cid, pid int64) bool {
+	catMu.RLock()
+	if !catInitialized {
+		catMu.RUnlock()
+		RefreshCategoryCache()
+		catMu.RLock()
+	}
+	defer catMu.RUnlock()
+
+	return isCategoryVisibleLocked(cid, pid)
+}
+
+// GetDisabledCategoryIDs 返回所有当前不可见（自身或父级停用）的分类 ID 集合
+func GetDisabledCategoryIDs() []int64 {
+	catMu.RLock()
+	if !catInitialized {
+		catMu.RUnlock()
+		RefreshCategoryCache()
+		catMu.RLock()
+	}
+	defer catMu.RUnlock()
+
+	if len(categoryShowMap) == 0 {
+		return nil
+	}
+	var disabled []int64
+	for id := range categoryShowMap {
+		if !isCategoryVisibleLocked(id, 0) {
+			disabled = append(disabled, id)
+		}
+	}
+	return disabled
 }
 
 // SetCategoryShowForTest 供单元测试注入分类可见性映射

@@ -137,14 +137,15 @@ func (User) TableName() string {
 }
 
 type UserUpdatePayload struct {
-	ID       uint    `json:"id"`
-	Password *string `json:"password"`
-	Email    *string `json:"email"`
-	Gender   *int    `json:"gender"`
-	NickName *string `json:"nickName"`
-	Avatar   *string `json:"avatar"`
-	Status   *int    `json:"status"`
-	Role     *int    `json:"role"`
+	ID          uint    `json:"id"`
+	Password    *string `json:"password"`
+	OldPassword *string `json:"oldPassword,omitempty"`
+	Email       *string `json:"email"`
+	Gender      *int    `json:"gender"`
+	NickName    *string `json:"nickName"`
+	Avatar      *string `json:"avatar"`
+	Status      *int    `json:"status"`
+	Role        *int    `json:"role"`
 }
 
 // UserInfoVo 用户信息返回对象

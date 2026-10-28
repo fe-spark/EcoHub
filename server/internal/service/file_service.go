@@ -44,6 +44,19 @@ func (s *FileService) RenameFile(id uint, name string, operatorID uint, operator
 	}
 	return repository.RenameFileInfo(id, name)
 }
+func (s *FileService) ValidateFilesRemovable(ids []uint, operatorID uint, operatorIsAdmin bool) error {
+	for _, id := range ids {
+		f := repository.GetFileInfoById(id)
+		if f.ID == 0 {
+			return fmt.Errorf("素材 ID %d 不存在", id)
+		}
+		if !operatorIsAdmin && f.Uid != int(operatorID) {
+			return fmt.Errorf("权限不足，仅可操作本人上传的素材")
+		}
+	}
+	return nil
+}
+
 
 func (s *FileService) RemoveFileById(id uint, operatorID uint, operatorIsAdmin bool) error {
 	f := repository.GetFileInfoById(id)

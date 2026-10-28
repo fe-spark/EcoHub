@@ -128,6 +128,10 @@ func (h *FileHandler) DelFile(c *gin.Context) {
 		return
 	}
 	isAdmin := model.IsAdmin(uc.UserID, uc.Role)
+	if err := service.FileSvc.ValidateFilesRemovable(cleanIds, uc.UserID, isAdmin); err != nil {
+		dto.Failed(fmt.Sprint("操作失败: ", err.Error()), c)
+		return
+	}
 	for _, id := range cleanIds {
 		if e := service.FileSvc.RemoveFileById(id, uc.UserID, isAdmin); e != nil {
 			dto.Failed(fmt.Sprint("删除失败: ", e.Error()), c)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"server/internal/config"
@@ -194,6 +195,45 @@ func TestUserHandler_UserProfile(t *testing.T) {
 	if updated.NickName != "NewNick" {
 		t.Fatalf("expected NewNick, got %s", updated.NickName)
 	}
+
+	// 2. 存在旧密码时，未传 oldPassword 应被拦截
+	newerPwd := "newerpwd456"
+	payloadNoOld, _ := json.Marshal(model.UserUpdatePayload{Password: &newerPwd})
+	cNoOld, wNoOld := testContext(http.MethodPost, "/api/manage/user/profile")
+	cNoOld.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10005, Role: model.UserRoleNormal})
+	cNoOld.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/profile", bytes.NewReader(payloadNoOld))
+	cNoOld.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserProfile(cNoOld)
+	respNoOld := decodeResponse(t, wNoOld)
+	if respNoOld.Code != dto.FAILED || !strings.Contains(respNoOld.Msg, "必须提供原密码") {
+		t.Fatalf("expected failure on missing old password, got code=%d msg=%s", respNoOld.Code, respNoOld.Msg)
+	}
+
+	// 3. 传入错误的 oldPassword 应被拦截
+	wrongOld := "wrongpassword"
+	payloadWrongOld, _ := json.Marshal(model.UserUpdatePayload{Password: &newerPwd, OldPassword: &wrongOld})
+	cWrong, wWrong := testContext(http.MethodPost, "/api/manage/user/profile")
+	cWrong.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10005, Role: model.UserRoleNormal})
+	cWrong.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/profile", bytes.NewReader(payloadWrongOld))
+	cWrong.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserProfile(cWrong)
+	respWrong := decodeResponse(t, wWrong)
+	if respWrong.Code != dto.FAILED || !strings.Contains(respWrong.Msg, "原密码校验失败") {
+		t.Fatalf("expected failure on wrong old password, got code=%d msg=%s", respWrong.Code, respWrong.Msg)
+	}
+
+	// 4. 传入正确的 oldPassword 成功更新
+	correctOld := "newpassword123"
+	payloadCorrect, _ := json.Marshal(model.UserUpdatePayload{Password: &newerPwd, OldPassword: &correctOld})
+	cCorrect, wCorrect := testContext(http.MethodPost, "/api/manage/user/profile")
+	cCorrect.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10005, Role: model.UserRoleNormal})
+	cCorrect.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/profile", bytes.NewReader(payloadCorrect))
+	cCorrect.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserProfile(cCorrect)
+	respCorrect := decodeResponse(t, wCorrect)
+	if respCorrect.Code != dto.SUCCESS {
+		t.Fatalf("expected success on correct old password, got code=%d msg=%s", respCorrect.Code, respCorrect.Msg)
+	}
 }
 
 func TestFileHandler_OwnershipEnforcement(t *testing.T) {
@@ -247,5 +287,23 @@ func TestFileHandler_OwnershipEnforcement(t *testing.T) {
 	resp4 := decodeResponse(t, w4)
 	if resp4.Code != dto.SUCCESS {
 		t.Fatalf("expected SUCCESS on admin delete, got %d msg=%s", resp4.Code, resp4.Msg)
+	}
+	// 验证批量删除原子预检：混入无权删除的文件时整批拒绝，本人文件不被删除
+	fileOwn := model.FileInfo{Model: gorm.Model{ID: 101}, Uid: 10001, Name: "OwnFile"}
+	fileOther := model.FileInfo{Model: gorm.Model{ID: 102}, Uid: 10002, Name: "OtherFile"}
+	db.Mdb.Create(&fileOwn)
+	db.Mdb.Create(&fileOther)
+
+	cBatch, wBatch := testJSONContext(http.MethodPost, "/api/manage/file/delete", `{"ids":[101, 102]}`)
+	cBatch.Set(config.AuthUserClaims, &utils.UserClaims{UserID: 10001, Role: model.UserRoleNormal})
+	FileHd.DelFile(cBatch)
+	respBatch := decodeResponse(t, wBatch)
+	if respBatch.Code != dto.FAILED {
+		t.Fatalf("expected FAILED on batch with unauthorized item, got %d", respBatch.Code)
+	}
+	// 验证 101 未被删除
+	var checkOwn model.FileInfo
+	if err := db.Mdb.First(&checkOwn, 101).Error; err != nil {
+		t.Fatalf("expected file 101 to remain intact after batch failure, got err: %v", err)
 	}
 }

@@ -15,8 +15,8 @@ import (
 	"server/internal/repository"
 	filmquery "server/internal/repository/film/query"
 	"server/internal/repository/film/shared"
+	"server/internal/repository/support"
 	"server/internal/utils"
-
 	"golang.org/x/sync/singleflight"
 )
 
@@ -42,6 +42,16 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		return []model.FilmListSnapshot{}, nil
 	}
 
+	if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}, nil
+	}
+	if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
+		page.Total = 0
+		page.PageCount = 1
+		return []model.FilmListSnapshot{}, nil
+	}
 	keywordOnly := keyword != "" && recentHours == 0 && st.Plot == "" && st.Area == "" && st.Language == "" && st.Year == ""
 	if keywordOnly {
 		snaps, err := memoryKeywordSnapshots(version, st.SourceId, keyword, st.Sort, st.Pid, st.Cid, page)
@@ -99,6 +109,9 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		}
 
 		query := applySourceMembership(liveFilmQuery(), st.SourceId)
+		if disabledCatIDs := support.GetDisabledCategoryIDs(); len(disabledCatIDs) > 0 {
+			query = query.Where("cid NOT IN ? AND pid NOT IN ?", disabledCatIDs, disabledCatIDs)
+		}
 		if st.SourceId != "" {
 			if st.Cid > 0 {
 				query = filmquery.ApplySourceTypeMatchIDs(query, st.SourceId, "cid", repository.PublicSourceTypeIDs(st.SourceId, "cid", st.Cid))
@@ -139,7 +152,13 @@ func ListProvideSnapshotsReadModel(version string, st model.SearchTagsVO, keywor
 		if findErr != nil {
 			return nil, findErr
 		}
-
+		filteredSnapshots := make([]model.FilmListSnapshot, 0, len(snapshots))
+		for _, s := range snapshots {
+			if support.IsCategoryVisible(s.Cid, s.Pid) {
+				filteredSnapshots = append(filteredSnapshots, s)
+			}
+		}
+		snapshots = filteredSnapshots
 		item := searchCacheItem{
 			Total:     calcTotal,
 			PageCount: calcPageCount,

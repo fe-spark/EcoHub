@@ -14,6 +14,12 @@ import (
 
 // tagPageFromIndex 分类筛选在内存索引上计数并取一页。只按主键回表取当前页。
 func tagPageFromIndex(version string, st model.SearchTagsVO, page *dto.Page) (tagSearchCacheItem, error) {
+	if st.Cid > 0 && !support.IsCategoryVisible(st.Cid, st.Pid) {
+		return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+	}
+	if st.Pid > 0 && !support.IsCategoryVisible(0, st.Pid) {
+		return tagSearchCacheItem{Total: 0, PageCount: 1, Snapshots: []model.FilmListSnapshot{}}, nil
+	}
 	idx, err := loadFilmSearchMetaIndex(version)
 	if err != nil {
 		return tagSearchCacheItem{}, err
@@ -65,6 +71,9 @@ func tagMetaMatch(version string, st model.SearchTagsVO) (func(*FilmSearchMeta) 
 	}
 	return func(item *FilmSearchMeta) bool {
 		if item == nil {
+			return false
+		}
+		if !support.IsCategoryVisible(item.Cid, item.Pid) {
 			return false
 		}
 		if sourceID != "" {

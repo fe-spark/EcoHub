@@ -201,6 +201,12 @@ func TestUserService_BuiltinAdminPasswordProtection(t *testing.T) {
 	if stored.Password == "rootpassword" || stored.Password == "" {
 		t.Fatalf("password should be updated and hashed, got %q", stored.Password)
 	}
+	if stored.Salt == "rootsalt" || stored.Salt == "" {
+		t.Fatalf("salt should be refreshed on password update, got %q", stored.Salt)
+	}
+	if !UserSvc.VerifyUserPassword(config.UserIdInitialVal, newPwd) {
+		t.Fatalf("new password should be verified successfully")
+	}
 	if tok, err := repository.GetUserToken(config.UserIdInitialVal); err != nil || tok != "" {
 		t.Fatalf("token should be cleared after password change, got %q err=%v", tok, err)
 	}

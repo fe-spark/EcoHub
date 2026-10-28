@@ -13,6 +13,7 @@ import (
 	"server/internal/repository"
 	filmshared "server/internal/repository/film/shared"
 	filmsnapshot "server/internal/repository/film/snapshot"
+	"server/internal/repository/support"
 )
 
 // GetCategoryInfo 获取活跃大类信息 (动态结构版)
@@ -116,6 +117,13 @@ func (i *IndexService) GetFilmsByTags(st model.SearchTagsVO, page *dto.Page) ([]
 
 // GetFilmClassify 通过Pid返回当前所属分类下的首页展示数据
 func (i *IndexService) GetFilmClassify(pid int64, page *dto.Page, sourceIdOpt ...string) (map[string]any, error) {
+	if pid > 0 && !support.IsCategoryVisible(0, pid) {
+		return map[string]any{
+			"news":   []model.MovieBasicInfo{},
+			"top":    []model.MovieBasicInfo{},
+			"recent": []model.MovieBasicInfo{},
+		}, nil
+	}
 	var sourceId string
 	if len(sourceIdOpt) > 0 {
 		sourceId = strings.TrimSpace(sourceIdOpt[0])
