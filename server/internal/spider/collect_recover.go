@@ -18,6 +18,7 @@ import (
 	"server/internal/model"
 	"server/internal/repository"
 	filmrepo "server/internal/repository/film"
+	filmsnapshot "server/internal/repository/film/snapshot"
 	"server/internal/spider/fetcher"
 	"server/internal/spider/progress"
 	"server/internal/spider/scheduler"
@@ -276,6 +277,7 @@ var (
 	errFailureRecoverNoSource = errors.New("采集站不存在，不能重试")
 	errFailureRecoverDisabled = errors.New("采集站已停用，不能重试")
 	errFailureRecoverBusy     = errors.New("采集站正在采集，请稍后再试")
+	errFailureRecoverIndexing = errors.New("检索索引构建中，请稍后再试")
 	errFailureRecoverRunning  = errors.New("正在重试中")
 )
 
@@ -287,12 +289,16 @@ type FailureRecoverOutcome struct {
 	Busy     int
 	Disabled int
 	NotFound int
+	Indexing int
 }
 
 func (o FailureRecoverOutcome) skippedReasonDesc() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 4)
 	if o.Disabled > 0 {
 		parts = append(parts, fmt.Sprintf("采集站已停用 %d 条", o.Disabled))
+	}
+	if o.Indexing > 0 {
+		parts = append(parts, fmt.Sprintf("检索索引构建中 %d 条", o.Indexing))
 	}
 	if o.Busy > 0 {
 		parts = append(parts, fmt.Sprintf("采集站正在采集中 %d 条", o.Busy))
@@ -300,7 +306,7 @@ func (o FailureRecoverOutcome) skippedReasonDesc() string {
 	if o.NotFound > 0 {
 		parts = append(parts, fmt.Sprintf("采集站不存在 %d 条", o.NotFound))
 	}
-	other := o.Skipped - (o.Disabled + o.Busy + o.NotFound)
+	other := o.Skipped - (o.Disabled + o.Busy + o.NotFound + o.Indexing)
 	if other > 0 && len(parts) > 0 {
 		parts = append(parts, fmt.Sprintf("其他 %d 条", other))
 	}
@@ -308,6 +314,8 @@ func (o FailureRecoverOutcome) skippedReasonDesc() string {
 		switch {
 		case o.Disabled == o.Skipped:
 			return "采集站已停用"
+		case o.Indexing == o.Skipped:
+			return "检索索引构建中"
 		case o.Busy == o.Skipped:
 			return "采集站正在采集中"
 		case o.NotFound == o.Skipped:
@@ -364,6 +372,9 @@ func AcceptFailureRecover(fr *model.FailureRecord) error {
 	if !source.State {
 		return errFailureRecoverDisabled
 	}
+	if filmsnapshot.IsSearchIndexRebuilding() {
+		return errFailureRecoverIndexing
+	}
 	if failureRecoverBlocked(source.Id) {
 		return errFailureRecoverBusy
 	}
@@ -396,6 +407,11 @@ func EnqueuePendingFailureRecovers() (FailureRecoverOutcome, error) {
 			out.Queued++
 		case errors.Is(err, errFailureRecoverRunning):
 			out.Already++
+		case errors.Is(err, errFailureRecoverIndexing):
+			out.Skipped++
+			out.Indexing++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 检索索引构建中",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
 		case errors.Is(err, errFailureRecoverBusy):
 			out.Skipped++
 			out.Busy++

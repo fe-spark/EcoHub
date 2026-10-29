@@ -280,7 +280,9 @@ func finalizeStreamPublish(takeMIDs func() []int64, warmupHome ...bool) error {
 	if takeMIDs != nil {
 		mids = takeMIDs()
 	}
-	filmsnapshot.ResealSearchIndexMids(mids)
+	if len(mids) > 0 {
+		go filmsnapshot.ResealSearchIndexMids(mids)
+	}
 	filmcache.ClearTVBoxConfigCache()
 	shouldWarmup := len(warmupHome) == 0 || warmupHome[0]
 	if shouldWarmup {
