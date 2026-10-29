@@ -8,6 +8,7 @@ import (
 	"server/internal/config"
 	"server/internal/infra/syslog"
 	"server/internal/model"
+	"server/internal/spider/progress"
 )
 
 // failureRecoverLane 合并同一采集站上的手动重试。
@@ -84,6 +85,10 @@ func failureRecoverLaneBusy(sourceID string) bool {
 // 本站重试队列已经在跑时返回 false，后来的记录要加入同一条队列。
 func failureRecoverBlocked(sourceID string) bool {
 	if failureRecoverLaneBusy(sourceID) {
+		return false
+	}
+	if snap, ok := progress.Snapshot(sourceID); ok && progress.IsTerminalStatus(snap.Status) && !progress.IsTaskRunning(sourceID) {
+		releaseCollectSourceIDs(sourceID)
 		return false
 	}
 	return isOccupiedCollectSource(sourceID)

@@ -194,12 +194,27 @@ func isOccupiedCollectSource(sourceID string) bool {
 	if !ok {
 		return false
 	}
-	if occTime, hasTime := collectingTimes[sourceID]; hasTime && time.Since(occTime) > 30*time.Second {
-		if !hasActiveBatchOccupyLocked(sourceID) && !progress.IsTaskRunning(sourceID) && !progress.IsStarting(sourceID) && !failureRecoverLaneBusy(sourceID) {
+	// 真实活跃校验：
+	// 1. 如果站点在 progress 中已处于终态（完成/失败/停止），且无活跃批次持有锁、无在途任务、无重试车道，说明采集已结束，必须立即释放残留占用
+	// 2. 如果占用已超过 3 秒，且无任何活跃批次、运行任务、排队启动进度或重试车道，亦属孤立占用锁，立即释放
+	hasActiveBatch := hasActiveBatchOccupyLocked(sourceID)
+	isLive := progress.IsTaskRunning(sourceID)
+	isLaneBusy := failureRecoverLaneBusy(sourceID)
+	if !hasActiveBatch && !isLive && !isLaneBusy {
+		snap, hasSnap := progress.Snapshot(sourceID)
+		if hasSnap && progress.IsTerminalStatus(snap.Status) {
 			delete(collectingSources, sourceID)
 			delete(collectingTimes, sourceID)
-			log.Printf("[Spider] 自动释放站点 %s 孤立的过期采集占用锁 (占用时长: %s)", sourceID, time.Since(occTime).Round(time.Second))
+			log.Printf("[Spider] 检测到站点 %s 已进入终态(%s)但残留占用锁，已即时释放", sourceID, snap.Status)
 			return false
+		}
+		if !progress.IsStarting(sourceID) {
+			if occTime, hasTime := collectingTimes[sourceID]; !hasTime || time.Since(occTime) > 3*time.Second {
+				delete(collectingSources, sourceID)
+				delete(collectingTimes, sourceID)
+				log.Printf("[Spider] 自动释放站点 %s 孤立的过期采集占用锁", sourceID)
+				return false
+			}
 		}
 	}
 	return true
@@ -364,10 +379,11 @@ func (b *collectBatchContext) releaseSourceOccupy(id string) {
 	tok, hasTok := b.occupyTokens[id]
 	delete(b.occupyTokens, id)
 	b.mu.Unlock()
-	if !hasTok {
-		return
+	if hasTok && tok > 0 {
+		releaseCollectTokens(map[string]uint64{id: tok})
+	} else {
+		releaseCollectSourceIDs(id)
 	}
-	releaseCollectTokens(map[string]uint64{id: tok})
 }
 
 // ownsOccupy 当前占用令牌仍是本批次抢到的那一个。停止后被新采集重新占用时为 false。
