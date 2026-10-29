@@ -148,11 +148,28 @@ export function useCollectQueueBars(
   }, [sites, tourHoldProgress, message, searchIndex, setSiteList]);
 
   const stopQueue = async (queueId: string, sourceIds: string[]) => {
+    const runningIds = sourceIds.filter((id) => {
+      const site = sites.find((s) => s.id === id);
+      return site?.progress && !isTerminalCollectStatus(site.progress.status);
+    });
+    const msgKey = queueId ? `collect-queue-notice-${queueId}` : undefined;
+
+    if (runningIds.length === 0) {
+      if (msgKey) {
+        message.info({
+          key: msgKey,
+          content: "采集已终止",
+          duration: 2,
+        });
+      }
+      setStoppingQueueId(null);
+      return;
+    }
+
     setStoppingQueueId(queueId);
     if (queueId) {
       stoppingQueuesRef.current.set(queueId, sourceIds);
     }
-    const msgKey = queueId ? `collect-queue-notice-${queueId}` : undefined;
     if (msgKey) {
       message.loading({
         key: msgKey,
@@ -160,10 +177,10 @@ export function useCollectQueueBars(
         duration: 0,
       });
     }
-    const idSet = new Set(sourceIds);
+    const runningIdSet = new Set(runningIds);
     setSiteList((current) =>
       current.map((item) =>
-        idSet.has(item.id)
+        runningIdSet.has(item.id)
           ? { ...item, progress: progressAsStopping(item.progress, item.id, item.name) }
           : item,
       ),
@@ -187,7 +204,7 @@ export function useCollectQueueBars(
         void reloadList();
         return;
       }
-      // API 请求成功后保持 loading，待所有站点在后台完全退出由 useEffect 统一提示
+      void reloadList();
     } catch {
       if (queueId) {
         stoppingQueuesRef.current.delete(queueId);

@@ -114,12 +114,22 @@ export function useCollectCardActions({
         content: "正在停止...",
         duration: 0,
       });
-      const resp = await ApiPost("/manage/spider/stop", { ids: [id] });
-      if (resp.code !== 0) {
+      try {
+        const resp = await ApiPost("/manage/spider/stop", { ids: [id] });
+        if (resp.code !== 0) {
+          stoppingSiteIdsRef.current.delete(id);
+          message.error({
+            key: `collect-stop-site-${id}`,
+            content: resp.msg || "终止任务失败",
+            duration: 2,
+          });
+          void getCollectList();
+        }
+      } catch {
         stoppingSiteIdsRef.current.delete(id);
         message.error({
           key: `collect-stop-site-${id}`,
-          content: resp.msg || "终止任务失败",
+          content: "终止任务失败",
           duration: 2,
         });
         void getCollectList();
