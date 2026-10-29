@@ -205,14 +205,14 @@ func TruncateRecordTable() error {
 	return support.TruncateTable(db.Mdb, model.TableFailureRecord)
 }
 
-// PruneExpiredFailureRecords 物理修剪超过保留期的终态失败记录（status 为 success 或 failed 且创建超过 retention）
+// PruneExpiredFailureRecords 物理修剪终态失败记录：即时清理全部成功记录，并清理创建超过保留期的最终失败记录。
 func PruneExpiredFailureRecords(retention time.Duration) int64 {
 	if db.Mdb == nil {
 		return 0
 	}
 	cutoff := time.Now().Add(-retention)
-	res := db.Mdb.Where("status IN ? AND created_at < ?",
-		[]int{model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed}, cutoff).
+	res := db.Mdb.Where("status = ? OR (status = ? AND created_at < ?)",
+		model.FailureRecordStatusSuccess, model.FailureRecordStatusFailed, cutoff).
 		Delete(&model.FailureRecord{})
 	if res.Error != nil {
 		log.Printf("[FailureRecord] 修剪历史失败流水失败: %v", res.Error)

@@ -14,7 +14,7 @@ const (
 	TaskModelRetryCollect  = 1 // 重试待处理的失败记录
 	TaskModelOrphanClean   = 2 // 清理片库冗余和孤儿数据
 	TaskModelLogClean      = 3 // 清理过期运行日志
-	TaskModelFailureClean  = 4 // 清理超过保留期的成功和最终失败记录
+	TaskModelFailureClean  = 4 // 清理已成功记录及超过 7 天的失败记录
 )
 
 // 采集触发方式常量。

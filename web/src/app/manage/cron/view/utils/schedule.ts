@@ -41,7 +41,7 @@ export function getTaskActionText(model: number) {
     case 3:
       return "清理过期运行日志";
     case 4:
-      return "清理超过 7 天的成功和最终失败记录";
+      return "清理已成功记录及超过 7 天的失败记录";
     default:
       return "计划任务";
   }

@@ -324,7 +324,7 @@ func executeFailureRecordCleanTask(ft model.FilmCollectTask) {
 	startedAt := time.Now()
 	remark := ft.Remark
 	if strings.TrimSpace(remark) == "" {
-		remark = "清理超过 7 天的成功和最终失败记录"
+		remark = "清理已成功记录及超过 7 天的失败记录"
 	}
 	pruned := repository.PruneExpiredFailureRecords(failureRecordRetention)
 	log.Printf("定时任务完成: %s，清理 %d 条，耗时 %s", remark, pruned, time.Since(startedAt))

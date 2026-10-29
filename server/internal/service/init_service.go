@@ -220,6 +220,12 @@ func (s *InitService) ensureDefaultTasks() ([]model.FilmCollectTask, error) {
 
 	for _, dt := range defaultFilmTasks() {
 		if existingModels[dt.Model] {
+			if dt.Model == model.TaskModelFailureClean {
+				if t, err := repository.GetFilmTaskById(model.TaskIDFailureClean); err == nil && t.Remark == "清理超过 7 天的成功和最终失败记录" {
+					t.Remark = dt.Remark
+					_ = repository.UpdateFilmTask(t)
+				}
+			}
 			continue
 		}
 		if err := repository.SaveFilmTask(dt); err != nil {
@@ -285,9 +291,8 @@ func defaultFilmTasks() []model.FilmCollectTask {
 
 	failureCleanTask := model.FilmCollectTask{
 		Id: model.TaskIDFailureClean, Time: 0, Spec: "0 30 3 * * *",
-		Model: model.TaskModelFailureClean, State: true, Remark: "清理超过 7 天的成功和最终失败记录",
+		Model: model.TaskModelFailureClean, State: true, Remark: "清理已成功记录及超过 7 天的失败记录",
 	}
-
 
 	return []model.FilmCollectTask{task, recoverTask, orphanTask, logCleanTask, failureCleanTask}
 }
