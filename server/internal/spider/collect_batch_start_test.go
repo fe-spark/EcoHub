@@ -112,3 +112,40 @@ func TestIsOccupiedCollectSource_SelfHealsStaleOccupy(t *testing.T) {
 		t.Fatal("expected stale occupy to be deleted from collectingSources")
 	}
 }
+
+func TestBatchCollect_ReleasesOccupyAfterFinished(t *testing.T) {
+	prev := db.Mdb
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.CategoryMapping{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	src := model.FilmSource{Id: "test-finish-src", Name: "测试站", Uri: "http://example.invalid", State: true}
+	if err := gdb.Create(&src).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := gdb.Create(&model.CategoryMapping{SourceId: src.Id, SourceTypeId: 1, CategoryId: 1}).Error; err != nil {
+		t.Fatal(err)
+	}
+	defer releaseCollectSourceIDs(src.Id)
+
+	claimed, res := PrepareBatchCollectStart([]string{src.Id})
+	if len(claimed) != 1 {
+		t.Fatalf("claimed = %+v, skipped = %+v", claimed, res.Skipped)
+	}
+	if !isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should be occupied after PrepareBatchCollectStart")
+	}
+
+	BatchCollectPrepared(model.CollectTriggerManual, 24, claimed)
+
+	if isOccupiedCollectSource(src.Id) {
+		t.Fatal("source should NOT be occupied after BatchCollectPrepared finishes")
+	}
+}

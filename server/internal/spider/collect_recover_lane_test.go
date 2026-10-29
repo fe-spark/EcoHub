@@ -8,7 +8,7 @@ import (
 
 	"server/internal/infra/db"
 	"server/internal/model"
-
+	"server/internal/spider/progress"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
@@ -295,5 +295,30 @@ func TestEnqueuePendingFailureRecovers_Breakdown(t *testing.T) {
 	wantMsg := "已加入重试 1 条，跳过 3 条（采集站已停用 1 条、采集站正在采集中 1 条、采集站不存在 1 条）"
 	if gotMsg := out.Message(); gotMsg != wantMsg {
 		t.Errorf("Message() = %q, want %q", gotMsg, wantMsg)
+	}
+}
+
+func TestFailureRecoverBlocked_TerminalStatusNotBlocked(t *testing.T) {
+	const sourceID = "test-terminal-recover"
+	defer releaseCollectSourceIDs(sourceID)
+
+	// 模拟之前有占用锁残留（且未超过 30 秒）
+	collectingSourcesMu.Lock()
+	collectingSources[sourceID] = 1234
+	collectingTimes[sourceID] = time.Now()
+	collectingSourcesMu.Unlock()
+
+	// 模拟站点已完成（StatusDone），无活跃任务
+	progress.Ensure(sourceID, "测试站")
+	progress.Update(sourceID, func(cur *model.CollectProgress) {
+		cur.Status = progress.StatusDone
+	})
+
+	if failureRecoverBlocked(sourceID) {
+		t.Fatal("站点已处于 StatusDone 终态且无任务运行，不应判定为采集中")
+	}
+
+	if isOccupiedCollectSource(sourceID) {
+		t.Fatal("站点进入终态后，残留的占用锁应已被释放")
 	}
 }
