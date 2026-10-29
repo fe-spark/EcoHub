@@ -180,8 +180,8 @@ func handleCollectWithStopVersion(id string, h int, runVersion *uint64, isStanda
 		}
 		if batchCtx != nil {
 			batchCtx.markSourceFinished(*s)
-			if !isStandalone && isPreferredCollectSource(s.Id) {
-				if err := batchCtx.finalizePrimarySource(s.Id); err != nil && originalErr == nil {
+			if !isStandalone && isPreferredCollectSource(s.Id) && originalErr == nil && !progress.IsStopped(s.Id) && !progress.IsStopping(s.Id) {
+				if err := batchCtx.finalizePrimarySource(s.Id); err != nil {
 					retErr = err
 				}
 			}

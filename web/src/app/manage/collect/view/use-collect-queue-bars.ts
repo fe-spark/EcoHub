@@ -86,6 +86,11 @@ export function useCollectQueueBars(
         }
       }
     } else {
+      for (const item of next) {
+        if (item.view.stoppingCount > 0 && !stoppingQueuesRef.current.has(item.queueId)) {
+          stoppingQueuesRef.current.set(item.queueId, item.sourceIds);
+        }
+      }
       // 检查正在手动终止的队列：必须该队列下的所有站点均达到终态，才触发「采集已终止」
       if (stoppingQueuesRef.current.size > 0) {
         for (const [qId, sIds] of Array.from(stoppingQueuesRef.current.entries())) {
