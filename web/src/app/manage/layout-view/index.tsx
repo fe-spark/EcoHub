@@ -354,7 +354,11 @@ export default function ManageLayoutView({
                 <div className={styles.userTrigger}>
                   <Space size="small">
                     <Avatar
-                      src={userInfo.avatar === "empty" ? null : userInfo.avatar}
+                      src={
+                        userInfo.avatar?.trim() && userInfo.avatar !== "empty"
+                          ? userInfo.avatar.trim()
+                          : null
+                      }
                       icon={<UserOutlined />}
                       style={{ backgroundColor: "#1890ff" }}
                     />

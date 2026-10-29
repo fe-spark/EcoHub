@@ -333,8 +333,10 @@ export default function PlayPageView({
       )}
       <div className={styles.bgWrapper}>
         {/* 播放页背景图来自动态视频资源，当前不走 next/image 优化链路 */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={currentFilm.picture} className={styles.bgPoster} alt="background" />
+        {currentFilm.picture ? (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img src={currentFilm.picture} className={styles.bgPoster} alt="background" />
+        ) : null}
         <div className={styles.mask} />
       </div>
 
