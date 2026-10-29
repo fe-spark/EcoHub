@@ -35,8 +35,13 @@ func ResealSearchIndexMids(mids []int64) {
 		log.Printf("[ActiveReadModel] 检索索引增量读取失败 mids=%d err=%v", len(mids), err)
 		return
 	}
-	newItems := patchSearchMetas(cur.Items, upsertMap, drop)
-	idx := sealSearchMetaIndex(version, newItems)
+	var idx *filmSearchMetaIndex
+	if len(drop) == 0 {
+		idx = updateSearchMetaIndexIncremental(cur, version, upsertMap)
+	} else {
+		newItems := patchSearchMetas(cur.Items, upsertMap, drop)
+		idx = sealSearchMetaIndex(version, newItems)
+	}
 	activeFilmSearchMetas.Store(idx)
 	log.Printf("[ActiveReadModel] 检索索引按变更封口 mids=%d total=%d cost=%s",
 		len(mids), len(idx.Items), time.Since(started).Round(time.Millisecond))

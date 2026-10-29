@@ -395,6 +395,7 @@ func (h *CollectHandler) CollectRecover(c *gin.Context) {
 			"busy":     out.Busy,
 			"disabled": out.Disabled,
 			"notFound": out.NotFound,
+			"indexing": out.Indexing,
 		}, out.Message(), c)
 		return
 	}

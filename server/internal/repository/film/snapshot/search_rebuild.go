@@ -108,6 +108,13 @@ func RequestActiveFilmSearchIndexRebuild() {
 	searchRebuild.mu.Unlock()
 }
 
+// IsSearchIndexRebuilding 检索索引是否正在全量重建中。
+func IsSearchIndexRebuilding() bool {
+	searchRebuild.mu.Lock()
+	defer searchRebuild.mu.Unlock()
+	return searchRebuild.running
+}
+
 func startSearchRebuild() {
 	searchRebuild.mu.Lock()
 	searchRebuild.timer = nil

@@ -44,6 +44,7 @@ func TestFailureRecoverOutcome_Message(t *testing.T) {
 		{FailureRecoverOutcome{Skipped: 4, Disabled: 4}, "4 条未开始：采集站已停用"},
 		{FailureRecoverOutcome{Skipped: 4, Busy: 4}, "4 条未开始：采集站正在采集中"},
 		{FailureRecoverOutcome{Skipped: 4, NotFound: 4}, "4 条未开始：采集站不存在"},
+		{FailureRecoverOutcome{Skipped: 4, Indexing: 4}, "4 条未开始：检索索引构建中"},
 		{FailureRecoverOutcome{Skipped: 4, Disabled: 2, Busy: 2}, "4 条未开始：采集站已停用 2 条、采集站正在采集中 2 条"},
 		{FailureRecoverOutcome{Queued: 4, Skipped: 1}, "已加入重试 4 条，跳过 1 条"},
 		{FailureRecoverOutcome{Queued: 2, Skipped: 2, Disabled: 2}, "已加入重试 2 条，跳过 2 条（采集站已停用）"},

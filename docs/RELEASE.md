@@ -16,3 +16,7 @@
   - 终态站点即时解除占用：当站点在进度状态中已进入 `StatusDone`、`StatusStopped` 或 `StatusFailed` 终态且无任务运行，系统在检查重试阻断（`failureRecoverBlocked`）与占用查询（`isOccupiedCollectSource`）时即刻自动清除残留占用锁，零延迟消除假占用；
   - `releaseSourceOccupy` 完善兜底释放：当批次占用令牌丢失或不匹配时，自动降级按站点 ID 强制释放 `collectingSources`，杜绝单站采集完成退出后内存占用锁残留；
   - 站点 ID 统一修剪空白字符，采集队列 ID 分配异常时增加安全回滚释放。
+- **解除检索索引对采集发布与任务执行的阻塞，精确区分采集中与索引构建中**：
+  - 检索索引发布解耦：`finalizeStreamPublish` 将 `ResealSearchIndexMids` 转为异步执行，采集写流与站点生命周期在毫秒级内完成收尾并释放锁，不再被数十万大库的倒排重算阻塞；
+  - 倒排增量优化：`updateSearchMetaIndexIncremental` 改为仅对变更影片增量 patch 倒排（`cloneAndPatchSearchPostings`），彻底消除 60 万+ 库量下耗时 50 秒的伪增量全量倒排重构；
+  - 精确状态反馈：若系统确实处于全量检索索引构建中，重试与调度逻辑精确反馈「检索索引构建中」，杜绝与「采集中」混淆。

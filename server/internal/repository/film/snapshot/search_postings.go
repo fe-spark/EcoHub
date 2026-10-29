@@ -67,6 +67,27 @@ func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	return posts
 }
 
+func cloneAndPatchSearchPostings(cur *searchPostings, items []FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
+	if cur == nil || len(cur.runes) == 0 {
+		return buildSearchPostings(items)
+	}
+	posts := &searchPostings{
+		runes: make(map[rune][]int32, len(cur.runes)+256),
+		ascii: make(map[string][]int32, len(cur.ascii)+256),
+	}
+	for r, list := range cur.runes {
+		posts.runes[r] = append([]int32(nil), list...)
+	}
+	for s, list := range cur.ascii {
+		posts.ascii[s] = append([]int32(nil), list...)
+	}
+	for mid, meta := range upsertMap {
+		if pos, ok := posMap[mid]; ok {
+			appendSingleItemPostings(posts, int32(pos), &meta)
+		}
+	}
+	return posts
+}
 func addAsciiPostings(dst map[string][]int32, pos int32, raw string) {
 	raw = strings.ToLower(strings.TrimSpace(raw))
 	if raw == "" {
