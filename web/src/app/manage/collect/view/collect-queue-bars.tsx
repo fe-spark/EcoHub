@@ -208,7 +208,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                   cancelText="取消"
                   okButtonProps={{
                     danger: true,
-                    loading: stoppingQueueId === item.queueId,
+                    loading: stoppingQueueId === item.queueId || isStopping,
                   }}
                 >
                   <Button
@@ -216,7 +216,7 @@ export default function CollectQueueBars(props: CollectQueueBarsProps) {
                     size="small"
                     aria-label="终止"
                     icon={<CloseOutlined />}
-                    loading={stoppingQueueId === item.queueId}
+                    loading={stoppingQueueId === item.queueId || isStopping}
                     disabled={!canWrite}
                     className={styles.queueCloseBtn}
                   />

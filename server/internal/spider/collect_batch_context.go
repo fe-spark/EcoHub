@@ -239,9 +239,15 @@ func (b *collectBatchContext) addAffectedMIDs(s *model.FilmSource, h int, mids [
 		return
 	}
 	b.mu.Lock()
+	const maxTrackedMIDs = 1500
 	for _, mid := range mids {
 		if mid > 0 {
-			b.masterAffectedMIDs[mid] = struct{}{}
+			if len(b.masterAffectedMIDs) < maxTrackedMIDs {
+				b.masterAffectedMIDs[mid] = struct{}{}
+			} else {
+				b.masterAffectedMIDs[int64(maxTrackedMIDs+1)] = struct{}{}
+				break
+			}
 		}
 	}
 	sourceID := s.Id

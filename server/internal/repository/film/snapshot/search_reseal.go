@@ -19,9 +19,10 @@ func ResealSearchIndexMids(mids []int64) {
 	activeFilmSearchMetasMu.Lock()
 	cur := activeFilmSearchMetas.Load()
 	version := currentSearchIndexVersion()
-	if cur == nil || cur.Version == "" || (version != "" && cur.Version != version) {
+	const maxIncrementalMids = 1000
+	if cur == nil || cur.Version == "" || (version != "" && cur.Version != version) || len(mids) > maxIncrementalMids {
 		activeFilmSearchMetasMu.Unlock()
-		log.Printf("[ActiveReadModel] 检索索引没有可增量的副本，改为全量重建 mids=%d", len(mids))
+		log.Printf("[ActiveReadModel] 变更影片数量(%d)过多或无增量副本，触发全量重建并广播进度", len(mids))
 		RequestActiveFilmSearchIndexRebuild()
 		return
 	}

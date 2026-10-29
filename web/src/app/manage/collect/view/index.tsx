@@ -30,7 +30,7 @@ import { useCollectSourceForm } from "./use-collect-source-form";
 import { useCollectCardActions } from "./use-collect-card-actions";
 import { isTerminalCollectStatus, newClientCollectQueueId } from "./collect-queue";
 import {
-  isActiveCollectStatus,
+  isCollectBusyStatus,
   type CollectListItemResponse,
   type FilmSource,
   normalizeSource,
@@ -253,7 +253,7 @@ export default function CollectManagePageView() {
   }, [cleanupSort, fetchProxyStatus, getCollectList]);
 
   const activeCollectIds = useMemo(
-    () => siteList.filter((item) => isActiveCollectStatus(item.progress?.status)).map((item) => item.id),
+    () => siteList.filter((item) => isCollectBusyStatus(item.progress?.status)).map((item) => item.id),
     [siteList],
   );
 

@@ -51,13 +51,22 @@ func loadPlaySources(mids []int64) (map[int64][]string, error) {
 		Mid      int64
 		SourceId string `gorm:"column:source_id"`
 	}
+	const batchSize = 500
 	var rows []row
-	if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
-		Select("mid, source_id").
-		Where("line_kind = ?", "play").
-		Where("mid IN ?", mids).
-		Scan(&rows).Error; err != nil {
-		return nil, err
+	for i := 0; i < len(mids); i += batchSize {
+		end := i + batchSize
+		if end > len(mids) {
+			end = len(mids)
+		}
+		var chunk []row
+		if err := db.Mdb.Model(&model.FilmSourcePlaylist{}).
+			Select("mid, source_id").
+			Where("line_kind = ?", "play").
+			Where("mid IN ?", mids[i:end]).
+			Scan(&chunk).Error; err != nil {
+			return nil, err
+		}
+		rows = append(rows, chunk...)
 	}
 	out := make(map[int64][]string)
 	for _, r := range rows {

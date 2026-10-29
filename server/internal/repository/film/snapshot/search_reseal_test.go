@@ -85,3 +85,63 @@ func TestResealSearchIndexMidsDoesNotFullScan(t *testing.T) {
 		t.Fatalf("reseal result = %+v", idx.Items)
 	}
 }
+
+func TestResealSearchIndexMids_TriggersRebuildWhenTooManyMids(t *testing.T) {
+	setupSnapshotRepoTestDB(t)
+	if err := SetActiveSnapshotVersion("v-too-many"); err != nil {
+		t.Fatal(err)
+	}
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-too-many", []FilmSearchMeta{{Mid: 1}}))
+
+	var scanned atomic.Bool
+	prevScan := scanActiveFilmSearchIndex
+	prevDebounce := searchRebuildDebounce
+	scanActiveFilmSearchIndex = func(uint64) error {
+		scanned.Store(true)
+		return nil
+	}
+	searchRebuildDebounce = 10 * time.Millisecond
+	t.Cleanup(func() {
+		searchRebuild.mu.Lock()
+		if searchRebuild.timer != nil {
+			searchRebuild.timer.Stop()
+			searchRebuild.timer = nil
+		}
+		searchRebuild.gen = 0
+		searchRebuild.running = false
+		searchRebuild.mu.Unlock()
+		scanActiveFilmSearchIndex = prevScan
+		searchRebuildDebounce = prevDebounce
+	})
+
+	manyMids := make([]int64, 1005)
+	for i := range manyMids {
+		manyMids[i] = int64(i + 1)
+	}
+	ResealSearchIndexMids(manyMids)
+	time.Sleep(40 * time.Millisecond)
+	if !scanned.Load() {
+		t.Fatal("expected full-scan rebuild triggered when mids > 1000")
+	}
+}
+
+func TestLoadPlaySources_ChunksLargeMids(t *testing.T) {
+	gdb := setupSnapshotRepoTestDB(t)
+	// 插入一个播放源测试行
+	gdb.Create(&model.FilmSourcePlaylist{
+		Mid:      12,
+		SourceId: "src-chunk",
+		LineKind: "play",
+	})
+	largeMids := make([]int64, 1200)
+	for i := range largeMids {
+		largeMids[i] = int64(i + 1)
+	}
+	plays, err := loadPlaySources(largeMids)
+	if err != nil {
+		t.Fatalf("loadPlaySources with 1200 mids failed: %v", err)
+	}
+	if len(plays[12]) != 1 || plays[12][0] != "src-chunk" {
+		t.Fatalf("expected play source for mid 12, got: %+v", plays[12])
+	}
+}
