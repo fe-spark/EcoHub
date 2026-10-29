@@ -78,9 +78,10 @@ export default function FilmBasicSection({
 
   const isCustomMode = watchedFollowPosterSource === false;
   const posterSource = String(loadedDetail?.picture || (!isCustomMode ? watchedPicture : "") || "").trim();
-  const currentPreview = isCustomMode
-    ? watchedPicture || loadedDetail?.customPicture || loadedDetail?.picture
-    : loadedDetail?.picture || watchedPicture;
+  const currentPreview =
+    (isCustomMode
+      ? watchedPicture || loadedDetail?.customPicture || loadedDetail?.picture
+      : loadedDetail?.picture || watchedPicture) || FALLBACK_IMG;
 
   const handleCustomSwitch = (checked: boolean) => {
     form.setFieldValue("followPosterSource", !checked);

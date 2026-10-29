@@ -189,7 +189,11 @@ export default function UsersPageView({ embedded = false }: UsersPageViewProps) 
       render: (text: string, record: any) => (
         <div className={styles.userCell}>
           <Avatar
-            src={record.avatar && record.avatar !== "empty" ? record.avatar : null}
+            src={
+              record.avatar?.trim() && record.avatar !== "empty"
+                ? record.avatar.trim()
+                : null
+            }
             icon={<UserOutlined />}
             style={{ backgroundColor: record.isAdmin ? "#f5222d" : "#1677ff" }}
           />
