@@ -3,7 +3,6 @@ package spider
 import (
 	"fmt"
 	"testing"
-	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -97,14 +96,16 @@ func TestIsOccupiedCollectSource_SelfHealsStaleOccupy(t *testing.T) {
 	const sourceID = "stale-occupy-test"
 	collectingSourcesMu.Lock()
 	collectingSources[sourceID] = 999
-	collectingTimes[sourceID] = time.Now().Add(-35 * time.Second)
 	collectingSourcesMu.Unlock()
 	defer releaseCollectSourceIDs(sourceID)
+	progress.Ensure(sourceID, "测试站")
+	progress.Update(sourceID, func(cur *model.CollectProgress) {
+		cur.Status = progress.StatusDone
+	})
 
 	if isOccupiedCollectSource(sourceID) {
-		t.Fatal("expected isOccupiedCollectSource to self-heal stale occupy and return false")
+		t.Fatal("expected isOccupiedCollectSource to self-heal stale occupy on terminal status and return false")
 	}
-
 	collectingSourcesMu.Lock()
 	_, exists := collectingSources[sourceID]
 	collectingSourcesMu.Unlock()

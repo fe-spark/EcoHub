@@ -22,7 +22,6 @@ var (
 	// 新队列出发前先看这里，已在采的源直接跳过，两条队列互不等待。
 	collectingSourcesMu sync.Mutex
 	collectingSources   = make(map[string]uint64)
-	collectingTimes     = make(map[string]time.Time)
 	occupySeq           atomic.Uint64
 )
 
@@ -88,7 +87,6 @@ func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSo
 			continue
 		}
 		collectingSources[id] = occupySeq.Add(1)
-		collectingTimes[id] = time.Now()
 		collectingSourcesMu.Unlock()
 		occupied = append(occupied, source)
 	}
@@ -107,7 +105,6 @@ func releaseCollectSources(sources []model.FilmSource) {
 			continue
 		}
 		delete(collectingSources, id)
-		delete(collectingTimes, id)
 	}
 }
 
@@ -123,7 +120,6 @@ func releaseCollectSourceIDs(ids ...string) {
 			continue
 		}
 		delete(collectingSources, id)
-		delete(collectingTimes, id)
 	}
 }
 
@@ -156,31 +152,8 @@ func releaseCollectTokens(tokens map[string]uint64) {
 		}
 		if collectingSources[id] == tok {
 			delete(collectingSources, id)
-			delete(collectingTimes, id)
 		}
 	}
-}
-
-func hasActiveBatchOccupyLocked(sourceID string) bool {
-	activeBatchesMu.Lock()
-	defer activeBatchesMu.Unlock()
-	for b := range activeBatches {
-		if b.hasOccupyToken(sourceID) {
-			return true
-		}
-	}
-	return false
-}
-
-func (b *collectBatchContext) hasOccupyToken(id string) bool {
-	if b == nil {
-		return false
-	}
-	id = collectSourceID(id)
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	_, ok := b.occupyTokens[id]
-	return ok
 }
 
 func isOccupiedCollectSource(sourceID string) bool {
@@ -194,28 +167,12 @@ func isOccupiedCollectSource(sourceID string) bool {
 	if !ok {
 		return false
 	}
-	// 真实活跃校验：
-	// 1. 如果站点在 progress 中已处于终态（完成/失败/停止），且无活跃批次持有锁、无在途任务、无重试车道，说明采集已结束，必须立即释放残留占用
-	// 2. 如果占用已超过 3 秒，且无任何活跃批次、运行任务、排队启动进度或重试车道，亦属孤立占用锁，立即释放
-	hasActiveBatch := hasActiveBatchOccupyLocked(sourceID)
-	isLive := progress.IsTaskRunning(sourceID)
-	isLaneBusy := failureRecoverLaneBusy(sourceID)
-	if !hasActiveBatch && !isLive && !isLaneBusy {
-		snap, hasSnap := progress.Snapshot(sourceID)
-		if hasSnap && progress.IsTerminalStatus(snap.Status) {
-			delete(collectingSources, sourceID)
-			delete(collectingTimes, sourceID)
-			log.Printf("[Spider] 检测到站点 %s 已进入终态(%s)但残留占用锁，已即时释放", sourceID, snap.Status)
-			return false
-		}
-		if !progress.IsStarting(sourceID) {
-			if occTime, hasTime := collectingTimes[sourceID]; !hasTime || time.Since(occTime) > 3*time.Second {
-				delete(collectingSources, sourceID)
-				delete(collectingTimes, sourceID)
-				log.Printf("[Spider] 自动释放站点 %s 孤立的过期采集占用锁", sourceID)
-				return false
-			}
-		}
+	// 真实终态校验：若站点在 progress 中已明确处于完成、失败或已停止等终态，且没有活跃任务在运行，
+	// 说明该站点采集已完结退出，立即清理占用标记并放行
+	snap, hasSnap := progress.Snapshot(sourceID)
+	if hasSnap && progress.IsTerminalStatus(snap.Status) && !progress.IsTaskRunning(sourceID) {
+		delete(collectingSources, sourceID)
+		return false
 	}
 	return true
 }
@@ -418,7 +375,6 @@ func releaseQueuedCollectOccupies() {
 			continue
 		}
 		delete(collectingSources, id)
-		delete(collectingTimes, id)
 	}
 }
 

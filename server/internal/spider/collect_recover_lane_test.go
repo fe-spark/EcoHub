@@ -257,8 +257,9 @@ func TestEnqueuePendingFailureRecovers_Breakdown(t *testing.T) {
 
 	collectingSourcesMu.Lock()
 	collectingSources["src-busy"] = 888
-	collectingTimes["src-busy"] = time.Now()
 	collectingSourcesMu.Unlock()
+	progress.Ensure("src-busy", "繁忙站")
+	progress.MarkSourcesCollectStarting([]model.FilmSource{{Id: "src-busy"}}, "q-busy")
 	defer releaseCollectSourceIDs("src-busy", "src-enabled", "src-disabled")
 
 	records := []model.FailureRecord{
@@ -305,9 +306,7 @@ func TestFailureRecoverBlocked_TerminalStatusNotBlocked(t *testing.T) {
 	// 模拟之前有占用锁残留（且未超过 30 秒）
 	collectingSourcesMu.Lock()
 	collectingSources[sourceID] = 1234
-	collectingTimes[sourceID] = time.Now()
 	collectingSourcesMu.Unlock()
-
 	// 模拟站点已完成（StatusDone），无活跃任务
 	progress.Ensure(sourceID, "测试站")
 	progress.Update(sourceID, func(cur *model.CollectProgress) {
