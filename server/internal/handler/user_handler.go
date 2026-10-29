@@ -3,13 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"strconv"
-	"strings"
 
 	"server/internal/config"
 	"server/internal/middleware"
 	"server/internal/model"
 	"server/internal/model/dto"
-	"server/internal/repository"
 	"server/internal/service"
 	"server/internal/utils"
 
@@ -97,29 +95,7 @@ func (h *UserHandler) UserProfile(c *gin.Context) {
 		dto.Failed("参数校验失败!!!", c)
 		return
 	}
-	// 修改密码前强制校验原密码
-	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
-		oldUser, err := repository.GetUserById(uc.UserID)
-		if err != nil || oldUser.ID == 0 {
-			dto.Failed("用户不存在", c)
-			return
-		}
-		if oldUser.Password != "" {
-			if req.OldPassword == nil || strings.TrimSpace(*req.OldPassword) == "" {
-				dto.Failed("修改密码必须提供原密码", c)
-				return
-			}
-			if !service.UserSvc.VerifyUserPassword(uc.UserID, strings.TrimSpace(*req.OldPassword)) {
-				dto.Failed("原密码校验失败，请核对后重试", c)
-				return
-			}
-		}
-	}
-	// 强制设为当前登录人 ID，普通用户不能修改角色与状态
-	req.ID = uc.UserID
-	req.Role = nil
-	req.Status = nil
-	if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
+	if err := service.UserSvc.UpdateProfile(uc.UserID, req); err != nil {
 		dto.Failed(err.Error(), c)
 		return
 	}
@@ -162,43 +138,9 @@ func (h *UserHandler) UserSave(c *gin.Context) {
 		dto.Failed("请求参数异常!!!", c)
 		return
 	}
-	var raw map[string]any
-	if err := json.Unmarshal(bodyBytes, &raw); err != nil {
-		dto.Failed("参数校验失败!!!", c)
-		return
-	}
 
-	var userID uint
-	extractID := func(val any) uint {
-		if val == nil {
-			return 0
-		}
-		switch v := val.(type) {
-		case float64:
-			return uint(v)
-		case int:
-			return uint(v)
-		case int64:
-			return uint(v)
-		case string:
-			if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
-				return uint(n)
-			}
-		}
-		return 0
-	}
-	if idVal, exists := raw["id"]; exists {
-		userID = extractID(idVal)
-	} else if idVal, exists := raw["ID"]; exists {
-		userID = extractID(idVal)
-	}
-	if userID > 0 {
-		var req model.UserUpdatePayload
-		if err := json.Unmarshal(bodyBytes, &req); err != nil {
-			dto.Failed("参数校验失败!!!", c)
-			return
-		}
-		req.ID = userID
+	var req model.UserUpdatePayload
+	if err := json.Unmarshal(bodyBytes, &req); err == nil && req.ID > 0 {
 		if err := service.UserSvc.UpdateUser(uc.UserID, uc.Role, req); err != nil {
 			dto.Failed(err.Error(), c)
 			return

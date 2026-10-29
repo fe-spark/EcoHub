@@ -1,13 +1,13 @@
 package handler
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"testing"
-
-	"fmt"
 	"strings"
+	"testing"
 
 	"server/internal/config"
 	"server/internal/infra/db"
@@ -320,6 +320,50 @@ func TestUserHandler_SaveAndDelete_Validation(t *testing.T) {
 	resp = decodeResponse(t, w)
 	if resp.Code != dto.FAILED {
 		t.Fatalf("expected FAILED on unauthenticated UserDelete, got %d", resp.Code)
+	}
+
+	// 3. 超管使用 string id 更新用户 -> 成功
+	setupManageConfigDB(t)
+	salt, _ := utils.GenerateSalt()
+	u10005 := model.User{
+		Model:    gorm.Model{ID: 10005},
+		UserName: "testuser10005",
+		NickName: "OldNick",
+		Role:     model.UserRoleNormal,
+		Status:   0,
+		Password: utils.PasswordEncrypt("pwd123", salt),
+		Salt:     salt,
+	}
+	db.Mdb.Create(&u10005)
+
+	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"id":"10005","nickName":"StringNick"}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserSave(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS on string id UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	var checkU model.User
+	db.Mdb.First(&checkU, 10005)
+	if checkU.NickName != "StringNick" {
+		t.Fatalf("expected NickName StringNick, got %s", checkU.NickName)
+	}
+
+	// 4. 超管使用大写 ID (number) 更新用户 -> 成功
+	c, w = testContext(http.MethodPost, "/api/manage/user/save")
+	c.Set(config.AuthUserClaims, &utils.UserClaims{UserID: config.UserIdInitialVal, UserName: "admin", Role: model.UserRoleAdmin})
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/manage/user/save", bytes.NewReader([]byte(`{"ID":10005,"nickName":"CapIDNick"}`)))
+	c.Request.Header.Set("Content-Type", "application/json")
+	UserHd.UserSave(c)
+	resp = decodeResponse(t, w)
+	if resp.Code != dto.SUCCESS {
+		t.Fatalf("expected SUCCESS on uppercase ID UserSave, got code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	db.Mdb.First(&checkU, 10005)
+	if checkU.NickName != "CapIDNick" {
+		t.Fatalf("expected NickName CapIDNick, got %s", checkU.NickName)
 	}
 }
 
