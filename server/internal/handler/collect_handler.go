@@ -389,9 +389,12 @@ func (h *CollectHandler) CollectRecover(c *gin.Context) {
 			return
 		}
 		dto.Success(gin.H{
-			"queued":  out.Queued,
-			"already": out.Already,
-			"skipped": out.Skipped,
+			"queued":   out.Queued,
+			"already":  out.Already,
+			"skipped":  out.Skipped,
+			"busy":     out.Busy,
+			"disabled": out.Disabled,
+			"notFound": out.NotFound,
 		}, out.Message(), c)
 		return
 	}

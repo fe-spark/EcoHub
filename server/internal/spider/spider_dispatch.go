@@ -76,6 +76,7 @@ func occupyAndMarkCollectSources(sources []model.FilmSource, tag string) ([]mode
 	}
 	queueID, err := newCollectQueueID()
 	if err != nil {
+		releaseCollectSources(occupied)
 		return nil, err
 	}
 	progress.MarkSourcesCollectStarting(occupied, queueID)

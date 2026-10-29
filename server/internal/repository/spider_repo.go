@@ -165,6 +165,10 @@ func FindCollectSourceById(id string) *model.FilmSource {
 	if db.Mdb == nil {
 		return nil
 	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return nil
+	}
 	var fs model.FilmSource
 	if err := db.Mdb.Where("id = ?", id).First(&fs).Error; err != nil {
 		return nil

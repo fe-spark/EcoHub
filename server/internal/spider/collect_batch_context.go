@@ -22,6 +22,7 @@ var (
 	// 新队列出发前先看这里，已在采的源直接跳过，两条队列互不等待。
 	collectingSourcesMu sync.Mutex
 	collectingSources   = make(map[string]uint64)
+	collectingTimes     = make(map[string]time.Time)
 	occupySeq           atomic.Uint64
 )
 
@@ -87,6 +88,7 @@ func occupyCollectSources(sources []model.FilmSource, tag string) []model.FilmSo
 			continue
 		}
 		collectingSources[id] = occupySeq.Add(1)
+		collectingTimes[id] = time.Now()
 		collectingSourcesMu.Unlock()
 		occupied = append(occupied, source)
 	}
@@ -105,6 +107,7 @@ func releaseCollectSources(sources []model.FilmSource) {
 			continue
 		}
 		delete(collectingSources, id)
+		delete(collectingTimes, id)
 	}
 }
 
@@ -120,6 +123,7 @@ func releaseCollectSourceIDs(ids ...string) {
 			continue
 		}
 		delete(collectingSources, id)
+		delete(collectingTimes, id)
 	}
 }
 
@@ -152,8 +156,31 @@ func releaseCollectTokens(tokens map[string]uint64) {
 		}
 		if collectingSources[id] == tok {
 			delete(collectingSources, id)
+			delete(collectingTimes, id)
 		}
 	}
+}
+
+func hasActiveBatchOccupyLocked(sourceID string) bool {
+	activeBatchesMu.Lock()
+	defer activeBatchesMu.Unlock()
+	for b := range activeBatches {
+		if b.hasOccupyToken(sourceID) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *collectBatchContext) hasOccupyToken(id string) bool {
+	if b == nil {
+		return false
+	}
+	id = collectSourceID(id)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	_, ok := b.occupyTokens[id]
+	return ok
 }
 
 func isOccupiedCollectSource(sourceID string) bool {
@@ -164,7 +191,18 @@ func isOccupiedCollectSource(sourceID string) bool {
 	collectingSourcesMu.Lock()
 	defer collectingSourcesMu.Unlock()
 	_, ok := collectingSources[sourceID]
-	return ok
+	if !ok {
+		return false
+	}
+	if occTime, hasTime := collectingTimes[sourceID]; hasTime && time.Since(occTime) > 30*time.Second {
+		if !hasActiveBatchOccupyLocked(sourceID) && !progress.IsTaskRunning(sourceID) && !progress.IsStarting(sourceID) && !failureRecoverLaneBusy(sourceID) {
+			delete(collectingSources, sourceID)
+			delete(collectingTimes, sourceID)
+			log.Printf("[Spider] 自动释放站点 %s 孤立的过期采集占用锁 (占用时长: %s)", sourceID, time.Since(occTime).Round(time.Second))
+			return false
+		}
+	}
+	return true
 }
 
 // collectBatchContext 批次上下文：封装单次采集运行的全部生命周期与状态（完全自闭环，跨批次零耦合）
@@ -364,6 +402,7 @@ func releaseQueuedCollectOccupies() {
 			continue
 		}
 		delete(collectingSources, id)
+		delete(collectingTimes, id)
 	}
 }
 

@@ -281,9 +281,40 @@ var (
 
 // FailureRecoverOutcome 是一次重试入队的结果。排队本身不代表页面已经重试完成。
 type FailureRecoverOutcome struct {
-	Queued  int
-	Already int
-	Skipped int
+	Queued   int
+	Already  int
+	Skipped  int
+	Busy     int
+	Disabled int
+	NotFound int
+}
+
+func (o FailureRecoverOutcome) skippedReasonDesc() string {
+	parts := make([]string, 0, 3)
+	if o.Disabled > 0 {
+		parts = append(parts, fmt.Sprintf("采集站已停用 %d 条", o.Disabled))
+	}
+	if o.Busy > 0 {
+		parts = append(parts, fmt.Sprintf("采集站正在采集中 %d 条", o.Busy))
+	}
+	if o.NotFound > 0 {
+		parts = append(parts, fmt.Sprintf("采集站不存在 %d 条", o.NotFound))
+	}
+	other := o.Skipped - (o.Disabled + o.Busy + o.NotFound)
+	if other > 0 && len(parts) > 0 {
+		parts = append(parts, fmt.Sprintf("其他 %d 条", other))
+	}
+	if len(parts) == 1 {
+		switch {
+		case o.Disabled == o.Skipped:
+			return "采集站已停用"
+		case o.Busy == o.Skipped:
+			return "采集站正在采集中"
+		case o.NotFound == o.Skipped:
+			return "采集站不存在"
+		}
+	}
+	return strings.Join(parts, "、")
 }
 
 func (o FailureRecoverOutcome) Message() string {
@@ -293,8 +324,14 @@ func (o FailureRecoverOutcome) Message() string {
 	case o.Queued == 0 && o.Skipped == 0:
 		return fmt.Sprintf("%d 条已在重试，没有新的任务", o.Already)
 	case o.Queued == 0 && o.Already == 0:
+		if desc := o.skippedReasonDesc(); desc != "" {
+			return fmt.Sprintf("%d 条未开始：%s", o.Skipped, desc)
+		}
 		return fmt.Sprintf("%d 条未开始：采集站正在采集、已停用或不存在", o.Skipped)
 	case o.Queued == 0:
+		if desc := o.skippedReasonDesc(); desc != "" {
+			return fmt.Sprintf("没有新的任务：已在重试 %d 条，跳过 %d 条（%s）", o.Already, o.Skipped, desc)
+		}
 		return fmt.Sprintf("没有新的任务：已在重试 %d 条，跳过 %d 条", o.Already, o.Skipped)
 	default:
 		msg := fmt.Sprintf("已加入重试 %d 条", o.Queued)
@@ -302,7 +339,11 @@ func (o FailureRecoverOutcome) Message() string {
 			msg += fmt.Sprintf("，已在重试 %d 条", o.Already)
 		}
 		if o.Skipped > 0 {
-			msg += fmt.Sprintf("，跳过 %d 条", o.Skipped)
+			if desc := o.skippedReasonDesc(); desc != "" {
+				msg += fmt.Sprintf("，跳过 %d 条（%s）", o.Skipped, desc)
+			} else {
+				msg += fmt.Sprintf("，跳过 %d 条", o.Skipped)
+			}
 		}
 		return msg
 	}
@@ -348,14 +389,32 @@ func EnqueuePendingFailureRecovers() (FailureRecoverOutcome, error) {
 		return out, err
 	}
 	for i := range list {
-		err := AcceptFailureRecover(&list[i])
+		rec := &list[i]
+		err := AcceptFailureRecover(rec)
 		switch {
 		case err == nil:
 			out.Queued++
 		case errors.Is(err, errFailureRecoverRunning):
 			out.Already++
+		case errors.Is(err, errFailureRecoverBusy):
+			out.Skipped++
+			out.Busy++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站正在采集中",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		case errors.Is(err, errFailureRecoverDisabled):
+			out.Skipped++
+			out.Disabled++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站已停用",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
+		case errors.Is(err, errFailureRecoverNoSource):
+			out.Skipped++
+			out.NotFound++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: 采集站不存在",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber)
 		default:
 			out.Skipped++
+			log.Printf("[Spider] 失败记录重试跳过 id=%d origin=%s(%s) page=%d: %v",
+				rec.ID, rec.OriginName, rec.OriginId, rec.PageNumber, err)
 		}
 	}
 	return out, nil

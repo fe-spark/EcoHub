@@ -3,6 +3,7 @@ package spider
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -89,5 +90,25 @@ func TestPrepareBatchCollectStart_ReportsSkipReasons(t *testing.T) {
 		if got[id] != reason {
 			t.Fatalf("skip %s = %q, want %q", id, got[id], reason)
 		}
+	}
+}
+
+func TestIsOccupiedCollectSource_SelfHealsStaleOccupy(t *testing.T) {
+	const sourceID = "stale-occupy-test"
+	collectingSourcesMu.Lock()
+	collectingSources[sourceID] = 999
+	collectingTimes[sourceID] = time.Now().Add(-35 * time.Second)
+	collectingSourcesMu.Unlock()
+	defer releaseCollectSourceIDs(sourceID)
+
+	if isOccupiedCollectSource(sourceID) {
+		t.Fatal("expected isOccupiedCollectSource to self-heal stale occupy and return false")
+	}
+
+	collectingSourcesMu.Lock()
+	_, exists := collectingSources[sourceID]
+	collectingSourcesMu.Unlock()
+	if exists {
+		t.Fatal("expected stale occupy to be deleted from collectingSources")
 	}
 }

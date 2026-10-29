@@ -1,11 +1,17 @@
 package spider
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"server/internal/infra/db"
 	"server/internal/model"
+
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func failureRecord(id uint, sourceID string) model.FailureRecord {
@@ -35,7 +41,12 @@ func TestFailureRecoverOutcome_Message(t *testing.T) {
 		{FailureRecoverOutcome{}, "没有待重试的记录"},
 		{FailureRecoverOutcome{Already: 2}, "2 条已在重试，没有新的任务"},
 		{FailureRecoverOutcome{Skipped: 3}, "3 条未开始：采集站正在采集、已停用或不存在"},
+		{FailureRecoverOutcome{Skipped: 4, Disabled: 4}, "4 条未开始：采集站已停用"},
+		{FailureRecoverOutcome{Skipped: 4, Busy: 4}, "4 条未开始：采集站正在采集中"},
+		{FailureRecoverOutcome{Skipped: 4, NotFound: 4}, "4 条未开始：采集站不存在"},
+		{FailureRecoverOutcome{Skipped: 4, Disabled: 2, Busy: 2}, "4 条未开始：采集站已停用 2 条、采集站正在采集中 2 条"},
 		{FailureRecoverOutcome{Queued: 4, Skipped: 1}, "已加入重试 4 条，跳过 1 条"},
+		{FailureRecoverOutcome{Queued: 2, Skipped: 2, Disabled: 2}, "已加入重试 2 条，跳过 2 条（采集站已停用）"},
 	}
 	for _, tc := range cases {
 		if got := tc.out.Message(); got != tc.want {
@@ -215,5 +226,74 @@ func TestServeFailureRecoverLane_BeginRejectedAbandonsAll(t *testing.T) {
 	}
 	if isOccupiedCollectSource(sourceID) {
 		t.Fatal("启动失败后仍占着站点")
+	}
+}
+
+func TestEnqueuePendingFailureRecovers_Breakdown(t *testing.T) {
+	prev := db.Mdb
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FilmSource{}, &model.FailureRecord{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	oldHub := failureRetries
+	failureRetries = newFailureRetryHub()
+	t.Cleanup(func() { failureRetries = oldHub })
+
+	sources := []model.FilmSource{
+		{Id: "src-enabled", Name: "正常站", Uri: "http://test/1", State: true},
+		{Id: "src-disabled", Name: "停用站", Uri: "http://test/2", State: false},
+		{Id: "src-busy", Name: "繁忙站", Uri: "http://test/3", State: true},
+	}
+	if err := gdb.Create(&sources).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	collectingSourcesMu.Lock()
+	collectingSources["src-busy"] = 888
+	collectingTimes["src-busy"] = time.Now()
+	collectingSourcesMu.Unlock()
+	defer releaseCollectSourceIDs("src-busy", "src-enabled", "src-disabled")
+
+	records := []model.FailureRecord{
+		{OriginId: "src-enabled", OriginName: "正常站", PageNumber: 1, Status: model.FailureRecordStatusPending},
+		{OriginId: "src-disabled", OriginName: "停用站", PageNumber: 2, Status: model.FailureRecordStatusPending},
+		{OriginId: "src-busy", OriginName: "繁忙站", PageNumber: 3, Status: model.FailureRecordStatusPending},
+		{OriginId: "src-nonexistent", OriginName: "不存在站", PageNumber: 4, Status: model.FailureRecordStatusPending},
+	}
+	if err := gdb.Create(&records).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := EnqueuePendingFailureRecovers()
+	if err != nil {
+		t.Fatalf("EnqueuePendingFailureRecovers err: %v", err)
+	}
+
+	if out.Queued != 1 {
+		t.Errorf("Queued = %d, want 1", out.Queued)
+	}
+	if out.Disabled != 1 {
+		t.Errorf("Disabled = %d, want 1", out.Disabled)
+	}
+	if out.Busy != 1 {
+		t.Errorf("Busy = %d, want 1", out.Busy)
+	}
+	if out.NotFound != 1 {
+		t.Errorf("NotFound = %d, want 1", out.NotFound)
+	}
+	if out.Skipped != 3 {
+		t.Errorf("Skipped = %d, want 3", out.Skipped)
+	}
+
+	wantMsg := "已加入重试 1 条，跳过 3 条（采集站已停用 1 条、采集站正在采集中 1 条、采集站不存在 1 条）"
+	if gotMsg := out.Message(); gotMsg != wantMsg {
+		t.Errorf("Message() = %q, want %q", gotMsg, wantMsg)
 	}
 }
