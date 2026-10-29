@@ -16,7 +16,16 @@ import (
 // BackupService 站点配置备份/恢复（不含影视库存与账号）
 type BackupService struct{}
 
-var BackupSvc = new(BackupService)
+var (
+	BackupSvc                      = new(BackupService)
+	syncImportedSourceCategoriesFn = func() {
+		go func() {
+			if err := SpiderSvc.SyncAllSourceCategories(); err != nil {
+				syslog.Errorf("[Backup] 导入采集站后自动同步分类树失败: %v", err)
+			}
+		}()
+	}
+)
 
 // ExportConfig 导出当前可迁移配置
 func (s *BackupService) ExportConfig() (model.ConfigBackup, error) {
@@ -241,6 +250,9 @@ func (s *BackupService) ImportConfig(req model.ConfigBackupImportRequest) error 
 		access.SetEnabled(backup.Analytics.Enabled)
 	}
 
+	if req.Modules.FilmSources {
+		syncImportedSourceCategoriesFn()
+	}
 
 	return nil
 }
