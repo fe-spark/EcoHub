@@ -3,6 +3,7 @@ package service
 import (
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 	"testing"
 	"time"
 	"server/internal/access"
@@ -354,5 +355,45 @@ func TestImportConfig_Analytics(t *testing.T) {
 	}
 	if err := BackupSvc.ImportConfig(badReq); err == nil {
 		t.Fatal("expected error on missing analytics payload")
+	}
+}
+
+func TestImportConfig_FilmSources_TriggersCategorySync(t *testing.T) {
+	setupBackupTestDB(t)
+
+	var synced atomic.Bool
+	prevFn := syncImportedSourceCategoriesFn
+	syncImportedSourceCategoriesFn = func() {
+		synced.Store(true)
+	}
+	t.Cleanup(func() {
+		syncImportedSourceCategoriesFn = prevFn
+	})
+
+	backup := model.ConfigBackup{
+		Version: model.ConfigBackupVersion,
+		FilmSources: []model.FilmSource{
+			{Id: "imp_src_1", Name: "导入站", Uri: "http://imp.test"},
+		},
+	}
+	req := model.ConfigBackupImportRequest{
+		Modules: model.ConfigBackupModules{FilmSources: true},
+		Backup:  backup,
+	}
+
+	if err := BackupSvc.ImportConfig(req); err != nil {
+		t.Fatalf("import config failed: %v", err)
+	}
+
+	if !synced.Load() {
+		t.Fatal("expected syncImportedSourceCategoriesFn to be called when importing FilmSources")
+	}
+
+	sources, err := repository.GetCollectSourceList()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].Id != "imp_src_1" {
+		t.Fatalf("imported sources mismatch: %+v", sources)
 	}
 }
