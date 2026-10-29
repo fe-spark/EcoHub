@@ -95,11 +95,18 @@ export default function FilmPlaySection({
 
   useEffect(() => {
     if (!activeLine) return;
+    const k = activeLine.id || activeLine.name;
+    const lineText =
+      lineLinks?.[k] !== undefined
+        ? lineLinks[k]
+        : internalLinks[k] !== undefined
+        ? internalLinks[k]
+        : formatEpisodesToPlayLink(activeLine.linkList || []);
     form.setFieldsValue({
-      playLink: currentLineText,
+      playLink: lineText,
       playForm: activeLine.name || activeLine.id || "",
     });
-  }, [activeLineKey, currentLineText, activeLine, form]);
+  }, [activeLineKey, activeLine, form]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleCopy = useCallback(() => {
     const content =

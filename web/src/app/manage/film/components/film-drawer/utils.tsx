@@ -1,5 +1,5 @@
 import React from "react";
-
+import type { PlayLine } from "./types";
 export function formatCategoryNodes(nodes: any[]): any[] {
   if (!nodes || nodes.length === 0) return [];
   return nodes.map((node) => ({
@@ -83,4 +83,83 @@ export function parsePlayLinkToEpisodes(raw: string): { episode: string; link: s
     }
   }
   return list;
+}
+
+export function mergePlayLinesForSave(
+  ownerLines: PlayLine[],
+  lineLinksMap: Record<string, string>,
+  singlePlayLink?: string,
+  singlePlayForm?: string,
+): { playLink?: string; playFrom?: string[]; playForm?: string } {
+  if (ownerLines.length > 1) {
+    const playFromList: string[] = [];
+    const playLinkList: string[] = [];
+    for (const l of ownerLines) {
+      const k = l.id || l.name;
+      const link =
+        lineLinksMap[k] !== undefined
+          ? lineLinksMap[k]
+          : formatEpisodesToPlayLink(l.linkList || []);
+      if (link && link.trim()) {
+        playFromList.push(l.name || l.id);
+        playLinkList.push(link.trim());
+      }
+    }
+    if (playLinkList.length > 0) {
+      return {
+        playLink: playLinkList.join("$$$"),
+        playFrom: playFromList,
+        playForm: playFromList.join("$$$"),
+      };
+    }
+  } else if (singlePlayLink && singlePlayLink.trim()) {
+    const singleForm = (singlePlayForm || ownerLines[0]?.name || "默认播放").trim();
+    return {
+      playLink: singlePlayLink.trim(),
+      playFrom: [singleForm],
+      playForm: singleForm,
+    };
+  }
+  return {};
+}
+
+export function buildFilmDetailFormValues(
+  filmData: Record<string, unknown>,
+  cat: { cid?: number; pid?: number; cName?: string },
+  isCustom: boolean,
+  customPic: string,
+  slidePic: string,
+  ownerLine?: { id?: string; name?: string },
+  formattedPlayLink?: string,
+) {
+  const desc = (filmData.descriptor as Record<string, unknown> | undefined) || {};
+  return {
+    id: filmData.id,
+    sourceId: filmData.sourceId || "",
+    name: filmData.name || "",
+    subTitle: desc.subTitle || filmData.subTitle || "",
+    cid: cat.cid,
+    pid: cat.pid,
+    cName: cat.cName,
+    followPosterSource: !isCustom,
+    picture: customPic,
+    pictureSlide: slidePic,
+    director: desc.director || filmData.director || "",
+    actor: desc.actor || filmData.actor || "",
+    writer: desc.writer || filmData.writer || "",
+    releaseDate: desc.releaseDate || filmData.releaseDate || "",
+    area: desc.area || filmData.area || "",
+    language: desc.language || filmData.language || "",
+    year: desc.year || (filmData.year ? String(filmData.year) : "") || "",
+    initial: desc.initial || filmData.initial || "",
+    classTag: desc.classTag || filmData.classTag || "",
+    remarks: desc.remarks || filmData.remarks || "",
+    state: desc.state || filmData.state || "",
+    hits: Number(desc.hits || filmData.hits) || 0,
+    playForm: ownerLine?.name || ownerLine?.id || "",
+    playLink: formattedPlayLink || "",
+    dbId: Number(desc.dbId || filmData.dbId) || 0,
+    dbScore: desc.dbScore || (filmData.score ? String(filmData.score) : "") || "",
+    content: desc.content || filmData.content || desc.blurb || filmData.blurb || "",
+  };
 }
