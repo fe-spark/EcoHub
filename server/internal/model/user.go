@@ -1,6 +1,10 @@
 package model
 
 import (
+	"encoding/json"
+	"strconv"
+	"strings"
+
 	"server/internal/config"
 
 	"gorm.io/gorm"
@@ -146,6 +150,37 @@ type UserUpdatePayload struct {
 	Avatar      *string `json:"avatar"`
 	Status      *int    `json:"status"`
 	Role        *int    `json:"role"`
+}
+
+func (p *UserUpdatePayload) UnmarshalJSON(data []byte) error {
+	type Alias UserUpdatePayload
+	aux := struct {
+		*Alias
+		RawID  any `json:"id"`
+		RawCap any `json:"ID"`
+	}{
+		Alias: (*Alias)(p),
+	}
+	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	rawVal := aux.RawID
+	if rawVal == nil {
+		rawVal = aux.RawCap
+	}
+	switch v := rawVal.(type) {
+	case float64:
+		p.ID = uint(v)
+	case int:
+		p.ID = uint(v)
+	case int64:
+		p.ID = uint(v)
+	case string:
+		if n, err := strconv.ParseUint(strings.TrimSpace(v), 10, 64); err == nil {
+			p.ID = uint(n)
+		}
+	}
+	return nil
 }
 
 // UserInfoVo 用户信息返回对象

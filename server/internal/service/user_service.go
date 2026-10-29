@@ -2,6 +2,8 @@ package service
 
 import (
 	"errors"
+	"strings"
+
 	"server/internal/model"
 	"server/internal/model/dto"
 	"server/internal/repository"
@@ -123,6 +125,27 @@ func (s *UserService) AddUser(u model.User) error {
 	u.Salt = salt
 	u.Password = utils.PasswordEncrypt(u.Password, u.Salt)
 	return repository.AddUser(&u)
+}
+// UpdateProfile 个人资料修改（含修改密码的原密码校验）
+func (s *UserService) UpdateProfile(userID uint, req model.UserUpdatePayload) error {
+	oldUser, err := repository.GetUserById(userID)
+	if err != nil || oldUser.ID == 0 {
+		return errors.New("用户不存在")
+	}
+	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		if oldUser.Password != "" {
+			if req.OldPassword == nil || strings.TrimSpace(*req.OldPassword) == "" {
+				return errors.New("修改密码必须提供原密码")
+			}
+			if utils.PasswordEncrypt(strings.TrimSpace(*req.OldPassword), oldUser.Salt) != oldUser.Password {
+				return errors.New("原密码校验失败，请核对后重试")
+			}
+		}
+	}
+	req.ID = userID
+	req.Role = nil
+	req.Status = nil
+	return s.UpdateUser(userID, oldUser.Role, req)
 }
 
 // UpdateUser 更新用户。operatorID、operatorRole 为当前登录人。
