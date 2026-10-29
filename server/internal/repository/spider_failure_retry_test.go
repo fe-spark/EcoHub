@@ -3,6 +3,7 @@ package repository
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"server/internal/infra/db"
 	"server/internal/model"
@@ -148,5 +149,52 @@ func TestMarkFailureRecordRetrySucceeded_KeepsRow(t *testing.T) {
 	}
 	if total != 1 {
 		t.Fatalf("成功后记录数 = %d", total)
+	}
+}
+
+func TestPruneExpiredFailureRecords_CleansSuccessImmediatelyAndFailedAfterRetention(t *testing.T) {
+	prev := db.Mdb
+	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
+	gdb, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	if err := gdb.AutoMigrate(&model.FailureRecord{}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	db.Mdb = gdb
+	t.Cleanup(func() { db.Mdb = prev })
+
+	now := time.Now()
+	rows := []model.FailureRecord{
+		// 1. 重试成功的记录（哪怕是刚刚创建的），必须立刻被清理
+		{OriginId: "src1", Status: model.FailureRecordStatusSuccess, Model: gorm.Model{CreatedAt: now.Add(-1 * time.Minute)}},
+		// 2. 最终失败的记录，超过 7 天，必须被清理
+		{OriginId: "src2", Status: model.FailureRecordStatusFailed, Model: gorm.Model{CreatedAt: now.Add(-8 * 24 * time.Hour)}},
+		// 3. 最终失败的记录，在 7 天内，必须保留
+		{OriginId: "src3", Status: model.FailureRecordStatusFailed, Model: gorm.Model{CreatedAt: now.Add(-2 * 24 * time.Hour)}},
+		// 4. 待重试的记录，超过 7 天也绝不能被清理
+		{OriginId: "src4", Status: model.FailureRecordStatusPending, Model: gorm.Model{CreatedAt: now.Add(-15 * 24 * time.Hour)}},
+	}
+	for i := range rows {
+		if err := gdb.Create(&rows[i]).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pruned := PruneExpiredFailureRecords(7 * 24 * time.Hour)
+	if pruned != 2 {
+		t.Fatalf("pruned = %d, want 2", pruned)
+	}
+
+	var remaining []model.FailureRecord
+	if err := gdb.Order("origin_id ASC").Find(&remaining).Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(remaining) != 2 {
+		t.Fatalf("remaining len = %d, want 2 (src3 and src4)", len(remaining))
+	}
+	if remaining[0].OriginId != "src3" || remaining[1].OriginId != "src4" {
+		t.Fatalf("remaining records = %+v, want src3 and src4", remaining)
 	}
 }
