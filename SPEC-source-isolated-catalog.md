@@ -1,120 +1,149 @@
 # EcoHub: Source-Isolated Catalog & Federated Playback Specification
 
-各站独立建档。前台只看当前主站的片子和分类。播放页按匹配键补上其他已启用站的线路。不把多站合成一条档案。
+Each source maintains an independent catalog record. The storefront strictly projects the catalog and taxonomy of the active primary source. The playback page dynamically federates streams from other enabled sources at read time using match keys. Multi-source entities are never consolidated into a single global catalog record.
 
-范围是 `server`、`web`、TVBox / CMS。不改 `app-for-android`、`app-for-ohos`，不改 `docs/RELEASE.md`。
+**Scope**: `server`, `web`, TVBox / CMS. Excludes `app-for-android`, `app-for-ohos`, and `docs/RELEASE.md`.
 
-## 原则
+---
 
-1. **首位即主站。** 已启用采集站里 `sort` 最小的是主站。没有 `is_primary` 列，也不提供「设为主站」。界面称「主站」。全部停用时，用排序第一名兜底。
-2. **线路独立。** 各站线路按所属站存放和展示。禁止跨站插播、补集。
-3. **前台锁定主站。** 首页、分类、检索、每日更新只展示主站采过的影片。访客不能切站，公开页不认采集站 `source` 参数。
+## 1. Core Principles
 
-## 档案
+1. **Implicit Primary via Min-Sort**: Among all enabled sources, the source with the lowest `sort` order is designated as the primary source. There is no `is_primary` database column, nor a manual "Set as Primary" action. The interface refers to it as the "Primary Source". When all sources are disabled, the source with the lowest `sort` order acts as the fallback.
+2. **Strict Stream Isolation**: Playlists and streams are stored and presented strictly by their owning source. Cross-source episode interleaving or playlist patching is strictly prohibited.
+3. **Master-Locked Storefront**: Home page sections, taxonomy listings, search results, and daily updates exclusively project films ingested by the primary source. Visitors cannot switch sources, and public endpoints ignore any `source` query parameters.
 
-每个采集站一份 `film_index`。`first_source_id` 是所属站。同一部片子，两个站是两个 `mid`。
+---
 
-站内认片只用 `movie_source_mapping`（本站 + 源站 `vod_id`）。再次采集只更新自己的档案。同一站、同一页、匹配键相同的条目合成一部。
+## 2. Catalog & Records (`film_index`)
 
-不按匹配键认别的站的 `mid`。不改别的站的名称、分类、封面、简介。匹配键写在自己的档案上，只给播放页和海报查找。
+- Each source maintains its own independent `film_index` record. The `first_source_id` column represents the owning source ID. The same title across two sources produces two distinct `mid` records.
+- Intra-source identity resolution relies strictly on `movie_source_mapping` (`source_id` + upstream `vod_id`). Subsequent ingestion runs only update the source's own records. Within the same source and page, items sharing identical match keys are merged into a single record.
+- Match keys are never used to resolve, merge, or overwrite another source's `mid`, title, category, poster, or description. Match keys are stored on the source's own record solely for read-time stream federation and poster resolution.
+- Category namespace keys follow the format: `source:{source_id}:{type_id}`.
 
-分类键是 `source:{本站}:{typeId}`。
+---
 
-## 前台与后台
+## 3. Storefront vs. Backoffice
 
-- 前台导航、首页栏目、分类页、筛选、搜索、每日更新都锁主站。未传或访客传入的 `source` 忽略。
-- 分类片单只含主站自己的分类键。不把别的站同名分类并进来。
-- 后台影片管理按所选采集站隔离，和前台锁定分开。
-- TVBox `/api/provide/tvbox` 只列出已启用采集站，排序第一位是当前主站。没有全量入口。`/api/provide/vod` 未传 `source` 时看主站，传了则看该站。详情不看这个参数，按匹配键补上其他已启用站的线路。
+- **Storefront**: Navigation bars, home page carousels/sections, category views, filter panels, search, and daily updates are strictly scoped to the primary source. Missing or client-supplied `source` parameters are ignored.
+- **Taxonomy Views**: Category listings contain only the primary source's own category keys. Categories with identical names from other sources are never merged into the view.
+- **Backoffice**: Film management in the admin console isolates catalog records by the explicitly selected source, remaining completely decoupled from the storefront master lock.
+- **TVBox / CMS APIs**:
+  - `/api/provide/tvbox`: Lists only enabled sources, with the active primary source ranked first. No global aggregate entry is provided.
+  - `/api/provide/vod`: Defaults to the primary source when `source` is omitted; queries the specified source when provided. The detail endpoint ignores this parameter and federates playlists across all enabled sources via match keys.
 
-## 播放
+---
 
-先放当前这部档案自己的线路，再按匹配键找其他已启用站的同一部，把那些站自己的线路附在后面。
+## 4. Playback & Stream Federation
 
-匹配顺序：豆瓣 ID + 片名，然后片名#大类，再纯片名。多个键命中同一部只出一次。线路按站的 `sort` 排列，同站内按线路序号。不跨站拼集。
+- The playback page renders the current catalog record's native playlists first, followed by federated playlists from other enabled sources matched via resolution keys.
+- **Match Key Cascade**:
+  1. Douban ID + Normalized Title
+  2. Normalized Title + Primary Category
+  3. Pure Normalized Title
+- Multiple keys matching the same upstream title yield only one instance. Playlists are sorted primarily by source `sort`, and secondarily by intra-source playlist index. Cross-source episode mixing is forbidden.
+- **Direct Streaming**: Posters and media streams connect directly to upstream sources without server-side reverse proxying. When a source has upstream proxying enabled, its playlists are flagged with a "Proxy" label.
 
-海报和视频直连源站，不走服务端反代。该站开启代理采集时，线路上标「代理」。
+---
 
-## 分类
+## 5. Taxonomy & Normalization
 
-每个站一份分类副本。添加或修改采集站时拉取。启停、拖拽换主站不重新拉分类。没有分类副本的站不能采集，采集过程中也不临时拉分类。
+- Each source maintains an isolated category mirror snapshot (`source_categories`), fetched upon source creation or URL modification. Toggling source status or reordering the primary source does not re-fetch categories. Sources lacking a category snapshot cannot ingest, and categories are never fetched ad-hoc during ingestion.
+- `source_categories` preserves raw upstream category names. `category_mappings` maps upstream `type_id` values to local standard categories. Same-name categories across different sources retain separate rows and are never merged by name.
+- The storefront recognizes only the active primary source's taxonomy. After switching the primary source, legacy category IDs belong to the new source; if unmapped, the page renders with the title "Category Stale".
+- Category rewrite rules only alter the storefront presentation of the active primary source. Exact match is evaluated first, followed by regex rules in sequential order. A matched rule rewrites the display name; items with identical normalized names under the same parent category are consolidated into a single storefront category. Unmatched categories retain their raw names. Hidden categories do not enter the storefront and do not participate in consolidation. Saving or deleting rules takes effect upon page refresh without requiring re-ingestion or altering persisted category keys.
+- Categories cannot be deleted—only shown or hidden. Disabled top-level categories are omitted from navigation and home sections; direct URL visits can still access the catalog.
 
-`source_categories` 留下该站原始分类名。`category_mappings` 把该站 `type_id` 绑到本地分类。不同站的同名分类各留一行，不按名称合并。
+---
 
-前台只认当前主站。换主站后，原来的分类数字属于新站；对不上时，页面标题为「分类已失效」。
+## 6. Posters, Scraping & Banners
 
-分类规则只改当前主站的前台展示。精确命中优先，否则按顺序做正则。命中后改显示名；同一父级下规范化名称相同的 type 合成一个前台分类。未命中的保持原名。已隐藏的不进前台，也不参与合并。保存或删除规则后刷新即可，不要求重采，也不改已经写入的分类键。
+- Storefront posters are resolved dynamically at read time rather than baked into catalog records during ingest. The deprecated `movie_poster` table is unused.
+- The **Designated Poster Source** is the enabled source flagged with `is_poster_source`, ordered by `sort ASC`, `created_at ASC`, `id ASC`. If no source is flagged, the top-sort enabled source serves as fallback.
+- **Display Poster Resolution**:
+  - Prioritizes the poster source's final image: Custom / Pinned Poster -> Scraped TMDB Image -> Ingested Source Image.
+  - Resolves via `movie_match_key` using the same cascade hierarchy as playback federation.
+  - Empty images do not overwrite existing ones.
+  - If the owning source is itself the poster source, it uses its own image.
+  - If unmatched, it falls back to the record's own image.
+  - Custom or scraped covers on the primary record do not bypass this late-binding resolution layer. `film_index.picture` is never overwritten by external sources.
+- **Film Editing & Field Locking**:
+  - The "Custom Poster / Follow Poster Source" toggle controls whether the film's poster continues to receive ingestion updates. Scraped covers count as custom covers. Switching back to "Follow Poster Source" clears the custom flag while preserving scraped body text.
+  - TMDB scraping writes selected fields directly into `film_index`. Title and category remain immutable. Rollback is not supported.
+  - `film_tmdb_scrapes` records only `mid`, `tmdb_id`, and `media_type` to track scraped status and support re-scraping.
+  - Re-ingestion preserves scraped columns tracked under `film_index.locked_fields` (internal metadata, hidden from APIs and UI).
+- **Home Banner Scraping**:
+  - Banner scraping operates in-place directly on `banners_record` rows: poster, backdrop, overview, rating, year, and `tmdb_id`.
+  - Does not mutate film records, does not write to `film_tmdb_scrapes`, and requires no separate banner scrape table.
+  - The storefront renders banner-specific media, overview, and rating, while episode update status tracks the catalog in real time.
+  - When a banner row lacks both custom media and `tmdb_id`, the cover falls back to the film's current display poster.
+  - Unsaved form autofill can be reverted via "Revert Autofill".
 
-分类不能删除，只能隐藏或显示。关掉的一级分类不出现在导航和首页栏目。直接打开原来的分类地址仍可进片库。
+---
 
-## 海报、刮削、轮播
+## 7. Master Failover, Deletion & Endpoint Changes
 
-前台封面在读取时决定，不在采集时把别的站的图写进本片。没有 `movie_poster`。
+### 7.1 Master Failover
+When drag-sorting or toggling changes the primary source:
+- Storefront catalog listings, categories, search index, and daily updates immediately project the new primary source's records.
+- Online banners and scheduling rules are cleared, category version is bumped, and search/inventory caches are invalidated.
+- No catalog records are deleted, no playlists are migrated, no automated ingestion is triggered, and no categories are re-fetched.
+- Ingestion in progress is not interrupted; ongoing page transactions continue writing to their respective source catalogs.
+- Confirmation modal prompt: "Clear Banners and Scheduling".
 
-海报源是已启用且标记了 `is_poster_source` 的站，按 `sort`、`created_at`、`id`。没有标记时用第一名已启用站。
+### 7.2 Source Deletion & Purging
+Deleting a source, updating its ingest URL, or selecting "Clear Source Data" triggers a source-scoped cascade purge limited exclusively to that source:
+- Purges source catalog records (including streamless records), playlists linked to those `mid`s, match keys, mappings, banners, scrape records, failure logs, category mirror snapshots, and cron associations.
+- Other sources remain completely untouched. Total master inventory reaches 0 only when all sources are deleted.
 
-展示图取海报源那部影片的最终图：自定义图，否则刮削图，否则采集图。用 `movie_match_key`，顺序与播放补源相同。空图不替换。所属站就是海报源时用自己的图。对不上用本片自己的图。本片已经自定义或刮削过封面，也不挡住这层读取。`film_index.picture` 不被别的站改写。
+### 7.3 Ingest URL Changes
+Updating a source's API endpoint purges only that source's data, then fetches categories from the new endpoint. If the fetch fails, the new URL remains saved, the source status becomes "Missing Category", and ingestion remains disabled. Modifying endpoints during active ingestion is prohibited. This operation is distinct from master failover.
 
-影片编辑里的「自定义封面 / 跟随海报源」只决定本片封面是否继续被采集更新。刮削过的封面算自定义封面。改回跟随海报源后，封面标记去掉，正文刮削仍留着。
+---
 
-影片刮削把选中的字段直接写入 `film_index`。片名和分类不改。没有还原。`film_tmdb_scrapes` 只留 `mid`、`tmdb_id`、`media_type`，用来再次刮削和「已刮削」标记。再采集不覆盖已经刮削写入的列，名单在 `film_index.locked_fields`，不出现在接口和界面里。
+## 8. Catalog Metrics & Telemetry
 
-首页轮播刮削写在 `banners_record` 本行：海报、横图、简介、评分、年份、`tmdb_id`。不改影片，不写 `film_tmdb_scrapes`，没有轮播刮削表。首页用本行的图、简介和评分，更新状态跟片库。本行没有自有图、也没有 `tmdb_id` 时，封面才跟随影片当前展示图。未保存的表单填入可以撤销，按钮是「撤销填入」。
+- **Playable Master Inventory**: Total count of active primary source records (unplayable entries lacking stream endpoints are filtered at ingestion, ensuring 100% playable capability).
+- **Multi-Source Federated Films**: Number of primary source records enriched with multi-source coverage or secondary backup streams.
+- **Per-Source Inventory**: Total catalog records owned independently by each source. The aggregate sum across all sources may exceed master inventory.
+- **Admin Dashboard**: Displays the master metrics above first, followed by a per-source breakdown of films, categories, and failure logs. Category metrics include only active display categories (including hidden). Sources lacking mappings are labeled "Missing Category". Snapshot counts are deprecated.
 
-## 换主站、删站、改地址
+---
 
-拖拽排序或启停使首位变化时：
+## 9. Ingestion Pipeline
 
-- 前台列表、分类、检索、每日更新改看新主站自己的档案。
-- 只清空线上轮播和排片规则，递增分类版本，清检索和片库规模缓存。
-- 不删档案，不搬线路，不自动采集，不重新拉分类。
-- 采集进行中允许切换。进行中的页仍写入各站自己的档案。
+- **Page-Atomic Transactions**: Each page is processed within an isolated transaction writing only to the owning source's `film_index`, match keys, source mappings, and playlists. Once committed, films are immediately queryable. No snapshot tables are written.
+- **Idempotent Ingestion**: Subsequent ingestion resolves records via intra-source mapping or intra-source match key. Playlists are overwritten only when content hash changes. Failed pages trigger a full page retry; partial failures are never committed as successes.
+- **Garbage Collection Concurrency Gate**: Orphan cleanup routines are completely bypassed while ingestion is actively writing to the database.
 
-确认文案是「清空轮播和排片」。
+---
 
-删除、更换采集地址、分类确认里勾选「清空该站数据」，只清这一站：该站档案（含没有线路的）、这些 `mid` 上的线路、匹配键、映射、轮播和刮削词条，以及该站自己的线路表、映射、失败记录、分类副本、定时任务关联。别的站不动。站都删光后，片库影片是 0。
+## 10. Explicit Non-Goals
 
-更换采集地址只清这一站，然后按新地址重新获取分类。获取失败时新地址已保存，该站变成「缺分类」，采集保持禁用。采集进行中禁止改地址。这和切换主站不是一回事。
+1. **No Full Database Wipe on Master Switch**: Never purge the entire database when switching primary sources to wait for new ingestion.
+2. **No Primary-Only Ingestion**: Never discard secondary sources if they cannot be matched to primary records.
+3. **No Stream-Only Deletion**: Never delete only playlists and defer record deletion until "zero playlists remain".
+4. **No Ingest-Time Multi-Source Consolidation**: Never merge multiple sources into a single catalog record during ingestion.
+5. **No Asset Cross-Contamination**: Never bake poster source image URLs into another source's records during ingestion.
+6. **No Redundant Scrape Duplication**: No secondary scraped copy columns, no banner scrape tables, and no scrape rollback mechanisms.
+7. **No Legacy Data Migration**: No migration scripts or cleanup sweeps for historical consolidated data.
 
-## 片库数字
+---
 
-- 片库影片 = 当前主站档案数（源头拦截无播放地址条目，100% 具备播放能力）。
-- 多源聚合 = 当前主站档案中拥有多源覆盖或备用播放线路的影片数。
-- 各站影片 = 该站自己的档案数。相加可以大于片库影片。
+## 11. Legacy Data Handling
 
-工作台先给出上述片库数字，再按采集站拆影片、分类和失败记录。分类只计该站仍然存在的展示分类，含隐藏。没有映射的站标成「缺分类」。不再统计快照。
+- Historical merged records in legacy databases cannot reliably be disentangled by source. No data migration is provided. Post-deployment, environments should perform a "Data Reset" and re-ingest all sources under the new architecture.
+- The `movie_poster` table is deprecated: it is never created, queried, or updated. Existing empty tables in legacy databases are preserved without issuing drop scripts.
 
-## 采集
+---
 
-一页一个事务。只写本站的 `film_index`、匹配键、源映射和线路。页提交成功，片子就能被列表读到。不写快照表。
+## 12. Acceptance Criteria
 
-再次采集走本站映射或本站匹配键。线路只在内容哈希变化时覆盖。失败页整页重放，不把写失败的页当成成功。
-
-采集正在写库时，孤儿清理整轮跳过。
-
-## 明确不做
-
-- 切换主站时清空全库，等新主站重采。
-- 只有主站建档，其他站对不上就丢弃。
-- 删除时只删线路，等「没有任何线路」再删档案。
-- 按匹配键把多站合成一条档案。
-- 采集时把海报源的图写进别的站。
-- 影片刮削的第二份正文，轮播刮削表，还原刮削。
-- 为旧的合成数据写迁移或清扫命令。
-
-## 已有数据
-
-库里已经合成的旧档案分不开所属站。不迁移。上线后用现有「数据重置」清一次，各站按新规则重新采集。
-
-`movie_poster` 不再建、不再读、不再写。已有库里的空表留着，不另写删除脚本。
-
-## 验收
-
-- 两站都采过。把第二站拖成主站：前台立刻是第二站的片子和分类，第一站对得上的线路出现在播放页。片库影片不是 0。
-- 采集进行中可以切换，另一个站的采集不中断。
-- A 是主站、B 是海报源：前台封面是 B 那部影片当前的展示图，含 B 刮削后的图。切到 B 且海报源仍是 B：显示 B 自己的图。
-- 刮削一部影片后，封面和简介在这部档案上。没有还原。再次采集不把这些列改回源站原文。`film_tmdb_scrapes` 只有词条。
-- 首页轮播刮削后，图和简介在轮播行上。影片行不变，`film_tmdb_scrapes` 不增加。更新状态仍跟片库。
-- 删掉一个站：该站档案、无线路档案、线路、映射、匹配键、轮播、失败记录、分类副本都是 0。另一个站还在。
-- 两个站都删掉：片库影片是 0。
-- 更换某站地址：只空这一站。
+1. **Master Failover**: With two sources ingested, drag the second source to the top sort position. The storefront immediately displays the second source's catalog and taxonomy; matching streams from the first source appear on playback pages. Master inventory is non-zero.
+2. **Concurrent Ingestion**: Switching the primary source during active ingestion succeeds without interrupting running background crawlers.
+3. **Poster Resolution**: With Source A as primary and Source B as poster source, storefront covers display Source B's current image (including B's scraped images). Switching primary to B while B remains poster source correctly displays B's native image.
+4. **Scraping Field Immutability**: Scraping a film writes poster and overview to that specific record without rollback options. Re-ingestion does not overwrite scraped columns. `film_tmdb_scrapes` contains only metadata entries.
+5. **In-Place Banner Scrapes**: Scraping a home banner writes metadata directly to the banner row. Film records remain unchanged and `film_tmdb_scrapes` count does not increment. Episode update status tracks catalog updates.
+6. **Isolated Source Deletion**: Deleting a source reduces its records, streamless entries, playlists, mappings, match keys, banners, failures, and category snapshots to 0. Other sources remain intact.
+7. **Complete Depletion**: Deleting all configured sources results in a master inventory count of exactly 0.
+8. **Endpoint Update Isolation**: Updating a source's API endpoint clears only that specific source's data.
