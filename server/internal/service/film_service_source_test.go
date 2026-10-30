@@ -9,7 +9,7 @@ import (
 	"server/internal/model/dto"
 	filmsnapshot "server/internal/repository/film/snapshot"
 
-	"gorm.io/driver/sqlite"
+	"github.com/glebarez/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
 )

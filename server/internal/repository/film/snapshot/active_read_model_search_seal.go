@@ -363,7 +363,7 @@ func updateSearchMetaIndexIncremental(cur *filmSearchMetaIndex, version string, 
 		RecentPools:         cur.RecentPools,
 		SourceHot:           cur.SourceHot,
 		ByCategory:          newByCategory,
-		SearchPosts:         cloneAndPatchSearchPostings(cur.SearchPosts, newItems, upsertMap, newPos),
+		SearchPosts:         cloneAndPatchSearchPostings(cur, newItems, upsertMap, newPos),
 	}
 }
 

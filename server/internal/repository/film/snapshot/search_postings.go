@@ -67,24 +67,47 @@ func buildSearchPostings(items []FilmSearchMeta) *searchPostings {
 	return posts
 }
 
-func cloneAndPatchSearchPostings(cur *searchPostings, items []FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
-	if cur == nil || len(cur.runes) == 0 {
+func cloneAndPatchSearchPostings(cur *filmSearchMetaIndex, items []FilmSearchMeta, upsertMap map[int64]FilmSearchMeta, posMap map[int64]int) *searchPostings {
+	if cur == nil || cur.SearchPosts == nil || len(cur.SearchPosts.runes) == 0 {
 		return buildSearchPostings(items)
 	}
-	posts := &searchPostings{
-		runes: make(map[rune][]int32, len(cur.runes)+256),
-		ascii: make(map[string][]int32, len(cur.ascii)+256),
+	var newCount int
+	for mid, meta := range upsertMap {
+		pos, ok := posMap[mid]
+		if !ok {
+			continue
+		}
+		if pos < len(cur.Items) {
+			old := &cur.Items[pos]
+			if old.Item.CleanName != meta.Item.CleanName ||
+				old.Item.PinyinInitials != meta.Item.PinyinInitials ||
+				old.Item.PinyinInitialAlts != meta.Item.PinyinInitialAlts ||
+				old.Item.PinyinFull != meta.Item.PinyinFull {
+				return buildSearchPostings(items)
+			}
+			continue
+		}
+		newCount++
 	}
-	for r, list := range cur.runes {
+	if newCount == 0 {
+		return cur.SearchPosts
+	}
+	posts := &searchPostings{
+		runes: make(map[rune][]int32, len(cur.SearchPosts.runes)+256),
+		ascii: make(map[string][]int32, len(cur.SearchPosts.ascii)+256),
+	}
+	for r, list := range cur.SearchPosts.runes {
 		posts.runes[r] = append([]int32(nil), list...)
 	}
-	for s, list := range cur.ascii {
+	for s, list := range cur.SearchPosts.ascii {
 		posts.ascii[s] = append([]int32(nil), list...)
 	}
 	for mid, meta := range upsertMap {
-		if pos, ok := posMap[mid]; ok {
-			appendSingleItemPostings(posts, int32(pos), &meta)
+		pos, ok := posMap[mid]
+		if !ok || pos < len(cur.Items) {
+			continue
 		}
+		appendSingleItemPostings(posts, int32(pos), &meta)
 	}
 	return posts
 }
