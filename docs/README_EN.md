@@ -19,6 +19,13 @@
 
 </div>
 
+> [!WARNING]
+> ### ⚠️ v3.0 Major Release Notice (Clean Deployment Required)
+> **EcoHub v3.0 is a complete architectural rewrite that is NOT backward-compatible with v2.x historical data or database schemas. No migration path is provided.**
+> - **Do NOT upgrade in-place**: Do not mount or reuse v2.x database volumes/directories (such as `./data/mysql`). Reusing legacy databases will cause schema conflicts and service crashes.
+> - **Deployment Guide**: Upgrading to v3.0 **requires deploying from scratch in a fresh directory** (or completely clearing legacy MySQL/Redis data volumes), then re-configuring sources and running full collection.
+> - See [Release Notes](./RELEASE.md) for details.
+
 > **Notice**  
 > EcoHub does not provide or store media files. Sources originate from collect APIs configured by the operator. Comply with applicable laws and the terms of each source. The operator assumes all related risk. This project is intended for study and technical exchange.
 

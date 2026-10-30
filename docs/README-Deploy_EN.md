@@ -92,6 +92,9 @@ docker compose up -d
 
 Pin a specific image version by setting `ECOHUB_IMAGE=ghcr.io/fe-spark/ecohub:v3.0.0-beta.0` in `.env` or in compose. Formal release tags overwrite `:latest`.
 
+> [!WARNING]
+> **Notice on Upgrading from v2.x to v3.0**: v3.0 is a major architectural rewrite and is completely incompatible with v2.x legacy databases. Do NOT upgrade by simply running `docker compose pull` on an existing `./data/mysql` directory. v2.x operators must deploy in a brand new directory from scratch and re-run full collection.
+
 ---
 
 ## Method 2: 1Panel
