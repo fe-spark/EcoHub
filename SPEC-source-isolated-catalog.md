@@ -1,4 +1,4 @@
-# EcoHub 项目方向
+# EcoHub: Source-Isolated Catalog & Federated Playback Specification
 
 各站独立建档。前台只看当前主站的片子和分类。播放页按匹配键补上其他已启用站的线路。不把多站合成一条档案。
 
