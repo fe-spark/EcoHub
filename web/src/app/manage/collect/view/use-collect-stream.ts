@@ -105,8 +105,13 @@ export function useCollectStream(
             }
           },
         });
-      } catch {
-        // 网络异常由重连逻辑处理
+      } catch (err: unknown) {
+        const status = err && typeof err === "object" && "status" in err ? err.status : undefined;
+        const message = err instanceof Error ? err.message : "";
+        if (status === 401 || status === 403 || /401|403/.test(message)) {
+          aborted = true;
+          return;
+        }
       } finally {
         if (!aborted) {
           retryTimer = setTimeout(connect, 3000);

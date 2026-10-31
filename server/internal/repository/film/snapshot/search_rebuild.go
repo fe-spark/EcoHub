@@ -179,6 +179,7 @@ func scanAndStoreActiveFilmSearchIndex(seen uint64) error {
 		return err
 	}
 	attachPlaySources(items, plays)
+	plays = nil
 	idx := sealSearchMetaIndex(version, items)
 	activeFilmSearchMetas.Store(idx)
 	cost := time.Since(started).Round(time.Millisecond)

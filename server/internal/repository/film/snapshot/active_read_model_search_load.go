@@ -82,6 +82,7 @@ func buildAndStoreFilmSearchMetaIndex(version string) (*filmSearchMetaIndex, err
 		}
 		log.Printf("[ActiveReadModel] 检索索引封口中 version=%s 影片=%d 播放线路=%d", version, len(items), len(plays))
 		attachPlaySources(items, plays)
+		plays = nil
 		idx := sealSearchMetaIndex(version, items)
 		activeFilmSearchMetas.Store(idx)
 		log.Printf("[ActiveReadModel] 检索索引加载完成 version=%s count=%d cost=%s", version, len(items), time.Since(started).Round(time.Millisecond))

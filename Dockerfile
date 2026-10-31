@@ -50,6 +50,7 @@ LABEL org.opencontainers.image.title="EcoHub All-in-One" \
       org.opencontainers.image.source="https://github.com/fe-spark/EcoHub"
 
 ENV NODE_ENV=production \
+    GIN_MODE=release \
     NEXT_TELEMETRY_DISABLED=1 \
     TZ=Asia/Shanghai \
     PORT=8080 \

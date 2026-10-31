@@ -46,8 +46,13 @@ export function useRecordStream(ids: number[], handlers: RecordStreamHandlers) {
             }
           },
         });
-      } catch {
-        // 断线后重连
+      } catch (err: unknown) {
+        const status = err && typeof err === "object" && "status" in err ? err.status : undefined;
+        const message = err instanceof Error ? err.message : "";
+        if (status === 401 || status === 403 || /401|403/.test(message)) {
+          aborted = true;
+          return;
+        }
       } finally {
         if (!aborted) {
           retryTimer = setTimeout(connect, 3000);

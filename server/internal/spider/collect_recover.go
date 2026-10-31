@@ -212,14 +212,17 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		return
 	}
 	if err != nil || len(list) <= 0 {
-		if batchCtx != nil && err != nil {
+		if err == nil {
+			err = errors.New("response list is empty")
+		}
+		if batchCtx != nil {
 			batchCtx.RecordSourceError(s.Id, err.Error())
 		}
 		status, retryCount, cause, wrote := markRecoverFailure(s, fr, "recover_fetch", err)
 		if wrote {
 			finish(status, retryCount, cause, true)
 		}
-		log.Println("Recover GetMovieDetail Error: ", err)
+		syslog.Warnf("[Spider][Recover] 采集详情失败 source=%s page=%d err=%v", s.Name, fr.PageNumber, err)
 		return
 	}
 
@@ -237,7 +240,7 @@ func recoverFilmPage(ctx context.Context, s *model.FilmSource, fr *model.Failure
 		if wrote {
 			finish(status, retryCount, cause, true)
 		}
-		log.Println("Recover saveCollectedFilm Error: ", err)
+		syslog.Warnf("[Spider][Recover] 保存影片失败 source=%s page=%d err=%v", s.Name, fr.PageNumber, err)
 		return
 	}
 	if batchCtx != nil {

@@ -296,11 +296,11 @@ func cleanFilmBatches(logName string, scope func(*gorm.DB) *gorm.DB) int64 {
 // CleanOrphanMatchKeysAndMappings 清理关联影片已被删除的悬空匹配键与源映射
 func CleanOrphanMatchKeysAndMappings() int64 {
 	var cleaned int64
-	res1 := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.MovieMatchKey{})
+	res1 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_match_keys.mid)").Delete(&model.MovieMatchKey{})
 	if res1.Error == nil {
 		cleaned += res1.RowsAffected
 	}
-	res2 := db.Mdb.Where("global_mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.MovieSourceMapping{})
+	res2 := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = movie_source_mappings.global_mid)").Delete(&model.MovieSourceMapping{})
 	if res2.Error == nil {
 		cleaned += res2.RowsAffected
 	}

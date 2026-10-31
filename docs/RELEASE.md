@@ -1,21 +1,22 @@
-预发布版 **v3.0.0-beta.20**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v3.0.0-beta.20`。不会覆盖 `latest`。
+预发布版 **v3.0.0-beta.21**，Docker 镜像 `ghcr.io/fe-spark/ecohub:v3.0.0-beta.21`。不会覆盖 `latest`。
 
 ### 升级指引
 
-- **试用本版**：把 Compose 镜像版本指定为 `ghcr.io/fe-spark/ecohub:v3.0.0-beta.20`，然后执行 `docker compose pull ecohub && docker compose up -d ecohub`。
+- **试用本版**：把 Compose 镜像版本指定为 `ghcr.io/fe-spark/ecohub:v3.0.0-beta.21`，然后执行 `docker compose pull ecohub && docker compose up -d ecohub`。
 - **破坏性变更与数据兼容**：**不兼容，不迁移。** 本版本为 v3.0 重大架构重构版本，完全不向后兼容 v2.x 历史数据。已入库的播放列表也不会改写；重复选集要重新采集对应站点才会拆开。请勿直接挂载 v2.x 历史数据库升级。
 
 ---
 
-### v3.0.0-beta.20 核心变更
+### v3.0.0-beta.21 核心变更
 
-- **测试环境彻底解耦 CGO 与纯 Go SQLite 迁移**：
-  - 测试驱动迁移：全面将单元测试与集成测试中的 SQLite 驱动从 `gorm.io/driver/sqlite`（绑定 CGO 版 `go-sqlite3`）迁移至纯 Go 实现的 `github.com/glebarez/sqlite`；
-  - 零 CGO 编译与 CI 就绪：彻底消除非 CGO 环境下测试报错 Stub 的问题，单测与集成测试在 `CGO_ENABLED=0` 与 `CGO_ENABLED=1` 下均 100% 通过；
-- **核心依赖升级与依赖链对齐**：
-  - Gin 框架升级至 `v1.12.0`；
-  - GORM 升级至 `v1.31.2`，MySQL 驱动升级至 `v1.6.0`，底层驱动 `go-sql-driver/mysql` 升级至 `v1.8.1`；
-  - 彻底清理废弃的 `mattn/go-sqlite3` 间接依赖，精简依赖图。
-- **检索内存索引倒排增量修剪缺陷修复**：
-  - 修复 `cloneAndPatchSearchPostings` 在增量更新既有影片时重复追加倒排记录、导致切片乱序与二分查找命中失效的缺陷；
-  - 变更记录未改动检索名称时复用既有倒排指针，杜绝索引膨胀与搜索结果条数统计异常。
+- **根除海量片库采集后检索索引全量扫描导致的 OOM SIGKILL**：
+  - 废除 `maxIncrementalMids = 1000` 人为限制：当内存中已有可用快照时，不论单次采集变更量多大，均在内存中安全高效分批增量封口（2~8s），彻底杜绝重复将 75 万全量影片加载到内存引发的系统内存溢出与进程强杀；
+  - 索引构建内存释放：在封口挂载播放线路后立即解除近百万临时映射引用，促使 Go GC 及时回收内存。
+- **重构片库冗余与孤儿清理查询，彻底解决 MySQL 30s 超时与 50s+ 采集互斥阻塞**：
+  - 针对大表孤儿清理，将原低效全表笛卡尔积扫描 `WHERE mid NOT IN (SELECT mid FROM film_index)` 重构为走主键索引的 `WHERE NOT EXISTS`；
+  - 消除每日 02:00 清理孤儿数据时由于长时间慢查询引发的连接超时与对整点定时采集的锁等待拒绝。
+- **根除管理后台 SSE 流鉴权过期后的 401 探针死循环风暴**：
+  - 优化 `fetchEventStream` 客户端及流管理 Hooks，在 401/403 错误时立即切断重试定时器，并在后台页面下自动重定向至登录页。
+- **生产环境容器配置与运行时规范化**：
+  - Dockerfile 默认启用 `ENV GIN_MODE=release`，Go 服务主入口增加 release 模式代码兜底，去除无效路由日志；
+  - 采集失败记录日志统一重构为标准系统日志格式。

@@ -24,6 +24,7 @@ LABEL maintainer="spark" \
       org.opencontainers.image.source="https://github.com/fe-spark/EcoHub"
 
 ENV TZ=Asia/Shanghai \
+    GIN_MODE=release \
     PORT=8080
 
 RUN apk add --no-cache ca-certificates tzdata wget
