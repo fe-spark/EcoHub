@@ -144,11 +144,16 @@ func (i *IndexService) IndexPage(sourceIdOpt ...string) (map[string]any, error) 
 		movies []int64
 		hot    []int64
 	}
-	slots := make([]homeSlot, len(tree.Children))
+	const maxHomeSections = 12
+	children := tree.Children
+	if len(children) > maxHomeSections {
+		children = children[:maxHomeSections]
+	}
+	slots := make([]homeSlot, len(children))
 	var wg sync.WaitGroup
 	var errMu sync.Mutex
 	var pageErr error
-	for idx, c := range tree.Children {
+	for idx, c := range children {
 		wg.Add(1)
 		go func(i int, cat *model.CategoryTree) {
 			defer wg.Done()
