@@ -67,11 +67,13 @@ export async function fetchEventStream(
     } catch {
       // 保持默认错误
     }
-    const err = new Error(errMsg);
+    const err = Object.assign(new Error(errMsg), { status: response.status });
     onError?.(err);
+    if (response.status === 401 && typeof window !== "undefined" && window.location.pathname.startsWith("/manage")) {
+      window.location.href = "/login";
+    }
     throw err;
   }
-
   onOpen?.();
   if (!response.body) {
     return;

@@ -277,7 +277,7 @@ func finishOrphanClean(ft model.FilmCollectTask, remark string, startedAt time.T
 
 func cleanOrphanData() (int64, int64, error) {
 	var n int64
-	if res := db.Mdb.Where("mid NOT IN (?)", db.Mdb.Model(&model.FilmIndex{}).Select("mid")).Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
+	if res := db.Mdb.Where("NOT EXISTS (SELECT 1 FROM film_index WHERE film_index.mid = film_source_playlists.mid)").Delete(&model.FilmSourcePlaylist{}); res.Error != nil {
 		return 0, 0, res.Error
 	} else {
 		n = res.RowsAffected

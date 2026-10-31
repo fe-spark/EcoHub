@@ -28,6 +28,9 @@ func init() {
 	if config.IsUpgradeHelper() {
 		return
 	}
+	if os.Getenv("GIN_MODE") == "" {
+		gin.SetMode(gin.ReleaseMode)
+	}
 	setupLogging()
 	if err := waitForRedis(30, 2*time.Second); err != nil {
 		panic(err)

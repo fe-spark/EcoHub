@@ -86,12 +86,12 @@ func TestResealSearchIndexMidsDoesNotFullScan(t *testing.T) {
 	}
 }
 
-func TestResealSearchIndexMids_TriggersRebuildWhenTooManyMids(t *testing.T) {
+func TestResealSearchIndexMids_DoesNotRebuildWhenLargeMids(t *testing.T) {
 	setupSnapshotRepoTestDB(t)
-	if err := SetActiveSnapshotVersion("v-too-many"); err != nil {
+	if err := SetActiveSnapshotVersion("v-large-mids"); err != nil {
 		t.Fatal(err)
 	}
-	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-too-many", []FilmSearchMeta{{Mid: 1}}))
+	activeFilmSearchMetas.Store(sealSearchMetaIndex("v-large-mids", []FilmSearchMeta{{Mid: 1}}))
 
 	var scanned atomic.Bool
 	prevScan := scanActiveFilmSearchIndex
@@ -120,8 +120,8 @@ func TestResealSearchIndexMids_TriggersRebuildWhenTooManyMids(t *testing.T) {
 	}
 	ResealSearchIndexMids(manyMids)
 	time.Sleep(40 * time.Millisecond)
-	if !scanned.Load() {
-		t.Fatal("expected full-scan rebuild triggered when mids > 1000")
+	if scanned.Load() {
+		t.Fatal("unexpected full-scan rebuild triggered when large mids should be resealed incrementally")
 	}
 }
 
